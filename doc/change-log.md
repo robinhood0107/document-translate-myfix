@@ -40,3 +40,10 @@
 - Verified changed files with `./.venv/bin/python -m py_compile`
 - Verified offscreen window construction of the new render-panel controls
 - Verified vertical alignment move/re-align behavior with a `TextBlockItem` smoke test
+
+## Checkpoint 6
+
+- Removed user-facing `SMART / GLOBAL / ITEM` jargon from the render panel
+- Replaced the confusing master SMART checkbox UI with explanatory copy
+- Exposed font color override as `Always Use This Color`
+- Migrated old `smart_global_apply_all` saved state into the visible force-color behavior on load

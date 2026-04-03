@@ -1114,7 +1114,7 @@ class TextController:
             max_font_size = int(self.main.settings_page.ui.max_font_spinbox.value()),
             color = self.main.block_font_color_button.property('selected_color'),
             force_font_color = self.main.force_font_color_checkbox.isChecked(),
-            smart_global_apply_all = self.main.smart_global_apply_all_checkbox.isChecked(),
+            smart_global_apply_all = False,
             upper_case = self.main.settings_page.ui.uppercase_checkbox.isChecked(),
             outline = self.main.outline_checkbox.isChecked(),
             outline_color = self.main.outline_font_color_button.property('selected_color'),

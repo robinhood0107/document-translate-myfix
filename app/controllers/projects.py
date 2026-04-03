@@ -883,12 +883,12 @@ class ProjectController:
         color = settings.value('color', '#000000')
         self.main.block_font_color_button.setStyleSheet(f"background-color: {color}; border: none; border-radius: 5px;")
         self.main.block_font_color_button.setProperty('selected_color', color)
+        force_font_color = settings.value('force_font_color', False, type=bool)
+        smart_global_apply_all = settings.value('smart_global_apply_all', False, type=bool)
         self.main.force_font_color_checkbox.setChecked(
-            settings.value('force_font_color', False, type=bool)
+            bool(force_font_color or smart_global_apply_all)
         )
-        self.main.smart_global_apply_all_checkbox.setChecked(
-            settings.value('smart_global_apply_all', False, type=bool)
-        )
+        self.main.smart_global_apply_all_checkbox.setChecked(False)
         self.main.settings_page.ui.uppercase_checkbox.setChecked(settings.value('upper_case', False, type=bool))
         self.main.outline_checkbox.setChecked(settings.value('outline', True, type=bool))
         self.main.outline_mode_group.set_dayu_checked(

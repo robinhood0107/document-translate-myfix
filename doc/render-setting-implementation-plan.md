@@ -119,3 +119,4 @@ Observed:
 - header button routing was intentionally left unchanged
 - font-size dropdown remains `ITEM` only; new render still auto-fits from min/max font settings
 - `block_anchor` stays separate from `source_rect` so manual movement and resizing can preserve block identity
+- the UI hides internal policy jargon and explains behavior in plain language instead

@@ -83,6 +83,13 @@ The safest extension path is:
 
 ## Implemented state on this branch
 
+Developer note:
+
+- the internal `GLOBAL / SMART / ITEM` classification still exists in code and docs
+- the UI now hides those labels and uses explanatory copy instead
+- the old `Apply All SMART Globally` checkbox is no longer user-facing
+- font color override is exposed as `Always Use This Color`
+
 | Control | Implemented behavior | Classification |
 |---|---|---|
 | Font family | Used for new render and batch render | `GLOBAL` |
