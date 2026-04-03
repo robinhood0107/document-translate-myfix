@@ -67,3 +67,55 @@ Rule set:
 - outline still acts globally
 - color can remain smart or be forced globally
 - vertical alignment persists across save/load
+
+## Implemented file map
+
+### Shared policy and state
+
+- `modules/utils/render_style_policy.py`
+- `modules/rendering/render.py`
+- `app/ui/canvas/text/text_item_properties.py`
+- `app/ui/canvas/text_item.py`
+
+### UI and controller wiring
+
+- `app/ui/main_window/builders/workspace.py`
+- `app/ui/main_window/window.py`
+- `controller.py`
+- `app/controllers/text.py`
+
+### Manual and automatic pipeline integration
+
+- `app/controllers/manual_workflow.py`
+- `pipeline/batch_processor.py`
+- `pipeline/webtoon_batch/render.py`
+
+### Save/load and compatibility paths
+
+- `app/ui/canvas/image_viewer.py`
+- `app/ui/canvas/save_renderer.py`
+- `app/ui/canvas/webtoons/scene_items/text_item_manager.py`
+- `app/controllers/projects.py`
+- `app/controllers/search_replace.py`
+- `app/ui/commands/base.py`
+
+## Validation run on this branch
+
+Executed:
+
+- `./.venv/bin/python -m py_compile ...` on all changed implementation files
+- offscreen Qt smoke test for `ComicTranslate()` construction
+- offscreen Qt smoke test for `TextBlockItem` with `vertical_alignment='center'`
+
+Observed:
+
+- new render-panel controls are created on window init
+- hidden legacy outline checkbox remains available as the backing boolean
+- explicit outline mode UI is visible while the old checkbox is hidden
+- vertical alignment does not drift after a move followed by re-alignment
+
+## Known design choices
+
+- header button routing was intentionally left unchanged
+- font-size dropdown remains `ITEM` only; new render still auto-fits from min/max font settings
+- `block_anchor` stays separate from `source_rect` so manual movement and resizing can preserve block identity

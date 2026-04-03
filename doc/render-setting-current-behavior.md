@@ -80,3 +80,42 @@ The safest extension path is:
 - do not reinterpret existing `GLOBAL` settings as optional toggles
 - only add force toggles for current `SMART` controls
 - add vertical alignment as a new `GLOBAL` control
+
+## Implemented state on this branch
+
+| Control | Implemented behavior | Classification |
+|---|---|---|
+| Font family | Used for new render and batch render | `GLOBAL` |
+| Font size dropdown | Edits selected text item only | `ITEM` |
+| Line spacing | Used for new render and batch render | `GLOBAL` |
+| Font color | Smart by default, can be forced from panel | `SMART` |
+| Force Color | Forces panel color for new render and batch render | `SMART override` |
+| Apply All SMART Globally | Enables global forcing for current smart controls | `SMART override` |
+| Horizontal alignment | Used for new render and batch render | `GLOBAL` |
+| Vertical alignment | Top/Center/Bottom placement inside source box | `GLOBAL` |
+| Bold | Used for new render and batch render | `GLOBAL` |
+| Italic | Used for new render and batch render | `GLOBAL` |
+| Underline | Used for new render and batch render | `GLOBAL` |
+| Outline OFF/ON | Used for new render and batch render | `GLOBAL` |
+| Outline color | Used when outline is enabled | `GLOBAL` |
+| Outline width | Used when outline is enabled | `GLOBAL` |
+
+## Important implementation note
+
+After vertical alignment was added, `position` no longer uniquely represents the original text block location.
+
+The branch therefore introduces:
+
+- `source_rect`: the layout box used for top/center/bottom placement
+- `block_anchor`: the stable block identity used for matching translated text back to the original block
+
+These fields are now carried through:
+
+- manual render
+- manual translate post-wrap
+- regular batch translate
+- webtoon batch translate
+- scene save/load
+- project save/load
+- export render
+- search/replace matching for rendered translated items

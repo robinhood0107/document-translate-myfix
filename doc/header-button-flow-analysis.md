@@ -133,3 +133,28 @@ To avoid breaking the current header/button model:
 - Keep existing manual entrypoints in `ManualWorkflowController`
 - Keep `start_batch_process()` as the only automatic entrypoint
 - Add new behavior inside render-setting interpretation and text state generation, not by changing header routing
+
+## Implementation status on `codex/header-render-policy`
+
+The branch keeps the header routing exactly as analyzed above.
+
+Preserved:
+
+- `workspace.py` still builds the same header button set
+- `controller.py` still routes the 6 manual buttons and the `Translate All` button through the same entrypoints
+- `manual_mode_selected()` and `batch_mode_selected()` still only change enabled state, not downstream pipeline choice
+
+Added without changing header routing:
+
+- render-panel controls for `SMART` overrides and vertical alignment
+- explicit outline mode control (`OFF | ON`) while preserving the existing global outline boolean
+- shared render-policy helpers consumed by:
+  - `TextController.render_text()`
+  - `ManualWorkflowController.update_translated_text_items()`
+  - `pipeline.batch_process()`
+  - `pipeline.webtoon_batch_process()`
+
+Practical result:
+
+- the screenshots still map to the same mode behavior
+- the new functionality lives behind the right render panel, not in the header button routing
