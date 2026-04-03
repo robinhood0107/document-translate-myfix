@@ -1,25 +1,25 @@
-# Render Setting Current Behavior
+# 렌더 설정의 현재 동작
 
-## Current classification
+## 기존 분류
 
-| Control | Current behavior | Classification |
+| 항목 | 기존 동작 | 내부 분류 |
 |---|---|---|
-| Font family | Used for new render and batch render | `GLOBAL` |
-| Font size dropdown | Edits selected text item only | `ITEM` |
-| Line spacing | Used for new render and batch render | `GLOBAL` |
-| Font color | Smart fallback: detected block color first, panel color second | `SMART` |
-| Horizontal alignment | Used for new render and batch render | `GLOBAL` |
-| Bold | Used for new render and batch render | `GLOBAL` |
-| Italic | Used for new render and batch render | `GLOBAL` |
-| Underline | Used for new render and batch render | `GLOBAL` |
-| Outline ON/OFF | Used for new render and batch render | `GLOBAL` |
-| Outline color | Used when outline is enabled | `GLOBAL` |
-| Outline width | Used when outline is enabled | `GLOBAL` |
-| Vertical alignment | Not implemented | `MISSING` |
+| 글꼴 패밀리 | 새 렌더와 배치 렌더에 사용 | `GLOBAL` |
+| 글꼴 크기 드롭다운 | 선택된 텍스트 아이템만 수정 | `ITEM` |
+| 줄 간격 | 새 렌더와 배치 렌더에 사용 | `GLOBAL` |
+| 글꼴 색상 | 감지된 글자색 우선, 없으면 패널 색상 사용 | `SMART` |
+| 좌우 정렬 | 새 렌더와 배치 렌더에 사용 | `GLOBAL` |
+| 굵게 | 새 렌더와 배치 렌더에 사용 | `GLOBAL` |
+| 기울임 | 새 렌더와 배치 렌더에 사용 | `GLOBAL` |
+| 밑줄 | 새 렌더와 배치 렌더에 사용 | `GLOBAL` |
+| 윤곽선 ON/OFF | 새 렌더와 배치 렌더에 사용 | `GLOBAL` |
+| 윤곽선 색상 | 윤곽선이 켜져 있을 때 사용 | `GLOBAL` |
+| 윤곽선 두께 | 윤곽선이 켜져 있을 때 사용 | `GLOBAL` |
+| 상하 정렬 | 미구현 | `MISSING` |
 
-## What is already global
+## 이미 전역으로 동작하던 항목
 
-The following settings already flow through `render_settings()` and are consumed by manual render, regular batch, and webtoon batch:
+아래 설정은 원래부터 `render_settings()`를 거쳐 수동 렌더, 일반 배치, 웹툰 배치에 공통으로 전달되고 있었다.
 
 - `font_family`
 - `min_font_size`
@@ -35,94 +35,93 @@ The following settings already flow through `render_settings()` and are consumed
 - `line_spacing`
 - `direction`
 
-This means outline is already a true global render setting.
+즉, 윤곽선은 원래도 진짜 전역 렌더 설정이었다.
 
-## What is currently smart
+## 기존의 자동판단 항목
 
-Font color is currently resolved by `get_smart_text_color(detected_rgb, setting_color)`.
+글꼴 색상은 `get_smart_text_color(detected_rgb, setting_color)`로 계산되고 있었다.
 
-Policy today:
+기존 정책:
 
-- if OCR/detection produced a block color, use that
-- otherwise use the panel color
+- OCR/감지 결과에 글자색이 있으면 그 색을 사용
+- 없으면 오른쪽 패널의 색을 사용
 
-So the font color button does not mean "always force this color" today. It means "default color unless detected color exists".
+그래서 원래의 폰트 색 버튼은 “항상 이 색으로 고정”이 아니라 “감지색이 없을 때의 기본값”에 가까웠다.
 
-## What is item-only today
+## 기존의 항목 개별 편집 전용 설정
 
-The font size dropdown in the right panel only affects the currently selected text item.
+오른쪽 패널의 글꼴 크기 드롭다운은 현재 선택된 텍스트 아이템만 수정한다.
 
-For new renders:
+새 렌더에서는 다음 규칙이 유지된다.
 
-- manual render uses `settings_page.get_min_font_size()` and `get_max_font_size()`
-- batch render also uses min/max size from settings
-- text is auto-fit by `pyside_word_wrap()`
+- 수동 렌더는 `settings_page.get_min_font_size()`와 `get_max_font_size()`를 사용한다.
+- 배치 렌더도 최소/최대 글꼴 크기 설정을 사용한다.
+- 실제 크기는 `pyside_word_wrap()`가 자동으로 맞춘다.
 
-So the visible font size dropdown is not a global render default for new text items.
+따라서 보이는 글꼴 크기 드롭다운은 새 텍스트용 전역 기본 크기가 아니다.
 
-## Existing gap
+## 당시의 공백
 
-There is no top/center/bottom vertical alignment setting.
+원래는 상하 정렬 `top/center/bottom`이 존재하지 않았다.
 
-The current alignment controls only map to:
+기존 정렬 컨트롤은 다음 세 값만 다뤘다.
 
 - `AlignLeft`
 - `AlignCenter`
 - `AlignRight`
 
-Vertical placement inside the source text box is not modeled separately.
+즉, 텍스트 박스 내부에서 세로 방향으로 어디에 배치할지는 별도 모델이 없었다.
 
-## Implementation rule to preserve
+## 유지해야 했던 구현 원칙
 
-The safest extension path is:
+안전하게 확장하려면 다음 원칙이 필요했다.
 
-- do not change header button routing
-- do not reinterpret existing `GLOBAL` settings as optional toggles
-- only add force toggles for current `SMART` controls
-- add vertical alignment as a new `GLOBAL` control
+- 헤더 버튼 라우팅은 바꾸지 않는다.
+- 이미 `GLOBAL`인 설정을 선택적 토글 구조로 다시 해석하지 않는다.
+- 자동판단하던 항목에만 강제 토글을 추가한다.
+- 상하 정렬은 새 `GLOBAL` 항목으로 넣는다.
 
-## Implemented state on this branch
+## 현재 브랜치에서 구현된 상태
 
-Developer note:
+개발 메모:
 
-- the internal `GLOBAL / SMART / ITEM` classification still exists in code and docs
-- the UI now hides those labels and uses explanatory copy instead
-- the old `Apply All SMART Globally` checkbox is no longer user-facing
-- font color override is exposed as `Always Use This Color`
+- 코드와 문서에는 여전히 `GLOBAL / SMART / ITEM` 분류가 남아 있다.
+- 하지만 실제 UI에서는 이 내부 용어를 숨기고 설명형 문구만 노출한다.
+- 예전의 `Apply All SMART Globally` 체크박스는 더 이상 사용자에게 보이지 않는다.
+- 색상 강제는 `Always Use This Color`라는 설명형 옵션으로 노출한다.
 
-| Control | Implemented behavior | Classification |
+| 항목 | 현재 구현된 동작 | 내부 분류 |
 |---|---|---|
-| Font family | Used for new render and batch render | `GLOBAL` |
-| Font size dropdown | Edits selected text item only | `ITEM` |
-| Line spacing | Used for new render and batch render | `GLOBAL` |
-| Font color | Smart by default, can be forced from panel | `SMART` |
-| Force Color | Forces panel color for new render and batch render | `SMART override` |
-| Apply All SMART Globally | Enables global forcing for current smart controls | `SMART override` |
-| Horizontal alignment | Used for new render and batch render | `GLOBAL` |
-| Vertical alignment | Top/Center/Bottom placement inside source box | `GLOBAL` |
-| Bold | Used for new render and batch render | `GLOBAL` |
-| Italic | Used for new render and batch render | `GLOBAL` |
-| Underline | Used for new render and batch render | `GLOBAL` |
-| Outline OFF/ON | Used for new render and batch render | `GLOBAL` |
-| Outline color | Used when outline is enabled | `GLOBAL` |
-| Outline width | Used when outline is enabled | `GLOBAL` |
+| 글꼴 패밀리 | 새 렌더와 배치 렌더에 사용 | `GLOBAL` |
+| 글꼴 크기 드롭다운 | 선택된 텍스트 아이템만 수정 | `ITEM` |
+| 줄 간격 | 새 렌더와 배치 렌더에 사용 | `GLOBAL` |
+| 글꼴 색상 | 기본은 자동판단, 필요 시 패널 색상으로 강제 가능 | `SMART` |
+| `Always Use This Color` | 새 렌더와 배치 렌더에서 선택한 색상을 강제로 사용 | `SMART override` |
+| 좌우 정렬 | 새 렌더와 배치 렌더에 사용 | `GLOBAL` |
+| 상하 정렬 | 원본 텍스트 박스 내부의 `Top / Center / Bottom` 배치 | `GLOBAL` |
+| 굵게 | 새 렌더와 배치 렌더에 사용 | `GLOBAL` |
+| 기울임 | 새 렌더와 배치 렌더에 사용 | `GLOBAL` |
+| 밑줄 | 새 렌더와 배치 렌더에 사용 | `GLOBAL` |
+| 윤곽선 `OFF / ON` | 새 렌더와 배치 렌더에 사용 | `GLOBAL` |
+| 윤곽선 색상 | 윤곽선이 켜져 있을 때 사용 | `GLOBAL` |
+| 윤곽선 두께 | 윤곽선이 켜져 있을 때 사용 | `GLOBAL` |
 
-## Important implementation note
+## 구현상 중요한 점
 
-After vertical alignment was added, `position` no longer uniquely represents the original text block location.
+상하 정렬이 들어가면서 `position` 값은 더 이상 “원본 텍스트 블록의 위치”를 유일하게 나타내지 않게 되었다.
 
-The branch therefore introduces:
+그래서 이 브랜치는 다음 두 필드를 새로 도입했다.
 
-- `source_rect`: the layout box used for top/center/bottom placement
-- `block_anchor`: the stable block identity used for matching translated text back to the original block
+- `source_rect`: 상하 정렬 계산에 사용하는 기준 박스
+- `block_anchor`: 번역된 텍스트를 원래 블록과 다시 연결할 때 쓰는 고정 앵커
 
-These fields are now carried through:
+이 두 필드는 현재 아래 경로 전부를 통과한다.
 
-- manual render
-- manual translate post-wrap
-- regular batch translate
-- webtoon batch translate
-- scene save/load
-- project save/load
-- export render
-- search/replace matching for rendered translated items
+- 수동 렌더
+- 수동 번역 후 재래핑
+- 일반 배치 번역
+- 웹툰 배치 번역
+- 씬 저장/복원
+- 프로젝트 저장/복원
+- 내보내기 렌더
+- 렌더된 번역 텍스트에 대한 검색/치환 매칭

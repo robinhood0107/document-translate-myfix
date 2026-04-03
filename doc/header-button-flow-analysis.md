@@ -1,42 +1,42 @@
-# Header Button Flow Analysis
+# 헤더 버튼 흐름 분석
 
-## Screenshot mapping
+## 스크린샷 대응
 
-- Screenshot 1 corresponds to `Manual` mode.
-  - Header buttons `Detect`, `Recognize`, `Translate`, `Segment`, `Clean`, `Render` are enabled.
-  - `Translate All` is disabled.
-- Screenshot 2 corresponds to `Automatic` mode.
-  - Header buttons `Detect`, `Recognize`, `Translate`, `Segment`, `Clean`, `Render` are disabled.
-  - `Translate All` is enabled.
+- 첫 번째 스크린샷은 `수동(Manual)` 모드에 대응한다.
+  - 상단의 `감지`, `인식`, `번역`, `분할`, `정리`, `렌더링` 버튼이 활성화된다.
+  - `모두 번역(Translate All)` 버튼은 비활성화된다.
+- 두 번째 스크린샷은 `자동(Automatic)` 모드에 대응한다.
+  - 상단의 `감지`, `인식`, `번역`, `분할`, `정리`, `렌더링` 버튼이 비활성화된다.
+  - `모두 번역(Translate All)` 버튼은 활성화된다.
 
-## Header UI
+## 헤더 UI 구성
 
-- Header controls are created in `app/ui/main_window/builders/workspace.py`.
-- `self.hbutton_group` contains 6 buttons in this exact order:
+- 헤더 컨트롤은 [workspace.py](/mnt/c/Users/pjjpj/Desktop/openai_manga_translater/comic-translate/app/ui/main_window/builders/workspace.py)에서 생성된다.
+- `self.hbutton_group`에는 아래 6개 버튼이 이 순서대로 들어간다.
   - `Detect`
   - `Recognize`
   - `Translate`
   - `Segment`
   - `Clean`
   - `Render`
-- `self.manual_radio`, `self.automatic_radio`, and `self.translate_button` live in the same header layout.
+- `self.manual_radio`, `self.automatic_radio`, `self.translate_button`도 같은 헤더 레이아웃에 있다.
 
-## Mode switching
+## 모드 전환
 
-- `Manual` radio connects to `controller.manual_mode_selected()`.
-  - Calls `enable_hbutton_group()`
-  - Disables `translate_button`
-  - Disables `cancel_button`
-- `Automatic` radio connects to `controller.batch_mode_selected()`.
-  - Calls `disable_hbutton_group()`
-  - Enables `translate_button`
-  - Enables `cancel_button`
+- `Manual` 라디오는 `controller.manual_mode_selected()`에 연결된다.
+  - `enable_hbutton_group()` 호출
+  - `translate_button` 비활성화
+  - `cancel_button` 비활성화
+- `Automatic` 라디오는 `controller.batch_mode_selected()`에 연결된다.
+  - `disable_hbutton_group()` 호출
+  - `translate_button` 활성화
+  - `cancel_button` 활성화
 
-This means the existing header behavior in the screenshots is already implemented correctly and should be preserved.
+즉, 스크린샷에서 보이는 헤더 버튼의 동작 자체는 원래부터 올바르게 구현되어 있었고, 이번 작업에서도 그대로 유지했다.
 
-## Button wiring
+## 버튼 연결 구조
 
-All 6 header buttons are wired in `controller.py`:
+6개의 수동 헤더 버튼은 모두 [controller.py](/mnt/c/Users/pjjpj/Desktop/openai_manga_translater/comic-translate/controller.py)에 그대로 연결되어 있다.
 
 - `Detect` -> `controller.block_detect()` -> `ManualWorkflowController.block_detect()`
 - `Recognize` -> `controller.ocr()` -> `ManualWorkflowController.ocr()`
@@ -45,116 +45,119 @@ All 6 header buttons are wired in `controller.py`:
 - `Clean` -> `controller.inpaint_and_set()` -> `ManualWorkflowController.inpaint_and_set()`
 - `Render` -> `TextController.render_text()`
 
-`Translate All` is separate:
+`Translate All`은 별도의 자동 경로를 탄다.
 
 - `Translate All` -> `controller.start_batch_process()`
-- Regular pages -> `pipeline.batch_process()`
-- Webtoon mode -> `pipeline.webtoon_batch_process()`
+- 일반 페이지 -> `pipeline.batch_process()`
+- 웹툰 모드 -> `pipeline.webtoon_batch_process()`
 
-## Manual flow summary
+## 수동 모드 흐름 요약
 
-### Detect
+### 감지
 
-- Single/current page:
+- 현재 페이지 한 장:
   - `pipeline.detect_blocks()`
   - `pipeline.on_blk_detect_complete()`
-- Multi-page:
-  - `ManualWorkflowController.block_detect()` performs detection per selected path and stores rectangles into `image_states[file]["viewer_state"]["rectangles"]`
+- 여러 페이지 선택:
+  - `ManualWorkflowController.block_detect()`가 페이지별로 감지를 수행하고,
+  - 결과 사각형을 `image_states[file]["viewer_state"]["rectangles"]`에 저장한다.
 
-### Recognize
+### 인식
 
-- Single/current page:
-  - `pipeline.OCR_image()` or `pipeline.OCR_webtoon_visible_area()`
-- Multi-page:
-  - `ManualWorkflowController.ocr()` processes OCR per selected path and updates `blk_list`
+- 현재 페이지 한 장:
+  - `pipeline.OCR_image()` 또는 `pipeline.OCR_webtoon_visible_area()`
+- 여러 페이지 선택:
+  - `ManualWorkflowController.ocr()`가 페이지별 OCR을 수행하고 `blk_list`를 갱신한다.
 
-### Translate
+### 번역
 
-- Single/current page:
-  - `pipeline.translate_image()` or `pipeline.translate_webtoon_visible_area()`
-  - then `ManualWorkflowController.update_translated_text_items()`
-- Multi-page:
-  - `ManualWorkflowController.translate_image()` translates selected paths
-  - then `update_translated_text_items()` re-wraps visible text items
+- 현재 페이지 한 장:
+  - `pipeline.translate_image()` 또는 `pipeline.translate_webtoon_visible_area()`
+  - 이후 `ManualWorkflowController.update_translated_text_items()`
+- 여러 페이지 선택:
+  - `ManualWorkflowController.translate_image()`가 선택 페이지를 번역하고,
+  - 이후 `update_translated_text_items()`가 보이는 텍스트 아이템을 다시 줄바꿈하고 스타일을 적용한다.
 
-### Segment
+### 분할
 
 - `ManualWorkflowController.load_segmentation_points()`
-- Clears live rectangles and text items, computes `inpaint_bboxes`, and restores segmentation strokes into state
+- 라이브 사각형과 텍스트 아이템을 지운 뒤,
+- `inpaint_bboxes`를 계산하고,
+- 분할 스트로크 상태를 복원한다.
 
-### Clean
+### 정리
 
 - `ManualWorkflowController.inpaint_and_set()`
-- Single page uses `pipeline.inpaint()`
-- Multi-page uses `inpainting.inpaint_page_from_saved_strokes()`
+- 단일 페이지는 `pipeline.inpaint()`를 사용한다.
+- 여러 페이지는 `inpainting.inpaint_page_from_saved_strokes()`를 사용한다.
 
-### Render
+### 렌더링
 
 - `TextController.render_text()`
-- Single page:
-  - formats translations
-  - calls `manual_wrap()`
-  - emits `blk_rendered`
-  - creates `TextBlockItem` instances
-- Multi-page:
-  - wraps blocks with `pyside_word_wrap()`
-  - stores new `text_items_state` into each selected page
+- 단일 페이지:
+  - 번역 문구를 포맷팅하고
+  - `manual_wrap()`을 호출하고
+  - `blk_rendered`를 발생시키고
+  - `TextBlockItem`을 만든다.
+- 여러 페이지:
+  - `pyside_word_wrap()`으로 줄바꿈하고
+  - 각 페이지의 `text_items_state`를 저장한다.
 
-## Automatic flow summary
+## 자동 모드 흐름 요약
 
-### Translate All
+### 모두 번역
 
-- `controller.start_batch_process()` validates settings and dispatches:
-  - `pipeline.batch_process()` for normal pages
-  - `pipeline.webtoon_batch_process()` for webtoon mode
+- `controller.start_batch_process()`가 설정을 검증한 뒤 아래 경로로 분기한다.
+  - 일반 페이지 -> `pipeline.batch_process()`
+  - 웹툰 모드 -> `pipeline.webtoon_batch_process()`
 
-### Regular batch
+### 일반 배치
 
-- `pipeline.batch_process()` performs:
-  - detection
+- `pipeline.batch_process()`는 아래 단계를 수행한다.
+  - 감지
   - OCR
-  - inpainting
-  - translation
-  - text rendering state creation
-- Render output is serialized into `image_states[image_path]["viewer_state"]["text_items_state"]`
+  - 인페인팅
+  - 번역
+  - 렌더링 상태 생성
+- 최종 렌더 결과는 `image_states[image_path]["viewer_state"]["text_items_state"]`에 직렬화된다.
 
-### Webtoon batch
+### 웹툰 배치
 
-- `pipeline.webtoon_batch_process()` streams virtual pages
-- Render output is serialized into the same `text_items_state` concept
-- Final export uses `ImageSaveRenderer`
+- `pipeline.webtoon_batch_process()`는 가상 페이지를 순회한다.
+- 렌더 결과는 동일한 `text_items_state` 개념으로 저장된다.
+- 최종 저장은 `ImageSaveRenderer`를 사용한다.
 
-## Safe implementation boundaries
+## 안전한 변경 경계
 
-To avoid breaking the current header/button model:
+현재 헤더/모드 구조를 깨뜨리지 않으려면 다음 원칙을 지켜야 했다.
 
-- Keep all existing button wiring in `controller.py`
-- Keep `manual_mode_selected()` and `batch_mode_selected()` behavior
-- Keep existing manual entrypoints in `ManualWorkflowController`
-- Keep `start_batch_process()` as the only automatic entrypoint
-- Add new behavior inside render-setting interpretation and text state generation, not by changing header routing
+- [controller.py](/mnt/c/Users/pjjpj/Desktop/openai_manga_translater/comic-translate/controller.py)의 기존 버튼 연결은 유지한다.
+- `manual_mode_selected()`와 `batch_mode_selected()`의 역할은 유지한다.
+- `ManualWorkflowController`의 수동 진입 함수명과 흐름은 유지한다.
+- `start_batch_process()`를 자동 처리의 유일한 진입점으로 유지한다.
+- 새 동작은 헤더 라우팅이 아니라 렌더 설정 해석과 텍스트 상태 생성 계층에 넣는다.
 
-## Implementation status on `codex/header-render-policy`
+## `codex/header-render-policy` 브랜치의 구현 상태
 
-The branch keeps the header routing exactly as analyzed above.
+이 브랜치는 위에서 분석한 헤더 라우팅을 그대로 유지한다.
 
-Preserved:
+유지된 점:
 
-- `workspace.py` still builds the same header button set
-- `controller.py` still routes the 6 manual buttons and the `Translate All` button through the same entrypoints
-- `manual_mode_selected()` and `batch_mode_selected()` still only change enabled state, not downstream pipeline choice
+- [workspace.py](/mnt/c/Users/pjjpj/Desktop/openai_manga_translater/comic-translate/app/ui/main_window/builders/workspace.py)는 같은 헤더 버튼 세트를 계속 만든다.
+- [controller.py](/mnt/c/Users/pjjpj/Desktop/openai_manga_translater/comic-translate/controller.py)는 6개 수동 버튼과 `Translate All`을 여전히 같은 진입점으로 연결한다.
+- `manual_mode_selected()`와 `batch_mode_selected()`는 하위 파이프라인을 바꾸지 않고, 활성/비활성 상태만 바꾼다.
 
-Added without changing header routing:
+헤더 라우팅을 바꾸지 않고 추가된 점:
 
-- render-panel controls for `SMART` overrides and vertical alignment
-- explicit outline mode control (`OFF | ON`) while preserving the existing global outline boolean
-- shared render-policy helpers consumed by:
+- 오른쪽 렌더 패널에 색상 강제, 상하 정렬, 명시적 윤곽선 ON/OFF UI를 추가했다.
+- 기존 전역 윤곽선 불리언은 유지하면서, 화면에는 더 분명한 `OFF | ON` 컨트롤을 보여 준다.
+- 공통 렌더 정책 헬퍼를 만들어 아래 경로가 같은 규칙을 쓰게 했다.
   - `TextController.render_text()`
   - `ManualWorkflowController.update_translated_text_items()`
   - `pipeline.batch_process()`
   - `pipeline.webtoon_batch_process()`
 
-Practical result:
+실질적인 결과:
 
-- the screenshots still map to the same mode behavior
-- the new functionality lives behind the right render panel, not in the header button routing
+- 스크린샷에서 보인 모드별 헤더 동작은 그대로다.
+- 새 기능은 모두 오른쪽 렌더 패널 뒤쪽 로직에 들어갔고, 헤더 버튼 구조는 건드리지 않았다.

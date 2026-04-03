@@ -1,49 +1,55 @@
-# Change Log
+# 변경 이력
 
-## Checkpoint 1
+## 체크포인트 1
 
-- Created analysis docs for header button flow
-- Documented current render-setting behavior
-- Recorded implementation strategy before code changes
+- 헤더 버튼 흐름 분석 문서를 작성했다.
+- 렌더 설정의 기존 동작을 문서화했다.
+- 코드 변경 전 구현 전략을 정리했다.
 
-## Checkpoint 2
+## 체크포인트 2
 
-- Added shared render-policy helper module for smart color forcing and vertical alignment math
-- Extended `TextRenderingSettings` with:
+- 자동 색상 강제와 상하 정렬 계산을 담당하는 공통 렌더 정책 헬퍼를 추가했다.
+- `TextRenderingSettings`에 아래 필드를 확장했다.
   - `force_font_color`
   - `smart_global_apply_all`
   - `vertical_alignment_id`
-- Extended serialized text state with:
+- 직렬화되는 텍스트 상태에 아래 필드를 확장했다.
   - `vertical_alignment`
   - `source_rect`
   - `block_anchor`
 
-## Checkpoint 3
+## 체크포인트 3
 
-- Added render-panel UI for:
+- 렌더 패널에 아래 UI를 추가했다.
   - `Apply All SMART Globally`
   - `Force Color`
   - `Top / Center / Bottom`
-  - explicit outline `OFF | ON`
-- Kept legacy header button wiring untouched
-- Hid the old outline checkbox and kept it as the underlying boolean source for compatibility
+  - 명시적 윤곽선 `OFF | ON`
+- 기존 헤더 버튼 연결 구조는 그대로 유지했다.
+- 기존 윤곽선 체크박스는 내부 호환용으로 남기고 화면에서는 숨겼다.
 
-## Checkpoint 4
+## 체크포인트 4
 
-- Reworked manual render and manual translate to use the shared render-policy layer
-- Reworked regular batch and webtoon batch render-state creation to use the same policy
-- Switched text/block matching to prefer `block_anchor` over visible `position`
-- Patched webtoon and export coordinate conversion so `position`, `source_rect`, and `block_anchor` are transformed independently
+- 수동 렌더와 수동 번역 후 재래핑이 같은 공통 렌더 정책을 쓰도록 바꿨다.
+- 일반 배치와 웹툰 배치의 렌더 상태 생성도 같은 정책을 쓰도록 바꿨다.
+- 텍스트와 블록 매칭이 보이는 `position`보다 `block_anchor`를 우선 사용하도록 바꿨다.
+- 웹툰 좌표 변환과 내보내기 렌더에서 `position`, `source_rect`, `block_anchor`를 각각 독립적으로 변환하도록 수정했다.
 
-## Checkpoint 5
+## 체크포인트 5
 
-- Verified changed files with `./.venv/bin/python -m py_compile`
-- Verified offscreen window construction of the new render-panel controls
-- Verified vertical alignment move/re-align behavior with a `TextBlockItem` smoke test
+- 변경 파일에 대해 `./.venv/bin/python -m py_compile` 검증을 수행했다.
+- 오프스크린 환경에서 새 렌더 패널 컨트롤 생성 여부를 확인했다.
+- `TextBlockItem` 스모크 테스트로 상하 정렬 이동/재정렬 드리프트가 없는지 확인했다.
 
-## Checkpoint 6
+## 체크포인트 6
 
-- Removed user-facing `SMART / GLOBAL / ITEM` jargon from the render panel
-- Replaced the confusing master SMART checkbox UI with explanatory copy
-- Exposed font color override as `Always Use This Color`
-- Migrated old `smart_global_apply_all` saved state into the visible force-color behavior on load
+- 렌더 패널에서 보이던 `SMART / GLOBAL / ITEM` 용어를 사용자 화면에서 제거했다.
+- 혼란을 주던 SMART 마스터 체크박스를 화면에서는 숨기고 설명형 문구로 대체했다.
+- 색상 강제 옵션을 `Always Use This Color`로 노출했다.
+- 예전 `smart_global_apply_all` 저장값은 로드시 보이는 색상 강제 동작으로 자연스럽게 이어지게 했다.
+
+## 체크포인트 7
+
+- `doc/` 아래 문서를 전부 한국어로 번역했다.
+- 새로 추가한 렌더 패널 UI 문자열을 각 언어 `ts` 파일에 반영했다.
+- `lrelease`로 `resources/translations/compiled/*.qm`을 다시 생성해 실제 프로그램에서도 번역이 적용되도록 정리했다.
