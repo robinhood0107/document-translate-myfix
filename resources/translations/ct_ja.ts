@@ -1852,8 +1852,8 @@ then do inpainting on the resized image.</source>
     </message>
     <message>
         <location filename="../../app/ui/main_window/builders/workspace.py" line="194"/>
-        <source>Text color follows the detected source text by default. Enable &apos;Always Use This Color&apos; to override it.</source>
-        <translation>テキスト色は既定で検出された元の文字色に従います。上書きするには「この色を常に使う」を有効にしてください。</translation>
+        <source>Text color follows the detected source text by default. Enable &apos;Use Selected Color&apos; to override it.</source>
+        <translation>テキスト色は既定で検出された元の文字色に従います。上書きするには「選択した色を使う」を有効にしてください。</translation>
     </message>
     <message>
         <location filename="../../app/ui/main_window/builders/workspace.py" line="200"/>
@@ -1877,13 +1877,13 @@ then do inpainting on the resized image.</source>
     </message>
     <message>
         <location filename="../../app/ui/main_window/builders/workspace.py" line="247"/>
-        <source>Choose the fallback text color. By default the app keeps the detected source text color unless you enable &apos;Always Use This Color&apos;.</source>
-        <translation>代替テキスト色を選択します。既定では、検出された元の文字色が使われます。「この色を常に使う」を有効にすると選択した色を使います。</translation>
+        <source>Choose the fallback text color. By default the app keeps the detected source text color unless you enable &apos;Use Selected Color&apos;.</source>
+        <translation>代替テキスト色を選択します。既定では、検出された元の文字色が使われます。「選択した色を使う」を有効にすると選択した色を使います。</translation>
     </message>
     <message>
         <location filename="../../app/ui/main_window/builders/workspace.py" line="254"/>
-        <source>Always Use This Color</source>
-        <translation>この色を常に使う</translation>
+        <source>Use Selected Color</source>
+        <translation>選択した色を使う</translation>
     </message>
     <message>
         <location filename="../../app/ui/main_window/builders/workspace.py" line="257"/>
@@ -1894,6 +1894,26 @@ then do inpainting on the resized image.</source>
         <location filename="../../app/ui/main_window/builders/workspace.py" line="271"/>
         <source>Horizontal alignment for new Render items and Translate All output.</source>
         <translation>新しくレンダリングされる項目と「すべて翻訳」の出力で使う横方向の配置です。</translation>
+    </message>
+    <message>
+        <location filename="../../app/ui/main_window/builders/workspace.py" line="407"/>
+        <source>Text Color</source>
+        <translation>文字色</translation>
+    </message>
+    <message>
+        <location filename="../../app/ui/main_window/builders/workspace.py" line="422"/>
+        <source>Horizontal</source>
+        <translation>横</translation>
+    </message>
+    <message>
+        <location filename="../../app/ui/main_window/builders/workspace.py" line="424"/>
+        <source>Vertical</source>
+        <translation>縦</translation>
+    </message>
+    <message>
+        <location filename="../../app/ui/main_window/builders/workspace.py" line="449"/>
+        <source>Style</source>
+        <translation>スタイル</translation>
     </message>
     <message>
         <location filename="../../app/ui/main_window/builders/workspace.py" line="280"/>

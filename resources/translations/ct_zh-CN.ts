@@ -1850,8 +1850,8 @@ then do inpainting on the resized image.</source>
     </message>
     <message>
         <location filename="../../app/ui/main_window/builders/workspace.py" line="194"/>
-        <source>Text color follows the detected source text by default. Enable &apos;Always Use This Color&apos; to override it.</source>
-        <translation>默认情况下，文本颜色会跟随检测到的原始文字颜色。启用“始终使用此颜色”即可覆盖。</translation>
+        <source>Text color follows the detected source text by default. Enable &apos;Use Selected Color&apos; to override it.</source>
+        <translation>默认情况下，文本颜色会跟随检测到的原始文字颜色。启用“使用所选颜色”即可覆盖。</translation>
     </message>
     <message>
         <location filename="../../app/ui/main_window/builders/workspace.py" line="200"/>
@@ -1875,13 +1875,13 @@ then do inpainting on the resized image.</source>
     </message>
     <message>
         <location filename="../../app/ui/main_window/builders/workspace.py" line="247"/>
-        <source>Choose the fallback text color. By default the app keeps the detected source text color unless you enable &apos;Always Use This Color&apos;.</source>
-        <translation>选择备用文字颜色。默认情况下，应用会保留检测到的原始文字颜色，除非启用“始终使用此颜色”。</translation>
+        <source>Choose the fallback text color. By default the app keeps the detected source text color unless you enable &apos;Use Selected Color&apos;.</source>
+        <translation>选择备用文字颜色。默认情况下，应用会保留检测到的原始文字颜色，除非启用“使用所选颜色”。</translation>
     </message>
     <message>
         <location filename="../../app/ui/main_window/builders/workspace.py" line="254"/>
-        <source>Always Use This Color</source>
-        <translation>始终使用此颜色</translation>
+        <source>Use Selected Color</source>
+        <translation>使用所选颜色</translation>
     </message>
     <message>
         <location filename="../../app/ui/main_window/builders/workspace.py" line="257"/>
@@ -1892,6 +1892,26 @@ then do inpainting on the resized image.</source>
         <location filename="../../app/ui/main_window/builders/workspace.py" line="271"/>
         <source>Horizontal alignment for new Render items and Translate All output.</source>
         <translation>用于新的渲染文本和“全部翻译”输出的水平对齐方式。</translation>
+    </message>
+    <message>
+        <location filename="../../app/ui/main_window/builders/workspace.py" line="407"/>
+        <source>Text Color</source>
+        <translation>文字颜色</translation>
+    </message>
+    <message>
+        <location filename="../../app/ui/main_window/builders/workspace.py" line="422"/>
+        <source>Horizontal</source>
+        <translation>水平</translation>
+    </message>
+    <message>
+        <location filename="../../app/ui/main_window/builders/workspace.py" line="424"/>
+        <source>Vertical</source>
+        <translation>垂直</translation>
+    </message>
+    <message>
+        <location filename="../../app/ui/main_window/builders/workspace.py" line="449"/>
+        <source>Style</source>
+        <translation>样式</translation>
     </message>
     <message>
         <location filename="../../app/ui/main_window/builders/workspace.py" line="280"/>

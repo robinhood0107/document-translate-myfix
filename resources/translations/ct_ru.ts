@@ -1852,8 +1852,8 @@ then do inpainting on the resized image.</source>
     </message>
     <message>
         <location filename="../../app/ui/main_window/builders/workspace.py" line="194"/>
-        <source>Text color follows the detected source text by default. Enable &apos;Always Use This Color&apos; to override it.</source>
-        <translation>По умолчанию цвет текста повторяет обнаруженный цвет исходного текста. Включите «Всегда использовать этот цвет», чтобы переопределить его.</translation>
+        <source>Text color follows the detected source text by default. Enable &apos;Use Selected Color&apos; to override it.</source>
+        <translation>По умолчанию цвет текста повторяет обнаруженный цвет исходного текста. Включите «Использовать выбранный цвет», чтобы переопределить его.</translation>
     </message>
     <message>
         <location filename="../../app/ui/main_window/builders/workspace.py" line="200"/>
@@ -1877,13 +1877,13 @@ then do inpainting on the resized image.</source>
     </message>
     <message>
         <location filename="../../app/ui/main_window/builders/workspace.py" line="247"/>
-        <source>Choose the fallback text color. By default the app keeps the detected source text color unless you enable &apos;Always Use This Color&apos;.</source>
-        <translation>Выберите резервный цвет текста. По умолчанию приложение сохраняет обнаруженный цвет исходного текста, если не включено «Всегда использовать этот цвет».</translation>
+        <source>Choose the fallback text color. By default the app keeps the detected source text color unless you enable &apos;Use Selected Color&apos;.</source>
+        <translation>Выберите резервный цвет текста. По умолчанию приложение сохраняет обнаруженный цвет исходного текста, если не включено «Использовать выбранный цвет».</translation>
     </message>
     <message>
         <location filename="../../app/ui/main_window/builders/workspace.py" line="254"/>
-        <source>Always Use This Color</source>
-        <translation>Всегда использовать этот цвет</translation>
+        <source>Use Selected Color</source>
+        <translation>Использовать выбранный цвет</translation>
     </message>
     <message>
         <location filename="../../app/ui/main_window/builders/workspace.py" line="257"/>
@@ -1894,6 +1894,26 @@ then do inpainting on the resized image.</source>
         <location filename="../../app/ui/main_window/builders/workspace.py" line="271"/>
         <source>Horizontal alignment for new Render items and Translate All output.</source>
         <translation>Горизонтальное выравнивание для новых элементов рендеринга и результата «Перевести всё».</translation>
+    </message>
+    <message>
+        <location filename="../../app/ui/main_window/builders/workspace.py" line="407"/>
+        <source>Text Color</source>
+        <translation>Цвет текста</translation>
+    </message>
+    <message>
+        <location filename="../../app/ui/main_window/builders/workspace.py" line="422"/>
+        <source>Horizontal</source>
+        <translation>Горизонталь</translation>
+    </message>
+    <message>
+        <location filename="../../app/ui/main_window/builders/workspace.py" line="424"/>
+        <source>Vertical</source>
+        <translation>Вертикаль</translation>
+    </message>
+    <message>
+        <location filename="../../app/ui/main_window/builders/workspace.py" line="449"/>
+        <source>Style</source>
+        <translation>Стиль</translation>
     </message>
     <message>
         <location filename="../../app/ui/main_window/builders/workspace.py" line="280"/>

@@ -37,6 +37,24 @@ class WorkspaceMixin:
             badge.setToolTip(tooltip)
         return badge
 
+    def _create_render_field_label(self, text: str):
+        label = QtWidgets.QLabel(text)
+        label.setProperty("render_field_label", "true")
+        label.setMinimumWidth(60)
+        label.setAlignment(QtCore.Qt.AlignmentFlag.AlignLeft | QtCore.Qt.AlignmentFlag.AlignVCenter)
+        return label
+
+    def _create_render_section_widget(self):
+        widget = QtWidgets.QWidget()
+        widget.setProperty("render_section", "true")
+        return widget
+
+    def _style_render_choice_group(self, button_group: MToolButtonGroup):
+        for button in button_group.get_button_group().buttons():
+            button.setProperty("render_choice", "true")
+            button.setMinimumHeight(30)
+            button.setMinimumWidth(46)
+
     def _create_main_content(self):
         content_widget = QtWidgets.QWidget()
 
@@ -192,7 +210,7 @@ class WorkspaceMixin:
         color_policy_hint = QtWidgets.QLabel(
             self.tr(
                 "Text color follows the detected source text by default. "
-                "Enable 'Always Use This Color' to override it."
+                "Enable 'Use Selected Color' to override it."
             )
         )
         color_policy_hint.setWordWrap(True)
@@ -233,8 +251,6 @@ class WorkspaceMixin:
         font_settings_layout.addWidget(self.line_spacing_dropdown)
         font_settings_layout.addStretch()
 
-        main_text_settings_layout = QtWidgets.QHBoxLayout()
-
         settings = QSettings("ComicLabs", "ComicTranslate")
         settings.beginGroup("text_rendering")
         dflt_clr = settings.value("color", "#000000")
@@ -245,18 +261,22 @@ class WorkspaceMixin:
         self.block_font_color_button.setToolTip(
             self.tr(
                 "Choose the fallback text color. By default the app keeps the "
-                "detected source text color unless you enable 'Always Use This Color'."
+                "detected source text color unless you enable 'Use Selected Color'."
             )
         )
         self.block_font_color_button.setFixedSize(30, 30)
         self.block_font_color_button.setStyleSheet(f"background-color: {dflt_clr}; border: none; border-radius: 5px;")
         self.block_font_color_button.setProperty("selected_color", dflt_clr)
-        self.force_font_color_checkbox = MCheckBox(self.tr("Always Use This Color"))
+        self.force_font_color_checkbox = MCheckBox(self.tr("Use Selected Color"))
         self.force_font_color_checkbox.setToolTip(
             self.tr(
                 "Ignore detected source text color and use the selected color "
                 "for all new Render items and Translate All output."
             )
+        )
+        self.force_font_color_checkbox.setSizePolicy(
+            QtWidgets.QSizePolicy.Policy.Maximum,
+            QtWidgets.QSizePolicy.Policy.Fixed,
         )
 
         self.alignment_tool_group = MToolButtonGroup(orientation=QtCore.Qt.Horizontal, exclusive=True)
@@ -283,6 +303,10 @@ class WorkspaceMixin:
             ]
         )
         self.vertical_alignment_tool_group.set_dayu_checked(0)
+        self._style_render_choice_group(self.vertical_alignment_tool_group)
+
+        for button in self.alignment_tool_group.get_button_group().buttons():
+            button.setMinimumSize(30, 30)
 
         self.bold_button = self.create_tool_button(svg="bold.svg", checkable=True)
         self.bold_button.setToolTip(
@@ -296,15 +320,8 @@ class WorkspaceMixin:
         self.underline_button.setToolTip(
             self.tr("Underline style for new Render items and Translate All output.")
         )
-
-        main_text_settings_layout.addWidget(self.block_font_color_button)
-        main_text_settings_layout.addWidget(self.force_font_color_checkbox)
-        main_text_settings_layout.addWidget(self.alignment_tool_group)
-        main_text_settings_layout.addWidget(self.vertical_alignment_tool_group)
-        main_text_settings_layout.addWidget(self.bold_button)
-        main_text_settings_layout.addWidget(self.italic_button)
-        main_text_settings_layout.addWidget(self.underline_button)
-        main_text_settings_layout.addStretch()
+        for button in (self.bold_button, self.italic_button, self.underline_button):
+            button.setMinimumSize(30, 30)
 
         outline_settings_layout = QtWidgets.QHBoxLayout()
 
@@ -323,6 +340,7 @@ class WorkspaceMixin:
             ]
         )
         self.outline_mode_group.set_dayu_checked(1 if dflt_outline_check else 0)
+        self._style_render_choice_group(self.outline_mode_group)
 
         self.outline_font_color_button = QtWidgets.QPushButton()
         self.outline_font_color_button.setToolTip(
@@ -340,10 +358,100 @@ class WorkspaceMixin:
         self.outline_width_dropdown.addItems(["1.0", "1.15", "1.3", "1.4", "1.5"])
         self.outline_width_dropdown.set_editable(True)
 
+        render_controls_widget = QtWidgets.QWidget()
+        render_controls_widget.setObjectName("renderControlsContainer")
+        render_controls_widget.setStyleSheet(
+            f"""
+            QWidget#renderControlsContainer QWidget[render_section="true"] {{
+                border: 1px solid #474747;
+                border-radius: 6px;
+                background-color: #353535;
+            }}
+            QWidget#renderControlsContainer QLabel[render_field_label="true"] {{
+                color: #f0f0f0;
+                font-weight: 600;
+                border: none;
+                background: transparent;
+                padding-right: 8px;
+            }}
+            QWidget#renderControlsContainer MToolButton[render_choice="true"] {{
+                padding: 0 10px;
+                min-height: 30px;
+                border: 1px solid #5a5a5a;
+                border-radius: 5px;
+                background-color: #3b3b3b;
+            }}
+            QWidget#renderControlsContainer MToolButton[render_choice="true"]:hover {{
+                color: {dayu_theme.primary_color};
+                border-color: {dayu_theme.primary_color};
+            }}
+            QWidget#renderControlsContainer MToolButton[render_choice="true"]:checked {{
+                color: {dayu_theme.primary_color};
+                border: 1px solid {dayu_theme.primary_color};
+                background-color: #4b3a12;
+            }}
+            """
+        )
+        render_controls_layout = QtWidgets.QVBoxLayout(render_controls_widget)
+        render_controls_layout.setContentsMargins(0, 0, 0, 0)
+        render_controls_layout.setSpacing(8)
+
+        color_group_widget = self._create_render_section_widget()
+        color_group_layout = QtWidgets.QGridLayout(color_group_widget)
+        color_group_layout.setContentsMargins(10, 8, 10, 8)
+        color_group_layout.setHorizontalSpacing(10)
+        color_group_layout.setVerticalSpacing(6)
+        color_group_layout.setColumnStretch(1, 1)
+        color_group_layout.addWidget(self._create_render_field_label(self.tr("Text Color")), 0, 0)
+        color_group_layout.addWidget(
+            self.block_font_color_button,
+            0,
+            1,
+            alignment=QtCore.Qt.AlignmentFlag.AlignLeft,
+        )
+        color_group_layout.addWidget(self.force_font_color_checkbox, 1, 0, 1, 2)
+
+        alignment_group_widget = self._create_render_section_widget()
+        alignment_group_layout = QtWidgets.QGridLayout(alignment_group_widget)
+        alignment_group_layout.setContentsMargins(10, 8, 10, 8)
+        alignment_group_layout.setHorizontalSpacing(10)
+        alignment_group_layout.setVerticalSpacing(6)
+        alignment_group_layout.setColumnStretch(1, 1)
+        alignment_group_layout.addWidget(self._create_render_field_label(self.tr("Horizontal")), 0, 0)
+        alignment_group_layout.addWidget(self.alignment_tool_group, 0, 1)
+        alignment_group_layout.addWidget(self._create_render_field_label(self.tr("Vertical")), 1, 0)
+        alignment_group_layout.addWidget(self.vertical_alignment_tool_group, 1, 1)
+
+        style_controls_widget = QtWidgets.QWidget()
+        style_controls_layout = QtWidgets.QHBoxLayout(style_controls_widget)
+        style_controls_layout.setContentsMargins(0, 0, 0, 0)
+        style_controls_layout.setSpacing(4)
+        style_controls_layout.addWidget(self.bold_button)
+        style_controls_layout.addWidget(self.italic_button)
+        style_controls_layout.addWidget(self.underline_button)
+        style_controls_layout.addStretch()
+
+        outline_settings_layout.setContentsMargins(0, 0, 0, 0)
+        outline_settings_layout.setSpacing(6)
         outline_settings_layout.addWidget(self.outline_mode_group)
         outline_settings_layout.addWidget(self.outline_font_color_button)
         outline_settings_layout.addWidget(self.outline_width_dropdown)
         outline_settings_layout.addStretch()
+
+        style_outline_group_widget = self._create_render_section_widget()
+        style_outline_group_layout = QtWidgets.QGridLayout(style_outline_group_widget)
+        style_outline_group_layout.setContentsMargins(10, 8, 10, 8)
+        style_outline_group_layout.setHorizontalSpacing(10)
+        style_outline_group_layout.setVerticalSpacing(6)
+        style_outline_group_layout.setColumnStretch(1, 1)
+        style_outline_group_layout.addWidget(self._create_render_field_label(self.tr("Style")), 0, 0)
+        style_outline_group_layout.addWidget(style_controls_widget, 0, 1)
+        style_outline_group_layout.addWidget(self._create_render_field_label(self.tr("Outline")), 1, 0)
+        style_outline_group_layout.addLayout(outline_settings_layout, 1, 1)
+
+        render_controls_layout.addWidget(color_group_widget)
+        render_controls_layout.addWidget(alignment_group_widget)
+        render_controls_layout.addWidget(style_outline_group_widget)
 
         rendering_divider_top = MDivider()
         rendering_divider_bottom = MDivider()
@@ -351,8 +459,7 @@ class WorkspaceMixin:
         text_render_layout.addWidget(render_policy_hint)
         text_render_layout.addWidget(color_policy_hint)
         text_render_layout.addLayout(font_settings_layout)
-        text_render_layout.addLayout(main_text_settings_layout)
-        text_render_layout.addLayout(outline_settings_layout)
+        text_render_layout.addWidget(render_controls_widget)
         text_render_layout.addWidget(rendering_divider_bottom)
 
         tools_widget = QtWidgets.QWidget()
@@ -478,7 +585,7 @@ class WorkspaceMixin:
         splitter.addWidget(central_widget)
         splitter.addWidget(right_widget)
 
-        right_widget.setMinimumWidth(240)
+        right_widget.setMinimumWidth(320)
 
         splitter.setStretchFactor(0, 40)
         splitter.setStretchFactor(1, 80)

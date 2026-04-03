@@ -1852,8 +1852,8 @@ luego realiza el inpainting en la imagen redimensionada.</translation>
     </message>
     <message>
         <location filename="../../app/ui/main_window/builders/workspace.py" line="194"/>
-        <source>Text color follows the detected source text by default. Enable &apos;Always Use This Color&apos; to override it.</source>
-        <translation>El color del texto sigue por defecto el color del texto fuente detectado. Activa «Usar siempre este color» para reemplazarlo.</translation>
+        <source>Text color follows the detected source text by default. Enable &apos;Use Selected Color&apos; to override it.</source>
+        <translation>El color del texto sigue por defecto el color del texto fuente detectado. Activa «Usar el color seleccionado» para reemplazarlo.</translation>
     </message>
     <message>
         <location filename="../../app/ui/main_window/builders/workspace.py" line="200"/>
@@ -1877,13 +1877,13 @@ luego realiza el inpainting en la imagen redimensionada.</translation>
     </message>
     <message>
         <location filename="../../app/ui/main_window/builders/workspace.py" line="247"/>
-        <source>Choose the fallback text color. By default the app keeps the detected source text color unless you enable &apos;Always Use This Color&apos;.</source>
-        <translation>Elige el color de texto de respaldo. Por defecto, la aplicación mantiene el color del texto fuente detectado, salvo que actives «Usar siempre este color».</translation>
+        <source>Choose the fallback text color. By default the app keeps the detected source text color unless you enable &apos;Use Selected Color&apos;.</source>
+        <translation>Elige el color de texto de respaldo. Por defecto, la aplicación mantiene el color del texto fuente detectado, salvo que actives «Usar el color seleccionado».</translation>
     </message>
     <message>
         <location filename="../../app/ui/main_window/builders/workspace.py" line="254"/>
-        <source>Always Use This Color</source>
-        <translation>Usar siempre este color</translation>
+        <source>Use Selected Color</source>
+        <translation>Usar el color seleccionado</translation>
     </message>
     <message>
         <location filename="../../app/ui/main_window/builders/workspace.py" line="257"/>
@@ -1894,6 +1894,26 @@ luego realiza el inpainting en la imagen redimensionada.</translation>
         <location filename="../../app/ui/main_window/builders/workspace.py" line="271"/>
         <source>Horizontal alignment for new Render items and Translate All output.</source>
         <translation>Alineación horizontal para los nuevos elementos renderizados y la salida de «Traducir todo».</translation>
+    </message>
+    <message>
+        <location filename="../../app/ui/main_window/builders/workspace.py" line="407"/>
+        <source>Text Color</source>
+        <translation>Color del texto</translation>
+    </message>
+    <message>
+        <location filename="../../app/ui/main_window/builders/workspace.py" line="422"/>
+        <source>Horizontal</source>
+        <translation>Horizontal</translation>
+    </message>
+    <message>
+        <location filename="../../app/ui/main_window/builders/workspace.py" line="424"/>
+        <source>Vertical</source>
+        <translation>Vertical</translation>
+    </message>
+    <message>
+        <location filename="../../app/ui/main_window/builders/workspace.py" line="449"/>
+        <source>Style</source>
+        <translation>Estilo</translation>
     </message>
     <message>
         <location filename="../../app/ui/main_window/builders/workspace.py" line="280"/>

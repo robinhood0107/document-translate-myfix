@@ -1852,8 +1852,8 @@ sonra yeniden boyutlandırılmış görselde boyama işlemi yapın.</translation
     </message>
     <message>
         <location filename="../../app/ui/main_window/builders/workspace.py" line="194"/>
-        <source>Text color follows the detected source text by default. Enable &apos;Always Use This Color&apos; to override it.</source>
-        <translation>Metin rengi varsayılan olarak algılanan kaynak metin rengini takip eder. Üzerine yazmak için “Bu Rengi Her Zaman Kullan” seçeneğini etkinleştirin.</translation>
+        <source>Text color follows the detected source text by default. Enable &apos;Use Selected Color&apos; to override it.</source>
+        <translation>Metin rengi varsayılan olarak algılanan kaynak metin rengini takip eder. Üzerine yazmak için “Seçili rengi kullan” seçeneğini etkinleştirin.</translation>
     </message>
     <message>
         <location filename="../../app/ui/main_window/builders/workspace.py" line="200"/>
@@ -1877,13 +1877,13 @@ sonra yeniden boyutlandırılmış görselde boyama işlemi yapın.</translation
     </message>
     <message>
         <location filename="../../app/ui/main_window/builders/workspace.py" line="247"/>
-        <source>Choose the fallback text color. By default the app keeps the detected source text color unless you enable &apos;Always Use This Color&apos;.</source>
-        <translation>Yedek metin rengini seçin. Varsayılan olarak uygulama algılanan kaynak metin rengini korur; “Bu Rengi Her Zaman Kullan” etkinleştirilirse seçilen renk kullanılır.</translation>
+        <source>Choose the fallback text color. By default the app keeps the detected source text color unless you enable &apos;Use Selected Color&apos;.</source>
+        <translation>Yedek metin rengini seçin. Varsayılan olarak uygulama algılanan kaynak metin rengini korur; “Seçili rengi kullan” etkinleştirilirse seçilen renk kullanılır.</translation>
     </message>
     <message>
         <location filename="../../app/ui/main_window/builders/workspace.py" line="254"/>
-        <source>Always Use This Color</source>
-        <translation>Bu Rengi Her Zaman Kullan</translation>
+        <source>Use Selected Color</source>
+        <translation>Seçili rengi kullan</translation>
     </message>
     <message>
         <location filename="../../app/ui/main_window/builders/workspace.py" line="257"/>
@@ -1894,6 +1894,26 @@ sonra yeniden boyutlandırılmış görselde boyama işlemi yapın.</translation
         <location filename="../../app/ui/main_window/builders/workspace.py" line="271"/>
         <source>Horizontal alignment for new Render items and Translate All output.</source>
         <translation>Yeni render öğeleri ve “Tümünü Çevir” çıktısı için yatay hizalama.</translation>
+    </message>
+    <message>
+        <location filename="../../app/ui/main_window/builders/workspace.py" line="407"/>
+        <source>Text Color</source>
+        <translation>Metin rengi</translation>
+    </message>
+    <message>
+        <location filename="../../app/ui/main_window/builders/workspace.py" line="422"/>
+        <source>Horizontal</source>
+        <translation>Yatay</translation>
+    </message>
+    <message>
+        <location filename="../../app/ui/main_window/builders/workspace.py" line="424"/>
+        <source>Vertical</source>
+        <translation>Dikey</translation>
+    </message>
+    <message>
+        <location filename="../../app/ui/main_window/builders/workspace.py" line="449"/>
+        <source>Style</source>
+        <translation>Stil</translation>
     </message>
     <message>
         <location filename="../../app/ui/main_window/builders/workspace.py" line="280"/>

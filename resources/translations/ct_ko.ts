@@ -1852,8 +1852,8 @@ then do inpainting on the resized image.</source>
     </message>
     <message>
         <location filename="../../app/ui/main_window/builders/workspace.py" line="194"/>
-        <source>Text color follows the detected source text by default. Enable &apos;Always Use This Color&apos; to override it.</source>
-        <translation>텍스트 색상은 기본적으로 감지된 원본 글자색을 따릅니다. 이를 덮어쓰려면 &apos;이 색상 항상 사용&apos;을 켜세요.</translation>
+        <source>Text color follows the detected source text by default. Enable &apos;Use Selected Color&apos; to override it.</source>
+        <translation>텍스트 색상은 기본적으로 감지된 원본 글자색을 따릅니다. 이를 덮어쓰려면 &apos;선택한 색상 사용&apos;을 켜세요.</translation>
     </message>
     <message>
         <location filename="../../app/ui/main_window/builders/workspace.py" line="200"/>
@@ -1877,13 +1877,13 @@ then do inpainting on the resized image.</source>
     </message>
     <message>
         <location filename="../../app/ui/main_window/builders/workspace.py" line="247"/>
-        <source>Choose the fallback text color. By default the app keeps the detected source text color unless you enable &apos;Always Use This Color&apos;.</source>
-        <translation>대체 텍스트 색상을 선택합니다. 기본적으로 앱은 감지된 원본 글자색을 유지하며, &apos;이 색상 항상 사용&apos;을 켜면 선택한 색상을 사용합니다.</translation>
+        <source>Choose the fallback text color. By default the app keeps the detected source text color unless you enable &apos;Use Selected Color&apos;.</source>
+        <translation>대체 텍스트 색상을 선택합니다. 기본적으로 앱은 감지된 원본 글자색을 유지하며, &apos;선택한 색상 사용&apos;을 켜면 선택한 색상을 사용합니다.</translation>
     </message>
     <message>
         <location filename="../../app/ui/main_window/builders/workspace.py" line="254"/>
-        <source>Always Use This Color</source>
-        <translation>이 색상 항상 사용</translation>
+        <source>Use Selected Color</source>
+        <translation>선택한 색상 사용</translation>
     </message>
     <message>
         <location filename="../../app/ui/main_window/builders/workspace.py" line="257"/>
@@ -1894,6 +1894,26 @@ then do inpainting on the resized image.</source>
         <location filename="../../app/ui/main_window/builders/workspace.py" line="271"/>
         <source>Horizontal alignment for new Render items and Translate All output.</source>
         <translation>새 렌더링 항목과 모두 번역 결과에 사용할 가로 정렬입니다.</translation>
+    </message>
+    <message>
+        <location filename="../../app/ui/main_window/builders/workspace.py" line="407"/>
+        <source>Text Color</source>
+        <translation>텍스트 색상</translation>
+    </message>
+    <message>
+        <location filename="../../app/ui/main_window/builders/workspace.py" line="422"/>
+        <source>Horizontal</source>
+        <translation>가로</translation>
+    </message>
+    <message>
+        <location filename="../../app/ui/main_window/builders/workspace.py" line="424"/>
+        <source>Vertical</source>
+        <translation>세로</translation>
+    </message>
+    <message>
+        <location filename="../../app/ui/main_window/builders/workspace.py" line="449"/>
+        <source>Style</source>
+        <translation>스타일</translation>
     </message>
     <message>
         <location filename="../../app/ui/main_window/builders/workspace.py" line="280"/>
