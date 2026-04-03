@@ -13,6 +13,11 @@ from app.ui.title_bar import CustomTitleBar
 from .builders import MainWindowBuildersMixin
 from .frame import EdgeResizer
 from .tools import ToolStateMixin
+from modules.utils.render_style_policy import (
+    VERTICAL_ALIGNMENT_BOTTOM,
+    VERTICAL_ALIGNMENT_CENTER,
+    VERTICAL_ALIGNMENT_TOP,
+)
 
 
 class ComicTranslateUI(
@@ -87,6 +92,11 @@ class ComicTranslateUI(
             0: QtCore.Qt.AlignmentFlag.AlignLeft,
             1: QtCore.Qt.AlignmentFlag.AlignCenter,
             2: QtCore.Qt.AlignmentFlag.AlignRight,
+        }
+        self.button_to_vertical_alignment = {
+            0: VERTICAL_ALIGNMENT_TOP,
+            1: VERTICAL_ALIGNMENT_CENTER,
+            2: VERTICAL_ALIGNMENT_BOTTOM,
         }
 
         self._init_ui()

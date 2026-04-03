@@ -388,14 +388,26 @@ class ManualWorkflowController:
         
         def set_new_text(
             text_item: TextBlockItem, 
-            wrapped: str, 
-            font_size: int
+            blk: TextBlock,
+            wrap_result: tuple,
         ) -> None:
-            
+            wrapped, font_size, rendered_width, rendered_height = wrap_result
             if is_no_space_lang(trg_lng_cd):
                 wrapped = wrapped.replace(" ", "")
-            text_item.set_plain_text(wrapped)
-            text_item.set_font_size(font_size)
+            source_rect = self.main.text_ctrl._get_text_item_layout_rect(text_item, blk)
+            block_anchor = self.main.text_ctrl._get_block_anchor_for_item(text_item, blk)
+            text_props = self.main.text_ctrl._build_text_item_properties(
+                blk,
+                wrapped,
+                font_size,
+                rs,
+                trg_lng_cd,
+                source_rect=source_rect,
+                block_anchor=block_anchor,
+                rendered_width=rendered_width,
+                rendered_height=rendered_height,
+            )
+            self.main.text_ctrl._apply_text_item_properties(text_item, text_props, wrapped)
 
         text_items_to_process = self._get_visible_text_items()
         if not text_items_to_process:
@@ -410,44 +422,33 @@ class ManualWorkflowController:
         def on_format_finished() -> None:
             for text_item in text_items_to_process:
                 text_item.handleDeselection()
-                x1, y1 = int(text_item.pos().x()), int(text_item.pos().y())
-                rot = text_item.rotation()
-
-                blk = next(
-                    (
-                        b
-                        for b in self.main.blk_list
-                        if is_close(b.xyxy[0], x1, 5)
-                        and is_close(b.xyxy[1], y1, 5)
-                        and is_close(b.angle, rot, 1)
-                    ),
-                    None,
-                )
+                blk = self.main.text_ctrl._find_text_block_for_item(text_item)
                 if not (blk and blk.translation):
                     continue
 
                 vertical = is_vertical_block(blk, trg_lng_cd)
                 wrap_args = (
                     blk.translation,
-                    text_item.font_family,
+                    rs.font_family,
                     blk.xyxy[2] - blk.xyxy[0],
                     blk.xyxy[3] - blk.xyxy[1],
-                    float(text_item.line_spacing),
-                    float(text_item.outline_width),
-                    text_item.bold,
-                    text_item.italic,
-                    text_item.underline,
-                    text_item.alignment,
-                    text_item.direction,
+                    float(rs.line_spacing),
+                    float(rs.outline_width),
+                    rs.bold,
+                    rs.italic,
+                    rs.underline,
+                    self.main.button_to_alignment[rs.alignment_id],
+                    rs.direction,
                     rs.max_font_size,
                     rs.min_font_size,
                     vertical,
+                    True,
                 )
 
                 self.main.run_threaded(
                     pyside_word_wrap,
-                    lambda wrap_res, ti=text_item: set_new_text(
-                        ti, wrap_res[0], wrap_res[1]
+                    lambda wrap_res, ti=text_item, current_blk=blk: set_new_text(
+                        ti, current_blk, wrap_res
                     ),
                     self.main.default_error_handler,
                     None,

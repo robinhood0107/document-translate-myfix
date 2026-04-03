@@ -400,6 +400,9 @@ class ImageViewer(QGraphicsView):
             italic=properties.italic, 
             underline=properties.underline,
             direction=properties.direction,
+            vertical_alignment=properties.vertical_alignment,
+            source_rect=properties.source_rect,
+            block_anchor=properties.block_anchor,
         )
         
         # Apply width if specified
@@ -417,8 +420,11 @@ class ImageViewer(QGraphicsView):
         item.setPos(QPointF(*properties.position))
         item.setRotation(properties.rotation)
         item.setScale(properties.scale)
+        item.set_source_rect(properties.source_rect)
+        item.set_block_anchor(properties.block_anchor)
 
         item.set_vertical(bool(properties.vertical))
+        item.set_vertical_alignment(properties.vertical_alignment)
         item.set_color(properties.text_color)
             
         # Set selection outlines

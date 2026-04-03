@@ -18,8 +18,14 @@ from modules.utils.textblock import TextBlock
 from modules.rendering.render import TextRenderingSettings, manual_wrap, is_vertical_block, pyside_word_wrap
 from modules.utils.pipeline_config import font_selected
 from modules.utils.language_utils import get_language_code, get_layout_direction, is_no_space_lang
-from modules.utils.image_utils import get_smart_text_color
 from modules.utils.common_utils import is_close
+from modules.utils.render_style_policy import (
+    VERTICAL_ALIGNMENT_TOP,
+    build_rect_tuple,
+    coerce_vertical_alignment,
+    compute_vertical_aligned_y,
+    resolve_render_text_color,
+)
 from modules.utils.translator_utils import format_translations
 
 if TYPE_CHECKING:
@@ -35,6 +41,8 @@ class TextController:
             self.main.font_size_dropdown,
             self.main.line_spacing_dropdown,
             self.main.block_font_color_button,
+            self.main.vertical_alignment_tool_group,
+            self.main.outline_mode_group,
             self.main.outline_font_color_button,
             self.main.outline_width_dropdown,
             self.main.outline_checkbox
@@ -48,6 +56,184 @@ class TextController:
         self._last_item_html = {}
         self._suspend_text_command = False
         self._is_updating_from_edit = False
+
+    def sync_outline_mode_group(self, state: int):
+        checked_id = 1 if state == 2 else 0
+        self.main.outline_mode_group.set_dayu_checked(checked_id)
+        enabled = checked_id == 1
+        self.main.outline_font_color_button.setEnabled(enabled)
+        self.main.outline_width_dropdown.setEnabled(enabled)
+
+    def on_outline_mode_group_changed(self, button_id: int):
+        self.main.outline_checkbox.setChecked(button_id == 1)
+
+    def on_vertical_alignment_changed(self, button_id: int):
+        if self.main.curr_tblock_item:
+            old_item = copy.copy(self.main.curr_tblock_item)
+            vertical_alignment = self.main.button_to_vertical_alignment.get(
+                button_id, VERTICAL_ALIGNMENT_TOP
+            )
+            self.main.curr_tblock_item.set_vertical_alignment(vertical_alignment)
+            command = TextFormatCommand(
+                self.main.image_viewer,
+                old_item,
+                self.main.curr_tblock_item,
+            )
+            self.main.push_command(command)
+
+    def _get_vertical_alignment(self, vertical_alignment_id: int | None = None) -> str:
+        if vertical_alignment_id is None:
+            vertical_alignment_id = self.main.vertical_alignment_tool_group.get_dayu_checked()
+        return self.main.button_to_vertical_alignment.get(
+            vertical_alignment_id,
+            VERTICAL_ALIGNMENT_TOP,
+        )
+
+    def _get_source_rect_for_block(self, blk: TextBlock) -> tuple[float, float, float, float]:
+        x1, y1, width, height = blk.xywh
+        return build_rect_tuple(x1, y1, width, height)
+
+    def _get_text_item_layout_rect(
+        self,
+        text_item: TextBlockItem | None,
+        blk: TextBlock | None = None,
+    ) -> tuple[float, float, float, float] | None:
+        if text_item is not None and getattr(text_item, "source_rect", None) is not None:
+            return tuple(float(v) for v in text_item.source_rect)
+        if blk is not None:
+            return self._get_source_rect_for_block(blk)
+        if text_item is not None:
+            return build_rect_tuple(
+                text_item.pos().x(),
+                text_item.pos().y(),
+                text_item.boundingRect().width(),
+                text_item.boundingRect().height(),
+            )
+        return None
+
+    def _get_block_anchor_for_item(
+        self,
+        text_item: TextBlockItem | None,
+        blk: TextBlock | None = None,
+    ) -> tuple[float, float, float, float] | None:
+        if text_item is not None and getattr(text_item, "block_anchor", None) is not None:
+            return tuple(float(v) for v in text_item.block_anchor)
+        if blk is not None:
+            return self._get_source_rect_for_block(blk)
+        return self._get_text_item_layout_rect(text_item, blk)
+
+    def _find_text_block_for_anchor(
+        self,
+        anchor_rect: tuple[float, float, float, float] | None,
+        rotation: float,
+    ) -> TextBlock | None:
+        if anchor_rect is None:
+            return None
+        anchor_x, anchor_y, _anchor_w, _anchor_h = anchor_rect
+        return next(
+            (
+                blk for blk in self.main.blk_list
+                if is_close(float(blk.xyxy[0]), float(anchor_x), 5)
+                and is_close(float(blk.xyxy[1]), float(anchor_y), 5)
+                and is_close(float(blk.angle), float(rotation), 1)
+            ),
+            None,
+        )
+
+    def _resolve_font_color(
+        self,
+        blk: TextBlock,
+        render_settings: TextRenderingSettings,
+    ) -> QColor:
+        return resolve_render_text_color(
+            blk.font_color,
+            QColor(render_settings.color),
+            render_settings.force_font_color,
+            render_settings.smart_global_apply_all,
+        )
+
+    def _build_text_item_properties(
+        self,
+        blk: TextBlock,
+        text: str,
+        font_size: float,
+        render_settings: TextRenderingSettings,
+        target_lang_code: str | None,
+        source_rect: tuple[float, float, float, float] | None = None,
+        block_anchor: tuple[float, float, float, float] | None = None,
+        rendered_width: float | None = None,
+        rendered_height: float | None = None,
+    ) -> TextItemProperties:
+        source_rect = source_rect or self._get_source_rect_for_block(blk)
+        block_anchor = block_anchor or self._get_source_rect_for_block(blk)
+        alignment = self.main.button_to_alignment[render_settings.alignment_id]
+        vertical_alignment = self._get_vertical_alignment(
+            render_settings.vertical_alignment_id
+        )
+        outline_color = (
+            QColor(render_settings.outline_color) if render_settings.outline else None
+        )
+        vertical = is_vertical_block(blk, target_lang_code)
+        position_y = source_rect[1]
+        if rendered_height is not None:
+            position_y = compute_vertical_aligned_y(
+                source_rect[1],
+                source_rect[3],
+                rendered_height,
+                vertical_alignment,
+            )
+
+        return TextItemProperties(
+            text=text,
+            font_family=render_settings.font_family,
+            font_size=font_size,
+            text_color=self._resolve_font_color(blk, render_settings),
+            alignment=alignment,
+            line_spacing=float(render_settings.line_spacing),
+            outline_color=outline_color,
+            outline_width=float(render_settings.outline_width),
+            bold=render_settings.bold,
+            italic=render_settings.italic,
+            underline=render_settings.underline,
+            direction=render_settings.direction,
+            position=(source_rect[0], position_y),
+            rotation=blk.angle,
+            width=rendered_width,
+            height=rendered_height,
+            vertical=vertical,
+            vertical_alignment=vertical_alignment,
+            source_rect=source_rect,
+            block_anchor=block_anchor,
+        )
+
+    def _apply_text_item_properties(
+        self,
+        text_item: TextBlockItem,
+        text_props: TextItemProperties,
+        text: str,
+    ) -> None:
+        text_item.font_family = text_props.font_family
+        text_item.font_size = text_props.font_size
+        text_item.text_color = text_props.text_color
+        text_item.alignment = text_props.alignment
+        text_item.line_spacing = text_props.line_spacing
+        text_item.outline = bool(text_props.outline_color)
+        text_item.outline_color = text_props.outline_color
+        text_item.outline_width = text_props.outline_width
+        text_item.bold = text_props.bold
+        text_item.italic = text_props.italic
+        text_item.underline = text_props.underline
+        text_item.direction = text_props.direction
+        text_item.set_source_rect(text_props.source_rect)
+        text_item.set_block_anchor(text_props.block_anchor)
+        text_item.vertical_alignment = coerce_vertical_alignment(
+            text_props.vertical_alignment
+        )
+        text_item.set_plain_text(text)
+        text_item.set_direction(text_props.direction)
+        text_item.set_vertical(bool(text_props.vertical))
+        text_item.set_vertical_alignment(text_props.vertical_alignment)
+        text_item.set_color(text_props.text_color)
 
     def connect_text_item_signals(self, text_item: TextBlockItem, force_reconnect: bool = False):
         if getattr(text_item, "_ct_signals_connected", False) and not force_reconnect:
@@ -114,41 +300,14 @@ class TextController:
             text = text.replace(' ', '')
 
         render_settings = self.render_settings()
-        font_family = render_settings.font_family
-        text_color_str = render_settings.color
-        text_color = QColor(text_color_str)
-
-        # Smart Color Override
-        text_color = get_smart_text_color(blk.font_color, text_color)
-
-        id = render_settings.alignment_id
-        alignment = self.main.button_to_alignment[id]
-        line_spacing = float(render_settings.line_spacing)
-        outline_color_str = render_settings.outline_color
-        outline_color = QColor(outline_color_str) if self.main.outline_checkbox.isChecked() else None
-        outline_width = float(render_settings.outline_width)
-        bold = render_settings.bold
-        italic = render_settings.italic
-        underline = render_settings.underline
-        direction = render_settings.direction
-        vertical = is_vertical_block(blk, trg_lng_cd)
-
-        properties = TextItemProperties(
-            text=text,
-            font_family=font_family,
-            font_size=font_size,
-            text_color=text_color,
-            alignment=alignment,
-            line_spacing=line_spacing,
-            outline_color=outline_color,
-            outline_width=outline_width,
-            bold=bold,
-            italic=italic,
-            underline=underline,
-            direction=direction,
-            position=(blk.xyxy[0], blk.xyxy[1]),
-            rotation=blk.angle,
-            vertical=vertical,
+        properties = self._build_text_item_properties(
+            blk,
+            text,
+            font_size,
+            render_settings,
+            trg_lng_cd,
+            source_rect=self._get_source_rect_for_block(blk),
+            block_anchor=self._get_source_rect_for_block(blk),
         )
         
         text_item = self.main.image_viewer.add_text_item(properties)
@@ -163,16 +322,9 @@ class TextController:
         self._last_item_text[text_item] = text_item.toPlainText()
         self._last_item_html[text_item] = text_item.document().toHtml()
 
-        x1, y1 = int(text_item.pos().x()), int(text_item.pos().y())
-        rotation = text_item.rotation()
-
-        self.main.curr_tblock = next(
-            (
-            blk for blk in self.main.blk_list
-            if is_close(blk.xyxy[0], x1, 5) and is_close(blk.xyxy[1], y1, 5)
-            and is_close(blk.angle, rotation, 1)
-            ),
-            None
+        self.main.curr_tblock = self._find_text_block_for_anchor(
+            self._get_block_anchor_for_item(text_item),
+            text_item.rotation(),
         )
 
         # Update both s_text_edit and t_text_edit
@@ -324,17 +476,9 @@ class TextController:
         if not text_item:
             return None
 
-        x1, y1 = int(text_item.pos().x()), int(text_item.pos().y())
-        rotation = text_item.rotation()
-
-        return next(
-            (
-                blk for blk in self.main.blk_list
-                if is_close(blk.xyxy[0], x1, 5)
-                and is_close(blk.xyxy[1], y1, 5)
-                and is_close(blk.angle, rotation, 1)
-            ),
-            None
+        return self._find_text_block_for_anchor(
+            self._get_block_anchor_for_item(text_item),
+            text_item.rotation(),
         )
 
     def _schedule_text_change_command(self, text_item: TextBlockItem, new_text: str, blk: TextBlock | None):
@@ -547,18 +691,20 @@ class TextController:
 
     def toggle_outline_settings(self, state):
         enabled = True if state == 2 else False
+        self.main.outline_font_color_button.setEnabled(enabled)
+        self.main.outline_width_dropdown.setEnabled(enabled)
         if self.main.curr_tblock_item:
+            old_item = copy.copy(self.main.curr_tblock_item)
             if not enabled:
                 self.main.curr_tblock_item.set_outline(None, None)
             else:
-                old_item = copy.copy(self.main.curr_tblock_item)
                 outline_width = float(self.main.outline_width_dropdown.currentText())
                 color_str = self.main.outline_font_color_button.property('selected_color')
                 color = QColor(color_str)
                 self.main.curr_tblock_item.set_outline(color, outline_width)
 
-                command = TextFormatCommand(self.main.image_viewer, old_item, self.main.curr_tblock_item)
-                self.main.push_command(command)
+            command = TextFormatCommand(self.main.image_viewer, old_item, self.main.curr_tblock_item)
+            self.main.push_command(command)
 
     # Widget helpers
     def block_text_item_widgets(self, widgets):
@@ -617,6 +763,9 @@ class TextController:
 
             self.main.outline_width_dropdown.setCurrentText(str(text_item.outline_width))
             self.main.outline_checkbox.setChecked(text_item.outline)
+            self.main.outline_mode_group.set_dayu_checked(1 if text_item.outline else 0)
+            self.main.outline_font_color_button.setEnabled(bool(text_item.outline))
+            self.main.outline_width_dropdown.setEnabled(bool(text_item.outline))
 
             self.main.bold_button.setChecked(text_item.bold)
             self.main.italic_button.setChecked(text_item.italic)
@@ -634,6 +783,18 @@ class TextController:
             if alignment in alignment_to_button:
                 button_index = alignment_to_button[alignment]
                 button_group.buttons()[button_index].setChecked(True)
+
+            vertical_alignment_to_button = {
+                VERTICAL_ALIGNMENT_TOP: 0,
+                "top": 0,
+                "center": 1,
+                "bottom": 2,
+            }
+            vertical_button_index = vertical_alignment_to_button.get(
+                coerce_vertical_alignment(getattr(text_item, "vertical_alignment", VERTICAL_ALIGNMENT_TOP)),
+                0,
+            )
+            self.main.vertical_alignment_tool_group.set_dayu_checked(vertical_button_index)
 
         finally:
             self.unblock_text_item_widgets(self.widgets_to_block)
@@ -681,6 +842,9 @@ class TextController:
 
             self.main.outline_width_dropdown.setCurrentText(str(outline_width)) if outline_width else None
             self.main.outline_checkbox.setChecked(outline)
+            self.main.outline_mode_group.set_dayu_checked(1 if outline else 0)
+            self.main.outline_font_color_button.setEnabled(bool(outline))
+            self.main.outline_width_dropdown.setEnabled(bool(outline))
 
             self.main.bold_button.setChecked(bold)
             self.main.italic_button.setChecked(italic)
@@ -697,6 +861,22 @@ class TextController:
             if alignment in alignment_to_button:
                 button_index = alignment_to_button[alignment]
                 button_group.buttons()[button_index].setChecked(True)
+
+            self.main.vertical_alignment_tool_group.set_dayu_checked(
+                {
+                    VERTICAL_ALIGNMENT_TOP: 0,
+                    "center": 1,
+                    "bottom": 2,
+                }.get(
+                    coerce_vertical_alignment(
+                        item_highlighted.get(
+                            "vertical_alignment",
+                            VERTICAL_ALIGNMENT_TOP,
+                        )
+                    ),
+                    0,
+                )
+            )
 
         finally:
             self.unblock_text_item_widgets(self.widgets_to_block)
@@ -715,23 +895,16 @@ class TextController:
             context = self.main.manual_workflow_ctrl._prepare_multi_page_context(selected_paths)
             render_settings = self.render_settings()
             upper = render_settings.upper_case
-            line_spacing = float(self.main.line_spacing_dropdown.currentText())
-            font_family = self.main.font_dropdown.currentText()
-            outline_width = float(self.main.outline_width_dropdown.currentText())
-            bold = self.main.bold_button.isChecked()
-            italic = self.main.italic_button.isChecked()
-            underline = self.main.underline_button.isChecked()
-            align_id = self.main.alignment_tool_group.get_dayu_checked()
-            alignment = self.main.button_to_alignment[align_id]
+            line_spacing = float(render_settings.line_spacing)
+            font_family = render_settings.font_family
+            outline_width = float(render_settings.outline_width)
+            bold = render_settings.bold
+            italic = render_settings.italic
+            underline = render_settings.underline
+            alignment = self.main.button_to_alignment[render_settings.alignment_id]
             direction = render_settings.direction
-            max_font_size = self.main.settings_page.get_max_font_size()
-            min_font_size = self.main.settings_page.get_min_font_size()
-            setting_font_color = QColor(render_settings.color)
-            outline_color = (
-                QColor(render_settings.outline_color)
-                if render_settings.outline
-                else None
-            )
+            max_font_size = render_settings.max_font_size
+            min_font_size = render_settings.min_font_size
 
             def render_selected_pages() -> set[str]:
                 updated_paths: set[str] = set()
@@ -751,8 +924,8 @@ class TextController:
                     existing_text_items = list(viewer_state.get("text_items_state", []))
                     existing_keys = {
                         (
-                            int(item.get("position", (0, 0))[0]),
-                            int(item.get("position", (0, 0))[1]),
+                            int(item.get("block_anchor", item.get("position", (0, 0)))[0]),
+                            int(item.get("block_anchor", item.get("position", (0, 0)))[1]),
                             float(item.get("rotation", 0)),
                         )
                         for item in existing_text_items
@@ -790,27 +963,21 @@ class TextController:
                         if is_no_space_lang(trg_lng_cd):
                             wrapped = wrapped.replace(" ", "")
 
-                        font_color = get_smart_text_color(blk.font_color, setting_font_color)
-                        text_props = TextItemProperties(
-                            text=wrapped,
-                            font_family=font_family,
-                            font_size=font_size,
-                            text_color=font_color,
-                            alignment=alignment,
-                            line_spacing=line_spacing,
-                            outline_color=outline_color,
-                            outline_width=outline_width,
-                            bold=bold,
-                            italic=italic,
-                            underline=underline,
-                            direction=direction,
-                            position=(x1, y1),
-                            rotation=blk.angle,
-                            scale=1.0,
-                            transform_origin=blk.tr_origin_point if blk.tr_origin_point else (0, 0),
-                            width=rendered_width,
-                            height=rendered_height,
-                            vertical=vertical,
+                        source_rect = self._get_source_rect_for_block(blk)
+                        text_props = self._build_text_item_properties(
+                            blk,
+                            wrapped,
+                            font_size,
+                            render_settings,
+                            trg_lng_cd,
+                            source_rect=source_rect,
+                            block_anchor=source_rect,
+                            rendered_width=rendered_width,
+                            rendered_height=rendered_height,
+                        )
+                        text_props.scale = 1.0
+                        text_props.transform_origin = (
+                            blk.tr_origin_point if blk.tr_origin_point else (0, 0)
                         )
                         new_text_items_state.append(text_props.to_dict())
 
@@ -858,8 +1025,16 @@ class TextController:
                 if item not in self.main.image_viewer._scene.items():
                     self.main.image_viewer._scene.addItem(item)
 
-            # Create a dictionary to map text items to their positions and rotations
-            existing_text_items = {item: (int(item.pos().x()), int(item.pos().y()), item.rotation()) for item in self.main.image_viewer.text_items}
+            # Create a dictionary to map text items to their anchor boxes and rotations
+            existing_text_items = {
+                item: (
+                    int(self._get_block_anchor_for_item(item)[0]),
+                    int(self._get_block_anchor_for_item(item)[1]),
+                    item.rotation(),
+                )
+                for item in self.main.image_viewer.text_items
+                if self._get_block_anchor_for_item(item) is not None
+            }
 
             # Identify new blocks based on position and rotation
             new_blocks = [
@@ -874,13 +1049,13 @@ class TextController:
             render_settings = self.render_settings()
             upper = render_settings.upper_case
 
-            line_spacing = float(self.main.line_spacing_dropdown.currentText())
-            font_family = self.main.font_dropdown.currentText()
-            outline_width = float(self.main.outline_width_dropdown.currentText())
+            line_spacing = float(render_settings.line_spacing)
+            font_family = render_settings.font_family
+            outline_width = float(render_settings.outline_width)
 
-            bold = self.main.bold_button.isChecked()
-            italic = self.main.italic_button.isChecked()
-            underline = self.main.underline_button.isChecked()
+            bold = render_settings.bold
+            italic = render_settings.italic
+            underline = render_settings.underline
 
             target_lang = self.main.t_combo.currentText()
             target_lang_en = self.main.lang_mapping.get(target_lang, None)
@@ -890,11 +1065,10 @@ class TextController:
             lambda: format_translations(self.main.blk_list, trg_lng_cd, upper_case=upper)
             )
 
-            min_font_size = self.main.settings_page.get_min_font_size()
-            max_font_size = self.main.settings_page.get_max_font_size()
+            min_font_size = render_settings.min_font_size
+            max_font_size = render_settings.max_font_size
 
-            align_id = self.main.alignment_tool_group.get_dayu_checked()
-            alignment = self.main.button_to_alignment[align_id]
+            alignment = self.main.button_to_alignment[render_settings.alignment_id]
             direction = render_settings.direction
 
             # Retrieve current image path to fix blk_rendered error
@@ -934,10 +1108,13 @@ class TextController:
 
         return TextRenderingSettings(
             alignment_id = self.main.alignment_tool_group.get_dayu_checked(),
+            vertical_alignment_id = self.main.vertical_alignment_tool_group.get_dayu_checked(),
             font_family = self.main.font_dropdown.currentText(),
             min_font_size = int(self.main.settings_page.ui.min_font_spinbox.value()),
             max_font_size = int(self.main.settings_page.ui.max_font_spinbox.value()),
             color = self.main.block_font_color_button.property('selected_color'),
+            force_font_color = self.main.force_font_color_checkbox.isChecked(),
+            smart_global_apply_all = self.main.smart_global_apply_all_checkbox.isChecked(),
             upper_case = self.main.settings_page.ui.uppercase_checkbox.isChecked(),
             outline = self.main.outline_checkbox.isChecked(),
             outline_color = self.main.outline_font_color_button.property('selected_color'),

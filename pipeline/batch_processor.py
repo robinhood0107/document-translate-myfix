@@ -17,8 +17,13 @@ from modules.detection.processor import TextBlockDetector
 from modules.translation.processor import Translator
 from modules.utils.textblock import sort_blk_list
 from modules.utils.pipeline_config import inpaint_map, get_config
-from modules.utils.image_utils import generate_mask, get_smart_text_color
+from modules.utils.image_utils import generate_mask
 from modules.utils.language_utils import get_language_code, is_no_space_lang
+from modules.utils.render_style_policy import (
+    VERTICAL_ALIGNMENT_TOP,
+    build_rect_tuple,
+    resolve_render_text_color,
+)
 from modules.utils.translator_utils import get_raw_translation, get_raw_text, format_translations
 from modules.rendering.render import get_best_render_area, pyside_word_wrap, is_vertical_block
 from modules.utils.device import resolve_device
@@ -373,6 +378,10 @@ class BatchProcessor:
             underline = render_settings.underline
             alignment_id = render_settings.alignment_id
             alignment = self.main_page.button_to_alignment[alignment_id]
+            vertical_alignment = self.main_page.button_to_vertical_alignment.get(
+                render_settings.vertical_alignment_id,
+                VERTICAL_ALIGNMENT_TOP,
+            )
             direction = render_settings.direction
                 
             text_items_state = []
@@ -413,7 +422,13 @@ class BatchProcessor:
                     translation = translation.replace(' ', '')
 
                 # Smart Color Override
-                font_color = get_smart_text_color(blk.font_color, setting_font_color)
+                font_color = resolve_render_text_color(
+                    blk.font_color,
+                    setting_font_color,
+                    render_settings.force_font_color,
+                    render_settings.smart_global_apply_all,
+                )
+                source_rect = build_rect_tuple(x1, y1, block_width, block_height)
 
                 # Use TextItemProperties for consistent text item creation
                 text_props = TextItemProperties(
@@ -436,6 +451,9 @@ class BatchProcessor:
                     height=rendered_height,
                     direction=direction,
                     vertical=vertical,
+                    vertical_alignment=vertical_alignment,
+                    source_rect=source_rect,
+                    block_anchor=source_rect,
                     selection_outlines=[
                         OutlineInfo(0, len(translation), 
                         outline_color, 

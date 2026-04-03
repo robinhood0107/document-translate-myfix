@@ -219,7 +219,8 @@ class RectCommandBase:
                     is_close(item.scale(), properties.scale) and
                     is_close(item.transformOriginPoint().x(), properties.transform_origin[0]) and
                     is_close(item.transformOriginPoint().y(), properties.transform_origin[1]) and
-                    is_close(item.boundingRect().width(), properties.width)):
+                    is_close(item.boundingRect().width(), properties.width) and
+                    getattr(item, "vertical_alignment", "top") == getattr(properties, "vertical_alignment", "top")):
                     return item
         return None
 

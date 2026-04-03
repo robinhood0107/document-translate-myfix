@@ -7,6 +7,12 @@ import math, copy
 from dataclasses import dataclass
 from enum import Enum
 from .text.vertical_layout import VerticalTextDocumentLayout
+from modules.utils.render_style_policy import (
+    VERTICAL_ALIGNMENT_TOP,
+    build_rect_tuple,
+    coerce_vertical_alignment,
+    compute_vertical_aligned_y,
+)
 
 
 @dataclass
@@ -56,7 +62,10 @@ class TextBlockItem(QGraphicsTextItem):
              bold=False, 
              italic=False, 
              underline=False,
-             direction=Qt.LayoutDirection.LeftToRight):
+             direction=Qt.LayoutDirection.LeftToRight,
+             vertical_alignment=VERTICAL_ALIGNMENT_TOP,
+             source_rect=None,
+             block_anchor=None):
 
         super().__init__(text)
         self.text_color = render_color
@@ -74,6 +83,9 @@ class TextBlockItem(QGraphicsTextItem):
 
         self.layout = None
         self.vertical = False
+        self.vertical_alignment = coerce_vertical_alignment(vertical_alignment)
+        self.source_rect = tuple(source_rect) if source_rect is not None else None
+        self.block_anchor = tuple(block_anchor) if block_anchor is not None else None
 
         self.selected = False
         self.resizing = False
@@ -107,6 +119,42 @@ class TextBlockItem(QGraphicsTextItem):
 
         # Set the initial text direction
         self._apply_text_direction()
+
+    def set_source_rect(self, source_rect):
+        if source_rect is None:
+            self.source_rect = None
+            return
+        self.source_rect = tuple(float(v) for v in source_rect)
+
+    def set_block_anchor(self, block_anchor):
+        if block_anchor is None:
+            self.block_anchor = None
+            return
+        self.block_anchor = tuple(float(v) for v in block_anchor)
+
+    def update_source_rect_from_current_geometry(self):
+        self.source_rect = build_rect_tuple(
+            self.pos().x(),
+            self.pos().y(),
+            self.boundingRect().width(),
+            self.boundingRect().height(),
+        )
+
+    def set_vertical_alignment(self, vertical_alignment: str):
+        self.vertical_alignment = coerce_vertical_alignment(vertical_alignment)
+        self.apply_vertical_alignment()
+
+    def apply_vertical_alignment(self):
+        if self.source_rect is None:
+            return
+        source_x, source_y, _source_width, source_height = self.source_rect
+        aligned_y = compute_vertical_aligned_y(
+            source_y,
+            source_height,
+            self.boundingRect().height(),
+            self.vertical_alignment,
+        )
+        self.setPos(QPointF(float(source_x), float(aligned_y)))
 
     def set_vertical(self, vertical: bool):
         doc = self.document()
@@ -163,6 +211,7 @@ class TextBlockItem(QGraphicsTextItem):
         
         # After setting the new layout, update the item's state
         self.setCenterTransform()
+        self.apply_vertical_alignment()
         self.update()
 
     def setCenterTransform(self):
@@ -189,12 +238,14 @@ class TextBlockItem(QGraphicsTextItem):
             self.setHtml(text)
             self.setTextWidth(width)
             self.set_outline(self.outline_color, self.outline_width)
+            self.apply_vertical_alignment()
         else:
             self.set_plain_text(text)
 
     def set_plain_text(self, text):
         self.setPlainText(text)
         self.apply_all_attributes()
+        self.apply_vertical_alignment()
 
     def is_html(self, text):
         import re
@@ -219,15 +270,18 @@ class TextBlockItem(QGraphicsTextItem):
         if not self.textCursor().hasSelection():
             self.font_size = font_size
         self.update_text_format('size', font_size)
+        self.apply_vertical_alignment()
 
     def update_text_width(self):
         width = self.document().size().width()
         self.setTextWidth(width)
+        self.apply_vertical_alignment()
 
     def set_alignment(self, alignment):
         if not self.textCursor().hasSelection():
             self.alignment = alignment
         self.update_alignment(alignment)
+        self.apply_vertical_alignment()
 
     def update_alignment(self, alignment):
         cursor = self.textCursor()
@@ -304,6 +358,7 @@ class TextBlockItem(QGraphicsTextItem):
         spacing = float(spacing)
         block_format.setLineHeight(spacing, QTextBlockFormat.LineHeightTypes.ProportionalHeight.value)
         cursor.mergeBlockFormat(block_format)
+        self.apply_vertical_alignment()
 
     def set_color(self, color):
         if not self.textCursor().hasSelection():
@@ -471,6 +526,7 @@ class TextBlockItem(QGraphicsTextItem):
         self.set_line_spacing(self.line_spacing)
         self.update_text_width()
         self.set_alignment(self.alignment)
+        self.apply_vertical_alignment()
 
     def mouseDoubleClickEvent(self, event):
         if not self.editing_mode:
@@ -698,6 +754,14 @@ class TextBlockItem(QGraphicsTextItem):
             new_pos.setY(self.pos().y() + parent_rect.bottom() - bounding_rect.bottom())
         
         self.setPos(new_pos)
+        if self.source_rect is not None:
+            source_x, source_y, width, height = self.source_rect
+            self.source_rect = build_rect_tuple(
+                source_x + delta.x(),
+                source_y + delta.y(),
+                width,
+                height,
+            )
 
     def rotate_item(self, scene_pos):
         self.setTransformOriginPoint(self.boundingRect().center())
@@ -780,6 +844,21 @@ class TextBlockItem(QGraphicsTextItem):
         new_pos = self.pos() + pos_delta
 
         self.setPos(new_pos)
+        if self.source_rect is not None:
+            source_x, source_y, _width, _height = self.source_rect
+            self.source_rect = build_rect_tuple(
+                source_x + pos_delta.x(),
+                source_y + pos_delta.y(),
+                new_rect.width(),
+                new_rect.height(),
+            )
+        else:
+            self.source_rect = build_rect_tuple(
+                new_pos.x(),
+                new_pos.y(),
+                new_rect.width(),
+                new_rect.height(),
+            )
 
         if self.vertical:
             if self.layout:
@@ -816,6 +895,7 @@ class TextBlockItem(QGraphicsTextItem):
                 'underline': False,
                 'text_color': self.text_color.name(),
                 'alignment': self.alignment,
+                'vertical_alignment': self.vertical_alignment,
                 'outline': self.outline,
                 'outline_color': self.outline_color.name() if self.outline_color else None,
                 'outline_width': self.outline_width,
@@ -858,6 +938,7 @@ class TextBlockItem(QGraphicsTextItem):
             'underline': True,
             'text_color': set(),
             'alignment': None,
+            'vertical_alignment': self.vertical_alignment,
         }
 
         # Get initial block format for alignment
@@ -901,7 +982,11 @@ class TextBlockItem(QGraphicsTextItem):
             outline_width=self.outline_width,
             bold=self.bold,
             italic=self.italic,
-            underline=self.underline
+            underline=self.underline,
+            direction=self.direction,
+            vertical_alignment=self.vertical_alignment,
+            source_rect=self.source_rect,
+            block_anchor=self.block_anchor,
         )
         
         new_instance.set_text(self.toHtml(), self.boundingRect().width())

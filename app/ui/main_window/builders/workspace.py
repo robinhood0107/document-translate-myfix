@@ -21,6 +21,22 @@ from app.ui.main_window.constants import supported_source_languages, supported_t
 
 
 class WorkspaceMixin:
+    def _create_scope_badge(self, text: str, tooltip: str = ""):
+        badge = QtWidgets.QLabel(text)
+        badge.setStyleSheet(
+            "QLabel {"
+            "background-color: #4a4a4a;"
+            "color: #f0f0f0;"
+            "border-radius: 8px;"
+            "padding: 1px 6px;"
+            "font-size: 10px;"
+            "font-weight: 600;"
+            "}"
+        )
+        if tooltip:
+            badge.setToolTip(tooltip)
+        return badge
+
     def _create_main_content(self):
         content_widget = QtWidgets.QWidget()
 
@@ -165,12 +181,43 @@ class WorkspaceMixin:
         input_layout.addLayout(t_combo_text_layout)
 
         text_render_layout = QtWidgets.QVBoxLayout()
+        render_policy_layout = QtWidgets.QHBoxLayout()
+        render_policy_layout.addWidget(
+            self._create_scope_badge(
+                "GLOBAL",
+                self.tr("Always used by new Render items and Translate All output."),
+            )
+        )
+        render_policy_layout.addWidget(
+            self._create_scope_badge(
+                "SMART",
+                self.tr("Uses program judgment unless a force toggle is enabled."),
+            )
+        )
+        render_policy_layout.addWidget(
+            self._create_scope_badge(
+                "ITEM",
+                self.tr("Only affects the currently selected text item."),
+            )
+        )
+        render_policy_layout.addStretch()
+
+        smart_toggle_layout = QtWidgets.QHBoxLayout()
+        self.smart_global_apply_all_checkbox = MCheckBox(self.tr("Apply All SMART Globally"))
+        self.smart_global_apply_all_checkbox.setToolTip(
+            self.tr("Force every SMART render setting instead of letting the program decide.")
+        )
+        smart_toggle_layout.addWidget(self.smart_global_apply_all_checkbox)
+        smart_toggle_layout.addStretch()
+
         font_settings_layout = QtWidgets.QHBoxLayout()
 
         self.font_dropdown = MFontComboBox().small()
-        self.font_dropdown.setToolTip(self.tr("Font"))
+        self.font_dropdown.setToolTip(self.tr("Font Family (GLOBAL)"))
         self.font_size_dropdown = MComboBox().small()
-        self.font_size_dropdown.setToolTip(self.tr("Font Size"))
+        self.font_size_dropdown.setToolTip(
+            self.tr("Font Size (ITEM). This edits the selected text item only. New renders still auto-fit using min/max font size.")
+        )
         self.font_size_dropdown.addItems(
             ["4", "6", "8", "9", "10", "11", "12", "14", "16", "18", "20", "22", "24", "28", "32", "36", "48", "72"]
         )
@@ -179,13 +226,19 @@ class WorkspaceMixin:
         self.font_size_dropdown.set_editable(True)
 
         self.line_spacing_dropdown = MComboBox().small()
-        self.line_spacing_dropdown.setToolTip(self.tr("Line Spacing"))
+        self.line_spacing_dropdown.setToolTip(self.tr("Line Spacing (GLOBAL)"))
         self.line_spacing_dropdown.addItems(["1.0", "1.1", "1.2", "1.3", "1.4", "1.5"])
         self.line_spacing_dropdown.setFixedWidth(60)
         self.line_spacing_dropdown.set_editable(True)
 
         font_settings_layout.addWidget(self.font_dropdown)
         font_settings_layout.addWidget(self.font_size_dropdown)
+        font_settings_layout.addWidget(
+            self._create_scope_badge(
+                "ITEM",
+                self.tr("Selected text item only."),
+            )
+        )
         font_settings_layout.addWidget(self.line_spacing_dropdown)
         font_settings_layout.addStretch()
 
@@ -198,10 +251,16 @@ class WorkspaceMixin:
         settings.endGroup()
 
         self.block_font_color_button = QtWidgets.QPushButton()
-        self.block_font_color_button.setToolTip(self.tr("Font Color"))
+        self.block_font_color_button.setToolTip(
+            self.tr("Font Color (SMART). Uses detected text color unless force is enabled.")
+        )
         self.block_font_color_button.setFixedSize(30, 30)
         self.block_font_color_button.setStyleSheet(f"background-color: {dflt_clr}; border: none; border-radius: 5px;")
         self.block_font_color_button.setProperty("selected_color", dflt_clr)
+        self.force_font_color_checkbox = MCheckBox(self.tr("Force Color"))
+        self.force_font_color_checkbox.setToolTip(
+            self.tr("Use the selected font color globally instead of the detected block color.")
+        )
 
         self.alignment_tool_group = MToolButtonGroup(orientation=QtCore.Qt.Horizontal, exclusive=True)
         alignment_tools = [
@@ -211,16 +270,50 @@ class WorkspaceMixin:
         ]
         self.alignment_tool_group.set_button_list(alignment_tools)
         self.alignment_tool_group.set_dayu_checked(1)
+        self.alignment_tool_group.setToolTip(self.tr("Horizontal Alignment (GLOBAL)"))
+
+        self.vertical_alignment_tool_group = MToolButtonGroup(
+            orientation=QtCore.Qt.Horizontal,
+            exclusive=True,
+        )
+        self.vertical_alignment_tool_group.set_button_list(
+            [
+                {"text": self.tr("Top"), "checkable": True, "tooltip": self.tr("Vertical Alignment Top (GLOBAL)")},
+                {"text": self.tr("Center"), "checkable": True, "tooltip": self.tr("Vertical Alignment Center (GLOBAL)")},
+                {"text": self.tr("Bottom"), "checkable": True, "tooltip": self.tr("Vertical Alignment Bottom (GLOBAL)")},
+            ]
+        )
+        self.vertical_alignment_tool_group.set_dayu_checked(0)
 
         self.bold_button = self.create_tool_button(svg="bold.svg", checkable=True)
-        self.bold_button.setToolTip(self.tr("Bold"))
+        self.bold_button.setToolTip(self.tr("Bold (GLOBAL)"))
         self.italic_button = self.create_tool_button(svg="italic.svg", checkable=True)
-        self.italic_button.setToolTip(self.tr("Italic"))
+        self.italic_button.setToolTip(self.tr("Italic (GLOBAL)"))
         self.underline_button = self.create_tool_button(svg="underline.svg", checkable=True)
-        self.underline_button.setToolTip(self.tr("Underline"))
+        self.underline_button.setToolTip(self.tr("Underline (GLOBAL)"))
 
         main_text_settings_layout.addWidget(self.block_font_color_button)
+        main_text_settings_layout.addWidget(
+            self._create_scope_badge(
+                "SMART",
+                self.tr("Program decides by default. Force to make the selected color global."),
+            )
+        )
+        main_text_settings_layout.addWidget(self.force_font_color_checkbox)
         main_text_settings_layout.addWidget(self.alignment_tool_group)
+        main_text_settings_layout.addWidget(
+            self._create_scope_badge(
+                "GLOBAL",
+                self.tr("Always applied when new text is rendered."),
+            )
+        )
+        main_text_settings_layout.addWidget(self.vertical_alignment_tool_group)
+        main_text_settings_layout.addWidget(
+            self._create_scope_badge(
+                "GLOBAL",
+                self.tr("Vertical placement inside the text box."),
+            )
+        )
         main_text_settings_layout.addWidget(self.bold_button)
         main_text_settings_layout.addWidget(self.italic_button)
         main_text_settings_layout.addWidget(self.underline_button)
@@ -230,20 +323,39 @@ class WorkspaceMixin:
 
         self.outline_checkbox = MCheckBox(self.tr("Outline"))
         self.outline_checkbox.setChecked(dflt_outline_check)
+        self.outline_checkbox.hide()
+
+        self.outline_mode_group = MToolButtonGroup(
+            orientation=QtCore.Qt.Horizontal,
+            exclusive=True,
+        )
+        self.outline_mode_group.set_button_list(
+            [
+                {"text": self.tr("OFF"), "checkable": True, "tooltip": self.tr("Disable outline globally.")},
+                {"text": self.tr("ON"), "checkable": True, "tooltip": self.tr("Enable outline globally.")},
+            ]
+        )
+        self.outline_mode_group.set_dayu_checked(1 if dflt_outline_check else 0)
 
         self.outline_font_color_button = QtWidgets.QPushButton()
-        self.outline_font_color_button.setToolTip(self.tr("Outline Color"))
+        self.outline_font_color_button.setToolTip(self.tr("Outline Color (GLOBAL)"))
         self.outline_font_color_button.setFixedSize(30, 30)
         self.outline_font_color_button.setStyleSheet("background-color: white; border: none; border-radius: 5px;")
         self.outline_font_color_button.setProperty("selected_color", "#ffffff")
 
         self.outline_width_dropdown = MComboBox().small()
         self.outline_width_dropdown.setFixedWidth(60)
-        self.outline_width_dropdown.setToolTip(self.tr("Outline Width"))
+        self.outline_width_dropdown.setToolTip(self.tr("Outline Width (GLOBAL)"))
         self.outline_width_dropdown.addItems(["1.0", "1.15", "1.3", "1.4", "1.5"])
         self.outline_width_dropdown.set_editable(True)
 
-        outline_settings_layout.addWidget(self.outline_checkbox)
+        outline_settings_layout.addWidget(
+            self._create_scope_badge(
+                "GLOBAL",
+                self.tr("Outline is already a global render setting."),
+            )
+        )
+        outline_settings_layout.addWidget(self.outline_mode_group)
         outline_settings_layout.addWidget(self.outline_font_color_button)
         outline_settings_layout.addWidget(self.outline_width_dropdown)
         outline_settings_layout.addStretch()
@@ -251,6 +363,8 @@ class WorkspaceMixin:
         rendering_divider_top = MDivider()
         rendering_divider_bottom = MDivider()
         text_render_layout.addWidget(rendering_divider_top)
+        text_render_layout.addLayout(render_policy_layout)
+        text_render_layout.addLayout(smart_toggle_layout)
         text_render_layout.addLayout(font_settings_layout)
         text_render_layout.addLayout(main_text_settings_layout)
         text_render_layout.addLayout(outline_settings_layout)

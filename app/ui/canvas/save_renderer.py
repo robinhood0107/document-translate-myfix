@@ -49,6 +49,9 @@ class ImageSaveRenderer:
                 italic=text_props.italic,
                 underline=text_props.underline,
                 direction=text_props.direction,
+                vertical_alignment=text_props.vertical_alignment,
+                source_rect=text_props.source_rect,
+                block_anchor=text_props.block_anchor,
             )
 
             text_item.set_text(text_props.text, text_props.width)
@@ -59,7 +62,10 @@ class ImageSaveRenderer:
             text_item.setPos(QtCore.QPointF(*text_props.position))
             text_item.setRotation(text_props.rotation)
             text_item.setScale(text_props.scale)
+            text_item.set_source_rect(text_props.source_rect)
+            text_item.set_block_anchor(text_props.block_anchor)
             text_item.set_vertical(bool(text_props.vertical))
+            text_item.set_vertical_alignment(text_props.vertical_alignment)
             text_item.selection_outlines = text_props.selection_outlines
             text_item.update()
 
@@ -130,7 +136,26 @@ class ImageSaveRenderer:
                     # Create a new text item state for the spanning portion.
                     # It's a full copy, but its position causes clipping.
                     spanning_text_item = text_item.copy()
+                    old_pos = text_item.get('position', (0, 0))
+                    delta_x = new_pos[0] - old_pos[0]
+                    delta_y = new_pos[1] - old_pos[1]
                     spanning_text_item['position'] = new_pos
+                    if spanning_text_item.get('source_rect') is not None:
+                        x, y, width, height = spanning_text_item['source_rect']
+                        spanning_text_item['source_rect'] = (
+                            x + delta_x,
+                            y + delta_y,
+                            width,
+                            height,
+                        )
+                    if spanning_text_item.get('block_anchor') is not None:
+                        x, y, width, height = spanning_text_item['block_anchor']
+                        spanning_text_item['block_anchor'] = (
+                            x + delta_x,
+                            y + delta_y,
+                            width,
+                            height,
+                        )
                     existing_text_items.append(spanning_text_item)
 
         viewer_state['text_items_state'] = existing_text_items

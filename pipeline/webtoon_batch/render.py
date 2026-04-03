@@ -13,8 +13,12 @@ from app.ui.canvas.save_renderer import ImageSaveRenderer
 from app.ui.canvas.text.text_item_properties import TextItemProperties
 from app.ui.canvas.text_item import OutlineInfo, OutlineType
 from modules.rendering.render import get_best_render_area, is_vertical_block, pyside_word_wrap
-from modules.utils.image_utils import get_smart_text_color
 from modules.utils.language_utils import get_language_code, is_no_space_lang
+from modules.utils.render_style_policy import (
+    VERTICAL_ALIGNMENT_TOP,
+    build_rect_tuple,
+    resolve_render_text_color,
+)
 from modules.utils.textblock import TextBlock
 from modules.utils.translator_utils import format_translations, get_raw_text, get_raw_translation
 
@@ -82,6 +86,10 @@ class RenderMixin:
         italic = render_settings.italic
         underline = render_settings.underline
         alignment = self.main_page.button_to_alignment[render_settings.alignment_id]
+        vertical_alignment = self.main_page.button_to_vertical_alignment.get(
+            render_settings.vertical_alignment_id,
+            VERTICAL_ALIGNMENT_TOP,
+        )
         direction = render_settings.direction
 
         target_lang = page_state["target_lang"]
@@ -140,7 +148,12 @@ class RenderMixin:
             if is_no_space_lang(target_lang_code):
                 wrapped_translation = wrapped_translation.replace(" ", "")
 
-            font_color = get_smart_text_color(block.font_color, base_font_color)
+            font_color = resolve_render_text_color(
+                block.font_color,
+                base_font_color,
+                render_settings.force_font_color,
+                render_settings.smart_global_apply_all,
+            )
             if should_emit_live:
                 render_block = block.deep_copy()
                 render_block.translation = wrapped_translation
@@ -155,6 +168,7 @@ class RenderMixin:
                     wrapped_translation, font_size, render_block, image_path
                 )
 
+            source_rect = build_rect_tuple(x1, y1, width, height)
             text_props = TextItemProperties(
                 text=wrapped_translation,
                 font_family=font,
@@ -175,6 +189,9 @@ class RenderMixin:
                 height=rendered_height,
                 direction=direction,
                 vertical=vertical,
+                vertical_alignment=vertical_alignment,
+                source_rect=source_rect,
+                block_anchor=source_rect,
                 selection_outlines=[
                     OutlineInfo(
                         0,

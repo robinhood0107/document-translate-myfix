@@ -19,10 +19,13 @@ from dataclasses import dataclass
 @dataclass
 class TextRenderingSettings:
     alignment_id: int
+    vertical_alignment_id: int
     font_family: str
     min_font_size: int
     max_font_size: int
     color: str
+    force_font_color: bool
+    smart_global_apply_all: bool
     upper_case: bool
     outline: bool
     outline_color: str

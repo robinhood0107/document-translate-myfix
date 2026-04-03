@@ -235,12 +235,16 @@ class ComicTranslate(ComicTranslateUI):
         self.alignment_tool_group.get_button_group().buttons()[0].clicked.connect(self.text_ctrl.left_align)
         self.alignment_tool_group.get_button_group().buttons()[1].clicked.connect(self.text_ctrl.center_align)
         self.alignment_tool_group.get_button_group().buttons()[2].clicked.connect(self.text_ctrl.right_align)
+        self.vertical_alignment_tool_group.sig_checked_changed.connect(self.text_ctrl.on_vertical_alignment_changed)
         self.bold_button.clicked.connect(self.text_ctrl.bold)
         self.italic_button.clicked.connect(self.text_ctrl.italic)
         self.underline_button.clicked.connect(self.text_ctrl.underline)
         self.outline_font_color_button.clicked.connect(self.text_ctrl.on_outline_color_change)
         self.outline_width_dropdown.currentTextChanged.connect(self.text_ctrl.on_outline_width_change)
         self.outline_checkbox.stateChanged.connect(self.text_ctrl.toggle_outline_settings)
+        self.outline_checkbox.stateChanged.connect(self.text_ctrl.sync_outline_mode_group)
+        self.outline_mode_group.sig_checked_changed.connect(self.text_ctrl.on_outline_mode_group_changed)
+        self.text_ctrl.sync_outline_mode_group(2 if self.outline_checkbox.isChecked() else 0)
 
         # Page List
         self.page_list.currentItemChanged.connect(self.image_ctrl.on_card_selected)

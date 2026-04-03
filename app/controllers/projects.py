@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING
 from dataclasses import asdict, is_dataclass
 
 from PySide6 import QtWidgets, QtCore
-from PySide6.QtCore import QSettings
+from PySide6.QtCore import QSettings, QPointF
 from PySide6.QtGui import QUndoStack
 
 from app.thread_worker import GenericWorker
@@ -589,6 +589,30 @@ class ProjectController:
                     text_props = TextItemProperties.from_text_item(text_item)
                     # Override position to use page-local coordinates
                     text_props.position = (page_local_x, page_local_y)
+                    if text_props.source_rect is not None:
+                        source_x, source_y, width, height = text_props.source_rect
+                        source_page_local = webtoon_manager.coordinate_converter.scene_to_page_local_position(
+                            QPointF(source_x, source_y),
+                            page_idx,
+                        )
+                        text_props.source_rect = (
+                            source_page_local.x(),
+                            source_page_local.y(),
+                            width,
+                            height,
+                        )
+                    if text_props.block_anchor is not None:
+                        anchor_x, anchor_y, width, height = text_props.block_anchor
+                        anchor_page_local = webtoon_manager.coordinate_converter.scene_to_page_local_position(
+                            QPointF(anchor_x, anchor_y),
+                            page_idx,
+                        )
+                        text_props.block_anchor = (
+                            anchor_page_local.x(),
+                            anchor_page_local.y(),
+                            width,
+                            height,
+                        )
                     
                     text_items_data.append(text_props.to_dict())
         
@@ -843,6 +867,8 @@ class ProjectController:
         settings.beginGroup('text_rendering')
         alignment = settings.value('alignment_id', 1, type=int) # Default value is 1 which is Center
         self.main.alignment_tool_group.set_dayu_checked(alignment)
+        vertical_alignment = settings.value('vertical_alignment_id', 0, type=int)
+        self.main.vertical_alignment_tool_group.set_dayu_checked(vertical_alignment)
 
         saved_font_family = settings.value('font_family', '')
         if saved_font_family:
@@ -857,8 +883,19 @@ class ProjectController:
         color = settings.value('color', '#000000')
         self.main.block_font_color_button.setStyleSheet(f"background-color: {color}; border: none; border-radius: 5px;")
         self.main.block_font_color_button.setProperty('selected_color', color)
+        self.main.force_font_color_checkbox.setChecked(
+            settings.value('force_font_color', False, type=bool)
+        )
+        self.main.smart_global_apply_all_checkbox.setChecked(
+            settings.value('smart_global_apply_all', False, type=bool)
+        )
         self.main.settings_page.ui.uppercase_checkbox.setChecked(settings.value('upper_case', False, type=bool))
         self.main.outline_checkbox.setChecked(settings.value('outline', True, type=bool))
+        self.main.outline_mode_group.set_dayu_checked(
+            1 if self.main.outline_checkbox.isChecked() else 0
+        )
+        self.main.outline_font_color_button.setEnabled(self.main.outline_checkbox.isChecked())
+        self.main.outline_width_dropdown.setEnabled(self.main.outline_checkbox.isChecked())
 
         self.main.line_spacing_dropdown.setCurrentText(settings.value('line_spacing', '1.0'))
         self.main.outline_width_dropdown.setCurrentText(settings.value('outline_width', '1.0'))
