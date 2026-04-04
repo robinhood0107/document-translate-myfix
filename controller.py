@@ -33,8 +33,6 @@ from app.controllers.task_runner import TaskRunnerController
 from app.controllers.batch_report import BatchReportController
 from app.controllers.manual_workflow import ManualWorkflowController
 from modules.utils.exceptions import (
-    ContentFlaggedException,
-    InsufficientCreditsException,
     LocalServiceError,
 )
 
@@ -438,18 +436,8 @@ class ComicTranslate(ComicTranslateUI):
 
     def default_error_handler(self, error_tuple: Tuple):
         exctype, value, traceback_str = error_tuple
-        
-        # Handle specific exceptions
-        if exctype is InsufficientCreditsException:
-            Messages.show_insufficient_credits_error(self, details=str(value))
-            
-        elif exctype is ContentFlaggedException:
-            err_msg = str(value)
-            reason = err_msg.split(": ")[-1] if ": " in err_msg else err_msg
-            context = getattr(value, 'context', 'Operation')
-            Messages.show_content_flagged_error(self, details=reason, context=context)
 
-        elif issubclass(exctype, LocalServiceError):
+        if issubclass(exctype, LocalServiceError):
             Messages.show_local_service_error(self, details=str(value))
 
         # Handle HTTP Errors (Server-side)

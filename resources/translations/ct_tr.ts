@@ -2,13 +2,6 @@
 <!DOCTYPE TS>
 <TS version="2.1" language="tr_TR">
 <context>
-    <name></name>
-    <message>
-        <source>Custom</source>
-        <translation type="vanished">Özel</translation>
-    </message>
-</context>
-<context>
     <name>AboutPage</name>
     <message>
         <source>App Information</source>
@@ -21,58 +14,6 @@
     <message>
         <source>Check for Updates</source>
         <translation>Güncellemeleri Kontrol Et</translation>
-    </message>
-</context>
-<context>
-    <name>AccountPage</name>
-    <message>
-        <source>Sign in to Comic Translate</source>
-        <translation type="vanished">Comic Translate&apos;a giriş yapın</translation>
-    </message>
-    <message>
-        <source>Sign in to use Comic Translate, see your credits balance, and purchase additional credits.</source>
-        <translation type="vanished">Comic Translate&apos;ı kullanmak, kredi bakiyenizi görmek ve ek kredi satın almak için giriş yapın.</translation>
-    </message>
-    <message>
-        <source>Sign in is Optional</source>
-        <translation>Özel</translation>
-    </message>
-    <message>
-        <source>Comic Translate can be used with local models or your own API keys.
-Sign in only if you want to use hosted credits and account features.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Sign In</source>
-        <translation>Giriş Yap</translation>
-    </message>
-    <message>
-        <source>See model credit costs</source>
-        <translation>Model kredi maliyetlerini gör</translation>
-    </message>
-    <message>
-        <source>Account Information</source>
-        <translation>Hesap Bilgileri</translation>
-    </message>
-    <message>
-        <source>Email:</source>
-        <translation>E-posta:</translation>
-    </message>
-    <message>
-        <source>Subscription Tier:</source>
-        <translation>Abonelik Seviyesi:</translation>
-    </message>
-    <message>
-        <source>Credits:</source>
-        <translation>Krediler:</translation>
-    </message>
-    <message>
-        <source>Buy Credits</source>
-        <translation>Kredi Satın Al</translation>
-    </message>
-    <message>
-        <source>Sign Out</source>
-        <translation>Çıkış Yap</translation>
     </message>
 </context>
 <context>
@@ -228,21 +169,18 @@ Sign in only if you want to use hosted credits and account features.</source>
         <translation>Anahtarları Kaydet</translation>
     </message>
     <message>
-        <source>These settings are for advanced users who wish to use their own Custom API endpoints (e.g. Local Language Models) for translation. For most users, no configuration is needed here.</source>
-        <translation type="vanished">Bu ayarlar, çeviri için kendi Özel API uç noktalarını (örneğin Yerel Dil Modelleri) kullanmak isteyen ileri düzey kullanıcılar içindir. Çoğu kullanıcı için burada yapılandırma gerekmez.</translation>
-    </message>
-    <message>
-        <source>Configure provider API keys or custom endpoints here.
-You do not need to sign in to use local models or your own provider credentials.</source>
-        <translation>Giriş Yap</translation>
-    </message>
-    <message>
         <source>OCR</source>
         <translation>OCR</translation>
     </message>
     <message>
         <source>API Key</source>
         <translation>API Anahtarı</translation>
+    </message>
+    <message>
+        <source>Configure provider API keys or custom endpoints here.
+Use Custom Service for authenticated OpenAI-compatible providers.
+Use Custom Local Server for OpenAI-compatible local or keyless endpoints.</source>
+        <translation type="unfinished"></translation>
     </message>
     <message>
         <source>Endpoint URL</source>
@@ -495,28 +433,12 @@ Go to Settings &gt; Text Rendering &gt; Font to select or import one </source>
 Bir yazı tipi seçmek veya içe aktarmak için Ayarlar &gt; Metin Renderlama &gt; Yazı Tipi bölümüne gidin </translation>
     </message>
     <message>
-        <source>Please sign in or sign up via Settings &gt; Account to continue.</source>
-        <translation type="vanished">Devam etmek için Ayarlar &gt; Hesap üzerinden giriş yapın veya kaydolun.</translation>
-    </message>
-    <message>
         <source>The translator does not support the selected target language. Please choose a different language or tool.</source>
         <translation>Çevirmen seçilen hedef dili desteklemiyor. Lütfen farklı bir dil veya araç seçin.</translation>
     </message>
     <message>
         <source>No {} selected. Please select a {} in Settings &gt; Tools.</source>
         <translation>Hiçbir {} seçilmedi. Lütfen Ayarlar &gt; Araçlar bölümünden bir {} seçin.</translation>
-    </message>
-    <message>
-        <source>Insufficient credits to perform this action.
-Go to Settings &gt; Account to buy more credits.</source>
-        <translation>Bu işlemi gerçekleştirmek için yetersiz kredi.
-Daha fazla kredi satın almak için Ayarlar &gt; Hesap bölümüne gidin.</translation>
-    </message>
-    <message>
-        <source>Custom requires advanced API configuration. Most users should use the Credits system instead.
-Please sign in via Settings &gt; Account to use credits, or configure Custom API settings in Settings &gt; Advanced.</source>
-        <translation type="vanished">Özel seçeneği gelişmiş API yapılandırması gerektirir. Çoğu kullanıcı bunun yerine Kredi sistemini kullanmalıdır.
-Kredi kullanmak için Ayarlar &gt; Hesap üzerinden giriş yapın veya Ayarlar &gt; Gelişmiş bölümünden Özel API ayarlarını yapılandırın.</translation>
     </message>
     <message>
         <source>Copy</source>
@@ -598,11 +520,6 @@ Lütfen farklı bir araç deneyin.</translation>
         <translation>Tamam</translation>
     </message>
     <message>
-        <source>Sign-in is only required for hosted credits.
-Configure local or provider API credentials in Settings &gt; Credentials to continue.</source>
-        <translation>İptal ediliyor... %p%</translation>
-    </message>
-    <message>
         <source>Required fields: {fields}</source>
         <translation type="unfinished"></translation>
     </message>
@@ -631,13 +548,14 @@ Configure them in Settings &gt; {settings_page}.
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>Insufficient Credits</source>
-        <translation>Yetersiz Kredi</translation>
+        <source>Custom Service requires an OpenAI-compatible API configuration.
+Please set API Key, Endpoint URL, and Model in Settings &gt; Credentials.</source>
+        <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>Custom requires an OpenAI-compatible API configuration.
-Please set API Key, Endpoint URL, and Model in Settings &gt; Credentials.</source>
-        <translation>Yetersiz Kredi</translation>
+        <source>Custom Local Server requires an OpenAI-compatible endpoint.
+Please set Endpoint URL and Model in Settings &gt; Credentials.</source>
+        <translation type="unfinished"></translation>
     </message>
     <message>
         <source>Close</source>
@@ -735,10 +653,6 @@ Lütfen internet bağlantınızı kontrol edin.</translation>
     <message>
         <source>PDF</source>
         <translation>PDF</translation>
-    </message>
-    <message>
-        <source>PSD</source>
-        <translation type="vanished">PSD</translation>
     </message>
     <message>
         <source>Home</source>
@@ -1060,30 +974,6 @@ Bu klasör Otomatik Kurtarma anlık görüntülerinden ayrıdır.</translation>
         <translation>Yeniden Başlatma Gerekli</translation>
     </message>
     <message>
-        <source>Failed to initiate sign-in process.</source>
-        <translation>Giriş işlemi başlatılamadı.</translation>
-    </message>
-    <message>
-        <source>Sign In</source>
-        <translation>Giriş Yap</translation>
-    </message>
-    <message>
-        <source>Sign In Required</source>
-        <translation>Giriş Gerekli</translation>
-    </message>
-    <message>
-        <source>Please sign in to purchase or manage credits.</source>
-        <translation>Kredi satın almak veya yönetmek için lütfen giriş yapın.</translation>
-    </message>
-    <message>
-        <source>Unable to Open Browser</source>
-        <translation>Tarayıcı Açılamıyor</translation>
-    </message>
-    <message>
-        <source>Please open the pricing page in your browser: {url}</source>
-        <translation>Lütfen fiyatlandırma sayfasını tarayıcınızda açın: {url}</translation>
-    </message>
-    <message>
         <source>The application needs to restart for the language changes to take effect.
 Restart now?</source>
         <translation>Dil değişikliklerinin etkili olması için uygulamanın yeniden başlatılması gerekiyor.
@@ -1092,58 +982,6 @@ Restart now?</source>
     <message>
         <source>Cancel</source>
         <translation>İptal</translation>
-    </message>
-    <message>
-        <source>Sign In Error</source>
-        <translation>Giriş Hatası</translation>
-    </message>
-    <message>
-        <source>Authentication failed: {error}</source>
-        <translation>Kimlik doğrulama başarısız: {error}</translation>
-    </message>
-    <message>
-        <source>Confirm Sign Out</source>
-        <translation>Çıkışı Onayla</translation>
-    </message>
-    <message>
-        <source>Are you sure you want to sign out?</source>
-        <translation>Çıkış yapmak istediğinizden emin misiniz?</translation>
-    </message>
-    <message>
-        <source>Signing Out...</source>
-        <translation>Çıkış Yapılıyor...</translation>
-    </message>
-    <message>
-        <source>Sign Out</source>
-        <translation>Çıkış Yap</translation>
-    </message>
-    <message>
-        <source>Session Expired</source>
-        <translation>Oturum Süresi Doldu</translation>
-    </message>
-    <message>
-        <source>Your session has expired. Please sign in again.</source>
-        <translation>Oturumunuzun süresi doldu. Lütfen tekrar giriş yapın.</translation>
-    </message>
-    <message>
-        <source>N/A</source>
-        <translation>Yok</translation>
-    </message>
-    <message>
-        <source>Free</source>
-        <translation>Ücretsiz</translation>
-    </message>
-    <message>
-        <source>Subscription</source>
-        <translation>Abonelik</translation>
-    </message>
-    <message>
-        <source>One-time</source>
-        <translation>Tek seferlik</translation>
-    </message>
-    <message>
-        <source>Total</source>
-        <translation>Toplam</translation>
     </message>
     <message>
         <source>Checking...</source>
@@ -1253,10 +1091,6 @@ Restart now?</source>
         <translation>Sağ</translation>
     </message>
     <message>
-        <source>Custom</source>
-        <translation>Özel</translation>
-    </message>
-    <message>
         <source>Gemini-3.0-Flash</source>
         <translation>Gemini-3.0-Flash</translation>
     </message>
@@ -1313,6 +1147,14 @@ Restart now?</source>
         <translation>Gemini-2.5-Pro</translation>
     </message>
     <message>
+        <source>Custom Service</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Custom Local Server</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
         <source>Microsoft Translator</source>
         <translation>Microsoft Translator</translation>
     </message>
@@ -1343,10 +1185,6 @@ Restart now?</source>
     <message>
         <source>Export</source>
         <translation>Dışa Aktar</translation>
-    </message>
-    <message>
-        <source>Account</source>
-        <translation>Hesap</translation>
     </message>
     <message>
         <source>Advanced</source>
@@ -1713,44 +1551,8 @@ sonra yeniden boyutlandırılmış görselde boyama işlemi yapın.</translation
         <translation>Yeni render öğeleri ve “Tümünü Çevir” çıktısında kullanılan kontur kalınlığı.</translation>
     </message>
     <message>
-        <source>Font</source>
-        <translation type="vanished">Yazı Tipi</translation>
-    </message>
-    <message>
-        <source>Font Size</source>
-        <translation type="vanished">Yazı Tipi Boyutu</translation>
-    </message>
-    <message>
-        <source>Line Spacing</source>
-        <translation type="vanished">Satır Aralığı</translation>
-    </message>
-    <message>
-        <source>Font Color</source>
-        <translation type="vanished">Yazı Tipi Rengi</translation>
-    </message>
-    <message>
-        <source>Bold</source>
-        <translation type="vanished">Kalın</translation>
-    </message>
-    <message>
-        <source>Italic</source>
-        <translation type="vanished">İtalik</translation>
-    </message>
-    <message>
-        <source>Underline</source>
-        <translation type="vanished">Altı Çizili</translation>
-    </message>
-    <message>
         <source>Outline</source>
         <translation>Dış Çizgi</translation>
-    </message>
-    <message>
-        <source>Outline Color</source>
-        <translation type="vanished">Dış Çizgi Rengi</translation>
-    </message>
-    <message>
-        <source>Outline Width</source>
-        <translation type="vanished">Dış Çizgi Kalınlığı</translation>
     </message>
     <message>
         <source>Pan Image</source>
@@ -1840,154 +1642,6 @@ back on the Image (for further editing)</source>
 <context>
     <name>self.main</name>
     <message>
-        <source>The AI provider flagged this content</source>
-        <translation type="vanished">Yapay zeka sağlayıcısı bu içeriği işaretledi</translation>
-    </message>
-    <message>
-        <source>Insufficient credits</source>
-        <translation type="vanished">Yetersiz kredi</translation>
-    </message>
-    <message>
-        <source>Request timed out</source>
-        <translation type="vanished">İstek zaman aşımına uğradı</translation>
-    </message>
-    <message>
-        <source>Rate limited by provider</source>
-        <translation type="vanished">Sağlayıcı tarafından hız sınırı uygulandı</translation>
-    </message>
-    <message>
-        <source>Authentication failed</source>
-        <translation type="vanished">Kimlik doğrulama başarısız</translation>
-    </message>
-    <message>
-        <source>Network or connection error</source>
-        <translation type="vanished">Ağ veya bağlantı hatası</translation>
-    </message>
-    <message>
-        <source>Provider unavailable</source>
-        <translation type="vanished">Sağlayıcı kullanılamıyor</translation>
-    </message>
-    <message>
-        <source>Invalid translation response</source>
-        <translation type="vanished">Geçersiz çeviri yanıtı</translation>
-    </message>
-    <message>
-        <source>Unexpected tool error</source>
-        <translation type="vanished">Beklenmeyen araç hatası</translation>
-    </message>
-    <message>
-        <source>Try another text recognition tool</source>
-        <translation type="vanished">Farklı bir metin tanıma aracı deneyin</translation>
-    </message>
-    <message>
-        <source>Try another translator</source>
-        <translation type="vanished">Farklı bir çevirmen deneyin</translation>
-    </message>
-    <message>
-        <source>Try another tool</source>
-        <translation type="vanished">Farklı bir araç deneyin</translation>
-    </message>
-    <message>
-        <source>Buy more credits</source>
-        <translation type="vanished">Daha fazla kredi satın alın</translation>
-    </message>
-    <message>
-        <source>Try again</source>
-        <translation type="vanished">Tekrar dene</translation>
-    </message>
-    <message>
-        <source>Wait and try again</source>
-        <translation type="vanished">Bekleyip tekrar deneyin</translation>
-    </message>
-    <message>
-        <source>Check API settings</source>
-        <translation type="vanished">API ayarlarını kontrol edin</translation>
-    </message>
-    <message>
-        <source>Check your connection</source>
-        <translation type="vanished">Bağlantınızı kontrol edin</translation>
-    </message>
-    <message>
-        <source>Try again later</source>
-        <translation type="vanished">Daha sonra tekrar deneyin</translation>
-    </message>
-    <message>
-        <source>No text blocks detected</source>
-        <translation type="vanished">Metin bloğu tespit edilmedi</translation>
-    </message>
-    <message>
-        <source>Text recognition failed</source>
-        <translation type="vanished">Metin tanıma başarısız</translation>
-    </message>
-    <message>
-        <source>Translation failed</source>
-        <translation type="vanished">Çeviri başarısız</translation>
-    </message>
-    <message>
-        <source>Webtoon text recognition chunk failed</source>
-        <translation type="vanished">Webtoon metin tanıma parçası başarısız</translation>
-    </message>
-    <message>
-        <source>Webtoon translation chunk failed</source>
-        <translation type="vanished">Webtoon çeviri parçası başarısız</translation>
-    </message>
-    <message>
-        <source>Page processing failed</source>
-        <translation type="vanished">Sayfa işleme başarısız</translation>
-    </message>
-    <message>
-        <source>This image is not in the current project.</source>
-        <translation type="vanished">Bu görsel mevcut projede yer almıyor.</translation>
-    </message>
-    <message>
-        <source>Cancelled</source>
-        <translation type="vanished">İptal Edildi</translation>
-    </message>
-    <message>
-        <source>Completed</source>
-        <translation type="vanished">Tamamlandı</translation>
-    </message>
-    <message>
-        <source>{0}  |  Updated {1}</source>
-        <translation type="vanished">{0}  |  Güncellendi {1}</translation>
-    </message>
-    <message>
-        <source>Total</source>
-        <translation type="vanished">Toplam</translation>
-    </message>
-    <message>
-        <source>Skipped</source>
-        <translation type="vanished">Atlandı</translation>
-    </message>
-    <message>
-        <source>Skipped Images ({0})</source>
-        <translation type="vanished">Atlanan Görseller ({0})</translation>
-    </message>
-    <message>
-        <source>Double-click a row to open that page.</source>
-        <translation type="vanished">O sayfayı açmak için bir satıra çift tıklayın.</translation>
-    </message>
-    <message>
-        <source>Image</source>
-        <translation type="vanished">Görsel</translation>
-    </message>
-    <message>
-        <source>Reason</source>
-        <translation type="vanished">Neden</translation>
-    </message>
-    <message>
-        <source>No skipped images in this batch.</source>
-        <translation type="vanished">Bu toplu işlemde atlanan görsel yok.</translation>
-    </message>
-    <message>
-        <source>No batch report is available yet.</source>
-        <translation type="vanished">Henüz toplu işlem raporu mevcut değil.</translation>
-    </message>
-    <message>
-        <source>Batch Report</source>
-        <translation type="vanished">Toplu İşlem Raporu</translation>
-    </message>
-    <message>
         <source>Project Recovery</source>
         <translation>Proje Kurtarma</translation>
     </message>
@@ -2066,8 +1720,12 @@ Taşınmış, yeniden adlandırılmış veya silinmiş olabilir.
         <translation>Varsayılan</translation>
     </message>
     <message>
-        <source>Custom</source>
-        <translation>Özel</translation>
+        <source>Custom Service</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Custom Local Server</source>
+        <translation type="unfinished"></translation>
     </message>
     <message>
         <source>Deepseek-v3</source>
