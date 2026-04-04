@@ -8,7 +8,6 @@ import traceback
 import imkit as imk
 import time
 from typing import TYPE_CHECKING
-from datetime import datetime
 from typing import List
 from PySide6.QtCore import QCoreApplication
 from PySide6.QtGui import QColor
@@ -22,6 +21,11 @@ from modules.utils.inpaint_cleanup import refine_bubble_residue_inpaint
 from modules.utils.language_utils import get_language_code, is_no_space_lang
 from modules.utils.ocr_quality import summarize_ocr_quality
 from modules.utils.ocr_debug import export_ocr_debug_artifacts
+from modules.utils.export_paths import (
+    build_export_timestamp,
+    export_run_root,
+    reserve_export_run_token,
+)
 from modules.utils.render_style_policy import (
     VERTICAL_ALIGNMENT_TOP,
     build_rect_tuple,
@@ -97,15 +101,15 @@ class BatchProcessor:
     def _current_run_type(self) -> str:
         return str(getattr(self.main_page, "_current_batch_run_type", "batch") or "batch")
 
-    def _should_force_json_exports(self) -> bool:
-        return self._current_run_type() == "one_page_auto"
-
     def _effective_export_settings(self, settings_page) -> dict:
-        export_settings = dict(settings_page.get_export_settings())
-        if self._should_force_json_exports():
-            export_settings["export_raw_text"] = True
-            export_settings["export_translated_text"] = True
-        return export_settings
+        return dict(settings_page.get_export_settings())
+
+    def _resolve_export_token(self, directory: str, base_timestamp: str) -> str:
+        cache = getattr(self, "_export_run_tokens", None)
+        if cache is None:
+            cache = {}
+            self._export_run_tokens = cache
+        return reserve_export_run_token(directory, base_timestamp, cache)
 
     def _write_json_exports(
         self,
@@ -315,7 +319,8 @@ class BatchProcessor:
         )
 
     def batch_process(self, selected_paths: List[str] = None):
-        timestamp = datetime.now().strftime("%b-%d-%Y_%I-%M-%S%p")
+        timestamp = build_export_timestamp()
+        self._export_run_tokens = {}
         image_list = selected_paths if selected_paths is not None else self.main_page.image_files
         total_images = len(image_list)
         try:
@@ -360,6 +365,20 @@ class BatchProcessor:
                         directory = os.path.dirname(archive_path)
                         archive_bname = os.path.splitext(os.path.basename(archive_path))[0].strip()
 
+            export_token = self._resolve_export_token(directory, timestamp)
+            export_root = export_run_root(directory, export_token)
+            self.main_page.image_ctrl.update_processing_summary(
+                image_path,
+                {
+                    "export_root": export_root,
+                    "export_settings": {
+                        "export_raw_text": bool(export_settings.get("export_raw_text", False)),
+                        "export_translated_text": bool(export_settings.get("export_translated_text", False)),
+                        "export_inpainted_image": bool(export_settings.get("export_inpainted_image", False)),
+                    },
+                },
+            )
+
             image = self.main_page.image_ctrl.load_image(image_path)
             if image is None:
                 ensure_path_materialized(image_path)
@@ -367,8 +386,8 @@ class BatchProcessor:
 
             # skip UI-skipped images
             if page_state.get('skip', False):
-                self.skip_save(directory, timestamp, base_name, extension, archive_bname, image)
-                self.log_skipped_image(directory, timestamp, image_path, "User-skipped")
+                self.skip_save(directory, export_token, base_name, extension, archive_bname, image)
+                self.log_skipped_image(directory, export_token, image_path, "User-skipped")
                 continue
 
             # Text Block Detection
@@ -507,21 +526,9 @@ class BatchProcessor:
                     )
                     reason = f"OCR: {err_msg}"
                     full_traceback = traceback.format_exc()
-                    if self._should_force_json_exports():
-                        self._write_json_exports(
-                            directory,
-                            timestamp,
-                            archive_bname,
-                            image_path,
-                            image,
-                            blk_list,
-                            page_state,
-                            source_lang,
-                            export_settings,
-                        )
-                    self.skip_save(directory, timestamp, base_name, extension, archive_bname, image)
+                    self.skip_save(directory, export_token, base_name, extension, archive_bname, image)
                     self.main_page.image_skipped.emit(image_path, "OCR", err_msg)
-                    self.log_skipped_image(directory, timestamp, image_path, reason, full_traceback)
+                    self.log_skipped_image(directory, export_token, image_path, reason, full_traceback)
                     continue
             else:
                 page_state = self._ensure_page_state(image_path)
@@ -533,21 +540,9 @@ class BatchProcessor:
                     "failed",
                     reason="No text blocks detected.",
                 )
-                if self._should_force_json_exports():
-                    self._write_json_exports(
-                        directory,
-                        timestamp,
-                        archive_bname,
-                        image_path,
-                        image,
-                        [],
-                        page_state,
-                        source_lang,
-                        export_settings,
-                    )
-                self.skip_save(directory, timestamp, base_name, extension, archive_bname, image)
+                self.skip_save(directory, export_token, base_name, extension, archive_bname, image)
                 self.main_page.image_skipped.emit(image_path, "Text Blocks", "")
-                self.log_skipped_image(directory, timestamp, image_path, "No text blocks detected")
+                self.log_skipped_image(directory, export_token, image_path, "No text blocks detected")
                 continue
 
             self.emit_progress(index, total_images, 3, 10, False)
@@ -606,7 +601,7 @@ class BatchProcessor:
             # inpaint_input_img is already in RGB format
 
             if export_settings['export_inpainted_image']:
-                path = os.path.join(directory, f"comic_translate_{timestamp}", "cleaned_images", archive_bname)
+                path = os.path.join(directory, f"comic_translate_{export_token}", "cleaned_images", archive_bname)
                 if not os.path.exists(path):
                     os.makedirs(path, exist_ok=True)
                 imk.write_image(os.path.join(path, f"{base_name}_cleaned{extension}"), inpaint_input_img)
@@ -682,21 +677,9 @@ class BatchProcessor:
                 )
                 reason = f"Translator: {err_msg}"
                 full_traceback = traceback.format_exc()
-                if self._should_force_json_exports():
-                    self._write_json_exports(
-                        directory,
-                        timestamp,
-                        archive_bname,
-                        image_path,
-                        image,
-                        blk_list,
-                        page_state,
-                        source_lang,
-                        export_settings,
-                    )
-                self.skip_save(directory, timestamp, base_name, extension, archive_bname, image)
+                self.skip_save(directory, export_token, base_name, extension, archive_bname, image)
                 self.main_page.image_skipped.emit(image_path, "Translator", err_msg)
-                self.log_skipped_image(directory, timestamp, image_path, reason, full_traceback)
+                self.log_skipped_image(directory, export_token, image_path, reason, full_traceback)
                 continue
 
             if self._is_cancelled():
@@ -717,21 +700,9 @@ class BatchProcessor:
                         "failed",
                         reason="Translator returned empty JSON.",
                     )
-                    if self._should_force_json_exports():
-                        self._write_json_exports(
-                            directory,
-                            timestamp,
-                            archive_bname,
-                            image_path,
-                            image,
-                            blk_list,
-                            page_state,
-                            source_lang,
-                            export_settings,
-                        )
-                    self.skip_save(directory, timestamp, base_name, extension, archive_bname, image)
+                    self.skip_save(directory, export_token, base_name, extension, archive_bname, image)
                     self.main_page.image_skipped.emit(image_path, "Translator", "")
-                    self.log_skipped_image(directory, timestamp, image_path, "Translator: empty JSON")
+                    self.log_skipped_image(directory, export_token, image_path, "Translator: empty JSON")
                     continue
             except json.JSONDecodeError as e:
                 # Handle invalid JSON
@@ -745,26 +716,14 @@ class BatchProcessor:
                     reason=error_message,
                 )
                 full_traceback = traceback.format_exc()
-                if self._should_force_json_exports():
-                    self._write_json_exports(
-                        directory,
-                        timestamp,
-                        archive_bname,
-                        image_path,
-                        image,
-                        blk_list,
-                        page_state,
-                        source_lang,
-                        export_settings,
-                    )
-                self.skip_save(directory, timestamp, base_name, extension, archive_bname, image)
+                self.skip_save(directory, export_token, base_name, extension, archive_bname, image)
                 self.main_page.image_skipped.emit(image_path, "Translator", error_message)
-                self.log_skipped_image(directory, timestamp, image_path, reason, full_traceback)
+                self.log_skipped_image(directory, export_token, image_path, reason, full_traceback)
                 continue
 
             self._write_json_exports(
                 directory,
-                timestamp,
+                export_token,
                 archive_bname,
                 image_path,
                 image,
@@ -921,7 +880,7 @@ class BatchProcessor:
 
             final_output_path = self._write_final_render_export(
                 directory,
-                timestamp,
+                export_token,
                 archive_bname,
                 image_path,
                 image,
@@ -929,5 +888,12 @@ class BatchProcessor:
                 page_state.get("viewer_state", {}),
             )
             logger.info("Saved final translated image to %s", final_output_path)
+            self.main_page.image_ctrl.update_processing_summary(
+                image_path,
+                {
+                    "translated_image_path": final_output_path,
+                    "export_root": export_root,
+                },
+            )
 
             self.emit_progress(index, total_images, 10, 10, False)

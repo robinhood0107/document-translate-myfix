@@ -120,6 +120,14 @@ class SettingsPage(QtWidgets.QWidget):
         self.ui.buy_credits_button.clicked.connect(self.open_pricing_page)
         self.ui.sign_out_button.clicked.connect(self.sign_out)
         self.ui.check_update_button.clicked.connect(self.check_for_updates)
+        self.ui.raw_text_checkbox.stateChanged.connect(self._save_settings_if_not_loading)
+        self.ui.translated_text_checkbox.stateChanged.connect(self._save_settings_if_not_loading)
+        self.ui.inpainted_image_checkbox.stateChanged.connect(self._save_settings_if_not_loading)
+
+    def _save_settings_if_not_loading(self, *_args):
+        if self._loading_settings:
+            return
+        self.save_settings()
 
     def on_theme_changed(self, theme: str):
         self.theme_changed.emit(theme)

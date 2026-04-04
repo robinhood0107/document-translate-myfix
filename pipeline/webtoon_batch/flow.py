@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import logging
-from datetime import datetime
 from types import SimpleNamespace
 from typing import TYPE_CHECKING, Dict, List, Optional, Tuple
 
@@ -9,6 +8,7 @@ import numpy as np
 from PIL import Image
 
 from app.path_materialization import ensure_path_materialized
+from modules.utils.export_paths import build_export_timestamp
 from modules.utils.textblock import sort_blk_list
 from ..virtual_page import VirtualPage
 
@@ -371,7 +371,8 @@ class FlowMixin:
         self: WebtoonBatchProcessor, selected_paths: List[str] = None
     ):
         try:
-            timestamp = datetime.now().strftime("%b-%d-%Y_%I-%M-%S%p")
+            timestamp = build_export_timestamp()
+            self._export_run_tokens = {}
             image_list = selected_paths if selected_paths is not None else self.main_page.image_files
             total_images = len(image_list)
             if total_images < 1:
