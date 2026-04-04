@@ -106,7 +106,8 @@ class Messages:
             text=QCoreApplication.translate(
                 "Messages",
                 "Custom requires an OpenAI-compatible API configuration.\n"
-                "Please set API Key, Endpoint URL, and Model in Settings > Credentials."
+                "Please set Endpoint URL and Model in Settings > Credentials.\n"
+                "API Key is optional unless your endpoint requires it."
             ),
             parent=parent,
             duration=None,
@@ -281,4 +282,3 @@ class Messages:
             duration=None,
             closable=True
         )
-

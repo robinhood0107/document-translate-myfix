@@ -170,7 +170,8 @@
     </message>
     <message>
         <source>Configure provider API keys or custom endpoints here.
-Use this page for your own API credentials and local OpenAI-compatible endpoints.</source>
+Use this page for your own API credentials and local OpenAI-compatible endpoints.
+For Custom endpoints, API Key is optional unless your server requires it.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
@@ -192,6 +193,10 @@ Use this page for your own API credentials and local OpenAI-compatible endpoints
     <message>
         <source>Region</source>
         <translation>OCR</translation>
+    </message>
+    <message>
+        <source>API Key (Optional)</source>
+        <translation type="unfinished"></translation>
     </message>
     <message>
         <source>Model</source>
@@ -440,6 +445,12 @@ Vai a Impostazioni &gt; Rendering testo &gt; Carattere per selezionarne o import
         <translation>Nessun {} selezionato. Seleziona un {} in Impostazioni &gt; Strumenti.</translation>
     </message>
     <message>
+        <source>Custom requires an OpenAI-compatible API configuration.
+Please set Endpoint URL and Model in Settings &gt; Credentials.
+API Key is optional unless your endpoint requires it.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
         <source>Copy</source>
         <translation>Copia</translation>
     </message>
@@ -545,11 +556,6 @@ Configure them in Settings &gt; {settings_page}.
     <message>
         <source>PaddleOCR VL Settings</source>
         <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Custom requires an OpenAI-compatible API configuration.
-Please set API Key, Endpoint URL, and Model in Settings &gt; Credentials.</source>
-        <translation>Crediti insufficienti</translation>
     </message>
     <message>
         <source>Close</source>

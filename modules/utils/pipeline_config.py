@@ -38,7 +38,7 @@ OCR_REQUIREMENTS = {
 }
 
 TRANSLATOR_REQUIREMENTS = {
-    "Custom": ("Custom", ("api_key", "api_url", "model")),
+    "Custom": ("Custom", ("api_url", "model")),
     "GPT-4.1": ("Open AI GPT", ("api_key",)),
     "GPT-4.1-mini": ("Open AI GPT", ("api_key",)),
     "Claude-4.5-Sonnet": ("Anthropic Claude", ("api_key",)),
