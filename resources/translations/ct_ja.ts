@@ -729,9 +729,9 @@ Please select a different tool in Settings.</source>
     </message>
     <message>
         <location filename="../../app/ui/messages.py" line="218"/>
-        <location filename="../../pipeline/batch_processor.py" line="455"/>
-        <location filename="../../pipeline/batch_processor.py" line="617"/>
-        <location filename="../../pipeline/webtoon_batch/chunk.py" line="90"/>
+        <location filename="../../pipeline/batch_processor.py" line="456"/>
+        <location filename="../../pipeline/batch_processor.py" line="631"/>
+        <location filename="../../pipeline/webtoon_batch/chunk.py" line="91"/>
         <source>Unable to connect to the server.
 Please check your internet connection.</source>
         <translation>サーバーに接続できません。
@@ -2406,7 +2406,7 @@ It may have been moved, renamed, or deleted.
 <context>
     <name>self.main_page</name>
     <message>
-        <location filename="../../pipeline/batch_processor.py" line="416"/>
+        <location filename="../../pipeline/batch_processor.py" line="417"/>
         <source>OCR quality too low after retry.</source>
         <translation type="unfinished"></translation>
     </message>
