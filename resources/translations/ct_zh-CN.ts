@@ -780,7 +780,8 @@ Please check your internet connection.</source>
     </message>
     <message>
         <source>Connect Comic Translate to your local PaddleOCR VL Docker service.
-These settings control the /layout-parsing OCR requests.</source>
+This OCR engine sends cropped text regions to the /layout-parsing endpoint.
+Leave markdown or visualization options disabled unless you need debugging.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
@@ -804,7 +805,16 @@ These settings control the /layout-parsing OCR requests.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>For your RTX 4070 SUPER, 256 tokens and 2 parallel workers are the recommended fastest defaults.</source>
+        <source>Estimated VRAM usage depends on page size, image resolution, and the Docker service build.
+Recommended starting points:
+- Up to 8 GB VRAM: 128 to 256 tokens, 1 worker
+- 10 to 12 GB VRAM: 256 tokens, 2 workers
+- 16 GB VRAM: 256 to 512 tokens, 2 to 3 workers
+- 24 GB or more: 512 tokens, 3 to 4 workers for dense pages
+Approximate GPU usage:
+- 256 tokens / 2 workers: about 5 to 7 GB
+- 512 tokens / 2 workers: about 7 to 10 GB
+- 1024 tokens / 2 workers: about 10 GB or more</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
