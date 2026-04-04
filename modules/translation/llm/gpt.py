@@ -1,10 +1,13 @@
 from typing import Any
+import logging
 import numpy as np
 import requests
 import json
 
 from .base import BaseLLMTranslation
 from ...utils.translator_utils import MODEL_MAP
+
+logger = logging.getLogger(__name__)
 
 
 class GPTTranslation(BaseLLMTranslation):
@@ -48,8 +51,9 @@ class GPTTranslation(BaseLLMTranslation):
         """
         headers = {
             "Content-Type": "application/json",
-            "Authorization": f"Bearer {self.api_key}"
         }
+        if self.api_key:
+            headers["Authorization"] = f"Bearer {self.api_key}"
         
         if self.supports_images and self.img_as_llm_input:
             # Use the base class method to encode the image
@@ -104,6 +108,12 @@ class GPTTranslation(BaseLLMTranslation):
             
             response.raise_for_status()
             response_data = response.json()
+            if self.debug_log_response_json:
+                logger.info(
+                    "translation raw response json (%s): %s",
+                    self.translation_mode_label,
+                    json.dumps(response_data, ensure_ascii=False),
+                )
             
             return response_data["choices"][0]["message"]["content"]
         except requests.exceptions.RequestException as e:

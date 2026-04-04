@@ -2,11 +2,14 @@ from typing import Any
 import numpy as np
 from abc import abstractmethod
 import base64
+import logging
 import imkit as imk
 
 from ..base import LLMTranslation
 from ...utils.textblock import TextBlock
 from ...utils.translator_utils import get_raw_text, set_texts_from_json
+
+logger = logging.getLogger(__name__)
 
 
 class BaseLLMTranslation(LLMTranslation):
@@ -23,6 +26,9 @@ class BaseLLMTranslation(LLMTranslation):
         self.top_p = None
         self.max_tokens = None
         self.timeout = 30  
+        self.debug_log_raw_response = False
+        self.debug_log_response_json = False
+        self.translation_mode_label = self.__class__.__name__
     
     def initialize(self, settings: Any, source_lang: str, target_lang: str, **kwargs) -> None:
         """
@@ -61,7 +67,27 @@ class BaseLLMTranslation(LLMTranslation):
         user_prompt = f"{extra_context}\nMake the translation sound as natural as possible.\nTranslate this:\n{entire_raw_text}"
         
         entire_translated_text = self._perform_translation(user_prompt, system_prompt, image)
-        set_texts_from_json(blk_list, entire_translated_text)
+        if self.debug_log_raw_response:
+            logger.info(
+                "translation raw content (%s): %s",
+                self.translation_mode_label,
+                entire_translated_text,
+            )
+        try:
+            updated_count = set_texts_from_json(blk_list, entire_translated_text)
+        except Exception:
+            logger.exception(
+                "translation response parse failed (%s). raw_content=%s",
+                self.translation_mode_label,
+                entire_translated_text,
+            )
+            raise
+        logger.info(
+            "translation parsed successfully (%s): updated_blocks=%d total_blocks=%d",
+            self.translation_mode_label,
+            updated_count,
+            len(blk_list),
+        )
             
         return blk_list
     
