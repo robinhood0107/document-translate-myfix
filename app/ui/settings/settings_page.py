@@ -487,10 +487,10 @@ class SettingsPage(QtWidgets.QWidget):
             settings.value('visualize', False, type=bool)
         )
         self.ui.paddleocr_vl_max_new_tokens_spinbox.setValue(
-            settings.value('max_new_tokens', 1024, type=int)
+            settings.value('max_new_tokens', 256, type=int)
         )
         self.ui.paddleocr_vl_parallel_workers_spinbox.setValue(
-            settings.value('parallel_workers', 8, type=int)
+            settings.value('parallel_workers', 2, type=int)
         )
         settings.endGroup()
 
