@@ -169,18 +169,18 @@
         <translation>Guardar Claves</translation>
     </message>
     <message>
-        <source>Configure provider API keys or custom endpoints here.
-Use this page for your own API credentials and local OpenAI-compatible endpoints.
-For Custom endpoints, API Key is optional unless your server requires it.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
         <source>OCR</source>
         <translation>OCR</translation>
     </message>
     <message>
         <source>API Key</source>
         <translation>Clave API</translation>
+    </message>
+    <message>
+        <source>Configure provider API keys or custom endpoints here.
+Use Custom Service for authenticated OpenAI-compatible providers.
+Use Custom Local Server for OpenAI-compatible local or keyless endpoints.</source>
+        <translation type="unfinished"></translation>
     </message>
     <message>
         <source>Endpoint URL</source>
@@ -193,10 +193,6 @@ For Custom endpoints, API Key is optional unless your server requires it.</sourc
     <message>
         <source>Region</source>
         <translation>OCR</translation>
-    </message>
-    <message>
-        <source>API Key (Optional)</source>
-        <translation type="unfinished"></translation>
     </message>
     <message>
         <source>Model</source>
@@ -445,12 +441,6 @@ Vaya a Configuración &gt; Renderización de texto &gt; Fuente para seleccionar 
         <translation>No se ha seleccionado {}. Por favor, selecciona un {} en Configuración &gt; Herramientas.</translation>
     </message>
     <message>
-        <source>Custom requires an OpenAI-compatible API configuration.
-Please set Endpoint URL and Model in Settings &gt; Credentials.
-API Key is optional unless your endpoint requires it.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
         <source>Copy</source>
         <translation>Copiar</translation>
     </message>
@@ -555,6 +545,16 @@ Configure them in Settings &gt; {settings_page}.
     </message>
     <message>
         <source>PaddleOCR VL Settings</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Custom Service requires an OpenAI-compatible API configuration.
+Please set API Key, Endpoint URL, and Model in Settings &gt; Credentials.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Custom Local Server requires an OpenAI-compatible endpoint.
+Please set Endpoint URL and Model in Settings &gt; Credentials.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
@@ -1091,6 +1091,14 @@ Restart now?</source>
         <translation>Derecha</translation>
     </message>
     <message>
+        <source>Custom Service</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Custom Local Server</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
         <source>Gemini-3.0-Flash</source>
         <translation>Gemini-3.0-Flash</translation>
     </message>
@@ -1125,10 +1133,6 @@ Restart now?</source>
     <message>
         <source>About</source>
         <translation>Acerca de</translation>
-    </message>
-    <message>
-        <source>Custom</source>
-        <translation>Personalizado</translation>
     </message>
     <message>
         <source>Deepseek</source>
@@ -1717,8 +1721,12 @@ Es posible que se haya movido, cambiado de nombre o eliminado.
         <translation>Predeterminado</translation>
     </message>
     <message>
-        <source>Custom</source>
-        <translation>Personalizado</translation>
+        <source>Custom Service</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Custom Local Server</source>
+        <translation type="unfinished"></translation>
     </message>
     <message>
         <source>Deepseek-v3</source>

@@ -38,7 +38,8 @@ OCR_REQUIREMENTS = {
 }
 
 TRANSLATOR_REQUIREMENTS = {
-    "Custom": ("Custom", ("api_url", "model")),
+    "Custom Service": ("Custom Service", ("api_key", "api_url", "model")),
+    "Custom Local Server": ("Custom Local Server", ("api_url", "model")),
     "GPT-4.1": ("Open AI GPT", ("api_key",)),
     "GPT-4.1-mini": ("Open AI GPT", ("api_key",)),
     "Claude-4.5-Sonnet": ("Anthropic Claude", ("api_key",)),
@@ -127,8 +128,10 @@ def validate_translator(main: ComicTranslate, target_lang: str):
     creds = settings_page.get_credentials(provider_name)
     missing_fields = _missing_fields(creds, required_fields)
     if missing_fields:
-        if normalized_tool == "Custom":
-            Messages.show_custom_not_configured_error(main)
+        if normalized_tool == "Custom Service":
+            Messages.show_custom_service_not_configured_error(main)
+        elif normalized_tool == "Custom Local Server":
+            Messages.show_custom_local_server_not_configured_error(main)
         else:
             _show_missing_credentials(main, provider_name, missing_fields)
         return False
