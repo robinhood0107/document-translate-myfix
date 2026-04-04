@@ -585,7 +585,7 @@ You do not need to sign in to use local models or your own provider credentials.
         <translation>归档中：</translation>
     </message>
     <message>
-        <location filename="../../app/controllers/image.py" line="1199"/>
+        <location filename="../../app/controllers/image.py" line="1111"/>
         <source>Skipping:</source>
         <translation>跳过：</translation>
     </message>
@@ -756,8 +756,8 @@ Please set API Key, Endpoint URL, and Model in Settings &gt; Credentials.</sourc
     </message>
     <message>
         <location filename="../../app/ui/messages.py" line="218"/>
-        <location filename="../../pipeline/batch_processor.py" line="399"/>
-        <location filename="../../pipeline/batch_processor.py" line="538"/>
+        <location filename="../../pipeline/batch_processor.py" line="179"/>
+        <location filename="../../pipeline/batch_processor.py" line="287"/>
         <location filename="../../pipeline/webtoon_batch/chunk.py" line="90"/>
         <source>Unable to connect to the server.
 Please check your internet connection.</source>
@@ -2096,7 +2096,7 @@ then do inpainting on the resized image.</source>
         <translation>移除图片上的所有框</translation>
     </message>
     <message>
-        <location filename="../../app/ui/main_window/builders/workspace.py" line="514"/>
+        <location filename="../../app/ui/main_window/builders/workspace.py" line="515"/>
         <source>Draws all the Text Blocks in the existing Text Block List
 back on the Image (for further editing)</source>
         <translation>将现有文本块列表中的所有文本块重新绘制到图片上（以便进一步编辑）</translation>
@@ -2348,12 +2348,12 @@ Do you want to restore it?</source>
         <translation>丢弃</translation>
     </message>
     <message>
-        <location filename="../../app/controllers/projects.py" line="759"/>
+        <location filename="../../app/controllers/projects.py" line="757"/>
         <source>Project Not Found</source>
         <translation>未找到项目</translation>
     </message>
     <message>
-        <location filename="../../app/controllers/projects.py" line="760"/>
+        <location filename="../../app/controllers/projects.py" line="759"/>
         <source>The selected project file could not be found.
 It may have been moved, renamed, or deleted.
 
@@ -2364,49 +2364,41 @@ It may have been moved, renamed, or deleted.
 {小路}</translation>
     </message>
     <message>
-        <location filename="../../app/controllers/projects.py" line="839"/>
+        <location filename="../../app/controllers/projects.py" line="837"/>
         <source>Korean</source>
         <translation>韩语</translation>
     </message>
     <message>
-        <location filename="../../app/controllers/projects.py" line="840"/>
+        <location filename="../../app/controllers/projects.py" line="838"/>
         <source>English</source>
         <translation>英语</translation>
     </message>
 </context>
 <context>
-    <name>self.main_page</name>
-    <message>
-        <location filename="../../pipeline/batch_processor.py" line="360"/>
-        <source>OCR quality too low after retry.</source>
-        <translation type="unfinished"></translation>
-    </message>
-</context>
-<context>
     <name>self.settings.ui</name>
     <message>
-        <location filename="../../modules/ocr/processor.py" line="87"/>
+        <location filename="../../modules/ocr/processor.py" line="63"/>
         <location filename="../../modules/translation/processor.py" line="65"/>
         <source>GPT-4.1-mini</source>
         <translation>GPT-4.1-mini</translation>
     </message>
     <message>
-        <location filename="../../modules/ocr/processor.py" line="88"/>
+        <location filename="../../modules/ocr/processor.py" line="64"/>
         <source>Microsoft OCR</source>
         <translation>微软 OCR</translation>
     </message>
     <message>
-        <location filename="../../modules/ocr/processor.py" line="89"/>
+        <location filename="../../modules/ocr/processor.py" line="65"/>
         <source>Google Cloud Vision</source>
         <translation>谷歌云视觉</translation>
     </message>
     <message>
-        <location filename="../../modules/ocr/processor.py" line="90"/>
+        <location filename="../../modules/ocr/processor.py" line="66"/>
         <source>Gemini-2.0-Flash</source>
         <translation>Gemini-2.0-Flash</translation>
     </message>
     <message>
-        <location filename="../../modules/ocr/processor.py" line="91"/>
+        <location filename="../../modules/ocr/processor.py" line="67"/>
         <source>Default</source>
         <translation>默认</translation>
     </message>
@@ -2504,7 +2496,7 @@ It may have been moved, renamed, or deleted.
     </message>
     <message>
         <location filename="../../modules/ocr/gemini_ocr.py" line="31"/>
-        <location filename="../../modules/translation/llm/gemini.py" line="35"/>
+        <location filename="../../modules/translation/llm/gemini.py" line="31"/>
         <source>Google Gemini</source>
         <translation>谷歌 Gemini</translation>
     </message>

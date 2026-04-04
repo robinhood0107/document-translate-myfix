@@ -570,7 +570,7 @@ You do not need to sign in to use local models or your own provider credentials.
 <context>
     <name>Messages</name>
     <message>
-        <location filename="../../app/controllers/image.py" line="1199"/>
+        <location filename="../../app/controllers/image.py" line="1111"/>
         <source>Skipping:</source>
         <translation>Salto:</translation>
     </message>
@@ -757,8 +757,8 @@ Please set API Key, Endpoint URL, and Model in Settings &gt; Credentials.</sourc
     </message>
     <message>
         <location filename="../../app/ui/messages.py" line="218"/>
-        <location filename="../../pipeline/batch_processor.py" line="399"/>
-        <location filename="../../pipeline/batch_processor.py" line="538"/>
+        <location filename="../../pipeline/batch_processor.py" line="179"/>
+        <location filename="../../pipeline/batch_processor.py" line="287"/>
         <location filename="../../pipeline/webtoon_batch/chunk.py" line="90"/>
         <source>Unable to connect to the server.
 Please check your internet connection.</source>
@@ -2098,7 +2098,7 @@ quindi esegui l&apos;inpainting sull&apos;immagine ridimensionata.</translation>
         <translation>Rimuovi tutte le caselle sull&apos;immagine</translation>
     </message>
     <message>
-        <location filename="../../app/ui/main_window/builders/workspace.py" line="514"/>
+        <location filename="../../app/ui/main_window/builders/workspace.py" line="515"/>
         <source>Draws all the Text Blocks in the existing Text Block List
 back on the Image (for further editing)</source>
         <translation>Disegna tutti i blocchi di testo nella lista dei blocchi di testo esistenti
@@ -2351,12 +2351,12 @@ Vuoi ripristinarlo?</translation>
         <translation>Scarta</translation>
     </message>
     <message>
-        <location filename="../../app/controllers/projects.py" line="759"/>
+        <location filename="../../app/controllers/projects.py" line="757"/>
         <source>Project Not Found</source>
         <translation>Progetto non trovato</translation>
     </message>
     <message>
-        <location filename="../../app/controllers/projects.py" line="760"/>
+        <location filename="../../app/controllers/projects.py" line="759"/>
         <source>The selected project file could not be found.
 It may have been moved, renamed, or deleted.
 
@@ -2367,49 +2367,41 @@ Potrebbe essere stato spostato, rinominato o eliminato.
 {sentiero}</translation>
     </message>
     <message>
-        <location filename="../../app/controllers/projects.py" line="839"/>
+        <location filename="../../app/controllers/projects.py" line="837"/>
         <source>Korean</source>
         <translation>Coreano</translation>
     </message>
     <message>
-        <location filename="../../app/controllers/projects.py" line="840"/>
+        <location filename="../../app/controllers/projects.py" line="838"/>
         <source>English</source>
         <translation>Inglese</translation>
     </message>
 </context>
 <context>
-    <name>self.main_page</name>
-    <message>
-        <location filename="../../pipeline/batch_processor.py" line="360"/>
-        <source>OCR quality too low after retry.</source>
-        <translation type="unfinished"></translation>
-    </message>
-</context>
-<context>
     <name>self.settings.ui</name>
     <message>
-        <location filename="../../modules/ocr/processor.py" line="87"/>
+        <location filename="../../modules/ocr/processor.py" line="63"/>
         <location filename="../../modules/translation/processor.py" line="65"/>
         <source>GPT-4.1-mini</source>
         <translation>GPT-4.1-mini</translation>
     </message>
     <message>
-        <location filename="../../modules/ocr/processor.py" line="88"/>
+        <location filename="../../modules/ocr/processor.py" line="64"/>
         <source>Microsoft OCR</source>
         <translation>Microsoft OCR</translation>
     </message>
     <message>
-        <location filename="../../modules/ocr/processor.py" line="89"/>
+        <location filename="../../modules/ocr/processor.py" line="65"/>
         <source>Google Cloud Vision</source>
         <translation>Google Cloud Vision</translation>
     </message>
     <message>
-        <location filename="../../modules/ocr/processor.py" line="90"/>
+        <location filename="../../modules/ocr/processor.py" line="66"/>
         <source>Gemini-2.0-Flash</source>
         <translation>Gemini-2.0-Flash</translation>
     </message>
     <message>
-        <location filename="../../modules/ocr/processor.py" line="91"/>
+        <location filename="../../modules/ocr/processor.py" line="67"/>
         <source>Default</source>
         <translation>Predefinito</translation>
     </message>
@@ -2507,7 +2499,7 @@ Potrebbe essere stato spostato, rinominato o eliminato.
     </message>
     <message>
         <location filename="../../modules/ocr/gemini_ocr.py" line="31"/>
-        <location filename="../../modules/translation/llm/gemini.py" line="35"/>
+        <location filename="../../modules/translation/llm/gemini.py" line="31"/>
         <source>Google Gemini</source>
         <translation>Google Gemini</translation>
     </message>
