@@ -19,7 +19,7 @@ class CredentialsPage(QtWidgets.QWidget):
 
         info_label = MLabel(self.tr(
             "Configure provider API keys or custom endpoints here.\n"
-            "You do not need to sign in to use local models or your own provider credentials."
+            "Use this page for your own API credentials and local OpenAI-compatible endpoints."
         )).secondary()
         info_label.setWordWrap(True)
         

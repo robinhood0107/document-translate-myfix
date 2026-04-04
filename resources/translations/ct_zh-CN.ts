@@ -2,13 +2,6 @@
 <!DOCTYPE TS>
 <TS version="2.1" language="zh_CN">
 <context>
-    <name></name>
-    <message>
-        <source>Custom</source>
-        <translation type="vanished">自定义</translation>
-    </message>
-</context>
-<context>
     <name>AboutPage</name>
     <message>
         <source>App Information</source>
@@ -21,58 +14,6 @@
     <message>
         <source>Check for Updates</source>
         <translation>检查更新</translation>
-    </message>
-</context>
-<context>
-    <name>AccountPage</name>
-    <message>
-        <source>Sign in to Comic Translate</source>
-        <translation type="vanished">登录 Comic Translate</translation>
-    </message>
-    <message>
-        <source>Sign in to use Comic Translate, see your credits balance, and purchase additional credits.</source>
-        <translation type="vanished">登录以使用 Comic Translate，查看您的积分余额并购买更多积分。</translation>
-    </message>
-    <message>
-        <source>Sign in is Optional</source>
-        <translation>自定义</translation>
-    </message>
-    <message>
-        <source>Comic Translate can be used with local models or your own API keys.
-Sign in only if you want to use hosted credits and account features.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Sign In</source>
-        <translation>登录</translation>
-    </message>
-    <message>
-        <source>See model credit costs</source>
-        <translation>查看模型积分消耗</translation>
-    </message>
-    <message>
-        <source>Account Information</source>
-        <translation>账户信息</translation>
-    </message>
-    <message>
-        <source>Email:</source>
-        <translation>邮箱：</translation>
-    </message>
-    <message>
-        <source>Subscription Tier:</source>
-        <translation>订阅等级：</translation>
-    </message>
-    <message>
-        <source>Credits:</source>
-        <translation>积分：</translation>
-    </message>
-    <message>
-        <source>Buy Credits</source>
-        <translation>购买积分</translation>
-    </message>
-    <message>
-        <source>Sign Out</source>
-        <translation>退出登录</translation>
     </message>
 </context>
 <context>
@@ -228,13 +169,9 @@ Sign in only if you want to use hosted credits and account features.</source>
         <translation>保存密钥</translation>
     </message>
     <message>
-        <source>These settings are for advanced users who wish to use their own Custom API endpoints (e.g. Local Language Models) for translation. For most users, no configuration is needed here.</source>
-        <translation type="vanished">这些设置供希望使用自己的自定义 API 终点（例如本地语言模型）进行翻译的高级用户使用。对于大多数用户，此处无需配置。</translation>
-    </message>
-    <message>
         <source>Configure provider API keys or custom endpoints here.
-You do not need to sign in to use local models or your own provider credentials.</source>
-        <translation>登录</translation>
+Use this page for your own API credentials and local OpenAI-compatible endpoints.</source>
+        <translation type="unfinished"></translation>
     </message>
     <message>
         <source>OCR</source>
@@ -494,28 +431,12 @@ Go to Settings &gt; Text Rendering &gt; Font to select or import one </source>
         <translation>未选择字体。请前往设置 &gt; 文本渲染 &gt; 字体选择或导入字体</translation>
     </message>
     <message>
-        <source>Please sign in or sign up via Settings &gt; Account to continue.</source>
-        <translation type="vanished">请通过设置 &gt; 账户登录或注册以继续。</translation>
-    </message>
-    <message>
         <source>The translator does not support the selected target language. Please choose a different language or tool.</source>
         <translation>翻译器不支持所选目标语言。请选择其他语言或工具。</translation>
     </message>
     <message>
         <source>No {} selected. Please select a {} in Settings &gt; Tools.</source>
         <translation>未选择 {}。请在设置 &gt; 工具中选择一个 {}。</translation>
-    </message>
-    <message>
-        <source>Insufficient credits to perform this action.
-Go to Settings &gt; Account to buy more credits.</source>
-        <translation>积分不足，无法执行此操作。
-请前往设置 &gt; 账户购买更多积分。</translation>
-    </message>
-    <message>
-        <source>Custom requires advanced API configuration. Most users should use the Credits system instead.
-Please sign in via Settings &gt; Account to use credits, or configure Custom API settings in Settings &gt; Advanced.</source>
-        <translation type="vanished">自定义需要高级 API 配置。大多数用户应使用积分系统。
-请通过设置 &gt; 账户登录以使用积分，或在设置 &gt; 高级中配置自定义 API 设置。</translation>
     </message>
     <message>
         <source>Copy</source>
@@ -597,11 +518,6 @@ Please try a different tool.</source>
         <translation>确定</translation>
     </message>
     <message>
-        <source>Sign-in is only required for hosted credits.
-Configure local or provider API credentials in Settings &gt; Credentials to continue.</source>
-        <translation>取消中... %p%</translation>
-    </message>
-    <message>
         <source>Required fields: {fields}</source>
         <translation type="unfinished"></translation>
     </message>
@@ -628,10 +544,6 @@ Configure them in Settings &gt; {settings_page}.
     <message>
         <source>PaddleOCR VL Settings</source>
         <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Insufficient Credits</source>
-        <translation>积分不足</translation>
     </message>
     <message>
         <source>Custom requires an OpenAI-compatible API configuration.
@@ -734,10 +646,6 @@ Please check your internet connection.</source>
     <message>
         <source>PDF</source>
         <translation>PDF</translation>
-    </message>
-    <message>
-        <source>PSD</source>
-        <translation type="vanished">PSD</translation>
     </message>
     <message>
         <source>Home</source>
@@ -1059,30 +967,6 @@ This folder is separate from Auto-Recover snapshots.</source>
         <translation>需要重启</translation>
     </message>
     <message>
-        <source>Failed to initiate sign-in process.</source>
-        <translation>无法启动登录流程。</translation>
-    </message>
-    <message>
-        <source>Sign In</source>
-        <translation>登录</translation>
-    </message>
-    <message>
-        <source>Sign In Required</source>
-        <translation>需要登录</translation>
-    </message>
-    <message>
-        <source>Please sign in to purchase or manage credits.</source>
-        <translation>请登录以购买或管理积分。</translation>
-    </message>
-    <message>
-        <source>Unable to Open Browser</source>
-        <translation>无法打开浏览器</translation>
-    </message>
-    <message>
-        <source>Please open the pricing page in your browser: {url}</source>
-        <translation>请在浏览器中打开定价页面：{url}</translation>
-    </message>
-    <message>
         <source>The application needs to restart for the language changes to take effect.
 Restart now?</source>
         <translation>应用需要重启以使语言更改生效。
@@ -1091,58 +975,6 @@ Restart now?</source>
     <message>
         <source>Cancel</source>
         <translation>取消</translation>
-    </message>
-    <message>
-        <source>Sign In Error</source>
-        <translation>登录错误</translation>
-    </message>
-    <message>
-        <source>Authentication failed: {error}</source>
-        <translation>认证失败：{error}</translation>
-    </message>
-    <message>
-        <source>Confirm Sign Out</source>
-        <translation>确认退出登录</translation>
-    </message>
-    <message>
-        <source>Are you sure you want to sign out?</source>
-        <translation>确定要退出登录吗？</translation>
-    </message>
-    <message>
-        <source>Signing Out...</source>
-        <translation>正在退出登录...</translation>
-    </message>
-    <message>
-        <source>Sign Out</source>
-        <translation>退出登录</translation>
-    </message>
-    <message>
-        <source>Session Expired</source>
-        <translation>会话已过期</translation>
-    </message>
-    <message>
-        <source>Your session has expired. Please sign in again.</source>
-        <translation>您的会话已过期，请重新登录。</translation>
-    </message>
-    <message>
-        <source>N/A</source>
-        <translation>无</translation>
-    </message>
-    <message>
-        <source>Free</source>
-        <translation>免费</translation>
-    </message>
-    <message>
-        <source>Subscription</source>
-        <translation>订阅</translation>
-    </message>
-    <message>
-        <source>One-time</source>
-        <translation>一次性</translation>
-    </message>
-    <message>
-        <source>Total</source>
-        <translation>总计</translation>
     </message>
     <message>
         <source>Checking...</source>
@@ -1342,10 +1174,6 @@ Restart now?</source>
     <message>
         <source>Export</source>
         <translation>导出</translation>
-    </message>
-    <message>
-        <source>Account</source>
-        <translation>账户</translation>
     </message>
     <message>
         <source>Advanced</source>
@@ -1711,44 +1539,8 @@ then do inpainting on the resized image.</source>
         <translation>用于新的渲染文本和“全部翻译”输出的描边宽度。</translation>
     </message>
     <message>
-        <source>Font</source>
-        <translation type="vanished">字体</translation>
-    </message>
-    <message>
-        <source>Font Size</source>
-        <translation type="vanished">字体大小</translation>
-    </message>
-    <message>
-        <source>Line Spacing</source>
-        <translation type="vanished">行间距</translation>
-    </message>
-    <message>
-        <source>Font Color</source>
-        <translation type="vanished">字体颜色</translation>
-    </message>
-    <message>
-        <source>Bold</source>
-        <translation type="vanished">加粗</translation>
-    </message>
-    <message>
-        <source>Italic</source>
-        <translation type="vanished">斜体</translation>
-    </message>
-    <message>
-        <source>Underline</source>
-        <translation type="vanished">下划线</translation>
-    </message>
-    <message>
         <source>Outline</source>
         <translation>描边</translation>
-    </message>
-    <message>
-        <source>Outline Color</source>
-        <translation type="vanished">描边颜色</translation>
-    </message>
-    <message>
-        <source>Outline Width</source>
-        <translation type="vanished">描边宽度</translation>
     </message>
     <message>
         <source>Pan Image</source>
@@ -1837,154 +1629,6 @@ back on the Image (for further editing)</source>
 </context>
 <context>
     <name>self.main</name>
-    <message>
-        <source>The AI provider flagged this content</source>
-        <translation type="vanished">AI 提供商标记了该内容</translation>
-    </message>
-    <message>
-        <source>Insufficient credits</source>
-        <translation type="vanished">积分不足</translation>
-    </message>
-    <message>
-        <source>Request timed out</source>
-        <translation type="vanished">请求超时</translation>
-    </message>
-    <message>
-        <source>Rate limited by provider</source>
-        <translation type="vanished">提供商限流</translation>
-    </message>
-    <message>
-        <source>Authentication failed</source>
-        <translation type="vanished">身份验证失败</translation>
-    </message>
-    <message>
-        <source>Network or connection error</source>
-        <translation type="vanished">网络或连接错误</translation>
-    </message>
-    <message>
-        <source>Provider unavailable</source>
-        <translation type="vanished">提供商不可用</translation>
-    </message>
-    <message>
-        <source>Invalid translation response</source>
-        <translation type="vanished">无效的翻译响应</translation>
-    </message>
-    <message>
-        <source>Unexpected tool error</source>
-        <translation type="vanished">意外的工具错误</translation>
-    </message>
-    <message>
-        <source>Try another text recognition tool</source>
-        <translation type="vanished">尝试其他文字识别工具</translation>
-    </message>
-    <message>
-        <source>Try another translator</source>
-        <translation type="vanished">尝试其他翻译工具</translation>
-    </message>
-    <message>
-        <source>Try another tool</source>
-        <translation type="vanished">尝试其他工具</translation>
-    </message>
-    <message>
-        <source>Buy more credits</source>
-        <translation type="vanished">购买更多积分</translation>
-    </message>
-    <message>
-        <source>Try again</source>
-        <translation type="vanished">重试</translation>
-    </message>
-    <message>
-        <source>Wait and try again</source>
-        <translation type="vanished">等待后重试</translation>
-    </message>
-    <message>
-        <source>Check API settings</source>
-        <translation type="vanished">检查 API 设置</translation>
-    </message>
-    <message>
-        <source>Check your connection</source>
-        <translation type="vanished">检查网络连接</translation>
-    </message>
-    <message>
-        <source>Try again later</source>
-        <translation type="vanished">稍后重试</translation>
-    </message>
-    <message>
-        <source>No text blocks detected</source>
-        <translation type="vanished">未检测到文本块</translation>
-    </message>
-    <message>
-        <source>Text recognition failed</source>
-        <translation type="vanished">文字识别失败</translation>
-    </message>
-    <message>
-        <source>Translation failed</source>
-        <translation type="vanished">翻译失败</translation>
-    </message>
-    <message>
-        <source>Webtoon text recognition chunk failed</source>
-        <translation type="vanished">Webtoon 文字识别分块失败</translation>
-    </message>
-    <message>
-        <source>Webtoon translation chunk failed</source>
-        <translation type="vanished">Webtoon 翻译分块失败</translation>
-    </message>
-    <message>
-        <source>Page processing failed</source>
-        <translation type="vanished">页面处理失败</translation>
-    </message>
-    <message>
-        <source>This image is not in the current project.</source>
-        <translation type="vanished">此图片不在当前项目中。</translation>
-    </message>
-    <message>
-        <source>Cancelled</source>
-        <translation type="vanished">已取消</translation>
-    </message>
-    <message>
-        <source>Completed</source>
-        <translation type="vanished">已完成</translation>
-    </message>
-    <message>
-        <source>{0}  |  Updated {1}</source>
-        <translation type="vanished">{0}  |  已更新 {1}</translation>
-    </message>
-    <message>
-        <source>Total</source>
-        <translation type="vanished">总计</translation>
-    </message>
-    <message>
-        <source>Skipped</source>
-        <translation type="vanished">已跳过</translation>
-    </message>
-    <message>
-        <source>Skipped Images ({0})</source>
-        <translation type="vanished">已跳过的图片 ({0})</translation>
-    </message>
-    <message>
-        <source>Double-click a row to open that page.</source>
-        <translation type="vanished">双击某行可打开该页面。</translation>
-    </message>
-    <message>
-        <source>Image</source>
-        <translation type="vanished">图片</translation>
-    </message>
-    <message>
-        <source>Reason</source>
-        <translation type="vanished">原因</translation>
-    </message>
-    <message>
-        <source>No skipped images in this batch.</source>
-        <translation type="vanished">本批次没有跳过的图片。</translation>
-    </message>
-    <message>
-        <source>No batch report is available yet.</source>
-        <translation type="vanished">暂无批处理报告。</translation>
-    </message>
-    <message>
-        <source>Batch Report</source>
-        <translation type="vanished">批处理报告</translation>
-    </message>
     <message>
         <source>Project Recovery</source>
         <translation>项目恢复</translation>

@@ -2,13 +2,6 @@
 <!DOCTYPE TS>
 <TS version="2.1" language="es_ES">
 <context>
-    <name></name>
-    <message>
-        <source>Custom</source>
-        <translation type="vanished">Personalizado</translation>
-    </message>
-</context>
-<context>
     <name>AboutPage</name>
     <message>
         <source>App Information</source>
@@ -21,58 +14,6 @@
     <message>
         <source>Check for Updates</source>
         <translation>Buscar actualizaciones</translation>
-    </message>
-</context>
-<context>
-    <name>AccountPage</name>
-    <message>
-        <source>Sign in to Comic Translate</source>
-        <translation type="vanished">Inicia sesión en Comic Translate</translation>
-    </message>
-    <message>
-        <source>Sign in to use Comic Translate, see your credits balance, and purchase additional credits.</source>
-        <translation type="vanished">Inicia sesión para usar Comic Translate, ver tu saldo de créditos y comprar créditos adicionales.</translation>
-    </message>
-    <message>
-        <source>Sign in is Optional</source>
-        <translation>Personalizado</translation>
-    </message>
-    <message>
-        <source>Comic Translate can be used with local models or your own API keys.
-Sign in only if you want to use hosted credits and account features.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Sign In</source>
-        <translation>Iniciar sesión</translation>
-    </message>
-    <message>
-        <source>See model credit costs</source>
-        <translation>Ver costos de créditos de modelos</translation>
-    </message>
-    <message>
-        <source>Account Information</source>
-        <translation>Información de la cuenta</translation>
-    </message>
-    <message>
-        <source>Email:</source>
-        <translation>Correo electrónico:</translation>
-    </message>
-    <message>
-        <source>Subscription Tier:</source>
-        <translation>Nivel de suscripción:</translation>
-    </message>
-    <message>
-        <source>Credits:</source>
-        <translation>Créditos:</translation>
-    </message>
-    <message>
-        <source>Buy Credits</source>
-        <translation>Comprar créditos</translation>
-    </message>
-    <message>
-        <source>Sign Out</source>
-        <translation>Cerrar sesión</translation>
     </message>
 </context>
 <context>
@@ -228,13 +169,9 @@ Sign in only if you want to use hosted credits and account features.</source>
         <translation>Guardar Claves</translation>
     </message>
     <message>
-        <source>These settings are for advanced users who wish to use their own Custom API endpoints (e.g. Local Language Models) for translation. For most users, no configuration is needed here.</source>
-        <translation type="vanished">Estos ajustes son para usuarios avanzados que desean utilizar sus propios puntos de conexión de API personalizados (por ejemplo, modelos de lenguaje locales) para la traducción. Para la mayoría de los usuarios, no es necesaria ninguna configuración aquí.</translation>
-    </message>
-    <message>
         <source>Configure provider API keys or custom endpoints here.
-You do not need to sign in to use local models or your own provider credentials.</source>
-        <translation>Iniciar sesión</translation>
+Use this page for your own API credentials and local OpenAI-compatible endpoints.</source>
+        <translation type="unfinished"></translation>
     </message>
     <message>
         <source>OCR</source>
@@ -495,28 +432,12 @@ Go to Settings &gt; Text Rendering &gt; Font to select or import one </source>
 Vaya a Configuración &gt; Renderización de texto &gt; Fuente para seleccionar o importar una.</translation>
     </message>
     <message>
-        <source>Please sign in or sign up via Settings &gt; Account to continue.</source>
-        <translation type="vanished">Por favor, inicia sesión o regístrate en Configuración &gt; Cuenta para continuar.</translation>
-    </message>
-    <message>
         <source>The translator does not support the selected target language. Please choose a different language or tool.</source>
         <translation>El traductor no admite el idioma de destino seleccionado. Por favor, elige otro idioma o herramienta.</translation>
     </message>
     <message>
         <source>No {} selected. Please select a {} in Settings &gt; Tools.</source>
         <translation>No se ha seleccionado {}. Por favor, selecciona un {} en Configuración &gt; Herramientas.</translation>
-    </message>
-    <message>
-        <source>Insufficient credits to perform this action.
-Go to Settings &gt; Account to buy more credits.</source>
-        <translation>Créditos insuficientes para realizar esta acción.
-Ve a Configuración &gt; Cuenta para comprar más créditos.</translation>
-    </message>
-    <message>
-        <source>Custom requires advanced API configuration. Most users should use the Credits system instead.
-Please sign in via Settings &gt; Account to use credits, or configure Custom API settings in Settings &gt; Advanced.</source>
-        <translation type="vanished">Personalizado requiere una configuración avanzada de API. La mayoría de los usuarios deberían usar el sistema de créditos.
-Por favor, inicia sesión en Configuración &gt; Cuenta para usar créditos, o configura la API personalizada en Configuración &gt; Avanzado.</translation>
     </message>
     <message>
         <source>Copy</source>
@@ -598,11 +519,6 @@ Por favor, intente con una herramienta diferente.</translation>
         <translation>Aceptar</translation>
     </message>
     <message>
-        <source>Sign-in is only required for hosted credits.
-Configure local or provider API credentials in Settings &gt; Credentials to continue.</source>
-        <translation>Saltando:</translation>
-    </message>
-    <message>
         <source>Required fields: {fields}</source>
         <translation type="unfinished"></translation>
     </message>
@@ -629,10 +545,6 @@ Configure them in Settings &gt; {settings_page}.
     <message>
         <source>PaddleOCR VL Settings</source>
         <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Insufficient Credits</source>
-        <translation>Créditos insuficientes</translation>
     </message>
     <message>
         <source>Custom requires an OpenAI-compatible API configuration.
@@ -735,10 +647,6 @@ Por favor, compruebe su conexión a Internet.</translation>
     <message>
         <source>PDF</source>
         <translation>PDF</translation>
-    </message>
-    <message>
-        <source>PSD</source>
-        <translation type="vanished">PSD</translation>
     </message>
     <message>
         <source>Home</source>
@@ -1060,30 +968,6 @@ Esta carpeta está separada de las instantáneas de recuperación automática.</
         <translation>Reinicio requerido</translation>
     </message>
     <message>
-        <source>Failed to initiate sign-in process.</source>
-        <translation>No se pudo iniciar el proceso de inicio de sesión.</translation>
-    </message>
-    <message>
-        <source>Sign In</source>
-        <translation>Iniciar sesión</translation>
-    </message>
-    <message>
-        <source>Sign In Required</source>
-        <translation>Se requiere iniciar sesión</translation>
-    </message>
-    <message>
-        <source>Please sign in to purchase or manage credits.</source>
-        <translation>Por favor, inicia sesión para comprar o gestionar créditos.</translation>
-    </message>
-    <message>
-        <source>Unable to Open Browser</source>
-        <translation>No se puede abrir el navegador</translation>
-    </message>
-    <message>
-        <source>Please open the pricing page in your browser: {url}</source>
-        <translation>Por favor, abre la página de precios en tu navegador: {url}</translation>
-    </message>
-    <message>
         <source>The application needs to restart for the language changes to take effect.
 Restart now?</source>
         <translation>La aplicación necesita reiniciarse para que los cambios de idioma surtan efecto.
@@ -1092,58 +976,6 @@ Restart now?</source>
     <message>
         <source>Cancel</source>
         <translation>Cancelar</translation>
-    </message>
-    <message>
-        <source>Sign In Error</source>
-        <translation>Error al iniciar sesión</translation>
-    </message>
-    <message>
-        <source>Authentication failed: {error}</source>
-        <translation>La autenticación falló: {error}</translation>
-    </message>
-    <message>
-        <source>Confirm Sign Out</source>
-        <translation>Confirmar cierre de sesión</translation>
-    </message>
-    <message>
-        <source>Are you sure you want to sign out?</source>
-        <translation>¿Estás seguro de que deseas cerrar sesión?</translation>
-    </message>
-    <message>
-        <source>Signing Out...</source>
-        <translation>Cerrando sesión...</translation>
-    </message>
-    <message>
-        <source>Sign Out</source>
-        <translation>Cerrar sesión</translation>
-    </message>
-    <message>
-        <source>Session Expired</source>
-        <translation>Sesión expirada</translation>
-    </message>
-    <message>
-        <source>Your session has expired. Please sign in again.</source>
-        <translation>Tu sesión ha expirado. Por favor, inicia sesión de nuevo.</translation>
-    </message>
-    <message>
-        <source>N/A</source>
-        <translation>No disponible</translation>
-    </message>
-    <message>
-        <source>Free</source>
-        <translation>Gratis</translation>
-    </message>
-    <message>
-        <source>Subscription</source>
-        <translation>Suscripción</translation>
-    </message>
-    <message>
-        <source>One-time</source>
-        <translation>Único pago</translation>
-    </message>
-    <message>
-        <source>Total</source>
-        <translation>Total</translation>
     </message>
     <message>
         <source>Checking...</source>
@@ -1331,10 +1163,6 @@ Restart now?</source>
     <message>
         <source>Gemini-2.5-Pro</source>
         <translation>Gemini-2.5-Pro</translation>
-    </message>
-    <message>
-        <source>Account</source>
-        <translation>Cuenta</translation>
     </message>
     <message>
         <source>Microsoft Translator</source>
@@ -1713,44 +1541,8 @@ luego realiza el inpainting en la imagen redimensionada.</translation>
         <translation>Grosor del contorno para los nuevos elementos renderizados y la salida de «Traducir todo».</translation>
     </message>
     <message>
-        <source>Font</source>
-        <translation type="vanished">Fuente</translation>
-    </message>
-    <message>
-        <source>Font Size</source>
-        <translation type="vanished">Tamaño de fuente</translation>
-    </message>
-    <message>
-        <source>Line Spacing</source>
-        <translation type="vanished">Espaciado de línea</translation>
-    </message>
-    <message>
-        <source>Font Color</source>
-        <translation type="vanished">Color de fuente</translation>
-    </message>
-    <message>
-        <source>Bold</source>
-        <translation type="vanished">Negrita</translation>
-    </message>
-    <message>
-        <source>Italic</source>
-        <translation type="vanished">Cursiva</translation>
-    </message>
-    <message>
-        <source>Underline</source>
-        <translation type="vanished">Subrayado</translation>
-    </message>
-    <message>
         <source>Outline</source>
         <translation>Contorno</translation>
-    </message>
-    <message>
-        <source>Outline Color</source>
-        <translation type="vanished">Color de contorno</translation>
-    </message>
-    <message>
-        <source>Outline Width</source>
-        <translation type="vanished">Ancho de contorno</translation>
     </message>
     <message>
         <source>Pan Image</source>
@@ -1840,154 +1632,6 @@ de nuevo en la imagen (para su posterior edición)</translation>
 </context>
 <context>
     <name>self.main</name>
-    <message>
-        <source>The AI provider flagged this content</source>
-        <translation type="vanished">El proveedor de IA marcó este contenido</translation>
-    </message>
-    <message>
-        <source>Insufficient credits</source>
-        <translation type="vanished">Créditos insuficientes</translation>
-    </message>
-    <message>
-        <source>Request timed out</source>
-        <translation type="vanished">Solicitud agotada</translation>
-    </message>
-    <message>
-        <source>Rate limited by provider</source>
-        <translation type="vanished">Límite de velocidad del proveedor</translation>
-    </message>
-    <message>
-        <source>Authentication failed</source>
-        <translation type="vanished">Autenticación fallida</translation>
-    </message>
-    <message>
-        <source>Network or connection error</source>
-        <translation type="vanished">Error de red o conexión</translation>
-    </message>
-    <message>
-        <source>Provider unavailable</source>
-        <translation type="vanished">Proveedor no disponible</translation>
-    </message>
-    <message>
-        <source>Invalid translation response</source>
-        <translation type="vanished">Respuesta de traducción inválida</translation>
-    </message>
-    <message>
-        <source>Unexpected tool error</source>
-        <translation type="vanished">Error de herramienta inesperado</translation>
-    </message>
-    <message>
-        <source>Try another text recognition tool</source>
-        <translation type="vanished">Pruebe otra herramienta de reconocimiento de texto</translation>
-    </message>
-    <message>
-        <source>Try another translator</source>
-        <translation type="vanished">Pruebe otro traductor</translation>
-    </message>
-    <message>
-        <source>Try another tool</source>
-        <translation type="vanished">Pruebe otra herramienta</translation>
-    </message>
-    <message>
-        <source>Buy more credits</source>
-        <translation type="vanished">Comprar más créditos</translation>
-    </message>
-    <message>
-        <source>Try again</source>
-        <translation type="vanished">Intentar de nuevo</translation>
-    </message>
-    <message>
-        <source>Wait and try again</source>
-        <translation type="vanished">Esperar e intentar de nuevo</translation>
-    </message>
-    <message>
-        <source>Check API settings</source>
-        <translation type="vanished">Verificar configuración de API</translation>
-    </message>
-    <message>
-        <source>Check your connection</source>
-        <translation type="vanished">Verificar su conexión</translation>
-    </message>
-    <message>
-        <source>Try again later</source>
-        <translation type="vanished">Inténtelo más tarde</translation>
-    </message>
-    <message>
-        <source>No text blocks detected</source>
-        <translation type="vanished">No se detectaron bloques de texto</translation>
-    </message>
-    <message>
-        <source>Text recognition failed</source>
-        <translation type="vanished">Error en el reconocimiento de texto</translation>
-    </message>
-    <message>
-        <source>Translation failed</source>
-        <translation type="vanished">Traducción fallida</translation>
-    </message>
-    <message>
-        <source>Webtoon text recognition chunk failed</source>
-        <translation type="vanished">Error en el fragmento de reconocimiento de texto de webtoon</translation>
-    </message>
-    <message>
-        <source>Webtoon translation chunk failed</source>
-        <translation type="vanished">Error en el fragmento de traducción de webtoon</translation>
-    </message>
-    <message>
-        <source>Page processing failed</source>
-        <translation type="vanished">Error en el procesamiento de la página</translation>
-    </message>
-    <message>
-        <source>This image is not in the current project.</source>
-        <translation type="vanished">Esta imagen no está en el proyecto actual.</translation>
-    </message>
-    <message>
-        <source>Cancelled</source>
-        <translation type="vanished">Cancelado</translation>
-    </message>
-    <message>
-        <source>Completed</source>
-        <translation type="vanished">Completado</translation>
-    </message>
-    <message>
-        <source>{0}  |  Updated {1}</source>
-        <translation type="vanished">{0}  |  Actualizado {1}</translation>
-    </message>
-    <message>
-        <source>Total</source>
-        <translation type="vanished">Total</translation>
-    </message>
-    <message>
-        <source>Skipped</source>
-        <translation type="vanished">Omitido</translation>
-    </message>
-    <message>
-        <source>Skipped Images ({0})</source>
-        <translation type="vanished">Imágenes omitidas ({0})</translation>
-    </message>
-    <message>
-        <source>Double-click a row to open that page.</source>
-        <translation type="vanished">Doble clic en una fila para abrir esa página.</translation>
-    </message>
-    <message>
-        <source>Image</source>
-        <translation type="vanished">Imagen</translation>
-    </message>
-    <message>
-        <source>Reason</source>
-        <translation type="vanished">Motivo</translation>
-    </message>
-    <message>
-        <source>No skipped images in this batch.</source>
-        <translation type="vanished">No hay imágenes omitidas en este lote.</translation>
-    </message>
-    <message>
-        <source>No batch report is available yet.</source>
-        <translation type="vanished">Aún no hay informe de lote disponible.</translation>
-    </message>
-    <message>
-        <source>Batch Report</source>
-        <translation type="vanished">Informe de lote</translation>
-    </message>
     <message>
         <source>Project Recovery</source>
         <translation>Recuperación del Proyecto</translation>

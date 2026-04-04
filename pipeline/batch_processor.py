@@ -34,7 +34,6 @@ from modules.utils.render_style_policy import (
 from modules.utils.translator_utils import get_raw_translation, get_raw_text, format_translations
 from modules.rendering.render import get_best_render_area, pyside_word_wrap, is_vertical_block
 from modules.utils.device import resolve_device
-from modules.utils.exceptions import InsufficientCreditsException
 from app.path_materialization import ensure_path_materialized
 from app.ui.canvas.save_renderer import ImageSaveRenderer
 from app.ui.canvas.text_item import OutlineInfo, OutlineType
@@ -494,8 +493,6 @@ class BatchProcessor:
                         attempt_count,
                     )
                     
-                except InsufficientCreditsException:
-                    raise
                 except Exception as e:
                     # if it's a connection/network error, give a short message
                     if isinstance(e, requests.exceptions.ConnectionError):
@@ -645,8 +642,6 @@ class BatchProcessor:
                     translator.engine.__class__.__name__,
                     translation_cache_status,
                 )
-            except InsufficientCreditsException:
-                raise
             except Exception as e:
                 # if it's a connection/network error, give a short message
                 if isinstance(e, requests.exceptions.ConnectionError):

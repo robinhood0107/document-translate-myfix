@@ -53,7 +53,7 @@ def main() -> int:
     lupdate = resolve_tool("lupdate")
     lrelease = resolve_tool("lrelease")
 
-    run([lupdate, "-extensions", "py", "-locations", "none", *SOURCE_TARGETS, "-ts", *ts_files])
+    run([lupdate, "-no-obsolete", "-extensions", "py", "-locations", "none", *SOURCE_TARGETS, "-ts", *ts_files])
 
     QM_DIR.mkdir(parents=True, exist_ok=True)
     for ts_path in ts_files:

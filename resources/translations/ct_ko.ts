@@ -2,13 +2,6 @@
 <!DOCTYPE TS>
 <TS version="2.1" language="ko_KR">
 <context>
-    <name></name>
-    <message>
-        <source>Custom</source>
-        <translation type="vanished">사용자 지정</translation>
-    </message>
-</context>
-<context>
     <name>AboutPage</name>
     <message>
         <source>App Information</source>
@@ -21,58 +14,6 @@
     <message>
         <source>Check for Updates</source>
         <translation>업데이트 확인</translation>
-    </message>
-</context>
-<context>
-    <name>AccountPage</name>
-    <message>
-        <source>Sign in to Comic Translate</source>
-        <translation type="vanished">Comic Translate에 로그인</translation>
-    </message>
-    <message>
-        <source>Sign in to use Comic Translate, see your credits balance, and purchase additional credits.</source>
-        <translation type="vanished">Comic Translate를 사용하려면 로그인하세요. 크레딧 잔액을 확인하고 추가 크레딧을 구매할 수 있습니다.</translation>
-    </message>
-    <message>
-        <source>Sign in is Optional</source>
-        <translation>사용자 지정</translation>
-    </message>
-    <message>
-        <source>Comic Translate can be used with local models or your own API keys.
-Sign in only if you want to use hosted credits and account features.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Sign In</source>
-        <translation>로그인</translation>
-    </message>
-    <message>
-        <source>See model credit costs</source>
-        <translation>모델 크레딧 비용 보기</translation>
-    </message>
-    <message>
-        <source>Account Information</source>
-        <translation>계정 정보</translation>
-    </message>
-    <message>
-        <source>Email:</source>
-        <translation>이메일:</translation>
-    </message>
-    <message>
-        <source>Subscription Tier:</source>
-        <translation>구독 등급:</translation>
-    </message>
-    <message>
-        <source>Credits:</source>
-        <translation>크레딧:</translation>
-    </message>
-    <message>
-        <source>Buy Credits</source>
-        <translation>크레딧 구매</translation>
-    </message>
-    <message>
-        <source>Sign Out</source>
-        <translation>로그아웃</translation>
     </message>
 </context>
 <context>
@@ -228,13 +169,9 @@ Sign in only if you want to use hosted credits and account features.</source>
         <translation>키 저장</translation>
     </message>
     <message>
-        <source>These settings are for advanced users who wish to use their own Custom API endpoints (e.g. Local Language Models) for translation. For most users, no configuration is needed here.</source>
-        <translation type="vanished">이 설정은 번역을 위해 자체 사용자 지정 API 엔드포인트(예: 로컬 언어 모델)를 사용하려는 고급 사용자를 위한 것입니다. 대부분의 사용자는 여기서 특별한 설정이 필요하지 않습니다.</translation>
-    </message>
-    <message>
         <source>Configure provider API keys or custom endpoints here.
-You do not need to sign in to use local models or your own provider credentials.</source>
-        <translation>로그인</translation>
+Use this page for your own API credentials and local OpenAI-compatible endpoints.</source>
+        <translation type="unfinished"></translation>
     </message>
     <message>
         <source>OCR</source>
@@ -495,28 +432,12 @@ Go to Settings &gt; Text Rendering &gt; Font to select or import one </source>
 설정 &gt; 텍스트 렌더링 &gt; 글꼴로 이동하여 선택하거나 가져오세요.</translation>
     </message>
     <message>
-        <source>Please sign in or sign up via Settings &gt; Account to continue.</source>
-        <translation type="vanished">계속하려면 설정 &gt; 계정에서 로그인하거나 가입하세요.</translation>
-    </message>
-    <message>
         <source>The translator does not support the selected target language. Please choose a different language or tool.</source>
         <translation>선택한 번역기는 해당 대상 언어를 지원하지 않습니다. 다른 언어나 도구를 선택하세요.</translation>
     </message>
     <message>
         <source>No {} selected. Please select a {} in Settings &gt; Tools.</source>
         <translation>선택된 {}이(가) 없습니다. 설정 &gt; 도구에서 {}을(를) 선택하세요.</translation>
-    </message>
-    <message>
-        <source>Insufficient credits to perform this action.
-Go to Settings &gt; Account to buy more credits.</source>
-        <translation>이 작업을 수행하기에 크레딧이 부족합니다.
-설정 &gt; 계정에서 크레딧을 추가로 구매하세요.</translation>
-    </message>
-    <message>
-        <source>Custom requires advanced API configuration. Most users should use the Credits system instead.
-Please sign in via Settings &gt; Account to use credits, or configure Custom API settings in Settings &gt; Advanced.</source>
-        <translation type="vanished">사용자 지정은 고급 API 구성이 필요합니다. 대부분의 사용자는 크레딧 시스템을 사용하는 것이 좋습니다.
-크레딧을 사용하려면 설정 &gt; 계정에서 로그인하거나, 설정 &gt; 고급에서 사용자 지정 API를 구성하세요.</translation>
     </message>
     <message>
         <source>Copy</source>
@@ -599,11 +520,6 @@ Please try a different tool.</source>
         <translation>확인</translation>
     </message>
     <message>
-        <source>Sign-in is only required for hosted credits.
-Configure local or provider API credentials in Settings &gt; Credentials to continue.</source>
-        <translation>건너뛰기:</translation>
-    </message>
-    <message>
         <source>Required fields: {fields}</source>
         <translation>필수 입력 항목: {fields}</translation>
     </message>
@@ -632,10 +548,6 @@ Configure them in Settings &gt; {settings_page}.
     <message>
         <source>PaddleOCR VL Settings</source>
         <translation>PaddleOCR VL 설정</translation>
-    </message>
-    <message>
-        <source>Insufficient Credits</source>
-        <translation>크레딧 부족</translation>
     </message>
     <message>
         <source>Custom requires an OpenAI-compatible API configuration.
@@ -738,10 +650,6 @@ Please check your internet connection.</source>
     <message>
         <source>PDF</source>
         <translation>PDF</translation>
-    </message>
-    <message>
-        <source>PSD</source>
-        <translation type="vanished">PSD</translation>
     </message>
     <message>
         <source>Home</source>
@@ -1074,30 +982,6 @@ This folder is separate from Auto-Recover snapshots.</source>
         <translation>재시작 필요</translation>
     </message>
     <message>
-        <source>Failed to initiate sign-in process.</source>
-        <translation>로그인 프로세스 시작에 실패했습니다.</translation>
-    </message>
-    <message>
-        <source>Sign In</source>
-        <translation>로그인</translation>
-    </message>
-    <message>
-        <source>Sign In Required</source>
-        <translation>로그인 필요</translation>
-    </message>
-    <message>
-        <source>Please sign in to purchase or manage credits.</source>
-        <translation>크레딧을 구매하거나 관리하려면 로그인하세요.</translation>
-    </message>
-    <message>
-        <source>Unable to Open Browser</source>
-        <translation>브라우저를 열 수 없습니다</translation>
-    </message>
-    <message>
-        <source>Please open the pricing page in your browser: {url}</source>
-        <translation>브라우저에서 가격 페이지를 여세요: {url}</translation>
-    </message>
-    <message>
         <source>The application needs to restart for the language changes to take effect.
 Restart now?</source>
         <translation>언어 변경 사항을 적용하려면 애플리케이션을 다시 시작해야 합니다.
@@ -1106,58 +990,6 @@ Restart now?</source>
     <message>
         <source>Cancel</source>
         <translation>취소</translation>
-    </message>
-    <message>
-        <source>Sign In Error</source>
-        <translation>로그인 오류</translation>
-    </message>
-    <message>
-        <source>Authentication failed: {error}</source>
-        <translation>인증 실패: {error}</translation>
-    </message>
-    <message>
-        <source>Confirm Sign Out</source>
-        <translation>로그아웃 확인</translation>
-    </message>
-    <message>
-        <source>Are you sure you want to sign out?</source>
-        <translation>정말로 로그아웃하시겠습니까?</translation>
-    </message>
-    <message>
-        <source>Signing Out...</source>
-        <translation>로그아웃 중...</translation>
-    </message>
-    <message>
-        <source>Sign Out</source>
-        <translation>로그아웃</translation>
-    </message>
-    <message>
-        <source>Session Expired</source>
-        <translation>세션 만료</translation>
-    </message>
-    <message>
-        <source>Your session has expired. Please sign in again.</source>
-        <translation>세션이 만료되었습니다. 다시 로그인하세요.</translation>
-    </message>
-    <message>
-        <source>N/A</source>
-        <translation>해당 없음</translation>
-    </message>
-    <message>
-        <source>Free</source>
-        <translation>무료</translation>
-    </message>
-    <message>
-        <source>Subscription</source>
-        <translation>구독</translation>
-    </message>
-    <message>
-        <source>One-time</source>
-        <translation>일회성</translation>
-    </message>
-    <message>
-        <source>Total</source>
-        <translation>총합</translation>
     </message>
     <message>
         <source>Checking...</source>
@@ -1345,10 +1177,6 @@ Restart now?</source>
     <message>
         <source>Gemini-2.5-Pro</source>
         <translation>Gemini-2.5-Pro</translation>
-    </message>
-    <message>
-        <source>Account</source>
-        <translation>계정</translation>
     </message>
     <message>
         <source>Microsoft Translator</source>
@@ -1727,44 +1555,8 @@ then do inpainting on the resized image.</source>
         <translation>새 렌더링 항목과 모두 번역 결과에 사용할 윤곽선 두께입니다.</translation>
     </message>
     <message>
-        <source>Font</source>
-        <translation type="vanished">글꼴</translation>
-    </message>
-    <message>
-        <source>Font Size</source>
-        <translation type="vanished">글꼴 크기</translation>
-    </message>
-    <message>
-        <source>Line Spacing</source>
-        <translation type="vanished">줄 간격</translation>
-    </message>
-    <message>
-        <source>Font Color</source>
-        <translation type="vanished">글꼴 색상</translation>
-    </message>
-    <message>
-        <source>Bold</source>
-        <translation type="vanished">굵게</translation>
-    </message>
-    <message>
-        <source>Italic</source>
-        <translation type="vanished">기울임꼴</translation>
-    </message>
-    <message>
-        <source>Underline</source>
-        <translation type="vanished">밑줄</translation>
-    </message>
-    <message>
         <source>Outline</source>
         <translation>윤곽선</translation>
-    </message>
-    <message>
-        <source>Outline Color</source>
-        <translation type="vanished">윤곽선 색상</translation>
-    </message>
-    <message>
-        <source>Outline Width</source>
-        <translation type="vanished">윤곽선 너비</translation>
     </message>
     <message>
         <source>Pan Image</source>
@@ -1854,154 +1646,6 @@ back on the Image (for further editing)</source>
 </context>
 <context>
     <name>self.main</name>
-    <message>
-        <source>The AI provider flagged this content</source>
-        <translation type="vanished">AI 공급자가 이 콘텐츠를 신고했습니다</translation>
-    </message>
-    <message>
-        <source>Insufficient credits</source>
-        <translation type="vanished">크레딧 부족</translation>
-    </message>
-    <message>
-        <source>Request timed out</source>
-        <translation type="vanished">요청 시간 초과</translation>
-    </message>
-    <message>
-        <source>Rate limited by provider</source>
-        <translation type="vanished">공급자에 의한 속도 제한</translation>
-    </message>
-    <message>
-        <source>Authentication failed</source>
-        <translation type="vanished">인증 실패</translation>
-    </message>
-    <message>
-        <source>Network or connection error</source>
-        <translation type="vanished">네트워크 또는 연결 오류</translation>
-    </message>
-    <message>
-        <source>Provider unavailable</source>
-        <translation type="vanished">공급자 사용 불가</translation>
-    </message>
-    <message>
-        <source>Invalid translation response</source>
-        <translation type="vanished">잘못된 번역 응답</translation>
-    </message>
-    <message>
-        <source>Unexpected tool error</source>
-        <translation type="vanished">예상치 못한 도구 오류</translation>
-    </message>
-    <message>
-        <source>Try another text recognition tool</source>
-        <translation type="vanished">다른 텍스트 인식 도구를 사용해 보세요</translation>
-    </message>
-    <message>
-        <source>Try another translator</source>
-        <translation type="vanished">다른 번역기를 사용해 보세요</translation>
-    </message>
-    <message>
-        <source>Try another tool</source>
-        <translation type="vanished">다른 도구를 사용해 보세요</translation>
-    </message>
-    <message>
-        <source>Buy more credits</source>
-        <translation type="vanished">크레딧 더 구매하기</translation>
-    </message>
-    <message>
-        <source>Try again</source>
-        <translation type="vanished">다시 시도</translation>
-    </message>
-    <message>
-        <source>Wait and try again</source>
-        <translation type="vanished">잠시 기다렸다가 다시 시도하세요</translation>
-    </message>
-    <message>
-        <source>Check API settings</source>
-        <translation type="vanished">API 설정 확인</translation>
-    </message>
-    <message>
-        <source>Check your connection</source>
-        <translation type="vanished">연결 상태 확인</translation>
-    </message>
-    <message>
-        <source>Try again later</source>
-        <translation type="vanished">나중에 다시 시도하세요</translation>
-    </message>
-    <message>
-        <source>No text blocks detected</source>
-        <translation type="vanished">텍스트 블록이 감지되지 않았습니다</translation>
-    </message>
-    <message>
-        <source>Text recognition failed</source>
-        <translation type="vanished">텍스트 인식 실패</translation>
-    </message>
-    <message>
-        <source>Translation failed</source>
-        <translation type="vanished">번역 실패</translation>
-    </message>
-    <message>
-        <source>Webtoon text recognition chunk failed</source>
-        <translation type="vanished">웹툰 텍스트 인식 청크 실패</translation>
-    </message>
-    <message>
-        <source>Webtoon translation chunk failed</source>
-        <translation type="vanished">웹툰 번역 청크 실패</translation>
-    </message>
-    <message>
-        <source>Page processing failed</source>
-        <translation type="vanished">페이지 처리 실패</translation>
-    </message>
-    <message>
-        <source>This image is not in the current project.</source>
-        <translation type="vanished">이 이미지는 현재 프로젝트에 없습니다.</translation>
-    </message>
-    <message>
-        <source>Cancelled</source>
-        <translation type="vanished">취소됨</translation>
-    </message>
-    <message>
-        <source>Completed</source>
-        <translation type="vanished">완료됨</translation>
-    </message>
-    <message>
-        <source>{0}  |  Updated {1}</source>
-        <translation type="vanished">{0}  |  업데이트됨 {1}</translation>
-    </message>
-    <message>
-        <source>Total</source>
-        <translation type="vanished">총합</translation>
-    </message>
-    <message>
-        <source>Skipped</source>
-        <translation type="vanished">건너뜀</translation>
-    </message>
-    <message>
-        <source>Skipped Images ({0})</source>
-        <translation type="vanished">건너뛴 이미지 ({0})</translation>
-    </message>
-    <message>
-        <source>Double-click a row to open that page.</source>
-        <translation type="vanished">행을 두 번 클릭하면 해당 페이지가 열립니다.</translation>
-    </message>
-    <message>
-        <source>Image</source>
-        <translation type="vanished">이미지</translation>
-    </message>
-    <message>
-        <source>Reason</source>
-        <translation type="vanished">이유</translation>
-    </message>
-    <message>
-        <source>No skipped images in this batch.</source>
-        <translation type="vanished">이 일괄 처리에서 건너뛴 이미지가 없습니다.</translation>
-    </message>
-    <message>
-        <source>No batch report is available yet.</source>
-        <translation type="vanished">아직 일괄 처리 보고서가 없습니다.</translation>
-    </message>
-    <message>
-        <source>Batch Report</source>
-        <translation type="vanished">일괄 처리 보고서</translation>
-    </message>
     <message>
         <source>Project Recovery</source>
         <translation>프로젝트 복구</translation>
