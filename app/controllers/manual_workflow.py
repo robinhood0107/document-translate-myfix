@@ -691,7 +691,11 @@ class ManualWorkflowController:
                         if image is None:
                             continue
                         for blk in blk_list:
-                            blk.inpaint_bboxes = get_inpaint_bboxes(blk.xyxy, image)
+                            blk.inpaint_bboxes = get_inpaint_bboxes(
+                                blk.xyxy,
+                                image,
+                                bubble_bbox=getattr(blk, "bubble_xyxy", None),
+                            )
                         results[file_path] = blk_list
                     return results
 
@@ -756,7 +760,11 @@ class ManualWorkflowController:
                         image = self.main.image_viewer.get_image_array()
                         results: list[tuple[TextBlock, Any]] = []
                         for blk in self.main.blk_list:
-                            bboxes = get_inpaint_bboxes(blk.xyxy, image)
+                            bboxes = get_inpaint_bboxes(
+                                blk.xyxy,
+                                image,
+                                bubble_bbox=getattr(blk, "bubble_xyxy", None),
+                            )
                             results.append((blk, bboxes))
                         return results
 
