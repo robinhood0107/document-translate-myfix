@@ -10,6 +10,8 @@ import imkit as imk
 
 
 MODEL_MAP = {
+    "Custom Service": "",
+    "Custom Local Server": "",
     "Custom": "",  
     "Deepseek-v3": "deepseek-chat", 
     "GPT-4.1": "gpt-4.1",

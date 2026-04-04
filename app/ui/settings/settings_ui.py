@@ -66,7 +66,8 @@ class SettingsPageUI(QtWidgets.QWidget):
         self.alignment = [self.tr("Left"), self.tr("Center"), self.tr("Right")]
 
         self.credential_services = [
-            self.tr("Custom"), 
+            self.tr("Custom Service"),
+            self.tr("Custom Local Server"),
             self.tr("Open AI GPT"),
             self.tr("Anthropic Claude"),
             self.tr("Google Gemini"),
@@ -83,7 +84,8 @@ class SettingsPageUI(QtWidgets.QWidget):
             self.tr("Claude-4.5-Sonnet"),
             self.tr("Claude-4.5-Haiku"),
             self.tr("Deepseek-v3"),
-            self.tr("Custom"),
+            self.tr("Custom Service"),
+            self.tr("Custom Local Server"),
         ]
         
         self.languages = [
@@ -118,7 +120,8 @@ class SettingsPageUI(QtWidgets.QWidget):
             self.tr("Light"): "Light",
 
             # Translator mappings
-            self.tr("Custom"): "Custom",
+            self.tr("Custom Service"): "Custom Service",
+            self.tr("Custom Local Server"): "Custom Local Server",
             self.tr("Deepseek-v3"): "Deepseek-v3",
             self.tr("GPT-4.1"): "GPT-4.1",
             self.tr("GPT-4.1-mini"): "GPT-4.1-mini",
@@ -155,7 +158,8 @@ class SettingsPageUI(QtWidgets.QWidget):
             self.tr("Right"): "Right",
 
             # Credential services mappings
-            self.tr("Custom"): "Custom",
+            self.tr("Custom Service"): "Custom Service",
+            self.tr("Custom Local Server"): "Custom Local Server",
             self.tr("Deepseek"): "Deepseek",
             self.tr("Open AI GPT"): "Open AI GPT",
             self.tr("Microsoft Azure"): "Microsoft Azure",
