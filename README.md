@@ -152,6 +152,7 @@ These can be used for any of the supported languages.
 
 * Gemini 2.0 Flash
 * Microsoft Azure Vision
+* PaddleOCR VL (local Docker `/layout-parsing` service)
 
 ### Inpainting
 To remove the segmented text

@@ -6,6 +6,7 @@ from .base import OCREngine
 from .microsoft_ocr import MicrosoftOCR
 from .google_ocr import GoogleOCR
 from .gpt_ocr import GPTOCR
+from .ocr_paddle_VL import PaddleOCRVLEngine
 from .ppocr import PPOCRv5Engine
 from .manga_ocr.onnx_engine import MangaOCREngineONNX
 from .pororo.onnx_engine import PororoOCREngineONNX  
@@ -91,6 +92,8 @@ class OCRFactory:
             extras["credentials"] = creds
         if device:
             extras["device"] = device
+        if ocr_key == "PaddleOCR VL":
+            extras["paddleocr_vl"] = settings.get_paddleocr_vl_settings()
 
         # The LLM OCR engines currently don't use the settings in the LLMs tab
         # so exclude this for now
@@ -132,6 +135,7 @@ class OCRFactory:
             'Google Cloud Vision': cls._create_google_ocr,
             'GPT-4.1-mini': lambda s: cls._create_gpt_ocr(s, ocr_model),
             'Gemini-2.0-Flash': lambda s: cls._create_gemini_ocr(s, ocr_model),
+            'PaddleOCR VL': cls._create_paddleocr_vl,
         }
         
         # Language-specific factory functions (for Default model)
@@ -229,4 +233,10 @@ class OCRFactory:
     def _create_gemini_ocr(settings, model) -> OCREngine:
         engine = GeminiOCR()
         engine.initialize(settings, model)
+        return engine
+
+    @staticmethod
+    def _create_paddleocr_vl(settings) -> OCREngine:
+        engine = PaddleOCRVLEngine()
+        engine.initialize(settings)
         return engine

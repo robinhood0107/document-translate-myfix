@@ -546,6 +546,20 @@ Configure them in Settings &gt; Credentials.
         <translation type="unfinished"></translation>
     </message>
     <message>
+        <source>Please fill in the required settings fields.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Missing settings for {service}.
+Configure them in Settings &gt; {settings_page}.
+{details}</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>PaddleOCR VL Settings</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
         <source>Custom requires an OpenAI-compatible API configuration.
 Please set API Key, Endpoint URL, and Model in Settings &gt; Credentials.</source>
         <translation type="unfinished"></translation>
@@ -607,6 +621,11 @@ Please check your internet connection.</source>
 インターネット接続を確認してください。</translation>
     </message>
     <message>
+        <source>Unable to reach the local PaddleOCR VL service.
+Check Settings &gt; PaddleOCR VL Settings and make sure the Docker service is running.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
         <source>Text Recognition blocked: The AI provider flagged this content.
 Please try a different Text Recognition tool.</source>
         <translation>テキスト認識がブロックされました: AI プロバイダーがこのコンテンツにフラグを立てました。
@@ -640,23 +659,23 @@ Open Batch Report to see all skipped images and reasons.</source>
     </message>
     <message>
         <source>OCR result is empty for this block.</source>
-        <translation>このブロックのOCR結果は空です。</translation>
+        <translation type="unfinished"></translation>
     </message>
     <message>
         <source>Initial crop is empty.</source>
-        <translation>初回クロップが空です。</translation>
+        <translation type="unfinished"></translation>
     </message>
     <message>
         <source>OCR returned empty text on the initial crop.</source>
-        <translation>初回クロップでOCRが空のテキストを返しました。</translation>
+        <translation type="unfinished"></translation>
     </message>
     <message>
         <source>Retry crop is empty after expansion.</source>
-        <translation>拡張後の再試行クロップが空です。</translation>
+        <translation type="unfinished"></translation>
     </message>
     <message>
         <source>Retry also failed after contrast preprocessing.</source>
-        <translation>コントラスト前処理後の再試行も失敗しました。</translation>
+        <translation type="unfinished"></translation>
     </message>
 </context>
 <context>
@@ -752,6 +771,60 @@ Open Batch Report to see all skipped images and reasons.</source>
     <message>
         <source>No</source>
         <translation>いいえ</translation>
+    </message>
+</context>
+<context>
+    <name>PaddleOCRVLPage</name>
+    <message>
+        <source>PaddleOCR VL Settings</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Connect Comic Translate to your local PaddleOCR VL Docker service.
+This OCR engine sends cropped text regions to the /layout-parsing endpoint.
+Leave markdown or visualization options disabled unless you need debugging.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Server URL</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Response Options</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Prettify Markdown</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Visualize</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Performance</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Estimated VRAM usage depends on page size, image resolution, and the Docker service build.
+Recommended starting points:
+- Up to 8 GB VRAM: 128 to 256 tokens, 1 worker
+- 10 to 12 GB VRAM: 256 tokens, 2 workers
+- 16 GB VRAM: 256 to 512 tokens, 2 to 3 workers
+- 24 GB or more: 512 tokens, 3 to 4 workers for dense pages
+Approximate GPU usage:
+- 256 tokens / 2 workers: about 5 to 7 GB
+- 512 tokens / 2 workers: about 7 to 10 GB
+- 1024 tokens / 2 workers: about 10 GB or more</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Max New Tokens</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Parallel Workers</source>
+        <translation type="unfinished"></translation>
     </message>
 </context>
 <context>
@@ -1136,6 +1209,10 @@ Restart now?</source>
         <translation>Gemini-2.0-フラッシュ</translation>
     </message>
     <message>
+        <source>PaddleOCR VL</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
         <source>Resize</source>
         <translation>サイズ変更</translation>
     </message>
@@ -1250,6 +1327,10 @@ Restart now?</source>
     <message>
         <source>Tools</source>
         <translation>ツール</translation>
+    </message>
+    <message>
+        <source>PaddleOCR VL Settings</source>
+        <translation type="unfinished"></translation>
     </message>
     <message>
         <source>LLMs</source>
@@ -1976,6 +2057,10 @@ It may have been moved, renamed, or deleted.
     <message>
         <source>Gemini-2.0-Flash</source>
         <translation>Gemini-2.0-フラッシュ</translation>
+    </message>
+    <message>
+        <source>PaddleOCR VL</source>
+        <translation type="unfinished"></translation>
     </message>
     <message>
         <source>Default</source>

@@ -565,6 +565,12 @@ Please select a different tool in Settings.</source>
 설정에서 다른 도구를 선택하세요.</translation>
     </message>
     <message>
+        <source>Unable to reach the local PaddleOCR VL service.
+Check Settings &gt; PaddleOCR VL Settings and make sure the Docker service is running.</source>
+        <translation>로컬 PaddleOCR VL 서비스에 연결할 수 없습니다.
+설정 &gt; PaddleOCR VL 설정에서 주소를 확인하고 Docker 서비스가 실행 중인지 확인하세요.</translation>
+    </message>
+    <message>
         <source>{0} image(s) were skipped in this batch.
 Open Batch Report to see all skipped images and reasons.</source>
         <translation>이 일괄 처리에서 {0}개의 이미지가 건너뛰어졌습니다.
@@ -599,7 +605,7 @@ Configure local or provider API credentials in Settings &gt; Credentials to cont
     </message>
     <message>
         <source>Required fields: {fields}</source>
-        <translation type="unfinished"></translation>
+        <translation>필수 입력 항목: {fields}</translation>
     </message>
     <message>
         <source>Please fill in the required credential fields.</source>
@@ -610,6 +616,22 @@ Configure local or provider API credentials in Settings &gt; Credentials to cont
 Configure them in Settings &gt; Credentials.
 {details}</source>
         <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Please fill in the required settings fields.</source>
+        <translation>필수 설정 항목을 입력해 주세요.</translation>
+    </message>
+    <message>
+        <source>Missing settings for {service}.
+Configure them in Settings &gt; {settings_page}.
+{details}</source>
+        <translation>{service} 설정이 비어 있습니다.
+설정 &gt; {settings_page}에서 값을 입력해 주세요.
+{details}</translation>
+    </message>
+    <message>
+        <source>PaddleOCR VL Settings</source>
+        <translation>PaddleOCR VL 설정</translation>
     </message>
     <message>
         <source>Insufficient Credits</source>
@@ -640,23 +662,23 @@ Please check your internet connection.</source>
     </message>
     <message>
         <source>OCR result is empty for this block.</source>
-        <translation>이 블록의 OCR 결과가 비어 있습니다.</translation>
+        <translation type="unfinished"></translation>
     </message>
     <message>
         <source>Initial crop is empty.</source>
-        <translation>초기 크롭이 비어 있습니다.</translation>
+        <translation type="unfinished"></translation>
     </message>
     <message>
         <source>OCR returned empty text on the initial crop.</source>
-        <translation>초기 크롭에서 OCR이 빈 텍스트를 반환했습니다.</translation>
+        <translation type="unfinished"></translation>
     </message>
     <message>
         <source>Retry crop is empty after expansion.</source>
-        <translation>확장 후 재시도 크롭이 비어 있습니다.</translation>
+        <translation type="unfinished"></translation>
     </message>
     <message>
         <source>Retry also failed after contrast preprocessing.</source>
-        <translation>대비 전처리 후 재시도도 실패했습니다.</translation>
+        <translation type="unfinished"></translation>
     </message>
 </context>
 <context>
@@ -752,6 +774,71 @@ Please check your internet connection.</source>
     <message>
         <source>No</source>
         <translation>아니오</translation>
+    </message>
+</context>
+<context>
+    <name>PaddleOCRVLPage</name>
+    <message>
+        <source>PaddleOCR VL Settings</source>
+        <translation>PaddleOCR VL 설정</translation>
+    </message>
+    <message>
+        <source>Connect Comic Translate to your local PaddleOCR VL Docker service.
+This OCR engine sends cropped text regions to the /layout-parsing endpoint.
+Leave markdown or visualization options disabled unless you need debugging.</source>
+        <translation>Comic Translate를 로컬 PaddleOCR VL Docker 서비스에 연결합니다.
+이 OCR 엔진은 잘라낸 텍스트 영역을 /layout-parsing 엔드포인트로 전송합니다.
+디버깅이 필요하지 않다면 마크다운 정리와 시각화 옵션은 끄는 것을 권장합니다.</translation>
+    </message>
+    <message>
+        <source>Server URL</source>
+        <translation>서버 URL</translation>
+    </message>
+    <message>
+        <source>Response Options</source>
+        <translation>응답 옵션</translation>
+    </message>
+    <message>
+        <source>Prettify Markdown</source>
+        <translation>마크다운 정리</translation>
+    </message>
+    <message>
+        <source>Visualize</source>
+        <translation>시각화 결과 생성</translation>
+    </message>
+    <message>
+        <source>Performance</source>
+        <translation>성능</translation>
+    </message>
+    <message>
+        <source>Estimated VRAM usage depends on page size, image resolution, and the Docker service build.
+Recommended starting points:
+- Up to 8 GB VRAM: 128 to 256 tokens, 1 worker
+- 10 to 12 GB VRAM: 256 tokens, 2 workers
+- 16 GB VRAM: 256 to 512 tokens, 2 to 3 workers
+- 24 GB or more: 512 tokens, 3 to 4 workers for dense pages
+Approximate GPU usage:
+- 256 tokens / 2 workers: about 5 to 7 GB
+- 512 tokens / 2 workers: about 7 to 10 GB
+- 1024 tokens / 2 workers: about 10 GB or more</source>
+        <translation>예상 VRAM 사용량은 페이지 크기, 이미지 해상도, Docker 서비스 빌드에 따라 달라집니다.
+권장 시작값:
+- VRAM 8GB 이하: 토큰 128~256, 작업 수 1
+- VRAM 10~12GB: 토큰 256, 작업 수 2
+- VRAM 16GB: 토큰 256~512, 작업 수 2~3
+- VRAM 24GB 이상: 글자가 많은 페이지에서 토큰 512, 작업 수 3~4
+대략적인 GPU 사용량:
+- 토큰 256 / 작업 수 2: 약 5~7GB
+- 토큰 512 / 작업 수 2: 약 7~10GB
+- 토큰 1024 / 작업 수 2: 약 10GB 이상</translation>
+    </message>
+    <message>
+        <source>Max New Tokens</source>
+        <translation>최대 새 토큰 수</translation>
+    </message>
+    <message>
+        <source>Parallel Workers</source>
+        <translation>병렬 작업 수</translation>
     </message>
 </context>
 <context>
@@ -1148,6 +1235,10 @@ Restart now?</source>
         <translation>크기 조정</translation>
     </message>
     <message>
+        <source>PaddleOCR VL</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
         <source>Original</source>
         <translation>원본</translation>
     </message>
@@ -1190,6 +1281,10 @@ Restart now?</source>
     <message>
         <source>Google Cloud</source>
         <translation>Google Cloud</translation>
+    </message>
+    <message>
+        <source>PaddleOCR VL Settings</source>
+        <translation>PaddleOCR VL 설정</translation>
     </message>
     <message>
         <source>LLMs</source>
@@ -1976,6 +2071,10 @@ It may have been moved, renamed, or deleted.
     <message>
         <source>Gemini-2.0-Flash</source>
         <translation>Gemini-2.0-Flash</translation>
+    </message>
+    <message>
+        <source>PaddleOCR VL</source>
+        <translation type="unfinished"></translation>
     </message>
     <message>
         <source>Default</source>

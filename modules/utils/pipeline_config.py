@@ -21,6 +21,7 @@ inpaint_map = {
 FIELD_LABELS = {
     "api_key": "API Key",
     "api_url": "Endpoint URL",
+    "server_url": "Server URL",
     "model": "Model",
     "api_key_ocr": "OCR API Key",
     "endpoint": "Endpoint URL",
@@ -82,6 +83,17 @@ def validate_ocr(main: ComicTranslate):
         return False
 
     normalized_tool = settings_page.ui.value_mappings.get(ocr_tool, ocr_tool)
+    if normalized_tool == "PaddleOCR VL":
+        paddle_settings = settings_page.get_paddleocr_vl_settings()
+        if not paddle_settings.get("server_url", "").strip():
+            Messages.show_missing_local_service_config_error(
+                main,
+                "PaddleOCR VL",
+                FIELD_LABELS["server_url"],
+            )
+            return False
+        return True
+
     provider = OCR_REQUIREMENTS.get(normalized_tool)
     if provider is None:
         return True
