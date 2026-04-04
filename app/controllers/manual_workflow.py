@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from typing import TYPE_CHECKING, Any, Sequence
 
 from PySide6 import QtCore
@@ -12,6 +13,7 @@ from modules.translation.processor import Translator
 from modules.utils.common_utils import is_close
 from modules.utils.device import resolve_device
 from modules.utils.language_utils import get_language_code, is_no_space_lang
+from modules.utils.ocr_quality import summarize_ocr_quality
 from modules.utils.pipeline_config import validate_ocr, validate_translator
 from modules.utils.textblock import sort_blk_list
 from modules.utils.translator_utils import is_there_text, format_translations, set_upper_case
@@ -21,6 +23,8 @@ if TYPE_CHECKING:
     from app.ui.canvas.text_item import TextBlockItem
     from controller import ComicTranslate
     from modules.utils.textblock import TextBlock
+
+logger = logging.getLogger(__name__)
 
 
 class ManualWorkflowController:
@@ -142,9 +146,33 @@ class ManualWorkflowController:
                     state = self.main.image_states.get(file_path)
                     if state is None:
                         continue
+                    self.main.image_ctrl.reset_processing_summary(file_path, run_type="manual")
                     state["blk_list"] = blk_list
                     viewer_state = state.setdefault("viewer_state", {})
                     viewer_state["rectangles"] = self._serialize_rectangles_from_blocks(blk_list)
+                    self.main.image_ctrl.update_processing_summary(
+                        file_path,
+                        {
+                            "detector_key": self.main.settings_page.get_tool_selection("detector") or "RT-DETR-v2",
+                            "detector_engine": getattr(
+                                self.main.pipeline.block_detection.block_detector_cache,
+                                "last_engine_name",
+                                "",
+                            ),
+                            "device": getattr(
+                                self.main.pipeline.block_detection.block_detector_cache,
+                                "last_device",
+                                "",
+                            ),
+                            "block_count": len(blk_list or []),
+                        },
+                    )
+                    self.main.image_ctrl.mark_processing_stage(
+                        file_path,
+                        "detect",
+                        "completed",
+                        block_count=len(blk_list or []),
+                    )
                     if file_path == current_file:
                         current_blocks = blk_list
 
@@ -205,12 +233,12 @@ class ManualWorkflowController:
             context = self._prepare_multi_page_context(selected_paths)
             source_lang_fallback = self.main.s_combo.currentText()
 
-            def ocr_selected_pages() -> dict[str, list[TextBlock]]:
+            def ocr_selected_pages() -> dict[str, tuple[list[TextBlock], str, dict, str]]:
                 cache_manager = self.main.pipeline.cache_manager
                 ocr = OCRProcessor()
                 ocr_model = self.main.settings_page.get_tool_selection("ocr")
                 device = resolve_device(self.main.settings_page.is_gpu_enabled())
-                results: dict[str, list[TextBlock]] = {}
+                results: dict[str, tuple[list[TextBlock], str, dict, str]] = {}
                 for file_path in selected_paths:
                     state = self.main.image_states.get(file_path, {})
                     blk_list = state.get("blk_list", [])
@@ -220,23 +248,62 @@ class ManualWorkflowController:
                     if image is None:
                         continue
                     source_lang = state.get("source_lang", source_lang_fallback)
+                    ocr.initialize(self.main, source_lang)
                     cache_key = cache_manager._get_ocr_cache_key(image, source_lang, ocr_model, device)
                     if cache_manager._can_serve_all_blocks_from_ocr_cache(cache_key, blk_list):
                         cache_manager._apply_cached_ocr_to_blocks(cache_key, blk_list)
+                        cache_status = "hit"
                     else:
-                        ocr.initialize(self.main, source_lang)
                         ocr.process(image, blk_list)
                         cache_manager._cache_ocr_results(cache_key, blk_list)
-                    results[file_path] = blk_list
+                        cache_status = "refreshed"
+                    quality = summarize_ocr_quality(blk_list)
+                    logger.info(
+                        "ocr quality summary: image=%s blocks=%d non_empty=%d empty=%d single_char_like=%d cache=%s",
+                        file_path.rsplit("/", 1)[-1],
+                        quality.get("block_count", 0),
+                        quality.get("non_empty", 0),
+                        quality.get("empty", 0),
+                        quality.get("single_char_like", 0),
+                        cache_status,
+                    )
+                    results[file_path] = (
+                        blk_list,
+                        cache_status,
+                        quality,
+                        ocr.last_engine_name or "",
+                    )
                 return results
 
-            def on_ocr_ready(results: dict[str, list[TextBlock]]) -> None:
+            def on_ocr_ready(results: dict[str, tuple[list[TextBlock], str, dict, str]]) -> None:
                 current_file = context["current_file"]
-                for file_path, blk_list in (results or {}).items():
+                for file_path, payload in (results or {}).items():
+                    blk_list, cache_status, quality, ocr_engine = payload
                     state = self.main.image_states.get(file_path)
                     if state is None:
                         continue
                     state["blk_list"] = blk_list
+                    self.main.image_ctrl.update_processing_summary(
+                        file_path,
+                        {
+                            "ocr_key": self.main.settings_page.get_tool_selection("ocr"),
+                            "ocr_engine": ocr_engine,
+                            "device": resolve_device(self.main.settings_page.is_gpu_enabled()),
+                            "block_count": len(blk_list or []),
+                            "ocr_quality_counts": {
+                                "non_empty": quality.get("non_empty", 0),
+                                "empty": quality.get("empty", 0),
+                                "single_char_like": quality.get("single_char_like", 0),
+                            },
+                        },
+                    )
+                    self.main.image_ctrl.mark_processing_stage(
+                        file_path,
+                        "ocr",
+                        "completed",
+                        cache_status=cache_status,
+                        quality=quality,
+                    )
                     if file_path == current_file:
                         self.main.blk_list = blk_list.copy()
 
@@ -300,9 +367,9 @@ class ManualWorkflowController:
             translator_key = settings_page.get_tool_selection("translator")
             upper_case = settings_page.ui.uppercase_checkbox.isChecked()
 
-            def translate_selected_pages() -> dict[str, list[TextBlock]]:
+            def translate_selected_pages() -> dict[str, tuple[list[TextBlock], str, str]]:
                 cache_manager = self.main.pipeline.cache_manager
-                results: dict[str, list[TextBlock]] = {}
+                results: dict[str, tuple[list[TextBlock], str, str]] = {}
                 for file_path in selected_paths:
                     state = self.main.image_states.get(file_path, {})
                     blk_list = state.get("blk_list", [])
@@ -323,20 +390,41 @@ class ManualWorkflowController:
                     )
                     if cache_manager._can_serve_all_blocks_from_translation_cache(cache_key, blk_list):
                         cache_manager._apply_cached_translations_to_blocks(cache_key, blk_list)
+                        cache_status = "hit"
                     else:
                         translator.translate(blk_list, image, extra_context)
                         cache_manager._cache_translation_results(cache_key, blk_list)
+                        cache_status = "refreshed"
                     set_upper_case(blk_list, upper_case)
-                    results[file_path] = blk_list
+                    results[file_path] = (
+                        blk_list,
+                        cache_status,
+                        translator.engine.__class__.__name__,
+                    )
                 return results
 
-            def on_translation_ready(results: dict[str, list[TextBlock]]) -> None:
+            def on_translation_ready(results: dict[str, tuple[list[TextBlock], str, str]]) -> None:
                 current_file = context["current_file"]
-                for file_path, blk_list in (results or {}).items():
+                for file_path, payload in (results or {}).items():
+                    blk_list, cache_status, translator_engine = payload
                     state = self.main.image_states.get(file_path)
                     if state is None:
                         continue
                     state["blk_list"] = blk_list
+                    self.main.image_ctrl.update_processing_summary(
+                        file_path,
+                        {
+                            "translator_key": translator_key,
+                            "translator_engine": translator_engine,
+                            "block_count": len(blk_list or []),
+                        },
+                    )
+                    self.main.image_ctrl.mark_processing_stage(
+                        file_path,
+                        "translation",
+                        "completed",
+                        cache_status=cache_status,
+                    )
                     if file_path == current_file:
                         self.main.blk_list = blk_list.copy()
 
@@ -603,7 +691,11 @@ class ManualWorkflowController:
                         if image is None:
                             continue
                         for blk in blk_list:
-                            blk.inpaint_bboxes = get_inpaint_bboxes(blk.xyxy, image)
+                            blk.inpaint_bboxes = get_inpaint_bboxes(
+                                blk.xyxy,
+                                image,
+                                bubble_bbox=getattr(blk, "bubble_xyxy", None),
+                            )
                         results[file_path] = blk_list
                     return results
 
@@ -668,7 +760,11 @@ class ManualWorkflowController:
                         image = self.main.image_viewer.get_image_array()
                         results: list[tuple[TextBlock, Any]] = []
                         for blk in self.main.blk_list:
-                            bboxes = get_inpaint_bboxes(blk.xyxy, image)
+                            bboxes = get_inpaint_bboxes(
+                                blk.xyxy,
+                                image,
+                                bubble_bbox=getattr(blk, "bubble_xyxy", None),
+                            )
                             results.append((blk, bboxes))
                         return results
 

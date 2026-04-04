@@ -18,6 +18,21 @@ class BlockDetectionHandler:
         self.main_page = main_page
         self.block_detector_cache = None
 
+    def _serialize_rectangles_from_blocks(self, blk_list: List[TextBlock]) -> list[dict]:
+        rects: list[dict] = []
+        for blk in blk_list or []:
+            x1, y1, x2, y2 = blk.xyxy
+            rects.append(
+                {
+                    "rect": (float(x1), float(y1), float(x2 - x1), float(y2 - y1)),
+                    "rotation": float(getattr(blk, "angle", 0)),
+                    "transform_origin": tuple(blk.tr_origin_point)
+                    if getattr(blk, "tr_origin_point", None)
+                    else (0.0, 0.0),
+                }
+            )
+        return rects
+
     def load_box_coords(self, blk_list: List[TextBlock]):
         # Clear rectangles appropriately based on mode
         if self.main_page.webtoon_mode:
@@ -155,6 +170,32 @@ class BlockDetectionHandler:
         source_lang_english = self.main_page.lang_mapping.get(source_lang, source_lang)
         rtl = True if source_lang_english == 'Japanese' else False
         self.main_page.blk_list = sort_blk_list(self.main_page.blk_list, rtl)
+
+        current_file = None
+        if 0 <= self.main_page.curr_img_idx < len(self.main_page.image_files):
+            current_file = self.main_page.image_files[self.main_page.curr_img_idx]
+        if current_file:
+            state = self.main_page.image_ctrl.ensure_page_state(current_file)
+            self.main_page.image_ctrl.reset_processing_summary(current_file, run_type="manual")
+            state["source_lang"] = source_lang
+            state["blk_list"] = self.main_page.blk_list.copy()
+            viewer_state = state.setdefault("viewer_state", {})
+            viewer_state["rectangles"] = self._serialize_rectangles_from_blocks(self.main_page.blk_list)
+            self.main_page.image_ctrl.update_processing_summary(
+                current_file,
+                {
+                    "detector_key": self.block_detector_cache.detector if self.block_detector_cache else "",
+                    "detector_engine": getattr(self.block_detector_cache, "last_engine_name", ""),
+                    "device": getattr(self.block_detector_cache, "last_device", ""),
+                    "block_count": len(self.main_page.blk_list),
+                },
+            )
+            self.main_page.image_ctrl.mark_processing_stage(
+                current_file,
+                "detect",
+                "completed",
+                block_count=len(self.main_page.blk_list),
+            )
         
         if load_rects:
             # For visible area detection, we pass the detected blocks only for rectangle loading

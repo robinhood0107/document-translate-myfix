@@ -28,6 +28,38 @@ class TranslationHandler:
         self.cache_manager = cache_manager
         self.pipeline = pipeline
 
+    def _current_file_path(self) -> str | None:
+        if 0 <= self.main_page.curr_img_idx < len(self.main_page.image_files):
+            return self.main_page.image_files[self.main_page.curr_img_idx]
+        return None
+
+    def _persist_current_page_translation_state(
+        self,
+        blk_list,
+        translator_key: str,
+        translator_engine: str,
+        cache_status: str,
+    ) -> None:
+        current_file = self._current_file_path()
+        if not current_file:
+            return
+        state = self.main_page.image_ctrl.ensure_page_state(current_file)
+        state["blk_list"] = self.main_page.blk_list.copy()
+        self.main_page.image_ctrl.update_processing_summary(
+            current_file,
+            {
+                "translator_key": translator_key,
+                "translator_engine": translator_engine,
+                "block_count": len(blk_list or []),
+            },
+        )
+        self.main_page.image_ctrl.mark_processing_stage(
+            current_file,
+            "translation",
+            "completed",
+            cache_status=cache_status,
+        )
+
     def translate_image(self, single_block=False):
         source_lang = self.main_page.s_combo.currentText()
         target_lang = self.main_page.t_combo.currentText()
@@ -63,6 +95,12 @@ class TranslationHandler:
                         blk.translation = cached_translation
                         logger.info(f"Using cached translation result for block: '{cached_translation}'")
                         set_upper_case([blk], upper_case)
+                        self._persist_current_page_translation_state(
+                            self.main_page.blk_list,
+                            translator_key,
+                            translator.engine.__class__.__name__,
+                            "hit",
+                        )
                         return
                     else:
                         logger.info("Block not found in cache or source text changed, processing single block...")
@@ -76,6 +114,12 @@ class TranslationHandler:
                     
                     logger.info(f"Processed single block and updated cache: '{blk.translation}'")
                     set_upper_case([blk], upper_case)
+                    self._persist_current_page_translation_state(
+                        self.main_page.blk_list,
+                        translator_key,
+                        translator.engine.__class__.__name__,
+                        "refreshed",
+                    )
                 else:
                     # Run translation on all blocks and cache the results
                     logger.info("No cached translation results found, running translation on entire page...")
@@ -95,19 +139,33 @@ class TranslationHandler:
                         logger.info(f"Cached translation results and extracted translation for block: {cached_translation}")
                     
                     set_upper_case([blk], upper_case)
+                    self._persist_current_page_translation_state(
+                        self.main_page.blk_list,
+                        translator_key,
+                        translator.engine.__class__.__name__,
+                        "refreshed",
+                    )
             else:
                 # For full page translation, check if we can use cached results
                 if self.cache_manager._can_serve_all_blocks_from_translation_cache(translation_cache_key, self.main_page.blk_list):
                     # All blocks can be served from cache with matching source text
                     self.cache_manager._apply_cached_translations_to_blocks(translation_cache_key, self.main_page.blk_list)
                     logger.info(f"Using cached translation results for all {len(self.main_page.blk_list)} blocks")
+                    cache_status = "hit"
                 else:
                     # Need to run translation and cache results
                     translator.translate(self.main_page.blk_list, image, extra_context)
                     self.cache_manager._cache_translation_results(translation_cache_key, self.main_page.blk_list)
                     logger.info("Translation completed and cached for %d blocks", len(self.main_page.blk_list))
+                    cache_status = "refreshed"
                 
                 set_upper_case(self.main_page.blk_list, upper_case)
+                self._persist_current_page_translation_state(
+                    self.main_page.blk_list,
+                    translator_key,
+                    translator.engine.__class__.__name__,
+                    cache_status,
+                )
 
     def translate_webtoon_visible_area(self, single_block=False):
         """Perform translation on the visible area in webtoon mode."""

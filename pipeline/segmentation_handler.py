@@ -51,7 +51,11 @@ class SegmentationHandler:
             y2 = max(y1 + 1, min(blk.xyxy[3], image_height))
             
             bounded_xyxy = [x1, y1, x2, y2]
-            bboxes = get_inpaint_bboxes(bounded_xyxy, visible_image)
+            bboxes = get_inpaint_bboxes(
+                bounded_xyxy,
+                visible_image,
+                bubble_bbox=getattr(blk, "bubble_xyxy", None),
+            )
             results.append((blk, bboxes))
         
         # Convert bbox coordinates back to webtoon scene coordinates and update original blocks

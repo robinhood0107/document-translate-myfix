@@ -49,11 +49,14 @@ def generate_mask(img: np.ndarray, blk_list: list[TextBlock], default_padding: i
     LONG_EDGE = 2048
 
     for blk in blk_list:
-        # Skip blocks with no text and no translation
-        if not blk.text and not blk.translation:
+        if getattr(blk, "xyxy", None) is None:
             continue
-        
-        bboxes = get_inpaint_bboxes(blk.xyxy, img)
+
+        bboxes = get_inpaint_bboxes(
+            blk.xyxy,
+            img,
+            bubble_bbox=getattr(blk, "bubble_xyxy", None),
+        )
         blk.inpaint_bboxes = bboxes
         if bboxes is None or len(bboxes) == 0:
             continue
@@ -107,10 +110,13 @@ def generate_mask(img: np.ndarray, blk_list: list[TextBlock], default_padding: i
         block_mask = imk.fill_poly(block_mask, polys, 255)
 
         # 8) Determine dilation kernel size
-        kernel_size = default_padding
-        src_lang = getattr(blk, 'source_lang', None)
-        if src_lang and src_lang not in ['ja', 'ko']:
-            kernel_size = 3
+        kernel_size = max(default_padding, 5)
+        if len(bboxes) > 0:
+            widths = [max(1, x2 - x1) for x1, _, x2, _ in bboxes]
+            heights = [max(1, y2 - y1) for _, y1, _, y2 in bboxes]
+            median_span = max(float(np.median(widths)), float(np.median(heights)))
+            dynamic_padding = int(round(median_span * 0.08))
+            kernel_size = max(kernel_size, min(9, max(3, dynamic_padding)))
         # Adjust for text bubbles: only consider contours wholly inside the bubble
         if getattr(blk, 'text_class', None) == 'text_bubble' and getattr(blk, 'bubble_xyxy', None) is not None:
             bx1, by1, bx2, by2 = blk.bubble_xyxy

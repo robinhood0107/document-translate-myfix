@@ -13,7 +13,9 @@ from app.ui.canvas.save_renderer import ImageSaveRenderer
 from app.ui.canvas.text.text_item_properties import TextItemProperties
 from app.ui.canvas.text_item import OutlineInfo, OutlineType
 from modules.rendering.render import get_best_render_area, is_vertical_block, pyside_word_wrap
+from modules.utils.export_paths import export_run_root, reserve_export_run_token
 from modules.utils.language_utils import get_language_code, is_no_space_lang
+from modules.utils.ocr_debug import export_ocr_debug_artifacts
 from modules.utils.render_style_policy import (
     VERTICAL_ALIGNMENT_TOP,
     build_rect_tuple,
@@ -29,6 +31,18 @@ logger = logging.getLogger(__name__)
 
 
 class RenderMixin:
+    def _effective_export_settings(self: WebtoonBatchProcessor) -> dict:
+        return dict(self.main_page.settings_page.get_export_settings())
+
+    def _resolve_export_token(
+        self: WebtoonBatchProcessor, directory: str, base_timestamp: str
+    ) -> str:
+        cache = getattr(self, "_export_run_tokens", None)
+        if cache is None:
+            cache = {}
+            self._export_run_tokens = cache
+        return reserve_export_run_token(directory, base_timestamp, cache)
+
     def _prepare_page_blocks_for_render(
         self: WebtoonBatchProcessor,
         image_path: str,
@@ -234,15 +248,27 @@ class RenderMixin:
                 archive_bname = os.path.splitext(os.path.basename(archive_path))[0].strip()
                 break
 
+        export_settings = self._effective_export_settings()
+        export_token = self._resolve_export_token(directory, timestamp)
+        export_root = export_run_root(directory, export_token)
+        self.main_page.image_ctrl.update_processing_summary(
+            image_path,
+            {
+                "export_root": export_root,
+                "export_settings": {
+                    "export_raw_text": bool(export_settings.get("export_raw_text", False)),
+                    "export_translated_text": bool(export_settings.get("export_translated_text", False)),
+                    "export_inpainted_image": bool(export_settings.get("export_inpainted_image", False)),
+                },
+            },
+        )
+
         if self.main_page.image_states[image_path].get("skip_render"):
             logger.info("Skipping final render for page %s, copying original.", page_idx)
             reason = "No text blocks detected or processed successfully."
-            self.skip_save(directory, timestamp, base_name, extension, archive_bname, image)
-            self.log_skipped_image(directory, timestamp, image_path, reason)
+            self.skip_save(directory, export_token, base_name, extension, archive_bname, image)
+            self.log_skipped_image(directory, export_token, image_path, reason)
             return
-
-        settings_page = self.main_page.settings_page
-        export_settings = settings_page.get_export_settings()
 
         if export_settings["export_inpainted_image"]:
             renderer = ImageSaveRenderer(image)
@@ -250,7 +276,7 @@ class RenderMixin:
             renderer.apply_patches(patches)
             path = os.path.join(
                 directory,
-                f"comic_translate_{timestamp}",
+                f"comic_translate_{export_token}",
                 "cleaned_images",
                 archive_bname,
             )
@@ -265,7 +291,7 @@ class RenderMixin:
 
         if export_settings["export_raw_text"] and blk_list:
             path = os.path.join(
-                directory, f"comic_translate_{timestamp}", "raw_texts", archive_bname
+                directory, f"comic_translate_{export_token}", "raw_texts", archive_bname
             )
             if not os.path.exists(path):
                 os.makedirs(path, exist_ok=True)
@@ -276,7 +302,7 @@ class RenderMixin:
         if export_settings["export_translated_text"] and blk_list:
             path = os.path.join(
                 directory,
-                f"comic_translate_{timestamp}",
+                f"comic_translate_{export_token}",
                 "translated_texts",
                 archive_bname,
             )
@@ -289,3 +315,46 @@ class RenderMixin:
                 encoding="UTF-8",
             ) as f:
                 f.write(translated_text)
+
+        if (export_settings["export_raw_text"] or export_settings["export_translated_text"]) and blk_list:
+            summary = self.main_page.image_states[image_path].get("processing_summary", {})
+            path = os.path.join(
+                directory,
+                f"comic_translate_{export_token}",
+                "ocr_debugs",
+                archive_bname,
+            )
+            export_ocr_debug_artifacts(
+                path,
+                base_name,
+                image,
+                blk_list,
+                summary.get("ocr_engine", ""),
+                self.main_page.image_states[image_path].get("source_lang", ""),
+            )
+
+        renderer = ImageSaveRenderer(image)
+        patches = self.final_patches_for_save.get(image_path, [])
+        renderer.apply_patches(patches)
+        viewer_state = self.main_page.image_states[image_path].get("viewer_state", {})
+        renderer.add_state_to_image(viewer_state, page_idx, self.main_page)
+        translated_dir = os.path.join(
+            directory,
+            f"comic_translate_{export_token}",
+            "translated_images",
+            archive_bname,
+        )
+        os.makedirs(translated_dir, exist_ok=True)
+        output_path = os.path.join(
+            translated_dir,
+            f"{base_name}_translated{extension}",
+        )
+        renderer.save_image(output_path)
+        logger.info("Saved final translated image to %s", output_path)
+        self.main_page.image_ctrl.update_processing_summary(
+            image_path,
+            {
+                "translated_image_path": output_path,
+                "export_root": export_root,
+            },
+        )
