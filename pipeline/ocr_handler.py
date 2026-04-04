@@ -1,4 +1,5 @@
 import logging
+import os
 from modules.ocr.processor import OCRProcessor
 from modules.utils.device import resolve_device
 from modules.utils.ocr_quality import summarize_ocr_quality
@@ -30,8 +31,17 @@ class OCRHandler:
         if not current_file:
             return
         state = self.main_page.image_ctrl.ensure_page_state(current_file)
-        state["blk_list"] = self.main_page.blk_list.copy()
+        state["blk_list"] = blk_list.copy()
         quality = summarize_ocr_quality(blk_list)
+        logger.info(
+            "ocr quality summary: image=%s blocks=%d non_empty=%d empty=%d single_char_like=%d cache=%s",
+            os.path.basename(current_file),
+            quality.get("block_count", 0),
+            quality.get("non_empty", 0),
+            quality.get("empty", 0),
+            quality.get("single_char_like", 0),
+            cache_status,
+        )
         self.main_page.image_ctrl.update_processing_summary(
             current_file,
             {
@@ -76,10 +86,14 @@ class OCRHandler:
                 # Check if we have cached results for this image/model/language
                 if self.cache_manager._is_ocr_cached(cache_key):
                     # Check if block exists in cache (even if text is empty)
-                    cached_text = self.cache_manager._get_cached_text_for_block(cache_key, blk)
-                    if cached_text is not None:  # Block was processed before (even if text is empty)
-                        blk.text = cached_text
-                        logger.info(f"Using cached OCR result for block: '{cached_text}'")
+                    payload = self.cache_manager._get_cached_ocr_payload_for_block(cache_key, blk)
+                    if payload is not None:  # Block was processed before (even if text is empty)
+                        blk.text = payload.get("text", "")
+                        blk.ocr_confidence = payload.get("confidence", 0.0)
+                        blk.ocr_status = payload.get("status", "")
+                        blk.ocr_empty_reason = payload.get("empty_reason", "")
+                        blk.ocr_attempt_count = payload.get("attempt_count", 0)
+                        logger.info(f"Using cached OCR result for block: '{blk.text}'")
                         self._persist_current_page_ocr_state(self.main_page.blk_list, "hit")
                         return
                     else:
@@ -113,9 +127,14 @@ class OCRHandler:
                         self.ocr.process(image, all_blocks_copy)
                         # Cache using the original blocks to maintain consistent IDs
                         self.cache_manager._cache_ocr_results(cache_key, self.main_page.blk_list, all_blocks_copy)
-                        cached_text = self.cache_manager._get_cached_text_for_block(cache_key, blk)
-                        blk.text = cached_text
-                        logger.info(f"Cached OCR results and extracted text for block: {cached_text}")
+                        payload = self.cache_manager._get_cached_ocr_payload_for_block(cache_key, blk)
+                        if payload is not None:
+                            blk.text = payload.get("text", "")
+                            blk.ocr_confidence = payload.get("confidence", 0.0)
+                            blk.ocr_status = payload.get("status", "")
+                            blk.ocr_empty_reason = payload.get("empty_reason", "")
+                            blk.ocr_attempt_count = payload.get("attempt_count", 0)
+                        logger.info(f"Cached OCR results and extracted text for block: {blk.text}")
                         self._persist_current_page_ocr_state(self.main_page.blk_list, "refreshed")
             else:
                 # For full page OCR, check if we can use cached results

@@ -1,16 +1,29 @@
 from __future__ import annotations
 
 from typing import Any, List, Tuple, Optional
+import logging
 import numpy as np
+from PySide6.QtCore import QCoreApplication
 
 from ..base import OCREngine
 from modules.utils.textblock import TextBlock
 from modules.utils.textblock import lists_to_blk_list
+from modules.utils.ocr_debug import (
+	OCR_STATUS_EMPTY_AFTER_RETRY,
+	OCR_STATUS_EMPTY_INITIAL,
+	OCR_STATUS_OK,
+	OCR_STATUS_OK_AFTER_RETRY,
+	build_retry_crop,
+	crop_block_image,
+	set_block_ocr_diagnostics,
+)
 from modules.utils.device import get_providers
 from modules.utils.download import ModelDownloader, ModelID
 from modules.utils.onnx import make_session, make_session_options
 from .preprocessing import det_preprocess, crop_quad, rec_resize_norm
 from .postprocessing import DBPostProcessor, CTCLabelDecoder
+
+logger = logging.getLogger(__name__)
 
 
 LANG_TO_REC_MODEL: dict[str, ModelID] = {
@@ -114,9 +127,141 @@ class PPOCRv5Engine(OCREngine):
 				confs[oi] = float(s)
 		return texts, confs
 
+	def _rec_only_blocks(self, img: np.ndarray, blk_list: List[TextBlock]) -> List[TextBlock]:
+		initial_payloads: list[tuple[int, TextBlock, np.ndarray | None]] = []
+		initial_crops: list[np.ndarray] = []
+		initial_indices: list[int] = []
+
+		for idx, blk in enumerate(blk_list):
+			crop = crop_block_image(img, blk.xyxy, auto_rotate_tall=True)
+			initial_payloads.append((idx, blk, crop))
+			if crop is not None:
+				initial_crops.append(crop)
+				initial_indices.append(idx)
+
+		initial_texts, initial_confs = self._rec_infer(initial_crops)
+		initial_results = {
+			idx: (text, conf)
+			for idx, text, conf in zip(initial_indices, initial_texts, initial_confs)
+		}
+
+		initial_empty_indices: list[int] = []
+		retry_candidates: list[tuple[int, TextBlock]] = []
+
+		for idx, blk, crop in initial_payloads:
+			if crop is None:
+				initial_empty_indices.append(idx)
+				retry_candidates.append((idx, blk))
+				set_block_ocr_diagnostics(
+					blk,
+					text="",
+					confidence=0.0,
+					status=OCR_STATUS_EMPTY_INITIAL,
+					empty_reason=QCoreApplication.translate("Messages", "Initial crop is empty."),
+					attempt_count=1,
+				)
+				continue
+
+			text, conf = initial_results.get(idx, ("", 0.0))
+			text = (text or "").strip()
+			if text:
+				set_block_ocr_diagnostics(
+					blk,
+					text=text,
+					confidence=conf,
+					status=OCR_STATUS_OK,
+					empty_reason="",
+					attempt_count=1,
+				)
+				continue
+
+			initial_empty_indices.append(idx)
+			retry_candidates.append((idx, blk))
+			set_block_ocr_diagnostics(
+				blk,
+				text="",
+				confidence=0.0,
+				status=OCR_STATUS_EMPTY_INITIAL,
+				empty_reason=QCoreApplication.translate(
+					"Messages",
+					"OCR returned empty text on the initial crop.",
+				),
+				attempt_count=1,
+			)
+
+		if initial_empty_indices:
+			logger.info("ppocr empty blocks after initial pass: %s", initial_empty_indices)
+
+		retry_payloads: list[tuple[int, TextBlock, np.ndarray | None]] = []
+		retry_crops: list[np.ndarray] = []
+		retry_indices: list[int] = []
+
+		for idx, blk in retry_candidates:
+			retry_crop = build_retry_crop(img, blk.xyxy)
+			retry_payloads.append((idx, blk, retry_crop))
+			if retry_crop is not None:
+				retry_crops.append(retry_crop)
+				retry_indices.append(idx)
+
+		retry_texts, retry_confs = self._rec_infer(retry_crops)
+		retry_results = {
+			idx: (text, conf)
+			for idx, text, conf in zip(retry_indices, retry_texts, retry_confs)
+		}
+
+		retry_empty_indices: list[int] = []
+		for idx, blk, retry_crop in retry_payloads:
+			if retry_crop is None:
+				retry_empty_indices.append(idx)
+				set_block_ocr_diagnostics(
+					blk,
+					text="",
+					confidence=0.0,
+					status=OCR_STATUS_EMPTY_AFTER_RETRY,
+					empty_reason=QCoreApplication.translate(
+						"Messages",
+						"Retry crop is empty after expansion.",
+					),
+					attempt_count=2,
+				)
+				continue
+
+			text, conf = retry_results.get(idx, ("", 0.0))
+			text = (text or "").strip()
+			if text:
+				set_block_ocr_diagnostics(
+					blk,
+					text=text,
+					confidence=conf,
+					status=OCR_STATUS_OK_AFTER_RETRY,
+					empty_reason="",
+					attempt_count=2,
+				)
+				continue
+
+			retry_empty_indices.append(idx)
+			set_block_ocr_diagnostics(
+				blk,
+				text="",
+				confidence=0.0,
+				status=OCR_STATUS_EMPTY_AFTER_RETRY,
+				empty_reason=QCoreApplication.translate(
+					"Messages",
+					"Retry also failed after contrast preprocessing.",
+				),
+				attempt_count=2,
+			)
+
+		if retry_empty_indices:
+			logger.info("ppocr empty blocks after retry: %s", retry_empty_indices)
+
+		return blk_list
+
 	def process_image(self, img: np.ndarray, blk_list: List[TextBlock]) -> List[TextBlock]:
 		if self.det_sess is None or self.rec_sess is None or self.decoder is None:
 			return blk_list
+		if blk_list:
+			return self._rec_only_blocks(img, blk_list)
 		boxes, _ = self._det_infer(img)
 		if boxes is None or len(boxes) == 0:
 			return blk_list

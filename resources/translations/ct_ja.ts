@@ -729,8 +729,8 @@ Please select a different tool in Settings.</source>
     </message>
     <message>
         <location filename="../../app/ui/messages.py" line="218"/>
-        <location filename="../../pipeline/batch_processor.py" line="399"/>
-        <location filename="../../pipeline/batch_processor.py" line="538"/>
+        <location filename="../../pipeline/batch_processor.py" line="400"/>
+        <location filename="../../pipeline/batch_processor.py" line="539"/>
         <location filename="../../pipeline/webtoon_batch/chunk.py" line="90"/>
         <source>Unable to connect to the server.
 Please check your internet connection.</source>
@@ -774,6 +774,31 @@ Open Batch Report to see all skipped images and reasons.</source>
         <location filename="../../modules/utils/pipeline_config.py" line="106"/>
         <source>Translator</source>
         <translation>翻訳者</translation>
+    </message>
+    <message>
+        <location filename="../../app/controllers/text.py" line="296"/>
+        <source>OCR result is empty for this block.</source>
+        <translation>このブロックのOCR結果は空です。</translation>
+    </message>
+    <message>
+        <location filename="../../modules/ocr/ppocr/engine.py" line="160"/>
+        <source>Initial crop is empty.</source>
+        <translation>初回クロップが空です。</translation>
+    </message>
+    <message>
+        <location filename="../../modules/ocr/ppocr/engine.py" line="185"/>
+        <source>OCR returned empty text on the initial crop.</source>
+        <translation>初回クロップでOCRが空のテキストを返しました。</translation>
+    </message>
+    <message>
+        <location filename="../../modules/ocr/ppocr/engine.py" line="221"/>
+        <source>Retry crop is empty after expansion.</source>
+        <translation>拡張後の再試行クロップが空です。</translation>
+    </message>
+    <message>
+        <location filename="../../modules/ocr/ppocr/engine.py" line="248"/>
+        <source>Retry also failed after contrast preprocessing.</source>
+        <translation>コントラスト前処理後の再試行も失敗しました。</translation>
     </message>
 </context>
 <context>
@@ -1014,33 +1039,33 @@ This folder is separate from Auto-Recover snapshots.</source>
         <translation>結果はありません</translation>
     </message>
     <message>
-        <location filename="../../app/controllers/search_replace.py" line="1070"/>
-        <location filename="../../app/controllers/search_replace.py" line="1154"/>
+        <location filename="../../app/controllers/search_replace.py" line="1071"/>
+        <location filename="../../app/controllers/search_replace.py" line="1155"/>
         <source>Replace Error</source>
         <translation>置換エラー</translation>
     </message>
     <message>
-        <location filename="../../app/controllers/search_replace.py" line="1140"/>
+        <location filename="../../app/controllers/search_replace.py" line="1141"/>
         <source>Replace</source>
         <translation>交換する</translation>
     </message>
     <message>
-        <location filename="../../app/controllers/search_replace.py" line="1145"/>
+        <location filename="../../app/controllers/search_replace.py" line="1146"/>
         <source>Replaced 1 occurrence(s)</source>
         <translation>1 件を置換しました</translation>
     </message>
     <message>
-        <location filename="../../app/controllers/search_replace.py" line="1223"/>
+        <location filename="../../app/controllers/search_replace.py" line="1224"/>
         <source>Replace All</source>
         <translation>すべて置換</translation>
     </message>
     <message>
-        <location filename="../../app/controllers/search_replace.py" line="1231"/>
+        <location filename="../../app/controllers/search_replace.py" line="1232"/>
         <source>Replaced {0} occurrence(s)</source>
         <translation>{0} 件を置換しました</translation>
     </message>
     <message>
-        <location filename="../../app/controllers/search_replace.py" line="1233"/>
+        <location filename="../../app/controllers/search_replace.py" line="1234"/>
         <source>No replacements</source>
         <translation>代替品はありません</translation>
     </message>
@@ -1881,147 +1906,147 @@ then do inpainting on the resized image.</source>
         <translation>対象言語</translation>
     </message>
     <message>
-        <location filename="../../app/ui/main_window/builders/workspace.py" line="219"/>
+        <location filename="../../app/ui/main_window/builders/workspace.py" line="226"/>
         <source>New Render items and Translate All use the controls below. Font size edits only the currently selected text item.</source>
         <translation>新しくレンダリングされる項目と「すべて翻訳」の出力には、以下の設定が使われます。フォントサイズは現在選択中のテキスト項目にのみ適用されます。</translation>
     </message>
     <message>
-        <location filename="../../app/ui/main_window/builders/workspace.py" line="227"/>
+        <location filename="../../app/ui/main_window/builders/workspace.py" line="234"/>
         <source>Text color follows the detected source text by default. Enable &apos;Use Selected Color&apos; to override it.</source>
         <translation>テキスト色は既定で検出された元の文字色に従います。上書きするには「選択した色を使う」を有効にしてください。</translation>
     </message>
     <message>
-        <location filename="../../app/ui/main_window/builders/workspace.py" line="233"/>
+        <location filename="../../app/ui/main_window/builders/workspace.py" line="240"/>
         <source>Apply All SMART Globally</source>
         <translation>すべてのSMART設定を全体に適用</translation>
     </message>
     <message>
-        <location filename="../../app/ui/main_window/builders/workspace.py" line="240"/>
+        <location filename="../../app/ui/main_window/builders/workspace.py" line="247"/>
         <source>Font family used for new Render items and Translate All output.</source>
         <translation>新しくレンダリングされる項目と「すべて翻訳」の出力で使うフォントです。</translation>
     </message>
     <message>
-        <location filename="../../app/ui/main_window/builders/workspace.py" line="245"/>
+        <location filename="../../app/ui/main_window/builders/workspace.py" line="252"/>
         <source>Edits only the selected text item. New renders still auto-fit using the min/max font size settings.</source>
         <translation>現在選択中のテキスト項目にのみ適用されます。新しいレンダリングでは、最小/最大フォントサイズ設定に基づいて引き続き自動調整されます。</translation>
     </message>
     <message>
-        <location filename="../../app/ui/main_window/builders/workspace.py" line="258"/>
+        <location filename="../../app/ui/main_window/builders/workspace.py" line="265"/>
         <source>Line spacing used for new Render items and Translate All output.</source>
         <translation>新しくレンダリングされる項目と「すべて翻訳」の出力で使う行間です。</translation>
     </message>
     <message>
-        <location filename="../../app/ui/main_window/builders/workspace.py" line="278"/>
+        <location filename="../../app/ui/main_window/builders/workspace.py" line="285"/>
         <source>Choose the fallback text color. By default the app keeps the detected source text color unless you enable &apos;Use Selected Color&apos;.</source>
         <translation>代替テキスト色を選択します。既定では、検出された元の文字色が使われます。「選択した色を使う」を有効にすると選択した色を使います。</translation>
     </message>
     <message>
-        <location filename="../../app/ui/main_window/builders/workspace.py" line="285"/>
+        <location filename="../../app/ui/main_window/builders/workspace.py" line="292"/>
         <source>Use Selected Color</source>
         <translation>選択した色を使う</translation>
     </message>
     <message>
-        <location filename="../../app/ui/main_window/builders/workspace.py" line="288"/>
+        <location filename="../../app/ui/main_window/builders/workspace.py" line="295"/>
         <source>Ignore detected source text color and use the selected color for all new Render items and Translate All output.</source>
         <translation>検出された元の文字色を無視し、新しくレンダリングされる項目と「すべて翻訳」の出力には選択した色を使います。</translation>
     </message>
     <message>
-        <location filename="../../app/ui/main_window/builders/workspace.py" line="306"/>
+        <location filename="../../app/ui/main_window/builders/workspace.py" line="313"/>
         <source>Horizontal alignment for new Render items and Translate All output.</source>
         <translation>新しくレンダリングされる項目と「すべて翻訳」の出力で使う横方向の配置です。</translation>
     </message>
     <message>
-        <location filename="../../app/ui/main_window/builders/workspace.py" line="420"/>
+        <location filename="../../app/ui/main_window/builders/workspace.py" line="427"/>
         <source>Text Color</source>
         <translation>文字色</translation>
     </message>
     <message>
-        <location filename="../../app/ui/main_window/builders/workspace.py" line="435"/>
+        <location filename="../../app/ui/main_window/builders/workspace.py" line="442"/>
         <source>Horizontal</source>
         <translation>横</translation>
     </message>
     <message>
-        <location filename="../../app/ui/main_window/builders/workspace.py" line="437"/>
+        <location filename="../../app/ui/main_window/builders/workspace.py" line="444"/>
         <source>Vertical</source>
         <translation>縦</translation>
     </message>
     <message>
-        <location filename="../../app/ui/main_window/builders/workspace.py" line="462"/>
+        <location filename="../../app/ui/main_window/builders/workspace.py" line="469"/>
         <source>Style</source>
         <translation>スタイル</translation>
     </message>
     <message>
-        <location filename="../../app/ui/main_window/builders/workspace.py" line="315"/>
+        <location filename="../../app/ui/main_window/builders/workspace.py" line="322"/>
         <source>Top</source>
         <translation>上</translation>
     </message>
     <message>
-        <location filename="../../app/ui/main_window/builders/workspace.py" line="315"/>
+        <location filename="../../app/ui/main_window/builders/workspace.py" line="322"/>
         <source>Place text at the top of the source text box.</source>
         <translation>テキストを元のテキストボックスの上部に配置します。</translation>
     </message>
     <message>
-        <location filename="../../app/ui/main_window/builders/workspace.py" line="316"/>
+        <location filename="../../app/ui/main_window/builders/workspace.py" line="323"/>
         <source>Center</source>
         <translation>中央</translation>
     </message>
     <message>
-        <location filename="../../app/ui/main_window/builders/workspace.py" line="316"/>
+        <location filename="../../app/ui/main_window/builders/workspace.py" line="323"/>
         <source>Place text in the vertical center of the source text box.</source>
         <translation>テキストを元のテキストボックスの縦方向中央に配置します。</translation>
     </message>
     <message>
-        <location filename="../../app/ui/main_window/builders/workspace.py" line="317"/>
+        <location filename="../../app/ui/main_window/builders/workspace.py" line="324"/>
         <source>Bottom</source>
         <translation>下</translation>
     </message>
     <message>
-        <location filename="../../app/ui/main_window/builders/workspace.py" line="317"/>
+        <location filename="../../app/ui/main_window/builders/workspace.py" line="324"/>
         <source>Place text at the bottom of the source text box.</source>
         <translation>テキストを元のテキストボックスの下部に配置します。</translation>
     </message>
     <message>
-        <location filename="../../app/ui/main_window/builders/workspace.py" line="328"/>
+        <location filename="../../app/ui/main_window/builders/workspace.py" line="335"/>
         <source>Bold style for new Render items and Translate All output.</source>
         <translation>新しくレンダリングされる項目と「すべて翻訳」の出力に適用する太字スタイルです。</translation>
     </message>
     <message>
-        <location filename="../../app/ui/main_window/builders/workspace.py" line="332"/>
+        <location filename="../../app/ui/main_window/builders/workspace.py" line="339"/>
         <source>Italic style for new Render items and Translate All output.</source>
         <translation>新しくレンダリングされる項目と「すべて翻訳」の出力に適用する斜体スタイルです。</translation>
     </message>
     <message>
-        <location filename="../../app/ui/main_window/builders/workspace.py" line="336"/>
+        <location filename="../../app/ui/main_window/builders/workspace.py" line="343"/>
         <source>Underline style for new Render items and Translate All output.</source>
         <translation>新しくレンダリングされる項目と「すべて翻訳」の出力に適用する下線スタイルです。</translation>
     </message>
     <message>
-        <location filename="../../app/ui/main_window/builders/workspace.py" line="353"/>
+        <location filename="../../app/ui/main_window/builders/workspace.py" line="360"/>
         <source>OFF</source>
         <translation>オフ</translation>
     </message>
     <message>
-        <location filename="../../app/ui/main_window/builders/workspace.py" line="353"/>
+        <location filename="../../app/ui/main_window/builders/workspace.py" line="360"/>
         <source>Disable outline globally.</source>
         <translation>輪郭線を全体で無効にします。</translation>
     </message>
     <message>
-        <location filename="../../app/ui/main_window/builders/workspace.py" line="354"/>
+        <location filename="../../app/ui/main_window/builders/workspace.py" line="361"/>
         <source>ON</source>
         <translation>オン</translation>
     </message>
     <message>
-        <location filename="../../app/ui/main_window/builders/workspace.py" line="354"/>
+        <location filename="../../app/ui/main_window/builders/workspace.py" line="361"/>
         <source>Enable outline globally.</source>
         <translation>輪郭線を全体で有効にします。</translation>
     </message>
     <message>
-        <location filename="../../app/ui/main_window/builders/workspace.py" line="362"/>
+        <location filename="../../app/ui/main_window/builders/workspace.py" line="369"/>
         <source>Outline color for new Render items and Translate All output.</source>
         <translation>新しくレンダリングされる項目と「すべて翻訳」の出力で使う輪郭線の色です。</translation>
     </message>
     <message>
-        <location filename="../../app/ui/main_window/builders/workspace.py" line="371"/>
+        <location filename="../../app/ui/main_window/builders/workspace.py" line="378"/>
         <source>Outline width for new Render items and Translate All output.</source>
         <translation>新しくレンダリングされる項目と「すべて翻訳」の出力で使う輪郭線の太さです。</translation>
     </message>
@@ -2054,8 +2079,8 @@ then do inpainting on the resized image.</source>
         <translation type="vanished">下線</translation>
     </message>
     <message>
-        <location filename="../../app/ui/main_window/builders/workspace.py" line="343"/>
-        <location filename="../../app/ui/main_window/builders/workspace.py" line="464"/>
+        <location filename="../../app/ui/main_window/builders/workspace.py" line="350"/>
+        <location filename="../../app/ui/main_window/builders/workspace.py" line="471"/>
         <source>Outline</source>
         <translation>概要</translation>
     </message>
@@ -2068,79 +2093,79 @@ then do inpainting on the resized image.</source>
         <translation type="vanished">輪郭の幅</translation>
     </message>
     <message>
-        <location filename="../../app/ui/main_window/builders/workspace.py" line="486"/>
+        <location filename="../../app/ui/main_window/builders/workspace.py" line="493"/>
         <source>Pan Image</source>
         <translation>画像をパンする</translation>
     </message>
     <message>
-        <location filename="../../app/ui/main_window/builders/workspace.py" line="490"/>
+        <location filename="../../app/ui/main_window/builders/workspace.py" line="497"/>
         <source>Set for all</source>
         <translation>全員に設定</translation>
     </message>
     <message>
-        <location filename="../../app/ui/main_window/builders/workspace.py" line="492"/>
+        <location filename="../../app/ui/main_window/builders/workspace.py" line="499"/>
         <source>Sets the Source and Target Language on the current page for all pages</source>
         <translation>すべてのページの現在のページにソース言語とターゲット言語を設定します</translation>
     </message>
     <message>
-        <location filename="../../app/ui/main_window/builders/workspace.py" line="502"/>
+        <location filename="../../app/ui/main_window/builders/workspace.py" line="509"/>
         <source>Draw or Select Text Boxes</source>
         <translation>テキストボックスの描画または選択</translation>
     </message>
     <message>
-        <location filename="../../app/ui/main_window/builders/workspace.py" line="507"/>
+        <location filename="../../app/ui/main_window/builders/workspace.py" line="514"/>
         <source>Delete Selected Box</source>
         <translation>選択したボックスを削除</translation>
     </message>
     <message>
-        <location filename="../../app/ui/main_window/builders/workspace.py" line="510"/>
+        <location filename="../../app/ui/main_window/builders/workspace.py" line="517"/>
         <source>Remove all the Boxes on the Image</source>
         <translation>画像上のすべてのボックスを削除します</translation>
     </message>
     <message>
-        <location filename="../../app/ui/main_window/builders/workspace.py" line="515"/>
+        <location filename="../../app/ui/main_window/builders/workspace.py" line="522"/>
         <source>Draws all the Text Blocks in the existing Text Block List
 back on the Image (for further editing)</source>
         <translation>既存のテキスト ブロック リスト内のすべてのテキスト ブロックを描画します
 画像に戻ります (さらなる編集のため)</translation>
     </message>
     <message>
-        <location filename="../../app/ui/main_window/builders/workspace.py" line="526"/>
+        <location filename="../../app/ui/main_window/builders/workspace.py" line="533"/>
         <source>Reduce the size of all blocks</source>
         <translation>すべてのブロックのサイズを小さくする</translation>
     </message>
     <message>
-        <location filename="../../app/ui/main_window/builders/workspace.py" line="537"/>
+        <location filename="../../app/ui/main_window/builders/workspace.py" line="544"/>
         <source>Increase the size of all blocks</source>
         <translation>すべてのブロックのサイズを大きくする</translation>
     </message>
     <message>
-        <location filename="../../app/ui/main_window/builders/workspace.py" line="548"/>
+        <location filename="../../app/ui/main_window/builders/workspace.py" line="555"/>
         <source>Draw Brush Strokes for Cleaning Image</source>
         <translation>画像をクリーニングするためのブラシ ストロークを描画する</translation>
     </message>
     <message>
-        <location filename="../../app/ui/main_window/builders/workspace.py" line="553"/>
+        <location filename="../../app/ui/main_window/builders/workspace.py" line="560"/>
         <source>Erase Brush Strokes</source>
         <translation>ブラシ ストロークの消去</translation>
     </message>
     <message>
-        <location filename="../../app/ui/main_window/builders/workspace.py" line="558"/>
+        <location filename="../../app/ui/main_window/builders/workspace.py" line="565"/>
         <source>Remove all the brush strokes on the Image</source>
         <translation>画像上のすべてのブラシ ストロークを削除します</translation>
     </message>
     <message>
-        <location filename="../../app/ui/main_window/builders/workspace.py" line="569"/>
+        <location filename="../../app/ui/main_window/builders/workspace.py" line="576"/>
         <source>Brush/Eraser Size Slider</source>
         <translation>ブラシ/消しゴムサイズスライダー</translation>
     </message>
     <message>
-        <location filename="../../app/ui/main_window/builders/workspace.py" line="573"/>
+        <location filename="../../app/ui/main_window/builders/workspace.py" line="580"/>
         <source>Box Drawing</source>
         <translation>ボックス図面</translation>
     </message>
     <message>
-        <location filename="../../app/ui/main_window/builders/workspace.py" line="577"/>
+        <location filename="../../app/ui/main_window/builders/workspace.py" line="584"/>
         <source>Inpainting</source>
         <translation>修復</translation>
     </message>
@@ -2380,7 +2405,7 @@ It may have been moved, renamed, or deleted.
 <context>
     <name>self.main_page</name>
     <message>
-        <location filename="../../pipeline/batch_processor.py" line="360"/>
+        <location filename="../../pipeline/batch_processor.py" line="361"/>
         <source>OCR quality too low after retry.</source>
         <translation type="unfinished"></translation>
     </message>

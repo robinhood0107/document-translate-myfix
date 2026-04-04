@@ -20,6 +20,7 @@ from modules.utils.pipeline_config import inpaint_map, get_config
 from modules.utils.image_utils import generate_mask
 from modules.utils.language_utils import get_language_code, is_no_space_lang
 from modules.utils.ocr_quality import summarize_ocr_quality
+from modules.utils.ocr_debug import export_ocr_debug_artifacts
 from modules.utils.render_style_policy import (
     VERTICAL_ALIGNMENT_TOP,
     build_rect_tuple,
@@ -627,6 +628,23 @@ class BatchProcessor:
                     encoding='UTF-8',
                 ) as file:
                     file.write(entire_translated_text)
+
+            if (export_settings['export_raw_text'] or export_settings['export_translated_text']) and blk_list:
+                ocr_summary = page_state.get("processing_summary", {})
+                debug_path = os.path.join(
+                    directory,
+                    f"comic_translate_{timestamp}",
+                    "ocr_debugs",
+                    archive_bname,
+                )
+                export_ocr_debug_artifacts(
+                    debug_path,
+                    os.path.splitext(os.path.basename(image_path))[0],
+                    image,
+                    blk_list,
+                    ocr_summary.get("ocr_engine", ""),
+                    page_state.get("source_lang", source_lang),
+                )
 
             self.emit_progress(index, total_images, 7, 10, False)
             if self._is_cancelled():

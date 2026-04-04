@@ -757,8 +757,8 @@ Please set API Key, Endpoint URL, and Model in Settings &gt; Credentials.</sourc
     </message>
     <message>
         <location filename="../../app/ui/messages.py" line="218"/>
-        <location filename="../../pipeline/batch_processor.py" line="399"/>
-        <location filename="../../pipeline/batch_processor.py" line="538"/>
+        <location filename="../../pipeline/batch_processor.py" line="400"/>
+        <location filename="../../pipeline/batch_processor.py" line="539"/>
         <location filename="../../pipeline/webtoon_batch/chunk.py" line="90"/>
         <source>Unable to connect to the server.
 Please check your internet connection.</source>
@@ -774,6 +774,31 @@ Lütfen internet bağlantınızı kontrol edin.</translation>
         <location filename="../../modules/utils/pipeline_config.py" line="106"/>
         <source>Translator</source>
         <translation>Çevirmen</translation>
+    </message>
+    <message>
+        <location filename="../../app/controllers/text.py" line="296"/>
+        <source>OCR result is empty for this block.</source>
+        <translation>Bu blok için OCR sonucu boş.</translation>
+    </message>
+    <message>
+        <location filename="../../modules/ocr/ppocr/engine.py" line="160"/>
+        <source>Initial crop is empty.</source>
+        <translation>İlk kırpma boş.</translation>
+    </message>
+    <message>
+        <location filename="../../modules/ocr/ppocr/engine.py" line="185"/>
+        <source>OCR returned empty text on the initial crop.</source>
+        <translation>OCR ilk kırpmada boş metin döndürdü.</translation>
+    </message>
+    <message>
+        <location filename="../../modules/ocr/ppocr/engine.py" line="221"/>
+        <source>Retry crop is empty after expansion.</source>
+        <translation>Genişletmeden sonraki yeniden deneme kırpması boş.</translation>
+    </message>
+    <message>
+        <location filename="../../modules/ocr/ppocr/engine.py" line="248"/>
+        <source>Retry also failed after contrast preprocessing.</source>
+        <translation>Kontrast ön işleme sonrası yeniden deneme de başarısız oldu.</translation>
     </message>
 </context>
 <context>
@@ -1014,33 +1039,33 @@ Bu klasör Otomatik Kurtarma anlık görüntülerinden ayrıdır.</translation>
         <translation>Sonuç yok</translation>
     </message>
     <message>
-        <location filename="../../app/controllers/search_replace.py" line="1070"/>
-        <location filename="../../app/controllers/search_replace.py" line="1154"/>
+        <location filename="../../app/controllers/search_replace.py" line="1071"/>
+        <location filename="../../app/controllers/search_replace.py" line="1155"/>
         <source>Replace Error</source>
         <translation>Değiştirme Hatası</translation>
     </message>
     <message>
-        <location filename="../../app/controllers/search_replace.py" line="1140"/>
+        <location filename="../../app/controllers/search_replace.py" line="1141"/>
         <source>Replace</source>
         <translation>Değiştir</translation>
     </message>
     <message>
-        <location filename="../../app/controllers/search_replace.py" line="1145"/>
+        <location filename="../../app/controllers/search_replace.py" line="1146"/>
         <source>Replaced 1 occurrence(s)</source>
         <translation>1 eşleşme değiştirildi</translation>
     </message>
     <message>
-        <location filename="../../app/controllers/search_replace.py" line="1223"/>
+        <location filename="../../app/controllers/search_replace.py" line="1224"/>
         <source>Replace All</source>
         <translation>Tümünü Değiştir</translation>
     </message>
     <message>
-        <location filename="../../app/controllers/search_replace.py" line="1231"/>
+        <location filename="../../app/controllers/search_replace.py" line="1232"/>
         <source>Replaced {0} occurrence(s)</source>
         <translation>{0} eşleşme değiştirildi</translation>
     </message>
     <message>
-        <location filename="../../app/controllers/search_replace.py" line="1233"/>
+        <location filename="../../app/controllers/search_replace.py" line="1234"/>
         <source>No replacements</source>
         <translation>Değişiklik yapılmadı</translation>
     </message>
@@ -1881,147 +1906,147 @@ sonra yeniden boyutlandırılmış görselde boyama işlemi yapın.</translation
         <translation>Hedef Dil</translation>
     </message>
     <message>
-        <location filename="../../app/ui/main_window/builders/workspace.py" line="219"/>
+        <location filename="../../app/ui/main_window/builders/workspace.py" line="226"/>
         <source>New Render items and Translate All use the controls below. Font size edits only the currently selected text item.</source>
         <translation>Yeni render öğeleri ve “Tümünü Çevir” çıktısı aşağıdaki ayarları kullanır. Yazı tipi boyutu yalnızca şu anda seçili metin öğesini düzenler.</translation>
     </message>
     <message>
-        <location filename="../../app/ui/main_window/builders/workspace.py" line="227"/>
+        <location filename="../../app/ui/main_window/builders/workspace.py" line="234"/>
         <source>Text color follows the detected source text by default. Enable &apos;Use Selected Color&apos; to override it.</source>
         <translation>Metin rengi varsayılan olarak algılanan kaynak metin rengini takip eder. Üzerine yazmak için “Seçili rengi kullan” seçeneğini etkinleştirin.</translation>
     </message>
     <message>
-        <location filename="../../app/ui/main_window/builders/workspace.py" line="233"/>
+        <location filename="../../app/ui/main_window/builders/workspace.py" line="240"/>
         <source>Apply All SMART Globally</source>
         <translation>Tüm SMART ayarlarını genel olarak uygula</translation>
     </message>
     <message>
-        <location filename="../../app/ui/main_window/builders/workspace.py" line="240"/>
+        <location filename="../../app/ui/main_window/builders/workspace.py" line="247"/>
         <source>Font family used for new Render items and Translate All output.</source>
         <translation>Yeni render öğeleri ve “Tümünü Çevir” çıktısında kullanılan yazı tipi ailesi.</translation>
     </message>
     <message>
-        <location filename="../../app/ui/main_window/builders/workspace.py" line="245"/>
+        <location filename="../../app/ui/main_window/builders/workspace.py" line="252"/>
         <source>Edits only the selected text item. New renders still auto-fit using the min/max font size settings.</source>
         <translation>Yalnızca şu anda seçili metin öğesini düzenler. Yeni render’lar yine minimum/maksimum yazı tipi boyutu ayarlarına göre otomatik sığdırılır.</translation>
     </message>
     <message>
-        <location filename="../../app/ui/main_window/builders/workspace.py" line="258"/>
+        <location filename="../../app/ui/main_window/builders/workspace.py" line="265"/>
         <source>Line spacing used for new Render items and Translate All output.</source>
         <translation>Yeni render öğeleri ve “Tümünü Çevir” çıktısında kullanılan satır aralığı.</translation>
     </message>
     <message>
-        <location filename="../../app/ui/main_window/builders/workspace.py" line="278"/>
+        <location filename="../../app/ui/main_window/builders/workspace.py" line="285"/>
         <source>Choose the fallback text color. By default the app keeps the detected source text color unless you enable &apos;Use Selected Color&apos;.</source>
         <translation>Yedek metin rengini seçin. Varsayılan olarak uygulama algılanan kaynak metin rengini korur; “Seçili rengi kullan” etkinleştirilirse seçilen renk kullanılır.</translation>
     </message>
     <message>
-        <location filename="../../app/ui/main_window/builders/workspace.py" line="285"/>
+        <location filename="../../app/ui/main_window/builders/workspace.py" line="292"/>
         <source>Use Selected Color</source>
         <translation>Seçili rengi kullan</translation>
     </message>
     <message>
-        <location filename="../../app/ui/main_window/builders/workspace.py" line="288"/>
+        <location filename="../../app/ui/main_window/builders/workspace.py" line="295"/>
         <source>Ignore detected source text color and use the selected color for all new Render items and Translate All output.</source>
         <translation>Algılanan kaynak metin rengini yok sayar ve tüm yeni render öğeleri ile “Tümünü Çevir” çıktısında seçilen rengi kullanır.</translation>
     </message>
     <message>
-        <location filename="../../app/ui/main_window/builders/workspace.py" line="306"/>
+        <location filename="../../app/ui/main_window/builders/workspace.py" line="313"/>
         <source>Horizontal alignment for new Render items and Translate All output.</source>
         <translation>Yeni render öğeleri ve “Tümünü Çevir” çıktısı için yatay hizalama.</translation>
     </message>
     <message>
-        <location filename="../../app/ui/main_window/builders/workspace.py" line="420"/>
+        <location filename="../../app/ui/main_window/builders/workspace.py" line="427"/>
         <source>Text Color</source>
         <translation>Metin rengi</translation>
     </message>
     <message>
-        <location filename="../../app/ui/main_window/builders/workspace.py" line="435"/>
+        <location filename="../../app/ui/main_window/builders/workspace.py" line="442"/>
         <source>Horizontal</source>
         <translation>Yatay</translation>
     </message>
     <message>
-        <location filename="../../app/ui/main_window/builders/workspace.py" line="437"/>
+        <location filename="../../app/ui/main_window/builders/workspace.py" line="444"/>
         <source>Vertical</source>
         <translation>Dikey</translation>
     </message>
     <message>
-        <location filename="../../app/ui/main_window/builders/workspace.py" line="462"/>
+        <location filename="../../app/ui/main_window/builders/workspace.py" line="469"/>
         <source>Style</source>
         <translation>Stil</translation>
     </message>
     <message>
-        <location filename="../../app/ui/main_window/builders/workspace.py" line="315"/>
+        <location filename="../../app/ui/main_window/builders/workspace.py" line="322"/>
         <source>Top</source>
         <translation>Üst</translation>
     </message>
     <message>
-        <location filename="../../app/ui/main_window/builders/workspace.py" line="315"/>
+        <location filename="../../app/ui/main_window/builders/workspace.py" line="322"/>
         <source>Place text at the top of the source text box.</source>
         <translation>Metni özgün metin kutusunun üst kısmına yerleştirir.</translation>
     </message>
     <message>
-        <location filename="../../app/ui/main_window/builders/workspace.py" line="316"/>
+        <location filename="../../app/ui/main_window/builders/workspace.py" line="323"/>
         <source>Center</source>
         <translation>Orta</translation>
     </message>
     <message>
-        <location filename="../../app/ui/main_window/builders/workspace.py" line="316"/>
+        <location filename="../../app/ui/main_window/builders/workspace.py" line="323"/>
         <source>Place text in the vertical center of the source text box.</source>
         <translation>Metni özgün metin kutusunun dikey ortasına yerleştirir.</translation>
     </message>
     <message>
-        <location filename="../../app/ui/main_window/builders/workspace.py" line="317"/>
+        <location filename="../../app/ui/main_window/builders/workspace.py" line="324"/>
         <source>Bottom</source>
         <translation>Alt</translation>
     </message>
     <message>
-        <location filename="../../app/ui/main_window/builders/workspace.py" line="317"/>
+        <location filename="../../app/ui/main_window/builders/workspace.py" line="324"/>
         <source>Place text at the bottom of the source text box.</source>
         <translation>Metni özgün metin kutusunun alt kısmına yerleştirir.</translation>
     </message>
     <message>
-        <location filename="../../app/ui/main_window/builders/workspace.py" line="328"/>
+        <location filename="../../app/ui/main_window/builders/workspace.py" line="335"/>
         <source>Bold style for new Render items and Translate All output.</source>
         <translation>Yeni render öğeleri ve “Tümünü Çevir” çıktısı için kalın stil.</translation>
     </message>
     <message>
-        <location filename="../../app/ui/main_window/builders/workspace.py" line="332"/>
+        <location filename="../../app/ui/main_window/builders/workspace.py" line="339"/>
         <source>Italic style for new Render items and Translate All output.</source>
         <translation>Yeni render öğeleri ve “Tümünü Çevir” çıktısı için italik stil.</translation>
     </message>
     <message>
-        <location filename="../../app/ui/main_window/builders/workspace.py" line="336"/>
+        <location filename="../../app/ui/main_window/builders/workspace.py" line="343"/>
         <source>Underline style for new Render items and Translate All output.</source>
         <translation>Yeni render öğeleri ve “Tümünü Çevir” çıktısı için altı çizili stil.</translation>
     </message>
     <message>
-        <location filename="../../app/ui/main_window/builders/workspace.py" line="353"/>
+        <location filename="../../app/ui/main_window/builders/workspace.py" line="360"/>
         <source>OFF</source>
         <translation>KAPALI</translation>
     </message>
     <message>
-        <location filename="../../app/ui/main_window/builders/workspace.py" line="353"/>
+        <location filename="../../app/ui/main_window/builders/workspace.py" line="360"/>
         <source>Disable outline globally.</source>
         <translation>Konturu genel olarak devre dışı bırakır.</translation>
     </message>
     <message>
-        <location filename="../../app/ui/main_window/builders/workspace.py" line="354"/>
+        <location filename="../../app/ui/main_window/builders/workspace.py" line="361"/>
         <source>ON</source>
         <translation>AÇIK</translation>
     </message>
     <message>
-        <location filename="../../app/ui/main_window/builders/workspace.py" line="354"/>
+        <location filename="../../app/ui/main_window/builders/workspace.py" line="361"/>
         <source>Enable outline globally.</source>
         <translation>Konturu genel olarak etkinleştirir.</translation>
     </message>
     <message>
-        <location filename="../../app/ui/main_window/builders/workspace.py" line="362"/>
+        <location filename="../../app/ui/main_window/builders/workspace.py" line="369"/>
         <source>Outline color for new Render items and Translate All output.</source>
         <translation>Yeni render öğeleri ve “Tümünü Çevir” çıktısında kullanılan kontur rengi.</translation>
     </message>
     <message>
-        <location filename="../../app/ui/main_window/builders/workspace.py" line="371"/>
+        <location filename="../../app/ui/main_window/builders/workspace.py" line="378"/>
         <source>Outline width for new Render items and Translate All output.</source>
         <translation>Yeni render öğeleri ve “Tümünü Çevir” çıktısında kullanılan kontur kalınlığı.</translation>
     </message>
@@ -2054,8 +2079,8 @@ sonra yeniden boyutlandırılmış görselde boyama işlemi yapın.</translation
         <translation type="vanished">Altı Çizili</translation>
     </message>
     <message>
-        <location filename="../../app/ui/main_window/builders/workspace.py" line="343"/>
-        <location filename="../../app/ui/main_window/builders/workspace.py" line="464"/>
+        <location filename="../../app/ui/main_window/builders/workspace.py" line="350"/>
+        <location filename="../../app/ui/main_window/builders/workspace.py" line="471"/>
         <source>Outline</source>
         <translation>Dış Çizgi</translation>
     </message>
@@ -2068,78 +2093,78 @@ sonra yeniden boyutlandırılmış görselde boyama işlemi yapın.</translation
         <translation type="vanished">Dış Çizgi Kalınlığı</translation>
     </message>
     <message>
-        <location filename="../../app/ui/main_window/builders/workspace.py" line="486"/>
+        <location filename="../../app/ui/main_window/builders/workspace.py" line="493"/>
         <source>Pan Image</source>
         <translation>Görseli Kaydır</translation>
     </message>
     <message>
-        <location filename="../../app/ui/main_window/builders/workspace.py" line="490"/>
+        <location filename="../../app/ui/main_window/builders/workspace.py" line="497"/>
         <source>Set for all</source>
         <translation>Tümüne Ayarla</translation>
     </message>
     <message>
-        <location filename="../../app/ui/main_window/builders/workspace.py" line="492"/>
+        <location filename="../../app/ui/main_window/builders/workspace.py" line="499"/>
         <source>Sets the Source and Target Language on the current page for all pages</source>
         <translation>Mevcut sayfadaki kaynak ve hedef dili tüm sayfalara uygular</translation>
     </message>
     <message>
-        <location filename="../../app/ui/main_window/builders/workspace.py" line="502"/>
+        <location filename="../../app/ui/main_window/builders/workspace.py" line="509"/>
         <source>Draw or Select Text Boxes</source>
         <translation>Metin Kutuları Çiz veya Seç</translation>
     </message>
     <message>
-        <location filename="../../app/ui/main_window/builders/workspace.py" line="507"/>
+        <location filename="../../app/ui/main_window/builders/workspace.py" line="514"/>
         <source>Delete Selected Box</source>
         <translation>Seçili Kutuyu Sil</translation>
     </message>
     <message>
-        <location filename="../../app/ui/main_window/builders/workspace.py" line="510"/>
+        <location filename="../../app/ui/main_window/builders/workspace.py" line="517"/>
         <source>Remove all the Boxes on the Image</source>
         <translation>Görseldeki tüm kutuları kaldır</translation>
     </message>
     <message>
-        <location filename="../../app/ui/main_window/builders/workspace.py" line="515"/>
+        <location filename="../../app/ui/main_window/builders/workspace.py" line="522"/>
         <source>Draws all the Text Blocks in the existing Text Block List
 back on the Image (for further editing)</source>
         <translation>Mevcut metin blok listesindeki tüm metin bloklarını tekrar görsele çizer (daha fazla düzenleme için)</translation>
     </message>
     <message>
-        <location filename="../../app/ui/main_window/builders/workspace.py" line="526"/>
+        <location filename="../../app/ui/main_window/builders/workspace.py" line="533"/>
         <source>Reduce the size of all blocks</source>
         <translation>Tüm blokların boyutunu küçült</translation>
     </message>
     <message>
-        <location filename="../../app/ui/main_window/builders/workspace.py" line="537"/>
+        <location filename="../../app/ui/main_window/builders/workspace.py" line="544"/>
         <source>Increase the size of all blocks</source>
         <translation>Tüm blokların boyutunu büyüt</translation>
     </message>
     <message>
-        <location filename="../../app/ui/main_window/builders/workspace.py" line="548"/>
+        <location filename="../../app/ui/main_window/builders/workspace.py" line="555"/>
         <source>Draw Brush Strokes for Cleaning Image</source>
         <translation>Görseli temizlemek için fırça darbeleri çiz</translation>
     </message>
     <message>
-        <location filename="../../app/ui/main_window/builders/workspace.py" line="553"/>
+        <location filename="../../app/ui/main_window/builders/workspace.py" line="560"/>
         <source>Erase Brush Strokes</source>
         <translation>Fırça darbelerini sil</translation>
     </message>
     <message>
-        <location filename="../../app/ui/main_window/builders/workspace.py" line="558"/>
+        <location filename="../../app/ui/main_window/builders/workspace.py" line="565"/>
         <source>Remove all the brush strokes on the Image</source>
         <translation>Görseldeki tüm fırça darbelerini kaldır</translation>
     </message>
     <message>
-        <location filename="../../app/ui/main_window/builders/workspace.py" line="569"/>
+        <location filename="../../app/ui/main_window/builders/workspace.py" line="576"/>
         <source>Brush/Eraser Size Slider</source>
         <translation>Fırça/Silgi Boyutu Kaydırıcısı</translation>
     </message>
     <message>
-        <location filename="../../app/ui/main_window/builders/workspace.py" line="573"/>
+        <location filename="../../app/ui/main_window/builders/workspace.py" line="580"/>
         <source>Box Drawing</source>
         <translation>Kutu Çizimi</translation>
     </message>
     <message>
-        <location filename="../../app/ui/main_window/builders/workspace.py" line="577"/>
+        <location filename="../../app/ui/main_window/builders/workspace.py" line="584"/>
         <source>Inpainting</source>
         <translation>Boyama</translation>
     </message>
@@ -2379,7 +2404,7 @@ Taşınmış, yeniden adlandırılmış veya silinmiş olabilir.
 <context>
     <name>self.main_page</name>
     <message>
-        <location filename="../../pipeline/batch_processor.py" line="360"/>
+        <location filename="../../pipeline/batch_processor.py" line="361"/>
         <source>OCR quality too low after retry.</source>
         <translation type="unfinished"></translation>
     </message>

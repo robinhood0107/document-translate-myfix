@@ -757,8 +757,8 @@ Please set API Key, Endpoint URL, and Model in Settings &gt; Credentials.</sourc
     </message>
     <message>
         <location filename="../../app/ui/messages.py" line="218"/>
-        <location filename="../../pipeline/batch_processor.py" line="399"/>
-        <location filename="../../pipeline/batch_processor.py" line="538"/>
+        <location filename="../../pipeline/batch_processor.py" line="400"/>
+        <location filename="../../pipeline/batch_processor.py" line="539"/>
         <location filename="../../pipeline/webtoon_batch/chunk.py" line="90"/>
         <source>Unable to connect to the server.
 Please check your internet connection.</source>
@@ -774,6 +774,31 @@ Veuillez vérifier votre connexion Internet.</translation>
         <location filename="../../modules/utils/pipeline_config.py" line="106"/>
         <source>Translator</source>
         <translation>Traducteur</translation>
+    </message>
+    <message>
+        <location filename="../../app/controllers/text.py" line="296"/>
+        <source>OCR result is empty for this block.</source>
+        <translation>Le résultat OCR de ce bloc est vide.</translation>
+    </message>
+    <message>
+        <location filename="../../modules/ocr/ppocr/engine.py" line="160"/>
+        <source>Initial crop is empty.</source>
+        <translation>Le recadrage initial est vide.</translation>
+    </message>
+    <message>
+        <location filename="../../modules/ocr/ppocr/engine.py" line="185"/>
+        <source>OCR returned empty text on the initial crop.</source>
+        <translation>L&apos;OCR a renvoyé un texte vide sur le recadrage initial.</translation>
+    </message>
+    <message>
+        <location filename="../../modules/ocr/ppocr/engine.py" line="221"/>
+        <source>Retry crop is empty after expansion.</source>
+        <translation>Le recadrage de nouvelle tentative est vide après l&apos;extension.</translation>
+    </message>
+    <message>
+        <location filename="../../modules/ocr/ppocr/engine.py" line="248"/>
+        <source>Retry also failed after contrast preprocessing.</source>
+        <translation>La nouvelle tentative a également échoué après le prétraitement du contraste.</translation>
     </message>
 </context>
 <context>
@@ -1014,33 +1039,33 @@ Ce dossier est distinct des instantanés de récupération automatique.</transla
         <translation>Aucun résultat</translation>
     </message>
     <message>
-        <location filename="../../app/controllers/search_replace.py" line="1070"/>
-        <location filename="../../app/controllers/search_replace.py" line="1154"/>
+        <location filename="../../app/controllers/search_replace.py" line="1071"/>
+        <location filename="../../app/controllers/search_replace.py" line="1155"/>
         <source>Replace Error</source>
         <translation>Erreur de remplacement</translation>
     </message>
     <message>
-        <location filename="../../app/controllers/search_replace.py" line="1140"/>
+        <location filename="../../app/controllers/search_replace.py" line="1141"/>
         <source>Replace</source>
         <translation>Remplacer</translation>
     </message>
     <message>
-        <location filename="../../app/controllers/search_replace.py" line="1145"/>
+        <location filename="../../app/controllers/search_replace.py" line="1146"/>
         <source>Replaced 1 occurrence(s)</source>
         <translation>1 occurrence remplacée</translation>
     </message>
     <message>
-        <location filename="../../app/controllers/search_replace.py" line="1223"/>
+        <location filename="../../app/controllers/search_replace.py" line="1224"/>
         <source>Replace All</source>
         <translation>Tout remplacer</translation>
     </message>
     <message>
-        <location filename="../../app/controllers/search_replace.py" line="1231"/>
+        <location filename="../../app/controllers/search_replace.py" line="1232"/>
         <source>Replaced {0} occurrence(s)</source>
         <translation>{0} occurrence(s) remplacée(s)</translation>
     </message>
     <message>
-        <location filename="../../app/controllers/search_replace.py" line="1233"/>
+        <location filename="../../app/controllers/search_replace.py" line="1234"/>
         <source>No replacements</source>
         <translation>Aucun remplacement</translation>
     </message>
@@ -1881,147 +1906,147 @@ puis effectuer l&apos;inpainting sur l&apos;image redimensionnée.</translation>
         <translation>Langue cible</translation>
     </message>
     <message>
-        <location filename="../../app/ui/main_window/builders/workspace.py" line="219"/>
+        <location filename="../../app/ui/main_window/builders/workspace.py" line="226"/>
         <source>New Render items and Translate All use the controls below. Font size edits only the currently selected text item.</source>
         <translation>Les nouveaux éléments rendus et la sortie de « Tout traduire » utilisent les réglages ci-dessous. La taille de police ne modifie que l’élément de texte actuellement sélectionné.</translation>
     </message>
     <message>
-        <location filename="../../app/ui/main_window/builders/workspace.py" line="227"/>
+        <location filename="../../app/ui/main_window/builders/workspace.py" line="234"/>
         <source>Text color follows the detected source text by default. Enable &apos;Use Selected Color&apos; to override it.</source>
         <translation>La couleur du texte suit par défaut la couleur du texte source détectée. Activez « Utiliser la couleur choisie » pour la remplacer.</translation>
     </message>
     <message>
-        <location filename="../../app/ui/main_window/builders/workspace.py" line="233"/>
+        <location filename="../../app/ui/main_window/builders/workspace.py" line="240"/>
         <source>Apply All SMART Globally</source>
         <translation>Appliquer globalement tous les réglages SMART</translation>
     </message>
     <message>
-        <location filename="../../app/ui/main_window/builders/workspace.py" line="240"/>
+        <location filename="../../app/ui/main_window/builders/workspace.py" line="247"/>
         <source>Font family used for new Render items and Translate All output.</source>
         <translation>Police utilisée pour les nouveaux éléments rendus et la sortie de « Tout traduire ».</translation>
     </message>
     <message>
-        <location filename="../../app/ui/main_window/builders/workspace.py" line="245"/>
+        <location filename="../../app/ui/main_window/builders/workspace.py" line="252"/>
         <source>Edits only the selected text item. New renders still auto-fit using the min/max font size settings.</source>
         <translation>Modifie uniquement l’élément de texte actuellement sélectionné. Les nouveaux rendus s’ajustent toujours automatiquement selon les réglages de taille minimale/maximale de police.</translation>
     </message>
     <message>
-        <location filename="../../app/ui/main_window/builders/workspace.py" line="258"/>
+        <location filename="../../app/ui/main_window/builders/workspace.py" line="265"/>
         <source>Line spacing used for new Render items and Translate All output.</source>
         <translation>Interligne utilisée pour les nouveaux éléments rendus et la sortie de « Tout traduire ».</translation>
     </message>
     <message>
-        <location filename="../../app/ui/main_window/builders/workspace.py" line="278"/>
+        <location filename="../../app/ui/main_window/builders/workspace.py" line="285"/>
         <source>Choose the fallback text color. By default the app keeps the detected source text color unless you enable &apos;Use Selected Color&apos;.</source>
         <translation>Choisissez la couleur de texte de secours. Par défaut, l’application conserve la couleur du texte source détectée, sauf si vous activez « Utiliser la couleur choisie ».</translation>
     </message>
     <message>
-        <location filename="../../app/ui/main_window/builders/workspace.py" line="285"/>
+        <location filename="../../app/ui/main_window/builders/workspace.py" line="292"/>
         <source>Use Selected Color</source>
         <translation>Utiliser la couleur choisie</translation>
     </message>
     <message>
-        <location filename="../../app/ui/main_window/builders/workspace.py" line="288"/>
+        <location filename="../../app/ui/main_window/builders/workspace.py" line="295"/>
         <source>Ignore detected source text color and use the selected color for all new Render items and Translate All output.</source>
         <translation>Ignore la couleur du texte source détectée et utilise la couleur sélectionnée pour tous les nouveaux éléments rendus et la sortie de « Tout traduire ».</translation>
     </message>
     <message>
-        <location filename="../../app/ui/main_window/builders/workspace.py" line="306"/>
+        <location filename="../../app/ui/main_window/builders/workspace.py" line="313"/>
         <source>Horizontal alignment for new Render items and Translate All output.</source>
         <translation>Alignement horizontal pour les nouveaux éléments rendus et la sortie de « Tout traduire ».</translation>
     </message>
     <message>
-        <location filename="../../app/ui/main_window/builders/workspace.py" line="420"/>
+        <location filename="../../app/ui/main_window/builders/workspace.py" line="427"/>
         <source>Text Color</source>
         <translation>Couleur du texte</translation>
     </message>
     <message>
-        <location filename="../../app/ui/main_window/builders/workspace.py" line="435"/>
+        <location filename="../../app/ui/main_window/builders/workspace.py" line="442"/>
         <source>Horizontal</source>
         <translation>Horizontal</translation>
     </message>
     <message>
-        <location filename="../../app/ui/main_window/builders/workspace.py" line="437"/>
+        <location filename="../../app/ui/main_window/builders/workspace.py" line="444"/>
         <source>Vertical</source>
         <translation>Vertical</translation>
     </message>
     <message>
-        <location filename="../../app/ui/main_window/builders/workspace.py" line="462"/>
+        <location filename="../../app/ui/main_window/builders/workspace.py" line="469"/>
         <source>Style</source>
         <translation>Style</translation>
     </message>
     <message>
-        <location filename="../../app/ui/main_window/builders/workspace.py" line="315"/>
+        <location filename="../../app/ui/main_window/builders/workspace.py" line="322"/>
         <source>Top</source>
         <translation>Haut</translation>
     </message>
     <message>
-        <location filename="../../app/ui/main_window/builders/workspace.py" line="315"/>
+        <location filename="../../app/ui/main_window/builders/workspace.py" line="322"/>
         <source>Place text at the top of the source text box.</source>
         <translation>Place le texte en haut de la zone de texte source.</translation>
     </message>
     <message>
-        <location filename="../../app/ui/main_window/builders/workspace.py" line="316"/>
+        <location filename="../../app/ui/main_window/builders/workspace.py" line="323"/>
         <source>Center</source>
         <translation>Centre</translation>
     </message>
     <message>
-        <location filename="../../app/ui/main_window/builders/workspace.py" line="316"/>
+        <location filename="../../app/ui/main_window/builders/workspace.py" line="323"/>
         <source>Place text in the vertical center of the source text box.</source>
         <translation>Place le texte au centre vertical de la zone de texte source.</translation>
     </message>
     <message>
-        <location filename="../../app/ui/main_window/builders/workspace.py" line="317"/>
+        <location filename="../../app/ui/main_window/builders/workspace.py" line="324"/>
         <source>Bottom</source>
         <translation>Bas</translation>
     </message>
     <message>
-        <location filename="../../app/ui/main_window/builders/workspace.py" line="317"/>
+        <location filename="../../app/ui/main_window/builders/workspace.py" line="324"/>
         <source>Place text at the bottom of the source text box.</source>
         <translation>Place le texte en bas de la zone de texte source.</translation>
     </message>
     <message>
-        <location filename="../../app/ui/main_window/builders/workspace.py" line="328"/>
+        <location filename="../../app/ui/main_window/builders/workspace.py" line="335"/>
         <source>Bold style for new Render items and Translate All output.</source>
         <translation>Style gras pour les nouveaux éléments rendus et la sortie de « Tout traduire ».</translation>
     </message>
     <message>
-        <location filename="../../app/ui/main_window/builders/workspace.py" line="332"/>
+        <location filename="../../app/ui/main_window/builders/workspace.py" line="339"/>
         <source>Italic style for new Render items and Translate All output.</source>
         <translation>Style italique pour les nouveaux éléments rendus et la sortie de « Tout traduire ».</translation>
     </message>
     <message>
-        <location filename="../../app/ui/main_window/builders/workspace.py" line="336"/>
+        <location filename="../../app/ui/main_window/builders/workspace.py" line="343"/>
         <source>Underline style for new Render items and Translate All output.</source>
         <translation>Style souligné pour les nouveaux éléments rendus et la sortie de « Tout traduire ».</translation>
     </message>
     <message>
-        <location filename="../../app/ui/main_window/builders/workspace.py" line="353"/>
+        <location filename="../../app/ui/main_window/builders/workspace.py" line="360"/>
         <source>OFF</source>
         <translation>DÉSACTIVÉ</translation>
     </message>
     <message>
-        <location filename="../../app/ui/main_window/builders/workspace.py" line="353"/>
+        <location filename="../../app/ui/main_window/builders/workspace.py" line="360"/>
         <source>Disable outline globally.</source>
         <translation>Désactive le contour globalement.</translation>
     </message>
     <message>
-        <location filename="../../app/ui/main_window/builders/workspace.py" line="354"/>
+        <location filename="../../app/ui/main_window/builders/workspace.py" line="361"/>
         <source>ON</source>
         <translation>ACTIVÉ</translation>
     </message>
     <message>
-        <location filename="../../app/ui/main_window/builders/workspace.py" line="354"/>
+        <location filename="../../app/ui/main_window/builders/workspace.py" line="361"/>
         <source>Enable outline globally.</source>
         <translation>Active le contour globalement.</translation>
     </message>
     <message>
-        <location filename="../../app/ui/main_window/builders/workspace.py" line="362"/>
+        <location filename="../../app/ui/main_window/builders/workspace.py" line="369"/>
         <source>Outline color for new Render items and Translate All output.</source>
         <translation>Couleur du contour pour les nouveaux éléments rendus et la sortie de « Tout traduire ».</translation>
     </message>
     <message>
-        <location filename="../../app/ui/main_window/builders/workspace.py" line="371"/>
+        <location filename="../../app/ui/main_window/builders/workspace.py" line="378"/>
         <source>Outline width for new Render items and Translate All output.</source>
         <translation>Épaisseur du contour pour les nouveaux éléments rendus et la sortie de « Tout traduire ».</translation>
     </message>
@@ -2054,8 +2079,8 @@ puis effectuer l&apos;inpainting sur l&apos;image redimensionnée.</translation>
         <translation type="vanished">Souligné</translation>
     </message>
     <message>
-        <location filename="../../app/ui/main_window/builders/workspace.py" line="343"/>
-        <location filename="../../app/ui/main_window/builders/workspace.py" line="464"/>
+        <location filename="../../app/ui/main_window/builders/workspace.py" line="350"/>
+        <location filename="../../app/ui/main_window/builders/workspace.py" line="471"/>
         <source>Outline</source>
         <translation>Contour</translation>
     </message>
@@ -2068,78 +2093,78 @@ puis effectuer l&apos;inpainting sur l&apos;image redimensionnée.</translation>
         <translation type="vanished">Largeur du contour</translation>
     </message>
     <message>
-        <location filename="../../app/ui/main_window/builders/workspace.py" line="486"/>
+        <location filename="../../app/ui/main_window/builders/workspace.py" line="493"/>
         <source>Pan Image</source>
         <translation>Déplacer l&apos;image</translation>
     </message>
     <message>
-        <location filename="../../app/ui/main_window/builders/workspace.py" line="490"/>
+        <location filename="../../app/ui/main_window/builders/workspace.py" line="497"/>
         <source>Set for all</source>
         <translation>Définir pour tous</translation>
     </message>
     <message>
-        <location filename="../../app/ui/main_window/builders/workspace.py" line="492"/>
+        <location filename="../../app/ui/main_window/builders/workspace.py" line="499"/>
         <source>Sets the Source and Target Language on the current page for all pages</source>
         <translation>Définit la langue source et la langue cible sur la page actuelle pour toutes les pages</translation>
     </message>
     <message>
-        <location filename="../../app/ui/main_window/builders/workspace.py" line="502"/>
+        <location filename="../../app/ui/main_window/builders/workspace.py" line="509"/>
         <source>Draw or Select Text Boxes</source>
         <translation>Dessiner ou sélectionner des zones de texte</translation>
     </message>
     <message>
-        <location filename="../../app/ui/main_window/builders/workspace.py" line="507"/>
+        <location filename="../../app/ui/main_window/builders/workspace.py" line="514"/>
         <source>Delete Selected Box</source>
         <translation>Supprimer la zone sélectionnée</translation>
     </message>
     <message>
-        <location filename="../../app/ui/main_window/builders/workspace.py" line="510"/>
+        <location filename="../../app/ui/main_window/builders/workspace.py" line="517"/>
         <source>Remove all the Boxes on the Image</source>
         <translation>Supprimer toutes les boîtes sur l&apos;image</translation>
     </message>
     <message>
-        <location filename="../../app/ui/main_window/builders/workspace.py" line="515"/>
+        <location filename="../../app/ui/main_window/builders/workspace.py" line="522"/>
         <source>Draws all the Text Blocks in the existing Text Block List
 back on the Image (for further editing)</source>
         <translation>Redessine tous les blocs de texte de la liste existante sur l&apos;image (pour une édition ultérieure)</translation>
     </message>
     <message>
-        <location filename="../../app/ui/main_window/builders/workspace.py" line="526"/>
+        <location filename="../../app/ui/main_window/builders/workspace.py" line="533"/>
         <source>Reduce the size of all blocks</source>
         <translation>Réduire la taille de tous les blocs</translation>
     </message>
     <message>
-        <location filename="../../app/ui/main_window/builders/workspace.py" line="537"/>
+        <location filename="../../app/ui/main_window/builders/workspace.py" line="544"/>
         <source>Increase the size of all blocks</source>
         <translation>Augmenter la taille de tous les blocs</translation>
     </message>
     <message>
-        <location filename="../../app/ui/main_window/builders/workspace.py" line="548"/>
+        <location filename="../../app/ui/main_window/builders/workspace.py" line="555"/>
         <source>Draw Brush Strokes for Cleaning Image</source>
         <translation>Tracer des coups de pinceau pour nettoyer l&apos;image</translation>
     </message>
     <message>
-        <location filename="../../app/ui/main_window/builders/workspace.py" line="553"/>
+        <location filename="../../app/ui/main_window/builders/workspace.py" line="560"/>
         <source>Erase Brush Strokes</source>
         <translation>Effacer les coups de pinceau</translation>
     </message>
     <message>
-        <location filename="../../app/ui/main_window/builders/workspace.py" line="558"/>
+        <location filename="../../app/ui/main_window/builders/workspace.py" line="565"/>
         <source>Remove all the brush strokes on the Image</source>
         <translation>Supprimer tous les coups de pinceau sur l&apos;image</translation>
     </message>
     <message>
-        <location filename="../../app/ui/main_window/builders/workspace.py" line="569"/>
+        <location filename="../../app/ui/main_window/builders/workspace.py" line="576"/>
         <source>Brush/Eraser Size Slider</source>
         <translation>Curseur de taille du pinceau/gomme</translation>
     </message>
     <message>
-        <location filename="../../app/ui/main_window/builders/workspace.py" line="573"/>
+        <location filename="../../app/ui/main_window/builders/workspace.py" line="580"/>
         <source>Box Drawing</source>
         <translation>Dessin de boîte</translation>
     </message>
     <message>
-        <location filename="../../app/ui/main_window/builders/workspace.py" line="577"/>
+        <location filename="../../app/ui/main_window/builders/workspace.py" line="584"/>
         <source>Inpainting</source>
         <translation>Inpainting</translation>
     </message>
@@ -2379,7 +2404,7 @@ Il a peut-être été déplacé, renommé ou supprimé.
 <context>
     <name>self.main_page</name>
     <message>
-        <location filename="../../pipeline/batch_processor.py" line="360"/>
+        <location filename="../../pipeline/batch_processor.py" line="361"/>
         <source>OCR quality too low after retry.</source>
         <translation type="unfinished"></translation>
     </message>

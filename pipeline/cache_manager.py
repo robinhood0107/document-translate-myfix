@@ -146,33 +146,51 @@ class CacheManager:
         """Check if OCR results are cached for this image/model/language combination"""
         return cache_key in self.ocr_cache
 
+    def _normalize_cached_ocr_payload(self, result):
+        if isinstance(result, dict):
+            return {
+                "text": result.get("text", "") or "",
+                "confidence": float(result.get("confidence", 0.0) or 0.0),
+                "status": result.get("status", "") or "",
+                "empty_reason": result.get("empty_reason", "") or "",
+                "attempt_count": int(result.get("attempt_count", 0) or 0),
+            }
+        return {
+            "text": result or "",
+            "confidence": 0.0,
+            "status": "ok" if result else "",
+            "empty_reason": "",
+            "attempt_count": 1 if result else 0,
+        }
+
+    def _build_ocr_cache_payload(self, block):
+        return {
+            "text": getattr(block, "text", "") or "",
+            "confidence": float(getattr(block, "ocr_confidence", 0.0) or 0.0),
+            "status": getattr(block, "ocr_status", "") or "",
+            "empty_reason": getattr(block, "ocr_empty_reason", "") or "",
+            "attempt_count": int(getattr(block, "ocr_attempt_count", 0) or 0),
+        }
+
     def _cache_ocr_results(self, cache_key, blk_list, processed_blk_list=None):
         """Cache OCR results for all blocks"""
         try:
             block_results = {}
-            # If we have separate processed blocks (with OCR results), use them for text
-            # but use original blocks for consistent IDs
+            # If we have separate processed blocks (with OCR results), use them for
+            # payload values but use original blocks for stable IDs.
             if processed_blk_list is not None:
                 for original_blk, processed_blk in zip(blk_list, processed_blk_list):
-                    block_id = self._get_block_id(original_blk)  # Use original block for ID
-                    text = getattr(processed_blk, 'text', '') or ''  # Get text from processed block
-                    # Only include blocks that actually have OCR text
-                    if text:
-                        block_results[block_id] = text
+                    block_id = self._get_block_id(original_blk)
+                    block_results[block_id] = self._build_ocr_cache_payload(processed_blk)
             else:
-                # Standard case: use the same blocks for both ID and text
                 for blk in blk_list:
                     block_id = self._get_block_id(blk)
-                    text = getattr(blk, 'text', '') or ''
-                    # Only include blocks that actually have OCR text
-                    if text:
-                        block_results[block_id] = text
-            # Do not create a cache entry if there are no blocks with OCR text
+                    block_results[block_id] = self._build_ocr_cache_payload(blk)
             if block_results:
                 self.ocr_cache[cache_key] = block_results
                 logger.info(f"Cached OCR results for {len(block_results)} blocks")
             else:
-                logger.debug("No OCR text found in blocks; skipping OCR cache creation")
+                logger.debug("No OCR blocks found; skipping OCR cache creation")
         except Exception as e:
             logger.warning(f"Failed to cache OCR results: {e}")
             # Don't raise exception, just skip caching
@@ -180,34 +198,32 @@ class CacheManager:
     def update_ocr_cache_for_block(self, cache_key, block):
         """Update or add a single block's OCR result to the cache."""
         block_id = self._get_block_id(block)
-        text = getattr(block, 'text', '') or ''
-
-        # Don't create/update cache entries for empty OCR text
-        if not text:
-            logger.debug(f"Skipping OCR cache update for empty text for block ID {block_id}")
-            return
 
         if cache_key not in self.ocr_cache:
             self.ocr_cache[cache_key] = {}
 
-        self.ocr_cache[cache_key][block_id] = text
+        self.ocr_cache[cache_key][block_id] = self._build_ocr_cache_payload(block)
         logger.debug(f"Updated OCR cache for block ID {block_id}")
 
 
+    def _get_cached_ocr_payload_for_block(self, cache_key, block):
+        matched_id, result = self._find_matching_block_id(cache_key, block)
+
+        if matched_id is not None:
+            return self._normalize_cached_ocr_payload(result)
+
+        block_id = self._get_block_id(block)
+        cached_results = self.ocr_cache.get(cache_key, {})
+        logger.debug(f"No cached text found for block ID {block_id}")
+        logger.debug(f"Available block IDs in cache: {list(cached_results.keys())}")
+        return None
+
     def _get_cached_text_for_block(self, cache_key, block):
         """Retrieve cached text for a specific block"""
-        matched_id, result = self._find_matching_block_id(cache_key, block)
-        
-        if matched_id is not None:  # Block found in cache
-            return result  # Return the cached text (could be empty string)
-        else:
-            # Block not found in cache at all
-            # Debug logging to help identify cache issues (only log when block not found in cache)
-            block_id = self._get_block_id(block)
-            cached_results = self.ocr_cache.get(cache_key, {})
-            logger.debug(f"No cached text found for block ID {block_id}")
-            logger.debug(f"Available block IDs in cache: {list(cached_results.keys())}")
-            return None  # Indicate block needs processing
+        payload = self._get_cached_ocr_payload_for_block(cache_key, block)
+        if payload is None:
+            return None
+        return payload.get("text", "")
 
     def _get_translation_cache_key(self, image, source_lang, target_lang, translator_key, extra_context):
         """Generate cache key for translation results"""
@@ -334,9 +350,14 @@ class CacheManager:
     def _apply_cached_ocr_to_blocks(self, cache_key, block_list):
         """Apply cached OCR results to all blocks in the list"""
         for block in block_list:
-            cached_text = self._get_cached_text_for_block(cache_key, block)
-            if cached_text is not None: 
-                block.text = cached_text  
+            payload = self._get_cached_ocr_payload_for_block(cache_key, block)
+            if payload is None:
+                continue
+            block.text = payload.get("text", "")
+            block.ocr_confidence = payload.get("confidence", 0.0)
+            block.ocr_status = payload.get("status", "")
+            block.ocr_empty_reason = payload.get("empty_reason", "")
+            block.ocr_attempt_count = payload.get("attempt_count", 0)
 
     def _apply_cached_translations_to_blocks(self, cache_key, block_list):
         """Apply cached translation results to all blocks in the list"""

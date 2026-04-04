@@ -756,8 +756,8 @@ Please set API Key, Endpoint URL, and Model in Settings &gt; Credentials.</sourc
     </message>
     <message>
         <location filename="../../app/ui/messages.py" line="218"/>
-        <location filename="../../pipeline/batch_processor.py" line="399"/>
-        <location filename="../../pipeline/batch_processor.py" line="538"/>
+        <location filename="../../pipeline/batch_processor.py" line="400"/>
+        <location filename="../../pipeline/batch_processor.py" line="539"/>
         <location filename="../../pipeline/webtoon_batch/chunk.py" line="90"/>
         <source>Unable to connect to the server.
 Please check your internet connection.</source>
@@ -773,6 +773,31 @@ Please check your internet connection.</source>
         <location filename="../../modules/utils/pipeline_config.py" line="106"/>
         <source>Translator</source>
         <translation>翻译器</translation>
+    </message>
+    <message>
+        <location filename="../../app/controllers/text.py" line="296"/>
+        <source>OCR result is empty for this block.</source>
+        <translation>此文本块的OCR结果为空。</translation>
+    </message>
+    <message>
+        <location filename="../../modules/ocr/ppocr/engine.py" line="160"/>
+        <source>Initial crop is empty.</source>
+        <translation>初始裁剪区域为空。</translation>
+    </message>
+    <message>
+        <location filename="../../modules/ocr/ppocr/engine.py" line="185"/>
+        <source>OCR returned empty text on the initial crop.</source>
+        <translation>OCR在初始裁剪区域上返回了空文本。</translation>
+    </message>
+    <message>
+        <location filename="../../modules/ocr/ppocr/engine.py" line="221"/>
+        <source>Retry crop is empty after expansion.</source>
+        <translation>扩展后的重试裁剪区域为空。</translation>
+    </message>
+    <message>
+        <location filename="../../modules/ocr/ppocr/engine.py" line="248"/>
+        <source>Retry also failed after contrast preprocessing.</source>
+        <translation>经过对比度预处理后，重试仍然失败。</translation>
     </message>
 </context>
 <context>
@@ -1013,33 +1038,33 @@ This folder is separate from Auto-Recover snapshots.</source>
         <translation>无结果</translation>
     </message>
     <message>
-        <location filename="../../app/controllers/search_replace.py" line="1070"/>
-        <location filename="../../app/controllers/search_replace.py" line="1154"/>
+        <location filename="../../app/controllers/search_replace.py" line="1071"/>
+        <location filename="../../app/controllers/search_replace.py" line="1155"/>
         <source>Replace Error</source>
         <translation>替换错误</translation>
     </message>
     <message>
-        <location filename="../../app/controllers/search_replace.py" line="1140"/>
+        <location filename="../../app/controllers/search_replace.py" line="1141"/>
         <source>Replace</source>
         <translation>替换</translation>
     </message>
     <message>
-        <location filename="../../app/controllers/search_replace.py" line="1145"/>
+        <location filename="../../app/controllers/search_replace.py" line="1146"/>
         <source>Replaced 1 occurrence(s)</source>
         <translation>已替换 1 处</translation>
     </message>
     <message>
-        <location filename="../../app/controllers/search_replace.py" line="1223"/>
+        <location filename="../../app/controllers/search_replace.py" line="1224"/>
         <source>Replace All</source>
         <translation>全部替换</translation>
     </message>
     <message>
-        <location filename="../../app/controllers/search_replace.py" line="1231"/>
+        <location filename="../../app/controllers/search_replace.py" line="1232"/>
         <source>Replaced {0} occurrence(s)</source>
         <translation>已替换 {0} 处</translation>
     </message>
     <message>
-        <location filename="../../app/controllers/search_replace.py" line="1233"/>
+        <location filename="../../app/controllers/search_replace.py" line="1234"/>
         <source>No replacements</source>
         <translation>未进行替换</translation>
     </message>
@@ -1879,147 +1904,147 @@ then do inpainting on the resized image.</source>
         <translation>目标语言</translation>
     </message>
     <message>
-        <location filename="../../app/ui/main_window/builders/workspace.py" line="219"/>
+        <location filename="../../app/ui/main_window/builders/workspace.py" line="226"/>
         <source>New Render items and Translate All use the controls below. Font size edits only the currently selected text item.</source>
         <translation>新的渲染文本和“全部翻译”输出会使用下方设置。字号只会编辑当前选中的文本项。</translation>
     </message>
     <message>
-        <location filename="../../app/ui/main_window/builders/workspace.py" line="227"/>
+        <location filename="../../app/ui/main_window/builders/workspace.py" line="234"/>
         <source>Text color follows the detected source text by default. Enable &apos;Use Selected Color&apos; to override it.</source>
         <translation>默认情况下，文本颜色会跟随检测到的原始文字颜色。启用“使用所选颜色”即可覆盖。</translation>
     </message>
     <message>
-        <location filename="../../app/ui/main_window/builders/workspace.py" line="233"/>
+        <location filename="../../app/ui/main_window/builders/workspace.py" line="240"/>
         <source>Apply All SMART Globally</source>
         <translation>全局应用所有 SMART 设置</translation>
     </message>
     <message>
-        <location filename="../../app/ui/main_window/builders/workspace.py" line="240"/>
+        <location filename="../../app/ui/main_window/builders/workspace.py" line="247"/>
         <source>Font family used for new Render items and Translate All output.</source>
         <translation>用于新的渲染文本和“全部翻译”输出的字体。</translation>
     </message>
     <message>
-        <location filename="../../app/ui/main_window/builders/workspace.py" line="245"/>
+        <location filename="../../app/ui/main_window/builders/workspace.py" line="252"/>
         <source>Edits only the selected text item. New renders still auto-fit using the min/max font size settings.</source>
         <translation>只编辑当前选中的文本项。新的渲染结果仍会根据最小/最大字号设置自动适配。</translation>
     </message>
     <message>
-        <location filename="../../app/ui/main_window/builders/workspace.py" line="258"/>
+        <location filename="../../app/ui/main_window/builders/workspace.py" line="265"/>
         <source>Line spacing used for new Render items and Translate All output.</source>
         <translation>用于新的渲染文本和“全部翻译”输出的行距。</translation>
     </message>
     <message>
-        <location filename="../../app/ui/main_window/builders/workspace.py" line="278"/>
+        <location filename="../../app/ui/main_window/builders/workspace.py" line="285"/>
         <source>Choose the fallback text color. By default the app keeps the detected source text color unless you enable &apos;Use Selected Color&apos;.</source>
         <translation>选择备用文字颜色。默认情况下，应用会保留检测到的原始文字颜色，除非启用“使用所选颜色”。</translation>
     </message>
     <message>
-        <location filename="../../app/ui/main_window/builders/workspace.py" line="285"/>
+        <location filename="../../app/ui/main_window/builders/workspace.py" line="292"/>
         <source>Use Selected Color</source>
         <translation>使用所选颜色</translation>
     </message>
     <message>
-        <location filename="../../app/ui/main_window/builders/workspace.py" line="288"/>
+        <location filename="../../app/ui/main_window/builders/workspace.py" line="295"/>
         <source>Ignore detected source text color and use the selected color for all new Render items and Translate All output.</source>
         <translation>忽略检测到的原始文字颜色，并将所选颜色用于所有新的渲染文本和“全部翻译”输出。</translation>
     </message>
     <message>
-        <location filename="../../app/ui/main_window/builders/workspace.py" line="306"/>
+        <location filename="../../app/ui/main_window/builders/workspace.py" line="313"/>
         <source>Horizontal alignment for new Render items and Translate All output.</source>
         <translation>用于新的渲染文本和“全部翻译”输出的水平对齐方式。</translation>
     </message>
     <message>
-        <location filename="../../app/ui/main_window/builders/workspace.py" line="420"/>
+        <location filename="../../app/ui/main_window/builders/workspace.py" line="427"/>
         <source>Text Color</source>
         <translation>文字颜色</translation>
     </message>
     <message>
-        <location filename="../../app/ui/main_window/builders/workspace.py" line="435"/>
+        <location filename="../../app/ui/main_window/builders/workspace.py" line="442"/>
         <source>Horizontal</source>
         <translation>水平</translation>
     </message>
     <message>
-        <location filename="../../app/ui/main_window/builders/workspace.py" line="437"/>
+        <location filename="../../app/ui/main_window/builders/workspace.py" line="444"/>
         <source>Vertical</source>
         <translation>垂直</translation>
     </message>
     <message>
-        <location filename="../../app/ui/main_window/builders/workspace.py" line="462"/>
+        <location filename="../../app/ui/main_window/builders/workspace.py" line="469"/>
         <source>Style</source>
         <translation>样式</translation>
     </message>
     <message>
-        <location filename="../../app/ui/main_window/builders/workspace.py" line="315"/>
+        <location filename="../../app/ui/main_window/builders/workspace.py" line="322"/>
         <source>Top</source>
         <translation>顶部</translation>
     </message>
     <message>
-        <location filename="../../app/ui/main_window/builders/workspace.py" line="315"/>
+        <location filename="../../app/ui/main_window/builders/workspace.py" line="322"/>
         <source>Place text at the top of the source text box.</source>
         <translation>将文本放置在原始文本框的顶部。</translation>
     </message>
     <message>
-        <location filename="../../app/ui/main_window/builders/workspace.py" line="316"/>
+        <location filename="../../app/ui/main_window/builders/workspace.py" line="323"/>
         <source>Center</source>
         <translation>居中</translation>
     </message>
     <message>
-        <location filename="../../app/ui/main_window/builders/workspace.py" line="316"/>
+        <location filename="../../app/ui/main_window/builders/workspace.py" line="323"/>
         <source>Place text in the vertical center of the source text box.</source>
         <translation>将文本放置在原始文本框的垂直居中位置。</translation>
     </message>
     <message>
-        <location filename="../../app/ui/main_window/builders/workspace.py" line="317"/>
+        <location filename="../../app/ui/main_window/builders/workspace.py" line="324"/>
         <source>Bottom</source>
         <translation>底部</translation>
     </message>
     <message>
-        <location filename="../../app/ui/main_window/builders/workspace.py" line="317"/>
+        <location filename="../../app/ui/main_window/builders/workspace.py" line="324"/>
         <source>Place text at the bottom of the source text box.</source>
         <translation>将文本放置在原始文本框的底部。</translation>
     </message>
     <message>
-        <location filename="../../app/ui/main_window/builders/workspace.py" line="328"/>
+        <location filename="../../app/ui/main_window/builders/workspace.py" line="335"/>
         <source>Bold style for new Render items and Translate All output.</source>
         <translation>用于新的渲染文本和“全部翻译”输出的加粗样式。</translation>
     </message>
     <message>
-        <location filename="../../app/ui/main_window/builders/workspace.py" line="332"/>
+        <location filename="../../app/ui/main_window/builders/workspace.py" line="339"/>
         <source>Italic style for new Render items and Translate All output.</source>
         <translation>用于新的渲染文本和“全部翻译”输出的斜体样式。</translation>
     </message>
     <message>
-        <location filename="../../app/ui/main_window/builders/workspace.py" line="336"/>
+        <location filename="../../app/ui/main_window/builders/workspace.py" line="343"/>
         <source>Underline style for new Render items and Translate All output.</source>
         <translation>用于新的渲染文本和“全部翻译”输出的下划线样式。</translation>
     </message>
     <message>
-        <location filename="../../app/ui/main_window/builders/workspace.py" line="353"/>
+        <location filename="../../app/ui/main_window/builders/workspace.py" line="360"/>
         <source>OFF</source>
         <translation>关</translation>
     </message>
     <message>
-        <location filename="../../app/ui/main_window/builders/workspace.py" line="353"/>
+        <location filename="../../app/ui/main_window/builders/workspace.py" line="360"/>
         <source>Disable outline globally.</source>
         <translation>全局禁用描边。</translation>
     </message>
     <message>
-        <location filename="../../app/ui/main_window/builders/workspace.py" line="354"/>
+        <location filename="../../app/ui/main_window/builders/workspace.py" line="361"/>
         <source>ON</source>
         <translation>开</translation>
     </message>
     <message>
-        <location filename="../../app/ui/main_window/builders/workspace.py" line="354"/>
+        <location filename="../../app/ui/main_window/builders/workspace.py" line="361"/>
         <source>Enable outline globally.</source>
         <translation>全局启用描边。</translation>
     </message>
     <message>
-        <location filename="../../app/ui/main_window/builders/workspace.py" line="362"/>
+        <location filename="../../app/ui/main_window/builders/workspace.py" line="369"/>
         <source>Outline color for new Render items and Translate All output.</source>
         <translation>用于新的渲染文本和“全部翻译”输出的描边颜色。</translation>
     </message>
     <message>
-        <location filename="../../app/ui/main_window/builders/workspace.py" line="371"/>
+        <location filename="../../app/ui/main_window/builders/workspace.py" line="378"/>
         <source>Outline width for new Render items and Translate All output.</source>
         <translation>用于新的渲染文本和“全部翻译”输出的描边宽度。</translation>
     </message>
@@ -2052,8 +2077,8 @@ then do inpainting on the resized image.</source>
         <translation type="vanished">下划线</translation>
     </message>
     <message>
-        <location filename="../../app/ui/main_window/builders/workspace.py" line="343"/>
-        <location filename="../../app/ui/main_window/builders/workspace.py" line="464"/>
+        <location filename="../../app/ui/main_window/builders/workspace.py" line="350"/>
+        <location filename="../../app/ui/main_window/builders/workspace.py" line="471"/>
         <source>Outline</source>
         <translation>描边</translation>
     </message>
@@ -2066,78 +2091,78 @@ then do inpainting on the resized image.</source>
         <translation type="vanished">描边宽度</translation>
     </message>
     <message>
-        <location filename="../../app/ui/main_window/builders/workspace.py" line="486"/>
+        <location filename="../../app/ui/main_window/builders/workspace.py" line="493"/>
         <source>Pan Image</source>
         <translation>平移图片</translation>
     </message>
     <message>
-        <location filename="../../app/ui/main_window/builders/workspace.py" line="490"/>
+        <location filename="../../app/ui/main_window/builders/workspace.py" line="497"/>
         <source>Set for all</source>
         <translation>全部设置</translation>
     </message>
     <message>
-        <location filename="../../app/ui/main_window/builders/workspace.py" line="492"/>
+        <location filename="../../app/ui/main_window/builders/workspace.py" line="499"/>
         <source>Sets the Source and Target Language on the current page for all pages</source>
         <translation>将当前页的源语言和目标语言应用到所有页面</translation>
     </message>
     <message>
-        <location filename="../../app/ui/main_window/builders/workspace.py" line="502"/>
+        <location filename="../../app/ui/main_window/builders/workspace.py" line="509"/>
         <source>Draw or Select Text Boxes</source>
         <translation>绘制或选择文本框</translation>
     </message>
     <message>
-        <location filename="../../app/ui/main_window/builders/workspace.py" line="507"/>
+        <location filename="../../app/ui/main_window/builders/workspace.py" line="514"/>
         <source>Delete Selected Box</source>
         <translation>删除选中的框</translation>
     </message>
     <message>
-        <location filename="../../app/ui/main_window/builders/workspace.py" line="510"/>
+        <location filename="../../app/ui/main_window/builders/workspace.py" line="517"/>
         <source>Remove all the Boxes on the Image</source>
         <translation>移除图片上的所有框</translation>
     </message>
     <message>
-        <location filename="../../app/ui/main_window/builders/workspace.py" line="515"/>
+        <location filename="../../app/ui/main_window/builders/workspace.py" line="522"/>
         <source>Draws all the Text Blocks in the existing Text Block List
 back on the Image (for further editing)</source>
         <translation>将现有文本块列表中的所有文本块重新绘制到图片上（以便进一步编辑）</translation>
     </message>
     <message>
-        <location filename="../../app/ui/main_window/builders/workspace.py" line="526"/>
+        <location filename="../../app/ui/main_window/builders/workspace.py" line="533"/>
         <source>Reduce the size of all blocks</source>
         <translation>缩小所有块的大小</translation>
     </message>
     <message>
-        <location filename="../../app/ui/main_window/builders/workspace.py" line="537"/>
+        <location filename="../../app/ui/main_window/builders/workspace.py" line="544"/>
         <source>Increase the size of all blocks</source>
         <translation>增大所有块的大小</translation>
     </message>
     <message>
-        <location filename="../../app/ui/main_window/builders/workspace.py" line="548"/>
+        <location filename="../../app/ui/main_window/builders/workspace.py" line="555"/>
         <source>Draw Brush Strokes for Cleaning Image</source>
         <translation>绘制笔刷以清理图片</translation>
     </message>
     <message>
-        <location filename="../../app/ui/main_window/builders/workspace.py" line="553"/>
+        <location filename="../../app/ui/main_window/builders/workspace.py" line="560"/>
         <source>Erase Brush Strokes</source>
         <translation>擦除笔刷</translation>
     </message>
     <message>
-        <location filename="../../app/ui/main_window/builders/workspace.py" line="558"/>
+        <location filename="../../app/ui/main_window/builders/workspace.py" line="565"/>
         <source>Remove all the brush strokes on the Image</source>
         <translation>移除图片上的所有笔刷</translation>
     </message>
     <message>
-        <location filename="../../app/ui/main_window/builders/workspace.py" line="569"/>
+        <location filename="../../app/ui/main_window/builders/workspace.py" line="576"/>
         <source>Brush/Eraser Size Slider</source>
         <translation>笔刷/橡皮大小滑块</translation>
     </message>
     <message>
-        <location filename="../../app/ui/main_window/builders/workspace.py" line="573"/>
+        <location filename="../../app/ui/main_window/builders/workspace.py" line="580"/>
         <source>Box Drawing</source>
         <translation>框绘制</translation>
     </message>
     <message>
-        <location filename="../../app/ui/main_window/builders/workspace.py" line="577"/>
+        <location filename="../../app/ui/main_window/builders/workspace.py" line="584"/>
         <source>Inpainting</source>
         <translation>修复填充</translation>
     </message>
@@ -2377,7 +2402,7 @@ It may have been moved, renamed, or deleted.
 <context>
     <name>self.main_page</name>
     <message>
-        <location filename="../../pipeline/batch_processor.py" line="360"/>
+        <location filename="../../pipeline/batch_processor.py" line="361"/>
         <source>OCR quality too low after retry.</source>
         <translation type="unfinished"></translation>
     </message>

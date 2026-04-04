@@ -14,6 +14,7 @@ from app.ui.canvas.text.text_item_properties import TextItemProperties
 from app.ui.canvas.text_item import OutlineInfo, OutlineType
 from modules.rendering.render import get_best_render_area, is_vertical_block, pyside_word_wrap
 from modules.utils.language_utils import get_language_code, is_no_space_lang
+from modules.utils.ocr_debug import export_ocr_debug_artifacts
 from modules.utils.render_style_policy import (
     VERTICAL_ALIGNMENT_TOP,
     build_rect_tuple,
@@ -289,3 +290,20 @@ class RenderMixin:
                 encoding="UTF-8",
             ) as f:
                 f.write(translated_text)
+
+        if (export_settings["export_raw_text"] or export_settings["export_translated_text"]) and blk_list:
+            summary = self.main_page.image_states[image_path].get("processing_summary", {})
+            path = os.path.join(
+                directory,
+                f"comic_translate_{timestamp}",
+                "ocr_debugs",
+                archive_bname,
+            )
+            export_ocr_debug_artifacts(
+                path,
+                base_name,
+                image,
+                blk_list,
+                summary.get("ocr_engine", ""),
+                self.main_page.image_states[image_path].get("source_lang", ""),
+            )

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from typing import TYPE_CHECKING, Any, Sequence
 
 from PySide6 import QtCore
@@ -22,6 +23,8 @@ if TYPE_CHECKING:
     from app.ui.canvas.text_item import TextBlockItem
     from controller import ComicTranslate
     from modules.utils.textblock import TextBlock
+
+logger = logging.getLogger(__name__)
 
 
 class ManualWorkflowController:
@@ -255,6 +258,15 @@ class ManualWorkflowController:
                         cache_manager._cache_ocr_results(cache_key, blk_list)
                         cache_status = "refreshed"
                     quality = summarize_ocr_quality(blk_list)
+                    logger.info(
+                        "ocr quality summary: image=%s blocks=%d non_empty=%d empty=%d single_char_like=%d cache=%s",
+                        file_path.rsplit("/", 1)[-1],
+                        quality.get("block_count", 0),
+                        quality.get("non_empty", 0),
+                        quality.get("empty", 0),
+                        quality.get("single_char_like", 0),
+                        cache_status,
+                    )
                     results[file_path] = (
                         blk_list,
                         cache_status,
