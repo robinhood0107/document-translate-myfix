@@ -2,13 +2,6 @@
 <!DOCTYPE TS>
 <TS version="2.1" language="ru_RU">
 <context>
-    <name></name>
-    <message>
-        <source>Custom</source>
-        <translation type="vanished">Пользовательский</translation>
-    </message>
-</context>
-<context>
     <name>AboutPage</name>
     <message>
         <source>App Information</source>
@@ -21,58 +14,6 @@
     <message>
         <source>Check for Updates</source>
         <translation>Проверить обновления</translation>
-    </message>
-</context>
-<context>
-    <name>AccountPage</name>
-    <message>
-        <source>Sign in to Comic Translate</source>
-        <translation type="vanished">Войдите в Comic Translate</translation>
-    </message>
-    <message>
-        <source>Sign in to use Comic Translate, see your credits balance, and purchase additional credits.</source>
-        <translation type="vanished">Войдите, чтобы использовать Comic Translate, просматривать баланс кредитов и покупать дополнительные кредиты.</translation>
-    </message>
-    <message>
-        <source>Sign in is Optional</source>
-        <translation>Пользовательский</translation>
-    </message>
-    <message>
-        <source>Comic Translate can be used with local models or your own API keys.
-Sign in only if you want to use hosted credits and account features.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Sign In</source>
-        <translation>Войти</translation>
-    </message>
-    <message>
-        <source>See model credit costs</source>
-        <translation>Посмотреть стоимость кредитов модели</translation>
-    </message>
-    <message>
-        <source>Account Information</source>
-        <translation>Информация об аккаунте</translation>
-    </message>
-    <message>
-        <source>Email:</source>
-        <translation>Электронная почта:</translation>
-    </message>
-    <message>
-        <source>Subscription Tier:</source>
-        <translation>Уровень подписки:</translation>
-    </message>
-    <message>
-        <source>Credits:</source>
-        <translation>Кредиты:</translation>
-    </message>
-    <message>
-        <source>Buy Credits</source>
-        <translation>Купить кредиты</translation>
-    </message>
-    <message>
-        <source>Sign Out</source>
-        <translation>Выйти</translation>
     </message>
 </context>
 <context>
@@ -228,13 +169,9 @@ Sign in only if you want to use hosted credits and account features.</source>
         <translation>Сохранить ключи</translation>
     </message>
     <message>
-        <source>These settings are for advanced users who wish to use their own Custom API endpoints (e.g. Local Language Models) for translation. For most users, no configuration is needed here.</source>
-        <translation type="vanished">Эти настройки предназначены для опытных пользователей, которые хотят использовать свои собственные пользовательские API-интерфейсы (например, локальные языковые модели) для перевода. Для большинства пользователей конфигурация здесь не требуется.</translation>
-    </message>
-    <message>
         <source>Configure provider API keys or custom endpoints here.
-You do not need to sign in to use local models or your own provider credentials.</source>
-        <translation>Войти</translation>
+Use this page for your own API credentials and local OpenAI-compatible endpoints.</source>
+        <translation type="unfinished"></translation>
     </message>
     <message>
         <source>OCR</source>
@@ -495,28 +432,12 @@ Go to Settings &gt; Text Rendering &gt; Font to select or import one </source>
 Перейдите в Настройки &gt; Отображение текста &gt; Шрифт, чтобы выбрать или импортировать его</translation>
     </message>
     <message>
-        <source>Please sign in or sign up via Settings &gt; Account to continue.</source>
-        <translation type="vanished">Пожалуйста, войдите или зарегистрируйтесь через Настройки &gt; Аккаунт для продолжения.</translation>
-    </message>
-    <message>
         <source>The translator does not support the selected target language. Please choose a different language or tool.</source>
         <translation>Переводчик не поддерживает выбранный целевой язык. Пожалуйста, выберите другой язык или инструмент.</translation>
     </message>
     <message>
         <source>No {} selected. Please select a {} in Settings &gt; Tools.</source>
         <translation>Не выбран {}. Пожалуйста, выберите {} в Настройки &gt; Инструменты.</translation>
-    </message>
-    <message>
-        <source>Insufficient credits to perform this action.
-Go to Settings &gt; Account to buy more credits.</source>
-        <translation>Недостаточно кредитов для выполнения этого действия.
-Перейдите в Настройки &gt; Аккаунт, чтобы купить больше кредитов.</translation>
-    </message>
-    <message>
-        <source>Custom requires advanced API configuration. Most users should use the Credits system instead.
-Please sign in via Settings &gt; Account to use credits, or configure Custom API settings in Settings &gt; Advanced.</source>
-        <translation type="vanished">Пользовательский режим требует расширенной настройки API. Большинству пользователей рекомендуется использовать систему кредитов.
-Пожалуйста, войдите через Настройки &gt; Аккаунт для использования кредитов или настройте параметры пользовательского API в Настройки &gt; Дополнительно.</translation>
     </message>
     <message>
         <source>Copy</source>
@@ -598,11 +519,6 @@ Please try a different tool.</source>
         <translation>ОК</translation>
     </message>
     <message>
-        <source>Sign-in is only required for hosted credits.
-Configure local or provider API credentials in Settings &gt; Credentials to continue.</source>
-        <translation>Пропускаем:</translation>
-    </message>
-    <message>
         <source>Required fields: {fields}</source>
         <translation type="unfinished"></translation>
     </message>
@@ -629,10 +545,6 @@ Configure them in Settings &gt; {settings_page}.
     <message>
         <source>PaddleOCR VL Settings</source>
         <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Insufficient Credits</source>
-        <translation>Недостаточно кредитов</translation>
     </message>
     <message>
         <source>Custom requires an OpenAI-compatible API configuration.
@@ -735,10 +647,6 @@ Please check your internet connection.</source>
     <message>
         <source>PDF</source>
         <translation>PDF</translation>
-    </message>
-    <message>
-        <source>PSD</source>
-        <translation type="vanished">PSD</translation>
     </message>
     <message>
         <source>Home</source>
@@ -1060,30 +968,6 @@ This folder is separate from Auto-Recover snapshots.</source>
         <translation>Необходим перезапуск</translation>
     </message>
     <message>
-        <source>Failed to initiate sign-in process.</source>
-        <translation>Не удалось начать процесс входа.</translation>
-    </message>
-    <message>
-        <source>Sign In</source>
-        <translation>Войти</translation>
-    </message>
-    <message>
-        <source>Sign In Required</source>
-        <translation>Требуется вход</translation>
-    </message>
-    <message>
-        <source>Please sign in to purchase or manage credits.</source>
-        <translation>Пожалуйста, войдите, чтобы купить или управлять кредитами.</translation>
-    </message>
-    <message>
-        <source>Unable to Open Browser</source>
-        <translation>Не удалось открыть браузер</translation>
-    </message>
-    <message>
-        <source>Please open the pricing page in your browser: {url}</source>
-        <translation>Пожалуйста, откройте страницу с ценами в вашем браузере: {url}</translation>
-    </message>
-    <message>
         <source>The application needs to restart for the language changes to take effect.
 Restart now?</source>
         <translation>Для применения изменений языка необходимо перезапустить приложение.
@@ -1092,58 +976,6 @@ Restart now?</source>
     <message>
         <source>Cancel</source>
         <translation>Отмена</translation>
-    </message>
-    <message>
-        <source>Sign In Error</source>
-        <translation>Ошибка входа</translation>
-    </message>
-    <message>
-        <source>Authentication failed: {error}</source>
-        <translation>Ошибка аутентификации: {error}</translation>
-    </message>
-    <message>
-        <source>Confirm Sign Out</source>
-        <translation>Подтвердите выход</translation>
-    </message>
-    <message>
-        <source>Are you sure you want to sign out?</source>
-        <translation>Вы уверены, что хотите выйти?</translation>
-    </message>
-    <message>
-        <source>Signing Out...</source>
-        <translation>Выход...</translation>
-    </message>
-    <message>
-        <source>Sign Out</source>
-        <translation>Выйти</translation>
-    </message>
-    <message>
-        <source>Session Expired</source>
-        <translation>Сессия истекла</translation>
-    </message>
-    <message>
-        <source>Your session has expired. Please sign in again.</source>
-        <translation>Ваша сессия истекла. Пожалуйста, войдите снова.</translation>
-    </message>
-    <message>
-        <source>N/A</source>
-        <translation>Н/Д</translation>
-    </message>
-    <message>
-        <source>Free</source>
-        <translation>Бесплатно</translation>
-    </message>
-    <message>
-        <source>Subscription</source>
-        <translation>Подписка</translation>
-    </message>
-    <message>
-        <source>One-time</source>
-        <translation>Одноразовая</translation>
-    </message>
-    <message>
-        <source>Total</source>
-        <translation>Всего</translation>
     </message>
     <message>
         <source>Checking...</source>
@@ -1331,10 +1163,6 @@ Restart now?</source>
     <message>
         <source>Gemini-2.5-Pro</source>
         <translation>Gemini-2.5-Pro</translation>
-    </message>
-    <message>
-        <source>Account</source>
-        <translation>Аккаунт</translation>
     </message>
     <message>
         <source>Microsoft Translator</source>
@@ -1713,44 +1541,8 @@ then do inpainting on the resized image.</source>
         <translation>Толщина обводки для новых элементов рендеринга и результата «Перевести всё».</translation>
     </message>
     <message>
-        <source>Font</source>
-        <translation type="vanished">Шрифт</translation>
-    </message>
-    <message>
-        <source>Font Size</source>
-        <translation type="vanished">Размер шрифта</translation>
-    </message>
-    <message>
-        <source>Line Spacing</source>
-        <translation type="vanished">Межстрочный интервал</translation>
-    </message>
-    <message>
-        <source>Font Color</source>
-        <translation type="vanished">Цвет шрифта</translation>
-    </message>
-    <message>
-        <source>Bold</source>
-        <translation type="vanished">Жирный</translation>
-    </message>
-    <message>
-        <source>Italic</source>
-        <translation type="vanished">Курсив</translation>
-    </message>
-    <message>
-        <source>Underline</source>
-        <translation type="vanished">Подчеркнутый</translation>
-    </message>
-    <message>
         <source>Outline</source>
         <translation>Контур</translation>
-    </message>
-    <message>
-        <source>Outline Color</source>
-        <translation type="vanished">Цвет контура</translation>
-    </message>
-    <message>
-        <source>Outline Width</source>
-        <translation type="vanished">Ширина контура</translation>
     </message>
     <message>
         <source>Pan Image</source>
@@ -1840,154 +1632,6 @@ back on the Image (for further editing)</source>
 </context>
 <context>
     <name>self.main</name>
-    <message>
-        <source>The AI provider flagged this content</source>
-        <translation type="vanished">Провайдер ИИ пометил этот контент</translation>
-    </message>
-    <message>
-        <source>Insufficient credits</source>
-        <translation type="vanished">Недостаточно кредитов</translation>
-    </message>
-    <message>
-        <source>Request timed out</source>
-        <translation type="vanished">Время ожидания запроса истекло</translation>
-    </message>
-    <message>
-        <source>Rate limited by provider</source>
-        <translation type="vanished">Ограничение частоты запросов провайдером</translation>
-    </message>
-    <message>
-        <source>Authentication failed</source>
-        <translation type="vanished">Ошибка аутентификации</translation>
-    </message>
-    <message>
-        <source>Network or connection error</source>
-        <translation type="vanished">Ошибка сети или подключения</translation>
-    </message>
-    <message>
-        <source>Provider unavailable</source>
-        <translation type="vanished">Провайдер недоступен</translation>
-    </message>
-    <message>
-        <source>Invalid translation response</source>
-        <translation type="vanished">Недопустимый ответ перевода</translation>
-    </message>
-    <message>
-        <source>Unexpected tool error</source>
-        <translation type="vanished">Непредвиденная ошибка инструмента</translation>
-    </message>
-    <message>
-        <source>Try another text recognition tool</source>
-        <translation type="vanished">Попробуйте другой инструмент распознавания текста</translation>
-    </message>
-    <message>
-        <source>Try another translator</source>
-        <translation type="vanished">Попробуйте другой переводчик</translation>
-    </message>
-    <message>
-        <source>Try another tool</source>
-        <translation type="vanished">Попробуйте другой инструмент</translation>
-    </message>
-    <message>
-        <source>Buy more credits</source>
-        <translation type="vanished">Купить больше кредитов</translation>
-    </message>
-    <message>
-        <source>Try again</source>
-        <translation type="vanished">Повторить попытку</translation>
-    </message>
-    <message>
-        <source>Wait and try again</source>
-        <translation type="vanished">Подождите и повторите попытку</translation>
-    </message>
-    <message>
-        <source>Check API settings</source>
-        <translation type="vanished">Проверьте настройки API</translation>
-    </message>
-    <message>
-        <source>Check your connection</source>
-        <translation type="vanished">Проверьте подключение</translation>
-    </message>
-    <message>
-        <source>Try again later</source>
-        <translation type="vanished">Повторите попытку позже</translation>
-    </message>
-    <message>
-        <source>No text blocks detected</source>
-        <translation type="vanished">Текстовые блоки не обнаружены</translation>
-    </message>
-    <message>
-        <source>Text recognition failed</source>
-        <translation type="vanished">Ошибка распознавания текста</translation>
-    </message>
-    <message>
-        <source>Translation failed</source>
-        <translation type="vanished">Ошибка перевода</translation>
-    </message>
-    <message>
-        <source>Webtoon text recognition chunk failed</source>
-        <translation type="vanished">Ошибка фрагмента распознавания текста вебтуна</translation>
-    </message>
-    <message>
-        <source>Webtoon translation chunk failed</source>
-        <translation type="vanished">Ошибка фрагмента перевода вебтуна</translation>
-    </message>
-    <message>
-        <source>Page processing failed</source>
-        <translation type="vanished">Ошибка обработки страницы</translation>
-    </message>
-    <message>
-        <source>This image is not in the current project.</source>
-        <translation type="vanished">Это изображение не входит в текущий проект.</translation>
-    </message>
-    <message>
-        <source>Cancelled</source>
-        <translation type="vanished">Отменено</translation>
-    </message>
-    <message>
-        <source>Completed</source>
-        <translation type="vanished">Завершено</translation>
-    </message>
-    <message>
-        <source>{0}  |  Updated {1}</source>
-        <translation type="vanished">{0}  |  Обновлено {1}</translation>
-    </message>
-    <message>
-        <source>Total</source>
-        <translation type="vanished">Всего</translation>
-    </message>
-    <message>
-        <source>Skipped</source>
-        <translation type="vanished">Пропущено</translation>
-    </message>
-    <message>
-        <source>Skipped Images ({0})</source>
-        <translation type="vanished">Пропущенные изображения ({0})</translation>
-    </message>
-    <message>
-        <source>Double-click a row to open that page.</source>
-        <translation type="vanished">Дважды щёлкните по строке, чтобы открыть эту страницу.</translation>
-    </message>
-    <message>
-        <source>Image</source>
-        <translation type="vanished">Изображение</translation>
-    </message>
-    <message>
-        <source>Reason</source>
-        <translation type="vanished">Причина</translation>
-    </message>
-    <message>
-        <source>No skipped images in this batch.</source>
-        <translation type="vanished">Нет пропущенных изображений в этом пакете.</translation>
-    </message>
-    <message>
-        <source>No batch report is available yet.</source>
-        <translation type="vanished">Отчёт о пакетной обработке ещё не доступен.</translation>
-    </message>
-    <message>
-        <source>Batch Report</source>
-        <translation type="vanished">Отчёт о пакетной обработке</translation>
-    </message>
     <message>
         <source>Project Recovery</source>
         <translation>Восстановление проекта</translation>
