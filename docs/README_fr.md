@@ -148,6 +148,7 @@ Ces outils peuvent être utilisés pour n'importe laquelle des langues prises en
 
 * Gemini 2.0 Flash
 * Microsoft Azure Vision
+* PaddleOCR VL (service Docker local `/layout-parsing`)
 
 ### Effacement
 Pour supprimer le texte segmenté

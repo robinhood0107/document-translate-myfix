@@ -143,6 +143,7 @@ class SettingsPage(QtWidgets.QWidget):
         text_changed_widgets = [
             self.ui.extra_context,
             self.ui.project_autosave_folder_input,
+            self.ui.paddleocr_vl_server_url_input,
         ]
         for widget in text_changed_widgets:
             signal = getattr(widget, "textChanged", None)
@@ -165,6 +166,8 @@ class SettingsPage(QtWidgets.QWidget):
             self.ui.image_checkbox,
             self.ui.uppercase_checkbox,
             self.ui.save_keys_checkbox,
+            self.ui.paddleocr_vl_prettify_checkbox,
+            self.ui.paddleocr_vl_visualize_checkbox,
         ]
         for widget in checkbox_widgets:
             widget.stateChanged.connect(self._save_settings_if_not_loading)
@@ -176,6 +179,8 @@ class SettingsPage(QtWidgets.QWidget):
             self.ui.min_font_spinbox,
             self.ui.max_font_spinbox,
             self.ui.project_autosave_interval_spinbox,
+            self.ui.paddleocr_vl_max_new_tokens_spinbox,
+            self.ui.paddleocr_vl_parallel_workers_spinbox,
         ]
         for widget in spin_widgets:
             widget.valueChanged.connect(self._save_settings_if_not_loading)
@@ -212,6 +217,19 @@ class SettingsPage(QtWidgets.QWidget):
         return {
             'extra_context': self.ui.extra_context.toPlainText(),
             'image_input_enabled': self.ui.image_checkbox.isChecked(),
+        }
+
+    def get_paddleocr_vl_settings(self):
+        server_url = self.ui.paddleocr_vl_server_url_input.text().strip()
+        if not server_url:
+            server_url = self.ui.paddleocr_vl_page.DEFAULT_SERVER_URL
+
+        return {
+            'server_url': server_url,
+            'prettify_markdown': self.ui.paddleocr_vl_prettify_checkbox.isChecked(),
+            'visualize': self.ui.paddleocr_vl_visualize_checkbox.isChecked(),
+            'max_new_tokens': int(self.ui.paddleocr_vl_max_new_tokens_spinbox.value()),
+            'parallel_workers': int(self.ui.paddleocr_vl_parallel_workers_spinbox.value()),
         }
 
     def get_export_settings(self):
@@ -295,6 +313,7 @@ class SettingsPage(QtWidgets.QWidget):
                 'use_gpu': self.is_gpu_enabled(),
                 'hd_strategy': self.get_hd_strategy_settings()
             },
+            'paddleocr_vl': self.get_paddleocr_vl_settings(),
             'llm': self.get_llm_settings(),
             'export': self.get_export_settings(),
             'credentials': self.get_credentials(),
@@ -451,6 +470,29 @@ class SettingsPage(QtWidgets.QWidget):
             self.ui.crop_trigger_spinbox.setValue(settings.value('crop_trigger_size', 512, type=int))
         settings.endGroup()  # hd_strategy
         settings.endGroup()  # tools
+
+        # Load PaddleOCR VL settings
+        settings.beginGroup('paddleocr_vl')
+        self.ui.paddleocr_vl_server_url_input.setText(
+            settings.value(
+                'server_url',
+                self.ui.paddleocr_vl_page.DEFAULT_SERVER_URL,
+                type=str,
+            )
+        )
+        self.ui.paddleocr_vl_prettify_checkbox.setChecked(
+            settings.value('prettify_markdown', False, type=bool)
+        )
+        self.ui.paddleocr_vl_visualize_checkbox.setChecked(
+            settings.value('visualize', False, type=bool)
+        )
+        self.ui.paddleocr_vl_max_new_tokens_spinbox.setValue(
+            settings.value('max_new_tokens', 1024, type=int)
+        )
+        self.ui.paddleocr_vl_parallel_workers_spinbox.setValue(
+            settings.value('parallel_workers', 8, type=int)
+        )
+        settings.endGroup()
 
         # Load LLM settings
         settings.beginGroup('llm')
@@ -1031,6 +1073,3 @@ class SettingsPage(QtWidgets.QWidget):
             except Exception:
                 pass
     
-
-
-

@@ -9,6 +9,7 @@ from ..dayu_widgets.qt import MPixmap
 # New imports for refactored pages
 from .personalization_page import PersonalizationPage
 from .tools_page import ToolsPage
+from .paddleocr_vl_page import PaddleOCRVLPage
 from .credentials_page import CredentialsPage
 from .llms_page import LlmsPage
 from .text_rendering_page import TextRenderingPage
@@ -59,6 +60,7 @@ class SettingsPageUI(QtWidgets.QWidget):
             self.tr('Microsoft OCR'), 
             self.tr('Google Cloud Vision'),
             self.tr('Gemini-2.0-Flash'), 
+            self.tr('PaddleOCR VL'),
         ]
         self.inpaint_strategy = [self.tr('Resize'), self.tr('Original'), self.tr('Crop')]
         self.themes = [self.tr('Dark'), self.tr('Light')]
@@ -134,6 +136,7 @@ class SettingsPageUI(QtWidgets.QWidget):
             self.tr("Microsoft OCR"): "Microsoft OCR",
             self.tr("Google Cloud Vision"): "Google Cloud Vision",
             self.tr("Gemini-2.0-Flash"): "Gemini-2.0-Flash",
+            self.tr("PaddleOCR VL"): "PaddleOCR VL",
 
             # Inpainter mappings
             "LaMa": "LaMa",
@@ -191,6 +194,7 @@ class SettingsPageUI(QtWidgets.QWidget):
             inpaint_strategy=self.inpaint_strategy,
             parent=self,
         )
+        self.paddleocr_vl_page = PaddleOCRVLPage(parent=self)
         self.credentials_page = CredentialsPage(
             services=self.credential_services,
             value_mappings=self.value_mappings,
@@ -218,6 +222,11 @@ class SettingsPageUI(QtWidgets.QWidget):
         self.crop_margin_spinbox = self.tools_page.crop_margin_spinbox
         self.crop_trigger_spinbox = self.tools_page.crop_trigger_spinbox
         self.use_gpu_checkbox = self.tools_page.use_gpu_checkbox
+        self.paddleocr_vl_server_url_input = self.paddleocr_vl_page.server_url_input
+        self.paddleocr_vl_prettify_checkbox = self.paddleocr_vl_page.prettify_markdown_checkbox
+        self.paddleocr_vl_visualize_checkbox = self.paddleocr_vl_page.visualize_checkbox
+        self.paddleocr_vl_max_new_tokens_spinbox = self.paddleocr_vl_page.max_new_tokens_spinbox
+        self.paddleocr_vl_parallel_workers_spinbox = self.paddleocr_vl_page.parallel_workers_spinbox
 
         # Credentials
         self.save_keys_checkbox = self.credentials_page.save_keys_checkbox
@@ -258,6 +267,7 @@ class SettingsPageUI(QtWidgets.QWidget):
         self.stacked_widget.addWidget(self.personalization_page)
         self.stacked_widget.addWidget(self.account_page)
         self.stacked_widget.addWidget(self.tools_page)
+        self.stacked_widget.addWidget(self.paddleocr_vl_page)
         self.stacked_widget.addWidget(self.llms_page)
         self.stacked_widget.addWidget(self.text_rendering_page)
         self.stacked_widget.addWidget(self.project_page)
@@ -312,6 +322,7 @@ class SettingsPageUI(QtWidgets.QWidget):
             {"title": self.tr("Personalization"), "avatar": MPixmap(".svg")},
             {"title": self.tr("Account"), "avatar": MPixmap(".svg")},
             {"title": self.tr("Tools"), "avatar": MPixmap(".svg")},
+            {"title": self.tr("PaddleOCR VL Settings"), "avatar": MPixmap(".svg")},
             {"title": self.tr("LLMs"), "avatar": MPixmap(".svg")},
             {"title": self.tr("Text Rendering"), "avatar": MPixmap(".svg")},
             {"title": self.tr("Project"), "avatar": MPixmap(".svg")},
