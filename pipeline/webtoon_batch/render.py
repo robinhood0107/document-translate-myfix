@@ -314,3 +314,22 @@ class RenderMixin:
                 summary.get("ocr_engine", ""),
                 self.main_page.image_states[image_path].get("source_lang", ""),
             )
+
+        renderer = ImageSaveRenderer(image)
+        patches = self.final_patches_for_save.get(image_path, [])
+        renderer.apply_patches(patches)
+        viewer_state = self.main_page.image_states[image_path].get("viewer_state", {})
+        renderer.add_state_to_image(viewer_state, page_idx, self.main_page)
+        translated_dir = os.path.join(
+            directory,
+            f"comic_translate_{timestamp}",
+            "translated_images",
+            archive_bname,
+        )
+        os.makedirs(translated_dir, exist_ok=True)
+        output_path = os.path.join(
+            translated_dir,
+            f"{base_name}_translated{extension}",
+        )
+        renderer.save_image(output_path)
+        logger.info("Saved final translated image to %s", output_path)

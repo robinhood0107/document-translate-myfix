@@ -32,6 +32,7 @@ from modules.rendering.render import get_best_render_area, pyside_word_wrap, is_
 from modules.utils.device import resolve_device
 from modules.utils.exceptions import InsufficientCreditsException
 from app.path_materialization import ensure_path_materialized
+from app.ui.canvas.save_renderer import ImageSaveRenderer
 from app.ui.canvas.text_item import OutlineInfo, OutlineType
 from app.ui.canvas.text.text_item_properties import TextItemProperties
 from app.ui.messages import Messages
@@ -149,6 +150,32 @@ class BatchProcessor:
                 ocr_summary.get("ocr_engine", ""),
                 page_state.get("source_lang", source_lang),
             )
+
+    def _write_final_render_export(
+        self,
+        directory: str,
+        timestamp: str,
+        archive_bname: str,
+        image_path: str,
+        image,
+        patches,
+        viewer_state: dict,
+    ) -> str:
+        page_base_name = os.path.splitext(os.path.basename(image_path))[0]
+        extension = os.path.splitext(image_path)[1]
+        path = os.path.join(
+            directory,
+            f"comic_translate_{timestamp}",
+            "translated_images",
+            archive_bname,
+        )
+        os.makedirs(path, exist_ok=True)
+        output_path = os.path.join(path, f"{page_base_name}_translated{extension}")
+        renderer = ImageSaveRenderer(image)
+        renderer.apply_patches(patches or [])
+        renderer.add_state_to_image(viewer_state or {})
+        renderer.save_image(output_path)
+        return output_path
 
     def _ensure_page_state(self, image_path: str) -> dict:
         return self.main_page.image_ctrl.ensure_page_state(image_path)
@@ -891,5 +918,16 @@ class BatchProcessor:
 
             if image_path == file_on_display:
                 self.main_page.blk_list = blk_list.copy()
+
+            final_output_path = self._write_final_render_export(
+                directory,
+                timestamp,
+                archive_bname,
+                image_path,
+                image,
+                patches,
+                page_state.get("viewer_state", {}),
+            )
+            logger.info("Saved final translated image to %s", final_output_path)
 
             self.emit_progress(index, total_images, 10, 10, False)
