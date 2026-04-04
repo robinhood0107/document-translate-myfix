@@ -213,6 +213,13 @@ class WorkspaceMixin:
         t_combo_text_layout.addWidget(self.t_text_edit)
         input_layout.addLayout(t_combo_text_layout)
 
+        self.ocr_warning_label = QtWidgets.QLabel()
+        self.ocr_warning_label.setWordWrap(True)
+        self.ocr_warning_label.setVisible(False)
+        self.ocr_warning_label.setStyleSheet(
+            "QLabel { color: #f5c26b; background-color: #3b3020; border: 1px solid #8a6631; border-radius: 4px; padding: 6px; }"
+        )
+
         text_render_layout = QtWidgets.QVBoxLayout()
         render_policy_hint = QtWidgets.QLabel(
             self.tr(
@@ -589,6 +596,7 @@ class WorkspaceMixin:
         tools_scroll.setFocusPolicy(QtCore.Qt.FocusPolicy.NoFocus)
 
         right_layout.addLayout(input_layout)
+        right_layout.addWidget(self.ocr_warning_label)
         right_layout.addLayout(text_render_layout)
         right_layout.addWidget(tools_scroll, 1)
 

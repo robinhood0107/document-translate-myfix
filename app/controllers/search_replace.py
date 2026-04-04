@@ -754,6 +754,7 @@ class SearchReplaceController(QtCore.QObject):
             self.main.t_text_edit.setPlainText(getattr(blk, "translation", "") or "")
             self.main.s_text_edit.blockSignals(False)
             self.main.t_text_edit.blockSignals(False)
+            self.main.text_ctrl.update_ocr_warning(blk)
         except Exception:
             pass
 

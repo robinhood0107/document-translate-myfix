@@ -699,6 +699,7 @@ class ProjectController:
         if not self.main.image_files:
             self.main.curr_img_idx = -1
             self.main.central_stack.setCurrentWidget(self.main.drag_browser)
+            self.main.batch_report_ctrl.refresh_action_buttons()
             return
 
         index = self.main.curr_img_idx
@@ -737,6 +738,7 @@ class ProjectController:
             self.main.webtoon_toggle.setChecked(True)
             self.main.webtoon_ctrl.switch_to_webtoon_mode()
         self.main.set_project_clean()
+        self.main.batch_report_ctrl.refresh_action_buttons()
 
     def _refresh_home_screen(self) -> None:
         """Repopulate the home screen recent list if it is currently visible."""

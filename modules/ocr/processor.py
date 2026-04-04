@@ -1,9 +1,13 @@
+import logging
 import numpy as np
 from typing import Any
 
 from ..utils.textblock import TextBlock
+from ..utils.device import resolve_device
 from ..utils.language_utils import language_codes
 from .factory import OCRFactory
+
+logger = logging.getLogger(__name__)
 
 
 class OCRProcessor:
@@ -19,6 +23,8 @@ class OCRProcessor:
         self.settings = None
         self.source_lang = None
         self.source_lang_english = None
+        self.last_engine_name = None
+        self.last_device = None
         
     def initialize(self, main_page: Any, source_lang: str) -> None:
         """
@@ -33,6 +39,15 @@ class OCRProcessor:
         self.source_lang = source_lang
         self.source_lang_english = self._get_english_lang(source_lang)
         self.ocr_key = self._get_ocr_key(self.settings.get_tool_selection('ocr'))
+        self.last_device = resolve_device(self.settings.is_gpu_enabled())
+        try:
+            self.last_engine_name = OCRFactory.create_engine(
+                self.settings,
+                self.source_lang_english,
+                self.ocr_key,
+            ).__class__.__name__
+        except Exception:
+            self.last_engine_name = None
         
     def _get_english_lang(self, translated_lang: str) -> str:
         return self.main_page.lang_mapping.get(translated_lang, translated_lang)
@@ -51,6 +66,15 @@ class OCRProcessor:
 
         self._set_source_language(blk_list)
         engine = OCRFactory.create_engine(self.settings, self.source_lang_english, self.ocr_key)
+        self.last_engine_name = engine.__class__.__name__
+        logger.info(
+            "ocr self-check: selected=%s resolved=%s source_lang=%s device=%s blocks=%d",
+            self.ocr_key,
+            self.last_engine_name,
+            self.source_lang_english,
+            self.last_device,
+            len(blk_list or []),
+        )
         return engine.process_image(img, blk_list)
             
     def _set_source_language(self, blk_list: list[TextBlock]) -> None:
