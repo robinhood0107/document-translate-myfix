@@ -39,7 +39,7 @@ OCR_REQUIREMENTS = {
 
 TRANSLATOR_REQUIREMENTS = {
     "Custom Service": ("Custom Service", ("api_key", "api_url", "model")),
-    "Custom Local Server": ("Custom Local Server", ("api_url", "model")),
+    "Custom Local Server(Gemma)": ("Custom Local Server(Gemma)", ("api_url", "model")),
     "GPT-4.1": ("Open AI GPT", ("api_key",)),
     "GPT-4.1-mini": ("Open AI GPT", ("api_key",)),
     "Claude-4.5-Sonnet": ("Anthropic Claude", ("api_key",)),
@@ -130,8 +130,8 @@ def validate_translator(main: ComicTranslate, target_lang: str):
     if missing_fields:
         if normalized_tool == "Custom Service":
             Messages.show_custom_service_not_configured_error(main)
-        elif normalized_tool == "Custom Local Server":
-            Messages.show_custom_local_server_not_configured_error(main)
+        elif normalized_tool == "Custom Local Server(Gemma)":
+            Messages.show_custom_local_gemma_not_configured_error(main)
         else:
             _show_missing_credentials(main, provider_name, missing_fields)
         return False
