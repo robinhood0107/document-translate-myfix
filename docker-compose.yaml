@@ -1,0 +1,28 @@
+services:
+  llama-server-gpu:
+    image: ghcr.io/ggml-org/llama.cpp:server-cuda
+    container_name: llama-cpp-server-cuda
+    restart: unless-stopped
+    ports:
+      - "18080:8080"
+    gpus: all
+    environment:
+      NVIDIA_VISIBLE_DEVICES: all
+      NVIDIA_DRIVER_CAPABILITIES: compute,utility
+    volumes:
+      - ./testmodel:/models:ro
+    command:
+      - -m
+      - /models/gemma-4-26B-A4B-it-UD-Q2_K_XL.gguf
+      - --host
+      - 0.0.0.0
+      - --port
+      - "8080"
+      - -c
+      - "${LLAMA_CTX_SIZE:-2048}"
+      - -np
+      - "${LLAMA_N_PARALLEL:-1}"
+      - -t
+      - "${LLAMA_THREADS:-8}"
+      - --n-gpu-layers
+      - "${LLAMA_N_GPU_LAYERS:-8}"
