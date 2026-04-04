@@ -190,6 +190,23 @@ class PPOCRv5Engine(OCREngine):
 
 		return score
 
+	def _should_probe_local_det(self, blk: TextBlock, text: str, conf: float) -> bool:
+		compact = self._compact_text(text)
+		width, height, area = self._block_geometry(blk)
+		conf = float(conf or 0.0)
+
+		if area >= 160000:
+			return True
+		if height >= 220 and width >= 360:
+			return True
+		if getattr(blk, "text_class", "") == "text_bubble" and width >= 420 and height >= 150:
+			return True
+		if conf < 0.88 and area >= 70000:
+			return True
+		if len(compact) <= 8 and area >= 180000:
+			return True
+		return False
+
 	def _select_best_candidate(self, blk: TextBlock, candidates: list[tuple[str, str, float]]) -> tuple[str, float, str]:
 		best_text = ""
 		best_conf = 0.0
@@ -214,17 +231,40 @@ class PPOCRv5Engine(OCREngine):
 		line_crops = [crop_quad(crop, quad.astype(np.float32)) for quad in boxes]
 		line_texts, line_confs = self._rec_infer(line_crops)
 
-		line_entries: list[tuple[tuple[int, int, int, int], str]] = []
-		valid_confs: list[float] = []
+		line_candidates: list[tuple[tuple[int, int, int, int], str, float, int, int]] = []
 		for quad, text, conf in zip(boxes, line_texts, line_confs):
 			compact_text = (text or "").strip()
 			if not compact_text:
 				continue
-			line_entries.append((self._quad_to_bbox(quad), compact_text))
-			valid_confs.append(float(conf or 0.0))
+			bbox = self._quad_to_bbox(quad)
+			width = max(1, bbox[2] - bbox[0])
+			height = max(1, bbox[3] - bbox[1])
+			line_candidates.append((bbox, compact_text, float(conf or 0.0), width, height))
 
-		if not line_entries:
+		if not line_candidates:
 			return "", 0.0
+
+		if len(line_candidates) > 1:
+			heights = [height for _, _, _, _, height in line_candidates]
+			widths = [width for _, _, _, width, _ in line_candidates]
+			median_h = float(np.median(heights))
+			median_w = float(np.median(widths))
+			filtered_candidates = []
+			for bbox, compact_text, conf, width, height in line_candidates:
+				tiny_line = (
+					height < max(10.0, median_h * 0.45)
+					or width < max(20.0, median_w * 0.22)
+				)
+				if tiny_line and conf < 0.45:
+					continue
+				filtered_candidates.append((bbox, compact_text, conf, width, height))
+			if filtered_candidates:
+				line_candidates = filtered_candidates
+
+		line_entries: list[tuple[tuple[int, int, int, int], str]] = [
+			(bbox, compact_text) for bbox, compact_text, _, _, _ in line_candidates
+		]
+		valid_confs: list[float] = [conf for _, _, conf, _, _ in line_candidates]
 
 		sorted_entries = sort_textblock_rectangles(line_entries, blk.source_lang_direction)
 		if is_no_space_lang(getattr(blk, "source_lang", "")):
@@ -277,6 +317,15 @@ class PPOCRv5Engine(OCREngine):
 			text, conf = initial_results.get(idx, ("", 0.0))
 			text = (text or "").strip()
 			if text:
+				candidates: list[tuple[str, str, float]] = [("initial_rec_only", text, conf)]
+				if self._should_probe_local_det(blk, text, conf):
+					local_text, local_conf = self._det_rec_in_crop(crop, blk)
+					if local_text:
+						candidates.append(("local_det", local_text, local_conf))
+					best_text, best_conf, _ = self._select_best_candidate(blk, candidates)
+					if best_text:
+						text = best_text
+						conf = best_conf
 				if self._is_suspicious_result(blk, text, conf):
 					initial_suspicious_indices.append(idx)
 					retry_candidates.append((idx, blk, text, conf))
