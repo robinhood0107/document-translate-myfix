@@ -780,22 +780,23 @@ Please check your internet connection.</source>
         <translation>此文本块的OCR结果为空。</translation>
     </message>
     <message>
-        <location filename="../../modules/ocr/ppocr/engine.py" line="199"/>
+        <location filename="../../modules/ocr/ppocr/engine.py" line="272"/>
         <source>Initial crop is empty.</source>
         <translation>初始裁剪区域为空。</translation>
     </message>
     <message>
-        <location filename="../../modules/ocr/ppocr/engine.py" line="224"/>
+        <location filename="../../modules/ocr/ppocr/engine.py" line="301"/>
         <source>OCR returned empty text on the initial crop.</source>
         <translation>OCR在初始裁剪区域上返回了空文本。</translation>
     </message>
     <message>
-        <location filename="../../modules/ocr/ppocr/engine.py" line="274"/>
+        <location filename="../../modules/ocr/ppocr/engine.py" line="366"/>
         <source>Retry crop is empty after expansion.</source>
         <translation>扩展后的重试裁剪区域为空。</translation>
     </message>
     <message>
-        <location filename="../../modules/ocr/ppocr/engine.py" line="303"/>
+        <location filename="../../modules/ocr/ppocr/engine.py" line="391"/>
+        <location filename="../../modules/ocr/ppocr/engine.py" line="414"/>
         <source>Retry also failed after contrast preprocessing.</source>
         <translation>经过对比度预处理后，重试仍然失败。</translation>
     </message>

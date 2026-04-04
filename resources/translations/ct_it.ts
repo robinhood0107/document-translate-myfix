@@ -781,22 +781,23 @@ Verifica la tua connessione Internet.</translation>
         <translation>Il risultato OCR per questo blocco è vuoto.</translation>
     </message>
     <message>
-        <location filename="../../modules/ocr/ppocr/engine.py" line="199"/>
+        <location filename="../../modules/ocr/ppocr/engine.py" line="272"/>
         <source>Initial crop is empty.</source>
         <translation>Il ritaglio iniziale è vuoto.</translation>
     </message>
     <message>
-        <location filename="../../modules/ocr/ppocr/engine.py" line="224"/>
+        <location filename="../../modules/ocr/ppocr/engine.py" line="301"/>
         <source>OCR returned empty text on the initial crop.</source>
         <translation>L&apos;OCR ha restituito testo vuoto nel ritaglio iniziale.</translation>
     </message>
     <message>
-        <location filename="../../modules/ocr/ppocr/engine.py" line="274"/>
+        <location filename="../../modules/ocr/ppocr/engine.py" line="366"/>
         <source>Retry crop is empty after expansion.</source>
         <translation>Il ritaglio del nuovo tentativo è vuoto dopo l&apos;espansione.</translation>
     </message>
     <message>
-        <location filename="../../modules/ocr/ppocr/engine.py" line="303"/>
+        <location filename="../../modules/ocr/ppocr/engine.py" line="391"/>
+        <location filename="../../modules/ocr/ppocr/engine.py" line="414"/>
         <source>Retry also failed after contrast preprocessing.</source>
         <translation>Anche il nuovo tentativo è fallito dopo la pre-elaborazione del contrasto.</translation>
     </message>

@@ -781,22 +781,23 @@ Open Batch Report to see all skipped images and reasons.</source>
         <translation>このブロックのOCR結果は空です。</translation>
     </message>
     <message>
-        <location filename="../../modules/ocr/ppocr/engine.py" line="199"/>
+        <location filename="../../modules/ocr/ppocr/engine.py" line="272"/>
         <source>Initial crop is empty.</source>
         <translation>初回クロップが空です。</translation>
     </message>
     <message>
-        <location filename="../../modules/ocr/ppocr/engine.py" line="224"/>
+        <location filename="../../modules/ocr/ppocr/engine.py" line="301"/>
         <source>OCR returned empty text on the initial crop.</source>
         <translation>初回クロップでOCRが空のテキストを返しました。</translation>
     </message>
     <message>
-        <location filename="../../modules/ocr/ppocr/engine.py" line="274"/>
+        <location filename="../../modules/ocr/ppocr/engine.py" line="366"/>
         <source>Retry crop is empty after expansion.</source>
         <translation>拡張後の再試行クロップが空です。</translation>
     </message>
     <message>
-        <location filename="../../modules/ocr/ppocr/engine.py" line="303"/>
+        <location filename="../../modules/ocr/ppocr/engine.py" line="391"/>
+        <location filename="../../modules/ocr/ppocr/engine.py" line="414"/>
         <source>Retry also failed after contrast preprocessing.</source>
         <translation>コントラスト前処理後の再試行も失敗しました。</translation>
     </message>
