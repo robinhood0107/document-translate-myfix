@@ -19,6 +19,7 @@ from modules.utils.textblock import sort_blk_list
 from modules.utils.pipeline_config import inpaint_map, get_config
 from modules.utils.image_utils import generate_mask
 from modules.utils.language_utils import get_language_code, is_no_space_lang
+from modules.utils.ocr_quality import summarize_ocr_quality
 from modules.utils.render_style_policy import (
     VERTICAL_ALIGNMENT_TOP,
     build_rect_tuple,
@@ -90,6 +91,146 @@ class BatchProcessor:
         worker = getattr(self.main_page, "current_worker", None)
         return bool(worker and worker.is_cancelled)
 
+    def _current_run_type(self) -> str:
+        return str(getattr(self.main_page, "_current_batch_run_type", "batch") or "batch")
+
+    def _ensure_page_state(self, image_path: str) -> dict:
+        return self.main_page.image_ctrl.ensure_page_state(image_path)
+
+    def _serialize_rectangles_from_blocks(self, blk_list) -> list[dict]:
+        rects: list[dict] = []
+        for blk in blk_list or []:
+            x1, y1, x2, y2 = blk.xyxy
+            rects.append(
+                {
+                    "rect": (float(x1), float(y1), float(x2 - x1), float(y2 - y1)),
+                    "rotation": float(getattr(blk, "angle", 0)),
+                    "transform_origin": tuple(blk.tr_origin_point)
+                    if getattr(blk, "tr_origin_point", None)
+                    else (0.0, 0.0),
+                }
+            )
+        return rects
+
+    def _start_page_summary(self, image_path: str, source_lang: str, target_lang: str) -> None:
+        state = self._ensure_page_state(image_path)
+        summary = self.main_page.image_ctrl.reset_processing_summary(
+            image_path, run_type=self._current_run_type()
+        )
+        self.main_page.image_ctrl.update_processing_summary(
+            image_path,
+            {
+                "source_lang": source_lang,
+                "target_lang": target_lang,
+                "device": resolve_device(self.main_page.settings_page.is_gpu_enabled()),
+                "stage_status": summary.get("stage_status", {}),
+            },
+        )
+        state["source_lang"] = source_lang
+        state["target_lang"] = target_lang
+
+    def _persist_detect_state(
+        self,
+        image_path: str,
+        blk_list,
+        detector_key: str,
+        detector_engine: str,
+        image,
+    ) -> None:
+        state = self._ensure_page_state(image_path)
+        state["blk_list"] = blk_list
+        viewer_state = state.setdefault("viewer_state", {})
+        viewer_state["rectangles"] = self._serialize_rectangles_from_blocks(blk_list)
+        self.main_page.image_ctrl.update_processing_summary(
+            image_path,
+            {
+                "detector_key": detector_key,
+                "detector_engine": detector_engine,
+                "block_count": len(blk_list or []),
+                "image_shape": list(getattr(image, "shape", []) or []),
+            },
+        )
+        self.main_page.image_ctrl.mark_processing_stage(
+            image_path,
+            "detect",
+            "completed",
+            block_count=len(blk_list or []),
+        )
+
+    def _persist_ocr_state(
+        self,
+        image_path: str,
+        blk_list,
+        ocr_key: str,
+        ocr_engine: str,
+        device: str,
+        quality: dict,
+        cache_status: str,
+        attempt_count: int,
+    ) -> None:
+        state = self._ensure_page_state(image_path)
+        state["blk_list"] = blk_list
+        self.main_page.image_ctrl.update_processing_summary(
+            image_path,
+            {
+                "ocr_key": ocr_key,
+                "ocr_engine": ocr_engine,
+                "device": device,
+                "block_count": len(blk_list or []),
+                "ocr_quality_counts": {
+                    "non_empty": quality.get("non_empty", 0),
+                    "empty": quality.get("empty", 0),
+                    "single_char_like": quality.get("single_char_like", 0),
+                },
+            },
+        )
+        self.main_page.image_ctrl.mark_processing_stage(
+            image_path,
+            "ocr",
+            "completed",
+            cache_status=cache_status,
+            attempt_count=attempt_count,
+            quality=quality,
+        )
+
+    def _persist_translation_state(
+        self,
+        image_path: str,
+        blk_list,
+        translator_key: str,
+        translator_engine: str,
+        cache_status: str,
+    ) -> None:
+        state = self._ensure_page_state(image_path)
+        state["blk_list"] = blk_list
+        self.main_page.image_ctrl.update_processing_summary(
+            image_path,
+            {
+                "translator_key": translator_key,
+                "translator_engine": translator_engine,
+                "block_count": len(blk_list or []),
+            },
+        )
+        self.main_page.image_ctrl.mark_processing_stage(
+            image_path,
+            "translation",
+            "completed",
+            cache_status=cache_status,
+        )
+
+    def _log_ocr_quality(self, image_path: str, quality: dict, attempt: int) -> None:
+        logger.info(
+            "ocr quality summary: image=%s attempt=%d blocks=%d non_empty=%d empty=%d single_char_like=%d low_quality=%s reason=%s",
+            os.path.basename(image_path),
+            attempt,
+            quality.get("block_count", 0),
+            quality.get("non_empty", 0),
+            quality.get("empty", 0),
+            quality.get("single_char_like", 0),
+            quality.get("low_quality", False),
+            quality.get("reason", ""),
+        )
+
     def batch_process(self, selected_paths: List[str] = None):
         timestamp = datetime.now().strftime("%b-%d-%Y_%I-%M-%S%p")
         image_list = selected_paths if selected_paths is not None else self.main_page.image_files
@@ -105,14 +246,18 @@ class BatchProcessor:
             if self._is_cancelled():
                 return
 
-            file_on_display = self.main_page.image_files[self.main_page.curr_img_idx]
+            file_on_display = None
+            if 0 <= self.main_page.curr_img_idx < len(self.main_page.image_files):
+                file_on_display = self.main_page.image_files[self.main_page.curr_img_idx]
 
             # index, step, total_steps, change_name
             self.emit_progress(index, total_images, 0, 10, True)
 
             settings_page = self.main_page.settings_page
-            source_lang = self.main_page.image_states[image_path]['source_lang']
-            target_lang = self.main_page.image_states[image_path]['target_lang']
+            page_state = self._ensure_page_state(image_path)
+            source_lang = page_state['source_lang']
+            target_lang = page_state['target_lang']
+            self._start_page_summary(image_path, source_lang, target_lang)
 
             target_lang_en = self.main_page.lang_mapping.get(target_lang, None)
             trg_lng_cd = get_language_code(target_lang_en)
@@ -131,12 +276,13 @@ class BatchProcessor:
                         directory = os.path.dirname(archive_path)
                         archive_bname = os.path.splitext(os.path.basename(archive_path))[0].strip()
 
-            ensure_path_materialized(image_path)
-            image = imk.read_image(image_path)
+            image = self.main_page.image_ctrl.load_image(image_path)
+            if image is None:
+                ensure_path_materialized(image_path)
+                image = imk.read_image(image_path)
 
             # skip UI-skipped images
-            state = self.main_page.image_states.get(image_path, {})
-            if state.get('skip', False):
+            if page_state.get('skip', False):
                 self.skip_save(directory, timestamp, base_name, extension, archive_bname, image)
                 self.log_skipped_image(directory, timestamp, image_path, "User-skipped")
                 continue
@@ -151,6 +297,20 @@ class BatchProcessor:
                 self.block_detection.block_detector_cache = TextBlockDetector(settings_page)
             
             blk_list = self.block_detection.block_detector_cache.detect(image)
+            detector_key = settings_page.get_tool_selection('detector') or 'RT-DETR-v2'
+            detector_engine = self.block_detection.block_detector_cache.last_engine_name or ""
+            source_lang_english = self.main_page.lang_mapping.get(source_lang, source_lang)
+            rtl = source_lang_english == 'Japanese'
+            if blk_list:
+                get_best_render_area(blk_list, image)
+                blk_list = sort_blk_list(blk_list, rtl)
+                self._persist_detect_state(
+                    image_path,
+                    blk_list,
+                    detector_key,
+                    detector_engine,
+                    image,
+                )
 
             self.emit_progress(index, total_images, 2, 10, False)
             if self._is_cancelled():
@@ -164,12 +324,72 @@ class BatchProcessor:
                 # Use the shared OCR processor from the handler
                 self.ocr_handler.ocr.initialize(self.main_page, source_lang)
                 try:
-                    self.ocr_handler.ocr.process(image, blk_list)
-                    # Cache the OCR results for potential future use
-                    self.cache_manager._cache_ocr_results(cache_key, self.main_page.blk_list)
-                    source_lang_english = self.main_page.lang_mapping.get(source_lang, source_lang)
-                    rtl = True if source_lang_english == 'Japanese' else False
-                    blk_list = sort_blk_list(blk_list, rtl)
+                    cache_status = "miss"
+                    attempt_count = 0
+                    if self.cache_manager._can_serve_all_blocks_from_ocr_cache(cache_key, blk_list):
+                        cache_status = "hit"
+                        logger.info("ocr cache hit: using cached OCR for %d blocks", len(blk_list))
+                        self.cache_manager._apply_cached_ocr_to_blocks(cache_key, blk_list)
+                        attempt_count = 1
+                    else:
+                        logger.info("ocr cache miss: running OCR for %d blocks", len(blk_list))
+                        self.ocr_handler.ocr.process(image, blk_list)
+                        self.cache_manager._cache_ocr_results(cache_key, blk_list)
+                        cache_status = "refreshed"
+                        attempt_count = 1
+
+                    quality = summarize_ocr_quality(blk_list)
+                    self._log_ocr_quality(image_path, quality, attempt_count)
+
+                    if quality.get("low_quality", False):
+                        attempt_count += 1
+                        logger.info(
+                            "ocr quality gate triggered retry for %s: %s",
+                            os.path.basename(image_path),
+                            quality.get("reason", ""),
+                        )
+                        for blk in blk_list:
+                            blk.text = ""
+                        self.ocr_handler.ocr.process(image, blk_list)
+                        self.cache_manager._cache_ocr_results(cache_key, blk_list)
+                        quality = summarize_ocr_quality(blk_list)
+                        self._log_ocr_quality(image_path, quality, attempt_count)
+                        cache_status = "refreshed"
+
+                    if quality.get("low_quality", False):
+                        err_msg = quality.get("reason") or self.main_page.tr("OCR quality too low after retry.")
+                        self.main_page.image_ctrl.update_processing_summary(
+                            image_path,
+                            {
+                                "ocr_quality_counts": {
+                                    "non_empty": quality.get("non_empty", 0),
+                                    "empty": quality.get("empty", 0),
+                                    "single_char_like": quality.get("single_char_like", 0),
+                                },
+                                "last_failure_reason": err_msg,
+                            },
+                        )
+                        self.main_page.image_ctrl.mark_processing_stage(
+                            image_path,
+                            "ocr",
+                            "failed",
+                            reason=err_msg,
+                            quality=quality,
+                            cache_status=cache_status,
+                            attempt_count=attempt_count,
+                        )
+                        raise RuntimeError(err_msg)
+
+                    self._persist_ocr_state(
+                        image_path,
+                        blk_list,
+                        ocr_model,
+                        self.ocr_handler.ocr.last_engine_name or "",
+                        device,
+                        quality,
+                        cache_status,
+                        attempt_count,
+                    )
                     
                 except InsufficientCreditsException:
                     raise
@@ -195,6 +415,12 @@ class BatchProcessor:
                         err_msg = str(e)
 
                     logger.exception(f"OCR processing failed: {err_msg}")
+                    self.main_page.image_ctrl.mark_processing_stage(
+                        image_path,
+                        "ocr",
+                        "failed",
+                        reason=err_msg,
+                    )
                     reason = f"OCR: {err_msg}"
                     full_traceback = traceback.format_exc()
                     self.skip_save(directory, timestamp, base_name, extension, archive_bname, image)
@@ -202,6 +428,15 @@ class BatchProcessor:
                     self.log_skipped_image(directory, timestamp, image_path, reason, full_traceback)
                     continue
             else:
+                page_state = self._ensure_page_state(image_path)
+                page_state["blk_list"] = []
+                page_state.setdefault("viewer_state", {})["rectangles"] = []
+                self.main_page.image_ctrl.mark_processing_stage(
+                    image_path,
+                    "detect",
+                    "failed",
+                    reason="No text blocks detected.",
+                )
                 self.skip_save(directory, timestamp, base_name, extension, archive_bname, image)
                 self.main_page.image_skipped.emit(image_path, "Text Blocks", "")
                 self.log_skipped_image(directory, timestamp, image_path, "No text blocks detected")
@@ -255,6 +490,12 @@ class BatchProcessor:
                 if not os.path.exists(path):
                     os.makedirs(path, exist_ok=True)
                 imk.write_image(os.path.join(path, f"{base_name}_cleaned{extension}"), inpaint_input_img)
+            self.main_page.image_ctrl.mark_processing_stage(
+                image_path,
+                "inpaint",
+                "completed",
+                patch_count=len(patches or []),
+            )
 
             self.emit_progress(index, total_images, 5, 10, False)
             if self._is_cancelled():
@@ -271,14 +512,24 @@ class BatchProcessor:
             )
             
             try:
+                translation_cache_status = "miss"
                 if self.cache_manager._can_serve_all_blocks_from_translation_cache(translation_cache_key, blk_list):
                     self.cache_manager._apply_cached_translations_to_blocks(translation_cache_key, blk_list)
+                    translation_cache_status = "hit"
                     logger.info("Using cached translation results for all %d blocks", len(blk_list))
                 else:
                     translator.translate(blk_list, image, extra_context)
                     # Cache the translation results for potential future use
                     self.cache_manager._cache_translation_results(translation_cache_key, blk_list)
+                    translation_cache_status = "refreshed"
                     logger.info("Translation completed and cached for %d blocks", len(blk_list))
+                self._persist_translation_state(
+                    image_path,
+                    blk_list,
+                    translator_key,
+                    translator.engine.__class__.__name__,
+                    translation_cache_status,
+                )
             except InsufficientCreditsException:
                 raise
             except Exception as e:
@@ -303,6 +554,12 @@ class BatchProcessor:
                     err_msg = str(e)
 
                 logger.exception(f"Translation failed: {err_msg}")
+                self.main_page.image_ctrl.mark_processing_stage(
+                    image_path,
+                    "translation",
+                    "failed",
+                    reason=err_msg,
+                )
                 reason = f"Translator: {err_msg}"
                 full_traceback = traceback.format_exc()
                 self.skip_save(directory, timestamp, base_name, extension, archive_bname, image)
@@ -322,6 +579,12 @@ class BatchProcessor:
                 translated_text_obj = json.loads(entire_translated_text)
                 
                 if (not raw_text_obj) or (not translated_text_obj):
+                    self.main_page.image_ctrl.mark_processing_stage(
+                        image_path,
+                        "translation",
+                        "failed",
+                        reason="Translator returned empty JSON.",
+                    )
                     self.skip_save(directory, timestamp, base_name, extension, archive_bname, image)
                     self.main_page.image_skipped.emit(image_path, "Translator", "")
                     self.log_skipped_image(directory, timestamp, image_path, "Translator: empty JSON")
@@ -331,6 +594,12 @@ class BatchProcessor:
                 error_message = str(e)
                 reason = f"Translator: JSONDecodeError: {error_message}"
                 logger.exception(reason)
+                self.main_page.image_ctrl.mark_processing_stage(
+                    image_path,
+                    "translation",
+                    "failed",
+                    reason=error_message,
+                )
                 full_traceback = traceback.format_exc()
                 self.skip_save(directory, timestamp, base_name, extension, archive_bname, image)
                 self.main_page.image_skipped.emit(image_path, "Translator", error_message)
@@ -468,22 +737,33 @@ class BatchProcessor:
                 )
                 text_items_state.append(text_props.to_dict())
 
-            self.main_page.image_states[image_path]['viewer_state'].update({
+            page_state = self._ensure_page_state(image_path)
+            page_state['viewer_state'].update({
                 'text_items_state': text_items_state
-                })
-            
-            self.main_page.image_states[image_path]['viewer_state'].update({
+            })
+            page_state['viewer_state'].update({
                 'push_to_stack': True
-                })
+            })
+            self.main_page.image_ctrl.mark_processing_stage(
+                image_path,
+                "render",
+                "completed",
+                text_item_count=len(text_items_state),
+            )
             
             self.emit_progress(index, total_images, 9, 10, False)
             if self._is_cancelled():
                 return
 
             # Saving blocks with texts to history
-            self.main_page.image_states[image_path].update({
-                'blk_list': blk_list                   
+            page_state.update({
+                'blk_list': blk_list
             })
+            self.main_page.image_ctrl.mark_processing_stage(
+                image_path,
+                "pipeline",
+                "completed",
+            )
 
             # Notify UI that this page's render state is finalized.
             # This enables a deterministic refresh when the user navigates to this page
@@ -491,6 +771,6 @@ class BatchProcessor:
             self.main_page.render_state_ready.emit(image_path)
 
             if image_path == file_on_display:
-                self.main_page.blk_list = blk_list
+                self.main_page.blk_list = blk_list.copy()
 
             self.emit_progress(index, total_images, 10, 10, False)
