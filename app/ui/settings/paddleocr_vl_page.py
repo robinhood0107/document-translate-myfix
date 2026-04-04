@@ -53,7 +53,7 @@ class PaddleOCRVLPage(QtWidgets.QWidget):
 
         perf_note = MLabel(
             self.tr(
-                "For your RTX 4070 SUPER, 1024 tokens and 8 parallel workers are the recommended high-throughput defaults."
+                "For your RTX 4070 SUPER, 256 tokens and 2 parallel workers are the recommended fastest defaults."
             )
         ).secondary()
         perf_note.setWordWrap(True)
@@ -63,9 +63,9 @@ class PaddleOCRVLPage(QtWidgets.QWidget):
         max_tokens_layout = QtWidgets.QHBoxLayout()
         max_tokens_label = MLabel(self.tr("Max New Tokens"))
         self.max_new_tokens_spinbox = MSpinBox().small()
-        self.max_new_tokens_spinbox.setRange(128, 2048)
-        self.max_new_tokens_spinbox.setSingleStep(128)
-        self.max_new_tokens_spinbox.setValue(1024)
+        self.max_new_tokens_spinbox.setRange(64, 2048)
+        self.max_new_tokens_spinbox.setSingleStep(64)
+        self.max_new_tokens_spinbox.setValue(256)
         self.max_new_tokens_spinbox.setFixedWidth(90)
         max_tokens_layout.addWidget(max_tokens_label)
         max_tokens_layout.addWidget(self.max_new_tokens_spinbox)
@@ -76,7 +76,7 @@ class PaddleOCRVLPage(QtWidgets.QWidget):
         workers_label = MLabel(self.tr("Parallel Workers"))
         self.parallel_workers_spinbox = MSpinBox().small()
         self.parallel_workers_spinbox.setRange(1, 8)
-        self.parallel_workers_spinbox.setValue(8)
+        self.parallel_workers_spinbox.setValue(2)
         self.parallel_workers_spinbox.setFixedWidth(90)
         workers_layout.addWidget(workers_label)
         workers_layout.addWidget(self.parallel_workers_spinbox)

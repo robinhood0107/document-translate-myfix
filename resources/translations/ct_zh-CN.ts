@@ -956,7 +956,7 @@ These settings control the /layout-parsing OCR requests.</source>
     </message>
     <message>
         <location filename="../../app/ui/settings/paddleocr_vl_page.py" line="56"/>
-        <source>For your RTX 4070 SUPER, 1024 tokens and 8 parallel workers are the recommended high-throughput defaults.</source>
+        <source>For your RTX 4070 SUPER, 256 tokens and 2 parallel workers are the recommended fastest defaults.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
