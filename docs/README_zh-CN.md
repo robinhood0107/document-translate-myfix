@@ -145,6 +145,7 @@ raise RarCannotExec("Cannot find working tool")
 
 * Gemini 2.0 Flash
 * Microsoft Azure Vision
+* PaddleOCR VL（本地 Docker `/layout-parsing` 服务）
 
 ### 图像修复
 去除分割后的文本

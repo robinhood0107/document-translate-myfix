@@ -32,7 +32,11 @@ from app.controllers.search_replace import SearchReplaceController
 from app.controllers.task_runner import TaskRunnerController
 from app.controllers.batch_report import BatchReportController
 from app.controllers.manual_workflow import ManualWorkflowController
-from modules.utils.exceptions import InsufficientCreditsException, ContentFlaggedException
+from modules.utils.exceptions import (
+    ContentFlaggedException,
+    InsufficientCreditsException,
+    LocalServiceError,
+)
 
 
 # Ensure any pre-declared mandatory models
@@ -444,7 +448,10 @@ class ComicTranslate(ComicTranslateUI):
             reason = err_msg.split(": ")[-1] if ": " in err_msg else err_msg
             context = getattr(value, 'context', 'Operation')
             Messages.show_content_flagged_error(self, details=reason, context=context)
-        
+
+        elif issubclass(exctype, LocalServiceError):
+            Messages.show_local_service_error(self, details=str(value))
+
         # Handle HTTP Errors (Server-side)
         elif issubclass(exctype, requests.exceptions.HTTPError):
             response = value.response

@@ -62,6 +62,30 @@ class Messages:
         )
 
     @staticmethod
+    def show_missing_local_service_config_error(parent, service_name: str, fields_text: str = ""):
+        details = (
+            QCoreApplication.translate(
+                "Messages",
+                "Required fields: {fields}"
+            ).format(fields=fields_text)
+            if fields_text
+            else QCoreApplication.translate("Messages", "Please fill in the required settings fields.")
+        )
+        MMessage.error(
+            text=QCoreApplication.translate(
+                "Messages",
+                "Missing settings for {service}.\nConfigure them in Settings > {settings_page}.\n{details}"
+            ).format(
+                service=service_name,
+                settings_page=QCoreApplication.translate("Messages", "PaddleOCR VL Settings"),
+                details=details,
+            ),
+            parent=parent,
+            duration=None,
+            closable=True
+        )
+
+    @staticmethod
     def show_translator_language_not_supported(parent):
         MMessage.error(
             text=QCoreApplication.translate(
@@ -219,6 +243,24 @@ class Messages:
                 "Messages", 
                 "Unable to connect to the server.\nPlease check your internet connection."
             ),
+            parent=parent,
+            duration=None,
+            closable=True
+        )
+
+    @staticmethod
+    def show_local_service_error(parent, details: str = None):
+        """
+        Show a user-friendly error when a required local OCR service is unavailable.
+        """
+        text = QCoreApplication.translate(
+            "Messages",
+            "Unable to reach the local PaddleOCR VL service.\nCheck Settings > PaddleOCR VL Settings and make sure the Docker service is running."
+        )
+        if details and details.strip() != "Unable to reach the local PaddleOCR VL service.":
+            text = f"{text}\n{details}"
+        MMessage.error(
+            text=text,
             parent=parent,
             duration=None,
             closable=True
