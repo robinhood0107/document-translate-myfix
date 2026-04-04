@@ -2,13 +2,6 @@
 <!DOCTYPE TS>
 <TS version="2.1" language="ja_JP">
 <context>
-    <name></name>
-    <message>
-        <source>Custom</source>
-        <translation type="vanished">カスタム</translation>
-    </message>
-</context>
-<context>
     <name>AboutPage</name>
     <message>
         <source>App Information</source>
@@ -21,58 +14,6 @@
     <message>
         <source>Check for Updates</source>
         <translation>アップデートをチェックする</translation>
-    </message>
-</context>
-<context>
-    <name>AccountPage</name>
-    <message>
-        <source>Sign in to Comic Translate</source>
-        <translation type="vanished">漫画翻訳にサインインする</translation>
-    </message>
-    <message>
-        <source>Sign in to use Comic Translate, see your credits balance, and purchase additional credits.</source>
-        <translation type="vanished">Comic Translate を使用するにはサインインし、クレジット残高を確認し、追加のクレジットを購入します。</translation>
-    </message>
-    <message>
-        <source>Sign in is Optional</source>
-        <translation>カスタム</translation>
-    </message>
-    <message>
-        <source>Comic Translate can be used with local models or your own API keys.
-Sign in only if you want to use hosted credits and account features.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Sign In</source>
-        <translation>サインイン</translation>
-    </message>
-    <message>
-        <source>See model credit costs</source>
-        <translation>モデルのクレジットコストを参照</translation>
-    </message>
-    <message>
-        <source>Account Information</source>
-        <translation>アカウント情報</translation>
-    </message>
-    <message>
-        <source>Email:</source>
-        <translation>電子メール:</translation>
-    </message>
-    <message>
-        <source>Subscription Tier:</source>
-        <translation>サブスクリプション層:</translation>
-    </message>
-    <message>
-        <source>Credits:</source>
-        <translation>クレジット:</translation>
-    </message>
-    <message>
-        <source>Buy Credits</source>
-        <translation>クレジットを購入する</translation>
-    </message>
-    <message>
-        <source>Sign Out</source>
-        <translation>サインアウト</translation>
     </message>
 </context>
 <context>
@@ -228,21 +169,18 @@ Sign in only if you want to use hosted credits and account features.</source>
         <translation>キーの保存</translation>
     </message>
     <message>
-        <source>These settings are for advanced users who wish to use their own Custom API endpoints (e.g. Local Language Models) for translation. For most users, no configuration is needed here.</source>
-        <translation type="vanished">これらの設定は、翻訳に独自のカスタム API エンドポイント (ローカル言語モデルなど) を使用したい上級ユーザー向けです。ほとんどのユーザーにとって、ここでの構成は必要ありません。</translation>
-    </message>
-    <message>
-        <source>Configure provider API keys or custom endpoints here.
-You do not need to sign in to use local models or your own provider credentials.</source>
-        <translation>サインイン</translation>
-    </message>
-    <message>
         <source>OCR</source>
         <translation>OCR</translation>
     </message>
     <message>
         <source>API Key</source>
         <translation>APIキー</translation>
+    </message>
+    <message>
+        <source>Configure provider API keys or custom endpoints here.
+Use Custom Service for authenticated OpenAI-compatible providers.
+Use Custom Local Server for OpenAI-compatible local or keyless endpoints.</source>
+        <translation type="unfinished"></translation>
     </message>
     <message>
         <source>Endpoint URL</source>
@@ -495,10 +433,6 @@ Go to Settings &gt; Text Rendering &gt; Font to select or import one </source>
 [設定] &gt; [テキスト レンダリング] &gt; [フォント] に移動して、フォントを選択またはインポートします</translation>
     </message>
     <message>
-        <source>Please sign in or sign up via Settings &gt; Account to continue.</source>
-        <translation type="vanished">続行するには、[設定] &gt; [アカウント] からサインインするかサインアップしてください。</translation>
-    </message>
-    <message>
         <source>The translator does not support the selected target language. Please choose a different language or tool.</source>
         <translation>翻訳者は、選択したターゲット言語をサポートしていません。別の言語またはツールを選択してください。</translation>
     </message>
@@ -507,29 +441,8 @@ Go to Settings &gt; Text Rendering &gt; Font to select or import one </source>
         <translation>{} が選択されていません。 [設定] &gt; [ツール] で {} を選択してください。</translation>
     </message>
     <message>
-        <source>Insufficient Credits</source>
-        <translation>クレジットが不十分です</translation>
-    </message>
-    <message>
-        <source>Insufficient credits to perform this action.
-Go to Settings &gt; Account to buy more credits.</source>
-        <translation>このアクションを実行するにはクレジットが不足しています。
-さらにクレジットを購入するには、[設定] &gt; [アカウント] に移動します。</translation>
-    </message>
-    <message>
         <source>OK</source>
         <translation>わかりました</translation>
-    </message>
-    <message>
-        <source>Custom requires advanced API configuration. Most users should use the Credits system instead.
-Please sign in via Settings &gt; Account to use credits, or configure Custom API settings in Settings &gt; Advanced.</source>
-        <translation type="vanished">カスタムには高度な API 構成が必要です。ほとんどのユーザーは代わりにクレジット システムを使用する必要があります。
-クレジットを使用するには、[設定] &gt; [アカウント] からサインインするか、[設定] &gt; [詳細設定] でカスタム API 設定を構成してください。</translation>
-    </message>
-    <message>
-        <source>Sign-in is only required for hosted credits.
-Configure local or provider API credentials in Settings &gt; Credentials to continue.</source>
-        <translation>処理：</translation>
     </message>
     <message>
         <source>Required fields: {fields}</source>
@@ -560,8 +473,13 @@ Configure them in Settings &gt; {settings_page}.
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>Custom requires an OpenAI-compatible API configuration.
+        <source>Custom Service requires an OpenAI-compatible API configuration.
 Please set API Key, Endpoint URL, and Model in Settings &gt; Credentials.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Custom Local Server requires an OpenAI-compatible endpoint.
+Please set Endpoint URL and Model in Settings &gt; Credentials.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
@@ -735,10 +653,6 @@ Open Batch Report to see all skipped images and reasons.</source>
     <message>
         <source>PDF</source>
         <translation>PDF</translation>
-    </message>
-    <message>
-        <source>PSD</source>
-        <translation type="vanished">PSD</translation>
     </message>
     <message>
         <source>Home</source>
@@ -1070,82 +984,6 @@ Restart now?</source>
         <translation>キャンセル</translation>
     </message>
     <message>
-        <source>Failed to initiate sign-in process.</source>
-        <translation>サインインプロセスを開始できませんでした。</translation>
-    </message>
-    <message>
-        <source>Sign In</source>
-        <translation>サインイン</translation>
-    </message>
-    <message>
-        <source>Sign In Required</source>
-        <translation>サインインが必要です</translation>
-    </message>
-    <message>
-        <source>Please sign in to purchase or manage credits.</source>
-        <translation>クレジットを購入または管理するにはサインインしてください。</translation>
-    </message>
-    <message>
-        <source>Unable to Open Browser</source>
-        <translation>ブラウザを開けません</translation>
-    </message>
-    <message>
-        <source>Please open the pricing page in your browser: {url}</source>
-        <translation>ブラウザで価格ページを開いてください: {url}</translation>
-    </message>
-    <message>
-        <source>Sign In Error</source>
-        <translation>サインインエラー</translation>
-    </message>
-    <message>
-        <source>Authentication failed: {error}</source>
-        <translation>認証に失敗しました: {error}</translation>
-    </message>
-    <message>
-        <source>Confirm Sign Out</source>
-        <translation>サインアウトの確認</translation>
-    </message>
-    <message>
-        <source>Are you sure you want to sign out?</source>
-        <translation>サインアウトしてもよろしいですか?</translation>
-    </message>
-    <message>
-        <source>Signing Out...</source>
-        <translation>サインアウト中...</translation>
-    </message>
-    <message>
-        <source>Sign Out</source>
-        <translation>サインアウト</translation>
-    </message>
-    <message>
-        <source>Session Expired</source>
-        <translation>セッションが期限切れになりました</translation>
-    </message>
-    <message>
-        <source>Your session has expired. Please sign in again.</source>
-        <translation>セッションの有効期限が切れました。再度サインインしてください。</translation>
-    </message>
-    <message>
-        <source>N/A</source>
-        <translation>該当なし</translation>
-    </message>
-    <message>
-        <source>Free</source>
-        <translation>無料</translation>
-    </message>
-    <message>
-        <source>Subscription</source>
-        <translation>サブスクリプション</translation>
-    </message>
-    <message>
-        <source>One-time</source>
-        <translation>一度</translation>
-    </message>
-    <message>
-        <source>Total</source>
-        <translation>合計</translation>
-    </message>
-    <message>
         <source>Checking...</source>
         <translation>チェック中...</translation>
     </message>
@@ -1245,10 +1083,6 @@ Restart now?</source>
         <translation>右</translation>
     </message>
     <message>
-        <source>Custom</source>
-        <translation>カスタム</translation>
-    </message>
-    <message>
         <source>Gemini-3.0-Flash</source>
         <translation>Gemini-3.0-フラッシュ</translation>
     </message>
@@ -1313,16 +1147,20 @@ Restart now?</source>
         <translation>Google ジェミニ</translation>
     </message>
     <message>
+        <source>Custom Service</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Custom Local Server</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
         <source>Anthropic Claude</source>
         <translation>人間的なクロード</translation>
     </message>
     <message>
         <source>Personalization</source>
         <translation>パーソナライゼーション</translation>
-    </message>
-    <message>
-        <source>Account</source>
-        <translation>アカウント</translation>
     </message>
     <message>
         <source>Tools</source>
@@ -1713,44 +1551,8 @@ then do inpainting on the resized image.</source>
         <translation>新しくレンダリングされる項目と「すべて翻訳」の出力で使う輪郭線の太さです。</translation>
     </message>
     <message>
-        <source>Font</source>
-        <translation type="vanished">フォント</translation>
-    </message>
-    <message>
-        <source>Font Size</source>
-        <translation type="vanished">フォントサイズ</translation>
-    </message>
-    <message>
-        <source>Line Spacing</source>
-        <translation type="vanished">行間</translation>
-    </message>
-    <message>
-        <source>Font Color</source>
-        <translation type="vanished">フォントの色</translation>
-    </message>
-    <message>
-        <source>Bold</source>
-        <translation type="vanished">大胆な</translation>
-    </message>
-    <message>
-        <source>Italic</source>
-        <translation type="vanished">イタリック</translation>
-    </message>
-    <message>
-        <source>Underline</source>
-        <translation type="vanished">下線</translation>
-    </message>
-    <message>
         <source>Outline</source>
         <translation>概要</translation>
-    </message>
-    <message>
-        <source>Outline Color</source>
-        <translation type="vanished">輪郭の色</translation>
-    </message>
-    <message>
-        <source>Outline Width</source>
-        <translation type="vanished">輪郭の幅</translation>
     </message>
     <message>
         <source>Pan Image</source>
@@ -1841,154 +1643,6 @@ back on the Image (for further editing)</source>
 <context>
     <name>self.main</name>
     <message>
-        <source>The AI provider flagged this content</source>
-        <translation type="vanished">AI プロバイダーがこのコンテンツにフラグを立てました</translation>
-    </message>
-    <message>
-        <source>Insufficient credits</source>
-        <translation type="vanished">クレジットが不十分です</translation>
-    </message>
-    <message>
-        <source>Request timed out</source>
-        <translation type="vanished">リクエストがタイムアウトしました</translation>
-    </message>
-    <message>
-        <source>Rate limited by provider</source>
-        <translation type="vanished">プロバイダーによる料金制限</translation>
-    </message>
-    <message>
-        <source>Authentication failed</source>
-        <translation type="vanished">認証に失敗しました</translation>
-    </message>
-    <message>
-        <source>Network or connection error</source>
-        <translation type="vanished">ネットワークまたは接続エラー</translation>
-    </message>
-    <message>
-        <source>Provider unavailable</source>
-        <translation type="vanished">プロバイダーが利用できない</translation>
-    </message>
-    <message>
-        <source>Invalid translation response</source>
-        <translation type="vanished">無効な翻訳応答</translation>
-    </message>
-    <message>
-        <source>Unexpected tool error</source>
-        <translation type="vanished">予期しないツールエラー</translation>
-    </message>
-    <message>
-        <source>Try another text recognition tool</source>
-        <translation type="vanished">別のテキスト認識ツールを試してください</translation>
-    </message>
-    <message>
-        <source>Try another translator</source>
-        <translation type="vanished">別の翻訳者を試してください</translation>
-    </message>
-    <message>
-        <source>Try another tool</source>
-        <translation type="vanished">別のツールを試してみる</translation>
-    </message>
-    <message>
-        <source>Buy more credits</source>
-        <translation type="vanished">さらにクレジットを購入する</translation>
-    </message>
-    <message>
-        <source>Try again</source>
-        <translation type="vanished">もう一度やり直してください</translation>
-    </message>
-    <message>
-        <source>Wait and try again</source>
-        <translation type="vanished">待ってからもう一度試してください</translation>
-    </message>
-    <message>
-        <source>Check API settings</source>
-        <translation type="vanished">API設定を確認する</translation>
-    </message>
-    <message>
-        <source>Check your connection</source>
-        <translation type="vanished">接続を確認してください</translation>
-    </message>
-    <message>
-        <source>Try again later</source>
-        <translation type="vanished">後でもう一度試してください</translation>
-    </message>
-    <message>
-        <source>No text blocks detected</source>
-        <translation type="vanished">テキストブロックは検出されませんでした</translation>
-    </message>
-    <message>
-        <source>Text recognition failed</source>
-        <translation type="vanished">テキスト認識に失敗しました</translation>
-    </message>
-    <message>
-        <source>Translation failed</source>
-        <translation type="vanished">翻訳に失敗しました</translation>
-    </message>
-    <message>
-        <source>Webtoon text recognition chunk failed</source>
-        <translation type="vanished">ウェブトゥーンのテキスト認識チャンクが失敗しました</translation>
-    </message>
-    <message>
-        <source>Webtoon translation chunk failed</source>
-        <translation type="vanished">ウェブトゥーン翻訳チャンクが失敗しました</translation>
-    </message>
-    <message>
-        <source>Page processing failed</source>
-        <translation type="vanished">ページ処理に失敗しました</translation>
-    </message>
-    <message>
-        <source>This image is not in the current project.</source>
-        <translation type="vanished">この画像は現在のプロジェクトにはありません。</translation>
-    </message>
-    <message>
-        <source>Cancelled</source>
-        <translation type="vanished">キャンセル</translation>
-    </message>
-    <message>
-        <source>Completed</source>
-        <translation type="vanished">完了</translation>
-    </message>
-    <message>
-        <source>{0}  |  Updated {1}</source>
-        <translation type="vanished">{0} |  {1} を更新しました</translation>
-    </message>
-    <message>
-        <source>Total</source>
-        <translation type="vanished">合計</translation>
-    </message>
-    <message>
-        <source>Skipped</source>
-        <translation type="vanished">スキップされました</translation>
-    </message>
-    <message>
-        <source>Skipped Images ({0})</source>
-        <translation type="vanished">スキップされた画像 ({0})</translation>
-    </message>
-    <message>
-        <source>Double-click a row to open that page.</source>
-        <translation type="vanished">行をダブルクリックしてそのページを開きます。</translation>
-    </message>
-    <message>
-        <source>Image</source>
-        <translation type="vanished">画像</translation>
-    </message>
-    <message>
-        <source>Reason</source>
-        <translation type="vanished">理由</translation>
-    </message>
-    <message>
-        <source>No skipped images in this batch.</source>
-        <translation type="vanished">このバッチにはスキップされた画像はありません。</translation>
-    </message>
-    <message>
-        <source>No batch report is available yet.</source>
-        <translation type="vanished">バッチ レポートはまだありません。</translation>
-    </message>
-    <message>
-        <source>Batch Report</source>
-        <translation type="vanished">バッチレポート</translation>
-    </message>
-    <message>
         <source>Project Recovery</source>
         <translation>プロジェクトの回復</translation>
     </message>
@@ -2067,8 +1721,12 @@ It may have been moved, renamed, or deleted.
         <translation>デフォルト</translation>
     </message>
     <message>
-        <source>Custom</source>
-        <translation>カスタム</translation>
+        <source>Custom Service</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Custom Local Server</source>
+        <translation type="unfinished"></translation>
     </message>
     <message>
         <source>Deepseek-v3</source>

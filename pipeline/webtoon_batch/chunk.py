@@ -12,7 +12,6 @@ from app.ui.messages import Messages
 from modules.detection.processor import TextBlockDetector
 from modules.translation.processor import Translator
 from modules.utils.device import resolve_device
-from modules.utils.exceptions import InsufficientCreditsException
 from modules.utils.image_utils import generate_mask
 from modules.utils.inpaint_cleanup import refine_bubble_residue_inpaint
 from modules.utils.pipeline_config import get_config, inpaint_map
@@ -125,8 +124,6 @@ class ChunkMixin:
                 rtl = source_lang_en == "Japanese"
                 return sort_blk_list(blocks, rtl)
             return blocks
-        except InsufficientCreditsException:
-            raise
         except Exception as error:
             err_msg = self._extract_error_message(error, context="ocr")
             logger.exception("OCR failed (%s): %s", reason, err_msg)
@@ -148,8 +145,6 @@ class ChunkMixin:
         translator = Translator(self.main_page, source_lang, target_lang)
         try:
             translator.translate(blocks, image, extra_context)
-        except InsufficientCreditsException:
-            raise
         except Exception as error:
             err_msg = self._extract_error_message(error, context="translation")
             logger.exception("Translation failed for %s: %s", image_path, err_msg)
