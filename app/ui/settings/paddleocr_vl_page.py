@@ -22,7 +22,8 @@ class PaddleOCRVLPage(QtWidgets.QWidget):
         note = MLabel(
             self.tr(
                 "Connect Comic Translate to your local PaddleOCR VL Docker service.\n"
-                "These settings control the /layout-parsing OCR requests."
+                "This OCR engine sends cropped text regions to the /layout-parsing endpoint.\n"
+                "Leave markdown or visualization options disabled unless you need debugging."
             )
         ).secondary()
         note.setWordWrap(True)
@@ -53,7 +54,16 @@ class PaddleOCRVLPage(QtWidgets.QWidget):
 
         perf_note = MLabel(
             self.tr(
-                "For your RTX 4070 SUPER, 256 tokens and 2 parallel workers are the recommended fastest defaults."
+                "Estimated VRAM usage depends on page size, image resolution, and the Docker service build.\n"
+                "Recommended starting points:\n"
+                "- Up to 8 GB VRAM: 128 to 256 tokens, 1 worker\n"
+                "- 10 to 12 GB VRAM: 256 tokens, 2 workers\n"
+                "- 16 GB VRAM: 256 to 512 tokens, 2 to 3 workers\n"
+                "- 24 GB or more: 512 tokens, 3 to 4 workers for dense pages\n"
+                "Approximate GPU usage:\n"
+                "- 256 tokens / 2 workers: about 5 to 7 GB\n"
+                "- 512 tokens / 2 workers: about 7 to 10 GB\n"
+                "- 1024 tokens / 2 workers: about 10 GB or more"
             )
         ).secondary()
         perf_note.setWordWrap(True)
