@@ -781,22 +781,22 @@ Please check your internet connection.</source>
         <translation>Результат OCR для этого блока пуст.</translation>
     </message>
     <message>
-        <location filename="../../modules/ocr/ppocr/engine.py" line="160"/>
+        <location filename="../../modules/ocr/ppocr/engine.py" line="199"/>
         <source>Initial crop is empty.</source>
         <translation>Исходная обрезка пуста.</translation>
     </message>
     <message>
-        <location filename="../../modules/ocr/ppocr/engine.py" line="185"/>
+        <location filename="../../modules/ocr/ppocr/engine.py" line="224"/>
         <source>OCR returned empty text on the initial crop.</source>
         <translation>OCR вернул пустой текст на исходной обрезке.</translation>
     </message>
     <message>
-        <location filename="../../modules/ocr/ppocr/engine.py" line="221"/>
+        <location filename="../../modules/ocr/ppocr/engine.py" line="274"/>
         <source>Retry crop is empty after expansion.</source>
         <translation>Обрезка для повторной попытки пуста после расширения.</translation>
     </message>
     <message>
-        <location filename="../../modules/ocr/ppocr/engine.py" line="248"/>
+        <location filename="../../modules/ocr/ppocr/engine.py" line="303"/>
         <source>Retry also failed after contrast preprocessing.</source>
         <translation>Повторная попытка также не удалась после предобработки контраста.</translation>
     </message>
