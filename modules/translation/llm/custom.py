@@ -25,6 +25,9 @@ class CustomTranslation(GPTTranslation):
         credentials = settings.get_credentials(settings.ui.tr(tr_key))
         self.api_key = credentials.get('api_key', '')
         self.model = credentials.get('model', '')
+        self.translation_mode_label = tr_key
+        self.debug_log_raw_response = tr_key == "Custom Local Server"
+        self.debug_log_response_json = tr_key == "Custom Local Server"
         
         # Override the API base URL with the custom one
         self.api_base_url = credentials.get('api_url', '').rstrip('/')
