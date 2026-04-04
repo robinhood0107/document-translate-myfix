@@ -18,6 +18,7 @@ from modules.translation.processor import Translator
 from modules.utils.textblock import sort_blk_list
 from modules.utils.pipeline_config import inpaint_map, get_config
 from modules.utils.image_utils import generate_mask
+from modules.utils.inpaint_cleanup import refine_bubble_residue_inpaint
 from modules.utils.language_utils import get_language_code, is_no_space_lang
 from modules.utils.ocr_quality import summarize_ocr_quality
 from modules.utils.ocr_debug import export_ocr_debug_artifacts
@@ -557,6 +558,19 @@ class BatchProcessor:
 
             inpaint_input_img = self.inpainting.inpainter_cache(image, mask, config)
             inpaint_input_img = imk.convert_scale_abs(inpaint_input_img)
+            inpaint_input_img, mask, cleanup_stats = refine_bubble_residue_inpaint(
+                inpaint_input_img,
+                mask,
+                blk_list,
+                self.inpainting.inpainter_cache,
+                config,
+            )
+            if cleanup_stats.get("applied"):
+                logger.info(
+                    "pre-inpaint: residue cleanup applied for %d block(s), %d component(s)",
+                    cleanup_stats.get("block_count", 0),
+                    cleanup_stats.get("component_count", 0),
+                )
 
             # Saving cleaned image
             patches = self.inpainting.get_inpainted_patches(mask, inpaint_input_img)
