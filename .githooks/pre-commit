@@ -1,0 +1,43 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$ROOT_DIR"
+
+resolve_python() {
+  if command -v python >/dev/null 2>&1; then
+    command -v python
+    return
+  fi
+  if command -v python3 >/dev/null 2>&1; then
+    command -v python3
+    return
+  fi
+  if [[ -x "$ROOT_DIR/.venv/bin/python" ]]; then
+    echo "$ROOT_DIR/.venv/bin/python"
+    return
+  fi
+  echo "Python interpreter not found." >&2
+  exit 1
+}
+
+PYTHON_BIN="$(resolve_python)"
+BRANCH_NAME="$(git branch --show-current)"
+"$PYTHON_BIN" scripts/validate_repo_policy.py --mode commit --branch "$BRANCH_NAME"
+
+mapfile -t STAGED_PY < <(git diff --cached --name-only --diff-filter=ACMRTUXB -- '*.py')
+if ((${#STAGED_PY[@]} > 0)); then
+  mapfile -t UNSTAGED_PY < <(git diff --name-only -- '*.py')
+  for file_name in "${STAGED_PY[@]}"; do
+    for dirty_name in "${UNSTAGED_PY[@]}"; do
+      if [[ "$file_name" == "$dirty_name" ]]; then
+        echo "Refusing commit: staged Python file also has unstaged edits: $file_name" >&2
+        echo "Stage or stash the remaining edits first." >&2
+        exit 1
+      fi
+    done
+  done
+  "$PYTHON_BIN" scripts/validate_changed_python.py "${STAGED_PY[@]}"
+fi
+
+exit 0

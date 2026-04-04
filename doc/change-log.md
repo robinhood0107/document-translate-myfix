@@ -61,3 +61,11 @@
 - `Always Use This Color` 문구를 `Use Selected Color`로 줄여 시인성을 높였다.
 - 상하 정렬과 윤곽선 `OFF / ON` 버튼은 렌더 패널 내부 전용 체크 스타일을 사용하도록 바꿨다.
 - 오른쪽 패널 최소 폭을 늘려 한국어와 독일어 같은 긴 번역에서도 잘림 가능성을 줄였다.
+
+## 체크포인트 9
+
+- 저장소 최상단에 `rules.md`를 추가해 Git 규칙, 브랜치 전략, CI/CD, 번역 반영 규칙을 문서화했다.
+- `AGENTS.md`를 추가해 저장소 범위 에이전트가 작업 전에 `rules.md`를 먼저 읽도록 강제했다.
+- `.githooks/`와 `scripts/bootstrap_git_hooks.sh`를 추가해 로컬 훅 기반 보호 규칙을 실제로 활성화할 수 있게 했다.
+- `.github/workflows/ci.yml`과 PR 템플릿을 추가해 브랜치 이름, Python 검증, 번역 자산 검증을 자동화했다.
+- `Retry Failed`, `One-Page Auto` 관련 설명 문자열과 보고서 문자열을 다국어 번역 자산에 반영할 준비를 마쳤다.

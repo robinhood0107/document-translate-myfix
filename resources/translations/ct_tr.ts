@@ -4,7 +4,7 @@
 <context>
     <name></name>
     <message>
-        <source>Custom</source><source>Custom</source>
+        <source>Custom</source>
         <translation type="vanished">Özel</translation>
     </message>
 </context>
@@ -49,7 +49,7 @@ Sign in only if you want to use hosted credits and account features.</source>
     </message>
     <message>
         <location filename="../../app/ui/settings/account_page.py" line="33"/>
-        <source>Sign In</source><source>Sign In</source>
+        <source>Sign In</source>
         <translation>Giriş Yap</translation>
     </message>
     <message>
@@ -92,39 +92,49 @@ Sign in only if you want to use hosted credits and account features.</source>
 <context>
     <name>ComicTranslate</name>
     <message>
-        <location filename="../../controller.py" line="485"/>
-        <location filename="../../controller.py" line="495"/>
+        <location filename="../../controller.py" line="490"/>
+        <location filename="../../controller.py" line="500"/>
         <source>Error</source>
         <translation>Hata</translation>
     </message>
     <message>
-        <location filename="../../controller.py" line="712"/>
-        <location filename="../../controller.py" line="723"/>
+        <location filename="../../controller.py" line="612"/>
+        <source>No failed pages from the latest batch are available to retry.</source>
+        <translation>Son toplu çalıştırmadan yeniden denenecek başarısız sayfa yok.</translation>
+    </message>
+    <message>
+        <location filename="../../controller.py" line="626"/>
+        <source>No current page is available for automatic processing.</source>
+        <translation>Otomatik işleme için kullanılabilir bir mevcut sayfa yok.</translation>
+    </message>
+    <message>
+        <location filename="../../controller.py" line="756"/>
+        <location filename="../../controller.py" line="767"/>
         <source>Downloading model file: {filename}</source>
         <translation>Model dosyası indiriliyor: {filename}</translation>
     </message>
     <message>
-        <location filename="../../controller.py" line="754"/>
+        <location filename="../../controller.py" line="798"/>
         <source>Unsaved Changes</source>
         <translation>Kaydedilmemiş Değişiklikler</translation>
     </message>
     <message>
-        <location filename="../../controller.py" line="755"/>
+        <location filename="../../controller.py" line="799"/>
         <source>Save changes to this file?</source>
         <translation>Bu dosyadaki değişiklikleri kaydetmek ister misiniz?</translation>
     </message>
     <message>
-        <location filename="../../controller.py" line="756"/>
+        <location filename="../../controller.py" line="800"/>
         <source>Save</source>
         <translation>Kaydet</translation>
     </message>
     <message>
-        <location filename="../../controller.py" line="757"/>
+        <location filename="../../controller.py" line="801"/>
         <source>Don&apos;t Save</source>
         <translation>Kaydetme</translation>
     </message>
     <message>
-        <location filename="../../controller.py" line="758"/>
+        <location filename="../../controller.py" line="802"/>
         <source>Cancel</source>
         <translation>İptal</translation>
     </message>
@@ -281,7 +291,7 @@ You do not need to sign in to use local models or your own provider credentials.
     </message>
     <message>
         <location filename="../../app/ui/settings/credentials_page.py" line="41"/>
-        <source>OCR</source><source>OCR</source>
+        <source>OCR</source>
         <translation>OCR</translation>
     </message>
     <message>
@@ -310,7 +320,7 @@ You do not need to sign in to use local models or your own provider credentials.
     </message>
     <message>
         <location filename="../../app/ui/settings/credentials_page.py" line="108"/>
-        <source>Model</source><source>Model</source>
+        <source>Model</source>
         <translation>Model</translation>
     </message>
     <message>
@@ -472,7 +482,7 @@ You do not need to sign in to use local models or your own provider credentials.
     </message>
     <message>
         <location filename="../../app/ui/dayu_widgets/combo_box.py" line="268"/>
-        <source>Font</source><source>Font</source>
+        <source>Font</source>
         <translation type="unfinished">Yazı Tipi</translation>
     </message>
 </context>
@@ -561,21 +571,21 @@ You do not need to sign in to use local models or your own provider credentials.
     <name>Messages</name>
     <message>
         <location filename="../../app/controllers/task_runner.py" line="148"/>
-        <source>Cancelling... %p%</source><source>Cancelling... %p%</source>
+        <source>Cancelling... %p%</source>
         <translation>İptal ediliyor... %p%</translation>
     </message>
     <message>
-        <location filename="../../controller.py" line="677"/>
+        <location filename="../../controller.py" line="721"/>
         <source>Processing:</source>
         <translation>İşleniyor:</translation>
     </message>
     <message>
-        <location filename="../../controller.py" line="680"/>
+        <location filename="../../controller.py" line="724"/>
         <source>Archiving:</source>
         <translation>Arşivleniyor:</translation>
     </message>
     <message>
-        <location filename="../../app/controllers/image.py" line="1111"/>
+        <location filename="../../app/controllers/image.py" line="1199"/>
         <source>Skipping:</source>
         <translation>Atlanıyor:</translation>
     </message>
@@ -731,7 +741,7 @@ Configure them in Settings &gt; Credentials.
     </message>
     <message>
         <location filename="../../app/ui/messages.py" line="99"/>
-        <source>Insufficient Credits</source><source>Insufficient Credits</source>
+        <source>Insufficient Credits</source>
         <translation>Yetersiz Kredi</translation>
     </message>
     <message>
@@ -742,13 +752,13 @@ Please set API Key, Endpoint URL, and Model in Settings &gt; Credentials.</sourc
     </message>
     <message>
         <location filename="../../app/ui/messages.py" line="156"/>
-        <source>Close</source><source>Close</source>
+        <source>Close</source>
         <translation>Kapat</translation>
     </message>
     <message>
         <location filename="../../app/ui/messages.py" line="218"/>
-        <location filename="../../pipeline/batch_processor.py" line="179"/>
-        <location filename="../../pipeline/batch_processor.py" line="282"/>
+        <location filename="../../pipeline/batch_processor.py" line="399"/>
+        <location filename="../../pipeline/batch_processor.py" line="538"/>
         <location filename="../../pipeline/webtoon_batch/chunk.py" line="90"/>
         <source>Unable to connect to the server.
 Please check your internet connection.</source>
@@ -1154,7 +1164,7 @@ Bu klasör Otomatik Kurtarma anlık görüntülerinden ayrıdır.</translation>
     <name>SettingsPage</name>
     <message>
         <location filename="../../app/ui/settings/settings_page.py" line="511"/>
-        <source>OK</source><source>OK</source>
+        <source>OK</source>
         <translation>Tamam</translation>
     </message>
     <message>
@@ -1756,237 +1766,262 @@ sonra yeniden boyutlandırılmış görselde boyama işlemi yapın.</translation
 <context>
     <name>WorkspaceMixin</name>
     <message>
-        <location filename="../../app/ui/main_window/builders/workspace.py" line="47"/>
+        <location filename="../../app/ui/main_window/builders/workspace.py" line="65"/>
         <source>Undo</source>
         <translation>Geri Al</translation>
     </message>
     <message>
-        <location filename="../../app/ui/main_window/builders/workspace.py" line="48"/>
+        <location filename="../../app/ui/main_window/builders/workspace.py" line="66"/>
         <source>Redo</source>
         <translation>Yinele</translation>
     </message>
     <message>
-        <location filename="../../app/ui/main_window/builders/workspace.py" line="53"/>
+        <location filename="../../app/ui/main_window/builders/workspace.py" line="71"/>
         <source>Detect</source>
         <translation>Algıla</translation>
     </message>
     <message>
-        <location filename="../../app/ui/main_window/builders/workspace.py" line="54"/>
+        <location filename="../../app/ui/main_window/builders/workspace.py" line="72"/>
         <source>Recognize</source>
         <translation>Tanı</translation>
     </message>
     <message>
-        <location filename="../../app/ui/main_window/builders/workspace.py" line="55"/>
+        <location filename="../../app/ui/main_window/builders/workspace.py" line="73"/>
         <source>Translate</source>
         <translation>Çevir</translation>
     </message>
     <message>
-        <location filename="../../app/ui/main_window/builders/workspace.py" line="56"/>
+        <location filename="../../app/ui/main_window/builders/workspace.py" line="74"/>
         <source>Segment</source>
         <translation>Parçala</translation>
     </message>
     <message>
-        <location filename="../../app/ui/main_window/builders/workspace.py" line="57"/>
+        <location filename="../../app/ui/main_window/builders/workspace.py" line="75"/>
         <source>Clean</source>
         <translation>Temizle</translation>
     </message>
     <message>
-        <location filename="../../app/ui/main_window/builders/workspace.py" line="58"/>
+        <location filename="../../app/ui/main_window/builders/workspace.py" line="76"/>
         <source>Render</source>
         <translation>Render Et</translation>
     </message>
     <message>
-        <location filename="../../app/ui/main_window/builders/workspace.py" line="75"/>
+        <location filename="../../app/ui/main_window/builders/workspace.py" line="93"/>
         <source>Manual</source>
         <translation>Manuel</translation>
     </message>
     <message>
-        <location filename="../../app/ui/main_window/builders/workspace.py" line="78"/>
+        <location filename="../../app/ui/main_window/builders/workspace.py" line="96"/>
         <source>Automatic</source>
         <translation>Otomatik</translation>
     </message>
     <message>
-        <location filename="../../app/ui/main_window/builders/workspace.py" line="87"/>
+        <location filename="../../app/ui/main_window/builders/workspace.py" line="105"/>
         <source>Toggle Webtoon Mode. For comics that are read in long vertical strips</source>
         <translation>Webtoon Modunu Aç/Kapat. Uzun dikey şeritlerde okunan çizgi romanlar için</translation>
     </message>
     <message>
-        <location filename="../../app/ui/main_window/builders/workspace.py" line="91"/>
+        <location filename="../../app/ui/main_window/builders/workspace.py" line="109"/>
         <source>Translate All</source>
         <translation>Tümünü Çevir</translation>
     </message>
     <message>
-        <location filename="../../app/ui/main_window/builders/workspace.py" line="94"/>
+        <location filename="../../app/ui/main_window/builders/workspace.py" line="112"/>
         <source>Cancel</source>
         <translation>İptal</translation>
     </message>
     <message>
-        <location filename="../../app/ui/main_window/builders/workspace.py" line="97"/>
+        <location filename="../../app/ui/main_window/builders/workspace.py" line="115"/>
         <source>Report</source>
         <translation>Rapor</translation>
     </message>
     <message>
-        <location filename="../../app/ui/main_window/builders/workspace.py" line="128"/>
+        <location filename="../../app/ui/main_window/builders/workspace.py" line="118"/>
+        <source>Open the latest automatic processing report.</source>
+        <translation>En son otomatik işleme raporunu aç.</translation>
+    </message>
+    <message>
+        <location filename="../../app/ui/main_window/builders/workspace.py" line="119"/>
+        <source>Retry Failed</source>
+        <translation>Başarısızları Yeniden Dene</translation>
+    </message>
+    <message>
+        <location filename="../../app/ui/main_window/builders/workspace.py" line="123"/>
+        <source>Retry only the pages that failed in the latest automatic run.</source>
+        <translation>Yalnızca son otomatik çalıştırmada başarısız olan sayfaları yeniden dene.</translation>
+    </message>
+    <message>
+        <location filename="../../app/ui/main_window/builders/workspace.py" line="125"/>
+        <source>One-Page Auto</source>
+        <translation>Tek Sayfa Otomatik</translation>
+    </message>
+    <message>
+        <location filename="../../app/ui/main_window/builders/workspace.py" line="129"/>
+        <source>Automatically process only the current page with the current automatic settings.</source>
+        <translation>Yalnızca mevcut sayfayı geçerli otomatik ayarlarla otomatik olarak işle.</translation>
+    </message>
+    <message>
+        <location filename="../../app/ui/main_window/builders/workspace.py" line="161"/>
         <source>Click or drag files here</source>
         <translation>Dosyaları buraya tıklayın veya sürükleyin</translation>
     </message>
     <message>
-        <location filename="../../app/ui/main_window/builders/workspace.py" line="148"/>
+        <location filename="../../app/ui/main_window/builders/workspace.py" line="181"/>
         <source>Import Images, PDFs, Epubs or Comic Book Archive Files(cbr, cbz, etc)</source>
         <translation>Resimleri, PDF&apos;leri, Epub&apos;ları veya Çizgi Roman Arşiv Dosyalarını (cbr, cbz, vb.) içe aktarın</translation>
     </message>
     <message>
-        <location filename="../../app/ui/main_window/builders/workspace.py" line="166"/>
+        <location filename="../../app/ui/main_window/builders/workspace.py" line="199"/>
         <source>Source Language</source>
         <translation>Kaynak Dil</translation>
     </message>
     <message>
-        <location filename="../../app/ui/main_window/builders/workspace.py" line="176"/>
+        <location filename="../../app/ui/main_window/builders/workspace.py" line="209"/>
         <source>Target Language</source>
         <translation>Hedef Dil</translation>
     </message>
     <message>
-        <location filename="../../app/ui/main_window/builders/workspace.py" line="186"/>
+        <location filename="../../app/ui/main_window/builders/workspace.py" line="219"/>
         <source>New Render items and Translate All use the controls below. Font size edits only the currently selected text item.</source>
         <translation>Yeni render öğeleri ve “Tümünü Çevir” çıktısı aşağıdaki ayarları kullanır. Yazı tipi boyutu yalnızca şu anda seçili metin öğesini düzenler.</translation>
     </message>
     <message>
-        <location filename="../../app/ui/main_window/builders/workspace.py" line="194"/>
+        <location filename="../../app/ui/main_window/builders/workspace.py" line="227"/>
         <source>Text color follows the detected source text by default. Enable &apos;Use Selected Color&apos; to override it.</source>
         <translation>Metin rengi varsayılan olarak algılanan kaynak metin rengini takip eder. Üzerine yazmak için “Seçili rengi kullan” seçeneğini etkinleştirin.</translation>
     </message>
     <message>
-        <location filename="../../app/ui/main_window/builders/workspace.py" line="200"/>
+        <location filename="../../app/ui/main_window/builders/workspace.py" line="233"/>
         <source>Apply All SMART Globally</source>
         <translation>Tüm SMART ayarlarını genel olarak uygula</translation>
     </message>
     <message>
-        <location filename="../../app/ui/main_window/builders/workspace.py" line="207"/>
+        <location filename="../../app/ui/main_window/builders/workspace.py" line="240"/>
         <source>Font family used for new Render items and Translate All output.</source>
         <translation>Yeni render öğeleri ve “Tümünü Çevir” çıktısında kullanılan yazı tipi ailesi.</translation>
     </message>
     <message>
-        <location filename="../../app/ui/main_window/builders/workspace.py" line="212"/>
+        <location filename="../../app/ui/main_window/builders/workspace.py" line="245"/>
         <source>Edits only the selected text item. New renders still auto-fit using the min/max font size settings.</source>
         <translation>Yalnızca şu anda seçili metin öğesini düzenler. Yeni render’lar yine minimum/maksimum yazı tipi boyutu ayarlarına göre otomatik sığdırılır.</translation>
     </message>
     <message>
-        <location filename="../../app/ui/main_window/builders/workspace.py" line="225"/>
+        <location filename="../../app/ui/main_window/builders/workspace.py" line="258"/>
         <source>Line spacing used for new Render items and Translate All output.</source>
         <translation>Yeni render öğeleri ve “Tümünü Çevir” çıktısında kullanılan satır aralığı.</translation>
     </message>
     <message>
-        <location filename="../../app/ui/main_window/builders/workspace.py" line="247"/>
+        <location filename="../../app/ui/main_window/builders/workspace.py" line="278"/>
         <source>Choose the fallback text color. By default the app keeps the detected source text color unless you enable &apos;Use Selected Color&apos;.</source>
         <translation>Yedek metin rengini seçin. Varsayılan olarak uygulama algılanan kaynak metin rengini korur; “Seçili rengi kullan” etkinleştirilirse seçilen renk kullanılır.</translation>
     </message>
     <message>
-        <location filename="../../app/ui/main_window/builders/workspace.py" line="254"/>
+        <location filename="../../app/ui/main_window/builders/workspace.py" line="285"/>
         <source>Use Selected Color</source>
         <translation>Seçili rengi kullan</translation>
     </message>
     <message>
-        <location filename="../../app/ui/main_window/builders/workspace.py" line="257"/>
+        <location filename="../../app/ui/main_window/builders/workspace.py" line="288"/>
         <source>Ignore detected source text color and use the selected color for all new Render items and Translate All output.</source>
         <translation>Algılanan kaynak metin rengini yok sayar ve tüm yeni render öğeleri ile “Tümünü Çevir” çıktısında seçilen rengi kullanır.</translation>
     </message>
     <message>
-        <location filename="../../app/ui/main_window/builders/workspace.py" line="271"/>
+        <location filename="../../app/ui/main_window/builders/workspace.py" line="306"/>
         <source>Horizontal alignment for new Render items and Translate All output.</source>
         <translation>Yeni render öğeleri ve “Tümünü Çevir” çıktısı için yatay hizalama.</translation>
     </message>
     <message>
-        <location filename="../../app/ui/main_window/builders/workspace.py" line="407"/>
+        <location filename="../../app/ui/main_window/builders/workspace.py" line="420"/>
         <source>Text Color</source>
         <translation>Metin rengi</translation>
     </message>
     <message>
-        <location filename="../../app/ui/main_window/builders/workspace.py" line="422"/>
+        <location filename="../../app/ui/main_window/builders/workspace.py" line="435"/>
         <source>Horizontal</source>
         <translation>Yatay</translation>
     </message>
     <message>
-        <location filename="../../app/ui/main_window/builders/workspace.py" line="424"/>
+        <location filename="../../app/ui/main_window/builders/workspace.py" line="437"/>
         <source>Vertical</source>
         <translation>Dikey</translation>
     </message>
     <message>
-        <location filename="../../app/ui/main_window/builders/workspace.py" line="449"/>
+        <location filename="../../app/ui/main_window/builders/workspace.py" line="462"/>
         <source>Style</source>
         <translation>Stil</translation>
     </message>
     <message>
-        <location filename="../../app/ui/main_window/builders/workspace.py" line="280"/>
+        <location filename="../../app/ui/main_window/builders/workspace.py" line="315"/>
         <source>Top</source>
         <translation>Üst</translation>
     </message>
     <message>
-        <location filename="../../app/ui/main_window/builders/workspace.py" line="280"/>
+        <location filename="../../app/ui/main_window/builders/workspace.py" line="315"/>
         <source>Place text at the top of the source text box.</source>
         <translation>Metni özgün metin kutusunun üst kısmına yerleştirir.</translation>
     </message>
     <message>
-        <location filename="../../app/ui/main_window/builders/workspace.py" line="281"/>
+        <location filename="../../app/ui/main_window/builders/workspace.py" line="316"/>
         <source>Center</source>
         <translation>Orta</translation>
     </message>
     <message>
-        <location filename="../../app/ui/main_window/builders/workspace.py" line="281"/>
+        <location filename="../../app/ui/main_window/builders/workspace.py" line="316"/>
         <source>Place text in the vertical center of the source text box.</source>
         <translation>Metni özgün metin kutusunun dikey ortasına yerleştirir.</translation>
     </message>
     <message>
-        <location filename="../../app/ui/main_window/builders/workspace.py" line="282"/>
+        <location filename="../../app/ui/main_window/builders/workspace.py" line="317"/>
         <source>Bottom</source>
         <translation>Alt</translation>
     </message>
     <message>
-        <location filename="../../app/ui/main_window/builders/workspace.py" line="282"/>
+        <location filename="../../app/ui/main_window/builders/workspace.py" line="317"/>
         <source>Place text at the bottom of the source text box.</source>
         <translation>Metni özgün metin kutusunun alt kısmına yerleştirir.</translation>
     </message>
     <message>
-        <location filename="../../app/ui/main_window/builders/workspace.py" line="289"/>
+        <location filename="../../app/ui/main_window/builders/workspace.py" line="328"/>
         <source>Bold style for new Render items and Translate All output.</source>
         <translation>Yeni render öğeleri ve “Tümünü Çevir” çıktısı için kalın stil.</translation>
     </message>
     <message>
-        <location filename="../../app/ui/main_window/builders/workspace.py" line="293"/>
+        <location filename="../../app/ui/main_window/builders/workspace.py" line="332"/>
         <source>Italic style for new Render items and Translate All output.</source>
         <translation>Yeni render öğeleri ve “Tümünü Çevir” çıktısı için italik stil.</translation>
     </message>
     <message>
-        <location filename="../../app/ui/main_window/builders/workspace.py" line="297"/>
+        <location filename="../../app/ui/main_window/builders/workspace.py" line="336"/>
         <source>Underline style for new Render items and Translate All output.</source>
         <translation>Yeni render öğeleri ve “Tümünü Çevir” çıktısı için altı çizili stil.</translation>
     </message>
     <message>
-        <location filename="../../app/ui/main_window/builders/workspace.py" line="321"/>
+        <location filename="../../app/ui/main_window/builders/workspace.py" line="353"/>
         <source>OFF</source>
         <translation>KAPALI</translation>
     </message>
     <message>
-        <location filename="../../app/ui/main_window/builders/workspace.py" line="321"/>
+        <location filename="../../app/ui/main_window/builders/workspace.py" line="353"/>
         <source>Disable outline globally.</source>
         <translation>Konturu genel olarak devre dışı bırakır.</translation>
     </message>
     <message>
-        <location filename="../../app/ui/main_window/builders/workspace.py" line="322"/>
+        <location filename="../../app/ui/main_window/builders/workspace.py" line="354"/>
         <source>ON</source>
         <translation>AÇIK</translation>
     </message>
     <message>
-        <location filename="../../app/ui/main_window/builders/workspace.py" line="322"/>
+        <location filename="../../app/ui/main_window/builders/workspace.py" line="354"/>
         <source>Enable outline globally.</source>
         <translation>Konturu genel olarak etkinleştirir.</translation>
     </message>
     <message>
-        <location filename="../../app/ui/main_window/builders/workspace.py" line="329"/>
+        <location filename="../../app/ui/main_window/builders/workspace.py" line="362"/>
         <source>Outline color for new Render items and Translate All output.</source>
         <translation>Yeni render öğeleri ve “Tümünü Çevir” çıktısında kullanılan kontur rengi.</translation>
     </message>
     <message>
-        <location filename="../../app/ui/main_window/builders/workspace.py" line="338"/>
+        <location filename="../../app/ui/main_window/builders/workspace.py" line="371"/>
         <source>Outline width for new Render items and Translate All output.</source>
         <translation>Yeni render öğeleri ve “Tümünü Çevir” çıktısında kullanılan kontur kalınlığı.</translation>
     </message>
@@ -2019,7 +2054,8 @@ sonra yeniden boyutlandırılmış görselde boyama işlemi yapın.</translation
         <translation type="vanished">Altı Çizili</translation>
     </message>
     <message>
-        <location filename="../../app/ui/main_window/builders/workspace.py" line="311"/>
+        <location filename="../../app/ui/main_window/builders/workspace.py" line="343"/>
+        <location filename="../../app/ui/main_window/builders/workspace.py" line="464"/>
         <source>Outline</source>
         <translation>Dış Çizgi</translation>
     </message>
@@ -2032,78 +2068,78 @@ sonra yeniden boyutlandırılmış görselde boyama işlemi yapın.</translation
         <translation type="vanished">Dış Çizgi Kalınlığı</translation>
     </message>
     <message>
-        <location filename="../../app/ui/main_window/builders/workspace.py" line="364"/>
+        <location filename="../../app/ui/main_window/builders/workspace.py" line="486"/>
         <source>Pan Image</source>
         <translation>Görseli Kaydır</translation>
     </message>
     <message>
-        <location filename="../../app/ui/main_window/builders/workspace.py" line="368"/>
+        <location filename="../../app/ui/main_window/builders/workspace.py" line="490"/>
         <source>Set for all</source>
         <translation>Tümüne Ayarla</translation>
     </message>
     <message>
-        <location filename="../../app/ui/main_window/builders/workspace.py" line="370"/>
+        <location filename="../../app/ui/main_window/builders/workspace.py" line="492"/>
         <source>Sets the Source and Target Language on the current page for all pages</source>
         <translation>Mevcut sayfadaki kaynak ve hedef dili tüm sayfalara uygular</translation>
     </message>
     <message>
-        <location filename="../../app/ui/main_window/builders/workspace.py" line="380"/>
+        <location filename="../../app/ui/main_window/builders/workspace.py" line="502"/>
         <source>Draw or Select Text Boxes</source>
         <translation>Metin Kutuları Çiz veya Seç</translation>
     </message>
     <message>
-        <location filename="../../app/ui/main_window/builders/workspace.py" line="385"/>
+        <location filename="../../app/ui/main_window/builders/workspace.py" line="507"/>
         <source>Delete Selected Box</source>
         <translation>Seçili Kutuyu Sil</translation>
     </message>
     <message>
-        <location filename="../../app/ui/main_window/builders/workspace.py" line="388"/>
+        <location filename="../../app/ui/main_window/builders/workspace.py" line="510"/>
         <source>Remove all the Boxes on the Image</source>
         <translation>Görseldeki tüm kutuları kaldır</translation>
     </message>
     <message>
-        <location filename="../../app/ui/main_window/builders/workspace.py" line="392"/>
+        <location filename="../../app/ui/main_window/builders/workspace.py" line="514"/>
         <source>Draws all the Text Blocks in the existing Text Block List
 back on the Image (for further editing)</source>
         <translation>Mevcut metin blok listesindeki tüm metin bloklarını tekrar görsele çizer (daha fazla düzenleme için)</translation>
     </message>
     <message>
-        <location filename="../../app/ui/main_window/builders/workspace.py" line="404"/>
+        <location filename="../../app/ui/main_window/builders/workspace.py" line="526"/>
         <source>Reduce the size of all blocks</source>
         <translation>Tüm blokların boyutunu küçült</translation>
     </message>
     <message>
-        <location filename="../../app/ui/main_window/builders/workspace.py" line="415"/>
+        <location filename="../../app/ui/main_window/builders/workspace.py" line="537"/>
         <source>Increase the size of all blocks</source>
         <translation>Tüm blokların boyutunu büyüt</translation>
     </message>
     <message>
-        <location filename="../../app/ui/main_window/builders/workspace.py" line="426"/>
+        <location filename="../../app/ui/main_window/builders/workspace.py" line="548"/>
         <source>Draw Brush Strokes for Cleaning Image</source>
         <translation>Görseli temizlemek için fırça darbeleri çiz</translation>
     </message>
     <message>
-        <location filename="../../app/ui/main_window/builders/workspace.py" line="431"/>
+        <location filename="../../app/ui/main_window/builders/workspace.py" line="553"/>
         <source>Erase Brush Strokes</source>
         <translation>Fırça darbelerini sil</translation>
     </message>
     <message>
-        <location filename="../../app/ui/main_window/builders/workspace.py" line="436"/>
+        <location filename="../../app/ui/main_window/builders/workspace.py" line="558"/>
         <source>Remove all the brush strokes on the Image</source>
         <translation>Görseldeki tüm fırça darbelerini kaldır</translation>
     </message>
     <message>
-        <location filename="../../app/ui/main_window/builders/workspace.py" line="447"/>
+        <location filename="../../app/ui/main_window/builders/workspace.py" line="569"/>
         <source>Brush/Eraser Size Slider</source>
         <translation>Fırça/Silgi Boyutu Kaydırıcısı</translation>
     </message>
     <message>
-        <location filename="../../app/ui/main_window/builders/workspace.py" line="451"/>
+        <location filename="../../app/ui/main_window/builders/workspace.py" line="573"/>
         <source>Box Drawing</source>
         <translation>Kutu Çizimi</translation>
     </message>
     <message>
-        <location filename="../../app/ui/main_window/builders/workspace.py" line="455"/>
+        <location filename="../../app/ui/main_window/builders/workspace.py" line="577"/>
         <source>Inpainting</source>
         <translation>Boyama</translation>
     </message>
@@ -2139,194 +2175,152 @@ back on the Image (for further editing)</source>
 <context>
     <name>self.main</name>
     <message>
-        <location filename="../../app/controllers/batch_report.py" line="76"/>
         <source>The AI provider flagged this content</source>
-        <translation>Yapay zeka sağlayıcısı bu içeriği işaretledi</translation>
+        <translation type="vanished">Yapay zeka sağlayıcısı bu içeriği işaretledi</translation>
     </message>
     <message>
-        <location filename="../../app/controllers/batch_report.py" line="78"/>
         <source>Insufficient credits</source>
-        <translation>Yetersiz kredi</translation>
+        <translation type="vanished">Yetersiz kredi</translation>
     </message>
     <message>
-        <location filename="../../app/controllers/batch_report.py" line="80"/>
         <source>Request timed out</source>
-        <translation>İstek zaman aşımına uğradı</translation>
+        <translation type="vanished">İstek zaman aşımına uğradı</translation>
     </message>
     <message>
-        <location filename="../../app/controllers/batch_report.py" line="86"/>
         <source>Rate limited by provider</source>
-        <translation>Sağlayıcı tarafından hız sınırı uygulandı</translation>
+        <translation type="vanished">Sağlayıcı tarafından hız sınırı uygulandı</translation>
     </message>
     <message>
-        <location filename="../../app/controllers/batch_report.py" line="93"/>
         <source>Authentication failed</source>
-        <translation>Kimlik doğrulama başarısız</translation>
+        <translation type="vanished">Kimlik doğrulama başarısız</translation>
     </message>
     <message>
-        <location filename="../../app/controllers/batch_report.py" line="100"/>
         <source>Network or connection error</source>
-        <translation>Ağ veya bağlantı hatası</translation>
+        <translation type="vanished">Ağ veya bağlantı hatası</translation>
     </message>
     <message>
-        <location filename="../../app/controllers/batch_report.py" line="109"/>
         <source>Provider unavailable</source>
-        <translation>Sağlayıcı kullanılamıyor</translation>
+        <translation type="vanished">Sağlayıcı kullanılamıyor</translation>
     </message>
     <message>
-        <location filename="../../app/controllers/batch_report.py" line="115"/>
         <source>Invalid translation response</source>
-        <translation>Geçersiz çeviri yanıtı</translation>
+        <translation type="vanished">Geçersiz çeviri yanıtı</translation>
     </message>
     <message>
-        <location filename="../../app/controllers/batch_report.py" line="116"/>
         <source>Unexpected tool error</source>
-        <translation>Beklenmeyen araç hatası</translation>
+        <translation type="vanished">Beklenmeyen araç hatası</translation>
     </message>
     <message>
-        <location filename="../../app/controllers/batch_report.py" line="124"/>
-        <location filename="../../app/controllers/batch_report.py" line="173"/>
         <source>Try another text recognition tool</source>
-        <translation>Farklı bir metin tanıma aracı deneyin</translation>
+        <translation type="vanished">Farklı bir metin tanıma aracı deneyin</translation>
     </message>
     <message>
-        <location filename="../../app/controllers/batch_report.py" line="128"/>
-        <location filename="../../app/controllers/batch_report.py" line="177"/>
         <source>Try another translator</source>
-        <translation>Farklı bir çevirmen deneyin</translation>
+        <translation type="vanished">Farklı bir çevirmen deneyin</translation>
     </message>
     <message>
-        <location filename="../../app/controllers/batch_report.py" line="129"/>
         <source>Try another tool</source>
-        <translation>Farklı bir araç deneyin</translation>
+        <translation type="vanished">Farklı bir araç deneyin</translation>
     </message>
     <message>
-        <location filename="../../app/controllers/batch_report.py" line="131"/>
         <source>Buy more credits</source>
-        <translation>Daha fazla kredi satın alın</translation>
+        <translation type="vanished">Daha fazla kredi satın alın</translation>
     </message>
     <message>
-        <location filename="../../app/controllers/batch_report.py" line="133"/>
-        <location filename="../../app/controllers/batch_report.py" line="168"/>
-        <location filename="../../app/controllers/batch_report.py" line="178"/>
         <source>Try again</source>
-        <translation>Tekrar dene</translation>
+        <translation type="vanished">Tekrar dene</translation>
     </message>
     <message>
-        <location filename="../../app/controllers/batch_report.py" line="139"/>
         <source>Wait and try again</source>
-        <translation>Bekleyip tekrar deneyin</translation>
+        <translation type="vanished">Bekleyip tekrar deneyin</translation>
     </message>
     <message>
-        <location filename="../../app/controllers/batch_report.py" line="146"/>
         <source>Check API settings</source>
-        <translation>API ayarlarını kontrol edin</translation>
+        <translation type="vanished">API ayarlarını kontrol edin</translation>
     </message>
     <message>
-        <location filename="../../app/controllers/batch_report.py" line="153"/>
         <source>Check your connection</source>
-        <translation>Bağlantınızı kontrol edin</translation>
+        <translation type="vanished">Bağlantınızı kontrol edin</translation>
     </message>
     <message>
-        <location filename="../../app/controllers/batch_report.py" line="162"/>
         <source>Try again later</source>
-        <translation>Daha sonra tekrar deneyin</translation>
+        <translation type="vanished">Daha sonra tekrar deneyin</translation>
     </message>
     <message>
-        <location filename="../../app/controllers/batch_report.py" line="184"/>
         <source>No text blocks detected</source>
-        <translation>Metin bloğu tespit edilmedi</translation>
+        <translation type="vanished">Metin bloğu tespit edilmedi</translation>
     </message>
     <message>
-        <location filename="../../app/controllers/batch_report.py" line="185"/>
         <source>Text recognition failed</source>
-        <translation>Metin tanıma başarısız</translation>
+        <translation type="vanished">Metin tanıma başarısız</translation>
     </message>
     <message>
-        <location filename="../../app/controllers/batch_report.py" line="186"/>
         <source>Translation failed</source>
-        <translation>Çeviri başarısız</translation>
+        <translation type="vanished">Çeviri başarısız</translation>
     </message>
     <message>
-        <location filename="../../app/controllers/batch_report.py" line="187"/>
         <source>Webtoon text recognition chunk failed</source>
-        <translation>Webtoon metin tanıma parçası başarısız</translation>
+        <translation type="vanished">Webtoon metin tanıma parçası başarısız</translation>
     </message>
     <message>
-        <location filename="../../app/controllers/batch_report.py" line="188"/>
         <source>Webtoon translation chunk failed</source>
-        <translation>Webtoon çeviri parçası başarısız</translation>
+        <translation type="vanished">Webtoon çeviri parçası başarısız</translation>
     </message>
     <message>
-        <location filename="../../app/controllers/batch_report.py" line="192"/>
         <source>Page processing failed</source>
-        <translation>Sayfa işleme başarısız</translation>
+        <translation type="vanished">Sayfa işleme başarısız</translation>
     </message>
     <message>
-        <location filename="../../app/controllers/batch_report.py" line="253"/>
         <source>This image is not in the current project.</source>
-        <translation>Bu görsel mevcut projede yer almıyor.</translation>
+        <translation type="vanished">Bu görsel mevcut projede yer almıyor.</translation>
     </message>
     <message>
-        <location filename="../../app/controllers/batch_report.py" line="279"/>
         <source>Cancelled</source>
-        <translation>İptal Edildi</translation>
+        <translation type="vanished">İptal Edildi</translation>
     </message>
     <message>
-        <location filename="../../app/controllers/batch_report.py" line="279"/>
         <source>Completed</source>
-        <translation>Tamamlandı</translation>
+        <translation type="vanished">Tamamlandı</translation>
     </message>
     <message>
-        <location filename="../../app/controllers/batch_report.py" line="282"/>
         <source>{0}  |  Updated {1}</source>
-        <translation>{0}  |  Güncellendi {1}</translation>
+        <translation type="vanished">{0}  |  Güncellendi {1}</translation>
     </message>
     <message>
-        <location filename="../../app/controllers/batch_report.py" line="309"/>
         <source>Total</source>
-        <translation>Toplam</translation>
+        <translation type="vanished">Toplam</translation>
     </message>
     <message>
-        <location filename="../../app/controllers/batch_report.py" line="310"/>
-        <location filename="../../app/controllers/batch_report.py" line="356"/>
         <source>Skipped</source>
-        <translation>Atlandı</translation>
+        <translation type="vanished">Atlandı</translation>
     </message>
     <message>
-        <location filename="../../app/controllers/batch_report.py" line="320"/>
         <source>Skipped Images ({0})</source>
-        <translation>Atlanan Görseller ({0})</translation>
+        <translation type="vanished">Atlanan Görseller ({0})</translation>
     </message>
     <message>
-        <location filename="../../app/controllers/batch_report.py" line="327"/>
         <source>Double-click a row to open that page.</source>
-        <translation>O sayfayı açmak için bir satıra çift tıklayın.</translation>
+        <translation type="vanished">O sayfayı açmak için bir satıra çift tıklayın.</translation>
     </message>
     <message>
-        <location filename="../../app/controllers/batch_report.py" line="332"/>
         <source>Image</source>
-        <translation>Görsel</translation>
+        <translation type="vanished">Görsel</translation>
     </message>
     <message>
-        <location filename="../../app/controllers/batch_report.py" line="332"/>
         <source>Reason</source>
-        <translation>Neden</translation>
+        <translation type="vanished">Neden</translation>
     </message>
     <message>
-        <location filename="../../app/controllers/batch_report.py" line="366"/>
         <source>No skipped images in this batch.</source>
-        <translation>Bu toplu işlemde atlanan görsel yok.</translation>
+        <translation type="vanished">Bu toplu işlemde atlanan görsel yok.</translation>
     </message>
     <message>
-        <location filename="../../app/controllers/batch_report.py" line="377"/>
         <source>No batch report is available yet.</source>
-        <translation>Henüz toplu işlem raporu mevcut değil.</translation>
+        <translation type="vanished">Henüz toplu işlem raporu mevcut değil.</translation>
     </message>
     <message>
-        <location filename="../../app/controllers/batch_report.py" line="391"/>
         <source>Batch Report</source>
-        <translation>Toplu İşlem Raporu</translation>
+        <translation type="vanished">Toplu İşlem Raporu</translation>
     </message>
     <message>
         <location filename="../../app/controllers/projects.py" line="436"/>
@@ -2356,12 +2350,12 @@ Geri yüklemek istiyor musunuz?</translation>
         <translation>At</translation>
     </message>
     <message>
-        <location filename="../../app/controllers/projects.py" line="757"/>
+        <location filename="../../app/controllers/projects.py" line="759"/>
         <source>Project Not Found</source>
         <translation>Proje Bulunamadı</translation>
     </message>
     <message>
-        <location filename="../../app/controllers/projects.py" line="758"/>
+        <location filename="../../app/controllers/projects.py" line="760"/>
         <source>The selected project file could not be found.
 It may have been moved, renamed, or deleted.
 
@@ -2372,91 +2366,99 @@ Taşınmış, yeniden adlandırılmış veya silinmiş olabilir.
 {yol}</translation>
     </message>
     <message>
-        <location filename="../../app/controllers/projects.py" line="837"/>
+        <location filename="../../app/controllers/projects.py" line="839"/>
         <source>Korean</source>
         <translation>Korece</translation>
     </message>
     <message>
-        <location filename="../../app/controllers/projects.py" line="838"/>
+        <location filename="../../app/controllers/projects.py" line="840"/>
         <source>English</source>
         <translation>İngilizce</translation>
     </message>
 </context>
 <context>
+    <name>self.main_page</name>
+    <message>
+        <location filename="../../pipeline/batch_processor.py" line="360"/>
+        <source>OCR quality too low after retry.</source>
+        <translation type="unfinished"></translation>
+    </message>
+</context>
+<context>
     <name>self.settings.ui</name>
     <message>
-        <location filename="../../modules/ocr/processor.py" line="63"/>
-        <location filename="../../modules/translation/processor.py" line="61"/>
+        <location filename="../../modules/ocr/processor.py" line="87"/>
+        <location filename="../../modules/translation/processor.py" line="65"/>
         <source>GPT-4.1-mini</source>
         <translation>GPT-4.1-mini</translation>
     </message>
     <message>
-        <location filename="../../modules/ocr/processor.py" line="64"/>
+        <location filename="../../modules/ocr/processor.py" line="88"/>
         <source>Microsoft OCR</source>
         <translation>Microsoft OCR</translation>
     </message>
     <message>
-        <location filename="../../modules/ocr/processor.py" line="65"/>
+        <location filename="../../modules/ocr/processor.py" line="89"/>
         <source>Google Cloud Vision</source>
         <translation>Google Cloud Vision</translation>
     </message>
     <message>
-        <location filename="../../modules/ocr/processor.py" line="66"/>
+        <location filename="../../modules/ocr/processor.py" line="90"/>
         <source>Gemini-2.0-Flash</source>
         <translation>Gemini-2.0-Flash</translation>
     </message>
     <message>
-        <location filename="../../modules/ocr/processor.py" line="67"/>
+        <location filename="../../modules/ocr/processor.py" line="91"/>
         <source>Default</source>
         <translation>Varsayılan</translation>
     </message>
     <message>
-        <location filename="../../modules/translation/processor.py" line="58"/>
+        <location filename="../../modules/translation/processor.py" line="62"/>
         <source>Custom</source>
         <translation>Özel</translation>
     </message>
     <message>
-        <location filename="../../modules/translation/processor.py" line="59"/>
+        <location filename="../../modules/translation/processor.py" line="63"/>
         <source>Deepseek-v3</source>
         <translation>Deepseek-v3</translation>
     </message>
     <message>
-        <location filename="../../modules/translation/processor.py" line="60"/>
+        <location filename="../../modules/translation/processor.py" line="64"/>
         <source>GPT-4.1</source>
         <translation>GPT-4.1</translation>
     </message>
     <message>
-        <location filename="../../modules/translation/processor.py" line="62"/>
+        <location filename="../../modules/translation/processor.py" line="66"/>
         <source>Claude-4.5-Sonnet</source>
         <translation>Claude-4.5-Sonnet</translation>
     </message>
     <message>
-        <location filename="../../modules/translation/processor.py" line="63"/>
+        <location filename="../../modules/translation/processor.py" line="67"/>
         <source>Claude-4.5-Haiku</source>
         <translation>Claude-4.5-Haiku</translation>
     </message>
     <message>
-        <location filename="../../modules/translation/processor.py" line="64"/>
+        <location filename="../../modules/translation/processor.py" line="68"/>
         <source>Gemini-3.0-Flash</source>
         <translation>Gemini-3.0-Flash</translation>
     </message>
     <message>
-        <location filename="../../modules/translation/processor.py" line="65"/>
+        <location filename="../../modules/translation/processor.py" line="69"/>
         <source>Gemini-2.5-Pro</source>
         <translation>Gemini-2.5-Pro</translation>
     </message>
     <message>
-        <location filename="../../modules/translation/processor.py" line="66"/>
+        <location filename="../../modules/translation/processor.py" line="70"/>
         <source>Microsoft Translator</source>
         <translation>Microsoft Translator</translation>
     </message>
     <message>
-        <location filename="../../modules/translation/processor.py" line="67"/>
+        <location filename="../../modules/translation/processor.py" line="71"/>
         <source>DeepL</source>
         <translation>DeepL</translation>
     </message>
     <message>
-        <location filename="../../modules/translation/processor.py" line="68"/>
+        <location filename="../../modules/translation/processor.py" line="72"/>
         <source>Yandex</source>
         <translation>Yandex</translation>
     </message>
@@ -2504,7 +2506,7 @@ Taşınmış, yeniden adlandırılmış veya silinmiş olabilir.
     </message>
     <message>
         <location filename="../../modules/ocr/gemini_ocr.py" line="31"/>
-        <location filename="../../modules/translation/llm/gemini.py" line="31"/>
+        <location filename="../../modules/translation/llm/gemini.py" line="35"/>
         <source>Google Gemini</source>
         <translation>Google Gemini</translation>
     </message>

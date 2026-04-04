@@ -115,6 +115,19 @@ class WorkspaceMixin:
         self.batch_report_button = MPushButton(self.tr("Report"))
         self.batch_report_button.setEnabled(False)
         self.batch_report_button.setFocusPolicy(QtCore.Qt.FocusPolicy.NoFocus)
+        self.batch_report_button.setToolTip(self.tr("Open the latest automatic processing report."))
+        self.retry_failed_button = MPushButton(self.tr("Retry Failed"))
+        self.retry_failed_button.setEnabled(False)
+        self.retry_failed_button.setFocusPolicy(QtCore.Qt.FocusPolicy.NoFocus)
+        self.retry_failed_button.setToolTip(
+            self.tr("Retry only the pages that failed in the latest automatic run.")
+        )
+        self.one_page_auto_button = MPushButton(self.tr("One-Page Auto"))
+        self.one_page_auto_button.setEnabled(False)
+        self.one_page_auto_button.setFocusPolicy(QtCore.Qt.FocusPolicy.NoFocus)
+        self.one_page_auto_button.setToolTip(
+            self.tr("Automatically process only the current page with the current automatic settings.")
+        )
 
         header_layout.addWidget(self.hbutton_group)
         header_layout.addWidget(self.loading)
@@ -125,6 +138,8 @@ class WorkspaceMixin:
         header_layout.addWidget(self.translate_button)
         header_layout.addWidget(self.cancel_button)
         header_layout.addWidget(self.batch_report_button)
+        header_layout.addWidget(self.retry_failed_button)
+        header_layout.addWidget(self.one_page_auto_button)
 
         self.search_panel = SearchReplacePanel(self)
         self.search_panel.setVisible(False)

@@ -111,6 +111,7 @@ class ComicTranslate(ComicTranslateUI):
         self.current_worker = None
         self._batch_active = False
         self._batch_cancel_requested = False
+        self._current_batch_run_type = None
 
         self.image_ctrl = ImageStateController(self)
         self.rect_item_ctrl = RectItemController(self)
@@ -196,6 +197,8 @@ class ComicTranslate(ComicTranslateUI):
         self.translate_button.clicked.connect(self.start_batch_process)
         self.cancel_button.clicked.connect(self.cancel_current_task)
         self.batch_report_button.clicked.connect(self.show_latest_batch_report)
+        self.retry_failed_button.clicked.connect(self.retry_failed_batch_pages)
+        self.one_page_auto_button.clicked.connect(self.start_one_page_auto_process)
         self.set_all_button.clicked.connect(self.text_ctrl.set_src_trg_all)
         self.clear_rectangles_button.clicked.connect(self.image_viewer.clear_rectangles)
         self.clear_brush_strokes_button.clicked.connect(self.image_viewer.clear_brush_strokes)
@@ -394,11 +397,13 @@ class ComicTranslate(ComicTranslateUI):
         self.disable_hbutton_group()
         self.translate_button.setEnabled(True)
         self.cancel_button.setEnabled(True)
+        self.batch_report_ctrl.refresh_action_buttons()
 
     def manual_mode_selected(self):
         self.enable_hbutton_group()
         self.translate_button.setEnabled(False)
         self.cancel_button.setEnabled(False)
+        self.batch_report_ctrl.refresh_action_buttons()
 
     def on_manual_finished(self):
         self.loading.setVisible(False)
@@ -497,8 +502,8 @@ class ComicTranslate(ComicTranslateUI):
         self.loading.setVisible(False)
         self.enable_hbutton_group()
 
-    def _start_batch_report(self, batch_paths: list[str]):
-        self.batch_report_ctrl.start_batch_report(batch_paths)
+    def _start_batch_report(self, batch_paths: list[str], run_type: str = "batch"):
+        self.batch_report_ctrl.start_batch_report(batch_paths, run_type=run_type)
 
     def _finalize_batch_report(self, was_cancelled: bool):
         return self.batch_report_ctrl.finalize_batch_report(was_cancelled)
@@ -508,6 +513,52 @@ class ComicTranslate(ComicTranslateUI):
 
     def register_batch_skip(self, image_path: str, skip_reason: str, error: str):
         self.batch_report_ctrl.register_batch_skip(image_path, skip_reason, error)
+
+    def _start_batch_process_for_paths(self, selected_paths: list[str], run_type: str = "batch") -> bool:
+        if not selected_paths:
+            return False
+
+        selected_paths = [path for path in selected_paths if path in self.image_files]
+        if not selected_paths:
+            return False
+
+        for path in selected_paths:
+            tgt = self.image_states[path]['target_lang']
+            if not validate_settings(self, tgt):
+                return False
+
+        self.image_ctrl.clear_page_skip_errors_for_paths(selected_paths)
+        self._start_batch_report(selected_paths, run_type=run_type)
+        self.selected_batch = selected_paths
+        self._current_batch_run_type = run_type
+
+        if self.manual_radio.isChecked():
+            self.automatic_radio.setChecked(True)
+            self.batch_mode_selected()
+        self._batch_active = True
+        self._batch_cancel_requested = False
+        self.translate_button.setEnabled(False)
+        self.cancel_button.setEnabled(True)
+        self.save_as_project_button.setEnabled(False)
+        self.webtoon_toggle.setEnabled(False)
+        self.progress_bar.setVisible(True)
+        self.batch_report_ctrl.refresh_action_buttons()
+
+        if self.webtoon_mode:
+            self.run_threaded(
+                lambda: self.pipeline.webtoon_batch_process(selected_paths),
+                None,
+                self.default_error_handler,
+                self.on_batch_process_finished
+            )
+        else:
+            self.run_threaded(
+                lambda: self.pipeline.batch_process(selected_paths),
+                None,
+                self.default_error_handler,
+                self.on_batch_process_finished
+            )
+        return True
 
     def start_batch_process(self):
         try:
@@ -521,14 +572,16 @@ class ComicTranslate(ComicTranslateUI):
                 return
 
         self.image_ctrl.clear_page_skip_errors_for_paths(self.image_files)
-        self._start_batch_report(self.image_files)
+        self._start_batch_report(self.image_files, run_type="batch")
         self._batch_active = True
         self._batch_cancel_requested = False
+        self._current_batch_run_type = "batch"
         self.translate_button.setEnabled(False)
         self.cancel_button.setEnabled(True)
         self.save_as_project_button.setEnabled(False)
         self.webtoon_toggle.setEnabled(False)
         self.progress_bar.setVisible(True)
+        self.batch_report_ctrl.refresh_action_buttons()
         
         # Choose batch processor based on webtoon mode
         if self.webtoon_mode:
@@ -547,48 +600,37 @@ class ComicTranslate(ComicTranslateUI):
             p for p in self.image_files
             if os.path.basename(p) in selected_file_names
         ]
-        if not selected_paths:
+        self._start_batch_process_for_paths(selected_paths, run_type="batch")
+
+    def retry_failed_batch_pages(self):
+        if self._batch_active:
             return
 
-        # validate each
-        for path in selected_paths:
-            tgt = self.image_states[path]['target_lang']
-            if not validate_settings(self, tgt):
-                return
-            
-        self.image_ctrl.clear_page_skip_errors_for_paths(selected_paths)
-        self._start_batch_report(selected_paths)
-        self.selected_batch = selected_paths
+        retry_paths = self.batch_report_ctrl.get_latest_retry_paths()
+        if not retry_paths:
+            MMessage.info(
+                text=self.tr("No failed pages from the latest batch are available to retry."),
+                parent=self,
+                duration=5,
+                closable=True,
+            )
+            return
 
-        # disable UI & run
-        if self.manual_radio.isChecked():
-            self.automatic_radio.setChecked(True)
-            self.batch_mode_selected()
-        self._batch_active = True
-        self._batch_cancel_requested = False
-        self.translate_button.setEnabled(False)
-        self.cancel_button.setEnabled(True)
-        self.save_as_project_button.setEnabled(False)
-        self.webtoon_toggle.setEnabled(False)
-        self.progress_bar.setVisible(True)
-        
-        # Choose batch processor based on webtoon mode
-        if self.webtoon_mode:
-            # pass our subset into webtoon_batch_process
-            self.run_threaded(
-                lambda: self.pipeline.webtoon_batch_process(selected_paths),
-                None,
-                self.default_error_handler,
-                self.on_batch_process_finished
+        self._start_batch_process_for_paths(retry_paths, run_type="retry_failed")
+
+    def start_one_page_auto_process(self):
+        if self._batch_active:
+            return
+        if not (0 <= self.curr_img_idx < len(self.image_files)):
+            MMessage.info(
+                text=self.tr("No current page is available for automatic processing."),
+                parent=self,
+                duration=5,
+                closable=True,
             )
-        else:
-            # pass our subset into batch_process
-            self.run_threaded(
-                lambda: self.pipeline.batch_process(selected_paths),
-                None,
-                self.default_error_handler,
-                self.on_batch_process_finished
-            )
+            return
+        current_path = self.image_files[self.curr_img_idx]
+        self._start_batch_process_for_paths([current_path], run_type="one_page_auto")
 
     def on_batch_process_finished(self):
         try:
@@ -597,9 +639,10 @@ class ComicTranslate(ComicTranslateUI):
         except Exception:
             pass
         was_cancelled = self._batch_cancel_requested
-        report = self._finalize_batch_report(was_cancelled)
         self._batch_active = False
         self._batch_cancel_requested = False
+        self._current_batch_run_type = None
+        report = self._finalize_batch_report(was_cancelled)
         self.progress_bar.setVisible(False)
         self.translate_button.setEnabled(True)
         self.cancel_button.setEnabled(True)
@@ -619,6 +662,7 @@ class ComicTranslate(ComicTranslateUI):
                 self._memlogger.emit("model_caches_released")
         except Exception:
             pass
+        self.batch_report_ctrl.refresh_action_buttons()
 
     def disable_hbutton_group(self):
         for button in self.hbutton_group.get_button_group().buttons():

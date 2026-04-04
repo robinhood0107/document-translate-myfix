@@ -11,6 +11,7 @@ __pycache__/
 .env
 .venv
 .venv-win
+.venv-win-cuda13
 env/
 venv/
 
@@ -22,3 +23,12 @@ uv.lock
 # Test files
 test_*.py
 demo_*.py
+
+# Tooling / caches
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+htmlcov/
+.coverage
+.idea/
+.DS_Store
