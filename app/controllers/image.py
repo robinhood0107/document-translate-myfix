@@ -303,8 +303,72 @@ class ImageStateController:
         rgb_image = imk.read_image(file_path)
         return rgb_image
 
+    def invalidate_pending_nav_loads(self):
+        """Ignore stale async navigation results after page/state mutations."""
+        self._nav_request_id += 1
+        self._nav_worker = None
+
+    def _evict_loaded_image(self, file_path: str):
+        self.main.image_data.pop(file_path, None)
+        self.main.in_memory_history[file_path] = []
+        self.main.in_memory_patches.pop(file_path, None)
+
+    def sync_loaded_image_cache(self, preferred_file_path: str | None = None):
+        """Keep loaded_images aligned with image_data entries that are really in memory."""
+        valid_paths = set(self.main.image_files)
+        materialized_paths = {
+            path
+            for path, image in self.main.image_data.items()
+            if path in valid_paths and image is not None
+        }
+
+        ordered: list[str] = []
+        seen: set[str] = set()
+
+        def _append(path: str):
+            if path in materialized_paths and path not in seen:
+                ordered.append(path)
+                seen.add(path)
+
+        for path in self.main.loaded_images:
+            _append(path)
+
+        for path in self.main.image_files:
+            if path == preferred_file_path:
+                continue
+            _append(path)
+
+        if preferred_file_path is not None and preferred_file_path in materialized_paths:
+            if preferred_file_path in seen:
+                ordered = [path for path in ordered if path != preferred_file_path]
+                seen.discard(preferred_file_path)
+            ordered.append(preferred_file_path)
+            seen.add(preferred_file_path)
+
+        max_images = max(1, int(getattr(self.main, "max_images_in_memory", 1) or 1))
+        while len(ordered) > max_images:
+            self._evict_loaded_image(ordered.pop(0))
+
+        self.main.loaded_images = ordered
+
+    def register_loaded_image(self, file_path: str):
+        """Mark a page as resident in memory and evict older cached pages."""
+        self.sync_loaded_image_cache()
+        if self.main.image_data.get(file_path) is None:
+            return
+
+        if file_path in self.main.loaded_images:
+            self.main.loaded_images.remove(file_path)
+        self.main.loaded_images.append(file_path)
+
+        max_images = max(1, int(getattr(self.main, "max_images_in_memory", 1) or 1))
+        while len(self.main.loaded_images) > max_images:
+            oldest_image = self.main.loaded_images.pop(0)
+            self._evict_loaded_image(oldest_image)
+
 
     def clear_state(self):
+        self.invalidate_pending_nav_loads()
         # Clear existing image data
         self.main.setWindowTitle("Project1.ctpr[*]")
         self._close_transient_skip_notice()
@@ -376,6 +440,7 @@ class ImageStateController:
             def on_files_prepared(prepared_files):
                 if not prepared_files:
                     return
+                self.invalidate_pending_nav_loads()
                 # Save current state and determine insert position
                 self.save_current_image_state()
                 
@@ -479,7 +544,7 @@ class ImageStateController:
             self.update_image_cards()
             self.main.page_list.blockSignals(False)
             self.main.page_list.setCurrentRow(0)
-            self.main.loaded_images.append(self.main.image_files[0])
+            self.register_loaded_image(self.main.image_files[0])
         else:
             self.main.image_viewer.clear_scene()
 
@@ -574,6 +639,7 @@ class ImageStateController:
         if current_file:
             self.save_current_image_state()
 
+        self.invalidate_pending_nav_loads()
         self.main.image_files = new_order
 
         if current_file in self.main.image_files:
@@ -775,6 +841,7 @@ class ImageStateController:
     def handle_image_deletion(self, file_names: list[str]):
         """Handles the deletion of images based on the provided file names."""
 
+        self.invalidate_pending_nav_loads()
         self.save_current_image_state()
         removed_any = False
         
@@ -924,6 +991,8 @@ class ImageStateController:
             self.main.mark_project_dirty()
 
     def display_image_from_loaded(self, rgb_image, index: int, switch_page: bool = True):
+        if not (0 <= index < len(self.main.image_files)):
+            return
         file_path = self.main.image_files[index]
         self.main.image_data[file_path] = rgb_image
         
@@ -934,16 +1003,7 @@ class ImageStateController:
             self.main.current_history_index[file_path] = 0
 
         self.display_image(index, switch_page)
-
-        # Manage loaded images
-        if file_path not in self.main.loaded_images:
-            self.main.loaded_images.append(file_path)
-            if len(self.main.loaded_images) > self.main.max_images_in_memory:
-                oldest_image = self.main.loaded_images.pop(0)
-                del self.main.image_data[oldest_image]
-                self.main.in_memory_history[oldest_image] = []
-
-                self.main.in_memory_patches.pop(oldest_image, None)
+        self.register_loaded_image(file_path)
 
     def set_image(self, rgb_img: np.ndarray, push: bool = True):
         if self.main.curr_img_idx >= 0:
