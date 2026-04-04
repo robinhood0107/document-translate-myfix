@@ -202,15 +202,22 @@ def load_state_from_proj_file(comic_translate: ComicTranslate, file_name: str):
         original_to_temp.get(i, i) for i in displayed_images
     )
     
-    loaded_images = state.get('loaded_images', [])
-    comic_translate.loaded_images = [
-        original_to_temp.get(file, file) for file in loaded_images
-    ]
-
     comic_translate.image_data = {
         original_to_temp.get(file, file): img 
         for file, img in image_data.items()
     }
+
+    restored_loaded_images = [
+        original_to_temp.get(file, file) for file in state.get('loaded_images', [])
+    ]
+    materialized_image_paths = {
+        path for path, img in comic_translate.image_data.items() if img is not None
+    }
+    comic_translate.loaded_images = [
+        path
+        for path in restored_loaded_images
+        if path in comic_translate.image_files and path in materialized_image_paths
+    ]
 
     comic_translate.in_memory_history = {
         original_to_temp.get(file, file): imgs 

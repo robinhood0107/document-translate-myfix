@@ -521,12 +521,21 @@ def _materialize_from_manifest_and_pages(
     displayed_images = manifest.get("displayed_images", [])
     comic_translate.displayed_images = set(original_to_temp.get(i, i) for i in displayed_images)
 
-    loaded_images = manifest.get("loaded_images", [])
-    comic_translate.loaded_images = [original_to_temp.get(file, file) for file in loaded_images]
-
     comic_translate.image_data = {
         original_to_temp.get(file, file): img for file, img in image_data.items()
     }
+
+    restored_loaded_images = [
+        original_to_temp.get(file, file) for file in manifest.get("loaded_images", [])
+    ]
+    materialized_image_paths = {
+        path for path, img in comic_translate.image_data.items() if img is not None
+    }
+    comic_translate.loaded_images = [
+        path
+        for path in restored_loaded_images
+        if path in comic_translate.image_files and path in materialized_image_paths
+    ]
 
     comic_translate.in_memory_history = {
         original_to_temp.get(file, file): imgs for file, imgs in in_memory_history.items()
