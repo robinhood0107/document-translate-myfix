@@ -271,9 +271,14 @@ class BatchProcessor:
             )
             
             try:
-                translator.translate(blk_list, image, extra_context)
-                # Cache the translation results for potential future use
-                self.cache_manager._cache_translation_results(translation_cache_key, blk_list)
+                if self.cache_manager._can_serve_all_blocks_from_translation_cache(translation_cache_key, blk_list):
+                    self.cache_manager._apply_cached_translations_to_blocks(translation_cache_key, blk_list)
+                    logger.info("Using cached translation results for all %d blocks", len(blk_list))
+                else:
+                    translator.translate(blk_list, image, extra_context)
+                    # Cache the translation results for potential future use
+                    self.cache_manager._cache_translation_results(translation_cache_key, blk_list)
+                    logger.info("Translation completed and cached for %d blocks", len(blk_list))
             except InsufficientCreditsException:
                 raise
             except Exception as e:
@@ -489,4 +494,3 @@ class BatchProcessor:
                 self.main_page.blk_list = blk_list
 
             self.emit_progress(index, total_images, 10, 10, False)
-

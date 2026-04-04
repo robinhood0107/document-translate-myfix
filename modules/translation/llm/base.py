@@ -37,7 +37,9 @@ class BaseLLMTranslation(LLMTranslation):
         llm_settings = settings.get_llm_settings()
         self.source_lang = source_lang
         self.target_lang = target_lang
-        self.img_as_llm_input = llm_settings.get('image_input_enabled', True)
+        # Keep image input opt-in. The UI default is unchecked, so missing or
+        # older settings should not silently enable image uploads.
+        self.img_as_llm_input = llm_settings.get('image_input_enabled', False)
         self.temperature = 1.0
         self.top_p = 0.95
         self.max_tokens = 5000

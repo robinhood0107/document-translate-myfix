@@ -2,12 +2,13 @@ from __future__ import annotations
 
 from typing import Any, Optional
 import onnxruntime as ort
+from .device import prepare_windows_onnxruntime_dlls
 
 
 def make_session_options(
     *, 
     log_severity_level: int = 3,
-    low_mem: bool = True
+    low_mem: bool = False
 ) -> Any:
     """Create ONNXRuntime SessionOptions with optional low-memory toggles."""
 
@@ -17,7 +18,7 @@ def make_session_options(
     except Exception:
         pass
 
-    # Default to low-memory mode (reduces peak RSS for large batches).
+    # Default to throughput-oriented mode.
     if low_mem:
         # These options trade memory for speed; useful for huge batches.
         try:
@@ -26,6 +27,15 @@ def make_session_options(
             pass
         try:
             so.enable_cpu_mem_arena = False
+        except Exception:
+            pass
+    else:
+        try:
+            so.enable_mem_pattern = True
+        except Exception:
+            pass
+        try:
+            so.enable_cpu_mem_arena = True
         except Exception:
             pass
 
@@ -39,5 +49,6 @@ def make_session(
     sess_options: Optional[Any] = None,
 ) -> Any:
     """Create an ONNXRuntime InferenceSession honoring CT_ORT_* toggles."""
+    prepare_windows_onnxruntime_dlls()
     so = sess_options if sess_options is not None else make_session_options()
     return ort.InferenceSession(model_path, sess_options=so, providers=providers)

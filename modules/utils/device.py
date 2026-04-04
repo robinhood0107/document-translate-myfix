@@ -1,9 +1,72 @@
 from __future__ import annotations
 
 import os
+import site
+from pathlib import Path
 from typing import Any, Mapping, Optional
 import onnxruntime as ort
 from .paths import get_user_data_dir
+
+_WINDOWS_DLL_DIR_HANDLES: list[Any] = []
+_WINDOWS_GPU_DLLS_READY = False
+
+
+def prepare_windows_onnxruntime_dlls() -> None:
+    """Register CUDA/cuDNN/TensorRT DLL directories for Windows once per process."""
+    global _WINDOWS_GPU_DLLS_READY
+    if _WINDOWS_GPU_DLLS_READY or os.name != "nt":
+        return
+
+    dll_dirs: list[Path] = []
+
+    for env_name in ("CUDA_PATH_V13_1", "CUDA_PATH"):
+        base = os.environ.get(env_name)
+        if not base:
+            continue
+        base_path = Path(base)
+        dll_dirs.extend([base_path / "bin" / "x64", base_path / "bin"])
+
+    for root in (Path(p) for p in site.getsitepackages()):
+        dll_dirs.extend(
+            [
+                root / "tensorrt_libs",
+                root / "nvidia" / "cudnn" / "bin",
+                root / "nvidia" / "cublas" / "bin",
+                root / "nvidia" / "cuda_runtime" / "bin",
+                root / "nvidia" / "cuda_nvrtc" / "bin",
+                root / "nvidia" / "nvjitlink" / "bin",
+            ]
+        )
+
+    existing_path = os.environ.get("PATH", "")
+    seen: set[str] = set()
+    for path in dll_dirs:
+        try:
+            resolved = str(path.resolve())
+        except Exception:
+            resolved = str(path)
+        if resolved in seen or not path.exists():
+            continue
+        seen.add(resolved)
+        if resolved not in existing_path.split(os.pathsep):
+            existing_path = f"{resolved}{os.pathsep}{existing_path}" if existing_path else resolved
+        try:
+            handle = os.add_dll_directory(resolved)
+        except (AttributeError, FileNotFoundError, OSError):
+            continue
+        _WINDOWS_DLL_DIR_HANDLES.append(handle)
+
+    os.environ["PATH"] = existing_path
+
+    try:
+        cuda_path = os.environ.get("CUDA_PATH_V13_1") or os.environ.get("CUDA_PATH")
+        if cuda_path:
+            ort.preload_dlls(cuda=True, cudnn=False, directory=os.path.join(cuda_path, "bin", "x64"))
+        ort.preload_dlls(cuda=False, cudnn=True, directory="")
+    except Exception:
+        pass
+
+    _WINDOWS_GPU_DLLS_READY = True
 
 
 def torch_available() -> bool:
@@ -25,6 +88,8 @@ def resolve_device(use_gpu: bool, backend: str = "onnx") -> str:
     Returns:
         Device string compatible with the specified backend
     """
+    prepare_windows_onnxruntime_dlls()
+
     if not use_gpu:
         return "cpu"
 
@@ -125,6 +190,8 @@ def get_providers(device: Optional[str] = None) -> list[Any]:
     - Otherwise return available providers with options for certain GPU providers
     - If no providers are available, fall back to ['CPUExecutionProvider']
     """
+    prepare_windows_onnxruntime_dlls()
+
     try:
         available = ort.get_available_providers()
     except Exception:
@@ -167,12 +234,46 @@ def get_providers(device: Optional[str] = None) -> list[Any]:
         }
     }
 
+    def configure_provider(name: str) -> Any:
+        if name in provider_options:
+            return (name, provider_options[name])
+        return name
+
+    requested = device.lower() if isinstance(device, str) else None
+
+    # Honor the resolved device. When the app selects "cuda", keep using the GPU
+    # through CUDA EP directly instead of silently inserting TensorRT first.
+    if requested == 'cuda':
+        configured = []
+        if 'CUDAExecutionProvider' in available:
+            configured.append('CUDAExecutionProvider')
+        configured.append('CPUExecutionProvider')
+        return configured
+
+    if requested == 'tensorrt':
+        configured = []
+        if 'TensorrtExecutionProvider' in available:
+            configured.append(configure_provider('TensorrtExecutionProvider'))
+        if 'CUDAExecutionProvider' in available:
+            configured.append('CUDAExecutionProvider')
+        configured.append('CPUExecutionProvider')
+        return configured
+
+    if requested in {'coreml', 'rocm', 'openvino'}:
+        provider_name = {
+            'coreml': 'CoreMLExecutionProvider',
+            'rocm': 'ROCMExecutionProvider',
+            'openvino': 'OpenVINOExecutionProvider',
+        }[requested]
+        configured = []
+        if provider_name in available:
+            configured.append(configure_provider(provider_name))
+        configured.append('CPUExecutionProvider')
+        return configured
+
     configured: list[Any] = []
     for p in available:
-        if p in provider_options:
-            configured.append((p, provider_options[p]))
-        else:
-            configured.append(p)
+        configured.append(configure_provider(p))
 
     return configured
 
@@ -183,6 +284,8 @@ def is_gpu_available() -> bool:
     Returns False if only AzureExecutionProvider and/or CPUExecutionProvider are present.
     Returns True if any other provider (CUDA, CoreML, etc.) is found.
     """
+    prepare_windows_onnxruntime_dlls()
+
     try:
         providers = ort.get_available_providers()
     except Exception:

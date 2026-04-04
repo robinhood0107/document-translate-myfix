@@ -1,8 +1,12 @@
+import logging
 import numpy as np
 
 from ..utils.textblock import TextBlock
+from ..utils.device import resolve_device
 from .base import LLMTranslation
 from .factory import TranslationFactory
+
+logger = logging.getLogger(__name__)
 
 
 class Translator:
@@ -94,6 +98,20 @@ class Translator:
         Returns:
             List of updated TextBlock objects with translations
         """
+        llm_settings = self.settings.get_llm_settings()
+        gpu_enabled = bool(self.settings.is_gpu_enabled())
+        logger.info(
+            "translation self-check: translator=%s ocr=%s gpu=%s resolved_device=%s image_input_enabled=%s blocks=%d extra_context_len=%d llm_engine=%s",
+            self.translator_key,
+            self.settings.get_tool_selection('ocr'),
+            gpu_enabled,
+            resolve_device(gpu_enabled),
+            bool(llm_settings.get('image_input_enabled', False)),
+            len(blk_list or []),
+            len(extra_context or ""),
+            self.is_llm_engine,
+        )
+
         if self.is_llm_engine:
             # LLM translators need image and extra context
             return self.engine.translate(blk_list, image, extra_context)
