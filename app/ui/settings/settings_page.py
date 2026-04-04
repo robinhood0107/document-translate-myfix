@@ -61,6 +61,10 @@ class SettingsPage(QtWidgets.QWidget):
         self._loading_settings = False
         self._is_background_check = False
         self._current_language = None  # Track current language for revert
+        self._settings_save_timer = QTimer(self)
+        self._settings_save_timer.setSingleShot(True)
+        self._settings_save_timer.setInterval(250)
+        self._settings_save_timer.timeout.connect(self._flush_scheduled_settings_save)
 
         self._pricing_refresh_timer: Optional[QTimer] = None
         self._pricing_refresh_attempts: int = 0
@@ -123,11 +127,63 @@ class SettingsPage(QtWidgets.QWidget):
         self.ui.raw_text_checkbox.stateChanged.connect(self._save_settings_if_not_loading)
         self.ui.translated_text_checkbox.stateChanged.connect(self._save_settings_if_not_loading)
         self.ui.inpainted_image_checkbox.stateChanged.connect(self._save_settings_if_not_loading)
+        self._connect_live_save_signals()
 
     def _save_settings_if_not_loading(self, *_args):
         if self._loading_settings:
             return
+        self._settings_save_timer.start()
+
+    def _flush_scheduled_settings_save(self):
+        if self._loading_settings:
+            return
         self.save_settings()
+
+    def _connect_live_save_signals(self):
+        text_changed_widgets = [
+            self.ui.extra_context,
+            self.ui.project_autosave_folder_input,
+        ]
+        for widget in text_changed_widgets:
+            signal = getattr(widget, "textChanged", None)
+            if signal is not None:
+                signal.connect(self._save_settings_if_not_loading)
+
+        combo_widgets = [
+            self.ui.theme_combo,
+            self.ui.translator_combo,
+            self.ui.ocr_combo,
+            self.ui.detector_combo,
+            self.ui.inpainter_combo,
+            self.ui.inpaint_strategy_combo,
+        ]
+        for widget in combo_widgets:
+            widget.currentTextChanged.connect(self._save_settings_if_not_loading)
+
+        checkbox_widgets = [
+            self.ui.use_gpu_checkbox,
+            self.ui.image_checkbox,
+            self.ui.uppercase_checkbox,
+            self.ui.save_keys_checkbox,
+        ]
+        for widget in checkbox_widgets:
+            widget.stateChanged.connect(self._save_settings_if_not_loading)
+
+        spin_widgets = [
+            self.ui.resize_spinbox,
+            self.ui.crop_margin_spinbox,
+            self.ui.crop_trigger_spinbox,
+            self.ui.min_font_spinbox,
+            self.ui.max_font_spinbox,
+            self.ui.project_autosave_interval_spinbox,
+        ]
+        for widget in spin_widgets:
+            widget.valueChanged.connect(self._save_settings_if_not_loading)
+
+        for widget in self.ui.credential_widgets.values():
+            signal = getattr(widget, "textChanged", None)
+            if signal is not None:
+                signal.connect(self._save_settings_if_not_loading)
 
     def on_theme_changed(self, theme: str):
         self.theme_changed.emit(theme)
