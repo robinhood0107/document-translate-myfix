@@ -15,6 +15,7 @@ logger = logging.getLogger(__name__)
 MODEL_MAP = {
     "Custom Service": "",
     "Custom Local Server": "",
+    "Custom Local Server(Gemma)": "",
     "Custom": "",  
     "Deepseek-v3": "deepseek-chat", 
     "GPT-4.1": "gpt-4.1",
@@ -50,15 +51,19 @@ def get_raw_translation(blk_list: list[TextBlock]):
     
     return raw_translations_json
 
-def set_texts_from_json(blk_list: list[TextBlock], json_string: str):
+def extract_json_object(json_string: str) -> dict:
     match = re.search(r"\{[\s\S]*\}", json_string)
     if not match:
         raise ValueError("Translator response did not contain a JSON object.")
 
-    json_string = match.group(0)
-    translation_dict = json.loads(json_string)
+    translation_dict = json.loads(match.group(0))
     if not isinstance(translation_dict, dict):
         raise ValueError("Translator response JSON was not an object.")
+
+    return translation_dict
+
+def set_texts_from_json(blk_list: list[TextBlock], json_string: str):
+    translation_dict = extract_json_object(json_string)
 
     updated_count = 0
     missing_keys = []

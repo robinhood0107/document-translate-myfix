@@ -1,0 +1,250 @@
+from __future__ import annotations
+
+from typing import Any
+import json
+import logging
+
+import numpy as np
+import requests
+
+from .base import BaseLLMTranslation
+from ...utils.textblock import TextBlock
+from ...utils.translator_utils import extract_json_object, get_raw_text
+
+logger = logging.getLogger(__name__)
+
+DEFAULT_GEMMA_LOCAL_ENDPOINT = "http://127.0.0.1:18080/v1"
+DEFAULT_GEMMA_LOCAL_MODEL = "gemma-4-26B-A4B-it-UD-Q2_K_XL.gguf"
+DEFAULT_GEMMA_CHUNK_SIZE = 4
+DEFAULT_GEMMA_MAX_COMPLETION_TOKENS = 512
+DEFAULT_GEMMA_REQUEST_TIMEOUT_SEC = 180
+
+
+class GemmaLocalServerResponseError(RuntimeError):
+    """Raised when the local Gemma server returns an unusable translation."""
+
+
+class GemmaLocalServerTruncatedError(GemmaLocalServerResponseError):
+    """Raised when the local Gemma server runs out of output budget."""
+
+
+class CustomLocalGemmaTranslation(BaseLLMTranslation):
+    """Translation engine specialized for the local Gemma llama.cpp server."""
+
+    def __init__(self):
+        super().__init__()
+        self.api_base_url = DEFAULT_GEMMA_LOCAL_ENDPOINT
+        self.model = DEFAULT_GEMMA_LOCAL_MODEL
+        self.chunk_size = DEFAULT_GEMMA_CHUNK_SIZE
+        self.raw_response_logging = False
+        self.translation_mode_label = "Custom Local Server(Gemma)"
+
+    def initialize(
+        self,
+        settings: Any,
+        source_lang: str,
+        target_lang: str,
+        translator_key: str,
+        **kwargs,
+    ) -> None:
+        super().initialize(settings, source_lang, target_lang, **kwargs)
+
+        credentials = settings.get_credentials(settings.ui.tr("Custom Local Server(Gemma)"))
+        gemma_settings = settings.get_gemma_local_server_settings()
+
+        self.api_base_url = credentials.get("api_url", "").strip().rstrip("/")
+        self.model = credentials.get("model", "").strip()
+        self.chunk_size = int(gemma_settings.get("chunk_size", DEFAULT_GEMMA_CHUNK_SIZE))
+        self.max_tokens = int(
+            gemma_settings.get(
+                "max_completion_tokens",
+                DEFAULT_GEMMA_MAX_COMPLETION_TOKENS,
+            )
+        )
+        self.timeout = int(
+            gemma_settings.get(
+                "request_timeout_sec",
+                DEFAULT_GEMMA_REQUEST_TIMEOUT_SEC,
+            )
+        )
+        self.raw_response_logging = bool(gemma_settings.get("raw_response_logging", False))
+        self.temperature = 0.0
+        self.top_p = 1.0
+        self.img_as_llm_input = False
+
+    def translate(
+        self,
+        blk_list: list[TextBlock],
+        image: np.ndarray,
+        extra_context: str,
+    ) -> list[TextBlock]:
+        updated_blocks = 0
+        if not blk_list:
+            return blk_list
+
+        working_blocks = [blk.deep_copy() for blk in blk_list]
+
+        for start in range(0, len(working_blocks), self.chunk_size):
+            chunk = working_blocks[start : start + self.chunk_size]
+            updated_blocks += self._translate_chunk_with_retry(chunk, extra_context)
+
+        for original_blk, translated_blk in zip(blk_list, working_blocks):
+            original_blk.translation = translated_blk.translation
+
+        logger.info(
+            "translation parsed successfully (%s): updated_blocks=%d total_blocks=%d",
+            self.translation_mode_label,
+            updated_blocks,
+            len(blk_list),
+        )
+        return blk_list
+
+    def _translate_chunk_with_retry(
+        self,
+        blk_list: list[TextBlock],
+        extra_context: str,
+    ) -> int:
+        try:
+            return self._translate_chunk(blk_list, extra_context)
+        except GemmaLocalServerResponseError as exc:
+            if len(blk_list) <= 1:
+                raise
+
+            split_point = max(1, len(blk_list) // 2)
+            logger.warning(
+                "gemma local server chunk failed for %d block(s); retrying as %d and %d block(s). reason=%s",
+                len(blk_list),
+                split_point,
+                len(blk_list) - split_point,
+                exc,
+            )
+            left = self._translate_chunk_with_retry(blk_list[:split_point], extra_context)
+            right = self._translate_chunk_with_retry(blk_list[split_point:], extra_context)
+            return left + right
+
+    def _translate_chunk(self, blk_list: list[TextBlock], extra_context: str) -> int:
+        system_prompt = self._build_system_prompt(extra_context)
+        user_prompt = get_raw_text(blk_list)
+        response_data = self._request_translation(system_prompt, user_prompt)
+
+        choice = (response_data.get("choices") or [{}])[0]
+        message = choice.get("message") or {}
+        finish_reason = choice.get("finish_reason")
+        content = message.get("content") or ""
+        reasoning_content = message.get("reasoning_content") or ""
+
+        usage = response_data.get("usage") or {}
+        logger.info(
+            "gemma local response summary: blocks=%d finish_reason=%s prompt_tokens=%s completion_tokens=%s total_tokens=%s has_content=%s has_reasoning=%s",
+            len(blk_list),
+            finish_reason,
+            usage.get("prompt_tokens"),
+            usage.get("completion_tokens"),
+            usage.get("total_tokens"),
+            bool(content.strip()),
+            bool(reasoning_content.strip()),
+        )
+
+        if self.raw_response_logging and content:
+            logger.info(
+                "translation raw content (%s): %s",
+                self.translation_mode_label,
+                content,
+            )
+
+        if finish_reason == "length":
+            raise GemmaLocalServerTruncatedError(
+                "Gemma local server response was truncated before the final JSON was completed. "
+                "Reduce Chunk Size or increase LLAMA_CTX_SIZE."
+            )
+
+        if not content.strip():
+            detail = "Gemma local server returned an empty message.content."
+            if reasoning_content.strip():
+                detail += " The model produced reasoning output without a final JSON answer."
+            raise GemmaLocalServerResponseError(
+                f"{detail} Check the local server settings or reduce Chunk Size."
+            )
+
+        try:
+            translation_dict = extract_json_object(content)
+        except Exception as exc:
+            raise GemmaLocalServerResponseError(
+                "Gemma local server did not return a valid JSON object in message.content."
+            ) from exc
+
+        expected_keys = [f"block_{index}" for index in range(len(blk_list))]
+        missing_keys = [key for key in expected_keys if key not in translation_dict]
+        if missing_keys:
+            raise GemmaLocalServerResponseError(
+                "Gemma local server JSON response was missing expected block keys: "
+                + ", ".join(missing_keys)
+            )
+
+        for index, blk in enumerate(blk_list):
+            value = translation_dict[f"block_{index}"]
+            blk.translation = value if isinstance(value, str) or value is None else str(value)
+
+        return len(blk_list)
+
+    def _build_system_prompt(self, extra_context: str) -> str:
+        prompt = (
+            f"Translate {self.source_lang} comic OCR text into {self.target_lang}. "
+            "Return exactly one JSON object. Keep every key unchanged. "
+            f"Each value must be a natural {self.target_lang} string suitable for comic dialogue. "
+            "Do not add explanations, markdown, comments, or extra keys. "
+            f"If text is already in {self.target_lang} or unreadable, copy it as-is."
+        )
+        cleaned_context = (extra_context or "").strip()
+        if cleaned_context:
+            prompt += f" Additional comic context: {cleaned_context}"
+        return prompt
+
+    def _request_translation(self, system_prompt: str, user_prompt: str) -> dict:
+        payload = {
+            "model": self.model,
+            "messages": [
+                {
+                    "role": "system",
+                    "content": [{"type": "text", "text": system_prompt}],
+                },
+                {
+                    "role": "user",
+                    "content": [{"type": "text", "text": user_prompt}],
+                },
+            ],
+            "temperature": self.temperature,
+            "top_p": self.top_p,
+            "max_completion_tokens": self.max_tokens,
+            "response_format": {"type": "json_object"},
+        }
+        headers = {"Content-Type": "application/json"}
+
+        try:
+            response = requests.post(
+                f"{self.api_base_url}/chat/completions",
+                headers=headers,
+                json=payload,
+                timeout=self.timeout,
+            )
+            response.raise_for_status()
+        except requests.exceptions.RequestException as exc:
+            error_msg = f"API request failed: {exc}"
+            if getattr(exc, "response", None) is not None:
+                try:
+                    error_msg += f" - {json.dumps(exc.response.json(), ensure_ascii=False)}"
+                except Exception:
+                    error_msg += f" - Status code: {exc.response.status_code}"
+            raise RuntimeError(error_msg) from exc
+
+        response_data = response.json()
+        if self.raw_response_logging:
+            logger.info(
+                "translation raw response json (%s): %s",
+                self.translation_mode_label,
+                json.dumps(response_data, ensure_ascii=False),
+            )
+        return response_data
+
+    def _perform_translation(self, user_prompt: str, system_prompt: str, image: np.ndarray) -> str:
+        raise NotImplementedError("CustomLocalGemmaTranslation uses chunked translate().")

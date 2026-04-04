@@ -3,6 +3,7 @@ from PySide6 import QtCore, QtWidgets
 from ..dayu_widgets.check_box import MCheckBox
 from ..dayu_widgets.label import MLabel
 from ..dayu_widgets.line_edit import MLineEdit
+from .gemma_local_server_page import GemmaLocalServerPage
 from .utils import set_label_width
 
 
@@ -20,9 +21,9 @@ class CredentialsPage(QtWidgets.QWidget):
 
         info_label = MLabel(
             self.tr(
-                "Configure provider API keys or custom endpoints here.\n"
+                "Configure provider API keys or local server endpoints here.\n"
                 "Use Custom Service for authenticated OpenAI-compatible providers.\n"
-                "Use Custom Local Server for OpenAI-compatible local or keyless endpoints."
+                "Use Custom Local Server(Gemma) with the included Gemma Docker setup."
             )
         ).secondary()
         info_label.setWordWrap(True)
@@ -44,8 +45,8 @@ class CredentialsPage(QtWidgets.QWidget):
                 self._add_microsoft_azure_fields(service_layout)
             elif normalized == "Custom Service":
                 self._add_custom_service_fields(service_layout)
-            elif normalized == "Custom Local Server":
-                self._add_custom_local_server_fields(service_layout)
+            elif normalized == "Custom Local Server(Gemma)":
+                self._add_custom_local_gemma_fields(service_layout)
             elif normalized == "Yandex":
                 self._add_yandex_fields(service_layout)
             else:
@@ -63,11 +64,14 @@ class CredentialsPage(QtWidgets.QWidget):
         widget_key: str,
         *,
         password: bool = False,
+        placeholder: str = "",
     ) -> MLineEdit:
         line_input = MLineEdit()
         if password:
             line_input.setEchoMode(QtWidgets.QLineEdit.Password)
         line_input.setFixedWidth(400)
+        if placeholder:
+            line_input.setPlaceholderText(placeholder)
         prefix = MLabel(label_text).border()
         set_label_width(prefix)
         prefix.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
@@ -96,26 +100,30 @@ class CredentialsPage(QtWidgets.QWidget):
             self._build_line_input(
                 self.tr("Endpoint URL"),
                 "Custom Service_api_url",
+                placeholder="https://api.example.com/v1",
             )
         )
         layout.addWidget(
             self._build_line_input(
                 self.tr("Model"),
                 "Custom Service_model",
+                placeholder="provider-model-name",
             )
         )
 
-    def _add_custom_local_server_fields(self, layout: QtWidgets.QVBoxLayout) -> None:
+    def _add_custom_local_gemma_fields(self, layout: QtWidgets.QVBoxLayout) -> None:
         layout.addWidget(
             self._build_line_input(
                 self.tr("Endpoint URL"),
-                "Custom Local Server_api_url",
+                "Custom Local Server(Gemma)_api_url",
+                placeholder=GemmaLocalServerPage.DEFAULT_ENDPOINT_URL,
             )
         )
         layout.addWidget(
             self._build_line_input(
                 self.tr("Model"),
-                "Custom Local Server_model",
+                "Custom Local Server(Gemma)_model",
+                placeholder=GemmaLocalServerPage.DEFAULT_MODEL,
             )
         )
 

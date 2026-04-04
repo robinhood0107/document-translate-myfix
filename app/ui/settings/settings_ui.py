@@ -10,6 +10,7 @@ from ..dayu_widgets.qt import MPixmap
 from .personalization_page import PersonalizationPage
 from .tools_page import ToolsPage
 from .paddleocr_vl_page import PaddleOCRVLPage
+from .gemma_local_server_page import GemmaLocalServerPage
 from .credentials_page import CredentialsPage
 from .llms_page import LlmsPage
 from .text_rendering_page import TextRenderingPage
@@ -67,7 +68,7 @@ class SettingsPageUI(QtWidgets.QWidget):
 
         self.credential_services = [
             self.tr("Custom Service"),
-            self.tr("Custom Local Server"),
+            self.tr("Custom Local Server(Gemma)"),
             self.tr("Open AI GPT"),
             self.tr("Anthropic Claude"),
             self.tr("Google Gemini"),
@@ -85,7 +86,7 @@ class SettingsPageUI(QtWidgets.QWidget):
             self.tr("Claude-4.5-Haiku"),
             self.tr("Deepseek-v3"),
             self.tr("Custom Service"),
-            self.tr("Custom Local Server"),
+            self.tr("Custom Local Server(Gemma)"),
         ]
         
         self.languages = [
@@ -121,7 +122,7 @@ class SettingsPageUI(QtWidgets.QWidget):
 
             # Translator mappings
             self.tr("Custom Service"): "Custom Service",
-            self.tr("Custom Local Server"): "Custom Local Server",
+            self.tr("Custom Local Server(Gemma)"): "Custom Local Server(Gemma)",
             self.tr("Deepseek-v3"): "Deepseek-v3",
             self.tr("GPT-4.1"): "GPT-4.1",
             self.tr("GPT-4.1-mini"): "GPT-4.1-mini",
@@ -159,7 +160,7 @@ class SettingsPageUI(QtWidgets.QWidget):
 
             # Credential services mappings
             self.tr("Custom Service"): "Custom Service",
-            self.tr("Custom Local Server"): "Custom Local Server",
+            self.tr("Custom Local Server(Gemma)"): "Custom Local Server(Gemma)",
             self.tr("Deepseek"): "Deepseek",
             self.tr("Open AI GPT"): "Open AI GPT",
             self.tr("Microsoft Azure"): "Microsoft Azure",
@@ -198,6 +199,7 @@ class SettingsPageUI(QtWidgets.QWidget):
             parent=self,
         )
         self.paddleocr_vl_page = PaddleOCRVLPage(parent=self)
+        self.gemma_local_server_page = GemmaLocalServerPage(parent=self)
         self.credentials_page = CredentialsPage(
             services=self.credential_services,
             value_mappings=self.value_mappings,
@@ -229,6 +231,10 @@ class SettingsPageUI(QtWidgets.QWidget):
         self.paddleocr_vl_visualize_checkbox = self.paddleocr_vl_page.visualize_checkbox
         self.paddleocr_vl_max_new_tokens_spinbox = self.paddleocr_vl_page.max_new_tokens_spinbox
         self.paddleocr_vl_parallel_workers_spinbox = self.paddleocr_vl_page.parallel_workers_spinbox
+        self.gemma_chunk_size_spinbox = self.gemma_local_server_page.chunk_size_spinbox
+        self.gemma_max_completion_tokens_spinbox = self.gemma_local_server_page.max_completion_tokens_spinbox
+        self.gemma_request_timeout_spinbox = self.gemma_local_server_page.request_timeout_spinbox
+        self.gemma_raw_response_logging_checkbox = self.gemma_local_server_page.raw_response_logging_checkbox
 
         # Credentials
         self.save_keys_checkbox = self.credentials_page.save_keys_checkbox
@@ -259,6 +265,7 @@ class SettingsPageUI(QtWidgets.QWidget):
         self.stacked_widget.addWidget(self.personalization_page)
         self.stacked_widget.addWidget(self.tools_page)
         self.stacked_widget.addWidget(self.paddleocr_vl_page)
+        self.stacked_widget.addWidget(self.gemma_local_server_page)
         self.stacked_widget.addWidget(self.llms_page)
         self.stacked_widget.addWidget(self.text_rendering_page)
         self.stacked_widget.addWidget(self.project_page)
@@ -313,6 +320,7 @@ class SettingsPageUI(QtWidgets.QWidget):
             {"title": self.tr("Personalization"), "avatar": MPixmap(".svg")},
             {"title": self.tr("Tools"), "avatar": MPixmap(".svg")},
             {"title": self.tr("PaddleOCR VL Settings"), "avatar": MPixmap(".svg")},
+            {"title": self.tr("Gemma Local Server Settings"), "avatar": MPixmap(".svg")},
             {"title": self.tr("LLMs"), "avatar": MPixmap(".svg")},
             {"title": self.tr("Text Rendering"), "avatar": MPixmap(".svg")},
             {"title": self.tr("Project"), "avatar": MPixmap(".svg")},
