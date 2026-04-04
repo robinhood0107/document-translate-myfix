@@ -19,7 +19,8 @@ class CredentialsPage(QtWidgets.QWidget):
 
         info_label = MLabel(self.tr(
             "Configure provider API keys or custom endpoints here.\n"
-            "Use this page for your own API credentials and local OpenAI-compatible endpoints."
+            "Use this page for your own API credentials and local OpenAI-compatible endpoints.\n"
+            "For Custom endpoints, API Key is optional unless your server requires it."
         )).secondary()
         info_label.setWordWrap(True)
         
@@ -87,7 +88,7 @@ class CredentialsPage(QtWidgets.QWidget):
                 api_key_input = MLineEdit()
                 api_key_input.setEchoMode(QtWidgets.QLineEdit.Password)
                 api_key_input.setFixedWidth(400)
-                api_key_prefix = MLabel(self.tr("API Key")).border()
+                api_key_prefix = MLabel(self.tr("API Key (Optional)")).border()
                 set_label_width(api_key_prefix)
                 api_key_prefix.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
                 api_key_input.set_prefix_widget(api_key_prefix)
