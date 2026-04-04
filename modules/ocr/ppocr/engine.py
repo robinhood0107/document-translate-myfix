@@ -134,6 +134,78 @@ class PPOCRv5Engine(OCREngine):
 		ys = quad[:, 1]
 		return int(xs.min()), int(ys.min()), int(xs.max()), int(ys.max())
 
+	@staticmethod
+	def _compact_text(text: str) -> str:
+		return "".join((text or "").split())
+
+	def _block_geometry(self, blk: TextBlock) -> tuple[float, float, float]:
+		x1, y1, x2, y2 = [float(v) for v in blk.xyxy]
+		width = max(1.0, x2 - x1)
+		height = max(1.0, y2 - y1)
+		return width, height, width * height
+
+	def _is_suspicious_result(self, blk: TextBlock, text: str, conf: float) -> bool:
+		compact = self._compact_text(text)
+		if not compact:
+			return True
+
+		width, height, area = self._block_geometry(blk)
+		text_len = len(compact)
+		conf = float(conf or 0.0)
+
+		if text_len <= 1 and area >= 25000:
+			return True
+		if text_len <= 2 and area >= 90000:
+			return True
+		if text_len <= 3 and conf < 0.45 and area >= 50000:
+			return True
+		if text_len <= 4 and conf < 0.60 and min(width, height) >= 220:
+			return True
+		if conf < 0.18 and area >= 30000:
+			return True
+		return False
+
+	def _candidate_score(self, blk: TextBlock, text: str, conf: float, source: str) -> float:
+		compact = self._compact_text(text)
+		if not compact:
+			return float("-inf")
+
+		width, height, area = self._block_geometry(blk)
+		text_len = len(compact)
+		score = float(conf or 0.0) * 10.0 + min(text_len, 12)
+
+		if source.startswith("local_det"):
+			score += 0.75
+		if source.startswith("retry_local_det"):
+			score += 0.25
+
+		if text_len <= 1 and area >= 25000:
+			score -= 8.0
+		elif text_len <= 2 and area >= 90000:
+			score -= 6.0
+		elif text_len <= 3 and float(conf or 0.0) < 0.45 and area >= 50000:
+			score -= 4.0
+		elif text_len <= 4 and float(conf or 0.0) < 0.60 and min(width, height) >= 220:
+			score -= 3.0
+
+		return score
+
+	def _select_best_candidate(self, blk: TextBlock, candidates: list[tuple[str, str, float]]) -> tuple[str, float, str]:
+		best_text = ""
+		best_conf = 0.0
+		best_source = ""
+		best_score = float("-inf")
+
+		for source, text, conf in candidates:
+			score = self._candidate_score(blk, text, conf, source)
+			if score > best_score:
+				best_text = (text or "").strip()
+				best_conf = float(conf or 0.0)
+				best_source = source
+				best_score = score
+
+		return best_text, best_conf, best_source
+
 	def _det_rec_in_crop(self, crop: np.ndarray, blk: TextBlock) -> tuple[str, float]:
 		boxes, _ = self._det_infer(crop)
 		if boxes is None or len(boxes) == 0:
@@ -185,12 +257,13 @@ class PPOCRv5Engine(OCREngine):
 		}
 
 		initial_empty_indices: list[int] = []
-		retry_candidates: list[tuple[int, TextBlock]] = []
+		initial_suspicious_indices: list[int] = []
+		retry_candidates: list[tuple[int, TextBlock, str, float]] = []
 
 		for idx, blk, crop in initial_payloads:
 			if crop is None:
 				initial_empty_indices.append(idx)
-				retry_candidates.append((idx, blk))
+				retry_candidates.append((idx, blk, "", 0.0))
 				set_block_ocr_diagnostics(
 					blk,
 					text="",
@@ -204,6 +277,10 @@ class PPOCRv5Engine(OCREngine):
 			text, conf = initial_results.get(idx, ("", 0.0))
 			text = (text or "").strip()
 			if text:
+				if self._is_suspicious_result(blk, text, conf):
+					initial_suspicious_indices.append(idx)
+					retry_candidates.append((idx, blk, text, conf))
+					continue
 				set_block_ocr_diagnostics(
 					blk,
 					text=text,
@@ -215,7 +292,7 @@ class PPOCRv5Engine(OCREngine):
 				continue
 
 			initial_empty_indices.append(idx)
-			retry_candidates.append((idx, blk))
+			retry_candidates.append((idx, blk, "", 0.0))
 			set_block_ocr_diagnostics(
 				blk,
 				text="",
@@ -230,12 +307,14 @@ class PPOCRv5Engine(OCREngine):
 
 		if initial_empty_indices:
 			logger.info("ppocr empty blocks after initial pass: %s", initial_empty_indices)
+		if initial_suspicious_indices:
+			logger.info("ppocr suspicious non-empty blocks after initial pass: %s", initial_suspicious_indices)
 
 		retry_payloads: list[tuple[int, TextBlock, np.ndarray | None]] = []
 		retry_crops: list[np.ndarray] = []
 		retry_indices: list[int] = []
 
-		for idx, blk in retry_candidates:
+		for idx, blk, _, _ in retry_candidates:
 			retry_crop = build_retry_crop(img, blk.xyxy)
 			retry_payloads.append((idx, blk, retry_crop))
 			if retry_crop is not None:
@@ -250,21 +329,34 @@ class PPOCRv5Engine(OCREngine):
 
 		retry_empty_indices: list[int] = []
 		for idx, blk, retry_crop in retry_payloads:
+			initial_text, initial_conf = next(
+				(candidate_text, candidate_conf)
+				for candidate_idx, candidate_blk, candidate_text, candidate_conf in retry_candidates
+				if candidate_idx == idx and candidate_blk is blk
+			)
+			candidates: list[tuple[str, str, float]] = []
+			if initial_text:
+				candidates.append(("initial_rec_only", initial_text, initial_conf))
+
 			initial_crop = initial_payloads[idx][2]
 			if initial_crop is not None:
 				local_text, local_conf = self._det_rec_in_crop(initial_crop, blk)
 				if local_text:
+					candidates.append(("local_det", local_text, local_conf))
+
+			if retry_crop is None:
+				text, conf, _ = self._select_best_candidate(blk, candidates)
+				text = (text or "").strip()
+				if text and not self._is_suspicious_result(blk, text, conf):
 					set_block_ocr_diagnostics(
 						blk,
-						text=local_text,
-						confidence=local_conf,
+						text=text,
+						confidence=conf,
 						status=OCR_STATUS_OK_AFTER_RETRY,
 						empty_reason="",
 						attempt_count=2,
 					)
 					continue
-
-			if retry_crop is None:
 				retry_empty_indices.append(idx)
 				set_block_ocr_diagnostics(
 					blk,
@@ -279,11 +371,30 @@ class PPOCRv5Engine(OCREngine):
 				)
 				continue
 
-			text, conf = self._det_rec_in_crop(retry_crop, blk)
-			if not text:
-				text, conf = retry_results.get(idx, ("", 0.0))
+			local_retry_text, local_retry_conf = self._det_rec_in_crop(retry_crop, blk)
+			if local_retry_text:
+				candidates.append(("retry_local_det", local_retry_text, local_retry_conf))
+			rec_retry_text, rec_retry_conf = retry_results.get(idx, ("", 0.0))
+			if rec_retry_text:
+				candidates.append(("retry_rec_only", rec_retry_text, rec_retry_conf))
+
+			text, conf, _ = self._select_best_candidate(blk, candidates)
 			text = (text or "").strip()
 			if text:
+				if self._is_suspicious_result(blk, text, conf):
+					retry_empty_indices.append(idx)
+					set_block_ocr_diagnostics(
+						blk,
+						text="",
+						confidence=0.0,
+						status=OCR_STATUS_EMPTY_AFTER_RETRY,
+						empty_reason=QCoreApplication.translate(
+							"Messages",
+							"Retry also failed after contrast preprocessing.",
+						),
+						attempt_count=2,
+					)
+					continue
 				set_block_ocr_diagnostics(
 					blk,
 					text=text,
