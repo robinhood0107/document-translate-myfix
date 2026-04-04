@@ -95,6 +95,60 @@ class BatchProcessor:
     def _current_run_type(self) -> str:
         return str(getattr(self.main_page, "_current_batch_run_type", "batch") or "batch")
 
+    def _should_force_json_exports(self) -> bool:
+        return self._current_run_type() == "one_page_auto"
+
+    def _effective_export_settings(self, settings_page) -> dict:
+        export_settings = dict(settings_page.get_export_settings())
+        if self._should_force_json_exports():
+            export_settings["export_raw_text"] = True
+            export_settings["export_translated_text"] = True
+        return export_settings
+
+    def _write_json_exports(
+        self,
+        directory: str,
+        timestamp: str,
+        archive_bname: str,
+        image_path: str,
+        image,
+        blk_list,
+        page_state: dict,
+        source_lang: str,
+        export_settings: dict,
+    ) -> None:
+        page_base_name = os.path.splitext(os.path.basename(image_path))[0]
+        blocks = list(blk_list or [])
+
+        if export_settings.get("export_raw_text", False):
+            path = os.path.join(directory, f"comic_translate_{timestamp}", "raw_texts", archive_bname)
+            os.makedirs(path, exist_ok=True)
+            with open(os.path.join(path, f"{page_base_name}_raw.json"), "w", encoding="UTF-8") as file:
+                file.write(get_raw_text(blocks))
+
+        if export_settings.get("export_translated_text", False):
+            path = os.path.join(directory, f"comic_translate_{timestamp}", "translated_texts", archive_bname)
+            os.makedirs(path, exist_ok=True)
+            with open(os.path.join(path, f"{page_base_name}_translated.json"), "w", encoding="UTF-8") as file:
+                file.write(get_raw_translation(blocks))
+
+        if export_settings.get("export_raw_text", False) or export_settings.get("export_translated_text", False):
+            ocr_summary = page_state.get("processing_summary", {})
+            debug_path = os.path.join(
+                directory,
+                f"comic_translate_{timestamp}",
+                "ocr_debugs",
+                archive_bname,
+            )
+            export_ocr_debug_artifacts(
+                debug_path,
+                page_base_name,
+                image,
+                blocks,
+                ocr_summary.get("ocr_engine", ""),
+                page_state.get("source_lang", source_lang),
+            )
+
     def _ensure_page_state(self, image_path: str) -> dict:
         return self.main_page.image_ctrl.ensure_page_state(image_path)
 
@@ -255,6 +309,7 @@ class BatchProcessor:
             self.emit_progress(index, total_images, 0, 10, True)
 
             settings_page = self.main_page.settings_page
+            export_settings = self._effective_export_settings(settings_page)
             page_state = self._ensure_page_state(image_path)
             source_lang = page_state['source_lang']
             target_lang = page_state['target_lang']
@@ -424,6 +479,18 @@ class BatchProcessor:
                     )
                     reason = f"OCR: {err_msg}"
                     full_traceback = traceback.format_exc()
+                    if self._should_force_json_exports():
+                        self._write_json_exports(
+                            directory,
+                            timestamp,
+                            archive_bname,
+                            image_path,
+                            image,
+                            blk_list,
+                            page_state,
+                            source_lang,
+                            export_settings,
+                        )
                     self.skip_save(directory, timestamp, base_name, extension, archive_bname, image)
                     self.main_page.image_skipped.emit(image_path, "OCR", err_msg)
                     self.log_skipped_image(directory, timestamp, image_path, reason, full_traceback)
@@ -438,6 +505,18 @@ class BatchProcessor:
                     "failed",
                     reason="No text blocks detected.",
                 )
+                if self._should_force_json_exports():
+                    self._write_json_exports(
+                        directory,
+                        timestamp,
+                        archive_bname,
+                        image_path,
+                        image,
+                        [],
+                        page_state,
+                        source_lang,
+                        export_settings,
+                    )
                 self.skip_save(directory, timestamp, base_name, extension, archive_bname, image)
                 self.main_page.image_skipped.emit(image_path, "Text Blocks", "")
                 self.log_skipped_image(directory, timestamp, image_path, "No text blocks detected")
@@ -448,7 +527,6 @@ class BatchProcessor:
                 return
 
             # Clean Image of text
-            export_settings = settings_page.get_export_settings()
 
             # Use the shared inpainter from the handler
             if self.inpainting.inpainter_cache is None or self.inpainting.cached_inpainter_key != settings_page.get_tool_selection('inpainter'):
@@ -563,6 +641,18 @@ class BatchProcessor:
                 )
                 reason = f"Translator: {err_msg}"
                 full_traceback = traceback.format_exc()
+                if self._should_force_json_exports():
+                    self._write_json_exports(
+                        directory,
+                        timestamp,
+                        archive_bname,
+                        image_path,
+                        image,
+                        blk_list,
+                        page_state,
+                        source_lang,
+                        export_settings,
+                    )
                 self.skip_save(directory, timestamp, base_name, extension, archive_bname, image)
                 self.main_page.image_skipped.emit(image_path, "Translator", err_msg)
                 self.log_skipped_image(directory, timestamp, image_path, reason, full_traceback)
@@ -586,6 +676,18 @@ class BatchProcessor:
                         "failed",
                         reason="Translator returned empty JSON.",
                     )
+                    if self._should_force_json_exports():
+                        self._write_json_exports(
+                            directory,
+                            timestamp,
+                            archive_bname,
+                            image_path,
+                            image,
+                            blk_list,
+                            page_state,
+                            source_lang,
+                            export_settings,
+                        )
                     self.skip_save(directory, timestamp, base_name, extension, archive_bname, image)
                     self.main_page.image_skipped.emit(image_path, "Translator", "")
                     self.log_skipped_image(directory, timestamp, image_path, "Translator: empty JSON")
@@ -602,49 +704,34 @@ class BatchProcessor:
                     reason=error_message,
                 )
                 full_traceback = traceback.format_exc()
+                if self._should_force_json_exports():
+                    self._write_json_exports(
+                        directory,
+                        timestamp,
+                        archive_bname,
+                        image_path,
+                        image,
+                        blk_list,
+                        page_state,
+                        source_lang,
+                        export_settings,
+                    )
                 self.skip_save(directory, timestamp, base_name, extension, archive_bname, image)
                 self.main_page.image_skipped.emit(image_path, "Translator", error_message)
                 self.log_skipped_image(directory, timestamp, image_path, reason, full_traceback)
                 continue
 
-            if export_settings['export_raw_text']:
-                path = os.path.join(directory, f"comic_translate_{timestamp}", "raw_texts", archive_bname)
-                if not os.path.exists(path):
-                    os.makedirs(path, exist_ok=True)
-                with open(
-                    os.path.join(path, os.path.splitext(os.path.basename(image_path))[0] + "_raw.json"),
-                    'w',
-                    encoding='UTF-8',
-                ) as file:
-                    file.write(entire_raw_text)
-
-            if export_settings['export_translated_text']:
-                path = os.path.join(directory, f"comic_translate_{timestamp}", "translated_texts", archive_bname)
-                if not os.path.exists(path):
-                    os.makedirs(path, exist_ok=True)
-                with open(
-                    os.path.join(path, os.path.splitext(os.path.basename(image_path))[0] + "_translated.json"),
-                    'w',
-                    encoding='UTF-8',
-                ) as file:
-                    file.write(entire_translated_text)
-
-            if (export_settings['export_raw_text'] or export_settings['export_translated_text']) and blk_list:
-                ocr_summary = page_state.get("processing_summary", {})
-                debug_path = os.path.join(
-                    directory,
-                    f"comic_translate_{timestamp}",
-                    "ocr_debugs",
-                    archive_bname,
-                )
-                export_ocr_debug_artifacts(
-                    debug_path,
-                    os.path.splitext(os.path.basename(image_path))[0],
-                    image,
-                    blk_list,
-                    ocr_summary.get("ocr_engine", ""),
-                    page_state.get("source_lang", source_lang),
-                )
+            self._write_json_exports(
+                directory,
+                timestamp,
+                archive_bname,
+                image_path,
+                image,
+                blk_list,
+                page_state,
+                source_lang,
+                export_settings,
+            )
 
             self.emit_progress(index, total_images, 7, 10, False)
             if self._is_cancelled():

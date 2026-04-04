@@ -30,6 +30,14 @@ logger = logging.getLogger(__name__)
 
 
 class RenderMixin:
+    def _effective_export_settings(self: WebtoonBatchProcessor) -> dict:
+        export_settings = dict(self.main_page.settings_page.get_export_settings())
+        run_type = str(getattr(self.main_page, "_current_batch_run_type", "batch") or "batch")
+        if run_type == "one_page_auto":
+            export_settings["export_raw_text"] = True
+            export_settings["export_translated_text"] = True
+        return export_settings
+
     def _prepare_page_blocks_for_render(
         self: WebtoonBatchProcessor,
         image_path: str,
@@ -242,8 +250,7 @@ class RenderMixin:
             self.log_skipped_image(directory, timestamp, image_path, reason)
             return
 
-        settings_page = self.main_page.settings_page
-        export_settings = settings_page.get_export_settings()
+        export_settings = self._effective_export_settings()
 
         if export_settings["export_inpainted_image"]:
             renderer = ImageSaveRenderer(image)
