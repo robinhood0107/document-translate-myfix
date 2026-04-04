@@ -358,6 +358,7 @@ def save_state_to_proj_file_v2(comic_translate: "ComicTranslate", file_name: str
         "llm_extra_context": comic_translate.settings_page.get_llm_settings().get("extra_context", ""),
         "webtoon_mode": comic_translate.webtoon_mode,
         "webtoon_view_state": comic_translate.image_viewer.webtoon_view_state,
+        "latest_automatic_report": comic_translate.batch_report_ctrl.export_latest_report_for_project(),
         "unique_images": ensure_string_keys(unique_images),
     }
     manifest_blob = msgpack.packb(manifest, default=encoder.encode, use_bin_type=True)
@@ -565,6 +566,29 @@ def _materialize_from_manifest_and_pages(
         original_to_temp.get(page, page): plist for page, plist in reconstructed.items()
     }
 
+    latest_report = manifest.get("latest_automatic_report")
+    if latest_report:
+        latest_report = dict(latest_report)
+        latest_report["paths"] = [
+            original_to_temp.get(path, path) for path in latest_report.get("paths", [])
+        ]
+        latest_report["retry_paths"] = [
+            original_to_temp.get(path, path)
+            for path in latest_report.get("retry_paths", [])
+        ]
+        normalized_entries = []
+        for entry in latest_report.get("skipped_entries", []):
+            normalized = dict(entry)
+            image_path = normalized.get("image_path")
+            if image_path:
+                normalized["image_path"] = original_to_temp.get(image_path, image_path)
+            normalized_entries.append(normalized)
+        latest_report["skipped_entries"] = normalized_entries
+    comic_translate.batch_report_ctrl.import_latest_report_from_project(
+        latest_report,
+        refresh=False,
+    )
+
     return manifest.get("llm_extra_context", "")
 
 
@@ -602,6 +626,7 @@ def _load_from_legacy_state_blob(
         "llm_extra_context": state.get("llm_extra_context", ""),
         "webtoon_mode": state.get("webtoon_mode", False),
         "webtoon_view_state": state.get("webtoon_view_state", {}),
+        "latest_automatic_report": state.get("latest_automatic_report"),
         "unique_images": state.get("unique_images", {}),
     }
 

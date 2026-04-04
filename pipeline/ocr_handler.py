@@ -1,6 +1,8 @@
 import logging
+import os
 from modules.ocr.processor import OCRProcessor
 from modules.utils.device import resolve_device
+from modules.utils.ocr_quality import summarize_ocr_quality
 from pipeline.webtoon_utils import filter_and_convert_visible_blocks, restore_original_block_coordinates
 
 logger = logging.getLogger(__name__)
@@ -14,6 +16,53 @@ class OCRHandler:
         self.cache_manager = cache_manager
         self.pipeline = pipeline
         self.ocr = OCRProcessor()
+
+    def _current_file_path(self) -> str | None:
+        if 0 <= self.main_page.curr_img_idx < len(self.main_page.image_files):
+            return self.main_page.image_files[self.main_page.curr_img_idx]
+        return None
+
+    def _persist_current_page_ocr_state(
+        self,
+        blk_list,
+        cache_status: str,
+    ) -> None:
+        current_file = self._current_file_path()
+        if not current_file:
+            return
+        state = self.main_page.image_ctrl.ensure_page_state(current_file)
+        state["blk_list"] = blk_list.copy()
+        quality = summarize_ocr_quality(blk_list)
+        logger.info(
+            "ocr quality summary: image=%s blocks=%d non_empty=%d empty=%d single_char_like=%d cache=%s",
+            os.path.basename(current_file),
+            quality.get("block_count", 0),
+            quality.get("non_empty", 0),
+            quality.get("empty", 0),
+            quality.get("single_char_like", 0),
+            cache_status,
+        )
+        self.main_page.image_ctrl.update_processing_summary(
+            current_file,
+            {
+                "ocr_key": self.ocr.ocr_key,
+                "ocr_engine": self.ocr.last_engine_name or "",
+                "device": self.ocr.last_device or "",
+                "block_count": len(blk_list or []),
+                "ocr_quality_counts": {
+                    "non_empty": quality.get("non_empty", 0),
+                    "empty": quality.get("empty", 0),
+                    "single_char_like": quality.get("single_char_like", 0),
+                },
+            },
+        )
+        self.main_page.image_ctrl.mark_processing_stage(
+            current_file,
+            "ocr",
+            "completed",
+            cache_status=cache_status,
+            quality=quality,
+        )
 
     def OCR_image(self, single_block: bool = False):
         source_lang = self.main_page.s_combo.currentText()
@@ -37,10 +86,15 @@ class OCRHandler:
                 # Check if we have cached results for this image/model/language
                 if self.cache_manager._is_ocr_cached(cache_key):
                     # Check if block exists in cache (even if text is empty)
-                    cached_text = self.cache_manager._get_cached_text_for_block(cache_key, blk)
-                    if cached_text is not None:  # Block was processed before (even if text is empty)
-                        blk.text = cached_text
-                        logger.info(f"Using cached OCR result for block: '{cached_text}'")
+                    payload = self.cache_manager._get_cached_ocr_payload_for_block(cache_key, blk)
+                    if payload is not None:  # Block was processed before (even if text is empty)
+                        blk.text = payload.get("text", "")
+                        blk.ocr_confidence = payload.get("confidence", 0.0)
+                        blk.ocr_status = payload.get("status", "")
+                        blk.ocr_empty_reason = payload.get("empty_reason", "")
+                        blk.ocr_attempt_count = payload.get("attempt_count", 0)
+                        logger.info(f"Using cached OCR result for block: '{blk.text}'")
+                        self._persist_current_page_ocr_state(self.main_page.blk_list, "hit")
                         return
                     else:
                         logger.info("Block not found in cache, processing single block...")
@@ -53,6 +107,7 @@ class OCRHandler:
                         self.cache_manager.update_ocr_cache_for_block(cache_key, blk)
                         
                         logger.info(f"Processed single block and updated cache: '{blk.text}'")
+                        self._persist_current_page_ocr_state(self.main_page.blk_list, "refreshed")
                 else:
                     # Run OCR on all blocks and cache the results
                     logger.info("No cached OCR results found, running OCR on entire page...")
@@ -72,15 +127,22 @@ class OCRHandler:
                         self.ocr.process(image, all_blocks_copy)
                         # Cache using the original blocks to maintain consistent IDs
                         self.cache_manager._cache_ocr_results(cache_key, self.main_page.blk_list, all_blocks_copy)
-                        cached_text = self.cache_manager._get_cached_text_for_block(cache_key, blk)
-                        blk.text = cached_text
-                        logger.info(f"Cached OCR results and extracted text for block: {cached_text}")
+                        payload = self.cache_manager._get_cached_ocr_payload_for_block(cache_key, blk)
+                        if payload is not None:
+                            blk.text = payload.get("text", "")
+                            blk.ocr_confidence = payload.get("confidence", 0.0)
+                            blk.ocr_status = payload.get("status", "")
+                            blk.ocr_empty_reason = payload.get("empty_reason", "")
+                            blk.ocr_attempt_count = payload.get("attempt_count", 0)
+                        logger.info(f"Cached OCR results and extracted text for block: {blk.text}")
+                        self._persist_current_page_ocr_state(self.main_page.blk_list, "refreshed")
             else:
                 # For full page OCR, check if we can use cached results
                 if self.cache_manager._can_serve_all_blocks_from_ocr_cache(cache_key, self.main_page.blk_list):
                     # All blocks can be served from cache
                     self.cache_manager._apply_cached_ocr_to_blocks(cache_key, self.main_page.blk_list)
                     logger.info(f"Using cached OCR results for all {len(self.main_page.blk_list)} blocks")
+                    self._persist_current_page_ocr_state(self.main_page.blk_list, "hit")
                 else:
                     # Need to run OCR and cache results
                     self.ocr.initialize(self.main_page, source_lang)
@@ -88,6 +150,7 @@ class OCRHandler:
                         self.ocr.process(image, self.main_page.blk_list)
                         self.cache_manager._cache_ocr_results(cache_key, self.main_page.blk_list)
                         logger.info("OCR completed and cached for %d blocks", len(self.main_page.blk_list))
+                        self._persist_current_page_ocr_state(self.main_page.blk_list, "refreshed")
 
     def OCR_webtoon_visible_area(self, single_block: bool = False):
         """Perform OCR on the visible area in webtoon mode."""

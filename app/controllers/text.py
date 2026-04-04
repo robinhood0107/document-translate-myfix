@@ -281,6 +281,25 @@ class TextController:
         self.main.curr_tblock_item = None
         self.main.s_text_edit.clear()
         self.main.t_text_edit.clear()
+        self.update_ocr_warning(None)
+
+    def update_ocr_warning(self, blk: TextBlock | None) -> None:
+        label = getattr(self.main, "ocr_warning_label", None)
+        if label is None:
+            return
+        status = getattr(blk, "ocr_status", "") if blk is not None else ""
+        if status not in {"empty_initial", "empty_after_retry"}:
+            label.clear()
+            label.setVisible(False)
+            return
+
+        base = QtCore.QCoreApplication.translate(
+            "Messages",
+            "OCR result is empty for this block.",
+        )
+        reason = (getattr(blk, "ocr_empty_reason", "") or "").strip()
+        label.setText(f"{base} {reason}".strip())
+        label.setVisible(True)
 
     def on_blk_rendered(self, text: str, font_size: int, blk: TextBlock, image_path: str):
         if not self.main.webtoon_mode:
@@ -332,6 +351,7 @@ class TextController:
             self.main.s_text_edit.blockSignals(True)
             self.main.s_text_edit.setPlainText(self.main.curr_tblock.text)
             self.main.s_text_edit.blockSignals(False)
+        self.update_ocr_warning(self.main.curr_tblock)
 
         self.main.t_text_edit.blockSignals(True)
         self.main.t_text_edit.setPlainText(text_item.toPlainText())

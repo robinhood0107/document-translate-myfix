@@ -14,6 +14,7 @@ from modules.translation.processor import Translator
 from modules.utils.device import resolve_device
 from modules.utils.exceptions import InsufficientCreditsException
 from modules.utils.image_utils import generate_mask
+from modules.utils.inpaint_cleanup import refine_bubble_residue_inpaint
 from modules.utils.pipeline_config import get_config, inpaint_map
 from modules.utils.textblock import TextBlock, sort_blk_list
 
@@ -200,6 +201,19 @@ class ChunkMixin:
             return None, None
         inpainted = self.inpainting.inpainter_cache(image, mask, config)
         inpainted = imk.convert_scale_abs(inpainted)
+        inpainted, mask, cleanup_stats = refine_bubble_residue_inpaint(
+            inpainted,
+            mask,
+            mask_blocks,
+            self.inpainting.inpainter_cache,
+            config,
+        )
+        if cleanup_stats.get("applied"):
+            logger.info(
+                "webtoon inpaint residue cleanup applied: blocks=%d components=%d",
+                cleanup_stats.get("block_count", 0),
+                cleanup_stats.get("component_count", 0),
+            )
         return mask, inpainted
 
     def _extract_page_patches_from_mask(

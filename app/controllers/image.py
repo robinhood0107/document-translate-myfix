@@ -4,6 +4,7 @@ import os
 import imkit as imk
 import numpy as np
 from typing import TYPE_CHECKING, List
+from datetime import datetime
 from PySide6 import QtCore, QtWidgets, QtGui
 
 from app.ui.dayu_widgets.clickable_card import ClickMeta
@@ -37,6 +38,76 @@ class ImageStateController:
             self.main.page_list,
             avatar_size=(35, 50)
         )
+
+    def ensure_page_state(self, file_path: str) -> dict:
+        state = self.main.image_states.setdefault(file_path, {})
+        state.setdefault('viewer_state', {})
+        state.setdefault('source_lang', self.main.s_combo.currentText())
+        state.setdefault('target_lang', self.main.t_combo.currentText())
+        state.setdefault('brush_strokes', [])
+        state.setdefault('blk_list', [])
+        state.setdefault('skip', False)
+        return state
+
+    def reset_processing_summary(self, file_path: str, run_type: str = "manual") -> dict:
+        state = self.ensure_page_state(file_path)
+        summary = {
+            "last_run_timestamp": datetime.now().isoformat(timespec="seconds"),
+            "run_type": run_type,
+            "source_lang": state.get("source_lang", self.main.s_combo.currentText()),
+            "target_lang": state.get("target_lang", self.main.t_combo.currentText()),
+            "stage_status": {},
+            "last_failure_reason": "",
+        }
+        state["processing_summary"] = summary
+        return summary
+
+    def _deep_merge_dict(self, target: dict, patch: dict) -> dict:
+        for key, value in (patch or {}).items():
+            if isinstance(value, dict) and isinstance(target.get(key), dict):
+                self._deep_merge_dict(target[key], value)
+            else:
+                target[key] = value
+        return target
+
+    def update_processing_summary(self, file_path: str, patch: dict | None = None, **kwargs) -> dict:
+        state = self.ensure_page_state(file_path)
+        summary = state.get("processing_summary")
+        if not isinstance(summary, dict):
+            summary = self.reset_processing_summary(file_path, run_type="manual")
+        merged_patch = {}
+        if patch:
+            merged_patch.update(patch)
+        if kwargs:
+            merged_patch.update(kwargs)
+        self._deep_merge_dict(summary, merged_patch)
+        summary["last_run_timestamp"] = datetime.now().isoformat(timespec="seconds")
+        state["processing_summary"] = summary
+        return summary
+
+    def mark_processing_stage(
+        self,
+        file_path: str,
+        stage: str,
+        status: str,
+        reason: str = "",
+        **extra,
+    ) -> dict:
+        summary = self.update_processing_summary(file_path)
+        stage_status = summary.setdefault("stage_status", {})
+        payload = {
+            "status": status,
+            "updated_at": datetime.now().isoformat(timespec="seconds"),
+        }
+        if reason:
+            payload["reason"] = reason
+            if status == "failed":
+                summary["last_failure_reason"] = reason
+        if extra:
+            payload.update(extra)
+        stage_status[stage] = payload
+        summary["stage_status"] = stage_status
+        return self.update_processing_summary(file_path, {"stage_status": stage_status})
 
     def _is_content_flagged_error(self, error: str) -> bool:
         lowered = (error or "").lower()
@@ -258,6 +329,10 @@ class ImageStateController:
         self.main.image_patches.clear()
         self.main.in_memory_patches.clear()
         self.main.project_file = None
+        try:
+            self.main.batch_report_ctrl.clear_latest_report()
+        except Exception:
+            pass
         self.main.image_cards.clear()
         self.main.current_card = None
         self.main.page_list.blockSignals(True)
@@ -268,6 +343,10 @@ class ImageStateController:
         # Reset current_image_index
         self.main.curr_img_idx = -1
         self.main.set_project_clean()
+        try:
+            self.main.batch_report_ctrl.refresh_action_buttons()
+        except Exception:
+            pass
 
     def thread_load_images(self, paths: List[str]):
         if paths and paths[0].lower().endswith('.ctpr'):
@@ -408,6 +487,10 @@ class ImageStateController:
         self.main.image_viewer.fitInView()
         if self.main.image_files:
             self.main.mark_project_dirty()
+        try:
+            self.main.batch_report_ctrl.refresh_action_buttons()
+        except Exception:
+            pass
 
     def update_image_cards(self):
         # Clear existing items
@@ -540,6 +623,10 @@ class ImageStateController:
         # Force load the selected image thumbnail
         self.page_list_loader.force_load_image(index)
         self._hide_active_page_skip_error()
+        try:
+            self.main.batch_report_ctrl.refresh_action_buttons()
+        except Exception:
+            pass
 
         # Avoid circular calls when in webtoon mode
         if getattr(self.main, '_processing_page_change', False):
@@ -907,15 +994,16 @@ class ImageStateController:
 
     def save_image_state(self, file: str):
         # For regular mode only
-        skip_status = self.main.image_states.get(file, {}).get('skip', False)
-        self.main.image_states[file] = {
+        existing = dict(self.main.image_states.get(file, {}))
+        existing.update({
             'viewer_state': self.main.image_viewer.save_state(),
             'source_lang': self.main.s_combo.currentText(),
             'target_lang': self.main.t_combo.currentText(),
             'brush_strokes': self.main.image_viewer.save_brush_strokes(),
             'blk_list': self.main.blk_list.copy(),  # Store a copy of the list, not a reference
-            'skip': skip_status,
-        }
+            'skip': existing.get('skip', False),
+        })
+        self.main.image_states[file] = existing
 
     def save_current_image_state(self):
         if self.main.curr_img_idx >= 0:

@@ -26,6 +26,10 @@ class TextBlock(object):
                  alignment: str = '',
                  source_lang: str = "",
                  target_lang: str = "",
+                 ocr_confidence: float = 0.0,
+                 ocr_status: str = "",
+                 ocr_empty_reason: str = "",
+                 ocr_attempt_count: int = 0,
                  min_font_size: int = 0,
                  max_font_size: int = 0,
                  font_color: tuple = (),
@@ -53,6 +57,10 @@ class TextBlock(object):
         
         self.source_lang = source_lang
         self.target_lang = target_lang
+        self.ocr_confidence = ocr_confidence
+        self.ocr_status = ocr_status
+        self.ocr_empty_reason = ocr_empty_reason
+        self.ocr_attempt_count = ocr_attempt_count
 
         self.min_font_size = min_font_size
         self.max_font_size = max_font_size
@@ -104,6 +112,10 @@ class TextBlock(object):
         new_block.alignment = self.alignment
         new_block.source_lang = self.source_lang
         new_block.target_lang = self.target_lang
+        new_block.ocr_confidence = self.ocr_confidence
+        new_block.ocr_status = self.ocr_status
+        new_block.ocr_empty_reason = self.ocr_empty_reason
+        new_block.ocr_attempt_count = self.ocr_attempt_count
         new_block.min_font_size = self.min_font_size
         new_block.max_font_size = self.max_font_size
         new_block.font_color = self.font_color
