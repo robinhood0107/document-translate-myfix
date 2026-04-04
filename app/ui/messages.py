@@ -30,18 +30,6 @@ class Messages:
         )
 
     @staticmethod
-    def show_not_logged_in_error(parent):
-        MMessage.error(
-            text=QCoreApplication.translate(
-                "Messages",
-                "Sign-in is only required for hosted credits.\nConfigure local or provider API credentials in Settings > Credentials to continue."
-            ),
-            parent=parent,
-            duration=None,
-            closable=True
-        )
-
-    @staticmethod
     def show_missing_credentials_error(parent, provider_name: str, fields_text: str = ""):
         details = (
             QCoreApplication.translate(
@@ -108,30 +96,6 @@ class Messages:
             duration=None,
             closable=True
         )
-
-    @staticmethod
-    def show_insufficient_credits_error(parent, details: str = None):
-        """
-        Show an error message when the user has insufficient credits.
-        
-        Args:
-            parent: parent widget
-            details: optional detailed message from backend
-        """
-        msg = QtWidgets.QMessageBox(parent)
-        msg.setIcon(QtWidgets.QMessageBox.Warning)
-        msg.setWindowTitle(QCoreApplication.translate("Messages", "Insufficient Credits"))
-        msg.setText(QCoreApplication.translate(
-            "Messages", 
-            "Insufficient credits to perform this action.\nGo to Settings > Account to buy more credits."
-        ))
-        
-        if details:
-            msg.setDetailedText(details)
-            
-        ok_btn = msg.addButton(QCoreApplication.translate("Messages", "OK"), QtWidgets.QMessageBox.ButtonRole.AcceptRole)
-        msg.setDefaultButton(ok_btn)
-        msg.exec()
 
     @staticmethod
     def show_custom_not_configured_error(parent):
