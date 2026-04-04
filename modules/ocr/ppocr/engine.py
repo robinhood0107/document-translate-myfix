@@ -6,8 +6,9 @@ import numpy as np
 from PySide6.QtCore import QCoreApplication
 
 from ..base import OCREngine
+from modules.utils.language_utils import is_no_space_lang
 from modules.utils.textblock import TextBlock
-from modules.utils.textblock import lists_to_blk_list
+from modules.utils.textblock import lists_to_blk_list, sort_textblock_rectangles
 from modules.utils.ocr_debug import (
 	OCR_STATUS_EMPTY_AFTER_RETRY,
 	OCR_STATUS_EMPTY_INITIAL,
@@ -127,6 +128,44 @@ class PPOCRv5Engine(OCREngine):
 				confs[oi] = float(s)
 		return texts, confs
 
+	@staticmethod
+	def _quad_to_bbox(quad: np.ndarray) -> tuple[int, int, int, int]:
+		xs = quad[:, 0]
+		ys = quad[:, 1]
+		return int(xs.min()), int(ys.min()), int(xs.max()), int(ys.max())
+
+	def _det_rec_in_crop(self, crop: np.ndarray, blk: TextBlock) -> tuple[str, float]:
+		boxes, _ = self._det_infer(crop)
+		if boxes is None or len(boxes) == 0:
+			return "", 0.0
+
+		line_crops = [crop_quad(crop, quad.astype(np.float32)) for quad in boxes]
+		line_texts, line_confs = self._rec_infer(line_crops)
+
+		line_entries: list[tuple[tuple[int, int, int, int], str]] = []
+		valid_confs: list[float] = []
+		for quad, text, conf in zip(boxes, line_texts, line_confs):
+			compact_text = (text or "").strip()
+			if not compact_text:
+				continue
+			line_entries.append((self._quad_to_bbox(quad), compact_text))
+			valid_confs.append(float(conf or 0.0))
+
+		if not line_entries:
+			return "", 0.0
+
+		sorted_entries = sort_textblock_rectangles(line_entries, blk.source_lang_direction)
+		if is_no_space_lang(getattr(blk, "source_lang", "")):
+			joined_text = "".join(text for _, text in sorted_entries if text)
+		else:
+			joined_text = " ".join(text for _, text in sorted_entries if text)
+
+		if not joined_text.strip():
+			return "", 0.0
+
+		avg_conf = float(np.mean(valid_confs)) if valid_confs else 0.0
+		return joined_text.strip(), avg_conf
+
 	def _rec_only_blocks(self, img: np.ndarray, blk_list: List[TextBlock]) -> List[TextBlock]:
 		initial_payloads: list[tuple[int, TextBlock, np.ndarray | None]] = []
 		initial_crops: list[np.ndarray] = []
@@ -211,6 +250,20 @@ class PPOCRv5Engine(OCREngine):
 
 		retry_empty_indices: list[int] = []
 		for idx, blk, retry_crop in retry_payloads:
+			initial_crop = initial_payloads[idx][2]
+			if initial_crop is not None:
+				local_text, local_conf = self._det_rec_in_crop(initial_crop, blk)
+				if local_text:
+					set_block_ocr_diagnostics(
+						blk,
+						text=local_text,
+						confidence=local_conf,
+						status=OCR_STATUS_OK_AFTER_RETRY,
+						empty_reason="",
+						attempt_count=2,
+					)
+					continue
+
 			if retry_crop is None:
 				retry_empty_indices.append(idx)
 				set_block_ocr_diagnostics(
@@ -226,7 +279,9 @@ class PPOCRv5Engine(OCREngine):
 				)
 				continue
 
-			text, conf = retry_results.get(idx, ("", 0.0))
+			text, conf = self._det_rec_in_crop(retry_crop, blk)
+			if not text:
+				text, conf = retry_results.get(idx, ("", 0.0))
 			text = (text or "").strip()
 			if text:
 				set_block_ocr_diagnostics(
