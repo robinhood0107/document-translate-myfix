@@ -570,7 +570,7 @@ You do not need to sign in to use local models or your own provider credentials.
 <context>
     <name>Messages</name>
     <message>
-        <location filename="../../app/controllers/image.py" line="1111"/>
+        <location filename="../../app/controllers/image.py" line="1199"/>
         <source>Skipping:</source>
         <translation>Saltando:</translation>
     </message>
@@ -757,8 +757,8 @@ Please set API Key, Endpoint URL, and Model in Settings &gt; Credentials.</sourc
     </message>
     <message>
         <location filename="../../app/ui/messages.py" line="218"/>
-        <location filename="../../pipeline/batch_processor.py" line="179"/>
-        <location filename="../../pipeline/batch_processor.py" line="287"/>
+        <location filename="../../pipeline/batch_processor.py" line="399"/>
+        <location filename="../../pipeline/batch_processor.py" line="538"/>
         <location filename="../../pipeline/webtoon_batch/chunk.py" line="90"/>
         <source>Unable to connect to the server.
 Please check your internet connection.</source>
@@ -2351,12 +2351,12 @@ Do you want to restore it?</source>
         <translation>Descartar</translation>
     </message>
     <message>
-        <location filename="../../app/controllers/projects.py" line="757"/>
+        <location filename="../../app/controllers/projects.py" line="759"/>
         <source>Project Not Found</source>
         <translation>Proyecto no encontrado</translation>
     </message>
     <message>
-        <location filename="../../app/controllers/projects.py" line="759"/>
+        <location filename="../../app/controllers/projects.py" line="761"/>
         <source>The selected project file could not be found.
 It may have been moved, renamed, or deleted.
 
@@ -2367,41 +2367,49 @@ Es posible que se haya movido, cambiado de nombre o eliminado.
 {camino}</translation>
     </message>
     <message>
-        <location filename="../../app/controllers/projects.py" line="837"/>
+        <location filename="../../app/controllers/projects.py" line="839"/>
         <source>Korean</source>
         <translation>Coreano</translation>
     </message>
     <message>
-        <location filename="../../app/controllers/projects.py" line="838"/>
+        <location filename="../../app/controllers/projects.py" line="840"/>
         <source>English</source>
         <translation>Inglés</translation>
     </message>
 </context>
 <context>
+    <name>self.main_page</name>
+    <message>
+        <location filename="../../pipeline/batch_processor.py" line="360"/>
+        <source>OCR quality too low after retry.</source>
+        <translation type="unfinished"></translation>
+    </message>
+</context>
+<context>
     <name>self.settings.ui</name>
     <message>
-        <location filename="../../modules/ocr/processor.py" line="63"/>
+        <location filename="../../modules/ocr/processor.py" line="87"/>
         <location filename="../../modules/translation/processor.py" line="65"/>
         <source>GPT-4.1-mini</source>
         <translation>GPT-4.1-mini</translation>
     </message>
     <message>
-        <location filename="../../modules/ocr/processor.py" line="64"/>
+        <location filename="../../modules/ocr/processor.py" line="88"/>
         <source>Microsoft OCR</source>
         <translation>Microsoft OCR</translation>
     </message>
     <message>
-        <location filename="../../modules/ocr/processor.py" line="65"/>
+        <location filename="../../modules/ocr/processor.py" line="89"/>
         <source>Google Cloud Vision</source>
         <translation>Google Cloud Vision</translation>
     </message>
     <message>
-        <location filename="../../modules/ocr/processor.py" line="66"/>
+        <location filename="../../modules/ocr/processor.py" line="90"/>
         <source>Gemini-2.0-Flash</source>
         <translation>Gemini-2.0-Flash</translation>
     </message>
     <message>
-        <location filename="../../modules/ocr/processor.py" line="67"/>
+        <location filename="../../modules/ocr/processor.py" line="91"/>
         <source>Default</source>
         <translation>Predeterminado</translation>
     </message>
@@ -2499,7 +2507,7 @@ Es posible que se haya movido, cambiado de nombre o eliminado.
     </message>
     <message>
         <location filename="../../modules/ocr/gemini_ocr.py" line="31"/>
-        <location filename="../../modules/translation/llm/gemini.py" line="31"/>
+        <location filename="../../modules/translation/llm/gemini.py" line="35"/>
         <source>Google Gemini</source>
         <translation>Google Gemini</translation>
     </message>
