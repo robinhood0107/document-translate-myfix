@@ -1189,199 +1189,199 @@ This folder is separate from Auto-Recover snapshots.</source>
 <context>
     <name>SettingsPage</name>
     <message>
-        <location filename="../../app/ui/settings/settings_page.py" line="519"/>
+        <location filename="../../app/ui/settings/settings_page.py" line="575"/>
         <source>OK</source>
         <translation>わかりました</translation>
     </message>
     <message>
-        <location filename="../../app/ui/settings/settings_page.py" line="528"/>
-        <location filename="../../app/ui/settings/settings_page.py" line="873"/>
+        <location filename="../../app/ui/settings/settings_page.py" line="584"/>
+        <location filename="../../app/ui/settings/settings_page.py" line="929"/>
         <source>Yes</source>
         <translation>はい</translation>
     </message>
     <message>
-        <location filename="../../app/ui/settings/settings_page.py" line="529"/>
-        <location filename="../../app/ui/settings/settings_page.py" line="874"/>
+        <location filename="../../app/ui/settings/settings_page.py" line="585"/>
+        <location filename="../../app/ui/settings/settings_page.py" line="930"/>
         <source>No</source>
         <translation>いいえ</translation>
     </message>
     <message>
-        <location filename="../../app/ui/settings/settings_page.py" line="538"/>
+        <location filename="../../app/ui/settings/settings_page.py" line="594"/>
         <source>Restart Required</source>
         <translation>再起動が必要です</translation>
     </message>
     <message>
-        <location filename="../../app/ui/settings/settings_page.py" line="539"/>
+        <location filename="../../app/ui/settings/settings_page.py" line="595"/>
         <source>The application needs to restart for the language changes to take effect.
 Restart now?</source>
         <translation>言語の変更を有効にするには、アプリケーションを再起動する必要があります。
 今すぐ再起動しますか?</translation>
     </message>
     <message>
-        <location filename="../../app/ui/settings/settings_page.py" line="582"/>
-        <location filename="../../app/ui/settings/settings_page.py" line="918"/>
+        <location filename="../../app/ui/settings/settings_page.py" line="638"/>
+        <location filename="../../app/ui/settings/settings_page.py" line="974"/>
         <source>Cancel</source>
         <translation>キャンセル</translation>
     </message>
     <message>
-        <location filename="../../app/ui/settings/settings_page.py" line="590"/>
+        <location filename="../../app/ui/settings/settings_page.py" line="646"/>
         <source>Failed to initiate sign-in process.</source>
         <translation>サインインプロセスを開始できませんでした。</translation>
     </message>
     <message>
-        <location filename="../../app/ui/settings/settings_page.py" line="607"/>
-        <location filename="../../app/ui/settings/settings_page.py" line="835"/>
+        <location filename="../../app/ui/settings/settings_page.py" line="663"/>
+        <location filename="../../app/ui/settings/settings_page.py" line="891"/>
         <source>Sign In</source>
         <translation>サインイン</translation>
     </message>
     <message>
-        <location filename="../../app/ui/settings/settings_page.py" line="624"/>
+        <location filename="../../app/ui/settings/settings_page.py" line="680"/>
         <source>Sign In Required</source>
         <translation>サインインが必要です</translation>
     </message>
     <message>
-        <location filename="../../app/ui/settings/settings_page.py" line="625"/>
+        <location filename="../../app/ui/settings/settings_page.py" line="681"/>
         <source>Please sign in to purchase or manage credits.</source>
         <translation>クレジットを購入または管理するにはサインインしてください。</translation>
     </message>
     <message>
-        <location filename="../../app/ui/settings/settings_page.py" line="634"/>
+        <location filename="../../app/ui/settings/settings_page.py" line="690"/>
         <source>Unable to Open Browser</source>
         <translation>ブラウザを開けません</translation>
     </message>
     <message>
-        <location filename="../../app/ui/settings/settings_page.py" line="635"/>
+        <location filename="../../app/ui/settings/settings_page.py" line="691"/>
         <source>Please open the pricing page in your browser: {url}</source>
         <translation>ブラウザで価格ページを開いてください: {url}</translation>
     </message>
     <message>
-        <location filename="../../app/ui/settings/settings_page.py" line="707"/>
+        <location filename="../../app/ui/settings/settings_page.py" line="763"/>
         <source>Sign In Error</source>
         <translation>サインインエラー</translation>
     </message>
     <message>
-        <location filename="../../app/ui/settings/settings_page.py" line="708"/>
+        <location filename="../../app/ui/settings/settings_page.py" line="764"/>
         <source>Authentication failed: {error}</source>
         <translation>認証に失敗しました: {error}</translation>
     </message>
     <message>
-        <location filename="../../app/ui/settings/settings_page.py" line="722"/>
+        <location filename="../../app/ui/settings/settings_page.py" line="778"/>
         <source>Confirm Sign Out</source>
         <translation>サインアウトの確認</translation>
     </message>
     <message>
-        <location filename="../../app/ui/settings/settings_page.py" line="723"/>
+        <location filename="../../app/ui/settings/settings_page.py" line="779"/>
         <source>Are you sure you want to sign out?</source>
         <translation>サインアウトしてもよろしいですか?</translation>
     </message>
     <message>
-        <location filename="../../app/ui/settings/settings_page.py" line="727"/>
+        <location filename="../../app/ui/settings/settings_page.py" line="783"/>
         <source>Signing Out...</source>
         <translation>サインアウト中...</translation>
     </message>
     <message>
-        <location filename="../../app/ui/settings/settings_page.py" line="750"/>
-        <location filename="../../app/ui/settings/settings_page.py" line="828"/>
+        <location filename="../../app/ui/settings/settings_page.py" line="806"/>
+        <location filename="../../app/ui/settings/settings_page.py" line="884"/>
         <source>Sign Out</source>
         <translation>サインアウト</translation>
     </message>
     <message>
-        <location filename="../../app/ui/settings/settings_page.py" line="766"/>
+        <location filename="../../app/ui/settings/settings_page.py" line="822"/>
         <source>Session Expired</source>
         <translation>セッションが期限切れになりました</translation>
     </message>
     <message>
-        <location filename="../../app/ui/settings/settings_page.py" line="767"/>
+        <location filename="../../app/ui/settings/settings_page.py" line="823"/>
         <source>Your session has expired. Please sign in again.</source>
         <translation>セッションの有効期限が切れました。再度サインインしてください。</translation>
     </message>
     <message>
-        <location filename="../../app/ui/settings/settings_page.py" line="781"/>
-        <location filename="../../app/ui/settings/settings_page.py" line="784"/>
-        <location filename="../../app/ui/settings/settings_page.py" line="803"/>
+        <location filename="../../app/ui/settings/settings_page.py" line="837"/>
+        <location filename="../../app/ui/settings/settings_page.py" line="840"/>
+        <location filename="../../app/ui/settings/settings_page.py" line="859"/>
         <source>N/A</source>
         <translation>該当なし</translation>
     </message>
     <message>
-        <location filename="../../app/ui/settings/settings_page.py" line="795"/>
+        <location filename="../../app/ui/settings/settings_page.py" line="851"/>
         <source>Free</source>
         <translation>無料</translation>
     </message>
     <message>
-        <location filename="../../app/ui/settings/settings_page.py" line="810"/>
+        <location filename="../../app/ui/settings/settings_page.py" line="866"/>
         <source>Subscription</source>
         <translation>サブスクリプション</translation>
     </message>
     <message>
-        <location filename="../../app/ui/settings/settings_page.py" line="813"/>
+        <location filename="../../app/ui/settings/settings_page.py" line="869"/>
         <source>One-time</source>
         <translation>一度</translation>
     </message>
     <message>
-        <location filename="../../app/ui/settings/settings_page.py" line="816"/>
-        <location filename="../../app/ui/settings/settings_page.py" line="821"/>
+        <location filename="../../app/ui/settings/settings_page.py" line="872"/>
+        <location filename="../../app/ui/settings/settings_page.py" line="877"/>
         <source>Total</source>
         <translation>合計</translation>
     </message>
     <message>
-        <location filename="../../app/ui/settings/settings_page.py" line="850"/>
+        <location filename="../../app/ui/settings/settings_page.py" line="906"/>
         <source>Checking...</source>
         <translation>チェック中...</translation>
     </message>
     <message>
-        <location filename="../../app/ui/settings/settings_page.py" line="856"/>
-        <location filename="../../app/ui/settings/settings_page.py" line="893"/>
-        <location filename="../../app/ui/settings/settings_page.py" line="906"/>
+        <location filename="../../app/ui/settings/settings_page.py" line="912"/>
+        <location filename="../../app/ui/settings/settings_page.py" line="949"/>
+        <location filename="../../app/ui/settings/settings_page.py" line="962"/>
         <source>Check for Updates</source>
         <translation>アップデートをチェックする</translation>
     </message>
     <message>
-        <location filename="../../app/ui/settings/settings_page.py" line="866"/>
+        <location filename="../../app/ui/settings/settings_page.py" line="922"/>
         <source>Update Available</source>
         <translation>利用可能なアップデート</translation>
     </message>
     <message>
-        <location filename="../../app/ui/settings/settings_page.py" line="869"/>
+        <location filename="../../app/ui/settings/settings_page.py" line="925"/>
         <source>A new version {version} is available.</source>
         <translation>新しいバージョン {version} が利用可能です。</translation>
     </message>
     <message>
-        <location filename="../../app/ui/settings/settings_page.py" line="870"/>
+        <location filename="../../app/ui/settings/settings_page.py" line="926"/>
         <source>Release Notes</source>
         <translation>リリースノート</translation>
     </message>
     <message>
-        <location filename="../../app/ui/settings/settings_page.py" line="878"/>
+        <location filename="../../app/ui/settings/settings_page.py" line="934"/>
         <source>Skip This Version</source>
         <translation>このバージョンをスキップする</translation>
     </message>
     <message>
-        <location filename="../../app/ui/settings/settings_page.py" line="896"/>
+        <location filename="../../app/ui/settings/settings_page.py" line="952"/>
         <source>Up to Date</source>
         <translation>最新の</translation>
     </message>
     <message>
-        <location filename="../../app/ui/settings/settings_page.py" line="897"/>
+        <location filename="../../app/ui/settings/settings_page.py" line="953"/>
         <source>You are using the latest version.</source>
         <translation>最新バージョンを使用しています。</translation>
     </message>
     <message>
-        <location filename="../../app/ui/settings/settings_page.py" line="912"/>
+        <location filename="../../app/ui/settings/settings_page.py" line="968"/>
         <source>Update Error</source>
         <translation>更新エラー</translation>
     </message>
     <message>
-        <location filename="../../app/ui/settings/settings_page.py" line="918"/>
+        <location filename="../../app/ui/settings/settings_page.py" line="974"/>
         <source>Downloading update...</source>
         <translation>アップデートをダウンロード中...</translation>
     </message>
     <message>
-        <location filename="../../app/ui/settings/settings_page.py" line="935"/>
+        <location filename="../../app/ui/settings/settings_page.py" line="991"/>
         <source>Download Complete</source>
         <translation>ダウンロード完了</translation>
     </message>
     <message>
-        <location filename="../../app/ui/settings/settings_page.py" line="936"/>
+        <location filename="../../app/ui/settings/settings_page.py" line="992"/>
         <source>Installer downloaded to {path}. Run it now?</source>
         <translation>インストーラーは {path} にダウンロードされました。今すぐ実行しますか?</translation>
     </message>
@@ -2502,12 +2502,12 @@ It may have been moved, renamed, or deleted.
 <context>
     <name>self.ui</name>
     <message>
-        <location filename="../../app/ui/settings/settings_page.py" line="213"/>
+        <location filename="../../app/ui/settings/settings_page.py" line="269"/>
         <source>Resize</source>
         <translation>サイズ変更</translation>
     </message>
     <message>
-        <location filename="../../app/ui/settings/settings_page.py" line="215"/>
+        <location filename="../../app/ui/settings/settings_page.py" line="271"/>
         <source>Crop</source>
         <translation>作物</translation>
     </message>
