@@ -1,5 +1,6 @@
 import base64
 import json
+import logging
 import re
 import jieba
 import janome.tokenizer
@@ -7,6 +8,8 @@ import numpy as np
 from pythainlp.tokenize import word_tokenize
 from .textblock import TextBlock
 import imkit as imk
+
+logger = logging.getLogger(__name__)
 
 
 MODEL_MAP = {
@@ -49,19 +52,36 @@ def get_raw_translation(blk_list: list[TextBlock]):
 
 def set_texts_from_json(blk_list: list[TextBlock], json_string: str):
     match = re.search(r"\{[\s\S]*\}", json_string)
-    if match:
-        # Extract the JSON string from the matched regular expression
-        json_string = match.group(0)
-        translation_dict = json.loads(json_string)
-        
-        for idx, blk in enumerate(blk_list):
-            block_key = f"block_{idx}"
-            if block_key in translation_dict:
-                blk.translation = translation_dict[block_key]
-            else:
-                print(f"Warning: {block_key} not found in JSON string.")
-    else:
-        print("No JSON found in the input string.")
+    if not match:
+        raise ValueError("Translator response did not contain a JSON object.")
+
+    json_string = match.group(0)
+    translation_dict = json.loads(json_string)
+    if not isinstance(translation_dict, dict):
+        raise ValueError("Translator response JSON was not an object.")
+
+    updated_count = 0
+    missing_keys = []
+    for idx, blk in enumerate(blk_list):
+        block_key = f"block_{idx}"
+        if block_key in translation_dict:
+            value = translation_dict[block_key]
+            blk.translation = value if isinstance(value, str) or value is None else str(value)
+            updated_count += 1
+        else:
+            missing_keys.append(block_key)
+
+    if missing_keys:
+        logger.warning(
+            "translator response missing %d expected block key(s): %s",
+            len(missing_keys),
+            ", ".join(missing_keys[:10]),
+        )
+
+    if updated_count == 0:
+        raise ValueError("Translator response JSON did not contain any expected block keys.")
+
+    return updated_count
 
 def set_upper_case(blk_list: list[TextBlock], upper_case: bool):
     for blk in blk_list:
