@@ -781,23 +781,23 @@ Bitte überprüfen Sie Ihre Internetverbindung.</translation>
         <translation>Das OCR-Ergebnis für diesen Block ist leer.</translation>
     </message>
     <message>
-        <location filename="../../modules/ocr/ppocr/engine.py" line="272"/>
+        <location filename="../../modules/ocr/ppocr/engine.py" line="312"/>
         <source>Initial crop is empty.</source>
         <translation>Der anfängliche Zuschnitt ist leer.</translation>
     </message>
     <message>
-        <location filename="../../modules/ocr/ppocr/engine.py" line="301"/>
+        <location filename="../../modules/ocr/ppocr/engine.py" line="350"/>
         <source>OCR returned empty text on the initial crop.</source>
         <translation>OCR hat beim anfänglichen Zuschnitt keinen Text zurückgegeben.</translation>
     </message>
     <message>
-        <location filename="../../modules/ocr/ppocr/engine.py" line="366"/>
+        <location filename="../../modules/ocr/ppocr/engine.py" line="415"/>
         <source>Retry crop is empty after expansion.</source>
         <translation>Der Zuschnitt für den Wiederholungsversuch ist nach der Erweiterung leer.</translation>
     </message>
     <message>
-        <location filename="../../modules/ocr/ppocr/engine.py" line="391"/>
-        <location filename="../../modules/ocr/ppocr/engine.py" line="414"/>
+        <location filename="../../modules/ocr/ppocr/engine.py" line="440"/>
+        <location filename="../../modules/ocr/ppocr/engine.py" line="463"/>
         <source>Retry also failed after contrast preprocessing.</source>
         <translation>Auch der Wiederholungsversuch nach der Kontrastvorverarbeitung ist fehlgeschlagen.</translation>
     </message>

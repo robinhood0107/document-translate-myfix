@@ -781,23 +781,23 @@ Please check your internet connection.</source>
         <translation>이 블록의 OCR 결과가 비어 있습니다.</translation>
     </message>
     <message>
-        <location filename="../../modules/ocr/ppocr/engine.py" line="272"/>
+        <location filename="../../modules/ocr/ppocr/engine.py" line="312"/>
         <source>Initial crop is empty.</source>
         <translation>초기 크롭이 비어 있습니다.</translation>
     </message>
     <message>
-        <location filename="../../modules/ocr/ppocr/engine.py" line="301"/>
+        <location filename="../../modules/ocr/ppocr/engine.py" line="350"/>
         <source>OCR returned empty text on the initial crop.</source>
         <translation>초기 크롭에서 OCR이 빈 텍스트를 반환했습니다.</translation>
     </message>
     <message>
-        <location filename="../../modules/ocr/ppocr/engine.py" line="366"/>
+        <location filename="../../modules/ocr/ppocr/engine.py" line="415"/>
         <source>Retry crop is empty after expansion.</source>
         <translation>확장 후 재시도 크롭이 비어 있습니다.</translation>
     </message>
     <message>
-        <location filename="../../modules/ocr/ppocr/engine.py" line="391"/>
-        <location filename="../../modules/ocr/ppocr/engine.py" line="414"/>
+        <location filename="../../modules/ocr/ppocr/engine.py" line="440"/>
+        <location filename="../../modules/ocr/ppocr/engine.py" line="463"/>
         <source>Retry also failed after contrast preprocessing.</source>
         <translation>대비 전처리 후 재시도도 실패했습니다.</translation>
     </message>

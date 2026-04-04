@@ -781,23 +781,23 @@ Lütfen internet bağlantınızı kontrol edin.</translation>
         <translation>Bu blok için OCR sonucu boş.</translation>
     </message>
     <message>
-        <location filename="../../modules/ocr/ppocr/engine.py" line="272"/>
+        <location filename="../../modules/ocr/ppocr/engine.py" line="312"/>
         <source>Initial crop is empty.</source>
         <translation>İlk kırpma boş.</translation>
     </message>
     <message>
-        <location filename="../../modules/ocr/ppocr/engine.py" line="301"/>
+        <location filename="../../modules/ocr/ppocr/engine.py" line="350"/>
         <source>OCR returned empty text on the initial crop.</source>
         <translation>OCR ilk kırpmada boş metin döndürdü.</translation>
     </message>
     <message>
-        <location filename="../../modules/ocr/ppocr/engine.py" line="366"/>
+        <location filename="../../modules/ocr/ppocr/engine.py" line="415"/>
         <source>Retry crop is empty after expansion.</source>
         <translation>Genişletmeden sonraki yeniden deneme kırpması boş.</translation>
     </message>
     <message>
-        <location filename="../../modules/ocr/ppocr/engine.py" line="391"/>
-        <location filename="../../modules/ocr/ppocr/engine.py" line="414"/>
+        <location filename="../../modules/ocr/ppocr/engine.py" line="440"/>
+        <location filename="../../modules/ocr/ppocr/engine.py" line="463"/>
         <source>Retry also failed after contrast preprocessing.</source>
         <translation>Kontrast ön işleme sonrası yeniden deneme de başarısız oldu.</translation>
     </message>
