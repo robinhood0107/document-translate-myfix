@@ -21,6 +21,8 @@ class SettingsPage(QtWidgets.QWidget):
     font_imported = Signal(str)
 
     TOOL_CREDENTIAL_SERVICE_MAP = {
+        "Custom Service": "Custom Service",
+        "Custom Local Server": "Custom Local Server",
         "Custom": "Custom",
         "GPT-4.1": "Open AI GPT",
         "GPT-4.1-mini": "Open AI GPT",
@@ -37,6 +39,8 @@ class SettingsPage(QtWidgets.QWidget):
         "Yandex": "Yandex",
     }
     CREDENTIAL_FIELDS = {
+        "Custom Service": ("api_key", "api_url", "model"),
+        "Custom Local Server": ("api_url", "model"),
         "Custom": ("api_key", "api_url", "model"),
         "Microsoft Azure": ("api_key_ocr", "endpoint", "api_key_translator", "region_translator"),
         "Yandex": ("api_key", "folder_id"),
@@ -211,6 +215,37 @@ class SettingsPage(QtWidgets.QWidget):
             "project_autosave_folder": autosave_folder,
         }
 
+    def _normalize_service_name(self, raw_service: str) -> str:
+        normalized = self.ui.value_mappings.get(raw_service, raw_service)
+        return self.TOOL_CREDENTIAL_SERVICE_MAP.get(normalized, normalized)
+
+    def _resolve_legacy_custom_translator(self) -> str:
+        settings = QSettings("ComicLabs", "ComicTranslate")
+        legacy_api_key = settings.value("credentials/Custom Service_api_key", "", type=str).strip()
+        if not legacy_api_key:
+            legacy_api_key = settings.value("credentials/Custom_api_key", "", type=str).strip()
+        return "Custom Service" if legacy_api_key else "Custom Local Server"
+
+    def _load_credential_value(
+        self,
+        settings: QSettings,
+        service_name: str,
+        field: str,
+        save_keys: bool,
+    ) -> str:
+        if not save_keys:
+            return ""
+
+        value = settings.value(f"{service_name}_{field}", "", type=str)
+        if value:
+            return value
+
+        if service_name == "Custom Service" and field in ("api_key", "api_url", "model"):
+            return settings.value(f"Custom_{field}", "", type=str)
+        if service_name == "Custom Local Server" and field in ("api_url", "model"):
+            return settings.value(f"Custom_{field}", "", type=str)
+        return ""
+
     def get_credentials(self, service: str = ""):
         save_keys = self.ui.save_keys_checkbox.isChecked()
 
@@ -218,12 +253,8 @@ class SettingsPage(QtWidgets.QWidget):
             widget = self.ui.credential_widgets.get(widget_key)
             return widget.text() if widget is not None else None
 
-        def _normalize_service_name(raw_service: str) -> str:
-            normalized = self.ui.value_mappings.get(raw_service, raw_service)
-            return self.TOOL_CREDENTIAL_SERVICE_MAP.get(normalized, normalized)
-
         if service:
-            normalized = _normalize_service_name(service)
+            normalized = self._normalize_service_name(service)
             creds = {"save_key": save_keys}
             for field in self.CREDENTIAL_FIELDS.get(normalized, ("api_key",)):
                 creds[field] = _text_or_none(f"{normalized}_{field}")
@@ -330,10 +361,7 @@ class SettingsPage(QtWidgets.QWidget):
         settings.setValue("save_keys", save_keys)
         if save_keys:
             for service, cred in credentials.items():
-                translated_service = self.TOOL_CREDENTIAL_SERVICE_MAP.get(
-                    self.ui.value_mappings.get(service, service),
-                    self.ui.value_mappings.get(service, service),
-                )
+                translated_service = self._normalize_service_name(service)
                 for field in self.CREDENTIAL_FIELDS.get(translated_service, ("api_key",)):
                     settings.setValue(f"{translated_service}_{field}", cred.get(field, ""))
         else:
@@ -353,8 +381,11 @@ class SettingsPage(QtWidgets.QWidget):
         self.ui.theme_combo.setCurrentText(translated_theme)
         self.theme_changed.emit(translated_theme)
 
+        translator = settings.value("tools/translator", "Gemini-2.5-Pro", type=str)
+        if translator == "Custom":
+            translator = self._resolve_legacy_custom_translator()
+
         settings.beginGroup("tools")
-        translator = settings.value("translator", "Gemini-2.5-Pro")
         translated_translator = self.ui.reverse_mappings.get(translator, translator)
         if self.ui.translator_combo.findText(translated_translator) != -1:
             self.ui.translator_combo.setCurrentText(translated_translator)
@@ -455,14 +486,18 @@ class SettingsPage(QtWidgets.QWidget):
         save_keys = settings.value("save_keys", False, type=bool)
         self.ui.save_keys_checkbox.setChecked(save_keys)
         for service in self.ui.credential_services:
-            translated_service = self.TOOL_CREDENTIAL_SERVICE_MAP.get(
-                self.ui.value_mappings.get(service, service),
-                self.ui.value_mappings.get(service, service),
-            )
+            translated_service = self._normalize_service_name(service)
             for field in self.CREDENTIAL_FIELDS.get(translated_service, ("api_key",)):
                 widget = self.ui.credential_widgets.get(f"{translated_service}_{field}")
                 if widget is not None:
-                    widget.setText(settings.value(f"{translated_service}_{field}", "") if save_keys else "")
+                    widget.setText(
+                        self._load_credential_value(
+                            settings,
+                            translated_service,
+                            field,
+                            save_keys,
+                        )
+                    )
         settings.endGroup()
 
         self._current_language = self.ui.lang_combo.currentText()

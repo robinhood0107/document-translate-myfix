@@ -98,16 +98,25 @@ class Messages:
         )
 
     @staticmethod
-    def show_custom_not_configured_error(parent):
-        """
-        Show an error message when Custom is selected without proper configuration.
-        """
+    def show_custom_service_not_configured_error(parent):
         MMessage.error(
             text=QCoreApplication.translate(
                 "Messages",
-                "Custom requires an OpenAI-compatible API configuration.\n"
-                "Please set Endpoint URL and Model in Settings > Credentials.\n"
-                "API Key is optional unless your endpoint requires it."
+                "Custom Service requires an OpenAI-compatible API configuration.\n"
+                "Please set API Key, Endpoint URL, and Model in Settings > Credentials."
+            ),
+            parent=parent,
+            duration=None,
+            closable=True
+        )
+
+    @staticmethod
+    def show_custom_local_server_not_configured_error(parent):
+        MMessage.error(
+            text=QCoreApplication.translate(
+                "Messages",
+                "Custom Local Server requires an OpenAI-compatible endpoint.\n"
+                "Please set Endpoint URL and Model in Settings > Credentials."
             ),
             parent=parent,
             duration=None,
