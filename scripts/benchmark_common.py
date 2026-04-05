@@ -201,6 +201,11 @@ def _stage_gemma_runtime(preset: dict[str, Any], runtime_dir: Path) -> dict[str,
     if normalized_volumes:
         service["volumes"] = normalized_volumes
 
+    if gemma.get("image"):
+        service["image"] = str(gemma["image"])
+    if gemma.get("pull_policy"):
+        service["pull_policy"] = str(gemma["pull_policy"])
+
     if gemma.get("model_path"):
         _update_command_option(command, "-m", [str(gemma["model_path"])])
     if gemma.get("context_size") is not None:
@@ -228,7 +233,7 @@ def _stage_gemma_runtime(preset: dict[str, Any], runtime_dir: Path) -> dict[str,
     compose_path = runtime_dir / "docker-compose.yaml"
     _python3_yaml_dump(compose_path, compose)
     return {
-        "compose_path": str(compose_path),
+        "compose_path": str(compose_path.resolve()),
         "service_name": "gemma-local-server",
     }
 
@@ -262,9 +267,9 @@ def _stage_ocr_runtime(preset: dict[str, Any], runtime_dir: Path) -> dict[str, A
     _python3_yaml_dump(vllm_path, vllm_conf)
 
     return {
-        "compose_path": str(compose_path),
-        "pipeline_conf_path": str(pipeline_path),
-        "vllm_config_path": str(vllm_path),
+        "compose_path": str(compose_path.resolve()),
+        "pipeline_conf_path": str(pipeline_path.resolve()),
+        "vllm_config_path": str(vllm_path.resolve()),
         "service_names": ["paddleocr-server", "paddleocr-vllm"],
     }
 
@@ -295,9 +300,10 @@ def stage_runtime_files(preset: dict[str, Any], runtime_dir: str | Path) -> dict
 
     return {
         "runtime_dir": str(base),
+        "runtime_dir_abs": str(base.resolve()),
         "gemma": gemma_runtime,
         "ocr": ocr_runtime,
-        "app_settings_path": str(app_settings_path),
+        "app_settings_path": str(app_settings_path.resolve()),
     }
 
 
@@ -377,6 +383,9 @@ def summarize_metrics(metrics_path: str | Path) -> dict[str, Any]:
         "gemma_chunk_retry_events": 0,
         "gemma_truncated_count": 0,
         "gemma_empty_content_count": 0,
+        "gemma_missing_key_count": 0,
+        "gemma_reasoning_without_final_count": 0,
+        "gemma_schema_validation_fail_count": 0,
         "ocr_total_block_count": 0,
         "ocr_empty_block_count": 0,
         "ocr_low_quality_block_count": 0,
@@ -456,6 +465,9 @@ def summarize_metrics(metrics_path: str | Path) -> dict[str, Any]:
         "gemma_chunk_retry_events": counters["gemma_chunk_retry_events"],
         "gemma_truncated_count": counters["gemma_truncated_count"],
         "gemma_empty_content_count": counters["gemma_empty_content_count"],
+        "gemma_missing_key_count": counters["gemma_missing_key_count"],
+        "gemma_reasoning_without_final_count": counters["gemma_reasoning_without_final_count"],
+        "gemma_schema_validation_fail_count": counters["gemma_schema_validation_fail_count"],
         "ocr_total_block_count": counters["ocr_total_block_count"],
         "ocr_empty_block_count": counters["ocr_empty_block_count"],
         "ocr_low_quality_block_count": counters["ocr_low_quality_block_count"],
@@ -483,6 +495,9 @@ def render_summary_markdown(summary: dict[str, Any]) -> str:
         f"- gemma_chunk_retry_events: `{summary.get('gemma_chunk_retry_events')}`",
         f"- gemma_truncated_count: `{summary.get('gemma_truncated_count')}`",
         f"- gemma_empty_content_count: `{summary.get('gemma_empty_content_count')}`",
+        f"- gemma_missing_key_count: `{summary.get('gemma_missing_key_count')}`",
+        f"- gemma_reasoning_without_final_count: `{summary.get('gemma_reasoning_without_final_count')}`",
+        f"- gemma_schema_validation_fail_count: `{summary.get('gemma_schema_validation_fail_count')}`",
         f"- ocr_total_block_count: `{summary.get('ocr_total_block_count')}`",
         f"- ocr_empty_block_count: `{summary.get('ocr_empty_block_count')}`",
         f"- ocr_low_quality_block_count: `{summary.get('ocr_low_quality_block_count')}`",

@@ -45,11 +45,14 @@ LANGUAGE_FONT_FALLBACKS = {
     "Traditional Chinese": ["Traditional Chinese", "Chinese"],
     "Brazilian Portuguese": ["Brazilian Portuguese", "Portuguese"],
 }
-GEMMA_SAMPLER_ENV = {
+GEMMA_ENV_OVERRIDES = {
     "temperature": "CT_GEMMA_TEMPERATURE",
     "top_k": "CT_GEMMA_TOP_K",
     "top_p": "CT_GEMMA_TOP_P",
     "min_p": "CT_GEMMA_MIN_P",
+    "response_format_mode": "CT_GEMMA_RESPONSE_FORMAT_MODE",
+    "response_schema_mode": "CT_GEMMA_RESPONSE_SCHEMA_MODE",
+    "think_briefly_prompt": "CT_GEMMA_THINK_BRIEFLY_PROMPT",
 }
 
 
@@ -136,10 +139,10 @@ def _apply_benchmark_font(window, target_lang: str) -> None:
     )
 
 
-def _apply_gemma_sampler_env(gemma: dict[str, object]) -> dict[str, str | None]:
+def _apply_gemma_env(gemma: dict[str, object]) -> dict[str, str | None]:
     snapshot: dict[str, str | None] = {}
     parts: list[str] = []
-    for key, env_name in GEMMA_SAMPLER_ENV.items():
+    for key, env_name in GEMMA_ENV_OVERRIDES.items():
         snapshot[env_name] = os.environ.get(env_name)
         value = gemma.get(key)
         if value is None:
@@ -148,7 +151,7 @@ def _apply_gemma_sampler_env(gemma: dict[str, object]) -> dict[str, str | None]:
         os.environ[env_name] = str(value)
         parts.append(f"{key}={value}")
     if parts:
-        _log("Gemma sampler override 적용: " + ", ".join(parts))
+        _log("Gemma runtime override 적용: " + ", ".join(parts))
     return snapshot
 
 
@@ -181,6 +184,20 @@ def _ensure_managed_runtime(run_dir: Path, preset: dict[str, object]) -> None:
     _wait_for_url("http://127.0.0.1:18000/v1/models")
     _wait_for_url("http://127.0.0.1:28118/docs")
     _log("managed runtime health-check 완료")
+
+
+def _write_container_logs(run_dir: Path, container_names: list[str]) -> None:
+    log_dir = run_dir / "docker_logs"
+    log_dir.mkdir(parents=True, exist_ok=True)
+    for container_name in container_names:
+        completed = run_command(
+            ["docker", "logs", "--tail", "200", container_name],
+            check=False,
+        )
+        (log_dir / f"{container_name}.log").write_text(
+            (completed.stdout or "") + (completed.stderr or ""),
+            encoding="utf-8",
+        )
 
 
 def _configure_window(window, preset: dict[str, object], source_lang: str, target_lang: str) -> None:
@@ -263,7 +280,7 @@ def _run_single_mode(
     image_paths: list[Path],
 ) -> dict[str, object]:
     os.environ["CT_BENCH_OUTPUT_DIR"] = str(run_dir)
-    gemma_env_snapshot = _apply_gemma_sampler_env(preset.get("gemma", {}))
+    gemma_env_snapshot = _apply_gemma_env(preset.get("gemma", {}))
     try:
         _log(
             "실행 시작: mode={mode} output={run_dir} images={count} source={source} target={target}".format(
@@ -455,12 +472,14 @@ def main() -> int:
                     run_dir / "docker_snapshot.json",
                     collect_runtime_snapshot(DEFAULT_CONTAINER_NAMES),
                 )
+                _write_container_logs(run_dir, DEFAULT_CONTAINER_NAMES)
             else:
                 _log("attach-running 모드: 현재 떠 있는 Docker 서버를 그대로 사용")
                 write_snapshot_json(
                     run_dir / "docker_snapshot.json",
                     collect_runtime_snapshot(DEFAULT_CONTAINER_NAMES),
                 )
+                _write_container_logs(run_dir, DEFAULT_CONTAINER_NAMES)
 
             try:
                 summary = _run_single_mode(
