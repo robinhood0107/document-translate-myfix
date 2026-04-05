@@ -8,8 +8,8 @@
 - [x] `develop` 최신화
 - [x] 새 작업 브랜치 생성
 - [x] `/Sample` gitignore 추가
-- [ ] 현재 작업 브랜치 첫 push 완료
-- [ ] 머지 완료된 old remote branch 삭제 마무리
+- [x] 현재 작업 브랜치 첫 push 완료
+- [x] 머지 완료된 old remote branch 삭제 마무리
 
 ## 2. 기준 번들
 
@@ -44,11 +44,12 @@
 
 ## 6. 실제 검증
 
-- [ ] Python compile / syntax 검증
-- [ ] `validate_changed_python.py --all`
-- [ ] `headless_smoke.py`
-- [ ] `compile_translations.py --check`
+- [x] Python compile / syntax 검증
+- [x] `validate_changed_python.py --all`
+- [x] `headless_smoke.py`
+- [x] `compile_translations.py --check`
 - [ ] benchmark script smoke 실행
+  현재 `.venv`에 `cv2`가 없어 full pipeline import 단계에서 fail-fast 확인까지만 완료
 - [ ] managed runtime dry-run 확인
 
 ## 7. 다음 튜닝 루프
