@@ -365,6 +365,15 @@ def summarize_metrics(metrics_path: str | Path) -> dict[str, Any]:
     free_values: list[int] = []
     gpu_util_values: list[int] = []
     mem_util_values: list[int] = []
+    counters = {
+        "gemma_json_retry_count": 0,
+        "gemma_chunk_retry_events": 0,
+        "gemma_truncated_count": 0,
+        "gemma_empty_content_count": 0,
+        "ocr_total_block_count": 0,
+        "ocr_empty_block_count": 0,
+        "ocr_low_quality_block_count": 0,
+    }
 
     for row in rows:
         ts = float(row.get("ts", 0.0) or 0.0)
@@ -397,6 +406,11 @@ def summarize_metrics(metrics_path: str | Path) -> dict[str, Any]:
             if isinstance(mem_util, int):
                 mem_util_values.append(mem_util)
 
+        for key in counters:
+            value = row.get(key)
+            if isinstance(value, (int, float)):
+                counters[key] += int(value)
+
     stage_stats = {}
     for stage, values in sorted(stage_durations.items()):
         if not values:
@@ -408,6 +422,12 @@ def summarize_metrics(metrics_path: str | Path) -> dict[str, Any]:
             "median_sec": round(ordered[len(ordered) // 2], 3),
             "max_sec": round(max(values), 3),
         }
+
+    ocr_empty_rate = None
+    ocr_low_quality_rate = None
+    if counters["ocr_total_block_count"] > 0:
+        ocr_empty_rate = round(counters["ocr_empty_block_count"] / counters["ocr_total_block_count"], 4)
+        ocr_low_quality_rate = round(counters["ocr_low_quality_block_count"] / counters["ocr_total_block_count"], 4)
 
     return {
         "entry_count": len(rows),
@@ -422,6 +442,18 @@ def summarize_metrics(metrics_path: str | Path) -> dict[str, Any]:
         "gpu_floor_free_mb": min(free_values) if free_values else None,
         "gpu_peak_util_percent": max(gpu_util_values) if gpu_util_values else None,
         "gpu_peak_mem_util_percent": max(mem_util_values) if mem_util_values else None,
+        "ocr_median_sec": stage_stats.get("ocr", {}).get("median_sec"),
+        "translate_median_sec": stage_stats.get("translate", {}).get("median_sec"),
+        "inpaint_median_sec": stage_stats.get("inpaint", {}).get("median_sec"),
+        "gemma_json_retry_count": counters["gemma_json_retry_count"],
+        "gemma_chunk_retry_events": counters["gemma_chunk_retry_events"],
+        "gemma_truncated_count": counters["gemma_truncated_count"],
+        "gemma_empty_content_count": counters["gemma_empty_content_count"],
+        "ocr_total_block_count": counters["ocr_total_block_count"],
+        "ocr_empty_block_count": counters["ocr_empty_block_count"],
+        "ocr_low_quality_block_count": counters["ocr_low_quality_block_count"],
+        "ocr_empty_rate": ocr_empty_rate,
+        "ocr_low_quality_rate": ocr_low_quality_rate,
     }
 
 
@@ -437,6 +469,18 @@ def render_summary_markdown(summary: dict[str, Any]) -> str:
         f"- gpu_peak_used_mb: `{summary.get('gpu_peak_used_mb')}`",
         f"- gpu_floor_free_mb: `{summary.get('gpu_floor_free_mb')}`",
         f"- gpu_peak_util_percent: `{summary.get('gpu_peak_util_percent')}`",
+        f"- ocr_median_sec: `{summary.get('ocr_median_sec')}`",
+        f"- translate_median_sec: `{summary.get('translate_median_sec')}`",
+        f"- inpaint_median_sec: `{summary.get('inpaint_median_sec')}`",
+        f"- gemma_json_retry_count: `{summary.get('gemma_json_retry_count')}`",
+        f"- gemma_chunk_retry_events: `{summary.get('gemma_chunk_retry_events')}`",
+        f"- gemma_truncated_count: `{summary.get('gemma_truncated_count')}`",
+        f"- gemma_empty_content_count: `{summary.get('gemma_empty_content_count')}`",
+        f"- ocr_total_block_count: `{summary.get('ocr_total_block_count')}`",
+        f"- ocr_empty_block_count: `{summary.get('ocr_empty_block_count')}`",
+        f"- ocr_low_quality_block_count: `{summary.get('ocr_low_quality_block_count')}`",
+        f"- ocr_empty_rate: `{summary.get('ocr_empty_rate')}`",
+        f"- ocr_low_quality_rate: `{summary.get('ocr_low_quality_rate')}`",
         "",
         "## Stage Stats",
         "",
