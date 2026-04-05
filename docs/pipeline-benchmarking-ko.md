@@ -28,13 +28,15 @@
 
 ## 2. 산출물 위치
 
-벤치 결과는 저장소가 아니라 사용자 데이터 디렉터리에 저장합니다.
+벤치 결과는 저장소가 아니라 Windows 사용자 루트의 `benchmarks` 폴더에 저장합니다.
 
 기본 경로:
 
 ```text
-<user_data_dir>/benchmarks/<timestamp>_<label>/
+%USERPROFILE%\benchmarks\<timestamp>_<label>\
 ```
+
+선택적으로 `CT_BENCH_OUTPUT_ROOT` 환경변수로 출력 루트를 덮어쓸 수 있습니다.
 
 각 run 디렉터리에는 아래 파일이 생성됩니다.
 
@@ -118,10 +120,17 @@ preset에서 staged runtime 파일을 만들고 Docker 서비스를 recreate한 
 Windows에서는 아래 배치 파일로 더 간단하게 실행할 수 있습니다.
 
 ```bat
+scripts\benchmark_suite.bat
 scripts\benchmark_pipeline.bat
 scripts\benchmark_pipeline.bat run gpu-shift-ocr-front-cpu batch managed 1
 scripts\benchmark_pipeline.bat summary
 ```
+
+- `benchmark_suite.bat`
+  사용자용 원클릭 풀스위트
+- `benchmark_pipeline.bat`
+  고급/수동 실행용
+- 원클릭 스위트는 `managed` 측정 뒤 원래 Docker 런타임 상태로 자동 복원
 
 ## 6. 권장 실행 순서
 
@@ -136,7 +145,7 @@ scripts\benchmark_pipeline.bat summary
 여러 run 디렉터리를 모아서 표로 보고 싶으면 아래를 사용합니다.
 
 ```bash
-.venv/bin/python scripts/summarize_benchmarks.py --input "<user_data_dir>/benchmarks"
+.venv/bin/python scripts/summarize_benchmarks.py --input "%USERPROFILE%\\benchmarks"
 ```
 
 ## 8. 합격 기준
