@@ -54,3 +54,37 @@ docker compose up -d
 
 - 현재 로컬 번역기는 generic local server가 아니라 Gemma Docker 서버에 맞춰져 있습니다.
 - `Custom Service`는 별도의 인증형 OpenAI 호환 서비스용입니다.
+
+## 7. 현재 확인된 llama.cpp Docker 이미지 버전
+
+아래 값은 이 워크스페이스에서 `2026-04-05`에 실제 실행 중이던 `gemma-local-server` 컨테이너 기준으로 확인한 값입니다.
+
+### 확인된 이미지 정보
+
+- Image tag: `ghcr.io/ggml-org/llama.cpp:server-cuda`
+- Exact digest: `ghcr.io/ggml-org/llama.cpp@sha256:0d60155f9cbd5118d02568d90f505638259d85f6f1cc4ac98d0f1002001e1f7a`
+- Image ID: `sha256:0d60155f9cbd5118d02568d90f505638259d85f6f1cc4ac98d0f1002001e1f7a`
+- Image label version: `24.04`
+- Image created at: `2026-04-04T06:17:58.828077388Z`
+- `llama.cpp --version`: `version: 8660 (d00685831)`
+- Build info: `built with GNU 14.2.0 for Linux x86_64`
+
+### 나중에 동일한 이미지를 다시 받는 방법
+
+가장 안전한 방법은 digest를 직접 지정해서 pull하는 것입니다.
+
+```bash
+docker pull ghcr.io/ggml-org/llama.cpp@sha256:0d60155f9cbd5118d02568d90f505638259d85f6f1cc4ac98d0f1002001e1f7a
+```
+
+태그만 쓰면 나중에 다른 빌드로 바뀔 수 있으므로, 재현성이 중요하면 위처럼 digest를 고정하는 것을 권장합니다.
+
+### 참고 명령
+
+현재 실행 중인 컨테이너에서 같은 정보를 다시 확인하고 싶다면 아래 명령을 사용할 수 있습니다.
+
+```bash
+docker inspect gemma-local-server --format '{{.Config.Image}} {{.Image}}'
+docker image inspect ghcr.io/ggml-org/llama.cpp:server-cuda
+docker run --rm ghcr.io/ggml-org/llama.cpp:server-cuda --version
+```
