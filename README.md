@@ -35,9 +35,11 @@ uv run comic.py
 ### OCR / Runtime
 - OCR Docker bundle: [paddleocr_vl_docker_files/README.md](/mnt/c/Users/pjjpj/Desktop/openai_manga_translater/comic-translate/paddleocr_vl_docker_files/README.md)
 
+### Repo Policy
+- Benchmark branch / merge policy: [benchmark-branch-policy-ko.md](/mnt/c/Users/pjjpj/Desktop/openai_manga_translater/comic-translate/docs/repo/benchmark-branch-policy-ko.md)
+
 ### Rendering / History
-- Rendering flow analysis: [header-button-flow-analysis-ko.md](/mnt/c/Users/pjjpj/Desktop/openai_manga_translater/comic-translate/docs/rendering/header-button-flow-analysis-ko.md)
-- Rendering behavior: [render-setting-current-behavior-ko.md](/mnt/c/Users/pjjpj/Desktop/openai_manga_translater/comic-translate/docs/rendering/render-setting-current-behavior-ko.md)
+- Rendering notes: [rendering-notes-ko.md](/mnt/c/Users/pjjpj/Desktop/openai_manga_translater/comic-translate/docs/rendering/rendering-notes-ko.md)
 - Change log: [change-log-ko.md](/mnt/c/Users/pjjpj/Desktop/openai_manga_translater/comic-translate/docs/history/change-log-ko.md)
 
 ## Notes
