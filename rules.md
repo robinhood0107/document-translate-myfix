@@ -32,12 +32,14 @@
   - `codex/fix/<slug>`
   - `codex/chore/<slug>`
   - `codex/hotfix/<slug>`
+  - `benchmarking/lab`
 
 ### 병합 대상
 
 - 일반 기능/수정: `codex/*` -> `develop`
 - 릴리스: `release/<version>` -> `main`, 이후 `develop` 백머지
 - 긴급 수정: `codex/hotfix/<slug>` -> `main`, 이후 `develop` 백머지
+- 벤치마크 실험/리포트: `benchmarking/lab`에서만 유지
 
 ## 3. 기능 작업 절차
 
@@ -218,3 +220,13 @@ GitHub 저장소 설정에서 아래를 권장한다.
 - PR이 열려 있거나 최신 커밋이 반영되었는가
 
 사용자가 명시적으로 `로컬만` 원한 경우에만 push 요구를 예외로 둔다.
+
+## 12. Benchmark 분리 원칙
+
+- `main`과 `develop`에는 benchmark-specific 정책, preset, runner, generated report, chart asset을 두지 않는다.
+- benchmark 실험 도구와 문서는 `benchmarking/lab` 브랜치에서만 관리한다.
+- 제품 코드에는 benchmark를 위해 필요한 최소 계측만 남긴다.
+  - 허용: stage hook, retry/truncated/quality 통계 surface, generic memlog/gpu snapshot helper
+  - 금지: winner 판단, preset 선택, 실험 순서, 차트/문서 생성 로직
+- core 비즈니스 코드는 benchmark runner나 report generator를 import하지 않는다.
+- benchmark 레이어는 raw 결과와 공용 계측 surface를 읽어서 해석한다.

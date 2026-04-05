@@ -1,6 +1,11 @@
 {
   "manifest": "./benchmarks/report_manifest.yaml",
   "results_root": "./banchmark_result_log",
+  "generated_at": "2026-04-06T01:20:56.836327+09:00",
+  "generated_at_display": "2026-04-06 01:20:56 대한민국 표준시",
+  "benchmark_name": "Translation-Only Gemma + PaddleOCR GPU Optimization",
+  "benchmark_kind": "translation-only preset sweep",
+  "benchmark_scope": "Gemma sampler temperature sweep + n_gpu_layers sweep with PaddleOCR front on CPU",
   "active_preset": "translation-baseline",
   "winning_candidate_preset": "translation-t06",
   "resolved_winner_preset": "translation-t06",

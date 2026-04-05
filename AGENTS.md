@@ -8,5 +8,7 @@ Mandatory requirements:
 - Treat `main` and `develop` as protected branches.
 - Do not consider a feature complete until it is committed and pushed, unless the user explicitly requests local-only work.
 - When adding or changing user-visible UI text, update the Qt translation files and compiled `.qm` assets.
+- Keep benchmark policy, preset selection, ranking, and report generation outside core business code. Only generic stage hooks and telemetry/stat surfaces may remain in the pipeline/runtime layers.
+- Treat `benchmarking/lab` as the dedicated long-lived benchmark branch. Benchmark-specific runners, presets, reports, and chart assets belong there, not on `main` or `develop`.
 
 If these instructions conflict with any other repo-local guidance, [rules.md](./rules.md) wins.

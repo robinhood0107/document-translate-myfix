@@ -2,6 +2,11 @@ results_root: banchmark_result_log
 active_preset: translation-baseline
 winning_candidate_preset: translation-t06
 
+benchmark:
+  name: Translation-Only Gemma + PaddleOCR GPU Optimization
+  kind: translation-only preset sweep
+  scope: Gemma sampler temperature sweep + n_gpu_layers sweep with PaddleOCR front on CPU
+
 baseline:
   one_page: 20260405_224354_translation-baseline_one-page_r1
   batch: 20260405_231837_translation-baseline_batch_r1
