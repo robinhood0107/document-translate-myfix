@@ -46,7 +46,7 @@ Current benchmark outputs are stored under:
 
 Generated charts and the latest report are written to:
 
-- [report-ko.md](/mnt/c/Users/pjjpj/Desktop/openai_manga_translater/comic-translate/docs/benchmark/report-ko.md)
+- [report-ko.md](/mnt/c/Users/pjjpj/Desktop/openai_manga_translater/comic-translate/docs/banchmark_report/report-ko.md)
 - [latest](/mnt/c/Users/pjjpj/Desktop/openai_manga_translater/comic-translate/docs/assets/benchmarking/latest)
 
 ## Docs Map
@@ -58,7 +58,7 @@ Generated charts and the latest report are written to:
 - Architecture and code separation: [architecture-ko.md](/mnt/c/Users/pjjpj/Desktop/openai_manga_translater/comic-translate/docs/benchmark/architecture-ko.md)
 - Optimization journey: [optimization-journey-ko.md](/mnt/c/Users/pjjpj/Desktop/openai_manga_translater/comic-translate/docs/benchmark/optimization-journey-ko.md)
 - Results history: [results-history-ko.md](/mnt/c/Users/pjjpj/Desktop/openai_manga_translater/comic-translate/docs/benchmark/results-history-ko.md)
-- Generated report: [report-ko.md](/mnt/c/Users/pjjpj/Desktop/openai_manga_translater/comic-translate/docs/benchmark/report-ko.md)
+- Generated report: [report-ko.md](/mnt/c/Users/pjjpj/Desktop/openai_manga_translater/comic-translate/docs/banchmark_report/report-ko.md)
 
 ### Gemma
 - Local server setup: [local-server-ko.md](/mnt/c/Users/pjjpj/Desktop/openai_manga_translater/comic-translate/docs/gemma/local-server-ko.md)

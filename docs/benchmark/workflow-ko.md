@@ -34,7 +34,7 @@ scripts\benchmark_suite_cuda13.bat
 1. `translation-baseline` one-page `attach-running`
 2. `translation-baseline` batch `attach-running`
 3. `translation-ngl23` batch `managed`
-4. `docs/benchmark/report-ko.md` 자동 생성
+4. `docs/banchmark_report/report-ko.md` 자동 생성
 
 ## 수동 실행
 
@@ -84,7 +84,7 @@ scripts\benchmark_pipeline_cuda13.bat summary
 
 자동 문서 생성 결과는 아래에 기록됩니다.
 
-- [report-ko.md](/mnt/c/Users/pjjpj/Desktop/openai_manga_translater/comic-translate/docs/benchmark/report-ko.md)
+- [report-ko.md](/mnt/c/Users/pjjpj/Desktop/openai_manga_translater/comic-translate/docs/banchmark_report/report-ko.md)
 - [latest](/mnt/c/Users/pjjpj/Desktop/openai_manga_translater/comic-translate/docs/assets/benchmarking/latest)
 
 ## 관련 문서
