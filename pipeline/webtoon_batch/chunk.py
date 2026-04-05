@@ -116,19 +116,43 @@ class ChunkMixin:
         if not blocks:
             return blocks
 
+        primary_path = affected_paths[0] if affected_paths else None
+        self._emit_benchmark_event(
+            "ocr_start",
+            image_path=primary_path,
+            block_count=len(blocks),
+            affected_paths=affected_paths,
+            reason=reason,
+        )
         self.ocr_handler.ocr.initialize(self.main_page, source_lang)
         try:
             self.ocr_handler.ocr.process(image, blocks)
             if sort_after:
                 source_lang_en = self.main_page.lang_mapping.get(source_lang, source_lang)
                 rtl = source_lang_en == "Japanese"
-                return sort_blk_list(blocks, rtl)
+                blocks = sort_blk_list(blocks, rtl)
+            self._emit_benchmark_event(
+                "ocr_end",
+                image_path=primary_path,
+                block_count=len(blocks),
+                affected_paths=affected_paths,
+                reason=reason,
+                ocr_engine=self.ocr_handler.ocr.last_engine_name or "",
+            )
             return blocks
         except Exception as error:
             err_msg = self._extract_error_message(error, context="ocr")
             logger.exception("OCR failed (%s): %s", reason, err_msg)
             for path in affected_paths:
                 self.main_page.image_skipped.emit(path, reason, err_msg)
+            self._emit_benchmark_event(
+                "page_failed",
+                image_path=primary_path,
+                block_count=len(blocks),
+                failed_stage="ocr",
+                reason=err_msg,
+                affected_paths=affected_paths,
+            )
             return blocks
 
     def _run_translation_on_blocks(
@@ -143,12 +167,32 @@ class ChunkMixin:
             return
         extra_context = self.main_page.settings_page.get_llm_settings()["extra_context"]
         translator = Translator(self.main_page, source_lang, target_lang)
+        self._emit_benchmark_event(
+            "translate_start",
+            image_path=image_path,
+            block_count=len(blocks),
+            translator_key=self.main_page.settings_page.get_tool_selection("translator"),
+        )
         try:
             translator.translate(blocks, image, extra_context)
+            self._emit_benchmark_event(
+                "translate_end",
+                image_path=image_path,
+                block_count=len(blocks),
+                translator_key=self.main_page.settings_page.get_tool_selection("translator"),
+                translator_engine=translator.engine.__class__.__name__,
+            )
         except Exception as error:
             err_msg = self._extract_error_message(error, context="translation")
             logger.exception("Translation failed for %s: %s", image_path, err_msg)
             self.main_page.image_skipped.emit(image_path, "Translation", err_msg)
+            self._emit_benchmark_event(
+                "page_failed",
+                image_path=image_path,
+                block_count=len(blocks),
+                failed_stage="translation",
+                reason=err_msg,
+            )
             for block in blocks:
                 block.translation = ""
 
@@ -156,9 +200,15 @@ class ChunkMixin:
         self: WebtoonBatchProcessor,
         image: np.ndarray,
         blocks: List[TextBlock],
+        image_path: str | None = None,
     ) -> Tuple[Optional[np.ndarray], Optional[np.ndarray]]:
         if not blocks:
             return None, None
+        self._emit_benchmark_event(
+            "inpaint_start",
+            image_path=image_path,
+            block_count=len(blocks),
+        )
         self._ensure_inpainter()
         config = get_config(self.main_page.settings_page)
         mask_blocks: List[TextBlock] = []
@@ -209,6 +259,14 @@ class ChunkMixin:
                 cleanup_stats.get("block_count", 0),
                 cleanup_stats.get("component_count", 0),
             )
+        self._emit_benchmark_event(
+            "inpaint_end",
+            image_path=image_path,
+            block_count=len(blocks),
+            cleanup_applied=bool(cleanup_stats.get("applied")),
+            cleanup_block_count=cleanup_stats.get("block_count", 0),
+            cleanup_component_count=cleanup_stats.get("component_count", 0),
+        )
         return mask, inpainted
 
     def _extract_page_patches_from_mask(
@@ -482,7 +540,9 @@ class ChunkMixin:
         processed_local_blocks = seam_blocks_local
 
         mask, inpainted_crop = self._inpaint_image_with_blocks(
-            seam_crop, processed_local_blocks
+            seam_crop,
+            processed_local_blocks,
+            image_path=top_record["path"],
         )
         if mask is None or inpainted_crop is None:
             return {seam_job.top_page_index: [], seam_job.bottom_page_index: []}

@@ -128,6 +128,9 @@ In that case, Instructions for [Windows](https://www.windowsdigitals.com/add-fol
 
 * For the Gemma local translation server guide in Korean, see [docs/gemma-local-server-ko.md](docs/gemma-local-server-ko.md)
 * For Gemma translation/chat profile recommendations in Korean, see [docs/gemma-profiles-ko.md](docs/gemma-profiles-ko.md)
+* For the automatic-translation GPU resource strategy in Korean, see [docs/pipeline-resource-strategy-ko.md](docs/pipeline-resource-strategy-ko.md)
+* For the benchmark workflow and checklist in Korean, see [docs/pipeline-benchmarking-ko.md](docs/pipeline-benchmarking-ko.md) and [docs/pipeline-benchmark-checklist-ko.md](docs/pipeline-benchmark-checklist-ko.md)
+* The tracked OCR runtime bundle used for current experiments lives in [paddleocr_vl_docker_files/README.md](paddleocr_vl_docker_files/README.md)
 * Make sure the selected Font supports characters of the target language
 * v2.0 introduces a Manual Mode. When you run into issues with Automatic Mode (No text detected, Incorrect OCR, Insufficient Cleaning etc), you are now able to make corrections. Simply Undo the Image and toggle Manual Mode.
 * In Automatic Mode, Once an Image has been processed, it is loaded in the Viewer or stored to be loaded on switch so you can keep reading in the app as the other Images are being translated.
