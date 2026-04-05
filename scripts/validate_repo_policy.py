@@ -9,6 +9,7 @@ import sys
 PROTECTED_BRANCHES = {"main", "develop"}
 WORK_BRANCH_RE = re.compile(r"^codex/(feature|fix|chore|hotfix)/[a-z0-9][a-z0-9._-]*$")
 RELEASE_BRANCH_RE = re.compile(r"^release/[0-9A-Za-z][0-9A-Za-z._-]*$")
+BENCHMARK_BRANCH_RE = re.compile(r"^benchmarking/lab$")
 FORBIDDEN_TRACKED_PREFIXES = (
     ".venv/",
     ".venv-win/",
@@ -55,18 +56,18 @@ def validate_branch(branch: str, mode: str) -> list[str]:
         return errors
 
     if mode in {"commit", "push"}:
-        if WORK_BRANCH_RE.match(branch) or RELEASE_BRANCH_RE.match(branch):
+        if WORK_BRANCH_RE.match(branch) or RELEASE_BRANCH_RE.match(branch) or BENCHMARK_BRANCH_RE.match(branch):
             return errors
         errors.append(
-            "Invalid work branch name. Use codex/feature|fix|chore|hotfix/<slug> or release/<version>."
+            "Invalid work branch name. Use codex/feature|fix|chore|hotfix/<slug>, benchmarking/lab, or release/<version>."
         )
         return errors
 
     if mode == "ci":
-        if branch in PROTECTED_BRANCHES or WORK_BRANCH_RE.match(branch) or RELEASE_BRANCH_RE.match(branch):
+        if branch in PROTECTED_BRANCHES or WORK_BRANCH_RE.match(branch) or RELEASE_BRANCH_RE.match(branch) or BENCHMARK_BRANCH_RE.match(branch):
             return errors
         errors.append(
-            "Invalid CI branch. Allowed: main, develop, release/<version>, codex/feature|fix|chore|hotfix/<slug>."
+            "Invalid CI branch. Allowed: main, develop, release/<version>, benchmarking/lab, codex/feature|fix|chore|hotfix/<slug>."
         )
     return errors
 
