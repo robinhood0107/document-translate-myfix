@@ -55,7 +55,6 @@ docker pull ghcr.io/ggml-org/llama.cpp@sha256:0d60155f9cbd5118d02568d90f50563825
 
 ## 관련 문서
 
-- [profiles-ko.md](/mnt/c/Users/pjjpj/Desktop/openai_manga_translater/comic-translate/docs/gemma/profiles-ko.md)
-- [translation-optimization-ko.md](/mnt/c/Users/pjjpj/Desktop/openai_manga_translater/comic-translate/docs/gemma/translation-optimization-ko.md)
-- [resource-strategy-ko.md](/mnt/c/Users/pjjpj/Desktop/openai_manga_translater/comic-translate/docs/benchmark/resource-strategy-ko.md)
-- [workflow-ko.md](/mnt/c/Users/pjjpj/Desktop/openai_manga_translater/comic-translate/docs/benchmark/workflow-ko.md)
+- [paddleocr_vl_docker_files/README.md](/mnt/c/Users/pjjpj/Desktop/openai_manga_translater/comic-translate/paddleocr_vl_docker_files/README.md)
+
+벤치마크 preset, 보고서, 차트, 실험 문서는 제품 브랜치가 아니라 `benchmarking/lab` 브랜치에서만 관리합니다.
