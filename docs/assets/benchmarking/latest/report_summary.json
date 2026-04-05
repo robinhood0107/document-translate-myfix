@@ -1,0 +1,13 @@
+{
+  "manifest": "./benchmarks/report_manifest.yaml",
+  "results_root": "./banchmark_result_log",
+  "active_preset": "translation-baseline",
+  "winning_candidate_preset": "translation-t06",
+  "resolved_winner_preset": "translation-t06",
+  "charts": {
+    "batch_elapsed": "./docs/assets/benchmarking/latest/batch_elapsed_comparison.png",
+    "n_gpu_layers_translate_median": "./docs/assets/benchmarking/latest/n_gpu_layers_translate_median.png",
+    "temperature_translate_median": "./docs/assets/benchmarking/latest/temperature_translate_median.png",
+    "quality_metrics": "./docs/assets/benchmarking/latest/quality_metrics_comparison.png"
+  }
+}
