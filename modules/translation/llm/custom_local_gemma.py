@@ -14,10 +14,14 @@ from ...utils.translator_utils import extract_json_object, get_raw_text
 logger = logging.getLogger(__name__)
 
 DEFAULT_GEMMA_LOCAL_ENDPOINT = "http://127.0.0.1:18080/v1"
-DEFAULT_GEMMA_LOCAL_MODEL = "gemma-4-26B-A4B-it-UD-Q2_K_XL.gguf"
+DEFAULT_GEMMA_LOCAL_MODEL = "gemma-4-26b-a4b-it-heretic.q3_k_m.gguf"
 DEFAULT_GEMMA_CHUNK_SIZE = 4
 DEFAULT_GEMMA_MAX_COMPLETION_TOKENS = 512
 DEFAULT_GEMMA_REQUEST_TIMEOUT_SEC = 180
+DEFAULT_GEMMA_TRANSLATION_TEMPERATURE = 1.0
+DEFAULT_GEMMA_TRANSLATION_TOP_K = 0
+DEFAULT_GEMMA_TRANSLATION_TOP_P = 1.0
+DEFAULT_GEMMA_TRANSLATION_MIN_P = 0.05
 
 
 class GemmaLocalServerResponseError(RuntimeError):
@@ -38,6 +42,8 @@ class CustomLocalGemmaTranslation(BaseLLMTranslation):
         self.chunk_size = DEFAULT_GEMMA_CHUNK_SIZE
         self.raw_response_logging = False
         self.translation_mode_label = "Custom Local Server(Gemma)"
+        self.top_k = DEFAULT_GEMMA_TRANSLATION_TOP_K
+        self.min_p = DEFAULT_GEMMA_TRANSLATION_MIN_P
 
     def initialize(
         self,
@@ -68,8 +74,10 @@ class CustomLocalGemmaTranslation(BaseLLMTranslation):
             )
         )
         self.raw_response_logging = bool(gemma_settings.get("raw_response_logging", False))
-        self.temperature = 0.0
-        self.top_p = 1.0
+        self.temperature = DEFAULT_GEMMA_TRANSLATION_TEMPERATURE
+        self.top_k = DEFAULT_GEMMA_TRANSLATION_TOP_K
+        self.top_p = DEFAULT_GEMMA_TRANSLATION_TOP_P
+        self.min_p = DEFAULT_GEMMA_TRANSLATION_MIN_P
         self.img_as_llm_input = False
 
     def translate(
@@ -214,7 +222,9 @@ class CustomLocalGemmaTranslation(BaseLLMTranslation):
                 },
             ],
             "temperature": self.temperature,
+            "top_k": self.top_k,
             "top_p": self.top_p,
+            "min_p": self.min_p,
             "max_completion_tokens": self.max_tokens,
             "response_format": {"type": "json_object"},
         }
