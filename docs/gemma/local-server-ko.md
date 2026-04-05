@@ -26,6 +26,7 @@ docker compose up -d
 - `top_k=64`
 - `top_p=0.95`
 - `min_p=0.0`
+- `prompt_profile=gemma4_balanced`
 - `Chunk Size=4`
 - `Max Completion Tokens=512`
 - `Request Timeout=180`
@@ -43,14 +44,20 @@ docker compose up -d
 
 ## 참고 이미지 버전
 
-- Image tag: `ghcr.io/ggml-org/llama.cpp:server-cuda`
-- Digest: `ghcr.io/ggml-org/llama.cpp@sha256:0d60155f9cbd5118d02568d90f505638259d85f6f1cc4ac98d0f1002001e1f7a`
-- `llama.cpp --version`: `8660 (d00685831)`
+- Image tag: `local/llama.cpp:server-cuda-b8665`
+- 기반 변경: `common : add gemma 4 specialized parser (#21418)`
+- 기대 build 표기: `b8665`
 
-재현용 pull:
+기본 prompt profile:
 
 ```bash
-docker pull ghcr.io/ggml-org/llama.cpp@sha256:0d60155f9cbd5118d02568d90f505638259d85f6f1cc4ac98d0f1002001e1f7a
+CT_GEMMA_PROMPT_PROFILE=gemma4_balanced
+```
+
+기존 프롬프트로 비교가 필요하면 아래 환경 변수를 사용합니다.
+
+```bash
+CT_GEMMA_PROMPT_PROFILE=legacy
 ```
 
 ## 관련 문서

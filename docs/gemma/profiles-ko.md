@@ -10,10 +10,12 @@
 | top_k | `64` |
 | top_p | `0.95` |
 | min_p | `0.0` |
+| prompt profile | `gemma4_balanced` |
 | chunk size | `4` |
 | max completion tokens | `512` |
 | timeout sec | `180` |
 | model path | `/models/gemma-4-26b-a4b-it-heretic.q3_k_m.gguf` |
+| image tag | `local/llama.cpp:server-cuda-b8665` |
 | ctx-size | `4096` |
 | threads | `12` |
 | n_gpu_layers | `23` |
@@ -34,6 +36,8 @@
 - `Custom Local Server(Gemma)` 분기
 - JSON 강제 응답
 - image input 비활성
+- Gemma 4 전용 `gemma4_balanced` prompt profile 추가
+- JSON/empty-content 실패 시 strict prompt 1회 재시도 후 chunk split
 
 ### translation-only benchmark 체계 정리
 
