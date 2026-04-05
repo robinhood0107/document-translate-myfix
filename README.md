@@ -127,6 +127,7 @@ raise RarCannotExec("Cannot find working tool")
 In that case, Instructions for [Windows](https://www.windowsdigitals.com/add-folder-to-path-environment-variable-in-windows-11-10/), [Linux](https://linuxize.com/post/how-to-add-directory-to-path-in-linux/), [Mac](https://techpp.com/2021/09/08/set-path-variable-in-macos-guide/)
 
 * For the Gemma local translation server guide in Korean, see [docs/gemma-local-server-ko.md](docs/gemma-local-server-ko.md)
+* For Gemma translation/chat profile recommendations in Korean, see [docs/gemma-profiles-ko.md](docs/gemma-profiles-ko.md)
 * Make sure the selected Font supports characters of the target language
 * v2.0 introduces a Manual Mode. When you run into issues with Automatic Mode (No text detected, Incorrect OCR, Insufficient Cleaning etc), you are now able to make corrections. Simply Undo the Image and toggle Manual Mode.
 * In Automatic Mode, Once an Image has been processed, it is loaded in the Viewer or stored to be loaded on switch so you can keep reading in the app as the other Images are being translated.
