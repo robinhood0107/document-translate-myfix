@@ -512,6 +512,9 @@ def _open_results(suite_dir: Path) -> None:
     try:
         os.startfile(str(suite_dir))
         os.startfile(str(suite_dir / "suite_report.md"))
+        report_path = ROOT / "docs" / "benchmark" / "report-ko.md"
+        if report_path.is_file():
+            os.startfile(str(report_path))
     except OSError:
         pass
 
@@ -583,6 +586,22 @@ def main() -> int:
     (suite_dir / "suite_report.md").write_text(suite_report, encoding="utf-8")
     (suite_dir / "suite_console_summary.txt").write_text(console_summary, encoding="utf-8")
     write_json(suite_root / "last_suite_run.json", suite_payload)
+
+    try:
+        _log("자동 benchmark report 생성 중...")
+        completed = subprocess.run(
+            [sys.executable, "-u", str(ROOT / "scripts" / "generate_benchmark_report.py")],
+            cwd=str(ROOT),
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        if completed.stdout.strip():
+            _log(completed.stdout.strip())
+        _log("자동 benchmark report 생성 완료")
+    except Exception as exc:
+        exit_code = 1
+        _log(f"자동 benchmark report 생성 실패: {exc}")
 
     print(console_summary)
     _open_results(suite_dir)

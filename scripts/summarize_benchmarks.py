@@ -5,6 +5,8 @@ import argparse
 import json
 from pathlib import Path
 
+ROOT = Path(__file__).resolve().parents[1]
+
 
 def _load_summary_files(root: Path) -> list[dict]:
     payloads: list[dict] = []
@@ -27,9 +29,14 @@ def _render_markdown(payloads: list[dict]) -> str:
         "| --- | --- | --- | --- | --- | --- | --- |",
     ]
     for payload in payloads:
+        run_dir = str(payload.get("_run_dir", ""))
+        try:
+            run_dir = "./" + str(Path(run_dir).resolve().relative_to(ROOT.resolve())).replace("\\", "/")
+        except Exception:
+            run_dir = run_dir.replace("\\", "/")
         lines.append(
             "| {run_dir} | {mode} | {elapsed} | {done} | {failed} | {free} | {used} |".format(
-                run_dir=payload.get("_run_dir", ""),
+                run_dir=run_dir,
                 mode=payload.get("mode", ""),
                 elapsed=payload.get("elapsed_sec", ""),
                 done=payload.get("page_done_count", ""),
