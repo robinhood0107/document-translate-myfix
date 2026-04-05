@@ -15,7 +15,7 @@ services:
       - ./testmodel:/models:ro
     command:
       - -m
-      - /models/gemma-4-26B-A4B-it-UD-Q2_K_XL.gguf
+      - /models/gemma-4-26b-a4b-it-heretic.q3_k_m.gguf
       - --host
       - 0.0.0.0
       - --port
@@ -28,6 +28,7 @@ services:
       - "${LLAMA_THREADS:-8}"
       - --n-gpu-layers
       - "${LLAMA_N_GPU_LAYERS:-8}"
+      - --swa-full
       - --reasoning
       - "off"
       - --reasoning-budget
