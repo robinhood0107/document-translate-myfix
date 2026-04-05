@@ -6,6 +6,7 @@ on:
       - main
       - develop
       - "codex/**"
+      - "benchmarking/lab"
       - "release/**"
   pull_request:
     branches:
@@ -26,6 +27,9 @@ jobs:
             exit 0
           fi
           if [[ "$branch" =~ ^release/[0-9A-Za-z][0-9A-Za-z._-]*$ ]]; then
+            exit 0
+          fi
+          if [[ "$branch" == "benchmarking/lab" ]]; then
             exit 0
           fi
           if [[ "$branch" =~ ^codex/(feature|fix|chore|hotfix)/[a-z0-9][a-z0-9._-]*$ ]]; then

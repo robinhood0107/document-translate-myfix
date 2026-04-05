@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import os
 from collections import defaultdict
 from typing import TYPE_CHECKING
 
@@ -52,6 +53,20 @@ class WebtoonBatchProcessor(FlowMixin, ChunkMixin, RenderMixin):
         self.edge_threshold = 50
         self.seam_crop_pad_x = 48
         self.seam_crop_pad_y = 48
+
+    def _emit_benchmark_event(self, tag: str, image_path: str | None = None, **extra) -> None:
+        payload = {
+            "pipeline_mode": "webtoon",
+            "run_type": str(getattr(self.main_page, "_current_batch_run_type", "batch") or "batch"),
+        }
+        if image_path:
+            payload["image_path"] = image_path
+            payload["image_name"] = os.path.basename(image_path)
+        payload.update(extra)
+        try:
+            self.main_page.emit_memlog(tag, **payload)
+        except Exception:
+            pass
 
     def skip_save(
         self: WebtoonBatchProcessor,

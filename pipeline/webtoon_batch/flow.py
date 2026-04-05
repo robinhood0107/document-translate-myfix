@@ -177,10 +177,26 @@ class FlowMixin:
             return record
 
         vpage: VirtualPage = record["vpage"]
+        self._emit_benchmark_event(
+            "detect_start",
+            image_path=record["path"],
+            image_index=record["selected_index"],
+            total_images=total_images,
+            virtual_id=vpage.virtual_id,
+        )
         image = self._read_virtual_image(vpage)
         if image is None:
             logger.error("Failed to load virtual image: %s", vpage.virtual_id)
             record["skip_only"] = True
+            self._emit_benchmark_event(
+                "page_failed",
+                image_path=record["path"],
+                image_index=record["selected_index"],
+                total_images=total_images,
+                failed_stage="detect",
+                reason=f"Failed to load virtual image: {vpage.virtual_id}",
+                virtual_id=vpage.virtual_id,
+            )
             if emit_progress:
                 self._emit_progress(record["selected_index"], total_images, 1, False)
             return record
@@ -192,6 +208,14 @@ class FlowMixin:
             record["path"],
             vpage.virtual_id,
             len(record["detected_blocks"]),
+        )
+        self._emit_benchmark_event(
+            "detect_end",
+            image_path=record["path"],
+            image_index=record["selected_index"],
+            total_images=total_images,
+            virtual_id=vpage.virtual_id,
+            block_count=len(record["detected_blocks"]),
         )
         if emit_progress:
             self._emit_progress(record["selected_index"], total_images, 1, False)
@@ -330,6 +354,14 @@ class FlowMixin:
             self.main_page.render_state_ready.emit(image_path)
             self._save_final_rendered_page(selected_index, image_path, timestamp)
             self._emit_progress(selected_index, total_images, 10, False)
+            self._emit_benchmark_event(
+                "page_done",
+                image_path=image_path,
+                image_index=selected_index,
+                total_images=total_images,
+                block_count=0,
+                patch_count=0,
+            )
             return
 
         blocks = list(page_accum[image_path]["blocks"])
@@ -340,6 +372,14 @@ class FlowMixin:
         if blocks:
             blocks = sort_blk_list(blocks, rtl)
 
+        self._emit_benchmark_event(
+            "render_start",
+            image_path=image_path,
+            image_index=selected_index,
+            total_images=total_images,
+            block_count=len(blocks),
+            patch_count=len(patches),
+        )
         self._emit_progress(selected_index, total_images, 9, False)
         prepared_blocks = self._prepare_page_blocks_for_render(
             image_path=image_path,
@@ -365,6 +405,22 @@ class FlowMixin:
             len(patches),
         )
         self._save_final_rendered_page(selected_index, image_path, timestamp)
+        self._emit_benchmark_event(
+            "render_end",
+            image_path=image_path,
+            image_index=selected_index,
+            total_images=total_images,
+            block_count=len(prepared_blocks),
+            patch_count=len(patches),
+        )
+        self._emit_benchmark_event(
+            "page_done",
+            image_path=image_path,
+            image_index=selected_index,
+            total_images=total_images,
+            block_count=len(prepared_blocks),
+            patch_count=len(patches),
+        )
         self._emit_progress(selected_index, total_images, 10, False)
 
     def webtoon_batch_process(
@@ -375,6 +431,7 @@ class FlowMixin:
             self._export_run_tokens = {}
             image_list = selected_paths if selected_paths is not None else self.main_page.image_files
             total_images = len(image_list)
+            self._emit_benchmark_event("webtoon_run_start", total_images=total_images)
             if total_images < 1:
                 logger.warning("No images to process")
                 return
@@ -482,10 +539,18 @@ class FlowMixin:
             for index, record in enumerate(virtual_records):
                 if self._is_cancelled():
                     logger.warning("Webtoon batch cancelled.")
+                    self._emit_benchmark_event("webtoon_run_cancelled", total_images=total_images)
                     return
 
                 if record.get("is_first_virtual", False):
                     self._emit_progress(record["selected_index"], total_images, 0, True)
+                    self._emit_benchmark_event(
+                        "page_start",
+                        image_path=record["path"],
+                        image_index=record["selected_index"],
+                        total_images=total_images,
+                        virtual_id=getattr(record.get("vpage"), "virtual_id", None),
+                    )
 
                 if (
                     cached_current is not None
@@ -567,7 +632,9 @@ class FlowMixin:
 
                 self._emit_progress(current_record["selected_index"], total_images, 4, False)
                 mask, inpainted = self._inpaint_image_with_blocks(
-                    current_record["image"], regular_blocks
+                    current_record["image"],
+                    regular_blocks,
+                    image_path=current_record["path"],
                 )
                 if mask is not None and inpainted is not None:
                     regular_patches = self._extract_page_patches_from_mask(
@@ -627,6 +694,7 @@ class FlowMixin:
                 cached_current = next_record
 
             logger.info("Seam-aware virtual streaming webtoon batch processing completed.")
+            self._emit_benchmark_event("webtoon_run_done", total_images=total_images)
         except Exception:
             logger.exception("Webtoon batch processing failed.")
             raise

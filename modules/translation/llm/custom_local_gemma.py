@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Any
 import json
 import logging
+import os
 
 import numpy as np
 import requests
@@ -18,10 +19,10 @@ DEFAULT_GEMMA_LOCAL_MODEL = "gemma-4-26b-a4b-it-heretic.q3_k_m.gguf"
 DEFAULT_GEMMA_CHUNK_SIZE = 4
 DEFAULT_GEMMA_MAX_COMPLETION_TOKENS = 512
 DEFAULT_GEMMA_REQUEST_TIMEOUT_SEC = 180
-DEFAULT_GEMMA_TRANSLATION_TEMPERATURE = 1.0
-DEFAULT_GEMMA_TRANSLATION_TOP_K = 0
-DEFAULT_GEMMA_TRANSLATION_TOP_P = 1.0
-DEFAULT_GEMMA_TRANSLATION_MIN_P = 0.05
+DEFAULT_GEMMA_TRANSLATION_TEMPERATURE = 0.6
+DEFAULT_GEMMA_TRANSLATION_TOP_K = 64
+DEFAULT_GEMMA_TRANSLATION_TOP_P = 0.95
+DEFAULT_GEMMA_TRANSLATION_MIN_P = 0.0
 
 
 class GemmaLocalServerResponseError(RuntimeError):
@@ -44,6 +45,37 @@ class CustomLocalGemmaTranslation(BaseLLMTranslation):
         self.translation_mode_label = "Custom Local Server(Gemma)"
         self.top_k = DEFAULT_GEMMA_TRANSLATION_TOP_K
         self.min_p = DEFAULT_GEMMA_TRANSLATION_MIN_P
+        self.last_benchmark_stats = self._new_benchmark_stats()
+        self._current_benchmark_stats = self._new_benchmark_stats()
+
+    @staticmethod
+    def _new_benchmark_stats() -> dict[str, int]:
+        return {
+            "gemma_json_retry_count": 0,
+            "gemma_chunk_retry_events": 0,
+            "gemma_truncated_count": 0,
+            "gemma_empty_content_count": 0,
+        }
+
+    @staticmethod
+    def _env_or_config_float(config: dict[str, Any], key: str, env_name: str, default: float) -> float:
+        raw_value = os.environ.get(env_name)
+        if raw_value is None:
+            raw_value = config.get(key, default)
+        try:
+            return float(raw_value)
+        except (TypeError, ValueError):
+            return float(default)
+
+    @staticmethod
+    def _env_or_config_int(config: dict[str, Any], key: str, env_name: str, default: int) -> int:
+        raw_value = os.environ.get(env_name)
+        if raw_value is None:
+            raw_value = config.get(key, default)
+        try:
+            return int(raw_value)
+        except (TypeError, ValueError):
+            return int(default)
 
     def initialize(
         self,
@@ -74,11 +106,32 @@ class CustomLocalGemmaTranslation(BaseLLMTranslation):
             )
         )
         self.raw_response_logging = bool(gemma_settings.get("raw_response_logging", False))
-        self.temperature = DEFAULT_GEMMA_TRANSLATION_TEMPERATURE
-        self.top_k = DEFAULT_GEMMA_TRANSLATION_TOP_K
-        self.top_p = DEFAULT_GEMMA_TRANSLATION_TOP_P
-        self.min_p = DEFAULT_GEMMA_TRANSLATION_MIN_P
+        self.temperature = self._env_or_config_float(
+            gemma_settings,
+            "temperature",
+            "CT_GEMMA_TEMPERATURE",
+            DEFAULT_GEMMA_TRANSLATION_TEMPERATURE,
+        )
+        self.top_k = self._env_or_config_int(
+            gemma_settings,
+            "top_k",
+            "CT_GEMMA_TOP_K",
+            DEFAULT_GEMMA_TRANSLATION_TOP_K,
+        )
+        self.top_p = self._env_or_config_float(
+            gemma_settings,
+            "top_p",
+            "CT_GEMMA_TOP_P",
+            DEFAULT_GEMMA_TRANSLATION_TOP_P,
+        )
+        self.min_p = self._env_or_config_float(
+            gemma_settings,
+            "min_p",
+            "CT_GEMMA_MIN_P",
+            DEFAULT_GEMMA_TRANSLATION_MIN_P,
+        )
         self.img_as_llm_input = False
+        self.last_benchmark_stats = self._new_benchmark_stats()
 
     def translate(
         self,
@@ -91,21 +144,25 @@ class CustomLocalGemmaTranslation(BaseLLMTranslation):
             return blk_list
 
         working_blocks = [blk.deep_copy() for blk in blk_list]
+        self._current_benchmark_stats = self._new_benchmark_stats()
 
-        for start in range(0, len(working_blocks), self.chunk_size):
-            chunk = working_blocks[start : start + self.chunk_size]
-            updated_blocks += self._translate_chunk_with_retry(chunk, extra_context)
+        try:
+            for start in range(0, len(working_blocks), self.chunk_size):
+                chunk = working_blocks[start : start + self.chunk_size]
+                updated_blocks += self._translate_chunk_with_retry(chunk, extra_context)
 
-        for original_blk, translated_blk in zip(blk_list, working_blocks):
-            original_blk.translation = translated_blk.translation
+            for original_blk, translated_blk in zip(blk_list, working_blocks):
+                original_blk.translation = translated_blk.translation
 
-        logger.info(
-            "translation parsed successfully (%s): updated_blocks=%d total_blocks=%d",
-            self.translation_mode_label,
-            updated_blocks,
-            len(blk_list),
-        )
-        return blk_list
+            logger.info(
+                "translation parsed successfully (%s): updated_blocks=%d total_blocks=%d",
+                self.translation_mode_label,
+                updated_blocks,
+                len(blk_list),
+            )
+            return blk_list
+        finally:
+            self.last_benchmark_stats = dict(self._current_benchmark_stats)
 
     def _translate_chunk_with_retry(
         self,
@@ -119,6 +176,7 @@ class CustomLocalGemmaTranslation(BaseLLMTranslation):
                 raise
 
             split_point = max(1, len(blk_list) // 2)
+            self._current_benchmark_stats["gemma_chunk_retry_events"] += 1
             logger.warning(
                 "gemma local server chunk failed for %d block(s); retrying as %d and %d block(s). reason=%s",
                 len(blk_list),
@@ -161,12 +219,14 @@ class CustomLocalGemmaTranslation(BaseLLMTranslation):
             )
 
         if finish_reason == "length":
+            self._current_benchmark_stats["gemma_truncated_count"] += 1
             raise GemmaLocalServerTruncatedError(
                 "Gemma local server response was truncated before the final JSON was completed. "
                 "Reduce Chunk Size or increase LLAMA_CTX_SIZE."
             )
 
         if not content.strip():
+            self._current_benchmark_stats["gemma_empty_content_count"] += 1
             detail = "Gemma local server returned an empty message.content."
             if reasoning_content.strip():
                 detail += " The model produced reasoning output without a final JSON answer."
@@ -177,6 +237,7 @@ class CustomLocalGemmaTranslation(BaseLLMTranslation):
         try:
             translation_dict = extract_json_object(content)
         except Exception as exc:
+            self._current_benchmark_stats["gemma_json_retry_count"] += 1
             raise GemmaLocalServerResponseError(
                 "Gemma local server did not return a valid JSON object in message.content."
             ) from exc
@@ -184,6 +245,7 @@ class CustomLocalGemmaTranslation(BaseLLMTranslation):
         expected_keys = [f"block_{index}" for index in range(len(blk_list))]
         missing_keys = [key for key in expected_keys if key not in translation_dict]
         if missing_keys:
+            self._current_benchmark_stats["gemma_json_retry_count"] += 1
             raise GemmaLocalServerResponseError(
                 "Gemma local server JSON response was missing expected block keys: "
                 + ", ".join(missing_keys)
