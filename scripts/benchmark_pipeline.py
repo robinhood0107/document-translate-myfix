@@ -216,6 +216,11 @@ def main() -> int:
         help="Use already running services or recreate staged runtime files",
     )
     parser.add_argument("--label", default="", help="Optional label suffix for run directory names")
+    parser.add_argument(
+        "--output-dir",
+        default="",
+        help="Optional exact output directory for a single benchmark run",
+    )
     args = parser.parse_args()
 
     preset, preset_path = load_preset(args.preset)
@@ -227,7 +232,13 @@ def main() -> int:
     for repeat_index in range(1, max(1, args.repeat) + 1):
         for mode in modes:
             label = args.label or preset.get("name", args.preset)
-            run_dir = create_run_dir(f"{label}_{mode}_r{repeat_index}")
+            if args.output_dir:
+                if len(modes) != 1 or max(1, args.repeat) != 1:
+                    parser.error("--output-dir only supports a single mode with repeat=1")
+                run_dir = Path(args.output_dir)
+                run_dir.mkdir(parents=True, exist_ok=True)
+            else:
+                run_dir = create_run_dir(f"{label}_{mode}_r{repeat_index}")
             run_dir.mkdir(parents=True, exist_ok=True)
 
             selected_paths = corpus["smoke"] if mode == "one-page" else corpus["representative"]

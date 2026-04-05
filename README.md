@@ -131,6 +131,7 @@ In that case, Instructions for [Windows](https://www.windowsdigitals.com/add-fol
 * For the automatic-translation GPU resource strategy in Korean, see [docs/pipeline-resource-strategy-ko.md](docs/pipeline-resource-strategy-ko.md)
 * For the benchmark workflow and checklist in Korean, see [docs/pipeline-benchmarking-ko.md](docs/pipeline-benchmarking-ko.md) and [docs/pipeline-benchmark-checklist-ko.md](docs/pipeline-benchmark-checklist-ko.md)
 * For practical benchmark usage and result interpretation in Korean, see [docs/pipeline-benchmark-usage-ko.md](docs/pipeline-benchmark-usage-ko.md)
+* For a one-click Windows benchmark suite launcher, use [scripts/benchmark_suite.bat](scripts/benchmark_suite.bat)
 * The tracked OCR runtime bundle used for current experiments lives in [paddleocr_vl_docker_files/README.md](paddleocr_vl_docker_files/README.md)
 * Make sure the selected Font supports characters of the target language
 * v2.0 introduces a Manual Mode. When you run into issues with Automatic Mode (No text detected, Incorrect OCR, Insufficient Cleaning etc), you are now able to make corrections. Simply Undo the Image and toggle Manual Mode.

@@ -4,8 +4,12 @@ setlocal
 set "SCRIPT_DIR=%~dp0"
 for %%I in ("%SCRIPT_DIR%..") do set "REPO_ROOT=%%~fI"
 
-set "BENCH_ROOT=%LOCALAPPDATA%\ComicTranslate\benchmarks"
-if not defined LOCALAPPDATA set "BENCH_ROOT=%USERPROFILE%\AppData\Local\ComicTranslate\benchmarks"
+if defined CT_BENCH_OUTPUT_ROOT (
+    set "BENCH_ROOT=%CT_BENCH_OUTPUT_ROOT%"
+) else (
+    set "BENCH_ROOT=%USERPROFILE%\benchmarks"
+    set "CT_BENCH_OUTPUT_ROOT=%BENCH_ROOT%"
+)
 
 set "PYTHON_EXE=%REPO_ROOT%\.venv\Scripts\python.exe"
 set "PYTHON_ARGS="
@@ -48,6 +52,7 @@ if "%SAMPLE_COUNT%"=="" set "SAMPLE_COUNT=30"
 :execute_run
 echo [benchmark] preset=%PRESET% mode=%MODE% runtime-mode=%RUNTIME_MODE% repeat=%REPEAT%
 echo [benchmark] sample-dir=%SAMPLE_DIR% sample-count=%SAMPLE_COUNT%
+echo [benchmark] output-root=%BENCH_ROOT%
 call "%PYTHON_EXE%" %PYTHON_ARGS% "%SCRIPT_DIR%benchmark_pipeline.py" ^
   --preset "%PRESET%" ^
   --mode "%MODE%" ^
@@ -85,6 +90,9 @@ echo   scripts\benchmark_pipeline.bat
 echo   scripts\benchmark_pipeline.bat run [preset] [mode] [runtime-mode] [repeat] [sample-dir] [sample-count]
 echo   scripts\benchmark_pipeline.bat summary
 echo   scripts\benchmark_pipeline.bat open
+echo.
+echo Output root:
+echo   %%USERPROFILE%%\benchmarks
 echo.
 echo Examples:
 echo   scripts\benchmark_pipeline.bat

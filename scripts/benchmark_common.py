@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import platform
 import shutil
 import subprocess
 import time
@@ -40,6 +41,19 @@ def repo_root() -> Path:
 
 def now_stamp() -> str:
     return datetime.now().strftime("%Y%m%d_%H%M%S")
+
+
+def benchmark_default_output_root() -> Path:
+    env_root = os.getenv("CT_BENCH_OUTPUT_ROOT", "").strip()
+    if env_root:
+        return Path(env_root).expanduser()
+
+    if platform.system() == "Windows":
+        return Path(os.path.expanduser("~")) / "benchmarks"
+
+    from modules.utils.paths import get_user_data_dir
+
+    return Path(get_user_data_dir()) / "benchmarks"
 
 
 def run_command(
@@ -274,15 +288,21 @@ def stage_runtime_files(preset: dict[str, Any], runtime_dir: str | Path) -> dict
 
 
 def benchmark_output_root() -> Path:
-    from modules.utils.paths import get_user_data_dir
-
-    root = Path(get_user_data_dir()) / "benchmarks"
+    root = benchmark_default_output_root()
     root.mkdir(parents=True, exist_ok=True)
     return root
 
 
-def create_run_dir(label: str) -> Path:
-    run_dir = benchmark_output_root() / f"{now_stamp()}_{label}"
+def create_run_dir(
+    label: str,
+    *,
+    root: str | Path | None = None,
+    include_timestamp: bool = True,
+) -> Path:
+    base_root = Path(root) if root is not None else benchmark_output_root()
+    base_root.mkdir(parents=True, exist_ok=True)
+    dir_name = f"{now_stamp()}_{label}" if include_timestamp else label
+    run_dir = base_root / dir_name
     run_dir.mkdir(parents=True, exist_ok=True)
     return run_dir
 

@@ -27,96 +27,91 @@
 
 ## 2. 가장 쉬운 실행 방법
 
-Windows에서는 배치 파일 [benchmark_pipeline.bat](/mnt/c/Users/pjjpj/Desktop/openai_manga_translater/comic-translate/scripts/benchmark_pipeline.bat)를 사용하면 됩니다.
-
-기본 실행:
+Windows에서는 배치 파일 [benchmark_suite.bat](/mnt/c/Users/pjjpj/Desktop/openai_manga_translater/comic-translate/scripts/benchmark_suite.bat)를 한 번만 실행하면 됩니다.
 
 ```bat
-scripts\benchmark_pipeline.bat
+scripts\benchmark_suite.bat
 ```
 
-이 명령은 아래와 같습니다.
+이 명령은 아래 3개를 자동으로 순서대로 수행합니다.
 
-- preset: `live-ops-baseline`
-- mode: `batch`
-- runtime-mode: `attach-running`
-- repeat: `1`
-- sample-dir: `.\Sample`
-- sample-count: `30`
+1. `live-ops-baseline` `batch` `attach-running`
+2. `live-ops-baseline` `one-page` `attach-running`
+3. `gpu-shift-ocr-front-cpu` `batch` `managed`
 
-## 3. 배치 파일 사용법
+실행이 끝나면 자동으로 아래를 수행합니다.
 
-### 3-1. 현재 떠 있는 서버에 붙어서 측정
+- 현재 스위트만 묶은 `suite_report.md` 생성
+- 결과 폴더 열기
+- `suite_report.md` 열기
+- 콘솔에 PASS / WARN / FAIL 요약과 추천 결과 출력
+- `managed` 단계 뒤에는 Gemma / OCR Docker 런타임을 시작 시점 상태로 복원
+
+## 3. 결과는 어디에 쌓이나
+
+기본 저장 위치는 아래입니다.
+
+```text
+%USERPROFILE%\benchmarks
+```
+
+필요하면 `CT_BENCH_OUTPUT_ROOT` 환경변수로 다른 출력 루트를 강제로 지정할 수 있습니다.
+
+예시:
+
+```text
+C:\Users\<사용자이름>\benchmarks\20260405_223000_suite
+```
+
+이 폴더 아래에 각 단계별 하위 폴더와 스위트 리포트가 함께 생깁니다.
+
+- `01_live_ops_batch`
+- `02_live_ops_one_page`
+- `03_gpu_shift_managed`
+- `suite_report.md`
+- `suite_report.json`
+- `suite_console_summary.txt`
+
+## 4. 고급 / 수동 실행
+
+세부 실행을 직접 제어하고 싶을 때만 [benchmark_pipeline.bat](/mnt/c/Users/pjjpj/Desktop/openai_manga_translater/comic-translate/scripts/benchmark_pipeline.bat)를 사용합니다.
+
+### 4-1. 현재 떠 있는 서버에 붙어서 batch 측정
 
 ```bat
 scripts\benchmark_pipeline.bat run live-ops-baseline batch attach-running 1
 ```
 
-### 3-2. one-page auto 성격으로 짧게 측정
+### 4-2. one-page auto 성격으로 짧게 측정
 
 ```bat
 scripts\benchmark_pipeline.bat run live-ops-baseline one-page attach-running 1
 ```
 
-### 3-3. preset 기준으로 Docker runtime을 다시 띄워서 측정
+### 4-3. preset 기준으로 Docker runtime을 다시 띄워서 측정
 
 ```bat
 scripts\benchmark_pipeline.bat run gpu-shift-ocr-front-cpu batch managed 1
 ```
 
-### 3-4. 누적 결과를 요약 표로 만들기
+### 4-4. 누적 결과 요약표 만들기
 
 ```bat
 scripts\benchmark_pipeline.bat summary
 ```
 
-### 3-5. 결과 폴더 열기
+### 4-5. 결과 폴더 열기
 
 ```bat
 scripts\benchmark_pipeline.bat open
 ```
 
-## 4. 권장 측정 순서
-
-아래 순서대로 비교하는 것을 권장합니다.
-
-1. `repo-default`
-2. `live-ops-baseline`
-3. `gpu-shift-ocr-front-cpu`
-4. `gemma-heavy-offload`
-
-이 순서를 쓰는 이유는 다음과 같습니다.
-
-- 먼저 머지된 기준과 현재 운영 기준을 비교
-- 그 다음 `paddleocr-server`를 CPU로 내려 VRAM을 회수할 수 있는지 확인
-- 마지막으로 회수된 여유분을 Gemma offload에 더 배분했을 때 이득이 있는지 확인
-
-## 5. 결과는 어디에 쌓이나
-
-결과는 사용자 데이터 폴더 아래에 쌓입니다.
-
-기본 위치:
-
-```text
-%LOCALAPPDATA%\ComicTranslate\benchmarks
-```
-
-각 run 디렉터리에는 아래 파일이 생깁니다.
-
-- `benchmark_request.json`
-- `preset_resolved.json`
-- `runtime_snapshot.json`
-- `docker_snapshot.json`
-- `metrics.jsonl`
-- `summary.json`
-- `summary.md`
-
-## 6. 어떤 파일을 보면 되나
+## 5. 어떤 파일을 보면 되나
 
 ### 가장 먼저 볼 파일
 
-- `summary.md`
-- `summary.json`
+- `suite_report.md`
+- `suite_report.json`
 
 여기서 바로 확인할 핵심 값:
 
@@ -125,10 +120,15 @@ scripts\benchmark_pipeline.bat open
 - `page_failed_count`
 - `gpu_peak_used_mb`
 - `gpu_floor_free_mb`
+- `ocr_median_sec`
+- `translate_median_sec`
+- `inpaint_median_sec`
 
 ### 더 자세히 볼 파일
 
-- `metrics.jsonl`
+- 각 단계 폴더의 `metrics.jsonl`
+- 각 단계 폴더의 `summary.json`
+- 각 단계 폴더의 `command_stdout.txt`, `command_stderr.txt`
 
 이 파일은 단계별 이벤트 로그입니다. 아래 태그가 중요합니다.
 
@@ -140,7 +140,7 @@ scripts\benchmark_pipeline.bat open
 - `page_done`
 - `page_failed`
 
-## 7. 결과를 어떻게 해석하나
+## 6. 결과를 어떻게 해석하나
 
 ### 좋은 조합
 
@@ -158,7 +158,7 @@ scripts\benchmark_pipeline.bat open
 - 빈 번역 / 잘린 응답
 - OCR retry 증가
 
-## 8. 실제 활용 예시
+## 7. 실제 활용 예시
 
 ### 예시 A: `gpu-shift-ocr-front-cpu`가 더 빠른 경우
 
@@ -190,7 +190,7 @@ scripts\benchmark_pipeline.bat open
 
 순서로 다시 측정합니다.
 
-## 9. 다음에 결과를 문서화하는 위치
+## 8. 다음에 결과를 문서화하는 위치
 
 실제 승자 조합은 아래 문서에 누적합니다.
 
