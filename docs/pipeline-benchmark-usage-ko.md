@@ -1,0 +1,203 @@
+# 자동번역 벤치 측정 / 활용 방법
+
+기준 날짜: `2026-04-05`
+
+이 문서는 현재 프로젝트에서 벤치를 실제로 어떻게 돌리고, 나온 결과를 다음 튜닝에 어떻게 활용하는지 설명합니다.
+
+## 1. 먼저 준비할 것
+
+### 로컬 코퍼스
+
+- 저장소 루트의 `/Sample` 폴더를 사용합니다.
+- 기준은 `30장`입니다.
+- smoke 용도는 앞 `5장`, representative 용도는 전체 `30장`입니다.
+- `/Sample`은 `.gitignore`에 포함되어 Git에 올라가지 않습니다.
+
+### Python 실행 환경
+
+오프스크린 benchmark는 실제 앱 파이프라인을 import해서 돌립니다.
+
+따라서 아래 의존성이 있는 환경이 필요합니다.
+
+- `PySide6`
+- `cv2`
+- 앱 실행에 필요한 OCR / ONNX / 기타 런타임 의존성
+
+현재 `.venv`에 `cv2`가 없으면 benchmark script가 fail-fast로 멈추며, 그 상태는 정상입니다. 이 경우 먼저 앱 실행 환경을 맞춰야 합니다.
+
+## 2. 가장 쉬운 실행 방법
+
+Windows에서는 배치 파일 [benchmark_pipeline.bat](/mnt/c/Users/pjjpj/Desktop/openai_manga_translater/comic-translate/scripts/benchmark_pipeline.bat)를 사용하면 됩니다.
+
+기본 실행:
+
+```bat
+scripts\benchmark_pipeline.bat
+```
+
+이 명령은 아래와 같습니다.
+
+- preset: `live-ops-baseline`
+- mode: `batch`
+- runtime-mode: `attach-running`
+- repeat: `1`
+- sample-dir: `.\Sample`
+- sample-count: `30`
+
+## 3. 배치 파일 사용법
+
+### 3-1. 현재 떠 있는 서버에 붙어서 측정
+
+```bat
+scripts\benchmark_pipeline.bat run live-ops-baseline batch attach-running 1
+```
+
+### 3-2. one-page auto 성격으로 짧게 측정
+
+```bat
+scripts\benchmark_pipeline.bat run live-ops-baseline one-page attach-running 1
+```
+
+### 3-3. preset 기준으로 Docker runtime을 다시 띄워서 측정
+
+```bat
+scripts\benchmark_pipeline.bat run gpu-shift-ocr-front-cpu batch managed 1
+```
+
+### 3-4. 누적 결과를 요약 표로 만들기
+
+```bat
+scripts\benchmark_pipeline.bat summary
+```
+
+### 3-5. 결과 폴더 열기
+
+```bat
+scripts\benchmark_pipeline.bat open
+```
+
+## 4. 권장 측정 순서
+
+아래 순서대로 비교하는 것을 권장합니다.
+
+1. `repo-default`
+2. `live-ops-baseline`
+3. `gpu-shift-ocr-front-cpu`
+4. `gemma-heavy-offload`
+
+이 순서를 쓰는 이유는 다음과 같습니다.
+
+- 먼저 머지된 기준과 현재 운영 기준을 비교
+- 그 다음 `paddleocr-server`를 CPU로 내려 VRAM을 회수할 수 있는지 확인
+- 마지막으로 회수된 여유분을 Gemma offload에 더 배분했을 때 이득이 있는지 확인
+
+## 5. 결과는 어디에 쌓이나
+
+결과는 사용자 데이터 폴더 아래에 쌓입니다.
+
+기본 위치:
+
+```text
+%LOCALAPPDATA%\ComicTranslate\benchmarks
+```
+
+각 run 디렉터리에는 아래 파일이 생깁니다.
+
+- `benchmark_request.json`
+- `preset_resolved.json`
+- `runtime_snapshot.json`
+- `docker_snapshot.json`
+- `metrics.jsonl`
+- `summary.json`
+- `summary.md`
+
+## 6. 어떤 파일을 보면 되나
+
+### 가장 먼저 볼 파일
+
+- `summary.md`
+- `summary.json`
+
+여기서 바로 확인할 핵심 값:
+
+- `elapsed_sec`
+- `page_done_count`
+- `page_failed_count`
+- `gpu_peak_used_mb`
+- `gpu_floor_free_mb`
+
+### 더 자세히 볼 파일
+
+- `metrics.jsonl`
+
+이 파일은 단계별 이벤트 로그입니다. 아래 태그가 중요합니다.
+
+- `detect_start`, `detect_end`
+- `ocr_start`, `ocr_end`
+- `inpaint_start`, `inpaint_end`
+- `translate_start`, `translate_end`
+- `render_start`, `render_end`
+- `page_done`
+- `page_failed`
+
+## 7. 결과를 어떻게 해석하나
+
+### 좋은 조합
+
+- `page_failed_count = 0`
+- `gpu_floor_free_mb >= 1536`
+- `elapsed_sec` 감소
+- `translate` 단계 시간이 줄어듦
+- `ocr` 단계 시간이 늘지 않음
+
+### 버려야 할 조합
+
+- OOM, CUDA 오류, HTTP 오류
+- `page_failed_count > 0`
+- `gpu_floor_free_mb < 1536`
+- 빈 번역 / 잘린 응답
+- OCR retry 증가
+
+## 8. 실제 활용 예시
+
+### 예시 A: `gpu-shift-ocr-front-cpu`가 더 빠른 경우
+
+이 경우는 `paddleocr-server`의 GPU 상주가 실제로는 낭비였다는 뜻입니다.
+
+다음 액션:
+
+1. 이 조합을 새로운 후보 baseline으로 기록
+2. 같은 조합에서 `gemma-heavy-offload`를 다시 측정
+
+### 예시 B: `gemma-heavy-offload`가 빨라지지만 실패가 생기는 경우
+
+이 경우는 Gemma가 VRAM을 너무 많이 먹어서 다른 단계와 충돌한 것입니다.
+
+다음 액션:
+
+1. `n_gpu_layers`를 한 단계 낮춤
+2. `gpu_floor_free_mb`가 1.5GB 이상 남는 지점으로 돌아감
+
+### 예시 C: OCR이 병목인 경우
+
+이 경우는 Gemma보다 OCR 쪽 조정이 우선입니다.
+
+다음 액션:
+
+1. `parallel_workers`
+2. `max_new_tokens`
+3. 필요 시 `gpu_memory_utilization`
+
+순서로 다시 측정합니다.
+
+## 9. 다음에 결과를 문서화하는 위치
+
+실제 승자 조합은 아래 문서에 누적합니다.
+
+- [pipeline-benchmark-results-ko.md](/mnt/c/Users/pjjpj/Desktop/openai_manga_translater/comic-translate/docs/pipeline-benchmark-results-ko.md)
+
+전략은 아래 문서를 기준으로 유지합니다.
+
+- [pipeline-resource-strategy-ko.md](/mnt/c/Users/pjjpj/Desktop/openai_manga_translater/comic-translate/docs/pipeline-resource-strategy-ko.md)
+- [pipeline-benchmarking-ko.md](/mnt/c/Users/pjjpj/Desktop/openai_manga_translater/comic-translate/docs/pipeline-benchmarking-ko.md)
+- [pipeline-benchmark-checklist-ko.md](/mnt/c/Users/pjjpj/Desktop/openai_manga_translater/comic-translate/docs/pipeline-benchmark-checklist-ko.md)
