@@ -24,6 +24,9 @@
 - `gemma_json_retry_count`
 - `gemma_truncated_count`
 - `gemma_empty_content_count`
+- `gemma_missing_key_count`
+- `gemma_reasoning_without_final_count`
+- `gemma_schema_validation_fail_count`
 - `ocr_empty_rate`
 - `ocr_low_quality_rate`
 
@@ -32,6 +35,8 @@
 - `page_failed_count = 0`
 - `gemma_truncated_count = 0`
 - `gemma_empty_content_count = 0`
+- `gemma_missing_key_count = 0`
+- `gemma_schema_validation_fail_count = 0`
 - `gemma_json_retry_count` 증가 없음
 - `ocr_empty_rate` 증가 없음
 - `ocr_low_quality_rate` 증가 없음
@@ -61,11 +66,13 @@
 자동 보고서는 보통 아래 차트를 만듭니다.
 
 - batch elapsed 비교
+- old image vs `b8665` object vs `b8665` schema control 비교
+- `chunk_size` 대비 `translate_median_sec`
 - `n_gpu_layers` 대비 `translate_median_sec`
 - `temperature` 대비 `translate_median_sec`
-- retry / truncated / OCR low-quality 비교
+- retry / missing key / truncated / OCR low-quality 비교
 
-실전에서는 `translate_median_sec`와 `gemma_truncated_count`를 같이 봐야 합니다. 속도만 빠르고 truncated가 늘어나면 채택하면 안 됩니다.
+실전에서는 `translate_median_sec`, `gemma_truncated_count`, `gemma_missing_key_count`를 같이 봐야 합니다. 속도만 빠르고 structured output이 흔들리면 채택하면 안 됩니다.
 
 ## 관련 문서
 

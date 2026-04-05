@@ -131,6 +131,13 @@ class BatchProcessor:
             "gemma_chunk_retry_events": int(stats.get("gemma_chunk_retry_events", 0) or 0),
             "gemma_truncated_count": int(stats.get("gemma_truncated_count", 0) or 0),
             "gemma_empty_content_count": int(stats.get("gemma_empty_content_count", 0) or 0),
+            "gemma_missing_key_count": int(stats.get("gemma_missing_key_count", 0) or 0),
+            "gemma_reasoning_without_final_count": int(
+                stats.get("gemma_reasoning_without_final_count", 0) or 0
+            ),
+            "gemma_schema_validation_fail_count": int(
+                stats.get("gemma_schema_validation_fail_count", 0) or 0
+            ),
         }
 
     def _effective_export_settings(self, settings_page) -> dict:

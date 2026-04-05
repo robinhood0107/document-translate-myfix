@@ -36,6 +36,25 @@ scripts\benchmark_suite_cuda13.bat
 3. `translation-ngl23` batch `managed`
 4. `docs/banchmark_report/report-ko.md` 자동 생성
 
+`b8665 + Gemma 4 parser` 실험 라운드는 아래처럼 별도 profile로 실행합니다.
+
+```bat
+scripts\benchmark_suite_cuda13.bat --suite-profile b8665-gemma4
+```
+
+이 profile은 `attach-running`이 아니라 `managed-only`로 동작합니다. 이유는 old image와 `local/llama.cpp:server-cuda-b8665`를 공정하게 비교하려면 suite가 매 단계에서 Docker runtime을 직접 recreate해야 하기 때문입니다.
+
+`b8665-gemma4` profile의 큰 순서는 아래와 같습니다.
+
+1. `translation-old-image-baseline` one-page / batch control
+2. `b8665-object-control` one-page / batch control
+3. `b8665-schema-control` one-page / batch control
+4. format winner 기준 `chunk_size` sweep
+5. format + chunk winner 기준 `temperature` sweep
+6. format + chunk + temperature winner 기준 `n_gpu_layers` sweep
+7. 필요 시 `ctx=3072` rescue, low-think fallback
+8. `docs/banchmark_report/report-ko.md` 자동 재생성
+
 ## 수동 실행
 
 대표 batch:
@@ -67,6 +86,7 @@ scripts\benchmark_pipeline_cuda13.bat summary
 
 ```bat
 .venv-win-cuda13\Scripts\python.exe scripts\generate_benchmark_report.py
+.venv-win-cuda13\Scripts\python.exe scripts\generate_benchmark_report.py --manifest .\banchmark_result_log\<b8665-suite-run>\report_manifest_b8665.yaml
 ```
 
 ## 생성되는 파일
@@ -86,6 +106,14 @@ scripts\benchmark_pipeline_cuda13.bat summary
 
 - [report-ko.md](/mnt/c/Users/pjjpj/Desktop/openai_manga_translater/comic-translate/docs/banchmark_report/report-ko.md)
 - [latest](/mnt/c/Users/pjjpj/Desktop/openai_manga_translater/comic-translate/docs/assets/benchmarking/latest)
+
+`b8665` managed run에는 추가로 아래 파일이 같이 남습니다.
+
+- `docker_logs/gemma-local-server.log`
+- `docker_logs/paddleocr-server.log`
+- `docker_logs/paddleocr-vllm.log`
+
+이 로그는 `b8665` build/version 확인, Gemma 4 template/parser 관련 startup 메시지 확인, structured output 이상 징후 확인에 사용합니다.
 
 ## 관련 문서
 

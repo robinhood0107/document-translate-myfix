@@ -38,8 +38,9 @@ echo [suite] runtime=.venv-win-cuda13
 echo [suite] cuda13-bin=%CUDA13_BIN%
 echo [suite] tensorrt-libs=%TENSORRT_LIBS%
 echo [suite] cudnn-bin=%CUDNN_BIN%
+echo [suite] suite-args=%*
 echo [suite] one-click suite starting...
-call "%PYTHON_EXE%" -u "%SCRIPT_DIR%benchmark_suite.py"
+call "%PYTHON_EXE%" -u "%SCRIPT_DIR%benchmark_suite.py" %*
 set "EXIT_CODE=%ERRORLEVEL%"
 echo [suite] finished exit-code=%EXIT_CODE% at=%DATE% %TIME%
 exit /b %EXIT_CODE%
@@ -48,11 +49,15 @@ exit /b %EXIT_CODE%
 echo.
 echo Usage:
 echo   scripts\benchmark_suite_cuda13.bat
+echo   scripts\benchmark_suite_cuda13.bat --suite-profile b8665-gemma4
 echo.
-echo This one-click launcher runs:
+echo Default suite runs:
 echo   1. translation-baseline one-page attach-running
 echo   2. translation-baseline batch attach-running
 echo   3. translation-ngl23 batch managed
+echo.
+echo b8665 experiment suite:
+echo   scripts\benchmark_suite_cuda13.bat --suite-profile b8665-gemma4
 echo.
 echo Runtime:
 echo   benchmark_suite_cuda13.bat uses .venv-win-cuda13
