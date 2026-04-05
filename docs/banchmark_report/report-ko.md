@@ -1,6 +1,13 @@
-# 자동번역 벤치마크 보고서
+# 자동번역 벤치마크 보고서 - Translation-Only Gemma + PaddleOCR GPU Optimization
 
 이 문서는 `./banchmark_result_log`에 있는 실제 run 결과를 기준으로 자동 생성됩니다.
+
+## 보고서 메타데이터
+
+- 생성 시각: `2026-04-06 01:20:56 대한민국 표준시`
+- 벤치마킹 이름: `Translation-Only Gemma + PaddleOCR GPU Optimization`
+- 벤치마킹 종류: `translation-only preset sweep`
+- 벤치마킹 범위: `Gemma sampler temperature sweep + n_gpu_layers sweep with PaddleOCR front on CPU`
 
 ## 현재 기준 설정
 

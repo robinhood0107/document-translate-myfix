@@ -4,6 +4,7 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -155,8 +156,14 @@ def main() -> int:
     manifest = _load_yaml(manifest_path)
     results_root = Path(args.results_root) if args.results_root else (ROOT / str(manifest.get("results_root", "banchmark_result_log")))
     report_cfg = manifest.get("report", {})
+    benchmark_cfg = manifest.get("benchmark", {})
     report_path = ROOT / str(report_cfg.get("markdown_output", "docs/banchmark_report/report-ko.md"))
     assets_dir = ROOT / str(report_cfg.get("assets_dir", "docs/assets/benchmarking/latest"))
+    generated_at = datetime.now().astimezone()
+    generated_at_display = generated_at.strftime("%Y-%m-%d %H:%M:%S %Z")
+    benchmark_name = str(benchmark_cfg.get("name", "Translation-Only Benchmark"))
+    benchmark_kind = str(benchmark_cfg.get("kind", "benchmark"))
+    benchmark_scope = str(benchmark_cfg.get("scope", ""))
 
     baseline_one = _load_run(results_root, manifest["baseline"]["one_page"])
     baseline_batch = _load_run(results_root, manifest["baseline"]["batch"])
@@ -218,6 +225,11 @@ def main() -> int:
     summary_payload = {
         "manifest": repo_relative_str(manifest_path),
         "results_root": repo_relative_str(results_root),
+        "generated_at": generated_at.isoformat(),
+        "generated_at_display": generated_at_display,
+        "benchmark_name": benchmark_name,
+        "benchmark_kind": benchmark_kind,
+        "benchmark_scope": benchmark_scope,
         "active_preset": manifest.get("active_preset"),
         "winning_candidate_preset": manifest.get("winning_candidate_preset"),
         "resolved_winner_preset": winner_preset,
@@ -235,9 +247,16 @@ def main() -> int:
 
     winner_run = finalist_lookup.get(str(manifest.get("winning_candidate_preset")), baseline_batch)
     report_lines = [
-        "# 자동번역 벤치마크 보고서",
+        f"# 자동번역 벤치마크 보고서 - {benchmark_name}",
         "",
         "이 문서는 `./banchmark_result_log`에 있는 실제 run 결과를 기준으로 자동 생성됩니다.",
+        "",
+        "## 보고서 메타데이터",
+        "",
+        f"- 생성 시각: `{generated_at_display}`",
+        f"- 벤치마킹 이름: `{benchmark_name}`",
+        f"- 벤치마킹 종류: `{benchmark_kind}`",
+        f"- 벤치마킹 범위: `{benchmark_scope}`",
         "",
         "## 현재 기준 설정",
         "",
