@@ -7,7 +7,7 @@ for %%I in ("%SCRIPT_DIR%..") do set "REPO_ROOT=%%~fI"
 if defined CT_BENCH_OUTPUT_ROOT (
     set "BENCH_ROOT=%CT_BENCH_OUTPUT_ROOT%"
 ) else (
-    set "BENCH_ROOT=%USERPROFILE%\benchmarks"
+    set "BENCH_ROOT=%USERPROFILE%\Documents\Comic Translate"
     set "CT_BENCH_OUTPUT_ROOT=%BENCH_ROOT%"
 )
 
@@ -36,6 +36,6 @@ echo   2. live-ops-baseline one-page attach-running
 echo   3. gpu-shift-ocr-front-cpu batch managed
 echo.
 echo Results are saved to:
-echo   %%USERPROFILE%%\benchmarks
+echo   %%USERPROFILE%%\Documents\Comic Translate
 echo.
 goto :eof
