@@ -45,4 +45,4 @@
 
 ## 참고
 
-최신 비교 표와 차트는 [report-ko.md](/mnt/c/Users/pjjpj/Desktop/openai_manga_translater/comic-translate/docs/benchmark/report-ko.md)에서 봅니다.
+최신 비교 표와 차트는 [report-ko.md](/mnt/c/Users/pjjpj/Desktop/openai_manga_translater/comic-translate/docs/banchmark_report/report-ko.md)에서 봅니다.

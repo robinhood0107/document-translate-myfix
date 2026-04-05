@@ -155,7 +155,7 @@ def main() -> int:
     manifest = _load_yaml(manifest_path)
     results_root = Path(args.results_root) if args.results_root else (ROOT / str(manifest.get("results_root", "banchmark_result_log")))
     report_cfg = manifest.get("report", {})
-    report_path = ROOT / str(report_cfg.get("markdown_output", "docs/benchmark/report-ko.md"))
+    report_path = ROOT / str(report_cfg.get("markdown_output", "docs/banchmark_report/report-ko.md"))
     assets_dir = ROOT / str(report_cfg.get("assets_dir", "docs/assets/benchmarking/latest"))
 
     baseline_one = _load_run(results_root, manifest["baseline"]["one_page"])

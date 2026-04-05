@@ -512,7 +512,7 @@ def _open_results(suite_dir: Path) -> None:
     try:
         os.startfile(str(suite_dir))
         os.startfile(str(suite_dir / "suite_report.md"))
-        report_path = ROOT / "docs" / "benchmark" / "report-ko.md"
+        report_path = ROOT / "docs" / "banchmark_report" / "report-ko.md"
         if report_path.is_file():
             os.startfile(str(report_path))
     except OSError:

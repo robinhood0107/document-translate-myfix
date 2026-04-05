@@ -20,7 +20,7 @@
 ## 실행 후
 
 - [ ] `summary.json`, `summary.md`, `metrics.jsonl` 생성 확인
-- [ ] `docs/benchmark/report-ko.md` 자동 생성 확인
+- [ ] `docs/banchmark_report/report-ko.md` 자동 생성 확인
 - [ ] `docs/assets/benchmarking/latest/*.png` 생성 확인
 - [ ] 대표 후보는 `translation_audit.json`까지 확인
 - [ ] `validate_changed_python.py --all` 실행
