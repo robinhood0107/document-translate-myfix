@@ -1,0 +1,57 @@
+pipeline_name: PaddleOCR-VL-1.5
+
+batch_size: 64
+use_queues: true
+
+use_doc_preprocessor: false
+use_layout_detection: false
+use_chart_recognition: false
+use_seal_recognition: false
+format_block_content: false
+merge_layout_blocks: true
+
+markdown_ignore_labels:
+  - number
+  - footnote
+  - header
+  - header_image
+  - footer
+  - footer_image
+  - aside_text
+
+SubModules:
+  LayoutDetection:
+    module_name: layout_detection
+    model_name: PP-DocLayoutV3
+    model_dir: null
+    batch_size: 8
+    threshold: 0.3
+    layout_nms: true
+    layout_unclip_ratio: [1.0, 1.0]
+
+  VLRecognition:
+    module_name: vl_recognition
+    model_name: PaddleOCR-VL-1.5-0.9B
+    model_dir: null
+    batch_size: 4096
+    genai_config:
+      backend: vllm-server
+      server_url: http://paddleocr-vllm:18000/v1
+      max_concurrency: 256
+
+SubPipelines:
+  DocPreprocessor:
+    pipeline_name: doc_preprocessor
+    batch_size: 8
+    use_doc_orientation_classify: true
+    use_doc_unwarping: true
+    SubModules:
+      DocOrientationClassify:
+        module_name: doc_text_orientation
+        model_name: PP-LCNet_x1_0_doc_ori
+        model_dir: null
+        batch_size: 8
+      DocUnwarping:
+        module_name: image_unwarping
+        model_name: UVDoc
+        model_dir: null
