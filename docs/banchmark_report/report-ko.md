@@ -4,7 +4,7 @@
 
 ## 보고서 메타데이터
 
-- 생성 시각: `2026-04-06 01:20:56 대한민국 표준시`
+- 생성 시각: `2026-04-06 05:18:26 대한민국 표준시`
 - 벤치마킹 이름: `Translation-Only Gemma + PaddleOCR GPU Optimization`
 - 벤치마킹 종류: `translation-only preset sweep`
 - 벤치마킹 범위: `Gemma sampler temperature sweep + n_gpu_layers sweep with PaddleOCR front on CPU`
@@ -20,7 +20,7 @@
 
 ## 판단 요약
 
-- translation-t06가 batch elapsed `1048.742s`, translate median `12.150s`, retry `1`, truncated `0`로 가장 균형이 좋았습니다.
+- translation-t06가 batch elapsed `1048.742s`, translate median `12.150s`, retry `1`, missing key `0`, truncated `0`로 가장 균형이 좋았습니다.
 - winning candidate run: `./banchmark_result_log/20260406_001330_translation-t06_batch_r1`
 - baseline one-page run: `./banchmark_result_log/20260405_224354_translation-baseline_one-page_r1`
 - baseline batch run: `./banchmark_result_log/20260405_231837_translation-baseline_batch_r1`
@@ -33,7 +33,7 @@
 | translation-ngl23 | 1053.787 | 12.999 | 16.821 | 2.215 | 1 | 1 | 0.040 | ./banchmark_result_log/20260405_233628_translation-ngl23_batch_r1 |
 | translation-baseline | 1067.117 | 13.511 | 16.358 | 2.081 | 1 | 1 | 0.040 | ./banchmark_result_log/20260405_231837_translation-baseline_batch_r1 |
 
-![Batch Elapsed](../assets/benchmarking/latest/batch_elapsed_comparison.png)
+![Batch Elapsed](/mnt/c/Users/pjjpj/Desktop/openai_manga_translater/comic-translate/docs/assets/benchmarking/latest/batch_elapsed_comparison.png)
 
 ## `n_gpu_layers` Sweep
 
@@ -45,7 +45,7 @@
 | translation-ngl23 | 23 | 42.305 | 11.781 | 22.132 | ./banchmark_result_log/20260405_230023_translation-ngl23_one-page_r1 |
 | translation-ngl24 | 24 | 43.485 | 14.806 | 20.976 | ./banchmark_result_log/20260405_230307_translation-ngl24_one-page_r1 |
 
-![n_gpu_layers](../assets/benchmarking/latest/n_gpu_layers_translate_median.png)
+![n_gpu_layers](/mnt/c/Users/pjjpj/Desktop/openai_manga_translater/comic-translate/docs/assets/benchmarking/latest/n_gpu_layers_translate_median.png)
 
 ## `temperature` Sweep
 
@@ -56,7 +56,7 @@
 | translation-t06 | 0.600 | 41.801 | 13.144 | 19.472 | ./banchmark_result_log/20260406_000711_translation-t06_one-page_r1 |
 | translation-t07 | 0.700 | 42.597 | 14.678 | 19.965 | ./banchmark_result_log/20260406_000955_translation-t07_one-page_r1 |
 
-![temperature](../assets/benchmarking/latest/temperature_translate_median.png)
+![temperature](/mnt/c/Users/pjjpj/Desktop/openai_manga_translater/comic-translate/docs/assets/benchmarking/latest/temperature_translate_median.png)
 
 ## 품질 지표 비교
 
@@ -66,15 +66,4 @@
 | translation-ngl23 | 1 | 1 | 0.000 | 0.040 | True |
 | translation-baseline | 1 | 1 | 0.000 | 0.040 | None |
 
-![quality](../assets/benchmarking/latest/quality_metrics_comparison.png)
-
-## 재현 입력
-
-- manifest: `./benchmarks/report_manifest.yaml`
-- baseline run dir: `./banchmark_result_log/20260405_231837_translation-baseline_batch_r1`
-- winner candidate run dir: `./banchmark_result_log/20260406_001330_translation-t06_batch_r1`
-
-## 참고
-
-- 실제 비즈니스 코드는 stage event와 통계 surface만 노출하고, 실험 비교/차트/판단은 benchmark 레이어에서 처리합니다.
-- raw 결과를 남겨두면 이 보고서를 언제든 다시 생성할 수 있습니다.
+![quality](/mnt/c/Users/pjjpj/Desktop/openai_manga_translater/comic-translate/docs/assets/benchmarking/latest/quality_metrics_comparison.png)
