@@ -31,6 +31,29 @@ Windows에서는 시스템 Python이 아니라 아래 전용 환경을 사용합
 - `.venv-win`
 - `.venv-win-cuda13`
 
+- `benchmark_pipeline.bat`, `benchmark_suite.bat`는 `.venv-win`만 사용
+- `benchmark_pipeline_cuda13.bat`, `benchmark_suite_cuda13.bat`는 `.venv-win-cuda13`만 사용
+
+## 1-2. 벤치 전용 폰트 폴더
+
+렌더링 벤치에서는 target language 기준으로 `benchmarks-fonts/<언어>/`를 먼저 찾습니다.
+
+- 한국어: `benchmarks-fonts/Korean/`
+- 일본어: `benchmarks-fonts/Japanese/`
+- 영어: `benchmarks-fonts/English/`
+
+규칙:
+
+- 폰트 확장자: `.ttf`, `.ttc`, `.otf`, `.woff`, `.woff2`
+- 해당 폴더에 파일이 여러 개면 사전순 첫 번째 파일 사용
+- 폴더가 비어 있으면 현재 앱 폰트 설정 유지
+
+fallback:
+
+- `Simplified Chinese` -> `Chinese`
+- `Traditional Chinese` -> `Chinese`
+- `Brazilian Portuguese` -> `Portuguese`
+
 ## 2. 산출물 위치
 
 벤치 결과는 저장소가 아니라 Windows 사용자 문서 폴더 아래의 `Comic Translate` 폴더에 저장합니다.

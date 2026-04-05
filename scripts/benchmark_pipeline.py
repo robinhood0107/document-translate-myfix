@@ -22,6 +22,7 @@ if str(ROOT) not in sys.path:
 from PySide6.QtCore import QSettings
 from PySide6.QtWidgets import QApplication
 
+from app.ui.main_window.constants import supported_source_languages, supported_target_languages
 from benchmark_common import (
     DEFAULT_CONTAINER_NAMES,
     create_run_dir,
@@ -35,6 +36,14 @@ from benchmark_common import (
     write_json,
 )
 from modules.utils.gpu_metrics import collect_runtime_snapshot, write_snapshot_json
+
+BENCHMARK_FONT_ROOT = ROOT / "benchmarks-fonts"
+BENCHMARK_FONT_EXTENSIONS = {".ttf", ".ttc", ".otf", ".woff", ".woff2"}
+LANGUAGE_FONT_FALLBACKS = {
+    "Simplified Chinese": ["Simplified Chinese", "Chinese"],
+    "Traditional Chinese": ["Traditional Chinese", "Chinese"],
+    "Brazilian Portuguese": ["Brazilian Portuguese", "Portuguese"],
+}
 
 
 def _log(message: str) -> None:
@@ -63,6 +72,61 @@ def _wait_for_url(url: str, timeout_sec: int = 180) -> None:
         except (urllib.error.URLError, TimeoutError):
             time.sleep(2)
     raise TimeoutError(f"Timed out waiting for {url}")
+
+
+def _benchmark_font_dirs(target_lang: str) -> list[Path]:
+    candidates = LANGUAGE_FONT_FALLBACKS.get(target_lang, [target_lang])
+    return [BENCHMARK_FONT_ROOT / name for name in candidates]
+
+
+def _find_benchmark_font(target_lang: str) -> Path | None:
+    for directory in _benchmark_font_dirs(target_lang):
+        if not directory.is_dir():
+            continue
+        files = sorted(
+            path
+            for path in directory.iterdir()
+            if path.is_file() and path.suffix.lower() in BENCHMARK_FONT_EXTENSIONS
+        )
+        if files:
+            return files[0]
+    return None
+
+
+def _apply_benchmark_font(window, target_lang: str) -> None:
+    font_path = _find_benchmark_font(target_lang)
+    if font_path is not None:
+        window.add_custom_font(str(font_path))
+        window.set_font(str(font_path))
+        _log(
+            "벤치 폰트 적용: target={target} font_file={font_file} resolved_family={family}".format(
+                target=target_lang,
+                font_file=font_path,
+                family=window.font_dropdown.currentText(),
+            )
+        )
+        return
+
+    current_font = window.font_dropdown.currentText().strip()
+    if current_font:
+        _log(
+            "벤치 폰트 없음: target={target} searched={dirs} current_font 유지={font}".format(
+                target=target_lang,
+                dirs=", ".join(str(path) for path in _benchmark_font_dirs(target_lang)),
+                font=current_font,
+            )
+        )
+        return
+
+    fallback_font = QApplication.font().family()
+    window.set_font(fallback_font)
+    _log(
+        "벤치 폰트 없음: target={target} searched={dirs} app 기본 폰트 적용={font}".format(
+            target=target_lang,
+            dirs=", ".join(str(path) for path in _benchmark_font_dirs(target_lang)),
+            font=fallback_font,
+        )
+    )
 
 
 def _ensure_managed_runtime(run_dir: Path, preset: dict[str, object]) -> None:
@@ -122,6 +186,7 @@ def _configure_window(window, preset: dict[str, object], source_lang: str, targe
 
     window.s_combo.setCurrentText(source_lang)
     window.t_combo.setCurrentText(target_lang)
+    _apply_benchmark_font(window, target_lang)
 
 
 def _load_images(window, image_paths: list[Path], source_lang: str, target_lang: str) -> list[str]:
@@ -276,6 +341,12 @@ def main() -> int:
             sample_count=args.sample_count,
             smoke=len(corpus["smoke"]),
             representative=len(corpus["representative"]),
+        )
+    )
+    _log(
+        "벤치 폰트 루트: {root} supported_target_langs={count}".format(
+            root=BENCHMARK_FONT_ROOT,
+            count=len(set(supported_source_languages + supported_target_languages)),
         )
     )
 
