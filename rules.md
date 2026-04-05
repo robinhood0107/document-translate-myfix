@@ -225,8 +225,10 @@ GitHub 저장소 설정에서 아래를 권장한다.
 
 - `main`과 `develop`에는 benchmark-specific 정책, preset, runner, generated report, chart asset을 두지 않는다.
 - benchmark 실험 도구와 문서는 `benchmarking/lab` 브랜치에서만 관리한다.
+- benchmark 결과를 제품 브랜치에 반영할 때는 `benchmarking/lab`를 직접 merge하지 않고, 필요한 제품 변경만 별도 `codex/*` 브랜치에서 다시 정리해 반영한다.
 - 제품 코드에는 benchmark를 위해 필요한 최소 계측만 남긴다.
   - 허용: stage hook, retry/truncated/quality 통계 surface, generic memlog/gpu snapshot helper
   - 금지: winner 판단, preset 선택, 실험 순서, 차트/문서 생성 로직
 - core 비즈니스 코드는 benchmark runner나 report generator를 import하지 않는다.
 - benchmark 레이어는 raw 결과와 공용 계측 surface를 읽어서 해석한다.
+- 상세 운영 기준은 `docs/repo/benchmark-branch-policy-ko.md`를 따른다.
