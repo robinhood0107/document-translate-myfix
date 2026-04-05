@@ -1,0 +1,437 @@
+from __future__ import annotations
+
+import json
+import os
+import shutil
+import subprocess
+import time
+from collections import Counter, defaultdict, deque
+from datetime import datetime
+from pathlib import Path
+from typing import Any
+
+
+ROOT = Path(__file__).resolve().parents[1]
+DEFAULT_SAMPLE_DIR = ROOT / "Sample"
+DEFAULT_SAMPLE_COUNT = 30
+DEFAULT_SMOKE_COUNT = 5
+SUPPORTED_IMAGE_EXTENSIONS = {
+    ".png",
+    ".jpg",
+    ".jpeg",
+    ".webp",
+    ".bmp",
+    ".tif",
+    ".tiff",
+}
+PRESET_DIR = ROOT / "benchmarks" / "presets"
+OCR_BUNDLE_DIR = ROOT / "paddleocr_vl_docker_files"
+ROOT_GEMMA_COMPOSE = ROOT / "docker-compose.yaml"
+DEFAULT_CONTAINER_NAMES = [
+    "gemma-local-server",
+    "paddleocr-server",
+    "paddleocr-vllm",
+]
+
+
+def repo_root() -> Path:
+    return ROOT
+
+
+def now_stamp() -> str:
+    return datetime.now().strftime("%Y%m%d_%H%M%S")
+
+
+def run_command(
+    cmd: list[str],
+    *,
+    cwd: str | Path | None = None,
+    check: bool = True,
+) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        cmd,
+        cwd=str(cwd) if cwd is not None else None,
+        check=check,
+        capture_output=True,
+        text=True,
+    )
+
+
+def _python3_yaml_load(path: Path) -> dict[str, Any]:
+    completed = subprocess.run(
+        [
+            "python3",
+            "-c",
+            (
+                "import json, sys, yaml; "
+                "payload = yaml.safe_load(sys.stdin.read()); "
+                "print(json.dumps(payload))"
+            ),
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+        input=path.read_text(encoding="utf-8"),
+    )
+    payload = json.loads(completed.stdout or "{}")
+    if not isinstance(payload, dict):
+        raise ValueError(f"Expected YAML mapping in {path}")
+    return payload
+
+
+def _python3_yaml_dump(path: Path, payload: dict[str, Any]) -> None:
+    completed = subprocess.run(
+        [
+            "python3",
+            "-c",
+            (
+                "import json, sys, yaml; "
+                "payload = json.loads(sys.stdin.read()); "
+                "sys.stdout.write(yaml.safe_dump(payload, sort_keys=False, allow_unicode=True))"
+            ),
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+        input=json.dumps(payload, ensure_ascii=False),
+    )
+    path.write_text(completed.stdout, encoding="utf-8")
+
+
+def load_preset(preset: str) -> tuple[dict[str, Any], Path]:
+    candidate = Path(preset)
+    if not candidate.is_file():
+        for suffix in (".json", ".yml", ".yaml"):
+            test_path = PRESET_DIR / f"{preset}{suffix}"
+            if test_path.is_file():
+                candidate = test_path
+                break
+    if not candidate.is_file():
+        raise FileNotFoundError(f"Unable to find preset: {preset}")
+
+    text = candidate.read_text(encoding="utf-8")
+    if candidate.suffix.lower() == ".json":
+        data = json.loads(text)
+    else:
+        data = _python3_yaml_load(candidate)
+    if not isinstance(data, dict):
+        raise ValueError(f"Preset is not a mapping: {candidate}")
+    return data, candidate
+
+
+def select_sample_images(
+    sample_dir: str | Path = DEFAULT_SAMPLE_DIR,
+    *,
+    sample_count: int = DEFAULT_SAMPLE_COUNT,
+) -> list[Path]:
+    root = Path(sample_dir)
+    if not root.is_dir():
+        raise FileNotFoundError(f"Sample directory does not exist: {root}")
+
+    files = sorted(
+        path
+        for path in root.rglob("*")
+        if path.is_file() and path.suffix.lower() in SUPPORTED_IMAGE_EXTENSIONS
+    )
+    if len(files) < sample_count:
+        raise RuntimeError(
+            f"Need at least {sample_count} benchmark images in {root}, found {len(files)}."
+        )
+    return files[:sample_count]
+
+
+def resolve_corpus(
+    sample_dir: str | Path = DEFAULT_SAMPLE_DIR,
+    *,
+    sample_count: int = DEFAULT_SAMPLE_COUNT,
+) -> dict[str, list[Path]]:
+    representative = select_sample_images(sample_dir, sample_count=sample_count)
+    smoke_count = min(DEFAULT_SMOKE_COUNT, len(representative))
+    return {
+        "smoke": representative[:smoke_count],
+        "representative": representative,
+    }
+
+
+def _update_command_option(command: list[Any], option: str, values: list[str]) -> None:
+    command_strs = [str(item) for item in command]
+    try:
+        index = command_strs.index(option)
+    except ValueError:
+        command.extend([option, *values])
+        return
+
+    del command[index : index + 2]
+    for offset, value in enumerate([option, *values]):
+        command.insert(index + offset, value)
+
+
+def _stage_gemma_runtime(preset: dict[str, Any], runtime_dir: Path) -> dict[str, Any]:
+    runtime_dir.mkdir(parents=True, exist_ok=True)
+    compose = _python3_yaml_load(ROOT_GEMMA_COMPOSE)
+    service = compose["services"]["gemma-local-server"]
+    command = list(service.get("command") or [])
+    gemma = preset.get("gemma", {})
+
+    if gemma.get("model_path"):
+        _update_command_option(command, "-m", [str(gemma["model_path"])])
+    if gemma.get("context_size") is not None:
+        _update_command_option(command, "-c", [str(gemma["context_size"])])
+    if gemma.get("n_parallel") is not None:
+        _update_command_option(command, "-np", [str(gemma["n_parallel"])])
+    if gemma.get("threads") is not None:
+        _update_command_option(command, "-t", [str(gemma["threads"])])
+    if gemma.get("n_gpu_layers") is not None:
+        _update_command_option(command, "--n-gpu-layers", [str(gemma["n_gpu_layers"])])
+    if gemma.get("reasoning") is not None:
+        _update_command_option(command, "--reasoning", [str(gemma["reasoning"])])
+    if gemma.get("reasoning_budget") is not None:
+        _update_command_option(
+            command, "--reasoning-budget", [str(gemma["reasoning_budget"])]
+        )
+    if gemma.get("reasoning_format") is not None:
+        _update_command_option(
+            command, "--reasoning-format", [str(gemma["reasoning_format"])]
+        )
+    if gemma.get("predict") is not None:
+        _update_command_option(command, "-n", [str(gemma["predict"])])
+
+    service["command"] = command
+    compose_path = runtime_dir / "docker-compose.yaml"
+    _python3_yaml_dump(compose_path, compose)
+    return {
+        "compose_path": str(compose_path),
+        "service_name": "gemma-local-server",
+    }
+
+
+def _stage_ocr_runtime(preset: dict[str, Any], runtime_dir: Path) -> dict[str, Any]:
+    runtime_dir.mkdir(parents=True, exist_ok=True)
+    compose = _python3_yaml_load(OCR_BUNDLE_DIR / "docker-compose.yaml")
+    ocr_runtime = preset.get("ocr_runtime", {})
+    front_device = str(ocr_runtime.get("front_device", "gpu:0"))
+
+    layout_service = compose["services"]["paddleocr-layout"]
+    layout_command = str(layout_service.get("command") or "")
+    layout_service["command"] = layout_command.replace("--device gpu:0", f"--device {front_device}")
+    if front_device == "cpu":
+        layout_service.pop("gpus", None)
+    else:
+        layout_service["gpus"] = "all"
+
+    compose_path = runtime_dir / "docker-compose.yaml"
+    _python3_yaml_dump(compose_path, compose)
+
+    pipeline_conf = _python3_yaml_load(OCR_BUNDLE_DIR / "pipeline_conf.yaml")
+    pipeline_path = runtime_dir / "pipeline_conf.yaml"
+    _python3_yaml_dump(pipeline_path, pipeline_conf)
+
+    vllm_conf = _python3_yaml_load(OCR_BUNDLE_DIR / "vllm_config.yml")
+    for key in ("gpu_memory_utilization", "max_model_len", "max_num_seqs", "max_num_batched_tokens", "dtype"):
+        if key in ocr_runtime:
+            vllm_conf[key] = ocr_runtime[key]
+    vllm_path = runtime_dir / "vllm_config.yml"
+    _python3_yaml_dump(vllm_path, vllm_conf)
+
+    return {
+        "compose_path": str(compose_path),
+        "pipeline_conf_path": str(pipeline_path),
+        "vllm_config_path": str(vllm_path),
+        "service_names": ["paddleocr-server", "paddleocr-vllm"],
+    }
+
+
+def stage_runtime_files(preset: dict[str, Any], runtime_dir: str | Path) -> dict[str, Any]:
+    base = Path(runtime_dir)
+    if base.exists():
+        shutil.rmtree(base)
+    base.mkdir(parents=True, exist_ok=True)
+
+    gemma_runtime = _stage_gemma_runtime(preset, base / "gemma")
+    ocr_runtime = _stage_ocr_runtime(preset, base / "ocr")
+
+    app_settings_path = base / "app_settings.json"
+    app_settings_path.write_text(
+        json.dumps(
+            {
+                "app": preset.get("app", {}),
+                "gemma": preset.get("gemma", {}),
+                "ocr_client": preset.get("ocr_client", {}),
+                "ocr_runtime": preset.get("ocr_runtime", {}),
+            },
+            ensure_ascii=False,
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+
+    return {
+        "runtime_dir": str(base),
+        "gemma": gemma_runtime,
+        "ocr": ocr_runtime,
+        "app_settings_path": str(app_settings_path),
+    }
+
+
+def benchmark_output_root() -> Path:
+    from modules.utils.paths import get_user_data_dir
+
+    root = Path(get_user_data_dir()) / "benchmarks"
+    root.mkdir(parents=True, exist_ok=True)
+    return root
+
+
+def create_run_dir(label: str) -> Path:
+    run_dir = benchmark_output_root() / f"{now_stamp()}_{label}"
+    run_dir.mkdir(parents=True, exist_ok=True)
+    return run_dir
+
+
+def write_json(path: str | Path, payload: dict[str, Any]) -> None:
+    output_path = Path(path)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    output_path.write_text(
+        json.dumps(payload, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+
+
+def load_metrics(metrics_path: str | Path) -> list[dict[str, Any]]:
+    path = Path(metrics_path)
+    if not path.is_file():
+        return []
+    rows: list[dict[str, Any]] = []
+    for line in path.read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            rows.append(json.loads(line))
+        except json.JSONDecodeError:
+            continue
+    return rows
+
+
+def _primary_gpu(entry: dict[str, Any]) -> dict[str, Any] | None:
+    gpu = entry.get("gpu")
+    if isinstance(gpu, dict):
+        primary = gpu.get("primary")
+        if isinstance(primary, dict):
+            return primary
+    return None
+
+
+def summarize_metrics(metrics_path: str | Path) -> dict[str, Any]:
+    rows = load_metrics(metrics_path)
+    if not rows:
+        return {
+            "entry_count": 0,
+            "tag_counts": {},
+            "stage_stats": {},
+        }
+
+    tag_counts = Counter(str(row.get("tag", "") or "") for row in rows)
+    stage_open: dict[tuple[str, str, str], deque[float]] = defaultdict(deque)
+    stage_durations: dict[str, list[float]] = defaultdict(list)
+
+    used_values: list[int] = []
+    free_values: list[int] = []
+    gpu_util_values: list[int] = []
+    mem_util_values: list[int] = []
+
+    for row in rows:
+        ts = float(row.get("ts", 0.0) or 0.0)
+        tag = str(row.get("tag", "") or "")
+        image_path = str(row.get("image_path", "") or "")
+        pipeline_mode = str(row.get("pipeline_mode", "") or "")
+
+        if tag.endswith("_start"):
+            stage = tag[: -len("_start")]
+            stage_open[(stage, image_path, pipeline_mode)].append(ts)
+        elif tag.endswith("_end"):
+            stage = tag[: -len("_end")]
+            key = (stage, image_path, pipeline_mode)
+            if stage_open[key]:
+                started = stage_open[key].popleft()
+                stage_durations[stage].append(max(0.0, ts - started))
+
+        primary = _primary_gpu(row)
+        if primary:
+            used = primary.get("memory_used_mb")
+            free = primary.get("memory_free_mb")
+            gpu_util = primary.get("gpu_util_percent")
+            mem_util = primary.get("memory_util_percent")
+            if isinstance(used, int):
+                used_values.append(used)
+            if isinstance(free, int):
+                free_values.append(free)
+            if isinstance(gpu_util, int):
+                gpu_util_values.append(gpu_util)
+            if isinstance(mem_util, int):
+                mem_util_values.append(mem_util)
+
+    stage_stats = {}
+    for stage, values in sorted(stage_durations.items()):
+        if not values:
+            continue
+        ordered = sorted(values)
+        stage_stats[stage] = {
+            "count": len(values),
+            "total_sec": round(sum(values), 3),
+            "median_sec": round(ordered[len(ordered) // 2], 3),
+            "max_sec": round(max(values), 3),
+        }
+
+    return {
+        "entry_count": len(rows),
+        "started_at": rows[0].get("ts"),
+        "ended_at": rows[-1].get("ts"),
+        "elapsed_sec": round(float(rows[-1].get("ts", 0.0)) - float(rows[0].get("ts", 0.0)), 3),
+        "tag_counts": dict(sorted(tag_counts.items())),
+        "stage_stats": stage_stats,
+        "page_done_count": tag_counts.get("page_done", 0),
+        "page_failed_count": tag_counts.get("page_failed", 0),
+        "gpu_peak_used_mb": max(used_values) if used_values else None,
+        "gpu_floor_free_mb": min(free_values) if free_values else None,
+        "gpu_peak_util_percent": max(gpu_util_values) if gpu_util_values else None,
+        "gpu_peak_mem_util_percent": max(mem_util_values) if mem_util_values else None,
+    }
+
+
+def render_summary_markdown(summary: dict[str, Any]) -> str:
+    lines = [
+        "# Benchmark Summary",
+        "",
+        "## Run",
+        "",
+        f"- elapsed_sec: `{summary.get('elapsed_sec')}`",
+        f"- page_done_count: `{summary.get('page_done_count')}`",
+        f"- page_failed_count: `{summary.get('page_failed_count')}`",
+        f"- gpu_peak_used_mb: `{summary.get('gpu_peak_used_mb')}`",
+        f"- gpu_floor_free_mb: `{summary.get('gpu_floor_free_mb')}`",
+        f"- gpu_peak_util_percent: `{summary.get('gpu_peak_util_percent')}`",
+        "",
+        "## Stage Stats",
+        "",
+        "| stage | count | total_sec | median_sec | max_sec |",
+        "| --- | --- | --- | --- | --- |",
+    ]
+    for stage, payload in summary.get("stage_stats", {}).items():
+        lines.append(
+            f"| {stage} | {payload.get('count')} | {payload.get('total_sec')} | {payload.get('median_sec')} | {payload.get('max_sec')} |"
+        )
+
+    lines.extend(
+        [
+            "",
+            "## Tag Counts",
+            "",
+            "| tag | count |",
+            "| --- | --- |",
+        ]
+    )
+    for tag, count in summary.get("tag_counts", {}).items():
+        lines.append(f"| {tag} | {count} |")
+
+    lines.append("")
+    return "\n".join(lines)

@@ -9,6 +9,11 @@ from dataclasses import dataclass
 from typing import Any
 
 
+def _env_enabled(name: str) -> bool:
+    value = str(os.environ.get(name, "") or "").strip().lower()
+    return value in {"1", "true", "yes", "on"}
+
+
 def _rss_mb() -> float:
     """Return RSS in MB (best-effort)."""
     # Prefer psutil if available (it is in the dev venv).
@@ -155,8 +160,13 @@ class MemLogger:
         self._path = None
         self._run_id = None
         self._deep_emitted: set[str] = set()
+        self._bench_output_dir = str(os.environ.get("CT_BENCH_OUTPUT_DIR", "") or "").strip()
+        self._gpu_bench_enabled = _env_enabled("CT_ENABLE_GPU_BENCH")
 
     def _resolve_log_path(self) -> str:
+        if self._bench_output_dir:
+            os.makedirs(self._bench_output_dir, exist_ok=True)
+            return os.path.join(self._bench_output_dir, "metrics.jsonl")
         try:
             from modules.utils.paths import get_user_data_dir
 
@@ -188,7 +198,7 @@ class MemLogger:
         except Exception:
             pass
 
-    def _snapshot(self, tag: str) -> dict[str, Any]:
+    def _snapshot(self, tag: str, extra: dict[str, Any] | None = None) -> dict[str, Any]:
         ct = self.main
 
         image_data = getattr(ct, "image_data", None)
@@ -213,6 +223,8 @@ class MemLogger:
             "image_data_np_mb": round(_sum_numpy_nbytes(image_data) / 1024.0 / 1024.0, 1),
             "in_memory_history_np_mb": round(_sum_numpy_nbytes(in_mem_hist) / 1024.0 / 1024.0, 1),
             "in_memory_patches_np_mb": round(_sum_numpy_nbytes(in_mem_patches) / 1024.0 / 1024.0, 1),
+            "batch_active": bool(getattr(ct, "_batch_active", False)),
+            "batch_run_type": getattr(ct, "_current_batch_run_type", None),
         }
 
         try:
@@ -255,13 +267,24 @@ class MemLogger:
         except Exception:
             pass
 
+        if self._gpu_bench_enabled:
+            try:
+                from modules.utils.gpu_metrics import query_gpu_metrics
+
+                snap["gpu"] = query_gpu_metrics()
+            except Exception:
+                pass
+
+        if extra:
+            snap.update(extra)
+
         return snap
 
-    def emit(self, tag: str) -> None:
+    def emit(self, tag: str, extra: dict[str, Any] | None = None) -> None:
         if self._path is None:
             self._path = self._resolve_log_path()
         self._rotate_if_needed()
-        payload = self._snapshot(tag)
+        payload = self._snapshot(tag, extra=extra)
         try:
             with open(self._path, "a", encoding="utf-8") as fh:
                 fh.write(json.dumps(payload, ensure_ascii=True) + "\n")
@@ -269,7 +292,13 @@ class MemLogger:
             # Never let diagnostics break the app.
             pass
 
-    def emit_deep(self, tag: str, *, top_n: int = 12) -> None:
+    def emit_deep(
+        self,
+        tag: str,
+        *,
+        top_n: int = 12,
+        extra: dict[str, Any] | None = None,
+    ) -> None:
         """Emit a deep snapshot (includes top memory-mapped modules)."""
         # De-dupe per tag so accidental repeated calls don't spam logs.
         if tag in self._deep_emitted:
@@ -280,7 +309,7 @@ class MemLogger:
             self._path = self._resolve_log_path()
         self._rotate_if_needed()
 
-        payload = self._snapshot(tag)
+        payload = self._snapshot(tag, extra=extra)
         try:
             payload["maps_top"] = _memory_maps_top(top_n=top_n)
         except Exception:

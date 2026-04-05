@@ -40,8 +40,15 @@ from modules.utils.exceptions import (
 # Ensure any pre-declared mandatory models
 ensure_mandatory_models()
 
-# Toggle memory logging.
-ENABLE_MEMLOGGER = False
+
+def _env_enabled(name: str) -> bool:
+    value = str(os.environ.get(name, "") or "").strip().lower()
+    return value in {"1", "true", "yes", "on"}
+
+
+# Toggle memory logging / benchmark diagnostics from the environment.
+ENABLE_MEMLOGGER = _env_enabled("CT_ENABLE_MEMLOG") or _env_enabled("CT_ENABLE_GPU_BENCH")
+DISABLE_BACKGROUND_UPDATE_CHECK = _env_enabled("CT_DISABLE_UPDATE_CHECK")
 
 class ComicTranslate(ComicTranslateUI):
     image_processed = QtCore.Signal(int, object, str)
@@ -150,7 +157,8 @@ class ComicTranslate(ComicTranslateUI):
         self.startup_home.populate(self.project_ctrl.get_recent_projects())
         
         # Check for updates in background
-        self.settings_page.check_for_updates(is_background=True)
+        if not DISABLE_BACKGROUND_UPDATE_CHECK:
+            self.settings_page.check_for_updates(is_background=True)
 
         self._processing_page_change = False  # Flag to prevent recursive page change handling
 
@@ -162,6 +170,13 @@ class ComicTranslate(ComicTranslateUI):
             except Exception:
                 pass
         set_download_callback(_dl_cb)
+
+    def emit_memlog(self, tag: str, **extra):
+        try:
+            if self._memlogger is not None:
+                self._memlogger.emit(tag, extra=extra or None)
+        except Exception:
+            pass
 
     def connect_ui_elements(self):
         # Browsers

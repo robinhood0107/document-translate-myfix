@@ -2,6 +2,11 @@
 
 이 문서는 `Custom Local Server(Gemma)` 번역기를 현재 저장소의 `docker-compose.yaml` 기준으로 설정하는 방법을 설명합니다.
 
+현재 문서에서는 아래 두 기준을 구분합니다.
+
+- `merged baseline`: 이미 `develop`에 머지된 기준
+- `live-ops baseline`: 현재 로컬 운영/실험 기준
+
 ## 1. 준비
 
 - 모델 파일을 `testmodel/` 폴더에 둡니다.
@@ -46,6 +51,17 @@ docker compose up -d
 - `Max Completion Tokens` 기본값: `512`
 - `Request Timeout (sec)` 기본값: `180`
 - `response_format`: `json_object`
+
+## 4-1. 현재 live-ops baseline
+
+현재 로컬 운영 기준 compose 값은 아래와 같습니다.
+
+- `ctx-size`: `4096`
+- `n_gpu_layers`: `20`
+- `--swa-full`: `enabled`
+- `reasoning`: `off`
+- `reasoning-budget`: `0`
+- `reasoning-format`: `none`
 
 ## 5. 응답이 잘릴 때
 
@@ -94,3 +110,8 @@ docker inspect gemma-local-server --format '{{.Config.Image}} {{.Image}}'
 docker image inspect ghcr.io/ggml-org/llama.cpp:server-cuda
 docker run --rm ghcr.io/ggml-org/llama.cpp:server-cuda --version
 ```
+
+## 8. 관련 문서
+
+- [pipeline-resource-strategy-ko.md](/mnt/c/Users/pjjpj/Desktop/openai_manga_translater/comic-translate/docs/pipeline-resource-strategy-ko.md)
+- [pipeline-benchmarking-ko.md](/mnt/c/Users/pjjpj/Desktop/openai_manga_translater/comic-translate/docs/pipeline-benchmarking-ko.md)

@@ -4,6 +4,11 @@
 
 이 문서는 현재 워크스페이스에서 실제로 적용한 번역 설정과, 참고용 Usage 메모만 남긴 문서입니다.
 
+이 문서에서는 기준선을 둘로 나눠 기록합니다.
+
+- `merged baseline`: 이미 `develop`에 머지된 기준
+- `live-ops baseline`: 현재 로컬 운영/실험 기준
+
 ## 현재 적용한 번역 설정
 
 ### 앱 요청값
@@ -30,18 +35,22 @@
 
 ### 현재 docker-compose 설정
 
-현재 워크스페이스의 `docker-compose.yaml` 기준 값입니다.
+현재 로컬 `live-ops baseline`의 `docker-compose.yaml` 기준 값입니다.
 
 | 항목 | 현재 값 |
 | --- | --- |
 | image | `ghcr.io/ggml-org/llama.cpp:server-cuda` |
 | model path | `/models/gemma-4-26b-a4b-it-heretic.q3_k_m.gguf` |
 | ctx-size | `4096` |
-| n_gpu_layers | `8` |
+| n_gpu_layers | `20` |
 | reasoning | `off` |
 | reasoning-budget | `0` |
 | reasoning-format | `none` |
 | `--swa-full` | `enabled` |
+
+### merged baseline 참고
+
+이미 `develop`에 머지된 기준 compose 기본값은 `n_gpu_layers=8`이었습니다. 이번 브랜치부터는 문서에 `merged baseline`과 `live-ops baseline`을 분리해서 기록합니다.
 
 ## 설정 이력
 
