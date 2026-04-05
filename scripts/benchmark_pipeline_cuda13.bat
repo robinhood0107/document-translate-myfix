@@ -34,7 +34,7 @@ if /I "%~1"=="help" goto :help
 goto :run_default
 
 :run_default
-set "PRESET=live-ops-baseline"
+set "PRESET=translation-baseline"
 set "MODE=batch"
 set "RUNTIME_MODE=attach-running"
 set "REPEAT=1"
@@ -44,7 +44,7 @@ goto :execute_run
 
 :run_command
 set "PRESET=%~2"
-if "%PRESET%"=="" set "PRESET=live-ops-baseline"
+if "%PRESET%"=="" set "PRESET=translation-baseline"
 set "MODE=%~3"
 if "%MODE%"=="" set "MODE=batch"
 set "RUNTIME_MODE=%~4"

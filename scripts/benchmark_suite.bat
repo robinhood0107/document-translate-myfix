@@ -41,9 +41,9 @@ echo   scripts\benchmark_suite.bat
 echo   scripts\benchmark_suite_cuda13.bat
 echo.
 echo This one-click launcher runs:
-echo   1. live-ops-baseline batch attach-running
-echo   2. live-ops-baseline one-page attach-running
-echo   3. gpu-shift-ocr-front-cpu batch managed
+echo   1. translation-baseline one-page attach-running
+echo   2. translation-baseline batch attach-running
+echo   3. translation-ngl23 batch managed
 echo.
 echo Runtime:
 echo   benchmark_suite.bat uses .venv-win

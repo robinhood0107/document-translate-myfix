@@ -1,6 +1,6 @@
 {
-  "name": "gemma-translation-stable-22",
-  "description": "OCR front on CPU, Gemma translation sampler stabilized for JSON, n_gpu_layers=22.",
+  "name": "translation-t06",
+  "description": "Translation-only temperature sweep candidate at 0.6 with n_gpu_layers=23.",
   "app": {
     "translator": "Custom Local Server(Gemma)",
     "ocr": "PaddleOCR VL",
@@ -16,9 +16,9 @@
     "context_size": 4096,
     "n_parallel": 1,
     "threads": 12,
-    "n_gpu_layers": 22,
+    "n_gpu_layers": 23,
     "chunk_size": 4,
-    "temperature": 1.0,
+    "temperature": 0.6,
     "top_k": 64,
     "top_p": 0.95,
     "min_p": 0.0,

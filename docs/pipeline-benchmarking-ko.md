@@ -2,37 +2,40 @@
 
 기준 날짜: `2026-04-05`
 
-이 문서는 `Gemma + PaddleOCR VL` 조합을 반복적으로 벤치마킹하는 방법과 기록 규칙을 정리합니다.
+이 문서는 `Gemma + PaddleOCR VL` 조합을 translation-only 기준으로 반복 측정하는 방법과 기록 규칙을 정리합니다.
 
 ## 1. 코퍼스 규칙
 
 기본 코퍼스는 저장소 루트의 로컬 `/Sample` 폴더입니다.
 
 - representative corpus: `30장`
-- smoke corpus: representative의 앞 `5장`
+- audit subset: representative의 앞 `5장`
 
 이 폴더는 로컬 검증 전용입니다.
 
 - Git에 올리지 않음
 - `.gitignore`에 `/Sample/` 추가
+- 벤치 스크립트는 생성 산출물 하위 폴더를 코퍼스에서 자동 제외함
 
 ## 1-1. 실행 환경 전제
 
 오프스크린 benchmark 스크립트는 실제 앱 파이프라인을 import해서 돌립니다.
 
-따라서 아래와 같은 full runtime 의존성이 준비된 Python 환경에서 실행해야 합니다.
+필수 런타임:
 
 - `PySide6`
-- `opencv-python` 또는 이에 준하는 `cv2`
+- `cv2`
 - 현재 앱이 사용하는 OCR / ONNX / 기타 런타임 의존성
 
-Windows에서는 시스템 Python이 아니라 아래 전용 환경을 사용합니다.
+Windows에서는 시스템 Python이 아니라 아래 전용 환경만 사용합니다.
 
 - `.venv-win`
 - `.venv-win-cuda13`
 
-- `benchmark_pipeline.bat`, `benchmark_suite.bat`는 `.venv-win`만 사용
-- `benchmark_pipeline_cuda13.bat`, `benchmark_suite_cuda13.bat`는 `.venv-win-cuda13`만 사용
+런처 매핑:
+
+- `benchmark_pipeline.bat`, `benchmark_suite.bat` -> `.venv-win`
+- `benchmark_pipeline_cuda13.bat`, `benchmark_suite_cuda13.bat` -> `.venv-win-cuda13`
 
 ## 1-2. 벤치 전용 폰트 폴더
 
@@ -44,8 +47,8 @@ Windows에서는 시스템 Python이 아니라 아래 전용 환경을 사용합
 
 규칙:
 
-- 폰트 확장자: `.ttf`, `.ttc`, `.otf`, `.woff`, `.woff2`
-- 해당 폴더에 파일이 여러 개면 사전순 첫 번째 파일 사용
+- 지원 확장자: `.ttf`, `.ttc`, `.otf`, `.woff`, `.woff2`
+- 파일이 여러 개면 사전순 첫 번째 파일 사용
 - 폴더가 비어 있으면 현재 앱 폰트 설정 유지
 
 fallback:
@@ -57,8 +60,6 @@ fallback:
 ## 2. 산출물 위치
 
 벤치 결과는 저장소가 아니라 Windows 사용자 문서 폴더 아래의 `Comic Translate` 폴더에 저장합니다.
-
-기본 경로:
 
 ```text
 %USERPROFILE%\Documents\Comic Translate\<timestamp>_<label>\
@@ -75,6 +76,7 @@ fallback:
 - `metrics.jsonl`
 - `summary.json`
 - `summary.md`
+- translated text export가 켜진 경우 `translated_texts/`
 
 ## 3. 계측 항목
 
@@ -93,7 +95,7 @@ fallback:
   - `gpu_util_percent`
   - `memory_util_percent`
 
-단계 태그는 아래를 사용합니다.
+단계 태그:
 
 - `page_start`
 - `detect_start`, `detect_end`
@@ -104,32 +106,42 @@ fallback:
 - `page_done`
 - `page_failed`
 
-추가 run-level 태그도 남습니다.
+summary에서 핵심으로 보는 품질/속도 지표:
 
-- `batch_run_start`, `batch_run_done`, `batch_run_cancelled`
-- `webtoon_run_start`, `webtoon_run_done`, `webtoon_run_cancelled`
-- `benchmark_run_start`, `benchmark_run_finished`
+- `page_failed_count`
+- `gemma_json_retry_count`
+- `gemma_chunk_retry_events`
+- `gemma_truncated_count`
+- `gemma_empty_content_count`
+- `ocr_empty_rate`
+- `ocr_low_quality_rate`
+- `ocr_median_sec`
+- `translate_median_sec`
+- `inpaint_median_sec`
+- `elapsed_sec`
 
 ## 4. preset 적용 방식
 
 preset은 [benchmarks/presets](/mnt/c/Users/pjjpj/Desktop/openai_manga_translater/comic-translate/benchmarks/presets)에 JSON으로 관리합니다.
 
-현재 기본 preset:
+현재 active preset:
 
-- `repo-default`
-- `live-ops-baseline`
-- `gpu-shift-ocr-front-cpu`
-- `gemma-heavy-offload`
-- `gemma-translation-stable-22`
-- `gemma-translation-stable-24`
-- `gemma-translation-stable-24-ctx3072`
-- `gemma-translation-stable-22-t07`
-- `gemma-translation-stable-22-t05`
+- `translation-baseline`
+- `translation-ngl20`
+- `translation-ngl21`
+- `translation-ngl22`
+- `translation-ngl23`
+- `translation-ngl24`
+- `translation-ngl24-ctx3072`
+- `translation-t04`
+- `translation-t05`
+- `translation-t06`
+- `translation-t07`
 
-runtime staging 스크립트:
+runtime staging 예시:
 
 ```bash
-.venv/bin/python scripts/apply_benchmark_preset.py --preset live-ops-baseline --runtime-dir /tmp/ct_runtime
+.venv/bin/python scripts/apply_benchmark_preset.py --preset translation-baseline --runtime-dir /tmp/ct_runtime
 ```
 
 ## 5. attach-running vs managed
@@ -139,7 +151,7 @@ runtime staging 스크립트:
 현재 이미 떠 있는 Docker runtime에 붙어서 계측만 수행합니다.
 
 ```bash
-.venv/bin/python scripts/benchmark_pipeline.py --preset live-ops-baseline --mode batch --repeat 1 --runtime-mode attach-running
+.venv/bin/python scripts/benchmark_pipeline.py --preset translation-baseline --mode batch --repeat 1 --runtime-mode attach-running
 ```
 
 ### managed
@@ -147,50 +159,58 @@ runtime staging 스크립트:
 preset에서 staged runtime 파일을 만들고 Docker 서비스를 recreate한 뒤 벤치를 수행합니다.
 
 ```bash
-.venv/bin/python scripts/benchmark_pipeline.py --preset gpu-shift-ocr-front-cpu --mode batch --repeat 1 --runtime-mode managed
+.venv/bin/python scripts/benchmark_pipeline.py --preset translation-ngl23 --mode batch --repeat 1 --runtime-mode managed
 ```
 
-Windows에서는 아래 배치 파일로 더 간단하게 실행할 수 있습니다.
+Windows 런처:
 
 ```bat
 scripts\benchmark_suite.bat
 scripts\benchmark_suite_cuda13.bat
 scripts\benchmark_pipeline.bat
 scripts\benchmark_pipeline_cuda13.bat
-scripts\benchmark_pipeline.bat run gpu-shift-ocr-front-cpu batch managed 1
-scripts\benchmark_pipeline.bat summary
+scripts\benchmark_pipeline_cuda13.bat run translation-baseline batch attach-running 1
+scripts\benchmark_pipeline_cuda13.bat run translation-ngl23 batch managed 1
+scripts\benchmark_pipeline_cuda13.bat summary
 ```
 
-- `benchmark_suite.bat`
-  사용자용 원클릭 풀스위트, `.venv-win`
-- `benchmark_suite_cuda13.bat`
-  사용자용 원클릭 풀스위트, `.venv-win-cuda13`
-- `benchmark_pipeline.bat`
-  고급/수동 실행용, `.venv-win`
-- `benchmark_pipeline_cuda13.bat`
-  고급/수동 실행용, `.venv-win-cuda13`
+- `benchmark_suite*.bat`
+  원클릭 풀스위트
+- `benchmark_pipeline*.bat`
+  고급/수동 실행용
 - 원클릭 스위트는 `managed` 측정 뒤 원래 Docker 런타임 상태로 자동 복원
 
 ## 6. 권장 실행 순서
 
-### 1차 기준선
+### 1차 기준선 재확정
 
-1. `live-ops-baseline`
-2. `gpu-shift-ocr-front-cpu`
+1. `translation-baseline` one-page `attach-running`
+2. `translation-baseline` batch `attach-running`
 
-### 2차 Gemma 번역 안정화
+### 2차 `n_gpu_layers` 스크리닝
 
-1. `gemma-translation-stable-22`
-2. 안정적이면 `gemma-translation-stable-24`
-3. `24`가 불안정하면 `gemma-translation-stable-24-ctx3072`
-4. JSON retry가 줄지 않으면 fallback
-   - `gemma-translation-stable-22-t07`
-   - `gemma-translation-stable-22-t05`
+1. `translation-ngl20`
+2. `translation-ngl21`
+3. `translation-ngl22`
+4. `translation-ngl23`
+5. `translation-ngl24`
 
-### 3차 이후
+위 5개는 먼저 one-page `managed`로 스크리닝하고, 통과 상위 3개만 batch `managed`로 올립니다.
 
-1. 필요 시 `gemma-heavy-offload`
-2. 필요 시 OCR vLLM backend 조정 preset 추가
+### 3차 temperature 스크리닝
+
+best `n_gpu_layers`를 고정한 뒤:
+
+1. `translation-t04`
+2. `translation-t05`
+3. `translation-t06`
+4. `translation-t07`
+
+역시 one-page `managed`를 먼저 돌리고, 상위 2개만 batch `managed`로 올립니다.
+
+### 4차 rescue
+
+`n_gpu_layers=24`가 품질 또는 안정성 기준을 못 넘으면 `translation-ngl24-ctx3072`를 한 번만 추가로 측정합니다.
 
 ## 7. 집계
 
@@ -200,32 +220,41 @@ scripts\benchmark_pipeline.bat summary
 .venv/bin/python scripts/summarize_benchmarks.py --input "%USERPROFILE%\\Documents\\Comic Translate"
 ```
 
+또는 Windows:
+
+```bat
+scripts\benchmark_pipeline_cuda13.bat summary
+```
+
 ## 8. 합격 기준
 
-- 오류 `0회`
-- `free VRAM floor >= 1.5 GiB`
-- 대표 코퍼스 기준 median total page time 개선
-- one-page auto latency 악화 없음
-- OCR retry 증가 없음
-- `gemma_json_retry_count` 증가 없음
-- `ocr_empty_rate` 증가 없음
-- `ocr_low_quality_rate` 증가 없음
-- truncated / empty translation 없음
+hard reject:
 
-## 8-1. 현재 1차 최적화 방향
+- `page_failed_count > 0`
+- `gemma_truncated_count > 0`
+- `gemma_empty_content_count > 0`
+- `ocr_empty_rate` 증가
+- `ocr_low_quality_rate` 증가
+- `gemma_json_retry_count` 증가
 
-현재 브랜치의 현재 운영 기준은 아래와 같습니다.
+survivor ranking:
 
-- `paddleocr-server` front service는 `cpu`
-- `paddleocr-vllm`은 `gpu`
-- Gemma 모델은 `Q3_K_M` 유지
-- Gemma sampler는 `temperature=0.5`, `top_k=64`, `top_p=0.95`, `min_p=0.0`
-- Gemma는 `n_gpu_layers=22`, `threads=12`, `ctx=4096`
+1. `batch elapsed_sec` 최소
+2. `translate_median_sec` 최소
+3. `gemma_json_retry_count` 최소
+4. `one-page elapsed_sec` 최소
 
-즉, OCR 본 추론 품질은 유지하면서 Gemma 번역 경로의 JSON 안정성과 GPU 활용을 함께 올리는 방향입니다. `24` 계열은 현재 운영 기본값으로 채택하지 않았습니다.
+## 9. 현재 translation-baseline
 
-## 9. 실사용 문서
+현재 브랜치의 translation-only 기준선은 아래와 같습니다.
 
-실제로 어떻게 측정하고 결과를 다음 preset 선택에 활용할지는 아래 문서를 기준으로 봅니다.
+- `paddleocr-server` front service = `cpu`
+- `paddleocr-vllm` = `gpu`
+- Gemma sampler = `temperature=0.6`, `top_k=64`, `top_p=0.95`, `min_p=0.0`
+- Gemma = `n_gpu_layers=23`, `threads=12`, `ctx=4096`
+- OCR client = `parallel_workers=8`, `max_new_tokens=1024`
+
+## 10. 실사용 문서
 
 - [pipeline-benchmark-usage-ko.md](/mnt/c/Users/pjjpj/Desktop/openai_manga_translater/comic-translate/docs/pipeline-benchmark-usage-ko.md)
+- [pipeline-benchmark-results-ko.md](/mnt/c/Users/pjjpj/Desktop/openai_manga_translater/comic-translate/docs/pipeline-benchmark-results-ko.md)

@@ -2,7 +2,7 @@
 
 기준 날짜: `2026-04-05`
 
-이 문서는 현재 워크스페이스에서 실제로 적용한 번역 설정과, 참고용 Usage 메모만 남긴 문서입니다.
+이 문서는 현재 워크스페이스에서 실제로 적용한 translation-only 설정과 이력만 남긴 문서입니다.
 
 이 문서에서는 기준선을 둘로 나눠 기록합니다.
 
@@ -17,7 +17,7 @@
 
 | 항목 | 현재 값 |
 | --- | --- |
-| temperature | `0.5` |
+| temperature | `0.6` |
 | top_k | `64` |
 | top_p | `0.95` |
 | min_p | `0.0` |
@@ -43,7 +43,7 @@
 | model path | `/models/gemma-4-26b-a4b-it-heretic.q3_k_m.gguf` |
 | ctx-size | `4096` |
 | threads | `12` |
-| n_gpu_layers | `22` |
+| n_gpu_layers | `23` |
 | reasoning | `off` |
 | reasoning-budget | `0` |
 | reasoning-format | `none` |
@@ -133,7 +133,7 @@ Gemma 로컬 `llama.cpp` Docker compose가 처음 들어온 시점입니다.
 
 ### `370b335` `docs(gemma): add profile tuning guide`
 
-이 커밋에서는 설정 자체를 바꾸지는 않았고, 위 `b8712ee` 시점의 값들을 문서로 정리해 남겼습니다. 당시 문서에는 번역용 추천값과 creative/chat용 추천값도 함께 적혀 있었습니다.
+이 커밋에서는 설정 자체를 바꾸지는 않았고, 위 `b8712ee` 시점의 값들을 문서로 정리해 남겼습니다.
 
 ### `c750008` `docs(gemma): pin tested llama image version`
 
@@ -166,87 +166,77 @@ Gemma 로컬 `llama.cpp` Docker compose가 처음 들어온 시점입니다.
 
 ### `6b6b15e` `feat(benchmark): add stable gemma translation presets`
 
-현재 브랜치에서 Gemma 번역 안정화 실험을 시작한 커밋입니다.
+현재 브랜치에서 translation-only benchmark preset 체계를 시작한 커밋입니다.
 
 핵심 변경:
 
-- 앱 기본 sampler를 번역 안정화 기준으로 조정
+- 앱 sampler를 translation benchmark 기준으로 조정
   - `temperature=1.0`
   - `top_k=64`
   - `top_p=0.95`
   - `min_p=0.0`
-- benchmark preset 추가
-  - `gemma-translation-stable-22`
-  - `gemma-translation-stable-24`
-  - `gemma-translation-stable-24-ctx3072`
-  - `gemma-translation-stable-22-t07`
-  - `gemma-translation-stable-22-t05`
 - Gemma benchmark 지표 추가
   - `gemma_json_retry_count`
   - `gemma_chunk_retry_events`
   - `gemma_truncated_count`
   - `gemma_empty_content_count`
 
-### `로컬 미푸시 후속 조정`
+### `로컬 미푸시 translation-only 후속 조정`
 
-현재 브랜치에서는 representative benchmark 결과를 반영해 기본 운영값도 아래처럼 조정했습니다.
+현재 브랜치에서는 representative benchmark 결과를 반영해 active baseline을 아래처럼 두고 있습니다.
 
 | 항목 | 현재 운영값 |
 | --- | --- |
-| temperature | `0.5` |
+| preset | `translation-baseline` |
+| temperature | `0.6` |
 | top_k | `64` |
 | top_p | `0.95` |
 | min_p | `0.0` |
 | Gemma threads | `12` |
-| Gemma n_gpu_layers | `22` |
+| Gemma n_gpu_layers | `23` |
+| Gemma ctx | `4096` |
 | PaddleOCR front device | `cpu` |
 
-## Usage 참고 메모
+### `로컬 미푸시 translation-only 한계값 탐색 결과`
 
-```text
-Usage
-Google recommends the following sampler settings:
+최종 representative benchmark 결과:
 
-temperature = 1.0
-top_k = 64
-top_p = 0.95
-min_p = 0.0
+- corrected baseline batch
+  - `elapsed=1067.117`
+  - `translate_median=13.511`
+  - `gemma_json_retry_count=1`
+  - `gemma_truncated_count=1`
+- `translation-ngl23` batch
+  - `elapsed=1053.787`
+  - `translate_median=12.999`
+  - `gemma_json_retry_count=1`
+  - `gemma_truncated_count=1`
+- `translation-t06` batch
+  - `elapsed=1048.742`
+  - `translate_median=12.150`
+  - `gemma_json_retry_count=1`
+  - `gemma_truncated_count=0`
 
-For creative writing, I use:
+결론:
 
-temperature = 1.0
-top_k = 0
-top_p = 1.0
-min_p = 0.05
-top-n-sigma = 1.0
-adaptive-target = 0.7
-adaptive-decay = 0.9
+- `temperature=0.6`
+- `top_k=64`
+- `top_p=0.95`
+- `min_p=0.0`
+- `n_gpu_layers=23`
 
-For the image encoder:
+이 조합을 현재 로컬 translation-only baseline으로 채택합니다.
 
-image-min-tokens: 70
-image-max-tokens: 1120
+### 현재 active preset 세트
 
-While it's reasoning is not excessive, sometimes I do want to limit it:
-
-predict: 16384
-reasoning-budget: 8192
-reasoning-budget-message: "... I think I've explored this enough, time to respond."
-
-Within llama.cpp and koboldcpp, ensure that --swa-full is enabled as this model uses Sliding Window Attention (SWA).
-
-Thinking
-In order to enable thinking, add <|think|> at the top of your system prompt:
-
-<|think|>
-You are a helpful assistant.
-
-Conversely, to disable thinking simply omit <|think|> from your system prompt:
-
-You are a helpful assistant.
-
-To parse the thinking, use the following in SillyTavern or your platform of choice:
-
-prefix: <|channel>thought
-postfix: <channel|>
-```
+- `translation-baseline`
+- `translation-ngl20`
+- `translation-ngl21`
+- `translation-ngl22`
+- `translation-ngl23`
+- `translation-ngl24`
+- `translation-ngl24-ctx3072`
+- `translation-t04`
+- `translation-t05`
+- `translation-t06`
+- `translation-t07`

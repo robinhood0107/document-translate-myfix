@@ -32,25 +32,25 @@ from benchmark_common import (
 
 SUITE_STEPS = [
     {
-        "name": "01_live_ops_batch",
-        "preset": "live-ops-baseline",
-        "mode": "batch",
-        "runtime_mode": "attach-running",
-        "description": "현재 떠 있는 서버 기준 batch 측정",
-    },
-    {
-        "name": "02_live_ops_one_page",
-        "preset": "live-ops-baseline",
+        "name": "01_translation_baseline_one_page",
+        "preset": "translation-baseline",
         "mode": "one-page",
         "runtime_mode": "attach-running",
-        "description": "현재 떠 있는 서버 기준 one-page 측정",
+        "description": "현재 떠 있는 translation-baseline 서버 기준 one-page 측정",
     },
     {
-        "name": "03_gpu_shift_managed",
-        "preset": "gpu-shift-ocr-front-cpu",
+        "name": "02_translation_baseline_batch",
+        "preset": "translation-baseline",
+        "mode": "batch",
+        "runtime_mode": "attach-running",
+        "description": "현재 떠 있는 translation-baseline 서버 기준 batch 측정",
+    },
+    {
+        "name": "03_translation_ngl23_managed",
+        "preset": "translation-ngl23",
         "mode": "batch",
         "runtime_mode": "managed",
-        "description": "OCR front CPU 전환 preset managed 측정",
+        "description": "translation-ngl23 managed 측정",
     },
 ]
 
@@ -254,10 +254,11 @@ def _stage_median(summary: dict[str, Any], stage_name: str) -> float | None:
 def _step_status(summary: dict[str, Any]) -> tuple[str, list[str]]:
     issues: list[str] = []
     page_failed_count = int(summary.get("page_failed_count") or 0)
-    floor_free = summary.get("gpu_floor_free_mb")
     gemma_truncated_count = int(summary.get("gemma_truncated_count") or 0)
     gemma_empty_content_count = int(summary.get("gemma_empty_content_count") or 0)
     gemma_json_retry_count = int(summary.get("gemma_json_retry_count") or 0)
+    ocr_empty_rate = summary.get("ocr_empty_rate")
+    ocr_low_quality_rate = summary.get("ocr_low_quality_rate")
 
     if page_failed_count > 0 or gemma_truncated_count > 0:
         issues.append("page_failed_count > 0")
@@ -265,12 +266,14 @@ def _step_status(summary: dict[str, Any]) -> tuple[str, list[str]]:
             issues.append("gemma_truncated_count > 0")
         return "FAIL", issues
 
-    if isinstance(floor_free, (int, float)) and float(floor_free) < 1536:
-        issues.append("gpu_floor_free_mb < 1536")
     if gemma_empty_content_count > 0:
         issues.append("gemma_empty_content_count > 0")
     if gemma_json_retry_count > 0:
         issues.append("gemma_json_retry_count > 0")
+    if isinstance(ocr_empty_rate, (int, float)) and float(ocr_empty_rate) > 0:
+        issues.append("ocr_empty_rate > 0")
+    if isinstance(ocr_low_quality_rate, (int, float)) and float(ocr_low_quality_rate) > 0:
+        issues.append("ocr_low_quality_rate > 0")
 
     if issues:
         return "WARN", issues
@@ -280,76 +283,56 @@ def _step_status(summary: dict[str, Any]) -> tuple[str, list[str]]:
 
 def _build_recommendation(results: list[dict[str, Any]]) -> list[str]:
     lines: list[str] = []
-    batch_result = next((item for item in results if item["name"] == "01_live_ops_batch"), None)
-    managed_result = next((item for item in results if item["name"] == "03_gpu_shift_managed"), None)
-    managed_baseline = next(
-        (
-            item
-            for item in results
-            if item.get("preset") == "gpu-shift-ocr-front-cpu" and item.get("mode") == "batch"
-        ),
-        None,
-    )
+    baseline_batch = next((item for item in results if item["name"] == "02_translation_baseline_batch"), None)
+    candidate_batches = [
+        item for item in results if item.get("mode") == "batch" and item["name"] != "02_translation_baseline_batch"
+    ]
 
     failing = [item for item in results if item["status"] == "FAIL"]
-    vram_low = [item for item in results if "gpu_floor_free_mb < 1536" in item.get("issues", [])]
-
     if failing:
         joined = ", ".join(item["name"] for item in failing)
         lines.append(f"채택 금지: 실패가 발생한 시나리오가 있습니다. ({joined})")
 
-    if vram_low:
-        joined = ", ".join(item["name"] for item in vram_low)
-        lines.append(f"VRAM 부족 후보: free VRAM 1.5GB 미만 구간이 있습니다. ({joined})")
+    if baseline_batch is None:
+        lines.append("translation-baseline batch 결과가 없어 후보 비교를 진행하지 못했습니다.")
+        return lines
 
-    if batch_result and managed_result:
-        batch_summary = batch_result.get("summary", {})
-        managed_summary = managed_result.get("summary", {})
-        batch_elapsed = batch_summary.get("elapsed_sec")
-        managed_elapsed = managed_summary.get("elapsed_sec")
-        managed_failed = int(managed_summary.get("page_failed_count") or 0)
-        managed_floor = managed_summary.get("gpu_floor_free_mb")
+    baseline_summary = baseline_batch.get("summary", {})
+    baseline_elapsed = baseline_summary.get("elapsed_sec")
+    baseline_retry = float(baseline_summary.get("gemma_json_retry_count") or 0)
+    baseline_empty_rate = float(baseline_summary.get("ocr_empty_rate") or 0.0)
+    baseline_low_quality_rate = float(baseline_summary.get("ocr_low_quality_rate") or 0.0)
+
+    winners: list[tuple[float, dict[str, Any]]] = []
+    for candidate in candidate_batches:
+        candidate_summary = candidate.get("summary", {})
+        candidate_elapsed = candidate_summary.get("elapsed_sec")
+        if not isinstance(baseline_elapsed, (int, float)) or not isinstance(candidate_elapsed, (int, float)):
+            continue
+
+        candidate_retry = float(candidate_summary.get("gemma_json_retry_count") or 0)
+        candidate_empty_rate = float(candidate_summary.get("ocr_empty_rate") or 0.0)
+        candidate_low_quality_rate = float(candidate_summary.get("ocr_low_quality_rate") or 0.0)
+        candidate_failed = int(candidate_summary.get("page_failed_count") or 0)
         if (
-            isinstance(batch_elapsed, (int, float))
-            and isinstance(managed_elapsed, (int, float))
-            and managed_elapsed < batch_elapsed
-            and managed_failed == 0
-            and isinstance(managed_floor, (int, float))
-            and managed_floor >= 1536
+            candidate_failed == 0
+            and candidate_retry <= baseline_retry
+            and candidate_empty_rate <= baseline_empty_rate
+            and candidate_low_quality_rate <= baseline_low_quality_rate
+            and candidate_elapsed < baseline_elapsed
         ):
-            lines.append("OCR front CPU 전환 후보: gpu-shift-ocr-front-cpu가 더 빠르고 안전합니다.")
+            winners.append((float(candidate_elapsed), candidate))
 
-    if managed_baseline:
-        baseline_summary = managed_baseline.get("summary", {})
-        baseline_elapsed = baseline_summary.get("elapsed_sec")
-        baseline_retry = float(baseline_summary.get("gemma_json_retry_count") or 0)
-        baseline_empty_rate = float(baseline_summary.get("ocr_empty_rate") or 0.0)
-        baseline_low_quality_rate = float(baseline_summary.get("ocr_low_quality_rate") or 0.0)
-        for candidate in results:
-            if candidate is managed_baseline or candidate.get("mode") != "batch":
-                continue
-            candidate_summary = candidate.get("summary", {})
-            candidate_elapsed = candidate_summary.get("elapsed_sec")
-            if not isinstance(baseline_elapsed, (int, float)) or not isinstance(candidate_elapsed, (int, float)):
-                continue
-
-            candidate_retry = float(candidate_summary.get("gemma_json_retry_count") or 0)
-            candidate_empty_rate = float(candidate_summary.get("ocr_empty_rate") or 0.0)
-            candidate_low_quality_rate = float(candidate_summary.get("ocr_low_quality_rate") or 0.0)
-
-            if (
-                candidate_elapsed < baseline_elapsed
-                and candidate_retry <= baseline_retry
-                and candidate_empty_rate <= baseline_empty_rate
-                and candidate_low_quality_rate <= baseline_low_quality_rate
-                and int(candidate_summary.get("page_failed_count") or 0) == 0
-            ):
-                lines.append(
-                    f"속도/품질 균형 후보: {candidate['name']}가 managed baseline보다 빠르면서 품질 지표를 유지했습니다."
-                )
-
-    if not lines:
-        lines.append("현재 live-ops-baseline 유지 후보: 실패 없이 기준선을 유지하는 것이 가장 안전합니다.")
+    if winners:
+        winners.sort(key=lambda item: item[0])
+        best_candidate = winners[0][1]
+        lines.append(
+            "속도/품질 균형 후보: {name}가 translation-baseline보다 빠르면서 품질 지표를 유지했습니다.".format(
+                name=best_candidate["name"]
+            )
+        )
+    else:
+        lines.append("현재 translation-baseline 유지 후보: 속도와 품질을 함께 만족하는 기본 조합입니다.")
 
     return lines
 

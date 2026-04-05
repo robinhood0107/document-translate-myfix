@@ -27,7 +27,7 @@ services:
       - -t
       - "${LLAMA_THREADS:-12}"
       - --n-gpu-layers
-      - "${LLAMA_N_GPU_LAYERS:-22}"
+      - "${LLAMA_N_GPU_LAYERS:-23}"
       - --swa-full
       - --reasoning
       - "off"

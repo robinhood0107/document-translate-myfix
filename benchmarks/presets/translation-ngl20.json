@@ -1,6 +1,6 @@
 {
-  "name": "gemma-translation-stable-22-t05",
-  "description": "Fallback stable translation sampler with temperature 0.5.",
+  "name": "translation-ngl20",
+  "description": "Translation-only candidate with n_gpu_layers=20 and the stabilized translation sampler.",
   "app": {
     "translator": "Custom Local Server(Gemma)",
     "ocr": "PaddleOCR VL",
@@ -16,7 +16,7 @@
     "context_size": 4096,
     "n_parallel": 1,
     "threads": 12,
-    "n_gpu_layers": 22,
+    "n_gpu_layers": 20,
     "chunk_size": 4,
     "temperature": 0.5,
     "top_k": 64,

@@ -6,7 +6,7 @@
 
 ## 1. 현재 판단
 
-현재 기준선에서는 `gpu-shift-ocr-front-cpu`가 가장 실용적인 출발점입니다.
+현재 기준선은 `translation-baseline`입니다.
 
 핵심 해석:
 
@@ -40,47 +40,47 @@
 
 ### Gemma sampler
 
-기존 creative 쪽 분포:
-
-- `temperature=1.0`
-- `top_k=0`
-- `top_p=1.0`
-- `min_p=0.05`
-
-실측 결과 최종 채택 분포:
+translation-only 기본 분포:
 
 - `temperature=0.5`
 - `top_k=64`
 - `top_p=0.95`
 - `min_p=0.0`
 
-핵심은 creative 분포를 번역용 분포로 조이고, representative batch에서 retry가 baseline 수준을 넘지 않는 지점까지 온도를 낮추는 것입니다.
+핵심은 번역용 분포를 유지한 채 `temperature`만 `0.4 ~ 0.7` 범위에서 탐색하고, representative batch에서 retry와 품질 지표가 baseline을 넘지 않는 지점을 찾는 것입니다.
 
 ### Gemma GPU 확대 순서
 
-1. `n_gpu_layers=22`, `threads=12`, `ctx=4096`
-2. `24`는 실험 후보로만 유지
-3. 현재 운영 기본값은 `22`
+1. `n_gpu_layers=20`, `threads=12`, `ctx=4096`
+2. `n_gpu_layers=21`
+3. `n_gpu_layers=22`
+4. `n_gpu_layers=23`
+5. `n_gpu_layers=24`
+6. `24`가 불안정하면 `ctx=3072` rescue
 
 ## 4. preset 순서
 
 ### 기준선
 
-- `live-ops-baseline`
-- `gpu-shift-ocr-front-cpu`
+- `translation-baseline`
 
 ### 1차 후보
 
-- `gemma-translation-stable-22`
-- `gemma-translation-stable-24`
-- `gemma-translation-stable-24-ctx3072`
+- `translation-ngl20`
+- `translation-ngl21`
+- `translation-ngl22`
+- `translation-ngl23`
+- `translation-ngl24`
+- `translation-ngl24-ctx3072`
 
-### fallback
+### 2차 후보
 
-- `gemma-translation-stable-22-t07`
-- `gemma-translation-stable-22-t05`
+- `translation-t04`
+- `translation-t05`
+- `translation-t06`
+- `translation-t07`
 
-fallback은 자동 채택이 아니라, `1.0 / 64 / 0.95 / 0.0`에서도 JSON retry가 줄지 않을 때만 검토합니다. 현재 기준으로는 `t05`가 representative batch 결과상 최종 채택 후보입니다.
+탐색 순서는 `n_gpu_layers`를 먼저 고른 뒤, 그 우승 설정에서만 `temperature`를 조정하는 방식으로 고정합니다.
 
 ## 5. 새로 기록하는 지표
 
@@ -104,30 +104,42 @@ fallback은 자동 채택이 아니라, `1.0 / 64 / 0.95 / 0.0`에서도 JSON re
 
 - `page_failed_count = 0`
 - `gemma_truncated_count = 0`
-- `gemma_json_retry_count <= gpu-shift-ocr-front-cpu baseline`
-- `ocr_empty_rate <= baseline`
-- `ocr_low_quality_rate <= baseline`
+- `gemma_empty_content_count = 0`
+- `gemma_json_retry_count <= translation-baseline`
+- `ocr_empty_rate <= translation-baseline`
+- `ocr_low_quality_rate <= translation-baseline`
 - representative batch `elapsed_sec` 개선
 - representative batch `translate_median_sec` 개선
 - one-page `elapsed_sec` 악화 없음
 
 ## 7. 현재 결론
 
-현재 representative benchmark 결과 기준 최종 채택 후보는 아래 조합입니다.
+현재 active translation baseline은 아래 조합입니다.
 
 - `paddleocr-server --device cpu`
 - `paddleocr-vllm` GPU 유지
-- Gemma `temperature=0.5`, `top_k=64`, `top_p=0.95`, `min_p=0.0`
-- Gemma `n_gpu_layers=22`
+- Gemma `temperature=0.6`, `top_k=64`, `top_p=0.95`, `min_p=0.0`
+- Gemma `n_gpu_layers=23`
 - Gemma `threads=12`
 - Gemma `ctx=4096`
 
-이 조합은 기준선 B 대비:
+이 조합을 fixed baseline으로 두고, `n_gpu_layers`와 `temperature`의 한계값을 찾는 방식으로만 확장합니다.
 
-- `gemma_json_retry_count`는 같은 수준(`1`)
-- `translate_median_sec`는 개선
-- `ocr_median_sec`도 개선
-- representative batch 총 시간도 개선
+현재까지의 실측 해석:
+
+- corrected baseline batch: `elapsed=1067.117`, `translate_median=13.511`, `truncated=1`
+- `translation-ngl23` batch: `elapsed=1053.787`, `translate_median=12.999`, `truncated=1`
+- `translation-t06` batch: `elapsed=1048.742`, `translate_median=12.150`, `truncated=0`
+- `translation-t06`은 baseline과 동일한 retry / OCR 품질 지표를 유지하면서 속도와 안정성을 함께 개선했습니다.
+- audit subset 5장도 통과했으므로, 현재 최종 승자는 `translation-t06`입니다.
+
+즉, 현재 최적 방향은 아래와 같습니다.
+
+- OCR front는 계속 `cpu`
+- OCR backend VRAM 설정은 그대로 유지
+- Gemma sampler는 `0.6 / 64 / 0.95 / 0.0`
+- Gemma `n_gpu_layers`는 `23`
+- 다음 개선 단계는 OCR backend VRAM 튜닝이 아니라, 이 baseline을 유지한 채 `ctx`/`chunk_size`와 장기 corpus 안정성을 보는 것입니다.
 
 ## 8. CUDA13 실행 규칙
 
