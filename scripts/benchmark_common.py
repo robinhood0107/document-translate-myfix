@@ -27,6 +27,13 @@ SUPPORTED_IMAGE_EXTENSIONS = {
     ".tif",
     ".tiff",
 }
+EXCLUDED_SAMPLE_PARENT_NAMES = {
+    "translated_images",
+    "translated_texts",
+    "raw_texts",
+    "cleaned_images",
+    "ocr_debugs",
+}
 PRESET_DIR = ROOT / "benchmarks" / "presets"
 OCR_BUNDLE_DIR = ROOT / "paddleocr_vl_docker_files"
 ROOT_GEMMA_COMPOSE = ROOT / "docker-compose.yaml"
@@ -141,7 +148,10 @@ def select_sample_images(
     files = sorted(
         path
         for path in root.rglob("*")
-        if path.is_file() and path.suffix.lower() in SUPPORTED_IMAGE_EXTENSIONS
+        if path.is_file()
+        and path.suffix.lower() in SUPPORTED_IMAGE_EXTENSIONS
+        and not any(part in EXCLUDED_SAMPLE_PARENT_NAMES for part in path.parts)
+        and not any(part.startswith("comic_translate_") for part in path.parts)
     )
     if len(files) < sample_count:
         raise RuntimeError(

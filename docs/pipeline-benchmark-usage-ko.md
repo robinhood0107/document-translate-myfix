@@ -62,9 +62,9 @@ scripts\benchmark_suite_cuda13.bat
 
 이 명령은 아래 3개를 자동으로 순서대로 수행합니다.
 
-1. `live-ops-baseline` `batch` `attach-running`
-2. `live-ops-baseline` `one-page` `attach-running`
-3. `gpu-shift-ocr-front-cpu` `batch` `managed`
+1. `translation-baseline` `one-page` `attach-running`
+2. `translation-baseline` `batch` `attach-running`
+3. `translation-ngl23` `batch` `managed`
 
 실행이 끝나면 자동으로 아래를 수행합니다.
 
@@ -92,9 +92,9 @@ C:\Users\<사용자이름>\Documents\Comic Translate\20260405_223000_suite
 
 이 폴더 아래에 각 단계별 하위 폴더와 스위트 리포트가 함께 생깁니다.
 
-- `01_live_ops_batch`
-- `02_live_ops_one_page`
-- `03_gpu_shift_managed`
+- `01_translation_baseline_one_page`
+- `02_translation_baseline_batch`
+- `03_translation_ngl23_managed`
 - `suite_report.md`
 - `suite_report.json`
 - `suite_console_summary.txt`
@@ -109,26 +109,27 @@ C:\Users\<사용자이름>\Documents\Comic Translate\20260405_223000_suite
 ### 4-1. 현재 떠 있는 서버에 붙어서 batch 측정
 
 ```bat
-scripts\benchmark_pipeline.bat run live-ops-baseline batch attach-running 1
-scripts\benchmark_pipeline_cuda13.bat run live-ops-baseline batch attach-running 1
+scripts\benchmark_pipeline.bat run translation-baseline batch attach-running 1
+scripts\benchmark_pipeline_cuda13.bat run translation-baseline batch attach-running 1
 ```
 
 ### 4-2. one-page auto 성격으로 짧게 측정
 
 ```bat
-scripts\benchmark_pipeline.bat run live-ops-baseline one-page attach-running 1
-scripts\benchmark_pipeline_cuda13.bat run live-ops-baseline one-page attach-running 1
+scripts\benchmark_pipeline.bat run translation-baseline one-page attach-running 1
+scripts\benchmark_pipeline_cuda13.bat run translation-baseline one-page attach-running 1
 ```
 
 ### 4-3. preset 기준으로 Docker runtime을 다시 띄워서 측정
 
 ```bat
-scripts\benchmark_pipeline.bat run gpu-shift-ocr-front-cpu batch managed 1
-scripts\benchmark_pipeline_cuda13.bat run gpu-shift-ocr-front-cpu batch managed 1
-scripts\benchmark_pipeline_cuda13.bat run gemma-translation-stable-22 one-page managed 1
-scripts\benchmark_pipeline_cuda13.bat run gemma-translation-stable-22 batch managed 1
-scripts\benchmark_pipeline_cuda13.bat run gemma-translation-stable-24 one-page managed 1
-scripts\benchmark_pipeline_cuda13.bat run gemma-translation-stable-24 batch managed 1
+scripts\benchmark_pipeline_cuda13.bat run translation-ngl20 one-page managed 1
+scripts\benchmark_pipeline_cuda13.bat run translation-ngl21 one-page managed 1
+scripts\benchmark_pipeline_cuda13.bat run translation-ngl22 one-page managed 1
+scripts\benchmark_pipeline_cuda13.bat run translation-ngl23 one-page managed 1
+scripts\benchmark_pipeline_cuda13.bat run translation-ngl24 one-page managed 1
+scripts\benchmark_pipeline_cuda13.bat run translation-t06 one-page managed 1
+scripts\benchmark_pipeline_cuda13.bat run translation-t06 batch managed 1
 ```
 
 ### 4-4. 누적 결과 요약표 만들기
@@ -138,7 +139,26 @@ scripts\benchmark_pipeline.bat summary
 scripts\benchmark_pipeline_cuda13.bat summary
 ```
 
-### 4-5. 결과 폴더 열기
+### 4-5. translated text export audit 비교
+
+batch 후보를 baseline과 비교할 때는 아래 스크립트를 사용합니다.
+
+```bat
+.venv-win-cuda13\Scripts\python.exe scripts\compare_translation_exports.py ^
+  --baseline-run-dir "C:\Users\pjjpj\Documents\Comic Translate\<baseline-run>" ^
+  --candidate-run-dir "C:\Users\pjjpj\Documents\Comic Translate\<candidate-run>" ^
+  --sample-dir "C:\Users\pjjpj\Desktop\openai_manga_translater\comic-translate\Sample" ^
+  --sample-count 5 ^
+  --output "C:\Users\pjjpj\Documents\Comic Translate\<candidate-run>\translation_audit.json"
+```
+
+이 스크립트는 아래를 검사합니다.
+
+- 첫 5장 translated export 존재 여부
+- block key mismatch
+- 과도한 장문 생성 또는 반복 생성 의심 블록
+
+### 4-6. 결과 폴더 열기
 
 ```bat
 scripts\benchmark_pipeline.bat open
@@ -184,70 +204,46 @@ scripts\benchmark_pipeline_cuda13.bat open
 ### 좋은 조합
 
 - `page_failed_count = 0`
-- `gpu_floor_free_mb >= 1536`
+- `gemma_truncated_count = 0`
+- `gemma_empty_content_count = 0`
 - `elapsed_sec` 감소
-- `translate` 단계 시간이 줄어듦
-- `ocr` 단계 시간이 늘지 않음
+- `translate_median_sec` 감소
+- `gemma_json_retry_count` 증가 없음
+- `ocr_empty_rate` 증가 없음
+- `ocr_low_quality_rate` 증가 없음
 
 ### 버려야 할 조합
 
 - OOM, CUDA 오류, HTTP 오류
 - `page_failed_count > 0`
-- `gpu_floor_free_mb < 1536`
-- 빈 번역 / 잘린 응답
-- OCR retry 증가
+- 잘린 응답 / 빈 응답 발생
+- OCR 품질 지표 악화
 
 ## 7. 실제 활용 예시
 
-### 예시 A: `gpu-shift-ocr-front-cpu`가 더 빠른 경우
-
-이 경우는 `paddleocr-server`의 GPU 상주가 실제로는 낭비였다는 뜻입니다.
+### 예시 A: `translation-ngl24`가 one-page는 나쁘지 않지만 `translation-ngl23`보다 느리고 representative 초반 retry 패턴도 같은 경우
 
 다음 액션:
 
-1. 이 조합을 새로운 후보 baseline으로 기록
-2. 같은 조합에서 `gemma-heavy-offload`를 다시 측정
+1. `translation-ngl24`는 탈락
+2. `translation-ngl24-ctx3072`를 rescue candidate로 한 번만 재측정
+3. 그래도 개선이 없으면 `23` baseline 유지
 
-### 예시 B: `gemma-heavy-offload`가 빨라지지만 실패가 생기는 경우
-
-이 경우는 Gemma가 VRAM을 너무 많이 먹어서 다른 단계와 충돌한 것입니다.
-
-다음 액션:
-
-1. `n_gpu_layers`를 한 단계 낮춤
-2. `gpu_floor_free_mb`가 1.5GB 이상 남는 지점으로 돌아감
-
-### 예시 B-1: `gemma-translation-stable-22`가 retry를 줄이는 경우
-
-이 경우는 Gemma sampler를 creative 쪽에서 번역용으로 조인 것이 효과를 낸 것입니다.
+### 예시 B: `translation-ngl23`가 batch elapsed와 `translate_median_sec`를 모두 줄이는 경우
 
 다음 액션:
 
-1. `gemma_json_retry_count`가 baseline보다 줄었는지 확인
-2. representative batch의 `translate_median_sec`가 같이 개선됐는지 확인
-3. 조건을 만족하면 `gemma-translation-stable-24`로 한 단계 더 올림
+1. `n_gpu_layers=23`을 임시 승자로 고정
+2. 같은 조건에서 `translation-t04/t05/t06/t07` one-page 스크리닝
+3. 상위 2개만 representative batch까지 올림
 
-### 예시 B-2: `gemma-translation-stable-24`가 느리거나 불안정한 경우
-
-이 경우는 Gemma에 GPU를 더 줬지만 전체 파이프라인에는 오히려 손해라는 뜻입니다.
+### 예시 C: `translation-t06`가 retry를 유지하면서 `truncated=0`으로 줄이고 속도도 더 빨라지는 경우
 
 다음 액션:
 
-1. `gemma-translation-stable-24-ctx3072`로 재시도
-2. 그래도 이득이 없으면 `22`를 유지
-3. sampler fallback은 `t07 -> t05` 순서로만 검토
-
-### 예시 C: OCR이 병목인 경우
-
-이 경우는 Gemma보다 OCR 쪽 조정이 우선입니다.
-
-다음 액션:
-
-1. `parallel_workers`
-2. `max_new_tokens`
-3. 필요 시 `gpu_memory_utilization`
-
-순서로 다시 측정합니다.
+1. 이를 새 `translation-baseline` 후보로 기록
+2. 첫 5장 translated text export를 baseline과 비교
+3. 누락, key mismatch, 과도한 장문 생성이 없으면 채택
 
 ## 8. 다음에 결과를 문서화하는 위치
 

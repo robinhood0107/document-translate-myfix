@@ -1,6 +1,6 @@
 {
-  "name": "gemma-translation-stable-24-ctx3072",
-  "description": "Same stable translation sampler, but lower ctx to 3072 while keeping n_gpu_layers=24.",
+  "name": "translation-ngl24",
+  "description": "Translation-only candidate with n_gpu_layers=24 and the stabilized translation sampler.",
   "app": {
     "translator": "Custom Local Server(Gemma)",
     "ocr": "PaddleOCR VL",
@@ -13,12 +13,12 @@
     "endpoint_url": "http://127.0.0.1:18080/v1",
     "model": "gemma-4-26b-a4b-it-heretic.q3_k_m.gguf",
     "model_path": "/models/gemma-4-26b-a4b-it-heretic.q3_k_m.gguf",
-    "context_size": 3072,
+    "context_size": 4096,
     "n_parallel": 1,
     "threads": 12,
     "n_gpu_layers": 24,
     "chunk_size": 4,
-    "temperature": 1.0,
+    "temperature": 0.5,
     "top_k": 64,
     "top_p": 0.95,
     "min_p": 0.0,

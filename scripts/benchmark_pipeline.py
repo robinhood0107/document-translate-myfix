@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import argparse
 import os
+import shutil
 import sys
 import time
 import urllib.error
@@ -213,6 +214,9 @@ def _configure_window(window, preset: dict[str, object], source_lang: str, targe
     ui.gemma_max_completion_tokens_spinbox.setValue(int(gemma.get("max_completion_tokens", 512)))
     ui.gemma_request_timeout_spinbox.setValue(int(gemma.get("request_timeout_sec", 180)))
     ui.gemma_raw_response_logging_checkbox.setChecked(bool(gemma.get("raw_response_logging", False)))
+    ui.raw_text_checkbox.setChecked(False)
+    ui.translated_text_checkbox.setChecked(True)
+    ui.inpainted_image_checkbox.setChecked(False)
 
     window.s_combo.setCurrentText(source_lang)
     window.t_combo.setCurrentText(target_lang)
@@ -227,6 +231,25 @@ def _load_images(window, image_paths: list[Path], source_lang: str, target_lang:
         state["source_lang"] = source_lang
         state["target_lang"] = target_lang
     return list(window.image_files)
+
+
+def _stage_selected_images(run_dir: Path, image_paths: list[Path]) -> list[Path]:
+    corpus_dir = run_dir / "corpus"
+    corpus_dir.mkdir(parents=True, exist_ok=True)
+
+    staged_paths: list[Path] = []
+    for path in image_paths:
+        target_path = corpus_dir / path.name
+        shutil.copy2(path, target_path)
+        staged_paths.append(target_path)
+
+    _log(
+        "입력 이미지 staging 완료: corpus_dir={corpus_dir} count={count}".format(
+            corpus_dir=corpus_dir,
+            count=len(staged_paths),
+        )
+    )
+    return staged_paths
 
 
 def _run_single_mode(
@@ -403,6 +426,7 @@ def main() -> int:
             if mode == "one-page":
                 selected_paths = selected_paths[:1]
             _log(f"선택 이미지 수: {len(selected_paths)}")
+            staged_paths = _stage_selected_images(run_dir, selected_paths)
 
             write_json(
                 run_dir / "benchmark_request.json",
@@ -415,6 +439,7 @@ def main() -> int:
                     "source_lang": args.source_lang,
                     "target_lang": args.target_lang,
                     "selected_paths": [str(path) for path in selected_paths],
+                    "staged_paths": [str(path) for path in staged_paths],
                 },
             )
             write_json(run_dir / "preset_resolved.json", preset)
@@ -445,7 +470,7 @@ def main() -> int:
                     run_dir=run_dir,
                     source_lang=args.source_lang,
                     target_lang=args.target_lang,
-                    image_paths=selected_paths,
+                    image_paths=staged_paths,
                 )
             except RuntimeError as exc:
                 print(str(exc), file=sys.stderr)

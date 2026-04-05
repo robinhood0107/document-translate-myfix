@@ -31,7 +31,7 @@
 - [x] preset staging 스크립트 추가
 - [x] offscreen benchmark 스크립트 추가
 - [x] benchmark summarize 스크립트 추가
-- [x] preset 4종 추가
+- [x] translation-only preset 세트 추가
 
 ## 5. 문서
 
@@ -40,7 +40,7 @@
 - [x] 벤치 결과 이력 문서
 - [x] 체크리스트 문서
 - [x] README 링크 갱신
-- [x] Gemma 문서 현재 baseline 반영
+- [x] legacy preset 이름 제거 후 translation-only 기준으로 재정리
 
 ## 6. 실제 검증
 
@@ -48,14 +48,25 @@
 - [x] `validate_changed_python.py --all`
 - [x] `headless_smoke.py`
 - [x] `compile_translations.py --check`
-- [ ] benchmark script smoke 실행
-  현재 `.venv`에 `cv2`가 없어 full pipeline import 단계에서 fail-fast 확인까지만 완료
-- [ ] managed runtime dry-run 확인
+- [x] benchmark script smoke 실행
+- [x] managed runtime dry-run 확인
 
 ## 7. 다음 튜닝 루프
 
-- [ ] `repo-default` 수집
-- [ ] `live-ops-baseline` 수집
-- [ ] `gpu-shift-ocr-front-cpu` 비교
-- [ ] `gemma-heavy-offload` 비교
-- [ ] 승자 preset을 results 문서에 승격
+- [x] `translation-baseline` one-page 재확정
+- [x] `translation-baseline` batch 30장 재확정
+- [x] `translation-ngl20` one-page
+- [x] `translation-ngl21` one-page
+- [x] `translation-ngl22` one-page
+- [x] `translation-ngl23` one-page
+- [x] `translation-ngl24` one-page
+- [x] one-page 상위 3개 후보 검토 후 representative 승격/pruning 결정
+- [x] best `n_gpu_layers` 확정
+- [x] `translation-t04` one-page
+- [x] `translation-t05` one-page
+- [x] `translation-t06` one-page
+- [x] `translation-t07` one-page
+- [x] 대표 temperature 후보 representative batch 승격
+- [ ] 필요 시 `translation-ngl24-ctx3072` rescue
+- [x] translated text audit subset 비교
+- [x] 최종 승자 preset을 results 문서에 승격
