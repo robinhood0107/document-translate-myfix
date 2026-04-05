@@ -125,6 +125,10 @@ scripts\benchmark_pipeline_cuda13.bat run live-ops-baseline one-page attach-runn
 ```bat
 scripts\benchmark_pipeline.bat run gpu-shift-ocr-front-cpu batch managed 1
 scripts\benchmark_pipeline_cuda13.bat run gpu-shift-ocr-front-cpu batch managed 1
+scripts\benchmark_pipeline_cuda13.bat run gemma-translation-stable-22 one-page managed 1
+scripts\benchmark_pipeline_cuda13.bat run gemma-translation-stable-22 batch managed 1
+scripts\benchmark_pipeline_cuda13.bat run gemma-translation-stable-24 one-page managed 1
+scripts\benchmark_pipeline_cuda13.bat run gemma-translation-stable-24 batch managed 1
 ```
 
 ### 4-4. 누적 결과 요약표 만들기
@@ -213,6 +217,26 @@ scripts\benchmark_pipeline_cuda13.bat open
 1. `n_gpu_layers`를 한 단계 낮춤
 2. `gpu_floor_free_mb`가 1.5GB 이상 남는 지점으로 돌아감
 
+### 예시 B-1: `gemma-translation-stable-22`가 retry를 줄이는 경우
+
+이 경우는 Gemma sampler를 creative 쪽에서 번역용으로 조인 것이 효과를 낸 것입니다.
+
+다음 액션:
+
+1. `gemma_json_retry_count`가 baseline보다 줄었는지 확인
+2. representative batch의 `translate_median_sec`가 같이 개선됐는지 확인
+3. 조건을 만족하면 `gemma-translation-stable-24`로 한 단계 더 올림
+
+### 예시 B-2: `gemma-translation-stable-24`가 느리거나 불안정한 경우
+
+이 경우는 Gemma에 GPU를 더 줬지만 전체 파이프라인에는 오히려 손해라는 뜻입니다.
+
+다음 액션:
+
+1. `gemma-translation-stable-24-ctx3072`로 재시도
+2. 그래도 이득이 없으면 `22`를 유지
+3. sampler fallback은 `t07 -> t05` 순서로만 검토
+
 ### 예시 C: OCR이 병목인 경우
 
 이 경우는 Gemma보다 OCR 쪽 조정이 우선입니다.
@@ -230,6 +254,7 @@ scripts\benchmark_pipeline_cuda13.bat open
 실제 승자 조합은 아래 문서에 누적합니다.
 
 - [pipeline-benchmark-results-ko.md](/mnt/c/Users/pjjpj/Desktop/openai_manga_translater/comic-translate/docs/pipeline-benchmark-results-ko.md)
+- [gemma-translation-optimization-ko.md](/mnt/c/Users/pjjpj/Desktop/openai_manga_translater/comic-translate/docs/gemma-translation-optimization-ko.md)
 
 전략은 아래 문서를 기준으로 유지합니다.
 
