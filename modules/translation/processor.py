@@ -15,7 +15,7 @@ class Translator:
     
     Supports multiple translation engines including:
     - Traditional translators (e.g Google, Microsoft, DeepL, Yandex)
-    - LLM-based translators (e.g GPT, Claude, Gemini, Deepseek, Custom Service, Custom Local Server)
+    - LLM-based translators (e.g GPT, Claude, Gemini, Deepseek, Custom Service, Custom Local Server(Gemma))
     """
     
     def __init__(self, main_page, source_lang: str = "", target_lang: str = ""):
@@ -60,7 +60,8 @@ class Translator:
         """
         translator_map = {
             self.settings.ui.tr("Custom Service"): "Custom Service",
-            self.settings.ui.tr("Custom Local Server"): "Custom Local Server",
+            self.settings.ui.tr("Custom Local Server(Gemma)"): "Custom Local Server(Gemma)",
+            self.settings.ui.tr("Custom Local Server"): "Custom Local Server(Gemma)",
             self.settings.ui.tr("Deepseek-v3"): "Deepseek-v3",
             self.settings.ui.tr("GPT-4.1"): "GPT-4.1",
             self.settings.ui.tr("GPT-4.1-mini"): "GPT-4.1-mini",

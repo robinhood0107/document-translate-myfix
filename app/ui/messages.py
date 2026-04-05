@@ -111,11 +111,11 @@ class Messages:
         )
 
     @staticmethod
-    def show_custom_local_server_not_configured_error(parent):
+    def show_custom_local_gemma_not_configured_error(parent):
         MMessage.error(
             text=QCoreApplication.translate(
                 "Messages",
-                "Custom Local Server requires an OpenAI-compatible endpoint.\n"
+                "Custom Local Server(Gemma) requires your local Gemma endpoint and model.\n"
                 "Please set Endpoint URL and Model in Settings > Credentials."
             ),
             parent=parent,
