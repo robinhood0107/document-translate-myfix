@@ -36,26 +36,23 @@
 - AOT / LaMa / MI-GAN inpainter
 - ONNX/Torch 런타임 캐시
 
-## 3. 기준선 두 종류
+## 3. 현재 active baseline
 
-이 작업에서는 기준선을 둘로 나눠 기록합니다.
+현재 translation-only active baseline은 아래와 같습니다.
 
-### merged baseline
-
-이미 `develop`에 머지된 기준값입니다.
-
-- Gemma compose 기본 `n_gpu_layers=8`
-- 앱 기본 PaddleOCR VL 값
-  - `parallel_workers=2`
-  - `max_new_tokens=256`
-
-### live-ops baseline
-
-현재 로컬 운영/실험 기준값입니다.
-
-- Gemma compose 현재 로컬 값 `n_gpu_layers=20`
-- OCR runtime 기준 번들: [paddleocr_vl_docker_files/README.md](/mnt/c/Users/pjjpj/Desktop/openai_manga_translater/comic-translate/paddleocr_vl_docker_files/README.md)
-- OCR client ops snapshot 값
+- preset: `translation-baseline`
+- `paddleocr-server`: `cpu`
+- `paddleocr-vllm`: `gpu`
+- Gemma sampler
+  - `temperature=0.6`
+  - `top_k=64`
+  - `top_p=0.95`
+  - `min_p=0.0`
+- Gemma compose
+  - `n_gpu_layers=23`
+  - `threads=12`
+  - `ctx=4096`
+- OCR client
   - `parallel_workers=8`
   - `max_new_tokens=1024`
 
@@ -82,31 +79,47 @@
 3. 그 다음 `PaddleOCR VL parallel_workers`와 `max_new_tokens`를 조정
 4. 마지막 단계에서만 `paddleocr-vllm` backend 값을 조정
 
+현재까지의 representative benchmark 결론:
+
+- corrected baseline batch: `1067.117s`
+- `translation-ngl23` batch: `1053.787s`
+- `translation-t06` batch: `1048.742s`
+- `translation-t06`은 retry/OCR 품질 지표를 유지하면서 `gemma_truncated_count`를 `0`으로 줄였으므로 새 baseline으로 승격했습니다.
+
 ## 6. 현재 탐색 후보군
 
 ### Gemma
 
-- `n_gpu_layers = 16, 18, 20, 22, 24`
+- 최종 승자: `n_gpu_layers = 23`
+- 탐색 이력: `20, 21, 22, 23, 24`
+- pruning:
+  - `24`는 one-page와 representative 초반 패턴 기준 `23` 대비 우위가 없어서 중단
+  - `20`은 one-page 지배 관계상 representative 승격 전 중단
+- rescue: `24 + ctx=3072`
 
-### OCR client
+### Gemma sampler
 
-- `parallel_workers = 2, 4, 6, 8`
-- `max_new_tokens = 256, 512, 768, 1024`
+- 최종 승자: `temperature = 0.6`
+- 탐색 이력: `0.4, 0.5, 0.6, 0.7`
+- 고정값
+  - `top_k=64`
+  - `top_p=0.95`
+  - `min_p=0.0`
 
 ### OCR runtime
 
-- `front_device = gpu:0, cpu`
-- `gpu_memory_utilization = 0.80, 0.84, 0.88, 0.90`
-- `max_num_seqs = 16, 32, 48`
-- `max_num_batched_tokens = 49152, 98304, 131072`
+- 1차 탐색에서는 고정 유지
+  - `front_device = cpu`
+  - `gpu_memory_utilization = 0.84`
+  - `max_num_seqs = 32`
+  - `max_num_batched_tokens = 98304`
 
 ## 7. 채택 기준
 
 아래 조건을 모두 만족해야 새 조합을 baseline으로 승격합니다.
 
 - OOM, CUDA 오류, ONNX 오류, HTTP 실패, JSON parse failure `0회`
-- `free VRAM floor >= 1.5 GiB`
-- OCR quality retry count가 기존 baseline보다 증가하지 않음
+- OCR 품질 지표가 기존 baseline보다 증가하지 않음
 - 빈 번역/잘린 응답 비율 `0%`
 - one-page auto 체감 latency가 baseline보다 나빠지지 않음
 - representative corpus 기준 median total page time이 개선됨

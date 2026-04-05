@@ -1,276 +1,209 @@
 # 자동번역 벤치 결과 이력
 
-이 문서는 실제 벤치 결과를 커밋 기준으로 누적 기록하는 곳입니다.
+이 문서는 translation-only benchmark 결과를 커밋 기준으로 누적 기록하는 곳입니다.
 
 ## 기록 규칙
 
+- 이전 preset 체계 결과는 active 기준선으로 취급하지 않습니다.
 - 새 baseline을 승격할 때만 이 문서를 갱신합니다.
 - 항상 commit SHA와 preset 이름을 함께 남깁니다.
 - representative corpus 기준 결과를 우선 기록합니다.
 
-## 템플릿
+## 현재 active preset 집합
 
-```text
-### <commit-sha> <preset-name>
+- `translation-baseline`
+- `translation-ngl20`
+- `translation-ngl21`
+- `translation-ngl22`
+- `translation-ngl23`
+- `translation-ngl24`
+- `translation-ngl24-ctx3072`
+- `translation-t04`
+- `translation-t05`
+- `translation-t06`
+- `translation-t07`
 
-- representative elapsed_sec:
-- page_done_count:
-- page_failed_count:
-- gpu_peak_used_mb:
-- gpu_floor_free_mb:
-- 판단:
-```
+## 2026-04-05 translation-only 재정리
 
-## 현재 상태
-
-- 벤치 인프라와 preset/문서가 먼저 들어간 상태입니다.
-- 다음 단계부터 `/Sample` 30장 코퍼스로 실제 수치를 누적합니다.
-
-## 2026-04-05 현재 브랜치 실험
-
-작업 브랜치:
+현재 브랜치:
 
 - `codex/feature/pipeline-gpu-benchmarking`
 
-기준 커밋:
+현재 active baseline:
 
-- `ecd3817` `feat(benchmark): add language-specific benchmark fonts`
-- `6b6b15e` `feat(benchmark): add stable gemma translation presets`
+- preset: `translation-baseline`
+- OCR front: `cpu`
+- Gemma sampler: `0.6 / 64 / 0.95 / 0.0`
+- Gemma compose: `n_gpu_layers=23`, `threads=12`, `ctx=4096`
 
-### 기준선 A: `live-ops-baseline`
+## 기준선 재확정 결과
 
-기록 출처:
+`/Sample` 코퍼스에서 생성 산출물 하위 폴더를 자동 제외하고, 입력 이미지를 각 run 디렉터리의 `corpus/`로 staging하는 구조로 다시 수집한 결과입니다.
 
-- `C:\Users\pjjpj\Documents\Comic Translate\20260405_180352_suite`
+### 기준선 one-page
 
-#### representative batch
+- run:
+  - `C:\Users\pjjpj\Documents\Comic Translate\20260405_224354_translation-baseline_one-page_r1`
 
-| 항목 | 값 |
+| 지표 | 값 |
 | --- | --- |
-| elapsed_sec | `789.204` |
-| page_done_count | `30` |
+| elapsed_sec | `35.106` |
+| translate_median_sec | `13.011` |
+| ocr_median_sec | `9.363` |
 | page_failed_count | `0` |
-| gpu_peak_used_mb | `11937` |
-| gpu_floor_free_mb | `63` |
-| ocr_median_sec | `12.368` |
-| translate_median_sec | `11.278` |
-| inpaint_median_sec | `2.158` |
-
-#### one-page
-
-| 항목 | 값 |
-| --- | --- |
-| elapsed_sec | `34.548` |
-| page_done_count | `1` |
-| page_failed_count | `0` |
-| gpu_peak_used_mb | `11706` |
-| gpu_floor_free_mb | `294` |
-
-### 기준선 B: `gpu-shift-ocr-front-cpu`
-
-이 기준선은 `paddleocr-server=cpu`, `paddleocr-vllm=gpu`를 유지한 상태입니다.
-
-기록 출처:
-
-- 이전 suite: `C:\Users\pjjpj\Documents\Comic Translate\20260405_180352_suite`
-- 새 계측 run:
-  - `C:\Users\pjjpj\Documents\Comic Translate\20260405_194023_gpu-shift-ocr-front-cpu_one-page_r1`
-  - `C:\Users\pjjpj\Documents\Comic Translate\20260405_194322_gpu-shift-ocr-front-cpu_batch_r1`
-
-#### representative batch
-
-| 항목 | 값 |
-| --- | --- |
-| elapsed_sec | `1016.410` |
-| page_done_count | `30` |
-| page_failed_count | `0` |
-| gpu_peak_used_mb | `11929` |
-| gpu_floor_free_mb | `71` |
-| ocr_median_sec | `15.644` |
-| translate_median_sec | `12.977` |
-| inpaint_median_sec | `2.121` |
-| gemma_json_retry_count | `1` |
-| gemma_chunk_retry_events | `1` |
-| gemma_truncated_count | `0` |
-| gemma_empty_content_count | `0` |
-| ocr_empty_rate | `0.0` |
-| ocr_low_quality_rate | `0.0313` |
-
-#### one-page
-
-| 항목 | 값 |
-| --- | --- |
-| elapsed_sec | `43.051` |
-| page_done_count | `1` |
-| page_failed_count | `0` |
-| gpu_peak_used_mb | `11702` |
-| gpu_floor_free_mb | `298` |
-| ocr_median_sec | `21.353` |
-| translate_median_sec | `12.811` |
-| inpaint_median_sec | `2.989` |
 | gemma_json_retry_count | `0` |
-| gemma_chunk_retry_events | `0` |
 | gemma_truncated_count | `0` |
-| gemma_empty_content_count | `0` |
 | ocr_empty_rate | `0.0` |
 | ocr_low_quality_rate | `0.0` |
 
-#### 해석
+### 기준선 batch
 
-- 기존 suite에서는 `gpu-shift-ocr-front-cpu`가 `live-ops-baseline`보다 빨랐습니다.
-- 새 계측 기준으로도 품질 지표는 양호하지만, representative batch에서는 `gemma_json_retry_count=1`이 확인됐습니다.
-- 즉 다음 최적화 초점은 OCR보다 Gemma 번역 안정화입니다.
+- run:
+  - `C:\Users\pjjpj\Documents\Comic Translate\20260405_231837_translation-baseline_batch_r1`
 
-### 후보 1: `gemma-translation-stable-22`
-
-설정:
-
-- OCR front = `cpu`
-- Gemma sampler = `1.0 / 64 / 0.95 / 0.0`
-- `n_gpu_layers=22`
-- `threads=12`
-- `ctx=4096`
-
-기록 출처:
-
-- `C:\Users\pjjpj\Documents\Comic Translate\20260405_200301_gemma-translation-stable-22_one-page_r1`
-- representative batch는 조기 중단
-
-#### one-page
-
-| 항목 | 값 |
+| 지표 | 값 |
 | --- | --- |
-| elapsed_sec | `42.115` |
-| page_done_count | `1` |
+| elapsed_sec | `1067.117` |
+| translate_median_sec | `13.511` |
+| ocr_median_sec | `16.358` |
+| inpaint_median_sec | `2.081` |
 | page_failed_count | `0` |
-| gpu_peak_used_mb | `11901` |
-| gpu_floor_free_mb | `99` |
-| ocr_median_sec | `19.399` |
-| translate_median_sec | `15.124` |
-| inpaint_median_sec | `2.374` |
-| gemma_json_retry_count | `0` |
-| gemma_chunk_retry_events | `0` |
-| gemma_truncated_count | `0` |
-| gemma_empty_content_count | `0` |
-| ocr_empty_rate | `0.0` |
-| ocr_low_quality_rate | `0.0` |
-
-#### representative batch 중단 판단
-
-이 조합은 batch 초반에 `gemma_json_retry_count=2`가 확인되어 기준선 B(`1`)를 이미 초과했습니다.
-
-- representative batch 진행 중 `page_done=4`
-- `gemma_json_retry_count=2`
-- `gemma_chunk_retry_events=2`
-
-즉 `temperature=1.0 / top_k=64 / top_p=0.95 / min_p=0.0`만으로는 batch JSON 안정성이 충분히 확보되지 않았습니다.
-
-### 후보 2: `gemma-translation-stable-22-t07`
-
-설정:
-
-- OCR front = `cpu`
-- Gemma sampler = `0.7 / 64 / 0.95 / 0.0`
-- `n_gpu_layers=22`
-- `threads=12`
-- `ctx=4096`
-
-#### one-page
-
-| 항목 | 값 |
-| --- | --- |
-| elapsed_sec | `41.298` |
-| page_done_count | `1` |
-| page_failed_count | `0` |
-| gpu_peak_used_mb | `11852` |
-| gpu_floor_free_mb | `148` |
-| ocr_median_sec | `20.658` |
-| translate_median_sec | `12.781` |
-| inpaint_median_sec | `2.334` |
-| gemma_json_retry_count | `0` |
-| gemma_chunk_retry_events | `0` |
-
-#### representative batch 중단 판단
-
-이 조합도 batch 초반에 기준선 B보다 많은 retry가 확인되어 조기 중단했습니다.
-
-- representative batch 진행 중 `page_done=7`
-- `gemma_json_retry_count=2`
-- `gemma_chunk_retry_events=2`
-
-### 후보 3: `gemma-translation-stable-22-t05`
-
-설정:
-
-- OCR front = `cpu`
-- Gemma sampler = `0.5 / 64 / 0.95 / 0.0`
-- `n_gpu_layers=22`
-- `threads=12`
-- `ctx=4096`
-
-기록 출처:
-
-- `C:\Users\pjjpj\Documents\Comic Translate\20260405_201853_gemma-translation-stable-22-t05_one-page_r1`
-- `C:\Users\pjjpj\Documents\Comic Translate\20260405_202151_gemma-translation-stable-22-t05_batch_r1`
-
-#### one-page
-
-| 항목 | 값 |
-| --- | --- |
-| elapsed_sec | `41.592` |
-| page_done_count | `1` |
-| page_failed_count | `0` |
-| gpu_peak_used_mb | `11886` |
-| gpu_floor_free_mb | `114` |
-| ocr_median_sec | `22.142` |
-| translate_median_sec | `12.063` |
-| inpaint_median_sec | `2.236` |
-| gemma_json_retry_count | `0` |
-| gemma_chunk_retry_events | `0` |
-| gemma_truncated_count | `0` |
-| gemma_empty_content_count | `0` |
-
-#### representative batch
-
-| 항목 | 값 |
-| --- | --- |
-| elapsed_sec | `825.772` |
-| page_done_count | `30` |
-| page_failed_count | `0` |
-| gpu_peak_used_mb | `11987` |
-| gpu_floor_free_mb | `13` |
-| ocr_median_sec | `12.264` |
-| translate_median_sec | `11.269` |
-| inpaint_median_sec | `1.982` |
 | gemma_json_retry_count | `1` |
-| gemma_chunk_retry_events | `1` |
+| gemma_truncated_count | `1` |
+| gemma_empty_content_count | `0` |
+| ocr_empty_rate | `0.0` |
+| ocr_low_quality_rate | `0.0397` |
+
+## `n_gpu_layers` sweep
+
+### one-page screen 결과
+
+| preset | elapsed_sec | translate_median_sec | ocr_median_sec | retry | fail |
+| --- | --- | --- | --- | --- | --- |
+| `translation-ngl20` | `44.145` | `15.856` | `20.171` | `0` | `0` |
+| `translation-ngl21` | `45.113` | `14.211` | `22.989` | `0` | `0` |
+| `translation-ngl22` | `44.549` | `12.113` | `23.648` | `0` | `0` |
+| `translation-ngl23` | `42.305` | `11.781` | `22.132` | `0` | `0` |
+| `translation-ngl24` | `43.485` | `14.806` | `20.976` | `0` | `0` |
+
+해석:
+
+- managed one-page 기준으로는 `translation-ngl23`가 가장 빨랐습니다.
+- 다만 warm `attach-running` 기준선 one-page(`35.106s`)보다 빠르지는 않았습니다.
+- 따라서 batch에서는 `translation-ngl23`를 우선 검증하고, 나머지는 지배 관계가 명확해지면 pruning합니다.
+
+### representative batch 진행 상태
+
+#### `translation-ngl23`
+
+- run:
+  - `C:\Users\pjjpj\Documents\Comic Translate\20260405_233628_translation-ngl23_batch_r1`
+
+| 지표 | 값 |
+| --- | --- |
+| elapsed_sec | `1053.787` |
+| translate_median_sec | `12.999` |
+| ocr_median_sec | `16.821` |
+| inpaint_median_sec | `2.215` |
+| page_failed_count | `0` |
+| gemma_json_retry_count | `1` |
+| gemma_truncated_count | `1` |
+| gemma_empty_content_count | `0` |
+| ocr_empty_rate | `0.0` |
+| ocr_low_quality_rate | `0.0397` |
+
+baseline 대비:
+
+- elapsed `1067.117 -> 1053.787`
+- translate median `13.511 -> 12.999`
+- retry/truncated/quality 지표는 baseline과 동급
+
+audit subset 5장 비교:
+
+- 결과: `PASS`
+- 파일:
+  - `C:\Users\pjjpj\Documents\Comic Translate\20260405_233628_translation-ngl23_batch_r1\translation_audit.json`
+
+참고:
+
+- audit heuristic은 짧은 감탄사 반복(`응`, `아`, `으응`)을 과생성으로 오탐하지 않도록 보정했습니다.
+- 현재까지는 `translation-ngl23`가 대표 batch 기준 선두 후보입니다.
+
+#### pruning 결과
+
+- `translation-ngl24`
+  - one-page에서 `translation-ngl23`보다 느렸고, representative batch 초반 패턴도 동일한 retry 흐름이라 pruning
+- `translation-ngl20`
+  - one-page에서 `translation-ngl23`보다 명확히 열세라 representative batch 승격 전 pruning
+
+## `temperature` sweep
+
+### one-page screen 결과
+
+temperature sweep는 `best n_gpu_layers=23` 기준으로 다시 측정했습니다.
+
+| preset | elapsed_sec | translate_median_sec | ocr_median_sec | retry | fail |
+| --- | --- | --- | --- | --- | --- |
+| `translation-t04` | `46.417` | `15.402` | `21.136` | `0` | `0` |
+| `translation-t05` | `49.127` | `16.508` | `24.024` | `0` | `0` |
+| `translation-t06` | `41.801` | `13.144` | `19.472` | `0` | `0` |
+| `translation-t07` | `42.597` | `14.678` | `19.965` | `0` | `0` |
+
+해석:
+
+- `n_gpu_layers=23` 축에서는 `translation-t06`이 가장 빨랐습니다.
+- `translation-t07`도 나쁘지 않았지만, `t06`보다 전체 elapsed와 translate median이 모두 밀렸습니다.
+- `t04`, `t05`는 one-page 단계에서 바로 탈락입니다.
+#### representative batch 결과
+
+##### `translation-t06`
+
+- run:
+  - `C:\Users\pjjpj\Documents\Comic Translate\20260406_001330_translation-t06_batch_r1`
+
+| 지표 | 값 |
+| --- | --- |
+| elapsed_sec | `1048.742` |
+| translate_median_sec | `12.150` |
+| ocr_median_sec | `16.604` |
+| inpaint_median_sec | `2.253` |
+| page_failed_count | `0` |
+| gemma_json_retry_count | `1` |
 | gemma_truncated_count | `0` |
 | gemma_empty_content_count | `0` |
 | ocr_empty_rate | `0.0` |
-| ocr_low_quality_rate | `0.0081` |
+| ocr_low_quality_rate | `0.0397` |
 
-#### 판단
+baseline 대비:
 
-- 기준선 B 대비 `gemma_json_retry_count`는 같은 수준으로 유지
-- representative batch `elapsed_sec`는 `1016.410 -> 825.772`로 개선
-- representative batch `translate_median_sec`는 `12.977 -> 11.269`로 개선
-- representative batch `ocr_median_sec`는 `15.644 -> 12.264`로 개선
-- `ocr_low_quality_rate`도 `0.0313 -> 0.0081`로 개선
-- 단점은 `gpu_floor_free_mb=13`으로 VRAM 여유가 거의 없다는 점
+- elapsed `1067.117 -> 1048.742`
+- translate median `13.511 -> 12.150`
+- truncated `1 -> 0`
+- retry / OCR 품질 지표는 동급 유지
 
-### 현재 채택 판단
+audit subset 5장 비교:
 
-현재 representative benchmark 결과 기준 최종 채택 후보는 `gemma-translation-stable-22-t05`입니다.
+- 결과: `PASS`
+- 파일:
+  - `C:\Users\pjjpj\Documents\Comic Translate\20260406_001330_translation-t06_batch_r1\translation_audit.json`
 
-선정 이유:
+정리:
 
-- 속도 개선폭이 큼
-- page failure 없음
-- JSON retry는 baseline과 동률
-- OCR 품질 지표도 개선
+- `translation-t06`은 `translation-ngl23`보다도 빠르고, `gemma_truncated_count`가 `0`으로 내려가 더 안정적입니다.
+- 따라서 `temperature=0.6 / n_gpu_layers=23` 조합을 새 active translation baseline으로 승격합니다.
 
-보류 이유:
+## 현재 잠정 결론
 
-- VRAM headroom이 극단적으로 낮아 다른 워크로드 동시 실행에는 불리함
-
-현재 사용자 목표가 `VRAM 여유보다 속도와 품질 유지`에 있으므로, 현 시점 추천 운영값은 이 조합입니다.
+- corrected `translation-baseline`은 representative batch 기준으로 재확정 완료
+- one-page `n_gpu_layers` 후보 중 승자는 `translation-ngl23`
+- `n_gpu_layers=23` 기준 one-page temperature 후보 중 승자는 `translation-t06`
+- representative batch 최종 승자는 `translation-t06`
+- 따라서 새 active translation baseline은 아래와 같습니다.
+  - `temperature=0.6`
+  - `top_k=64`
+  - `top_p=0.95`
+  - `min_p=0.0`
+  - `n_gpu_layers=23`
+  - `threads=12`
+  - `ctx=4096`
+  - `paddleocr-server=cpu`
