@@ -5,7 +5,7 @@
 ## 1. 준비
 
 - 모델 파일을 `testmodel/` 폴더에 둡니다.
-- 기본 모델명은 `gemma-4-26B-A4B-it-UD-Q2_K_XL.gguf`입니다.
+- 현재 `docker-compose.yaml` 기준 모델 파일은 `gemma-4-26b-a4b-it-heretic.q3_k_m.gguf`입니다.
 
 ## 2. Docker 서버 실행
 
@@ -18,7 +18,7 @@ docker compose up -d
 정상 실행 후 앱에서는 아래 값을 사용합니다.
 
 - Endpoint URL: `http://127.0.0.1:18080/v1`
-- Model: `gemma-4-26B-A4B-it-UD-Q2_K_XL.gguf`
+- Model: `gemma-4-26b-a4b-it-heretic.q3_k_m.gguf`
 
 ## 3. 앱 설정
 
@@ -36,11 +36,16 @@ docker compose up -d
 - `Request Timeout (sec)`: 요청 타임아웃
 - `Raw Response Log`: 원시 응답 로그 출력 여부
 
-## 4. 권장 시작값
+## 4. 현재 적용된 번역 요청값
 
-- `Chunk Size`: `4`
-- `Max Completion Tokens`: `512`
-- `Request Timeout (sec)`: `180`
+- `temperature`: `1.0`
+- `top_k`: `0`
+- `top_p`: `1.0`
+- `min_p`: `0.05`
+- `Chunk Size` 기본값: `4`
+- `Max Completion Tokens` 기본값: `512`
+- `Request Timeout (sec)` 기본값: `180`
+- `response_format`: `json_object`
 
 ## 5. 응답이 잘릴 때
 
@@ -54,6 +59,7 @@ docker compose up -d
 
 - 현재 로컬 번역기는 generic local server가 아니라 Gemma Docker 서버에 맞춰져 있습니다.
 - `Custom Service`는 별도의 인증형 OpenAI 호환 서비스용입니다.
+- 현재 `docker-compose.yaml`은 `--swa-full`이 켜진 상태입니다.
 
 ## 7. 현재 확인된 llama.cpp Docker 이미지 버전
 
