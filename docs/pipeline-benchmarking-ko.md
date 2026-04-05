@@ -115,6 +115,14 @@ preset에서 staged runtime 파일을 만들고 Docker 서비스를 recreate한 
 .venv/bin/python scripts/benchmark_pipeline.py --preset gpu-shift-ocr-front-cpu --mode batch --repeat 1 --runtime-mode managed
 ```
 
+Windows에서는 아래 배치 파일로 더 간단하게 실행할 수 있습니다.
+
+```bat
+scripts\benchmark_pipeline.bat
+scripts\benchmark_pipeline.bat run gpu-shift-ocr-front-cpu batch managed 1
+scripts\benchmark_pipeline.bat summary
+```
+
 ## 6. 권장 실행 순서
 
 1. `repo-default`
@@ -139,3 +147,9 @@ preset에서 staged runtime 파일을 만들고 Docker 서비스를 recreate한 
 - one-page auto latency 악화 없음
 - OCR retry 증가 없음
 - truncated / empty translation 없음
+
+## 9. 실사용 문서
+
+실제로 어떻게 측정하고 결과를 다음 preset 선택에 활용할지는 아래 문서를 기준으로 봅니다.
+
+- [pipeline-benchmark-usage-ko.md](/mnt/c/Users/pjjpj/Desktop/openai_manga_translater/comic-translate/docs/pipeline-benchmark-usage-ko.md)
