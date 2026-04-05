@@ -177,12 +177,6 @@
         <translation>API 키</translation>
     </message>
     <message>
-        <source>Configure provider API keys or custom endpoints here.
-Use Custom Service for authenticated OpenAI-compatible providers.
-Use Custom Local Server for OpenAI-compatible local or keyless endpoints.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
         <source>Endpoint URL</source>
         <translation>엔드포인트 URL</translation>
     </message>
@@ -197,6 +191,14 @@ Use Custom Local Server for OpenAI-compatible local or keyless endpoints.</sourc
     <message>
         <source>Model</source>
         <translation>모델</translation>
+    </message>
+    <message>
+        <source>Configure provider API keys or local server endpoints here.
+Use Custom Service for authenticated OpenAI-compatible providers.
+Use Custom Local Server(Gemma) with the included Gemma Docker setup.</source>
+        <translation>여기에서 공급자 API 키 또는 로컬 서버 엔드포인트를 설정합니다.
+인증이 필요한 OpenAI 호환 공급자는 사용자 지정 서비스를 사용하세요.
+포함된 Gemma Docker 구성을 사용할 때는 사용자 지정 로컬 서버(Gemma)를 사용하세요.</translation>
     </message>
     <message>
         <source>Secret Key</source>
@@ -239,6 +241,55 @@ Use Custom Local Server for OpenAI-compatible local or keyless endpoints.</sourc
     <message>
         <source>Export Inpainted Image</source>
         <translation>인페인팅된 이미지 내보내기</translation>
+    </message>
+</context>
+<context>
+    <name>GemmaLocalServerPage</name>
+    <message>
+        <source>Gemma Local Server Settings</source>
+        <translation>Gemma 로컬 서버 설정</translation>
+    </message>
+    <message>
+        <source>Comic Translate can use your local Gemma Docker server for translation.
+1. Run `docker compose up -d` in the repository root.
+2. In Settings &gt; Credentials, use Endpoint URL `http://127.0.0.1:18080/v1`.
+3. Set Model to `gemma-4-26B-A4B-it-UD-Q2_K_XL.gguf`.
+If responses are truncated, lower Chunk Size or increase LLAMA_CTX_SIZE in docker-compose.yaml.</source>
+        <translation>Comic Translate는 로컬 Gemma Docker 서버를 번역용으로 사용할 수 있습니다.
+1. 저장소 루트에서 `docker compose up -d`를 실행하세요.
+2. 설정 &gt; 자격 증명에서 Endpoint URL을 `http://127.0.0.1:18080/v1`로 입력하세요.
+3. Model을 `gemma-4-26B-A4B-it-UD-Q2_K_XL.gguf`로 설정하세요.
+응답이 잘리면 Chunk Size를 더 낮추거나 docker-compose.yaml의 LLAMA_CTX_SIZE를 더 크게 올리세요.</translation>
+    </message>
+    <message>
+        <source>Gemma Translation Tuning</source>
+        <translation>Gemma 번역 튜닝</translation>
+    </message>
+    <message>
+        <source>Chunk Size</source>
+        <translation>청크 크기</translation>
+    </message>
+    <message>
+        <source>Max Completion Tokens</source>
+        <translation>최대 완료 토큰</translation>
+    </message>
+    <message>
+        <source>Request Timeout (sec)</source>
+        <translation>요청 타임아웃(초)</translation>
+    </message>
+    <message>
+        <source>Raw Response Log</source>
+        <translation>원시 응답 로그</translation>
+    </message>
+    <message>
+        <source>Recommended starting values for the included Gemma Docker setup:
+- Chunk Size: 4
+- Max Completion Tokens: 512
+- Request Timeout: 180 seconds</source>
+        <translation>포함된 Gemma Docker 구성의 권장 시작값:
+- Chunk Size: 4
+- Max Completion Tokens: 512
+- Request Timeout: 180초</translation>
     </message>
 </context>
 <context>
@@ -441,6 +492,12 @@ Go to Settings &gt; Text Rendering &gt; Font to select or import one </source>
         <translation>선택된 {}이(가) 없습니다. 설정 &gt; 도구에서 {}을(를) 선택하세요.</translation>
     </message>
     <message>
+        <source>Custom Local Server(Gemma) requires your local Gemma endpoint and model.
+Please set Endpoint URL and Model in Settings &gt; Credentials.</source>
+        <translation>사용자 지정 로컬 서버(Gemma)에는 로컬 Gemma 엔드포인트와 모델이 필요합니다.
+설정 &gt; 자격 증명에서 Endpoint URL과 Model을 입력해 주세요.</translation>
+    </message>
+    <message>
         <source>Copy</source>
         <translation>복사</translation>
     </message>
@@ -553,12 +610,8 @@ Configure them in Settings &gt; {settings_page}.
     <message>
         <source>Custom Service requires an OpenAI-compatible API configuration.
 Please set API Key, Endpoint URL, and Model in Settings &gt; Credentials.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Custom Local Server requires an OpenAI-compatible endpoint.
-Please set Endpoint URL and Model in Settings &gt; Credentials.</source>
-        <translation type="unfinished"></translation>
+        <translation>사용자 지정 서비스에는 OpenAI 호환 API 구성이 필요합니다.
+설정 &gt; 자격 증명에서 API Key, Endpoint URL, Model을 입력해 주세요.</translation>
     </message>
     <message>
         <source>Close</source>
@@ -1106,11 +1159,7 @@ Restart now?</source>
     </message>
     <message>
         <source>Custom Service</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Custom Local Server</source>
-        <translation type="unfinished"></translation>
+        <translation>사용자 지정 서비스</translation>
     </message>
     <message>
         <source>Gemini-3.0-Flash</source>
@@ -1119,6 +1168,10 @@ Restart now?</source>
     <message>
         <source>Open AI GPT</source>
         <translation>Open AI GPT</translation>
+    </message>
+    <message>
+        <source>Custom Local Server(Gemma)</source>
+        <translation>사용자 지정 로컬 서버(Gemma)</translation>
     </message>
     <message>
         <source>Microsoft Azure</source>
@@ -1131,6 +1184,10 @@ Restart now?</source>
     <message>
         <source>PaddleOCR VL Settings</source>
         <translation>PaddleOCR VL 설정</translation>
+    </message>
+    <message>
+        <source>Gemma Local Server Settings</source>
+        <translation>Gemma 로컬 서버 설정</translation>
     </message>
     <message>
         <source>LLMs</source>
@@ -1736,11 +1793,15 @@ It may have been moved, renamed, or deleted.
     </message>
     <message>
         <source>Custom Service</source>
-        <translation type="unfinished"></translation>
+        <translation>사용자 지정 서비스</translation>
+    </message>
+    <message>
+        <source>Custom Local Server(Gemma)</source>
+        <translation>사용자 지정 로컬 서버(Gemma)</translation>
     </message>
     <message>
         <source>Custom Local Server</source>
-        <translation type="unfinished"></translation>
+        <translation>사용자 지정 로컬 서버</translation>
     </message>
     <message>
         <source>Deepseek-v3</source>
@@ -1830,6 +1891,14 @@ It may have been moved, renamed, or deleted.
     <message>
         <source>Yandex</source>
         <translation>Yandex</translation>
+    </message>
+    <message>
+        <source>Custom Local Server(Gemma)</source>
+        <translation>사용자 지정 로컬 서버(Gemma)</translation>
+    </message>
+    <message>
+        <source>Custom Service</source>
+        <translation>사용자 지정 서비스</translation>
     </message>
 </context>
 <context>
