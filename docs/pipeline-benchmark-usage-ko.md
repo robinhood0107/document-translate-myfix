@@ -30,6 +30,24 @@ Windows에서는 시스템 Python이 아니라 아래 전용 환경을 사용합
 
 배치 파일 이름으로 어떤 환경을 쓸지 구분합니다.
 
+- `benchmark_pipeline.bat`, `benchmark_suite.bat` -> `.venv-win` 전용
+- `benchmark_pipeline_cuda13.bat`, `benchmark_suite_cuda13.bat` -> `.venv-win-cuda13` 전용
+
+### 벤치 전용 언어별 폰트
+
+렌더링 벤치에서는 target language 기준으로 `benchmarks-fonts/<언어>/` 폴더를 먼저 찾습니다.
+
+- 예: 한국어는 `benchmarks-fonts/Korean/`
+- 지원 확장자: `.ttf`, `.ttc`, `.otf`, `.woff`, `.woff2`
+- 폴더 안에 폰트가 여러 개 있으면 사전순 첫 번째 파일을 사용합니다.
+- 폴더가 비어 있으면 현재 앱 폰트 설정을 그대로 씁니다.
+
+추가 fallback:
+
+- `Simplified Chinese` -> `Chinese`
+- `Traditional Chinese` -> `Chinese`
+- `Brazilian Portuguese` -> `Portuguese`
+
 ## 2. 가장 쉬운 실행 방법
 
 Windows에서는 배치 파일 이름으로 환경을 고릅니다.
