@@ -46,5 +46,5 @@ batch_finalists:
   - translation-t06
 
 report:
-  markdown_output: docs/benchmark/report-ko.md
+  markdown_output: docs/banchmark_report/report-ko.md
   assets_dir: docs/assets/benchmarking/latest
