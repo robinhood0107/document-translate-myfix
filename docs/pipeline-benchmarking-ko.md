@@ -120,6 +120,11 @@ preset은 [benchmarks/presets](/mnt/c/Users/pjjpj/Desktop/openai_manga_translate
 - `live-ops-baseline`
 - `gpu-shift-ocr-front-cpu`
 - `gemma-heavy-offload`
+- `gemma-translation-stable-22`
+- `gemma-translation-stable-24`
+- `gemma-translation-stable-24-ctx3072`
+- `gemma-translation-stable-22-t07`
+- `gemma-translation-stable-22-t05`
 
 runtime staging 스크립트:
 
@@ -168,11 +173,24 @@ scripts\benchmark_pipeline.bat summary
 
 ## 6. 권장 실행 순서
 
-1. `repo-default`
-2. `live-ops-baseline`
-3. `gpu-shift-ocr-front-cpu`
-4. `gemma-heavy-offload`
-5. 필요 시 OCR vLLM backend 조정 preset 추가
+### 1차 기준선
+
+1. `live-ops-baseline`
+2. `gpu-shift-ocr-front-cpu`
+
+### 2차 Gemma 번역 안정화
+
+1. `gemma-translation-stable-22`
+2. 안정적이면 `gemma-translation-stable-24`
+3. `24`가 불안정하면 `gemma-translation-stable-24-ctx3072`
+4. JSON retry가 줄지 않으면 fallback
+   - `gemma-translation-stable-22-t07`
+   - `gemma-translation-stable-22-t05`
+
+### 3차 이후
+
+1. 필요 시 `gemma-heavy-offload`
+2. 필요 시 OCR vLLM backend 조정 preset 추가
 
 ## 7. 집계
 
@@ -189,7 +207,22 @@ scripts\benchmark_pipeline.bat summary
 - 대표 코퍼스 기준 median total page time 개선
 - one-page auto latency 악화 없음
 - OCR retry 증가 없음
+- `gemma_json_retry_count` 증가 없음
+- `ocr_empty_rate` 증가 없음
+- `ocr_low_quality_rate` 증가 없음
 - truncated / empty translation 없음
+
+## 8-1. 현재 1차 최적화 방향
+
+현재 브랜치의 현재 운영 기준은 아래와 같습니다.
+
+- `paddleocr-server` front service는 `cpu`
+- `paddleocr-vllm`은 `gpu`
+- Gemma 모델은 `Q3_K_M` 유지
+- Gemma sampler는 `temperature=0.5`, `top_k=64`, `top_p=0.95`, `min_p=0.0`
+- Gemma는 `n_gpu_layers=22`, `threads=12`, `ctx=4096`
+
+즉, OCR 본 추론 품질은 유지하면서 Gemma 번역 경로의 JSON 안정성과 GPU 활용을 함께 올리는 방향입니다. `24` 계열은 현재 운영 기본값으로 채택하지 않았습니다.
 
 ## 9. 실사용 문서
 

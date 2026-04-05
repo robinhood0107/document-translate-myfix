@@ -17,10 +17,10 @@
 
 | 항목 | 현재 값 |
 | --- | --- |
-| temperature | `1.0` |
-| top_k | `0` |
-| top_p | `1.0` |
-| min_p | `0.05` |
+| temperature | `0.5` |
+| top_k | `64` |
+| top_p | `0.95` |
+| min_p | `0.0` |
 | response_format | `json_object` |
 | image input | `off` |
 
@@ -42,11 +42,13 @@
 | image | `ghcr.io/ggml-org/llama.cpp:server-cuda` |
 | model path | `/models/gemma-4-26b-a4b-it-heretic.q3_k_m.gguf` |
 | ctx-size | `4096` |
-| n_gpu_layers | `20` |
+| threads | `12` |
+| n_gpu_layers | `22` |
 | reasoning | `off` |
 | reasoning-budget | `0` |
 | reasoning-format | `none` |
 | `--swa-full` | `enabled` |
+| `paddleocr-server --device` | `cpu` |
 
 ### merged baseline 참고
 
@@ -161,6 +163,43 @@ Gemma 로컬 `llama.cpp` Docker compose가 처음 들어온 시점입니다.
 | reasoning-budget | `0` |
 | reasoning-format | `none` |
 | `--swa-full` | `enabled` |
+
+### `6b6b15e` `feat(benchmark): add stable gemma translation presets`
+
+현재 브랜치에서 Gemma 번역 안정화 실험을 시작한 커밋입니다.
+
+핵심 변경:
+
+- 앱 기본 sampler를 번역 안정화 기준으로 조정
+  - `temperature=1.0`
+  - `top_k=64`
+  - `top_p=0.95`
+  - `min_p=0.0`
+- benchmark preset 추가
+  - `gemma-translation-stable-22`
+  - `gemma-translation-stable-24`
+  - `gemma-translation-stable-24-ctx3072`
+  - `gemma-translation-stable-22-t07`
+  - `gemma-translation-stable-22-t05`
+- Gemma benchmark 지표 추가
+  - `gemma_json_retry_count`
+  - `gemma_chunk_retry_events`
+  - `gemma_truncated_count`
+  - `gemma_empty_content_count`
+
+### `로컬 미푸시 후속 조정`
+
+현재 브랜치에서는 representative benchmark 결과를 반영해 기본 운영값도 아래처럼 조정했습니다.
+
+| 항목 | 현재 운영값 |
+| --- | --- |
+| temperature | `0.5` |
+| top_k | `64` |
+| top_p | `0.95` |
+| min_p | `0.0` |
+| Gemma threads | `12` |
+| Gemma n_gpu_layers | `22` |
+| PaddleOCR front device | `cpu` |
 
 ## Usage 참고 메모
 

@@ -56,4 +56,4 @@ services:
       --pipeline /tmp/pipeline_conf.yaml
       --host 0.0.0.0
       --port 8118
-      --device gpu:0"
+      --device cpu"
