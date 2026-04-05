@@ -11,12 +11,19 @@ if defined CT_BENCH_OUTPUT_ROOT (
     set "CT_BENCH_OUTPUT_ROOT=%BENCH_ROOT%"
 )
 
-set "PYTHON_EXE=%REPO_ROOT%\.venv-win\Scripts\python.exe"
+set "PYTHON_EXE=%REPO_ROOT%\.venv-win-cuda13\Scripts\python.exe"
+set "CUDA13_BIN=C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v13.1\bin\x64"
+set "TENSORRT_LIBS=%REPO_ROOT%\.venv-win-cuda13\Lib\site-packages\tensorrt_libs"
+set "CUDNN_BIN=%REPO_ROOT%\.venv-win-cuda13\Lib\site-packages\nvidia\cudnn\bin"
+
 if not exist "%PYTHON_EXE%" (
-    echo Windows benchmark environment not found: "%PYTHON_EXE%"
-    echo Create or repair .venv-win before running this launcher.
+    echo CUDA 13 benchmark environment not found: "%PYTHON_EXE%"
     exit /b 1
 )
+
+if exist "%CUDA13_BIN%" set "PATH=%CUDA13_BIN%;%PATH%"
+if exist "%TENSORRT_LIBS%" set "PATH=%TENSORRT_LIBS%;%PATH%"
+if exist "%CUDNN_BIN%" set "PATH=%CUDNN_BIN%;%PATH%"
 
 if "%~1"=="" goto :run_default
 if /I "%~1"=="run" goto :run_command
@@ -53,6 +60,7 @@ if "%SAMPLE_COUNT%"=="" set "SAMPLE_COUNT=30"
 echo [benchmark] preset=%PRESET% mode=%MODE% runtime-mode=%RUNTIME_MODE% repeat=%REPEAT%
 echo [benchmark] sample-dir=%SAMPLE_DIR% sample-count=%SAMPLE_COUNT%
 echo [benchmark] output-root=%BENCH_ROOT%
+echo [benchmark] runtime=.venv-win-cuda13
 call "%PYTHON_EXE%" "%SCRIPT_DIR%benchmark_pipeline.py" ^
   --preset "%PRESET%" ^
   --mode "%MODE%" ^
@@ -86,24 +94,15 @@ goto :eof
 :help
 echo.
 echo Usage:
-echo   scripts\benchmark_pipeline.bat
 echo   scripts\benchmark_pipeline_cuda13.bat
-echo   scripts\benchmark_pipeline.bat run [preset] [mode] [runtime-mode] [repeat] [sample-dir] [sample-count]
-echo   scripts\benchmark_pipeline.bat summary
-echo   scripts\benchmark_pipeline.bat open
+echo   scripts\benchmark_pipeline_cuda13.bat run [preset] [mode] [runtime-mode] [repeat] [sample-dir] [sample-count]
+echo   scripts\benchmark_pipeline_cuda13.bat summary
+echo   scripts\benchmark_pipeline_cuda13.bat open
 echo.
 echo Runtime:
-echo   benchmark_pipeline.bat uses .venv-win
 echo   benchmark_pipeline_cuda13.bat uses .venv-win-cuda13
 echo.
 echo Output root:
 echo   %%USERPROFILE%%\Documents\Comic Translate
-echo.
-echo Examples:
-echo   scripts\benchmark_pipeline.bat
-echo   scripts\benchmark_pipeline.bat run live-ops-baseline one-page attach-running 1
-echo   scripts\benchmark_pipeline.bat run gpu-shift-ocr-front-cpu batch managed 1
-echo   scripts\benchmark_pipeline.bat summary
-echo   scripts\benchmark_pipeline.bat open
 echo.
 goto :eof

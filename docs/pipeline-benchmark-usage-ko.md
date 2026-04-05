@@ -23,14 +23,23 @@
 - `cv2`
 - 앱 실행에 필요한 OCR / ONNX / 기타 런타임 의존성
 
-현재 `.venv`에 `cv2`가 없으면 benchmark script가 fail-fast로 멈추며, 그 상태는 정상입니다. 이 경우 먼저 앱 실행 환경을 맞춰야 합니다.
+Windows에서는 시스템 Python이 아니라 아래 전용 환경을 사용합니다.
+
+- `.venv-win`
+- `.venv-win-cuda13`
+
+배치 파일 이름으로 어떤 환경을 쓸지 구분합니다.
 
 ## 2. 가장 쉬운 실행 방법
 
-Windows에서는 배치 파일 [benchmark_suite.bat](/mnt/c/Users/pjjpj/Desktop/openai_manga_translater/comic-translate/scripts/benchmark_suite.bat)를 한 번만 실행하면 됩니다.
+Windows에서는 배치 파일 이름으로 환경을 고릅니다.
+
+- 표준 환경: [benchmark_suite.bat](/mnt/c/Users/pjjpj/Desktop/openai_manga_translater/comic-translate/scripts/benchmark_suite.bat)
+- CUDA13 환경: [benchmark_suite_cuda13.bat](/mnt/c/Users/pjjpj/Desktop/openai_manga_translater/comic-translate/scripts/benchmark_suite_cuda13.bat)
 
 ```bat
 scripts\benchmark_suite.bat
+scripts\benchmark_suite_cuda13.bat
 ```
 
 이 명령은 아래 3개를 자동으로 순서대로 수행합니다.
@@ -74,36 +83,44 @@ C:\Users\<사용자이름>\Documents\Comic Translate\20260405_223000_suite
 
 ## 4. 고급 / 수동 실행
 
-세부 실행을 직접 제어하고 싶을 때만 [benchmark_pipeline.bat](/mnt/c/Users/pjjpj/Desktop/openai_manga_translater/comic-translate/scripts/benchmark_pipeline.bat)를 사용합니다.
+세부 실행을 직접 제어하고 싶을 때는 환경에 맞는 고급 런처를 사용합니다.
+
+- 표준 환경: [benchmark_pipeline.bat](/mnt/c/Users/pjjpj/Desktop/openai_manga_translater/comic-translate/scripts/benchmark_pipeline.bat)
+- CUDA13 환경: [benchmark_pipeline_cuda13.bat](/mnt/c/Users/pjjpj/Desktop/openai_manga_translater/comic-translate/scripts/benchmark_pipeline_cuda13.bat)
 
 ### 4-1. 현재 떠 있는 서버에 붙어서 batch 측정
 
 ```bat
 scripts\benchmark_pipeline.bat run live-ops-baseline batch attach-running 1
+scripts\benchmark_pipeline_cuda13.bat run live-ops-baseline batch attach-running 1
 ```
 
 ### 4-2. one-page auto 성격으로 짧게 측정
 
 ```bat
 scripts\benchmark_pipeline.bat run live-ops-baseline one-page attach-running 1
+scripts\benchmark_pipeline_cuda13.bat run live-ops-baseline one-page attach-running 1
 ```
 
 ### 4-3. preset 기준으로 Docker runtime을 다시 띄워서 측정
 
 ```bat
 scripts\benchmark_pipeline.bat run gpu-shift-ocr-front-cpu batch managed 1
+scripts\benchmark_pipeline_cuda13.bat run gpu-shift-ocr-front-cpu batch managed 1
 ```
 
 ### 4-4. 누적 결과 요약표 만들기
 
 ```bat
 scripts\benchmark_pipeline.bat summary
+scripts\benchmark_pipeline_cuda13.bat summary
 ```
 
 ### 4-5. 결과 폴더 열기
 
 ```bat
 scripts\benchmark_pipeline.bat open
+scripts\benchmark_pipeline_cuda13.bat open
 ```
 
 ## 5. 어떤 파일을 보면 되나
