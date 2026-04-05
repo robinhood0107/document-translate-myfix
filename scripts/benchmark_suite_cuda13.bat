@@ -27,11 +27,22 @@ if exist "%CUDNN_BIN%" set "PATH=%CUDNN_BIN%;%PATH%"
 
 if /I "%~1"=="help" goto :help
 
+echo [suite] launcher=scripts\benchmark_suite_cuda13.bat
+echo [suite] started-at=%DATE% %TIME%
+echo [suite] repo-root=%REPO_ROOT%
+echo [suite] python=%PYTHON_EXE%
 echo [suite] output-root=%BENCH_ROOT%
+echo [suite] sample-dir=%REPO_ROOT%\Sample
+echo [suite] sample-count=30
 echo [suite] runtime=.venv-win-cuda13
+echo [suite] cuda13-bin=%CUDA13_BIN%
+echo [suite] tensorrt-libs=%TENSORRT_LIBS%
+echo [suite] cudnn-bin=%CUDNN_BIN%
 echo [suite] one-click suite starting...
-call "%PYTHON_EXE%" "%SCRIPT_DIR%benchmark_suite.py"
-exit /b %ERRORLEVEL%
+call "%PYTHON_EXE%" -u "%SCRIPT_DIR%benchmark_suite.py"
+set "EXIT_CODE=%ERRORLEVEL%"
+echo [suite] finished exit-code=%EXIT_CODE% at=%DATE% %TIME%
+exit /b %EXIT_CODE%
 
 :help
 echo.
