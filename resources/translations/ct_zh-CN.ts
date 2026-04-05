@@ -177,12 +177,6 @@
         <translation>API 密钥</translation>
     </message>
     <message>
-        <source>Configure provider API keys or custom endpoints here.
-Use Custom Service for authenticated OpenAI-compatible providers.
-Use Custom Local Server for OpenAI-compatible local or keyless endpoints.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
         <source>Endpoint URL</source>
         <translation>终端地址</translation>
     </message>
@@ -197,6 +191,12 @@ Use Custom Local Server for OpenAI-compatible local or keyless endpoints.</sourc
     <message>
         <source>Model</source>
         <translation>模型</translation>
+    </message>
+    <message>
+        <source>Configure provider API keys or local server endpoints here.
+Use Custom Service for authenticated OpenAI-compatible providers.
+Use Custom Local Server(Gemma) with the included Gemma Docker setup.</source>
+        <translation type="unfinished"></translation>
     </message>
     <message>
         <source>Secret Key</source>
@@ -239,6 +239,48 @@ Use Custom Local Server for OpenAI-compatible local or keyless endpoints.</sourc
     <message>
         <source>Export Inpainted Image</source>
         <translation>导出修复后的图片</translation>
+    </message>
+</context>
+<context>
+    <name>GemmaLocalServerPage</name>
+    <message>
+        <source>Gemma Local Server Settings</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Comic Translate can use your local Gemma Docker server for translation.
+1. Run `docker compose up -d` in the repository root.
+2. In Settings &gt; Credentials, use Endpoint URL `http://127.0.0.1:18080/v1`.
+3. Set Model to `gemma-4-26B-A4B-it-UD-Q2_K_XL.gguf`.
+If responses are truncated, lower Chunk Size or increase LLAMA_CTX_SIZE in docker-compose.yaml.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Gemma Translation Tuning</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Chunk Size</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Max Completion Tokens</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Request Timeout (sec)</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Raw Response Log</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Recommended starting values for the included Gemma Docker setup:
+- Chunk Size: 4
+- Max Completion Tokens: 512
+- Request Timeout: 180 seconds</source>
+        <translation type="unfinished"></translation>
     </message>
 </context>
 <context>
@@ -440,6 +482,11 @@ Go to Settings &gt; Text Rendering &gt; Font to select or import one </source>
         <translation>未选择 {}。请在设置 &gt; 工具中选择一个 {}。</translation>
     </message>
     <message>
+        <source>Custom Local Server(Gemma) requires your local Gemma endpoint and model.
+Please set Endpoint URL and Model in Settings &gt; Credentials.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
         <source>Copy</source>
         <translation>复制</translation>
     </message>
@@ -549,11 +596,6 @@ Configure them in Settings &gt; {settings_page}.
     <message>
         <source>Custom Service requires an OpenAI-compatible API configuration.
 Please set API Key, Endpoint URL, and Model in Settings &gt; Credentials.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Custom Local Server requires an OpenAI-compatible endpoint.
-Please set Endpoint URL and Model in Settings &gt; Credentials.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
@@ -1090,6 +1132,10 @@ Restart now?</source>
         <translation>右对齐</translation>
     </message>
     <message>
+        <source>Custom Local Server(Gemma)</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
         <source>Gemini-3.0-Flash</source>
         <translation>Gemini-3.0-Flash</translation>
     </message>
@@ -1150,10 +1196,6 @@ Restart now?</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>Custom Local Server</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
         <source>Microsoft Translator</source>
         <translation>微软翻译</translation>
     </message>
@@ -1167,6 +1209,10 @@ Restart now?</source>
     </message>
     <message>
         <source>PaddleOCR VL Settings</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Gemma Local Server Settings</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
@@ -1722,6 +1768,10 @@ It may have been moved, renamed, or deleted.
         <translation type="unfinished"></translation>
     </message>
     <message>
+        <source>Custom Local Server(Gemma)</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
         <source>Custom Local Server</source>
         <translation type="unfinished"></translation>
     </message>
@@ -1813,6 +1863,14 @@ It may have been moved, renamed, or deleted.
     <message>
         <source>Yandex</source>
         <translation>Yandex</translation>
+    </message>
+    <message>
+        <source>Custom Local Server(Gemma)</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Custom Service</source>
+        <translation type="unfinished"></translation>
     </message>
 </context>
 <context>

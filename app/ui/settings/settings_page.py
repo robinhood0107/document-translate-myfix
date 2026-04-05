@@ -8,6 +8,7 @@ from PySide6.QtCore import QSettings, QTimer, Qt, Signal
 from PySide6.QtGui import QFont, QFontDatabase
 
 from .settings_ui import SettingsPageUI
+from .gemma_local_server_page import GemmaLocalServerPage
 from app.update_checker import UpdateChecker
 from modules.utils.device import is_gpu_available
 from modules.utils.paths import get_default_project_autosave_dir, get_user_data_dir
@@ -22,7 +23,8 @@ class SettingsPage(QtWidgets.QWidget):
 
     TOOL_CREDENTIAL_SERVICE_MAP = {
         "Custom Service": "Custom Service",
-        "Custom Local Server": "Custom Local Server",
+        "Custom Local Server(Gemma)": "Custom Local Server(Gemma)",
+        "Custom Local Server": "Custom Local Server(Gemma)",
         "Custom": "Custom",
         "GPT-4.1": "Open AI GPT",
         "GPT-4.1-mini": "Open AI GPT",
@@ -40,6 +42,7 @@ class SettingsPage(QtWidgets.QWidget):
     }
     CREDENTIAL_FIELDS = {
         "Custom Service": ("api_key", "api_url", "model"),
+        "Custom Local Server(Gemma)": ("api_url", "model"),
         "Custom Local Server": ("api_url", "model"),
         "Custom": ("api_key", "api_url", "model"),
         "Microsoft Azure": ("api_key_ocr", "endpoint", "api_key_translator", "region_translator"),
@@ -128,6 +131,7 @@ class SettingsPage(QtWidgets.QWidget):
             self.ui.save_keys_checkbox,
             self.ui.paddleocr_vl_prettify_checkbox,
             self.ui.paddleocr_vl_visualize_checkbox,
+            self.ui.gemma_raw_response_logging_checkbox,
         ]
         for widget in checkbox_widgets:
             widget.stateChanged.connect(self._save_settings_if_not_loading)
@@ -141,6 +145,9 @@ class SettingsPage(QtWidgets.QWidget):
             self.ui.project_autosave_interval_spinbox,
             self.ui.paddleocr_vl_max_new_tokens_spinbox,
             self.ui.paddleocr_vl_parallel_workers_spinbox,
+            self.ui.gemma_chunk_size_spinbox,
+            self.ui.gemma_max_completion_tokens_spinbox,
+            self.ui.gemma_request_timeout_spinbox,
         ]
         for widget in spin_widgets:
             widget.valueChanged.connect(self._save_settings_if_not_loading)
@@ -192,6 +199,14 @@ class SettingsPage(QtWidgets.QWidget):
             "parallel_workers": int(self.ui.paddleocr_vl_parallel_workers_spinbox.value()),
         }
 
+    def get_gemma_local_server_settings(self):
+        return {
+            "chunk_size": int(self.ui.gemma_chunk_size_spinbox.value()),
+            "max_completion_tokens": int(self.ui.gemma_max_completion_tokens_spinbox.value()),
+            "request_timeout_sec": int(self.ui.gemma_request_timeout_spinbox.value()),
+            "raw_response_logging": self.ui.gemma_raw_response_logging_checkbox.isChecked(),
+        }
+
     def get_export_settings(self):
         owner = self.window()
         title_bar = getattr(owner, "title_bar", None)
@@ -224,7 +239,7 @@ class SettingsPage(QtWidgets.QWidget):
         legacy_api_key = settings.value("credentials/Custom Service_api_key", "", type=str).strip()
         if not legacy_api_key:
             legacy_api_key = settings.value("credentials/Custom_api_key", "", type=str).strip()
-        return "Custom Service" if legacy_api_key else "Custom Local Server"
+        return "Custom Service" if legacy_api_key else "Custom Local Server(Gemma)"
 
     def _load_credential_value(
         self,
@@ -242,7 +257,10 @@ class SettingsPage(QtWidgets.QWidget):
 
         if service_name == "Custom Service" and field in ("api_key", "api_url", "model"):
             return settings.value(f"Custom_{field}", "", type=str)
-        if service_name == "Custom Local Server" and field in ("api_url", "model"):
+        if service_name == "Custom Local Server(Gemma)" and field in ("api_url", "model"):
+            legacy_value = settings.value(f"Custom Local Server_{field}", "", type=str)
+            if legacy_value:
+                return legacy_value
             return settings.value(f"Custom_{field}", "", type=str)
         return ""
 
@@ -287,6 +305,7 @@ class SettingsPage(QtWidgets.QWidget):
                 "hd_strategy": self.get_hd_strategy_settings(),
             },
             "paddleocr_vl": self.get_paddleocr_vl_settings(),
+            "gemma_local_server": self.get_gemma_local_server_settings(),
             "llm": self.get_llm_settings(),
             "export": self.get_export_settings(),
             "credentials": self.get_credentials(),
@@ -384,6 +403,8 @@ class SettingsPage(QtWidgets.QWidget):
         translator = settings.value("tools/translator", "Gemini-2.5-Pro", type=str)
         if translator == "Custom":
             translator = self._resolve_legacy_custom_translator()
+        elif translator == "Custom Local Server":
+            translator = "Custom Local Server(Gemma)"
 
         settings.beginGroup("tools")
         translated_translator = self.ui.reverse_mappings.get(translator, translator)
@@ -453,6 +474,33 @@ class SettingsPage(QtWidgets.QWidget):
         )
         self.ui.paddleocr_vl_parallel_workers_spinbox.setValue(
             settings.value("parallel_workers", 2, type=int)
+        )
+        settings.endGroup()
+
+        settings.beginGroup("gemma_local_server")
+        self.ui.gemma_chunk_size_spinbox.setValue(
+            settings.value(
+                "chunk_size",
+                GemmaLocalServerPage.DEFAULT_CHUNK_SIZE,
+                type=int,
+            )
+        )
+        self.ui.gemma_max_completion_tokens_spinbox.setValue(
+            settings.value(
+                "max_completion_tokens",
+                GemmaLocalServerPage.DEFAULT_MAX_COMPLETION_TOKENS,
+                type=int,
+            )
+        )
+        self.ui.gemma_request_timeout_spinbox.setValue(
+            settings.value(
+                "request_timeout_sec",
+                GemmaLocalServerPage.DEFAULT_REQUEST_TIMEOUT_SEC,
+                type=int,
+            )
+        )
+        self.ui.gemma_raw_response_logging_checkbox.setChecked(
+            settings.value("raw_response_logging", False, type=bool)
         )
         settings.endGroup()
 
