@@ -44,6 +44,12 @@ LANGUAGE_FONT_FALLBACKS = {
     "Traditional Chinese": ["Traditional Chinese", "Chinese"],
     "Brazilian Portuguese": ["Brazilian Portuguese", "Portuguese"],
 }
+GEMMA_SAMPLER_ENV = {
+    "temperature": "CT_GEMMA_TEMPERATURE",
+    "top_k": "CT_GEMMA_TOP_K",
+    "top_p": "CT_GEMMA_TOP_P",
+    "min_p": "CT_GEMMA_MIN_P",
+}
 
 
 def _log(message: str) -> None:
@@ -129,6 +135,30 @@ def _apply_benchmark_font(window, target_lang: str) -> None:
     )
 
 
+def _apply_gemma_sampler_env(gemma: dict[str, object]) -> dict[str, str | None]:
+    snapshot: dict[str, str | None] = {}
+    parts: list[str] = []
+    for key, env_name in GEMMA_SAMPLER_ENV.items():
+        snapshot[env_name] = os.environ.get(env_name)
+        value = gemma.get(key)
+        if value is None:
+            os.environ.pop(env_name, None)
+            continue
+        os.environ[env_name] = str(value)
+        parts.append(f"{key}={value}")
+    if parts:
+        _log("Gemma sampler override 적용: " + ", ".join(parts))
+    return snapshot
+
+
+def _restore_env(snapshot: dict[str, str | None]) -> None:
+    for key, value in snapshot.items():
+        if value is None:
+            os.environ.pop(key, None)
+        else:
+            os.environ[key] = value
+
+
 def _ensure_managed_runtime(run_dir: Path, preset: dict[str, object]) -> None:
     runtime_dir = run_dir / "runtime"
     _log(f"managed runtime staging 시작: {runtime_dir}")
@@ -210,68 +240,72 @@ def _run_single_mode(
     image_paths: list[Path],
 ) -> dict[str, object]:
     os.environ["CT_BENCH_OUTPUT_DIR"] = str(run_dir)
-    _log(
-        "실행 시작: mode={mode} output={run_dir} images={count} source={source} target={target}".format(
-            mode=mode,
-            run_dir=run_dir,
-            count=len(image_paths) if mode != "one-page" else 1,
-            source=source_lang,
-            target=target_lang,
-        )
-    )
+    gemma_env_snapshot = _apply_gemma_sampler_env(preset.get("gemma", {}))
     try:
-        from controller import ComicTranslate
-    except ModuleNotFoundError as exc:
-        missing = exc.name or "unknown-module"
-        raise RuntimeError(
-            "Benchmark runtime is missing a required dependency: "
-            f"{missing}. Install the full app runtime before running pipeline benchmarks."
-        ) from exc
-
-    settings_backup = _settings_snapshot()
-    window = ComicTranslate()
-    try:
-        _configure_window(window, preset, source_lang, target_lang)
-        _log("앱 설정 적용 완료")
-        loaded_paths = _load_images(window, image_paths, source_lang, target_lang)
-        _log(f"이미지 로드 완료: {len(loaded_paths)}장")
-        window.curr_img_idx = 0
-        window._current_batch_run_type = "one_page_auto" if mode == "one-page" else "batch"
-        window.emit_memlog(
-            "benchmark_run_start",
-            benchmark_mode=mode,
-            total_images=len(loaded_paths),
+        _log(
+            "실행 시작: mode={mode} output={run_dir} images={count} source={source} target={target}".format(
+                mode=mode,
+                run_dir=run_dir,
+                count=len(image_paths) if mode != "one-page" else 1,
+                source=source_lang,
+                target=target_lang,
+            )
         )
-
-        started = time.perf_counter()
-        if mode == "one-page":
-            _log("one-page 벤치 실행 중...")
-            window.pipeline.batch_process([loaded_paths[0]])
-        elif mode == "batch":
-            _log("batch 벤치 실행 중...")
-            window.pipeline.batch_process(loaded_paths)
-        elif mode == "webtoon":
-            _log("webtoon 벤치 실행 중...")
-            window.pipeline.webtoon_batch_process(loaded_paths)
-        else:
-            raise ValueError(f"Unsupported benchmark mode: {mode}")
-        elapsed = time.perf_counter() - started
-        _log(f"파이프라인 실행 완료: elapsed={elapsed:.3f}s")
-
-        window.pipeline.release_model_caches()
-        window.emit_memlog(
-            "benchmark_run_finished",
-            benchmark_mode=mode,
-            elapsed_sec=round(elapsed, 3),
-        )
-        app.processEvents()
-    finally:
         try:
-            window._skip_close_prompt = True
-            window.close()
+            from controller import ComicTranslate
+        except ModuleNotFoundError as exc:
+            missing = exc.name or "unknown-module"
+            raise RuntimeError(
+                "Benchmark runtime is missing a required dependency: "
+                f"{missing}. Install the full app runtime before running pipeline benchmarks."
+            ) from exc
+
+        settings_backup = _settings_snapshot()
+        window = ComicTranslate()
+        try:
+            _configure_window(window, preset, source_lang, target_lang)
+            _log("앱 설정 적용 완료")
+            loaded_paths = _load_images(window, image_paths, source_lang, target_lang)
+            _log(f"이미지 로드 완료: {len(loaded_paths)}장")
+            window.curr_img_idx = 0
+            window._current_batch_run_type = "one_page_auto" if mode == "one-page" else "batch"
+            window.emit_memlog(
+                "benchmark_run_start",
+                benchmark_mode=mode,
+                total_images=len(loaded_paths),
+            )
+
+            started = time.perf_counter()
+            if mode == "one-page":
+                _log("one-page 벤치 실행 중...")
+                window.pipeline.batch_process([loaded_paths[0]])
+            elif mode == "batch":
+                _log("batch 벤치 실행 중...")
+                window.pipeline.batch_process(loaded_paths)
+            elif mode == "webtoon":
+                _log("webtoon 벤치 실행 중...")
+                window.pipeline.webtoon_batch_process(loaded_paths)
+            else:
+                raise ValueError(f"Unsupported benchmark mode: {mode}")
+            elapsed = time.perf_counter() - started
+            _log(f"파이프라인 실행 완료: elapsed={elapsed:.3f}s")
+
+            window.pipeline.release_model_caches()
+            window.emit_memlog(
+                "benchmark_run_finished",
+                benchmark_mode=mode,
+                elapsed_sec=round(elapsed, 3),
+            )
             app.processEvents()
         finally:
-            _restore_settings(settings_backup)
+            try:
+                window._skip_close_prompt = True
+                window.close()
+                app.processEvents()
+            finally:
+                _restore_settings(settings_backup)
+    finally:
+        _restore_env(gemma_env_snapshot)
 
     metrics_path = run_dir / "metrics.jsonl"
     summary = summarize_metrics(metrics_path)

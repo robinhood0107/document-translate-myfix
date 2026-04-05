@@ -114,6 +114,25 @@ class BatchProcessor:
     def _current_run_type(self) -> str:
         return str(getattr(self.main_page, "_current_batch_run_type", "batch") or "batch")
 
+    def _ocr_quality_metrics(self, quality: dict | None) -> dict[str, int]:
+        quality = quality or {}
+        return {
+            "ocr_total_block_count": int(quality.get("block_count", 0) or 0),
+            "ocr_empty_block_count": int(quality.get("empty", 0) or 0),
+            # Treat suspiciously short OCR outputs as low-quality block candidates.
+            "ocr_low_quality_block_count": int(quality.get("single_char_like", 0) or 0),
+        }
+
+    def _translation_benchmark_metrics(self, translator) -> dict[str, int]:
+        engine = getattr(translator, "engine", None)
+        stats = getattr(engine, "last_benchmark_stats", {}) if engine is not None else {}
+        return {
+            "gemma_json_retry_count": int(stats.get("gemma_json_retry_count", 0) or 0),
+            "gemma_chunk_retry_events": int(stats.get("gemma_chunk_retry_events", 0) or 0),
+            "gemma_truncated_count": int(stats.get("gemma_truncated_count", 0) or 0),
+            "gemma_empty_content_count": int(stats.get("gemma_empty_content_count", 0) or 0),
+        }
+
     def _effective_export_settings(self, settings_page) -> dict:
         return dict(settings_page.get_export_settings())
 
@@ -370,6 +389,8 @@ class BatchProcessor:
                 source_lang=source_lang,
                 target_lang=target_lang,
             )
+            page_ocr_metrics = self._ocr_quality_metrics(None)
+            page_translation_metrics = self._translation_benchmark_metrics(None)
 
             target_lang_en = self.main_page.lang_mapping.get(target_lang, None)
             trg_lng_cd = get_language_code(target_lang_en)
@@ -550,6 +571,7 @@ class BatchProcessor:
                         cache_status,
                         attempt_count,
                     )
+                    page_ocr_metrics = self._ocr_quality_metrics(quality)
                     self._emit_benchmark_event(
                         "ocr_end",
                         image_path=image_path,
@@ -560,6 +582,7 @@ class BatchProcessor:
                         ocr_engine=self.ocr_handler.ocr.last_engine_name or "",
                         cache_status=cache_status,
                         attempt_count=attempt_count,
+                        **page_ocr_metrics,
                     )
                     
                 except Exception as e:
@@ -591,6 +614,7 @@ class BatchProcessor:
                         total_images=total_images,
                         failed_stage="ocr",
                         reason=err_msg,
+                        **page_ocr_metrics,
                     )
                     self.main_page.image_ctrl.mark_processing_stage(
                         image_path,
@@ -624,6 +648,7 @@ class BatchProcessor:
                     total_images=total_images,
                     failed_stage="detect",
                     reason="No text blocks detected.",
+                    **page_ocr_metrics,
                 )
                 continue
 
@@ -745,6 +770,7 @@ class BatchProcessor:
                     self.cache_manager._cache_translation_results(translation_cache_key, blk_list)
                     translation_cache_status = "refreshed"
                     logger.info("Translation completed and cached for %d blocks", len(blk_list))
+                page_translation_metrics = self._translation_benchmark_metrics(translator)
                 self._persist_translation_state(
                     image_path,
                     blk_list,
@@ -761,6 +787,7 @@ class BatchProcessor:
                     translator_key=translator_key,
                     translator_engine=translator.engine.__class__.__name__,
                     cache_status=translation_cache_status,
+                    **page_translation_metrics,
                 )
             except Exception as e:
                 # if it's a connection/network error, give a short message
@@ -784,6 +811,7 @@ class BatchProcessor:
                     err_msg = str(e)
 
                 logger.exception(f"Translation failed: {err_msg}")
+                page_translation_metrics = self._translation_benchmark_metrics(translator)
                 self._emit_benchmark_event(
                     "page_failed",
                     image_path=image_path,
@@ -791,6 +819,7 @@ class BatchProcessor:
                     total_images=total_images,
                     failed_stage="translation",
                     reason=err_msg,
+                    **page_translation_metrics,
                 )
                 self.main_page.image_ctrl.mark_processing_stage(
                     image_path,
@@ -818,6 +847,15 @@ class BatchProcessor:
                 translated_text_obj = json.loads(entire_translated_text)
                 
                 if (not raw_text_obj) or (not translated_text_obj):
+                    self._emit_benchmark_event(
+                        "page_failed",
+                        image_path=image_path,
+                        image_index=index,
+                        total_images=total_images,
+                        failed_stage="translation",
+                        reason="Translator returned empty JSON.",
+                        **page_translation_metrics,
+                    )
                     self.main_page.image_ctrl.mark_processing_stage(
                         image_path,
                         "translation",
@@ -833,6 +871,15 @@ class BatchProcessor:
                 error_message = str(e)
                 reason = f"Translator: JSONDecodeError: {error_message}"
                 logger.exception(reason)
+                self._emit_benchmark_event(
+                    "page_failed",
+                    image_path=image_path,
+                    image_index=index,
+                    total_images=total_images,
+                    failed_stage="translation",
+                    reason=error_message,
+                    **page_translation_metrics,
+                )
                 self.main_page.image_ctrl.mark_processing_stage(
                     image_path,
                     "translation",

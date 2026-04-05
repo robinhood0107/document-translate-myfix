@@ -236,6 +236,10 @@ def _run_command_streaming(
 
 
 def _stage_median(summary: dict[str, Any], stage_name: str) -> float | None:
+    top_level_key = f"{stage_name}_median_sec"
+    top_level = summary.get(top_level_key)
+    if isinstance(top_level, (int, float)):
+        return float(top_level)
     stage_stats = summary.get("stage_stats", {})
     if not isinstance(stage_stats, dict):
         return None
@@ -251,13 +255,24 @@ def _step_status(summary: dict[str, Any]) -> tuple[str, list[str]]:
     issues: list[str] = []
     page_failed_count = int(summary.get("page_failed_count") or 0)
     floor_free = summary.get("gpu_floor_free_mb")
+    gemma_truncated_count = int(summary.get("gemma_truncated_count") or 0)
+    gemma_empty_content_count = int(summary.get("gemma_empty_content_count") or 0)
+    gemma_json_retry_count = int(summary.get("gemma_json_retry_count") or 0)
 
-    if page_failed_count > 0:
+    if page_failed_count > 0 or gemma_truncated_count > 0:
         issues.append("page_failed_count > 0")
+        if gemma_truncated_count > 0:
+            issues.append("gemma_truncated_count > 0")
         return "FAIL", issues
 
     if isinstance(floor_free, (int, float)) and float(floor_free) < 1536:
         issues.append("gpu_floor_free_mb < 1536")
+    if gemma_empty_content_count > 0:
+        issues.append("gemma_empty_content_count > 0")
+    if gemma_json_retry_count > 0:
+        issues.append("gemma_json_retry_count > 0")
+
+    if issues:
         return "WARN", issues
 
     return "PASS", issues
@@ -267,9 +282,17 @@ def _build_recommendation(results: list[dict[str, Any]]) -> list[str]:
     lines: list[str] = []
     batch_result = next((item for item in results if item["name"] == "01_live_ops_batch"), None)
     managed_result = next((item for item in results if item["name"] == "03_gpu_shift_managed"), None)
+    managed_baseline = next(
+        (
+            item
+            for item in results
+            if item.get("preset") == "gpu-shift-ocr-front-cpu" and item.get("mode") == "batch"
+        ),
+        None,
+    )
 
     failing = [item for item in results if item["status"] == "FAIL"]
-    vram_low = [item for item in results if item["status"] == "WARN"]
+    vram_low = [item for item in results if "gpu_floor_free_mb < 1536" in item.get("issues", [])]
 
     if failing:
         joined = ", ".join(item["name"] for item in failing)
@@ -295,6 +318,35 @@ def _build_recommendation(results: list[dict[str, Any]]) -> list[str]:
             and managed_floor >= 1536
         ):
             lines.append("OCR front CPU 전환 후보: gpu-shift-ocr-front-cpu가 더 빠르고 안전합니다.")
+
+    if managed_baseline:
+        baseline_summary = managed_baseline.get("summary", {})
+        baseline_elapsed = baseline_summary.get("elapsed_sec")
+        baseline_retry = float(baseline_summary.get("gemma_json_retry_count") or 0)
+        baseline_empty_rate = float(baseline_summary.get("ocr_empty_rate") or 0.0)
+        baseline_low_quality_rate = float(baseline_summary.get("ocr_low_quality_rate") or 0.0)
+        for candidate in results:
+            if candidate is managed_baseline or candidate.get("mode") != "batch":
+                continue
+            candidate_summary = candidate.get("summary", {})
+            candidate_elapsed = candidate_summary.get("elapsed_sec")
+            if not isinstance(baseline_elapsed, (int, float)) or not isinstance(candidate_elapsed, (int, float)):
+                continue
+
+            candidate_retry = float(candidate_summary.get("gemma_json_retry_count") or 0)
+            candidate_empty_rate = float(candidate_summary.get("ocr_empty_rate") or 0.0)
+            candidate_low_quality_rate = float(candidate_summary.get("ocr_low_quality_rate") or 0.0)
+
+            if (
+                candidate_elapsed < baseline_elapsed
+                and candidate_retry <= baseline_retry
+                and candidate_empty_rate <= baseline_empty_rate
+                and candidate_low_quality_rate <= baseline_low_quality_rate
+                and int(candidate_summary.get("page_failed_count") or 0) == 0
+            ):
+                lines.append(
+                    f"속도/품질 균형 후보: {candidate['name']}가 managed baseline보다 빠르면서 품질 지표를 유지했습니다."
+                )
 
     if not lines:
         lines.append("현재 live-ops-baseline 유지 후보: 실패 없이 기준선을 유지하는 것이 가장 안전합니다.")
@@ -331,7 +383,6 @@ def _render_suite_report(results: list[dict[str, Any]], restore_status: str) -> 
                 inpaint=_stage_median(summary, "inpaint"),
             )
         )
-
     lines.extend(
         [
             "",
@@ -341,6 +392,29 @@ def _render_suite_report(results: list[dict[str, Any]], restore_status: str) -> 
     )
     for line in _build_recommendation(results):
         lines.append(f"- {line}")
+
+    lines.extend(
+        [
+            "",
+            "## Quality Metrics",
+            "",
+            "| run | gemma_json_retry_count | gemma_chunk_retry_events | gemma_truncated_count | gemma_empty_content_count | ocr_empty_rate | ocr_low_quality_rate |",
+            "| --- | --- | --- | --- | --- | --- | --- |",
+        ]
+    )
+    for result in results:
+        summary = result.get("summary", {})
+        lines.append(
+            "| {name} | {json_retry} | {chunk_retry} | {truncated} | {empty_content} | {ocr_empty_rate} | {ocr_low_quality_rate} |".format(
+                name=result["name"],
+                json_retry=summary.get("gemma_json_retry_count", ""),
+                chunk_retry=summary.get("gemma_chunk_retry_events", ""),
+                truncated=summary.get("gemma_truncated_count", ""),
+                empty_content=summary.get("gemma_empty_content_count", ""),
+                ocr_empty_rate=summary.get("ocr_empty_rate", ""),
+                ocr_low_quality_rate=summary.get("ocr_low_quality_rate", ""),
+            )
+        )
 
     lines.extend(
         [
@@ -363,12 +437,13 @@ def _render_console_summary(results: list[dict[str, Any]], restore_status: str) 
         summary = result.get("summary", {})
         issues = ", ".join(result.get("issues", [])) or "-"
         lines.append(
-            "[{status}] {name} | elapsed={elapsed}s | failed={failed} | free={free}MB | issues={issues}".format(
+            "[{status}] {name} | elapsed={elapsed}s | failed={failed} | free={free}MB | retry={retry} | issues={issues}".format(
                 status=result["status"],
                 name=result["name"],
                 elapsed=summary.get("elapsed_sec", "-"),
                 failed=summary.get("page_failed_count", "-"),
                 free=summary.get("gpu_floor_free_mb", "-"),
+                retry=summary.get("gemma_json_retry_count", "-"),
                 issues=issues,
             )
         )
