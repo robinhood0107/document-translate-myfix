@@ -50,16 +50,23 @@ set "SAMPLE_COUNT=%~7"
 if "%SAMPLE_COUNT%"=="" set "SAMPLE_COUNT=30"
 
 :execute_run
+echo [benchmark] launcher=scripts\benchmark_pipeline.bat
+echo [benchmark] started-at=%DATE% %TIME%
+echo [benchmark] repo-root=%REPO_ROOT%
+echo [benchmark] python=%PYTHON_EXE%
 echo [benchmark] preset=%PRESET% mode=%MODE% runtime-mode=%RUNTIME_MODE% repeat=%REPEAT%
 echo [benchmark] sample-dir=%SAMPLE_DIR% sample-count=%SAMPLE_COUNT%
 echo [benchmark] output-root=%BENCH_ROOT%
-call "%PYTHON_EXE%" "%SCRIPT_DIR%benchmark_pipeline.py" ^
+echo [benchmark] runtime=.venv-win
+call "%PYTHON_EXE%" -u "%SCRIPT_DIR%benchmark_pipeline.py" ^
   --preset "%PRESET%" ^
   --mode "%MODE%" ^
   --repeat "%REPEAT%" ^
   --runtime-mode "%RUNTIME_MODE%" ^
   --sample-dir "%SAMPLE_DIR%" ^
   --sample-count "%SAMPLE_COUNT%"
+set "EXIT_CODE=%ERRORLEVEL%"
+echo [benchmark] finished exit-code=%EXIT_CODE% at=%DATE% %TIME%
 goto :eof
 
 :summary
@@ -68,7 +75,8 @@ if not exist "%BENCH_ROOT%" (
     exit /b 1
 )
 echo [benchmark] writing summary to %BENCH_ROOT%\summary.md
-call "%PYTHON_EXE%" "%SCRIPT_DIR%summarize_benchmarks.py" ^
+echo [benchmark] python=%PYTHON_EXE%
+call "%PYTHON_EXE%" -u "%SCRIPT_DIR%summarize_benchmarks.py" ^
   --input "%BENCH_ROOT%" ^
   --output "%BENCH_ROOT%\summary.md"
 if exist "%BENCH_ROOT%\summary.md" (
@@ -80,6 +88,7 @@ goto :eof
 if not exist "%BENCH_ROOT%" (
     mkdir "%BENCH_ROOT%" >nul 2>&1
 )
+echo [benchmark] opening result directory: %BENCH_ROOT%
 start "" "%BENCH_ROOT%"
 goto :eof
 

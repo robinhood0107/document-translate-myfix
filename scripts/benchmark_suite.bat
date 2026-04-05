@@ -20,10 +20,19 @@ if not exist "%PYTHON_EXE%" (
 
 if /I "%~1"=="help" goto :help
 
+echo [suite] launcher=scripts\benchmark_suite.bat
+echo [suite] started-at=%DATE% %TIME%
+echo [suite] repo-root=%REPO_ROOT%
+echo [suite] python=%PYTHON_EXE%
 echo [suite] output-root=%BENCH_ROOT%
+echo [suite] sample-dir=%REPO_ROOT%\Sample
+echo [suite] sample-count=30
+echo [suite] runtime=.venv-win
 echo [suite] one-click suite starting...
-call "%PYTHON_EXE%" "%SCRIPT_DIR%benchmark_suite.py"
-exit /b %ERRORLEVEL%
+call "%PYTHON_EXE%" -u "%SCRIPT_DIR%benchmark_suite.py"
+set "EXIT_CODE=%ERRORLEVEL%"
+echo [suite] finished exit-code=%EXIT_CODE% at=%DATE% %TIME%
+exit /b %EXIT_CODE%
 
 :help
 echo.

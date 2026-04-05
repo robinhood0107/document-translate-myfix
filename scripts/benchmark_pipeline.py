@@ -26,6 +26,7 @@ from benchmark_common import (
     DEFAULT_CONTAINER_NAMES,
     create_run_dir,
     load_preset,
+    remove_containers,
     render_summary_markdown,
     resolve_corpus,
     run_command,
@@ -34,6 +35,10 @@ from benchmark_common import (
     write_json,
 )
 from modules.utils.gpu_metrics import collect_runtime_snapshot, write_snapshot_json
+
+
+def _log(message: str) -> None:
+    print(f"[benchmark] {message}", flush=True)
 
 
 def _settings_snapshot() -> dict[str, object]:
@@ -62,18 +67,25 @@ def _wait_for_url(url: str, timeout_sec: int = 180) -> None:
 
 def _ensure_managed_runtime(run_dir: Path, preset: dict[str, object]) -> None:
     runtime_dir = run_dir / "runtime"
+    _log(f"managed runtime staging 시작: {runtime_dir}")
     staged = stage_runtime_files(preset, runtime_dir)
+    _log("managed runtime 기존 컨테이너 정리 중...")
+    remove_containers(DEFAULT_CONTAINER_NAMES)
+    _log(f"Gemma compose 적용: {staged['gemma']['compose_path']}")
     run_command(
         ["docker", "compose", "-f", staged["gemma"]["compose_path"], "up", "-d", "--force-recreate"],
         cwd=runtime_dir / "gemma",
     )
+    _log(f"OCR compose 적용: {staged['ocr']['compose_path']}")
     run_command(
         ["docker", "compose", "-f", staged["ocr"]["compose_path"], "up", "-d", "--force-recreate"],
         cwd=runtime_dir / "ocr",
     )
+    _log("managed runtime health-check 대기 중...")
     _wait_for_url("http://127.0.0.1:18080/health")
     _wait_for_url("http://127.0.0.1:18000/v1/models")
     _wait_for_url("http://127.0.0.1:28118/docs")
+    _log("managed runtime health-check 완료")
 
 
 def _configure_window(window, preset: dict[str, object], source_lang: str, target_lang: str) -> None:
@@ -133,6 +145,15 @@ def _run_single_mode(
     image_paths: list[Path],
 ) -> dict[str, object]:
     os.environ["CT_BENCH_OUTPUT_DIR"] = str(run_dir)
+    _log(
+        "실행 시작: mode={mode} output={run_dir} images={count} source={source} target={target}".format(
+            mode=mode,
+            run_dir=run_dir,
+            count=len(image_paths) if mode != "one-page" else 1,
+            source=source_lang,
+            target=target_lang,
+        )
+    )
     try:
         from controller import ComicTranslate
     except ModuleNotFoundError as exc:
@@ -146,7 +167,9 @@ def _run_single_mode(
     window = ComicTranslate()
     try:
         _configure_window(window, preset, source_lang, target_lang)
+        _log("앱 설정 적용 완료")
         loaded_paths = _load_images(window, image_paths, source_lang, target_lang)
+        _log(f"이미지 로드 완료: {len(loaded_paths)}장")
         window.curr_img_idx = 0
         window._current_batch_run_type = "one_page_auto" if mode == "one-page" else "batch"
         window.emit_memlog(
@@ -157,14 +180,18 @@ def _run_single_mode(
 
         started = time.perf_counter()
         if mode == "one-page":
+            _log("one-page 벤치 실행 중...")
             window.pipeline.batch_process([loaded_paths[0]])
         elif mode == "batch":
+            _log("batch 벤치 실행 중...")
             window.pipeline.batch_process(loaded_paths)
         elif mode == "webtoon":
+            _log("webtoon 벤치 실행 중...")
             window.pipeline.webtoon_batch_process(loaded_paths)
         else:
             raise ValueError(f"Unsupported benchmark mode: {mode}")
         elapsed = time.perf_counter() - started
+        _log(f"파이프라인 실행 완료: elapsed={elapsed:.3f}s")
 
         window.pipeline.release_model_caches()
         window.emit_memlog(
@@ -192,6 +219,14 @@ def _run_single_mode(
     )
     write_json(run_dir / "summary.json", summary)
     (run_dir / "summary.md").write_text(render_summary_markdown(summary), encoding="utf-8")
+    _log(
+        "요약 저장 완료: summary.json={summary_json} summary.md={summary_md} page_done={done} page_failed={failed}".format(
+            summary_json=run_dir / "summary.json",
+            summary_md=run_dir / "summary.md",
+            done=summary.get("page_done_count"),
+            failed=summary.get("page_failed_count"),
+        )
+    )
     return summary
 
 
@@ -226,6 +261,23 @@ def main() -> int:
     preset, preset_path = load_preset(args.preset)
     corpus = resolve_corpus(args.sample_dir, sample_count=args.sample_count)
     modes = ["one-page", "batch", "webtoon"] if args.mode == "all" else [args.mode]
+    _log(
+        "시작: preset={preset} preset_path={preset_path} mode={mode} repeat={repeat} runtime_mode={runtime_mode}".format(
+            preset=preset.get("name", args.preset),
+            preset_path=preset_path,
+            mode=args.mode,
+            repeat=args.repeat,
+            runtime_mode=args.runtime_mode,
+        )
+    )
+    _log(
+        "코퍼스: sample_dir={sample_dir} sample_count={sample_count} smoke={smoke} representative={representative}".format(
+            sample_dir=args.sample_dir,
+            sample_count=args.sample_count,
+            smoke=len(corpus["smoke"]),
+            representative=len(corpus["representative"]),
+        )
+    )
 
     app = QApplication.instance() or QApplication([])
     aggregated = []
@@ -240,10 +292,12 @@ def main() -> int:
             else:
                 run_dir = create_run_dir(f"{label}_{mode}_r{repeat_index}")
             run_dir.mkdir(parents=True, exist_ok=True)
+            _log(f"run 디렉터리 준비: {run_dir}")
 
             selected_paths = corpus["smoke"] if mode == "one-page" else corpus["representative"]
             if mode == "one-page":
                 selected_paths = selected_paths[:1]
+            _log(f"선택 이미지 수: {len(selected_paths)}")
 
             write_json(
                 run_dir / "benchmark_request.json",
@@ -263,6 +317,7 @@ def main() -> int:
                 run_dir / "runtime_snapshot.json",
                 collect_runtime_snapshot(DEFAULT_CONTAINER_NAMES),
             )
+            _log("런타임 스냅샷 저장 완료")
 
             if args.runtime_mode == "managed":
                 _ensure_managed_runtime(run_dir, preset)
@@ -271,6 +326,7 @@ def main() -> int:
                     collect_runtime_snapshot(DEFAULT_CONTAINER_NAMES),
                 )
             else:
+                _log("attach-running 모드: 현재 떠 있는 Docker 서버를 그대로 사용")
                 write_snapshot_json(
                     run_dir / "docker_snapshot.json",
                     collect_runtime_snapshot(DEFAULT_CONTAINER_NAMES),
@@ -300,10 +356,23 @@ def main() -> int:
                     "summary": summary,
                 }
             )
+            _log(
+                "run 완료: mode={mode} repeat={repeat} elapsed={elapsed} failed={failed}".format(
+                    mode=mode,
+                    repeat=repeat_index,
+                    elapsed=summary.get("elapsed_sec"),
+                    failed=summary.get("page_failed_count"),
+                )
+            )
             print(f"[done] {mode} repeat={repeat_index} -> {run_dir}")
 
     if aggregated:
         write_json(Path(aggregated[-1]["run_dir"]).parent / "last_benchmark_runs.json", {"runs": aggregated})
+        _log(
+            "전체 완료: last_benchmark_runs.json={path}".format(
+                path=Path(aggregated[-1]["run_dir"]).parent / "last_benchmark_runs.json"
+            )
+        )
     return 0
 
 

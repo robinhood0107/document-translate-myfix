@@ -11,6 +11,8 @@ import time
 import urllib.error
 import urllib.request
 from pathlib import Path
+from queue import Empty, Queue
+from threading import Thread
 from typing import Any
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -22,6 +24,7 @@ from benchmark_common import (
     DEFAULT_SAMPLE_DIR,
     benchmark_output_root,
     create_run_dir,
+    remove_containers,
     resolve_corpus,
     write_json,
 )
@@ -98,14 +101,18 @@ def _wait_for_url(url: str, timeout_sec: int = 180) -> None:
 
 
 def _preflight(sample_dir: Path, sample_count: int) -> None:
+    _log(f"preflight: Sample 폴더 확인 중... dir={sample_dir} count>={sample_count}")
     resolve_corpus(sample_dir, sample_count=sample_count)
+    _log("preflight: Python 런타임 import 확인 중... (PySide6, cv2)")
     _check_imports()
+    _log("preflight: attach-running 서버 health-check 확인 중...")
     for url in ATTACH_RUNNING_HEALTH_URLS:
         if not _url_available(url, timeout_sec=5):
             raise RuntimeError(
                 "attach-running 기준 서버가 준비되지 않았습니다. "
                 f"응답이 없는 URL: {url}"
             )
+        _log(f"preflight: OK {url}")
 
 
 def _snapshot_runtime_files(snapshot_dir: Path) -> None:
@@ -115,12 +122,16 @@ def _snapshot_runtime_files(snapshot_dir: Path) -> None:
         target_path = snapshot_dir / relative_path
         target_path.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(source_path, target_path)
+        _log(f"runtime snapshot 저장: {relative_path}")
 
 
 def _restore_runtime(snapshot_dir: Path) -> None:
     gemma_snapshot = snapshot_dir / "docker-compose.yaml"
     ocr_snapshot = snapshot_dir / "paddleocr_vl_docker_files" / "docker-compose.yaml"
 
+    _log("restore: 기존 컨테이너 정리 중...")
+    remove_containers(["gemma-local-server", "paddleocr-server", "paddleocr-vllm"])
+    _log("restore: Gemma docker-compose 복원 중...")
     subprocess.run(
         [
             "docker",
@@ -138,6 +149,7 @@ def _restore_runtime(snapshot_dir: Path) -> None:
         text=True,
         cwd=str(ROOT),
     )
+    _log("restore: OCR docker-compose 복원 중...")
     subprocess.run(
         [
             "docker",
@@ -157,7 +169,70 @@ def _restore_runtime(snapshot_dir: Path) -> None:
     )
 
     for url in ATTACH_RUNNING_HEALTH_URLS:
+        _log(f"restore: health-check 대기 중... {url}")
         _wait_for_url(url)
+    _log("restore: 모든 서비스 복원 완료")
+
+
+def _enqueue_output(stream, queue: Queue[tuple[str, str]]) -> None:
+    try:
+        for line in iter(stream.readline, ""):
+            queue.put(("line", line))
+    finally:
+        queue.put(("eof", ""))
+
+
+def _run_command_streaming(
+    *,
+    cmd: list[str],
+    cwd: Path,
+    env: dict[str, str],
+    output_dir: Path,
+    step_name: str,
+) -> subprocess.CompletedProcess[str]:
+    output_dir.mkdir(parents=True, exist_ok=True)
+    stdout_path = output_dir / "command_stdout.txt"
+    stderr_path = output_dir / "command_stderr.txt"
+
+    process = subprocess.Popen(
+        cmd,
+        cwd=str(cwd),
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+        bufsize=1,
+        env=env,
+    )
+    if process.stdout is None:
+        raise RuntimeError(f"{step_name} stdout pipe could not be created.")
+
+    queue: Queue[tuple[str, str]] = Queue()
+    reader = Thread(target=_enqueue_output, args=(process.stdout, queue), daemon=True)
+    reader.start()
+
+    combined: list[str] = []
+    eof_seen = False
+    while not eof_seen or process.poll() is None:
+        try:
+            kind, payload = queue.get(timeout=0.2)
+        except Empty:
+            continue
+        if kind == "eof":
+            eof_seen = True
+            continue
+        combined.append(payload)
+        print(f"[suite][{step_name}] {payload.rstrip()}", flush=True)
+
+    return_code = process.wait()
+    output_text = "".join(combined)
+    stdout_path.write_text(output_text, encoding="utf-8")
+    stderr_path.write_text("", encoding="utf-8")
+    return subprocess.CompletedProcess(
+        cmd,
+        return_code,
+        stdout=output_text,
+        stderr="",
+    )
 
 
 def _stage_median(summary: dict[str, Any], stage_name: str) -> float | None:
@@ -319,6 +394,7 @@ def _run_step(suite_dir: Path, step: dict[str, str], sample_dir: Path, sample_co
     output_dir = suite_dir / step["name"]
     cmd = [
         sys.executable,
+        "-u",
         str(ROOT / "scripts" / "benchmark_pipeline.py"),
         "--preset",
         step["preset"],
@@ -339,17 +415,16 @@ def _run_step(suite_dir: Path, step: dict[str, str], sample_dir: Path, sample_co
     ]
     env = os.environ.copy()
     env["CT_BENCH_OUTPUT_ROOT"] = str(benchmark_output_root())
+    _log(f"step command: {' '.join(cmd)}")
+    _log(f"step output dir: {output_dir}")
 
-    completed = subprocess.run(
-        cmd,
-        cwd=str(ROOT),
-        capture_output=True,
-        text=True,
+    completed = _run_command_streaming(
+        cmd=cmd,
+        cwd=ROOT,
         env=env,
+        output_dir=output_dir,
+        step_name=step["name"],
     )
-    output_dir.mkdir(parents=True, exist_ok=True)
-    (output_dir / "command_stdout.txt").write_text(completed.stdout or "", encoding="utf-8")
-    (output_dir / "command_stderr.txt").write_text(completed.stderr or "", encoding="utf-8")
 
     if completed.returncode != 0:
         raise RuntimeError(
@@ -395,6 +470,7 @@ def main() -> int:
 
     suite_root = benchmark_output_root()
     suite_dir = create_run_dir("suite", root=suite_root)
+    _log(f"suite output dir: {suite_dir}")
     snapshot_dir = suite_dir / "_runtime_snapshot"
     _snapshot_runtime_files(snapshot_dir)
 
