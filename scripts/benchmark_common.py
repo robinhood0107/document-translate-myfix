@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import json
 import os
-import platform
 import shutil
 import subprocess
 import time
@@ -57,16 +56,14 @@ def benchmark_default_output_root() -> Path:
     if env_root:
         return Path(env_root).expanduser()
 
-    user_profile = os.getenv("USERPROFILE", "").strip()
-    if user_profile:
-        return Path(user_profile) / "Documents" / "Comic Translate"
+    return ROOT / "banchmark_result_log"
 
-    if platform.system() == "Windows":
-        return Path(os.path.expanduser("~")) / "Documents" / "Comic Translate"
 
-    from modules.utils.paths import get_user_data_dir
-
-    return Path(get_user_data_dir()) / "benchmarks"
+def repo_relative_str(path: str | Path) -> str:
+    try:
+        return "./" + str(Path(path).resolve().relative_to(ROOT.resolve())).replace("\\", "/")
+    except Exception:
+        return str(path).replace("\\", "/")
 
 
 def run_command(

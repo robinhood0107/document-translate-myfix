@@ -7,7 +7,7 @@ for %%I in ("%SCRIPT_DIR%..") do set "REPO_ROOT=%%~fI"
 if defined CT_BENCH_OUTPUT_ROOT (
     set "BENCH_ROOT=%CT_BENCH_OUTPUT_ROOT%"
 ) else (
-    set "BENCH_ROOT=%USERPROFILE%\Documents\Comic Translate"
+    set "BENCH_ROOT=%REPO_ROOT%\banchmark_result_log"
     set "CT_BENCH_OUTPUT_ROOT=%BENCH_ROOT%"
 )
 
@@ -92,6 +92,8 @@ call "%PYTHON_EXE%" -u "%SCRIPT_DIR%summarize_benchmarks.py" ^
 if exist "%BENCH_ROOT%\summary.md" (
     echo [benchmark] summary ready: %BENCH_ROOT%\summary.md
 )
+echo [benchmark] generating docs benchmark report
+call "%PYTHON_EXE%" -u "%SCRIPT_DIR%generate_benchmark_report.py"
 goto :eof
 
 :open_dir
@@ -114,6 +116,6 @@ echo Runtime:
 echo   benchmark_pipeline_cuda13.bat uses .venv-win-cuda13
 echo.
 echo Output root:
-echo   %%USERPROFILE%%\Documents\Comic Translate
+echo   %%REPO_ROOT%%\banchmark_result_log
 echo.
 goto :eof
