@@ -1,0 +1,11 @@
+model: "/home/paddleocr/.paddlex/official_models/PaddleOCR-VL-1.5"
+host: "0.0.0.0"
+port: 18000
+
+# Leave VRAM headroom for the /layout-parsing service running on gpu:0.
+# 4070 12GB 기준 처리량 향상을 위해 소폭 상향.
+gpu_memory_utilization: 0.84
+max_model_len: 4096
+max_num_seqs: 32
+max_num_batched_tokens: 98304
+dtype: "bfloat16"

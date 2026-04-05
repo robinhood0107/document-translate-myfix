@@ -69,6 +69,20 @@ class BatchProcessor:
         self.inpainting = inpainting_handler
         self.ocr_handler = ocr_handler
 
+    def _emit_benchmark_event(self, tag: str, image_path: str | None = None, **extra) -> None:
+        payload = {
+            "pipeline_mode": "batch",
+            "run_type": self._current_run_type(),
+        }
+        if image_path:
+            payload["image_path"] = image_path
+            payload["image_name"] = os.path.basename(image_path)
+        payload.update(extra)
+        try:
+            self.main_page.emit_memlog(tag, **payload)
+        except Exception:
+            pass
+
     def skip_save(self, directory, timestamp, base_name, extension, archive_bname, image):
         logger.info("Skipping fallback translated image save for '%s'.", base_name)
 
@@ -99,6 +113,25 @@ class BatchProcessor:
 
     def _current_run_type(self) -> str:
         return str(getattr(self.main_page, "_current_batch_run_type", "batch") or "batch")
+
+    def _ocr_quality_metrics(self, quality: dict | None) -> dict[str, int]:
+        quality = quality or {}
+        return {
+            "ocr_total_block_count": int(quality.get("block_count", 0) or 0),
+            "ocr_empty_block_count": int(quality.get("empty", 0) or 0),
+            # Treat suspiciously short OCR outputs as low-quality block candidates.
+            "ocr_low_quality_block_count": int(quality.get("single_char_like", 0) or 0),
+        }
+
+    def _translation_benchmark_metrics(self, translator) -> dict[str, int]:
+        engine = getattr(translator, "engine", None)
+        stats = getattr(engine, "last_benchmark_stats", {}) if engine is not None else {}
+        return {
+            "gemma_json_retry_count": int(stats.get("gemma_json_retry_count", 0) or 0),
+            "gemma_chunk_retry_events": int(stats.get("gemma_chunk_retry_events", 0) or 0),
+            "gemma_truncated_count": int(stats.get("gemma_truncated_count", 0) or 0),
+            "gemma_empty_content_count": int(stats.get("gemma_empty_content_count", 0) or 0),
+        }
 
     def _effective_export_settings(self, settings_page) -> dict:
         return dict(settings_page.get_export_settings())
@@ -322,6 +355,7 @@ class BatchProcessor:
         self._export_run_tokens = {}
         image_list = selected_paths if selected_paths is not None else self.main_page.image_files
         total_images = len(image_list)
+        self._emit_benchmark_event("batch_run_start", total_images=total_images)
         try:
             if self.main_page.file_handler.should_pre_materialize(image_list):
                 count = self.main_page.file_handler.pre_materialize(image_list)
@@ -331,6 +365,7 @@ class BatchProcessor:
 
         for index, image_path in enumerate(image_list):
             if self._is_cancelled():
+                self._emit_benchmark_event("batch_run_cancelled", image_path=image_path, image_index=index, total_images=total_images)
                 return
 
             file_on_display = None
@@ -346,6 +381,16 @@ class BatchProcessor:
             source_lang = page_state['source_lang']
             target_lang = page_state['target_lang']
             self._start_page_summary(image_path, source_lang, target_lang)
+            self._emit_benchmark_event(
+                "page_start",
+                image_path=image_path,
+                image_index=index,
+                total_images=total_images,
+                source_lang=source_lang,
+                target_lang=target_lang,
+            )
+            page_ocr_metrics = self._ocr_quality_metrics(None)
+            page_translation_metrics = self._translation_benchmark_metrics(None)
 
             target_lang_en = self.main_page.lang_mapping.get(target_lang, None)
             trg_lng_cd = get_language_code(target_lang_en)
@@ -392,7 +437,14 @@ class BatchProcessor:
             # Text Block Detection
             self.emit_progress(index, total_images, 1, 10, False)
             if self._is_cancelled():
+                self._emit_benchmark_event("batch_run_cancelled", image_path=image_path, image_index=index, total_images=total_images)
                 return
+            self._emit_benchmark_event(
+                "detect_start",
+                image_path=image_path,
+                image_index=index,
+                total_images=total_images,
+            )
 
             # Use the shared block detector from the handler
             if self.block_detection.block_detector_cache is None:
@@ -413,12 +465,39 @@ class BatchProcessor:
                     detector_engine,
                     image,
                 )
+                self._emit_benchmark_event(
+                    "detect_end",
+                    image_path=image_path,
+                    image_index=index,
+                    total_images=total_images,
+                    block_count=len(blk_list or []),
+                    detector_key=detector_key,
+                    detector_engine=detector_engine,
+                )
+            else:
+                self._emit_benchmark_event(
+                    "detect_end",
+                    image_path=image_path,
+                    image_index=index,
+                    total_images=total_images,
+                    block_count=0,
+                    detector_key=detector_key,
+                    detector_engine=detector_engine,
+                )
 
             self.emit_progress(index, total_images, 2, 10, False)
             if self._is_cancelled():
+                self._emit_benchmark_event("batch_run_cancelled", image_path=image_path, image_index=index, total_images=total_images)
                 return
 
             if blk_list:
+                self._emit_benchmark_event(
+                    "ocr_start",
+                    image_path=image_path,
+                    image_index=index,
+                    total_images=total_images,
+                    block_count=len(blk_list or []),
+                )
                 # Get ocr cache key for batch processing
                 ocr_model = settings_page.get_tool_selection('ocr')
                 device = resolve_device(settings_page.is_gpu_enabled())
@@ -492,6 +571,19 @@ class BatchProcessor:
                         cache_status,
                         attempt_count,
                     )
+                    page_ocr_metrics = self._ocr_quality_metrics(quality)
+                    self._emit_benchmark_event(
+                        "ocr_end",
+                        image_path=image_path,
+                        image_index=index,
+                        total_images=total_images,
+                        block_count=len(blk_list or []),
+                        ocr_model=ocr_model,
+                        ocr_engine=self.ocr_handler.ocr.last_engine_name or "",
+                        cache_status=cache_status,
+                        attempt_count=attempt_count,
+                        **page_ocr_metrics,
+                    )
                     
                 except Exception as e:
                     # if it's a connection/network error, give a short message
@@ -515,6 +607,15 @@ class BatchProcessor:
                         err_msg = str(e)
 
                     logger.exception(f"OCR processing failed: {err_msg}")
+                    self._emit_benchmark_event(
+                        "page_failed",
+                        image_path=image_path,
+                        image_index=index,
+                        total_images=total_images,
+                        failed_stage="ocr",
+                        reason=err_msg,
+                        **page_ocr_metrics,
+                    )
                     self.main_page.image_ctrl.mark_processing_stage(
                         image_path,
                         "ocr",
@@ -540,11 +641,28 @@ class BatchProcessor:
                 self.skip_save(directory, export_token, base_name, extension, archive_bname, image)
                 self.main_page.image_skipped.emit(image_path, "Text Blocks", "")
                 self.log_skipped_image(directory, export_token, image_path, "No text blocks detected")
+                self._emit_benchmark_event(
+                    "page_failed",
+                    image_path=image_path,
+                    image_index=index,
+                    total_images=total_images,
+                    failed_stage="detect",
+                    reason="No text blocks detected.",
+                    **page_ocr_metrics,
+                )
                 continue
 
             self.emit_progress(index, total_images, 3, 10, False)
             if self._is_cancelled():
+                self._emit_benchmark_event("batch_run_cancelled", image_path=image_path, image_index=index, total_images=total_images)
                 return
+            self._emit_benchmark_event(
+                "inpaint_start",
+                image_path=image_path,
+                image_index=index,
+                total_images=total_images,
+                block_count=len(blk_list or []),
+            )
 
             # Clean Image of text
 
@@ -608,15 +726,32 @@ class BatchProcessor:
                 "completed",
                 patch_count=len(patches or []),
             )
+            self._emit_benchmark_event(
+                "inpaint_end",
+                image_path=image_path,
+                image_index=index,
+                total_images=total_images,
+                block_count=len(blk_list or []),
+                patch_count=len(patches or []),
+            )
 
             self.emit_progress(index, total_images, 5, 10, False)
             if self._is_cancelled():
+                self._emit_benchmark_event("batch_run_cancelled", image_path=image_path, image_index=index, total_images=total_images)
                 return
 
             # Get Translations/ Export if selected
             extra_context = settings_page.get_llm_settings()['extra_context']
             translator_key = settings_page.get_tool_selection('translator')
             translator = Translator(self.main_page, source_lang, target_lang)
+            self._emit_benchmark_event(
+                "translate_start",
+                image_path=image_path,
+                image_index=index,
+                total_images=total_images,
+                block_count=len(blk_list or []),
+                translator_key=translator_key,
+            )
             
             # Get translation cache key for batch processing
             translation_cache_key = self.cache_manager._get_translation_cache_key(
@@ -635,12 +770,24 @@ class BatchProcessor:
                     self.cache_manager._cache_translation_results(translation_cache_key, blk_list)
                     translation_cache_status = "refreshed"
                     logger.info("Translation completed and cached for %d blocks", len(blk_list))
+                page_translation_metrics = self._translation_benchmark_metrics(translator)
                 self._persist_translation_state(
                     image_path,
                     blk_list,
                     translator_key,
                     translator.engine.__class__.__name__,
                     translation_cache_status,
+                )
+                self._emit_benchmark_event(
+                    "translate_end",
+                    image_path=image_path,
+                    image_index=index,
+                    total_images=total_images,
+                    block_count=len(blk_list or []),
+                    translator_key=translator_key,
+                    translator_engine=translator.engine.__class__.__name__,
+                    cache_status=translation_cache_status,
+                    **page_translation_metrics,
                 )
             except Exception as e:
                 # if it's a connection/network error, give a short message
@@ -664,6 +811,16 @@ class BatchProcessor:
                     err_msg = str(e)
 
                 logger.exception(f"Translation failed: {err_msg}")
+                page_translation_metrics = self._translation_benchmark_metrics(translator)
+                self._emit_benchmark_event(
+                    "page_failed",
+                    image_path=image_path,
+                    image_index=index,
+                    total_images=total_images,
+                    failed_stage="translation",
+                    reason=err_msg,
+                    **page_translation_metrics,
+                )
                 self.main_page.image_ctrl.mark_processing_stage(
                     image_path,
                     "translation",
@@ -678,6 +835,7 @@ class BatchProcessor:
                 continue
 
             if self._is_cancelled():
+                self._emit_benchmark_event("batch_run_cancelled", image_path=image_path, image_index=index, total_images=total_images)
                 return
 
             entire_raw_text = get_raw_text(blk_list)
@@ -689,6 +847,15 @@ class BatchProcessor:
                 translated_text_obj = json.loads(entire_translated_text)
                 
                 if (not raw_text_obj) or (not translated_text_obj):
+                    self._emit_benchmark_event(
+                        "page_failed",
+                        image_path=image_path,
+                        image_index=index,
+                        total_images=total_images,
+                        failed_stage="translation",
+                        reason="Translator returned empty JSON.",
+                        **page_translation_metrics,
+                    )
                     self.main_page.image_ctrl.mark_processing_stage(
                         image_path,
                         "translation",
@@ -704,6 +871,15 @@ class BatchProcessor:
                 error_message = str(e)
                 reason = f"Translator: JSONDecodeError: {error_message}"
                 logger.exception(reason)
+                self._emit_benchmark_event(
+                    "page_failed",
+                    image_path=image_path,
+                    image_index=index,
+                    total_images=total_images,
+                    failed_stage="translation",
+                    reason=error_message,
+                    **page_translation_metrics,
+                )
                 self.main_page.image_ctrl.mark_processing_stage(
                     image_path,
                     "translation",
@@ -730,9 +906,17 @@ class BatchProcessor:
 
             self.emit_progress(index, total_images, 7, 10, False)
             if self._is_cancelled():
+                self._emit_benchmark_event("batch_run_cancelled", image_path=image_path, image_index=index, total_images=total_images)
                 return
 
             # Text Rendering
+            self._emit_benchmark_event(
+                "render_start",
+                image_path=image_path,
+                image_index=index,
+                total_images=total_images,
+                block_count=len(blk_list or []),
+            )
             render_settings = self.main_page.render_settings()
             upper_case = render_settings.upper_case
             outline = render_settings.outline
@@ -853,6 +1037,7 @@ class BatchProcessor:
             
             self.emit_progress(index, total_images, 9, 10, False)
             if self._is_cancelled():
+                self._emit_benchmark_event("batch_run_cancelled", image_path=image_path, image_index=index, total_images=total_images)
                 return
 
             # Saving blocks with texts to history
@@ -890,5 +1075,22 @@ class BatchProcessor:
                     "export_root": export_root,
                 },
             )
+            self._emit_benchmark_event(
+                "render_end",
+                image_path=image_path,
+                image_index=index,
+                total_images=total_images,
+                block_count=len(blk_list or []),
+                translated_image_path=final_output_path,
+            )
+            self._emit_benchmark_event(
+                "page_done",
+                image_path=image_path,
+                image_index=index,
+                total_images=total_images,
+                block_count=len(blk_list or []),
+                patch_count=len(patches or []),
+            )
 
             self.emit_progress(index, total_images, 10, 10, False)
+        self._emit_benchmark_event("batch_run_done", total_images=total_images)
