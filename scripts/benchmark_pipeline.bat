@@ -7,7 +7,7 @@ for %%I in ("%SCRIPT_DIR%..") do set "REPO_ROOT=%%~fI"
 if defined CT_BENCH_OUTPUT_ROOT (
     set "BENCH_ROOT=%CT_BENCH_OUTPUT_ROOT%"
 ) else (
-    set "BENCH_ROOT=%USERPROFILE%\benchmarks"
+    set "BENCH_ROOT=%USERPROFILE%\Documents\Comic Translate"
     set "CT_BENCH_OUTPUT_ROOT=%BENCH_ROOT%"
 )
 
@@ -92,7 +92,7 @@ echo   scripts\benchmark_pipeline.bat summary
 echo   scripts\benchmark_pipeline.bat open
 echo.
 echo Output root:
-echo   %%USERPROFILE%%\benchmarks
+echo   %%USERPROFILE%%\Documents\Comic Translate
 echo.
 echo Examples:
 echo   scripts\benchmark_pipeline.bat

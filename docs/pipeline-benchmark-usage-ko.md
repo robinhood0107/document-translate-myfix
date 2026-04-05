@@ -52,7 +52,7 @@ scripts\benchmark_suite.bat
 기본 저장 위치는 아래입니다.
 
 ```text
-%USERPROFILE%\benchmarks
+%USERPROFILE%\Documents\Comic Translate
 ```
 
 필요하면 `CT_BENCH_OUTPUT_ROOT` 환경변수로 다른 출력 루트를 강제로 지정할 수 있습니다.
@@ -60,7 +60,7 @@ scripts\benchmark_suite.bat
 예시:
 
 ```text
-C:\Users\<사용자이름>\benchmarks\20260405_223000_suite
+C:\Users\<사용자이름>\Documents\Comic Translate\20260405_223000_suite
 ```
 
 이 폴더 아래에 각 단계별 하위 폴더와 스위트 리포트가 함께 생깁니다.

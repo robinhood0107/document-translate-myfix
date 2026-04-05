@@ -48,8 +48,12 @@ def benchmark_default_output_root() -> Path:
     if env_root:
         return Path(env_root).expanduser()
 
+    user_profile = os.getenv("USERPROFILE", "").strip()
+    if user_profile:
+        return Path(user_profile) / "Documents" / "Comic Translate"
+
     if platform.system() == "Windows":
-        return Path(os.path.expanduser("~")) / "benchmarks"
+        return Path(os.path.expanduser("~")) / "Documents" / "Comic Translate"
 
     from modules.utils.paths import get_user_data_dir
 

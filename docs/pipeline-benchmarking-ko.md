@@ -28,12 +28,12 @@
 
 ## 2. 산출물 위치
 
-벤치 결과는 저장소가 아니라 Windows 사용자 루트의 `benchmarks` 폴더에 저장합니다.
+벤치 결과는 저장소가 아니라 Windows 사용자 문서 폴더 아래의 `Comic Translate` 폴더에 저장합니다.
 
 기본 경로:
 
 ```text
-%USERPROFILE%\benchmarks\<timestamp>_<label>\
+%USERPROFILE%\Documents\Comic Translate\<timestamp>_<label>\
 ```
 
 선택적으로 `CT_BENCH_OUTPUT_ROOT` 환경변수로 출력 루트를 덮어쓸 수 있습니다.
@@ -145,7 +145,7 @@ scripts\benchmark_pipeline.bat summary
 여러 run 디렉터리를 모아서 표로 보고 싶으면 아래를 사용합니다.
 
 ```bash
-.venv/bin/python scripts/summarize_benchmarks.py --input "%USERPROFILE%\\benchmarks"
+.venv/bin/python scripts/summarize_benchmarks.py --input "%USERPROFILE%\\Documents\\Comic Translate"
 ```
 
 ## 8. 합격 기준
