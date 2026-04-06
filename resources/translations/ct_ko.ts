@@ -19,6 +19,10 @@
 <context>
     <name>ComicTranslate</name>
     <message>
+        <source>PaddleOCR VL Settings</source>
+        <translation type="unfinished">PaddleOCR VL 설정</translation>
+    </message>
+    <message>
         <source>Error</source>
         <translation>오류</translation>
     </message>
@@ -293,6 +297,55 @@ If responses are truncated, lower Chunk Size or increase LLAMA_CTX_SIZE in docke
     </message>
 </context>
 <context>
+    <name>HunyuanOCRPage</name>
+    <message>
+        <source>HunyuanOCR Settings</source>
+        <translation>HunyuanOCR 설정</translation>
+    </message>
+    <message>
+        <source>Connect Comic Translate to your local HunyuanOCR llama.cpp server.
+This OCR engine sends cropped text regions to the OpenAI-compatible /chat/completions endpoint.
+Start the server with both the HunyuanOCR GGUF model and the matching mmproj file.</source>
+        <translation>Comic Translate를 로컬 HunyuanOCR llama.cpp 서버에 연결합니다.
+이 OCR 엔진은 잘라낸 텍스트 영역을 OpenAI 호환 /chat/completions 엔드포인트로 전송합니다.
+서버는 HunyuanOCR GGUF 모델과 대응하는 mmproj 파일을 함께 사용해 시작해야 합니다.</translation>
+    </message>
+    <message>
+        <source>Server URL</source>
+        <translation type="unfinished">서버 URL</translation>
+    </message>
+    <message>
+        <source>Hunyuan OCR Tuning</source>
+        <translation>Hunyuan OCR 튜닝</translation>
+    </message>
+    <message>
+        <source>Max Completion Tokens</source>
+        <translation type="unfinished">최대 완료 토큰</translation>
+    </message>
+    <message>
+        <source>Parallel Workers</source>
+        <translation type="unfinished">병렬 작업 수</translation>
+    </message>
+    <message>
+        <source>Request Timeout (sec)</source>
+        <translation type="unfinished">요청 타임아웃(초)</translation>
+    </message>
+    <message>
+        <source>Raw Response Log</source>
+        <translation type="unfinished">원시 응답 로그</translation>
+    </message>
+    <message>
+        <source>Recommended starting values for the included HunyuanOCR Docker setup:
+- Max Completion Tokens: 256
+- Parallel Workers: 2
+- Request Timeout: 60 seconds</source>
+        <translation>포함된 HunyuanOCR Docker 설정의 권장 시작값:
+- 최대 완료 토큰: 256
+- 병렬 작업 수: 2
+- 요청 타임아웃: 60초</translation>
+    </message>
+</context>
+<context>
     <name>LlmsPage</name>
     <message>
         <source>Provide Image as Input to AI</source>
@@ -544,12 +597,6 @@ Please select a different tool in Settings.</source>
 설정에서 다른 도구를 선택하세요.</translation>
     </message>
     <message>
-        <source>Unable to reach the local PaddleOCR VL service.
-Check Settings &gt; PaddleOCR VL Settings and make sure the Docker service is running.</source>
-        <translation>로컬 PaddleOCR VL 서비스에 연결할 수 없습니다.
-설정 &gt; PaddleOCR VL 설정에서 주소를 확인하고 Docker 서비스가 실행 중인지 확인하세요.</translation>
-    </message>
-    <message>
         <source>{0} image(s) were skipped in this batch.
 Open Batch Report to see all skipped images and reasons.</source>
         <translation>이 일괄 처리에서 {0}개의 이미지가 건너뛰어졌습니다.
@@ -560,6 +607,18 @@ Open Batch Report to see all skipped images and reasons.</source>
 Please try a different Text Recognition tool.</source>
         <translation>텍스트 인식 차단됨: AI 공급자가 이 콘텐츠를 신고했습니다.
 다른 텍스트 인식 도구를 사용해 보세요.</translation>
+    </message>
+    <message>
+        <source>The local {service} service returned an invalid response.
+Check Settings &gt; {settings_page} and review the local service logs.</source>
+        <translation>로컬 {service} 서비스가 잘못된 응답을 반환했습니다.
+설정 &gt; {settings_page}를 확인하고 로컬 서비스 로그를 점검하세요.</translation>
+    </message>
+    <message>
+        <source>Unable to reach the local {service} service.
+Check Settings &gt; {settings_page} and make sure the local service is running.</source>
+        <translation>로컬 {service} 서비스에 연결할 수 없습니다.
+설정 &gt; {settings_page}를 확인하고 로컬 서비스가 실행 중인지 확인하세요.</translation>
     </message>
     <message>
         <source>Translation blocked: The AI provider flagged this content.
@@ -1130,6 +1189,10 @@ Restart now?</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
+        <source>HunyuanOCR</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
         <source>Original</source>
         <translation>원본</translation>
     </message>
@@ -1184,6 +1247,10 @@ Restart now?</source>
     <message>
         <source>PaddleOCR VL Settings</source>
         <translation>PaddleOCR VL 설정</translation>
+    </message>
+    <message>
+        <source>HunyuanOCR Settings</source>
+        <translation>HunyuanOCR 설정</translation>
     </message>
     <message>
         <source>Gemma Local Server Settings</source>
@@ -1788,6 +1855,10 @@ It may have been moved, renamed, or deleted.
         <translation type="unfinished"></translation>
     </message>
     <message>
+        <source>HunyuanOCR</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
         <source>Default</source>
         <translation>기본값</translation>
     </message>
@@ -1910,6 +1981,14 @@ It may have been moved, renamed, or deleted.
     <message>
         <source>Crop</source>
         <translation>자르기</translation>
+    </message>
+    <message>
+        <source>PaddleOCR VL Settings</source>
+        <translation type="unfinished">PaddleOCR VL 설정</translation>
+    </message>
+    <message>
+        <source>HunyuanOCR Settings</source>
+        <translation>HunyuanOCR 설정</translation>
     </message>
 </context>
 <context>

@@ -144,7 +144,11 @@ class PaddleOCRVLEngine(OCREngine):
         error_code = data.get("errorCode")
         if error_code not in (None, 0):
             error_msg = str(data.get("errorMsg", "") or "Unknown PaddleOCR VL error.")
-            raise LocalServiceResponseError(error_msg)
+            raise LocalServiceResponseError(
+                error_msg,
+                service_name="PaddleOCR VL",
+                settings_page_name="PaddleOCR VL Settings",
+            )
 
         return self._extract_text_from_response(data)
 
@@ -157,7 +161,9 @@ class PaddleOCRVLEngine(OCREngine):
             )
         except requests.exceptions.RequestException as exc:
             raise LocalServiceConnectionError(
-                "Unable to reach the local PaddleOCR VL service."
+                "Unable to reach the local PaddleOCR VL service.",
+                service_name="PaddleOCR VL",
+                settings_page_name="PaddleOCR VL Settings",
             ) from exc
 
         if response.status_code != 200:
@@ -172,7 +178,9 @@ class PaddleOCRVLEngine(OCREngine):
                     )
                 except requests.exceptions.RequestException as exc:
                     raise LocalServiceConnectionError(
-                        "Unable to reach the local PaddleOCR VL service."
+                        "Unable to reach the local PaddleOCR VL service.",
+                        service_name="PaddleOCR VL",
+                        settings_page_name="PaddleOCR VL Settings",
                     ) from exc
                 if legacy_response.status_code == 200:
                     response = legacy_response
@@ -180,14 +188,18 @@ class PaddleOCRVLEngine(OCREngine):
 
         if response.status_code != 200:
             raise LocalServiceResponseError(
-                f"PaddleOCR VL service returned HTTP {response.status_code}."
+                f"PaddleOCR VL service returned HTTP {response.status_code}.",
+                service_name="PaddleOCR VL",
+                settings_page_name="PaddleOCR VL Settings",
             )
 
         try:
             return response.json()
         except ValueError as exc:
             raise LocalServiceResponseError(
-                "PaddleOCR VL service returned invalid JSON."
+                "PaddleOCR VL service returned invalid JSON.",
+                service_name="PaddleOCR VL",
+                settings_page_name="PaddleOCR VL Settings",
             ) from exc
 
     def _extract_text_from_response(self, data: dict) -> str:
@@ -292,7 +304,12 @@ class PaddleOCRVLEngine(OCREngine):
     def _encode_image(self, image: np.ndarray) -> bytes:
         success, encoded = cv2.imencode(".jpg", image)
         if not success:
-            raise LocalServiceResponseError("Failed to encode OCR crop for PaddleOCR VL.")
+            raise LocalServiceResponseError(
+                "Failed to encode OCR crop for PaddleOCR VL.",
+                service_name="PaddleOCR VL",
+                settings_page_name="PaddleOCR VL Settings",
+            )
+            
         return encoded.tobytes()
 
     def _mark_empty(self, blk: TextBlock, reason: str) -> None:
