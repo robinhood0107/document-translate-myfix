@@ -228,7 +228,10 @@ GitHub 저장소 설정에서 아래를 권장한다.
 - benchmark 결과를 제품 브랜치에 반영할 때는 `benchmarking/lab`를 직접 merge하지 않고, 필요한 제품 변경만 별도 `codex/*` 브랜치에서 다시 정리해 반영한다.
 - 제품 코드에는 benchmark를 위해 필요한 최소 계측만 남긴다.
   - 허용: stage hook, retry/truncated/quality 통계 surface, generic memlog/gpu snapshot helper
+  - 허용: benchmark로 검증된 제품 기본값 승격
+    - 예: Docker image/pull policy, `response_format_mode`, `response_schema_mode`, `chunk_size`, sampler 기본값, prompt profile, `n_gpu_layers`
   - 금지: winner 판단, preset 선택, 실험 순서, 차트/문서 생성 로직
 - core 비즈니스 코드는 benchmark runner나 report generator를 import하지 않는다.
 - benchmark 레이어는 raw 결과와 공용 계측 surface를 읽어서 해석한다.
+- benchmark 결과를 근거로 한 제품 기본값 변경 PR은 benchmark 자산만 포함하지 않으면 `develop` 대상 제품 변경 PR로 수용할 수 있다.
 - 상세 운영 기준은 `docs/repo/benchmark-branch-policy-ko.md`를 따른다.
