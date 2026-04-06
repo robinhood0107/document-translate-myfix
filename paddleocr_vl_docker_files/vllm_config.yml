@@ -1,11 +1,13 @@
-model: "/home/paddleocr/.paddlex/official_models/PaddleOCR-VL-1.5"
-host: "0.0.0.0"
-port: 18000
+# Optional backend_config template for the official PaddleOCR genai_server.
+# The tracked docker-compose.yaml does not mount this file by default.
+#
+# Use this only if the official defaults fail to start in your environment
+# or after the direct /v1 path has passed the 30-image regression suite.
+# Keys follow the official PaddleOCR backend_config format.
 
-# Leave VRAM headroom for the /layout-parsing service running on gpu:0.
-# 4070 12GB 기준 처리량 향상을 위해 소폭 상향.
-gpu_memory_utilization: 0.84
-max_model_len: 4096
-max_num_seqs: 32
-max_num_batched_tokens: 98304
-dtype: "bfloat16"
+gpu-memory-utilization: 0.7
+max-model-len: 4096
+max-num-seqs: 16
+max-num-batched-tokens: 16384
+enable-prefix-caching: false
+mm-processor-cache-gb: 0

@@ -328,11 +328,11 @@ Start the server with both the HunyuanOCR GGUF model and the matching mmproj fil
     </message>
     <message>
         <source>Request Timeout (sec)</source>
-        <translation type="unfinished">요청 타임아웃(초)</translation>
+        <translation>요청 타임아웃(초)</translation>
     </message>
     <message>
         <source>Raw Response Log</source>
-        <translation type="unfinished">원시 응답 로그</translation>
+        <translation>원시 응답 로그</translation>
     </message>
     <message>
         <source>Recommended starting values for the included HunyuanOCR Docker setup:
@@ -809,58 +809,38 @@ Please check your internet connection.</source>
         <translation>PaddleOCR VL 설정</translation>
     </message>
     <message>
-        <source>Connect Comic Translate to your local PaddleOCR VL Docker service.
-This OCR engine sends cropped text regions to the /layout-parsing endpoint.
-Leave markdown or visualization options disabled unless you need debugging.</source>
-        <translation>Comic Translate를 로컬 PaddleOCR VL Docker 서비스에 연결합니다.
-이 OCR 엔진은 잘라낸 텍스트 영역을 /layout-parsing 엔드포인트로 전송합니다.
-디버깅이 필요하지 않다면 마크다운 정리와 시각화 옵션은 끄는 것을 권장합니다.</translation>
+        <source>Connect Comic Translate to the official PaddleOCR genai_server runtime.
+This OCR engine sends cropped text regions to the OpenAI-compatible /v1/chat/completions endpoint.
+Use the direct genai_server service for RT-DETR-v2 block OCR instead of the legacy /layout-parsing pipeline.</source>
+        <translation>Comic Translate를 공식 PaddleOCR genai_server 런타임에 연결합니다.
+이 OCR 엔진은 잘라낸 텍스트 영역을 OpenAI 호환 /v1/chat/completions 엔드포인트로 전송합니다.
+기존 /layout-parsing 파이프라인 대신 direct genai_server 서비스를 RT-DETR-v2 블록 OCR에 사용하세요.</translation>
+    </message>
+    <message>
+        <source>Paddle OCR Tuning</source>
+        <translation>Paddle OCR 튜닝</translation>
+    </message>
+    <message>
+        <source>Request Timeout (sec)</source>
+        <translation>요청 타임아웃(초)</translation>
+    </message>
+    <message>
+        <source>Raw Response Log</source>
+        <translation>원시 응답 로그</translation>
+    </message>
+    <message>
+        <source>Recommended starting values for the official PaddleOCR-VL genai_server:
+- Parallel Workers: 2
+- Request Timeout: 60 seconds
+- Keep server-side backend tuning at the official defaults until direct /v1 validation passes.</source>
+        <translation>공식 PaddleOCR-VL genai_server 권장 시작값:
+- 병렬 워커: 2
+- 요청 타임아웃: 60초
+- direct /v1 검증이 끝날 때까지 서버 측 backend 튜닝은 공식 기본값으로 유지하세요.</translation>
     </message>
     <message>
         <source>Server URL</source>
         <translation>서버 URL</translation>
-    </message>
-    <message>
-        <source>Response Options</source>
-        <translation>응답 옵션</translation>
-    </message>
-    <message>
-        <source>Prettify Markdown</source>
-        <translation>마크다운 정리</translation>
-    </message>
-    <message>
-        <source>Visualize</source>
-        <translation>시각화 결과 생성</translation>
-    </message>
-    <message>
-        <source>Performance</source>
-        <translation>성능</translation>
-    </message>
-    <message>
-        <source>Estimated VRAM usage depends on page size, image resolution, and the Docker service build.
-Recommended starting points:
-- Up to 8 GB VRAM: 128 to 256 tokens, 1 worker
-- 10 to 12 GB VRAM: 256 tokens, 2 workers
-- 16 GB VRAM: 256 to 512 tokens, 2 to 3 workers
-- 24 GB or more: 512 tokens, 3 to 4 workers for dense pages
-Approximate GPU usage:
-- 256 tokens / 2 workers: about 5 to 7 GB
-- 512 tokens / 2 workers: about 7 to 10 GB
-- 1024 tokens / 2 workers: about 10 GB or more</source>
-        <translation>예상 VRAM 사용량은 페이지 크기, 이미지 해상도, Docker 서비스 빌드에 따라 달라집니다.
-권장 시작값:
-- VRAM 8GB 이하: 토큰 128~256, 작업 수 1
-- VRAM 10~12GB: 토큰 256, 작업 수 2
-- VRAM 16GB: 토큰 256~512, 작업 수 2~3
-- VRAM 24GB 이상: 글자가 많은 페이지에서 토큰 512, 작업 수 3~4
-대략적인 GPU 사용량:
-- 토큰 256 / 작업 수 2: 약 5~7GB
-- 토큰 512 / 작업 수 2: 약 7~10GB
-- 토큰 1024 / 작업 수 2: 약 10GB 이상</translation>
-    </message>
-    <message>
-        <source>Max New Tokens</source>
-        <translation>최대 새 토큰 수</translation>
     </message>
     <message>
         <source>Parallel Workers</source>

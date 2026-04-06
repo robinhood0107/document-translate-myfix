@@ -9,8 +9,7 @@ from typing import Any, Iterable
 
 DEFAULT_CONTAINER_NAMES = (
     "gemma-local-server",
-    "paddleocr-server",
-    "paddleocr-vllm",
+    "paddleocr-vl-genai",
 )
 
 

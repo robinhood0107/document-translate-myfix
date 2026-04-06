@@ -789,46 +789,32 @@ Verifica la tua connessione Internet.</translation>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>Connect Comic Translate to your local PaddleOCR VL Docker service.
-This OCR engine sends cropped text regions to the /layout-parsing endpoint.
-Leave markdown or visualization options disabled unless you need debugging.</source>
+        <source>Connect Comic Translate to the official PaddleOCR genai_server runtime.
+This OCR engine sends cropped text regions to the OpenAI-compatible /v1/chat/completions endpoint.
+Use the direct genai_server service for RT-DETR-v2 block OCR instead of the legacy /layout-parsing pipeline.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Paddle OCR Tuning</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Request Timeout (sec)</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Raw Response Log</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Recommended starting values for the official PaddleOCR-VL genai_server:
+- Parallel Workers: 2
+- Request Timeout: 60 seconds
+- Keep server-side backend tuning at the official defaults until direct /v1 validation passes.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
         <source>Server URL</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Response Options</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Prettify Markdown</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Visualize</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Performance</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Estimated VRAM usage depends on page size, image resolution, and the Docker service build.
-Recommended starting points:
-- Up to 8 GB VRAM: 128 to 256 tokens, 1 worker
-- 10 to 12 GB VRAM: 256 tokens, 2 workers
-- 16 GB VRAM: 256 to 512 tokens, 2 to 3 workers
-- 24 GB or more: 512 tokens, 3 to 4 workers for dense pages
-Approximate GPU usage:
-- 256 tokens / 2 workers: about 5 to 7 GB
-- 512 tokens / 2 workers: about 7 to 10 GB
-- 1024 tokens / 2 workers: about 10 GB or more</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Max New Tokens</source>
         <translation type="unfinished"></translation>
     </message>
     <message>

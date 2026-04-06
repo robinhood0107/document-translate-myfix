@@ -231,10 +231,9 @@ class SettingsPageUI(QtWidgets.QWidget):
         self.crop_trigger_spinbox = self.tools_page.crop_trigger_spinbox
         self.use_gpu_checkbox = self.tools_page.use_gpu_checkbox
         self.paddleocr_vl_server_url_input = self.paddleocr_vl_page.server_url_input
-        self.paddleocr_vl_prettify_checkbox = self.paddleocr_vl_page.prettify_markdown_checkbox
-        self.paddleocr_vl_visualize_checkbox = self.paddleocr_vl_page.visualize_checkbox
-        self.paddleocr_vl_max_new_tokens_spinbox = self.paddleocr_vl_page.max_new_tokens_spinbox
         self.paddleocr_vl_parallel_workers_spinbox = self.paddleocr_vl_page.parallel_workers_spinbox
+        self.paddleocr_vl_request_timeout_spinbox = self.paddleocr_vl_page.request_timeout_spinbox
+        self.paddleocr_vl_raw_response_logging_checkbox = self.paddleocr_vl_page.raw_response_logging_checkbox
         self.hunyuan_ocr_server_url_input = self.hunyuan_ocr_page.server_url_input
         self.hunyuan_ocr_max_completion_tokens_spinbox = self.hunyuan_ocr_page.max_completion_tokens_spinbox
         self.hunyuan_ocr_parallel_workers_spinbox = self.hunyuan_ocr_page.parallel_workers_spinbox

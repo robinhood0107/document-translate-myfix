@@ -131,8 +131,7 @@ class SettingsPage(QtWidgets.QWidget):
             self.ui.image_checkbox,
             self.ui.uppercase_checkbox,
             self.ui.save_keys_checkbox,
-            self.ui.paddleocr_vl_prettify_checkbox,
-            self.ui.paddleocr_vl_visualize_checkbox,
+            self.ui.paddleocr_vl_raw_response_logging_checkbox,
             self.ui.hunyuan_ocr_raw_response_logging_checkbox,
             self.ui.gemma_raw_response_logging_checkbox,
         ]
@@ -146,8 +145,8 @@ class SettingsPage(QtWidgets.QWidget):
             self.ui.min_font_spinbox,
             self.ui.max_font_spinbox,
             self.ui.project_autosave_interval_spinbox,
-            self.ui.paddleocr_vl_max_new_tokens_spinbox,
             self.ui.paddleocr_vl_parallel_workers_spinbox,
+            self.ui.paddleocr_vl_request_timeout_spinbox,
             self.ui.hunyuan_ocr_max_completion_tokens_spinbox,
             self.ui.hunyuan_ocr_parallel_workers_spinbox,
             self.ui.hunyuan_ocr_request_timeout_spinbox,
@@ -199,10 +198,9 @@ class SettingsPage(QtWidgets.QWidget):
 
         return {
             "server_url": server_url,
-            "prettify_markdown": self.ui.paddleocr_vl_prettify_checkbox.isChecked(),
-            "visualize": self.ui.paddleocr_vl_visualize_checkbox.isChecked(),
-            "max_new_tokens": int(self.ui.paddleocr_vl_max_new_tokens_spinbox.value()),
             "parallel_workers": int(self.ui.paddleocr_vl_parallel_workers_spinbox.value()),
+            "request_timeout_sec": int(self.ui.paddleocr_vl_request_timeout_spinbox.value()),
+            "raw_response_logging": self.ui.paddleocr_vl_raw_response_logging_checkbox.isChecked(),
         }
 
     def get_gemma_local_server_settings(self):
@@ -476,24 +474,28 @@ class SettingsPage(QtWidgets.QWidget):
         settings.endGroup()
 
         settings.beginGroup("paddleocr_vl")
+        server_url = settings.value(
+            "server_url",
+            self.ui.paddleocr_vl_page.DEFAULT_SERVER_URL,
+            type=str,
+        )
+        if server_url.strip() == "http://127.0.0.1:28118/layout-parsing":
+            server_url = self.ui.paddleocr_vl_page.DEFAULT_SERVER_URL
         self.ui.paddleocr_vl_server_url_input.setText(
-            settings.value(
-                "server_url",
-                self.ui.paddleocr_vl_page.DEFAULT_SERVER_URL,
-                type=str,
-            )
-        )
-        self.ui.paddleocr_vl_prettify_checkbox.setChecked(
-            settings.value("prettify_markdown", False, type=bool)
-        )
-        self.ui.paddleocr_vl_visualize_checkbox.setChecked(
-            settings.value("visualize", False, type=bool)
-        )
-        self.ui.paddleocr_vl_max_new_tokens_spinbox.setValue(
-            settings.value("max_new_tokens", 256, type=int)
+            server_url
         )
         self.ui.paddleocr_vl_parallel_workers_spinbox.setValue(
-            settings.value("parallel_workers", 2, type=int)
+            settings.value("parallel_workers", self.ui.paddleocr_vl_page.DEFAULT_PARALLEL_WORKERS, type=int)
+        )
+        self.ui.paddleocr_vl_request_timeout_spinbox.setValue(
+            settings.value(
+                "request_timeout_sec",
+                self.ui.paddleocr_vl_page.DEFAULT_REQUEST_TIMEOUT_SEC,
+                type=int,
+            )
+        )
+        self.ui.paddleocr_vl_raw_response_logging_checkbox.setChecked(
+            settings.value("raw_response_logging", False, type=bool)
         )
         settings.endGroup()
 

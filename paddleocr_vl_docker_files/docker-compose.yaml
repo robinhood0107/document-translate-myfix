@@ -1,18 +1,15 @@
 services:
-  paddleocr-vllm:
+  paddleocr-vl-genai:
     image: ccr-2vdh3abv-pub.cnc.bj.baidubce.com/paddlepaddle/paddleocr-genai-vllm-server:latest-nvidia-gpu-offline
-    container_name: paddleocr-vllm
+    container_name: paddleocr-vl-genai
     restart: unless-stopped
-    volumes:
-      - ./vllm_config.yml:/tmp/vllm_config.yml:ro
     environment:
       PADDLE_PDX_DISABLE_MODEL_SOURCE_CHECK: "True"
       PYTHONUNBUFFERED: "1"
     gpus: all
-    ports:
-      - "18000:18000"
+    network_mode: host
     healthcheck:
-      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:18000/v1/models', timeout=2)"]
+      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8118/v1/models', timeout=2)"]
       interval: 10s
       timeout: 5s
       retries: 20
@@ -21,39 +18,5 @@ services:
       paddleocr genai_server
       --model_name PaddleOCR-VL-1.5-0.9B
       --backend vllm
-      --backend_config /tmp/vllm_config.yml
       --host 0.0.0.0
-      --port 18000"
-
-  paddleocr-layout:
-    image: ccr-2vdh3abv-pub.cnc.bj.baidubce.com/paddlepaddle/paddleocr-genai-vllm-server:latest-nvidia-gpu-offline
-    container_name: paddleocr-server
-    tty: true
-    stdin_open: true
-    restart: unless-stopped
-    depends_on:
-      paddleocr-vllm:
-        condition: service_healthy
-    volumes:
-      - ./pipeline_conf.yaml:/tmp/pipeline_conf.yaml:ro
-    environment:
-      PADDLE_PDX_DISABLE_MODEL_SOURCE_CHECK: "True"
-      PYTHONUNBUFFERED: "1"
-    gpus: all
-    ports:
-      - "28118:8118"
-    healthcheck:
-      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8118/docs', timeout=2)"]
-      interval: 10s
-      timeout: 5s
-      retries: 20
-      start_period: 60s
-    command: >
-      bash -lc "set -euo pipefail &&
-      paddlex --install serving &&
-      pip install --no-cache-dir 'paddlex[ocr]' &&
-      paddlex --serve
-      --pipeline /tmp/pipeline_conf.yaml
-      --host 0.0.0.0
-      --port 8118
-      --device cpu"
+      --port 8118"

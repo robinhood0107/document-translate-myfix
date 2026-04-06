@@ -20,7 +20,7 @@ The goal of this fork is to make the local Gemma + OCR runtime path practical an
 - Tuned the current translation-only baseline around:
   - Gemma `temperature=0.6`, `top_k=64`, `top_p=0.95`, `min_p=0.0`
   - Gemma `n_gpu_layers=23`, `threads=12`, `ctx=4096`
-  - `paddleocr-server=cpu`, `paddleocr-vllm=gpu`
+  - `paddleocr-vl-genai=gpu`
 
 ## Quick Start
 ### App
