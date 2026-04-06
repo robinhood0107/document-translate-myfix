@@ -42,10 +42,74 @@ class HunyuanOCREngine(OCREngine):
     MAX_COMPLETION_TOKENS_RANGE = (64, 2048)
     PARALLEL_WORKERS_RANGE = (1, 8)
     REQUEST_ENDPOINT_SUFFIX = "/chat/completions"
-    PROMPT = "OCR"
+    PROMPT = (
+        "OCR task.\n"
+        "Only output the exact original text visible in the image.\n"
+        "只输出图片中的原文文字。\n"
+        "Do not describe the image.\n"
+        "不要描述图片，不要解释，不要翻译，不要总结。\n"
+        "Do not add prefixes like 'The text is', '图片中的文字是', or 'この画像'.\n"
+        "Preserve line breaks.\n"
+        "If there is no readable text, return an empty string."
+    )
+    STRICT_PROMPT = (
+        "Strict OCR only.\n"
+        "Return only the text visible in the image.\n"
+        "严格只返回图片中的文字本身。\n"
+        "Forbidden: image descriptions, explanations, translations, guesses, summaries, Markdown, bullets, or prefixes.\n"
+        "禁止输出“图片中的文字是”“图像中的文字是”“この画像”“The image”这类说明。\n"
+        "Keep line breaks only for the recognized text.\n"
+        "If no readable text is present, return an empty string."
+    )
     TEXT_EXPANSION_RATIO = 0.05
     TOP_K = DEFAULT_HUNYUAN_TOP_K
     REPETITION_PENALTY = DEFAULT_HUNYUAN_REPETITION_PENALTY
+    DESCRIPTIVE_PREFIX_PATTERNS = (
+        r"^\s*(?:the\s+image|this\s+image|image\s+shows|the\s+text\s+in\s+the\s+image|text\s+in\s+the\s+image)\b",
+        r"^\s*(?:图片|圖片|图像|圖像|图中|圖中|画面中|畫面中|这张图片|這張圖片)",
+        r"^\s*(?:この画像|この図|この漫畫|このイラスト|画像の|図の)",
+        r"^\s*(?:要理解|下面是|以下是|内容如下|內容如下)",
+        r"^\s*#{1,6}\s",
+    )
+    DESCRIPTIVE_PHRASES = (
+        "图片中的文字",
+        "圖片中的文字",
+        "图像中的文字",
+        "圖像中的文字",
+        "图中是",
+        "圖中是",
+        "这张图片",
+        "這張圖片",
+        "画面中",
+        "畫面中",
+        "この画像",
+        "この図",
+        "the text in the image",
+        "text in the image",
+        "the image shows",
+        "this image",
+        "to understand this",
+    )
+    DESCRIPTIVE_WRAPPER_PATTERNS = (
+        r"^\s*(?:the\s+text\s+in\s+the\s+image|text\s+in\s+the\s+image)(?:\s+is)?\s*[:：]\s*",
+        r"^\s*(?:图片中的文字|圖片中的文字|图像中的文字|圖像中的文字)(?:是|為)?\s*[:：]?\s*",
+        r"^\s*(?:图像中的文字如下|圖片中的文字如下|图像中的文字是|圖片中的文字是)\s*[:：]?\s*",
+        r"^\s*(?:画像内の文字|画像の文字|図中の文字)(?:は|：|:)?\s*",
+    )
+    PROMPT_ECHO_PHRASES = (
+        "ocr task",
+        "strict ocr only",
+        "only output the exact original text visible in the image",
+        "return only the text visible in the image",
+        "do not describe the image",
+        "if there is no readable text",
+        "if no readable text is present",
+        "只输出图片中的原文文字",
+        "严格只返回图片中的文字本身",
+        "不要描述图片",
+        "禁止输出",
+    )
+    QUOTED_TEXT_PATTERN = re.compile(r"[「『“\"']([^「」『』“”\"'\n]{1,200})[」』”\"']")
 
     def __init__(self) -> None:
         self.server_url = DEFAULT_HUNYUAN_SERVER_URL
@@ -129,8 +193,8 @@ class HunyuanOCREngine(OCREngine):
             self._mark_empty(blk, "Invalid OCR crop bounds.")
             return
 
-        text = self._request_ocr_text(crop)
-        cleaned = self._normalize_output_text(self._clean_repeated_substrings(text))
+        text, descriptive_filtered, request_attempt_count = self._request_ocr_text(crop)
+        cleaned = text
         if cleaned:
             set_block_ocr_diagnostics(
                 blk,
@@ -138,19 +202,44 @@ class HunyuanOCREngine(OCREngine):
                 confidence=0.0,
                 status=OCR_STATUS_OK,
                 empty_reason="",
-                attempt_count=1,
+                attempt_count=request_attempt_count,
             )
         else:
-            self._mark_empty(blk, "HunyuanOCR returned no text.")
+            if descriptive_filtered:
+                self._mark_empty(blk, "HunyuanOCR returned non-OCR output instead of raw OCR text.")
+            else:
+                self._mark_empty(blk, "HunyuanOCR returned no text.")
 
-    def _request_ocr_text(self, image: np.ndarray) -> str:
+    def _request_ocr_text(self, image: np.ndarray) -> tuple[str, bool, int]:
+        first_text = self._request_ocr_text_for_prompt(image, self.PROMPT)
+        first_prepared = self._prepare_output_text(first_text)
+        if not self._looks_bad_output(first_prepared):
+            return first_prepared, False, 1
+
+        logger.warning("hunyuan_ocr non-ocr response detected; retrying with strict OCR prompt")
+
+        retry_text = self._request_ocr_text_for_prompt(image, self.STRICT_PROMPT)
+        retry_prepared = self._prepare_output_text(retry_text)
+        if not self._looks_bad_output(retry_prepared):
+            return retry_prepared, True, 2
+
+        salvaged = self._salvage_text_from_descriptive_output(retry_prepared)
+        if not salvaged:
+            salvaged = self._salvage_text_from_descriptive_output(first_prepared)
+        if salvaged and not self._looks_bad_output(salvaged):
+            logger.warning("hunyuan_ocr salvaged OCR text from non-ocr response")
+            return salvaged, True, 2
+
+        return "", True, 2
+
+    def _request_ocr_text_for_prompt(self, image: np.ndarray, prompt: str) -> str:
         data_url = self._image_data_url(image)
         payload = {
             "messages": [
                 {
                     "role": "user",
                     "content": [
-                        {"type": "text", "text": self.PROMPT},
+                        {"type": "text", "text": prompt},
                         {"type": "image_url", "image_url": {"url": data_url}},
                     ],
                 }
@@ -225,6 +314,80 @@ class HunyuanOCREngine(OCREngine):
             logger.info("hunyuan_ocr raw content: %s", content_text)
 
         return content_text
+
+    def _prepare_output_text(self, text: str) -> str:
+        return self._normalize_output_text(self._clean_repeated_substrings(text))
+
+    def _looks_descriptive(self, text: str) -> bool:
+        if not text:
+            return False
+
+        stripped = text.strip()
+        if not stripped:
+            return False
+
+        lowered = stripped.lower()
+        for pattern in self.DESCRIPTIVE_PREFIX_PATTERNS:
+            if re.match(pattern, lowered, flags=re.IGNORECASE):
+                return True
+
+        lowered_lines = [line.strip().lower() for line in stripped.splitlines() if line.strip()]
+        if any(
+            line.startswith(("-", "*", "###", "1.", "2.", "3."))
+            and any(phrase in line for phrase in self.DESCRIPTIVE_PHRASES)
+            for line in lowered_lines
+        ):
+            return True
+
+        return any(phrase in lowered for phrase in self.DESCRIPTIVE_PHRASES)
+
+    def _looks_prompt_echo(self, text: str) -> bool:
+        if not text:
+            return False
+        lowered = text.strip().lower()
+        return any(phrase in lowered for phrase in self.PROMPT_ECHO_PHRASES)
+
+    def _looks_bad_output(self, text: str) -> bool:
+        return self._looks_descriptive(text) or self._looks_prompt_echo(text)
+
+    def _strip_descriptive_wrappers(self, text: str) -> str:
+        stripped = text.strip()
+        if not stripped:
+            return ""
+
+        updated = stripped
+        changed = True
+        while changed and updated:
+            changed = False
+            for pattern in self.DESCRIPTIVE_WRAPPER_PATTERNS:
+                new_value, count = re.subn(pattern, "", updated, count=1, flags=re.IGNORECASE)
+                if count:
+                    updated = new_value.strip()
+                    changed = True
+        return self._prepare_output_text(updated)
+
+    def _extract_quoted_text(self, text: str) -> str:
+        matches = self.QUOTED_TEXT_PATTERN.findall(text or "")
+        cleaned_parts: list[str] = []
+        seen: set[str] = set()
+        for match in matches:
+            cleaned = self._prepare_output_text(match)
+            if not cleaned or cleaned in seen:
+                continue
+            seen.add(cleaned)
+            cleaned_parts.append(cleaned)
+        return "\n".join(cleaned_parts).strip()
+
+    def _salvage_text_from_descriptive_output(self, text: str) -> str:
+        stripped = self._strip_descriptive_wrappers(text)
+        if stripped and not self._looks_bad_output(stripped):
+            return stripped
+
+        quoted = self._extract_quoted_text(text)
+        if quoted and not self._looks_bad_output(quoted):
+            return quoted
+
+        return ""
 
     def _extract_content_text(self, content) -> str:
         if isinstance(content, str):
