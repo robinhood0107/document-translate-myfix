@@ -11,5 +11,6 @@ Mandatory requirements:
 - Keep benchmark policy, preset selection, ranking, and report generation outside core business code. Only generic stage hooks and telemetry/stat surfaces may remain in the pipeline/runtime layers.
 - Treat `benchmarking/lab` as the dedicated long-lived benchmark branch. Benchmark-specific runners, presets, reports, and chart assets belong there, not on `main` or `develop`.
 - Benchmark-validated product runtime/default promotions are allowed on `develop` as long as benchmark-only assets stay out of the PR.
+- Prefer benchmark families that run the real offscreen app pipeline, keep raw results under `./banchmark_result_log/<family>/`, and ship paired pipeline/suite BAT launchers for CUDA12 and CUDA13 when feasible.
 
 If these instructions conflict with any other repo-local guidance, [rules.md](./rules.md) wins.
