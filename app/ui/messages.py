@@ -50,7 +50,12 @@ class Messages:
         )
 
     @staticmethod
-    def show_missing_local_service_config_error(parent, service_name: str, fields_text: str = ""):
+    def show_missing_local_service_config_error(
+        parent,
+        service_name: str,
+        fields_text: str = "",
+        settings_page_name: str | None = None,
+    ):
         details = (
             QCoreApplication.translate(
                 "Messages",
@@ -59,13 +64,14 @@ class Messages:
             if fields_text
             else QCoreApplication.translate("Messages", "Please fill in the required settings fields.")
         )
+        page_name = settings_page_name or QCoreApplication.translate("Messages", "PaddleOCR VL Settings")
         MMessage.error(
             text=QCoreApplication.translate(
                 "Messages",
                 "Missing settings for {service}.\nConfigure them in Settings > {settings_page}.\n{details}"
             ).format(
                 service=service_name,
-                settings_page=QCoreApplication.translate("Messages", "PaddleOCR VL Settings"),
+                settings_page=page_name,
                 details=details,
             ),
             parent=parent,
@@ -223,15 +229,30 @@ class Messages:
         )
 
     @staticmethod
-    def show_local_service_error(parent, details: str = None):
+    def show_local_service_error(
+        parent,
+        details: str = None,
+        *,
+        service_name: str = "PaddleOCR VL",
+        settings_page_name: str | None = None,
+        error_kind: str = "connection",
+    ):
         """
         Show a user-friendly error when a required local OCR service is unavailable.
         """
-        text = QCoreApplication.translate(
-            "Messages",
-            "Unable to reach the local PaddleOCR VL service.\nCheck Settings > PaddleOCR VL Settings and make sure the Docker service is running."
-        )
-        if details and details.strip() != "Unable to reach the local PaddleOCR VL service.":
+        page_name = settings_page_name or QCoreApplication.translate("Messages", "PaddleOCR VL Settings")
+        if error_kind == "response":
+            text = QCoreApplication.translate(
+                "Messages",
+                "The local {service} service returned an invalid response.\nCheck Settings > {settings_page} and review the local service logs."
+            ).format(service=service_name, settings_page=page_name)
+        else:
+            text = QCoreApplication.translate(
+                "Messages",
+                "Unable to reach the local {service} service.\nCheck Settings > {settings_page} and make sure the local service is running."
+            ).format(service=service_name, settings_page=page_name)
+
+        if details and details.strip() != text.strip():
             text = f"{text}\n{details}"
         MMessage.error(
             text=text,

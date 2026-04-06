@@ -8,13 +8,15 @@ This fork focuses on a practical local pipeline for comic translation:
 
 - `Custom Local Server(Gemma)` for local LLM translation
 - `PaddleOCR VL` local Docker services for OCR
+- `HunyuanOCR` local `llama.cpp` server for OCR
 
-The goal of this fork is to make the local Gemma + PaddleOCR VL path practical and reproducible for day-to-day comic translation.
+The goal of this fork is to make the local Gemma + OCR runtime path practical and reproducible for day-to-day comic translation.
 
 ## What This Fork Updates
 - Removed legacy account/login dependencies from the local workflow
 - Split local Gemma translation into a dedicated runtime/config path
 - Added tracked OCR Docker runtime bundle in [paddleocr_vl_docker_files/README.md](/mnt/c/Users/pjjpj/Desktop/openai_manga_translater/comic-translate/paddleocr_vl_docker_files/README.md)
+- Added tracked HunyuanOCR runtime bundle in [hunyuanocr_docker_files/README.md](/mnt/c/Users/pjjpj/Desktop/openai_manga_translater/comic-translate/hunyuanocr_docker_files/README.md)
 - Tuned the current translation-only baseline around:
   - Gemma `temperature=0.6`, `top_k=64`, `top_p=0.95`, `min_p=0.0`
   - Gemma `n_gpu_layers=23`, `threads=12`, `ctx=4096`
@@ -34,6 +36,8 @@ uv run comic.py
 
 ### OCR / Runtime
 - OCR Docker bundle: [paddleocr_vl_docker_files/README.md](/mnt/c/Users/pjjpj/Desktop/openai_manga_translater/comic-translate/paddleocr_vl_docker_files/README.md)
+- HunyuanOCR runtime bundle: [hunyuanocr_docker_files/README.md](/mnt/c/Users/pjjpj/Desktop/openai_manga_translater/comic-translate/hunyuanocr_docker_files/README.md)
+- HunyuanOCR setup guide: [local-server-ko.md](/mnt/c/Users/pjjpj/Desktop/openai_manga_translater/comic-translate/docs/hunyuan/local-server-ko.md)
 
 ### Repo Policy
 - Benchmark branch / merge policy: [benchmark-branch-policy-ko.md](/mnt/c/Users/pjjpj/Desktop/openai_manga_translater/comic-translate/docs/repo/benchmark-branch-policy-ko.md)
