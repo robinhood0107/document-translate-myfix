@@ -43,14 +43,9 @@ class HunyuanOCREngine(OCREngine):
     MAX_COMPLETION_TOKENS_RANGE = (64, 2048)
     PARALLEL_WORKERS_RANGE = (1, 8)
     REQUEST_ENDPOINT_SUFFIX = "/chat/completions"
-    PROMPT = "提取图中的文字。"
-    STRICT_PROMPT = (
-        "只返回图片中的原文文字本身。"
-        "不要描述图片，不要解释，不要翻译，不要总结，不要补全，"
-        "不要添加前缀、引号、坐标、项目符号或Markdown。"
-        "保持原有换行。"
-        "没有可识别文字就输出空字符串。"
-    )
+    OFFICIAL_GENERAL_PARSING_PROMPT = "提取图中的文字。"
+    PROMPT = "只输出图中的原文文字。"
+    RETRY_PROMPT = "识别图中的文字并直接输出原文。"
     TEXT_EXPANSION_RATIO = 0.05
     TOP_K = DEFAULT_HUNYUAN_TOP_K
     REPETITION_PENALTY = DEFAULT_HUNYUAN_REPETITION_PENALTY
@@ -94,16 +89,19 @@ class HunyuanOCREngine(OCREngine):
         r"^\s*(?:可以看到|可以看出)(?:[，,]\s*)?(?:文字是|內容是)?\s*[:：]?\s*",
         r"^\s*(?:画像内の文字|画像の文字|図中の文字)(?:は|：|:)?\s*",
     )
-    PROMPT_ECHO_PHRASES = (
+    PROMPT_ECHO_FALLBACK_PHRASES = (
         "提取图中的文字",
-        "只返回图片中的原文文字本身",
-        "不要描述图片",
-        "保持原有换行",
-        "没有可识别文字就输出空字符串",
+        "识别图中的文字",
+        "只输出图中的原文文字",
+        "识别图中的文字并直接输出原文",
+        "只输出原文",
+        "只输出图片中的文字内容",
     )
     STRUCTURED_OUTPUT_PATTERNS = (
         r"^\s*```",
+        r"^\s*\$\$",
         r"^\s*[\{\[][\s\S]*[\}\]]\s*$",
+        r"^\s*\\begin\{",
         r"^\s*<\s*(?:table|tr|td|th|div|span|html|body)\b",
         r"^\s*\|.+\|\s*$",
     )
@@ -118,6 +116,8 @@ class HunyuanOCREngine(OCREngine):
         '"y1"',
         '"x2"',
         '"y2"',
+        "\\left\\{",
+        "\\begin{",
         '"markdown"',
         '"html"',
     )
@@ -136,6 +136,7 @@ class HunyuanOCREngine(OCREngine):
         "x2",
         "y2",
     }
+    MARKDOWN_PREFIX_PATTERN = re.compile(r"^\s*(?:#{1,6}|[-*•]+|\d+\.)\s*")
     QUOTED_TEXT_PATTERN = re.compile(r"[「『“\"']([^「」『』“”\"'\n]{1,200})[」』”\"']")
 
     def __init__(self) -> None:
@@ -247,21 +248,21 @@ class HunyuanOCREngine(OCREngine):
 
     def _request_ocr_text(self, image: np.ndarray) -> tuple[str, bool, int]:
         first_text = self._request_ocr_text_for_prompt(image, self.PROMPT)
-        first_prepared = self._prepare_output_text(first_text)
-        if not self._looks_bad_output(first_prepared):
-            return first_prepared, False, 1
+        first_candidate = self._extract_direct_candidate(first_text, self.PROMPT)
+        if first_candidate:
+            return first_candidate, False, 1
 
-        logger.warning("hunyuan_ocr non-ocr response detected; retrying with strict OCR prompt")
+        logger.warning("hunyuan_ocr non-ocr response detected; retrying with alternate OCR prompt")
 
-        retry_text = self._request_ocr_text_for_prompt(image, self.STRICT_PROMPT)
-        retry_prepared = self._prepare_output_text(retry_text)
-        if not self._looks_bad_output(retry_prepared):
-            return retry_prepared, True, 2
+        retry_text = self._request_ocr_text_for_prompt(image, self.RETRY_PROMPT)
+        retry_candidate = self._extract_direct_candidate(retry_text, self.RETRY_PROMPT)
+        if retry_candidate:
+            return retry_candidate, True, 2
 
-        salvaged = self._salvage_text_from_descriptive_output(retry_prepared)
+        salvaged = self._salvage_text_from_descriptive_output(retry_text, self.RETRY_PROMPT)
         if not salvaged:
-            salvaged = self._salvage_text_from_descriptive_output(first_prepared)
-        if salvaged and not self._looks_bad_output(salvaged):
+            salvaged = self._salvage_text_from_descriptive_output(first_text, self.PROMPT)
+        if salvaged:
             logger.warning("hunyuan_ocr salvaged OCR text from non-ocr response")
             return salvaged, True, 2
 
@@ -353,6 +354,22 @@ class HunyuanOCREngine(OCREngine):
     def _prepare_output_text(self, text: str) -> str:
         return self._normalize_output_text(self._clean_repeated_substrings(text))
 
+    def _extract_direct_candidate(self, text: str, prompt: str | None = None) -> str:
+        for candidate in self._build_direct_candidates(text):
+            if candidate and not self._looks_bad_output(candidate, prompt=prompt):
+                return candidate
+        return ""
+
+    def _build_direct_candidates(self, text: str) -> list[str]:
+        prepared = self._prepare_output_text(text)
+        markdown_stripped = self._strip_markdown_noise(prepared)
+        candidates = []
+        if markdown_stripped and markdown_stripped != prepared:
+            candidates.append(markdown_stripped)
+        candidates.append(prepared)
+
+        return self._unique_candidates(candidates)
+
     def _looks_descriptive(self, text: str) -> bool:
         if not text:
             return False
@@ -376,11 +393,29 @@ class HunyuanOCREngine(OCREngine):
 
         return any(phrase in lowered for phrase in self.DESCRIPTIVE_PHRASES)
 
-    def _looks_prompt_echo(self, text: str) -> bool:
+    def _looks_prompt_echo(self, text: str, prompt: str | None = None) -> bool:
         if not text:
             return False
+
+        normalized_text = self._normalize_overlap_text(text)
+        if not normalized_text:
+            return False
+
+        prompt_candidates = self._unique_candidates(
+            [
+                prompt or "",
+                self.PROMPT,
+                self.RETRY_PROMPT,
+                self.OFFICIAL_GENERAL_PARSING_PROMPT,
+            ]
+        )
+        for prompt_candidate in prompt_candidates:
+            normalized_prompt = self._normalize_overlap_text(prompt_candidate)
+            if self._has_prompt_like_overlap(normalized_text, normalized_prompt):
+                return True
+
         lowered = text.strip().lower()
-        return any(phrase in lowered for phrase in self.PROMPT_ECHO_PHRASES)
+        return any(phrase in lowered for phrase in self.PROMPT_ECHO_FALLBACK_PHRASES)
 
     def _looks_structured_output(self, text: str) -> bool:
         if not text:
@@ -406,10 +441,10 @@ class HunyuanOCREngine(OCREngine):
 
         return False
 
-    def _looks_bad_output(self, text: str) -> bool:
+    def _looks_bad_output(self, text: str, prompt: str | None = None) -> bool:
         return (
             self._looks_descriptive(text)
-            or self._looks_prompt_echo(text)
+            or self._looks_prompt_echo(text, prompt=prompt)
             or self._looks_structured_output(text)
         )
 
@@ -435,6 +470,7 @@ class HunyuanOCREngine(OCREngine):
         seen: set[str] = set()
         for match in matches:
             cleaned = self._prepare_output_text(match)
+            cleaned = self._strip_markdown_noise(cleaned)
             lowered = cleaned.lower()
             if lowered in self.IGNORED_QUOTED_TEXTS:
                 continue
@@ -446,16 +482,17 @@ class HunyuanOCREngine(OCREngine):
             cleaned_parts.append(cleaned)
         return "\n".join(cleaned_parts).strip()
 
-    def _salvage_text_from_descriptive_output(self, text: str) -> str:
+    def _salvage_text_from_descriptive_output(self, text: str, prompt: str | None = None) -> str:
         stripped = self._strip_descriptive_wrappers(text)
-        if stripped and not self._looks_bad_output(stripped):
+        stripped = self._strip_markdown_noise(stripped)
+        if stripped and not self._looks_bad_output(stripped, prompt=prompt):
             return stripped
 
         if self._looks_structured_output(text):
             return ""
 
         quoted = self._extract_quoted_text(text)
-        if quoted and not self._looks_bad_output(quoted):
+        if quoted and not self._looks_bad_output(quoted, prompt=prompt):
             return quoted
 
         return ""
@@ -485,25 +522,111 @@ class HunyuanOCREngine(OCREngine):
 
         return ""
 
+    def _strip_markdown_noise(self, text: str) -> str:
+        stripped = (text or "").strip()
+        if not stripped:
+            return ""
+
+        changed = False
+        cleaned_lines: list[str] = []
+        for line in stripped.splitlines():
+            if not line.strip():
+                continue
+            cleaned_line, count = self.MARKDOWN_PREFIX_PATTERN.subn("", line, count=1)
+            if count:
+                changed = True
+            cleaned_lines.append(cleaned_line.strip())
+
+        if not changed:
+            return stripped
+
+        return self._prepare_output_text("\n".join(line for line in cleaned_lines if line))
+
+    @staticmethod
+    def _unique_candidates(candidates: list[str]) -> list[str]:
+        unique: list[str] = []
+        seen: set[str] = set()
+        for candidate in candidates:
+            cleaned = (candidate or "").strip()
+            if not cleaned or cleaned in seen:
+                continue
+            seen.add(cleaned)
+            unique.append(cleaned)
+        return unique
+
+    @staticmethod
+    def _normalize_overlap_text(text: str) -> str:
+        return "".join(char for char in (text or "").lower() if char.isalnum())
+
+    @classmethod
+    def _has_prompt_like_overlap(cls, normalized_text: str, normalized_prompt: str) -> bool:
+        if not normalized_text or not normalized_prompt:
+            return False
+
+        if normalized_text == normalized_prompt:
+            return True
+
+        if len(normalized_text) >= 3 and normalized_text in normalized_prompt:
+            return True
+
+        if len(normalized_prompt) >= 3 and normalized_prompt in normalized_text:
+            return True
+
+        prefix_overlap = 0
+        for text_char, prompt_char in zip(normalized_text, normalized_prompt):
+            if text_char != prompt_char:
+                break
+            prefix_overlap += 1
+
+        if prefix_overlap >= 3 and len(normalized_text) <= 12:
+            return True
+
+        longest_common = cls._longest_common_substring_len(normalized_text, normalized_prompt)
+        minimum_overlap = 4 if len(normalized_text) > 6 else 3
+        return longest_common >= minimum_overlap and (longest_common / max(1, len(normalized_text))) >= 0.6
+
+    @staticmethod
+    def _longest_common_substring_len(left: str, right: str) -> int:
+        if not left or not right:
+            return 0
+
+        previous = [0] * (len(right) + 1)
+        longest = 0
+        for left_char in left:
+            current = [0]
+            for idx, right_char in enumerate(right, start=1):
+                if left_char == right_char:
+                    value = previous[idx - 1] + 1
+                    current.append(value)
+                    if value > longest:
+                        longest = value
+                else:
+                    current.append(0)
+            previous = current
+
+        return longest
+
     def _resolve_bbox(self, blk: TextBlock, image: np.ndarray) -> tuple[int, int, int, int] | None:
-        source_bbox = getattr(blk, "bubble_xyxy", None)
-        if source_bbox is not None:
-            bbox = expand_bbox(source_bbox, image.shape)
-        else:
-            text_bbox = getattr(blk, "xyxy", None)
-            if text_bbox is None:
-                return None
+        text_bbox = getattr(blk, "xyxy", None)
+        if text_bbox is not None:
             bbox = expand_bbox(
                 text_bbox,
                 image.shape,
                 x_ratio=self.TEXT_EXPANSION_RATIO,
                 y_ratio=self.TEXT_EXPANSION_RATIO,
             )
+            x1, y1, x2, y2 = bbox
+            if x2 > x1 and y2 > y1:
+                return x1, y1, x2, y2
 
-        x1, y1, x2, y2 = bbox
-        if x2 <= x1 or y2 <= y1:
-            return None
-        return x1, y1, x2, y2
+        bubble_bbox = getattr(blk, "bubble_xyxy", None)
+        if bubble_bbox is not None:
+            bbox = expand_bbox(bubble_bbox, image.shape)
+            x1, y1, x2, y2 = bbox
+            if x2 > x1 and y2 > y1:
+                return x1, y1, x2, y2
+
+        return None
 
     def _crop_image(self, image: np.ndarray, bbox: tuple[int, int, int, int]) -> np.ndarray | None:
         x1, y1, x2, y2 = bbox
