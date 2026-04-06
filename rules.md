@@ -47,6 +47,7 @@
 
 - benchmark harness는 가능하면 실제 offscreen 앱 파이프라인을 기준으로 만든다.
 - 공식 점수 범위가 파이프라인 일부일 경우, 실행 범위와 점수 범위를 문서에 분리해 명시한다.
+- 공식 점수가 특정 stage까지만 필요하면, 그 family의 공식 suite는 generic stage ceiling으로 그 stage까지만 실행할 수 있다.
 - Windows benchmark family는 가능하면 `pipeline + suite`, `CUDA12 + CUDA13` BAT 쌍을 함께 제공한다.
 - raw 결과는 `./banchmark_result_log/<family>/` 아래에 남긴다.
 - benchmark family는 최소한 아래 문서 세트를 함께 가진다.

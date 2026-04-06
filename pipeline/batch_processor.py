@@ -114,6 +114,47 @@ class BatchProcessor:
     def _current_run_type(self) -> str:
         return str(getattr(self.main_page, "_current_batch_run_type", "batch") or "batch")
 
+    def _benchmark_stage_ceiling(self) -> str:
+        return str(os.getenv("CT_BENCH_STAGE_CEILING", "render") or "render").strip().lower()
+
+    def _should_stop_after_ocr(self) -> bool:
+        return self._benchmark_stage_ceiling() == "ocr"
+
+    def _finalize_benchmark_page_after_ocr(
+        self,
+        *,
+        image_path: str,
+        image_index: int,
+        total_images: int,
+        block_count: int,
+        page_ocr_metrics: dict[str, int],
+    ) -> None:
+        self.main_page.image_ctrl.update_processing_summary(
+            image_path,
+            {
+                "execution_scope": "detect-ocr-only",
+                "skipped_after_stage": "ocr",
+            },
+        )
+        for stage_name in ("inpaint", "translation", "render", "save"):
+            self.main_page.image_ctrl.mark_processing_stage(
+                image_path,
+                stage_name,
+                "skipped",
+                reason="Benchmark stage ceiling: ocr",
+            )
+        self._emit_benchmark_event(
+            "page_done",
+            image_path=image_path,
+            image_index=image_index,
+            total_images=total_images,
+            block_count=block_count,
+            patch_count=0,
+            skipped_after_stage="ocr",
+            execution_scope="detect-ocr-only",
+            **page_ocr_metrics,
+        )
+
     def _ocr_quality_metrics(self, quality: dict | None) -> dict[str, int]:
         quality = quality or {}
         return {
@@ -465,13 +506,14 @@ class BatchProcessor:
             if blk_list:
                 get_best_render_area(blk_list, image)
                 blk_list = sort_blk_list(blk_list, rtl)
-                self._persist_detect_state(
-                    image_path,
-                    blk_list,
-                    detector_key,
-                    detector_engine,
-                    image,
-                )
+            self._persist_detect_state(
+                image_path,
+                blk_list,
+                detector_key,
+                detector_engine,
+                image,
+            )
+            if blk_list:
                 self._emit_benchmark_event(
                     "detect_end",
                     image_path=image_path,
@@ -639,6 +681,23 @@ class BatchProcessor:
                 page_state = self._ensure_page_state(image_path)
                 page_state["blk_list"] = []
                 page_state.setdefault("viewer_state", {})["rectangles"] = []
+                if self._should_stop_after_ocr():
+                    self.main_page.image_ctrl.mark_processing_stage(
+                        image_path,
+                        "ocr",
+                        "completed",
+                        cache_status="skipped",
+                        attempt_count=0,
+                        quality=summarize_ocr_quality([]),
+                    )
+                    self._finalize_benchmark_page_after_ocr(
+                        image_path=image_path,
+                        image_index=index,
+                        total_images=total_images,
+                        block_count=0,
+                        page_ocr_metrics=page_ocr_metrics,
+                    )
+                    continue
                 self.main_page.image_ctrl.mark_processing_stage(
                     image_path,
                     "detect",
@@ -656,6 +715,16 @@ class BatchProcessor:
                     failed_stage="detect",
                     reason="No text blocks detected.",
                     **page_ocr_metrics,
+                )
+                continue
+
+            if self._should_stop_after_ocr():
+                self._finalize_benchmark_page_after_ocr(
+                    image_path=image_path,
+                    image_index=index,
+                    total_images=total_images,
+                    block_count=len(blk_list or []),
+                    page_ocr_metrics=page_ocr_metrics,
                 )
                 continue
 

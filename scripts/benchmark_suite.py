@@ -127,7 +127,7 @@ SUITE_PROFILES = {
     "paddleocr-vl15-runtime": {
         "benchmark_name": "PaddleOCR-VL-1.5 Runtime Benchmark",
         "benchmark_kind": "managed family suite",
-        "benchmark_scope": "actual offscreen app pipeline; official score and quality gate use detect+ocr only",
+        "benchmark_scope": "detect-ocr-only official suite with warm-stable gate; legacy full pipeline remains opt-in",
         "baseline_batch_step": "",
     },
 }
