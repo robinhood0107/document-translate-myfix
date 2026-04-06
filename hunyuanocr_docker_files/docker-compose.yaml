@@ -33,5 +33,7 @@ services:
       - "${LLAMA_N_PARALLEL:-1}"
       - -t
       - "${LLAMA_THREADS:-12}"
+      - --cache-ram
+      - "0"
       - --n-gpu-layers
       - "${LLAMA_N_GPU_LAYERS:-99}"

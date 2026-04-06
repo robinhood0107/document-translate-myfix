@@ -34,6 +34,8 @@ DEFAULT_HUNYUAN_SERVER_URL = "http://127.0.0.1:28080/v1"
 DEFAULT_HUNYUAN_MAX_COMPLETION_TOKENS = 256
 DEFAULT_HUNYUAN_PARALLEL_WORKERS = 2
 DEFAULT_HUNYUAN_REQUEST_TIMEOUT_SEC = 60
+DEFAULT_HUNYUAN_TOP_K = 1
+DEFAULT_HUNYUAN_REPETITION_PENALTY = 1.0
 
 
 class HunyuanOCREngine(OCREngine):
@@ -42,6 +44,8 @@ class HunyuanOCREngine(OCREngine):
     REQUEST_ENDPOINT_SUFFIX = "/chat/completions"
     PROMPT = "OCR"
     TEXT_EXPANSION_RATIO = 0.05
+    TOP_K = DEFAULT_HUNYUAN_TOP_K
+    REPETITION_PENALTY = DEFAULT_HUNYUAN_REPETITION_PENALTY
 
     def __init__(self) -> None:
         self.server_url = DEFAULT_HUNYUAN_SERVER_URL
@@ -153,6 +157,8 @@ class HunyuanOCREngine(OCREngine):
             ],
             "temperature": 0,
             "max_completion_tokens": self.max_completion_tokens,
+            "top_k": self.TOP_K,
+            "repetition_penalty": self.REPETITION_PENALTY,
         }
 
         data = self._send_request(payload)

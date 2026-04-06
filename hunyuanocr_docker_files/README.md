@@ -38,6 +38,8 @@ docker compose -f hunyuanocr_docker_files/docker-compose.yaml up -d
 - image: `local/llama.cpp:server-cuda-b8672`
 - OpenAI-compatible endpoint: `/v1/chat/completions`
 - health endpoint: `/health`
+- OCR request defaults: `temperature=0`, `top_k=1`, `repetition_penalty=1.0`
+- prompt cache: disabled with `--cache-ram 0`
 - purpose: block-crop OCR for the app's existing `TextBlock` pipeline
 
 ## 참고
