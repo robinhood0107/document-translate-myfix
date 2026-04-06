@@ -9,6 +9,7 @@ from PySide6.QtGui import QFont, QFontDatabase
 
 from .settings_ui import SettingsPageUI
 from .gemma_local_server_page import GemmaLocalServerPage
+from .hunyuan_ocr_page import HunyuanOCRPage
 from app.update_checker import UpdateChecker
 from modules.utils.device import is_gpu_available
 from modules.utils.paths import get_default_project_autosave_dir, get_user_data_dir
@@ -107,6 +108,7 @@ class SettingsPage(QtWidgets.QWidget):
             self.ui.extra_context,
             self.ui.project_autosave_folder_input,
             self.ui.paddleocr_vl_server_url_input,
+            self.ui.hunyuan_ocr_server_url_input,
         ]
         for widget in text_changed_widgets:
             signal = getattr(widget, "textChanged", None)
@@ -131,6 +133,7 @@ class SettingsPage(QtWidgets.QWidget):
             self.ui.save_keys_checkbox,
             self.ui.paddleocr_vl_prettify_checkbox,
             self.ui.paddleocr_vl_visualize_checkbox,
+            self.ui.hunyuan_ocr_raw_response_logging_checkbox,
             self.ui.gemma_raw_response_logging_checkbox,
         ]
         for widget in checkbox_widgets:
@@ -145,6 +148,9 @@ class SettingsPage(QtWidgets.QWidget):
             self.ui.project_autosave_interval_spinbox,
             self.ui.paddleocr_vl_max_new_tokens_spinbox,
             self.ui.paddleocr_vl_parallel_workers_spinbox,
+            self.ui.hunyuan_ocr_max_completion_tokens_spinbox,
+            self.ui.hunyuan_ocr_parallel_workers_spinbox,
+            self.ui.hunyuan_ocr_request_timeout_spinbox,
             self.ui.gemma_chunk_size_spinbox,
             self.ui.gemma_max_completion_tokens_spinbox,
             self.ui.gemma_request_timeout_spinbox,
@@ -205,6 +211,19 @@ class SettingsPage(QtWidgets.QWidget):
             "max_completion_tokens": int(self.ui.gemma_max_completion_tokens_spinbox.value()),
             "request_timeout_sec": int(self.ui.gemma_request_timeout_spinbox.value()),
             "raw_response_logging": self.ui.gemma_raw_response_logging_checkbox.isChecked(),
+        }
+
+    def get_hunyuan_ocr_settings(self):
+        server_url = self.ui.hunyuan_ocr_server_url_input.text().strip()
+        if not server_url:
+            server_url = self.ui.hunyuan_ocr_page.DEFAULT_SERVER_URL
+
+        return {
+            "server_url": server_url,
+            "max_completion_tokens": int(self.ui.hunyuan_ocr_max_completion_tokens_spinbox.value()),
+            "parallel_workers": int(self.ui.hunyuan_ocr_parallel_workers_spinbox.value()),
+            "request_timeout_sec": int(self.ui.hunyuan_ocr_request_timeout_spinbox.value()),
+            "raw_response_logging": self.ui.hunyuan_ocr_raw_response_logging_checkbox.isChecked(),
         }
 
     def get_export_settings(self):
@@ -305,6 +324,7 @@ class SettingsPage(QtWidgets.QWidget):
                 "hd_strategy": self.get_hd_strategy_settings(),
             },
             "paddleocr_vl": self.get_paddleocr_vl_settings(),
+            "hunyuan_ocr": self.get_hunyuan_ocr_settings(),
             "gemma_local_server": self.get_gemma_local_server_settings(),
             "llm": self.get_llm_settings(),
             "export": self.get_export_settings(),
@@ -474,6 +494,40 @@ class SettingsPage(QtWidgets.QWidget):
         )
         self.ui.paddleocr_vl_parallel_workers_spinbox.setValue(
             settings.value("parallel_workers", 2, type=int)
+        )
+        settings.endGroup()
+
+        settings.beginGroup("hunyuan_ocr")
+        self.ui.hunyuan_ocr_server_url_input.setText(
+            settings.value(
+                "server_url",
+                HunyuanOCRPage.DEFAULT_SERVER_URL,
+                type=str,
+            )
+        )
+        self.ui.hunyuan_ocr_max_completion_tokens_spinbox.setValue(
+            settings.value(
+                "max_completion_tokens",
+                HunyuanOCRPage.DEFAULT_MAX_COMPLETION_TOKENS,
+                type=int,
+            )
+        )
+        self.ui.hunyuan_ocr_parallel_workers_spinbox.setValue(
+            settings.value(
+                "parallel_workers",
+                HunyuanOCRPage.DEFAULT_PARALLEL_WORKERS,
+                type=int,
+            )
+        )
+        self.ui.hunyuan_ocr_request_timeout_spinbox.setValue(
+            settings.value(
+                "request_timeout_sec",
+                HunyuanOCRPage.DEFAULT_REQUEST_TIMEOUT_SEC,
+                type=int,
+            )
+        )
+        self.ui.hunyuan_ocr_raw_response_logging_checkbox.setChecked(
+            settings.value("raw_response_logging", False, type=bool)
         )
         settings.endGroup()
 

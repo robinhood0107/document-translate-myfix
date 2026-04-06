@@ -1,30 +1,51 @@
 # Comic Translate
 English | [한국어](/mnt/c/Users/pjjpj/Desktop/openai_manga_translater/comic-translate/docs/i18n/README_ko.md) | [Français](/mnt/c/Users/pjjpj/Desktop/openai_manga_translater/comic-translate/docs/i18n/README_fr.md) | [简体中文](/mnt/c/Users/pjjpj/Desktop/openai_manga_translater/comic-translate/docs/i18n/README_zh-CN.md)
 
-This fork focuses on a practical local comic translation workflow on Windows.
+<img src="https://i.imgur.com/QUVK6mK.png">
 
-## What Changed In This Fork
-- Added a dedicated local Gemma translation path for `Custom Local Server(Gemma)`.
-- Added a tracked local OCR runtime bundle in [paddleocr_vl_docker_files/README.md](/mnt/c/Users/pjjpj/Desktop/openai_manga_translater/comic-translate/paddleocr_vl_docker_files/README.md).
-- Tuned the local translation path around Gemma + PaddleOCR VL.
-- Split benchmark tooling and reports into the dedicated `benchmarking/lab` branch.
+## Overview
+This fork focuses on a practical local pipeline for comic translation:
 
-## Usage
-### Run the app
-Use your prepared environment and start the desktop app:
+- `Custom Local Server(Gemma)` for local LLM translation
+- `PaddleOCR VL` local Docker services for OCR
+- `HunyuanOCR` local `llama.cpp` server for OCR
+
+The goal of this fork is to make the local Gemma + OCR runtime path practical and reproducible for day-to-day comic translation.
+
+## What This Fork Updates
+- Removed legacy account/login dependencies from the local workflow
+- Split local Gemma translation into a dedicated runtime/config path
+- Added tracked OCR Docker runtime bundle in [paddleocr_vl_docker_files/README.md](/mnt/c/Users/pjjpj/Desktop/openai_manga_translater/comic-translate/paddleocr_vl_docker_files/README.md)
+- Added tracked HunyuanOCR runtime bundle in [hunyuanocr_docker_files/README.md](/mnt/c/Users/pjjpj/Desktop/openai_manga_translater/comic-translate/hunyuanocr_docker_files/README.md)
+- Tuned the current translation-only baseline around:
+  - Gemma `temperature=0.6`, `top_k=64`, `top_p=0.95`, `min_p=0.0`
+  - Gemma `n_gpu_layers=23`, `threads=12`, `ctx=4096`
+  - `paddleocr-server=cpu`, `paddleocr-vllm=gpu`
+
+## Quick Start
+### App
+Run the app from your prepared environment.
 
 ```bash
 uv run comic.py
 ```
 
-### Local Gemma + OCR setup
-- Gemma local server guide: [local-server-ko.md](/mnt/c/Users/pjjpj/Desktop/openai_manga_translater/comic-translate/docs/gemma/local-server-ko.md)
-- OCR Docker bundle: [paddleocr_vl_docker_files/README.md](/mnt/c/Users/pjjpj/Desktop/openai_manga_translater/comic-translate/paddleocr_vl_docker_files/README.md)
+## Docs Map
+### Gemma
+- Local server setup: [local-server-ko.md](/mnt/c/Users/pjjpj/Desktop/openai_manga_translater/comic-translate/docs/gemma/local-server-ko.md)
 
-### Benchmarking
-Benchmark tooling, presets, and reports are maintained on the `benchmarking/lab` branch.
+### OCR / Runtime
+- OCR Docker bundle: [paddleocr_vl_docker_files/README.md](/mnt/c/Users/pjjpj/Desktop/openai_manga_translater/comic-translate/paddleocr_vl_docker_files/README.md)
+- HunyuanOCR runtime bundle: [hunyuanocr_docker_files/README.md](/mnt/c/Users/pjjpj/Desktop/openai_manga_translater/comic-translate/hunyuanocr_docker_files/README.md)
+- HunyuanOCR setup guide: [local-server-ko.md](/mnt/c/Users/pjjpj/Desktop/openai_manga_translater/comic-translate/docs/hunyuan/local-server-ko.md)
+
+### Repo Policy
+- Benchmark branch / merge policy: [benchmark-branch-policy-ko.md](/mnt/c/Users/pjjpj/Desktop/openai_manga_translater/comic-translate/docs/repo/benchmark-branch-policy-ko.md)
+
+### Rendering / History
+- Rendering notes: [rendering-notes-ko.md](/mnt/c/Users/pjjpj/Desktop/openai_manga_translater/comic-translate/docs/rendering/rendering-notes-ko.md)
+- Change log: [change-log-ko.md](/mnt/c/Users/pjjpj/Desktop/openai_manga_translater/comic-translate/docs/history/change-log-ko.md)
 
 ## Notes
-- `main` and `develop` are product branches.
-- Benchmark-specific docs, presets, reports, and chart assets stay on `benchmarking/lab`.
-- `/Sample/` and `/banchmark_result_log/` are local-only and ignored by Git.
+- `/Sample/` is local-only and ignored by Git.
+- Benchmark-specific tooling and reports are maintained on the `benchmarking/lab` branch.
