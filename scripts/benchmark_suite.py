@@ -124,6 +124,12 @@ SUITE_PROFILES = {
         "baseline_batch_step": "02_old_image_batch",
         "active_image": "local/llama.cpp:server-cuda-b8665",
     },
+    "paddleocr-vl15-runtime": {
+        "benchmark_name": "PaddleOCR-VL-1.5 Runtime Benchmark",
+        "benchmark_kind": "managed family suite",
+        "benchmark_scope": "actual offscreen app pipeline; official score and quality gate use detect+ocr only",
+        "baseline_batch_step": "",
+    },
 }
 
 RUNTIME_SNAPSHOT_FILES = [
@@ -1448,6 +1454,14 @@ def main() -> int:
         help="Suite profile to execute",
     )
     args = parser.parse_args()
+
+    if args.suite_profile == "paddleocr-vl15-runtime":
+        from paddleocr_vl15_benchmark import run_suite as run_paddleocr_vl15_suite
+
+        return run_paddleocr_vl15_suite(
+            sample_dir=DEFAULT_SAMPLE_DIR,
+            sample_count=DEFAULT_SAMPLE_COUNT,
+        )
 
     sample_dir = DEFAULT_SAMPLE_DIR
     sample_count = DEFAULT_SAMPLE_COUNT

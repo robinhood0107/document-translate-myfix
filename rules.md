@@ -41,6 +41,22 @@
 - 긴급 수정: `codex/hotfix/<slug>` -> `main`, 이후 `develop` 백머지
 - 벤치마크 실험/리포트: `benchmarking/lab`에서만 유지
 
+## 2-1. 벤치마크 자산 규칙
+
+벤치마크는 아래 원칙을 기본으로 한다.
+
+- benchmark harness는 가능하면 실제 offscreen 앱 파이프라인을 기준으로 만든다.
+- 공식 점수 범위가 파이프라인 일부일 경우, 실행 범위와 점수 범위를 문서에 분리해 명시한다.
+- Windows benchmark family는 가능하면 `pipeline + suite`, `CUDA12 + CUDA13` BAT 쌍을 함께 제공한다.
+- raw 결과는 `./banchmark_result_log/<family>/` 아래에 남긴다.
+- benchmark family는 최소한 아래 문서 세트를 함께 가진다.
+  - workflow
+  - usage
+  - architecture
+  - results history
+  - generated/latest report
+- benchmark 자산은 `benchmarking/lab`에만 두고, 제품 반영은 별도 `codex/* -> develop` PR로 승격한다.
+
 ## 3. 기능 작업 절차
 
 모든 기능 추가/수정은 아래 순서를 지킨다.

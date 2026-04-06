@@ -36,6 +36,7 @@ from benchmark_common import (
     summarize_metrics,
     write_json,
 )
+from modules.utils.ocr_quality import summarize_ocr_quality
 from modules.utils.gpu_metrics import collect_runtime_snapshot, write_snapshot_json
 
 BENCHMARK_FONT_ROOT = ROOT / "benchmarks-fonts"
@@ -269,6 +270,74 @@ def _stage_selected_images(run_dir: Path, image_paths: list[Path]) -> list[Path]
     return staged_paths
 
 
+def _normalize_ocr_text(text: object) -> str:
+    return "".join(str(text or "").split())
+
+
+def _serialize_page_snapshot_block(blk) -> dict[str, object]:
+    bubble_xyxy = getattr(blk, "bubble_xyxy", None)
+    text_class = getattr(blk, "text_class", None)
+    return {
+        "xyxy": [float(value) for value in getattr(blk, "xyxy", [])],
+        "bubble_xyxy": [float(value) for value in bubble_xyxy] if bubble_xyxy is not None else None,
+        "angle": float(getattr(blk, "angle", 0.0) or 0.0),
+        "text_class": text_class if isinstance(text_class, (str, int, float, bool)) or text_class is None else str(text_class),
+        "text": str(getattr(blk, "text", "") or ""),
+        "normalized_text": _normalize_ocr_text(getattr(blk, "text", "") or ""),
+    }
+
+
+def _page_failed_reason(summary: dict[str, object]) -> str:
+    if not isinstance(summary, dict):
+        return ""
+    last_failure = str(summary.get("last_failure_reason", "") or "").strip()
+    if last_failure:
+        return last_failure
+    stage_status = summary.get("stage_status", {})
+    if isinstance(stage_status, dict):
+        for stage_name in ("ocr", "detect", "translation", "inpaint", "render", "save"):
+            payload = stage_status.get(stage_name)
+            if isinstance(payload, dict) and str(payload.get("status", "")) == "failed":
+                return str(payload.get("reason", "") or "").strip()
+    return ""
+
+
+def _write_page_snapshots(window, run_dir: Path, loaded_paths: list[str]) -> Path:
+    snapshots: list[dict[str, object]] = []
+    for image_path in loaded_paths:
+        state = window.image_ctrl.ensure_page_state(image_path)
+        blk_list = list(state.get("blk_list") or [])
+        processing_summary = state.get("processing_summary", {})
+        quality = summarize_ocr_quality(blk_list)
+        snapshots.append(
+            {
+                "image_path": str(image_path),
+                "image_name": Path(str(image_path)).name,
+                "image_stem": Path(str(image_path)).stem,
+                "source_lang": str(state.get("source_lang", "")),
+                "target_lang": str(state.get("target_lang", "")),
+                "page_failed": bool(_page_failed_reason(processing_summary)),
+                "page_failed_reason": _page_failed_reason(processing_summary),
+                "ocr_quality": {
+                    "block_count": int(quality.get("block_count", 0) or 0),
+                    "non_empty": int(quality.get("non_empty", 0) or 0),
+                    "empty": int(quality.get("empty", 0) or 0),
+                    "single_char_like": int(quality.get("single_char_like", 0) or 0),
+                },
+                "blocks": [_serialize_page_snapshot_block(block) for block in blk_list],
+            }
+        )
+
+    payload = {
+        "generated_at": time.time(),
+        "page_count": len(snapshots),
+        "pages": snapshots,
+    }
+    output_path = run_dir / "page_snapshots.json"
+    write_json(output_path, payload)
+    return output_path
+
+
 def _run_single_mode(
     *,
     app: QApplication,
@@ -303,6 +372,10 @@ def _run_single_mode(
         settings_backup = _settings_snapshot()
         window = ComicTranslate()
         try:
+            if os.environ.get("CT_BENCH_CLEAR_APP_CACHES", "").strip() == "1":
+                window.pipeline.cache_manager.clear_ocr_cache()
+                window.pipeline.cache_manager.clear_translation_cache()
+                _log("앱 OCR/번역 캐시 초기화 완료")
             _configure_window(window, preset, source_lang, target_lang)
             _log("앱 설정 적용 완료")
             loaded_paths = _load_images(window, image_paths, source_lang, target_lang)
@@ -329,6 +402,11 @@ def _run_single_mode(
                 raise ValueError(f"Unsupported benchmark mode: {mode}")
             elapsed = time.perf_counter() - started
             _log(f"파이프라인 실행 완료: elapsed={elapsed:.3f}s")
+
+            snapshot_path: Path | None = None
+            if os.environ.get("CT_BENCH_EXPORT_PAGE_SNAPSHOTS", "").strip() == "1":
+                snapshot_path = _write_page_snapshots(window, run_dir, loaded_paths)
+                _log(f"페이지 스냅샷 저장 완료: {snapshot_path}")
 
             window.pipeline.release_model_caches()
             window.emit_memlog(
@@ -395,6 +473,16 @@ def main() -> int:
         default="",
         help="Optional exact output directory for a single benchmark run",
     )
+    parser.add_argument(
+        "--export-page-snapshots",
+        action="store_true",
+        help="Export page-level detect/OCR snapshot JSON for gold/compare workflows.",
+    )
+    parser.add_argument(
+        "--clear-app-caches",
+        action="store_true",
+        help="Clear app OCR/translation caches before running the pipeline.",
+    )
     args = parser.parse_args()
 
     preset, preset_path = load_preset(args.preset)
@@ -425,6 +513,10 @@ def main() -> int:
     )
 
     app = QApplication.instance() or QApplication([])
+    if args.export_page_snapshots:
+        os.environ["CT_BENCH_EXPORT_PAGE_SNAPSHOTS"] = "1"
+    if args.clear_app_caches:
+        os.environ["CT_BENCH_CLEAR_APP_CACHES"] = "1"
     aggregated = []
     for repeat_index in range(1, max(1, args.repeat) + 1):
         for mode in modes:
