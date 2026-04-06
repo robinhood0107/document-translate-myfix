@@ -16,17 +16,33 @@ logger = logging.getLogger(__name__)
 
 DEFAULT_GEMMA_LOCAL_ENDPOINT = "http://127.0.0.1:18080/v1"
 DEFAULT_GEMMA_LOCAL_MODEL = "gemma-4-26b-a4b-it-heretic.q3_k_m.gguf"
-DEFAULT_GEMMA_CHUNK_SIZE = 4
+DEFAULT_GEMMA_CHUNK_SIZE = 6
 DEFAULT_GEMMA_MAX_COMPLETION_TOKENS = 512
 DEFAULT_GEMMA_REQUEST_TIMEOUT_SEC = 180
 DEFAULT_GEMMA_TRANSLATION_TEMPERATURE = 0.6
 DEFAULT_GEMMA_TRANSLATION_TOP_K = 64
 DEFAULT_GEMMA_TRANSLATION_TOP_P = 0.95
 DEFAULT_GEMMA_TRANSLATION_MIN_P = 0.0
+DEFAULT_GEMMA_RESPONSE_FORMAT_MODE = "json_schema"
+DEFAULT_GEMMA_RESPONSE_SCHEMA_MODE = "blocks"
+DEFAULT_GEMMA_THINK_BRIEFLY_PROMPT = False
+DEFAULT_GEMMA_PROMPT_PROFILE = "gemma4_balanced"
+STRICT_GEMMA_PROMPT_PROFILE = "gemma4_strict_json"
+GEMMA_PROMPT_PROFILES = {
+    "legacy": "legacy",
+    "gemma4_balanced": "gemma4_balanced",
+    "gemma4_strict_json": "gemma4_strict_json",
+}
+GEMMA_RESPONSE_FORMAT_MODES = {"json_object", "json_schema"}
+GEMMA_RESPONSE_SCHEMA_MODES = {"blocks"}
 
 
 class GemmaLocalServerResponseError(RuntimeError):
     """Raised when the local Gemma server returns an unusable translation."""
+
+    def __init__(self, message: str, *, strict_retryable: bool = False):
+        super().__init__(message)
+        self.strict_retryable = strict_retryable
 
 
 class GemmaLocalServerTruncatedError(GemmaLocalServerResponseError):
@@ -45,6 +61,10 @@ class CustomLocalGemmaTranslation(BaseLLMTranslation):
         self.translation_mode_label = "Custom Local Server(Gemma)"
         self.top_k = DEFAULT_GEMMA_TRANSLATION_TOP_K
         self.min_p = DEFAULT_GEMMA_TRANSLATION_MIN_P
+        self.response_format_mode = DEFAULT_GEMMA_RESPONSE_FORMAT_MODE
+        self.response_schema_mode = DEFAULT_GEMMA_RESPONSE_SCHEMA_MODE
+        self.think_briefly_prompt = DEFAULT_GEMMA_THINK_BRIEFLY_PROMPT
+        self.prompt_profile = DEFAULT_GEMMA_PROMPT_PROFILE
         self.last_benchmark_stats = self._new_benchmark_stats()
         self._current_benchmark_stats = self._new_benchmark_stats()
 
@@ -55,6 +75,9 @@ class CustomLocalGemmaTranslation(BaseLLMTranslation):
             "gemma_chunk_retry_events": 0,
             "gemma_truncated_count": 0,
             "gemma_empty_content_count": 0,
+            "gemma_missing_key_count": 0,
+            "gemma_reasoning_without_final_count": 0,
+            "gemma_schema_validation_fail_count": 0,
         }
 
     @staticmethod
@@ -76,6 +99,50 @@ class CustomLocalGemmaTranslation(BaseLLMTranslation):
             return int(raw_value)
         except (TypeError, ValueError):
             return int(default)
+
+    @staticmethod
+    def _env_or_config_str(config: dict[str, Any], key: str, env_name: str, default: str) -> str:
+        raw_value = os.environ.get(env_name)
+        if raw_value is None:
+            raw_value = config.get(key, default)
+        if raw_value is None:
+            return default
+        return str(raw_value).strip() or default
+
+    @staticmethod
+    def _env_or_config_bool(config: dict[str, Any], key: str, env_name: str, default: bool) -> bool:
+        raw_value = os.environ.get(env_name)
+        if raw_value is None:
+            raw_value = config.get(key, default)
+        if isinstance(raw_value, bool):
+            return raw_value
+        normalized = str(raw_value).strip().lower()
+        if normalized in {"1", "true", "yes", "on"}:
+            return True
+        if normalized in {"0", "false", "no", "off"}:
+            return False
+        return bool(default)
+
+    @staticmethod
+    def _normalize_prompt_profile(raw_value: str) -> str:
+        normalized = (raw_value or "").strip().lower()
+        if normalized in GEMMA_PROMPT_PROFILES:
+            return normalized
+        return DEFAULT_GEMMA_PROMPT_PROFILE
+
+    @staticmethod
+    def _normalize_response_format_mode(raw_value: str) -> str:
+        normalized = (raw_value or "").strip().lower()
+        if normalized in GEMMA_RESPONSE_FORMAT_MODES:
+            return normalized
+        return DEFAULT_GEMMA_RESPONSE_FORMAT_MODE
+
+    @staticmethod
+    def _normalize_response_schema_mode(raw_value: str) -> str:
+        normalized = (raw_value or "").strip().lower()
+        if normalized in GEMMA_RESPONSE_SCHEMA_MODES:
+            return normalized
+        return DEFAULT_GEMMA_RESPONSE_SCHEMA_MODE
 
     def initialize(
         self,
@@ -130,6 +197,36 @@ class CustomLocalGemmaTranslation(BaseLLMTranslation):
             "CT_GEMMA_MIN_P",
             DEFAULT_GEMMA_TRANSLATION_MIN_P,
         )
+        self.prompt_profile = self._normalize_prompt_profile(
+            self._env_or_config_str(
+                gemma_settings,
+                "prompt_profile",
+                "CT_GEMMA_PROMPT_PROFILE",
+                DEFAULT_GEMMA_PROMPT_PROFILE,
+            )
+        )
+        self.response_format_mode = self._normalize_response_format_mode(
+            self._env_or_config_str(
+                gemma_settings,
+                "response_format_mode",
+                "CT_GEMMA_RESPONSE_FORMAT_MODE",
+                DEFAULT_GEMMA_RESPONSE_FORMAT_MODE,
+            )
+        )
+        self.response_schema_mode = self._normalize_response_schema_mode(
+            self._env_or_config_str(
+                gemma_settings,
+                "response_schema_mode",
+                "CT_GEMMA_RESPONSE_SCHEMA_MODE",
+                DEFAULT_GEMMA_RESPONSE_SCHEMA_MODE,
+            )
+        )
+        self.think_briefly_prompt = self._env_or_config_bool(
+            gemma_settings,
+            "think_briefly_prompt",
+            "CT_GEMMA_THINK_BRIEFLY_PROMPT",
+            DEFAULT_GEMMA_THINK_BRIEFLY_PROMPT,
+        )
         self.img_as_llm_input = False
         self.last_benchmark_stats = self._new_benchmark_stats()
 
@@ -170,8 +267,24 @@ class CustomLocalGemmaTranslation(BaseLLMTranslation):
         extra_context: str,
     ) -> int:
         try:
-            return self._translate_chunk(blk_list, extra_context)
+            return self._translate_chunk(blk_list, extra_context, prompt_profile=self.prompt_profile)
         except GemmaLocalServerResponseError as exc:
+            if exc.strict_retryable and self.prompt_profile != STRICT_GEMMA_PROMPT_PROFILE:
+                logger.warning(
+                    "gemma local server chunk failed for %d block(s); retrying once with prompt_profile=%s. reason=%s",
+                    len(blk_list),
+                    STRICT_GEMMA_PROMPT_PROFILE,
+                    exc,
+                )
+                try:
+                    return self._translate_chunk(
+                        blk_list,
+                        extra_context,
+                        prompt_profile=STRICT_GEMMA_PROMPT_PROFILE,
+                    )
+                except GemmaLocalServerResponseError as strict_exc:
+                    exc = strict_exc
+
             if len(blk_list) <= 1:
                 raise
 
@@ -188,8 +301,14 @@ class CustomLocalGemmaTranslation(BaseLLMTranslation):
             right = self._translate_chunk_with_retry(blk_list[split_point:], extra_context)
             return left + right
 
-    def _translate_chunk(self, blk_list: list[TextBlock], extra_context: str) -> int:
-        system_prompt = self._build_system_prompt(extra_context)
+    def _translate_chunk(
+        self,
+        blk_list: list[TextBlock],
+        extra_context: str,
+        *,
+        prompt_profile: str,
+    ) -> int:
+        system_prompt = self._build_system_prompt(extra_context, prompt_profile=prompt_profile)
         user_prompt = get_raw_text(blk_list)
         response_data = self._request_translation(system_prompt, user_prompt)
 
@@ -201,8 +320,9 @@ class CustomLocalGemmaTranslation(BaseLLMTranslation):
 
         usage = response_data.get("usage") or {}
         logger.info(
-            "gemma local response summary: blocks=%d finish_reason=%s prompt_tokens=%s completion_tokens=%s total_tokens=%s has_content=%s has_reasoning=%s",
+            "gemma local response summary: blocks=%d prompt_profile=%s finish_reason=%s prompt_tokens=%s completion_tokens=%s total_tokens=%s has_content=%s has_reasoning=%s",
             len(blk_list),
+            prompt_profile,
             finish_reason,
             usage.get("prompt_tokens"),
             usage.get("completion_tokens"),
@@ -229,9 +349,11 @@ class CustomLocalGemmaTranslation(BaseLLMTranslation):
             self._current_benchmark_stats["gemma_empty_content_count"] += 1
             detail = "Gemma local server returned an empty message.content."
             if reasoning_content.strip():
+                self._current_benchmark_stats["gemma_reasoning_without_final_count"] += 1
                 detail += " The model produced reasoning output without a final JSON answer."
             raise GemmaLocalServerResponseError(
-                f"{detail} Check the local server settings or reduce Chunk Size."
+                f"{detail} Check the local server settings or reduce Chunk Size.",
+                strict_retryable=True,
             )
 
         try:
@@ -239,16 +361,27 @@ class CustomLocalGemmaTranslation(BaseLLMTranslation):
         except Exception as exc:
             self._current_benchmark_stats["gemma_json_retry_count"] += 1
             raise GemmaLocalServerResponseError(
-                "Gemma local server did not return a valid JSON object in message.content."
+                "Gemma local server did not return a valid JSON object in message.content.",
+                strict_retryable=True,
             ) from exc
 
         expected_keys = [f"block_{index}" for index in range(len(blk_list))]
         missing_keys = [key for key in expected_keys if key not in translation_dict]
-        if missing_keys:
+        unexpected_keys = [key for key in translation_dict if key not in expected_keys]
+        if missing_keys or unexpected_keys:
             self._current_benchmark_stats["gemma_json_retry_count"] += 1
+            if missing_keys:
+                self._current_benchmark_stats["gemma_missing_key_count"] += len(missing_keys)
+            if self.response_format_mode == "json_schema":
+                self._current_benchmark_stats["gemma_schema_validation_fail_count"] += 1
+            reasons: list[str] = []
+            if missing_keys:
+                reasons.append("missing expected block keys: " + ", ".join(missing_keys))
+            if unexpected_keys:
+                reasons.append("unexpected block keys: " + ", ".join(unexpected_keys))
             raise GemmaLocalServerResponseError(
-                "Gemma local server JSON response was missing expected block keys: "
-                + ", ".join(missing_keys)
+                "Gemma local server JSON response was invalid: " + "; ".join(reasons),
+                strict_retryable=True,
             )
 
         for index, blk in enumerate(blk_list):
@@ -257,17 +390,40 @@ class CustomLocalGemmaTranslation(BaseLLMTranslation):
 
         return len(blk_list)
 
-    def _build_system_prompt(self, extra_context: str) -> str:
-        prompt = (
-            f"Translate {self.source_lang} comic OCR text into {self.target_lang}. "
-            "Return exactly one JSON object. Keep every key unchanged. "
-            f"Each value must be a natural {self.target_lang} string suitable for comic dialogue. "
-            "Do not add explanations, markdown, comments, or extra keys. "
-            f"If text is already in {self.target_lang} or unreadable, copy it as-is."
-        )
+    def _build_system_prompt(self, extra_context: str, *, prompt_profile: str) -> str:
+        if prompt_profile == "legacy":
+            prompt = (
+                f"Translate {self.source_lang} comic OCR text into {self.target_lang}. "
+                "Return exactly one JSON object. Keep every key unchanged. "
+                f"Each value must be a natural {self.target_lang} string suitable for comic dialogue. "
+                "Do not add explanations, markdown, comments, or extra keys. "
+                f"If text is already in {self.target_lang} or unreadable, copy it as-is."
+            )
+        elif prompt_profile == STRICT_GEMMA_PROMPT_PROFILE:
+            prompt = (
+                f"Translate the user's JSON object from {self.source_lang} to {self.target_lang}. "
+                "Return only one valid JSON object and nothing before or after it. "
+                "Use exactly the same keys from the input. "
+                f"Each value must be a short natural {self.target_lang} comic dialogue string. "
+                "Do not output markdown, comments, reasoning, analysis, channel tokens, or code fences. "
+                f"If any line is unreadable or already in {self.target_lang}, copy it unchanged."
+            )
+        else:
+            prompt = (
+                f"Translate the user's JSON object of comic OCR lines from {self.source_lang} to {self.target_lang}. "
+                "Return exactly one JSON object with the same keys and no extra text. "
+                f"Each value must be concise natural {self.target_lang} dialogue suitable for a comic bubble. "
+                "Keep key names unchanged. Do not add markdown, explanations, comments, code fences, or reasoning. "
+                f"If a line is unreadable or already in {self.target_lang}, copy it as-is."
+            )
         cleaned_context = (extra_context or "").strip()
         if cleaned_context:
             prompt += f" Additional comic context: {cleaned_context}"
+        if self.think_briefly_prompt:
+            prompt += (
+                " If internal reasoning is needed, keep it brief and efficient, "
+                "then return only the final JSON object."
+            )
         return prompt
 
     def _request_translation(self, system_prompt: str, user_prompt: str) -> dict:
@@ -288,7 +444,7 @@ class CustomLocalGemmaTranslation(BaseLLMTranslation):
             "top_p": self.top_p,
             "min_p": self.min_p,
             "max_completion_tokens": self.max_tokens,
-            "response_format": {"type": "json_object"},
+            "response_format": self._build_response_format(user_prompt),
         }
         headers = {"Content-Type": "application/json"}
 
@@ -317,6 +473,42 @@ class CustomLocalGemmaTranslation(BaseLLMTranslation):
                 json.dumps(response_data, ensure_ascii=False),
             )
         return response_data
+
+    def _build_response_format(self, user_prompt: str) -> dict[str, Any]:
+        if self.response_format_mode != "json_schema":
+            return {"type": "json_object"}
+
+        if self.response_schema_mode != "blocks":
+            return {"type": "json_object"}
+
+        try:
+            chunk_payload = extract_json_object(user_prompt)
+        except Exception:
+            return {"type": "json_object"}
+
+        properties: dict[str, Any] = {}
+        required: list[str] = []
+        for key in chunk_payload:
+            if not str(key).startswith("block_"):
+                continue
+            required.append(str(key))
+            properties[str(key)] = {"type": ["string", "null"]}
+
+        if not required:
+            return {"type": "json_object"}
+
+        return {
+            "type": "json_schema",
+            "json_schema": {
+                "name": f"translation_blocks_{len(required)}",
+                "schema": {
+                    "type": "object",
+                    "properties": properties,
+                    "required": required,
+                    "additionalProperties": False,
+                },
+            },
+        }
 
     def _perform_translation(self, user_prompt: str, system_prompt: str, image: np.ndarray) -> str:
         raise NotImplementedError("CustomLocalGemmaTranslation uses chunked translate().")
