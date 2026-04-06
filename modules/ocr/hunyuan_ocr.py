@@ -16,6 +16,7 @@ from modules.utils.exceptions import (
 )
 from modules.utils.ocr_debug import (
     OCR_STATUS_EMPTY_INITIAL,
+    OCR_STATUS_EMPTY_AFTER_RETRY,
     OCR_STATUS_OK,
     ensure_three_channel,
     expand_bbox,
@@ -42,24 +43,13 @@ class HunyuanOCREngine(OCREngine):
     MAX_COMPLETION_TOKENS_RANGE = (64, 2048)
     PARALLEL_WORKERS_RANGE = (1, 8)
     REQUEST_ENDPOINT_SUFFIX = "/chat/completions"
-    PROMPT = (
-        "OCR task.\n"
-        "Only output the exact original text visible in the image.\n"
-        "只输出图片中的原文文字。\n"
-        "Do not describe the image.\n"
-        "不要描述图片，不要解释，不要翻译，不要总结。\n"
-        "Do not add prefixes like 'The text is', '图片中的文字是', or 'この画像'.\n"
-        "Preserve line breaks.\n"
-        "If there is no readable text, return an empty string."
-    )
+    PROMPT = "提取图中的文字。"
     STRICT_PROMPT = (
-        "Strict OCR only.\n"
-        "Return only the text visible in the image.\n"
-        "严格只返回图片中的文字本身。\n"
-        "Forbidden: image descriptions, explanations, translations, guesses, summaries, Markdown, bullets, or prefixes.\n"
-        "禁止输出“图片中的文字是”“图像中的文字是”“この画像”“The image”这类说明。\n"
-        "Keep line breaks only for the recognized text.\n"
-        "If no readable text is present, return an empty string."
+        "只返回图片中的原文文字本身。"
+        "不要描述图片，不要解释，不要翻译，不要总结，不要补全，"
+        "不要添加前缀、引号、坐标、项目符号或Markdown。"
+        "保持原有换行。"
+        "没有可识别文字就输出空字符串。"
     )
     TEXT_EXPANSION_RATIO = 0.05
     TOP_K = DEFAULT_HUNYUAN_TOP_K
@@ -67,6 +57,7 @@ class HunyuanOCREngine(OCREngine):
     DESCRIPTIVE_PREFIX_PATTERNS = (
         r"^\s*(?:the\s+image|this\s+image|image\s+shows|the\s+text\s+in\s+the\s+image|text\s+in\s+the\s+image)\b",
         r"^\s*(?:图片|圖片|图像|圖像|图中|圖中|画面中|畫面中|这张图片|這張圖片)",
+        r"^\s*(?:从图中|從圖中|从图片|從圖片|图中可以看到|圖中可以看到|可以看到|可以看出)",
         r"^\s*(?:この画像|この図|この漫畫|このイラスト|画像の|図の)",
         r"^\s*(?:要理解|下面是|以下是|内容如下|內容如下)",
         r"^\s*#{1,6}\s",
@@ -78,6 +69,11 @@ class HunyuanOCREngine(OCREngine):
         "圖像中的文字",
         "图中是",
         "圖中是",
+        "从图中",
+        "從圖中",
+        "图中可以看到",
+        "圖中可以看到",
+        "文字是",
         "这张图片",
         "這張圖片",
         "画面中",
@@ -94,21 +90,52 @@ class HunyuanOCREngine(OCREngine):
         r"^\s*(?:the\s+text\s+in\s+the\s+image|text\s+in\s+the\s+image)(?:\s+is)?\s*[:：]\s*",
         r"^\s*(?:图片中的文字|圖片中的文字|图像中的文字|圖像中的文字)(?:是|為)?\s*[:：]?\s*",
         r"^\s*(?:图像中的文字如下|圖片中的文字如下|图像中的文字是|圖片中的文字是)\s*[:：]?\s*",
+        r"^\s*(?:从图中可以看到|從圖中可以看到|图中可以看到|圖中可以看到)(?:[，,]\s*)?(?:文字是|內容是)?\s*[:：]?\s*",
+        r"^\s*(?:可以看到|可以看出)(?:[，,]\s*)?(?:文字是|內容是)?\s*[:：]?\s*",
         r"^\s*(?:画像内の文字|画像の文字|図中の文字)(?:は|：|:)?\s*",
     )
     PROMPT_ECHO_PHRASES = (
-        "ocr task",
-        "strict ocr only",
-        "only output the exact original text visible in the image",
-        "return only the text visible in the image",
-        "do not describe the image",
-        "if there is no readable text",
-        "if no readable text is present",
-        "只输出图片中的原文文字",
-        "严格只返回图片中的文字本身",
+        "提取图中的文字",
+        "只返回图片中的原文文字本身",
         "不要描述图片",
-        "禁止输出",
+        "保持原有换行",
+        "没有可识别文字就输出空字符串",
     )
+    STRUCTURED_OUTPUT_PATTERNS = (
+        r"^\s*```",
+        r"^\s*[\{\[][\s\S]*[\}\]]\s*$",
+        r"^\s*<\s*(?:table|tr|td|th|div|span|html|body)\b",
+        r"^\s*\|.+\|\s*$",
+    )
+    STRUCTURED_OUTPUT_PHRASES = (
+        '"text"',
+        '"bbox"',
+        '"box"',
+        '"points"',
+        '"coord"',
+        '"coords"',
+        '"x1"',
+        '"y1"',
+        '"x2"',
+        '"y2"',
+        '"markdown"',
+        '"html"',
+    )
+    IGNORED_QUOTED_TEXTS = {
+        "text",
+        "bbox",
+        "box",
+        "points",
+        "coord",
+        "coords",
+        "markdown",
+        "html",
+        "latex",
+        "x1",
+        "y1",
+        "x2",
+        "y2",
+    }
     QUOTED_TEXT_PATTERN = re.compile(r"[「『“\"']([^「」『』“”\"'\n]{1,200})[」』”\"']")
 
     def __init__(self) -> None:
@@ -206,9 +233,17 @@ class HunyuanOCREngine(OCREngine):
             )
         else:
             if descriptive_filtered:
-                self._mark_empty(blk, "HunyuanOCR returned non-OCR output instead of raw OCR text.")
+                self._mark_empty(
+                    blk,
+                    "HunyuanOCR returned non-OCR output instead of raw OCR text.",
+                    attempt_count=request_attempt_count,
+                )
             else:
-                self._mark_empty(blk, "HunyuanOCR returned no text.")
+                self._mark_empty(
+                    blk,
+                    "HunyuanOCR returned no text.",
+                    attempt_count=request_attempt_count,
+                )
 
     def _request_ocr_text(self, image: np.ndarray) -> tuple[str, bool, int]:
         first_text = self._request_ocr_text_for_prompt(image, self.PROMPT)
@@ -347,8 +382,36 @@ class HunyuanOCREngine(OCREngine):
         lowered = text.strip().lower()
         return any(phrase in lowered for phrase in self.PROMPT_ECHO_PHRASES)
 
+    def _looks_structured_output(self, text: str) -> bool:
+        if not text:
+            return False
+
+        stripped = text.strip()
+        if not stripped:
+            return False
+
+        lowered = stripped.lower()
+        if any(re.match(pattern, stripped, flags=re.IGNORECASE) for pattern in self.STRUCTURED_OUTPUT_PATTERNS):
+            return True
+
+        if any(phrase in lowered for phrase in self.STRUCTURED_OUTPUT_PHRASES):
+            return True
+
+        coordinate_markers = ("bbox", "box", "coord", "coords", "points", "x1", "y1", "x2", "y2")
+        if any(marker in lowered for marker in coordinate_markers):
+            digit_count = sum(char.isdigit() for char in stripped)
+            punctuation_count = sum(stripped.count(char) for char in "[]{}(),:")
+            if digit_count >= 4 and punctuation_count >= 4:
+                return True
+
+        return False
+
     def _looks_bad_output(self, text: str) -> bool:
-        return self._looks_descriptive(text) or self._looks_prompt_echo(text)
+        return (
+            self._looks_descriptive(text)
+            or self._looks_prompt_echo(text)
+            or self._looks_structured_output(text)
+        )
 
     def _strip_descriptive_wrappers(self, text: str) -> str:
         stripped = text.strip()
@@ -372,6 +435,11 @@ class HunyuanOCREngine(OCREngine):
         seen: set[str] = set()
         for match in matches:
             cleaned = self._prepare_output_text(match)
+            lowered = cleaned.lower()
+            if lowered in self.IGNORED_QUOTED_TEXTS:
+                continue
+            if cleaned.isdigit():
+                continue
             if not cleaned or cleaned in seen:
                 continue
             seen.add(cleaned)
@@ -382,6 +450,9 @@ class HunyuanOCREngine(OCREngine):
         stripped = self._strip_descriptive_wrappers(text)
         if stripped and not self._looks_bad_output(stripped):
             return stripped
+
+        if self._looks_structured_output(text):
+            return ""
 
         quoted = self._extract_quoted_text(text)
         if quoted and not self._looks_bad_output(quoted):
@@ -462,14 +533,15 @@ class HunyuanOCREngine(OCREngine):
             return base
         return f"{base}{self.REQUEST_ENDPOINT_SUFFIX}"
 
-    def _mark_empty(self, blk: TextBlock, reason: str) -> None:
+    def _mark_empty(self, blk: TextBlock, reason: str, attempt_count: int = 1) -> None:
+        status = OCR_STATUS_EMPTY_AFTER_RETRY if attempt_count > 1 else OCR_STATUS_EMPTY_INITIAL
         set_block_ocr_diagnostics(
             blk,
             text="",
             confidence=0.0,
-            status=OCR_STATUS_EMPTY_INITIAL,
+            status=status,
             empty_reason=reason,
-            attempt_count=1,
+            attempt_count=attempt_count,
         )
 
     def _normalize_output_text(self, text: str) -> str:
