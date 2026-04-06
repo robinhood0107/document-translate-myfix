@@ -34,6 +34,7 @@ from app.controllers.batch_report import BatchReportController
 from app.controllers.manual_workflow import ManualWorkflowController
 from modules.utils.exceptions import (
     LocalServiceError,
+    LocalServiceConnectionError,
 )
 
 
@@ -453,7 +454,19 @@ class ComicTranslate(ComicTranslateUI):
         exctype, value, traceback_str = error_tuple
 
         if issubclass(exctype, LocalServiceError):
-            Messages.show_local_service_error(self, details=str(value))
+            Messages.show_local_service_error(
+                self,
+                details=str(value),
+                service_name=getattr(value, "service_name", "PaddleOCR VL"),
+                settings_page_name=getattr(
+                    value,
+                    "settings_page_name",
+                    self.tr("PaddleOCR VL Settings"),
+                ),
+                error_kind="connection"
+                if issubclass(exctype, LocalServiceConnectionError)
+                else "response",
+            )
 
         # Handle HTTP Errors (Server-side)
         elif issubclass(exctype, requests.exceptions.HTTPError):
