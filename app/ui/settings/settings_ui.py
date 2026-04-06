@@ -10,6 +10,7 @@ from ..dayu_widgets.qt import MPixmap
 from .personalization_page import PersonalizationPage
 from .tools_page import ToolsPage
 from .paddleocr_vl_page import PaddleOCRVLPage
+from .hunyuan_ocr_page import HunyuanOCRPage
 from .gemma_local_server_page import GemmaLocalServerPage
 from .credentials_page import CredentialsPage
 from .llms_page import LlmsPage
@@ -61,6 +62,7 @@ class SettingsPageUI(QtWidgets.QWidget):
             self.tr('Google Cloud Vision'),
             self.tr('Gemini-2.0-Flash'), 
             self.tr('PaddleOCR VL'),
+            self.tr('HunyuanOCR'),
         ]
         self.inpaint_strategy = [self.tr('Resize'), self.tr('Original'), self.tr('Crop')]
         self.themes = [self.tr('Dark'), self.tr('Light')]
@@ -140,6 +142,7 @@ class SettingsPageUI(QtWidgets.QWidget):
             self.tr("Google Cloud Vision"): "Google Cloud Vision",
             self.tr("Gemini-2.0-Flash"): "Gemini-2.0-Flash",
             self.tr("PaddleOCR VL"): "PaddleOCR VL",
+            self.tr("HunyuanOCR"): "HunyuanOCR",
 
             # Inpainter mappings
             "LaMa": "LaMa",
@@ -199,6 +202,7 @@ class SettingsPageUI(QtWidgets.QWidget):
             parent=self,
         )
         self.paddleocr_vl_page = PaddleOCRVLPage(parent=self)
+        self.hunyuan_ocr_page = HunyuanOCRPage(parent=self)
         self.gemma_local_server_page = GemmaLocalServerPage(parent=self)
         self.credentials_page = CredentialsPage(
             services=self.credential_services,
@@ -231,6 +235,11 @@ class SettingsPageUI(QtWidgets.QWidget):
         self.paddleocr_vl_visualize_checkbox = self.paddleocr_vl_page.visualize_checkbox
         self.paddleocr_vl_max_new_tokens_spinbox = self.paddleocr_vl_page.max_new_tokens_spinbox
         self.paddleocr_vl_parallel_workers_spinbox = self.paddleocr_vl_page.parallel_workers_spinbox
+        self.hunyuan_ocr_server_url_input = self.hunyuan_ocr_page.server_url_input
+        self.hunyuan_ocr_max_completion_tokens_spinbox = self.hunyuan_ocr_page.max_completion_tokens_spinbox
+        self.hunyuan_ocr_parallel_workers_spinbox = self.hunyuan_ocr_page.parallel_workers_spinbox
+        self.hunyuan_ocr_request_timeout_spinbox = self.hunyuan_ocr_page.request_timeout_spinbox
+        self.hunyuan_ocr_raw_response_logging_checkbox = self.hunyuan_ocr_page.raw_response_logging_checkbox
         self.gemma_chunk_size_spinbox = self.gemma_local_server_page.chunk_size_spinbox
         self.gemma_max_completion_tokens_spinbox = self.gemma_local_server_page.max_completion_tokens_spinbox
         self.gemma_request_timeout_spinbox = self.gemma_local_server_page.request_timeout_spinbox
@@ -265,6 +274,7 @@ class SettingsPageUI(QtWidgets.QWidget):
         self.stacked_widget.addWidget(self.personalization_page)
         self.stacked_widget.addWidget(self.tools_page)
         self.stacked_widget.addWidget(self.paddleocr_vl_page)
+        self.stacked_widget.addWidget(self.hunyuan_ocr_page)
         self.stacked_widget.addWidget(self.gemma_local_server_page)
         self.stacked_widget.addWidget(self.llms_page)
         self.stacked_widget.addWidget(self.text_rendering_page)
@@ -320,6 +330,7 @@ class SettingsPageUI(QtWidgets.QWidget):
             {"title": self.tr("Personalization"), "avatar": MPixmap(".svg")},
             {"title": self.tr("Tools"), "avatar": MPixmap(".svg")},
             {"title": self.tr("PaddleOCR VL Settings"), "avatar": MPixmap(".svg")},
+            {"title": self.tr("HunyuanOCR Settings"), "avatar": MPixmap(".svg")},
             {"title": self.tr("Gemma Local Server Settings"), "avatar": MPixmap(".svg")},
             {"title": self.tr("LLMs"), "avatar": MPixmap(".svg")},
             {"title": self.tr("Text Rendering"), "avatar": MPixmap(".svg")},
