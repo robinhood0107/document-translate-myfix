@@ -105,8 +105,10 @@ scripts\benchmark_pipeline_cuda13.bat summary
 
 자동 문서 생성 결과는 아래에 기록됩니다.
 
-- [report-ko.md](/mnt/c/Users/pjjpj/Desktop/openai_manga_translater/comic-translate/docs/banchmark_report/report-ko.md)
-- [latest](/mnt/c/Users/pjjpj/Desktop/openai_manga_translater/comic-translate/docs/assets/benchmarking/latest)
+- [report-ko.md](../banchmark_report/report-ko.md)
+- `docs/assets/benchmarking/latest`
+- `docs/banchmark_report/history/<snapshot-id>/report-ko.md`
+- `docs/assets/benchmarking/history/<snapshot-id>/`
 
 `b8665` managed run에는 추가로 아래 파일이 같이 남습니다.
 
@@ -124,7 +126,7 @@ scripts\benchmark_pipeline_cuda13.bat summary
 
 ## 관련 문서
 
-- [usage-ko.md](/mnt/c/Users/pjjpj/Desktop/openai_manga_translater/comic-translate/docs/benchmark/usage-ko.md)
-- [checklist-ko.md](/mnt/c/Users/pjjpj/Desktop/openai_manga_translater/comic-translate/docs/benchmark/checklist-ko.md)
-- [architecture-ko.md](/mnt/c/Users/pjjpj/Desktop/openai_manga_translater/comic-translate/docs/benchmark/architecture-ko.md)
-- [optimization-journey-ko.md](/mnt/c/Users/pjjpj/Desktop/openai_manga_translater/comic-translate/docs/benchmark/optimization-journey-ko.md)
+- [usage-ko.md](./usage-ko.md)
+- [checklist-ko.md](./checklist-ko.md)
+- [architecture-ko.md](./architecture-ko.md)
+- [optimization-journey-ko.md](./optimization-journey-ko.md)

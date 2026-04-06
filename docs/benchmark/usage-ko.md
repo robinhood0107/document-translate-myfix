@@ -4,7 +4,7 @@
 
 가장 먼저 보는 파일은 아래 둘입니다.
 
-- [report-ko.md](/mnt/c/Users/pjjpj/Desktop/openai_manga_translater/comic-translate/docs/banchmark_report/report-ko.md)
+- [report-ko.md](../banchmark_report/report-ko.md)
 - `./banchmark_result_log/<run>/summary.json`
 
 `report-ko.md`는 여러 run을 비교한 문서이고, `summary.json`은 개별 run의 raw 요약입니다.
@@ -91,6 +91,6 @@
 
 ## 관련 문서
 
-- [workflow-ko.md](/mnt/c/Users/pjjpj/Desktop/openai_manga_translater/comic-translate/docs/benchmark/workflow-ko.md)
-- [results-history-ko.md](/mnt/c/Users/pjjpj/Desktop/openai_manga_translater/comic-translate/docs/benchmark/results-history-ko.md)
-- [resource-strategy-ko.md](/mnt/c/Users/pjjpj/Desktop/openai_manga_translater/comic-translate/docs/benchmark/resource-strategy-ko.md)
+- [workflow-ko.md](./workflow-ko.md)
+- [results-history-ko.md](./results-history-ko.md)
+- [resource-strategy-ko.md](./resource-strategy-ko.md)

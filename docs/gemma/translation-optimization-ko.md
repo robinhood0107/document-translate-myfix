@@ -23,6 +23,6 @@
 
 ## 더 자세한 설명
 
-- 전체 실험 과정: [optimization-journey-ko.md](/mnt/c/Users/pjjpj/Desktop/openai_manga_translater/comic-translate/docs/benchmark/optimization-journey-ko.md)
-- 최신 차트/표: [report-ko.md](/mnt/c/Users/pjjpj/Desktop/openai_manga_translater/comic-translate/docs/banchmark_report/report-ko.md)
-- 설정 이력: [profiles-ko.md](/mnt/c/Users/pjjpj/Desktop/openai_manga_translater/comic-translate/docs/gemma/profiles-ko.md)
+- 전체 실험 과정: [optimization-journey-ko.md](../benchmark/optimization-journey-ko.md)
+- 최신 차트/표: [report-ko.md](../banchmark_report/report-ko.md)
+- 설정 이력: [profiles-ko.md](./profiles-ko.md)
