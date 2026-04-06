@@ -94,6 +94,10 @@ def _generated_metadata(manifest_path: Path, manifest: dict[str, Any]) -> dict[s
         "benchmark_name": str(benchmark_cfg.get("name", "PaddleOCR-VL 1.5 Runtime Benchmark")),
         "benchmark_kind": str(benchmark_cfg.get("kind", "benchmark")),
         "benchmark_scope": str(benchmark_cfg.get("scope", "")),
+        "execution_scope": str(benchmark_cfg.get("execution_scope", "") or ""),
+        "official_score_scope": str(benchmark_cfg.get("official_score_scope", "") or ""),
+        "legacy_full_pipeline_available": bool(benchmark_cfg.get("legacy_full_pipeline_available", False)),
+        "runtime_services": str(benchmark_cfg.get("runtime_services", "") or ""),
         "baseline_sha": str(benchmark_cfg.get("baseline_sha", "") or ""),
         "develop_ref_sha": str(benchmark_cfg.get("develop_ref_sha", "") or ""),
         "results_root": results_root,
@@ -164,20 +168,19 @@ def _candidate_rows(manifest: dict[str, Any]) -> tuple[pd.DataFrame, pd.DataFram
     baseline_row = {
         "phase": "phase-0-baseline",
         "preset": str(baseline.get("preset", "baseline")),
+        "stage": str(baseline.get("scope", "full-confirm")),
         "official_score_detect_ocr_median_sec": float(
             baseline.get("official_score_detect_ocr_median_sec") or np.nan
         ),
         "warm_ocr_page_p95_median_sec": float(
             np.median(
                 [
-                    float((item.get("summary") or {}).get("ocr_page_p95_sec") or np.nan)
+                    float((item.get("official_metrics") or {}).get("ocr_page_p95_sec") or np.nan)
                     for item in baseline.get("warm_runs", [])
                     if isinstance(item, dict)
                 ]
             )
-        )
-        if baseline.get("warm_runs")
-        else np.nan,
+        ) if baseline.get("warm_runs") else np.nan,
         "detection_pass": bool(baseline.get("detection_pass", False)),
         "ocr_pass": bool(baseline.get("ocr_pass", False)),
         "promoted": True,
@@ -196,6 +199,7 @@ def _candidate_rows(manifest: dict[str, Any]) -> tuple[pd.DataFrame, pd.DataFram
                 {
                     "phase": phase_name,
                     "preset": str(phase.get("best_preset_after", "") or ""),
+                    "stage": "skipped",
                     "official_score_detect_ocr_median_sec": np.nan,
                     "warm_ocr_page_p95_median_sec": np.nan,
                     "detection_pass": "",
@@ -207,7 +211,7 @@ def _candidate_rows(manifest: dict[str, Any]) -> tuple[pd.DataFrame, pd.DataFram
             )
             continue
 
-        candidates = phase.get("candidates", [])
+        candidates = list(phase.get("screen_candidates", [])) + list(phase.get("confirm_candidates", []))
         best_preset = str(phase.get("best_preset_after", "") or "")
         phase_best: dict[str, Any] | None = None
         for candidate in candidates:
@@ -216,6 +220,7 @@ def _candidate_rows(manifest: dict[str, Any]) -> tuple[pd.DataFrame, pd.DataFram
             row = {
                 "phase": phase_name,
                 "preset": str(candidate.get("preset", "") or ""),
+                "stage": str(candidate.get("stage", "") or ""),
                 "official_score_detect_ocr_median_sec": float(
                     candidate.get("official_score_detect_ocr_median_sec") or np.nan
                 ),
@@ -235,6 +240,7 @@ def _candidate_rows(manifest: dict[str, Any]) -> tuple[pd.DataFrame, pd.DataFram
             phase_best = {
                 "phase": phase_name,
                 "preset": best_preset,
+                "stage": "",
                 "official_score_detect_ocr_median_sec": np.nan,
                 "warm_ocr_page_p95_median_sec": np.nan,
                 "detection_pass": "",
@@ -260,10 +266,10 @@ def _baseline_cold_warm_table(manifest: dict[str, Any]) -> pd.DataFrame:
                 "run_dir": str(cold.get("run_dir", "") or ""),
                 "detect_total_sec": float(summary.get("detect_total_sec") or np.nan),
                 "ocr_total_sec": float(summary.get("ocr_total_sec") or np.nan),
-                "detect_ocr_total_sec": float(summary.get("detect_ocr_total_sec") or np.nan),
-                "ocr_page_p95_sec": float(summary.get("ocr_page_p95_sec") or np.nan),
-                "detection_pass": bool(cold.get("detection_pass", False)),
-                "ocr_pass": bool(cold.get("ocr_pass", False)),
+                "detect_ocr_total_sec": float(((cold.get("official_metrics") or {}).get("detect_ocr_total_sec")) or np.nan),
+                "ocr_page_p95_sec": float(((cold.get("official_metrics") or {}).get("ocr_page_p95_sec")) or np.nan),
+                "detection_pass": bool(cold.get("detection_pass", (cold.get("compare") or {}).get("detection_pass", False))),
+                "ocr_pass": bool(cold.get("ocr_pass", (cold.get("compare") or {}).get("ocr_pass", False))),
             }
         )
     for index, warm in enumerate(baseline.get("warm_runs", []), start=1):
@@ -276,10 +282,10 @@ def _baseline_cold_warm_table(manifest: dict[str, Any]) -> pd.DataFrame:
                 "run_dir": str(warm.get("run_dir", "") or ""),
                 "detect_total_sec": float(summary.get("detect_total_sec") or np.nan),
                 "ocr_total_sec": float(summary.get("ocr_total_sec") or np.nan),
-                "detect_ocr_total_sec": float(summary.get("detect_ocr_total_sec") or np.nan),
-                "ocr_page_p95_sec": float(summary.get("ocr_page_p95_sec") or np.nan),
-                "detection_pass": bool(warm.get("detection_pass", False)),
-                "ocr_pass": bool(warm.get("ocr_pass", False)),
+                "detect_ocr_total_sec": float(((warm.get("official_metrics") or {}).get("detect_ocr_total_sec")) or np.nan),
+                "ocr_page_p95_sec": float(((warm.get("official_metrics") or {}).get("ocr_page_p95_sec")) or np.nan),
+                "detection_pass": bool(warm.get("detection_pass", (warm.get("compare") or {}).get("detection_pass", False))),
+                "ocr_pass": bool(warm.get("ocr_pass", (warm.get("compare") or {}).get("ocr_pass", False))),
             }
         )
     return pd.DataFrame(rows)
@@ -358,6 +364,8 @@ def generate_report(manifest_path: Path) -> int:
         "benchmark_name": meta["benchmark_name"],
         "benchmark_kind": meta["benchmark_kind"],
         "benchmark_scope": meta["benchmark_scope"],
+        "execution_scope": meta["execution_scope"],
+        "official_score_scope": meta["official_score_scope"],
         "winner_preset": winner_preset,
         "develop_promotion_ready": bool(winner.get("develop_promotion_ready", False)),
         "charts": {
@@ -371,10 +379,11 @@ def generate_report(manifest_path: Path) -> int:
     write_json(assets_dir / "report_summary.json", summary_payload)
 
     phase_order = [str(item.get("phase", "")) for item in manifest.get("phases", []) if isinstance(item, dict)]
+    gold_cfg = manifest.get("gold", {}) if isinstance(manifest.get("gold"), dict) else {}
     report_lines = [
         f"# 자동 벤치마크 보고서 - {meta['benchmark_name']}",
         "",
-        "이 문서는 `PaddleOCR-VL 1.5` actual-pipeline family suite 결과에서 자동 생성됩니다.",
+        "이 문서는 `PaddleOCR-VL 1.5` detect+ocr 공식 suite 결과에서 자동 생성됩니다.",
         "",
         "## 보고서 메타데이터",
         "",
@@ -382,10 +391,15 @@ def generate_report(manifest_path: Path) -> int:
         f"- 벤치마킹 이름: `{meta['benchmark_name']}`",
         f"- 벤치마킹 종류: `{meta['benchmark_kind']}`",
         f"- 벤치마킹 범위: `{meta['benchmark_scope']}`",
+        f"- `execution_scope`: `{meta['execution_scope']}`",
+        f"- `official_score_scope`: `{meta['official_score_scope']}`",
+        f"- runtime_services: `{meta['runtime_services']}`",
+        f"- legacy_full_pipeline_available: `{meta['legacy_full_pipeline_available']}`",
         f"- baseline SHA: `{meta['baseline_sha']}`",
         f"- develop ref SHA: `{meta['develop_ref_sha']}`",
         f"- results root: `{repo_relative_str(meta['results_root'])}`",
         f"- gold path: `{manifest.get('gold', {}).get('path', '')}`",
+        f"- stable_page_count: `{gold_cfg.get('stable_page_count', 0)}`",
         "",
         "## 라운드 결론",
         "",
@@ -394,6 +408,13 @@ def generate_report(manifest_path: Path) -> int:
         f"- develop 승격 가능: `{winner.get('develop_promotion_ready', False)}`",
         f"- baseline 대비 개선폭: `{winner.get('improvement_vs_baseline_pct', '')}%`",
         "",
+        "## Official Scope",
+        "",
+        f"- `execution_scope`: `{meta['execution_scope']}`",
+        f"- `official_score_scope`: `{meta['official_score_scope']}`",
+        f"- screen subset: `{', '.join(gold_cfg.get('screen_subset', []))}`",
+        f"- excluded_unstable_pages: `{len(gold_cfg.get('excluded_unstable_pages', []))}`",
+        "",
         "## Candidate Phase 순서",
         "",
     ]
@@ -401,6 +422,11 @@ def generate_report(manifest_path: Path) -> int:
         report_lines.append(f"- `{phase_name}`")
     report_lines.extend(
         [
+            "",
+            "## Warm-Stable Gate",
+            "",
+            f"- screen subset: `{', '.join(gold_cfg.get('screen_subset', []))}`",
+            f"- excluded_unstable_pages: `{len(gold_cfg.get('excluded_unstable_pages', []))}`",
             "",
             "## Baseline cold / warm",
             "",
@@ -423,9 +449,10 @@ def generate_report(manifest_path: Path) -> int:
             "## Candidate 결과",
             "",
             _markdown_table(
-                candidate_df.sort_values(["phase", "official_score_detect_ocr_median_sec"]),
+                candidate_df.sort_values(["phase", "stage", "official_score_detect_ocr_median_sec"]),
                 [
                     "phase",
+                    "stage",
                     "preset",
                     "official_score_detect_ocr_median_sec",
                     "warm_ocr_page_p95_median_sec",
@@ -448,6 +475,7 @@ def generate_report(manifest_path: Path) -> int:
                 phase_best_df,
                 [
                     "phase",
+                    "stage",
                     "preset",
                     "official_score_detect_ocr_median_sec",
                     "warm_ocr_page_p95_median_sec",

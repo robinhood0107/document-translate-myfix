@@ -4,6 +4,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import shutil
 import statistics
 import subprocess
 import sys
@@ -26,28 +27,37 @@ from benchmark_common import (
     DEFAULT_SAMPLE_COUNT,
     DEFAULT_SAMPLE_DIR,
     create_run_dir,
+    load_metrics,
     load_preset,
     remove_containers,
     repo_relative_str,
+    resolve_corpus,
     run_command,
     stage_runtime_files,
     write_json,
 )
+from paddleocr_vl15_compare_gold import build_stability_profile
 
 FAMILY_NAME = "paddleocr_vl15"
 FAMILY_OUTPUT_ROOT_NAME = "paddleocr_vl15"
 FAMILY_PRESET_BASE = "paddleocr-vl15-baseline"
 LAST_SUITE_RECORD = "last_paddleocr_vl15_suite.json"
 REPORT_MANIFEST_NAME = "paddleocr_vl15_report_manifest.yaml"
-HEALTH_URLS = [
+FULL_RUNTIME_HEALTH_URLS = [
     "http://127.0.0.1:18080/health",
     "http://127.0.0.1:18000/v1/models",
     "http://127.0.0.1:28118/docs",
 ]
+OCR_ONLY_HEALTH_URLS = [
+    "http://127.0.0.1:28118/docs",
+]
+DEFAULT_EXECUTION_SCOPE = "detect-ocr"
+LEGACY_EXECUTION_SCOPE = "full-pipeline"
+DEFAULT_SCREEN_SUBSET_SIZE = 10
+DEFAULT_CONFIRM_IMPROVEMENT_RATIO = 0.05
 PHASE_SEQUENCE = [
     {
         "name": "phase-1-workers-and-hpip",
-        "baseline_dependent": True,
         "candidates": [
             {
                 "suffix": "workers1",
@@ -74,7 +84,6 @@ PHASE_SEQUENCE = [
     },
     {
         "name": "phase-2-max-concurrency",
-        "baseline_dependent": True,
         "candidates": [
             {"suffix": "conc64", "description": "max_concurrency=64", "updates": {"ocr_runtime": {"max_concurrency": 64}}},
             {"suffix": "conc32", "description": "max_concurrency=32", "updates": {"ocr_runtime": {"max_concurrency": 32}}},
@@ -83,7 +92,6 @@ PHASE_SEQUENCE = [
     },
     {
         "name": "phase-3a-gpu-memory-utilization",
-        "baseline_dependent": True,
         "candidates": [
             {"suffix": "vram080", "description": "gpu_memory_utilization=0.80", "updates": {"ocr_runtime": {"gpu_memory_utilization": 0.80}}},
             {"suffix": "vram076", "description": "gpu_memory_utilization=0.76", "updates": {"ocr_runtime": {"gpu_memory_utilization": 0.76}}},
@@ -92,7 +100,6 @@ PHASE_SEQUENCE = [
     },
     {
         "name": "phase-3b-max-num-seqs",
-        "baseline_dependent": True,
         "candidates": [
             {"suffix": "seqs16", "description": "max_num_seqs=16", "updates": {"ocr_runtime": {"max_num_seqs": 16}}},
             {"suffix": "seqs12", "description": "max_num_seqs=12", "updates": {"ocr_runtime": {"max_num_seqs": 12}}},
@@ -101,28 +108,14 @@ PHASE_SEQUENCE = [
     },
     {
         "name": "phase-3c-max-num-batched-tokens",
-        "baseline_dependent": True,
         "candidates": [
-            {
-                "suffix": "tokens65536",
-                "description": "max_num_batched_tokens=65536",
-                "updates": {"ocr_runtime": {"max_num_batched_tokens": 65536}},
-            },
-            {
-                "suffix": "tokens49152",
-                "description": "max_num_batched_tokens=49152",
-                "updates": {"ocr_runtime": {"max_num_batched_tokens": 49152}},
-            },
-            {
-                "suffix": "tokens32768",
-                "description": "max_num_batched_tokens=32768",
-                "updates": {"ocr_runtime": {"max_num_batched_tokens": 32768}},
-            },
+            {"suffix": "tokens65536", "description": "max_num_batched_tokens=65536", "updates": {"ocr_runtime": {"max_num_batched_tokens": 65536}}},
+            {"suffix": "tokens49152", "description": "max_num_batched_tokens=49152", "updates": {"ocr_runtime": {"max_num_batched_tokens": 49152}}},
+            {"suffix": "tokens32768", "description": "max_num_batched_tokens=32768", "updates": {"ocr_runtime": {"max_num_batched_tokens": 32768}}},
         ],
     },
     {
         "name": "phase-4-layout-gpu",
-        "baseline_dependent": True,
         "min_gpu_floor_free_mb": 3072,
         "candidates": [
             {
@@ -169,7 +162,7 @@ def _wait_for_url(url: str, timeout_sec: int = 180) -> None:
         try:
             with urllib.request.urlopen(url, timeout=5):
                 return
-        except (urllib.error.URLError, TimeoutError):
+        except Exception:
             time.sleep(2)
     raise TimeoutError(f"Timed out waiting for {url}")
 
@@ -260,24 +253,26 @@ def _materialize_generated_preset(
     return output_path
 
 
-def _prepare_runtime(preset_ref: str, runtime_dir: Path) -> dict[str, Any]:
+def _prepare_runtime(preset_ref: str, runtime_dir: Path, *, runtime_services: str) -> dict[str, Any]:
     preset, _ = load_preset(preset_ref)
     staged = stage_runtime_files(preset, runtime_dir)
     remove_containers(DEFAULT_CONTAINER_NAMES)
-    run_command(
-        ["docker", "compose", "-f", staged["gemma"]["compose_path"], "up", "-d", "--force-recreate"],
-        cwd=runtime_dir / "gemma",
-    )
+    if runtime_services != "ocr-only":
+        run_command(
+            ["docker", "compose", "-f", staged["gemma"]["compose_path"], "up", "-d", "--force-recreate"],
+            cwd=runtime_dir / "gemma",
+        )
     run_command(
         ["docker", "compose", "-f", staged["ocr"]["compose_path"], "up", "-d", "--force-recreate"],
         cwd=runtime_dir / "ocr",
     )
-    for url in HEALTH_URLS:
+    for url in OCR_ONLY_HEALTH_URLS if runtime_services == "ocr-only" else FULL_RUNTIME_HEALTH_URLS:
         _wait_for_url(url)
     return {
         "preset": preset,
         "runtime_dir": runtime_dir,
         "staged": staged,
+        "runtime_services": runtime_services,
     }
 
 
@@ -286,11 +281,14 @@ def _run_pipeline(
     preset_ref: str,
     mode: str,
     runtime_mode: str,
+    runtime_services: str,
+    execution_scope: str,
     sample_dir: Path,
     sample_count: int,
     output_dir: Path,
     label: str,
 ) -> dict[str, Any]:
+    stage_ceiling = "ocr" if execution_scope == DEFAULT_EXECUTION_SCOPE else "render"
     cmd = [
         sys.executable,
         "-u",
@@ -303,6 +301,10 @@ def _run_pipeline(
         "1",
         "--runtime-mode",
         runtime_mode,
+        "--runtime-services",
+        runtime_services,
+        "--stage-ceiling",
+        stage_ceiling,
         "--sample-dir",
         str(sample_dir),
         "--sample-count",
@@ -333,6 +335,8 @@ def _run_pipeline(
         "run_dir": output_dir,
         "summary": summary,
         "preset_input": preset_ref,
+        "execution_scope": execution_scope,
+        "runtime_services": runtime_services,
     }
 
 
@@ -349,20 +353,23 @@ def _generate_gold_from_run(run_dir: Path, output_path: Path, *, baseline_sha: s
     return output_path
 
 
-def _run_gold_compare(gold_path: Path, candidate_run_dir: Path) -> dict[str, Any]:
+def _run_gold_compare(gold_path: Path, candidate_run_dir: Path, *, expected_pages: list[str] | None = None) -> dict[str, Any]:
     output_path = candidate_run_dir / "detect_ocr_compare.json"
+    cmd = [
+        sys.executable,
+        "-u",
+        str(ROOT / "scripts" / "paddleocr_vl15_compare_gold.py"),
+        "--baseline-gold",
+        str(gold_path),
+        "--candidate-run-dir",
+        str(candidate_run_dir),
+        "--output",
+        str(output_path),
+    ]
+    if expected_pages:
+        cmd.extend(["--expected-pages", *expected_pages])
     completed = subprocess.run(
-        [
-            sys.executable,
-            "-u",
-            str(ROOT / "scripts" / "paddleocr_vl15_compare_gold.py"),
-            "--baseline-gold",
-            str(gold_path),
-            "--candidate-run-dir",
-            str(candidate_run_dir),
-            "--output",
-            str(output_path),
-        ],
+        cmd,
         cwd=str(ROOT),
         check=False,
         capture_output=True,
@@ -382,17 +389,152 @@ def _median(values: list[float]) -> float:
     return float(statistics.median(values))
 
 
-def _compare_pass_flags(compare_payload: dict[str, Any]) -> tuple[bool, bool]:
-    detection_pass = True
-    ocr_pass = True
-    for page in compare_payload.get("pages", []):
-        for issue in page.get("issues", []):
-            issue_text = str(issue)
-            if any(keyword in issue_text for keyword in ("block_count", "unmatched_", "page_failed mismatch", "candidate page missing")):
-                detection_pass = False
-            if any(keyword in issue_text for keyword in ("text_mismatch", "non_empty regression", "empty regression", "single_char_like regression")):
-                ocr_pass = False
-    return detection_pass, ocr_pass
+def _p95(values: list[float]) -> float:
+    if not values:
+        return float("inf")
+    ordered = sorted(values)
+    index = max(0, min(len(ordered) - 1, int(round((len(ordered) - 1) * 0.95))))
+    return float(ordered[index])
+
+
+def _resolve_sample_paths(sample_dir: Path, sample_count: int) -> list[Path]:
+    corpus = resolve_corpus(sample_dir, sample_count=sample_count)
+    return list(corpus["representative"])
+
+
+def _materialize_subset_corpus(
+    *,
+    suite_dir: Path,
+    source_paths: list[Path],
+    subset_page_names: list[str],
+    label: str,
+) -> Path:
+    by_stem = {path.stem: path for path in source_paths}
+    subset_dir = suite_dir / "_corpus" / label
+    if subset_dir.exists():
+        shutil.rmtree(subset_dir)
+    subset_dir.mkdir(parents=True, exist_ok=True)
+    copied = 0
+    for page_name in subset_page_names:
+        source_path = by_stem.get(page_name)
+        if source_path is None:
+            continue
+        shutil.copy2(source_path, subset_dir / source_path.name)
+        copied += 1
+    if copied < 1:
+        raise RuntimeError(f"No subset pages materialized for {label}")
+    return subset_dir
+
+
+def _load_per_page_stage_metrics(run_dir: Path) -> dict[str, dict[str, float]]:
+    stage_open: dict[tuple[str, str], list[float]] = {}
+    per_page: dict[str, dict[str, float]] = {}
+    for row in load_metrics(run_dir / "metrics.jsonl"):
+        tag = str(row.get("tag", "") or "")
+        image_path = str(row.get("image_path", "") or "")
+        if not image_path:
+            continue
+        image_stem = Path(image_path).stem
+        ts = float(row.get("ts", 0.0) or 0.0)
+        if tag.endswith("_start"):
+            stage_open.setdefault((tag[:-6], image_stem), []).append(ts)
+        elif tag.endswith("_end"):
+            stage_name = tag[:-4]
+            key = (stage_name, image_stem)
+            starts = stage_open.get(key, [])
+            if not starts:
+                continue
+            started = starts.pop(0)
+            per_page.setdefault(image_stem, {})
+            per_page[image_stem][f"{stage_name}_sec"] = round(
+                float(per_page[image_stem].get(f"{stage_name}_sec", 0.0)) + max(0.0, ts - started),
+                6,
+            )
+    for page_name, payload in per_page.items():
+        payload["detect_ocr_total_sec"] = round(
+            float(payload.get("detect_sec", 0.0)) + float(payload.get("ocr_sec", 0.0)),
+            6,
+        )
+        payload["image_stem"] = page_name
+    return per_page
+
+
+def _official_metrics_for_run(run_dir: Path, page_names: list[str]) -> dict[str, Any]:
+    per_page = _load_per_page_stage_metrics(run_dir)
+    detected_pages = [page for page in page_names if page in per_page]
+    detect_ocr_total_sec = sum(float(per_page[page].get("detect_ocr_total_sec", 0.0)) for page in detected_pages)
+    ocr_values = [float(per_page[page].get("ocr_sec", 0.0)) for page in detected_pages]
+    return {
+        "pages_used": detected_pages,
+        "detect_ocr_total_sec": round(detect_ocr_total_sec, 3),
+        "ocr_page_p95_sec": round(_p95(ocr_values), 3) if ocr_values else None,
+    }
+
+
+def _run_candidate(
+    *,
+    suite_dir: Path,
+    name: str,
+    preset_ref: str,
+    sample_dir: Path,
+    sample_count: int,
+    execution_scope: str,
+    gold_path: Path | None,
+    expected_pages: list[str] | None,
+    warm_count: int,
+) -> dict[str, Any]:
+    runtime_dir = suite_dir / "_runtime" / name
+    runtime_services = "ocr-only" if execution_scope == DEFAULT_EXECUTION_SCOPE else "full"
+    _log(f"runtime 준비: {name} preset={preset_ref} execution_scope={execution_scope}")
+    runtime = _prepare_runtime(preset_ref, runtime_dir, runtime_services=runtime_services)
+    preset_name = str(runtime["preset"].get("name", preset_ref))
+    candidate_root = suite_dir / name
+    candidate_root.mkdir(parents=True, exist_ok=True)
+
+    cold_run = _run_pipeline(
+        preset_ref=preset_ref,
+        mode="batch",
+        runtime_mode="attach-running",
+        runtime_services=runtime_services,
+        execution_scope=execution_scope,
+        sample_dir=sample_dir,
+        sample_count=sample_count,
+        output_dir=candidate_root / "cold",
+        label=f"{name}_cold",
+    )
+    if gold_path is not None:
+        cold_run["compare"] = _run_gold_compare(gold_path, Path(cold_run["run_dir"]), expected_pages=expected_pages)
+    cold_run["official_metrics"] = _official_metrics_for_run(Path(cold_run["run_dir"]), expected_pages or [])
+
+    warm_runs: list[dict[str, Any]] = []
+    for warm_index in range(1, warm_count + 1):
+        warm_run = _run_pipeline(
+            preset_ref=preset_ref,
+            mode="batch",
+            runtime_mode="attach-running",
+            runtime_services=runtime_services,
+            execution_scope=execution_scope,
+            sample_dir=sample_dir,
+            sample_count=sample_count,
+            output_dir=candidate_root / f"warm{warm_index}",
+            label=f"{name}_warm{warm_index}",
+        )
+        if gold_path is not None:
+            warm_run["compare"] = _run_gold_compare(gold_path, Path(warm_run["run_dir"]), expected_pages=expected_pages)
+        warm_run["official_metrics"] = _official_metrics_for_run(Path(warm_run["run_dir"]), expected_pages or [])
+        warm_runs.append(warm_run)
+
+    remove_containers(DEFAULT_CONTAINER_NAMES)
+    return {
+        "name": name,
+        "preset": preset_name,
+        "preset_input": preset_ref,
+        "cold_run": cold_run,
+        "warm_runs": warm_runs,
+        "execution_scope": execution_scope,
+        "runtime_services": runtime_services,
+        "expected_pages": expected_pages or [],
+    }
 
 
 def _evaluate_candidate_result(
@@ -402,23 +544,31 @@ def _evaluate_candidate_result(
     cold: dict[str, Any],
     warms: list[dict[str, Any]],
     current_best_official_score: float,
+    compare_required: bool,
+    require_improvement: bool,
 ) -> dict[str, Any]:
     warm_summaries = [item["summary"] for item in warms]
-    warm_compare = [item["compare"] for item in warms]
-    warm_scores = [float(summary.get("detect_ocr_total_sec") or 1e12) for summary in warm_summaries]
-    warm_p95 = [float(summary.get("ocr_page_p95_sec") or 1e12) for summary in warm_summaries]
+    warm_compare = [item.get("compare", {}) for item in warms]
+    warm_scores = [float((item.get("official_metrics") or {}).get("detect_ocr_total_sec") or 1e12) for item in warms]
+    warm_p95 = [float((item.get("official_metrics") or {}).get("ocr_page_p95_sec") or 1e12) for item in warms]
     rejection_reasons: list[str] = []
 
-    detection_pass = all(item.get("detection_pass", False) for item in warm_compare) and bool(cold["compare"].get("passed", False))
-    ocr_pass = all(item.get("ocr_pass", False) for item in warm_compare) and bool(cold["compare"].get("passed", False))
-    compare_pass = bool(cold["compare"].get("passed", False)) and all(
-        payload.get("passed", False) for payload in warm_compare
+    detection_pass = all(bool(item.get("detection_pass", False)) for item in warm_compare) and bool(
+        (cold.get("compare") or {}).get("detection_pass", True)
     )
+    ocr_pass = all(bool(item.get("ocr_pass", False)) for item in warm_compare) and bool(
+        (cold.get("compare") or {}).get("ocr_pass", True)
+    )
+    compare_pass = True
+    if compare_required:
+        compare_pass = bool((cold.get("compare") or {}).get("passed", False)) and all(
+            bool(payload.get("passed", False)) for payload in warm_compare
+        )
     if not detection_pass:
         rejection_reasons.append("detection gate failed")
     if not ocr_pass:
         rejection_reasons.append("ocr gate failed")
-    if not compare_pass:
+    if compare_required and not compare_pass:
         rejection_reasons.append("gold compare failed")
 
     for summary in [cold["summary"], *warm_summaries]:
@@ -431,14 +581,14 @@ def _evaluate_candidate_result(
             break
 
     official_score = _median(warm_scores)
-    cold_score = float(cold["summary"].get("detect_ocr_total_sec") or 1e12)
+    cold_score = float((cold.get("official_metrics") or {}).get("detect_ocr_total_sec") or 1e12)
     warm_p95_median = _median(warm_p95)
     improvement_ratio = (
         ((current_best_official_score - official_score) / current_best_official_score)
         if current_best_official_score and current_best_official_score < 1e12
         else 0.0
     )
-    if improvement_ratio < 0.05:
+    if require_improvement and improvement_ratio < DEFAULT_CONFIRM_IMPROVEMENT_RATIO:
         rejection_reasons.append("warm detect+ocr median improvement < 5%")
 
     promoted = not rejection_reasons
@@ -467,73 +617,12 @@ def _candidate_sort_key(candidate: dict[str, Any]) -> tuple[float, float, float]
     )
 
 
-def _render_candidate_console(candidate: dict[str, Any]) -> str:
+def _render_candidate_console(candidate: dict[str, Any], stage: str) -> str:
     return (
-        f"{candidate['preset']} official={candidate['official_score_detect_ocr_median_sec']}s "
+        f"{stage} {candidate['preset']} official={candidate['official_score_detect_ocr_median_sec']}s "
         f"p95={candidate['warm_ocr_page_p95_median_sec']}s promoted={candidate['promoted']} "
         f"reason={candidate['rejection_reason'] or '-'}"
     )
-
-
-def _run_candidate(
-    *,
-    suite_dir: Path,
-    name: str,
-    preset_ref: str,
-    sample_dir: Path,
-    sample_count: int,
-    gold_path: Path | None,
-) -> dict[str, Any]:
-    runtime_dir = suite_dir / "_runtime" / name
-    _log(f"runtime 준비: {name} preset={preset_ref}")
-    runtime = _prepare_runtime(preset_ref, runtime_dir)
-    preset_name = str(runtime["preset"].get("name", preset_ref))
-    candidate_root = suite_dir / name
-    candidate_root.mkdir(parents=True, exist_ok=True)
-
-    cold_run = _run_pipeline(
-        preset_ref=preset_ref,
-        mode="batch",
-        runtime_mode="attach-running",
-        sample_dir=sample_dir,
-        sample_count=sample_count,
-        output_dir=candidate_root / "cold",
-        label=f"{name}_cold",
-    )
-    if gold_path is not None:
-        cold_compare = _run_gold_compare(gold_path, Path(cold_run["run_dir"]))
-        cold_detection_pass, cold_ocr_pass = _compare_pass_flags(cold_compare)
-        cold_run["compare"] = cold_compare
-        cold_run["detection_pass"] = cold_detection_pass
-        cold_run["ocr_pass"] = cold_ocr_pass
-
-    warm_runs: list[dict[str, Any]] = []
-    for warm_index in range(1, 4):
-        warm_run = _run_pipeline(
-            preset_ref=preset_ref,
-            mode="batch",
-            runtime_mode="attach-running",
-            sample_dir=sample_dir,
-            sample_count=sample_count,
-            output_dir=candidate_root / f"warm{warm_index}",
-            label=f"{name}_warm{warm_index}",
-        )
-        if gold_path is not None:
-            compare_payload = _run_gold_compare(gold_path, Path(warm_run["run_dir"]))
-            detection_pass, ocr_pass = _compare_pass_flags(compare_payload)
-            warm_run["compare"] = compare_payload
-            warm_run["detection_pass"] = detection_pass
-            warm_run["ocr_pass"] = ocr_pass
-        warm_runs.append(warm_run)
-
-    remove_containers(DEFAULT_CONTAINER_NAMES)
-    return {
-        "name": name,
-        "preset": preset_name,
-        "preset_input": preset_ref,
-        "cold_run": cold_run,
-        "warm_runs": warm_runs,
-    }
 
 
 def _phase_candidates(
@@ -569,43 +658,57 @@ def _latest_gpu_floor_free_mb(candidate: dict[str, Any]) -> float:
     return min(values) if values else 0.0
 
 
+def _encode_run(run: dict[str, Any]) -> dict[str, Any]:
+    compare_path = Path(run["run_dir"]) / "detect_ocr_compare.json"
+    compare = run.get("compare", {}) if isinstance(run.get("compare"), dict) else {}
+    return {
+        "run_dir": repo_relative_str(Path(run["run_dir"])),
+        "summary": run["summary"],
+        "compare_path": repo_relative_str(compare_path) if compare_path.is_file() else "",
+        "compare": compare,
+        "detection_pass": bool(compare.get("detection_pass", False)),
+        "ocr_pass": bool(compare.get("ocr_pass", False)),
+        "official_metrics": run.get("official_metrics", {}),
+    }
+
+
 def _suite_manifest(
     *,
     suite_dir: Path,
     baseline_sha: str,
     develop_ref_sha: str,
     gold_path: Path,
+    profile: dict[str, Any],
     baseline_candidate: dict[str, Any],
     phase_results: list[dict[str, Any]],
     winner: dict[str, Any],
 ) -> Path:
-    def encode_run(run: dict[str, Any]) -> dict[str, Any]:
-        compare_path = Path(run["run_dir"]) / "detect_ocr_compare.json"
-        return {
-            "run_dir": repo_relative_str(Path(run["run_dir"])),
-            "summary": run["summary"],
-            "compare_path": repo_relative_str(compare_path) if compare_path.is_file() else "",
-            "detection_pass": bool(run.get("detection_pass", False)),
-            "ocr_pass": bool(run.get("ocr_pass", False)),
-        }
-
     manifest = {
         "results_root": _repo_root_results_root(),
         "benchmark": {
             "name": "PaddleOCR-VL-1.5 Runtime Benchmark",
             "kind": "managed family suite",
-            "scope": "actual offscreen app pipeline; official score and quality gate use detect+ocr only",
+            "scope": "official default suite uses detect+ocr-only offscreen execution with warm-stable quality gate",
+            "execution_scope": "detect-ocr-only",
+            "official_score_scope": "detect+ocr-only",
+            "legacy_full_pipeline_available": True,
+            "runtime_services": "ocr-only",
             "baseline_sha": baseline_sha,
             "develop_ref_sha": develop_ref_sha,
             "family": FAMILY_NAME,
         },
         "gold": {
             "path": repo_relative_str(gold_path),
+            "profile_kind": str(profile.get("profile_kind", "") or ""),
+            "stable_page_count": int(profile.get("stable_page_count", 0) or 0),
+            "screen_subset": list(profile.get("screen_subset", [])),
+            "excluded_unstable_pages": list(profile.get("excluded_unstable_pages", [])),
         },
         "baseline": {
             "preset": baseline_candidate["preset"],
-            "cold_run": encode_run(baseline_candidate["cold_run"]),
-            "warm_runs": [encode_run(item) for item in baseline_candidate["warm_runs"]],
+            "scope": "full-confirm",
+            "cold_run": _encode_run(baseline_candidate["cold_run"]),
+            "warm_runs": [_encode_run(item) for item in baseline_candidate["warm_runs"]],
             "official_score_detect_ocr_median_sec": baseline_candidate["official_score_detect_ocr_median_sec"],
             "detection_pass": baseline_candidate["detection_pass"],
             "ocr_pass": baseline_candidate["ocr_pass"],
@@ -663,6 +766,35 @@ def _latest_gold_path() -> Path | None:
     return candidates[-1] if candidates else None
 
 
+def _baseline_variance_ok(candidate: dict[str, Any]) -> tuple[bool, float]:
+    scores = [
+        float((item.get("official_metrics") or {}).get("detect_ocr_total_sec") or 0.0)
+        for item in candidate.get("warm_runs", [])
+    ]
+    scores = [item for item in scores if item > 0]
+    if len(scores) < 2:
+        return True, 0.0
+    median_score = _median(scores)
+    if median_score <= 0:
+        return True, 0.0
+    spread = (max(scores) - min(scores)) / median_score
+    return spread <= 0.05, round(spread * 100.0, 2)
+
+
+def _select_confirm_candidates(screen_candidates: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    passed = [candidate for candidate in screen_candidates if candidate.get("promoted", False)]
+    passed.sort(key=_candidate_sort_key)
+    if not passed:
+        return []
+    selected = [passed[0]]
+    if len(passed) > 1:
+        best = float(passed[0].get("official_score_detect_ocr_median_sec") or 1e12)
+        second = float(passed[1].get("official_score_detect_ocr_median_sec") or 1e12)
+        if best < 1e12 and abs(second - best) / best <= 0.01:
+            selected.append(passed[1])
+    return selected
+
+
 def run_suite(*, sample_dir: Path = DEFAULT_SAMPLE_DIR, sample_count: int = DEFAULT_SAMPLE_COUNT) -> int:
     suite_dir = create_run_dir("paddleocr-vl15-runtime_suite", root=family_output_root())
     _log(f"suite output dir: {suite_dir}")
@@ -671,57 +803,97 @@ def run_suite(*, sample_dir: Path = DEFAULT_SAMPLE_DIR, sample_count: int = DEFA
 
     baseline_sha = _current_git_sha("HEAD")
     develop_ref_sha = _current_git_sha("develop") or baseline_sha
+    source_paths = _resolve_sample_paths(sample_dir, sample_count)
 
     baseline_raw = _run_candidate(
         suite_dir=suite_dir,
-        name="baseline",
+        name="baseline-confirm",
         preset_ref=FAMILY_PRESET_BASE,
         sample_dir=sample_dir,
         sample_count=sample_count,
+        execution_scope=DEFAULT_EXECUTION_SCOPE,
         gold_path=None,
+        expected_pages=None,
+        warm_count=3,
     )
-    gold_path = _generate_gold_from_run(
-        Path(baseline_raw["cold_run"]["run_dir"]),
-        gold_dir / "baseline_gold.json",
+    baseline_profile = build_stability_profile(
+        [
+            Path(baseline_raw["cold_run"]["run_dir"]),
+            *[Path(item["run_dir"]) for item in baseline_raw["warm_runs"]],
+        ],
         baseline_sha=baseline_sha,
-        baseline_ref_sha=develop_ref_sha,
+        develop_ref_sha=develop_ref_sha,
+        execution_scope="detect-ocr-only",
+        official_score_scope="detect+ocr-only",
     )
-    baseline_raw["cold_run"]["compare"] = _run_gold_compare(gold_path, Path(baseline_raw["cold_run"]["run_dir"]))
-    baseline_raw["cold_run"]["detection_pass"], baseline_raw["cold_run"]["ocr_pass"] = _compare_pass_flags(
-        baseline_raw["cold_run"]["compare"]
+    gold_path = gold_dir / "baseline_warm_stable_profile.json"
+    write_json(gold_path, baseline_profile)
+
+    stable_pages = list(baseline_profile.get("stable_pages", []))
+    screen_subset = list(baseline_profile.get("screen_subset", []))
+    if not stable_pages:
+        raise RuntimeError("No stable baseline pages remained after warm-stable profiling.")
+
+    baseline_raw["cold_run"]["compare"] = _run_gold_compare(
+        gold_path,
+        Path(baseline_raw["cold_run"]["run_dir"]),
+        expected_pages=stable_pages,
     )
-    refreshed_warms: list[dict[str, Any]] = []
     for warm_run in baseline_raw["warm_runs"]:
-        compare_payload = _run_gold_compare(gold_path, Path(warm_run["run_dir"]))
-        warm_run["compare"] = compare_payload
-        warm_run["detection_pass"], warm_run["ocr_pass"] = _compare_pass_flags(compare_payload)
-        refreshed_warms.append(warm_run)
-    baseline_raw["warm_runs"] = refreshed_warms
+        warm_run["compare"] = _run_gold_compare(
+            gold_path,
+            Path(warm_run["run_dir"]),
+            expected_pages=stable_pages,
+        )
+        warm_run["official_metrics"] = _official_metrics_for_run(Path(warm_run["run_dir"]), stable_pages)
+    baseline_raw["cold_run"]["official_metrics"] = _official_metrics_for_run(
+        Path(baseline_raw["cold_run"]["run_dir"]),
+        stable_pages,
+    )
     baseline_candidate = _evaluate_candidate_result(
-        name="baseline",
+        name="baseline-confirm",
         preset_name=baseline_raw["preset"],
         cold=baseline_raw["cold_run"],
         warms=baseline_raw["warm_runs"],
         current_best_official_score=float("inf"),
+        compare_required=True,
+        require_improvement=False,
     )
     baseline_candidate["promoted"] = True
     baseline_candidate["rejection_reason"] = ""
+    baseline_candidate["execution_scope"] = DEFAULT_EXECUTION_SCOPE
+    baseline_candidate["runtime_services"] = "ocr-only"
     current_best = baseline_candidate
     current_best_payload, _ = load_preset(FAMILY_PRESET_BASE)
 
+    baseline_variance_ok, baseline_spread_pct = _baseline_variance_ok(baseline_raw)
+    if not baseline_variance_ok:
+        raise RuntimeError(
+            f"Baseline warm detect+ocr variance too high ({baseline_spread_pct}%). Stabilize runtime before comparing candidates."
+        )
+
+    screen_dir = _materialize_subset_corpus(
+        suite_dir=suite_dir,
+        source_paths=source_paths,
+        subset_page_names=screen_subset,
+        label="screen-subset",
+    )
+
     phase_results: list[dict[str, Any]] = []
     for phase in PHASE_SEQUENCE:
+        current_best_before = current_best["preset"]
         if phase.get("min_gpu_floor_free_mb") and _latest_gpu_floor_free_mb(current_best) < float(
             phase["min_gpu_floor_free_mb"]
         ):
             phase_results.append(
                 {
                     "phase": phase["name"],
-                    "current_best_before": current_best["preset"],
+                    "current_best_before": current_best_before,
                     "best_preset_after": current_best["preset"],
                     "skipped": True,
                     "skip_reason": f"gpu_floor_free_mb < {phase['min_gpu_floor_free_mb']}",
-                    "candidates": [],
+                    "screen_candidates": [],
+                    "confirm_candidates": [],
                 }
             )
             continue
@@ -731,16 +903,18 @@ def run_suite(*, sample_dir: Path = DEFAULT_SAMPLE_DIR, sample_count: int = DEFA
             base_preset_payload=current_best_payload,
             phase=phase,
         )
-        candidate_rows: list[dict[str, Any]] = []
-        promoted: list[dict[str, Any]] = []
+        screen_results: list[dict[str, Any]] = []
         for candidate_name, preset_ref in generated:
             raw_candidate = _run_candidate(
                 suite_dir=suite_dir,
-                name=candidate_name,
+                name=f"{candidate_name}-screen",
                 preset_ref=preset_ref,
-                sample_dir=sample_dir,
-                sample_count=sample_count,
+                sample_dir=screen_dir,
+                sample_count=len(screen_subset),
+                execution_scope=DEFAULT_EXECUTION_SCOPE,
                 gold_path=gold_path,
+                expected_pages=screen_subset,
+                warm_count=1,
             )
             candidate_row = _evaluate_candidate_result(
                 name=candidate_name,
@@ -748,26 +922,47 @@ def run_suite(*, sample_dir: Path = DEFAULT_SAMPLE_DIR, sample_count: int = DEFA
                 cold=raw_candidate["cold_run"],
                 warms=raw_candidate["warm_runs"],
                 current_best_official_score=float(current_best["official_score_detect_ocr_median_sec"]),
+                compare_required=True,
+                require_improvement=False,
             )
+            candidate_row["stage"] = "screen"
             candidate_row["preset_input"] = preset_ref
-            candidate_row["cold_run"] = {
-                "run_dir": repo_relative_str(raw_candidate["cold_run"]["run_dir"]),
-                "summary": raw_candidate["cold_run"]["summary"],
-                "compare_path": repo_relative_str(Path(raw_candidate["cold_run"]["run_dir"]) / "detect_ocr_compare.json"),
-            }
-            candidate_row["warm_runs"] = [
-                {
-                    "run_dir": repo_relative_str(item["run_dir"]),
-                    "summary": item["summary"],
-                    "compare_path": repo_relative_str(Path(item["run_dir"]) / "detect_ocr_compare.json"),
-                }
-                for item in raw_candidate["warm_runs"]
-            ]
-            candidate_rows.append(candidate_row)
-            if candidate_row["promoted"]:
-                promoted.append(candidate_row)
-            _log(_render_candidate_console(candidate_row))
+            candidate_row["cold_run"] = raw_candidate["cold_run"]
+            candidate_row["warm_runs"] = raw_candidate["warm_runs"]
+            screen_results.append(candidate_row)
+            _log(_render_candidate_console(candidate_row, "screen"))
 
+        confirm_targets = _select_confirm_candidates(screen_results)
+        confirm_results: list[dict[str, Any]] = []
+        for candidate_row in confirm_targets:
+            raw_candidate = _run_candidate(
+                suite_dir=suite_dir,
+                name=f"{candidate_row['name']}-confirm",
+                preset_ref=str(candidate_row["preset_input"]),
+                sample_dir=sample_dir,
+                sample_count=sample_count,
+                execution_scope=DEFAULT_EXECUTION_SCOPE,
+                gold_path=gold_path,
+                expected_pages=stable_pages,
+                warm_count=3,
+            )
+            confirm_row = _evaluate_candidate_result(
+                name=str(candidate_row["name"]),
+                preset_name=raw_candidate["preset"],
+                cold=raw_candidate["cold_run"],
+                warms=raw_candidate["warm_runs"],
+                current_best_official_score=float(current_best["official_score_detect_ocr_median_sec"]),
+                compare_required=True,
+                require_improvement=True,
+            )
+            confirm_row["stage"] = "confirm"
+            confirm_row["preset_input"] = str(candidate_row["preset_input"])
+            confirm_row["cold_run"] = raw_candidate["cold_run"]
+            confirm_row["warm_runs"] = raw_candidate["warm_runs"]
+            confirm_results.append(confirm_row)
+            _log(_render_candidate_console(confirm_row, "confirm"))
+
+        promoted = [candidate for candidate in confirm_results if candidate.get("promoted", False)]
         promoted.sort(key=_candidate_sort_key)
         if promoted:
             phase_best = promoted[0]
@@ -780,30 +975,33 @@ def run_suite(*, sample_dir: Path = DEFAULT_SAMPLE_DIR, sample_count: int = DEFA
         phase_results.append(
             {
                 "phase": phase["name"],
-                "current_best_before": baseline_candidate["preset"] if not phase_results else phase_results[-1]["best_preset_after"],
+                "current_best_before": current_best_before,
                 "best_preset_after": best_after,
                 "skipped": False,
-                "candidates": candidate_rows,
+                "screen_candidates": screen_results,
+                "confirm_candidates": confirm_results,
+                "confirm_selected_presets": [candidate["preset"] for candidate in confirm_targets],
             }
         )
 
-    if current_best["official_score_detect_ocr_median_sec"] >= baseline_candidate["official_score_detect_ocr_median_sec"] * 0.95:
-        phase_results.append(
-            {
-                "phase": "phase-5-code-candidate",
-                "current_best_before": current_best["preset"],
-                "best_preset_after": current_best["preset"],
-                "skipped": True,
-                "skip_reason": "No code candidate implemented; current config winner did not exceed 5% overall improvement threshold.",
-                "candidates": [],
-            }
-        )
+    phase_results.append(
+        {
+            "phase": "phase-5-code-candidate",
+            "current_best_before": current_best["preset"],
+            "best_preset_after": current_best["preset"],
+            "skipped": True,
+            "skip_reason": "Optional code candidate not implemented in this round.",
+            "screen_candidates": [],
+            "confirm_candidates": [],
+        }
+    )
 
     manifest_path = _suite_manifest(
         suite_dir=suite_dir,
         baseline_sha=baseline_sha,
         develop_ref_sha=develop_ref_sha,
         gold_path=gold_path,
+        profile=baseline_profile,
         baseline_candidate=baseline_candidate,
         phase_results=phase_results,
         winner=current_best,
@@ -816,14 +1014,17 @@ def run_suite(*, sample_dir: Path = DEFAULT_SAMPLE_DIR, sample_count: int = DEFA
     }
     write_json(family_output_root() / LAST_SUITE_RECORD, record_payload)
 
-    report_cmd = [
-        sys.executable,
-        "-u",
-        str(ROOT / "scripts" / "generate_paddleocr_vl15_report.py"),
-        "--manifest",
-        str(manifest_path),
-    ]
-    subprocess.run(report_cmd, cwd=str(ROOT), check=True)
+    subprocess.run(
+        [
+            sys.executable,
+            "-u",
+            str(ROOT / "scripts" / "generate_paddleocr_vl15_report.py"),
+            "--manifest",
+            str(manifest_path),
+        ],
+        cwd=str(ROOT),
+        check=True,
+    )
     print(
         "winner={winner} official_detect_ocr_median={score}s manifest={manifest}".format(
             winner=current_best["preset"],
@@ -850,7 +1051,7 @@ def _open_dir(path: Path) -> int:
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="PaddleOCR-VL 1.5 actual-pipeline benchmark family.")
+    parser = argparse.ArgumentParser(description="PaddleOCR-VL 1.5 detect+ocr-first benchmark family.")
     subparsers = parser.add_subparsers(dest="command", required=False)
 
     run_parser = subparsers.add_parser("run", help="Run a single PaddleOCR-VL 1.5 benchmark candidate.")
@@ -860,19 +1061,25 @@ def main() -> int:
     run_parser.add_argument("repeat", nargs="?", default="1")
     run_parser.add_argument("sample_dir", nargs="?", default=str(DEFAULT_SAMPLE_DIR))
     run_parser.add_argument("sample_count", nargs="?", default=str(DEFAULT_SAMPLE_COUNT))
+    run_parser.add_argument(
+        "--execution-scope",
+        choices=(DEFAULT_EXECUTION_SCOPE, LEGACY_EXECUTION_SCOPE),
+        default=DEFAULT_EXECUTION_SCOPE,
+        help="Official default is detect-ocr. full-pipeline remains legacy/manual.",
+    )
 
-    gold_parser = subparsers.add_parser("gold", help="Generate baseline gold JSON from an existing run.")
+    gold_parser = subparsers.add_parser("gold", help="Generate a baseline gold JSON from an existing run.")
     gold_parser.add_argument("--run-dir", default="")
     gold_parser.add_argument("--output", default="")
 
-    compare_parser = subparsers.add_parser("compare", help="Compare an existing run against baseline gold.")
+    compare_parser = subparsers.add_parser("compare", help="Compare an existing run against baseline gold or warm-stable profile.")
     compare_parser.add_argument("--baseline-gold", default="")
     compare_parser.add_argument("--candidate-run-dir", default="")
 
     summary_parser = subparsers.add_parser("summary", help="Generate the PaddleOCR-VL 1.5 report from a suite manifest.")
     summary_parser.add_argument("--manifest", default="")
 
-    subparsers.add_parser("suite", help="Run the full PaddleOCR-VL 1.5 suite.")
+    subparsers.add_parser("suite", help="Run the official PaddleOCR-VL 1.5 suite.")
     subparsers.add_parser("open", help="Open the family result root.")
     subparsers.add_parser("help", help="Show help.")
 
@@ -886,21 +1093,27 @@ def main() -> int:
         repeat = int(args.repeat)
         sample_count = int(args.sample_count)
         sample_dir = Path(args.sample_dir)
+        runtime_services = "ocr-only" if args.execution_scope == DEFAULT_EXECUTION_SCOPE else "full"
         output_root = family_output_root()
         for repeat_index in range(1, max(1, repeat) + 1):
             run_dir = create_run_dir(
                 f"{Path(str(preset_ref)).stem}_{args.mode}_r{repeat_index}",
                 root=output_root,
             )
+            if args.runtime_mode == "managed":
+                _prepare_runtime(preset_ref, output_root / "_run_runtime" / run_dir.name, runtime_services=runtime_services)
             result = _run_pipeline(
                 preset_ref=preset_ref,
                 mode=args.mode,
-                runtime_mode=args.runtime_mode,
+                runtime_mode="attach-running" if args.runtime_mode == "managed" else args.runtime_mode,
+                runtime_services=runtime_services,
+                execution_scope=args.execution_scope,
                 sample_dir=sample_dir,
                 sample_count=sample_count,
                 output_dir=run_dir,
                 label=run_dir.name,
             )
+            remove_containers(DEFAULT_CONTAINER_NAMES)
             print(repo_relative_str(result["run_dir"]))
         return 0
 

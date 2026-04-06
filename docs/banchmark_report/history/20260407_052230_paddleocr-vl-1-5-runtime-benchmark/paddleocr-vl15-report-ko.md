@@ -4,7 +4,7 @@
 
 ## 보고서 메타데이터
 
-- 생성 시각: `2026-04-07 05:22:30 대한민국 표준시`
+- 생성 시각: `2026-04-07 05:20:15 대한민국 표준시`
 - 벤치마킹 이름: `PaddleOCR-VL-1.5 Runtime Benchmark`
 - 벤치마킹 종류: `managed family suite`
 - 벤치마킹 범위: `official default suite uses detect+ocr-only offscreen execution with warm-stable quality gate`
@@ -53,9 +53,9 @@
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | phase-0-baseline | full-confirm | paddleocr-vl15-baseline | 15.424 | 13.282 | True | True | True |  |
 
-![candidate-official-score](../assets/benchmarking/paddleocr-vl15/latest/paddleocr_vl15_candidate_official_score.png)
+![candidate-official-score](../../../assets/benchmarking/paddleocr-vl15/history/20260407_052230_paddleocr-vl-1-5-runtime-benchmark/paddleocr_vl15_candidate_official_score.png)
 
-![candidate-p95](../assets/benchmarking/paddleocr-vl15/latest/paddleocr_vl15_candidate_p95.png)
+![candidate-p95](../../../assets/benchmarking/paddleocr-vl15/history/20260407_052230_paddleocr-vl-1-5-runtime-benchmark/paddleocr_vl15_candidate_p95.png)
 
 ## Phase Best
 
@@ -63,7 +63,7 @@
 | --- | --- | --- | --- | --- | --- | --- |
 | phase-0-baseline | full-confirm | paddleocr-vl15-baseline | 15.424 | 13.282 | True |  |
 
-![phase-best](../assets/benchmarking/paddleocr-vl15/latest/paddleocr_vl15_phase_best_official_score.png)
+![phase-best](../../../assets/benchmarking/paddleocr-vl15/history/20260407_052230_paddleocr-vl-1-5-runtime-benchmark/paddleocr_vl15_phase_best_official_score.png)
 
 ## 산출물
 

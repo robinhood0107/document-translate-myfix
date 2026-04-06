@@ -12,12 +12,15 @@
 - CUDA12 런처는 `.venv-win`
 - CUDA13 런처는 `.venv-win-cuda13`
 - raw 결과는 `./banchmark_result_log/paddleocr_vl15/`
+- 기본 공식 경로는 `execution_scope=detect-ocr-only`
+- legacy full pipeline은 `--execution-scope full-pipeline`로만 사용
 
 ## 단일 실행
 
 ```bat
 scripts\paddleocr_vl15_benchmark_pipeline_cuda13.bat
 scripts\paddleocr_vl15_benchmark_pipeline_cuda13.bat run paddleocr-vl15-baseline one-page managed 1
+scripts\paddleocr_vl15_benchmark_pipeline_cuda13.bat run paddleocr-vl15-baseline batch managed 1 .\Sample 30 --execution-scope full-pipeline
 ```
 
 ## gold 생성 / compare
@@ -33,7 +36,7 @@ scripts\paddleocr_vl15_benchmark_pipeline_cuda13.bat compare --baseline-gold <go
 scripts\paddleocr_vl15_benchmark_suite_cuda13.bat
 ```
 
-이 명령은 내부적으로 `benchmark_suite.py --suite-profile paddleocr-vl15-runtime`을 호출합니다.
+이 명령은 내부적으로 `benchmark_suite.py --suite-profile paddleocr-vl15-runtime`을 호출하며, 공식 기본값으로 `detect+ocr-only` suite를 수행합니다.
 
 ## 보고서 생성
 

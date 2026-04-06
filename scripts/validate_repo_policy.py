@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+from pathlib import Path
 import re
 import subprocess
 import sys
@@ -118,6 +119,39 @@ def validate_benchmark_asset_placement(branch: str) -> list[str]:
     return errors
 
 
+def validate_benchmark_family_structure() -> list[str]:
+    errors: list[str] = []
+    root = Path.cwd()
+    family_anchor = root / "docs" / "benchmark" / "paddleocr-vl15"
+    if not family_anchor.exists():
+        return errors
+    required_paths = [
+        root / "scripts" / "paddleocr_vl15_benchmark_pipeline.bat",
+        root / "scripts" / "paddleocr_vl15_benchmark_pipeline_cuda13.bat",
+        root / "scripts" / "paddleocr_vl15_benchmark_suite.bat",
+        root / "scripts" / "paddleocr_vl15_benchmark_suite_cuda13.bat",
+        root / "docs" / "benchmark" / "paddleocr-vl15" / "architecture-ko.md",
+        root / "docs" / "benchmark" / "paddleocr-vl15" / "workflow-ko.md",
+        root / "docs" / "benchmark" / "paddleocr-vl15" / "usage-ko.md",
+        root / "docs" / "banchmark_report" / "paddleocr-vl15-report-ko.md",
+    ]
+    for path in required_paths:
+        if not path.exists():
+            errors.append(f"Missing required PaddleOCR-VL15 benchmark family asset: {path.relative_to(root)}")
+
+    architecture_path = root / "docs" / "benchmark" / "paddleocr-vl15" / "architecture-ko.md"
+    report_path = root / "docs" / "banchmark_report" / "paddleocr-vl15-report-ko.md"
+    for path in (architecture_path, report_path):
+        if not path.is_file():
+            continue
+        text = path.read_text(encoding="utf-8")
+        if "execution_scope" not in text or "official_score_scope" not in text:
+            errors.append(
+                f"PaddleOCR-VL15 docs/report must mention both execution_scope and official_score_scope: {path.relative_to(root)}"
+            )
+    return errors
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Validate repo branch and tracked-file policy.")
     parser.add_argument("--mode", choices=("commit", "push", "ci"), default="ci")
@@ -129,6 +163,7 @@ def main() -> int:
     errors.extend(validate_branch(branch, args.mode))
     errors.extend(validate_tracked_paths())
     errors.extend(validate_benchmark_asset_placement(branch))
+    errors.extend(validate_benchmark_family_structure())
 
     if errors:
         for error in errors:

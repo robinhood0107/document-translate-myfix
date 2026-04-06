@@ -68,6 +68,12 @@ class WebtoonBatchProcessor(FlowMixin, ChunkMixin, RenderMixin):
         except Exception:
             pass
 
+    def _benchmark_stage_ceiling(self) -> str:
+        return str(os.getenv("CT_BENCH_STAGE_CEILING", "render") or "render").strip().lower()
+
+    def _should_stop_after_ocr(self) -> bool:
+        return self._benchmark_stage_ceiling() == "ocr"
+
     def skip_save(
         self: WebtoonBatchProcessor,
         directory,

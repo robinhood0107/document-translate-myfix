@@ -6,6 +6,7 @@
 
 - 최신 보고서: [paddleocr-vl15-report-ko.md](/mnt/c/Users/pjjpj/Desktop/openai_manga_translater/comic-translate/docs/banchmark_report/paddleocr-vl15-report-ko.md)
 - 최신 자산: [latest](/mnt/c/Users/pjjpj/Desktop/openai_manga_translater/comic-translate/docs/assets/benchmarking/paddleocr-vl15/latest)
+- 최신 보고서는 `execution_scope`와 `official_score_scope`, `screen subset`, `excluded_unstable_pages`를 함께 기록합니다.
 
 ## 과거 결과
 

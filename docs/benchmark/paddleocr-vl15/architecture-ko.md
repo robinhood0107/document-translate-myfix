@@ -2,7 +2,15 @@
 
 이 family는 translation benchmark와 달리 **OCR runtime 튜닝**이 목적이지만, 실행 자체는 실제 앱 파이프라인을 그대로 탑니다.
 
-## 실행 범위
+## 공식 범위
+
+- `execution_scope=detect-ocr-only`
+- `official_score_scope=detect+ocr-only`
+- `legacy_full_pipeline_available=true`
+
+즉 공식 기본 suite는 offscreen 앱 파이프라인을 타되, generic stage ceiling으로 `ocr` 단계에서 정상 종료합니다.
+
+## legacy 실행 범위
 
 - 이미지 로드
 - detect
@@ -12,7 +20,7 @@
 - render
 - save
 
-즉, 실제 제품과 같은 offscreen 앱 경로를 사용합니다.
+이 full-pipeline 경로는 제거하지 않고 legacy/manual 참고용으로만 남깁니다.
 
 ## 공식 점수 범위
 
@@ -23,18 +31,19 @@
 - `detect+ocr page total`
 - `warm detect+ocr suite total`
 - `warm p50/p95/p99 per-page OCR time`
-- detection/OCR gold compare 결과
+- detection/OCR warm-stable compare 결과
 
-번역, 인페인트, 렌더, 저장은 실행은 하되 공식 점수에는 포함하지 않습니다.
+번역, 인페인트, 렌더, 저장은 legacy 경로에서는 실행할 수 있지만 공식 점수에는 포함하지 않습니다.
 
 ## 품질 게이트
 
 - `page_failed_count = 0`
 - `ocr_cache_hit_count = 0`
-- block count 동일
-- bubble/box IoU 기반 1:1 매칭
-- normalized OCR text 완전 일치
-- `non_empty`, `empty`, `single_char_like` 무회귀
+- baseline 안정 페이지 기준 block count 동일
+- baseline 안정 페이지 기준 bubble/box IoU 기반 1:1 매칭
+- `text-stable block`에 대해서만 normalized OCR text 완전 일치
+- `text-unstable block` mismatch는 soft metric
+- `non_empty`, `empty`, `single_char_like`는 baseline warm 범위 기준 무회귀
 
 ## 결과 루트
 

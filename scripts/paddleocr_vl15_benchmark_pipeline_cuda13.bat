@@ -45,18 +45,18 @@ set "SAMPLE_COUNT=30"
 goto :execute_run
 
 :run_command
-set "PRESET=%~2"
-if "%PRESET%"=="" set "PRESET=paddleocr-vl15-baseline"
-set "MODE=%~3"
-if "%MODE%"=="" set "MODE=batch"
-set "RUNTIME_MODE=%~4"
-if "%RUNTIME_MODE%"=="" set "RUNTIME_MODE=managed"
-set "REPEAT=%~5"
-if "%REPEAT%"=="" set "REPEAT=1"
-set "SAMPLE_DIR=%~6"
-if "%SAMPLE_DIR%"=="" set "SAMPLE_DIR=%REPO_ROOT%\Sample"
-set "SAMPLE_COUNT=%~7"
-if "%SAMPLE_COUNT%"=="" set "SAMPLE_COUNT=30"
+:execute_with_args
+echo [paddleocr-vl15] launcher=scripts\paddleocr_vl15_benchmark_pipeline_cuda13.bat
+echo [paddleocr-vl15] started-at=%DATE% %TIME%
+echo [paddleocr-vl15] repo-root=%REPO_ROOT%
+echo [paddleocr-vl15] python=%PYTHON_EXE%
+echo [paddleocr-vl15] output-root=%BENCH_ROOT%
+echo [paddleocr-vl15] runtime=.venv-win-cuda13
+echo [paddleocr-vl15] default-execution-scope=detect-ocr-only
+call "%PYTHON_EXE%" -u "%SCRIPT_DIR%paddleocr_vl15_benchmark.py" %*
+set "EXIT_CODE=%ERRORLEVEL%"
+echo [paddleocr-vl15] finished exit-code=%EXIT_CODE% at=%DATE% %TIME%
+exit /b %EXIT_CODE%
 
 :execute_run
 echo [paddleocr-vl15] launcher=scripts\paddleocr_vl15_benchmark_pipeline_cuda13.bat
@@ -67,6 +67,7 @@ echo [paddleocr-vl15] preset=%PRESET% mode=%MODE% runtime-mode=%RUNTIME_MODE% re
 echo [paddleocr-vl15] sample-dir=%SAMPLE_DIR% sample-count=%SAMPLE_COUNT%
 echo [paddleocr-vl15] output-root=%BENCH_ROOT%
 echo [paddleocr-vl15] runtime=.venv-win-cuda13
+echo [paddleocr-vl15] default-execution-scope=detect-ocr-only
 call "%PYTHON_EXE%" -u "%SCRIPT_DIR%paddleocr_vl15_benchmark.py" run "%PRESET%" "%MODE%" "%RUNTIME_MODE%" "%REPEAT%" "%SAMPLE_DIR%" "%SAMPLE_COUNT%"
 set "EXIT_CODE=%ERRORLEVEL%"
 echo [paddleocr-vl15] finished exit-code=%EXIT_CODE% at=%DATE% %TIME%
@@ -106,5 +107,8 @@ echo   paddleocr_vl15_benchmark_pipeline_cuda13.bat uses .venv-win-cuda13
 echo.
 echo Output root:
 echo   %%REPO_ROOT%%\banchmark_result_log\paddleocr_vl15
+echo.
+echo Official default:
+echo   detect+ocr-only suite. Use --execution-scope full-pipeline for legacy/manual full pipeline runs.
 echo.
 goto :eof

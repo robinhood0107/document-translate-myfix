@@ -55,6 +55,14 @@ GEMMA_ENV_OVERRIDES = {
     "response_schema_mode": "CT_GEMMA_RESPONSE_SCHEMA_MODE",
     "think_briefly_prompt": "CT_GEMMA_THINK_BRIEFLY_PROMPT",
 }
+FULL_RUNTIME_HEALTH_URLS = [
+    "http://127.0.0.1:18080/health",
+    "http://127.0.0.1:18000/v1/models",
+    "http://127.0.0.1:28118/docs",
+]
+OCR_ONLY_HEALTH_URLS = [
+    "http://127.0.0.1:28118/docs",
+]
 
 
 def _log(message: str) -> None:
@@ -80,7 +88,7 @@ def _wait_for_url(url: str, timeout_sec: int = 180) -> None:
         try:
             with urllib.request.urlopen(url, timeout=5):
                 return
-        except (urllib.error.URLError, TimeoutError):
+        except Exception:
             time.sleep(2)
     raise TimeoutError(f"Timed out waiting for {url}")
 
@@ -164,26 +172,31 @@ def _restore_env(snapshot: dict[str, str | None]) -> None:
             os.environ[key] = value
 
 
-def _ensure_managed_runtime(run_dir: Path, preset: dict[str, object]) -> None:
+def _ensure_managed_runtime(
+    run_dir: Path,
+    preset: dict[str, object],
+    runtime_services: str = "full",
+) -> None:
     runtime_dir = run_dir / "runtime"
     _log(f"managed runtime staging 시작: {runtime_dir}")
     staged = stage_runtime_files(preset, runtime_dir)
     _log("managed runtime 기존 컨테이너 정리 중...")
     remove_containers(DEFAULT_CONTAINER_NAMES)
-    _log(f"Gemma compose 적용: {staged['gemma']['compose_path']}")
-    run_command(
-        ["docker", "compose", "-f", staged["gemma"]["compose_path"], "up", "-d", "--force-recreate"],
-        cwd=runtime_dir / "gemma",
-    )
+    if runtime_services != "ocr-only":
+        _log(f"Gemma compose 적용: {staged['gemma']['compose_path']}")
+        run_command(
+            ["docker", "compose", "-f", staged["gemma"]["compose_path"], "up", "-d", "--force-recreate"],
+            cwd=runtime_dir / "gemma",
+        )
     _log(f"OCR compose 적용: {staged['ocr']['compose_path']}")
     run_command(
         ["docker", "compose", "-f", staged["ocr"]["compose_path"], "up", "-d", "--force-recreate"],
         cwd=runtime_dir / "ocr",
     )
     _log("managed runtime health-check 대기 중...")
-    _wait_for_url("http://127.0.0.1:18080/health")
-    _wait_for_url("http://127.0.0.1:18000/v1/models")
-    _wait_for_url("http://127.0.0.1:28118/docs")
+    health_urls = OCR_ONLY_HEALTH_URLS if runtime_services == "ocr-only" else FULL_RUNTIME_HEALTH_URLS
+    for url in health_urls:
+        _wait_for_url(url)
     _log("managed runtime health-check 완료")
 
 
@@ -347,9 +360,16 @@ def _run_single_mode(
     source_lang: str,
     target_lang: str,
     image_paths: list[Path],
+    stage_ceiling: str,
 ) -> dict[str, object]:
     os.environ["CT_BENCH_OUTPUT_DIR"] = str(run_dir)
     gemma_env_snapshot = _apply_gemma_env(preset.get("gemma", {}))
+    benchmark_env_snapshot = {
+        "CT_BENCH_STAGE_CEILING": os.environ.get("CT_BENCH_STAGE_CEILING"),
+        "CT_BENCH_EXECUTION_SCOPE": os.environ.get("CT_BENCH_EXECUTION_SCOPE"),
+    }
+    os.environ["CT_BENCH_STAGE_CEILING"] = stage_ceiling
+    os.environ["CT_BENCH_EXECUTION_SCOPE"] = "detect-ocr-only" if stage_ceiling == "ocr" else "full-pipeline"
     try:
         _log(
             "실행 시작: mode={mode} output={run_dir} images={count} source={source} target={target}".format(
@@ -424,6 +444,7 @@ def _run_single_mode(
                 _restore_settings(settings_backup)
     finally:
         _restore_env(gemma_env_snapshot)
+        _restore_env(benchmark_env_snapshot)
 
     metrics_path = run_dir / "metrics.jsonl"
     summary = summarize_metrics(metrics_path)
@@ -482,6 +503,18 @@ def main() -> int:
         "--clear-app-caches",
         action="store_true",
         help="Clear app OCR/translation caches before running the pipeline.",
+    )
+    parser.add_argument(
+        "--stage-ceiling",
+        default="render",
+        choices=("ocr", "render"),
+        help="Stop the offscreen pipeline after the given stage while treating the page as completed.",
+    )
+    parser.add_argument(
+        "--runtime-services",
+        default="full",
+        choices=("full", "ocr-only"),
+        help="Select which managed Docker services to boot for this run.",
     )
     args = parser.parse_args()
 
@@ -545,6 +578,8 @@ def main() -> int:
                     "mode": mode,
                     "repeat_index": repeat_index,
                     "runtime_mode": args.runtime_mode,
+                    "runtime_services": args.runtime_services,
+                    "stage_ceiling": args.stage_ceiling,
                     "source_lang": args.source_lang,
                     "target_lang": args.target_lang,
                     "selected_paths": [str(path) for path in selected_paths],
@@ -559,7 +594,7 @@ def main() -> int:
             _log("런타임 스냅샷 저장 완료")
 
             if args.runtime_mode == "managed":
-                _ensure_managed_runtime(run_dir, preset)
+                _ensure_managed_runtime(run_dir, preset, args.runtime_services)
                 write_snapshot_json(
                     run_dir / "docker_snapshot.json",
                     collect_runtime_snapshot(DEFAULT_CONTAINER_NAMES),
@@ -582,6 +617,7 @@ def main() -> int:
                     source_lang=args.source_lang,
                     target_lang=args.target_lang,
                     image_paths=staged_paths,
+                    stage_ceiling=args.stage_ceiling,
                 )
             except RuntimeError as exc:
                 print(str(exc), file=sys.stderr)

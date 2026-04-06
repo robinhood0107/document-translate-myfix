@@ -95,6 +95,7 @@ benchmark family는 가능한 한 아래 구조를 함께 갖춥니다.
 - 실제 실행 범위
 - 공식 점수 범위
 - 합격/탈락 게이트
+- 필요하면 generic stage ceiling으로 공식 suite의 실행 범위를 해당 stage까지만 줄일 수 있음
 
 ## benchmark 결과를 `develop`로 반영하는 절차
 
