@@ -19,6 +19,10 @@
 <context>
     <name>ComicTranslate</name>
     <message>
+        <source>PaddleOCR VL Settings</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
         <source>Error</source>
         <translation>エラー</translation>
     </message>
@@ -277,9 +281,53 @@ If responses are truncated, lower Chunk Size or increase LLAMA_CTX_SIZE in docke
     </message>
     <message>
         <source>Recommended starting values for the included Gemma Docker setup:
-- Chunk Size: 4
+- Chunk Size: 6
 - Max Completion Tokens: 512
 - Request Timeout: 180 seconds</source>
+        <translation type="unfinished"></translation>
+    </message>
+</context>
+<context>
+    <name>HunyuanOCRPage</name>
+    <message>
+        <source>HunyuanOCR Settings</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Connect Comic Translate to your local HunyuanOCR llama.cpp server.
+This OCR engine sends cropped text regions to the OpenAI-compatible /chat/completions endpoint.
+Start the server with both the HunyuanOCR GGUF model and the matching mmproj file.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Server URL</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Hunyuan OCR Tuning</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Max Completion Tokens</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Parallel Workers</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Request Timeout (sec)</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Raw Response Log</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Recommended starting values for the included HunyuanOCR Docker setup:
+- Max Completion Tokens: 256
+- Parallel Workers: 2
+- Request Timeout: 60 seconds</source>
         <translation type="unfinished"></translation>
     </message>
 </context>
@@ -581,8 +629,13 @@ Please check your internet connection.</source>
 インターネット接続を確認してください。</translation>
     </message>
     <message>
-        <source>Unable to reach the local PaddleOCR VL service.
-Check Settings &gt; PaddleOCR VL Settings and make sure the Docker service is running.</source>
+        <source>The local {service} service returned an invalid response.
+Check Settings &gt; {settings_page} and review the local service logs.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Unable to reach the local {service} service.
+Check Settings &gt; {settings_page} and make sure the local service is running.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
@@ -1093,6 +1146,10 @@ Restart now?</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
+        <source>HunyuanOCR</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
         <source>Resize</source>
         <translation>サイズ変更</translation>
     </message>
@@ -1210,6 +1267,10 @@ Restart now?</source>
     </message>
     <message>
         <source>PaddleOCR VL Settings</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>HunyuanOCR Settings</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
@@ -1763,6 +1824,10 @@ It may have been moved, renamed, or deleted.
         <translation type="unfinished"></translation>
     </message>
     <message>
+        <source>HunyuanOCR</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
         <source>Default</source>
         <translation>デフォルト</translation>
     </message>
@@ -1885,6 +1950,14 @@ It may have been moved, renamed, or deleted.
     <message>
         <source>Crop</source>
         <translation>作物</translation>
+    </message>
+    <message>
+        <source>PaddleOCR VL Settings</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>HunyuanOCR Settings</source>
+        <translation type="unfinished"></translation>
     </message>
 </context>
 <context>

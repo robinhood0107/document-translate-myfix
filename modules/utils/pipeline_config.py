@@ -84,13 +84,26 @@ def validate_ocr(main: ComicTranslate):
         return False
 
     normalized_tool = settings_page.ui.value_mappings.get(ocr_tool, ocr_tool)
-    if normalized_tool == "PaddleOCR VL":
-        paddle_settings = settings_page.get_paddleocr_vl_settings()
-        if not paddle_settings.get("server_url", "").strip():
+    if normalized_tool in {"PaddleOCR VL", "HunyuanOCR"}:
+        local_service_configs = {
+            "PaddleOCR VL": (
+                "PaddleOCR VL",
+                settings_page.ui.tr("PaddleOCR VL Settings"),
+                settings_page.get_paddleocr_vl_settings(),
+            ),
+            "HunyuanOCR": (
+                "HunyuanOCR",
+                settings_page.ui.tr("HunyuanOCR Settings"),
+                settings_page.get_hunyuan_ocr_settings(),
+            ),
+        }
+        service_name, settings_page_name, service_settings = local_service_configs[normalized_tool]
+        if not service_settings.get("server_url", "").strip():
             Messages.show_missing_local_service_config_error(
                 main,
-                "PaddleOCR VL",
+                service_name,
                 FIELD_LABELS["server_url"],
+                settings_page_name=settings_page_name,
             )
             return False
         return True

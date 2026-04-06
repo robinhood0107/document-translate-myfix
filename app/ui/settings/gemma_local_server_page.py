@@ -86,7 +86,7 @@ class GemmaLocalServerPage(QtWidgets.QWidget):
         tip = MLabel(
             self.tr(
                 "Recommended starting values for the included Gemma Docker setup:\n"
-                "- Chunk Size: 4\n"
+                "- Chunk Size: 6\n"
                 "- Max Completion Tokens: 512\n"
                 "- Request Timeout: 180 seconds"
             )

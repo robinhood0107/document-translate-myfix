@@ -26,11 +26,10 @@ docker compose up -d
 - `top_k=64`
 - `top_p=0.95`
 - `min_p=0.0`
-- `prompt_profile=gemma4_balanced`
-- `Chunk Size=4`
+- `Chunk Size=6`
 - `Max Completion Tokens=512`
 - `Request Timeout=180`
-- `response_format=json_object`
+- `response_format=json_schema`
 
 ## 현재 compose 기준값
 
@@ -45,24 +44,11 @@ docker compose up -d
 ## 참고 이미지 버전
 
 - Image tag: `local/llama.cpp:server-cuda-b8665`
-- 기반 변경: `common : add gemma 4 specialized parser (#21418)`
-- 기대 build 표기: `b8665`
-
-기본 prompt profile:
-
-```bash
-CT_GEMMA_PROMPT_PROFILE=gemma4_balanced
-```
-
-기존 프롬프트로 비교가 필요하면 아래 환경 변수를 사용합니다.
-
-```bash
-CT_GEMMA_PROMPT_PROFILE=legacy
-```
+- Pull policy: `never`
+- `llama.cpp` 계열 빌드 기준: `b8665`
 
 ## 관련 문서
 
-- [profiles-ko.md](./profiles-ko.md)
-- [translation-optimization-ko.md](./translation-optimization-ko.md)
-- [resource-strategy-ko.md](../benchmark/resource-strategy-ko.md)
-- [workflow-ko.md](../benchmark/workflow-ko.md)
+- [README.md](../../paddleocr_vl_docker_files/README.md)
+
+벤치마크 preset, 보고서, 차트, 실험 문서는 제품 브랜치가 아니라 `benchmarking/lab` 브랜치에서만 관리합니다.

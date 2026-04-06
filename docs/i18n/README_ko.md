@@ -146,6 +146,7 @@ raise RarCannotExec("Cannot find working tool")
 * Gemini 2.0 Flash
 * Microsoft Azure Vision
 * PaddleOCR VL (로컬 Docker `/layout-parsing` 서비스)
+* HunyuanOCR (로컬 `llama.cpp` `/v1/chat/completions` 서비스)
 
 ### 이미지 복원
 분할된 텍스트를 제거하기 위해

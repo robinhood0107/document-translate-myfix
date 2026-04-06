@@ -19,6 +19,10 @@
 <context>
     <name>ComicTranslate</name>
     <message>
+        <source>PaddleOCR VL Settings</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
         <source>Error</source>
         <translation>Erreur</translation>
     </message>
@@ -277,9 +281,53 @@ If responses are truncated, lower Chunk Size or increase LLAMA_CTX_SIZE in docke
     </message>
     <message>
         <source>Recommended starting values for the included Gemma Docker setup:
-- Chunk Size: 4
+- Chunk Size: 6
 - Max Completion Tokens: 512
 - Request Timeout: 180 seconds</source>
+        <translation type="unfinished"></translation>
+    </message>
+</context>
+<context>
+    <name>HunyuanOCRPage</name>
+    <message>
+        <source>HunyuanOCR Settings</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Connect Comic Translate to your local HunyuanOCR llama.cpp server.
+This OCR engine sends cropped text regions to the OpenAI-compatible /chat/completions endpoint.
+Start the server with both the HunyuanOCR GGUF model and the matching mmproj file.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Server URL</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Hunyuan OCR Tuning</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Max Completion Tokens</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Parallel Workers</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Request Timeout (sec)</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Raw Response Log</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Recommended starting values for the included HunyuanOCR Docker setup:
+- Max Completion Tokens: 256
+- Parallel Workers: 2
+- Request Timeout: 60 seconds</source>
         <translation type="unfinished"></translation>
     </message>
 </context>
@@ -534,11 +582,6 @@ Please select a different tool in Settings.</source>
 Veuillez sélectionner un autre outil dans les Paramètres.</translation>
     </message>
     <message>
-        <source>Unable to reach the local PaddleOCR VL service.
-Check Settings &gt; PaddleOCR VL Settings and make sure the Docker service is running.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
         <source>{0} image(s) were skipped in this batch.
 Open Batch Report to see all skipped images and reasons.</source>
         <translation>{0} image(s) ignorée(s) dans ce lot.
@@ -549,6 +592,16 @@ Ouvrez le Rapport de lot pour voir toutes les images ignorées et les raisons.</
 Please try a different Text Recognition tool.</source>
         <translation>Reconnaissance de texte bloquée : Le fournisseur IA a signalé ce contenu.
 Veuillez essayer un outil de reconnaissance de texte différent.</translation>
+    </message>
+    <message>
+        <source>The local {service} service returned an invalid response.
+Check Settings &gt; {settings_page} and review the local service logs.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Unable to reach the local {service} service.
+Check Settings &gt; {settings_page} and make sure the local service is running.</source>
+        <translation type="unfinished"></translation>
     </message>
     <message>
         <source>Translation blocked: The AI provider flagged this content.
@@ -1105,6 +1158,10 @@ Redémarrer maintenant ?</translation>
         <translation type="unfinished"></translation>
     </message>
     <message>
+        <source>HunyuanOCR</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
         <source>Original</source>
         <translation>Original</translation>
     </message>
@@ -1158,6 +1215,10 @@ Redémarrer maintenant ?</translation>
     </message>
     <message>
         <source>PaddleOCR VL Settings</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>HunyuanOCR Settings</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
@@ -1762,6 +1823,10 @@ Il a peut-être été déplacé, renommé ou supprimé.
         <translation type="unfinished"></translation>
     </message>
     <message>
+        <source>HunyuanOCR</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
         <source>Default</source>
         <translation>Par défaut</translation>
     </message>
@@ -1884,6 +1949,14 @@ Il a peut-être été déplacé, renommé ou supprimé.
     <message>
         <source>Crop</source>
         <translation>Rogner</translation>
+    </message>
+    <message>
+        <source>PaddleOCR VL Settings</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>HunyuanOCR Settings</source>
+        <translation type="unfinished"></translation>
     </message>
 </context>
 <context>
