@@ -23,12 +23,26 @@ The goal of this fork is to make the local Gemma + OCR runtime path practical an
   - `paddleocr-server=cpu`, `paddleocr-vllm=gpu`
 
 ## Quick Start
-### App
-Run the app from your prepared environment.
+### Windows setup
+Run the setup script once to create or update both Windows environments.
 
 ```bash
-uv run comic.py
+setup.bat
 ```
+
+After that:
+
+- `run_comic.bat` uses `.venv-win`
+- `run_comic_cuda13.bat` uses `.venv-win-cuda13`
+
+If you only want one environment:
+
+```bash
+setup.bat win
+setup.bat cuda13
+```
+
+`cuda13` mode expects NVIDIA CUDA Toolkit v13.1 to already be installed.
 
 ## Docs Map
 ### Gemma
