@@ -23,6 +23,21 @@ FORBIDDEN_TRACKED_PREFIXES = (
 FORBIDDEN_TRACKED_NAMES = {
     ".DS_Store",
 }
+BENCHMARK_ONLY_PREFIXES = (
+    "benchmarks/",
+    "docs/benchmark/",
+    "docs/banchmark_report/",
+    "docs/assets/benchmarking/",
+)
+BENCHMARK_ONLY_FILE_PATTERNS = (
+    re.compile(r"^scripts/benchmark_[^/]+$"),
+    re.compile(r"^scripts/generate_benchmark_report\.py$"),
+    re.compile(r"^scripts/generate_paddleocr_vl15_report\.py$"),
+    re.compile(r"^scripts/summarize_benchmarks\.py$"),
+    re.compile(r"^scripts/compare_translation_exports\.py$"),
+    re.compile(r"^scripts/apply_benchmark_preset\.py$"),
+    re.compile(r"^scripts/paddleocr_vl15_[^/]+$"),
+)
 
 
 def git_lines(args: list[str]) -> list[str]:
@@ -84,6 +99,25 @@ def validate_tracked_paths() -> list[str]:
     return errors
 
 
+def validate_benchmark_asset_placement(branch: str) -> list[str]:
+    if BENCHMARK_BRANCH_RE.match(branch):
+        return []
+
+    errors: list[str] = []
+    for path in git_lines(["ls-files"]):
+        normalized = path.replace("\\", "/")
+        if any(normalized.startswith(prefix) for prefix in BENCHMARK_ONLY_PREFIXES):
+            errors.append(
+                f"Benchmark-only asset tracked outside benchmarking/lab: {normalized}"
+            )
+            continue
+        if any(pattern.match(normalized) for pattern in BENCHMARK_ONLY_FILE_PATTERNS):
+            errors.append(
+                f"Benchmark-only script tracked outside benchmarking/lab: {normalized}"
+            )
+    return errors
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Validate repo branch and tracked-file policy.")
     parser.add_argument("--mode", choices=("commit", "push", "ci"), default="ci")
@@ -94,6 +128,7 @@ def main() -> int:
     errors = []
     errors.extend(validate_branch(branch, args.mode))
     errors.extend(validate_tracked_paths())
+    errors.extend(validate_benchmark_asset_placement(branch))
 
     if errors:
         for error in errors:
