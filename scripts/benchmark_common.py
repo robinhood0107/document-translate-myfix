@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import math
 import os
 import shutil
 import subprocess
@@ -33,7 +34,10 @@ EXCLUDED_SAMPLE_PARENT_NAMES = {
     "cleaned_images",
     "ocr_debugs",
 }
-PRESET_DIR = ROOT / "benchmarks" / "presets"
+PRESET_DIRS = [
+    ROOT / "benchmarks" / "presets",
+    ROOT / "benchmarks" / "paddleocr_vl15" / "presets",
+]
 OCR_BUNDLE_DIR = ROOT / "paddleocr_vl_docker_files"
 ROOT_GEMMA_COMPOSE = ROOT / "docker-compose.yaml"
 DEFAULT_CONTAINER_NAMES = [
@@ -115,10 +119,13 @@ def _python3_yaml_dump(path: Path, payload: dict[str, Any]) -> None:
 def load_preset(preset: str) -> tuple[dict[str, Any], Path]:
     candidate = Path(preset)
     if not candidate.is_file():
-        for suffix in (".json", ".yml", ".yaml"):
-            test_path = PRESET_DIR / f"{preset}{suffix}"
-            if test_path.is_file():
-                candidate = test_path
+        for preset_dir in PRESET_DIRS:
+            for suffix in (".json", ".yml", ".yaml"):
+                test_path = preset_dir / f"{preset}{suffix}"
+                if test_path.is_file():
+                    candidate = test_path
+                    break
+            if candidate.is_file():
                 break
     if not candidate.is_file():
         raise FileNotFoundError(f"Unable to find preset: {preset}")
@@ -243,10 +250,20 @@ def _stage_ocr_runtime(preset: dict[str, Any], runtime_dir: Path) -> dict[str, A
     compose = _python3_yaml_load(OCR_BUNDLE_DIR / "docker-compose.yaml")
     ocr_runtime = preset.get("ocr_runtime", {})
     front_device = str(ocr_runtime.get("front_device", "gpu:0"))
+    use_hpip = bool(ocr_runtime.get("use_hpip", False))
 
     layout_service = compose["services"]["paddleocr-layout"]
+    if ocr_runtime.get("layout_image"):
+        layout_service["image"] = str(ocr_runtime["layout_image"])
     layout_command = str(layout_service.get("command") or "")
     layout_service["command"] = layout_command.replace("--device gpu:0", f"--device {front_device}")
+    layout_command = str(layout_service.get("command") or "")
+    if use_hpip:
+        if "--use_hpip" not in layout_command:
+            layout_command = layout_command.rstrip() + " --use_hpip"
+    else:
+        layout_command = layout_command.replace(" --use_hpip", "").replace("--use_hpip", "")
+    layout_service["command"] = layout_command
     if front_device == "cpu":
         layout_service.pop("gpus", None)
     else:
@@ -256,6 +273,13 @@ def _stage_ocr_runtime(preset: dict[str, Any], runtime_dir: Path) -> dict[str, A
     _python3_yaml_dump(compose_path, compose)
 
     pipeline_conf = _python3_yaml_load(OCR_BUNDLE_DIR / "pipeline_conf.yaml")
+    vl_genai_config = (
+        pipeline_conf.setdefault("SubModules", {})
+        .setdefault("VLRecognition", {})
+        .setdefault("genai_config", {})
+    )
+    if "max_concurrency" in ocr_runtime:
+        vl_genai_config["max_concurrency"] = int(ocr_runtime["max_concurrency"])
     pipeline_path = runtime_dir / "pipeline_conf.yaml"
     _python3_yaml_dump(pipeline_path, pipeline_conf)
 
@@ -389,6 +413,7 @@ def summarize_metrics(metrics_path: str | Path) -> dict[str, Any]:
         "ocr_total_block_count": 0,
         "ocr_empty_block_count": 0,
         "ocr_low_quality_block_count": 0,
+        "ocr_cache_hit_count": 0,
     }
 
     for row in rows:
@@ -426,16 +451,23 @@ def summarize_metrics(metrics_path: str | Path) -> dict[str, Any]:
             value = row.get(key)
             if isinstance(value, (int, float)):
                 counters[key] += int(value)
+        if tag == "ocr_end" and str(row.get("cache_status", "") or "").lower() == "hit":
+            counters["ocr_cache_hit_count"] += 1
 
     stage_stats = {}
     for stage, values in sorted(stage_durations.items()):
         if not values:
             continue
         ordered = sorted(values)
+        def percentile(p: float) -> float:
+            rank = max(0, min(len(ordered) - 1, math.ceil(len(ordered) * p) - 1))
+            return ordered[rank]
         stage_stats[stage] = {
             "count": len(values),
             "total_sec": round(sum(values), 3),
             "median_sec": round(ordered[len(ordered) // 2], 3),
+            "p95_sec": round(percentile(0.95), 3),
+            "p99_sec": round(percentile(0.99), 3),
             "max_sec": round(max(values), 3),
         }
 
@@ -458,7 +490,17 @@ def summarize_metrics(metrics_path: str | Path) -> dict[str, Any]:
         "gpu_floor_free_mb": min(free_values) if free_values else None,
         "gpu_peak_util_percent": max(gpu_util_values) if gpu_util_values else None,
         "gpu_peak_mem_util_percent": max(mem_util_values) if mem_util_values else None,
+        "detect_total_sec": stage_stats.get("detect", {}).get("total_sec"),
+        "ocr_total_sec": stage_stats.get("ocr", {}).get("total_sec"),
+        "detect_ocr_total_sec": round(
+            float(stage_stats.get("detect", {}).get("total_sec") or 0.0)
+            + float(stage_stats.get("ocr", {}).get("total_sec") or 0.0),
+            3,
+        ),
         "ocr_median_sec": stage_stats.get("ocr", {}).get("median_sec"),
+        "ocr_page_p50_sec": stage_stats.get("ocr", {}).get("median_sec"),
+        "ocr_page_p95_sec": stage_stats.get("ocr", {}).get("p95_sec"),
+        "ocr_page_p99_sec": stage_stats.get("ocr", {}).get("p99_sec"),
         "translate_median_sec": stage_stats.get("translate", {}).get("median_sec"),
         "inpaint_median_sec": stage_stats.get("inpaint", {}).get("median_sec"),
         "gemma_json_retry_count": counters["gemma_json_retry_count"],
@@ -471,6 +513,7 @@ def summarize_metrics(metrics_path: str | Path) -> dict[str, Any]:
         "ocr_total_block_count": counters["ocr_total_block_count"],
         "ocr_empty_block_count": counters["ocr_empty_block_count"],
         "ocr_low_quality_block_count": counters["ocr_low_quality_block_count"],
+        "ocr_cache_hit_count": counters["ocr_cache_hit_count"],
         "ocr_empty_rate": ocr_empty_rate,
         "ocr_low_quality_rate": ocr_low_quality_rate,
     }
@@ -488,7 +531,12 @@ def render_summary_markdown(summary: dict[str, Any]) -> str:
         f"- gpu_peak_used_mb: `{summary.get('gpu_peak_used_mb')}`",
         f"- gpu_floor_free_mb: `{summary.get('gpu_floor_free_mb')}`",
         f"- gpu_peak_util_percent: `{summary.get('gpu_peak_util_percent')}`",
+        f"- detect_total_sec: `{summary.get('detect_total_sec')}`",
+        f"- ocr_total_sec: `{summary.get('ocr_total_sec')}`",
+        f"- detect_ocr_total_sec: `{summary.get('detect_ocr_total_sec')}`",
         f"- ocr_median_sec: `{summary.get('ocr_median_sec')}`",
+        f"- ocr_page_p95_sec: `{summary.get('ocr_page_p95_sec')}`",
+        f"- ocr_page_p99_sec: `{summary.get('ocr_page_p99_sec')}`",
         f"- translate_median_sec: `{summary.get('translate_median_sec')}`",
         f"- inpaint_median_sec: `{summary.get('inpaint_median_sec')}`",
         f"- gemma_json_retry_count: `{summary.get('gemma_json_retry_count')}`",
@@ -501,17 +549,18 @@ def render_summary_markdown(summary: dict[str, Any]) -> str:
         f"- ocr_total_block_count: `{summary.get('ocr_total_block_count')}`",
         f"- ocr_empty_block_count: `{summary.get('ocr_empty_block_count')}`",
         f"- ocr_low_quality_block_count: `{summary.get('ocr_low_quality_block_count')}`",
+        f"- ocr_cache_hit_count: `{summary.get('ocr_cache_hit_count')}`",
         f"- ocr_empty_rate: `{summary.get('ocr_empty_rate')}`",
         f"- ocr_low_quality_rate: `{summary.get('ocr_low_quality_rate')}`",
         "",
         "## Stage Stats",
         "",
-        "| stage | count | total_sec | median_sec | max_sec |",
-        "| --- | --- | --- | --- | --- |",
+        "| stage | count | total_sec | median_sec | p95_sec | p99_sec | max_sec |",
+        "| --- | --- | --- | --- | --- | --- | --- |",
     ]
     for stage, payload in summary.get("stage_stats", {}).items():
         lines.append(
-            f"| {stage} | {payload.get('count')} | {payload.get('total_sec')} | {payload.get('median_sec')} | {payload.get('max_sec')} |"
+            f"| {stage} | {payload.get('count')} | {payload.get('total_sec')} | {payload.get('median_sec')} | {payload.get('p95_sec')} | {payload.get('p99_sec')} | {payload.get('max_sec')} |"
         )
 
     lines.extend(
