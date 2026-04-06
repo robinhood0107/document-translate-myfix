@@ -26,10 +26,10 @@ docker compose up -d
 - `top_k=64`
 - `top_p=0.95`
 - `min_p=0.0`
-- `Chunk Size=4`
+- `Chunk Size=6`
 - `Max Completion Tokens=512`
 - `Request Timeout=180`
-- `response_format=json_object`
+- `response_format=json_schema`
 
 ## 현재 compose 기준값
 
@@ -43,18 +43,12 @@ docker compose up -d
 
 ## 참고 이미지 버전
 
-- Image tag: `ghcr.io/ggml-org/llama.cpp:server-cuda`
-- Digest: `ghcr.io/ggml-org/llama.cpp@sha256:0d60155f9cbd5118d02568d90f505638259d85f6f1cc4ac98d0f1002001e1f7a`
-- `llama.cpp --version`: `8660 (d00685831)`
-
-재현용 pull:
-
-```bash
-docker pull ghcr.io/ggml-org/llama.cpp@sha256:0d60155f9cbd5118d02568d90f505638259d85f6f1cc4ac98d0f1002001e1f7a
-```
+- Image tag: `local/llama.cpp:server-cuda-b8665`
+- Pull policy: `never`
+- `llama.cpp` 계열 빌드 기준: `b8665`
 
 ## 관련 문서
 
-- [paddleocr_vl_docker_files/README.md](/mnt/c/Users/pjjpj/Desktop/openai_manga_translater/comic-translate/paddleocr_vl_docker_files/README.md)
+- [README.md](../../paddleocr_vl_docker_files/README.md)
 
 벤치마크 preset, 보고서, 차트, 실험 문서는 제품 브랜치가 아니라 `benchmarking/lab` 브랜치에서만 관리합니다.

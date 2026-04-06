@@ -44,11 +44,14 @@ benchmark 실험 결과를 바탕으로 아래 종류의 변경만 `develop` 후
 
 - 제품 기능을 실제로 바꾸는 runtime 설정 변경
   - 예: Gemma sampler 기본값, `n_gpu_layers`, OCR front device 기본값
+  - 예: Docker image/pull policy, `response_format_mode`, `response_schema_mode`, `chunk_size`, prompt profile
 - benchmark를 위해서가 아니라 제품 관측 안정성을 위해 필요한 얇은 계측 훅
   - 예: `emit_memlog(tag, **extra)` 같은 generic hook
   - 예: translator engine의 retry/truncated 통계 surface
 - 제품 사용 문서에서 실제 현재 동작을 설명하는 문구
   - 예: Gemma local server 설정값
+
+위와 같은 변경은 benchmark 결과를 근거로 했더라도 benchmark 자산이 아니라 제품 동작 변경으로 취급합니다. 따라서 `benchmarks/`, generated report, 차트, preset을 포함하지 않는 한 `develop` 대상 PR로 수용할 수 있습니다.
 
 ## `develop`로 가져오면 안 되는 파일
 
