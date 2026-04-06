@@ -4,23 +4,15 @@ setlocal
 set "SCRIPT_DIR=%~dp0"
 pushd "%SCRIPT_DIR%" >nul
 
-set "UV_CMD=uv.exe"
-where /q %UV_CMD%
-if errorlevel 1 (
-    if exist "%USERPROFILE%\.local\bin\uv.exe" (
-        set "UV_CMD=%USERPROFILE%\.local\bin\uv.exe"
-    ) else (
-        echo uv.exe was not found. Install uv or add it to PATH.
-        popd >nul
-        exit /b 1
-    )
+set "PYTHON_EXE=%SCRIPT_DIR%.venv-win\Scripts\python.exe"
+if not exist "%PYTHON_EXE%" (
+    echo Windows runtime environment not found: "%PYTHON_EXE%"
+    echo Create or repair .venv-win before running this launcher.
+    popd >nul
+    exit /b 1
 )
 
-if exist ".venv\bin\python" if not exist ".venv\Scripts\python.exe" (
-    set "UV_PROJECT_ENVIRONMENT=.venv-win"
-)
-
-"%UV_CMD%" run comic.py %*
+"%PYTHON_EXE%" comic.py %*
 set "EXITCODE=%ERRORLEVEL%"
 
 popd >nul
