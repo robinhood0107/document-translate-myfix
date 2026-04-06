@@ -54,6 +54,6 @@
 
 ## 관련 문서
 
-- [translation-optimization-ko.md](/mnt/c/Users/pjjpj/Desktop/openai_manga_translater/comic-translate/docs/gemma/translation-optimization-ko.md)
-- [optimization-journey-ko.md](/mnt/c/Users/pjjpj/Desktop/openai_manga_translater/comic-translate/docs/benchmark/optimization-journey-ko.md)
-- [report-ko.md](/mnt/c/Users/pjjpj/Desktop/openai_manga_translater/comic-translate/docs/banchmark_report/report-ko.md)
+- [translation-optimization-ko.md](./translation-optimization-ko.md)
+- [optimization-journey-ko.md](../benchmark/optimization-journey-ko.md)
+- [report-ko.md](../banchmark_report/report-ko.md)

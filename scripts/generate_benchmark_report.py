@@ -3,6 +3,9 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
+import re
+import shutil
 import sys
 from datetime import datetime
 from pathlib import Path
@@ -21,6 +24,9 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from benchmark_common import load_preset, repo_relative_str, write_json
+
+
+_MD_IMAGE_RE = re.compile(r"!\[([^\]]*)\]\(([^)]+)\)")
 
 
 def _load_yaml(path: Path) -> dict[str, Any]:
@@ -273,10 +279,75 @@ def _generated_metadata(manifest_path: Path, manifest: dict[str, Any], results_r
     }
 
 
+def _slugify(value: str) -> str:
+    slug = re.sub(r"[^a-z0-9]+", "-", value.strip().lower()).strip("-")
+    return slug or "report"
+
+
+def _markdown_relative_path(from_path: Path, target_path: Path) -> str:
+    return Path(os.path.relpath(target_path, start=from_path.parent)).as_posix()
+
+
+def _rewrite_markdown_image_links(markdown: str, report_path: Path, assets_dir: Path) -> str:
+    def replace(match: re.Match[str]) -> str:
+        alt_text, target = match.groups()
+        if target.startswith(("http://", "https://")):
+            return match.group(0)
+        candidate = assets_dir / Path(target).name
+        if not candidate.is_file():
+            return match.group(0)
+        return f"![{alt_text}]({_markdown_relative_path(report_path, candidate)})"
+
+    return _MD_IMAGE_RE.sub(replace, markdown)
+
+
+def _archive_existing_latest(meta: dict[str, Any]) -> dict[str, str] | None:
+    report_path: Path = meta["report_path"]
+    assets_dir: Path = meta["assets_dir"]
+
+    if "history" in report_path.parts:
+        return None
+    if not report_path.is_file() and not assets_dir.exists():
+        return None
+
+    history_report_root = report_path.parent / "history"
+    history_assets_root = assets_dir.parent / "history"
+    snapshot_base = f"{meta['generated_at'].strftime('%Y%m%d_%H%M%S')}_{_slugify(meta['benchmark_name'])}"
+    snapshot_id = snapshot_base
+    suffix = 2
+    while (history_report_root / snapshot_id).exists() or (history_assets_root / snapshot_id).exists():
+        snapshot_id = f"{snapshot_base}-{suffix}"
+        suffix += 1
+
+    history_report_dir = history_report_root / snapshot_id
+    history_report_path = history_report_dir / report_path.name
+    history_assets_dir = history_assets_root / snapshot_id
+
+    history_report_dir.mkdir(parents=True, exist_ok=True)
+    history_assets_root.mkdir(parents=True, exist_ok=True)
+
+    if assets_dir.is_dir():
+        shutil.copytree(assets_dir, history_assets_dir)
+    if report_path.is_file():
+        archived_markdown = _rewrite_markdown_image_links(
+            report_path.read_text(encoding="utf-8"),
+            history_report_path,
+            history_assets_dir,
+        )
+        history_report_path.write_text(archived_markdown, encoding="utf-8")
+
+    return {
+        "snapshot_id": snapshot_id,
+        "report_path": repo_relative_str(history_report_path),
+        "assets_dir": repo_relative_str(history_assets_dir),
+    }
+
+
 def _legacy_report(manifest_path: Path, manifest: dict[str, Any], results_root: Path) -> int:
     meta = _generated_metadata(manifest_path, manifest, results_root)
     report_path = meta["report_path"]
     assets_dir = meta["assets_dir"]
+    archived_previous = _archive_existing_latest(meta)
 
     baseline_one = _load_run(results_root, manifest["baseline"]["one_page"])
     baseline_batch = _load_run(results_root, manifest["baseline"]["batch"])
@@ -374,6 +445,8 @@ def _legacy_report(manifest_path: Path, manifest: dict[str, Any], results_root: 
             "quality_metrics": repo_relative_str(quality_chart_path),
         },
     }
+    if archived_previous:
+        summary_payload["archived_previous_report"] = archived_previous
     write_json(assets_dir / "report_summary.json", summary_payload)
 
     report_lines = [
@@ -431,7 +504,7 @@ def _legacy_report(manifest_path: Path, manifest: dict[str, Any], results_root: 
             ],
         ),
         "",
-        f"![Batch Elapsed](/mnt/c/Users/pjjpj/Desktop/openai_manga_translater/comic-translate/docs/assets/benchmarking/latest/{batch_chart_path.name})",
+        f"![Batch Elapsed]({_markdown_relative_path(report_path, batch_chart_path)})",
         "",
         "## `n_gpu_layers` Sweep",
         "",
@@ -440,7 +513,7 @@ def _legacy_report(manifest_path: Path, manifest: dict[str, Any], results_root: 
             ["preset", "n_gpu_layers", "elapsed_sec", "translate_median_sec", "ocr_median_sec", "run_dir_rel"],
         ),
         "",
-        f"![n_gpu_layers](/mnt/c/Users/pjjpj/Desktop/openai_manga_translater/comic-translate/docs/assets/benchmarking/latest/{ngl_chart_path.name})",
+        f"![n_gpu_layers]({_markdown_relative_path(report_path, ngl_chart_path)})",
         "",
         "## `temperature` Sweep",
         "",
@@ -449,7 +522,7 @@ def _legacy_report(manifest_path: Path, manifest: dict[str, Any], results_root: 
             ["preset", "temperature", "elapsed_sec", "translate_median_sec", "ocr_median_sec", "run_dir_rel"],
         ),
         "",
-        f"![temperature](/mnt/c/Users/pjjpj/Desktop/openai_manga_translater/comic-translate/docs/assets/benchmarking/latest/{temp_chart_path.name})",
+        f"![temperature]({_markdown_relative_path(report_path, temp_chart_path)})",
         "",
         "## 품질 지표 비교",
         "",
@@ -458,7 +531,7 @@ def _legacy_report(manifest_path: Path, manifest: dict[str, Any], results_root: 
             ["preset", "gemma_json_retry_count", "gemma_truncated_count", "ocr_empty_rate", "ocr_low_quality_rate", "audit_passed"],
         ),
         "",
-        f"![quality](/mnt/c/Users/pjjpj/Desktop/openai_manga_translater/comic-translate/docs/assets/benchmarking/latest/{quality_chart_path.name})",
+        f"![quality]({_markdown_relative_path(report_path, quality_chart_path)})",
         "",
     ]
     report_path.parent.mkdir(parents=True, exist_ok=True)
@@ -472,6 +545,7 @@ def _b8665_report(manifest_path: Path, manifest: dict[str, Any], results_root: P
     meta = _generated_metadata(manifest_path, manifest, results_root)
     report_path = meta["report_path"]
     assets_dir = meta["assets_dir"]
+    archived_previous = _archive_existing_latest(meta)
     verification = manifest.get("verification", {}) if isinstance(manifest.get("verification"), dict) else {}
     verification_checks = verification.get("checks", {}) if isinstance(verification.get("checks"), dict) else {}
 
@@ -674,6 +748,8 @@ def _b8665_report(manifest_path: Path, manifest: dict[str, Any], results_root: P
             "quality_metrics": repo_relative_str(quality_chart_path) if quality_chart_path.is_file() else "",
         },
     }
+    if archived_previous:
+        summary_payload["archived_previous_report"] = archived_previous
     write_json(assets_dir / "report_summary.json", summary_payload)
 
     report_lines = [
@@ -750,7 +826,7 @@ def _b8665_report(manifest_path: Path, manifest: dict[str, Any], results_root: P
         )
         if control_chart_path.is_file():
             report_lines.append(
-                f"![control](/mnt/c/Users/pjjpj/Desktop/openai_manga_translater/comic-translate/docs/assets/benchmarking/latest/{control_chart_path.name})"
+                f"![control]({_markdown_relative_path(report_path, control_chart_path)})"
             )
             report_lines.append("")
     else:
@@ -829,7 +905,7 @@ def _b8665_report(manifest_path: Path, manifest: dict[str, Any], results_root: P
         )
         if chunk_chart_path.is_file():
             report_lines.append(
-                f"![chunk](/mnt/c/Users/pjjpj/Desktop/openai_manga_translater/comic-translate/docs/assets/benchmarking/latest/{chunk_chart_path.name})"
+                f"![chunk]({_markdown_relative_path(report_path, chunk_chart_path)})"
             )
             report_lines.append("")
     else:
@@ -866,7 +942,7 @@ def _b8665_report(manifest_path: Path, manifest: dict[str, Any], results_root: P
         )
         if temp_chart_path.is_file():
             report_lines.append(
-                f"![temperature](/mnt/c/Users/pjjpj/Desktop/openai_manga_translater/comic-translate/docs/assets/benchmarking/latest/{temp_chart_path.name})"
+                f"![temperature]({_markdown_relative_path(report_path, temp_chart_path)})"
             )
             report_lines.append("")
     else:
@@ -903,7 +979,7 @@ def _b8665_report(manifest_path: Path, manifest: dict[str, Any], results_root: P
         )
         if ngl_chart_path.is_file():
             report_lines.append(
-                f"![ngl](/mnt/c/Users/pjjpj/Desktop/openai_manga_translater/comic-translate/docs/assets/benchmarking/latest/{ngl_chart_path.name})"
+                f"![ngl]({_markdown_relative_path(report_path, ngl_chart_path)})"
             )
             report_lines.append("")
     else:
@@ -944,7 +1020,7 @@ def _b8665_report(manifest_path: Path, manifest: dict[str, Any], results_root: P
         )
         if quality_chart_path.is_file():
             report_lines.append(
-                f"![quality](/mnt/c/Users/pjjpj/Desktop/openai_manga_translater/comic-translate/docs/assets/benchmarking/latest/{quality_chart_path.name})"
+                f"![quality]({_markdown_relative_path(report_path, quality_chart_path)})"
             )
             report_lines.append("")
     else:

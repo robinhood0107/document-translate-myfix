@@ -4,7 +4,7 @@
 
 ## 보고서 메타데이터
 
-- 생성 시각: `2026-04-06 13:09:02 대한민국 표준시`
+- 생성 시각: `2026-04-06 10:14:05 대한민국 표준시`
 - 벤치마킹 이름: `b8665 Gemma 4 Parser Translation Optimization`
 - 벤치마킹 종류: `managed benchmark sweep`
 - 벤치마킹 범위: `old-image vs b8665, json_object vs json_schema, chunk_size sweep, temperature sweep, n_gpu_layers sweep`
@@ -37,7 +37,7 @@
 | old image baseline | translation-old-image-baseline | json_object | local/llama.cpp:server-cuda-pre-b8665 | 1009.577 | 10.959 | 1 | 0 | 1 | ./banchmark_result_log/20260406_054332_b8665-gemma4_suite/02_old_image_batch |
 | b8665 json_object | b8665-object-control | json_object | local/llama.cpp:server-cuda-b8665 | 1054.138 | 12.663 | 1 | 0 | 1 | ./banchmark_result_log/20260406_054332_b8665-gemma4_suite/04_b8665_object_batch |
 
-![control](../assets/benchmarking/latest/b8665_control_elapsed_comparison.png)
+![control](../../../assets/benchmarking/history/20260406_130902_b8665-gemma-4-parser-translation-optimization/b8665_control_elapsed_comparison.png)
 
 ## Representative Batch Finalists
 
@@ -62,7 +62,7 @@
 | b8665-schema-ch5-t06-ngl23 | 5 | 40.350 | 12.104 | 0 | 0 | ./banchmark_result_log/20260406_054332_b8665-gemma4_suite/07_chunk_schema_ch5_one_page |
 | b8665-schema-ch6-t06-ngl23 | 6 | 40.179 | 11.446 | 0 | 0 | ./banchmark_result_log/20260406_054332_b8665-gemma4_suite/07_chunk_schema_ch6_one_page |
 
-![chunk](../assets/benchmarking/latest/b8665_chunk_translate_median.png)
+![chunk](../../../assets/benchmarking/history/20260406_130902_b8665-gemma-4-parser-translation-optimization/b8665_chunk_translate_median.png)
 
 ## Temperature Sweep
 
@@ -75,7 +75,7 @@
 | b8665-schema-ch6-t07-ngl23 | 0.700 | 38.341 | 11.362 | 0 | 0 | ./banchmark_result_log/20260406_054332_b8665-gemma4_suite/20_temp_schema_t07_one_page |
 | b8665-schema-ch6-t08-ngl23 | 0.800 | 37.659 | 11.015 | 0 | 0 | ./banchmark_result_log/20260406_054332_b8665-gemma4_suite/20_temp_schema_t08_one_page |
 
-![temperature](../assets/benchmarking/latest/b8665_temperature_translate_median.png)
+![temperature](../../../assets/benchmarking/history/20260406_130902_b8665-gemma-4-parser-translation-optimization/b8665_temperature_translate_median.png)
 
 ## n_gpu_layers Sweep
 
@@ -85,7 +85,7 @@
 | b8665-schema-ch6-t06-ngl24 | 24 | 47.673 | 15.179 | 0 | 0 | ./banchmark_result_log/20260406_054332_b8665-gemma4_suite/30_ngl_24_one_page |
 | b8665-schema-ch6-t06-ngl25 | 25 | 44.013 | 14.743 | 0 | 0 | ./banchmark_result_log/20260406_054332_b8665-gemma4_suite/30_ngl_25_one_page |
 
-![ngl](../assets/benchmarking/latest/b8665_n_gpu_layers_translate_median.png)
+![ngl](../../../assets/benchmarking/history/20260406_130902_b8665-gemma-4-parser-translation-optimization/b8665_n_gpu_layers_translate_median.png)
 
 ## 품질 지표 비교
 
@@ -102,4 +102,4 @@
 | b8665-object-control | 1 | 0 | 1 | 0 | 0 | 0.000 | 0.040 | True |
 | b8665-schema-ch6-t055-ngl23 | 0 | 0 | 3 | 0 | 0 | 0.000 | 0.040 | True |
 
-![quality](../assets/benchmarking/latest/b8665_quality_metrics_comparison.png)
+![quality](../../../assets/benchmarking/history/20260406_130902_b8665-gemma-4-parser-translation-optimization/b8665_quality_metrics_comparison.png)

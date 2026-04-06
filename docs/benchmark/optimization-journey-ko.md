@@ -65,4 +65,4 @@ one-page 기준으로 `20 -> 24`를 먼저 스크리닝했습니다.
 - `ctx=4096`
 - `paddleocr-server=cpu`
 
-최신 수치와 비교 차트는 [report-ko.md](/mnt/c/Users/pjjpj/Desktop/openai_manga_translater/comic-translate/docs/banchmark_report/report-ko.md)에서 봅니다.
+최신 수치와 비교 차트는 [report-ko.md](../banchmark_report/report-ko.md)에서 봅니다.

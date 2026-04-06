@@ -62,7 +62,7 @@ CT_GEMMA_PROMPT_PROFILE=legacy
 
 ## 관련 문서
 
-- [profiles-ko.md](/mnt/c/Users/pjjpj/Desktop/openai_manga_translater/comic-translate/docs/gemma/profiles-ko.md)
-- [translation-optimization-ko.md](/mnt/c/Users/pjjpj/Desktop/openai_manga_translater/comic-translate/docs/gemma/translation-optimization-ko.md)
-- [resource-strategy-ko.md](/mnt/c/Users/pjjpj/Desktop/openai_manga_translater/comic-translate/docs/benchmark/resource-strategy-ko.md)
-- [workflow-ko.md](/mnt/c/Users/pjjpj/Desktop/openai_manga_translater/comic-translate/docs/benchmark/workflow-ko.md)
+- [profiles-ko.md](./profiles-ko.md)
+- [translation-optimization-ko.md](./translation-optimization-ko.md)
+- [resource-strategy-ko.md](../benchmark/resource-strategy-ko.md)
+- [workflow-ko.md](../benchmark/workflow-ko.md)
