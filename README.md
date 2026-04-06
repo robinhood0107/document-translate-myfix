@@ -36,6 +36,7 @@ uv run comic.py
 
 ### OCR / Runtime
 - OCR Docker bundle: [paddleocr_vl_docker_files/README.md](/mnt/c/Users/pjjpj/Desktop/openai_manga_translater/comic-translate/paddleocr_vl_docker_files/README.md)
+- PaddleOCR VL 1.5 speed plan: [paddleocr-vl-15-speed-plan-ko.md](/mnt/c/Users/pjjpj/Desktop/openai_manga_translater/comic-translate/docs/ocr/paddleocr-vl-15-speed-plan-ko.md)
 - HunyuanOCR runtime bundle: [hunyuanocr_docker_files/README.md](/mnt/c/Users/pjjpj/Desktop/openai_manga_translater/comic-translate/hunyuanocr_docker_files/README.md)
 - HunyuanOCR setup guide: [local-server-ko.md](/mnt/c/Users/pjjpj/Desktop/openai_manga_translater/comic-translate/docs/hunyuan/local-server-ko.md)
 

@@ -20,9 +20,11 @@
 
 ## 현재 기준 요약
 
+- 관련 분석 메모: [docs/ocr/paddleocr-vl-15-speed-plan-ko.md](/mnt/c/Users/pjjpj/Desktop/openai_manga_translater/comic-translate/docs/ocr/paddleocr-vl-15-speed-plan-ko.md)
+
 - `paddleocr-server`
   - `/layout-parsing` 프런트 서비스
-  - 현재 compose 기준 `--device gpu:0`
+  - 현재 compose 기준 `--device cpu`
 - `paddleocr-vllm`
   - 실제 VL 모델 추론 백엔드
   - `gpu_memory_utilization: 0.84`
