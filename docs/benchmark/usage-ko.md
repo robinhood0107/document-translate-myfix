@@ -74,6 +74,21 @@
 
 실전에서는 `translate_median_sec`, `gemma_truncated_count`, `gemma_missing_key_count`를 같이 봐야 합니다. 속도만 빠르고 structured output이 흔들리면 채택하면 안 됩니다.
 
+## `b8665` 라운드 해석 포인트
+
+`b8665` full suite는 아래 순서로 읽으면 됩니다.
+
+1. `Gemma 4 verification`가 PASS인지 확인
+2. old image / `b8665` object / `b8665` schema control 비교
+3. format winner 기준 `chunk_size` sweep 결과 확인
+4. chunk winner 기준 `temperature` coarse/fine sweep 확인
+5. 최종 `n_gpu_layers` winner 확인
+
+이번 라운드에서 old-image 통제군은 떠 있는 `ghcr` 태그가 아니라 고정 태그를 사용합니다.
+
+- `translation-old-image-baseline`: `local/llama.cpp:server-cuda-pre-b8665`
+- `b8665-*`: `local/llama.cpp:server-cuda-b8665`
+
 ## 관련 문서
 
 - [workflow-ko.md](/mnt/c/Users/pjjpj/Desktop/openai_manga_translater/comic-translate/docs/benchmark/workflow-ko.md)

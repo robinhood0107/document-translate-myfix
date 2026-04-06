@@ -56,6 +56,57 @@ def _load_run(root: Path, run_name: str) -> dict[str, Any]:
     }
 
 
+def _iter_manifest_run_names(manifest: dict[str, Any]) -> list[str]:
+    names: list[str] = []
+
+    def add_name(value: Any) -> None:
+        if isinstance(value, str) and value and value not in names:
+            names.append(value)
+
+    baseline = manifest.get("baseline")
+    if isinstance(baseline, dict):
+        add_name(baseline.get("one_page"))
+        add_name(baseline.get("batch"))
+
+    for section_name in ("controls", "chunk_sweep", "temperature_sweep", "n_gpu_layers_sweep"):
+        section = manifest.get(section_name)
+        if not isinstance(section, list):
+            continue
+        for item in section:
+            if not isinstance(item, dict):
+                continue
+            add_name(item.get("one_page"))
+            add_name(item.get("batch"))
+
+    finalists = manifest.get("batch_finalists")
+    if isinstance(finalists, list):
+        for item in finalists:
+            add_name(item)
+
+    return names
+
+
+def _resolve_results_root(
+    manifest_path: Path,
+    manifest: dict[str, Any],
+    explicit_results_root: str,
+) -> Path:
+    if explicit_results_root:
+        return Path(explicit_results_root)
+
+    configured_root = ROOT / str(manifest.get("results_root", "banchmark_result_log"))
+    sibling_root = manifest_path.parent
+    run_names = _iter_manifest_run_names(manifest)
+
+    for run_name in run_names:
+        if (sibling_root / run_name / "summary.json").is_file():
+            return sibling_root
+        if (configured_root / run_name / "summary.json").is_file():
+            return configured_root
+
+    return sibling_root if sibling_root.is_dir() else configured_root
+
+
 def _run_row(
     label: str,
     preset: str,
@@ -183,6 +234,24 @@ def _winner_summary(finalists: pd.DataFrame) -> tuple[str, str]:
         f"missing key `{int(winner['gemma_missing_key_count'])}`, "
         f"truncated `{int(winner['gemma_truncated_count'])}`로 가장 균형이 좋았습니다."
     )
+
+
+def _dedupe_finalists(finalists: pd.DataFrame) -> pd.DataFrame:
+    if finalists.empty:
+        return finalists
+    ordered = finalists.sort_values(
+        by=[
+            "page_failed_count",
+            "gemma_truncated_count",
+            "gemma_missing_key_count",
+            "gemma_empty_content_count",
+            "gemma_json_retry_count",
+            "elapsed_sec",
+            "translate_median_sec",
+        ],
+        ascending=[True, True, True, True, True, True, True],
+    )
+    return ordered.drop_duplicates(subset=["preset"], keep="first").reset_index(drop=True)
 
 
 def _generated_metadata(manifest_path: Path, manifest: dict[str, Any], results_root: Path) -> dict[str, Any]:
@@ -403,15 +472,17 @@ def _b8665_report(manifest_path: Path, manifest: dict[str, Any], results_root: P
     meta = _generated_metadata(manifest_path, manifest, results_root)
     report_path = meta["report_path"]
     assets_dir = meta["assets_dir"]
+    verification = manifest.get("verification", {}) if isinstance(manifest.get("verification"), dict) else {}
+    verification_checks = verification.get("checks", {}) if isinstance(verification.get("checks"), dict) else {}
 
     controls_config = manifest.get("controls", [])
-    if not controls_config:
-        raise ValueError("b8665 manifest requires controls.")
-
     control_rows: list[dict[str, Any]] = []
     control_runs: dict[str, dict[str, Any]] = {}
     for item in controls_config:
-        batch_run = _load_run(results_root, item["batch"])
+        batch_name = item.get("batch")
+        if not batch_name:
+            continue
+        batch_run = _load_run(results_root, batch_name)
         control_runs[item["preset"]] = batch_run
         control_rows.append(
             _run_row(
@@ -422,11 +493,18 @@ def _b8665_report(manifest_path: Path, manifest: dict[str, Any], results_root: P
                 {"control_label": item.get("label", item["preset"])},
             )
         )
-    control_df = pd.DataFrame(control_rows).sort_values("elapsed_sec").reset_index(drop=True)
+    control_df = (
+        pd.DataFrame(control_rows).sort_values("elapsed_sec").reset_index(drop=True)
+        if control_rows
+        else pd.DataFrame()
+    )
 
-    baseline_run = control_runs.get("translation-old-image-baseline") or next(iter(control_runs.values()))
-    baseline_row = control_df[control_df["preset"] == "translation-old-image-baseline"]
-    baseline_elapsed = float(baseline_row.iloc[0]["elapsed_sec"]) if not baseline_row.empty else np.nan
+    baseline_run = control_runs.get("translation-old-image-baseline")
+    baseline_elapsed = np.nan
+    if baseline_run is not None and not control_df.empty:
+        baseline_row = control_df[control_df["preset"] == "translation-old-image-baseline"]
+        if not baseline_row.empty:
+            baseline_elapsed = float(baseline_row.iloc[0]["elapsed_sec"])
 
     def sweep_rows(section_name: str, value_key: str) -> tuple[pd.DataFrame, dict[str, dict[str, Any]]]:
         rows: list[dict[str, Any]] = []
@@ -451,14 +529,17 @@ def _b8665_report(manifest_path: Path, manifest: dict[str, Any], results_root: P
             df = df.sort_values(value_key).reset_index(drop=True)
         return df, batch_runs
 
-    chunk_df, chunk_batch_runs = sweep_rows("chunk_sweep", "chunk_size")
-    temp_df, temp_batch_runs = sweep_rows("temperature_sweep", "temperature")
-    ngl_df, ngl_batch_runs = sweep_rows("n_gpu_layers_sweep", "n_gpu_layers")
+    chunk_df, _chunk_batch_runs = sweep_rows("chunk_sweep", "chunk_size")
+    temp_df, _temp_batch_runs = sweep_rows("temperature_sweep", "temperature")
+    ngl_df, _ngl_batch_runs = sweep_rows("n_gpu_layers_sweep", "n_gpu_layers")
 
-    finalists_lookup: dict[str, dict[str, Any]] = dict(control_runs)
-    finalists_lookup.update(chunk_batch_runs)
-    finalists_lookup.update(temp_batch_runs)
-    finalists_lookup.update(ngl_batch_runs)
+    finalist_entries: list[tuple[str, dict[str, Any]]] = list(control_runs.items())
+    for section_name in ("chunk_sweep", "temperature_sweep", "n_gpu_layers_sweep"):
+        for item in manifest.get(section_name, []):
+            if not isinstance(item, dict) or not item.get("batch"):
+                continue
+            finalist_entries.append((str(item["preset"]), _load_run(results_root, str(item["batch"]))))
+
     finalist_rows = [
         _run_row(
             "baseline batch" if preset == "translation-old-image-baseline" else preset,
@@ -466,11 +547,21 @@ def _b8665_report(manifest_path: Path, manifest: dict[str, Any], results_root: P
             run,
             "batch_finalist",
         )
-        for preset, run in finalists_lookup.items()
+        for preset, run in finalist_entries
     ]
-    finalists_df = pd.DataFrame(finalist_rows).sort_values("elapsed_sec").reset_index(drop=True)
-    winner_preset, winner_sentence = _winner_summary(finalists_df)
-    winner_run = finalists_lookup.get(str(manifest.get("winning_candidate_preset")), finalists_lookup[winner_preset])
+    finalists_df = (
+        pd.DataFrame(finalist_rows).sort_values("elapsed_sec").reset_index(drop=True)
+        if finalist_rows
+        else pd.DataFrame()
+    )
+    finalists_df = _dedupe_finalists(finalists_df)
+
+    winner_preset = ""
+    winner_sentence = "verification 단계까지만 완료되었고 batch winner는 아직 결정되지 않았습니다."
+    winner_row: dict[str, Any] | None = None
+    if not finalists_df.empty:
+        winner_preset, winner_sentence = _winner_summary(finalists_df)
+        winner_row = finalists_df[finalists_df["preset"] == winner_preset].iloc[0].to_dict()
 
     control_chart_path = assets_dir / "b8665_control_elapsed_comparison.png"
     chunk_chart_path = assets_dir / "b8665_chunk_translate_median.png"
@@ -478,14 +569,15 @@ def _b8665_report(manifest_path: Path, manifest: dict[str, Any], results_root: P
     ngl_chart_path = assets_dir / "b8665_n_gpu_layers_translate_median.png"
     quality_chart_path = assets_dir / "b8665_quality_metrics_comparison.png"
 
-    _bar_chart(
-        control_df,
-        "control_label",
-        "elapsed_sec",
-        "Old Image vs b8665 Control Batch Comparison",
-        "elapsed_sec",
-        control_chart_path,
-    )
+    if not control_df.empty:
+        _bar_chart(
+            control_df,
+            "control_label",
+            "elapsed_sec",
+            "Old Image vs b8665 Control Batch Comparison",
+            "elapsed_sec",
+            control_chart_path,
+        )
     if not chunk_df.empty:
         _line_chart(
             chunk_df,
@@ -513,28 +605,48 @@ def _b8665_report(manifest_path: Path, manifest: dict[str, Any], results_root: P
             "translate_median_sec",
             ngl_chart_path,
         )
+    if not finalists_df.empty:
+        quality_df = finalists_df[
+            [
+                "preset",
+                "gemma_json_retry_count",
+                "gemma_missing_key_count",
+                "gemma_truncated_count",
+                "ocr_low_quality_rate",
+            ]
+        ].copy()
+        fig, ax = plt.subplots(figsize=(10, 4.8))
+        x = np.arange(len(quality_df))
+        width = 0.2
+        ax.bar(x - 1.5 * width, quality_df["gemma_json_retry_count"], width=width, label="json_retry")
+        ax.bar(x - 0.5 * width, quality_df["gemma_missing_key_count"], width=width, label="missing_key")
+        ax.bar(x + 0.5 * width, quality_df["gemma_truncated_count"], width=width, label="truncated")
+        ax.bar(x + 1.5 * width, quality_df["ocr_low_quality_rate"], width=width, label="ocr_low_quality_rate")
+        ax.set_xticks(x)
+        ax.set_xticklabels(quality_df["preset"], rotation=20)
+        ax.set_title("Quality Metrics Comparison")
+        ax.legend()
+        _write_plot(quality_chart_path, fig)
 
-    quality_df = finalists_df[
-        [
-            "preset",
-            "gemma_json_retry_count",
-            "gemma_missing_key_count",
-            "gemma_truncated_count",
-            "ocr_low_quality_rate",
-        ]
-    ].copy()
-    fig, ax = plt.subplots(figsize=(10, 4.8))
-    x = np.arange(len(quality_df))
-    width = 0.2
-    ax.bar(x - 1.5 * width, quality_df["gemma_json_retry_count"], width=width, label="json_retry")
-    ax.bar(x - 0.5 * width, quality_df["gemma_missing_key_count"], width=width, label="missing_key")
-    ax.bar(x + 0.5 * width, quality_df["gemma_truncated_count"], width=width, label="truncated")
-    ax.bar(x + 1.5 * width, quality_df["ocr_low_quality_rate"], width=width, label="ocr_low_quality_rate")
-    ax.set_xticks(x)
-    ax.set_xticklabels(quality_df["preset"], rotation=20)
-    ax.set_title("Quality Metrics Comparison")
-    ax.legend()
-    _write_plot(quality_chart_path, fig)
+    winner_format = str(winner_row.get("response_format_mode", "") or "") if winner_row else ""
+    winner_chunk = (
+        int(winner_row["chunk_size"])
+        if winner_row and pd.notna(winner_row.get("chunk_size"))
+        else ""
+    )
+    winner_temperature = (
+        float(winner_row["temperature"])
+        if winner_row and pd.notna(winner_row.get("temperature"))
+        else ""
+    )
+    winner_ngl = (
+        int(winner_row["n_gpu_layers"])
+        if winner_row and pd.notna(winner_row.get("n_gpu_layers"))
+        else ""
+    )
+    elapsed_delta = ""
+    if winner_row and pd.notna(baseline_elapsed):
+        elapsed_delta = f"{baseline_elapsed - float(winner_row['elapsed_sec']):.3f}s"
 
     summary_payload = {
         "manifest": repo_relative_str(manifest_path),
@@ -546,14 +658,20 @@ def _b8665_report(manifest_path: Path, manifest: dict[str, Any], results_root: P
         "benchmark_scope": meta["benchmark_scope"],
         "build_id": meta["build_id"],
         "active_image": meta["active_image"],
+        "verification": verification,
         "winning_candidate_preset": manifest.get("winning_candidate_preset"),
         "resolved_winner_preset": winner_preset,
+        "winning_format": winner_format,
+        "winning_chunk_size": winner_chunk,
+        "winning_temperature": winner_temperature,
+        "winning_n_gpu_layers": winner_ngl,
+        "elapsed_delta_vs_old_image": elapsed_delta,
         "charts": {
-            "control_elapsed": repo_relative_str(control_chart_path),
+            "control_elapsed": repo_relative_str(control_chart_path) if control_chart_path.is_file() else "",
             "chunk_translate_median": repo_relative_str(chunk_chart_path) if chunk_chart_path.is_file() else "",
             "temperature_translate_median": repo_relative_str(temp_chart_path) if temp_chart_path.is_file() else "",
             "n_gpu_layers_translate_median": repo_relative_str(ngl_chart_path) if ngl_chart_path.is_file() else "",
-            "quality_metrics": repo_relative_str(quality_chart_path),
+            "quality_metrics": repo_relative_str(quality_chart_path) if quality_chart_path.is_file() else "",
         },
     }
     write_json(assets_dir / "report_summary.json", summary_payload)
@@ -571,25 +689,49 @@ def _b8665_report(manifest_path: Path, manifest: dict[str, Any], results_root: P
         f"- 벤치마킹 범위: `{meta['benchmark_scope']}`",
         f"- build id: `{meta['build_id']}`",
         f"- active image: `{meta['active_image']}`",
+        f"- winning format: `{winner_format}`",
+        f"- winning chunk: `{winner_chunk}`",
+        f"- winning temperature: `{winner_temperature}`",
+        f"- winning n_gpu_layers: `{winner_ngl}`",
         "",
-        "## 판단 요약",
+        "## Gemma 4 Verification",
         "",
-        f"- {winner_sentence}",
-        f"- old-image baseline batch run: `{baseline_run['run_dir_rel']}`",
-        f"- winning candidate run: `{repo_relative_str(winner_run['run_dir'])}`",
+        f"- verification status: `{verification.get('status', 'UNKNOWN')}`",
+        f"- verification dir: `{verification.get('verification_dir', '')}`",
+        f"- container image: `{verification.get('container_image', '')}`",
+        f"- checks: `image_matches={verification_checks.get('image_matches', False)}`, `build_marker_found={verification_checks.get('build_marker_found', False)}`, `arch_gemma4_found={verification_checks.get('arch_gemma4_found', False)}`, `tool_response_eog_found={verification_checks.get('tool_response_eog_found', False)}`, `object_smoke_ok={verification_checks.get('object_smoke_ok', False)}`, `schema_smoke_ok={verification_checks.get('schema_smoke_ok', False)}`",
     ]
-    if pd.notna(baseline_elapsed):
-        winner_elapsed = float(finalists_df[finalists_df["preset"] == winner_preset].iloc[0]["elapsed_sec"])
-        delta = baseline_elapsed - winner_elapsed
-        report_lines.append(f"- old-image baseline 대비 elapsed delta: `{delta:.3f}s`")
+    issues = verification.get("issues", [])
+    if issues:
+        report_lines.append(f"- verification issues: `{', '.join(str(item) for item in issues)}`")
 
-    report_lines.extend(
-        [
-            "",
-            "## Old Image vs b8665 Control 비교",
-            "",
-            _markdown_table(
-                control_df[
+    report_lines.extend(["", "## 판단 요약", "", f"- {winner_sentence}"])
+    if baseline_run is not None:
+        report_lines.append(f"- old-image baseline batch run: `{baseline_run['run_dir_rel']}`")
+    if winner_row:
+        report_lines.append(f"- winning candidate run: `{winner_row['run_dir_rel']}`")
+    if elapsed_delta:
+        report_lines.append(f"- old-image baseline 대비 elapsed delta: `{elapsed_delta}`")
+
+    report_lines.extend(["", "## Old Image vs b8665 Control 비교", ""])
+    if not control_df.empty:
+        report_lines.extend(
+            [
+                _markdown_table(
+                    control_df[
+                        [
+                            "control_label",
+                            "preset",
+                            "response_format_mode",
+                            "image",
+                            "elapsed_sec",
+                            "translate_median_sec",
+                            "gemma_json_retry_count",
+                            "gemma_missing_key_count",
+                            "gemma_truncated_count",
+                            "run_dir_rel",
+                        ]
+                    ],
                     [
                         "control_label",
                         "preset",
@@ -601,28 +743,40 @@ def _b8665_report(manifest_path: Path, manifest: dict[str, Any], results_root: P
                         "gemma_missing_key_count",
                         "gemma_truncated_count",
                         "run_dir_rel",
-                    ]
-                ],
-                [
-                    "control_label",
-                    "preset",
-                    "response_format_mode",
-                    "image",
-                    "elapsed_sec",
-                    "translate_median_sec",
-                    "gemma_json_retry_count",
-                    "gemma_missing_key_count",
-                    "gemma_truncated_count",
-                    "run_dir_rel",
-                ],
-            ),
-            "",
-            f"![control](/mnt/c/Users/pjjpj/Desktop/openai_manga_translater/comic-translate/docs/assets/benchmarking/latest/{control_chart_path.name})",
-            "",
-            "## Representative Batch Finalists",
-            "",
-            _markdown_table(
-                finalists_df[
+                    ],
+                ),
+                "",
+            ]
+        )
+        if control_chart_path.is_file():
+            report_lines.append(
+                f"![control](/mnt/c/Users/pjjpj/Desktop/openai_manga_translater/comic-translate/docs/assets/benchmarking/latest/{control_chart_path.name})"
+            )
+            report_lines.append("")
+    else:
+        report_lines.extend(["- control 결과가 없습니다. verification 단계에서 중단되었을 수 있습니다.", ""])
+
+    report_lines.extend(["## Representative Batch Finalists", ""])
+    if not finalists_df.empty:
+        report_lines.extend(
+            [
+                _markdown_table(
+                    finalists_df[
+                        [
+                            "preset",
+                            "response_format_mode",
+                            "chunk_size",
+                            "temperature",
+                            "n_gpu_layers",
+                            "elapsed_sec",
+                            "translate_median_sec",
+                            "gemma_json_retry_count",
+                            "gemma_missing_key_count",
+                            "gemma_truncated_count",
+                            "audit_passed",
+                            "run_dir_rel",
+                        ]
+                    ],
                     [
                         "preset",
                         "response_format_mode",
@@ -636,28 +790,15 @@ def _b8665_report(manifest_path: Path, manifest: dict[str, Any], results_root: P
                         "gemma_truncated_count",
                         "audit_passed",
                         "run_dir_rel",
-                    ]
-                ],
-                [
-                    "preset",
-                    "response_format_mode",
-                    "chunk_size",
-                    "temperature",
-                    "n_gpu_layers",
-                    "elapsed_sec",
-                    "translate_median_sec",
-                    "gemma_json_retry_count",
-                    "gemma_missing_key_count",
-                    "gemma_truncated_count",
-                    "audit_passed",
-                    "run_dir_rel",
-                ],
-            ),
-            "",
-            "## Chunk Sweep",
-            "",
-        ]
-    )
+                    ],
+                ),
+                "",
+            ]
+        )
+    else:
+        report_lines.extend(["- finalist 결과가 없습니다.", ""])
+
+    report_lines.extend(["## Chunk Sweep", ""])
     if not chunk_df.empty:
         report_lines.extend(
             [
@@ -684,10 +825,13 @@ def _b8665_report(manifest_path: Path, manifest: dict[str, Any], results_root: P
                     ],
                 ),
                 "",
-                f"![chunk](/mnt/c/Users/pjjpj/Desktop/openai_manga_translater/comic-translate/docs/assets/benchmarking/latest/{chunk_chart_path.name})",
-                "",
             ]
         )
+        if chunk_chart_path.is_file():
+            report_lines.append(
+                f"![chunk](/mnt/c/Users/pjjpj/Desktop/openai_manga_translater/comic-translate/docs/assets/benchmarking/latest/{chunk_chart_path.name})"
+            )
+            report_lines.append("")
     else:
         report_lines.extend(["- chunk sweep 결과가 없습니다.", ""])
 
@@ -718,10 +862,13 @@ def _b8665_report(manifest_path: Path, manifest: dict[str, Any], results_root: P
                     ],
                 ),
                 "",
-                f"![temperature](/mnt/c/Users/pjjpj/Desktop/openai_manga_translater/comic-translate/docs/assets/benchmarking/latest/{temp_chart_path.name})",
-                "",
             ]
         )
+        if temp_chart_path.is_file():
+            report_lines.append(
+                f"![temperature](/mnt/c/Users/pjjpj/Desktop/openai_manga_translater/comic-translate/docs/assets/benchmarking/latest/{temp_chart_path.name})"
+            )
+            report_lines.append("")
     else:
         report_lines.extend(["- temperature sweep 결과가 없습니다.", ""])
 
@@ -752,19 +899,34 @@ def _b8665_report(manifest_path: Path, manifest: dict[str, Any], results_root: P
                     ],
                 ),
                 "",
-                f"![ngl](/mnt/c/Users/pjjpj/Desktop/openai_manga_translater/comic-translate/docs/assets/benchmarking/latest/{ngl_chart_path.name})",
-                "",
             ]
         )
+        if ngl_chart_path.is_file():
+            report_lines.append(
+                f"![ngl](/mnt/c/Users/pjjpj/Desktop/openai_manga_translater/comic-translate/docs/assets/benchmarking/latest/{ngl_chart_path.name})"
+            )
+            report_lines.append("")
     else:
         report_lines.extend(["- n_gpu_layers sweep 결과가 없습니다.", ""])
 
-    report_lines.extend(
-        [
-            "## 품질 지표 비교",
-            "",
-            _markdown_table(
-                finalists_df[
+    report_lines.extend(["## 품질 지표 비교", ""])
+    if not finalists_df.empty:
+        report_lines.extend(
+            [
+                _markdown_table(
+                    finalists_df[
+                        [
+                            "preset",
+                            "gemma_json_retry_count",
+                            "gemma_missing_key_count",
+                            "gemma_truncated_count",
+                            "gemma_empty_content_count",
+                            "gemma_reasoning_without_final_count",
+                            "ocr_empty_rate",
+                            "ocr_low_quality_rate",
+                            "audit_passed",
+                        ]
+                    ],
                     [
                         "preset",
                         "gemma_json_retry_count",
@@ -775,25 +937,18 @@ def _b8665_report(manifest_path: Path, manifest: dict[str, Any], results_root: P
                         "ocr_empty_rate",
                         "ocr_low_quality_rate",
                         "audit_passed",
-                    ]
-                ],
-                [
-                    "preset",
-                    "gemma_json_retry_count",
-                    "gemma_missing_key_count",
-                    "gemma_truncated_count",
-                    "gemma_empty_content_count",
-                    "gemma_reasoning_without_final_count",
-                    "ocr_empty_rate",
-                    "ocr_low_quality_rate",
-                    "audit_passed",
-                ],
-            ),
-            "",
-            f"![quality](/mnt/c/Users/pjjpj/Desktop/openai_manga_translater/comic-translate/docs/assets/benchmarking/latest/{quality_chart_path.name})",
-            "",
-        ]
-    )
+                    ],
+                ),
+                "",
+            ]
+        )
+        if quality_chart_path.is_file():
+            report_lines.append(
+                f"![quality](/mnt/c/Users/pjjpj/Desktop/openai_manga_translater/comic-translate/docs/assets/benchmarking/latest/{quality_chart_path.name})"
+            )
+            report_lines.append("")
+    else:
+        report_lines.extend(["- 품질 비교 대상이 없습니다.", ""])
 
     report_path.parent.mkdir(parents=True, exist_ok=True)
     report_path.write_text("\n".join(report_lines), encoding="utf-8")
@@ -810,9 +965,9 @@ def main() -> int:
 
     manifest_path = Path(args.manifest)
     manifest = _load_yaml(manifest_path)
-    results_root = Path(args.results_root) if args.results_root else (ROOT / str(manifest.get("results_root", "banchmark_result_log")))
+    results_root = _resolve_results_root(manifest_path, manifest, args.results_root)
 
-    if manifest.get("controls"):
+    if "verification" in manifest or manifest.get("controls") or str((manifest.get("benchmark") or {}).get("build_id", "")) == "b8665":
         return _b8665_report(manifest_path, manifest, results_root)
     return _legacy_report(manifest_path, manifest, results_root)
 

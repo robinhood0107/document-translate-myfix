@@ -9,6 +9,19 @@ benchmark:
   build_id: b8665
   active_image: local/llama.cpp:server-cuda-b8665
 
+verification:
+  status: PENDING
+  issues: []
+  verification_dir: ""
+  container_image: ""
+  checks:
+    image_matches: false
+    build_marker_found: false
+    arch_gemma4_found: false
+    tool_response_eog_found: false
+    object_smoke_ok: false
+    schema_smoke_ok: false
+
 controls: []
 chunk_sweep: []
 temperature_sweep: []

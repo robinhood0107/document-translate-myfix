@@ -23,14 +23,17 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from benchmark_common import (
+    DEFAULT_CONTAINER_NAMES,
     DEFAULT_SAMPLE_COUNT,
     DEFAULT_SAMPLE_DIR,
     benchmark_output_root,
     create_run_dir,
     load_preset,
     remove_containers,
+    run_command,
     resolve_corpus,
     repo_relative_str,
+    stage_runtime_files,
     write_json,
 )
 
@@ -135,6 +138,7 @@ ATTACH_RUNNING_HEALTH_URLS = [
     "http://127.0.0.1:18000/v1/models",
     "http://127.0.0.1:28118/docs",
 ]
+GEMMA_VERIFICATION_DIR_NAME = "_server_verification"
 
 
 def _log(message: str) -> None:
@@ -167,6 +171,159 @@ def _wait_for_url(url: str, timeout_sec: int = 180) -> None:
             return
         time.sleep(2)
     raise TimeoutError(f"Timed out waiting for {url}")
+
+
+def _json_post(url: str, payload: dict[str, Any], timeout_sec: int = 60) -> dict[str, Any]:
+    request = urllib.request.Request(
+        url,
+        data=json.dumps(payload).encode("utf-8"),
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    with urllib.request.urlopen(request, timeout=timeout_sec) as response:
+        body = response.read().decode("utf-8")
+    parsed = json.loads(body)
+    if not isinstance(parsed, dict):
+        raise ValueError(f"Expected JSON object response from {url}")
+    return parsed
+
+
+def _response_has_valid_json_content(payload: dict[str, Any]) -> bool:
+    try:
+        choice = (payload.get("choices") or [{}])[0]
+        message = choice.get("message") or {}
+        content = (message.get("content") or "").strip()
+        if not content:
+            return False
+        try:
+            parsed = json.loads(content)
+        except json.JSONDecodeError:
+            start = content.find("{")
+            end = content.rfind("}")
+            if start < 0 or end <= start:
+                return False
+            parsed = json.loads(content[start : end + 1])
+        return isinstance(parsed, dict)
+    except Exception:
+        return False
+
+
+def _verify_gemma4_runtime(suite_dir: Path) -> dict[str, Any]:
+    verification_dir = suite_dir / GEMMA_VERIFICATION_DIR_NAME
+    runtime_dir = verification_dir / "runtime"
+    verification_dir.mkdir(parents=True, exist_ok=True)
+
+    preset, _ = load_preset("b8665-schema-control")
+    staged = stage_runtime_files(preset, runtime_dir)
+
+    remove_containers(DEFAULT_CONTAINER_NAMES)
+    run_command(
+        ["docker", "compose", "-f", staged["gemma"]["compose_path"], "up", "-d", "--force-recreate"],
+        cwd=runtime_dir / "gemma",
+    )
+    run_command(
+        ["docker", "compose", "-f", staged["ocr"]["compose_path"], "up", "-d", "--force-recreate"],
+        cwd=runtime_dir / "ocr",
+    )
+    for url in ATTACH_RUNNING_HEALTH_URLS:
+        _wait_for_url(url)
+
+    inspect_completed = run_command(
+        ["docker", "inspect", "--format", "{{.Config.Image}}", "gemma-local-server"],
+        check=False,
+    )
+    container_image = (inspect_completed.stdout or "").strip()
+
+    log_completed = run_command(
+        ["docker", "logs", "--tail", "400", "gemma-local-server"],
+        check=False,
+    )
+    gemma_log_tail = ((log_completed.stdout or "") + (log_completed.stderr or "")).strip()
+    (verification_dir / "gemma_log_tail.txt").write_text(gemma_log_tail, encoding="utf-8")
+
+    model_name = str((preset.get("gemma") or {}).get("model", ""))
+    smoke_messages = [
+        {
+            "role": "system",
+            "content": [
+                {
+                    "type": "text",
+                    "text": "Translate the user's JSON object from Korean to English. Return only one valid JSON object with identical keys.",
+                }
+            ],
+        },
+        {
+            "role": "user",
+            "content": [{"type": "text", "text": "{\"block_0\":\"안녕하세요\"}"}],
+        },
+    ]
+    object_request = {
+        "model": model_name,
+        "messages": smoke_messages,
+        "temperature": 0.2,
+        "top_k": 64,
+        "top_p": 0.95,
+        "min_p": 0.0,
+        "max_completion_tokens": 128,
+        "response_format": {"type": "json_object"},
+    }
+    schema_request = {
+        **object_request,
+        "response_format": {
+            "type": "json_schema",
+            "json_schema": {
+                "name": "verification_blocks_1",
+                "schema": {
+                    "type": "object",
+                    "properties": {"block_0": {"type": ["string", "null"]}},
+                    "required": ["block_0"],
+                    "additionalProperties": False,
+                },
+            },
+        },
+    }
+    object_response = _json_post("http://127.0.0.1:18080/v1/chat/completions", object_request, timeout_sec=60)
+    schema_response = _json_post("http://127.0.0.1:18080/v1/chat/completions", schema_request, timeout_sec=60)
+    write_json(verification_dir / "request_object.json", object_request)
+    write_json(verification_dir / "response_object.json", object_response)
+    write_json(verification_dir / "request_schema.json", schema_request)
+    write_json(verification_dir / "response_schema.json", schema_response)
+
+    expected_image = str((preset.get("gemma") or {}).get("image", ""))
+    log_lower = gemma_log_tail.lower()
+    checks = {
+        "image_matches": container_image == expected_image,
+        "build_marker_found": ("b8665" in log_lower) or ("b8665" in container_image.lower()),
+        "arch_gemma4_found": ("arch" in log_lower) and ("gemma4" in log_lower),
+        "tool_response_eog_found": "<|tool_response>" in log_lower,
+        "object_smoke_ok": _response_has_valid_json_content(object_response),
+        "schema_smoke_ok": _response_has_valid_json_content(schema_response),
+    }
+    issues = [f"{name}=false" for name, value in checks.items() if not value]
+    verification = {
+        "status": "PASS" if not issues else "FAIL",
+        "issues": issues,
+        "verification_dir": repo_relative_str(verification_dir),
+        "container_image": container_image,
+        "checks": checks,
+    }
+    write_json(verification_dir / "verification.json", verification)
+    return verification
+
+
+def _verification_result_entry(verification: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "name": "00_gemma4_verification",
+        "preset": "b8665-schema-control",
+        "preset_input": "b8665-schema-control",
+        "mode": "verification",
+        "runtime_mode": "managed",
+        "description": "Gemma 4 dedicated parser/template verification before sweep",
+        "status": verification.get("status", "FAIL"),
+        "issues": list(verification.get("issues", [])),
+        "summary": {},
+        "run_dir": str(ROOT / verification.get("verification_dir", ".")),
+    }
 
 
 def _preflight(sample_dir: Path, sample_count: int, *, check_attach_running: bool) -> None:
@@ -723,10 +880,12 @@ def _open_results(suite_dir: Path) -> None:
 def _write_b8665_manifest(
     suite_dir: Path,
     *,
+    verification: dict[str, Any],
     control_results: list[dict[str, Any]],
     chunk_results: list[dict[str, Any]],
     temperature_results: list[dict[str, Any]],
     ngl_results: list[dict[str, Any]],
+    active_preset: str,
     winner_preset: str,
 ) -> Path:
     def run_name(result: dict[str, Any]) -> str:
@@ -781,7 +940,7 @@ def _write_b8665_manifest(
 
     manifest = {
         "results_root": "banchmark_result_log",
-        "active_preset": "b8665-schema-control",
+        "active_preset": active_preset,
         "winning_candidate_preset": winner_preset,
         "benchmark": {
             "name": SUITE_PROFILES["b8665-gemma4"]["benchmark_name"],
@@ -790,6 +949,7 @@ def _write_b8665_manifest(
             "build_id": SUITE_PROFILES["b8665-gemma4"]["build_id"],
             "active_image": SUITE_PROFILES["b8665-gemma4"]["active_image"],
         },
+        "verification": verification,
         "controls": controls,
         "chunk_sweep": encode_rows(chunk_results, "chunk_size"),
         "temperature_sweep": encode_rows(temperature_results, "temperature"),
@@ -847,6 +1007,21 @@ def _run_b8665_profile(
     ngl_results: list[dict[str, Any]] = []
     generated_dir = suite_dir / "_generated_presets"
     generated_dir.mkdir(parents=True, exist_ok=True)
+
+    verification = _verify_gemma4_runtime(suite_dir)
+    results.append(_verification_result_entry(verification))
+    if verification.get("status") != "PASS":
+        manifest_path = _write_b8665_manifest(
+            suite_dir,
+            verification=verification,
+            control_results=control_results,
+            chunk_results=chunk_results,
+            temperature_results=temperature_results,
+            ngl_results=ngl_results,
+            active_preset="b8665-schema-control",
+            winner_preset="",
+        )
+        return results, manifest_path
 
     for step in B8665_CONTROL_STEPS:
         _log(f"시작: {step['name']} ({step['description']})")
@@ -1035,7 +1210,7 @@ def _run_b8665_profile(
         promoted_fine = _select_promoted_candidates(
             fine_one_page_results,
             baseline_summary=baseline_batch["summary"],
-            top_n=1,
+            top_n=2,
         )
         for promoted in promoted_fine:
             step = {
@@ -1253,10 +1428,12 @@ def _run_b8665_profile(
 
     manifest_path = _write_b8665_manifest(
         suite_dir,
+        verification=verification,
         control_results=control_results,
         chunk_results=chunk_results,
         temperature_results=temperature_results,
         ngl_results=ngl_results,
+        active_preset=winning_control_preset,
         winner_preset=str(winner_result["preset"]),
     )
     return results, manifest_path
