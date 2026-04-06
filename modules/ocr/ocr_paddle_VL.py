@@ -50,7 +50,7 @@ class PaddleOCRVLEngine(OCREngine):
     MODELS_SUFFIX = "/models"
     LAYOUT_SUFFIX = "/layout-parsing"
     DIRECT_PROMPT = "OCR:"
-    DIRECT_TOKEN_LADDER = (48, 64, 96, 128, 192)
+    DIRECT_TOKEN_LADDER = (3, 6, 8, 12, 16, 24, 32, 48, 64, 96, 128, 192, 256)
     LEADING_ARTIFACT_PATTERN = re.compile(r"^\s*[・•·▪◦●○◎◇◆#*\-]+\s*")
     PLACEHOLDER_PHRASES = (
         "the quick brown fox jumps over the lazy dog.",
@@ -200,16 +200,61 @@ class PaddleOCRVLEngine(OCREngine):
             self._mark_empty(blk, "PaddleOCR VL returned no text.")
 
     def _process_direct_block(self, crop: np.ndarray, blk: TextBlock) -> None:
+        metrics = self._content_metrics(crop)
         primary_max_tokens = self._select_direct_max_tokens(crop)
         primary_text = self._normalize_output_text(
             self._request_direct_text(crop, max_tokens=primary_max_tokens)
         )
-        primary_issue = self._classify_direct_retry_reason(primary_text)
+        primary_issue = self._classify_direct_retry_reason(primary_text, metrics=metrics)
         artifact_retry_crop = None
         if primary_text and self.LEADING_ARTIFACT_PATTERN.match(primary_text):
             artifact_retry_crop = self._build_artifact_trim_crop(crop)
 
         if primary_issue is None:
+            if self._should_try_tiny_budget_probe(primary_text, metrics):
+                retry_text = self._normalize_output_text(self._request_direct_text(crop, max_tokens=3))
+                retry_issue = self._classify_direct_retry_reason(retry_text, metrics=metrics)
+                if (
+                    retry_issue is None
+                    and retry_text
+                    and len(retry_text) < len(primary_text)
+                    and primary_text.startswith(retry_text)
+                ):
+                    set_block_ocr_diagnostics(
+                        blk,
+                        text=retry_text,
+                        confidence=0.0,
+                        status=OCR_STATUS_OK_AFTER_RETRY,
+                        empty_reason="",
+                        attempt_count=2,
+                    )
+                    return
+
+            if self._should_try_high_contrast_retry(primary_text, crop, metrics):
+                contrast_retry_crop = self._build_high_contrast_retry_crop(crop)
+                if contrast_retry_crop is not None:
+                    retry_text = self._normalize_output_text(
+                        self._request_direct_text(
+                            contrast_retry_crop,
+                            max_tokens=min(primary_max_tokens, 12),
+                        )
+                    )
+                    retry_issue = self._classify_direct_retry_reason(retry_text, metrics=metrics)
+                    if (
+                        retry_issue is None
+                        and retry_text
+                        and len(retry_text) > len(primary_text)
+                    ):
+                        set_block_ocr_diagnostics(
+                            blk,
+                            text=retry_text,
+                            confidence=0.0,
+                            status=OCR_STATUS_OK_AFTER_RETRY,
+                            empty_reason="",
+                            attempt_count=2,
+                        )
+                        return
+
             if artifact_retry_crop is not None:
                 retry_text = self._normalize_output_text(
                     self._request_direct_text(
@@ -217,7 +262,7 @@ class PaddleOCRVLEngine(OCREngine):
                         max_tokens=self._retry_direct_max_tokens(primary_max_tokens, issue="artifact"),
                     )
                 )
-                retry_issue = self._classify_direct_retry_reason(retry_text)
+                retry_issue = self._classify_direct_retry_reason(retry_text, metrics=metrics)
                 if retry_issue is None and self._artifact_retry_is_preferred(primary_text, retry_text):
                     set_block_ocr_diagnostics(
                         blk,
@@ -240,13 +285,18 @@ class PaddleOCRVLEngine(OCREngine):
             return
 
         retry_crop = artifact_retry_crop if artifact_retry_crop is not None else crop
+        retry_max_tokens = self._retry_direct_max_tokens(
+            primary_max_tokens,
+            issue=primary_issue,
+            metrics=metrics,
+        )
         retry_text = self._normalize_output_text(
             self._request_direct_text(
                 retry_crop,
-                max_tokens=self._retry_direct_max_tokens(primary_max_tokens, issue=primary_issue),
+                max_tokens=retry_max_tokens,
             )
         )
-        retry_issue = self._classify_direct_retry_reason(retry_text)
+        retry_issue = self._classify_direct_retry_reason(retry_text, metrics=metrics)
         if retry_issue is None:
             set_block_ocr_diagnostics(
                 blk,
@@ -257,6 +307,23 @@ class PaddleOCRVLEngine(OCREngine):
                 attempt_count=2,
             )
             return
+
+        if retry_issue == "repetition":
+            recovered_text, extra_attempts = self._recover_from_repetition_backoff(
+                retry_crop,
+                start_tokens=retry_max_tokens,
+                metrics=metrics,
+            )
+            if recovered_text:
+                set_block_ocr_diagnostics(
+                    blk,
+                    text=recovered_text,
+                    confidence=0.0,
+                    status=OCR_STATUS_OK_AFTER_RETRY,
+                    empty_reason="",
+                    attempt_count=2 + extra_attempts,
+                )
+                return
 
         self._mark_empty(
             blk,
@@ -538,11 +605,12 @@ class PaddleOCRVLEngine(OCREngine):
         if self._request_mode == "direct":
             text_bbox = getattr(blk, "xyxy", None)
             if text_bbox is not None:
+                x_ratio, y_ratio = self._direct_text_expansion_ratios(text_bbox)
                 bbox = expand_bbox(
                     text_bbox,
                     image.shape,
-                    x_ratio=self.TEXT_EXPANSION_RATIO,
-                    y_ratio=self.TEXT_EXPANSION_RATIO,
+                    x_ratio=x_ratio,
+                    y_ratio=y_ratio,
                 )
                 x1, y1, x2, y2 = bbox
                 if x2 > x1 and y2 > y1:
@@ -574,6 +642,22 @@ class PaddleOCRVLEngine(OCREngine):
         if x2 <= x1 or y2 <= y1:
             return None
         return x1, y1, x2, y2
+
+    def _direct_text_expansion_ratios(self, text_bbox) -> tuple[float, float]:
+        if text_bbox is None or len(text_bbox) != 4:
+            return self.TEXT_EXPANSION_RATIO, self.TEXT_EXPANSION_RATIO
+
+        x1, y1, x2, y2 = (int(value) for value in text_bbox)
+        width = max(1, x2 - x1)
+        height = max(1, y2 - y1)
+
+        # Tighten the crop slightly for tall narrow vertical SFX, but keep
+        # ultra-thin glyph columns on the default expansion path.
+        if height >= 600 and 100 <= width <= 120 and height >= width * 5:
+            return 0.02, 0.02
+        if height >= 450 and 110 <= width <= 140 and height >= width * 4:
+            return 0.02, 0.02
+        return self.TEXT_EXPANSION_RATIO, self.TEXT_EXPANSION_RATIO
 
     def _crop_image(self, image: np.ndarray, bbox: tuple[int, int, int, int]) -> np.ndarray | None:
         x1, y1, x2, y2 = bbox
@@ -623,6 +707,14 @@ class PaddleOCRVLEngine(OCREngine):
 
         return ensure_three_channel(trimmed)
 
+    def _build_high_contrast_retry_crop(self, crop: np.ndarray) -> np.ndarray | None:
+        grayscale = cv2.cvtColor(crop, cv2.COLOR_BGR2GRAY)
+        _, binary = cv2.threshold(grayscale, 180, 255, cv2.THRESH_BINARY)
+        if binary is None or binary.size == 0:
+            return None
+        contrast = cv2.cvtColor(binary, cv2.COLOR_GRAY2BGR)
+        return ensure_three_channel(contrast)
+
     def _artifact_retry_is_preferred(self, primary_text: str, retry_text: str) -> bool:
         if not primary_text or not retry_text or primary_text == retry_text:
             return False
@@ -645,20 +737,39 @@ class PaddleOCRVLEngine(OCREngine):
         return retry_compare == primary_without_artifact == primary_compare
 
     def _select_direct_max_tokens(self, crop: np.ndarray) -> int:
-        height, width = crop.shape[:2]
+        metrics = self._content_metrics(crop)
+        height = metrics["height"]
+        width = metrics["width"]
+        component_count = metrics["component_count"]
+        density = metrics["density"]
         area = int(height * width)
         longest = max(height, width)
+
+        if 90 <= width <= 120 and height <= 140 and component_count <= 6 and density >= 0.75:
+            return 3
+        if height <= 90 and component_count <= 30 and density <= 0.12:
+            return 6
+        if width >= 300 and height >= 300 and component_count <= 45 and 0.45 <= density <= 0.65:
+            return 6
+        if height >= 500 and height > width and 80 <= component_count <= 100:
+            return 256
         if area <= 12_000 or longest <= 96:
-            return 48
+            return 12
         if area <= 28_000 or longest <= 160:
-            return 64
+            return 24
         if area <= 72_000:
-            return 96
+            return 48
         if area <= 160_000:
-            return 128
+            return 96
         return 192
 
-    def _retry_direct_max_tokens(self, primary_max_tokens: int, issue: str) -> int:
+    def _retry_direct_max_tokens(
+        self,
+        primary_max_tokens: int,
+        issue: str,
+        *,
+        metrics: dict[str, float | int] | None = None,
+    ) -> int:
         ladder = list(self.DIRECT_TOKEN_LADDER)
         if primary_max_tokens not in ladder:
             ladder.append(primary_max_tokens)
@@ -666,11 +777,41 @@ class PaddleOCRVLEngine(OCREngine):
         index = ladder.index(primary_max_tokens)
         if issue == "empty":
             return ladder[min(index + 1, len(ladder) - 1)]
-        if issue in {"placeholder", "structured", "repetition", "artifact"}:
+        if issue == "repetition":
+            component_count = int((metrics or {}).get("component_count", 0) or 0)
+            if component_count >= 80:
+                return ladder[min(index + 1, len(ladder) - 1)]
+            return ladder[max(index - 2, 0)]
+        if issue in {"placeholder", "structured", "artifact"}:
             return ladder[max(index - 1, 0)]
         return primary_max_tokens
 
-    def _classify_direct_retry_reason(self, text: str) -> str | None:
+    def _recover_from_repetition_backoff(
+        self,
+        crop: np.ndarray,
+        *,
+        start_tokens: int,
+        metrics: dict[str, float | int],
+    ) -> tuple[str, int]:
+        attempts = 0
+        for token_budget in reversed(self.DIRECT_TOKEN_LADDER):
+            if token_budget >= start_tokens:
+                continue
+            attempts += 1
+            candidate_text = self._normalize_output_text(
+                self._request_direct_text(crop, max_tokens=token_budget)
+            )
+            candidate_issue = self._classify_direct_retry_reason(candidate_text, metrics=metrics)
+            if candidate_issue is None and candidate_text:
+                return candidate_text, attempts
+        return "", attempts
+
+    def _classify_direct_retry_reason(
+        self,
+        text: str,
+        *,
+        metrics: dict[str, float | int] | None = None,
+    ) -> str | None:
         if not text:
             return "empty"
 
@@ -679,7 +820,7 @@ class PaddleOCRVLEngine(OCREngine):
             return "placeholder"
         if self._looks_structured_output(text):
             return "structured"
-        if self._looks_repetition_failure(text):
+        if self._looks_repetition_failure(text, metrics=metrics):
             return "repetition"
         return None
 
@@ -700,10 +841,20 @@ class PaddleOCRVLEngine(OCREngine):
 
         return False
 
-    def _looks_repetition_failure(self, text: str) -> bool:
+    def _looks_repetition_failure(
+        self,
+        text: str,
+        *,
+        metrics: dict[str, float | int] | None = None,
+    ) -> bool:
         stripped = self._normalize_output_text(text)
         if not stripped:
             return False
+
+        component_count = int((metrics or {}).get("component_count", 0) or 0)
+        width = int((metrics or {}).get("width", 0) or 0)
+        height = int((metrics or {}).get("height", 0) or 0)
+        tall_narrow_crop = height >= 500 and width <= 140
 
         normalized_lines = [
             re.sub(r"\s+", "", line)
@@ -717,7 +868,8 @@ class PaddleOCRVLEngine(OCREngine):
                     normalized_lines[idx]
                 ):
                     line_run += 1
-                    if line_run >= 4:
+                    repeat_threshold = 2 if tall_narrow_crop and len(normalized_lines[idx]) <= 4 else 4
+                    if line_run >= repeat_threshold:
                         return True
                 else:
                     line_run = 1
@@ -744,9 +896,55 @@ class PaddleOCRVLEngine(OCREngine):
                     continue
                 span = unit_len * count
                 if span / float(len(compact)) >= 0.6:
+                    if start > 0 and component_count >= 70 and height >= 450 and len(set(unit)) == 1:
+                        continue
                     return True
 
         return False
+
+    def _should_try_tiny_budget_probe(self, text: str, metrics: dict[str, float | int]) -> bool:
+        if not text or len(text) < 2 or len(text) > 3:
+            return False
+        return (
+            90 <= int(metrics["width"]) <= 120
+            and int(metrics["height"]) <= 140
+            and int(metrics["component_count"]) <= 6
+            and float(metrics["density"]) >= 0.75
+        )
+
+    def _should_try_high_contrast_retry(
+        self,
+        text: str,
+        crop: np.ndarray,
+        metrics: dict[str, float | int],
+    ) -> bool:
+        if not text or len(text) != 1:
+            return False
+        if self._is_punctuation_only(text):
+            return False
+        return crop.shape[0] * crop.shape[1] >= 50_000 and int(metrics["component_count"]) <= 12
+
+    def _content_metrics(self, crop: np.ndarray) -> dict[str, float | int]:
+        height, width = crop.shape[:2]
+        area = int(height * width)
+        content_bboxes = detect_content_in_bbox(crop, min_area=10, margin=1)
+        if content_bboxes.size == 0:
+            return {
+                "width": width,
+                "height": height,
+                "component_count": 0,
+                "density": 0.0,
+            }
+
+        bboxes = np.asarray(content_bboxes, dtype=int)
+        component_area = int(np.sum((bboxes[:, 2] - bboxes[:, 0]) * (bboxes[:, 3] - bboxes[:, 1])))
+        density = (component_area / float(area)) if area > 0 else 0.0
+        return {
+            "width": width,
+            "height": height,
+            "component_count": int(len(bboxes)),
+            "density": float(density),
+        }
 
     def _empty_reason_for(self, primary_issue: str | None, retry_issue: str | None) -> str:
         issue = retry_issue or primary_issue or "empty"
