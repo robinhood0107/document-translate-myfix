@@ -7,6 +7,7 @@
 - `main`에는 배포에 필요한 제품 코드만 남깁니다.
 - `develop`에는 통합 대상 제품 코드만 남깁니다.
 - benchmark 실험, preset, 보고서, 차트, 결과 로그는 `benchmarking/lab` 브랜치에서만 유지합니다.
+- benchmark harness는 가능하면 실제 offscreen 앱 파이프라인을 기준으로 유지합니다.
 
 핵심 원칙은 다음과 같습니다.
 
@@ -68,6 +69,32 @@ benchmark 실험 결과를 바탕으로 아래 종류의 변경만 `develop` 후
 - `docs/banchmark_report/`
 - `docs/assets/benchmarking/`
 - benchmark 결과 수치, 승자 preset 설명, 차트 링크가 들어간 README 변경
+
+## benchmark family 구조 규칙
+
+benchmark family는 가능한 한 아래 구조를 함께 갖춥니다.
+
+- 실행 런처
+  - `pipeline` BAT
+  - `suite` BAT
+  - CUDA12 / CUDA13 쌍
+- 결과 루트
+  - `./banchmark_result_log/<family>/`
+- 문서 세트
+  - `docs/benchmark/<family>/workflow-ko.md`
+  - `docs/benchmark/<family>/usage-ko.md`
+  - `docs/benchmark/<family>/architecture-ko.md`
+  - `docs/benchmark/<family>/results-history-ko.md`
+  - `docs/banchmark_report/<family>-report-ko.md`
+- generated 자산
+  - `docs/assets/benchmarking/<family>/latest`
+  - `docs/assets/benchmarking/<family>/history/<snapshot-id>`
+
+공식 점수 범위가 파이프라인 전체가 아닌 일부일 경우, 문서와 보고서에서 아래를 반드시 분리합니다.
+
+- 실제 실행 범위
+- 공식 점수 범위
+- 합격/탈락 게이트
 
 ## benchmark 결과를 `develop`로 반영하는 절차
 
