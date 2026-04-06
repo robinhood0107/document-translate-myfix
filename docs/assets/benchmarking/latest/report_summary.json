@@ -1,18 +1,39 @@
 {
-  "manifest": "./benchmarks/report_manifest.yaml",
-  "results_root": "./banchmark_result_log",
-  "generated_at": "2026-04-06T05:18:26.852105+09:00",
-  "generated_at_display": "2026-04-06 05:18:26 대한민국 표준시",
-  "benchmark_name": "Translation-Only Gemma + PaddleOCR GPU Optimization",
-  "benchmark_kind": "translation-only preset sweep",
-  "benchmark_scope": "Gemma sampler temperature sweep + n_gpu_layers sweep with PaddleOCR front on CPU",
-  "active_preset": "translation-baseline",
-  "winning_candidate_preset": "translation-t06",
-  "resolved_winner_preset": "translation-t06",
+  "manifest": "./banchmark_result_log/20260406_054332_b8665-gemma4_suite/report_manifest_b8665.yaml",
+  "results_root": "./banchmark_result_log/20260406_054332_b8665-gemma4_suite",
+  "generated_at": "2026-04-06T10:14:05.792659+09:00",
+  "generated_at_display": "2026-04-06 10:14:05 대한민국 표준시",
+  "benchmark_name": "b8665 Gemma 4 Parser Translation Optimization",
+  "benchmark_kind": "managed benchmark sweep",
+  "benchmark_scope": "old-image vs b8665, json_object vs json_schema, chunk_size sweep, temperature sweep, n_gpu_layers sweep",
+  "build_id": "b8665",
+  "active_image": "local/llama.cpp:server-cuda-b8665",
+  "verification": {
+    "status": "PASS",
+    "issues": [],
+    "verification_dir": "./banchmark_result_log/20260406_054332_b8665-gemma4_suite/_server_verification",
+    "container_image": "local/llama.cpp:server-cuda-b8665",
+    "checks": {
+      "image_matches": true,
+      "build_marker_found": true,
+      "arch_gemma4_found": true,
+      "tool_response_eog_found": true,
+      "object_smoke_ok": true,
+      "schema_smoke_ok": true
+    }
+  },
+  "winning_candidate_preset": "b8665-schema-ch6-t06-ngl23",
+  "resolved_winner_preset": "b8665-schema-ch6-t06-ngl23",
+  "winning_format": "json_schema",
+  "winning_chunk_size": 6,
+  "winning_temperature": 0.6,
+  "winning_n_gpu_layers": 23,
+  "elapsed_delta_vs_old_image": "75.524s",
   "charts": {
-    "batch_elapsed": "./docs/assets/benchmarking/latest/batch_elapsed_comparison.png",
-    "n_gpu_layers_translate_median": "./docs/assets/benchmarking/latest/n_gpu_layers_translate_median.png",
-    "temperature_translate_median": "./docs/assets/benchmarking/latest/temperature_translate_median.png",
-    "quality_metrics": "./docs/assets/benchmarking/latest/quality_metrics_comparison.png"
+    "control_elapsed": "./docs/assets/benchmarking/latest/b8665_control_elapsed_comparison.png",
+    "chunk_translate_median": "./docs/assets/benchmarking/latest/b8665_chunk_translate_median.png",
+    "temperature_translate_median": "./docs/assets/benchmarking/latest/b8665_temperature_translate_median.png",
+    "n_gpu_layers_translate_median": "./docs/assets/benchmarking/latest/b8665_n_gpu_layers_translate_median.png",
+    "quality_metrics": "./docs/assets/benchmarking/latest/b8665_quality_metrics_comparison.png"
   }
 }
