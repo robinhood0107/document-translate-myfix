@@ -10,8 +10,8 @@
     "extra_context": ""
   },
   "gemma": {
-    "image": "ghcr.io/ggml-org/llama.cpp:server-cuda",
-    "pull_policy": "missing",
+    "image": "local/llama.cpp:server-cuda-pre-b8665",
+    "pull_policy": "never",
     "endpoint_url": "http://127.0.0.1:18080/v1",
     "model": "gemma-4-26b-a4b-it-heretic.q3_k_m.gguf",
     "model_path": "/models/gemma-4-26b-a4b-it-heretic.q3_k_m.gguf",

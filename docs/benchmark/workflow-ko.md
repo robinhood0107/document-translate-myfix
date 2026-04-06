@@ -46,14 +46,15 @@ scripts\benchmark_suite_cuda13.bat --suite-profile b8665-gemma4
 
 `b8665-gemma4` profile의 큰 순서는 아래와 같습니다.
 
-1. `translation-old-image-baseline` one-page / batch control
-2. `b8665-object-control` one-page / batch control
-3. `b8665-schema-control` one-page / batch control
-4. format winner 기준 `chunk_size` sweep
-5. format + chunk winner 기준 `temperature` sweep
-6. format + chunk + temperature winner 기준 `n_gpu_layers` sweep
-7. 필요 시 `ctx=3072` rescue, low-think fallback
-8. `docs/banchmark_report/report-ko.md` 자동 재생성
+1. `Gemma 4 verification` managed startup + raw API smoke
+2. `translation-old-image-baseline` one-page / batch control
+3. `b8665-object-control` one-page / batch control
+4. `b8665-schema-control` one-page / batch control
+5. format winner 기준 `chunk_size` sweep
+6. format + chunk winner 기준 `temperature` coarse/fine sweep
+7. format + chunk + temperature winner 기준 `n_gpu_layers` sweep
+8. 필요 시 `ctx=3072` rescue, low-think fallback
+9. `docs/banchmark_report/report-ko.md` 자동 재생성
 
 ## 수동 실행
 
@@ -112,6 +113,12 @@ scripts\benchmark_pipeline_cuda13.bat summary
 - `docker_logs/gemma-local-server.log`
 - `docker_logs/paddleocr-server.log`
 - `docker_logs/paddleocr-vllm.log`
+- `_server_verification/verification.json`
+- `_server_verification/request_object.json`
+- `_server_verification/response_object.json`
+- `_server_verification/request_schema.json`
+- `_server_verification/response_schema.json`
+- `_server_verification/gemma_log_tail.txt`
 
 이 로그는 `b8665` build/version 확인, Gemma 4 template/parser 관련 startup 메시지 확인, structured output 이상 징후 확인에 사용합니다.
 
