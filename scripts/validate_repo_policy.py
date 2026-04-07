@@ -34,10 +34,13 @@ BENCHMARK_ONLY_FILE_PATTERNS = (
     re.compile(r"^scripts/benchmark_[^/]+$"),
     re.compile(r"^scripts/generate_benchmark_report\.py$"),
     re.compile(r"^scripts/generate_paddleocr_vl15_report\.py$"),
+    re.compile(r"^scripts/generate_ocr_combo_report\.py$"),
     re.compile(r"^scripts/summarize_benchmarks\.py$"),
     re.compile(r"^scripts/compare_translation_exports\.py$"),
     re.compile(r"^scripts/apply_benchmark_preset\.py$"),
     re.compile(r"^scripts/paddleocr_vl15_[^/]+$"),
+    re.compile(r"^scripts/ocr_combo_[^/]+$"),
+    re.compile(r"^scripts/compare_ocr_combo_reference\.py$"),
 )
 
 
@@ -149,6 +152,33 @@ def validate_benchmark_family_structure() -> list[str]:
             errors.append(
                 f"PaddleOCR-VL15 docs/report must mention both execution_scope and official_score_scope: {path.relative_to(root)}"
             )
+
+    combo_anchor = root / "docs" / "benchmark" / "ocr-combo"
+    if combo_anchor.exists():
+        combo_required_paths = [
+            root / "scripts" / "ocr_combo_benchmark.py",
+            root / "scripts" / "generate_ocr_combo_report.py",
+            root / "scripts" / "compare_ocr_combo_reference.py",
+            root / "docs" / "benchmark" / "ocr-combo" / "architecture-ko.md",
+            root / "docs" / "benchmark" / "ocr-combo" / "workflow-ko.md",
+            root / "docs" / "benchmark" / "ocr-combo" / "usage-ko.md",
+            root / "docs" / "benchmark" / "ocr-combo" / "results-history-ko.md",
+            root / "docs" / "banchmark_report" / "ocr-combo-report-ko.md",
+        ]
+        for path in combo_required_paths:
+            if not path.exists():
+                errors.append(f"Missing required OCR combo benchmark family asset: {path.relative_to(root)}")
+        for path in (
+            root / "docs" / "benchmark" / "ocr-combo" / "architecture-ko.md",
+            root / "docs" / "banchmark_report" / "ocr-combo-report-ko.md",
+        ):
+            if not path.is_file():
+                continue
+            text = path.read_text(encoding="utf-8")
+            if "execution_scope" not in text or "official_score_scope" not in text:
+                errors.append(
+                    f"OCR combo docs/report must mention both execution_scope and official_score_scope: {path.relative_to(root)}"
+                )
     return errors
 
 
