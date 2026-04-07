@@ -29,13 +29,22 @@ locked gold가 없으면 suite는 benchmark를 끝까지 돌리지 않고 아래
 locked gold가 있으면 같은 명령으로 아래를 끝까지 수행합니다.
 
 1. China/japan smoke
-2. corpus별 default compare
-3. hard gate 통과 후보만 유지
-4. `PaddleOCR VL` / `HunyuanOCR` stepwise tuning
-5. corpus winner `cold 3회` final confirm
-6. latest report/history snapshot 갱신
+2. crop debug (`effective_crop_xyxy`, `retry_crop_xyxy`, `crop_source`) 확인
+3. corpus별 default compare
+4. hard gate 통과 후보만 유지
+5. `PaddleOCR VL` / `HunyuanOCR` stepwise tuning
+6. corpus winner `cold 3회` final confirm
+7. latest report/history snapshot 갱신
 
-## 5. 산출물
+## 5. 현재 판정 원칙
+
+- 속도는 Gemma까지 포함한 full pipeline elapsed입니다.
+- 품질 게이트는 OCR-only입니다.
+- translation similarity는 참고 지표일 뿐 hard gate가 아닙니다.
+- `gold_text=""` block은 geometry를 유지하고 텍스트 hard gate만 제외합니다.
+- crop overreach는 `xyxy` 우선 crop과 bubble clamp 회귀로 확인합니다.
+
+## 6. 산출물
 
 - suite manifest
 - corpus별 smoke/default/tuning/final confirm raw 결과

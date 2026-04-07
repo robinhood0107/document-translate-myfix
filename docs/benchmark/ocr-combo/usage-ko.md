@@ -24,6 +24,7 @@ scripts\benchmark_suite.bat --suite-profile ocr-combo-runtime
   - `speed_score_scope=full-pipeline elapsed`
   - `quality_gate_scope=OCR-only`
   - `gold_source=human-reviewed`
+  - `gold_empty_text_policy=geometry-kept-text-skipped`
 
 ## 첫 실행
 
@@ -41,10 +42,18 @@ scripts\benchmark_suite.bat --suite-profile ocr-combo-runtime
 locked gold가 있으면 같은 명령이 정식 benchmark mode로 동작합니다.
 
 1. China/japan smoke
-2. corpus별 default 비교
-3. `PaddleOCR VL` / `HunyuanOCR` stepwise tuning
-4. corpus winner `cold 3회` final confirm
-5. latest report/history snapshot 갱신
+2. crop debug (`effective_crop_xyxy`, `retry_crop_xyxy`, `crop_source`) 확인
+3. corpus별 default 비교
+4. `PaddleOCR VL` / `HunyuanOCR` stepwise tuning
+5. corpus winner `cold 3회` final confirm
+6. latest report/history snapshot 갱신
+
+## OCR canonical normalization
+
+- `あ゙/ぁ/あ`, `お゙/ぉ/お` 같은 특수 가나는 base 글자로 접어 비교합니다.
+- `ヴ`는 `ウ` 계열로 비교합니다.
+- `「」『』,，、♡♥`는 있어도 되고 없어도 되는 문자로 봅니다.
+- 이 규칙은 OCR exact match와 CER 계산에 동일하게 적용합니다.
 
 ## 보고서
 
