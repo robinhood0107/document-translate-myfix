@@ -9,6 +9,7 @@ import torch
 from modules.ocr.base import OCREngine
 from modules.utils.textblock import TextBlock, adjust_text_line_coordinates
 from modules.utils.download import ModelDownloader, ModelID, models_base_dir
+from modules.utils.ocr_debug import resolve_block_crop_bbox, set_block_ocr_crop_diagnostics
 
 
 class MangaOCREngine(OCREngine):
@@ -37,17 +38,31 @@ class MangaOCREngine(OCREngine):
         
     def process_image(self, img: np.ndarray, blk_list: list[TextBlock]) -> list[TextBlock]:
         for blk in blk_list:
-            # Get box coordinates
-            if blk.bubble_xyxy is not None:
-                x1, y1, x2, y2 = blk.bubble_xyxy
-            else:
+            x_ratio = max(0.0, float(self.expansion_percentage) / 100.0)
+            bbox, crop_source = resolve_block_crop_bbox(
+                blk,
+                img.shape,
+                x_ratio=x_ratio,
+                y_ratio=x_ratio,
+                bubble_as_clamp=True,
+                fallback_to_bubble=getattr(blk, "xyxy", None) is None,
+            )
+            if bbox is None and blk.xyxy is not None:
                 x1, y1, x2, y2 = adjust_text_line_coordinates(
-                    blk.xyxy, 
-                    self.expansion_percentage, 
-                    self.expansion_percentage, 
-                    img
+                    blk.xyxy,
+                    self.expansion_percentage,
+                    self.expansion_percentage,
+                    img,
                 )
-            
+                bbox = (x1, y1, x2, y2)
+                crop_source = "xyxy"
+
+            if bbox is None:
+                blk.text = ""
+                continue
+
+            set_block_ocr_crop_diagnostics(blk, effective_crop_xyxy=bbox, crop_source=crop_source)
+            x1, y1, x2, y2 = bbox
             # Check if coordinates are valid
             if x1 < x2 and y1 < y2 and x1 >= 0 and y1 >= 0 and x2 <= img.shape[1] and y2 <= img.shape[0]:
                 # Crop image and run OCR

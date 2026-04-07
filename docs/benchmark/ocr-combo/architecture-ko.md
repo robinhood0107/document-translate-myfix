@@ -18,6 +18,17 @@
 
 즉 실제 실행은 detect, OCR, translate, inpaint, render, save까지 모두 돌리고, 공식 점수는 전체 elapsed를 사용합니다. 다만 합격/탈락 게이트는 OCR geometry와 OCR text 품질만 봅니다.
 
+## canonical OCR normalization
+
+OCR text 비교는 사람 검수 gold를 그대로 byte-for-byte 비교하지 않습니다.
+
+- 공백/줄바꿈은 제거합니다.
+- 작은 가나, 탁점이 붙은 특수 가나, `ヴ` 계열은 같은 base 글자로 접어 비교합니다.
+- `「」『』,，、♡♥`는 있어도 되고 없어도 되는 문자로 취급합니다.
+- `gold_text=""` block은 geometry를 유지하되 non-empty OCR text hard gate에서는 제외합니다.
+
+이 규칙은 OCR exact match와 CER 계산에 동일하게 적용됩니다.
+
 ## 비교군
 
 ### China
@@ -70,6 +81,12 @@ hard gate는 아래만 사용합니다.
 - `overgenerated_block_count = 0`
 
 translation similarity는 hard gate가 아니라 soft metric으로만 남깁니다.
+
+## crop overreach 회귀
+
+- OCR crop은 `xyxy` 우선입니다.
+- `bubble_xyxy`는 OCR 입력을 넓히는 기본 crop이 아니라 clamp boundary로만 사용합니다.
+- 대표 회귀 케이스는 `p_018`처럼 같은 말풍선 안 다른 block까지 같이 읽어버리는 경우입니다.
 
 ## 튜닝 원칙
 

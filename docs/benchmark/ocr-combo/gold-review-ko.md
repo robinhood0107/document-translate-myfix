@@ -36,6 +36,25 @@ block마다 `gold_text`만 수정합니다.
 - seed OCR이 맞으면 그대로 둡니다.
 - seed OCR이 틀렸거나 빠졌으면 `gold_text`를 고칩니다.
 - geometry는 기본적으로 수정하지 않습니다.
+- block을 통째로 지우지 않습니다.
+- 너무 인식이 어렵거나, 품질 비교에서 텍스트를 강제하고 싶지 않은 block은 `gold_text=""`로 둡니다.
+
+## 어떤 경우를 허용하나
+
+OCR 비교는 exact glyph 복제가 아니라 canonical OCR normalization을 사용합니다.
+
+- `あ゙`, `ぁ`, `あ`는 모두 `あ`로 비교합니다.
+- `お゙`, `ぉ`, `お`도 같은 방식으로 base 글자로 접습니다.
+- `ヴ`는 `ウ` 계열로 비교합니다.
+- `「」『』,，、♡♥`는 있어도 되고 없어도 됩니다.
+
+즉 정확히 같은 글리프가 아니어도, 이번 benchmark 규칙에서 허용한 변형이면 정답으로 봅니다.
+
+## false positive / 배경 오검출은 어떻게 하나
+
+- 배경을 글자로 잘못 잡았더라도 block을 삭제하지 않습니다.
+- 그 block을 benchmark 구조에 남겨야 geometry 비교가 꼬이지 않습니다.
+- 이런 경우는 보통 `gold_text=""`로 두고 텍스트 hard gate에서 제외합니다.
 
 ## 언제 exclude를 쓰나
 
