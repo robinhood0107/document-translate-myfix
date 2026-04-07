@@ -146,6 +146,7 @@ Optionnel :
 
 Ces outils peuvent être utilisés pour n'importe laquelle des langues prises en charge.
 
+* PPOCRv5 (sélection explicite possible aussi pour le japonais via le modèle mobile multilingue officiel PP-OCRv5 ; la valeur par défaut reste manga-ocr)
 * Gemini 2.0 Flash
 * Microsoft Azure Vision
 * PaddleOCR VL (service Docker local `/layout-parsing`)
