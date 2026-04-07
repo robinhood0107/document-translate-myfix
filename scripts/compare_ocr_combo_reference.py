@@ -18,6 +18,13 @@ from benchmark_common import write_json
 
 XYXY_IOU_THRESHOLD = 0.90
 BUBBLE_IOU_THRESHOLD = 0.85
+GEOMETRY_RECALL_THRESHOLD = 0.98
+GEOMETRY_PRECISION_THRESHOLD = 0.98
+NON_EMPTY_RETENTION_THRESHOLD = 0.98
+OCR_CHAR_ERROR_RATE_THRESHOLD = 0.02
+PAGE_P95_OCR_CHAR_ERROR_RATE_THRESHOLD = 0.05
+EMPTY_RATE_DELTA_THRESHOLD = 0.02
+SINGLE_CHAR_RATE_DELTA_THRESHOLD = 0.02
 
 
 def _load_json(path: Path) -> dict[str, Any]:
@@ -48,20 +55,6 @@ def _load_pages(run_dir: Path) -> tuple[dict[str, Any], dict[str, dict[str, Any]
 
 def _load_summary(run_dir: Path) -> dict[str, Any]:
     return _load_json(run_dir / "summary.json")
-
-
-def _load_translation_exports(run_dir: Path) -> dict[str, dict[str, str]]:
-    exports: dict[str, dict[str, str]] = {}
-    for path in sorted(run_dir.rglob("*_translated.json")):
-        try:
-            payload = json.loads(path.read_text(encoding="utf-8"))
-        except json.JSONDecodeError:
-            continue
-        if not isinstance(payload, dict):
-            continue
-        page_name = path.name.replace("_translated.json", "")
-        exports[page_name] = {str(key): str(value or "") for key, value in payload.items()}
-    return exports
 
 
 def _page_quality(page: dict[str, Any]) -> dict[str, int]:
@@ -103,216 +96,331 @@ def _as_box(value: object) -> list[float] | None:
         return None
 
 
+def _levenshtein_distance(left: str, right: str) -> int:
+    if left == right:
+        return 0
+    if not left:
+        return len(right)
+    if not right:
+        return len(left)
+    prev = list(range(len(right) + 1))
+    for i, left_ch in enumerate(left, start=1):
+        curr = [i]
+        for j, right_ch in enumerate(right, start=1):
+            insert_cost = curr[j - 1] + 1
+            delete_cost = prev[j] + 1
+            replace_cost = prev[j - 1] + (0 if left_ch == right_ch else 1)
+            curr.append(min(insert_cost, delete_cost, replace_cost))
+        prev = curr
+    return prev[-1]
+
+
+def _percentile(values: list[float], p: float) -> float:
+    if not values:
+        return 0.0
+    ordered = sorted(float(value) for value in values)
+    rank = max(0, min(len(ordered) - 1, int((len(ordered) - 1) * p)))
+    return ordered[rank]
+
+
+def _single_char_like(text: str) -> bool:
+    return 0 < len(_normalize_text(text)) <= 1
+
+
+def _load_gold_pages(gold_path: Path) -> tuple[dict[str, Any], dict[str, dict[str, Any]]]:
+    payload = _load_json(gold_path)
+    pages = payload.get("pages", [])
+    if not isinstance(pages, list):
+        raise ValueError(f"Expected pages list in {gold_path}")
+    result: dict[str, dict[str, Any]] = {}
+    for page in pages:
+        if not isinstance(page, dict):
+            continue
+        image_stem = str(page.get("image_stem", "") or "")
+        if image_stem:
+            result[image_stem] = page
+    return payload, result
+
+
+def _gold_page_blocks(page: dict[str, Any]) -> list[dict[str, Any]]:
+    if str(page.get("status", "active") or "active").lower() == "excluded":
+        return []
+    blocks = page.get("blocks", [])
+    if not isinstance(blocks, list):
+        return []
+    return [block for block in blocks if isinstance(block, dict)]
+
+
+def _gold_page_quality(page: dict[str, Any]) -> dict[str, int]:
+    blocks = _gold_page_blocks(page)
+    total = len(blocks)
+    non_empty = 0
+    empty = 0
+    single_char_like = 0
+    for block in blocks:
+        gold_text = str(block.get("gold_text", block.get("seed_text", "")) or "")
+        normalized = _normalize_text(gold_text)
+        if normalized:
+            non_empty += 1
+        else:
+            empty += 1
+        if _single_char_like(gold_text):
+            single_char_like += 1
+    return {
+        "block_count": total,
+        "non_empty": non_empty,
+        "empty": empty,
+        "single_char_like": single_char_like,
+    }
+
+
 def _match_blocks(
-    reference_blocks: list[dict[str, Any]],
+    gold_blocks: list[dict[str, Any]],
     candidate_blocks: list[dict[str, Any]],
-) -> tuple[list[dict[str, Any]], list[str], list[int]]:
+) -> tuple[list[dict[str, Any]], list[str], list[int], list[int]]:
     scores: list[tuple[float, int, int, str]] = []
-    for ref_index, ref_block in enumerate(reference_blocks):
+    for gold_index, gold_block in enumerate(gold_blocks):
         for cand_index, cand_block in enumerate(candidate_blocks):
-            ref_bubble = _as_box(ref_block.get("bubble_xyxy"))
+            gold_bubble = _as_box(gold_block.get("bubble_xyxy"))
             cand_bubble = _as_box(cand_block.get("bubble_xyxy"))
-            if ref_bubble and cand_bubble:
-                score = _xyxy_iou(ref_bubble, cand_bubble)
+            if gold_bubble and cand_bubble:
+                score = _xyxy_iou(gold_bubble, cand_bubble)
                 threshold = BUBBLE_IOU_THRESHOLD
                 match_kind = "bubble"
             else:
-                ref_xyxy = _as_box(ref_block.get("xyxy"))
+                gold_xyxy = _as_box(gold_block.get("xyxy"))
                 cand_xyxy = _as_box(cand_block.get("xyxy"))
-                if not ref_xyxy or not cand_xyxy:
+                if not gold_xyxy or not cand_xyxy:
                     continue
-                score = _xyxy_iou(ref_xyxy, cand_xyxy)
+                score = _xyxy_iou(gold_xyxy, cand_xyxy)
                 threshold = XYXY_IOU_THRESHOLD
                 match_kind = "xyxy"
             if score >= threshold:
-                scores.append((score, ref_index, cand_index, match_kind))
+                scores.append((score, gold_index, cand_index, match_kind))
 
     matches: list[dict[str, Any]] = []
-    used_ref: set[int] = set()
+    used_gold: set[int] = set()
     used_cand: set[int] = set()
-    for score, ref_index, cand_index, match_kind in sorted(scores, reverse=True):
-        if ref_index in used_ref or cand_index in used_cand:
+    for score, gold_index, cand_index, match_kind in sorted(scores, reverse=True):
+        if gold_index in used_gold or cand_index in used_cand:
             continue
-        used_ref.add(ref_index)
+        used_gold.add(gold_index)
         used_cand.add(cand_index)
         matches.append(
             {
-                "reference_index": ref_index,
+                "gold_index": gold_index,
                 "candidate_index": cand_index,
                 "iou": round(score, 4),
                 "match_kind": match_kind,
             }
         )
 
-    issues: list[str] = []
+    unmatched_gold = sorted(set(range(len(gold_blocks))) - used_gold)
     unmatched_candidate = sorted(set(range(len(candidate_blocks))) - used_cand)
-    if len(matches) < len(reference_blocks):
-        unmatched_reference = sorted(set(range(len(reference_blocks))) - used_ref)
-        if unmatched_reference:
-            issues.append(f"unmatched_reference_blocks={unmatched_reference}")
+    issues: list[str] = []
+    if unmatched_gold:
+        issues.append(f"unmatched_gold_blocks={unmatched_gold}")
     if unmatched_candidate:
         issues.append(f"unmatched_candidate_blocks={unmatched_candidate}")
-
-    return sorted(matches, key=lambda item: item["reference_index"]), issues, unmatched_candidate
-
-
-def _sorted_export_values(payload: dict[str, str]) -> list[str]:
-    def sort_key(key: str) -> tuple[int, str]:
-        prefix, _, suffix = key.partition("_")
-        try:
-            number = int(suffix) if prefix == "block" else 10**9
-        except ValueError:
-            number = 10**9
-        return number, key
-
-    return [str(payload[key] or "") for key in sorted(payload.keys(), key=sort_key)]
+    return sorted(matches, key=lambda item: item["gold_index"]), issues, unmatched_gold, unmatched_candidate
 
 
-def _page_translation_text(page: dict[str, Any], exports: dict[str, dict[str, str]]) -> str:
-    page_name = str(page.get("image_stem", "") or "")
-    export_payload = exports.get(page_name)
-    if export_payload:
-        return _normalize_text("".join(_sorted_export_values(export_payload)))
-    blocks = page.get("blocks", []) if isinstance(page.get("blocks"), list) else []
-    return _normalize_text("".join(str(block.get("translation", "") or "") for block in blocks if isinstance(block, dict)))
-
-
-def compare_runs(reference_run_dir: Path, candidate_run_dir: Path) -> dict[str, Any]:
-    reference_summary = _load_summary(reference_run_dir)
+def compare_runs(gold_path: Path, candidate_run_dir: Path) -> dict[str, Any]:
+    gold_payload, gold_pages = _load_gold_pages(gold_path)
     candidate_summary = _load_summary(candidate_run_dir)
-    _, reference_pages = _load_pages(reference_run_dir)
     _, candidate_pages = _load_pages(candidate_run_dir)
-    reference_exports = _load_translation_exports(reference_run_dir)
-    candidate_exports = _load_translation_exports(candidate_run_dir)
 
-    total_reference_blocks = 0
-    total_reference_non_empty = 0
-    matched_reference_non_empty = 0
+    total_gold_blocks = 0
+    total_gold_non_empty = 0
+    total_candidate_non_empty = 0
+    matched_gold_blocks = 0
     matched_candidate_non_empty = 0
+    matched_gold_non_empty = 0
     ocr_exact_matches = 0
     translation_exact_matches = 0
     translation_similarity_values: list[float] = []
-    page_translation_similarity_values: list[float] = []
-    unmatched_candidate_blocks = 0
-    overgenerated_translation_blocks = 0
+    page_ocr_char_error_rates: list[float] = []
+    total_char_errors = 0
+    total_gold_chars = 0
+    unmatched_candidate_block_count = 0
+    overgenerated_block_count = 0
+    excluded_unstable_pages: list[str] = []
 
-    reference_quality = {"block_count": 0, "non_empty": 0, "empty": 0, "single_char_like": 0}
+    gold_quality = {"block_count": 0, "non_empty": 0, "empty": 0, "single_char_like": 0}
     candidate_quality = {"block_count": 0, "non_empty": 0, "empty": 0, "single_char_like": 0}
     page_results: list[dict[str, Any]] = []
 
-    for page_name in sorted(reference_pages):
-        reference_page = reference_pages[page_name]
+    for page_name in sorted(gold_pages):
+        gold_page = gold_pages[page_name]
+        if str(gold_page.get("status", "active") or "active").lower() == "excluded":
+            excluded_unstable_pages.append(page_name)
+            continue
+
         candidate_page = candidate_pages.get(page_name)
-        reference_quality_page = _page_quality(reference_page)
-        for key, value in reference_quality_page.items():
-            reference_quality[key] += value
+        gold_page_quality = _gold_page_quality(gold_page)
+        for key, value in gold_page_quality.items():
+            gold_quality[key] += value
+
+        gold_blocks = _gold_page_blocks(gold_page)
+        total_gold_blocks += len(gold_blocks)
+        gold_non_empty_indices = {
+            idx
+            for idx, block in enumerate(gold_blocks)
+            if _normalize_text(block.get("gold_text", block.get("seed_text", "")))
+        }
+        total_gold_non_empty += len(gold_non_empty_indices)
 
         if not isinstance(candidate_page, dict):
+            total_gold_chars += sum(
+                len(_normalize_text(gold_blocks[idx].get("gold_text", gold_blocks[idx].get("seed_text", ""))))
+                for idx in gold_non_empty_indices
+            )
             page_results.append(
                 {
                     "page": page_name,
                     "pass": False,
                     "reason": "candidate page missing",
+                    "page_ocr_char_error_rate": 1.0,
                 }
             )
-            total_reference_blocks += reference_quality_page["block_count"]
-            total_reference_non_empty += reference_quality_page["non_empty"]
+            page_ocr_char_error_rates.append(1.0)
             continue
 
-        candidate_quality_page = _page_quality(candidate_page)
-        for key, value in candidate_quality_page.items():
+        candidate_page_quality = _page_quality(candidate_page)
+        for key, value in candidate_page_quality.items():
             candidate_quality[key] += value
 
-        reference_blocks = reference_page.get("blocks", []) if isinstance(reference_page.get("blocks"), list) else []
-        candidate_blocks = candidate_page.get("blocks", []) if isinstance(candidate_page.get("blocks"), list) else []
-        total_reference_blocks += len(reference_blocks)
-
-        matches, issues, unmatched_candidate = _match_blocks(reference_blocks, candidate_blocks)
-        unmatched_candidate_blocks += len(unmatched_candidate)
-
-        reference_non_empty_indices = {
+        candidate_blocks = (
+            candidate_page.get("blocks", []) if isinstance(candidate_page.get("blocks"), list) else []
+        )
+        candidate_non_empty_indices = {
             idx
-            for idx, block in enumerate(reference_blocks)
+            for idx, block in enumerate(candidate_blocks)
             if _normalize_text(block.get("normalized_text", ""))
         }
-        total_reference_non_empty += len(reference_non_empty_indices)
-        matched_index_map = {int(item["reference_index"]): int(item["candidate_index"]) for item in matches}
-        matched_ref_non_empty_indices = reference_non_empty_indices & set(matched_index_map.keys())
-        matched_reference_non_empty += len(matched_ref_non_empty_indices)
+        total_candidate_non_empty += len(candidate_non_empty_indices)
 
-        for ref_index in matched_ref_non_empty_indices:
-            candidate_index = matched_index_map[ref_index]
-            ref_block = reference_blocks[ref_index]
-            cand_block = candidate_blocks[candidate_index]
-            ref_text = _normalize_text(ref_block.get("normalized_text", ""))
-            cand_text = _normalize_text(cand_block.get("normalized_text", ""))
-            if cand_text:
+        matches, issues, unmatched_gold, unmatched_candidate = _match_blocks(gold_blocks, candidate_blocks)
+        matched_gold_blocks += len(matches)
+        unmatched_candidate_block_count += len(unmatched_candidate)
+
+        match_map = {int(item["gold_index"]): int(item["candidate_index"]) for item in matches}
+
+        page_char_errors = 0
+        page_gold_chars = 0
+        page_ocr_exact_matches = 0
+        page_translation_similarity_values: list[float] = []
+        page_translation_exact_matches = 0
+
+        for gold_index in gold_non_empty_indices:
+            gold_block = gold_blocks[gold_index]
+            gold_text_raw = str(gold_block.get("gold_text", gold_block.get("seed_text", "")) or "")
+            gold_text = _normalize_text(gold_text_raw)
+            gold_char_count = max(1, len(gold_text))
+            page_gold_chars += gold_char_count
+            total_gold_chars += gold_char_count
+
+            candidate_index = match_map.get(gold_index)
+            if candidate_index is None:
+                page_char_errors += gold_char_count
+                total_char_errors += gold_char_count
+                continue
+
+            candidate_block = candidate_blocks[candidate_index]
+            candidate_text = _normalize_text(candidate_block.get("normalized_text", ""))
+            if candidate_text:
                 matched_candidate_non_empty += 1
-            if ref_text == cand_text:
-                ocr_exact_matches += 1
+            matched_gold_non_empty += 1
 
-            ref_translation = _normalize_text(ref_block.get("normalized_translation", ""))
-            cand_translation = _normalize_text(cand_block.get("normalized_translation", ""))
-            if ref_translation == cand_translation:
-                translation_exact_matches += 1
-            translation_similarity_values.append(
-                SequenceMatcher(None, ref_translation, cand_translation).ratio()
+            char_errors = _levenshtein_distance(gold_text, candidate_text)
+            page_char_errors += char_errors
+            total_char_errors += char_errors
+            if gold_text == candidate_text:
+                ocr_exact_matches += 1
+                page_ocr_exact_matches += 1
+
+            seed_translation = _normalize_text(
+                gold_block.get("seed_normalized_translation", gold_block.get("seed_translation", ""))
             )
+            candidate_translation = _normalize_text(candidate_block.get("normalized_translation", ""))
+            if seed_translation or candidate_translation:
+                if seed_translation == candidate_translation:
+                    translation_exact_matches += 1
+                    page_translation_exact_matches += 1
+                page_translation_similarity_values.append(
+                    SequenceMatcher(None, seed_translation, candidate_translation).ratio()
+                )
+                translation_similarity_values.append(
+                    SequenceMatcher(None, seed_translation, candidate_translation).ratio()
+                )
 
         for candidate_index in unmatched_candidate:
             candidate_block = candidate_blocks[candidate_index]
-            if _normalize_text(candidate_block.get("normalized_translation", "")):
-                overgenerated_translation_blocks += 1
+            if _normalize_text(candidate_block.get("normalized_text", "")):
+                overgenerated_block_count += 1
 
-        reference_page_translation = _page_translation_text(reference_page, reference_exports)
-        candidate_page_translation = _page_translation_text(candidate_page, candidate_exports)
-        page_similarity = SequenceMatcher(
-            None,
-            reference_page_translation,
-            candidate_page_translation,
-        ).ratio()
-        page_translation_similarity_values.append(page_similarity)
-
+        page_cer = page_char_errors / page_gold_chars if page_gold_chars else 0.0
+        page_ocr_char_error_rates.append(page_cer)
         page_results.append(
             {
                 "page": page_name,
                 "pass": not issues,
                 "issues": issues,
-                "reference_block_count": len(reference_blocks),
+                "gold_block_count": len(gold_blocks),
                 "candidate_block_count": len(candidate_blocks),
                 "matched_block_count": len(matches),
-                "page_translation_similarity": round(page_similarity, 4),
-                "reference_non_empty": reference_quality_page["non_empty"],
-                "candidate_non_empty": candidate_quality_page["non_empty"],
+                "gold_non_empty": gold_page_quality["non_empty"],
+                "candidate_non_empty": candidate_page_quality["non_empty"],
+                "page_ocr_char_error_rate": round(page_cer, 4),
+                "page_ocr_exact_match_ratio": round(
+                    page_ocr_exact_matches / len(gold_non_empty_indices), 4
+                )
+                if gold_non_empty_indices
+                else 1.0,
+                "page_translation_exact_match_ratio": round(
+                    page_translation_exact_matches / len(page_translation_similarity_values), 4
+                )
+                if page_translation_similarity_values
+                else None,
+                "page_translation_similarity_avg": round(
+                    sum(page_translation_similarity_values) / len(page_translation_similarity_values), 4
+                )
+                if page_translation_similarity_values
+                else None,
             }
         )
 
-    geometry_match_recall = (
-        matched_reference_non_empty / total_reference_non_empty if total_reference_non_empty else 1.0
+    geometry_match_recall = matched_gold_blocks / total_gold_blocks if total_gold_blocks else 1.0
+    geometry_match_precision = (
+        matched_gold_blocks / candidate_quality["block_count"] if candidate_quality["block_count"] else 1.0
     )
     non_empty_retention = (
-        matched_candidate_non_empty / total_reference_non_empty if total_reference_non_empty else 1.0
+        matched_candidate_non_empty / total_gold_non_empty if total_gold_non_empty else 1.0
     )
-    reference_empty_rate = (
-        reference_quality["empty"] / reference_quality["block_count"] if reference_quality["block_count"] else 0.0
-    )
+    gold_empty_rate = gold_quality["empty"] / gold_quality["block_count"] if gold_quality["block_count"] else 0.0
     candidate_empty_rate = (
         candidate_quality["empty"] / candidate_quality["block_count"] if candidate_quality["block_count"] else 0.0
     )
-    reference_single_char_like_rate = (
-        reference_quality["single_char_like"] / reference_quality["block_count"]
-        if reference_quality["block_count"]
-        else 0.0
+    gold_single_char_like_rate = (
+        gold_quality["single_char_like"] / gold_quality["block_count"] if gold_quality["block_count"] else 0.0
     )
     candidate_single_char_like_rate = (
         candidate_quality["single_char_like"] / candidate_quality["block_count"]
         if candidate_quality["block_count"]
         else 0.0
     )
-    translation_similarity_avg = (
-        sum(page_translation_similarity_values) / len(page_translation_similarity_values)
-        if page_translation_similarity_values
-        else 1.0
+    ocr_char_error_rate = total_char_errors / total_gold_chars if total_gold_chars else 0.0
+    page_p95_ocr_char_error_rate = _percentile(page_ocr_char_error_rates, 0.95)
+    ocr_exact_text_match_ratio = (
+        ocr_exact_matches / total_gold_non_empty if total_gold_non_empty else 1.0
+    )
+    translation_exact_match_ratio = (
+        translation_exact_matches / len(translation_similarity_values) if translation_similarity_values else None
+    )
+    translation_similarity_ratio = (
+        sum(translation_similarity_values) / len(translation_similarity_values)
+        if translation_similarity_values
+        else None
     )
 
     hard_gate_failures: list[str] = []
@@ -326,63 +434,76 @@ def compare_runs(reference_run_dir: Path, candidate_run_dir: Path) -> dict[str, 
     ):
         if int(candidate_summary.get(field, 0) or 0) != 0:
             hard_gate_failures.append(f"{field}={candidate_summary.get(field)}")
-    if geometry_match_recall < 0.95:
-        hard_gate_failures.append(f"geometry_match_recall<{0.95}: {geometry_match_recall:.4f}")
-    if non_empty_retention < 0.98:
-        hard_gate_failures.append(f"non_empty_retention<{0.98}: {non_empty_retention:.4f}")
-    if candidate_empty_rate > reference_empty_rate + 0.02:
+    if geometry_match_recall < GEOMETRY_RECALL_THRESHOLD:
         hard_gate_failures.append(
-            f"candidate_empty_rate>{reference_empty_rate + 0.02:.4f}: {candidate_empty_rate:.4f}"
+            f"geometry_match_recall<{GEOMETRY_RECALL_THRESHOLD}: {geometry_match_recall:.4f}"
         )
-    if candidate_single_char_like_rate > reference_single_char_like_rate + 0.02:
+    if geometry_match_precision < GEOMETRY_PRECISION_THRESHOLD:
         hard_gate_failures.append(
-            f"candidate_single_char_like_rate>{reference_single_char_like_rate + 0.02:.4f}: {candidate_single_char_like_rate:.4f}"
+            f"geometry_match_precision<{GEOMETRY_PRECISION_THRESHOLD}: {geometry_match_precision:.4f}"
         )
-    if translation_similarity_avg < 0.98:
+    if non_empty_retention < NON_EMPTY_RETENTION_THRESHOLD:
         hard_gate_failures.append(
-            f"translation_similarity_avg<{0.98}: {translation_similarity_avg:.4f}"
+            f"non_empty_retention<{NON_EMPTY_RETENTION_THRESHOLD}: {non_empty_retention:.4f}"
         )
-    if overgenerated_translation_blocks != 0:
+    if candidate_empty_rate > gold_empty_rate + EMPTY_RATE_DELTA_THRESHOLD:
         hard_gate_failures.append(
-            f"suspect_overgenerated_translation_block_count={overgenerated_translation_blocks}"
+            f"candidate_empty_rate>{gold_empty_rate + EMPTY_RATE_DELTA_THRESHOLD:.4f}: {candidate_empty_rate:.4f}"
         )
-
-    ocr_exact_text_match_ratio = (
-        ocr_exact_matches / matched_reference_non_empty if matched_reference_non_empty else 1.0
-    )
-    translation_exact_match_ratio = (
-        translation_exact_matches / matched_reference_non_empty if matched_reference_non_empty else 1.0
-    )
-    translation_similarity_ratio = (
-        sum(translation_similarity_values) / len(translation_similarity_values)
-        if translation_similarity_values
-        else 1.0
-    )
+    if candidate_single_char_like_rate > gold_single_char_like_rate + SINGLE_CHAR_RATE_DELTA_THRESHOLD:
+        hard_gate_failures.append(
+            "candidate_single_char_like_rate>"
+            f"{gold_single_char_like_rate + SINGLE_CHAR_RATE_DELTA_THRESHOLD:.4f}: "
+            f"{candidate_single_char_like_rate:.4f}"
+        )
+    if ocr_char_error_rate > OCR_CHAR_ERROR_RATE_THRESHOLD:
+        hard_gate_failures.append(
+            f"ocr_char_error_rate>{OCR_CHAR_ERROR_RATE_THRESHOLD}: {ocr_char_error_rate:.4f}"
+        )
+    if page_p95_ocr_char_error_rate > PAGE_P95_OCR_CHAR_ERROR_RATE_THRESHOLD:
+        hard_gate_failures.append(
+            "page_p95_ocr_char_error_rate>"
+            f"{PAGE_P95_OCR_CHAR_ERROR_RATE_THRESHOLD}: {page_p95_ocr_char_error_rate:.4f}"
+        )
+    if overgenerated_block_count != 0:
+        hard_gate_failures.append(f"overgenerated_block_count={overgenerated_block_count}")
 
     return {
-        "reference_run_dir": str(reference_run_dir),
+        "gold_path": str(gold_path),
         "candidate_run_dir": str(candidate_run_dir),
         "quality_gate_pass": not hard_gate_failures,
         "hard_gate_failures": hard_gate_failures,
-        "reference_summary": reference_summary,
+        "gold_metadata": {
+            "corpus": gold_payload.get("corpus", ""),
+            "review_status": gold_payload.get("review_status", ""),
+            "generated_from_run_dir": gold_payload.get("generated_from_run_dir", ""),
+        },
         "candidate_summary": candidate_summary,
         "metrics": {
-            "reference_block_count": reference_quality["block_count"],
+            "gold_block_count": gold_quality["block_count"],
             "candidate_block_count": candidate_quality["block_count"],
-            "reference_non_empty_count": reference_quality["non_empty"],
+            "gold_non_empty_count": gold_quality["non_empty"],
             "candidate_non_empty_count": candidate_quality["non_empty"],
             "geometry_match_recall": round(geometry_match_recall, 4),
+            "geometry_match_precision": round(geometry_match_precision, 4),
             "non_empty_retention": round(non_empty_retention, 4),
-            "reference_empty_rate": round(reference_empty_rate, 4),
+            "gold_empty_rate": round(gold_empty_rate, 4),
             "candidate_empty_rate": round(candidate_empty_rate, 4),
-            "reference_single_char_like_rate": round(reference_single_char_like_rate, 4),
+            "gold_single_char_like_rate": round(gold_single_char_like_rate, 4),
             "candidate_single_char_like_rate": round(candidate_single_char_like_rate, 4),
+            "ocr_char_error_rate": round(ocr_char_error_rate, 4),
+            "page_p95_ocr_char_error_rate": round(page_p95_ocr_char_error_rate, 4),
             "ocr_exact_text_match_ratio": round(ocr_exact_text_match_ratio, 4),
-            "translation_exact_match_ratio": round(translation_exact_match_ratio, 4),
-            "translation_similarity_ratio": round(translation_similarity_ratio, 4),
-            "page_translation_similarity_avg": round(translation_similarity_avg, 4),
-            "unmatched_candidate_block_count": unmatched_candidate_blocks,
-            "suspect_overgenerated_translation_block_count": overgenerated_translation_blocks,
+            "translation_exact_match_ratio": round(translation_exact_match_ratio, 4)
+            if translation_exact_match_ratio is not None
+            else None,
+            "translation_similarity_ratio": round(translation_similarity_ratio, 4)
+            if translation_similarity_ratio is not None
+            else None,
+            "unmatched_candidate_block_count": unmatched_candidate_block_count,
+            "overgenerated_block_count": overgenerated_block_count,
+            "excluded_unstable_page_count": len(excluded_unstable_pages),
+            "excluded_unstable_pages": excluded_unstable_pages,
         },
         "page_results": page_results,
     }
@@ -394,14 +515,16 @@ def _render_markdown(payload: dict[str, Any]) -> str:
         "# OCR Combo Compare",
         "",
         f"- quality_gate_pass: `{payload.get('quality_gate_pass')}`",
-        f"- reference_run_dir: `{payload.get('reference_run_dir')}`",
+        f"- gold_path: `{payload.get('gold_path')}`",
         f"- candidate_run_dir: `{payload.get('candidate_run_dir')}`",
         f"- geometry_match_recall: `{metrics.get('geometry_match_recall')}`",
+        f"- geometry_match_precision: `{metrics.get('geometry_match_precision')}`",
         f"- non_empty_retention: `{metrics.get('non_empty_retention')}`",
         f"- candidate_empty_rate: `{metrics.get('candidate_empty_rate')}`",
         f"- candidate_single_char_like_rate: `{metrics.get('candidate_single_char_like_rate')}`",
-        f"- page_translation_similarity_avg: `{metrics.get('page_translation_similarity_avg')}`",
-        f"- suspect_overgenerated_translation_block_count: `{metrics.get('suspect_overgenerated_translation_block_count')}`",
+        f"- ocr_char_error_rate: `{metrics.get('ocr_char_error_rate')}`",
+        f"- page_p95_ocr_char_error_rate: `{metrics.get('page_p95_ocr_char_error_rate')}`",
+        f"- overgenerated_block_count: `{metrics.get('overgenerated_block_count')}`",
         "",
         "## Hard Gate Failures",
         "",
@@ -416,7 +539,7 @@ def _render_markdown(payload: dict[str, Any]) -> str:
             "",
             "## Page Results",
             "",
-            "| page | pass | matched_block_count | page_translation_similarity | issues |",
+            "| page | pass | matched_block_count | page_ocr_char_error_rate | issues |",
             "| --- | --- | --- | --- | --- |",
         ]
     )
@@ -427,11 +550,11 @@ def _render_markdown(payload: dict[str, Any]) -> str:
         else:
             issue_text = str(row.get("reason", "") or "")
         lines.append(
-            "| {page} | {passed} | {matched} | {similarity} | {issues} |".format(
+            "| {page} | {passed} | {matched} | {cer} | {issues} |".format(
                 page=row.get("page", ""),
                 passed=row.get("pass", False),
                 matched=row.get("matched_block_count", ""),
-                similarity=row.get("page_translation_similarity", ""),
+                cer=row.get("page_ocr_char_error_rate", ""),
                 issues=issue_text,
             )
         )
@@ -440,17 +563,17 @@ def _render_markdown(payload: dict[str, Any]) -> str:
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Compare OCR combo candidate run against a reference run.")
-    parser.add_argument("--reference-run-dir", required=True)
+    parser = argparse.ArgumentParser(description="Compare OCR combo candidate run against locked OCR gold.")
+    parser.add_argument("--gold-path", required=True)
     parser.add_argument("--candidate-run-dir", required=True)
     parser.add_argument("--output", required=True)
     args = parser.parse_args()
 
-    reference_run_dir = Path(args.reference_run_dir)
+    gold_path = Path(args.gold_path)
     candidate_run_dir = Path(args.candidate_run_dir)
     output_path = Path(args.output)
 
-    payload = compare_runs(reference_run_dir, candidate_run_dir)
+    payload = compare_runs(gold_path, candidate_run_dir)
     write_json(output_path, payload)
     output_path.with_suffix(".md").write_text(_render_markdown(payload), encoding="utf-8")
     print(json.dumps({"quality_gate_pass": payload["quality_gate_pass"], "output": str(output_path)}, ensure_ascii=False))
