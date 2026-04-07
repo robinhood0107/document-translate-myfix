@@ -1142,6 +1142,10 @@ Restart now?</source>
         <translation>Gemini-2.0-フラッシュ</translation>
     </message>
     <message>
+        <source>PPOCRv5</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
         <source>PaddleOCR VL</source>
         <translation type="unfinished"></translation>
     </message>
@@ -1818,6 +1822,10 @@ It may have been moved, renamed, or deleted.
     <message>
         <source>Gemini-2.0-Flash</source>
         <translation>Gemini-2.0-フラッシュ</translation>
+    </message>
+    <message>
+        <source>PPOCRv5</source>
+        <translation type="unfinished"></translation>
     </message>
     <message>
         <source>PaddleOCR VL</source>

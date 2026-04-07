@@ -30,6 +30,7 @@ logger = logging.getLogger(__name__)
 LANG_TO_REC_MODEL: dict[str, ModelID] = {
 	'ch': ModelID.PPOCR_V5_REC_MOBILE,
 	'en': ModelID.PPOCR_V5_REC_EN_MOBILE,
+	'japan': ModelID.PPOCR_V5_REC_JAPAN_MOBILE,
 	'ko': ModelID.PPOCR_V5_REC_KOREAN_MOBILE,
 	'latin': ModelID.PPOCR_V5_REC_LATIN_MOBILE,
 	'ru': ModelID.PPOCR_V5_REC_ESLAV_MOBILE,
