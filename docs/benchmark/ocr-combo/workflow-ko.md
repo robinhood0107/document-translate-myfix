@@ -4,45 +4,41 @@
 
 공식 launcher는 [benchmark_suite_cuda13.bat](/mnt/c/Users/pjjpj/Desktop/openai_manga_translater/comic-translate/scripts/benchmark_suite_cuda13.bat)이며, `ocr-combo-runtime` profile로 실행합니다.
 
-## 2. smoke
+## 2. bootstrap mode
 
-- China 1장: `PPOCRv5 / PaddleOCR VL / HunyuanOCR`
-- japan 1장: `MangaOCR / PaddleOCR VL / HunyuanOCR`
+locked gold가 없으면 suite는 benchmark를 끝까지 돌리지 않고 아래까지만 수행합니다.
 
-smoke는 service 기동, page snapshot, translated export, runtime snapshot이 모두 나오는지 확인하는 단계입니다.
+- China seed 생성: `PaddleOCR VL + Gemma`
+- japan seed 생성: `PaddleOCR VL + Gemma`
+- gold review packet 생성
+- latest report를 `awaiting_gold_review` 상태로 갱신
 
-## 3. reference
+이 단계의 목적은 사람 검수 OCR gold를 잠그는 것입니다.
 
-- China: `PaddleOCR VL + Gemma`
-- japan: `PaddleOCR VL + Gemma`
+## 3. gold review
 
-각 corpus별 reference를 fresh 생성한 뒤 self-compare로 기준점을 고정합니다.
+- `benchmarks/ocr_combo/gold/<corpus>/gold.json`을 엽니다.
+- source image와 overlay, `ocr_debug`를 보고 block별 `gold_text`를 수정합니다.
+- geometry가 unusable한 페이지는 `status=excluded`로 표시합니다.
+- 검수가 끝나면 `review_status=locked`로 저장합니다.
 
-## 4. default compare
+세부 절차는 [gold-review-ko.md](/mnt/c/Users/pjjpj/Desktop/openai_manga_translater/comic-translate/docs/benchmark/ocr-combo/gold-review-ko.md)를 따릅니다.
 
-corpus별 3후보를 full pipeline cold 1회씩 비교하고 hard gate 통과 후보만 남깁니다.
+## 4. benchmark mode
 
-## 5. bounded tuning
+locked gold가 있으면 같은 명령으로 아래를 끝까지 수행합니다.
 
-- `PaddleOCR VL`
-  - `parallel_workers`
-  - `max_new_tokens`
-  - `max_concurrency`
-  - `gpu_memory_utilization`
-- `HunyuanOCR`
-  - `parallel_workers`
-  - `max_completion_tokens`
-  - `n_gpu_layers`
+1. China/japan smoke
+2. corpus별 default compare
+3. hard gate 통과 후보만 유지
+4. `PaddleOCR VL` / `HunyuanOCR` stepwise tuning
+5. corpus winner `cold 3회` final confirm
+6. latest report/history snapshot 갱신
 
-각 축은 stepwise winner만 다음 축으로 보냅니다.
-
-## 6. final confirm
-
-corpus별 최종 후보 1개만 `cold 3회` 재실행하고 median elapsed로 winner를 확정합니다.
-
-## 7. 산출물
+## 5. 산출물
 
 - suite manifest
-- corpus별 reference/default/tuning/final confirm raw 결과
+- corpus별 smoke/default/tuning/final confirm raw 결과
+- locked gold review packet
 - latest report + history snapshot
 - language-aware routing policy

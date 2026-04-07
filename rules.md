@@ -57,6 +57,10 @@
   - results history
   - generated/latest report
 - 서로 다른 source language 코퍼스를 함께 다루는 family는 단일 글로벌 winner 대신 언어별 추천 정책을 공식 산출물로 채택할 수 있다.
+- OCR 비교 family는 `speed_score_scope`와 `quality_gate_scope`를 분리할 수 있다.
+  - 예: 속도는 full-pipeline elapsed
+  - 품질은 OCR-only
+- OCR benchmark의 hard gate에는 machine-generated translation similarity를 직접 쓰지 말고, 가능하면 사람이 잠근 OCR gold를 공식 품질 기준으로 사용한다.
 - benchmark 자산은 `benchmarking/lab`에만 두고, 제품 반영은 별도 `codex/* -> develop` PR로 승격한다.
 
 ## 3. 기능 작업 절차

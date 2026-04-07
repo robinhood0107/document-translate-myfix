@@ -134,8 +134,8 @@ SUITE_PROFILES = {
         "benchmark_name": "OCR Combo Runtime Benchmark",
         "benchmark_kind": "managed family suite",
         "benchmark_scope": (
-            "full-pipeline OCR+Gemma comparison with language-aware winners for "
-            "China and japan corpora"
+            "full-pipeline OCR+Gemma timing with OCR-only quality gate and "
+            "language-aware winners for China and japan corpora"
         ),
         "baseline_batch_step": "",
     },

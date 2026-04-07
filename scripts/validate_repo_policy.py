@@ -160,6 +160,7 @@ def validate_benchmark_family_structure() -> list[str]:
             root / "scripts" / "generate_ocr_combo_report.py",
             root / "scripts" / "compare_ocr_combo_reference.py",
             root / "docs" / "benchmark" / "ocr-combo" / "architecture-ko.md",
+            root / "docs" / "benchmark" / "ocr-combo" / "gold-review-ko.md",
             root / "docs" / "benchmark" / "ocr-combo" / "workflow-ko.md",
             root / "docs" / "benchmark" / "ocr-combo" / "usage-ko.md",
             root / "docs" / "benchmark" / "ocr-combo" / "results-history-ko.md",
@@ -175,9 +176,10 @@ def validate_benchmark_family_structure() -> list[str]:
             if not path.is_file():
                 continue
             text = path.read_text(encoding="utf-8")
-            if "execution_scope" not in text or "official_score_scope" not in text:
+            if "execution_scope" not in text or "quality_gate_scope" not in text or "gold_source" not in text:
                 errors.append(
-                    f"OCR combo docs/report must mention both execution_scope and official_score_scope: {path.relative_to(root)}"
+                    "OCR combo docs/report must mention execution_scope, quality_gate_scope, "
+                    f"and gold_source: {path.relative_to(root)}"
                 )
     return errors
 
