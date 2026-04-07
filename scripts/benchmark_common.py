@@ -58,7 +58,7 @@ ALL_BENCHMARK_CONTAINER_NAMES = (
 )
 GEMMA_HEALTH_URLS = [
     "http://127.0.0.1:18080/health",
-    "http://127.0.0.1:18000/v1/models",
+    "http://127.0.0.1:18080/v1/models",
 ]
 PADDLEOCR_VL_HEALTH_URLS = [
     "http://127.0.0.1:28118/docs",

@@ -45,7 +45,7 @@ LAST_SUITE_RECORD = "last_paddleocr_vl15_suite.json"
 REPORT_MANIFEST_NAME = "paddleocr_vl15_report_manifest.yaml"
 FULL_RUNTIME_HEALTH_URLS = [
     "http://127.0.0.1:18080/health",
-    "http://127.0.0.1:18000/v1/models",
+    "http://127.0.0.1:18080/v1/models",
     "http://127.0.0.1:28118/docs",
 ]
 OCR_ONLY_HEALTH_URLS = [

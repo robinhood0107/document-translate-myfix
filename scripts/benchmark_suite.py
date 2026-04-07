@@ -150,7 +150,7 @@ RUNTIME_SNAPSHOT_FILES = [
 
 ATTACH_RUNNING_HEALTH_URLS = [
     "http://127.0.0.1:18080/health",
-    "http://127.0.0.1:18000/v1/models",
+    "http://127.0.0.1:18080/v1/models",
     "http://127.0.0.1:28118/docs",
 ]
 GEMMA_VERIFICATION_DIR_NAME = "_server_verification"
