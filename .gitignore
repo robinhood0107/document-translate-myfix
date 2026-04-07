@@ -22,3 +22,4 @@ uv.lock
 # Test files
 test_*.py
 demo_*.py
+/benchmarks/ocr_combo/
