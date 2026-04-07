@@ -14,8 +14,11 @@ from modules.utils.ocr_debug import (
 	OCR_STATUS_EMPTY_INITIAL,
 	OCR_STATUS_OK,
 	OCR_STATUS_OK_AFTER_RETRY,
-	build_retry_crop,
-	crop_block_image,
+	build_retry_crop_bbox,
+	build_retry_crop_from_bbox,
+	crop_bbox_image,
+	resolve_block_crop_bbox,
+	set_block_ocr_crop_diagnostics,
 	set_block_ocr_diagnostics,
 )
 from modules.utils.device import get_providers
@@ -279,13 +282,20 @@ class PPOCRv5Engine(OCREngine):
 		return joined_text.strip(), avg_conf
 
 	def _rec_only_blocks(self, img: np.ndarray, blk_list: List[TextBlock]) -> List[TextBlock]:
-		initial_payloads: list[tuple[int, TextBlock, np.ndarray | None]] = []
+		initial_payloads: list[tuple[int, TextBlock, np.ndarray | None, tuple[int, int, int, int] | None]] = []
 		initial_crops: list[np.ndarray] = []
 		initial_indices: list[int] = []
 
 		for idx, blk in enumerate(blk_list):
-			crop = crop_block_image(img, blk.xyxy, auto_rotate_tall=True)
-			initial_payloads.append((idx, blk, crop))
+			bbox, crop_source = resolve_block_crop_bbox(
+				blk,
+				img.shape,
+				bubble_as_clamp=True,
+				fallback_to_bubble=getattr(blk, "xyxy", None) is None,
+			)
+			set_block_ocr_crop_diagnostics(blk, effective_crop_xyxy=bbox, crop_source=crop_source)
+			crop = crop_bbox_image(img, bbox, auto_rotate_tall=True) if bbox is not None else None
+			initial_payloads.append((idx, blk, crop, bbox))
 			if crop is not None:
 				initial_crops.append(crop)
 				initial_indices.append(idx)
@@ -300,7 +310,7 @@ class PPOCRv5Engine(OCREngine):
 		initial_suspicious_indices: list[int] = []
 		retry_candidates: list[tuple[int, TextBlock, str, float]] = []
 
-		for idx, blk, crop in initial_payloads:
+		for idx, blk, crop, _ in initial_payloads:
 			if crop is None:
 				initial_empty_indices.append(idx)
 				retry_candidates.append((idx, blk, "", 0.0))
@@ -359,13 +369,19 @@ class PPOCRv5Engine(OCREngine):
 		if initial_suspicious_indices:
 			logger.info("ppocr suspicious non-empty blocks after initial pass: %s", initial_suspicious_indices)
 
-		retry_payloads: list[tuple[int, TextBlock, np.ndarray | None]] = []
+		retry_payloads: list[tuple[int, TextBlock, np.ndarray | None, tuple[int, int, int, int] | None]] = []
 		retry_crops: list[np.ndarray] = []
 		retry_indices: list[int] = []
 
 		for idx, blk, _, _ in retry_candidates:
-			retry_crop = build_retry_crop(img, blk.xyxy)
-			retry_payloads.append((idx, blk, retry_crop))
+			retry_source_bbox = getattr(blk, "xyxy", None)
+			if retry_source_bbox is None:
+				retry_source_bbox = getattr(blk, "ocr_effective_crop_xyxy", None)
+			retry_clamp = getattr(blk, "bubble_xyxy", None) if getattr(blk, "xyxy", None) is not None else None
+			retry_bbox = build_retry_crop_bbox(img.shape, retry_source_bbox, clamp_xyxy=retry_clamp)
+			set_block_ocr_crop_diagnostics(blk, retry_crop_xyxy=retry_bbox)
+			retry_crop = build_retry_crop_from_bbox(img, retry_bbox)
+			retry_payloads.append((idx, blk, retry_crop, retry_bbox))
 			if retry_crop is not None:
 				retry_crops.append(retry_crop)
 				retry_indices.append(idx)
@@ -377,7 +393,7 @@ class PPOCRv5Engine(OCREngine):
 		}
 
 		retry_empty_indices: list[int] = []
-		for idx, blk, retry_crop in retry_payloads:
+		for idx, blk, retry_crop, _ in retry_payloads:
 			initial_text, initial_conf = next(
 				(candidate_text, candidate_conf)
 				for candidate_idx, candidate_blk, candidate_text, candidate_conf in retry_candidates

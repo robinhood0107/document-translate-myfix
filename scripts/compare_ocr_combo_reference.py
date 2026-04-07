@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import unicodedata
 from difflib import SequenceMatcher
 from pathlib import Path
 from typing import Any
@@ -25,6 +26,33 @@ OCR_CHAR_ERROR_RATE_THRESHOLD = 0.02
 PAGE_P95_OCR_CHAR_ERROR_RATE_THRESHOLD = 0.05
 EMPTY_RATE_DELTA_THRESHOLD = 0.02
 SINGLE_CHAR_RATE_DELTA_THRESHOLD = 0.02
+IGNORABLE_OCR_CHARS = {"「", "」", "『", "』", ",", "，", "、", "♡", "♥"}
+OCR_CANONICAL_REPLACEMENTS = {
+    "あ゙": "あ",
+    "ぁ": "あ",
+    "い゙": "い",
+    "ぃ": "い",
+    "ゔ": "う",
+    "ゔ": "う",
+    "ぅ": "う",
+    "え゙": "え",
+    "ぇ": "え",
+    "お゙": "お",
+    "ぉ": "お",
+    "ん゙": "ん",
+    "ア゙": "ア",
+    "ァ": "ア",
+    "イ゙": "イ",
+    "ィ": "イ",
+    "ヴ": "ウ",
+    "ヴ": "ウ",
+    "ゥ": "ウ",
+    "エ゙": "エ",
+    "ェ": "エ",
+    "オ゙": "オ",
+    "ォ": "オ",
+    "ン゙": "ン",
+}
 
 
 def _load_json(path: Path) -> dict[str, Any]:
@@ -36,6 +64,21 @@ def _load_json(path: Path) -> dict[str, Any]:
 
 def _normalize_text(text: object) -> str:
     return "".join(str(text or "").split())
+
+
+def _normalize_translation_text(text: object) -> str:
+    return _normalize_text(text)
+
+
+def _normalize_ocr_text(text: object) -> str:
+    normalized = _normalize_text(text)
+    if not normalized:
+        return ""
+    normalized = unicodedata.normalize("NFD", normalized)
+    for source, target in OCR_CANONICAL_REPLACEMENTS.items():
+        normalized = normalized.replace(source, target)
+    normalized = "".join(ch for ch in normalized if ch not in IGNORABLE_OCR_CHARS)
+    return unicodedata.normalize("NFC", normalized)
 
 
 def _load_pages(run_dir: Path) -> tuple[dict[str, Any], dict[str, dict[str, Any]]]:
@@ -58,12 +101,25 @@ def _load_summary(run_dir: Path) -> dict[str, Any]:
 
 
 def _page_quality(page: dict[str, Any]) -> dict[str, int]:
-    quality = page.get("ocr_quality", {}) if isinstance(page.get("ocr_quality"), dict) else {}
+    blocks = page.get("blocks", []) if isinstance(page.get("blocks"), list) else []
+    valid_blocks = [block for block in blocks if isinstance(block, dict)]
+    total = len(valid_blocks)
+    non_empty = 0
+    empty = 0
+    single_char_like = 0
+    for block in valid_blocks:
+        normalized = _normalize_ocr_text(block.get("normalized_text", block.get("text", "")))
+        if normalized:
+            non_empty += 1
+        else:
+            empty += 1
+        if 0 < len(normalized) <= 1:
+            single_char_like += 1
     return {
-        "block_count": int(quality.get("block_count", 0) or 0),
-        "non_empty": int(quality.get("non_empty", 0) or 0),
-        "empty": int(quality.get("empty", 0) or 0),
-        "single_char_like": int(quality.get("single_char_like", 0) or 0),
+        "block_count": total,
+        "non_empty": non_empty,
+        "empty": empty,
+        "single_char_like": single_char_like,
     }
 
 
@@ -124,7 +180,7 @@ def _percentile(values: list[float], p: float) -> float:
 
 
 def _single_char_like(text: str) -> bool:
-    return 0 < len(_normalize_text(text)) <= 1
+    return 0 < len(_normalize_ocr_text(text)) <= 1
 
 
 def _load_gold_pages(gold_path: Path) -> tuple[dict[str, Any], dict[str, dict[str, Any]]]:
@@ -159,7 +215,7 @@ def _gold_page_quality(page: dict[str, Any]) -> dict[str, int]:
     single_char_like = 0
     for block in blocks:
         gold_text = str(block.get("gold_text", block.get("seed_text", "")) or "")
-        normalized = _normalize_text(gold_text)
+        normalized = _normalize_ocr_text(gold_text)
         if normalized:
             non_empty += 1
         else:
@@ -178,30 +234,28 @@ def _match_blocks(
     gold_blocks: list[dict[str, Any]],
     candidate_blocks: list[dict[str, Any]],
 ) -> tuple[list[dict[str, Any]], list[str], list[int], list[int]]:
-    scores: list[tuple[float, int, int, str]] = []
+    scores: list[tuple[float, float, int, int, str]] = []
     for gold_index, gold_block in enumerate(gold_blocks):
         for cand_index, cand_block in enumerate(candidate_blocks):
+            gold_xyxy = _as_box(gold_block.get("xyxy"))
+            cand_xyxy = _as_box(cand_block.get("xyxy"))
+            if gold_xyxy and cand_xyxy:
+                xyxy_score = _xyxy_iou(gold_xyxy, cand_xyxy)
+                if xyxy_score >= XYXY_IOU_THRESHOLD:
+                    scores.append((2.0, xyxy_score, gold_index, cand_index, "xyxy"))
+                continue
+
             gold_bubble = _as_box(gold_block.get("bubble_xyxy"))
             cand_bubble = _as_box(cand_block.get("bubble_xyxy"))
             if gold_bubble and cand_bubble:
-                score = _xyxy_iou(gold_bubble, cand_bubble)
-                threshold = BUBBLE_IOU_THRESHOLD
-                match_kind = "bubble"
-            else:
-                gold_xyxy = _as_box(gold_block.get("xyxy"))
-                cand_xyxy = _as_box(cand_block.get("xyxy"))
-                if not gold_xyxy or not cand_xyxy:
-                    continue
-                score = _xyxy_iou(gold_xyxy, cand_xyxy)
-                threshold = XYXY_IOU_THRESHOLD
-                match_kind = "xyxy"
-            if score >= threshold:
-                scores.append((score, gold_index, cand_index, match_kind))
+                bubble_score = _xyxy_iou(gold_bubble, cand_bubble)
+                if bubble_score >= BUBBLE_IOU_THRESHOLD:
+                    scores.append((1.0, bubble_score, gold_index, cand_index, "bubble"))
 
     matches: list[dict[str, Any]] = []
     used_gold: set[int] = set()
     used_cand: set[int] = set()
-    for score, gold_index, cand_index, match_kind in sorted(scores, reverse=True):
+    for _, score, gold_index, cand_index, match_kind in sorted(scores, reverse=True):
         if gold_index in used_gold or cand_index in used_cand:
             continue
         used_gold.add(gold_index)
@@ -266,13 +320,13 @@ def compare_runs(gold_path: Path, candidate_run_dir: Path) -> dict[str, Any]:
         gold_non_empty_indices = {
             idx
             for idx, block in enumerate(gold_blocks)
-            if _normalize_text(block.get("gold_text", block.get("seed_text", "")))
+            if _normalize_ocr_text(block.get("gold_text", block.get("seed_text", "")))
         }
         total_gold_non_empty += len(gold_non_empty_indices)
 
         if not isinstance(candidate_page, dict):
             total_gold_chars += sum(
-                len(_normalize_text(gold_blocks[idx].get("gold_text", gold_blocks[idx].get("seed_text", ""))))
+                len(_normalize_ocr_text(gold_blocks[idx].get("gold_text", gold_blocks[idx].get("seed_text", ""))))
                 for idx in gold_non_empty_indices
             )
             page_results.append(
@@ -296,7 +350,7 @@ def compare_runs(gold_path: Path, candidate_run_dir: Path) -> dict[str, Any]:
         candidate_non_empty_indices = {
             idx
             for idx, block in enumerate(candidate_blocks)
-            if _normalize_text(block.get("normalized_text", ""))
+            if _normalize_ocr_text(block.get("normalized_text", block.get("text", "")))
         }
         total_candidate_non_empty += len(candidate_non_empty_indices)
 
@@ -315,7 +369,7 @@ def compare_runs(gold_path: Path, candidate_run_dir: Path) -> dict[str, Any]:
         for gold_index in gold_non_empty_indices:
             gold_block = gold_blocks[gold_index]
             gold_text_raw = str(gold_block.get("gold_text", gold_block.get("seed_text", "")) or "")
-            gold_text = _normalize_text(gold_text_raw)
+            gold_text = _normalize_ocr_text(gold_text_raw)
             gold_char_count = max(1, len(gold_text))
             page_gold_chars += gold_char_count
             total_gold_chars += gold_char_count
@@ -327,7 +381,7 @@ def compare_runs(gold_path: Path, candidate_run_dir: Path) -> dict[str, Any]:
                 continue
 
             candidate_block = candidate_blocks[candidate_index]
-            candidate_text = _normalize_text(candidate_block.get("normalized_text", ""))
+            candidate_text = _normalize_ocr_text(candidate_block.get("normalized_text", candidate_block.get("text", "")))
             if candidate_text:
                 matched_candidate_non_empty += 1
             matched_gold_non_empty += 1
@@ -339,10 +393,10 @@ def compare_runs(gold_path: Path, candidate_run_dir: Path) -> dict[str, Any]:
                 ocr_exact_matches += 1
                 page_ocr_exact_matches += 1
 
-            seed_translation = _normalize_text(
+            seed_translation = _normalize_translation_text(
                 gold_block.get("seed_normalized_translation", gold_block.get("seed_translation", ""))
             )
-            candidate_translation = _normalize_text(candidate_block.get("normalized_translation", ""))
+            candidate_translation = _normalize_translation_text(candidate_block.get("normalized_translation", ""))
             if seed_translation or candidate_translation:
                 if seed_translation == candidate_translation:
                     translation_exact_matches += 1
@@ -356,7 +410,7 @@ def compare_runs(gold_path: Path, candidate_run_dir: Path) -> dict[str, Any]:
 
         for candidate_index in unmatched_candidate:
             candidate_block = candidate_blocks[candidate_index]
-            if _normalize_text(candidate_block.get("normalized_text", "")):
+            if _normalize_ocr_text(candidate_block.get("normalized_text", candidate_block.get("text", ""))):
                 overgenerated_block_count += 1
 
         page_cer = page_char_errors / page_gold_chars if page_gold_chars else 0.0
@@ -478,6 +532,11 @@ def compare_runs(gold_path: Path, candidate_run_dir: Path) -> dict[str, Any]:
             "review_status": gold_payload.get("review_status", ""),
             "generated_from_run_dir": gold_payload.get("generated_from_run_dir", ""),
         },
+        "ocr_normalization": {
+            "canonical_small_voiced_kana": True,
+            "ignored_chars": "".join(sorted(IGNORABLE_OCR_CHARS)),
+            "gold_empty_text_policy": "geometry-kept-text-skipped",
+        },
         "candidate_summary": candidate_summary,
         "metrics": {
             "gold_block_count": gold_quality["block_count"],
@@ -517,6 +576,9 @@ def _render_markdown(payload: dict[str, Any]) -> str:
         f"- quality_gate_pass: `{payload.get('quality_gate_pass')}`",
         f"- gold_path: `{payload.get('gold_path')}`",
         f"- candidate_run_dir: `{payload.get('candidate_run_dir')}`",
+        f"- canonical_small_voiced_kana: `{(payload.get('ocr_normalization') or {}).get('canonical_small_voiced_kana')}`",
+        f"- ignored_chars: `{(payload.get('ocr_normalization') or {}).get('ignored_chars')}`",
+        f"- gold_empty_text_policy: `{(payload.get('ocr_normalization') or {}).get('gold_empty_text_policy')}`",
         f"- geometry_match_recall: `{metrics.get('geometry_match_recall')}`",
         f"- geometry_match_precision: `{metrics.get('geometry_match_precision')}`",
         f"- non_empty_retention: `{metrics.get('non_empty_retention')}`",

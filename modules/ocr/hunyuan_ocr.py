@@ -19,7 +19,8 @@ from modules.utils.ocr_debug import (
     OCR_STATUS_EMPTY_AFTER_RETRY,
     OCR_STATUS_OK,
     ensure_three_channel,
-    expand_bbox,
+    resolve_block_crop_bbox,
+    set_block_ocr_crop_diagnostics,
     set_block_ocr_diagnostics,
 )
 from modules.utils.textblock import TextBlock
@@ -170,13 +171,14 @@ class HunyuanOCREngine(OCREngine):
         self.raw_response_logging = bool(config.get("raw_response_logging", False))
 
     def process_image(self, img: np.ndarray, blk_list: list[TextBlock]) -> list[TextBlock]:
-        jobs: list[tuple[TextBlock, tuple[int, int, int, int]]] = []
+        jobs: list[tuple[TextBlock, tuple[int, int, int, int], str]] = []
         for blk in blk_list or []:
-            bbox = self._resolve_bbox(blk, img)
+            bbox, crop_source = self._resolve_bbox(blk, img)
             if bbox is None:
                 self._mark_empty(blk, "Invalid OCR crop bounds.")
                 continue
-            jobs.append((blk, bbox))
+            set_block_ocr_crop_diagnostics(blk, effective_crop_xyxy=bbox, crop_source=crop_source)
+            jobs.append((blk, bbox, crop_source))
 
         if not jobs:
             return blk_list
@@ -192,13 +194,13 @@ class HunyuanOCREngine(OCREngine):
 
         started_at = time.perf_counter()
         if worker_count <= 1:
-            for blk, bbox in jobs:
-                self._process_block(img, blk, bbox)
+            for blk, bbox, crop_source in jobs:
+                self._process_block(img, blk, bbox, crop_source)
         else:
             with ThreadPoolExecutor(max_workers=worker_count) as executor:
                 future_map = {
-                    executor.submit(self._process_block, img, blk, bbox): (blk, bbox)
-                    for blk, bbox in jobs
+                    executor.submit(self._process_block, img, blk, bbox, crop_source): (blk, bbox, crop_source)
+                    for blk, bbox, crop_source in jobs
                 }
                 try:
                     for future in as_completed(future_map):
@@ -215,7 +217,14 @@ class HunyuanOCREngine(OCREngine):
         )
         return blk_list
 
-    def _process_block(self, img: np.ndarray, blk: TextBlock, bbox: tuple[int, int, int, int]) -> None:
+    def _process_block(
+        self,
+        img: np.ndarray,
+        blk: TextBlock,
+        bbox: tuple[int, int, int, int],
+        crop_source: str,
+    ) -> None:
+        set_block_ocr_crop_diagnostics(blk, effective_crop_xyxy=bbox, crop_source=crop_source)
         crop = self._crop_image(img, bbox)
         if crop is None:
             self._mark_empty(blk, "Invalid OCR crop bounds.")
@@ -606,27 +615,15 @@ class HunyuanOCREngine(OCREngine):
 
         return longest
 
-    def _resolve_bbox(self, blk: TextBlock, image: np.ndarray) -> tuple[int, int, int, int] | None:
-        text_bbox = getattr(blk, "xyxy", None)
-        if text_bbox is not None:
-            bbox = expand_bbox(
-                text_bbox,
-                image.shape,
-                x_ratio=self.TEXT_EXPANSION_RATIO,
-                y_ratio=self.TEXT_EXPANSION_RATIO,
-            )
-            x1, y1, x2, y2 = bbox
-            if x2 > x1 and y2 > y1:
-                return x1, y1, x2, y2
-
-        bubble_bbox = getattr(blk, "bubble_xyxy", None)
-        if bubble_bbox is not None:
-            bbox = expand_bbox(bubble_bbox, image.shape)
-            x1, y1, x2, y2 = bbox
-            if x2 > x1 and y2 > y1:
-                return x1, y1, x2, y2
-
-        return None
+    def _resolve_bbox(self, blk: TextBlock, image: np.ndarray) -> tuple[tuple[int, int, int, int] | None, str]:
+        return resolve_block_crop_bbox(
+            blk,
+            image.shape,
+            x_ratio=self.TEXT_EXPANSION_RATIO,
+            y_ratio=self.TEXT_EXPANSION_RATIO,
+            bubble_as_clamp=True,
+            fallback_to_bubble=getattr(blk, "xyxy", None) is None,
+        )
 
     def _crop_image(self, image: np.ndarray, bbox: tuple[int, int, int, int]) -> np.ndarray | None:
         x1, y1, x2, y2 = bbox

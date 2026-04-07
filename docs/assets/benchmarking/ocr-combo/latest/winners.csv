@@ -1,0 +1,3 @@
+corpus,engine,preset,official_score_elapsed_median_sec,ocr_median_sec,translate_median_sec,gpu_peak_used_mb,all_quality_gate_pass,promotion_recommended
+china,HunyuanOCR + Gemma,C:\Users\pjjpj\Desktop\openai_manga_translater\comic-translate\banchmark_result_log\ocr_combo\20260408_005922_ocr-combo-runtime_suite\_generated_presets\china-hunyuanocr--gemma-ngl80.json,136.107,1.743,11.118,11977.0,True,True
+japan,,,,,,,,False

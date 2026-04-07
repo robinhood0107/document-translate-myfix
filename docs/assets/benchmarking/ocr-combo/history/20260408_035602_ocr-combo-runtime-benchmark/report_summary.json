@@ -1,0 +1,42 @@
+{
+  "manifest": "./banchmark_result_log/ocr_combo/20260407_211341_ocr-combo-runtime_suite/ocr_combo_report_manifest.yaml",
+  "results_root": "./banchmark_result_log/ocr_combo",
+  "archived_previous_latest": {
+    "snapshot_id": "20260407_213635_ocr-combo-runtime-benchmark",
+    "report_path": "./docs/banchmark_report/history/20260407_213635_ocr-combo-runtime-benchmark/ocr-combo-report-ko.md",
+    "assets_dir": "./docs/assets/benchmarking/ocr-combo/history/20260407_213635_ocr-combo-runtime-benchmark"
+  },
+  "routing_policy": {
+    "china": "awaiting_gold_review",
+    "japan": "awaiting_gold_review",
+    "mixed": "OCR gold review를 먼저 완료해야 mixed corpus 정책을 확정할 수 있습니다."
+  },
+  "status": "awaiting_gold_review",
+  "winners": [],
+  "gold_review_packets": [
+    {
+      "corpus": "china",
+      "gold_review_status": "draft",
+      "gold_path": "./benchmarks/ocr_combo/gold/china/gold.json",
+      "gold_review_packet_dir": "./banchmark_result_log/ocr_combo/20260407_211341_ocr-combo-runtime_suite/gold-review/china",
+      "gold_generated_from_run_dir": "./banchmark_result_log/ocr_combo/20260407_211341_ocr-combo-runtime_suite/reference-seed/china",
+      "gold_page_count": 8,
+      "example_page": "0006_0005",
+      "example_source_image": "[local-only]",
+      "example_overlay_image": "[local-only]",
+      "example_ocr_debug": "./banchmark_result_log/ocr_combo/20260407_211341_ocr-combo-runtime_suite/gold-review/china/ocr_debugs/0006_0005_ocr_debug.json"
+    },
+    {
+      "corpus": "japan",
+      "gold_review_status": "draft",
+      "gold_path": "./benchmarks/ocr_combo/gold/japan/gold.json",
+      "gold_review_packet_dir": "./banchmark_result_log/ocr_combo/20260407_211341_ocr-combo-runtime_suite/gold-review/japan",
+      "gold_generated_from_run_dir": "./banchmark_result_log/ocr_combo/20260407_211341_ocr-combo-runtime_suite/reference-seed/japan",
+      "gold_page_count": 22,
+      "example_page": "094",
+      "example_source_image": "[local-only]",
+      "example_overlay_image": "[local-only]",
+      "example_ocr_debug": "./banchmark_result_log/ocr_combo/20260407_211341_ocr-combo-runtime_suite/gold-review/japan/ocr_debugs/094_ocr_debug.json"
+    }
+  ]
+}

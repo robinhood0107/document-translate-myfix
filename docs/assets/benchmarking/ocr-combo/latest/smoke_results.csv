@@ -1,0 +1,7 @@
+corpus,engine,elapsed_sec,ocr_total_sec,translate_total_sec,run_dir
+china,PPOCRv5 + Gemma,35.666,2.794,25.549,./banchmark_result_log/ocr_combo/20260408_005922_ocr-combo-runtime_suite/smoke/china/china-ppocrv5-smoke
+china,PaddleOCR VL + Gemma,70.27,21.802,37.188,./banchmark_result_log/ocr_combo/20260408_005922_ocr-combo-runtime_suite/smoke/china/china-paddleocr-smoke
+china,HunyuanOCR + Gemma,44.041,2.02,33.383,./banchmark_result_log/ocr_combo/20260408_005922_ocr-combo-runtime_suite/smoke/china/china-hunyuanocr-smoke
+japan,MangaOCR + Gemma,30.072,2.734,19.129,./banchmark_result_log/ocr_combo/20260408_005922_ocr-combo-runtime_suite/smoke/japan/japan-mangaocr-smoke
+japan,PaddleOCR VL + Gemma,65.877,32.182,24.321,./banchmark_result_log/ocr_combo/20260408_005922_ocr-combo-runtime_suite/smoke/japan/japan-paddleocr-smoke
+japan,HunyuanOCR + Gemma,31.275,3.787,18.388,./banchmark_result_log/ocr_combo/20260408_005922_ocr-combo-runtime_suite/smoke/japan/japan-hunyuanocr-smoke
