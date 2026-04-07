@@ -130,6 +130,15 @@ SUITE_PROFILES = {
         "benchmark_scope": "detect-ocr-only official suite with warm-stable gate; legacy full pipeline remains opt-in",
         "baseline_batch_step": "",
     },
+    "ocr-combo-runtime": {
+        "benchmark_name": "OCR Combo Runtime Benchmark",
+        "benchmark_kind": "managed family suite",
+        "benchmark_scope": (
+            "full-pipeline OCR+Gemma comparison with language-aware winners for "
+            "China and japan corpora"
+        ),
+        "baseline_batch_step": "",
+    },
 }
 
 RUNTIME_SNAPSHOT_FILES = [
@@ -1461,6 +1470,12 @@ def main() -> int:
         return run_paddleocr_vl15_suite(
             sample_dir=DEFAULT_SAMPLE_DIR,
             sample_count=DEFAULT_SAMPLE_COUNT,
+        )
+    if args.suite_profile == "ocr-combo-runtime":
+        from ocr_combo_benchmark import run_suite as run_ocr_combo_suite
+
+        return run_ocr_combo_suite(
+            sample_root=DEFAULT_SAMPLE_DIR,
         )
 
     sample_dir = DEFAULT_SAMPLE_DIR

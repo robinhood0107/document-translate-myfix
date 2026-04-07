@@ -41,6 +41,7 @@ echo Usage:
 echo   scripts\benchmark_suite.bat
 echo   scripts\benchmark_suite_cuda13.bat
 echo   scripts\benchmark_suite_cuda13.bat --suite-profile b8665-gemma4
+echo   scripts\benchmark_suite_cuda13.bat --suite-profile ocr-combo-runtime
 echo.
 echo Default suite runs:
 echo   1. translation-baseline one-page attach-running
@@ -49,6 +50,9 @@ echo   3. translation-ngl23 batch managed
 echo.
 echo b8665 experiment suite:
 echo   scripts\benchmark_suite_cuda13.bat --suite-profile b8665-gemma4
+echo.
+echo OCR combo language-aware suite:
+echo   scripts\benchmark_suite_cuda13.bat --suite-profile ocr-combo-runtime
 echo.
 echo Runtime:
 echo   benchmark_suite.bat uses .venv-win

@@ -56,6 +56,7 @@
   - architecture
   - results history
   - generated/latest report
+- 서로 다른 source language 코퍼스를 함께 다루는 family는 단일 글로벌 winner 대신 언어별 추천 정책을 공식 산출물로 채택할 수 있다.
 - benchmark 자산은 `benchmarking/lab`에만 두고, 제품 반영은 별도 `codex/* -> develop` PR로 승격한다.
 
 ## 3. 기능 작업 절차

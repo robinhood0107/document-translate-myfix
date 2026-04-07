@@ -25,11 +25,13 @@ from PySide6.QtWidgets import QApplication
 
 from app.ui.main_window.constants import supported_source_languages, supported_target_languages
 from benchmark_common import (
-    DEFAULT_CONTAINER_NAMES,
+    ALL_BENCHMARK_CONTAINER_NAMES,
     create_run_dir,
     load_preset,
     remove_containers,
     render_summary_markdown,
+    resolve_runtime_container_names,
+    resolve_runtime_health_urls,
     resolve_corpus,
     run_command,
     stage_runtime_files,
@@ -55,15 +57,6 @@ GEMMA_ENV_OVERRIDES = {
     "response_schema_mode": "CT_GEMMA_RESPONSE_SCHEMA_MODE",
     "think_briefly_prompt": "CT_GEMMA_THINK_BRIEFLY_PROMPT",
 }
-FULL_RUNTIME_HEALTH_URLS = [
-    "http://127.0.0.1:18080/health",
-    "http://127.0.0.1:18000/v1/models",
-    "http://127.0.0.1:28118/docs",
-]
-OCR_ONLY_HEALTH_URLS = [
-    "http://127.0.0.1:28118/docs",
-]
-
 
 def _log(message: str) -> None:
     print(f"[benchmark] {message}", flush=True)
@@ -176,28 +169,33 @@ def _ensure_managed_runtime(
     run_dir: Path,
     preset: dict[str, object],
     runtime_services: str = "full",
-) -> None:
+) -> list[str]:
     runtime_dir = run_dir / "runtime"
     _log(f"managed runtime staging 시작: {runtime_dir}")
     staged = stage_runtime_files(preset, runtime_dir)
+    container_names = resolve_runtime_container_names(preset, runtime_services)
     _log("managed runtime 기존 컨테이너 정리 중...")
-    remove_containers(DEFAULT_CONTAINER_NAMES)
+    remove_containers(ALL_BENCHMARK_CONTAINER_NAMES)
     if runtime_services != "ocr-only":
         _log(f"Gemma compose 적용: {staged['gemma']['compose_path']}")
         run_command(
             ["docker", "compose", "-f", staged["gemma"]["compose_path"], "up", "-d", "--force-recreate"],
             cwd=runtime_dir / "gemma",
         )
-    _log(f"OCR compose 적용: {staged['ocr']['compose_path']}")
-    run_command(
-        ["docker", "compose", "-f", staged["ocr"]["compose_path"], "up", "-d", "--force-recreate"],
-        cwd=runtime_dir / "ocr",
-    )
+    if staged["ocr"].get("kind") != "internal":
+        _log(f"OCR compose 적용: {staged['ocr']['compose_path']}")
+        run_command(
+            ["docker", "compose", "-f", staged["ocr"]["compose_path"], "up", "-d", "--force-recreate"],
+            cwd=runtime_dir / "ocr",
+        )
+    else:
+        _log("OCR runtime kind=internal: 외부 OCR 컨테이너를 띄우지 않습니다")
     _log("managed runtime health-check 대기 중...")
-    health_urls = OCR_ONLY_HEALTH_URLS if runtime_services == "ocr-only" else FULL_RUNTIME_HEALTH_URLS
+    health_urls = resolve_runtime_health_urls(preset, runtime_services)
     for url in health_urls:
         _wait_for_url(url)
     _log("managed runtime health-check 완료")
+    return container_names
 
 
 def _write_container_logs(run_dir: Path, container_names: list[str]) -> None:
@@ -219,6 +217,7 @@ def _configure_window(window, preset: dict[str, object], source_lang: str, targe
     app_config = preset.get("app", {})
     gemma = preset.get("gemma", {})
     ocr_client = preset.get("ocr_client", {})
+    hunyuan_ocr_client = preset.get("hunyuan_ocr_client", {})
 
     ui.use_gpu_checkbox.setChecked(bool(app_config.get("use_gpu", True)))
     ui.translator_combo.setCurrentText(str(app_config.get("translator", "Custom Local Server(Gemma)")))
@@ -240,6 +239,21 @@ def _configure_window(window, preset: dict[str, object], source_lang: str, targe
     )
     ui.paddleocr_vl_max_new_tokens_spinbox.setValue(int(ocr_client.get("max_new_tokens", 256)))
     ui.paddleocr_vl_parallel_workers_spinbox.setValue(int(ocr_client.get("parallel_workers", 2)))
+    ui.hunyuan_ocr_server_url_input.setText(
+        str(hunyuan_ocr_client.get("server_url", "http://127.0.0.1:28080/v1"))
+    )
+    ui.hunyuan_ocr_max_completion_tokens_spinbox.setValue(
+        int(hunyuan_ocr_client.get("max_completion_tokens", 256))
+    )
+    ui.hunyuan_ocr_parallel_workers_spinbox.setValue(
+        int(hunyuan_ocr_client.get("parallel_workers", 2))
+    )
+    ui.hunyuan_ocr_request_timeout_spinbox.setValue(
+        int(hunyuan_ocr_client.get("request_timeout_sec", 60))
+    )
+    ui.hunyuan_ocr_raw_response_logging_checkbox.setChecked(
+        bool(hunyuan_ocr_client.get("raw_response_logging", False))
+    )
 
     ui.gemma_chunk_size_spinbox.setValue(int(gemma.get("chunk_size", 4)))
     ui.gemma_max_completion_tokens_spinbox.setValue(int(gemma.get("max_completion_tokens", 512)))
@@ -290,6 +304,7 @@ def _normalize_ocr_text(text: object) -> str:
 def _serialize_page_snapshot_block(blk) -> dict[str, object]:
     bubble_xyxy = getattr(blk, "bubble_xyxy", None)
     text_class = getattr(blk, "text_class", None)
+    translation = str(getattr(blk, "translation", "") or "")
     return {
         "xyxy": [float(value) for value in getattr(blk, "xyxy", [])],
         "bubble_xyxy": [float(value) for value in bubble_xyxy] if bubble_xyxy is not None else None,
@@ -297,6 +312,8 @@ def _serialize_page_snapshot_block(blk) -> dict[str, object]:
         "text_class": text_class if isinstance(text_class, (str, int, float, bool)) or text_class is None else str(text_class),
         "text": str(getattr(blk, "text", "") or ""),
         "normalized_text": _normalize_ocr_text(getattr(blk, "text", "") or ""),
+        "translation": translation,
+        "normalized_translation": _normalize_ocr_text(translation),
     }
 
 
@@ -587,26 +604,27 @@ def main() -> int:
                 },
             )
             write_json(run_dir / "preset_resolved.json", preset)
+            container_names = resolve_runtime_container_names(preset, args.runtime_services)
             write_snapshot_json(
                 run_dir / "runtime_snapshot.json",
-                collect_runtime_snapshot(DEFAULT_CONTAINER_NAMES),
+                collect_runtime_snapshot(container_names),
             )
             _log("런타임 스냅샷 저장 완료")
 
             if args.runtime_mode == "managed":
-                _ensure_managed_runtime(run_dir, preset, args.runtime_services)
+                container_names = _ensure_managed_runtime(run_dir, preset, args.runtime_services)
                 write_snapshot_json(
                     run_dir / "docker_snapshot.json",
-                    collect_runtime_snapshot(DEFAULT_CONTAINER_NAMES),
+                    collect_runtime_snapshot(container_names),
                 )
-                _write_container_logs(run_dir, DEFAULT_CONTAINER_NAMES)
+                _write_container_logs(run_dir, container_names)
             else:
                 _log("attach-running 모드: 현재 떠 있는 Docker 서버를 그대로 사용")
                 write_snapshot_json(
                     run_dir / "docker_snapshot.json",
-                    collect_runtime_snapshot(DEFAULT_CONTAINER_NAMES),
+                    collect_runtime_snapshot(container_names),
                 )
-                _write_container_logs(run_dir, DEFAULT_CONTAINER_NAMES)
+                _write_container_logs(run_dir, container_names)
 
             try:
                 summary = _run_single_mode(

@@ -37,14 +37,83 @@ EXCLUDED_SAMPLE_PARENT_NAMES = {
 PRESET_DIRS = [
     ROOT / "benchmarks" / "presets",
     ROOT / "benchmarks" / "paddleocr_vl15" / "presets",
+    ROOT / "benchmarks" / "ocr_combo" / "presets",
 ]
 OCR_BUNDLE_DIR = ROOT / "paddleocr_vl_docker_files"
+HUNYUAN_OCR_BUNDLE_DIR = ROOT / "hunyuanocr_docker_files"
 ROOT_GEMMA_COMPOSE = ROOT / "docker-compose.yaml"
-DEFAULT_CONTAINER_NAMES = [
+GEMMA_CONTAINER_NAMES = [
     "gemma-local-server",
+]
+PADDLEOCR_VL_CONTAINER_NAMES = [
     "paddleocr-server",
     "paddleocr-vllm",
 ]
+HUNYUAN_OCR_CONTAINER_NAMES = [
+    "hunyuanocr-local-server",
+]
+DEFAULT_CONTAINER_NAMES = GEMMA_CONTAINER_NAMES + PADDLEOCR_VL_CONTAINER_NAMES
+ALL_BENCHMARK_CONTAINER_NAMES = (
+    GEMMA_CONTAINER_NAMES + PADDLEOCR_VL_CONTAINER_NAMES + HUNYUAN_OCR_CONTAINER_NAMES
+)
+GEMMA_HEALTH_URLS = [
+    "http://127.0.0.1:18080/health",
+    "http://127.0.0.1:18000/v1/models",
+]
+PADDLEOCR_VL_HEALTH_URLS = [
+    "http://127.0.0.1:28118/docs",
+]
+HUNYUAN_OCR_HEALTH_URLS = [
+    "http://127.0.0.1:28080/health",
+]
+
+
+def ocr_runtime_kind(preset: dict[str, Any]) -> str:
+    ocr_runtime = preset.get("ocr_runtime", {})
+    if isinstance(ocr_runtime, dict):
+        kind = str(ocr_runtime.get("kind", "") or "").strip().lower()
+        if kind:
+            return kind
+
+    app = preset.get("app", {})
+    ocr_name = str((app.get("ocr") if isinstance(app, dict) else "") or "").strip()
+    if ocr_name == "PaddleOCR VL":
+        return "paddleocr_vl"
+    if ocr_name == "HunyuanOCR":
+        return "hunyuanocr"
+    return "internal"
+
+
+def resolve_runtime_container_names(
+    preset: dict[str, Any],
+    runtime_services: str = "full",
+) -> list[str]:
+    names: list[str] = []
+    if runtime_services != "ocr-only":
+        names.extend(GEMMA_CONTAINER_NAMES)
+
+    kind = ocr_runtime_kind(preset)
+    if kind == "paddleocr_vl":
+        names.extend(PADDLEOCR_VL_CONTAINER_NAMES)
+    elif kind == "hunyuanocr":
+        names.extend(HUNYUAN_OCR_CONTAINER_NAMES)
+    return names
+
+
+def resolve_runtime_health_urls(
+    preset: dict[str, Any],
+    runtime_services: str = "full",
+) -> list[str]:
+    urls: list[str] = []
+    if runtime_services != "ocr-only":
+        urls.extend(GEMMA_HEALTH_URLS)
+
+    kind = ocr_runtime_kind(preset)
+    if kind == "paddleocr_vl":
+        urls.extend(PADDLEOCR_VL_HEALTH_URLS)
+    elif kind == "hunyuanocr":
+        urls.extend(HUNYUAN_OCR_HEALTH_URLS)
+    return urls
 
 
 def repo_root() -> Path:
@@ -291,10 +360,65 @@ def _stage_ocr_runtime(preset: dict[str, Any], runtime_dir: Path) -> dict[str, A
     _python3_yaml_dump(vllm_path, vllm_conf)
 
     return {
+        "kind": "paddleocr_vl",
         "compose_path": str(compose_path.resolve()),
         "pipeline_conf_path": str(pipeline_path.resolve()),
         "vllm_config_path": str(vllm_path.resolve()),
         "service_names": ["paddleocr-server", "paddleocr-vllm"],
+    }
+
+
+def _stage_hunyuan_ocr_runtime(preset: dict[str, Any], runtime_dir: Path) -> dict[str, Any]:
+    runtime_dir.mkdir(parents=True, exist_ok=True)
+    compose = _python3_yaml_load(HUNYUAN_OCR_BUNDLE_DIR / "docker-compose.yaml")
+    service = compose["services"]["hunyuanocr-local-server"]
+    command = list(service.get("command") or [])
+    volumes = list(service.get("volumes") or [])
+    ocr_runtime = preset.get("ocr_runtime", {}) if isinstance(preset.get("ocr_runtime"), dict) else {}
+    testmodel_dir = (ROOT / "testmodel").resolve()
+
+    normalized_volumes: list[Any] = []
+    for volume in volumes:
+        if isinstance(volume, str) and volume.startswith("../testmodel:"):
+            normalized_volumes.append(f"{testmodel_dir.as_posix()}:/models:ro")
+        else:
+            normalized_volumes.append(volume)
+    if normalized_volumes:
+        service["volumes"] = normalized_volumes
+
+    if ocr_runtime.get("image"):
+        service["image"] = str(ocr_runtime["image"])
+    if ocr_runtime.get("pull_policy"):
+        service["pull_policy"] = str(ocr_runtime["pull_policy"])
+    if ocr_runtime.get("model_path"):
+        _update_command_option(command, "-m", [str(ocr_runtime["model_path"])])
+    if ocr_runtime.get("mmproj_path"):
+        _update_command_option(command, "--mmproj", [str(ocr_runtime["mmproj_path"])])
+    if ocr_runtime.get("context_size") is not None:
+        _update_command_option(command, "-c", [str(ocr_runtime["context_size"])])
+    if ocr_runtime.get("n_parallel") is not None:
+        _update_command_option(command, "-np", [str(ocr_runtime["n_parallel"])])
+    if ocr_runtime.get("threads") is not None:
+        _update_command_option(command, "-t", [str(ocr_runtime["threads"])])
+    if ocr_runtime.get("n_gpu_layers") is not None:
+        _update_command_option(command, "--n-gpu-layers", [str(ocr_runtime["n_gpu_layers"])])
+
+    service["command"] = command
+    compose_path = runtime_dir / "docker-compose.yaml"
+    _python3_yaml_dump(compose_path, compose)
+    return {
+        "kind": "hunyuanocr",
+        "compose_path": str(compose_path.resolve()),
+        "service_names": ["hunyuanocr-local-server"],
+    }
+
+
+def _stage_internal_ocr_runtime(runtime_dir: Path) -> dict[str, Any]:
+    runtime_dir.mkdir(parents=True, exist_ok=True)
+    return {
+        "kind": "internal",
+        "compose_path": "",
+        "service_names": [],
     }
 
 
@@ -305,7 +429,13 @@ def stage_runtime_files(preset: dict[str, Any], runtime_dir: str | Path) -> dict
     base.mkdir(parents=True, exist_ok=True)
 
     gemma_runtime = _stage_gemma_runtime(preset, base / "gemma")
-    ocr_runtime = _stage_ocr_runtime(preset, base / "ocr")
+    kind = ocr_runtime_kind(preset)
+    if kind == "paddleocr_vl":
+        ocr_runtime = _stage_ocr_runtime(preset, base / "ocr")
+    elif kind == "hunyuanocr":
+        ocr_runtime = _stage_hunyuan_ocr_runtime(preset, base / "ocr")
+    else:
+        ocr_runtime = _stage_internal_ocr_runtime(base / "ocr")
 
     app_settings_path = base / "app_settings.json"
     app_settings_path.write_text(
@@ -314,6 +444,7 @@ def stage_runtime_files(preset: dict[str, Any], runtime_dir: str | Path) -> dict
                 "app": preset.get("app", {}),
                 "gemma": preset.get("gemma", {}),
                 "ocr_client": preset.get("ocr_client", {}),
+                "hunyuan_ocr_client": preset.get("hunyuan_ocr_client", {}),
                 "ocr_runtime": preset.get("ocr_runtime", {}),
             },
             ensure_ascii=False,

@@ -97,6 +97,10 @@ benchmark family는 가능한 한 아래 구조를 함께 갖춥니다.
 - 합격/탈락 게이트
 - 필요하면 generic stage ceiling으로 공식 suite의 실행 범위를 해당 stage까지만 줄일 수 있음
 
+source language가 다른 코퍼스를 함께 비교하는 family는 단일 글로벌 winner 대신 언어별 추천 정책을 공식 결론으로 삼을 수 있습니다.
+
+- 예: China winner, japan winner를 따로 두고 mixed corpus는 source language 라우팅 정책으로 정리
+
 ## benchmark 결과를 `develop`로 반영하는 절차
 
 1. `benchmarking/lab`에서 실험을 완료합니다.
