@@ -1154,6 +1154,10 @@ Jetzt neu starten?</translation>
         <translation>Größe ändern</translation>
     </message>
     <message>
+        <source>PPOCRv5</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
         <source>PaddleOCR VL</source>
         <translation type="unfinished"></translation>
     </message>
@@ -1817,6 +1821,10 @@ Möglicherweise wurde es verschoben, umbenannt oder gelöscht.
     <message>
         <source>Gemini-2.0-Flash</source>
         <translation>Gemini-2.0-Flash</translation>
+    </message>
+    <message>
+        <source>PPOCRv5</source>
+        <translation type="unfinished"></translation>
     </message>
     <message>
         <source>PaddleOCR VL</source>
