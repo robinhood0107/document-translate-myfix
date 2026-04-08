@@ -22,3 +22,5 @@ onnxruntime-gpu>=1.22.1
 shapely>=2.1.1
 pyclipper>=1.3.0.post6
 six>=1.16.0
+PhotoshopAPI>=0.9.0
+Send2Trash>=1.8.3
