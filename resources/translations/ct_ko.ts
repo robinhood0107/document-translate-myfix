@@ -1185,10 +1185,6 @@ Restart now?</source>
         <translation>크기 조정</translation>
     </message>
     <message>
-        <source>PPOCRv5</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
         <source>PaddleOCR VL</source>
         <translation type="unfinished"></translation>
     </message>
@@ -1853,10 +1849,6 @@ It may have been moved, renamed, or deleted.
     <message>
         <source>Gemini-2.0-Flash</source>
         <translation>Gemini-2.0-Flash</translation>
-    </message>
-    <message>
-        <source>PPOCRv5</source>
-        <translation type="unfinished"></translation>
     </message>
     <message>
         <source>PaddleOCR VL</source>
