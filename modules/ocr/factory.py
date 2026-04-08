@@ -194,14 +194,16 @@ class OCRFactory:
     @staticmethod
     def _create_manga_ocr(settings, backend: str = 'onnx') -> OCREngine:
         device = resolve_device(settings.is_gpu_enabled(), backend)
+        generic = settings.get_ocr_generic_settings() if hasattr(settings, "get_ocr_generic_settings") else {}
+        expansion_percentage = int(generic.get("manga_expansion_percentage", 7))
         
         if backend.lower() == 'torch' and torch_available():
             from .manga_ocr.engine import MangaOCREngine
             engine = MangaOCREngine()
-            engine.initialize(device=device)
+            engine.initialize(device=device, expansion_percentage=expansion_percentage)
         else:
             engine = MangaOCREngineONNX()
-            engine.initialize(device=device)
+            engine.initialize(device=device, expansion_percentage=expansion_percentage)
         
         return engine
     
