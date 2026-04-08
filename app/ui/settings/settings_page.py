@@ -226,6 +226,14 @@ class SettingsPage(QtWidgets.QWidget):
             "raw_response_logging": self.ui.hunyuan_ocr_raw_response_logging_checkbox.isChecked(),
         }
 
+    def get_ocr_generic_settings(self):
+        return {
+            "manga_expansion_percentage": 7,
+            "crop_padding_ratio": 0.05,
+            "ppocr_retry_crop_ratio_x": 0.06,
+            "ppocr_retry_crop_ratio_y": 0.10,
+        }
+
     def get_export_settings(self):
         owner = self.window()
         title_bar = getattr(owner, "title_bar", None)
@@ -490,10 +498,18 @@ class SettingsPage(QtWidgets.QWidget):
             settings.value("visualize", False, type=bool)
         )
         self.ui.paddleocr_vl_max_new_tokens_spinbox.setValue(
-            settings.value("max_new_tokens", 256, type=int)
+            settings.value(
+                "max_new_tokens",
+                self.ui.paddleocr_vl_page.DEFAULT_MAX_NEW_TOKENS,
+                type=int,
+            )
         )
         self.ui.paddleocr_vl_parallel_workers_spinbox.setValue(
-            settings.value("parallel_workers", 2, type=int)
+            settings.value(
+                "parallel_workers",
+                self.ui.paddleocr_vl_page.DEFAULT_PARALLEL_WORKERS,
+                type=int,
+            )
         )
         settings.endGroup()
 
