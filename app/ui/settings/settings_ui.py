@@ -61,7 +61,6 @@ class SettingsPageUI(QtWidgets.QWidget):
             self.tr('Microsoft OCR'), 
             self.tr('Google Cloud Vision'),
             self.tr('Gemini-2.0-Flash'), 
-            self.tr('PPOCRv5'),
             self.tr('PaddleOCR VL'),
             self.tr('HunyuanOCR'),
         ]
@@ -142,7 +141,6 @@ class SettingsPageUI(QtWidgets.QWidget):
             self.tr("Microsoft OCR"): "Microsoft OCR",
             self.tr("Google Cloud Vision"): "Google Cloud Vision",
             self.tr("Gemini-2.0-Flash"): "Gemini-2.0-Flash",
-            self.tr("PPOCRv5"): "PPOCRv5",
             self.tr("PaddleOCR VL"): "PaddleOCR VL",
             self.tr("HunyuanOCR"): "HunyuanOCR",
 

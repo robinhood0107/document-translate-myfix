@@ -1246,10 +1246,6 @@ Restart now?</source>
         <translation>Gemini-2.5-Pro</translation>
     </message>
     <message>
-        <source>PPOCRv5</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
         <source>HunyuanOCR</source>
         <translation type="unfinished"></translation>
     </message>
@@ -1821,10 +1817,6 @@ Taşınmış, yeniden adlandırılmış veya silinmiş olabilir.
     <message>
         <source>Gemini-2.0-Flash</source>
         <translation>Gemini-2.0-Flash</translation>
-    </message>
-    <message>
-        <source>PPOCRv5</source>
-        <translation type="unfinished"></translation>
     </message>
     <message>
         <source>PaddleOCR VL</source>
