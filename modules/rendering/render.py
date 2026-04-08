@@ -1,8 +1,10 @@
+import logging
 import numpy as np
 from typing import Tuple, List
+import unicodedata
 
 from PIL import Image, ImageFont, ImageDraw
-from PySide6.QtGui import QFont, QTextDocument,\
+from PySide6.QtGui import QFont, QFontMetrics, QTextDocument,\
       QTextCursor, QTextBlockFormat, QTextOption
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QApplication
@@ -13,8 +15,12 @@ from modules.utils.textblock import adjust_blks_size
 from modules.detection.utils.geometry import shrink_bbox
 from app.ui.canvas.text.vertical_layout import VerticalTextDocumentLayout
 from modules.utils.language_utils import get_language_code
+from modules.utils.text_normalization import PADDLE_DECORATIVE_NOISE_GLYPHS, canonicalize_ellipsis_runs
 
 from dataclasses import dataclass
+
+
+logger = logging.getLogger(__name__)
 
 @dataclass
 class TextRenderingSettings:
@@ -64,6 +70,59 @@ def is_vertical_block(blk, lang_code: str | None) -> bool:
     and the target language code is one of the vertical-capable ones.
     """
     return getattr(blk, "direction", "") == "vertical" and is_vertical_language_code(lang_code)
+
+
+def _render_font_supports(metrics: QFontMetrics, ch: str) -> bool:
+    try:
+        return metrics.inFontUcs4(ord(ch))
+    except AttributeError:
+        return metrics.inFont(ch)
+
+
+def sanitize_render_text(
+    text: str,
+    font_family: str,
+    *,
+    block_index: int | None = None,
+    image_path: str = "",
+) -> str:
+    if not text:
+        return ""
+
+    sanitized = canonicalize_ellipsis_runs(text)
+    effective_family = font_family.strip() if isinstance(font_family, str) and font_family.strip() else QApplication.font().family()
+    metrics = QFontMetrics(QFont(effective_family, 12))
+    cleaned_parts: list[str] = []
+
+    for ch in sanitized:
+        replacement = ch
+        reason = ""
+        if ch in PADDLE_DECORATIVE_NOISE_GLYPHS:
+            replacement = ""
+            reason = "decorative-noise"
+        elif ch not in {"\n", "\r", "\t"} and not _render_font_supports(metrics, ch):
+            category = unicodedata.category(ch)
+            if ch in {"…", "⋯"}:
+                replacement = "..."
+                reason = "unsupported-ellipsis"
+            elif category.startswith("S"):
+                replacement = ""
+                reason = "unsupported-symbol"
+
+        if replacement != ch:
+            logger.warning(
+                "render glyph sanitized: image=%s block=%s codepoint=U+%04X char=%r replacement=%r reason=%s font=%s",
+                image_path or "",
+                block_index if block_index is not None else -1,
+                ord(ch),
+                ch,
+                replacement,
+                reason or "render-normalization",
+                effective_family,
+            )
+        cleaned_parts.append(replacement)
+
+    return "".join(cleaned_parts)
 
 def pil_word_wrap(image: Image, tbbox_top_left: Tuple, font_pth: str, text: str, 
                   roi_width, roi_height, align: str, spacing, init_font_size: int, min_font_size: int = 10):
@@ -128,11 +187,15 @@ def draw_text(image: np.ndarray, blk_list: List[TextBlock], font_pth: str, colou
 
     font = ImageFont.truetype(font_pth, size=init_font_size)
 
-    for blk in blk_list:
+    for block_index, blk in enumerate(blk_list):
         x1, y1, width, height = blk.xywh
         tbbox_top_left = (x1, y1)
 
-        translation = blk.translation
+        translation = sanitize_render_text(
+            blk.translation,
+            "",
+            block_index=block_index,
+        )
         if not translation or len(translation) == 1:
             continue
 
@@ -367,10 +430,15 @@ def manual_wrap(
     target_lang = main_page.lang_mapping.get(main_page.t_combo.currentText(), None)
     trg_lng_cd = get_language_code(target_lang)
 
-    for blk in blk_list:
+    for block_index, blk in enumerate(blk_list):
         x1, y1, width, height = blk.xywh
 
-        translation = blk.translation
+        translation = sanitize_render_text(
+            blk.translation,
+            font_family,
+            block_index=block_index,
+            image_path=image_path,
+        )
         if not translation or len(translation) == 1:
             continue
 
