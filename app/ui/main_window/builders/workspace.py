@@ -174,6 +174,7 @@ class WorkspaceMixin:
                 ".cbt",
                 ".pdf",
                 ".epub",
+                ".psd",
                 ".ctpr",
             ]
         )
