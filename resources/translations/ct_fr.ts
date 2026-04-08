@@ -1154,10 +1154,6 @@ Redémarrer maintenant ?</translation>
         <translation>Redimensionner</translation>
     </message>
     <message>
-        <source>PPOCRv5</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
         <source>PaddleOCR VL</source>
         <translation type="unfinished"></translation>
     </message>
@@ -1821,10 +1817,6 @@ Il a peut-être été déplacé, renommé ou supprimé.
     <message>
         <source>Gemini-2.0-Flash</source>
         <translation>Gemini-2.0-Flash</translation>
-    </message>
-    <message>
-        <source>PPOCRv5</source>
-        <translation type="unfinished"></translation>
     </message>
     <message>
         <source>PaddleOCR VL</source>
