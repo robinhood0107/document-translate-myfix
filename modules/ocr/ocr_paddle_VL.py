@@ -15,6 +15,11 @@ from modules.utils.exceptions import (
     LocalServiceResponseError,
 )
 from modules.utils.ocr_debug import OCR_STATUS_EMPTY_INITIAL, OCR_STATUS_OK, ensure_three_channel, expand_bbox, set_block_ocr_diagnostics
+from modules.utils.text_normalization import (
+    PADDLE_DECORATIVE_NOISE_GLYPHS,
+    canonicalize_ellipsis_runs,
+    strip_selected_glyphs,
+)
 from modules.utils.textblock import TextBlock
 
 from .base import OCREngine
@@ -109,8 +114,8 @@ class PaddleOCRVLEngine(OCREngine):
             self._mark_empty(blk, "Invalid OCR crop bounds.")
             return
 
-        text = self._request_ocr_text(crop)
-        cleaned = self._normalize_output_text(text)
+        raw_text = self._request_ocr_text(crop)
+        cleaned = self._normalize_output_text(raw_text)
         if cleaned:
             set_block_ocr_diagnostics(
                 blk,
@@ -119,9 +124,11 @@ class PaddleOCRVLEngine(OCREngine):
                 status=OCR_STATUS_OK,
                 empty_reason="",
                 attempt_count=1,
+                raw_text=raw_text,
+                sanitized_text=cleaned,
             )
         else:
-            self._mark_empty(blk, "PaddleOCR VL returned no text.")
+            self._mark_empty(blk, "PaddleOCR VL returned no usable text.", raw_text=raw_text)
 
     def _request_ocr_text(self, image: np.ndarray) -> str:
         image_bytes = self._encode_image(image)
@@ -312,7 +319,7 @@ class PaddleOCRVLEngine(OCREngine):
             
         return encoded.tobytes()
 
-    def _mark_empty(self, blk: TextBlock, reason: str) -> None:
+    def _mark_empty(self, blk: TextBlock, reason: str, raw_text: str = "") -> None:
         set_block_ocr_diagnostics(
             blk,
             text="",
@@ -320,6 +327,8 @@ class PaddleOCRVLEngine(OCREngine):
             status=OCR_STATUS_EMPTY_INITIAL,
             empty_reason=reason,
             attempt_count=1,
+            raw_text=raw_text,
+            sanitized_text="",
         )
 
     def _response_rejected_max_new_tokens(self, data: dict) -> bool:
@@ -332,6 +341,8 @@ class PaddleOCRVLEngine(OCREngine):
         if not text:
             return ""
         normalized = text.replace("\r\n", "\n").replace("\r", "\n").strip()
+        normalized = strip_selected_glyphs(normalized, PADDLE_DECORATIVE_NOISE_GLYPHS)
+        normalized = canonicalize_ellipsis_runs(normalized)
         normalized = re.sub(r"\n{3,}", "\n\n", normalized)
         return normalized.strip()
 
