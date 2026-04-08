@@ -88,7 +88,6 @@ class OCRProcessor:
             self.settings.ui.tr('Microsoft OCR'): 'Microsoft OCR',
             self.settings.ui.tr('Google Cloud Vision'): 'Google Cloud Vision',
             self.settings.ui.tr('Gemini-2.0-Flash'): 'Gemini-2.0-Flash',
-            self.settings.ui.tr('PPOCRv5'): 'PPOCRv5',
             self.settings.ui.tr('PaddleOCR VL'): 'PaddleOCR VL',
             self.settings.ui.tr('HunyuanOCR'): 'HunyuanOCR',
             self.settings.ui.tr('Default'): 'Default',
