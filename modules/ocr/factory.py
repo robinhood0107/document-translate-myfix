@@ -151,6 +151,7 @@ class OCRFactory:
             'Google Cloud Vision': cls._create_google_ocr,
             'GPT-4.1-mini': lambda s: cls._create_gpt_ocr(s, ocr_model),
             'Gemini-2.0-Flash': lambda s: cls._create_gemini_ocr(s, ocr_model),
+            'MangaOCR': lambda s: cls._create_manga_ocr(s, backend),
             'PPOCRv5': lambda s: cls._create_explicit_ppocr(s, source_lang_english, backend),
             'PaddleOCR VL': cls._create_paddleocr_vl,
             'HunyuanOCR': cls._create_hunyuan_ocr,
@@ -208,14 +209,16 @@ class OCRFactory:
     @staticmethod
     def _create_manga_ocr(settings, backend: str = 'onnx') -> OCREngine:
         device = resolve_device(settings.is_gpu_enabled(), backend)
+        generic = settings.get_ocr_generic_settings() if hasattr(settings, "get_ocr_generic_settings") else {}
+        expansion_percentage = int(generic.get("manga_expansion_percentage", 5))
         
         if backend.lower() == 'torch' and torch_available():
             from .manga_ocr.engine import MangaOCREngine
             engine = MangaOCREngine()
-            engine.initialize(device=device)
+            engine.initialize(device=device, expansion_percentage=expansion_percentage)
         else:
             engine = MangaOCREngineONNX()
-            engine.initialize(device=device)
+            engine.initialize(device=device, expansion_percentage=expansion_percentage)
         
         return engine
     
@@ -236,14 +239,30 @@ class OCRFactory:
     @staticmethod
     def _create_ppocr(settings, lang: str, backend: str = 'onnx') -> OCREngine:
         device = resolve_device(settings.is_gpu_enabled(), backend)
+        generic = settings.get_ocr_generic_settings() if hasattr(settings, "get_ocr_generic_settings") else {}
+        crop_padding_ratio = float(generic.get("crop_padding_ratio", 0.05))
+        retry_crop_ratio_x = float(generic.get("ppocr_retry_crop_ratio_x", 0.06))
+        retry_crop_ratio_y = float(generic.get("ppocr_retry_crop_ratio_y", 0.10))
         if backend.lower() == 'torch' and torch_available():
             from .ppocr.torch.engine import PPOCRv5TorchEngine
             device = resolve_device(settings.is_gpu_enabled(), 'torch')
             engine = PPOCRv5TorchEngine()
-            engine.initialize(lang=lang, device=device)
+            engine.initialize(
+                lang=lang,
+                device=device,
+                crop_padding_ratio=crop_padding_ratio,
+                retry_crop_ratio_x=retry_crop_ratio_x,
+                retry_crop_ratio_y=retry_crop_ratio_y,
+            )
         else:
             engine = PPOCRv5Engine()
-            engine.initialize(lang=lang, device=device)
+            engine.initialize(
+                lang=lang,
+                device=device,
+                crop_padding_ratio=crop_padding_ratio,
+                retry_crop_ratio_x=retry_crop_ratio_x,
+                retry_crop_ratio_y=retry_crop_ratio_y,
+            )
         
         return engine
 

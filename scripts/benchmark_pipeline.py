@@ -218,6 +218,12 @@ def _configure_window(window, preset: dict[str, object], source_lang: str, targe
     gemma = preset.get("gemma", {})
     ocr_client = preset.get("ocr_client", {})
     hunyuan_ocr_client = preset.get("hunyuan_ocr_client", {})
+    ocr_generic = preset.get("ocr_generic", {})
+
+    if isinstance(ocr_generic, dict):
+        window.settings_page._benchmark_ocr_generic_settings = dict(ocr_generic)
+    else:
+        window.settings_page._benchmark_ocr_generic_settings = {}
 
     ui.use_gpu_checkbox.setChecked(bool(app_config.get("use_gpu", True)))
     ui.translator_combo.setCurrentText(str(app_config.get("translator", "Custom Local Server(Gemma)")))

@@ -1,0 +1,5 @@
+corpus,stage,engine,preset,elapsed_sec,ocr_total_sec,translate_median_sec,gpu_peak_used_mb,quality_band,quality_gate_pass,geometry_match_recall,geometry_match_precision,non_empty_retention,ocr_char_error_rate,ocr_word_error_rate,page_p95_ocr_char_error_rate,overgenerated_block_rate,page_failed_rate,page_failed_count,gemma_truncated_count
+japan,default,MangaOCR + Gemma,ocr-combo-ranked-japan-mangaocr-gemma,306.516,8.17,9.914,11969,conditional,True,1.0,0.9967,1.0,0.1457,0.1457,0.3361,0.0033,0.0,0,0
+japan,default,PaddleOCR VL + Gemma,ocr-combo-ranked-japan-paddleocr-vl-gemma,819.797,449.547,12.228,11976,ready,True,1.0,0.9967,1.0,0.0603,0.0603,0.1452,0.0033,0.0,0,0
+japan,default,HunyuanOCR + Gemma,ocr-combo-ranked-japan-hunyuanocr-gemma,317.94,41.576,8.848,11974,conditional,True,1.0,0.9967,1.0,0.177,0.177,0.3231,0.0033,0.0,0,0
+japan,default,PPOCRv5 + Gemma,ocr-combo-ranked-japan-ppocrv5-gemma,320.417,54.404,7.157,11945,catastrophic,False,1.0,0.9967,0.9799,0.629,0.629,0.9195,0.0033,0.0,0,0

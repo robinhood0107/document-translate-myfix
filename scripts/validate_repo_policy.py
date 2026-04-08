@@ -40,7 +40,10 @@ BENCHMARK_ONLY_FILE_PATTERNS = (
     re.compile(r"^scripts/apply_benchmark_preset\.py$"),
     re.compile(r"^scripts/paddleocr_vl15_[^/]+$"),
     re.compile(r"^scripts/ocr_combo_[^/]+$"),
+    re.compile(r"^scripts/ocr_combo_ranked_[^/]+$"),
     re.compile(r"^scripts/compare_ocr_combo_reference\.py$"),
+    re.compile(r"^scripts/compare_ocr_combo_ranked\.py$"),
+    re.compile(r"^scripts/generate_ocr_combo_ranked_report\.py$"),
 )
 
 
@@ -179,6 +182,36 @@ def validate_benchmark_family_structure() -> list[str]:
             if "execution_scope" not in text or "quality_gate_scope" not in text or "gold_source" not in text:
                 errors.append(
                     "OCR combo docs/report must mention execution_scope, quality_gate_scope, "
+                    f"and gold_source: {path.relative_to(root)}"
+                )
+    ranked_anchor = root / "docs" / "benchmark" / "ocr-combo-ranked"
+    if ranked_anchor.exists():
+        ranked_required_paths = [
+            root / "scripts" / "ocr_combo_ranked_benchmark.py",
+            root / "scripts" / "compare_ocr_combo_ranked.py",
+            root / "scripts" / "generate_ocr_combo_ranked_report.py",
+            root / "scripts" / "ocr_combo_ranked_benchmark_suite.bat",
+            root / "scripts" / "ocr_combo_ranked_benchmark_suite_cuda13.bat",
+            root / "docs" / "benchmark" / "ocr-combo-ranked" / "architecture-ko.md",
+            root / "docs" / "benchmark" / "ocr-combo-ranked" / "workflow-ko.md",
+            root / "docs" / "benchmark" / "ocr-combo-ranked" / "usage-ko.md",
+            root / "docs" / "benchmark" / "ocr-combo-ranked" / "results-history-ko.md",
+            root / "docs" / "banchmark_report" / "ocr-combo-ranked-report-ko.md",
+            root / "benchmarks" / "ocr_combo_ranked" / "frozen" / "china_winner.json",
+        ]
+        for path in ranked_required_paths:
+            if not path.exists():
+                errors.append(f"Missing required OCR combo ranked family asset: {path.relative_to(root)}")
+        for path in (
+            root / "docs" / "benchmark" / "ocr-combo-ranked" / "architecture-ko.md",
+            root / "docs" / "banchmark_report" / "ocr-combo-ranked-report-ko.md",
+        ):
+            if not path.is_file():
+                continue
+            text = path.read_text(encoding="utf-8")
+            if "execution_scope" not in text or "quality_gate_scope" not in text or "gold_source" not in text:
+                errors.append(
+                    "OCR combo ranked docs/report must mention execution_scope, quality_gate_scope, "
                     f"and gold_source: {path.relative_to(root)}"
                 )
     return errors

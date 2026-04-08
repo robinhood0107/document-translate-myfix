@@ -146,9 +146,11 @@ class HunyuanOCREngine(OCREngine):
         self.parallel_workers = DEFAULT_HUNYUAN_PARALLEL_WORKERS
         self.request_timeout_sec = DEFAULT_HUNYUAN_REQUEST_TIMEOUT_SEC
         self.raw_response_logging = False
+        self.crop_padding_ratio = self.TEXT_EXPANSION_RATIO
 
     def initialize(self, settings, **kwargs) -> None:
         config = settings.get_hunyuan_ocr_settings()
+        generic = settings.get_ocr_generic_settings() if hasattr(settings, "get_ocr_generic_settings") else {}
         self.server_url = config.get("server_url", DEFAULT_HUNYUAN_SERVER_URL) or DEFAULT_HUNYUAN_SERVER_URL
         self.max_completion_tokens = self._clamp_int(
             config.get("max_completion_tokens", DEFAULT_HUNYUAN_MAX_COMPLETION_TOKENS),
@@ -169,6 +171,7 @@ class HunyuanOCREngine(OCREngine):
             ),
         )
         self.raw_response_logging = bool(config.get("raw_response_logging", False))
+        self.crop_padding_ratio = max(0.0, float(generic.get("crop_padding_ratio", self.TEXT_EXPANSION_RATIO)))
 
     def process_image(self, img: np.ndarray, blk_list: list[TextBlock]) -> list[TextBlock]:
         jobs: list[tuple[TextBlock, tuple[int, int, int, int], str]] = []
@@ -619,8 +622,8 @@ class HunyuanOCREngine(OCREngine):
         return resolve_block_crop_bbox(
             blk,
             image.shape,
-            x_ratio=self.TEXT_EXPANSION_RATIO,
-            y_ratio=self.TEXT_EXPANSION_RATIO,
+            x_ratio=self.crop_padding_ratio,
+            y_ratio=self.crop_padding_ratio,
             bubble_as_clamp=True,
             fallback_to_bubble=getattr(blk, "xyxy", None) is None,
         )

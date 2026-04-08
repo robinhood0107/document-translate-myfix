@@ -49,6 +49,9 @@ class PPOCRv5Engine(OCREngine):
 		# Sessions are created lazily in initialize(); keep startup light.
 		self.det_sess: Optional[Any] = None
 		self.rec_sess: Optional[Any] = None
+		self.crop_padding_ratio = 0.05
+		self.retry_crop_ratio_x = 0.06
+		self.retry_crop_ratio_y = 0.10
 		self.det_post = DBPostProcessor(
 			thresh=0.3, 
 			box_thresh=0.5, 
@@ -62,8 +65,14 @@ class PPOCRv5Engine(OCREngine):
 		self, 
 		lang: str = 'ch', 
 		device: str = 'cpu', 
-		det_model: str = 'mobile'
+		det_model: str = 'mobile',
+		crop_padding_ratio: float = 0.05,
+		retry_crop_ratio_x: float = 0.06,
+		retry_crop_ratio_y: float = 0.10,
 	) -> None:
+		self.crop_padding_ratio = max(0.0, float(crop_padding_ratio))
+		self.retry_crop_ratio_x = max(0.0, float(retry_crop_ratio_x))
+		self.retry_crop_ratio_y = max(0.0, float(retry_crop_ratio_y))
 		# Ensure models present
 		det_id = ModelID.PPOCR_V5_DET_MOBILE if det_model == 'mobile' else ModelID.PPOCR_V5_DET_SERVER
 		rec_id = LANG_TO_REC_MODEL.get(lang, ModelID.PPOCR_V5_REC_LATIN_MOBILE)
@@ -291,6 +300,8 @@ class PPOCRv5Engine(OCREngine):
 			bbox, crop_source = resolve_block_crop_bbox(
 				blk,
 				img.shape,
+				x_ratio=self.crop_padding_ratio,
+				y_ratio=self.crop_padding_ratio,
 				bubble_as_clamp=True,
 				fallback_to_bubble=getattr(blk, "xyxy", None) is None,
 			)
@@ -379,7 +390,13 @@ class PPOCRv5Engine(OCREngine):
 			if retry_source_bbox is None:
 				retry_source_bbox = getattr(blk, "ocr_effective_crop_xyxy", None)
 			retry_clamp = getattr(blk, "bubble_xyxy", None) if getattr(blk, "xyxy", None) is not None else None
-			retry_bbox = build_retry_crop_bbox(img.shape, retry_source_bbox, clamp_xyxy=retry_clamp)
+			retry_bbox = build_retry_crop_bbox(
+				img.shape,
+				retry_source_bbox,
+				clamp_xyxy=retry_clamp,
+				x_ratio=self.retry_crop_ratio_x,
+				y_ratio=self.retry_crop_ratio_y,
+			)
 			set_block_ocr_crop_diagnostics(blk, retry_crop_xyxy=retry_bbox)
 			retry_crop = build_retry_crop_from_bbox(img, retry_bbox)
 			retry_payloads.append((idx, blk, retry_crop, retry_bbox))
@@ -507,4 +524,3 @@ class PPOCRv5Engine(OCREngine):
 			x1, y1, x2, y2 = int(xs.min()), int(ys.min()), int(xs.max()), int(ys.max())
 			bboxes.append((x1, y1, x2, y2))
 		return lists_to_blk_list(blk_list, bboxes, texts)
-
