@@ -11,6 +11,7 @@ from .settings_ui import SettingsPageUI
 from .gemma_local_server_page import GemmaLocalServerPage
 from .hunyuan_ocr_page import HunyuanOCRPage
 from app.update_checker import UpdateChecker
+from app.shortcuts import get_default_shortcuts
 from modules.utils.device import is_gpu_available
 from modules.utils.paths import get_default_project_autosave_dir, get_user_data_dir
 
@@ -29,7 +30,7 @@ class SettingsPage(QtWidgets.QWidget):
         "Custom": "Custom",
         "GPT-4.1": "Open AI GPT",
         "GPT-4.1-mini": "Open AI GPT",
-        "Claude-4.5-Sonnet": "Anthropic Claude",
+        "Claude-4.6-Sonnet": "Anthropic Claude",
         "Claude-4.5-Haiku": "Anthropic Claude",
         "Gemini-2.0-Flash": "Google Gemini",
         "Gemini-2.5-Pro": "Google Gemini",
@@ -88,6 +89,8 @@ class SettingsPage(QtWidgets.QWidget):
         self.ui.lang_combo.currentTextChanged.connect(self.on_language_changed)
         self.ui.font_browser.sig_files_changed.connect(self.import_font)
         self.ui.check_update_button.clicked.connect(self.check_for_updates)
+        self.ui.shortcuts_page.shortcut_changed.connect(self.on_shortcut_changed)
+        self.ui.translator_combo.currentTextChanged.connect(self._sync_extra_context_limit)
         self.ui.raw_text_checkbox.stateChanged.connect(self._save_settings_if_not_loading)
         self.ui.translated_text_checkbox.stateChanged.connect(self._save_settings_if_not_loading)
         self.ui.inpainted_image_checkbox.stateChanged.connect(self._save_settings_if_not_loading)
@@ -162,6 +165,11 @@ class SettingsPage(QtWidgets.QWidget):
             signal = getattr(widget, "textChanged", None)
             if signal is not None:
                 signal.connect(self._save_settings_if_not_loading)
+
+    def _sync_extra_context_limit(self, translator: str | None = None):
+        raw_service = translator if translator is not None else self.ui.translator_combo.currentText()
+        normalized = self.ui.value_mappings.get(raw_service, raw_service)
+        self.ui.llms_page.set_extra_context_unlimited(normalized == "Custom")
 
     def on_theme_changed(self, theme: str):
         self.theme_changed.emit(theme)
@@ -336,9 +344,24 @@ class SettingsPage(QtWidgets.QWidget):
             "gemma_local_server": self.get_gemma_local_server_settings(),
             "llm": self.get_llm_settings(),
             "export": self.get_export_settings(),
+            "shortcuts": self.ui.shortcuts_page.get_shortcuts(),
             "credentials": self.get_credentials(),
             "save_keys": self.ui.save_keys_checkbox.isChecked(),
         }
+
+    def on_shortcut_changed(self, shortcut_id: str, sequence: str) -> None:
+        if self._loading_settings:
+            return
+
+        settings = QSettings("ComicLabs", "ComicTranslate")
+        settings.beginGroup("shortcuts")
+        settings.setValue(shortcut_id, sequence)
+        settings.endGroup()
+
+        owner = self.window()
+        shortcut_ctrl = getattr(owner, "shortcut_ctrl", None)
+        if shortcut_ctrl is not None:
+            shortcut_ctrl.apply_shortcuts()
 
     def import_font(self, file_paths: list[str]):
         file_paths = [
@@ -433,6 +456,8 @@ class SettingsPage(QtWidgets.QWidget):
             translator = self._resolve_legacy_custom_translator()
         elif translator == "Custom Local Server":
             translator = "Custom Local Server(Gemma)"
+        elif translator == "Claude-4.5-Sonnet":
+            translator = "Claude-4.6-Sonnet"
 
         settings.beginGroup("tools")
         translated_translator = self.ui.reverse_mappings.get(translator, translator)
@@ -440,6 +465,7 @@ class SettingsPage(QtWidgets.QWidget):
             self.ui.translator_combo.setCurrentText(translated_translator)
         else:
             self.ui.translator_combo.setCurrentIndex(-1)
+        self._sync_extra_context_limit(translated_translator)
 
         ocr = settings.value("ocr", "Default")
         translated_ocr = self.ui.reverse_mappings.get(ocr, ocr)
@@ -599,6 +625,18 @@ class SettingsPage(QtWidgets.QWidget):
             settings.value("project_autosave_folder", get_default_project_autosave_dir(), type=str)
         )
         settings.endGroup()
+
+        settings.beginGroup("shortcuts")
+        default_shortcuts = get_default_shortcuts()
+        shortcut_values = {}
+        for shortcut_id, default_value in default_shortcuts.items():
+            shortcut_values[shortcut_id] = settings.value(shortcut_id, default_value, type=str)
+        settings.endGroup()
+        self.ui.shortcuts_page.load_shortcuts(shortcut_values)
+        owner = self.window()
+        shortcut_ctrl = getattr(owner, "shortcut_ctrl", None)
+        if shortcut_ctrl is not None:
+            shortcut_ctrl.apply_shortcuts()
 
         settings.beginGroup("credentials")
         save_keys = settings.value("save_keys", False, type=bool)

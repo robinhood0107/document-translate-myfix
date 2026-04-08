@@ -2,7 +2,7 @@ import os
 from typing import Set
 import imkit as imk
 from PIL import Image
-from PySide6.QtCore import QTimer, QThread, QObject, Signal, QSize
+from PySide6.QtCore import QTimer, QThread, QObject, Signal, QSize, QPoint
 from PySide6.QtGui import QPixmap, QImage
 from PySide6.QtWidgets import QListWidget
 from app.path_materialization import ensure_path_materialized
@@ -191,16 +191,34 @@ class ListViewImageLoader:
             
         # Get the viewport rect
         viewport_rect = self.list_widget.viewport().rect()
-        
-        # Check each item to see if it's visible
-        for i in range(self.list_widget.count()):
-            item = self.list_widget.item(i)
-            if item:
-                item_rect = self.list_widget.visualItemRect(item)
-                if viewport_rect.intersects(item_rect):
-                    visible_indices.add(i)
-                    
+
+        probe_x = max(1, viewport_rect.center().x())
+        top_item = self._find_visible_item(probe_x, viewport_rect.top(), 1, viewport_rect.bottom())
+        bottom_item = self._find_visible_item(probe_x, max(0, viewport_rect.bottom() - 1), -1, viewport_rect.top())
+
+        if top_item is None:
+            return visible_indices
+
+        top_index = self.list_widget.row(top_item)
+        if bottom_item is not None:
+            bottom_index = self.list_widget.row(bottom_item)
+        else:
+            row_height = max(1, self.list_widget.sizeHintForRow(top_index))
+            visible_rows = max(1, (viewport_rect.height() // row_height) + 1)
+            bottom_index = min(self.list_widget.count() - 1, top_index + visible_rows)
+
+        visible_indices.update(range(top_index, bottom_index + 1))
         return visible_indices
+
+    def _find_visible_item(self, x: int, start_y: int, step: int, limit_y: int):
+        """Probe vertically within the viewport until a row is found."""
+        y = start_y
+        while (y <= limit_y) if step > 0 else (y >= limit_y):
+            item = self.list_widget.itemAt(QPoint(x, y))
+            if item is not None:
+                return item
+            y += step
+        return None
         
     def _queue_image_load(self, index: int):
         """Queue an image for loading."""

@@ -2,7 +2,12 @@
 
 from __future__ import annotations
 
+import os
 import platform
+import sys
+
+if sys.platform == "win32":
+    import ctypes
 
 from PySide6 import QtCore, QtGui, QtWidgets
 from PySide6.QtCore import Qt
@@ -27,6 +32,9 @@ _MINIMIZE = "minimize"
 _MAXIMIZE = "maximize"
 _RESTORE  = "restore"
 _CLOSE    = "close"
+if sys.platform == "win32":
+    WM_NCLBUTTONDOWN = 0x00A1
+    HTCAPTION = 2
 
 
 class _CtrlButton(QtWidgets.QPushButton):
@@ -257,8 +265,235 @@ class _MacCtrlButton(QtWidgets.QPushButton):
         p.end()
 
 
+class _ProjectDetailsPopup(QtWidgets.QFrame):
+    project_target_requested = QtCore.Signal(str)
+
+    def __init__(self, parent: QtWidgets.QWidget | None = None) -> None:
+        super().__init__(
+            parent,
+            Qt.WindowType.Popup | Qt.WindowType.FramelessWindowHint,
+        )
+        self.setObjectName("projectDetailsPopup")
+        self._init_ui()
+
+    def _init_ui(self) -> None:
+        layout = QtWidgets.QVBoxLayout(self)
+        layout.setContentsMargins(14, 14, 14, 14)
+        layout.setSpacing(8)
+
+        file_label = QtWidgets.QLabel(self.tr("File name"), self)
+        file_label.setObjectName("projectPopupSectionLabel")
+        layout.addWidget(file_label)
+
+        file_row = QtWidgets.QHBoxLayout()
+        file_row.setSpacing(8)
+        self.name_edit = QtWidgets.QLineEdit(self)
+        self.name_edit.setObjectName("projectPopupLineEdit")
+        self.name_edit.setClearButtonEnabled(True)
+        self.name_edit.returnPressed.connect(self._emit_apply)
+        file_row.addWidget(self.name_edit, 1)
+
+        self.extension_label = QtWidgets.QLabel(".ctpr", self)
+        self.extension_label.setObjectName("projectPopupSuffix")
+        file_row.addWidget(self.extension_label, 0)
+        layout.addLayout(file_row)
+
+        location_label = QtWidgets.QLabel(self.tr("Location"), self)
+        location_label.setObjectName("projectPopupSectionLabel")
+        layout.addWidget(location_label)
+
+        location_row = QtWidgets.QHBoxLayout()
+        location_row.setSpacing(8)
+        self.location_edit = QtWidgets.QLineEdit(self)
+        self.location_edit.setObjectName("projectPopupLineEdit")
+        self.location_edit.setClearButtonEnabled(True)
+        self.location_edit.returnPressed.connect(self._emit_apply)
+        location_row.addWidget(self.location_edit, 1)
+
+        self.browse_button = QtWidgets.QPushButton(self.tr("Browse"), self)
+        self.browse_button.setObjectName("projectPopupBrowseButton")
+        self.browse_button.clicked.connect(self._browse_for_location)
+        location_row.addWidget(self.browse_button, 0)
+        layout.addLayout(location_row)
+
+        self.hint_label = QtWidgets.QLabel(self)
+        self.hint_label.setObjectName("projectPopupHint")
+        self.hint_label.setWordWrap(True)
+        layout.addWidget(self.hint_label)
+
+        actions_row = QtWidgets.QHBoxLayout()
+        actions_row.addStretch(1)
+        self.apply_button = QtWidgets.QPushButton(self.tr("Apply"), self)
+        self.apply_button.setObjectName("projectPopupApplyButton")
+        self.apply_button.clicked.connect(self._emit_apply)
+        actions_row.addWidget(self.apply_button, 0)
+        layout.addLayout(actions_row)
+
+        self.setFixedWidth(380)
+
+    def apply_colors(self, bg: str, fg: str) -> None:
+        fg_color = QtGui.QColor(fg)
+        is_light_theme = fg_color.lightness() < 128
+        if is_light_theme:
+            panel_bg = "#ffffff"
+            input_bg = "#ffffff"
+            border = "rgba(0,0,0,28)"
+            muted = "#5f6368"
+            browse_bg = "#f5f6f7"
+        else:
+            panel_bg = "#313131"
+            input_bg = "#262626"
+            border = "rgba(255,255,255,34)"
+            muted = "#b7b7b7"
+            browse_bg = "#3a3a3a"
+
+        self.setStyleSheet(f"""
+            QFrame#projectDetailsPopup {{
+                background: {panel_bg};
+                border: 1px solid {border};
+                border-radius: 12px;
+            }}
+            QLabel#projectPopupSectionLabel {{
+                color: {fg};
+                font-size: 12px;
+                font-weight: 600;
+                background: transparent;
+            }}
+            QLabel#projectPopupSuffix {{
+                color: {muted};
+                font-size: 12px;
+                background: transparent;
+                min-width: 34px;
+            }}
+            QLabel#projectPopupHint {{
+                color: {muted};
+                font-size: 11px;
+                background: transparent;
+            }}
+            QLineEdit#projectPopupLineEdit {{
+                min-height: 34px;
+                padding: 0 10px;
+                border-radius: 10px;
+                border: 1px solid {border};
+                background: {input_bg};
+                color: {fg};
+                selection-background-color: rgba(24, 144, 255, 90);
+            }}
+            QLineEdit#projectPopupLineEdit:focus {{
+                border: 1px solid #1677ff;
+            }}
+            QPushButton#projectPopupBrowseButton {{
+                min-height: 34px;
+                padding: 0 12px;
+                border-radius: 10px;
+                border: 1px solid {border};
+                background: {browse_bg};
+                color: {fg};
+            }}
+            QPushButton#projectPopupBrowseButton:hover {{
+                border: 1px solid #1677ff;
+            }}
+            QPushButton#projectPopupApplyButton {{
+                min-width: 88px;
+                min-height: 34px;
+                padding: 0 12px;
+                border: none;
+                border-radius: 10px;
+                background: #1677ff;
+                color: white;
+                font-weight: 600;
+            }}
+            QPushButton#projectPopupApplyButton:hover {{
+                background: #2a85ff;
+            }}
+        """)
+
+    def prepare_for_window(self, window: QtWidgets.QWidget | None) -> None:
+        project_path = getattr(window, "project_file", None) if window is not None else None
+        if isinstance(project_path, str) and project_path:
+            current_project_path = os.path.normpath(os.path.abspath(project_path))
+            stem = os.path.splitext(os.path.basename(current_project_path))[0]
+            directory = os.path.dirname(current_project_path)
+            hint = self.tr("Apply to rename or move the current project file.")
+        else:
+            clean_title = ""
+            if window is not None:
+                clean_title = _clean_title(window.windowTitle(), bool(window.isWindowModified()))
+            stem = _project_stem_from_title(clean_title) or "Project1"
+            directory = _default_project_directory(window)
+            hint = self.tr("Apply to save the current project file with a new name or location.")
+
+        self.name_edit.setText(stem)
+        self.location_edit.setText(directory)
+        self.hint_label.setText(hint)
+
+    def show_anchored(self, anchor: QtWidgets.QWidget) -> None:
+        parent_window = anchor.window()
+        if self.parentWidget() is not parent_window:
+            self.setParent(parent_window, self.windowFlags())
+
+        self.adjustSize()
+        screen = anchor.screen() or QtWidgets.QApplication.primaryScreen()
+        available = screen.availableGeometry() if screen is not None else QtCore.QRect()
+
+        anchor_center = anchor.mapToGlobal(anchor.rect().center())
+        anchor_bottom = anchor.mapToGlobal(QtCore.QPoint(0, anchor.height())).y()
+        x = anchor_center.x() - int(self.width() / 2)
+        y = anchor_bottom + 8
+
+        if available.isValid():
+            x = max(available.left() + 8, min(x, available.right() - self.width() - 8))
+            y = min(y, available.bottom() - self.height() - 8)
+
+        self.move(x, y)
+        self.show()
+        self.raise_()
+        self.activateWindow()
+        self.name_edit.setFocus(Qt.FocusReason.PopupFocusReason)
+        self.name_edit.selectAll()
+
+    def _browse_for_location(self) -> None:
+        current_dir = self.location_edit.text().strip() or os.path.expanduser("~")
+        selected = QtWidgets.QFileDialog.getExistingDirectory(
+            self.window(),
+            self.tr("Choose Project Folder"),
+            current_dir,
+        )
+        if selected:
+            self.location_edit.setText(selected)
+
+    def _emit_apply(self) -> None:
+        stem = self.name_edit.text().strip()
+        directory = os.path.expanduser(self.location_edit.text().strip())
+        if stem.lower().endswith(".ctpr"):
+            stem = stem[:-5]
+
+        if not stem:
+            QtWidgets.QMessageBox.warning(
+                self.window(),
+                self.tr("Project File"),
+                self.tr("Enter a file name."),
+            )
+            self.name_edit.setFocus(Qt.FocusReason.PopupFocusReason)
+            return
+
+        if not directory:
+            QtWidgets.QMessageBox.warning(
+                self.window(),
+                self.tr("Project File"),
+                self.tr("Choose a folder location."),
+            )
+            self.location_edit.setFocus(Qt.FocusReason.PopupFocusReason)
+            return
+
+        self.project_target_requested.emit(os.path.join(directory, f"{stem}.ctpr"))
+        self.hide()
+
+
 class CustomTitleBar(QtWidgets.QWidget):
     """Thin title-bar replacement used with Qt.FramelessWindowHint."""
+
+    project_target_requested = QtCore.Signal(str)
 
     def __init__(self, parent: QtWidgets.QWidget | None = None) -> None:
         super().__init__(parent)
@@ -282,6 +517,11 @@ class CustomTitleBar(QtWidgets.QWidget):
             icon = win.windowIcon()
             if icon and not icon.isNull():
                 self.icon_label.setPixmap(icon.pixmap(20, 20))
+
+        self.project_button = QtWidgets.QPushButton(self)
+        self.project_button.setObjectName("titleBarProjectButton")
+        self.project_button.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self.project_button.clicked.connect(self._toggle_project_popup)
 
         # Title label 
         win_title = win.windowTitle() if win is not None else ""
@@ -311,6 +551,8 @@ class CustomTitleBar(QtWidgets.QWidget):
         self._tools_layout.setContentsMargins(0, 0, 0, 0)
         self._tools_layout.setSpacing(1)
         self._undo_redo_widget: QtWidgets.QWidget | None = None
+        self._project_popup = _ProjectDetailsPopup(self)
+        self._project_popup.project_target_requested.connect(self.project_target_requested)
 
         self._left_host = QtWidgets.QWidget(self)
         self._left_host.setObjectName("titleBarLeftHost")
@@ -363,6 +605,8 @@ class CustomTitleBar(QtWidgets.QWidget):
         if not USE_MAC_STYLE_CONTROLS:
             self._left_layout.addWidget(self.icon_label)
             self._left_layout.addSpacing(8)
+        self._left_layout.addWidget(self.project_button)
+        self._left_layout.addSpacing(8)
         self._left_layout.addWidget(self.autosave_label)
         self._left_layout.addSpacing(6)
         self._left_layout.addWidget(self.autosave_switch)
@@ -380,6 +624,7 @@ class CustomTitleBar(QtWidgets.QWidget):
         self._layout.addWidget(self._center_host, 1)
         self._layout.addWidget(self._right_host, 0)
         self.title_label.raise_()
+        self._refresh_project_button()
         self._layout_title_label()
 
     # Public update helpers
@@ -388,6 +633,7 @@ class CustomTitleBar(QtWidgets.QWidget):
         win = self.window()
         is_modified = bool(win.isWindowModified()) if win is not None else False
         self._title_text = _clean_title(title, is_modified)
+        self._refresh_project_button()
         self._layout_title_label()
 
     def set_autosave_checked(self, checked: bool) -> None:
@@ -520,8 +766,37 @@ class CustomTitleBar(QtWidgets.QWidget):
                 background: transparent;
                 border: none;
             }}
+            QPushButton#titleBarProjectButton {{
+                min-height: 28px;
+                max-height: 28px;
+                padding: 0 10px;
+                border-radius: 10px;
+                border: 1px solid rgba(255,255,255,18);
+                background: transparent;
+                color: {fg};
+                text-align: left;
+            }}
+            QPushButton#titleBarProjectButton:hover {{
+                background: {hover};
+            }}
         """)
+        self._project_popup.apply_colors(bg, fg)
         self._layout_title_label()
+
+    def _refresh_project_button(self) -> None:
+        display_name = _project_stem_from_title(self._title_text) or "Project1"
+        fm = self.fontMetrics()
+        elided = fm.elidedText(display_name, Qt.TextElideMode.ElideRight, 180)
+        self.project_button.setText(f"{elided}  v")
+        self.project_button.setToolTip(self.tr("Rename or move the current project file"))
+        self.project_button.setFixedWidth(max(90, min(210, fm.horizontalAdvance(display_name) + 30)))
+
+    def _toggle_project_popup(self) -> None:
+        if self._project_popup.isVisible():
+            self._project_popup.hide()
+            return
+        self._project_popup.prepare_for_window(self.window())
+        self._project_popup.show_anchored(self.project_button)
 
     def _layout_title_label(self) -> None:
         """Center title in full bar width, then clamp to avoid side-widget overlap."""
@@ -577,6 +852,33 @@ class CustomTitleBar(QtWidgets.QWidget):
         else:
             win.showMaximized()
 
+    def is_caption_draggable(self, local_pos: QtCore.QPoint) -> bool:
+        """Return whether *local_pos* is a safe caption drag region."""
+        if not self.rect().contains(local_pos):
+            return False
+
+        child = self.childAt(local_pos)
+        while child is not None and child is not self:
+            if child.testAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents):
+                child = child.parentWidget()
+                continue
+            if isinstance(
+                child,
+                (
+                    QtWidgets.QAbstractButton,
+                    QtWidgets.QAbstractSlider,
+                    QtWidgets.QAbstractSpinBox,
+                    QtWidgets.QComboBox,
+                    QtWidgets.QLineEdit,
+                    QtWidgets.QTextEdit,
+                    QtWidgets.QPlainTextEdit,
+                    QtWidgets.QAbstractItemView,
+                ),
+            ):
+                return False
+            child = child.parentWidget()
+        return True
+
     # Dragging / double-click
     def mousePressEvent(self, event: QtGui.QMouseEvent) -> None:
         """Delegate window move to the OS via QWindow.startSystemMove()."""
@@ -585,14 +887,23 @@ class CustomTitleBar(QtWidgets.QWidget):
             near_top = local.y() <= RESIZE_MARGIN
             near_left = local.x() <= RESIZE_MARGIN
             near_right = local.x() >= (self.width() - RESIZE_MARGIN)
-            if not (near_top or near_left or near_right):
-                handle = self.window().windowHandle()
-                if handle:
-                    handle.startSystemMove()
+            if self.is_caption_draggable(local) and not (near_top or near_left or near_right):
+                if sys.platform == "win32":
+                    hwnd = int(self.window().winId())
+                    if hwnd:
+                        user32 = ctypes.windll.user32
+                        user32.ReleaseCapture()
+                        user32.SendMessageW(hwnd, WM_NCLBUTTONDOWN, HTCAPTION, 0)
+                        event.accept()
+                        return
+                else:
+                    handle = self.window().windowHandle()
+                    if handle:
+                        handle.startSystemMove()
         super().mousePressEvent(event)
 
     def mouseDoubleClickEvent(self, event: QtGui.QMouseEvent) -> None:
-        if event.button() == Qt.MouseButton.LeftButton:
+        if event.button() == Qt.MouseButton.LeftButton and self.is_caption_draggable(event.position().toPoint()):
             self._toggle_maximize()
         super().mouseDoubleClickEvent(event)
 
@@ -603,3 +914,20 @@ def _clean_title(title: str, is_modified: bool = False) -> str:
     """Render Qt's [*] marker as * only while the window is modified."""
     marker = "*" if is_modified else ""
     return title.replace("[*]", marker).strip()
+
+
+def _project_stem_from_title(title: str) -> str:
+    cleaned = title.replace("*", "").strip()
+    if cleaned.lower().endswith(".ctpr"):
+        cleaned = cleaned[:-5]
+    return os.path.basename(cleaned).strip()
+
+
+def _default_project_directory(window: QtWidgets.QWidget | None) -> str:
+    project_file = getattr(window, "project_file", None) if window is not None else None
+    if isinstance(project_file, str) and project_file:
+        return os.path.dirname(os.path.abspath(project_file))
+    documents = QtCore.QStandardPaths.writableLocation(
+        QtCore.QStandardPaths.StandardLocation.DocumentsLocation
+    )
+    return documents or os.path.expanduser("~")
