@@ -1,0 +1,1 @@
+docker build -t local/llama.cpp:server-cuda-b8709 --target server -f .devops/cuda.Dockerfile .
