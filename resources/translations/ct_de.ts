@@ -1823,6 +1823,10 @@ Möglicherweise wurde es verschoben, umbenannt oder gelöscht.
         <translation>Gemini-2.0-Flash</translation>
     </message>
     <message>
+        <source>MangaOCR</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
         <source>PPOCRv5</source>
         <translation type="unfinished"></translation>
     </message>

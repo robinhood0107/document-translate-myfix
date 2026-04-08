@@ -45,10 +45,12 @@ class PaddleOCRVLEngine(OCREngine):
         self.visualize = False
         self.max_new_tokens = self.DEFAULT_MAX_NEW_TOKENS
         self.parallel_workers = self.DEFAULT_PARALLEL_WORKERS
+        self.crop_padding_ratio = self.TEXT_EXPANSION_RATIO
         self._supports_max_new_tokens = True
 
     def initialize(self, settings, **kwargs) -> None:
         config = settings.get_paddleocr_vl_settings()
+        generic = settings.get_ocr_generic_settings() if hasattr(settings, "get_ocr_generic_settings") else {}
         self.server_url = config.get("server_url", self.DEFAULT_SERVER_URL) or self.DEFAULT_SERVER_URL
         self.prettify_markdown = bool(config.get("prettify_markdown", False))
         self.visualize = bool(config.get("visualize", False))
@@ -62,6 +64,7 @@ class PaddleOCRVLEngine(OCREngine):
             self.DEFAULT_PARALLEL_WORKERS,
             self.PARALLEL_WORKERS_RANGE,
         )
+        self.crop_padding_ratio = max(0.0, float(generic.get("crop_padding_ratio", self.TEXT_EXPANSION_RATIO)))
         self._supports_max_new_tokens = True
 
     def process_image(self, img: np.ndarray, blk_list: list[TextBlock]) -> list[TextBlock]:
@@ -293,8 +296,8 @@ class PaddleOCRVLEngine(OCREngine):
         return resolve_block_crop_bbox(
             blk,
             image.shape,
-            x_ratio=self.TEXT_EXPANSION_RATIO,
-            y_ratio=self.TEXT_EXPANSION_RATIO,
+            x_ratio=self.crop_padding_ratio,
+            y_ratio=self.crop_padding_ratio,
             bubble_as_clamp=True,
             fallback_to_bubble=getattr(blk, "xyxy", None) is None,
         )

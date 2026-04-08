@@ -1,0 +1,39 @@
+{
+  "name": "ocr-combo-ranked-japan-mangaocr-gemma",
+  "description": "Japan ranked benchmark candidate using explicit MangaOCR with fixed Gemma runtime.",
+  "app": {
+    "translator": "Custom Local Server(Gemma)",
+    "ocr": "MangaOCR",
+    "detector": "RT-DETR-v2",
+    "inpainter": "AOT",
+    "use_gpu": true,
+    "extra_context": ""
+  },
+  "gemma": {
+    "image": "local/llama.cpp:server-cuda-b8665",
+    "pull_policy": "never",
+    "endpoint_url": "http://127.0.0.1:18080/v1",
+    "model": "gemma-4-26b-a4b-it-heretic.q3_k_m.gguf",
+    "model_path": "/models/gemma-4-26b-a4b-it-heretic.q3_k_m.gguf",
+    "context_size": 4096,
+    "n_parallel": 1,
+    "threads": 12,
+    "n_gpu_layers": 23,
+    "chunk_size": 6,
+    "temperature": 0.6,
+    "top_k": 64,
+    "top_p": 0.95,
+    "min_p": 0.0,
+    "max_completion_tokens": 512,
+    "request_timeout_sec": 180,
+    "raw_response_logging": false,
+    "reasoning": "off",
+    "reasoning_budget": 0,
+    "reasoning_format": "none",
+    "response_format_mode": "json_schema",
+    "response_schema_mode": "blocks"
+  },
+  "ocr_runtime": {
+    "kind": "internal"
+  }
+}

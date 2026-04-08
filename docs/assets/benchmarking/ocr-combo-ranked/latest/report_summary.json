@@ -1,0 +1,33 @@
+{
+  "status": "benchmark_complete",
+  "benchmark_name": "OCR Combo Ranked Runtime Benchmark",
+  "execution_scope": "full-pipeline",
+  "speed_score_scope": "full-pipeline elapsed_sec",
+  "quality_gate_scope": "OCR-only",
+  "gold_source": "human-reviewed",
+  "china_frozen": {
+    "corpus": "china",
+    "source_run_dir": "./banchmark_result_log/ocr_combo/20260408_005922_ocr-combo-runtime_suite",
+    "winner_engine": "HunyuanOCR + Gemma",
+    "winner_preset": "china-hunyuanocr--gemma-ngl80",
+    "official_score_elapsed_median_sec": 136.107,
+    "winner_status": "ready",
+    "promotion_recommended": true
+  },
+  "japan_winner": {
+    "benchmark_winner": "PaddleOCR VL + Gemma",
+    "winner_status": "ready",
+    "promotion_recommended": true,
+    "official_score_elapsed_median_sec": 779.051
+  },
+  "routing_policy": {
+    "china": "HunyuanOCR + Gemma",
+    "japan": "PaddleOCR VL + Gemma",
+    "mixed": "중국어 페이지는 `HunyuanOCR + Gemma`, 일본어 페이지는 `PaddleOCR VL + Gemma`로 라우팅하고 mixed corpus는 source language 판별 뒤 분기 권장"
+  },
+  "archived_previous_latest": {
+    "snapshot_id": "20260408_114125_ocr-combo-ranked-runtime-benchmark",
+    "report_path": "./docs/banchmark_report/history/20260408_114125_ocr-combo-ranked-runtime-benchmark/ocr-combo-ranked-report-ko.md",
+    "assets_dir": "./docs/assets/benchmarking/ocr-combo-ranked/history/20260408_114125_ocr-combo-ranked-runtime-benchmark"
+  }
+}

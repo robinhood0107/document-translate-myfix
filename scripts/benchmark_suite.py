@@ -139,6 +139,15 @@ SUITE_PROFILES = {
         ),
         "baseline_batch_step": "",
     },
+    "ocr-combo-ranked-runtime": {
+        "benchmark_name": "OCR Combo Ranked Runtime Benchmark",
+        "benchmark_kind": "managed ranked family suite",
+        "benchmark_scope": (
+            "Japan full-pipeline OCR+Gemma timing with OCR-only quality bands, "
+            "always-winner ranking, and frozen China reuse"
+        ),
+        "baseline_batch_step": "",
+    },
 }
 
 RUNTIME_SNAPSHOT_FILES = [
@@ -1475,6 +1484,12 @@ def main() -> int:
         from ocr_combo_benchmark import run_suite as run_ocr_combo_suite
 
         return run_ocr_combo_suite(
+            sample_root=DEFAULT_SAMPLE_DIR,
+        )
+    if args.suite_profile == "ocr-combo-ranked-runtime":
+        from ocr_combo_ranked_benchmark import run_suite as run_ocr_combo_ranked_suite
+
+        return run_ocr_combo_ranked_suite(
             sample_root=DEFAULT_SAMPLE_DIR,
         )
 

@@ -1,0 +1,9 @@
+{
+  "corpus": "china",
+  "source_run_dir": "./banchmark_result_log/ocr_combo/20260408_005922_ocr-combo-runtime_suite",
+  "winner_engine": "HunyuanOCR + Gemma",
+  "winner_preset": "china-hunyuanocr--gemma-ngl80",
+  "official_score_elapsed_median_sec": 136.107,
+  "winner_status": "ready",
+  "promotion_recommended": true
+}
