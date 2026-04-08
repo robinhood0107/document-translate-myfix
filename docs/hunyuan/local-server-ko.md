@@ -57,7 +57,7 @@ docker compose -f hunyuanocr_docker_files/docker-compose.yaml up -d
 - `ctx-size=4096`
 - `n_parallel=1`
 - `threads=12`
-- `n_gpu_layers=99`
+- `n_gpu_layers=80`
 
 ## 참고
 
