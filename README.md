@@ -1,65 +1,77 @@
 # Comic Translate
-English | [한국어](/mnt/c/Users/pjjpj/Desktop/openai_manga_translater/comic-translate/docs/i18n/README_ko.md) | [Français](/mnt/c/Users/pjjpj/Desktop/openai_manga_translater/comic-translate/docs/i18n/README_fr.md) | [简体中文](/mnt/c/Users/pjjpj/Desktop/openai_manga_translater/comic-translate/docs/i18n/README_zh-CN.md)
 
-<img src="https://i.imgur.com/QUVK6mK.png">
+This repository is an unofficial clone project that started from the upstream `comic-translate` `v2.6.7` codebase and then diverged with local product changes.
 
-## Overview
-This fork focuses on a practical local pipeline for comic translation:
+It is maintained as a practical local-first fork for comic translation workflows, with an emphasis on:
 
-- `Custom Local Server(Gemma)` for local LLM translation
-- `PaddleOCR VL` local Docker services for OCR
-- `HunyuanOCR` local `llama.cpp` server for OCR
+- local Gemma translation runtime support
+- local OCR runtime integrations such as PaddleOCR VL and HunyuanOCR
+- Windows-first setup and launch tooling
+- selective manual backports of user-facing features from upstream `v2.7.0`
 
-The goal of this fork is to make the local Gemma + OCR runtime path practical and reproducible for day-to-day comic translation.
+## Project Base And History
 
-## What This Fork Updates
-- Removed legacy account/login dependencies from the local workflow
-- Split local Gemma translation into a dedicated runtime/config path
-- Added tracked OCR Docker runtime bundle in [paddleocr_vl_docker_files/README.md](/mnt/c/Users/pjjpj/Desktop/openai_manga_translater/comic-translate/paddleocr_vl_docker_files/README.md)
-- Added tracked HunyuanOCR runtime bundle in [hunyuanocr_docker_files/README.md](/mnt/c/Users/pjjpj/Desktop/openai_manga_translater/comic-translate/hunyuanocr_docker_files/README.md)
-- Tuned the current translation-only baseline around:
-  - Gemma `temperature=0.6`, `top_k=64`, `top_p=0.95`, `min_p=0.0`
-  - Gemma `n_gpu_layers=23`, `threads=12`, `ctx=4096`
-  - `paddleocr-server=cpu`, `paddleocr-vllm=gpu`
+This repository did **not** start from current upstream `main`.
 
-## Quick Start
-### Windows setup
-Run the setup script once to create or update both Windows environments.
+It started from an upstream `v2.6.7` snapshot and then accumulated local changes in stages:
 
-```bash
-setup.bat
-```
+1. local runtime cleanup and fork-specific workflow simplification
+2. Gemma local server/runtime integration and default tuning
+3. PaddleOCR VL and HunyuanOCR product integration
+4. Windows environment bootstrap and CUDA13 launcher support
+5. selective manual backport work based on the upstream `v2.6.7...v2.7.0` compare
 
-After that:
+The `v2.7.0` upgrade work in this repository was performed by **manual compare-based selection and adaptation**, not by merging or copying the upstream release wholesale.
 
-- `run_comic.bat` uses `.venv-win`
-- `run_comic_cuda13.bat` uses `.venv-win-cuda13`
+## What Is Backported From Upstream `v2.7.0`
 
-If you only want one environment:
+The current branch selectively backports the user-facing parts that fit this fork safely:
 
-```bash
-setup.bat win
-setup.bat cuda13
-```
+- configurable keyboard shortcuts
+- PSD export and PSD import
+- chapter-aware export flow
+- startup recent-project actions such as copy path and delete file
+- current project rename/move from the title bar
+- multi-select text formatting
+- undo text render as a single undo step
+- unlimited extra context for the custom translator
+- Hebrew and Croatian target languages, plus RTL handling for Persian, Hebrew, and Arabic
+- Windows snap support for the frameless window path
+- selected webtoon and list-view performance/behavior fixes
+- Claude 4.6 Sonnet label refresh
 
-`cuda13` mode expects NVIDIA CUDA Toolkit v13.1 to already be installed.
+A detailed audit of the upstream `v2.6.7 -> v2.7.0` delta and exactly what was brought into this fork lives in:
 
-## Docs Map
-### Gemma
-- Local server setup: [local-server-ko.md](/mnt/c/Users/pjjpj/Desktop/openai_manga_translater/comic-translate/docs/gemma/local-server-ko.md)
+- [docs/history/v267-to-v270-backport-audit-ko.md](docs/history/v267-to-v270-backport-audit-ko.md)
 
-### OCR / Runtime
-- OCR Docker bundle: [paddleocr_vl_docker_files/README.md](/mnt/c/Users/pjjpj/Desktop/openai_manga_translater/comic-translate/paddleocr_vl_docker_files/README.md)
-- HunyuanOCR runtime bundle: [hunyuanocr_docker_files/README.md](/mnt/c/Users/pjjpj/Desktop/openai_manga_translater/comic-translate/hunyuanocr_docker_files/README.md)
-- HunyuanOCR setup guide: [local-server-ko.md](/mnt/c/Users/pjjpj/Desktop/openai_manga_translater/comic-translate/docs/hunyuan/local-server-ko.md)
+## Current Repo Notes
 
-### Repo Policy
-- Benchmark branch / merge policy: [benchmark-branch-policy-ko.md](/mnt/c/Users/pjjpj/Desktop/openai_manga_translater/comic-translate/docs/repo/benchmark-branch-policy-ko.md)
+- benchmark runners, generated benchmark results, and benchmark reports are kept off the product branches
+- `/banchmark_result_log/` and `/Sample/` are local-only and ignored by Git
+- CUDA13 runtime setup uses a dedicated launcher: `run_comic_cuda13.bat`
+- general Windows runtime setup is handled by `setup.bat`
 
-### Rendering / History
-- Rendering notes: [rendering-notes-ko.md](/mnt/c/Users/pjjpj/Desktop/openai_manga_translater/comic-translate/docs/rendering/rendering-notes-ko.md)
-- Change log: [change-log-ko.md](/mnt/c/Users/pjjpj/Desktop/openai_manga_translater/comic-translate/docs/history/change-log-ko.md)
+Useful docs in this repository:
 
-## Notes
-- `/Sample/` is local-only and ignored by Git.
-- Benchmark-specific tooling and reports are maintained on the `benchmarking/lab` branch.
+- [docs/gemma/local-server-ko.md](docs/gemma/local-server-ko.md)
+- [docs/hunyuan/local-server-ko.md](docs/hunyuan/local-server-ko.md)
+- [docs/repo/benchmark-branch-policy-ko.md](docs/repo/benchmark-branch-policy-ko.md)
+
+## Copyright And Licensing
+
+This repository is a derivative project of the upstream `comic-translate` codebase and keeps the repository license in [LICENSE](LICENSE).
+
+Important points:
+
+- the upstream base code and any preserved notices remain subject to their original license terms
+- this repository's fork-specific code and documentation are distributed inside the same repository, but they do **not** erase upstream attribution requirements
+- upstream release names, version numbers, and compare references are used here only to document provenance and compatibility history
+- third-party models, OCR runtimes, translation services, Docker images, and other external dependencies keep their own licenses and usage terms
+
+If you redistribute or publish derivative work from this repository, preserve the upstream license and attribution trail, and review any third-party component licenses separately.
+
+## Status Of Legacy Localized READMEs
+
+The old localized README files under `docs/i18n/` are no longer the source of truth for this fork.
+
+Use this root `README.md` for the current repository overview, and use the backport audit document for the `v2.6.7 -> v2.7.0` migration history.

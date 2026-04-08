@@ -129,9 +129,14 @@ exit /b 0
 set "ENV_DIR=%~1"
 set "VENV_PY=%SCRIPT_DIR%%ENV_DIR%\Scripts\python.exe"
 echo [setup] installing CUDA 13 packages into %ENV_DIR%
-"%VENV_PY%" -m pip install --upgrade --pre "onnx==1.21.0" "onnxruntime-gpu==1.25.0.dev20260403004"
+"%VENV_PY%" -m pip install --upgrade "onnx==1.21.0"
 if errorlevel 1 (
-    echo [setup] failed to install ONNX Runtime nightly build for CUDA 13
+    echo [setup] failed to install ONNX for CUDA 13 runtime verification
+    exit /b 1
+)
+"%VENV_PY%" -m pip install --upgrade --pre --index-url https://aiinfra.pkgs.visualstudio.com/PublicPackages/_packaging/ort-cuda-13-nightly/pypi/simple/ onnxruntime-gpu --no-deps
+if errorlevel 1 (
+    echo [setup] failed to install the latest ONNX Runtime CUDA 13 nightly build
     exit /b 1
 )
 "%VENV_PY%" -m pip install --upgrade --extra-index-url https://pypi.nvidia.com ^
