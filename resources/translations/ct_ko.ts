@@ -20,7 +20,7 @@
     <name>ComicTranslate</name>
     <message>
         <source>PaddleOCR VL Settings</source>
-        <translation type="unfinished">PaddleOCR VL 설정</translation>
+        <translation>PaddleOCR VL 설정</translation>
     </message>
     <message>
         <source>Error</source>
@@ -151,7 +151,7 @@
     </message>
     <message>
         <source>Hebrew</source>
-        <translation type="unfinished"></translation>
+        <translation>히브리어</translation>
     </message>
     <message>
         <source>Czech</source>
@@ -159,7 +159,7 @@
     </message>
     <message>
         <source>Croatian</source>
-        <translation type="unfinished"></translation>
+        <translation>크로아티아어</translation>
     </message>
     <message>
         <source>Persian</source>
@@ -194,7 +194,7 @@
     </message>
     <message>
         <source>Translate</source>
-        <translation type="unfinished">번역</translation>
+        <translation>번역</translation>
     </message>
     <message>
         <source>Region</source>
@@ -233,78 +233,78 @@ Use Custom Local Server(Gemma) with the included Gemma Docker setup.</source>
     </message>
     <message>
         <source>Rename or move the current project file</source>
-        <translation type="unfinished"></translation>
+        <translation>현재 프로젝트 파일의 이름을 바꾸거나 이동합니다</translation>
     </message>
 </context>
 <context>
     <name>ExportChaptersDialog</name>
     <message>
         <source>Partition Export</source>
-        <translation type="unfinished"></translation>
+        <translation>챕터별 내보내기</translation>
     </message>
     <message>
         <source>Pages with the same chapter name are exported together. Edit the Chapter column to merge or split chapters.</source>
-        <translation type="unfinished"></translation>
+        <translation>같은 챕터 이름의 페이지는 함께 내보냅니다. 챕터 열을 수정해 챕터를 합치거나 나눌 수 있습니다.</translation>
     </message>
     <message>
         <source>Output folder</source>
-        <translation type="unfinished"></translation>
+        <translation>출력 폴더</translation>
     </message>
     <message>
         <source>Browse</source>
-        <translation type="unfinished">먹다</translation>
+        <translation>찾아보기</translation>
     </message>
     <message>
         <source>Selected pages</source>
-        <translation type="unfinished"></translation>
+        <translation>선택된 페이지</translation>
     </message>
     <message>
         <source>New chapter name</source>
-        <translation type="unfinished"></translation>
+        <translation>새 챕터 이름</translation>
     </message>
     <message>
         <source>Apply</source>
-        <translation type="unfinished"></translation>
+        <translation>적용</translation>
     </message>
     <message>
         <source>Page</source>
-        <translation type="unfinished"></translation>
+        <translation>페이지</translation>
     </message>
     <message>
         <source>File</source>
-        <translation type="unfinished"></translation>
+        <translation>파일</translation>
     </message>
     <message>
         <source>Chapter</source>
-        <translation type="unfinished"></translation>
+        <translation>챕터</translation>
     </message>
     <message>
         <source>Export targets</source>
-        <translation type="unfinished"></translation>
+        <translation>내보낼 대상</translation>
     </message>
     <message>
         <source>Reset Chapters</source>
-        <translation type="unfinished"></translation>
+        <translation>챕터 초기화</translation>
     </message>
     <message>
         <source>Select Export Folder</source>
-        <translation type="unfinished"></translation>
+        <translation>내보내기 폴더 선택</translation>
     </message>
     <message>
         <source>Output Folder Required</source>
-        <translation type="unfinished"></translation>
+        <translation>출력 폴더 필요</translation>
     </message>
     <message>
         <source>Choose an existing output folder.</source>
-        <translation type="unfinished"></translation>
+        <translation>기존 출력 폴더를 선택하세요.</translation>
     </message>
     <message>
         <source>Chapter Name Required</source>
-        <translation type="unfinished"></translation>
+        <translation>챕터 이름 필요</translation>
     </message>
     <message>
         <source>Each page must belong to a non-empty chapter.</source>
-        <translation type="unfinished"></translation>
+        <translation>각 페이지는 비어 있지 않은 챕터에 속해야 합니다.</translation>
     </message>
 </context>
 <context>
@@ -395,7 +395,7 @@ Start the server with both the HunyuanOCR GGUF model and the matching mmproj fil
     </message>
     <message>
         <source>Server URL</source>
-        <translation type="unfinished">서버 URL</translation>
+        <translation>서버 URL</translation>
     </message>
     <message>
         <source>Hunyuan OCR Tuning</source>
@@ -403,19 +403,19 @@ Start the server with both the HunyuanOCR GGUF model and the matching mmproj fil
     </message>
     <message>
         <source>Max Completion Tokens</source>
-        <translation type="unfinished">최대 완료 토큰</translation>
+        <translation>최대 완료 토큰</translation>
     </message>
     <message>
         <source>Parallel Workers</source>
-        <translation type="unfinished">병렬 작업 수</translation>
+        <translation>병렬 작업 수</translation>
     </message>
     <message>
         <source>Request Timeout (sec)</source>
-        <translation type="unfinished">요청 타임아웃(초)</translation>
+        <translation>요청 타임아웃(초)</translation>
     </message>
     <message>
         <source>Raw Response Log</source>
-        <translation type="unfinished">원시 응답 로그</translation>
+        <translation>원시 응답 로그</translation>
     </message>
     <message>
         <source>Recommended starting values for the included HunyuanOCR Docker setup:
@@ -450,145 +450,145 @@ Start the server with both the HunyuanOCR GGUF model and the matching mmproj fil
     <name>MClickBrowserFilePushButton</name>
     <message>
         <source>Click to browser file</source>
-        <translation type="unfinished"></translation>
+        <translation>클릭하여 파일 찾아보기</translation>
     </message>
 </context>
 <context>
     <name>MClickBrowserFileToolButton</name>
     <message>
         <source>Click to browser file</source>
-        <translation type="unfinished"></translation>
+        <translation>클릭하여 파일 찾아보기</translation>
     </message>
 </context>
 <context>
     <name>MClickBrowserFolderPushButton</name>
     <message>
         <source>Click to browser folder</source>
-        <translation type="unfinished"></translation>
+        <translation>클릭하여 폴더 찾아보기</translation>
     </message>
 </context>
 <context>
     <name>MClickBrowserFolderToolButton</name>
     <message>
         <source>Click to browser folder</source>
-        <translation type="unfinished"></translation>
+        <translation>클릭하여 폴더 찾아보기</translation>
     </message>
 </context>
 <context>
     <name>MClickSaveFileToolButton</name>
     <message>
         <source>Click to save file</source>
-        <translation type="unfinished"></translation>
+        <translation>클릭하여 파일 저장</translation>
     </message>
 </context>
 <context>
     <name>MColorChart</name>
     <message>
         <source>Click to Copy Color</source>
-        <translation type="unfinished"></translation>
+        <translation>클릭하여 색상 복사</translation>
     </message>
 </context>
 <context>
     <name>MComboBox</name>
     <message>
         <source>Please Select</source>
-        <translation type="unfinished"></translation>
+        <translation>선택하세요</translation>
     </message>
 </context>
 <context>
     <name>MDragFileButton</name>
     <message>
         <source>Click to browser file</source>
-        <translation type="unfinished"></translation>
+        <translation>클릭하여 파일 찾아보기</translation>
     </message>
 </context>
 <context>
     <name>MDragFolderButton</name>
     <message>
         <source>Click or drag folder here</source>
-        <translation type="unfinished"></translation>
+        <translation>클릭하거나 폴더를 여기로 끌어오세요</translation>
     </message>
     <message>
         <source>Click to browser folder or drag folder here</source>
-        <translation type="unfinished"></translation>
+        <translation>클릭하여 폴더를 찾거나 폴더를 여기로 끌어오세요</translation>
     </message>
 </context>
 <context>
     <name>MFontComboBox</name>
     <message>
         <source>Please Select</source>
-        <translation type="unfinished"></translation>
+        <translation>선택하세요</translation>
     </message>
     <message>
         <source>Font</source>
-        <translation type="unfinished">글꼴</translation>
+        <translation>글꼴</translation>
     </message>
 </context>
 <context>
     <name>MHeaderView</name>
     <message>
         <source>Select All</source>
-        <translation>글꼴</translation>
+        <translation>모두 선택</translation>
     </message>
     <message>
         <source>Select None</source>
-        <translation type="unfinished"></translation>
+        <translation>선택 해제</translation>
     </message>
     <message>
         <source>Select Invert</source>
-        <translation type="unfinished"></translation>
+        <translation>선택 반전</translation>
     </message>
     <message>
         <source>Fit Size</source>
-        <translation type="unfinished"></translation>
+        <translation>크기에 맞춤</translation>
     </message>
 </context>
 <context>
     <name>MLineEdit</name>
     <message>
         <source>Enter key word to search...</source>
-        <translation type="unfinished"></translation>
+        <translation>검색어를 입력하세요...</translation>
     </message>
     <message>
         <source>Error Detail Information</source>
-        <translation type="unfinished"></translation>
+        <translation>오류 상세 정보</translation>
     </message>
     <message>
         <source>Error information will be here...</source>
-        <translation type="unfinished"></translation>
+        <translation>오류 정보가 여기에 표시됩니다...</translation>
     </message>
     <message>
         <source>Click button to browser files</source>
-        <translation type="unfinished"></translation>
+        <translation>버튼을 눌러 파일을 찾으세요</translation>
     </message>
     <message>
         <source>Click button to set save file</source>
-        <translation type="unfinished"></translation>
+        <translation>버튼을 눌러 저장할 파일을 선택하세요</translation>
     </message>
     <message>
         <source>Click button to browser folder</source>
-        <translation type="unfinished"></translation>
+        <translation>버튼을 눌러 폴더를 찾으세요</translation>
     </message>
 </context>
 <context>
     <name>MListView</name>
     <message>
         <source>No Data</source>
-        <translation type="unfinished"></translation>
+        <translation>데이터 없음</translation>
     </message>
 </context>
 <context>
     <name>MTableView</name>
     <message>
         <source>No Data</source>
-        <translation type="unfinished"></translation>
+        <translation>데이터 없음</translation>
     </message>
 </context>
 <context>
     <name>MTreeView</name>
     <message>
         <source>No Data</source>
-        <translation type="unfinished"></translation>
+        <translation>데이터 없음</translation>
     </message>
 </context>
 <context>
@@ -725,13 +725,15 @@ Please try a different tool.</source>
     </message>
     <message>
         <source>Please fill in the required credential fields.</source>
-        <translation type="unfinished"></translation>
+        <translation>필수 자격 증명 항목을 입력하세요.</translation>
     </message>
     <message>
         <source>Missing credentials for {provider}.
 Configure them in Settings &gt; Credentials.
 {details}</source>
-        <translation type="unfinished"></translation>
+        <translation>{provider}의 자격 증명이 없습니다.
+설정 &gt; 자격 증명에서 설정하세요.
+{details}</translation>
     </message>
     <message>
         <source>Please fill in the required settings fields.</source>
@@ -775,40 +777,41 @@ Please check your internet connection.</source>
     </message>
     <message>
         <source>OCR result is empty for this block.</source>
-        <translation type="unfinished"></translation>
+        <translation>이 블록의 OCR 결과가 비어 있습니다.</translation>
     </message>
     <message>
         <source>Initial crop is empty.</source>
-        <translation type="unfinished"></translation>
+        <translation>초기 크롭이 비어 있습니다.</translation>
     </message>
     <message>
         <source>OCR returned empty text on the initial crop.</source>
-        <translation type="unfinished"></translation>
+        <translation>초기 크롭에서 OCR이 빈 텍스트를 반환했습니다.</translation>
     </message>
     <message>
         <source>Retry crop is empty after expansion.</source>
-        <translation type="unfinished"></translation>
+        <translation>확장 후 재시도 크롭이 비어 있습니다.</translation>
     </message>
     <message>
         <source>Retry also failed after contrast preprocessing.</source>
-        <translation type="unfinished"></translation>
+        <translation>대비 전처리 후 재시도도 실패했습니다.</translation>
     </message>
     <message>
         <source>This PSD was exported by this application, but it now contains Photoshop features that are not fully supported on import. It may not appear exactly as it did in Photoshop.</source>
-        <translation type="unfinished"></translation>
+        <translation>이 PSD는 이 앱에서 내보낸 파일이지만, 현재 가져오기에서 완전히 지원되지 않는 Photoshop 기능이 포함되어 있습니다. Photoshop에서 보이던 모습과 완전히 같지 않을 수 있습니다.</translation>
     </message>
     <message>
         <source>Imported a PSD that was not exported by this application. Visible image layers were flattened, and unsupported Photoshop features may not match exactly.</source>
-        <translation type="unfinished"></translation>
+        <translation>이 앱에서 내보내지 않은 PSD를 가져왔습니다. 보이는 이미지 레이어는 하나로 합쳐졌으며, 지원되지 않는 Photoshop 기능은 정확히 일치하지 않을 수 있습니다.</translation>
     </message>
     <message>
         <source>PSD import/export requires the optional Python package &apos;PhotoshopAPI&apos;.
 Install it to use PSD features.</source>
-        <translation type="unfinished"></translation>
+        <translation>PSD 가져오기/내보내기를 사용하려면 선택적 Python 패키지 &apos;PhotoshopAPI&apos;가 필요합니다.
+PSD 기능을 사용하려면 설치하세요.</translation>
     </message>
     <message>
         <source>PSD Feature Unavailable</source>
-        <translation type="unfinished"></translation>
+        <translation>PSD 기능을 사용할 수 없음</translation>
     </message>
 </context>
 <context>
@@ -843,7 +846,7 @@ Install it to use PSD features.</source>
     </message>
     <message>
         <source>PSD File</source>
-        <translation type="unfinished"></translation>
+        <translation>PSD 파일</translation>
     </message>
     <message>
         <source>Save Currently Loaded Image</source>
@@ -875,7 +878,7 @@ Install it to use PSD features.</source>
     </message>
     <message>
         <source>PSD</source>
-        <translation type="unfinished"></translation>
+        <translation>PSD</translation>
     </message>
     <message>
         <source>Home</source>
@@ -1294,11 +1297,11 @@ Restart now?</source>
     </message>
     <message>
         <source>PaddleOCR VL</source>
-        <translation type="unfinished"></translation>
+        <translation>PaddleOCR VL</translation>
     </message>
     <message>
         <source>HunyuanOCR</source>
-        <translation type="unfinished"></translation>
+        <translation>HunyuanOCR</translation>
     </message>
     <message>
         <source>Original</source>
@@ -1354,7 +1357,7 @@ Restart now?</source>
     </message>
     <message>
         <source>Claude-4.6-Sonnet</source>
-        <translation type="unfinished"></translation>
+        <translation>Claude-4.6-Sonnet</translation>
     </message>
     <message>
         <source>PaddleOCR VL Settings</source>
@@ -1378,7 +1381,7 @@ Restart now?</source>
     </message>
     <message>
         <source>Shortcuts</source>
-        <translation type="unfinished"></translation>
+        <translation>단축키</translation>
     </message>
     <message>
         <source>Advanced</source>
@@ -1449,54 +1452,54 @@ Restart now?</source>
     <name>ShortcutDefinitions</name>
     <message>
         <source>Undo</source>
-        <translation type="unfinished">실행 취소</translation>
+        <translation>실행 취소</translation>
     </message>
     <message>
         <source>Undo the last editing action.</source>
-        <translation type="unfinished"></translation>
+        <translation>마지막 편집 동작을 실행 취소합니다.</translation>
     </message>
     <message>
         <source>Redo</source>
-        <translation type="unfinished">다시 실행</translation>
+        <translation>다시 실행</translation>
     </message>
     <message>
         <source>Redo the previously undone action.</source>
-        <translation type="unfinished"></translation>
+        <translation>이전에 실행 취소한 동작을 다시 실행합니다.</translation>
     </message>
     <message>
         <source>Delete Selected Box</source>
-        <translation type="unfinished">선택한 상자 삭제</translation>
+        <translation>선택한 상자 삭제</translation>
     </message>
     <message>
         <source>Delete the currently selected text box.</source>
-        <translation type="unfinished"></translation>
+        <translation>현재 선택한 텍스트 상자를 삭제합니다.</translation>
     </message>
     <message>
         <source>Restore Text Blocks</source>
-        <translation type="unfinished"></translation>
+        <translation>텍스트 블록 복원</translation>
     </message>
     <message>
         <source>Draw saved text blocks back onto the image for editing.</source>
-        <translation type="unfinished"></translation>
+        <translation>저장된 텍스트 블록을 이미지 위에 다시 그려 편집할 수 있게 합니다.</translation>
     </message>
 </context>
 <context>
     <name>ShortcutsPage</name>
     <message>
         <source>Keyboard Shortcuts</source>
-        <translation type="unfinished"></translation>
+        <translation>키보드 단축키</translation>
     </message>
     <message>
         <source>Assign shortcuts for common editing actions. Leave a field empty to disable that shortcut.</source>
-        <translation type="unfinished"></translation>
+        <translation>자주 쓰는 편집 작업의 단축키를 지정합니다. 비워 두면 해당 단축키가 비활성화됩니다.</translation>
     </message>
     <message>
         <source>Reset</source>
-        <translation type="unfinished">다시 놓기</translation>
+        <translation>초기화</translation>
     </message>
     <message>
         <source>Reset All Shortcuts</source>
-        <translation type="unfinished"></translation>
+        <translation>모든 단축키 초기화</translation>
     </message>
 </context>
 <context>
@@ -1925,50 +1928,50 @@ back on the Image (for further editing)</source>
     <name>_ProjectDetailsPopup</name>
     <message>
         <source>File name</source>
-        <translation type="unfinished"></translation>
+        <translation>파일 이름</translation>
     </message>
     <message>
         <source>Location</source>
-        <translation type="unfinished"></translation>
+        <translation>위치</translation>
     </message>
     <message>
         <source>Browse</source>
-        <translation type="unfinished">먹다</translation>
+        <translation>찾아보기</translation>
     </message>
     <message>
         <source>Apply</source>
-        <translation type="unfinished"></translation>
+        <translation>적용</translation>
     </message>
     <message>
         <source>Apply to rename or move the current project file.</source>
-        <translation type="unfinished"></translation>
+        <translation>현재 프로젝트 파일의 이름을 바꾸거나 이동하려면 적용을 누르세요.</translation>
     </message>
     <message>
         <source>Apply to save the current project file with a new name or location.</source>
-        <translation type="unfinished"></translation>
+        <translation>현재 프로젝트 파일을 새 이름 또는 새 위치로 저장하려면 적용을 누르세요.</translation>
     </message>
     <message>
         <source>Choose Project Folder</source>
-        <translation type="unfinished"></translation>
+        <translation>프로젝트 폴더 선택</translation>
     </message>
     <message>
         <source>Project File</source>
-        <translation type="unfinished">프로젝트 파일</translation>
+        <translation>프로젝트 파일</translation>
     </message>
     <message>
         <source>Enter a file name.</source>
-        <translation type="unfinished"></translation>
+        <translation>파일 이름을 입력하세요.</translation>
     </message>
     <message>
         <source>Choose a folder location.</source>
-        <translation type="unfinished"></translation>
+        <translation>폴더 위치를 선택하세요.</translation>
     </message>
 </context>
 <context>
     <name>_RecentRow</name>
     <message>
         <source>Open</source>
-        <translation>열려 있는</translation>
+        <translation>열기</translation>
     </message>
     <message>
         <source>Open File Location</source>
@@ -1976,7 +1979,7 @@ back on the Image (for further editing)</source>
     </message>
     <message>
         <source>Copy Path</source>
-        <translation type="unfinished"></translation>
+        <translation>경로 복사</translation>
     </message>
     <message>
         <source>Unpin</source>
@@ -1992,40 +1995,45 @@ back on the Image (for further editing)</source>
     </message>
     <message>
         <source>Delete File</source>
-        <translation type="unfinished"></translation>
+        <translation>파일 삭제</translation>
     </message>
     <message>
         <source>File Not Found</source>
-        <translation type="unfinished"></translation>
+        <translation>파일을 찾을 수 없음</translation>
     </message>
     <message>
         <source>The selected project file could not be found.
 It may have already been moved, renamed, or deleted.
 
 {path}</source>
-        <translation type="unfinished"></translation>
+        <translation>선택한 프로젝트 파일을 찾을 수 없습니다.
+이미 이동, 이름 변경 또는 삭제되었을 수 있습니다.
+
+{path}</translation>
     </message>
     <message>
         <source>Are you sure you want to permanently delete this project file?</source>
-        <translation type="unfinished"></translation>
+        <translation>이 프로젝트 파일을 영구적으로 삭제하시겠습니까?</translation>
     </message>
     <message>
         <source>Delete</source>
-        <translation type="unfinished">삭제</translation>
+        <translation>삭제</translation>
     </message>
     <message>
         <source>Cancel</source>
-        <translation type="unfinished">취소</translation>
+        <translation>취소</translation>
     </message>
     <message>
         <source>Delete Failed</source>
-        <translation type="unfinished"></translation>
+        <translation>삭제 실패</translation>
     </message>
     <message>
         <source>Could not delete the selected project file.
 
 {error}</source>
-        <translation type="unfinished"></translation>
+        <translation>선택한 프로젝트 파일을 삭제할 수 없습니다.
+
+{error}</translation>
     </message>
 </context>
 <context>
@@ -2046,7 +2054,7 @@ Do you want to restore it?</source>
     </message>
     <message>
         <source>Restore</source>
-        <translation>복원하다</translation>
+        <translation>복원</translation>
     </message>
     <message>
         <source>Discard</source>
@@ -2054,33 +2062,35 @@ Do you want to restore it?</source>
     </message>
     <message>
         <source>Export PSD As</source>
-        <translation type="unfinished"></translation>
+        <translation>PSD로 내보내기</translation>
     </message>
     <message>
         <source>PSD Files (*.psd);;All Files (*)</source>
-        <translation type="unfinished"></translation>
+        <translation>PSD 파일 (*.psd);;모든 파일 (*)</translation>
     </message>
     <message>
         <source>Export PSD</source>
-        <translation type="unfinished"></translation>
+        <translation>PSD 내보내기</translation>
     </message>
     <message>
         <source>Project File</source>
-        <translation type="unfinished">프로젝트 파일</translation>
+        <translation>프로젝트 파일</translation>
     </message>
     <message>
         <source>Choose an existing folder for the project file.</source>
-        <translation type="unfinished"></translation>
+        <translation>프로젝트 파일을 저장할 기존 폴더를 선택하세요.</translation>
     </message>
     <message>
         <source>Could not create the selected project folder.
 
 {error}</source>
-        <translation type="unfinished"></translation>
+        <translation>선택한 프로젝트 폴더를 만들 수 없습니다.
+
+{error}</translation>
     </message>
     <message>
         <source>Overwrite Project File</source>
-        <translation type="unfinished"></translation>
+        <translation>프로젝트 파일 덮어쓰기</translation>
     </message>
     <message>
         <source>A project file already exists at this location.
@@ -2088,11 +2098,15 @@ Do you want to restore it?</source>
 {path}
 
 Overwrite it?</source>
-        <translation type="unfinished"></translation>
+        <translation>이 위치에 이미 프로젝트 파일이 있습니다.
+
+{path}
+
+덮어쓰시겠습니까?</translation>
     </message>
     <message>
         <source>Old Project File Kept</source>
-        <translation type="unfinished"></translation>
+        <translation>기존 프로젝트 파일 유지됨</translation>
     </message>
     <message>
         <source>The project was saved to the new location, but the old file could not be removed.
@@ -2100,19 +2114,23 @@ Overwrite it?</source>
 {path}
 
 {error}</source>
-        <translation type="unfinished"></translation>
+        <translation>프로젝트를 새 위치에 저장했지만 이전 파일을 제거할 수 없었습니다.
+
+{path}
+
+{error}</translation>
     </message>
     <message>
         <source>Project file saved.</source>
-        <translation type="unfinished"></translation>
+        <translation>프로젝트 파일이 저장되었습니다.</translation>
     </message>
     <message>
         <source>Project file renamed.</source>
-        <translation type="unfinished"></translation>
+        <translation>프로젝트 파일 이름이 변경되었습니다.</translation>
     </message>
     <message>
         <source>Project file moved.</source>
-        <translation type="unfinished"></translation>
+        <translation>프로젝트 파일이 이동되었습니다.</translation>
     </message>
     <message>
         <source>Project Not Found</source>
@@ -2126,7 +2144,7 @@ It may have been moved, renamed, or deleted.
         <translation>선택한 프로젝트 파일을 찾을 수 없습니다.
 이동되었거나 이름이 바뀌었거나 삭제되었을 수 있습니다.
 
-{길}</translation>
+{path}</translation>
     </message>
     <message>
         <source>Korean</source>
@@ -2141,7 +2159,7 @@ It may have been moved, renamed, or deleted.
     <name>self.main_page</name>
     <message>
         <source>OCR quality too low after retry.</source>
-        <translation type="unfinished"></translation>
+        <translation>재시도 후에도 OCR 품질이 너무 낮습니다.</translation>
     </message>
 </context>
 <context>
@@ -2164,11 +2182,11 @@ It may have been moved, renamed, or deleted.
     </message>
     <message>
         <source>PaddleOCR VL</source>
-        <translation type="unfinished"></translation>
+        <translation>PaddleOCR VL</translation>
     </message>
     <message>
         <source>HunyuanOCR</source>
-        <translation type="unfinished"></translation>
+        <translation>HunyuanOCR</translation>
     </message>
     <message>
         <source>Default</source>
@@ -2196,7 +2214,7 @@ It may have been moved, renamed, or deleted.
     </message>
     <message>
         <source>Claude-4.6-Sonnet</source>
-        <translation type="unfinished"></translation>
+        <translation>Claude-4.6-Sonnet</translation>
     </message>
     <message>
         <source>Claude-4.5-Haiku</source>
@@ -2296,7 +2314,7 @@ It may have been moved, renamed, or deleted.
     </message>
     <message>
         <source>PaddleOCR VL Settings</source>
-        <translation type="unfinished">PaddleOCR VL 설정</translation>
+        <translation>PaddleOCR VL 설정</translation>
     </message>
     <message>
         <source>HunyuanOCR Settings</source>
