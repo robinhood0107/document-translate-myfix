@@ -1,6 +1,6 @@
 services:
   hunyuanocr-local-server:
-    image: local/llama.cpp:server-cuda-b8672
+    image: ${LLAMA_CPP_IMAGE:-local/llama.cpp:server-cuda-b8709}
     pull_policy: never
     container_name: hunyuanocr-local-server
     restart: unless-stopped

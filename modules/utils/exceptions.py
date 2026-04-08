@@ -18,6 +18,11 @@ class LocalServiceConnectionError(LocalServiceError):
     pass
 
 
+class LocalServiceSetupError(LocalServiceError):
+    """Raised when a local service cannot be prepared or started."""
+    pass
+
+
 class LocalServiceResponseError(LocalServiceError):
     """Raised when a local service returns an unexpected response."""
     pass
