@@ -1154,10 +1154,6 @@ Riavviare ora?</translation>
         <translation>Ridimensiona</translation>
     </message>
     <message>
-        <source>PPOCRv5</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
         <source>PaddleOCR VL</source>
         <translation type="unfinished"></translation>
     </message>
@@ -1822,10 +1818,6 @@ Potrebbe essere stato spostato, rinominato o eliminato.
     <message>
         <source>Gemini-2.0-Flash</source>
         <translation>Gemini-2.0-Flash</translation>
-    </message>
-    <message>
-        <source>PPOCRv5</source>
-        <translation type="unfinished"></translation>
     </message>
     <message>
         <source>PaddleOCR VL</source>
