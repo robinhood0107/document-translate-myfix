@@ -75,7 +75,6 @@ class ModelID(Enum):
     
     # PPOCRv5 Recognition Models - Other Languages
     PPOCR_V5_REC_EN_MOBILE = "ppocr-v5-rec-en-mobile"
-    PPOCR_V5_REC_JAPAN_MOBILE = "ppocr-v5-rec-japan-mobile"
     PPOCR_V5_REC_KOREAN_MOBILE = "ppocr-v5-rec-korean-mobile"
     PPOCR_V5_REC_LATIN_MOBILE = "ppocr-v5-rec-latin-mobile"
     PPOCR_V5_REC_ESLAV_MOBILE = "ppocr-v5-rec-eslav-mobile"
@@ -521,18 +520,6 @@ def _register_defaults():
         save_dir=os.path.join(models_base_dir, 'ocr', 'ppocr-v5-onnx'),
         additional_urls={
             'ppocrv5_en_dict.txt': 'https://www.modelscope.cn/models/RapidAI/RapidOCR/resolve/v3.4.0/paddle/PP-OCRv5/rec/en_PP-OCRv5_rec_mobile_infer/ppocrv5_en_dict.txt'
-        }
-    ))
-
-    # PPOCRv5 Recognition Models - Japanese (shared multilingual mobile rec asset)
-    ModelDownloader.register(ModelSpec(
-        id=ModelID.PPOCR_V5_REC_JAPAN_MOBILE,
-        url='https://www.modelscope.cn/models/RapidAI/RapidOCR/resolve/v3.4.0/onnx/PP-OCRv5/rec/',
-        files=['ch_PP-OCRv5_rec_mobile_infer.onnx', 'ppocrv5_dict.txt'],
-        sha256=['5825fc7ebf84ae7a412be049820b4d86d77620f204a041697b0494669b1742c5', None],
-        save_dir=os.path.join(models_base_dir, 'ocr', 'ppocr-v5-onnx'),
-        additional_urls={
-            'ppocrv5_dict.txt': 'https://www.modelscope.cn/models/RapidAI/RapidOCR/resolve/v3.4.0/paddle/PP-OCRv5/rec/ch_PP-OCRv5_rec_mobile_infer/ppocrv5_dict.txt'
         }
     ))
 
