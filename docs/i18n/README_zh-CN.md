@@ -143,7 +143,6 @@ raise RarCannotExec("Cannot find working tool")
 
 这些可以用于任何支持的语言。
 
-* PPOCRv5（显式选择时也可用于日语，走官方 PP-OCRv5 多语言 mobile recognition；默认仍然是 manga-ocr）
 * Gemini 2.0 Flash
 * Microsoft Azure Vision
 * PaddleOCR VL（本地 Docker `/layout-parsing` 服务）

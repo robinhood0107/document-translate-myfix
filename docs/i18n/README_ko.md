@@ -143,7 +143,6 @@ raise RarCannotExec("Cannot find working tool")
 
 지원되는 모든 언어에 사용할 수 있습니다.
 
-* PPOCRv5 (명시적으로 선택하면 일본어에서도 공식 PP-OCRv5 다국어 mobile recognition 경로를 사용 가능, 기본값은 계속 manga-ocr)
 * Gemini 2.0 Flash
 * Microsoft Azure Vision
 * PaddleOCR VL (로컬 Docker `/layout-parsing` 서비스)
