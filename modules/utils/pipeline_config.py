@@ -42,7 +42,7 @@ TRANSLATOR_REQUIREMENTS = {
     "Custom Local Server(Gemma)": ("Custom Local Server(Gemma)", ("api_url", "model")),
     "GPT-4.1": ("Open AI GPT", ("api_key",)),
     "GPT-4.1-mini": ("Open AI GPT", ("api_key",)),
-    "Claude-4.5-Sonnet": ("Anthropic Claude", ("api_key",)),
+    "Claude-4.6-Sonnet": ("Anthropic Claude", ("api_key",)),
     "Claude-4.5-Haiku": ("Anthropic Claude", ("api_key",)),
     "Gemini-2.5-Pro": ("Google Gemini", ("api_key",)),
     "Gemini-3.0-Flash": ("Google Gemini", ("api_key",)),
