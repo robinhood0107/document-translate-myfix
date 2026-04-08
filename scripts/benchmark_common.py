@@ -38,6 +38,7 @@ PRESET_DIRS = [
     ROOT / "benchmarks" / "presets",
     ROOT / "benchmarks" / "paddleocr_vl15" / "presets",
     ROOT / "benchmarks" / "ocr_combo" / "presets",
+    ROOT / "benchmarks" / "ocr_combo_ranked" / "presets",
 ]
 OCR_BUNDLE_DIR = ROOT / "paddleocr_vl_docker_files"
 HUNYUAN_OCR_BUNDLE_DIR = ROOT / "hunyuanocr_docker_files"
