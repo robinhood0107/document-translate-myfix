@@ -10,7 +10,7 @@ import requests
 
 from .base import BaseLLMTranslation
 from ...utils.textblock import TextBlock
-from ...utils.translator_utils import extract_json_object, get_raw_text
+from ...utils.translator_utils import extract_json_object
 
 logger = logging.getLogger(__name__)
 
@@ -309,7 +309,7 @@ class CustomLocalGemmaTranslation(BaseLLMTranslation):
         prompt_profile: str,
     ) -> int:
         system_prompt = self._build_system_prompt(extra_context, prompt_profile=prompt_profile)
-        user_prompt = get_raw_text(blk_list)
+        _, user_prompt = self._build_translation_input_payloads(blk_list)
         response_data = self._request_translation(system_prompt, user_prompt)
 
         choice = (response_data.get("choices") or [{}])[0]
