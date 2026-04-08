@@ -36,4 +36,4 @@ services:
       - --cache-ram
       - "0"
       - --n-gpu-layers
-      - "${LLAMA_N_GPU_LAYERS:-99}"
+      - "${LLAMA_N_GPU_LAYERS:-80}"
