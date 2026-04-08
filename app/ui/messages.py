@@ -246,6 +246,11 @@ class Messages:
                 "Messages",
                 "The local {service} service returned an invalid response.\nCheck Settings > {settings_page} and review the local service logs."
             ).format(service=service_name, settings_page=page_name)
+        elif error_kind == "setup":
+            text = QCoreApplication.translate(
+                "Messages",
+                "Unable to prepare the local {service} runtime.\nCheck Settings > {settings_page} and make sure Docker is available."
+            ).format(service=service_name, settings_page=page_name)
         else:
             text = QCoreApplication.translate(
                 "Messages",
@@ -260,6 +265,69 @@ class Messages:
             duration=None,
             closable=True
         )
+
+    @staticmethod
+    def confirm_automatic_run(
+        parent,
+        *,
+        run_label: str,
+        page_count: int,
+        source_lang: str,
+        target_lang: str,
+        ocr_mode_label: str,
+        resolved_ocr_label: str | None = None,
+    ) -> bool:
+        msg = QtWidgets.QMessageBox(parent)
+        msg.setIcon(QtWidgets.QMessageBox.Question)
+        msg.setWindowTitle(
+            QCoreApplication.translate("Messages", "Confirm Automatic Processing")
+        )
+
+        lines = [
+            QCoreApplication.translate(
+                "Messages",
+                "Review the automatic processing settings before starting.",
+            ),
+            "",
+            QCoreApplication.translate("Messages", "Run: {run_label}").format(
+                run_label=run_label
+            ),
+            QCoreApplication.translate("Messages", "Pages: {page_count}").format(
+                page_count=page_count
+            ),
+            QCoreApplication.translate("Messages", "Source Language: {source_lang}").format(
+                source_lang=source_lang
+            ),
+            QCoreApplication.translate("Messages", "Target Language: {target_lang}").format(
+                target_lang=target_lang
+            ),
+            QCoreApplication.translate("Messages", "Text Recognition Mode: {ocr_mode}").format(
+                ocr_mode=ocr_mode_label
+            ),
+        ]
+        if resolved_ocr_label:
+            lines.append(
+                QCoreApplication.translate(
+                    "Messages",
+                    "Resolved Text Recognition: {ocr_engine}",
+                ).format(ocr_engine=resolved_ocr_label)
+            )
+        msg.setText("\n".join(lines))
+        try:
+            msg.setTextInteractionFlags(Qt.TextSelectableByMouse | Qt.TextSelectableByKeyboard)
+        except Exception:
+            pass
+        start_btn = msg.addButton(
+            QCoreApplication.translate("Messages", "Start"),
+            QtWidgets.QMessageBox.ButtonRole.AcceptRole,
+        )
+        msg.addButton(
+            QCoreApplication.translate("Messages", "Cancel"),
+            QtWidgets.QMessageBox.ButtonRole.RejectRole,
+        )
+        msg.setDefaultButton(start_btn)
+        msg.exec()
+        return msg.clickedButton() == start_btn
 
     @staticmethod
     def get_content_flagged_text(details: str = None, context: str = "Operation") -> str:
