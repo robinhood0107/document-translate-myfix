@@ -29,6 +29,7 @@ from app.controllers.projects import ProjectController
 from app.controllers.text import TextController
 from app.controllers.webtoons import WebtoonController
 from app.controllers.search_replace import SearchReplaceController
+from app.controllers.shortcuts import ShortcutController
 from app.controllers.task_runner import TaskRunnerController
 from app.controllers.batch_report import BatchReportController
 from app.controllers.manual_workflow import ManualWorkflowController
@@ -129,6 +130,7 @@ class ComicTranslate(ComicTranslateUI):
         self.text_ctrl = TextController(self)
         self.webtoon_ctrl = WebtoonController(self)
         self.search_ctrl = SearchReplaceController(self)
+        self.shortcut_ctrl = ShortcutController(self)
         self.task_runner_ctrl = TaskRunnerController(self)
         self.batch_report_ctrl = BatchReportController(self)
         self.manual_workflow_ctrl = ManualWorkflowController(self)
@@ -185,6 +187,7 @@ class ComicTranslate(ComicTranslateUI):
         self.document_browser_button.sig_files_changed.connect(self.image_ctrl.thread_load_images)
         self.archive_browser_button.sig_files_changed.connect(self.image_ctrl.thread_load_images)
         self.comic_browser_button.sig_files_changed.connect(self.image_ctrl.thread_load_images)
+        self.psd_browser_button.sig_files_changed.connect(self.image_ctrl.thread_load_images)
         self.project_browser_button.sig_file_changed.connect(self.project_ctrl.thread_load_project)
         self.insert_browser_button.sig_files_changed.connect(self.image_ctrl.thread_insert)
 
@@ -220,7 +223,7 @@ class ComicTranslate(ComicTranslateUI):
         self.set_all_button.clicked.connect(self.text_ctrl.set_src_trg_all)
         self.clear_rectangles_button.clicked.connect(self.image_viewer.clear_rectangles)
         self.clear_brush_strokes_button.clicked.connect(self.image_viewer.clear_brush_strokes)
-        self.draw_blklist_blks.clicked.connect(lambda: self.pipeline.load_box_coords(self.blk_list))
+        self.draw_blklist_blks.clicked.connect(self.restore_text_blocks)
         self.change_all_blocks_size_dec.clicked.connect(lambda: self.text_ctrl.change_all_blocks_size(-int(self.change_all_blocks_size_diff.text())))
         self.change_all_blocks_size_inc.clicked.connect(lambda: self.text_ctrl.change_all_blocks_size(int(self.change_all_blocks_size_diff.text())))
         self.delete_button.clicked.connect(self.delete_selected_box)
@@ -287,6 +290,7 @@ class ComicTranslate(ComicTranslateUI):
         self.startup_home._sig_pin.connect(
             lambda path, pinned: self.project_ctrl.toggle_pin_project(path, pinned)
         )
+        self.title_bar.project_target_requested.connect(self.project_ctrl.thread_change_project_file)
 
     def _guarded_thread_load_images(self, paths: list[str]):
         """Wrap thread_load_images with unsaved-project confirmation and clear state."""
@@ -410,6 +414,38 @@ class ComicTranslate(ComicTranslateUI):
                 self.blk_list,
             )
             self.undo_group.activeStack().push(command)
+
+    def restore_text_blocks(self):
+        if not self.webtoon_mode:
+            if self.blk_list:
+                self.pipeline.load_box_coords(self.blk_list)
+            return
+
+        manager = getattr(self.image_viewer, "webtoon_manager", None)
+        page_idx = self.curr_img_idx
+        if manager is None or not (0 <= page_idx < len(self.image_files)):
+            if self.blk_list:
+                self.pipeline.load_box_coords(self.blk_list)
+            return
+
+        page_y = manager.image_positions[page_idx]
+        page_bottom = page_y + manager.image_heights[page_idx]
+
+        current_page_blocks = []
+        for blk in self.blk_list:
+            if blk.xyxy is None or len(blk.xyxy) < 4:
+                continue
+            blk_y = blk.xyxy[1]
+            blk_bottom = blk.xyxy[3]
+            if (
+                (blk_y >= page_y and blk_y < page_bottom)
+                or (blk_bottom > page_y and blk_bottom <= page_bottom)
+                or (blk_y < page_y and blk_bottom > page_bottom)
+            ):
+                current_page_blocks.append(blk)
+
+        if current_page_blocks:
+            self.pipeline.load_box_coords(current_page_blocks)
 
     def batch_mode_selected(self):
         self.disable_hbutton_group()

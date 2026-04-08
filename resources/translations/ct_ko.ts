@@ -150,8 +150,16 @@
         <translation>아랍어</translation>
     </message>
     <message>
+        <source>Hebrew</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
         <source>Czech</source>
         <translation>체코어</translation>
+    </message>
+    <message>
+        <source>Croatian</source>
+        <translation type="unfinished"></translation>
     </message>
     <message>
         <source>Persian</source>
@@ -222,6 +230,81 @@ Use Custom Local Server(Gemma) with the included Gemma Docker setup.</source>
     <message>
         <source>Auto-Save Project</source>
         <translation>프로젝트 자동 저장</translation>
+    </message>
+    <message>
+        <source>Rename or move the current project file</source>
+        <translation type="unfinished"></translation>
+    </message>
+</context>
+<context>
+    <name>ExportChaptersDialog</name>
+    <message>
+        <source>Partition Export</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Pages with the same chapter name are exported together. Edit the Chapter column to merge or split chapters.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Output folder</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Browse</source>
+        <translation type="unfinished">먹다</translation>
+    </message>
+    <message>
+        <source>Selected pages</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>New chapter name</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Apply</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Page</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>File</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Chapter</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Export targets</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Reset Chapters</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Select Export Folder</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Output Folder Required</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Choose an existing output folder.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Chapter Name Required</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Each page must belong to a non-empty chapter.</source>
+        <translation type="unfinished"></translation>
     </message>
 </context>
 <context>
@@ -710,6 +793,23 @@ Please check your internet connection.</source>
         <source>Retry also failed after contrast preprocessing.</source>
         <translation type="unfinished"></translation>
     </message>
+    <message>
+        <source>This PSD was exported by this application, but it now contains Photoshop features that are not fully supported on import. It may not appear exactly as it did in Photoshop.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Imported a PSD that was not exported by this application. Visible image layers were flattened, and unsupported Photoshop features may not match exactly.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>PSD import/export requires the optional Python package &apos;PhotoshopAPI&apos;.
+Install it to use PSD features.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>PSD Feature Unavailable</source>
+        <translation type="unfinished"></translation>
+    </message>
 </context>
 <context>
     <name>NavRailMixin</name>
@@ -742,6 +842,10 @@ Please check your internet connection.</source>
         <translation>프로젝트 파일</translation>
     </message>
     <message>
+        <source>PSD File</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
         <source>Save Currently Loaded Image</source>
         <translation>현재 로드된 이미지 저장</translation>
     </message>
@@ -768,6 +872,10 @@ Please check your internet connection.</source>
     <message>
         <source>PDF</source>
         <translation>PDF</translation>
+    </message>
+    <message>
+        <source>PSD</source>
+        <translation type="unfinished"></translation>
     </message>
     <message>
         <source>Home</source>
@@ -1245,6 +1353,10 @@ Restart now?</source>
         <translation>Google Cloud</translation>
     </message>
     <message>
+        <source>Claude-4.6-Sonnet</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
         <source>PaddleOCR VL Settings</source>
         <translation>PaddleOCR VL 설정</translation>
     </message>
@@ -1263,6 +1375,10 @@ Restart now?</source>
     <message>
         <source>Project</source>
         <translation>프로젝트</translation>
+    </message>
+    <message>
+        <source>Shortcuts</source>
+        <translation type="unfinished"></translation>
     </message>
     <message>
         <source>Advanced</source>
@@ -1297,10 +1413,6 @@ Restart now?</source>
         <translation>GPT-4.1</translation>
     </message>
     <message>
-        <source>Claude-4.5-Sonnet</source>
-        <translation>Claude-4.5-Sonnet</translation>
-    </message>
-    <message>
         <source>Claude-4.5-Haiku</source>
         <translation>Claude-4.5-Haiku</translation>
     </message>
@@ -1331,6 +1443,60 @@ Restart now?</source>
     <message>
         <source>Export</source>
         <translation>내보내기</translation>
+    </message>
+</context>
+<context>
+    <name>ShortcutDefinitions</name>
+    <message>
+        <source>Undo</source>
+        <translation type="unfinished">실행 취소</translation>
+    </message>
+    <message>
+        <source>Undo the last editing action.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Redo</source>
+        <translation type="unfinished">다시 실행</translation>
+    </message>
+    <message>
+        <source>Redo the previously undone action.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Delete Selected Box</source>
+        <translation type="unfinished">선택한 상자 삭제</translation>
+    </message>
+    <message>
+        <source>Delete the currently selected text box.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Restore Text Blocks</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Draw saved text blocks back onto the image for editing.</source>
+        <translation type="unfinished"></translation>
+    </message>
+</context>
+<context>
+    <name>ShortcutsPage</name>
+    <message>
+        <source>Keyboard Shortcuts</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Assign shortcuts for common editing actions. Leave a field empty to disable that shortcut.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Reset</source>
+        <translation type="unfinished">다시 놓기</translation>
+    </message>
+    <message>
+        <source>Reset All Shortcuts</source>
+        <translation type="unfinished"></translation>
     </message>
 </context>
 <context>
@@ -1756,6 +1922,49 @@ back on the Image (for further editing)</source>
     </message>
 </context>
 <context>
+    <name>_ProjectDetailsPopup</name>
+    <message>
+        <source>File name</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Location</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Browse</source>
+        <translation type="unfinished">먹다</translation>
+    </message>
+    <message>
+        <source>Apply</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Apply to rename or move the current project file.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Apply to save the current project file with a new name or location.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Choose Project Folder</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Project File</source>
+        <translation type="unfinished">프로젝트 파일</translation>
+    </message>
+    <message>
+        <source>Enter a file name.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Choose a folder location.</source>
+        <translation type="unfinished"></translation>
+    </message>
+</context>
+<context>
     <name>_RecentRow</name>
     <message>
         <source>Open</source>
@@ -1764,6 +1973,10 @@ back on the Image (for further editing)</source>
     <message>
         <source>Open File Location</source>
         <translation>파일 위치 열기</translation>
+    </message>
+    <message>
+        <source>Copy Path</source>
+        <translation type="unfinished"></translation>
     </message>
     <message>
         <source>Unpin</source>
@@ -1776,6 +1989,43 @@ back on the Image (for further editing)</source>
     <message>
         <source>Remove from Recent</source>
         <translation>최근 항목에서 삭제</translation>
+    </message>
+    <message>
+        <source>Delete File</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>File Not Found</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>The selected project file could not be found.
+It may have already been moved, renamed, or deleted.
+
+{path}</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Are you sure you want to permanently delete this project file?</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Delete</source>
+        <translation type="unfinished">삭제</translation>
+    </message>
+    <message>
+        <source>Cancel</source>
+        <translation type="unfinished">취소</translation>
+    </message>
+    <message>
+        <source>Delete Failed</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Could not delete the selected project file.
+
+{error}</source>
+        <translation type="unfinished"></translation>
     </message>
 </context>
 <context>
@@ -1801,6 +2051,68 @@ Do you want to restore it?</source>
     <message>
         <source>Discard</source>
         <translation>저장 안 함</translation>
+    </message>
+    <message>
+        <source>Export PSD As</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>PSD Files (*.psd);;All Files (*)</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Export PSD</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Project File</source>
+        <translation type="unfinished">프로젝트 파일</translation>
+    </message>
+    <message>
+        <source>Choose an existing folder for the project file.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Could not create the selected project folder.
+
+{error}</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Overwrite Project File</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>A project file already exists at this location.
+
+{path}
+
+Overwrite it?</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Old Project File Kept</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>The project was saved to the new location, but the old file could not be removed.
+
+{path}
+
+{error}</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Project file saved.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Project file renamed.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Project file moved.</source>
+        <translation type="unfinished"></translation>
     </message>
     <message>
         <source>Project Not Found</source>
@@ -1883,8 +2195,8 @@ It may have been moved, renamed, or deleted.
         <translation>GPT-4.1</translation>
     </message>
     <message>
-        <source>Claude-4.5-Sonnet</source>
-        <translation>Claude-4.5-Sonnet</translation>
+        <source>Claude-4.6-Sonnet</source>
+        <translation type="unfinished"></translation>
     </message>
     <message>
         <source>Claude-4.5-Haiku</source>
