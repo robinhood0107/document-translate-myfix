@@ -14,7 +14,7 @@ from app.ui.commands.image import SetImageCommand, ToggleSkipImagesCommand
 from app.ui.commands.inpaint import PatchInsertCommand
 from app.ui.commands.inpaint import PatchCommandBase
 from app.ui.commands.box import AddTextItemCommand
-from app.controllers.psd_importer import ImportedPsdPage, import_psd_files
+from app.controllers.psd_importer import ImportedPsdPage, import_psd_files, prepare_psd_font_catalog
 from app.controllers.psd_support import ensure_photoshopapi_available
 from app.ui.list_view_image_loader import ListViewImageLoader
 from app.thread_worker import GenericWorker
@@ -496,6 +496,10 @@ class ImageStateController:
                 return
             if not ensure_photoshopapi_available(self.main):
                 return
+            try:
+                prepare_psd_font_catalog()
+            except Exception:
+                pass
             self.main.project_ctrl.clear_recovery_checkpoint()
             self.clear_state()
             if prev_project_file:
@@ -908,10 +912,12 @@ class ImageStateController:
             self.display_image_from_loaded(result, index)
 
         worker.signals.result.connect(
-            lambda result: QtCore.QTimer.singleShot(0, lambda: _on_result(result))
+            lambda result: QtCore.QTimer.singleShot(0, self.main, lambda: _on_result(result))
         )
         worker.signals.error.connect(
-            lambda error: QtCore.QTimer.singleShot(0, lambda: self.main.default_error_handler(error))
+            lambda error: QtCore.QTimer.singleShot(
+                0, self.main, lambda: self.main.default_error_handler(error)
+            )
         )
         self._nav_worker = worker
         self.main.threadpool.start(worker)
