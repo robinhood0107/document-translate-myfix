@@ -876,10 +876,6 @@ Install it to use PSD features.</source>
         <translation>Archivo de proyecto</translation>
     </message>
     <message>
-        <source>PSD File</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
         <source>Save Currently Loaded Image</source>
         <translation>Guardar la imagen cargada actualmente</translation>
     </message>
