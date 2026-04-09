@@ -14,6 +14,8 @@ from app.ui.main_window import ComicTranslateUI
 from app.ui.messages import Messages
 from app.ui.dayu_widgets.message import MMessage
 
+from modules.ocr.local_runtime import LocalOCRRuntimeManager
+from modules.ocr.selection import OCR_MODE_BEST_LOCAL, normalize_ocr_mode, resolve_ocr_engine
 from app.ui.canvas.text_item import TextBlockItem
 from app.ui.commands.box import DeleteBoxesCommand
 
@@ -36,6 +38,7 @@ from app.controllers.manual_workflow import ManualWorkflowController
 from modules.utils.exceptions import (
     LocalServiceError,
     LocalServiceConnectionError,
+    LocalServiceSetupError,
 )
 
 
@@ -123,6 +126,7 @@ class ComicTranslate(ComicTranslateUI):
         self._batch_active = False
         self._batch_cancel_requested = False
         self._current_batch_run_type = None
+        self.local_ocr_runtime_manager = LocalOCRRuntimeManager()
 
         self.image_ctrl = ImageStateController(self)
         self.rect_item_ctrl = RectItemController(self)
@@ -490,6 +494,12 @@ class ComicTranslate(ComicTranslateUI):
         exctype, value, traceback_str = error_tuple
 
         if issubclass(exctype, LocalServiceError):
+            if issubclass(exctype, LocalServiceSetupError):
+                error_kind = "setup"
+            elif issubclass(exctype, LocalServiceConnectionError):
+                error_kind = "connection"
+            else:
+                error_kind = "response"
             Messages.show_local_service_error(
                 self,
                 details=str(value),
@@ -499,9 +509,7 @@ class ComicTranslate(ComicTranslateUI):
                     "settings_page_name",
                     self.tr("PaddleOCR VL Settings"),
                 ),
-                error_kind="connection"
-                if issubclass(exctype, LocalServiceConnectionError)
-                else "response",
+                error_kind=error_kind,
             )
 
         # Handle HTTP Errors (Server-side)
@@ -582,8 +590,10 @@ class ComicTranslate(ComicTranslateUI):
             return False
 
         for path in selected_paths:
-            tgt = self.image_states[path]['target_lang']
-            if not validate_settings(self, tgt):
+            page_state = self.image_ctrl.ensure_page_state(path)
+            tgt = page_state['target_lang']
+            src = page_state['source_lang']
+            if not validate_settings(self, tgt, source_lang=src):
                 return False
 
         self.image_ctrl.clear_page_skip_errors_for_paths(selected_paths)
@@ -619,34 +629,48 @@ class ComicTranslate(ComicTranslateUI):
             )
         return True
 
+    def _confirm_and_apply_auto_languages(self, selected_paths: list[str], run_type: str) -> bool:
+        selected_paths = [path for path in selected_paths if path in self.image_files]
+        if not selected_paths:
+            return False
+
+        source_lang = self.s_combo.currentText()
+        target_lang = self.t_combo.currentText()
+        ocr_mode = self.settings_page.get_tool_selection("ocr")
+        source_lang_english = self.lang_mapping.get(source_lang, source_lang)
+        resolved_ocr = resolve_ocr_engine(ocr_mode, source_lang_english)
+        resolved_ocr_label = (
+            resolved_ocr if normalize_ocr_mode(ocr_mode) == OCR_MODE_BEST_LOCAL else None
+        )
+        run_label = (
+            self.tr("One-Page Auto")
+            if run_type == "one_page_auto"
+            else self.tr("Translate All")
+        )
+        confirmed = Messages.confirm_automatic_run(
+            self,
+            run_label=run_label,
+            page_count=len(selected_paths),
+            source_lang=source_lang,
+            target_lang=target_lang,
+            ocr_mode_label=self.settings_page.get_ocr_mode_label(ocr_mode),
+            resolved_ocr_label=resolved_ocr_label,
+        )
+        if not confirmed:
+            return False
+
+        self.image_ctrl.apply_languages_to_paths(selected_paths, source_lang, target_lang)
+        return True
+
     def start_batch_process(self):
         try:
             if self._memlogger is not None:
                 self._memlogger.emit("batch_start_all")
         except Exception:
             pass
-        for image_path in self.image_files:
-            target_lang = self.image_states[image_path]['target_lang']
-            if not validate_settings(self, target_lang):
-                return
-
-        self.image_ctrl.clear_page_skip_errors_for_paths(self.image_files)
-        self._start_batch_report(self.image_files, run_type="batch")
-        self._batch_active = True
-        self._batch_cancel_requested = False
-        self._current_batch_run_type = "batch"
-        self.translate_button.setEnabled(False)
-        self.cancel_button.setEnabled(True)
-        self.save_as_project_button.setEnabled(False)
-        self.webtoon_toggle.setEnabled(False)
-        self.progress_bar.setVisible(True)
-        self.batch_report_ctrl.refresh_action_buttons()
-        
-        # Choose batch processor based on webtoon mode
-        if self.webtoon_mode:
-            self.run_threaded(self.pipeline.webtoon_batch_process, None, self.default_error_handler, self.on_batch_process_finished)
-        else:
-            self.run_threaded(self.pipeline.batch_process, None, self.default_error_handler, self.on_batch_process_finished)
+        if not self._confirm_and_apply_auto_languages(self.image_files, "batch"):
+            return
+        self._start_batch_process_for_paths(self.image_files, run_type="batch")
 
     def batch_translate_selected(self, selected_file_names: list[str]):
         try:
@@ -689,6 +713,8 @@ class ComicTranslate(ComicTranslateUI):
             )
             return
         current_path = self.image_files[self.curr_img_idx]
+        if not self._confirm_and_apply_auto_languages([current_path], "one_page_auto"):
+            return
         self._start_batch_process_for_paths([current_path], run_type="one_page_auto")
 
     def on_batch_process_finished(self):
@@ -918,5 +944,9 @@ class ComicTranslate(ComicTranslateUI):
 
         try:
             self.settings_page.shutdown()
+        except Exception:
+            pass
+        try:
+            self.local_ocr_runtime_manager.shutdown()
         except Exception:
             pass
