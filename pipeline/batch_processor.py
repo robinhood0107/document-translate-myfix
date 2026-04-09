@@ -30,6 +30,7 @@ from modules.utils.export_paths import (
     build_export_timestamp,
     export_run_root,
     reserve_export_run_token,
+    resolve_export_directory,
 )
 from modules.utils.render_style_policy import (
     VERTICAL_ALIGNMENT_TOP,
@@ -467,17 +468,13 @@ class BatchProcessor:
             
             base_name = os.path.splitext(os.path.basename(image_path))[0].strip()
             extension = os.path.splitext(image_path)[1]
-            directory = os.path.dirname(image_path)
-
-            archive_bname = ""
-            for archive in self.main_page.file_handler.archive_info:
-                images = archive['extracted_images']
-                archive_path = archive['archive_path']
-
-                for img_pth in images:
-                    if img_pth == image_path:
-                        directory = os.path.dirname(archive_path)
-                        archive_bname = os.path.splitext(os.path.basename(archive_path))[0].strip()
+            directory, archive_bname = resolve_export_directory(
+                image_path,
+                archive_info=self.main_page.file_handler.archive_info,
+                source_records=getattr(self.main_page, "export_source_by_path", {}),
+                project_file=getattr(self.main_page, "project_file", None),
+                temp_dir=getattr(self.main_page, "temp_dir", None),
+            )
 
             export_token = self._resolve_export_token(directory, timestamp)
             export_root = export_run_root(directory, export_token)

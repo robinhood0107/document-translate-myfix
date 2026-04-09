@@ -96,6 +96,7 @@ class ComicTranslateUI(
         self._workspace_initialized = False
         self.tool_buttons = {}
         self.page_list = PageListView()
+        self.export_source_by_path = {}
 
         self.webtoon_mode = False
 

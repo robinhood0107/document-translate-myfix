@@ -26,6 +26,17 @@ def _clear_lazy_sources_under_dir(base_dir: str) -> None:
             _LAZY_SOURCE_BY_PATH.pop(p, None)
 
 
+def get_prepared_path_source(path: str) -> dict | None:
+    if not path:
+        return None
+    abs_path = os.path.abspath(path)
+    with _LAZY_SOURCE_LOCK:
+        source = _LAZY_SOURCE_BY_PATH.get(abs_path)
+    if not isinstance(source, dict):
+        return None
+    return dict(source)
+
+
 def ensure_prepared_path_materialized(path: str) -> bool:
     if not path:
         return False
