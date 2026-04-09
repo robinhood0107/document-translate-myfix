@@ -901,10 +901,6 @@ PSD 기능을 사용하려면 설치하세요.</translation>
         <translation>프로젝트 파일</translation>
     </message>
     <message>
-        <source>PSD File</source>
-        <translation>PSD 파일</translation>
-    </message>
-    <message>
         <source>Save Currently Loaded Image</source>
         <translation>현재 로드된 이미지 저장</translation>
     </message>
