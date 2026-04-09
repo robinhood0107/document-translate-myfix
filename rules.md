@@ -14,7 +14,7 @@
 
 ## 2. 브랜치 모델
 
-이 저장소는 엄격한 `main + develop` 모델을 사용한다.
+이 저장소는 엄격한 `main + develop + tag` 모델을 사용한다.
 
 - `main`
   - 배포 기준 브랜치
@@ -23,10 +23,6 @@
   - 통합 기준 브랜치
   - 일반 기능은 모두 이 브랜치로 PR
   - 직접 커밋, 직접 push 금지
-- `release/<version>`
-  - 릴리스 준비 브랜치
-  - `develop`에서 분기 후 안정화
-  - 검증 후 `main`에 병합하고, 다시 `develop`에도 반영
 - 작업 브랜치
   - `feature/<slug>`
   - `fix/<slug>`
@@ -34,13 +30,14 @@
   - `hotfix/<slug>`
   - `benchmarking/lab`
 
+릴리스는 별도 `release/*` 브랜치가 아니라 `main`에 머지된 커밋에 버전 태그(`vX.Y.Z`)를 달아 발행한다.
 `codex/` 접두사는 더 이상 사용하지 않는다.
 
 ### 병합 대상
 
 - 일반 기능/수정: `feature/*`, `fix/*`, `chore/*` -> `develop`
-- 릴리스: `release/<version>` -> `main`, 이후 `develop` 백머지
-- 긴급 수정: `hotfix/<slug>` -> `main`, 이후 `develop` 백머지
+- 긴급 수정: `hotfix/<slug>` -> `main`, 이후 `main` -> `develop` 백머지
+- 릴리스 발행: `main` 머지 후 버전 태그 생성 -> GitHub Release 작성
 - 벤치마크 실험/리포트: `benchmarking/lab`에서만 유지
 
 ## 2-1. 벤치마크 자산 규칙
@@ -200,24 +197,26 @@ bash scripts/bootstrap_git_hooks.sh
 CI는 필수다. 다음 항목이 통과해야 병합 가능하다.
 
 - 브랜치 이름 규칙 검사
+- PR 대상 브랜치 흐름 검사
+- `main` 문서 승격 allowlist 검사
 - 저장소 위생 검사
 - Python 구문/컴파일 검사
 - 헤드리스 스모크 검사
 - 번역 자산 검사
 
-public/free 저장소의 ruleset은 보호 브랜치, PR 강제, 상태 체크, 태그 보호까지를 담당한다.
-브랜치 계열별 base 브랜치 적합성, 금지된 tracked 경로, benchmark 전용 자산 분리는 로컬 훅과 CI 정책 스크립트가 계속 담당한다.
+public/free 저장소의 ruleset은 보호 브랜치, PR 강제, 상태 체크, 태그 보호를 담당한다.
+브랜치 이름 강제, 브랜치 계열별 base 브랜치 적합성, 금지된 tracked 경로, benchmark 전용 자산 분리, `main` 문서 승격 allowlist 검사는 로컬 훅과 CI 정책 스크립트가 계속 담당한다.
+실제 import용 ruleset JSON은 `.github/rulesets/` 아래 파일을 기준으로 관리한다.
 
 ### CD
 
-현재 저장소에는 설치형 패키징 파이프라인이 커밋되어 있지 않으므로, CD v1은 `릴리스 거버넌스`에 집중한다.
+현재 저장소에는 설치형 패키징 파이프라인이 커밋되어 있지 않으므로, CD v1은 `태그 기반 릴리스 거버넌스`에 집중한다.
 
-- `develop`에서 `release/<version>` 생성
-- 릴리스 검증
-- `main` 병합
-- 태그 생성
+- `develop`에서 충분히 검증된 변경만 `main`으로 승격
+- `main` 머지 커밋에 버전 태그 생성
 - GitHub Release 작성
-- `develop` 백머지
+- 필요 시 `pre-release` 표기
+- `hotfix/*`는 `main` 기준으로 처리 후 `develop`에 백머지
 
 ## 10. 브랜치 보호 설정 가이드
 
@@ -227,7 +226,24 @@ GitHub 저장소 설정에서 아래를 권장한다.
 - PR 필수
 - CI 체크 통과 필수
 - force push 금지
+- 버전 태그 보호
 - 관리자 예외는 `hotfix` 절차에 한정
+- public/free ruleset import는 `docs/repo/github-rulesets-public-free-ko.md`와 `.github/rulesets/*.json`을 기준으로 적용한다.
+
+## 10-1. Main 문서 승격 정책
+
+- `main`에는 운영 필수 문서만 허용한다.
+  - 루트: `README.md`, `README_ko.md`, `rules.md`
+  - 변경 이력/감사: `docs/history/*.md`
+  - 운영 문서: `docs/gemma/*.md`, `docs/hunyuan/*.md`, `docs/repo/github-rulesets-public-free-ko.md`, `hunyuanocr_docker_files/README.md`, `paddleocr_vl_docker_files/README.md`
+- `develop`에는 개발/감사/정책 문서를 허용한다.
+- `benchmarking/lab`에는 benchmark 전용 문서를 허용한다.
+- 아래 문서는 `main`에 올리지 않는다.
+  - `docs/i18n/*`
+  - `docs/rendering/*`
+  - `docs/repo/benchmark-branch-policy-ko.md`
+  - benchmark/manual-review/dev-note 성격의 markdown
+- 이 정책은 문서 설명만으로 두지 않고, `main` 대상 PR에서 changed markdown/doc path allowlist 검사로 강제한다.
 
 ## 11. 세션 종료 체크리스트
 
@@ -241,18 +257,3 @@ GitHub 저장소 설정에서 아래를 권장한다.
 - PR이 열려 있거나 최신 커밋이 반영되었는가
 
 사용자가 명시적으로 `로컬만` 원한 경우에만 push 요구를 예외로 둔다.
-
-## 12. Benchmark 분리 원칙
-
-- `main`과 `develop`에는 benchmark-specific 정책, preset, runner, generated report, chart asset을 두지 않는다.
-- benchmark 실험 도구와 문서는 `benchmarking/lab` 브랜치에서만 관리한다.
-- benchmark 결과를 제품 브랜치에 반영할 때는 `benchmarking/lab`를 직접 merge하지 않고, 필요한 제품 변경만 별도 `feature/*`, `fix/*`, `chore/*` 브랜치에서 다시 정리해 반영한다.
-- 제품 코드에는 benchmark를 위해 필요한 최소 계측만 남긴다.
-  - 허용: stage hook, retry/truncated/quality 통계 surface, generic memlog/gpu snapshot helper
-  - 허용: benchmark로 검증된 제품 기본값 승격
-    - 예: Docker image/pull policy, `response_format_mode`, `response_schema_mode`, `chunk_size`, sampler 기본값, prompt profile, `n_gpu_layers`
-  - 금지: winner 판단, preset 선택, 실험 순서, 차트/문서 생성 로직
-- core 비즈니스 코드는 benchmark runner나 report generator를 import하지 않는다.
-- benchmark 레이어는 raw 결과와 공용 계측 surface를 읽어서 해석한다.
-- benchmark 결과를 근거로 한 제품 기본값 변경 PR은 benchmark 자산만 포함하지 않으면 `develop` 대상 제품 변경 PR로 수용할 수 있다.
-- 상세 운영 기준은 `docs/repo/benchmark-branch-policy-ko.md`를 따른다.
