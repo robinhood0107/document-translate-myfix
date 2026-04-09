@@ -326,10 +326,6 @@ Use Custom Local Server(Gemma) with the included Gemma Docker setup.</source>
         <translation>선택한 내보내기는 입력 파일/아카이브와 동일한 디렉터리의 comic_translate_&lt;timestamp&gt;에 저장됩니다.</translation>
     </message>
     <message>
-        <source>Debug exports apply to both Translate All and One-Page Auto so detector, mask, and cleanup issues can be reviewed afterwards.</source>
-        <translation>디버그 내보내기는 전체 번역과 한 페이지 자동 번역 모두에 적용되며, 이후 검출, 마스크, 정리 문제를 검토할 수 있습니다.</translation>
-    </message>
-    <message>
         <source>Export Raw Text</source>
         <translation>원시 텍스트 내보내기</translation>
     </message>
@@ -342,24 +338,24 @@ Use Custom Local Server(Gemma) with the included Gemma Docker setup.</source>
         <translation>인페인팅된 이미지 내보내기</translation>
     </message>
     <message>
-        <source>Export Detector Overlay</source>
-        <translation>검출 오버레이 내보내기</translation>
+        <source>Export Detector Overlay (Debug)</source>
+        <translation>검출 오버레이 내보내기 (디버그)</translation>
     </message>
     <message>
-        <source>Export Raw Inpaint Mask</source>
-        <translation>원본 인페인팅 마스크 내보내기</translation>
+        <source>Export Raw Inpaint Mask (Debug)</source>
+        <translation>원본 인페인팅 마스크 내보내기 (디버그)</translation>
     </message>
     <message>
-        <source>Export Mask Overlay</source>
-        <translation>마스크 오버레이 내보내기</translation>
+        <source>Export Mask Overlay (Debug)</source>
+        <translation>마스크 오버레이 내보내기 (디버그)</translation>
     </message>
     <message>
-        <source>Export Cleanup Mask Delta</source>
-        <translation>정리 마스크 변화량 내보내기</translation>
+        <source>Export Cleanup Mask Delta (Debug)</source>
+        <translation>정리 마스크 변화량 내보내기 (디버그)</translation>
     </message>
     <message>
-        <source>Export Debug Metadata</source>
-        <translation>디버그 메타데이터 내보내기</translation>
+        <source>Export Debug Metadata (Debug)</source>
+        <translation>디버그 메타데이터 내보내기 (디버그)</translation>
     </message>
 </context>
 <context>
