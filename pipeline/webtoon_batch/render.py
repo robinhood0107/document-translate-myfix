@@ -13,7 +13,7 @@ from app.ui.canvas.save_renderer import ImageSaveRenderer
 from app.ui.canvas.text.text_item_properties import TextItemProperties
 from app.ui.canvas.text_item import OutlineInfo, OutlineType
 from modules.rendering.render import get_best_render_area, is_vertical_block, pyside_word_wrap
-from modules.utils.export_paths import export_run_root, reserve_export_run_token
+from modules.utils.export_paths import export_run_root, reserve_export_run_token, resolve_export_directory
 from modules.utils.language_utils import get_language_code, is_no_space_lang
 from modules.utils.ocr_debug import export_ocr_debug_artifacts
 from modules.utils.inpaint_debug import (
@@ -242,15 +242,13 @@ class RenderMixin:
 
         base_name = os.path.splitext(os.path.basename(image_path))[0].strip()
         extension = os.path.splitext(image_path)[1]
-        directory = os.path.dirname(image_path)
-
-        archive_bname = ""
-        for archive in self.main_page.file_handler.archive_info:
-            if image_path in archive["extracted_images"]:
-                archive_path = archive["archive_path"]
-                directory = os.path.dirname(archive_path)
-                archive_bname = os.path.splitext(os.path.basename(archive_path))[0].strip()
-                break
+        directory, archive_bname = resolve_export_directory(
+            image_path,
+            archive_info=self.main_page.file_handler.archive_info,
+            source_records=getattr(self.main_page, "export_source_by_path", {}),
+            project_file=getattr(self.main_page, "project_file", None),
+            temp_dir=getattr(self.main_page, "temp_dir", None),
+        )
 
         export_settings = self._effective_export_settings()
         export_token = self._resolve_export_token(directory, timestamp)

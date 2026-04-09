@@ -429,6 +429,7 @@ class ImageStateController:
         self._page_skip_errors.clear()
         self._suppress_dismiss_message_ids.clear()
         self.main.image_files = []
+        self.main.export_source_by_path = {}
         self.main.image_states.clear()
         self.main.image_data.clear()
         self.main.image_history.clear()
