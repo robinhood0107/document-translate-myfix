@@ -492,8 +492,9 @@ class TextController:
         
         if self.main.curr_img_idx >= 0:
             current_file = self.main.image_files[self.main.curr_img_idx]
-            self.main.image_states[current_file]['source_lang'] = source_lang
-            self.main.image_states[current_file]['target_lang'] = target_lang
+            state = self.main.image_ctrl.ensure_page_state(current_file)
+            state['source_lang'] = source_lang
+            state['target_lang'] = target_lang
 
         target_en = self.main.lang_mapping.get(target_lang, None)
         t_direction = get_layout_direction(target_en)

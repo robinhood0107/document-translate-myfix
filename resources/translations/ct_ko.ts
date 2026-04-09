@@ -27,6 +27,14 @@
         <translation>오류</translation>
     </message>
     <message>
+        <source>One-Page Auto</source>
+        <translation>한 페이지만 자동번역</translation>
+    </message>
+    <message>
+        <source>Translate All</source>
+        <translation>모두 번역</translation>
+    </message>
+    <message>
         <source>No failed pages from the latest batch are available to retry.</source>
         <translation>가장 최근 일괄 처리에서 다시 시도할 실패 페이지가 없습니다.</translation>
     </message>
@@ -388,10 +396,12 @@ If responses are truncated, lower Chunk Size or increase LLAMA_CTX_SIZE in docke
     <message>
         <source>Connect Comic Translate to your local HunyuanOCR llama.cpp server.
 This OCR engine sends cropped text regions to the OpenAI-compatible /chat/completions endpoint.
+Keep the default localhost URL if you want Comic Translate to start the bundled Docker runtime on demand.
 Start the server with both the HunyuanOCR GGUF model and the matching mmproj file.</source>
         <translation>Comic Translate를 로컬 HunyuanOCR llama.cpp 서버에 연결합니다.
 이 OCR 엔진은 잘라낸 텍스트 영역을 OpenAI 호환 /chat/completions 엔드포인트로 전송합니다.
-서버는 HunyuanOCR GGUF 모델과 대응하는 mmproj 파일을 함께 사용해 시작해야 합니다.</translation>
+기본 localhost URL을 유지하면 Comic Translate가 번들 Docker 런타임을 필요할 때 자동으로 시작할 수 있습니다.
+HunyuanOCR GGUF 모델과 대응하는 mmproj 파일을 함께 사용해 서버를 시작하세요.</translation>
     </message>
     <message>
         <source>Server URL</source>
@@ -680,6 +690,52 @@ Please select a different tool in Settings.</source>
 설정에서 다른 도구를 선택하세요.</translation>
     </message>
     <message>
+        <source>Unable to prepare the local {service} runtime.
+Check Settings &gt; {settings_page} and make sure Docker is available.</source>
+        <translation>로컬 {service} 런타임을 준비할 수 없습니다.
+설정 &gt; {settings_page}를 확인하고 Docker 사용 가능 상태를 점검하세요.</translation>
+    </message>
+    <message>
+        <source>Confirm Automatic Processing</source>
+        <translation>자동 처리 확인</translation>
+    </message>
+    <message>
+        <source>Review the automatic processing settings before starting.</source>
+        <translation>시작 전에 자동 처리 설정을 다시 확인하세요.</translation>
+    </message>
+    <message>
+        <source>Run: {run_label}</source>
+        <translation>실행: {run_label}</translation>
+    </message>
+    <message>
+        <source>Pages: {page_count}</source>
+        <translation>페이지 수: {page_count}</translation>
+    </message>
+    <message>
+        <source>Source Language: {source_lang}</source>
+        <translation>원문 언어: {source_lang}</translation>
+    </message>
+    <message>
+        <source>Target Language: {target_lang}</source>
+        <translation>번역 언어: {target_lang}</translation>
+    </message>
+    <message>
+        <source>Text Recognition Mode: {ocr_mode}</source>
+        <translation>텍스트 인식 모드: {ocr_mode}</translation>
+    </message>
+    <message>
+        <source>Resolved Text Recognition: {ocr_engine}</source>
+        <translation>실제 적용 OCR: {ocr_engine}</translation>
+    </message>
+    <message>
+        <source>Start</source>
+        <translation>시작</translation>
+    </message>
+    <message>
+        <source>Cancel</source>
+        <translation>취소</translation>
+    </message>
+    <message>
         <source>{0} image(s) were skipped in this batch.
 Open Batch Report to see all skipped images and reasons.</source>
         <translation>이 일괄 처리에서 {0}개의 이미지가 건너뛰어졌습니다.
@@ -922,10 +978,12 @@ PSD 기능을 사용하려면 설치하세요.</translation>
     <message>
         <source>Connect Comic Translate to your local PaddleOCR VL Docker service.
 This OCR engine sends cropped text regions to the /layout-parsing endpoint.
+Keep the default localhost URL if you want Comic Translate to start the bundled Docker runtime on demand.
 Leave markdown or visualization options disabled unless you need debugging.</source>
         <translation>Comic Translate를 로컬 PaddleOCR VL Docker 서비스에 연결합니다.
 이 OCR 엔진은 잘라낸 텍스트 영역을 /layout-parsing 엔드포인트로 전송합니다.
-디버깅이 필요하지 않다면 마크다운 정리와 시각화 옵션은 끄는 것을 권장합니다.</translation>
+기본 localhost URL을 유지하면 Comic Translate가 번들 Docker 런타임을 필요할 때 자동으로 시작할 수 있습니다.
+디버깅이 필요하지 않다면 markdown/visualize 옵션은 꺼두세요.</translation>
     </message>
     <message>
         <source>Server URL</source>
@@ -1272,10 +1330,6 @@ Restart now?</source>
 <context>
     <name>SettingsPageUI</name>
     <message>
-        <source>Default</source>
-        <translation>기본값</translation>
-    </message>
-    <message>
         <source>Microsoft OCR</source>
         <translation>Microsoft OCR</translation>
     </message>
@@ -1358,6 +1412,14 @@ Restart now?</source>
     <message>
         <source>Claude-4.6-Sonnet</source>
         <translation>Claude-4.6-Sonnet</translation>
+    </message>
+    <message>
+        <source>Default (existing auto: MangaOCR / PPOCR / Pororo...)</source>
+        <translation>기본값 (기존 자동: MangaOCR / PPOCR / Pororo 등)</translation>
+    </message>
+    <message>
+        <source>Optimal (HunyuanOCR / PaddleOCR VL)</source>
+        <translation>최적값 (HunyuanOCR / PaddleOCR VL)</translation>
     </message>
     <message>
         <source>PaddleOCR VL Settings</source>
@@ -2169,30 +2231,6 @@ It may have been moved, renamed, or deleted.
         <translation>GPT-4.1-mini</translation>
     </message>
     <message>
-        <source>Microsoft OCR</source>
-        <translation>Microsoft OCR</translation>
-    </message>
-    <message>
-        <source>Google Cloud Vision</source>
-        <translation>Google Cloud Vision</translation>
-    </message>
-    <message>
-        <source>Gemini-2.0-Flash</source>
-        <translation>Gemini-2.0-Flash</translation>
-    </message>
-    <message>
-        <source>PaddleOCR VL</source>
-        <translation>PaddleOCR VL</translation>
-    </message>
-    <message>
-        <source>HunyuanOCR</source>
-        <translation>HunyuanOCR</translation>
-    </message>
-    <message>
-        <source>Default</source>
-        <translation>기본값</translation>
-    </message>
-    <message>
         <source>Custom Service</source>
         <translation>사용자 지정 서비스</translation>
     </message>
@@ -2250,6 +2288,34 @@ It may have been moved, renamed, or deleted.
 </context>
 <context>
     <name>self.ui</name>
+    <message>
+        <source>Default</source>
+        <translation>기본값</translation>
+    </message>
+    <message>
+        <source>Optimal (HunyuanOCR / PaddleOCR VL)</source>
+        <translation>최적값 (HunyuanOCR / PaddleOCR VL)</translation>
+    </message>
+    <message>
+        <source>Microsoft OCR</source>
+        <translation type="unfinished">Microsoft OCR</translation>
+    </message>
+    <message>
+        <source>Google Cloud Vision</source>
+        <translation type="unfinished">Google Cloud Vision</translation>
+    </message>
+    <message>
+        <source>Gemini-2.0-Flash</source>
+        <translation type="unfinished">Gemini-2.0-Flash</translation>
+    </message>
+    <message>
+        <source>PaddleOCR VL</source>
+        <translation type="unfinished">PaddleOCR VL</translation>
+    </message>
+    <message>
+        <source>HunyuanOCR</source>
+        <translation type="unfinished">HunyuanOCR</translation>
+    </message>
     <message>
         <source>Resize</source>
         <translation>크기 조정</translation>
