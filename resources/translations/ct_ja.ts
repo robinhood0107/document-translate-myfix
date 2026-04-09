@@ -876,10 +876,6 @@ Install it to use PSD features.</source>
         <translation>プロジェクトファイル</translation>
     </message>
     <message>
-        <source>PSD File</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
         <source>Save Currently Loaded Image</source>
         <translation>現在ロードされている画像を保存</translation>
     </message>

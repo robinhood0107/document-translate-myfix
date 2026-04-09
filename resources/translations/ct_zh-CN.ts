@@ -875,10 +875,6 @@ Install it to use PSD features.</source>
         <translation>项目文件</translation>
     </message>
     <message>
-        <source>PSD File</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
         <source>Save Currently Loaded Image</source>
         <translation>保存当前加载的图片</translation>
     </message>
