@@ -16,8 +16,12 @@ from modules.detection.processor import TextBlockDetector
 from modules.translation.processor import Translator
 from modules.utils.textblock import sort_blk_list
 from modules.utils.pipeline_config import inpaint_map, get_config
-from modules.utils.image_utils import generate_mask
-from modules.utils.inpaint_cleanup import refine_bubble_residue_inpaint
+from modules.utils.inpaint_cleanup import refine_automatic_inpaint_result
+from modules.utils.inpaint_quality import (
+    build_automatic_inpaint_config,
+    build_inpaint_mask_bundle,
+    export_automatic_inpaint_debug_artifacts,
+)
 from modules.utils.language_utils import get_language_code, is_no_space_lang
 from modules.utils.ocr_quality import summarize_ocr_quality
 from modules.utils.ocr_debug import export_ocr_debug_artifacts
@@ -213,6 +217,35 @@ class BatchProcessor:
         renderer.save_image(output_path)
         return output_path
 
+    def _write_inpaint_debug_export(
+        self,
+        directory: str,
+        timestamp: str,
+        archive_bname: str,
+        image_path: str,
+        original_image,
+        cleaned_image,
+        bundle,
+        inpaint_summary: dict,
+    ) -> None:
+        page_base_name = os.path.splitext(os.path.basename(image_path))[0]
+        path = os.path.join(
+            directory,
+            f"comic_translate_{timestamp}",
+            "inpaint_debugs",
+            archive_bname,
+        )
+        export_automatic_inpaint_debug_artifacts(
+            path,
+            page_base_name,
+            original_image,
+            cleaned_image,
+            bundle,
+            inpaint_summary.get("cleanup_mask"),
+            inpaint_summary.get("retry_records", []),
+            inpaint_summary,
+        )
+
     def _ensure_page_state(self, image_path: str) -> dict:
         return self.main_page.image_ctrl.ensure_page_state(image_path)
 
@@ -230,6 +263,38 @@ class BatchProcessor:
                 }
             )
         return rects
+
+    def _persist_inpaint_state(
+        self,
+        image_path: str,
+        bundle,
+        inpaint_summary: dict,
+        patch_count: int,
+    ) -> None:
+        self.main_page.image_ctrl.update_processing_summary(
+            image_path,
+            {
+                "inpaint_summary": {
+                    "artifact_retry_count": int(inpaint_summary.get("artifact_retry_count", 0)),
+                    "artifact_retry_blocks": list(inpaint_summary.get("artifact_retry_blocks", [])),
+                    "bubble_cleanup_applied": bool(inpaint_summary.get("bubble_cleanup_applied", False)),
+                    "protect_mask_violation_ratio": float(inpaint_summary.get("protect_mask_violation_ratio", 0.0)),
+                    "residual_text_component_count": int(inpaint_summary.get("residual_text_component_count", 0)),
+                    "inpaint_region_kind_counts": dict(bundle.summary.get("inpaint_region_kind_counts", {})),
+                    "review_flag_count": int(inpaint_summary.get("review_flag_count", 0)),
+                    "review_flagged_blocks": list(inpaint_summary.get("review_flagged_blocks", [])),
+                    "mask_coverage_ratio": float(bundle.summary.get("mask_coverage_ratio", 0.0)),
+                },
+            },
+        )
+        self.main_page.image_ctrl.mark_processing_stage(
+            image_path,
+            "inpaint",
+            "completed",
+            patch_count=patch_count,
+            artifact_retry_count=int(inpaint_summary.get("artifact_retry_count", 0)),
+            review_flag_count=int(inpaint_summary.get("review_flag_count", 0)),
+        )
 
     def _start_page_summary(self, image_path: str, source_lang: str, target_lang: str) -> None:
         state = self._ensure_page_state(image_path)
@@ -666,47 +731,54 @@ class BatchProcessor:
 
             # Clean Image of text
 
-            # Use the shared inpainter from the handler
-            if self.inpainting.inpainter_cache is None or self.inpainting.cached_inpainter_key != settings_page.get_tool_selection('inpainter'):
+            inpainter_key = settings_page.get_tool_selection('inpainter')
+            if self.inpainting.inpainter_cache is None or self.inpainting.cached_inpainter_key != inpainter_key:
                 backend = 'onnx'
                 device = resolve_device(
                     settings_page.is_gpu_enabled(),
                     backend=backend
                 )
-                inpainter_key = settings_page.get_tool_selection('inpainter')
-                InpainterClass = inpaint_map[inpainter_key]
                 logger.info("pre-inpaint: initializing inpainter '%s' on device %s", inpainter_key, device)
                 t0 = time.time()
-                self.inpainting.inpainter_cache = InpainterClass(device, backend=backend)
-                self.inpainting.cached_inpainter_key = inpainter_key
+                self.inpainting.get_inpainter(inpainter_key)
                 t1 = time.time()
                 logger.info("pre-inpaint: inpainter initialized in %.2fs", t1 - t0)
 
             config = get_config(settings_page)
             logger.info("pre-inpaint: generating mask (blk_list=%d blocks)", len(blk_list))
             t0 = time.time()
-            mask = generate_mask(image, blk_list)
+            mask_bundle = build_inpaint_mask_bundle(image, blk_list)
             t1 = time.time()
-            logger.info("pre-inpaint: mask generated in %.2fs (mask shape=%s)", t1 - t0, getattr(mask, 'shape', None))
+            logger.info(
+                "pre-inpaint: mask generated in %.2fs (mask shape=%s regions=%s)",
+                t1 - t0,
+                getattr(mask_bundle.mask, 'shape', None),
+                mask_bundle.summary.get("inpaint_region_kind_counts", {}),
+            )
+            auto_config = build_automatic_inpaint_config(config, mask_bundle)
 
             self.emit_progress(index, total_images, 4, 10, False)
             if self._is_cancelled():
                 return
 
-            inpaint_input_img = self.inpainting.inpainter_cache(image, mask, config)
+            primary_inpainter = self.inpainting.inpainter_cache
+            inpaint_input_img = primary_inpainter(image, mask_bundle.mask, auto_config)
             inpaint_input_img = imk.convert_scale_abs(inpaint_input_img)
-            inpaint_input_img, mask, cleanup_stats = refine_bubble_residue_inpaint(
-                inpaint_input_img,
-                mask,
-                blk_list,
-                self.inpainting.inpainter_cache,
-                config,
+            lama_inpainter = self.inpainting.get_inpainter("LaMa")
+            inpaint_input_img, mask, inpaint_summary = refine_automatic_inpaint_result(
+                original_image=image,
+                inpainted_image=inpaint_input_img,
+                bundle=mask_bundle,
+                blk_list=blk_list,
+                primary_inpainter=primary_inpainter,
+                base_config=auto_config,
+                lama_inpainter=lama_inpainter,
             )
-            if cleanup_stats.get("applied"):
+            if inpaint_summary.get("bubble_cleanup_applied"):
                 logger.info(
                     "pre-inpaint: residue cleanup applied for %d block(s), %d component(s)",
-                    cleanup_stats.get("block_count", 0),
-                    cleanup_stats.get("component_count", 0),
+                    inpaint_summary.get("cleanup_stats", {}).get("block_count", 0),
+                    inpaint_summary.get("cleanup_stats", {}).get("component_count", 0),
                 )
 
             # Saving cleaned image
@@ -720,11 +792,22 @@ class BatchProcessor:
                 if not os.path.exists(path):
                     os.makedirs(path, exist_ok=True)
                 imk.write_image(os.path.join(path, f"{base_name}_cleaned{extension}"), inpaint_input_img)
-            self.main_page.image_ctrl.mark_processing_stage(
+            if export_settings.get("automatic_inpaint_debug_export", False):
+                self._write_inpaint_debug_export(
+                    directory,
+                    export_token,
+                    archive_bname,
+                    image_path,
+                    image,
+                    inpaint_input_img,
+                    mask_bundle,
+                    inpaint_summary,
+                )
+            self._persist_inpaint_state(
                 image_path,
-                "inpaint",
-                "completed",
-                patch_count=len(patches or []),
+                mask_bundle,
+                inpaint_summary,
+                len(patches or []),
             )
             self._emit_benchmark_event(
                 "inpaint_end",
@@ -733,6 +816,8 @@ class BatchProcessor:
                 total_images=total_images,
                 block_count=len(blk_list or []),
                 patch_count=len(patches or []),
+                artifact_retry_count=int(inpaint_summary.get("artifact_retry_count", 0)),
+                review_flag_count=int(inpaint_summary.get("review_flag_count", 0)),
             )
 
             self.emit_progress(index, total_images, 5, 10, False)

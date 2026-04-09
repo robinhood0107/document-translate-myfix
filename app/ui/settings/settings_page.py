@@ -106,6 +106,9 @@ class SettingsPage(QtWidgets.QWidget):
         self.ui.raw_text_checkbox.stateChanged.connect(self._save_settings_if_not_loading)
         self.ui.translated_text_checkbox.stateChanged.connect(self._save_settings_if_not_loading)
         self.ui.inpainted_image_checkbox.stateChanged.connect(self._save_settings_if_not_loading)
+        self.ui.automatic_inpaint_debug_export_checkbox.stateChanged.connect(
+            self._save_settings_if_not_loading
+        )
         self._connect_live_save_signals()
 
     def _save_settings_if_not_loading(self, *_args):
@@ -322,6 +325,7 @@ class SettingsPage(QtWidgets.QWidget):
             "export_raw_text": self.ui.raw_text_checkbox.isChecked(),
             "export_translated_text": self.ui.translated_text_checkbox.isChecked(),
             "export_inpainted_image": self.ui.inpainted_image_checkbox.isChecked(),
+            "automatic_inpaint_debug_export": self.ui.automatic_inpaint_debug_export_checkbox.isChecked(),
             "project_autosave_enabled": autosave_enabled,
             "project_autosave_interval_min": int(self.ui.project_autosave_interval_spinbox.value()),
             "project_autosave_folder": autosave_folder,
@@ -670,6 +674,9 @@ class SettingsPage(QtWidgets.QWidget):
         )
         self.ui.inpainted_image_checkbox.setChecked(
             settings.value("export_inpainted_image", False, type=bool)
+        )
+        self.ui.automatic_inpaint_debug_export_checkbox.setChecked(
+            settings.value("automatic_inpaint_debug_export", False, type=bool)
         )
         autosave_enabled = settings.value("project_autosave_enabled", False, type=bool)
         owner = self.parent()

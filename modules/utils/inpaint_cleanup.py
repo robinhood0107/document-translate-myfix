@@ -7,6 +7,15 @@ import imkit as imk
 import numpy as np
 
 from modules.detection.utils.content import detect_content_in_bbox
+from modules.utils.inpaint_quality import (
+    InpaintMaskBundle,
+    REGION_COLOR_ART_OVERLAY,
+    REGION_MONO_ART_OVERLAY,
+    apply_local_mask_to_global,
+    build_retry_mask,
+    choose_retry_config,
+    score_inpaint_artifact,
+)
 from modules.utils.textblock import TextBlock
 
 logger = logging.getLogger(__name__)
@@ -42,22 +51,19 @@ def _expand_bbox(
     return ex1, ey1, ex2, ey2
 
 
-def refine_bubble_residue_inpaint(
+def build_bubble_cleanup_mask(
     inpainted_image: np.ndarray,
     mask: np.ndarray,
     blk_list: Iterable[TextBlock],
-    inpainter,
-    config,
-) -> tuple[np.ndarray, np.ndarray, dict]:
+) -> tuple[np.ndarray, dict]:
     block_list = list(blk_list or [])
     if (
         inpainted_image is None
         or mask is None
         or not block_list
-        or inpainter is None
         or not np.any(mask)
     ):
-        return inpainted_image, mask, {"applied": False, "component_count": 0, "block_count": 0}
+        return np.zeros_like(mask, dtype=np.uint8), {"applied": False, "component_count": 0, "block_count": 0}
 
     cleanup_zone = imk.dilate(
         (mask > 0).astype(np.uint8) * 255,
@@ -128,20 +134,166 @@ def refine_bubble_residue_inpaint(
             component_count += local_components
 
     if component_count <= 0 or not np.any(cleanup_mask):
-        return inpainted_image, mask, {"applied": False, "component_count": 0, "block_count": 0}
+        return np.zeros_like(mask, dtype=np.uint8), {"applied": False, "component_count": 0, "block_count": 0}
 
     cleanup_mask = imk.dilate(cleanup_mask, np.ones((3, 3), np.uint8), iterations=2)
+    return cleanup_mask, {
+        "applied": True,
+        "component_count": component_count,
+        "block_count": len(touched_blocks),
+        "block_indexes": touched_blocks,
+    }
+
+
+def refine_bubble_residue_inpaint(
+    inpainted_image: np.ndarray,
+    mask: np.ndarray,
+    blk_list: Iterable[TextBlock],
+    inpainter,
+    config,
+) -> tuple[np.ndarray, np.ndarray, dict]:
+    cleanup_mask, stats = build_bubble_cleanup_mask(inpainted_image, mask, blk_list)
+    if not stats.get("applied") or inpainter is None:
+        return inpainted_image, mask, {"applied": False, "component_count": 0, "block_count": 0, "cleanup_mask": cleanup_mask}
+
     refined_image = inpainter(inpainted_image, cleanup_mask, config)
     refined_image = imk.convert_scale_abs(refined_image)
     merged_mask = np.where((mask > 0) | (cleanup_mask > 0), 255, 0).astype(np.uint8)
 
     logger.info(
         "inpaint residue cleanup applied: blocks=%s components=%d",
-        touched_blocks,
-        component_count,
+        stats.get("block_indexes", []),
+        stats.get("component_count", 0),
     )
     return refined_image, merged_mask, {
         "applied": True,
-        "component_count": component_count,
-        "block_count": len(touched_blocks),
+        "component_count": stats.get("component_count", 0),
+        "block_count": stats.get("block_count", 0),
+        "block_indexes": stats.get("block_indexes", []),
+        "cleanup_mask": cleanup_mask,
     }
+
+
+def refine_automatic_inpaint_result(
+    *,
+    original_image: np.ndarray,
+    inpainted_image: np.ndarray,
+    bundle: InpaintMaskBundle,
+    blk_list: Iterable[TextBlock],
+    primary_inpainter,
+    base_config,
+    lama_inpainter=None,
+) -> tuple[np.ndarray, np.ndarray, dict]:
+    refined_image, merged_mask, cleanup_stats = refine_bubble_residue_inpaint(
+        inpainted_image,
+        bundle.mask,
+        blk_list,
+        primary_inpainter,
+        base_config,
+    )
+
+    retry_records: list[dict] = []
+    review_flagged_blocks: list[int] = []
+    cleanup_blocks = {
+        int(idx)
+        for idx in cleanup_stats.get("block_indexes", [])
+        if isinstance(idx, (int, np.integer))
+    }
+
+    for plan in bundle.plans:
+        x1, y1, x2, y2 = plan.roi
+        crop = refined_image[y1:y2, x1:x2]
+        artifact_score = score_inpaint_artifact(
+            crop,
+            plan.erase_mask_local,
+            protect_mask_local=plan.protect_mask_local,
+        )
+        severe_artifact = (
+            float(artifact_score.get("residual_component_count", 0.0)) > 0.0
+            or (
+                float(artifact_score.get("inner_std", 0.0))
+                > max(
+                    float(artifact_score.get("ring_std", 0.0)) * 1.6,
+                    float(artifact_score.get("ring_std", 0.0)) + 12.0,
+                )
+                and float(artifact_score.get("inner_edge_density", 0.0))
+                > max(
+                    float(artifact_score.get("ring_edge_density", 0.0)) * 2.1,
+                    float(artifact_score.get("ring_edge_density", 0.0)) + 0.08,
+                )
+            )
+        )
+        residual_component_count = int(artifact_score.get("residual_component_count", 0.0))
+        should_retry = (
+            plan.block_index in cleanup_blocks
+            and severe_artifact
+            and 0 < residual_component_count <= 3
+        )
+        if plan.review_flag:
+            review_flagged_blocks.append(plan.block_index)
+
+        if plan.region_kind in {REGION_MONO_ART_OVERLAY, REGION_COLOR_ART_OVERLAY}:
+            should_retry = False
+
+        if not should_retry:
+            retry_records.append(
+                {
+                    "block_index": plan.block_index,
+                    "region_kind": plan.region_kind,
+                    "roi": list(plan.roi),
+                    "artifact_score": artifact_score,
+                    "applied": False,
+                }
+            )
+            continue
+
+        retry_inpainter = lama_inpainter or primary_inpainter
+        local_retry_mask = build_retry_mask(plan)
+        global_retry_mask = apply_local_mask_to_global(bundle.mask.shape, local_retry_mask, plan.roi)
+        protect_mask = apply_local_mask_to_global(bundle.mask.shape, plan.protect_mask_local, plan.roi)
+        retry_config = choose_retry_config(base_config, plan.region_kind, protect_mask=protect_mask)
+        retried = retry_inpainter(refined_image, global_retry_mask, retry_config)
+        refined_image = imk.convert_scale_abs(retried)
+        merged_mask = np.where((merged_mask > 0) | (global_retry_mask > 0), 255, 0).astype(np.uint8)
+        retry_records.append(
+            {
+                "block_index": plan.block_index,
+                "region_kind": plan.region_kind,
+                "roi": list(plan.roi),
+                "artifact_score": artifact_score,
+                "applied": True,
+                "local_mask": local_retry_mask,
+            }
+        )
+
+        if plan.region_kind in {REGION_MONO_ART_OVERLAY, REGION_COLOR_ART_OVERLAY}:
+            review_flagged_blocks.append(plan.block_index)
+
+    if review_flagged_blocks:
+        review_flagged_blocks = sorted(set(review_flagged_blocks))
+
+    summary = {
+        "bubble_cleanup_applied": bool(cleanup_stats.get("applied")),
+        "artifact_retry_count": int(sum(1 for record in retry_records if record.get("applied"))),
+        "artifact_retry_blocks": [
+            {
+                "block_index": int(record["block_index"]),
+                "region_kind": str(record["region_kind"]),
+            }
+            for record in retry_records
+            if record.get("applied")
+        ],
+        "protect_mask_violation_ratio": float(
+            max((plan.protect_overlap_ratio for plan in bundle.plans), default=0.0)
+        ),
+        "residual_text_component_count": int(
+            sum(int(record.get("artifact_score", {}).get("residual_component_count", 0)) for record in retry_records)
+        ),
+        "review_flag_count": int(len(review_flagged_blocks)),
+        "review_flagged_blocks": review_flagged_blocks,
+        "inpaint_region_kind_counts": bundle.summary.get("inpaint_region_kind_counts", {}),
+        "cleanup_stats": cleanup_stats,
+        "retry_records": retry_records,
+        "cleanup_mask": cleanup_stats.get("cleanup_mask"),
+    }
+    return refined_image, merged_mask, summary

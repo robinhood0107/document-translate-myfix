@@ -44,6 +44,8 @@ class Config:
     # If the longer side of the image is larger than this value, use crop strategy
     hd_strategy_crop_trigger_size: int = 512
     hd_strategy_resize_limit: int = 512
+    mask_feather_radius: int = 0
+    protect_mask: Optional[object] = None
 
     # # Configs for ldm model
     # ldm_steps: int = 2

@@ -337,6 +337,10 @@ Use Custom Local Server(Gemma) with the included Gemma Docker setup.</source>
         <source>Export Inpainted Image</source>
         <translation>인페인팅된 이미지 내보내기</translation>
     </message>
+    <message>
+        <source>Export Automatic Inpaint Debug</source>
+        <translation>자동 인페인트 디버그 내보내기</translation>
+    </message>
 </context>
 <context>
     <name>GemmaLocalServerPage</name>

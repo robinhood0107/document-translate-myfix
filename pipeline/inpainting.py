@@ -18,17 +18,24 @@ class InpaintingHandler:
         self.main_page = main_page
         self.inpainter_cache = None
         self.cached_inpainter_key = None
+        self._inpainter_cache_by_key = {}
 
-    def _ensure_inpainter(self):
+    def get_inpainter(self, inpainter_key: str | None = None):
         settings_page = self.main_page.settings_page
-        inpainter_key = settings_page.get_tool_selection('inpainter')
-        if self.inpainter_cache is None or self.cached_inpainter_key != inpainter_key:
+        inpainter_key = inpainter_key or settings_page.get_tool_selection('inpainter')
+        cached = self._inpainter_cache_by_key.get(inpainter_key)
+        if cached is None:
             backend = 'onnx'
             device = resolve_device(settings_page.is_gpu_enabled(), backend)
             InpainterClass = inpaint_map[inpainter_key]
-            self.inpainter_cache = InpainterClass(device, backend=backend)
-            self.cached_inpainter_key = inpainter_key
-        return self.inpainter_cache
+            cached = InpainterClass(device, backend=backend)
+            self._inpainter_cache_by_key[inpainter_key] = cached
+        self.inpainter_cache = cached
+        self.cached_inpainter_key = inpainter_key
+        return cached
+
+    def _ensure_inpainter(self):
+        return self.get_inpainter()
 
     def manual_inpaint(self):
         image_viewer = self.main_page.image_viewer

@@ -18,11 +18,15 @@ class ExportPage(QtWidgets.QWidget):
         self.raw_text_checkbox = MCheckBox(self.tr("Export Raw Text"))
         self.translated_text_checkbox = MCheckBox(self.tr("Export Translated text"))
         self.inpainted_image_checkbox = MCheckBox(self.tr("Export Inpainted Image"))
+        self.automatic_inpaint_debug_export_checkbox = MCheckBox(
+            self.tr("Export Automatic Inpaint Debug")
+        )
 
         layout.addWidget(batch_label)
         layout.addWidget(batch_note)
         layout.addWidget(self.raw_text_checkbox)
         layout.addWidget(self.translated_text_checkbox)
         layout.addWidget(self.inpainted_image_checkbox)
+        layout.addWidget(self.automatic_inpaint_debug_export_checkbox)
 
         layout.addStretch(1)

@@ -1,4 +1,5 @@
 import abc
+import copy
 from typing import Optional
 
 import numpy as np
@@ -15,6 +16,7 @@ from ..utils.inpainting import (
     pad_img_to_modulo,
     # switch_mps_device,
 )
+from ..utils.inpaint_quality import composite_inpaint_result
 from .schema import Config, HDStrategy
 
 
@@ -67,10 +69,13 @@ class InpaintModel:
         result = result[0:origin_height, 0:origin_width, :]
 
         result, image, mask = self.forward_post_process(result, image, mask, config)
-
-        mask = mask[:, :, np.newaxis]
-        result = result * (mask / 255) + image * (1 - (mask / 255))
-        return result
+        return composite_inpaint_result(
+            result,
+            image,
+            mask,
+            feather_radius=int(getattr(config, "mask_feather_radius", 0) or 0),
+            protect_mask=getattr(config, "protect_mask", None),
+        )
 
     def forward_post_process(self, result, image, mask, config):
         return result, image, mask
@@ -131,10 +136,13 @@ class InpaintModel:
                         (origin_size[1], origin_size[0]),
                         mode=Image.Resampling.BICUBIC,
                     )
-                    original_pixel_indices = mask < 127
-                    inpaint_result[original_pixel_indices] = image[
-                        original_pixel_indices
-                    ]
+                    inpaint_result = composite_inpaint_result(
+                        inpaint_result,
+                        image,
+                        mask,
+                        feather_radius=int(getattr(config, "mask_feather_radius", 0) or 0),
+                        protect_mask=getattr(config, "protect_mask", None),
+                    )
 
             if inpaint_result is None:
                 inpaint_result = self._pad_forward(image, mask, config)
@@ -265,8 +273,11 @@ class InpaintModel:
             BGR IMAGE
         """
         crop_img, crop_mask, [l, t, r, b] = self._crop_box(image, mask, box, config)
-
-        return self._pad_forward(crop_img, crop_mask, config), [l, t, r, b]
+        crop_config = copy.copy(config)
+        protect_mask = getattr(config, "protect_mask", None)
+        if protect_mask is not None and getattr(protect_mask, "shape", None) == mask.shape:
+            crop_config.protect_mask = protect_mask[t:b, l:r]
+        return self._pad_forward(crop_img, crop_mask, crop_config), [l, t, r, b]
 
 
 class DiffusionInpaintModel(InpaintModel):
