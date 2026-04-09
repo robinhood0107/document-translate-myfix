@@ -60,7 +60,13 @@ def normalize_ocr_mode(value: str | None) -> str:
 
 def is_chinese_source_language(source_lang_english: str | None) -> bool:
     normalized = str(source_lang_english or "").strip().casefold()
-    return normalized in {"chinese", "simplified chinese", "traditional chinese"}
+    return normalized in {
+        "chinese",
+        "simplified chinese",
+        "traditional chinese",
+        "chinese (simplified)",
+        "chinese (traditional)",
+    }
 
 
 def resolve_ocr_engine(mode: str | None, source_lang_english: str | None) -> str:

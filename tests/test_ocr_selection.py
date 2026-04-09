@@ -21,6 +21,10 @@ class OCRSelectionTests(unittest.TestCase):
     def test_best_local_routes_chinese_to_hunyuan(self) -> None:
         self.assertEqual(resolve_ocr_engine(OCR_MODE_BEST_LOCAL, "Chinese"), "HunyuanOCR")
 
+    def test_best_local_routes_parenthesized_chinese_variants_to_hunyuan(self) -> None:
+        self.assertEqual(resolve_ocr_engine(OCR_MODE_BEST_LOCAL, "Chinese (Simplified)"), "HunyuanOCR")
+        self.assertEqual(resolve_ocr_engine(OCR_MODE_BEST_LOCAL, "Chinese (Traditional)"), "HunyuanOCR")
+
     def test_best_local_routes_japanese_to_paddle(self) -> None:
         self.assertEqual(resolve_ocr_engine(OCR_MODE_BEST_LOCAL, "Japanese"), "PaddleOCR VL")
 
