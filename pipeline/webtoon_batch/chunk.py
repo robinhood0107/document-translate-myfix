@@ -201,9 +201,9 @@ class ChunkMixin:
         image: np.ndarray,
         blocks: List[TextBlock],
         image_path: str | None = None,
-    ) -> Tuple[Optional[np.ndarray], Optional[np.ndarray]]:
+    ) -> Tuple[Optional[np.ndarray], Optional[np.ndarray], Optional[np.ndarray], dict, List[TextBlock]]:
         if not blocks:
-            return None, None
+            return None, None, None, {"applied": False, "component_count": 0, "block_count": 0}, []
         self._emit_benchmark_event(
             "inpaint_start",
             image_path=image_path,
@@ -240,10 +240,11 @@ class ChunkMixin:
                 mask_block.text = " "
             mask_blocks.append(mask_block)
         if not mask_blocks:
-            return None, None
+            return None, None, None, {"applied": False, "component_count": 0, "block_count": 0}, []
         mask = generate_mask(image, mask_blocks)
         if mask is None or not np.any(mask):
-            return None, None
+            return None, None, None, {"applied": False, "component_count": 0, "block_count": 0}, mask_blocks
+        raw_mask = np.where(mask > 0, 255, 0).astype(np.uint8)
         inpainted = self.inpainting.inpainter_cache(image, mask, config)
         inpainted = imk.convert_scale_abs(inpainted)
         inpainted, mask, cleanup_stats = refine_bubble_residue_inpaint(
@@ -267,7 +268,7 @@ class ChunkMixin:
             cleanup_block_count=cleanup_stats.get("block_count", 0),
             cleanup_component_count=cleanup_stats.get("component_count", 0),
         )
-        return mask, inpainted
+        return raw_mask, mask, inpainted, cleanup_stats, mask_blocks
 
     def _extract_page_patches_from_mask(
         self: WebtoonBatchProcessor,
@@ -539,7 +540,7 @@ class ChunkMixin:
         # OCR has already been performed by the unified per-current-record pass.
         processed_local_blocks = seam_blocks_local
 
-        mask, inpainted_crop = self._inpaint_image_with_blocks(
+        _raw_mask, mask, inpainted_crop, _cleanup_stats, _mask_blocks = self._inpaint_image_with_blocks(
             seam_crop,
             processed_local_blocks,
             image_path=top_record["path"],
