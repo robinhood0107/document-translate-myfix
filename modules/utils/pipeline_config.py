@@ -2,12 +2,14 @@ from __future__ import annotations
 
 from PySide6.QtCore import QCoreApplication
 from typing import TYPE_CHECKING
+from modules.ocr.selection import resolve_ocr_engine
 from modules.inpainting.lama import LaMa
 from modules.inpainting.mi_gan import MIGAN
 from modules.inpainting.aot import AOT
 from modules.inpainting.schema import Config
 from app.ui.messages import Messages
 from app.ui.settings.settings_page import SettingsPage
+from modules.utils.exceptions import LocalServiceSetupError
 
 if TYPE_CHECKING:
     from controller import ComicTranslate
@@ -73,17 +75,18 @@ def _show_missing_credentials(main: ComicTranslate, provider_name: str, missing_
     field_text = ", ".join(FIELD_LABELS.get(field, field) for field in missing_fields)
     Messages.show_missing_credentials_error(main, provider_name, field_text)
 
-def validate_ocr(main: ComicTranslate):
+def validate_ocr(main: ComicTranslate, source_lang: str | None = None):
     """Ensure the selected OCR tool has the credentials it needs."""
     settings_page = main.settings_page
-    settings = settings_page.get_all_settings()
-    ocr_tool = settings['tools']['ocr']
+    ocr_tool = settings_page.get_tool_selection("ocr")
 
     if not ocr_tool:
         Messages.show_missing_tool_error(main, QCoreApplication.translate("Messages", "Text Recognition model"))
         return False
 
-    normalized_tool = settings_page.ui.value_mappings.get(ocr_tool, ocr_tool)
+    source_lang = source_lang or main.s_combo.currentText()
+    source_lang_english = main.lang_mapping.get(source_lang, source_lang)
+    normalized_tool = resolve_ocr_engine(ocr_tool, source_lang_english)
     if normalized_tool in {"PaddleOCR VL", "HunyuanOCR"}:
         local_service_configs = {
             "PaddleOCR VL": (
@@ -104,6 +107,17 @@ def validate_ocr(main: ComicTranslate):
                 service_name,
                 FIELD_LABELS["server_url"],
                 settings_page_name=settings_page_name,
+            )
+            return False
+        try:
+            main.local_ocr_runtime_manager.validate_engine(normalized_tool, settings_page)
+        except LocalServiceSetupError as exc:
+            Messages.show_local_service_error(
+                main,
+                details=str(exc),
+                service_name=service_name,
+                settings_page_name=settings_page_name,
+                error_kind="setup",
             )
             return False
         return True
@@ -157,8 +171,8 @@ def font_selected(main: ComicTranslate):
         return False
     return True
 
-def validate_settings(main: ComicTranslate, target_lang: str):
-    if not validate_ocr(main):
+def validate_settings(main: ComicTranslate, target_lang: str, source_lang: str | None = None):
+    if not validate_ocr(main, source_lang=source_lang):
         return False
     if not validate_translator(main, target_lang):
         return False

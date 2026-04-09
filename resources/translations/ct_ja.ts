@@ -27,6 +27,14 @@
         <translation>エラー</translation>
     </message>
     <message>
+        <source>One-Page Auto</source>
+        <translation type="unfinished">現在ページを自動処理</translation>
+    </message>
+    <message>
+        <source>Translate All</source>
+        <translation type="unfinished">すべて翻訳</translation>
+    </message>
+    <message>
         <source>No failed pages from the latest batch are available to retry.</source>
         <translation>最新の一括処理で再試行できる失敗ページはありません。</translation>
     </message>
@@ -379,6 +387,7 @@ If responses are truncated, lower Chunk Size or increase LLAMA_CTX_SIZE in docke
     <message>
         <source>Connect Comic Translate to your local HunyuanOCR llama.cpp server.
 This OCR engine sends cropped text regions to the OpenAI-compatible /chat/completions endpoint.
+Keep the default localhost URL if you want Comic Translate to start the bundled Docker runtime on demand.
 Start the server with both the HunyuanOCR GGUF model and the matching mmproj file.</source>
         <translation type="unfinished"></translation>
     </message>
@@ -717,9 +726,54 @@ Check Settings &gt; {settings_page} and review the local service logs.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
+        <source>Unable to prepare the local {service} runtime.
+Check Settings &gt; {settings_page} and make sure Docker is available.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
         <source>Unable to reach the local {service} service.
 Check Settings &gt; {settings_page} and make sure the local service is running.</source>
         <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Confirm Automatic Processing</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Review the automatic processing settings before starting.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Run: {run_label}</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Pages: {page_count}</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Source Language: {source_lang}</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Target Language: {target_lang}</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Text Recognition Mode: {ocr_mode}</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Resolved Text Recognition: {ocr_engine}</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Start</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Cancel</source>
+        <translation type="unfinished">キャンセル</translation>
     </message>
     <message>
         <source>Text Recognition blocked: The AI provider flagged this content.
@@ -899,6 +953,7 @@ Install it to use PSD features.</source>
     <message>
         <source>Connect Comic Translate to your local PaddleOCR VL Docker service.
 This OCR engine sends cropped text regions to the /layout-parsing endpoint.
+Keep the default localhost URL if you want Comic Translate to start the bundled Docker runtime on demand.
 Leave markdown or visualization options disabled unless you need debugging.</source>
         <translation type="unfinished"></translation>
     </message>
@@ -1238,10 +1293,6 @@ Restart now?</source>
 <context>
     <name>SettingsPageUI</name>
     <message>
-        <source>Default</source>
-        <translation>デフォルト</translation>
-    </message>
-    <message>
         <source>Microsoft OCR</source>
         <translation>マイクロソフトOCR</translation>
     </message>
@@ -1363,6 +1414,14 @@ Restart now?</source>
     </message>
     <message>
         <source>Claude-4.6-Sonnet</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Default (existing auto: MangaOCR / PPOCR / Pororo...)</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Optimal (HunyuanOCR / PaddleOCR VL)</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
@@ -2120,30 +2179,6 @@ It may have been moved, renamed, or deleted.
         <translation>GPT-4.1-ミニ</translation>
     </message>
     <message>
-        <source>Microsoft OCR</source>
-        <translation>マイクロソフトOCR</translation>
-    </message>
-    <message>
-        <source>Google Cloud Vision</source>
-        <translation>Googleクラウドビジョン</translation>
-    </message>
-    <message>
-        <source>Gemini-2.0-Flash</source>
-        <translation>Gemini-2.0-フラッシュ</translation>
-    </message>
-    <message>
-        <source>PaddleOCR VL</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>HunyuanOCR</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Default</source>
-        <translation>デフォルト</translation>
-    </message>
-    <message>
         <source>Custom Service</source>
         <translation type="unfinished"></translation>
     </message>
@@ -2201,6 +2236,34 @@ It may have been moved, renamed, or deleted.
 </context>
 <context>
     <name>self.ui</name>
+    <message>
+        <source>Default</source>
+        <translation type="unfinished">デフォルト</translation>
+    </message>
+    <message>
+        <source>Optimal (HunyuanOCR / PaddleOCR VL)</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Microsoft OCR</source>
+        <translation type="unfinished">マイクロソフトOCR</translation>
+    </message>
+    <message>
+        <source>Google Cloud Vision</source>
+        <translation type="unfinished">Googleクラウドビジョン</translation>
+    </message>
+    <message>
+        <source>Gemini-2.0-Flash</source>
+        <translation type="unfinished">Gemini-2.0-フラッシュ</translation>
+    </message>
+    <message>
+        <source>PaddleOCR VL</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>HunyuanOCR</source>
+        <translation type="unfinished"></translation>
+    </message>
     <message>
         <source>Resize</source>
         <translation>サイズ変更</translation>

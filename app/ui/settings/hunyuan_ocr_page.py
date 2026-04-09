@@ -32,6 +32,7 @@ class HunyuanOCRPage(QtWidgets.QWidget):
             self.tr(
                 "Connect Comic Translate to your local HunyuanOCR llama.cpp server.\n"
                 "This OCR engine sends cropped text regions to the OpenAI-compatible /chat/completions endpoint.\n"
+                "Keep the default localhost URL if you want Comic Translate to start the bundled Docker runtime on demand.\n"
                 "Start the server with both the HunyuanOCR GGUF model and the matching mmproj file."
             )
         ).secondary()

@@ -51,6 +51,17 @@ class ImageStateController:
         state.setdefault('skip', False)
         return state
 
+    def apply_languages_to_paths(
+        self,
+        paths: list[str],
+        source_lang: str,
+        target_lang: str,
+    ) -> None:
+        for file_path in paths or []:
+            state = self.ensure_page_state(file_path)
+            state["source_lang"] = source_lang
+            state["target_lang"] = target_lang
+
     def _default_export_group_name(self, file_path: str) -> str:
         state = self.main.image_states.get(file_path, {})
         group_name = str(state.get("export_group_name", "")).strip()

@@ -25,6 +25,7 @@ class PaddleOCRVLPage(QtWidgets.QWidget):
             self.tr(
                 "Connect Comic Translate to your local PaddleOCR VL Docker service.\n"
                 "This OCR engine sends cropped text regions to the /layout-parsing endpoint.\n"
+                "Keep the default localhost URL if you want Comic Translate to start the bundled Docker runtime on demand.\n"
                 "Leave markdown or visualization options disabled unless you need debugging."
             )
         ).secondary()

@@ -7,6 +7,18 @@ from PySide6 import QtGui, QtWidgets
 from PySide6.QtCore import QSettings, QTimer, Qt, Signal
 from PySide6.QtGui import QFont, QFontDatabase
 
+from modules.ocr.selection import (
+    OCR_DEFAULT_LABEL,
+    OCR_MODE_BEST_LOCAL,
+    OCR_MODE_DEFAULT,
+    OCR_MODE_GEMINI,
+    OCR_MODE_GOOGLE,
+    OCR_MODE_HUNYUAN,
+    OCR_MODE_MICROSOFT,
+    OCR_MODE_PADDLE_VL,
+    OCR_OPTIMAL_LABEL,
+    normalize_ocr_mode,
+)
 from .settings_ui import SettingsPageUI
 from .gemma_local_server_page import GemmaLocalServerPage
 from .hunyuan_ocr_page import HunyuanOCRPage
@@ -187,7 +199,57 @@ class SettingsPage(QtWidgets.QWidget):
             "inpainter": self.ui.inpainter_combo,
             "detector": self.ui.detector_combo,
         }
+        combo = tool_combos[tool_type]
+        if tool_type == "ocr":
+            current_data = combo.currentData()
+            if isinstance(current_data, str) and current_data.strip():
+                return self._normalize_ocr_mode_value(current_data)
+            return self._normalize_ocr_mode_value(combo.currentText())
+        return combo.currentText()
+
+    def get_tool_display_text(self, tool_type: str) -> str:
+        tool_combos = {
+            "translator": self.ui.translator_combo,
+            "ocr": self.ui.ocr_combo,
+            "inpainter": self.ui.inpainter_combo,
+            "detector": self.ui.detector_combo,
+        }
         return tool_combos[tool_type].currentText()
+
+    def get_ocr_mode_label(self, mode_key: str | None = None) -> str:
+        normalized = self._normalize_ocr_mode_value(mode_key or self.get_tool_selection("ocr"))
+        index = self.ui.ocr_combo.findData(normalized)
+        if index != -1:
+            return self.ui.ocr_combo.itemText(index)
+        return normalized
+
+    def _normalized_ocr_aliases(self) -> dict[str, str]:
+        return {
+            self.ui.tr("Default"): OCR_MODE_DEFAULT,
+            self.ui.tr(OCR_DEFAULT_LABEL): OCR_MODE_DEFAULT,
+            self.ui.tr("Optimal (HunyuanOCR / PaddleOCR VL)"): OCR_MODE_BEST_LOCAL,
+            self.ui.tr(OCR_OPTIMAL_LABEL): OCR_MODE_BEST_LOCAL,
+            self.ui.tr("Microsoft OCR"): OCR_MODE_MICROSOFT,
+            self.ui.tr("Google Cloud Vision"): OCR_MODE_GOOGLE,
+            self.ui.tr("Gemini-2.0-Flash"): OCR_MODE_GEMINI,
+            self.ui.tr("PaddleOCR VL"): OCR_MODE_PADDLE_VL,
+            self.ui.tr("HunyuanOCR"): OCR_MODE_HUNYUAN,
+        }
+
+    def _normalize_ocr_mode_value(self, raw_value: str | None) -> str:
+        raw = str(raw_value or "").strip()
+        if not raw:
+            return OCR_MODE_DEFAULT
+        return normalize_ocr_mode(self._normalized_ocr_aliases().get(raw, raw))
+
+    def _set_ocr_mode(self, raw_value: str | None) -> None:
+        normalized = self._normalize_ocr_mode_value(raw_value)
+        index = self.ui.ocr_combo.findData(normalized)
+        if index != -1:
+            self.ui.ocr_combo.setCurrentIndex(index)
+            return
+        fallback = self.ui.ocr_combo.findData(OCR_MODE_DEFAULT)
+        self.ui.ocr_combo.setCurrentIndex(fallback if fallback != -1 else 0)
 
     def is_gpu_enabled(self):
         if not is_gpu_available():
@@ -467,12 +529,8 @@ class SettingsPage(QtWidgets.QWidget):
             self.ui.translator_combo.setCurrentIndex(-1)
         self._sync_extra_context_limit(translated_translator)
 
-        ocr = settings.value("ocr", "Default")
-        translated_ocr = self.ui.reverse_mappings.get(ocr, ocr)
-        if self.ui.ocr_combo.findText(translated_ocr) != -1:
-            self.ui.ocr_combo.setCurrentText(translated_ocr)
-        else:
-            self.ui.ocr_combo.setCurrentIndex(-1)
+        ocr = settings.value("ocr", OCR_MODE_DEFAULT, type=str)
+        self._set_ocr_mode(ocr)
 
         inpainter = settings.value("inpainter", "AOT")
         translated_inpainter = self.ui.reverse_mappings.get(inpainter, inpainter)
