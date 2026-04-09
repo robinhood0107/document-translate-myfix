@@ -28,17 +28,19 @@
   - `develop`에서 분기 후 안정화
   - 검증 후 `main`에 병합하고, 다시 `develop`에도 반영
 - 작업 브랜치
-  - `codex/feature/<slug>`
-  - `codex/fix/<slug>`
-  - `codex/chore/<slug>`
-  - `codex/hotfix/<slug>`
+  - `feature/<slug>`
+  - `fix/<slug>`
+  - `chore/<slug>`
+  - `hotfix/<slug>`
   - `benchmarking/lab`
+
+`codex/` 접두사는 더 이상 사용하지 않는다.
 
 ### 병합 대상
 
-- 일반 기능/수정: `codex/*` -> `develop`
+- 일반 기능/수정: `feature/*`, `fix/*`, `chore/*` -> `develop`
 - 릴리스: `release/<version>` -> `main`, 이후 `develop` 백머지
-- 긴급 수정: `codex/hotfix/<slug>` -> `main`, 이후 `develop` 백머지
+- 긴급 수정: `hotfix/<slug>` -> `main`, 이후 `develop` 백머지
 - 벤치마크 실험/리포트: `benchmarking/lab`에서만 유지
 
 ## 2-1. 벤치마크 자산 규칙
@@ -55,7 +57,7 @@
   - architecture
   - results history
   - generated/latest report
-- benchmark 자산은 `benchmarking/lab`에만 두고, 제품 반영은 별도 `codex/* -> develop` PR로 승격한다.
+- benchmark 자산은 `benchmarking/lab`에만 두고, 제품 반영은 별도 `feature/*`, `fix/*`, `chore/*` 작업 브랜치 PR로 승격한다.
 
 ## 3. 기능 작업 절차
 
@@ -74,7 +76,7 @@
 ```bash
 git switch develop
 git pull --ff-only origin develop
-git switch -c codex/feature/example-task
+git switch -c feature/example-task
 ```
 
 작업 후:
@@ -86,7 +88,7 @@ python scripts/compile_translations.py --check
 git status
 git add <intended-files>
 git commit -m "feat(workspace): add retry tooltips"
-git push -u origin codex/feature/example-task
+git push -u origin feature/example-task
 ```
 
 ## 4. 커밋 규칙
@@ -203,6 +205,9 @@ CI는 필수다. 다음 항목이 통과해야 병합 가능하다.
 - 헤드리스 스모크 검사
 - 번역 자산 검사
 
+public/free 저장소의 ruleset은 보호 브랜치, PR 강제, 상태 체크, 태그 보호까지를 담당한다.
+브랜치 계열별 base 브랜치 적합성, 금지된 tracked 경로, benchmark 전용 자산 분리는 로컬 훅과 CI 정책 스크립트가 계속 담당한다.
+
 ### CD
 
 현재 저장소에는 설치형 패키징 파이프라인이 커밋되어 있지 않으므로, CD v1은 `릴리스 거버넌스`에 집중한다.
@@ -241,7 +246,7 @@ GitHub 저장소 설정에서 아래를 권장한다.
 
 - `main`과 `develop`에는 benchmark-specific 정책, preset, runner, generated report, chart asset을 두지 않는다.
 - benchmark 실험 도구와 문서는 `benchmarking/lab` 브랜치에서만 관리한다.
-- benchmark 결과를 제품 브랜치에 반영할 때는 `benchmarking/lab`를 직접 merge하지 않고, 필요한 제품 변경만 별도 `codex/*` 브랜치에서 다시 정리해 반영한다.
+- benchmark 결과를 제품 브랜치에 반영할 때는 `benchmarking/lab`를 직접 merge하지 않고, 필요한 제품 변경만 별도 `feature/*`, `fix/*`, `chore/*` 브랜치에서 다시 정리해 반영한다.
 - 제품 코드에는 benchmark를 위해 필요한 최소 계측만 남긴다.
   - 허용: stage hook, retry/truncated/quality 통계 surface, generic memlog/gpu snapshot helper
   - 허용: benchmark로 검증된 제품 기본값 승격
