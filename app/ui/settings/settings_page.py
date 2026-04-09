@@ -106,6 +106,11 @@ class SettingsPage(QtWidgets.QWidget):
         self.ui.raw_text_checkbox.stateChanged.connect(self._save_settings_if_not_loading)
         self.ui.translated_text_checkbox.stateChanged.connect(self._save_settings_if_not_loading)
         self.ui.inpainted_image_checkbox.stateChanged.connect(self._save_settings_if_not_loading)
+        self.ui.detector_overlay_checkbox.stateChanged.connect(self._save_settings_if_not_loading)
+        self.ui.raw_mask_checkbox.stateChanged.connect(self._save_settings_if_not_loading)
+        self.ui.mask_overlay_checkbox.stateChanged.connect(self._save_settings_if_not_loading)
+        self.ui.cleanup_mask_delta_checkbox.stateChanged.connect(self._save_settings_if_not_loading)
+        self.ui.debug_metadata_checkbox.stateChanged.connect(self._save_settings_if_not_loading)
         self._connect_live_save_signals()
 
     def _save_settings_if_not_loading(self, *_args):
@@ -322,6 +327,11 @@ class SettingsPage(QtWidgets.QWidget):
             "export_raw_text": self.ui.raw_text_checkbox.isChecked(),
             "export_translated_text": self.ui.translated_text_checkbox.isChecked(),
             "export_inpainted_image": self.ui.inpainted_image_checkbox.isChecked(),
+            "export_detector_overlay": self.ui.detector_overlay_checkbox.isChecked(),
+            "export_raw_mask": self.ui.raw_mask_checkbox.isChecked(),
+            "export_mask_overlay": self.ui.mask_overlay_checkbox.isChecked(),
+            "export_cleanup_mask_delta": self.ui.cleanup_mask_delta_checkbox.isChecked(),
+            "export_debug_metadata": self.ui.debug_metadata_checkbox.isChecked(),
             "project_autosave_enabled": autosave_enabled,
             "project_autosave_interval_min": int(self.ui.project_autosave_interval_spinbox.value()),
             "project_autosave_folder": autosave_folder,
@@ -670,6 +680,21 @@ class SettingsPage(QtWidgets.QWidget):
         )
         self.ui.inpainted_image_checkbox.setChecked(
             settings.value("export_inpainted_image", False, type=bool)
+        )
+        self.ui.detector_overlay_checkbox.setChecked(
+            settings.value("export_detector_overlay", False, type=bool)
+        )
+        self.ui.raw_mask_checkbox.setChecked(
+            settings.value("export_raw_mask", False, type=bool)
+        )
+        self.ui.mask_overlay_checkbox.setChecked(
+            settings.value("export_mask_overlay", False, type=bool)
+        )
+        self.ui.cleanup_mask_delta_checkbox.setChecked(
+            settings.value("export_cleanup_mask_delta", False, type=bool)
+        )
+        self.ui.debug_metadata_checkbox.setChecked(
+            settings.value("export_debug_metadata", False, type=bool)
         )
         autosave_enabled = settings.value("project_autosave_enabled", False, type=bool)
         owner = self.parent()

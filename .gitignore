@@ -22,6 +22,7 @@ uv.lock
 
 # Test files
 test_*.py
+!tests/test_*.py
 demo_*.py
 
 # Tooling / caches
