@@ -327,7 +327,7 @@ Use Custom Local Server(Gemma) with the included Gemma Docker setup.</source>
     </message>
     <message>
         <source>Debug exports apply to both Translate All and One-Page Auto so detector, mask, and cleanup issues can be reviewed afterwards.</source>
-        <translation>디버그 내보내기는 전체 번역과 한 페이지 자동번역 모두에 적용되며, 이후 detector, mask, cleanup 문제를 검토할 수 있습니다.</translation>
+        <translation>디버그 내보내기는 전체 번역과 한 페이지 자동 번역 모두에 적용되며, 이후 검출, 마스크, 정리 문제를 검토할 수 있습니다.</translation>
     </message>
     <message>
         <source>Export Raw Text</source>
@@ -343,11 +343,11 @@ Use Custom Local Server(Gemma) with the included Gemma Docker setup.</source>
     </message>
     <message>
         <source>Export Detector Overlay</source>
-        <translation>Detector 오버레이 내보내기</translation>
+        <translation>검출 오버레이 내보내기</translation>
     </message>
     <message>
         <source>Export Raw Inpaint Mask</source>
-        <translation>원본 인페인트 마스크 내보내기</translation>
+        <translation>원본 인페인팅 마스크 내보내기</translation>
     </message>
     <message>
         <source>Export Mask Overlay</source>
@@ -355,7 +355,7 @@ Use Custom Local Server(Gemma) with the included Gemma Docker setup.</source>
     </message>
     <message>
         <source>Export Cleanup Mask Delta</source>
-        <translation>정리 마스크 델타 내보내기</translation>
+        <translation>정리 마스크 변화량 내보내기</translation>
     </message>
     <message>
         <source>Export Debug Metadata</source>
