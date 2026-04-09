@@ -324,10 +324,6 @@ Use Custom Local Server(Gemma) with the included Gemma Docker setup.</source>
         <translation>选定的导出将保存到与输入文件/存档相同的目录中的 Comic_translate_&lt;timestamp&gt;。</translation>
     </message>
     <message>
-        <source>Debug exports apply to both Translate All and One-Page Auto so detector, mask, and cleanup issues can be reviewed afterwards.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
         <source>Export Raw Text</source>
         <translation>导出原始文本</translation>
     </message>
@@ -340,23 +336,23 @@ Use Custom Local Server(Gemma) with the included Gemma Docker setup.</source>
         <translation>导出修复后的图片</translation>
     </message>
     <message>
-        <source>Export Detector Overlay</source>
+        <source>Export Detector Overlay (Debug)</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>Export Raw Inpaint Mask</source>
+        <source>Export Raw Inpaint Mask (Debug)</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>Export Mask Overlay</source>
+        <source>Export Mask Overlay (Debug)</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>Export Cleanup Mask Delta</source>
+        <source>Export Cleanup Mask Delta (Debug)</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>Export Debug Metadata</source>
+        <source>Export Debug Metadata (Debug)</source>
         <translation type="unfinished"></translation>
     </message>
 </context>
