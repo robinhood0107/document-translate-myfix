@@ -324,6 +324,10 @@ Use Custom Local Server(Gemma) with the included Gemma Docker setup.</source>
         <translation>Выбранные экспортированные файлы сохраняются в comic_translate_&lt;timestamp&gt; в том же каталоге, что и входной файл/архив.</translation>
     </message>
     <message>
+        <source>Debug exports apply to both Translate All and One-Page Auto so detector, mask, and cleanup issues can be reviewed afterwards.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
         <source>Export Raw Text</source>
         <translation>Экспортировать необработанный текст</translation>
     </message>
@@ -334,6 +338,26 @@ Use Custom Local Server(Gemma) with the included Gemma Docker setup.</source>
     <message>
         <source>Export Inpainted Image</source>
         <translation>Экспортировать восстановленное изображение</translation>
+    </message>
+    <message>
+        <source>Export Detector Overlay</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Export Raw Inpaint Mask</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Export Mask Overlay</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Export Cleanup Mask Delta</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Export Debug Metadata</source>
+        <translation type="unfinished"></translation>
     </message>
 </context>
 <context>
