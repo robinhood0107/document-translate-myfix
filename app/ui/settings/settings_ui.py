@@ -2,6 +2,8 @@
 from PySide6 import QtWidgets
 from PySide6 import QtCore
 
+from modules.ocr.selection import OCR_MODE_OPTIONS
+
 from ..dayu_widgets.clickable_card import ClickMeta
 from ..dayu_widgets.divider import MDivider
 from ..dayu_widgets.qt import MPixmap
@@ -57,14 +59,8 @@ class SettingsPageUI(QtWidgets.QWidget):
 
         self.inpainters = ['LaMa', 'AOT']
         self.detectors = ['RT-DETR-v2']
-        self.ocr_engines = [
-            self.tr("Default"), 
-            self.tr('Microsoft OCR'), 
-            self.tr('Google Cloud Vision'),
-            self.tr('Gemini-2.0-Flash'), 
-            self.tr('PaddleOCR VL'),
-            self.tr('HunyuanOCR'),
-        ]
+        self.ocr_engine_keys = [key for key, _label in OCR_MODE_OPTIONS]
+        self.ocr_engines = [self.tr(label) for _key, label in OCR_MODE_OPTIONS]
         self.inpaint_strategy = [self.tr('Resize'), self.tr('Original'), self.tr('Crop')]
         self.themes = [self.tr('Dark'), self.tr('Light')]
         self.alignment = [self.tr("Left"), self.tr("Center"), self.tr("Right")]
@@ -138,12 +134,13 @@ class SettingsPageUI(QtWidgets.QWidget):
             self.tr("Microsoft Translator"): "Microsoft Translator",
 
             # OCR mappings
-            self.tr("Default"): "Default",
-            self.tr("Microsoft OCR"): "Microsoft OCR",
-            self.tr("Google Cloud Vision"): "Google Cloud Vision",
-            self.tr("Gemini-2.0-Flash"): "Gemini-2.0-Flash",
-            self.tr("PaddleOCR VL"): "PaddleOCR VL",
-            self.tr("HunyuanOCR"): "HunyuanOCR",
+            self.tr("Default (existing auto: MangaOCR / PPOCR / Pororo...)"): "default",
+            self.tr("Optimal (HunyuanOCR / PaddleOCR VL)"): "best_local",
+            self.tr("Microsoft OCR"): "microsoft_ocr",
+            self.tr("Google Cloud Vision"): "google_cloud_vision",
+            self.tr("Gemini-2.0-Flash"): "gemini_2_0_flash",
+            self.tr("PaddleOCR VL"): "paddleocr_vl",
+            self.tr("HunyuanOCR"): "hunyuanocr",
 
             # Inpainter mappings
             "LaMa": "LaMa",
@@ -202,6 +199,8 @@ class SettingsPageUI(QtWidgets.QWidget):
             inpaint_strategy=self.inpaint_strategy,
             parent=self,
         )
+        for index, key in enumerate(self.ocr_engine_keys):
+            self.tools_page.ocr_combo.setItemData(index, key)
         self.paddleocr_vl_page = PaddleOCRVLPage(parent=self)
         self.hunyuan_ocr_page = HunyuanOCRPage(parent=self)
         self.gemma_local_server_page = GemmaLocalServerPage(parent=self)
