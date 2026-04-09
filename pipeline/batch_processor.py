@@ -6,6 +6,7 @@ import requests
 import logging
 import traceback
 import imkit as imk
+import numpy as np
 import time
 from typing import TYPE_CHECKING
 from typing import List
@@ -21,6 +22,10 @@ from modules.utils.inpaint_cleanup import refine_bubble_residue_inpaint
 from modules.utils.language_utils import get_language_code, is_no_space_lang
 from modules.utils.ocr_quality import summarize_ocr_quality
 from modules.utils.ocr_debug import export_ocr_debug_artifacts
+from modules.utils.inpaint_debug import (
+    build_inpaint_debug_metadata,
+    export_inpaint_debug_artifacts,
+)
 from modules.utils.export_paths import (
     build_export_timestamp,
     export_run_root,
@@ -186,6 +191,66 @@ class BatchProcessor:
                 ocr_summary.get("ocr_engine", ""),
                 page_state.get("source_lang", source_lang),
             )
+
+    def _build_cleanup_delta_mask(self, raw_mask, final_mask):
+        if raw_mask is None and final_mask is None:
+            return None
+        if final_mask is None:
+            return None
+        final_arr = np.asarray(final_mask)
+        if final_arr.ndim == 3:
+            final_arr = final_arr[:, :, 0]
+        if raw_mask is None:
+            raw_arr = np.zeros_like(final_arr, dtype=np.uint8)
+        else:
+            raw_arr = np.asarray(raw_mask)
+            if raw_arr.ndim == 3:
+                raw_arr = raw_arr[:, :, 0]
+        return np.where((final_arr > 0) & (raw_arr <= 0), 255, 0).astype(np.uint8)
+
+    def _write_inpaint_debug_exports(
+        self,
+        *,
+        export_root: str,
+        archive_bname: str,
+        image_path: str,
+        image,
+        blk_list,
+        export_settings: dict,
+        raw_mask,
+        final_mask,
+        detector_key: str,
+        detector_engine: str,
+        detector_device: str,
+        inpainter_key: str,
+        hd_strategy: str,
+        cleanup_stats: dict | None,
+    ) -> None:
+        cleanup_delta = self._build_cleanup_delta_mask(raw_mask, final_mask)
+        metadata = build_inpaint_debug_metadata(
+            image_path=image_path,
+            run_type=self._current_run_type(),
+            detector_key=detector_key,
+            detector_engine=detector_engine,
+            device=detector_device,
+            inpainter=inpainter_key,
+            hd_strategy=hd_strategy,
+            blocks=blk_list or [],
+            raw_mask=raw_mask,
+            cleanup_delta=cleanup_delta,
+            cleanup_stats=cleanup_stats,
+        )
+        export_inpaint_debug_artifacts(
+            export_root=export_root,
+            archive_bname=archive_bname,
+            page_base_name=os.path.splitext(os.path.basename(image_path))[0],
+            image=image,
+            blocks=blk_list or [],
+            export_settings=export_settings,
+            raw_mask=raw_mask,
+            cleanup_delta=cleanup_delta,
+            metadata=metadata,
+        )
 
     def _write_final_render_export(
         self,
@@ -377,6 +442,11 @@ class BatchProcessor:
 
             settings_page = self.main_page.settings_page
             export_settings = self._effective_export_settings(settings_page)
+            hd_strategy_settings = settings_page.get_hd_strategy_settings()
+            hd_strategy = settings_page.ui.value_mappings.get(
+                hd_strategy_settings.get("strategy", ""),
+                hd_strategy_settings.get("strategy", ""),
+            )
             page_state = self._ensure_page_state(image_path)
             source_lang = page_state['source_lang']
             target_lang = page_state['target_lang']
@@ -419,6 +489,11 @@ class BatchProcessor:
                         "export_raw_text": bool(export_settings.get("export_raw_text", False)),
                         "export_translated_text": bool(export_settings.get("export_translated_text", False)),
                         "export_inpainted_image": bool(export_settings.get("export_inpainted_image", False)),
+                        "export_detector_overlay": bool(export_settings.get("export_detector_overlay", False)),
+                        "export_raw_mask": bool(export_settings.get("export_raw_mask", False)),
+                        "export_mask_overlay": bool(export_settings.get("export_mask_overlay", False)),
+                        "export_cleanup_mask_delta": bool(export_settings.get("export_cleanup_mask_delta", False)),
+                        "export_debug_metadata": bool(export_settings.get("export_debug_metadata", False)),
                     },
                 },
             )
@@ -453,6 +528,9 @@ class BatchProcessor:
             blk_list = self.block_detection.block_detector_cache.detect(image)
             detector_key = settings_page.get_tool_selection('detector') or 'RT-DETR-v2'
             detector_engine = self.block_detection.block_detector_cache.last_engine_name or ""
+            detector_device = self.block_detection.block_detector_cache.last_device or resolve_device(
+                settings_page.is_gpu_enabled(), backend='onnx'
+            )
             source_lang_english = self.main_page.lang_mapping.get(source_lang, source_lang)
             rtl = source_lang_english == 'Japanese'
             if blk_list:
@@ -638,6 +716,22 @@ class BatchProcessor:
                     "failed",
                     reason="No text blocks detected.",
                 )
+                self._write_inpaint_debug_exports(
+                    export_root=export_root,
+                    archive_bname=archive_bname,
+                    image_path=image_path,
+                    image=image,
+                    blk_list=[],
+                    export_settings=export_settings,
+                    raw_mask=None,
+                    final_mask=None,
+                    detector_key=detector_key,
+                    detector_engine=detector_engine,
+                    detector_device=detector_device,
+                    inpainter_key=settings_page.get_tool_selection('inpainter'),
+                    hd_strategy=hd_strategy,
+                    cleanup_stats={"applied": False, "component_count": 0, "block_count": 0},
+                )
                 self.skip_save(directory, export_token, base_name, extension, archive_bname, image)
                 self.main_page.image_skipped.emit(image_path, "Text Blocks", "")
                 self.log_skipped_image(directory, export_token, image_path, "No text blocks detected")
@@ -686,6 +780,7 @@ class BatchProcessor:
             logger.info("pre-inpaint: generating mask (blk_list=%d blocks)", len(blk_list))
             t0 = time.time()
             mask = generate_mask(image, blk_list)
+            raw_mask = np.where(mask > 0, 255, 0).astype(np.uint8) if mask is not None else None
             t1 = time.time()
             logger.info("pre-inpaint: mask generated in %.2fs (mask shape=%s)", t1 - t0, getattr(mask, 'shape', None))
 
@@ -720,6 +815,32 @@ class BatchProcessor:
                 if not os.path.exists(path):
                     os.makedirs(path, exist_ok=True)
                 imk.write_image(os.path.join(path, f"{base_name}_cleaned{extension}"), inpaint_input_img)
+            self.main_page.image_ctrl.update_processing_summary(
+                image_path,
+                {
+                    "inpainter": settings_page.get_tool_selection('inpainter'),
+                    "hd_strategy": hd_strategy,
+                    "cleanup_applied": bool(cleanup_stats.get("applied", False)),
+                    "cleanup_component_count": int(cleanup_stats.get("component_count", 0) or 0),
+                    "cleanup_block_count": int(cleanup_stats.get("block_count", 0) or 0),
+                },
+            )
+            self._write_inpaint_debug_exports(
+                export_root=export_root,
+                archive_bname=archive_bname,
+                image_path=image_path,
+                image=image,
+                blk_list=blk_list,
+                export_settings=export_settings,
+                raw_mask=raw_mask,
+                final_mask=mask,
+                detector_key=detector_key,
+                detector_engine=detector_engine,
+                detector_device=detector_device,
+                inpainter_key=settings_page.get_tool_selection('inpainter'),
+                hd_strategy=hd_strategy,
+                cleanup_stats=cleanup_stats,
+            )
             self.main_page.image_ctrl.mark_processing_stage(
                 image_path,
                 "inpaint",

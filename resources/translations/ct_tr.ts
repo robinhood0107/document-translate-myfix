@@ -324,6 +324,10 @@ Use Custom Local Server(Gemma) with the included Gemma Docker setup.</source>
         <translation>Seçilen dışa aktarımlar, giriş dosyası/arşiv ile aynı dizindeki comic_translate_&lt;timestamp&gt; dizinine kaydedilir.</translation>
     </message>
     <message>
+        <source>Debug exports apply to both Translate All and One-Page Auto so detector, mask, and cleanup issues can be reviewed afterwards.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
         <source>Export Raw Text</source>
         <translation>Ham Metni Dışa Aktar</translation>
     </message>
@@ -334,6 +338,26 @@ Use Custom Local Server(Gemma) with the included Gemma Docker setup.</source>
     <message>
         <source>Export Inpainted Image</source>
         <translation>Boyanmış Görseli Dışa Aktar</translation>
+    </message>
+    <message>
+        <source>Export Detector Overlay</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Export Raw Inpaint Mask</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Export Mask Overlay</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Export Cleanup Mask Delta</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Export Debug Metadata</source>
+        <translation type="unfinished"></translation>
     </message>
 </context>
 <context>
