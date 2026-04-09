@@ -1,71 +1,70 @@
 # 변경 이력
 
-## 체크포인트 1
+## 기준선: upstream `v2.6.7`
 
-- 헤더 버튼 흐름 분석 문서를 작성했다.
-- 렌더 설정의 기존 동작을 문서화했다.
-- 코드 변경 전 구현 전략을 정리했다.
+이 포크는 upstream `comic-translate` `v2.6.7` 코드에서 시작했고, 이후 로컬 제품 요구에 맞춘 수정이 단계적으로 누적됐습니다.
 
-## 체크포인트 2
+## 로컬 개선 축
 
-- 자동 색상 강제와 상하 정렬 계산을 담당하는 공통 렌더 정책 헬퍼를 추가했다.
-- `TextRenderingSettings`에 아래 필드를 확장했다.
-  - `force_font_color`
-  - `smart_global_apply_all`
-  - `vertical_alignment_id`
-- 직렬화되는 텍스트 상태에 아래 필드를 확장했다.
-  - `vertical_alignment`
-  - `source_rect`
-  - `block_anchor`
+### 렌더링과 수동 워크플로
 
-## 체크포인트 3
+- 헤더/렌더 흐름을 먼저 문서화한 뒤 렌더 정책 변경을 진행했습니다.
+- 강제 색상, 정렬, 윤곽선 상태를 다루는 공통 render policy helper를 도입했습니다.
+- 직렬화되는 텍스트 상태에 `vertical_alignment`, `source_rect`, `block_anchor`를 추가했습니다.
+- 렌더 패널을 더 명확한 사용자 그룹으로 재배치했습니다.
+- 수동 렌더, 배치 렌더, 웹툰 렌더가 같은 공통 정책 경로를 쓰도록 맞췄습니다.
 
-- 렌더 패널에 아래 UI를 추가했다.
-  - `Apply All SMART Globally`
-  - `Force Color`
-  - `Top / Center / Bottom`
-  - 명시적 윤곽선 `OFF | ON`
-- 기존 헤더 버튼 연결 구조는 그대로 유지했다.
-- 기존 윤곽선 체크박스는 내부 호환용으로 남기고 화면에서는 숨겼다.
+### Windows 런타임과 저장소 운영
 
-## 체크포인트 4
+- 기본 런타임과 CUDA13 런타임용 Windows launcher를 추가했습니다.
+- `.venv-win`, `.venv-win-cuda13`를 자동 준비하는 `setup.bat`를 추가했습니다.
+- 로컬 hook과 CI 검증을 강화했습니다.
+- 브랜치 정책을 표준화했고, 이후 `codex/` 접두사도 제거했습니다.
+- 최종적으로 저장소 정책을 `main + develop + tag`로 정리했습니다.
 
-- 수동 렌더와 수동 번역 후 재래핑이 같은 공통 렌더 정책을 쓰도록 바꿨다.
-- 일반 배치와 웹툰 배치의 렌더 상태 생성도 같은 정책을 쓰도록 바꿨다.
-- 텍스트와 블록 매칭이 보이는 `position`보다 `block_anchor`를 우선 사용하도록 바꿨다.
-- 웹툰 좌표 변환과 내보내기 렌더에서 `position`, `source_rect`, `block_anchor`를 각각 독립적으로 변환하도록 수정했다.
+### OCR 안정성과 진단
 
-## 체크포인트 5
+- one-page auto와 batch OCR의 parity를 개선했습니다.
+- block-local detection fallback을 추가했습니다.
+- suspicious short-result retry를 추가했습니다.
+- 잔여 글자 제거를 위해 text mask를 넓히고 bubble residue cleanup을 추가했습니다.
+- OCR diagnostics와 runtime selection 테스트를 확장했습니다.
 
-- 변경 파일에 대해 `./.venv/bin/python -m py_compile` 검증을 수행했다.
-- 오프스크린 환경에서 새 렌더 패널 컨트롤 생성 여부를 확인했다.
-- `TextBlockItem` 스모크 테스트로 상하 정렬 이동/재정렬 드리프트가 없는지 확인했다.
+### 로컬 모델/런타임 통합
 
-## 체크포인트 6
+- 로컬 Gemma 서버 경로와 런타임 튜닝을 추가했습니다.
+- PaddleOCR VL 통합과 기본값 튜닝을 추가했습니다.
+- HunyuanOCR 통합을 추가했습니다.
+- `Optimal (HunyuanOCR / PaddleOCR VL)` 라우팅과 언어 기반 런타임 선택을 추가했습니다.
 
-- 렌더 패널에서 보이던 `SMART / GLOBAL / ITEM` 용어를 사용자 화면에서 제거했다.
-- 혼란을 주던 SMART 마스터 체크박스를 화면에서는 숨기고 설명형 문구로 대체했다.
-- 색상 강제 옵션을 `Always Use This Color`로 노출했다.
-- 예전 `smart_global_apply_all` 저장값은 로드시 보이는 색상 강제 동작으로 자연스럽게 이어지게 했다.
+### 벤치마크 도구와 브랜치 분리
 
-## 체크포인트 7
+- benchmark toolkit 스크립트와 one-click runner를 추가했습니다.
+- benchmark 자산을 제품 브랜치에서 분리했습니다.
+- `benchmarking/lab`를 benchmark 전용 브랜치로 명문화했습니다.
 
-- 렌더링 관련 문서를 `docs/rendering/` 아래로 정리하고 전부 한국어로 유지했다.
-- 새로 추가한 렌더 패널 UI 문자열을 각 언어 `ts` 파일에 반영했다.
-- `lrelease`로 `resources/translations/compiled/*.qm`을 다시 생성해 실제 프로그램에서도 번역이 적용되도록 정리했다.
+## Selective Backport 축
 
-## 체크포인트 8
+### `v2.6.7 -> v2.7.0`
 
-- 오른쪽 렌더 패널을 `색상`, `정렬`, `스타일/윤곽선` 3개 의미 그룹으로 재배치했다.
-- 좁은 패널에서도 컨트롤이 한 줄에 몰리지 않도록 그룹별 카드형 배치와 더 큰 클릭 영역을 적용했다.
-- `Always Use This Color` 문구를 `Use Selected Color`로 줄여 시인성을 높였다.
-- 상하 정렬과 윤곽선 `OFF / ON` 버튼은 렌더 패널 내부 전용 체크 스타일을 사용하도록 바꿨다.
-- 오른쪽 패널 최소 폭을 늘려 한국어와 독일어 같은 긴 번역에서도 잘림 가능성을 줄였다.
+upstream `v2.7.0`의 필요한 사용자 기능만 선택적으로 현재 포크 구조에 맞게 적응 이식했습니다.
 
-## 체크포인트 9
+문서:
 
-- 저장소 최상단에 `rules.md`를 추가해 Git 규칙, 브랜치 전략, CI/CD, 번역 반영 규칙을 문서화했다.
-- `AGENTS.md`를 추가해 저장소 범위 에이전트가 작업 전에 `rules.md`를 먼저 읽도록 강제했다.
-- `.githooks/`와 `scripts/bootstrap_git_hooks.sh`를 추가해 로컬 훅 기반 보호 규칙을 실제로 활성화할 수 있게 했다.
-- `.github/workflows/ci.yml`과 PR 템플릿을 추가해 브랜치 이름, Python 검증, 번역 자산 검증을 자동화했다.
-- `Retry Failed`, `One-Page Auto` 관련 설명 문자열과 보고서 문자열을 다국어 번역 자산에 반영할 준비를 마쳤다.
+- [v267-to-v270-backport-audit.md](v267-to-v270-backport-audit.md)
+- [v267-to-v270-backport-audit-ko.md](v267-to-v270-backport-audit-ko.md)
+
+### `v2.7.0 -> v2.7.1`
+
+upstream `v2.7.1`의 버그 수정 중 이 포크에 의미 있는 항목만 선택 반영했습니다. 핵심은 아래입니다.
+
+- PSD import 안정화
+- main-thread callback 안전성 정리
+- 리스트 썸네일 로더 안정화
+- PSD 메뉴 정리
+- 앱 버전 `2.7.1` 반영
+
+문서:
+
+- [v270-to-v271-backport-audit.md](v270-to-v271-backport-audit.md)
+- [v270-to-v271-backport-audit-ko.md](v270-to-v271-backport-audit-ko.md)
