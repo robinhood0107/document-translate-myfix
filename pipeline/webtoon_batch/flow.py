@@ -366,6 +366,7 @@ class FlowMixin:
 
         blocks = list(page_accum[image_path]["blocks"])
         patches = list(page_accum[image_path]["patches"])
+        page_state["inpaint_debug_state"] = page_accum[image_path].get("debug")
         source_lang = page_state.get("source_lang", self.main_page.s_combo.currentText())
         source_lang_en = self.main_page.lang_mapping.get(source_lang, source_lang)
         rtl = source_lang_en == "Japanese"
@@ -526,7 +527,7 @@ class FlowMixin:
 
             page_info_by_path = {info["path"]: info for info in physical_pages}
             page_accum = {
-                info["path"]: {"blocks": [], "patches": []}
+                info["path"]: {"blocks": [], "patches": [], "debug": None}
                 for info in physical_pages
             }
 
@@ -631,12 +632,18 @@ class FlowMixin:
                 )
 
                 self._emit_progress(current_record["selected_index"], total_images, 4, False)
-                mask, inpainted = self._inpaint_image_with_blocks(
+                raw_mask, mask, inpainted, cleanup_stats, mask_blocks = self._inpaint_image_with_blocks(
                     current_record["image"],
                     regular_blocks,
                     image_path=current_record["path"],
                 )
                 if mask is not None and inpainted is not None:
+                    page_accum[current_record["path"]]["debug"] = {
+                        "raw_mask": raw_mask,
+                        "final_mask": mask,
+                        "cleanup_stats": cleanup_stats,
+                        "mask_blocks": mask_blocks,
+                    }
                     regular_patches = self._extract_page_patches_from_mask(
                         mask=mask,
                         inpainted=inpainted,

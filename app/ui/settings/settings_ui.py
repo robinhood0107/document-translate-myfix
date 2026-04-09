@@ -264,6 +264,11 @@ class SettingsPageUI(QtWidgets.QWidget):
         self.raw_text_checkbox = self.export_page.raw_text_checkbox
         self.translated_text_checkbox = self.export_page.translated_text_checkbox
         self.inpainted_image_checkbox = self.export_page.inpainted_image_checkbox
+        self.detector_overlay_checkbox = self.export_page.detector_overlay_checkbox
+        self.raw_mask_checkbox = self.export_page.raw_mask_checkbox
+        self.mask_overlay_checkbox = self.export_page.mask_overlay_checkbox
+        self.cleanup_mask_delta_checkbox = self.export_page.cleanup_mask_delta_checkbox
+        self.debug_metadata_checkbox = self.export_page.debug_metadata_checkbox
         self.project_autosave_interval_spinbox = self.project_page.project_autosave_interval_spinbox
         self.project_autosave_folder_input = self.project_page.project_autosave_folder_input
 
