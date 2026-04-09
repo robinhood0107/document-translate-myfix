@@ -100,7 +100,7 @@ benchmark family는 가능한 한 아래 구조를 함께 갖춥니다.
 
 1. `benchmarking/lab`에서 실험을 완료합니다.
 2. 결과를 읽고 제품에 실제로 필요한 변경만 추립니다.
-3. 새 `codex/*` 작업 브랜치를 `develop`에서 분기합니다.
+3. 새 `feature/*`, `fix/*`, `chore/*` 작업 브랜치를 `develop`에서 분기합니다.
 4. benchmark 전용 파일은 제외하고 아래만 수동으로 옮깁니다.
    - 제품 runtime/config 변경
    - 공용 계측 훅
