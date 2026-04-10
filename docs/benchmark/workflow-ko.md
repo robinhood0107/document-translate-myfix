@@ -42,7 +42,7 @@ scripts\benchmark_suite_cuda13.bat
 scripts\benchmark_suite_cuda13.bat --suite-profile b8665-gemma4
 ```
 
-이 profile은 `attach-running`이 아니라 `managed-only`로 동작합니다. 이유는 old image와 `local/llama.cpp:server-cuda-b8665`를 공정하게 비교하려면 suite가 매 단계에서 Docker runtime을 직접 recreate해야 하기 때문입니다.
+이 profile은 `attach-running`이 아니라 `managed-only`로 동작합니다. 이유는 old image와 `ghcr.io/ggml-org/llama.cpp:server-cuda`를 공정하게 비교하려면 suite가 매 단계에서 Docker runtime을 직접 recreate해야 하기 때문입니다.
 
 `b8665-gemma4` profile의 큰 순서는 아래와 같습니다.
 

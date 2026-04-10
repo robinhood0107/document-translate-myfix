@@ -29,6 +29,8 @@ from benchmark_common import (
     write_json,
 )
 
+from modules.utils.llama_cpp_runtime import DEFAULT_LLAMA_CPP_IMAGE
+
 FAMILY_NAME = "ocr_combo_ranked"
 FAMILY_OUTPUT_ROOT_NAME = "ocr_combo_ranked"
 LAST_SUITE_RECORD = "last_ocr_combo_ranked_suite.json"
@@ -925,7 +927,7 @@ def run_suite(*, sample_root: Path) -> int:
             "develop_ref_sha": _current_git_sha("develop"),
             "entrypoint": r"scripts\ocr_combo_ranked_benchmark_suite_cuda13.bat",
             "fixed_gemma": {
-                "image": "local/llama.cpp:server-cuda-b8665",
+                "image": DEFAULT_LLAMA_CPP_IMAGE,
                 "response_format_mode": "json_schema",
                 "chunk_size": 6,
                 "temperature": 0.6,

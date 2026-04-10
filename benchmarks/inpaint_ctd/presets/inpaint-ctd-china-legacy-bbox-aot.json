@@ -14,8 +14,8 @@
     }
   },
   "gemma": {
-    "image": "local/llama.cpp:server-cuda-b8709",
-    "pull_policy": "never",
+    "image": "ghcr.io/ggml-org/llama.cpp:server-cuda",
+    "pull_policy": "always",
     "endpoint_url": "http://127.0.0.1:18080/v1",
     "model": "gemma-4-26b-a4b-it-heretic.q3_k_m.gguf",
     "model_path": "/models/gemma-4-26b-a4b-it-heretic.q3_k_m.gguf",
@@ -46,8 +46,8 @@
   },
   "ocr_runtime": {
     "kind": "hunyuanocr",
-    "image": "local/llama.cpp:server-cuda-b8709",
-    "pull_policy": "never",
+    "image": "ghcr.io/ggml-org/llama.cpp:server-cuda",
+    "pull_policy": "always",
     "model_path": "/models/HunyuanOCR-BF16.gguf",
     "mmproj_path": "/models/mmproj-HunyuanOCR-BF16.gguf",
     "context_size": 4096,

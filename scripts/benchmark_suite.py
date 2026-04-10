@@ -34,8 +34,12 @@ from benchmark_common import (
     resolve_corpus,
     repo_relative_str,
     stage_runtime_files,
+    compose_pull_and_recreate,
+    collect_llama_cpp_runtime_metadata,
     write_json,
 )
+
+from modules.utils.llama_cpp_runtime import DEFAULT_LLAMA_CPP_IMAGE
 
 
 DEFAULT_SUITE_PROFILE = "default"
@@ -122,7 +126,7 @@ SUITE_PROFILES = {
         ),
         "build_id": "b8665",
         "baseline_batch_step": "02_old_image_batch",
-        "active_image": "local/llama.cpp:server-cuda-b8665",
+        "active_image": DEFAULT_LLAMA_CPP_IMAGE,
     },
     "paddleocr-vl15-runtime": {
         "benchmark_name": "PaddleOCR-VL-1.5 Runtime Benchmark",
@@ -250,14 +254,8 @@ def _verify_gemma4_runtime(suite_dir: Path) -> dict[str, Any]:
     staged = stage_runtime_files(preset, runtime_dir)
 
     remove_containers(DEFAULT_CONTAINER_NAMES)
-    run_command(
-        ["docker", "compose", "-f", staged["gemma"]["compose_path"], "up", "-d", "--force-recreate"],
-        cwd=runtime_dir / "gemma",
-    )
-    run_command(
-        ["docker", "compose", "-f", staged["ocr"]["compose_path"], "up", "-d", "--force-recreate"],
-        cwd=runtime_dir / "ocr",
-    )
+    compose_pull_and_recreate(staged["gemma"]["compose_path"], cwd=runtime_dir / "gemma")
+    compose_pull_and_recreate(staged["ocr"]["compose_path"], cwd=runtime_dir / "ocr")
     for url in ATTACH_RUNNING_HEALTH_URLS:
         _wait_for_url(url)
 
@@ -324,9 +322,13 @@ def _verify_gemma4_runtime(suite_dir: Path) -> dict[str, Any]:
 
     expected_image = str((preset.get("gemma") or {}).get("image", ""))
     log_lower = gemma_log_tail.lower()
+    runtime_info = collect_llama_cpp_runtime_metadata(
+        image_ref=expected_image,
+        container_name="gemma-local-server",
+    )
     checks = {
         "image_matches": container_image == expected_image,
-        "build_marker_found": ("b8665" in log_lower) or ("b8665" in container_image.lower()),
+        "version_recorded": bool(runtime_info.get("llama_cpp_version")),
         "arch_gemma4_found": ("arch" in log_lower) and ("gemma4" in log_lower),
         "tool_response_eog_found": "<|tool_response>" in log_lower,
         "object_smoke_ok": _response_has_valid_json_content(object_response),
@@ -338,6 +340,7 @@ def _verify_gemma4_runtime(suite_dir: Path) -> dict[str, Any]:
         "issues": issues,
         "verification_dir": repo_relative_str(verification_dir),
         "container_image": container_image,
+        "llama_cpp_runtime": runtime_info,
         "checks": checks,
     }
     write_json(verification_dir / "verification.json", verification)

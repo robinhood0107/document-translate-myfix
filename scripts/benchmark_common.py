@@ -13,6 +13,14 @@ from typing import Any
 
 import yaml
 
+from modules.utils.llama_cpp_runtime import (
+    DEFAULT_LLAMA_CPP_IMAGE,
+    docker_compose_pull_and_up,
+    inspect_llama_cpp_runtime,
+    normalize_llama_cpp_image,
+    normalize_llama_cpp_pull_policy,
+)
+
 
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_SAMPLE_DIR = ROOT / "Sample"
@@ -300,10 +308,8 @@ def _stage_gemma_runtime(preset: dict[str, Any], runtime_dir: Path) -> dict[str,
     if normalized_volumes:
         service["volumes"] = normalized_volumes
 
-    if gemma.get("image"):
-        service["image"] = str(gemma["image"])
-    if gemma.get("pull_policy"):
-        service["pull_policy"] = str(gemma["pull_policy"])
+    service["image"] = normalize_llama_cpp_image(gemma.get("image") or DEFAULT_LLAMA_CPP_IMAGE)
+    service["pull_policy"] = normalize_llama_cpp_pull_policy(gemma.get("pull_policy"))
 
     if gemma.get("model_path"):
         _update_command_option(command, "-m", [str(gemma["model_path"])])
@@ -409,10 +415,8 @@ def _stage_hunyuan_ocr_runtime(preset: dict[str, Any], runtime_dir: Path) -> dic
     if normalized_volumes:
         service["volumes"] = normalized_volumes
 
-    if ocr_runtime.get("image"):
-        service["image"] = str(ocr_runtime["image"])
-    if ocr_runtime.get("pull_policy"):
-        service["pull_policy"] = str(ocr_runtime["pull_policy"])
+    service["image"] = normalize_llama_cpp_image(ocr_runtime.get("image") or DEFAULT_LLAMA_CPP_IMAGE)
+    service["pull_policy"] = normalize_llama_cpp_pull_policy(ocr_runtime.get("pull_policy"))
     if ocr_runtime.get("model_path"):
         _update_command_option(command, "-m", [str(ocr_runtime["model_path"])])
     if ocr_runtime.get("mmproj_path"):
@@ -483,6 +487,37 @@ def stage_runtime_files(preset: dict[str, Any], runtime_dir: str | Path) -> dict
         "ocr": ocr_runtime,
         "app_settings_path": str(app_settings_path.resolve()),
     }
+
+
+
+
+def compose_pull_and_recreate(compose_path: str | Path, *, cwd: str | Path | None = None) -> None:
+    docker_compose_pull_and_up(compose_path, cwd=cwd)
+
+
+def collect_llama_cpp_runtime_metadata(*, image_ref: str | None = None, container_name: str | None = None) -> dict[str, str]:
+    return inspect_llama_cpp_runtime(image_ref=image_ref, container_name=container_name)
+
+
+def collect_managed_llama_cpp_runtimes(
+    preset: dict[str, Any],
+    runtime_services: str = "full",
+) -> dict[str, dict[str, str]]:
+    payload: dict[str, dict[str, str]] = {}
+    gemma = preset.get("gemma", {}) if isinstance(preset.get("gemma"), dict) else {}
+    if runtime_services != "ocr-only":
+        payload["gemma"] = inspect_llama_cpp_runtime(
+            image_ref=normalize_llama_cpp_image(gemma.get("image") or DEFAULT_LLAMA_CPP_IMAGE),
+            container_name="gemma-local-server",
+        )
+
+    ocr_runtime = preset.get("ocr_runtime", {}) if isinstance(preset.get("ocr_runtime"), dict) else {}
+    if ocr_runtime_kind(preset) == "hunyuanocr":
+        payload["hunyuanocr"] = inspect_llama_cpp_runtime(
+            image_ref=normalize_llama_cpp_image(ocr_runtime.get("image") or DEFAULT_LLAMA_CPP_IMAGE),
+            container_name="hunyuanocr-local-server",
+        )
+    return payload
 
 
 def benchmark_output_root() -> Path:
