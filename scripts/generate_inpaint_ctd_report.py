@@ -112,6 +112,21 @@ def _full_rows(corpus_payload: dict[str, Any]) -> list[dict[str, Any]]:
     return rows
 
 
+def _runtime_lines(corpus_payload: dict[str, Any]) -> list[str]:
+    runtime = corpus_payload.get("llama_cpp_runtime", {}) if isinstance(corpus_payload.get("llama_cpp_runtime"), dict) else {}
+    lines: list[str] = []
+    for key in ("gemma", "hunyuanocr"):
+        item = runtime.get(key, {}) if isinstance(runtime.get(key), dict) else {}
+        if not item:
+            continue
+        lines.append(f"- {key} image: `{item.get('llama_cpp_image', '')}`")
+        lines.append(f"- {key} digest: `{item.get('llama_cpp_digest', '')}`")
+        lines.append(f"- {key} version: `{item.get('llama_cpp_version', '')}`")
+    if lines:
+        lines.append("")
+    return lines
+
+
 def _copy_spotlight_assets(manifest: dict[str, Any]) -> dict[str, Any]:
     copied: dict[str, Any] = {}
     for corpus_name, corpus_payload in (manifest.get("corpora") or {}).items():
@@ -194,6 +209,7 @@ def _render(manifest: dict[str, Any], copied_assets: dict[str, Any], archive_inf
                 "",
                 f"- OCR invariance (spotlight): `{((corpus_payload.get('spotlight_ocr_invariance') or {}).get('status', ''))}`",
                 "",
+                *(_runtime_lines(corpus_payload)),
                 f"## {corpus_name.capitalize()} Full Summary",
                 "",
                 _table(

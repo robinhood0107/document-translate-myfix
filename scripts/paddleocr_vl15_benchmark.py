@@ -258,14 +258,8 @@ def _prepare_runtime(preset_ref: str, runtime_dir: Path, *, runtime_services: st
     staged = stage_runtime_files(preset, runtime_dir)
     remove_containers(DEFAULT_CONTAINER_NAMES)
     if runtime_services != "ocr-only":
-        run_command(
-            ["docker", "compose", "-f", staged["gemma"]["compose_path"], "up", "-d", "--force-recreate"],
-            cwd=runtime_dir / "gemma",
-        )
-    run_command(
-        ["docker", "compose", "-f", staged["ocr"]["compose_path"], "up", "-d", "--force-recreate"],
-        cwd=runtime_dir / "ocr",
-    )
+        compose_pull_and_recreate(staged["gemma"]["compose_path"], cwd=runtime_dir / "gemma")
+    compose_pull_and_recreate(staged["ocr"]["compose_path"], cwd=runtime_dir / "ocr")
     for url in OCR_ONLY_HEALTH_URLS if runtime_services == "ocr-only" else FULL_RUNTIME_HEALTH_URLS:
         _wait_for_url(url)
     return {

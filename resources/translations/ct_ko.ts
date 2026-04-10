@@ -358,12 +358,12 @@ Use Custom Local Server(Gemma) with the included Gemma Docker setup.</source>
     </message>
     <message>
         <source>Comic Translate can use your local Gemma Docker server for translation.
-1. Run `docker compose up -d` in the repository root.
+1. Run `docker compose pull --policy always` and then `docker compose up -d --force-recreate` in the repository root.
 2. In Settings &gt; Credentials, use Endpoint URL `http://127.0.0.1:18080/v1`.
 3. Set Model to `gemma-4-26b-a4b-it-heretic.q3_k_m.gguf`.
 If responses are truncated, lower Chunk Size or increase LLAMA_CTX_SIZE in docker-compose.yaml.</source>
         <translation>Comic Translate는 로컬 Gemma Docker 서버를 번역용으로 사용할 수 있습니다.
-1. 저장소 루트에서 `docker compose up -d`를 실행하세요.
+1. 저장소 루트에서 `docker compose pull --policy always`를 먼저 실행하고, 이어서 `docker compose up -d --force-recreate`를 실행하세요.
 2. 설정 &gt; 자격 증명에서 Endpoint URL을 `http://127.0.0.1:18080/v1`로 입력하세요.
 3. Model을 `gemma-4-26b-a4b-it-heretic.q3_k_m.gguf`로 설정하세요.
 응답이 잘리면 Chunk Size를 더 낮추거나 docker-compose.yaml의 LLAMA_CTX_SIZE를 더 크게 올리세요.</translation>
@@ -830,12 +830,48 @@ Please check your internet connection.</source>
 인터넷 연결을 확인해 주세요.</translation>
     </message>
     <message>
+        <source>Missing credentials for {provider}</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Missing OCR tool</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>No Text Recognition model selected.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
         <source>Text Recognition model</source>
         <translation>텍스트 인식 모델</translation>
     </message>
     <message>
+        <source>{service} settings missing</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>{service} runtime setup failed</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Missing translator</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>No Translator selected.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
         <source>Translator</source>
         <translation>번역기</translation>
+    </message>
+    <message>
+        <source>No font selected</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Go to Settings &gt; Text Rendering &gt; Font to select or import one.</source>
+        <translation type="unfinished"></translation>
     </message>
     <message>
         <source>OCR result is empty for this block.</source>

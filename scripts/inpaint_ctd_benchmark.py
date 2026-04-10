@@ -27,6 +27,8 @@ from benchmark_common import (
     resolve_runtime_health_urls,
     run_command,
     stage_runtime_files,
+    compose_pull_and_recreate,
+    collect_managed_llama_cpp_runtimes,
     write_json,
 )
 
@@ -118,22 +120,20 @@ def _stage_spotlight_input(suite_dir: Path, corpus_name: str, source_path: Path)
     return target_dir
 
 
-def _compose_up(runtime_dir: Path, preset_ref: str) -> None:
+def _compose_up(runtime_dir: Path, preset_ref: str) -> dict[str, Any]:
     preset, _ = load_preset(preset_ref)
     staged = stage_runtime_files(preset, runtime_dir)
     remove_containers(ALL_BENCHMARK_CONTAINER_NAMES)
     if staged.get("gemma"):
-        run_command(
-            ["docker", "compose", "-f", staged["gemma"]["compose_path"], "up", "-d", "--force-recreate"],
-            cwd=runtime_dir / "gemma",
-        )
+        compose_pull_and_recreate(staged["gemma"]["compose_path"], cwd=runtime_dir / "gemma")
     if staged["ocr"].get("kind") != "internal":
-        run_command(
-            ["docker", "compose", "-f", staged["ocr"]["compose_path"], "up", "-d", "--force-recreate"],
-            cwd=runtime_dir / "ocr",
-        )
+        compose_pull_and_recreate(staged["ocr"]["compose_path"], cwd=runtime_dir / "ocr")
     for url in resolve_runtime_health_urls(preset, "full"):
         _wait_for_url(url)
+    return {
+        "preset": preset,
+        "runtime": collect_managed_llama_cpp_runtimes(preset, "full"),
+    }
 
 
 def _write_container_logs(output_dir: Path) -> None:
@@ -400,13 +400,14 @@ def _suite_payload(
         corpus_cfg = CORPORA[corpus_name]
         runtime_dir = suite_dir / "_runtime" / corpus_name
         _log(f"runtime start: corpus={corpus_name}")
-        _compose_up(runtime_dir, _corpus_case_preset(corpus_name, case_slugs[0]))
+        runtime_info = _compose_up(runtime_dir, _corpus_case_preset(corpus_name, case_slugs[0]))
         corpus_payload: dict[str, Any] = {
             "corpus": corpus_name,
             "sample_subdir": corpus_cfg["sample_subdir"],
             "sample_count": corpus_cfg["sample_count"],
             "spotlight_file": corpus_cfg["spotlight_file"],
             "ocr_runtime": corpus_cfg["ocr"],
+            "llama_cpp_runtime": runtime_info.get("runtime", {}),
             "spotlight_runs": [],
             "full_runs": [],
         }

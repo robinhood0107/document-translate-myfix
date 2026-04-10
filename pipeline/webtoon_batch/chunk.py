@@ -131,8 +131,10 @@ class ChunkMixin:
             affected_paths=affected_paths,
             reason=reason,
         )
-        self.ocr_handler.ocr.initialize(self.main_page, source_lang)
         try:
+            # Runtime startup for local OCR can fail here (e.g. missing Docker image).
+            # Route it through the same skip/report path as OCR execution failures.
+            self.ocr_handler.ocr.initialize(self.main_page, source_lang)
             self.ocr_handler.ocr.process(image, blocks)
             if sort_after:
                 source_lang_en = self.main_page.lang_mapping.get(source_lang, source_lang)

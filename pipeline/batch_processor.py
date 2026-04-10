@@ -586,11 +586,12 @@ class BatchProcessor:
                 ocr_model = settings_page.get_tool_selection('ocr')
                 device = resolve_device(settings_page.is_gpu_enabled())
                 cache_key = self.cache_manager._get_ocr_cache_key(image, source_lang, ocr_model, device)
-                # Use the shared OCR processor from the handler
-                self.ocr_handler.ocr.initialize(self.main_page, source_lang)
                 try:
                     cache_status = "miss"
                     attempt_count = 0
+                    # Runtime startup for local OCR can fail here (e.g. missing Docker image).
+                    # Keep it inside the per-page OCR error path so the batch report captures it.
+                    self.ocr_handler.ocr.initialize(self.main_page, source_lang)
                     if self.cache_manager._can_serve_all_blocks_from_ocr_cache(cache_key, blk_list):
                         cache_status = "hit"
                         logger.info("ocr cache hit: using cached OCR for %d blocks", len(blk_list))

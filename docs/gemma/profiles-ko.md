@@ -15,7 +15,7 @@
 | max completion tokens | `512` |
 | timeout sec | `180` |
 | model path | `/models/gemma-4-26b-a4b-it-heretic.q3_k_m.gguf` |
-| image tag | `local/llama.cpp:server-cuda-b8665` |
+| image tag | `ghcr.io/ggml-org/llama.cpp:server-cuda` |
 | ctx-size | `4096` |
 | threads | `12` |
 | n_gpu_layers | `23` |
