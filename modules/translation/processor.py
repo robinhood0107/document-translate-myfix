@@ -3,6 +3,7 @@ import numpy as np
 
 from ..utils.textblock import TextBlock
 from ..utils.device import resolve_device
+from .local_runtime import LocalGemmaRuntimeManager
 from .base import LLMTranslation
 from .factory import TranslationFactory
 
@@ -36,6 +37,13 @@ class Translator:
         self.source_lang_en = self._get_english_lang(main_page, self.source_lang)
         self.target_lang = target_lang
         self.target_lang_en = self._get_english_lang(main_page, self.target_lang)
+
+        if self.translator_key == "Custom Local Server(Gemma)":
+            runtime_manager = getattr(main_page, "local_translation_runtime_manager", None)
+            if not isinstance(runtime_manager, LocalGemmaRuntimeManager):
+                runtime_manager = LocalGemmaRuntimeManager()
+                main_page.local_translation_runtime_manager = runtime_manager
+            runtime_manager.ensure_server(self.settings)
         
         # Create appropriate engine using factory
         self.engine = TranslationFactory.create_engine(

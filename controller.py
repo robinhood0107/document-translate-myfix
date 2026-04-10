@@ -15,6 +15,7 @@ from app.ui.messages import Messages
 from app.ui.dayu_widgets.message import MMessage
 
 from modules.ocr.local_runtime import LocalOCRRuntimeManager
+from modules.translation.local_runtime import LocalGemmaRuntimeManager
 from modules.ocr.selection import OCR_MODE_BEST_LOCAL, normalize_ocr_mode, resolve_ocr_engine
 from app.ui.canvas.text_item import TextBlockItem
 from app.ui.commands.box import DeleteBoxesCommand
@@ -124,6 +125,7 @@ class ComicTranslate(ComicTranslateUI):
         self._batch_cancel_requested = False
         self._current_batch_run_type = None
         self.local_ocr_runtime_manager = LocalOCRRuntimeManager()
+        self.local_translation_runtime_manager = LocalGemmaRuntimeManager()
 
         self.image_ctrl = ImageStateController(self)
         self.rect_item_ctrl = RectItemController(self)
