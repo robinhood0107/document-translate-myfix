@@ -6,6 +6,7 @@
 ## 1. 기본 원칙
 
 - `main`과 `develop`은 보호 브랜치다.
+- `main`, `develop`, `benchmarking/lab`은 장기 유지 브랜치이며 삭제 대상으로 취급하지 않는다.
 - 기능 개발은 반드시 별도 작업 브랜치에서만 한다.
 - 트래킹되는 코드 변경 전에 먼저 브랜치를 만든다.
 - 기능 단위 작업은 `커밋`과 `push`까지 끝나야 완료로 본다.
@@ -23,12 +24,15 @@
   - 통합 기준 브랜치
   - 일반 기능은 모두 이 브랜치로 PR
   - 직접 커밋, 직접 push 금지
+- `benchmarking/lab`
+  - benchmark 전용 장기 유지 브랜치
+  - benchmark preset, runner, 보고서, 차트, generated asset은 이 브랜치에만 유지
+  - 직접 제품 승격 브랜치로 간주하지 않으며, 검증된 제품 변경만 별도 작업 브랜치로 다시 승격
 - 작업 브랜치
   - `feature/<slug>`
   - `fix/<slug>`
   - `chore/<slug>`
   - `hotfix/<slug>`
-  - `benchmarking/lab`
 
 릴리스는 별도 `release/*` 브랜치가 아니라 `main`에 머지된 커밋에 버전 태그(`vX.Y.Z`)를 달아 발행한다.
 `codex/` 접두사는 더 이상 사용하지 않는다.
