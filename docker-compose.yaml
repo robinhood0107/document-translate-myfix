@@ -2,8 +2,8 @@ services:
   # Gemma 4 로컬 번역 서버 기본 설정입니다.
   # 응답이 잘리면 LLAMA_CTX_SIZE를 올리거나 앱의 Chunk Size를 낮추세요.
   gemma-local-server:
-    image: ${LLAMA_CPP_IMAGE:-local/llama.cpp:server-cuda-b8709}
-    pull_policy: never
+    image: ${LLAMA_CPP_IMAGE:-ghcr.io/ggml-org/llama.cpp:server-cuda}
+    pull_policy: always
     container_name: gemma-local-server
     restart: unless-stopped
     ports:

@@ -12,7 +12,8 @@
 저장소 루트에서 실행:
 
 ```bash
-docker compose up -d
+docker compose pull --policy always
+docker compose up -d --force-recreate
 ```
 
 앱 설정:
@@ -43,9 +44,9 @@ docker compose up -d
 
 ## 참고 이미지 버전
 
-- Image tag: `local/llama.cpp:server-cuda-b8665`
-- Pull policy: `never`
-- `llama.cpp` 계열 빌드 기준: `b8665`
+- Image tag: `ghcr.io/ggml-org/llama.cpp:server-cuda`
+- Pull policy: `always`
+- 현재 관측된 내부 `llama-server --version`은 구현 시점 기준 `8740`이며, 최신 상태는 실행 로그나 benchmark summary의 digest/version 기록을 확인하세요.
 
 ## 관련 문서
 

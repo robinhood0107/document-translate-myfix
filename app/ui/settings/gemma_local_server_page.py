@@ -32,7 +32,7 @@ class GemmaLocalServerPage(QtWidgets.QWidget):
         note = MLabel(
             self.tr(
                 "Comic Translate can use your local Gemma Docker server for translation.\n"
-                "1. Run `docker compose up -d` in the repository root.\n"
+                "1. Run `docker compose pull --policy always` and then `docker compose up -d --force-recreate` in the repository root.\n"
                 "2. In Settings > Credentials, use Endpoint URL `http://127.0.0.1:18080/v1`.\n"
                 "3. Set Model to `gemma-4-26b-a4b-it-heretic.q3_k_m.gguf`.\n"
                 "If responses are truncated, lower Chunk Size or increase LLAMA_CTX_SIZE in docker-compose.yaml."
