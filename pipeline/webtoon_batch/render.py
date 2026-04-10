@@ -367,6 +367,7 @@ class RenderMixin:
                 if raw_arr.ndim == 3:
                     raw_arr = raw_arr[:, :, 0]
             cleanup_delta = _np.where((final_arr > 0) & (raw_arr <= 0), 255, 0).astype(_np.uint8)
+        mask_details = debug_state.get("mask_details") or {}
         debug_metadata = build_inpaint_debug_metadata(
             image_path=image_path,
             run_type=str(getattr(self.main_page, "_current_batch_run_type", "batch") or "batch"),
@@ -379,6 +380,12 @@ class RenderMixin:
             raw_mask=raw_mask,
             cleanup_delta=cleanup_delta,
             cleanup_stats=cleanup_stats,
+            mask_refiner=str(mask_details.get("mask_refiner", "legacy_bbox") or "legacy_bbox"),
+            protect_mask_applied=bool(mask_details.get("keep_existing_lines", False)),
+            protect_mask=mask_details.get("protect_mask"),
+            refiner_backend=str(mask_details.get("refiner_backend", "legacy") or "legacy"),
+            refiner_device=str(mask_details.get("refiner_device", "cpu") or "cpu"),
+            inpainter_backend=str(debug_state.get("inpainter_backend", "unknown") or "unknown"),
         )
         export_inpaint_debug_artifacts(
             export_root=export_root,

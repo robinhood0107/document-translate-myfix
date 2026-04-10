@@ -70,6 +70,7 @@ class BatchReportController:
             "paths": list(report.get("paths", [])),
             "retry_paths": list(report.get("retry_paths", [])),
             "skipped_entries": list(report.get("skipped_entries", [])),
+            "preflight_errors": list(report.get("preflight_errors", [])),
         }
 
     def import_latest_report_from_project(self, payload: dict | None, refresh: bool = True) -> None:
@@ -90,6 +91,7 @@ class BatchReportController:
             "paths": list(payload.get("paths", [])),
             "retry_paths": list(payload.get("retry_paths", [])),
             "skipped_entries": list(payload.get("skipped_entries", [])),
+            "preflight_errors": list(payload.get("preflight_errors", [])),
         }
         if refresh:
             self.refresh_action_buttons()
@@ -144,7 +146,26 @@ class BatchReportController:
             "paths": tracked_paths,
             "path_set": set(tracked_paths),
             "skipped": {},
+            "preflight_errors": [],
+            "preflight_seen": set(),
         }
+
+    def register_preflight_error(self, title: str, details: str = "") -> None:
+        report = self._current_batch_report
+        if not report:
+            return
+        normalized_title = str(title or "").strip() or self._tr("Setup Error")
+        normalized_details = self._sanitize_batch_skip_error(details)
+        key = (normalized_title, normalized_details)
+        if key in report["preflight_seen"]:
+            return
+        report["preflight_seen"].add(key)
+        report["preflight_errors"].append(
+            {
+                "title": normalized_title,
+                "details": normalized_details,
+            }
+        )
 
     def _sanitize_batch_skip_error(self, error: str) -> str:
         if not error:
@@ -359,6 +380,7 @@ class BatchReportController:
             "paths": list(report["paths"]),
             "skipped_entries": skipped_entries,
             "retry_paths": retry_paths,
+            "preflight_errors": list(report.get("preflight_errors", [])),
         }
         self._latest_batch_report = finalized
         self.refresh_action_buttons()
@@ -436,7 +458,34 @@ class BatchReportController:
 
         stats_layout.addWidget(make_stat_card(self._tr("Total"), str(report["total_images"])))
         stats_layout.addWidget(make_stat_card(self._tr("Skipped"), str(report["skipped_count"])))
+        stats_layout.addWidget(
+            make_stat_card(
+                self._tr("Setup Errors"),
+                str(len(report.get("preflight_errors", []))),
+            )
+        )
         layout.addLayout(stats_layout)
+
+        preflight_errors = list(report.get("preflight_errors", []))
+        if preflight_errors:
+            preflight_header = QtWidgets.QLabel(
+                self._tr("Setup / Runtime Errors ({0})").format(len(preflight_errors))
+            )
+            preflight_header.setStyleSheet("font-weight: 600;")
+            layout.addWidget(preflight_header)
+            preflight_list = QtWidgets.QListWidget()
+            preflight_list.setSelectionMode(QtWidgets.QAbstractItemView.SelectionMode.NoSelection)
+            visible_rows = min(max(len(preflight_errors), 1), 6)
+            preflight_list.setMinimumHeight((visible_rows * 42) + 12)
+            preflight_list.setMaximumHeight((visible_rows * 42) + 12)
+            for entry in preflight_errors:
+                title = str(entry.get("title", "") or self._tr("Setup Error"))
+                details = str(entry.get("details", "") or "")
+                item_text = title if not details else f"{title}\n{details}"
+                item = QtWidgets.QListWidgetItem(item_text)
+                item.setToolTip(item_text)
+                preflight_list.addItem(item)
+            layout.addWidget(preflight_list)
 
         container.setStyleSheet(
             "QFrame#batchStatCard { border: 1px solid rgba(128,128,128,0.35); border-radius: 8px; }"

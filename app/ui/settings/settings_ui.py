@@ -57,7 +57,7 @@ class SettingsPageUI(QtWidgets.QWidget):
 
         self.credential_widgets = {}
 
-        self.inpainters = ['LaMa', 'AOT']
+        self.inpainters = ['AOT', 'lama_large_512px', 'lama_mpe']
         self.detectors = ['RT-DETR-v2']
         self.ocr_engine_keys = [key for key, _label in OCR_MODE_OPTIONS]
         self.ocr_engines = [self.tr(label) for _key, label in OCR_MODE_OPTIONS]
@@ -143,8 +143,10 @@ class SettingsPageUI(QtWidgets.QWidget):
             self.tr("HunyuanOCR"): "hunyuanocr",
 
             # Inpainter mappings
-            "LaMa": "LaMa",
             "AOT": "AOT",
+            "lama_large_512px": "lama_large_512px",
+            "lama_mpe": "lama_mpe",
+            "LaMa": "lama_large_512px",
 
             # Detector mappings
             "RT-DETR-v2": "RT-DETR-v2",
@@ -172,8 +174,11 @@ class SettingsPageUI(QtWidgets.QWidget):
             self.tr("Yandex"): "Yandex",
         }
 
-        # Create reverse mappings for loading
+        # Create reverse mappings for loading.\n        # Deprecated aliases like "LaMa" should not override canonical UI labels.
         self.reverse_mappings = {v: k for k, v in self.value_mappings.items()}
+        self.reverse_mappings["AOT"] = "AOT"
+        self.reverse_mappings["lama_large_512px"] = "lama_large_512px"
+        self.reverse_mappings["lama_mpe"] = "lama_mpe"
 
         self._init_ui()
 
@@ -226,6 +231,18 @@ class SettingsPageUI(QtWidgets.QWidget):
         self.ocr_combo = self.tools_page.ocr_combo
         self.detector_combo = self.tools_page.detector_combo
         self.inpainter_combo = self.tools_page.inpainter_combo
+        self.mask_refiner_combo = self.tools_page.mask_refiner_combo
+        self.keep_existing_lines_checkbox = self.tools_page.keep_existing_lines_checkbox
+        self.ctd_detect_size_combo = self.tools_page.ctd_detect_size_combo
+        self.ctd_det_rearrange_max_batches_combo = self.tools_page.ctd_det_rearrange_max_batches_combo
+        self.ctd_device_combo = self.tools_page.ctd_device_combo
+        self.ctd_font_size_multiplier_spinbox = self.tools_page.ctd_font_size_multiplier_spinbox
+        self.ctd_font_size_max_spinbox = self.tools_page.ctd_font_size_max_spinbox
+        self.ctd_font_size_min_spinbox = self.tools_page.ctd_font_size_min_spinbox
+        self.ctd_mask_dilate_size_spinbox = self.tools_page.ctd_mask_dilate_size_spinbox
+        self.inpainter_size_combo = self.tools_page.inpainter_size_combo
+        self.inpainter_device_combo = self.tools_page.inpainter_device_combo
+        self.inpainter_precision_combo = self.tools_page.inpainter_precision_combo
         self.inpaint_strategy_combo = self.tools_page.inpaint_strategy_combo
         self.resize_spinbox = self.tools_page.resize_spinbox
         self.crop_margin_spinbox = self.tools_page.crop_margin_spinbox
