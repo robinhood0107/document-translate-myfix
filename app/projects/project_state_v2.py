@@ -10,7 +10,8 @@ from typing import TYPE_CHECKING
 import msgpack
 
 from .parsers import ProjectDecoder, ProjectEncoder, ensure_string_keys
-from modules.utils.file_handler import ensure_prepared_path_materialized
+from modules.utils.export_paths import normalize_export_source_record
+from modules.utils.file_handler import ensure_prepared_path_materialized, get_prepared_path_source
 
 if TYPE_CHECKING:
     from controller import ComicTranslate
@@ -349,9 +350,46 @@ def save_state_to_proj_file_v2(comic_translate: "ComicTranslate", file_name: str
         }
         page_rows[page_path] = msgpack.packb(row_payload, default=encoder.encode, use_bin_type=True)
 
+    def resolve_page_export_source(path: str) -> dict[str, str]:
+        source_records = getattr(comic_translate, "export_source_by_path", {}) or {}
+        source_record = normalize_export_source_record(source_records.get(path))
+        if source_record is not None:
+            return source_record
+
+        lazy_source = get_prepared_path_source(path)
+        archive_path = str((lazy_source or {}).get("archive_path", "")).strip()
+        if archive_path:
+            return {
+                "kind": "archive",
+                "source_path": os.path.abspath(archive_path),
+            }
+
+        project_file = getattr(comic_translate, "project_file", None)
+        temp_dir = getattr(comic_translate, "temp_dir", None)
+        abs_path = os.path.abspath(path)
+        if project_file and temp_dir:
+            abs_temp_dir = os.path.abspath(temp_dir)
+            prefix = abs_temp_dir if abs_temp_dir.endswith(os.sep) else f"{abs_temp_dir}{os.sep}"
+            if abs_path == abs_temp_dir or abs_path.startswith(prefix):
+                return {
+                    "kind": "file",
+                    "source_path": os.path.abspath(project_file),
+                }
+
+        return {
+            "kind": "file",
+            "source_path": abs_path,
+        }
+
+    page_export_sources = {
+        file_path: resolve_page_export_source(file_path)
+        for file_path in comic_translate.image_files
+    }
+
     manifest = {
         "current_image_index": comic_translate.curr_img_idx,
         "original_image_files": comic_translate.image_files,
+        "page_export_sources": page_export_sources,
         "current_history_index": comic_translate.current_history_index,
         "displayed_images": list(comic_translate.displayed_images),
         "loaded_images": comic_translate.loaded_images,
@@ -507,6 +545,13 @@ def _materialize_from_manifest_and_pages(
 
     original_image_files = manifest.get("original_image_files", [])
     comic_translate.image_files = [original_to_temp.get(file, file) for file in original_image_files]
+    saved_export_sources = manifest.get("page_export_sources", {}) or {}
+    comic_translate.export_source_by_path = {
+        original_to_temp.get(page_path, page_path): normalized
+        for page_path, source in saved_export_sources.items()
+        for normalized in [normalize_export_source_record(source)]
+        if normalized is not None
+    }
 
     comic_translate.image_states = {
         original_to_temp.get(page, page): (row.get("image_state", {}) or {})
@@ -629,6 +674,7 @@ def _load_from_legacy_state_blob(
     manifest = {
         "current_image_index": state.get("current_image_index", 0),
         "original_image_files": state.get("original_image_files", []),
+        "page_export_sources": state.get("page_export_sources", {}),
         "current_history_index": state.get("current_history_index", {}),
         "displayed_images": state.get("displayed_images", []),
         "loaded_images": state.get("loaded_images", []),

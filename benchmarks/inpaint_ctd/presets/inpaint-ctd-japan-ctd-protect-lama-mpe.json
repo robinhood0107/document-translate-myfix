@@ -1,0 +1,82 @@
+{
+  "name": "inpaint-ctd-japan-ctd-protect-lama-mpe",
+  "description": "japan corpus ctd-protect-lama-mpe CTD inpaint benchmark preset.",
+  "app": {
+    "translator": "Custom Local Server(Gemma)",
+    "ocr": "PaddleOCR VL",
+    "detector": "RT-DETR-v2",
+    "inpainter": "lama_mpe",
+    "use_gpu": false,
+    "extra_context": "",
+    "hd_strategy": {
+      "strategy": "Resize",
+      "resize_limit": 960
+    }
+  },
+  "gemma": {
+    "image": "local/llama.cpp:server-cuda-b8709",
+    "pull_policy": "never",
+    "endpoint_url": "http://127.0.0.1:18080/v1",
+    "model": "gemma-4-26b-a4b-it-heretic.q3_k_m.gguf",
+    "model_path": "/models/gemma-4-26b-a4b-it-heretic.q3_k_m.gguf",
+    "context_size": 4096,
+    "n_parallel": 1,
+    "threads": 12,
+    "n_gpu_layers": 23,
+    "chunk_size": 6,
+    "temperature": 0.6,
+    "top_k": 64,
+    "top_p": 0.95,
+    "min_p": 0.0,
+    "max_completion_tokens": 512,
+    "request_timeout_sec": 180,
+    "raw_response_logging": false,
+    "reasoning": "off",
+    "reasoning_budget": 0,
+    "reasoning_format": "none",
+    "response_format_mode": "json_schema",
+    "response_schema_mode": "blocks"
+  },
+  "ocr_client": {
+    "server_url": "http://127.0.0.1:28118/layout-parsing",
+    "parallel_workers": 8,
+    "max_new_tokens": 1024,
+    "prettify_markdown": false,
+    "visualize": false
+  },
+  "ocr_runtime": {
+    "kind": "paddleocr_vl",
+    "front_device": "cpu",
+    "gpu_memory_utilization": 0.84,
+    "max_model_len": 4096,
+    "max_num_seqs": 32,
+    "max_num_batched_tokens": 98304,
+    "dtype": "bfloat16"
+  },
+  "mask_refiner_settings": {
+    "mask_refiner": "ctd",
+    "keep_existing_lines": true,
+    "ctd_detect_size": 1280,
+    "ctd_det_rearrange_max_batches": 4,
+    "ctd_device": "cuda",
+    "ctd_font_size_multiplier": 1.0,
+    "ctd_font_size_max": -1,
+    "ctd_font_size_min": -1,
+    "ctd_mask_dilate_size": 2
+  },
+  "inpainter_runtime": {
+    "device": "cuda",
+    "inpaint_size": 2048,
+    "precision": "fp32"
+  },
+  "export": {
+    "export_raw_text": false,
+    "export_translated_text": false,
+    "export_inpainted_image": true,
+    "export_detector_overlay": true,
+    "export_raw_mask": true,
+    "export_mask_overlay": true,
+    "export_cleanup_mask_delta": true,
+    "export_debug_metadata": true
+  }
+}

@@ -141,6 +141,15 @@ def _apply_benchmark_font(window, target_lang: str) -> None:
     )
 
 
+def _set_combo_text(combo, value: object) -> None:
+    text = str(value)
+    index = combo.findText(text)
+    if index != -1:
+        combo.setCurrentIndex(index)
+    else:
+        combo.setCurrentText(text)
+
+
 def _apply_gemma_env(gemma: dict[str, object]) -> dict[str, str | None]:
     snapshot: dict[str, str | None] = {}
     parts: list[str] = []
@@ -219,6 +228,10 @@ def _configure_window(window, preset: dict[str, object], source_lang: str, targe
     ocr_client = preset.get("ocr_client", {})
     hunyuan_ocr_client = preset.get("hunyuan_ocr_client", {})
     ocr_generic = preset.get("ocr_generic", {})
+    mask_refiner_settings = preset.get("mask_refiner_settings", {})
+    inpainter_runtime = preset.get("inpainter_runtime", {})
+    export_settings = preset.get("export", {})
+    hd_strategy = app_config.get("hd_strategy", {})
 
     if isinstance(ocr_generic, dict):
         window.settings_page._benchmark_ocr_generic_settings = dict(ocr_generic)
@@ -226,10 +239,37 @@ def _configure_window(window, preset: dict[str, object], source_lang: str, targe
         window.settings_page._benchmark_ocr_generic_settings = {}
 
     ui.use_gpu_checkbox.setChecked(bool(app_config.get("use_gpu", True)))
-    ui.translator_combo.setCurrentText(str(app_config.get("translator", "Custom Local Server(Gemma)")))
-    ui.ocr_combo.setCurrentText(str(app_config.get("ocr", "PaddleOCR VL")))
-    ui.detector_combo.setCurrentText(str(app_config.get("detector", "RT-DETR-v2")))
-    ui.inpainter_combo.setCurrentText(str(app_config.get("inpainter", "AOT")))
+    _set_combo_text(ui.translator_combo, app_config.get("translator", "Custom Local Server(Gemma)"))
+    window.settings_page._set_ocr_mode(str(app_config.get("ocr", "PaddleOCR VL")))
+    _set_combo_text(ui.detector_combo, app_config.get("detector", "RT-DETR-v2"))
+    _set_combo_text(ui.inpainter_combo, app_config.get("inpainter", "AOT"))
+    ui.tools_page._update_inpainter_runtime_widgets(ui.inpainter_combo.currentIndex())
+
+    if isinstance(hd_strategy, dict):
+        _set_combo_text(ui.inpaint_strategy_combo, hd_strategy.get("strategy", "Resize"))
+        if "resize_limit" in hd_strategy:
+            ui.resize_spinbox.setValue(int(hd_strategy.get("resize_limit", 960)))
+        if "crop_margin" in hd_strategy:
+            ui.crop_margin_spinbox.setValue(int(hd_strategy.get("crop_margin", 512)))
+        if "crop_trigger_size" in hd_strategy:
+            ui.crop_trigger_spinbox.setValue(int(hd_strategy.get("crop_trigger_size", 512)))
+
+    if isinstance(mask_refiner_settings, dict):
+        _set_combo_text(ui.mask_refiner_combo, mask_refiner_settings.get("mask_refiner", "legacy_bbox"))
+        ui.tools_page._update_mask_refiner_widgets(ui.mask_refiner_combo.currentIndex())
+        ui.keep_existing_lines_checkbox.setChecked(bool(mask_refiner_settings.get("keep_existing_lines", False)))
+        _set_combo_text(ui.ctd_detect_size_combo, mask_refiner_settings.get("ctd_detect_size", 1280))
+        _set_combo_text(ui.ctd_det_rearrange_max_batches_combo, mask_refiner_settings.get("ctd_det_rearrange_max_batches", 4))
+        _set_combo_text(ui.ctd_device_combo, mask_refiner_settings.get("ctd_device", "cuda"))
+        ui.ctd_font_size_multiplier_spinbox.setValue(float(mask_refiner_settings.get("ctd_font_size_multiplier", 1.0)))
+        ui.ctd_font_size_max_spinbox.setValue(int(mask_refiner_settings.get("ctd_font_size_max", -1)))
+        ui.ctd_font_size_min_spinbox.setValue(int(mask_refiner_settings.get("ctd_font_size_min", -1)))
+        ui.ctd_mask_dilate_size_spinbox.setValue(int(mask_refiner_settings.get("ctd_mask_dilate_size", 2)))
+
+    if isinstance(inpainter_runtime, dict):
+        _set_combo_text(ui.inpainter_device_combo, inpainter_runtime.get("device", "cuda"))
+        _set_combo_text(ui.inpainter_size_combo, inpainter_runtime.get("inpaint_size", 2048))
+        _set_combo_text(ui.inpainter_precision_combo, inpainter_runtime.get("precision", "fp32"))
 
     ui.save_keys_checkbox.setChecked(True)
     ui.extra_context.setPlainText(str(app_config.get("extra_context", "")))
@@ -265,9 +305,14 @@ def _configure_window(window, preset: dict[str, object], source_lang: str, targe
     ui.gemma_max_completion_tokens_spinbox.setValue(int(gemma.get("max_completion_tokens", 512)))
     ui.gemma_request_timeout_spinbox.setValue(int(gemma.get("request_timeout_sec", 180)))
     ui.gemma_raw_response_logging_checkbox.setChecked(bool(gemma.get("raw_response_logging", False)))
-    ui.raw_text_checkbox.setChecked(False)
-    ui.translated_text_checkbox.setChecked(True)
-    ui.inpainted_image_checkbox.setChecked(False)
+    ui.raw_text_checkbox.setChecked(bool(export_settings.get("export_raw_text", False)))
+    ui.translated_text_checkbox.setChecked(bool(export_settings.get("export_translated_text", True)))
+    ui.inpainted_image_checkbox.setChecked(bool(export_settings.get("export_inpainted_image", False)))
+    ui.detector_overlay_checkbox.setChecked(bool(export_settings.get("export_detector_overlay", False)))
+    ui.raw_mask_checkbox.setChecked(bool(export_settings.get("export_raw_mask", False)))
+    ui.mask_overlay_checkbox.setChecked(bool(export_settings.get("export_mask_overlay", False)))
+    ui.cleanup_mask_delta_checkbox.setChecked(bool(export_settings.get("export_cleanup_mask_delta", False)))
+    ui.debug_metadata_checkbox.setChecked(bool(export_settings.get("export_debug_metadata", False)))
 
     window.s_combo.setCurrentText(source_lang)
     window.t_combo.setCurrentText(target_lang)

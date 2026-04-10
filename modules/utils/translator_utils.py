@@ -8,6 +8,8 @@ import numpy as np
 from pythainlp.tokenize import word_tokenize
 from .textblock import TextBlock
 import imkit as imk
+from .language_utils import get_language_code, is_no_space_lang
+from .text_normalization import canonicalize_ellipsis_runs, remove_invisible_format_chars
 
 logger = logging.getLogger(__name__)
 
@@ -20,7 +22,7 @@ MODEL_MAP = {
     "Deepseek-v3": "deepseek-chat", 
     "GPT-4.1": "gpt-4.1",
     "GPT-4.1-mini": "gpt-4.1-mini",
-    "Claude-4.5-Sonnet": "claude-sonnet-4-5-20250929",
+    "Claude-4.6-Sonnet": "claude-sonnet-4-6",
     "Claude-4.5-Haiku": "claude-haiku-4-5-20251001",
     "Gemini-2.0-Flash": "gemini-2.0-flash",
     "Gemini-3.0-Flash": "gemini-3-flash-preview",
@@ -40,6 +42,33 @@ def get_raw_text(blk_list: list[TextBlock]):
     raw_texts_json = json.dumps(rw_txts_dict, ensure_ascii=False, indent=4)
     
     return raw_texts_json
+
+
+def normalize_text_for_translation(text, source_lang, *, ocr_engine=None) -> str:
+    del ocr_engine
+    normalized = remove_invisible_format_chars(str(text or ""))
+    normalized = normalized.replace("\r\n", "\n").replace("\r", "\n")
+
+    source_lang_code = get_language_code(str(source_lang or "")) or str(source_lang or "")
+    if is_no_space_lang(source_lang_code):
+        normalized = re.sub(r"[\s\u3000]+", "", normalized)
+    else:
+        normalized = normalized.replace("\n", " ")
+        normalized = re.sub(r"[ \t\f\v\u3000]+", " ", normalized).strip()
+
+    return canonicalize_ellipsis_runs(normalized)
+
+
+def build_translation_input_json(blk_list: list[TextBlock], source_lang, *, ocr_engine=None):
+    payload = {}
+    for idx, blk in enumerate(blk_list):
+        block_key = f"block_{idx}"
+        payload[block_key] = normalize_text_for_translation(
+            getattr(blk, "text", ""),
+            source_lang,
+            ocr_engine=ocr_engine,
+        )
+    return json.dumps(payload, ensure_ascii=False, indent=4)
 
 def get_raw_translation(blk_list: list[TextBlock]):
     rw_translations_dict = {}

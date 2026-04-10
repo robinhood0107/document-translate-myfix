@@ -14,11 +14,8 @@ from modules.utils.ocr_debug import (
 	OCR_STATUS_EMPTY_INITIAL,
 	OCR_STATUS_OK,
 	OCR_STATUS_OK_AFTER_RETRY,
-	build_retry_crop_bbox,
-	build_retry_crop_from_bbox,
-	crop_bbox_image,
-	resolve_block_crop_bbox,
-	set_block_ocr_crop_diagnostics,
+	build_retry_crop,
+	crop_block_image,
 	set_block_ocr_diagnostics,
 )
 from modules.utils.device import get_providers
@@ -33,7 +30,6 @@ logger = logging.getLogger(__name__)
 LANG_TO_REC_MODEL: dict[str, ModelID] = {
 	'ch': ModelID.PPOCR_V5_REC_MOBILE,
 	'en': ModelID.PPOCR_V5_REC_EN_MOBILE,
-	'japan': ModelID.PPOCR_V5_REC_JAPAN_MOBILE,
 	'ko': ModelID.PPOCR_V5_REC_KOREAN_MOBILE,
 	'latin': ModelID.PPOCR_V5_REC_LATIN_MOBILE,
 	'ru': ModelID.PPOCR_V5_REC_ESLAV_MOBILE,
@@ -49,9 +45,6 @@ class PPOCRv5Engine(OCREngine):
 		# Sessions are created lazily in initialize(); keep startup light.
 		self.det_sess: Optional[Any] = None
 		self.rec_sess: Optional[Any] = None
-		self.crop_padding_ratio = 0.05
-		self.retry_crop_ratio_x = 0.06
-		self.retry_crop_ratio_y = 0.10
 		self.det_post = DBPostProcessor(
 			thresh=0.3, 
 			box_thresh=0.5, 
@@ -65,14 +58,8 @@ class PPOCRv5Engine(OCREngine):
 		self, 
 		lang: str = 'ch', 
 		device: str = 'cpu', 
-		det_model: str = 'mobile',
-		crop_padding_ratio: float = 0.05,
-		retry_crop_ratio_x: float = 0.06,
-		retry_crop_ratio_y: float = 0.10,
+		det_model: str = 'mobile'
 	) -> None:
-		self.crop_padding_ratio = max(0.0, float(crop_padding_ratio))
-		self.retry_crop_ratio_x = max(0.0, float(retry_crop_ratio_x))
-		self.retry_crop_ratio_y = max(0.0, float(retry_crop_ratio_y))
 		# Ensure models present
 		det_id = ModelID.PPOCR_V5_DET_MOBILE if det_model == 'mobile' else ModelID.PPOCR_V5_DET_SERVER
 		rec_id = LANG_TO_REC_MODEL.get(lang, ModelID.PPOCR_V5_REC_LATIN_MOBILE)
@@ -292,22 +279,13 @@ class PPOCRv5Engine(OCREngine):
 		return joined_text.strip(), avg_conf
 
 	def _rec_only_blocks(self, img: np.ndarray, blk_list: List[TextBlock]) -> List[TextBlock]:
-		initial_payloads: list[tuple[int, TextBlock, np.ndarray | None, tuple[int, int, int, int] | None]] = []
+		initial_payloads: list[tuple[int, TextBlock, np.ndarray | None]] = []
 		initial_crops: list[np.ndarray] = []
 		initial_indices: list[int] = []
 
 		for idx, blk in enumerate(blk_list):
-			bbox, crop_source = resolve_block_crop_bbox(
-				blk,
-				img.shape,
-				x_ratio=self.crop_padding_ratio,
-				y_ratio=self.crop_padding_ratio,
-				bubble_as_clamp=True,
-				fallback_to_bubble=getattr(blk, "xyxy", None) is None,
-			)
-			set_block_ocr_crop_diagnostics(blk, effective_crop_xyxy=bbox, crop_source=crop_source)
-			crop = crop_bbox_image(img, bbox, auto_rotate_tall=True) if bbox is not None else None
-			initial_payloads.append((idx, blk, crop, bbox))
+			crop = crop_block_image(img, blk.xyxy, auto_rotate_tall=True)
+			initial_payloads.append((idx, blk, crop))
 			if crop is not None:
 				initial_crops.append(crop)
 				initial_indices.append(idx)
@@ -322,7 +300,7 @@ class PPOCRv5Engine(OCREngine):
 		initial_suspicious_indices: list[int] = []
 		retry_candidates: list[tuple[int, TextBlock, str, float]] = []
 
-		for idx, blk, crop, _ in initial_payloads:
+		for idx, blk, crop in initial_payloads:
 			if crop is None:
 				initial_empty_indices.append(idx)
 				retry_candidates.append((idx, blk, "", 0.0))
@@ -381,25 +359,13 @@ class PPOCRv5Engine(OCREngine):
 		if initial_suspicious_indices:
 			logger.info("ppocr suspicious non-empty blocks after initial pass: %s", initial_suspicious_indices)
 
-		retry_payloads: list[tuple[int, TextBlock, np.ndarray | None, tuple[int, int, int, int] | None]] = []
+		retry_payloads: list[tuple[int, TextBlock, np.ndarray | None]] = []
 		retry_crops: list[np.ndarray] = []
 		retry_indices: list[int] = []
 
 		for idx, blk, _, _ in retry_candidates:
-			retry_source_bbox = getattr(blk, "xyxy", None)
-			if retry_source_bbox is None:
-				retry_source_bbox = getattr(blk, "ocr_effective_crop_xyxy", None)
-			retry_clamp = getattr(blk, "bubble_xyxy", None) if getattr(blk, "xyxy", None) is not None else None
-			retry_bbox = build_retry_crop_bbox(
-				img.shape,
-				retry_source_bbox,
-				clamp_xyxy=retry_clamp,
-				x_ratio=self.retry_crop_ratio_x,
-				y_ratio=self.retry_crop_ratio_y,
-			)
-			set_block_ocr_crop_diagnostics(blk, retry_crop_xyxy=retry_bbox)
-			retry_crop = build_retry_crop_from_bbox(img, retry_bbox)
-			retry_payloads.append((idx, blk, retry_crop, retry_bbox))
+			retry_crop = build_retry_crop(img, blk.xyxy)
+			retry_payloads.append((idx, blk, retry_crop))
 			if retry_crop is not None:
 				retry_crops.append(retry_crop)
 				retry_indices.append(idx)
@@ -411,7 +377,7 @@ class PPOCRv5Engine(OCREngine):
 		}
 
 		retry_empty_indices: list[int] = []
-		for idx, blk, retry_crop, _ in retry_payloads:
+		for idx, blk, retry_crop in retry_payloads:
 			initial_text, initial_conf = next(
 				(candidate_text, candidate_conf)
 				for candidate_idx, candidate_blk, candidate_text, candidate_conf in retry_candidates
@@ -524,3 +490,4 @@ class PPOCRv5Engine(OCREngine):
 			x1, y1, x2, y2 = int(xs.min()), int(ys.min()), int(xs.max()), int(ys.max())
 			bboxes.append((x1, y1, x2, y2))
 		return lists_to_blk_list(blk_list, bboxes, texts)
+

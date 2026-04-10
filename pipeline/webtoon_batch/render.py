@@ -13,9 +13,13 @@ from app.ui.canvas.save_renderer import ImageSaveRenderer
 from app.ui.canvas.text.text_item_properties import TextItemProperties
 from app.ui.canvas.text_item import OutlineInfo, OutlineType
 from modules.rendering.render import get_best_render_area, is_vertical_block, pyside_word_wrap
-from modules.utils.export_paths import export_run_root, reserve_export_run_token
+from modules.utils.export_paths import export_run_root, reserve_export_run_token, resolve_export_directory
 from modules.utils.language_utils import get_language_code, is_no_space_lang
 from modules.utils.ocr_debug import export_ocr_debug_artifacts
+from modules.utils.inpaint_debug import (
+    build_inpaint_debug_metadata,
+    export_inpaint_debug_artifacts,
+)
 from modules.utils.render_style_policy import (
     VERTICAL_ALIGNMENT_TOP,
     build_rect_tuple,
@@ -238,15 +242,13 @@ class RenderMixin:
 
         base_name = os.path.splitext(os.path.basename(image_path))[0].strip()
         extension = os.path.splitext(image_path)[1]
-        directory = os.path.dirname(image_path)
-
-        archive_bname = ""
-        for archive in self.main_page.file_handler.archive_info:
-            if image_path in archive["extracted_images"]:
-                archive_path = archive["archive_path"]
-                directory = os.path.dirname(archive_path)
-                archive_bname = os.path.splitext(os.path.basename(archive_path))[0].strip()
-                break
+        directory, archive_bname = resolve_export_directory(
+            image_path,
+            archive_info=self.main_page.file_handler.archive_info,
+            source_records=getattr(self.main_page, "export_source_by_path", {}),
+            project_file=getattr(self.main_page, "project_file", None),
+            temp_dir=getattr(self.main_page, "temp_dir", None),
+        )
 
         export_settings = self._effective_export_settings()
         export_token = self._resolve_export_token(directory, timestamp)
@@ -259,6 +261,11 @@ class RenderMixin:
                     "export_raw_text": bool(export_settings.get("export_raw_text", False)),
                     "export_translated_text": bool(export_settings.get("export_translated_text", False)),
                     "export_inpainted_image": bool(export_settings.get("export_inpainted_image", False)),
+                    "export_detector_overlay": bool(export_settings.get("export_detector_overlay", False)),
+                    "export_raw_mask": bool(export_settings.get("export_raw_mask", False)),
+                    "export_mask_overlay": bool(export_settings.get("export_mask_overlay", False)),
+                    "export_cleanup_mask_delta": bool(export_settings.get("export_cleanup_mask_delta", False)),
+                    "export_debug_metadata": bool(export_settings.get("export_debug_metadata", False)),
                 },
             },
         )
@@ -332,6 +339,65 @@ class RenderMixin:
                 summary.get("ocr_engine", ""),
                 self.main_page.image_states[image_path].get("source_lang", ""),
             )
+
+        summary = self.main_page.image_states[image_path].get("processing_summary", {})
+        debug_state = self.main_page.image_states[image_path].get("inpaint_debug_state") or {}
+        strategy_settings = self.main_page.settings_page.get_hd_strategy_settings()
+        hd_strategy = self.main_page.settings_page.ui.value_mappings.get(
+            strategy_settings.get("strategy", ""),
+            strategy_settings.get("strategy", ""),
+        )
+        detector_cache = getattr(self.block_detection, "block_detector_cache", None)
+        detector_key = summary.get("detector_key") or self.main_page.settings_page.get_tool_selection("detector")
+        detector_engine = summary.get("detector_engine") or getattr(detector_cache, "last_engine_name", "") or ""
+        detector_device = summary.get("device") or getattr(detector_cache, "last_device", "") or ""
+        cleanup_stats = debug_state.get("cleanup_stats") or {"applied": False, "component_count": 0, "block_count": 0}
+        raw_mask = debug_state.get("raw_mask")
+        final_mask = debug_state.get("final_mask")
+        cleanup_delta = None
+        if final_mask is not None:
+            import numpy as _np
+            final_arr = _np.asarray(final_mask)
+            if final_arr.ndim == 3:
+                final_arr = final_arr[:, :, 0]
+            if raw_mask is None:
+                raw_arr = _np.zeros_like(final_arr, dtype=_np.uint8)
+            else:
+                raw_arr = _np.asarray(raw_mask)
+                if raw_arr.ndim == 3:
+                    raw_arr = raw_arr[:, :, 0]
+            cleanup_delta = _np.where((final_arr > 0) & (raw_arr <= 0), 255, 0).astype(_np.uint8)
+        mask_details = debug_state.get("mask_details") or {}
+        debug_metadata = build_inpaint_debug_metadata(
+            image_path=image_path,
+            run_type=str(getattr(self.main_page, "_current_batch_run_type", "batch") or "batch"),
+            detector_key=detector_key or "",
+            detector_engine=detector_engine,
+            device=detector_device,
+            inpainter=self.main_page.settings_page.get_tool_selection("inpainter"),
+            hd_strategy=hd_strategy,
+            blocks=debug_state.get("mask_blocks") or blk_list,
+            raw_mask=raw_mask,
+            cleanup_delta=cleanup_delta,
+            cleanup_stats=cleanup_stats,
+            mask_refiner=str(mask_details.get("mask_refiner", "legacy_bbox") or "legacy_bbox"),
+            protect_mask_applied=bool(mask_details.get("keep_existing_lines", False)),
+            protect_mask=mask_details.get("protect_mask"),
+            refiner_backend=str(mask_details.get("refiner_backend", "legacy") or "legacy"),
+            refiner_device=str(mask_details.get("refiner_device", "cpu") or "cpu"),
+            inpainter_backend=str(debug_state.get("inpainter_backend", "unknown") or "unknown"),
+        )
+        export_inpaint_debug_artifacts(
+            export_root=export_root,
+            archive_bname=archive_bname,
+            page_base_name=base_name,
+            image=image,
+            blocks=debug_state.get("mask_blocks") or blk_list,
+            export_settings=export_settings,
+            raw_mask=raw_mask,
+            cleanup_delta=cleanup_delta,
+            metadata=debug_metadata,
+        )
 
         renderer = ImageSaveRenderer(image)
         patches = self.final_patches_for_save.get(image_path, [])

@@ -2,6 +2,8 @@ import logging
 import numpy as np
 from typing import Any
 
+from .local_runtime import LocalOCRRuntimeManager
+from .selection import normalize_ocr_mode, resolve_ocr_engine
 from ..utils.textblock import TextBlock
 from ..utils.device import resolve_device
 from ..utils.language_utils import language_codes
@@ -38,8 +40,12 @@ class OCRProcessor:
         self.settings = main_page.settings_page
         self.source_lang = source_lang
         self.source_lang_english = self._get_english_lang(source_lang)
-        self.ocr_key = self._get_ocr_key(self.settings.get_tool_selection('ocr'))
+        self.ocr_mode = normalize_ocr_mode(self.settings.get_tool_selection('ocr'))
+        self.ocr_key = resolve_ocr_engine(self.ocr_mode, self.source_lang_english)
         self.last_device = resolve_device(self.settings.is_gpu_enabled())
+        runtime_manager = getattr(self.main_page, "local_ocr_runtime_manager", None)
+        if isinstance(runtime_manager, LocalOCRRuntimeManager):
+            runtime_manager.ensure_engine(self.ocr_key, self.settings)
         try:
             self.last_engine_name = OCRFactory.create_engine(
                 self.settings,
@@ -68,7 +74,8 @@ class OCRProcessor:
         engine = OCRFactory.create_engine(self.settings, self.source_lang_english, self.ocr_key)
         self.last_engine_name = engine.__class__.__name__
         logger.info(
-            "ocr self-check: selected=%s resolved=%s source_lang=%s device=%s blocks=%d",
+            "ocr self-check: selected_mode=%s resolved_key=%s resolved_engine=%s source_lang=%s device=%s blocks=%d",
+            self.ocr_mode,
             self.ocr_key,
             self.last_engine_name,
             self.source_lang_english,
@@ -82,16 +89,3 @@ class OCRProcessor:
         for blk in blk_list:
             blk.source_lang = source_lang_code
 
-    def _get_ocr_key(self, localized_ocr: str) -> str:
-        translator_map = {
-            self.settings.ui.tr('GPT-4.1-mini'): 'GPT-4.1-mini',
-            self.settings.ui.tr('Microsoft OCR'): 'Microsoft OCR',
-            self.settings.ui.tr('Google Cloud Vision'): 'Google Cloud Vision',
-            self.settings.ui.tr('Gemini-2.0-Flash'): 'Gemini-2.0-Flash',
-            self.settings.ui.tr('MangaOCR'): 'MangaOCR',
-            self.settings.ui.tr('PPOCRv5'): 'PPOCRv5',
-            self.settings.ui.tr('PaddleOCR VL'): 'PaddleOCR VL',
-            self.settings.ui.tr('HunyuanOCR'): 'HunyuanOCR',
-            self.settings.ui.tr('Default'): 'Default',
-        }
-        return translator_map.get(localized_ocr, localized_ocr)

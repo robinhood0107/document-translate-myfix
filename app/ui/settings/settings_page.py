@@ -7,12 +7,30 @@ from PySide6 import QtGui, QtWidgets
 from PySide6.QtCore import QSettings, QTimer, Qt, Signal
 from PySide6.QtGui import QFont, QFontDatabase
 
+from modules.ocr.selection import (
+    OCR_DEFAULT_LABEL,
+    OCR_MODE_BEST_LOCAL,
+    OCR_MODE_DEFAULT,
+    OCR_MODE_GEMINI,
+    OCR_MODE_GOOGLE,
+    OCR_MODE_HUNYUAN,
+    OCR_MODE_MICROSOFT,
+    OCR_MODE_PADDLE_VL,
+    OCR_OPTIMAL_LABEL,
+    normalize_ocr_mode,
+)
 from .settings_ui import SettingsPageUI
 from .gemma_local_server_page import GemmaLocalServerPage
 from .hunyuan_ocr_page import HunyuanOCRPage
 from app.update_checker import UpdateChecker
+from app.shortcuts import get_default_shortcuts
 from modules.utils.device import is_gpu_available
 from modules.utils.paths import get_default_project_autosave_dir, get_user_data_dir
+from modules.utils.inpainting_runtime import (
+    inpainter_default_settings,
+    normalize_inpainter_key,
+    normalized_mask_refiner_settings,
+)
 
 
 logger = logging.getLogger(__name__)
@@ -29,7 +47,7 @@ class SettingsPage(QtWidgets.QWidget):
         "Custom": "Custom",
         "GPT-4.1": "Open AI GPT",
         "GPT-4.1-mini": "Open AI GPT",
-        "Claude-4.5-Sonnet": "Anthropic Claude",
+        "Claude-4.6-Sonnet": "Anthropic Claude",
         "Claude-4.5-Haiku": "Anthropic Claude",
         "Gemini-2.0-Flash": "Google Gemini",
         "Gemini-2.5-Pro": "Google Gemini",
@@ -88,9 +106,16 @@ class SettingsPage(QtWidgets.QWidget):
         self.ui.lang_combo.currentTextChanged.connect(self.on_language_changed)
         self.ui.font_browser.sig_files_changed.connect(self.import_font)
         self.ui.check_update_button.clicked.connect(self.check_for_updates)
+        self.ui.shortcuts_page.shortcut_changed.connect(self.on_shortcut_changed)
+        self.ui.translator_combo.currentTextChanged.connect(self._sync_extra_context_limit)
         self.ui.raw_text_checkbox.stateChanged.connect(self._save_settings_if_not_loading)
         self.ui.translated_text_checkbox.stateChanged.connect(self._save_settings_if_not_loading)
         self.ui.inpainted_image_checkbox.stateChanged.connect(self._save_settings_if_not_loading)
+        self.ui.detector_overlay_checkbox.stateChanged.connect(self._save_settings_if_not_loading)
+        self.ui.raw_mask_checkbox.stateChanged.connect(self._save_settings_if_not_loading)
+        self.ui.mask_overlay_checkbox.stateChanged.connect(self._save_settings_if_not_loading)
+        self.ui.cleanup_mask_delta_checkbox.stateChanged.connect(self._save_settings_if_not_loading)
+        self.ui.debug_metadata_checkbox.stateChanged.connect(self._save_settings_if_not_loading)
         self._connect_live_save_signals()
 
     def _save_settings_if_not_loading(self, *_args):
@@ -120,14 +145,22 @@ class SettingsPage(QtWidgets.QWidget):
             self.ui.translator_combo,
             self.ui.ocr_combo,
             self.ui.detector_combo,
+            self.ui.mask_refiner_combo,
             self.ui.inpainter_combo,
             self.ui.inpaint_strategy_combo,
+            self.ui.ctd_detect_size_combo,
+            self.ui.ctd_det_rearrange_max_batches_combo,
+            self.ui.ctd_device_combo,
+            self.ui.inpainter_size_combo,
+            self.ui.inpainter_device_combo,
+            self.ui.inpainter_precision_combo,
         ]
         for widget in combo_widgets:
             widget.currentTextChanged.connect(self._save_settings_if_not_loading)
 
         checkbox_widgets = [
             self.ui.use_gpu_checkbox,
+            self.ui.keep_existing_lines_checkbox,
             self.ui.image_checkbox,
             self.ui.uppercase_checkbox,
             self.ui.save_keys_checkbox,
@@ -154,6 +187,10 @@ class SettingsPage(QtWidgets.QWidget):
             self.ui.gemma_chunk_size_spinbox,
             self.ui.gemma_max_completion_tokens_spinbox,
             self.ui.gemma_request_timeout_spinbox,
+            self.ui.ctd_font_size_multiplier_spinbox,
+            self.ui.ctd_font_size_max_spinbox,
+            self.ui.ctd_font_size_min_spinbox,
+            self.ui.ctd_mask_dilate_size_spinbox,
         ]
         for widget in spin_widgets:
             widget.valueChanged.connect(self._save_settings_if_not_loading)
@@ -162,6 +199,11 @@ class SettingsPage(QtWidgets.QWidget):
             signal = getattr(widget, "textChanged", None)
             if signal is not None:
                 signal.connect(self._save_settings_if_not_loading)
+
+    def _sync_extra_context_limit(self, translator: str | None = None):
+        raw_service = translator if translator is not None else self.ui.translator_combo.currentText()
+        normalized = self.ui.value_mappings.get(raw_service, raw_service)
+        self.ui.llms_page.set_extra_context_unlimited(normalized == "Custom")
 
     def on_theme_changed(self, theme: str):
         self.theme_changed.emit(theme)
@@ -179,7 +221,59 @@ class SettingsPage(QtWidgets.QWidget):
             "inpainter": self.ui.inpainter_combo,
             "detector": self.ui.detector_combo,
         }
+        combo = tool_combos[tool_type]
+        if tool_type == "ocr":
+            current_data = combo.currentData()
+            if isinstance(current_data, str) and current_data.strip():
+                return self._normalize_ocr_mode_value(current_data)
+            return self._normalize_ocr_mode_value(combo.currentText())
+        if tool_type == "inpainter":
+            return normalize_inpainter_key(combo.currentText())
+        return combo.currentText()
+
+    def get_tool_display_text(self, tool_type: str) -> str:
+        tool_combos = {
+            "translator": self.ui.translator_combo,
+            "ocr": self.ui.ocr_combo,
+            "inpainter": self.ui.inpainter_combo,
+            "detector": self.ui.detector_combo,
+        }
         return tool_combos[tool_type].currentText()
+
+    def get_ocr_mode_label(self, mode_key: str | None = None) -> str:
+        normalized = self._normalize_ocr_mode_value(mode_key or self.get_tool_selection("ocr"))
+        index = self.ui.ocr_combo.findData(normalized)
+        if index != -1:
+            return self.ui.ocr_combo.itemText(index)
+        return normalized
+
+    def _normalized_ocr_aliases(self) -> dict[str, str]:
+        return {
+            self.ui.tr("Default"): OCR_MODE_DEFAULT,
+            self.ui.tr(OCR_DEFAULT_LABEL): OCR_MODE_DEFAULT,
+            self.ui.tr("Optimal (HunyuanOCR / PaddleOCR VL)"): OCR_MODE_BEST_LOCAL,
+            self.ui.tr(OCR_OPTIMAL_LABEL): OCR_MODE_BEST_LOCAL,
+            self.ui.tr("Microsoft OCR"): OCR_MODE_MICROSOFT,
+            self.ui.tr("Google Cloud Vision"): OCR_MODE_GOOGLE,
+            self.ui.tr("Gemini-2.0-Flash"): OCR_MODE_GEMINI,
+            self.ui.tr("PaddleOCR VL"): OCR_MODE_PADDLE_VL,
+            self.ui.tr("HunyuanOCR"): OCR_MODE_HUNYUAN,
+        }
+
+    def _normalize_ocr_mode_value(self, raw_value: str | None) -> str:
+        raw = str(raw_value or "").strip()
+        if not raw:
+            return OCR_MODE_DEFAULT
+        return normalize_ocr_mode(self._normalized_ocr_aliases().get(raw, raw))
+
+    def _set_ocr_mode(self, raw_value: str | None) -> None:
+        normalized = self._normalize_ocr_mode_value(raw_value)
+        index = self.ui.ocr_combo.findData(normalized)
+        if index != -1:
+            self.ui.ocr_combo.setCurrentIndex(index)
+            return
+        fallback = self.ui.ocr_combo.findData(OCR_MODE_DEFAULT)
+        self.ui.ocr_combo.setCurrentIndex(fallback if fallback != -1 else 0)
 
     def is_gpu_enabled(self):
         if not is_gpu_available():
@@ -227,18 +321,38 @@ class SettingsPage(QtWidgets.QWidget):
         }
 
     def get_ocr_generic_settings(self):
-        defaults = {
-            "manga_expansion_percentage": 5,
+        return {
+            "manga_expansion_percentage": 7,
             "crop_padding_ratio": 0.05,
             "ppocr_retry_crop_ratio_x": 0.06,
             "ppocr_retry_crop_ratio_y": 0.10,
         }
-        payload = getattr(self, "_benchmark_ocr_generic_settings", None)
-        if not isinstance(payload, dict):
-            return defaults
-        merged = dict(defaults)
-        merged.update(payload)
-        return merged
+
+    def get_mask_refiner_settings(self):
+        return normalized_mask_refiner_settings({
+            "mask_refiner": self.ui.mask_refiner_combo.currentText(),
+            "ctd_detect_size": int(self.ui.ctd_detect_size_combo.currentText()),
+            "ctd_det_rearrange_max_batches": int(self.ui.ctd_det_rearrange_max_batches_combo.currentText()),
+            "ctd_device": self.ui.ctd_device_combo.currentText(),
+            "ctd_font_size_multiplier": float(self.ui.ctd_font_size_multiplier_spinbox.value()),
+            "ctd_font_size_max": int(self.ui.ctd_font_size_max_spinbox.value()),
+            "ctd_font_size_min": int(self.ui.ctd_font_size_min_spinbox.value()),
+            "ctd_mask_dilate_size": int(self.ui.ctd_mask_dilate_size_spinbox.value()),
+            "keep_existing_lines": self.ui.keep_existing_lines_checkbox.isChecked(),
+        })
+
+    def get_inpainter_runtime_settings(self, inpainter_key: str | None = None):
+        normalized = normalize_inpainter_key(inpainter_key or self.get_tool_selection("inpainter"))
+        defaults = inpainter_default_settings(normalized)
+        runtime = {
+            "backend": defaults.get("backend", "torch"),
+            "device": self.ui.inpainter_device_combo.currentText() or defaults.get("device", "cuda"),
+            "inpaint_size": int(self.ui.inpainter_size_combo.currentText() or defaults.get("inpaint_size", 2048)),
+            "precision": self.ui.inpainter_precision_combo.currentText() or defaults.get("precision", "fp32"),
+        }
+        if normalized != "lama_large_512px":
+            runtime["precision"] = defaults.get("precision", "fp32")
+        return runtime
 
     def get_export_settings(self):
         owner = self.window()
@@ -258,6 +372,11 @@ class SettingsPage(QtWidgets.QWidget):
             "export_raw_text": self.ui.raw_text_checkbox.isChecked(),
             "export_translated_text": self.ui.translated_text_checkbox.isChecked(),
             "export_inpainted_image": self.ui.inpainted_image_checkbox.isChecked(),
+            "export_detector_overlay": self.ui.detector_overlay_checkbox.isChecked(),
+            "export_raw_mask": self.ui.raw_mask_checkbox.isChecked(),
+            "export_mask_overlay": self.ui.mask_overlay_checkbox.isChecked(),
+            "export_cleanup_mask_delta": self.ui.cleanup_mask_delta_checkbox.isChecked(),
+            "export_debug_metadata": self.ui.debug_metadata_checkbox.isChecked(),
             "project_autosave_enabled": autosave_enabled,
             "project_autosave_interval_min": int(self.ui.project_autosave_interval_spinbox.value()),
             "project_autosave_folder": autosave_folder,
@@ -336,15 +455,32 @@ class SettingsPage(QtWidgets.QWidget):
                 "inpainter": self.get_tool_selection("inpainter"),
                 "use_gpu": self.is_gpu_enabled(),
                 "hd_strategy": self.get_hd_strategy_settings(),
+                "mask_refiner_settings": self.get_mask_refiner_settings(),
+                "inpainter_runtime": self.get_inpainter_runtime_settings(),
             },
             "paddleocr_vl": self.get_paddleocr_vl_settings(),
             "hunyuan_ocr": self.get_hunyuan_ocr_settings(),
             "gemma_local_server": self.get_gemma_local_server_settings(),
             "llm": self.get_llm_settings(),
             "export": self.get_export_settings(),
+            "shortcuts": self.ui.shortcuts_page.get_shortcuts(),
             "credentials": self.get_credentials(),
             "save_keys": self.ui.save_keys_checkbox.isChecked(),
         }
+
+    def on_shortcut_changed(self, shortcut_id: str, sequence: str) -> None:
+        if self._loading_settings:
+            return
+
+        settings = QSettings("ComicLabs", "ComicTranslate")
+        settings.beginGroup("shortcuts")
+        settings.setValue(shortcut_id, sequence)
+        settings.endGroup()
+
+        owner = self.window()
+        shortcut_ctrl = getattr(owner, "shortcut_ctrl", None)
+        if shortcut_ctrl is not None:
+            shortcut_ctrl.apply_shortcuts()
 
     def import_font(self, file_paths: list[str]):
         file_paths = [
@@ -427,11 +563,13 @@ class SettingsPage(QtWidgets.QWidget):
 
         language = settings.value("language", "English")
         translated_language = self.ui.reverse_mappings.get(language, language)
-        self.ui.lang_combo.setCurrentText(translated_language)
+        lang_index = self.ui.lang_combo.findText(translated_language)
+        self.ui.lang_combo.setCurrentIndex(lang_index if lang_index != -1 else 0)
 
         theme = settings.value("theme", "Dark")
         translated_theme = self.ui.reverse_mappings.get(theme, theme)
-        self.ui.theme_combo.setCurrentText(translated_theme)
+        theme_index = self.ui.theme_combo.findText(translated_theme)
+        self.ui.theme_combo.setCurrentIndex(theme_index if theme_index != -1 else 0)
         self.theme_changed.emit(translated_theme)
 
         translator = settings.value("tools/translator", "Gemini-2.5-Pro", type=str)
@@ -439,34 +577,35 @@ class SettingsPage(QtWidgets.QWidget):
             translator = self._resolve_legacy_custom_translator()
         elif translator == "Custom Local Server":
             translator = "Custom Local Server(Gemma)"
+        elif translator == "Claude-4.5-Sonnet":
+            translator = "Claude-4.6-Sonnet"
 
         settings.beginGroup("tools")
         translated_translator = self.ui.reverse_mappings.get(translator, translator)
         if self.ui.translator_combo.findText(translated_translator) != -1:
-            self.ui.translator_combo.setCurrentText(translated_translator)
+            self.ui.translator_combo.setCurrentIndex(self.ui.translator_combo.findText(translated_translator))
         else:
             self.ui.translator_combo.setCurrentIndex(-1)
+        self._sync_extra_context_limit(translated_translator)
 
-        ocr = settings.value("ocr", "Default")
-        translated_ocr = self.ui.reverse_mappings.get(ocr, ocr)
-        if self.ui.ocr_combo.findText(translated_ocr) != -1:
-            self.ui.ocr_combo.setCurrentText(translated_ocr)
-        else:
-            self.ui.ocr_combo.setCurrentIndex(-1)
+        ocr = settings.value("ocr", OCR_MODE_DEFAULT, type=str)
+        self._set_ocr_mode(ocr)
 
-        inpainter = settings.value("inpainter", "AOT")
+        inpainter = normalize_inpainter_key(settings.value("inpainter", "AOT", type=str))
         translated_inpainter = self.ui.reverse_mappings.get(inpainter, inpainter)
         if self.ui.inpainter_combo.findText(translated_inpainter) != -1:
-            self.ui.inpainter_combo.setCurrentText(translated_inpainter)
+            self.ui.inpainter_combo.setCurrentIndex(self.ui.inpainter_combo.findText(translated_inpainter))
         else:
-            self.ui.inpainter_combo.setCurrentIndex(-1)
+            self.ui.inpainter_combo.setCurrentIndex(0)
 
         detector = settings.value("detector", "RT-DETR-v2")
         translated_detector = self.ui.reverse_mappings.get(detector, detector)
         if self.ui.detector_combo.findText(translated_detector) != -1:
-            self.ui.detector_combo.setCurrentText(translated_detector)
+            self.ui.detector_combo.setCurrentIndex(self.ui.detector_combo.findText(translated_detector))
         else:
             self.ui.detector_combo.setCurrentIndex(-1)
+
+        self.ui.tools_page._update_inpainter_runtime_widgets(self.ui.inpainter_combo.currentIndex())
 
         if is_gpu_available():
             self.ui.use_gpu_checkbox.setChecked(settings.value("use_gpu", False, type=bool))
@@ -477,7 +616,7 @@ class SettingsPage(QtWidgets.QWidget):
         strategy = settings.value("strategy", "Resize")
         translated_strategy = self.ui.reverse_mappings.get(strategy, strategy)
         if self.ui.inpaint_strategy_combo.findText(translated_strategy) != -1:
-            self.ui.inpaint_strategy_combo.setCurrentText(translated_strategy)
+            self.ui.inpaint_strategy_combo.setCurrentIndex(self.ui.inpaint_strategy_combo.findText(translated_strategy))
         else:
             self.ui.inpaint_strategy_combo.setCurrentIndex(0)
 
@@ -486,6 +625,29 @@ class SettingsPage(QtWidgets.QWidget):
         elif strategy == "Crop":
             self.ui.crop_margin_spinbox.setValue(settings.value("crop_margin", 512, type=int))
             self.ui.crop_trigger_spinbox.setValue(settings.value("crop_trigger_size", 512, type=int))
+        settings.endGroup()
+
+        settings.beginGroup("mask_refiner_settings")
+        mask_refiner = settings.value("mask_refiner", "ctd", type=str)
+        idx = self.ui.mask_refiner_combo.findText(mask_refiner)
+        if idx != -1:
+            self.ui.mask_refiner_combo.setCurrentIndex(idx)
+        self.ui.tools_page._update_mask_refiner_widgets(self.ui.mask_refiner_combo.currentIndex())
+        self.ui.keep_existing_lines_checkbox.setChecked(settings.value("keep_existing_lines", True, type=bool))
+        self.ui.ctd_detect_size_combo.setCurrentText(str(settings.value("ctd_detect_size", 1280, type=int)))
+        self.ui.ctd_det_rearrange_max_batches_combo.setCurrentText(str(settings.value("ctd_det_rearrange_max_batches", 4, type=int)))
+        self.ui.ctd_device_combo.setCurrentText(settings.value("ctd_device", "cuda", type=str))
+        self.ui.ctd_font_size_multiplier_spinbox.setValue(settings.value("ctd_font_size_multiplier", 1.0, type=float))
+        self.ui.ctd_font_size_max_spinbox.setValue(settings.value("ctd_font_size_max", -1, type=int))
+        self.ui.ctd_font_size_min_spinbox.setValue(settings.value("ctd_font_size_min", -1, type=int))
+        self.ui.ctd_mask_dilate_size_spinbox.setValue(settings.value("ctd_mask_dilate_size", 2, type=int))
+        settings.endGroup()
+
+        runtime_defaults = inpainter_default_settings(inpainter)
+        settings.beginGroup("inpainter_runtime")
+        self.ui.inpainter_size_combo.setCurrentText(str(settings.value("inpaint_size", runtime_defaults.get("inpaint_size", 2048), type=int)))
+        self.ui.inpainter_device_combo.setCurrentText(settings.value("device", runtime_defaults.get("device", "cuda"), type=str))
+        self.ui.inpainter_precision_combo.setCurrentText(settings.value("precision", runtime_defaults.get("precision", "fp32"), type=str))
         settings.endGroup()
         settings.endGroup()
 
@@ -504,10 +666,18 @@ class SettingsPage(QtWidgets.QWidget):
             settings.value("visualize", False, type=bool)
         )
         self.ui.paddleocr_vl_max_new_tokens_spinbox.setValue(
-            settings.value("max_new_tokens", 256, type=int)
+            settings.value(
+                "max_new_tokens",
+                self.ui.paddleocr_vl_page.DEFAULT_MAX_NEW_TOKENS,
+                type=int,
+            )
         )
         self.ui.paddleocr_vl_parallel_workers_spinbox.setValue(
-            settings.value("parallel_workers", 2, type=int)
+            settings.value(
+                "parallel_workers",
+                self.ui.paddleocr_vl_page.DEFAULT_PARALLEL_WORKERS,
+                type=int,
+            )
         )
         settings.endGroup()
 
@@ -585,6 +755,21 @@ class SettingsPage(QtWidgets.QWidget):
         self.ui.inpainted_image_checkbox.setChecked(
             settings.value("export_inpainted_image", False, type=bool)
         )
+        self.ui.detector_overlay_checkbox.setChecked(
+            settings.value("export_detector_overlay", False, type=bool)
+        )
+        self.ui.raw_mask_checkbox.setChecked(
+            settings.value("export_raw_mask", False, type=bool)
+        )
+        self.ui.mask_overlay_checkbox.setChecked(
+            settings.value("export_mask_overlay", False, type=bool)
+        )
+        self.ui.cleanup_mask_delta_checkbox.setChecked(
+            settings.value("export_cleanup_mask_delta", False, type=bool)
+        )
+        self.ui.debug_metadata_checkbox.setChecked(
+            settings.value("export_debug_metadata", False, type=bool)
+        )
         autosave_enabled = settings.value("project_autosave_enabled", False, type=bool)
         owner = self.parent()
         title_bar = getattr(owner, "title_bar", None)
@@ -597,6 +782,18 @@ class SettingsPage(QtWidgets.QWidget):
             settings.value("project_autosave_folder", get_default_project_autosave_dir(), type=str)
         )
         settings.endGroup()
+
+        settings.beginGroup("shortcuts")
+        default_shortcuts = get_default_shortcuts()
+        shortcut_values = {}
+        for shortcut_id, default_value in default_shortcuts.items():
+            shortcut_values[shortcut_id] = settings.value(shortcut_id, default_value, type=str)
+        settings.endGroup()
+        self.ui.shortcuts_page.load_shortcuts(shortcut_values)
+        owner = self.window()
+        shortcut_ctrl = getattr(owner, "shortcut_ctrl", None)
+        if shortcut_ctrl is not None:
+            shortcut_ctrl.apply_shortcuts()
 
         settings.beginGroup("credentials")
         save_keys = settings.value("save_keys", False, type=bool)

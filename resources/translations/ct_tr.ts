@@ -150,8 +150,16 @@
         <translation>Arapça</translation>
     </message>
     <message>
+        <source>Hebrew</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
         <source>Czech</source>
         <translation>Çekçe</translation>
+    </message>
+    <message>
+        <source>Croatian</source>
+        <translation type="unfinished"></translation>
     </message>
     <message>
         <source>Persian</source>
@@ -221,6 +229,81 @@ Use Custom Local Server(Gemma) with the included Gemma Docker setup.</source>
         <source>Auto-Save Project</source>
         <translation>Projeyi Otomatik Kaydet</translation>
     </message>
+    <message>
+        <source>Rename or move the current project file</source>
+        <translation type="unfinished"></translation>
+    </message>
+</context>
+<context>
+    <name>ExportChaptersDialog</name>
+    <message>
+        <source>Partition Export</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Pages with the same chapter name are exported together. Edit the Chapter column to merge or split chapters.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Output folder</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Browse</source>
+        <translation type="unfinished">Göz at</translation>
+    </message>
+    <message>
+        <source>Selected pages</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>New chapter name</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Apply</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Page</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>File</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Chapter</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Export targets</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Reset Chapters</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Select Export Folder</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Output Folder Required</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Choose an existing output folder.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Chapter Name Required</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Each page must belong to a non-empty chapter.</source>
+        <translation type="unfinished"></translation>
+    </message>
 </context>
 <context>
     <name>ExportPage</name>
@@ -243,6 +326,26 @@ Use Custom Local Server(Gemma) with the included Gemma Docker setup.</source>
     <message>
         <source>Export Inpainted Image</source>
         <translation>Boyanmış Görseli Dışa Aktar</translation>
+    </message>
+    <message>
+        <source>Export Detector Overlay (Debug)</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Export Raw Inpaint Mask (Debug)</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Export Mask Overlay (Debug)</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Export Cleanup Mask Delta (Debug)</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Export Debug Metadata (Debug)</source>
+        <translation type="unfinished"></translation>
     </message>
 </context>
 <context>
@@ -296,6 +399,7 @@ If responses are truncated, lower Chunk Size or increase LLAMA_CTX_SIZE in docke
     <message>
         <source>Connect Comic Translate to your local HunyuanOCR llama.cpp server.
 This OCR engine sends cropped text regions to the OpenAI-compatible /chat/completions endpoint.
+Keep the default localhost URL if you want Comic Translate to start the bundled Docker runtime on demand.
 Start the server with both the HunyuanOCR GGUF model and the matching mmproj file.</source>
         <translation type="unfinished"></translation>
     </message>
@@ -582,6 +686,51 @@ Please select a different tool in Settings.</source>
 Lütfen Ayarlar&apos;dan farklı bir araç seçin.</translation>
     </message>
     <message>
+        <source>Unable to prepare the local {service} runtime.
+Check Settings &gt; {settings_page} and make sure Docker is available.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Confirm Automatic Processing</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Review the automatic processing settings before starting.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Run: {run_label}</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Pages: {page_count}</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Source Language: {source_lang}</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Target Language: {target_lang}</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Text Recognition Mode: {ocr_mode}</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Resolved Text Recognition: {ocr_engine}</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Start</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Cancel</source>
+        <translation type="unfinished">İptal</translation>
+    </message>
+    <message>
         <source>{0} image(s) were skipped in this batch.
 Open Batch Report to see all skipped images and reasons.</source>
         <translation>Bu toplu işlemde {0} görsel atlandı.
@@ -690,6 +839,23 @@ Lütfen internet bağlantınızı kontrol edin.</translation>
         <source>Retry also failed after contrast preprocessing.</source>
         <translation type="unfinished"></translation>
     </message>
+    <message>
+        <source>This PSD was exported by this application, but it now contains Photoshop features that are not fully supported on import. It may not appear exactly as it did in Photoshop.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Imported a PSD that was not exported by this application. Visible image layers were flattened, and unsupported Photoshop features may not match exactly.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>PSD import/export requires the optional Python package &apos;PhotoshopAPI&apos;.
+Install it to use PSD features.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>PSD Feature Unavailable</source>
+        <translation type="unfinished"></translation>
+    </message>
 </context>
 <context>
     <name>NavRailMixin</name>
@@ -720,6 +886,10 @@ Lütfen internet bağlantınızı kontrol edin.</translation>
     <message>
         <source>Project File</source>
         <translation>Proje Dosyası</translation>
+    </message>
+    <message>
+        <source>PSD</source>
+        <translation type="unfinished"></translation>
     </message>
     <message>
         <source>Save Currently Loaded Image</source>
@@ -791,6 +961,7 @@ Lütfen internet bağlantınızı kontrol edin.</translation>
     <message>
         <source>Connect Comic Translate to your local PaddleOCR VL Docker service.
 This OCR engine sends cropped text regions to the /layout-parsing endpoint.
+Keep the default localhost URL if you want Comic Translate to start the bundled Docker runtime on demand.
 Leave markdown or visualization options disabled unless you need debugging.</source>
         <translation type="unfinished"></translation>
     </message>
@@ -1130,10 +1301,6 @@ Restart now?</source>
 <context>
     <name>SettingsPageUI</name>
     <message>
-        <source>Default</source>
-        <translation>Varsayılan</translation>
-    </message>
-    <message>
         <source>Microsoft OCR</source>
         <translation>Microsoft OCR</translation>
     </message>
@@ -1230,10 +1397,6 @@ Restart now?</source>
         <translation>GPT-4.1</translation>
     </message>
     <message>
-        <source>Claude-4.5-Sonnet</source>
-        <translation>Claude-4.5-Sonnet</translation>
-    </message>
-    <message>
         <source>Claude-4.5-Haiku</source>
         <translation>Claude-4.5-Haiku</translation>
     </message>
@@ -1246,10 +1409,6 @@ Restart now?</source>
         <translation>Gemini-2.5-Pro</translation>
     </message>
     <message>
-        <source>PPOCRv5</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
         <source>HunyuanOCR</source>
         <translation type="unfinished"></translation>
     </message>
@@ -1258,8 +1417,20 @@ Restart now?</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
+        <source>Claude-4.6-Sonnet</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
         <source>Microsoft Translator</source>
         <translation>Microsoft Translator</translation>
+    </message>
+    <message>
+        <source>Default (existing auto: MangaOCR / PPOCR / Pororo...)</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Optimal (HunyuanOCR / PaddleOCR VL)</source>
+        <translation type="unfinished"></translation>
     </message>
     <message>
         <source>Personalization</source>
@@ -1298,12 +1469,70 @@ Restart now?</source>
         <translation>Dışa Aktar</translation>
     </message>
     <message>
+        <source>Shortcuts</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
         <source>Advanced</source>
         <translation>Gelişmiş</translation>
     </message>
     <message>
         <source>About</source>
         <translation>Hakkında</translation>
+    </message>
+</context>
+<context>
+    <name>ShortcutDefinitions</name>
+    <message>
+        <source>Undo</source>
+        <translation type="unfinished">Geri Al</translation>
+    </message>
+    <message>
+        <source>Undo the last editing action.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Redo</source>
+        <translation type="unfinished">Yinele</translation>
+    </message>
+    <message>
+        <source>Redo the previously undone action.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Delete Selected Box</source>
+        <translation type="unfinished">Seçili Kutuyu Sil</translation>
+    </message>
+    <message>
+        <source>Delete the currently selected text box.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Restore Text Blocks</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Draw saved text blocks back onto the image for editing.</source>
+        <translation type="unfinished"></translation>
+    </message>
+</context>
+<context>
+    <name>ShortcutsPage</name>
+    <message>
+        <source>Keyboard Shortcuts</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Assign shortcuts for common editing actions. Leave a field empty to disable that shortcut.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Reset</source>
+        <translation type="unfinished">Sıfırla</translation>
+    </message>
+    <message>
+        <source>Reset All Shortcuts</source>
+        <translation type="unfinished"></translation>
     </message>
 </context>
 <context>
@@ -1397,6 +1626,54 @@ Başlamak için bir proje açın veya oluşturun.</translation>
         <translation>Metin Algılayıcı</translation>
     </message>
     <message>
+        <source>Precise Masking</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Mask Refiner</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>legacy_bbox</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>ctd</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Keep Existing Lines</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>detect_size</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>det_rearrange_max_batches</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>device</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>font size multiplier</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>font size max</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>font size min</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>mask dilate size</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
         <source>Image Cleaning</source>
         <translation>Görsel Temizleme</translation>
     </message>
@@ -1407,6 +1684,14 @@ Başlamak için bir proje açın veya oluşturun.</translation>
     <message>
         <source>AOT</source>
         <translation>AOT</translation>
+    </message>
+    <message>
+        <source>inpaint_size</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>precision</source>
+        <translation type="unfinished"></translation>
     </message>
     <message>
         <source>HD Strategy</source>
@@ -1449,6 +1734,14 @@ sonra yeniden boyutlandırılmış görselde boyama işlemi yapın.</translation
     <message>
         <source>Original</source>
         <translation>Orijinal</translation>
+    </message>
+    <message>
+        <source>lama_large_512px</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>lama_mpe</source>
+        <translation type="unfinished"></translation>
     </message>
 </context>
 <context>
@@ -1728,6 +2021,49 @@ back on the Image (for further editing)</source>
     </message>
 </context>
 <context>
+    <name>_ProjectDetailsPopup</name>
+    <message>
+        <source>File name</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Location</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Browse</source>
+        <translation type="unfinished">Göz at</translation>
+    </message>
+    <message>
+        <source>Apply</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Apply to rename or move the current project file.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Apply to save the current project file with a new name or location.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Choose Project Folder</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Project File</source>
+        <translation type="unfinished">Proje Dosyası</translation>
+    </message>
+    <message>
+        <source>Enter a file name.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Choose a folder location.</source>
+        <translation type="unfinished"></translation>
+    </message>
+</context>
+<context>
     <name>_RecentRow</name>
     <message>
         <source>Open</source>
@@ -1736,6 +2072,10 @@ back on the Image (for further editing)</source>
     <message>
         <source>Open File Location</source>
         <translation>Dosya Konumunu Aç</translation>
+    </message>
+    <message>
+        <source>Copy Path</source>
+        <translation type="unfinished"></translation>
     </message>
     <message>
         <source>Unpin</source>
@@ -1748,6 +2088,43 @@ back on the Image (for further editing)</source>
     <message>
         <source>Remove from Recent</source>
         <translation>En Son&apos;dan kaldır</translation>
+    </message>
+    <message>
+        <source>Delete File</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>File Not Found</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>The selected project file could not be found.
+It may have already been moved, renamed, or deleted.
+
+{path}</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Are you sure you want to permanently delete this project file?</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Delete</source>
+        <translation type="unfinished">Sil</translation>
+    </message>
+    <message>
+        <source>Cancel</source>
+        <translation type="unfinished">İptal</translation>
+    </message>
+    <message>
+        <source>Delete Failed</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Could not delete the selected project file.
+
+{error}</source>
+        <translation type="unfinished"></translation>
     </message>
 </context>
 <context>
@@ -1773,6 +2150,68 @@ Geri yüklemek istiyor musunuz?</translation>
     <message>
         <source>Discard</source>
         <translation>At</translation>
+    </message>
+    <message>
+        <source>Export PSD As</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>PSD Files (*.psd);;All Files (*)</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Export PSD</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Project File</source>
+        <translation type="unfinished">Proje Dosyası</translation>
+    </message>
+    <message>
+        <source>Choose an existing folder for the project file.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Could not create the selected project folder.
+
+{error}</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Overwrite Project File</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>A project file already exists at this location.
+
+{path}
+
+Overwrite it?</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Old Project File Kept</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>The project was saved to the new location, but the old file could not be removed.
+
+{path}
+
+{error}</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Project file saved.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Project file renamed.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Project file moved.</source>
+        <translation type="unfinished"></translation>
     </message>
     <message>
         <source>Project Not Found</source>
@@ -1809,38 +2248,6 @@ Taşınmış, yeniden adlandırılmış veya silinmiş olabilir.
     <message>
         <source>GPT-4.1-mini</source>
         <translation>GPT-4.1-mini</translation>
-    </message>
-    <message>
-        <source>Microsoft OCR</source>
-        <translation>Microsoft OCR</translation>
-    </message>
-    <message>
-        <source>Google Cloud Vision</source>
-        <translation>Google Cloud Vision</translation>
-    </message>
-    <message>
-        <source>Gemini-2.0-Flash</source>
-        <translation>Gemini-2.0-Flash</translation>
-    </message>
-    <message>
-        <source>MangaOCR</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>PPOCRv5</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>PaddleOCR VL</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>HunyuanOCR</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Default</source>
-        <translation>Varsayılan</translation>
     </message>
     <message>
         <source>Custom Service</source>
@@ -1900,6 +2307,34 @@ Taşınmış, yeniden adlandırılmış veya silinmiş olabilir.
 </context>
 <context>
     <name>self.ui</name>
+    <message>
+        <source>Default</source>
+        <translation type="unfinished">Varsayılan</translation>
+    </message>
+    <message>
+        <source>Optimal (HunyuanOCR / PaddleOCR VL)</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Microsoft OCR</source>
+        <translation type="unfinished">Microsoft OCR</translation>
+    </message>
+    <message>
+        <source>Google Cloud Vision</source>
+        <translation type="unfinished">Google Cloud Vision</translation>
+    </message>
+    <message>
+        <source>Gemini-2.0-Flash</source>
+        <translation type="unfinished">Gemini-2.0-Flash</translation>
+    </message>
+    <message>
+        <source>PaddleOCR VL</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>HunyuanOCR</source>
+        <translation type="unfinished"></translation>
+    </message>
     <message>
         <source>Resize</source>
         <translation>Yeniden Boyutlandır</translation>

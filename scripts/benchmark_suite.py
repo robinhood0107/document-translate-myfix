@@ -148,6 +148,15 @@ SUITE_PROFILES = {
         ),
         "baseline_batch_step": "",
     },
+    "inpaint-ctd-runtime": {
+        "benchmark_name": "CTD Inpaint Runtime Benchmark",
+        "benchmark_kind": "managed family suite",
+        "benchmark_scope": (
+            "RT-DETR-v2 + CTD/protect + Torch CUDA inpainter comparison with OCR invariance gate "
+            "for China and japan corpora"
+        ),
+        "baseline_batch_step": "",
+    },
 }
 
 RUNTIME_SNAPSHOT_FILES = [
@@ -1490,6 +1499,12 @@ def main() -> int:
         from ocr_combo_ranked_benchmark import run_suite as run_ocr_combo_ranked_suite
 
         return run_ocr_combo_ranked_suite(
+            sample_root=DEFAULT_SAMPLE_DIR,
+        )
+    if args.suite_profile == "inpaint-ctd-runtime":
+        from inpaint_ctd_benchmark import run_suite as run_inpaint_ctd_suite
+
+        return run_inpaint_ctd_suite(
             sample_root=DEFAULT_SAMPLE_DIR,
         )
 

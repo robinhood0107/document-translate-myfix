@@ -19,6 +19,7 @@ from .project_state_v2 import (
     load_state_from_proj_file_v2,
     save_state_to_proj_file_v2,
 )
+from modules.utils.export_paths import normalize_export_source_record
 
 if TYPE_CHECKING:
     from controller import ComicTranslate
@@ -186,6 +187,13 @@ def load_state_from_proj_file(comic_translate: ComicTranslate, file_name: str):
     comic_translate.image_files = [
         original_to_temp.get(file, file) for file in original_image_files
     ]
+    saved_export_sources = state.get('page_export_sources', {}) or {}
+    comic_translate.export_source_by_path = {
+        original_to_temp.get(page_path, page_path): normalized
+        for page_path, source in saved_export_sources.items()
+        for normalized in [normalize_export_source_record(source)]
+        if normalized is not None
+    }
 
     image_states = state.get('image_states', {})
     comic_translate.image_states = {

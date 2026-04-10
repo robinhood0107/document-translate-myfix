@@ -2,6 +2,8 @@
 from PySide6 import QtWidgets
 from PySide6 import QtCore
 
+from modules.ocr.selection import OCR_MODE_OPTIONS
+
 from ..dayu_widgets.clickable_card import ClickMeta
 from ..dayu_widgets.divider import MDivider
 from ..dayu_widgets.qt import MPixmap
@@ -17,6 +19,7 @@ from .llms_page import LlmsPage
 from .text_rendering_page import TextRenderingPage
 from .project_page import ProjectPage
 from .export_page import ExportPage
+from .shortcuts_page import ShortcutsPage
 from .about_page import AboutPage
 
 
@@ -54,17 +57,10 @@ class SettingsPageUI(QtWidgets.QWidget):
 
         self.credential_widgets = {}
 
-        self.inpainters = ['LaMa', 'AOT']
+        self.inpainters = ['AOT', 'lama_large_512px', 'lama_mpe']
         self.detectors = ['RT-DETR-v2']
-        self.ocr_engines = [
-            self.tr("Default"), 
-            self.tr('Microsoft OCR'), 
-            self.tr('Google Cloud Vision'),
-            self.tr('Gemini-2.0-Flash'), 
-            self.tr('PPOCRv5'),
-            self.tr('PaddleOCR VL'),
-            self.tr('HunyuanOCR'),
-        ]
+        self.ocr_engine_keys = [key for key, _label in OCR_MODE_OPTIONS]
+        self.ocr_engines = [self.tr(label) for _key, label in OCR_MODE_OPTIONS]
         self.inpaint_strategy = [self.tr('Resize'), self.tr('Original'), self.tr('Crop')]
         self.themes = [self.tr('Dark'), self.tr('Light')]
         self.alignment = [self.tr("Left"), self.tr("Center"), self.tr("Right")]
@@ -85,7 +81,7 @@ class SettingsPageUI(QtWidgets.QWidget):
             self.tr("Gemini-3.0-Flash"),
             self.tr("GPT-4.1"),
             self.tr("GPT-4.1-mini"),
-            self.tr("Claude-4.5-Sonnet"),
+            self.tr("Claude-4.6-Sonnet"),
             self.tr("Claude-4.5-Haiku"),
             self.tr("Deepseek-v3"),
             self.tr("Custom Service"),
@@ -130,7 +126,7 @@ class SettingsPageUI(QtWidgets.QWidget):
             self.tr("GPT-4.1"): "GPT-4.1",
             self.tr("GPT-4.1-mini"): "GPT-4.1-mini",
             self.tr("DeepL"): "DeepL",
-            self.tr("Claude-4.5-Sonnet"): "Claude-4.5-Sonnet",
+            self.tr("Claude-4.6-Sonnet"): "Claude-4.6-Sonnet",
             self.tr("Claude-4.5-Haiku"): "Claude-4.5-Haiku",
             self.tr("Gemini-3.0-Flash"): "Gemini-3.0-Flash",
             self.tr("Gemini-2.5-Pro"): "Gemini-2.5-Pro",
@@ -138,17 +134,19 @@ class SettingsPageUI(QtWidgets.QWidget):
             self.tr("Microsoft Translator"): "Microsoft Translator",
 
             # OCR mappings
-            self.tr("Default"): "Default",
-            self.tr("Microsoft OCR"): "Microsoft OCR",
-            self.tr("Google Cloud Vision"): "Google Cloud Vision",
-            self.tr("Gemini-2.0-Flash"): "Gemini-2.0-Flash",
-            self.tr("PPOCRv5"): "PPOCRv5",
-            self.tr("PaddleOCR VL"): "PaddleOCR VL",
-            self.tr("HunyuanOCR"): "HunyuanOCR",
+            self.tr("Default (existing auto: MangaOCR / PPOCR / Pororo...)"): "default",
+            self.tr("Optimal (HunyuanOCR / PaddleOCR VL)"): "best_local",
+            self.tr("Microsoft OCR"): "microsoft_ocr",
+            self.tr("Google Cloud Vision"): "google_cloud_vision",
+            self.tr("Gemini-2.0-Flash"): "gemini_2_0_flash",
+            self.tr("PaddleOCR VL"): "paddleocr_vl",
+            self.tr("HunyuanOCR"): "hunyuanocr",
 
             # Inpainter mappings
-            "LaMa": "LaMa",
             "AOT": "AOT",
+            "lama_large_512px": "lama_large_512px",
+            "lama_mpe": "lama_mpe",
+            "LaMa": "lama_large_512px",
 
             # Detector mappings
             "RT-DETR-v2": "RT-DETR-v2",
@@ -176,8 +174,11 @@ class SettingsPageUI(QtWidgets.QWidget):
             self.tr("Yandex"): "Yandex",
         }
 
-        # Create reverse mappings for loading
+        # Create reverse mappings for loading.\n        # Deprecated aliases like "LaMa" should not override canonical UI labels.
         self.reverse_mappings = {v: k for k, v in self.value_mappings.items()}
+        self.reverse_mappings["AOT"] = "AOT"
+        self.reverse_mappings["lama_large_512px"] = "lama_large_512px"
+        self.reverse_mappings["lama_mpe"] = "lama_mpe"
 
         self._init_ui()
 
@@ -203,6 +204,8 @@ class SettingsPageUI(QtWidgets.QWidget):
             inpaint_strategy=self.inpaint_strategy,
             parent=self,
         )
+        for index, key in enumerate(self.ocr_engine_keys):
+            self.tools_page.ocr_combo.setItemData(index, key)
         self.paddleocr_vl_page = PaddleOCRVLPage(parent=self)
         self.hunyuan_ocr_page = HunyuanOCRPage(parent=self)
         self.gemma_local_server_page = GemmaLocalServerPage(parent=self)
@@ -215,6 +218,7 @@ class SettingsPageUI(QtWidgets.QWidget):
         self.text_rendering_page = TextRenderingPage(parent=self)
         self.project_page = ProjectPage(parent=self)
         self.export_page = ExportPage(parent=self)
+        self.shortcuts_page = ShortcutsPage(parent=self)
         self.about_page = AboutPage(parent=self)
 
         # Backward-compatible attribute proxies for existing SettingsPage references
@@ -227,6 +231,18 @@ class SettingsPageUI(QtWidgets.QWidget):
         self.ocr_combo = self.tools_page.ocr_combo
         self.detector_combo = self.tools_page.detector_combo
         self.inpainter_combo = self.tools_page.inpainter_combo
+        self.mask_refiner_combo = self.tools_page.mask_refiner_combo
+        self.keep_existing_lines_checkbox = self.tools_page.keep_existing_lines_checkbox
+        self.ctd_detect_size_combo = self.tools_page.ctd_detect_size_combo
+        self.ctd_det_rearrange_max_batches_combo = self.tools_page.ctd_det_rearrange_max_batches_combo
+        self.ctd_device_combo = self.tools_page.ctd_device_combo
+        self.ctd_font_size_multiplier_spinbox = self.tools_page.ctd_font_size_multiplier_spinbox
+        self.ctd_font_size_max_spinbox = self.tools_page.ctd_font_size_max_spinbox
+        self.ctd_font_size_min_spinbox = self.tools_page.ctd_font_size_min_spinbox
+        self.ctd_mask_dilate_size_spinbox = self.tools_page.ctd_mask_dilate_size_spinbox
+        self.inpainter_size_combo = self.tools_page.inpainter_size_combo
+        self.inpainter_device_combo = self.tools_page.inpainter_device_combo
+        self.inpainter_precision_combo = self.tools_page.inpainter_precision_combo
         self.inpaint_strategy_combo = self.tools_page.inpaint_strategy_combo
         self.resize_spinbox = self.tools_page.resize_spinbox
         self.crop_margin_spinbox = self.tools_page.crop_margin_spinbox
@@ -265,6 +281,11 @@ class SettingsPageUI(QtWidgets.QWidget):
         self.raw_text_checkbox = self.export_page.raw_text_checkbox
         self.translated_text_checkbox = self.export_page.translated_text_checkbox
         self.inpainted_image_checkbox = self.export_page.inpainted_image_checkbox
+        self.detector_overlay_checkbox = self.export_page.detector_overlay_checkbox
+        self.raw_mask_checkbox = self.export_page.raw_mask_checkbox
+        self.mask_overlay_checkbox = self.export_page.mask_overlay_checkbox
+        self.cleanup_mask_delta_checkbox = self.export_page.cleanup_mask_delta_checkbox
+        self.debug_metadata_checkbox = self.export_page.debug_metadata_checkbox
         self.project_autosave_interval_spinbox = self.project_page.project_autosave_interval_spinbox
         self.project_autosave_folder_input = self.project_page.project_autosave_folder_input
 
@@ -282,6 +303,7 @@ class SettingsPageUI(QtWidgets.QWidget):
         self.stacked_widget.addWidget(self.text_rendering_page)
         self.stacked_widget.addWidget(self.project_page)
         self.stacked_widget.addWidget(self.export_page)
+        self.stacked_widget.addWidget(self.shortcuts_page)
         self.stacked_widget.addWidget(self.credentials_page)
         self.stacked_widget.addWidget(self.about_page)
 
@@ -338,6 +360,7 @@ class SettingsPageUI(QtWidgets.QWidget):
             {"title": self.tr("Text Rendering"), "avatar": MPixmap(".svg")},
             {"title": self.tr("Project"), "avatar": MPixmap(".svg")},
             {"title": self.tr("Export"), "avatar": MPixmap(".svg")},
+            {"title": self.tr("Shortcuts"), "avatar": MPixmap(".svg")},
             {"title": self.tr("Advanced"), "avatar": MPixmap(".svg")},
             {"title": self.tr("About"), "avatar": MPixmap(".svg")},
         ]):
