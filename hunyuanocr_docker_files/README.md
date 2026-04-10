@@ -25,7 +25,8 @@
 저장소 루트에서 실행:
 
 ```bash
-docker compose -f hunyuanocr_docker_files/docker-compose.yaml up -d
+docker compose -f hunyuanocr_docker_files/docker-compose.yaml pull --policy always
+docker compose -f hunyuanocr_docker_files/docker-compose.yaml up -d --force-recreate
 ```
 
 앱 설정:
@@ -35,12 +36,14 @@ docker compose -f hunyuanocr_docker_files/docker-compose.yaml up -d
 
 ## 기준 요약
 
-- image: `local/llama.cpp:server-cuda-b8672`
+- image: `ghcr.io/ggml-org/llama.cpp:server-cuda`
+- pull policy: `always`
 - OpenAI-compatible endpoint: `/v1/chat/completions`
 - health endpoint: `/health`
 - OCR request defaults: `temperature=0`, `top_k=1`, `repetition_penalty=1.0`
 - prompt cache: disabled with `--cache-ram 0`
 - purpose: block-crop OCR for the app's existing `TextBlock` pipeline
+- note: moving tag 최신 상태는 pull 후 실제 runtime digest/version 기록으로 확인
 
 ## 참고
 

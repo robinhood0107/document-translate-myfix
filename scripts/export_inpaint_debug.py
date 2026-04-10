@@ -8,14 +8,14 @@ import traceback
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
+import sys
+
+ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
 
 import imkit as imk
 import numpy as np
-
-ROOT = Path(__file__).resolve().parents[1]
-import sys
-if str(ROOT) not in sys.path:
-    sys.path.insert(0, str(ROOT))
 
 from modules.detection.processor import TextBlockDetector
 from modules.utils.device import resolve_device
@@ -26,7 +26,8 @@ from modules.utils.inpaint_debug import (
     ensure_three_channel,
     export_inpaint_debug_artifacts,
 )
-from modules.utils.pipeline_config import get_config, inpaint_map
+from modules.utils.pipeline_config import get_config, get_inpainter_runtime, inpaint_map
+from modules.utils.inpainting_runtime import inpainter_default_settings, normalize_inpainter_key
 
 DEBUG_EXPORT_SETTINGS = {
     "export_detector_overlay": True,
@@ -46,9 +47,30 @@ class _UIStub:
 
 
 class _SettingsStub:
-    def __init__(self, *, inpainter: str, use_gpu: bool) -> None:
+    def __init__(
+        self,
+        *,
+        inpainter: str,
+        use_gpu: bool,
+        mask_refiner: str = "ctd",
+        keep_existing_lines: bool = True,
+        ctd_detect_size: int = 1280,
+        ctd_det_rearrange_max_batches: int = 4,
+        ctd_font_size_multiplier: float = 1.0,
+        ctd_font_size_max: int = -1,
+        ctd_font_size_min: int = -1,
+        ctd_mask_dilate_size: int = 2,
+    ) -> None:
         self._inpainter = inpainter
         self._use_gpu = use_gpu
+        self._mask_refiner = mask_refiner
+        self._keep_existing_lines = keep_existing_lines
+        self._ctd_detect_size = ctd_detect_size
+        self._ctd_det_rearrange_max_batches = ctd_det_rearrange_max_batches
+        self._ctd_font_size_multiplier = ctd_font_size_multiplier
+        self._ctd_font_size_max = ctd_font_size_max
+        self._ctd_font_size_min = ctd_font_size_min
+        self._ctd_mask_dilate_size = ctd_mask_dilate_size
         self.ui = _UIStub(
             value_mappings={
                 "Resize": "Resize",
@@ -69,6 +91,23 @@ class _SettingsStub:
 
     def get_hd_strategy_settings(self) -> dict:
         return {"strategy": "Resize", "resize_limit": 960}
+
+    def get_mask_refiner_settings(self) -> dict:
+        return {
+            "mask_refiner": self._mask_refiner,
+            "ctd_detect_size": self._ctd_detect_size,
+            "ctd_det_rearrange_max_batches": self._ctd_det_rearrange_max_batches,
+            "ctd_device": "cuda" if self._use_gpu else "cpu",
+            "ctd_font_size_multiplier": self._ctd_font_size_multiplier,
+            "ctd_font_size_max": self._ctd_font_size_max,
+            "ctd_font_size_min": self._ctd_font_size_min,
+            "ctd_mask_dilate_size": self._ctd_mask_dilate_size,
+            "keep_existing_lines": self._keep_existing_lines,
+        }
+
+    def get_inpainter_runtime_settings(self, inpainter_key: str | None = None) -> dict:
+        normalized = normalize_inpainter_key(inpainter_key or self._inpainter)
+        return inpainter_default_settings(normalized)
 
 
 def _build_cleanup_delta(raw_mask, final_mask):
@@ -118,16 +157,18 @@ def _process_image(
     final_mask = None
     cleanup_stats = {"applied": False, "component_count": 0, "block_count": 0}
     cleaned = image.copy()
+    mask_details = {}
 
     if blocks:
-        mask = generate_mask(image, blocks)
+        mask_details = generate_mask(image, blocks, settings=settings.get_mask_refiner_settings(), return_details=True)
+        mask = mask_details["final_mask"]
         if mask is not None and np.any(mask):
-            raw_mask = np.where(mask > 0, 255, 0).astype(np.uint8)
-            cleaned = inpainter(image, raw_mask, get_config(settings))
+            raw_mask = mask_details["raw_mask"]
+            cleaned = inpainter(image, mask, get_config(settings))
             cleaned = imk.convert_scale_abs(cleaned)
             cleaned, final_mask, cleanup_stats = refine_bubble_residue_inpaint(
                 cleaned,
-                raw_mask,
+                mask,
                 blocks,
                 inpainter,
                 get_config(settings),
@@ -136,6 +177,7 @@ def _process_image(
             final_mask = mask
 
     cleanup_delta = _build_cleanup_delta(raw_mask, final_mask)
+    runtime = get_inpainter_runtime(settings)
     metadata = build_inpaint_debug_metadata(
         image_path=str(image_path),
         run_type="sample_debug",
@@ -148,6 +190,12 @@ def _process_image(
         raw_mask=raw_mask,
         cleanup_delta=cleanup_delta,
         cleanup_stats=cleanup_stats,
+        mask_refiner=str(mask_details.get("mask_refiner", "legacy_bbox") or "legacy_bbox"),
+        protect_mask_applied=bool(mask_details.get("keep_existing_lines", False)),
+        protect_mask=mask_details.get("protect_mask"),
+        refiner_backend=str(mask_details.get("refiner_backend", "legacy") or "legacy"),
+        refiner_device=str(mask_details.get("refiner_device", "cpu") or "cpu"),
+        inpainter_backend=str(runtime.get("backend", "unknown") or "unknown"),
     )
     export_inpaint_debug_artifacts(
         export_root=str(corpus_output),
@@ -215,14 +263,22 @@ def _write_index(root_output: Path, records_by_corpus: dict[str, list[dict]], su
 def main() -> int:
     parser = argparse.ArgumentParser(description="Export inpaint debug artifacts for Sample corpora.")
     parser.add_argument("--glob", default="*", help="Glob pattern for sample filenames.")
-    parser.add_argument("--inpainter", default="AOT", choices=sorted(inpaint_map.keys()))
+    parser.add_argument("--inpainter", default="AOT", choices=["AOT", "lama_large_512px", "lama_mpe"])
     parser.add_argument("--use-gpu", action="store_true")
     args = parser.parse_args()
 
     settings = _SettingsStub(inpainter=args.inpainter, use_gpu=args.use_gpu)
     detector = TextBlockDetector(settings)
-    inpainter_cls = inpaint_map[args.inpainter]
-    inpainter = inpainter_cls(resolve_device(args.use_gpu, backend="onnx"), backend="onnx")
+    runtime = get_inpainter_runtime(settings, args.inpainter)
+    inpainter_cls = inpaint_map[runtime["key"]]
+    device = resolve_device(args.use_gpu, backend=runtime["backend"])
+    inpainter = inpainter_cls(
+        device,
+        backend=runtime["backend"],
+        runtime_device=runtime.get("device", device),
+        inpaint_size=runtime.get("inpaint_size"),
+        precision=runtime.get("precision"),
+    )
 
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     root_output = ROOT / "banchmark_result_log" / "inpaint_debug" / f"{timestamp}_sample-debug-export"

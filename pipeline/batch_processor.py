@@ -16,7 +16,7 @@ from PySide6.QtGui import QColor
 from modules.detection.processor import TextBlockDetector
 from modules.translation.processor import Translator
 from modules.utils.textblock import sort_blk_list
-from modules.utils.pipeline_config import inpaint_map, get_config
+from modules.utils.pipeline_config import inpaint_map, get_config, get_inpainter_runtime
 from modules.utils.image_utils import generate_mask
 from modules.utils.inpaint_cleanup import refine_bubble_residue_inpaint
 from modules.utils.language_utils import get_language_code, is_no_space_lang
@@ -226,8 +226,11 @@ class BatchProcessor:
         inpainter_key: str,
         hd_strategy: str,
         cleanup_stats: dict | None,
+        mask_details: dict | None = None,
+        inpainter_backend: str = "unknown",
     ) -> None:
         cleanup_delta = self._build_cleanup_delta_mask(raw_mask, final_mask)
+        mask_details = mask_details or {}
         metadata = build_inpaint_debug_metadata(
             image_path=image_path,
             run_type=self._current_run_type(),
@@ -240,6 +243,12 @@ class BatchProcessor:
             raw_mask=raw_mask,
             cleanup_delta=cleanup_delta,
             cleanup_stats=cleanup_stats,
+            mask_refiner=str(mask_details.get("mask_refiner", "legacy_bbox") or "legacy_bbox"),
+            protect_mask_applied=bool(mask_details.get("keep_existing_lines", False)),
+            protect_mask=mask_details.get("protect_mask"),
+            refiner_backend=str(mask_details.get("refiner_backend", "legacy") or "legacy"),
+            refiner_device=str(mask_details.get("refiner_device", "cpu") or "cpu"),
+            inpainter_backend=inpainter_backend,
         )
         export_inpaint_debug_artifacts(
             export_root=export_root,
@@ -577,11 +586,12 @@ class BatchProcessor:
                 ocr_model = settings_page.get_tool_selection('ocr')
                 device = resolve_device(settings_page.is_gpu_enabled())
                 cache_key = self.cache_manager._get_ocr_cache_key(image, source_lang, ocr_model, device)
-                # Use the shared OCR processor from the handler
-                self.ocr_handler.ocr.initialize(self.main_page, source_lang)
                 try:
                     cache_status = "miss"
                     attempt_count = 0
+                    # Runtime startup for local OCR can fail here (e.g. missing Docker image).
+                    # Keep it inside the per-page OCR error path so the batch report captures it.
+                    self.ocr_handler.ocr.initialize(self.main_page, source_lang)
                     if self.cache_manager._can_serve_all_blocks_from_ocr_cache(cache_key, blk_list):
                         cache_status = "hit"
                         logger.info("ocr cache hit: using cached OCR for %d blocks", len(blk_list))
@@ -728,6 +738,8 @@ class BatchProcessor:
                     inpainter_key=settings_page.get_tool_selection('inpainter'),
                     hd_strategy=hd_strategy,
                     cleanup_stats={"applied": False, "component_count": 0, "block_count": 0},
+                    mask_details={"mask_refiner": settings_page.get_mask_refiner_settings().get("mask_refiner", "legacy_bbox")},
+                    inpainter_backend=get_inpainter_runtime(settings_page)["backend"],
                 )
                 self.skip_save(directory, export_token, base_name, extension, archive_bname, image)
                 self.main_page.image_skipped.emit(image_path, "Text Blocks", "")
@@ -758,17 +770,24 @@ class BatchProcessor:
             # Clean Image of text
 
             # Use the shared inpainter from the handler
-            if self.inpainting.inpainter_cache is None or self.inpainting.cached_inpainter_key != settings_page.get_tool_selection('inpainter'):
-                backend = 'onnx'
+            runtime = get_inpainter_runtime(settings_page)
+            inpainter_key = runtime["key"]
+            inpainter_backend = runtime["backend"]
+            if self.inpainting.inpainter_cache is None or self.inpainting.cached_inpainter_key != inpainter_key:
                 device = resolve_device(
                     settings_page.is_gpu_enabled(),
-                    backend=backend
+                    backend=inpainter_backend,
                 )
-                inpainter_key = settings_page.get_tool_selection('inpainter')
                 InpainterClass = inpaint_map[inpainter_key]
-                logger.info("pre-inpaint: initializing inpainter '%s' on device %s", inpainter_key, device)
+                logger.info("pre-inpaint: initializing inpainter '%s' on device %s (backend=%s)", inpainter_key, device, inpainter_backend)
                 t0 = time.time()
-                self.inpainting.inpainter_cache = InpainterClass(device, backend=backend)
+                self.inpainting.inpainter_cache = InpainterClass(
+                    device,
+                    backend=inpainter_backend,
+                    runtime_device=runtime.get("device", device),
+                    inpaint_size=runtime.get("inpaint_size"),
+                    precision=runtime.get("precision"),
+                )
                 self.inpainting.cached_inpainter_key = inpainter_key
                 t1 = time.time()
                 logger.info("pre-inpaint: inpainter initialized in %.2fs", t1 - t0)
@@ -776,10 +795,12 @@ class BatchProcessor:
             config = get_config(settings_page)
             logger.info("pre-inpaint: generating mask (blk_list=%d blocks)", len(blk_list))
             t0 = time.time()
-            mask = generate_mask(image, blk_list)
-            raw_mask = np.where(mask > 0, 255, 0).astype(np.uint8) if mask is not None else None
+            mask_settings = settings_page.get_mask_refiner_settings()
+            mask_details = generate_mask(image, blk_list, settings=mask_settings, return_details=True)
+            mask = mask_details["final_mask"]
+            raw_mask = mask_details["raw_mask"]
             t1 = time.time()
-            logger.info("pre-inpaint: mask generated in %.2fs (mask shape=%s)", t1 - t0, getattr(mask, 'shape', None))
+            logger.info("pre-inpaint: mask generated in %.2fs (mask shape=%s, refiner=%s backend=%s)", t1 - t0, getattr(mask, 'shape', None), mask_details.get("mask_refiner"), mask_details.get("refiner_backend"))
 
             self.emit_progress(index, total_images, 4, 10, False)
             if self._is_cancelled():
@@ -834,9 +855,11 @@ class BatchProcessor:
                 detector_key=detector_key,
                 detector_engine=detector_engine,
                 detector_device=detector_device,
-                inpainter_key=settings_page.get_tool_selection('inpainter'),
+                inpainter_key=inpainter_key,
                 hd_strategy=hd_strategy,
                 cleanup_stats=cleanup_stats,
+                mask_details=mask_details,
+                inpainter_backend=inpainter_backend,
             )
             self.main_page.image_ctrl.mark_processing_stage(
                 image_path,
