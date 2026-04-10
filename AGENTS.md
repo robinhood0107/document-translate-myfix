@@ -6,6 +6,7 @@ Mandatory requirements:
 
 - Follow the branch, commit, push, PR, i18n, and CI rules in [rules.md](./rules.md).
 - Treat `main` and `develop` as protected branches.
+- Treat `main`, `develop`, and `benchmarking/lab` as long-lived branches that must remain available. Do not delete them as cleanup branches.
 - Do not consider a feature complete until it is committed and pushed, unless the user explicitly requests local-only work.
 - When adding or changing user-visible UI text, update the Qt translation files and compiled `.qm` assets.
 - Keep benchmark policy, preset selection, ranking, and report generation outside core business code. Only generic stage hooks and telemetry/stat surfaces may remain in the pipeline/runtime layers.
