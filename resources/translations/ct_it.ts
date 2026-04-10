@@ -366,7 +366,7 @@ Use Custom Local Server(Gemma) with the included Gemma Docker setup.</source>
         <source>Comic Translate can use your local Gemma Docker server for translation.
 1. Run `docker compose pull --policy always` and then `docker compose up -d --force-recreate` in the repository root.
 2. In Settings &gt; Credentials, use Endpoint URL `http://127.0.0.1:18080/v1`.
-3. Set Model to `gemma-4-26b-a4b-it-heretic.q3_k_m.gguf`.
+3. Set Model to the exact GGUF filename you placed in `testmodel/` (for example `gemma-4-26b-a4b-it-heretic.q3_k_m.gguf`).
 If responses are truncated, lower Chunk Size or increase LLAMA_CTX_SIZE in docker-compose.yaml.</source>
         <translation type="unfinished"></translation>
     </message>
@@ -854,6 +854,14 @@ Verifica la tua connessione Internet.</translation>
     <message>
         <source>Translator</source>
         <translation>Traduttore</translation>
+    </message>
+    <message>
+        <source>Gemma local server runtime setup failed</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Gemma local server is unavailable</source>
+        <translation type="unfinished"></translation>
     </message>
     <message>
         <source>No font selected</source>
@@ -2448,6 +2456,10 @@ Potrebbe essere stato spostato, rinominato o eliminato.
     </message>
     <message>
         <source>HunyuanOCR Settings</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Gemma Local Server Settings</source>
         <translation type="unfinished"></translation>
     </message>
 </context>

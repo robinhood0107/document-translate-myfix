@@ -16,7 +16,7 @@ services:
       - ./testmodel:/models:ro
     command:
       - -m
-      - /models/gemma-4-26b-a4b-it-heretic.q3_k_m.gguf
+      - /models/${LLAMA_MODEL_FILE:-gemma-4-26B-A4B-it-ultra-uncensored-heretic-Q4_K_M.gguf}
       - --host
       - 0.0.0.0
       - --port
