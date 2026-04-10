@@ -22,7 +22,7 @@ from app.ui.commands.box import DeleteBoxesCommand
 from modules.utils.textblock import TextBlock
 from modules.utils.file_handler import FileHandler
 from modules.utils.pipeline_config import validate_settings
-from modules.utils.download import mandatory_models, set_download_callback, ensure_mandatory_models
+from modules.utils.download import set_download_callback
 from pipeline.main_pipeline import ComicTranslatePipeline
 
 from app.controllers.image import ImageStateController
@@ -41,9 +41,6 @@ from modules.utils.exceptions import (
     LocalServiceSetupError,
 )
 
-
-# Ensure any pre-declared mandatory models
-ensure_mandatory_models()
 
 
 def _env_enabled(name: str) -> bool:

@@ -17,7 +17,7 @@ This fork started from upstream `comic-translate` `v2.6.7` and then diverged thr
 ### Windows runtime and repo operations
 
 - added Windows launchers for the default runtime and CUDA13 runtime
-- added `setup.bat` to provision `.venv-win` and `.venv-win-cuda13`
+- made `run_comic.bat` and `run_comic_cuda13.bat` self-bootstrapping for local venv/runtime setup
 - hardened local hooks and CI checks
 - standardized branch policy and later removed the old `codex/` branch prefix
 - switched the repo policy to `main + develop + tag`

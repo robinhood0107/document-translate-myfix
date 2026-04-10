@@ -4,12 +4,12 @@ from enum import Enum
 from dataclasses import dataclass
 from typing import Callable, Iterable, Optional, Dict, List, Union
 from .download_file import download_url_to_file
-from .paths import get_user_data_dir
+from .paths import get_project_models_dir
 
 logger = logging.getLogger(__name__)
 
 # Paths / Globals
-models_base_dir = os.path.join(get_user_data_dir(), "models")
+models_base_dir = get_project_models_dir()
 
 
 _download_event_callback: Optional[Callable[[str, str], None]] = None
@@ -62,6 +62,10 @@ class ModelID(Enum):
     MIGAN_ONNX = "migan-onnx"
     MIGAN_JIT = "migan-traced"
     RTDETR_V2_ONNX = "rtdetr-v2-onnx"
+    CTD_TORCH = "ctd-torch"
+    CTD_ONNX = "ctd-onnx"
+    LAMA_LARGE_512PX = "lama-large-512px-ckpt"
+    LAMA_MPE = "lama-mpe-ckpt"
     
     # PPOCRv5 Detection Models
     PPOCR_V5_DET_MOBILE = "ppocr-v5-det-mobile"
@@ -451,6 +455,40 @@ def _register_defaults():
         save_dir=os.path.join(models_base_dir, 'detection')
     ))
 
+    ModelDownloader.register(ModelSpec(
+        id=ModelID.CTD_TORCH,
+        url='https://github.com/zyddnys/manga-image-translator/releases/download/beta-0.3/',
+        files=['comictextdetector.pt'],
+        sha256=['1f90fa60aeeb1eb82e2ac1167a66bf139a8a61b8780acd351ead55268540cccb'],
+        save_dir=os.path.join(models_base_dir, 'detection')
+    ))
+
+    ModelDownloader.register(ModelSpec(
+        id=ModelID.CTD_ONNX,
+        url='https://github.com/zyddnys/manga-image-translator/releases/download/beta-0.3/',
+        files=['comictextdetector.pt.onnx'],
+        sha256=['1a86ace74961413cbd650002e7bb4dcec4980ffa21b2f19b86933372071d718f'],
+        save_dir=os.path.join(models_base_dir, 'detection')
+    ))
+
+    ModelDownloader.register(ModelSpec(
+        id=ModelID.LAMA_LARGE_512PX,
+        url='https://huggingface.co/dreMaz/AnimeMangaInpainting/resolve/main/',
+        files=['lama_large_512px.ckpt'],
+        sha256=['11d30fbb3000fb2eceae318b75d9ced9229d99ae990a7f8b3ac35c8d31f2c935'],
+        save_dir=os.path.join(models_base_dir, 'inpainting')
+    ))
+
+    ModelDownloader.register(ModelSpec(
+        id=ModelID.LAMA_MPE,
+        url='',
+        files=['inpainting_lama_mpe.ckpt'],
+        sha256=['d625aa1b3e0d0408acfd6928aa84f005867aa8dbb9162480346a4e20660786cc'],
+        save_dir=os.path.join(models_base_dir, 'inpainting'),
+        additional_urls={'inpainting_lama_mpe.ckpt': 'https://github.com/zyddnys/manga-image-translator/releases/download/beta-0.3/inpainting_lama_mpe.ckpt'},
+        save_as={'inpainting_lama_mpe.ckpt': 'lama_mpe.ckpt'}
+    ))
+
     # PPOCRv5 Detection Models
     ModelDownloader.register(ModelSpec(
         id=ModelID.PPOCR_V5_DET_MOBILE,
@@ -632,6 +670,40 @@ def _register_defaults():
     ))
 
 _register_defaults()
+
+STARTUP_RUNTIME_MODELS: tuple[ModelID, ...] = (
+    ModelID.CTD_TORCH,
+    ModelID.CTD_ONNX,
+    ModelID.LAMA_LARGE_512PX,
+    ModelID.LAMA_MPE,
+)
+
+
+def ensure_startup_runtime_models(prefer_cuda: bool = True) -> None:
+    failures: List[str] = []
+    for model_id in STARTUP_RUNTIME_MODELS:
+        spec = ModelDownloader.registry[model_id]
+        try:
+            ModelDownloader.get(model_id)
+        except Exception as exc:
+            file_lines = []
+            for remote_name in spec.files:
+                local_name = spec.save_as.get(remote_name, remote_name) if spec.save_as else remote_name
+                local_path = os.path.join(spec.save_dir, local_name)
+                remote_url = spec.additional_urls.get(remote_name) if spec.additional_urls else None
+                if not remote_url:
+                    remote_url = f"{spec.url}{remote_name}"
+                file_lines.append(f"- {local_name}\n  path: {local_path}\n  url: {remote_url}")
+            failures.append(
+                f"Model {model_id.value} failed to prepare.\n"
+                + "\n".join(file_lines)
+                + f"\n  reason: {exc}"
+            )
+    if failures:
+        raise RuntimeError(
+            "Failed to prepare required local runtime models.\n" + "\n\n".join(failures)
+        )
+
 
 # List of models that should always be ensured at startup (can be ModelID items)
 mandatory_models: List[Union[ModelID, ModelSpec, Dict[str, Union[str, List[str]]]]] = []

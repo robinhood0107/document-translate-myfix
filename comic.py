@@ -8,7 +8,7 @@ from PySide6.QtCore import QSettings, QTranslator, QLocale, \
     Qt, QTimer, QThread, QObject, Signal, Slot, QEvent
 from PySide6.QtCore import QLibraryInfo
 from PySide6.QtNetwork import QLocalServer, QLocalSocket
-from PySide6.QtWidgets import QApplication
+from PySide6.QtWidgets import QApplication, QMessageBox
 from app.ui.splash_screen import SplashScreen
 
 
@@ -312,8 +312,27 @@ def main():
     worker.failed.connect(coordinator.on_failed, Qt.ConnectionType.QueuedConnection)
     thread.started.connect(worker.run)
     
-    # Show splash and start loading thread
+    # Show splash and prepare required local runtime models before controller import.
     splash.show()
+    try:
+        from modules.utils.download import ensure_startup_runtime_models
+
+        ensure_startup_runtime_models(prefer_cuda=True)
+    except Exception as exc:
+        logging.exception("Failed to prepare required local runtime models: %s", exc)
+        splash.close()
+        msg = QMessageBox()
+        msg.setIcon(QMessageBox.Icon.Critical)
+        msg.setWindowTitle("Required Model Download Failed")
+        msg.setText("Failed to prepare required local model files under the project models directory.")
+        msg.setInformativeText(str(exc))
+        try:
+            msg.setDetailedText(str(exc))
+        except Exception:
+            pass
+        msg.exec()
+        raise SystemExit(1)
+
     # Defer starting work until the event loop is running so the splash remains clickable.
     QTimer.singleShot(0, thread.start)
     
