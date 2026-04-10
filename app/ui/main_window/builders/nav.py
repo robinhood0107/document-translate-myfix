@@ -48,6 +48,9 @@ class NavRailMixin:
         self.project_browser_button = MClickBrowserFileToolButton(multiple=False)
         self.project_browser_button.set_dayu_filters([".ctpr"])
 
+        self.psd_browser_button = MClickBrowserFileToolButton(multiple=True)
+        self.psd_browser_button.set_dayu_filters([".psd"])
+
         self.tool_menu = MMenu(parent=self)
 
         image_action = self.tool_menu.addAction(MIcon("ion--image-outline.svg"), self.tr("Images"))
@@ -66,6 +69,9 @@ class NavRailMixin:
 
         project_action = self.tool_menu.addAction(MIcon("ct-file-icon.svg"), self.tr("Project File"))
         project_action.triggered.connect(self.project_browser_button.clicked)
+
+        psd_action = self.tool_menu.addAction(MIcon("psd-file.svg"), self.tr("PSD"))
+        psd_action.triggered.connect(self.psd_browser_button.clicked)
 
         self.save_browser = MClickSaveFileToolButton()
         save_file_types = [("Images", ["png", "jpg", "jpeg", "webp", "bmp"])]
@@ -115,6 +121,12 @@ class NavRailMixin:
             self.tr("PDF"),
         )
         export_document_action.triggered.connect(lambda: self._export_all_as("pdf"))
+
+        export_psd_action = self.export_menu.addAction(
+            MIcon("psd-file.svg"),
+            self.tr("PSD"),
+        )
+        export_psd_action.triggered.connect(self._on_export_psd_requested)
 
 
         nav_tool_group = MToolButtonGroup(orientation=QtCore.Qt.Vertical, exclusive=True)
@@ -246,6 +258,11 @@ class NavRailMixin:
 
     def show_export_menu(self):
         self.export_menu.exec_(self.save_all_button.mapToGlobal(self.save_all_button.rect().bottomLeft()))
+
+    def _on_export_psd_requested(self):
+        project_ctrl = getattr(self, "project_ctrl", None)
+        if project_ctrl is not None:
+            project_ctrl.export_to_psd_dialog()
 
     def _export_all_as(self, extension: str):
         extension = (extension or "").lower().lstrip(".")

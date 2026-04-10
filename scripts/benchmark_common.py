@@ -39,6 +39,7 @@ PRESET_DIRS = [
     ROOT / "benchmarks" / "paddleocr_vl15" / "presets",
     ROOT / "benchmarks" / "ocr_combo" / "presets",
     ROOT / "benchmarks" / "ocr_combo_ranked" / "presets",
+    ROOT / "benchmarks" / "inpaint_ctd" / "presets",
 ]
 OCR_BUNDLE_DIR = ROOT / "paddleocr_vl_docker_files"
 HUNYUAN_OCR_BUNDLE_DIR = ROOT / "hunyuanocr_docker_files"
@@ -140,14 +141,35 @@ def repo_relative_str(path: str | Path) -> str:
         return str(path).replace("\\", "/")
 
 
+def _resolve_docker_executable() -> str:
+    docker = shutil.which("docker")
+    if docker:
+        return docker
+    docker_exe = shutil.which("docker.exe")
+    if docker_exe:
+        return docker_exe
+    return "docker"
+
+
+def _rewrite_docker_command(cmd: list[str]) -> list[str]:
+    if not cmd:
+        return cmd
+    if cmd[0] != "docker":
+        return cmd
+    rewritten = list(cmd)
+    rewritten[0] = _resolve_docker_executable()
+    return rewritten
+
+
 def run_command(
     cmd: list[str],
     *,
     cwd: str | Path | None = None,
     check: bool = True,
 ) -> subprocess.CompletedProcess[str]:
+    resolved_cmd = _rewrite_docker_command(cmd)
     completed = subprocess.run(
-        cmd,
+        resolved_cmd,
         cwd=str(cwd) if cwd is not None else None,
         check=False,
         capture_output=True,
@@ -155,10 +177,10 @@ def run_command(
     )
     if check and completed.returncode != 0:
         detail = (
-            f"Command failed (exit={completed.returncode}): {' '.join(cmd)}\n"
+            f"Command failed (exit={completed.returncode}): {' '.join(resolved_cmd)}\n"
             f"cwd={cwd}\n"
-            f"stdout:\n{(completed.stdout or '').strip()}\n"
-            f"stderr:\n{(completed.stderr or '').strip()}"
+            f"stdout:\n{(completed.stdout or "").strip()}\n"
+            f"stderr:\n{(completed.stderr or "").strip()}"
         )
         raise RuntimeError(detail)
     return completed
@@ -167,7 +189,7 @@ def run_command(
 def remove_containers(container_names: list[str]) -> None:
     for name in container_names:
         subprocess.run(
-            ["docker", "rm", "-f", name],
+            _rewrite_docker_command(["docker", "rm", "-f", name]),
             check=False,
             capture_output=True,
             text=True,

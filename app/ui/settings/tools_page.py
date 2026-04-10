@@ -1,19 +1,21 @@
-from PySide6 import QtWidgets
-from ..dayu_widgets.label import MLabel
+from PySide6 import QtCore, QtWidgets
+
 from ..dayu_widgets.check_box import MCheckBox
+from ..dayu_widgets.label import MLabel
 from ..dayu_widgets.spin_box import MSpinBox
 from .utils import create_title_and_combo, set_combo_box_width
 from modules.utils.device import is_gpu_available
 
+
 class ToolsPage(QtWidgets.QWidget):
     def __init__(
-        self, 
-        translators: list[str], 
-        ocr_engines: list[str], 
+        self,
+        translators: list[str],
+        ocr_engines: list[str],
         detectors: list[str],
-        inpainters: list[str], 
-        inpaint_strategy: list[str], 
-        parent=None
+        inpainters: list[str],
+        inpaint_strategy: list[str],
+        parent=None,
     ):
         super().__init__(parent)
         self.translators = translators
@@ -33,20 +35,86 @@ class ToolsPage(QtWidgets.QWidget):
         detector_widget, self.detector_combo = create_title_and_combo(self.tr("Text Detector"), self.detectors, h4=True)
         set_combo_box_width(self.detector_combo, self.detectors)
 
+        mask_label = MLabel(self.tr("Precise Masking")).h4()
+        mask_refiner_widget, self.mask_refiner_combo = create_title_and_combo(
+            self.tr("Mask Refiner"),
+            [self.tr("legacy_bbox"), self.tr("ctd")],
+            h4=False,
+        )
+        set_combo_box_width(self.mask_refiner_combo, [self.tr("legacy_bbox"), self.tr("ctd")])
+        self.mask_refiner_combo.setCurrentText(self.tr("ctd"))
+        self.keep_existing_lines_checkbox = MCheckBox(self.tr("Keep Existing Lines"))
+        self.keep_existing_lines_checkbox.setChecked(True)
+
+        self.ctd_settings_widget = QtWidgets.QWidget()
+        ctd_form = QtWidgets.QFormLayout(self.ctd_settings_widget)
+        ctd_form.setContentsMargins(10, 0, 0, 0)
+        ctd_form.setLabelAlignment(QtCore.Qt.AlignmentFlag.AlignLeft)
+
+        self.ctd_detect_size_combo = QtWidgets.QComboBox()
+        self.ctd_detect_size_combo.addItems(["640", "960", "1280", "1536", "2048"])
+        self.ctd_detect_size_combo.setCurrentText("1280")
+
+        self.ctd_det_rearrange_max_batches_combo = QtWidgets.QComboBox()
+        self.ctd_det_rearrange_max_batches_combo.addItems(["1", "2", "4", "8"])
+        self.ctd_det_rearrange_max_batches_combo.setCurrentText("4")
+
+        self.ctd_device_combo = QtWidgets.QComboBox()
+        self.ctd_device_combo.addItems(["cuda", "cpu"])
+        self.ctd_device_combo.setCurrentText("cuda")
+
+        self.ctd_font_size_multiplier_spinbox = QtWidgets.QDoubleSpinBox()
+        self.ctd_font_size_multiplier_spinbox.setDecimals(2)
+        self.ctd_font_size_multiplier_spinbox.setSingleStep(0.05)
+        self.ctd_font_size_multiplier_spinbox.setRange(0.1, 4.0)
+        self.ctd_font_size_multiplier_spinbox.setValue(1.0)
+
+        self.ctd_font_size_max_spinbox = MSpinBox().small()
+        self.ctd_font_size_max_spinbox.setRange(-1, 4096)
+        self.ctd_font_size_max_spinbox.setValue(-1)
+
+        self.ctd_font_size_min_spinbox = MSpinBox().small()
+        self.ctd_font_size_min_spinbox.setRange(-1, 4096)
+        self.ctd_font_size_min_spinbox.setValue(-1)
+
+        self.ctd_mask_dilate_size_spinbox = MSpinBox().small()
+        self.ctd_mask_dilate_size_spinbox.setRange(0, 32)
+        self.ctd_mask_dilate_size_spinbox.setValue(2)
+
+        ctd_form.addRow(self.tr("detect_size"), self.ctd_detect_size_combo)
+        ctd_form.addRow(self.tr("det_rearrange_max_batches"), self.ctd_det_rearrange_max_batches_combo)
+        ctd_form.addRow(self.tr("device"), self.ctd_device_combo)
+        ctd_form.addRow(self.tr("font size multiplier"), self.ctd_font_size_multiplier_spinbox)
+        ctd_form.addRow(self.tr("font size max"), self.ctd_font_size_max_spinbox)
+        ctd_form.addRow(self.tr("font size min"), self.ctd_font_size_min_spinbox)
+        ctd_form.addRow(self.tr("mask dilate size"), self.ctd_mask_dilate_size_spinbox)
+
         inpainting_label = MLabel(self.tr("Image Cleaning")).h4()
         inpainter_widget, self.inpainter_combo = create_title_and_combo(self.tr("Inpainter"), self.inpainters, h4=False)
         set_combo_box_width(self.inpainter_combo, self.inpainters)
         self.inpainter_combo.setCurrentText(self.tr("AOT"))
 
+        self.inpainter_runtime_widget = QtWidgets.QWidget()
+        inpainter_form = QtWidgets.QFormLayout(self.inpainter_runtime_widget)
+        inpainter_form.setContentsMargins(10, 0, 0, 0)
+        self.inpainter_size_combo = QtWidgets.QComboBox()
+        self.inpainter_device_combo = QtWidgets.QComboBox()
+        self.inpainter_device_combo.addItems(["cuda", "cpu"])
+        self.inpainter_device_combo.setCurrentText("cuda")
+        self.inpainter_precision_combo = QtWidgets.QComboBox()
+        self.inpainter_precision_combo.addItems(["fp32", "bf16"])
+        self.inpainter_precision_combo.setCurrentText("bf16")
+        inpainter_form.addRow(self.tr("inpaint_size"), self.inpainter_size_combo)
+        inpainter_form.addRow(self.tr("device"), self.inpainter_device_combo)
+        inpainter_form.addRow(self.tr("precision"), self.inpainter_precision_combo)
+
         inpaint_strategy_widget, self.inpaint_strategy_combo = create_title_and_combo(self.tr("HD Strategy"), self.inpaint_strategy, h4=False)
         set_combo_box_width(self.inpaint_strategy_combo, self.inpaint_strategy)
         self.inpaint_strategy_combo.setCurrentText(self.tr("Resize"))
 
-        # HD Strategy detail widgets
         self.hd_strategy_widgets = QtWidgets.QWidget()
         self.hd_strategy_layout = QtWidgets.QVBoxLayout(self.hd_strategy_widgets)
 
-        # Resize panel
         self.resize_widget = QtWidgets.QWidget()
         about_resize_layout = QtWidgets.QVBoxLayout(self.resize_widget)
         resize_layout = QtWidgets.QHBoxLayout()
@@ -64,7 +132,6 @@ class ToolsPage(QtWidgets.QWidget):
         about_resize_layout.setContentsMargins(5, 5, 5, 5)
         about_resize_layout.addStretch()
 
-        # Crop panel
         self.crop_widget = QtWidgets.QWidget()
         crop_layout = QtWidgets.QVBoxLayout(self.crop_widget)
         about_crop_label = MLabel(self.tr("Crop masking area from the original image to do inpainting."))
@@ -95,25 +162,36 @@ class ToolsPage(QtWidgets.QWidget):
 
         self.hd_strategy_layout.addWidget(self.resize_widget)
         self.hd_strategy_layout.addWidget(self.crop_widget)
-
         self.resize_widget.show()
         self.crop_widget.hide()
         self.inpaint_strategy_combo.currentIndexChanged.connect(self._update_hd_strategy_widgets)
-
+        self.inpainter_combo.currentIndexChanged.connect(self._update_inpainter_runtime_widgets)
+        self.inpainter_combo.currentTextChanged.connect(
+            lambda _text: self._update_inpainter_runtime_widgets(self.inpainter_combo.currentIndex())
+        )
+        self.mask_refiner_combo.currentIndexChanged.connect(self._update_mask_refiner_widgets)
+        self.mask_refiner_combo.currentTextChanged.connect(
+            lambda _text: self._update_mask_refiner_widgets(self.mask_refiner_combo.currentIndex())
+        )
 
         self.use_gpu_checkbox = MCheckBox(self.tr("Use GPU"))
         if not is_gpu_available():
             self.use_gpu_checkbox.setVisible(False)
 
-
         layout.addWidget(translator_widget)
         layout.addSpacing(10)
         layout.addWidget(detector_widget)
+        layout.addSpacing(10)
+        layout.addWidget(mask_label)
+        layout.addWidget(mask_refiner_widget)
+        layout.addWidget(self.keep_existing_lines_checkbox)
+        layout.addWidget(self.ctd_settings_widget)
         layout.addSpacing(10)
         layout.addWidget(ocr_widget)
         layout.addSpacing(10)
         layout.addWidget(inpainting_label)
         layout.addWidget(inpainter_widget)
+        layout.addWidget(self.inpainter_runtime_widget)
         layout.addWidget(inpaint_strategy_widget)
         layout.addWidget(self.hd_strategy_widgets)
         layout.addSpacing(10)
@@ -121,6 +199,8 @@ class ToolsPage(QtWidgets.QWidget):
         layout.addStretch(1)
 
         self._update_hd_strategy_widgets(self.inpaint_strategy_combo.currentIndex())
+        self._update_inpainter_runtime_widgets(self.inpainter_combo.currentIndex())
+        self._update_mask_refiner_widgets(self.mask_refiner_combo.currentIndex())
 
     def _update_hd_strategy_widgets(self, index: int):
         strategy = self.inpaint_strategy_combo.itemText(index)
@@ -130,3 +210,37 @@ class ToolsPage(QtWidgets.QWidget):
             self.hd_strategy_widgets.setFixedHeight(0)
         else:
             self.hd_strategy_widgets.setFixedHeight(self.hd_strategy_widgets.sizeHint().height())
+
+    def _update_mask_refiner_widgets(self, index: int):
+        use_ctd = self.mask_refiner_combo.itemText(index) == self.tr("ctd")
+        self.keep_existing_lines_checkbox.setVisible(use_ctd)
+        self.ctd_settings_widget.setVisible(use_ctd)
+
+    def _update_inpainter_runtime_widgets(self, index: int):
+        key = self.inpainter_combo.itemText(index)
+        if key == self.tr("lama_large_512px"):
+            sizes = ["512", "768", "1024", "1536", "2048"]
+            default_size = "1536"
+            show_precision = True
+            default_precision = "bf16"
+        elif key == self.tr("lama_mpe"):
+            sizes = ["1024", "2048"]
+            default_size = "2048"
+            show_precision = False
+            default_precision = "fp32"
+        else:
+            sizes = ["1024", "2048"]
+            default_size = "2048"
+            show_precision = False
+            default_precision = "fp32"
+
+        current_size = self.inpainter_size_combo.currentText()
+        self.inpainter_size_combo.blockSignals(True)
+        self.inpainter_size_combo.clear()
+        self.inpainter_size_combo.addItems(sizes)
+        self.inpainter_size_combo.setCurrentText(current_size if current_size in sizes else default_size)
+        self.inpainter_size_combo.blockSignals(False)
+        self.inpainter_precision_combo.setCurrentText(default_precision)
+        self.inpainter_precision_combo.setVisible(show_precision)
+        form = self.inpainter_runtime_widget.layout()
+        form.labelForField(self.inpainter_precision_combo).setVisible(show_precision)

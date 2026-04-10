@@ -1,11 +1,20 @@
 from __future__ import annotations
 
-from PySide6.QtCore import QCoreApplication
 from typing import TYPE_CHECKING
-from modules.inpainting.lama import LaMa
-from modules.inpainting.mi_gan import MIGAN
+
+from PySide6.QtCore import QCoreApplication
+
+from modules.ocr.selection import resolve_ocr_engine
 from modules.inpainting.aot import AOT
+from modules.inpainting.lama_variants import LaMaLarge512px, LaMaMPE
+from modules.inpainting.mi_gan import MIGAN
 from modules.inpainting.schema import Config
+from modules.utils.exceptions import LocalServiceSetupError
+from modules.utils.inpainting_runtime import (
+    inpainter_backend_for,
+    inpainter_default_settings,
+    normalize_inpainter_key,
+)
 from app.ui.messages import Messages
 from app.ui.settings.settings_page import SettingsPage
 
@@ -13,9 +22,12 @@ if TYPE_CHECKING:
     from controller import ComicTranslate
 
 inpaint_map = {
-    "LaMa": LaMa,
-    "MI-GAN": MIGAN,
     "AOT": AOT,
+    "lama_large_512px": LaMaLarge512px,
+    "lama_mpe": LaMaMPE,
+    "MI-GAN": MIGAN,
+    # Backward compatibility for older saved settings or stale project metadata.
+    "LaMa": LaMaLarge512px,
 }
 
 FIELD_LABELS = {
@@ -42,7 +54,7 @@ TRANSLATOR_REQUIREMENTS = {
     "Custom Local Server(Gemma)": ("Custom Local Server(Gemma)", ("api_url", "model")),
     "GPT-4.1": ("Open AI GPT", ("api_key",)),
     "GPT-4.1-mini": ("Open AI GPT", ("api_key",)),
-    "Claude-4.5-Sonnet": ("Anthropic Claude", ("api_key",)),
+    "Claude-4.6-Sonnet": ("Anthropic Claude", ("api_key",)),
     "Claude-4.5-Haiku": ("Anthropic Claude", ("api_key",)),
     "Gemini-2.5-Pro": ("Google Gemini", ("api_key",)),
     "Gemini-3.0-Flash": ("Google Gemini", ("api_key",)),
@@ -52,17 +64,29 @@ TRANSLATOR_REQUIREMENTS = {
     "Yandex": ("Yandex", ("api_key", "folder_id")),
 }
 
+
 def get_config(settings_page: SettingsPage):
     strategy_settings = settings_page.get_hd_strategy_settings()
     if strategy_settings['strategy'] == settings_page.ui.tr("Resize"):
-        config = Config(hd_strategy="Resize", hd_strategy_resize_limit = strategy_settings['resize_limit'])
-    elif strategy_settings['strategy'] == settings_page.ui.tr("Crop"):
-        config = Config(hd_strategy="Crop", hd_strategy_crop_margin = strategy_settings['crop_margin'],
-                        hd_strategy_crop_trigger_size = strategy_settings['crop_trigger_size'])
-    else:
-        config = Config(hd_strategy="Original")
+        return Config(hd_strategy="Resize", hd_strategy_resize_limit=strategy_settings['resize_limit'])
+    if strategy_settings['strategy'] == settings_page.ui.tr("Crop"):
+        return Config(
+            hd_strategy="Crop",
+            hd_strategy_crop_margin=strategy_settings['crop_margin'],
+            hd_strategy_crop_trigger_size=strategy_settings['crop_trigger_size'],
+        )
+    return Config(hd_strategy="Original")
 
-    return config
+
+def get_inpainter_runtime(settings_page: SettingsPage, inpainter_key: str | None = None) -> dict:
+    normalized = normalize_inpainter_key(inpainter_key or settings_page.get_tool_selection("inpainter"))
+    defaults = inpainter_default_settings(normalized)
+    runtime_settings = settings_page.get_inpainter_runtime_settings(normalized)
+    merged = dict(defaults)
+    merged.update(runtime_settings)
+    merged["key"] = normalized
+    merged["backend"] = str(merged.get("backend") or inpainter_backend_for(normalized))
+    return merged
 
 
 def _missing_fields(creds: dict, required_fields: tuple[str, ...]) -> list[str]:
@@ -73,17 +97,18 @@ def _show_missing_credentials(main: ComicTranslate, provider_name: str, missing_
     field_text = ", ".join(FIELD_LABELS.get(field, field) for field in missing_fields)
     Messages.show_missing_credentials_error(main, provider_name, field_text)
 
-def validate_ocr(main: ComicTranslate):
-    """Ensure the selected OCR tool has the credentials it needs."""
+
+def validate_ocr(main: ComicTranslate, source_lang: str | None = None):
     settings_page = main.settings_page
-    settings = settings_page.get_all_settings()
-    ocr_tool = settings['tools']['ocr']
+    ocr_tool = settings_page.get_tool_selection("ocr")
 
     if not ocr_tool:
         Messages.show_missing_tool_error(main, QCoreApplication.translate("Messages", "Text Recognition model"))
         return False
 
-    normalized_tool = settings_page.ui.value_mappings.get(ocr_tool, ocr_tool)
+    source_lang = source_lang or main.s_combo.currentText()
+    source_lang_english = main.lang_mapping.get(source_lang, source_lang)
+    normalized_tool = resolve_ocr_engine(ocr_tool, source_lang_english)
     if normalized_tool in {"PaddleOCR VL", "HunyuanOCR"}:
         local_service_configs = {
             "PaddleOCR VL": (
@@ -106,6 +131,17 @@ def validate_ocr(main: ComicTranslate):
                 settings_page_name=settings_page_name,
             )
             return False
+        try:
+            main.local_ocr_runtime_manager.validate_engine(normalized_tool, settings_page)
+        except LocalServiceSetupError as exc:
+            Messages.show_local_service_error(
+                main,
+                details=str(exc),
+                service_name=service_name,
+                settings_page_name=settings_page_name,
+                error_kind="setup",
+            )
+            return False
         return True
 
     provider = OCR_REQUIREMENTS.get(normalized_tool)
@@ -123,7 +159,6 @@ def validate_ocr(main: ComicTranslate):
 
 
 def validate_translator(main: ComicTranslate, target_lang: str):
-    """Ensure the selected translator has the credentials it needs."""
     settings_page = main.settings_page
     settings = settings_page.get_all_settings()
     translator_tool = settings['tools']['translator']
@@ -151,18 +186,19 @@ def validate_translator(main: ComicTranslate, target_lang: str):
 
     return True
 
+
 def font_selected(main: ComicTranslate):
     if not main.render_settings().font_family:
         Messages.select_font_error(main)
         return False
     return True
 
-def validate_settings(main: ComicTranslate, target_lang: str):
-    if not validate_ocr(main):
+
+def validate_settings(main: ComicTranslate, target_lang: str, source_lang: str | None = None):
+    if not validate_ocr(main, source_lang=source_lang):
         return False
     if not validate_translator(main, target_lang):
         return False
     if not font_selected(main):
         return False
-    
     return True
