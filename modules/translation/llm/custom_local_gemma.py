@@ -11,6 +11,7 @@ import requests
 from .base import BaseLLMTranslation
 from ...utils.textblock import TextBlock
 from ...utils.translator_utils import extract_json_object
+from ...utils.exceptions import LocalServiceConnectionError, LocalServiceResponseError
 
 logger = logging.getLogger(__name__)
 
@@ -463,9 +464,20 @@ class CustomLocalGemmaTranslation(BaseLLMTranslation):
                     error_msg += f" - {json.dumps(exc.response.json(), ensure_ascii=False)}"
                 except Exception:
                     error_msg += f" - Status code: {exc.response.status_code}"
-            raise RuntimeError(error_msg) from exc
+            raise LocalServiceConnectionError(
+                error_msg,
+                service_name="Gemma",
+                settings_page_name="Gemma Local Server Settings",
+            ) from exc
 
-        response_data = response.json()
+        try:
+            response_data = response.json()
+        except ValueError as exc:
+            raise LocalServiceResponseError(
+                "Gemma local server returned invalid JSON.",
+                service_name="Gemma",
+                settings_page_name="Gemma Local Server Settings",
+            ) from exc
         if self.raw_response_logging:
             logger.info(
                 "translation raw response json (%s): %s",
