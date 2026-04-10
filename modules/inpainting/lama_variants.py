@@ -7,10 +7,7 @@ from PIL import Image
 
 from .base import InpaintModel
 from .schema import Config
-from modules.utils.integration_paths import (
-    get_lama_large_512px_ckpt_path,
-    get_lama_mpe_ckpt_path,
-)
+from modules.utils.download import ModelDownloader, ModelID
 
 
 def _resize_keep_aspect(img, target_size: int | None, *, stride: int | None = None):
@@ -151,7 +148,7 @@ class LaMaMPE(_TorchLamaBase):
 
     @classmethod
     def model_path(cls):
-        return get_lama_mpe_ckpt_path()
+        return ModelDownloader.primary_path(ModelID.LAMA_MPE)
 
     @classmethod
     def load_model_impl(cls, model_path: str, device: str):
@@ -208,7 +205,7 @@ class LaMaLarge512px(LaMaMPE):
 
     @classmethod
     def model_path(cls):
-        return get_lama_large_512px_ckpt_path()
+        return ModelDownloader.primary_path(ModelID.LAMA_LARGE_512PX)
 
     @classmethod
     def load_model_impl(cls, model_path: str, device: str):

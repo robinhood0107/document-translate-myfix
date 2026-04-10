@@ -17,7 +17,7 @@
 ### Windows 런타임과 저장소 운영
 
 - 기본 런타임과 CUDA13 런타임용 Windows launcher를 추가했습니다.
-- `.venv-win`, `.venv-win-cuda13`를 자동 준비하는 `setup.bat`를 추가했습니다.
+- `run_comic.bat`, `run_comic_cuda13.bat`가 로컬 venv/runtime을 스스로 bootstrap하도록 바꿨습니다.
 - 로컬 hook과 CI 검증을 강화했습니다.
 - 브랜치 정책을 표준화했고, 이후 `codex/` 접두사도 제거했습니다.
 - 최종적으로 저장소 정책을 `main + develop + tag`로 정리했습니다.
