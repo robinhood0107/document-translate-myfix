@@ -6,11 +6,12 @@ from PySide6.QtCore import QCoreApplication
 
 from modules.ocr.selection import resolve_ocr_engine
 from modules.ocr.local_runtime import LocalOCRRuntimeManager
+from modules.translation.local_runtime import LocalGemmaRuntimeManager
 from modules.inpainting.aot import AOT
 from modules.inpainting.lama_variants import LaMaLarge512px, LaMaMPE
 from modules.inpainting.mi_gan import MIGAN
 from modules.inpainting.schema import Config
-from modules.utils.exceptions import LocalServiceSetupError
+from modules.utils.exceptions import LocalServiceConnectionError, LocalServiceSetupError
 from modules.utils.inpainting_runtime import (
     inpainter_backend_for,
     inpainter_default_settings,
@@ -213,6 +214,30 @@ def validate_translator(main: ComicTranslate, target_lang: str):
         else:
             _show_missing_credentials(main, provider_name, missing_fields)
         return False
+
+    if normalized_tool == "Custom Local Server(Gemma)":
+        runtime_manager = getattr(main, "local_translation_runtime_manager", None)
+        if not isinstance(runtime_manager, LocalGemmaRuntimeManager):
+            runtime_manager = LocalGemmaRuntimeManager()
+            main.local_translation_runtime_manager = runtime_manager
+        try:
+            runtime_manager.ensure_server(settings_page)
+        except (LocalServiceSetupError, LocalServiceConnectionError) as exc:
+            if hasattr(main, "batch_report_ctrl"):
+                title = (
+                    QCoreApplication.translate("Messages", "Gemma local server runtime setup failed")
+                    if isinstance(exc, LocalServiceSetupError)
+                    else QCoreApplication.translate("Messages", "Gemma local server is unavailable")
+                )
+                main.batch_report_ctrl.register_preflight_error(title, str(exc))
+            Messages.show_local_service_error(
+                main,
+                details=str(exc),
+                service_name="Gemma",
+                settings_page_name=settings_page.ui.tr("Gemma Local Server Settings"),
+                error_kind="setup" if isinstance(exc, LocalServiceSetupError) else "connection",
+            )
+            return False
 
     return True
 
