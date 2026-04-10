@@ -86,8 +86,8 @@
 
 이번 라운드에서 old-image 통제군은 떠 있는 `ghcr` 태그가 아니라 고정 태그를 사용합니다.
 
-- `translation-old-image-baseline`: `local/llama.cpp:server-cuda-pre-b8665`
-- `b8665-*`: `local/llama.cpp:server-cuda-b8665`
+- 현재 active llama.cpp moving tag: `ghcr.io/ggml-org/llama.cpp:server-cuda`
+- historical reports may reference older local tags, but active presets now pull the official GHCR image every run.
 
 ## 관련 문서
 

@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import shutil
 import sys
@@ -35,6 +36,8 @@ from benchmark_common import (
     resolve_corpus,
     run_command,
     stage_runtime_files,
+    compose_pull_and_recreate,
+    collect_managed_llama_cpp_runtimes,
     summarize_metrics,
     write_json,
 )
@@ -186,17 +189,11 @@ def _ensure_managed_runtime(
     _log("managed runtime 기존 컨테이너 정리 중...")
     remove_containers(ALL_BENCHMARK_CONTAINER_NAMES)
     if runtime_services != "ocr-only":
-        _log(f"Gemma compose 적용: {staged['gemma']['compose_path']}")
-        run_command(
-            ["docker", "compose", "-f", staged["gemma"]["compose_path"], "up", "-d", "--force-recreate"],
-            cwd=runtime_dir / "gemma",
-        )
+        _log(f"Gemma compose pull+recreate: {staged['gemma']['compose_path']}")
+        compose_pull_and_recreate(staged["gemma"]["compose_path"], cwd=runtime_dir / "gemma")
     if staged["ocr"].get("kind") != "internal":
-        _log(f"OCR compose 적용: {staged['ocr']['compose_path']}")
-        run_command(
-            ["docker", "compose", "-f", staged["ocr"]["compose_path"], "up", "-d", "--force-recreate"],
-            cwd=runtime_dir / "ocr",
-        )
+        _log(f"OCR compose pull+recreate: {staged['ocr']['compose_path']}")
+        compose_pull_and_recreate(staged["ocr"]["compose_path"], cwd=runtime_dir / "ocr")
     else:
         _log("OCR runtime kind=internal: 외부 OCR 컨테이너를 띄우지 않습니다")
     _log("managed runtime health-check 대기 중...")
@@ -516,6 +513,12 @@ def _run_single_mode(
 
     metrics_path = run_dir / "metrics.jsonl"
     summary = summarize_metrics(metrics_path)
+    runtime_meta_path = run_dir / "llama_cpp_runtime.json"
+    if runtime_meta_path.is_file():
+        try:
+            summary["llama_cpp_runtime"] = json.loads(runtime_meta_path.read_text(encoding="utf-8"))
+        except Exception:
+            pass
     summary.update(
         {
             "mode": mode,
@@ -668,12 +671,20 @@ def main() -> int:
                     run_dir / "docker_snapshot.json",
                     collect_runtime_snapshot(container_names),
                 )
+                write_json(
+                    run_dir / "llama_cpp_runtime.json",
+                    collect_managed_llama_cpp_runtimes(preset, args.runtime_services),
+                )
                 _write_container_logs(run_dir, container_names)
             else:
                 _log("attach-running 모드: 현재 떠 있는 Docker 서버를 그대로 사용")
                 write_snapshot_json(
                     run_dir / "docker_snapshot.json",
                     collect_runtime_snapshot(container_names),
+                )
+                write_json(
+                    run_dir / "llama_cpp_runtime.json",
+                    collect_managed_llama_cpp_runtimes(preset, args.runtime_services),
                 )
                 _write_container_logs(run_dir, container_names)
 

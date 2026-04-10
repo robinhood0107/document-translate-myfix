@@ -20,6 +20,7 @@ from app.ui.commands.box import DeleteBoxesCommand
 from modules.utils.textblock import TextBlock
 from modules.utils.file_handler import FileHandler
 from modules.utils.pipeline_config import validate_settings
+from modules.ocr.local_runtime import LocalOCRRuntimeManager
 from modules.utils.download import mandatory_models, set_download_callback, ensure_mandatory_models
 from pipeline.main_pipeline import ComicTranslatePipeline
 
@@ -111,6 +112,7 @@ class ComicTranslate(ComicTranslateUI):
         self._skip_close_prompt = False
 
         self.pipeline = ComicTranslatePipeline(self)
+        self.local_ocr_runtime_manager = LocalOCRRuntimeManager()
         try:
             if self._memlogger is not None:
                 self._memlogger.emit("after_pipeline_init")
@@ -545,13 +547,15 @@ class ComicTranslate(ComicTranslateUI):
         if not selected_paths:
             return False
 
+        self._start_batch_report(selected_paths, run_type=run_type)
         for path in selected_paths:
             tgt = self.image_states[path]['target_lang']
             if not validate_settings(self, tgt):
+                self._finalize_batch_report(was_cancelled=False)
+                self.batch_report_ctrl.refresh_action_buttons()
                 return False
 
         self.image_ctrl.clear_page_skip_errors_for_paths(selected_paths)
-        self._start_batch_report(selected_paths, run_type=run_type)
         self.selected_batch = selected_paths
         self._current_batch_run_type = run_type
 
@@ -589,13 +593,15 @@ class ComicTranslate(ComicTranslateUI):
                 self._memlogger.emit("batch_start_all")
         except Exception:
             pass
+        self._start_batch_report(self.image_files, run_type="batch")
         for image_path in self.image_files:
             target_lang = self.image_states[image_path]['target_lang']
             if not validate_settings(self, target_lang):
+                self._finalize_batch_report(was_cancelled=False)
+                self.batch_report_ctrl.refresh_action_buttons()
                 return
 
         self.image_ctrl.clear_page_skip_errors_for_paths(self.image_files)
-        self._start_batch_report(self.image_files, run_type="batch")
         self._batch_active = True
         self._batch_cancel_requested = False
         self._current_batch_run_type = "batch"
