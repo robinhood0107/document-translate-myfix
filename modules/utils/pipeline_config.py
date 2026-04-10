@@ -5,6 +5,7 @@ from typing import TYPE_CHECKING
 from PySide6.QtCore import QCoreApplication
 
 from modules.ocr.selection import resolve_ocr_engine
+from modules.ocr.local_runtime import LocalOCRRuntimeManager
 from modules.inpainting.aot import AOT
 from modules.inpainting.lama_variants import LaMaLarge512px, LaMaMPE
 from modules.inpainting.mi_gan import MIGAN
@@ -95,6 +96,11 @@ def _missing_fields(creds: dict, required_fields: tuple[str, ...]) -> list[str]:
 
 def _show_missing_credentials(main: ComicTranslate, provider_name: str, missing_fields: list[str]) -> None:
     field_text = ", ".join(FIELD_LABELS.get(field, field) for field in missing_fields)
+    if hasattr(main, "batch_report_ctrl"):
+        main.batch_report_ctrl.register_preflight_error(
+            QCoreApplication.translate("Messages", "Missing credentials for {provider}").format(provider=provider_name),
+            QCoreApplication.translate("Messages", "Required fields: {fields}").format(fields=field_text),
+        )
     Messages.show_missing_credentials_error(main, provider_name, field_text)
 
 
@@ -103,6 +109,11 @@ def validate_ocr(main: ComicTranslate, source_lang: str | None = None):
     ocr_tool = settings_page.get_tool_selection("ocr")
 
     if not ocr_tool:
+        if hasattr(main, "batch_report_ctrl"):
+            main.batch_report_ctrl.register_preflight_error(
+                QCoreApplication.translate("Messages", "Missing OCR tool"),
+                QCoreApplication.translate("Messages", "No Text Recognition model selected."),
+            )
         Messages.show_missing_tool_error(main, QCoreApplication.translate("Messages", "Text Recognition model"))
         return False
 
@@ -124,6 +135,11 @@ def validate_ocr(main: ComicTranslate, source_lang: str | None = None):
         }
         service_name, settings_page_name, service_settings = local_service_configs[normalized_tool]
         if not service_settings.get("server_url", "").strip():
+            if hasattr(main, "batch_report_ctrl"):
+                main.batch_report_ctrl.register_preflight_error(
+                    QCoreApplication.translate("Messages", "{service} settings missing").format(service=service_name),
+                    QCoreApplication.translate("Messages", "Required fields: {fields}").format(fields=FIELD_LABELS["server_url"]),
+                )
             Messages.show_missing_local_service_config_error(
                 main,
                 service_name,
@@ -131,9 +147,18 @@ def validate_ocr(main: ComicTranslate, source_lang: str | None = None):
                 settings_page_name=settings_page_name,
             )
             return False
+        runtime_manager = getattr(main, "local_ocr_runtime_manager", None)
+        if not isinstance(runtime_manager, LocalOCRRuntimeManager):
+            runtime_manager = LocalOCRRuntimeManager()
+            main.local_ocr_runtime_manager = runtime_manager
         try:
-            main.local_ocr_runtime_manager.validate_engine(normalized_tool, settings_page)
+            runtime_manager.validate_engine(normalized_tool, settings_page)
         except LocalServiceSetupError as exc:
+            if hasattr(main, "batch_report_ctrl"):
+                main.batch_report_ctrl.register_preflight_error(
+                    QCoreApplication.translate("Messages", "{service} runtime setup failed").format(service=service_name),
+                    str(exc),
+                )
             Messages.show_local_service_error(
                 main,
                 details=str(exc),
@@ -164,6 +189,11 @@ def validate_translator(main: ComicTranslate, target_lang: str):
     translator_tool = settings['tools']['translator']
 
     if not translator_tool:
+        if hasattr(main, "batch_report_ctrl"):
+            main.batch_report_ctrl.register_preflight_error(
+                QCoreApplication.translate("Messages", "Missing translator"),
+                QCoreApplication.translate("Messages", "No Translator selected."),
+            )
         Messages.show_missing_tool_error(main, QCoreApplication.translate("Messages", "Translator"))
         return False
 
@@ -189,6 +219,11 @@ def validate_translator(main: ComicTranslate, target_lang: str):
 
 def font_selected(main: ComicTranslate):
     if not main.render_settings().font_family:
+        if hasattr(main, "batch_report_ctrl"):
+            main.batch_report_ctrl.register_preflight_error(
+                QCoreApplication.translate("Messages", "No font selected"),
+                QCoreApplication.translate("Messages", "Go to Settings > Text Rendering > Font to select or import one."),
+            )
         Messages.select_font_error(main)
         return False
     return True

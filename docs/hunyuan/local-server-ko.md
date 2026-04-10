@@ -7,15 +7,17 @@
 - `testmodel/` 폴더에 아래 두 파일을 둡니다.
   - `HunyuanOCR-BF16.gguf`
   - `mmproj-HunyuanOCR-BF16.gguf`
-- 현재 기준 Docker image는 `local/llama.cpp:server-cuda-b8672`입니다.
-- `b8672`를 사용하는 이유는 `HunyuanOCR` 지원이 포함된 `llama.cpp` 서버 빌드를 맞추기 위해서입니다.
+- 현재 기준 Docker image는 `ghcr.io/ggml-org/llama.cpp:server-cuda`입니다.
+- 최신 이미지를 실제로 반영하려면 실행 전에 `docker compose pull --policy always`를 먼저 수행한 뒤 `up -d --force-recreate`를 사용하세요.
+- 구현 시점에 직접 확인한 내부 `llama-server --version`은 `8740`입니다. 이 값은 moving tag 특성상 앞으로 바뀔 수 있습니다.
 
 ## 서버 실행
 
 저장소 루트에서 실행:
 
 ```bash
-docker compose -f hunyuanocr_docker_files/docker-compose.yaml up -d
+docker compose -f hunyuanocr_docker_files/docker-compose.yaml pull --policy always
+docker compose -f hunyuanocr_docker_files/docker-compose.yaml up -d --force-recreate
 ```
 
 앱 설정:
@@ -57,7 +59,7 @@ docker compose -f hunyuanocr_docker_files/docker-compose.yaml up -d
 - `ctx-size=4096`
 - `n_parallel=1`
 - `threads=12`
-- `n_gpu_layers=80`
+- `n_gpu_layers=99`
 
 ## 참고
 

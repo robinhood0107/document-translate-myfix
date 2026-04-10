@@ -364,7 +364,7 @@ Use Custom Local Server(Gemma) with the included Gemma Docker setup.</source>
     </message>
     <message>
         <source>Comic Translate can use your local Gemma Docker server for translation.
-1. Run `docker compose up -d` in the repository root.
+1. Run `docker compose pull --policy always` and then `docker compose up -d --force-recreate` in the repository root.
 2. In Settings &gt; Credentials, use Endpoint URL `http://127.0.0.1:18080/v1`.
 3. Set Model to `gemma-4-26b-a4b-it-heretic.q3_k_m.gguf`.
 If responses are truncated, lower Chunk Size or increase LLAMA_CTX_SIZE in docker-compose.yaml.</source>
@@ -820,12 +820,48 @@ Please check your internet connection.</source>
 Veuillez vérifier votre connexion Internet.</translation>
     </message>
     <message>
+        <source>Missing credentials for {provider}</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Missing OCR tool</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>No Text Recognition model selected.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
         <source>Text Recognition model</source>
         <translation>Modèle de reconnaissance de texte</translation>
     </message>
     <message>
+        <source>{service} settings missing</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>{service} runtime setup failed</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Missing translator</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>No Translator selected.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
         <source>Translator</source>
         <translation>Traducteur</translation>
+    </message>
+    <message>
+        <source>No font selected</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Go to Settings &gt; Text Rendering &gt; Font to select or import one.</source>
+        <translation type="unfinished"></translation>
     </message>
     <message>
         <source>OCR result is empty for this block.</source>
@@ -896,6 +932,10 @@ Install it to use PSD features.</source>
         <translation>Fichier de projet</translation>
     </message>
     <message>
+        <source>PSD</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
         <source>Save Currently Loaded Image</source>
         <translation>Enregistrer l&apos;image actuellement chargée</translation>
     </message>
@@ -922,10 +962,6 @@ Install it to use PSD features.</source>
     <message>
         <source>PDF</source>
         <translation>PDF</translation>
-    </message>
-    <message>
-        <source>PSD</source>
-        <translation type="unfinished"></translation>
     </message>
     <message>
         <source>Home</source>
