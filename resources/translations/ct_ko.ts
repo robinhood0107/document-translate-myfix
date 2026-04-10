@@ -1671,12 +1671,76 @@ Open or create a project to get started.</source>
         <translation>텍스트 감지기</translation>
     </message>
     <message>
+        <source>Precise Masking</source>
+        <translation>정밀 마스킹</translation>
+    </message>
+    <message>
+        <source>Mask Refiner</source>
+        <translation>마스크 리파이너</translation>
+    </message>
+    <message>
+        <source>legacy_bbox</source>
+        <translation>legacy_bbox</translation>
+    </message>
+    <message>
+        <source>ctd</source>
+        <translation>ctd</translation>
+    </message>
+    <message>
+        <source>Keep Existing Lines</source>
+        <translation>기존 선 유지</translation>
+    </message>
+    <message>
+        <source>detect_size</source>
+        <translation>검출 크기</translation>
+    </message>
+    <message>
+        <source>det_rearrange_max_batches</source>
+        <translation>최대 재배열 배치 수</translation>
+    </message>
+    <message>
+        <source>device</source>
+        <translation>장치</translation>
+    </message>
+    <message>
+        <source>font size multiplier</source>
+        <translation>글꼴 크기 배수</translation>
+    </message>
+    <message>
+        <source>font size max</source>
+        <translation>최대 글꼴 크기</translation>
+    </message>
+    <message>
+        <source>font size min</source>
+        <translation>최소 글꼴 크기</translation>
+    </message>
+    <message>
+        <source>mask dilate size</source>
+        <translation>마스크 팽창 크기</translation>
+    </message>
+    <message>
         <source>Image Cleaning</source>
         <translation>이미지 정리</translation>
     </message>
     <message>
         <source>Inpainter</source>
         <translation>인페인터</translation>
+    </message>
+    <message>
+        <source>lama_large_512px</source>
+        <translation>lama_large_512px</translation>
+    </message>
+    <message>
+        <source>lama_mpe</source>
+        <translation>lama_mpe</translation>
+    </message>
+    <message>
+        <source>inpaint_size</source>
+        <translation>인페인트 크기</translation>
+    </message>
+    <message>
+        <source>precision</source>
+        <translation>정밀도</translation>
     </message>
     <message>
         <source>AOT</source>

@@ -1634,6 +1634,54 @@ Abra o cree un proyecto para comenzar.</translation>
         <translation>Detector de texto</translation>
     </message>
     <message>
+        <source>Precise Masking</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Mask Refiner</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>legacy_bbox</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>ctd</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Keep Existing Lines</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>detect_size</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>det_rearrange_max_batches</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>device</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>font size multiplier</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>font size max</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>font size min</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>mask dilate size</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
         <source>Image Cleaning</source>
         <translation>Limpieza de imagen</translation>
     </message>
@@ -1644,6 +1692,14 @@ Abra o cree un proyecto para comenzar.</translation>
     <message>
         <source>AOT</source>
         <translation>AOT</translation>
+    </message>
+    <message>
+        <source>inpaint_size</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>precision</source>
+        <translation type="unfinished"></translation>
     </message>
     <message>
         <source>HD Strategy</source>
@@ -1686,6 +1742,14 @@ luego realiza el inpainting en la imagen redimensionada.</translation>
     <message>
         <source>Original</source>
         <translation>Original</translation>
+    </message>
+    <message>
+        <source>lama_large_512px</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>lama_mpe</source>
+        <translation type="unfinished"></translation>
     </message>
 </context>
 <context>
