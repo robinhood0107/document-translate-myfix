@@ -94,6 +94,14 @@ if defined COMIC_BOOTSTRAP_ONLY (
     exit /b 0
 )
 
+echo [bootstrap] Preparing required local runtime models...
+"%PYTHON_EXE%" -c "from modules.utils.download import ensure_startup_runtime_models; ensure_startup_runtime_models(prefer_cuda=True)"
+if errorlevel 1 (
+    echo [bootstrap] Required local model preparation failed.
+    popd >nul
+    exit /b 1
+)
+
 "%PYTHON_EXE%" comic.py %*
 set "EXITCODE=%ERRORLEVEL%"
 

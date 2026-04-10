@@ -12,6 +12,52 @@ The fork is maintained around a practical desktop workflow:
 - selective manual backports from upstream `v2.7.0` and `v2.7.1`
 - benchmark work isolated from product branches
 
+## Origin and Upstream Attribution
+
+This repository started from [ogkalu2/comic-translate](https://github.com/ogkalu2/comic-translate) and should be understood as a downstream, product-focused fork/derivative of that upstream work. It began from the upstream `v2.6.7` codebase and then diverged with local runtime, OCR, Windows, and workflow changes.
+
+## Third-Party Models and Runtime Notice
+
+This project uses, downloads, or interoperates with third-party models, checkpoints, and runtime images. The copyright, license, and usage terms for those assets belong to their original authors and distributors, and this repository does not claim ownership of them. You are responsible for reviewing and complying with each upstream model/runtime license before using them.
+
+### Models and runtimes used by the product code
+
+Detection / masking:
+- [RT-DETR v2](https://huggingface.co/ogkalu/comic-text-and-bubble-detector)
+- [ComicTextDetector (CTD)](https://github.com/zyddnys/manga-image-translator/releases/tag/beta-0.3) (`comictextdetector.pt`, `comictextdetector.pt.onnx`)
+- [Font Detector](https://huggingface.co/gyrojeff/YuzuMarker.FontDetection)
+
+OCR:
+- [MangaOCR](https://huggingface.co/kha-white/manga-ocr-base)
+- [MangaOCR ONNX](https://huggingface.co/mayocream/manga-ocr-onnx)
+- [Pororo OCR](https://huggingface.co/ogkalu/pororo)
+- [PPOCRv5 / RapidOCR](https://www.modelscope.cn/models/RapidAI/RapidOCR)
+- [PaddleOCR VL](https://github.com/PaddlePaddle/PaddleOCR)
+- [HunyuanOCR](https://github.com/Tencent-Hunyuan/HunyuanOCR)
+
+Inpainting:
+- [AOT](https://huggingface.co/ogkalu/aot-inpainting)
+- [LaMa legacy runtime](https://github.com/Sanster/models/releases/tag/AnimeMangaInpainting)
+- [lama_large_512px](https://huggingface.co/dreMaz/AnimeMangaInpainting)
+- [lama_mpe / manga-image-translator inpainting checkpoint](https://github.com/zyddnys/manga-image-translator/releases/tag/beta-0.3)
+- [MI-GAN](https://github.com/Sanster/models/releases/tag/migan)
+
+Local translation/runtime:
+- [Gemma](https://ai.google.dev/gemma) local GGUF runtime
+- [llama.cpp](https://github.com/ggml-org/llama.cpp) Docker runtime image
+
+### Auto-downloaded vs user-supplied assets
+
+Automatically downloaded by the app when missing:
+- CTD model files (`comictextdetector.pt`, `comictextdetector.pt.onnx`)
+- Inpainting checkpoints such as `AOT`, `lama_large_512px`, and `lama_mpe`
+- OCR checkpoints such as `MangaOCR`, `Pororo OCR`, and `PPOCRv5`
+
+Provided separately by the user or local runtime bundle:
+- Gemma GGUF files mounted into the local translation runtime
+- HunyuanOCR GGUF and mmproj files
+- PaddleOCR VL Docker/runtime bundle files
+
 ## Release Policy
 
 This repository now uses a strict `main + develop + tag` model.
@@ -37,7 +83,7 @@ Local product work since the `v2.6.7` base has focused on a few technical areas.
 ### Windows runtime and repo workflow
 
 - added dedicated Windows launchers and a CUDA13 environment path
-- added `setup.bat` to create and verify `.venv-win` and `.venv-win-cuda13`
+- made `run_comic.bat` and `run_comic_cuda13.bat` self-bootstrapping for local venv/runtime setup
 - hardened local Git hook setup and CI validation flow
 - cleaned branch policy and standardized on `feature/*`, `fix/*`, `chore/*`, `hotfix/*`, `benchmarking/lab`
 
@@ -104,18 +150,10 @@ Audit document:
 
 ## Quick Start
 
-### 1. Prepare the Windows environments
+### 1. Launch the application
 
-```bat
-setup.bat
-```
+The launchers create or update their own local runtime environment on first run.
 
-This creates or updates:
-
-- `.venv-win`
-- `.venv-win-cuda13`
-
-### 2. Launch the application
 
 Default Windows runtime:
 
@@ -129,7 +167,7 @@ CUDA13 runtime:
 run_comic_cuda13.bat
 ```
 
-### 3. Optional local translation runtime
+### 2. Optional local translation runtime
 
 Start the local Gemma server from the repository root:
 
@@ -139,7 +177,7 @@ docker compose up -d
 
 Then use `Custom Local Server(Gemma)` in the app.
 
-### 4. Optional local OCR runtimes
+### 3. Optional local OCR runtimes
 
 HunyuanOCR:
 
@@ -149,7 +187,7 @@ docker compose -f hunyuanocr_docker_files/docker-compose.yaml up -d
 
 PaddleOCR VL uses the tracked bundle under [paddleocr_vl_docker_files/README.md](paddleocr_vl_docker_files/README.md).
 
-### 5. Recommended OCR setting
+### 4. Recommended OCR setting
 
 In Settings, choose:
 

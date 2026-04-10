@@ -1,17 +1,28 @@
 import os
 import platform
+from pathlib import Path
+
+
+def get_repo_root() -> str:
+    """Return the repository root for the running application."""
+    return str(Path(__file__).resolve().parents[2])
+
+
+def get_project_models_dir() -> str:
+    """Return the repository-local models directory."""
+    return os.path.join(get_repo_root(), "models")
 
 
 def get_user_data_dir(app_name: str = "ComicTranslate") -> str:
     """
     Returns the platform-specific user data directory for the application.
-    
+
     Windows: %LOCALAPPDATA%/<app_name>
     macOS: ~/Library/Application Support/<app_name>
     Linux: $XDG_DATA_HOME/<app_name> or ~/.local/share/<app_name>
     """
     system = platform.system()
-    
+
     if system == "Windows":
         base_dir = os.getenv('LOCALAPPDATA')
         if not base_dir:
@@ -23,7 +34,7 @@ def get_user_data_dir(app_name: str = "ComicTranslate") -> str:
         base_dir = os.getenv('XDG_DATA_HOME')
         if not base_dir:
             base_dir = os.path.join(os.path.expanduser("~"), ".local", "share")
-            
+
     return os.path.join(base_dir, app_name)
 
 

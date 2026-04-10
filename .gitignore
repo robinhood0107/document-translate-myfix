@@ -35,6 +35,7 @@ htmlcov/
 .DS_Store
 
 #ai models
+/models/
 testmodel
 /Sample/
 /banchmark_result_log/

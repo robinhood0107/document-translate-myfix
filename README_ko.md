@@ -12,6 +12,52 @@
 - upstream `v2.7.0`, `v2.7.1`의 selective manual backport
 - benchmark 작업과 제품 브랜치의 분리
 
+## 원점과 upstream 출처 고지
+
+이 저장소는 [ogkalu2/comic-translate](https://github.com/ogkalu2/comic-translate) 에서 시작된 downstream 포크/파생 작업입니다. upstream `v2.6.7` 코드베이스에서 출발했고, 이후 로컬 런타임, OCR, Windows 실행 환경, 제품 워크플로 방향으로 분기하며 확장되었습니다.
+
+## 서드파티 모델 및 런타임 고지
+
+이 프로젝트는 여러 외부 모델, 체크포인트, 런타임 이미지를 사용하거나 자동 다운로드하거나 연동합니다. 해당 자산의 저작권, 라이선스, 사용 조건은 원 저작권자와 원 배포처에 귀속되며, 이 저장소는 그 소유권을 주장하지 않습니다. 사용자는 각 upstream 모델/런타임의 라이선스와 이용 조건을 직접 확인하고 준수해야 합니다.
+
+### 현재 제품 코드가 사용하는 모델 및 런타임
+
+검출 / 마스킹:
+- [RT-DETR v2](https://huggingface.co/ogkalu/comic-text-and-bubble-detector)
+- [ComicTextDetector (CTD)](https://github.com/zyddnys/manga-image-translator/releases/tag/beta-0.3) (`comictextdetector.pt`, `comictextdetector.pt.onnx`)
+- [Font Detector](https://huggingface.co/gyrojeff/YuzuMarker.FontDetection)
+
+OCR:
+- [MangaOCR](https://huggingface.co/kha-white/manga-ocr-base)
+- [MangaOCR ONNX](https://huggingface.co/mayocream/manga-ocr-onnx)
+- [Pororo OCR](https://huggingface.co/ogkalu/pororo)
+- [PPOCRv5 / RapidOCR](https://www.modelscope.cn/models/RapidAI/RapidOCR)
+- [PaddleOCR VL](https://github.com/PaddlePaddle/PaddleOCR)
+- [HunyuanOCR](https://github.com/Tencent-Hunyuan/HunyuanOCR)
+
+인페인팅:
+- [AOT](https://huggingface.co/ogkalu/aot-inpainting)
+- [LaMa legacy runtime](https://github.com/Sanster/models/releases/tag/AnimeMangaInpainting)
+- [lama_large_512px](https://huggingface.co/dreMaz/AnimeMangaInpainting)
+- [lama_mpe / manga-image-translator 인페인팅 체크포인트](https://github.com/zyddnys/manga-image-translator/releases/tag/beta-0.3)
+- [MI-GAN](https://github.com/Sanster/models/releases/tag/migan)
+
+로컬 번역 / 런타임:
+- [Gemma](https://ai.google.dev/gemma) 로컬 GGUF 런타임
+- [llama.cpp](https://github.com/ggml-org/llama.cpp) Docker 런타임 이미지
+
+### 자동 다운로드 자산과 사용자 준비 자산 구분
+
+앱이 누락 시 자동 다운로드하는 자산:
+- CTD 모델 파일 (`comictextdetector.pt`, `comictextdetector.pt.onnx`)
+- `AOT`, `lama_large_512px`, `lama_mpe` 같은 인페인팅 체크포인트
+- `MangaOCR`, `Pororo OCR`, `PPOCRv5` 같은 OCR 체크포인트
+
+사용자가 별도로 준비하거나 로컬 런타임 번들이 제공하는 자산:
+- 로컬 Gemma 번역 런타임에 마운트하는 Gemma GGUF 파일
+- HunyuanOCR GGUF 및 mmproj 파일
+- PaddleOCR VL Docker/runtime bundle 파일
+
 ## 릴리스 정책
 
 현재 저장소는 엄격한 `main + develop + tag` 모델을 사용합니다.
@@ -37,7 +83,7 @@
 ### Windows 런타임과 저장소 워크플로
 
 - Windows 실행기와 CUDA13 전용 실행 경로를 추가했습니다.
-- `setup.bat`으로 `.venv-win`, `.venv-win-cuda13` 생성/검증 흐름을 만들었습니다.
+- `run_comic.bat`, `run_comic_cuda13.bat` 자체가 로컬 venv/runtime을 자동 bootstrap하도록 바꿨습니다.
 - 로컬 Git hook과 CI 검증 체계를 강화했습니다.
 - 브랜치 정책을 정리해 `feature/*`, `fix/*`, `chore/*`, `hotfix/*`, `benchmarking/lab` 체계로 표준화했습니다.
 
@@ -104,18 +150,10 @@
 
 ## 빠른 사용법
 
-### 1. Windows 환경 준비
+### 1. 앱 실행
 
-```bat
-setup.bat
-```
+런처는 첫 실행 시 필요한 로컬 runtime 환경을 스스로 생성하거나 갱신합니다.
 
-이 명령은 아래 환경을 생성하거나 갱신합니다.
-
-- `.venv-win`
-- `.venv-win-cuda13`
-
-### 2. 앱 실행
 
 기본 Windows 런타임:
 
@@ -129,7 +167,7 @@ CUDA13 런타임:
 run_comic_cuda13.bat
 ```
 
-### 3. 로컬 번역 서버 사용
+### 2. 로컬 번역 서버 사용
 
 저장소 루트에서 Gemma 서버 실행:
 
@@ -139,7 +177,7 @@ docker compose up -d
 
 앱에서는 `Custom Local Server(Gemma)`를 선택합니다.
 
-### 4. 로컬 OCR 서버 사용
+### 3. 로컬 OCR 서버 사용
 
 HunyuanOCR 실행:
 
@@ -149,7 +187,7 @@ docker compose -f hunyuanocr_docker_files/docker-compose.yaml up -d
 
 PaddleOCR VL 런타임 기준 파일은 [paddleocr_vl_docker_files/README.md](paddleocr_vl_docker_files/README.md)에 정리돼 있습니다.
 
-### 5. 권장 OCR 설정
+### 4. 권장 OCR 설정
 
 Settings에서 아래 중 하나를 선택합니다.
 
