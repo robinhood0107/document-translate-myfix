@@ -27,14 +27,6 @@
         <translation>错误</translation>
     </message>
     <message>
-        <source>One-Page Auto</source>
-        <translation type="unfinished">单页自动处理</translation>
-    </message>
-    <message>
-        <source>Translate All</source>
-        <translation type="unfinished">全部翻译</translation>
-    </message>
-    <message>
         <source>No failed pages from the latest batch are available to retry.</source>
         <translation>最近一次批处理中没有可重试的失败页面。</translation>
     </message>
@@ -364,7 +356,7 @@ Use Custom Local Server(Gemma) with the included Gemma Docker setup.</source>
     </message>
     <message>
         <source>Comic Translate can use your local Gemma Docker server for translation.
-1. Run `docker compose up -d` in the repository root.
+1. Run `docker compose pull --policy always` and then `docker compose up -d --force-recreate` in the repository root.
 2. In Settings &gt; Credentials, use Endpoint URL `http://127.0.0.1:18080/v1`.
 3. Set Model to `gemma-4-26b-a4b-it-heretic.q3_k_m.gguf`.
 If responses are truncated, lower Chunk Size or increase LLAMA_CTX_SIZE in docker-compose.yaml.</source>
@@ -819,12 +811,48 @@ Please check your internet connection.</source>
 请检查您的互联网连接。</translation>
     </message>
     <message>
+        <source>Missing credentials for {provider}</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Missing OCR tool</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>No Text Recognition model selected.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
         <source>Text Recognition model</source>
         <translation>文本识别模型</translation>
     </message>
     <message>
+        <source>{service} settings missing</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>{service} runtime setup failed</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Missing translator</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>No Translator selected.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
         <source>Translator</source>
         <translation>翻译器</translation>
+    </message>
+    <message>
+        <source>No font selected</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Go to Settings &gt; Text Rendering &gt; Font to select or import one.</source>
+        <translation type="unfinished"></translation>
     </message>
     <message>
         <source>OCR result is empty for this block.</source>
@@ -895,6 +923,10 @@ Install it to use PSD features.</source>
         <translation>项目文件</translation>
     </message>
     <message>
+        <source>PSD</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
         <source>Save Currently Loaded Image</source>
         <translation>保存当前加载的图片</translation>
     </message>
@@ -921,10 +953,6 @@ Install it to use PSD features.</source>
     <message>
         <source>PDF</source>
         <translation>PDF</translation>
-    </message>
-    <message>
-        <source>PSD</source>
-        <translation type="unfinished"></translation>
     </message>
     <message>
         <source>Home</source>
@@ -2276,8 +2304,8 @@ It may have been moved, renamed, or deleted.
         <translation>GPT-4.1</translation>
     </message>
     <message>
-        <source>Claude-4.6-Sonnet</source>
-        <translation type="unfinished"></translation>
+        <source>Claude-4.5-Sonnet</source>
+        <translation>Claude-4.5-Sonnet</translation>
     </message>
     <message>
         <source>Claude-4.5-Haiku</source>

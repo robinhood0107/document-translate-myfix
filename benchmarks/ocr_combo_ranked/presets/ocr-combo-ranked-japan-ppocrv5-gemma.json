@@ -1,0 +1,44 @@
+{
+  "name": "ocr-combo-ranked-japan-ppocrv5-gemma",
+  "description": "Japan ranked benchmark candidate using explicit PPOCRv5 with fixed Gemma runtime.",
+  "app": {
+    "translator": "Custom Local Server(Gemma)",
+    "ocr": "PPOCRv5",
+    "detector": "RT-DETR-v2",
+    "inpainter": "AOT",
+    "use_gpu": true,
+    "extra_context": ""
+  },
+  "gemma": {
+    "image": "ghcr.io/ggml-org/llama.cpp:server-cuda",
+    "pull_policy": "always",
+    "endpoint_url": "http://127.0.0.1:18080/v1",
+    "model": "gemma-4-26b-a4b-it-heretic.q3_k_m.gguf",
+    "model_path": "/models/gemma-4-26b-a4b-it-heretic.q3_k_m.gguf",
+    "context_size": 4096,
+    "n_parallel": 1,
+    "threads": 12,
+    "n_gpu_layers": 23,
+    "chunk_size": 6,
+    "temperature": 0.6,
+    "top_k": 64,
+    "top_p": 0.95,
+    "min_p": 0.0,
+    "max_completion_tokens": 512,
+    "request_timeout_sec": 180,
+    "raw_response_logging": false,
+    "reasoning": "off",
+    "reasoning_budget": 0,
+    "reasoning_format": "none",
+    "response_format_mode": "json_schema",
+    "response_schema_mode": "blocks"
+  },
+  "ocr_runtime": {
+    "kind": "internal"
+  },
+  "ocr_generic": {
+    "crop_padding_ratio": 0.05,
+    "ppocr_retry_crop_ratio_x": 0.06,
+    "ppocr_retry_crop_ratio_y": 0.1
+  }
+}

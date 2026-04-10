@@ -95,12 +95,28 @@ benchmark family는 가능한 한 아래 구조를 함께 갖춥니다.
 - 실제 실행 범위
 - 공식 점수 범위
 - 합격/탈락 게이트
+- 필요하면 generic stage ceiling으로 공식 suite의 실행 범위를 해당 stage까지만 줄일 수 있음
+
+source language가 다른 코퍼스를 함께 비교하는 family는 단일 글로벌 winner 대신 언어별 추천 정책을 공식 결론으로 삼을 수 있습니다.
+
+- 예: China winner, japan winner를 따로 두고 mixed corpus는 source language 라우팅 정책으로 정리
+
+OCR 비교 family는 아래처럼 scope를 분리할 수 있습니다.
+
+- `execution_scope`
+  - 실제 앱 파이프라인을 어디까지 실행하는지
+- `speed_score_scope`
+  - 공식 속도 점수를 무엇으로 계산하는지
+- `quality_gate_scope`
+  - 합격/탈락을 무엇으로 판단하는지
+
+예를 들어 `ocr-combo`처럼 speed는 full pipeline elapsed로 재되, 품질 gate는 OCR-only로 둘 수 있습니다. 이 경우 machine-generated translation은 hard gate가 될 수 없고, 가능하면 사람이 잠근 OCR gold를 공식 기준으로 사용합니다.
 
 ## benchmark 결과를 `develop`로 반영하는 절차
 
 1. `benchmarking/lab`에서 실험을 완료합니다.
 2. 결과를 읽고 제품에 실제로 필요한 변경만 추립니다.
-3. 새 `feature/*`, `fix/*`, `chore/*` 작업 브랜치를 `develop`에서 분기합니다.
+3. 새 `codex/*` 작업 브랜치를 `develop`에서 분기합니다.
 4. benchmark 전용 파일은 제외하고 아래만 수동으로 옮깁니다.
    - 제품 runtime/config 변경
    - 공용 계측 훅

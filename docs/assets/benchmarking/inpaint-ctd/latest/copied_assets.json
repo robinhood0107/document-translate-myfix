@@ -1,0 +1,150 @@
+{
+  "china": {
+    "spotlight_runs": [
+      {
+        "case_slug": "legacy-bbox-aot",
+        "case_label": "legacy_bbox + AOT",
+        "artifacts": {
+          "source": "./docs/assets/benchmarking/inpaint-ctd/latest/spotlight/china/legacy-bbox-aot/0094_0093.jpg",
+          "detector_overlay": "./docs/assets/benchmarking/inpaint-ctd/latest/spotlight/china/legacy-bbox-aot/0094_0093_detector_overlay.png",
+          "raw_mask": "./docs/assets/benchmarking/inpaint-ctd/latest/spotlight/china/legacy-bbox-aot/0094_0093_raw_mask.png",
+          "mask_overlay": "./docs/assets/benchmarking/inpaint-ctd/latest/spotlight/china/legacy-bbox-aot/0094_0093_mask_overlay.png",
+          "cleanup_delta": "./docs/assets/benchmarking/inpaint-ctd/latest/spotlight/china/legacy-bbox-aot/0094_0093_cleanup_delta.png",
+          "cleaned": "./docs/assets/benchmarking/inpaint-ctd/latest/spotlight/china/legacy-bbox-aot/0094_0093_cleaned.jpg",
+          "translated": "./docs/assets/benchmarking/inpaint-ctd/latest/spotlight/china/legacy-bbox-aot/0094_0093_translated.jpg",
+          "debug_metadata": "./docs/assets/benchmarking/inpaint-ctd/latest/spotlight/china/legacy-bbox-aot/0094_0093_debug.json"
+        }
+      },
+      {
+        "case_slug": "ctd-aot",
+        "case_label": "ctd + AOT",
+        "artifacts": {
+          "source": "./docs/assets/benchmarking/inpaint-ctd/latest/spotlight/china/ctd-aot/0094_0093.jpg",
+          "detector_overlay": "./docs/assets/benchmarking/inpaint-ctd/latest/spotlight/china/ctd-aot/0094_0093_detector_overlay.png",
+          "raw_mask": "./docs/assets/benchmarking/inpaint-ctd/latest/spotlight/china/ctd-aot/0094_0093_raw_mask.png",
+          "mask_overlay": "./docs/assets/benchmarking/inpaint-ctd/latest/spotlight/china/ctd-aot/0094_0093_mask_overlay.png",
+          "cleanup_delta": "./docs/assets/benchmarking/inpaint-ctd/latest/spotlight/china/ctd-aot/0094_0093_cleanup_delta.png",
+          "cleaned": "./docs/assets/benchmarking/inpaint-ctd/latest/spotlight/china/ctd-aot/0094_0093_cleaned.jpg",
+          "translated": "./docs/assets/benchmarking/inpaint-ctd/latest/spotlight/china/ctd-aot/0094_0093_translated.jpg",
+          "debug_metadata": "./docs/assets/benchmarking/inpaint-ctd/latest/spotlight/china/ctd-aot/0094_0093_debug.json"
+        }
+      },
+      {
+        "case_slug": "ctd-protect-aot",
+        "case_label": "ctd + protect + AOT",
+        "artifacts": {
+          "source": "./docs/assets/benchmarking/inpaint-ctd/latest/spotlight/china/ctd-protect-aot/0094_0093.jpg",
+          "detector_overlay": "./docs/assets/benchmarking/inpaint-ctd/latest/spotlight/china/ctd-protect-aot/0094_0093_detector_overlay.png",
+          "raw_mask": "./docs/assets/benchmarking/inpaint-ctd/latest/spotlight/china/ctd-protect-aot/0094_0093_raw_mask.png",
+          "mask_overlay": "./docs/assets/benchmarking/inpaint-ctd/latest/spotlight/china/ctd-protect-aot/0094_0093_mask_overlay.png",
+          "cleanup_delta": "./docs/assets/benchmarking/inpaint-ctd/latest/spotlight/china/ctd-protect-aot/0094_0093_cleanup_delta.png",
+          "cleaned": "./docs/assets/benchmarking/inpaint-ctd/latest/spotlight/china/ctd-protect-aot/0094_0093_cleaned.jpg",
+          "translated": "./docs/assets/benchmarking/inpaint-ctd/latest/spotlight/china/ctd-protect-aot/0094_0093_translated.jpg",
+          "debug_metadata": "./docs/assets/benchmarking/inpaint-ctd/latest/spotlight/china/ctd-protect-aot/0094_0093_debug.json"
+        }
+      },
+      {
+        "case_slug": "ctd-protect-lama-large-512px",
+        "case_label": "ctd + protect + lama_large_512px",
+        "artifacts": {
+          "source": "./docs/assets/benchmarking/inpaint-ctd/latest/spotlight/china/ctd-protect-lama-large-512px/0094_0093.jpg",
+          "detector_overlay": "./docs/assets/benchmarking/inpaint-ctd/latest/spotlight/china/ctd-protect-lama-large-512px/0094_0093_detector_overlay.png",
+          "raw_mask": "./docs/assets/benchmarking/inpaint-ctd/latest/spotlight/china/ctd-protect-lama-large-512px/0094_0093_raw_mask.png",
+          "mask_overlay": "./docs/assets/benchmarking/inpaint-ctd/latest/spotlight/china/ctd-protect-lama-large-512px/0094_0093_mask_overlay.png",
+          "cleanup_delta": "./docs/assets/benchmarking/inpaint-ctd/latest/spotlight/china/ctd-protect-lama-large-512px/0094_0093_cleanup_delta.png",
+          "cleaned": "./docs/assets/benchmarking/inpaint-ctd/latest/spotlight/china/ctd-protect-lama-large-512px/0094_0093_cleaned.jpg",
+          "translated": "./docs/assets/benchmarking/inpaint-ctd/latest/spotlight/china/ctd-protect-lama-large-512px/0094_0093_translated.jpg",
+          "debug_metadata": "./docs/assets/benchmarking/inpaint-ctd/latest/spotlight/china/ctd-protect-lama-large-512px/0094_0093_debug.json"
+        }
+      },
+      {
+        "case_slug": "ctd-protect-lama-mpe",
+        "case_label": "ctd + protect + lama_mpe",
+        "artifacts": {
+          "source": "./docs/assets/benchmarking/inpaint-ctd/latest/spotlight/china/ctd-protect-lama-mpe/0094_0093.jpg",
+          "detector_overlay": "./docs/assets/benchmarking/inpaint-ctd/latest/spotlight/china/ctd-protect-lama-mpe/0094_0093_detector_overlay.png",
+          "raw_mask": "./docs/assets/benchmarking/inpaint-ctd/latest/spotlight/china/ctd-protect-lama-mpe/0094_0093_raw_mask.png",
+          "mask_overlay": "./docs/assets/benchmarking/inpaint-ctd/latest/spotlight/china/ctd-protect-lama-mpe/0094_0093_mask_overlay.png",
+          "cleanup_delta": "./docs/assets/benchmarking/inpaint-ctd/latest/spotlight/china/ctd-protect-lama-mpe/0094_0093_cleanup_delta.png",
+          "cleaned": "./docs/assets/benchmarking/inpaint-ctd/latest/spotlight/china/ctd-protect-lama-mpe/0094_0093_cleaned.jpg",
+          "translated": "./docs/assets/benchmarking/inpaint-ctd/latest/spotlight/china/ctd-protect-lama-mpe/0094_0093_translated.jpg",
+          "debug_metadata": "./docs/assets/benchmarking/inpaint-ctd/latest/spotlight/china/ctd-protect-lama-mpe/0094_0093_debug.json"
+        }
+      }
+    ]
+  },
+  "japan": {
+    "spotlight_runs": [
+      {
+        "case_slug": "legacy-bbox-aot",
+        "case_label": "legacy_bbox + AOT",
+        "artifacts": {
+          "source": "./docs/assets/benchmarking/inpaint-ctd/latest/spotlight/japan/legacy-bbox-aot/094.png",
+          "detector_overlay": "./docs/assets/benchmarking/inpaint-ctd/latest/spotlight/japan/legacy-bbox-aot/094_detector_overlay.png",
+          "raw_mask": "./docs/assets/benchmarking/inpaint-ctd/latest/spotlight/japan/legacy-bbox-aot/094_raw_mask.png",
+          "mask_overlay": "./docs/assets/benchmarking/inpaint-ctd/latest/spotlight/japan/legacy-bbox-aot/094_mask_overlay.png",
+          "cleanup_delta": "./docs/assets/benchmarking/inpaint-ctd/latest/spotlight/japan/legacy-bbox-aot/094_cleanup_delta.png",
+          "cleaned": "./docs/assets/benchmarking/inpaint-ctd/latest/spotlight/japan/legacy-bbox-aot/094_cleaned.png",
+          "translated": "./docs/assets/benchmarking/inpaint-ctd/latest/spotlight/japan/legacy-bbox-aot/094_translated.png",
+          "debug_metadata": "./docs/assets/benchmarking/inpaint-ctd/latest/spotlight/japan/legacy-bbox-aot/094_debug.json"
+        }
+      },
+      {
+        "case_slug": "ctd-aot",
+        "case_label": "ctd + AOT",
+        "artifacts": {
+          "source": "./docs/assets/benchmarking/inpaint-ctd/latest/spotlight/japan/ctd-aot/094.png",
+          "detector_overlay": "./docs/assets/benchmarking/inpaint-ctd/latest/spotlight/japan/ctd-aot/094_detector_overlay.png",
+          "raw_mask": "./docs/assets/benchmarking/inpaint-ctd/latest/spotlight/japan/ctd-aot/094_raw_mask.png",
+          "mask_overlay": "./docs/assets/benchmarking/inpaint-ctd/latest/spotlight/japan/ctd-aot/094_mask_overlay.png",
+          "cleanup_delta": "./docs/assets/benchmarking/inpaint-ctd/latest/spotlight/japan/ctd-aot/094_cleanup_delta.png",
+          "cleaned": "./docs/assets/benchmarking/inpaint-ctd/latest/spotlight/japan/ctd-aot/094_cleaned.png",
+          "translated": "./docs/assets/benchmarking/inpaint-ctd/latest/spotlight/japan/ctd-aot/094_translated.png",
+          "debug_metadata": "./docs/assets/benchmarking/inpaint-ctd/latest/spotlight/japan/ctd-aot/094_debug.json"
+        }
+      },
+      {
+        "case_slug": "ctd-protect-aot",
+        "case_label": "ctd + protect + AOT",
+        "artifacts": {
+          "source": "./docs/assets/benchmarking/inpaint-ctd/latest/spotlight/japan/ctd-protect-aot/094.png",
+          "detector_overlay": "./docs/assets/benchmarking/inpaint-ctd/latest/spotlight/japan/ctd-protect-aot/094_detector_overlay.png",
+          "raw_mask": "./docs/assets/benchmarking/inpaint-ctd/latest/spotlight/japan/ctd-protect-aot/094_raw_mask.png",
+          "mask_overlay": "./docs/assets/benchmarking/inpaint-ctd/latest/spotlight/japan/ctd-protect-aot/094_mask_overlay.png",
+          "cleanup_delta": "./docs/assets/benchmarking/inpaint-ctd/latest/spotlight/japan/ctd-protect-aot/094_cleanup_delta.png",
+          "cleaned": "./docs/assets/benchmarking/inpaint-ctd/latest/spotlight/japan/ctd-protect-aot/094_cleaned.png",
+          "translated": "./docs/assets/benchmarking/inpaint-ctd/latest/spotlight/japan/ctd-protect-aot/094_translated.png",
+          "debug_metadata": "./docs/assets/benchmarking/inpaint-ctd/latest/spotlight/japan/ctd-protect-aot/094_debug.json"
+        }
+      },
+      {
+        "case_slug": "ctd-protect-lama-large-512px",
+        "case_label": "ctd + protect + lama_large_512px",
+        "artifacts": {
+          "source": "./docs/assets/benchmarking/inpaint-ctd/latest/spotlight/japan/ctd-protect-lama-large-512px/094.png",
+          "detector_overlay": "./docs/assets/benchmarking/inpaint-ctd/latest/spotlight/japan/ctd-protect-lama-large-512px/094_detector_overlay.png",
+          "raw_mask": "./docs/assets/benchmarking/inpaint-ctd/latest/spotlight/japan/ctd-protect-lama-large-512px/094_raw_mask.png",
+          "mask_overlay": "./docs/assets/benchmarking/inpaint-ctd/latest/spotlight/japan/ctd-protect-lama-large-512px/094_mask_overlay.png",
+          "cleanup_delta": "./docs/assets/benchmarking/inpaint-ctd/latest/spotlight/japan/ctd-protect-lama-large-512px/094_cleanup_delta.png",
+          "cleaned": "./docs/assets/benchmarking/inpaint-ctd/latest/spotlight/japan/ctd-protect-lama-large-512px/094_cleaned.png",
+          "translated": "./docs/assets/benchmarking/inpaint-ctd/latest/spotlight/japan/ctd-protect-lama-large-512px/094_translated.png",
+          "debug_metadata": "./docs/assets/benchmarking/inpaint-ctd/latest/spotlight/japan/ctd-protect-lama-large-512px/094_debug.json"
+        }
+      },
+      {
+        "case_slug": "ctd-protect-lama-mpe",
+        "case_label": "ctd + protect + lama_mpe",
+        "artifacts": {
+          "source": "./docs/assets/benchmarking/inpaint-ctd/latest/spotlight/japan/ctd-protect-lama-mpe/094.png",
+          "detector_overlay": "./docs/assets/benchmarking/inpaint-ctd/latest/spotlight/japan/ctd-protect-lama-mpe/094_detector_overlay.png",
+          "raw_mask": "./docs/assets/benchmarking/inpaint-ctd/latest/spotlight/japan/ctd-protect-lama-mpe/094_raw_mask.png",
+          "mask_overlay": "./docs/assets/benchmarking/inpaint-ctd/latest/spotlight/japan/ctd-protect-lama-mpe/094_mask_overlay.png",
+          "cleanup_delta": "./docs/assets/benchmarking/inpaint-ctd/latest/spotlight/japan/ctd-protect-lama-mpe/094_cleanup_delta.png",
+          "cleaned": "./docs/assets/benchmarking/inpaint-ctd/latest/spotlight/japan/ctd-protect-lama-mpe/094_cleaned.png",
+          "translated": "./docs/assets/benchmarking/inpaint-ctd/latest/spotlight/japan/ctd-protect-lama-mpe/094_translated.png",
+          "debug_metadata": "./docs/assets/benchmarking/inpaint-ctd/latest/spotlight/japan/ctd-protect-lama-mpe/094_debug.json"
+        }
+      }
+    ]
+  }
+}

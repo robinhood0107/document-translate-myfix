@@ -1,0 +1,47 @@
+{
+  "name": "translation-t05",
+  "description": "Translation-only temperature sweep candidate at 0.5 with n_gpu_layers=23.",
+  "app": {
+    "translator": "Custom Local Server(Gemma)",
+    "ocr": "PaddleOCR VL",
+    "detector": "RT-DETR-v2",
+    "inpainter": "AOT",
+    "use_gpu": true,
+    "extra_context": ""
+  },
+  "gemma": {
+    "endpoint_url": "http://127.0.0.1:18080/v1",
+    "model": "gemma-4-26b-a4b-it-heretic.q3_k_m.gguf",
+    "model_path": "/models/gemma-4-26b-a4b-it-heretic.q3_k_m.gguf",
+    "context_size": 4096,
+    "n_parallel": 1,
+    "threads": 12,
+    "n_gpu_layers": 23,
+    "chunk_size": 4,
+    "temperature": 0.5,
+    "top_k": 64,
+    "top_p": 0.95,
+    "min_p": 0.0,
+    "max_completion_tokens": 512,
+    "request_timeout_sec": 180,
+    "raw_response_logging": false,
+    "reasoning": "off",
+    "reasoning_budget": 0,
+    "reasoning_format": "none"
+  },
+  "ocr_client": {
+    "server_url": "http://127.0.0.1:28118/layout-parsing",
+    "parallel_workers": 8,
+    "max_new_tokens": 1024,
+    "prettify_markdown": false,
+    "visualize": false
+  },
+  "ocr_runtime": {
+    "front_device": "cpu",
+    "gpu_memory_utilization": 0.84,
+    "max_model_len": 4096,
+    "max_num_seqs": 32,
+    "max_num_batched_tokens": 98304,
+    "dtype": "bfloat16"
+  }
+}

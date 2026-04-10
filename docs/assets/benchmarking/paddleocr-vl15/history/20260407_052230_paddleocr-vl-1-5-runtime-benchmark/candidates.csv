@@ -1,0 +1,2 @@
+phase,preset,stage,official_score_detect_ocr_median_sec,warm_ocr_page_p95_median_sec,detection_pass,ocr_pass,promoted,rejection_reason,source
+phase-0-baseline,paddleocr-vl15-baseline,full-confirm,15.424,13.282,True,True,True,,baseline

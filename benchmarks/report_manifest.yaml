@@ -1,0 +1,55 @@
+results_root: banchmark_result_log
+active_preset: translation-baseline
+winning_candidate_preset: translation-t06
+
+benchmark:
+  name: Translation-Only Gemma + PaddleOCR GPU Optimization
+  kind: translation-only preset sweep
+  scope: Gemma sampler temperature sweep + n_gpu_layers sweep with PaddleOCR front on CPU
+
+baseline:
+  one_page: 20260405_224354_translation-baseline_one-page_r1
+  batch: 20260405_231837_translation-baseline_batch_r1
+
+n_gpu_layers_sweep:
+  - preset: translation-ngl20
+    n_gpu_layers: 20
+    one_page: 20260405_225129_translation-ngl20_one-page_r1
+  - preset: translation-ngl21
+    n_gpu_layers: 21
+    one_page: 20260405_225451_translation-ngl21_one-page_r1
+  - preset: translation-ngl22
+    n_gpu_layers: 22
+    one_page: 20260405_225737_translation-ngl22_one-page_r1
+  - preset: translation-ngl23
+    n_gpu_layers: 23
+    one_page: 20260405_230023_translation-ngl23_one-page_r1
+    batch: 20260405_233628_translation-ngl23_batch_r1
+  - preset: translation-ngl24
+    n_gpu_layers: 24
+    one_page: 20260405_230307_translation-ngl24_one-page_r1
+    batch: 20260405_235616_translation-ngl24_batch_r1
+
+temperature_sweep:
+  - preset: translation-t04
+    temperature: 0.4
+    one_page: 20260406_000110_translation-t04_one-page_r1
+  - preset: translation-t05
+    temperature: 0.5
+    one_page: 20260406_000423_translation-t05_one-page_r1
+  - preset: translation-t06
+    temperature: 0.6
+    one_page: 20260406_000711_translation-t06_one-page_r1
+    batch: 20260406_001330_translation-t06_batch_r1
+  - preset: translation-t07
+    temperature: 0.7
+    one_page: 20260406_000955_translation-t07_one-page_r1
+
+batch_finalists:
+  - translation-baseline
+  - translation-ngl23
+  - translation-t06
+
+report:
+  markdown_output: docs/banchmark_report/report-ko.md
+  assets_dir: docs/assets/benchmarking/latest

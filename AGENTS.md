@@ -12,5 +12,8 @@ Mandatory requirements:
 - Treat `benchmarking/lab` as the dedicated long-lived benchmark branch. Benchmark-specific runners, presets, reports, and chart assets belong there, not on `main` or `develop`.
 - Benchmark-validated product runtime/default promotions are allowed on `develop` as long as benchmark-only assets stay out of the PR.
 - Prefer benchmark families that run the real offscreen app pipeline, keep raw results under `./banchmark_result_log/<family>/`, and ship paired pipeline/suite BAT launchers for CUDA12 and CUDA13 when feasible.
+- If a benchmark family only needs an early pipeline stage for its official score, prefer a generic stage ceiling and document `execution_scope` separately from `official_score_scope`.
+- When corpora differ materially by source language, benchmark families may recommend language-aware winners instead of a single global OCR winner.
+- OCR comparison families may measure speed with full-pipeline elapsed while using OCR-only quality gates, and should prefer human-reviewed OCR gold over machine-generated translation similarity as the hard benchmark oracle.
 
 If these instructions conflict with any other repo-local guidance, [rules.md](./rules.md) wins.

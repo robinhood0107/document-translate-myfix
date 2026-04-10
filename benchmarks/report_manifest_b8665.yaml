@@ -1,0 +1,32 @@
+results_root: banchmark_result_log
+active_preset: b8665-schema-control
+winning_candidate_preset: b8665-schema-control
+
+benchmark:
+  name: b8665 Gemma 4 Parser Translation Optimization
+  kind: managed benchmark sweep
+  scope: old-image vs b8665, json_object vs json_schema, chunk_size sweep, temperature sweep, n_gpu_layers sweep
+  build_id: b8665
+  active_image: local/llama.cpp:server-cuda-b8665
+
+verification:
+  status: PENDING
+  issues: []
+  verification_dir: ""
+  container_image: ""
+  checks:
+    image_matches: false
+    build_marker_found: false
+    arch_gemma4_found: false
+    tool_response_eog_found: false
+    object_smoke_ok: false
+    schema_smoke_ok: false
+
+controls: []
+chunk_sweep: []
+temperature_sweep: []
+n_gpu_layers_sweep: []
+
+report:
+  markdown_output: docs/banchmark_report/report-ko.md
+  assets_dir: docs/assets/benchmarking/latest

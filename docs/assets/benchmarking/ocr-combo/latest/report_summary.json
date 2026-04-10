@@ -1,0 +1,39 @@
+{
+  "manifest": "./banchmark_result_log/ocr_combo/20260408_005922_ocr-combo-runtime_suite/ocr_combo_report_manifest.yaml",
+  "results_root": "./banchmark_result_log/ocr_combo",
+  "archived_previous_latest": {
+    "snapshot_id": "20260408_035602_ocr-combo-runtime-benchmark",
+    "report_path": "./docs/banchmark_report/history/20260408_035602_ocr-combo-runtime-benchmark/ocr-combo-report-ko.md",
+    "assets_dir": "./docs/assets/benchmarking/ocr-combo/history/20260408_035602_ocr-combo-runtime-benchmark"
+  },
+  "routing_policy": {
+    "china": "HunyuanOCR + Gemma",
+    "japan": "no winner",
+    "mixed": "중국어 페이지는 `HunyuanOCR + Gemma`, 일본어 페이지는 `no winner`로 라우팅하고 mixed corpus는 source language 판별 뒤 분기 권장"
+  },
+  "status": "benchmark_complete",
+  "winners": [
+    {
+      "corpus": "china",
+      "engine": "HunyuanOCR + Gemma",
+      "preset": "C:\\Users\\pjjpj\\Desktop\\openai_manga_translater\\comic-translate\\banchmark_result_log\\ocr_combo\\20260408_005922_ocr-combo-runtime_suite\\_generated_presets\\china-hunyuanocr--gemma-ngl80.json",
+      "official_score_elapsed_median_sec": 136.107,
+      "ocr_median_sec": 1.743,
+      "translate_median_sec": 11.118,
+      "gpu_peak_used_mb": 11977.0,
+      "all_quality_gate_pass": true,
+      "promotion_recommended": true
+    },
+    {
+      "corpus": "japan",
+      "engine": "",
+      "preset": "",
+      "official_score_elapsed_median_sec": "",
+      "ocr_median_sec": "",
+      "translate_median_sec": "",
+      "gpu_peak_used_mb": "",
+      "all_quality_gate_pass": "",
+      "promotion_recommended": false
+    }
+  ]
+}

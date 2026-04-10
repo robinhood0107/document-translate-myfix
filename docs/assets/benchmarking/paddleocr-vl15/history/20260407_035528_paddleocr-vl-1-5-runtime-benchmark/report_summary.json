@@ -1,0 +1,21 @@
+{
+  "manifest": "./banchmark_result_log/paddleocr_vl15/smoke_manifest.yaml",
+  "results_root": "./banchmark_result_log/paddleocr_vl15",
+  "generated_at": "2026-04-07T03:55:08.384208+09:00",
+  "generated_at_display": "2026-04-07 03:55:08 대한민국 표준시",
+  "benchmark_name": "PaddleOCR-VL-1.5 Runtime Benchmark",
+  "benchmark_kind": "managed family suite",
+  "benchmark_scope": "actual offscreen app pipeline; official score and quality gate use detect+ocr only",
+  "winner_preset": "paddleocr-vl15-baseline",
+  "develop_promotion_ready": false,
+  "charts": {
+    "candidate_official_score": "./docs/assets/benchmarking/paddleocr-vl15/latest/paddleocr_vl15_candidate_official_score.png",
+    "candidate_p95": "./docs/assets/benchmarking/paddleocr-vl15/latest/paddleocr_vl15_candidate_p95.png",
+    "phase_best": "./docs/assets/benchmarking/paddleocr-vl15/latest/paddleocr_vl15_phase_best_official_score.png"
+  },
+  "archived_previous_report": {
+    "snapshot_id": "20260407_035508_paddleocr-vl-1-5-runtime-benchmark",
+    "report_path": "./docs/banchmark_report/history/20260407_035508_paddleocr-vl-1-5-runtime-benchmark/paddleocr-vl15-report-ko.md",
+    "assets_dir": "./docs/assets/benchmarking/paddleocr-vl15/history/20260407_035508_paddleocr-vl-1-5-runtime-benchmark"
+  }
+}

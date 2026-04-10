@@ -19,16 +19,10 @@ def prepare_windows_onnxruntime_dlls() -> None:
 
     dll_dirs: list[Path] = []
 
-    for env_name in ("CUDA_PATH_V13_1", "CUDA_PATH"):
-        base = os.environ.get(env_name)
-        if not base:
-            continue
-        base_path = Path(base)
-        dll_dirs.extend([base_path / "bin" / "x64", base_path / "bin"])
-
     for root in (Path(p) for p in site.getsitepackages()):
         dll_dirs.extend(
             [
+                root / "torch" / "lib",
                 root / "tensorrt_libs",
                 root / "nvidia" / "cudnn" / "bin",
                 root / "nvidia" / "cublas" / "bin",
@@ -37,6 +31,9 @@ def prepare_windows_onnxruntime_dlls() -> None:
                 root / "nvidia" / "nvjitlink" / "bin",
             ]
         )
+
+    # Intentionally ignore system CUDA toolkit paths here.
+    # We want launcher-driven, venv-local DLL loading only: torch/lib + NVIDIA site-packages.
 
     existing_path = os.environ.get("PATH", "")
     seen: set[str] = set()
@@ -59,12 +56,13 @@ def prepare_windows_onnxruntime_dlls() -> None:
     os.environ["PATH"] = existing_path
 
     try:
-        cuda_path = os.environ.get("CUDA_PATH_V13_1") or os.environ.get("CUDA_PATH")
-        if cuda_path:
-            ort.preload_dlls(cuda=True, cudnn=False, directory=os.path.join(cuda_path, "bin", "x64"))
-        ort.preload_dlls(cuda=False, cudnn=True, directory="")
+        # Prefer the toolkit-free default search order: torch/lib first, then NVIDIA site-packages.
+        ort.preload_dlls(cuda=True, cudnn=True, directory=None)
     except Exception:
-        pass
+        try:
+            ort.preload_dlls(cuda=False, cudnn=True, directory="")
+        except Exception:
+            pass
 
     _WINDOWS_GPU_DLLS_READY = True
 
