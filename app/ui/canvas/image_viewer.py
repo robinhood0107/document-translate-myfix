@@ -443,11 +443,20 @@ class ImageViewer(QGraphicsView):
         return item
     
     # InteractionManager proxy methods
+    def get_selected_text_items(self) -> list[TextBlockItem]:
+        return [item for item in self.text_items if item.selected]
+
+    def get_selected_rectangles(self) -> list[MoveableRectItem]:
+        return [item for item in self.rectangles if item.selected]
+
     def sel_rot_item(self):
         return self.interaction_manager.sel_rot_item()
     
     def select_rectangle(self, rect: MoveableRectItem):
         return self.interaction_manager.select_rectangle(rect)
+
+    def add_rectangle_to_selection(self, rect: MoveableRectItem):
+        return self.interaction_manager.add_rectangle_to_selection(rect)
     
     def deselect_rect(self, rect: MoveableRectItem):
         return self.interaction_manager.deselect_rect(rect)

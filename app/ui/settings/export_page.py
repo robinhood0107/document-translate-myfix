@@ -1,6 +1,8 @@
 from PySide6 import QtWidgets
-from ..dayu_widgets.label import MLabel
+
 from ..dayu_widgets.check_box import MCheckBox
+from ..dayu_widgets.label import MLabel
+
 
 class ExportPage(QtWidgets.QWidget):
     def __init__(self, parent=None):
@@ -15,14 +17,24 @@ class ExportPage(QtWidgets.QWidget):
             )
         ).secondary()
         batch_note.setWordWrap(True)
+
         self.raw_text_checkbox = MCheckBox(self.tr("Export Raw Text"))
         self.translated_text_checkbox = MCheckBox(self.tr("Export Translated text"))
         self.inpainted_image_checkbox = MCheckBox(self.tr("Export Inpainted Image"))
+        self.detector_overlay_checkbox = MCheckBox(self.tr("Export Detector Overlay (Debug)"))
+        self.raw_mask_checkbox = MCheckBox(self.tr("Export Raw Inpaint Mask (Debug)"))
+        self.mask_overlay_checkbox = MCheckBox(self.tr("Export Mask Overlay (Debug)"))
+        self.cleanup_mask_delta_checkbox = MCheckBox(self.tr("Export Cleanup Mask Delta (Debug)"))
+        self.debug_metadata_checkbox = MCheckBox(self.tr("Export Debug Metadata (Debug)"))
 
         layout.addWidget(batch_label)
         layout.addWidget(batch_note)
         layout.addWidget(self.raw_text_checkbox)
         layout.addWidget(self.translated_text_checkbox)
         layout.addWidget(self.inpainted_image_checkbox)
-
+        layout.addWidget(self.detector_overlay_checkbox)
+        layout.addWidget(self.raw_mask_checkbox)
+        layout.addWidget(self.mask_overlay_checkbox)
+        layout.addWidget(self.cleanup_mask_delta_checkbox)
+        layout.addWidget(self.debug_metadata_checkbox)
         layout.addStretch(1)

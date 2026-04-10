@@ -14,13 +14,11 @@ from modules.utils.exceptions import (
     LocalServiceConnectionError,
     LocalServiceResponseError,
 )
-from modules.utils.ocr_debug import (
-    OCR_STATUS_EMPTY_INITIAL,
-    OCR_STATUS_OK,
-    ensure_three_channel,
-    resolve_block_crop_bbox,
-    set_block_ocr_crop_diagnostics,
-    set_block_ocr_diagnostics,
+from modules.utils.ocr_debug import OCR_STATUS_EMPTY_INITIAL, OCR_STATUS_OK, ensure_three_channel, expand_bbox, set_block_ocr_diagnostics
+from modules.utils.text_normalization import (
+    PADDLE_DECORATIVE_NOISE_GLYPHS,
+    canonicalize_ellipsis_runs,
+    strip_selected_glyphs,
 )
 from modules.utils.textblock import TextBlock
 
@@ -45,12 +43,10 @@ class PaddleOCRVLEngine(OCREngine):
         self.visualize = False
         self.max_new_tokens = self.DEFAULT_MAX_NEW_TOKENS
         self.parallel_workers = self.DEFAULT_PARALLEL_WORKERS
-        self.crop_padding_ratio = self.TEXT_EXPANSION_RATIO
         self._supports_max_new_tokens = True
 
     def initialize(self, settings, **kwargs) -> None:
         config = settings.get_paddleocr_vl_settings()
-        generic = settings.get_ocr_generic_settings() if hasattr(settings, "get_ocr_generic_settings") else {}
         self.server_url = config.get("server_url", self.DEFAULT_SERVER_URL) or self.DEFAULT_SERVER_URL
         self.prettify_markdown = bool(config.get("prettify_markdown", False))
         self.visualize = bool(config.get("visualize", False))
@@ -64,18 +60,16 @@ class PaddleOCRVLEngine(OCREngine):
             self.DEFAULT_PARALLEL_WORKERS,
             self.PARALLEL_WORKERS_RANGE,
         )
-        self.crop_padding_ratio = max(0.0, float(generic.get("crop_padding_ratio", self.TEXT_EXPANSION_RATIO)))
         self._supports_max_new_tokens = True
 
     def process_image(self, img: np.ndarray, blk_list: list[TextBlock]) -> list[TextBlock]:
-        jobs: list[tuple[TextBlock, tuple[int, int, int, int], str]] = []
+        jobs: list[tuple[TextBlock, tuple[int, int, int, int]]] = []
         for blk in blk_list or []:
-            bbox, crop_source = self._resolve_bbox(blk, img)
+            bbox = self._resolve_bbox(blk, img)
             if bbox is None:
                 self._mark_empty(blk, "Invalid OCR crop bounds.")
                 continue
-            set_block_ocr_crop_diagnostics(blk, effective_crop_xyxy=bbox, crop_source=crop_source)
-            jobs.append((blk, bbox, crop_source))
+            jobs.append((blk, bbox))
 
         if not jobs:
             return blk_list
@@ -91,13 +85,13 @@ class PaddleOCRVLEngine(OCREngine):
 
         started_at = time.perf_counter()
         if worker_count <= 1:
-            for blk, bbox, crop_source in jobs:
-                self._process_block(img, blk, bbox, crop_source)
+            for blk, bbox in jobs:
+                self._process_block(img, blk, bbox)
         else:
             with ThreadPoolExecutor(max_workers=worker_count) as executor:
                 future_map = {
-                    executor.submit(self._process_block, img, blk, bbox, crop_source): (blk, bbox, crop_source)
-                    for blk, bbox, crop_source in jobs
+                    executor.submit(self._process_block, img, blk, bbox): (blk, bbox)
+                    for blk, bbox in jobs
                 }
                 try:
                     for future in as_completed(future_map):
@@ -114,21 +108,14 @@ class PaddleOCRVLEngine(OCREngine):
         )
         return blk_list
 
-    def _process_block(
-        self,
-        img: np.ndarray,
-        blk: TextBlock,
-        bbox: tuple[int, int, int, int],
-        crop_source: str,
-    ) -> None:
-        set_block_ocr_crop_diagnostics(blk, effective_crop_xyxy=bbox, crop_source=crop_source)
+    def _process_block(self, img: np.ndarray, blk: TextBlock, bbox: tuple[int, int, int, int]) -> None:
         crop = self._crop_image(img, bbox)
         if crop is None:
             self._mark_empty(blk, "Invalid OCR crop bounds.")
             return
 
-        text = self._request_ocr_text(crop)
-        cleaned = self._normalize_output_text(text)
+        raw_text = self._request_ocr_text(crop)
+        cleaned = self._normalize_output_text(raw_text)
         if cleaned:
             set_block_ocr_diagnostics(
                 blk,
@@ -137,9 +124,11 @@ class PaddleOCRVLEngine(OCREngine):
                 status=OCR_STATUS_OK,
                 empty_reason="",
                 attempt_count=1,
+                raw_text=raw_text,
+                sanitized_text=cleaned,
             )
         else:
-            self._mark_empty(blk, "PaddleOCR VL returned no text.")
+            self._mark_empty(blk, "PaddleOCR VL returned no usable text.", raw_text=raw_text)
 
     def _request_ocr_text(self, image: np.ndarray) -> str:
         image_bytes = self._encode_image(image)
@@ -292,15 +281,25 @@ class PaddleOCRVLEngine(OCREngine):
         walk(node)
         return texts
 
-    def _resolve_bbox(self, blk: TextBlock, image: np.ndarray) -> tuple[tuple[int, int, int, int] | None, str]:
-        return resolve_block_crop_bbox(
-            blk,
-            image.shape,
-            x_ratio=self.crop_padding_ratio,
-            y_ratio=self.crop_padding_ratio,
-            bubble_as_clamp=True,
-            fallback_to_bubble=getattr(blk, "xyxy", None) is None,
-        )
+    def _resolve_bbox(self, blk: TextBlock, image: np.ndarray) -> tuple[int, int, int, int] | None:
+        source_bbox = getattr(blk, "bubble_xyxy", None)
+        if source_bbox is not None:
+            bbox = expand_bbox(source_bbox, image.shape)
+        else:
+            text_bbox = getattr(blk, "xyxy", None)
+            if text_bbox is None:
+                return None
+            bbox = expand_bbox(
+                text_bbox,
+                image.shape,
+                x_ratio=self.TEXT_EXPANSION_RATIO,
+                y_ratio=self.TEXT_EXPANSION_RATIO,
+            )
+
+        x1, y1, x2, y2 = bbox
+        if x2 <= x1 or y2 <= y1:
+            return None
+        return x1, y1, x2, y2
 
     def _crop_image(self, image: np.ndarray, bbox: tuple[int, int, int, int]) -> np.ndarray | None:
         x1, y1, x2, y2 = bbox
@@ -320,7 +319,7 @@ class PaddleOCRVLEngine(OCREngine):
             
         return encoded.tobytes()
 
-    def _mark_empty(self, blk: TextBlock, reason: str) -> None:
+    def _mark_empty(self, blk: TextBlock, reason: str, raw_text: str = "") -> None:
         set_block_ocr_diagnostics(
             blk,
             text="",
@@ -328,6 +327,8 @@ class PaddleOCRVLEngine(OCREngine):
             status=OCR_STATUS_EMPTY_INITIAL,
             empty_reason=reason,
             attempt_count=1,
+            raw_text=raw_text,
+            sanitized_text="",
         )
 
     def _response_rejected_max_new_tokens(self, data: dict) -> bool:
@@ -340,6 +341,8 @@ class PaddleOCRVLEngine(OCREngine):
         if not text:
             return ""
         normalized = text.replace("\r\n", "\n").replace("\r", "\n").strip()
+        normalized = strip_selected_glyphs(normalized, PADDLE_DECORATIVE_NOISE_GLYPHS)
+        normalized = canonicalize_ellipsis_runs(normalized)
         normalized = re.sub(r"\n{3,}", "\n\n", normalized)
         return normalized.strip()
 

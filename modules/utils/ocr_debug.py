@@ -159,7 +159,7 @@ def build_retry_crop_bbox(
 ) -> tuple[int, int, int, int] | None:
     if xyxy is None:
         return None
-    bbox = expand_bbox(xyxy, image_shape, x_ratio=x_ratio, y_ratio=y_ratio, clamp_xyxy=clamp_xyxy)
+    bbox = expand_bbox(image_shape=image_shape, xyxy=xyxy, x_ratio=x_ratio, y_ratio=y_ratio, clamp_xyxy=clamp_xyxy)
     x1, y1, x2, y2 = bbox
     if x2 <= x1 or y2 <= y1:
         return None
@@ -205,12 +205,17 @@ def set_block_ocr_diagnostics(
     status: str,
     empty_reason: str,
     attempt_count: int,
+    raw_text: str | None = None,
+    sanitized_text: str | None = None,
 ) -> None:
-    block.text = text or ""
+    final_text = text or ""
+    block.text = final_text
     block.ocr_confidence = float(confidence or 0.0)
     block.ocr_status = status
     block.ocr_empty_reason = empty_reason or ""
     block.ocr_attempt_count = int(attempt_count or 0)
+    block.ocr_raw_text = final_text if raw_text is None else str(raw_text or "")
+    block.ocr_sanitized_text = final_text if sanitized_text is None else str(sanitized_text or "")
 
 
 def set_block_ocr_crop_diagnostics(
@@ -262,6 +267,8 @@ def build_ocr_debug_payload(
                 "index": idx,
                 "bbox": [x1, y1, x2, y2],
                 "text": getattr(blk, "text", "") or "",
+                "raw_text": getattr(blk, "ocr_raw_text", getattr(blk, "text", "")) or "",
+                "sanitized_text": getattr(blk, "ocr_sanitized_text", getattr(blk, "text", "")) or "",
                 "confidence": float(getattr(blk, "ocr_confidence", 0.0) or 0.0),
                 "status": getattr(blk, "ocr_status", "") or "",
                 "empty_reason": getattr(blk, "ocr_empty_reason", "") or "",
@@ -291,16 +298,8 @@ def export_ocr_debug_artifacts(
     for idx, blk in enumerate(blk_list or []):
         if getattr(blk, "ocr_status", "") != OCR_STATUS_EMPTY_AFTER_RETRY:
             continue
-        retry_bbox = getattr(blk, "ocr_retry_crop_xyxy", None)
-        retry_crop = (
-            build_retry_crop_from_bbox(image, retry_bbox)
-            if retry_bbox is not None
-            else build_retry_crop(
-                image,
-                getattr(blk, "xyxy", (0, 0, 0, 0)),
-                clamp_xyxy=getattr(blk, "bubble_xyxy", None),
-            )
-        )
+        retry_bbox = getattr(blk, "ocr_retry_crop_xyxy", None) or getattr(blk, "xyxy", (0, 0, 0, 0))
+        retry_crop = build_retry_crop_from_bbox(image, retry_bbox)
         if retry_crop is None or retry_crop.size == 0:
             continue
         retry_path = os.path.join(output_dir, f"{page_base_name}_block_{idx}_retry.png")

@@ -9,6 +9,7 @@ from PIL import Image
 
 from app.path_materialization import ensure_path_materialized
 from modules.utils.export_paths import build_export_timestamp
+from modules.utils.pipeline_config import get_inpainter_runtime
 from modules.utils.textblock import sort_blk_list
 from ..virtual_page import VirtualPage
 
@@ -366,42 +367,12 @@ class FlowMixin:
 
         blocks = list(page_accum[image_path]["blocks"])
         patches = list(page_accum[image_path]["patches"])
+        page_state["inpaint_debug_state"] = page_accum[image_path].get("debug")
         source_lang = page_state.get("source_lang", self.main_page.s_combo.currentText())
         source_lang_en = self.main_page.lang_mapping.get(source_lang, source_lang)
         rtl = source_lang_en == "Japanese"
         if blocks:
             blocks = sort_blk_list(blocks, rtl)
-
-        if self._should_stop_after_ocr():
-            page_state["blk_list"] = list(blocks)
-            page_state["skip_render"] = True
-            self.final_patches_for_save[image_path] = []
-            self.main_page.image_ctrl.update_processing_summary(
-                image_path,
-                {
-                    "execution_scope": "detect-ocr-only",
-                    "skipped_after_stage": "ocr",
-                },
-            )
-            for stage_name in ("inpaint", "translation", "render", "save"):
-                self.main_page.image_ctrl.mark_processing_stage(
-                    image_path,
-                    stage_name,
-                    "skipped",
-                    reason="Benchmark stage ceiling: ocr",
-                )
-            self._emit_benchmark_event(
-                "page_done",
-                image_path=image_path,
-                image_index=selected_index,
-                total_images=total_images,
-                block_count=len(blocks),
-                patch_count=0,
-                skipped_after_stage="ocr",
-                execution_scope="detect-ocr-only",
-            )
-            self._emit_progress(selected_index, total_images, 10, False)
-            return
 
         self._emit_benchmark_event(
             "render_start",
@@ -557,7 +528,7 @@ class FlowMixin:
 
             page_info_by_path = {info["path"]: info for info in physical_pages}
             page_accum = {
-                info["path"]: {"blocks": [], "patches": []}
+                info["path"]: {"blocks": [], "patches": [], "debug": None}
                 for info in physical_pages
             }
 
@@ -661,35 +632,21 @@ class FlowMixin:
                     sort_after=False,
                 )
 
-                final_blocks_virtual = regular_blocks + split_owned_blocks
-                source_lang_en = self.main_page.lang_mapping.get(source_lang, source_lang)
-                rtl = source_lang_en == "Japanese"
-                final_blocks_virtual = (
-                    sort_blk_list(final_blocks_virtual, rtl) if final_blocks_virtual else []
-                )
-                final_blocks_physical = self._convert_blocks_to_physical(
-                    final_blocks_virtual, current_vpage
-                )
-                page_accum[current_record["path"]]["blocks"].extend(final_blocks_physical)
-
-                if self._should_stop_after_ocr():
-                    if current_record.get("is_last_virtual", False):
-                        self._finalize_physical_page(
-                            page_info=page_info_by_path[current_record["path"]],
-                            page_accum=page_accum,
-                            total_images=total_images,
-                            timestamp=timestamp,
-                        )
-                    cached_current = next_record
-                    continue
-
                 self._emit_progress(current_record["selected_index"], total_images, 4, False)
-                mask, inpainted = self._inpaint_image_with_blocks(
+                raw_mask, mask, inpainted, cleanup_stats, mask_blocks, mask_details = self._inpaint_image_with_blocks(
                     current_record["image"],
                     regular_blocks,
                     image_path=current_record["path"],
                 )
                 if mask is not None and inpainted is not None:
+                    page_accum[current_record["path"]]["debug"] = {
+                        "raw_mask": raw_mask,
+                        "final_mask": mask,
+                        "cleanup_stats": cleanup_stats,
+                        "mask_blocks": mask_blocks,
+                        "mask_details": mask_details,
+                        "inpainter_backend": get_inpainter_runtime(self.main_page.settings_page)["backend"],
+                    }
                     regular_patches = self._extract_page_patches_from_mask(
                         mask=mask,
                         inpainted=inpainted,
@@ -714,6 +671,13 @@ class FlowMixin:
                             if patch_path in page_accum:
                                 page_accum[patch_path]["patches"].append(patch)
 
+                final_blocks_virtual = regular_blocks + split_owned_blocks
+                source_lang_en = self.main_page.lang_mapping.get(source_lang, source_lang)
+                rtl = source_lang_en == "Japanese"
+                final_blocks_virtual = (
+                    sort_blk_list(final_blocks_virtual, rtl) if final_blocks_virtual else []
+                )
+
                 self._emit_progress(current_record["selected_index"], total_images, 7, False)
                 target_lang = page_state.get("target_lang", self.main_page.t_combo.currentText())
                 self._run_translation_on_blocks(
@@ -723,6 +687,11 @@ class FlowMixin:
                     target_lang=target_lang,
                     image_path=current_record["path"],
                 )
+
+                final_blocks_physical = self._convert_blocks_to_physical(
+                    final_blocks_virtual, current_vpage
+                )
+                page_accum[current_record["path"]]["blocks"].extend(final_blocks_physical)
 
                 if current_record.get("is_last_virtual", False):
                     self._finalize_physical_page(

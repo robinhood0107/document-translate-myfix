@@ -56,6 +56,7 @@ class TextController:
         self._last_item_html = {}
         self._suspend_text_command = False
         self._is_updating_from_edit = False
+        self._render_macro_stack = None
 
     def sync_outline_mode_group(self, state: int):
         checked_id = 1 if state == 2 else 0
@@ -68,18 +69,14 @@ class TextController:
         self.main.outline_checkbox.setChecked(button_id == 1)
 
     def on_vertical_alignment_changed(self, button_id: int):
-        if self.main.curr_tblock_item:
-            old_item = copy.copy(self.main.curr_tblock_item)
+        if self._selected_text_items():
             vertical_alignment = self.main.button_to_vertical_alignment.get(
                 button_id, VERTICAL_ALIGNMENT_TOP
             )
-            self.main.curr_tblock_item.set_vertical_alignment(vertical_alignment)
-            command = TextFormatCommand(
-                self.main.image_viewer,
-                old_item,
-                self.main.curr_tblock_item,
+            self._apply_format_to_selected(
+                "change_text_vertical_alignment",
+                lambda item: item.set_vertical_alignment(vertical_alignment),
             )
-            self.main.push_command(command)
 
     def _get_vertical_alignment(self, vertical_alignment_id: int | None = None) -> str:
         if vertical_alignment_id is None:
@@ -361,7 +358,42 @@ class TextController:
 
     def on_text_item_deselected(self):
         self._commit_pending_text_command()
+        selected_items = self.main.image_viewer.get_selected_text_items()
+        if selected_items:
+            if self.main.curr_tblock_item not in selected_items:
+                self.on_text_item_selected(selected_items[-1])
+            return
         self.clear_text_edits()
+
+    def _selected_text_items(self) -> list[TextBlockItem]:
+        selected_items = self.main.image_viewer.get_selected_text_items()
+        if selected_items:
+            return selected_items
+        return [self.main.curr_tblock_item] if self.main.curr_tblock_item else []
+
+    def _apply_format_to_selected(self, macro_name: str, apply_fn):
+        items = self._selected_text_items()
+        if not items:
+            return
+
+        commands = []
+        for item in items:
+            old_item = copy.copy(item)
+            apply_fn(item)
+            commands.append(TextFormatCommand(self.main.image_viewer, old_item, item))
+
+        stack = self.main.undo_group.activeStack()
+        if stack is None:
+            return
+
+        if len(commands) > 1:
+            stack.beginMacro(macro_name)
+        try:
+            for command in commands:
+                stack.push(command)
+        finally:
+            if len(commands) > 1:
+                stack.endMacro()
 
     def update_text_block(self):
         if self.main.curr_tblock:
@@ -460,8 +492,9 @@ class TextController:
         
         if self.main.curr_img_idx >= 0:
             current_file = self.main.image_files[self.main.curr_img_idx]
-            self.main.image_states[current_file]['source_lang'] = source_lang
-            self.main.image_states[current_file]['target_lang'] = target_lang
+            state = self.main.image_ctrl.ensure_page_state(current_file)
+            state['source_lang'] = source_lang
+            state['target_lang'] = target_lang
 
         target_en = self.main.lang_mapping.get(target_lang, None)
         t_direction = get_layout_direction(target_en)
@@ -591,31 +624,28 @@ class TextController:
 
     # Formatting actions
     def on_font_dropdown_change(self, font_family: str):
-        if self.main.curr_tblock_item and font_family:
-            old_item = copy.copy(self.main.curr_tblock_item)
+        if self._selected_text_items() and font_family:
             font_size = int(self.main.font_size_dropdown.currentText())
-            self.main.curr_tblock_item.set_font(font_family, font_size)
-
-            command = TextFormatCommand(self.main.image_viewer, old_item, self.main.curr_tblock_item)
-            self.main.push_command(command)
+            self._apply_format_to_selected(
+                "change_text_font",
+                lambda item: item.set_font(font_family, font_size),
+            )
 
     def on_font_size_change(self, font_size: str):
-        if self.main.curr_tblock_item and font_size:
-            old_item = copy.copy(self.main.curr_tblock_item)
+        if self._selected_text_items() and font_size:
             font_size = float(font_size)
-            self.main.curr_tblock_item.set_font_size(font_size)
-
-            command = TextFormatCommand(self.main.image_viewer, old_item, self.main.curr_tblock_item)
-            self.main.push_command(command)
+            self._apply_format_to_selected(
+                "change_text_font_size",
+                lambda item: item.set_font_size(font_size),
+            )
 
     def on_line_spacing_change(self, line_spacing: str):
-        if self.main.curr_tblock_item and line_spacing:
-            old_item = copy.copy(self.main.curr_tblock_item)
+        if self._selected_text_items() and line_spacing:
             spacing = float(line_spacing)
-            self.main.curr_tblock_item.set_line_spacing(spacing)
-
-            command = TextFormatCommand(self.main.image_viewer, old_item, self.main.curr_tblock_item)
-            self.main.push_command(command)
+            self._apply_format_to_selected(
+                "change_text_line_spacing",
+                lambda item: item.set_line_spacing(spacing),
+            )
 
     def on_font_color_change(self):
         font_color = self.main.get_color()
@@ -624,63 +654,56 @@ class TextController:
                 f"background-color: {font_color.name()}; border: none; border-radius: 5px;"
             )
             self.main.block_font_color_button.setProperty('selected_color', font_color.name())
-            if self.main.curr_tblock_item:
-                old_item = copy.copy(self.main.curr_tblock_item)
-                self.main.curr_tblock_item.set_color(font_color)
-
-                command = TextFormatCommand(self.main.image_viewer, old_item, self.main.curr_tblock_item)
-                self.main.push_command(command)
+            if self._selected_text_items():
+                self._apply_format_to_selected(
+                    "change_text_color",
+                    lambda item: item.set_color(font_color),
+                )
 
     def left_align(self):
-        if self.main.curr_tblock_item:
-            old_item = copy.copy(self.main.curr_tblock_item)
-            self.main.curr_tblock_item.set_alignment(QtCore.Qt.AlignmentFlag.AlignLeft)
-
-            command = TextFormatCommand(self.main.image_viewer, old_item, self.main.curr_tblock_item)
-            self.main.push_command(command)
+        if self._selected_text_items():
+            self._apply_format_to_selected(
+                "change_text_alignment_left",
+                lambda item: item.set_alignment(QtCore.Qt.AlignmentFlag.AlignLeft),
+            )
 
     def center_align(self):
-        if self.main.curr_tblock_item:
-            old_item = copy.copy(self.main.curr_tblock_item)
-            self.main.curr_tblock_item.set_alignment(QtCore.Qt.AlignmentFlag.AlignCenter)
-
-            command = TextFormatCommand(self.main.image_viewer, old_item, self.main.curr_tblock_item)
-            self.main.push_command(command)
+        if self._selected_text_items():
+            self._apply_format_to_selected(
+                "change_text_alignment_center",
+                lambda item: item.set_alignment(QtCore.Qt.AlignmentFlag.AlignCenter),
+            )
 
     def right_align(self):
-        if self.main.curr_tblock_item:
-            old_item = copy.copy(self.main.curr_tblock_item)
-            self.main.curr_tblock_item.set_alignment(QtCore.Qt.AlignmentFlag.AlignRight)
-
-            command = TextFormatCommand(self.main.image_viewer, old_item, self.main.curr_tblock_item)
-            self.main.push_command(command)
+        if self._selected_text_items():
+            self._apply_format_to_selected(
+                "change_text_alignment_right",
+                lambda item: item.set_alignment(QtCore.Qt.AlignmentFlag.AlignRight),
+            )
 
     def bold(self):
-        if self.main.curr_tblock_item:
-            old_item = copy.copy(self.main.curr_tblock_item)
+        if self._selected_text_items():
             state = self.main.bold_button.isChecked()
-            self.main.curr_tblock_item.set_bold(state)
-
-            command = TextFormatCommand(self.main.image_viewer, old_item, self.main.curr_tblock_item)
-            self.main.push_command(command)
+            self._apply_format_to_selected(
+                "change_text_bold",
+                lambda item: item.set_bold(state),
+            )
 
     def italic(self):
-        if self.main.curr_tblock_item:
-            old_item = copy.copy(self.main.curr_tblock_item)
+        if self._selected_text_items():
             state = self.main.italic_button.isChecked()
-            self.main.curr_tblock_item.set_italic(state)
-
-            command = TextFormatCommand(self.main.image_viewer, old_item, self.main.curr_tblock_item)
-            self.main.push_command(command)
+            self._apply_format_to_selected(
+                "change_text_italic",
+                lambda item: item.set_italic(state),
+            )
 
     def underline(self):
-        if self.main.curr_tblock_item:
-            old_item = copy.copy(self.main.curr_tblock_item)
+        if self._selected_text_items():
             state = self.main.underline_button.isChecked()
-            self.main.curr_tblock_item.set_underline(state)
-
-            command = TextFormatCommand(self.main.image_viewer, old_item, self.main.curr_tblock_item)
-            self.main.push_command(command)
+            self._apply_format_to_selected(
+                "change_text_underline",
+                lambda item: item.set_underline(state),
+            )
 
     def on_outline_color_change(self):
         outline_color = self.main.get_color()
@@ -691,40 +714,40 @@ class TextController:
             self.main.outline_font_color_button.setProperty('selected_color', outline_color.name())
             outline_width = float(self.main.outline_width_dropdown.currentText())
 
-            if self.main.curr_tblock_item and self.main.outline_checkbox.isChecked():
-                old_item = copy.copy(self.main.curr_tblock_item)
-                self.main.curr_tblock_item.set_outline(outline_color, outline_width)
-
-                command = TextFormatCommand(self.main.image_viewer, old_item, self.main.curr_tblock_item)
-                self.main.push_command(command)
+            if self._selected_text_items() and self.main.outline_checkbox.isChecked():
+                self._apply_format_to_selected(
+                    "change_text_outline_color",
+                    lambda item: item.set_outline(outline_color, outline_width),
+                )
 
     def on_outline_width_change(self, outline_width):
-        if self.main.curr_tblock_item and self.main.outline_checkbox.isChecked():
-            old_item = copy.copy(self.main.curr_tblock_item)
+        if self._selected_text_items() and self.main.outline_checkbox.isChecked():
             outline_width = float(self.main.outline_width_dropdown.currentText())
             color_str = self.main.outline_font_color_button.property('selected_color')
             color = QColor(color_str)
-            self.main.curr_tblock_item.set_outline(color, outline_width)
-
-            command = TextFormatCommand(self.main.image_viewer, old_item, self.main.curr_tblock_item)
-            self.main.push_command(command)
+            self._apply_format_to_selected(
+                "change_text_outline_width",
+                lambda item: item.set_outline(color, outline_width),
+            )
 
     def toggle_outline_settings(self, state):
         enabled = True if state == 2 else False
         self.main.outline_font_color_button.setEnabled(enabled)
         self.main.outline_width_dropdown.setEnabled(enabled)
-        if self.main.curr_tblock_item:
-            old_item = copy.copy(self.main.curr_tblock_item)
+        if self._selected_text_items():
             if not enabled:
-                self.main.curr_tblock_item.set_outline(None, None)
+                self._apply_format_to_selected(
+                    "toggle_text_outline_off",
+                    lambda item: item.set_outline(None, None),
+                )
             else:
                 outline_width = float(self.main.outline_width_dropdown.currentText())
                 color_str = self.main.outline_font_color_button.property('selected_color')
                 color = QColor(color_str)
-                self.main.curr_tblock_item.set_outline(color, outline_width)
-
-            command = TextFormatCommand(self.main.image_viewer, old_item, self.main.curr_tblock_item)
-            self.main.push_command(command)
+                self._apply_format_to_selected(
+                    "toggle_text_outline_on",
+                    lambda item: item.set_outline(color, outline_width),
+                )
 
     # Widget helpers
     def block_text_item_widgets(self, widgets):
@@ -902,6 +925,32 @@ class TextController:
             self.unblock_text_item_widgets(self.widgets_to_block)
 
     # Rendering
+    def _begin_render_macro(self):
+        if self._render_macro_stack is not None:
+            return
+
+        stack = self.main.undo_group.activeStack()
+        if stack is None:
+            return
+
+        stack.beginMacro("render_text")
+        self._render_macro_stack = stack
+
+    def _end_render_macro(self):
+        stack = self._render_macro_stack
+        self._render_macro_stack = None
+        if stack is None:
+            return
+
+        try:
+            stack.endMacro()
+        except RuntimeError:
+            pass
+
+    def _handle_render_error(self, error_tuple: tuple):
+        self._end_render_macro()
+        self.main.default_error_handler(error_tuple)
+
     def render_text(self):
         selected_paths = self.main.get_selected_page_paths()
         if self.main.image_viewer.hasPhoto() and len(selected_paths) > 1:
@@ -1096,10 +1145,13 @@ class TextController:
             if 0 <= self.main.curr_img_idx < len(self.main.image_files):
                 image_path = self.main.image_files[self.main.curr_img_idx]
 
+            if new_blocks:
+                self._begin_render_macro()
+
             self.main.run_threaded(
                 manual_wrap, 
                 self.on_render_complete, 
-                self.main.default_error_handler,
+                self._handle_render_error,
                 None, 
                 self.main, 
                 new_blocks, 
@@ -1120,7 +1172,7 @@ class TextController:
         # self.main.set_image(rendered_image) 
         self.main.loading.setVisible(False)
         self.main.enable_hbutton_group()
-        self.main.undo_group.activeStack().endMacro()
+        self._end_render_macro()
 
     def render_settings(self) -> TextRenderingSettings:
         target_lang = self.main.lang_mapping.get(self.main.t_combo.currentText(), None)

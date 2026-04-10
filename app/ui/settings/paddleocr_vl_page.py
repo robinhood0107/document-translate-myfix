@@ -8,6 +8,8 @@ from ..dayu_widgets.spin_box import MSpinBox
 
 class PaddleOCRVLPage(QtWidgets.QWidget):
     DEFAULT_SERVER_URL = "http://127.0.0.1:28118/layout-parsing"
+    DEFAULT_MAX_NEW_TOKENS = 1024
+    DEFAULT_PARALLEL_WORKERS = 4
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -23,6 +25,7 @@ class PaddleOCRVLPage(QtWidgets.QWidget):
             self.tr(
                 "Connect Comic Translate to your local PaddleOCR VL Docker service.\n"
                 "This OCR engine sends cropped text regions to the /layout-parsing endpoint.\n"
+                "Keep the default localhost URL if you want Comic Translate to start the bundled Docker runtime on demand.\n"
                 "Leave markdown or visualization options disabled unless you need debugging."
             )
         ).secondary()
@@ -75,7 +78,7 @@ class PaddleOCRVLPage(QtWidgets.QWidget):
         self.max_new_tokens_spinbox = MSpinBox().small()
         self.max_new_tokens_spinbox.setRange(64, 2048)
         self.max_new_tokens_spinbox.setSingleStep(64)
-        self.max_new_tokens_spinbox.setValue(256)
+        self.max_new_tokens_spinbox.setValue(self.DEFAULT_MAX_NEW_TOKENS)
         self.max_new_tokens_spinbox.setFixedWidth(90)
         max_tokens_layout.addWidget(max_tokens_label)
         max_tokens_layout.addWidget(self.max_new_tokens_spinbox)
@@ -86,7 +89,7 @@ class PaddleOCRVLPage(QtWidgets.QWidget):
         workers_label = MLabel(self.tr("Parallel Workers"))
         self.parallel_workers_spinbox = MSpinBox().small()
         self.parallel_workers_spinbox.setRange(1, 8)
-        self.parallel_workers_spinbox.setValue(2)
+        self.parallel_workers_spinbox.setValue(self.DEFAULT_PARALLEL_WORKERS)
         self.parallel_workers_spinbox.setFixedWidth(90)
         workers_layout.addWidget(workers_label)
         workers_layout.addWidget(self.parallel_workers_spinbox)
