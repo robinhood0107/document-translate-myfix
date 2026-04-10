@@ -138,11 +138,18 @@ def build_inpaint_debug_metadata(
     raw_mask: np.ndarray | None,
     cleanup_delta: np.ndarray | None,
     cleanup_stats: dict | None,
+    mask_refiner: str = "legacy_bbox",
+    protect_mask_applied: bool = False,
+    protect_mask: np.ndarray | None = None,
+    refiner_backend: str = "legacy",
+    refiner_device: str = "cpu",
+    inpainter_backend: str = "unknown",
 ) -> dict:
     block_list = list(blocks or [])
     cleanup_stats = cleanup_stats or {}
     raw_mask_pixels = int(np.count_nonzero(raw_mask)) if raw_mask is not None else 0
     cleanup_delta_pixels = int(np.count_nonzero(cleanup_delta)) if cleanup_delta is not None else 0
+    protect_mask_pixels = int(np.count_nonzero(protect_mask)) if protect_mask is not None else 0
     return {
         "image_path": image_path,
         "run_type": run_type,
@@ -150,7 +157,13 @@ def build_inpaint_debug_metadata(
         "detector_engine": detector_engine,
         "device": device,
         "inpainter": inpainter,
+        "inpainter_backend": inpainter_backend,
         "hd_strategy": hd_strategy,
+        "mask_refiner": mask_refiner,
+        "refiner_backend": refiner_backend,
+        "refiner_device": refiner_device,
+        "protect_mask_applied": bool(protect_mask_applied),
+        "protect_mask_pixel_count": protect_mask_pixels,
         "block_count": len(block_list),
         "raw_mask_pixel_count": raw_mask_pixels,
         "cleanup_delta_pixel_count": cleanup_delta_pixels,

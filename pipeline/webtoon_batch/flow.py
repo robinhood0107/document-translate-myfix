@@ -9,6 +9,7 @@ from PIL import Image
 
 from app.path_materialization import ensure_path_materialized
 from modules.utils.export_paths import build_export_timestamp
+from modules.utils.pipeline_config import get_inpainter_runtime
 from modules.utils.textblock import sort_blk_list
 from ..virtual_page import VirtualPage
 
@@ -632,7 +633,7 @@ class FlowMixin:
                 )
 
                 self._emit_progress(current_record["selected_index"], total_images, 4, False)
-                raw_mask, mask, inpainted, cleanup_stats, mask_blocks = self._inpaint_image_with_blocks(
+                raw_mask, mask, inpainted, cleanup_stats, mask_blocks, mask_details = self._inpaint_image_with_blocks(
                     current_record["image"],
                     regular_blocks,
                     image_path=current_record["path"],
@@ -643,6 +644,8 @@ class FlowMixin:
                         "final_mask": mask,
                         "cleanup_stats": cleanup_stats,
                         "mask_blocks": mask_blocks,
+                        "mask_details": mask_details,
+                        "inpainter_backend": get_inpainter_runtime(self.main_page.settings_page)["backend"],
                     }
                     regular_patches = self._extract_page_patches_from_mask(
                         mask=mask,
