@@ -8,6 +8,11 @@ import numpy as np
 
 from modules.detection.utils.content import get_inpaint_bboxes
 from modules.masking.legacy_bbox_rescue import build_block_rescue_mask
+from modules.utils.carrier import (
+    CARRIER_KIND_CAPTION_PLATE,
+    resolve_caption_plate_mask_roi,
+    resolve_effective_text_bubble_roi,
+)
 from modules.utils.mask_inpaint_mode import DEFAULT_MASK_INPAINT_MODE
 from modules.utils.textblock import TextBlock
 
@@ -51,7 +56,7 @@ def _build_legacy_base_block_mask(
 
     roi = roi_override
     if roi is None and getattr(blk, "text_class", None) == "text_bubble":
-        roi = _normalize_xyxy(getattr(blk, "bubble_xyxy", None), img.shape)
+        roi = resolve_effective_text_bubble_roi(blk, img.shape)
     bboxes = get_inpaint_bboxes(
         blk.xyxy,
         img,
@@ -163,7 +168,7 @@ def merge_legacy_and_rescue(
     text_class = str(getattr(block, "text_class", "") or "")
     clamp_xyxy: tuple[int, int, int, int] | None = None
     if text_class == "text_bubble":
-        clamp_xyxy = _normalize_xyxy(getattr(block, "bubble_xyxy", None), image_shape)
+        clamp_xyxy = resolve_effective_text_bubble_roi(block, image_shape)
     elif text_class == "text_free":
         clamp_xyxy = _resolve_text_free_local_roi(block, image_shape, rescue_roi_xyxy)
 
@@ -191,10 +196,14 @@ def build_legacy_bbox_mask_details(
     hard_box_reason_totals: dict[str, int] = {}
 
     for index, blk in enumerate(blk_list):
+        carrier_mask_roi_xyxy = resolve_caption_plate_mask_roi(blk, img.shape)
+        if (getattr(blk, "carrier_kind", "") or "") == CARRIER_KIND_CAPTION_PLATE:
+            setattr(blk, "carrier_mask_roi_xyxy", list(carrier_mask_roi_xyxy) if carrier_mask_roi_xyxy is not None else None)
         block_base_mask, _bboxes = _build_legacy_base_block_mask(
             img,
             blk,
             default_padding=default_padding,
+            roi_override=carrier_mask_roi_xyxy if carrier_mask_roi_xyxy is not None else None,
         )
         rescue = build_block_rescue_mask(img, blk, block_base_mask)
         block_base_mask, block_rescue_mask, final_block_mask = merge_legacy_and_rescue(

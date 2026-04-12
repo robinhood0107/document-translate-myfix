@@ -93,6 +93,7 @@ def build_detector_overlay(image: np.ndarray, blocks: Iterable) -> np.ndarray:
         "text_free": (255, 64, 64),
         "ctd_roi": (60, 220, 255),
         "cleanup_roi": (255, 214, 10),
+        "carrier_roi": (255, 179, 64),
     }
 
     for x1, y1, x2, y2 in _collect_bubble_boxes(blocks):
@@ -105,6 +106,12 @@ def build_detector_overlay(image: np.ndarray, blocks: Iterable) -> np.ndarray:
         x1, y1, x2, y2 = [int(float(v)) for v in bbox[:4]]
         color = palette.get(getattr(block, "text_class", ""), (255, 64, 64))
         draw.rectangle([x1, y1, x2, y2], outline=color, width=2)
+        carrier_kind = getattr(block, "carrier_kind", "") or ""
+        label = getattr(block, "text_class", "") or ""
+        if label and carrier_kind not in ("", "none", "speech_bubble"):
+            label = f"{label}/{carrier_kind}"
+        if label:
+            draw.text((x1 + 2, y1 + 2), label, fill=color)
 
         ctd_roi = getattr(block, "ctd_roi_xyxy", None) or getattr(block, "mask_roi_xyxy", None)
         if ctd_roi is not None and len(ctd_roi) >= 4:
@@ -115,6 +122,11 @@ def build_detector_overlay(image: np.ndarray, blocks: Iterable) -> np.ndarray:
         if cleanup_roi is not None and len(cleanup_roi) >= 4:
             cx1, cy1, cx2, cy2 = [int(float(v)) for v in cleanup_roi[:4]]
             draw.rectangle([cx1, cy1, cx2, cy2], outline=palette["cleanup_roi"], width=1)
+
+        carrier_roi = getattr(block, "carrier_mask_roi_xyxy", None)
+        if carrier_kind == "caption_plate" and carrier_roi is not None and len(carrier_roi) >= 4:
+            px1, py1, px2, py2 = [int(float(v)) for v in carrier_roi[:4]]
+            draw.rectangle([px1, py1, px2, py2], outline=palette["carrier_roi"], width=2)
 
     return np.array(canvas, dtype=np.uint8)
 
@@ -151,6 +163,16 @@ def serialize_inpaint_block(block, index: int) -> dict:
         ),
         "roi_type": get_mask_roi_type(block),
         "text_class": getattr(block, "text_class", "") or "",
+        "carrier_kind": getattr(block, "carrier_kind", "") or "",
+        "carrier_metrics": {
+            key: float(value)
+            for key, value in dict(getattr(block, "carrier_metrics", {}) or {}).items()
+        },
+        "carrier_mask_roi_xyxy": (
+            [int(float(v)) for v in getattr(block, "carrier_mask_roi_xyxy", ())[:4]]
+            if getattr(block, "carrier_mask_roi_xyxy", None) is not None
+            else None
+        ),
         "inpaint_bboxes": inpaint_boxes,
         "hard_box_applied": bool(getattr(block, "_hard_box_applied", False)),
         "hard_box_reason_codes": list(getattr(block, "_hard_box_reason_codes", []) or []),

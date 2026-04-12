@@ -5,16 +5,18 @@ from unittest import mock
 
 import numpy as np
 
-from modules.masking.legacy_bbox_mask import build_legacy_bbox_mask_details
+from modules.masking.legacy_bbox_mask import build_legacy_bbox_mask_details, merge_legacy_and_rescue
 from modules.masking.legacy_bbox_rescue import build_block_rescue_mask
 from modules.utils.textblock import TextBlock
 
 
-def _block(*, xyxy, text_class="text_bubble", bubble_xyxy=None) -> TextBlock:
+def _block(*, xyxy, text_class="text_bubble", bubble_xyxy=None, carrier_kind=None, carrier_mask_roi_xyxy=None) -> TextBlock:
     return TextBlock(
         text_bbox=np.asarray(xyxy, dtype=np.int32),
         bubble_bbox=np.asarray(bubble_xyxy, dtype=np.int32) if bubble_xyxy is not None else None,
         text_class=text_class,
+        carrier_kind=carrier_kind,
+        carrier_mask_roi_xyxy=carrier_mask_roi_xyxy,
         text="demo",
     )
 
@@ -131,6 +133,37 @@ class LegacyBBoxMaskTests(unittest.TestCase):
         self.assertEqual(int(np.count_nonzero(final_mask[11:15, 11:15])), 16)
         self.assertEqual(int(np.count_nonzero(final_mask[15:18, 15:18])), 9)
         self.assertEqual(int(np.count_nonzero(final_mask)), 25)
+
+    def test_caption_plate_final_mask_is_clamped_to_local_roi(self) -> None:
+        image_shape = (40, 40, 3)
+        block = _block(
+            xyxy=[10, 10, 20, 20],
+            text_class="text_bubble",
+            bubble_xyxy=[2, 2, 32, 32],
+            carrier_kind="caption_plate",
+            carrier_mask_roi_xyxy=[8, 8, 22, 22],
+        )
+        legacy_mask = np.zeros((40, 40), dtype=np.uint8)
+        legacy_mask[4:28, 4:28] = 255
+        rescue_mask = np.zeros((40, 40), dtype=np.uint8)
+        rescue_mask[6:26, 6:26] = 255
+
+        base_mask, rescue_mask, final_mask = merge_legacy_and_rescue(
+            image_shape,
+            block,
+            legacy_mask,
+            rescue_mask,
+            (6, 6, 26, 26),
+        )
+
+        self.assertEqual(int(np.count_nonzero(base_mask[:8, :])), 0)
+        self.assertEqual(int(np.count_nonzero(base_mask[:, :8])), 0)
+        self.assertEqual(int(np.count_nonzero(base_mask[22:, :])), 0)
+        self.assertEqual(int(np.count_nonzero(base_mask[:, 22:])), 0)
+        self.assertEqual(int(np.count_nonzero(final_mask[:8, :])), 0)
+        self.assertEqual(int(np.count_nonzero(final_mask[:, :8])), 0)
+        self.assertEqual(int(np.count_nonzero(final_mask[22:, :])), 0)
+        self.assertEqual(int(np.count_nonzero(final_mask[:, 22:])), 0)
 
 
 if __name__ == "__main__":

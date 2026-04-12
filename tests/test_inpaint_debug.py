@@ -20,6 +20,9 @@ class _Block:
     xyxy: list[int]
     bubble_xyxy: list[int] | None = None
     text_class: str = "text_bubble"
+    carrier_kind: str = "speech_bubble"
+    carrier_metrics: dict = field(default_factory=dict)
+    carrier_mask_roi_xyxy: list[int] | None = None
     inpaint_bboxes: list[list[int]] = field(default_factory=list)
     _hard_box_applied: bool = False
     _hard_box_reason_codes: list[str] = field(default_factory=list)
@@ -40,6 +43,9 @@ class InpaintDebugTests(unittest.TestCase):
             xyxy=[1, 1, 4, 5],
             bubble_xyxy=[0, 0, 7, 7],
             text_class="text_bubble",
+            carrier_kind="caption_plate",
+            carrier_metrics={"white_ratio": 0.12, "analysis_area": 24},
+            carrier_mask_roi_xyxy=[1, 1, 5, 6],
             inpaint_bboxes=[[1, 1, 4, 5]],
             _hard_box_applied=True,
             _hard_box_reason_codes=["edge_dense"],
@@ -70,6 +76,9 @@ class InpaintDebugTests(unittest.TestCase):
         self.assertTrue(metadata["cleanup_applied"])
         self.assertEqual(metadata["hard_box_applied_count"], 1)
         self.assertEqual(metadata["blocks"][0]["text_class"], "text_bubble")
+        self.assertEqual(metadata["blocks"][0]["carrier_kind"], "caption_plate")
+        self.assertEqual(metadata["blocks"][0]["carrier_mask_roi_xyxy"], [1, 1, 5, 6])
+        self.assertAlmostEqual(metadata["blocks"][0]["carrier_metrics"]["white_ratio"], 0.12)
         self.assertEqual(metadata["blocks"][0]["inpaint_bboxes"], [[1, 1, 4, 5]])
         self.assertTrue(metadata["blocks"][0]["hard_box_applied"])
         self.assertEqual(metadata["blocks"][0]["hard_box_reason_codes"], ["edge_dense"])

@@ -5,6 +5,7 @@ from PIL import Image, ImageDraw
 from collections import defaultdict, deque
 from ..detection.utils.text_lines import group_items_into_lines
 from modules.detection.utils.geometry import does_rectangle_fit, is_mostly_contained
+from modules.utils.carrier import default_carrier_kind
 from modules.utils.language_utils import is_no_space_lang
 
 class TextBlock(object):
@@ -46,6 +47,14 @@ class TextBlock(object):
         self.cleanup_roi_xyxy = cleanup_roi_bbox if cleanup_roi_bbox is not None else self.ctd_roi_xyxy
         self.mask_roi_xyxy = self.ctd_roi_xyxy
         self.text_class = text_class
+        self.carrier_kind = str(kwargs.get("carrier_kind") or default_carrier_kind(text_class))
+        self.carrier_metrics = copy.deepcopy(kwargs.get("carrier_metrics", {}) or {})
+        carrier_mask_roi = kwargs.get("carrier_mask_roi_xyxy")
+        self.carrier_mask_roi_xyxy = (
+            carrier_mask_roi.copy()
+            if isinstance(carrier_mask_roi, np.ndarray)
+            else copy.deepcopy(carrier_mask_roi)
+        )
         self.angle = angle
         self.tr_origin_point = ()
  
@@ -107,10 +116,17 @@ class TextBlock(object):
         new_block.ctd_roi_xyxy = self.ctd_roi_xyxy.copy() if isinstance(self.ctd_roi_xyxy, np.ndarray) else copy.deepcopy(self.ctd_roi_xyxy)
         new_block.cleanup_roi_xyxy = self.cleanup_roi_xyxy.copy() if isinstance(self.cleanup_roi_xyxy, np.ndarray) else copy.deepcopy(self.cleanup_roi_xyxy)
         new_block.mask_roi_xyxy = self.mask_roi_xyxy.copy() if isinstance(self.mask_roi_xyxy, np.ndarray) else copy.deepcopy(self.mask_roi_xyxy)
+        new_block.carrier_mask_roi_xyxy = (
+            self.carrier_mask_roi_xyxy.copy()
+            if isinstance(self.carrier_mask_roi_xyxy, np.ndarray)
+            else copy.deepcopy(self.carrier_mask_roi_xyxy)
+        )
         new_block.inpaint_bboxes = self.inpaint_bboxes.copy() if isinstance(self.inpaint_bboxes, np.ndarray) else self.inpaint_bboxes
         
         # Copy simple attributes
         new_block.text_class = self.text_class
+        new_block.carrier_kind = self.carrier_kind
+        new_block.carrier_metrics = copy.deepcopy(self.carrier_metrics)
         new_block.angle = self.angle
         new_block.tr_origin_point = copy.deepcopy(self.tr_origin_point)
         new_block.lines = copy.deepcopy(self.lines)
@@ -128,6 +144,7 @@ class TextBlock(object):
         new_block.min_font_size = self.min_font_size
         new_block.max_font_size = self.max_font_size
         new_block.font_color = self.font_color
+        new_block.direction = self.direction
         
         return new_block
 
@@ -319,4 +336,3 @@ def lists_to_blk_list(blk_list: list[TextBlock], texts_bboxes: list, texts_strin
             blk.text = ' '.join(text for bbox, text in sorted_entries)
 
     return blk_list
-

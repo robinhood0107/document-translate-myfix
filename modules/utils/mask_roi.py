@@ -6,20 +6,15 @@ import cv2
 import numpy as np
 
 from modules.detection.utils.content import get_inpaint_bboxes
+from modules.utils.carrier import (
+    CARRIER_KIND_CAPTION_PLATE,
+    normalize_xyxy as normalize_carrier_xyxy,
+    resolve_effective_text_bubble_roi,
+)
 
 
 def normalize_xyxy(box, image_shape: tuple[int, int] | tuple[int, int, int]) -> tuple[int, int, int, int] | None:
-    if box is None or len(box) < 4:
-        return None
-    img_h, img_w = image_shape[:2]
-    x1, y1, x2, y2 = [int(float(v)) for v in box[:4]]
-    x1 = max(0, min(x1, img_w))
-    x2 = max(0, min(x2, img_w))
-    y1 = max(0, min(y1, img_h))
-    y2 = max(0, min(y2, img_h))
-    if x2 <= x1 or y2 <= y1:
-        return None
-    return x1, y1, x2, y2
+    return normalize_carrier_xyxy(box, image_shape)
 
 
 def _expand_bbox(
@@ -55,9 +50,10 @@ def resolve_block_ctd_roi(block, image_shape: tuple[int, int] | tuple[int, int, 
         return explicit
 
     text_class = getattr(block, 'text_class', '') or ''
-    bubble_roi = normalize_xyxy(getattr(block, 'bubble_xyxy', None), image_shape)
-    if text_class == 'text_bubble' and bubble_roi is not None:
-        return bubble_roi
+    if text_class == 'text_bubble':
+        bubble_roi = resolve_effective_text_bubble_roi(block, image_shape)
+        if bubble_roi is not None:
+            return bubble_roi
 
     mask_alias = normalize_xyxy(getattr(block, 'mask_roi_xyxy', None), image_shape)
     if mask_alias is not None:
@@ -79,9 +75,10 @@ def resolve_block_cleanup_roi(block, image_shape: tuple[int, int] | tuple[int, i
         return explicit
 
     text_class = getattr(block, 'text_class', '') or ''
-    bubble_roi = normalize_xyxy(getattr(block, 'bubble_xyxy', None), image_shape)
-    if text_class == 'text_bubble' and bubble_roi is not None:
-        return bubble_roi
+    if text_class == 'text_bubble':
+        bubble_roi = resolve_effective_text_bubble_roi(block, image_shape)
+        if bubble_roi is not None:
+            return bubble_roi
 
     ctd_roi = normalize_xyxy(getattr(block, 'ctd_roi_xyxy', None), image_shape)
     if ctd_roi is not None:
@@ -174,8 +171,12 @@ def build_text_prior_mask(
 def get_mask_roi_type(block) -> str:
     roi = getattr(block, 'ctd_roi_xyxy', None) or getattr(block, 'mask_roi_xyxy', None)
     if roi is None:
+        roi = getattr(block, 'carrier_mask_roi_xyxy', None)
+    if roi is None:
         return 'none'
     text_class = getattr(block, 'text_class', '') or ''
+    if text_class == 'text_bubble' and (getattr(block, 'carrier_kind', '') or '') == CARRIER_KIND_CAPTION_PLATE:
+        return 'caption_plate_local'
     if text_class == 'text_bubble' and getattr(block, 'bubble_xyxy', None) is not None:
         return 'bubble'
     return 'synthetic_text_free'

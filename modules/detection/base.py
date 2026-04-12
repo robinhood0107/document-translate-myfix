@@ -1,4 +1,5 @@
 from abc import ABC, abstractmethod
+import logging
 import numpy as np
 from typing import Optional
 
@@ -7,6 +8,10 @@ from .utils.geometry import does_rectangle_fit, do_rectangles_overlap, \
     merge_overlapping_boxes
 from .font.engine import FontEngineFactory
 from .utils.content import filter_and_fix_bboxes
+from modules.utils.carrier import annotate_text_block_carriers
+
+
+logger = logging.getLogger(__name__)
 
 
 class DetectionEngine(ABC):
@@ -135,5 +140,10 @@ class DetectionEngine(ABC):
                         )
                     )
         
+        try:
+            annotate_text_block_carriers(image, text_blocks)
+        except Exception as exc:
+            logger.warning("failed to classify text block carriers: %s", exc)
+
         return text_blocks
     
