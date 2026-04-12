@@ -1,10 +1,6 @@
-from .ctd_refiner import CTDRefiner, CTDRefinerSettings, MaskGenerationResult
-from .protect_mask import ProtectMaskSettings, build_protect_mask
+from .legacy_bbox_mask import build_legacy_bbox_mask_details, merge_legacy_and_rescue
 
 __all__ = [
-    "CTDRefiner",
-    "CTDRefinerSettings",
-    "MaskGenerationResult",
-    "ProtectMaskSettings",
-    "build_protect_mask",
+    "build_legacy_bbox_mask_details",
+    "merge_legacy_and_rescue",
 ]

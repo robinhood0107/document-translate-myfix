@@ -152,6 +152,19 @@ def serialize_inpaint_block(block, index: int) -> dict:
         "roi_type": get_mask_roi_type(block),
         "text_class": getattr(block, "text_class", "") or "",
         "inpaint_bboxes": inpaint_boxes,
+        "hard_box_applied": bool(getattr(block, "_hard_box_applied", False)),
+        "hard_box_reason_codes": list(getattr(block, "_hard_box_reason_codes", []) or []),
+        "hard_box_rescue_roi_xyxy": (
+            [int(float(v)) for v in getattr(block, "_hard_box_rescue_roi_xyxy", ())[:4]]
+            if getattr(block, "_hard_box_rescue_roi_xyxy", None) is not None
+            else None
+        ),
+        "legacy_fill_ratio": float(getattr(block, "_legacy_fill_ratio", 0.0) or 0.0),
+        "rescue_fill_ratio": float(getattr(block, "_rescue_fill_ratio", 0.0) or 0.0),
+        "legacy_mask_pixel_count": int(getattr(block, "_legacy_mask_pixel_count", 0) or 0),
+        "rescue_mask_pixel_count": int(getattr(block, "_rescue_mask_pixel_count", 0) or 0),
+        "final_mask_pixel_count": int(getattr(block, "_final_mask_pixel_count", 0) or 0),
+        "hard_box_metrics": dict(getattr(block, "_hard_box_metrics", {}) or {}),
     }
 
 
@@ -166,18 +179,22 @@ def build_inpaint_debug_metadata(
     hd_strategy: str,
     blocks: Iterable,
     raw_mask: np.ndarray | None,
-    final_mask: np.ndarray | None,
-    final_mask_pre_expand: np.ndarray | None,
-    final_mask_post_expand: np.ndarray | None,
-    residue_mask: np.ndarray | None,
-    cleanup_delta: np.ndarray | None,
-    cleanup_stats: dict | None,
+    final_mask: np.ndarray | None = None,
+    final_mask_pre_expand: np.ndarray | None = None,
+    final_mask_post_expand: np.ndarray | None = None,
+    residue_mask: np.ndarray | None = None,
+    cleanup_delta: np.ndarray | None = None,
+    cleanup_stats: dict | None = None,
     mask_refiner: str = "legacy_bbox",
     protect_mask_applied: bool = False,
     protect_mask: np.ndarray | None = None,
     refiner_backend: str = "legacy",
     refiner_device: str = "cpu",
     inpainter_backend: str = "unknown",
+    legacy_base_mask: np.ndarray | None = None,
+    hard_box_rescue_mask: np.ndarray | None = None,
+    hard_box_applied_count: int | None = None,
+    hard_box_reason_totals: dict | None = None,
 ) -> dict:
     block_list = list(blocks or [])
     cleanup_stats = cleanup_stats or {}
@@ -188,6 +205,16 @@ def build_inpaint_debug_metadata(
     residue_mask_pixels = int(np.count_nonzero(residue_mask)) if residue_mask is not None else 0
     cleanup_delta_pixels = int(np.count_nonzero(cleanup_delta)) if cleanup_delta is not None else 0
     protect_mask_pixels = int(np.count_nonzero(protect_mask)) if protect_mask is not None else 0
+    legacy_base_mask_pixels = int(np.count_nonzero(legacy_base_mask)) if legacy_base_mask is not None else 0
+    hard_box_rescue_mask_pixels = int(np.count_nonzero(hard_box_rescue_mask)) if hard_box_rescue_mask is not None else 0
+    if hard_box_applied_count is None:
+        hard_box_applied_count = sum(1 for block in block_list if bool(getattr(block, "_hard_box_applied", False)))
+    if hard_box_reason_totals is None:
+        reason_totals: dict[str, int] = {}
+        for block in block_list:
+            for code in list(getattr(block, "_hard_box_reason_codes", []) or []):
+                reason_totals[code] = reason_totals.get(code, 0) + 1
+        hard_box_reason_totals = reason_totals
     return {
         "image_path": image_path,
         "run_type": run_type,
@@ -204,11 +231,15 @@ def build_inpaint_debug_metadata(
         "protect_mask_pixel_count": protect_mask_pixels,
         "block_count": len(block_list),
         "raw_mask_pixel_count": raw_mask_pixels,
+        "legacy_base_mask_pixel_count": legacy_base_mask_pixels,
+        "hard_box_rescue_mask_pixel_count": hard_box_rescue_mask_pixels,
         "final_mask_pixel_count": final_mask_pixels,
         "final_mask_pre_expand_pixel_count": final_mask_pre_expand_pixels,
         "final_mask_post_expand_pixel_count": final_mask_post_expand_pixels,
         "residue_mask_pixel_count": residue_mask_pixels,
         "cleanup_delta_pixel_count": cleanup_delta_pixels,
+        "hard_box_applied_count": int(hard_box_applied_count or 0),
+        "hard_box_reason_totals": dict(hard_box_reason_totals or {}),
         "cleanup_applied": bool(cleanup_stats.get("applied", False)),
         "cleanup_component_count": int(cleanup_stats.get("component_count", 0) or 0),
         "cleanup_block_count": int(cleanup_stats.get("block_count", 0) or 0),
@@ -245,10 +276,10 @@ def export_inpaint_debug_artifacts(
     image: np.ndarray,
     blocks: Iterable,
     export_settings: dict | None,
-    raw_mask: np.ndarray | None,
-    mask_overlay_mask: np.ndarray | None,
-    cleanup_delta: np.ndarray | None,
-    metadata: dict | None,
+    raw_mask: np.ndarray | None = None,
+    mask_overlay_mask: np.ndarray | None = None,
+    cleanup_delta: np.ndarray | None = None,
+    metadata: dict | None = None,
 ) -> None:
     settings = export_settings or {}
     if not has_debug_exports(settings):

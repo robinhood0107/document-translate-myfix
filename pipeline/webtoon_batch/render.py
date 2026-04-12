@@ -386,6 +386,10 @@ class RenderMixin:
             refiner_backend=str(mask_details.get("refiner_backend", "legacy") or "legacy"),
             refiner_device=str(mask_details.get("refiner_device", "cpu") or "cpu"),
             inpainter_backend=str(debug_state.get("inpainter_backend", "unknown") or "unknown"),
+            legacy_base_mask=mask_details.get("legacy_base_mask"),
+            hard_box_rescue_mask=mask_details.get("hard_box_rescue_mask"),
+            hard_box_applied_count=int(mask_details.get("hard_box_applied_count", 0) or 0),
+            hard_box_reason_totals=dict(mask_details.get("hard_box_reason_totals", {}) or {}),
         )
         export_inpaint_debug_artifacts(
             export_root=export_root,
@@ -395,6 +399,7 @@ class RenderMixin:
             blocks=debug_state.get("mask_blocks") or blk_list,
             export_settings=export_settings,
             raw_mask=raw_mask,
+            mask_overlay_mask=mask_details.get("final_mask", final_mask),
             cleanup_delta=cleanup_delta,
             metadata=debug_metadata,
         )

@@ -348,10 +348,10 @@ class BatchProcessor:
         inpainter_backend: str = "unknown",
     ) -> None:
         mask_details = mask_details or {}
-        base_mask = mask_details.get("final_mask", final_mask)
+        base_mask = mask_details.get("legacy_base_mask", raw_mask if raw_mask is not None else mask_details.get("final_mask", final_mask))
         cleanup_delta = self._build_cleanup_delta_mask(base_mask, final_mask)
         residue_mask = (cleanup_stats or {}).get("residue_mask") if cleanup_stats else None
-        mask_overlay_mask = mask_details.get("final_mask_post_expand", base_mask)
+        mask_overlay_mask = mask_details.get("final_mask", final_mask)
         metadata = build_inpaint_debug_metadata(
             image_path=image_path,
             run_type=self._current_run_type(),
@@ -374,6 +374,10 @@ class BatchProcessor:
             refiner_backend=str(mask_details.get("refiner_backend", "legacy") or "legacy"),
             refiner_device=str(mask_details.get("refiner_device", "cpu") or "cpu"),
             inpainter_backend=inpainter_backend,
+            legacy_base_mask=mask_details.get("legacy_base_mask"),
+            hard_box_rescue_mask=mask_details.get("hard_box_rescue_mask"),
+            hard_box_applied_count=int(mask_details.get("hard_box_applied_count", 0) or 0),
+            hard_box_reason_totals=dict(mask_details.get("hard_box_reason_totals", {}) or {}),
         )
         export_inpaint_debug_artifacts(
             export_root=export_root,

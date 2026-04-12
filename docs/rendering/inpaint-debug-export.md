@@ -1,11 +1,9 @@
 # Inpaint Debug Export
 
-Automatic Mode debug exports help separate three failure classes:
+The supported verifier is the default automatic runtime only:
 
-- Detector issue: bounding boxes are too small or missing in `detector_overlays`.
-- Mask issue: boxes look correct, but `raw_masks`, `mask_overlays`, or `cleanup_mask_delta` still miss glyph pixels.
-- Inpainter issue: masks look correct, but `cleaned_images` still show text residue or artifacts.
+- `RT-DETR-v2`
+- `Legacy BBox Rescue`
+- `Source LaMa`
 
-`Translate All` and `One-Page Auto` share the same export settings and write into the same `comic_translate_<timestamp>` tree.
-
-For bulk review, run `scripts/export_inpaint_debug.py` to export the same detector/mask/inpaint/cleanup artifacts for `Sample/japan` and `Sample/China` into `banchmark_result_log/inpaint_debug/...`.
+Run `scripts/export_inpaint_debug.py` to process the full `Sample` tree without OCR, translation, or rendering. The script writes per-image `source`, `legacy_base_mask`, `hard_box_rescue_mask`, `final_mask`, `mask_overlay`, `cleaned`, `metrics.json`, a horizontal compare panel, root `index.md`, root `summary.json`, and ranked `review_samples/` panels under `banchmark_result_log/inpaint_debug/...`.
