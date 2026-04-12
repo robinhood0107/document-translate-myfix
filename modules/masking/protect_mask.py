@@ -38,20 +38,6 @@ def _bubble_border_band(shape: tuple[int, int], bubble_box, width: int) -> np.nd
     return band
 
 
-def _line_protect_mask(image: np.ndarray, dilate_px: int, canny_low: int, canny_high: int) -> np.ndarray:
-    if image.ndim == 3:
-        gray = cv2.cvtColor(image, cv2.COLOR_RGB2GRAY)
-    else:
-        gray = image.astype(np.uint8)
-    edges = cv2.Canny(gray, threshold1=canny_low, threshold2=canny_high)
-    _, dark_lines = cv2.threshold(gray, 60, 255, cv2.THRESH_BINARY_INV)
-    protect = cv2.bitwise_or(edges, dark_lines)
-    if dilate_px > 0:
-        kernel = np.ones((2 * dilate_px + 1, 2 * dilate_px + 1), dtype=np.uint8)
-        protect = cv2.dilate(protect, kernel, iterations=1)
-    return protect
-
-
 def build_protect_mask(
     image: np.ndarray,
     blocks: Iterable,
@@ -62,13 +48,10 @@ def build_protect_mask(
     if not cfg.keep_existing_lines:
         return base
 
-    protect = _line_protect_mask(
-        image,
-        dilate_px=max(0, int(cfg.line_dilate_px)),
-        canny_low=int(cfg.canny_low),
-        canny_high=int(cfg.canny_high),
-    )
-
+    # Protect only speech-bubble border bands. The previous global edge/dark-line
+    # mask was preserving too much interior text structure, which made inpainting
+    # look like it was not happening even when the mask was correct.
+    protect = np.zeros_like(base)
     for block in blocks or []:
         if getattr(block, "text_class", "") != "text_bubble":
             continue

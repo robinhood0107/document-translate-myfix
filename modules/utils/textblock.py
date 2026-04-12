@@ -15,6 +15,9 @@ class TextBlock(object):
                  text_bbox: np.ndarray = None,
                  bubble_bbox: np.ndarray = None,
                  text_class: str = "",
+                 mask_roi_bbox = None,
+                 ctd_roi_bbox = None,
+                 cleanup_roi_bbox = None,
                  inpaint_bboxes = None,
                  lines: List = None,
                  text_segm_points: np.ndarray = None, 
@@ -39,6 +42,9 @@ class TextBlock(object):
         self.xyxy = text_bbox
         self.segm_pts = text_segm_points
         self.bubble_xyxy = bubble_bbox
+        self.ctd_roi_xyxy = ctd_roi_bbox if ctd_roi_bbox is not None else mask_roi_bbox
+        self.cleanup_roi_xyxy = cleanup_roi_bbox if cleanup_roi_bbox is not None else self.ctd_roi_xyxy
+        self.mask_roi_xyxy = self.ctd_roi_xyxy
         self.text_class = text_class
         self.angle = angle
         self.tr_origin_point = ()
@@ -98,6 +104,9 @@ class TextBlock(object):
         new_block.xyxy = self.xyxy.copy() if isinstance(self.xyxy, np.ndarray) else self.xyxy
         new_block.segm_pts = self.segm_pts.copy() if isinstance(self.segm_pts, np.ndarray) else self.segm_pts
         new_block.bubble_xyxy = self.bubble_xyxy.copy() if isinstance(self.bubble_xyxy, np.ndarray) else self.bubble_xyxy
+        new_block.ctd_roi_xyxy = self.ctd_roi_xyxy.copy() if isinstance(self.ctd_roi_xyxy, np.ndarray) else copy.deepcopy(self.ctd_roi_xyxy)
+        new_block.cleanup_roi_xyxy = self.cleanup_roi_xyxy.copy() if isinstance(self.cleanup_roi_xyxy, np.ndarray) else copy.deepcopy(self.cleanup_roi_xyxy)
+        new_block.mask_roi_xyxy = self.mask_roi_xyxy.copy() if isinstance(self.mask_roi_xyxy, np.ndarray) else copy.deepcopy(self.mask_roi_xyxy)
         new_block.inpaint_bboxes = self.inpaint_bboxes.copy() if isinstance(self.inpaint_bboxes, np.ndarray) else self.inpaint_bboxes
         
         # Copy simple attributes

@@ -7,6 +7,7 @@ from PySide6.QtGui import QColor, QImage, QPainter, QPen, QBrush
 
 from modules.utils.device import resolve_device
 from modules.utils.pipeline_config import inpaint_map, get_config, get_inpainter_runtime
+from modules.inpainting.source_lama_blockwise import source_lama_blockwise_inpaint
 
 logger = logging.getLogger(__name__)
 
@@ -59,6 +60,22 @@ class InpaintingHandler:
         inpaint_input_img = imk.convert_scale_abs(inpaint_input_img) 
 
         return inpaint_input_img
+
+    def inpaint_with_blocks(self, image: np.ndarray, mask: np.ndarray, blk_list, config=None):
+        if image is None or mask is None:
+            return None
+        self._ensure_inpainter()
+        if config is None:
+            config = get_config(self.main_page.settings_page)
+        blocks = list(blk_list or [])
+        return source_lama_blockwise_inpaint(
+            image,
+            mask,
+            blocks,
+            self.inpainter_cache,
+            config,
+            check_need_inpaint=True,
+        )
 
     def _qimage_to_np(self, qimg: QImage):
         if qimg.width() <= 0 or qimg.height() <= 0:

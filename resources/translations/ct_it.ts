@@ -17,9 +17,139 @@
     </message>
 </context>
 <context>
+    <name>AutomaticProgress</name>
+    <message>
+        <source>Calculating</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Recent History</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Live Learning</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Live Stable</source>
+        <translation type="unfinished"></translation>
+    </message>
+</context>
+<context>
+    <name>AutomaticProgressDialog</name>
+    <message>
+        <source>Automatic Translation Progress</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>자동번역 준비 중</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>초기화 중...</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>경과 시간</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>남은 시간</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>예상 완료 시각</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>ETA 신뢰도</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>현재 작업</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>서비스</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>페이지</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>단계</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>파일명</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>세부 로그</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>재시도</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Settings 열기</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Cancel</source>
+        <translation type="unfinished">Annulla</translation>
+    </message>
+    <message>
+        <source>닫기</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Calculating</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>작업이 취소되었습니다.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>자동번역 진행 중</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>작업이 실패했습니다.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>자동번역이 완료되었습니다.</source>
+        <translation type="unfinished"></translation>
+    </message>
+</context>
+<context>
     <name>ComicTranslate</name>
     <message>
+        <source>Gemma와 OCR 준비를 확인하는 중...</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>취소 중...</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
         <source>PaddleOCR VL Settings</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>HunyuanOCR Settings</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Gemma Local Server Settings</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>자동번역 준비 또는 실행에 실패했습니다.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
@@ -41,6 +171,10 @@
     <message>
         <source>No current page is available for automatic processing.</source>
         <translation>Nessuna pagina corrente è disponibile per l&apos;elaborazione automatica.</translation>
+    </message>
+    <message>
+        <source>자동번역이 완료되었습니다.</source>
+        <translation type="unfinished"></translation>
     </message>
     <message>
         <source>Downloading model file: {filename}</source>
@@ -363,11 +497,12 @@ Use Custom Local Server(Gemma) with the included Gemma Docker setup.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>Comic Translate can use your local Gemma Docker server for translation.
-1. Run `docker compose pull --policy always` and then `docker compose up -d --force-recreate` in the repository root.
+        <source>Comic Translate can reuse your local Gemma Docker server for translation.
+1. Keep the existing Gemma container running if it is already healthy.
 2. In Settings &gt; Credentials, use Endpoint URL `http://127.0.0.1:18080/v1`.
 3. Set Model to the exact GGUF filename in `testmodel/` (recommended: `gemma-4-26B-IQ4_NL.gguf`).
-If responses are truncated, lower Chunk Size or increase LLAMA_CTX_SIZE in docker-compose.yaml.</source>
+Automatic translation reuses an existing Gemma runtime first and only runs `docker compose up -d` when needed.
+If responses are truncated, lower Chunk Size or Max Completion Tokens before recreating the container.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
@@ -387,14 +522,36 @@ If responses are truncated, lower Chunk Size or increase LLAMA_CTX_SIZE in docke
         <translation type="unfinished"></translation>
     </message>
     <message>
+        <source>Advanced Sampler Settings</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Temperature</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Top K</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Top P</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Min P</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
         <source>Raw Response Log</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>Recommended defaults for the included Gemma Docker setup:
+        <source>Promoted winner defaults for the bundled Gemma runtime:
 - Chunk Size: 6
 - Max Completion Tokens: 512
-- Request Timeout: 180 seconds</source>
+- Request Timeout: 180 seconds
+- Temperature: 0.7
+- Top K / Top P / Min P: 64 / 0.95 / 0.0</source>
         <translation type="unfinished"></translation>
     </message>
 </context>
@@ -1445,6 +1602,10 @@ Riavviare ora?</translation>
         <translation type="unfinished"></translation>
     </message>
     <message>
+        <source>RT-DETR-v2 + Legacy BBox Rescue + Source LaMa</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
         <source>PaddleOCR VL Settings</source>
         <translation type="unfinished"></translation>
     </message>
@@ -1682,55 +1843,19 @@ Apri o crea un progetto per iniziare.</translation>
         <translation type="unfinished"></translation>
     </message>
     <message>
+        <source>Automatic Runtime</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Automatic mode is fixed to RT-DETR-v2 detection, legacy bbox rescue masking, and source block-wise LaMa cleaning.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
         <source>Text Detector</source>
         <translation>Rilevatore di testo</translation>
     </message>
     <message>
-        <source>Precise Masking</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Mask Refiner</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>legacy_bbox</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>ctd</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Keep Existing Lines</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>detect_size</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>det_rearrange_max_batches</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
         <source>device</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>font size multiplier</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>font size max</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>font size min</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>mask dilate size</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
