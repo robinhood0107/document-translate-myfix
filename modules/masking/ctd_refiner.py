@@ -8,6 +8,7 @@ import numpy as np
 
 from modules.masking.ctd_vendor.ctd import TextDetBase, TextDetBaseDNN
 from modules.utils.download import ModelDownloader, ModelID
+from modules.utils.mask_roi import build_text_prior_mask, normalize_xyxy, resolve_block_ctd_roi
 from modules.utils.textblock import TextBlock
 
 
@@ -27,6 +28,8 @@ class MaskGenerationResult:
     raw_mask: np.ndarray
     refined_mask: np.ndarray
     protect_mask: np.ndarray
+    final_mask_pre_expand: np.ndarray
+    final_mask_post_expand: np.ndarray
     final_mask: np.ndarray
     backend: str
     device: str
@@ -313,6 +316,56 @@ def _det_rearrange_forward(img, dbnet_batch_forward, tgt_size=1280, max_batch_si
     return db, mask
 
 
+def _refine_mask_roi(image: np.ndarray, pred_mask: np.ndarray) -> np.ndarray:
+    if image.size == 0 or pred_mask.size == 0 or not np.any(pred_mask):
+        return np.zeros_like(pred_mask)
+    mask_list = _get_topk_masklist(image, pred_mask)
+    mask_list += _get_otsuthresh_masklist(image, pred_mask)
+    merged = _merge_mask_list(mask_list, pred_mask)
+    return np.where(merged > 0, 255, 0).astype(np.uint8)
+
+
+def _expand_final_mask_crop(final_crop: np.ndarray, text_class: str) -> np.ndarray:
+    if final_crop.size == 0 or not np.any(final_crop):
+        return np.zeros_like(final_crop)
+    iterations = 2 if text_class == "text_bubble" else 2
+    kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3))
+    expanded = cv2.dilate(final_crop, kernel, iterations=max(1, int(iterations)))
+    return np.where(expanded > 0, 255, 0).astype(np.uint8)
+
+
+def _filter_candidate_mask(candidate_mask: np.ndarray, prior_mask: np.ndarray, text_class: str) -> np.ndarray:
+    if candidate_mask.size == 0 or not np.any(candidate_mask) or not np.any(prior_mask):
+        return np.zeros_like(candidate_mask)
+
+    roi_h, roi_w = candidate_mask.shape[:2]
+    roi_area = max(1, roi_h * roi_w)
+    max_bbox_ratio = 0.50 if text_class == 'text_bubble' else 0.34
+    edge_bbox_ratio = 0.14
+
+    num_labels, labels, stats, _centroids = cv2.connectedComponentsWithStats((candidate_mask > 0).astype(np.uint8), 8, cv2.CV_32S)
+    filtered = np.zeros_like(candidate_mask, dtype=np.uint8)
+    for label_idx in range(1, num_labels):
+        x, y, w, h, _area = stats[label_idx]
+        if w <= 0 or h <= 0:
+            continue
+        bbox_area = int(w * h)
+        if bbox_area > int(round(roi_area * max_bbox_ratio)):
+            continue
+
+        component = labels[y:y + h, x:x + w] == label_idx
+        if not np.any(prior_mask[y:y + h, x:x + w][component] > 0):
+            continue
+
+        touches_edge = x == 0 or y == 0 or (x + w) >= roi_w or (y + h) >= roi_h
+        if touches_edge and bbox_area > int(round(roi_area * edge_bbox_ratio)):
+            continue
+
+        filtered[y:y + h, x:x + w][component] = 255
+
+    return np.where(filtered > 0, 255, 0).astype(np.uint8)
+
+
 class CTDRefiner:
     def __init__(self, settings: CTDRefinerSettings | None = None) -> None:
         self.settings = settings or CTDRefinerSettings()
@@ -395,34 +448,57 @@ class CTDRefiner:
             raw_mask = cv2.dilate(raw_mask, element)
         return np.where(raw_mask > 0, 255, 0).astype(np.uint8)
 
-    def _compose_by_blocks(self, image_rgb: np.ndarray, refined_mask: np.ndarray, blocks: list[TextBlock]) -> np.ndarray:
-        composed = np.zeros_like(refined_mask)
-        im_h, im_w = image_rgb.shape[:2]
-        for block in blocks:
-            if getattr(block, "xyxy", None) is None:
-                continue
-            if getattr(block, "text_class", "") == "text_bubble" and getattr(block, "bubble_xyxy", None) is not None:
-                x1, y1, x2, y2 = [int(float(v)) for v in block.bubble_xyxy[:4]]
-            else:
-                x1, y1, x2, y2 = _enlarge_window(block.xyxy, im_w, im_h)
-            if x2 <= x1 or y2 <= y1:
-                continue
-            block_slice = refined_mask[y1:y2, x1:x2]
-            if not np.any(block_slice):
-                continue
-            composed[y1:y2, x1:x2] = cv2.bitwise_or(composed[y1:y2, x1:x2], block_slice)
-        return np.where(composed > 0, 255, 0).astype(np.uint8)
-
     def refine(self, image_rgb: np.ndarray, blocks: Iterable[TextBlock]) -> MaskGenerationResult:
         block_list = list(blocks or [])
-        raw_mask = self._infer_raw_mask(image_rgb)
-        refined_mask = _refine_mask(image_rgb, raw_mask, block_list) if block_list else raw_mask.copy()
-        composed_mask = self._compose_by_blocks(image_rgb, refined_mask, block_list) if block_list else refined_mask.copy()
+        im_h, im_w = image_rgb.shape[:2]
+        raw_mask = np.zeros((im_h, im_w), dtype=np.uint8)
+        refined_mask = np.zeros_like(raw_mask)
+        final_mask_pre_expand = np.zeros_like(raw_mask)
+        final_mask_post_expand = np.zeros_like(raw_mask)
+        final_mask = np.zeros_like(raw_mask)
+
+        for block in block_list:
+            roi = resolve_block_ctd_roi(block, image_rgb.shape)
+            if roi is None:
+                continue
+            x1, y1, x2, y2 = roi
+            if x2 <= x1 or y2 <= y1:
+                continue
+
+            crop = np.ascontiguousarray(image_rgb[y1:y2, x1:x2])
+            if crop.size == 0:
+                continue
+
+            raw_crop = self._infer_raw_mask(crop)
+            if raw_crop.size == 0 or not np.any(raw_crop):
+                continue
+
+            prior_mask = build_text_prior_mask(image_rgb, block, roi, dilate_iterations=2)
+            if not np.any(prior_mask):
+                continue
+
+            constrained_raw = cv2.bitwise_and(raw_crop, prior_mask)
+            refined_crop = _refine_mask_roi(crop, raw_crop)
+            constrained_refined = cv2.bitwise_and(refined_crop, prior_mask) if np.any(refined_crop) else np.zeros_like(raw_crop)
+            candidate_crop = cv2.bitwise_or(constrained_raw, constrained_refined) if np.any(constrained_refined) else constrained_raw
+            text_class = getattr(block, 'text_class', '') or ''
+            filtered_crop = _filter_candidate_mask(candidate_crop, prior_mask, text_class)
+            final_crop = cv2.bitwise_and(filtered_crop, prior_mask)
+            expanded_final_crop = _expand_final_mask_crop(final_crop, text_class)
+
+            raw_mask[y1:y2, x1:x2] = cv2.bitwise_or(raw_mask[y1:y2, x1:x2], constrained_raw)
+            refined_mask[y1:y2, x1:x2] = cv2.bitwise_or(refined_mask[y1:y2, x1:x2], constrained_refined)
+            final_mask_pre_expand[y1:y2, x1:x2] = cv2.bitwise_or(final_mask_pre_expand[y1:y2, x1:x2], final_crop)
+            final_mask_post_expand[y1:y2, x1:x2] = cv2.bitwise_or(final_mask_post_expand[y1:y2, x1:x2], expanded_final_crop)
+            final_mask[y1:y2, x1:x2] = cv2.bitwise_or(final_mask[y1:y2, x1:x2], expanded_final_crop)
+
         return MaskGenerationResult(
             raw_mask=np.where(raw_mask > 0, 255, 0).astype(np.uint8),
             refined_mask=np.where(refined_mask > 0, 255, 0).astype(np.uint8),
             protect_mask=np.zeros_like(raw_mask),
-            final_mask=np.where(composed_mask > 0, 255, 0).astype(np.uint8),
+            final_mask_pre_expand=np.where(final_mask_pre_expand > 0, 255, 0).astype(np.uint8),
+            final_mask_post_expand=np.where(final_mask_post_expand > 0, 255, 0).astype(np.uint8),
+            final_mask=np.where(final_mask > 0, 255, 0).astype(np.uint8),
             backend=self.backend,
             device=self.settings.device,
             fallback_used=False,
