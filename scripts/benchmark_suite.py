@@ -161,6 +161,15 @@ SUITE_PROFILES = {
         ),
         "baseline_batch_step": "",
     },
+    "gemma-iq4nl-japan-fullgpu": {
+        "benchmark_name": "Gemma IQ4_NL Japan Full Pipeline Full GPU Benchmark",
+        "benchmark_kind": "managed family suite",
+        "benchmark_scope": (
+            "Sample/japan 22-page full-pipeline speed optimization for Gemma IQ4_NL with "
+            "PaddleOCR VL + RT-DETR-v2 + CTD + lama_large_512px on full GPU"
+        ),
+        "baseline_batch_step": "",
+    },
 }
 
 RUNTIME_SNAPSHOT_FILES = [
@@ -1508,6 +1517,12 @@ def main() -> int:
         from inpaint_ctd_benchmark import run_suite as run_inpaint_ctd_suite
 
         return run_inpaint_ctd_suite(
+            sample_root=DEFAULT_SAMPLE_DIR,
+        )
+    if args.suite_profile == "gemma-iq4nl-japan-fullgpu":
+        from gemma_iq4nl_japan_fullgpu_benchmark import run_suite as run_gemma_iq4nl_fullgpu_suite
+
+        return run_gemma_iq4nl_fullgpu_suite(
             sample_root=DEFAULT_SAMPLE_DIR,
         )
 

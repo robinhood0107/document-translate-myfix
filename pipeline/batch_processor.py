@@ -329,6 +329,7 @@ class BatchProcessor:
         blk_list,
         detector_key: str,
         detector_engine: str,
+        detector_device: str,
         image,
     ) -> None:
         state = self._ensure_page_state(image_path)
@@ -340,6 +341,7 @@ class BatchProcessor:
             {
                 "detector_key": detector_key,
                 "detector_engine": detector_engine,
+                "detector_device": detector_device,
                 "block_count": len(blk_list or []),
                 "image_shape": list(getattr(image, "shape", []) or []),
             },
@@ -369,6 +371,7 @@ class BatchProcessor:
             {
                 "ocr_key": ocr_key,
                 "ocr_engine": ocr_engine,
+                "ocr_device": device,
                 "device": device,
                 "block_count": len(blk_list or []),
                 "ocr_quality_counts": {
@@ -547,6 +550,7 @@ class BatchProcessor:
                     blk_list,
                     detector_key,
                     detector_engine,
+                    detector_device,
                     image,
                 )
                 self._emit_benchmark_event(
@@ -837,6 +841,15 @@ class BatchProcessor:
                 image_path,
                 {
                     "inpainter": settings_page.get_tool_selection('inpainter'),
+                    "inpainter_key": inpainter_key,
+                    "inpainter_backend": inpainter_backend,
+                    "inpainter_device": runtime.get("device", device),
+                    "inpaint_size": runtime.get("inpaint_size"),
+                    "precision": runtime.get("precision"),
+                    "mask_refiner": mask_details.get("mask_refiner"),
+                    "ctd_device": mask_details.get("refiner_device", "cpu"),
+                    "refiner_backend": mask_details.get("refiner_backend", "legacy"),
+                    "refiner_device": mask_details.get("refiner_device", "cpu"),
                     "hd_strategy": hd_strategy,
                     "cleanup_applied": bool(cleanup_stats.get("applied", False)),
                     "cleanup_component_count": int(cleanup_stats.get("component_count", 0) or 0),

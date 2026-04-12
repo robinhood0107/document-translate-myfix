@@ -274,14 +274,14 @@ def _configure_window(window, preset: dict[str, object], source_lang: str, targe
         str(gemma.get("endpoint_url", "http://127.0.0.1:18080/v1"))
     )
     ui.credential_widgets["Custom Local Server(Gemma)_model"].setText(
-        str(gemma.get("model", "gemma-4-26b-a4b-it-heretic.q3_k_m.gguf"))
+        str(gemma.get("model", "gemma-4-26B-IQ4_NL.gguf"))
     )
 
     ui.paddleocr_vl_server_url_input.setText(
         str(ocr_client.get("server_url", "http://127.0.0.1:28118/layout-parsing"))
     )
-    ui.paddleocr_vl_max_new_tokens_spinbox.setValue(int(ocr_client.get("max_new_tokens", 256)))
-    ui.paddleocr_vl_parallel_workers_spinbox.setValue(int(ocr_client.get("parallel_workers", 2)))
+    ui.paddleocr_vl_max_new_tokens_spinbox.setValue(int(ocr_client.get("max_new_tokens", 1024)))
+    ui.paddleocr_vl_parallel_workers_spinbox.setValue(int(ocr_client.get("parallel_workers", 8)))
     ui.hunyuan_ocr_server_url_input.setText(
         str(hunyuan_ocr_client.get("server_url", "http://127.0.0.1:28080/v1"))
     )
@@ -298,7 +298,7 @@ def _configure_window(window, preset: dict[str, object], source_lang: str, targe
         bool(hunyuan_ocr_client.get("raw_response_logging", False))
     )
 
-    ui.gemma_chunk_size_spinbox.setValue(int(gemma.get("chunk_size", 4)))
+    ui.gemma_chunk_size_spinbox.setValue(int(gemma.get("chunk_size", 6)))
     ui.gemma_max_completion_tokens_spinbox.setValue(int(gemma.get("max_completion_tokens", 512)))
     ui.gemma_request_timeout_spinbox.setValue(int(gemma.get("request_timeout_sec", 180)))
     ui.gemma_raw_response_logging_checkbox.setChecked(bool(gemma.get("raw_response_logging", False)))
@@ -380,6 +380,35 @@ def _page_failed_reason(summary: dict[str, object]) -> str:
     return ""
 
 
+def _runtime_snapshot_from_summary(summary: dict[str, object]) -> dict[str, object]:
+    if not isinstance(summary, dict):
+        return {}
+    runtime: dict[str, object] = {}
+    for key in (
+        "detector_key",
+        "detector_engine",
+        "detector_device",
+        "ocr_key",
+        "ocr_engine",
+        "ocr_device",
+        "translator_key",
+        "translator_engine",
+        "mask_refiner",
+        "ctd_device",
+        "refiner_backend",
+        "refiner_device",
+        "inpainter_key",
+        "inpainter_backend",
+        "inpainter_device",
+        "inpaint_size",
+        "precision",
+    ):
+        value = summary.get(key)
+        if value not in (None, ""):
+            runtime[key] = value
+    return runtime
+
+
 def _write_page_snapshots(window, run_dir: Path, loaded_paths: list[str]) -> Path:
     snapshots: list[dict[str, object]] = []
     for image_path in loaded_paths:
@@ -387,6 +416,7 @@ def _write_page_snapshots(window, run_dir: Path, loaded_paths: list[str]) -> Pat
         blk_list = list(state.get("blk_list") or [])
         processing_summary = state.get("processing_summary", {})
         quality = summarize_ocr_quality(blk_list)
+        stage_status = processing_summary.get("stage_status", {}) if isinstance(processing_summary, dict) else {}
         snapshots.append(
             {
                 "image_path": str(image_path),
@@ -402,6 +432,8 @@ def _write_page_snapshots(window, run_dir: Path, loaded_paths: list[str]) -> Pat
                     "empty": int(quality.get("empty", 0) or 0),
                     "single_char_like": int(quality.get("single_char_like", 0) or 0),
                 },
+                "runtime": _runtime_snapshot_from_summary(processing_summary),
+                "stage_status": stage_status if isinstance(stage_status, dict) else {},
                 "blocks": [_serialize_page_snapshot_block(block) for block in blk_list],
             }
         )
