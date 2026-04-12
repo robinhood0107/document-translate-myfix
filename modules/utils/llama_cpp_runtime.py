@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import shutil
 import subprocess
+import time
 from pathlib import Path
 from typing import Any
 
@@ -34,6 +35,20 @@ def resolve_docker_executable() -> str:
     return "docker"
 
 
+def _format_command_failure(
+    resolved_cmd: list[str],
+    completed: subprocess.CompletedProcess[str],
+    *,
+    cwd: str | Path | None = None,
+) -> str:
+    return (
+        f"Command failed (exit={completed.returncode}): {' '.join(resolved_cmd)}\n"
+        f"cwd={cwd}\n"
+        f"stdout:\n{(completed.stdout or '').strip()}\n"
+        f"stderr:\n{(completed.stderr or '').strip()}"
+    )
+
+
 def run_docker_command(
     cmd: list[str],
     *,
@@ -53,13 +68,7 @@ def run_docker_command(
         text=True,
     )
     if check and completed.returncode != 0:
-        detail = (
-            f"Command failed (exit={completed.returncode}): {' '.join(resolved_cmd)}\n"
-            f"cwd={cwd}\n"
-            f"stdout:\n{(completed.stdout or '').strip()}\n"
-            f"stderr:\n{(completed.stderr or '').strip()}"
-        )
-        raise RuntimeError(detail)
+        raise RuntimeError(_format_command_failure(resolved_cmd, completed, cwd=cwd))
     return completed
 
 
@@ -92,17 +101,37 @@ def docker_compose_pull_latest(
     )
 
 
+def _is_retryable_compose_up_failure(completed: subprocess.CompletedProcess[str]) -> bool:
+    details = ((completed.stdout or "") + "\n" + (completed.stderr or "")).lower()
+    retry_markers = (
+        'removal of container',
+        'already in progress',
+        'container name',
+        'is already in use',
+        'network has active endpoints',
+    )
+    return any(marker in details for marker in retry_markers)
+
+
 def docker_compose_up_force_recreate(
     compose_file: str | Path,
     *,
     cwd: str | Path | None = None,
     env: dict[str, str] | None = None,
 ) -> subprocess.CompletedProcess[str]:
-    return run_docker_command(
-        [*resolve_docker_compose_command(), "-f", str(compose_file), "up", "-d", "--force-recreate"],
-        cwd=cwd,
-        env=env,
-    )
+    resolved_cmd = [*resolve_docker_compose_command(), "-f", str(compose_file), "up", "-d", "--force-recreate"]
+    last_completed: subprocess.CompletedProcess[str] | None = None
+    for attempt in range(5):
+        completed = run_docker_command(resolved_cmd, cwd=cwd, env=env, check=False)
+        if completed.returncode == 0:
+            return completed
+        last_completed = completed
+        if attempt < 4 and _is_retryable_compose_up_failure(completed):
+            time.sleep(2 + attempt)
+            continue
+        raise RuntimeError(_format_command_failure(resolved_cmd, completed, cwd=cwd))
+    assert last_completed is not None
+    raise RuntimeError(_format_command_failure(resolved_cmd, last_completed, cwd=cwd))
 
 
 def docker_compose_pull_and_up(

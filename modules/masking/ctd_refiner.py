@@ -7,7 +7,7 @@ import cv2
 import numpy as np
 
 from modules.masking.ctd_vendor.ctd import TextDetBase, TextDetBaseDNN
-from modules.utils.integration_paths import get_ctd_onnx_path, get_ctd_torch_path
+from modules.utils.download import ModelDownloader, ModelID
 from modules.utils.textblock import TextBlock
 
 
@@ -321,9 +321,9 @@ class CTDRefiner:
         self.model_path = None
 
     def _choose_model_path(self) -> str:
-        if self.settings.device.lower() != "cpu" and get_ctd_torch_path().exists():
-            return str(get_ctd_torch_path())
-        return str(get_ctd_onnx_path())
+        if self.settings.device.lower() != "cpu":
+            return ModelDownloader.primary_path(ModelID.CTD_TORCH)
+        return ModelDownloader.primary_path(ModelID.CTD_ONNX)
 
     def _ensure_model(self) -> None:
         model_path = self._choose_model_path()

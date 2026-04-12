@@ -400,6 +400,24 @@ class SettingsPage(QtWidgets.QWidget):
         field: str,
         save_keys: bool,
     ) -> str:
+        if service_name == "Custom Local Server(Gemma)" and field in ("api_url", "model"):
+            default_value = (
+                GemmaLocalServerPage.DEFAULT_ENDPOINT_URL
+                if field == "api_url"
+                else GemmaLocalServerPage.DEFAULT_MODEL
+            )
+            if not save_keys:
+                return default_value
+
+            value = settings.value(f"{service_name}_{field}", "", type=str)
+            if value:
+                return value
+
+            legacy_value = settings.value(f"Custom Local Server_{field}", "", type=str)
+            if legacy_value:
+                return legacy_value
+            return settings.value(f"Custom_{field}", default_value, type=str)
+
         if not save_keys:
             return ""
 
@@ -408,11 +426,6 @@ class SettingsPage(QtWidgets.QWidget):
             return value
 
         if service_name == "Custom Service" and field in ("api_key", "api_url", "model"):
-            return settings.value(f"Custom_{field}", "", type=str)
-        if service_name == "Custom Local Server(Gemma)" and field in ("api_url", "model"):
-            legacy_value = settings.value(f"Custom Local Server_{field}", "", type=str)
-            if legacy_value:
-                return legacy_value
             return settings.value(f"Custom_{field}", "", type=str)
         return ""
 
@@ -572,7 +585,7 @@ class SettingsPage(QtWidgets.QWidget):
         self.ui.theme_combo.setCurrentIndex(theme_index if theme_index != -1 else 0)
         self.theme_changed.emit(translated_theme)
 
-        translator = settings.value("tools/translator", "Gemini-2.5-Pro", type=str)
+        translator = settings.value("tools/translator", "Custom Local Server(Gemma)", type=str)
         if translator == "Custom":
             translator = self._resolve_legacy_custom_translator()
         elif translator == "Custom Local Server":
@@ -588,10 +601,10 @@ class SettingsPage(QtWidgets.QWidget):
             self.ui.translator_combo.setCurrentIndex(-1)
         self._sync_extra_context_limit(translated_translator)
 
-        ocr = settings.value("ocr", OCR_MODE_DEFAULT, type=str)
+        ocr = settings.value("ocr", OCR_MODE_PADDLE_VL, type=str)
         self._set_ocr_mode(ocr)
 
-        inpainter = normalize_inpainter_key(settings.value("inpainter", "AOT", type=str))
+        inpainter = normalize_inpainter_key(settings.value("inpainter", "lama_large_512px", type=str))
         translated_inpainter = self.ui.reverse_mappings.get(inpainter, inpainter)
         if self.ui.inpainter_combo.findText(translated_inpainter) != -1:
             self.ui.inpainter_combo.setCurrentIndex(self.ui.inpainter_combo.findText(translated_inpainter))
@@ -608,7 +621,7 @@ class SettingsPage(QtWidgets.QWidget):
         self.ui.tools_page._update_inpainter_runtime_widgets(self.ui.inpainter_combo.currentIndex())
 
         if is_gpu_available():
-            self.ui.use_gpu_checkbox.setChecked(settings.value("use_gpu", False, type=bool))
+            self.ui.use_gpu_checkbox.setChecked(settings.value("use_gpu", True, type=bool))
         else:
             self.ui.use_gpu_checkbox.setChecked(False)
 

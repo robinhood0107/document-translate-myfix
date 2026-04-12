@@ -91,6 +91,12 @@ class LocalOCRRuntimeManager:
             if self._active_engine and self._active_engine != engine_key:
                 self._stop_engine(self._active_engine)
 
+            if self._wait_for_health(config["health_url"], timeout_sec=3):
+                logger.info("%s runtime already reachable at %s; skipping compose restart.", engine_key, config["health_url"])
+                self._active_engine = engine_key
+                self._log_runtime_metadata(engine_key)
+                return
+
             self._run_compose(engine_key, "pull", "--policy", "always", step_name="pull")
             self._run_compose(engine_key, "up", "-d", "--force-recreate", step_name="up")
             if not self._wait_for_health(config["health_url"], timeout_sec=timeout_sec):

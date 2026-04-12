@@ -9,7 +9,7 @@ from ..dayu_widgets.spin_box import MSpinBox
 class PaddleOCRVLPage(QtWidgets.QWidget):
     DEFAULT_SERVER_URL = "http://127.0.0.1:28118/layout-parsing"
     DEFAULT_MAX_NEW_TOKENS = 1024
-    DEFAULT_PARALLEL_WORKERS = 4
+    DEFAULT_PARALLEL_WORKERS = 8
 
     def __init__(self, parent=None):
         super().__init__(parent)
