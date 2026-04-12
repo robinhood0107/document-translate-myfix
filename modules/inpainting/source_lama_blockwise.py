@@ -11,6 +11,7 @@ from modules.inpainting.lama_torch_network import load_lama_mpe
 from modules.source_parity_vendor.utils.imgproc_utils import enlarge_window, resize_keepasp
 from modules.source_parity_vendor.utils.textblock import TextBlock as SourceLaMaTextBlock
 from modules.source_parity_vendor.utils.textblock_mask import extract_ballon_mask
+from modules.utils.carrier import CARRIER_KIND_CAPTION_PLATE
 from modules.utils.download import ModelDownloader, ModelID
 from modules.utils.textblock import TextBlock
 
@@ -26,6 +27,101 @@ def _inpaint_handle_alpha_channel(original_alpha: np.ndarray, mask: np.ndarray) 
             if median_surrounding_alpha < 128:
                 result_alpha[mask > 127] = median_surrounding_alpha
     return result_alpha
+
+
+def _clip_roi_to_crop(
+    roi_xyxy,
+    crop_xyxy: list[int] | tuple[int, int, int, int],
+) -> tuple[int, int, int, int] | None:
+    if roi_xyxy is None or len(roi_xyxy) < 4:
+        return None
+    cx1, cy1, cx2, cy2 = [int(v) for v in crop_xyxy[:4]]
+    rx1, ry1, rx2, ry2 = [int(float(v)) for v in roi_xyxy[:4]]
+    ix1 = max(cx1, rx1)
+    iy1 = max(cy1, ry1)
+    ix2 = min(cx2, rx2)
+    iy2 = min(cy2, ry2)
+    if ix2 <= ix1 or iy2 <= iy1:
+        return None
+    return ix1 - cx1, iy1 - cy1, ix2 - cx1, iy2 - cy1
+
+
+def _try_caption_plate_local_inpaint(
+    image_crop: np.ndarray,
+    mask_crop: np.ndarray,
+    block,
+    crop_xyxy: list[int] | tuple[int, int, int, int],
+) -> np.ndarray | None:
+    if (getattr(block, "carrier_kind", "") or "") != CARRIER_KIND_CAPTION_PLATE:
+        return None
+    carrier_roi = getattr(block, "carrier_mask_roi_xyxy", None)
+    local_roi = _clip_roi_to_crop(carrier_roi, crop_xyxy)
+    if local_roi is None:
+        return None
+
+    lx1, ly1, lx2, ly2 = local_roi
+    plate_crop = image_crop[ly1:ly2, lx1:lx2]
+    plate_mask = np.where(mask_crop[ly1:ly2, lx1:lx2] > 0, 255, 0).astype(np.uint8)
+    if plate_crop.size == 0 or plate_mask.size == 0 or not np.any(plate_mask):
+        return None
+
+    sample_ring = cv2.dilate((plate_mask > 0).astype(np.uint8), np.ones((5, 5), np.uint8), iterations=1)
+    sample_mask = np.where((sample_ring > 0) & (plate_mask == 0), 255, 0).astype(np.uint8)
+    sample_pixels = plate_crop[sample_mask > 0]
+    if sample_pixels.size <= 0:
+        return None
+
+    sample_median = np.median(sample_pixels.astype(np.float32), axis=0)
+    sample_std = np.max(np.std(sample_pixels.astype(np.float32) - sample_median, axis=0))
+    radius = 3 if sample_std < 20.0 else 5
+    inpainted_plate = cv2.inpaint(plate_crop, plate_mask, float(radius), cv2.INPAINT_TELEA)
+    if inpainted_plate is None or inpainted_plate.shape != plate_crop.shape:
+        return None
+
+    result = image_crop.copy()
+    result[ly1:ly2, lx1:lx2] = inpainted_plate
+    return result
+
+
+def _resolve_caption_plate_erase_mask(
+    image_crop: np.ndarray,
+    mask_crop: np.ndarray,
+    block,
+) -> np.ndarray | None:
+    if (getattr(block, "carrier_kind", "") or "") != CARRIER_KIND_CAPTION_PLATE:
+        return None
+
+    text_mask = np.where(mask_crop > 0, 255, 0).astype(np.uint8)
+    text_area = int(np.count_nonzero(text_mask))
+    if text_area <= 0:
+        return None
+
+    ballon_mask, _non_text_mask = extract_ballon_mask(image_crop, text_mask)
+    if ballon_mask is None:
+        return None
+
+    ballon_mask = np.where(ballon_mask > 0, 255, 0).astype(np.uint8)
+    ballon_area = int(np.count_nonzero(ballon_mask))
+    crop_area = int(image_crop.shape[0] * image_crop.shape[1])
+    if (
+        ballon_area <= int(round(text_area * 1.15))
+        or ballon_area >= int(round(crop_area * 0.92))
+    ):
+        return None
+
+    expand = max(4, min(12, int(round(np.sqrt(float(max(1, ballon_area))) * 0.015))))
+    ballon_mask = cv2.morphologyEx(
+        ballon_mask,
+        cv2.MORPH_CLOSE,
+        cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5)),
+        iterations=1,
+    )
+    ballon_mask = cv2.dilate(
+        ballon_mask,
+        cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (expand * 2 + 1, expand * 2 + 1)),
+        iterations=1,
+    )
+    return np.where(ballon_mask > 0, 255, 0).astype(np.uint8)
 
 
 @dataclass(frozen=True)
@@ -202,9 +298,27 @@ class SourceLaMaLarge:
         work_mask = mask.copy()
         for blk in textblock_list:
             xyxy = [int(v) for v in getattr(blk, "xyxy", [0, 0, 0, 0])]
-            xyxy_e = enlarge_window(xyxy, im_w, im_h, ratio=1.7)
+            crop_anchor = xyxy
+            if (getattr(blk, "carrier_kind", "") or "") == CARRIER_KIND_CAPTION_PLATE:
+                crop_anchor = [
+                    int(v) for v in getattr(blk, "bubble_xyxy", getattr(blk, "xyxy", xyxy))[:4]
+                ]
+            xyxy_e = enlarge_window(crop_anchor, im_w, im_h, ratio=1.7)
             image_crop = inpainted[xyxy_e[1]:xyxy_e[3], xyxy_e[0]:xyxy_e[2]]
             mask_crop = work_mask[xyxy_e[1]:xyxy_e[3], xyxy_e[0]:xyxy_e[2]]
+            caption_plate_erase_mask = _resolve_caption_plate_erase_mask(image_crop, mask_crop, blk)
+            if caption_plate_erase_mask is not None:
+                inpainted[xyxy_e[1]:xyxy_e[3], xyxy_e[0]:xyxy_e[2]] = self.memory_safe_inpaint(
+                    image_crop,
+                    caption_plate_erase_mask,
+                )
+                work_mask[xyxy[1]:xyxy[3], xyxy[0]:xyxy[2]] = 0
+                continue
+            caption_plate_crop = _try_caption_plate_local_inpaint(image_crop, mask_crop, blk, xyxy_e)
+            if caption_plate_crop is not None:
+                inpainted[xyxy_e[1]:xyxy_e[3], xyxy_e[0]:xyxy_e[2]] = caption_plate_crop
+                work_mask[xyxy[1]:xyxy[3], xyxy[0]:xyxy[2]] = 0
+                continue
             need_inpaint = True
             if self.check_need_inpaint or check_need_inpaint:
                 ballon_msk, non_text_msk = extract_ballon_mask(image_crop, mask_crop)
@@ -256,6 +370,19 @@ def _adapt_generic_block_to_source_block(block: TextBlock) -> SourceLaMaTextBloc
     if direction == "vertical":
         source_block.vertical = True
         source_block.src_is_vertical = True
+    source_block.carrier_kind = str(getattr(block, "carrier_kind", "") or "")
+    bubble_xyxy = getattr(block, "bubble_xyxy", None)
+    source_block.bubble_xyxy = (
+        [int(v) for v in bubble_xyxy[:4]]
+        if bubble_xyxy is not None
+        else None
+    )
+    carrier_mask_roi_xyxy = getattr(block, "carrier_mask_roi_xyxy", None)
+    source_block.carrier_mask_roi_xyxy = (
+        [int(v) for v in carrier_mask_roi_xyxy[:4]]
+        if carrier_mask_roi_xyxy is not None
+        else None
+    )
     return source_block
 
 

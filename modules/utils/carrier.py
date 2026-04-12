@@ -193,19 +193,26 @@ def classify_text_block_carrier(
     if any(not np.isfinite(value) for value in metrics.values()):
         return CARRIER_KIND_SPEECH_BUBBLE, _empty_metrics(), None
 
-    is_caption_plate = (
+    is_colored_caption_plate = (
         metrics["dark_border_ratio"] <= 0.18
-        and metrics["white_ratio"] <= 0.55
+        and metrics["white_ratio"] <= 0.38
         and (
-            metrics["chroma_ratio"] >= 0.10
-            or metrics["mean_chroma"] >= 14.0
+            metrics["mean_chroma"] >= 10.0
+            or metrics["chroma_ratio"] >= 0.18
             or (
-                metrics["white_ratio"] <= 0.35
-                and 80.0 <= metrics["mean_lightness"] <= 190.0
+                metrics["white_ratio"] <= 0.30
+                and 80.0 <= metrics["mean_lightness"] <= 195.0
                 and metrics["lightness_std"] >= 8.0
             )
         )
     )
+    is_dark_caption_plate = (
+        metrics["white_ratio"] <= 0.28
+        and metrics["mean_chroma"] >= 10.0
+        and metrics["lightness_std"] >= 20.0
+        and metrics["dark_border_ratio"] <= 0.32
+    )
+    is_caption_plate = is_colored_caption_plate or is_dark_caption_plate
     if not is_caption_plate:
         return CARRIER_KIND_SPEECH_BUBBLE, metrics, None
 

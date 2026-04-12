@@ -5,7 +5,11 @@ from unittest import mock
 
 import numpy as np
 
-from modules.masking.legacy_bbox_mask import build_legacy_bbox_mask_details, merge_legacy_and_rescue
+from modules.masking.legacy_bbox_mask import (
+    _build_legacy_base_block_mask,
+    build_legacy_bbox_mask_details,
+    merge_legacy_and_rescue,
+)
 from modules.masking.legacy_bbox_rescue import build_block_rescue_mask
 from modules.utils.textblock import TextBlock
 
@@ -164,6 +168,36 @@ class LegacyBBoxMaskTests(unittest.TestCase):
         self.assertEqual(int(np.count_nonzero(final_mask[:, :8])), 0)
         self.assertEqual(int(np.count_nonzero(final_mask[22:, :])), 0)
         self.assertEqual(int(np.count_nonzero(final_mask[:, 22:])), 0)
+
+    @mock.patch("modules.masking.legacy_bbox_mask.get_inpaint_bboxes")
+    def test_caption_plate_base_mask_uses_conservative_union_instead_of_blob(self, mock_get_inpaint_bboxes) -> None:
+        image = np.zeros((80, 80, 3), dtype=np.uint8)
+        block = _block(
+            xyxy=[20, 20, 60, 60],
+            text_class="text_bubble",
+            bubble_xyxy=[10, 10, 70, 70],
+            carrier_kind="caption_plate",
+            carrier_mask_roi_xyxy=[16, 16, 64, 64],
+        )
+        mock_get_inpaint_bboxes.return_value = [
+            [22, 24, 34, 32],
+            [37, 24, 50, 32],
+            [24, 38, 32, 46],
+            [36, 38, 48, 46],
+        ]
+
+        block_mask, _ = _build_legacy_base_block_mask(
+            image,
+            block,
+            roi_override=(16, 16, 64, 64),
+        )
+
+        roi_area = (64 - 16) * (64 - 16)
+        fill_ratio = float(np.count_nonzero(block_mask[16:64, 16:64])) / float(roi_area)
+        self.assertLess(fill_ratio, 0.25)
+        self.assertGreater(int(np.count_nonzero(block_mask[24:32, 22:50])), 0)
+        self.assertEqual(int(np.count_nonzero(block_mask[16:22, 16:64])), 0)
+        self.assertEqual(int(np.count_nonzero(block_mask[48:64, 16:64])), 0)
 
 
 if __name__ == "__main__":

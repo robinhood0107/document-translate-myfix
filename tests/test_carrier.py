@@ -44,6 +44,19 @@ def _caption_plate_image(*, color: tuple[int, int, int], with_gradient: bool = T
     return image
 
 
+def _dark_thought_bubble_image() -> np.ndarray:
+    image = np.full((96, 96, 3), 210, dtype=np.uint8)
+    image[12:84, 12:84] = np.array([95, 72, 68], dtype=np.uint8)
+    image[12:16, 12:84] = 242
+    image[80:84, 12:84] = 242
+    image[12:84, 12:16] = 242
+    image[12:84, 80:84] = 242
+    gradient = np.linspace(-14, 14, 72, dtype=np.int16)[:, None, None]
+    bubble = image[12:84, 12:84].astype(np.int16)
+    image[12:84, 12:84] = np.clip(bubble + gradient, 0, 255).astype(np.uint8)
+    return image
+
+
 class CarrierClassificationTests(unittest.TestCase):
     def test_white_bubble_stays_speech_bubble(self) -> None:
         image = _white_bubble_image()
@@ -76,6 +89,17 @@ class CarrierClassificationTests(unittest.TestCase):
         self.assertEqual(carrier_kind, CARRIER_KIND_SPEECH_BUBBLE)
         self.assertLess(metrics["analysis_area"], 400.0)
         self.assertIsNone(carrier_roi)
+
+    def test_dark_thought_bubble_is_detected(self) -> None:
+        image = _dark_thought_bubble_image()
+        block = _block(xyxy=[32, 28, 64, 70], bubble_xyxy=[12, 12, 84, 84])
+
+        carrier_kind, metrics, carrier_roi = classify_text_block_carrier(image, block)
+
+        self.assertEqual(carrier_kind, CARRIER_KIND_CAPTION_PLATE)
+        self.assertIsNotNone(carrier_roi)
+        self.assertLessEqual(metrics["white_ratio"], 0.28)
+        self.assertGreaterEqual(metrics["mean_chroma"], 9.0)
 
     def test_caption_plate_roi_is_used_by_mask_roi_helpers(self) -> None:
         image = _caption_plate_image(color=(150, 105, 88))

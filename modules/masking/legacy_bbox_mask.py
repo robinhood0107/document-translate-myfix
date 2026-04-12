@@ -43,6 +43,105 @@ def _mask_for_xyxy(image_shape: tuple[int, ...], xyxy: tuple[int, int, int, int]
     return mask
 
 
+def _clip_box_to_roi(
+    box: tuple[int, int, int, int] | list[int] | np.ndarray | None,
+    roi: tuple[int, int, int, int] | None,
+    image_shape: tuple[int, ...],
+) -> tuple[int, int, int, int] | None:
+    norm = _normalize_xyxy(box, image_shape)
+    if norm is None:
+        return None
+    if roi is None:
+        return norm
+    x1, y1, x2, y2 = norm
+    rx1, ry1, rx2, ry2 = roi
+    ix1 = max(x1, rx1)
+    iy1 = max(y1, ry1)
+    ix2 = min(x2, rx2)
+    iy2 = min(y2, ry2)
+    if ix2 <= ix1 or iy2 <= iy1:
+        return None
+    return ix1, iy1, ix2, iy2
+
+
+def _build_caption_plate_base_block_mask(
+    img: np.ndarray,
+    blk: TextBlock,
+    *,
+    roi: tuple[int, int, int, int] | None,
+) -> tuple[np.ndarray, np.ndarray | None]:
+    h, w, _ = img.shape
+    if getattr(blk, "xyxy", None) is None:
+        return np.zeros((h, w), dtype=np.uint8), None
+
+    bboxes = get_inpaint_bboxes(
+        blk.xyxy,
+        img,
+        bubble_bbox=roi,
+    )
+    blk.inpaint_bboxes = bboxes
+    if bboxes is None or len(bboxes) == 0:
+        return np.zeros((h, w), dtype=np.uint8), bboxes
+
+    raw_mask = np.zeros((h, w), dtype=np.uint8)
+    spans: list[int] = []
+    valid_boxes = 0
+    for box in bboxes:
+        clipped = _clip_box_to_roi(box, roi, img.shape)
+        if clipped is None:
+            continue
+        x1, y1, x2, y2 = clipped
+        bw = max(1, x2 - x1)
+        bh = max(1, y2 - y1)
+        spans.extend((bw, bh))
+        pad = 1 if max(bw, bh) <= 16 else 2
+        px1 = max(0, x1 - pad)
+        py1 = max(0, y1 - pad)
+        px2 = min(w, x2 + pad)
+        py2 = min(h, y2 + pad)
+        if roi is not None:
+            rx1, ry1, rx2, ry2 = roi
+            px1 = max(px1, rx1)
+            py1 = max(py1, ry1)
+            px2 = min(px2, rx2)
+            py2 = min(py2, ry2)
+        if px2 <= px1 or py2 <= py1:
+            continue
+        raw_mask[py1:py2, px1:px2] = 255
+        valid_boxes += 1
+
+    if valid_boxes <= 0 or not np.any(raw_mask):
+        return np.zeros((h, w), dtype=np.uint8), bboxes
+
+    median_span = float(np.median(spans)) if spans else 6.0
+    kernel_side = 3 if median_span < 18.0 else 5
+    soft_mask = cv2.morphologyEx(
+        raw_mask,
+        cv2.MORPH_CLOSE,
+        cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (kernel_side, kernel_side)),
+        iterations=1,
+    )
+    soft_mask = cv2.dilate(
+        soft_mask,
+        cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3)),
+        iterations=1,
+    )
+
+    if roi is not None:
+        roi_mask = _mask_for_xyxy(img.shape, roi)
+        raw_mask = cv2.bitwise_and(raw_mask, roi_mask)
+        soft_mask = cv2.bitwise_and(soft_mask, roi_mask)
+        roi_area = max(1, (roi[2] - roi[0]) * (roi[3] - roi[1]))
+    else:
+        roi_area = max(1, h * w)
+
+    raw_fill_ratio = float(np.count_nonzero(raw_mask)) / float(roi_area)
+    soft_fill_ratio = float(np.count_nonzero(soft_mask)) / float(roi_area)
+    if soft_fill_ratio > 0.22 or (soft_fill_ratio > raw_fill_ratio * 1.65 and soft_fill_ratio > 0.14):
+        return np.where(raw_mask > 0, 255, 0).astype(np.uint8), bboxes
+    return np.where(soft_mask > 0, 255, 0).astype(np.uint8), bboxes
+
+
 def _build_legacy_base_block_mask(
     img: np.ndarray,
     blk: TextBlock,
@@ -57,6 +156,12 @@ def _build_legacy_base_block_mask(
     roi = roi_override
     if roi is None and getattr(blk, "text_class", None) == "text_bubble":
         roi = resolve_effective_text_bubble_roi(blk, img.shape)
+    if (getattr(blk, "carrier_kind", "") or "") == CARRIER_KIND_CAPTION_PLATE:
+        return _build_caption_plate_base_block_mask(
+            img,
+            blk,
+            roi=roi,
+        )
     bboxes = get_inpaint_bboxes(
         blk.xyxy,
         img,
