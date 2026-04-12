@@ -60,30 +60,19 @@ class SettingsToolsRuntimeTests(unittest.TestCase):
         page.load_settings()
 
         self.assertEqual(page.get_mask_inpaint_mode(), "rtdetr_legacy_bbox_source_lama")
-        self.assertEqual(page.ui.mask_inpaint_mode_combo.currentText(), "RT-DETR-v2 + Legacy BBox + Source LaMa")
-        self.assertEqual(page.ui.mask_refiner_combo.currentText(), "legacy_bbox")
-        self.assertFalse(page.ui.mask_refiner_combo.isEnabled())
+        self.assertEqual(
+            page.ui.tools_page.automatic_runtime_value_label.text(),
+            "RT-DETR-v2 + Legacy BBox Rescue + Source LaMa",
+        )
         self.assertEqual(page.get_tool_selection("inpainter"), "lama_large_512px")
         self.assertFalse(page.ui.inpainter_combo.isEnabled())
         self.assertEqual(page.get_tool_selection("detector"), "RT-DETR-v2")
         self.assertFalse(page.ui.detector_combo.isEnabled())
-        self.assertFalse(page.ui.keep_existing_lines_checkbox.isChecked())
-        self.assertTrue(page.ui.keep_existing_lines_checkbox.isHidden())
-        self.assertTrue(page.ui.ctd_settings_widget.isHidden())
-
-    def test_source_parity_mode_forces_ctd_and_disables_detector(self) -> None:
-        page = self._make_page()
-        idx = page.ui.mask_inpaint_mode_combo.findText("Source Parity CTD/LaMa")
-        page.ui.mask_inpaint_mode_combo.setCurrentIndex(idx)
-        page.ui.tools_page._update_mask_inpaint_mode_widgets(idx)
-
-        self.assertEqual(page.get_mask_inpaint_mode(), "source_parity_ctd_lama")
-        self.assertEqual(page.ui.mask_refiner_combo.currentText(), "ctd")
-        self.assertFalse(page.ui.mask_refiner_combo.isEnabled())
-        self.assertFalse(page.ui.detector_combo.isEnabled())
-        self.assertFalse(page.ui.ctd_settings_widget.isHidden())
-        self.assertFalse(page.ui.keep_existing_lines_checkbox.isChecked())
-        self.assertTrue(page.ui.keep_existing_lines_checkbox.isHidden())
+        self.assertFalse(hasattr(page.ui, "mask_inpaint_mode_combo"))
+        self.assertFalse(hasattr(page.ui, "mask_refiner_combo"))
+        self.assertFalse(hasattr(page.ui, "ctd_settings_widget"))
+        self.assertEqual(page.get_mask_refiner_settings()["mask_refiner"], "legacy_bbox")
+        self.assertFalse(page.get_mask_refiner_settings()["keep_existing_lines"])
 
     def test_old_hybrid_mode_value_migrates_to_new_legacy_bbox_mode(self) -> None:
         settings = QtCore.QSettings("ComicLabs", "ComicTranslate")
@@ -97,10 +86,18 @@ class SettingsToolsRuntimeTests(unittest.TestCase):
         page.load_settings()
 
         self.assertEqual(page.get_mask_inpaint_mode(), "rtdetr_legacy_bbox_source_lama")
-        self.assertEqual(page.ui.mask_inpaint_mode_combo.currentText(), "RT-DETR-v2 + Legacy BBox + Source LaMa")
-        self.assertEqual(page.ui.mask_refiner_combo.currentText(), "legacy_bbox")
+        self.assertEqual(
+            page.ui.tools_page.automatic_runtime_value_label.text(),
+            "RT-DETR-v2 + Legacy BBox Rescue + Source LaMa",
+        )
         self.assertEqual(page.get_tool_selection("inpainter"), "lama_large_512px")
-        self.assertFalse(page.ui.keep_existing_lines_checkbox.isChecked())
+        self.assertEqual(page.get_mask_refiner_settings()["mask_refiner"], "legacy_bbox")
+        self.assertFalse(page.get_mask_refiner_settings()["keep_existing_lines"])
+        page.save_settings()
+        self.assertEqual(
+            settings.value("tools/mask_refiner_settings/mask_inpaint_mode", "", type=str),
+            "rtdetr_legacy_bbox_source_lama",
+        )
 
 
 if __name__ == "__main__":

@@ -12,7 +12,6 @@ from modules.inpainting.lama_variants import LaMaLarge512px, LaMaMPE
 from modules.inpainting.mi_gan import MIGAN
 from modules.inpainting.schema import Config
 from modules.utils.exceptions import LocalServiceConnectionError, LocalServiceSetupError
-from modules.utils.mask_inpaint_mode import uses_source_compat_mode
 from modules.utils.inpainting_runtime import (
     inpainter_backend_for,
     inpainter_default_settings,
@@ -83,8 +82,6 @@ def get_config(settings_page: SettingsPage):
 
 def get_inpainter_runtime(settings_page: SettingsPage, inpainter_key: str | None = None) -> dict:
     requested = inpainter_key or settings_page.get_tool_selection("inpainter")
-    if uses_source_compat_mode(settings_page.get_mask_inpaint_mode()):
-        requested = "lama_large_512px"
     normalized = normalize_inpainter_key(requested)
     defaults = inpainter_default_settings(normalized)
     runtime_settings = settings_page.get_inpainter_runtime_settings(normalized)
@@ -92,6 +89,8 @@ def get_inpainter_runtime(settings_page: SettingsPage, inpainter_key: str | None
     merged.update(runtime_settings)
     merged["key"] = normalized
     merged["backend"] = str(merged.get("backend") or inpainter_backend_for(normalized))
+    if not settings_page.is_gpu_enabled():
+        merged["device"] = "cpu"
     return merged
 
 
