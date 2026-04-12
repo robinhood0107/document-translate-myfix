@@ -52,6 +52,47 @@ def _try_caption_plate_local_inpaint(
     block,
     crop_xyxy: list[int] | tuple[int, int, int, int],
 ) -> np.ndarray | None:
+    paint_mask = _build_caption_plate_local_mask(image_crop, mask_crop, block, crop_xyxy)
+    if paint_mask is None:
+        return None
+
+    nonzero = cv2.findNonZero(paint_mask)
+    if nonzero is None:
+        return None
+    x, y, w, h = cv2.boundingRect(nonzero)
+    plate_crop = image_crop[y:y + h, x:x + w]
+    local_mask = paint_mask[y:y + h, x:x + w]
+    if plate_crop.size == 0 or local_mask.size == 0 or not np.any(local_mask):
+        return None
+
+    sample_ring = cv2.dilate((local_mask > 0).astype(np.uint8), np.ones((5, 5), np.uint8), iterations=1)
+    sample_mask = np.where((sample_ring > 0) & (local_mask == 0), 255, 0).astype(np.uint8)
+    sample_pixels = plate_crop[sample_mask > 0]
+    if sample_pixels.size <= 0:
+        return None
+
+    sample_median = np.median(sample_pixels.astype(np.float32), axis=0)
+    sample_std = np.max(np.std(sample_pixels.astype(np.float32) - sample_median, axis=0))
+    if sample_std < 14.0:
+        inpainted_plate = plate_crop.copy()
+        inpainted_plate[local_mask > 0] = np.clip(np.round(sample_median), 0, 255).astype(np.uint8)
+    else:
+        radius = 3 if sample_std < 20.0 else 5
+        inpainted_plate = cv2.inpaint(plate_crop, local_mask, float(radius), cv2.INPAINT_TELEA)
+    if inpainted_plate is None or inpainted_plate.shape != plate_crop.shape:
+        return None
+
+    result = image_crop.copy()
+    result[y:y + h, x:x + w] = inpainted_plate
+    return result
+
+
+def _build_caption_plate_local_mask(
+    image_crop: np.ndarray,
+    mask_crop: np.ndarray,
+    block,
+    crop_xyxy: list[int] | tuple[int, int, int, int],
+) -> np.ndarray | None:
     if (getattr(block, "carrier_kind", "") or "") != CARRIER_KIND_CAPTION_PLATE:
         return None
     carrier_roi = getattr(block, "carrier_mask_roi_xyxy", None)
@@ -60,27 +101,26 @@ def _try_caption_plate_local_inpaint(
         return None
 
     lx1, ly1, lx2, ly2 = local_roi
-    plate_crop = image_crop[ly1:ly2, lx1:lx2]
     plate_mask = np.where(mask_crop[ly1:ly2, lx1:lx2] > 0, 255, 0).astype(np.uint8)
-    if plate_crop.size == 0 or plate_mask.size == 0 or not np.any(plate_mask):
+    if plate_mask.size == 0 or not np.any(plate_mask):
         return None
 
-    sample_ring = cv2.dilate((plate_mask > 0).astype(np.uint8), np.ones((5, 5), np.uint8), iterations=1)
-    sample_mask = np.where((sample_ring > 0) & (plate_mask == 0), 255, 0).astype(np.uint8)
-    sample_pixels = plate_crop[sample_mask > 0]
-    if sample_pixels.size <= 0:
-        return None
-
-    sample_median = np.median(sample_pixels.astype(np.float32), axis=0)
-    sample_std = np.max(np.std(sample_pixels.astype(np.float32) - sample_median, axis=0))
-    radius = 3 if sample_std < 20.0 else 5
-    inpainted_plate = cv2.inpaint(plate_crop, plate_mask, float(radius), cv2.INPAINT_TELEA)
-    if inpainted_plate is None or inpainted_plate.shape != plate_crop.shape:
-        return None
-
-    result = image_crop.copy()
-    result[ly1:ly2, lx1:lx2] = inpainted_plate
-    return result
+    text_area = int(np.count_nonzero(plate_mask))
+    expand = max(3, min(10, int(round(np.sqrt(float(max(1, text_area))) * 0.08))))
+    paint_mask = cv2.morphologyEx(
+        plate_mask,
+        cv2.MORPH_CLOSE,
+        cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5)),
+        iterations=1,
+    )
+    paint_mask = cv2.dilate(
+        paint_mask,
+        cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (expand * 2 + 1, expand * 2 + 1)),
+        iterations=1,
+    )
+    result_mask = np.zeros(mask_crop.shape[:2], dtype=np.uint8)
+    result_mask[ly1:ly2, lx1:lx2] = paint_mask
+    return result_mask
 
 
 def _resolve_caption_plate_erase_mask(
@@ -306,17 +346,25 @@ class SourceLaMaLarge:
             xyxy_e = enlarge_window(crop_anchor, im_w, im_h, ratio=1.7)
             image_crop = inpainted[xyxy_e[1]:xyxy_e[3], xyxy_e[0]:xyxy_e[2]]
             mask_crop = work_mask[xyxy_e[1]:xyxy_e[3], xyxy_e[0]:xyxy_e[2]]
-            caption_plate_erase_mask = _resolve_caption_plate_erase_mask(image_crop, mask_crop, blk)
-            if caption_plate_erase_mask is not None:
+            caption_plate_mask = _build_caption_plate_local_mask(image_crop, mask_crop, blk, xyxy_e)
+            if caption_plate_mask is not None:
                 inpainted[xyxy_e[1]:xyxy_e[3], xyxy_e[0]:xyxy_e[2]] = self.memory_safe_inpaint(
                     image_crop,
-                    caption_plate_erase_mask,
+                    caption_plate_mask,
                 )
                 work_mask[xyxy[1]:xyxy[3], xyxy[0]:xyxy[2]] = 0
                 continue
             caption_plate_crop = _try_caption_plate_local_inpaint(image_crop, mask_crop, blk, xyxy_e)
             if caption_plate_crop is not None:
                 inpainted[xyxy_e[1]:xyxy_e[3], xyxy_e[0]:xyxy_e[2]] = caption_plate_crop
+                work_mask[xyxy[1]:xyxy[3], xyxy[0]:xyxy[2]] = 0
+                continue
+            caption_plate_erase_mask = _resolve_caption_plate_erase_mask(image_crop, mask_crop, blk)
+            if caption_plate_erase_mask is not None:
+                inpainted[xyxy_e[1]:xyxy_e[3], xyxy_e[0]:xyxy_e[2]] = self.memory_safe_inpaint(
+                    image_crop,
+                    caption_plate_erase_mask,
+                )
                 work_mask[xyxy[1]:xyxy[3], xyxy[0]:xyxy[2]] = 0
                 continue
             need_inpaint = True

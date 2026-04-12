@@ -6,12 +6,34 @@ from types import SimpleNamespace
 import numpy as np
 
 from modules.inpainting.source_lama_blockwise import (
+    _build_caption_plate_local_mask,
     _resolve_caption_plate_erase_mask,
     _try_caption_plate_local_inpaint,
 )
 
 
 class CaptionPlateLocalInpaintTests(unittest.TestCase):
+    def test_caption_plate_local_mask_expands_text_but_stays_local(self) -> None:
+        image = np.zeros((80, 80, 3), dtype=np.uint8)
+        image[:, :] = np.array([150, 105, 88], dtype=np.uint8)
+
+        mask = np.zeros((80, 80), dtype=np.uint8)
+        mask[20:24, 18:58] = 255
+        mask[32:36, 18:58] = 255
+
+        block = SimpleNamespace(
+            carrier_kind="caption_plate",
+            carrier_mask_roi_xyxy=[10, 10, 70, 70],
+        )
+
+        result = _build_caption_plate_local_mask(image, mask, block, [0, 0, 80, 80])
+
+        self.assertIsNotNone(result)
+        result = np.asarray(result)
+        self.assertGreater(int(np.count_nonzero(result)), int(np.count_nonzero(mask)))
+        self.assertEqual(int(np.count_nonzero(result[:8, :])), 0)
+        self.assertEqual(int(np.count_nonzero(result[:, :8])), 0)
+
     def test_caption_plate_erase_mask_expands_beyond_text_mask(self) -> None:
         image = np.full((120, 120, 3), 210, dtype=np.uint8)
         image[15:105, 15:105] = np.array([125, 90, 72], dtype=np.uint8)
