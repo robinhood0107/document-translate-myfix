@@ -366,7 +366,7 @@ Use Custom Local Server(Gemma) with the included Gemma Docker setup.</source>
         <source>Comic Translate can use your local Gemma Docker server for translation.
 1. Run `docker compose pull --policy always` and then `docker compose up -d --force-recreate` in the repository root.
 2. In Settings &gt; Credentials, use Endpoint URL `http://127.0.0.1:18080/v1`.
-3. Set Model to the exact GGUF filename you placed in `testmodel/` (for example `gemma-4-26b-a4b-it-heretic.q3_k_m.gguf`).
+3. Set Model to the exact GGUF filename in `testmodel/` (recommended: `gemma-4-26B-IQ4_NL.gguf`).
 If responses are truncated, lower Chunk Size or increase LLAMA_CTX_SIZE in docker-compose.yaml.</source>
         <translation type="unfinished"></translation>
     </message>
@@ -391,7 +391,7 @@ If responses are truncated, lower Chunk Size or increase LLAMA_CTX_SIZE in docke
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>Recommended starting values for the included Gemma Docker setup:
+        <source>Recommended defaults for the included Gemma Docker setup:
 - Chunk Size: 6
 - Max Completion Tokens: 512
 - Request Timeout: 180 seconds</source>
@@ -1670,8 +1670,16 @@ Open or create a project to get started.</source>
         <translation>Übersetzer</translation>
     </message>
     <message>
+        <source>Custom Local Server(Gemma)</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
         <source>Text Recognition</source>
         <translation>Texterkennung</translation>
+    </message>
+    <message>
+        <source>PaddleOCR VL</source>
+        <translation type="unfinished"></translation>
     </message>
     <message>
         <source>Text Detector</source>
@@ -1732,10 +1740,6 @@ Open or create a project to get started.</source>
     <message>
         <source>Inpainter</source>
         <translation>Inpainting-Modell</translation>
-    </message>
-    <message>
-        <source>AOT</source>
-        <translation>AOT</translation>
     </message>
     <message>
         <source>inpaint_size</source>
