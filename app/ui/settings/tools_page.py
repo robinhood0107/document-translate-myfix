@@ -28,9 +28,11 @@ class ToolsPage(QtWidgets.QWidget):
 
         translator_widget, self.translator_combo = create_title_and_combo(self.tr("Translator"), self.translators, h4=True)
         set_combo_box_width(self.translator_combo, self.translators)
+        self.translator_combo.setCurrentText(self.tr("Custom Local Server(Gemma)"))
 
         ocr_widget, self.ocr_combo = create_title_and_combo(self.tr("Text Recognition"), self.ocr_engines, h4=True)
         set_combo_box_width(self.ocr_combo, self.ocr_engines)
+        self.ocr_combo.setCurrentText(self.tr("PaddleOCR VL"))
 
         detector_widget, self.detector_combo = create_title_and_combo(self.tr("Text Detector"), self.detectors, h4=True)
         set_combo_box_width(self.detector_combo, self.detectors)
@@ -92,7 +94,7 @@ class ToolsPage(QtWidgets.QWidget):
         inpainting_label = MLabel(self.tr("Image Cleaning")).h4()
         inpainter_widget, self.inpainter_combo = create_title_and_combo(self.tr("Inpainter"), self.inpainters, h4=False)
         set_combo_box_width(self.inpainter_combo, self.inpainters)
-        self.inpainter_combo.setCurrentText(self.tr("AOT"))
+        self.inpainter_combo.setCurrentText(self.tr("lama_large_512px"))
 
         self.inpainter_runtime_widget = QtWidgets.QWidget()
         inpainter_form = QtWidgets.QFormLayout(self.inpainter_runtime_widget)
@@ -175,6 +177,7 @@ class ToolsPage(QtWidgets.QWidget):
         )
 
         self.use_gpu_checkbox = MCheckBox(self.tr("Use GPU"))
+        self.use_gpu_checkbox.setChecked(True)
         if not is_gpu_available():
             self.use_gpu_checkbox.setVisible(False)
 

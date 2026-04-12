@@ -1,0 +1,11 @@
+{
+  "winner": {},
+  "runner_up": {},
+  "stages": {
+    "smoke": {
+      "winner_candidate": "",
+      "winner_reason": ""
+    }
+  },
+  "official_score_scope": "full-pipeline batch on Sample/japan (22 pages)"
+}
