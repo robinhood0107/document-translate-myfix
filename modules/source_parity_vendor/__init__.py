@@ -1,7 +1,1 @@
-from .runtime import ExactSourceParityResult, ExactSourceParityRuntime, source_parity_blockwise_inpaint
-
-__all__ = [
-    "ExactSourceParityResult",
-    "ExactSourceParityRuntime",
-    "source_parity_blockwise_inpaint",
-]
+"""Vendor utility subset retained for shared Source LaMa helpers."""

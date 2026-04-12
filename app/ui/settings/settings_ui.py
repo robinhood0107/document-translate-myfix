@@ -151,10 +151,8 @@ class SettingsPageUI(QtWidgets.QWidget):
             # Detector mappings
             "RT-DETR-v2": "RT-DETR-v2",
 
-            # Mask/Inpaint mode mappings
-            self.tr("RT-DETR-v2 + Legacy BBox + Source LaMa"): "rtdetr_legacy_bbox_source_lama",
-            self.tr("RT-DETR + Source CTD/LaMa"): "rtdetr_legacy_bbox_source_lama",
-            self.tr("Source Parity CTD/LaMa"): "source_parity_ctd_lama",
+            # Fixed automatic runtime mapping
+            self.tr("RT-DETR-v2 + Legacy BBox Rescue + Source LaMa"): "rtdetr_legacy_bbox_source_lama",
 
             # HD Strategy mappings
             self.tr("Resize"): "Resize",
@@ -236,19 +234,7 @@ class SettingsPageUI(QtWidgets.QWidget):
         self.translator_combo = self.tools_page.translator_combo
         self.ocr_combo = self.tools_page.ocr_combo
         self.detector_combo = self.tools_page.detector_combo
-        self.mask_inpaint_mode_combo = self.tools_page.mask_inpaint_mode_combo
-        self.mask_inpaint_mode_hint = self.tools_page.mask_inpaint_mode_hint
         self.inpainter_combo = self.tools_page.inpainter_combo
-        self.mask_refiner_combo = self.tools_page.mask_refiner_combo
-        self.keep_existing_lines_checkbox = self.tools_page.keep_existing_lines_checkbox
-        self.ctd_settings_widget = self.tools_page.ctd_settings_widget
-        self.ctd_detect_size_combo = self.tools_page.ctd_detect_size_combo
-        self.ctd_det_rearrange_max_batches_combo = self.tools_page.ctd_det_rearrange_max_batches_combo
-        self.ctd_device_combo = self.tools_page.ctd_device_combo
-        self.ctd_font_size_multiplier_spinbox = self.tools_page.ctd_font_size_multiplier_spinbox
-        self.ctd_font_size_max_spinbox = self.tools_page.ctd_font_size_max_spinbox
-        self.ctd_font_size_min_spinbox = self.tools_page.ctd_font_size_min_spinbox
-        self.ctd_mask_dilate_size_spinbox = self.tools_page.ctd_mask_dilate_size_spinbox
         self.inpainter_size_combo = self.tools_page.inpainter_size_combo
         self.inpainter_device_combo = self.tools_page.inpainter_device_combo
         self.inpainter_precision_combo = self.tools_page.inpainter_precision_combo

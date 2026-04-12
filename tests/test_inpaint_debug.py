@@ -21,6 +21,13 @@ class _Block:
     bubble_xyxy: list[int] | None = None
     text_class: str = "text_bubble"
     inpaint_bboxes: list[list[int]] = field(default_factory=list)
+    _hard_box_applied: bool = False
+    _hard_box_reason_codes: list[str] = field(default_factory=list)
+    _legacy_fill_ratio: float = 0.0
+    _rescue_fill_ratio: float = 0.0
+    _legacy_mask_pixel_count: int = 0
+    _rescue_mask_pixel_count: int = 0
+    _final_mask_pixel_count: int = 0
 
 
 class InpaintDebugTests(unittest.TestCase):
@@ -34,6 +41,13 @@ class InpaintDebugTests(unittest.TestCase):
             bubble_xyxy=[0, 0, 7, 7],
             text_class="text_bubble",
             inpaint_bboxes=[[1, 1, 4, 5]],
+            _hard_box_applied=True,
+            _hard_box_reason_codes=["edge_dense"],
+            _legacy_fill_ratio=0.05,
+            _rescue_fill_ratio=0.10,
+            _legacy_mask_pixel_count=4,
+            _rescue_mask_pixel_count=2,
+            _final_mask_pixel_count=6,
         )
 
         metadata = build_inpaint_debug_metadata(
@@ -54,8 +68,11 @@ class InpaintDebugTests(unittest.TestCase):
         self.assertEqual(metadata["raw_mask_pixel_count"], 4)
         self.assertEqual(metadata["cleanup_delta_pixel_count"], 2)
         self.assertTrue(metadata["cleanup_applied"])
+        self.assertEqual(metadata["hard_box_applied_count"], 1)
         self.assertEqual(metadata["blocks"][0]["text_class"], "text_bubble")
         self.assertEqual(metadata["blocks"][0]["inpaint_bboxes"], [[1, 1, 4, 5]])
+        self.assertTrue(metadata["blocks"][0]["hard_box_applied"])
+        self.assertEqual(metadata["blocks"][0]["hard_box_reason_codes"], ["edge_dense"])
 
     def test_export_artifacts_only_writes_selected_debug_outputs(self) -> None:
         image = np.full((10, 12, 3), 255, dtype=np.uint8)
