@@ -4,7 +4,7 @@ port: 18000
 
 # Leave VRAM headroom for the /layout-parsing service running on gpu:0.
 # 4070 12GB 기준 처리량 향상을 위해 소폭 상향.
-gpu_memory_utilization: 0.84
+gpu_memory_utilization: 0.80
 max_model_len: 4096
 max_num_seqs: 32
 max_num_batched_tokens: 98304
