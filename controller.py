@@ -1,9 +1,10 @@
+import logging
 import os
 import requests
 import numpy as np
 import shutil
 import tempfile
-from typing import Callable, Tuple
+from typing import Any, Callable, Tuple
 
 from PySide6 import QtCore, QtWidgets
 from PySide6.QtCore import QCoreApplication, QThreadPool
@@ -12,6 +13,7 @@ from PySide6.QtGui import QUndoGroup, QUndoStack, QIcon
 from app.ui.dayu_widgets.qt import MPixmap
 from app.ui.main_window import ComicTranslateUI
 from app.ui.messages import Messages
+from app.ui.automatic_progress_dialog import AutomaticProgressDialog
 from app.ui.dayu_widgets.message import MMessage
 
 from modules.ocr.local_runtime import LocalOCRRuntimeManager
@@ -23,6 +25,7 @@ from app.ui.commands.box import DeleteBoxesCommand
 from modules.utils.textblock import TextBlock
 from modules.utils.file_handler import FileHandler
 from modules.utils.pipeline_config import validate_settings
+from modules.utils.automatic_progress import AutomaticProgressTracker
 from modules.utils.download import set_download_callback
 from pipeline.main_pipeline import ComicTranslatePipeline
 
@@ -40,8 +43,11 @@ from modules.utils.exceptions import (
     LocalServiceError,
     LocalServiceConnectionError,
     LocalServiceSetupError,
+    OperationCancelledError,
 )
 
+
+logger = logging.getLogger(__name__)
 
 
 def _env_enabled(name: str) -> bool:
@@ -57,6 +63,7 @@ class ComicTranslate(ComicTranslateUI):
     image_processed = QtCore.Signal(int, object, str)
     patches_processed = QtCore.Signal(list, str)
     progress_update = QtCore.Signal(int, int, int, int, bool)
+    runtime_progress_update = QtCore.Signal(dict)
     image_skipped = QtCore.Signal(str, str, str)
     blk_rendered = QtCore.Signal(str, int, object, str)
     render_state_ready = QtCore.Signal(str)
@@ -123,7 +130,13 @@ class ComicTranslate(ComicTranslateUI):
         self.current_worker = None
         self._batch_active = False
         self._batch_cancel_requested = False
+        self._batch_failed = False
         self._current_batch_run_type = None
+        self._last_batch_request_paths = []
+        self._last_batch_run_type = "batch"
+        self._automatic_progress_dialog = None
+        self._automatic_progress_settings_target = None
+        self._automatic_progress_tracker = AutomaticProgressTracker()
         self.local_ocr_runtime_manager = LocalOCRRuntimeManager()
         self.local_translation_runtime_manager = LocalGemmaRuntimeManager()
 
@@ -151,6 +164,7 @@ class ComicTranslate(ComicTranslateUI):
         self.render_state_ready.connect(self.image_ctrl.on_render_state_ready)
         self.render_state_ready.connect(self.project_ctrl._on_batch_page_done)
         self.download_event.connect(self.on_download_event)
+        self.runtime_progress_update.connect(self.on_runtime_progress_update)
 
         self.connect_ui_elements()
         self.setFocusPolicy(QtCore.Qt.FocusPolicy.StrongFocus)
@@ -486,11 +500,125 @@ class ComicTranslate(ComicTranslateUI):
     def cancel_current_task(self):
         self.task_runner_ctrl.cancel_current_task()
 
+    def is_current_task_cancelled(self) -> bool:
+        worker = getattr(self, "current_worker", None)
+        return bool(self._batch_cancel_requested or (worker and worker.is_cancelled))
+
+    def report_runtime_progress(self, payload: dict[str, Any]):
+        if not isinstance(payload, dict):
+            return
+        try:
+            self.runtime_progress_update.emit(dict(payload))
+        except Exception:
+            logger.debug("Failed to queue runtime progress update.", exc_info=True)
+
+    def _ensure_automatic_progress_dialog(self):
+        if self._automatic_progress_dialog is None:
+            dialog = AutomaticProgressDialog(self)
+            dialog.cancel_requested.connect(self._on_automatic_progress_cancel)
+            dialog.retry_requested.connect(self._on_automatic_progress_retry)
+            dialog.open_settings_requested.connect(self._on_automatic_progress_open_settings)
+            self._automatic_progress_dialog = dialog
+        return self._automatic_progress_dialog
+
+    def _show_automatic_progress_dialog(self, selected_paths: list[str], run_type: str):
+        self._automatic_progress_tracker.reset(page_total=len(selected_paths), run_type=run_type)
+        dialog = self._ensure_automatic_progress_dialog()
+        dialog.set_running_state()
+        self.on_runtime_progress_update({
+            "phase": "gemma_startup",
+            "service": "gemma",
+            "status": "starting",
+            "step_key": "queue",
+            "message": self.tr("Gemma와 OCR 준비를 확인하는 중..."),
+            "page_total": len(selected_paths),
+            "page_index": 0,
+            "image_name": os.path.basename(selected_paths[0]) if selected_paths else "",
+        })
+        dialog.show()
+        dialog.raise_()
+        dialog.activateWindow()
+
+    @QtCore.Slot(dict)
+    def on_runtime_progress_update(self, payload: dict):
+        if not isinstance(payload, dict):
+            return
+        event = self._automatic_progress_tracker.enrich(payload)
+        dialog = self._ensure_automatic_progress_dialog()
+        dialog.update_event(event)
+        self._log_runtime_progress(event)
+
+    def _log_runtime_progress(self, event: dict):
+        logger.info(
+            "Runtime progress: phase=%s service=%s step=%s status=%s page=%s/%s image=%s elapsed=%s eta=%s finish_at=%s",
+            event.get("phase", ""),
+            event.get("service", ""),
+            event.get("step_key", ""),
+            event.get("status", ""),
+            (int(event.get("page_index", 0)) + 1) if event.get("page_index") is not None else "-",
+            event.get("page_total", "-"),
+            event.get("image_name", ""),
+            event.get("elapsed_text", ""),
+            event.get("eta_text", ""),
+            event.get("eta_finish_at_local", ""),
+        )
+
+    def _on_automatic_progress_cancel(self):
+        self.cancel_current_task()
+        dialog = self._ensure_automatic_progress_dialog()
+        dialog.subtitle_label.setText(self.tr("취소 중..."))
+
+    def _on_automatic_progress_retry(self):
+        if self._batch_active or not self._last_batch_request_paths:
+            return
+        self._start_batch_process_for_paths(list(self._last_batch_request_paths), run_type=self._last_batch_run_type)
+
+    def _on_automatic_progress_open_settings(self):
+        self.show_settings_page()
+        try:
+            ui = self.settings_page.ui
+            page_map = {
+                self.tr("PaddleOCR VL Settings"): 2,
+                self.tr("HunyuanOCR Settings"): 3,
+                self.tr("Gemma Local Server Settings"): 4,
+            }
+            target_index = page_map.get(self._automatic_progress_settings_target, 4)
+            if len(ui.nav_cards) > target_index:
+                ui.on_nav_clicked(target_index, ui.nav_cards[target_index])
+        except Exception:
+            logger.debug("Failed to focus local service settings page.", exc_info=True)
+
     def run_finish_only(self, finished_callback: Callable, error_callback: Callable = None):
         self.task_runner_ctrl.run_finish_only(finished_callback, error_callback)
 
     def default_error_handler(self, error_tuple: Tuple):
         exctype, value, traceback_str = error_tuple
+
+        if issubclass(exctype, OperationCancelledError):
+            dialog = self._ensure_automatic_progress_dialog() if self._automatic_progress_dialog is not None else None
+            if dialog is not None:
+                dialog.set_cancelled_state()
+            self.loading.setVisible(False)
+            return
+
+        if self._batch_active and self._automatic_progress_dialog is not None:
+            self._batch_failed = True
+            service_name = getattr(value, "service_name", "Gemma") if isinstance(value, BaseException) else "Gemma"
+            self._automatic_progress_settings_target = getattr(value, "settings_page_name", self.tr("Gemma Local Server Settings"))
+            service_key = "gemma" if "gemma" in service_name.lower() else ("paddleocr_vl" if "paddle" in service_name.lower() else "batch")
+            self.on_runtime_progress_update({
+                "phase": "error",
+                "service": service_key,
+                "status": "failed",
+                "step_key": "error",
+                "message": self.tr("자동번역 준비 또는 실행에 실패했습니다."),
+                "detail": str(value),
+                "page_total": len(self._last_batch_request_paths),
+                "page_index": 0,
+                "image_name": os.path.basename(self._last_batch_request_paths[0]) if self._last_batch_request_paths else "",
+            })
+            self.loading.setVisible(False)
+            return
 
         if issubclass(exctype, LocalServiceError):
             if issubclass(exctype, LocalServiceSetupError):
@@ -588,6 +716,10 @@ class ComicTranslate(ComicTranslateUI):
         if not selected_paths:
             return False
 
+        self._last_batch_request_paths = list(selected_paths)
+        self._last_batch_run_type = run_type
+        self._batch_failed = False
+
         for path in selected_paths:
             page_state = self.image_ctrl.ensure_page_state(path)
             tgt = page_state['target_lang']
@@ -611,6 +743,7 @@ class ComicTranslate(ComicTranslateUI):
         self.webtoon_toggle.setEnabled(False)
         self.progress_bar.setVisible(True)
         self.batch_report_ctrl.refresh_action_buttons()
+        self._show_automatic_progress_dialog(selected_paths, run_type)
 
         if self.webtoon_mode:
             self.run_threaded(
@@ -723,8 +856,11 @@ class ComicTranslate(ComicTranslateUI):
         except Exception:
             pass
         was_cancelled = self._batch_cancel_requested
+        failed = self._batch_failed
+        total_images = len(self.selected_batch)
         self._batch_active = False
         self._batch_cancel_requested = False
+        self._batch_failed = False
         self._current_batch_run_type = None
         report = self._finalize_batch_report(was_cancelled)
         self.progress_bar.setVisible(False)
@@ -733,9 +869,32 @@ class ComicTranslate(ComicTranslateUI):
         self.save_as_project_button.setEnabled(True)
         self.webtoon_toggle.setEnabled(True)
         self.selected_batch = []
+
+        dialog = self._automatic_progress_dialog
+        if dialog is not None:
+            if was_cancelled:
+                dialog.set_cancelled_state()
+            elif failed:
+                dialog.show()
+                dialog.raise_()
+                dialog.activateWindow()
+            else:
+                self._automatic_progress_tracker.record_batch_completion(success=True, total_images=total_images)
+                self.on_runtime_progress_update({
+                    "phase": "done",
+                    "service": "batch",
+                    "status": "completed",
+                    "step_key": "done",
+                    "message": self.tr("자동번역이 완료되었습니다."),
+                    "page_total": total_images,
+                    "page_index": max(total_images - 1, 0),
+                    "image_name": "",
+                })
+                QtCore.QTimer.singleShot(1200, dialog.hide)
+
         if report and report["skipped_count"] > 0:
             Messages.show_batch_skipped_summary(self, report["skipped_count"])
-        elif not was_cancelled:
+        elif not was_cancelled and not failed:
             Messages.show_translation_complete(self)
 
         # Drop cached models/sessions after batch to keep RAM bounded.
@@ -943,6 +1102,11 @@ class ComicTranslate(ComicTranslateUI):
 
         try:
             self.settings_page.shutdown()
+        except Exception:
+            pass
+        try:
+            if self._automatic_progress_dialog is not None:
+                self._automatic_progress_dialog.hide()
         except Exception:
             pass
         try:

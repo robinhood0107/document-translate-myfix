@@ -1,10 +1,13 @@
-from PySide6 import QtCore, QtWidgets
+from PySide6 import QtWidgets
 
 from ..dayu_widgets.check_box import MCheckBox
 from ..dayu_widgets.label import MLabel
 from ..dayu_widgets.spin_box import MSpinBox
 from .utils import create_title_and_combo, set_combo_box_width
 from modules.utils.device import is_gpu_available
+
+
+DEFAULT_AUTOMATIC_RUNTIME_LABEL = "RT-DETR-v2 + Legacy BBox Rescue + Source LaMa"
 
 
 class ToolsPage(QtWidgets.QWidget):
@@ -34,67 +37,26 @@ class ToolsPage(QtWidgets.QWidget):
         set_combo_box_width(self.ocr_combo, self.ocr_engines)
         self.ocr_combo.setCurrentText(self.tr("PaddleOCR VL"))
 
-        detector_widget, self.detector_combo = create_title_and_combo(self.tr("Text Detector"), self.detectors, h4=True)
-        set_combo_box_width(self.detector_combo, self.detectors)
-
-        mask_label = MLabel(self.tr("Precise Masking")).h4()
-        mask_refiner_widget, self.mask_refiner_combo = create_title_and_combo(
-            self.tr("Mask Refiner"),
-            [self.tr("legacy_bbox"), self.tr("ctd")],
-            h4=False,
+        automatic_runtime_label = MLabel(self.tr("Automatic Runtime")).h4()
+        self.automatic_runtime_value_label = MLabel(self.tr(DEFAULT_AUTOMATIC_RUNTIME_LABEL))
+        self.automatic_runtime_value_label.setWordWrap(True)
+        self.automatic_runtime_hint = MLabel(
+            self.tr(
+                "Automatic mode is fixed to RT-DETR-v2 detection, legacy bbox rescue masking, and source block-wise LaMa cleaning."
+            )
         )
-        set_combo_box_width(self.mask_refiner_combo, [self.tr("legacy_bbox"), self.tr("ctd")])
-        self.mask_refiner_combo.setCurrentText(self.tr("ctd"))
-        self.keep_existing_lines_checkbox = MCheckBox(self.tr("Keep Existing Lines"))
-        self.keep_existing_lines_checkbox.setChecked(True)
+        self.automatic_runtime_hint.setWordWrap(True)
 
-        self.ctd_settings_widget = QtWidgets.QWidget()
-        ctd_form = QtWidgets.QFormLayout(self.ctd_settings_widget)
-        ctd_form.setContentsMargins(10, 0, 0, 0)
-        ctd_form.setLabelAlignment(QtCore.Qt.AlignmentFlag.AlignLeft)
-
-        self.ctd_detect_size_combo = QtWidgets.QComboBox()
-        self.ctd_detect_size_combo.addItems(["640", "960", "1280", "1536", "2048"])
-        self.ctd_detect_size_combo.setCurrentText("1280")
-
-        self.ctd_det_rearrange_max_batches_combo = QtWidgets.QComboBox()
-        self.ctd_det_rearrange_max_batches_combo.addItems(["1", "2", "4", "8"])
-        self.ctd_det_rearrange_max_batches_combo.setCurrentText("4")
-
-        self.ctd_device_combo = QtWidgets.QComboBox()
-        self.ctd_device_combo.addItems(["cuda", "cpu"])
-        self.ctd_device_combo.setCurrentText("cuda")
-
-        self.ctd_font_size_multiplier_spinbox = QtWidgets.QDoubleSpinBox()
-        self.ctd_font_size_multiplier_spinbox.setDecimals(2)
-        self.ctd_font_size_multiplier_spinbox.setSingleStep(0.05)
-        self.ctd_font_size_multiplier_spinbox.setRange(0.1, 4.0)
-        self.ctd_font_size_multiplier_spinbox.setValue(1.0)
-
-        self.ctd_font_size_max_spinbox = MSpinBox().small()
-        self.ctd_font_size_max_spinbox.setRange(-1, 4096)
-        self.ctd_font_size_max_spinbox.setValue(-1)
-
-        self.ctd_font_size_min_spinbox = MSpinBox().small()
-        self.ctd_font_size_min_spinbox.setRange(-1, 4096)
-        self.ctd_font_size_min_spinbox.setValue(-1)
-
-        self.ctd_mask_dilate_size_spinbox = MSpinBox().small()
-        self.ctd_mask_dilate_size_spinbox.setRange(0, 32)
-        self.ctd_mask_dilate_size_spinbox.setValue(2)
-
-        ctd_form.addRow(self.tr("detect_size"), self.ctd_detect_size_combo)
-        ctd_form.addRow(self.tr("det_rearrange_max_batches"), self.ctd_det_rearrange_max_batches_combo)
-        ctd_form.addRow(self.tr("device"), self.ctd_device_combo)
-        ctd_form.addRow(self.tr("font size multiplier"), self.ctd_font_size_multiplier_spinbox)
-        ctd_form.addRow(self.tr("font size max"), self.ctd_font_size_max_spinbox)
-        ctd_form.addRow(self.tr("font size min"), self.ctd_font_size_min_spinbox)
-        ctd_form.addRow(self.tr("mask dilate size"), self.ctd_mask_dilate_size_spinbox)
+        detector_widget, self.detector_combo = create_title_and_combo(self.tr("Text Detector"), self.detectors, h4=False)
+        set_combo_box_width(self.detector_combo, self.detectors)
+        self.detector_combo.setCurrentText("RT-DETR-v2")
+        self.detector_combo.setEnabled(False)
 
         inpainting_label = MLabel(self.tr("Image Cleaning")).h4()
         inpainter_widget, self.inpainter_combo = create_title_and_combo(self.tr("Inpainter"), self.inpainters, h4=False)
         set_combo_box_width(self.inpainter_combo, self.inpainters)
         self.inpainter_combo.setCurrentText(self.tr("lama_large_512px"))
+        self.inpainter_combo.setEnabled(False)
 
         self.inpainter_runtime_widget = QtWidgets.QWidget()
         inpainter_form = QtWidgets.QFormLayout(self.inpainter_runtime_widget)
@@ -167,14 +129,6 @@ class ToolsPage(QtWidgets.QWidget):
         self.resize_widget.show()
         self.crop_widget.hide()
         self.inpaint_strategy_combo.currentIndexChanged.connect(self._update_hd_strategy_widgets)
-        self.inpainter_combo.currentIndexChanged.connect(self._update_inpainter_runtime_widgets)
-        self.inpainter_combo.currentTextChanged.connect(
-            lambda _text: self._update_inpainter_runtime_widgets(self.inpainter_combo.currentIndex())
-        )
-        self.mask_refiner_combo.currentIndexChanged.connect(self._update_mask_refiner_widgets)
-        self.mask_refiner_combo.currentTextChanged.connect(
-            lambda _text: self._update_mask_refiner_widgets(self.mask_refiner_combo.currentIndex())
-        )
 
         self.use_gpu_checkbox = MCheckBox(self.tr("Use GPU"))
         self.use_gpu_checkbox.setChecked(True)
@@ -183,14 +137,13 @@ class ToolsPage(QtWidgets.QWidget):
 
         layout.addWidget(translator_widget)
         layout.addSpacing(10)
-        layout.addWidget(detector_widget)
-        layout.addSpacing(10)
-        layout.addWidget(mask_label)
-        layout.addWidget(mask_refiner_widget)
-        layout.addWidget(self.keep_existing_lines_checkbox)
-        layout.addWidget(self.ctd_settings_widget)
-        layout.addSpacing(10)
         layout.addWidget(ocr_widget)
+        layout.addSpacing(10)
+        layout.addWidget(automatic_runtime_label)
+        layout.addWidget(self.automatic_runtime_value_label)
+        layout.addWidget(self.automatic_runtime_hint)
+        layout.addSpacing(10)
+        layout.addWidget(detector_widget)
         layout.addSpacing(10)
         layout.addWidget(inpainting_label)
         layout.addWidget(inpainter_widget)
@@ -201,9 +154,8 @@ class ToolsPage(QtWidgets.QWidget):
         layout.addWidget(self.use_gpu_checkbox)
         layout.addStretch(1)
 
-        self._update_hd_strategy_widgets(self.inpaint_strategy_combo.currentIndex())
         self._update_inpainter_runtime_widgets(self.inpainter_combo.currentIndex())
-        self._update_mask_refiner_widgets(self.mask_refiner_combo.currentIndex())
+        self._update_hd_strategy_widgets(self.inpaint_strategy_combo.currentIndex())
 
     def _update_hd_strategy_widgets(self, index: int):
         strategy = self.inpaint_strategy_combo.itemText(index)
@@ -213,11 +165,6 @@ class ToolsPage(QtWidgets.QWidget):
             self.hd_strategy_widgets.setFixedHeight(0)
         else:
             self.hd_strategy_widgets.setFixedHeight(self.hd_strategy_widgets.sizeHint().height())
-
-    def _update_mask_refiner_widgets(self, index: int):
-        use_ctd = self.mask_refiner_combo.itemText(index) == self.tr("ctd")
-        self.keep_existing_lines_checkbox.setVisible(use_ctd)
-        self.ctd_settings_widget.setVisible(use_ctd)
 
     def _update_inpainter_runtime_widgets(self, index: int):
         key = self.inpainter_combo.itemText(index)
