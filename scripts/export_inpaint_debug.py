@@ -20,7 +20,8 @@ import numpy as np
 from modules.detection.processor import TextBlockDetector
 from modules.utils.device import resolve_device
 from modules.utils.image_utils import generate_mask
-from modules.utils.inpaint_cleanup import refine_bubble_residue_inpaint
+from modules.source_parity_vendor import source_parity_blockwise_inpaint
+from modules.utils.mask_inpaint_mode import normalize_mask_inpaint_mode
 from modules.utils.inpaint_debug import (
     build_inpaint_debug_metadata,
     ensure_three_channel,
@@ -28,6 +29,11 @@ from modules.utils.inpaint_debug import (
 )
 from modules.utils.pipeline_config import get_config, get_inpainter_runtime, inpaint_map
 from modules.utils.inpainting_runtime import inpainter_default_settings, normalize_inpainter_key
+from modules.utils.mask_inpaint_mode import (
+    DEFAULT_MASK_INPAINT_MODE,
+    MASK_INPAINT_MODE_RTDETR_LEGACY_BBOX_SOURCE,
+    MASK_INPAINT_MODE_SOURCE_PARITY,
+)
 
 DEBUG_EXPORT_SETTINGS = {
     "export_detector_overlay": True,
@@ -52,14 +58,15 @@ class _SettingsStub:
         *,
         inpainter: str,
         use_gpu: bool,
-        mask_refiner: str = "ctd",
-        keep_existing_lines: bool = True,
+        mask_refiner: str = "legacy_bbox",
+        keep_existing_lines: bool = False,
         ctd_detect_size: int = 1280,
         ctd_det_rearrange_max_batches: int = 4,
         ctd_font_size_multiplier: float = 1.0,
         ctd_font_size_max: int = -1,
         ctd_font_size_min: int = -1,
         ctd_mask_dilate_size: int = 2,
+        mask_inpaint_mode: str = DEFAULT_MASK_INPAINT_MODE,
     ) -> None:
         self._inpainter = inpainter
         self._use_gpu = use_gpu
@@ -71,6 +78,7 @@ class _SettingsStub:
         self._ctd_font_size_max = ctd_font_size_max
         self._ctd_font_size_min = ctd_font_size_min
         self._ctd_mask_dilate_size = ctd_mask_dilate_size
+        self._mask_inpaint_mode = mask_inpaint_mode
         self.ui = _UIStub(
             value_mappings={
                 "Resize": "Resize",
@@ -81,10 +89,17 @@ class _SettingsStub:
 
     def get_tool_selection(self, tool_type: str) -> str:
         if tool_type == "detector":
+            if self._mask_inpaint_mode == MASK_INPAINT_MODE_SOURCE_PARITY:
+                return "Source Parity CTD"
             return "RT-DETR-v2"
         if tool_type == "inpainter":
+            if self._mask_inpaint_mode in {MASK_INPAINT_MODE_RTDETR_LEGACY_BBOX_SOURCE, MASK_INPAINT_MODE_SOURCE_PARITY}:
+                return "lama_large_512px"
             return self._inpainter
         raise KeyError(tool_type)
+
+    def get_mask_inpaint_mode(self) -> str:
+        return self._mask_inpaint_mode
 
     def is_gpu_enabled(self) -> bool:
         return self._use_gpu
@@ -93,8 +108,13 @@ class _SettingsStub:
         return {"strategy": "Resize", "resize_limit": 960}
 
     def get_mask_refiner_settings(self) -> dict:
+        mask_refiner = self._mask_refiner
+        if self._mask_inpaint_mode == MASK_INPAINT_MODE_SOURCE_PARITY:
+            mask_refiner = "ctd"
+        elif self._mask_inpaint_mode == MASK_INPAINT_MODE_RTDETR_LEGACY_BBOX_SOURCE:
+            mask_refiner = "legacy_bbox"
         return {
-            "mask_refiner": self._mask_refiner,
+            "mask_refiner": mask_refiner,
             "ctd_detect_size": self._ctd_detect_size,
             "ctd_det_rearrange_max_batches": self._ctd_det_rearrange_max_batches,
             "ctd_device": "cuda" if self._use_gpu else "cpu",
@@ -102,7 +122,8 @@ class _SettingsStub:
             "ctd_font_size_max": self._ctd_font_size_max,
             "ctd_font_size_min": self._ctd_font_size_min,
             "ctd_mask_dilate_size": self._ctd_mask_dilate_size,
-            "keep_existing_lines": self._keep_existing_lines,
+            "keep_existing_lines": False if self._mask_inpaint_mode in {MASK_INPAINT_MODE_RTDETR_LEGACY_BBOX_SOURCE, MASK_INPAINT_MODE_SOURCE_PARITY} else self._keep_existing_lines,
+            "mask_inpaint_mode": self._mask_inpaint_mode,
         }
 
     def get_inpainter_runtime_settings(self, inpainter_key: str | None = None) -> dict:
@@ -110,19 +131,19 @@ class _SettingsStub:
         return inpainter_default_settings(normalized)
 
 
-def _build_cleanup_delta(raw_mask, final_mask):
+def _build_cleanup_delta(base_mask, final_mask):
     if final_mask is None:
         return None
     final_arr = np.asarray(final_mask)
     if final_arr.ndim == 3:
         final_arr = final_arr[:, :, 0]
-    if raw_mask is None:
-        raw_arr = np.zeros_like(final_arr, dtype=np.uint8)
+    if base_mask is None:
+        base_arr = np.zeros_like(final_arr, dtype=np.uint8)
     else:
-        raw_arr = np.asarray(raw_mask)
-        if raw_arr.ndim == 3:
-            raw_arr = raw_arr[:, :, 0]
-    return np.where((final_arr > 0) & (raw_arr <= 0), 255, 0).astype(np.uint8)
+        base_arr = np.asarray(base_mask)
+        if base_arr.ndim == 3:
+            base_arr = base_arr[:, :, 0]
+    return np.where((final_arr > 0) & (base_arr <= 0), 255, 0).astype(np.uint8)
 
 
 def _write_image(path: Path, image: np.ndarray) -> None:
@@ -150,7 +171,7 @@ def _process_image(
         raise RuntimeError("failed to read image")
     image = ensure_three_channel(image)
     blocks = detector.detect(image) or []
-    detector_key = settings.get_tool_selection("detector")
+    detector_key = getattr(detector, "detector", None) or settings.get_tool_selection("detector")
     detector_engine = detector.last_engine_name or ""
     detector_device = detector.last_device or resolve_device(settings.is_gpu_enabled(), backend="onnx")
     raw_mask = None
@@ -160,23 +181,26 @@ def _process_image(
     mask_details = {}
 
     if blocks:
-        mask_details = generate_mask(image, blocks, settings=settings.get_mask_refiner_settings(), return_details=True)
+        mask_details = generate_mask(
+            image,
+            blocks,
+            settings=settings.get_mask_refiner_settings(),
+            return_details=True,
+            precomputed_mask_details=getattr(detector, "last_mask_details", None),
+        )
         mask = mask_details["final_mask"]
         if mask is not None and np.any(mask):
             raw_mask = mask_details["raw_mask"]
-            cleaned = inpainter(image, mask, get_config(settings))
+            if normalize_mask_inpaint_mode(settings.get_mask_inpaint_mode()) in {MASK_INPAINT_MODE_RTDETR_LEGACY_BBOX_SOURCE, MASK_INPAINT_MODE_SOURCE_PARITY}:
+                cleaned = source_parity_blockwise_inpaint(image, mask, blocks, inpainter, get_config(settings), check_need_inpaint=True)
+            else:
+                cleaned = inpainter(image, mask, get_config(settings))
             cleaned = imk.convert_scale_abs(cleaned)
-            cleaned, final_mask, cleanup_stats = refine_bubble_residue_inpaint(
-                cleaned,
-                mask,
-                blocks,
-                inpainter,
-                get_config(settings),
-            )
+            final_mask = mask
         else:
             final_mask = mask
 
-    cleanup_delta = _build_cleanup_delta(raw_mask, final_mask)
+    cleanup_delta = _build_cleanup_delta(mask_details.get("final_mask", final_mask), final_mask)
     runtime = get_inpainter_runtime(settings)
     metadata = build_inpaint_debug_metadata(
         image_path=str(image_path),
@@ -188,6 +212,10 @@ def _process_image(
         hd_strategy="Resize",
         blocks=blocks,
         raw_mask=raw_mask,
+        final_mask=final_mask,
+        final_mask_pre_expand=mask_details.get("final_mask_pre_expand"),
+        final_mask_post_expand=mask_details.get("final_mask_post_expand"),
+        residue_mask=cleanup_stats.get("residue_mask") if cleanup_stats else None,
         cleanup_delta=cleanup_delta,
         cleanup_stats=cleanup_stats,
         mask_refiner=str(mask_details.get("mask_refiner", "legacy_bbox") or "legacy_bbox"),
@@ -205,6 +233,7 @@ def _process_image(
         blocks=blocks,
         export_settings=DEBUG_EXPORT_SETTINGS,
         raw_mask=raw_mask,
+        mask_overlay_mask=mask_details.get("final_mask_post_expand", mask_details.get("final_mask", final_mask)),
         cleanup_delta=cleanup_delta,
         metadata=metadata,
     )
@@ -264,10 +293,11 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="Export inpaint debug artifacts for Sample corpora.")
     parser.add_argument("--glob", default="*", help="Glob pattern for sample filenames.")
     parser.add_argument("--inpainter", default="AOT", choices=["AOT", "lama_large_512px", "lama_mpe"])
+    parser.add_argument("--mask-inpaint-mode", default=DEFAULT_MASK_INPAINT_MODE, choices=[MASK_INPAINT_MODE_RTDETR_LEGACY_BBOX_SOURCE, MASK_INPAINT_MODE_SOURCE_PARITY])
     parser.add_argument("--use-gpu", action="store_true")
     args = parser.parse_args()
 
-    settings = _SettingsStub(inpainter=args.inpainter, use_gpu=args.use_gpu)
+    settings = _SettingsStub(inpainter=args.inpainter, use_gpu=args.use_gpu, mask_inpaint_mode=args.mask_inpaint_mode)
     detector = TextBlockDetector(settings)
     runtime = get_inpainter_runtime(settings, args.inpainter)
     inpainter_cls = inpaint_map[runtime["key"]]
@@ -312,7 +342,8 @@ def main() -> int:
     summary = {
         "generated_at": datetime.now().isoformat(timespec="seconds"),
         "detector_key": settings.get_tool_selection("detector"),
-        "inpainter": args.inpainter,
+        "inpainter": settings.get_tool_selection("inpainter"),
+        "mask_inpaint_mode": args.mask_inpaint_mode,
         "hd_strategy": "Resize",
         "use_gpu": bool(args.use_gpu),
         "glob": args.glob,

@@ -26,3 +26,9 @@ class LocalServiceSetupError(LocalServiceError):
 class LocalServiceResponseError(LocalServiceError):
     """Raised when a local service returns an unexpected response."""
     pass
+
+
+class OperationCancelledError(Exception):
+    """Raised when a long-running automatic task is cancelled by the user."""
+
+    pass

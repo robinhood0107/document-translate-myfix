@@ -10,6 +10,14 @@ from PySide6.QtGui import QColor
 
 from modules.detection.utils.content import get_inpaint_bboxes
 from modules.masking import CTDRefiner, CTDRefinerSettings, ProtectMaskSettings, build_protect_mask
+from modules.source_compat import SourceCTDDetector, build_rtdetr_legacy_bbox_mask
+from modules.utils.mask_inpaint_mode import (
+    DEFAULT_MASK_INPAINT_MODE,
+    MASK_INPAINT_MODE_RTDETR_LEGACY_BBOX_SOURCE,
+    MASK_INPAINT_MODE_SOURCE_PARITY,
+    normalize_mask_inpaint_mode,
+)
+from modules.utils.mask_roi import assign_mask_rois, normalize_xyxy, resolve_block_cleanup_roi
 from modules.utils.textblock import TextBlock
 
 
@@ -35,6 +43,16 @@ def get_smart_text_color(detected_rgb: tuple, setting_color: QColor) -> QColor:
         return setting_color
 
 
+def _get_cleanup_roi(block: TextBlock, image_shape: tuple[int, ...]):
+    roi = normalize_xyxy(getattr(block, "cleanup_roi_xyxy", None), image_shape)
+    if roi is not None:
+        return roi
+    roi = normalize_xyxy(getattr(block, "mask_roi_xyxy", None), image_shape)
+    if roi is not None:
+        return roi
+    return resolve_block_cleanup_roi(block, image_shape)
+
+
 def _populate_legacy_inpaint_boxes(img: np.ndarray, blk_list: list[TextBlock]) -> None:
     for blk in blk_list:
         if getattr(blk, "xyxy", None) is None:
@@ -42,7 +60,7 @@ def _populate_legacy_inpaint_boxes(img: np.ndarray, blk_list: list[TextBlock]) -
         bboxes = get_inpaint_bboxes(
             blk.xyxy,
             img,
-            bubble_bbox=getattr(blk, "bubble_xyxy", None),
+            bubble_bbox=_get_cleanup_roi(blk, img.shape),
         )
         blk.inpaint_bboxes = bboxes
 
@@ -56,12 +74,13 @@ def _generate_legacy_mask(img: np.ndarray, blk_list: list[TextBlock], default_pa
         if getattr(blk, "xyxy", None) is None:
             continue
 
+        roi = _get_cleanup_roi(blk, img.shape)
         bboxes = getattr(blk, "inpaint_bboxes", None)
         if bboxes is None:
             bboxes = get_inpaint_bboxes(
                 blk.xyxy,
                 img,
-                bubble_bbox=getattr(blk, "bubble_xyxy", None),
+                bubble_bbox=roi,
             )
             blk.inpaint_bboxes = bboxes
         if bboxes is None or len(bboxes) == 0:
@@ -113,24 +132,24 @@ def _generate_legacy_mask(img: np.ndarray, blk_list: list[TextBlock], default_pa
         dynamic_padding = int(round(median_span * 0.08))
         kernel_size = max(kernel_size, min(9, max(3, dynamic_padding)))
 
-        if getattr(blk, "text_class", None) == "text_bubble" and getattr(blk, "bubble_xyxy", None) is not None:
-            bx1, by1, bx2, by2 = blk.bubble_xyxy
+        if roi is not None:
+            rx1, ry1, rx2, ry2 = roi
             valid = [
                 p
                 for p in polys
-                if (p[:, 0] >= bx1).all()
-                and (p[:, 0] <= bx2).all()
-                and (p[:, 1] >= by1).all()
-                and (p[:, 1] <= by2).all()
+                if (p[:, 0] >= rx1).all()
+                and (p[:, 0] <= rx2).all()
+                and (p[:, 1] >= ry1).all()
+                and (p[:, 1] <= ry2).all()
             ]
             if valid:
                 dists = []
                 for poly in valid:
                     dists.extend([
-                        poly[:, 0].min() - bx1,
-                        bx2 - poly[:, 0].max(),
-                        poly[:, 1].min() - by1,
-                        by2 - poly[:, 1].max(),
+                        poly[:, 0].min() - rx1,
+                        rx2 - poly[:, 0].max(),
+                        poly[:, 1].min() - ry1,
+                        ry2 - poly[:, 1].max(),
                     ])
                 min_dist = min(dists)
                 if kernel_size >= min_dist:
@@ -138,6 +157,11 @@ def _generate_legacy_mask(img: np.ndarray, blk_list: list[TextBlock], default_pa
 
         dil_kernel = np.ones((kernel_size, kernel_size), np.uint8)
         dilated = imk.dilate(block_mask, dil_kernel, iterations=4)
+        if roi is not None:
+            rx1, ry1, rx2, ry2 = roi
+            roi_mask = np.zeros_like(mask, dtype=np.uint8)
+            roi_mask[ry1:ry2, rx1:rx2] = 255
+            dilated = cv2.bitwise_and(dilated, roi_mask)
         mask = np.bitwise_or(mask, dilated)
 
     return np.where(mask > 0, 255, 0).astype(np.uint8)
@@ -146,6 +170,7 @@ def _generate_legacy_mask(img: np.ndarray, blk_list: list[TextBlock], default_pa
 def _normalize_mask_refiner_settings(settings: dict[str, Any] | None) -> dict[str, Any]:
     data = dict(settings or {})
     data.setdefault("mask_refiner", "legacy_bbox")
+    data.setdefault("mask_inpaint_mode", DEFAULT_MASK_INPAINT_MODE)
     data.setdefault("keep_existing_lines", False)
     data.setdefault("ctd_detect_size", 1280)
     data.setdefault("ctd_det_rearrange_max_batches", 4)
@@ -154,6 +179,7 @@ def _normalize_mask_refiner_settings(settings: dict[str, Any] | None) -> dict[st
     data.setdefault("ctd_font_size_max", -1)
     data.setdefault("ctd_font_size_min", -1)
     data.setdefault("ctd_mask_dilate_size", 2)
+    data["mask_inpaint_mode"] = normalize_mask_inpaint_mode(data.get("mask_inpaint_mode", DEFAULT_MASK_INPAINT_MODE))
     return data
 
 
@@ -163,71 +189,116 @@ def generate_mask(
     default_padding: int = 5,
     settings: dict[str, Any] | None = None,
     return_details: bool = False,
+    precomputed_mask_details: dict[str, Any] | None = None,
 ):
     cfg = _normalize_mask_refiner_settings(settings)
-    _populate_legacy_inpaint_boxes(img, blk_list)
+    mode = normalize_mask_inpaint_mode(cfg.get("mask_inpaint_mode", DEFAULT_MASK_INPAINT_MODE))
 
     raw_mask = None
     refined_mask = None
+    final_mask_pre_expand = None
+    final_mask_post_expand = None
     protect_mask = np.zeros(img.shape[:2], dtype=np.uint8)
     backend = "legacy"
     device = "cpu"
     fallback_used = False
 
-    if cfg.get("mask_refiner") == "ctd":
-        try:
-            refiner = CTDRefiner(
-                CTDRefinerSettings(
-                    detect_size=int(cfg["ctd_detect_size"]),
-                    det_rearrange_max_batches=int(cfg["ctd_det_rearrange_max_batches"]),
-                    device=str(cfg["ctd_device"]),
-                    font_size_multiplier=float(cfg["ctd_font_size_multiplier"]),
-                    font_size_max=int(cfg["ctd_font_size_max"]),
-                    font_size_min=int(cfg["ctd_font_size_min"]),
-                    mask_dilate_size=int(cfg["ctd_mask_dilate_size"]),
-                )
-            )
-            result = refiner.refine(img, blk_list)
-            raw_mask = result.raw_mask
-            refined_mask = result.refined_mask
-            backend = result.backend
-            device = result.device
-            protect_mask = build_protect_mask(
-                img,
-                blk_list,
-                ProtectMaskSettings(keep_existing_lines=bool(cfg.get("keep_existing_lines", False))),
-            )
-            final_mask = cv2.bitwise_and(result.final_mask, cv2.bitwise_not(protect_mask))
-            if not np.any(final_mask) and np.any(result.final_mask):
-                final_mask = result.final_mask.copy()
-                fallback_used = True
-            if not np.any(final_mask):
-                final_mask = _generate_legacy_mask(img, blk_list, default_padding=default_padding)
-                fallback_used = True
-        except Exception:
-            raw_mask = None
-            refined_mask = None
-            final_mask = _generate_legacy_mask(img, blk_list, default_padding=default_padding)
-            fallback_used = True
+    if mode == MASK_INPAINT_MODE_SOURCE_PARITY:
+        details = precomputed_mask_details
+        if not details:
+            parity_detector = SourceCTDDetector()
+            details = parity_detector.detect(img, cfg).mask_details
+        final_mask = np.where(np.asarray(details.get("final_mask", np.zeros(img.shape[:2], dtype=np.uint8))) > 0, 255, 0).astype(np.uint8)
+        raw_mask = np.where(np.asarray(details.get("raw_mask", final_mask)) > 0, 255, 0).astype(np.uint8)
+        refined_mask = np.where(np.asarray(details.get("refined_mask", final_mask)) > 0, 255, 0).astype(np.uint8)
+        final_mask_pre_expand = np.where(np.asarray(details.get("final_mask_pre_expand", final_mask)) > 0, 255, 0).astype(np.uint8)
+        final_mask_post_expand = np.where(np.asarray(details.get("final_mask_post_expand", final_mask)) > 0, 255, 0).astype(np.uint8)
+        protect_mask = np.where(np.asarray(details.get("protect_mask", np.zeros_like(final_mask))) > 0, 255, 0).astype(np.uint8)
+        backend = str(details.get("refiner_backend", "source_ctd") or "source_ctd")
+        device = str(details.get("refiner_device", cfg.get("ctd_device", "cpu")) or cfg.get("ctd_device", "cpu"))
+        fallback_used = bool(details.get("fallback_used", False))
+    elif mode == MASK_INPAINT_MODE_RTDETR_LEGACY_BBOX_SOURCE:
+        details = build_rtdetr_legacy_bbox_mask(img, blk_list, cfg)
+        final_mask = np.where(np.asarray(details.get("final_mask", np.zeros(img.shape[:2], dtype=np.uint8))) > 0, 255, 0).astype(np.uint8)
+        raw_mask = np.where(np.asarray(details.get("raw_mask", final_mask)) > 0, 255, 0).astype(np.uint8)
+        refined_mask = np.where(np.asarray(details.get("refined_mask", final_mask)) > 0, 255, 0).astype(np.uint8)
+        final_mask_pre_expand = np.where(np.asarray(details.get("final_mask_pre_expand", final_mask)) > 0, 255, 0).astype(np.uint8)
+        final_mask_post_expand = np.where(np.asarray(details.get("final_mask_post_expand", final_mask)) > 0, 255, 0).astype(np.uint8)
+        protect_mask = np.where(np.asarray(details.get("protect_mask", np.zeros_like(final_mask))) > 0, 255, 0).astype(np.uint8)
+        backend = str(details.get("refiner_backend", "source_ctd") or "source_ctd")
+        device = str(details.get("refiner_device", cfg.get("ctd_device", "cpu")) or cfg.get("ctd_device", "cpu"))
+        fallback_used = bool(details.get("fallback_used", False))
     else:
-        final_mask = _generate_legacy_mask(img, blk_list, default_padding=default_padding)
+        assign_mask_rois(blk_list, img.shape)
+        _populate_legacy_inpaint_boxes(img, blk_list)
+        if cfg.get("mask_refiner") == "ctd":
+            try:
+                refiner = CTDRefiner(
+                    CTDRefinerSettings(
+                        detect_size=int(cfg["ctd_detect_size"]),
+                        det_rearrange_max_batches=int(cfg["ctd_det_rearrange_max_batches"]),
+                        device=str(cfg["ctd_device"]),
+                        font_size_multiplier=float(cfg["ctd_font_size_multiplier"]),
+                        font_size_max=int(cfg["ctd_font_size_max"]),
+                        font_size_min=int(cfg["ctd_font_size_min"]),
+                        mask_dilate_size=int(cfg["ctd_mask_dilate_size"]),
+                    )
+                )
+                result = refiner.refine(img, blk_list)
+                raw_mask = result.raw_mask
+                refined_mask = result.refined_mask
+                final_mask_pre_expand = result.final_mask_pre_expand
+                final_mask_post_expand = result.final_mask_post_expand
+                backend = result.backend
+                device = result.device
+                protect_mask = build_protect_mask(
+                    img,
+                    blk_list,
+                    ProtectMaskSettings(keep_existing_lines=bool(cfg.get("keep_existing_lines", False))),
+                )
+                final_mask = cv2.bitwise_and(result.final_mask, cv2.bitwise_not(protect_mask))
+                if not np.any(final_mask) and np.any(result.final_mask):
+                    final_mask = result.final_mask.copy()
+                    fallback_used = True
+                if not np.any(final_mask):
+                    final_mask = _generate_legacy_mask(img, blk_list, default_padding=default_padding)
+                    fallback_used = True
+            except Exception:
+                raw_mask = None
+                refined_mask = None
+                final_mask = _generate_legacy_mask(img, blk_list, default_padding=default_padding)
+                final_mask_pre_expand = final_mask.copy()
+                final_mask_post_expand = final_mask.copy()
+                fallback_used = True
+        else:
+            final_mask = _generate_legacy_mask(img, blk_list, default_padding=default_padding)
+            final_mask_pre_expand = final_mask.copy()
+            final_mask_post_expand = final_mask.copy()
 
     final_mask = np.where(final_mask > 0, 255, 0).astype(np.uint8)
     if raw_mask is None:
         raw_mask = final_mask.copy()
     if refined_mask is None:
         refined_mask = final_mask.copy()
+    if final_mask_pre_expand is None:
+        final_mask_pre_expand = final_mask.copy()
+    if final_mask_post_expand is None:
+        final_mask_post_expand = final_mask.copy()
 
+    details = {
+        "raw_mask": np.where(raw_mask > 0, 255, 0).astype(np.uint8),
+        "refined_mask": np.where(refined_mask > 0, 255, 0).astype(np.uint8),
+        "protect_mask": np.where(protect_mask > 0, 255, 0).astype(np.uint8),
+        "final_mask_pre_expand": np.where(final_mask_pre_expand > 0, 255, 0).astype(np.uint8),
+        "final_mask_post_expand": np.where(final_mask_post_expand > 0, 255, 0).astype(np.uint8),
+        "final_mask": final_mask,
+        "mask_refiner": cfg.get("mask_refiner", "legacy_bbox"),
+        "mask_inpaint_mode": mode,
+        "keep_existing_lines": bool(cfg.get("keep_existing_lines", False)) if mode not in {MASK_INPAINT_MODE_RTDETR_LEGACY_BBOX_SOURCE, MASK_INPAINT_MODE_SOURCE_PARITY} else False,
+        "refiner_backend": backend,
+        "refiner_device": device,
+        "fallback_used": fallback_used,
+    }
     if return_details:
-        return {
-            "raw_mask": np.where(raw_mask > 0, 255, 0).astype(np.uint8),
-            "refined_mask": np.where(refined_mask > 0, 255, 0).astype(np.uint8),
-            "protect_mask": np.where(protect_mask > 0, 255, 0).astype(np.uint8),
-            "final_mask": final_mask,
-            "mask_refiner": cfg.get("mask_refiner", "legacy_bbox"),
-            "keep_existing_lines": bool(cfg.get("keep_existing_lines", False)),
-            "refiner_backend": backend,
-            "refiner_device": device,
-            "fallback_used": fallback_used,
-        }
-    return final_mask
+        return details
+    return details["final_mask"]
