@@ -8,6 +8,7 @@ import traceback
 import imkit as imk
 import numpy as np
 import time
+from collections import deque
 from typing import TYPE_CHECKING
 from typing import List
 from PySide6.QtCore import QCoreApplication
@@ -18,7 +19,6 @@ from modules.translation.processor import Translator
 from modules.utils.textblock import sort_blk_list
 from modules.utils.pipeline_config import inpaint_map, get_config, get_inpainter_runtime
 from modules.utils.image_utils import generate_mask
-from modules.utils.inpaint_cleanup import refine_bubble_residue_inpaint
 from modules.utils.language_utils import get_language_code, is_no_space_lang
 from modules.utils.ocr_quality import summarize_ocr_quality
 from modules.utils.ocr_debug import export_ocr_debug_artifacts
@@ -74,6 +74,10 @@ class BatchProcessor:
         self.block_detection = block_detection_handler
         self.inpainting = inpainting_handler
         self.ocr_handler = ocr_handler
+        self._run_started_at: float | None = None
+        self._page_started_at: float | None = None
+        self._progress_image_path: str | None = None
+        self._recent_page_durations = deque(maxlen=5)
 
     def _emit_benchmark_event(self, tag: str, image_path: str | None = None, **extra) -> None:
         payload = {
@@ -92,8 +96,93 @@ class BatchProcessor:
     def skip_save(self, directory, timestamp, base_name, extension, archive_bname, image):
         logger.info("Skipping fallback translated image save for '%s'.", base_name)
 
+    @staticmethod
+    def _format_duration(seconds: float | None) -> str:
+        if seconds is None or seconds < 0:
+            return "n/a"
+        total_seconds = int(round(seconds))
+        hours, remainder = divmod(total_seconds, 3600)
+        minutes, secs = divmod(remainder, 60)
+        return f"{hours:02d}:{minutes:02d}:{secs:02d}"
+
+    def _estimate_eta_seconds(self, index: int, total: int) -> float | None:
+        if self._run_started_at is None:
+            return None
+        completed_pages = max(index, 0)
+        if completed_pages <= 0:
+            return None
+        recent = list(self._recent_page_durations)
+        avg_page = (sum(recent) / len(recent)) if recent else ((time.monotonic() - self._run_started_at) / completed_pages)
+        remaining_pages = max(total - index, 0)
+        return avg_page * remaining_pages
+
+    def _log_page_start(self, index: int, total: int, image_path: str) -> None:
+        self._progress_image_path = image_path
+        self._page_started_at = time.monotonic()
+        run_elapsed = (self._page_started_at - self._run_started_at) if self._run_started_at is not None else None
+        logger.info(
+            "Batch page start: page=%d/%d image=%s elapsed=%s eta=%s",
+            index + 1,
+            total,
+            os.path.basename(image_path),
+            self._format_duration(run_elapsed),
+            self._format_duration(self._estimate_eta_seconds(index, total)),
+        )
+        self._report_runtime_progress(
+            phase="pipeline",
+            service="batch",
+            status="starting",
+            step_key="page_start",
+            stage_name="page_start",
+            message=f"{index + 1}/{total} 페이지를 준비하는 중...",
+            page_index=index,
+            page_total=total,
+            image_name=os.path.basename(image_path),
+        )
+
+    def _log_page_done(self, index: int, total: int, image_path: str) -> None:
+        now = time.monotonic()
+        page_elapsed = None
+        if self._page_started_at is not None:
+            page_elapsed = now - self._page_started_at
+            self._recent_page_durations.append(page_elapsed)
+        run_elapsed = (now - self._run_started_at) if self._run_started_at is not None else None
+        avg_page = (sum(self._recent_page_durations) / len(self._recent_page_durations)) if self._recent_page_durations else None
+        remaining_pages = max(total - (index + 1), 0)
+        eta = (avg_page * remaining_pages) if avg_page is not None else None
+        logger.info(
+            "Batch page done: page=%d/%d image=%s page_elapsed=%s elapsed=%s avg_page=%s eta=%s",
+            index + 1,
+            total,
+            os.path.basename(image_path),
+            self._format_duration(page_elapsed),
+            self._format_duration(run_elapsed),
+            self._format_duration(avg_page),
+            self._format_duration(eta),
+        )
+        self._report_runtime_progress(
+            phase="pipeline",
+            service="batch",
+            status="completed",
+            step_key="page_done",
+            stage_name="page_done",
+            message=f"{index + 1}/{total} 페이지 처리가 완료되었습니다.",
+            page_index=index,
+            page_total=total,
+            image_name=os.path.basename(image_path),
+        )
+
+    def _report_runtime_progress(self, **payload):
+        callback = getattr(self.main_page, "report_runtime_progress", None)
+        if not callable(callback):
+            return
+        try:
+            callback(payload)
+        except Exception:
+            logger.debug("Failed to forward automatic progress payload.", exc_info=True)
+
     def emit_progress(self, index, total, step, steps, change_name):
-        """Wrapper around main_page.progress_update.emit that logs a human-readable stage."""
+        """Wrapper around main_page.progress_update.emit that logs current batch position with ETA."""
         stage_map = {
             0: 'start-image',
             1: 'text-block-detection',
@@ -106,7 +195,36 @@ class BatchProcessor:
             10: 'save-and-finish',
         }
         stage_name = stage_map.get(step, f'stage-{step}')
-        logger.info(f"Progress: image_index={index}/{total} step={step}/{steps} ({stage_name}) change_name={change_name}")
+        image_name = os.path.basename(self._progress_image_path) if self._progress_image_path else '-'
+        run_elapsed = (time.monotonic() - self._run_started_at) if self._run_started_at is not None else None
+        page_elapsed = (time.monotonic() - self._page_started_at) if self._page_started_at is not None else None
+        percent = 0.0
+        total_units = max(total * steps, 1)
+        current_units = min(max(index * steps + step, 0), total_units)
+        percent = (current_units / total_units) * 100.0
+        logger.info(
+            "Batch progress: page=%d/%d image=%s stage=%s overall=%.1f%% elapsed=%s page_elapsed=%s eta=%s",
+            index + 1 if total else 0,
+            total,
+            image_name,
+            stage_name,
+            percent,
+            self._format_duration(run_elapsed),
+            self._format_duration(page_elapsed),
+            self._format_duration(self._estimate_eta_seconds(index, total)),
+        )
+        if step > 0:
+            self._report_runtime_progress(
+                phase="pipeline",
+                service="batch",
+                status="running",
+                step_key=stage_name,
+                stage_name=stage_name,
+                message=f"{index + 1}/{total} 페이지 {stage_name} 단계 진행 중...",
+                page_index=index,
+                page_total=total,
+                image_name=image_name,
+            )
         self.main_page.progress_update.emit(index, total, step, steps, change_name)
 
     def log_skipped_image(self, directory, timestamp, image_path, reason="", full_traceback=""):
@@ -193,21 +311,21 @@ class BatchProcessor:
                 page_state.get("source_lang", source_lang),
             )
 
-    def _build_cleanup_delta_mask(self, raw_mask, final_mask):
-        if raw_mask is None and final_mask is None:
+    def _build_cleanup_delta_mask(self, base_mask, final_mask):
+        if base_mask is None and final_mask is None:
             return None
         if final_mask is None:
             return None
         final_arr = np.asarray(final_mask)
         if final_arr.ndim == 3:
             final_arr = final_arr[:, :, 0]
-        if raw_mask is None:
-            raw_arr = np.zeros_like(final_arr, dtype=np.uint8)
+        if base_mask is None:
+            base_arr = np.zeros_like(final_arr, dtype=np.uint8)
         else:
-            raw_arr = np.asarray(raw_mask)
-            if raw_arr.ndim == 3:
-                raw_arr = raw_arr[:, :, 0]
-        return np.where((final_arr > 0) & (raw_arr <= 0), 255, 0).astype(np.uint8)
+            base_arr = np.asarray(base_mask)
+            if base_arr.ndim == 3:
+                base_arr = base_arr[:, :, 0]
+        return np.where((final_arr > 0) & (base_arr <= 0), 255, 0).astype(np.uint8)
 
     def _write_inpaint_debug_exports(
         self,
@@ -229,8 +347,11 @@ class BatchProcessor:
         mask_details: dict | None = None,
         inpainter_backend: str = "unknown",
     ) -> None:
-        cleanup_delta = self._build_cleanup_delta_mask(raw_mask, final_mask)
         mask_details = mask_details or {}
+        base_mask = mask_details.get("final_mask", final_mask)
+        cleanup_delta = self._build_cleanup_delta_mask(base_mask, final_mask)
+        residue_mask = (cleanup_stats or {}).get("residue_mask") if cleanup_stats else None
+        mask_overlay_mask = mask_details.get("final_mask_post_expand", base_mask)
         metadata = build_inpaint_debug_metadata(
             image_path=image_path,
             run_type=self._current_run_type(),
@@ -241,6 +362,10 @@ class BatchProcessor:
             hd_strategy=hd_strategy,
             blocks=blk_list or [],
             raw_mask=raw_mask,
+            final_mask=final_mask,
+            final_mask_pre_expand=mask_details.get("final_mask_pre_expand"),
+            final_mask_post_expand=mask_details.get("final_mask_post_expand"),
+            residue_mask=residue_mask,
             cleanup_delta=cleanup_delta,
             cleanup_stats=cleanup_stats,
             mask_refiner=str(mask_details.get("mask_refiner", "legacy_bbox") or "legacy_bbox"),
@@ -258,6 +383,7 @@ class BatchProcessor:
             blocks=blk_list or [],
             export_settings=export_settings,
             raw_mask=raw_mask,
+            mask_overlay_mask=mask_overlay_mask,
             cleanup_delta=cleanup_delta,
             metadata=metadata,
         )
@@ -428,6 +554,10 @@ class BatchProcessor:
     def batch_process(self, selected_paths: List[str] = None):
         timestamp = build_export_timestamp()
         self._export_run_tokens = {}
+        self._run_started_at = time.monotonic()
+        self._page_started_at = None
+        self._progress_image_path = None
+        self._recent_page_durations.clear()
         image_list = selected_paths if selected_paths is not None else self.main_page.image_files
         total_images = len(image_list)
         self._emit_benchmark_event("batch_run_start", total_images=total_images)
@@ -461,6 +591,7 @@ class BatchProcessor:
             source_lang = page_state['source_lang']
             target_lang = page_state['target_lang']
             self._start_page_summary(image_path, source_lang, target_lang)
+            self._log_page_start(index, total_images, image_path)
             self._emit_benchmark_event(
                 "page_start",
                 image_path=image_path,
@@ -532,7 +663,8 @@ class BatchProcessor:
                 self.block_detection.block_detector_cache = TextBlockDetector(settings_page)
             
             blk_list = self.block_detection.block_detector_cache.detect(image)
-            detector_key = settings_page.get_tool_selection('detector') or 'RT-DETR-v2'
+            precomputed_mask_details = self.block_detection.block_detector_cache.last_mask_details
+            detector_key = self.block_detection.block_detector_cache.detector or settings_page.get_tool_selection('detector') or 'RT-DETR-v2'
             detector_engine = self.block_detection.block_detector_cache.last_engine_name or ""
             detector_device = self.block_detection.block_detector_cache.last_device or resolve_device(
                 settings_page.is_gpu_enabled(), backend='onnx'
@@ -738,7 +870,10 @@ class BatchProcessor:
                     inpainter_key=settings_page.get_tool_selection('inpainter'),
                     hd_strategy=hd_strategy,
                     cleanup_stats={"applied": False, "component_count": 0, "block_count": 0},
-                    mask_details={"mask_refiner": settings_page.get_mask_refiner_settings().get("mask_refiner", "legacy_bbox")},
+                    mask_details={
+                        "mask_refiner": settings_page.get_mask_refiner_settings().get("mask_refiner", "legacy_bbox"),
+                        "mask_inpaint_mode": settings_page.get_mask_refiner_settings().get("mask_inpaint_mode", "rtdetr_legacy_bbox_source_lama"),
+                    },
                     inpainter_backend=get_inpainter_runtime(settings_page)["backend"],
                 )
                 self.skip_save(directory, export_token, base_name, extension, archive_bname, image)
@@ -796,7 +931,13 @@ class BatchProcessor:
             logger.info("pre-inpaint: generating mask (blk_list=%d blocks)", len(blk_list))
             t0 = time.time()
             mask_settings = settings_page.get_mask_refiner_settings()
-            mask_details = generate_mask(image, blk_list, settings=mask_settings, return_details=True)
+            mask_details = generate_mask(
+                image,
+                blk_list,
+                settings=mask_settings,
+                return_details=True,
+                precomputed_mask_details=precomputed_mask_details,
+            )
             mask = mask_details["final_mask"]
             raw_mask = mask_details["raw_mask"]
             t1 = time.time()
@@ -806,21 +947,9 @@ class BatchProcessor:
             if self._is_cancelled():
                 return
 
-            inpaint_input_img = self.inpainting.inpainter_cache(image, mask, config)
+            inpaint_input_img = self.inpainting.inpaint_with_blocks(image, mask, blk_list, config=config)
             inpaint_input_img = imk.convert_scale_abs(inpaint_input_img)
-            inpaint_input_img, mask, cleanup_stats = refine_bubble_residue_inpaint(
-                inpaint_input_img,
-                mask,
-                blk_list,
-                self.inpainting.inpainter_cache,
-                config,
-            )
-            if cleanup_stats.get("applied"):
-                logger.info(
-                    "pre-inpaint: residue cleanup applied for %d block(s), %d component(s)",
-                    cleanup_stats.get("block_count", 0),
-                    cleanup_stats.get("component_count", 0),
-                )
+            cleanup_stats = {"applied": False, "component_count": 0, "block_count": 0}
 
             # Saving cleaned image
             patches = self.inpainting.get_inpainted_patches(mask, inpaint_input_img)
@@ -1232,6 +1361,7 @@ class BatchProcessor:
                 block_count=len(blk_list or []),
                 patch_count=len(patches or []),
             )
+            self._log_page_done(index, total_images, image_path)
 
             self.emit_progress(index, total_images, 10, 10, False)
         self._emit_benchmark_event("batch_run_done", total_images=total_images)

@@ -12,6 +12,7 @@ from modules.inpainting.lama_variants import LaMaLarge512px, LaMaMPE
 from modules.inpainting.mi_gan import MIGAN
 from modules.inpainting.schema import Config
 from modules.utils.exceptions import LocalServiceConnectionError, LocalServiceSetupError
+from modules.utils.mask_inpaint_mode import uses_source_compat_mode
 from modules.utils.inpainting_runtime import (
     inpainter_backend_for,
     inpainter_default_settings,
@@ -81,7 +82,10 @@ def get_config(settings_page: SettingsPage):
 
 
 def get_inpainter_runtime(settings_page: SettingsPage, inpainter_key: str | None = None) -> dict:
-    normalized = normalize_inpainter_key(inpainter_key or settings_page.get_tool_selection("inpainter"))
+    requested = inpainter_key or settings_page.get_tool_selection("inpainter")
+    if uses_source_compat_mode(settings_page.get_mask_inpaint_mode()):
+        requested = "lama_large_512px"
+    normalized = normalize_inpainter_key(requested)
     defaults = inpainter_default_settings(normalized)
     runtime_settings = settings_page.get_inpainter_runtime_settings(normalized)
     merged = dict(defaults)
@@ -221,7 +225,10 @@ def validate_translator(main: ComicTranslate, target_lang: str):
             runtime_manager = LocalGemmaRuntimeManager()
             main.local_translation_runtime_manager = runtime_manager
         try:
-            runtime_manager.ensure_server(settings_page)
+            # Keep automatic-run preflight cheap on the UI thread.
+            # The actual managed-runtime startup/connection check still happens
+            # inside the worker when the translator is instantiated.
+            runtime_manager.validate_server(settings_page)
         except (LocalServiceSetupError, LocalServiceConnectionError) as exc:
             if hasattr(main, "batch_report_ctrl"):
                 title = (

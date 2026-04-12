@@ -43,7 +43,11 @@ class Translator:
             if not isinstance(runtime_manager, LocalGemmaRuntimeManager):
                 runtime_manager = LocalGemmaRuntimeManager()
                 main_page.local_translation_runtime_manager = runtime_manager
-            runtime_manager.ensure_server(self.settings)
+            runtime_manager.ensure_server(
+                self.settings,
+                progress_callback=getattr(main_page, "report_runtime_progress", None),
+                cancel_checker=getattr(main_page, "is_current_task_cancelled", None),
+            )
         
         # Create appropriate engine using factory
         self.engine = TranslationFactory.create_engine(
