@@ -34,7 +34,7 @@ class GemmaLocalServerPage(QtWidgets.QWidget):
                 "Comic Translate can use your local Gemma Docker server for translation.\n"
                 "1. Run `docker compose pull --policy always` and then `docker compose up -d --force-recreate` in the repository root.\n"
                 "2. In Settings > Credentials, use Endpoint URL `http://127.0.0.1:18080/v1`.\n"
-                "3. Set Model to the exact GGUF filename you placed in `testmodel/` (for example `gemma-4-26b-a4b-it-heretic.q3_k_m.gguf`).\n"
+                "3. Set Model to the exact GGUF filename in `testmodel/` (recommended: `gemma-4-26B-IQ4_NL.gguf`).\n"
                 "If responses are truncated, lower Chunk Size or increase LLAMA_CTX_SIZE in docker-compose.yaml."
             )
         ).secondary()
@@ -85,7 +85,7 @@ class GemmaLocalServerPage(QtWidgets.QWidget):
 
         tip = MLabel(
             self.tr(
-                "Recommended starting values for the included Gemma Docker setup:\n"
+                "Recommended defaults for the included Gemma Docker setup:\n"
                 "- Chunk Size: 6\n"
                 "- Max Completion Tokens: 512\n"
                 "- Request Timeout: 180 seconds"

@@ -368,13 +368,9 @@ Use Custom Local Server(Gemma) with the included Gemma Docker setup.</source>
         <source>Comic Translate can use your local Gemma Docker server for translation.
 1. Run `docker compose pull --policy always` and then `docker compose up -d --force-recreate` in the repository root.
 2. In Settings &gt; Credentials, use Endpoint URL `http://127.0.0.1:18080/v1`.
-3. Set Model to the exact GGUF filename you placed in `testmodel/` (for example `gemma-4-26b-a4b-it-heretic.q3_k_m.gguf`).
+3. Set Model to the exact GGUF filename in `testmodel/` (recommended: `gemma-4-26B-IQ4_NL.gguf`).
 If responses are truncated, lower Chunk Size or increase LLAMA_CTX_SIZE in docker-compose.yaml.</source>
-        <translation>Comic Translate는 로컬 Gemma Docker 서버를 번역용으로 사용할 수 있습니다.
-1. 저장소 루트에서 `docker compose pull --policy always`를 먼저 실행하고, 이어서 `docker compose up -d --force-recreate`를 실행하세요.
-2. 설정 &gt; 자격 증명에서 Endpoint URL을 `http://127.0.0.1:18080/v1`로 입력하세요.
-3. `testmodel/`에 둔 실제 GGUF 파일명을 Model에 정확히 입력하세요.
-응답이 잘리면 Chunk Size를 더 낮추거나 docker-compose.yaml의 LLAMA_CTX_SIZE를 더 크게 올리세요.</translation>
+        <translation type="unfinished"></translation>
     </message>
     <message>
         <source>Gemma Translation Tuning</source>
@@ -397,14 +393,11 @@ If responses are truncated, lower Chunk Size or increase LLAMA_CTX_SIZE in docke
         <translation>원시 응답 로그</translation>
     </message>
     <message>
-        <source>Recommended starting values for the included Gemma Docker setup:
+        <source>Recommended defaults for the included Gemma Docker setup:
 - Chunk Size: 6
 - Max Completion Tokens: 512
 - Request Timeout: 180 seconds</source>
-        <translation>포함된 Gemma Docker 구성의 권장 시작값:
-- Chunk Size: 6
-- Max Completion Tokens: 512
-- Request Timeout: 180초</translation>
+        <translation type="unfinished"></translation>
     </message>
 </context>
 <context>
@@ -1697,8 +1690,16 @@ Open or create a project to get started.</source>
         <translation>번역기</translation>
     </message>
     <message>
+        <source>Custom Local Server(Gemma)</source>
+        <translation type="unfinished">사용자 지정 로컬 서버(Gemma)</translation>
+    </message>
+    <message>
         <source>Text Recognition</source>
         <translation>텍스트 인식</translation>
+    </message>
+    <message>
+        <source>PaddleOCR VL</source>
+        <translation type="unfinished"></translation>
     </message>
     <message>
         <source>Text Detector</source>
@@ -1775,10 +1776,6 @@ Open or create a project to get started.</source>
     <message>
         <source>precision</source>
         <translation>정밀도</translation>
-    </message>
-    <message>
-        <source>AOT</source>
-        <translation>AOT</translation>
     </message>
     <message>
         <source>HD Strategy</source>
