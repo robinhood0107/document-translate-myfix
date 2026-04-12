@@ -13,7 +13,6 @@ from modules.detection.processor import TextBlockDetector
 from modules.translation.processor import Translator
 from modules.utils.device import resolve_device
 from modules.utils.image_utils import generate_mask
-from modules.utils.inpaint_cleanup import refine_bubble_residue_inpaint
 from modules.utils.pipeline_config import get_config, get_inpainter_runtime, inpaint_map
 from modules.utils.textblock import TextBlock, sort_blk_list
 
@@ -249,26 +248,21 @@ class ChunkMixin:
         if not mask_blocks:
             return None, None, None, {"applied": False, "component_count": 0, "block_count": 0}, [], {}
         mask_settings = self.main_page.settings_page.get_mask_refiner_settings()
-        mask_details = generate_mask(image, mask_blocks, settings=mask_settings, return_details=True)
+        precomputed_mask_details = getattr(self.block_detection.block_detector_cache, "last_mask_details", None)
+        mask_details = generate_mask(
+            image,
+            mask_blocks,
+            settings=mask_settings,
+            return_details=True,
+            precomputed_mask_details=precomputed_mask_details,
+        )
         mask = mask_details["final_mask"]
         if mask is None or not np.any(mask):
             return None, None, None, {"applied": False, "component_count": 0, "block_count": 0}, mask_blocks, mask_details
         raw_mask = mask_details["raw_mask"]
-        inpainted = self.inpainting.inpainter_cache(image, mask, config)
+        inpainted = self.inpainting.inpaint_with_blocks(image, mask, mask_blocks, config=config)
         inpainted = imk.convert_scale_abs(inpainted)
-        inpainted, mask, cleanup_stats = refine_bubble_residue_inpaint(
-            inpainted,
-            mask,
-            mask_blocks,
-            self.inpainting.inpainter_cache,
-            config,
-        )
-        if cleanup_stats.get("applied"):
-            logger.info(
-                "webtoon inpaint residue cleanup applied: blocks=%d components=%d",
-                cleanup_stats.get("block_count", 0),
-                cleanup_stats.get("component_count", 0),
-            )
+        cleanup_stats = {"applied": False, "component_count": 0, "block_count": 0}
         self._emit_benchmark_event(
             "inpaint_end",
             image_path=image_path,
