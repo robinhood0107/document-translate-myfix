@@ -37,6 +37,20 @@ class ToolsPage(QtWidgets.QWidget):
         detector_widget, self.detector_combo = create_title_and_combo(self.tr("Text Detector"), self.detectors, h4=True)
         set_combo_box_width(self.detector_combo, self.detectors)
 
+        self.mask_inpaint_mode_options = [
+            self.tr("RT-DETR-v2 + Legacy BBox + Source LaMa"),
+            self.tr("Source Parity CTD/LaMa"),
+        ]
+        mask_inpaint_mode_widget, self.mask_inpaint_mode_combo = create_title_and_combo(
+            self.tr("Mask/Inpaint Mode"),
+            self.mask_inpaint_mode_options,
+            h4=False,
+        )
+        set_combo_box_width(self.mask_inpaint_mode_combo, self.mask_inpaint_mode_options)
+        self.mask_inpaint_mode_combo.setCurrentText(self.mask_inpaint_mode_options[0])
+        self.mask_inpaint_mode_hint = MLabel("")
+        self.mask_inpaint_mode_hint.setWordWrap(True)
+
         mask_label = MLabel(self.tr("Precise Masking")).h4()
         mask_refiner_widget, self.mask_refiner_combo = create_title_and_combo(
             self.tr("Mask Refiner"),
@@ -44,9 +58,9 @@ class ToolsPage(QtWidgets.QWidget):
             h4=False,
         )
         set_combo_box_width(self.mask_refiner_combo, [self.tr("legacy_bbox"), self.tr("ctd")])
-        self.mask_refiner_combo.setCurrentText(self.tr("ctd"))
+        self.mask_refiner_combo.setCurrentText(self.tr("legacy_bbox"))
         self.keep_existing_lines_checkbox = MCheckBox(self.tr("Keep Existing Lines"))
-        self.keep_existing_lines_checkbox.setChecked(True)
+        self.keep_existing_lines_checkbox.setChecked(False)
 
         self.ctd_settings_widget = QtWidgets.QWidget()
         ctd_form = QtWidgets.QFormLayout(self.ctd_settings_widget)
@@ -175,6 +189,10 @@ class ToolsPage(QtWidgets.QWidget):
         self.mask_refiner_combo.currentTextChanged.connect(
             lambda _text: self._update_mask_refiner_widgets(self.mask_refiner_combo.currentIndex())
         )
+        self.mask_inpaint_mode_combo.currentIndexChanged.connect(self._update_mask_inpaint_mode_widgets)
+        self.mask_inpaint_mode_combo.currentTextChanged.connect(
+            lambda _text: self._update_mask_inpaint_mode_widgets(self.mask_inpaint_mode_combo.currentIndex())
+        )
 
         self.use_gpu_checkbox = MCheckBox(self.tr("Use GPU"))
         self.use_gpu_checkbox.setChecked(True)
@@ -184,6 +202,8 @@ class ToolsPage(QtWidgets.QWidget):
         layout.addWidget(translator_widget)
         layout.addSpacing(10)
         layout.addWidget(detector_widget)
+        layout.addWidget(mask_inpaint_mode_widget)
+        layout.addWidget(self.mask_inpaint_mode_hint)
         layout.addSpacing(10)
         layout.addWidget(mask_label)
         layout.addWidget(mask_refiner_widget)
@@ -204,6 +224,7 @@ class ToolsPage(QtWidgets.QWidget):
         self._update_hd_strategy_widgets(self.inpaint_strategy_combo.currentIndex())
         self._update_inpainter_runtime_widgets(self.inpainter_combo.currentIndex())
         self._update_mask_refiner_widgets(self.mask_refiner_combo.currentIndex())
+        self._update_mask_inpaint_mode_widgets(self.mask_inpaint_mode_combo.currentIndex())
 
     def _update_hd_strategy_widgets(self, index: int):
         strategy = self.inpaint_strategy_combo.itemText(index)
@@ -218,6 +239,44 @@ class ToolsPage(QtWidgets.QWidget):
         use_ctd = self.mask_refiner_combo.itemText(index) == self.tr("ctd")
         self.keep_existing_lines_checkbox.setVisible(use_ctd)
         self.ctd_settings_widget.setVisible(use_ctd)
+
+    def _update_mask_inpaint_mode_widgets(self, index: int):
+        mode_text = self.mask_inpaint_mode_combo.itemText(index)
+        legacy_mode = mode_text == self.tr("RT-DETR-v2 + Legacy BBox + Source LaMa")
+        source_parity = mode_text == self.tr("Source Parity CTD/LaMa")
+        source_mode = legacy_mode or source_parity
+
+        if source_mode:
+            target_mask_refiner = self.tr("ctd") if source_parity else self.tr("legacy_bbox")
+            mask_refiner_index = self.mask_refiner_combo.findText(target_mask_refiner)
+            if mask_refiner_index != -1 and self.mask_refiner_combo.currentIndex() != mask_refiner_index:
+                self.mask_refiner_combo.setCurrentIndex(mask_refiner_index)
+            self.mask_refiner_combo.setEnabled(False)
+            self.keep_existing_lines_checkbox.setChecked(False)
+            self.keep_existing_lines_checkbox.setVisible(False)
+            self.ctd_settings_widget.setVisible(source_parity)
+
+            lama_index = self.inpainter_combo.findText(self.tr("lama_large_512px"))
+            if lama_index != -1 and self.inpainter_combo.currentIndex() != lama_index:
+                self.inpainter_combo.setCurrentIndex(lama_index)
+            self.inpainter_combo.setEnabled(False)
+
+            detector_index = self.detector_combo.findText("RT-DETR-v2")
+            if legacy_mode and detector_index != -1 and self.detector_combo.currentIndex() != detector_index:
+                self.detector_combo.setCurrentIndex(detector_index)
+        else:
+            self.mask_refiner_combo.setEnabled(True)
+            self.keep_existing_lines_checkbox.setVisible(self.mask_refiner_combo.currentText() == self.tr("ctd"))
+            self.ctd_settings_widget.setVisible(self.mask_refiner_combo.currentText() == self.tr("ctd"))
+            self.inpainter_combo.setEnabled(True)
+
+        self.detector_combo.setEnabled(not source_mode)
+        if source_parity:
+            self.mask_inpaint_mode_hint.setText(self.tr("Source Parity mode runs the source CTD detector, source grouping, source mask refinement, and source block-wise LaMa exactly as the reference flow."))
+        elif legacy_mode:
+            self.mask_inpaint_mode_hint.setText(self.tr("RT-DETR-v2 + Legacy BBox + Source LaMa keeps RT-DETR-v2 as the detector, restores the exact 1aec275 bbox mask flow, and then runs the exact source block-wise LaMa inpainting flow."))
+        else:
+            self.mask_inpaint_mode_hint.setText("")
 
     def _update_inpainter_runtime_widgets(self, index: int):
         key = self.inpainter_combo.itemText(index)

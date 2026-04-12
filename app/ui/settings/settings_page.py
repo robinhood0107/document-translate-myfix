@@ -31,6 +31,13 @@ from modules.utils.inpainting_runtime import (
     normalize_inpainter_key,
     normalized_mask_refiner_settings,
 )
+from modules.utils.mask_inpaint_mode import (
+    DEFAULT_MASK_INPAINT_MODE,
+    normalize_mask_inpaint_mode,
+    uses_legacy_bbox_source_mode,
+    uses_source_compat_mode,
+    uses_source_parity_detector,
+)
 
 
 logger = logging.getLogger(__name__)
@@ -145,6 +152,7 @@ class SettingsPage(QtWidgets.QWidget):
             self.ui.translator_combo,
             self.ui.ocr_combo,
             self.ui.detector_combo,
+            self.ui.mask_inpaint_mode_combo,
             self.ui.mask_refiner_combo,
             self.ui.inpainter_combo,
             self.ui.inpaint_strategy_combo,
@@ -187,6 +195,10 @@ class SettingsPage(QtWidgets.QWidget):
             self.ui.gemma_chunk_size_spinbox,
             self.ui.gemma_max_completion_tokens_spinbox,
             self.ui.gemma_request_timeout_spinbox,
+            self.ui.gemma_temperature_spinbox,
+            self.ui.gemma_top_k_spinbox,
+            self.ui.gemma_top_p_spinbox,
+            self.ui.gemma_min_p_spinbox,
             self.ui.ctd_font_size_multiplier_spinbox,
             self.ui.ctd_font_size_max_spinbox,
             self.ui.ctd_font_size_min_spinbox,
@@ -228,8 +240,19 @@ class SettingsPage(QtWidgets.QWidget):
                 return self._normalize_ocr_mode_value(current_data)
             return self._normalize_ocr_mode_value(combo.currentText())
         if tool_type == "inpainter":
+            if uses_source_compat_mode(self.get_mask_inpaint_mode()):
+                return "lama_large_512px"
             return normalize_inpainter_key(combo.currentText())
+        if tool_type == "detector" and uses_source_parity_detector(self.get_mask_inpaint_mode()):
+            return "Source Parity CTD"
         return combo.currentText()
+
+    def get_mask_inpaint_mode(self) -> str:
+        raw = self.ui.value_mappings.get(
+            self.ui.mask_inpaint_mode_combo.currentText(),
+            self.ui.mask_inpaint_mode_combo.currentText(),
+        )
+        return normalize_mask_inpaint_mode(raw)
 
     def get_tool_display_text(self, tool_type: str) -> str:
         tool_combos = {
@@ -304,6 +327,10 @@ class SettingsPage(QtWidgets.QWidget):
             "chunk_size": int(self.ui.gemma_chunk_size_spinbox.value()),
             "max_completion_tokens": int(self.ui.gemma_max_completion_tokens_spinbox.value()),
             "request_timeout_sec": int(self.ui.gemma_request_timeout_spinbox.value()),
+            "temperature": float(self.ui.gemma_temperature_spinbox.value()),
+            "top_k": int(self.ui.gemma_top_k_spinbox.value()),
+            "top_p": float(self.ui.gemma_top_p_spinbox.value()),
+            "min_p": float(self.ui.gemma_min_p_spinbox.value()),
             "raw_response_logging": self.ui.gemma_raw_response_logging_checkbox.isChecked(),
         }
 
@@ -329,8 +356,16 @@ class SettingsPage(QtWidgets.QWidget):
         }
 
     def get_mask_refiner_settings(self):
+        mode = self.get_mask_inpaint_mode()
+        if uses_source_parity_detector(mode):
+            mask_refiner = "ctd"
+        elif uses_legacy_bbox_source_mode(mode):
+            mask_refiner = "legacy_bbox"
+        else:
+            mask_refiner = self.ui.mask_refiner_combo.currentText()
         return normalized_mask_refiner_settings({
-            "mask_refiner": self.ui.mask_refiner_combo.currentText(),
+            "mask_refiner": mask_refiner,
+            "mask_inpaint_mode": mode,
             "ctd_detect_size": int(self.ui.ctd_detect_size_combo.currentText()),
             "ctd_det_rearrange_max_batches": int(self.ui.ctd_det_rearrange_max_batches_combo.currentText()),
             "ctd_device": self.ui.ctd_device_combo.currentText(),
@@ -338,7 +373,7 @@ class SettingsPage(QtWidgets.QWidget):
             "ctd_font_size_max": int(self.ui.ctd_font_size_max_spinbox.value()),
             "ctd_font_size_min": int(self.ui.ctd_font_size_min_spinbox.value()),
             "ctd_mask_dilate_size": int(self.ui.ctd_mask_dilate_size_spinbox.value()),
-            "keep_existing_lines": self.ui.keep_existing_lines_checkbox.isChecked(),
+            "keep_existing_lines": False if uses_source_compat_mode(mode) else self.ui.keep_existing_lines_checkbox.isChecked(),
         })
 
     def get_inpainter_runtime_settings(self, inpainter_key: str | None = None):
@@ -618,6 +653,14 @@ class SettingsPage(QtWidgets.QWidget):
         else:
             self.ui.detector_combo.setCurrentIndex(-1)
 
+        mask_inpaint_mode = normalize_mask_inpaint_mode(
+            settings.value("mask_refiner_settings/mask_inpaint_mode", DEFAULT_MASK_INPAINT_MODE, type=str)
+        )
+        translated_mask_mode = self.ui.reverse_mappings.get(mask_inpaint_mode, self.ui.reverse_mappings.get(DEFAULT_MASK_INPAINT_MODE, self.ui.mask_inpaint_mode_combo.itemText(0)))
+        idx = self.ui.mask_inpaint_mode_combo.findText(translated_mask_mode)
+        self.ui.mask_inpaint_mode_combo.setCurrentIndex(idx if idx != -1 else 0)
+        self.ui.tools_page._update_mask_inpaint_mode_widgets(self.ui.mask_inpaint_mode_combo.currentIndex())
+
         self.ui.tools_page._update_inpainter_runtime_widgets(self.ui.inpainter_combo.currentIndex())
 
         if is_gpu_available():
@@ -641,12 +684,22 @@ class SettingsPage(QtWidgets.QWidget):
         settings.endGroup()
 
         settings.beginGroup("mask_refiner_settings")
-        mask_refiner = settings.value("mask_refiner", "ctd", type=str)
+        default_mask_refiner = "ctd" if uses_source_parity_detector(mask_inpaint_mode) else "legacy_bbox" if uses_legacy_bbox_source_mode(mask_inpaint_mode) else "legacy_bbox"
+        mask_refiner = settings.value("mask_refiner", default_mask_refiner, type=str)
         idx = self.ui.mask_refiner_combo.findText(mask_refiner)
         if idx != -1:
             self.ui.mask_refiner_combo.setCurrentIndex(idx)
+        if uses_source_parity_detector(mask_inpaint_mode):
+            forced_idx = self.ui.mask_refiner_combo.findText("ctd")
+            if forced_idx != -1:
+                self.ui.mask_refiner_combo.setCurrentIndex(forced_idx)
+        elif uses_legacy_bbox_source_mode(mask_inpaint_mode):
+            forced_idx = self.ui.mask_refiner_combo.findText("legacy_bbox")
+            if forced_idx != -1:
+                self.ui.mask_refiner_combo.setCurrentIndex(forced_idx)
         self.ui.tools_page._update_mask_refiner_widgets(self.ui.mask_refiner_combo.currentIndex())
-        self.ui.keep_existing_lines_checkbox.setChecked(settings.value("keep_existing_lines", True, type=bool))
+        keep_existing_lines = settings.value("keep_existing_lines", False, type=bool)
+        self.ui.keep_existing_lines_checkbox.setChecked(False if uses_source_compat_mode(mask_inpaint_mode) else keep_existing_lines)
         self.ui.ctd_detect_size_combo.setCurrentText(str(settings.value("ctd_detect_size", 1280, type=int)))
         self.ui.ctd_det_rearrange_max_batches_combo.setCurrentText(str(settings.value("ctd_det_rearrange_max_batches", 4, type=int)))
         self.ui.ctd_device_combo.setCurrentText(settings.value("ctd_device", "cuda", type=str))
@@ -749,6 +802,18 @@ class SettingsPage(QtWidgets.QWidget):
                 GemmaLocalServerPage.DEFAULT_REQUEST_TIMEOUT_SEC,
                 type=int,
             )
+        )
+        self.ui.gemma_temperature_spinbox.setValue(
+            settings.value("temperature", GemmaLocalServerPage.DEFAULT_TEMPERATURE, type=float)
+        )
+        self.ui.gemma_top_k_spinbox.setValue(
+            settings.value("top_k", GemmaLocalServerPage.DEFAULT_TOP_K, type=int)
+        )
+        self.ui.gemma_top_p_spinbox.setValue(
+            settings.value("top_p", GemmaLocalServerPage.DEFAULT_TOP_P, type=float)
+        )
+        self.ui.gemma_min_p_spinbox.setValue(
+            settings.value("min_p", GemmaLocalServerPage.DEFAULT_MIN_P, type=float)
         )
         self.ui.gemma_raw_response_logging_checkbox.setChecked(
             settings.value("raw_response_logging", False, type=bool)
