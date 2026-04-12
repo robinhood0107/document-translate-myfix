@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 import math
 import os
 import shutil
@@ -44,6 +45,7 @@ EXCLUDED_SAMPLE_PARENT_NAMES = {
 }
 PRESET_DIRS = [
     ROOT / "benchmarks" / "presets",
+    ROOT / "benchmarks" / "gemma_iq4nl_japan" / "presets",
     ROOT / "benchmarks" / "paddleocr_vl15" / "presets",
     ROOT / "benchmarks" / "ocr_combo" / "presets",
     ROOT / "benchmarks" / "ocr_combo_ranked" / "presets",
@@ -194,7 +196,18 @@ def run_command(
     return completed
 
 
-def remove_containers(container_names: list[str]) -> None:
+def _container_exists(name: str) -> bool:
+    completed = subprocess.run(
+        _rewrite_docker_command(["docker", "ps", "-a", "--filter", f"name=^{name}$", "--format", "{{.Names}}"]),
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    names = [line.strip() for line in (completed.stdout or "").splitlines() if line.strip()]
+    return name in names
+
+
+def remove_containers(container_names: list[str], *, wait_timeout_sec: float = 30.0) -> None:
     for name in container_names:
         subprocess.run(
             _rewrite_docker_command(["docker", "rm", "-f", name]),
@@ -202,6 +215,13 @@ def remove_containers(container_names: list[str]) -> None:
             capture_output=True,
             text=True,
         )
+    deadline = time.time() + wait_timeout_sec
+    pending = {name for name in container_names if _container_exists(name)}
+    while pending and time.time() < deadline:
+        time.sleep(1.0)
+        pending = {name for name in pending if _container_exists(name)}
+    if pending:
+        raise RuntimeError(f"Container cleanup did not finish before timeout: {sorted(pending)}")
 
 
 def _python3_yaml_load(path: Path) -> dict[str, Any]:
@@ -347,22 +367,25 @@ def _stage_ocr_runtime(preset: dict[str, Any], runtime_dir: Path) -> dict[str, A
     runtime_dir.mkdir(parents=True, exist_ok=True)
     compose = _python3_yaml_load(OCR_BUNDLE_DIR / "docker-compose.yaml")
     ocr_runtime = preset.get("ocr_runtime", {})
-    front_device = str(ocr_runtime.get("front_device", "gpu:0"))
+    front_device = str(ocr_runtime.get("front_device", "gpu:0") or "gpu:0")
     use_hpip = bool(ocr_runtime.get("use_hpip", False))
 
     layout_service = compose["services"]["paddleocr-layout"]
+    depends_on = layout_service.get("depends_on")
+    if isinstance(depends_on, dict) and isinstance(depends_on.get("paddleocr-vllm"), dict):
+        depends_on["paddleocr-vllm"]["condition"] = "service_started"
     if ocr_runtime.get("layout_image"):
         layout_service["image"] = str(ocr_runtime["layout_image"])
     layout_command = str(layout_service.get("command") or "")
-    layout_service["command"] = layout_command.replace("--device gpu:0", f"--device {front_device}")
-    layout_command = str(layout_service.get("command") or "")
+    layout_command = re.sub(r"--device\s+cpu", f"--device {front_device}", layout_command)
+    layout_command = re.sub(r"--device\s+gpu:0", f"--device {front_device}", layout_command)
     if use_hpip:
         if "--use_hpip" not in layout_command:
             layout_command = layout_command.rstrip() + " --use_hpip"
     else:
         layout_command = layout_command.replace(" --use_hpip", "").replace("--use_hpip", "")
     layout_service["command"] = layout_command
-    if front_device == "cpu":
+    if front_device.lower() == "cpu":
         layout_service.pop("gpus", None)
     else:
         layout_service["gpus"] = "all"
@@ -686,6 +709,7 @@ def summarize_metrics(metrics_path: str | Path) -> dict[str, Any]:
             + float(stage_stats.get("ocr", {}).get("total_sec") or 0.0),
             3,
         ),
+        "detect_median_sec": stage_stats.get("detect", {}).get("median_sec"),
         "ocr_median_sec": stage_stats.get("ocr", {}).get("median_sec"),
         "ocr_page_p50_sec": stage_stats.get("ocr", {}).get("median_sec"),
         "ocr_page_p95_sec": stage_stats.get("ocr", {}).get("p95_sec"),
@@ -720,7 +744,9 @@ def render_summary_markdown(summary: dict[str, Any]) -> str:
         f"- gpu_peak_used_mb: `{summary.get('gpu_peak_used_mb')}`",
         f"- gpu_floor_free_mb: `{summary.get('gpu_floor_free_mb')}`",
         f"- gpu_peak_util_percent: `{summary.get('gpu_peak_util_percent')}`",
+        f"- gpu_peak_mem_util_percent: `{summary.get('gpu_peak_mem_util_percent')}`",
         f"- detect_total_sec: `{summary.get('detect_total_sec')}`",
+        f"- detect_median_sec: `{summary.get('detect_median_sec')}`",
         f"- ocr_total_sec: `{summary.get('ocr_total_sec')}`",
         f"- detect_ocr_total_sec: `{summary.get('detect_ocr_total_sec')}`",
         f"- ocr_median_sec: `{summary.get('ocr_median_sec')}`",

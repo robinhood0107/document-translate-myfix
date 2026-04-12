@@ -1,0 +1,823 @@
+{
+  "winner": {
+    "candidate_slug": "max512",
+    "label": "max_completion_tokens=512",
+    "run_dir": "",
+    "requested_temperature": 0.7,
+    "effective_temperature": 0.7,
+    "rescue_attempt_count": 0,
+    "temperature_attempt_count": 1,
+    "infra_attempt_count": 1,
+    "health_wait_sec": 900,
+    "candidate_status": "passed",
+    "passed_hard_gate": true,
+    "hard_fail_issues": [],
+    "rescue_trigger_issues": [],
+    "derived_from": "",
+    "oom_rescue_level": 0,
+    "oom_rescue_changes": {},
+    "setup_retry_reasons": [],
+    "last_failure_kind": "completed",
+    "last_failure_reason": "",
+    "summary": {
+      "elapsed_sec": 954.214,
+      "translate_median_sec": 14.275,
+      "detect_median_sec": 1.195,
+      "ocr_median_sec": 19.613,
+      "inpaint_median_sec": 3.195,
+      "gpu_peak_used_mb": 11986.0,
+      "gpu_floor_free_mb": 14.0,
+      "gpu_peak_util_percent": 100.0,
+      "gpu_peak_mem_util_percent": 44.0,
+      "page_failed_count": 0,
+      "gemma_truncated_count": 0,
+      "gemma_empty_content_count": 0,
+      "gemma_missing_key_count": 0,
+      "gemma_schema_validation_fail_count": 0
+    },
+    "runtime_observation": {
+      "detector_backend": "RTDetrV2ONNXDetection",
+      "detector_device": "cuda",
+      "ocr_front_device": "cuda",
+      "mask_refiner": "ctd",
+      "ctd_device": "cuda",
+      "inpainter_key": "lama_large_512px",
+      "inpainter_device": "cuda",
+      "inpaint_size": 1536,
+      "precision": "bf16",
+      "gemma_loaded_model_ids": [
+        "gemma-4-26B-IQ4_NL.gguf"
+      ]
+    },
+    "translation_audit": {
+      "baseline_run_dir": "C:\\Users\\pjjpj\\Desktop\\openai_manga_translater\\comic-translate\\banchmark_result_log\\gemma_iq4nl_japan\\20260411_171639_gemma_iq4nl_japan_fullgpu_suite\\stage1\\ov068-ngl14\\attempt02_t06_infra01",
+      "candidate_run_dir": "C:\\Users\\pjjpj\\Desktop\\openai_manga_translater\\comic-translate\\banchmark_result_log\\gemma_iq4nl_japan\\20260411_171639_gemma_iq4nl_japan_fullgpu_suite\\confirm\\max512-r1\\attempt01_t07_infra01",
+      "sample_count": 22,
+      "pages_checked": 22,
+      "missing_page_count": 0,
+      "key_mismatch_count": 0,
+      "suspect_block_count": 0,
+      "passed": true,
+      "pages": [
+        {
+          "page": "094",
+          "baseline_file": "C:\\Users\\pjjpj\\Desktop\\openai_manga_translater\\comic-translate\\banchmark_result_log\\gemma_iq4nl_japan\\20260411_171639_gemma_iq4nl_japan_fullgpu_suite\\stage1\\ov068-ngl14\\attempt02_t06_infra01\\corpus\\comic_translate_Apr-11-2026_06-13-46PM\\translated_texts\\094_translated.json",
+          "candidate_file": "C:\\Users\\pjjpj\\Desktop\\openai_manga_translater\\comic-translate\\banchmark_result_log\\gemma_iq4nl_japan\\20260411_171639_gemma_iq4nl_japan_fullgpu_suite\\confirm\\max512-r1\\attempt01_t07_infra01\\corpus\\comic_translate_Apr-12-2026_07-42-44PM\\translated_texts\\094_translated.json",
+          "missing": false,
+          "key_mismatch": false,
+          "suspect_blocks": 0
+        },
+        {
+          "page": "095",
+          "baseline_file": "C:\\Users\\pjjpj\\Desktop\\openai_manga_translater\\comic-translate\\banchmark_result_log\\gemma_iq4nl_japan\\20260411_171639_gemma_iq4nl_japan_fullgpu_suite\\stage1\\ov068-ngl14\\attempt02_t06_infra01\\corpus\\comic_translate_Apr-11-2026_06-13-46PM\\translated_texts\\095_translated.json",
+          "candidate_file": "C:\\Users\\pjjpj\\Desktop\\openai_manga_translater\\comic-translate\\banchmark_result_log\\gemma_iq4nl_japan\\20260411_171639_gemma_iq4nl_japan_fullgpu_suite\\confirm\\max512-r1\\attempt01_t07_infra01\\corpus\\comic_translate_Apr-12-2026_07-42-44PM\\translated_texts\\095_translated.json",
+          "missing": false,
+          "key_mismatch": false,
+          "suspect_blocks": 0
+        },
+        {
+          "page": "096",
+          "baseline_file": "C:\\Users\\pjjpj\\Desktop\\openai_manga_translater\\comic-translate\\banchmark_result_log\\gemma_iq4nl_japan\\20260411_171639_gemma_iq4nl_japan_fullgpu_suite\\stage1\\ov068-ngl14\\attempt02_t06_infra01\\corpus\\comic_translate_Apr-11-2026_06-13-46PM\\translated_texts\\096_translated.json",
+          "candidate_file": "C:\\Users\\pjjpj\\Desktop\\openai_manga_translater\\comic-translate\\banchmark_result_log\\gemma_iq4nl_japan\\20260411_171639_gemma_iq4nl_japan_fullgpu_suite\\confirm\\max512-r1\\attempt01_t07_infra01\\corpus\\comic_translate_Apr-12-2026_07-42-44PM\\translated_texts\\096_translated.json",
+          "missing": false,
+          "key_mismatch": false,
+          "suspect_blocks": 0
+        },
+        {
+          "page": "097",
+          "baseline_file": "C:\\Users\\pjjpj\\Desktop\\openai_manga_translater\\comic-translate\\banchmark_result_log\\gemma_iq4nl_japan\\20260411_171639_gemma_iq4nl_japan_fullgpu_suite\\stage1\\ov068-ngl14\\attempt02_t06_infra01\\corpus\\comic_translate_Apr-11-2026_06-13-46PM\\translated_texts\\097_translated.json",
+          "candidate_file": "C:\\Users\\pjjpj\\Desktop\\openai_manga_translater\\comic-translate\\banchmark_result_log\\gemma_iq4nl_japan\\20260411_171639_gemma_iq4nl_japan_fullgpu_suite\\confirm\\max512-r1\\attempt01_t07_infra01\\corpus\\comic_translate_Apr-12-2026_07-42-44PM\\translated_texts\\097_translated.json",
+          "missing": false,
+          "key_mismatch": false,
+          "suspect_blocks": 0
+        },
+        {
+          "page": "098",
+          "baseline_file": "C:\\Users\\pjjpj\\Desktop\\openai_manga_translater\\comic-translate\\banchmark_result_log\\gemma_iq4nl_japan\\20260411_171639_gemma_iq4nl_japan_fullgpu_suite\\stage1\\ov068-ngl14\\attempt02_t06_infra01\\corpus\\comic_translate_Apr-11-2026_06-13-46PM\\translated_texts\\098_translated.json",
+          "candidate_file": "C:\\Users\\pjjpj\\Desktop\\openai_manga_translater\\comic-translate\\banchmark_result_log\\gemma_iq4nl_japan\\20260411_171639_gemma_iq4nl_japan_fullgpu_suite\\confirm\\max512-r1\\attempt01_t07_infra01\\corpus\\comic_translate_Apr-12-2026_07-42-44PM\\translated_texts\\098_translated.json",
+          "missing": false,
+          "key_mismatch": false,
+          "suspect_blocks": 0
+        },
+        {
+          "page": "099",
+          "baseline_file": "C:\\Users\\pjjpj\\Desktop\\openai_manga_translater\\comic-translate\\banchmark_result_log\\gemma_iq4nl_japan\\20260411_171639_gemma_iq4nl_japan_fullgpu_suite\\stage1\\ov068-ngl14\\attempt02_t06_infra01\\corpus\\comic_translate_Apr-11-2026_06-13-46PM\\translated_texts\\099_translated.json",
+          "candidate_file": "C:\\Users\\pjjpj\\Desktop\\openai_manga_translater\\comic-translate\\banchmark_result_log\\gemma_iq4nl_japan\\20260411_171639_gemma_iq4nl_japan_fullgpu_suite\\confirm\\max512-r1\\attempt01_t07_infra01\\corpus\\comic_translate_Apr-12-2026_07-42-44PM\\translated_texts\\099_translated.json",
+          "missing": false,
+          "key_mismatch": false,
+          "suspect_blocks": 0
+        },
+        {
+          "page": "100",
+          "baseline_file": "C:\\Users\\pjjpj\\Desktop\\openai_manga_translater\\comic-translate\\banchmark_result_log\\gemma_iq4nl_japan\\20260411_171639_gemma_iq4nl_japan_fullgpu_suite\\stage1\\ov068-ngl14\\attempt02_t06_infra01\\corpus\\comic_translate_Apr-11-2026_06-13-46PM\\translated_texts\\100_translated.json",
+          "candidate_file": "C:\\Users\\pjjpj\\Desktop\\openai_manga_translater\\comic-translate\\banchmark_result_log\\gemma_iq4nl_japan\\20260411_171639_gemma_iq4nl_japan_fullgpu_suite\\confirm\\max512-r1\\attempt01_t07_infra01\\corpus\\comic_translate_Apr-12-2026_07-42-44PM\\translated_texts\\100_translated.json",
+          "missing": false,
+          "key_mismatch": false,
+          "suspect_blocks": 0
+        },
+        {
+          "page": "101",
+          "baseline_file": "C:\\Users\\pjjpj\\Desktop\\openai_manga_translater\\comic-translate\\banchmark_result_log\\gemma_iq4nl_japan\\20260411_171639_gemma_iq4nl_japan_fullgpu_suite\\stage1\\ov068-ngl14\\attempt02_t06_infra01\\corpus\\comic_translate_Apr-11-2026_06-13-46PM\\translated_texts\\101_translated.json",
+          "candidate_file": "C:\\Users\\pjjpj\\Desktop\\openai_manga_translater\\comic-translate\\banchmark_result_log\\gemma_iq4nl_japan\\20260411_171639_gemma_iq4nl_japan_fullgpu_suite\\confirm\\max512-r1\\attempt01_t07_infra01\\corpus\\comic_translate_Apr-12-2026_07-42-44PM\\translated_texts\\101_translated.json",
+          "missing": false,
+          "key_mismatch": false,
+          "suspect_blocks": 0
+        },
+        {
+          "page": "i_099",
+          "baseline_file": "C:\\Users\\pjjpj\\Desktop\\openai_manga_translater\\comic-translate\\banchmark_result_log\\gemma_iq4nl_japan\\20260411_171639_gemma_iq4nl_japan_fullgpu_suite\\stage1\\ov068-ngl14\\attempt02_t06_infra01\\corpus\\comic_translate_Apr-11-2026_06-13-46PM\\translated_texts\\i_099_translated.json",
+          "candidate_file": "C:\\Users\\pjjpj\\Desktop\\openai_manga_translater\\comic-translate\\banchmark_result_log\\gemma_iq4nl_japan\\20260411_171639_gemma_iq4nl_japan_fullgpu_suite\\confirm\\max512-r1\\attempt01_t07_infra01\\corpus\\comic_translate_Apr-12-2026_07-42-44PM\\translated_texts\\i_099_translated.json",
+          "missing": false,
+          "key_mismatch": false,
+          "suspect_blocks": 0
+        },
+        {
+          "page": "i_100",
+          "baseline_file": "C:\\Users\\pjjpj\\Desktop\\openai_manga_translater\\comic-translate\\banchmark_result_log\\gemma_iq4nl_japan\\20260411_171639_gemma_iq4nl_japan_fullgpu_suite\\stage1\\ov068-ngl14\\attempt02_t06_infra01\\corpus\\comic_translate_Apr-11-2026_06-13-46PM\\translated_texts\\i_100_translated.json",
+          "candidate_file": "C:\\Users\\pjjpj\\Desktop\\openai_manga_translater\\comic-translate\\banchmark_result_log\\gemma_iq4nl_japan\\20260411_171639_gemma_iq4nl_japan_fullgpu_suite\\confirm\\max512-r1\\attempt01_t07_infra01\\corpus\\comic_translate_Apr-12-2026_07-42-44PM\\translated_texts\\i_100_translated.json",
+          "missing": false,
+          "key_mismatch": false,
+          "suspect_blocks": 0
+        },
+        {
+          "page": "i_101",
+          "baseline_file": "C:\\Users\\pjjpj\\Desktop\\openai_manga_translater\\comic-translate\\banchmark_result_log\\gemma_iq4nl_japan\\20260411_171639_gemma_iq4nl_japan_fullgpu_suite\\stage1\\ov068-ngl14\\attempt02_t06_infra01\\corpus\\comic_translate_Apr-11-2026_06-13-46PM\\translated_texts\\i_101_translated.json",
+          "candidate_file": "C:\\Users\\pjjpj\\Desktop\\openai_manga_translater\\comic-translate\\banchmark_result_log\\gemma_iq4nl_japan\\20260411_171639_gemma_iq4nl_japan_fullgpu_suite\\confirm\\max512-r1\\attempt01_t07_infra01\\corpus\\comic_translate_Apr-12-2026_07-42-44PM\\translated_texts\\i_101_translated.json",
+          "missing": false,
+          "key_mismatch": false,
+          "suspect_blocks": 0
+        },
+        {
+          "page": "i_102",
+          "baseline_file": "C:\\Users\\pjjpj\\Desktop\\openai_manga_translater\\comic-translate\\banchmark_result_log\\gemma_iq4nl_japan\\20260411_171639_gemma_iq4nl_japan_fullgpu_suite\\stage1\\ov068-ngl14\\attempt02_t06_infra01\\corpus\\comic_translate_Apr-11-2026_06-13-46PM\\translated_texts\\i_102_translated.json",
+          "candidate_file": "C:\\Users\\pjjpj\\Desktop\\openai_manga_translater\\comic-translate\\banchmark_result_log\\gemma_iq4nl_japan\\20260411_171639_gemma_iq4nl_japan_fullgpu_suite\\confirm\\max512-r1\\attempt01_t07_infra01\\corpus\\comic_translate_Apr-12-2026_07-42-44PM\\translated_texts\\i_102_translated.json",
+          "missing": false,
+          "key_mismatch": false,
+          "suspect_blocks": 0
+        },
+        {
+          "page": "i_103",
+          "baseline_file": "C:\\Users\\pjjpj\\Desktop\\openai_manga_translater\\comic-translate\\banchmark_result_log\\gemma_iq4nl_japan\\20260411_171639_gemma_iq4nl_japan_fullgpu_suite\\stage1\\ov068-ngl14\\attempt02_t06_infra01\\corpus\\comic_translate_Apr-11-2026_06-13-46PM\\translated_texts\\i_103_translated.json",
+          "candidate_file": "C:\\Users\\pjjpj\\Desktop\\openai_manga_translater\\comic-translate\\banchmark_result_log\\gemma_iq4nl_japan\\20260411_171639_gemma_iq4nl_japan_fullgpu_suite\\confirm\\max512-r1\\attempt01_t07_infra01\\corpus\\comic_translate_Apr-12-2026_07-42-44PM\\translated_texts\\i_103_translated.json",
+          "missing": false,
+          "key_mismatch": false,
+          "suspect_blocks": 0
+        },
+        {
+          "page": "i_104",
+          "baseline_file": "C:\\Users\\pjjpj\\Desktop\\openai_manga_translater\\comic-translate\\banchmark_result_log\\gemma_iq4nl_japan\\20260411_171639_gemma_iq4nl_japan_fullgpu_suite\\stage1\\ov068-ngl14\\attempt02_t06_infra01\\corpus\\comic_translate_Apr-11-2026_06-13-46PM\\translated_texts\\i_104_translated.json",
+          "candidate_file": "C:\\Users\\pjjpj\\Desktop\\openai_manga_translater\\comic-translate\\banchmark_result_log\\gemma_iq4nl_japan\\20260411_171639_gemma_iq4nl_japan_fullgpu_suite\\confirm\\max512-r1\\attempt01_t07_infra01\\corpus\\comic_translate_Apr-12-2026_07-42-44PM\\translated_texts\\i_104_translated.json",
+          "missing": false,
+          "key_mismatch": false,
+          "suspect_blocks": 0
+        },
+        {
+          "page": "i_105",
+          "baseline_file": "C:\\Users\\pjjpj\\Desktop\\openai_manga_translater\\comic-translate\\banchmark_result_log\\gemma_iq4nl_japan\\20260411_171639_gemma_iq4nl_japan_fullgpu_suite\\stage1\\ov068-ngl14\\attempt02_t06_infra01\\corpus\\comic_translate_Apr-11-2026_06-13-46PM\\translated_texts\\i_105_translated.json",
+          "candidate_file": "C:\\Users\\pjjpj\\Desktop\\openai_manga_translater\\comic-translate\\banchmark_result_log\\gemma_iq4nl_japan\\20260411_171639_gemma_iq4nl_japan_fullgpu_suite\\confirm\\max512-r1\\attempt01_t07_infra01\\corpus\\comic_translate_Apr-12-2026_07-42-44PM\\translated_texts\\i_105_translated.json",
+          "missing": false,
+          "key_mismatch": false,
+          "suspect_blocks": 0
+        },
+        {
+          "page": "p_015",
+          "baseline_file": "C:\\Users\\pjjpj\\Desktop\\openai_manga_translater\\comic-translate\\banchmark_result_log\\gemma_iq4nl_japan\\20260411_171639_gemma_iq4nl_japan_fullgpu_suite\\stage1\\ov068-ngl14\\attempt02_t06_infra01\\corpus\\comic_translate_Apr-11-2026_06-13-46PM\\translated_texts\\p_015_translated.json",
+          "candidate_file": "C:\\Users\\pjjpj\\Desktop\\openai_manga_translater\\comic-translate\\banchmark_result_log\\gemma_iq4nl_japan\\20260411_171639_gemma_iq4nl_japan_fullgpu_suite\\confirm\\max512-r1\\attempt01_t07_infra01\\corpus\\comic_translate_Apr-12-2026_07-42-44PM\\translated_texts\\p_015_translated.json",
+          "missing": false,
+          "key_mismatch": false,
+          "suspect_blocks": 0
+        },
+        {
+          "page": "p_016",
+          "baseline_file": "C:\\Users\\pjjpj\\Desktop\\openai_manga_translater\\comic-translate\\banchmark_result_log\\gemma_iq4nl_japan\\20260411_171639_gemma_iq4nl_japan_fullgpu_suite\\stage1\\ov068-ngl14\\attempt02_t06_infra01\\corpus\\comic_translate_Apr-11-2026_06-13-46PM\\translated_texts\\p_016_translated.json",
+          "candidate_file": "C:\\Users\\pjjpj\\Desktop\\openai_manga_translater\\comic-translate\\banchmark_result_log\\gemma_iq4nl_japan\\20260411_171639_gemma_iq4nl_japan_fullgpu_suite\\confirm\\max512-r1\\attempt01_t07_infra01\\corpus\\comic_translate_Apr-12-2026_07-42-44PM\\translated_texts\\p_016_translated.json",
+          "missing": false,
+          "key_mismatch": false,
+          "suspect_blocks": 0
+        },
+        {
+          "page": "p_017",
+          "baseline_file": "C:\\Users\\pjjpj\\Desktop\\openai_manga_translater\\comic-translate\\banchmark_result_log\\gemma_iq4nl_japan\\20260411_171639_gemma_iq4nl_japan_fullgpu_suite\\stage1\\ov068-ngl14\\attempt02_t06_infra01\\corpus\\comic_translate_Apr-11-2026_06-13-46PM\\translated_texts\\p_017_translated.json",
+          "candidate_file": "C:\\Users\\pjjpj\\Desktop\\openai_manga_translater\\comic-translate\\banchmark_result_log\\gemma_iq4nl_japan\\20260411_171639_gemma_iq4nl_japan_fullgpu_suite\\confirm\\max512-r1\\attempt01_t07_infra01\\corpus\\comic_translate_Apr-12-2026_07-42-44PM\\translated_texts\\p_017_translated.json",
+          "missing": false,
+          "key_mismatch": false,
+          "suspect_blocks": 0
+        },
+        {
+          "page": "p_018",
+          "baseline_file": "C:\\Users\\pjjpj\\Desktop\\openai_manga_translater\\comic-translate\\banchmark_result_log\\gemma_iq4nl_japan\\20260411_171639_gemma_iq4nl_japan_fullgpu_suite\\stage1\\ov068-ngl14\\attempt02_t06_infra01\\corpus\\comic_translate_Apr-11-2026_06-13-46PM\\translated_texts\\p_018_translated.json",
+          "candidate_file": "C:\\Users\\pjjpj\\Desktop\\openai_manga_translater\\comic-translate\\banchmark_result_log\\gemma_iq4nl_japan\\20260411_171639_gemma_iq4nl_japan_fullgpu_suite\\confirm\\max512-r1\\attempt01_t07_infra01\\corpus\\comic_translate_Apr-12-2026_07-42-44PM\\translated_texts\\p_018_translated.json",
+          "missing": false,
+          "key_mismatch": false,
+          "suspect_blocks": 0
+        },
+        {
+          "page": "p_019",
+          "baseline_file": "C:\\Users\\pjjpj\\Desktop\\openai_manga_translater\\comic-translate\\banchmark_result_log\\gemma_iq4nl_japan\\20260411_171639_gemma_iq4nl_japan_fullgpu_suite\\stage1\\ov068-ngl14\\attempt02_t06_infra01\\corpus\\comic_translate_Apr-11-2026_06-13-46PM\\translated_texts\\p_019_translated.json",
+          "candidate_file": "C:\\Users\\pjjpj\\Desktop\\openai_manga_translater\\comic-translate\\banchmark_result_log\\gemma_iq4nl_japan\\20260411_171639_gemma_iq4nl_japan_fullgpu_suite\\confirm\\max512-r1\\attempt01_t07_infra01\\corpus\\comic_translate_Apr-12-2026_07-42-44PM\\translated_texts\\p_019_translated.json",
+          "missing": false,
+          "key_mismatch": false,
+          "suspect_blocks": 0
+        },
+        {
+          "page": "p_020",
+          "baseline_file": "C:\\Users\\pjjpj\\Desktop\\openai_manga_translater\\comic-translate\\banchmark_result_log\\gemma_iq4nl_japan\\20260411_171639_gemma_iq4nl_japan_fullgpu_suite\\stage1\\ov068-ngl14\\attempt02_t06_infra01\\corpus\\comic_translate_Apr-11-2026_06-13-46PM\\translated_texts\\p_020_translated.json",
+          "candidate_file": "C:\\Users\\pjjpj\\Desktop\\openai_manga_translater\\comic-translate\\banchmark_result_log\\gemma_iq4nl_japan\\20260411_171639_gemma_iq4nl_japan_fullgpu_suite\\confirm\\max512-r1\\attempt01_t07_infra01\\corpus\\comic_translate_Apr-12-2026_07-42-44PM\\translated_texts\\p_020_translated.json",
+          "missing": false,
+          "key_mismatch": false,
+          "suspect_blocks": 0
+        },
+        {
+          "page": "p_021",
+          "baseline_file": "C:\\Users\\pjjpj\\Desktop\\openai_manga_translater\\comic-translate\\banchmark_result_log\\gemma_iq4nl_japan\\20260411_171639_gemma_iq4nl_japan_fullgpu_suite\\stage1\\ov068-ngl14\\attempt02_t06_infra01\\corpus\\comic_translate_Apr-11-2026_06-13-46PM\\translated_texts\\p_021_translated.json",
+          "candidate_file": "C:\\Users\\pjjpj\\Desktop\\openai_manga_translater\\comic-translate\\banchmark_result_log\\gemma_iq4nl_japan\\20260411_171639_gemma_iq4nl_japan_fullgpu_suite\\confirm\\max512-r1\\attempt01_t07_infra01\\corpus\\comic_translate_Apr-12-2026_07-42-44PM\\translated_texts\\p_021_translated.json",
+          "missing": false,
+          "key_mismatch": false,
+          "suspect_blocks": 0
+        }
+      ],
+      "issues": [],
+      "runner_exit_code": 0
+    },
+    "page_snapshot_audit": {
+      "baseline_run_dir": "C:\\Users\\pjjpj\\Desktop\\openai_manga_translater\\comic-translate\\banchmark_result_log\\gemma_iq4nl_japan\\20260411_171639_gemma_iq4nl_japan_fullgpu_suite\\stage1\\ov068-ngl14\\attempt02_t06_infra01",
+      "candidate_run_dir": "C:\\Users\\pjjpj\\Desktop\\openai_manga_translater\\comic-translate\\banchmark_result_log\\gemma_iq4nl_japan\\20260411_171639_gemma_iq4nl_japan_fullgpu_suite\\confirm\\max512-r1\\attempt01_t07_infra01",
+      "pages_checked": 22,
+      "mismatch_count": 0,
+      "passed": true,
+      "pages": [
+        {
+          "page": "094.png",
+          "block_count_match": true,
+          "ocr_quality_match": true,
+          "normalized_text_match": true
+        },
+        {
+          "page": "095.png",
+          "block_count_match": true,
+          "ocr_quality_match": true,
+          "normalized_text_match": true
+        },
+        {
+          "page": "096.png",
+          "block_count_match": true,
+          "ocr_quality_match": true,
+          "normalized_text_match": true
+        },
+        {
+          "page": "097.png",
+          "block_count_match": true,
+          "ocr_quality_match": true,
+          "normalized_text_match": true
+        },
+        {
+          "page": "098.png",
+          "block_count_match": true,
+          "ocr_quality_match": true,
+          "normalized_text_match": true
+        },
+        {
+          "page": "099.png",
+          "block_count_match": true,
+          "ocr_quality_match": true,
+          "normalized_text_match": true
+        },
+        {
+          "page": "100.png",
+          "block_count_match": true,
+          "ocr_quality_match": true,
+          "normalized_text_match": true
+        },
+        {
+          "page": "101.png",
+          "block_count_match": true,
+          "ocr_quality_match": true,
+          "normalized_text_match": true
+        },
+        {
+          "page": "i_099.jpg",
+          "block_count_match": true,
+          "ocr_quality_match": true,
+          "normalized_text_match": true
+        },
+        {
+          "page": "i_100.jpg",
+          "block_count_match": true,
+          "ocr_quality_match": true,
+          "normalized_text_match": true
+        },
+        {
+          "page": "i_101.jpg",
+          "block_count_match": true,
+          "ocr_quality_match": true,
+          "normalized_text_match": true
+        },
+        {
+          "page": "i_102.jpg",
+          "block_count_match": true,
+          "ocr_quality_match": true,
+          "normalized_text_match": true
+        },
+        {
+          "page": "i_103.jpg",
+          "block_count_match": true,
+          "ocr_quality_match": true,
+          "normalized_text_match": true
+        },
+        {
+          "page": "i_104.jpg",
+          "block_count_match": true,
+          "ocr_quality_match": true,
+          "normalized_text_match": true
+        },
+        {
+          "page": "i_105.jpg",
+          "block_count_match": true,
+          "ocr_quality_match": true,
+          "normalized_text_match": true
+        },
+        {
+          "page": "p_015.jpg",
+          "block_count_match": true,
+          "ocr_quality_match": true,
+          "normalized_text_match": true
+        },
+        {
+          "page": "p_016.jpg",
+          "block_count_match": true,
+          "ocr_quality_match": true,
+          "normalized_text_match": true
+        },
+        {
+          "page": "p_017.jpg",
+          "block_count_match": true,
+          "ocr_quality_match": true,
+          "normalized_text_match": true
+        },
+        {
+          "page": "p_018.jpg",
+          "block_count_match": true,
+          "ocr_quality_match": true,
+          "normalized_text_match": true
+        },
+        {
+          "page": "p_019.jpg",
+          "block_count_match": true,
+          "ocr_quality_match": true,
+          "normalized_text_match": true
+        },
+        {
+          "page": "p_020.jpg",
+          "block_count_match": true,
+          "ocr_quality_match": true,
+          "normalized_text_match": true
+        },
+        {
+          "page": "p_021.jpg",
+          "block_count_match": true,
+          "ocr_quality_match": true,
+          "normalized_text_match": true
+        }
+      ],
+      "issues": [],
+      "runner_exit_code": 0
+    },
+    "tuning": {
+      "ocr_gpu_memory_utilization": 0.8,
+      "gemma_n_gpu_layers": 23,
+      "context_size": 4096,
+      "chunk_size": 6,
+      "threads": 10,
+      "max_completion_tokens": 512
+    },
+    "attempts": [],
+    "winner_reason": "selected fastest hard-gate-passing candidate"
+  },
+  "runner_up": {
+    "candidate_slug": "max384",
+    "label": "max_completion_tokens=384",
+    "run_dir": "",
+    "requested_temperature": 0.7,
+    "effective_temperature": 0.7,
+    "rescue_attempt_count": 0,
+    "temperature_attempt_count": 1,
+    "infra_attempt_count": 1,
+    "health_wait_sec": 900,
+    "candidate_status": "passed",
+    "passed_hard_gate": true,
+    "hard_fail_issues": [],
+    "rescue_trigger_issues": [],
+    "derived_from": "",
+    "oom_rescue_level": 0,
+    "oom_rescue_changes": {},
+    "setup_retry_reasons": [],
+    "last_failure_kind": "completed",
+    "last_failure_reason": "",
+    "summary": {
+      "elapsed_sec": 1002.261,
+      "translate_median_sec": 15.249,
+      "detect_median_sec": 1.429,
+      "ocr_median_sec": 18.257,
+      "inpaint_median_sec": 3.713,
+      "gpu_peak_used_mb": 11988.0,
+      "gpu_floor_free_mb": 12.0,
+      "gpu_peak_util_percent": 83.0,
+      "gpu_peak_mem_util_percent": 57.0,
+      "page_failed_count": 0,
+      "gemma_truncated_count": 0,
+      "gemma_empty_content_count": 0,
+      "gemma_missing_key_count": 0,
+      "gemma_schema_validation_fail_count": 0
+    },
+    "runtime_observation": {
+      "detector_backend": "RTDetrV2ONNXDetection",
+      "detector_device": "cuda",
+      "ocr_front_device": "cuda",
+      "mask_refiner": "ctd",
+      "ctd_device": "cuda",
+      "inpainter_key": "lama_large_512px",
+      "inpainter_device": "cuda",
+      "inpaint_size": 1536,
+      "precision": "bf16",
+      "gemma_loaded_model_ids": [
+        "gemma-4-26B-IQ4_NL.gguf"
+      ]
+    },
+    "translation_audit": {
+      "baseline_run_dir": "C:\\Users\\pjjpj\\Desktop\\openai_manga_translater\\comic-translate\\banchmark_result_log\\gemma_iq4nl_japan\\20260411_171639_gemma_iq4nl_japan_fullgpu_suite\\stage1\\ov068-ngl14\\attempt02_t06_infra01",
+      "candidate_run_dir": "C:\\Users\\pjjpj\\Desktop\\openai_manga_translater\\comic-translate\\banchmark_result_log\\gemma_iq4nl_japan\\20260411_171639_gemma_iq4nl_japan_fullgpu_suite\\confirm\\max384-r1\\attempt01_t07_infra01",
+      "sample_count": 22,
+      "pages_checked": 22,
+      "missing_page_count": 0,
+      "key_mismatch_count": 0,
+      "suspect_block_count": 0,
+      "passed": true,
+      "pages": [
+        {
+          "page": "094",
+          "baseline_file": "C:\\Users\\pjjpj\\Desktop\\openai_manga_translater\\comic-translate\\banchmark_result_log\\gemma_iq4nl_japan\\20260411_171639_gemma_iq4nl_japan_fullgpu_suite\\stage1\\ov068-ngl14\\attempt02_t06_infra01\\corpus\\comic_translate_Apr-11-2026_06-13-46PM\\translated_texts\\094_translated.json",
+          "candidate_file": "C:\\Users\\pjjpj\\Desktop\\openai_manga_translater\\comic-translate\\banchmark_result_log\\gemma_iq4nl_japan\\20260411_171639_gemma_iq4nl_japan_fullgpu_suite\\confirm\\max384-r1\\attempt01_t07_infra01\\corpus\\comic_translate_Apr-12-2026_07-23-15PM\\translated_texts\\094_translated.json",
+          "missing": false,
+          "key_mismatch": false,
+          "suspect_blocks": 0
+        },
+        {
+          "page": "095",
+          "baseline_file": "C:\\Users\\pjjpj\\Desktop\\openai_manga_translater\\comic-translate\\banchmark_result_log\\gemma_iq4nl_japan\\20260411_171639_gemma_iq4nl_japan_fullgpu_suite\\stage1\\ov068-ngl14\\attempt02_t06_infra01\\corpus\\comic_translate_Apr-11-2026_06-13-46PM\\translated_texts\\095_translated.json",
+          "candidate_file": "C:\\Users\\pjjpj\\Desktop\\openai_manga_translater\\comic-translate\\banchmark_result_log\\gemma_iq4nl_japan\\20260411_171639_gemma_iq4nl_japan_fullgpu_suite\\confirm\\max384-r1\\attempt01_t07_infra01\\corpus\\comic_translate_Apr-12-2026_07-23-15PM\\translated_texts\\095_translated.json",
+          "missing": false,
+          "key_mismatch": false,
+          "suspect_blocks": 0
+        },
+        {
+          "page": "096",
+          "baseline_file": "C:\\Users\\pjjpj\\Desktop\\openai_manga_translater\\comic-translate\\banchmark_result_log\\gemma_iq4nl_japan\\20260411_171639_gemma_iq4nl_japan_fullgpu_suite\\stage1\\ov068-ngl14\\attempt02_t06_infra01\\corpus\\comic_translate_Apr-11-2026_06-13-46PM\\translated_texts\\096_translated.json",
+          "candidate_file": "C:\\Users\\pjjpj\\Desktop\\openai_manga_translater\\comic-translate\\banchmark_result_log\\gemma_iq4nl_japan\\20260411_171639_gemma_iq4nl_japan_fullgpu_suite\\confirm\\max384-r1\\attempt01_t07_infra01\\corpus\\comic_translate_Apr-12-2026_07-23-15PM\\translated_texts\\096_translated.json",
+          "missing": false,
+          "key_mismatch": false,
+          "suspect_blocks": 0
+        },
+        {
+          "page": "097",
+          "baseline_file": "C:\\Users\\pjjpj\\Desktop\\openai_manga_translater\\comic-translate\\banchmark_result_log\\gemma_iq4nl_japan\\20260411_171639_gemma_iq4nl_japan_fullgpu_suite\\stage1\\ov068-ngl14\\attempt02_t06_infra01\\corpus\\comic_translate_Apr-11-2026_06-13-46PM\\translated_texts\\097_translated.json",
+          "candidate_file": "C:\\Users\\pjjpj\\Desktop\\openai_manga_translater\\comic-translate\\banchmark_result_log\\gemma_iq4nl_japan\\20260411_171639_gemma_iq4nl_japan_fullgpu_suite\\confirm\\max384-r1\\attempt01_t07_infra01\\corpus\\comic_translate_Apr-12-2026_07-23-15PM\\translated_texts\\097_translated.json",
+          "missing": false,
+          "key_mismatch": false,
+          "suspect_blocks": 0
+        },
+        {
+          "page": "098",
+          "baseline_file": "C:\\Users\\pjjpj\\Desktop\\openai_manga_translater\\comic-translate\\banchmark_result_log\\gemma_iq4nl_japan\\20260411_171639_gemma_iq4nl_japan_fullgpu_suite\\stage1\\ov068-ngl14\\attempt02_t06_infra01\\corpus\\comic_translate_Apr-11-2026_06-13-46PM\\translated_texts\\098_translated.json",
+          "candidate_file": "C:\\Users\\pjjpj\\Desktop\\openai_manga_translater\\comic-translate\\banchmark_result_log\\gemma_iq4nl_japan\\20260411_171639_gemma_iq4nl_japan_fullgpu_suite\\confirm\\max384-r1\\attempt01_t07_infra01\\corpus\\comic_translate_Apr-12-2026_07-23-15PM\\translated_texts\\098_translated.json",
+          "missing": false,
+          "key_mismatch": false,
+          "suspect_blocks": 0
+        },
+        {
+          "page": "099",
+          "baseline_file": "C:\\Users\\pjjpj\\Desktop\\openai_manga_translater\\comic-translate\\banchmark_result_log\\gemma_iq4nl_japan\\20260411_171639_gemma_iq4nl_japan_fullgpu_suite\\stage1\\ov068-ngl14\\attempt02_t06_infra01\\corpus\\comic_translate_Apr-11-2026_06-13-46PM\\translated_texts\\099_translated.json",
+          "candidate_file": "C:\\Users\\pjjpj\\Desktop\\openai_manga_translater\\comic-translate\\banchmark_result_log\\gemma_iq4nl_japan\\20260411_171639_gemma_iq4nl_japan_fullgpu_suite\\confirm\\max384-r1\\attempt01_t07_infra01\\corpus\\comic_translate_Apr-12-2026_07-23-15PM\\translated_texts\\099_translated.json",
+          "missing": false,
+          "key_mismatch": false,
+          "suspect_blocks": 0
+        },
+        {
+          "page": "100",
+          "baseline_file": "C:\\Users\\pjjpj\\Desktop\\openai_manga_translater\\comic-translate\\banchmark_result_log\\gemma_iq4nl_japan\\20260411_171639_gemma_iq4nl_japan_fullgpu_suite\\stage1\\ov068-ngl14\\attempt02_t06_infra01\\corpus\\comic_translate_Apr-11-2026_06-13-46PM\\translated_texts\\100_translated.json",
+          "candidate_file": "C:\\Users\\pjjpj\\Desktop\\openai_manga_translater\\comic-translate\\banchmark_result_log\\gemma_iq4nl_japan\\20260411_171639_gemma_iq4nl_japan_fullgpu_suite\\confirm\\max384-r1\\attempt01_t07_infra01\\corpus\\comic_translate_Apr-12-2026_07-23-15PM\\translated_texts\\100_translated.json",
+          "missing": false,
+          "key_mismatch": false,
+          "suspect_blocks": 0
+        },
+        {
+          "page": "101",
+          "baseline_file": "C:\\Users\\pjjpj\\Desktop\\openai_manga_translater\\comic-translate\\banchmark_result_log\\gemma_iq4nl_japan\\20260411_171639_gemma_iq4nl_japan_fullgpu_suite\\stage1\\ov068-ngl14\\attempt02_t06_infra01\\corpus\\comic_translate_Apr-11-2026_06-13-46PM\\translated_texts\\101_translated.json",
+          "candidate_file": "C:\\Users\\pjjpj\\Desktop\\openai_manga_translater\\comic-translate\\banchmark_result_log\\gemma_iq4nl_japan\\20260411_171639_gemma_iq4nl_japan_fullgpu_suite\\confirm\\max384-r1\\attempt01_t07_infra01\\corpus\\comic_translate_Apr-12-2026_07-23-15PM\\translated_texts\\101_translated.json",
+          "missing": false,
+          "key_mismatch": false,
+          "suspect_blocks": 0
+        },
+        {
+          "page": "i_099",
+          "baseline_file": "C:\\Users\\pjjpj\\Desktop\\openai_manga_translater\\comic-translate\\banchmark_result_log\\gemma_iq4nl_japan\\20260411_171639_gemma_iq4nl_japan_fullgpu_suite\\stage1\\ov068-ngl14\\attempt02_t06_infra01\\corpus\\comic_translate_Apr-11-2026_06-13-46PM\\translated_texts\\i_099_translated.json",
+          "candidate_file": "C:\\Users\\pjjpj\\Desktop\\openai_manga_translater\\comic-translate\\banchmark_result_log\\gemma_iq4nl_japan\\20260411_171639_gemma_iq4nl_japan_fullgpu_suite\\confirm\\max384-r1\\attempt01_t07_infra01\\corpus\\comic_translate_Apr-12-2026_07-23-15PM\\translated_texts\\i_099_translated.json",
+          "missing": false,
+          "key_mismatch": false,
+          "suspect_blocks": 0
+        },
+        {
+          "page": "i_100",
+          "baseline_file": "C:\\Users\\pjjpj\\Desktop\\openai_manga_translater\\comic-translate\\banchmark_result_log\\gemma_iq4nl_japan\\20260411_171639_gemma_iq4nl_japan_fullgpu_suite\\stage1\\ov068-ngl14\\attempt02_t06_infra01\\corpus\\comic_translate_Apr-11-2026_06-13-46PM\\translated_texts\\i_100_translated.json",
+          "candidate_file": "C:\\Users\\pjjpj\\Desktop\\openai_manga_translater\\comic-translate\\banchmark_result_log\\gemma_iq4nl_japan\\20260411_171639_gemma_iq4nl_japan_fullgpu_suite\\confirm\\max384-r1\\attempt01_t07_infra01\\corpus\\comic_translate_Apr-12-2026_07-23-15PM\\translated_texts\\i_100_translated.json",
+          "missing": false,
+          "key_mismatch": false,
+          "suspect_blocks": 0
+        },
+        {
+          "page": "i_101",
+          "baseline_file": "C:\\Users\\pjjpj\\Desktop\\openai_manga_translater\\comic-translate\\banchmark_result_log\\gemma_iq4nl_japan\\20260411_171639_gemma_iq4nl_japan_fullgpu_suite\\stage1\\ov068-ngl14\\attempt02_t06_infra01\\corpus\\comic_translate_Apr-11-2026_06-13-46PM\\translated_texts\\i_101_translated.json",
+          "candidate_file": "C:\\Users\\pjjpj\\Desktop\\openai_manga_translater\\comic-translate\\banchmark_result_log\\gemma_iq4nl_japan\\20260411_171639_gemma_iq4nl_japan_fullgpu_suite\\confirm\\max384-r1\\attempt01_t07_infra01\\corpus\\comic_translate_Apr-12-2026_07-23-15PM\\translated_texts\\i_101_translated.json",
+          "missing": false,
+          "key_mismatch": false,
+          "suspect_blocks": 0
+        },
+        {
+          "page": "i_102",
+          "baseline_file": "C:\\Users\\pjjpj\\Desktop\\openai_manga_translater\\comic-translate\\banchmark_result_log\\gemma_iq4nl_japan\\20260411_171639_gemma_iq4nl_japan_fullgpu_suite\\stage1\\ov068-ngl14\\attempt02_t06_infra01\\corpus\\comic_translate_Apr-11-2026_06-13-46PM\\translated_texts\\i_102_translated.json",
+          "candidate_file": "C:\\Users\\pjjpj\\Desktop\\openai_manga_translater\\comic-translate\\banchmark_result_log\\gemma_iq4nl_japan\\20260411_171639_gemma_iq4nl_japan_fullgpu_suite\\confirm\\max384-r1\\attempt01_t07_infra01\\corpus\\comic_translate_Apr-12-2026_07-23-15PM\\translated_texts\\i_102_translated.json",
+          "missing": false,
+          "key_mismatch": false,
+          "suspect_blocks": 0
+        },
+        {
+          "page": "i_103",
+          "baseline_file": "C:\\Users\\pjjpj\\Desktop\\openai_manga_translater\\comic-translate\\banchmark_result_log\\gemma_iq4nl_japan\\20260411_171639_gemma_iq4nl_japan_fullgpu_suite\\stage1\\ov068-ngl14\\attempt02_t06_infra01\\corpus\\comic_translate_Apr-11-2026_06-13-46PM\\translated_texts\\i_103_translated.json",
+          "candidate_file": "C:\\Users\\pjjpj\\Desktop\\openai_manga_translater\\comic-translate\\banchmark_result_log\\gemma_iq4nl_japan\\20260411_171639_gemma_iq4nl_japan_fullgpu_suite\\confirm\\max384-r1\\attempt01_t07_infra01\\corpus\\comic_translate_Apr-12-2026_07-23-15PM\\translated_texts\\i_103_translated.json",
+          "missing": false,
+          "key_mismatch": false,
+          "suspect_blocks": 0
+        },
+        {
+          "page": "i_104",
+          "baseline_file": "C:\\Users\\pjjpj\\Desktop\\openai_manga_translater\\comic-translate\\banchmark_result_log\\gemma_iq4nl_japan\\20260411_171639_gemma_iq4nl_japan_fullgpu_suite\\stage1\\ov068-ngl14\\attempt02_t06_infra01\\corpus\\comic_translate_Apr-11-2026_06-13-46PM\\translated_texts\\i_104_translated.json",
+          "candidate_file": "C:\\Users\\pjjpj\\Desktop\\openai_manga_translater\\comic-translate\\banchmark_result_log\\gemma_iq4nl_japan\\20260411_171639_gemma_iq4nl_japan_fullgpu_suite\\confirm\\max384-r1\\attempt01_t07_infra01\\corpus\\comic_translate_Apr-12-2026_07-23-15PM\\translated_texts\\i_104_translated.json",
+          "missing": false,
+          "key_mismatch": false,
+          "suspect_blocks": 0
+        },
+        {
+          "page": "i_105",
+          "baseline_file": "C:\\Users\\pjjpj\\Desktop\\openai_manga_translater\\comic-translate\\banchmark_result_log\\gemma_iq4nl_japan\\20260411_171639_gemma_iq4nl_japan_fullgpu_suite\\stage1\\ov068-ngl14\\attempt02_t06_infra01\\corpus\\comic_translate_Apr-11-2026_06-13-46PM\\translated_texts\\i_105_translated.json",
+          "candidate_file": "C:\\Users\\pjjpj\\Desktop\\openai_manga_translater\\comic-translate\\banchmark_result_log\\gemma_iq4nl_japan\\20260411_171639_gemma_iq4nl_japan_fullgpu_suite\\confirm\\max384-r1\\attempt01_t07_infra01\\corpus\\comic_translate_Apr-12-2026_07-23-15PM\\translated_texts\\i_105_translated.json",
+          "missing": false,
+          "key_mismatch": false,
+          "suspect_blocks": 0
+        },
+        {
+          "page": "p_015",
+          "baseline_file": "C:\\Users\\pjjpj\\Desktop\\openai_manga_translater\\comic-translate\\banchmark_result_log\\gemma_iq4nl_japan\\20260411_171639_gemma_iq4nl_japan_fullgpu_suite\\stage1\\ov068-ngl14\\attempt02_t06_infra01\\corpus\\comic_translate_Apr-11-2026_06-13-46PM\\translated_texts\\p_015_translated.json",
+          "candidate_file": "C:\\Users\\pjjpj\\Desktop\\openai_manga_translater\\comic-translate\\banchmark_result_log\\gemma_iq4nl_japan\\20260411_171639_gemma_iq4nl_japan_fullgpu_suite\\confirm\\max384-r1\\attempt01_t07_infra01\\corpus\\comic_translate_Apr-12-2026_07-23-15PM\\translated_texts\\p_015_translated.json",
+          "missing": false,
+          "key_mismatch": false,
+          "suspect_blocks": 0
+        },
+        {
+          "page": "p_016",
+          "baseline_file": "C:\\Users\\pjjpj\\Desktop\\openai_manga_translater\\comic-translate\\banchmark_result_log\\gemma_iq4nl_japan\\20260411_171639_gemma_iq4nl_japan_fullgpu_suite\\stage1\\ov068-ngl14\\attempt02_t06_infra01\\corpus\\comic_translate_Apr-11-2026_06-13-46PM\\translated_texts\\p_016_translated.json",
+          "candidate_file": "C:\\Users\\pjjpj\\Desktop\\openai_manga_translater\\comic-translate\\banchmark_result_log\\gemma_iq4nl_japan\\20260411_171639_gemma_iq4nl_japan_fullgpu_suite\\confirm\\max384-r1\\attempt01_t07_infra01\\corpus\\comic_translate_Apr-12-2026_07-23-15PM\\translated_texts\\p_016_translated.json",
+          "missing": false,
+          "key_mismatch": false,
+          "suspect_blocks": 0
+        },
+        {
+          "page": "p_017",
+          "baseline_file": "C:\\Users\\pjjpj\\Desktop\\openai_manga_translater\\comic-translate\\banchmark_result_log\\gemma_iq4nl_japan\\20260411_171639_gemma_iq4nl_japan_fullgpu_suite\\stage1\\ov068-ngl14\\attempt02_t06_infra01\\corpus\\comic_translate_Apr-11-2026_06-13-46PM\\translated_texts\\p_017_translated.json",
+          "candidate_file": "C:\\Users\\pjjpj\\Desktop\\openai_manga_translater\\comic-translate\\banchmark_result_log\\gemma_iq4nl_japan\\20260411_171639_gemma_iq4nl_japan_fullgpu_suite\\confirm\\max384-r1\\attempt01_t07_infra01\\corpus\\comic_translate_Apr-12-2026_07-23-15PM\\translated_texts\\p_017_translated.json",
+          "missing": false,
+          "key_mismatch": false,
+          "suspect_blocks": 0
+        },
+        {
+          "page": "p_018",
+          "baseline_file": "C:\\Users\\pjjpj\\Desktop\\openai_manga_translater\\comic-translate\\banchmark_result_log\\gemma_iq4nl_japan\\20260411_171639_gemma_iq4nl_japan_fullgpu_suite\\stage1\\ov068-ngl14\\attempt02_t06_infra01\\corpus\\comic_translate_Apr-11-2026_06-13-46PM\\translated_texts\\p_018_translated.json",
+          "candidate_file": "C:\\Users\\pjjpj\\Desktop\\openai_manga_translater\\comic-translate\\banchmark_result_log\\gemma_iq4nl_japan\\20260411_171639_gemma_iq4nl_japan_fullgpu_suite\\confirm\\max384-r1\\attempt01_t07_infra01\\corpus\\comic_translate_Apr-12-2026_07-23-15PM\\translated_texts\\p_018_translated.json",
+          "missing": false,
+          "key_mismatch": false,
+          "suspect_blocks": 0
+        },
+        {
+          "page": "p_019",
+          "baseline_file": "C:\\Users\\pjjpj\\Desktop\\openai_manga_translater\\comic-translate\\banchmark_result_log\\gemma_iq4nl_japan\\20260411_171639_gemma_iq4nl_japan_fullgpu_suite\\stage1\\ov068-ngl14\\attempt02_t06_infra01\\corpus\\comic_translate_Apr-11-2026_06-13-46PM\\translated_texts\\p_019_translated.json",
+          "candidate_file": "C:\\Users\\pjjpj\\Desktop\\openai_manga_translater\\comic-translate\\banchmark_result_log\\gemma_iq4nl_japan\\20260411_171639_gemma_iq4nl_japan_fullgpu_suite\\confirm\\max384-r1\\attempt01_t07_infra01\\corpus\\comic_translate_Apr-12-2026_07-23-15PM\\translated_texts\\p_019_translated.json",
+          "missing": false,
+          "key_mismatch": false,
+          "suspect_blocks": 0
+        },
+        {
+          "page": "p_020",
+          "baseline_file": "C:\\Users\\pjjpj\\Desktop\\openai_manga_translater\\comic-translate\\banchmark_result_log\\gemma_iq4nl_japan\\20260411_171639_gemma_iq4nl_japan_fullgpu_suite\\stage1\\ov068-ngl14\\attempt02_t06_infra01\\corpus\\comic_translate_Apr-11-2026_06-13-46PM\\translated_texts\\p_020_translated.json",
+          "candidate_file": "C:\\Users\\pjjpj\\Desktop\\openai_manga_translater\\comic-translate\\banchmark_result_log\\gemma_iq4nl_japan\\20260411_171639_gemma_iq4nl_japan_fullgpu_suite\\confirm\\max384-r1\\attempt01_t07_infra01\\corpus\\comic_translate_Apr-12-2026_07-23-15PM\\translated_texts\\p_020_translated.json",
+          "missing": false,
+          "key_mismatch": false,
+          "suspect_blocks": 0
+        },
+        {
+          "page": "p_021",
+          "baseline_file": "C:\\Users\\pjjpj\\Desktop\\openai_manga_translater\\comic-translate\\banchmark_result_log\\gemma_iq4nl_japan\\20260411_171639_gemma_iq4nl_japan_fullgpu_suite\\stage1\\ov068-ngl14\\attempt02_t06_infra01\\corpus\\comic_translate_Apr-11-2026_06-13-46PM\\translated_texts\\p_021_translated.json",
+          "candidate_file": "C:\\Users\\pjjpj\\Desktop\\openai_manga_translater\\comic-translate\\banchmark_result_log\\gemma_iq4nl_japan\\20260411_171639_gemma_iq4nl_japan_fullgpu_suite\\confirm\\max384-r1\\attempt01_t07_infra01\\corpus\\comic_translate_Apr-12-2026_07-23-15PM\\translated_texts\\p_021_translated.json",
+          "missing": false,
+          "key_mismatch": false,
+          "suspect_blocks": 0
+        }
+      ],
+      "issues": [],
+      "runner_exit_code": 0
+    },
+    "page_snapshot_audit": {
+      "baseline_run_dir": "C:\\Users\\pjjpj\\Desktop\\openai_manga_translater\\comic-translate\\banchmark_result_log\\gemma_iq4nl_japan\\20260411_171639_gemma_iq4nl_japan_fullgpu_suite\\stage1\\ov068-ngl14\\attempt02_t06_infra01",
+      "candidate_run_dir": "C:\\Users\\pjjpj\\Desktop\\openai_manga_translater\\comic-translate\\banchmark_result_log\\gemma_iq4nl_japan\\20260411_171639_gemma_iq4nl_japan_fullgpu_suite\\confirm\\max384-r1\\attempt01_t07_infra01",
+      "pages_checked": 22,
+      "mismatch_count": 0,
+      "passed": true,
+      "pages": [
+        {
+          "page": "094.png",
+          "block_count_match": true,
+          "ocr_quality_match": true,
+          "normalized_text_match": true
+        },
+        {
+          "page": "095.png",
+          "block_count_match": true,
+          "ocr_quality_match": true,
+          "normalized_text_match": true
+        },
+        {
+          "page": "096.png",
+          "block_count_match": true,
+          "ocr_quality_match": true,
+          "normalized_text_match": true
+        },
+        {
+          "page": "097.png",
+          "block_count_match": true,
+          "ocr_quality_match": true,
+          "normalized_text_match": true
+        },
+        {
+          "page": "098.png",
+          "block_count_match": true,
+          "ocr_quality_match": true,
+          "normalized_text_match": true
+        },
+        {
+          "page": "099.png",
+          "block_count_match": true,
+          "ocr_quality_match": true,
+          "normalized_text_match": true
+        },
+        {
+          "page": "100.png",
+          "block_count_match": true,
+          "ocr_quality_match": true,
+          "normalized_text_match": true
+        },
+        {
+          "page": "101.png",
+          "block_count_match": true,
+          "ocr_quality_match": true,
+          "normalized_text_match": true
+        },
+        {
+          "page": "i_099.jpg",
+          "block_count_match": true,
+          "ocr_quality_match": true,
+          "normalized_text_match": true
+        },
+        {
+          "page": "i_100.jpg",
+          "block_count_match": true,
+          "ocr_quality_match": true,
+          "normalized_text_match": true
+        },
+        {
+          "page": "i_101.jpg",
+          "block_count_match": true,
+          "ocr_quality_match": true,
+          "normalized_text_match": true
+        },
+        {
+          "page": "i_102.jpg",
+          "block_count_match": true,
+          "ocr_quality_match": true,
+          "normalized_text_match": true
+        },
+        {
+          "page": "i_103.jpg",
+          "block_count_match": true,
+          "ocr_quality_match": true,
+          "normalized_text_match": true
+        },
+        {
+          "page": "i_104.jpg",
+          "block_count_match": true,
+          "ocr_quality_match": true,
+          "normalized_text_match": true
+        },
+        {
+          "page": "i_105.jpg",
+          "block_count_match": true,
+          "ocr_quality_match": true,
+          "normalized_text_match": true
+        },
+        {
+          "page": "p_015.jpg",
+          "block_count_match": true,
+          "ocr_quality_match": true,
+          "normalized_text_match": true
+        },
+        {
+          "page": "p_016.jpg",
+          "block_count_match": true,
+          "ocr_quality_match": true,
+          "normalized_text_match": true
+        },
+        {
+          "page": "p_017.jpg",
+          "block_count_match": true,
+          "ocr_quality_match": true,
+          "normalized_text_match": true
+        },
+        {
+          "page": "p_018.jpg",
+          "block_count_match": true,
+          "ocr_quality_match": true,
+          "normalized_text_match": true
+        },
+        {
+          "page": "p_019.jpg",
+          "block_count_match": true,
+          "ocr_quality_match": true,
+          "normalized_text_match": true
+        },
+        {
+          "page": "p_020.jpg",
+          "block_count_match": true,
+          "ocr_quality_match": true,
+          "normalized_text_match": true
+        },
+        {
+          "page": "p_021.jpg",
+          "block_count_match": true,
+          "ocr_quality_match": true,
+          "normalized_text_match": true
+        }
+      ],
+      "issues": [],
+      "runner_exit_code": 0
+    },
+    "tuning": {
+      "ocr_gpu_memory_utilization": 0.8,
+      "gemma_n_gpu_layers": 23,
+      "context_size": 4096,
+      "chunk_size": 6,
+      "threads": 10,
+      "max_completion_tokens": 384
+    },
+    "attempts": [],
+    "winner_reason": ""
+  },
+  "stages": {
+    "smoke": {
+      "winner_candidate": "",
+      "winner_reason": ""
+    },
+    "stage1": {
+      "winner_candidate": "ov08-ngl23",
+      "winner_reason": "selected fastest hard-gate-passing candidate"
+    },
+    "stage2": {
+      "winner_candidate": "ctx4096",
+      "winner_reason": "selected fastest hard-gate-passing candidate"
+    },
+    "stage3": {
+      "winner_candidate": "chunk6",
+      "winner_reason": "selected fastest hard-gate-passing candidate"
+    },
+    "stage4": {
+      "winner_candidate": "threads10",
+      "winner_reason": "selected fastest hard-gate-passing candidate"
+    },
+    "stage5": {
+      "winner_candidate": "max384",
+      "winner_reason": "selected fastest hard-gate-passing candidate"
+    },
+    "confirm": {
+      "winner_candidate": "max512",
+      "winner_reason": "selected fastest hard-gate-passing candidate"
+    }
+  },
+  "official_score_scope": "full-pipeline batch on Sample/japan (22 pages)",
+  "status": "completed",
+  "last_failure_kind": ""
+}
