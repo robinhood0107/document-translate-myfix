@@ -551,22 +551,30 @@ class WorkspaceMixin:
         box_tools_lay.addStretch()
 
         inp_tools_lay = QtWidgets.QHBoxLayout()
+        inpaint_specs = self.get_inpaint_tool_specs()
 
-        self.brush_button = self.create_tool_button(svg="brush-fill.svg", checkable=True)
-        self.brush_button.setToolTip(self.tr("Draw Brush Strokes for Cleaning Image"))
+        self.brush_button = self.create_tool_button(svg=str(inpaint_specs["brush"]["svg"]), checkable=True)
         self.brush_button.clicked.connect(self.toggle_brush_tool)
         self.tool_buttons["brush"] = self.brush_button
 
-        self.eraser_button = self.create_tool_button(svg="eraser_fill.svg", checkable=True)
-        self.eraser_button.setToolTip(self.tr("Erase Brush Strokes"))
+        self.eraser_button = self.create_tool_button(svg=str(inpaint_specs["eraser"]["svg"]), checkable=True)
         self.eraser_button.clicked.connect(self.toggle_eraser_tool)
         self.tool_buttons["eraser"] = self.eraser_button
 
-        self.clear_brush_strokes_button = self.create_tool_button(svg="clear-outlined.svg")
-        self.clear_brush_strokes_button.setToolTip(self.tr("Remove all the brush strokes on the Image"))
+        self.exclude_button = self.create_tool_button(svg=str(inpaint_specs["exclude"]["svg"]), checkable=True)
+        self.exclude_button.clicked.connect(self.toggle_exclude_tool)
+        self.tool_buttons["exclude"] = self.exclude_button
+
+        self.restore_button = self.create_tool_button(svg=str(inpaint_specs["restore"]["svg"]), checkable=True)
+        self.restore_button.clicked.connect(self.toggle_restore_tool)
+        self.tool_buttons["restore"] = self.restore_button
+
+        self.clear_brush_strokes_button = self.create_tool_button(svg=str(inpaint_specs["clear"]["svg"]))
 
         inp_tools_lay.addWidget(self.brush_button)
         inp_tools_lay.addWidget(self.eraser_button)
+        inp_tools_lay.addWidget(self.exclude_button)
+        inp_tools_lay.addWidget(self.restore_button)
         inp_tools_lay.addWidget(self.clear_brush_strokes_button)
         inp_tools_lay.addStretch()
 
@@ -574,8 +582,8 @@ class WorkspaceMixin:
         self.brush_eraser_slider.setMinimum(1)
         self.brush_eraser_slider.setMaximum(100)
         self.brush_eraser_slider.setValue(10)
-        self.brush_eraser_slider.setToolTip(self.tr("Brush/Eraser Size Slider"))
         self.brush_eraser_slider.valueChanged.connect(self.set_brush_eraser_size)
+        self.refresh_inpaint_tool_ui()
 
         tools_layout.addLayout(misc_lay)
         box_div = MDivider(self.tr("Box Drawing"))

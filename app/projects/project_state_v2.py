@@ -12,6 +12,7 @@ import msgpack
 from .parsers import ProjectDecoder, ProjectEncoder, ensure_string_keys
 from modules.utils.export_paths import normalize_export_source_record
 from modules.utils.file_handler import ensure_prepared_path_materialized, get_prepared_path_source
+from modules.utils.inpaint_strokes import PATCH_KIND_INPAINT, normalize_patch_kind
 
 if TYPE_CHECKING:
     from controller import ComicTranslate
@@ -321,11 +322,17 @@ def save_state_to_proj_file_v2(comic_translate: "ComicTranslate", file_name: str
 
     for page_path, patch_list in comic_translate.image_patches.items():
         image_patches_references[page_path] = []
-        for patch in patch_list:
+        for idx, patch in enumerate(patch_list, start=1):
             src_png = patch["png_path"]
             blob_hash = add_blob_if_needed(src_png, "patch")
             image_patches_references[page_path].append(
-                {"bbox": patch["bbox"], "png_hash": blob_hash, "hash": patch["hash"]}
+                {
+                    "bbox": patch["bbox"],
+                    "png_hash": blob_hash,
+                    "hash": patch["hash"],
+                    "kind": normalize_patch_kind(patch.get("kind", PATCH_KIND_INPAINT)),
+                    "order": int(patch.get("order", idx) or idx),
+                }
             )
 
     page_paths = list(
@@ -611,7 +618,15 @@ def _materialize_from_manifest_and_pages(
             patch_disk_path = os.path.join(page_folder, f"{idx}_{png_hash[:12]}{ext}")
             register_lazy_blob_path(project_file, patch_disk_path, str(png_hash))
 
-            new_list.append({"bbox": patch["bbox"], "png_path": patch_disk_path, "hash": patch["hash"]})
+            new_list.append(
+                {
+                    "bbox": patch["bbox"],
+                    "png_path": patch_disk_path,
+                    "hash": patch["hash"],
+                    "kind": normalize_patch_kind(patch.get("kind", PATCH_KIND_INPAINT)),
+                    "order": int(patch.get("order", idx + 1) or (idx + 1)),
+                }
+            )
 
         if new_list:
             reconstructed[page_path] = new_list
