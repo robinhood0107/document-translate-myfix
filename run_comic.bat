@@ -85,6 +85,7 @@ set "CUDA_PATH_V13_1="
 set "CUDA_HOME="
 set "CUDA_ROOT="
 set "CUDNN_PATH="
+set "QT_QPA_PLATFORM=windows"
 set "PYTHONNOUSERSITE=1"
 set "PYTHONWARNINGS=ignore:pkg_resources is deprecated as an API:UserWarning"
 
