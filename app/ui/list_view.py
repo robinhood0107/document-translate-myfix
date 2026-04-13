@@ -9,6 +9,7 @@ from PySide6.QtCore import Qt, Signal
 
 from .dayu_widgets.browser import MClickBrowserFilePushButton
 from .dayu_widgets.menu import MMenu
+from .dayu_widgets.slider import MSlider
 
 
 @dataclass(slots=True)
@@ -21,6 +22,38 @@ class PageListItemData:
     modified_at: float = 0.0
     source_path: str = ""
     source_kind: str = "file"
+
+
+class _FooterPillButton(QtWidgets.QPushButton):
+    def __init__(self, text: str, parent=None) -> None:
+        super().__init__(text, parent)
+        self.setObjectName("pageListFooterButton")
+        self.setCheckable(True)
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self.setMinimumHeight(30)
+        self.setStyleSheet(
+            """
+            QPushButton#pageListFooterButton {
+                background: rgba(255, 255, 255, 0.05);
+                color: #cfd6e4;
+                border: 1px solid rgba(255, 255, 255, 0.08);
+                border-radius: 15px;
+                padding: 5px 14px;
+                font-size: 13px;
+                font-weight: 600;
+            }
+            QPushButton#pageListFooterButton:hover {
+                background: rgba(255, 255, 255, 0.10);
+                border-color: rgba(24, 144, 255, 0.45);
+            }
+            QPushButton#pageListFooterButton:checked {
+                background: #1890ff;
+                color: #ffffff;
+                border-color: #1890ff;
+            }
+            """
+        )
 
 
 class PageListModel(QtCore.QAbstractListModel):
@@ -174,18 +207,36 @@ class PageListModel(QtCore.QAbstractListModel):
 
 
 class PageListDelegate(QtWidgets.QStyledItemDelegate):
-    def __init__(self, parent=None) -> None:
+    def __init__(self, parent=None, thumbnail_size: QtCore.QSize | None = None) -> None:
         super().__init__(parent)
-        self._thumbnail_size = QtCore.QSize(35, 50)
-        self._horizontal_padding = 8
-        self._vertical_padding = 6
+        self._thumbnail_size = QtCore.QSize(thumbnail_size or QtCore.QSize(46, 66))
+        self._horizontal_padding = 10
+        self._vertical_padding = 8
+
+    def thumbnail_size(self) -> QtCore.QSize:
+        return QtCore.QSize(self._thumbnail_size)
+
+    def set_thumbnail_size(self, size: QtCore.QSize) -> None:
+        bounded = QtCore.QSize(max(32, size.width()), max(46, size.height()))
+        self._thumbnail_size = bounded
+
+    @staticmethod
+    def _blend(base: QtGui.QColor, accent: QtGui.QColor, ratio: float) -> QtGui.QColor:
+        ratio = max(0.0, min(1.0, ratio))
+        inv = 1.0 - ratio
+        return QtGui.QColor(
+            int(base.red() * inv + accent.red() * ratio),
+            int(base.green() * inv + accent.green() * ratio),
+            int(base.blue() * inv + accent.blue() * ratio),
+            235,
+        )
 
     def sizeHint(
         self,
         option: QtWidgets.QStyleOptionViewItem,
         index: QtCore.QModelIndex,
     ) -> QtCore.QSize:
-        height = self._thumbnail_size.height() + (self._vertical_padding * 2) + 4
+        height = self._thumbnail_size.height() + (self._vertical_padding * 2) + 8
         return QtCore.QSize(option.rect.width(), height)
 
     def paint(
@@ -197,16 +248,16 @@ class PageListDelegate(QtWidgets.QStyledItemDelegate):
         painter.save()
         painter.setRenderHint(QtGui.QPainter.RenderHint.Antialiasing, True)
 
-        rect = option.rect.adjusted(4, 2, -4, -2)
+        rect = option.rect.adjusted(4, 3, -4, -3)
         palette = option.palette
         selected = bool(option.state & QtWidgets.QStyle.StateFlag.State_Selected)
         hovered = bool(option.state & QtWidgets.QStyle.StateFlag.State_MouseOver)
         skipped = bool(index.data(PageListModel.SkippedRole))
 
-        bg_color = palette.base().color().lighter(112 if hovered else 104)
-        border_color = palette.mid().color()
+        bg_color = palette.window().color().darker(106 if hovered else 112)
+        border_color = palette.mid().color().lighter(108)
         if selected:
-            bg_color = palette.highlight().color().lighter(120)
+            bg_color = self._blend(bg_color, palette.highlight().color(), 0.22)
             border_color = palette.highlight().color()
 
         painter.setPen(QtGui.QPen(border_color, 1))
@@ -220,7 +271,7 @@ class PageListDelegate(QtWidgets.QStyledItemDelegate):
             self._thumbnail_size.height(),
         )
         painter.setPen(QtGui.QPen(palette.mid().color(), 1))
-        painter.setBrush(palette.alternateBase())
+        painter.setBrush(bg_color.lighter(108))
         painter.drawRoundedRect(thumb_rect, 4, 4)
 
         pixmap = index.data(PageListModel.ThumbnailRole)
@@ -252,6 +303,7 @@ class PageListDelegate(QtWidgets.QStyledItemDelegate):
         font = QtGui.QFont(option.font)
         font.setBold(selected)
         font.setStrikeOut(skipped)
+        font.setPointSizeF(max(font.pointSizeF(), 10.0) + 1.0)
         painter.setFont(font)
 
         text_color = palette.text().color()
@@ -286,11 +338,57 @@ class _PageListContentView(QtWidgets.QListView):
         self.setDropIndicatorShown(True)
         self.setAutoScroll(True)
         self.setAutoScrollMargin(36)
+        self.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
         self.setVerticalScrollMode(QtWidgets.QAbstractItemView.ScrollMode.ScrollPerPixel)
         self.setUniformItemSizes(True)
         self.setMouseTracking(True)
         self.setEditTriggers(QtWidgets.QAbstractItemView.EditTrigger.NoEditTriggers)
         self.setContextMenuPolicy(Qt.ContextMenuPolicy.DefaultContextMenu)
+        self.setFrameShape(QtWidgets.QFrame.Shape.NoFrame)
+        self.setStyleSheet(
+            """
+            QListView {
+                background: transparent;
+                border: none;
+                outline: none;
+            }
+            QScrollBar:horizontal {
+                height: 0px;
+                margin: 0px;
+            }
+            QScrollBar::add-line:horizontal,
+            QScrollBar::sub-line:horizontal,
+            QScrollBar::add-page:horizontal,
+            QScrollBar::sub-page:horizontal {
+                width: 0px;
+                height: 0px;
+                border: none;
+                background: transparent;
+            }
+            QScrollBar:vertical {
+                background: transparent;
+                width: 10px;
+                margin: 6px 0 6px 0;
+            }
+            QScrollBar::handle:vertical {
+                background: rgba(255, 255, 255, 0.18);
+                border-radius: 5px;
+                min-height: 28px;
+            }
+            QScrollBar::handle:vertical:hover {
+                background: rgba(255, 255, 255, 0.28);
+            }
+            QScrollBar::add-line:vertical,
+            QScrollBar::sub-line:vertical,
+            QScrollBar::add-page:vertical,
+            QScrollBar::sub-page:vertical {
+                height: 0px;
+                border: none;
+                background: transparent;
+            }
+            """
+        )
 
     def startDrag(self, supportedActions: Qt.DropAction) -> None:
         indexes = self.selectionModel().selectedRows()
@@ -383,11 +481,13 @@ class PageListView(QtWidgets.QWidget):
     selection_changed = Signal(list)
     order_changed = Signal(list)
     sort_requested = Signal(str, str)
+    thumbnail_size_changed = Signal(int, int)
 
     def __init__(self) -> None:
         super().__init__()
-        self.setMinimumWidth(100)
+        self.setMinimumWidth(88)
         self.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self._preferred_width = 208
 
         self.insert_browser = MClickBrowserFilePushButton(multiple=True)
         self.insert_browser.set_dayu_filters(
@@ -408,7 +508,8 @@ class PageListView(QtWidgets.QWidget):
         )
 
         self._model = PageListModel(self)
-        self._delegate = PageListDelegate(self)
+        self._base_thumbnail_size = QtCore.QSize(83, 119)
+        self._delegate = PageListDelegate(self, thumbnail_size=self._base_thumbnail_size)
         self._list_view = _PageListContentView(self)
         self._list_view.setModel(self._model)
         self._list_view.setItemDelegate(self._delegate)
@@ -417,19 +518,58 @@ class PageListView(QtWidgets.QWidget):
         self._name_direction = "asc"
         self._date_direction = "desc"
 
-        self._name_sort_button = QtWidgets.QPushButton(self.tr("Name"))
-        self._name_sort_button.setCheckable(True)
-        self._name_sort_button.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self._name_sort_button = _FooterPillButton(self.tr("Name"))
         self._name_sort_button.clicked.connect(self._request_name_sort)
 
-        self._date_sort_button = QtWidgets.QPushButton(self.tr("Date"))
-        self._date_sort_button.setCheckable(True)
-        self._date_sort_button.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self._date_sort_button = _FooterPillButton(self.tr("Date"))
         self._date_sort_button.clicked.connect(self._request_date_sort)
 
-        controls_layout = QtWidgets.QHBoxLayout()
+        self._thumbnail_scale_slider = MSlider(Qt.Orientation.Horizontal, self)
+        self._thumbnail_scale_slider.setRange(80, 180)
+        self._thumbnail_scale_slider.setSingleStep(5)
+        self._thumbnail_scale_slider.setPageStep(10)
+        self._thumbnail_scale_slider.setValue(100)
+        self._thumbnail_scale_slider.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self._thumbnail_scale_slider.setSizePolicy(
+            QtWidgets.QSizePolicy.Policy.Expanding,
+            QtWidgets.QSizePolicy.Policy.Fixed,
+        )
+        self._thumbnail_scale_slider.valueChanged.connect(self._on_thumbnail_scale_changed)
+
+        self._size_value_label = QtWidgets.QLabel(self)
+        self._size_value_label.setObjectName("pageListSizeValue")
+        value_font = self._size_value_label.font()
+        value_font.setBold(True)
+        value_font.setPointSizeF(max(value_font.pointSizeF(), 11.0) + 1.0)
+        self._size_value_label.setFont(value_font)
+        self._size_value_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._size_value_label.setMinimumWidth(60)
+
+        self._footer_frame = QtWidgets.QFrame(self)
+        self._footer_frame.setObjectName("pageListFooter")
+        self._footer_frame.setStyleSheet(
+            """
+            QFrame#pageListFooter {
+                background: rgba(255, 255, 255, 0.03);
+                border: 1px solid rgba(255, 255, 255, 0.06);
+                border-radius: 14px;
+            }
+            QLabel#pageListSizeValue {
+                background: rgba(255, 255, 255, 0.05);
+                color: #f5f7fb;
+                border: 1px solid rgba(255, 255, 255, 0.08);
+                border-radius: 11px;
+                padding: 5px 10px;
+            }
+            """
+        )
+
+        controls_layout = QtWidgets.QHBoxLayout(self._footer_frame)
         controls_layout.setContentsMargins(0, 0, 0, 0)
-        controls_layout.addStretch(1)
+        controls_layout.setSpacing(8)
+        controls_layout.addWidget(self._size_value_label)
+        controls_layout.addWidget(self._thumbnail_scale_slider, 1)
+        controls_layout.addSpacing(6)
         controls_layout.addWidget(self._name_sort_button)
         controls_layout.addWidget(self._date_sort_button)
 
@@ -437,12 +577,16 @@ class PageListView(QtWidgets.QWidget):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(6)
         layout.addWidget(self._list_view, 1)
-        layout.addLayout(controls_layout)
+        layout.addWidget(self._footer_frame, 0)
 
         selection_model = self._list_view.selectionModel()
         selection_model.selectionChanged.connect(self._on_selection_changed)
         selection_model.currentChanged.connect(self.currentItemChanged.emit)
         self._update_sort_buttons()
+        self._apply_thumbnail_scale(self._thumbnail_scale_slider.value(), emit_signal=False)
+
+    def sizeHint(self) -> QtCore.QSize:  # type: ignore[override]
+        return QtCore.QSize(self._preferred_width, 520)
 
     def _direction_icon(self, direction: str) -> QtGui.QIcon:
         style = self.style()
@@ -474,6 +618,26 @@ class PageListView(QtWidgets.QWidget):
         self._name_sort_button.setChecked(self._active_sort_key == "name")
         self._date_sort_button.setChecked(self._active_sort_key == "date")
 
+    def _scaled_thumbnail_size(self, percentage: int) -> QtCore.QSize:
+        return QtCore.QSize(
+            max(32, int(self._base_thumbnail_size.width() * percentage / 100.0)),
+            max(46, int(self._base_thumbnail_size.height() * percentage / 100.0)),
+        )
+
+    def _apply_thumbnail_scale(self, value: int, *, emit_signal: bool) -> None:
+        thumbnail_size = self._scaled_thumbnail_size(value)
+        self._delegate.set_thumbnail_size(thumbnail_size)
+        self._list_view.setSpacing(max(6, thumbnail_size.height() // 8))
+        self._size_value_label.setText(f"{value}%")
+        self._thumbnail_scale_slider.setToolTip(f"{value}%")
+        self._list_view.doItemsLayout()
+        self._list_view.viewport().update()
+        if emit_signal:
+            self.thumbnail_size_changed.emit(thumbnail_size.width(), thumbnail_size.height())
+
+    def _on_thumbnail_scale_changed(self, value: int) -> None:
+        self._apply_thumbnail_scale(value, emit_signal=True)
+
     def _request_name_sort(self) -> None:
         if self._active_sort_key == "name":
             self._name_direction = "desc" if self._name_direction == "asc" else "asc"
@@ -497,6 +661,9 @@ class PageListView(QtWidgets.QWidget):
 
     def content_view(self) -> QtWidgets.QListView:
         return self._list_view
+
+    def thumbnail_size(self) -> QtCore.QSize:
+        return self._delegate.thumbnail_size()
 
     def set_page_items(self, items: list[PageListItemData]) -> None:
         self._model.set_items(items)

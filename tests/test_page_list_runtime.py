@@ -5,7 +5,7 @@ import unittest
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-from PySide6 import QtWidgets
+from PySide6 import QtCore, QtWidgets
 
 from app.ui.list_view import PageListItemData, PageListView
 
@@ -56,6 +56,27 @@ class PageListRuntimeTests(unittest.TestCase):
                 ("date", "oldest"),
             ],
         )
+
+    def test_thumbnail_slider_updates_size_and_hides_horizontal_scrollbar(self) -> None:
+        emitted: list[tuple[int, int]] = []
+        self.widget.thumbnail_size_changed.connect(lambda w, h: emitted.append((w, h)))
+
+        self.widget._thumbnail_scale_slider.setValue(140)
+        QtWidgets.QApplication.processEvents()
+
+        self.assertEqual(
+            self.widget.content_view().horizontalScrollBarPolicy(),
+            QtCore.Qt.ScrollBarPolicy.ScrollBarAlwaysOff,
+        )
+        self.assertTrue(emitted)
+        self.assertGreater(self.widget.thumbnail_size().width(), 46)
+        self.assertEqual(self.widget._size_value_label.text(), "140%")
+
+    def test_default_thumbnail_scale_and_compact_width(self) -> None:
+        self.assertEqual(self.widget._thumbnail_scale_slider.value(), 100)
+        self.assertEqual(self.widget._size_value_label.text(), "100%")
+        self.assertGreaterEqual(self.widget.thumbnail_size().width(), 83)
+        self.assertLessEqual(self.widget.sizeHint().width(), 208)
 
 
 if __name__ == "__main__":
