@@ -493,13 +493,23 @@ def extract_archive(file_path: str, extract_to: str):
 
     return image_paths
 
-def make_cbz(input_dir, output_path='', output_dir='', output_base_name='', save_as_ext='.cbz'):
+def make_cbz(input_dir, output_path='', output_dir='', output_base_name='', save_as_ext='.cbz', compresslevel=None):
     if not output_path:
         output_path = os.path.join(output_dir, f"{output_base_name}_translated{save_as_ext}")
-    
-    with zipfile.ZipFile(output_path, 'w') as archive:
+
+    zip_kwargs = {"mode": "w"}
+    if compresslevel is None:
+        zip_kwargs["compression"] = zipfile.ZIP_STORED
+    elif int(compresslevel) <= 0:
+        zip_kwargs["compression"] = zipfile.ZIP_STORED
+    else:
+        zip_kwargs["compression"] = zipfile.ZIP_DEFLATED
+        zip_kwargs["compresslevel"] = max(1, min(9, int(compresslevel)))
+
+    with zipfile.ZipFile(output_path, **zip_kwargs) as archive:
         for root, dirs, files in os.walk(input_dir):
-            for file in files:
+            dirs.sort(key=natural_sort_key)
+            for file in sorted(files, key=natural_sort_key):
                 if is_image_file(file):
                     file_path = os.path.join(root, file)
                     archive.write(file_path, arcname=os.path.relpath(file_path, input_dir))
@@ -533,7 +543,7 @@ def make_pdf(input_dir, output_path="", output_dir="", output_base_name=""):
     with open(output_path, "wb") as f:
         f.write(img2pdf.convert(sorted_paths))
 
-def make(input_dir, output_path="", save_as_ext="", output_dir="", output_base_name=""):
+def make(input_dir, output_path="", save_as_ext="", output_dir="", output_base_name="", compresslevel=None):
     if not output_path and (not output_dir or not output_base_name):
         raise ValueError("Either output_path or both output_dir and output_base_name must be provided")
     
@@ -541,7 +551,14 @@ def make(input_dir, output_path="", save_as_ext="", output_dir="", output_base_n
         save_as_ext = os.path.splitext(output_path)[1]
 
     if save_as_ext in ['.cbz', '.zip']:
-        make_cbz(input_dir, output_path, output_dir, output_base_name, save_as_ext)
+        make_cbz(
+            input_dir,
+            output_path,
+            output_dir,
+            output_base_name,
+            save_as_ext,
+            compresslevel=compresslevel,
+        )
     elif save_as_ext == '.cb7':
         make_cb7(input_dir, output_path, output_dir, output_base_name)
     elif save_as_ext == '.pdf':
