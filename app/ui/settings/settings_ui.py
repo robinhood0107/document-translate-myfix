@@ -17,6 +17,7 @@ from .gemma_local_server_page import GemmaLocalServerPage
 from .credentials_page import CredentialsPage
 from .llms_page import LlmsPage
 from .text_rendering_page import TextRenderingPage
+from .notifications_page import NotificationsPage
 from .project_page import ProjectPage
 from .export_page import ExportPage
 from .shortcuts_page import ShortcutsPage
@@ -224,6 +225,7 @@ class SettingsPageUI(QtWidgets.QWidget):
         self.project_page = ProjectPage(parent=self)
         self.export_page = ExportPage(parent=self)
         self.user_dictionaries_page = UserDictionariesPage(parent=self)
+        self.notifications_page = NotificationsPage(parent=self)
         self.shortcuts_page = ShortcutsPage(parent=self)
         self.about_page = AboutPage(parent=self)
 
@@ -279,6 +281,9 @@ class SettingsPageUI(QtWidgets.QWidget):
         self.uppercase_checkbox = self.text_rendering_page.uppercase_checkbox
         self.ocr_dictionary_table = self.user_dictionaries_page.ocr_dictionary_table
         self.translation_dictionary_table = self.user_dictionaries_page.translation_dictionary_table
+        self.enable_completion_sound_checkbox = self.notifications_page.enable_completion_sound_checkbox
+        self.completion_sound_combo = self.notifications_page.completion_sound_combo
+        self.test_sound_button = self.notifications_page.test_sound_button
 
         # Export
         self.raw_text_checkbox = self.export_page.raw_text_checkbox
@@ -305,6 +310,7 @@ class SettingsPageUI(QtWidgets.QWidget):
         self.stacked_widget.addWidget(self.llms_page)
         self.stacked_widget.addWidget(self.text_rendering_page)
         self.stacked_widget.addWidget(self.user_dictionaries_page)
+        self.stacked_widget.addWidget(self.notifications_page)
         self.stacked_widget.addWidget(self.project_page)
         self.stacked_widget.addWidget(self.export_page)
         self.stacked_widget.addWidget(self.shortcuts_page)
@@ -363,6 +369,7 @@ class SettingsPageUI(QtWidgets.QWidget):
             {"title": self.tr("LLMs"), "avatar": MPixmap(".svg")},
             {"title": self.tr("Text Rendering"), "avatar": MPixmap(".svg")},
             {"title": self.tr("User Dictionaries"), "avatar": MPixmap(".svg")},
+            {"title": self.tr("Notifications"), "avatar": MPixmap(".svg")},
             {"title": self.tr("Project"), "avatar": MPixmap(".svg")},
             {"title": self.tr("Export"), "avatar": MPixmap(".svg")},
             {"title": self.tr("Shortcuts"), "avatar": MPixmap(".svg")},
