@@ -1,11 +1,14 @@
 from typing import List, Tuple
 import numpy as np
 import copy
+import re
 from PIL import Image, ImageDraw
 from collections import defaultdict, deque
 from ..detection.utils.text_lines import group_items_into_lines
 from modules.detection.utils.geometry import does_rectangle_fit, is_mostly_contained
 from modules.utils.language_utils import is_no_space_lang
+
+_CJK_PATTERN = re.compile(r'[\uac00-\ud7a3\u3040-\u30ff\u4e00-\u9FFF]')
 
 class TextBlock(object):
     """
@@ -25,6 +28,7 @@ class TextBlock(object):
                  text: str = "",
                  texts: List[str] = None,
                  translation: str = "",
+                 rich_text: str = "",
                  line_spacing = 1,
                  alignment: str = '',
                  source_lang: str = "",
@@ -57,6 +61,7 @@ class TextBlock(object):
         self.texts = texts if texts is not None else []
         self.text = ' '.join(self.texts) if self.texts else text
         self.translation = translation
+        self.rich_text = rich_text
 
         self.line_spacing = line_spacing
         self.alignment = alignment
@@ -117,6 +122,7 @@ class TextBlock(object):
         new_block.texts = copy.deepcopy(self.texts)
         new_block.text = self.text
         new_block.translation = self.translation
+        new_block.rich_text = self.rich_text
         new_block.line_spacing = self.line_spacing
         new_block.alignment = self.alignment
         new_block.source_lang = self.source_lang
@@ -128,8 +134,29 @@ class TextBlock(object):
         new_block.min_font_size = self.min_font_size
         new_block.max_font_size = self.max_font_size
         new_block.font_color = self.font_color
+        new_block.direction = self.direction
         
         return new_block
+
+    def get_text(self) -> str:
+        if isinstance(self.text, str):
+            return self.text
+
+        text_list = self.text if isinstance(self.text, list) else self.texts
+        if not isinstance(text_list, list):
+            return str(text_list or "")
+
+        result = ""
+        for index, fragment in enumerate(text_list):
+            current = str(fragment or "")
+            result += current
+            if index + 1 >= len(text_list):
+                continue
+            next_fragment = str(text_list[index + 1] or "")
+            if _CJK_PATTERN.search(current) or _CJK_PATTERN.search(next_fragment):
+                continue
+            result += " "
+        return result
 
 def sort_blk_list(blk_list: List[TextBlock], right_to_left=True) -> List[TextBlock]:
     # Sort blk_list from right to left, top to bottom
