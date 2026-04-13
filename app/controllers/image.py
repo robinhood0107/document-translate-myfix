@@ -19,6 +19,12 @@ from app.controllers.psd_support import ensure_photoshopapi_available
 from app.ui.list_view_image_loader import ListViewImageLoader
 from app.thread_worker import GenericWorker
 from app.path_materialization import ensure_path_materialized
+from modules.utils.inpaint_strokes import (
+    PATCH_KIND_INPAINT,
+    PATCH_KIND_RESTORE,
+    STROKE_ROLE_ADD,
+    normalize_patch_kind,
+)
 
 if TYPE_CHECKING:
     from controller import ComicTranslate
@@ -554,6 +560,7 @@ class ImageStateController:
             stack = QtGui.QUndoStack(self.main)
             stack.cleanChanged.connect(self.main._update_window_modified)
             stack.indexChanged.connect(self.main._bump_dirty_revision)
+            stack.indexChanged.connect(self.main.refresh_inpaint_tool_ui)
             try:
                 if hasattr(self.main, "search_ctrl") and self.main.search_ctrl is not None:
                     stack.indexChanged.connect(self.main.search_ctrl.on_undo_redo)
@@ -615,6 +622,7 @@ class ImageStateController:
                     stack = QtGui.QUndoStack(self.main)
                     stack.cleanChanged.connect(self.main._update_window_modified)
                     stack.indexChanged.connect(self.main._bump_dirty_revision)
+                    stack.indexChanged.connect(self.main.refresh_inpaint_tool_ui)
                     self.main.undo_stacks[file_path] = stack
                     self.main.undo_group.addStack(stack)
                 
@@ -674,6 +682,7 @@ class ImageStateController:
             stack = QtGui.QUndoStack(self.main)
             stack.cleanChanged.connect(self.main._update_window_modified)
             stack.indexChanged.connect(self.main._bump_dirty_revision)
+            stack.indexChanged.connect(self.main.refresh_inpaint_tool_ui)
             try:
                 if hasattr(self.main, "search_ctrl") and self.main.search_ctrl is not None:
                     stack.indexChanged.connect(self.main.search_ctrl.on_undo_redo)
@@ -947,6 +956,8 @@ class ImageStateController:
                         'bbox': saved['bbox'],
                         'image': rgb_img,
                         'hash': saved['hash'],
+                        'kind': normalize_patch_kind(saved.get('kind', PATCH_KIND_INPAINT)),
+                        'order': int(saved.get('order', 0) or 0),
                     })
         if loaded:
             self.main.in_memory_patches.setdefault(file_path, []).extend(loaded)
@@ -1170,7 +1181,9 @@ class ImageStateController:
                 prop = {
                     'bbox': saved['bbox'],
                     'image': match['image'],
-                    'hash': saved['hash']
+                    'hash': saved['hash'],
+                    'kind': normalize_patch_kind(saved.get('kind', match.get('kind', PATCH_KIND_INPAINT))),
+                    'order': int(saved.get('order', match.get('order', 0)) or 0),
                 }
             else:
                 # load into memory
@@ -1179,13 +1192,88 @@ class ImageStateController:
                 prop = {
                     'bbox': saved['bbox'],
                     'image': rgb_img,
-                    'hash': saved['hash']
+                    'hash': saved['hash'],
+                    'kind': normalize_patch_kind(saved.get('kind', PATCH_KIND_INPAINT)),
+                    'order': int(saved.get('order', 0) or 0),
                 }
                 self.main.in_memory_patches[file_path].append(prop)
             
             # draw it
             if not PatchCommandBase.find_matching_item(self.main.image_viewer._scene, prop):   
                 PatchCommandBase.create_patch_item(prop, self.main.image_viewer)
+
+    def _current_file_path(self) -> str | None:
+        if 0 <= self.main.curr_img_idx < len(self.main.image_files):
+            return self.main.image_files[self.main.curr_img_idx]
+        return None
+
+    def current_page_has_inpaint_patches(self) -> bool:
+        file_path = self._current_file_path()
+        if not file_path:
+            return False
+        return bool(self.main.image_patches.get(file_path, []))
+
+    def apply_restore_stroke(self, payload: dict):
+        if not payload:
+            return
+
+        file_path = self._current_file_path()
+        if not file_path or not self.current_page_has_inpaint_patches():
+            self.main.refresh_inpaint_tool_ui()
+            return
+
+        image = self.main.image_data.get(file_path)
+        if image is None:
+            image = self.load_image(file_path)
+            if image is not None:
+                self.main.image_data[file_path] = image
+        if image is None:
+            return
+
+        stroke_path = payload.get("path")
+        if stroke_path is None:
+            return
+
+        stroke_width = max(1, int(payload.get("width", self.main.image_viewer.brush_size)))
+        page_index = self.main.curr_img_idx
+        if self.main.webtoon_mode:
+            page_index = int(payload.get("page_index", self.main.curr_img_idx))
+            stroke_path = self.main.image_viewer.webtoon_manager.coordinate_converter.convert_path_to_page_local(
+                stroke_path,
+                page_index,
+            )
+
+        mask = self.main.pipeline.inpainting._generate_mask_from_saved_strokes(
+            [{
+                "path": stroke_path,
+                "width": stroke_width,
+                "brush": "#00000000",
+                "role": STROKE_ROLE_ADD,
+            }],
+            image,
+        )
+        patches = self.main.pipeline.inpainting.extract_patches_from_image(
+            mask,
+            image,
+            kind=PATCH_KIND_RESTORE,
+        )
+        if not patches:
+            return
+
+        if self.main.webtoon_mode:
+            for patch in patches:
+                x, y, _w, _h = patch["bbox"]
+                scene_pos = self.main.image_viewer.page_to_scene_coordinates(
+                    page_index,
+                    QtCore.QPointF(x, y),
+                )
+                if scene_pos is not None:
+                    patch["scene_pos"] = [scene_pos.x(), scene_pos.y()]
+                    patch["page_index"] = page_index
+
+        self.on_inpaint_patches_processed(patches, file_path)
+        self.main.mark_project_dirty()
+        self.main.refresh_inpaint_tool_ui()
 
     def save_current_image(self, file_path: str):
         if self.main.webtoon_mode:
@@ -1280,6 +1368,7 @@ class ImageStateController:
         finally:
             viewer.setUpdatesEnabled(True)
             viewer.viewport().update()
+            self.main.refresh_inpaint_tool_ui()
 
     def display_image(self, index: int, switch_page: bool = True):
         if 0 <= index < len(self.main.image_files):
@@ -1320,6 +1409,7 @@ class ImageStateController:
             if first_time_display and not self.main.webtoon_mode:
                 self.main.image_viewer.fitInView()
                 self.main.displayed_images.add(file_path)  # Mark this image as displayed
+            self.main.refresh_inpaint_tool_ui()
 
     def on_image_processed(self, index: int, image: np.ndarray, image_path: str):
         file_on_display = self.main.image_files[self.main.curr_img_idx]
@@ -1387,6 +1477,7 @@ class ImageStateController:
         finally:
             viewer.setUpdatesEnabled(True)
             viewer.viewport().update()
+            self.main.refresh_inpaint_tool_ui()
 
     def on_image_skipped(self, image_path: str, skip_reason: str, error: str):
         summarized_error = self._summarize_skip_error(error)
@@ -1461,10 +1552,12 @@ class ImageStateController:
         # Create the command for the specific page
         command = PatchInsertCommand(self.main, patches, file_path, display=should_display)
         target_stack.push(command)
+        self.main.refresh_inpaint_tool_ui()
 
     def apply_inpaint_patches(self, patches):
         command = PatchInsertCommand(self.main, patches, self.main.image_files[self.main.curr_img_idx])
         self.main.undo_group.activeStack().push(command)
+        self.main.refresh_inpaint_tool_ui()
 
     def cleanup(self):
         """Clean up resources, including the lazy loader."""
