@@ -129,6 +129,12 @@
 <context>
     <name>ComicTranslate</name>
     <message>
+        <source>Project files cannot be opened together with other imported files.
+Choose either a project file or image/document/archive files.</source>
+        <translation>项目文件不能与其他导入文件一起打开。
+请选择项目文件，或仅选择图像/文档/压缩包文件。</translation>
+    </message>
+    <message>
         <source>Gemma와 OCR 준비를 확인하는 중...</source>
         <translation type="unfinished"></translation>
     </message>
@@ -259,6 +265,12 @@ Duplicates:
     <message>
         <source>Unsaved Changes</source>
         <translation>未保存的更改</translation>
+    </message>
+    <message>
+        <source>Project switching is unavailable while automatic processing is running.
+Cancel the current run or wait for it to finish first.</source>
+        <translation>自动处理运行期间无法切换项目。
+请先取消当前任务，或等待其完成。</translation>
     </message>
     <message>
         <source>Save changes to this file?</source>
@@ -1235,6 +1247,10 @@ Install it to use PSD features.</source>
         <translation>主页</translation>
     </message>
     <message>
+        <source>Open Latest Recent Project</source>
+        <translation>打开最近一次使用的项目</translation>
+    </message>
+    <message>
         <source>Settings</source>
         <translation>设置</translation>
     </message>
@@ -1246,22 +1262,6 @@ Install it to use PSD features.</source>
         <source>Insert files into current project</source>
         <translation>插入文件到当前项目</translation>
     </message>
-    <message>
-        <source>Start New Project</source>
-        <translation>开始新项目</translation>
-    </message>
-    <message>
-        <source>Your current project has unsaved changes. Start a new project?</source>
-        <translation>您当前的项目有未保存的更改。要开始新项目吗？</translation>
-    </message>
-    <message>
-        <source>Yes</source>
-        <translation>是</translation>
-    </message>
-    <message>
-        <source>No</source>
-        <translation>否</translation>
-    </message>
 </context>
 <context>
     <name>NotificationsPage</name>
@@ -1270,8 +1270,8 @@ Install it to use PSD features.</source>
         <translation>自动处理完成</translation>
     </message>
     <message>
-        <source>Play a sound when automatic processing finishes successfully. Custom files must be placed in the project&apos;s music folder.</source>
-        <translation>自动处理成功完成时播放声音。自定义文件必须放在项目的 music 文件夹中。</translation>
+        <source>Play a sound when automatic processing finishes successfully. Custom files must be placed in the repository music folder.</source>
+        <translation>自动处理成功完成时播放声音。自定义文件必须放在仓库的 music 文件夹中。</translation>
     </message>
     <message>
         <source>Enable Completion Sound</source>
@@ -2099,6 +2099,12 @@ Open or create a project to get started.</source>
     <message>
         <source>Supported Files ({exts});;All Files (*)</source>
         <translation>支持的文件 ({exts});;所有文件 (*)</translation>
+    </message>
+    <message>
+        <source>Project files cannot be opened together with other imported files.
+Choose either a project file or image/document/archive files.</source>
+        <translation>项目文件不能与其他导入文件一起打开。
+请选择项目文件，或仅选择图像/文档/压缩包文件。</translation>
     </message>
 </context>
 <context>

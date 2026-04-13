@@ -129,6 +129,12 @@
 <context>
     <name>ComicTranslate</name>
     <message>
+        <source>Project files cannot be opened together with other imported files.
+Choose either a project file or image/document/archive files.</source>
+        <translation>プロジェクトファイルは他のインポートファイルと一緒に開けません。
+プロジェクトファイルだけを選ぶか、画像・ドキュメント・アーカイブファイルだけを選択してください。</translation>
+    </message>
+    <message>
         <source>Gemma와 OCR 준비를 확인하는 중...</source>
         <translation type="unfinished"></translation>
     </message>
@@ -259,6 +265,12 @@ Duplicates:
     <message>
         <source>Unsaved Changes</source>
         <translation>未保存の変更</translation>
+    </message>
+    <message>
+        <source>Project switching is unavailable while automatic processing is running.
+Cancel the current run or wait for it to finish first.</source>
+        <translation>自動処理の実行中はプロジェクトを切り替えられません。
+現在の実行をキャンセルするか、完了するまで待ってください。</translation>
     </message>
     <message>
         <source>Save changes to this file?</source>
@@ -1236,6 +1248,10 @@ Install it to use PSD features.</source>
         <translation>家</translation>
     </message>
     <message>
+        <source>Open Latest Recent Project</source>
+        <translation>最新の最近使ったプロジェクトを開く</translation>
+    </message>
+    <message>
         <source>Settings</source>
         <translation>設定</translation>
     </message>
@@ -1247,22 +1263,6 @@ Install it to use PSD features.</source>
         <source>Insert files into current project</source>
         <translation>現在のプロジェクトにファイルを挿入する</translation>
     </message>
-    <message>
-        <source>Start New Project</source>
-        <translation>新しいプロジェクトを開始する</translation>
-    </message>
-    <message>
-        <source>Your current project has unsaved changes. Start a new project?</source>
-        <translation>現在のプロジェクトには保存されていない変更があります。新しいプロジェクトを始めますか?</translation>
-    </message>
-    <message>
-        <source>Yes</source>
-        <translation>はい</translation>
-    </message>
-    <message>
-        <source>No</source>
-        <translation>いいえ</translation>
-    </message>
 </context>
 <context>
     <name>NotificationsPage</name>
@@ -1271,8 +1271,8 @@ Install it to use PSD features.</source>
         <translation>自動処理の完了</translation>
     </message>
     <message>
-        <source>Play a sound when automatic processing finishes successfully. Custom files must be placed in the project&apos;s music folder.</source>
-        <translation>自動処理が正常に完了したときに音を再生します。カスタムファイルはプロジェクトの music フォルダーに置いてください。</translation>
+        <source>Play a sound when automatic processing finishes successfully. Custom files must be placed in the repository music folder.</source>
+        <translation>自動処理が正常に完了したら音を再生します。カスタムファイルはリポジトリの music フォルダーに配置してください。</translation>
     </message>
     <message>
         <source>Enable Completion Sound</source>
@@ -2100,6 +2100,12 @@ Open or create a project to get started.</source>
     <message>
         <source>Supported Files ({exts});;All Files (*)</source>
         <translation>サポートされているファイル ({exts});;すべてのファイル (*)</translation>
+    </message>
+    <message>
+        <source>Project files cannot be opened together with other imported files.
+Choose either a project file or image/document/archive files.</source>
+        <translation>プロジェクトファイルは他のインポートファイルと一緒に開けません。
+プロジェクトファイルだけを選ぶか、画像・ドキュメント・アーカイブファイルだけを選択してください。</translation>
     </message>
 </context>
 <context>

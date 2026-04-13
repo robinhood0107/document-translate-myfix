@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import os
 import unittest
+from unittest import mock
 
 from app.controllers.image import ImageStateController
 
@@ -78,6 +80,28 @@ class ImageStateControllerTests(unittest.TestCase):
 
         self.assertEqual(captured[0], ["a.png", "b.png", "c.png"])
         self.assertEqual(captured[1], ["c.png", "a.png", "b.png"])
+
+    def test_thread_load_images_does_not_preserve_old_project_file(self) -> None:
+        main = mock.Mock()
+        main.project_file = "/tmp/old-project.ctpr"
+        main.default_error_handler = mock.Mock()
+        main.run_threaded = mock.Mock()
+        main.setWindowTitle = mock.Mock()
+        main.project_ctrl = mock.Mock()
+
+        controller = ImageStateController.__new__(ImageStateController)
+        controller.main = main
+        controller.clear_state = mock.Mock(
+            side_effect=lambda: setattr(main, "project_file", None)
+        )
+
+        controller.thread_load_images(["folder/page.png"])
+
+        main.project_ctrl.clear_recovery_checkpoint.assert_called_once()
+        controller.clear_state.assert_called_once()
+        self.assertIsNone(main.project_file)
+        loaded_paths = main.run_threaded.call_args.args[-1]
+        self.assertEqual(loaded_paths, [os.path.abspath("folder/page.png")])
 
 
 if __name__ == "__main__":
