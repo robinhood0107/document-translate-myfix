@@ -666,6 +666,12 @@ def _materialize_from_manifest_and_pages(
     )
     comic_translate.project_output_preferences = normalize_project_output_preferences(
         {
+            "output_use_global": manifest.get("output_use_global"),
+            "output_target": manifest.get("output_target"),
+            "output_image_format": manifest.get("output_image_format"),
+            "output_archive_format": manifest.get("output_archive_format"),
+            "output_archive_image_format": manifest.get("output_archive_image_format"),
+            "output_archive_compression_level": manifest.get("output_archive_compression_level"),
             "output_format_override_mode": manifest.get("output_format_override_mode"),
             "output_format_override_value": manifest.get("output_format_override_value"),
             "output_preset_override_mode": manifest.get("output_preset_override_mode"),
@@ -712,6 +718,12 @@ def _load_from_legacy_state_blob(
         "webtoon_mode": state.get("webtoon_mode", False),
         "webtoon_view_state": state.get("webtoon_view_state", {}),
         "latest_automatic_report": state.get("latest_automatic_report"),
+        "output_use_global": state.get("output_use_global"),
+        "output_target": state.get("output_target"),
+        "output_image_format": state.get("output_image_format"),
+        "output_archive_format": state.get("output_archive_format"),
+        "output_archive_image_format": state.get("output_archive_image_format"),
+        "output_archive_compression_level": state.get("output_archive_compression_level"),
         "output_format_override_mode": state.get("output_format_override_mode"),
         "output_format_override_value": state.get("output_format_override_value"),
         "output_preset_override_mode": state.get("output_preset_override_mode"),
