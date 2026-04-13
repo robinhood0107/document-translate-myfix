@@ -12,7 +12,6 @@ from app.ui.dayu_widgets.divider import MDivider
 from app.ui.dayu_widgets.theme import MTheme
 from app.ui.list_view import PageListView
 from app.ui.pipeline_status_panel import (
-    PipelineCompletionOverlay,
     PipelineInteractionOverlay,
     PipelineStatusPanel,
 )
@@ -206,9 +205,7 @@ class ComicTranslateUI(
         self._runtime_overlay_host = outer_widget
         self.pipeline_overlay = PipelineInteractionOverlay(outer_widget)
         self.pipeline_overlay.hide()
-        self.pipeline_completion_overlay = PipelineCompletionOverlay(outer_widget)
-        self.pipeline_completion_overlay.hide()
-        self.pipeline_status_panel = PipelineStatusPanel(self)
+        self.pipeline_status_panel = PipelineStatusPanel(outer_widget)
         self.pipeline_status_panel.setWindowIcon(self.windowIcon())
         self.pipeline_status_panel.hide()
         self._update_runtime_surface_geometry()
@@ -336,16 +333,12 @@ class ComicTranslateUI(
         area = self._runtime_surface_area()
         if hasattr(self, "pipeline_overlay") and self.pipeline_overlay is not None:
             self.pipeline_overlay.setGeometry(area)
-        if hasattr(self, "pipeline_completion_overlay") and self.pipeline_completion_overlay is not None:
-            self.pipeline_completion_overlay.setGeometry(area)
         if hasattr(self, "pipeline_status_panel") and self.pipeline_status_panel is not None:
-            host = getattr(self, "_runtime_overlay_host", None)
-            if host is not None:
-                top_left = host.mapToGlobal(area.topLeft())
-                self.pipeline_status_panel.set_anchor_rect(
-                    QtCore.QRect(top_left, area.size()).adjusted(8, 8, -8, -8)
-                )
-            if self.pipeline_status_panel.isVisible() and not self.pipeline_status_panel.isMinimized():
+            self.pipeline_status_panel.set_anchor_rect(area.adjusted(8, 8, -8, -8))
+            if self.pipeline_status_panel.isVisible() and (
+                self.pipeline_status_panel.display_mode() == PipelineStatusPanel.EMBEDDED_MODE
+                or not self.pipeline_status_panel.isMinimized()
+            ):
                 self.pipeline_status_panel.raise_()
 
     def set_pipeline_overlay_active(self, active: bool) -> None:
@@ -354,36 +347,14 @@ class ComicTranslateUI(
         if active:
             self.pipeline_overlay.show()
             self.pipeline_overlay.raise_()
-            if hasattr(self, "pipeline_completion_overlay") and self.pipeline_completion_overlay.isVisible():
-                self.pipeline_completion_overlay.raise_()
             if hasattr(self, "pipeline_status_panel"):
-                if self.pipeline_status_panel.isVisible() and not self.pipeline_status_panel.isMinimized():
+                if self.pipeline_status_panel.isVisible() and (
+                    self.pipeline_status_panel.display_mode() == PipelineStatusPanel.EMBEDDED_MODE
+                    or not self.pipeline_status_panel.isMinimized()
+                ):
                     self.pipeline_status_panel.raise_()
         else:
-            if hasattr(self, "pipeline_completion_overlay") and self.pipeline_completion_overlay is not None:
-                self.pipeline_completion_overlay.clear_preview()
             self.pipeline_overlay.hide()
-
-    def show_pipeline_completion_preview(
-        self,
-        preview_path: str | None,
-        *,
-        output_root: str | None = None,
-        message: str = "",
-    ) -> None:
-        if not hasattr(self, "pipeline_completion_overlay") or self.pipeline_completion_overlay is None:
-            return
-        self.set_pipeline_overlay_active(True)
-        self.pipeline_completion_overlay.show_preview(
-            preview_path,
-            message=message,
-            output_root=output_root,
-        )
-        self.pipeline_completion_overlay.raise_()
-
-    def hide_pipeline_completion_preview(self) -> None:
-        if hasattr(self, "pipeline_completion_overlay") and self.pipeline_completion_overlay is not None:
-            self.pipeline_completion_overlay.clear_preview()
 
     def route_passive_message(
         self,
