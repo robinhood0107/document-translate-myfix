@@ -29,7 +29,7 @@ class NotificationsPage(QtWidgets.QWidget):
         note = MLabel(
             self.tr(
                 "Play a sound when automatic processing finishes successfully. "
-                "Custom files must be placed in the project's music folder."
+                "Custom files must be placed in the repository music folder."
             )
         ).secondary()
         note.setWordWrap(True)

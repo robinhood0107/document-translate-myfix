@@ -129,6 +129,12 @@
 <context>
     <name>ComicTranslate</name>
     <message>
+        <source>Project files cannot be opened together with other imported files.
+Choose either a project file or image/document/archive files.</source>
+        <translation>Los archivos de proyecto no pueden abrirse junto con otros archivos importados.
+Elija un archivo de proyecto o solo archivos de imagen/documento/archivo comprimido.</translation>
+    </message>
+    <message>
         <source>Gemma와 OCR 준비를 확인하는 중...</source>
         <translation type="unfinished"></translation>
     </message>
@@ -259,6 +265,12 @@ Duplicados:
     <message>
         <source>Unsaved Changes</source>
         <translation>Cambios no guardados</translation>
+    </message>
+    <message>
+        <source>Project switching is unavailable while automatic processing is running.
+Cancel the current run or wait for it to finish first.</source>
+        <translation>No se puede cambiar de proyecto mientras la ejecución automática está en curso.
+Cancele la ejecución actual o espere a que termine.</translation>
     </message>
     <message>
         <source>Save changes to this file?</source>
@@ -1236,6 +1248,10 @@ Install it to use PSD features.</source>
         <translation>Inicio</translation>
     </message>
     <message>
+        <source>Open Latest Recent Project</source>
+        <translation>Abrir el proyecto abierto más recientemente</translation>
+    </message>
+    <message>
         <source>Settings</source>
         <translation>Configuración</translation>
     </message>
@@ -1247,22 +1263,6 @@ Install it to use PSD features.</source>
         <source>Insert files into current project</source>
         <translation>Insertar archivos en el proyecto actual</translation>
     </message>
-    <message>
-        <source>Start New Project</source>
-        <translation>Iniciar nuevo proyecto</translation>
-    </message>
-    <message>
-        <source>Your current project has unsaved changes. Start a new project?</source>
-        <translation>Tu proyecto actual tiene cambios no guardados. ¿Iniciar un nuevo proyecto?</translation>
-    </message>
-    <message>
-        <source>Yes</source>
-        <translation>Sí</translation>
-    </message>
-    <message>
-        <source>No</source>
-        <translation>No</translation>
-    </message>
 </context>
 <context>
     <name>NotificationsPage</name>
@@ -1271,8 +1271,8 @@ Install it to use PSD features.</source>
         <translation>Finalización automática</translation>
     </message>
     <message>
-        <source>Play a sound when automatic processing finishes successfully. Custom files must be placed in the project&apos;s music folder.</source>
-        <translation>Reproduce un sonido cuando el procesamiento automático finalice correctamente. Los archivos personalizados deben colocarse en la carpeta music del proyecto.</translation>
+        <source>Play a sound when automatic processing finishes successfully. Custom files must be placed in the repository music folder.</source>
+        <translation>Reproduce un sonido cuando el procesamiento automático termina correctamente. Los archivos personalizados deben colocarse en la carpeta music del repositorio.</translation>
     </message>
     <message>
         <source>Enable Completion Sound</source>
@@ -2100,6 +2100,12 @@ Abra o cree un proyecto para comenzar.</translation>
     <message>
         <source>Supported Files ({exts});;All Files (*)</source>
         <translation>Archivos compatibles ({exts});;Todos los archivos (*)</translation>
+    </message>
+    <message>
+        <source>Project files cannot be opened together with other imported files.
+Choose either a project file or image/document/archive files.</source>
+        <translation>Los archivos de proyecto no pueden abrirse junto con otros archivos importados.
+Elija un archivo de proyecto o solo archivos de imagen/documento/archivo comprimido.</translation>
     </message>
 </context>
 <context>
