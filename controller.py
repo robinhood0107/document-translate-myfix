@@ -7,15 +7,13 @@ import tempfile
 import traceback
 from typing import Any, Callable, Tuple
 
-from PySide6 import QtCore, QtWidgets
+from PySide6 import QtCore, QtGui, QtWidgets
 from PySide6.QtCore import QCoreApplication, QThreadPool
 from PySide6.QtGui import QUndoGroup, QUndoStack, QIcon
 
 from app.ui.dayu_widgets.qt import MPixmap
 from app.ui.main_window import ComicTranslateUI
 from app.ui.messages import Messages
-from app.ui.automatic_progress_dialog import AutomaticProgressDialog
-from app.ui.dayu_widgets.message import MMessage
 
 from modules.ocr.local_runtime import LocalOCRRuntimeManager
 from modules.translation.local_runtime import LocalGemmaRuntimeManager
@@ -28,6 +26,7 @@ from modules.utils.file_handler import FileHandler
 from modules.utils.pipeline_config import validate_settings
 from modules.utils.automatic_progress import AutomaticProgressTracker
 from modules.utils.download import set_download_callback
+from modules.utils.notification_sound import SYSTEM_SOUND_MODE, notify_pipeline_event, play_completion_sound
 from modules.utils.txt_md_exchange import (
     apply_translation_pages,
     collect_page_entries,
@@ -143,8 +142,9 @@ class ComicTranslate(ComicTranslateUI):
         self._current_batch_run_type = None
         self._last_batch_request_paths = []
         self._last_batch_run_type = "batch"
-        self._automatic_progress_dialog = None
         self._automatic_progress_settings_target = None
+        self._last_runtime_preview_path = ""
+        self._last_batch_output_root = ""
         self._automatic_progress_tracker = AutomaticProgressTracker()
         self.local_ocr_runtime_manager = LocalOCRRuntimeManager()
         self.local_translation_runtime_manager = LocalGemmaRuntimeManager()
@@ -247,6 +247,11 @@ class ComicTranslate(ComicTranslateUI):
         self.batch_report_button.clicked.connect(self.show_latest_batch_report)
         self.retry_failed_button.clicked.connect(self.retry_failed_batch_pages)
         self.one_page_auto_button.clicked.connect(self.start_one_page_auto_process)
+        self.pipeline_status_panel.cancel_requested.connect(self._on_automatic_progress_cancel)
+        self.pipeline_status_panel.retry_requested.connect(self._on_automatic_progress_retry)
+        self.pipeline_status_panel.open_settings_requested.connect(self._on_automatic_progress_open_settings)
+        self.pipeline_status_panel.report_requested.connect(self.show_latest_batch_report)
+        self.pipeline_status_panel.open_output_requested.connect(self._open_latest_batch_output)
         self.set_all_button.clicked.connect(self.text_ctrl.set_src_trg_all)
         self.clear_rectangles_button.clicked.connect(self.image_viewer.clear_rectangles)
         self.clear_brush_strokes_button.clicked.connect(self.image_viewer.clear_brush_strokes)
@@ -536,18 +541,16 @@ class ComicTranslate(ComicTranslateUI):
             logger.debug("Failed to queue runtime progress update.", exc_info=True)
 
     def _ensure_automatic_progress_dialog(self):
-        if self._automatic_progress_dialog is None:
-            dialog = AutomaticProgressDialog(self)
-            dialog.cancel_requested.connect(self._on_automatic_progress_cancel)
-            dialog.retry_requested.connect(self._on_automatic_progress_retry)
-            dialog.open_settings_requested.connect(self._on_automatic_progress_open_settings)
-            self._automatic_progress_dialog = dialog
-        return self._automatic_progress_dialog
+        return self.pipeline_status_panel
 
     def _show_automatic_progress_dialog(self, selected_paths: list[str], run_type: str):
         self._automatic_progress_tracker.reset(page_total=len(selected_paths), run_type=run_type)
-        dialog = self._ensure_automatic_progress_dialog()
-        dialog.set_running_state()
+        self._last_runtime_preview_path = ""
+        self._last_batch_output_root = ""
+        panel = self._ensure_automatic_progress_dialog()
+        panel.set_output_root("")
+        panel.set_minimized(False)
+        self.set_pipeline_overlay_active(True)
         self.on_runtime_progress_update({
             "phase": "gemma_startup",
             "service": "gemma",
@@ -557,18 +560,21 @@ class ComicTranslate(ComicTranslateUI):
             "page_total": len(selected_paths),
             "page_index": 0,
             "image_name": os.path.basename(selected_paths[0]) if selected_paths else "",
+            "panel_state": "running",
+            "panel_message_level": "info",
         })
-        dialog.show()
-        dialog.raise_()
-        dialog.activateWindow()
+        panel.show()
+        panel.raise_()
 
     @QtCore.Slot(dict)
     def on_runtime_progress_update(self, payload: dict):
         if not isinstance(payload, dict):
             return
         event = self._automatic_progress_tracker.enrich(payload)
-        dialog = self._ensure_automatic_progress_dialog()
-        dialog.update_event(event)
+        preview_path = str(event.get("preview_path") or "").strip()
+        if preview_path:
+            self._last_runtime_preview_path = preview_path
+        self._ensure_automatic_progress_dialog().update_event(event)
         self._log_runtime_progress(event)
 
     def _log_runtime_progress(self, event: dict):
@@ -588,8 +594,13 @@ class ComicTranslate(ComicTranslateUI):
 
     def _on_automatic_progress_cancel(self):
         self.cancel_current_task()
-        dialog = self._ensure_automatic_progress_dialog()
-        dialog.subtitle_label.setText(self.tr("취소 중..."))
+        self._ensure_automatic_progress_dialog().show_passive_message(
+            "info",
+            self.tr("취소 중..."),
+            duration=None,
+            closable=False,
+            source="pipeline",
+        )
 
     def _on_automatic_progress_retry(self):
         if self._batch_active or not self._last_batch_request_paths:
@@ -618,13 +629,18 @@ class ComicTranslate(ComicTranslateUI):
         exctype, value, traceback_str = error_tuple
 
         if issubclass(exctype, OperationCancelledError):
-            dialog = self._ensure_automatic_progress_dialog() if self._automatic_progress_dialog is not None else None
-            if dialog is not None:
-                dialog.set_cancelled_state()
+            self.pipeline_status_panel.update_event({
+                "phase": "done",
+                "status": "cancelled",
+                "service": "batch",
+                "message": self.tr("작업이 취소되었습니다."),
+                "panel_state": "cancelled",
+            })
+            self.set_pipeline_overlay_active(False)
             self.loading.setVisible(False)
             return
 
-        if self._batch_active and self._automatic_progress_dialog is not None:
+        if self._batch_active:
             self._batch_failed = True
             service_name = getattr(value, "service_name", "Gemma") if isinstance(value, BaseException) else "Gemma"
             self._automatic_progress_settings_target = getattr(value, "settings_page_name", self.tr("Gemma Local Server Settings"))
@@ -639,6 +655,8 @@ class ComicTranslate(ComicTranslateUI):
                 "page_total": len(self._last_batch_request_paths),
                 "page_index": 0,
                 "image_name": os.path.basename(self._last_batch_request_paths[0]) if self._last_batch_request_paths else "",
+                "panel_state": "failed",
+                "panel_message_level": "error",
             })
             self.loading.setVisible(False)
             return
@@ -742,23 +760,25 @@ class ComicTranslate(ComicTranslateUI):
 
     def _ensure_txt_md_ready(self) -> bool:
         if not self.image_files:
-            MMessage.info(
-                text=self.tr("No pages are loaded for TXT/MD import or export."),
-                parent=self,
+            Messages.show_info(
+                self,
+                self.tr("No pages are loaded for TXT/MD import or export."),
                 duration=5,
                 closable=True,
+                source="txt_md",
             )
             return False
 
         duplicates = find_duplicate_page_names(self.image_files)
         if duplicates:
-            MMessage.warning(
-                text=self.tr(
+            Messages.show_warning(
+                self,
+                self.tr(
                     "TXT/MD import and export require unique page file names.\nRename duplicate pages first.\nDuplicates:\n{names}"
                 ).format(names="\n".join(duplicates)),
-                parent=self,
                 duration=None,
                 closable=True,
+                source="txt_md",
             )
             return False
         return True
@@ -803,11 +823,12 @@ class ComicTranslate(ComicTranslateUI):
             logger.exception("Failed to export source exchange file: %s", exc)
             return
 
-        MMessage.success(
-            text=self.tr("Exported source text to:\n{path}").format(path=save_path),
-            parent=self,
+        Messages.show_success(
+            self,
+            self.tr("Exported source text to:\n{path}").format(path=save_path),
             duration=None,
             closable=True,
+            source="txt_md",
         )
 
     def _refresh_after_translation_import(self, matched_paths: list[str]) -> None:
@@ -949,14 +970,15 @@ class ComicTranslate(ComicTranslateUI):
                 self._write_txt_md_exchange(target, suffix, page_paths)
             except Exception:
                 logger.exception("Automatic TXT/MD export failed for %s%s", target, suffix)
-                MMessage.warning(
-                    text=self.tr("Automatic TXT/MD export failed for {target}{suffix}.").format(
+                Messages.show_warning(
+                    self,
+                    self.tr("Automatic TXT/MD export failed for {target}{suffix}.").format(
                         target=target,
                         suffix=suffix,
                     ),
-                    parent=self,
                     duration=None,
                     closable=True,
+                    source="txt_md",
                 )
                 return
 
@@ -1076,11 +1098,12 @@ class ComicTranslate(ComicTranslateUI):
 
         retry_paths = self.batch_report_ctrl.get_latest_retry_paths()
         if not retry_paths:
-            MMessage.info(
-                text=self.tr("No failed pages from the latest batch are available to retry."),
-                parent=self,
+            Messages.show_info(
+                self,
+                self.tr("No failed pages from the latest batch are available to retry."),
                 duration=5,
                 closable=True,
+                source="batch",
             )
             return
 
@@ -1090,11 +1113,12 @@ class ComicTranslate(ComicTranslateUI):
         if self._batch_active:
             return
         if not (0 <= self.curr_img_idx < len(self.image_files)):
-            MMessage.info(
-                text=self.tr("No current page is available for automatic processing."),
-                parent=self,
+            Messages.show_info(
+                self,
+                self.tr("No current page is available for automatic processing."),
                 duration=5,
                 closable=True,
+                source="batch",
             )
             return
         current_path = self.image_files[self.curr_img_idx]
@@ -1117,34 +1141,56 @@ class ComicTranslate(ComicTranslateUI):
         self._batch_failed = False
         self._current_batch_run_type = None
         report = self._finalize_batch_report(was_cancelled)
+        self._last_batch_output_root = self._find_latest_batch_output_root(completed_batch_paths)
         self.progress_bar.setVisible(False)
         self.translate_button.setEnabled(True)
         self.cancel_button.setEnabled(True)
         self.save_as_project_button.setEnabled(True)
         self.webtoon_toggle.setEnabled(True)
         self.selected_batch = []
+        self.set_pipeline_overlay_active(False)
 
-        dialog = self._automatic_progress_dialog
-        if dialog is not None:
-            if was_cancelled:
-                dialog.set_cancelled_state()
-            elif failed:
-                dialog.show()
-                dialog.raise_()
-                dialog.activateWindow()
-            else:
-                self._automatic_progress_tracker.record_batch_completion(success=True, total_images=total_images)
-                self.on_runtime_progress_update({
-                    "phase": "done",
-                    "service": "batch",
-                    "status": "completed",
-                    "step_key": "done",
+        panel = self.pipeline_status_panel
+        panel.set_output_root(self._last_batch_output_root)
+        if was_cancelled:
+            panel.update_event({
+                "phase": "done",
+                "service": "batch",
+                "status": "cancelled",
+                "step_key": "done",
+                "message": self.tr("작업이 취소되었습니다."),
+                "panel_state": "cancelled",
+            })
+        elif failed:
+            panel.show()
+            panel.raise_()
+        else:
+            self._automatic_progress_tracker.record_batch_completion(success=True, total_images=total_images)
+            self.on_runtime_progress_update({
+                "phase": "done",
+                "service": "batch",
+                "status": "completed",
+                "step_key": "done",
+                "message": self.tr("자동번역이 완료되었습니다."),
+                "page_total": total_images,
+                "page_index": max(total_images - 1, 0),
+                "image_name": "",
+                "preview_path": self._last_runtime_preview_path,
+                "panel_state": "done",
+                "panel_message_level": "success",
+            })
+            self._play_completion_sound_if_enabled()
+            # Reserved hook for future ntfy integration. Keep best-effort and non-blocking.
+            notify_pipeline_event(
+                {
+                    "event_type": "pipeline_completed",
+                    "run_type": self._last_batch_run_type,
+                    "success": True,
+                    "image_count": total_images,
+                    "output_root": self._last_batch_output_root,
                     "message": self.tr("자동번역이 완료되었습니다."),
-                    "page_total": total_images,
-                    "page_index": max(total_images - 1, 0),
-                    "image_name": "",
-                })
-                QtCore.QTimer.singleShot(1200, dialog.hide)
+                }
+            )
 
         if report and report["skipped_count"] > 0:
             Messages.show_batch_skipped_summary(self, report["skipped_count"])
@@ -1161,6 +1207,30 @@ class ComicTranslate(ComicTranslateUI):
         except Exception:
             pass
         self.batch_report_ctrl.refresh_action_buttons()
+
+    def _find_latest_batch_output_root(self, page_paths: list[str]) -> str:
+        for file_path in reversed(list(page_paths or [])):
+            state = self.image_states.get(file_path, {})
+            summary = state.get("processing_summary", {}) if isinstance(state, dict) else {}
+            export_root = str(summary.get("export_root", "")).strip()
+            if export_root:
+                return export_root
+        return ""
+
+    def _open_latest_batch_output(self) -> None:
+        output_root = self._last_batch_output_root or self._find_latest_batch_output_root(self._last_batch_request_paths)
+        if not output_root:
+            return
+        QtGui.QDesktopServices.openUrl(QtCore.QUrl.fromLocalFile(output_root))
+
+    def _play_completion_sound_if_enabled(self) -> None:
+        settings = self.settings_page.get_notification_settings()
+        if not bool(settings.get("enable_completion_sound", True)):
+            return
+        play_completion_sound(
+            str(settings.get("completion_sound_mode") or SYSTEM_SOUND_MODE),
+            str(settings.get("completion_sound_file") or ""),
+        )
 
     def disable_hbutton_group(self):
         for button in self.hbutton_group.get_button_group().buttons():
@@ -1239,41 +1309,15 @@ class ComicTranslate(ComicTranslateUI):
         # Keep a counter of active downloads to handle multiple files
         if not hasattr(self, "_active_downloads"):
             self._active_downloads = 0
-        if not hasattr(self, "_download_message"):
-            self._download_message = None
 
         if status == 'start':
             self._active_downloads += 1
-            # Create a persistent loading message if not already shown
-            if self._download_message is None:
-                try:
-                    # Extract just the filename and use it in the initial message
-                    import os
-                    filename = os.path.basename(name)
-                    # Use a specific message with the filename
-                    self._download_message = MMessage.loading(self.tr(f"Downloading model file: {filename}"), parent=self)
-                except Exception:
-                    # If loading message cannot be shown, do nothing; avoid touching global spinner here
-                    pass
-            else:
-                # Optionally update text with the most recent file name
-                try:
-                    # Extract just the filename from the path/name and format the message
-                    import os
-                    filename = os.path.basename(name)
-                    # Access the internal label to update text
-                    self._download_message._content_label.setText(self.tr(f"Downloading model file: {filename}"))
-                except Exception:
-                    pass
+            filename = os.path.basename(name)
+            self.set_download_status(self.tr(f"Downloading model file: {filename}"))
         elif status == 'end':
             self._active_downloads = max(0, self._active_downloads - 1)
             if self._active_downloads == 0:
-                # Close the loading message
-                try:
-                    if self._download_message is not None:
-                        self._download_message.close()
-                finally:
-                    self._download_message = None
+                self.set_download_status(None)
                 # Do not change the main window loading spinner here; it's managed by the running task lifecycle
 
     def keyPressEvent(self, event):
@@ -1360,8 +1404,8 @@ class ComicTranslate(ComicTranslateUI):
         except Exception:
             pass
         try:
-            if self._automatic_progress_dialog is not None:
-                self._automatic_progress_dialog.hide()
+            self.pipeline_status_panel.hide()
+            self.set_pipeline_overlay_active(False)
         except Exception:
             pass
         try:

@@ -144,7 +144,14 @@ class BatchProcessor:
             image_name=os.path.basename(image_path),
         )
 
-    def _log_page_done(self, index: int, total: int, image_path: str) -> None:
+    def _log_page_done(
+        self,
+        index: int,
+        total: int,
+        image_path: str,
+        *,
+        preview_path: str = "",
+    ) -> None:
         now = time.monotonic()
         page_elapsed = None
         if self._page_started_at is not None:
@@ -174,6 +181,9 @@ class BatchProcessor:
             page_index=index,
             page_total=total,
             image_name=os.path.basename(image_path),
+            preview_path=preview_path,
+            panel_state="running",
+            panel_message_level="success",
         )
 
     def _report_runtime_progress(self, **payload):
@@ -1389,7 +1399,12 @@ class BatchProcessor:
                 block_count=len(blk_list or []),
                 patch_count=len(patches or []),
             )
-            self._log_page_done(index, total_images, image_path)
+            self._log_page_done(
+                index,
+                total_images,
+                image_path,
+                preview_path=final_output_path,
+            )
 
             self.emit_progress(index, total_images, 10, 10, False)
         self._emit_benchmark_event("batch_run_done", total_images=total_images)
