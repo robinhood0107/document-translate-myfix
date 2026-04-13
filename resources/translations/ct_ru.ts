@@ -129,6 +129,12 @@
 <context>
     <name>ComicTranslate</name>
     <message>
+        <source>Project files cannot be opened together with other imported files.
+Choose either a project file or image/document/archive files.</source>
+        <translation>Файлы проекта нельзя открывать вместе с другими импортируемыми файлами.
+Выберите либо файл проекта, либо только файлы изображений/документов/архивов.</translation>
+    </message>
+    <message>
         <source>Gemma와 OCR 준비를 확인하는 중...</source>
         <translation type="unfinished"></translation>
     </message>
@@ -259,6 +265,12 @@ Duplicates:
     <message>
         <source>Unsaved Changes</source>
         <translation>Несохранённые изменения</translation>
+    </message>
+    <message>
+        <source>Project switching is unavailable while automatic processing is running.
+Cancel the current run or wait for it to finish first.</source>
+        <translation>Во время автоматической обработки переключение проекта недоступно.
+Отмените текущий запуск или дождитесь его завершения.</translation>
     </message>
     <message>
         <source>Save changes to this file?</source>
@@ -1236,6 +1248,10 @@ Install it to use PSD features.</source>
         <translation>Главная</translation>
     </message>
     <message>
+        <source>Open Latest Recent Project</source>
+        <translation>Открыть последний открытый проект</translation>
+    </message>
+    <message>
         <source>Settings</source>
         <translation>Настройки</translation>
     </message>
@@ -1247,22 +1263,6 @@ Install it to use PSD features.</source>
         <source>Insert files into current project</source>
         <translation>Вставить файлы в текущий проект</translation>
     </message>
-    <message>
-        <source>Start New Project</source>
-        <translation>Начать новый проект</translation>
-    </message>
-    <message>
-        <source>Your current project has unsaved changes. Start a new project?</source>
-        <translation>В текущем проекте есть несохранённые изменения. Начать новый проект?</translation>
-    </message>
-    <message>
-        <source>Yes</source>
-        <translation>Да</translation>
-    </message>
-    <message>
-        <source>No</source>
-        <translation>Нет</translation>
-    </message>
 </context>
 <context>
     <name>NotificationsPage</name>
@@ -1271,8 +1271,8 @@ Install it to use PSD features.</source>
         <translation>Завершение автообработки</translation>
     </message>
     <message>
-        <source>Play a sound when automatic processing finishes successfully. Custom files must be placed in the project&apos;s music folder.</source>
-        <translation>После успешного завершения автоматической обработки воспроизводить звук. Пользовательские файлы нужно поместить в папку music проекта.</translation>
+        <source>Play a sound when automatic processing finishes successfully. Custom files must be placed in the repository music folder.</source>
+        <translation>Проигрывать звук после успешного завершения автоматической обработки. Пользовательские файлы должны находиться в папке music репозитория.</translation>
     </message>
     <message>
         <source>Enable Completion Sound</source>
@@ -2100,6 +2100,12 @@ Open or create a project to get started.</source>
     <message>
         <source>Supported Files ({exts});;All Files (*)</source>
         <translation>Поддерживаемые файлы ({exts});;Все файлы (*)</translation>
+    </message>
+    <message>
+        <source>Project files cannot be opened together with other imported files.
+Choose either a project file or image/document/archive files.</source>
+        <translation>Файлы проекта нельзя открывать вместе с другими импортируемыми файлами.
+Выберите либо файл проекта, либо только файлы изображений/документов/архивов.</translation>
     </message>
 </context>
 <context>
