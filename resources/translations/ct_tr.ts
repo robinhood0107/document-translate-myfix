@@ -20,7 +20,7 @@
     <name>AutomaticProgress</name>
     <message>
         <source>Calculating</source>
-        <translation type="unfinished"></translation>
+        <translation type="unfinished">Hesaplanıyor</translation>
     </message>
     <message>
         <source>Recent History</source>
@@ -107,7 +107,7 @@
     </message>
     <message>
         <source>Calculating</source>
-        <translation type="unfinished"></translation>
+        <translation type="unfinished">Hesaplanıyor</translation>
     </message>
     <message>
         <source>작업이 취소되었습니다.</source>
@@ -146,6 +146,10 @@
     </message>
     <message>
         <source>Gemma Local Server Settings</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>작업이 취소되었습니다.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
@@ -511,7 +515,7 @@ Use Custom Local Server(Gemma) with the included Gemma Docker setup.</source>
     </message>
     <message>
         <source>File</source>
-        <translation type="unfinished"></translation>
+        <translation type="unfinished">Dosya</translation>
     </message>
     <message>
         <source>Chapter</source>
@@ -1261,6 +1265,33 @@ Install it to use PSD features.</source>
     </message>
 </context>
 <context>
+    <name>NotificationsPage</name>
+    <message>
+        <source>Automatic Completion</source>
+        <translation>Otomatik tamamlama</translation>
+    </message>
+    <message>
+        <source>Play a sound when automatic processing finishes successfully. Custom files must be placed in the project&apos;s music folder.</source>
+        <translation>Otomatik işlem başarıyla bittiğinde bir ses çal. Özel dosyalar projenin music klasörüne yerleştirilmelidir.</translation>
+    </message>
+    <message>
+        <source>Enable Completion Sound</source>
+        <translation>Tamamlama sesini etkinleştir</translation>
+    </message>
+    <message>
+        <source>Test Sound</source>
+        <translation>Sesi test et</translation>
+    </message>
+    <message>
+        <source>Music Folder: {path}</source>
+        <translation>music klasörü: {path}</translation>
+    </message>
+    <message>
+        <source>System sound</source>
+        <translation>Sistem sesi</translation>
+    </message>
+</context>
+<context>
     <name>PaddleOCRVLPage</name>
     <message>
         <source>PaddleOCR VL Settings</source>
@@ -1347,6 +1378,141 @@ Approximate GPU usage:
     <message>
         <source>Theme</source>
         <translation>Tema</translation>
+    </message>
+</context>
+<context>
+    <name>PipelineStatusPanel</name>
+    <message>
+        <source>Pipeline Status</source>
+        <translation>İşlem hattı durumu</translation>
+    </message>
+    <message>
+        <source>Idle</source>
+        <translation>Boşta</translation>
+    </message>
+    <message>
+        <source>Show details</source>
+        <translation>Ayrıntıları göster</translation>
+    </message>
+    <message>
+        <source>Minimize</source>
+        <translation>Küçült</translation>
+    </message>
+    <message>
+        <source>Service</source>
+        <translation>Servis</translation>
+    </message>
+    <message>
+        <source>Progress</source>
+        <translation>İlerleme</translation>
+    </message>
+    <message>
+        <source>File</source>
+        <translation>Dosya</translation>
+    </message>
+    <message>
+        <source>ETA</source>
+        <translation>ETA</translation>
+    </message>
+    <message>
+        <source>Message</source>
+        <translation>Mesaj</translation>
+    </message>
+    <message>
+        <source>No Preview</source>
+        <translation>Önizleme yok</translation>
+    </message>
+    <message>
+        <source>Cancel</source>
+        <translation>İptal</translation>
+    </message>
+    <message>
+        <source>Report</source>
+        <translation>Rapor</translation>
+    </message>
+    <message>
+        <source>Retry</source>
+        <translation>Yeniden dene</translation>
+    </message>
+    <message>
+        <source>Settings</source>
+        <translation>Ayarlar</translation>
+    </message>
+    <message>
+        <source>Open Output</source>
+        <translation>Çıktıyı aç</translation>
+    </message>
+    <message>
+        <source>Close</source>
+        <translation>Kapat</translation>
+    </message>
+    <message>
+        <source>Automatic</source>
+        <translation>Otomatik</translation>
+    </message>
+    <message>
+        <source>Calculating</source>
+        <translation>Hesaplanıyor</translation>
+    </message>
+    <message>
+        <source>Status</source>
+        <translation>Durum</translation>
+    </message>
+    <message>
+        <source>Info</source>
+        <translation>Bilgi</translation>
+    </message>
+    <message>
+        <source>Success</source>
+        <translation>Başarılı</translation>
+    </message>
+    <message>
+        <source>Warning</source>
+        <translation>Uyarı</translation>
+    </message>
+    <message>
+        <source>Error</source>
+        <translation>Hata</translation>
+    </message>
+    <message>
+        <source>Download</source>
+        <translation>İndirme</translation>
+    </message>
+    <message>
+        <source>Local Service</source>
+        <translation>Yerel servis</translation>
+    </message>
+    <message>
+        <source>Network</source>
+        <translation>Ağ</translation>
+    </message>
+    <message>
+        <source>Content Filter</source>
+        <translation>İçerik filtresi</translation>
+    </message>
+    <message>
+        <source>Batch Report</source>
+        <translation>Toplu işlem raporu</translation>
+    </message>
+    <message>
+        <source>Pipeline</source>
+        <translation>İşlem hattı</translation>
+    </message>
+    <message>
+        <source>Running</source>
+        <translation>Çalışıyor</translation>
+    </message>
+    <message>
+        <source>Done</source>
+        <translation>Tamamlandı</translation>
+    </message>
+    <message>
+        <source>Failed</source>
+        <translation>Başarısız</translation>
+    </message>
+    <message>
+        <source>Cancelled</source>
+        <translation>İptal edildi</translation>
     </message>
 </context>
 <context>
@@ -1775,6 +1941,10 @@ Restart now?</source>
     <message>
         <source>User Dictionaries</source>
         <translation>Kullanıcı sözlükleri</translation>
+    </message>
+    <message>
+        <source>Notifications</source>
+        <translation>Bildirimler</translation>
     </message>
     <message>
         <source>Project</source>

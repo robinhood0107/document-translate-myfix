@@ -20,7 +20,7 @@
     <name>AutomaticProgress</name>
     <message>
         <source>Calculating</source>
-        <translation type="unfinished"></translation>
+        <translation type="unfinished">Вычисление</translation>
     </message>
     <message>
         <source>Recent History</source>
@@ -107,7 +107,7 @@
     </message>
     <message>
         <source>Calculating</source>
-        <translation type="unfinished"></translation>
+        <translation type="unfinished">Вычисление</translation>
     </message>
     <message>
         <source>작업이 취소되었습니다.</source>
@@ -146,6 +146,10 @@
     </message>
     <message>
         <source>Gemma Local Server Settings</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>작업이 취소되었습니다.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
@@ -511,7 +515,7 @@ Use Custom Local Server(Gemma) with the included Gemma Docker setup.</source>
     </message>
     <message>
         <source>File</source>
-        <translation type="unfinished"></translation>
+        <translation type="unfinished">Файл</translation>
     </message>
     <message>
         <source>Chapter</source>
@@ -1261,6 +1265,33 @@ Install it to use PSD features.</source>
     </message>
 </context>
 <context>
+    <name>NotificationsPage</name>
+    <message>
+        <source>Automatic Completion</source>
+        <translation>Завершение автообработки</translation>
+    </message>
+    <message>
+        <source>Play a sound when automatic processing finishes successfully. Custom files must be placed in the project&apos;s music folder.</source>
+        <translation>После успешного завершения автоматической обработки воспроизводить звук. Пользовательские файлы нужно поместить в папку music проекта.</translation>
+    </message>
+    <message>
+        <source>Enable Completion Sound</source>
+        <translation>Включить звук завершения</translation>
+    </message>
+    <message>
+        <source>Test Sound</source>
+        <translation>Проверить звук</translation>
+    </message>
+    <message>
+        <source>Music Folder: {path}</source>
+        <translation>Папка music: {path}</translation>
+    </message>
+    <message>
+        <source>System sound</source>
+        <translation>Системный звук</translation>
+    </message>
+</context>
+<context>
     <name>PaddleOCRVLPage</name>
     <message>
         <source>PaddleOCR VL Settings</source>
@@ -1347,6 +1378,141 @@ Approximate GPU usage:
     <message>
         <source>Theme</source>
         <translation>Тема</translation>
+    </message>
+</context>
+<context>
+    <name>PipelineStatusPanel</name>
+    <message>
+        <source>Pipeline Status</source>
+        <translation>Состояние конвейера</translation>
+    </message>
+    <message>
+        <source>Idle</source>
+        <translation>Ожидание</translation>
+    </message>
+    <message>
+        <source>Show details</source>
+        <translation>Показать детали</translation>
+    </message>
+    <message>
+        <source>Minimize</source>
+        <translation>Свернуть</translation>
+    </message>
+    <message>
+        <source>Service</source>
+        <translation>Сервис</translation>
+    </message>
+    <message>
+        <source>Progress</source>
+        <translation>Ход выполнения</translation>
+    </message>
+    <message>
+        <source>File</source>
+        <translation>Файл</translation>
+    </message>
+    <message>
+        <source>ETA</source>
+        <translation>ETA</translation>
+    </message>
+    <message>
+        <source>Message</source>
+        <translation>Сообщение</translation>
+    </message>
+    <message>
+        <source>No Preview</source>
+        <translation>Нет предпросмотра</translation>
+    </message>
+    <message>
+        <source>Cancel</source>
+        <translation>Отмена</translation>
+    </message>
+    <message>
+        <source>Report</source>
+        <translation>Отчёт</translation>
+    </message>
+    <message>
+        <source>Retry</source>
+        <translation>Повторить</translation>
+    </message>
+    <message>
+        <source>Settings</source>
+        <translation>Настройки</translation>
+    </message>
+    <message>
+        <source>Open Output</source>
+        <translation>Открыть результат</translation>
+    </message>
+    <message>
+        <source>Close</source>
+        <translation>Закрыть</translation>
+    </message>
+    <message>
+        <source>Automatic</source>
+        <translation>Авто</translation>
+    </message>
+    <message>
+        <source>Calculating</source>
+        <translation>Вычисление</translation>
+    </message>
+    <message>
+        <source>Status</source>
+        <translation>Состояние</translation>
+    </message>
+    <message>
+        <source>Info</source>
+        <translation>Сведения</translation>
+    </message>
+    <message>
+        <source>Success</source>
+        <translation>Успешно</translation>
+    </message>
+    <message>
+        <source>Warning</source>
+        <translation>Предупреждение</translation>
+    </message>
+    <message>
+        <source>Error</source>
+        <translation>Ошибка</translation>
+    </message>
+    <message>
+        <source>Download</source>
+        <translation>Загрузка</translation>
+    </message>
+    <message>
+        <source>Local Service</source>
+        <translation>Локальный сервис</translation>
+    </message>
+    <message>
+        <source>Network</source>
+        <translation>Сеть</translation>
+    </message>
+    <message>
+        <source>Content Filter</source>
+        <translation>Фильтр контента</translation>
+    </message>
+    <message>
+        <source>Batch Report</source>
+        <translation>Отчёт по пакету</translation>
+    </message>
+    <message>
+        <source>Pipeline</source>
+        <translation>Конвейер</translation>
+    </message>
+    <message>
+        <source>Running</source>
+        <translation>Выполняется</translation>
+    </message>
+    <message>
+        <source>Done</source>
+        <translation>Готово</translation>
+    </message>
+    <message>
+        <source>Failed</source>
+        <translation>Сбой</translation>
+    </message>
+    <message>
+        <source>Cancelled</source>
+        <translation>Отменено</translation>
     </message>
 </context>
 <context>
@@ -1723,6 +1889,10 @@ Restart now?</source>
     <message>
         <source>User Dictionaries</source>
         <translation>Пользовательские словари</translation>
+    </message>
+    <message>
+        <source>Notifications</source>
+        <translation>Уведомления</translation>
     </message>
     <message>
         <source>Project</source>
