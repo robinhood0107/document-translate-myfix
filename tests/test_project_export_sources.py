@@ -46,6 +46,12 @@ class _FakeProjectMain:
         self.batch_report_ctrl = _BatchReportCtrl()
         self.export_source_by_path = {image_path: export_source} if image_path and export_source else {}
         self.project_file = None
+        self.project_output_preferences = {
+            "output_format_override_mode": "project",
+            "output_format_override_value": "webp",
+            "output_preset_override_mode": "project",
+            "output_preset_override_value": "small",
+        }
 
 
 class ProjectExportSourceRoundTripTests(unittest.TestCase):
@@ -81,6 +87,15 @@ class ProjectExportSourceRoundTripTests(unittest.TestCase):
                     {
                         "kind": "archive",
                         "source_path": os.path.abspath(archive_path),
+                    },
+                )
+                self.assertEqual(
+                    restored_main.project_output_preferences,
+                    {
+                        "output_format_override_mode": "project",
+                        "output_format_override_value": "webp",
+                        "output_preset_override_mode": "project",
+                        "output_preset_override_value": "small",
                     },
                 )
             finally:

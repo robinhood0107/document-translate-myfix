@@ -14,6 +14,10 @@ from app.ui.canvas.text.text_item_properties import TextItemProperties
 from app.ui.canvas.text_item import OutlineInfo, OutlineType
 from modules.rendering.render import get_best_render_area, is_vertical_block, pyside_word_wrap
 from modules.utils.export_paths import export_run_root, reserve_export_run_token, resolve_export_directory
+from modules.utils.automatic_output import (
+    build_output_file_name,
+    write_output_image,
+)
 from modules.utils.language_utils import get_language_code, is_no_space_lang
 from modules.utils.ocr_debug import export_ocr_debug_artifacts
 from modules.utils.inpaint_debug import (
@@ -36,7 +40,7 @@ logger = logging.getLogger(__name__)
 
 class RenderMixin:
     def _effective_export_settings(self: WebtoonBatchProcessor) -> dict:
-        return dict(self.main_page.settings_page.get_export_settings())
+        return dict(self.main_page.get_resolved_export_settings())
 
     def _resolve_export_token(
         self: WebtoonBatchProcessor, directory: str, base_timestamp: str
@@ -281,17 +285,30 @@ class RenderMixin:
             renderer = ImageSaveRenderer(image)
             patches = self.final_patches_for_save.get(image_path, [])
             renderer.apply_patches(patches)
-            path = os.path.join(
+            path = self.main_page.get_automatic_output_series_dir(
                 directory,
-                f"comic_translate_{export_token}",
-                "cleaned_images",
-                archive_bname,
+                anchor_path=self.main_page.image_files[0] if self.main_page.image_files else image_path,
             )
-            if not os.path.exists(path):
-                os.makedirs(path, exist_ok=True)
+            os.makedirs(path, exist_ok=True)
             cleaned_image_rgb = renderer.render_to_image()
-            imk.write_image(
-                os.path.join(path, f"{base_name}_cleaned{extension}"), cleaned_image_rgb
+            cleaned_output_path = os.path.join(
+                path,
+                build_output_file_name(
+                    base_name,
+                    "cleaned",
+                    image_path,
+                    export_settings,
+                ),
+            )
+            write_output_image(
+                cleaned_output_path,
+                cleaned_image_rgb,
+                source_path=image_path,
+                resolved_settings=export_settings,
+            )
+            self.main_page.image_ctrl.update_processing_summary(
+                image_path,
+                {"cleaned_image_path": cleaned_output_path},
             )
 
         blk_list = self.main_page.image_states[image_path].get("blk_list", [])
@@ -409,23 +426,32 @@ class RenderMixin:
         renderer.apply_patches(patches)
         viewer_state = self.main_page.image_states[image_path].get("viewer_state", {})
         renderer.add_state_to_image(viewer_state, page_idx, self.main_page)
-        translated_dir = os.path.join(
+        translated_dir = self.main_page.get_automatic_output_series_dir(
             directory,
-            f"comic_translate_{export_token}",
-            "translated_images",
-            archive_bname,
+            anchor_path=self.main_page.image_files[0] if self.main_page.image_files else image_path,
         )
         os.makedirs(translated_dir, exist_ok=True)
         output_path = os.path.join(
             translated_dir,
-            f"{base_name}_translated{extension}",
+            build_output_file_name(
+                base_name,
+                "translated",
+                image_path,
+                export_settings,
+            ),
         )
-        renderer.save_image(output_path)
+        translated_image_rgb = renderer.render_to_image()
+        write_output_image(
+            output_path,
+            translated_image_rgb,
+            source_path=image_path,
+            resolved_settings=export_settings,
+        )
         logger.info("Saved final translated image to %s", output_path)
         self.main_page.image_ctrl.update_processing_summary(
             image_path,
             {
                 "translated_image_path": output_path,
-                "export_root": export_root,
+                "export_root": os.path.dirname(output_path),
             },
         )
