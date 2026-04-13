@@ -528,7 +528,7 @@ class PageListView(QtWidgets.QWidget):
         self._thumbnail_scale_slider.setRange(80, 180)
         self._thumbnail_scale_slider.setSingleStep(5)
         self._thumbnail_scale_slider.setPageStep(10)
-        self._thumbnail_scale_slider.setValue(180)
+        self._thumbnail_scale_slider.setValue(100)
         self._thumbnail_scale_slider.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         self._thumbnail_scale_slider.setSizePolicy(
             QtWidgets.QSizePolicy.Policy.Expanding,
