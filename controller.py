@@ -171,6 +171,7 @@ class ComicTranslate(ComicTranslateUI):
 
         self.project_ctrl.load_main_page_settings()
         self.settings_page.load_settings()
+        self.refresh_inpaint_tool_ui()
         self.project_ctrl.initialize_autosave()
 
         # Populate the home screen with any previously-saved recent projects
@@ -257,9 +258,11 @@ class ComicTranslate(ComicTranslateUI):
         self.image_viewer.rectangle_created.connect(self.rect_item_ctrl.handle_rectangle_creation)
         self.image_viewer.rectangle_deleted.connect(self.rect_item_ctrl.handle_rectangle_deletion)
         self.image_viewer.command_emitted.connect(self.push_command)
+        self.image_viewer.restore_stroke_requested.connect(self.image_ctrl.apply_restore_stroke)
         self.image_viewer.connect_rect_item.connect(self.rect_item_ctrl.connect_rect_item_signals)
         self.image_viewer.connect_text_item.connect(self.text_ctrl.connect_text_item_signals)
         self.image_viewer.page_changed.connect(self.webtoon_ctrl.on_page_changed)
+        self.image_viewer.page_changed.connect(lambda _page_index: self.refresh_inpaint_tool_ui())
         self.image_viewer.clear_text_edits.connect(self.text_ctrl.clear_text_edits)
 
         try:

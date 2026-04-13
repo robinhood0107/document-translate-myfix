@@ -6,6 +6,14 @@ from PySide6.QtCore import Qt
 from PySide6.QtGui import QColor, QImage, QPainter, QPen, QBrush
 
 from modules.utils.device import resolve_device
+from modules.utils.inpaint_strokes import (
+    PATCH_KIND_INPAINT,
+    normalize_stroke_role,
+    normalize_patch_kind,
+    STROKE_ROLE_ADD,
+    STROKE_ROLE_EXCLUDE,
+    STROKE_ROLE_GENERATED,
+)
 from modules.utils.pipeline_config import inpaint_map, get_config, get_inpainter_runtime
 from modules.inpainting.source_lama_blockwise import source_lama_blockwise_inpaint
 
@@ -91,51 +99,63 @@ class InpaintingHandler:
         if width <= 0 or height <= 0:
             return None
 
-        human_qimg = QImage(width, height, QImage.Format_Grayscale8)
+        add_qimg = QImage(width, height, QImage.Format_Grayscale8)
         gen_qimg = QImage(width, height, QImage.Format_Grayscale8)
-        human_qimg.fill(0)
+        exclude_qimg = QImage(width, height, QImage.Format_Grayscale8)
+        add_qimg.fill(0)
         gen_qimg.fill(0)
+        exclude_qimg.fill(0)
 
-        human_painter = QPainter(human_qimg)
+        add_painter = QPainter(add_qimg)
         gen_painter = QPainter(gen_qimg)
+        exclude_painter = QPainter(exclude_qimg)
 
-        human_painter.setPen(QPen(QColor(255, 255, 255), 1, Qt.SolidLine, Qt.RoundCap, Qt.RoundJoin))
-        gen_painter.setPen(QPen(QColor(255, 255, 255), 2, Qt.SolidLine, Qt.RoundCap, Qt.RoundJoin))
-        human_painter.setBrush(QBrush(QColor(255, 255, 255)))
+        add_painter.setBrush(QBrush(QColor(255, 255, 255)))
         gen_painter.setBrush(QBrush(QColor(255, 255, 255)))
+        exclude_painter.setBrush(QBrush(QColor(255, 255, 255)))
+        gen_painter.setPen(QPen(QColor(255, 255, 255), 2, Qt.SolidLine, Qt.RoundCap, Qt.RoundJoin))
 
         has_any = False
         for stroke in strokes:
             path = stroke.get('path')
             if path is None:
                 continue
-            brush_hex = QColor(stroke.get('brush', '#00000000')).name(QColor.HexArgb)
-            if brush_hex == "#80ff0000":
+
+            role = normalize_stroke_role(stroke.get('role'), brush=stroke.get('brush'))
+            if role == STROKE_ROLE_GENERATED:
                 gen_painter.drawPath(path)
                 has_any = True
                 continue
 
+            if role not in {STROKE_ROLE_ADD, STROKE_ROLE_EXCLUDE}:
+                continue
             width_px = max(1, int(stroke.get('width', 25)))
-            human_pen = QPen(QColor(255, 255, 255), width_px, Qt.SolidLine, Qt.RoundCap, Qt.RoundJoin)
-            human_painter.setPen(human_pen)
-            human_painter.drawPath(path)
+            painter = exclude_painter if role == STROKE_ROLE_EXCLUDE else add_painter
+            painter.setPen(QPen(QColor(255, 255, 255), width_px, Qt.SolidLine, Qt.RoundCap, Qt.RoundJoin))
+            painter.drawPath(path)
             has_any = True
 
-        human_painter.end()
+        add_painter.end()
         gen_painter.end()
+        exclude_painter.end()
 
         if not has_any:
             return None
 
-        human_mask = self._qimage_to_np(human_qimg)
+        add_mask = self._qimage_to_np(add_qimg)
         gen_mask = self._qimage_to_np(gen_qimg)
+        exclude_mask = self._qimage_to_np(exclude_qimg)
         kernel = np.ones((5, 5), np.uint8)
-        human_mask = imk.dilate(human_mask, kernel, iterations=2)
+        add_mask = imk.dilate(add_mask, kernel, iterations=2)
         gen_mask = imk.dilate(gen_mask, kernel, iterations=3)
-        mask = np.where((human_mask > 0) | (gen_mask > 0), 255, 0).astype(np.uint8)
-        if np.count_nonzero(mask) == 0:
+        exclude_mask = imk.dilate(exclude_mask, kernel, iterations=2)
+        include_mask = np.where((add_mask > 0) | (gen_mask > 0), 255, 0).astype(np.uint8)
+        if np.count_nonzero(include_mask) == 0:
             return None
-        return mask
+        final_mask = np.where((include_mask > 0) & ~(exclude_mask > 0), 255, 0).astype(np.uint8)
+        if np.count_nonzero(final_mask) == 0:
+            return None
+        return final_mask
 
     def _get_regular_patches(self, mask: np.ndarray, inpainted_image: np.ndarray):
         contours, _ = imk.find_contours(mask)
@@ -143,7 +163,27 @@ class InpaintingHandler:
         for c in contours:
             x, y, w, h = imk.bounding_rect(c)
             patch = inpainted_image[y:y + h, x:x + w]
-            patches.append({'bbox': [x, y, w, h], 'image': patch.copy()})
+            patches.append({
+                'bbox': [x, y, w, h],
+                'image': patch.copy(),
+                'kind': PATCH_KIND_INPAINT,
+            })
+        return patches
+
+    def extract_patches_from_image(
+        self,
+        mask: np.ndarray | None,
+        image: np.ndarray | None,
+        *,
+        kind: str = PATCH_KIND_INPAINT,
+    ) -> list[dict]:
+        if mask is None or image is None or np.count_nonzero(mask) == 0:
+            return []
+
+        patches = self._get_regular_patches(mask, image)
+        normalized_kind = normalize_patch_kind(kind)
+        for patch in patches:
+            patch['kind'] = normalized_kind
         return patches
 
     def inpaint_page_from_saved_strokes(self, image: np.ndarray, strokes: list[dict]):
@@ -157,6 +197,7 @@ class InpaintingHandler:
         return self._get_regular_patches(mask, inpainted)
 
     def inpaint_complete(self, patch_list):
+        patch_list = list(patch_list or [])
         # Handle webtoon mode vs regular mode
         if self.main_page.webtoon_mode:
             # In webtoon mode, group patches by page and apply them
@@ -171,7 +212,8 @@ class InpaintingHandler:
                     # Remove page-specific keys for the patch command but keep scene_pos for webtoon mode
                     clean_patch = {
                         'bbox': patch['bbox'],
-                        'image': patch['image']
+                        'image': patch['image'],
+                        'kind': normalize_patch_kind(patch.get('kind', PATCH_KIND_INPAINT)),
                     }
                     # Add scene position info for webtoon mode positioning
                     if 'scene_pos' in patch:
@@ -236,6 +278,7 @@ class InpaintingHandler:
                     patches.append({
                         'bbox': [x, int(page_local_y), w, clipped_height],
                         'image': clipped_patch.copy(),
+                        'kind': PATCH_KIND_INPAINT,
                         'page_index': mapping['page_index'],
                         'file_path': self.main_page.image_files[mapping['page_index']],
                         'scene_pos': [x, scene_y]  # Store correct scene position for webtoon mode
@@ -254,6 +297,10 @@ class InpaintingHandler:
     
     def inpaint(self):
         mask = self.main_page.image_viewer.get_mask_for_inpainting()
-        painted = self.manual_inpaint()              
+        if mask is None or np.count_nonzero(mask) == 0:
+            return []
+        painted = self.manual_inpaint()
+        if painted is None:
+            return []
         patches = self.get_inpainted_patches(mask, painted)
         return patches         

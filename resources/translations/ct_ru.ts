@@ -1825,6 +1825,63 @@ Open or create a project to get started.</source>
     </message>
 </context>
 <context>
+    <name>ToolStateMixin</name>
+    <message>
+        <source>Add Inpaint Mask
+Paint areas to clean before running inpainting.
+These pixels are added to the final mask.</source>
+        <translation>Добавить маску инпейнта
+Закрасьте области, которые нужно очистить перед запуском инпейнта.
+Эти пиксели добавляются в итоговую маску.</translation>
+    </message>
+    <message>
+        <source>Erase Mask Strokes
+Remove parts of drawn add/exclude strokes.
+This edits mask strokes only and does not change applied patches.</source>
+        <translation>Стереть штрихи маски
+Удаляйте части нарисованных штрихов добавления/исключения.
+Это изменяет только штрихи маски и не затрагивает уже применённые патчи.</translation>
+    </message>
+    <message>
+        <source>Exclude from Inpainting
+Protect areas from inpainting.
+Excluded pixels are removed from the final mask even if they were auto-detected or painted.</source>
+        <translation>Исключить из инпейнта
+Защитите области от инпейнта.
+Исключённые пиксели удаляются из итоговой маски, даже если они были обнаружены автоматически или закрашены вручную.</translation>
+    </message>
+    <message>
+        <source>Restore Original over Inpainted Area
+Paint over an inpainted result to bring back the original image.
+This creates a restore patch above existing inpaint patches on the current page.</source>
+        <translation>Восстановить оригинал поверх инпейнта
+Проведите по результату инпейнта, чтобы вернуть исходное изображение.
+Это создаёт патч восстановления поверх существующих патчей инпейнта на текущей странице.</translation>
+    </message>
+    <message>
+        <source>Restore Original over Inpainted Area
+No inpainted patch exists on this page yet.
+Run inpainting first, then use this tool to recover original pixels where needed.</source>
+        <translation>Восстановить оригинал поверх инпейнта
+На этой странице пока нет патча инпейнта.
+Сначала выполните инпейнт, затем используйте этот инструмент, чтобы при необходимости вернуть исходные пиксели.</translation>
+    </message>
+    <message>
+        <source>Clear Inpaint Mask Strokes
+Remove all add/exclude mask strokes on the current page.
+Applied inpaint and restore patches are kept; use Undo to revert patch changes.</source>
+        <translation>Очистить штрихи маски инпейнта
+Удалите все штрихи маски добавления/исключения на текущей странице.
+Применённые патчи инпейнта и восстановления сохраняются; используйте «Отменить», чтобы откатить изменения патчей.</translation>
+    </message>
+    <message>
+        <source>Inpaint Brush Size
+Adjust the size used by add, erase, exclude, and restore brushes.</source>
+        <translation>Размер кисти инпейнта
+Настройте размер кистей добавления, стирания, исключения и восстановления.</translation>
+    </message>
+</context>
+<context>
     <name>ToolsPage</name>
     <message>
         <source>Translator</source>
@@ -2176,22 +2233,6 @@ back on the Image (for further editing)</source>
     <message>
         <source>Increase the size of all blocks</source>
         <translation>Увеличить размер всех блоков</translation>
-    </message>
-    <message>
-        <source>Draw Brush Strokes for Cleaning Image</source>
-        <translation>Рисовать мазки кистью для очистки изображения</translation>
-    </message>
-    <message>
-        <source>Erase Brush Strokes</source>
-        <translation>Стереть мазки кистью</translation>
-    </message>
-    <message>
-        <source>Remove all the brush strokes on the Image</source>
-        <translation>Удалить все мазки кистью на изображении</translation>
-    </message>
-    <message>
-        <source>Brush/Eraser Size Slider</source>
-        <translation>Ползунок размера кисти/ластика</translation>
     </message>
     <message>
         <source>Box Drawing</source>

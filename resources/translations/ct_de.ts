@@ -1825,6 +1825,63 @@ Open or create a project to get started.</source>
     </message>
 </context>
 <context>
+    <name>ToolStateMixin</name>
+    <message>
+        <source>Add Inpaint Mask
+Paint areas to clean before running inpainting.
+These pixels are added to the final mask.</source>
+        <translation>Inpaint-Maske hinzufügen
+Malen Sie vor dem Inpainting die Bereiche an, die bereinigt werden sollen.
+Diese Pixel werden zur endgültigen Maske hinzugefügt.</translation>
+    </message>
+    <message>
+        <source>Erase Mask Strokes
+Remove parts of drawn add/exclude strokes.
+This edits mask strokes only and does not change applied patches.</source>
+        <translation>Maskenstriche löschen
+Entfernen Sie Teile gezeichneter Hinzufügen-/Ausschließen-Striche.
+Dadurch werden nur die Maskenstriche bearbeitet; bereits angewendete Patches bleiben unverändert.</translation>
+    </message>
+    <message>
+        <source>Exclude from Inpainting
+Protect areas from inpainting.
+Excluded pixels are removed from the final mask even if they were auto-detected or painted.</source>
+        <translation>Vom Inpainting ausschließen
+Schützen Sie Bereiche vor dem Inpainting.
+Ausgeschlossene Pixel werden aus der endgültigen Maske entfernt, auch wenn sie automatisch erkannt oder manuell gemalt wurden.</translation>
+    </message>
+    <message>
+        <source>Restore Original over Inpainted Area
+Paint over an inpainted result to bring back the original image.
+This creates a restore patch above existing inpaint patches on the current page.</source>
+        <translation>Original über inpaintetem Bereich wiederherstellen
+Malen Sie über ein Inpainting-Ergebnis, um das Originalbild zurückzuholen.
+Dadurch wird auf der aktuellen Seite ein Wiederherstellungs-Patch über den vorhandenen Inpaint-Patches erstellt.</translation>
+    </message>
+    <message>
+        <source>Restore Original over Inpainted Area
+No inpainted patch exists on this page yet.
+Run inpainting first, then use this tool to recover original pixels where needed.</source>
+        <translation>Original über inpaintetem Bereich wiederherstellen
+Auf dieser Seite gibt es noch keinen Inpaint-Patch.
+Führen Sie zuerst Inpainting aus und verwenden Sie dann dieses Werkzeug, um bei Bedarf Originalpixel zurückzuholen.</translation>
+    </message>
+    <message>
+        <source>Clear Inpaint Mask Strokes
+Remove all add/exclude mask strokes on the current page.
+Applied inpaint and restore patches are kept; use Undo to revert patch changes.</source>
+        <translation>Inpaint-Maskenstriche löschen
+Entfernen Sie alle Hinzufügen-/Ausschließen-Maskenstriche auf der aktuellen Seite.
+Bereits angewendete Inpaint- und Wiederherstellungs-Patches bleiben erhalten; verwenden Sie Rückgängig, um Patch-Änderungen zurückzunehmen.</translation>
+    </message>
+    <message>
+        <source>Inpaint Brush Size
+Adjust the size used by add, erase, exclude, and restore brushes.</source>
+        <translation>Inpaint-Pinselgröße
+Passen Sie die Größe an, die für Hinzufügen-, Lösch-, Ausschließen- und Wiederherstellungs-Pinsel verwendet wird.</translation>
+    </message>
+</context>
+<context>
     <name>ToolsPage</name>
     <message>
         <source>Translator</source>
@@ -2175,22 +2232,6 @@ zurück auf das Bild (zur weiteren Bearbeitung)</translation>
     <message>
         <source>Increase the size of all blocks</source>
         <translation>Größe aller Blöcke erhöhen</translation>
-    </message>
-    <message>
-        <source>Draw Brush Strokes for Cleaning Image</source>
-        <translation>Pinselstriche zum Bereinigen des Bildes zeichnen</translation>
-    </message>
-    <message>
-        <source>Erase Brush Strokes</source>
-        <translation>Pinselstriche löschen</translation>
-    </message>
-    <message>
-        <source>Remove all the brush strokes on the Image</source>
-        <translation>Alle Pinselstriche auf dem Bild entfernen</translation>
-    </message>
-    <message>
-        <source>Brush/Eraser Size Slider</source>
-        <translation>Schieberegler für Pinsel-/Radiergummigröße</translation>
     </message>
     <message>
         <source>Box Drawing</source>

@@ -14,6 +14,11 @@ from modules.utils.textblock import TextBlock
 from ..canvas.rectangle import MoveableRectItem
 from ..canvas.text_item import TextBlockItem
 from modules.utils.common_utils import is_close
+from modules.utils.inpaint_strokes import (
+    PATCH_KIND_INPAINT,
+    normalize_patch_kind,
+    normalize_stroke_role,
+)
 
 if TYPE_CHECKING:
     from app.ui.canvas.image_viewer import ImageViewer
@@ -30,19 +35,27 @@ class PathProperties(TypedDict):
     pen: str  # HexArgb color string
     brush: str  # HexArgb color string
     width: int
+    role: str
     pen_settings: PenSettings
 
 class PathCommandBase:
     """Base class with shared functionality for path-related commands"""
+
+    ROLE_KEY = 0x100
     
     @staticmethod
     def save_path_properties(path_item) -> PathProperties:
         """Save properties of a path item"""
+        role = normalize_stroke_role(
+            path_item.data(PathCommandBase.ROLE_KEY),
+            brush=path_item.brush().color().name(QColor.HexArgb),
+        )
         return {
             'path': path_item.path(),
             'pen': path_item.pen().color().name(QColor.HexArgb),
             'brush': path_item.brush().color().name(QColor.HexArgb),
             'width': path_item.pen().width(),
+            'role': role,
             'pen_settings': {
                 'color': path_item.pen().color(),
                 'width': path_item.pen().width(),
@@ -66,11 +79,12 @@ class PathCommandBase:
         path_item = QGraphicsPathItem()
         path_item.setPath(properties['path'])
         path_item.setPen(pen)
-        
-        if properties['brush'] == "#80ff0000":
+
+        role = normalize_stroke_role(properties.get('role'), brush=properties.get('brush'))
+        if role == "generated":
             brush_color = QColor(properties['brush'])
             path_item.setBrush(QBrush(brush_color))
-            
+        path_item.setData(PathCommandBase.ROLE_KEY, role)
         return path_item
 
     @staticmethod
@@ -234,6 +248,15 @@ class PatchCommandBase:
     """Shared helpers for pixmap patch commands"""
 
     HASH_KEY = 0
+    KIND_KEY = 1
+    ORDER_KEY = 2
+    BASE_Z = 0.5
+    ORDER_Z_STEP = 0.0001
+
+    @staticmethod
+    def patch_z_value(properties) -> float:
+        order = int(properties.get('order', 0) or 0)
+        return PatchCommandBase.BASE_Z + (order * PatchCommandBase.ORDER_Z_STEP)
 
     @staticmethod
     def create_patch_item(properties, viewer: ImageViewer):
@@ -254,11 +277,12 @@ class PatchCommandBase:
         if 'scene_pos' in properties and viewer.webtoon_mode:
             scene_x, scene_y = properties['scene_pos']
             item.setPos(scene_x, scene_y)
-            item.setZValue(0.5)  # Above images but below text
         else:
             item.setPos(x, y)
-            item.setZValue(0.5)
+        item.setZValue(PatchCommandBase.patch_z_value(properties))
         item.setData(PatchCommandBase.HASH_KEY, properties['hash'])
+        item.setData(PatchCommandBase.KIND_KEY, normalize_patch_kind(properties.get('kind', PATCH_KIND_INPAINT)))
+        item.setData(PatchCommandBase.ORDER_KEY, int(properties.get('order', 0) or 0))
         viewer._scene.addItem(item)
         viewer._scene.update()
         return item

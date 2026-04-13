@@ -8,6 +8,12 @@ from typing import List, Dict, Set, Optional
 from PySide6.QtWidgets import QGraphicsPathItem
 from PySide6.QtCore import QPointF, QRectF
 from PySide6.QtGui import QPen, QBrush, QColor, QPainterPath, Qt
+from app.ui.commands.base import PathCommandBase as pcb
+from modules.utils.inpaint_strokes import (
+    STORABLE_STROKE_ROLES,
+    STROKE_ROLE_GENERATED,
+    normalize_stroke_role,
+)
 
 
 class BrushStrokeManager:
@@ -33,6 +39,9 @@ class BrushStrokeManager:
         if brush_strokes and hasattr(self.viewer, 'drawing_manager'):
             # Convert brush strokes from page-local to scene coordinates
             for stroke_data in brush_strokes:
+                role = normalize_stroke_role(stroke_data.get('role'), brush=stroke_data.get('brush'))
+                if role not in STORABLE_STROKE_ROLES:
+                    continue
                 # Convert the path from page-local to scene coordinates
                 scene_path = self.coordinate_converter.convert_path_to_scene_coordinates(stroke_data['path'], page_idx)
                 
@@ -44,10 +53,11 @@ class BrushStrokeManager:
                 pen.setJoinStyle(Qt.RoundJoin)
                 
                 brush = QBrush(QColor(stroke_data['brush']))
-                if brush.color() == QColor("#80ff0000"):
-                    self._scene.addPath(scene_path, pen, brush)
+                if role == STROKE_ROLE_GENERATED:
+                    item = self._scene.addPath(scene_path, pen, brush)
                 else:
-                    self._scene.addPath(scene_path, pen)
+                    item = self._scene.addPath(scene_path, pen)
+                item.setData(pcb.ROLE_KEY, role)
     
     def unload_brush_strokes(self, page_idx: int, page_y: float, page_bottom: float, file_path: str):
         """Unload brush strokes for a specific page."""
@@ -86,11 +96,18 @@ class BrushStrokeManager:
                 item != self.viewer.photo):
                 
                 # Process this brush stroke using coordinate converter
+                role = normalize_stroke_role(
+                    item.data(pcb.ROLE_KEY),
+                    brush=item.brush().color().name(QColor.HexArgb) if hasattr(item, 'brush') else '#00000000',
+                )
+                if role not in STORABLE_STROKE_ROLES:
+                    continue
                 stroke_data = {
                     'path': item.path(),
                     'pen': item.pen().color().name(QColor.HexArgb) if hasattr(item, 'pen') else '#80ff0000',
                     'brush': item.brush().color().name(QColor.HexArgb) if hasattr(item, 'brush') else '#00000000',
-                    'width': item.pen().width() if hasattr(item, 'pen') else 25
+                    'width': item.pen().width() if hasattr(item, 'pen') else 25,
+                    'role': role,
                 }
                 
                 # Find all pages this stroke intersects with and create clipped versions
