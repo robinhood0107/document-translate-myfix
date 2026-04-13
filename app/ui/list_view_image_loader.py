@@ -1,69 +1,64 @@
-import os
+from __future__ import annotations
+
 from collections import deque
-from typing import Set
 
 import imkit as imk
 from PIL import Image
-from PySide6.QtCore import QTimer, QThread, QObject, Signal, QSize, QPoint, Qt, Slot
-from PySide6.QtGui import QPixmap, QImage
-from PySide6.QtWidgets import QListWidget
+from PySide6.QtCore import QThread, QObject, Signal, QSize, QTimer, Qt, Slot
+from PySide6.QtGui import QImage, QPixmap
+from PySide6.QtWidgets import QListView
 
 from app.path_materialization import ensure_path_materialized
 
+from .list_view import PageListModel
+
 
 class ImageLoadWorker(QObject):
-    """Worker thread for loading images in the background."""
+    image_loaded = Signal(str, QImage)
 
-    image_loaded = Signal(int, str, QImage)  # index, file_path, image
-
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
         self.load_queue = deque()
-        self._queued_indices: set[int] = set()
+        self._queued_paths: set[str] = set()
         self.should_stop = False
         self._processing = False
 
-    @Slot(int, str, QSize)
-    def add_to_queue(self, index: int, file_path: str, target_size: QSize):
-        """Add an image to the loading queue."""
-        if self.should_stop or index in self._queued_indices:
+    @Slot(str, QSize)
+    def add_to_queue(self, file_path: str, target_size: QSize) -> None:
+        if self.should_stop or not file_path or file_path in self._queued_paths:
             return
-        self.load_queue.append((index, file_path, target_size))
-        self._queued_indices.add(index)
+        self.load_queue.append((file_path, target_size))
+        self._queued_paths.add(file_path)
         if not self._processing:
             self.process_queue()
 
     @Slot()
-    def clear_queue(self):
-        """Clear the loading queue."""
+    def clear_queue(self) -> None:
         self.load_queue.clear()
-        self._queued_indices.clear()
+        self._queued_paths.clear()
 
     @Slot()
-    def stop(self):
-        """Stop the worker."""
+    def stop(self) -> None:
         self.should_stop = True
         self.clear_queue()
 
     @Slot()
-    def process_queue(self):
-        """Process the loading queue."""
+    def process_queue(self) -> None:
         if self._processing or self.should_stop:
             return
 
         self._processing = True
         try:
             while self.load_queue and not self.should_stop:
-                index, file_path, target_size = self.load_queue.popleft()
-                self._queued_indices.discard(index)
+                file_path, target_size = self.load_queue.popleft()
+                self._queued_paths.discard(file_path)
                 image = self._load_and_resize_image(file_path, target_size)
                 if image is not None and not image.isNull():
-                    self.image_loaded.emit(index, file_path, image)
+                    self.image_loaded.emit(file_path, image)
         finally:
             self._processing = False
 
     def _load_and_resize_image(self, file_path: str, target_size: QSize) -> QImage | None:
-        """Load and resize an image to the target size."""
         try:
             ensure_path_materialized(file_path)
             image = imk.read_image(file_path)
@@ -72,39 +67,34 @@ class ImageLoadWorker(QObject):
 
             height, width = image.shape[:2]
             target_width, target_height = target_size.width(), target_size.height()
-            scale_x = target_width / width
-            scale_y = target_height / height
-            scale = min(scale_x, scale_y)
+            scale = min(target_width / max(width, 1), target_height / max(height, 1))
+            new_width = max(1, int(width * scale))
+            new_height = max(1, int(height * scale))
+            resized = imk.resize(image, (new_width, new_height), mode=Image.Resampling.LANCZOS)
 
-            new_width = int(width * scale)
-            new_height = int(height * scale)
-            resized_image = imk.resize(image, (new_width, new_height), mode=Image.Resampling.LANCZOS)
-
-            h, w, ch = resized_image.shape
+            h, w, ch = resized.shape
             bytes_per_line = ch * w
-            qt_image = QImage(resized_image.data, w, h, bytes_per_line, QImage.Format_RGB888)
+            qt_image = QImage(resized.data, w, h, bytes_per_line, QImage.Format.Format_RGB888)
             return qt_image.copy()
-        except Exception as e:
-            print(f"Error processing image {file_path}: {e}")
+        except Exception as exc:
+            print(f"Error processing image {file_path}: {exc}")
             return None
 
 
 class ListViewImageLoader(QObject):
-    """Lazy image loader for QListWidget that loads thumbnails only when visible."""
-
-    queue_image_load_requested = Signal(int, str, QSize)
+    queue_image_load_requested = Signal(str, QSize)
     clear_queue_requested = Signal()
     stop_worker_requested = Signal()
 
-    def __init__(self, list_widget: QListWidget, avatar_size: tuple = (60, 80)):
-        super().__init__(list_widget)
-        self.list_widget = list_widget
+    def __init__(self, list_view: QListView, avatar_size: tuple = (60, 80)):
+        super().__init__(list_view)
+        self.list_view = list_view
         self.avatar_size = QSize(avatar_size[0], avatar_size[1])
 
-        self.loaded_images: dict[int, QPixmap] = {}
-        self.visible_items: Set[int] = set()
+        self.loaded_images: dict[str, QPixmap] = {}
+        self.visible_paths: set[str] = set()
         self.file_paths: list[str] = []
-        self.cards = []
+        self.model: PageListModel | None = None
 
         self.worker_thread = QThread(self)
         self.worker = ImageLoadWorker()
@@ -119,154 +109,104 @@ class ListViewImageLoader(QObject):
         self.update_timer.setSingleShot(True)
         self.update_timer.timeout.connect(self._update_visible_items)
 
-        if hasattr(self.list_widget, 'verticalScrollBar'):
-            scrollbar = self.list_widget.verticalScrollBar()
-            if scrollbar:
-                scrollbar.valueChanged.connect(self._on_scroll)
+        scrollbar = self.list_view.verticalScrollBar()
+        if scrollbar:
+            scrollbar.valueChanged.connect(self._on_scroll)
 
-        self.max_loaded_images = 20
+        self.max_loaded_images = 24
         self.preload_buffer = 2
 
-    def set_file_paths(self, file_paths: list[str], cards: list):
-        """Set the file paths and card references for lazy loading."""
-        cards_copy = cards.copy() if cards else []
+    def set_model(self, model: PageListModel) -> None:
+        self.model = model
+
+    def set_file_paths(self, file_paths: list[str]) -> None:
         self.clear()
         self.file_paths = file_paths.copy()
-        self.cards = cards_copy
 
         if not self.worker_thread.isRunning():
             self.worker_thread.start()
 
         self._schedule_update()
 
-    def clear(self):
-        """Clear all loaded images and reset state."""
+    def clear(self) -> None:
+        if self.model:
+            for file_path in list(self.loaded_images.keys()):
+                self.model.clear_thumbnail(file_path)
         self.loaded_images.clear()
-        self.visible_items.clear()
+        self.visible_paths.clear()
         self.file_paths.clear()
-        self.cards.clear()
 
         if self.worker:
             self.clear_queue_requested.emit()
 
-    def _on_scroll(self):
-        """Handle scroll events with debouncing."""
+    def _on_scroll(self) -> None:
         self._schedule_update()
 
-    def _schedule_update(self):
-        """Schedule an update of visible items."""
+    def _schedule_update(self) -> None:
         self.update_timer.start(100)
 
-    def _update_visible_items(self):
-        """Update which items are visible and manage loading/unloading."""
-        if not self.list_widget or not self.file_paths:
+    def _update_visible_items(self) -> None:
+        if not self.list_view or not self.file_paths or self.model is None:
             return
 
-        new_visible_items = self._get_visible_item_indices()
+        visible_rows = self._get_visible_rows()
+        items_to_load: set[str] = set()
+        for row in visible_rows:
+            start = max(0, row - self.preload_buffer)
+            end = min(len(self.file_paths), row + self.preload_buffer + 1)
+            for path in self.file_paths[start:end]:
+                items_to_load.add(path)
 
-        items_to_load = set()
-        for index in new_visible_items:
-            start_idx = max(0, index - self.preload_buffer)
-            end_idx = min(len(self.file_paths), index + self.preload_buffer + 1)
-            items_to_load.update(range(start_idx, end_idx))
-
-        for index in items_to_load:
-            if index not in self.loaded_images and 0 <= index < len(self.file_paths):
-                self._queue_image_load(index)
+        for file_path in items_to_load:
+            if file_path not in self.loaded_images:
+                self._queue_image_load(file_path)
 
         self._manage_memory(items_to_load)
-        self.visible_items = new_visible_items
+        self.visible_paths = items_to_load
 
-    def _get_visible_item_indices(self) -> Set[int]:
-        """Get indices of currently visible items."""
-        visible_indices = set()
-        if not self.list_widget:
-            return visible_indices
+    def _get_visible_rows(self) -> list[int]:
+        if self.model is None:
+            return []
+        viewport_rect = self.list_view.viewport().rect()
+        visible_rows: list[int] = []
+        for row in range(self.model.rowCount()):
+            index = self.model.index(row, 0)
+            rect = self.list_view.visualRect(index)
+            if rect.isValid() and rect.intersects(viewport_rect):
+                visible_rows.append(row)
+        return visible_rows
 
-        viewport_rect = self.list_widget.viewport().rect()
-        probe_x = max(1, viewport_rect.center().x())
-        top_item = self._find_visible_item(probe_x, viewport_rect.top(), 1, viewport_rect.bottom())
-        bottom_item = self._find_visible_item(probe_x, max(0, viewport_rect.bottom() - 1), -1, viewport_rect.top())
+    def _queue_image_load(self, file_path: str) -> None:
+        self.queue_image_load_requested.emit(file_path, self.avatar_size)
+        if not self.worker_thread.isRunning():
+            self.worker_thread.start()
 
-        if top_item is None:
-            return visible_indices
+    def _on_image_loaded(self, file_path: str, image: QImage) -> None:
+        if self.model is None or file_path not in self.file_paths:
+            return
+        pixmap = QPixmap.fromImage(image)
+        self.loaded_images[file_path] = pixmap
+        self.model.set_thumbnail(file_path, pixmap)
 
-        top_index = self.list_widget.row(top_item)
-        if bottom_item is not None:
-            bottom_index = self.list_widget.row(bottom_item)
-        else:
-            row_height = max(1, self.list_widget.sizeHintForRow(top_index))
-            visible_rows = max(1, (viewport_rect.height() // row_height) + 1)
-            bottom_index = min(self.list_widget.count() - 1, top_index + visible_rows)
-
-        visible_indices.update(range(top_index, bottom_index + 1))
-        return visible_indices
-
-    def _find_visible_item(self, x: int, start_y: int, step: int, limit_y: int):
-        """Probe vertically within the viewport until a row is found."""
-        y = start_y
-        while (y <= limit_y) if step > 0 else (y >= limit_y):
-            item = self.list_widget.itemAt(QPoint(x, y))
-            if item is not None:
-                return item
-            y += step
-        return None
-
-    def _queue_image_load(self, index: int):
-        """Queue an image for loading."""
-        if 0 <= index < len(self.file_paths):
-            file_path = self.file_paths[index]
-            if ensure_path_materialized(file_path) or os.path.exists(file_path):
-                self.queue_image_load_requested.emit(index, file_path, self.avatar_size)
-                if not self.worker_thread.isRunning():
-                    self.worker_thread.start()
-
-    def _on_image_loaded(self, index: int, file_path: str, image: QImage):
-        """Handle when an image has been loaded."""
-        if 0 <= index < len(self.cards) and index < len(self.file_paths) and self.file_paths[index] == file_path:
-            pixmap = QPixmap.fromImage(image)
-            self.loaded_images[index] = pixmap
-
-            card = self.cards[index]
-            if card and hasattr(card, '_avatar'):
-                card._avatar.set_dayu_image(pixmap)
-                card._avatar.setVisible(True)
-
-                list_item = self.list_widget.item(index)
-                if list_item:
-                    list_item.setSizeHint(card.sizeHint())
-
-    def _manage_memory(self, needed_items: Set[int]):
-        """Manage memory by unloading images that are no longer needed."""
-        if len(self.loaded_images) <= self.max_loaded_images:
+    def _manage_memory(self, needed_paths: set[str]) -> None:
+        if len(self.loaded_images) <= self.max_loaded_images or self.model is None:
             return
 
-        items_to_unload = []
-        for index in list(self.loaded_images.keys()):
-            if index not in needed_items:
-                items_to_unload.append(index)
-
+        unload_candidates = [path for path in self.loaded_images if path not in needed_paths]
+        unload_candidates.sort(key=lambda p: self.file_paths.index(p) if p in self.file_paths else 10**9)
         excess_count = len(self.loaded_images) - self.max_loaded_images
-        items_to_unload.sort()
+        for file_path in unload_candidates[:excess_count]:
+            self.loaded_images.pop(file_path, None)
+            self.model.clear_thumbnail(file_path)
 
-        for i, index in enumerate(items_to_unload):
-            if i >= excess_count:
-                break
+    def force_load_image(self, index: int) -> None:
+        if not (0 <= index < len(self.file_paths)):
+            return
+        file_path = self.file_paths[index]
+        if file_path not in self.loaded_images:
+            self._queue_image_load(file_path)
 
-            del self.loaded_images[index]
-
-            if 0 <= index < len(self.cards):
-                card = self.cards[index]
-                if card and hasattr(card, '_avatar'):
-                    card._avatar.setVisible(False)
-
-    def force_load_image(self, index: int):
-        """Force load an image immediately (for current selection)."""
-        if 0 <= index < len(self.file_paths) and index not in self.loaded_images:
-            self._queue_image_load(index)
-
-    def shutdown(self):
-        """Shutdown the loader and clean up resources."""
+    def shutdown(self) -> None:
         if self.worker:
             self.stop_worker_requested.emit()
 
