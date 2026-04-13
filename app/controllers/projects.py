@@ -1105,6 +1105,7 @@ class ProjectController:
             stack = QUndoStack(self.main)
             stack.cleanChanged.connect(self.main._update_window_modified)
             stack.indexChanged.connect(self.main._bump_dirty_revision)
+            stack.indexChanged.connect(self.main.refresh_inpaint_tool_ui)
             self.main.undo_stacks[file] = stack
             self.main.undo_group.addStack(stack)
 
@@ -1309,4 +1310,3 @@ class ProjectController:
             # Convert value to English using mappings if available
             mapped_value = self.main.settings_page.ui.value_mappings.get(group_value, group_value)
             settings_obj.setValue(group_key, mapped_value)
-

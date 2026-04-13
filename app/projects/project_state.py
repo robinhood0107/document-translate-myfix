@@ -20,6 +20,7 @@ from .project_state_v2 import (
     save_state_to_proj_file_v2,
 )
 from modules.utils.export_paths import normalize_export_source_record
+from modules.utils.inpaint_strokes import PATCH_KIND_INPAINT, normalize_patch_kind
 
 if TYPE_CHECKING:
     from controller import ComicTranslate
@@ -246,9 +247,13 @@ def load_state_from_proj_file(comic_translate: ComicTranslate, file_name: str):
             for p in patch_list:
                 abs_png = _join_from_archive_relpath(unique_patches_dir, p.get('png_path', ''))
                 if os.path.isfile(abs_png):  
-                    new_list.append({'bbox': p['bbox'],
-                                    'png_path': abs_png,
-                                    'hash': p['hash']})
+                    new_list.append({
+                        'bbox': p['bbox'],
+                        'png_path': abs_png,
+                        'hash': p['hash'],
+                        'kind': normalize_patch_kind(p.get('kind', PATCH_KIND_INPAINT)),
+                        'order': int(p.get('order', len(new_list) + 1) or (len(new_list) + 1)),
+                    })
             if new_list:
                 reconstructed[page_path] = new_list
 
@@ -260,4 +265,3 @@ def load_state_from_proj_file(comic_translate: ComicTranslate, file_name: str):
     # restore LLM extra context
     saved_ctx = state.get('llm_extra_context', '')
     return saved_ctx
-
