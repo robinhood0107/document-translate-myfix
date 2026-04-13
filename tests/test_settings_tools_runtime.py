@@ -114,6 +114,9 @@ class SettingsToolsRuntimeTests(unittest.TestCase):
         page.load_settings()
 
         self.assertTrue(page.ui.notifications_page.enable_completion_sound_checkbox.isChecked())
+        note_labels = page.ui.notifications_page.findChildren(QtWidgets.QLabel)
+        joined_notes = "\n".join(label.text() for label in note_labels)
+        self.assertIn("repository music folder", joined_notes)
         page.ui.notifications_page.enable_completion_sound_checkbox.setChecked(False)
         combo = page.ui.notifications_page.completion_sound_combo
         combo.setCurrentIndex(1)

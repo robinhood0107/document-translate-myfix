@@ -236,12 +236,10 @@ class ComicTranslateUI(
         self._finish_settings_resize_preview()
         self._set_document_tools_visible(False)
         self._center_stack.setCurrentWidget(self.startup_home)
-        self.set_pipeline_overlay_active(False)
+        self._set_nav_checked_state("home")
+        self.set_pipeline_overlay_active(bool(getattr(self, "_batch_active", False)))
 
     def show_home(self) -> None:
-        if self._workspace_initialized:
-            self.show_main_page()
-            return
         self.show_home_screen()
 
     def show_settings_page(self):
@@ -249,6 +247,8 @@ class ComicTranslateUI(
             self.settings_page = SettingsPage(self)
         self._finish_settings_resize_preview()
         self._center_stack.setCurrentWidget(self.settings_page)
+        self._set_nav_checked_state("settings")
+        self.set_pipeline_overlay_active(False)
 
     def show_main_page(self):
         self._finish_settings_resize_preview()
@@ -256,6 +256,34 @@ class ComicTranslateUI(
             self._workspace_initialized = True
             self._set_document_tools_visible(True)
             self._center_stack.setCurrentWidget(self.main_content_widget)
+            self._set_nav_checked_state("main")
+            if getattr(self, "_batch_active", False):
+                self.set_pipeline_overlay_active(True)
+
+    def _set_nav_checked_state(self, target: str) -> None:
+        nav_buttons = (
+            getattr(self, "home_nav_button", None),
+            getattr(self, "settings_nav_button", None),
+        )
+        home_checked = target == "home"
+        settings_checked = target == "settings"
+        button_group = None
+        if hasattr(self, "nav_tool_group") and self.nav_tool_group is not None:
+            button_group = self.nav_tool_group.get_button_group()
+        previous_exclusive = None
+        if button_group is not None:
+            previous_exclusive = button_group.exclusive()
+            button_group.setExclusive(False)
+        for button, checked in zip(nav_buttons, (home_checked, settings_checked)):
+            if button is None:
+                continue
+            try:
+                with QtCore.QSignalBlocker(button):
+                    button.setChecked(bool(checked))
+            except Exception:
+                button.setChecked(bool(checked))
+        if button_group is not None and previous_exclusive is not None:
+            button_group.setExclusive(previous_exclusive)
 
     def resizeEvent(self, event: QtGui.QResizeEvent) -> None:  # type: ignore[override]
         super().resizeEvent(event)

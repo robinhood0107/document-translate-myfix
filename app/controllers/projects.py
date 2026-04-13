@@ -6,6 +6,7 @@ import os
 import re
 import shutil
 import tempfile
+import time
 from collections import OrderedDict
 from datetime import datetime
 from typing import TYPE_CHECKING
@@ -78,29 +79,33 @@ class ProjectController:
         # Preserve pin state if already present
         existing = next((e for e in entries if os.path.normpath(e["path"]) == path), None)
         pinned = existing.get("pinned", False) if existing else False
+        opened_at = time.time()
         # Remove duplicates
         entries = [e for e in entries if os.path.normpath(e["path"]) != path]
         try:
             mtime = os.path.getmtime(path)
         except OSError:
             mtime = 0.0
-        entries.insert(0, {"path": path, "mtime": mtime, "pinned": pinned})
+        entries.insert(0, {"path": path, "mtime": mtime, "pinned": pinned, "opened_at": opened_at})
         entries = entries[: self.MAX_RECENT]
         self._save_entries(entries)
 
     def get_recent_projects(self) -> list:
-        """Return list of ``{path, mtime, pinned}`` dicts sorted by mtime desc."""
+        """Return list of ``{path, mtime, pinned, opened_at}`` dicts sorted by open recency."""
         settings = QSettings("ComicLabs", "ComicTranslate")
         settings.beginGroup("recent_projects")
         paths   = settings.value("paths",   []) or []
         mtimes  = settings.value("mtimes",  []) or []
         pinneds = settings.value("pinned",  []) or []
+        opened_ats = settings.value("opened_at", []) or []
         settings.endGroup()
         # Normalise types — QSettings may return a single string if only 1 entry
         if isinstance(paths, str):   paths   = [paths]
         if not isinstance(mtimes,  list): mtimes  = [mtimes]
         if not isinstance(pinneds, list): pinneds = [pinneds]
+        if not isinstance(opened_ats, list): opened_ats = [opened_ats]
         result = []
+        fallback_base = float(len(paths))
         for i, (path, mtime) in enumerate(zip(paths, mtimes)):
             try:
                 m = float(mtime)
@@ -117,8 +122,14 @@ class ProjectController:
                 p = str(pinneds[i]).lower() == "true" if i < len(pinneds) else False
             except Exception:
                 p = False
-            result.append({"path": str(path), "mtime": m, "pinned": p})
-        result.sort(key=lambda e: float(e.get("mtime", 0.0) or 0.0), reverse=True)
+            try:
+                opened_at = float(opened_ats[i]) if i < len(opened_ats) else 0.0
+            except (TypeError, ValueError):
+                opened_at = 0.0
+            if opened_at <= 0:
+                opened_at = fallback_base - float(i)
+            result.append({"path": str(path), "mtime": m, "pinned": p, "opened_at": opened_at})
+        result.sort(key=lambda e: float(e.get("opened_at", 0.0) or 0.0), reverse=True)
         return result
 
     def remove_recent_project(self, path: str) -> None:
@@ -152,10 +163,12 @@ class ProjectController:
         """Write the full entries list to QSettings."""
         settings = QSettings("ComicLabs", "ComicTranslate")
         settings.beginGroup("recent_projects")
-        settings.setValue("paths",  [e["path"]           for e in entries])
-        settings.setValue("mtimes", [e["mtime"]          for e in entries])
+        settings.setValue("paths",  [e["path"] for e in entries])
+        settings.setValue("mtimes", [e["mtime"] for e in entries])
         settings.setValue("pinned", [e.get("pinned", False) for e in entries])
+        settings.setValue("opened_at", [e.get("opened_at", 0.0) for e in entries])
         settings.endGroup()
+        settings.sync()
 
     def initialize_autosave(self):
         # Restore persisted auto-save toggle state as a single source of truth.
@@ -208,7 +221,12 @@ class ProjectController:
             pass
         return False
 
-    def _ensure_autosave_project_file_if_needed(self, require_images: bool = True) -> None:
+    def _ensure_autosave_project_file_if_needed(
+        self,
+        require_images: bool = True,
+        *,
+        ignore_home_visibility: bool = False,
+    ) -> None:
         autosave_enabled = bool(
             self.main.settings_page.get_export_settings().get("project_autosave_enabled", False)
         )
@@ -217,7 +235,7 @@ class ProjectController:
         if require_images and not self.main.image_files:
             return
         # Avoid creating a "rogue" auto-save file on plain startup before user intent.
-        if self._is_startup_home_visible():
+        if self._is_startup_home_visible() and not ignore_home_visibility:
             return
 
         generated_project_file = self._generate_autosave_project_file_path()
@@ -227,6 +245,13 @@ class ProjectController:
     def ensure_autosave_project_file_for_new_project(self) -> None:
         """Create an auto-save project file after explicit New Project intent."""
         self._ensure_autosave_project_file_if_needed(require_images=False)
+
+    def ensure_autosave_project_file_for_transition(self) -> None:
+        """Force-create an auto-save target before guarded project transitions."""
+        self._ensure_autosave_project_file_if_needed(
+            require_images=False,
+            ignore_home_visibility=True,
+        )
 
     def shutdown_autosave(self, clear_recovery: bool = True):
         try:
