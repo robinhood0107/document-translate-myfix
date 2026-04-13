@@ -323,6 +323,7 @@ class ComicTranslate(ComicTranslateUI):
         self.page_list.insert_browser.sig_files_changed.connect(self.image_ctrl.thread_insert)
         self.page_list.toggle_skip_img.connect(self.image_ctrl.handle_toggle_skip_images)
         self.page_list.translate_imgs.connect(self.batch_translate_selected)
+        self.page_list.sort_requested.connect(self.image_ctrl.sort_images)
 
         # New project and safety confirmations
         self.new_project_button.clicked.connect(self._on_new_project_clicked)
@@ -390,12 +391,7 @@ class ComicTranslate(ComicTranslateUI):
     def get_selected_page_paths(self) -> list[str]:
         selected_paths: list[str] = []
         seen: set[str] = set()
-        for item in self.page_list.selectedItems():
-            path = item.data(QtCore.Qt.ItemDataRole.UserRole)
-            if not isinstance(path, str) or path not in self.image_files:
-                idx = self.page_list.row(item)
-                if 0 <= idx < len(self.image_files):
-                    path = self.image_files[idx]
+        for path in self.page_list.selected_file_paths():
             if isinstance(path, str) and path in self.image_files and path not in seen:
                 selected_paths.append(path)
                 seen.add(path)
@@ -1079,17 +1075,13 @@ class ComicTranslate(ComicTranslateUI):
             return
         self._start_batch_process_for_paths(self.image_files, run_type="batch")
 
-    def batch_translate_selected(self, selected_file_names: list[str]):
+    def batch_translate_selected(self, selected_paths: list[str]):
         try:
             if self._memlogger is not None:
                 self._memlogger.emit("batch_start_selected")
         except Exception:
             pass
-        # map base‐name back to full paths
-        selected_paths = [
-            p for p in self.image_files
-            if os.path.basename(p) in selected_file_names
-        ]
+        selected_paths = [p for p in selected_paths if p in self.image_files]
         self._start_batch_process_for_paths(selected_paths, run_type="batch")
 
     def retry_failed_batch_pages(self):
