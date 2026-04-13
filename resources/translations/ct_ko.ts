@@ -20,106 +20,106 @@
     <name>AutomaticProgress</name>
     <message>
         <source>Calculating</source>
-        <translation type="unfinished">계산 중</translation>
+        <translation>계산 중</translation>
     </message>
     <message>
         <source>Recent History</source>
-        <translation type="unfinished"></translation>
+        <translation>최근 기록</translation>
     </message>
     <message>
         <source>Live Learning</source>
-        <translation type="unfinished"></translation>
+        <translation>실시간 학습</translation>
     </message>
     <message>
         <source>Live Stable</source>
-        <translation type="unfinished"></translation>
+        <translation>실시간 안정판</translation>
     </message>
 </context>
 <context>
     <name>AutomaticProgressDialog</name>
     <message>
         <source>Automatic Translation Progress</source>
-        <translation type="unfinished"></translation>
+        <translation>자동 번역 진행 상황</translation>
     </message>
     <message>
         <source>자동번역 준비 중</source>
-        <translation type="unfinished"></translation>
+        <translation>자동번역 준비 중</translation>
     </message>
     <message>
         <source>초기화 중...</source>
-        <translation type="unfinished"></translation>
+        <translation>초기화 중...</translation>
     </message>
     <message>
         <source>경과 시간</source>
-        <translation type="unfinished"></translation>
+        <translation>경과 시간</translation>
     </message>
     <message>
         <source>남은 시간</source>
-        <translation type="unfinished"></translation>
+        <translation>남은 시간</translation>
     </message>
     <message>
         <source>예상 완료 시각</source>
-        <translation type="unfinished"></translation>
+        <translation>예상 완료 시각</translation>
     </message>
     <message>
         <source>ETA 신뢰도</source>
-        <translation type="unfinished"></translation>
+        <translation>ETA 신뢰도</translation>
     </message>
     <message>
         <source>현재 작업</source>
-        <translation type="unfinished"></translation>
+        <translation>현재 작업</translation>
     </message>
     <message>
         <source>서비스</source>
-        <translation type="unfinished"></translation>
+        <translation>서비스</translation>
     </message>
     <message>
         <source>페이지</source>
-        <translation type="unfinished"></translation>
+        <translation>페이지</translation>
     </message>
     <message>
         <source>단계</source>
-        <translation type="unfinished"></translation>
+        <translation>단계</translation>
     </message>
     <message>
         <source>파일명</source>
-        <translation type="unfinished"></translation>
+        <translation>파일명</translation>
     </message>
     <message>
         <source>세부 로그</source>
-        <translation type="unfinished"></translation>
+        <translation>세부 로그</translation>
     </message>
     <message>
         <source>재시도</source>
-        <translation type="unfinished"></translation>
+        <translation>재시도</translation>
     </message>
     <message>
         <source>Settings 열기</source>
-        <translation type="unfinished"></translation>
+        <translation>설정 열기</translation>
     </message>
     <message>
         <source>Cancel</source>
-        <translation type="unfinished">취소</translation>
+        <translation>취소</translation>
     </message>
     <message>
         <source>닫기</source>
-        <translation type="unfinished"></translation>
+        <translation>닫기</translation>
     </message>
     <message>
         <source>Calculating</source>
-        <translation type="unfinished">계산 중</translation>
+        <translation>계산 중</translation>
     </message>
     <message>
         <source>작업이 취소되었습니다.</source>
-        <translation type="unfinished"></translation>
+        <translation>작업이 취소되었습니다.</translation>
     </message>
     <message>
         <source>자동번역 진행 중</source>
-        <translation type="unfinished"></translation>
+        <translation>자동번역 진행 중</translation>
     </message>
     <message>
         <source>작업이 실패했습니다.</source>
-        <translation type="unfinished"></translation>
+        <translation>작업이 실패했습니다.</translation>
     </message>
     <message>
         <source>자동번역이 완료되었습니다.</source>
@@ -136,31 +136,31 @@ Choose either a project file or image/document/archive files.</source>
     </message>
     <message>
         <source>Gemma와 OCR 준비를 확인하는 중...</source>
-        <translation type="unfinished"></translation>
+        <translation>Gemma와 OCR 준비를 확인하는 중...</translation>
     </message>
     <message>
         <source>취소 중...</source>
-        <translation type="unfinished"></translation>
+        <translation>취소 중...</translation>
     </message>
     <message>
         <source>PaddleOCR VL Settings</source>
-        <translation type="unfinished">PaddleOCR VL 설정</translation>
+        <translation>PaddleOCR VL 설정</translation>
     </message>
     <message>
         <source>HunyuanOCR Settings</source>
-        <translation type="unfinished">HunyuanOCR 설정</translation>
+        <translation>HunyuanOCR 설정</translation>
     </message>
     <message>
         <source>Gemma Local Server Settings</source>
-        <translation type="unfinished">Gemma 로컬 서버 설정</translation>
+        <translation>Gemma 로컬 서버 설정</translation>
     </message>
     <message>
         <source>작업이 취소되었습니다.</source>
-        <translation type="unfinished"></translation>
+        <translation>작업이 취소되었습니다.</translation>
     </message>
     <message>
         <source>자동번역 준비 또는 실행에 실패했습니다.</source>
-        <translation type="unfinished"></translation>
+        <translation>자동번역 준비 또는 실행에 실패했습니다.</translation>
     </message>
     <message>
         <source>Error</source>
@@ -240,11 +240,11 @@ Duplicates:
     </message>
     <message>
         <source>One-Page Auto</source>
-        <translation type="unfinished">한 페이지만 자동번역</translation>
+        <translation>한 페이지만 자동번역</translation>
     </message>
     <message>
         <source>Translate All</source>
-        <translation type="unfinished">모두 번역</translation>
+        <translation>모두 번역</translation>
     </message>
     <message>
         <source>No failed pages from the latest batch are available to retry.</source>
@@ -256,7 +256,7 @@ Duplicates:
     </message>
     <message>
         <source>자동번역이 완료되었습니다.</source>
-        <translation type="unfinished">자동번역이 완료되었습니다.</translation>
+        <translation>자동번역이 완료되었습니다.</translation>
     </message>
     <message>
         <source>Downloading model file: {filename}</source>
@@ -267,32 +267,22 @@ Duplicates:
         <translation>저장되지 않은 변경 사항</translation>
     </message>
     <message>
-        <source>Fast</source>
-        <translation>빠름</translation>
-    </message>
-    <message>
-        <source>Balanced</source>
-        <translation>균형</translation>
-    </message>
-    <message>
-        <source>Small</source>
-        <translation>작음</translation>
-    </message>
-    <message>
-        <source>{name} (Estimated: {ratio}, {time})</source>
-        <translation>{name} (예상: {ratio}, {time})</translation>
-    </message>
-    <message>
-        <source>Estimated output: {ratio}, {time} across {pages} pages.</source>
-        <translation>예상 출력: {pages}개 페이지 기준 {ratio}, {time}</translation>
-    </message>
-    <message>
-        <source>Current project estimate: {ratio}, {time} across {pages} pages.</source>
-        <translation>현재 프로젝트 예상치: {pages}개 페이지 기준 {ratio}, {time}</translation>
-    </message>
-    <message>
         <source>Load pages to see automatic output estimates.</source>
         <translation>자동 출력 예상치를 보려면 페이지를 불러오세요.</translation>
+    </message>
+    <message>
+        <source>Archive estimates (PNG / JPG / WEBP):</source>
+        <translation>아카이브 예상치 (PNG / JPG / WEBP):</translation>
+    </message>
+    <message>
+        <source>{name}: {size}, {time}, {ratio}</source>
+        <translation>{name}: {size}, {time}, {ratio}</translation>
+    </message>
+    <message>
+        <source>Images are saved individually at maximum quality.
+Translated and cleaned images are exported.</source>
+        <translation>이미지는 항상 최고 품질로 개별 저장됩니다.
+번역된 이미지와 cleaned 이미지가 함께 출력됩니다.</translation>
     </message>
     <message>
         <source>Project switching is unavailable while automatic processing is running.
@@ -409,7 +399,7 @@ Cancel the current run or wait for it to finish first.</source>
     </message>
     <message>
         <source>Hebrew</source>
-        <translation type="unfinished"></translation>
+        <translation>히브리어</translation>
     </message>
     <message>
         <source>Czech</source>
@@ -417,7 +407,7 @@ Cancel the current run or wait for it to finish first.</source>
     </message>
     <message>
         <source>Croatian</source>
-        <translation type="unfinished"></translation>
+        <translation>크로아티아어</translation>
     </message>
     <message>
         <source>Persian</source>
@@ -479,11 +469,11 @@ Cancel the current run or wait for it to finish first.</source>
     </message>
     <message>
         <source>Translate</source>
-        <translation type="unfinished">번역</translation>
+        <translation>번역</translation>
     </message>
     <message>
         <source>Region</source>
-        <translation>OCR</translation>
+        <translation>지역</translation>
     </message>
     <message>
         <source>Model</source>
@@ -518,78 +508,78 @@ Use Custom Local Server(Gemma) with the included Gemma Docker setup.</source>
     </message>
     <message>
         <source>Rename or move the current project file</source>
-        <translation type="unfinished"></translation>
+        <translation>현재 프로젝트 파일의 이름을 바꾸거나 위치를 옮깁니다</translation>
     </message>
 </context>
 <context>
     <name>ExportChaptersDialog</name>
     <message>
         <source>Partition Export</source>
-        <translation type="unfinished"></translation>
+        <translation>분할 내보내기</translation>
     </message>
     <message>
         <source>Pages with the same chapter name are exported together. Edit the Chapter column to merge or split chapters.</source>
-        <translation type="unfinished"></translation>
+        <translation>같은 챕터 이름을 가진 페이지는 함께 내보냅니다. 챕터 열을 수정해 챕터를 합치거나 나눌 수 있습니다.</translation>
     </message>
     <message>
         <source>Output folder</source>
-        <translation type="unfinished"></translation>
+        <translation>출력 폴더</translation>
     </message>
     <message>
         <source>Browse</source>
-        <translation type="unfinished">먹다</translation>
+        <translation>찾아보기</translation>
     </message>
     <message>
         <source>Selected pages</source>
-        <translation type="unfinished"></translation>
+        <translation>선택한 페이지</translation>
     </message>
     <message>
         <source>New chapter name</source>
-        <translation type="unfinished"></translation>
+        <translation>새 챕터 이름</translation>
     </message>
     <message>
         <source>Apply</source>
-        <translation type="unfinished"></translation>
+        <translation>적용</translation>
     </message>
     <message>
         <source>Page</source>
-        <translation type="unfinished"></translation>
+        <translation>페이지</translation>
     </message>
     <message>
         <source>File</source>
-        <translation type="unfinished">파일</translation>
+        <translation>파일</translation>
     </message>
     <message>
         <source>Chapter</source>
-        <translation type="unfinished"></translation>
+        <translation>챕터</translation>
     </message>
     <message>
         <source>Export targets</source>
-        <translation type="unfinished"></translation>
+        <translation>내보내기 대상</translation>
     </message>
     <message>
         <source>Reset Chapters</source>
-        <translation type="unfinished"></translation>
+        <translation>챕터 초기화</translation>
     </message>
     <message>
         <source>Select Export Folder</source>
-        <translation type="unfinished"></translation>
+        <translation>내보내기 폴더 선택</translation>
     </message>
     <message>
         <source>Output Folder Required</source>
-        <translation type="unfinished"></translation>
+        <translation>출력 폴더 필요</translation>
     </message>
     <message>
         <source>Choose an existing output folder.</source>
-        <translation type="unfinished"></translation>
+        <translation>기존 출력 폴더를 선택하세요.</translation>
     </message>
     <message>
         <source>Chapter Name Required</source>
-        <translation type="unfinished"></translation>
+        <translation>챕터 이름 필요</translation>
     </message>
     <message>
         <source>Each page must belong to a non-empty chapter.</source>
-        <translation type="unfinished"></translation>
+        <translation>각 페이지는 비어 있지 않은 챕터에 속해야 합니다.</translation>
     </message>
 </context>
 <context>
@@ -616,73 +606,77 @@ Use Custom Local Server(Gemma) with the included Gemma Docker setup.</source>
     </message>
     <message>
         <source>Export Detector Overlay (Debug)</source>
-        <translation type="unfinished"></translation>
+        <translation>탐지기 오버레이 내보내기 (디버그)</translation>
     </message>
     <message>
         <source>Export Raw Inpaint Mask (Debug)</source>
-        <translation type="unfinished"></translation>
+        <translation>원시 인페인트 마스크 내보내기 (디버그)</translation>
     </message>
     <message>
         <source>Export Mask Overlay (Debug)</source>
-        <translation type="unfinished"></translation>
+        <translation>마스크 오버레이 내보내기 (디버그)</translation>
     </message>
     <message>
         <source>Export Cleanup Mask Delta (Debug)</source>
-        <translation type="unfinished"></translation>
+        <translation>클린업 마스크 델타 내보내기 (디버그)</translation>
     </message>
     <message>
         <source>Export Debug Metadata (Debug)</source>
-        <translation type="unfinished"></translation>
+        <translation>디버그 메타데이터 내보내기 (디버그)</translation>
     </message>
     <message>
-        <source>Automatic Output Image Format</source>
-        <translation>자동 출력 이미지 형식</translation>
+        <source>Automatic Output</source>
+        <translation>자동 출력</translation>
     </message>
     <message>
-        <source>These defaults control how automatic translated and cleaned images are written.
-Project-specific quick settings can override the format and preset for the current project.</source>
-        <translation>이 기본값은 자동 번역 결과 이미지와 cleaned 이미지를 저장하는 방식을 제어합니다.
-프로젝트별 빠른 설정으로 현재 프로젝트의 형식과 프리셋을 덮어쓸 수 있습니다.</translation>
+        <source>These defaults control automatic output after batch translation.
+Project-specific quick settings can override them for the current project.</source>
+        <translation>이 기본값은 배치 번역 후 자동 출력 방식을 제어합니다.
+프로젝트별 빠른 설정으로 현재 프로젝트에 한해 덮어쓸 수 있습니다.</translation>
     </message>
     <message>
-        <source>Default format:</source>
-        <translation>기본 형식:</translation>
+        <source>Default output target:</source>
+        <translation>기본 출력 대상:</translation>
+    </message>
+    <message>
+        <source>Individual images</source>
+        <translation>개별 이미지</translation>
+    </message>
+    <message>
+        <source>Single archive</source>
+        <translation>단일 압축 파일</translation>
+    </message>
+    <message>
+        <source>Default image format:</source>
+        <translation>기본 이미지 형식:</translation>
+    </message>
+    <message>
+        <source>Default archive format:</source>
+        <translation>기본 아카이브 형식:</translation>
+    </message>
+    <message>
+        <source>Default archive image format:</source>
+        <translation>기본 아카이브 내부 이미지 형식:</translation>
+    </message>
+    <message>
+        <source>Default archive compression level:</source>
+        <translation>기본 아카이브 압축 수준:</translation>
+    </message>
+    <message>
+        <source>PNG/JPG/WEBP images are saved at maximum quality.</source>
+        <translation>PNG/JPG/WEBP 이미지는 항상 최고 품질로 저장됩니다.</translation>
+    </message>
+    <message>
+        <source>Archive compression only affects the ZIP/CBZ container, not image quality.</source>
+        <translation>아카이브 압축은 ZIP/CBZ 컨테이너에만 적용되며 이미지 품질에는 영향을 주지 않습니다.</translation>
+    </message>
+    <message>
+        <source>Load pages to see automatic output estimates.</source>
+        <translation>자동 출력 예상치를 보려면 페이지를 불러오세요.</translation>
     </message>
     <message>
         <source>Same as source</source>
         <translation>원본과 동일</translation>
-    </message>
-    <message>
-        <source>Default preset:</source>
-        <translation>기본 프리셋:</translation>
-    </message>
-    <message>
-        <source>Fast</source>
-        <translation>빠름</translation>
-    </message>
-    <message>
-        <source>Balanced</source>
-        <translation>균형</translation>
-    </message>
-    <message>
-        <source>Small</source>
-        <translation>작음</translation>
-    </message>
-    <message>
-        <source>PNG compression level:</source>
-        <translation>PNG 압축 수준:</translation>
-    </message>
-    <message>
-        <source>JPG quality:</source>
-        <translation>JPG 품질:</translation>
-    </message>
-    <message>
-        <source>WEBP quality:</source>
-        <translation>WEBP 품질:</translation>
-    </message>
-    <message>
-        <source>Current project estimate: Calculating...</source>
-        <translation>현재 프로젝트 예상치: 계산 중...</translation>
     </message>
 </context>
 <context>
@@ -698,7 +692,12 @@ Project-specific quick settings can override the format and preset for the curre
 3. Set Model to the exact GGUF filename in `testmodel/` (recommended: `gemma-4-26B-IQ4_NL.gguf`).
 Automatic translation reuses an existing Gemma runtime first and only runs `docker compose up -d` when needed.
 If responses are truncated, lower Chunk Size or Max Completion Tokens before recreating the container.</source>
-        <translation type="unfinished"></translation>
+        <translation>Comic Translate는 번역에 로컬 Gemma Docker 서버를 재사용할 수 있습니다.
+1. 기존 Gemma 컨테이너가 이미 정상 상태라면 그대로 실행된 상태를 유지하세요.
+2. 설정 &gt; 인증 정보에서 엔드포인트 URL을 `http://127.0.0.1:18080/v1`로 설정하세요.
+3. 모델은 `testmodel/` 안의 정확한 GGUF 파일명으로 지정하세요. (권장: `gemma-4-26B-IQ4_NL.gguf`)
+자동 번역은 기존 Gemma 런타임을 먼저 재사용하고, 필요할 때만 `docker compose up -d`를 실행합니다.
+응답이 잘리면 컨테이너를 다시 만들기 전에 청크 크기나 최대 완료 토큰 수를 낮추세요.</translation>
     </message>
     <message>
         <source>Gemma Translation Tuning</source>
@@ -718,23 +717,23 @@ If responses are truncated, lower Chunk Size or Max Completion Tokens before rec
     </message>
     <message>
         <source>Advanced Sampler Settings</source>
-        <translation type="unfinished"></translation>
+        <translation>고급 샘플러 설정</translation>
     </message>
     <message>
         <source>Temperature</source>
-        <translation type="unfinished"></translation>
+        <translation>온도</translation>
     </message>
     <message>
         <source>Top K</source>
-        <translation type="unfinished"></translation>
+        <translation>Top K</translation>
     </message>
     <message>
         <source>Top P</source>
-        <translation type="unfinished"></translation>
+        <translation>Top P</translation>
     </message>
     <message>
         <source>Min P</source>
-        <translation type="unfinished"></translation>
+        <translation>Min P</translation>
     </message>
     <message>
         <source>Raw Response Log</source>
@@ -747,7 +746,12 @@ If responses are truncated, lower Chunk Size or Max Completion Tokens before rec
 - Request Timeout: 180 seconds
 - Temperature: 0.7
 - Top K / Top P / Min P: 64 / 0.95 / 0.0</source>
-        <translation type="unfinished"></translation>
+        <translation>기본 제공 Gemma 런타임의 승격 기본값:
+- 청크 크기: 6
+- 최대 완료 토큰: 512
+- 요청 타임아웃: 180초
+- 온도: 0.7
+- Top K / Top P / Min P: 64 / 0.95 / 0.0</translation>
     </message>
 </context>
 <context>
@@ -761,11 +765,14 @@ If responses are truncated, lower Chunk Size or Max Completion Tokens before rec
 This OCR engine sends cropped text regions to the OpenAI-compatible /chat/completions endpoint.
 Keep the default localhost URL if you want Comic Translate to start the bundled Docker runtime on demand.
 Start the server with both the HunyuanOCR GGUF model and the matching mmproj file.</source>
-        <translation type="unfinished"></translation>
+        <translation>Comic Translate를 로컬 HunyuanOCR llama.cpp 서버에 연결합니다.
+이 OCR 엔진은 잘라낸 텍스트 영역을 OpenAI 호환 /chat/completions 엔드포인트로 보냅니다.
+Comic Translate가 필요할 때 기본 제공 Docker 런타임을 시작하게 하려면 기본 localhost URL을 유지하세요.
+서버는 HunyuanOCR GGUF 모델과 그에 맞는 mmproj 파일을 함께 사용해 시작하세요.</translation>
     </message>
     <message>
         <source>Server URL</source>
-        <translation type="unfinished">서버 URL</translation>
+        <translation>서버 URL</translation>
     </message>
     <message>
         <source>Hunyuan OCR Tuning</source>
@@ -773,19 +780,19 @@ Start the server with both the HunyuanOCR GGUF model and the matching mmproj fil
     </message>
     <message>
         <source>Max Completion Tokens</source>
-        <translation type="unfinished">최대 완료 토큰</translation>
+        <translation>최대 완료 토큰</translation>
     </message>
     <message>
         <source>Parallel Workers</source>
-        <translation type="unfinished">병렬 작업 수</translation>
+        <translation>병렬 작업 수</translation>
     </message>
     <message>
         <source>Request Timeout (sec)</source>
-        <translation type="unfinished">요청 타임아웃(초)</translation>
+        <translation>요청 타임아웃(초)</translation>
     </message>
     <message>
         <source>Raw Response Log</source>
-        <translation type="unfinished">원시 응답 로그</translation>
+        <translation>원시 응답 로그</translation>
     </message>
     <message>
         <source>Recommended starting values for the included HunyuanOCR Docker setup:
@@ -813,85 +820,85 @@ Start the server with both the HunyuanOCR GGUF model and the matching mmproj fil
     <name>MBigView</name>
     <message>
         <source>No Data</source>
-        <translation>모델</translation>
+        <translation>데이터 없음</translation>
     </message>
 </context>
 <context>
     <name>MClickBrowserFilePushButton</name>
     <message>
         <source>Click to browser file</source>
-        <translation type="unfinished"></translation>
+        <translation>클릭하여 파일을 선택하세요</translation>
     </message>
 </context>
 <context>
     <name>MClickBrowserFileToolButton</name>
     <message>
         <source>Click to browser file</source>
-        <translation type="unfinished"></translation>
+        <translation>클릭하여 파일을 선택하세요</translation>
     </message>
 </context>
 <context>
     <name>MClickBrowserFolderPushButton</name>
     <message>
         <source>Click to browser folder</source>
-        <translation type="unfinished"></translation>
+        <translation>클릭하여 폴더를 선택하세요</translation>
     </message>
 </context>
 <context>
     <name>MClickBrowserFolderToolButton</name>
     <message>
         <source>Click to browser folder</source>
-        <translation type="unfinished"></translation>
+        <translation>클릭하여 폴더를 선택하세요</translation>
     </message>
 </context>
 <context>
     <name>MClickSaveFileToolButton</name>
     <message>
         <source>Click to save file</source>
-        <translation type="unfinished"></translation>
+        <translation>클릭하여 저장할 파일을 지정하세요</translation>
     </message>
 </context>
 <context>
     <name>MColorChart</name>
     <message>
         <source>Click to Copy Color</source>
-        <translation type="unfinished"></translation>
+        <translation>클릭하여 색상을 복사하세요</translation>
     </message>
 </context>
 <context>
     <name>MComboBox</name>
     <message>
         <source>Please Select</source>
-        <translation type="unfinished"></translation>
+        <translation>선택하세요</translation>
     </message>
 </context>
 <context>
     <name>MDragFileButton</name>
     <message>
         <source>Click to browser file</source>
-        <translation type="unfinished"></translation>
+        <translation>클릭하여 파일을 선택하세요</translation>
     </message>
 </context>
 <context>
     <name>MDragFolderButton</name>
     <message>
         <source>Click or drag folder here</source>
-        <translation type="unfinished"></translation>
+        <translation>클릭하거나 여기에 폴더를 드래그하세요</translation>
     </message>
     <message>
         <source>Click to browser folder or drag folder here</source>
-        <translation type="unfinished"></translation>
+        <translation>클릭하여 폴더를 선택하거나 여기에 폴더를 드래그하세요</translation>
     </message>
 </context>
 <context>
     <name>MFontComboBox</name>
     <message>
         <source>Please Select</source>
-        <translation type="unfinished"></translation>
+        <translation>선택하세요</translation>
     </message>
     <message>
         <source>Font</source>
-        <translation type="unfinished">글꼴</translation>
+        <translation>글꼴</translation>
     </message>
 </context>
 <context>
@@ -902,63 +909,63 @@ Start the server with both the HunyuanOCR GGUF model and the matching mmproj fil
     </message>
     <message>
         <source>Select None</source>
-        <translation type="unfinished"></translation>
+        <translation>선택 해제</translation>
     </message>
     <message>
         <source>Select Invert</source>
-        <translation type="unfinished"></translation>
+        <translation>선택 반전</translation>
     </message>
     <message>
         <source>Fit Size</source>
-        <translation type="unfinished"></translation>
+        <translation>크기에 맞춤</translation>
     </message>
 </context>
 <context>
     <name>MLineEdit</name>
     <message>
         <source>Enter key word to search...</source>
-        <translation type="unfinished"></translation>
+        <translation>검색어를 입력하세요...</translation>
     </message>
     <message>
         <source>Error Detail Information</source>
-        <translation type="unfinished"></translation>
+        <translation>오류 상세 정보</translation>
     </message>
     <message>
         <source>Error information will be here...</source>
-        <translation type="unfinished"></translation>
+        <translation>오류 정보가 여기에 표시됩니다...</translation>
     </message>
     <message>
         <source>Click button to browser files</source>
-        <translation type="unfinished"></translation>
+        <translation>버튼을 눌러 파일을 선택하세요</translation>
     </message>
     <message>
         <source>Click button to set save file</source>
-        <translation type="unfinished"></translation>
+        <translation>버튼을 눌러 저장할 파일을 지정하세요</translation>
     </message>
     <message>
         <source>Click button to browser folder</source>
-        <translation type="unfinished"></translation>
+        <translation>버튼을 눌러 폴더를 선택하세요</translation>
     </message>
 </context>
 <context>
     <name>MListView</name>
     <message>
         <source>No Data</source>
-        <translation type="unfinished"></translation>
+        <translation>데이터 없음</translation>
     </message>
 </context>
 <context>
     <name>MTableView</name>
     <message>
         <source>No Data</source>
-        <translation type="unfinished"></translation>
+        <translation>데이터 없음</translation>
     </message>
 </context>
 <context>
     <name>MTreeView</name>
     <message>
         <source>No Data</source>
-        <translation type="unfinished"></translation>
+        <translation>데이터 없음</translation>
     </message>
 </context>
 <context>
@@ -1052,47 +1059,48 @@ Please select a different tool in Settings.</source>
     <message>
         <source>Unable to prepare the local {service} runtime.
 Check Settings &gt; {settings_page} and make sure Docker is available.</source>
-        <translation type="unfinished"></translation>
+        <translation>로컬 {service} 런타임을 준비할 수 없습니다.
+설정 &gt; {settings_page}에서 Docker를 사용할 수 있는지 확인하세요.</translation>
     </message>
     <message>
         <source>Confirm Automatic Processing</source>
-        <translation type="unfinished"></translation>
+        <translation>자동 처리 확인</translation>
     </message>
     <message>
         <source>Review the automatic processing settings before starting.</source>
-        <translation type="unfinished"></translation>
+        <translation>시작하기 전에 자동 처리 설정을 확인하세요.</translation>
     </message>
     <message>
         <source>Run: {run_label}</source>
-        <translation type="unfinished"></translation>
+        <translation>실행: {run_label}</translation>
     </message>
     <message>
         <source>Pages: {page_count}</source>
-        <translation type="unfinished"></translation>
+        <translation>페이지: {page_count}</translation>
     </message>
     <message>
         <source>Source Language: {source_lang}</source>
-        <translation type="unfinished"></translation>
+        <translation>원본 언어: {source_lang}</translation>
     </message>
     <message>
         <source>Target Language: {target_lang}</source>
-        <translation type="unfinished"></translation>
+        <translation>대상 언어: {target_lang}</translation>
     </message>
     <message>
         <source>Text Recognition Mode: {ocr_mode}</source>
-        <translation type="unfinished"></translation>
+        <translation>텍스트 인식 모드: {ocr_mode}</translation>
     </message>
     <message>
         <source>Resolved Text Recognition: {ocr_engine}</source>
-        <translation type="unfinished"></translation>
+        <translation>최종 텍스트 인식 엔진: {ocr_engine}</translation>
     </message>
     <message>
         <source>Start</source>
-        <translation type="unfinished"></translation>
+        <translation>시작</translation>
     </message>
     <message>
         <source>Cancel</source>
-        <translation type="unfinished">취소</translation>
+        <translation>취소</translation>
     </message>
     <message>
         <source>{0} image(s) were skipped in this batch.
@@ -1140,13 +1148,15 @@ Please try a different tool.</source>
     </message>
     <message>
         <source>Please fill in the required credential fields.</source>
-        <translation type="unfinished"></translation>
+        <translation>필수 인증 정보 항목을 입력하세요.</translation>
     </message>
     <message>
         <source>Missing credentials for {provider}.
 Configure them in Settings &gt; Credentials.
 {details}</source>
-        <translation type="unfinished"></translation>
+        <translation>{provider}의 인증 정보가 없습니다.
+설정 &gt; 인증 정보에서 설정하세요.
+{details}</translation>
     </message>
     <message>
         <source>Please fill in the required settings fields.</source>
@@ -1182,15 +1192,15 @@ Please check your internet connection.</source>
     </message>
     <message>
         <source>Missing credentials for {provider}</source>
-        <translation type="unfinished"></translation>
+        <translation>{provider} 인증 정보 누락</translation>
     </message>
     <message>
         <source>Missing OCR tool</source>
-        <translation type="unfinished"></translation>
+        <translation>OCR 도구 누락</translation>
     </message>
     <message>
         <source>No Text Recognition model selected.</source>
-        <translation type="unfinished"></translation>
+        <translation>텍스트 인식 모델이 선택되지 않았습니다.</translation>
     </message>
     <message>
         <source>Text Recognition model</source>
@@ -1198,19 +1208,19 @@ Please check your internet connection.</source>
     </message>
     <message>
         <source>{service} settings missing</source>
-        <translation type="unfinished"></translation>
+        <translation>{service} 설정 누락</translation>
     </message>
     <message>
         <source>{service} runtime setup failed</source>
-        <translation type="unfinished"></translation>
+        <translation>{service} 런타임 준비 실패</translation>
     </message>
     <message>
         <source>Missing translator</source>
-        <translation type="unfinished"></translation>
+        <translation>번역기 누락</translation>
     </message>
     <message>
         <source>No Translator selected.</source>
-        <translation type="unfinished"></translation>
+        <translation>번역기가 선택되지 않았습니다.</translation>
     </message>
     <message>
         <source>Translator</source>
@@ -1226,48 +1236,49 @@ Please check your internet connection.</source>
     </message>
     <message>
         <source>No font selected</source>
-        <translation type="unfinished"></translation>
+        <translation>글꼴이 선택되지 않았습니다.</translation>
     </message>
     <message>
         <source>Go to Settings &gt; Text Rendering &gt; Font to select or import one.</source>
-        <translation type="unfinished"></translation>
+        <translation>설정 &gt; 텍스트 렌더링 &gt; 글꼴에서 선택하거나 가져오세요.</translation>
     </message>
     <message>
         <source>OCR result is empty for this block.</source>
-        <translation type="unfinished"></translation>
+        <translation>이 블록의 OCR 결과가 비어 있습니다.</translation>
     </message>
     <message>
         <source>Initial crop is empty.</source>
-        <translation type="unfinished"></translation>
+        <translation>초기 크롭 영역이 비어 있습니다.</translation>
     </message>
     <message>
         <source>OCR returned empty text on the initial crop.</source>
-        <translation type="unfinished"></translation>
+        <translation>초기 크롭에서 OCR이 빈 텍스트를 반환했습니다.</translation>
     </message>
     <message>
         <source>Retry crop is empty after expansion.</source>
-        <translation type="unfinished"></translation>
+        <translation>확장 후 재시도 크롭 영역이 비어 있습니다.</translation>
     </message>
     <message>
         <source>Retry also failed after contrast preprocessing.</source>
-        <translation type="unfinished"></translation>
+        <translation>명암 전처리 후 재시도도 실패했습니다.</translation>
     </message>
     <message>
         <source>This PSD was exported by this application, but it now contains Photoshop features that are not fully supported on import. It may not appear exactly as it did in Photoshop.</source>
-        <translation type="unfinished"></translation>
+        <translation>이 PSD는 이 프로그램에서 내보낸 것이지만, 현재 가져오기에서 완전히 지원되지 않는 Photoshop 기능을 포함하고 있습니다. Photoshop에서 보이던 모습과 정확히 같지 않을 수 있습니다.</translation>
     </message>
     <message>
         <source>Imported a PSD that was not exported by this application. Visible image layers were flattened, and unsupported Photoshop features may not match exactly.</source>
-        <translation type="unfinished"></translation>
+        <translation>이 프로그램에서 내보내지 않은 PSD를 가져왔습니다. 보이는 이미지 레이어는 평탄화되었고, 지원되지 않는 Photoshop 기능은 정확히 일치하지 않을 수 있습니다.</translation>
     </message>
     <message>
         <source>PSD import/export requires the optional Python package &apos;PhotoshopAPI&apos;.
 Install it to use PSD features.</source>
-        <translation type="unfinished"></translation>
+        <translation>PSD 가져오기/내보내기에는 선택적 Python 패키지 &apos;PhotoshopAPI&apos;가 필요합니다.
+PSD 기능을 사용하려면 설치하세요.</translation>
     </message>
     <message>
         <source>PSD Feature Unavailable</source>
-        <translation type="unfinished"></translation>
+        <translation>PSD 기능을 사용할 수 없음</translation>
     </message>
 </context>
 <context>
@@ -1302,7 +1313,7 @@ Install it to use PSD features.</source>
     </message>
     <message>
         <source>PSD</source>
-        <translation type="unfinished"></translation>
+        <translation>PSD</translation>
     </message>
     <message>
         <source>Save Currently Loaded Image</source>
@@ -1391,7 +1402,10 @@ Install it to use PSD features.</source>
 This OCR engine sends cropped text regions to the /layout-parsing endpoint.
 Keep the default localhost URL if you want Comic Translate to start the bundled Docker runtime on demand.
 Leave markdown or visualization options disabled unless you need debugging.</source>
-        <translation type="unfinished"></translation>
+        <translation>Comic Translate를 로컬 PaddleOCR VL Docker 서비스에 연결합니다.
+이 OCR 엔진은 잘라낸 텍스트 영역을 /layout-parsing 엔드포인트로 보냅니다.
+Comic Translate가 필요할 때 기본 제공 Docker 런타임을 시작하게 하려면 기본 localhost URL을 유지하세요.
+디버깅이 필요하지 않다면 markdown 또는 시각화 옵션은 꺼 두세요.</translation>
     </message>
     <message>
         <source>Server URL</source>
@@ -1701,11 +1715,11 @@ This folder is separate from Auto-Recover snapshots.</source>
     </message>
     <message>
         <source>Browse</source>
-        <translation>먹다</translation>
+        <translation>찾아보기</translation>
     </message>
     <message>
         <source>Reset</source>
-        <translation>다시 놓기</translation>
+        <translation>초기화</translation>
     </message>
     <message>
         <source>Choose Auto-Save Folder</source>
@@ -1946,11 +1960,11 @@ Restart now?</source>
     </message>
     <message>
         <source>PaddleOCR VL</source>
-        <translation type="unfinished"></translation>
+        <translation>PaddleOCR VL</translation>
     </message>
     <message>
         <source>HunyuanOCR</source>
-        <translation type="unfinished"></translation>
+        <translation>HunyuanOCR</translation>
     </message>
     <message>
         <source>Original</source>
@@ -2006,19 +2020,19 @@ Restart now?</source>
     </message>
     <message>
         <source>Claude-4.6-Sonnet</source>
-        <translation type="unfinished"></translation>
+        <translation>Claude-4.6-Sonnet</translation>
     </message>
     <message>
         <source>Default (existing auto: MangaOCR / PPOCR / Pororo...)</source>
-        <translation type="unfinished"></translation>
+        <translation>기본값 (기존 자동: MangaOCR / PPOCR / Pororo...)</translation>
     </message>
     <message>
         <source>Optimal (HunyuanOCR / PaddleOCR VL)</source>
-        <translation type="unfinished"></translation>
+        <translation>최적값 (HunyuanOCR / PaddleOCR VL)</translation>
     </message>
     <message>
         <source>RT-DETR-v2 + Legacy BBox Rescue + Source LaMa</source>
-        <translation type="unfinished"></translation>
+        <translation>RT-DETR-v2 + Legacy BBox Rescue + Source LaMa</translation>
     </message>
     <message>
         <source>PaddleOCR VL Settings</source>
@@ -2050,7 +2064,7 @@ Restart now?</source>
     </message>
     <message>
         <source>Shortcuts</source>
-        <translation type="unfinished"></translation>
+        <translation>단축키</translation>
     </message>
     <message>
         <source>Advanced</source>
@@ -2121,54 +2135,54 @@ Restart now?</source>
     <name>ShortcutDefinitions</name>
     <message>
         <source>Undo</source>
-        <translation type="unfinished">실행 취소</translation>
+        <translation>실행 취소</translation>
     </message>
     <message>
         <source>Undo the last editing action.</source>
-        <translation type="unfinished"></translation>
+        <translation>마지막 편집 작업을 실행 취소합니다.</translation>
     </message>
     <message>
         <source>Redo</source>
-        <translation type="unfinished">다시 실행</translation>
+        <translation>다시 실행</translation>
     </message>
     <message>
         <source>Redo the previously undone action.</source>
-        <translation type="unfinished"></translation>
+        <translation>방금 실행 취소한 작업을 다시 실행합니다.</translation>
     </message>
     <message>
         <source>Delete Selected Box</source>
-        <translation type="unfinished">선택한 상자 삭제</translation>
+        <translation>선택한 상자 삭제</translation>
     </message>
     <message>
         <source>Delete the currently selected text box.</source>
-        <translation type="unfinished"></translation>
+        <translation>현재 선택된 텍스트 상자를 삭제합니다.</translation>
     </message>
     <message>
         <source>Restore Text Blocks</source>
-        <translation type="unfinished"></translation>
+        <translation>텍스트 블록 복원</translation>
     </message>
     <message>
         <source>Draw saved text blocks back onto the image for editing.</source>
-        <translation type="unfinished"></translation>
+        <translation>저장된 텍스트 블록을 편집할 수 있도록 이미지 위에 다시 그립니다.</translation>
     </message>
 </context>
 <context>
     <name>ShortcutsPage</name>
     <message>
         <source>Keyboard Shortcuts</source>
-        <translation type="unfinished"></translation>
+        <translation>키보드 단축키</translation>
     </message>
     <message>
         <source>Assign shortcuts for common editing actions. Leave a field empty to disable that shortcut.</source>
-        <translation type="unfinished"></translation>
+        <translation>자주 사용하는 편집 동작에 단축키를 지정합니다. 비워 두면 해당 단축키가 비활성화됩니다.</translation>
     </message>
     <message>
         <source>Reset</source>
-        <translation type="unfinished">다시 놓기</translation>
+        <translation>초기화</translation>
     </message>
     <message>
         <source>Reset All Shortcuts</source>
-        <translation type="unfinished"></translation>
+        <translation>모든 단축키 초기화</translation>
     </message>
 </context>
 <context>
@@ -2318,7 +2332,7 @@ Adjust the size used by add, erase, exclude, and restore brushes.</source>
     </message>
     <message>
         <source>Custom Local Server(Gemma)</source>
-        <translation type="unfinished">사용자 지정 로컬 서버(Gemma)</translation>
+        <translation>사용자 지정 로컬 서버(Gemma)</translation>
     </message>
     <message>
         <source>Text Recognition</source>
@@ -2326,7 +2340,7 @@ Adjust the size used by add, erase, exclude, and restore brushes.</source>
     </message>
     <message>
         <source>PaddleOCR VL</source>
-        <translation type="unfinished"></translation>
+        <translation>PaddleOCR VL</translation>
     </message>
     <message>
         <source>Text Detector</source>
@@ -2358,11 +2372,11 @@ Adjust the size used by add, erase, exclude, and restore brushes.</source>
     </message>
     <message>
         <source>Automatic Runtime</source>
-        <translation type="unfinished"></translation>
+        <translation>자동 런타임</translation>
     </message>
     <message>
         <source>Automatic mode is fixed to RT-DETR-v2 detection, legacy bbox rescue masking, and source block-wise LaMa cleaning.</source>
-        <translation type="unfinished"></translation>
+        <translation>자동 모드는 RT-DETR-v2 탐지, 레거시 bbox rescue 마스킹, source block-wise LaMa 클리닝으로 고정됩니다.</translation>
     </message>
     <message>
         <source>precision</source>
@@ -2585,6 +2599,50 @@ then do inpainting on the resized image.</source>
         <translation>스타일</translation>
     </message>
     <message>
+        <source>When enabled, this project inherits the automatic output settings from Settings.</source>
+        <translation>켜면 이 프로젝트는 설정의 자동 출력 값을 그대로 상속합니다.</translation>
+    </message>
+    <message>
+        <source>Output target</source>
+        <translation>출력 대상</translation>
+    </message>
+    <message>
+        <source>Individual images</source>
+        <translation>개별 이미지</translation>
+    </message>
+    <message>
+        <source>Single archive</source>
+        <translation>단일 압축 파일</translation>
+    </message>
+    <message>
+        <source>Image format</source>
+        <translation>이미지 형식</translation>
+    </message>
+    <message>
+        <source>Archive format</source>
+        <translation>아카이브 형식</translation>
+    </message>
+    <message>
+        <source>Archive image format</source>
+        <translation>아카이브 내부 이미지 형식</translation>
+    </message>
+    <message>
+        <source>Compression level</source>
+        <translation>압축 수준</translation>
+    </message>
+    <message>
+        <source>PNG/JPG/WEBP images are saved at maximum quality.</source>
+        <translation>PNG/JPG/WEBP 이미지는 항상 최고 품질로 저장됩니다.</translation>
+    </message>
+    <message>
+        <source>Archive compression only affects the ZIP/CBZ container, not image quality.</source>
+        <translation>아카이브 압축은 ZIP/CBZ 컨테이너에만 적용되며 이미지 품질에는 영향을 주지 않습니다.</translation>
+    </message>
+    <message>
+        <source>Load pages to see automatic output estimates.</source>
+        <translation>자동 출력 예상치를 보려면 페이지를 불러오세요.</translation>
+    </message>
+    <message>
         <source>Top</source>
         <translation>상단</translation>
     </message>
@@ -2763,36 +2821,8 @@ back on the Image (for further editing)</source>
         <translation>전역 출력 설정 사용</translation>
     </message>
     <message>
-        <source>When enabled, this project inherits the automatic output format and preset from Settings.</source>
-        <translation>이 옵션을 켜면 현재 프로젝트는 설정의 자동 출력 형식과 프리셋을 상속합니다.</translation>
-    </message>
-    <message>
-        <source>Format</source>
-        <translation>형식</translation>
-    </message>
-    <message>
         <source>Same as source</source>
         <translation>원본과 동일</translation>
-    </message>
-    <message>
-        <source>Preset</source>
-        <translation>프리셋</translation>
-    </message>
-    <message>
-        <source>Fast</source>
-        <translation>빠름</translation>
-    </message>
-    <message>
-        <source>Balanced</source>
-        <translation>균형</translation>
-    </message>
-    <message>
-        <source>Small</source>
-        <translation>작음</translation>
-    </message>
-    <message>
-        <source>Estimated output: Calculating...</source>
-        <translation>예상 출력: 계산 중...</translation>
     </message>
     <message>
         <source>Box Drawing</source>
@@ -2814,50 +2844,50 @@ back on the Image (for further editing)</source>
     <name>_ProjectDetailsPopup</name>
     <message>
         <source>File name</source>
-        <translation type="unfinished"></translation>
+        <translation>파일 이름</translation>
     </message>
     <message>
         <source>Location</source>
-        <translation type="unfinished"></translation>
+        <translation>위치</translation>
     </message>
     <message>
         <source>Browse</source>
-        <translation type="unfinished">먹다</translation>
+        <translation>찾아보기</translation>
     </message>
     <message>
         <source>Apply</source>
-        <translation type="unfinished"></translation>
+        <translation>적용</translation>
     </message>
     <message>
         <source>Apply to rename or move the current project file.</source>
-        <translation type="unfinished"></translation>
+        <translation>현재 프로젝트 파일의 이름을 바꾸거나 위치를 옮기려면 적용하세요.</translation>
     </message>
     <message>
         <source>Apply to save the current project file with a new name or location.</source>
-        <translation type="unfinished"></translation>
+        <translation>현재 프로젝트 파일을 새 이름이나 새 위치로 저장하려면 적용하세요.</translation>
     </message>
     <message>
         <source>Choose Project Folder</source>
-        <translation type="unfinished"></translation>
+        <translation>프로젝트 폴더 선택</translation>
     </message>
     <message>
         <source>Project File</source>
-        <translation type="unfinished">프로젝트 파일</translation>
+        <translation>프로젝트 파일</translation>
     </message>
     <message>
         <source>Enter a file name.</source>
-        <translation type="unfinished"></translation>
+        <translation>파일 이름을 입력하세요.</translation>
     </message>
     <message>
         <source>Choose a folder location.</source>
-        <translation type="unfinished"></translation>
+        <translation>폴더 위치를 선택하세요.</translation>
     </message>
 </context>
 <context>
     <name>_RecentRow</name>
     <message>
         <source>Open</source>
-        <translation>열려 있는</translation>
+        <translation>열기</translation>
     </message>
     <message>
         <source>Open File Location</source>
@@ -2865,7 +2895,7 @@ back on the Image (for further editing)</source>
     </message>
     <message>
         <source>Copy Path</source>
-        <translation type="unfinished"></translation>
+        <translation>경로 복사</translation>
     </message>
     <message>
         <source>Unpin</source>
@@ -2881,22 +2911,25 @@ back on the Image (for further editing)</source>
     </message>
     <message>
         <source>Delete File</source>
-        <translation type="unfinished"></translation>
+        <translation>파일 삭제</translation>
     </message>
     <message>
         <source>File Not Found</source>
-        <translation type="unfinished"></translation>
+        <translation>파일을 찾을 수 없음</translation>
     </message>
     <message>
         <source>The selected project file could not be found.
 It may have already been moved, renamed, or deleted.
 
 {path}</source>
-        <translation type="unfinished"></translation>
+        <translation>선택한 프로젝트 파일을 찾을 수 없습니다.
+이미 이동되었거나, 이름이 바뀌었거나, 삭제되었을 수 있습니다.
+
+{path}</translation>
     </message>
     <message>
         <source>Are you sure you want to permanently delete this project file?</source>
-        <translation type="unfinished"></translation>
+        <translation>이 프로젝트 파일을 영구적으로 삭제하시겠습니까?</translation>
     </message>
     <message>
         <source>Delete</source>
@@ -2904,17 +2937,19 @@ It may have already been moved, renamed, or deleted.
     </message>
     <message>
         <source>Cancel</source>
-        <translation type="unfinished">취소</translation>
+        <translation>취소</translation>
     </message>
     <message>
         <source>Delete Failed</source>
-        <translation type="unfinished"></translation>
+        <translation>삭제 실패</translation>
     </message>
     <message>
         <source>Could not delete the selected project file.
 
 {error}</source>
-        <translation type="unfinished"></translation>
+        <translation>선택한 프로젝트 파일을 삭제할 수 없습니다.
+
+{error}</translation>
     </message>
 </context>
 <context>
@@ -2943,33 +2978,35 @@ Do you want to restore it?</source>
     </message>
     <message>
         <source>Export PSD As</source>
-        <translation type="unfinished"></translation>
+        <translation>PSD로 내보내기</translation>
     </message>
     <message>
         <source>PSD Files (*.psd);;All Files (*)</source>
-        <translation type="unfinished"></translation>
+        <translation>PSD 파일 (*.psd);;모든 파일 (*)</translation>
     </message>
     <message>
         <source>Export PSD</source>
-        <translation type="unfinished"></translation>
+        <translation>PSD 내보내기</translation>
     </message>
     <message>
         <source>Project File</source>
-        <translation type="unfinished">프로젝트 파일</translation>
+        <translation>프로젝트 파일</translation>
     </message>
     <message>
         <source>Choose an existing folder for the project file.</source>
-        <translation type="unfinished"></translation>
+        <translation>프로젝트 파일을 저장할 기존 폴더를 선택하세요.</translation>
     </message>
     <message>
         <source>Could not create the selected project folder.
 
 {error}</source>
-        <translation type="unfinished"></translation>
+        <translation>선택한 프로젝트 폴더를 만들 수 없습니다.
+
+{error}</translation>
     </message>
     <message>
         <source>Overwrite Project File</source>
-        <translation type="unfinished"></translation>
+        <translation>프로젝트 파일 덮어쓰기</translation>
     </message>
     <message>
         <source>A project file already exists at this location.
@@ -2977,11 +3014,15 @@ Do you want to restore it?</source>
 {path}
 
 Overwrite it?</source>
-        <translation type="unfinished"></translation>
+        <translation>이 위치에 이미 프로젝트 파일이 있습니다.
+
+{path}
+
+덮어쓰시겠습니까?</translation>
     </message>
     <message>
         <source>Old Project File Kept</source>
-        <translation type="unfinished"></translation>
+        <translation>기존 프로젝트 파일 유지됨</translation>
     </message>
     <message>
         <source>The project was saved to the new location, but the old file could not be removed.
@@ -2989,19 +3030,23 @@ Overwrite it?</source>
 {path}
 
 {error}</source>
-        <translation type="unfinished"></translation>
+        <translation>프로젝트를 새 위치에 저장했지만 기존 파일은 제거하지 못했습니다.
+
+{path}
+
+{error}</translation>
     </message>
     <message>
         <source>Project file saved.</source>
-        <translation type="unfinished"></translation>
+        <translation>프로젝트 파일을 저장했습니다.</translation>
     </message>
     <message>
         <source>Project file renamed.</source>
-        <translation type="unfinished"></translation>
+        <translation>프로젝트 파일 이름을 변경했습니다.</translation>
     </message>
     <message>
         <source>Project file moved.</source>
-        <translation type="unfinished"></translation>
+        <translation>프로젝트 파일을 이동했습니다.</translation>
     </message>
     <message>
         <source>Project Not Found</source>
@@ -3030,7 +3075,7 @@ It may have been moved, renamed, or deleted.
     <name>self.main_page</name>
     <message>
         <source>OCR quality too low after retry.</source>
-        <translation type="unfinished"></translation>
+        <translation>재시도 후에도 OCR 품질이 너무 낮습니다.</translation>
     </message>
 </context>
 <context>
@@ -3061,7 +3106,7 @@ It may have been moved, renamed, or deleted.
     </message>
     <message>
         <source>Claude-4.6-Sonnet</source>
-        <translation type="unfinished"></translation>
+        <translation>Claude-4.6-Sonnet</translation>
     </message>
     <message>
         <source>Claude-4.5-Haiku</source>
@@ -3099,31 +3144,31 @@ It may have been moved, renamed, or deleted.
     <name>self.ui</name>
     <message>
         <source>Default</source>
-        <translation type="unfinished">기본값</translation>
+        <translation>기본값</translation>
     </message>
     <message>
         <source>Optimal (HunyuanOCR / PaddleOCR VL)</source>
-        <translation type="unfinished"></translation>
+        <translation>최적값 (HunyuanOCR / PaddleOCR VL)</translation>
     </message>
     <message>
         <source>Microsoft OCR</source>
-        <translation type="unfinished">Microsoft OCR</translation>
+        <translation>Microsoft OCR</translation>
     </message>
     <message>
         <source>Google Cloud Vision</source>
-        <translation type="unfinished">Google Cloud Vision</translation>
+        <translation>Google Cloud Vision</translation>
     </message>
     <message>
         <source>Gemini-2.0-Flash</source>
-        <translation type="unfinished">Gemini-2.0-Flash</translation>
+        <translation>Gemini-2.0-Flash</translation>
     </message>
     <message>
         <source>PaddleOCR VL</source>
-        <translation type="unfinished"></translation>
+        <translation>PaddleOCR VL</translation>
     </message>
     <message>
         <source>HunyuanOCR</source>
-        <translation type="unfinished"></translation>
+        <translation>HunyuanOCR</translation>
     </message>
     <message>
         <source>Resize</source>
@@ -3189,7 +3234,7 @@ It may have been moved, renamed, or deleted.
     </message>
     <message>
         <source>PaddleOCR VL Settings</source>
-        <translation type="unfinished">PaddleOCR VL 설정</translation>
+        <translation>PaddleOCR VL 설정</translation>
     </message>
     <message>
         <source>HunyuanOCR Settings</source>
@@ -3212,7 +3257,7 @@ It may have been moved, renamed, or deleted.
     </message>
     <message>
         <source>No Data</source>
-        <translation>확인</translation>
+        <translation>데이터 없음</translation>
     </message>
 </context>
 </TS>

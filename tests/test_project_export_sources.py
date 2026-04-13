@@ -47,10 +47,12 @@ class _FakeProjectMain:
         self.export_source_by_path = {image_path: export_source} if image_path and export_source else {}
         self.project_file = None
         self.project_output_preferences = {
-            "output_format_override_mode": "project",
-            "output_format_override_value": "webp",
-            "output_preset_override_mode": "project",
-            "output_preset_override_value": "small",
+            "output_use_global": False,
+            "output_target": "single_archive",
+            "output_image_format": "same_as_source",
+            "output_archive_format": "cbz",
+            "output_archive_image_format": "webp",
+            "output_archive_compression_level": 7,
         }
 
 
@@ -92,10 +94,12 @@ class ProjectExportSourceRoundTripTests(unittest.TestCase):
                 self.assertEqual(
                     restored_main.project_output_preferences,
                     {
-                        "output_format_override_mode": "project",
-                        "output_format_override_value": "webp",
-                        "output_preset_override_mode": "project",
-                        "output_preset_override_value": "small",
+                        "output_use_global": False,
+                        "output_target": "single_archive",
+                        "output_image_format": "same_as_source",
+                        "output_archive_format": "cbz",
+                        "output_archive_image_format": "webp",
+                        "output_archive_compression_level": 7,
                     },
                 )
             finally:
