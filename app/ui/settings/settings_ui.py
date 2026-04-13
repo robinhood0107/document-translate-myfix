@@ -294,6 +294,12 @@ class SettingsPageUI(QtWidgets.QWidget):
         self.mask_overlay_checkbox = self.export_page.mask_overlay_checkbox
         self.cleanup_mask_delta_checkbox = self.export_page.cleanup_mask_delta_checkbox
         self.debug_metadata_checkbox = self.export_page.debug_metadata_checkbox
+        self.automatic_output_format_combo = self.export_page.automatic_output_format_combo
+        self.automatic_output_preset_combo = self.export_page.automatic_output_preset_combo
+        self.automatic_output_png_spinbox = self.export_page.automatic_output_png_spinbox
+        self.automatic_output_jpg_spinbox = self.export_page.automatic_output_jpg_spinbox
+        self.automatic_output_webp_spinbox = self.export_page.automatic_output_webp_spinbox
+        self.automatic_output_estimate_summary_label = self.export_page.automatic_output_estimate_summary_label
         self.project_autosave_interval_spinbox = self.project_page.project_autosave_interval_spinbox
         self.project_autosave_folder_input = self.project_page.project_autosave_folder_input
 
