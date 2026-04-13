@@ -17,14 +17,234 @@
     </message>
 </context>
 <context>
+    <name>AutomaticProgress</name>
+    <message>
+        <source>Calculating</source>
+        <translation type="unfinished">Calculando</translation>
+    </message>
+    <message>
+        <source>Recent History</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Live Learning</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Live Stable</source>
+        <translation type="unfinished"></translation>
+    </message>
+</context>
+<context>
+    <name>AutomaticProgressDialog</name>
+    <message>
+        <source>Automatic Translation Progress</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>자동번역 준비 중</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>초기화 중...</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>경과 시간</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>남은 시간</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>예상 완료 시각</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>ETA 신뢰도</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>현재 작업</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>서비스</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>페이지</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>단계</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>파일명</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>세부 로그</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>재시도</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Settings 열기</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Cancel</source>
+        <translation type="unfinished">Cancelar</translation>
+    </message>
+    <message>
+        <source>닫기</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Calculating</source>
+        <translation type="unfinished">Calculando</translation>
+    </message>
+    <message>
+        <source>작업이 취소되었습니다.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>자동번역 진행 중</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>작업이 실패했습니다.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>자동번역이 완료되었습니다.</source>
+        <translation type="unfinished"></translation>
+    </message>
+</context>
+<context>
     <name>ComicTranslate</name>
+    <message>
+        <source>Project files cannot be opened together with other imported files.
+Choose either a project file or image/document/archive files.</source>
+        <translation>Los archivos de proyecto no pueden abrirse junto con otros archivos importados.
+Elija un archivo de proyecto o solo archivos de imagen/documento/archivo comprimido.</translation>
+    </message>
+    <message>
+        <source>Gemma와 OCR 준비를 확인하는 중...</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>취소 중...</source>
+        <translation type="unfinished"></translation>
+    </message>
     <message>
         <source>PaddleOCR VL Settings</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
+        <source>HunyuanOCR Settings</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Gemma Local Server Settings</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>작업이 취소되었습니다.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>자동번역 준비 또는 실행에 실패했습니다.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
         <source>Error</source>
         <translation>Error</translation>
+    </message>
+    <message>
+        <source>No pages are loaded for TXT/MD import or export.</source>
+        <translation>No hay páginas cargadas para importar o exportar TXT/MD.</translation>
+    </message>
+    <message>
+        <source>TXT/MD import and export require unique page file names.
+Rename duplicate pages first.
+Duplicates:
+{names}</source>
+        <translation>La importación y exportación de TXT/MD requieren nombres de archivo de página únicos.
+Primero cambie el nombre de las páginas duplicadas.
+Duplicados:
+{names}</translation>
+    </message>
+    <message>
+        <source>TXT/MD Export Failed</source>
+        <translation>Error al exportar TXT/MD</translation>
+    </message>
+    <message>
+        <source>Failed to export source text.</source>
+        <translation>No se pudo exportar el texto fuente.</translation>
+    </message>
+    <message>
+        <source>Exported source text to:
+{path}</source>
+        <translation>Texto fuente exportado a:
+{path}</translation>
+    </message>
+    <message>
+        <source>Translation imported and matched successfully.</source>
+        <translation>La traducción se importó y se vinculó correctamente.</translation>
+    </message>
+    <message>
+        <source>Imported TXT/MD content was only partially matched. Make sure the file follows the exported exchange format.</source>
+        <translation>El contenido TXT/MD importado solo coincidió parcialmente. Asegúrese de que el archivo siga el formato de intercambio exportado.</translation>
+    </message>
+    <message>
+        <source>Missing pages:</source>
+        <translation>Páginas faltantes:</translation>
+    </message>
+    <message>
+        <source>Unexpected pages:</source>
+        <translation>Páginas inesperadas:</translation>
+    </message>
+    <message>
+        <source>Unmatched pages:</source>
+        <translation>Páginas no coincidentes:</translation>
+    </message>
+    <message>
+        <source>TXT Files (*.txt *.TXT)</source>
+        <translation>Archivos TXT (*.txt *.TXT)</translation>
+    </message>
+    <message>
+        <source>Markdown Files (*.md *.MD)</source>
+        <translation>Archivos Markdown (*.md *.MD)</translation>
+    </message>
+    <message>
+        <source>Import Translation</source>
+        <translation>Importar traducción</translation>
+    </message>
+    <message>
+        <source>TXT/MD Import Failed</source>
+        <translation>Error al importar TXT/MD</translation>
+    </message>
+    <message>
+        <source>Failed to import translation text.</source>
+        <translation>No se pudo importar el texto traducido.</translation>
+    </message>
+    <message>
+        <source>Automatic TXT/MD export failed for {target}{suffix}.</source>
+        <translation>Error en la exportación automática de TXT/MD para {target}{suffix}.</translation>
+    </message>
+    <message>
+        <source>One-Page Auto</source>
+        <translation type="unfinished">Auto de una página</translation>
+    </message>
+    <message>
+        <source>Translate All</source>
+        <translation type="unfinished">Traducir todo</translation>
     </message>
     <message>
         <source>No failed pages from the latest batch are available to retry.</source>
@@ -35,12 +255,39 @@
         <translation>No hay una página actual disponible para el procesamiento automático.</translation>
     </message>
     <message>
+        <source>자동번역이 완료되었습니다.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
         <source>Downloading model file: {filename}</source>
         <translation>Descargando archivo de modelo: {filename}</translation>
     </message>
     <message>
         <source>Unsaved Changes</source>
         <translation>Cambios no guardados</translation>
+    </message>
+    <message>
+        <source>Load pages to see automatic output estimates.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Archive estimates (PNG / JPG / WEBP):</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>{name}: {size}, {time}, {ratio}</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Images are saved individually at maximum quality.
+Translated and cleaned images are exported.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Project switching is unavailable while automatic processing is running.
+Cancel the current run or wait for it to finish first.</source>
+        <translation>No se puede cambiar de proyecto mientras la ejecución automática está en curso.
+Cancele la ejecución actual o espere a que termine.</translation>
     </message>
     <message>
         <source>Save changes to this file?</source>
@@ -175,6 +422,33 @@
     </message>
 </context>
 <context>
+    <name>CorrectionDictionaryTable</name>
+    <message>
+        <source>Keyword</source>
+        <translation>Palabra clave</translation>
+    </message>
+    <message>
+        <source>Substitution</source>
+        <translation>Sustitución</translation>
+    </message>
+    <message>
+        <source>Use regex</source>
+        <translation>Usar regex</translation>
+    </message>
+    <message>
+        <source>Case sensitive</source>
+        <translation>Distinguir mayúsculas y minúsculas</translation>
+    </message>
+    <message>
+        <source>New</source>
+        <translation>Nuevo</translation>
+    </message>
+    <message>
+        <source>Delete</source>
+        <translation>Eliminar</translation>
+    </message>
+</context>
+<context>
     <name>CredentialsPage</name>
     <message>
         <source>Save Keys</source>
@@ -270,7 +544,7 @@ Use Custom Local Server(Gemma) with the included Gemma Docker setup.</source>
     </message>
     <message>
         <source>File</source>
-        <translation type="unfinished"></translation>
+        <translation type="unfinished">Archivo</translation>
     </message>
     <message>
         <source>Chapter</source>
@@ -347,6 +621,59 @@ Use Custom Local Server(Gemma) with the included Gemma Docker setup.</source>
         <source>Export Debug Metadata (Debug)</source>
         <translation type="unfinished"></translation>
     </message>
+    <message>
+        <source>Automatic Output</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>These defaults control automatic output after batch translation.
+Project-specific quick settings can override them for the current project.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Default output target:</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Individual images</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Single archive</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Default image format:</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Default archive format:</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Default archive image format:</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Default archive compression level:</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>PNG/JPG/WEBP images are saved at maximum quality.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Archive compression only affects the ZIP/CBZ container, not image quality.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Load pages to see automatic output estimates.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Same as source</source>
+        <translation type="unfinished"></translation>
+    </message>
 </context>
 <context>
     <name>GemmaLocalServerPage</name>
@@ -355,11 +682,12 @@ Use Custom Local Server(Gemma) with the included Gemma Docker setup.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>Comic Translate can use your local Gemma Docker server for translation.
-1. Run `docker compose pull --policy always` and then `docker compose up -d --force-recreate` in the repository root.
+        <source>Comic Translate can reuse your local Gemma Docker server for translation.
+1. Keep the existing Gemma container running if it is already healthy.
 2. In Settings &gt; Credentials, use Endpoint URL `http://127.0.0.1:18080/v1`.
-3. Set Model to `gemma-4-26b-a4b-it-heretic.q3_k_m.gguf`.
-If responses are truncated, lower Chunk Size or increase LLAMA_CTX_SIZE in docker-compose.yaml.</source>
+3. Set Model to the exact GGUF filename in `testmodel/` (recommended: `gemma-4-26B-IQ4_NL.gguf`).
+Automatic translation reuses an existing Gemma runtime first and only runs `docker compose up -d` when needed.
+If responses are truncated, lower Chunk Size or Max Completion Tokens before recreating the container.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
@@ -379,14 +707,36 @@ If responses are truncated, lower Chunk Size or increase LLAMA_CTX_SIZE in docke
         <translation type="unfinished"></translation>
     </message>
     <message>
+        <source>Advanced Sampler Settings</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Temperature</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Top K</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Top P</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Min P</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
         <source>Raw Response Log</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>Recommended starting values for the included Gemma Docker setup:
+        <source>Promoted winner defaults for the bundled Gemma runtime:
 - Chunk Size: 6
 - Max Completion Tokens: 512
-- Request Timeout: 180 seconds</source>
+- Request Timeout: 180 seconds
+- Temperature: 0.7
+- Top K / Top P / Min P: 64 / 0.95 / 0.0</source>
         <translation type="unfinished"></translation>
     </message>
 </context>
@@ -595,6 +945,74 @@ Start the server with both the HunyuanOCR GGUF model and the matching mmproj fil
     <name>MTreeView</name>
     <message>
         <source>No Data</source>
+        <translation type="unfinished"></translation>
+    </message>
+</context>
+<context>
+    <name>MangaLMMOCRPage</name>
+    <message>
+        <source>MangaLMM Settings</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Connect Comic Translate to your local MangaLMM llama.cpp server.
+This OCR engine sends cropped text regions to the OpenAI-compatible /chat/completions endpoint.
+MangaLMM is used as block-crop OCR only, not as full-page spotting inside the app.
+Keep the default localhost URL if you want Comic Translate to reuse the bundled Docker runtime.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Server URL</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>MangaLMM OCR Tuning</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Max Completion Tokens</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Parallel Workers</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Request Timeout (sec)</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Raw Response Log</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Safe Resize</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Enable Safe Resize</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Max Pixels</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Max Long Side</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Recommended values for the bundled MangaLMM runtime:
+- ctx-size 4096: enough for block OCR while keeping VRAM safer
+- Max Completion Tokens: 256
+- Parallel Workers: 1
+- Request Timeout: 60 seconds
+- Safe Resize: on
+- Max Pixels / Max Long Side: 1200000 / 1280
+Reasoning:
+- Keep the request deterministic with temperature 0 and top_k 1 internally.
+- Large crops are resized only when needed, and OCR region boxes are mapped back to original coordinates.
+- Workers 1 is the safest default when Gemma and MangaLMM stay resident on the same GPU.</source>
         <translation type="unfinished"></translation>
     </message>
 </context>
@@ -848,6 +1266,14 @@ Por favor, compruebe su conexión a Internet.</translation>
         <translation>Traductor</translation>
     </message>
     <message>
+        <source>Gemma local server runtime setup failed</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Gemma local server is unavailable</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
         <source>No font selected</source>
         <translation type="unfinished"></translation>
     </message>
@@ -960,6 +1386,10 @@ Install it to use PSD features.</source>
         <translation>Inicio</translation>
     </message>
     <message>
+        <source>Open Latest Recent Project</source>
+        <translation>Abrir el proyecto abierto más recientemente</translation>
+    </message>
+    <message>
         <source>Settings</source>
         <translation>Configuración</translation>
     </message>
@@ -971,21 +1401,32 @@ Install it to use PSD features.</source>
         <source>Insert files into current project</source>
         <translation>Insertar archivos en el proyecto actual</translation>
     </message>
+</context>
+<context>
+    <name>NotificationsPage</name>
     <message>
-        <source>Start New Project</source>
-        <translation>Iniciar nuevo proyecto</translation>
+        <source>Automatic Completion</source>
+        <translation>Finalización automática</translation>
     </message>
     <message>
-        <source>Your current project has unsaved changes. Start a new project?</source>
-        <translation>Tu proyecto actual tiene cambios no guardados. ¿Iniciar un nuevo proyecto?</translation>
+        <source>Play a sound when automatic processing finishes successfully. Custom files must be placed in the repository music folder.</source>
+        <translation>Reproduce un sonido cuando el procesamiento automático termina correctamente. Los archivos personalizados deben colocarse en la carpeta music del repositorio.</translation>
     </message>
     <message>
-        <source>Yes</source>
-        <translation>Sí</translation>
+        <source>Enable Completion Sound</source>
+        <translation>Activar sonido de finalización</translation>
     </message>
     <message>
-        <source>No</source>
-        <translation>No</translation>
+        <source>Test Sound</source>
+        <translation>Probar sonido</translation>
+    </message>
+    <message>
+        <source>Music Folder: {path}</source>
+        <translation>Carpeta music: {path}</translation>
+    </message>
+    <message>
+        <source>System sound</source>
+        <translation>Sonido del sistema</translation>
     </message>
 </context>
 <context>
@@ -1046,6 +1487,38 @@ Approximate GPU usage:
 <context>
     <name>PageListView</name>
     <message>
+        <source>Name</source>
+        <translation>Nombre</translation>
+    </message>
+    <message>
+        <source>Date</source>
+        <translation>Fecha</translation>
+    </message>
+    <message>
+        <source>Sort by Name</source>
+        <translation>Ordenar por nombre</translation>
+    </message>
+    <message>
+        <source>Name: A to Z</source>
+        <translation>Nombre: A a Z</translation>
+    </message>
+    <message>
+        <source>Name: Z to A</source>
+        <translation>Nombre: Z a A</translation>
+    </message>
+    <message>
+        <source>Sort by Date</source>
+        <translation>Ordenar por fecha</translation>
+    </message>
+    <message>
+        <source>Date: Newest First</source>
+        <translation>Fecha: más recientes primero</translation>
+    </message>
+    <message>
+        <source>Date: Oldest First</source>
+        <translation>Fecha: más antiguas primero</translation>
+    </message>
+    <message>
         <source>Insert</source>
         <translation>Insertar</translation>
     </message>
@@ -1075,6 +1548,161 @@ Approximate GPU usage:
     <message>
         <source>Theme</source>
         <translation>Tema</translation>
+    </message>
+</context>
+<context>
+    <name>PipelineStatusPanel</name>
+    <message>
+        <source>Pipeline Status</source>
+        <translation>Estado de la canalización</translation>
+    </message>
+    <message>
+        <source>Idle</source>
+        <translation>Inactivo</translation>
+    </message>
+    <message>
+        <source>Service</source>
+        <translation>Servicio</translation>
+    </message>
+    <message>
+        <source>Progress</source>
+        <translation>Progreso</translation>
+    </message>
+    <message>
+        <source>File</source>
+        <translation>Archivo</translation>
+    </message>
+    <message>
+        <source>ETA</source>
+        <translation>ETA</translation>
+    </message>
+    <message>
+        <source>Message</source>
+        <translation>Mensaje</translation>
+    </message>
+    <message>
+        <source>No Preview</source>
+        <translation>Sin vista previa</translation>
+    </message>
+    <message>
+        <source>Cancel</source>
+        <translation>Cancelar</translation>
+    </message>
+    <message>
+        <source>Logs</source>
+        <translation>Registro</translation>
+    </message>
+    <message>
+        <source>Report</source>
+        <translation>Informe</translation>
+    </message>
+    <message>
+        <source>Retry</source>
+        <translation>Reintentar</translation>
+    </message>
+    <message>
+        <source>Settings</source>
+        <translation>Configuración</translation>
+    </message>
+    <message>
+        <source>Open Output</source>
+        <translation>Abrir salida</translation>
+    </message>
+    <message>
+        <source>Close</source>
+        <translation>Cerrar</translation>
+    </message>
+    <message>
+        <source>Window</source>
+        <translation>Ventana</translation>
+    </message>
+    <message>
+        <source>Switch to window mode</source>
+        <translation>Cambiar al modo de ventana</translation>
+    </message>
+    <message>
+        <source>Embed</source>
+        <translation>Integrar</translation>
+    </message>
+    <message>
+        <source>Switch to embedded mode</source>
+        <translation>Cambiar al modo integrado</translation>
+    </message>
+    <message>
+        <source>Hide logs</source>
+        <translation>Ocultar registro</translation>
+    </message>
+    <message>
+        <source>Show logs</source>
+        <translation>Mostrar registro</translation>
+    </message>
+    <message>
+        <source>Automatic</source>
+        <translation>Automático</translation>
+    </message>
+    <message>
+        <source>Calculating</source>
+        <translation>Calculando</translation>
+    </message>
+    <message>
+        <source>Status</source>
+        <translation>Estado</translation>
+    </message>
+    <message>
+        <source>Info</source>
+        <translation>Información</translation>
+    </message>
+    <message>
+        <source>Success</source>
+        <translation>Éxito</translation>
+    </message>
+    <message>
+        <source>Warning</source>
+        <translation>Advertencia</translation>
+    </message>
+    <message>
+        <source>Error</source>
+        <translation>Error</translation>
+    </message>
+    <message>
+        <source>Download</source>
+        <translation>Descarga</translation>
+    </message>
+    <message>
+        <source>Local Service</source>
+        <translation>Servicio local</translation>
+    </message>
+    <message>
+        <source>Network</source>
+        <translation>Red</translation>
+    </message>
+    <message>
+        <source>Content Filter</source>
+        <translation>Filtro de contenido</translation>
+    </message>
+    <message>
+        <source>Batch Report</source>
+        <translation>Informe por lotes</translation>
+    </message>
+    <message>
+        <source>Pipeline</source>
+        <translation>Canalización</translation>
+    </message>
+    <message>
+        <source>Running</source>
+        <translation>En ejecución</translation>
+    </message>
+    <message>
+        <source>Done</source>
+        <translation>Completado</translation>
+    </message>
+    <message>
+        <source>Failed</source>
+        <translation>Falló</translation>
+    </message>
+    <message>
+        <source>Cancelled</source>
+        <translation>Cancelado</translation>
     </message>
 </context>
 <context>
@@ -1429,11 +2057,27 @@ Restart now?</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
+        <source>Optimal+ (HunyuanOCR / MangaLMM / PaddleOCR VL)</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>MangaLMM</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>RT-DETR-v2 + Legacy BBox Rescue + Source LaMa</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
         <source>PaddleOCR VL Settings</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
         <source>HunyuanOCR Settings</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>MangaLMM Settings</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
@@ -1443,6 +2087,14 @@ Restart now?</source>
     <message>
         <source>LLMs</source>
         <translation>LLMs</translation>
+    </message>
+    <message>
+        <source>User Dictionaries</source>
+        <translation>Diccionarios de usuario</translation>
+    </message>
+    <message>
+        <source>Notifications</source>
+        <translation>Notificaciones</translation>
     </message>
     <message>
         <source>Project</source>
@@ -1619,6 +2271,12 @@ Abra o cree un proyecto para comenzar.</translation>
         <source>Supported Files ({exts});;All Files (*)</source>
         <translation>Archivos compatibles ({exts});;Todos los archivos (*)</translation>
     </message>
+    <message>
+        <source>Project files cannot be opened together with other imported files.
+Choose either a project file or image/document/archive files.</source>
+        <translation>Los archivos de proyecto no pueden abrirse junto con otros archivos importados.
+Elija un archivo de proyecto o solo archivos de imagen/documento/archivo comprimido.</translation>
+    </message>
 </context>
 <context>
     <name>TextRenderingPage</name>
@@ -1648,65 +2306,94 @@ Abra o cree un proyecto para comenzar.</translation>
     </message>
 </context>
 <context>
+    <name>ToolStateMixin</name>
+    <message>
+        <source>Add Inpaint Mask
+Paint areas to clean before running inpainting.
+These pixels are added to the final mask.</source>
+        <translation>Añadir máscara de inpainting
+Pinta las áreas que quieres limpiar antes de ejecutar el inpainting.
+Estos píxeles se añaden a la máscara final.</translation>
+    </message>
+    <message>
+        <source>Erase Mask Strokes
+Remove parts of drawn add/exclude strokes.
+This edits mask strokes only and does not change applied patches.</source>
+        <translation>Borrar trazos de máscara
+Elimina partes de los trazos de añadir/excluir ya dibujados.
+Esto solo edita los trazos de la máscara y no cambia los parches ya aplicados.</translation>
+    </message>
+    <message>
+        <source>Exclude from Inpainting
+Protect areas from inpainting.
+Excluded pixels are removed from the final mask even if they were auto-detected or painted.</source>
+        <translation>Excluir del inpainting
+Protege áreas para que no se procesen con inpainting.
+Los píxeles excluidos se eliminan de la máscara final, incluso si se detectaron automáticamente o se pintaron manualmente.</translation>
+    </message>
+    <message>
+        <source>Restore Original over Inpainted Area
+Paint over an inpainted result to bring back the original image.
+This creates a restore patch above existing inpaint patches on the current page.</source>
+        <translation>Restaurar original sobre el área retocada
+Pinta sobre un resultado de inpainting para recuperar la imagen original.
+Esto crea un parche de restauración sobre los parches de inpainting existentes en la página actual.</translation>
+    </message>
+    <message>
+        <source>Restore Original over Inpainted Area
+No inpainted patch exists on this page yet.
+Run inpainting first, then use this tool to recover original pixels where needed.</source>
+        <translation>Restaurar original sobre el área retocada
+Todavía no existe ningún parche de inpainting en esta página.
+Ejecuta primero el inpainting y luego usa esta herramienta para recuperar los píxeles originales donde haga falta.</translation>
+    </message>
+    <message>
+        <source>Clear Inpaint Mask Strokes
+Remove all add/exclude mask strokes on the current page.
+Applied inpaint and restore patches are kept; use Undo to revert patch changes.</source>
+        <translation>Borrar trazos de máscara de inpainting
+Elimina todos los trazos de máscara de añadir/excluir de la página actual.
+Los parches de inpainting y restauración ya aplicados se conservan; usa Deshacer para revertir cambios en los parches.</translation>
+    </message>
+    <message>
+        <source>Inpaint Brush Size
+Adjust the size used by add, erase, exclude, and restore brushes.</source>
+        <translation>Tamaño del pincel de inpainting
+Ajusta el tamaño usado por los pinceles de añadir, borrar, excluir y restaurar.</translation>
+    </message>
+</context>
+<context>
     <name>ToolsPage</name>
     <message>
         <source>Translator</source>
         <translation>Traductor</translation>
     </message>
     <message>
+        <source>Custom Local Server(Gemma)</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
         <source>Text Recognition</source>
         <translation>Reconocimiento de texto</translation>
+    </message>
+    <message>
+        <source>PaddleOCR VL</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Automatic Runtime</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Automatic mode is fixed to RT-DETR-v2 detection, legacy bbox rescue masking, and source block-wise LaMa cleaning.</source>
+        <translation type="unfinished"></translation>
     </message>
     <message>
         <source>Text Detector</source>
         <translation>Detector de texto</translation>
     </message>
     <message>
-        <source>Precise Masking</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Mask Refiner</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>legacy_bbox</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>ctd</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Keep Existing Lines</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>detect_size</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>det_rearrange_max_batches</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
         <source>device</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>font size multiplier</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>font size max</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>font size min</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>mask dilate size</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
@@ -1716,10 +2403,6 @@ Abra o cree un proyecto para comenzar.</translation>
     <message>
         <source>Inpainter</source>
         <translation>Inpainter</translation>
-    </message>
-    <message>
-        <source>AOT</source>
-        <translation>AOT</translation>
     </message>
     <message>
         <source>inpaint_size</source>
@@ -1778,6 +2461,29 @@ luego realiza el inpainting en la imagen redimensionada.</translation>
     <message>
         <source>lama_mpe</source>
         <translation type="unfinished"></translation>
+    </message>
+</context>
+<context>
+    <name>UserDictionariesPage</name>
+    <message>
+        <source>Correction dictionaries rewrite OCR and translation results before they are saved to the project.</source>
+        <translation>Los diccionarios de corrección reescriben los resultados de OCR y traducción antes de guardarlos en el proyecto.</translation>
+    </message>
+    <message>
+        <source>OCR Result Dictionary</source>
+        <translation>Diccionario de resultados OCR</translation>
+    </message>
+    <message>
+        <source>Apply these substitutions immediately after OCR returns text, before the source text is stored.</source>
+        <translation>Aplique estas sustituciones inmediatamente después de que el OCR devuelva texto, antes de guardar el texto fuente.</translation>
+    </message>
+    <message>
+        <source>Translation Result Dictionary</source>
+        <translation>Diccionario de resultados de traducción</translation>
+    </message>
+    <message>
+        <source>Apply these substitutions immediately after translation or TXT/MD import returns text, before the translation is stored.</source>
+        <translation>Aplique estas sustituciones inmediatamente después de que la traducción o la importación TXT/MD devuelva texto, antes de guardar la traducción.</translation>
     </message>
 </context>
 <context>
@@ -1931,6 +2637,50 @@ luego realiza el inpainting en la imagen redimensionada.</translation>
         <translation>Estilo</translation>
     </message>
     <message>
+        <source>When enabled, this project inherits the automatic output settings from Settings.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Output target</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Individual images</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Single archive</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Image format</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Archive format</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Archive image format</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Compression level</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>PNG/JPG/WEBP images are saved at maximum quality.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Archive compression only affects the ZIP/CBZ container, not image quality.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Load pages to see automatic output estimates.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
         <source>Top</source>
         <translation>Arriba</translation>
     </message>
@@ -2033,20 +2783,84 @@ de nuevo en la imagen (para su posterior edición)</translation>
         <translation>Aumentar el tamaño de todos los bloques</translation>
     </message>
     <message>
-        <source>Draw Brush Strokes for Cleaning Image</source>
-        <translation>Dibujar trazos de pincel para limpiar la imagen</translation>
+        <source>TXT/MD</source>
+        <translation>TXT/MD</translation>
     </message>
     <message>
-        <source>Erase Brush Strokes</source>
-        <translation>Borrar trazos de pincel</translation>
+        <source>Export Source TXT</source>
+        <translation>Exportar texto fuente TXT</translation>
     </message>
     <message>
-        <source>Remove all the brush strokes on the Image</source>
-        <translation>Eliminar todos los trazos de pincel de la imagen</translation>
+        <source>Export the current project&apos;s source text in the TXT exchange format.</source>
+        <translation>Exporta el texto fuente del proyecto actual en formato de intercambio TXT.</translation>
     </message>
     <message>
-        <source>Brush/Eraser Size Slider</source>
-        <translation>Control deslizante de tamaño de pincel/borrador</translation>
+        <source>Import Translation TXT</source>
+        <translation>Importar traducción TXT</translation>
+    </message>
+    <message>
+        <source>Import translated text from a TXT exchange file and rebuild text boxes to fit.</source>
+        <translation>Importa texto traducido desde un archivo de intercambio TXT y vuelve a ajustar los cuadros de texto.</translation>
+    </message>
+    <message>
+        <source>Export Source MD</source>
+        <translation>Exportar texto fuente MD</translation>
+    </message>
+    <message>
+        <source>Export the current project&apos;s source text in the Markdown exchange format.</source>
+        <translation>Exporta el texto fuente del proyecto actual en formato de intercambio Markdown.</translation>
+    </message>
+    <message>
+        <source>Import Translation MD</source>
+        <translation>Importar traducción MD</translation>
+    </message>
+    <message>
+        <source>Import translated text from a Markdown exchange file and rebuild text boxes to fit.</source>
+        <translation>Importa texto traducido desde un archivo de intercambio Markdown y vuelve a ajustar los cuadros de texto.</translation>
+    </message>
+    <message>
+        <source>Auto Export Source TXT</source>
+        <translation>Exportar automáticamente texto fuente TXT</translation>
+    </message>
+    <message>
+        <source>After a successful automatic run, overwrite the TXT source exchange file with only the pages from that run.</source>
+        <translation>Después de una ejecución automática correcta, sobrescribe el archivo de intercambio TXT de origen solo con las páginas de esa ejecución.</translation>
+    </message>
+    <message>
+        <source>Auto Export Source MD</source>
+        <translation>Exportar automáticamente texto fuente MD</translation>
+    </message>
+    <message>
+        <source>After a successful automatic run, overwrite the Markdown source exchange file with only the pages from that run.</source>
+        <translation>Después de una ejecución automática correcta, sobrescribe el archivo de intercambio Markdown de origen solo con las páginas de esa ejecución.</translation>
+    </message>
+    <message>
+        <source>Auto Export Translation TXT</source>
+        <translation>Exportar automáticamente traducción TXT</translation>
+    </message>
+    <message>
+        <source>After a successful automatic run, overwrite the TXT translation exchange file with only the pages from that run.</source>
+        <translation>Después de una ejecución automática correcta, sobrescribe el archivo de intercambio TXT de traducción solo con las páginas de esa ejecución.</translation>
+    </message>
+    <message>
+        <source>Auto Export Translation MD</source>
+        <translation>Exportar automáticamente traducción MD</translation>
+    </message>
+    <message>
+        <source>After a successful automatic run, overwrite the Markdown translation exchange file with only the pages from that run.</source>
+        <translation>Después de una ejecución automática correcta, sobrescribe el archivo de intercambio Markdown de traducción solo con las páginas de esa ejecución.</translation>
+    </message>
+    <message>
+        <source>Output</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Use global output settings</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Same as source</source>
+        <translation type="unfinished"></translation>
     </message>
     <message>
         <source>Box Drawing</source>
@@ -2055,6 +2869,13 @@ de nuevo en la imagen (para su posterior edición)</translation>
     <message>
         <source>Inpainting</source>
         <translation>Inpainting</translation>
+    </message>
+</context>
+<context>
+    <name>_PageListContentView</name>
+    <message>
+        <source>{count} pages</source>
+        <translation>{count} páginas</translation>
     </message>
 </context>
 <context>
@@ -2147,7 +2968,7 @@ It may have already been moved, renamed, or deleted.
     </message>
     <message>
         <source>Delete</source>
-        <translation type="unfinished">Eliminar</translation>
+        <translation>Eliminar</translation>
     </message>
     <message>
         <source>Cancel</source>
@@ -2307,8 +3128,8 @@ Es posible que se haya movido, cambiado de nombre o eliminado.
         <translation>GPT-4.1</translation>
     </message>
     <message>
-        <source>Claude-4.5-Sonnet</source>
-        <translation>Claude-4.5-Sonnet</translation>
+        <source>Claude-4.6-Sonnet</source>
+        <translation type="unfinished"></translation>
     </message>
     <message>
         <source>Claude-4.5-Haiku</source>
@@ -2353,6 +3174,10 @@ Es posible que se haya movido, cambiado de nombre o eliminado.
         <translation type="unfinished"></translation>
     </message>
     <message>
+        <source>Optimal+ (HunyuanOCR / MangaLMM / PaddleOCR VL)</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
         <source>Microsoft OCR</source>
         <translation type="unfinished">Microsoft OCR</translation>
     </message>
@@ -2370,6 +3195,10 @@ Es posible que se haya movido, cambiado de nombre o eliminado.
     </message>
     <message>
         <source>HunyuanOCR</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>MangaLMM</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
@@ -2440,6 +3269,14 @@ Es posible que se haya movido, cambiado de nombre o eliminado.
     </message>
     <message>
         <source>HunyuanOCR Settings</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>MangaLMM Settings</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Gemma Local Server Settings</source>
         <translation type="unfinished"></translation>
     </message>
 </context>

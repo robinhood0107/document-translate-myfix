@@ -112,6 +112,33 @@ class SettingsToolsRuntimeTests(unittest.TestCase):
         self.assertEqual(page.ui.inpainter_combo.currentText(), "lama_large_512px")
         self.assertEqual(page.get_tool_selection("inpainter"), "lama_large_512px")
 
+    def test_mangalmm_settings_round_trip(self) -> None:
+        page = self._make_page()
+        page.load_settings()
+
+        self.assertEqual(page.get_tool_selection("ocr"), "paddleocr_vl")
+        page.ui.mangalmm_ocr_server_url_input.setText("http://127.0.0.1:28081/v1")
+        page.ui.mangalmm_ocr_max_completion_tokens_spinbox.setValue(320)
+        page.ui.mangalmm_ocr_parallel_workers_spinbox.setValue(1)
+        page.ui.mangalmm_ocr_request_timeout_spinbox.setValue(75)
+        page.ui.mangalmm_ocr_raw_response_logging_checkbox.setChecked(True)
+        page.ui.mangalmm_ocr_safe_resize_checkbox.setChecked(False)
+        page.ui.mangalmm_ocr_max_pixels_spinbox.setValue(1500000)
+        page.ui.mangalmm_ocr_max_long_side_spinbox.setValue(1408)
+        page._set_ocr_mode("best_local_plus")
+        page.save_settings()
+
+        settings = QtCore.QSettings("ComicLabs", "ComicTranslate")
+        self.assertEqual(settings.value("tools/ocr", "", type=str), "best_local_plus")
+        self.assertEqual(settings.value("mangalmm_ocr/server_url", "", type=str), "http://127.0.0.1:28081/v1")
+        self.assertEqual(settings.value("mangalmm_ocr/max_completion_tokens", 0, type=int), 320)
+        self.assertEqual(settings.value("mangalmm_ocr/parallel_workers", 0, type=int), 1)
+        self.assertEqual(settings.value("mangalmm_ocr/request_timeout_sec", 0, type=int), 75)
+        self.assertTrue(settings.value("mangalmm_ocr/raw_response_logging", False, type=bool))
+        self.assertFalse(settings.value("mangalmm_ocr/safe_resize", True, type=bool))
+        self.assertEqual(settings.value("mangalmm_ocr/max_pixels", 0, type=int), 1500000)
+        self.assertEqual(settings.value("mangalmm_ocr/max_long_side", 0, type=int), 1408)
+
 
 if __name__ == "__main__":
     unittest.main()

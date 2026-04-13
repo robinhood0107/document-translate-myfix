@@ -17,14 +17,234 @@
     </message>
 </context>
 <context>
+    <name>AutomaticProgress</name>
+    <message>
+        <source>Calculating</source>
+        <translation type="unfinished">Hesaplanıyor</translation>
+    </message>
+    <message>
+        <source>Recent History</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Live Learning</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Live Stable</source>
+        <translation type="unfinished"></translation>
+    </message>
+</context>
+<context>
+    <name>AutomaticProgressDialog</name>
+    <message>
+        <source>Automatic Translation Progress</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>자동번역 준비 중</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>초기화 중...</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>경과 시간</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>남은 시간</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>예상 완료 시각</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>ETA 신뢰도</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>현재 작업</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>서비스</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>페이지</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>단계</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>파일명</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>세부 로그</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>재시도</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Settings 열기</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Cancel</source>
+        <translation type="unfinished">İptal</translation>
+    </message>
+    <message>
+        <source>닫기</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Calculating</source>
+        <translation type="unfinished">Hesaplanıyor</translation>
+    </message>
+    <message>
+        <source>작업이 취소되었습니다.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>자동번역 진행 중</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>작업이 실패했습니다.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>자동번역이 완료되었습니다.</source>
+        <translation type="unfinished"></translation>
+    </message>
+</context>
+<context>
     <name>ComicTranslate</name>
+    <message>
+        <source>Project files cannot be opened together with other imported files.
+Choose either a project file or image/document/archive files.</source>
+        <translation>Proje dosyaları diğer içe aktarılan dosyalarla birlikte açılamaz.
+Bir proje dosyası ya da yalnızca görüntü/belge/arşiv dosyaları seçin.</translation>
+    </message>
+    <message>
+        <source>Gemma와 OCR 준비를 확인하는 중...</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>취소 중...</source>
+        <translation type="unfinished"></translation>
+    </message>
     <message>
         <source>PaddleOCR VL Settings</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
+        <source>HunyuanOCR Settings</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Gemma Local Server Settings</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>작업이 취소되었습니다.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>자동번역 준비 또는 실행에 실패했습니다.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
         <source>Error</source>
         <translation>Hata</translation>
+    </message>
+    <message>
+        <source>No pages are loaded for TXT/MD import or export.</source>
+        <translation>TXT/MD içe aktarma veya dışa aktarma için yüklü sayfa yok.</translation>
+    </message>
+    <message>
+        <source>TXT/MD import and export require unique page file names.
+Rename duplicate pages first.
+Duplicates:
+{names}</source>
+        <translation>TXT/MD içe aktarma ve dışa aktarma işlemleri benzersiz sayfa dosya adları gerektirir.
+Önce yinelenen sayfaları yeniden adlandırın.
+Yinelenenler:
+{names}</translation>
+    </message>
+    <message>
+        <source>TXT/MD Export Failed</source>
+        <translation>TXT/MD dışa aktarma başarısız</translation>
+    </message>
+    <message>
+        <source>Failed to export source text.</source>
+        <translation>Kaynak metin dışa aktarılamadı.</translation>
+    </message>
+    <message>
+        <source>Exported source text to:
+{path}</source>
+        <translation>Kaynak metin şu konuma dışa aktarıldı:
+{path}</translation>
+    </message>
+    <message>
+        <source>Translation imported and matched successfully.</source>
+        <translation>Çeviri başarıyla içe aktarıldı ve eşleştirildi.</translation>
+    </message>
+    <message>
+        <source>Imported TXT/MD content was only partially matched. Make sure the file follows the exported exchange format.</source>
+        <translation>İçe aktarılan TXT/MD içeriği yalnızca kısmen eşleşti. Dosyanın dışa aktarılan değişim biçimine uyduğundan emin olun.</translation>
+    </message>
+    <message>
+        <source>Missing pages:</source>
+        <translation>Eksik sayfalar:</translation>
+    </message>
+    <message>
+        <source>Unexpected pages:</source>
+        <translation>Beklenmeyen sayfalar:</translation>
+    </message>
+    <message>
+        <source>Unmatched pages:</source>
+        <translation>Eşleşmeyen sayfalar:</translation>
+    </message>
+    <message>
+        <source>TXT Files (*.txt *.TXT)</source>
+        <translation>TXT Dosyaları (*.txt *.TXT)</translation>
+    </message>
+    <message>
+        <source>Markdown Files (*.md *.MD)</source>
+        <translation>Markdown Dosyaları (*.md *.MD)</translation>
+    </message>
+    <message>
+        <source>Import Translation</source>
+        <translation>Çeviriyi İçe Aktar</translation>
+    </message>
+    <message>
+        <source>TXT/MD Import Failed</source>
+        <translation>TXT/MD içe aktarma başarısız</translation>
+    </message>
+    <message>
+        <source>Failed to import translation text.</source>
+        <translation>Çeviri metni içe aktarılamadı.</translation>
+    </message>
+    <message>
+        <source>Automatic TXT/MD export failed for {target}{suffix}.</source>
+        <translation>{target}{suffix} için otomatik TXT/MD dışa aktarma başarısız oldu.</translation>
+    </message>
+    <message>
+        <source>One-Page Auto</source>
+        <translation type="unfinished">Tek Sayfa Otomatik</translation>
+    </message>
+    <message>
+        <source>Translate All</source>
+        <translation type="unfinished">Tümünü Çevir</translation>
     </message>
     <message>
         <source>No failed pages from the latest batch are available to retry.</source>
@@ -35,12 +255,39 @@
         <translation>Otomatik işleme için kullanılabilir bir mevcut sayfa yok.</translation>
     </message>
     <message>
+        <source>자동번역이 완료되었습니다.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
         <source>Downloading model file: {filename}</source>
         <translation>Model dosyası indiriliyor: {filename}</translation>
     </message>
     <message>
         <source>Unsaved Changes</source>
         <translation>Kaydedilmemiş Değişiklikler</translation>
+    </message>
+    <message>
+        <source>Load pages to see automatic output estimates.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Archive estimates (PNG / JPG / WEBP):</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>{name}: {size}, {time}, {ratio}</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Images are saved individually at maximum quality.
+Translated and cleaned images are exported.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Project switching is unavailable while automatic processing is running.
+Cancel the current run or wait for it to finish first.</source>
+        <translation>Otomatik işlem çalışırken proje değiştirilemez.
+Geçerli çalıştırmayı iptal edin ya da tamamlanmasını bekleyin.</translation>
     </message>
     <message>
         <source>Save changes to this file?</source>
@@ -175,6 +422,33 @@
     </message>
 </context>
 <context>
+    <name>CorrectionDictionaryTable</name>
+    <message>
+        <source>Keyword</source>
+        <translation>Anahtar sözcük</translation>
+    </message>
+    <message>
+        <source>Substitution</source>
+        <translation>Yerine koyma</translation>
+    </message>
+    <message>
+        <source>Use regex</source>
+        <translation>Regex kullan</translation>
+    </message>
+    <message>
+        <source>Case sensitive</source>
+        <translation>Büyük/küçük harfe duyarlı</translation>
+    </message>
+    <message>
+        <source>New</source>
+        <translation>Yeni</translation>
+    </message>
+    <message>
+        <source>Delete</source>
+        <translation>Sil</translation>
+    </message>
+</context>
+<context>
     <name>CredentialsPage</name>
     <message>
         <source>Save Keys</source>
@@ -270,7 +544,7 @@ Use Custom Local Server(Gemma) with the included Gemma Docker setup.</source>
     </message>
     <message>
         <source>File</source>
-        <translation type="unfinished"></translation>
+        <translation type="unfinished">Dosya</translation>
     </message>
     <message>
         <source>Chapter</source>
@@ -347,6 +621,59 @@ Use Custom Local Server(Gemma) with the included Gemma Docker setup.</source>
         <source>Export Debug Metadata (Debug)</source>
         <translation type="unfinished"></translation>
     </message>
+    <message>
+        <source>Automatic Output</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>These defaults control automatic output after batch translation.
+Project-specific quick settings can override them for the current project.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Default output target:</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Individual images</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Single archive</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Default image format:</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Default archive format:</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Default archive image format:</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Default archive compression level:</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>PNG/JPG/WEBP images are saved at maximum quality.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Archive compression only affects the ZIP/CBZ container, not image quality.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Load pages to see automatic output estimates.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Same as source</source>
+        <translation type="unfinished"></translation>
+    </message>
 </context>
 <context>
     <name>GemmaLocalServerPage</name>
@@ -355,11 +682,12 @@ Use Custom Local Server(Gemma) with the included Gemma Docker setup.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>Comic Translate can use your local Gemma Docker server for translation.
-1. Run `docker compose pull --policy always` and then `docker compose up -d --force-recreate` in the repository root.
+        <source>Comic Translate can reuse your local Gemma Docker server for translation.
+1. Keep the existing Gemma container running if it is already healthy.
 2. In Settings &gt; Credentials, use Endpoint URL `http://127.0.0.1:18080/v1`.
-3. Set Model to `gemma-4-26b-a4b-it-heretic.q3_k_m.gguf`.
-If responses are truncated, lower Chunk Size or increase LLAMA_CTX_SIZE in docker-compose.yaml.</source>
+3. Set Model to the exact GGUF filename in `testmodel/` (recommended: `gemma-4-26B-IQ4_NL.gguf`).
+Automatic translation reuses an existing Gemma runtime first and only runs `docker compose up -d` when needed.
+If responses are truncated, lower Chunk Size or Max Completion Tokens before recreating the container.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
@@ -379,14 +707,36 @@ If responses are truncated, lower Chunk Size or increase LLAMA_CTX_SIZE in docke
         <translation type="unfinished"></translation>
     </message>
     <message>
+        <source>Advanced Sampler Settings</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Temperature</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Top K</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Top P</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Min P</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
         <source>Raw Response Log</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>Recommended starting values for the included Gemma Docker setup:
+        <source>Promoted winner defaults for the bundled Gemma runtime:
 - Chunk Size: 6
 - Max Completion Tokens: 512
-- Request Timeout: 180 seconds</source>
+- Request Timeout: 180 seconds
+- Temperature: 0.7
+- Top K / Top P / Min P: 64 / 0.95 / 0.0</source>
         <translation type="unfinished"></translation>
     </message>
 </context>
@@ -595,6 +945,74 @@ Start the server with both the HunyuanOCR GGUF model and the matching mmproj fil
     <name>MTreeView</name>
     <message>
         <source>No Data</source>
+        <translation type="unfinished"></translation>
+    </message>
+</context>
+<context>
+    <name>MangaLMMOCRPage</name>
+    <message>
+        <source>MangaLMM Settings</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Connect Comic Translate to your local MangaLMM llama.cpp server.
+This OCR engine sends cropped text regions to the OpenAI-compatible /chat/completions endpoint.
+MangaLMM is used as block-crop OCR only, not as full-page spotting inside the app.
+Keep the default localhost URL if you want Comic Translate to reuse the bundled Docker runtime.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Server URL</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>MangaLMM OCR Tuning</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Max Completion Tokens</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Parallel Workers</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Request Timeout (sec)</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Raw Response Log</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Safe Resize</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Enable Safe Resize</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Max Pixels</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Max Long Side</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Recommended values for the bundled MangaLMM runtime:
+- ctx-size 4096: enough for block OCR while keeping VRAM safer
+- Max Completion Tokens: 256
+- Parallel Workers: 1
+- Request Timeout: 60 seconds
+- Safe Resize: on
+- Max Pixels / Max Long Side: 1200000 / 1280
+Reasoning:
+- Keep the request deterministic with temperature 0 and top_k 1 internally.
+- Large crops are resized only when needed, and OCR region boxes are mapped back to original coordinates.
+- Workers 1 is the safest default when Gemma and MangaLMM stay resident on the same GPU.</source>
         <translation type="unfinished"></translation>
     </message>
 </context>
@@ -848,6 +1266,14 @@ Lütfen internet bağlantınızı kontrol edin.</translation>
         <translation>Çevirmen</translation>
     </message>
     <message>
+        <source>Gemma local server runtime setup failed</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Gemma local server is unavailable</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
         <source>No font selected</source>
         <translation type="unfinished"></translation>
     </message>
@@ -960,6 +1386,10 @@ Install it to use PSD features.</source>
         <translation>Ana Sayfa</translation>
     </message>
     <message>
+        <source>Open Latest Recent Project</source>
+        <translation>En son açılan projeyi aç</translation>
+    </message>
+    <message>
         <source>Settings</source>
         <translation>Ayarlar</translation>
     </message>
@@ -971,21 +1401,32 @@ Install it to use PSD features.</source>
         <source>Insert files into current project</source>
         <translation>Dosyaları mevcut projeye ekle</translation>
     </message>
+</context>
+<context>
+    <name>NotificationsPage</name>
     <message>
-        <source>Start New Project</source>
-        <translation>Yeni Proje Başlat</translation>
+        <source>Automatic Completion</source>
+        <translation>Otomatik tamamlama</translation>
     </message>
     <message>
-        <source>Your current project has unsaved changes. Start a new project?</source>
-        <translation>Mevcut projenizde kaydedilmemiş değişiklikler var. Yeni bir proje başlatılsın mı?</translation>
+        <source>Play a sound when automatic processing finishes successfully. Custom files must be placed in the repository music folder.</source>
+        <translation>Otomatik işlem başarıyla tamamlandığında bir ses çal. Özel dosyalar depo içindeki music klasörüne yerleştirilmelidir.</translation>
     </message>
     <message>
-        <source>Yes</source>
-        <translation>Evet</translation>
+        <source>Enable Completion Sound</source>
+        <translation>Tamamlama sesini etkinleştir</translation>
     </message>
     <message>
-        <source>No</source>
-        <translation>Hayır</translation>
+        <source>Test Sound</source>
+        <translation>Sesi test et</translation>
+    </message>
+    <message>
+        <source>Music Folder: {path}</source>
+        <translation>music klasörü: {path}</translation>
+    </message>
+    <message>
+        <source>System sound</source>
+        <translation>Sistem sesi</translation>
     </message>
 </context>
 <context>
@@ -1046,6 +1487,38 @@ Approximate GPU usage:
 <context>
     <name>PageListView</name>
     <message>
+        <source>Name</source>
+        <translation>Ad</translation>
+    </message>
+    <message>
+        <source>Date</source>
+        <translation>Tarih</translation>
+    </message>
+    <message>
+        <source>Sort by Name</source>
+        <translation>Ada göre sırala</translation>
+    </message>
+    <message>
+        <source>Name: A to Z</source>
+        <translation>Ad: A&apos;dan Z&apos;ye</translation>
+    </message>
+    <message>
+        <source>Name: Z to A</source>
+        <translation>Ad: Z&apos;den A&apos;ya</translation>
+    </message>
+    <message>
+        <source>Sort by Date</source>
+        <translation>Tarihe göre sırala</translation>
+    </message>
+    <message>
+        <source>Date: Newest First</source>
+        <translation>Tarih: en yeni önce</translation>
+    </message>
+    <message>
+        <source>Date: Oldest First</source>
+        <translation>Tarih: en eski önce</translation>
+    </message>
+    <message>
         <source>Insert</source>
         <translation>Ekle</translation>
     </message>
@@ -1075,6 +1548,161 @@ Approximate GPU usage:
     <message>
         <source>Theme</source>
         <translation>Tema</translation>
+    </message>
+</context>
+<context>
+    <name>PipelineStatusPanel</name>
+    <message>
+        <source>Pipeline Status</source>
+        <translation>İşlem hattı durumu</translation>
+    </message>
+    <message>
+        <source>Idle</source>
+        <translation>Boşta</translation>
+    </message>
+    <message>
+        <source>Service</source>
+        <translation>Servis</translation>
+    </message>
+    <message>
+        <source>Progress</source>
+        <translation>İlerleme</translation>
+    </message>
+    <message>
+        <source>File</source>
+        <translation>Dosya</translation>
+    </message>
+    <message>
+        <source>ETA</source>
+        <translation>ETA</translation>
+    </message>
+    <message>
+        <source>Message</source>
+        <translation>Mesaj</translation>
+    </message>
+    <message>
+        <source>No Preview</source>
+        <translation>Önizleme yok</translation>
+    </message>
+    <message>
+        <source>Cancel</source>
+        <translation>İptal</translation>
+    </message>
+    <message>
+        <source>Logs</source>
+        <translation>Günlük</translation>
+    </message>
+    <message>
+        <source>Report</source>
+        <translation>Rapor</translation>
+    </message>
+    <message>
+        <source>Retry</source>
+        <translation>Yeniden dene</translation>
+    </message>
+    <message>
+        <source>Settings</source>
+        <translation>Ayarlar</translation>
+    </message>
+    <message>
+        <source>Open Output</source>
+        <translation>Çıktıyı aç</translation>
+    </message>
+    <message>
+        <source>Close</source>
+        <translation>Kapat</translation>
+    </message>
+    <message>
+        <source>Window</source>
+        <translation>Pencere</translation>
+    </message>
+    <message>
+        <source>Switch to window mode</source>
+        <translation>Pencere moduna geç</translation>
+    </message>
+    <message>
+        <source>Embed</source>
+        <translation>Göm</translation>
+    </message>
+    <message>
+        <source>Switch to embedded mode</source>
+        <translation>Gömülü moda geç</translation>
+    </message>
+    <message>
+        <source>Hide logs</source>
+        <translation>Günlüğü gizle</translation>
+    </message>
+    <message>
+        <source>Show logs</source>
+        <translation>Günlüğü göster</translation>
+    </message>
+    <message>
+        <source>Automatic</source>
+        <translation>Otomatik</translation>
+    </message>
+    <message>
+        <source>Calculating</source>
+        <translation>Hesaplanıyor</translation>
+    </message>
+    <message>
+        <source>Status</source>
+        <translation>Durum</translation>
+    </message>
+    <message>
+        <source>Info</source>
+        <translation>Bilgi</translation>
+    </message>
+    <message>
+        <source>Success</source>
+        <translation>Başarılı</translation>
+    </message>
+    <message>
+        <source>Warning</source>
+        <translation>Uyarı</translation>
+    </message>
+    <message>
+        <source>Error</source>
+        <translation>Hata</translation>
+    </message>
+    <message>
+        <source>Download</source>
+        <translation>İndirme</translation>
+    </message>
+    <message>
+        <source>Local Service</source>
+        <translation>Yerel servis</translation>
+    </message>
+    <message>
+        <source>Network</source>
+        <translation>Ağ</translation>
+    </message>
+    <message>
+        <source>Content Filter</source>
+        <translation>İçerik filtresi</translation>
+    </message>
+    <message>
+        <source>Batch Report</source>
+        <translation>Toplu işlem raporu</translation>
+    </message>
+    <message>
+        <source>Pipeline</source>
+        <translation>İşlem hattı</translation>
+    </message>
+    <message>
+        <source>Running</source>
+        <translation>Çalışıyor</translation>
+    </message>
+    <message>
+        <source>Done</source>
+        <translation>Tamamlandı</translation>
+    </message>
+    <message>
+        <source>Failed</source>
+        <translation>Başarısız</translation>
+    </message>
+    <message>
+        <source>Cancelled</source>
+        <translation>İptal edildi</translation>
     </message>
 </context>
 <context>
@@ -1469,6 +2097,18 @@ Restart now?</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
+        <source>Optimal+ (HunyuanOCR / MangaLMM / PaddleOCR VL)</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>MangaLMM</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>RT-DETR-v2 + Legacy BBox Rescue + Source LaMa</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
         <source>Personalization</source>
         <translation>Kişiselleştirme</translation>
     </message>
@@ -1485,6 +2125,10 @@ Restart now?</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
+        <source>MangaLMM Settings</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
         <source>Gemma Local Server Settings</source>
         <translation type="unfinished"></translation>
     </message>
@@ -1495,6 +2139,14 @@ Restart now?</source>
     <message>
         <source>Text Rendering</source>
         <translation>Metin Renderlama</translation>
+    </message>
+    <message>
+        <source>User Dictionaries</source>
+        <translation>Kullanıcı sözlükleri</translation>
+    </message>
+    <message>
+        <source>Notifications</source>
+        <translation>Bildirimler</translation>
     </message>
     <message>
         <source>Project</source>
@@ -1619,6 +2271,12 @@ Başlamak için bir proje açın veya oluşturun.</translation>
         <source>Supported Files ({exts});;All Files (*)</source>
         <translation>Desteklenen Dosyalar ({exts});;Tüm Dosyalar (*)</translation>
     </message>
+    <message>
+        <source>Project files cannot be opened together with other imported files.
+Choose either a project file or image/document/archive files.</source>
+        <translation>Proje dosyaları diğer içe aktarılan dosyalarla birlikte açılamaz.
+Bir proje dosyası ya da yalnızca görüntü/belge/arşiv dosyaları seçin.</translation>
+    </message>
 </context>
 <context>
     <name>TextRenderingPage</name>
@@ -1648,65 +2306,94 @@ Başlamak için bir proje açın veya oluşturun.</translation>
     </message>
 </context>
 <context>
+    <name>ToolStateMixin</name>
+    <message>
+        <source>Add Inpaint Mask
+Paint areas to clean before running inpainting.
+These pixels are added to the final mask.</source>
+        <translation>Inpaint maskesi ekle
+Inpainting&apos;i çalıştırmadan önce temizlenecek alanları boyayın.
+Bu pikseller son maskeye eklenir.</translation>
+    </message>
+    <message>
+        <source>Erase Mask Strokes
+Remove parts of drawn add/exclude strokes.
+This edits mask strokes only and does not change applied patches.</source>
+        <translation>Maske çizgilerini sil
+Çizilmiş ekleme/çıkarma çizgilerinin bir kısmını silin.
+Bu işlem yalnızca maske çizgilerini düzenler; uygulanmış yamaları değiştirmez.</translation>
+    </message>
+    <message>
+        <source>Exclude from Inpainting
+Protect areas from inpainting.
+Excluded pixels are removed from the final mask even if they were auto-detected or painted.</source>
+        <translation>Inpainting&apos;den hariç tut
+Alanları inpainting işleminden koruyun.
+Hariç tutulan pikseller, otomatik algılanmış veya elle boyanmış olsalar bile son maskeden çıkarılır.</translation>
+    </message>
+    <message>
+        <source>Restore Original over Inpainted Area
+Paint over an inpainted result to bring back the original image.
+This creates a restore patch above existing inpaint patches on the current page.</source>
+        <translation>İnpaint edilmiş alan üzerinde orijinali geri yükle
+Inpainting sonucunun üzerine boyayarak özgün görüntüyü geri getirin.
+Bu işlem, geçerli sayfadaki mevcut inpaint yamalarının üstüne bir geri yükleme yaması oluşturur.</translation>
+    </message>
+    <message>
+        <source>Restore Original over Inpainted Area
+No inpainted patch exists on this page yet.
+Run inpainting first, then use this tool to recover original pixels where needed.</source>
+        <translation>İnpaint edilmiş alan üzerinde orijinali geri yükle
+Bu sayfada henüz bir inpaint yaması yok.
+Önce inpainting çalıştırın, sonra gerektiğinde özgün pikselleri geri getirmek için bu aracı kullanın.</translation>
+    </message>
+    <message>
+        <source>Clear Inpaint Mask Strokes
+Remove all add/exclude mask strokes on the current page.
+Applied inpaint and restore patches are kept; use Undo to revert patch changes.</source>
+        <translation>Inpaint maske çizgilerini temizle
+Geçerli sayfadaki tüm ekleme/çıkarma maske çizgilerini kaldırın.
+Uygulanmış inpaint ve geri yükleme yamaları korunur; yama değişikliklerini geri almak için Geri Al&apos;ı kullanın.</translation>
+    </message>
+    <message>
+        <source>Inpaint Brush Size
+Adjust the size used by add, erase, exclude, and restore brushes.</source>
+        <translation>Inpaint fırça boyutu
+Ekleme, silme, hariç tutma ve geri yükleme fırçalarında kullanılan boyutu ayarlayın.</translation>
+    </message>
+</context>
+<context>
     <name>ToolsPage</name>
     <message>
         <source>Translator</source>
         <translation>Çevirmen</translation>
     </message>
     <message>
+        <source>Custom Local Server(Gemma)</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
         <source>Text Recognition</source>
         <translation>Metin Tanıma</translation>
+    </message>
+    <message>
+        <source>PaddleOCR VL</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Automatic Runtime</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Automatic mode is fixed to RT-DETR-v2 detection, legacy bbox rescue masking, and source block-wise LaMa cleaning.</source>
+        <translation type="unfinished"></translation>
     </message>
     <message>
         <source>Text Detector</source>
         <translation>Metin Algılayıcı</translation>
     </message>
     <message>
-        <source>Precise Masking</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Mask Refiner</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>legacy_bbox</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>ctd</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Keep Existing Lines</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>detect_size</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>det_rearrange_max_batches</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
         <source>device</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>font size multiplier</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>font size max</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>font size min</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>mask dilate size</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
@@ -1716,10 +2403,6 @@ Başlamak için bir proje açın veya oluşturun.</translation>
     <message>
         <source>Inpainter</source>
         <translation>Boyama Aracı</translation>
-    </message>
-    <message>
-        <source>AOT</source>
-        <translation>AOT</translation>
     </message>
     <message>
         <source>inpaint_size</source>
@@ -1778,6 +2461,29 @@ sonra yeniden boyutlandırılmış görselde boyama işlemi yapın.</translation
     <message>
         <source>lama_mpe</source>
         <translation type="unfinished"></translation>
+    </message>
+</context>
+<context>
+    <name>UserDictionariesPage</name>
+    <message>
+        <source>Correction dictionaries rewrite OCR and translation results before they are saved to the project.</source>
+        <translation>Düzeltme sözlükleri, OCR ve çeviri sonuçlarını projeye kaydetmeden önce yeniden yazar.</translation>
+    </message>
+    <message>
+        <source>OCR Result Dictionary</source>
+        <translation>OCR Sonuç Sözlüğü</translation>
+    </message>
+    <message>
+        <source>Apply these substitutions immediately after OCR returns text, before the source text is stored.</source>
+        <translation>Bu değiştirmeleri, OCR metni döndürdükten hemen sonra ve kaynak metin kaydedilmeden önce uygula.</translation>
+    </message>
+    <message>
+        <source>Translation Result Dictionary</source>
+        <translation>Çeviri Sonuç Sözlüğü</translation>
+    </message>
+    <message>
+        <source>Apply these substitutions immediately after translation or TXT/MD import returns text, before the translation is stored.</source>
+        <translation>Bu değiştirmeleri, çeviri veya TXT/MD içe aktarma metni döndürdükten hemen sonra ve çeviri kaydedilmeden önce uygula.</translation>
     </message>
 </context>
 <context>
@@ -1931,6 +2637,50 @@ sonra yeniden boyutlandırılmış görselde boyama işlemi yapın.</translation
         <translation>Stil</translation>
     </message>
     <message>
+        <source>When enabled, this project inherits the automatic output settings from Settings.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Output target</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Individual images</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Single archive</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Image format</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Archive format</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Archive image format</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Compression level</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>PNG/JPG/WEBP images are saved at maximum quality.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Archive compression only affects the ZIP/CBZ container, not image quality.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Load pages to see automatic output estimates.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
         <source>Top</source>
         <translation>Üst</translation>
     </message>
@@ -2032,20 +2782,84 @@ back on the Image (for further editing)</source>
         <translation>Tüm blokların boyutunu büyüt</translation>
     </message>
     <message>
-        <source>Draw Brush Strokes for Cleaning Image</source>
-        <translation>Görseli temizlemek için fırça darbeleri çiz</translation>
+        <source>TXT/MD</source>
+        <translation>TXT/MD</translation>
     </message>
     <message>
-        <source>Erase Brush Strokes</source>
-        <translation>Fırça darbelerini sil</translation>
+        <source>Export Source TXT</source>
+        <translation>Kaynak TXT Dışa Aktar</translation>
     </message>
     <message>
-        <source>Remove all the brush strokes on the Image</source>
-        <translation>Görseldeki tüm fırça darbelerini kaldır</translation>
+        <source>Export the current project&apos;s source text in the TXT exchange format.</source>
+        <translation>Geçerli projenin kaynak metnini TXT değişim biçiminde dışa aktarır.</translation>
     </message>
     <message>
-        <source>Brush/Eraser Size Slider</source>
-        <translation>Fırça/Silgi Boyutu Kaydırıcısı</translation>
+        <source>Import Translation TXT</source>
+        <translation>Çeviri TXT İçe Aktar</translation>
+    </message>
+    <message>
+        <source>Import translated text from a TXT exchange file and rebuild text boxes to fit.</source>
+        <translation>Çevrilmiş metni bir TXT değişim dosyasından içe aktarır ve metin kutularını sığacak şekilde yeniden oluşturur.</translation>
+    </message>
+    <message>
+        <source>Export Source MD</source>
+        <translation>Kaynak MD Dışa Aktar</translation>
+    </message>
+    <message>
+        <source>Export the current project&apos;s source text in the Markdown exchange format.</source>
+        <translation>Geçerli projenin kaynak metnini Markdown değişim biçiminde dışa aktarır.</translation>
+    </message>
+    <message>
+        <source>Import Translation MD</source>
+        <translation>Çeviri MD İçe Aktar</translation>
+    </message>
+    <message>
+        <source>Import translated text from a Markdown exchange file and rebuild text boxes to fit.</source>
+        <translation>Çevrilmiş metni bir Markdown değişim dosyasından içe aktarır ve metin kutularını sığacak şekilde yeniden oluşturur.</translation>
+    </message>
+    <message>
+        <source>Auto Export Source TXT</source>
+        <translation>Kaynak TXT Otomatik Dışa Aktar</translation>
+    </message>
+    <message>
+        <source>After a successful automatic run, overwrite the TXT source exchange file with only the pages from that run.</source>
+        <translation>Başarılı bir otomatik çalıştırmadan sonra, TXT kaynak değişim dosyasını yalnızca o çalıştırmadaki sayfalarla üzerine yazar.</translation>
+    </message>
+    <message>
+        <source>Auto Export Source MD</source>
+        <translation>Kaynak MD Otomatik Dışa Aktar</translation>
+    </message>
+    <message>
+        <source>After a successful automatic run, overwrite the Markdown source exchange file with only the pages from that run.</source>
+        <translation>Başarılı bir otomatik çalıştırmadan sonra, Markdown kaynak değişim dosyasını yalnızca o çalıştırmadaki sayfalarla üzerine yazar.</translation>
+    </message>
+    <message>
+        <source>Auto Export Translation TXT</source>
+        <translation>Çeviri TXT Otomatik Dışa Aktar</translation>
+    </message>
+    <message>
+        <source>After a successful automatic run, overwrite the TXT translation exchange file with only the pages from that run.</source>
+        <translation>Başarılı bir otomatik çalıştırmadan sonra, TXT çeviri değişim dosyasını yalnızca o çalıştırmadaki sayfalarla üzerine yazar.</translation>
+    </message>
+    <message>
+        <source>Auto Export Translation MD</source>
+        <translation>Çeviri MD Otomatik Dışa Aktar</translation>
+    </message>
+    <message>
+        <source>After a successful automatic run, overwrite the Markdown translation exchange file with only the pages from that run.</source>
+        <translation>Başarılı bir otomatik çalıştırmadan sonra, Markdown çeviri değişim dosyasını yalnızca o çalıştırmadaki sayfalarla üzerine yazar.</translation>
+    </message>
+    <message>
+        <source>Output</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Use global output settings</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Same as source</source>
+        <translation type="unfinished"></translation>
     </message>
     <message>
         <source>Box Drawing</source>
@@ -2054,6 +2868,13 @@ back on the Image (for further editing)</source>
     <message>
         <source>Inpainting</source>
         <translation>Boyama</translation>
+    </message>
+</context>
+<context>
+    <name>_PageListContentView</name>
+    <message>
+        <source>{count} pages</source>
+        <translation>{count} sayfa</translation>
     </message>
 </context>
 <context>
@@ -2146,7 +2967,7 @@ It may have already been moved, renamed, or deleted.
     </message>
     <message>
         <source>Delete</source>
-        <translation type="unfinished">Sil</translation>
+        <translation>Sil</translation>
     </message>
     <message>
         <source>Cancel</source>
@@ -2306,8 +3127,8 @@ Taşınmış, yeniden adlandırılmış veya silinmiş olabilir.
         <translation>GPT-4.1</translation>
     </message>
     <message>
-        <source>Claude-4.5-Sonnet</source>
-        <translation>Claude-4.5-Sonnet</translation>
+        <source>Claude-4.6-Sonnet</source>
+        <translation type="unfinished"></translation>
     </message>
     <message>
         <source>Claude-4.5-Haiku</source>
@@ -2352,6 +3173,10 @@ Taşınmış, yeniden adlandırılmış veya silinmiş olabilir.
         <translation type="unfinished"></translation>
     </message>
     <message>
+        <source>Optimal+ (HunyuanOCR / MangaLMM / PaddleOCR VL)</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
         <source>Microsoft OCR</source>
         <translation type="unfinished">Microsoft OCR</translation>
     </message>
@@ -2369,6 +3194,10 @@ Taşınmış, yeniden adlandırılmış veya silinmiş olabilir.
     </message>
     <message>
         <source>HunyuanOCR</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>MangaLMM</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
@@ -2439,6 +3268,14 @@ Taşınmış, yeniden adlandırılmış veya silinmiş olabilir.
     </message>
     <message>
         <source>HunyuanOCR Settings</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>MangaLMM Settings</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Gemma Local Server Settings</source>
         <translation type="unfinished"></translation>
     </message>
 </context>
