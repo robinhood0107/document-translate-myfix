@@ -4,6 +4,7 @@ import requests
 import numpy as np
 import shutil
 import tempfile
+import traceback
 from typing import Any, Callable, Tuple
 
 from PySide6 import QtCore, QtWidgets
@@ -27,6 +28,14 @@ from modules.utils.file_handler import FileHandler
 from modules.utils.pipeline_config import validate_settings
 from modules.utils.automatic_progress import AutomaticProgressTracker
 from modules.utils.download import set_download_callback
+from modules.utils.txt_md_exchange import (
+    apply_translation_pages,
+    collect_page_entries,
+    dump_exchange_text,
+    find_duplicate_page_names,
+    page_name_from_path,
+    parse_translation_exchange_file,
+)
 from pipeline.main_pipeline import ComicTranslatePipeline
 
 from app.controllers.image import ImageStateController
@@ -241,10 +250,21 @@ class ComicTranslate(ComicTranslateUI):
         self.set_all_button.clicked.connect(self.text_ctrl.set_src_trg_all)
         self.clear_rectangles_button.clicked.connect(self.image_viewer.clear_rectangles)
         self.clear_brush_strokes_button.clicked.connect(self.image_viewer.clear_brush_strokes)
+        self.export_source_txt_button.clicked.connect(lambda: self.export_source_exchange(".txt"))
+        self.import_translation_txt_button.clicked.connect(lambda: self.import_translation_exchange(".txt"))
+        self.export_source_md_button.clicked.connect(lambda: self.export_source_exchange(".md"))
+        self.import_translation_md_button.clicked.connect(lambda: self.import_translation_exchange(".md"))
         self.draw_blklist_blks.clicked.connect(self.restore_text_blocks)
         self.change_all_blocks_size_dec.clicked.connect(lambda: self.text_ctrl.change_all_blocks_size(-int(self.change_all_blocks_size_diff.text())))
         self.change_all_blocks_size_inc.clicked.connect(lambda: self.text_ctrl.change_all_blocks_size(int(self.change_all_blocks_size_diff.text())))
         self.delete_button.clicked.connect(self.delete_selected_box)
+        for checkbox in (
+            self.auto_export_source_txt_checkbox,
+            self.auto_export_source_md_checkbox,
+            self.auto_export_translation_txt_checkbox,
+            self.auto_export_translation_md_checkbox,
+        ):
+            checkbox.stateChanged.connect(self.settings_page._save_settings_if_not_loading)
 
         # Connect text edit widgets
         self.s_text_edit.textChanged.connect(self.text_ctrl.update_text_block)
@@ -711,6 +731,235 @@ class ComicTranslate(ComicTranslateUI):
     def register_batch_skip(self, image_path: str, skip_reason: str, error: str):
         self.batch_report_ctrl.register_batch_skip(image_path, skip_reason, error)
 
+    def _sync_txt_md_project_state(self) -> None:
+        if self.webtoon_mode:
+            manager = getattr(self.image_viewer, "webtoon_manager", None)
+            scene_mgr = getattr(manager, "scene_item_manager", None) if manager is not None else None
+            if scene_mgr is not None:
+                scene_mgr.save_all_scene_items_to_states()
+        else:
+            self.image_ctrl.save_current_image_state()
+
+    def _ensure_txt_md_ready(self) -> bool:
+        if not self.image_files:
+            MMessage.info(
+                text=self.tr("No pages are loaded for TXT/MD import or export."),
+                parent=self,
+                duration=5,
+                closable=True,
+            )
+            return False
+
+        duplicates = find_duplicate_page_names(self.image_files)
+        if duplicates:
+            MMessage.warning(
+                text=self.tr(
+                    "TXT/MD import and export require unique page file names.\nRename duplicate pages first.\nDuplicates:\n{names}"
+                ).format(names="\n".join(duplicates)),
+                parent=self,
+                duration=None,
+                closable=True,
+            )
+            return False
+        return True
+
+    def _txt_md_default_dir(self) -> str:
+        return self.project_ctrl._get_default_export_dir()
+
+    def _txt_md_bundle_name(self) -> str:
+        return self.project_ctrl._get_export_bundle_name()
+
+    def _txt_md_save_path(self, target: str, suffix: str) -> str:
+        return os.path.join(
+            self._txt_md_default_dir(),
+            f"{self._txt_md_bundle_name()}_{target}{suffix}",
+        )
+
+    def _write_txt_md_exchange(
+        self,
+        target: str,
+        suffix: str,
+        page_paths: list[str],
+    ) -> str:
+        page_entries = collect_page_entries(page_paths, self.image_states, target)
+        save_path = self._txt_md_save_path(target, suffix)
+        return dump_exchange_text(save_path, page_entries)
+
+    def export_source_exchange(self, suffix: str) -> None:
+        if not self._ensure_txt_md_ready():
+            return
+
+        self._sync_txt_md_project_state()
+        try:
+            save_path = self._write_txt_md_exchange("source", suffix, list(self.image_files))
+        except Exception as exc:
+            error_text = traceback.format_exc()
+            Messages.show_error_with_copy(
+                self,
+                self.tr("TXT/MD Export Failed"),
+                self.tr("Failed to export source text."),
+                error_text,
+            )
+            logger.exception("Failed to export source exchange file: %s", exc)
+            return
+
+        MMessage.success(
+            text=self.tr("Exported source text to:\n{path}").format(path=save_path),
+            parent=self,
+            duration=None,
+            closable=True,
+        )
+
+    def _refresh_after_translation_import(self, matched_paths: list[str]) -> None:
+        if not matched_paths:
+            return
+
+        current_file = None
+        if 0 <= self.curr_img_idx < len(self.image_files):
+            current_file = self.image_files[self.curr_img_idx]
+
+        for file_path in matched_paths:
+            stack = self.undo_stacks.get(file_path)
+            if stack is not None:
+                stack.clear()
+                stack.setClean()
+
+        if current_file not in matched_paths:
+            return
+
+        if self.webtoon_mode:
+            manager = getattr(self.image_viewer, "webtoon_manager", None)
+            scene_mgr = getattr(manager, "scene_item_manager", None) if manager is not None else None
+            if (
+                scene_mgr is not None
+                and manager is not None
+                and 0 <= self.curr_img_idx < len(self.image_files)
+                and self.curr_img_idx in manager.loaded_pages
+            ):
+                scene_mgr.unload_page_scene_items(self.curr_img_idx)
+                scene_mgr.load_page_scene_items(self.curr_img_idx)
+                self.text_ctrl.clear_text_edits()
+        else:
+            self.image_ctrl.on_render_state_ready(current_file)
+
+    def _build_translation_import_message(self, all_matched: bool, match_result: dict[str, list[str]]) -> str:
+        if all_matched:
+            return self.tr("Translation imported and matched successfully.")
+
+        lines = [
+            self.tr(
+                "Imported TXT/MD content was only partially matched. Make sure the file follows the exported exchange format."
+            )
+        ]
+        if match_result["missing_pages"]:
+            lines.append("")
+            lines.append(self.tr("Missing pages:"))
+            lines.extend(match_result["missing_pages"])
+        if match_result["unexpected_pages"]:
+            lines.append("")
+            lines.append(self.tr("Unexpected pages:"))
+            lines.extend(match_result["unexpected_pages"])
+        if match_result["unmatched_pages"]:
+            lines.append("")
+            lines.append(self.tr("Unmatched pages:"))
+            lines.extend(match_result["unmatched_pages"])
+        return "\n".join(lines).strip()
+
+    def import_translation_exchange(self, suffix: str) -> None:
+        if not self._ensure_txt_md_ready():
+            return
+
+        self._sync_txt_md_project_state()
+        file_filter = (
+            self.tr("TXT Files (*.txt *.TXT)")
+            if suffix == ".txt"
+            else self.tr("Markdown Files (*.md *.MD)")
+        )
+        selected_file, _ = QtWidgets.QFileDialog.getOpenFileName(
+            self,
+            self.tr("Import Translation"),
+            self._txt_md_default_dir(),
+            file_filter,
+        )
+        if not selected_file:
+            return
+
+        try:
+            parsed_pages = parse_translation_exchange_file(selected_file)
+            page_name_to_blocks: dict[str, list[TextBlock]] = {}
+            page_name_to_path: dict[str, str] = {}
+            for file_path in self.image_files:
+                state = self.image_ctrl.ensure_page_state(file_path)
+                page_name = page_name_from_path(file_path)
+                page_name_to_blocks[page_name] = state.get("blk_list", []) or []
+                page_name_to_path[page_name] = file_path
+
+            all_matched, match_result = apply_translation_pages(
+                parsed_pages,
+                page_name_to_blocks,
+                translation_rules=self.settings_page.get_translation_result_dictionary_rules(),
+            )
+            matched_paths = [
+                page_name_to_path[name]
+                for name in match_result["matched_pages"]
+                if name in page_name_to_path
+            ]
+            if matched_paths:
+                self.text_ctrl.rebuild_text_items_state_for_paths(matched_paths)
+                self._refresh_after_translation_import(matched_paths)
+                self.mark_project_dirty()
+
+            message = self._build_translation_import_message(all_matched, match_result)
+            icon = (
+                QtWidgets.QMessageBox.Icon.Information
+                if all_matched
+                else QtWidgets.QMessageBox.Icon.Warning
+            )
+            msg_box = QtWidgets.QMessageBox(self)
+            msg_box.setIcon(icon)
+            msg_box.setWindowTitle(self.tr("Import Translation"))
+            msg_box.setText(message)
+            msg_box.exec()
+        except Exception:
+            Messages.show_error_with_copy(
+                self,
+                self.tr("TXT/MD Import Failed"),
+                self.tr("Failed to import translation text."),
+                traceback.format_exc(),
+            )
+
+    def _run_txt_md_auto_exports(self, page_paths: list[str]) -> None:
+        if not page_paths:
+            return
+        if not self._ensure_txt_md_ready():
+            return
+
+        export_settings = self.settings_page.get_export_settings()
+        targets = []
+        if export_settings.get("auto_export_source_txt"):
+            targets.append(("source", ".txt"))
+        if export_settings.get("auto_export_source_md"):
+            targets.append(("source", ".md"))
+        if export_settings.get("auto_export_translation_txt"):
+            targets.append(("translation", ".txt"))
+        if export_settings.get("auto_export_translation_md"):
+            targets.append(("translation", ".md"))
+        for target, suffix in targets:
+            try:
+                self._write_txt_md_exchange(target, suffix, page_paths)
+            except Exception:
+                logger.exception("Automatic TXT/MD export failed for %s%s", target, suffix)
+                MMessage.warning(
+                    text=self.tr("Automatic TXT/MD export failed for {target}{suffix}.").format(
+                        target=target,
+                        suffix=suffix,
+                    ),
+                    parent=self,
+                    duration=None,
+                    closable=True,
+                )
+                return
+
     def _start_batch_process_for_paths(self, selected_paths: list[str], run_type: str = "batch") -> bool:
         if not selected_paths:
             return False
@@ -862,6 +1111,7 @@ class ComicTranslate(ComicTranslateUI):
         was_cancelled = self._batch_cancel_requested
         failed = self._batch_failed
         total_images = len(self.selected_batch)
+        completed_batch_paths = list(self.selected_batch)
         self._batch_active = False
         self._batch_cancel_requested = False
         self._batch_failed = False
@@ -899,6 +1149,7 @@ class ComicTranslate(ComicTranslateUI):
         if report and report["skipped_count"] > 0:
             Messages.show_batch_skipped_summary(self, report["skipped_count"])
         elif not was_cancelled and not failed:
+            self._run_txt_md_auto_exports(completed_batch_paths)
             Messages.show_translation_complete(self)
 
         # Drop cached models/sessions after batch to keep RAM bounded.
