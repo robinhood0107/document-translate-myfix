@@ -82,13 +82,17 @@ class PipelineConfigRuntimeTests(unittest.TestCase):
         main = _FakeMain()
         self.assertFalse(hasattr(main, "local_ocr_runtime_manager"))
 
-        with mock.patch.object(LocalOCRRuntimeManager, "validate_engine", return_value=None) as validate_engine:
+        with mock.patch.object(LocalOCRRuntimeManager, "validate_engine", return_value=None) as validate_engine, \
+             mock.patch.object(LocalOCRRuntimeManager, "preflight_cache_key", return_value="HunyuanOCR|http://127.0.0.1:28080/v1") as preflight_cache_key, \
+             mock.patch.object(LocalOCRRuntimeManager, "probe_managed_engine", return_value="healthy") as probe_managed_engine:
             result = validate_ocr(main, source_lang="Japanese")
 
         self.assertTrue(result)
         self.assertTrue(hasattr(main, "local_ocr_runtime_manager"))
         self.assertIsInstance(main.local_ocr_runtime_manager, LocalOCRRuntimeManager)
         validate_engine.assert_called_once()
+        preflight_cache_key.assert_called_once()
+        probe_managed_engine.assert_called_once()
 
     def test_validate_ocr_registers_preflight_error_for_local_runtime_failure(self) -> None:
         main = _FakeMain()
@@ -108,17 +112,44 @@ class PipelineConfigRuntimeTests(unittest.TestCase):
         self.assertIn("runtime setup failed", title)
         self.assertIn("No such image", details)
 
+    def test_validate_ocr_health_miss_does_not_fail_preflight(self) -> None:
+        main = _FakeMain()
+
+        with mock.patch.object(LocalOCRRuntimeManager, "validate_engine", return_value=None), \
+             mock.patch.object(LocalOCRRuntimeManager, "preflight_cache_key", return_value="HunyuanOCR|http://127.0.0.1:28080/v1"), \
+             mock.patch.object(LocalOCRRuntimeManager, "probe_managed_engine", return_value="unavailable") as probe_managed_engine:
+            result = validate_ocr(main, source_lang="Japanese")
+
+        self.assertTrue(result)
+        self.assertEqual(main.batch_report_ctrl.entries, [])
+        probe_managed_engine.assert_called_once()
+
+    def test_validate_ocr_reuses_preflight_cache_for_same_engine_and_url(self) -> None:
+        main = _FakeMain()
+        preflight_cache: dict[str, str] = {}
+
+        with mock.patch.object(LocalOCRRuntimeManager, "validate_engine", return_value=None), \
+             mock.patch.object(LocalOCRRuntimeManager, "preflight_cache_key", return_value="HunyuanOCR|http://127.0.0.1:28080/v1"), \
+             mock.patch.object(LocalOCRRuntimeManager, "probe_managed_engine", return_value="healthy") as probe_managed_engine:
+            first = validate_ocr(main, source_lang="Japanese", preflight_cache=preflight_cache)
+            second = validate_ocr(main, source_lang="Japanese", preflight_cache=preflight_cache)
+
+        self.assertTrue(first)
+        self.assertTrue(second)
+        self.assertEqual(preflight_cache, {"HunyuanOCR|http://127.0.0.1:28080/v1": "healthy"})
+        probe_managed_engine.assert_called_once()
+
     def test_validate_translator_initializes_runtime_manager_when_missing(self) -> None:
         main = _FakeMain()
         self.assertFalse(hasattr(main, "local_translation_runtime_manager"))
 
-        with mock.patch.object(LocalGemmaRuntimeManager, "ensure_server", return_value=None) as ensure_server:
+        with mock.patch.object(LocalGemmaRuntimeManager, "validate_server", return_value=None) as validate_server:
             result = validate_translator(main, "English")
 
         self.assertTrue(result)
         self.assertTrue(hasattr(main, "local_translation_runtime_manager"))
         self.assertIsInstance(main.local_translation_runtime_manager, LocalGemmaRuntimeManager)
-        ensure_server.assert_called_once()
+        validate_server.assert_called_once()
 
     def test_validate_translator_registers_preflight_error_for_runtime_failure(self) -> None:
         main = _FakeMain()
@@ -128,7 +159,7 @@ class PipelineConfigRuntimeTests(unittest.TestCase):
             settings_page_name="Gemma Local Server Settings",
         )
 
-        with mock.patch.object(LocalGemmaRuntimeManager, "ensure_server", side_effect=failure), \
+        with mock.patch.object(LocalGemmaRuntimeManager, "validate_server", side_effect=failure), \
              mock.patch("app.ui.messages.Messages.show_local_service_error", return_value=None):
             result = validate_translator(main, "English")
 
