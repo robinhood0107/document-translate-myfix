@@ -21,6 +21,10 @@ from modules.utils.pipeline_config import inpaint_map, get_config, get_inpainter
 from modules.utils.image_utils import generate_mask
 from modules.utils.language_utils import get_language_code, is_no_space_lang
 from modules.utils.ocr_quality import summarize_ocr_quality
+from modules.utils.correction_dictionary import (
+    apply_ocr_result_dictionary,
+    apply_translation_result_dictionary,
+)
 from modules.utils.ocr_debug import export_ocr_debug_artifacts
 from modules.utils.inpaint_debug import (
     build_inpaint_debug_metadata,
@@ -732,10 +736,18 @@ class BatchProcessor:
                         cache_status = "hit"
                         logger.info("ocr cache hit: using cached OCR for %d blocks", len(blk_list))
                         self.cache_manager._apply_cached_ocr_to_blocks(cache_key, blk_list)
+                        apply_ocr_result_dictionary(
+                            blk_list,
+                            settings_page.get_ocr_result_dictionary_rules(),
+                        )
                         attempt_count = 1
                     else:
                         logger.info("ocr cache miss: running OCR for %d blocks", len(blk_list))
                         self.ocr_handler.ocr.process(image, blk_list)
+                        apply_ocr_result_dictionary(
+                            blk_list,
+                            settings_page.get_ocr_result_dictionary_rules(),
+                        )
                         self.cache_manager._cache_ocr_results(cache_key, blk_list)
                         cache_status = "refreshed"
                         attempt_count = 1
@@ -753,6 +765,10 @@ class BatchProcessor:
                         for blk in blk_list:
                             blk.text = ""
                         self.ocr_handler.ocr.process(image, blk_list)
+                        apply_ocr_result_dictionary(
+                            blk_list,
+                            settings_page.get_ocr_result_dictionary_rules(),
+                        )
                         self.cache_manager._cache_ocr_results(cache_key, blk_list)
                         quality = summarize_ocr_quality(blk_list)
                         self._log_ocr_quality(image_path, quality, attempt_count)
@@ -1036,10 +1052,18 @@ class BatchProcessor:
                 translation_cache_status = "miss"
                 if self.cache_manager._can_serve_all_blocks_from_translation_cache(translation_cache_key, blk_list):
                     self.cache_manager._apply_cached_translations_to_blocks(translation_cache_key, blk_list)
+                    apply_translation_result_dictionary(
+                        blk_list,
+                        settings_page.get_translation_result_dictionary_rules(),
+                    )
                     translation_cache_status = "hit"
                     logger.info("Using cached translation results for all %d blocks", len(blk_list))
                 else:
                     translator.translate(blk_list, image, extra_context)
+                    apply_translation_result_dictionary(
+                        blk_list,
+                        settings_page.get_translation_result_dictionary_rules(),
+                    )
                     # Cache the translation results for potential future use
                     self.cache_manager._cache_translation_results(translation_cache_key, blk_list)
                     translation_cache_status = "refreshed"

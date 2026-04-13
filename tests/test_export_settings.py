@@ -58,9 +58,13 @@ class _FakePage:
             project_autosave_interval_spinbox=_Spin(5),
             project_autosave_folder_input=_Text(""),
         )
+        self.auto_export_source_txt_checkbox = _Check(True)
+        self.auto_export_source_md_checkbox = _Check(False)
+        self.auto_export_translation_txt_checkbox = _Check(True)
+        self.auto_export_translation_md_checkbox = _Check(False)
 
     def window(self):
-        return None
+        return self
 
 
 class ExportSettingsTests(unittest.TestCase):
@@ -82,6 +86,10 @@ class ExportSettingsTests(unittest.TestCase):
         self.assertFalse(settings["export_debug_metadata"])
         self.assertEqual(settings["project_autosave_interval_min"], 5)
         self.assertEqual(settings["project_autosave_folder"], "/tmp/projects")
+        self.assertTrue(settings["auto_export_source_txt"])
+        self.assertFalse(settings["auto_export_source_md"])
+        self.assertTrue(settings["auto_export_translation_txt"])
+        self.assertFalse(settings["auto_export_translation_md"])
 
 
 if __name__ == "__main__":

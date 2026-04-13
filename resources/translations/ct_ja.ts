@@ -157,6 +157,78 @@
         <translation>エラー</translation>
     </message>
     <message>
+        <source>No pages are loaded for TXT/MD import or export.</source>
+        <translation>TXT/MD のインポートまたはエクスポートに使えるページが読み込まれていません。</translation>
+    </message>
+    <message>
+        <source>TXT/MD import and export require unique page file names.
+Rename duplicate pages first.
+Duplicates:
+{names}</source>
+        <translation>TXT/MD のインポートとエクスポートには一意のページファイル名が必要です。
+重複しているページ名を先に変更してください。
+重複:
+{names}</translation>
+    </message>
+    <message>
+        <source>TXT/MD Export Failed</source>
+        <translation>TXT/MD のエクスポートに失敗しました</translation>
+    </message>
+    <message>
+        <source>Failed to export source text.</source>
+        <translation>原文テキストをエクスポートできませんでした。</translation>
+    </message>
+    <message>
+        <source>Exported source text to:
+{path}</source>
+        <translation>原文テキストを次へエクスポートしました:
+{path}</translation>
+    </message>
+    <message>
+        <source>Translation imported and matched successfully.</source>
+        <translation>翻訳を正常にインポートし、プロジェクトに対応付けました。</translation>
+    </message>
+    <message>
+        <source>Imported TXT/MD content was only partially matched. Make sure the file follows the exported exchange format.</source>
+        <translation>インポートした TXT/MD の内容は一部しか一致しませんでした。ファイルがエクスポートされた交換フォーマットに従っているか確認してください。</translation>
+    </message>
+    <message>
+        <source>Missing pages:</source>
+        <translation>不足しているページ:</translation>
+    </message>
+    <message>
+        <source>Unexpected pages:</source>
+        <translation>予期しないページ:</translation>
+    </message>
+    <message>
+        <source>Unmatched pages:</source>
+        <translation>一致しないページ:</translation>
+    </message>
+    <message>
+        <source>TXT Files (*.txt *.TXT)</source>
+        <translation>TXT ファイル (*.txt *.TXT)</translation>
+    </message>
+    <message>
+        <source>Markdown Files (*.md *.MD)</source>
+        <translation>Markdown ファイル (*.md *.MD)</translation>
+    </message>
+    <message>
+        <source>Import Translation</source>
+        <translation>翻訳をインポート</translation>
+    </message>
+    <message>
+        <source>TXT/MD Import Failed</source>
+        <translation>TXT/MD のインポートに失敗しました</translation>
+    </message>
+    <message>
+        <source>Failed to import translation text.</source>
+        <translation>翻訳テキストをインポートできませんでした。</translation>
+    </message>
+    <message>
+        <source>Automatic TXT/MD export failed for {target}{suffix}.</source>
+        <translation>{target}{suffix} の自動 TXT/MD エクスポートに失敗しました。</translation>
+    </message>
+    <message>
         <source>One-Page Auto</source>
         <translation type="unfinished">現在ページを自動処理</translation>
     </message>
@@ -314,6 +386,33 @@
     <message>
         <source>Mongolian</source>
         <translation>モンゴル語</translation>
+    </message>
+</context>
+<context>
+    <name>CorrectionDictionaryTable</name>
+    <message>
+        <source>Keyword</source>
+        <translation>キーワード</translation>
+    </message>
+    <message>
+        <source>Substitution</source>
+        <translation>置換後</translation>
+    </message>
+    <message>
+        <source>Use regex</source>
+        <translation>正規表現を使用</translation>
+    </message>
+    <message>
+        <source>Case sensitive</source>
+        <translation>大文字と小文字を区別</translation>
+    </message>
+    <message>
+        <source>New</source>
+        <translation>追加</translation>
+    </message>
+    <message>
+        <source>Delete</source>
+        <translation>削除</translation>
     </message>
 </context>
 <context>
@@ -1224,7 +1323,7 @@ Approximate GPU usage:
     </message>
     <message>
         <source>Delete</source>
-        <translation>消去</translation>
+        <translation>削除</translation>
     </message>
     <message>
         <source>Unskip</source>
@@ -1674,6 +1773,10 @@ Restart now?</source>
         <translation>テキストのレンダリング</translation>
     </message>
     <message>
+        <source>User Dictionaries</source>
+        <translation>ユーザー辞書</translation>
+    </message>
+    <message>
         <source>Project</source>
         <translation>プロジェクト</translation>
     </message>
@@ -1752,7 +1855,7 @@ Restart now?</source>
     <name>StartupHomeScreen</name>
     <message>
         <source>New</source>
-        <translation>新しい</translation>
+        <translation>追加</translation>
     </message>
     <message>
         <source>New Project</source>
@@ -1980,6 +2083,29 @@ then do inpainting on the resized image.</source>
     <message>
         <source>lama_mpe</source>
         <translation type="unfinished"></translation>
+    </message>
+</context>
+<context>
+    <name>UserDictionariesPage</name>
+    <message>
+        <source>Correction dictionaries rewrite OCR and translation results before they are saved to the project.</source>
+        <translation>補正辞書は、OCR と翻訳の結果をプロジェクトに保存する前に書き換えて補正します。</translation>
+    </message>
+    <message>
+        <source>OCR Result Dictionary</source>
+        <translation>OCR 結果辞書</translation>
+    </message>
+    <message>
+        <source>Apply these substitutions immediately after OCR returns text, before the source text is stored.</source>
+        <translation>OCR がテキストを返した直後、原文として保存される前にこれらの置換を適用します。</translation>
+    </message>
+    <message>
+        <source>Translation Result Dictionary</source>
+        <translation>翻訳結果辞書</translation>
+    </message>
+    <message>
+        <source>Apply these substitutions immediately after translation or TXT/MD import returns text, before the translation is stored.</source>
+        <translation>翻訳または TXT/MD インポートがテキストを返した直後、翻訳文として保存される前にこれらの置換を適用します。</translation>
     </message>
 </context>
 <context>
@@ -2235,6 +2361,74 @@ back on the Image (for further editing)</source>
         <translation>すべてのブロックのサイズを大きくする</translation>
     </message>
     <message>
+        <source>TXT/MD</source>
+        <translation>TXT/MD</translation>
+    </message>
+    <message>
+        <source>Export Source TXT</source>
+        <translation>原文 TXT をエクスポート</translation>
+    </message>
+    <message>
+        <source>Export the current project&apos;s source text in the TXT exchange format.</source>
+        <translation>現在のプロジェクトの原文テキストを TXT 交換フォーマットでエクスポートします。</translation>
+    </message>
+    <message>
+        <source>Import Translation TXT</source>
+        <translation>翻訳 TXT をインポート</translation>
+    </message>
+    <message>
+        <source>Import translated text from a TXT exchange file and rebuild text boxes to fit.</source>
+        <translation>TXT 交換ファイルから翻訳テキストをインポートし、テキストボックスが収まるように再構築します。</translation>
+    </message>
+    <message>
+        <source>Export Source MD</source>
+        <translation>原文 MD をエクスポート</translation>
+    </message>
+    <message>
+        <source>Export the current project&apos;s source text in the Markdown exchange format.</source>
+        <translation>現在のプロジェクトの原文テキストを Markdown 交換フォーマットでエクスポートします。</translation>
+    </message>
+    <message>
+        <source>Import Translation MD</source>
+        <translation>翻訳 MD をインポート</translation>
+    </message>
+    <message>
+        <source>Import translated text from a Markdown exchange file and rebuild text boxes to fit.</source>
+        <translation>Markdown 交換ファイルから翻訳テキストをインポートし、テキストボックスが収まるように再構築します。</translation>
+    </message>
+    <message>
+        <source>Auto Export Source TXT</source>
+        <translation>原文 TXT を自動エクスポート</translation>
+    </message>
+    <message>
+        <source>After a successful automatic run, overwrite the TXT source exchange file with only the pages from that run.</source>
+        <translation>自動実行が正常に完了した後、その実行に含まれるページだけで TXT 原文交換ファイルを上書きします。</translation>
+    </message>
+    <message>
+        <source>Auto Export Source MD</source>
+        <translation>原文 MD を自動エクスポート</translation>
+    </message>
+    <message>
+        <source>After a successful automatic run, overwrite the Markdown source exchange file with only the pages from that run.</source>
+        <translation>自動実行が正常に完了した後、その実行に含まれるページだけで Markdown 原文交換ファイルを上書きします。</translation>
+    </message>
+    <message>
+        <source>Auto Export Translation TXT</source>
+        <translation>翻訳 TXT を自動エクスポート</translation>
+    </message>
+    <message>
+        <source>After a successful automatic run, overwrite the TXT translation exchange file with only the pages from that run.</source>
+        <translation>自動実行が正常に完了した後、その実行に含まれるページだけで TXT 翻訳交換ファイルを上書きします。</translation>
+    </message>
+    <message>
+        <source>Auto Export Translation MD</source>
+        <translation>翻訳 MD を自動エクスポート</translation>
+    </message>
+    <message>
+        <source>After a successful automatic run, overwrite the Markdown translation exchange file with only the pages from that run.</source>
+        <translation>自動実行が正常に完了した後、その実行に含まれるページだけで Markdown 翻訳交換ファイルを上書きします。</translation>
+    </message>
+    <message>
         <source>Box Drawing</source>
         <translation>ボックス図面</translation>
     </message>
@@ -2333,7 +2527,7 @@ It may have already been moved, renamed, or deleted.
     </message>
     <message>
         <source>Delete</source>
-        <translation type="unfinished">消去</translation>
+        <translation>削除</translation>
     </message>
     <message>
         <source>Cancel</source>
