@@ -3,6 +3,7 @@ import os
 import shutil
 import json
 from dataclasses import asdict, is_dataclass
+from typing import Mapping
 
 from PySide6 import QtGui, QtWidgets
 from PySide6.QtCore import QSettings, QTimer, Qt, Signal
@@ -38,6 +39,16 @@ from modules.utils.inpainting_runtime import (
 )
 from modules.utils.mask_inpaint_mode import (
     DEFAULT_MASK_INPAINT_MODE,
+)
+from modules.utils.automatic_output import (
+    DEFAULT_JPG_QUALITY,
+    DEFAULT_OUTPUT_FORMAT,
+    DEFAULT_OUTPUT_PRESET,
+    DEFAULT_PNG_COMPRESSION,
+    DEFAULT_WEBP_QUALITY,
+    normalize_global_output_settings,
+    normalize_project_output_preferences,
+    resolve_automatic_output_settings,
 )
 
 
@@ -124,6 +135,11 @@ class SettingsPage(QtWidgets.QWidget):
         self.ui.mask_overlay_checkbox.stateChanged.connect(self._save_settings_if_not_loading)
         self.ui.cleanup_mask_delta_checkbox.stateChanged.connect(self._save_settings_if_not_loading)
         self.ui.debug_metadata_checkbox.stateChanged.connect(self._save_settings_if_not_loading)
+        self.ui.automatic_output_format_combo.currentIndexChanged.connect(self._save_settings_if_not_loading)
+        self.ui.automatic_output_preset_combo.currentIndexChanged.connect(self._save_settings_if_not_loading)
+        self.ui.automatic_output_png_spinbox.valueChanged.connect(self._save_settings_if_not_loading)
+        self.ui.automatic_output_jpg_spinbox.valueChanged.connect(self._save_settings_if_not_loading)
+        self.ui.automatic_output_webp_spinbox.valueChanged.connect(self._save_settings_if_not_loading)
         self.ui.user_dictionaries_page.changed.connect(self._save_settings_if_not_loading)
         self.ui.notifications_page.changed.connect(self._save_settings_if_not_loading)
         self.ui.notifications_page.test_requested.connect(self.play_test_completion_sound)
@@ -404,6 +420,17 @@ class SettingsPage(QtWidgets.QWidget):
             "export_mask_overlay": self.ui.mask_overlay_checkbox.isChecked(),
             "export_cleanup_mask_delta": self.ui.cleanup_mask_delta_checkbox.isChecked(),
             "export_debug_metadata": self.ui.debug_metadata_checkbox.isChecked(),
+            "automatic_output_format": str(
+                self.ui.automatic_output_format_combo.currentData() or DEFAULT_OUTPUT_FORMAT
+            ),
+            "automatic_output_preset": str(
+                self.ui.automatic_output_preset_combo.currentData() or DEFAULT_OUTPUT_PRESET
+            ),
+            "automatic_output_png_compression_level": int(
+                self.ui.automatic_output_png_spinbox.value()
+            ),
+            "automatic_output_jpg_quality": int(self.ui.automatic_output_jpg_spinbox.value()),
+            "automatic_output_webp_quality": int(self.ui.automatic_output_webp_spinbox.value()),
             "project_autosave_enabled": autosave_enabled,
             "project_autosave_interval_min": int(self.ui.project_autosave_interval_spinbox.value()),
             "project_autosave_folder": autosave_folder,
@@ -412,6 +439,13 @@ class SettingsPage(QtWidgets.QWidget):
             "auto_export_translation_txt": auto_export_translation_txt,
             "auto_export_translation_md": auto_export_translation_md,
         }
+
+    def get_resolved_automatic_output_settings(
+        self,
+        project_preferences: Mapping[str, object] | None = None,
+    ) -> dict[str, object]:
+        project = normalize_project_output_preferences(project_preferences)
+        return resolve_automatic_output_settings(self.get_export_settings(), project)
 
     def get_dictionary_settings(self) -> dict[str, list[dict]]:
         return {
@@ -854,6 +888,42 @@ class SettingsPage(QtWidgets.QWidget):
         self.ui.debug_metadata_checkbox.setChecked(
             settings.value("export_debug_metadata", False, type=bool)
         )
+        automatic_output_format = settings.value(
+            "automatic_output_format",
+            DEFAULT_OUTPUT_FORMAT,
+            type=str,
+        )
+        automatic_output_preset = settings.value(
+            "automatic_output_preset",
+            DEFAULT_OUTPUT_PRESET,
+            type=str,
+        )
+        automatic_output_png = settings.value(
+            "automatic_output_png_compression_level",
+            DEFAULT_PNG_COMPRESSION,
+            type=int,
+        )
+        automatic_output_jpg = settings.value(
+            "automatic_output_jpg_quality",
+            DEFAULT_JPG_QUALITY,
+            type=int,
+        )
+        automatic_output_webp = settings.value(
+            "automatic_output_webp_quality",
+            DEFAULT_WEBP_QUALITY,
+            type=int,
+        )
+        format_index = self.ui.automatic_output_format_combo.findData(automatic_output_format)
+        if format_index < 0:
+            format_index = self.ui.automatic_output_format_combo.findData(DEFAULT_OUTPUT_FORMAT)
+        self.ui.automatic_output_format_combo.setCurrentIndex(max(format_index, 0))
+        preset_index = self.ui.automatic_output_preset_combo.findData(automatic_output_preset)
+        if preset_index < 0:
+            preset_index = self.ui.automatic_output_preset_combo.findData(DEFAULT_OUTPUT_PRESET)
+        self.ui.automatic_output_preset_combo.setCurrentIndex(max(preset_index, 0))
+        self.ui.automatic_output_png_spinbox.setValue(int(automatic_output_png))
+        self.ui.automatic_output_jpg_spinbox.setValue(int(automatic_output_jpg))
+        self.ui.automatic_output_webp_spinbox.setValue(int(automatic_output_webp))
         autosave_enabled = settings.value("project_autosave_enabled", False, type=bool)
         owner = self.parent()
         title_bar = getattr(owner, "title_bar", None)
@@ -934,6 +1004,12 @@ class SettingsPage(QtWidgets.QWidget):
 
         self._current_language = self.ui.lang_combo.currentText()
         self._loading_settings = False
+        owner = self.window()
+        if owner is not None and hasattr(owner, "refresh_automatic_output_controls"):
+            try:
+                owner.refresh_automatic_output_controls()
+            except Exception:
+                logger.debug("Failed to refresh automatic output controls after loading settings.", exc_info=True)
 
     def on_language_changed(self, new_language):
         if not self._loading_settings:

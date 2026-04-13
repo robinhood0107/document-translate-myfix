@@ -8,6 +8,7 @@ from app.ui.dayu_widgets.button_group import MPushButtonGroup, MToolButtonGroup
 from app.ui.dayu_widgets.check_box import MCheckBox
 from app.ui.dayu_widgets.combo_box import MComboBox, MFontComboBox
 from app.ui.dayu_widgets.divider import MDivider
+from app.ui.dayu_widgets.label import MLabel
 from app.ui.dayu_widgets.line_edit import MLineEdit
 from app.ui.dayu_widgets.loading import MLoading
 from app.ui.dayu_widgets.progress_bar import MProgressBar
@@ -18,6 +19,15 @@ from app.ui.dayu_widgets.text_edit import MTextEdit
 from app.ui.dayu_widgets.tool_button import MToolButton
 from app.ui.search_replace_panel import SearchReplacePanel
 from app.ui.main_window.constants import supported_source_languages, supported_target_languages
+from modules.utils.automatic_output import (
+    OUTPUT_PRESET_BALANCED,
+    OUTPUT_PRESET_FAST,
+    OUTPUT_PRESET_SMALL,
+    OUTPUT_FORMAT_JPG,
+    OUTPUT_FORMAT_PNG,
+    OUTPUT_FORMAT_SAME,
+    OUTPUT_FORMAT_WEBP,
+)
 
 
 class WorkspaceMixin:
@@ -637,6 +647,44 @@ class WorkspaceMixin:
         txt_md_auto_layout.addWidget(self.auto_export_translation_txt_checkbox)
         txt_md_auto_layout.addWidget(self.auto_export_translation_md_checkbox)
 
+        output_div = MDivider(self.tr("Output"))
+        output_widget = QtWidgets.QWidget()
+        output_layout = QtWidgets.QVBoxLayout(output_widget)
+        output_layout.setContentsMargins(0, 0, 0, 0)
+        output_layout.setSpacing(6)
+
+        self.output_use_global_checkbox = MCheckBox(self.tr("Use global output settings"))
+        self.output_use_global_checkbox.setToolTip(
+            self.tr("When enabled, this project inherits the automatic output format and preset from Settings.")
+        )
+
+        output_format_row = QtWidgets.QHBoxLayout()
+        output_format_label = MLabel(self.tr("Format"))
+        self.output_format_combo = MComboBox().small()
+        self.output_format_combo.addItem(self.tr("Same as source"), OUTPUT_FORMAT_SAME)
+        self.output_format_combo.addItem("PNG", OUTPUT_FORMAT_PNG)
+        self.output_format_combo.addItem("JPG", OUTPUT_FORMAT_JPG)
+        self.output_format_combo.addItem("WEBP", OUTPUT_FORMAT_WEBP)
+        output_format_row.addWidget(output_format_label)
+        output_format_row.addWidget(self.output_format_combo, 1)
+
+        output_preset_row = QtWidgets.QHBoxLayout()
+        output_preset_label = MLabel(self.tr("Preset"))
+        self.output_preset_combo = MComboBox().small()
+        self.output_preset_combo.addItem(self.tr("Fast"), OUTPUT_PRESET_FAST)
+        self.output_preset_combo.addItem(self.tr("Balanced"), OUTPUT_PRESET_BALANCED)
+        self.output_preset_combo.addItem(self.tr("Small"), OUTPUT_PRESET_SMALL)
+        output_preset_row.addWidget(output_preset_label)
+        output_preset_row.addWidget(self.output_preset_combo, 1)
+
+        self.output_estimate_label = MLabel(self.tr("Estimated output: Calculating...")).secondary()
+        self.output_estimate_label.setWordWrap(True)
+
+        output_layout.addWidget(self.output_use_global_checkbox)
+        output_layout.addLayout(output_format_row)
+        output_layout.addLayout(output_preset_row)
+        output_layout.addWidget(self.output_estimate_label)
+
         tools_layout.addLayout(misc_lay)
         box_div = MDivider(self.tr("Box Drawing"))
         tools_layout.addWidget(box_div)
@@ -649,6 +697,8 @@ class WorkspaceMixin:
         tools_layout.addWidget(txt_md_div)
         tools_layout.addWidget(txt_md_buttons_widget)
         tools_layout.addLayout(txt_md_auto_layout)
+        tools_layout.addWidget(output_div)
+        tools_layout.addWidget(output_widget)
         tools_layout.addStretch()
         tools_widget.setLayout(tools_layout)
 
