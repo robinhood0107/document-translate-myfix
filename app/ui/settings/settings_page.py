@@ -27,6 +27,10 @@ from app.update_checker import UpdateChecker
 from app.shortcuts import get_default_shortcuts
 from modules.utils.device import is_gpu_available
 from modules.utils.paths import get_default_project_autosave_dir, get_user_data_dir
+from modules.utils.notification_sound import (
+    SYSTEM_SOUND_MODE,
+    play_completion_sound,
+)
 from modules.utils.inpainting_runtime import (
     inpainter_default_settings,
     normalize_inpainter_key,
@@ -121,6 +125,8 @@ class SettingsPage(QtWidgets.QWidget):
         self.ui.cleanup_mask_delta_checkbox.stateChanged.connect(self._save_settings_if_not_loading)
         self.ui.debug_metadata_checkbox.stateChanged.connect(self._save_settings_if_not_loading)
         self.ui.user_dictionaries_page.changed.connect(self._save_settings_if_not_loading)
+        self.ui.notifications_page.changed.connect(self._save_settings_if_not_loading)
+        self.ui.notifications_page.test_requested.connect(self.play_test_completion_sound)
         self._connect_live_save_signals()
 
     def _save_settings_if_not_loading(self, *_args):
@@ -413,6 +419,9 @@ class SettingsPage(QtWidgets.QWidget):
             "translation_substitutions": self.ui.user_dictionaries_page.get_translation_rules(),
         }
 
+    def get_notification_settings(self) -> dict[str, object]:
+        return self.ui.notifications_page.get_notification_settings()
+
     def get_ocr_result_dictionary_rules(self) -> list[dict]:
         return self.get_dictionary_settings()["ocr_substitutions"]
 
@@ -513,6 +522,7 @@ class SettingsPage(QtWidgets.QWidget):
             "gemma_local_server": self.get_gemma_local_server_settings(),
             "llm": self.get_llm_settings(),
             "export": self.get_export_settings(),
+            "notifications": self.get_notification_settings(),
             "shortcuts": self.ui.shortcuts_page.get_shortcuts(),
             "credentials": self.get_credentials(),
             "save_keys": self.ui.save_keys_checkbox.isChecked(),
@@ -884,6 +894,14 @@ class SettingsPage(QtWidgets.QWidget):
         self.ui.user_dictionaries_page.load_rules(ocr_rules, translation_rules)
         settings.endGroup()
 
+        settings.beginGroup("notifications")
+        self.ui.notifications_page.load_settings(
+            enable_completion_sound=settings.value("enable_completion_sound", True, type=bool),
+            completion_sound_mode=settings.value("completion_sound_mode", SYSTEM_SOUND_MODE, type=str),
+            completion_sound_file=settings.value("completion_sound_file", "", type=str),
+        )
+        settings.endGroup()
+
         settings.beginGroup("shortcuts")
         default_shortcuts = get_default_shortcuts()
         shortcut_values = {}
@@ -920,6 +938,13 @@ class SettingsPage(QtWidgets.QWidget):
     def on_language_changed(self, new_language):
         if not self._loading_settings:
             self.show_restart_dialog(new_language)
+
+    def play_test_completion_sound(self) -> None:
+        settings = self.get_notification_settings()
+        play_completion_sound(
+            str(settings.get("completion_sound_mode") or SYSTEM_SOUND_MODE),
+            str(settings.get("completion_sound_file") or ""),
+        )
 
     def _show_message_box(self, icon: QtWidgets.QMessageBox.Icon, title: str, text: str):
         msg_box = QtWidgets.QMessageBox(self)
