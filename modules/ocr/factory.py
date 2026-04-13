@@ -7,6 +7,7 @@ from .microsoft_ocr import MicrosoftOCR
 from .google_ocr import GoogleOCR
 from .gpt_ocr import GPTOCR
 from .hunyuan_ocr import HunyuanOCREngine
+from .mangalmm_ocr import MangaLMMOCREngine
 from .ocr_paddle_VL import PaddleOCRVLEngine
 from .ppocr import PPOCRv5Engine
 from .manga_ocr.onnx_engine import MangaOCREngineONNX
@@ -97,6 +98,8 @@ class OCRFactory:
             extras["paddleocr_vl"] = settings.get_paddleocr_vl_settings()
         if ocr_key == "HunyuanOCR":
             extras["hunyuan_ocr"] = settings.get_hunyuan_ocr_settings()
+        if ocr_key == "MangaLMM":
+            extras["mangalmm_ocr"] = settings.get_mangalmm_ocr_settings()
 
         # The LLM OCR engines currently don't use the settings in the LLMs tab
         # so exclude this for now
@@ -140,6 +143,7 @@ class OCRFactory:
             'Gemini-2.0-Flash': lambda s: cls._create_gemini_ocr(s, ocr_model),
             'PaddleOCR VL': cls._create_paddleocr_vl,
             'HunyuanOCR': cls._create_hunyuan_ocr,
+            'MangaLMM': cls._create_mangalmm_ocr,
         }
         
         # Language-specific factory functions (for Default model)
@@ -250,5 +254,11 @@ class OCRFactory:
     @staticmethod
     def _create_hunyuan_ocr(settings) -> OCREngine:
         engine = HunyuanOCREngine()
+        engine.initialize(settings)
+        return engine
+
+    @staticmethod
+    def _create_mangalmm_ocr(settings) -> OCREngine:
+        engine = MangaLMMOCREngine()
         engine.initialize(settings)
         return engine
