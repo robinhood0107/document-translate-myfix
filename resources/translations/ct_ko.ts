@@ -20,7 +20,7 @@
     <name>AutomaticProgress</name>
     <message>
         <source>Calculating</source>
-        <translation type="unfinished"></translation>
+        <translation type="unfinished">계산 중</translation>
     </message>
     <message>
         <source>Recent History</source>
@@ -107,7 +107,7 @@
     </message>
     <message>
         <source>Calculating</source>
-        <translation type="unfinished"></translation>
+        <translation type="unfinished">계산 중</translation>
     </message>
     <message>
         <source>작업이 취소되었습니다.</source>
@@ -147,6 +147,10 @@
     <message>
         <source>Gemma Local Server Settings</source>
         <translation type="unfinished">Gemma 로컬 서버 설정</translation>
+    </message>
+    <message>
+        <source>작업이 취소되었습니다.</source>
+        <translation type="unfinished"></translation>
     </message>
     <message>
         <source>자동번역 준비 또는 실행에 실패했습니다.</source>
@@ -513,7 +517,7 @@ Use Custom Local Server(Gemma) with the included Gemma Docker setup.</source>
     </message>
     <message>
         <source>File</source>
-        <translation type="unfinished"></translation>
+        <translation type="unfinished">파일</translation>
     </message>
     <message>
         <source>Chapter</source>
@@ -1272,6 +1276,33 @@ Install it to use PSD features.</source>
     </message>
 </context>
 <context>
+    <name>NotificationsPage</name>
+    <message>
+        <source>Automatic Completion</source>
+        <translation>자동 완료 알림</translation>
+    </message>
+    <message>
+        <source>Play a sound when automatic processing finishes successfully. Custom files must be placed in the project&apos;s music folder.</source>
+        <translation>자동 처리가 성공적으로 끝나면 소리를 재생합니다. 사용자 지정 파일은 프로젝트의 music 폴더에 넣어야 합니다.</translation>
+    </message>
+    <message>
+        <source>Enable Completion Sound</source>
+        <translation>완료 알림음 사용</translation>
+    </message>
+    <message>
+        <source>Test Sound</source>
+        <translation>소리 테스트</translation>
+    </message>
+    <message>
+        <source>Music Folder: {path}</source>
+        <translation>music 폴더: {path}</translation>
+    </message>
+    <message>
+        <source>System sound</source>
+        <translation>시스템 소리</translation>
+    </message>
+</context>
+<context>
     <name>PaddleOCRVLPage</name>
     <message>
         <source>PaddleOCR VL Settings</source>
@@ -1367,6 +1398,141 @@ Approximate GPU usage:
     <message>
         <source>Theme</source>
         <translation>테마</translation>
+    </message>
+</context>
+<context>
+    <name>PipelineStatusPanel</name>
+    <message>
+        <source>Pipeline Status</source>
+        <translation>파이프라인 상태</translation>
+    </message>
+    <message>
+        <source>Idle</source>
+        <translation>대기 중</translation>
+    </message>
+    <message>
+        <source>Show details</source>
+        <translation>상세 보기</translation>
+    </message>
+    <message>
+        <source>Minimize</source>
+        <translation>최소화</translation>
+    </message>
+    <message>
+        <source>Service</source>
+        <translation>서비스</translation>
+    </message>
+    <message>
+        <source>Progress</source>
+        <translation>진행률</translation>
+    </message>
+    <message>
+        <source>File</source>
+        <translation>파일</translation>
+    </message>
+    <message>
+        <source>ETA</source>
+        <translation>예상 남은 시간</translation>
+    </message>
+    <message>
+        <source>Message</source>
+        <translation>메시지</translation>
+    </message>
+    <message>
+        <source>No Preview</source>
+        <translation>미리보기 없음</translation>
+    </message>
+    <message>
+        <source>Cancel</source>
+        <translation>취소</translation>
+    </message>
+    <message>
+        <source>Report</source>
+        <translation>리포트</translation>
+    </message>
+    <message>
+        <source>Retry</source>
+        <translation>재시도</translation>
+    </message>
+    <message>
+        <source>Settings</source>
+        <translation>설정</translation>
+    </message>
+    <message>
+        <source>Open Output</source>
+        <translation>출력 열기</translation>
+    </message>
+    <message>
+        <source>Close</source>
+        <translation>닫기</translation>
+    </message>
+    <message>
+        <source>Automatic</source>
+        <translation>자동</translation>
+    </message>
+    <message>
+        <source>Calculating</source>
+        <translation>계산 중</translation>
+    </message>
+    <message>
+        <source>Status</source>
+        <translation>상태</translation>
+    </message>
+    <message>
+        <source>Info</source>
+        <translation>정보</translation>
+    </message>
+    <message>
+        <source>Success</source>
+        <translation>성공</translation>
+    </message>
+    <message>
+        <source>Warning</source>
+        <translation>경고</translation>
+    </message>
+    <message>
+        <source>Error</source>
+        <translation>오류</translation>
+    </message>
+    <message>
+        <source>Download</source>
+        <translation>다운로드</translation>
+    </message>
+    <message>
+        <source>Local Service</source>
+        <translation>로컬 서비스</translation>
+    </message>
+    <message>
+        <source>Network</source>
+        <translation>네트워크</translation>
+    </message>
+    <message>
+        <source>Content Filter</source>
+        <translation>콘텐츠 필터</translation>
+    </message>
+    <message>
+        <source>Batch Report</source>
+        <translation>배치 리포트</translation>
+    </message>
+    <message>
+        <source>Pipeline</source>
+        <translation>파이프라인</translation>
+    </message>
+    <message>
+        <source>Running</source>
+        <translation>실행 중</translation>
+    </message>
+    <message>
+        <source>Done</source>
+        <translation>완료</translation>
+    </message>
+    <message>
+        <source>Failed</source>
+        <translation>실패</translation>
+    </message>
+    <message>
+        <source>Cancelled</source>
+        <translation>취소됨</translation>
     </message>
 </context>
 <context>
@@ -1743,6 +1909,10 @@ Restart now?</source>
     <message>
         <source>User Dictionaries</source>
         <translation>사용자 사전</translation>
+    </message>
+    <message>
+        <source>Notifications</source>
+        <translation>알림</translation>
     </message>
     <message>
         <source>Project</source>
