@@ -1423,14 +1423,6 @@ Approximate GPU usage:
         <translation>Boşta</translation>
     </message>
     <message>
-        <source>Show details</source>
-        <translation>Ayrıntıları göster</translation>
-    </message>
-    <message>
-        <source>Minimize</source>
-        <translation>Küçült</translation>
-    </message>
-    <message>
         <source>Service</source>
         <translation>Servis</translation>
     </message>
@@ -1459,6 +1451,10 @@ Approximate GPU usage:
         <translation>İptal</translation>
     </message>
     <message>
+        <source>Logs</source>
+        <translation>Günlük</translation>
+    </message>
+    <message>
         <source>Report</source>
         <translation>Rapor</translation>
     </message>
@@ -1477,6 +1473,30 @@ Approximate GPU usage:
     <message>
         <source>Close</source>
         <translation>Kapat</translation>
+    </message>
+    <message>
+        <source>Window</source>
+        <translation>Pencere</translation>
+    </message>
+    <message>
+        <source>Switch to window mode</source>
+        <translation>Pencere moduna geç</translation>
+    </message>
+    <message>
+        <source>Embed</source>
+        <translation>Göm</translation>
+    </message>
+    <message>
+        <source>Switch to embedded mode</source>
+        <translation>Gömülü moda geç</translation>
+    </message>
+    <message>
+        <source>Hide logs</source>
+        <translation>Günlüğü gizle</translation>
+    </message>
+    <message>
+        <source>Show logs</source>
+        <translation>Günlüğü göster</translation>
     </message>
     <message>
         <source>Automatic</source>

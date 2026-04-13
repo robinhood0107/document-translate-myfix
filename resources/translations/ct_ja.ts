@@ -1423,14 +1423,6 @@ Approximate GPU usage:
         <translation>待機中</translation>
     </message>
     <message>
-        <source>Show details</source>
-        <translation>詳細を表示</translation>
-    </message>
-    <message>
-        <source>Minimize</source>
-        <translation>最小化</translation>
-    </message>
-    <message>
         <source>Service</source>
         <translation>サービス</translation>
     </message>
@@ -1459,6 +1451,10 @@ Approximate GPU usage:
         <translation>キャンセル</translation>
     </message>
     <message>
+        <source>Logs</source>
+        <translation>ログ</translation>
+    </message>
+    <message>
         <source>Report</source>
         <translation>レポート</translation>
     </message>
@@ -1477,6 +1473,30 @@ Approximate GPU usage:
     <message>
         <source>Close</source>
         <translation>閉じる</translation>
+    </message>
+    <message>
+        <source>Window</source>
+        <translation>ウィンドウ</translation>
+    </message>
+    <message>
+        <source>Switch to window mode</source>
+        <translation>ウィンドウモードに切り替え</translation>
+    </message>
+    <message>
+        <source>Embed</source>
+        <translation>埋め込み</translation>
+    </message>
+    <message>
+        <source>Switch to embedded mode</source>
+        <translation>埋め込みモードに切り替え</translation>
+    </message>
+    <message>
+        <source>Hide logs</source>
+        <translation>ログを隠す</translation>
+    </message>
+    <message>
+        <source>Show logs</source>
+        <translation>ログを表示</translation>
     </message>
     <message>
         <source>Automatic</source>

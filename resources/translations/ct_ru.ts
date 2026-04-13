@@ -1423,14 +1423,6 @@ Approximate GPU usage:
         <translation>Ожидание</translation>
     </message>
     <message>
-        <source>Show details</source>
-        <translation>Показать детали</translation>
-    </message>
-    <message>
-        <source>Minimize</source>
-        <translation>Свернуть</translation>
-    </message>
-    <message>
         <source>Service</source>
         <translation>Сервис</translation>
     </message>
@@ -1459,6 +1451,10 @@ Approximate GPU usage:
         <translation>Отмена</translation>
     </message>
     <message>
+        <source>Logs</source>
+        <translation>Логи</translation>
+    </message>
+    <message>
         <source>Report</source>
         <translation>Отчёт</translation>
     </message>
@@ -1477,6 +1473,30 @@ Approximate GPU usage:
     <message>
         <source>Close</source>
         <translation>Закрыть</translation>
+    </message>
+    <message>
+        <source>Window</source>
+        <translation>Окно</translation>
+    </message>
+    <message>
+        <source>Switch to window mode</source>
+        <translation>Переключить в режим окна</translation>
+    </message>
+    <message>
+        <source>Embed</source>
+        <translation>Встроить</translation>
+    </message>
+    <message>
+        <source>Switch to embedded mode</source>
+        <translation>Переключить во встроенный режим</translation>
+    </message>
+    <message>
+        <source>Hide logs</source>
+        <translation>Скрыть логи</translation>
+    </message>
+    <message>
+        <source>Show logs</source>
+        <translation>Показать логи</translation>
     </message>
     <message>
         <source>Automatic</source>
