@@ -253,8 +253,6 @@ class ComicTranslate(ComicTranslateUI):
         self.pipeline_status_panel.open_settings_requested.connect(self._on_automatic_progress_open_settings)
         self.pipeline_status_panel.report_requested.connect(self.show_latest_batch_report)
         self.pipeline_status_panel.open_output_requested.connect(self._open_latest_batch_output)
-        self.pipeline_completion_overlay.open_output_requested.connect(self._open_latest_batch_output)
-        self.pipeline_completion_overlay.close_requested.connect(self._dismiss_pipeline_completion_preview)
         self.set_all_button.clicked.connect(self.text_ctrl.set_src_trg_all)
         self.clear_rectangles_button.clicked.connect(self.image_viewer.clear_rectangles)
         self.clear_brush_strokes_button.clicked.connect(self.image_viewer.clear_brush_strokes)
@@ -678,10 +676,9 @@ class ComicTranslate(ComicTranslateUI):
         self._automatic_progress_tracker.reset(page_total=len(selected_paths), run_type=run_type)
         self._last_runtime_preview_path = ""
         self._last_batch_output_root = ""
-        self.hide_pipeline_completion_preview()
         panel = self._ensure_automatic_progress_dialog()
+        panel.prepare_for_new_run()
         panel.set_output_root("")
-        panel.set_minimized(False)
         self.set_pipeline_overlay_active(True)
         self.on_runtime_progress_update({
             "phase": "gemma_startup",
@@ -726,7 +723,6 @@ class ComicTranslate(ComicTranslateUI):
 
     def _on_automatic_progress_cancel(self):
         self.cancel_current_task()
-        self.hide_pipeline_completion_preview()
         self._ensure_automatic_progress_dialog().show_passive_message(
             "info",
             self.tr("취소 중..."),
@@ -1279,7 +1275,6 @@ class ComicTranslate(ComicTranslateUI):
         self.save_as_project_button.setEnabled(True)
         self.webtoon_toggle.setEnabled(True)
         self.selected_batch = []
-        self.hide_pipeline_completion_preview()
 
         panel = self.pipeline_status_panel
         panel.set_output_root(self._last_batch_output_root)
@@ -1298,6 +1293,7 @@ class ComicTranslate(ComicTranslateUI):
             panel.show()
             panel.raise_()
         else:
+            self.set_pipeline_overlay_active(False)
             self._automatic_progress_tracker.record_batch_completion(success=True, total_images=total_images)
             self.on_runtime_progress_update({
                 "phase": "done",
@@ -1311,15 +1307,8 @@ class ComicTranslate(ComicTranslateUI):
                 "preview_path": self._last_runtime_preview_path,
                 "panel_state": "done",
                 "panel_message_level": "success",
+                "auto_hide_ms": 5000,
             })
-            if self._last_runtime_preview_path:
-                self.show_pipeline_completion_preview(
-                    self._last_runtime_preview_path,
-                    output_root=self._last_batch_output_root,
-                    message=self.tr("자동번역이 완료되었습니다."),
-                )
-            else:
-                self.set_pipeline_overlay_active(False)
             self._play_completion_sound_if_enabled()
             # Reserved hook for future ntfy integration. Keep best-effort and non-blocking.
             notify_pipeline_event(
@@ -1362,12 +1351,7 @@ class ComicTranslate(ComicTranslateUI):
         output_root = self._last_batch_output_root or self._find_latest_batch_output_root(self._last_batch_request_paths)
         if not output_root:
             return
-        self._dismiss_pipeline_completion_preview()
         QtGui.QDesktopServices.openUrl(QtCore.QUrl.fromLocalFile(output_root))
-
-    def _dismiss_pipeline_completion_preview(self) -> None:
-        self.hide_pipeline_completion_preview()
-        self.set_pipeline_overlay_active(False)
 
     def _play_completion_sound_if_enabled(self) -> None:
         settings = self.settings_page.get_notification_settings()

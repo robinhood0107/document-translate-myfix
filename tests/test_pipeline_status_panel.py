@@ -6,10 +6,10 @@ import unittest
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-from PySide6 import QtCore, QtWidgets
+from PySide6 import QtCore, QtTest, QtWidgets
 from PySide6.QtGui import QImage
 
-from app.ui.pipeline_status_panel import PipelineCompletionOverlay, PipelineStatusPanel
+from app.ui.pipeline_status_panel import PipelineStatusPanel
 
 
 class PipelineStatusPanelTests(unittest.TestCase):
@@ -23,16 +23,26 @@ class PipelineStatusPanelTests(unittest.TestCase):
         self.parent.show()
         self.panel = PipelineStatusPanel(self.parent)
         self.panel.set_allowed_area(QtCore.QRect(0, 0, 1200, 900))
-        self.completion_overlay = PipelineCompletionOverlay(self.parent)
-        self.completion_overlay.setGeometry(0, 0, 1200, 900)
         self.addCleanup(self.panel.deleteLater)
-        self.addCleanup(self.completion_overlay.deleteLater)
         self.addCleanup(self.parent.deleteLater)
 
-    def test_panel_is_top_level_window(self) -> None:
-        flags = self.panel.windowFlags()
-        self.assertTrue(bool(flags & QtCore.Qt.WindowType.Window))
-        self.assertFalse(self.panel.testAttribute(QtCore.Qt.WidgetAttribute.WA_QuitOnClose))
+    def test_panel_defaults_to_embedded_mode(self) -> None:
+        self.assertEqual(self.panel.display_mode(), PipelineStatusPanel.EMBEDDED_MODE)
+        self.assertIs(self.panel.parentWidget(), self.parent)
+
+    def test_toggle_display_mode_switches_to_window_and_back(self) -> None:
+        self.panel.show()
+        QtWidgets.QApplication.processEvents()
+
+        self.panel.set_display_mode(PipelineStatusPanel.WINDOW_MODE)
+        QtWidgets.QApplication.processEvents()
+        self.assertEqual(self.panel.display_mode(), PipelineStatusPanel.WINDOW_MODE)
+        self.assertTrue(bool(self.panel.windowFlags() & QtCore.Qt.WindowType.Window))
+
+        self.panel.set_display_mode(PipelineStatusPanel.EMBEDDED_MODE)
+        QtWidgets.QApplication.processEvents()
+        self.assertEqual(self.panel.display_mode(), PipelineStatusPanel.EMBEDDED_MODE)
+        self.assertIs(self.panel.parentWidget(), self.parent)
 
     def test_running_event_shows_cancel_and_report(self) -> None:
         self.panel.update_event(
@@ -52,10 +62,10 @@ class PipelineStatusPanelTests(unittest.TestCase):
         self.assertFalse(self.panel.report_button.isHidden())
         self.assertTrue(self.panel.retry_button.isHidden())
 
-    def test_done_event_updates_preview_and_output_button(self) -> None:
+    def test_done_event_updates_preview_and_auto_hides(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             image_path = os.path.join(temp_dir, "preview.png")
-            QImage(32, 32, QImage.Format.Format_RGB32).save(image_path)
+            QImage(120, 220, QImage.Format.Format_RGB32).save(image_path)
             self.panel.set_output_root(temp_dir)
             self.panel.update_event(
                 {
@@ -64,6 +74,7 @@ class PipelineStatusPanelTests(unittest.TestCase):
                     "service": "batch",
                     "message": "done",
                     "preview_path": image_path,
+                    "auto_hide_ms": 1,
                 }
             )
             QtWidgets.QApplication.processEvents()
@@ -74,18 +85,14 @@ class PipelineStatusPanelTests(unittest.TestCase):
             self.assertIsNotNone(pixmap)
             self.assertFalse(pixmap.isNull())
 
-    def test_completion_overlay_shows_preview_and_output_button(self) -> None:
-        with tempfile.TemporaryDirectory() as temp_dir:
-            image_path = os.path.join(temp_dir, "preview.png")
-            QImage(120, 80, QImage.Format.Format_RGB32).save(image_path)
-            self.completion_overlay.show_preview(
-                image_path,
-                message="done",
-                output_root=temp_dir,
-            )
+            QtTest.QTest.qWait(50)
             QtWidgets.QApplication.processEvents()
-            self.assertTrue(self.completion_overlay.isVisible())
-            self.assertFalse(self.completion_overlay.open_output_button.isHidden())
-            pixmap = self.completion_overlay.preview_label.pixmap()
-            self.assertIsNotNone(pixmap)
-            self.assertFalse(pixmap.isNull())
+            self.assertFalse(self.panel.isVisible())
+
+    def test_hiding_logs_reduces_left_column_width(self) -> None:
+        self.panel.show()
+        QtWidgets.QApplication.processEvents()
+        width_with_logs = self.panel.left_panel.width()
+        self.panel.set_logs_visible(False)
+        QtWidgets.QApplication.processEvents()
+        self.assertLess(self.panel.left_panel.width(), width_with_logs)
