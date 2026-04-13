@@ -949,6 +949,74 @@ Start the server with both the HunyuanOCR GGUF model and the matching mmproj fil
     </message>
 </context>
 <context>
+    <name>MangaLMMOCRPage</name>
+    <message>
+        <source>MangaLMM Settings</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Connect Comic Translate to your local MangaLMM llama.cpp server.
+This OCR engine sends cropped text regions to the OpenAI-compatible /chat/completions endpoint.
+MangaLMM is used as block-crop OCR only, not as full-page spotting inside the app.
+Keep the default localhost URL if you want Comic Translate to reuse the bundled Docker runtime.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Server URL</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>MangaLMM OCR Tuning</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Max Completion Tokens</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Parallel Workers</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Request Timeout (sec)</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Raw Response Log</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Safe Resize</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Enable Safe Resize</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Max Pixels</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Max Long Side</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Recommended values for the bundled MangaLMM runtime:
+- ctx-size 4096: enough for block OCR while keeping VRAM safer
+- Max Completion Tokens: 256
+- Parallel Workers: 1
+- Request Timeout: 60 seconds
+- Safe Resize: on
+- Max Pixels / Max Long Side: 1200000 / 1280
+Reasoning:
+- Keep the request deterministic with temperature 0 and top_k 1 internally.
+- Large crops are resized only when needed, and OCR region boxes are mapped back to original coordinates.
+- Workers 1 is the safest default when Gemma and MangaLMM stay resident on the same GPU.</source>
+        <translation type="unfinished"></translation>
+    </message>
+</context>
+<context>
     <name>Messages</name>
     <message>
         <source>Skipping:</source>
@@ -1989,6 +2057,14 @@ Restart now?</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
+        <source>Optimal+ (HunyuanOCR / MangaLMM / PaddleOCR VL)</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>MangaLMM</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
         <source>RT-DETR-v2 + Legacy BBox Rescue + Source LaMa</source>
         <translation type="unfinished"></translation>
     </message>
@@ -1998,6 +2074,10 @@ Restart now?</source>
     </message>
     <message>
         <source>HunyuanOCR Settings</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>MangaLMM Settings</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
@@ -3094,6 +3174,10 @@ Es posible que se haya movido, cambiado de nombre o eliminado.
         <translation type="unfinished"></translation>
     </message>
     <message>
+        <source>Optimal+ (HunyuanOCR / MangaLMM / PaddleOCR VL)</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
         <source>Microsoft OCR</source>
         <translation type="unfinished">Microsoft OCR</translation>
     </message>
@@ -3111,6 +3195,10 @@ Es posible que se haya movido, cambiado de nombre o eliminado.
     </message>
     <message>
         <source>HunyuanOCR</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>MangaLMM</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
@@ -3181,6 +3269,10 @@ Es posible que se haya movido, cambiado de nombre o eliminado.
     </message>
     <message>
         <source>HunyuanOCR Settings</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>MangaLMM Settings</source>
         <translation type="unfinished"></translation>
     </message>
     <message>

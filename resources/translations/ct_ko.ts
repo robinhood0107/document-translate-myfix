@@ -969,6 +969,87 @@ Comic Translate가 필요할 때 기본 제공 Docker 런타임을 시작하게 
     </message>
 </context>
 <context>
+    <name>MangaLMMOCRPage</name>
+    <message>
+        <source>MangaLMM Settings</source>
+        <translation>MangaLMM 설정</translation>
+    </message>
+    <message>
+        <source>Connect Comic Translate to your local MangaLMM llama.cpp server.
+This OCR engine sends cropped text regions to the OpenAI-compatible /chat/completions endpoint.
+MangaLMM is used as block-crop OCR only, not as full-page spotting inside the app.
+Keep the default localhost URL if you want Comic Translate to reuse the bundled Docker runtime.</source>
+        <translation>Comic Translate를 로컬 MangaLMM llama.cpp 서버에 연결합니다.
+이 OCR 엔진은 잘라낸 텍스트 영역을 OpenAI 호환 /chat/completions 엔드포인트로 전송합니다.
+앱 안에서 MangaLMM은 전체 페이지 spotting이 아니라 블록 crop OCR 용도로만 사용됩니다.
+Comic Translate가 기본 제공 Docker 런타임을 재사용하게 하려면 기본 localhost URL을 그대로 두세요.</translation>
+    </message>
+    <message>
+        <source>Server URL</source>
+        <translation type="unfinished">서버 URL</translation>
+    </message>
+    <message>
+        <source>MangaLMM OCR Tuning</source>
+        <translation>MangaLMM OCR 튜닝</translation>
+    </message>
+    <message>
+        <source>Max Completion Tokens</source>
+        <translation type="unfinished">최대 완료 토큰</translation>
+    </message>
+    <message>
+        <source>Parallel Workers</source>
+        <translation type="unfinished">병렬 작업 수</translation>
+    </message>
+    <message>
+        <source>Request Timeout (sec)</source>
+        <translation type="unfinished">요청 타임아웃(초)</translation>
+    </message>
+    <message>
+        <source>Raw Response Log</source>
+        <translation type="unfinished">원시 응답 로그</translation>
+    </message>
+    <message>
+        <source>Safe Resize</source>
+        <translation>안전 리사이즈</translation>
+    </message>
+    <message>
+        <source>Enable Safe Resize</source>
+        <translation>안전 리사이즈 사용</translation>
+    </message>
+    <message>
+        <source>Max Pixels</source>
+        <translation>최대 픽셀 수</translation>
+    </message>
+    <message>
+        <source>Max Long Side</source>
+        <translation>최대 긴 변 길이</translation>
+    </message>
+    <message>
+        <source>Recommended values for the bundled MangaLMM runtime:
+- ctx-size 4096: enough for block OCR while keeping VRAM safer
+- Max Completion Tokens: 256
+- Parallel Workers: 1
+- Request Timeout: 60 seconds
+- Safe Resize: on
+- Max Pixels / Max Long Side: 1200000 / 1280
+Reasoning:
+- Keep the request deterministic with temperature 0 and top_k 1 internally.
+- Large crops are resized only when needed, and OCR region boxes are mapped back to original coordinates.
+- Workers 1 is the safest default when Gemma and MangaLMM stay resident on the same GPU.</source>
+        <translation>기본 제공 MangaLMM 런타임의 권장값:
+- ctx-size 4096: 블록 OCR에는 충분하면서 VRAM 부담을 더 안전하게 유지
+- Max Completion Tokens: 256
+- Parallel Workers: 1
+- Request Timeout: 60초
+- Safe Resize: 켜기
+- Max Pixels / Max Long Side: 1200000 / 1280
+이유:
+- 내부적으로 temperature 0, top_k 1을 유지해 요청을 결정적으로 만듭니다.
+- 큰 crop만 필요할 때 리사이즈하고, OCR 영역 좌표는 원본 좌표로 다시 매핑합니다.
+- Gemma와 MangaLMM이 같은 GPU에 상주할 때 Workers 1이 가장 안전한 기본값입니다.</translation>
+    </message>
+</context>
+<context>
     <name>Messages</name>
     <message>
         <source>Skipping:</source>
@@ -2031,6 +2112,14 @@ Restart now?</source>
         <translation>최적값 (HunyuanOCR / PaddleOCR VL)</translation>
     </message>
     <message>
+        <source>Optimal+ (HunyuanOCR / MangaLMM / PaddleOCR VL)</source>
+        <translation>최적값+ (HunyuanOCR / MangaLMM / PaddleOCR VL)</translation>
+    </message>
+    <message>
+        <source>MangaLMM</source>
+        <translation>MangaLMM</translation>
+    </message>
+    <message>
         <source>RT-DETR-v2 + Legacy BBox Rescue + Source LaMa</source>
         <translation>RT-DETR-v2 + Legacy BBox Rescue + Source LaMa</translation>
     </message>
@@ -2041,6 +2130,10 @@ Restart now?</source>
     <message>
         <source>HunyuanOCR Settings</source>
         <translation>HunyuanOCR 설정</translation>
+    </message>
+    <message>
+        <source>MangaLMM Settings</source>
+        <translation>MangaLMM 설정</translation>
     </message>
     <message>
         <source>Gemma Local Server Settings</source>
@@ -3151,6 +3244,10 @@ It may have been moved, renamed, or deleted.
         <translation>최적값 (HunyuanOCR / PaddleOCR VL)</translation>
     </message>
     <message>
+        <source>Optimal+ (HunyuanOCR / MangaLMM / PaddleOCR VL)</source>
+        <translation>최적값+ (HunyuanOCR / MangaLMM / PaddleOCR VL)</translation>
+    </message>
+    <message>
         <source>Microsoft OCR</source>
         <translation>Microsoft OCR</translation>
     </message>
@@ -3169,6 +3266,10 @@ It may have been moved, renamed, or deleted.
     <message>
         <source>HunyuanOCR</source>
         <translation>HunyuanOCR</translation>
+    </message>
+    <message>
+        <source>MangaLMM</source>
+        <translation>MangaLMM</translation>
     </message>
     <message>
         <source>Resize</source>
@@ -3239,6 +3340,10 @@ It may have been moved, renamed, or deleted.
     <message>
         <source>HunyuanOCR Settings</source>
         <translation>HunyuanOCR 설정</translation>
+    </message>
+    <message>
+        <source>MangaLMM Settings</source>
+        <translation>MangaLMM 설정</translation>
     </message>
     <message>
         <source>Gemma Local Server Settings</source>
