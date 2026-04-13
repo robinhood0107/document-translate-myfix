@@ -6,6 +6,7 @@ import shutil
 import tempfile
 import traceback
 from typing import Any, Callable, Tuple
+from PIL import Image as PILImage
 
 from PySide6 import QtCore, QtGui, QtWidgets
 from PySide6.QtCore import QCoreApplication, QThreadPool
@@ -20,6 +21,7 @@ from modules.translation.local_runtime import LocalGemmaRuntimeManager
 from modules.ocr.selection import OCR_MODE_BEST_LOCAL, normalize_ocr_mode, resolve_ocr_engine
 from app.ui.canvas.text_item import TextBlockItem
 from app.ui.commands.box import DeleteBoxesCommand
+from app.path_materialization import ensure_path_materialized
 
 from modules.utils.textblock import TextBlock
 from modules.utils.file_handler import FileHandler
@@ -27,6 +29,19 @@ from modules.utils.pipeline_config import validate_settings
 from modules.utils.automatic_progress import AutomaticProgressTracker
 from modules.utils.download import set_download_callback
 from modules.utils.notification_sound import SYSTEM_SOUND_MODE, notify_pipeline_event, play_completion_sound
+from modules.utils.automatic_output import (
+    OUTPUT_OVERRIDE_MODE_GLOBAL,
+    OUTPUT_OVERRIDE_MODE_PROJECT,
+    SUPPORTED_OUTPUT_PRESETS,
+    build_series_output_dir,
+    default_project_output_preferences,
+    estimate_output_for_pages,
+    format_estimate_ratio_text,
+    format_estimate_seconds_text,
+    normalize_project_output_preferences,
+    resolve_automatic_output_settings,
+    resolve_series_folder_name,
+)
 from modules.utils.txt_md_exchange import (
     apply_translation_pages,
     collect_page_entries,
@@ -126,6 +141,9 @@ class ComicTranslate(ComicTranslateUI):
         self._manual_dirty = False
         self._dirty_revision = 0
         self._skip_close_prompt = False
+        self.project_output_preferences = default_project_output_preferences()
+        self._automatic_output_controls_updating = False
+        self._automatic_output_page_metrics_cache: dict[str, dict[str, object]] = {}
 
         self.pipeline = ComicTranslatePipeline(self)
         try:
@@ -271,6 +289,17 @@ class ComicTranslate(ComicTranslateUI):
             self.auto_export_translation_md_checkbox,
         ):
             checkbox.stateChanged.connect(self.settings_page._save_settings_if_not_loading)
+        self.output_use_global_checkbox.stateChanged.connect(self._on_project_output_use_global_changed)
+        self.output_format_combo.currentIndexChanged.connect(self._on_project_output_selection_changed)
+        self.output_preset_combo.currentIndexChanged.connect(self._on_project_output_selection_changed)
+        for signal in (
+            self.settings_page.ui.automatic_output_format_combo.currentIndexChanged,
+            self.settings_page.ui.automatic_output_preset_combo.currentIndexChanged,
+            self.settings_page.ui.automatic_output_png_spinbox.valueChanged,
+            self.settings_page.ui.automatic_output_jpg_spinbox.valueChanged,
+            self.settings_page.ui.automatic_output_webp_spinbox.valueChanged,
+        ):
+            signal.connect(self.refresh_automatic_output_controls)
 
         # Connect text edit widgets
         self.s_text_edit.textChanged.connect(self.text_ctrl.update_text_block)
@@ -361,6 +390,256 @@ class ComicTranslate(ComicTranslateUI):
                 popup.hide()
         if hasattr(self, "startup_home") and self.startup_home is not None:
             self.startup_home.set_actions_enabled(bool(enabled))
+
+    def clear_automatic_output_metric_cache(self) -> None:
+        self._automatic_output_page_metrics_cache.clear()
+
+    def _set_combo_to_data(self, combo: QtWidgets.QComboBox, value: str) -> None:
+        index = combo.findData(value)
+        if index < 0 and combo.count() > 0:
+            index = 0
+        combo.setCurrentIndex(index)
+
+    def get_project_output_preferences(self) -> dict[str, str]:
+        return normalize_project_output_preferences(self.project_output_preferences)
+
+    def set_project_output_preferences(
+        self,
+        preferences: dict[str, object] | None,
+        *,
+        mark_dirty: bool = False,
+    ) -> None:
+        normalized = normalize_project_output_preferences(preferences)
+        changed = normalized != self.get_project_output_preferences()
+        self.project_output_preferences = normalized
+        self.refresh_automatic_output_controls()
+        if changed and mark_dirty and self.image_files:
+            self.mark_project_dirty()
+
+    def get_resolved_export_settings(self) -> dict[str, object]:
+        export_settings = dict(self.settings_page.get_export_settings())
+        export_settings.update(
+            self.settings_page.get_resolved_automatic_output_settings(
+                self.get_project_output_preferences()
+            )
+        )
+        return export_settings
+
+    def get_automatic_output_series_dir(
+        self,
+        base_dir: str,
+        *,
+        anchor_path: str | None = None,
+    ) -> str:
+        anchor = anchor_path
+        if not anchor:
+            anchor = self.image_files[0] if self.image_files else ""
+        folder_name = resolve_series_folder_name(
+            anchor,
+            source_records=getattr(self, "export_source_by_path", {}),
+            project_file=self.project_file,
+            temp_dir=self.temp_dir,
+        )
+        return build_series_output_dir(base_dir, folder_name)
+
+    def _get_automatic_output_page_metric(self, file_path: str) -> dict[str, object] | None:
+        if not file_path:
+            return None
+        abs_path = os.path.abspath(file_path)
+        try:
+            ensure_path_materialized(abs_path)
+        except Exception:
+            pass
+        try:
+            stat_result = os.stat(abs_path)
+        except OSError:
+            return None
+        cached = self._automatic_output_page_metrics_cache.get(abs_path)
+        if (
+            cached
+            and cached.get("mtime_ns") == stat_result.st_mtime_ns
+            and cached.get("byte_size") == stat_result.st_size
+        ):
+            return dict(cached["metric"])
+        megapixels = 0.0
+        try:
+            with PILImage.open(abs_path) as image:
+                width, height = image.size
+            megapixels = (float(width) * float(height)) / 1_000_000.0
+        except Exception:
+            megapixels = 0.0
+        metric = {
+            "source_path": abs_path,
+            "byte_size": int(stat_result.st_size),
+            "megapixels": megapixels,
+        }
+        self._automatic_output_page_metrics_cache[abs_path] = {
+            "mtime_ns": int(stat_result.st_mtime_ns),
+            "byte_size": int(stat_result.st_size),
+            "metric": dict(metric),
+        }
+        return metric
+
+    def _collect_automatic_output_page_metrics(self) -> list[dict[str, object]]:
+        metrics: list[dict[str, object]] = []
+        for file_path in self.image_files:
+            metric = self._get_automatic_output_page_metric(file_path)
+            if metric is not None:
+                metrics.append(metric)
+        return metrics
+
+    def _format_output_estimate_text(
+        self,
+        estimate: dict[str, object],
+        *,
+        prefix: str,
+    ) -> str:
+        return prefix.format(
+            ratio=format_estimate_ratio_text(estimate),
+            time=format_estimate_seconds_text(estimate.get("seconds", 0.0)),
+            pages=int(estimate.get("page_count", 0) or 0),
+        )
+
+    def _preset_display_name(self, preset: str) -> str:
+        names = {
+            "fast": self.tr("Fast"),
+            "balanced": self.tr("Balanced"),
+            "small": self.tr("Small"),
+        }
+        return names.get(preset, preset)
+
+    def _rebuild_output_preset_combo_labels(
+        self,
+        combo: QtWidgets.QComboBox,
+        *,
+        requested_format: str,
+        global_settings: dict[str, object],
+        page_metrics: list[dict[str, object]],
+        selected_value: str,
+    ) -> None:
+        blocker = QtCore.QSignalBlocker(combo)
+        combo.clear()
+        for preset in SUPPORTED_OUTPUT_PRESETS:
+            label = self._preset_display_name(preset)
+            if page_metrics:
+                estimate_settings = resolve_automatic_output_settings(
+                    global_settings,
+                    {
+                        "output_format_override_mode": OUTPUT_OVERRIDE_MODE_PROJECT,
+                        "output_format_override_value": requested_format,
+                        "output_preset_override_mode": OUTPUT_OVERRIDE_MODE_PROJECT,
+                        "output_preset_override_value": preset,
+                    },
+                )
+                estimate = estimate_output_for_pages(page_metrics, estimate_settings)
+                label = self.tr("{name} (Estimated: {ratio}, {time})").format(
+                    name=label,
+                    ratio=format_estimate_ratio_text(estimate),
+                    time=format_estimate_seconds_text(estimate.get("seconds", 0.0)),
+                )
+            combo.addItem(label, preset)
+        del blocker
+        self._set_combo_to_data(combo, selected_value)
+
+    def refresh_automatic_output_controls(self) -> None:
+        if not hasattr(self, "settings_page") or self.settings_page is None:
+            return
+        if not hasattr(self, "output_format_combo"):
+            return
+
+        global_settings = dict(self.settings_page.get_export_settings())
+        project_preferences = self.get_project_output_preferences()
+        page_metrics = self._collect_automatic_output_page_metrics()
+        use_global = (
+            project_preferences.get("output_format_override_mode") == OUTPUT_OVERRIDE_MODE_GLOBAL
+            and project_preferences.get("output_preset_override_mode") == OUTPUT_OVERRIDE_MODE_GLOBAL
+        )
+        active_format = (
+            str(global_settings.get("automatic_output_format"))
+            if use_global
+            else project_preferences.get("output_format_override_value", "")
+        )
+        active_preset = (
+            str(global_settings.get("automatic_output_preset"))
+            if use_global
+            else project_preferences.get("output_preset_override_value", "")
+        )
+        resolved_settings = resolve_automatic_output_settings(
+            global_settings,
+            None if use_global else project_preferences,
+        )
+        global_resolved = resolve_automatic_output_settings(global_settings, None)
+
+        self._automatic_output_controls_updating = True
+        try:
+            use_global_blocker = QtCore.QSignalBlocker(self.output_use_global_checkbox)
+            format_blocker = QtCore.QSignalBlocker(self.output_format_combo)
+            self.output_use_global_checkbox.setChecked(use_global)
+            self.output_use_global_checkbox.setEnabled(bool(self.image_files))
+            self._set_combo_to_data(self.output_format_combo, active_format)
+            self.output_format_combo.setEnabled(bool(self.image_files) and not use_global)
+            self._rebuild_output_preset_combo_labels(
+                self.output_preset_combo,
+                requested_format=active_format,
+                global_settings=global_settings,
+                page_metrics=page_metrics,
+                selected_value=active_preset,
+            )
+            self.output_preset_combo.setEnabled(bool(self.image_files) and not use_global)
+            del use_global_blocker
+            del format_blocker
+        finally:
+            self._automatic_output_controls_updating = False
+
+        if page_metrics:
+            project_estimate = estimate_output_for_pages(page_metrics, resolved_settings)
+            global_estimate = estimate_output_for_pages(page_metrics, global_resolved)
+            self.output_estimate_label.setText(
+                self._format_output_estimate_text(
+                    project_estimate,
+                    prefix=self.tr("Estimated output: {ratio}, {time} across {pages} pages."),
+                )
+            )
+            self.settings_page.ui.automatic_output_estimate_summary_label.setText(
+                self._format_output_estimate_text(
+                    global_estimate,
+                    prefix=self.tr("Current project estimate: {ratio}, {time} across {pages} pages."),
+                )
+            )
+        else:
+            no_pages_text = self.tr("Load pages to see automatic output estimates.")
+            self.output_estimate_label.setText(no_pages_text)
+            self.settings_page.ui.automatic_output_estimate_summary_label.setText(no_pages_text)
+
+    def _on_project_output_use_global_changed(self, state: int) -> None:
+        if self._automatic_output_controls_updating:
+            return
+        use_global = bool(state)
+        preferences = self.get_project_output_preferences()
+        mode = OUTPUT_OVERRIDE_MODE_GLOBAL if use_global else OUTPUT_OVERRIDE_MODE_PROJECT
+        preferences["output_format_override_mode"] = mode
+        preferences["output_preset_override_mode"] = mode
+        preferences["output_format_override_value"] = str(
+            self.output_format_combo.currentData() or preferences.get("output_format_override_value", "")
+        )
+        preferences["output_preset_override_value"] = str(
+            self.output_preset_combo.currentData() or preferences.get("output_preset_override_value", "")
+        )
+        self.set_project_output_preferences(preferences, mark_dirty=True)
+
+    def _on_project_output_selection_changed(self, *_args) -> None:
+        if self._automatic_output_controls_updating:
+            return
+        preferences = self.get_project_output_preferences()
+        preferences["output_format_override_mode"] = OUTPUT_OVERRIDE_MODE_PROJECT
+        preferences["output_preset_override_mode"] = OUTPUT_OVERRIDE_MODE_PROJECT
+        preferences["output_format_override_value"] = str(
+            self.output_format_combo.currentData() or preferences.get("output_format_override_value", "")
+        )
+        preferences["output_preset_override_value"] = str(
+            self.output_preset_combo.currentData() or preferences.get("output_preset_override_value", "")
+        )
+        self.set_project_output_preferences(preferences, mark_dirty=True)
 
     def _show_project_switch_locked_warning(self) -> None:
         Messages.show_warning(
@@ -924,15 +1203,28 @@ class ComicTranslate(ComicTranslateUI):
             f"{self._txt_md_bundle_name()}_{target}{suffix}",
         )
 
+    def _txt_md_auto_save_path(self, target: str, suffix: str) -> str:
+        series_dir = self.get_automatic_output_series_dir(
+            self._txt_md_default_dir(),
+            anchor_path=self.image_files[0] if self.image_files else "",
+        )
+        os.makedirs(series_dir, exist_ok=True)
+        return os.path.join(
+            series_dir,
+            f"{self._txt_md_bundle_name()}_{target}{suffix}",
+        )
+
     def _write_txt_md_exchange(
         self,
         target: str,
         suffix: str,
         page_paths: list[str],
+        *,
+        save_path: str | None = None,
     ) -> str:
         page_entries = collect_page_entries(page_paths, self.image_states, target)
-        save_path = self._txt_md_save_path(target, suffix)
-        return dump_exchange_text(save_path, page_entries)
+        target_path = save_path or self._txt_md_save_path(target, suffix)
+        return dump_exchange_text(target_path, page_entries)
 
     def export_source_exchange(self, suffix: str) -> None:
         if not self._ensure_txt_md_ready():
@@ -1096,7 +1388,12 @@ class ComicTranslate(ComicTranslateUI):
             targets.append(("translation", ".md"))
         for target, suffix in targets:
             try:
-                self._write_txt_md_exchange(target, suffix, page_paths)
+                self._write_txt_md_exchange(
+                    target,
+                    suffix,
+                    page_paths,
+                    save_path=self._txt_md_auto_save_path(target, suffix),
+                )
             except Exception:
                 logger.exception("Automatic TXT/MD export failed for %s%s", target, suffix)
                 Messages.show_warning(
