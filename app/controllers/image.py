@@ -21,6 +21,7 @@ from app.thread_worker import GenericWorker
 from app.path_materialization import ensure_path_materialized
 from modules.utils.archives import natural_sort_key
 from modules.utils.export_paths import normalize_export_source_record
+from modules.utils.automatic_output import default_project_output_preferences
 from modules.utils.file_handler import get_prepared_path_source
 from modules.utils.inpaint_strokes import (
     PATCH_KIND_INPAINT,
@@ -546,6 +547,8 @@ class ImageStateController:
         self.main.image_patches.clear()
         self.main.in_memory_patches.clear()
         self.main.project_file = None
+        self.main.project_output_preferences = default_project_output_preferences()
+        self.main.clear_automatic_output_metric_cache()
         try:
             self.main.batch_report_ctrl.clear_latest_report()
         except Exception:
@@ -557,6 +560,7 @@ class ImageStateController:
         self.main.page_list.clear_active_sort()
         self.main.page_list.blockSignals(False)
         self.page_list_loader.clear()
+        self.main.refresh_automatic_output_controls()
 
         # Reset current_image_index
         self.main.curr_img_idx = -1
@@ -813,6 +817,7 @@ class ImageStateController:
         self.main.current_card = None
         self.page_list_loader.set_model(self.main.page_list.model())
         self.page_list_loader.set_file_paths(self.main.image_files)
+        self.main.refresh_automatic_output_controls()
 
     def handle_image_reorder(self, ordered_items: list[str]):
         if not self.main.image_files:
