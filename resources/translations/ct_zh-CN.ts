@@ -1422,14 +1422,6 @@ Approximate GPU usage:
         <translation>空闲</translation>
     </message>
     <message>
-        <source>Show details</source>
-        <translation>显示详情</translation>
-    </message>
-    <message>
-        <source>Minimize</source>
-        <translation>最小化</translation>
-    </message>
-    <message>
         <source>Service</source>
         <translation>服务</translation>
     </message>
@@ -1458,6 +1450,10 @@ Approximate GPU usage:
         <translation>取消</translation>
     </message>
     <message>
+        <source>Logs</source>
+        <translation>日志</translation>
+    </message>
+    <message>
         <source>Report</source>
         <translation>报告</translation>
     </message>
@@ -1476,6 +1472,30 @@ Approximate GPU usage:
     <message>
         <source>Close</source>
         <translation>关闭</translation>
+    </message>
+    <message>
+        <source>Window</source>
+        <translation>窗口</translation>
+    </message>
+    <message>
+        <source>Switch to window mode</source>
+        <translation>切换到窗口模式</translation>
+    </message>
+    <message>
+        <source>Embed</source>
+        <translation>内嵌</translation>
+    </message>
+    <message>
+        <source>Switch to embedded mode</source>
+        <translation>切换到内嵌模式</translation>
+    </message>
+    <message>
+        <source>Hide logs</source>
+        <translation>隐藏日志</translation>
+    </message>
+    <message>
+        <source>Show logs</source>
+        <translation>显示日志</translation>
     </message>
     <message>
         <source>Automatic</source>
