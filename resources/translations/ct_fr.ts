@@ -20,7 +20,7 @@
     <name>AutomaticProgress</name>
     <message>
         <source>Calculating</source>
-        <translation type="unfinished"></translation>
+        <translation type="unfinished">Calcul en cours</translation>
     </message>
     <message>
         <source>Recent History</source>
@@ -107,7 +107,7 @@
     </message>
     <message>
         <source>Calculating</source>
-        <translation type="unfinished"></translation>
+        <translation type="unfinished">Calcul en cours</translation>
     </message>
     <message>
         <source>작업이 취소되었습니다.</source>
@@ -146,6 +146,10 @@
     </message>
     <message>
         <source>Gemma Local Server Settings</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>작업이 취소되었습니다.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
@@ -511,7 +515,7 @@ Use Custom Local Server(Gemma) with the included Gemma Docker setup.</source>
     </message>
     <message>
         <source>File</source>
-        <translation type="unfinished"></translation>
+        <translation type="unfinished">Fichier</translation>
     </message>
     <message>
         <source>Chapter</source>
@@ -1261,6 +1265,33 @@ Install it to use PSD features.</source>
     </message>
 </context>
 <context>
+    <name>NotificationsPage</name>
+    <message>
+        <source>Automatic Completion</source>
+        <translation>Fin automatique</translation>
+    </message>
+    <message>
+        <source>Play a sound when automatic processing finishes successfully. Custom files must be placed in the project&apos;s music folder.</source>
+        <translation>Jouer un son lorsque le traitement automatique se termine avec succès. Les fichiers personnalisés doivent être placés dans le dossier music du projet.</translation>
+    </message>
+    <message>
+        <source>Enable Completion Sound</source>
+        <translation>Activer le son de fin</translation>
+    </message>
+    <message>
+        <source>Test Sound</source>
+        <translation>Tester le son</translation>
+    </message>
+    <message>
+        <source>Music Folder: {path}</source>
+        <translation>Dossier music : {path}</translation>
+    </message>
+    <message>
+        <source>System sound</source>
+        <translation>Son système</translation>
+    </message>
+</context>
+<context>
     <name>PaddleOCRVLPage</name>
     <message>
         <source>PaddleOCR VL Settings</source>
@@ -1347,6 +1378,141 @@ Approximate GPU usage:
     <message>
         <source>Theme</source>
         <translation>Thème</translation>
+    </message>
+</context>
+<context>
+    <name>PipelineStatusPanel</name>
+    <message>
+        <source>Pipeline Status</source>
+        <translation>État du pipeline</translation>
+    </message>
+    <message>
+        <source>Idle</source>
+        <translation>Au repos</translation>
+    </message>
+    <message>
+        <source>Show details</source>
+        <translation>Afficher les détails</translation>
+    </message>
+    <message>
+        <source>Minimize</source>
+        <translation>Réduire</translation>
+    </message>
+    <message>
+        <source>Service</source>
+        <translation>Service</translation>
+    </message>
+    <message>
+        <source>Progress</source>
+        <translation>Progression</translation>
+    </message>
+    <message>
+        <source>File</source>
+        <translation>Fichier</translation>
+    </message>
+    <message>
+        <source>ETA</source>
+        <translation>ETA</translation>
+    </message>
+    <message>
+        <source>Message</source>
+        <translation>Message</translation>
+    </message>
+    <message>
+        <source>No Preview</source>
+        <translation>Aucun aperçu</translation>
+    </message>
+    <message>
+        <source>Cancel</source>
+        <translation>Annuler</translation>
+    </message>
+    <message>
+        <source>Report</source>
+        <translation>Rapport</translation>
+    </message>
+    <message>
+        <source>Retry</source>
+        <translation>Réessayer</translation>
+    </message>
+    <message>
+        <source>Settings</source>
+        <translation>Paramètres</translation>
+    </message>
+    <message>
+        <source>Open Output</source>
+        <translation>Ouvrir la sortie</translation>
+    </message>
+    <message>
+        <source>Close</source>
+        <translation>Fermer</translation>
+    </message>
+    <message>
+        <source>Automatic</source>
+        <translation>Automatique</translation>
+    </message>
+    <message>
+        <source>Calculating</source>
+        <translation>Calcul en cours</translation>
+    </message>
+    <message>
+        <source>Status</source>
+        <translation>État</translation>
+    </message>
+    <message>
+        <source>Info</source>
+        <translation>Info</translation>
+    </message>
+    <message>
+        <source>Success</source>
+        <translation>Succès</translation>
+    </message>
+    <message>
+        <source>Warning</source>
+        <translation>Avertissement</translation>
+    </message>
+    <message>
+        <source>Error</source>
+        <translation>Erreur</translation>
+    </message>
+    <message>
+        <source>Download</source>
+        <translation>Téléchargement</translation>
+    </message>
+    <message>
+        <source>Local Service</source>
+        <translation>Service local</translation>
+    </message>
+    <message>
+        <source>Network</source>
+        <translation>Réseau</translation>
+    </message>
+    <message>
+        <source>Content Filter</source>
+        <translation>Filtre de contenu</translation>
+    </message>
+    <message>
+        <source>Batch Report</source>
+        <translation>Rapport de lot</translation>
+    </message>
+    <message>
+        <source>Pipeline</source>
+        <translation>Pipeline</translation>
+    </message>
+    <message>
+        <source>Running</source>
+        <translation>En cours</translation>
+    </message>
+    <message>
+        <source>Done</source>
+        <translation>Terminé</translation>
+    </message>
+    <message>
+        <source>Failed</source>
+        <translation>Échec</translation>
+    </message>
+    <message>
+        <source>Cancelled</source>
+        <translation>Annulé</translation>
     </message>
 </context>
 <context>
@@ -1723,6 +1889,10 @@ Redémarrer maintenant ?</translation>
     <message>
         <source>User Dictionaries</source>
         <translation>Dictionnaires utilisateur</translation>
+    </message>
+    <message>
+        <source>Notifications</source>
+        <translation>Notifications</translation>
     </message>
     <message>
         <source>Project</source>

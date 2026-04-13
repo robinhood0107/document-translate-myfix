@@ -20,7 +20,7 @@
     <name>AutomaticProgress</name>
     <message>
         <source>Calculating</source>
-        <translation type="unfinished"></translation>
+        <translation type="unfinished">计算中</translation>
     </message>
     <message>
         <source>Recent History</source>
@@ -107,7 +107,7 @@
     </message>
     <message>
         <source>Calculating</source>
-        <translation type="unfinished"></translation>
+        <translation type="unfinished">计算中</translation>
     </message>
     <message>
         <source>작업이 취소되었습니다.</source>
@@ -146,6 +146,10 @@
     </message>
     <message>
         <source>Gemma Local Server Settings</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>작업이 취소되었습니다.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
@@ -511,7 +515,7 @@ Use Custom Local Server(Gemma) with the included Gemma Docker setup.</source>
     </message>
     <message>
         <source>File</source>
-        <translation type="unfinished"></translation>
+        <translation type="unfinished">文件</translation>
     </message>
     <message>
         <source>Chapter</source>
@@ -1260,6 +1264,33 @@ Install it to use PSD features.</source>
     </message>
 </context>
 <context>
+    <name>NotificationsPage</name>
+    <message>
+        <source>Automatic Completion</source>
+        <translation>自动处理完成</translation>
+    </message>
+    <message>
+        <source>Play a sound when automatic processing finishes successfully. Custom files must be placed in the project&apos;s music folder.</source>
+        <translation>自动处理成功完成时播放声音。自定义文件必须放在项目的 music 文件夹中。</translation>
+    </message>
+    <message>
+        <source>Enable Completion Sound</source>
+        <translation>启用完成提示音</translation>
+    </message>
+    <message>
+        <source>Test Sound</source>
+        <translation>测试声音</translation>
+    </message>
+    <message>
+        <source>Music Folder: {path}</source>
+        <translation>music 文件夹：{path}</translation>
+    </message>
+    <message>
+        <source>System sound</source>
+        <translation>系统声音</translation>
+    </message>
+</context>
+<context>
     <name>PaddleOCRVLPage</name>
     <message>
         <source>PaddleOCR VL Settings</source>
@@ -1346,6 +1377,141 @@ Approximate GPU usage:
     <message>
         <source>Theme</source>
         <translation>主题</translation>
+    </message>
+</context>
+<context>
+    <name>PipelineStatusPanel</name>
+    <message>
+        <source>Pipeline Status</source>
+        <translation>流水线状态</translation>
+    </message>
+    <message>
+        <source>Idle</source>
+        <translation>空闲</translation>
+    </message>
+    <message>
+        <source>Show details</source>
+        <translation>显示详情</translation>
+    </message>
+    <message>
+        <source>Minimize</source>
+        <translation>最小化</translation>
+    </message>
+    <message>
+        <source>Service</source>
+        <translation>服务</translation>
+    </message>
+    <message>
+        <source>Progress</source>
+        <translation>进度</translation>
+    </message>
+    <message>
+        <source>File</source>
+        <translation>文件</translation>
+    </message>
+    <message>
+        <source>ETA</source>
+        <translation>预计剩余时间</translation>
+    </message>
+    <message>
+        <source>Message</source>
+        <translation>消息</translation>
+    </message>
+    <message>
+        <source>No Preview</source>
+        <translation>无预览</translation>
+    </message>
+    <message>
+        <source>Cancel</source>
+        <translation>取消</translation>
+    </message>
+    <message>
+        <source>Report</source>
+        <translation>报告</translation>
+    </message>
+    <message>
+        <source>Retry</source>
+        <translation>重试</translation>
+    </message>
+    <message>
+        <source>Settings</source>
+        <translation>设置</translation>
+    </message>
+    <message>
+        <source>Open Output</source>
+        <translation>打开输出</translation>
+    </message>
+    <message>
+        <source>Close</source>
+        <translation>关闭</translation>
+    </message>
+    <message>
+        <source>Automatic</source>
+        <translation>自动</translation>
+    </message>
+    <message>
+        <source>Calculating</source>
+        <translation>计算中</translation>
+    </message>
+    <message>
+        <source>Status</source>
+        <translation>状态</translation>
+    </message>
+    <message>
+        <source>Info</source>
+        <translation>信息</translation>
+    </message>
+    <message>
+        <source>Success</source>
+        <translation>成功</translation>
+    </message>
+    <message>
+        <source>Warning</source>
+        <translation>警告</translation>
+    </message>
+    <message>
+        <source>Error</source>
+        <translation>错误</translation>
+    </message>
+    <message>
+        <source>Download</source>
+        <translation>下载</translation>
+    </message>
+    <message>
+        <source>Local Service</source>
+        <translation>本地服务</translation>
+    </message>
+    <message>
+        <source>Network</source>
+        <translation>网络</translation>
+    </message>
+    <message>
+        <source>Content Filter</source>
+        <translation>内容过滤</translation>
+    </message>
+    <message>
+        <source>Batch Report</source>
+        <translation>批处理报告</translation>
+    </message>
+    <message>
+        <source>Pipeline</source>
+        <translation>流水线</translation>
+    </message>
+    <message>
+        <source>Running</source>
+        <translation>运行中</translation>
+    </message>
+    <message>
+        <source>Done</source>
+        <translation>完成</translation>
+    </message>
+    <message>
+        <source>Failed</source>
+        <translation>失败</translation>
+    </message>
+    <message>
+        <source>Cancelled</source>
+        <translation>已取消</translation>
     </message>
 </context>
 <context>
@@ -1774,6 +1940,10 @@ Restart now?</source>
     <message>
         <source>User Dictionaries</source>
         <translation>用户词典</translation>
+    </message>
+    <message>
+        <source>Notifications</source>
+        <translation>通知</translation>
     </message>
     <message>
         <source>Project</source>
