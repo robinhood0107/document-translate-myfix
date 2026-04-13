@@ -12,6 +12,23 @@
 - upstream `v2.7.0`, `v2.7.1`의 selective manual backport
 - benchmark 작업과 제품 브랜치의 분리
 
+## 중요 기능
+
+- 데스크톱 중심 번역 워크플로를 위한 로컬 Gemma 번역 런타임.
+- `HunyuanOCR`와 `PaddleOCR VL`을 상황에 맞게 고르는 로컬 OCR 최적 라우팅.
+- 저장/불러오기까지 유지되는 인페인팅 Add / Exclude / Restore 도구.
+- OCR/번역 교정 사전이 포함된 TXT/MD 원문 export 및 번역 import.
+- lazy page materialization 기반의 CBZ/CBR 만화 아카이브 입력.
+- 좌하단 상태 패널, 오버레이 잠금, 최신 결과 미리보기가 결합된 자동 파이프라인 UI.
+
+## 서브 기능
+
+- 이미 실행 중인 로컬 OCR 컨테이너를 재기동하지 않는 reuse-only preflight 검사.
+- 자동 실행 중 페이지가 끝날 때마다 최신 번역 완료 이미지를 바로 갱신하는 미리보기.
+- 시스템 알림음 또는 저장소 `music/*.wav`를 쓰는 완료 알림음.
+- `.venv-win`, `.venv-win-cuda13`을 자동 bootstrap하는 Windows 런처.
+- UI 변경과 함께 유지되는 다국어 툴팁, 도움말, Qt 번역 자산.
+
 ## 원점과 upstream 출처 고지
 
 이 저장소는 [ogkalu2/comic-translate](https://github.com/ogkalu2/comic-translate) 에서 시작된 downstream 포크/파생 작업입니다. upstream `v2.6.7` 코드베이스에서 출발했고, 이후 로컬 런타임, OCR, Windows 실행 환경, 제품 워크플로 방향으로 분기하며 확장되었습니다.

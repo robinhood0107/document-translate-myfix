@@ -1349,6 +1349,38 @@ Approximate GPU usage:
 <context>
     <name>PageListView</name>
     <message>
+        <source>Name</source>
+        <translation>名前</translation>
+    </message>
+    <message>
+        <source>Date</source>
+        <translation>日付</translation>
+    </message>
+    <message>
+        <source>Sort by Name</source>
+        <translation>名前順で並べ替え</translation>
+    </message>
+    <message>
+        <source>Name: A to Z</source>
+        <translation>名前: A から Z</translation>
+    </message>
+    <message>
+        <source>Name: Z to A</source>
+        <translation>名前: Z から A</translation>
+    </message>
+    <message>
+        <source>Sort by Date</source>
+        <translation>日付順で並べ替え</translation>
+    </message>
+    <message>
+        <source>Date: Newest First</source>
+        <translation>日付: 新しい順</translation>
+    </message>
+    <message>
+        <source>Date: Oldest First</source>
+        <translation>日付: 古い順</translation>
+    </message>
+    <message>
         <source>Insert</source>
         <translation>入れる</translation>
     </message>
@@ -2605,6 +2637,13 @@ back on the Image (for further editing)</source>
     <message>
         <source>Inpainting</source>
         <translation>修復</translation>
+    </message>
+</context>
+<context>
+    <name>_PageListContentView</name>
+    <message>
+        <source>{count} pages</source>
+        <translation>{count}ページ</translation>
     </message>
 </context>
 <context>

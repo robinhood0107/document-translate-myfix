@@ -1348,6 +1348,38 @@ Approximate GPU usage:
 <context>
     <name>PageListView</name>
     <message>
+        <source>Name</source>
+        <translation>名称</translation>
+    </message>
+    <message>
+        <source>Date</source>
+        <translation>日期</translation>
+    </message>
+    <message>
+        <source>Sort by Name</source>
+        <translation>按名称排序</translation>
+    </message>
+    <message>
+        <source>Name: A to Z</source>
+        <translation>名称：A 到 Z</translation>
+    </message>
+    <message>
+        <source>Name: Z to A</source>
+        <translation>名称：Z 到 A</translation>
+    </message>
+    <message>
+        <source>Sort by Date</source>
+        <translation>按日期排序</translation>
+    </message>
+    <message>
+        <source>Date: Newest First</source>
+        <translation>日期：最新在前</translation>
+    </message>
+    <message>
+        <source>Date: Oldest First</source>
+        <translation>日期：最旧在前</translation>
+    </message>
+    <message>
         <source>Insert</source>
         <translation>插入</translation>
     </message>
@@ -2602,6 +2634,13 @@ back on the Image (for further editing)</source>
     <message>
         <source>Inpainting</source>
         <translation>修复填充</translation>
+    </message>
+</context>
+<context>
+    <name>_PageListContentView</name>
+    <message>
+        <source>{count} pages</source>
+        <translation>{count} 页</translation>
     </message>
 </context>
 <context>
