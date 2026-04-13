@@ -1349,6 +1349,38 @@ Approximate GPU usage:
 <context>
     <name>PageListView</name>
     <message>
+        <source>Name</source>
+        <translation>Имя</translation>
+    </message>
+    <message>
+        <source>Date</source>
+        <translation>Дата</translation>
+    </message>
+    <message>
+        <source>Sort by Name</source>
+        <translation>Сортировать по имени</translation>
+    </message>
+    <message>
+        <source>Name: A to Z</source>
+        <translation>Имя: от A до Z</translation>
+    </message>
+    <message>
+        <source>Name: Z to A</source>
+        <translation>Имя: от Z до A</translation>
+    </message>
+    <message>
+        <source>Sort by Date</source>
+        <translation>Сортировать по дате</translation>
+    </message>
+    <message>
+        <source>Date: Newest First</source>
+        <translation>Дата: сначала новые</translation>
+    </message>
+    <message>
+        <source>Date: Oldest First</source>
+        <translation>Дата: сначала старые</translation>
+    </message>
+    <message>
         <source>Insert</source>
         <translation>Вставить</translation>
     </message>
@@ -2605,6 +2637,13 @@ back on the Image (for further editing)</source>
     <message>
         <source>Inpainting</source>
         <translation>Восстановление изображения</translation>
+    </message>
+</context>
+<context>
+    <name>_PageListContentView</name>
+    <message>
+        <source>{count} pages</source>
+        <translation>{count} страниц</translation>
     </message>
 </context>
 <context>

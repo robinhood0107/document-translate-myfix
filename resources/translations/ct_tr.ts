@@ -1349,6 +1349,38 @@ Approximate GPU usage:
 <context>
     <name>PageListView</name>
     <message>
+        <source>Name</source>
+        <translation>Ad</translation>
+    </message>
+    <message>
+        <source>Date</source>
+        <translation>Tarih</translation>
+    </message>
+    <message>
+        <source>Sort by Name</source>
+        <translation>Ada göre sırala</translation>
+    </message>
+    <message>
+        <source>Name: A to Z</source>
+        <translation>Ad: A&apos;dan Z&apos;ye</translation>
+    </message>
+    <message>
+        <source>Name: Z to A</source>
+        <translation>Ad: Z&apos;den A&apos;ya</translation>
+    </message>
+    <message>
+        <source>Sort by Date</source>
+        <translation>Tarihe göre sırala</translation>
+    </message>
+    <message>
+        <source>Date: Newest First</source>
+        <translation>Tarih: en yeni önce</translation>
+    </message>
+    <message>
+        <source>Date: Oldest First</source>
+        <translation>Tarih: en eski önce</translation>
+    </message>
+    <message>
         <source>Insert</source>
         <translation>Ekle</translation>
     </message>
@@ -2604,6 +2636,13 @@ back on the Image (for further editing)</source>
     <message>
         <source>Inpainting</source>
         <translation>Boyama</translation>
+    </message>
+</context>
+<context>
+    <name>_PageListContentView</name>
+    <message>
+        <source>{count} pages</source>
+        <translation>{count} sayfa</translation>
     </message>
 </context>
 <context>
