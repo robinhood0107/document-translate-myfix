@@ -157,6 +157,78 @@
         <translation>Ошибка</translation>
     </message>
     <message>
+        <source>No pages are loaded for TXT/MD import or export.</source>
+        <translation>Нет загруженных страниц для импорта или экспорта TXT/MD.</translation>
+    </message>
+    <message>
+        <source>TXT/MD import and export require unique page file names.
+Rename duplicate pages first.
+Duplicates:
+{names}</source>
+        <translation>Для импорта и экспорта TXT/MD требуются уникальные имена файлов страниц.
+Сначала переименуйте дублирующиеся страницы.
+Дубликаты:
+{names}</translation>
+    </message>
+    <message>
+        <source>TXT/MD Export Failed</source>
+        <translation>Ошибка экспорта TXT/MD</translation>
+    </message>
+    <message>
+        <source>Failed to export source text.</source>
+        <translation>Не удалось экспортировать исходный текст.</translation>
+    </message>
+    <message>
+        <source>Exported source text to:
+{path}</source>
+        <translation>Исходный текст экспортирован в:
+{path}</translation>
+    </message>
+    <message>
+        <source>Translation imported and matched successfully.</source>
+        <translation>Перевод успешно импортирован и сопоставлен.</translation>
+    </message>
+    <message>
+        <source>Imported TXT/MD content was only partially matched. Make sure the file follows the exported exchange format.</source>
+        <translation>Импортированное содержимое TXT/MD было сопоставлено только частично. Убедитесь, что файл следует экспортированному формату обмена.</translation>
+    </message>
+    <message>
+        <source>Missing pages:</source>
+        <translation>Отсутствующие страницы:</translation>
+    </message>
+    <message>
+        <source>Unexpected pages:</source>
+        <translation>Неожиданные страницы:</translation>
+    </message>
+    <message>
+        <source>Unmatched pages:</source>
+        <translation>Несовпадающие страницы:</translation>
+    </message>
+    <message>
+        <source>TXT Files (*.txt *.TXT)</source>
+        <translation>Файлы TXT (*.txt *.TXT)</translation>
+    </message>
+    <message>
+        <source>Markdown Files (*.md *.MD)</source>
+        <translation>Файлы Markdown (*.md *.MD)</translation>
+    </message>
+    <message>
+        <source>Import Translation</source>
+        <translation>Импорт перевода</translation>
+    </message>
+    <message>
+        <source>TXT/MD Import Failed</source>
+        <translation>Ошибка импорта TXT/MD</translation>
+    </message>
+    <message>
+        <source>Failed to import translation text.</source>
+        <translation>Не удалось импортировать текст перевода.</translation>
+    </message>
+    <message>
+        <source>Automatic TXT/MD export failed for {target}{suffix}.</source>
+        <translation>Сбой автоматического экспорта TXT/MD для {target}{suffix}.</translation>
+    </message>
+    <message>
         <source>One-Page Auto</source>
         <translation type="unfinished">Авто для одной страницы</translation>
     </message>
@@ -314,6 +386,33 @@
     <message>
         <source>Mongolian</source>
         <translation>Монгольский</translation>
+    </message>
+</context>
+<context>
+    <name>CorrectionDictionaryTable</name>
+    <message>
+        <source>Keyword</source>
+        <translation>Ключевое слово</translation>
+    </message>
+    <message>
+        <source>Substitution</source>
+        <translation>Замена</translation>
+    </message>
+    <message>
+        <source>Use regex</source>
+        <translation>Использовать regex</translation>
+    </message>
+    <message>
+        <source>Case sensitive</source>
+        <translation>Учитывать регистр</translation>
+    </message>
+    <message>
+        <source>New</source>
+        <translation>Новый</translation>
+    </message>
+    <message>
+        <source>Delete</source>
+        <translation>Удалить</translation>
     </message>
 </context>
 <context>
@@ -1622,6 +1721,10 @@ Restart now?</source>
         <translation>LLMs</translation>
     </message>
     <message>
+        <source>User Dictionaries</source>
+        <translation>Пользовательские словари</translation>
+    </message>
+    <message>
         <source>Project</source>
         <translation>Проект</translation>
     </message>
@@ -1983,6 +2086,29 @@ then do inpainting on the resized image.</source>
     </message>
 </context>
 <context>
+    <name>UserDictionariesPage</name>
+    <message>
+        <source>Correction dictionaries rewrite OCR and translation results before they are saved to the project.</source>
+        <translation>Словари коррекции переписывают результаты OCR и перевода перед сохранением в проект.</translation>
+    </message>
+    <message>
+        <source>OCR Result Dictionary</source>
+        <translation>Словарь результатов OCR</translation>
+    </message>
+    <message>
+        <source>Apply these substitutions immediately after OCR returns text, before the source text is stored.</source>
+        <translation>Применяйте эти замены сразу после того, как OCR вернёт текст, до сохранения исходного текста.</translation>
+    </message>
+    <message>
+        <source>Translation Result Dictionary</source>
+        <translation>Словарь результатов перевода</translation>
+    </message>
+    <message>
+        <source>Apply these substitutions immediately after translation or TXT/MD import returns text, before the translation is stored.</source>
+        <translation>Применяйте эти замены сразу после того, как перевод или импорт TXT/MD вернёт текст, до сохранения перевода.</translation>
+    </message>
+</context>
+<context>
     <name>WorkspaceMixin</name>
     <message>
         <source>Undo</source>
@@ -2235,6 +2361,74 @@ back on the Image (for further editing)</source>
         <translation>Увеличить размер всех блоков</translation>
     </message>
     <message>
+        <source>TXT/MD</source>
+        <translation>TXT/MD</translation>
+    </message>
+    <message>
+        <source>Export Source TXT</source>
+        <translation>Экспорт исходного TXT</translation>
+    </message>
+    <message>
+        <source>Export the current project&apos;s source text in the TXT exchange format.</source>
+        <translation>Экспортировать исходный текст текущего проекта в формате обмена TXT.</translation>
+    </message>
+    <message>
+        <source>Import Translation TXT</source>
+        <translation>Импорт перевода TXT</translation>
+    </message>
+    <message>
+        <source>Import translated text from a TXT exchange file and rebuild text boxes to fit.</source>
+        <translation>Импортировать переведённый текст из файла обмена TXT и заново подогнать текстовые блоки.</translation>
+    </message>
+    <message>
+        <source>Export Source MD</source>
+        <translation>Экспорт исходного MD</translation>
+    </message>
+    <message>
+        <source>Export the current project&apos;s source text in the Markdown exchange format.</source>
+        <translation>Экспортировать исходный текст текущего проекта в формате обмена Markdown.</translation>
+    </message>
+    <message>
+        <source>Import Translation MD</source>
+        <translation>Импорт перевода MD</translation>
+    </message>
+    <message>
+        <source>Import translated text from a Markdown exchange file and rebuild text boxes to fit.</source>
+        <translation>Импортировать переведённый текст из файла обмена Markdown и заново подогнать текстовые блоки.</translation>
+    </message>
+    <message>
+        <source>Auto Export Source TXT</source>
+        <translation>Автоэкспорт исходного TXT</translation>
+    </message>
+    <message>
+        <source>After a successful automatic run, overwrite the TXT source exchange file with only the pages from that run.</source>
+        <translation>После успешного автоматического запуска перезаписывать файл обмена исходного TXT только страницами из этого запуска.</translation>
+    </message>
+    <message>
+        <source>Auto Export Source MD</source>
+        <translation>Автоэкспорт исходного MD</translation>
+    </message>
+    <message>
+        <source>After a successful automatic run, overwrite the Markdown source exchange file with only the pages from that run.</source>
+        <translation>После успешного автоматического запуска перезаписывать файл обмена исходного Markdown только страницами из этого запуска.</translation>
+    </message>
+    <message>
+        <source>Auto Export Translation TXT</source>
+        <translation>Автоэкспорт перевода TXT</translation>
+    </message>
+    <message>
+        <source>After a successful automatic run, overwrite the TXT translation exchange file with only the pages from that run.</source>
+        <translation>После успешного автоматического запуска перезаписывать файл обмена перевода TXT только страницами из этого запуска.</translation>
+    </message>
+    <message>
+        <source>Auto Export Translation MD</source>
+        <translation>Автоэкспорт перевода MD</translation>
+    </message>
+    <message>
+        <source>After a successful automatic run, overwrite the Markdown translation exchange file with only the pages from that run.</source>
+        <translation>После успешного автоматического запуска перезаписывать файл обмена перевода Markdown только страницами из этого запуска.</translation>
+    </message>
+    <message>
         <source>Box Drawing</source>
         <translation>Рисование блоков</translation>
     </message>
@@ -2333,7 +2527,7 @@ It may have already been moved, renamed, or deleted.
     </message>
     <message>
         <source>Delete</source>
-        <translation type="unfinished">Удалить</translation>
+        <translation>Удалить</translation>
     </message>
     <message>
         <source>Cancel</source>
