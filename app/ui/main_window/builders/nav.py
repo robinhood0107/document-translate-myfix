@@ -133,7 +133,7 @@ class NavRailMixin:
         nav_tools = [
             {"svg": "home_line.svg", "checkable": True, "tooltip": self.tr("Home"), "clicked": self.show_home},
             {
-                "svg": "rotate-arrow-top.svg",
+                "svg": "tabler--history.svg",
                 "checkable": False,
                 "tooltip": self.tr("Open Latest Recent Project"),
             },
