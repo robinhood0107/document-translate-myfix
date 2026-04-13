@@ -129,6 +129,12 @@
 <context>
     <name>ComicTranslate</name>
     <message>
+        <source>Project files cannot be opened together with other imported files.
+Choose either a project file or image/document/archive files.</source>
+        <translation>Proje dosyaları diğer içe aktarılan dosyalarla birlikte açılamaz.
+Bir proje dosyası ya da yalnızca görüntü/belge/arşiv dosyaları seçin.</translation>
+    </message>
+    <message>
         <source>Gemma와 OCR 준비를 확인하는 중...</source>
         <translation type="unfinished"></translation>
     </message>
@@ -259,6 +265,12 @@ Yinelenenler:
     <message>
         <source>Unsaved Changes</source>
         <translation>Kaydedilmemiş Değişiklikler</translation>
+    </message>
+    <message>
+        <source>Project switching is unavailable while automatic processing is running.
+Cancel the current run or wait for it to finish first.</source>
+        <translation>Otomatik işlem çalışırken proje değiştirilemez.
+Geçerli çalıştırmayı iptal edin ya da tamamlanmasını bekleyin.</translation>
     </message>
     <message>
         <source>Save changes to this file?</source>
@@ -1236,6 +1248,10 @@ Install it to use PSD features.</source>
         <translation>Ana Sayfa</translation>
     </message>
     <message>
+        <source>Open Latest Recent Project</source>
+        <translation>En son açılan projeyi aç</translation>
+    </message>
+    <message>
         <source>Settings</source>
         <translation>Ayarlar</translation>
     </message>
@@ -1247,22 +1263,6 @@ Install it to use PSD features.</source>
         <source>Insert files into current project</source>
         <translation>Dosyaları mevcut projeye ekle</translation>
     </message>
-    <message>
-        <source>Start New Project</source>
-        <translation>Yeni Proje Başlat</translation>
-    </message>
-    <message>
-        <source>Your current project has unsaved changes. Start a new project?</source>
-        <translation>Mevcut projenizde kaydedilmemiş değişiklikler var. Yeni bir proje başlatılsın mı?</translation>
-    </message>
-    <message>
-        <source>Yes</source>
-        <translation>Evet</translation>
-    </message>
-    <message>
-        <source>No</source>
-        <translation>Hayır</translation>
-    </message>
 </context>
 <context>
     <name>NotificationsPage</name>
@@ -1271,8 +1271,8 @@ Install it to use PSD features.</source>
         <translation>Otomatik tamamlama</translation>
     </message>
     <message>
-        <source>Play a sound when automatic processing finishes successfully. Custom files must be placed in the project&apos;s music folder.</source>
-        <translation>Otomatik işlem başarıyla bittiğinde bir ses çal. Özel dosyalar projenin music klasörüne yerleştirilmelidir.</translation>
+        <source>Play a sound when automatic processing finishes successfully. Custom files must be placed in the repository music folder.</source>
+        <translation>Otomatik işlem başarıyla tamamlandığında bir ses çal. Özel dosyalar depo içindeki music klasörüne yerleştirilmelidir.</translation>
     </message>
     <message>
         <source>Enable Completion Sound</source>
@@ -2100,6 +2100,12 @@ Başlamak için bir proje açın veya oluşturun.</translation>
     <message>
         <source>Supported Files ({exts});;All Files (*)</source>
         <translation>Desteklenen Dosyalar ({exts});;Tüm Dosyalar (*)</translation>
+    </message>
+    <message>
+        <source>Project files cannot be opened together with other imported files.
+Choose either a project file or image/document/archive files.</source>
+        <translation>Proje dosyaları diğer içe aktarılan dosyalarla birlikte açılamaz.
+Bir proje dosyası ya da yalnızca görüntü/belge/arşiv dosyaları seçin.</translation>
     </message>
 </context>
 <context>

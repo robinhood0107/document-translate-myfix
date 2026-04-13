@@ -436,6 +436,7 @@ class StartupHomeScreen(QtWidgets.QWidget):
         self._is_dark = True
         self._filter  = "recent"             # "recent" | "pinned"
         self._search  = ""
+        self._actions_enabled = True
         self._build()
         self._refresh_theme()
 
@@ -571,9 +572,16 @@ class StartupHomeScreen(QtWidgets.QWidget):
     # Public API 
 
     def populate(self, recent: list[dict]) -> None:
-        """Rebuild rows from [{path, mtime}, …] list (newest modified first)."""
+        """Rebuild rows from [{path, mtime}, …] list ordered by recent-open recency."""
         self._all_entries = recent
         self._rebuild_rows()
+
+    def set_actions_enabled(self, enabled: bool) -> None:
+        self._actions_enabled = bool(enabled)
+        self._card_new.setEnabled(enabled)
+        self._card_open.setEnabled(enabled)
+        for row in self._rows:
+            row.setEnabled(enabled)
 
     def apply_theme(self, is_dark: bool) -> None:
         self._is_dark = is_dark
@@ -612,6 +620,7 @@ class StartupHomeScreen(QtWidgets.QWidget):
                 continue
             row = _RecentRow(path, mtime, pinned=e.get("pinned", False), parent=self._rows_w)
             row.apply_theme(self._is_dark)
+            row.setEnabled(self._actions_enabled)
             row.sig_open.connect(self.sig_open_project)
             row.sig_remove.connect(self._on_remove)
             row.sig_pin.connect(self._on_pin)
@@ -639,10 +648,14 @@ class StartupHomeScreen(QtWidgets.QWidget):
 
     def _on_new_project(self):
         """Emit via sig so controller can clear state & show home."""
+        if not self._actions_enabled:
+            return
         # We emit an empty list — controller interprets as "new blank project"
         self.sig_open_files.emit([])
 
     def _on_browse(self):
+        if not self._actions_enabled:
+            return
         exts = " ".join(f"*{e}" for e in sorted(IMPORT_EXTS))
         paths, _ = QtWidgets.QFileDialog.getOpenFileNames(
             self,
@@ -654,6 +667,16 @@ class StartupHomeScreen(QtWidgets.QWidget):
             return
         projects = [p for p in paths if p.lower().endswith(".ctpr")]
         images   = [p for p in paths if not p.lower().endswith(".ctpr")]
+        if projects and images:
+            QtWidgets.QMessageBox.warning(
+                self,
+                self.tr("Open Files"),
+                self.tr(
+                    "Project files cannot be opened together with other imported files.\n"
+                    "Choose either a project file or image/document/archive files."
+                ),
+            )
+            return
         if projects:
             self.sig_open_project.emit(projects[0])
         if images:
@@ -726,14 +749,28 @@ class StartupHomeScreen(QtWidgets.QWidget):
     # Drop support on the whole screen 
 
     def dragEnterEvent(self, event: QtGui.QDragEnterEvent):
+        if not self._actions_enabled:
+            return
         if event.mimeData().hasUrls():
             if self._valid_urls(event.mimeData().urls()):
                 event.acceptProposedAction()
 
     def dropEvent(self, event: QtGui.QDropEvent):
+        if not self._actions_enabled:
+            return
         valid    = self._valid_urls(event.mimeData().urls())
         projects = [p for p in valid if p.lower().endswith(".ctpr")]
         images   = [p for p in valid if not p.lower().endswith(".ctpr")]
+        if projects and images:
+            QtWidgets.QMessageBox.warning(
+                self,
+                self.tr("Open Files"),
+                self.tr(
+                    "Project files cannot be opened together with other imported files.\n"
+                    "Choose either a project file or image/document/archive files."
+                ),
+            )
+            return
         if projects:
             self.sig_open_project.emit(projects[0])
         if images:
