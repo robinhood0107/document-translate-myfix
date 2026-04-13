@@ -123,7 +123,7 @@
     </message>
     <message>
         <source>자동번역이 완료되었습니다.</source>
-        <translation type="unfinished"></translation>
+        <translation>자동번역이 완료되었습니다.</translation>
     </message>
 </context>
 <context>
@@ -256,7 +256,7 @@ Duplicates:
     </message>
     <message>
         <source>자동번역이 완료되었습니다.</source>
-        <translation type="unfinished"></translation>
+        <translation type="unfinished">자동번역이 완료되었습니다.</translation>
     </message>
     <message>
         <source>Downloading model file: {filename}</source>
@@ -265,6 +265,34 @@ Duplicates:
     <message>
         <source>Unsaved Changes</source>
         <translation>저장되지 않은 변경 사항</translation>
+    </message>
+    <message>
+        <source>Fast</source>
+        <translation>빠름</translation>
+    </message>
+    <message>
+        <source>Balanced</source>
+        <translation>균형</translation>
+    </message>
+    <message>
+        <source>Small</source>
+        <translation>작음</translation>
+    </message>
+    <message>
+        <source>{name} (Estimated: {ratio}, {time})</source>
+        <translation>{name} (예상: {ratio}, {time})</translation>
+    </message>
+    <message>
+        <source>Estimated output: {ratio}, {time} across {pages} pages.</source>
+        <translation>예상 출력: {pages}개 페이지 기준 {ratio}, {time}</translation>
+    </message>
+    <message>
+        <source>Current project estimate: {ratio}, {time} across {pages} pages.</source>
+        <translation>현재 프로젝트 예상치: {pages}개 페이지 기준 {ratio}, {time}</translation>
+    </message>
+    <message>
+        <source>Load pages to see automatic output estimates.</source>
+        <translation>자동 출력 예상치를 보려면 페이지를 불러오세요.</translation>
     </message>
     <message>
         <source>Project switching is unavailable while automatic processing is running.
@@ -605,6 +633,56 @@ Use Custom Local Server(Gemma) with the included Gemma Docker setup.</source>
     <message>
         <source>Export Debug Metadata (Debug)</source>
         <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Automatic Output Image Format</source>
+        <translation>자동 출력 이미지 형식</translation>
+    </message>
+    <message>
+        <source>These defaults control how automatic translated and cleaned images are written.
+Project-specific quick settings can override the format and preset for the current project.</source>
+        <translation>이 기본값은 자동 번역 결과 이미지와 cleaned 이미지를 저장하는 방식을 제어합니다.
+프로젝트별 빠른 설정으로 현재 프로젝트의 형식과 프리셋을 덮어쓸 수 있습니다.</translation>
+    </message>
+    <message>
+        <source>Default format:</source>
+        <translation>기본 형식:</translation>
+    </message>
+    <message>
+        <source>Same as source</source>
+        <translation>원본과 동일</translation>
+    </message>
+    <message>
+        <source>Default preset:</source>
+        <translation>기본 프리셋:</translation>
+    </message>
+    <message>
+        <source>Fast</source>
+        <translation>빠름</translation>
+    </message>
+    <message>
+        <source>Balanced</source>
+        <translation>균형</translation>
+    </message>
+    <message>
+        <source>Small</source>
+        <translation>작음</translation>
+    </message>
+    <message>
+        <source>PNG compression level:</source>
+        <translation>PNG 압축 수준:</translation>
+    </message>
+    <message>
+        <source>JPG quality:</source>
+        <translation>JPG 품질:</translation>
+    </message>
+    <message>
+        <source>WEBP quality:</source>
+        <translation>WEBP 품질:</translation>
+    </message>
+    <message>
+        <source>Current project estimate: Calculating...</source>
+        <translation>현재 프로젝트 예상치: 계산 중...</translation>
     </message>
 </context>
 <context>
@@ -2675,6 +2753,46 @@ back on the Image (for further editing)</source>
     <message>
         <source>After a successful automatic run, overwrite the Markdown translation exchange file with only the pages from that run.</source>
         <translation>자동 실행이 성공적으로 끝나면, 이번 실행에 포함된 페이지만 담아 Markdown 번역 교환 파일을 덮어씁니다.</translation>
+    </message>
+    <message>
+        <source>Output</source>
+        <translation>출력</translation>
+    </message>
+    <message>
+        <source>Use global output settings</source>
+        <translation>전역 출력 설정 사용</translation>
+    </message>
+    <message>
+        <source>When enabled, this project inherits the automatic output format and preset from Settings.</source>
+        <translation>이 옵션을 켜면 현재 프로젝트는 설정의 자동 출력 형식과 프리셋을 상속합니다.</translation>
+    </message>
+    <message>
+        <source>Format</source>
+        <translation>형식</translation>
+    </message>
+    <message>
+        <source>Same as source</source>
+        <translation>원본과 동일</translation>
+    </message>
+    <message>
+        <source>Preset</source>
+        <translation>프리셋</translation>
+    </message>
+    <message>
+        <source>Fast</source>
+        <translation>빠름</translation>
+    </message>
+    <message>
+        <source>Balanced</source>
+        <translation>균형</translation>
+    </message>
+    <message>
+        <source>Small</source>
+        <translation>작음</translation>
+    </message>
+    <message>
+        <source>Estimated output: Calculating...</source>
+        <translation>예상 출력: 계산 중...</translation>
     </message>
     <message>
         <source>Box Drawing</source>

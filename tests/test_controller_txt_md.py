@@ -31,6 +31,9 @@ class ControllerTxtMdTests(unittest.TestCase):
         )
         controller._ensure_txt_md_ready = mock.Mock(return_value=True)
         controller._write_txt_md_exchange = mock.Mock()
+        controller._txt_md_auto_save_path = mock.Mock(
+            side_effect=lambda target, suffix: f"/tmp/{target}{suffix}"
+        )
         controller.tr = lambda text: text
 
         ComicTranslate._run_txt_md_auto_exports(controller, ["page-a.png"])
@@ -39,8 +42,8 @@ class ControllerTxtMdTests(unittest.TestCase):
         self.assertEqual(
             controller._write_txt_md_exchange.call_args_list,
             [
-                mock.call("source", ".txt", ["page-a.png"]),
-                mock.call("translation", ".md", ["page-a.png"]),
+                mock.call("source", ".txt", ["page-a.png"], save_path="/tmp/source.txt"),
+                mock.call("translation", ".md", ["page-a.png"], save_path="/tmp/translation.md"),
             ],
         )
 
@@ -56,6 +59,7 @@ class ControllerTxtMdTests(unittest.TestCase):
         )
         controller._ensure_txt_md_ready = mock.Mock(return_value=False)
         controller._write_txt_md_exchange = mock.Mock()
+        controller._txt_md_auto_save_path = mock.Mock()
         controller.tr = lambda text: text
 
         ComicTranslate._run_txt_md_auto_exports(controller, ["page-a.png"])

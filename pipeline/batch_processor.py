@@ -36,6 +36,10 @@ from modules.utils.export_paths import (
     reserve_export_run_token,
     resolve_export_directory,
 )
+from modules.utils.automatic_output import (
+    build_output_file_name,
+    write_output_image,
+)
 from modules.utils.render_style_policy import (
     VERTICAL_ALIGNMENT_TOP,
     build_rect_tuple,
@@ -272,7 +276,7 @@ class BatchProcessor:
         }
 
     def _effective_export_settings(self, settings_page) -> dict:
-        return dict(settings_page.get_export_settings())
+        return dict(self.main_page.get_resolved_export_settings())
 
     def _resolve_export_token(self, directory: str, base_timestamp: str) -> str:
         cache = getattr(self, "_export_run_tokens", None)
@@ -409,27 +413,37 @@ class BatchProcessor:
     def _write_final_render_export(
         self,
         directory: str,
-        timestamp: str,
-        archive_bname: str,
         image_path: str,
         image,
         patches,
         viewer_state: dict,
+        export_settings: dict[str, object],
     ) -> str:
         page_base_name = os.path.splitext(os.path.basename(image_path))[0]
-        extension = os.path.splitext(image_path)[1]
-        path = os.path.join(
+        path = self.main_page.get_automatic_output_series_dir(
             directory,
-            f"comic_translate_{timestamp}",
-            "translated_images",
-            archive_bname,
+            anchor_path=self.main_page.image_files[0] if self.main_page.image_files else image_path,
         )
         os.makedirs(path, exist_ok=True)
-        output_path = os.path.join(path, f"{page_base_name}_translated{extension}")
+        output_path = os.path.join(
+            path,
+            build_output_file_name(
+                page_base_name,
+                "translated",
+                image_path,
+                export_settings,
+            ),
+        )
         renderer = ImageSaveRenderer(image)
         renderer.apply_patches(patches or [])
         renderer.add_state_to_image(viewer_state or {})
-        renderer.save_image(output_path)
+        final_rgb = renderer.render_to_image()
+        write_output_image(
+            output_path,
+            final_rgb,
+            source_path=image_path,
+            resolved_settings=export_settings,
+        )
         return output_path
 
     def _ensure_page_state(self, image_path: str) -> dict:
@@ -988,10 +1002,30 @@ class BatchProcessor:
             # inpaint_input_img is already in RGB format
 
             if export_settings['export_inpainted_image']:
-                path = os.path.join(directory, f"comic_translate_{export_token}", "cleaned_images", archive_bname)
-                if not os.path.exists(path):
-                    os.makedirs(path, exist_ok=True)
-                imk.write_image(os.path.join(path, f"{base_name}_cleaned{extension}"), inpaint_input_img)
+                path = self.main_page.get_automatic_output_series_dir(
+                    directory,
+                    anchor_path=self.main_page.image_files[0] if self.main_page.image_files else image_path,
+                )
+                os.makedirs(path, exist_ok=True)
+                cleaned_output_path = os.path.join(
+                    path,
+                    build_output_file_name(
+                        base_name,
+                        "cleaned",
+                        image_path,
+                        export_settings,
+                    ),
+                )
+                write_output_image(
+                    cleaned_output_path,
+                    inpaint_input_img,
+                    source_path=image_path,
+                    resolved_settings=export_settings,
+                )
+                self.main_page.image_ctrl.update_processing_summary(
+                    image_path,
+                    {"cleaned_image_path": cleaned_output_path},
+                )
             self.main_page.image_ctrl.update_processing_summary(
                 image_path,
                 {
@@ -1368,19 +1402,18 @@ class BatchProcessor:
 
             final_output_path = self._write_final_render_export(
                 directory,
-                export_token,
-                archive_bname,
                 image_path,
                 image,
                 patches,
                 page_state.get("viewer_state", {}),
+                export_settings,
             )
             logger.info("Saved final translated image to %s", final_output_path)
             self.main_page.image_ctrl.update_processing_summary(
                 image_path,
                 {
                     "translated_image_path": final_output_path,
-                    "export_root": export_root,
+                    "export_root": os.path.dirname(final_output_path),
                 },
             )
             self._emit_benchmark_event(
