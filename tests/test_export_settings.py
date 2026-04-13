@@ -63,11 +63,11 @@ class _FakePage:
             mask_overlay_checkbox=_Check(False),
             cleanup_mask_delta_checkbox=_Check(True),
             debug_metadata_checkbox=_Check(False),
-            automatic_output_format_combo=_Combo("webp"),
-            automatic_output_preset_combo=_Combo("small"),
-            automatic_output_png_spinbox=_Spin(7),
-            automatic_output_jpg_spinbox=_Spin(83),
-            automatic_output_webp_spinbox=_Spin(77),
+            automatic_output_target_combo=_Combo("single_archive"),
+            automatic_output_image_format_combo=_Combo("webp"),
+            automatic_output_archive_format_combo=_Combo("zip"),
+            automatic_output_archive_image_format_combo=_Combo("jpg"),
+            automatic_output_archive_level_spinbox=_Spin(7),
             project_autosave_interval_spinbox=_Spin(5),
             project_autosave_folder_input=_Text(""),
         )
@@ -97,11 +97,11 @@ class ExportSettingsTests(unittest.TestCase):
         self.assertFalse(settings["export_mask_overlay"])
         self.assertTrue(settings["export_cleanup_mask_delta"])
         self.assertFalse(settings["export_debug_metadata"])
-        self.assertEqual(settings["automatic_output_format"], "webp")
-        self.assertEqual(settings["automatic_output_preset"], "small")
-        self.assertEqual(settings["automatic_output_png_compression_level"], 7)
-        self.assertEqual(settings["automatic_output_jpg_quality"], 83)
-        self.assertEqual(settings["automatic_output_webp_quality"], 77)
+        self.assertEqual(settings["automatic_output_target"], "single_archive")
+        self.assertEqual(settings["automatic_output_image_format"], "webp")
+        self.assertEqual(settings["automatic_output_archive_format"], "zip")
+        self.assertEqual(settings["automatic_output_archive_image_format"], "jpg")
+        self.assertEqual(settings["automatic_output_archive_compression_level"], 7)
         self.assertEqual(settings["project_autosave_interval_min"], 5)
         self.assertEqual(settings["project_autosave_folder"], "/tmp/projects")
         self.assertTrue(settings["auto_export_source_txt"])
