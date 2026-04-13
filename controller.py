@@ -185,6 +185,7 @@ class ComicTranslate(ComicTranslateUI):
 
         # Populate the home screen with any previously-saved recent projects
         self.startup_home.populate(self.project_ctrl.get_recent_projects())
+        self._set_project_navigation_enabled(True)
         
         # Check for updates in background
         if not DISABLE_BACKGROUND_UPDATE_CHECK:
@@ -210,12 +211,12 @@ class ComicTranslate(ComicTranslateUI):
 
     def connect_ui_elements(self):
         # Browsers
-        self.image_browser_button.sig_files_changed.connect(self.image_ctrl.thread_load_images)
-        self.document_browser_button.sig_files_changed.connect(self.image_ctrl.thread_load_images)
-        self.archive_browser_button.sig_files_changed.connect(self.image_ctrl.thread_load_images)
-        self.comic_browser_button.sig_files_changed.connect(self.image_ctrl.thread_load_images)
-        self.psd_browser_button.sig_files_changed.connect(self.image_ctrl.thread_load_images)
-        self.project_browser_button.sig_file_changed.connect(self.project_ctrl.thread_load_project)
+        self.image_browser_button.sig_files_changed.connect(self._guarded_thread_load_images)
+        self.document_browser_button.sig_files_changed.connect(self._guarded_thread_load_images)
+        self.archive_browser_button.sig_files_changed.connect(self._guarded_thread_load_images)
+        self.comic_browser_button.sig_files_changed.connect(self._guarded_thread_load_images)
+        self.psd_browser_button.sig_files_changed.connect(self._guarded_thread_load_images)
+        self.project_browser_button.sig_file_changed.connect(self._guarded_thread_load_project)
         self.insert_browser_button.sig_files_changed.connect(self.image_ctrl.thread_insert)
 
         self.save_browser.sig_file_changed.connect(self.image_ctrl.save_current_image)
@@ -329,6 +330,7 @@ class ComicTranslate(ComicTranslateUI):
 
         # New project and safety confirmations
         self.new_project_button.clicked.connect(self._on_new_project_clicked)
+        self.recent_project_button.clicked.connect(self._open_latest_recent_project)
 
         # Home screen signals
         self.startup_home.sig_open_files.connect(self._guarded_thread_load_images)
@@ -338,45 +340,176 @@ class ComicTranslate(ComicTranslateUI):
         self.startup_home._sig_pin.connect(
             lambda path, pinned: self.project_ctrl.toggle_pin_project(path, pinned)
         )
-        self.title_bar.project_target_requested.connect(self.project_ctrl.thread_change_project_file)
+        self.title_bar.project_target_requested.connect(self._on_project_target_requested)
 
-    def _guarded_thread_load_images(self, paths: list[str]):
-        """Wrap thread_load_images with unsaved-project confirmation and clear state."""
-        if not paths:
-            # Empty list = "New Project" action from the home screen
-            self._on_new_project_clicked()
-            return
-        if not self._confirm_start_new_project():
-            return
-        self.image_ctrl.thread_load_images(paths)
+    def _set_project_navigation_enabled(self, enabled: bool) -> None:
+        widgets = [
+            getattr(self, "new_project_button", None),
+            getattr(self, "tool_browser", None),
+            getattr(self, "recent_project_button", None),
+            getattr(self, "drag_browser", None),
+            getattr(self.title_bar, "project_button", None) if hasattr(self, "title_bar") else None,
+        ]
+        for widget in widgets:
+            if widget is None:
+                continue
+            widget.setEnabled(bool(enabled))
+        if not enabled and hasattr(self, "title_bar"):
+            tool_menu = getattr(self, "tool_menu", None)
+            if tool_menu is not None:
+                tool_menu.hide()
+            popup = getattr(self.title_bar, "_project_popup", None)
+            if popup is not None:
+                popup.hide()
+        if hasattr(self, "startup_home") and self.startup_home is not None:
+            self.startup_home.set_actions_enabled(bool(enabled))
 
-    def _on_new_project_clicked(self):
-        """Clear the app to initial state after confirmation."""
-        if not self._confirm_start_new_project():
-            return
+    def _show_project_switch_locked_warning(self) -> None:
+        Messages.show_warning(
+            self,
+            self.tr(
+                "Project switching is unavailable while automatic processing is running.\n"
+                "Cancel the current run or wait for it to finish first."
+            ),
+            duration=6,
+            closable=True,
+            source="batch",
+        )
+
+    def _run_guarded_project_transition(self, proceed: Callable[[], None]) -> bool:
+        try:
+            self.text_ctrl._commit_pending_text_command()
+        except Exception:
+            pass
+
+        if self._batch_active:
+            self._show_project_switch_locked_warning()
+            return False
+
+        if not self.has_unsaved_changes():
+            proceed()
+            return True
+
+        autosave_enabled = bool(
+            self.settings_page.get_export_settings().get("project_autosave_enabled", False)
+        )
+        if autosave_enabled:
+            self.project_ctrl.ensure_autosave_project_file_for_transition()
+            return self.project_ctrl.thread_save_project(post_save_callback=proceed)
+
+        msg_box = QtWidgets.QMessageBox(self)
+        msg_box.setIcon(QtWidgets.QMessageBox.Question)
+        msg_box.setWindowTitle(self.tr("Unsaved Changes"))
+        msg_box.setText(self.tr("Save changes to this file?"))
+        save_btn = msg_box.addButton(self.tr("Save"), QtWidgets.QMessageBox.ButtonRole.AcceptRole)
+        dont_save_btn = msg_box.addButton(
+            self.tr("Don't Save"), QtWidgets.QMessageBox.ButtonRole.DestructiveRole
+        )
+        cancel_btn = msg_box.addButton(self.tr("Cancel"), QtWidgets.QMessageBox.ButtonRole.RejectRole)
+        msg_box.setDefaultButton(save_btn)
+        msg_box.exec()
+        clicked = msg_box.clickedButton()
+        if clicked == save_btn:
+            return self.project_ctrl.thread_save_project(post_save_callback=proceed)
+        if clicked == dont_save_btn:
+            proceed()
+            return True
+        if clicked == cancel_btn or clicked is None:
+            return False
+        return False
+
+    def _reset_to_blank_project_workspace(self) -> None:
         self.project_ctrl.clear_recovery_checkpoint()
-        # Clear state and switch to the main editor showing the drag area
         self.image_ctrl.clear_state()
         self.central_stack.setCurrentWidget(self.drag_browser)
-        self.show_main_page()
-        self.project_ctrl.ensure_autosave_project_file_for_new_project()
-        # Reset webtoon mode UI state
         if self.webtoon_mode:
             self.webtoon_toggle.setChecked(False)
         self.webtoon_mode = False
+        self.show_main_page()
+        self.project_ctrl.ensure_autosave_project_file_for_new_project()
+
+    def _guarded_thread_load_images(self, paths: list[str]):
+        """Load a new workspace only after the shared project-transition guard passes."""
+        normalized_paths = [
+            os.path.normpath(os.path.abspath(path))
+            for path in (paths or [])
+            if isinstance(path, str) and path
+        ]
+        if not normalized_paths:
+            self._on_new_project_clicked()
+            return
+
+        project_paths = [path for path in normalized_paths if path.lower().endswith(".ctpr")]
+        if project_paths:
+            if len(normalized_paths) != 1:
+                Messages.show_warning(
+                    self,
+                    self.tr(
+                        "Project files cannot be opened together with other imported files.\n"
+                        "Choose either a project file or image/document/archive files."
+                    ),
+                    duration=None,
+                    closable=True,
+                    source="project",
+                )
+                return
+            self._guarded_thread_load_project(project_paths[0])
+            return
+
+        self._run_guarded_project_transition(
+            lambda: self.image_ctrl.thread_load_images(normalized_paths)
+        )
+
+    def _guarded_thread_load_project(self, path: str):
+        normalized_path = os.path.normpath(os.path.abspath(path or ""))
+        if not normalized_path:
+            return
+        if not normalized_path.lower().endswith(".ctpr"):
+            self._guarded_thread_load_images([normalized_path])
+            return
+
+        self._run_guarded_project_transition(
+            lambda: self.project_ctrl.thread_load_project(normalized_path)
+        )
+
+    def _on_new_project_clicked(self):
+        """Clear the app to initial state after the shared transition guard passes."""
+        self._run_guarded_project_transition(self._reset_to_blank_project_workspace)
+
+    def _open_latest_recent_project(self) -> None:
+        entries = list(self.project_ctrl.get_recent_projects())
+        removed_stale = False
+        for entry in entries:
+            recent_path = os.path.normpath(os.path.abspath(str(entry.get("path", "") or "")))
+            if not recent_path:
+                continue
+            if os.path.isfile(recent_path):
+                if removed_stale:
+                    self.project_ctrl._refresh_home_screen()
+                self._guarded_thread_load_project(recent_path)
+                return
+            self.project_ctrl.remove_recent_project(recent_path)
+            removed_stale = True
+        if removed_stale:
+            self.project_ctrl._refresh_home_screen()
+        self.show_home_screen()
 
     # Home screen helper methods
 
     def _open_project_from_home(self, path: str):
         """Load a .ctpr project selected on the home screen."""
-        if not self._confirm_start_new_project():
+        if not path:
             return
-        if not path or not path.lower().endswith(".ctpr"):
-            # Treat as generic files
+        if not path.lower().endswith(".ctpr"):
             self._guarded_thread_load_images([path])
             return
-        self.project_ctrl.thread_load_project(path)
-        self.show_main_page()
+        self._guarded_thread_load_project(path)
+
+    def _on_project_target_requested(self, target_path: str) -> None:
+        if self._batch_active:
+            self._show_project_switch_locked_warning()
+            return
+        self.project_ctrl.thread_change_project_file(target_path)
 
     def _on_home_remove_recent(self, path: str):
         """Persist removal of one entry from the recent list."""
@@ -1012,6 +1145,7 @@ class ComicTranslate(ComicTranslateUI):
             self.batch_mode_selected()
         self._batch_active = True
         self._batch_cancel_requested = False
+        self._set_project_navigation_enabled(False)
         self.translate_button.setEnabled(False)
         self.cancel_button.setEnabled(True)
         self.save_as_project_button.setEnabled(False)
@@ -1136,6 +1270,7 @@ class ComicTranslate(ComicTranslateUI):
         self._batch_cancel_requested = False
         self._batch_failed = False
         self._current_batch_run_type = None
+        self._set_project_navigation_enabled(True)
         report = self._finalize_batch_report(was_cancelled)
         self._last_batch_output_root = self._find_latest_batch_output_root(completed_batch_paths)
         self.progress_bar.setVisible(False)
