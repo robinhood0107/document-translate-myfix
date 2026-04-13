@@ -1845,6 +1845,63 @@ Open or create a project to get started.</source>
     </message>
 </context>
 <context>
+    <name>ToolStateMixin</name>
+    <message>
+        <source>Add Inpaint Mask
+Paint areas to clean before running inpainting.
+These pixels are added to the final mask.</source>
+        <translation>인페인트 마스크 추가
+인페인트를 실행하기 전에 정리할 영역을 칠합니다.
+이 픽셀들은 최종 마스크에 추가됩니다.</translation>
+    </message>
+    <message>
+        <source>Erase Mask Strokes
+Remove parts of drawn add/exclude strokes.
+This edits mask strokes only and does not change applied patches.</source>
+        <translation>마스크 스트로크 지우기
+그려진 추가/제외 스트로크의 일부를 지웁니다.
+이 작업은 마스크 스트로크만 수정하며 적용된 패치는 바꾸지 않습니다.</translation>
+    </message>
+    <message>
+        <source>Exclude from Inpainting
+Protect areas from inpainting.
+Excluded pixels are removed from the final mask even if they were auto-detected or painted.</source>
+        <translation>인페인팅에서 제외
+영역이 인페인팅되지 않도록 보호합니다.
+자동 감지되었거나 직접 칠한 영역이라도 제외된 픽셀은 최종 마스크에서 제거됩니다.</translation>
+    </message>
+    <message>
+        <source>Restore Original over Inpainted Area
+Paint over an inpainted result to bring back the original image.
+This creates a restore patch above existing inpaint patches on the current page.</source>
+        <translation>인페인팅된 영역 위에 원본 복원
+인페인팅 결과 위를 칠해 원본 이미지를 다시 가져옵니다.
+현재 페이지의 기존 인페인트 패치 위에 복원 패치를 만듭니다.</translation>
+    </message>
+    <message>
+        <source>Restore Original over Inpainted Area
+No inpainted patch exists on this page yet.
+Run inpainting first, then use this tool to recover original pixels where needed.</source>
+        <translation>인페인팅된 영역 위에 원본 복원
+이 페이지에는 아직 인페인트 패치가 없습니다.
+먼저 인페인팅을 실행한 뒤, 필요할 때 이 도구로 원본 픽셀을 되살리세요.</translation>
+    </message>
+    <message>
+        <source>Clear Inpaint Mask Strokes
+Remove all add/exclude mask strokes on the current page.
+Applied inpaint and restore patches are kept; use Undo to revert patch changes.</source>
+        <translation>인페인트 마스크 스트로크 지우기
+현재 페이지의 추가/제외 마스크 스트로크를 모두 제거합니다.
+적용된 인페인트 및 복원 패치는 유지되며, 패치 변경은 실행 취소로 되돌릴 수 있습니다.</translation>
+    </message>
+    <message>
+        <source>Inpaint Brush Size
+Adjust the size used by add, erase, exclude, and restore brushes.</source>
+        <translation>인페인트 브러시 크기
+추가, 지우기, 제외, 복원 브러시에 사용할 크기를 조절합니다.</translation>
+    </message>
+</context>
+<context>
     <name>ToolsPage</name>
     <message>
         <source>Translator</source>
@@ -2196,22 +2253,6 @@ back on the Image (for further editing)</source>
     <message>
         <source>Increase the size of all blocks</source>
         <translation>모든 블록의 크기 늘리기</translation>
-    </message>
-    <message>
-        <source>Draw Brush Strokes for Cleaning Image</source>
-        <translation>이미지 정리를 위한 브러시 스트로크 그리기</translation>
-    </message>
-    <message>
-        <source>Erase Brush Strokes</source>
-        <translation>브러시 스트로크 지우기</translation>
-    </message>
-    <message>
-        <source>Remove all the brush strokes on the Image</source>
-        <translation>이미지에서 모든 브러시 스트로크 제거</translation>
-    </message>
-    <message>
-        <source>Brush/Eraser Size Slider</source>
-        <translation>브러시/지우개 크기 슬라이더</translation>
     </message>
     <message>
         <source>Box Drawing</source>

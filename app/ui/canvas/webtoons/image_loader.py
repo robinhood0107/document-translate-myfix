@@ -6,6 +6,7 @@ from PySide6.QtCore import QTimer, QRectF, Qt
 from PySide6.QtGui import QPixmap, QColor, QPen, QBrush, QImage, QPainter
 import imkit as imk
 from app.path_materialization import ensure_path_materialized
+from app.ui.commands.base import PatchCommandBase
 
 
 class LazyImageLoader:
@@ -510,25 +511,40 @@ class LazyImageLoader:
             
             page_scene_bounds = QRectF(page_scene_left, page_scene_top, pixmap.width(), page_height)
             
-            for item in self._scene.items():
-                if isinstance(item, QGraphicsPixmapItem) and item != page_item:
-                    # Check if this is a patch item (has the hash key data)
-                    if item.data(0) is not None:  # HASH_KEY = 0 from PatchCommandBase
-                        # Get patch bounds in scene coordinates
-                        item_scene_pos = item.pos()
-                        patch_width = item.pixmap().width()
-                        patch_height = item.pixmap().height()
-                        patch_scene_bounds = QRectF(item_scene_pos.x(), item_scene_pos.y(), 
-                                                   patch_width, patch_height)
-                        
-                        # Check if this patch overlaps with the current page
-                        if page_scene_bounds.intersects(patch_scene_bounds):
-                            # Convert scene coordinates to page-local coordinates
-                            page_local_x = item_scene_pos.x() - page_scene_left
-                            page_local_y = item_scene_pos.y() - page_scene_top
-                            
-                            # Draw the patch at the converted coordinates
-                            painter.drawPixmap(int(page_local_x), int(page_local_y), item.pixmap())
+            patch_items = sorted(
+                (
+                    item
+                    for item in self._scene.items()
+                    if isinstance(item, QGraphicsPixmapItem)
+                    and item != page_item
+                    and item.data(PatchCommandBase.HASH_KEY) is not None
+                ),
+                key=lambda item: (
+                    item.zValue(),
+                    int(item.data(PatchCommandBase.ORDER_KEY) or 0),
+                ),
+            )
+
+            for item in patch_items:
+                # Get patch bounds in scene coordinates
+                item_scene_pos = item.pos()
+                patch_width = item.pixmap().width()
+                patch_height = item.pixmap().height()
+                patch_scene_bounds = QRectF(
+                    item_scene_pos.x(),
+                    item_scene_pos.y(),
+                    patch_width,
+                    patch_height,
+                )
+
+                # Check if this patch overlaps with the current page
+                if page_scene_bounds.intersects(patch_scene_bounds):
+                    # Convert scene coordinates to page-local coordinates
+                    page_local_x = item_scene_pos.x() - page_scene_left
+                    page_local_y = item_scene_pos.y() - page_scene_top
+
+                    # Draw the patch at the converted coordinates
+                    painter.drawPixmap(int(page_local_x), int(page_local_y), item.pixmap())
                             
             painter.end()
         else:
@@ -777,4 +793,3 @@ class LazyImageLoader:
             if new_idx is not None:
                 remapped[new_idx] = value
         return remapped
-

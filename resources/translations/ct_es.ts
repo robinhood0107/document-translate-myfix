@@ -1825,6 +1825,63 @@ Abra o cree un proyecto para comenzar.</translation>
     </message>
 </context>
 <context>
+    <name>ToolStateMixin</name>
+    <message>
+        <source>Add Inpaint Mask
+Paint areas to clean before running inpainting.
+These pixels are added to the final mask.</source>
+        <translation>Añadir máscara de inpainting
+Pinta las áreas que quieres limpiar antes de ejecutar el inpainting.
+Estos píxeles se añaden a la máscara final.</translation>
+    </message>
+    <message>
+        <source>Erase Mask Strokes
+Remove parts of drawn add/exclude strokes.
+This edits mask strokes only and does not change applied patches.</source>
+        <translation>Borrar trazos de máscara
+Elimina partes de los trazos de añadir/excluir ya dibujados.
+Esto solo edita los trazos de la máscara y no cambia los parches ya aplicados.</translation>
+    </message>
+    <message>
+        <source>Exclude from Inpainting
+Protect areas from inpainting.
+Excluded pixels are removed from the final mask even if they were auto-detected or painted.</source>
+        <translation>Excluir del inpainting
+Protege áreas para que no se procesen con inpainting.
+Los píxeles excluidos se eliminan de la máscara final, incluso si se detectaron automáticamente o se pintaron manualmente.</translation>
+    </message>
+    <message>
+        <source>Restore Original over Inpainted Area
+Paint over an inpainted result to bring back the original image.
+This creates a restore patch above existing inpaint patches on the current page.</source>
+        <translation>Restaurar original sobre el área retocada
+Pinta sobre un resultado de inpainting para recuperar la imagen original.
+Esto crea un parche de restauración sobre los parches de inpainting existentes en la página actual.</translation>
+    </message>
+    <message>
+        <source>Restore Original over Inpainted Area
+No inpainted patch exists on this page yet.
+Run inpainting first, then use this tool to recover original pixels where needed.</source>
+        <translation>Restaurar original sobre el área retocada
+Todavía no existe ningún parche de inpainting en esta página.
+Ejecuta primero el inpainting y luego usa esta herramienta para recuperar los píxeles originales donde haga falta.</translation>
+    </message>
+    <message>
+        <source>Clear Inpaint Mask Strokes
+Remove all add/exclude mask strokes on the current page.
+Applied inpaint and restore patches are kept; use Undo to revert patch changes.</source>
+        <translation>Borrar trazos de máscara de inpainting
+Elimina todos los trazos de máscara de añadir/excluir de la página actual.
+Los parches de inpainting y restauración ya aplicados se conservan; usa Deshacer para revertir cambios en los parches.</translation>
+    </message>
+    <message>
+        <source>Inpaint Brush Size
+Adjust the size used by add, erase, exclude, and restore brushes.</source>
+        <translation>Tamaño del pincel de inpainting
+Ajusta el tamaño usado por los pinceles de añadir, borrar, excluir y restaurar.</translation>
+    </message>
+</context>
+<context>
     <name>ToolsPage</name>
     <message>
         <source>Translator</source>
@@ -2176,22 +2233,6 @@ de nuevo en la imagen (para su posterior edición)</translation>
     <message>
         <source>Increase the size of all blocks</source>
         <translation>Aumentar el tamaño de todos los bloques</translation>
-    </message>
-    <message>
-        <source>Draw Brush Strokes for Cleaning Image</source>
-        <translation>Dibujar trazos de pincel para limpiar la imagen</translation>
-    </message>
-    <message>
-        <source>Erase Brush Strokes</source>
-        <translation>Borrar trazos de pincel</translation>
-    </message>
-    <message>
-        <source>Remove all the brush strokes on the Image</source>
-        <translation>Eliminar todos los trazos de pincel de la imagen</translation>
-    </message>
-    <message>
-        <source>Brush/Eraser Size Slider</source>
-        <translation>Control deslizante de tamaño de pincel/borrador</translation>
     </message>
     <message>
         <source>Box Drawing</source>
