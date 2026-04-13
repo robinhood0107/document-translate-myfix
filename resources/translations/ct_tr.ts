@@ -1825,6 +1825,63 @@ Başlamak için bir proje açın veya oluşturun.</translation>
     </message>
 </context>
 <context>
+    <name>ToolStateMixin</name>
+    <message>
+        <source>Add Inpaint Mask
+Paint areas to clean before running inpainting.
+These pixels are added to the final mask.</source>
+        <translation>Inpaint maskesi ekle
+Inpainting&apos;i çalıştırmadan önce temizlenecek alanları boyayın.
+Bu pikseller son maskeye eklenir.</translation>
+    </message>
+    <message>
+        <source>Erase Mask Strokes
+Remove parts of drawn add/exclude strokes.
+This edits mask strokes only and does not change applied patches.</source>
+        <translation>Maske çizgilerini sil
+Çizilmiş ekleme/çıkarma çizgilerinin bir kısmını silin.
+Bu işlem yalnızca maske çizgilerini düzenler; uygulanmış yamaları değiştirmez.</translation>
+    </message>
+    <message>
+        <source>Exclude from Inpainting
+Protect areas from inpainting.
+Excluded pixels are removed from the final mask even if they were auto-detected or painted.</source>
+        <translation>Inpainting&apos;den hariç tut
+Alanları inpainting işleminden koruyun.
+Hariç tutulan pikseller, otomatik algılanmış veya elle boyanmış olsalar bile son maskeden çıkarılır.</translation>
+    </message>
+    <message>
+        <source>Restore Original over Inpainted Area
+Paint over an inpainted result to bring back the original image.
+This creates a restore patch above existing inpaint patches on the current page.</source>
+        <translation>İnpaint edilmiş alan üzerinde orijinali geri yükle
+Inpainting sonucunun üzerine boyayarak özgün görüntüyü geri getirin.
+Bu işlem, geçerli sayfadaki mevcut inpaint yamalarının üstüne bir geri yükleme yaması oluşturur.</translation>
+    </message>
+    <message>
+        <source>Restore Original over Inpainted Area
+No inpainted patch exists on this page yet.
+Run inpainting first, then use this tool to recover original pixels where needed.</source>
+        <translation>İnpaint edilmiş alan üzerinde orijinali geri yükle
+Bu sayfada henüz bir inpaint yaması yok.
+Önce inpainting çalıştırın, sonra gerektiğinde özgün pikselleri geri getirmek için bu aracı kullanın.</translation>
+    </message>
+    <message>
+        <source>Clear Inpaint Mask Strokes
+Remove all add/exclude mask strokes on the current page.
+Applied inpaint and restore patches are kept; use Undo to revert patch changes.</source>
+        <translation>Inpaint maske çizgilerini temizle
+Geçerli sayfadaki tüm ekleme/çıkarma maske çizgilerini kaldırın.
+Uygulanmış inpaint ve geri yükleme yamaları korunur; yama değişikliklerini geri almak için Geri Al&apos;ı kullanın.</translation>
+    </message>
+    <message>
+        <source>Inpaint Brush Size
+Adjust the size used by add, erase, exclude, and restore brushes.</source>
+        <translation>Inpaint fırça boyutu
+Ekleme, silme, hariç tutma ve geri yükleme fırçalarında kullanılan boyutu ayarlayın.</translation>
+    </message>
+</context>
+<context>
     <name>ToolsPage</name>
     <message>
         <source>Translator</source>
@@ -2175,22 +2232,6 @@ back on the Image (for further editing)</source>
     <message>
         <source>Increase the size of all blocks</source>
         <translation>Tüm blokların boyutunu büyüt</translation>
-    </message>
-    <message>
-        <source>Draw Brush Strokes for Cleaning Image</source>
-        <translation>Görseli temizlemek için fırça darbeleri çiz</translation>
-    </message>
-    <message>
-        <source>Erase Brush Strokes</source>
-        <translation>Fırça darbelerini sil</translation>
-    </message>
-    <message>
-        <source>Remove all the brush strokes on the Image</source>
-        <translation>Görseldeki tüm fırça darbelerini kaldır</translation>
-    </message>
-    <message>
-        <source>Brush/Eraser Size Slider</source>
-        <translation>Fırça/Silgi Boyutu Kaydırıcısı</translation>
     </message>
     <message>
         <source>Box Drawing</source>

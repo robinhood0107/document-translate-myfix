@@ -1825,6 +1825,63 @@ Ouvrez ou créez un projet pour commencer.</translation>
     </message>
 </context>
 <context>
+    <name>ToolStateMixin</name>
+    <message>
+        <source>Add Inpaint Mask
+Paint areas to clean before running inpainting.
+These pixels are added to the final mask.</source>
+        <translation>Ajouter un masque d&apos;inpainting
+Peignez les zones a nettoyer avant de lancer l&apos;inpainting.
+Ces pixels sont ajoutes au masque final.</translation>
+    </message>
+    <message>
+        <source>Erase Mask Strokes
+Remove parts of drawn add/exclude strokes.
+This edits mask strokes only and does not change applied patches.</source>
+        <translation>Effacer les traits du masque
+Retirez des portions des traits d&apos;ajout/exclusion dessines.
+Cela modifie uniquement les traits du masque et ne change pas les patchs deja appliques.</translation>
+    </message>
+    <message>
+        <source>Exclude from Inpainting
+Protect areas from inpainting.
+Excluded pixels are removed from the final mask even if they were auto-detected or painted.</source>
+        <translation>Exclure de l&apos;inpainting
+Protegez des zones contre l&apos;inpainting.
+Les pixels exclus sont retires du masque final, meme s&apos;ils ont ete detectes automatiquement ou peints manuellement.</translation>
+    </message>
+    <message>
+        <source>Restore Original over Inpainted Area
+Paint over an inpainted result to bring back the original image.
+This creates a restore patch above existing inpaint patches on the current page.</source>
+        <translation>Restaurer l&apos;original sur la zone retouchee
+Peignez sur un resultat retouche pour retrouver l&apos;image d&apos;origine.
+Cela cree un patch de restauration au-dessus des patchs d&apos;inpainting existants sur la page actuelle.</translation>
+    </message>
+    <message>
+        <source>Restore Original over Inpainted Area
+No inpainted patch exists on this page yet.
+Run inpainting first, then use this tool to recover original pixels where needed.</source>
+        <translation>Restaurer l&apos;original sur la zone retouchee
+Aucun patch d&apos;inpainting n&apos;existe encore sur cette page.
+Lancez d&apos;abord l&apos;inpainting, puis utilisez cet outil pour recuperer les pixels d&apos;origine si besoin.</translation>
+    </message>
+    <message>
+        <source>Clear Inpaint Mask Strokes
+Remove all add/exclude mask strokes on the current page.
+Applied inpaint and restore patches are kept; use Undo to revert patch changes.</source>
+        <translation>Effacer les traits du masque d&apos;inpainting
+Supprimez tous les traits de masque d&apos;ajout/exclusion sur la page actuelle.
+Les patchs d&apos;inpainting et de restauration appliques sont conserves ; utilisez Annuler pour revenir sur les changements de patch.</translation>
+    </message>
+    <message>
+        <source>Inpaint Brush Size
+Adjust the size used by add, erase, exclude, and restore brushes.</source>
+        <translation>Taille du pinceau d&apos;inpainting
+Ajustez la taille utilisee par les pinceaux d&apos;ajout, d&apos;effacement, d&apos;exclusion et de restauration.</translation>
+    </message>
+</context>
+<context>
     <name>ToolsPage</name>
     <message>
         <source>Translator</source>
@@ -2175,22 +2232,6 @@ back on the Image (for further editing)</source>
     <message>
         <source>Increase the size of all blocks</source>
         <translation>Augmenter la taille de tous les blocs</translation>
-    </message>
-    <message>
-        <source>Draw Brush Strokes for Cleaning Image</source>
-        <translation>Tracer des coups de pinceau pour nettoyer l&apos;image</translation>
-    </message>
-    <message>
-        <source>Erase Brush Strokes</source>
-        <translation>Effacer les coups de pinceau</translation>
-    </message>
-    <message>
-        <source>Remove all the brush strokes on the Image</source>
-        <translation>Supprimer tous les coups de pinceau sur l&apos;image</translation>
-    </message>
-    <message>
-        <source>Brush/Eraser Size Slider</source>
-        <translation>Curseur de taille du pinceau/gomme</translation>
     </message>
     <message>
         <source>Box Drawing</source>
