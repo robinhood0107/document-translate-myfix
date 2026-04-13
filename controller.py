@@ -719,12 +719,13 @@ class ComicTranslate(ComicTranslateUI):
         self._last_batch_request_paths = list(selected_paths)
         self._last_batch_run_type = run_type
         self._batch_failed = False
+        ocr_preflight_cache: dict[str, str] = {}
 
         for path in selected_paths:
             page_state = self.image_ctrl.ensure_page_state(path)
             tgt = page_state['target_lang']
             src = page_state['source_lang']
-            if not validate_settings(self, tgt, source_lang=src):
+            if not validate_settings(self, tgt, source_lang=src, preflight_cache=ocr_preflight_cache):
                 return False
 
         self.image_ctrl.clear_page_skip_errors_for_paths(selected_paths)
