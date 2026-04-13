@@ -267,31 +267,20 @@ Duplicados:
         <translation>Cambios no guardados</translation>
     </message>
     <message>
-        <source>Fast</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Balanced</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Small</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>{name} (Estimated: {ratio}, {time})</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Estimated output: {ratio}, {time} across {pages} pages.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Current project estimate: {ratio}, {time} across {pages} pages.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
         <source>Load pages to see automatic output estimates.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Archive estimates (PNG / JPG / WEBP):</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>{name}: {size}, {time}, {ratio}</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Images are saved individually at maximum quality.
+Translated and cleaned images are exported.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
@@ -633,52 +622,56 @@ Use Custom Local Server(Gemma) with the included Gemma Docker setup.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>Automatic Output Image Format</source>
+        <source>Automatic Output</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>These defaults control how automatic translated and cleaned images are written.
-Project-specific quick settings can override the format and preset for the current project.</source>
+        <source>These defaults control automatic output after batch translation.
+Project-specific quick settings can override them for the current project.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>Default format:</source>
+        <source>Default output target:</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Individual images</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Single archive</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Default image format:</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Default archive format:</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Default archive image format:</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Default archive compression level:</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>PNG/JPG/WEBP images are saved at maximum quality.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Archive compression only affects the ZIP/CBZ container, not image quality.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Load pages to see automatic output estimates.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
         <source>Same as source</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Default preset:</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Fast</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Balanced</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Small</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>PNG compression level:</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>JPG quality:</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>WEBP quality:</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Current project estimate: Calculating...</source>
         <translation type="unfinished"></translation>
     </message>
 </context>
@@ -2564,6 +2557,50 @@ luego realiza el inpainting en la imagen redimensionada.</translation>
         <translation>Estilo</translation>
     </message>
     <message>
+        <source>When enabled, this project inherits the automatic output settings from Settings.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Output target</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Individual images</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Single archive</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Image format</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Archive format</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Archive image format</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Compression level</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>PNG/JPG/WEBP images are saved at maximum quality.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Archive compression only affects the ZIP/CBZ container, not image quality.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Load pages to see automatic output estimates.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
         <source>Top</source>
         <translation>Arriba</translation>
     </message>
@@ -2742,35 +2779,7 @@ de nuevo en la imagen (para su posterior edición)</translation>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>When enabled, this project inherits the automatic output format and preset from Settings.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Format</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
         <source>Same as source</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Preset</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Fast</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Balanced</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Small</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Estimated output: Calculating...</source>
         <translation type="unfinished"></translation>
     </message>
     <message>

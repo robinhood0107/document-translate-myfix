@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import os
 import re
+import shutil
+import tempfile
 from pathlib import Path
 from typing import Iterable, Mapping
 
@@ -11,55 +13,62 @@ from PIL import Image
 from .export_paths import normalize_export_source_record
 
 
-OUTPUT_FORMAT_SAME = "same_as_source"
-OUTPUT_FORMAT_PNG = "png"
-OUTPUT_FORMAT_JPG = "jpg"
-OUTPUT_FORMAT_WEBP = "webp"
-OUTPUT_FORMAT_BMP = "bmp"
+OUTPUT_TARGET_IMAGES = "individual_images"
+OUTPUT_TARGET_ARCHIVE = "single_archive"
 
-OUTPUT_PRESET_FAST = "fast"
-OUTPUT_PRESET_BALANCED = "balanced"
-OUTPUT_PRESET_SMALL = "small"
+OUTPUT_IMAGE_FORMAT_SAME = "same_as_source"
+OUTPUT_IMAGE_FORMAT_PNG = "png"
+OUTPUT_IMAGE_FORMAT_JPG = "jpg"
+OUTPUT_IMAGE_FORMAT_WEBP = "webp"
+OUTPUT_IMAGE_FORMAT_BMP = "bmp"
 
-OUTPUT_OVERRIDE_MODE_GLOBAL = "global"
-OUTPUT_OVERRIDE_MODE_PROJECT = "project"
+OUTPUT_ARCHIVE_FORMAT_ZIP = "zip"
+OUTPUT_ARCHIVE_FORMAT_CBZ = "cbz"
 
-SUPPORTED_OUTPUT_FORMATS = (
-    OUTPUT_FORMAT_SAME,
-    OUTPUT_FORMAT_PNG,
-    OUTPUT_FORMAT_JPG,
-    OUTPUT_FORMAT_WEBP,
+SUPPORTED_OUTPUT_TARGETS = (
+    OUTPUT_TARGET_IMAGES,
+    OUTPUT_TARGET_ARCHIVE,
 )
-SUPPORTED_OUTPUT_PRESETS = (
-    OUTPUT_PRESET_FAST,
-    OUTPUT_PRESET_BALANCED,
-    OUTPUT_PRESET_SMALL,
+SUPPORTED_IMAGE_FORMATS = (
+    OUTPUT_IMAGE_FORMAT_SAME,
+    OUTPUT_IMAGE_FORMAT_PNG,
+    OUTPUT_IMAGE_FORMAT_JPG,
+    OUTPUT_IMAGE_FORMAT_WEBP,
+)
+SUPPORTED_ARCHIVE_IMAGE_FORMATS = (
+    OUTPUT_IMAGE_FORMAT_PNG,
+    OUTPUT_IMAGE_FORMAT_JPG,
+    OUTPUT_IMAGE_FORMAT_WEBP,
+)
+SUPPORTED_ARCHIVE_FORMATS = (
+    OUTPUT_ARCHIVE_FORMAT_ZIP,
+    OUTPUT_ARCHIVE_FORMAT_CBZ,
 )
 SAME_AS_SOURCE_ALLOWED_FORMATS = {
-    OUTPUT_FORMAT_PNG,
-    OUTPUT_FORMAT_JPG,
-    OUTPUT_FORMAT_WEBP,
-    OUTPUT_FORMAT_BMP,
+    OUTPUT_IMAGE_FORMAT_PNG,
+    OUTPUT_IMAGE_FORMAT_JPG,
+    OUTPUT_IMAGE_FORMAT_WEBP,
+    OUTPUT_IMAGE_FORMAT_BMP,
 }
 
-DEFAULT_PNG_COMPRESSION = 6
-DEFAULT_JPG_QUALITY = 90
-DEFAULT_WEBP_QUALITY = 90
-DEFAULT_OUTPUT_FORMAT = OUTPUT_FORMAT_SAME
-DEFAULT_OUTPUT_PRESET = OUTPUT_PRESET_BALANCED
+DEFAULT_OUTPUT_TARGET = OUTPUT_TARGET_IMAGES
+DEFAULT_OUTPUT_IMAGE_FORMAT = OUTPUT_IMAGE_FORMAT_SAME
+DEFAULT_OUTPUT_ARCHIVE_FORMAT = OUTPUT_ARCHIVE_FORMAT_CBZ
+DEFAULT_OUTPUT_ARCHIVE_IMAGE_FORMAT = OUTPUT_IMAGE_FORMAT_PNG
+DEFAULT_OUTPUT_ARCHIVE_COMPRESSION_LEVEL = 6
 
 _OUTPUT_FORMAT_BY_EXTENSION = {
-    ".png": OUTPUT_FORMAT_PNG,
-    ".jpg": OUTPUT_FORMAT_JPG,
-    ".jpeg": OUTPUT_FORMAT_JPG,
-    ".webp": OUTPUT_FORMAT_WEBP,
-    ".bmp": OUTPUT_FORMAT_BMP,
+    ".png": OUTPUT_IMAGE_FORMAT_PNG,
+    ".jpg": OUTPUT_IMAGE_FORMAT_JPG,
+    ".jpeg": OUTPUT_IMAGE_FORMAT_JPG,
+    ".webp": OUTPUT_IMAGE_FORMAT_WEBP,
+    ".bmp": OUTPUT_IMAGE_FORMAT_BMP,
 }
 _OUTPUT_EXTENSION_BY_FORMAT = {
-    OUTPUT_FORMAT_PNG: ".png",
-    OUTPUT_FORMAT_JPG: ".jpg",
-    OUTPUT_FORMAT_WEBP: ".webp",
-    OUTPUT_FORMAT_BMP: ".bmp",
+    OUTPUT_IMAGE_FORMAT_PNG: ".png",
+    OUTPUT_IMAGE_FORMAT_JPG: ".jpg",
+    OUTPUT_IMAGE_FORMAT_WEBP: ".webp",
+    OUTPUT_IMAGE_FORMAT_BMP: ".bmp",
 }
 _ILLEGAL_FILE_CHARS_RE = re.compile(r'[<>:"/\\|?*\x00-\x1f]')
 _BRACKET_RE = re.compile(r"[\(\)\[\]\{\}]")
@@ -69,124 +78,143 @@ _TRAILING_VERSION_RE = re.compile(
 _WHITESPACE_RE = re.compile(r"\s+")
 _SEPARATOR_RE = re.compile(r"[_-]{2,}")
 
-_PRESET_OFFSETS = {
-    OUTPUT_FORMAT_PNG: {
-        OUTPUT_PRESET_FAST: -5,
-        OUTPUT_PRESET_BALANCED: 0,
-        OUTPUT_PRESET_SMALL: 3,
+_ARCHIVE_ESTIMATE_ANCHORS = {
+    OUTPUT_IMAGE_FORMAT_PNG: {
+        0: (1.10, 225.0),
+        3: (0.98, 185.0),
+        6: (0.88, 145.0),
+        9: (0.80, 110.0),
     },
-    OUTPUT_FORMAT_JPG: {
-        OUTPUT_PRESET_FAST: 2,
-        OUTPUT_PRESET_BALANCED: -2,
-        OUTPUT_PRESET_SMALL: -12,
+    OUTPUT_IMAGE_FORMAT_JPG: {
+        0: (0.66, 260.0),
+        3: (0.63, 230.0),
+        6: (0.60, 205.0),
+        9: (0.57, 170.0),
     },
-    OUTPUT_FORMAT_WEBP: {
-        OUTPUT_PRESET_FAST: 2,
-        OUTPUT_PRESET_BALANCED: -5,
-        OUTPUT_PRESET_SMALL: -15,
+    OUTPUT_IMAGE_FORMAT_WEBP: {
+        0: (0.54, 210.0),
+        3: (0.51, 188.0),
+        6: (0.49, 166.0),
+        9: (0.46, 142.0),
     },
 }
-_PNG_ANCHORS = {
-    1: (0.95, 220.0),
-    6: (0.82, 150.0),
-    9: (0.72, 95.0),
-}
-_JPG_ANCHORS = {
-    92: (0.58, 280.0),
-    88: (0.40, 250.0),
-    78: (0.26, 230.0),
-}
-_WEBP_ANCHORS = {
-    92: (0.46, 190.0),
-    85: (0.31, 155.0),
-    75: (0.21, 115.0),
-}
-_BMP_RATIO = 1.0
-_BMP_THROUGHPUT = 300.0
 
 
 def default_global_output_settings() -> dict[str, object]:
     return {
-        "automatic_output_format": DEFAULT_OUTPUT_FORMAT,
-        "automatic_output_preset": DEFAULT_OUTPUT_PRESET,
-        "automatic_output_png_compression_level": DEFAULT_PNG_COMPRESSION,
-        "automatic_output_jpg_quality": DEFAULT_JPG_QUALITY,
-        "automatic_output_webp_quality": DEFAULT_WEBP_QUALITY,
+        "automatic_output_target": DEFAULT_OUTPUT_TARGET,
+        "automatic_output_image_format": DEFAULT_OUTPUT_IMAGE_FORMAT,
+        "automatic_output_archive_format": DEFAULT_OUTPUT_ARCHIVE_FORMAT,
+        "automatic_output_archive_image_format": DEFAULT_OUTPUT_ARCHIVE_IMAGE_FORMAT,
+        "automatic_output_archive_compression_level": DEFAULT_OUTPUT_ARCHIVE_COMPRESSION_LEVEL,
     }
 
 
-def default_project_output_preferences() -> dict[str, str]:
+def default_project_output_preferences() -> dict[str, object]:
     return {
-        "output_format_override_mode": OUTPUT_OVERRIDE_MODE_GLOBAL,
-        "output_format_override_value": DEFAULT_OUTPUT_FORMAT,
-        "output_preset_override_mode": OUTPUT_OVERRIDE_MODE_GLOBAL,
-        "output_preset_override_value": DEFAULT_OUTPUT_PRESET,
+        "output_use_global": True,
+        "output_target": DEFAULT_OUTPUT_TARGET,
+        "output_image_format": DEFAULT_OUTPUT_IMAGE_FORMAT,
+        "output_archive_format": DEFAULT_OUTPUT_ARCHIVE_FORMAT,
+        "output_archive_image_format": DEFAULT_OUTPUT_ARCHIVE_IMAGE_FORMAT,
+        "output_archive_compression_level": DEFAULT_OUTPUT_ARCHIVE_COMPRESSION_LEVEL,
     }
 
 
-def normalize_output_format(value: str | None) -> str:
+def normalize_output_target(value: str | None) -> str:
     normalized = str(value or "").strip().lower()
-    if normalized in SUPPORTED_OUTPUT_FORMATS:
+    if normalized in SUPPORTED_OUTPUT_TARGETS:
         return normalized
-    return DEFAULT_OUTPUT_FORMAT
+    return DEFAULT_OUTPUT_TARGET
 
 
-def normalize_output_preset(value: str | None) -> str:
+def normalize_image_format(value: str | None) -> str:
     normalized = str(value or "").strip().lower()
-    if normalized in SUPPORTED_OUTPUT_PRESETS:
+    if normalized in SUPPORTED_IMAGE_FORMATS:
         return normalized
-    return DEFAULT_OUTPUT_PRESET
+    return DEFAULT_OUTPUT_IMAGE_FORMAT
 
 
-def normalize_output_override_mode(value: str | None) -> str:
+def normalize_archive_image_format(value: str | None) -> str:
     normalized = str(value or "").strip().lower()
-    if normalized == OUTPUT_OVERRIDE_MODE_PROJECT:
-        return OUTPUT_OVERRIDE_MODE_PROJECT
-    return OUTPUT_OVERRIDE_MODE_GLOBAL
+    if normalized in SUPPORTED_ARCHIVE_IMAGE_FORMATS:
+        return normalized
+    return DEFAULT_OUTPUT_ARCHIVE_IMAGE_FORMAT
 
 
-def clamp_png_compression(value: object) -> int:
-    return max(0, min(9, int(value or DEFAULT_PNG_COMPRESSION)))
+def normalize_archive_format(value: str | None) -> str:
+    normalized = str(value or "").strip().lower()
+    if normalized in SUPPORTED_ARCHIVE_FORMATS:
+        return normalized
+    return DEFAULT_OUTPUT_ARCHIVE_FORMAT
 
 
-def clamp_quality(value: object, default: int) -> int:
-    return max(1, min(100, int(value or default)))
+def clamp_archive_compression_level(value: object) -> int:
+    return max(0, min(9, int(value or DEFAULT_OUTPUT_ARCHIVE_COMPRESSION_LEVEL)))
 
 
 def normalize_global_output_settings(settings: Mapping[str, object] | None) -> dict[str, object]:
     raw = dict(default_global_output_settings())
     raw.update(dict(settings or {}))
-    raw["automatic_output_format"] = normalize_output_format(raw.get("automatic_output_format"))
-    raw["automatic_output_preset"] = normalize_output_preset(raw.get("automatic_output_preset"))
-    raw["automatic_output_png_compression_level"] = clamp_png_compression(
-        raw.get("automatic_output_png_compression_level", DEFAULT_PNG_COMPRESSION)
+    legacy_image_format = raw.get("automatic_output_format")
+    raw["automatic_output_target"] = normalize_output_target(raw.get("automatic_output_target"))
+    raw["automatic_output_image_format"] = normalize_image_format(
+        raw.get("automatic_output_image_format", legacy_image_format)
     )
-    raw["automatic_output_jpg_quality"] = clamp_quality(
-        raw.get("automatic_output_jpg_quality", DEFAULT_JPG_QUALITY),
-        DEFAULT_JPG_QUALITY,
+    raw["automatic_output_archive_format"] = normalize_archive_format(
+        raw.get("automatic_output_archive_format")
     )
-    raw["automatic_output_webp_quality"] = clamp_quality(
-        raw.get("automatic_output_webp_quality", DEFAULT_WEBP_QUALITY),
-        DEFAULT_WEBP_QUALITY,
+    raw["automatic_output_archive_image_format"] = normalize_archive_image_format(
+        raw.get("automatic_output_archive_image_format")
     )
+    raw["automatic_output_archive_compression_level"] = clamp_archive_compression_level(
+        raw.get("automatic_output_archive_compression_level", DEFAULT_OUTPUT_ARCHIVE_COMPRESSION_LEVEL)
+    )
+    for legacy_key in (
+        "automatic_output_format",
+        "automatic_output_preset",
+        "automatic_output_png_compression_level",
+        "automatic_output_jpg_quality",
+        "automatic_output_webp_quality",
+    ):
+        raw.pop(legacy_key, None)
     return raw
 
 
-def normalize_project_output_preferences(preferences: Mapping[str, object] | None) -> dict[str, str]:
+def normalize_project_output_preferences(preferences: Mapping[str, object] | None) -> dict[str, object]:
     raw = dict(default_project_output_preferences())
     raw.update(dict(preferences or {}))
-    raw["output_format_override_mode"] = normalize_output_override_mode(
-        raw.get("output_format_override_mode")
+
+    if "output_use_global" not in raw:
+        legacy_target_mode = str(raw.get("output_target_override_mode", "") or "").strip().lower()
+        legacy_image_mode = str(raw.get("output_format_override_mode", "") or "").strip().lower()
+        raw["output_use_global"] = not (
+            legacy_target_mode == "project" or legacy_image_mode == "project"
+        )
+
+    raw["output_use_global"] = bool(raw.get("output_use_global", True))
+    raw["output_target"] = normalize_output_target(
+        raw.get("output_target", raw.get("output_target_override_value"))
     )
-    raw["output_format_override_value"] = normalize_output_format(
-        raw.get("output_format_override_value")
+    raw["output_image_format"] = normalize_image_format(
+        raw.get("output_image_format", raw.get("output_format_override_value"))
     )
-    raw["output_preset_override_mode"] = normalize_output_override_mode(
-        raw.get("output_preset_override_mode")
+    raw["output_archive_format"] = normalize_archive_format(raw.get("output_archive_format"))
+    raw["output_archive_image_format"] = normalize_archive_image_format(
+        raw.get("output_archive_image_format")
     )
-    raw["output_preset_override_value"] = normalize_output_preset(
-        raw.get("output_preset_override_value")
+    raw["output_archive_compression_level"] = clamp_archive_compression_level(
+        raw.get("output_archive_compression_level")
     )
+    for legacy_key in (
+        "output_target_override_mode",
+        "output_target_override_value",
+        "output_format_override_mode",
+        "output_format_override_value",
+        "output_preset_override_mode",
+        "output_preset_override_value",
+    ):
+        raw.pop(legacy_key, None)
     return raw
 
 
@@ -196,27 +224,36 @@ def resolve_automatic_output_settings(
 ) -> dict[str, object]:
     settings = normalize_global_output_settings(global_settings)
     project = normalize_project_output_preferences(project_preferences)
-    resolved_format = (
-        project["output_format_override_value"]
-        if project["output_format_override_mode"] == OUTPUT_OVERRIDE_MODE_PROJECT
-        else str(settings["automatic_output_format"])
-    )
-    resolved_preset = (
-        project["output_preset_override_value"]
-        if project["output_preset_override_mode"] == OUTPUT_OVERRIDE_MODE_PROJECT
-        else str(settings["automatic_output_preset"])
-    )
-    settings.update(
-        {
-            "output_format_override_mode": project["output_format_override_mode"],
-            "output_format_override_value": project["output_format_override_value"],
-            "output_preset_override_mode": project["output_preset_override_mode"],
-            "output_preset_override_value": project["output_preset_override_value"],
-            "resolved_automatic_output_format": normalize_output_format(resolved_format),
-            "resolved_automatic_output_preset": normalize_output_preset(resolved_preset),
+    if project["output_use_global"]:
+        resolved = {
+            "resolved_automatic_output_target": settings["automatic_output_target"],
+            "resolved_automatic_output_image_format": settings["automatic_output_image_format"],
+            "resolved_automatic_output_archive_format": settings["automatic_output_archive_format"],
+            "resolved_automatic_output_archive_image_format": settings["automatic_output_archive_image_format"],
+            "resolved_automatic_output_archive_compression_level": settings["automatic_output_archive_compression_level"],
         }
-    )
+    else:
+        resolved = {
+            "resolved_automatic_output_target": project["output_target"],
+            "resolved_automatic_output_image_format": project["output_image_format"],
+            "resolved_automatic_output_archive_format": project["output_archive_format"],
+            "resolved_automatic_output_archive_image_format": project["output_archive_image_format"],
+            "resolved_automatic_output_archive_compression_level": project["output_archive_compression_level"],
+        }
+    settings.update(project)
+    settings.update(resolved)
     return settings
+
+
+def is_individual_images_mode(resolved_settings: Mapping[str, object] | None) -> bool:
+    target = str(
+        (resolved_settings or {}).get("resolved_automatic_output_target", DEFAULT_OUTPUT_TARGET)
+    )
+    return normalize_output_target(target) == OUTPUT_TARGET_IMAGES
+
+
+def is_single_archive_mode(resolved_settings: Mapping[str, object] | None) -> bool:
+    return not is_individual_images_mode(resolved_settings)
 
 
 def source_format_from_path(path: str | None) -> str:
@@ -224,71 +261,23 @@ def source_format_from_path(path: str | None) -> str:
     return _OUTPUT_FORMAT_BY_EXTENSION.get(suffix, "")
 
 
-def resolve_effective_output_format(source_path: str | None, requested_format: str | None) -> str:
-    normalized_requested = normalize_output_format(requested_format)
-    if normalized_requested != OUTPUT_FORMAT_SAME:
+def resolve_individual_output_format(source_path: str | None, requested_format: str | None) -> str:
+    normalized_requested = normalize_image_format(requested_format)
+    if normalized_requested != OUTPUT_IMAGE_FORMAT_SAME:
         return normalized_requested
     source_format = source_format_from_path(source_path)
     if source_format in SAME_AS_SOURCE_ALLOWED_FORMATS:
         return source_format
-    return OUTPUT_FORMAT_PNG
+    return OUTPUT_IMAGE_FORMAT_PNG
 
 
-def resolve_output_extension(source_path: str | None, requested_format: str | None) -> str:
-    effective = resolve_effective_output_format(source_path, requested_format)
-    return _OUTPUT_EXTENSION_BY_FORMAT.get(effective, ".png")
+def resolve_output_extension_for_format(output_format: str) -> str:
+    return _OUTPUT_EXTENSION_BY_FORMAT.get(output_format, ".png")
 
 
-def _with_preset_offset(value: int, output_format: str, preset: str) -> int:
-    return int(value) + int(_PRESET_OFFSETS.get(output_format, {}).get(preset, 0))
-
-
-def resolve_encode_settings(
-    resolved_settings: Mapping[str, object] | None,
-    source_path: str | None,
-) -> dict[str, object]:
-    settings = normalize_global_output_settings(resolved_settings)
-    requested_format = str(
-        (resolved_settings or {}).get("resolved_automatic_output_format")
-        or settings["automatic_output_format"]
-    )
-    preset = normalize_output_preset(
-        (resolved_settings or {}).get("resolved_automatic_output_preset")
-        or settings["automatic_output_preset"]
-    )
-    effective_format = resolve_effective_output_format(source_path, requested_format)
-    png_level = clamp_png_compression(
-        _with_preset_offset(
-            int(settings["automatic_output_png_compression_level"]),
-            OUTPUT_FORMAT_PNG,
-            preset,
-        )
-    )
-    jpg_quality = clamp_quality(
-        _with_preset_offset(
-            int(settings["automatic_output_jpg_quality"]),
-            OUTPUT_FORMAT_JPG,
-            preset,
-        ),
-        DEFAULT_JPG_QUALITY,
-    )
-    webp_quality = clamp_quality(
-        _with_preset_offset(
-            int(settings["automatic_output_webp_quality"]),
-            OUTPUT_FORMAT_WEBP,
-            preset,
-        ),
-        DEFAULT_WEBP_QUALITY,
-    )
-    return {
-        "requested_format": requested_format,
-        "preset": preset,
-        "effective_format": effective_format,
-        "extension": resolve_output_extension(source_path, requested_format),
-        "png_compression_level": png_level,
-        "jpg_quality": jpg_quality,
-        "webp_quality": webp_quality,
-    }
+def resolve_individual_output_extension(source_path: str | None, requested_format: str | None) -> str:
+    effective = resolve_individual_output_format(source_path, requested_format)
+    return resolve_output_extension_for_format(effective)
 
 
 def build_output_file_name(
@@ -297,8 +286,33 @@ def build_output_file_name(
     source_path: str | None,
     resolved_settings: Mapping[str, object] | None,
 ) -> str:
-    encode = resolve_encode_settings(resolved_settings, source_path)
-    return f"{page_base_name}_{variant}{encode['extension']}"
+    requested_format = str(
+        (resolved_settings or {}).get("resolved_automatic_output_image_format", DEFAULT_OUTPUT_IMAGE_FORMAT)
+    )
+    ext = resolve_individual_output_extension(source_path, requested_format)
+    return f"{page_base_name}_{variant}{ext}"
+
+
+def build_archive_page_file_name(
+    page_index: int,
+    total_pages: int,
+    page_base_name: str,
+    archive_image_format: str,
+) -> str:
+    digits = max(len(str(max(total_pages, 1))), 3)
+    ext = resolve_output_extension_for_format(normalize_archive_image_format(archive_image_format))
+    sanitized = sanitize_series_folder_name(page_base_name, max_length=120)
+    return f"{page_index + 1:0{digits}d}_{sanitized}{ext}"
+
+
+def build_archive_file_name(bundle_name: str, archive_format: str) -> str:
+    ext = f".{normalize_archive_format(archive_format)}"
+    stem = sanitize_series_folder_name(bundle_name, max_length=180)
+    return f"{stem}_translated{ext}"
+
+
+def build_archive_staging_dir(series_dir: str, export_token: str) -> str:
+    return os.path.join(series_dir, f".archive_staging_{sanitize_series_folder_name(export_token, 64)}")
 
 
 def _ensure_uint8_rgb(image: np.ndarray) -> np.ndarray:
@@ -312,6 +326,34 @@ def _ensure_uint8_rgb(image: np.ndarray) -> np.ndarray:
     return arr
 
 
+def write_image_with_format(output_path: str, image: np.ndarray, output_format: str) -> str:
+    os.makedirs(os.path.dirname(output_path), exist_ok=True)
+    pil_image = Image.fromarray(_ensure_uint8_rgb(image), mode="RGB")
+    fmt = str(output_format or "").strip().lower()
+    if fmt == OUTPUT_IMAGE_FORMAT_PNG:
+        pil_image.save(output_path, format="PNG", compress_level=0, optimize=False)
+    elif fmt == OUTPUT_IMAGE_FORMAT_JPG:
+        pil_image.save(
+            output_path,
+            format="JPEG",
+            quality=100,
+            subsampling=0,
+            optimize=False,
+        )
+    elif fmt == OUTPUT_IMAGE_FORMAT_WEBP:
+        pil_image.save(
+            output_path,
+            format="WEBP",
+            quality=100,
+            method=6,
+        )
+    elif fmt == OUTPUT_IMAGE_FORMAT_BMP:
+        pil_image.save(output_path, format="BMP")
+    else:
+        pil_image.save(output_path, format="PNG", compress_level=0, optimize=False)
+    return output_path
+
+
 def write_output_image(
     output_path: str,
     image: np.ndarray,
@@ -319,35 +361,26 @@ def write_output_image(
     source_path: str | None,
     resolved_settings: Mapping[str, object] | None,
 ) -> str:
-    encode = resolve_encode_settings(resolved_settings, source_path)
-    effective_format = str(encode["effective_format"])
-    os.makedirs(os.path.dirname(output_path), exist_ok=True)
-    pil_image = Image.fromarray(_ensure_uint8_rgb(image), mode="RGB")
-    if effective_format == OUTPUT_FORMAT_PNG:
-        pil_image.save(
-            output_path,
-            format="PNG",
-            compress_level=int(encode["png_compression_level"]),
+    requested = str(
+        (resolved_settings or {}).get("resolved_automatic_output_image_format", DEFAULT_OUTPUT_IMAGE_FORMAT)
+    )
+    effective = resolve_individual_output_format(source_path, requested)
+    return write_image_with_format(output_path, image, effective)
+
+
+def write_archive_image(
+    output_path: str,
+    image: np.ndarray,
+    *,
+    resolved_settings: Mapping[str, object] | None,
+) -> str:
+    output_format = str(
+        (resolved_settings or {}).get(
+            "resolved_automatic_output_archive_image_format",
+            DEFAULT_OUTPUT_ARCHIVE_IMAGE_FORMAT,
         )
-    elif effective_format == OUTPUT_FORMAT_JPG:
-        pil_image.save(
-            output_path,
-            format="JPEG",
-            quality=int(encode["jpg_quality"]),
-            optimize=True,
-        )
-    elif effective_format == OUTPUT_FORMAT_WEBP:
-        pil_image.save(
-            output_path,
-            format="WEBP",
-            quality=int(encode["webp_quality"]),
-            method=6,
-        )
-    elif effective_format == OUTPUT_FORMAT_BMP:
-        pil_image.save(output_path, format="BMP")
-    else:
-        pil_image.save(output_path, format="PNG", compress_level=DEFAULT_PNG_COMPRESSION)
-    return output_path
+    )
+    return write_image_with_format(output_path, image, output_format)
 
 
 def strip_trailing_version_suffix(stem: str) -> str:
@@ -429,35 +462,25 @@ def interpolate_metric(value: int, anchors: Mapping[int, tuple[float, float]]) -
     return ordered[-1][1]
 
 
-def estimate_for_encode_settings(encode_settings: Mapping[str, object]) -> tuple[float, float]:
-    effective_format = str(encode_settings.get("effective_format") or OUTPUT_FORMAT_PNG)
-    if effective_format == OUTPUT_FORMAT_PNG:
-        return interpolate_metric(int(encode_settings.get("png_compression_level", DEFAULT_PNG_COMPRESSION)), _PNG_ANCHORS)
-    if effective_format == OUTPUT_FORMAT_JPG:
-        return interpolate_metric(int(encode_settings.get("jpg_quality", DEFAULT_JPG_QUALITY)), _JPG_ANCHORS)
-    if effective_format == OUTPUT_FORMAT_WEBP:
-        return interpolate_metric(int(encode_settings.get("webp_quality", DEFAULT_WEBP_QUALITY)), _WEBP_ANCHORS)
-    if effective_format == OUTPUT_FORMAT_BMP:
-        return _BMP_RATIO, _BMP_THROUGHPUT
-    return interpolate_metric(DEFAULT_PNG_COMPRESSION, _PNG_ANCHORS)
-
-
-def estimate_output_for_pages(
+def estimate_archive_for_pages(
     page_metrics: Iterable[Mapping[str, object]],
-    resolved_settings: Mapping[str, object] | None,
+    archive_image_format: str,
+    compression_level: int,
 ) -> dict[str, object]:
     total_input_bytes = 0.0
     total_output_bytes = 0.0
     total_seconds = 0.0
     total_pages = 0
     total_megapixels = 0.0
+    normalized_format = normalize_archive_image_format(archive_image_format)
+    ratio, throughput = interpolate_metric(
+        clamp_archive_compression_level(compression_level),
+        _ARCHIVE_ESTIMATE_ANCHORS[normalized_format],
+    )
 
     for metric in page_metrics or []:
-        source_path = str(metric.get("source_path", "") or "")
         byte_size = max(float(metric.get("byte_size", 0.0) or 0.0), 0.0)
         megapixels = max(float(metric.get("megapixels", 0.0) or 0.0), 0.0)
-        encode = resolve_encode_settings(resolved_settings, source_path)
-        ratio, throughput = estimate_for_encode_settings(encode)
         total_input_bytes += byte_size
         total_output_bytes += byte_size * ratio
         total_megapixels += megapixels
@@ -467,7 +490,7 @@ def estimate_output_for_pages(
 
     compression_ratio = 0.0
     if total_input_bytes > 0:
-        compression_ratio = max(0.0, min(1.0, total_output_bytes / total_input_bytes))
+        compression_ratio = max(0.0, min(10.0, total_output_bytes / total_input_bytes))
 
     return {
         "page_count": total_pages,
@@ -476,6 +499,18 @@ def estimate_output_for_pages(
         "compression_ratio": compression_ratio,
         "seconds": max(total_seconds, 0.0),
         "megapixels": total_megapixels,
+        "archive_image_format": normalized_format,
+        "compression_level": clamp_archive_compression_level(compression_level),
+    }
+
+
+def estimate_archive_options_for_pages(
+    page_metrics: Iterable[Mapping[str, object]],
+    compression_level: int,
+) -> dict[str, dict[str, object]]:
+    return {
+        image_format: estimate_archive_for_pages(page_metrics, image_format, compression_level)
+        for image_format in SUPPORTED_ARCHIVE_IMAGE_FORMATS
     }
 
 
@@ -495,3 +530,29 @@ def format_estimate_seconds_text(seconds: float | int | None) -> str:
     if minutes > 0:
         return f"{minutes}m {secs}s"
     return f"{secs}s"
+
+
+def format_estimate_size_text(num_bytes: int | float | None) -> str:
+    value = max(float(num_bytes or 0.0), 0.0)
+    units = ["B", "KB", "MB", "GB", "TB"]
+    index = 0
+    while value >= 1024.0 and index < len(units) - 1:
+        value /= 1024.0
+        index += 1
+    if index == 0:
+        return f"{int(value)} {units[index]}"
+    return f"{value:.1f} {units[index]}"
+
+
+def preserve_preview_file(
+    preview_path: str | None,
+    *,
+    temp_root: str | None = None,
+) -> str:
+    path = str(preview_path or "").strip()
+    if not path or not os.path.exists(path):
+        return ""
+    target_dir = tempfile.mkdtemp(prefix="comic_translate_preview_", dir=temp_root or None)
+    target_path = os.path.join(target_dir, os.path.basename(path))
+    shutil.copy2(path, target_path)
+    return target_path

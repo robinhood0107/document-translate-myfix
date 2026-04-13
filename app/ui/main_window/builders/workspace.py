@@ -15,18 +15,20 @@ from app.ui.dayu_widgets.progress_bar import MProgressBar
 from app.ui.dayu_widgets.push_button import MPushButton
 from app.ui.dayu_widgets.radio_button import MRadioButton
 from app.ui.dayu_widgets.slider import MSlider
+from app.ui.dayu_widgets.spin_box import MSpinBox
 from app.ui.dayu_widgets.text_edit import MTextEdit
 from app.ui.dayu_widgets.tool_button import MToolButton
 from app.ui.search_replace_panel import SearchReplacePanel
 from app.ui.main_window.constants import supported_source_languages, supported_target_languages
 from modules.utils.automatic_output import (
-    OUTPUT_PRESET_BALANCED,
-    OUTPUT_PRESET_FAST,
-    OUTPUT_PRESET_SMALL,
-    OUTPUT_FORMAT_JPG,
-    OUTPUT_FORMAT_PNG,
-    OUTPUT_FORMAT_SAME,
-    OUTPUT_FORMAT_WEBP,
+    OUTPUT_ARCHIVE_FORMAT_CBZ,
+    OUTPUT_ARCHIVE_FORMAT_ZIP,
+    OUTPUT_IMAGE_FORMAT_JPG,
+    OUTPUT_IMAGE_FORMAT_PNG,
+    OUTPUT_IMAGE_FORMAT_SAME,
+    OUTPUT_IMAGE_FORMAT_WEBP,
+    OUTPUT_TARGET_ARCHIVE,
+    OUTPUT_TARGET_IMAGES,
 )
 
 
@@ -655,34 +657,83 @@ class WorkspaceMixin:
 
         self.output_use_global_checkbox = MCheckBox(self.tr("Use global output settings"))
         self.output_use_global_checkbox.setToolTip(
-            self.tr("When enabled, this project inherits the automatic output format and preset from Settings.")
+            self.tr("When enabled, this project inherits the automatic output settings from Settings.")
         )
 
-        output_format_row = QtWidgets.QHBoxLayout()
-        output_format_label = MLabel(self.tr("Format"))
-        self.output_format_combo = MComboBox().small()
-        self.output_format_combo.addItem(self.tr("Same as source"), OUTPUT_FORMAT_SAME)
-        self.output_format_combo.addItem("PNG", OUTPUT_FORMAT_PNG)
-        self.output_format_combo.addItem("JPG", OUTPUT_FORMAT_JPG)
-        self.output_format_combo.addItem("WEBP", OUTPUT_FORMAT_WEBP)
-        output_format_row.addWidget(output_format_label)
-        output_format_row.addWidget(self.output_format_combo, 1)
+        output_target_row = QtWidgets.QHBoxLayout()
+        output_target_label = MLabel(self.tr("Output target"))
+        self.output_target_combo = MComboBox().small()
+        self.output_target_combo.addItem(self.tr("Individual images"), OUTPUT_TARGET_IMAGES)
+        self.output_target_combo.addItem(self.tr("Single archive"), OUTPUT_TARGET_ARCHIVE)
+        output_target_row.addWidget(output_target_label)
+        output_target_row.addWidget(self.output_target_combo, 1)
 
-        output_preset_row = QtWidgets.QHBoxLayout()
-        output_preset_label = MLabel(self.tr("Preset"))
-        self.output_preset_combo = MComboBox().small()
-        self.output_preset_combo.addItem(self.tr("Fast"), OUTPUT_PRESET_FAST)
-        self.output_preset_combo.addItem(self.tr("Balanced"), OUTPUT_PRESET_BALANCED)
-        self.output_preset_combo.addItem(self.tr("Small"), OUTPUT_PRESET_SMALL)
-        output_preset_row.addWidget(output_preset_label)
-        output_preset_row.addWidget(self.output_preset_combo, 1)
+        self.output_image_format_row = QtWidgets.QWidget()
+        output_image_format_row_layout = QtWidgets.QHBoxLayout(self.output_image_format_row)
+        output_image_format_row_layout.setContentsMargins(0, 0, 0, 0)
+        output_image_format_label = MLabel(self.tr("Image format"))
+        self.output_image_format_combo = MComboBox().small()
+        self.output_image_format_combo.addItem(self.tr("Same as source"), OUTPUT_IMAGE_FORMAT_SAME)
+        self.output_image_format_combo.addItem("PNG", OUTPUT_IMAGE_FORMAT_PNG)
+        self.output_image_format_combo.addItem("JPG", OUTPUT_IMAGE_FORMAT_JPG)
+        self.output_image_format_combo.addItem("WEBP", OUTPUT_IMAGE_FORMAT_WEBP)
+        output_image_format_row_layout.addWidget(output_image_format_label)
+        output_image_format_row_layout.addWidget(self.output_image_format_combo, 1)
 
-        self.output_estimate_label = MLabel(self.tr("Estimated output: Calculating...")).secondary()
+        self.output_archive_format_row = QtWidgets.QWidget()
+        output_archive_format_row_layout = QtWidgets.QHBoxLayout(self.output_archive_format_row)
+        output_archive_format_row_layout.setContentsMargins(0, 0, 0, 0)
+        output_archive_format_label = MLabel(self.tr("Archive format"))
+        self.output_archive_format_combo = MComboBox().small()
+        self.output_archive_format_combo.addItem("ZIP", OUTPUT_ARCHIVE_FORMAT_ZIP)
+        self.output_archive_format_combo.addItem("CBZ", OUTPUT_ARCHIVE_FORMAT_CBZ)
+        output_archive_format_row_layout.addWidget(output_archive_format_label)
+        output_archive_format_row_layout.addWidget(self.output_archive_format_combo, 1)
+
+        self.output_archive_image_format_row = QtWidgets.QWidget()
+        output_archive_image_format_row_layout = QtWidgets.QHBoxLayout(self.output_archive_image_format_row)
+        output_archive_image_format_row_layout.setContentsMargins(0, 0, 0, 0)
+        output_archive_image_format_label = MLabel(self.tr("Archive image format"))
+        self.output_archive_image_format_combo = MComboBox().small()
+        self.output_archive_image_format_combo.addItem("PNG", OUTPUT_IMAGE_FORMAT_PNG)
+        self.output_archive_image_format_combo.addItem("JPG", OUTPUT_IMAGE_FORMAT_JPG)
+        self.output_archive_image_format_combo.addItem("WEBP", OUTPUT_IMAGE_FORMAT_WEBP)
+        output_archive_image_format_row_layout.addWidget(output_archive_image_format_label)
+        output_archive_image_format_row_layout.addWidget(self.output_archive_image_format_combo, 1)
+
+        self.output_archive_level_row = QtWidgets.QWidget()
+        output_archive_level_row_layout = QtWidgets.QHBoxLayout(self.output_archive_level_row)
+        output_archive_level_row_layout.setContentsMargins(0, 0, 0, 0)
+        output_archive_level_label = MLabel(self.tr("Compression level"))
+        self.output_archive_level_spinbox = MSpinBox().small()
+        self.output_archive_level_spinbox.setMinimum(0)
+        self.output_archive_level_spinbox.setMaximum(9)
+        self.output_archive_level_spinbox.setValue(6)
+        output_archive_level_row_layout.addWidget(output_archive_level_label)
+        output_archive_level_row_layout.addWidget(self.output_archive_level_spinbox)
+        output_archive_level_row_layout.addStretch(1)
+
+        self.output_quality_note_label = MLabel(
+            self.tr("PNG/JPG/WEBP images are saved at maximum quality.")
+        ).secondary()
+        self.output_quality_note_label.setWordWrap(True)
+
+        self.output_archive_note_label = MLabel(
+            self.tr("Archive compression only affects the ZIP/CBZ container, not image quality.")
+        ).secondary()
+        self.output_archive_note_label.setWordWrap(True)
+
+        self.output_estimate_label = MLabel(self.tr("Load pages to see automatic output estimates.")).secondary()
         self.output_estimate_label.setWordWrap(True)
 
         output_layout.addWidget(self.output_use_global_checkbox)
-        output_layout.addLayout(output_format_row)
-        output_layout.addLayout(output_preset_row)
+        output_layout.addLayout(output_target_row)
+        output_layout.addWidget(self.output_image_format_row)
+        output_layout.addWidget(self.output_archive_format_row)
+        output_layout.addWidget(self.output_archive_image_format_row)
+        output_layout.addWidget(self.output_archive_level_row)
+        output_layout.addWidget(self.output_quality_note_label)
+        output_layout.addWidget(self.output_archive_note_label)
         output_layout.addWidget(self.output_estimate_label)
 
         tools_layout.addLayout(misc_lay)
