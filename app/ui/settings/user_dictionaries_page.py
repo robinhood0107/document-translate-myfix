@@ -14,6 +14,53 @@ class CorrectionDictionaryTable(QtWidgets.QWidget):
         self._loading = False
 
         layout = QtWidgets.QVBoxLayout(self)
+        layout.setContentsMargins(12, 12, 12, 12)
+        layout.setSpacing(10)
+        self.setObjectName("correctionDictionaryCard")
+        self.setStyleSheet(
+            """
+            QWidget#correctionDictionaryCard {
+                background: rgba(255, 255, 255, 0.035);
+                border: 1px solid rgba(255, 255, 255, 0.08);
+                border-radius: 14px;
+            }
+            QWidget#correctionDictionaryCard QLabel {
+                background: transparent;
+                border: none;
+            }
+            QTableWidget {
+                background-color: #f8fafc;
+                alternate-background-color: #f1f5f9;
+                color: #111827;
+                border: 1px solid #d6dde8;
+                border-radius: 12px;
+                gridline-color: transparent;
+                selection-background-color: #dbeafe;
+                selection-color: #111827;
+                outline: none;
+            }
+            QTableWidget::item {
+                color: #111827;
+                padding: 6px 8px;
+            }
+            QTableWidget::item:selected {
+                color: #111827;
+            }
+            QHeaderView::section {
+                background-color: #eef2f7;
+                color: #334155;
+                border: none;
+                border-bottom: 1px solid #d6dde8;
+                padding: 8px 10px;
+                font-weight: 600;
+            }
+            QTableCornerButton::section {
+                background-color: #eef2f7;
+                border: none;
+                border-bottom: 1px solid #d6dde8;
+            }
+            """
+        )
         title_label = MLabel(title).h4()
         desc_label = MLabel(description).secondary()
         desc_label.setWordWrap(True)
@@ -44,6 +91,9 @@ class CorrectionDictionaryTable(QtWidgets.QWidget):
             QtWidgets.QHeaderView.ResizeMode.ResizeToContents,
         )
         self.table.verticalHeader().setVisible(False)
+        self.table.verticalHeader().setDefaultSectionSize(38)
+        self.table.setAlternatingRowColors(True)
+        self.table.setShowGrid(False)
         self.table.setSelectionBehavior(
             QtWidgets.QAbstractItemView.SelectionBehavior.SelectRows
         )
@@ -68,6 +118,7 @@ class CorrectionDictionaryTable(QtWidgets.QWidget):
 
     def _make_text_item(self, text: str) -> QtWidgets.QTableWidgetItem:
         item = QtWidgets.QTableWidgetItem(text)
+        item.setForeground(QtGui.QBrush(QtGui.QColor("#111827")))
         item.setFlags(
             QtCore.Qt.ItemFlag.ItemIsSelectable
             | QtCore.Qt.ItemFlag.ItemIsEnabled
