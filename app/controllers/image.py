@@ -564,24 +564,29 @@ class ImageStateController:
             pass
 
     def thread_load_images(self, paths: List[str]):
-        if paths and paths[0].lower().endswith('.ctpr'):
-            self.main.project_ctrl.thread_load_project(paths[0])
+        normalized_paths = [
+            os.path.normpath(os.path.abspath(path))
+            for path in (paths or [])
+            if isinstance(path, str) and path
+        ]
+        if normalized_paths and any(path.lower().endswith(".ctpr") for path in normalized_paths):
+            if len(normalized_paths) == 1 and normalized_paths[0].lower().endswith(".ctpr"):
+                self.main.project_ctrl.thread_load_project(normalized_paths[0])
+                return
+            self.main.default_error_handler(
+                (
+                    ValueError,
+                    ValueError(
+                        "Project files cannot be opened together with other imported files."
+                    ),
+                    "",
+                )
+            )
             return
 
-        # If autosave is active and a project file is already chosen, preserve
-        # the association so the title and autosave target survive the state reset.
-        try:
-            autosave_enabled = bool(
-                hasattr(self.main, 'title_bar')
-                and self.main.title_bar.autosave_switch.isChecked()
-            )
-        except Exception:
-            autosave_enabled = False
-        prev_project_file = self.main.project_file if autosave_enabled else None
-
-        psd_paths = [p for p in (paths or []) if isinstance(p, str) and p.lower().endswith(".psd")]
+        psd_paths = [p for p in normalized_paths if p.lower().endswith(".psd")]
         if psd_paths:
-            if len(psd_paths) != len(paths):
+            if len(psd_paths) != len(normalized_paths):
                 self.main.default_error_handler(
                     (
                         ValueError,
@@ -600,9 +605,6 @@ class ImageStateController:
                 pass
             self.main.project_ctrl.clear_recovery_checkpoint()
             self.clear_state()
-            if prev_project_file:
-                self.main.project_file = prev_project_file
-                self.main.setWindowTitle(f"{os.path.basename(prev_project_file)}[*]")
             self.main.run_threaded(
                 self._import_psd_files,
                 self.on_psd_imported,
@@ -614,10 +616,13 @@ class ImageStateController:
 
         self.main.project_ctrl.clear_recovery_checkpoint()
         self.clear_state()
-        if prev_project_file:
-            self.main.project_file = prev_project_file
-            self.main.setWindowTitle(f"{os.path.basename(prev_project_file)}[*]")
-        self.main.run_threaded(self.load_initial_image, self.on_initial_image_loaded, self.main.default_error_handler, None, paths)
+        self.main.run_threaded(
+            self.load_initial_image,
+            self.on_initial_image_loaded,
+            self.main.default_error_handler,
+            None,
+            normalized_paths,
+        )
 
     def _import_psd_files(self, psd_paths: List[str]) -> list[ImportedPsdPage]:
         return import_psd_files(psd_paths)
@@ -783,8 +788,9 @@ class ImageStateController:
         if self.main.image_files:
             self.main.page_list.blockSignals(True)
             self.update_image_cards()
-            self.main.page_list.blockSignals(False)
             self.main.page_list.setCurrentRow(0)
+            self.main.page_list.blockSignals(False)
+            self.display_image_from_loaded(self.main.image_data[self.main.image_files[0]], 0, switch_page=False)
             self.register_loaded_image(self.main.image_files[0])
         else:
             self.main.image_viewer.clear_scene()
