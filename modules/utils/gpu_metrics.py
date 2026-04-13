@@ -11,6 +11,7 @@ DEFAULT_CONTAINER_NAMES = (
     "gemma-local-server",
     "paddleocr-server",
     "paddleocr-vllm",
+    "mangalmm-local-server",
 )
 
 
@@ -137,7 +138,7 @@ def _docker_inspect_rows(container_names: Iterable[str]) -> dict[str, dict[str, 
 def collect_runtime_snapshot(
     container_names: Iterable[str] | None = None,
 ) -> dict[str, Any]:
-    names = list(container_names or DEFAULT_CONTAINER_NAMES)
+    names = list(DEFAULT_CONTAINER_NAMES if container_names is None else container_names)
     ps_rows = _docker_ps_rows(names)
     inspect_rows = _docker_inspect_rows(names)
     return {

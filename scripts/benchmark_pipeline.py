@@ -224,6 +224,7 @@ def _configure_window(window, preset: dict[str, object], source_lang: str, targe
     gemma = preset.get("gemma", {})
     ocr_client = preset.get("ocr_client", {})
     hunyuan_ocr_client = preset.get("hunyuan_ocr_client", {})
+    mangalmm_ocr_client = preset.get("mangalmm_ocr_client", {})
     ocr_generic = preset.get("ocr_generic", {})
     mask_refiner_settings = preset.get("mask_refiner_settings", {})
     inpainter_runtime = preset.get("inpainter_runtime", {})
@@ -296,6 +297,30 @@ def _configure_window(window, preset: dict[str, object], source_lang: str, targe
     )
     ui.hunyuan_ocr_raw_response_logging_checkbox.setChecked(
         bool(hunyuan_ocr_client.get("raw_response_logging", False))
+    )
+    ui.mangalmm_ocr_server_url_input.setText(
+        str(mangalmm_ocr_client.get("server_url", "http://127.0.0.1:28081/v1"))
+    )
+    ui.mangalmm_ocr_max_completion_tokens_spinbox.setValue(
+        int(mangalmm_ocr_client.get("max_completion_tokens", 256))
+    )
+    ui.mangalmm_ocr_parallel_workers_spinbox.setValue(
+        int(mangalmm_ocr_client.get("parallel_workers", 1))
+    )
+    ui.mangalmm_ocr_request_timeout_spinbox.setValue(
+        int(mangalmm_ocr_client.get("request_timeout_sec", 60))
+    )
+    ui.mangalmm_ocr_raw_response_logging_checkbox.setChecked(
+        bool(mangalmm_ocr_client.get("raw_response_logging", False))
+    )
+    ui.mangalmm_ocr_safe_resize_checkbox.setChecked(
+        bool(mangalmm_ocr_client.get("safe_resize", True))
+    )
+    ui.mangalmm_ocr_max_pixels_spinbox.setValue(
+        int(mangalmm_ocr_client.get("max_pixels", 1200000))
+    )
+    ui.mangalmm_ocr_max_long_side_spinbox.setValue(
+        int(mangalmm_ocr_client.get("max_long_side", 1280))
     )
 
     ui.gemma_chunk_size_spinbox.setValue(int(gemma.get("chunk_size", 6)))
