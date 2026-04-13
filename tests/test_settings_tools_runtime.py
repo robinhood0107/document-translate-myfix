@@ -3,6 +3,8 @@ from __future__ import annotations
 import os
 import tempfile
 import unittest
+from contextlib import ExitStack
+from pathlib import Path
 from unittest import mock
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
@@ -50,8 +52,16 @@ class SettingsToolsRuntimeTests(unittest.TestCase):
         self._temp_dir.cleanup()
 
     def _make_page(self) -> SettingsPage:
-        with mock.patch("app.ui.settings.settings_page.UpdateChecker", _FakeUpdateChecker):
-            page = SettingsPage()
+        patchers = [
+            mock.patch("app.ui.settings.settings_page.UpdateChecker", _FakeUpdateChecker),
+            mock.patch("app.ui.settings.notifications_page.get_music_dir", return_value=Path(self._temp_dir.name)),
+            mock.patch("app.ui.settings.notifications_page.list_music_wav_files", return_value=["notify.wav"]),
+        ]
+        stack = ExitStack()
+        for patcher in patchers:
+            stack.enter_context(patcher)
+        self.addCleanup(stack.close)
+        page = SettingsPage()
         self.addCleanup(page.deleteLater)
         return page
 
@@ -98,6 +108,21 @@ class SettingsToolsRuntimeTests(unittest.TestCase):
             settings.value("tools/mask_refiner_settings/mask_inpaint_mode", "", type=str),
             "rtdetr_legacy_bbox_source_lama",
         )
+
+    def test_notification_settings_round_trip(self) -> None:
+        page = self._make_page()
+        page.load_settings()
+
+        self.assertTrue(page.ui.notifications_page.enable_completion_sound_checkbox.isChecked())
+        page.ui.notifications_page.enable_completion_sound_checkbox.setChecked(False)
+        combo = page.ui.notifications_page.completion_sound_combo
+        combo.setCurrentIndex(1)
+        page.save_settings()
+
+        settings = QtCore.QSettings("ComicLabs", "ComicTranslate")
+        self.assertFalse(settings.value("notifications/enable_completion_sound", True, type=bool))
+        self.assertEqual(settings.value("notifications/completion_sound_mode", "", type=str), "file")
+        self.assertEqual(settings.value("notifications/completion_sound_file", "", type=str), "notify.wav")
 
 
 if __name__ == "__main__":

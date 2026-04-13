@@ -11,6 +11,7 @@ from app.ui.dayu_widgets import dayu_theme
 from app.ui.dayu_widgets.divider import MDivider
 from app.ui.dayu_widgets.theme import MTheme
 from app.ui.list_view import PageListView
+from app.ui.pipeline_status_panel import PipelineInteractionOverlay, PipelineStatusPanel
 from app.ui.settings.settings_page import SettingsPage
 from app.ui.startup_home import StartupHomeScreen
 from app.ui.title_bar import CustomTitleBar, RESIZE_MARGIN
@@ -173,6 +174,7 @@ class ComicTranslateUI(
         self._edge_resizer = EdgeResizer(self)
 
         main_widget = QtWidgets.QWidget()
+        self._main_body_widget = main_widget
         self.main_layout = QtWidgets.QHBoxLayout()
         main_widget.setLayout(self.main_layout)
         outer_layout.addWidget(main_widget)
@@ -197,6 +199,12 @@ class ComicTranslateUI(
 
         self.main_layout.addWidget(self._center_stack)
 
+        self.pipeline_overlay = PipelineInteractionOverlay(outer_widget)
+        self.pipeline_overlay.hide()
+        self.pipeline_status_panel = PipelineStatusPanel(outer_widget)
+        self.pipeline_status_panel.hide()
+        self._update_runtime_surface_geometry()
+
     def _set_document_tools_visible(self, visible: bool) -> None:
         tools = [
             self.insert_button,
@@ -220,6 +228,7 @@ class ComicTranslateUI(
         self._finish_settings_resize_preview()
         self._set_document_tools_visible(False)
         self._center_stack.setCurrentWidget(self.startup_home)
+        self.set_pipeline_overlay_active(False)
 
     def show_home(self) -> None:
         if self._workspace_initialized:
@@ -242,6 +251,7 @@ class ComicTranslateUI(
 
     def resizeEvent(self, event: QtGui.QResizeEvent) -> None:  # type: ignore[override]
         super().resizeEvent(event)
+        self._update_runtime_surface_geometry()
         if sys.platform != "win32":
             return
         if not hasattr(self, "_center_stack") or self._center_stack.currentWidget() is not self.settings_page:
@@ -280,6 +290,63 @@ class ComicTranslateUI(
             self._settings_resize_active = False
             if hasattr(self, "settings_page") and self.settings_page is not None:
                 self.settings_page.update()
+
+    def _runtime_surface_area(self) -> QtCore.QRect:
+        if not hasattr(self, "_main_body_widget") or self._main_body_widget is None:
+            return QtCore.QRect()
+        return self._main_body_widget.geometry()
+
+    def _update_runtime_surface_geometry(self) -> None:
+        area = self._runtime_surface_area()
+        if hasattr(self, "pipeline_overlay") and self.pipeline_overlay is not None:
+            self.pipeline_overlay.setGeometry(area)
+        if hasattr(self, "pipeline_status_panel") and self.pipeline_status_panel is not None:
+            self.pipeline_status_panel.set_allowed_area(area.adjusted(8, 8, -8, -8))
+            self.pipeline_status_panel.raise_()
+
+    def set_pipeline_overlay_active(self, active: bool) -> None:
+        if not hasattr(self, "pipeline_overlay"):
+            return
+        if active:
+            self.pipeline_overlay.show()
+            self.pipeline_overlay.raise_()
+            if hasattr(self, "pipeline_status_panel"):
+                self.pipeline_status_panel.raise_()
+        else:
+            self.pipeline_overlay.hide()
+
+    def route_passive_message(
+        self,
+        level: str,
+        text: str,
+        *,
+        duration: int | None = None,
+        closable: bool = True,
+        source: str = "generic",
+    ):
+        if not hasattr(self, "pipeline_status_panel") or self.pipeline_status_panel is None:
+            return None
+        current_widget = self._center_stack.currentWidget() if hasattr(self, "_center_stack") else None
+        if current_widget is self.startup_home and not self.pipeline_status_panel.isVisible():
+            return None
+        self.pipeline_status_panel.show_passive_message(
+            level,
+            text,
+            duration=duration,
+            closable=closable,
+            source=source,
+        )
+        self.pipeline_status_panel.raise_()
+        return self.pipeline_status_panel
+
+    def set_download_status(self, text: str | None) -> None:
+        if not hasattr(self, "pipeline_status_panel") or self.pipeline_status_panel is None:
+            return
+        if text:
+            self.pipeline_status_panel.show_download_message(text)
+            self.pipeline_status_panel.raise_()
+        else:
+            self.pipeline_status_panel.clear_download_message()
 
 
     def changeEvent(self, event: QtCore.QEvent) -> None:  # type: ignore[override]
