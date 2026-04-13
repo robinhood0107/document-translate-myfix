@@ -108,7 +108,11 @@ def _show_missing_credentials(main: ComicTranslate, provider_name: str, missing_
     Messages.show_missing_credentials_error(main, provider_name, field_text)
 
 
-def validate_ocr(main: ComicTranslate, source_lang: str | None = None):
+def validate_ocr(
+    main: ComicTranslate,
+    source_lang: str | None = None,
+    preflight_cache: dict[str, str] | None = None,
+):
     settings_page = main.settings_page
     ocr_tool = settings_page.get_tool_selection("ocr")
 
@@ -171,6 +175,13 @@ def validate_ocr(main: ComicTranslate, source_lang: str | None = None):
                 error_kind="setup",
             )
             return False
+        cache_key = runtime_manager.preflight_cache_key(normalized_tool, settings_page)
+        if cache_key:
+            probe_result = preflight_cache.get(cache_key) if preflight_cache is not None else None
+            if probe_result is None:
+                probe_result = runtime_manager.probe_managed_engine(normalized_tool, settings_page)
+                if preflight_cache is not None:
+                    preflight_cache[cache_key] = probe_result
         return True
 
     provider = OCR_REQUIREMENTS.get(normalized_tool)
@@ -260,8 +271,13 @@ def font_selected(main: ComicTranslate):
     return True
 
 
-def validate_settings(main: ComicTranslate, target_lang: str, source_lang: str | None = None):
-    if not validate_ocr(main, source_lang=source_lang):
+def validate_settings(
+    main: ComicTranslate,
+    target_lang: str,
+    source_lang: str | None = None,
+    preflight_cache: dict[str, str] | None = None,
+):
+    if not validate_ocr(main, source_lang=source_lang, preflight_cache=preflight_cache):
         return False
     if not validate_translator(main, target_lang):
         return False
