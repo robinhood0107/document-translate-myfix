@@ -10,6 +10,10 @@ from modules.detection.utils.content import get_inpaint_bboxes
 from modules.ocr.processor import OCRProcessor
 from modules.rendering.render import pyside_word_wrap, is_vertical_block, get_best_render_area
 from modules.translation.processor import Translator
+from modules.utils.correction_dictionary import (
+    apply_ocr_result_dictionary,
+    apply_translation_result_dictionary,
+)
 from modules.utils.common_utils import is_close
 from modules.utils.device import resolve_device
 from modules.utils.inpaint_strokes import retain_non_manual_strokes
@@ -253,9 +257,17 @@ class ManualWorkflowController:
                     cache_key = cache_manager._get_ocr_cache_key(image, source_lang, ocr_model, device)
                     if cache_manager._can_serve_all_blocks_from_ocr_cache(cache_key, blk_list):
                         cache_manager._apply_cached_ocr_to_blocks(cache_key, blk_list)
+                        apply_ocr_result_dictionary(
+                            blk_list,
+                            self.main.settings_page.get_ocr_result_dictionary_rules(),
+                        )
                         cache_status = "hit"
                     else:
                         ocr.process(image, blk_list)
+                        apply_ocr_result_dictionary(
+                            blk_list,
+                            self.main.settings_page.get_ocr_result_dictionary_rules(),
+                        )
                         cache_manager._cache_ocr_results(cache_key, blk_list)
                         cache_status = "refreshed"
                     quality = summarize_ocr_quality(blk_list)
@@ -391,9 +403,17 @@ class ManualWorkflowController:
                     )
                     if cache_manager._can_serve_all_blocks_from_translation_cache(cache_key, blk_list):
                         cache_manager._apply_cached_translations_to_blocks(cache_key, blk_list)
+                        apply_translation_result_dictionary(
+                            blk_list,
+                            self.main.settings_page.get_translation_result_dictionary_rules(),
+                        )
                         cache_status = "hit"
                     else:
                         translator.translate(blk_list, image, extra_context)
+                        apply_translation_result_dictionary(
+                            blk_list,
+                            self.main.settings_page.get_translation_result_dictionary_rules(),
+                        )
                         cache_manager._cache_translation_results(cache_key, blk_list)
                         cache_status = "refreshed"
                     set_upper_case(blk_list, upper_case)

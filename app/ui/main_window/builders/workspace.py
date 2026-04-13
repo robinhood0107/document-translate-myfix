@@ -585,6 +585,62 @@ class WorkspaceMixin:
         self.brush_eraser_slider.valueChanged.connect(self.set_brush_eraser_size)
         self.refresh_inpaint_tool_ui()
 
+        txt_md_div = MDivider(self.tr("TXT/MD"))
+
+        txt_md_buttons_widget = QtWidgets.QWidget()
+        txt_md_buttons_layout = QtWidgets.QGridLayout(txt_md_buttons_widget)
+        txt_md_buttons_layout.setContentsMargins(0, 0, 0, 0)
+        txt_md_buttons_layout.setHorizontalSpacing(6)
+        txt_md_buttons_layout.setVerticalSpacing(6)
+
+        self.export_source_txt_button = MPushButton(self.tr("Export Source TXT")).small()
+        self.export_source_txt_button.setToolTip(
+            self.tr("Export the current project's source text in the TXT exchange format.")
+        )
+        self.import_translation_txt_button = MPushButton(self.tr("Import Translation TXT")).small()
+        self.import_translation_txt_button.setToolTip(
+            self.tr("Import translated text from a TXT exchange file and rebuild text boxes to fit.")
+        )
+        self.export_source_md_button = MPushButton(self.tr("Export Source MD")).small()
+        self.export_source_md_button.setToolTip(
+            self.tr("Export the current project's source text in the Markdown exchange format.")
+        )
+        self.import_translation_md_button = MPushButton(self.tr("Import Translation MD")).small()
+        self.import_translation_md_button.setToolTip(
+            self.tr("Import translated text from a Markdown exchange file and rebuild text boxes to fit.")
+        )
+
+        txt_md_buttons_layout.addWidget(self.export_source_txt_button, 0, 0)
+        txt_md_buttons_layout.addWidget(self.import_translation_txt_button, 0, 1)
+        txt_md_buttons_layout.addWidget(self.export_source_md_button, 1, 0)
+        txt_md_buttons_layout.addWidget(self.import_translation_md_button, 1, 1)
+
+        txt_md_auto_layout = QtWidgets.QVBoxLayout()
+        txt_md_auto_layout.setContentsMargins(0, 0, 0, 0)
+        txt_md_auto_layout.setSpacing(2)
+
+        self.auto_export_source_txt_checkbox = MCheckBox(self.tr("Auto Export Source TXT"))
+        self.auto_export_source_txt_checkbox.setToolTip(
+            self.tr("After a successful automatic run, overwrite the TXT source exchange file with only the pages from that run.")
+        )
+        self.auto_export_source_md_checkbox = MCheckBox(self.tr("Auto Export Source MD"))
+        self.auto_export_source_md_checkbox.setToolTip(
+            self.tr("After a successful automatic run, overwrite the Markdown source exchange file with only the pages from that run.")
+        )
+        self.auto_export_translation_txt_checkbox = MCheckBox(self.tr("Auto Export Translation TXT"))
+        self.auto_export_translation_txt_checkbox.setToolTip(
+            self.tr("After a successful automatic run, overwrite the TXT translation exchange file with only the pages from that run.")
+        )
+        self.auto_export_translation_md_checkbox = MCheckBox(self.tr("Auto Export Translation MD"))
+        self.auto_export_translation_md_checkbox.setToolTip(
+            self.tr("After a successful automatic run, overwrite the Markdown translation exchange file with only the pages from that run.")
+        )
+
+        txt_md_auto_layout.addWidget(self.auto_export_source_txt_checkbox)
+        txt_md_auto_layout.addWidget(self.auto_export_source_md_checkbox)
+        txt_md_auto_layout.addWidget(self.auto_export_translation_txt_checkbox)
+        txt_md_auto_layout.addWidget(self.auto_export_translation_md_checkbox)
+
         tools_layout.addLayout(misc_lay)
         box_div = MDivider(self.tr("Box Drawing"))
         tools_layout.addWidget(box_div)
@@ -594,6 +650,9 @@ class WorkspaceMixin:
         tools_layout.addWidget(inp_div)
         tools_layout.addLayout(inp_tools_lay)
         tools_layout.addWidget(self.brush_eraser_slider)
+        tools_layout.addWidget(txt_md_div)
+        tools_layout.addWidget(txt_md_buttons_widget)
+        tools_layout.addLayout(txt_md_auto_layout)
         tools_layout.addStretch()
         tools_widget.setLayout(tools_layout)
 
