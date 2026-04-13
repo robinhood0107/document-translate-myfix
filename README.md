@@ -12,6 +12,23 @@ The fork is maintained around a practical desktop workflow:
 - selective manual backports from upstream `v2.7.0` and `v2.7.1`
 - benchmark work isolated from product branches
 
+## Important Features
+
+- Local Gemma translation runtime for desktop-first translation workflows.
+- Local OCR runtimes with optimal routing between `HunyuanOCR` and `PaddleOCR VL`.
+- Inpainting add, exclude, and restore tools with saved mask and patch state.
+- TXT/MD source export and translation import with OCR and translation correction dictionaries.
+- CBZ/CBR comic archive import with lazy page materialization.
+- Bottom-left automatic pipeline status panel with overlay locking and latest-result preview.
+
+## Supporting Features
+
+- Reuse-only OCR preflight checks avoid restarting already running local OCR containers.
+- Automatic runs update the latest completed translated image preview page by page.
+- Completion sounds support the system alert or repo-provided `music/*.wav` files.
+- Windows launchers bootstrap `.venv-win` and `.venv-win-cuda13` automatically.
+- Localized tooltips, help text, and compiled Qt translation assets stay aligned with UI changes.
+
 ## Origin and Upstream Attribution
 
 This repository started from [ogkalu2/comic-translate](https://github.com/ogkalu2/comic-translate) and should be understood as a downstream, product-focused fork/derivative of that upstream work. It began from the upstream `v2.6.7` codebase and then diverged with local runtime, OCR, Windows, and workflow changes.

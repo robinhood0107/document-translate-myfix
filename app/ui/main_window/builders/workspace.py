@@ -147,10 +147,6 @@ class WorkspaceMixin:
         left_layout = QtWidgets.QVBoxLayout()
         left_layout.addWidget(MDivider())
 
-        self.image_card_layout = QtWidgets.QVBoxLayout()
-        self.image_card_layout.addStretch(1)
-
-        self.page_list.setLayout(self.image_card_layout)
         left_layout.addWidget(self.page_list)
         left_layout.addWidget(self.search_panel)
         left_widget = QtWidgets.QWidget()
