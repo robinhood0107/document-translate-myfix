@@ -37,7 +37,12 @@ from modules.utils.export_paths import (
     resolve_export_directory,
 )
 from modules.utils.automatic_output import (
+    build_archive_page_file_name,
+    build_archive_staging_dir,
     build_output_file_name,
+    is_individual_images_mode,
+    is_single_archive_mode,
+    write_archive_image,
     write_output_image,
 )
 from modules.utils.render_style_policy import (
@@ -413,20 +418,52 @@ class BatchProcessor:
     def _write_final_render_export(
         self,
         directory: str,
+        export_token: str,
         image_path: str,
         image,
         patches,
         viewer_state: dict,
         export_settings: dict[str, object],
-    ) -> str:
+        *,
+        page_index: int,
+        total_pages: int,
+    ) -> tuple[str, str]:
         page_base_name = os.path.splitext(os.path.basename(image_path))[0]
-        path = self.main_page.get_automatic_output_series_dir(
+        series_dir = self.main_page.get_automatic_output_series_dir(
             directory,
             anchor_path=self.main_page.image_files[0] if self.main_page.image_files else image_path,
         )
-        os.makedirs(path, exist_ok=True)
+        renderer = ImageSaveRenderer(image)
+        renderer.apply_patches(patches or [])
+        renderer.add_state_to_image(viewer_state or {})
+        final_rgb = renderer.render_to_image()
+        if is_single_archive_mode(export_settings):
+            staging_dir = build_archive_staging_dir(series_dir, export_token)
+            os.makedirs(staging_dir, exist_ok=True)
+            output_path = os.path.join(
+                staging_dir,
+                build_archive_page_file_name(
+                    page_index,
+                    total_pages,
+                    page_base_name,
+                    str(
+                        export_settings.get(
+                            "resolved_automatic_output_archive_image_format",
+                            "png",
+                        )
+                    ),
+                ),
+            )
+            write_archive_image(
+                output_path,
+                final_rgb,
+                resolved_settings=export_settings,
+            )
+            return output_path, series_dir
+
+        os.makedirs(series_dir, exist_ok=True)
         output_path = os.path.join(
-            path,
+            series_dir,
             build_output_file_name(
                 page_base_name,
                 "translated",
@@ -434,17 +471,13 @@ class BatchProcessor:
                 export_settings,
             ),
         )
-        renderer = ImageSaveRenderer(image)
-        renderer.apply_patches(patches or [])
-        renderer.add_state_to_image(viewer_state or {})
-        final_rgb = renderer.render_to_image()
         write_output_image(
             output_path,
             final_rgb,
             source_path=image_path,
             resolved_settings=export_settings,
         )
-        return output_path
+        return output_path, series_dir
 
     def _ensure_page_state(self, image_path: str) -> dict:
         return self.main_page.image_ctrl.ensure_page_state(image_path)
@@ -1001,7 +1034,7 @@ class BatchProcessor:
 
             # inpaint_input_img is already in RGB format
 
-            if export_settings['export_inpainted_image']:
+            if export_settings['export_inpainted_image'] and is_individual_images_mode(export_settings):
                 path = self.main_page.get_automatic_output_series_dir(
                     directory,
                     anchor_path=self.main_page.image_files[0] if self.main_page.image_files else image_path,
@@ -1025,6 +1058,11 @@ class BatchProcessor:
                 self.main_page.image_ctrl.update_processing_summary(
                     image_path,
                     {"cleaned_image_path": cleaned_output_path},
+                )
+            elif not is_individual_images_mode(export_settings):
+                self.main_page.image_ctrl.update_processing_summary(
+                    image_path,
+                    {"cleaned_image_path": ""},
                 )
             self.main_page.image_ctrl.update_processing_summary(
                 image_path,
@@ -1400,20 +1438,23 @@ class BatchProcessor:
             if image_path == file_on_display:
                 self.main_page.blk_list = blk_list.copy()
 
-            final_output_path = self._write_final_render_export(
+            final_output_path, final_output_root = self._write_final_render_export(
                 directory,
+                export_token,
                 image_path,
                 image,
                 patches,
                 page_state.get("viewer_state", {}),
                 export_settings,
+                page_index=index,
+                total_pages=total_images,
             )
             logger.info("Saved final translated image to %s", final_output_path)
             self.main_page.image_ctrl.update_processing_summary(
                 image_path,
                 {
                     "translated_image_path": final_output_path,
-                    "export_root": os.path.dirname(final_output_path),
+                    "export_root": final_output_root,
                 },
             )
             self._emit_benchmark_event(
