@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING
 from PySide6 import QtCore, QtWidgets
 
 from app.ui.dayu_widgets.drawer import MDrawer
-from app.ui.dayu_widgets.message import MMessage
+from app.ui.messages import Messages
 
 if TYPE_CHECKING:
     from controller import ComicTranslate
@@ -388,11 +388,12 @@ class BatchReportController:
 
     def _open_image_from_batch_report(self, image_path: str):
         if image_path not in self.main.image_files:
-            MMessage.warning(
-                text=self._tr("This image is not in the current project."),
-                parent=self.main,
+            Messages.show_warning(
+                self.main,
+                self._tr("This image is not in the current project."),
                 duration=5,
                 closable=True,
+                source="batch_report",
             )
             return
 
@@ -550,11 +551,12 @@ class BatchReportController:
     def show_latest_batch_report(self):
         report = self._latest_batch_report
         if report is None:
-            MMessage.info(
-                text=self._tr("No batch report is available yet."),
-                parent=self.main,
+            Messages.show_info(
+                self.main,
+                self._tr("No batch report is available yet."),
                 duration=5,
                 closable=True,
+                source="batch_report",
             )
             return
 
