@@ -11,6 +11,7 @@ from PySide6.QtWidgets import QGraphicsPixmapItem
 
 from app.ui.commands.base import PatchCommandBase
 from app.path_materialization import ensure_path_materialized
+from modules.utils.inpaint_strokes import PATCH_KIND_INPAINT, normalize_patch_kind
 
 
 class PatchManager:
@@ -56,7 +57,9 @@ class PatchManager:
                 prop = {
                     'bbox': patch_data['bbox'],
                     'png_path': patch_data['png_path'],
-                    'hash': patch_data['hash']
+                    'hash': patch_data['hash'],
+                    'kind': normalize_patch_kind(patch_data.get('kind', PATCH_KIND_INPAINT)),
+                    'order': int(patch_data.get('order', 0) or 0),
                 }
                 
                 # Always convert from bbox even if scene_pos is available
@@ -83,7 +86,9 @@ class PatchManager:
                                 mem_prop = {
                                     'bbox': patch_data['bbox'],
                                     'image': cv_img,
-                                    'hash': patch_data['hash']
+                                    'hash': patch_data['hash'],
+                                    'kind': normalize_patch_kind(patch_data.get('kind', PATCH_KIND_INPAINT)),
+                                    'order': int(patch_data.get('order', 0) or 0),
                                 }
                                 mem_list.append(mem_prop)
     

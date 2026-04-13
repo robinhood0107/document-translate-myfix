@@ -1825,6 +1825,63 @@ Apri o crea un progetto per iniziare.</translation>
     </message>
 </context>
 <context>
+    <name>ToolStateMixin</name>
+    <message>
+        <source>Add Inpaint Mask
+Paint areas to clean before running inpainting.
+These pixels are added to the final mask.</source>
+        <translation>Aggiungi maschera di inpainting
+Dipingi le aree da pulire prima di eseguire l&apos;inpainting.
+Questi pixel vengono aggiunti alla maschera finale.</translation>
+    </message>
+    <message>
+        <source>Erase Mask Strokes
+Remove parts of drawn add/exclude strokes.
+This edits mask strokes only and does not change applied patches.</source>
+        <translation>Cancella i tratti della maschera
+Rimuovi parti dei tratti di aggiunta/esclusione disegnati.
+Questo modifica solo i tratti della maschera e non cambia le patch già applicate.</translation>
+    </message>
+    <message>
+        <source>Exclude from Inpainting
+Protect areas from inpainting.
+Excluded pixels are removed from the final mask even if they were auto-detected or painted.</source>
+        <translation>Escludi dall&apos;inpainting
+Proteggi le aree dall&apos;inpainting.
+I pixel esclusi vengono rimossi dalla maschera finale, anche se sono stati rilevati automaticamente o dipinti manualmente.</translation>
+    </message>
+    <message>
+        <source>Restore Original over Inpainted Area
+Paint over an inpainted result to bring back the original image.
+This creates a restore patch above existing inpaint patches on the current page.</source>
+        <translation>Ripristina l&apos;originale sull&apos;area ritoccata
+Dipingi sopra un risultato di inpainting per riportare l&apos;immagine originale.
+Questo crea una patch di ripristino sopra le patch di inpainting esistenti nella pagina corrente.</translation>
+    </message>
+    <message>
+        <source>Restore Original over Inpainted Area
+No inpainted patch exists on this page yet.
+Run inpainting first, then use this tool to recover original pixels where needed.</source>
+        <translation>Ripristina l&apos;originale sull&apos;area ritoccata
+In questa pagina non esiste ancora alcuna patch di inpainting.
+Esegui prima l&apos;inpainting, poi usa questo strumento per recuperare i pixel originali dove serve.</translation>
+    </message>
+    <message>
+        <source>Clear Inpaint Mask Strokes
+Remove all add/exclude mask strokes on the current page.
+Applied inpaint and restore patches are kept; use Undo to revert patch changes.</source>
+        <translation>Cancella i tratti della maschera di inpainting
+Rimuovi tutti i tratti della maschera di aggiunta/esclusione nella pagina corrente.
+Le patch di inpainting e di ripristino già applicate vengono mantenute; usa Annulla per ripristinare le modifiche alle patch.</translation>
+    </message>
+    <message>
+        <source>Inpaint Brush Size
+Adjust the size used by add, erase, exclude, and restore brushes.</source>
+        <translation>Dimensione pennello inpainting
+Regola la dimensione usata dai pennelli di aggiunta, cancellazione, esclusione e ripristino.</translation>
+    </message>
+</context>
+<context>
     <name>ToolsPage</name>
     <message>
         <source>Translator</source>
@@ -2176,22 +2233,6 @@ sull&apos;immagine (per ulteriori modifiche)</translation>
     <message>
         <source>Increase the size of all blocks</source>
         <translation>Aumenta la dimensione di tutti i blocchi</translation>
-    </message>
-    <message>
-        <source>Draw Brush Strokes for Cleaning Image</source>
-        <translation>Disegna tratti di pennello per pulire l&apos;immagine</translation>
-    </message>
-    <message>
-        <source>Erase Brush Strokes</source>
-        <translation>Cancella tratti di pennello</translation>
-    </message>
-    <message>
-        <source>Remove all the brush strokes on the Image</source>
-        <translation>Rimuovi tutti i tratti di pennello sull&apos;immagine</translation>
-    </message>
-    <message>
-        <source>Brush/Eraser Size Slider</source>
-        <translation>Cursore dimensione pennello/gomma</translation>
     </message>
     <message>
         <source>Box Drawing</source>
