@@ -267,6 +267,34 @@ Duplicates:
         <translation>未保存的更改</translation>
     </message>
     <message>
+        <source>Fast</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Balanced</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Small</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>{name} (Estimated: {ratio}, {time})</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Estimated output: {ratio}, {time} across {pages} pages.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Current project estimate: {ratio}, {time} across {pages} pages.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Load pages to see automatic output estimates.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
         <source>Project switching is unavailable while automatic processing is running.
 Cancel the current run or wait for it to finish first.</source>
         <translation>自动处理运行期间无法切换项目。
@@ -602,6 +630,55 @@ Use Custom Local Server(Gemma) with the included Gemma Docker setup.</source>
     </message>
     <message>
         <source>Export Debug Metadata (Debug)</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Automatic Output Image Format</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>These defaults control how automatic translated and cleaned images are written.
+Project-specific quick settings can override the format and preset for the current project.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Default format:</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Same as source</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Default preset:</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Fast</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Balanced</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Small</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>PNG compression level:</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>JPG quality:</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>WEBP quality:</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Current project estimate: Calculating...</source>
         <translation type="unfinished"></translation>
     </message>
 </context>
@@ -2652,6 +2729,46 @@ back on the Image (for further editing)</source>
     <message>
         <source>After a successful automatic run, overwrite the Markdown translation exchange file with only the pages from that run.</source>
         <translation>自动运行成功后，仅用本次运行包含的页面覆盖 Markdown 翻译交换文件。</translation>
+    </message>
+    <message>
+        <source>Output</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Use global output settings</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>When enabled, this project inherits the automatic output format and preset from Settings.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Format</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Same as source</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Preset</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Fast</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Balanced</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Small</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Estimated output: Calculating...</source>
+        <translation type="unfinished"></translation>
     </message>
     <message>
         <source>Box Drawing</source>

@@ -10,6 +10,10 @@ from typing import TYPE_CHECKING
 import msgpack
 
 from .parsers import ProjectDecoder, ProjectEncoder, ensure_string_keys
+from modules.utils.automatic_output import (
+    default_project_output_preferences,
+    normalize_project_output_preferences,
+)
 from modules.utils.export_paths import normalize_export_source_record
 from modules.utils.file_handler import ensure_prepared_path_materialized, get_prepared_path_source
 from modules.utils.inpaint_strokes import PATCH_KIND_INPAINT, normalize_patch_kind
@@ -404,6 +408,9 @@ def save_state_to_proj_file_v2(comic_translate: "ComicTranslate", file_name: str
         "webtoon_mode": comic_translate.webtoon_mode,
         "webtoon_view_state": comic_translate.image_viewer.webtoon_view_state,
         "latest_automatic_report": comic_translate.batch_report_ctrl.export_latest_report_for_project(),
+        **normalize_project_output_preferences(
+            getattr(comic_translate, "project_output_preferences", default_project_output_preferences())
+        ),
         "unique_images": ensure_string_keys(unique_images),
     }
     manifest_blob = msgpack.packb(manifest, default=encoder.encode, use_bin_type=True)
@@ -657,6 +664,14 @@ def _materialize_from_manifest_and_pages(
         latest_report,
         refresh=False,
     )
+    comic_translate.project_output_preferences = normalize_project_output_preferences(
+        {
+            "output_format_override_mode": manifest.get("output_format_override_mode"),
+            "output_format_override_value": manifest.get("output_format_override_value"),
+            "output_preset_override_mode": manifest.get("output_preset_override_mode"),
+            "output_preset_override_value": manifest.get("output_preset_override_value"),
+        }
+    )
 
     return manifest.get("llm_extra_context", "")
 
@@ -697,6 +712,10 @@ def _load_from_legacy_state_blob(
         "webtoon_mode": state.get("webtoon_mode", False),
         "webtoon_view_state": state.get("webtoon_view_state", {}),
         "latest_automatic_report": state.get("latest_automatic_report"),
+        "output_format_override_mode": state.get("output_format_override_mode"),
+        "output_format_override_value": state.get("output_format_override_value"),
+        "output_preset_override_mode": state.get("output_preset_override_mode"),
+        "output_preset_override_value": state.get("output_preset_override_value"),
         "unique_images": state.get("unique_images", {}),
     }
 
