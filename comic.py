@@ -26,6 +26,17 @@ def _single_instance_server_name() -> str:
     return f"ComicTranslate-{digest}"
 
 
+def _read_positive_int_env(name: str, default: int = 0) -> int:
+    raw = str(os.environ.get(name, "") or "").strip()
+    if not raw:
+        return default
+    try:
+        value = int(raw)
+    except ValueError:
+        return default
+    return value if value > 0 else default
+
+
 def _encode_ipc_message(payload: dict) -> bytes:
     return (json.dumps(payload, ensure_ascii=False) + "\n").encode("utf-8", errors="ignore")
 
@@ -189,6 +200,7 @@ def main():
     # Get language settings
     settings = QSettings("ComicLabs", "ComicTranslate")
     selected_language = settings.value('language', get_system_language())
+    smoke_exit_ms = _read_positive_int_env("COMIC_SMOKE_EXIT_MS", 0)
     
     # Create worker and thread
     thread = QThread()
@@ -269,11 +281,15 @@ def main():
 
                 splash.finish(self._ct)
 
+                if smoke_exit_ms > 0:
+                    logging.info("Startup smoke mode enabled; quitting in %d ms", smoke_exit_ms)
+                    QTimer.singleShot(smoke_exit_ms, app.quit)
+
                 if project_file:
                     self.request_open_project(project_file)
                 elif self._pending_project_file:
                     self.request_open_project(self._pending_project_file)
-                else:
+                elif smoke_exit_ms <= 0:
                     # Offer recovery only on plain startup (no explicit project open request).
                     self._ct.project_ctrl.prompt_restore_recovery_if_available()
             except Exception as e:

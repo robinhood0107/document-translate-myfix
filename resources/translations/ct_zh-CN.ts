@@ -157,6 +157,78 @@
         <translation>错误</translation>
     </message>
     <message>
+        <source>No pages are loaded for TXT/MD import or export.</source>
+        <translation>没有已加载的页面可用于 TXT/MD 导入或导出。</translation>
+    </message>
+    <message>
+        <source>TXT/MD import and export require unique page file names.
+Rename duplicate pages first.
+Duplicates:
+{names}</source>
+        <translation>TXT/MD 导入和导出要求页面文件名唯一。
+请先重命名重复页面。
+重复项：
+{names}</translation>
+    </message>
+    <message>
+        <source>TXT/MD Export Failed</source>
+        <translation>TXT/MD 导出失败</translation>
+    </message>
+    <message>
+        <source>Failed to export source text.</source>
+        <translation>无法导出源文本。</translation>
+    </message>
+    <message>
+        <source>Exported source text to:
+{path}</source>
+        <translation>源文本已导出到：
+{path}</translation>
+    </message>
+    <message>
+        <source>Translation imported and matched successfully.</source>
+        <translation>翻译已成功导入并匹配。</translation>
+    </message>
+    <message>
+        <source>Imported TXT/MD content was only partially matched. Make sure the file follows the exported exchange format.</source>
+        <translation>导入的 TXT/MD 内容只完成了部分匹配。请确认文件遵循导出的交换格式。</translation>
+    </message>
+    <message>
+        <source>Missing pages:</source>
+        <translation>缺失页面：</translation>
+    </message>
+    <message>
+        <source>Unexpected pages:</source>
+        <translation>意外页面：</translation>
+    </message>
+    <message>
+        <source>Unmatched pages:</source>
+        <translation>未匹配页面：</translation>
+    </message>
+    <message>
+        <source>TXT Files (*.txt *.TXT)</source>
+        <translation>TXT 文件 (*.txt *.TXT)</translation>
+    </message>
+    <message>
+        <source>Markdown Files (*.md *.MD)</source>
+        <translation>Markdown 文件 (*.md *.MD)</translation>
+    </message>
+    <message>
+        <source>Import Translation</source>
+        <translation>导入翻译</translation>
+    </message>
+    <message>
+        <source>TXT/MD Import Failed</source>
+        <translation>TXT/MD 导入失败</translation>
+    </message>
+    <message>
+        <source>Failed to import translation text.</source>
+        <translation>无法导入翻译文本。</translation>
+    </message>
+    <message>
+        <source>Automatic TXT/MD export failed for {target}{suffix}.</source>
+        <translation>{target}{suffix} 的自动 TXT/MD 导出失败。</translation>
+    </message>
+    <message>
         <source>One-Page Auto</source>
         <translation type="unfinished">单页自动处理</translation>
     </message>
@@ -314,6 +386,33 @@
     <message>
         <source>Mongolian</source>
         <translation>蒙古语</translation>
+    </message>
+</context>
+<context>
+    <name>CorrectionDictionaryTable</name>
+    <message>
+        <source>Keyword</source>
+        <translation>关键词</translation>
+    </message>
+    <message>
+        <source>Substitution</source>
+        <translation>替换内容</translation>
+    </message>
+    <message>
+        <source>Use regex</source>
+        <translation>使用正则表达式</translation>
+    </message>
+    <message>
+        <source>Case sensitive</source>
+        <translation>区分大小写</translation>
+    </message>
+    <message>
+        <source>New</source>
+        <translation>新增</translation>
+    </message>
+    <message>
+        <source>Delete</source>
+        <translation>删除</translation>
     </message>
 </context>
 <context>
@@ -1673,6 +1772,10 @@ Restart now?</source>
         <translation>文本渲染</translation>
     </message>
     <message>
+        <source>User Dictionaries</source>
+        <translation>用户词典</translation>
+    </message>
+    <message>
         <source>Project</source>
         <translation>项目</translation>
     </message>
@@ -1751,7 +1854,7 @@ Restart now?</source>
     <name>StartupHomeScreen</name>
     <message>
         <source>New</source>
-        <translation>新的</translation>
+        <translation>新增</translation>
     </message>
     <message>
         <source>New Project</source>
@@ -1978,6 +2081,29 @@ then do inpainting on the resized image.</source>
     <message>
         <source>lama_mpe</source>
         <translation type="unfinished"></translation>
+    </message>
+</context>
+<context>
+    <name>UserDictionariesPage</name>
+    <message>
+        <source>Correction dictionaries rewrite OCR and translation results before they are saved to the project.</source>
+        <translation>校正规则词典会在 OCR 和翻译结果保存到项目之前重写这些结果。</translation>
+    </message>
+    <message>
+        <source>OCR Result Dictionary</source>
+        <translation>OCR 结果词典</translation>
+    </message>
+    <message>
+        <source>Apply these substitutions immediately after OCR returns text, before the source text is stored.</source>
+        <translation>在 OCR 返回文本后、源文本保存之前立即应用这些替换规则。</translation>
+    </message>
+    <message>
+        <source>Translation Result Dictionary</source>
+        <translation>翻译结果词典</translation>
+    </message>
+    <message>
+        <source>Apply these substitutions immediately after translation or TXT/MD import returns text, before the translation is stored.</source>
+        <translation>在翻译或 TXT/MD 导入返回文本后、翻译保存之前立即应用这些替换规则。</translation>
     </message>
 </context>
 <context>
@@ -2232,6 +2358,74 @@ back on the Image (for further editing)</source>
         <translation>增大所有块的大小</translation>
     </message>
     <message>
+        <source>TXT/MD</source>
+        <translation>TXT/MD</translation>
+    </message>
+    <message>
+        <source>Export Source TXT</source>
+        <translation>导出源文本 TXT</translation>
+    </message>
+    <message>
+        <source>Export the current project&apos;s source text in the TXT exchange format.</source>
+        <translation>以 TXT 交换格式导出当前项目的源文本。</translation>
+    </message>
+    <message>
+        <source>Import Translation TXT</source>
+        <translation>导入翻译 TXT</translation>
+    </message>
+    <message>
+        <source>Import translated text from a TXT exchange file and rebuild text boxes to fit.</source>
+        <translation>从 TXT 交换文件导入翻译文本，并重新构建文本框以适配内容。</translation>
+    </message>
+    <message>
+        <source>Export Source MD</source>
+        <translation>导出源文本 MD</translation>
+    </message>
+    <message>
+        <source>Export the current project&apos;s source text in the Markdown exchange format.</source>
+        <translation>以 Markdown 交换格式导出当前项目的源文本。</translation>
+    </message>
+    <message>
+        <source>Import Translation MD</source>
+        <translation>导入翻译 MD</translation>
+    </message>
+    <message>
+        <source>Import translated text from a Markdown exchange file and rebuild text boxes to fit.</source>
+        <translation>从 Markdown 交换文件导入翻译文本，并重新构建文本框以适配内容。</translation>
+    </message>
+    <message>
+        <source>Auto Export Source TXT</source>
+        <translation>自动导出源文本 TXT</translation>
+    </message>
+    <message>
+        <source>After a successful automatic run, overwrite the TXT source exchange file with only the pages from that run.</source>
+        <translation>自动运行成功后，仅用本次运行包含的页面覆盖 TXT 源文本交换文件。</translation>
+    </message>
+    <message>
+        <source>Auto Export Source MD</source>
+        <translation>自动导出源文本 MD</translation>
+    </message>
+    <message>
+        <source>After a successful automatic run, overwrite the Markdown source exchange file with only the pages from that run.</source>
+        <translation>自动运行成功后，仅用本次运行包含的页面覆盖 Markdown 源文本交换文件。</translation>
+    </message>
+    <message>
+        <source>Auto Export Translation TXT</source>
+        <translation>自动导出翻译 TXT</translation>
+    </message>
+    <message>
+        <source>After a successful automatic run, overwrite the TXT translation exchange file with only the pages from that run.</source>
+        <translation>自动运行成功后，仅用本次运行包含的页面覆盖 TXT 翻译交换文件。</translation>
+    </message>
+    <message>
+        <source>Auto Export Translation MD</source>
+        <translation>自动导出翻译 MD</translation>
+    </message>
+    <message>
+        <source>After a successful automatic run, overwrite the Markdown translation exchange file with only the pages from that run.</source>
+        <translation>自动运行成功后，仅用本次运行包含的页面覆盖 Markdown 翻译交换文件。</translation>
+    </message>
+    <message>
         <source>Box Drawing</source>
         <translation>框绘制</translation>
     </message>
@@ -2330,7 +2524,7 @@ It may have already been moved, renamed, or deleted.
     </message>
     <message>
         <source>Delete</source>
-        <translation type="unfinished">删除</translation>
+        <translation>删除</translation>
     </message>
     <message>
         <source>Cancel</source>

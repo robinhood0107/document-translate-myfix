@@ -21,6 +21,7 @@ from .project_page import ProjectPage
 from .export_page import ExportPage
 from .shortcuts_page import ShortcutsPage
 from .about_page import AboutPage
+from .user_dictionaries_page import UserDictionariesPage
 
 
 class CurrentPageStack(QtWidgets.QStackedWidget):
@@ -222,6 +223,7 @@ class SettingsPageUI(QtWidgets.QWidget):
         self.text_rendering_page = TextRenderingPage(parent=self)
         self.project_page = ProjectPage(parent=self)
         self.export_page = ExportPage(parent=self)
+        self.user_dictionaries_page = UserDictionariesPage(parent=self)
         self.shortcuts_page = ShortcutsPage(parent=self)
         self.about_page = AboutPage(parent=self)
 
@@ -275,6 +277,8 @@ class SettingsPageUI(QtWidgets.QWidget):
         self.max_font_spinbox = self.text_rendering_page.max_font_spinbox
         self.font_browser = self.text_rendering_page.font_browser
         self.uppercase_checkbox = self.text_rendering_page.uppercase_checkbox
+        self.ocr_dictionary_table = self.user_dictionaries_page.ocr_dictionary_table
+        self.translation_dictionary_table = self.user_dictionaries_page.translation_dictionary_table
 
         # Export
         self.raw_text_checkbox = self.export_page.raw_text_checkbox
@@ -300,6 +304,7 @@ class SettingsPageUI(QtWidgets.QWidget):
         self.stacked_widget.addWidget(self.gemma_local_server_page)
         self.stacked_widget.addWidget(self.llms_page)
         self.stacked_widget.addWidget(self.text_rendering_page)
+        self.stacked_widget.addWidget(self.user_dictionaries_page)
         self.stacked_widget.addWidget(self.project_page)
         self.stacked_widget.addWidget(self.export_page)
         self.stacked_widget.addWidget(self.shortcuts_page)
@@ -357,6 +362,7 @@ class SettingsPageUI(QtWidgets.QWidget):
             {"title": self.tr("Gemma Local Server Settings"), "avatar": MPixmap(".svg")},
             {"title": self.tr("LLMs"), "avatar": MPixmap(".svg")},
             {"title": self.tr("Text Rendering"), "avatar": MPixmap(".svg")},
+            {"title": self.tr("User Dictionaries"), "avatar": MPixmap(".svg")},
             {"title": self.tr("Project"), "avatar": MPixmap(".svg")},
             {"title": self.tr("Export"), "avatar": MPixmap(".svg")},
             {"title": self.tr("Shortcuts"), "avatar": MPixmap(".svg")},

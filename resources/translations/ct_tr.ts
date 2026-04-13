@@ -157,6 +157,78 @@
         <translation>Hata</translation>
     </message>
     <message>
+        <source>No pages are loaded for TXT/MD import or export.</source>
+        <translation>TXT/MD içe aktarma veya dışa aktarma için yüklü sayfa yok.</translation>
+    </message>
+    <message>
+        <source>TXT/MD import and export require unique page file names.
+Rename duplicate pages first.
+Duplicates:
+{names}</source>
+        <translation>TXT/MD içe aktarma ve dışa aktarma işlemleri benzersiz sayfa dosya adları gerektirir.
+Önce yinelenen sayfaları yeniden adlandırın.
+Yinelenenler:
+{names}</translation>
+    </message>
+    <message>
+        <source>TXT/MD Export Failed</source>
+        <translation>TXT/MD dışa aktarma başarısız</translation>
+    </message>
+    <message>
+        <source>Failed to export source text.</source>
+        <translation>Kaynak metin dışa aktarılamadı.</translation>
+    </message>
+    <message>
+        <source>Exported source text to:
+{path}</source>
+        <translation>Kaynak metin şu konuma dışa aktarıldı:
+{path}</translation>
+    </message>
+    <message>
+        <source>Translation imported and matched successfully.</source>
+        <translation>Çeviri başarıyla içe aktarıldı ve eşleştirildi.</translation>
+    </message>
+    <message>
+        <source>Imported TXT/MD content was only partially matched. Make sure the file follows the exported exchange format.</source>
+        <translation>İçe aktarılan TXT/MD içeriği yalnızca kısmen eşleşti. Dosyanın dışa aktarılan değişim biçimine uyduğundan emin olun.</translation>
+    </message>
+    <message>
+        <source>Missing pages:</source>
+        <translation>Eksik sayfalar:</translation>
+    </message>
+    <message>
+        <source>Unexpected pages:</source>
+        <translation>Beklenmeyen sayfalar:</translation>
+    </message>
+    <message>
+        <source>Unmatched pages:</source>
+        <translation>Eşleşmeyen sayfalar:</translation>
+    </message>
+    <message>
+        <source>TXT Files (*.txt *.TXT)</source>
+        <translation>TXT Dosyaları (*.txt *.TXT)</translation>
+    </message>
+    <message>
+        <source>Markdown Files (*.md *.MD)</source>
+        <translation>Markdown Dosyaları (*.md *.MD)</translation>
+    </message>
+    <message>
+        <source>Import Translation</source>
+        <translation>Çeviriyi İçe Aktar</translation>
+    </message>
+    <message>
+        <source>TXT/MD Import Failed</source>
+        <translation>TXT/MD içe aktarma başarısız</translation>
+    </message>
+    <message>
+        <source>Failed to import translation text.</source>
+        <translation>Çeviri metni içe aktarılamadı.</translation>
+    </message>
+    <message>
+        <source>Automatic TXT/MD export failed for {target}{suffix}.</source>
+        <translation>{target}{suffix} için otomatik TXT/MD dışa aktarma başarısız oldu.</translation>
+    </message>
+    <message>
         <source>One-Page Auto</source>
         <translation type="unfinished">Tek Sayfa Otomatik</translation>
     </message>
@@ -314,6 +386,33 @@
     <message>
         <source>Mongolian</source>
         <translation>Moğolca</translation>
+    </message>
+</context>
+<context>
+    <name>CorrectionDictionaryTable</name>
+    <message>
+        <source>Keyword</source>
+        <translation>Anahtar sözcük</translation>
+    </message>
+    <message>
+        <source>Substitution</source>
+        <translation>Yerine koyma</translation>
+    </message>
+    <message>
+        <source>Use regex</source>
+        <translation>Regex kullan</translation>
+    </message>
+    <message>
+        <source>Case sensitive</source>
+        <translation>Büyük/küçük harfe duyarlı</translation>
+    </message>
+    <message>
+        <source>New</source>
+        <translation>Yeni</translation>
+    </message>
+    <message>
+        <source>Delete</source>
+        <translation>Sil</translation>
     </message>
 </context>
 <context>
@@ -1674,6 +1773,10 @@ Restart now?</source>
         <translation>Metin Renderlama</translation>
     </message>
     <message>
+        <source>User Dictionaries</source>
+        <translation>Kullanıcı sözlükleri</translation>
+    </message>
+    <message>
         <source>Project</source>
         <translation>Proje</translation>
     </message>
@@ -1983,6 +2086,29 @@ sonra yeniden boyutlandırılmış görselde boyama işlemi yapın.</translation
     </message>
 </context>
 <context>
+    <name>UserDictionariesPage</name>
+    <message>
+        <source>Correction dictionaries rewrite OCR and translation results before they are saved to the project.</source>
+        <translation>Düzeltme sözlükleri, OCR ve çeviri sonuçlarını projeye kaydetmeden önce yeniden yazar.</translation>
+    </message>
+    <message>
+        <source>OCR Result Dictionary</source>
+        <translation>OCR Sonuç Sözlüğü</translation>
+    </message>
+    <message>
+        <source>Apply these substitutions immediately after OCR returns text, before the source text is stored.</source>
+        <translation>Bu değiştirmeleri, OCR metni döndürdükten hemen sonra ve kaynak metin kaydedilmeden önce uygula.</translation>
+    </message>
+    <message>
+        <source>Translation Result Dictionary</source>
+        <translation>Çeviri Sonuç Sözlüğü</translation>
+    </message>
+    <message>
+        <source>Apply these substitutions immediately after translation or TXT/MD import returns text, before the translation is stored.</source>
+        <translation>Bu değiştirmeleri, çeviri veya TXT/MD içe aktarma metni döndürdükten hemen sonra ve çeviri kaydedilmeden önce uygula.</translation>
+    </message>
+</context>
+<context>
     <name>WorkspaceMixin</name>
     <message>
         <source>Undo</source>
@@ -2234,6 +2360,74 @@ back on the Image (for further editing)</source>
         <translation>Tüm blokların boyutunu büyüt</translation>
     </message>
     <message>
+        <source>TXT/MD</source>
+        <translation>TXT/MD</translation>
+    </message>
+    <message>
+        <source>Export Source TXT</source>
+        <translation>Kaynak TXT Dışa Aktar</translation>
+    </message>
+    <message>
+        <source>Export the current project&apos;s source text in the TXT exchange format.</source>
+        <translation>Geçerli projenin kaynak metnini TXT değişim biçiminde dışa aktarır.</translation>
+    </message>
+    <message>
+        <source>Import Translation TXT</source>
+        <translation>Çeviri TXT İçe Aktar</translation>
+    </message>
+    <message>
+        <source>Import translated text from a TXT exchange file and rebuild text boxes to fit.</source>
+        <translation>Çevrilmiş metni bir TXT değişim dosyasından içe aktarır ve metin kutularını sığacak şekilde yeniden oluşturur.</translation>
+    </message>
+    <message>
+        <source>Export Source MD</source>
+        <translation>Kaynak MD Dışa Aktar</translation>
+    </message>
+    <message>
+        <source>Export the current project&apos;s source text in the Markdown exchange format.</source>
+        <translation>Geçerli projenin kaynak metnini Markdown değişim biçiminde dışa aktarır.</translation>
+    </message>
+    <message>
+        <source>Import Translation MD</source>
+        <translation>Çeviri MD İçe Aktar</translation>
+    </message>
+    <message>
+        <source>Import translated text from a Markdown exchange file and rebuild text boxes to fit.</source>
+        <translation>Çevrilmiş metni bir Markdown değişim dosyasından içe aktarır ve metin kutularını sığacak şekilde yeniden oluşturur.</translation>
+    </message>
+    <message>
+        <source>Auto Export Source TXT</source>
+        <translation>Kaynak TXT Otomatik Dışa Aktar</translation>
+    </message>
+    <message>
+        <source>After a successful automatic run, overwrite the TXT source exchange file with only the pages from that run.</source>
+        <translation>Başarılı bir otomatik çalıştırmadan sonra, TXT kaynak değişim dosyasını yalnızca o çalıştırmadaki sayfalarla üzerine yazar.</translation>
+    </message>
+    <message>
+        <source>Auto Export Source MD</source>
+        <translation>Kaynak MD Otomatik Dışa Aktar</translation>
+    </message>
+    <message>
+        <source>After a successful automatic run, overwrite the Markdown source exchange file with only the pages from that run.</source>
+        <translation>Başarılı bir otomatik çalıştırmadan sonra, Markdown kaynak değişim dosyasını yalnızca o çalıştırmadaki sayfalarla üzerine yazar.</translation>
+    </message>
+    <message>
+        <source>Auto Export Translation TXT</source>
+        <translation>Çeviri TXT Otomatik Dışa Aktar</translation>
+    </message>
+    <message>
+        <source>After a successful automatic run, overwrite the TXT translation exchange file with only the pages from that run.</source>
+        <translation>Başarılı bir otomatik çalıştırmadan sonra, TXT çeviri değişim dosyasını yalnızca o çalıştırmadaki sayfalarla üzerine yazar.</translation>
+    </message>
+    <message>
+        <source>Auto Export Translation MD</source>
+        <translation>Çeviri MD Otomatik Dışa Aktar</translation>
+    </message>
+    <message>
+        <source>After a successful automatic run, overwrite the Markdown translation exchange file with only the pages from that run.</source>
+        <translation>Başarılı bir otomatik çalıştırmadan sonra, Markdown çeviri değişim dosyasını yalnızca o çalıştırmadaki sayfalarla üzerine yazar.</translation>
+    </message>
+    <message>
         <source>Box Drawing</source>
         <translation>Kutu Çizimi</translation>
     </message>
@@ -2332,7 +2526,7 @@ It may have already been moved, renamed, or deleted.
     </message>
     <message>
         <source>Delete</source>
-        <translation type="unfinished">Sil</translation>
+        <translation>Sil</translation>
     </message>
     <message>
         <source>Cancel</source>

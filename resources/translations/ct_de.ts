@@ -157,6 +157,78 @@
         <translation>Fehler</translation>
     </message>
     <message>
+        <source>No pages are loaded for TXT/MD import or export.</source>
+        <translation>Es sind keine Seiten für den TXT/MD-Import oder -Export geladen.</translation>
+    </message>
+    <message>
+        <source>TXT/MD import and export require unique page file names.
+Rename duplicate pages first.
+Duplicates:
+{names}</source>
+        <translation>Für den TXT/MD-Import und -Export sind eindeutige Seitendateinamen erforderlich.
+Benennen Sie doppelte Seiten zuerst um.
+Duplikate:
+{names}</translation>
+    </message>
+    <message>
+        <source>TXT/MD Export Failed</source>
+        <translation>TXT/MD-Export fehlgeschlagen</translation>
+    </message>
+    <message>
+        <source>Failed to export source text.</source>
+        <translation>Quelltext konnte nicht exportiert werden.</translation>
+    </message>
+    <message>
+        <source>Exported source text to:
+{path}</source>
+        <translation>Quelltext exportiert nach:
+{path}</translation>
+    </message>
+    <message>
+        <source>Translation imported and matched successfully.</source>
+        <translation>Übersetzung erfolgreich importiert und zugeordnet.</translation>
+    </message>
+    <message>
+        <source>Imported TXT/MD content was only partially matched. Make sure the file follows the exported exchange format.</source>
+        <translation>Der importierte TXT/MD-Inhalt wurde nur teilweise zugeordnet. Stellen Sie sicher, dass die Datei dem exportierten Austauschformat folgt.</translation>
+    </message>
+    <message>
+        <source>Missing pages:</source>
+        <translation>Fehlende Seiten:</translation>
+    </message>
+    <message>
+        <source>Unexpected pages:</source>
+        <translation>Unerwartete Seiten:</translation>
+    </message>
+    <message>
+        <source>Unmatched pages:</source>
+        <translation>Nicht übereinstimmende Seiten:</translation>
+    </message>
+    <message>
+        <source>TXT Files (*.txt *.TXT)</source>
+        <translation>TXT-Dateien (*.txt *.TXT)</translation>
+    </message>
+    <message>
+        <source>Markdown Files (*.md *.MD)</source>
+        <translation>Markdown-Dateien (*.md *.MD)</translation>
+    </message>
+    <message>
+        <source>Import Translation</source>
+        <translation>Übersetzung importieren</translation>
+    </message>
+    <message>
+        <source>TXT/MD Import Failed</source>
+        <translation>TXT/MD-Import fehlgeschlagen</translation>
+    </message>
+    <message>
+        <source>Failed to import translation text.</source>
+        <translation>Übersetzungstext konnte nicht importiert werden.</translation>
+    </message>
+    <message>
+        <source>Automatic TXT/MD export failed for {target}{suffix}.</source>
+        <translation>Automatischer TXT/MD-Export für {target}{suffix} fehlgeschlagen.</translation>
+    </message>
+    <message>
         <source>One-Page Auto</source>
         <translation type="unfinished">Auto für eine Seite</translation>
     </message>
@@ -314,6 +386,33 @@
     <message>
         <source>Mongolian</source>
         <translation>Mongolisch</translation>
+    </message>
+</context>
+<context>
+    <name>CorrectionDictionaryTable</name>
+    <message>
+        <source>Keyword</source>
+        <translation>Schlüsselwort</translation>
+    </message>
+    <message>
+        <source>Substitution</source>
+        <translation>Ersetzung</translation>
+    </message>
+    <message>
+        <source>Use regex</source>
+        <translation>Regex verwenden</translation>
+    </message>
+    <message>
+        <source>Case sensitive</source>
+        <translation>Groß-/Kleinschreibung beachten</translation>
+    </message>
+    <message>
+        <source>New</source>
+        <translation>Neu</translation>
+    </message>
+    <message>
+        <source>Delete</source>
+        <translation>Löschen</translation>
     </message>
 </context>
 <context>
@@ -1622,6 +1721,10 @@ Jetzt neu starten?</translation>
         <translation>LLMs</translation>
     </message>
     <message>
+        <source>User Dictionaries</source>
+        <translation>Benutzerwörterbücher</translation>
+    </message>
+    <message>
         <source>Project</source>
         <translation>Projekt</translation>
     </message>
@@ -1982,6 +2085,29 @@ then do inpainting on the resized image.</source>
     </message>
 </context>
 <context>
+    <name>UserDictionariesPage</name>
+    <message>
+        <source>Correction dictionaries rewrite OCR and translation results before they are saved to the project.</source>
+        <translation>Korrekturwörterbücher überschreiben OCR- und Übersetzungsergebnisse, bevor sie im Projekt gespeichert werden.</translation>
+    </message>
+    <message>
+        <source>OCR Result Dictionary</source>
+        <translation>OCR-Ergebniswörterbuch</translation>
+    </message>
+    <message>
+        <source>Apply these substitutions immediately after OCR returns text, before the source text is stored.</source>
+        <translation>Wenden Sie diese Ersetzungen unmittelbar an, nachdem OCR Text zurückgegeben hat, bevor der Quelltext gespeichert wird.</translation>
+    </message>
+    <message>
+        <source>Translation Result Dictionary</source>
+        <translation>Übersetzungsergebniswörterbuch</translation>
+    </message>
+    <message>
+        <source>Apply these substitutions immediately after translation or TXT/MD import returns text, before the translation is stored.</source>
+        <translation>Wenden Sie diese Ersetzungen unmittelbar an, nachdem Übersetzung oder TXT/MD-Import Text zurückgegeben hat, bevor die Übersetzung gespeichert wird.</translation>
+    </message>
+</context>
+<context>
     <name>WorkspaceMixin</name>
     <message>
         <source>Undo</source>
@@ -2234,6 +2360,74 @@ zurück auf das Bild (zur weiteren Bearbeitung)</translation>
         <translation>Größe aller Blöcke erhöhen</translation>
     </message>
     <message>
+        <source>TXT/MD</source>
+        <translation>TXT/MD</translation>
+    </message>
+    <message>
+        <source>Export Source TXT</source>
+        <translation>Quelltext als TXT exportieren</translation>
+    </message>
+    <message>
+        <source>Export the current project&apos;s source text in the TXT exchange format.</source>
+        <translation>Exportiert den Quelltext des aktuellen Projekts im TXT-Austauschformat.</translation>
+    </message>
+    <message>
+        <source>Import Translation TXT</source>
+        <translation>Übersetzungs-TXT importieren</translation>
+    </message>
+    <message>
+        <source>Import translated text from a TXT exchange file and rebuild text boxes to fit.</source>
+        <translation>Importiert übersetzten Text aus einer TXT-Austauschdatei und passt die Textfelder neu an.</translation>
+    </message>
+    <message>
+        <source>Export Source MD</source>
+        <translation>Quelltext als MD exportieren</translation>
+    </message>
+    <message>
+        <source>Export the current project&apos;s source text in the Markdown exchange format.</source>
+        <translation>Exportiert den Quelltext des aktuellen Projekts im Markdown-Austauschformat.</translation>
+    </message>
+    <message>
+        <source>Import Translation MD</source>
+        <translation>Übersetzungs-MD importieren</translation>
+    </message>
+    <message>
+        <source>Import translated text from a Markdown exchange file and rebuild text boxes to fit.</source>
+        <translation>Importiert übersetzten Text aus einer Markdown-Austauschdatei und passt die Textfelder neu an.</translation>
+    </message>
+    <message>
+        <source>Auto Export Source TXT</source>
+        <translation>Quelltext-TXT automatisch exportieren</translation>
+    </message>
+    <message>
+        <source>After a successful automatic run, overwrite the TXT source exchange file with only the pages from that run.</source>
+        <translation>Nach einem erfolgreichen automatischen Durchlauf wird die TXT-Quelldatei nur mit den Seiten dieses Durchlaufs überschrieben.</translation>
+    </message>
+    <message>
+        <source>Auto Export Source MD</source>
+        <translation>Quelltext-MD automatisch exportieren</translation>
+    </message>
+    <message>
+        <source>After a successful automatic run, overwrite the Markdown source exchange file with only the pages from that run.</source>
+        <translation>Nach einem erfolgreichen automatischen Durchlauf wird die Markdown-Quelldatei nur mit den Seiten dieses Durchlaufs überschrieben.</translation>
+    </message>
+    <message>
+        <source>Auto Export Translation TXT</source>
+        <translation>Übersetzungs-TXT automatisch exportieren</translation>
+    </message>
+    <message>
+        <source>After a successful automatic run, overwrite the TXT translation exchange file with only the pages from that run.</source>
+        <translation>Nach einem erfolgreichen automatischen Durchlauf wird die TXT-Übersetzungsdatei nur mit den Seiten dieses Durchlaufs überschrieben.</translation>
+    </message>
+    <message>
+        <source>Auto Export Translation MD</source>
+        <translation>Übersetzungs-MD automatisch exportieren</translation>
+    </message>
+    <message>
+        <source>After a successful automatic run, overwrite the Markdown translation exchange file with only the pages from that run.</source>
+        <translation>Nach einem erfolgreichen automatischen Durchlauf wird die Markdown-Übersetzungsdatei nur mit den Seiten dieses Durchlaufs überschrieben.</translation>
+    </message>
+    <message>
         <source>Box Drawing</source>
         <translation>Feldzeichnung</translation>
     </message>
@@ -2332,7 +2526,7 @@ It may have already been moved, renamed, or deleted.
     </message>
     <message>
         <source>Delete</source>
-        <translation type="unfinished">Löschen</translation>
+        <translation>Löschen</translation>
     </message>
     <message>
         <source>Cancel</source>

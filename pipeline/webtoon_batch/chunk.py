@@ -11,6 +11,10 @@ from PySide6.QtCore import QCoreApplication
 from app.ui.messages import Messages
 from modules.detection.processor import TextBlockDetector
 from modules.translation.processor import Translator
+from modules.utils.correction_dictionary import (
+    apply_ocr_result_dictionary,
+    apply_translation_result_dictionary,
+)
 from modules.utils.device import resolve_device
 from modules.utils.image_utils import generate_mask
 from modules.utils.pipeline_config import get_config, get_inpainter_runtime, inpaint_map
@@ -133,6 +137,10 @@ class ChunkMixin:
         self.ocr_handler.ocr.initialize(self.main_page, source_lang)
         try:
             self.ocr_handler.ocr.process(image, blocks)
+            apply_ocr_result_dictionary(
+                blocks,
+                self.main_page.settings_page.get_ocr_result_dictionary_rules(),
+            )
             if sort_after:
                 source_lang_en = self.main_page.lang_mapping.get(source_lang, source_lang)
                 rtl = source_lang_en == "Japanese"
@@ -181,6 +189,10 @@ class ChunkMixin:
         )
         try:
             translator.translate(blocks, image, extra_context)
+            apply_translation_result_dictionary(
+                blocks,
+                self.main_page.settings_page.get_translation_result_dictionary_rules(),
+            )
             self._emit_benchmark_event(
                 "translate_end",
                 image_path=image_path,
