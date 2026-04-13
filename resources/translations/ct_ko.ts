@@ -1443,14 +1443,6 @@ Approximate GPU usage:
         <translation>대기 중</translation>
     </message>
     <message>
-        <source>Show details</source>
-        <translation>상세 보기</translation>
-    </message>
-    <message>
-        <source>Minimize</source>
-        <translation>최소화</translation>
-    </message>
-    <message>
         <source>Service</source>
         <translation>서비스</translation>
     </message>
@@ -1479,6 +1471,10 @@ Approximate GPU usage:
         <translation>취소</translation>
     </message>
     <message>
+        <source>Logs</source>
+        <translation>로그</translation>
+    </message>
+    <message>
         <source>Report</source>
         <translation>리포트</translation>
     </message>
@@ -1497,6 +1493,30 @@ Approximate GPU usage:
     <message>
         <source>Close</source>
         <translation>닫기</translation>
+    </message>
+    <message>
+        <source>Window</source>
+        <translation>윈도우</translation>
+    </message>
+    <message>
+        <source>Switch to window mode</source>
+        <translation>윈도우 모드로 전환</translation>
+    </message>
+    <message>
+        <source>Embed</source>
+        <translation>내부</translation>
+    </message>
+    <message>
+        <source>Switch to embedded mode</source>
+        <translation>내부 위젯 모드로 전환</translation>
+    </message>
+    <message>
+        <source>Hide logs</source>
+        <translation>로그 숨기기</translation>
+    </message>
+    <message>
+        <source>Show logs</source>
+        <translation>로그 보기</translation>
     </message>
     <message>
         <source>Automatic</source>

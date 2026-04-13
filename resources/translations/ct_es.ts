@@ -1423,14 +1423,6 @@ Approximate GPU usage:
         <translation>Inactivo</translation>
     </message>
     <message>
-        <source>Show details</source>
-        <translation>Mostrar detalles</translation>
-    </message>
-    <message>
-        <source>Minimize</source>
-        <translation>Minimizar</translation>
-    </message>
-    <message>
         <source>Service</source>
         <translation>Servicio</translation>
     </message>
@@ -1459,6 +1451,10 @@ Approximate GPU usage:
         <translation>Cancelar</translation>
     </message>
     <message>
+        <source>Logs</source>
+        <translation>Registro</translation>
+    </message>
+    <message>
         <source>Report</source>
         <translation>Informe</translation>
     </message>
@@ -1477,6 +1473,30 @@ Approximate GPU usage:
     <message>
         <source>Close</source>
         <translation>Cerrar</translation>
+    </message>
+    <message>
+        <source>Window</source>
+        <translation>Ventana</translation>
+    </message>
+    <message>
+        <source>Switch to window mode</source>
+        <translation>Cambiar al modo de ventana</translation>
+    </message>
+    <message>
+        <source>Embed</source>
+        <translation>Integrar</translation>
+    </message>
+    <message>
+        <source>Switch to embedded mode</source>
+        <translation>Cambiar al modo integrado</translation>
+    </message>
+    <message>
+        <source>Hide logs</source>
+        <translation>Ocultar registro</translation>
+    </message>
+    <message>
+        <source>Show logs</source>
+        <translation>Mostrar registro</translation>
     </message>
     <message>
         <source>Automatic</source>
