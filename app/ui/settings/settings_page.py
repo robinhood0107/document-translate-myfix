@@ -1,6 +1,7 @@
 import logging
 import os
 import shutil
+import json
 from dataclasses import asdict, is_dataclass
 
 from PySide6 import QtGui, QtWidgets
@@ -119,6 +120,7 @@ class SettingsPage(QtWidgets.QWidget):
         self.ui.mask_overlay_checkbox.stateChanged.connect(self._save_settings_if_not_loading)
         self.ui.cleanup_mask_delta_checkbox.stateChanged.connect(self._save_settings_if_not_loading)
         self.ui.debug_metadata_checkbox.stateChanged.connect(self._save_settings_if_not_loading)
+        self.ui.user_dictionaries_page.changed.connect(self._save_settings_if_not_loading)
         self._connect_live_save_signals()
 
     def _save_settings_if_not_loading(self, *_args):
@@ -371,6 +373,22 @@ class SettingsPage(QtWidgets.QWidget):
         autosave_folder = self.ui.project_autosave_folder_input.text().strip()
         if not autosave_folder:
             autosave_folder = get_default_project_autosave_dir()
+        auto_export_source_txt = bool(
+            getattr(owner, "auto_export_source_txt_checkbox", None)
+            and owner.auto_export_source_txt_checkbox.isChecked()
+        )
+        auto_export_source_md = bool(
+            getattr(owner, "auto_export_source_md_checkbox", None)
+            and owner.auto_export_source_md_checkbox.isChecked()
+        )
+        auto_export_translation_txt = bool(
+            getattr(owner, "auto_export_translation_txt_checkbox", None)
+            and owner.auto_export_translation_txt_checkbox.isChecked()
+        )
+        auto_export_translation_md = bool(
+            getattr(owner, "auto_export_translation_md_checkbox", None)
+            and owner.auto_export_translation_md_checkbox.isChecked()
+        )
         return {
             "export_raw_text": self.ui.raw_text_checkbox.isChecked(),
             "export_translated_text": self.ui.translated_text_checkbox.isChecked(),
@@ -383,7 +401,23 @@ class SettingsPage(QtWidgets.QWidget):
             "project_autosave_enabled": autosave_enabled,
             "project_autosave_interval_min": int(self.ui.project_autosave_interval_spinbox.value()),
             "project_autosave_folder": autosave_folder,
+            "auto_export_source_txt": auto_export_source_txt,
+            "auto_export_source_md": auto_export_source_md,
+            "auto_export_translation_txt": auto_export_translation_txt,
+            "auto_export_translation_md": auto_export_translation_md,
         }
+
+    def get_dictionary_settings(self) -> dict[str, list[dict]]:
+        return {
+            "ocr_substitutions": self.ui.user_dictionaries_page.get_ocr_rules(),
+            "translation_substitutions": self.ui.user_dictionaries_page.get_translation_rules(),
+        }
+
+    def get_ocr_result_dictionary_rules(self) -> list[dict]:
+        return self.get_dictionary_settings()["ocr_substitutions"]
+
+    def get_translation_result_dictionary_rules(self) -> list[dict]:
+        return self.get_dictionary_settings()["translation_substitutions"]
 
     def _normalize_service_name(self, raw_service: str) -> str:
         normalized = self.ui.value_mappings.get(raw_service, raw_service)
@@ -574,6 +608,18 @@ class SettingsPage(QtWidgets.QWidget):
         settings.beginGroup("export")
         settings.remove("auto_save")
         settings.remove("archive_save_as")
+        settings.endGroup()
+
+        dictionaries = self.get_dictionary_settings()
+        settings.beginGroup("dictionaries")
+        settings.setValue(
+            "ocr_substitutions_json",
+            json.dumps(dictionaries["ocr_substitutions"], ensure_ascii=False),
+        )
+        settings.setValue(
+            "translation_substitutions_json",
+            json.dumps(dictionaries["translation_substitutions"], ensure_ascii=False),
+        )
         settings.endGroup()
 
         credentials = self.get_credentials()
@@ -809,6 +855,33 @@ class SettingsPage(QtWidgets.QWidget):
         self.ui.project_autosave_folder_input.setText(
             settings.value("project_autosave_folder", get_default_project_autosave_dir(), type=str)
         )
+        owner = self.window()
+        auto_export_source_txt = settings.value("auto_export_source_txt", False, type=bool)
+        auto_export_source_md = settings.value("auto_export_source_md", False, type=bool)
+        auto_export_translation_txt = settings.value("auto_export_translation_txt", False, type=bool)
+        auto_export_translation_md = settings.value("auto_export_translation_md", False, type=bool)
+        if getattr(owner, "auto_export_source_txt_checkbox", None) is not None:
+            owner.auto_export_source_txt_checkbox.setChecked(bool(auto_export_source_txt))
+        if getattr(owner, "auto_export_source_md_checkbox", None) is not None:
+            owner.auto_export_source_md_checkbox.setChecked(bool(auto_export_source_md))
+        if getattr(owner, "auto_export_translation_txt_checkbox", None) is not None:
+            owner.auto_export_translation_txt_checkbox.setChecked(bool(auto_export_translation_txt))
+        if getattr(owner, "auto_export_translation_md_checkbox", None) is not None:
+            owner.auto_export_translation_md_checkbox.setChecked(bool(auto_export_translation_md))
+        settings.endGroup()
+
+        settings.beginGroup("dictionaries")
+        ocr_rules_json = settings.value("ocr_substitutions_json", "[]", type=str)
+        translation_rules_json = settings.value("translation_substitutions_json", "[]", type=str)
+        try:
+            ocr_rules = json.loads(ocr_rules_json or "[]")
+        except Exception:
+            ocr_rules = []
+        try:
+            translation_rules = json.loads(translation_rules_json or "[]")
+        except Exception:
+            translation_rules = []
+        self.ui.user_dictionaries_page.load_rules(ocr_rules, translation_rules)
         settings.endGroup()
 
         settings.beginGroup("shortcuts")

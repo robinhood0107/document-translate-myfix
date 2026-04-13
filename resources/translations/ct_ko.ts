@@ -157,6 +157,78 @@
         <translation>오류</translation>
     </message>
     <message>
+        <source>No pages are loaded for TXT/MD import or export.</source>
+        <translation>TXT/MD 가져오기 또는 내보내기를 할 페이지가 로드되지 않았습니다.</translation>
+    </message>
+    <message>
+        <source>TXT/MD import and export require unique page file names.
+Rename duplicate pages first.
+Duplicates:
+{names}</source>
+        <translation>TXT/MD 가져오기와 내보내기를 하려면 페이지 파일 이름이 고유해야 합니다.
+먼저 중복된 페이지 이름을 바꾸세요.
+중복 항목:
+{names}</translation>
+    </message>
+    <message>
+        <source>TXT/MD Export Failed</source>
+        <translation>TXT/MD 내보내기 실패</translation>
+    </message>
+    <message>
+        <source>Failed to export source text.</source>
+        <translation>원문 텍스트를 내보내지 못했습니다.</translation>
+    </message>
+    <message>
+        <source>Exported source text to:
+{path}</source>
+        <translation>원문 텍스트를 다음 위치로 내보냈습니다:
+{path}</translation>
+    </message>
+    <message>
+        <source>Translation imported and matched successfully.</source>
+        <translation>번역을 가져왔고 프로젝트와 성공적으로 일치했습니다.</translation>
+    </message>
+    <message>
+        <source>Imported TXT/MD content was only partially matched. Make sure the file follows the exported exchange format.</source>
+        <translation>가져온 TXT/MD 내용이 일부만 일치했습니다. 파일이 내보낸 교환 포맷을 따르는지 확인하세요.</translation>
+    </message>
+    <message>
+        <source>Missing pages:</source>
+        <translation>누락된 페이지:</translation>
+    </message>
+    <message>
+        <source>Unexpected pages:</source>
+        <translation>예상하지 못한 페이지:</translation>
+    </message>
+    <message>
+        <source>Unmatched pages:</source>
+        <translation>일치하지 않는 페이지:</translation>
+    </message>
+    <message>
+        <source>TXT Files (*.txt *.TXT)</source>
+        <translation>TXT 파일 (*.txt *.TXT)</translation>
+    </message>
+    <message>
+        <source>Markdown Files (*.md *.MD)</source>
+        <translation>Markdown 파일 (*.md *.MD)</translation>
+    </message>
+    <message>
+        <source>Import Translation</source>
+        <translation>번역 가져오기</translation>
+    </message>
+    <message>
+        <source>TXT/MD Import Failed</source>
+        <translation>TXT/MD 가져오기 실패</translation>
+    </message>
+    <message>
+        <source>Failed to import translation text.</source>
+        <translation>번역 텍스트를 가져오지 못했습니다.</translation>
+    </message>
+    <message>
+        <source>Automatic TXT/MD export failed for {target}{suffix}.</source>
+        <translation>{target}{suffix} 자동 TXT/MD 내보내기에 실패했습니다.</translation>
+    </message>
+    <message>
         <source>One-Page Auto</source>
         <translation type="unfinished">한 페이지만 자동번역</translation>
     </message>
@@ -314,6 +386,33 @@
     <message>
         <source>Mongolian</source>
         <translation>몽골어</translation>
+    </message>
+</context>
+<context>
+    <name>CorrectionDictionaryTable</name>
+    <message>
+        <source>Keyword</source>
+        <translation>키워드</translation>
+    </message>
+    <message>
+        <source>Substitution</source>
+        <translation>치환값</translation>
+    </message>
+    <message>
+        <source>Use regex</source>
+        <translation>정규식 사용</translation>
+    </message>
+    <message>
+        <source>Case sensitive</source>
+        <translation>대소문자 구분</translation>
+    </message>
+    <message>
+        <source>New</source>
+        <translation>새로 추가</translation>
+    </message>
+    <message>
+        <source>Delete</source>
+        <translation>삭제</translation>
     </message>
 </context>
 <context>
@@ -1642,6 +1741,10 @@ Restart now?</source>
         <translation>LLMs</translation>
     </message>
     <message>
+        <source>User Dictionaries</source>
+        <translation>사용자 사전</translation>
+    </message>
+    <message>
         <source>Project</source>
         <translation>프로젝트</translation>
     </message>
@@ -1772,7 +1875,7 @@ Restart now?</source>
     <name>StartupHomeScreen</name>
     <message>
         <source>New</source>
-        <translation>새로운</translation>
+        <translation>새로 추가</translation>
     </message>
     <message>
         <source>New Project</source>
@@ -2000,6 +2103,29 @@ then do inpainting on the resized image.</source>
     <message>
         <source>Original</source>
         <translation>원본</translation>
+    </message>
+</context>
+<context>
+    <name>UserDictionariesPage</name>
+    <message>
+        <source>Correction dictionaries rewrite OCR and translation results before they are saved to the project.</source>
+        <translation>교정 사전은 OCR 결과와 번역 결과를 프로젝트에 저장하기 전에 다시 써서 교정합니다.</translation>
+    </message>
+    <message>
+        <source>OCR Result Dictionary</source>
+        <translation>OCR 결과 사전</translation>
+    </message>
+    <message>
+        <source>Apply these substitutions immediately after OCR returns text, before the source text is stored.</source>
+        <translation>OCR이 텍스트를 반환한 직후, 원문 텍스트로 저장되기 전에 이 치환 규칙을 적용합니다.</translation>
+    </message>
+    <message>
+        <source>Translation Result Dictionary</source>
+        <translation>번역 결과 사전</translation>
+    </message>
+    <message>
+        <source>Apply these substitutions immediately after translation or TXT/MD import returns text, before the translation is stored.</source>
+        <translation>번역 또는 TXT/MD 가져오기가 텍스트를 반환한 직후, 번역문으로 저장되기 전에 이 치환 규칙을 적용합니다.</translation>
     </message>
 </context>
 <context>
@@ -2255,6 +2381,74 @@ back on the Image (for further editing)</source>
         <translation>모든 블록의 크기 늘리기</translation>
     </message>
     <message>
+        <source>TXT/MD</source>
+        <translation>TXT/MD</translation>
+    </message>
+    <message>
+        <source>Export Source TXT</source>
+        <translation>원문 TXT 내보내기</translation>
+    </message>
+    <message>
+        <source>Export the current project&apos;s source text in the TXT exchange format.</source>
+        <translation>현재 프로젝트의 원문 텍스트를 TXT 교환 포맷으로 내보냅니다.</translation>
+    </message>
+    <message>
+        <source>Import Translation TXT</source>
+        <translation>번역 TXT 가져오기</translation>
+    </message>
+    <message>
+        <source>Import translated text from a TXT exchange file and rebuild text boxes to fit.</source>
+        <translation>TXT 교환 파일에서 번역 텍스트를 가져오고 텍스트 상자를 다시 맞춰 배치합니다.</translation>
+    </message>
+    <message>
+        <source>Export Source MD</source>
+        <translation>원문 MD 내보내기</translation>
+    </message>
+    <message>
+        <source>Export the current project&apos;s source text in the Markdown exchange format.</source>
+        <translation>현재 프로젝트의 원문 텍스트를 Markdown 교환 포맷으로 내보냅니다.</translation>
+    </message>
+    <message>
+        <source>Import Translation MD</source>
+        <translation>번역 MD 가져오기</translation>
+    </message>
+    <message>
+        <source>Import translated text from a Markdown exchange file and rebuild text boxes to fit.</source>
+        <translation>Markdown 교환 파일에서 번역 텍스트를 가져오고 텍스트 상자를 다시 맞춰 배치합니다.</translation>
+    </message>
+    <message>
+        <source>Auto Export Source TXT</source>
+        <translation>원문 TXT 자동 내보내기</translation>
+    </message>
+    <message>
+        <source>After a successful automatic run, overwrite the TXT source exchange file with only the pages from that run.</source>
+        <translation>자동 실행이 성공적으로 끝나면, 이번 실행에 포함된 페이지만 담아 TXT 원문 교환 파일을 덮어씁니다.</translation>
+    </message>
+    <message>
+        <source>Auto Export Source MD</source>
+        <translation>원문 MD 자동 내보내기</translation>
+    </message>
+    <message>
+        <source>After a successful automatic run, overwrite the Markdown source exchange file with only the pages from that run.</source>
+        <translation>자동 실행이 성공적으로 끝나면, 이번 실행에 포함된 페이지만 담아 Markdown 원문 교환 파일을 덮어씁니다.</translation>
+    </message>
+    <message>
+        <source>Auto Export Translation TXT</source>
+        <translation>번역 TXT 자동 내보내기</translation>
+    </message>
+    <message>
+        <source>After a successful automatic run, overwrite the TXT translation exchange file with only the pages from that run.</source>
+        <translation>자동 실행이 성공적으로 끝나면, 이번 실행에 포함된 페이지만 담아 TXT 번역 교환 파일을 덮어씁니다.</translation>
+    </message>
+    <message>
+        <source>Auto Export Translation MD</source>
+        <translation>번역 MD 자동 내보내기</translation>
+    </message>
+    <message>
+        <source>After a successful automatic run, overwrite the Markdown translation exchange file with only the pages from that run.</source>
+        <translation>자동 실행이 성공적으로 끝나면, 이번 실행에 포함된 페이지만 담아 Markdown 번역 교환 파일을 덮어씁니다.</translation>
+    </message>
+    <message>
         <source>Box Drawing</source>
         <translation>상자 그리기</translation>
     </message>
@@ -2353,7 +2547,7 @@ It may have already been moved, renamed, or deleted.
     </message>
     <message>
         <source>Delete</source>
-        <translation type="unfinished">삭제</translation>
+        <translation>삭제</translation>
     </message>
     <message>
         <source>Cancel</source>
