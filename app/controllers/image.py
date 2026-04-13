@@ -50,6 +50,9 @@ class ImageStateController:
             avatar_size=(35, 50)
         )
         self.page_list_loader.set_model(self.main.page_list.model())
+        initial_size = self.main.page_list.thumbnail_size()
+        self.page_list_loader.set_avatar_size(initial_size.width(), initial_size.height())
+        self.main.page_list.thumbnail_size_changed.connect(self.page_list_loader.set_avatar_size)
 
     def ensure_page_state(self, file_path: str) -> dict:
         state = self.main.image_states.setdefault(file_path, {})

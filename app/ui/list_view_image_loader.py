@@ -119,6 +119,21 @@ class ListViewImageLoader(QObject):
     def set_model(self, model: PageListModel) -> None:
         self.model = model
 
+    def set_avatar_size(self, width: int, height: int) -> None:
+        new_size = QSize(int(width), int(height))
+        if new_size == self.avatar_size:
+            return
+        self.avatar_size = new_size
+        if self.model:
+            for file_path in list(self.loaded_images.keys()):
+                self.model.clear_thumbnail(file_path)
+        self.loaded_images.clear()
+        self.visible_paths.clear()
+        if self.worker:
+            self.clear_queue_requested.emit()
+        if self.file_paths:
+            self._schedule_update()
+
     def set_file_paths(self, file_paths: list[str]) -> None:
         self.clear()
         self.file_paths = file_paths.copy()
