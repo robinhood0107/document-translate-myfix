@@ -220,6 +220,17 @@ class PageListDelegate(QtWidgets.QStyledItemDelegate):
         bounded = QtCore.QSize(max(32, size.width()), max(46, size.height()))
         self._thumbnail_size = bounded
 
+    @staticmethod
+    def _blend(base: QtGui.QColor, accent: QtGui.QColor, ratio: float) -> QtGui.QColor:
+        ratio = max(0.0, min(1.0, ratio))
+        inv = 1.0 - ratio
+        return QtGui.QColor(
+            int(base.red() * inv + accent.red() * ratio),
+            int(base.green() * inv + accent.green() * ratio),
+            int(base.blue() * inv + accent.blue() * ratio),
+            235,
+        )
+
     def sizeHint(
         self,
         option: QtWidgets.QStyleOptionViewItem,
@@ -243,10 +254,10 @@ class PageListDelegate(QtWidgets.QStyledItemDelegate):
         hovered = bool(option.state & QtWidgets.QStyle.StateFlag.State_MouseOver)
         skipped = bool(index.data(PageListModel.SkippedRole))
 
-        bg_color = palette.base().color().lighter(112 if hovered else 104)
-        border_color = palette.mid().color()
+        bg_color = palette.window().color().darker(106 if hovered else 112)
+        border_color = palette.mid().color().lighter(108)
         if selected:
-            bg_color = palette.highlight().color().lighter(120)
+            bg_color = self._blend(bg_color, palette.highlight().color(), 0.22)
             border_color = palette.highlight().color()
 
         painter.setPen(QtGui.QPen(border_color, 1))
@@ -260,7 +271,7 @@ class PageListDelegate(QtWidgets.QStyledItemDelegate):
             self._thumbnail_size.height(),
         )
         painter.setPen(QtGui.QPen(palette.mid().color(), 1))
-        painter.setBrush(palette.alternateBase())
+        painter.setBrush(bg_color.lighter(108))
         painter.drawRoundedRect(thumb_rect, 4, 4)
 
         pixmap = index.data(PageListModel.ThumbnailRole)
@@ -474,8 +485,9 @@ class PageListView(QtWidgets.QWidget):
 
     def __init__(self) -> None:
         super().__init__()
-        self.setMinimumWidth(100)
+        self.setMinimumWidth(88)
         self.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self._preferred_width = 208
 
         self.insert_browser = MClickBrowserFilePushButton(multiple=True)
         self.insert_browser.set_dayu_filters(
@@ -516,7 +528,7 @@ class PageListView(QtWidgets.QWidget):
         self._thumbnail_scale_slider.setRange(80, 180)
         self._thumbnail_scale_slider.setSingleStep(5)
         self._thumbnail_scale_slider.setPageStep(10)
-        self._thumbnail_scale_slider.setValue(100)
+        self._thumbnail_scale_slider.setValue(180)
         self._thumbnail_scale_slider.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         self._thumbnail_scale_slider.setSizePolicy(
             QtWidgets.QSizePolicy.Policy.Expanding,
@@ -538,14 +550,14 @@ class PageListView(QtWidgets.QWidget):
         self._footer_frame.setStyleSheet(
             """
             QFrame#pageListFooter {
-                background: rgba(255, 255, 255, 0.04);
-                border: 1px solid rgba(255, 255, 255, 0.08);
+                background: rgba(255, 255, 255, 0.03);
+                border: 1px solid rgba(255, 255, 255, 0.06);
                 border-radius: 14px;
             }
             QLabel#pageListSizeValue {
-                background: rgba(24, 144, 255, 0.16);
+                background: rgba(255, 255, 255, 0.05);
                 color: #f5f7fb;
-                border: 1px solid rgba(24, 144, 255, 0.34);
+                border: 1px solid rgba(255, 255, 255, 0.08);
                 border-radius: 11px;
                 padding: 5px 10px;
             }
@@ -572,6 +584,9 @@ class PageListView(QtWidgets.QWidget):
         selection_model.currentChanged.connect(self.currentItemChanged.emit)
         self._update_sort_buttons()
         self._apply_thumbnail_scale(self._thumbnail_scale_slider.value(), emit_signal=False)
+
+    def sizeHint(self) -> QtCore.QSize:  # type: ignore[override]
+        return QtCore.QSize(self._preferred_width, 520)
 
     def _direction_icon(self, direction: str) -> QtGui.QIcon:
         style = self.style()

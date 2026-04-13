@@ -29,13 +29,13 @@ class CorrectionDictionaryTable(QtWidgets.QWidget):
                 border: none;
             }
             QTableWidget {
-                background-color: #f8fafc;
-                alternate-background-color: #f1f5f9;
+                background-color: #e8edf3;
+                alternate-background-color: #dfe6ee;
                 color: #111827;
-                border: 1px solid #d6dde8;
+                border: 1px solid #c7d1dc;
                 border-radius: 12px;
                 gridline-color: transparent;
-                selection-background-color: #dbeafe;
+                selection-background-color: #d6e4f5;
                 selection-color: #111827;
                 outline: none;
             }
@@ -47,17 +47,17 @@ class CorrectionDictionaryTable(QtWidgets.QWidget):
                 color: #111827;
             }
             QHeaderView::section {
-                background-color: #eef2f7;
+                background-color: #d6dee8;
                 color: #334155;
                 border: none;
-                border-bottom: 1px solid #d6dde8;
+                border-bottom: 1px solid #c7d1dc;
                 padding: 8px 10px;
                 font-weight: 600;
             }
             QTableCornerButton::section {
-                background-color: #eef2f7;
+                background-color: #d6dee8;
                 border: none;
-                border-bottom: 1px solid #d6dde8;
+                border-bottom: 1px solid #c7d1dc;
             }
             """
         )

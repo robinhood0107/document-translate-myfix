@@ -72,6 +72,11 @@ class PageListRuntimeTests(unittest.TestCase):
         self.assertGreater(self.widget.thumbnail_size().width(), 46)
         self.assertEqual(self.widget._size_value_label.text(), "140%")
 
+    def test_default_thumbnail_scale_and_compact_width(self) -> None:
+        self.assertEqual(self.widget._thumbnail_scale_slider.value(), 180)
+        self.assertEqual(self.widget._size_value_label.text(), "180%")
+        self.assertLessEqual(self.widget.sizeHint().width(), 208)
+
 
 if __name__ == "__main__":
     unittest.main()

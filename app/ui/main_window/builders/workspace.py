@@ -677,6 +677,7 @@ class WorkspaceMixin:
         splitter.setStretchFactor(0, 40)
         splitter.setStretchFactor(1, 80)
         splitter.setStretchFactor(2, 10)
+        splitter.setSizes([220, 980, 360])
 
         content_layout = QtWidgets.QVBoxLayout()
         content_layout.addLayout(header_layout)
