@@ -25,10 +25,11 @@ class _FakeSettingsPage:
     def __init__(self, server_url: str = "http://127.0.0.1:28118/layout-parsing") -> None:
         self._server_url = server_url
         self._translator = "Custom Local Server(Gemma)"
+        self._ocr = "Optimal (HunyuanOCR / PaddleOCR VL)"
 
     def get_tool_selection(self, key: str) -> str:
         if key == "ocr":
-            return "Optimal (HunyuanOCR / PaddleOCR VL)"
+            return self._ocr
         if key == "translator":
             return self._translator
         raise AssertionError(key)
@@ -38,6 +39,9 @@ class _FakeSettingsPage:
 
     def get_hunyuan_ocr_settings(self) -> dict:
         return {"server_url": "http://127.0.0.1:28080/v1"}
+
+    def get_mangalmm_ocr_settings(self) -> dict:
+        return {"server_url": "http://127.0.0.1:28081/v1"}
 
     def get_all_settings(self) -> dict:
         return {"tools": {"translator": self._translator}}
@@ -122,6 +126,20 @@ class PipelineConfigRuntimeTests(unittest.TestCase):
 
         self.assertTrue(result)
         self.assertEqual(main.batch_report_ctrl.entries, [])
+        probe_managed_engine.assert_called_once()
+
+    def test_validate_ocr_supports_direct_mangalmm_runtime(self) -> None:
+        main = _FakeMain()
+        main.settings_page._ocr = "MangaLMM"
+
+        with mock.patch.object(LocalOCRRuntimeManager, "validate_engine", return_value=None) as validate_engine, \
+             mock.patch.object(LocalOCRRuntimeManager, "preflight_cache_key", return_value="MangaLMM|http://127.0.0.1:28081/v1") as preflight_cache_key, \
+             mock.patch.object(LocalOCRRuntimeManager, "probe_managed_engine", return_value="healthy") as probe_managed_engine:
+            result = validate_ocr(main, source_lang="Japanese")
+
+        self.assertTrue(result)
+        validate_engine.assert_called_once()
+        preflight_cache_key.assert_called_once()
         probe_managed_engine.assert_called_once()
 
     def test_validate_ocr_reuses_preflight_cache_for_same_engine_and_url(self) -> None:
