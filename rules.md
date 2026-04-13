@@ -92,6 +92,12 @@ git commit -m "feat(workspace): add retry tooltips"
 git push -u origin feature/example-task
 ```
 
+Windows launcher/runtime 변경이 포함되면 아래 검증도 추가한다.
+
+```bash
+python scripts/verify_windows_launchers.py
+```
+
 ## 4. 커밋 규칙
 
 커밋 제목은 아래 형식을 기본으로 사용한다.
@@ -130,6 +136,7 @@ type(scope): summary
 - 기능 단위 커밋을 만들었다.
 - 브랜치를 원격에 push했다.
 - 병합 대상 브랜치가 맞는 PR을 열었거나 갱신했다.
+- Windows launcher/runtime 또는 pinned CUDA 의존성을 건드렸다면 `.venv-win`, `.venv-win-cuda13`, `run_comic.bat`, `run_comic_cuda13.bat`를 모두 검증했다.
 
 ## 6. 금지 사항
 
@@ -258,6 +265,7 @@ GitHub 저장소 설정에서 아래를 권장한다.
 - 커밋 메시지가 규칙에 맞는가
 - 첫 push면 `git push -u origin <branch>`를 했는가
 - 이후 push가 최신 상태인가
+- Windows launcher/runtime 관련 변경이면 `python scripts/verify_windows_launchers.py`를 돌렸는가
 - PR이 열려 있거나 최신 커밋이 반영되었는가
 
 사용자가 명시적으로 `로컬만` 원한 경우에만 push 요구를 예외로 둔다.
