@@ -1369,6 +1369,38 @@ Approximate GPU usage:
 <context>
     <name>PageListView</name>
     <message>
+        <source>Name</source>
+        <translation>이름</translation>
+    </message>
+    <message>
+        <source>Date</source>
+        <translation>날짜</translation>
+    </message>
+    <message>
+        <source>Sort by Name</source>
+        <translation>이름순 정렬</translation>
+    </message>
+    <message>
+        <source>Name: A to Z</source>
+        <translation>이름: 오름차순</translation>
+    </message>
+    <message>
+        <source>Name: Z to A</source>
+        <translation>이름: 내림차순</translation>
+    </message>
+    <message>
+        <source>Sort by Date</source>
+        <translation>날짜순 정렬</translation>
+    </message>
+    <message>
+        <source>Date: Newest First</source>
+        <translation>날짜: 최신순</translation>
+    </message>
+    <message>
+        <source>Date: Oldest First</source>
+        <translation>날짜: 오래된 순</translation>
+    </message>
+    <message>
         <source>Insert</source>
         <translation>삽입</translation>
     </message>
@@ -2625,6 +2657,13 @@ back on the Image (for further editing)</source>
     <message>
         <source>Inpainting</source>
         <translation>인페인팅</translation>
+    </message>
+</context>
+<context>
+    <name>_PageListContentView</name>
+    <message>
+        <source>{count} pages</source>
+        <translation>{count}개 페이지</translation>
     </message>
 </context>
 <context>

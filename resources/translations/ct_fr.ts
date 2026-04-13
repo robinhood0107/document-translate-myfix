@@ -1349,6 +1349,38 @@ Approximate GPU usage:
 <context>
     <name>PageListView</name>
     <message>
+        <source>Name</source>
+        <translation>Nom</translation>
+    </message>
+    <message>
+        <source>Date</source>
+        <translation>Date</translation>
+    </message>
+    <message>
+        <source>Sort by Name</source>
+        <translation>Trier par nom</translation>
+    </message>
+    <message>
+        <source>Name: A to Z</source>
+        <translation>Nom : A à Z</translation>
+    </message>
+    <message>
+        <source>Name: Z to A</source>
+        <translation>Nom : Z à A</translation>
+    </message>
+    <message>
+        <source>Sort by Date</source>
+        <translation>Trier par date</translation>
+    </message>
+    <message>
+        <source>Date: Newest First</source>
+        <translation>Date : plus récent d&apos;abord</translation>
+    </message>
+    <message>
+        <source>Date: Oldest First</source>
+        <translation>Date : plus ancien d&apos;abord</translation>
+    </message>
+    <message>
         <source>Insert</source>
         <translation>Insérer</translation>
     </message>
@@ -2604,6 +2636,13 @@ back on the Image (for further editing)</source>
     <message>
         <source>Inpainting</source>
         <translation>Inpainting</translation>
+    </message>
+</context>
+<context>
+    <name>_PageListContentView</name>
+    <message>
+        <source>{count} pages</source>
+        <translation>{count} pages</translation>
     </message>
 </context>
 <context>
