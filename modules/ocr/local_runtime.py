@@ -5,7 +5,7 @@ import os
 import threading
 import time
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any, Callable, Literal
 from urllib.error import URLError
 from urllib.parse import urlparse
 from urllib.request import urlopen
@@ -22,6 +22,7 @@ logger = logging.getLogger(__name__)
 
 ROOT_DIR = Path(__file__).resolve().parents[2]
 DEFAULT_HUNYUAN_N_GPU_LAYERS = "80"
+OCRPreflightProbeResult = Literal["healthy", "unavailable", "not_managed"]
 
 _ENGINE_CONFIG = {
     "HunyuanOCR": {
@@ -79,6 +80,33 @@ class LocalOCRRuntimeManager:
         config = self._config_for(engine_key)
         server_url = self._resolve_server_url(engine_key, settings_page)
         return _normalize_url(server_url) == _normalize_url(config["managed_url"])
+
+    def preflight_cache_key(self, engine_key: str, settings_page: Any) -> str | None:
+        if not self.should_manage_engine(engine_key, settings_page):
+            return None
+        return f"{engine_key}|{_normalize_url(self._resolve_server_url(engine_key, settings_page))}"
+
+    def probe_managed_engine(
+        self,
+        engine_key: str,
+        settings_page: Any,
+        *,
+        timeout_sec: int = 2,
+    ) -> OCRPreflightProbeResult:
+        if not self.should_manage_engine(engine_key, settings_page):
+            return "not_managed"
+        config = self._config_for(engine_key)
+        if self._wait_for_health(
+            config["health_url"],
+            timeout_sec=timeout_sec,
+            progress_callback=None,
+            cancel_checker=None,
+            engine_key=engine_key,
+            step_key="health_probe",
+            message=f"{engine_key} 상태를 확인하는 중...",
+        ):
+            return "healthy"
+        return "unavailable"
 
     def ensure_engine(
         self,
