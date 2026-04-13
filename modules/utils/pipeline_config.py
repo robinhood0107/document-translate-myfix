@@ -120,7 +120,7 @@ def validate_ocr(main: ComicTranslate, source_lang: str | None = None):
     source_lang = source_lang or main.s_combo.currentText()
     source_lang_english = main.lang_mapping.get(source_lang, source_lang)
     normalized_tool = resolve_ocr_engine(ocr_tool, source_lang_english)
-    if normalized_tool in {"PaddleOCR VL", "HunyuanOCR"}:
+    if normalized_tool in {"PaddleOCR VL", "HunyuanOCR", "MangaLMM"}:
         local_service_configs = {
             "PaddleOCR VL": (
                 "PaddleOCR VL",
@@ -131,6 +131,11 @@ def validate_ocr(main: ComicTranslate, source_lang: str | None = None):
                 "HunyuanOCR",
                 settings_page.ui.tr("HunyuanOCR Settings"),
                 settings_page.get_hunyuan_ocr_settings(),
+            ),
+            "MangaLMM": (
+                "MangaLMM",
+                settings_page.ui.tr("MangaLMM Settings"),
+                settings_page.get_mangalmm_ocr_settings(),
             ),
         }
         service_name, settings_page_name, service_settings = local_service_configs[normalized_tool]

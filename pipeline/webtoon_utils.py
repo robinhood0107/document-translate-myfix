@@ -95,6 +95,10 @@ def convert_block_to_visible_coordinates(blk: TextBlock, mapping: dict, page_idx
     else:
         page_width = webtoon_manager.webtoon_width
     page_x_offset = (webtoon_manager.webtoon_width - page_width) / 2
+    blk._visible_page_y = float(page_y)
+    blk._visible_page_x_offset = float(page_x_offset)
+    blk._visible_crop_top = float(mapping['page_crop_top'])
+    blk._visible_combined_y_start = float(mapping['combined_y_start'])
     
     # Convert coordinates to page-local first
     x1_local = blk.xyxy[0] - page_x_offset
@@ -197,6 +201,43 @@ def restore_original_block_coordinates(processed_blocks: list[TextBlock]):
     for blk in processed_blocks:
         if not hasattr(blk, '_original_xyxy'):
             continue
+
+        page_y = float(getattr(blk, "_visible_page_y", 0.0))
+        page_x_offset = float(getattr(blk, "_visible_page_x_offset", 0.0))
+        crop_top = float(getattr(blk, "_visible_crop_top", 0.0))
+        combined_y_start = float(getattr(blk, "_visible_combined_y_start", 0.0))
+
+        if isinstance(getattr(blk, "ocr_regions", None), list):
+            restored_regions = []
+            for region in blk.ocr_regions:
+                if not isinstance(region, dict):
+                    continue
+                bbox = region.get("bbox_xyxy")
+                if not isinstance(bbox, (list, tuple)) or len(bbox) != 4:
+                    continue
+                x1, y1, x2, y2 = [float(v) for v in bbox]
+                restored_regions.append(
+                    {
+                        "bbox_xyxy": [
+                            int(round(x1 + page_x_offset)),
+                            int(round((y1 - combined_y_start) + crop_top + page_y)),
+                            int(round(x2 + page_x_offset)),
+                            int(round((y2 - combined_y_start) + crop_top + page_y)),
+                        ],
+                        "text": str(region.get("text", "") or ""),
+                    }
+                )
+            blk.ocr_regions = restored_regions
+
+        crop_bbox = getattr(blk, "ocr_crop_bbox", None)
+        if isinstance(crop_bbox, (list, tuple)) and len(crop_bbox) == 4:
+            x1, y1, x2, y2 = [float(v) for v in crop_bbox]
+            blk.ocr_crop_bbox = [
+                int(round(x1 + page_x_offset)),
+                int(round((y1 - combined_y_start) + crop_top + page_y)),
+                int(round(x2 + page_x_offset)),
+                int(round((y2 - combined_y_start) + crop_top + page_y)),
+            ]
         
         # Restore original coordinates
         blk.xyxy[:] = blk._original_xyxy
@@ -208,6 +249,10 @@ def restore_original_block_coordinates(processed_blocks: list[TextBlock]):
         delattr(blk, '_original_bubble_xyxy')
         delattr(blk, '_mapping')
         delattr(blk, '_page_index')
+        delattr(blk, '_visible_page_y')
+        delattr(blk, '_visible_page_x_offset')
+        delattr(blk, '_visible_crop_top')
+        delattr(blk, '_visible_combined_y_start')
 
 
 def is_text_item_in_visible_portion(text_item, mapping: dict, page_idx: int, webtoon_manager) -> bool:
@@ -321,5 +366,4 @@ def convert_bboxes_to_webtoon_coordinates(bboxes: list, mapping: dict, page_idx:
         converted_bboxes.append([x1_scene, y1_scene, x2_scene, y2_scene])
     
     return converted_bboxes
-
 

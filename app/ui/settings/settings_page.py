@@ -10,18 +10,22 @@ from PySide6.QtGui import QFont, QFontDatabase
 from modules.ocr.selection import (
     OCR_DEFAULT_LABEL,
     OCR_MODE_BEST_LOCAL,
+    OCR_MODE_BEST_LOCAL_PLUS,
     OCR_MODE_DEFAULT,
     OCR_MODE_GEMINI,
     OCR_MODE_GOOGLE,
     OCR_MODE_HUNYUAN,
+    OCR_MODE_MANGALMM,
     OCR_MODE_MICROSOFT,
     OCR_MODE_PADDLE_VL,
     OCR_OPTIMAL_LABEL,
+    OCR_OPTIMAL_PLUS_LABEL,
     normalize_ocr_mode,
 )
 from .settings_ui import SettingsPageUI
 from .gemma_local_server_page import GemmaLocalServerPage
 from .hunyuan_ocr_page import HunyuanOCRPage
+from .mangalmm_ocr_page import MangaLMMOCRPage
 from app.update_checker import UpdateChecker
 from app.shortcuts import get_default_shortcuts
 from modules.utils.device import is_gpu_available
@@ -134,6 +138,7 @@ class SettingsPage(QtWidgets.QWidget):
             self.ui.project_autosave_folder_input,
             self.ui.paddleocr_vl_server_url_input,
             self.ui.hunyuan_ocr_server_url_input,
+            self.ui.mangalmm_ocr_server_url_input,
         ]
         for widget in text_changed_widgets:
             signal = getattr(widget, "textChanged", None)
@@ -167,6 +172,8 @@ class SettingsPage(QtWidgets.QWidget):
             self.ui.paddleocr_vl_prettify_checkbox,
             self.ui.paddleocr_vl_visualize_checkbox,
             self.ui.hunyuan_ocr_raw_response_logging_checkbox,
+            self.ui.mangalmm_ocr_raw_response_logging_checkbox,
+            self.ui.mangalmm_ocr_safe_resize_checkbox,
             self.ui.gemma_raw_response_logging_checkbox,
         ]
         for widget in checkbox_widgets:
@@ -184,6 +191,11 @@ class SettingsPage(QtWidgets.QWidget):
             self.ui.hunyuan_ocr_max_completion_tokens_spinbox,
             self.ui.hunyuan_ocr_parallel_workers_spinbox,
             self.ui.hunyuan_ocr_request_timeout_spinbox,
+            self.ui.mangalmm_ocr_max_completion_tokens_spinbox,
+            self.ui.mangalmm_ocr_parallel_workers_spinbox,
+            self.ui.mangalmm_ocr_request_timeout_spinbox,
+            self.ui.mangalmm_ocr_max_pixels_spinbox,
+            self.ui.mangalmm_ocr_max_long_side_spinbox,
             self.ui.gemma_chunk_size_spinbox,
             self.ui.gemma_max_completion_tokens_spinbox,
             self.ui.gemma_request_timeout_spinbox,
@@ -253,11 +265,14 @@ class SettingsPage(QtWidgets.QWidget):
             self.ui.tr(OCR_DEFAULT_LABEL): OCR_MODE_DEFAULT,
             self.ui.tr("Optimal (HunyuanOCR / PaddleOCR VL)"): OCR_MODE_BEST_LOCAL,
             self.ui.tr(OCR_OPTIMAL_LABEL): OCR_MODE_BEST_LOCAL,
+            self.ui.tr("Optimal+ (HunyuanOCR / MangaLMM / PaddleOCR VL)"): OCR_MODE_BEST_LOCAL_PLUS,
+            self.ui.tr(OCR_OPTIMAL_PLUS_LABEL): OCR_MODE_BEST_LOCAL_PLUS,
             self.ui.tr("Microsoft OCR"): OCR_MODE_MICROSOFT,
             self.ui.tr("Google Cloud Vision"): OCR_MODE_GOOGLE,
             self.ui.tr("Gemini-2.0-Flash"): OCR_MODE_GEMINI,
             self.ui.tr("PaddleOCR VL"): OCR_MODE_PADDLE_VL,
             self.ui.tr("HunyuanOCR"): OCR_MODE_HUNYUAN,
+            self.ui.tr("MangaLMM"): OCR_MODE_MANGALMM,
         }
 
     def _normalize_ocr_mode_value(self, raw_value: str | None) -> str:
@@ -318,6 +333,22 @@ class SettingsPage(QtWidgets.QWidget):
             "parallel_workers": int(self.ui.hunyuan_ocr_parallel_workers_spinbox.value()),
             "request_timeout_sec": int(self.ui.hunyuan_ocr_request_timeout_spinbox.value()),
             "raw_response_logging": self.ui.hunyuan_ocr_raw_response_logging_checkbox.isChecked(),
+        }
+
+    def get_mangalmm_ocr_settings(self):
+        server_url = self.ui.mangalmm_ocr_server_url_input.text().strip()
+        if not server_url:
+            server_url = self.ui.mangalmm_ocr_page.DEFAULT_SERVER_URL
+
+        return {
+            "server_url": server_url,
+            "max_completion_tokens": int(self.ui.mangalmm_ocr_max_completion_tokens_spinbox.value()),
+            "parallel_workers": int(self.ui.mangalmm_ocr_parallel_workers_spinbox.value()),
+            "request_timeout_sec": int(self.ui.mangalmm_ocr_request_timeout_spinbox.value()),
+            "raw_response_logging": self.ui.mangalmm_ocr_raw_response_logging_checkbox.isChecked(),
+            "safe_resize": self.ui.mangalmm_ocr_safe_resize_checkbox.isChecked(),
+            "max_pixels": int(self.ui.mangalmm_ocr_max_pixels_spinbox.value()),
+            "max_long_side": int(self.ui.mangalmm_ocr_max_long_side_spinbox.value()),
         }
 
     def get_ocr_generic_settings(self):
@@ -473,6 +504,7 @@ class SettingsPage(QtWidgets.QWidget):
             },
             "paddleocr_vl": self.get_paddleocr_vl_settings(),
             "hunyuan_ocr": self.get_hunyuan_ocr_settings(),
+            "mangalmm_ocr": self.get_mangalmm_ocr_settings(),
             "gemma_local_server": self.get_gemma_local_server_settings(),
             "llm": self.get_llm_settings(),
             "export": self.get_export_settings(),
@@ -725,6 +757,61 @@ class SettingsPage(QtWidgets.QWidget):
         )
         self.ui.hunyuan_ocr_raw_response_logging_checkbox.setChecked(
             settings.value("raw_response_logging", False, type=bool)
+        )
+        settings.endGroup()
+
+        settings.beginGroup("mangalmm_ocr")
+        self.ui.mangalmm_ocr_server_url_input.setText(
+            settings.value(
+                "server_url",
+                MangaLMMOCRPage.DEFAULT_SERVER_URL,
+                type=str,
+            )
+        )
+        self.ui.mangalmm_ocr_max_completion_tokens_spinbox.setValue(
+            settings.value(
+                "max_completion_tokens",
+                MangaLMMOCRPage.DEFAULT_MAX_COMPLETION_TOKENS,
+                type=int,
+            )
+        )
+        self.ui.mangalmm_ocr_parallel_workers_spinbox.setValue(
+            settings.value(
+                "parallel_workers",
+                MangaLMMOCRPage.DEFAULT_PARALLEL_WORKERS,
+                type=int,
+            )
+        )
+        self.ui.mangalmm_ocr_request_timeout_spinbox.setValue(
+            settings.value(
+                "request_timeout_sec",
+                MangaLMMOCRPage.DEFAULT_REQUEST_TIMEOUT_SEC,
+                type=int,
+            )
+        )
+        self.ui.mangalmm_ocr_raw_response_logging_checkbox.setChecked(
+            settings.value("raw_response_logging", False, type=bool)
+        )
+        self.ui.mangalmm_ocr_safe_resize_checkbox.setChecked(
+            settings.value(
+                "safe_resize",
+                MangaLMMOCRPage.DEFAULT_SAFE_RESIZE,
+                type=bool,
+            )
+        )
+        self.ui.mangalmm_ocr_max_pixels_spinbox.setValue(
+            settings.value(
+                "max_pixels",
+                MangaLMMOCRPage.DEFAULT_MAX_PIXELS,
+                type=int,
+            )
+        )
+        self.ui.mangalmm_ocr_max_long_side_spinbox.setValue(
+            settings.value(
+                "max_long_side",
+                MangaLMMOCRPage.DEFAULT_MAX_LONG_SIDE,
+                type=int,
+            )
         )
         settings.endGroup()
 

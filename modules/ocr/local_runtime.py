@@ -32,6 +32,14 @@ _ENGINE_CONFIG = {
         "container_name": "hunyuanocr-local-server",
         "uses_llama_cpp": True,
     },
+    "MangaLMM": {
+        "compose_file": ROOT_DIR / "mangalmm_docker_files" / "docker-compose.yaml",
+        "managed_url": "http://127.0.0.1:28081/v1",
+        "health_url": "http://127.0.0.1:28081/health",
+        "settings_page_name": "MangaLMM Settings",
+        "container_name": "mangalmm-local-server",
+        "uses_llama_cpp": True,
+    },
     "PaddleOCR VL": {
         "compose_file": ROOT_DIR / "paddleocr_vl_docker_files" / "docker-compose.yaml",
         "managed_url": "http://127.0.0.1:28118/layout-parsing",
@@ -187,6 +195,8 @@ class LocalOCRRuntimeManager:
     def _resolve_server_url(self, engine_key: str, settings_page: Any) -> str:
         if engine_key == "HunyuanOCR":
             return str(settings_page.get_hunyuan_ocr_settings().get("server_url", "")).strip()
+        if engine_key == "MangaLMM":
+            return str(settings_page.get_mangalmm_ocr_settings().get("server_url", "")).strip()
         if engine_key == "PaddleOCR VL":
             return str(settings_page.get_paddleocr_vl_settings().get("server_url", "")).strip()
         return ""

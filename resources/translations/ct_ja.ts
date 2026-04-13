@@ -17,14 +17,234 @@
     </message>
 </context>
 <context>
+    <name>AutomaticProgress</name>
+    <message>
+        <source>Calculating</source>
+        <translation type="unfinished">計算中</translation>
+    </message>
+    <message>
+        <source>Recent History</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Live Learning</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Live Stable</source>
+        <translation type="unfinished"></translation>
+    </message>
+</context>
+<context>
+    <name>AutomaticProgressDialog</name>
+    <message>
+        <source>Automatic Translation Progress</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>자동번역 준비 중</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>초기화 중...</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>경과 시간</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>남은 시간</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>예상 완료 시각</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>ETA 신뢰도</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>현재 작업</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>서비스</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>페이지</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>단계</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>파일명</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>세부 로그</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>재시도</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Settings 열기</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Cancel</source>
+        <translation type="unfinished">キャンセル</translation>
+    </message>
+    <message>
+        <source>닫기</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Calculating</source>
+        <translation type="unfinished">計算中</translation>
+    </message>
+    <message>
+        <source>작업이 취소되었습니다.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>자동번역 진행 중</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>작업이 실패했습니다.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>자동번역이 완료되었습니다.</source>
+        <translation type="unfinished"></translation>
+    </message>
+</context>
+<context>
     <name>ComicTranslate</name>
+    <message>
+        <source>Project files cannot be opened together with other imported files.
+Choose either a project file or image/document/archive files.</source>
+        <translation>プロジェクトファイルは他のインポートファイルと一緒に開けません。
+プロジェクトファイルだけを選ぶか、画像・ドキュメント・アーカイブファイルだけを選択してください。</translation>
+    </message>
+    <message>
+        <source>Gemma와 OCR 준비를 확인하는 중...</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>취소 중...</source>
+        <translation type="unfinished"></translation>
+    </message>
     <message>
         <source>PaddleOCR VL Settings</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
+        <source>HunyuanOCR Settings</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Gemma Local Server Settings</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>작업이 취소되었습니다.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>자동번역 준비 또는 실행에 실패했습니다.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
         <source>Error</source>
         <translation>エラー</translation>
+    </message>
+    <message>
+        <source>No pages are loaded for TXT/MD import or export.</source>
+        <translation>TXT/MD のインポートまたはエクスポートに使えるページが読み込まれていません。</translation>
+    </message>
+    <message>
+        <source>TXT/MD import and export require unique page file names.
+Rename duplicate pages first.
+Duplicates:
+{names}</source>
+        <translation>TXT/MD のインポートとエクスポートには一意のページファイル名が必要です。
+重複しているページ名を先に変更してください。
+重複:
+{names}</translation>
+    </message>
+    <message>
+        <source>TXT/MD Export Failed</source>
+        <translation>TXT/MD のエクスポートに失敗しました</translation>
+    </message>
+    <message>
+        <source>Failed to export source text.</source>
+        <translation>原文テキストをエクスポートできませんでした。</translation>
+    </message>
+    <message>
+        <source>Exported source text to:
+{path}</source>
+        <translation>原文テキストを次へエクスポートしました:
+{path}</translation>
+    </message>
+    <message>
+        <source>Translation imported and matched successfully.</source>
+        <translation>翻訳を正常にインポートし、プロジェクトに対応付けました。</translation>
+    </message>
+    <message>
+        <source>Imported TXT/MD content was only partially matched. Make sure the file follows the exported exchange format.</source>
+        <translation>インポートした TXT/MD の内容は一部しか一致しませんでした。ファイルがエクスポートされた交換フォーマットに従っているか確認してください。</translation>
+    </message>
+    <message>
+        <source>Missing pages:</source>
+        <translation>不足しているページ:</translation>
+    </message>
+    <message>
+        <source>Unexpected pages:</source>
+        <translation>予期しないページ:</translation>
+    </message>
+    <message>
+        <source>Unmatched pages:</source>
+        <translation>一致しないページ:</translation>
+    </message>
+    <message>
+        <source>TXT Files (*.txt *.TXT)</source>
+        <translation>TXT ファイル (*.txt *.TXT)</translation>
+    </message>
+    <message>
+        <source>Markdown Files (*.md *.MD)</source>
+        <translation>Markdown ファイル (*.md *.MD)</translation>
+    </message>
+    <message>
+        <source>Import Translation</source>
+        <translation>翻訳をインポート</translation>
+    </message>
+    <message>
+        <source>TXT/MD Import Failed</source>
+        <translation>TXT/MD のインポートに失敗しました</translation>
+    </message>
+    <message>
+        <source>Failed to import translation text.</source>
+        <translation>翻訳テキストをインポートできませんでした。</translation>
+    </message>
+    <message>
+        <source>Automatic TXT/MD export failed for {target}{suffix}.</source>
+        <translation>{target}{suffix} の自動 TXT/MD エクスポートに失敗しました。</translation>
+    </message>
+    <message>
+        <source>One-Page Auto</source>
+        <translation type="unfinished">現在ページを自動処理</translation>
+    </message>
+    <message>
+        <source>Translate All</source>
+        <translation type="unfinished">すべて翻訳</translation>
     </message>
     <message>
         <source>No failed pages from the latest batch are available to retry.</source>
@@ -35,12 +255,39 @@
         <translation>自動処理できる現在のページがありません。</translation>
     </message>
     <message>
+        <source>자동번역이 완료되었습니다.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
         <source>Downloading model file: {filename}</source>
         <translation>モデル ファイルをダウンロードしています: {filename}</translation>
     </message>
     <message>
         <source>Unsaved Changes</source>
         <translation>未保存の変更</translation>
+    </message>
+    <message>
+        <source>Load pages to see automatic output estimates.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Archive estimates (PNG / JPG / WEBP):</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>{name}: {size}, {time}, {ratio}</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Images are saved individually at maximum quality.
+Translated and cleaned images are exported.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Project switching is unavailable while automatic processing is running.
+Cancel the current run or wait for it to finish first.</source>
+        <translation>自動処理の実行中はプロジェクトを切り替えられません。
+現在の実行をキャンセルするか、完了するまで待ってください。</translation>
     </message>
     <message>
         <source>Save changes to this file?</source>
@@ -175,6 +422,33 @@
     </message>
 </context>
 <context>
+    <name>CorrectionDictionaryTable</name>
+    <message>
+        <source>Keyword</source>
+        <translation>キーワード</translation>
+    </message>
+    <message>
+        <source>Substitution</source>
+        <translation>置換後</translation>
+    </message>
+    <message>
+        <source>Use regex</source>
+        <translation>正規表現を使用</translation>
+    </message>
+    <message>
+        <source>Case sensitive</source>
+        <translation>大文字と小文字を区別</translation>
+    </message>
+    <message>
+        <source>New</source>
+        <translation>追加</translation>
+    </message>
+    <message>
+        <source>Delete</source>
+        <translation>削除</translation>
+    </message>
+</context>
+<context>
     <name>CredentialsPage</name>
     <message>
         <source>Save Keys</source>
@@ -270,7 +544,7 @@ Use Custom Local Server(Gemma) with the included Gemma Docker setup.</source>
     </message>
     <message>
         <source>File</source>
-        <translation type="unfinished"></translation>
+        <translation type="unfinished">ファイル</translation>
     </message>
     <message>
         <source>Chapter</source>
@@ -347,6 +621,59 @@ Use Custom Local Server(Gemma) with the included Gemma Docker setup.</source>
         <source>Export Debug Metadata (Debug)</source>
         <translation type="unfinished"></translation>
     </message>
+    <message>
+        <source>Automatic Output</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>These defaults control automatic output after batch translation.
+Project-specific quick settings can override them for the current project.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Default output target:</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Individual images</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Single archive</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Default image format:</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Default archive format:</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Default archive image format:</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Default archive compression level:</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>PNG/JPG/WEBP images are saved at maximum quality.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Archive compression only affects the ZIP/CBZ container, not image quality.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Load pages to see automatic output estimates.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Same as source</source>
+        <translation type="unfinished"></translation>
+    </message>
 </context>
 <context>
     <name>GemmaLocalServerPage</name>
@@ -355,11 +682,12 @@ Use Custom Local Server(Gemma) with the included Gemma Docker setup.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>Comic Translate can use your local Gemma Docker server for translation.
-1. Run `docker compose pull --policy always` and then `docker compose up -d --force-recreate` in the repository root.
+        <source>Comic Translate can reuse your local Gemma Docker server for translation.
+1. Keep the existing Gemma container running if it is already healthy.
 2. In Settings &gt; Credentials, use Endpoint URL `http://127.0.0.1:18080/v1`.
-3. Set Model to `gemma-4-26b-a4b-it-heretic.q3_k_m.gguf`.
-If responses are truncated, lower Chunk Size or increase LLAMA_CTX_SIZE in docker-compose.yaml.</source>
+3. Set Model to the exact GGUF filename in `testmodel/` (recommended: `gemma-4-26B-IQ4_NL.gguf`).
+Automatic translation reuses an existing Gemma runtime first and only runs `docker compose up -d` when needed.
+If responses are truncated, lower Chunk Size or Max Completion Tokens before recreating the container.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
@@ -379,14 +707,36 @@ If responses are truncated, lower Chunk Size or increase LLAMA_CTX_SIZE in docke
         <translation type="unfinished"></translation>
     </message>
     <message>
+        <source>Advanced Sampler Settings</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Temperature</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Top K</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Top P</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Min P</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
         <source>Raw Response Log</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>Recommended starting values for the included Gemma Docker setup:
+        <source>Promoted winner defaults for the bundled Gemma runtime:
 - Chunk Size: 6
 - Max Completion Tokens: 512
-- Request Timeout: 180 seconds</source>
+- Request Timeout: 180 seconds
+- Temperature: 0.7
+- Top K / Top P / Min P: 64 / 0.95 / 0.0</source>
         <translation type="unfinished"></translation>
     </message>
 </context>
@@ -595,6 +945,74 @@ Start the server with both the HunyuanOCR GGUF model and the matching mmproj fil
     <name>MTreeView</name>
     <message>
         <source>No Data</source>
+        <translation type="unfinished"></translation>
+    </message>
+</context>
+<context>
+    <name>MangaLMMOCRPage</name>
+    <message>
+        <source>MangaLMM Settings</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Connect Comic Translate to your local MangaLMM llama.cpp server.
+This OCR engine sends cropped text regions to the OpenAI-compatible /chat/completions endpoint.
+MangaLMM is used as block-crop OCR only, not as full-page spotting inside the app.
+Keep the default localhost URL if you want Comic Translate to reuse the bundled Docker runtime.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Server URL</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>MangaLMM OCR Tuning</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Max Completion Tokens</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Parallel Workers</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Request Timeout (sec)</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Raw Response Log</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Safe Resize</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Enable Safe Resize</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Max Pixels</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Max Long Side</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Recommended values for the bundled MangaLMM runtime:
+- ctx-size 4096: enough for block OCR while keeping VRAM safer
+- Max Completion Tokens: 256
+- Parallel Workers: 1
+- Request Timeout: 60 seconds
+- Safe Resize: on
+- Max Pixels / Max Long Side: 1200000 / 1280
+Reasoning:
+- Keep the request deterministic with temperature 0 and top_k 1 internally.
+- Large crops are resized only when needed, and OCR region boxes are mapped back to original coordinates.
+- Workers 1 is the safest default when Gemma and MangaLMM stay resident on the same GPU.</source>
         <translation type="unfinished"></translation>
     </message>
 </context>
@@ -848,6 +1266,14 @@ Open Batch Report to see all skipped images and reasons.</source>
         <translation>翻訳者</translation>
     </message>
     <message>
+        <source>Gemma local server runtime setup failed</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Gemma local server is unavailable</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
         <source>No font selected</source>
         <translation type="unfinished"></translation>
     </message>
@@ -960,6 +1386,10 @@ Install it to use PSD features.</source>
         <translation>家</translation>
     </message>
     <message>
+        <source>Open Latest Recent Project</source>
+        <translation>最新の最近使ったプロジェクトを開く</translation>
+    </message>
+    <message>
         <source>Settings</source>
         <translation>設定</translation>
     </message>
@@ -971,21 +1401,32 @@ Install it to use PSD features.</source>
         <source>Insert files into current project</source>
         <translation>現在のプロジェクトにファイルを挿入する</translation>
     </message>
+</context>
+<context>
+    <name>NotificationsPage</name>
     <message>
-        <source>Start New Project</source>
-        <translation>新しいプロジェクトを開始する</translation>
+        <source>Automatic Completion</source>
+        <translation>自動処理の完了</translation>
     </message>
     <message>
-        <source>Your current project has unsaved changes. Start a new project?</source>
-        <translation>現在のプロジェクトには保存されていない変更があります。新しいプロジェクトを始めますか?</translation>
+        <source>Play a sound when automatic processing finishes successfully. Custom files must be placed in the repository music folder.</source>
+        <translation>自動処理が正常に完了したら音を再生します。カスタムファイルはリポジトリの music フォルダーに配置してください。</translation>
     </message>
     <message>
-        <source>Yes</source>
-        <translation>はい</translation>
+        <source>Enable Completion Sound</source>
+        <translation>完了音を有効にする</translation>
     </message>
     <message>
-        <source>No</source>
-        <translation>いいえ</translation>
+        <source>Test Sound</source>
+        <translation>音をテスト</translation>
+    </message>
+    <message>
+        <source>Music Folder: {path}</source>
+        <translation>music フォルダー: {path}</translation>
+    </message>
+    <message>
+        <source>System sound</source>
+        <translation>システムサウンド</translation>
     </message>
 </context>
 <context>
@@ -1046,12 +1487,44 @@ Approximate GPU usage:
 <context>
     <name>PageListView</name>
     <message>
+        <source>Name</source>
+        <translation>名前</translation>
+    </message>
+    <message>
+        <source>Date</source>
+        <translation>日付</translation>
+    </message>
+    <message>
+        <source>Sort by Name</source>
+        <translation>名前順で並べ替え</translation>
+    </message>
+    <message>
+        <source>Name: A to Z</source>
+        <translation>名前: A から Z</translation>
+    </message>
+    <message>
+        <source>Name: Z to A</source>
+        <translation>名前: Z から A</translation>
+    </message>
+    <message>
+        <source>Sort by Date</source>
+        <translation>日付順で並べ替え</translation>
+    </message>
+    <message>
+        <source>Date: Newest First</source>
+        <translation>日付: 新しい順</translation>
+    </message>
+    <message>
+        <source>Date: Oldest First</source>
+        <translation>日付: 古い順</translation>
+    </message>
+    <message>
         <source>Insert</source>
         <translation>入れる</translation>
     </message>
     <message>
         <source>Delete</source>
-        <translation>消去</translation>
+        <translation>削除</translation>
     </message>
     <message>
         <source>Unskip</source>
@@ -1075,6 +1548,161 @@ Approximate GPU usage:
     <message>
         <source>Theme</source>
         <translation>テーマ</translation>
+    </message>
+</context>
+<context>
+    <name>PipelineStatusPanel</name>
+    <message>
+        <source>Pipeline Status</source>
+        <translation>パイプラインの状態</translation>
+    </message>
+    <message>
+        <source>Idle</source>
+        <translation>待機中</translation>
+    </message>
+    <message>
+        <source>Service</source>
+        <translation>サービス</translation>
+    </message>
+    <message>
+        <source>Progress</source>
+        <translation>進行状況</translation>
+    </message>
+    <message>
+        <source>File</source>
+        <translation>ファイル</translation>
+    </message>
+    <message>
+        <source>ETA</source>
+        <translation>ETA</translation>
+    </message>
+    <message>
+        <source>Message</source>
+        <translation>メッセージ</translation>
+    </message>
+    <message>
+        <source>No Preview</source>
+        <translation>プレビューなし</translation>
+    </message>
+    <message>
+        <source>Cancel</source>
+        <translation>キャンセル</translation>
+    </message>
+    <message>
+        <source>Logs</source>
+        <translation>ログ</translation>
+    </message>
+    <message>
+        <source>Report</source>
+        <translation>レポート</translation>
+    </message>
+    <message>
+        <source>Retry</source>
+        <translation>再試行</translation>
+    </message>
+    <message>
+        <source>Settings</source>
+        <translation>設定</translation>
+    </message>
+    <message>
+        <source>Open Output</source>
+        <translation>出力を開く</translation>
+    </message>
+    <message>
+        <source>Close</source>
+        <translation>閉じる</translation>
+    </message>
+    <message>
+        <source>Window</source>
+        <translation>ウィンドウ</translation>
+    </message>
+    <message>
+        <source>Switch to window mode</source>
+        <translation>ウィンドウモードに切り替え</translation>
+    </message>
+    <message>
+        <source>Embed</source>
+        <translation>埋め込み</translation>
+    </message>
+    <message>
+        <source>Switch to embedded mode</source>
+        <translation>埋め込みモードに切り替え</translation>
+    </message>
+    <message>
+        <source>Hide logs</source>
+        <translation>ログを隠す</translation>
+    </message>
+    <message>
+        <source>Show logs</source>
+        <translation>ログを表示</translation>
+    </message>
+    <message>
+        <source>Automatic</source>
+        <translation>自動</translation>
+    </message>
+    <message>
+        <source>Calculating</source>
+        <translation>計算中</translation>
+    </message>
+    <message>
+        <source>Status</source>
+        <translation>状態</translation>
+    </message>
+    <message>
+        <source>Info</source>
+        <translation>情報</translation>
+    </message>
+    <message>
+        <source>Success</source>
+        <translation>成功</translation>
+    </message>
+    <message>
+        <source>Warning</source>
+        <translation>警告</translation>
+    </message>
+    <message>
+        <source>Error</source>
+        <translation>エラー</translation>
+    </message>
+    <message>
+        <source>Download</source>
+        <translation>ダウンロード</translation>
+    </message>
+    <message>
+        <source>Local Service</source>
+        <translation>ローカルサービス</translation>
+    </message>
+    <message>
+        <source>Network</source>
+        <translation>ネットワーク</translation>
+    </message>
+    <message>
+        <source>Content Filter</source>
+        <translation>コンテンツフィルター</translation>
+    </message>
+    <message>
+        <source>Batch Report</source>
+        <translation>バッチレポート</translation>
+    </message>
+    <message>
+        <source>Pipeline</source>
+        <translation>パイプライン</translation>
+    </message>
+    <message>
+        <source>Running</source>
+        <translation>実行中</translation>
+    </message>
+    <message>
+        <source>Done</source>
+        <translation>完了</translation>
+    </message>
+    <message>
+        <source>Failed</source>
+        <translation>失敗</translation>
+    </message>
+    <message>
+        <source>Cancelled</source>
+        <translation>キャンセル済み</translation>
     </message>
 </context>
 <context>
@@ -1469,6 +2097,18 @@ Restart now?</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
+        <source>Optimal+ (HunyuanOCR / MangaLMM / PaddleOCR VL)</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>MangaLMM</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>RT-DETR-v2 + Legacy BBox Rescue + Source LaMa</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
         <source>Personalization</source>
         <translation>パーソナライゼーション</translation>
     </message>
@@ -1485,6 +2125,10 @@ Restart now?</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
+        <source>MangaLMM Settings</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
         <source>Gemma Local Server Settings</source>
         <translation type="unfinished"></translation>
     </message>
@@ -1495,6 +2139,14 @@ Restart now?</source>
     <message>
         <source>Text Rendering</source>
         <translation>テキストのレンダリング</translation>
+    </message>
+    <message>
+        <source>User Dictionaries</source>
+        <translation>ユーザー辞書</translation>
+    </message>
+    <message>
+        <source>Notifications</source>
+        <translation>通知</translation>
     </message>
     <message>
         <source>Project</source>
@@ -1575,7 +2227,7 @@ Restart now?</source>
     <name>StartupHomeScreen</name>
     <message>
         <source>New</source>
-        <translation>新しい</translation>
+        <translation>追加</translation>
     </message>
     <message>
         <source>New Project</source>
@@ -1619,6 +2271,12 @@ Open or create a project to get started.</source>
         <source>Supported Files ({exts});;All Files (*)</source>
         <translation>サポートされているファイル ({exts});;すべてのファイル (*)</translation>
     </message>
+    <message>
+        <source>Project files cannot be opened together with other imported files.
+Choose either a project file or image/document/archive files.</source>
+        <translation>プロジェクトファイルは他のインポートファイルと一緒に開けません。
+プロジェクトファイルだけを選ぶか、画像・ドキュメント・アーカイブファイルだけを選択してください。</translation>
+    </message>
 </context>
 <context>
     <name>TextRenderingPage</name>
@@ -1648,65 +2306,94 @@ Open or create a project to get started.</source>
     </message>
 </context>
 <context>
+    <name>ToolStateMixin</name>
+    <message>
+        <source>Add Inpaint Mask
+Paint areas to clean before running inpainting.
+These pixels are added to the final mask.</source>
+        <translation>インペイントマスクを追加
+インペイントを実行する前に、きれいにしたい領域を塗ります。
+これらのピクセルは最終マスクに追加されます。</translation>
+    </message>
+    <message>
+        <source>Erase Mask Strokes
+Remove parts of drawn add/exclude strokes.
+This edits mask strokes only and does not change applied patches.</source>
+        <translation>マスクストロークを消去
+描画した追加/除外ストロークの一部を消します。
+これはマスクストロークだけを編集し、適用済みのパッチは変更しません。</translation>
+    </message>
+    <message>
+        <source>Exclude from Inpainting
+Protect areas from inpainting.
+Excluded pixels are removed from the final mask even if they were auto-detected or painted.</source>
+        <translation>インペイントから除外
+領域がインペイントされないよう保護します。
+自動検出された領域や手動で塗った領域であっても、除外したピクセルは最終マスクから取り除かれます。</translation>
+    </message>
+    <message>
+        <source>Restore Original over Inpainted Area
+Paint over an inpainted result to bring back the original image.
+This creates a restore patch above existing inpaint patches on the current page.</source>
+        <translation>インペイント領域の上に元画像を復元
+インペイント結果の上を塗って元の画像を戻します。
+現在のページにある既存のインペイントパッチの上に復元パッチを作成します。</translation>
+    </message>
+    <message>
+        <source>Restore Original over Inpainted Area
+No inpainted patch exists on this page yet.
+Run inpainting first, then use this tool to recover original pixels where needed.</source>
+        <translation>インペイント領域の上に元画像を復元
+このページにはまだインペイントパッチがありません。
+先にインペイントを実行してから、必要な場所でこのツールを使って元のピクセルを戻してください。</translation>
+    </message>
+    <message>
+        <source>Clear Inpaint Mask Strokes
+Remove all add/exclude mask strokes on the current page.
+Applied inpaint and restore patches are kept; use Undo to revert patch changes.</source>
+        <translation>インペイントマスクストロークをクリア
+現在のページ上の追加/除外マスクストロークをすべて削除します。
+適用済みのインペイントパッチと復元パッチは保持されます。パッチ変更を戻すには元に戻すを使ってください。</translation>
+    </message>
+    <message>
+        <source>Inpaint Brush Size
+Adjust the size used by add, erase, exclude, and restore brushes.</source>
+        <translation>インペイントブラシサイズ
+追加、消去、除外、復元ブラシで使うサイズを調整します。</translation>
+    </message>
+</context>
+<context>
     <name>ToolsPage</name>
     <message>
         <source>Translator</source>
         <translation>翻訳者</translation>
     </message>
     <message>
+        <source>Custom Local Server(Gemma)</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
         <source>Text Recognition</source>
         <translation>テキスト認識</translation>
+    </message>
+    <message>
+        <source>PaddleOCR VL</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Automatic Runtime</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Automatic mode is fixed to RT-DETR-v2 detection, legacy bbox rescue masking, and source block-wise LaMa cleaning.</source>
+        <translation type="unfinished"></translation>
     </message>
     <message>
         <source>Text Detector</source>
         <translation>テキスト検出器</translation>
     </message>
     <message>
-        <source>Precise Masking</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Mask Refiner</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>legacy_bbox</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>ctd</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Keep Existing Lines</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>detect_size</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>det_rearrange_max_batches</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
         <source>device</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>font size multiplier</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>font size max</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>font size min</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>mask dilate size</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
@@ -1716,10 +2403,6 @@ Open or create a project to get started.</source>
     <message>
         <source>Inpainter</source>
         <translation>修復者</translation>
-    </message>
-    <message>
-        <source>AOT</source>
-        <translation>AOT</translation>
     </message>
     <message>
         <source>inpaint_size</source>
@@ -1778,6 +2461,29 @@ then do inpainting on the resized image.</source>
     <message>
         <source>lama_mpe</source>
         <translation type="unfinished"></translation>
+    </message>
+</context>
+<context>
+    <name>UserDictionariesPage</name>
+    <message>
+        <source>Correction dictionaries rewrite OCR and translation results before they are saved to the project.</source>
+        <translation>補正辞書は、OCR と翻訳の結果をプロジェクトに保存する前に書き換えて補正します。</translation>
+    </message>
+    <message>
+        <source>OCR Result Dictionary</source>
+        <translation>OCR 結果辞書</translation>
+    </message>
+    <message>
+        <source>Apply these substitutions immediately after OCR returns text, before the source text is stored.</source>
+        <translation>OCR がテキストを返した直後、原文として保存される前にこれらの置換を適用します。</translation>
+    </message>
+    <message>
+        <source>Translation Result Dictionary</source>
+        <translation>翻訳結果辞書</translation>
+    </message>
+    <message>
+        <source>Apply these substitutions immediately after translation or TXT/MD import returns text, before the translation is stored.</source>
+        <translation>翻訳または TXT/MD インポートがテキストを返した直後、翻訳文として保存される前にこれらの置換を適用します。</translation>
     </message>
 </context>
 <context>
@@ -1931,6 +2637,50 @@ then do inpainting on the resized image.</source>
         <translation>スタイル</translation>
     </message>
     <message>
+        <source>When enabled, this project inherits the automatic output settings from Settings.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Output target</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Individual images</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Single archive</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Image format</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Archive format</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Archive image format</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Compression level</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>PNG/JPG/WEBP images are saved at maximum quality.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Archive compression only affects the ZIP/CBZ container, not image quality.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Load pages to see automatic output estimates.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
         <source>Top</source>
         <translation>上</translation>
     </message>
@@ -2033,20 +2783,84 @@ back on the Image (for further editing)</source>
         <translation>すべてのブロックのサイズを大きくする</translation>
     </message>
     <message>
-        <source>Draw Brush Strokes for Cleaning Image</source>
-        <translation>画像をクリーニングするためのブラシ ストロークを描画する</translation>
+        <source>TXT/MD</source>
+        <translation>TXT/MD</translation>
     </message>
     <message>
-        <source>Erase Brush Strokes</source>
-        <translation>ブラシ ストロークの消去</translation>
+        <source>Export Source TXT</source>
+        <translation>原文 TXT をエクスポート</translation>
     </message>
     <message>
-        <source>Remove all the brush strokes on the Image</source>
-        <translation>画像上のすべてのブラシ ストロークを削除します</translation>
+        <source>Export the current project&apos;s source text in the TXT exchange format.</source>
+        <translation>現在のプロジェクトの原文テキストを TXT 交換フォーマットでエクスポートします。</translation>
     </message>
     <message>
-        <source>Brush/Eraser Size Slider</source>
-        <translation>ブラシ/消しゴムサイズスライダー</translation>
+        <source>Import Translation TXT</source>
+        <translation>翻訳 TXT をインポート</translation>
+    </message>
+    <message>
+        <source>Import translated text from a TXT exchange file and rebuild text boxes to fit.</source>
+        <translation>TXT 交換ファイルから翻訳テキストをインポートし、テキストボックスが収まるように再構築します。</translation>
+    </message>
+    <message>
+        <source>Export Source MD</source>
+        <translation>原文 MD をエクスポート</translation>
+    </message>
+    <message>
+        <source>Export the current project&apos;s source text in the Markdown exchange format.</source>
+        <translation>現在のプロジェクトの原文テキストを Markdown 交換フォーマットでエクスポートします。</translation>
+    </message>
+    <message>
+        <source>Import Translation MD</source>
+        <translation>翻訳 MD をインポート</translation>
+    </message>
+    <message>
+        <source>Import translated text from a Markdown exchange file and rebuild text boxes to fit.</source>
+        <translation>Markdown 交換ファイルから翻訳テキストをインポートし、テキストボックスが収まるように再構築します。</translation>
+    </message>
+    <message>
+        <source>Auto Export Source TXT</source>
+        <translation>原文 TXT を自動エクスポート</translation>
+    </message>
+    <message>
+        <source>After a successful automatic run, overwrite the TXT source exchange file with only the pages from that run.</source>
+        <translation>自動実行が正常に完了した後、その実行に含まれるページだけで TXT 原文交換ファイルを上書きします。</translation>
+    </message>
+    <message>
+        <source>Auto Export Source MD</source>
+        <translation>原文 MD を自動エクスポート</translation>
+    </message>
+    <message>
+        <source>After a successful automatic run, overwrite the Markdown source exchange file with only the pages from that run.</source>
+        <translation>自動実行が正常に完了した後、その実行に含まれるページだけで Markdown 原文交換ファイルを上書きします。</translation>
+    </message>
+    <message>
+        <source>Auto Export Translation TXT</source>
+        <translation>翻訳 TXT を自動エクスポート</translation>
+    </message>
+    <message>
+        <source>After a successful automatic run, overwrite the TXT translation exchange file with only the pages from that run.</source>
+        <translation>自動実行が正常に完了した後、その実行に含まれるページだけで TXT 翻訳交換ファイルを上書きします。</translation>
+    </message>
+    <message>
+        <source>Auto Export Translation MD</source>
+        <translation>翻訳 MD を自動エクスポート</translation>
+    </message>
+    <message>
+        <source>After a successful automatic run, overwrite the Markdown translation exchange file with only the pages from that run.</source>
+        <translation>自動実行が正常に完了した後、その実行に含まれるページだけで Markdown 翻訳交換ファイルを上書きします。</translation>
+    </message>
+    <message>
+        <source>Output</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Use global output settings</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Same as source</source>
+        <translation type="unfinished"></translation>
     </message>
     <message>
         <source>Box Drawing</source>
@@ -2055,6 +2869,13 @@ back on the Image (for further editing)</source>
     <message>
         <source>Inpainting</source>
         <translation>修復</translation>
+    </message>
+</context>
+<context>
+    <name>_PageListContentView</name>
+    <message>
+        <source>{count} pages</source>
+        <translation>{count}ページ</translation>
     </message>
 </context>
 <context>
@@ -2147,7 +2968,7 @@ It may have already been moved, renamed, or deleted.
     </message>
     <message>
         <source>Delete</source>
-        <translation type="unfinished">消去</translation>
+        <translation>削除</translation>
     </message>
     <message>
         <source>Cancel</source>
@@ -2307,8 +3128,8 @@ It may have been moved, renamed, or deleted.
         <translation>GPT-4.1</translation>
     </message>
     <message>
-        <source>Claude-4.5-Sonnet</source>
-        <translation>クロード-4.5-ソネット</translation>
+        <source>Claude-4.6-Sonnet</source>
+        <translation type="unfinished"></translation>
     </message>
     <message>
         <source>Claude-4.5-Haiku</source>
@@ -2353,6 +3174,10 @@ It may have been moved, renamed, or deleted.
         <translation type="unfinished"></translation>
     </message>
     <message>
+        <source>Optimal+ (HunyuanOCR / MangaLMM / PaddleOCR VL)</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
         <source>Microsoft OCR</source>
         <translation type="unfinished">マイクロソフトOCR</translation>
     </message>
@@ -2370,6 +3195,10 @@ It may have been moved, renamed, or deleted.
     </message>
     <message>
         <source>HunyuanOCR</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>MangaLMM</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
@@ -2440,6 +3269,14 @@ It may have been moved, renamed, or deleted.
     </message>
     <message>
         <source>HunyuanOCR Settings</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>MangaLMM Settings</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Gemma Local Server Settings</source>
         <translation type="unfinished"></translation>
     </message>
 </context>
