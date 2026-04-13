@@ -5,6 +5,7 @@ from unittest import mock
 
 from modules.ocr.local_runtime import LocalOCRRuntimeManager
 from modules.utils.exceptions import LocalServiceSetupError
+from modules.utils.llama_cpp_runtime import DEFAULT_LLAMA_CPP_IMAGE
 
 
 class _DummySettingsPage:
@@ -43,7 +44,7 @@ class LocalOCRRuntimeManagerTests(unittest.TestCase):
     def test_hunyuan_env_defaults_are_applied(self) -> None:
         manager = LocalOCRRuntimeManager()
         env = manager._build_env("HunyuanOCR")
-        self.assertEqual(env["LLAMA_CPP_IMAGE"], "local/llama.cpp:server-cuda-b8709")
+        self.assertEqual(env["LLAMA_CPP_IMAGE"], DEFAULT_LLAMA_CPP_IMAGE)
         self.assertEqual(env["LLAMA_N_GPU_LAYERS"], "80")
 
     def test_validate_engine_requires_docker_for_managed_mode(self) -> None:
@@ -56,6 +57,28 @@ class LocalOCRRuntimeManagerTests(unittest.TestCase):
         ):
             with self.assertRaises(LocalServiceSetupError):
                 manager.validate_engine("HunyuanOCR", settings_page)
+
+    def test_probe_managed_engine_returns_healthy_without_compose_side_effects(self) -> None:
+        manager = LocalOCRRuntimeManager()
+        settings_page = _DummySettingsPage()
+        with mock.patch.object(manager, "_wait_for_health", return_value=True) as wait_for_health, \
+             mock.patch.object(manager, "_run_compose") as run_compose:
+            result = manager.probe_managed_engine("PaddleOCR VL", settings_page)
+
+        self.assertEqual(result, "healthy")
+        wait_for_health.assert_called_once()
+        run_compose.assert_not_called()
+
+    def test_probe_managed_engine_returns_unavailable_without_compose_side_effects(self) -> None:
+        manager = LocalOCRRuntimeManager()
+        settings_page = _DummySettingsPage()
+        with mock.patch.object(manager, "_wait_for_health", return_value=False) as wait_for_health, \
+             mock.patch.object(manager, "_run_compose") as run_compose:
+            result = manager.probe_managed_engine("HunyuanOCR", settings_page)
+
+        self.assertEqual(result, "unavailable")
+        wait_for_health.assert_called_once()
+        run_compose.assert_not_called()
 
 
 if __name__ == "__main__":
