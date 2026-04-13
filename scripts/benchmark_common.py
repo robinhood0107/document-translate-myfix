@@ -49,10 +49,12 @@ PRESET_DIRS = [
     ROOT / "benchmarks" / "paddleocr_vl15" / "presets",
     ROOT / "benchmarks" / "ocr_combo" / "presets",
     ROOT / "benchmarks" / "ocr_combo_ranked" / "presets",
+    ROOT / "benchmarks" / "ocr_simpletest_mangalmm_vs_paddle" / "presets",
     ROOT / "benchmarks" / "inpaint_ctd" / "presets",
 ]
 OCR_BUNDLE_DIR = ROOT / "paddleocr_vl_docker_files"
 HUNYUAN_OCR_BUNDLE_DIR = ROOT / "hunyuanocr_docker_files"
+MANGALMM_OCR_BUNDLE_DIR = ROOT / "mangalmm_docker_files"
 ROOT_GEMMA_COMPOSE = ROOT / "docker-compose.yaml"
 GEMMA_CONTAINER_NAMES = [
     "gemma-local-server",
@@ -64,9 +66,15 @@ PADDLEOCR_VL_CONTAINER_NAMES = [
 HUNYUAN_OCR_CONTAINER_NAMES = [
     "hunyuanocr-local-server",
 ]
+MANGALMM_OCR_CONTAINER_NAMES = [
+    "mangalmm-local-server",
+]
 DEFAULT_CONTAINER_NAMES = GEMMA_CONTAINER_NAMES + PADDLEOCR_VL_CONTAINER_NAMES
 ALL_BENCHMARK_CONTAINER_NAMES = (
-    GEMMA_CONTAINER_NAMES + PADDLEOCR_VL_CONTAINER_NAMES + HUNYUAN_OCR_CONTAINER_NAMES
+    GEMMA_CONTAINER_NAMES
+    + PADDLEOCR_VL_CONTAINER_NAMES
+    + HUNYUAN_OCR_CONTAINER_NAMES
+    + MANGALMM_OCR_CONTAINER_NAMES
 )
 GEMMA_HEALTH_URLS = [
     "http://127.0.0.1:18080/health",
@@ -77,6 +85,9 @@ PADDLEOCR_VL_HEALTH_URLS = [
 ]
 HUNYUAN_OCR_HEALTH_URLS = [
     "http://127.0.0.1:28080/health",
+]
+MANGALMM_OCR_HEALTH_URLS = [
+    "http://127.0.0.1:28081/health",
 ]
 
 
@@ -93,6 +104,8 @@ def ocr_runtime_kind(preset: dict[str, Any]) -> str:
         return "paddleocr_vl"
     if ocr_name == "HunyuanOCR":
         return "hunyuanocr"
+    if ocr_name == "MangaLMM":
+        return "mangalmm"
     return "internal"
 
 
@@ -109,6 +122,8 @@ def resolve_runtime_container_names(
         names.extend(PADDLEOCR_VL_CONTAINER_NAMES)
     elif kind == "hunyuanocr":
         names.extend(HUNYUAN_OCR_CONTAINER_NAMES)
+    elif kind == "mangalmm":
+        names.extend(MANGALMM_OCR_CONTAINER_NAMES)
     return names
 
 
@@ -125,6 +140,8 @@ def resolve_runtime_health_urls(
         urls.extend(PADDLEOCR_VL_HEALTH_URLS)
     elif kind == "hunyuanocr":
         urls.extend(HUNYUAN_OCR_HEALTH_URLS)
+    elif kind == "mangalmm":
+        urls.extend(MANGALMM_OCR_HEALTH_URLS)
     return urls
 
 
@@ -236,6 +253,40 @@ def _python3_yaml_dump(path: Path, payload: dict[str, Any]) -> None:
     path.write_text(dumped, encoding="utf-8")
 
 
+def _resolve_testmodel_dir() -> Path:
+    env_dir = os.getenv("CT_TESTMODEL_DIR", "").strip()
+    candidates: list[Path] = []
+    if env_dir:
+        candidates.append(Path(env_dir).expanduser())
+
+    candidates.extend(
+        [
+            ROOT / "testmodel",
+            ROOT.with_name("comic-translate") / "testmodel",
+            ROOT.parent / "comic-translate" / "testmodel",
+        ]
+    )
+
+    def has_gguf_files(path: Path) -> bool:
+        if not path.is_dir():
+            return False
+        try:
+            return any(item.is_file() and item.suffix.lower() == ".gguf" for item in path.iterdir())
+        except OSError:
+            return False
+
+    seen: set[str] = set()
+    for candidate in candidates:
+        resolved = candidate.resolve()
+        key = str(resolved)
+        if key in seen:
+            continue
+        seen.add(key)
+        if has_gguf_files(resolved):
+            return resolved
+    return (ROOT / "testmodel").resolve()
+
+
 def load_preset(preset: str) -> tuple[dict[str, Any], Path]:
     candidate = Path(preset)
     if not candidate.is_file():
@@ -317,7 +368,7 @@ def _stage_gemma_runtime(preset: dict[str, Any], runtime_dir: Path) -> dict[str,
     command = list(service.get("command") or [])
     volumes = list(service.get("volumes") or [])
     gemma = preset.get("gemma", {})
-    testmodel_dir = (ROOT / "testmodel").resolve()
+    testmodel_dir = _resolve_testmodel_dir()
 
     normalized_volumes: list[Any] = []
     for volume in volumes:
@@ -427,7 +478,7 @@ def _stage_hunyuan_ocr_runtime(preset: dict[str, Any], runtime_dir: Path) -> dic
     command = list(service.get("command") or [])
     volumes = list(service.get("volumes") or [])
     ocr_runtime = preset.get("ocr_runtime", {}) if isinstance(preset.get("ocr_runtime"), dict) else {}
-    testmodel_dir = (ROOT / "testmodel").resolve()
+    testmodel_dir = _resolve_testmodel_dir()
 
     normalized_volumes: list[Any] = []
     for volume in volumes:
@@ -463,6 +514,49 @@ def _stage_hunyuan_ocr_runtime(preset: dict[str, Any], runtime_dir: Path) -> dic
     }
 
 
+def _stage_mangalmm_ocr_runtime(preset: dict[str, Any], runtime_dir: Path) -> dict[str, Any]:
+    runtime_dir.mkdir(parents=True, exist_ok=True)
+    compose = _python3_yaml_load(MANGALMM_OCR_BUNDLE_DIR / "docker-compose.yaml")
+    service = compose["services"]["mangalmm-local-server"]
+    command = list(service.get("command") or [])
+    volumes = list(service.get("volumes") or [])
+    ocr_runtime = preset.get("ocr_runtime", {}) if isinstance(preset.get("ocr_runtime"), dict) else {}
+    testmodel_dir = _resolve_testmodel_dir()
+
+    normalized_volumes: list[Any] = []
+    for volume in volumes:
+        if isinstance(volume, str) and volume.startswith("./testmodel:"):
+            normalized_volumes.append(f"{testmodel_dir.as_posix()}:/models:ro")
+        else:
+            normalized_volumes.append(volume)
+    if normalized_volumes:
+        service["volumes"] = normalized_volumes
+
+    service["image"] = normalize_llama_cpp_image(ocr_runtime.get("image") or DEFAULT_LLAMA_CPP_IMAGE)
+    service["pull_policy"] = normalize_llama_cpp_pull_policy(ocr_runtime.get("pull_policy"))
+    if ocr_runtime.get("model_path"):
+        _update_command_option(command, "-m", [str(ocr_runtime["model_path"])])
+    if ocr_runtime.get("mmproj_path"):
+        _update_command_option(command, "--mmproj", [str(ocr_runtime["mmproj_path"])])
+    if ocr_runtime.get("context_size") is not None:
+        _update_command_option(command, "-c", [str(ocr_runtime["context_size"])])
+    if ocr_runtime.get("n_parallel") is not None:
+        _update_command_option(command, "-np", [str(ocr_runtime["n_parallel"])])
+    if ocr_runtime.get("threads") is not None:
+        _update_command_option(command, "-t", [str(ocr_runtime["threads"])])
+    if ocr_runtime.get("n_gpu_layers") is not None:
+        _update_command_option(command, "--n-gpu-layers", [str(ocr_runtime["n_gpu_layers"])])
+
+    service["command"] = command
+    compose_path = runtime_dir / "docker-compose.yaml"
+    _python3_yaml_dump(compose_path, compose)
+    return {
+        "kind": "mangalmm",
+        "compose_path": str(compose_path.resolve()),
+        "service_names": ["mangalmm-local-server"],
+    }
+
+
 def _stage_internal_ocr_runtime(runtime_dir: Path) -> dict[str, Any]:
     runtime_dir.mkdir(parents=True, exist_ok=True)
     return {
@@ -484,6 +578,8 @@ def stage_runtime_files(preset: dict[str, Any], runtime_dir: str | Path) -> dict
         ocr_runtime = _stage_ocr_runtime(preset, base / "ocr")
     elif kind == "hunyuanocr":
         ocr_runtime = _stage_hunyuan_ocr_runtime(preset, base / "ocr")
+    elif kind == "mangalmm":
+        ocr_runtime = _stage_mangalmm_ocr_runtime(preset, base / "ocr")
     else:
         ocr_runtime = _stage_internal_ocr_runtime(base / "ocr")
 
@@ -495,6 +591,7 @@ def stage_runtime_files(preset: dict[str, Any], runtime_dir: str | Path) -> dict
                 "gemma": preset.get("gemma", {}),
                 "ocr_client": preset.get("ocr_client", {}),
                 "hunyuan_ocr_client": preset.get("hunyuan_ocr_client", {}),
+                "mangalmm_ocr_client": preset.get("mangalmm_ocr_client", {}),
                 "ocr_runtime": preset.get("ocr_runtime", {}),
             },
             ensure_ascii=False,
@@ -539,6 +636,11 @@ def collect_managed_llama_cpp_runtimes(
         payload["hunyuanocr"] = inspect_llama_cpp_runtime(
             image_ref=normalize_llama_cpp_image(ocr_runtime.get("image") or DEFAULT_LLAMA_CPP_IMAGE),
             container_name="hunyuanocr-local-server",
+        )
+    elif ocr_runtime_kind(preset) == "mangalmm":
+        payload["mangalmm"] = inspect_llama_cpp_runtime(
+            image_ref=normalize_llama_cpp_image(ocr_runtime.get("image") or DEFAULT_LLAMA_CPP_IMAGE),
+            container_name="mangalmm-local-server",
         )
     return payload
 
