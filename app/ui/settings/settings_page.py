@@ -41,11 +41,11 @@ from modules.utils.mask_inpaint_mode import (
     DEFAULT_MASK_INPAINT_MODE,
 )
 from modules.utils.automatic_output import (
-    DEFAULT_JPG_QUALITY,
-    DEFAULT_OUTPUT_FORMAT,
-    DEFAULT_OUTPUT_PRESET,
-    DEFAULT_PNG_COMPRESSION,
-    DEFAULT_WEBP_QUALITY,
+    DEFAULT_OUTPUT_ARCHIVE_COMPRESSION_LEVEL,
+    DEFAULT_OUTPUT_ARCHIVE_FORMAT,
+    DEFAULT_OUTPUT_ARCHIVE_IMAGE_FORMAT,
+    DEFAULT_OUTPUT_IMAGE_FORMAT,
+    DEFAULT_OUTPUT_TARGET,
     normalize_global_output_settings,
     normalize_project_output_preferences,
     resolve_automatic_output_settings,
@@ -135,11 +135,11 @@ class SettingsPage(QtWidgets.QWidget):
         self.ui.mask_overlay_checkbox.stateChanged.connect(self._save_settings_if_not_loading)
         self.ui.cleanup_mask_delta_checkbox.stateChanged.connect(self._save_settings_if_not_loading)
         self.ui.debug_metadata_checkbox.stateChanged.connect(self._save_settings_if_not_loading)
-        self.ui.automatic_output_format_combo.currentIndexChanged.connect(self._save_settings_if_not_loading)
-        self.ui.automatic_output_preset_combo.currentIndexChanged.connect(self._save_settings_if_not_loading)
-        self.ui.automatic_output_png_spinbox.valueChanged.connect(self._save_settings_if_not_loading)
-        self.ui.automatic_output_jpg_spinbox.valueChanged.connect(self._save_settings_if_not_loading)
-        self.ui.automatic_output_webp_spinbox.valueChanged.connect(self._save_settings_if_not_loading)
+        self.ui.automatic_output_target_combo.currentIndexChanged.connect(self._save_settings_if_not_loading)
+        self.ui.automatic_output_image_format_combo.currentIndexChanged.connect(self._save_settings_if_not_loading)
+        self.ui.automatic_output_archive_format_combo.currentIndexChanged.connect(self._save_settings_if_not_loading)
+        self.ui.automatic_output_archive_image_format_combo.currentIndexChanged.connect(self._save_settings_if_not_loading)
+        self.ui.automatic_output_archive_level_spinbox.valueChanged.connect(self._save_settings_if_not_loading)
         self.ui.user_dictionaries_page.changed.connect(self._save_settings_if_not_loading)
         self.ui.notifications_page.changed.connect(self._save_settings_if_not_loading)
         self.ui.notifications_page.test_requested.connect(self.play_test_completion_sound)
@@ -420,17 +420,22 @@ class SettingsPage(QtWidgets.QWidget):
             "export_mask_overlay": self.ui.mask_overlay_checkbox.isChecked(),
             "export_cleanup_mask_delta": self.ui.cleanup_mask_delta_checkbox.isChecked(),
             "export_debug_metadata": self.ui.debug_metadata_checkbox.isChecked(),
-            "automatic_output_format": str(
-                self.ui.automatic_output_format_combo.currentData() or DEFAULT_OUTPUT_FORMAT
+            "automatic_output_target": str(
+                self.ui.automatic_output_target_combo.currentData() or DEFAULT_OUTPUT_TARGET
             ),
-            "automatic_output_preset": str(
-                self.ui.automatic_output_preset_combo.currentData() or DEFAULT_OUTPUT_PRESET
+            "automatic_output_image_format": str(
+                self.ui.automatic_output_image_format_combo.currentData() or DEFAULT_OUTPUT_IMAGE_FORMAT
             ),
-            "automatic_output_png_compression_level": int(
-                self.ui.automatic_output_png_spinbox.value()
+            "automatic_output_archive_format": str(
+                self.ui.automatic_output_archive_format_combo.currentData() or DEFAULT_OUTPUT_ARCHIVE_FORMAT
             ),
-            "automatic_output_jpg_quality": int(self.ui.automatic_output_jpg_spinbox.value()),
-            "automatic_output_webp_quality": int(self.ui.automatic_output_webp_spinbox.value()),
+            "automatic_output_archive_image_format": str(
+                self.ui.automatic_output_archive_image_format_combo.currentData()
+                or DEFAULT_OUTPUT_ARCHIVE_IMAGE_FORMAT
+            ),
+            "automatic_output_archive_compression_level": int(
+                self.ui.automatic_output_archive_level_spinbox.value()
+            ),
             "project_autosave_enabled": autosave_enabled,
             "project_autosave_interval_min": int(self.ui.project_autosave_interval_spinbox.value()),
             "project_autosave_folder": autosave_folder,
@@ -652,6 +657,11 @@ class SettingsPage(QtWidgets.QWidget):
         settings.beginGroup("export")
         settings.remove("auto_save")
         settings.remove("archive_save_as")
+        settings.remove("automatic_output_format")
+        settings.remove("automatic_output_preset")
+        settings.remove("automatic_output_png_compression_level")
+        settings.remove("automatic_output_jpg_quality")
+        settings.remove("automatic_output_webp_quality")
         settings.endGroup()
 
         dictionaries = self.get_dictionary_settings()
@@ -888,42 +898,56 @@ class SettingsPage(QtWidgets.QWidget):
         self.ui.debug_metadata_checkbox.setChecked(
             settings.value("export_debug_metadata", False, type=bool)
         )
-        automatic_output_format = settings.value(
-            "automatic_output_format",
-            DEFAULT_OUTPUT_FORMAT,
-            type=str,
+        normalized_output_settings = normalize_global_output_settings(
+            {
+                "automatic_output_target": settings.value(
+                    "automatic_output_target",
+                    DEFAULT_OUTPUT_TARGET,
+                    type=str,
+                ),
+                "automatic_output_image_format": settings.value(
+                    "automatic_output_image_format",
+                    settings.value("automatic_output_format", DEFAULT_OUTPUT_IMAGE_FORMAT, type=str),
+                    type=str,
+                ),
+                "automatic_output_archive_format": settings.value(
+                    "automatic_output_archive_format",
+                    DEFAULT_OUTPUT_ARCHIVE_FORMAT,
+                    type=str,
+                ),
+                "automatic_output_archive_image_format": settings.value(
+                    "automatic_output_archive_image_format",
+                    DEFAULT_OUTPUT_ARCHIVE_IMAGE_FORMAT,
+                    type=str,
+                ),
+                "automatic_output_archive_compression_level": settings.value(
+                    "automatic_output_archive_compression_level",
+                    DEFAULT_OUTPUT_ARCHIVE_COMPRESSION_LEVEL,
+                    type=int,
+                ),
+            }
         )
-        automatic_output_preset = settings.value(
-            "automatic_output_preset",
-            DEFAULT_OUTPUT_PRESET,
-            type=str,
+        target_index = self.ui.automatic_output_target_combo.findData(
+            normalized_output_settings["automatic_output_target"]
         )
-        automatic_output_png = settings.value(
-            "automatic_output_png_compression_level",
-            DEFAULT_PNG_COMPRESSION,
-            type=int,
+        self.ui.automatic_output_target_combo.setCurrentIndex(max(target_index, 0))
+        image_format_index = self.ui.automatic_output_image_format_combo.findData(
+            normalized_output_settings["automatic_output_image_format"]
         )
-        automatic_output_jpg = settings.value(
-            "automatic_output_jpg_quality",
-            DEFAULT_JPG_QUALITY,
-            type=int,
+        self.ui.automatic_output_image_format_combo.setCurrentIndex(max(image_format_index, 0))
+        archive_format_index = self.ui.automatic_output_archive_format_combo.findData(
+            normalized_output_settings["automatic_output_archive_format"]
         )
-        automatic_output_webp = settings.value(
-            "automatic_output_webp_quality",
-            DEFAULT_WEBP_QUALITY,
-            type=int,
+        self.ui.automatic_output_archive_format_combo.setCurrentIndex(max(archive_format_index, 0))
+        archive_image_format_index = self.ui.automatic_output_archive_image_format_combo.findData(
+            normalized_output_settings["automatic_output_archive_image_format"]
         )
-        format_index = self.ui.automatic_output_format_combo.findData(automatic_output_format)
-        if format_index < 0:
-            format_index = self.ui.automatic_output_format_combo.findData(DEFAULT_OUTPUT_FORMAT)
-        self.ui.automatic_output_format_combo.setCurrentIndex(max(format_index, 0))
-        preset_index = self.ui.automatic_output_preset_combo.findData(automatic_output_preset)
-        if preset_index < 0:
-            preset_index = self.ui.automatic_output_preset_combo.findData(DEFAULT_OUTPUT_PRESET)
-        self.ui.automatic_output_preset_combo.setCurrentIndex(max(preset_index, 0))
-        self.ui.automatic_output_png_spinbox.setValue(int(automatic_output_png))
-        self.ui.automatic_output_jpg_spinbox.setValue(int(automatic_output_jpg))
-        self.ui.automatic_output_webp_spinbox.setValue(int(automatic_output_webp))
+        self.ui.automatic_output_archive_image_format_combo.setCurrentIndex(
+            max(archive_image_format_index, 0)
+        )
+        self.ui.automatic_output_archive_level_spinbox.setValue(
+            int(normalized_output_settings["automatic_output_archive_compression_level"])
+        )
         autosave_enabled = settings.value("project_autosave_enabled", False, type=bool)
         owner = self.parent()
         title_bar = getattr(owner, "title_bar", None)

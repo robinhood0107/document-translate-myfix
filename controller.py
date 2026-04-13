@@ -29,16 +29,21 @@ from modules.utils.pipeline_config import validate_settings
 from modules.utils.automatic_progress import AutomaticProgressTracker
 from modules.utils.download import set_download_callback
 from modules.utils.notification_sound import SYSTEM_SOUND_MODE, notify_pipeline_event, play_completion_sound
+from modules.utils.archives import make as make_archive
 from modules.utils.automatic_output import (
-    OUTPUT_OVERRIDE_MODE_GLOBAL,
-    OUTPUT_OVERRIDE_MODE_PROJECT,
-    SUPPORTED_OUTPUT_PRESETS,
+    OUTPUT_TARGET_ARCHIVE,
+    OUTPUT_TARGET_IMAGES,
+    build_archive_file_name,
     build_series_output_dir,
     default_project_output_preferences,
-    estimate_output_for_pages,
+    estimate_archive_options_for_pages,
+    format_estimate_size_text,
     format_estimate_ratio_text,
     format_estimate_seconds_text,
+    is_individual_images_mode,
+    is_single_archive_mode,
     normalize_project_output_preferences,
+    preserve_preview_file,
     resolve_automatic_output_settings,
     resolve_series_folder_name,
 )
@@ -290,14 +295,17 @@ class ComicTranslate(ComicTranslateUI):
         ):
             checkbox.stateChanged.connect(self.settings_page._save_settings_if_not_loading)
         self.output_use_global_checkbox.stateChanged.connect(self._on_project_output_use_global_changed)
-        self.output_format_combo.currentIndexChanged.connect(self._on_project_output_selection_changed)
-        self.output_preset_combo.currentIndexChanged.connect(self._on_project_output_selection_changed)
+        self.output_target_combo.currentIndexChanged.connect(self._on_project_output_selection_changed)
+        self.output_image_format_combo.currentIndexChanged.connect(self._on_project_output_selection_changed)
+        self.output_archive_format_combo.currentIndexChanged.connect(self._on_project_output_selection_changed)
+        self.output_archive_image_format_combo.currentIndexChanged.connect(self._on_project_output_selection_changed)
+        self.output_archive_level_spinbox.valueChanged.connect(self._on_project_output_selection_changed)
         for signal in (
-            self.settings_page.ui.automatic_output_format_combo.currentIndexChanged,
-            self.settings_page.ui.automatic_output_preset_combo.currentIndexChanged,
-            self.settings_page.ui.automatic_output_png_spinbox.valueChanged,
-            self.settings_page.ui.automatic_output_jpg_spinbox.valueChanged,
-            self.settings_page.ui.automatic_output_webp_spinbox.valueChanged,
+            self.settings_page.ui.automatic_output_target_combo.currentIndexChanged,
+            self.settings_page.ui.automatic_output_image_format_combo.currentIndexChanged,
+            self.settings_page.ui.automatic_output_archive_format_combo.currentIndexChanged,
+            self.settings_page.ui.automatic_output_archive_image_format_combo.currentIndexChanged,
+            self.settings_page.ui.automatic_output_archive_level_spinbox.valueChanged,
         ):
             signal.connect(self.refresh_automatic_output_controls)
 
@@ -488,142 +496,243 @@ class ComicTranslate(ComicTranslateUI):
                 metrics.append(metric)
         return metrics
 
-    def _format_output_estimate_text(
+    def _format_archive_estimate_summary(
         self,
-        estimate: dict[str, object],
-        *,
-        prefix: str,
+        estimates: dict[str, dict[str, object]],
     ) -> str:
-        return prefix.format(
-            ratio=format_estimate_ratio_text(estimate),
-            time=format_estimate_seconds_text(estimate.get("seconds", 0.0)),
-            pages=int(estimate.get("page_count", 0) or 0),
-        )
-
-    def _preset_display_name(self, preset: str) -> str:
-        names = {
-            "fast": self.tr("Fast"),
-            "balanced": self.tr("Balanced"),
-            "small": self.tr("Small"),
-        }
-        return names.get(preset, preset)
-
-    def _rebuild_output_preset_combo_labels(
-        self,
-        combo: QtWidgets.QComboBox,
-        *,
-        requested_format: str,
-        global_settings: dict[str, object],
-        page_metrics: list[dict[str, object]],
-        selected_value: str,
-    ) -> None:
-        blocker = QtCore.QSignalBlocker(combo)
-        combo.clear()
-        for preset in SUPPORTED_OUTPUT_PRESETS:
-            label = self._preset_display_name(preset)
-            if page_metrics:
-                estimate_settings = resolve_automatic_output_settings(
-                    global_settings,
-                    {
-                        "output_format_override_mode": OUTPUT_OVERRIDE_MODE_PROJECT,
-                        "output_format_override_value": requested_format,
-                        "output_preset_override_mode": OUTPUT_OVERRIDE_MODE_PROJECT,
-                        "output_preset_override_value": preset,
-                    },
-                )
-                estimate = estimate_output_for_pages(page_metrics, estimate_settings)
-                label = self.tr("{name} (Estimated: {ratio}, {time})").format(
-                    name=label,
-                    ratio=format_estimate_ratio_text(estimate),
+        if not estimates:
+            return self.tr("Load pages to see automatic output estimates.")
+        lines = [self.tr("Archive estimates (PNG / JPG / WEBP):")]
+        for image_format in ("png", "jpg", "webp"):
+            estimate = estimates.get(image_format)
+            if not estimate:
+                continue
+            lines.append(
+                self.tr("{name}: {size}, {time}, {ratio}").format(
+                    name=image_format.upper(),
+                    size=format_estimate_size_text(estimate.get("output_bytes")),
                     time=format_estimate_seconds_text(estimate.get("seconds", 0.0)),
+                    ratio=format_estimate_ratio_text(estimate),
                 )
-            combo.addItem(label, preset)
-        del blocker
-        self._set_combo_to_data(combo, selected_value)
+            )
+        return "\n".join(lines)
 
     def refresh_automatic_output_controls(self) -> None:
         if not hasattr(self, "settings_page") or self.settings_page is None:
             return
-        if not hasattr(self, "output_format_combo"):
+        if not hasattr(self, "output_target_combo"):
             return
 
         global_settings = dict(self.settings_page.get_export_settings())
         project_preferences = self.get_project_output_preferences()
         page_metrics = self._collect_automatic_output_page_metrics()
-        use_global = (
-            project_preferences.get("output_format_override_mode") == OUTPUT_OVERRIDE_MODE_GLOBAL
-            and project_preferences.get("output_preset_override_mode") == OUTPUT_OVERRIDE_MODE_GLOBAL
-        )
-        active_format = (
-            str(global_settings.get("automatic_output_format"))
-            if use_global
-            else project_preferences.get("output_format_override_value", "")
-        )
-        active_preset = (
-            str(global_settings.get("automatic_output_preset"))
-            if use_global
-            else project_preferences.get("output_preset_override_value", "")
-        )
+        use_global = bool(project_preferences.get("output_use_global", True))
         resolved_settings = resolve_automatic_output_settings(
             global_settings,
             None if use_global else project_preferences,
         )
-        global_resolved = resolve_automatic_output_settings(global_settings, None)
+        settings_ui = self.settings_page.ui
+        resolved_target = str(resolved_settings.get("resolved_automatic_output_target", OUTPUT_TARGET_IMAGES))
+        target_is_archive = resolved_target == OUTPUT_TARGET_ARCHIVE
 
         self._automatic_output_controls_updating = True
         try:
-            use_global_blocker = QtCore.QSignalBlocker(self.output_use_global_checkbox)
-            format_blocker = QtCore.QSignalBlocker(self.output_format_combo)
+            control_enabled = bool(self.image_files) and not use_global
+
+            blockers = [
+                QtCore.QSignalBlocker(self.output_use_global_checkbox),
+                QtCore.QSignalBlocker(self.output_target_combo),
+                QtCore.QSignalBlocker(self.output_image_format_combo),
+                QtCore.QSignalBlocker(self.output_archive_format_combo),
+                QtCore.QSignalBlocker(self.output_archive_image_format_combo),
+                QtCore.QSignalBlocker(self.output_archive_level_spinbox),
+                QtCore.QSignalBlocker(settings_ui.automatic_output_target_combo),
+                QtCore.QSignalBlocker(settings_ui.automatic_output_image_format_combo),
+                QtCore.QSignalBlocker(settings_ui.automatic_output_archive_format_combo),
+                QtCore.QSignalBlocker(settings_ui.automatic_output_archive_image_format_combo),
+                QtCore.QSignalBlocker(settings_ui.automatic_output_archive_level_spinbox),
+            ]
+
             self.output_use_global_checkbox.setChecked(use_global)
             self.output_use_global_checkbox.setEnabled(bool(self.image_files))
-            self._set_combo_to_data(self.output_format_combo, active_format)
-            self.output_format_combo.setEnabled(bool(self.image_files) and not use_global)
-            self._rebuild_output_preset_combo_labels(
-                self.output_preset_combo,
-                requested_format=active_format,
-                global_settings=global_settings,
-                page_metrics=page_metrics,
-                selected_value=active_preset,
+            self._set_combo_to_data(
+                self.output_target_combo,
+                str(
+                    resolved_target
+                    if use_global
+                    else project_preferences.get("output_target", resolved_target)
+                ),
             )
-            self.output_preset_combo.setEnabled(bool(self.image_files) and not use_global)
-            del use_global_blocker
-            del format_blocker
+            self._set_combo_to_data(
+                self.output_image_format_combo,
+                str(
+                    resolved_settings.get("resolved_automatic_output_image_format", "")
+                    if use_global
+                    else project_preferences.get(
+                        "output_image_format",
+                        resolved_settings.get("resolved_automatic_output_image_format", ""),
+                    )
+                ),
+            )
+            self._set_combo_to_data(
+                self.output_archive_format_combo,
+                str(
+                    resolved_settings.get("resolved_automatic_output_archive_format", "")
+                    if use_global
+                    else project_preferences.get(
+                        "output_archive_format",
+                        resolved_settings.get("resolved_automatic_output_archive_format", ""),
+                    )
+                ),
+            )
+            self._set_combo_to_data(
+                self.output_archive_image_format_combo,
+                str(
+                    resolved_settings.get("resolved_automatic_output_archive_image_format", "")
+                    if use_global
+                    else project_preferences.get(
+                        "output_archive_image_format",
+                        resolved_settings.get("resolved_automatic_output_archive_image_format", ""),
+                    )
+                ),
+            )
+            self.output_archive_level_spinbox.setValue(
+                int(
+                    resolved_settings.get("resolved_automatic_output_archive_compression_level", 6)
+                    if use_global
+                    else project_preferences.get(
+                        "output_archive_compression_level",
+                        resolved_settings.get("resolved_automatic_output_archive_compression_level", 6),
+                    )
+                )
+            )
+            self.output_target_combo.setEnabled(control_enabled)
+            self.output_image_format_combo.setEnabled(control_enabled)
+            self.output_archive_format_combo.setEnabled(control_enabled)
+            self.output_archive_image_format_combo.setEnabled(control_enabled)
+            self.output_archive_level_spinbox.setEnabled(control_enabled)
+
+            self.output_image_format_row.setVisible(resolved_target == OUTPUT_TARGET_IMAGES)
+            self.output_archive_format_row.setVisible(target_is_archive)
+            self.output_archive_image_format_row.setVisible(target_is_archive)
+            self.output_archive_level_row.setVisible(target_is_archive)
+            self.output_quality_note_label.setVisible(True)
+            self.output_archive_note_label.setVisible(target_is_archive)
+
+            self._set_combo_to_data(
+                settings_ui.automatic_output_target_combo,
+                str(global_settings.get("automatic_output_target", OUTPUT_TARGET_IMAGES)),
+            )
+            self._set_combo_to_data(
+                settings_ui.automatic_output_image_format_combo,
+                str(global_settings.get("automatic_output_image_format", "")),
+            )
+            self._set_combo_to_data(
+                settings_ui.automatic_output_archive_format_combo,
+                str(global_settings.get("automatic_output_archive_format", "")),
+            )
+            self._set_combo_to_data(
+                settings_ui.automatic_output_archive_image_format_combo,
+                str(global_settings.get("automatic_output_archive_image_format", "")),
+            )
+            settings_ui.automatic_output_archive_level_spinbox.setValue(
+                int(global_settings.get("automatic_output_archive_compression_level", 6))
+            )
+            settings_ui.individual_format_widget.setVisible(
+                str(global_settings.get("automatic_output_target", OUTPUT_TARGET_IMAGES))
+                == OUTPUT_TARGET_IMAGES
+            )
+            settings_ui.archive_format_widget.setVisible(
+                str(global_settings.get("automatic_output_target", OUTPUT_TARGET_IMAGES))
+                == OUTPUT_TARGET_ARCHIVE
+            )
+            settings_ui.archive_image_format_widget.setVisible(
+                str(global_settings.get("automatic_output_target", OUTPUT_TARGET_IMAGES))
+                == OUTPUT_TARGET_ARCHIVE
+            )
+            settings_ui.archive_level_widget.setVisible(
+                str(global_settings.get("automatic_output_target", OUTPUT_TARGET_IMAGES))
+                == OUTPUT_TARGET_ARCHIVE
+            )
+            settings_ui.automatic_output_archive_note_label.setVisible(
+                str(global_settings.get("automatic_output_target", OUTPUT_TARGET_IMAGES))
+                == OUTPUT_TARGET_ARCHIVE
+            )
+
+            del blockers
         finally:
             self._automatic_output_controls_updating = False
 
-        if page_metrics:
-            project_estimate = estimate_output_for_pages(page_metrics, resolved_settings)
-            global_estimate = estimate_output_for_pages(page_metrics, global_resolved)
-            self.output_estimate_label.setText(
-                self._format_output_estimate_text(
-                    project_estimate,
-                    prefix=self.tr("Estimated output: {ratio}, {time} across {pages} pages."),
-                )
-            )
-            self.settings_page.ui.automatic_output_estimate_summary_label.setText(
-                self._format_output_estimate_text(
-                    global_estimate,
-                    prefix=self.tr("Current project estimate: {ratio}, {time} across {pages} pages."),
-                )
-            )
-        else:
+        if not page_metrics:
             no_pages_text = self.tr("Load pages to see automatic output estimates.")
             self.output_estimate_label.setText(no_pages_text)
-            self.settings_page.ui.automatic_output_estimate_summary_label.setText(no_pages_text)
+            settings_ui.automatic_output_estimate_summary_label.setText(no_pages_text)
+        elif is_individual_images_mode(resolved_settings):
+            project_text = self.tr(
+                "Images are saved individually at maximum quality.\nTranslated and cleaned images are exported."
+            )
+            self.output_estimate_label.setText(project_text)
+            global_target = str(global_settings.get("automatic_output_target", OUTPUT_TARGET_IMAGES))
+            if global_target == OUTPUT_TARGET_IMAGES:
+                settings_ui.automatic_output_estimate_summary_label.setText(project_text)
+            else:
+                global_estimates = estimate_archive_options_for_pages(
+                    page_metrics,
+                    int(global_settings.get("automatic_output_archive_compression_level", 6)),
+                )
+                settings_ui.automatic_output_estimate_summary_label.setText(
+                    self._format_archive_estimate_summary(global_estimates)
+                )
+        else:
+            project_estimates = estimate_archive_options_for_pages(
+                page_metrics,
+                int(
+                    resolved_settings.get(
+                        "resolved_automatic_output_archive_compression_level",
+                        6,
+                    )
+                ),
+            )
+            self.output_estimate_label.setText(self._format_archive_estimate_summary(project_estimates))
+            global_target = str(global_settings.get("automatic_output_target", OUTPUT_TARGET_IMAGES))
+            if global_target == OUTPUT_TARGET_ARCHIVE:
+                global_estimates = estimate_archive_options_for_pages(
+                    page_metrics,
+                    int(global_settings.get("automatic_output_archive_compression_level", 6)),
+                )
+                settings_ui.automatic_output_estimate_summary_label.setText(
+                    self._format_archive_estimate_summary(global_estimates)
+                )
+            else:
+                settings_ui.automatic_output_estimate_summary_label.setText(
+                    self.tr(
+                        "Images are saved individually at maximum quality.\nTranslated and cleaned images are exported."
+                    )
+                )
 
     def _on_project_output_use_global_changed(self, state: int) -> None:
         if self._automatic_output_controls_updating:
             return
         use_global = bool(state)
         preferences = self.get_project_output_preferences()
-        mode = OUTPUT_OVERRIDE_MODE_GLOBAL if use_global else OUTPUT_OVERRIDE_MODE_PROJECT
-        preferences["output_format_override_mode"] = mode
-        preferences["output_preset_override_mode"] = mode
-        preferences["output_format_override_value"] = str(
-            self.output_format_combo.currentData() or preferences.get("output_format_override_value", "")
+        preferences["output_use_global"] = use_global
+        preferences["output_target"] = str(
+            self.output_target_combo.currentData() or preferences.get("output_target", OUTPUT_TARGET_IMAGES)
         )
-        preferences["output_preset_override_value"] = str(
-            self.output_preset_combo.currentData() or preferences.get("output_preset_override_value", "")
+        preferences["output_image_format"] = str(
+            self.output_image_format_combo.currentData()
+            or preferences.get("output_image_format", "")
+        )
+        preferences["output_archive_format"] = str(
+            self.output_archive_format_combo.currentData()
+            or preferences.get("output_archive_format", "")
+        )
+        preferences["output_archive_image_format"] = str(
+            self.output_archive_image_format_combo.currentData()
+            or preferences.get("output_archive_image_format", "")
+        )
+        preferences["output_archive_compression_level"] = int(
+            self.output_archive_level_spinbox.value()
         )
         self.set_project_output_preferences(preferences, mark_dirty=True)
 
@@ -631,13 +740,24 @@ class ComicTranslate(ComicTranslateUI):
         if self._automatic_output_controls_updating:
             return
         preferences = self.get_project_output_preferences()
-        preferences["output_format_override_mode"] = OUTPUT_OVERRIDE_MODE_PROJECT
-        preferences["output_preset_override_mode"] = OUTPUT_OVERRIDE_MODE_PROJECT
-        preferences["output_format_override_value"] = str(
-            self.output_format_combo.currentData() or preferences.get("output_format_override_value", "")
+        preferences["output_use_global"] = False
+        preferences["output_target"] = str(
+            self.output_target_combo.currentData() or preferences.get("output_target", OUTPUT_TARGET_IMAGES)
         )
-        preferences["output_preset_override_value"] = str(
-            self.output_preset_combo.currentData() or preferences.get("output_preset_override_value", "")
+        preferences["output_image_format"] = str(
+            self.output_image_format_combo.currentData()
+            or preferences.get("output_image_format", "")
+        )
+        preferences["output_archive_format"] = str(
+            self.output_archive_format_combo.currentData()
+            or preferences.get("output_archive_format", "")
+        )
+        preferences["output_archive_image_format"] = str(
+            self.output_archive_image_format_combo.currentData()
+            or preferences.get("output_archive_image_format", "")
+        )
+        preferences["output_archive_compression_level"] = int(
+            self.output_archive_level_spinbox.value()
         )
         self.set_project_output_preferences(preferences, mark_dirty=True)
 
@@ -1408,6 +1528,75 @@ class ComicTranslate(ComicTranslateUI):
                 )
                 return
 
+    def _finalize_single_archive_output(self, page_paths: list[str]) -> str:
+        export_settings = self.get_resolved_export_settings()
+        if not is_single_archive_mode(export_settings):
+            return ""
+
+        staged_paths: list[str] = []
+        series_dir = ""
+        for file_path in page_paths or []:
+            state = self.image_states.get(file_path, {})
+            summary = state.get("processing_summary", {}) if isinstance(state, dict) else {}
+            translated_path = str(summary.get("translated_image_path", "") or "").strip()
+            export_root = str(summary.get("export_root", "") or "").strip()
+            if export_root and not series_dir:
+                series_dir = export_root
+            if translated_path and os.path.isfile(translated_path):
+                staged_paths.append(translated_path)
+
+        if not staged_paths:
+            return ""
+
+        staging_dir = os.path.dirname(staged_paths[0])
+        if not series_dir:
+            series_dir = os.path.dirname(staging_dir)
+        if not series_dir:
+            return ""
+
+        archive_format = str(
+            export_settings.get("resolved_automatic_output_archive_format", "cbz") or "cbz"
+        )
+        compression_level = int(
+            export_settings.get("resolved_automatic_output_archive_compression_level", 6)
+        )
+        archive_path = os.path.join(
+            series_dir,
+            build_archive_file_name(self._txt_md_bundle_name(), archive_format),
+        )
+
+        preview_path = self._last_runtime_preview_path
+        preserved_preview = ""
+        try:
+            if preview_path and os.path.commonpath(
+                [os.path.abspath(preview_path), os.path.abspath(staging_dir)]
+            ) == os.path.abspath(staging_dir):
+                preserved_preview = preserve_preview_file(preview_path, temp_root=self.temp_dir)
+        except Exception:
+            preserved_preview = ""
+
+        make_archive(
+            staging_dir,
+            output_path=archive_path,
+            save_as=f".{archive_format}",
+            compresslevel=compression_level,
+        )
+
+        for file_path in page_paths or []:
+            self.image_ctrl.update_processing_summary(
+                file_path,
+                {
+                    "translated_image_path": archive_path,
+                    "export_root": series_dir,
+                },
+            )
+
+        if preserved_preview:
+            self._last_runtime_preview_path = preserved_preview
+
+        shutil.rmtree(staging_dir, ignore_errors=True)
+        return archive_path
+
     def _start_batch_process_for_paths(self, selected_paths: list[str], run_type: str = "batch") -> bool:
         if not selected_paths:
             return False
@@ -1565,7 +1754,17 @@ class ComicTranslate(ComicTranslateUI):
         self._current_batch_run_type = None
         self._set_project_navigation_enabled(True)
         report = self._finalize_batch_report(was_cancelled)
+        archive_path = ""
+        if not was_cancelled and not failed:
+            try:
+                archive_path = self._finalize_single_archive_output(completed_batch_paths)
+            except Exception:
+                logger.exception("Failed to finalize automatic archive output.")
+                failed = True
+                self._batch_failed = True
         self._last_batch_output_root = self._find_latest_batch_output_root(completed_batch_paths)
+        if archive_path:
+            self._last_batch_output_root = os.path.dirname(archive_path)
         self.progress_bar.setVisible(False)
         self.translate_button.setEnabled(True)
         self.cancel_button.setEnabled(True)
