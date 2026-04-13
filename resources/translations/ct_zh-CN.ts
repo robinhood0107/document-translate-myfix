@@ -1824,6 +1824,63 @@ Open or create a project to get started.</source>
     </message>
 </context>
 <context>
+    <name>ToolStateMixin</name>
+    <message>
+        <source>Add Inpaint Mask
+Paint areas to clean before running inpainting.
+These pixels are added to the final mask.</source>
+        <translation>添加修补蒙版
+在执行修补前涂抹需要清理的区域。
+这些像素会加入最终蒙版。</translation>
+    </message>
+    <message>
+        <source>Erase Mask Strokes
+Remove parts of drawn add/exclude strokes.
+This edits mask strokes only and does not change applied patches.</source>
+        <translation>擦除蒙版笔划
+擦除已绘制的添加/排除笔划的一部分。
+这只会编辑蒙版笔划，不会改变已应用的补丁。</translation>
+    </message>
+    <message>
+        <source>Exclude from Inpainting
+Protect areas from inpainting.
+Excluded pixels are removed from the final mask even if they were auto-detected or painted.</source>
+        <translation>从修补中排除
+保护某些区域不被修补。
+即使这些像素是自动检测到或手动涂抹的，被排除的像素也会从最终蒙版中移除。</translation>
+    </message>
+    <message>
+        <source>Restore Original over Inpainted Area
+Paint over an inpainted result to bring back the original image.
+This creates a restore patch above existing inpaint patches on the current page.</source>
+        <translation>在已修补区域上恢复原图
+在修补结果上涂抹以恢复原始图像。
+这会在当前页面现有修补补丁之上创建恢复补丁。</translation>
+    </message>
+    <message>
+        <source>Restore Original over Inpainted Area
+No inpainted patch exists on this page yet.
+Run inpainting first, then use this tool to recover original pixels where needed.</source>
+        <translation>在已修补区域上恢复原图
+当前页面还没有修补补丁。
+请先执行修补，然后再用此工具按需恢复原始像素。</translation>
+    </message>
+    <message>
+        <source>Clear Inpaint Mask Strokes
+Remove all add/exclude mask strokes on the current page.
+Applied inpaint and restore patches are kept; use Undo to revert patch changes.</source>
+        <translation>清除修补蒙版笔划
+移除当前页面上的所有添加/排除蒙版笔划。
+已应用的修补和恢复补丁会保留；如需撤回补丁更改，请使用撤销。</translation>
+    </message>
+    <message>
+        <source>Inpaint Brush Size
+Adjust the size used by add, erase, exclude, and restore brushes.</source>
+        <translation>修补画笔大小
+调整添加、擦除、排除和恢复画笔使用的大小。</translation>
+    </message>
+</context>
+<context>
     <name>ToolsPage</name>
     <message>
         <source>Translator</source>
@@ -2173,22 +2230,6 @@ back on the Image (for further editing)</source>
     <message>
         <source>Increase the size of all blocks</source>
         <translation>增大所有块的大小</translation>
-    </message>
-    <message>
-        <source>Draw Brush Strokes for Cleaning Image</source>
-        <translation>绘制笔刷以清理图片</translation>
-    </message>
-    <message>
-        <source>Erase Brush Strokes</source>
-        <translation>擦除笔刷</translation>
-    </message>
-    <message>
-        <source>Remove all the brush strokes on the Image</source>
-        <translation>移除图片上的所有笔刷</translation>
-    </message>
-    <message>
-        <source>Brush/Eraser Size Slider</source>
-        <translation>笔刷/橡皮大小滑块</translation>
     </message>
     <message>
         <source>Box Drawing</source>
