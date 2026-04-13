@@ -508,7 +508,7 @@ class PageListView(QtWidgets.QWidget):
         )
 
         self._model = PageListModel(self)
-        self._base_thumbnail_size = QtCore.QSize(46, 66)
+        self._base_thumbnail_size = QtCore.QSize(83, 119)
         self._delegate = PageListDelegate(self, thumbnail_size=self._base_thumbnail_size)
         self._list_view = _PageListContentView(self)
         self._list_view.setModel(self._model)
