@@ -56,6 +56,7 @@ class OCRProcessor:
                 self.settings,
                 self.source_lang_english,
                 self.ocr_key,
+                selected_ocr_mode=self.ocr_mode,
             ).__class__.__name__
         except Exception:
             self.last_engine_name = None
@@ -76,7 +77,12 @@ class OCRProcessor:
         """
 
         self._set_source_language(blk_list)
-        engine = OCRFactory.create_engine(self.settings, self.source_lang_english, self.ocr_key)
+        engine = OCRFactory.create_engine(
+            self.settings,
+            self.source_lang_english,
+            self.ocr_key,
+            selected_ocr_mode=self.ocr_mode,
+        )
         self.last_engine_name = engine.__class__.__name__
         logger.info(
             "ocr self-check: selected_mode=%s resolved_key=%s resolved_engine=%s source_lang=%s device=%s blocks=%d",
@@ -93,4 +99,3 @@ class OCRProcessor:
         source_lang_code = language_codes.get(self.source_lang_english, 'en')
         for blk in blk_list:
             blk.source_lang = source_lang_code
-
