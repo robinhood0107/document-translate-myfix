@@ -12,7 +12,13 @@ from app.path_materialization import ensure_path_materialized
 from app.ui.canvas.save_renderer import ImageSaveRenderer
 from app.ui.canvas.text.text_item_properties import TextItemProperties
 from app.ui.canvas.text_item import OutlineInfo, OutlineType
-from modules.rendering.render import get_best_render_area, is_vertical_block, pyside_word_wrap
+from modules.rendering.render import (
+    describe_render_text_markup,
+    describe_render_text_sanitization,
+    get_best_render_area,
+    is_vertical_block,
+    pyside_word_wrap,
+)
 from modules.utils.export_paths import export_run_root, reserve_export_run_token, resolve_export_directory
 from modules.utils.automatic_output import (
     build_archive_page_file_name,
@@ -144,7 +150,25 @@ class RenderMixin:
             width = max(1.0, x2 - x1)
             height = max(1.0, y2 - y1)
 
-            translation = block.translation
+            translation_raw = block.translation
+            if not translation_raw:
+                continue
+            render_normalization = describe_render_text_sanitization(
+                translation_raw,
+                font,
+                block_index=getattr(block, "_debug_block_index", None),
+                image_path=image_path,
+            )
+            translation = render_normalization.text
+            block._render_translation_raw = str(translation_raw or "")
+            block._render_text = str(translation or "")
+            block._render_normalization_applied = bool(
+                render_normalization.normalization_applied
+            )
+            block._render_normalization_reasons = list(render_normalization.reasons)
+            block._render_normalization_replacements = list(
+                render_normalization.replacements
+            )
             if not translation:
                 continue
 
@@ -174,6 +198,25 @@ class RenderMixin:
 
             if is_no_space_lang(target_lang_code):
                 wrapped_translation = wrapped_translation.replace(" ", "")
+            render_markup = describe_render_text_markup(wrapped_translation)
+            block._render_text = str(wrapped_translation or "")
+            block._render_html = str(
+                render_markup.html_text if render_markup.html_applied else wrapped_translation or ""
+            )
+            block._render_html_applied = bool(render_markup.html_applied)
+            block._render_fallback_font_family = str(
+                render_markup.fallback_font_family or ""
+            )
+            block._render_normalization_applied = bool(
+                render_normalization.normalization_applied
+                or render_markup.html_applied
+            )
+            block._render_normalization_reasons = sorted(
+                set(render_normalization.reasons).union(render_markup.reasons)
+            )
+            block._render_normalization_replacements = list(
+                render_normalization.replacements
+            ) + list(render_markup.replacements)
 
             font_color = resolve_render_text_color(
                 block.font_color,
@@ -181,23 +224,9 @@ class RenderMixin:
                 render_settings.force_font_color,
                 render_settings.smart_global_apply_all,
             )
-            if should_emit_live:
-                render_block = block.deep_copy()
-                render_block.translation = wrapped_translation
-                render_block.xyxy = list(render_block.xyxy)
-                render_block.xyxy[1] += page_scene_offset
-                render_block.xyxy[3] += page_scene_offset
-                if render_block.bubble_xyxy is not None:
-                    render_block.bubble_xyxy = list(render_block.bubble_xyxy)
-                    render_block.bubble_xyxy[1] += page_scene_offset
-                    render_block.bubble_xyxy[3] += page_scene_offset
-                self.main_page.blk_rendered.emit(
-                    wrapped_translation, font_size, render_block, image_path
-                )
-
             source_rect = build_rect_tuple(x1, y1, width, height)
             text_props = TextItemProperties(
-                text=wrapped_translation,
+                text=block._render_html,
                 font_family=font,
                 font_size=font_size,
                 text_color=font_color,
@@ -231,7 +260,37 @@ class RenderMixin:
                 if outline
                 else [],
             )
-            viewer_state["text_items_state"].append(text_props.to_dict())
+            text_item_state = text_props.to_dict()
+            text_item_state["translation_raw"] = str(translation_raw or "")
+            text_item_state["render_text"] = str(wrapped_translation or "")
+            text_item_state["render_html_applied"] = bool(
+                render_markup.html_applied
+            )
+            text_item_state["render_fallback_font_family"] = str(
+                render_markup.fallback_font_family or ""
+            )
+            text_item_state["render_normalization_applied"] = bool(
+                block._render_normalization_applied
+            )
+            text_item_state["render_normalization_reasons"] = list(
+                block._render_normalization_reasons
+            )
+            viewer_state["text_items_state"].append(text_item_state)
+
+            if should_emit_live:
+                render_block = block.deep_copy()
+                render_block.translation = wrapped_translation
+                render_block._render_html = block._render_html
+                render_block.xyxy = list(render_block.xyxy)
+                render_block.xyxy[1] += page_scene_offset
+                render_block.xyxy[3] += page_scene_offset
+                if render_block.bubble_xyxy is not None:
+                    render_block.bubble_xyxy = list(render_block.bubble_xyxy)
+                    render_block.bubble_xyxy[1] += page_scene_offset
+                    render_block.bubble_xyxy[3] += page_scene_offset
+                self.main_page.blk_rendered.emit(
+                    wrapped_translation, font_size, render_block, image_path
+                )
 
     def _save_final_rendered_page(
         self: WebtoonBatchProcessor, page_idx: int, image_path: str, timestamp: str
