@@ -276,6 +276,9 @@ def build_ocr_debug_payload(
                 "effective_crop_xyxy": getattr(blk, "ocr_effective_crop_xyxy", None),
                 "retry_crop_xyxy": getattr(blk, "ocr_retry_crop_xyxy", None),
                 "crop_source": getattr(blk, "ocr_crop_source", "") or "",
+                "ocr_regions": getattr(blk, "ocr_regions", None),
+                "ocr_crop_bbox": getattr(blk, "ocr_crop_bbox", None),
+                "ocr_resize_scale": getattr(blk, "ocr_resize_scale", None),
             }
         )
     return payload
