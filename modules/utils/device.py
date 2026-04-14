@@ -5,7 +5,7 @@ import site
 from pathlib import Path
 from typing import Any, Mapping, Optional
 import onnxruntime as ort
-from .paths import get_user_data_dir
+from .paths import get_project_models_dir
 
 _WINDOWS_DLL_DIR_HANDLES: list[Any] = []
 _WINDOWS_GPU_DLLS_READY = False
@@ -203,7 +203,7 @@ def get_providers(device: Optional[str] = None) -> list[Any]:
 
     
     # Use user data directory for cache
-    base_models_dir = os.path.join(get_user_data_dir(), "models")
+    base_models_dir = get_project_models_dir()
     
     # OpenVINO cache
     ov_cache_dir = os.path.join(base_models_dir, 'onnx-gpu-cache', 'openvino')

@@ -5,13 +5,13 @@ import os
 import threading
 import time
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable, Literal
 from urllib.error import URLError
 from urllib.parse import urlparse
 from urllib.request import urlopen
 
 from modules.ocr.selection import is_local_ocr_engine
-from modules.utils.exceptions import LocalServiceSetupError
+from modules.utils.exceptions import LocalServiceSetupError, OperationCancelledError
 from modules.utils.llama_cpp_runtime import (
     DEFAULT_LLAMA_CPP_IMAGE,
     inspect_llama_cpp_runtime,
@@ -22,6 +22,7 @@ logger = logging.getLogger(__name__)
 
 ROOT_DIR = Path(__file__).resolve().parents[2]
 DEFAULT_HUNYUAN_N_GPU_LAYERS = "80"
+OCRPreflightProbeResult = Literal["healthy", "unavailable", "not_managed"]
 
 _ENGINE_CONFIG = {
     "HunyuanOCR": {
@@ -88,7 +89,42 @@ class LocalOCRRuntimeManager:
         server_url = self._resolve_server_url(engine_key, settings_page)
         return _normalize_url(server_url) == _normalize_url(config["managed_url"])
 
-    def ensure_engine(self, engine_key: str, settings_page: Any, *, timeout_sec: int = 240) -> None:
+    def preflight_cache_key(self, engine_key: str, settings_page: Any) -> str | None:
+        if not self.should_manage_engine(engine_key, settings_page):
+            return None
+        return f"{engine_key}|{_normalize_url(self._resolve_server_url(engine_key, settings_page))}"
+
+    def probe_managed_engine(
+        self,
+        engine_key: str,
+        settings_page: Any,
+        *,
+        timeout_sec: int = 2,
+    ) -> OCRPreflightProbeResult:
+        if not self.should_manage_engine(engine_key, settings_page):
+            return "not_managed"
+        config = self._config_for(engine_key)
+        if self._wait_for_health(
+            config["health_url"],
+            timeout_sec=timeout_sec,
+            progress_callback=None,
+            cancel_checker=None,
+            engine_key=engine_key,
+            step_key="health_probe",
+            message=f"{engine_key} 상태를 확인하는 중...",
+        ):
+            return "healthy"
+        return "unavailable"
+
+    def ensure_engine(
+        self,
+        engine_key: str,
+        settings_page: Any,
+        *,
+        timeout_sec: int = 240,
+        progress_callback: Callable[[dict[str, Any]], None] | None = None,
+        cancel_checker: Callable[[], bool] | None = None,
+    ) -> None:
         with self._lock:
             if not is_local_ocr_engine(engine_key) or not self.should_manage_engine(engine_key, settings_page):
                 self._deactivate_active_engine()
@@ -96,26 +132,67 @@ class LocalOCRRuntimeManager:
 
             self.validate_engine(engine_key, settings_page)
             config = self._config_for(engine_key)
+            if self._wait_for_health(
+                config["health_url"],
+                timeout_sec=2,
+                progress_callback=progress_callback,
+                cancel_checker=cancel_checker,
+                engine_key=engine_key,
+                step_key="health_probe",
+                message=f"{engine_key} 상태를 확인하는 중...",
+            ):
+                self._active_engine = engine_key
+                self._emit_progress(
+                    progress_callback,
+                    engine_key,
+                    status="completed",
+                    step_key="health_probe",
+                    message=f"기존 {engine_key} 런타임을 재사용합니다.",
+                )
+                return
             if self._active_engine and self._active_engine != engine_key:
                 self._stop_engine(self._active_engine)
 
-            if self._wait_for_health(config["health_url"], timeout_sec=3):
-                logger.info("%s runtime already reachable at %s; skipping compose restart.", engine_key, config["health_url"])
-                self._active_engine = engine_key
-                self._log_runtime_metadata(engine_key)
-                return
-
-            self._run_compose(engine_key, "pull", "--policy", "always", step_name="pull")
-            self._run_compose(engine_key, "up", "-d", "--force-recreate", step_name="up")
-            if not self._wait_for_health(config["health_url"], timeout_sec=timeout_sec):
+            self._emit_progress(
+                progress_callback,
+                engine_key,
+                status="starting",
+                step_key="compose_up",
+                message=f"{engine_key} 컨테이너를 시작하는 중...",
+                detail="docker compose up -d",
+            )
+            self._run_compose(engine_key, "up", "-d", step_name="up")
+            self._emit_progress(
+                progress_callback,
+                engine_key,
+                status="completed",
+                step_key="compose_up",
+                message=f"{engine_key} 컨테이너 시작 명령을 보냈습니다.",
+            )
+            if not self._wait_for_health(
+                config["health_url"],
+                timeout_sec=timeout_sec,
+                progress_callback=progress_callback,
+                cancel_checker=cancel_checker,
+                engine_key=engine_key,
+                step_key="health_wait",
+                message=f"{engine_key} health 기다리는 중...",
+            ):
                 raise self._build_setup_error(
                     engine_key,
                     (
                         f"Timed out while waiting for {engine_key} at {config['health_url']} "
-                        f"after pull + force-recreate of {config['compose_file'].name}."
+                        f"after docker compose up -d of {config['compose_file'].name}."
                     ),
                 )
             self._active_engine = engine_key
+            self._emit_progress(
+                progress_callback,
+                engine_key,
+                status="completed",
+                step_key="health_wait",
+                message=f"{engine_key} health 확인이 완료되었습니다.",
+            )
             self._log_runtime_metadata(engine_key)
 
     def shutdown(self) -> None:
@@ -149,8 +226,6 @@ class LocalOCRRuntimeManager:
         try:
             from modules.utils.llama_cpp_runtime import run_docker_command
 
-            if step_name == "up":
-                self._remove_named_container_if_needed(str(config.get("container_name") or ""), compose_file.parent, env)
             run_docker_command(command, cwd=compose_file.parent, env=env)
             return
         except RuntimeError as exc:
@@ -160,18 +235,6 @@ class LocalOCRRuntimeManager:
         if requested_image:
             extra = f"{extra}\nRequested image: {requested_image}"
         raise self._build_setup_error(engine_key, extra)
-
-    def _remove_named_container_if_needed(self, container_name: str, cwd: Path, env: dict[str, str]) -> None:
-        name = container_name.strip()
-        if not name:
-            return
-        from modules.utils.llama_cpp_runtime import run_docker_command
-
-        inspect_cmd = ["docker", "inspect", "--format", "{{.Id}}", name]
-        inspect_result = run_docker_command(inspect_cmd, cwd=cwd, env=env, check=False)
-        if inspect_result.returncode != 0:
-            return
-        run_docker_command(["docker", "rm", "-f", name], cwd=cwd, env=env, check=False)
 
     def _resolve_compose_command(self, engine_key: str) -> tuple[str, ...]:
         if self._compose_command is not None:
@@ -243,15 +306,65 @@ class LocalOCRRuntimeManager:
             settings_page_name=settings_page_name,
         )
 
-    @staticmethod
-    def _wait_for_health(url: str, *, timeout_sec: int) -> bool:
+    def _wait_for_health(
+        self,
+        url: str,
+        *,
+        timeout_sec: int,
+        progress_callback: Callable[[dict[str, Any]], None] | None = None,
+        cancel_checker: Callable[[], bool] | None = None,
+        engine_key: str,
+        step_key: str,
+        message: str,
+    ) -> bool:
         deadline = time.monotonic() + max(timeout_sec, 1)
+        started = time.monotonic()
         while time.monotonic() < deadline:
+            if self._is_cancelled(cancel_checker):
+                raise OperationCancelledError(f"Cancelled while waiting for {engine_key} runtime.")
             try:
                 with urlopen(url, timeout=2) as response:
                     if getattr(response, "status", 200) < 500:
                         return True
             except (URLError, OSError, ValueError):
                 pass
+            self._emit_progress(
+                progress_callback,
+                engine_key,
+                status="waiting_health",
+                step_key=step_key,
+                message=message,
+                elapsed_sec=time.monotonic() - started,
+                detail=f"Waiting for {url}",
+            )
             time.sleep(1)
         return False
+
+    def _emit_progress(
+        self,
+        progress_callback: Callable[[dict[str, Any]], None] | None,
+        engine_key: str,
+        **payload: Any,
+    ) -> None:
+        if progress_callback is None:
+            return
+        event = {
+            "phase": "ocr_startup",
+            "service": "paddleocr_vl" if engine_key == "PaddleOCR VL" else engine_key.lower(),
+            "status": payload.pop("status", "running"),
+            "step_key": payload.pop("step_key", "health_wait"),
+            "message": payload.pop("message", f"{engine_key} 준비 중..."),
+            "detail": payload.pop("detail", ""),
+        }
+        event.update(payload)
+        try:
+            progress_callback(event)
+        except Exception:
+            logger.debug("Failed to emit OCR runtime progress event.", exc_info=True)
+
+    @staticmethod
+    def _is_cancelled(cancel_checker: Callable[[], bool] | None) -> bool:
+        try:
+            return bool(cancel_checker and cancel_checker())
+        except Exception:
+            return False

@@ -10,8 +10,13 @@ from typing import TYPE_CHECKING
 import msgpack
 
 from .parsers import ProjectDecoder, ProjectEncoder, ensure_string_keys
+from modules.utils.automatic_output import (
+    default_project_output_preferences,
+    normalize_project_output_preferences,
+)
 from modules.utils.export_paths import normalize_export_source_record
 from modules.utils.file_handler import ensure_prepared_path_materialized, get_prepared_path_source
+from modules.utils.inpaint_strokes import PATCH_KIND_INPAINT, normalize_patch_kind
 
 if TYPE_CHECKING:
     from controller import ComicTranslate
@@ -321,11 +326,17 @@ def save_state_to_proj_file_v2(comic_translate: "ComicTranslate", file_name: str
 
     for page_path, patch_list in comic_translate.image_patches.items():
         image_patches_references[page_path] = []
-        for patch in patch_list:
+        for idx, patch in enumerate(patch_list, start=1):
             src_png = patch["png_path"]
             blob_hash = add_blob_if_needed(src_png, "patch")
             image_patches_references[page_path].append(
-                {"bbox": patch["bbox"], "png_hash": blob_hash, "hash": patch["hash"]}
+                {
+                    "bbox": patch["bbox"],
+                    "png_hash": blob_hash,
+                    "hash": patch["hash"],
+                    "kind": normalize_patch_kind(patch.get("kind", PATCH_KIND_INPAINT)),
+                    "order": int(patch.get("order", idx) or idx),
+                }
             )
 
     page_paths = list(
@@ -397,6 +408,9 @@ def save_state_to_proj_file_v2(comic_translate: "ComicTranslate", file_name: str
         "webtoon_mode": comic_translate.webtoon_mode,
         "webtoon_view_state": comic_translate.image_viewer.webtoon_view_state,
         "latest_automatic_report": comic_translate.batch_report_ctrl.export_latest_report_for_project(),
+        **normalize_project_output_preferences(
+            getattr(comic_translate, "project_output_preferences", default_project_output_preferences())
+        ),
         "unique_images": ensure_string_keys(unique_images),
     }
     manifest_blob = msgpack.packb(manifest, default=encoder.encode, use_bin_type=True)
@@ -611,7 +625,15 @@ def _materialize_from_manifest_and_pages(
             patch_disk_path = os.path.join(page_folder, f"{idx}_{png_hash[:12]}{ext}")
             register_lazy_blob_path(project_file, patch_disk_path, str(png_hash))
 
-            new_list.append({"bbox": patch["bbox"], "png_path": patch_disk_path, "hash": patch["hash"]})
+            new_list.append(
+                {
+                    "bbox": patch["bbox"],
+                    "png_path": patch_disk_path,
+                    "hash": patch["hash"],
+                    "kind": normalize_patch_kind(patch.get("kind", PATCH_KIND_INPAINT)),
+                    "order": int(patch.get("order", idx + 1) or (idx + 1)),
+                }
+            )
 
         if new_list:
             reconstructed[page_path] = new_list
@@ -641,6 +663,20 @@ def _materialize_from_manifest_and_pages(
     comic_translate.batch_report_ctrl.import_latest_report_from_project(
         latest_report,
         refresh=False,
+    )
+    comic_translate.project_output_preferences = normalize_project_output_preferences(
+        {
+            "output_use_global": manifest.get("output_use_global"),
+            "output_target": manifest.get("output_target"),
+            "output_image_format": manifest.get("output_image_format"),
+            "output_archive_format": manifest.get("output_archive_format"),
+            "output_archive_image_format": manifest.get("output_archive_image_format"),
+            "output_archive_compression_level": manifest.get("output_archive_compression_level"),
+            "output_format_override_mode": manifest.get("output_format_override_mode"),
+            "output_format_override_value": manifest.get("output_format_override_value"),
+            "output_preset_override_mode": manifest.get("output_preset_override_mode"),
+            "output_preset_override_value": manifest.get("output_preset_override_value"),
+        }
     )
 
     return manifest.get("llm_extra_context", "")
@@ -682,6 +718,16 @@ def _load_from_legacy_state_blob(
         "webtoon_mode": state.get("webtoon_mode", False),
         "webtoon_view_state": state.get("webtoon_view_state", {}),
         "latest_automatic_report": state.get("latest_automatic_report"),
+        "output_use_global": state.get("output_use_global"),
+        "output_target": state.get("output_target"),
+        "output_image_format": state.get("output_image_format"),
+        "output_archive_format": state.get("output_archive_format"),
+        "output_archive_image_format": state.get("output_archive_image_format"),
+        "output_archive_compression_level": state.get("output_archive_compression_level"),
+        "output_format_override_mode": state.get("output_format_override_mode"),
+        "output_format_override_value": state.get("output_format_override_value"),
+        "output_preset_override_mode": state.get("output_preset_override_mode"),
+        "output_preset_override_value": state.get("output_preset_override_value"),
         "unique_images": state.get("unique_images", {}),
     }
 

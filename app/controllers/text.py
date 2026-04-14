@@ -232,6 +232,88 @@ class TextController:
         text_item.set_vertical_alignment(text_props.vertical_alignment)
         text_item.set_color(text_props.text_color)
 
+    def _build_rebuilt_text_items_state(
+        self,
+        blk_list: list[TextBlock],
+        target_lang: str,
+        render_settings: TextRenderingSettings | None = None,
+    ) -> list[dict]:
+        if not blk_list:
+            return []
+
+        render_settings = render_settings or self.render_settings()
+        target_lang_en = self.main.lang_mapping.get(target_lang, target_lang)
+        trg_lng_cd = get_language_code(target_lang_en)
+
+        render_blocks = [blk.deep_copy() for blk in blk_list]
+        format_translations(
+            render_blocks,
+            trg_lng_cd,
+            upper_case=render_settings.upper_case,
+        )
+
+        text_items_state: list[dict] = []
+        for original_blk, render_blk in zip(blk_list, render_blocks):
+            x1, y1, block_width, block_height = original_blk.xywh
+            translation = render_blk.translation
+            if not translation or len(translation) == 1:
+                continue
+
+            vertical = is_vertical_block(original_blk, trg_lng_cd)
+            wrapped, font_size, rendered_width, rendered_height = pyside_word_wrap(
+                translation,
+                render_settings.font_family,
+                block_width,
+                block_height,
+                float(render_settings.line_spacing),
+                float(render_settings.outline_width),
+                render_settings.bold,
+                render_settings.italic,
+                render_settings.underline,
+                self.main.button_to_alignment[render_settings.alignment_id],
+                render_settings.direction,
+                render_settings.max_font_size,
+                render_settings.min_font_size,
+                vertical,
+                return_metrics=True,
+            )
+
+            if is_no_space_lang(trg_lng_cd):
+                wrapped = wrapped.replace(" ", "")
+
+            source_rect = self._get_source_rect_for_block(original_blk)
+            text_props = self._build_text_item_properties(
+                original_blk,
+                wrapped,
+                font_size,
+                render_settings,
+                trg_lng_cd,
+                source_rect=source_rect,
+                block_anchor=source_rect,
+                rendered_width=rendered_width,
+                rendered_height=rendered_height,
+            )
+            text_props.scale = 1.0
+            text_props.transform_origin = (
+                original_blk.tr_origin_point if original_blk.tr_origin_point else (0, 0)
+            )
+            text_items_state.append(text_props.to_dict())
+
+        return text_items_state
+
+    def rebuild_text_items_state_for_paths(self, file_paths: list[str]) -> None:
+        render_settings = self.render_settings()
+        for file_path in file_paths:
+            state = self.main.image_ctrl.ensure_page_state(file_path)
+            blk_list = state.get("blk_list", []) or []
+            viewer_state = state.setdefault("viewer_state", {})
+            viewer_state["text_items_state"] = self._build_rebuilt_text_items_state(
+                blk_list,
+                state.get("target_lang", self.main.t_combo.currentText()),
+                render_settings=render_settings,
+            )
+            viewer_state["push_to_stack"] = False
+
     def connect_text_item_signals(self, text_item: TextBlockItem, force_reconnect: bool = False):
         if getattr(text_item, "_ct_signals_connected", False) and not force_reconnect:
             return

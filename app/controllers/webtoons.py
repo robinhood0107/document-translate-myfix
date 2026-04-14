@@ -223,6 +223,7 @@ class WebtoonController:
                     
                 # Clear text edits
                 self.main.text_ctrl.clear_text_edits()
+                self.main.refresh_inpaint_tool_ui()
 
                 # Page-skip popup policy:
                 # - show on explicit programmatic jumps (page list/report)
