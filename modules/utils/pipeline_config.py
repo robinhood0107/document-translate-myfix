@@ -6,11 +6,12 @@ from PySide6.QtCore import QCoreApplication
 
 from modules.ocr.selection import resolve_ocr_engine
 from modules.ocr.local_runtime import LocalOCRRuntimeManager
+from modules.translation.local_runtime import LocalGemmaRuntimeManager
 from modules.inpainting.aot import AOT
 from modules.inpainting.lama_variants import LaMaLarge512px, LaMaMPE
 from modules.inpainting.mi_gan import MIGAN
 from modules.inpainting.schema import Config
-from modules.utils.exceptions import LocalServiceSetupError
+from modules.utils.exceptions import LocalServiceConnectionError, LocalServiceSetupError
 from modules.utils.inpainting_runtime import (
     inpainter_backend_for,
     inpainter_default_settings,
@@ -80,13 +81,16 @@ def get_config(settings_page: SettingsPage):
 
 
 def get_inpainter_runtime(settings_page: SettingsPage, inpainter_key: str | None = None) -> dict:
-    normalized = normalize_inpainter_key(inpainter_key or settings_page.get_tool_selection("inpainter"))
+    requested = inpainter_key or settings_page.get_tool_selection("inpainter")
+    normalized = normalize_inpainter_key(requested)
     defaults = inpainter_default_settings(normalized)
     runtime_settings = settings_page.get_inpainter_runtime_settings(normalized)
     merged = dict(defaults)
     merged.update(runtime_settings)
     merged["key"] = normalized
     merged["backend"] = str(merged.get("backend") or inpainter_backend_for(normalized))
+    if not settings_page.is_gpu_enabled():
+        merged["device"] = "cpu"
     return merged
 
 
@@ -104,7 +108,11 @@ def _show_missing_credentials(main: ComicTranslate, provider_name: str, missing_
     Messages.show_missing_credentials_error(main, provider_name, field_text)
 
 
-def validate_ocr(main: ComicTranslate, source_lang: str | None = None):
+def validate_ocr(
+    main: ComicTranslate,
+    source_lang: str | None = None,
+    preflight_cache: dict[str, str] | None = None,
+):
     settings_page = main.settings_page
     ocr_tool = settings_page.get_tool_selection("ocr")
 
@@ -172,6 +180,13 @@ def validate_ocr(main: ComicTranslate, source_lang: str | None = None):
                 error_kind="setup",
             )
             return False
+        cache_key = runtime_manager.preflight_cache_key(normalized_tool, settings_page)
+        if cache_key:
+            probe_result = preflight_cache.get(cache_key) if preflight_cache is not None else None
+            if probe_result is None:
+                probe_result = runtime_manager.probe_managed_engine(normalized_tool, settings_page)
+                if preflight_cache is not None:
+                    preflight_cache[cache_key] = probe_result
         return True
 
     provider = OCR_REQUIREMENTS.get(normalized_tool)
@@ -219,6 +234,33 @@ def validate_translator(main: ComicTranslate, target_lang: str):
             _show_missing_credentials(main, provider_name, missing_fields)
         return False
 
+    if normalized_tool == "Custom Local Server(Gemma)":
+        runtime_manager = getattr(main, "local_translation_runtime_manager", None)
+        if not isinstance(runtime_manager, LocalGemmaRuntimeManager):
+            runtime_manager = LocalGemmaRuntimeManager()
+            main.local_translation_runtime_manager = runtime_manager
+        try:
+            # Keep automatic-run preflight cheap on the UI thread.
+            # The actual managed-runtime startup/connection check still happens
+            # inside the worker when the translator is instantiated.
+            runtime_manager.validate_server(settings_page)
+        except (LocalServiceSetupError, LocalServiceConnectionError) as exc:
+            if hasattr(main, "batch_report_ctrl"):
+                title = (
+                    QCoreApplication.translate("Messages", "Gemma local server runtime setup failed")
+                    if isinstance(exc, LocalServiceSetupError)
+                    else QCoreApplication.translate("Messages", "Gemma local server is unavailable")
+                )
+                main.batch_report_ctrl.register_preflight_error(title, str(exc))
+            Messages.show_local_service_error(
+                main,
+                details=str(exc),
+                service_name="Gemma",
+                settings_page_name=settings_page.ui.tr("Gemma Local Server Settings"),
+                error_kind="setup" if isinstance(exc, LocalServiceSetupError) else "connection",
+            )
+            return False
+
     return True
 
 
@@ -234,8 +276,13 @@ def font_selected(main: ComicTranslate):
     return True
 
 
-def validate_settings(main: ComicTranslate, target_lang: str, source_lang: str | None = None):
-    if not validate_ocr(main, source_lang=source_lang):
+def validate_settings(
+    main: ComicTranslate,
+    target_lang: str,
+    source_lang: str | None = None,
+    preflight_cache: dict[str, str] | None = None,
+):
+    if not validate_ocr(main, source_lang=source_lang, preflight_cache=preflight_cache):
         return False
     if not validate_translator(main, target_lang):
         return False

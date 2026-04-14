@@ -1,7 +1,9 @@
 import logging
 import os
 import shutil
+import json
 from dataclasses import asdict, is_dataclass
+from typing import Mapping
 
 from PySide6 import QtGui, QtWidgets
 from PySide6.QtCore import QSettings, QTimer, Qt, Signal
@@ -30,10 +32,27 @@ from app.update_checker import UpdateChecker
 from app.shortcuts import get_default_shortcuts
 from modules.utils.device import is_gpu_available
 from modules.utils.paths import get_default_project_autosave_dir, get_user_data_dir
+from modules.utils.notification_sound import (
+    SYSTEM_SOUND_MODE,
+    play_completion_sound,
+)
 from modules.utils.inpainting_runtime import (
     inpainter_default_settings,
     normalize_inpainter_key,
     normalized_mask_refiner_settings,
+)
+from modules.utils.mask_inpaint_mode import (
+    DEFAULT_MASK_INPAINT_MODE,
+)
+from modules.utils.automatic_output import (
+    DEFAULT_OUTPUT_ARCHIVE_COMPRESSION_LEVEL,
+    DEFAULT_OUTPUT_ARCHIVE_FORMAT,
+    DEFAULT_OUTPUT_ARCHIVE_IMAGE_FORMAT,
+    DEFAULT_OUTPUT_IMAGE_FORMAT,
+    DEFAULT_OUTPUT_TARGET,
+    normalize_global_output_settings,
+    normalize_project_output_preferences,
+    resolve_automatic_output_settings,
 )
 
 
@@ -120,6 +139,14 @@ class SettingsPage(QtWidgets.QWidget):
         self.ui.mask_overlay_checkbox.stateChanged.connect(self._save_settings_if_not_loading)
         self.ui.cleanup_mask_delta_checkbox.stateChanged.connect(self._save_settings_if_not_loading)
         self.ui.debug_metadata_checkbox.stateChanged.connect(self._save_settings_if_not_loading)
+        self.ui.automatic_output_target_combo.currentIndexChanged.connect(self._save_settings_if_not_loading)
+        self.ui.automatic_output_image_format_combo.currentIndexChanged.connect(self._save_settings_if_not_loading)
+        self.ui.automatic_output_archive_format_combo.currentIndexChanged.connect(self._save_settings_if_not_loading)
+        self.ui.automatic_output_archive_image_format_combo.currentIndexChanged.connect(self._save_settings_if_not_loading)
+        self.ui.automatic_output_archive_level_spinbox.valueChanged.connect(self._save_settings_if_not_loading)
+        self.ui.user_dictionaries_page.changed.connect(self._save_settings_if_not_loading)
+        self.ui.notifications_page.changed.connect(self._save_settings_if_not_loading)
+        self.ui.notifications_page.test_requested.connect(self.play_test_completion_sound)
         self._connect_live_save_signals()
 
     def _save_settings_if_not_loading(self, *_args):
@@ -150,12 +177,8 @@ class SettingsPage(QtWidgets.QWidget):
             self.ui.translator_combo,
             self.ui.ocr_combo,
             self.ui.detector_combo,
-            self.ui.mask_refiner_combo,
             self.ui.inpainter_combo,
             self.ui.inpaint_strategy_combo,
-            self.ui.ctd_detect_size_combo,
-            self.ui.ctd_det_rearrange_max_batches_combo,
-            self.ui.ctd_device_combo,
             self.ui.inpainter_size_combo,
             self.ui.inpainter_device_combo,
             self.ui.inpainter_precision_combo,
@@ -165,7 +188,6 @@ class SettingsPage(QtWidgets.QWidget):
 
         checkbox_widgets = [
             self.ui.use_gpu_checkbox,
-            self.ui.keep_existing_lines_checkbox,
             self.ui.image_checkbox,
             self.ui.uppercase_checkbox,
             self.ui.save_keys_checkbox,
@@ -199,10 +221,10 @@ class SettingsPage(QtWidgets.QWidget):
             self.ui.gemma_chunk_size_spinbox,
             self.ui.gemma_max_completion_tokens_spinbox,
             self.ui.gemma_request_timeout_spinbox,
-            self.ui.ctd_font_size_multiplier_spinbox,
-            self.ui.ctd_font_size_max_spinbox,
-            self.ui.ctd_font_size_min_spinbox,
-            self.ui.ctd_mask_dilate_size_spinbox,
+            self.ui.gemma_temperature_spinbox,
+            self.ui.gemma_top_k_spinbox,
+            self.ui.gemma_top_p_spinbox,
+            self.ui.gemma_min_p_spinbox,
         ]
         for widget in spin_widgets:
             widget.valueChanged.connect(self._save_settings_if_not_loading)
@@ -240,8 +262,13 @@ class SettingsPage(QtWidgets.QWidget):
                 return self._normalize_ocr_mode_value(current_data)
             return self._normalize_ocr_mode_value(combo.currentText())
         if tool_type == "inpainter":
-            return normalize_inpainter_key(combo.currentText())
+            return "lama_large_512px"
+        if tool_type == "detector":
+            return "RT-DETR-v2"
         return combo.currentText()
+
+    def get_mask_inpaint_mode(self) -> str:
+        return DEFAULT_MASK_INPAINT_MODE
 
     def get_tool_display_text(self, tool_type: str) -> str:
         tool_combos = {
@@ -319,6 +346,10 @@ class SettingsPage(QtWidgets.QWidget):
             "chunk_size": int(self.ui.gemma_chunk_size_spinbox.value()),
             "max_completion_tokens": int(self.ui.gemma_max_completion_tokens_spinbox.value()),
             "request_timeout_sec": int(self.ui.gemma_request_timeout_spinbox.value()),
+            "temperature": float(self.ui.gemma_temperature_spinbox.value()),
+            "top_k": int(self.ui.gemma_top_k_spinbox.value()),
+            "top_p": float(self.ui.gemma_top_p_spinbox.value()),
+            "min_p": float(self.ui.gemma_min_p_spinbox.value()),
             "raw_response_logging": self.ui.gemma_raw_response_logging_checkbox.isChecked(),
         }
 
@@ -360,17 +391,13 @@ class SettingsPage(QtWidgets.QWidget):
         }
 
     def get_mask_refiner_settings(self):
-        return normalized_mask_refiner_settings({
-            "mask_refiner": self.ui.mask_refiner_combo.currentText(),
-            "ctd_detect_size": int(self.ui.ctd_detect_size_combo.currentText()),
-            "ctd_det_rearrange_max_batches": int(self.ui.ctd_det_rearrange_max_batches_combo.currentText()),
-            "ctd_device": self.ui.ctd_device_combo.currentText(),
-            "ctd_font_size_multiplier": float(self.ui.ctd_font_size_multiplier_spinbox.value()),
-            "ctd_font_size_max": int(self.ui.ctd_font_size_max_spinbox.value()),
-            "ctd_font_size_min": int(self.ui.ctd_font_size_min_spinbox.value()),
-            "ctd_mask_dilate_size": int(self.ui.ctd_mask_dilate_size_spinbox.value()),
-            "keep_existing_lines": self.ui.keep_existing_lines_checkbox.isChecked(),
-        })
+        return normalized_mask_refiner_settings(
+            {
+                "mask_refiner": "legacy_bbox",
+                "mask_inpaint_mode": self.get_mask_inpaint_mode(),
+                "keep_existing_lines": False,
+            }
+        )
 
     def get_inpainter_runtime_settings(self, inpainter_key: str | None = None):
         normalized = normalize_inpainter_key(inpainter_key or self.get_tool_selection("inpainter"))
@@ -399,6 +426,22 @@ class SettingsPage(QtWidgets.QWidget):
         autosave_folder = self.ui.project_autosave_folder_input.text().strip()
         if not autosave_folder:
             autosave_folder = get_default_project_autosave_dir()
+        auto_export_source_txt = bool(
+            getattr(owner, "auto_export_source_txt_checkbox", None)
+            and owner.auto_export_source_txt_checkbox.isChecked()
+        )
+        auto_export_source_md = bool(
+            getattr(owner, "auto_export_source_md_checkbox", None)
+            and owner.auto_export_source_md_checkbox.isChecked()
+        )
+        auto_export_translation_txt = bool(
+            getattr(owner, "auto_export_translation_txt_checkbox", None)
+            and owner.auto_export_translation_txt_checkbox.isChecked()
+        )
+        auto_export_translation_md = bool(
+            getattr(owner, "auto_export_translation_md_checkbox", None)
+            and owner.auto_export_translation_md_checkbox.isChecked()
+        )
         return {
             "export_raw_text": self.ui.raw_text_checkbox.isChecked(),
             "export_translated_text": self.ui.translated_text_checkbox.isChecked(),
@@ -408,10 +451,52 @@ class SettingsPage(QtWidgets.QWidget):
             "export_mask_overlay": self.ui.mask_overlay_checkbox.isChecked(),
             "export_cleanup_mask_delta": self.ui.cleanup_mask_delta_checkbox.isChecked(),
             "export_debug_metadata": self.ui.debug_metadata_checkbox.isChecked(),
+            "automatic_output_target": str(
+                self.ui.automatic_output_target_combo.currentData() or DEFAULT_OUTPUT_TARGET
+            ),
+            "automatic_output_image_format": str(
+                self.ui.automatic_output_image_format_combo.currentData() or DEFAULT_OUTPUT_IMAGE_FORMAT
+            ),
+            "automatic_output_archive_format": str(
+                self.ui.automatic_output_archive_format_combo.currentData() or DEFAULT_OUTPUT_ARCHIVE_FORMAT
+            ),
+            "automatic_output_archive_image_format": str(
+                self.ui.automatic_output_archive_image_format_combo.currentData()
+                or DEFAULT_OUTPUT_ARCHIVE_IMAGE_FORMAT
+            ),
+            "automatic_output_archive_compression_level": int(
+                self.ui.automatic_output_archive_level_spinbox.value()
+            ),
             "project_autosave_enabled": autosave_enabled,
             "project_autosave_interval_min": int(self.ui.project_autosave_interval_spinbox.value()),
             "project_autosave_folder": autosave_folder,
+            "auto_export_source_txt": auto_export_source_txt,
+            "auto_export_source_md": auto_export_source_md,
+            "auto_export_translation_txt": auto_export_translation_txt,
+            "auto_export_translation_md": auto_export_translation_md,
         }
+
+    def get_resolved_automatic_output_settings(
+        self,
+        project_preferences: Mapping[str, object] | None = None,
+    ) -> dict[str, object]:
+        project = normalize_project_output_preferences(project_preferences)
+        return resolve_automatic_output_settings(self.get_export_settings(), project)
+
+    def get_dictionary_settings(self) -> dict[str, list[dict]]:
+        return {
+            "ocr_substitutions": self.ui.user_dictionaries_page.get_ocr_rules(),
+            "translation_substitutions": self.ui.user_dictionaries_page.get_translation_rules(),
+        }
+
+    def get_notification_settings(self) -> dict[str, object]:
+        return self.ui.notifications_page.get_notification_settings()
+
+    def get_ocr_result_dictionary_rules(self) -> list[dict]:
+        return self.get_dictionary_settings()["ocr_substitutions"]
+
+    def get_translation_result_dictionary_rules(self) -> list[dict]:
+        return self.get_dictionary_settings()["translation_substitutions"]
 
     def _normalize_service_name(self, raw_service: str) -> str:
         normalized = self.ui.value_mappings.get(raw_service, raw_service)
@@ -508,6 +593,7 @@ class SettingsPage(QtWidgets.QWidget):
             "gemma_local_server": self.get_gemma_local_server_settings(),
             "llm": self.get_llm_settings(),
             "export": self.get_export_settings(),
+            "notifications": self.get_notification_settings(),
             "shortcuts": self.ui.shortcuts_page.get_shortcuts(),
             "credentials": self.get_credentials(),
             "save_keys": self.ui.save_keys_checkbox.isChecked(),
@@ -584,9 +670,42 @@ class SettingsPage(QtWidgets.QWidget):
         for key, value in all_settings.items():
             process_group(key, value, settings)
 
+        settings.beginGroup("tools")
+        settings.beginGroup("mask_refiner_settings")
+        for stale_key in (
+            "ctd_detect_size",
+            "ctd_det_rearrange_max_batches",
+            "ctd_device",
+            "ctd_font_size_multiplier",
+            "ctd_font_size_max",
+            "ctd_font_size_min",
+            "ctd_mask_dilate_size",
+            "keep_existing_lines",
+        ):
+            settings.remove(stale_key)
+        settings.endGroup()
+        settings.endGroup()
+
         settings.beginGroup("export")
         settings.remove("auto_save")
         settings.remove("archive_save_as")
+        settings.remove("automatic_output_format")
+        settings.remove("automatic_output_preset")
+        settings.remove("automatic_output_png_compression_level")
+        settings.remove("automatic_output_jpg_quality")
+        settings.remove("automatic_output_webp_quality")
+        settings.endGroup()
+
+        dictionaries = self.get_dictionary_settings()
+        settings.beginGroup("dictionaries")
+        settings.setValue(
+            "ocr_substitutions_json",
+            json.dumps(dictionaries["ocr_substitutions"], ensure_ascii=False),
+        )
+        settings.setValue(
+            "translation_substitutions_json",
+            json.dumps(dictionaries["translation_substitutions"], ensure_ascii=False),
+        )
         settings.endGroup()
 
         credentials = self.get_credentials()
@@ -636,19 +755,19 @@ class SettingsPage(QtWidgets.QWidget):
         ocr = settings.value("ocr", OCR_MODE_PADDLE_VL, type=str)
         self._set_ocr_mode(ocr)
 
-        inpainter = normalize_inpainter_key(settings.value("inpainter", "lama_large_512px", type=str))
+        inpainter = "lama_large_512px"
         translated_inpainter = self.ui.reverse_mappings.get(inpainter, inpainter)
         if self.ui.inpainter_combo.findText(translated_inpainter) != -1:
             self.ui.inpainter_combo.setCurrentIndex(self.ui.inpainter_combo.findText(translated_inpainter))
         else:
             self.ui.inpainter_combo.setCurrentIndex(0)
 
-        detector = settings.value("detector", "RT-DETR-v2")
+        detector = "RT-DETR-v2"
         translated_detector = self.ui.reverse_mappings.get(detector, detector)
         if self.ui.detector_combo.findText(translated_detector) != -1:
             self.ui.detector_combo.setCurrentIndex(self.ui.detector_combo.findText(translated_detector))
         else:
-            self.ui.detector_combo.setCurrentIndex(-1)
+            self.ui.detector_combo.setCurrentIndex(0)
 
         self.ui.tools_page._update_inpainter_runtime_widgets(self.ui.inpainter_combo.currentIndex())
 
@@ -670,22 +789,6 @@ class SettingsPage(QtWidgets.QWidget):
         elif strategy == "Crop":
             self.ui.crop_margin_spinbox.setValue(settings.value("crop_margin", 512, type=int))
             self.ui.crop_trigger_spinbox.setValue(settings.value("crop_trigger_size", 512, type=int))
-        settings.endGroup()
-
-        settings.beginGroup("mask_refiner_settings")
-        mask_refiner = settings.value("mask_refiner", "ctd", type=str)
-        idx = self.ui.mask_refiner_combo.findText(mask_refiner)
-        if idx != -1:
-            self.ui.mask_refiner_combo.setCurrentIndex(idx)
-        self.ui.tools_page._update_mask_refiner_widgets(self.ui.mask_refiner_combo.currentIndex())
-        self.ui.keep_existing_lines_checkbox.setChecked(settings.value("keep_existing_lines", True, type=bool))
-        self.ui.ctd_detect_size_combo.setCurrentText(str(settings.value("ctd_detect_size", 1280, type=int)))
-        self.ui.ctd_det_rearrange_max_batches_combo.setCurrentText(str(settings.value("ctd_det_rearrange_max_batches", 4, type=int)))
-        self.ui.ctd_device_combo.setCurrentText(settings.value("ctd_device", "cuda", type=str))
-        self.ui.ctd_font_size_multiplier_spinbox.setValue(settings.value("ctd_font_size_multiplier", 1.0, type=float))
-        self.ui.ctd_font_size_max_spinbox.setValue(settings.value("ctd_font_size_max", -1, type=int))
-        self.ui.ctd_font_size_min_spinbox.setValue(settings.value("ctd_font_size_min", -1, type=int))
-        self.ui.ctd_mask_dilate_size_spinbox.setValue(settings.value("ctd_mask_dilate_size", 2, type=int))
         settings.endGroup()
 
         runtime_defaults = inpainter_default_settings(inpainter)
@@ -837,6 +940,18 @@ class SettingsPage(QtWidgets.QWidget):
                 type=int,
             )
         )
+        self.ui.gemma_temperature_spinbox.setValue(
+            settings.value("temperature", GemmaLocalServerPage.DEFAULT_TEMPERATURE, type=float)
+        )
+        self.ui.gemma_top_k_spinbox.setValue(
+            settings.value("top_k", GemmaLocalServerPage.DEFAULT_TOP_K, type=int)
+        )
+        self.ui.gemma_top_p_spinbox.setValue(
+            settings.value("top_p", GemmaLocalServerPage.DEFAULT_TOP_P, type=float)
+        )
+        self.ui.gemma_min_p_spinbox.setValue(
+            settings.value("min_p", GemmaLocalServerPage.DEFAULT_MIN_P, type=float)
+        )
         self.ui.gemma_raw_response_logging_checkbox.setChecked(
             settings.value("raw_response_logging", False, type=bool)
         )
@@ -870,6 +985,56 @@ class SettingsPage(QtWidgets.QWidget):
         self.ui.debug_metadata_checkbox.setChecked(
             settings.value("export_debug_metadata", False, type=bool)
         )
+        normalized_output_settings = normalize_global_output_settings(
+            {
+                "automatic_output_target": settings.value(
+                    "automatic_output_target",
+                    DEFAULT_OUTPUT_TARGET,
+                    type=str,
+                ),
+                "automatic_output_image_format": settings.value(
+                    "automatic_output_image_format",
+                    settings.value("automatic_output_format", DEFAULT_OUTPUT_IMAGE_FORMAT, type=str),
+                    type=str,
+                ),
+                "automatic_output_archive_format": settings.value(
+                    "automatic_output_archive_format",
+                    DEFAULT_OUTPUT_ARCHIVE_FORMAT,
+                    type=str,
+                ),
+                "automatic_output_archive_image_format": settings.value(
+                    "automatic_output_archive_image_format",
+                    DEFAULT_OUTPUT_ARCHIVE_IMAGE_FORMAT,
+                    type=str,
+                ),
+                "automatic_output_archive_compression_level": settings.value(
+                    "automatic_output_archive_compression_level",
+                    DEFAULT_OUTPUT_ARCHIVE_COMPRESSION_LEVEL,
+                    type=int,
+                ),
+            }
+        )
+        target_index = self.ui.automatic_output_target_combo.findData(
+            normalized_output_settings["automatic_output_target"]
+        )
+        self.ui.automatic_output_target_combo.setCurrentIndex(max(target_index, 0))
+        image_format_index = self.ui.automatic_output_image_format_combo.findData(
+            normalized_output_settings["automatic_output_image_format"]
+        )
+        self.ui.automatic_output_image_format_combo.setCurrentIndex(max(image_format_index, 0))
+        archive_format_index = self.ui.automatic_output_archive_format_combo.findData(
+            normalized_output_settings["automatic_output_archive_format"]
+        )
+        self.ui.automatic_output_archive_format_combo.setCurrentIndex(max(archive_format_index, 0))
+        archive_image_format_index = self.ui.automatic_output_archive_image_format_combo.findData(
+            normalized_output_settings["automatic_output_archive_image_format"]
+        )
+        self.ui.automatic_output_archive_image_format_combo.setCurrentIndex(
+            max(archive_image_format_index, 0)
+        )
+        self.ui.automatic_output_archive_level_spinbox.setValue(
+            int(normalized_output_settings["automatic_output_archive_compression_level"])
+        )
         autosave_enabled = settings.value("project_autosave_enabled", False, type=bool)
         owner = self.parent()
         title_bar = getattr(owner, "title_bar", None)
@@ -880,6 +1045,41 @@ class SettingsPage(QtWidgets.QWidget):
         )
         self.ui.project_autosave_folder_input.setText(
             settings.value("project_autosave_folder", get_default_project_autosave_dir(), type=str)
+        )
+        owner = self.window()
+        auto_export_source_txt = settings.value("auto_export_source_txt", False, type=bool)
+        auto_export_source_md = settings.value("auto_export_source_md", False, type=bool)
+        auto_export_translation_txt = settings.value("auto_export_translation_txt", False, type=bool)
+        auto_export_translation_md = settings.value("auto_export_translation_md", False, type=bool)
+        if getattr(owner, "auto_export_source_txt_checkbox", None) is not None:
+            owner.auto_export_source_txt_checkbox.setChecked(bool(auto_export_source_txt))
+        if getattr(owner, "auto_export_source_md_checkbox", None) is not None:
+            owner.auto_export_source_md_checkbox.setChecked(bool(auto_export_source_md))
+        if getattr(owner, "auto_export_translation_txt_checkbox", None) is not None:
+            owner.auto_export_translation_txt_checkbox.setChecked(bool(auto_export_translation_txt))
+        if getattr(owner, "auto_export_translation_md_checkbox", None) is not None:
+            owner.auto_export_translation_md_checkbox.setChecked(bool(auto_export_translation_md))
+        settings.endGroup()
+
+        settings.beginGroup("dictionaries")
+        ocr_rules_json = settings.value("ocr_substitutions_json", "[]", type=str)
+        translation_rules_json = settings.value("translation_substitutions_json", "[]", type=str)
+        try:
+            ocr_rules = json.loads(ocr_rules_json or "[]")
+        except Exception:
+            ocr_rules = []
+        try:
+            translation_rules = json.loads(translation_rules_json or "[]")
+        except Exception:
+            translation_rules = []
+        self.ui.user_dictionaries_page.load_rules(ocr_rules, translation_rules)
+        settings.endGroup()
+
+        settings.beginGroup("notifications")
+        self.ui.notifications_page.load_settings(
+            enable_completion_sound=settings.value("enable_completion_sound", True, type=bool),
+            completion_sound_mode=settings.value("completion_sound_mode", SYSTEM_SOUND_MODE, type=str),
+            completion_sound_file=settings.value("completion_sound_file", "", type=str),
         )
         settings.endGroup()
 
@@ -915,10 +1115,23 @@ class SettingsPage(QtWidgets.QWidget):
 
         self._current_language = self.ui.lang_combo.currentText()
         self._loading_settings = False
+        owner = self.window()
+        if owner is not None and hasattr(owner, "refresh_automatic_output_controls"):
+            try:
+                owner.refresh_automatic_output_controls()
+            except Exception:
+                logger.debug("Failed to refresh automatic output controls after loading settings.", exc_info=True)
 
     def on_language_changed(self, new_language):
         if not self._loading_settings:
             self.show_restart_dialog(new_language)
+
+    def play_test_completion_sound(self) -> None:
+        settings = self.get_notification_settings()
+        play_completion_sound(
+            str(settings.get("completion_sound_mode") or SYSTEM_SOUND_MODE),
+            str(settings.get("completion_sound_file") or ""),
+        )
 
     def _show_message_box(self, icon: QtWidgets.QMessageBox.Icon, title: str, text: str):
         msg_box = QtWidgets.QMessageBox(self)

@@ -7,7 +7,12 @@ import imkit as imk
 
 from ..base import LLMTranslation
 from ...utils.textblock import TextBlock
-from ...utils.translator_utils import get_raw_text, set_texts_from_json
+from ...utils.translator_utils import (
+    build_translation_input_json,
+    get_raw_text,
+    normalize_text_for_translation,
+    set_texts_from_json,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -29,6 +34,8 @@ class BaseLLMTranslation(LLMTranslation):
         self.debug_log_raw_response = False
         self.debug_log_response_json = False
         self.translation_mode_label = self.__class__.__name__
+        self.last_translation_input_raw_json = ""
+        self.last_translation_input_normalized_json = ""
     
     def initialize(self, settings: Any, source_lang: str, target_lang: str, **kwargs) -> None:
         """
@@ -62,9 +69,9 @@ class BaseLLMTranslation(LLMTranslation):
         Returns:
             List of updated TextBlock objects with translations
         """
-        entire_raw_text = get_raw_text(blk_list)
+        _, translation_input_json = self._build_translation_input_payloads(blk_list)
         system_prompt = self.get_system_prompt(self.source_lang, self.target_lang)
-        user_prompt = f"{extra_context}\nMake the translation sound as natural as possible.\nTranslate this:\n{entire_raw_text}"
+        user_prompt = f"{extra_context}\nMake the translation sound as natural as possible.\nTranslate this:\n{translation_input_json}"
         
         entire_translated_text = self._perform_translation(user_prompt, system_prompt, image)
         if self.debug_log_raw_response:
@@ -90,6 +97,36 @@ class BaseLLMTranslation(LLMTranslation):
         )
             
         return blk_list
+
+    def _build_translation_input_payloads(self, blk_list: list[TextBlock]) -> tuple[str, str]:
+        source_lang_code = self.get_language_code(self.source_lang) or (self.source_lang or "")
+        raw_json = get_raw_text(blk_list)
+        normalized_json = build_translation_input_json(blk_list, source_lang_code)
+        self.last_translation_input_raw_json = raw_json
+        self.last_translation_input_normalized_json = normalized_json
+
+        changed_blocks = sum(
+            1
+            for blk in blk_list
+            if normalize_text_for_translation(getattr(blk, "text", ""), source_lang_code)
+            != str(getattr(blk, "text", "") or "")
+        )
+        if changed_blocks:
+            logger.info(
+                "translation input normalized (%s): source_lang=%s changed_blocks=%d total_blocks=%d",
+                self.translation_mode_label,
+                source_lang_code,
+                changed_blocks,
+                len(blk_list),
+            )
+            logger.debug("translation input raw (%s): %s", self.translation_mode_label, raw_json)
+            logger.debug(
+                "translation input normalized (%s): %s",
+                self.translation_mode_label,
+                normalized_json,
+            )
+
+        return raw_json, normalized_json
     
     @abstractmethod
     def _perform_translation(self, user_prompt: str, system_prompt: str, image: np.ndarray) -> str:

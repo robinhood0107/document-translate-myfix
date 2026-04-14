@@ -91,7 +91,7 @@ class EventHandler:
             self._press_handle_pan(event)
             return
 
-        if self.viewer.current_tool in ['brush', 'eraser'] and self.viewer.hasPhoto():
+        if self.viewer.current_tool in ['brush', 'eraser', 'exclude', 'restore'] and self.viewer.hasPhoto():
             if self._is_on_image(scene_pos):
                 self.viewer.drawing_manager.start_stroke(scene_pos)
 
@@ -119,7 +119,7 @@ class EventHandler:
             self._move_handle_pan(event)
             return
         
-        if self.viewer.current_tool in ['brush', 'eraser'] and self.viewer.drawing_manager.current_path:
+        if self.viewer.current_tool in ['brush', 'eraser', 'exclude', 'restore'] and self.viewer.drawing_manager.current_path:
             if self._is_on_image(scene_pos):
                 self.viewer.drawing_manager.continue_stroke(scene_pos)
         
@@ -158,7 +158,7 @@ class EventHandler:
             self._release_handle_pan()
             return
         
-        if self.viewer.current_tool in ['brush', 'eraser']:
+        if self.viewer.current_tool in ['brush', 'eraser', 'exclude', 'restore']:
             self.viewer.drawing_manager.end_stroke()
             
         if self.viewer.current_tool == 'box':

@@ -2,6 +2,7 @@ from PySide6 import QtCore, QtGui, QtWidgets
 import imkit as imk
 import numpy as np
 from app.path_materialization import ensure_path_materialized
+from app.ui.commands.base import PatchCommandBase
 from .text_item import TextBlockItem
 from .text.text_item_properties import TextItemProperties
 
@@ -216,7 +217,12 @@ class ImageSaveRenderer:
     def apply_patches(self, patches: list[dict]):
         """Apply inpainting patches to the image."""
 
-        for patch in patches:
+        ordered_patches = sorted(
+            patches,
+            key=lambda patch: int(patch.get("order", 0) or 0),
+        )
+
+        for fallback_order, patch in enumerate(ordered_patches, start=1):
             # Extract data from the patch dict
             x, y, w, h = patch['bbox']
             if 'png_path' in patch:
@@ -236,7 +242,8 @@ class ImageSaveRenderer:
             
             # Position the patch relative to its parent (pixmap_item)
             patch_item.setPos(x, y)
-            patch_item.setZValue(self.pixmap_item.zValue() + 0.5)
+            patch_order = int(patch.get("order", fallback_order) or fallback_order)
+            patch_item.setZValue(PatchCommandBase.patch_z_value({"order": patch_order}))
 
 
 

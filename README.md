@@ -1,61 +1,230 @@
-# Comic Translate
-English | [한국어](/mnt/c/Users/pjjpj/Desktop/openai_manga_translater/comic-translate/docs/i18n/README_ko.md) | [Français](/mnt/c/Users/pjjpj/Desktop/openai_manga_translater/comic-translate/docs/i18n/README_fr.md) | [简体中文](/mnt/c/Users/pjjpj/Desktop/openai_manga_translater/comic-translate/docs/i18n/README_zh-CN.md)
+[English](README.md) | [한국어](README_ko.md)
 
-<img src="https://i.imgur.com/QUVK6mK.png">
+# Comic Translate Fork
 
-## Overview
-This fork focuses on a practical local pipeline for comic translation:
+This repository is a local-first fork of upstream `comic-translate` that started from the upstream `v2.6.7` codebase and then diverged with product-specific runtime, OCR, workflow, and Windows setup changes.
 
-- `Custom Local Server(Gemma)` for local LLM translation
-- `PaddleOCR VL` local Docker services for OCR
-- `HunyuanOCR` local `llama.cpp` server for OCR
+The fork is maintained around a practical desktop workflow:
 
-The goal of this fork is to make the local Gemma + OCR runtime path practical and reproducible for day-to-day comic translation.
+- local Gemma translation runtime support
+- local OCR runtimes such as `PaddleOCR VL` and `HunyuanOCR`
+- Windows-oriented setup and launch tooling
+- selective manual backports from upstream `v2.7.0` and `v2.7.1`
+- benchmark work isolated from product branches
 
-## What This Fork Updates
-- Removed legacy account/login dependencies from the local workflow
-- Split local Gemma translation into a dedicated runtime/config path
-- Added tracked OCR Docker runtime bundle in [paddleocr_vl_docker_files/README.md](/mnt/c/Users/pjjpj/Desktop/openai_manga_translater/comic-translate/paddleocr_vl_docker_files/README.md)
-- Added tracked HunyuanOCR runtime bundle in [hunyuanocr_docker_files/README.md](/mnt/c/Users/pjjpj/Desktop/openai_manga_translater/comic-translate/hunyuanocr_docker_files/README.md)
-- Tuned the current translation-only baseline around:
-  - Gemma `temperature=0.6`, `top_k=64`, `top_p=0.95`, `min_p=0.0`
-  - Gemma `n_gpu_layers=23`, `threads=12`, `ctx=4096`
-  - `paddleocr-server=cpu`, `paddleocr-vllm=gpu`
+## Important Features
+
+- Local Gemma translation runtime for desktop-first translation workflows.
+- Local OCR runtimes with optimal routing between `HunyuanOCR` and `PaddleOCR VL`.
+- Inpainting add, exclude, and restore tools with saved mask and patch state.
+- TXT/MD source export and translation import with OCR and translation correction dictionaries.
+- CBZ/CBR comic archive import with lazy page materialization.
+- Bottom-left automatic pipeline status panel with overlay locking and latest-result preview.
+
+## Supporting Features
+
+- Reuse-only OCR preflight checks avoid restarting already running local OCR containers.
+- Automatic runs update the latest completed translated image preview page by page.
+- Completion sounds support the system alert or repo-provided `music/*.wav` files.
+- Windows launchers bootstrap `.venv-win` and `.venv-win-cuda13` automatically.
+- Localized tooltips, help text, and compiled Qt translation assets stay aligned with UI changes.
+
+## Origin and Upstream Attribution
+
+This repository started from [ogkalu2/comic-translate](https://github.com/ogkalu2/comic-translate) and should be understood as a downstream, product-focused fork/derivative of that upstream work. It began from the upstream `v2.6.7` codebase and then diverged with local runtime, OCR, Windows, and workflow changes.
+
+## Third-Party Models and Runtime Notice
+
+This project uses, downloads, or interoperates with third-party models, checkpoints, and runtime images. The copyright, license, and usage terms for those assets belong to their original authors and distributors, and this repository does not claim ownership of them. You are responsible for reviewing and complying with each upstream model/runtime license before using them.
+
+### Models and runtimes used by the product code
+
+Detection / masking:
+- [RT-DETR v2](https://huggingface.co/ogkalu/comic-text-and-bubble-detector)
+- [ComicTextDetector (CTD)](https://github.com/zyddnys/manga-image-translator/releases/tag/beta-0.3) (`comictextdetector.pt`, `comictextdetector.pt.onnx`)
+- [Font Detector](https://huggingface.co/gyrojeff/YuzuMarker.FontDetection)
+
+OCR:
+- [MangaOCR](https://huggingface.co/kha-white/manga-ocr-base)
+- [MangaOCR ONNX](https://huggingface.co/mayocream/manga-ocr-onnx)
+- [Pororo OCR](https://huggingface.co/ogkalu/pororo)
+- [PPOCRv5 / RapidOCR](https://www.modelscope.cn/models/RapidAI/RapidOCR)
+- [PaddleOCR VL](https://github.com/PaddlePaddle/PaddleOCR)
+- [HunyuanOCR](https://github.com/Tencent-Hunyuan/HunyuanOCR)
+
+Inpainting:
+- [AOT](https://huggingface.co/ogkalu/aot-inpainting)
+- [LaMa legacy runtime](https://github.com/Sanster/models/releases/tag/AnimeMangaInpainting)
+- [lama_large_512px](https://huggingface.co/dreMaz/AnimeMangaInpainting)
+- [lama_mpe / manga-image-translator inpainting checkpoint](https://github.com/zyddnys/manga-image-translator/releases/tag/beta-0.3)
+- [MI-GAN](https://github.com/Sanster/models/releases/tag/migan)
+
+Local translation/runtime:
+- [Gemma](https://ai.google.dev/gemma) local GGUF runtime
+- [llama.cpp](https://github.com/ggml-org/llama.cpp) Docker runtime image
+
+### Auto-downloaded vs user-supplied assets
+
+Automatically downloaded by the app when missing:
+- CTD model files (`comictextdetector.pt`, `comictextdetector.pt.onnx`)
+- Inpainting checkpoints such as `AOT`, `lama_large_512px`, and `lama_mpe`
+- OCR checkpoints such as `MangaOCR`, `Pororo OCR`, and `PPOCRv5`
+
+Provided separately by the user or local runtime bundle:
+- Gemma GGUF files mounted into the local translation runtime
+- HunyuanOCR GGUF and mmproj files
+- PaddleOCR VL Docker/runtime bundle files
+
+## Release Policy
+
+This repository now uses a strict `main + develop + tag` model.
+
+- `develop` is the integration branch for upcoming product work.
+- `main` is the shipping baseline.
+- Releases are created from version tags on `main`.
+- `release/*` branches are not used.
+
+The authoritative repository policy lives in [rules.md](rules.md).
+
+## Fork Improvements Since Upstream `v2.6.7`
+
+Local product work since the `v2.6.7` base has focused on a few technical areas.
+
+### Rendering and manual editing
+
+- documented and then centralized shared render policy behavior
+- expanded render state with forced color, block anchoring, source rect tracking, and vertical alignment metadata
+- refined the render panel layout, wording, and selection affordances
+- kept manual rendering and batch/webtoon rendering on the same shared policy path
+
+### Windows runtime and repo workflow
+
+- added dedicated Windows launchers and a CUDA13 environment path
+- made `run_comic.bat` and `run_comic_cuda13.bat` self-bootstrapping for local venv/runtime setup
+- hardened local Git hook setup and CI validation flow
+- cleaned branch policy and standardized on `feature/*`, `fix/*`, `chore/*`, `hotfix/*`, `benchmarking/lab`
+
+### OCR quality and diagnostics
+
+- added block-local OCR fallback and suspicious-result retry behavior
+- added bubble residue cleanup and mask widening for residual glyph removal
+- improved one-page auto / batch OCR parity and diagnostics
+- added local PaddleOCR VL support and tuned its defaults
+- added local HunyuanOCR support
+- added `Optimal (HunyuanOCR / PaddleOCR VL)` OCR routing with run-start language confirmation and on-demand local runtime management
+
+### Local translation runtime
+
+- specialized the local Gemma translation server flow
+- split custom translator modes and improved keyless local endpoint support
+- normalized Gemma input and sanitized problematic glyphs
+- aligned local sampler/runtime defaults with measured benchmark presets
+
+### Benchmarking and branch separation
+
+- added a dedicated benchmark toolkit and one-click runners
+- separated benchmark harness/report assets from product branches
+- codified the `benchmarking/lab` promotion boundary
+
+## Selective Backports
+
+This fork does not merge upstream releases wholesale. Instead, it performs selective compare-based backports and adapts only the changes that fit the local product structure.
+
+### `v2.6.7 -> v2.7.0`
+
+The `v2.7.0` backport brought in selected user-facing features such as:
+
+- configurable keyboard shortcuts
+- PSD export and PSD import
+- chapter-aware export flow
+- project rename/move actions
+- startup recent-project actions such as copy path and delete file
+- multi-select text block formatting
+- undo text render as a single undo step
+- unlimited extra context for the custom translator
+- new target languages and improved RTL handling
+- selected webtoon/list-view behavior fixes
+
+Audit document:
+
+- [docs/history/v267-to-v270-backport-audit.md](docs/history/v267-to-v270-backport-audit.md)
+- [docs/history/v267-to-v270-backport-audit-ko.md](docs/history/v267-to-v270-backport-audit-ko.md)
+
+### `v2.7.0 -> v2.7.1`
+
+The `v2.7.1` round selectively applies the upstream fixes that matter to this fork:
+
+- PSD import stabilization with explicit font-catalog preparation and safer decode fallback logging
+- main-thread-safe `QTimer.singleShot(...)` dispatch for async UI callbacks
+- list thumbnail loading reworked around `QImage` in the worker thread and `QPixmap` conversion on the main thread
+- import menu cleanup so `PSD` appears next to `Project File`
+- app version bump to `2.7.1`
+
+Audit document:
+
+- [docs/history/v270-to-v271-backport-audit.md](docs/history/v270-to-v271-backport-audit.md)
+- [docs/history/v270-to-v271-backport-audit-ko.md](docs/history/v270-to-v271-backport-audit-ko.md)
 
 ## Quick Start
-### App
-Run the app from your prepared environment.
 
-```bash
-uv run comic.py
+### 1. Launch the application
+
+The launchers create or update their own local runtime environment on first run.
+
+
+Default Windows runtime:
+
+```bat
+run_comic.bat
 ```
 
-## Docs Map
-### Gemma
-- Local server setup: [local-server-ko.md](/mnt/c/Users/pjjpj/Desktop/openai_manga_translater/comic-translate/docs/gemma/local-server-ko.md)
+CUDA13 runtime:
 
-### OCR / Runtime
-- OCR Docker bundle: [paddleocr_vl_docker_files/README.md](/mnt/c/Users/pjjpj/Desktop/openai_manga_translater/comic-translate/paddleocr_vl_docker_files/README.md)
-- HunyuanOCR runtime bundle: [hunyuanocr_docker_files/README.md](/mnt/c/Users/pjjpj/Desktop/openai_manga_translater/comic-translate/hunyuanocr_docker_files/README.md)
-- HunyuanOCR setup guide: [local-server-ko.md](/mnt/c/Users/pjjpj/Desktop/openai_manga_translater/comic-translate/docs/hunyuan/local-server-ko.md)
-- MangaLMM runtime bundle: [mangalmm_docker_files/README.md](/mnt/c/Users/pjjpj/Desktop/openai_manga_translater/comic-translate-benchmarking/mangalmm_docker_files/README.md)
-- MangaLMM setup guide: [local-server-ko.md](/mnt/c/Users/pjjpj/Desktop/openai_manga_translater/comic-translate-benchmarking/docs/mangalmm/local-server-ko.md)
+```bat
+run_comic_cuda13.bat
+```
 
-### Benchmarking Status
-- `MangaLMM` local OCR support is tracked on the benchmark branch as a Japanese block-crop OCR candidate.
-- `Optimal+ (HunyuanOCR / MangaLMM / PaddleOCR VL)` remains a design/promotion candidate, not a default on this branch.
-- simpletest 3-page head-to-head workflow: [workflow-ko.md](/mnt/c/Users/pjjpj/Desktop/openai_manga_translater/comic-translate-benchmarking/docs/benchmark/ocr-simpletest-mangalmm-vs-paddle/workflow-ko.md)
-- implementation history: [implementation-history-ko.md](/mnt/c/Users/pjjpj/Desktop/openai_manga_translater/comic-translate-benchmarking/docs/benchmark/ocr-simpletest-mangalmm-vs-paddle/implementation-history-ko.md)
-- generated report: [ocr-simpletest-mangalmm-vs-paddle-report-ko.md](/mnt/c/Users/pjjpj/Desktop/openai_manga_translater/comic-translate-benchmarking/docs/banchmark_report/ocr-simpletest-mangalmm-vs-paddle-report-ko.md)
+### 2. Optional local translation runtime
 
-### Repo Policy
-- Benchmark branch / merge policy: [benchmark-branch-policy-ko.md](/mnt/c/Users/pjjpj/Desktop/openai_manga_translater/comic-translate/docs/repo/benchmark-branch-policy-ko.md)
+Start the local Gemma server from the repository root:
 
-### Rendering / History
-- Rendering notes: [rendering-notes-ko.md](/mnt/c/Users/pjjpj/Desktop/openai_manga_translater/comic-translate/docs/rendering/rendering-notes-ko.md)
-- Change log: [change-log-ko.md](/mnt/c/Users/pjjpj/Desktop/openai_manga_translater/comic-translate/docs/history/change-log-ko.md)
+```bash
+docker compose up -d
+```
 
-## Notes
-- `/Sample/` is local-only and ignored by Git.
-- Benchmark-specific tooling and reports are maintained on the `benchmarking/lab` branch.
-- The simpletest comparison family and its copied/generated assets remain benchmark-only branch assets and are not promoted into product PRs directly.
+Then use `Custom Local Server(Gemma)` in the app.
+
+### 3. Optional local OCR runtimes
+
+HunyuanOCR:
+
+```bash
+docker compose -f hunyuanocr_docker_files/docker-compose.yaml up -d
+```
+
+PaddleOCR VL uses the tracked bundle under [paddleocr_vl_docker_files/README.md](paddleocr_vl_docker_files/README.md).
+
+### 4. Recommended OCR setting
+
+In Settings, choose:
+
+- `Default (existing auto: MangaOCR / PPOCR / Pororo...)` to keep legacy OCR routing
+- `Optimal (HunyuanOCR / PaddleOCR VL)` to route Chinese to `HunyuanOCR` and Japanese/other languages to `PaddleOCR VL`
+
+## Repository Documents
+
+- [rules.md](rules.md)
+- [docs/history/change-log.md](docs/history/change-log.md)
+- [docs/history/change-log-ko.md](docs/history/change-log-ko.md)
+- [docs/gemma/local-server-ko.md](docs/gemma/local-server-ko.md)
+- [docs/hunyuan/local-server-ko.md](docs/hunyuan/local-server-ko.md)
+- [docs/repo/github-rulesets-public-free-ko.md](docs/repo/github-rulesets-public-free-ko.md)
+
+## Legacy Localized READMEs
+
+The old localized README files under `docs/i18n/` are no longer the source of truth for this fork.
+
+Use:
+
+- [README.md](README.md) for the English source of truth
+- [README_ko.md](README_ko.md) for the Korean source of truth

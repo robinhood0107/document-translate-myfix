@@ -5,7 +5,7 @@
 ## 준비
 
 - 모델 파일을 `testmodel/` 폴더에 둡니다.
-- 현재 compose 기준 모델 파일은 `gemma-4-26b-a4b-it-heretic.q3_k_m.gguf`입니다.
+- 앱은 `Settings > Credentials > Model`에 적은 GGUF 파일명을 그대로 사용합니다.
 
 ## 서버 실행
 
@@ -19,7 +19,7 @@ docker compose up -d --force-recreate
 앱 설정:
 
 - Endpoint URL: `http://127.0.0.1:18080/v1`
-- Model: `gemma-4-26b-a4b-it-heretic.q3_k_m.gguf`
+- Model: `testmodel/` 안에 둔 실제 GGUF 파일명과 정확히 같아야 합니다.
 
 ## 현재 활성 요청값
 
