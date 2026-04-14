@@ -93,6 +93,12 @@ class PaddleOCRVLEngineTests(unittest.TestCase):
         self.assertEqual(merged["crop_padding_ratio"], 0.11)
         self.assertEqual(merged["manga_expansion_percentage"], 7)
 
+    def test_default_scheduler_mode_is_fixed_area_desc_without_override(self) -> None:
+        engine = PaddleOCRVLEngine()
+        engine.initialize(_FakeSettings())
+
+        self.assertEqual(engine.scheduler_mode, "fixed_area_desc")
+
     def test_fixed_mode_preserves_original_order_and_uses_fixed_worker_cap(self) -> None:
         engine = PaddleOCRVLEngine()
         engine.initialize(_FakeSettings(scheduler_mode="fixed", parallel_workers=8))
