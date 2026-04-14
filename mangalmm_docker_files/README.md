@@ -40,12 +40,17 @@ docker compose -f mangalmm_docker_files/docker-compose.yaml up -d --force-recrea
 - pull policy: `always`
 - OpenAI-compatible endpoint: `/v1/chat/completions`
 - health endpoint: `/health`
-- OCR request defaults: `temperature=0`, `top_k=1`
+- OCR request defaults: `PNG data URL`, `image -> text`, `temperature=0.1`, `top_k=1`, `top_p=0.001`, `repeat_penalty=1.05`
 - prompt cache: disabled with `--cache-ram 0`
 - purpose: full-page single-shot OCR for the app's existing `TextBlock` pipeline
 
 ## 참고
 
 - 이 런타임은 detector 이후 `페이지 전체 1장`을 한 번 보내는 full-page single-shot OCR 용도입니다.
+- 일본어 `Optimal+`는 이 런타임 위에서 내부 고정 계약을 사용합니다.
+  - `standard`: `1224 x 1728`, grounding prompt, `2048 tokens`
+  - `dense`: `900 x 1270`, hybrid JSON grounding prompt, `1024 tokens`
+  - rescue retry: `900 x 1270`, dense prompt, `4096 tokens`
 - 비율 유지 downscale만 적용하고, `bbox_2d`는 앱에서 `scale_x`, `scale_y`로 원본 좌표에 역매핑합니다.
+- `/health`가 `503 Loading model`인 동안에는 재기동보다 최대 300초 대기를 우선합니다.
 - 루트 `docker-compose.yaml`은 Gemma 번역 서버용으로 유지하고, MangaLMM는 이 별도 번들에서 관리합니다.

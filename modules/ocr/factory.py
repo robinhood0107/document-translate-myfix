@@ -3,6 +3,7 @@ import hashlib
 
 from modules.utils.device import resolve_device, torch_available
 from .base import OCREngine
+from .selection import normalize_ocr_mode
 from .microsoft_ocr import MicrosoftOCR
 from .google_ocr import GoogleOCR
 from .gpt_ocr import GPTOCR
@@ -31,7 +32,8 @@ class OCRFactory:
         settings, 
         source_lang_english: str, 
         ocr_model: str, 
-        backend: str = 'onnx'
+        backend: str = 'onnx',
+        selected_ocr_mode: str | None = None,
     ) -> OCREngine:
         """
         Create or retrieve an appropriate OCR engine based on settings.
@@ -50,7 +52,8 @@ class OCRFactory:
             ocr_model, 
             source_lang_english, 
             settings, 
-            backend
+            backend,
+            selected_ocr_mode=selected_ocr_mode,
         )
 
         # 1) if we already made it, return it
@@ -58,7 +61,13 @@ class OCRFactory:
             return cls._engines[cache_key]
 
         # 2) Create the direct/local engine selected in settings.
-        engine = cls._create_new_engine(settings, source_lang_english, ocr_model, backend)
+        engine = cls._create_new_engine(
+            settings,
+            source_lang_english,
+            ocr_model,
+            backend,
+            selected_ocr_mode=selected_ocr_mode,
+        )
         cls._engines[cache_key] = engine
         return engine
     
@@ -68,7 +77,9 @@ class OCRFactory:
         ocr_key: str,
         source_lang: str,
         settings, 
-        backend: str = 'onnx'
+        backend: str = 'onnx',
+        *,
+        selected_ocr_mode: str | None = None,
     ) -> str:
         """
         Build a cache key for all ocr engines.
@@ -100,6 +111,7 @@ class OCRFactory:
             extras["hunyuan_ocr"] = settings.get_hunyuan_ocr_settings()
         if ocr_key == "MangaLMM":
             extras["mangalmm_ocr"] = settings.get_mangalmm_ocr_settings()
+            extras["selected_ocr_mode"] = normalize_ocr_mode(selected_ocr_mode)
 
         # The LLM OCR engines currently don't use the settings in the LLMs tab
         # so exclude this for now
@@ -131,7 +143,9 @@ class OCRFactory:
         settings, 
         source_lang_english: str, 
         ocr_model: str, 
-        backend: str = 'onnx'
+        backend: str = 'onnx',
+        *,
+        selected_ocr_mode: str | None = None,
     ) -> OCREngine:
         """Create a new OCR engine instance based on model and language."""
         
@@ -143,7 +157,11 @@ class OCRFactory:
             'Gemini-2.0-Flash': lambda s: cls._create_gemini_ocr(s, ocr_model),
             'PaddleOCR VL': cls._create_paddleocr_vl,
             'HunyuanOCR': cls._create_hunyuan_ocr,
-            'MangaLMM': cls._create_mangalmm_ocr,
+            'MangaLMM': lambda s: cls._create_mangalmm_ocr(
+                s,
+                source_lang_english=source_lang_english,
+                selected_ocr_mode=selected_ocr_mode,
+            ),
         }
         
         # Language-specific factory functions (for Default model)
@@ -258,7 +276,16 @@ class OCRFactory:
         return engine
 
     @staticmethod
-    def _create_mangalmm_ocr(settings) -> OCREngine:
+    def _create_mangalmm_ocr(
+        settings,
+        *,
+        source_lang_english: str,
+        selected_ocr_mode: str | None,
+    ) -> OCREngine:
         engine = MangaLMMOCREngine()
-        engine.initialize(settings)
+        engine.initialize(
+            settings,
+            source_lang_english=source_lang_english,
+            selected_ocr_mode=selected_ocr_mode,
+        )
         return engine
