@@ -1,0 +1,39 @@
+services:
+  mangalmm-local-server:
+    image: ${LLAMA_CPP_IMAGE:-ghcr.io/ggml-org/llama.cpp:server-cuda}
+    pull_policy: always
+    container_name: mangalmm-local-server
+    restart: unless-stopped
+    ports:
+      - "28081:8080"
+    gpus: all
+    environment:
+      NVIDIA_VISIBLE_DEVICES: all
+      NVIDIA_DRIVER_CAPABILITIES: compute,utility
+    volumes:
+      - ../testmodel:/models:ro
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:8080/health >/dev/null || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+      start_period: 20s
+    command:
+      - -m
+      - /models/MangaLMM.Q8_0.gguf
+      - --mmproj
+      - /models/MangaLMM.mmproj-Q8_0.gguf
+      - --host
+      - 0.0.0.0
+      - --port
+      - "8080"
+      - -c
+      - "4096"
+      - -np
+      - "1"
+      - -t
+      - "12"
+      - --cache-ram
+      - "0"
+      - --n-gpu-layers
+      - "99"
