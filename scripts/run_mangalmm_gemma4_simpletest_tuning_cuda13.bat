@@ -7,7 +7,7 @@ for %%I in ("%SCRIPT_DIR%..") do set "REPO_ROOT=%%~fI"
 if defined CT_BENCH_OUTPUT_ROOT (
     set "BENCH_ROOT=%CT_BENCH_OUTPUT_ROOT%"
 ) else (
-    set "BENCH_ROOT=%REPO_ROOT%\banchmark_result_log"
+    set "BENCH_ROOT=C:\ctbench"
     set "CT_BENCH_OUTPUT_ROOT=%BENCH_ROOT%"
 )
 
@@ -16,11 +16,16 @@ set "CUDA13_BIN=C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v13.1\bin\x64
 set "TENSORRT_LIBS=%REPO_ROOT%\.venv-win-cuda13\Lib\site-packages\tensorrt_libs"
 set "CUDNN_BIN=%REPO_ROOT%\.venv-win-cuda13\Lib\site-packages\nvidia\cudnn\bin"
 set "DOCKER_BIN=C:\Program Files\Docker\Docker\resources\bin"
+set "DOCKER_CONFIG=%REPO_ROOT%\.docker-bench"
 
 if not exist "%PYTHON_EXE%" (
     echo CUDA 13 benchmark environment not found: "%PYTHON_EXE%"
     exit /b 1
 )
+
+if not exist "%BENCH_ROOT%" mkdir "%BENCH_ROOT%"
+if not exist "%DOCKER_CONFIG%" mkdir "%DOCKER_CONFIG%"
+if not exist "%DOCKER_CONFIG%\config.json" echo {}>"%DOCKER_CONFIG%\config.json"
 
 if exist "%CUDA13_BIN%" set "PATH=%CUDA13_BIN%;%PATH%"
 if exist "%TENSORRT_LIBS%" set "PATH=%TENSORRT_LIBS%;%PATH%"
