@@ -42,10 +42,10 @@ docker compose -f mangalmm_docker_files/docker-compose.yaml up -d --force-recrea
 - health endpoint: `/health`
 - OCR request defaults: `temperature=0`, `top_k=1`
 - prompt cache: disabled with `--cache-ram 0`
-- purpose: block-crop OCR for the app's existing `TextBlock` pipeline
+- purpose: full-page single-shot OCR for the app's existing `TextBlock` pipeline
 
 ## 참고
 
-- 이 런타임은 전체 페이지 spotting이 아니라 현재 앱 구조에 맞춘 block-crop OCR 용도입니다.
-- 큰 crop만 조건부 resize를 적용하고, `bbox_2d`는 앱에서 원본 좌표로 역매핑합니다.
+- 이 런타임은 detector 이후 `페이지 전체 1장`을 한 번 보내는 full-page single-shot OCR 용도입니다.
+- 비율 유지 downscale만 적용하고, `bbox_2d`는 앱에서 `scale_x`, `scale_y`로 원본 좌표에 역매핑합니다.
 - 루트 `docker-compose.yaml`은 Gemma 번역 서버용으로 유지하고, MangaLMM는 이 별도 번들에서 관리합니다.
