@@ -1,0 +1,31 @@
+@echo off
+setlocal
+
+set "SCRIPT_DIR=%~dp0"
+for %%I in ("%SCRIPT_DIR%..") do set "REPO_ROOT=%%~fI"
+
+if defined CT_BENCH_OUTPUT_ROOT (
+    set "BENCH_ROOT=%CT_BENCH_OUTPUT_ROOT%"
+) else (
+    set "BENCH_ROOT=%REPO_ROOT%\banchmark_result_log"
+    set "CT_BENCH_OUTPUT_ROOT=%BENCH_ROOT%"
+)
+
+set "PYTHON_EXE=%REPO_ROOT%\.venv-win-cuda13\Scripts\python.exe"
+set "CUDA13_BIN=C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v13.1\bin\x64"
+set "TENSORRT_LIBS=%REPO_ROOT%\.venv-win-cuda13\Lib\site-packages\tensorrt_libs"
+set "CUDNN_BIN=%REPO_ROOT%\.venv-win-cuda13\Lib\site-packages\nvidia\cudnn\bin"
+set "DOCKER_BIN=C:\Program Files\Docker\Docker\resources\bin"
+
+if not exist "%PYTHON_EXE%" (
+    echo CUDA 13 benchmark environment not found: "%PYTHON_EXE%"
+    exit /b 1
+)
+
+if exist "%CUDA13_BIN%" set "PATH=%CUDA13_BIN%;%PATH%"
+if exist "%TENSORRT_LIBS%" set "PATH=%TENSORRT_LIBS%;%PATH%"
+if exist "%CUDNN_BIN%" set "PATH=%CUDNN_BIN%;%PATH%"
+if exist "%DOCKER_BIN%" set "PATH=%DOCKER_BIN%;%PATH%"
+
+call "%PYTHON_EXE%" -u "%SCRIPT_DIR%run_mangalmm_gemma4_simpletest_tuning.py" %*
+exit /b %ERRORLEVEL%
