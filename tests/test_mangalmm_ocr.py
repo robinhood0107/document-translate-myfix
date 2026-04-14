@@ -89,13 +89,13 @@ class MangaLMMOCRTests(unittest.TestCase):
 
         self.assertEqual(dense_plan.profile, "dense")
         self.assertEqual(dense_plan.request_shape, (1270, 900))
-        self.assertEqual(dense_plan.max_completion_tokens, 768)
+        self.assertEqual(dense_plan.max_completion_tokens, 1024)
         self.assertAlmostEqual(dense_plan.scale_x, 900 / 2150.0)
         self.assertAlmostEqual(dense_plan.scale_y, 1270 / 3035.0)
 
         self.assertEqual(standard_plan.profile, "standard")
         self.assertEqual(standard_plan.request_shape, (1728, 1224))
-        self.assertEqual(standard_plan.max_completion_tokens, 512)
+        self.assertEqual(standard_plan.max_completion_tokens, 2048)
         self.assertAlmostEqual(standard_plan.scale_x, 1224 / 2150.0)
         self.assertAlmostEqual(standard_plan.scale_y, 1728 / 3036.0)
 
@@ -108,7 +108,7 @@ class MangaLMMOCRTests(unittest.TestCase):
             base_scale=0.5,
             scale_x=0.5,
             scale_y=0.5,
-            max_completion_tokens=512,
+            max_completion_tokens=2048,
             block_count=1,
             small_block_ratio=0.0,
             text_cover_ratio=0.02,
@@ -142,7 +142,7 @@ class MangaLMMOCRTests(unittest.TestCase):
             base_scale=900 / 2150.0,
             scale_x=900 / 2150.0,
             scale_y=1270 / 3035.0,
-            max_completion_tokens=768,
+            max_completion_tokens=1024,
             block_count=30,
             small_block_ratio=0.7,
             text_cover_ratio=0.2,
@@ -200,6 +200,72 @@ class MangaLMMOCRTests(unittest.TestCase):
         self.assertEqual(region["resize_profile"], "dense")
         self.assertAlmostEqual(region["scale_x"], resize_plan.scale_x)
         self.assertAlmostEqual(region["scale_y"], resize_plan.scale_y)
+
+    def test_prompt_for_resize_plan_uses_standard_and_dense_variants(self) -> None:
+        engine = MangaLMMOCREngine()
+        standard_plan = ResizePlan(
+            profile="standard",
+            original_shape=(3036, 2150),
+            request_shape=(1728, 1224),
+            base_scale=1224 / 2150.0,
+            scale_x=1224 / 2150.0,
+            scale_y=1728 / 3036.0,
+            max_completion_tokens=2048,
+            block_count=15,
+            small_block_ratio=0.2,
+            text_cover_ratio=0.1,
+        )
+        dense_plan = ResizePlan(
+            profile="dense",
+            original_shape=(3035, 2150),
+            request_shape=(1270, 900),
+            base_scale=900 / 2150.0,
+            scale_x=900 / 2150.0,
+            scale_y=1270 / 3035.0,
+            max_completion_tokens=1024,
+            block_count=30,
+            small_block_ratio=0.7,
+            text_cover_ratio=0.2,
+        )
+
+        self.assertEqual(
+            engine._prompt_for_resize_plan(standard_plan),
+            ("standard_grounding", engine.STANDARD_PROMPT),
+        )
+        self.assertEqual(
+            engine._prompt_for_resize_plan(dense_plan),
+            ("dense_grounding_json", engine.DENSE_PROMPT),
+        )
+
+    def test_request_response_text_sends_image_first_with_selected_prompt(self) -> None:
+        engine = MangaLMMOCREngine()
+        image = np.zeros((32, 32, 3), dtype=np.uint8)
+        response = mock.Mock()
+        response.status_code = 200
+        response.json.return_value = {
+            "choices": [{"message": {"content": "[]"}}],
+        }
+
+        with mock.patch("modules.ocr.mangalmm_ocr.requests.post", return_value=response) as post:
+            raw = engine._request_response_text(
+                image,
+                max_completion_tokens=1024,
+                prompt_text=engine.DENSE_PROMPT,
+            )
+
+        self.assertEqual(raw, "[]")
+        payload = post.call_args.kwargs["json"]
+        content = payload["messages"][0]["content"]
+        self.assertEqual(content[0]["type"], "image_url")
+        self.assertTrue(content[0]["image_url"]["url"].startswith("data:image/png;base64,"))
+        self.assertEqual(content[1], {"type": "text", "text": engine.DENSE_PROMPT})
+        self.assertEqual(payload["max_completion_tokens"], 1024)
+        self.assertEqual(payload["temperature"], 0.1)
+        self.assertEqual(payload["top_k"], 1)
+        self.assertEqual(payload["top_p"], 0.001)
+        self.assertEqual(payload["min_p"], 0.0)
+        self.assertEqual(payload["repeat_penalty"], 1.05)
+        self.assertEqual(payload["repeat_last_n"], 0)
 
     def test_process_image_does_not_retry_when_page_returns_empty(self) -> None:
         engine = MangaLMMOCREngine()
