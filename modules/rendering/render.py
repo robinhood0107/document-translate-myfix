@@ -15,7 +15,7 @@ from modules.utils.textblock import adjust_blks_size
 from modules.detection.utils.geometry import shrink_bbox
 from app.ui.canvas.text.vertical_layout import VerticalTextDocumentLayout
 from modules.utils.language_utils import get_language_code
-from modules.utils.text_normalization import PADDLE_DECORATIVE_NOISE_GLYPHS, canonicalize_ellipsis_runs
+from modules.utils.text_normalization import DECORATIVE_NOISE_GLYPHS, canonicalize_ellipsis_runs
 
 from dataclasses import dataclass
 
@@ -97,7 +97,7 @@ def sanitize_render_text(
     for ch in sanitized:
         replacement = ch
         reason = ""
-        if ch in PADDLE_DECORATIVE_NOISE_GLYPHS:
+        if ch in DECORATIVE_NOISE_GLYPHS:
             replacement = ""
             reason = "decorative-noise"
         elif ch not in {"\n", "\r", "\t"} and not _render_font_supports(metrics, ch):
