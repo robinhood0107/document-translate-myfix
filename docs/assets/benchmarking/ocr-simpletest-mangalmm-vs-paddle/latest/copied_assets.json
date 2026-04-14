@@ -1,0 +1,30 @@
+{
+  "paddleocr_vl": {
+    "candidate_key": "paddleocr_vl",
+    "selected_warm_run_dir": "./banchmark_result_log/ocr_simpletest_mangalmm_vs_paddle/20260414_090047_ocr_simpletest_mangalmm_vs_paddle_suite/paddleocr_vl/warm2",
+    "selected_export_root": "./banchmark_result_log/ocr_simpletest_mangalmm_vs_paddle/20260414_090047_ocr_simpletest_mangalmm_vs_paddle_suite/paddleocr_vl/warm2/corpus/comic_translate_Apr-14-2026_09-09-44AM",
+    "translated_images": [
+      {
+        "original": "./banchmark_result_log/ocr_simpletest_mangalmm_vs_paddle/20260414_090047_ocr_simpletest_mangalmm_vs_paddle_suite/paddleocr_vl/warm2/corpus/comic_translate_Apr-14-2026_09-09-44AM/translated_images/p_016_translated.jpg",
+        "latest_copy": "./docs/assets/benchmarking/ocr-simpletest-mangalmm-vs-paddle/latest/translated_images/paddleocr_vl/p_016_translated.jpg",
+        "history_copy": "./docs/assets/benchmarking/ocr-simpletest-mangalmm-vs-paddle/history/20260414_090047_ocr_simpletest_mangalmm_vs_paddle_suite/translated_images/paddleocr_vl/p_016_translated.jpg"
+      },
+      {
+        "original": "./banchmark_result_log/ocr_simpletest_mangalmm_vs_paddle/20260414_090047_ocr_simpletest_mangalmm_vs_paddle_suite/paddleocr_vl/warm2/corpus/comic_translate_Apr-14-2026_09-09-44AM/translated_images/p_017_translated.jpg",
+        "latest_copy": "./docs/assets/benchmarking/ocr-simpletest-mangalmm-vs-paddle/latest/translated_images/paddleocr_vl/p_017_translated.jpg",
+        "history_copy": "./docs/assets/benchmarking/ocr-simpletest-mangalmm-vs-paddle/history/20260414_090047_ocr_simpletest_mangalmm_vs_paddle_suite/translated_images/paddleocr_vl/p_017_translated.jpg"
+      },
+      {
+        "original": "./banchmark_result_log/ocr_simpletest_mangalmm_vs_paddle/20260414_090047_ocr_simpletest_mangalmm_vs_paddle_suite/paddleocr_vl/warm2/corpus/comic_translate_Apr-14-2026_09-09-44AM/translated_images/p_021_translated.jpg",
+        "latest_copy": "./docs/assets/benchmarking/ocr-simpletest-mangalmm-vs-paddle/latest/translated_images/paddleocr_vl/p_021_translated.jpg",
+        "history_copy": "./docs/assets/benchmarking/ocr-simpletest-mangalmm-vs-paddle/history/20260414_090047_ocr_simpletest_mangalmm_vs_paddle_suite/translated_images/paddleocr_vl/p_021_translated.jpg"
+      }
+    ]
+  },
+  "mangalmm": {
+    "candidate_key": "mangalmm",
+    "selected_warm_run_dir": "./banchmark_result_log/ocr_simpletest_mangalmm_vs_paddle/20260414_090047_ocr_simpletest_mangalmm_vs_paddle_suite/mangalmm/warm2",
+    "selected_export_root": "./banchmark_result_log/ocr_simpletest_mangalmm_vs_paddle/20260414_090047_ocr_simpletest_mangalmm_vs_paddle_suite/mangalmm/warm2/corpus/comic_translate_Apr-14-2026_09-17-30AM",
+    "translated_images": []
+  }
+}

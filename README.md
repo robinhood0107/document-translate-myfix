@@ -38,6 +38,15 @@ uv run comic.py
 - OCR Docker bundle: [paddleocr_vl_docker_files/README.md](/mnt/c/Users/pjjpj/Desktop/openai_manga_translater/comic-translate/paddleocr_vl_docker_files/README.md)
 - HunyuanOCR runtime bundle: [hunyuanocr_docker_files/README.md](/mnt/c/Users/pjjpj/Desktop/openai_manga_translater/comic-translate/hunyuanocr_docker_files/README.md)
 - HunyuanOCR setup guide: [local-server-ko.md](/mnt/c/Users/pjjpj/Desktop/openai_manga_translater/comic-translate/docs/hunyuan/local-server-ko.md)
+- MangaLMM runtime bundle: [mangalmm_docker_files/README.md](/mnt/c/Users/pjjpj/Desktop/openai_manga_translater/comic-translate-benchmarking/mangalmm_docker_files/README.md)
+- MangaLMM setup guide: [local-server-ko.md](/mnt/c/Users/pjjpj/Desktop/openai_manga_translater/comic-translate-benchmarking/docs/mangalmm/local-server-ko.md)
+
+### Benchmarking Status
+- `MangaLMM` local OCR support is tracked on the benchmark branch as a Japanese block-crop OCR candidate.
+- `Optimal+ (HunyuanOCR / MangaLMM / PaddleOCR VL)` remains a design/promotion candidate, not a default on this branch.
+- simpletest 3-page head-to-head workflow: [workflow-ko.md](/mnt/c/Users/pjjpj/Desktop/openai_manga_translater/comic-translate-benchmarking/docs/benchmark/ocr-simpletest-mangalmm-vs-paddle/workflow-ko.md)
+- implementation history: [implementation-history-ko.md](/mnt/c/Users/pjjpj/Desktop/openai_manga_translater/comic-translate-benchmarking/docs/benchmark/ocr-simpletest-mangalmm-vs-paddle/implementation-history-ko.md)
+- generated report: [ocr-simpletest-mangalmm-vs-paddle-report-ko.md](/mnt/c/Users/pjjpj/Desktop/openai_manga_translater/comic-translate-benchmarking/docs/banchmark_report/ocr-simpletest-mangalmm-vs-paddle-report-ko.md)
 
 ### Repo Policy
 - Benchmark branch / merge policy: [benchmark-branch-policy-ko.md](/mnt/c/Users/pjjpj/Desktop/openai_manga_translater/comic-translate/docs/repo/benchmark-branch-policy-ko.md)
@@ -49,3 +58,4 @@ uv run comic.py
 ## Notes
 - `/Sample/` is local-only and ignored by Git.
 - Benchmark-specific tooling and reports are maintained on the `benchmarking/lab` branch.
+- The simpletest comparison family and its copied/generated assets remain benchmark-only branch assets and are not promoted into product PRs directly.
