@@ -19,16 +19,12 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from benchmark_common import (
-    ALL_BENCHMARK_CONTAINER_NAMES,
     create_run_dir,
     load_preset,
-    remove_containers,
     repo_relative_str,
-    resolve_runtime_health_urls,
     run_command,
-    stage_runtime_files,
-    compose_pull_and_recreate,
     collect_managed_llama_cpp_runtimes,
+    ensure_managed_runtime_health_first,
     write_json,
 )
 
@@ -100,19 +96,6 @@ def _current_git_sha(ref: str = "HEAD") -> str:
     return (completed.stdout or "").strip()
 
 
-def _wait_for_url(url: str, timeout_sec: int = 240) -> None:
-    import urllib.request
-
-    started = time.time()
-    while time.time() - started < timeout_sec:
-        try:
-            with urllib.request.urlopen(url, timeout=5):
-                return
-        except Exception:
-            time.sleep(2)
-    raise TimeoutError(f"Timed out waiting for {url}")
-
-
 def _stage_spotlight_input(suite_dir: Path, corpus_name: str, source_path: Path) -> Path:
     target_dir = suite_dir / "_spotlight_inputs" / corpus_name
     target_dir.mkdir(parents=True, exist_ok=True)
@@ -122,14 +105,13 @@ def _stage_spotlight_input(suite_dir: Path, corpus_name: str, source_path: Path)
 
 def _compose_up(runtime_dir: Path, preset_ref: str) -> dict[str, Any]:
     preset, _ = load_preset(preset_ref)
-    staged = stage_runtime_files(preset, runtime_dir)
-    remove_containers(ALL_BENCHMARK_CONTAINER_NAMES)
-    if staged.get("gemma"):
-        compose_pull_and_recreate(staged["gemma"]["compose_path"], cwd=runtime_dir / "gemma")
-    if staged["ocr"].get("kind") != "internal":
-        compose_pull_and_recreate(staged["ocr"]["compose_path"], cwd=runtime_dir / "ocr")
-    for url in resolve_runtime_health_urls(preset, "full"):
-        _wait_for_url(url)
+    runtime_state = ensure_managed_runtime_health_first(
+        preset,
+        runtime_dir,
+        runtime_services="full",
+        log_fn=_log,
+    )
+    write_json(runtime_dir / "managed_runtime_policy.json", runtime_state["report"])
     return {
         "preset": preset,
         "runtime": collect_managed_llama_cpp_runtimes(preset, "full"),
@@ -432,7 +414,6 @@ def _suite_payload(
                 corpus_payload["full_ocr_invariance"] = _ocr_invariance(corpus_payload["full_runs"])
         finally:
             _write_container_logs(suite_dir / "docker_logs" / corpus_name)
-            remove_containers(ALL_BENCHMARK_CONTAINER_NAMES)
         payload["corpora"][corpus_name] = corpus_payload
     return payload
 
