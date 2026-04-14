@@ -8,10 +8,6 @@ REMOTE_NAME="${1:-}"
 BRANCH_NAME="$(git branch --show-current)"
 
 resolve_python() {
-  if [[ -x "$ROOT_DIR/.venv/bin/python" ]]; then
-    echo "$ROOT_DIR/.venv/bin/python"
-    return
-  fi
   if [[ -x "$ROOT_DIR/.venv-win/Scripts/python.exe" ]]; then
     echo "$ROOT_DIR/.venv-win/Scripts/python.exe"
     return
