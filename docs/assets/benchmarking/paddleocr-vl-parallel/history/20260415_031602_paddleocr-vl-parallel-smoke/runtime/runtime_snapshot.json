@@ -1,0 +1,154 @@
+{
+  "sampled_at": 1776190562.8036978,
+  "container_names": [
+    "paddleocr-server",
+    "paddleocr-vllm"
+  ],
+  "docker_ps": [
+    {
+      "Command": "\"bash -lc 'set -euo …\"",
+      "CreatedAt": "2026-04-15 01:51:22 +0900 KST",
+      "ID": "d650606cf8b9",
+      "Image": "ccr-2vdh3abv-pub.cnc.bj.baidubce.com/paddlepaddle/paddleocr-genai-vllm-server:latest-nvidia-gpu-offline",
+      "Labels": "com.docker.compose.config-hash=53c1807ca00ba6b7cdfc5f82e1c27fe18e71af48d3b7178b96901892183264b0,com.docker.compose.container-number=1,com.docker.compose.depends_on=paddleocr-vllm:service_started:false,com.docker.compose.image=sha256:7f5ddd587a2deffd7adf8fbba0627e30740c907afb85a3a1b8cfb30939acb5f0,com.docker.compose.oneoff=False,com.docker.compose.project.config_files=C:\\Users\\pjjpj\\Desktop\\openai_manga_translater\\comic-translate\\banchmark_result_log\\paddleocr_vl_parallel\\20260415_015119_paddleocr-vl-parallel-smoke\\runtime\\ocr\\docker-compose.yaml,com.docker.compose.project.working_dir=C:\\Users\\pjjpj\\Desktop\\openai_manga_translater\\comic-translate\\banchmark_result_log\\paddleocr_vl_parallel\\20260415_015119_paddleocr-vl-parallel-smoke\\runtime\\ocr,com.docker.compose.project=ocr,com.docker.compose.service=paddleocr-layout,com.docker.compose.version=5.0.2,desktop.docker.io/binds/0/Source=C:\\Users\\pjjpj\\Desktop\\openai_manga_translater\\comic-translate\\banchmark_result_log\\paddleocr_vl_parallel\\20260415_015119_paddleocr-vl-parallel-smoke\\runtime\\ocr\\pipeline_conf.yaml,desktop.docker.io/binds/0/SourceKind=hostFile,desktop.docker.io/binds/0/Target=/tmp/pipeline_conf.yaml,desktop.docker.io/ports.scheme=v2,desktop.docker.io/ports/8118/tcp=:28118,org.opencontainers.image.version.dockerfile.sha=84dde7f6d5ce,org.opencontainers.image.version.paddleocr=3.4.0,org.opencontainers.image.version.paddlex=3.4.0",
+      "LocalVolumes": "0",
+      "Mounts": "/run/desktop/m…",
+      "Names": "paddleocr-server",
+      "Networks": "ocr_default",
+      "Platform": {
+        "architecture": "amd64",
+        "os": "linux"
+      },
+      "Ports": "0.0.0.0:28118->8118/tcp, [::]:28118->8118/tcp",
+      "RunningFor": "About an hour ago",
+      "Size": "71.7MB (virtual 14.7GB)",
+      "State": "running",
+      "Status": "Up About an hour (healthy)"
+    },
+    {
+      "Command": "\"bash -lc 'set -euo …\"",
+      "CreatedAt": "2026-04-15 01:51:22 +0900 KST",
+      "ID": "044bfc54f6c6",
+      "Image": "ccr-2vdh3abv-pub.cnc.bj.baidubce.com/paddlepaddle/paddleocr-genai-vllm-server:latest-nvidia-gpu-offline",
+      "Labels": "com.docker.compose.config-hash=278bac23652a2d0843dabddc0b48977a0d1a50907ace9742c8b35ee782fdcb12,com.docker.compose.container-number=1,com.docker.compose.depends_on=,com.docker.compose.image=sha256:7f5ddd587a2deffd7adf8fbba0627e30740c907afb85a3a1b8cfb30939acb5f0,com.docker.compose.oneoff=False,com.docker.compose.project.config_files=C:\\Users\\pjjpj\\Desktop\\openai_manga_translater\\comic-translate\\banchmark_result_log\\paddleocr_vl_parallel\\20260415_015119_paddleocr-vl-parallel-smoke\\runtime\\ocr\\docker-compose.yaml,com.docker.compose.project.working_dir=C:\\Users\\pjjpj\\Desktop\\openai_manga_translater\\comic-translate\\banchmark_result_log\\paddleocr_vl_parallel\\20260415_015119_paddleocr-vl-parallel-smoke\\runtime\\ocr,com.docker.compose.project=ocr,com.docker.compose.service=paddleocr-vllm,com.docker.compose.version=5.0.2,desktop.docker.io/binds/0/Source=C:\\Users\\pjjpj\\Desktop\\openai_manga_translater\\comic-translate\\banchmark_result_log\\paddleocr_vl_parallel\\20260415_015119_paddleocr-vl-parallel-smoke\\runtime\\ocr\\vllm_config.yml,desktop.docker.io/binds/0/SourceKind=hostFile,desktop.docker.io/binds/0/Target=/tmp/vllm_config.yml,desktop.docker.io/ports.scheme=v2,desktop.docker.io/ports/18000/tcp=:18000,org.opencontainers.image.version.dockerfile.sha=84dde7f6d5ce,org.opencontainers.image.version.paddleocr=3.4.0,org.opencontainers.image.version.paddlex=3.4.0",
+      "LocalVolumes": "0",
+      "Mounts": "/run/desktop/m…",
+      "Names": "paddleocr-vllm",
+      "Networks": "ocr_default",
+      "Platform": {
+        "architecture": "amd64",
+        "os": "linux"
+      },
+      "Ports": "0.0.0.0:18000->18000/tcp, [::]:18000->18000/tcp",
+      "RunningFor": "About an hour ago",
+      "Size": "45.3MB (virtual 14.7GB)",
+      "State": "running",
+      "Status": "Up About an hour (healthy)"
+    }
+  ],
+  "containers": {
+    "paddleocr-server": {
+      "name": "paddleocr-server",
+      "image": "ccr-2vdh3abv-pub.cnc.bj.baidubce.com/paddlepaddle/paddleocr-genai-vllm-server:latest-nvidia-gpu-offline",
+      "cmd": [
+        "bash",
+        "-lc",
+        "set -euo pipefail && paddlex --install serving && pip install --no-cache-dir 'paddlex[ocr]' && paddlex --serve --pipeline /tmp/pipeline_conf.yaml --host 0.0.0.0 --port 8118 --device gpu:0"
+      ],
+      "entrypoint": [],
+      "status": "running",
+      "running": true,
+      "health": "healthy",
+      "restart_count": 0,
+      "device_requests": [
+        {
+          "Driver": "",
+          "Count": -1,
+          "DeviceIDs": null,
+          "Capabilities": [
+            [
+              "gpu"
+            ]
+          ],
+          "Options": null
+        }
+      ],
+      "ports": {
+        "8118/tcp": [
+          {
+            "HostIp": "0.0.0.0",
+            "HostPort": "28118"
+          },
+          {
+            "HostIp": "::",
+            "HostPort": "28118"
+          }
+        ]
+      }
+    },
+    "paddleocr-vllm": {
+      "name": "paddleocr-vllm",
+      "image": "ccr-2vdh3abv-pub.cnc.bj.baidubce.com/paddlepaddle/paddleocr-genai-vllm-server:latest-nvidia-gpu-offline",
+      "cmd": [
+        "bash",
+        "-lc",
+        "set -euo pipefail && paddleocr genai_server --model_name PaddleOCR-VL-1.5-0.9B --backend vllm --backend_config /tmp/vllm_config.yml --host 0.0.0.0 --port 18000"
+      ],
+      "entrypoint": [],
+      "status": "running",
+      "running": true,
+      "health": "healthy",
+      "restart_count": 1,
+      "device_requests": [
+        {
+          "Driver": "",
+          "Count": -1,
+          "DeviceIDs": null,
+          "Capabilities": [
+            [
+              "gpu"
+            ]
+          ],
+          "Options": null
+        }
+      ],
+      "ports": {
+        "18000/tcp": [
+          {
+            "HostIp": "0.0.0.0",
+            "HostPort": "18000"
+          },
+          {
+            "HostIp": "::",
+            "HostPort": "18000"
+          }
+        ]
+      }
+    }
+  },
+  "gpu": {
+    "available": true,
+    "gpu_count": 1,
+    "gpus": [
+      {
+        "index": 0,
+        "name": "NVIDIA GeForce RTX 4070 SUPER",
+        "memory_total_mb": 12282,
+        "memory_used_mb": 1229,
+        "memory_free_mb": 10771,
+        "gpu_util_percent": 0,
+        "memory_util_percent": 27
+      }
+    ],
+    "primary": {
+      "index": 0,
+      "name": "NVIDIA GeForce RTX 4070 SUPER",
+      "memory_total_mb": 12282,
+      "memory_used_mb": 1229,
+      "memory_free_mb": 10771,
+      "gpu_util_percent": 0,
+      "memory_util_percent": 27
+    },
+    "sampled_at": 1776190562.8436382
+  }
+}
