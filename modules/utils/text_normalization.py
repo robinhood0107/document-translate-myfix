@@ -12,9 +12,13 @@ _INVISIBLE_CHAR_TRANSLATION = str.maketrans({
     "\ufeff": "",
 })
 
-DECORATIVE_NOISE_GLYPHS = frozenset({"⌒", "✺", "︸"})
+OCR_DECORATIVE_NOISE_GLYPHS = frozenset({"⌒", "✺", "︸"})
+RENDER_NORMALIZABLE_GLYPHS = frozenset({"「", "」", "『", "』", "♥", "♡", "❤"})
+
+# Backward-compatible aliases for existing callers.
+DECORATIVE_NOISE_GLYPHS = OCR_DECORATIVE_NOISE_GLYPHS
 # Backward-compatible alias for existing callers.
-PADDLE_DECORATIVE_NOISE_GLYPHS = DECORATIVE_NOISE_GLYPHS
+PADDLE_DECORATIVE_NOISE_GLYPHS = OCR_DECORATIVE_NOISE_GLYPHS
 
 
 def remove_invisible_format_chars(text: str) -> str:
@@ -49,7 +53,7 @@ def normalize_decorative_ocr_text(
     normalized = normalized.replace("\r\n", "\n").replace("\r", "\n").strip()
     normalized = strip_selected_glyphs(
         normalized,
-        DECORATIVE_NOISE_GLYPHS if glyphs is None else glyphs,
+        OCR_DECORATIVE_NOISE_GLYPHS if glyphs is None else glyphs,
     )
     normalized = canonicalize_ellipsis_runs(normalized)
     return normalized.strip()

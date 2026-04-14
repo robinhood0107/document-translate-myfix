@@ -20,6 +20,11 @@ class _Block:
     xyxy: list[int]
     bubble_xyxy: list[int] | None = None
     text_class: str = "text_bubble"
+    translation: str = ""
+    _render_translation_raw: str = ""
+    _render_text: str = ""
+    _render_normalization_applied: bool = False
+    _render_normalization_reasons: list[str] = field(default_factory=list)
     inpaint_bboxes: list[list[int]] = field(default_factory=list)
     _hard_box_applied: bool = False
     _hard_box_reason_codes: list[str] = field(default_factory=list)
@@ -40,6 +45,11 @@ class InpaintDebugTests(unittest.TestCase):
             xyxy=[1, 1, 4, 5],
             bubble_xyxy=[0, 0, 7, 7],
             text_class="text_bubble",
+            translation='본명 「나나세 아야카」 25세♥',
+            _render_translation_raw='본명 「나나세 아야카」 25세♥',
+            _render_text='본명 "나나세 아야카" 25세',
+            _render_normalization_applied=True,
+            _render_normalization_reasons=["quote-to-ascii", "heart-dropped"],
             inpaint_bboxes=[[1, 1, 4, 5]],
             _hard_box_applied=True,
             _hard_box_reason_codes=["edge_dense"],
@@ -73,6 +83,19 @@ class InpaintDebugTests(unittest.TestCase):
         self.assertEqual(metadata["blocks"][0]["inpaint_bboxes"], [[1, 1, 4, 5]])
         self.assertTrue(metadata["blocks"][0]["hard_box_applied"])
         self.assertEqual(metadata["blocks"][0]["hard_box_reason_codes"], ["edge_dense"])
+        self.assertEqual(
+            metadata["blocks"][0]["translation_raw"],
+            '본명 「나나세 아야카」 25세♥',
+        )
+        self.assertEqual(
+            metadata["blocks"][0]["render_text"],
+            '본명 "나나세 아야카" 25세',
+        )
+        self.assertTrue(metadata["blocks"][0]["render_normalization_applied"])
+        self.assertEqual(
+            metadata["blocks"][0]["render_normalization_reasons"],
+            ["quote-to-ascii", "heart-dropped"],
+        )
 
     def test_export_artifacts_only_writes_selected_debug_outputs(self) -> None:
         image = np.full((10, 12, 3), 255, dtype=np.uint8)
