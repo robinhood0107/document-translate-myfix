@@ -29,9 +29,9 @@
 2. `완료` Requirement 1 벤치마크 family 문서/체크리스트 scaffold 작성
 3. `완료` 현재 제품 파이프라인 진입점 및 런타임 계측 지점 문서화
 4. `완료` Requirement 1 family runner / preset / BAT / report generator 명세 고정
-5. `진행 중` Requirement 1 smoke / baseline 측정 준비
-6. `대기` Requirement 1 13장 full measured run 누적
-7. `대기` Requirement 1 제품 승격 브랜치 생성 및 develop-safe portfolio 문서 반영
+5. `완료` Requirement 1 2페이지 smoke baseline 측정 및 근거 파일 고정
+6. `진행 중` Requirement 1 13장 full measured run 누적
+7. `대기` Requirement 1 제품 승격 브랜치에서 `legacy` + `candidate_stage_batched_dual_resident` 정식 전체 플로우 반영
 8. `대기` Requirement 2 family 설계 및 사용자 검수 패키지 설계
 9. `대기` Requirement 2 실측, selector rule 후보 도출, 문제 해결 명세서 누적
 10. `대기` Requirement 2 제품 승격 브랜치 생성 및 develop-safe portfolio 문서 반영
@@ -65,6 +65,7 @@
 - [x] `modules/ocr/local_runtime.py`의 OCR runtime 정책 맵핑
 - [x] `modules/translation/local_runtime.py`의 Gemma runtime 정책 맵핑
 - [ ] 설정 UI에 `workflow_mode` 추가 설계 고정
+- [ ] 설정 UI의 정식 신규 전체 플로우 대상을 `candidate_stage_batched_dual_resident`로 잠금
 - [x] benchmark family runner 명세 고정
 - [x] Windows BAT 쌍 명세 고정
 - [x] `Sample/japan` curated 13장 staging runner 구현
@@ -74,11 +75,12 @@
 
 - [x] 2페이지 smoke 입력 세트 고정
 - [x] 공식 시나리오 3개 잠금
-- [ ] 기존 워크플로우 baseline smoke 측정
+- [x] 기존 워크플로우 baseline smoke 측정
 - [ ] 기존 워크플로우 baseline 13장 측정
 - [ ] 단계형 워크플로우 단일 OCR runtime 측정
 - [ ] 단계형 워크플로우 dual-resident OCR 후보 측정
-- [ ] Docker compose up / health wait / reuse hit / timeout / retry 분해표 작성
+- [x] smoke 기준 Docker compose up / health wait / reuse hit 분해표 작성
+- [ ] full 13장 기준 Docker compose up / health wait / reuse hit / timeout / retry 분해표 작성
 - [ ] VRAM / ngl / idle runtime snapshot 비교
 - [ ] 첫 결과 시간과 전체 완료 시간 비교
 - [ ] 페이지 수 증가 시 고정비/변동비 모델 정리
@@ -88,8 +90,9 @@
 - [ ] 총 시간 순이득이 실측으로 확인됨
 - [ ] Docker 재기동 패널티를 포함해도 순이득이 유지됨
 - [ ] 품질이 동일 이상임
-- [ ] 설정창에서 legacy / stage-batched 선택안이 설계 완료됨
+- [ ] 설정창에서 `legacy` / `candidate_stage_batched_dual_resident` 선택안이 설계 완료됨
 - [ ] 제품 코드와 benchmark 코드의 경계가 유지됨
+- [ ] `candidate_stage_batched_dual_resident`가 단일 OCR 후보보다 불리해도 Requirement 1 자체를 무효화하지 않는다는 정책이 문서/승격 계획에 반영됨
 
 ### F. Requirement 2 사전 게이트
 
@@ -114,6 +117,7 @@
 - [ ] `feature/workflow-split-runtime` 브랜치 생성
 - [ ] develop-safe portfolio 문서 생성
 - [ ] workflow mode 제품 코드 반영
+- [ ] `candidate_stage_batched_dual_resident`를 정식 신규 전체 플로우로 제품 UI에 반영
 - [ ] UI 문구 번역 및 `.qm` 갱신
 - [ ] commit / push / PR
 - [ ] `feature/hybrid-ocr-selector` 브랜치 생성
