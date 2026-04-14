@@ -85,6 +85,7 @@ set "CUDA_PATH_V13_1="
 set "CUDA_HOME="
 set "CUDA_ROOT="
 set "CUDNN_PATH="
+set "QT_QPA_PLATFORM=windows"
 set "PYTHONNOUSERSITE=1"
 set "PYTHONWARNINGS=ignore:pkg_resources is deprecated as an API:UserWarning"
 
@@ -92,6 +93,14 @@ if defined COMIC_BOOTSTRAP_ONLY (
     echo [bootstrap] .venv-win-cuda13 is ready.
     popd >nul
     exit /b 0
+)
+
+echo [bootstrap] Preparing required local runtime models...
+"%PYTHON_EXE%" -c "from modules.utils.download import ensure_startup_runtime_models; ensure_startup_runtime_models(prefer_cuda=True)"
+if errorlevel 1 (
+    echo [bootstrap] Required local model preparation failed.
+    popd >nul
+    exit /b 1
 )
 
 "%PYTHON_EXE%" comic.py %*

@@ -29,7 +29,7 @@ class TranslationFactory:
     LLM_ENGINES = {
         "GPT-4.1": GPTTranslation,
         "GPT-4.1-mini": GPTTranslation,
-        "Claude-4.5-Sonnet": ClaudeTranslation,
+        "Claude-4.6-Sonnet": ClaudeTranslation,
         "Claude-4.5-Haiku": ClaudeTranslation,
         "Gemini-2.5-Pro": GeminiTranslation,
         "Gemini-3.0-Flash": GeminiTranslation,

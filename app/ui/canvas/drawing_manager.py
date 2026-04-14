@@ -10,6 +10,15 @@ from app.ui.commands.brush import BrushStrokeCommand, ClearBrushStrokesCommand, 
                             SegmentBoxesCommand, EraseUndoCommand
 from app.ui.commands.base import PathCommandBase as pcb
 import imkit as imk
+from modules.utils.inpaint_strokes import (
+    MANUAL_STROKE_ROLES,
+    STORABLE_STROKE_ROLES,
+    STROKE_ROLE_ADD,
+    STROKE_ROLE_EXCLUDE,
+    STROKE_ROLE_GENERATED,
+    STROKE_ROLE_RESTORE_PREVIEW,
+    normalize_stroke_role,
+)
 
 
 class DrawingManager:
@@ -19,18 +28,47 @@ class DrawingManager:
         self.viewer = viewer
         self._scene = viewer._scene
 
-        self.brush_color = QColor(255, 0, 0, 100)
+        self.add_stroke_color = QColor(255, 0, 0, 100)
+        self.exclude_stroke_color = QColor(0, 140, 255, 110)
+        self.restore_preview_color = QColor(24, 168, 82, 120)
         self.brush_size = 25
         self.eraser_size = 25
         
         self.brush_cursor = self.create_inpaint_cursor('brush', self.brush_size)
         self.eraser_cursor = self.create_inpaint_cursor('eraser', self.eraser_size)
+        self.exclude_cursor = self.create_inpaint_cursor('exclude', self.brush_size)
+        self.restore_cursor = self.create_inpaint_cursor('restore', self.brush_size)
 
         self.current_path = None
         self.current_path_item = None
+        self.current_restore_page_index = None
         
         self.before_erase_state = []
         self.after_erase_state = []
+
+    def _iter_path_items(self):
+        photo_item = getattr(self.viewer, 'photo', None)
+        for item in self._scene.items():
+            if isinstance(item, QGraphicsPathItem) and item != photo_item and hasattr(item, 'path'):
+                role = normalize_stroke_role(
+                    item.data(pcb.ROLE_KEY),
+                    brush=item.brush().color().name(QColor.HexArgb),
+                )
+                yield item, role
+
+    def _make_path_item(self, role: str) -> QGraphicsPathItem:
+        if role == STROKE_ROLE_EXCLUDE:
+            color = self.exclude_stroke_color
+        elif role == STROKE_ROLE_RESTORE_PREVIEW:
+            color = self.restore_preview_color
+        else:
+            color = self.add_stroke_color
+
+        pen = QPen(color, self.brush_size, Qt.SolidLine, Qt.RoundCap, Qt.RoundJoin)
+        item = self._scene.addPath(self.current_path, pen)
+        item.setZValue(0.8)
+        item.setData(pcb.ROLE_KEY, role)
+        return item
 
     def start_stroke(self, scene_pos: QPointF):
         """Starts a new drawing or erasing stroke."""
@@ -41,23 +79,25 @@ class DrawingManager:
         self.current_path.moveTo(scene_pos)
 
         if self.viewer.current_tool == 'brush':
-            pen = QPen(self.brush_color, self.brush_size, 
-                       Qt.SolidLine, Qt.RoundCap, Qt.RoundJoin)
-            self.current_path_item = self._scene.addPath(self.current_path, pen)
-            self.current_path_item.setZValue(0.8)  
-        
+            self.current_path_item = self._make_path_item(STROKE_ROLE_ADD)
+        elif self.viewer.current_tool == 'exclude':
+            self.current_path_item = self._make_path_item(STROKE_ROLE_EXCLUDE)
+        elif self.viewer.current_tool == 'restore':
+            self.current_path_item = self._make_path_item(STROKE_ROLE_RESTORE_PREVIEW)
+            self.current_restore_page_index = None
+            if self.viewer.webtoon_mode:
+                page_index, _ = self.viewer.scene_to_page_coordinates(scene_pos)
+                self.current_restore_page_index = page_index
         elif self.viewer.current_tool == 'eraser':
             # Capture the current state before starting erase operation
             self.before_erase_state = []
             try:
-                photo_item = getattr(self.viewer, 'photo', None)
-                for item in self._scene.items():
-                    if (isinstance(item, QGraphicsPathItem) and 
-                        item != photo_item and
-                        hasattr(item, 'path')):  # Ensure item has path method
-                        props = pcb.save_path_properties(item)
-                        if props:  # Only add valid properties
-                            self.before_erase_state.append(props)
+                for item, role in self._iter_path_items():
+                    if role not in STORABLE_STROKE_ROLES:
+                        continue
+                    props = pcb.save_path_properties(item)
+                    if props:
+                        self.before_erase_state.append(props)
             except Exception as e:
                 print(f"Warning: Error capturing before_erase_state: {e}")
                 import traceback
@@ -70,7 +110,7 @@ class DrawingManager:
             return
 
         self.current_path.lineTo(scene_pos)
-        if self.viewer.current_tool == 'brush' and self.current_path_item:
+        if self.viewer.current_tool in {'brush', 'exclude', 'restore'} and self.current_path_item:
             self.current_path_item.setPath(self.current_path)
         elif self.viewer.current_tool == 'eraser':
             self.erase_at(scene_pos)
@@ -78,22 +118,29 @@ class DrawingManager:
     def end_stroke(self):
         """Finalizes the current stroke and creates an undo command."""
         if self.current_path_item:
-            if self.viewer.current_tool == 'brush':
+            if self.viewer.current_tool in {'brush', 'exclude'}:
                 command = BrushStrokeCommand(self.viewer, self.current_path_item)
                 self.viewer.command_emitted.emit(command)
+            elif self.viewer.current_tool == 'restore':
+                payload = {
+                    'path': QPainterPath(self.current_path),
+                    'width': int(self.brush_size),
+                }
+                if self.current_restore_page_index is not None:
+                    payload['page_index'] = int(self.current_restore_page_index)
+                self._scene.removeItem(self.current_path_item)
+                self.viewer.restore_stroke_requested.emit(payload)
 
         if self.viewer.current_tool == 'eraser':
             # Capture the current state after erase operation
             self.after_erase_state = []
             try:
-                photo_item = getattr(self.viewer, 'photo', None)
-                for item in self._scene.items():
-                    if (isinstance(item, QGraphicsPathItem) and 
-                        item != photo_item and
-                        hasattr(item, 'path')):  # Ensure item has path method
-                        props = pcb.save_path_properties(item)
-                        if props:  # Only add valid properties
-                            self.after_erase_state.append(props)
+                for item, role in self._iter_path_items():
+                    if role not in STORABLE_STROKE_ROLES:
+                        continue
+                    props = pcb.save_path_properties(item)
+                    if props:
+                        self.after_erase_state.append(props)
             except Exception as e:
                 print(f"Warning: Error capturing after_erase_state: {e}")
                 import traceback
@@ -114,6 +161,7 @@ class DrawingManager:
         
         self.current_path = None
         self.current_path_item = None
+        self.current_restore_page_index = None
         self.viewer.drawing_path = None
 
     def erase_at(self, pos: QPointF):
@@ -128,8 +176,14 @@ class DrawingManager:
         path = item.path()
         new_path = QPainterPath()
         
-        brush_color = QColor(item.brush().color().name(QColor.HexArgb))
-        if brush_color == "#80ff0000":  # Generated (filled) segmentation path
+        role = normalize_stroke_role(
+            item.data(pcb.ROLE_KEY),
+            brush=item.brush().color().name(QColor.HexArgb),
+        )
+        if role == STROKE_ROLE_RESTORE_PREVIEW:
+            return
+
+        if role == STROKE_ROLE_GENERATED:
             # Map erase shape into item's local coordinates to ensure robust boolean ops
             try:
                 local_erase_path = item.mapFromScene(erase_path)
@@ -179,6 +233,8 @@ class DrawingManager:
     def set_brush_size(self, size, scaled_size):
         self.brush_size = size
         self.brush_cursor = self.create_inpaint_cursor("brush", scaled_size)
+        self.exclude_cursor = self.create_inpaint_cursor("exclude", scaled_size)
+        self.restore_cursor = self.create_inpaint_cursor("restore", scaled_size)
 
     def set_eraser_size(self, size, scaled_size):
         self.eraser_size = size
@@ -191,6 +247,12 @@ class DrawingManager:
         painter = QPainter(pixmap)
         if cursor_type == "brush":
             painter.setBrush(QBrush(QColor(255, 0, 0, 127)))
+            painter.setPen(Qt.PenStyle.NoPen)
+        elif cursor_type == "exclude":
+            painter.setBrush(QBrush(QColor(0, 140, 255, 127)))
+            painter.setPen(Qt.PenStyle.NoPen)
+        elif cursor_type == "restore":
+            painter.setBrush(QBrush(QColor(24, 168, 82, 127)))
             painter.setPen(Qt.PenStyle.NoPen)
         elif cursor_type == "eraser":
             painter.setBrush(QBrush(QColor(0, 0, 0, 0)))
@@ -206,19 +268,24 @@ class DrawingManager:
         strokes = []
         
         # Also collect any currently visible strokes
-        for item in self._scene.items():
-            if isinstance(item, QGraphicsPathItem) and item != self.viewer.photo:
-                strokes.append({
-                    'path': item.path(),
-                    'pen': item.pen().color().name(QColor.HexArgb),
-                    'brush': item.brush().color().name(QColor.HexArgb),
-                    'width': item.pen().width()
-                })
+        for item, role in self._iter_path_items():
+            if role not in STORABLE_STROKE_ROLES:
+                continue
+            strokes.append({
+                'path': item.path(),
+                'pen': item.pen().color().name(QColor.HexArgb),
+                'brush': item.brush().color().name(QColor.HexArgb),
+                'width': item.pen().width(),
+                'role': role,
+            })
         return strokes
 
     def load_brush_strokes(self, strokes: List[Dict]):
         self.clear_brush_strokes(page_switch=True)
         for stroke in reversed(strokes):
+            role = normalize_stroke_role(stroke.get('role'), brush=stroke.get('brush'))
+            if role not in STORABLE_STROKE_ROLES:
+                continue
             pen = QPen()
             pen.setColor(QColor(stroke['pen']))
             pen.setWidth(stroke['width'])
@@ -226,124 +293,130 @@ class DrawingManager:
             pen.setCapStyle(Qt.RoundCap)
             pen.setJoinStyle(Qt.RoundJoin)
             brush = QBrush(QColor(stroke['brush']))
-            if brush.color() == QColor("#80ff0000"):
-                self._scene.addPath(stroke['path'], pen, brush)
+            if role == STROKE_ROLE_GENERATED:
+                item = self._scene.addPath(stroke['path'], pen, brush)
             else:
-                self._scene.addPath(stroke['path'], pen)
+                item = self._scene.addPath(stroke['path'], pen)
+            item.setData(pcb.ROLE_KEY, role)
                 
     def clear_brush_strokes(self, page_switch=False):
         if page_switch:      
-            items_to_remove = [item for item in self._scene.items()
-                               if isinstance(item, QGraphicsPathItem) and item != self.viewer.photo]
+            items_to_remove = [
+                item
+                for item, role in self._iter_path_items()
+                if role in STORABLE_STROKE_ROLES or role == STROKE_ROLE_RESTORE_PREVIEW
+            ]
             for item in items_to_remove:
                 self._scene.removeItem(item)
             self._scene.update()
         else:
-            command = ClearBrushStrokesCommand(self.viewer)
+            command = ClearBrushStrokesCommand(self.viewer, roles=MANUAL_STROKE_ROLES)
             self.viewer.command_emitted.emit(command)
-            
+
     def has_drawn_elements(self):
-        for item in self._scene.items():
-            if isinstance(item, QGraphicsPathItem) and item != self.viewer.photo:
+        for _item, role in self._iter_path_items():
+            if role in STORABLE_STROKE_ROLES:
                 return True
         return False
-        
+
     def generate_mask_from_strokes(self):
-        if not self.viewer.hasPhoto(): 
+        if not self.viewer.hasPhoto():
             return None
-        
-        # Check if there are any brush strokes to process
+
         if not self.has_drawn_elements():
             return None
 
-        # Handle webtoon mode vs regular mode for getting dimensions
         is_webtoon_mode = self.viewer.webtoon_mode
         if is_webtoon_mode:
-            # In webtoon mode, use visible area dimensions
             visible_image, mappings = self.viewer.get_visible_area_image()
             if visible_image is None:
                 return None
             height, width = visible_image.shape[:2]
         else:
-            # Regular mode - use photo dimensions
             image_rect = self.viewer.photo.boundingRect()
             width, height = int(image_rect.width()), int(image_rect.height())
-        
-        # Ensure we have valid dimensions
+
         if width <= 0 or height <= 0:
             return None
-        
-        human_qimg = QImage(width, height, QImage.Format_Grayscale8)
-        gen_qimg = QImage(width, height, QImage.Format_Grayscale8)
-        human_qimg.fill(0)
-        gen_qimg.fill(0)
 
-        human_painter, gen_painter = QPainter(human_qimg), QPainter(gen_qimg)
-        
-        # Get transformation values for debug logging
-        visible_scene_top = 0
-        visible_scene_left = 0
-        
-        # Set up coordinate transformation for webtoon mode
+        add_qimg = QImage(width, height, QImage.Format_Grayscale8)
+        generated_qimg = QImage(width, height, QImage.Format_Grayscale8)
+        exclude_qimg = QImage(width, height, QImage.Format_Grayscale8)
+        add_qimg.fill(0)
+        generated_qimg.fill(0)
+        exclude_qimg.fill(0)
+
+        add_painter = QPainter(add_qimg)
+        generated_painter = QPainter(generated_qimg)
+        exclude_painter = QPainter(exclude_qimg)
+
         if is_webtoon_mode:
-            
-            # Don't use viewport bounds - use the actual visible area bounds from the mappings
             visible_image, mappings = self.viewer.get_visible_area_image()
             if mappings:
-                # Get the top-left corner of the visible area in scene coordinates
-                # Use scene_y_start which is the actual scene coordinate where the visible area starts
                 visible_scene_top = mappings[0]['scene_y_start']
-                visible_scene_left = 0  # Assuming webtoon width starts at 0
-                
-                # Transform from scene coordinates to visible area image coordinates
-                human_painter.translate(-visible_scene_left, -visible_scene_top)
-                gen_painter.translate(-visible_scene_left, -visible_scene_top)
-            else:
-                # Fallback: no transformation if no mappings
-                print(f"[DEBUG] No mappings available, using direct scene coordinates")
-        
-        human_pen = QPen(QColor(255, 255, 255), self.brush_size)
-        gen_pen = QPen(QColor(255, 255, 255), 2, Qt.SolidLine)
-        human_painter.setPen(human_pen)
-        gen_painter.setPen(gen_pen)
-        brush = QBrush(QColor(255, 255, 255))
-        human_painter.setBrush(brush)
-        gen_painter.setBrush(brush)
+                add_painter.translate(0, -visible_scene_top)
+                generated_painter.translate(0, -visible_scene_top)
+                exclude_painter.translate(0, -visible_scene_top)
 
-        for item in self._scene.items():
-            if isinstance(item, QGraphicsPathItem) and item != self.viewer.photo:
-                painter = gen_painter if QColor(item.brush().color().name(QColor.HexArgb)) == "#80ff0000" else human_painter
-                # Get the path bounding rect to see where the stroke is
-                item_pos = item.pos()
-                # Draw the path - the painter already has the transformation applied
-                # We need to draw at the item position + path coordinates
+        add_painter.setBrush(QBrush(QColor(255, 255, 255)))
+        generated_painter.setBrush(QBrush(QColor(255, 255, 255)))
+        exclude_painter.setBrush(QBrush(QColor(255, 255, 255)))
+        generated_painter.setPen(QPen(QColor(255, 255, 255), 2, Qt.SolidLine))
+
+        for item, role in self._iter_path_items():
+            if role not in STORABLE_STROKE_ROLES:
+                continue
+            if role == STROKE_ROLE_GENERATED:
+                painter = generated_painter
                 painter.save()
-                painter.translate(item_pos)
+                painter.translate(item.pos())
                 painter.drawPath(item.path())
                 painter.restore()
-        
-        human_painter.end()
-        gen_painter.end()
-        
+                continue
+
+            painter = exclude_painter if role == STROKE_ROLE_EXCLUDE else add_painter
+            painter.setPen(
+                QPen(
+                    QColor(255, 255, 255),
+                    max(1, item.pen().width()),
+                    Qt.SolidLine,
+                    Qt.RoundCap,
+                    Qt.RoundJoin,
+                )
+            )
+            painter.save()
+            painter.translate(item.pos())
+            painter.drawPath(item.path())
+            painter.restore()
+
+        add_painter.end()
+        generated_painter.end()
+        exclude_painter.end()
+
         def qimage_to_np(qimg):
-            # Check for valid dimensions
             if qimg.width() <= 0 or qimg.height() <= 0:
                 return np.zeros((max(1, qimg.height()), max(1, qimg.width())), dtype=np.uint8)
-            
+
             ptr = qimg.constBits()
             arr = np.array(ptr).reshape(qimg.height(), qimg.bytesPerLine())
             return arr[:, :qimg.width()]
-            
-        human_mask = qimage_to_np(human_qimg)
-        gen_mask = qimage_to_np(gen_qimg)
 
-        # Dilate using backend (ksize approximated by kernel size)
-        kernel = np.ones((5,5), np.uint8)
-        human_mask = imk.dilate(human_mask, kernel, iterations=2)
-        gen_mask = imk.dilate(gen_mask, kernel, iterations=3)
+        add_mask = qimage_to_np(add_qimg)
+        generated_mask = qimage_to_np(generated_qimg)
+        exclude_mask = qimage_to_np(exclude_qimg)
 
-        # Combine masks (bitwise_or equivalent)
-        final_mask = np.where((human_mask > 0) | (gen_mask > 0), 255, 0).astype(np.uint8)
+        kernel = np.ones((5, 5), np.uint8)
+        add_mask = imk.dilate(add_mask, kernel, iterations=2)
+        generated_mask = imk.dilate(generated_mask, kernel, iterations=3)
+        exclude_mask = imk.dilate(exclude_mask, kernel, iterations=2)
+
+        include_mask = np.where((add_mask > 0) | (generated_mask > 0), 255, 0).astype(np.uint8)
+        if np.count_nonzero(include_mask) == 0:
+            return None
+
+        final_mask = np.where((include_mask > 0) & ~(exclude_mask > 0), 255, 0).astype(np.uint8)
+        if np.count_nonzero(final_mask) == 0:
+            return None
         return final_mask
     
     def draw_segmentation_lines(self, bboxes):
@@ -357,6 +430,7 @@ class DrawingManager:
         item = QtWidgets.QGraphicsPathItem(stroke['path'])
         item.setPen(QtGui.QPen(outline_color, 2, QtCore.Qt.SolidLine))
         item.setBrush(QtGui.QBrush(fill_color))
+        item.setData(pcb.ROLE_KEY, STROKE_ROLE_GENERATED)
 
         self.viewer.command_emitted.emit(SegmentBoxesCommand(self.viewer, [item]))
         
@@ -418,6 +492,7 @@ class DrawingManager:
             'pen': QColor(255, 0, 0).name(QColor.HexArgb),
             'brush': QColor(255, 0, 0, 128).name(QColor.HexArgb),
             'width': 2,
+            'role': STROKE_ROLE_GENERATED,
         }
 
     # def draw_segmentation_lines(self, bboxes, layers: int = 1, scale_factor: float = 1.0):
