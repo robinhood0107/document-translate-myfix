@@ -26,7 +26,7 @@ docker compose -f mangalmm_docker_files/docker-compose.yaml up -d --force-recrea
 
 ## 현재 요청 형식
 
-앱은 현재 파이프라인에 맞춰 페이지 전체 또는 겹치는 타일, 필요 시 rescue macro window를 아래 OpenAI-compatible 형식으로 전송합니다.
+앱은 현재 파이프라인에 맞춰 `페이지 전체 1장`만 아래 OpenAI-compatible 형식으로 전송합니다.
 
 ```json
 {
@@ -47,9 +47,9 @@ docker compose -f mangalmm_docker_files/docker-compose.yaml up -d --force-recrea
       ]
     }
   ],
-  "temperature": 0.1,
-  "top_k": 32,
-  "max_completion_tokens": 256
+  "temperature": 0.0,
+  "top_k": 1,
+  "max_completion_tokens": 512
 }
 ```
 
@@ -63,8 +63,10 @@ docker compose -f mangalmm_docker_files/docker-compose.yaml up -d --force-recrea
 
 ## 참고
 
-- 현재 제품 파이프라인은 `RT-DETR-v2`가 먼저 텍스트 블록을 만들고, `MangaLMM`는 페이지/타일 OCR의 JSON 결과를 각 `TextBlock`에 다시 매칭합니다.
+- 현재 제품 파이프라인은 `RT-DETR-v2`가 먼저 텍스트 블록을 만들고, `MangaLMM`는 `페이지 전체 1회 OCR`의 JSON 결과를 각 `TextBlock`에 다시 매칭합니다.
 - detector의 `bubble_xyxy`는 말풍선 소유권 게이트로, `xyxy`는 같은 말풍선 안에서 최종 블록을 고르는 정밀 박스로 사용합니다.
-- `bbox_2d`는 요청 unit의 resize scale과 tile origin을 사용해 원본 페이지 좌표로 역매핑합니다.
-- resize는 큰 페이지/타일에만 비율 유지 단일 스케일로 적용하며, 회전은 하지 않습니다.
+- `bbox_2d`는 실제 요청 크기 기준 `scale_x`, `scale_y`를 사용해 원본 페이지 좌표로 역매핑합니다.
+- resize는 비율 유지 downscale만 허용하며, `standard`와 `dense` 프로파일 중 하나를 페이지 단위로 한 번만 고릅니다.
+- `standard`는 대체로 `1224 x 1728` 상한, `dense`는 대체로 `900 x 1270` 상한을 사용합니다.
+- 제품 경로에서는 tile, crop, rescue macro, second request retry를 사용하지 않습니다.
 - 루트 `docker-compose.yaml`은 Gemma 번역 서버용으로 유지하고, MangaLMM는 `mangalmm_docker_files/`에서 별도로 관리합니다.
