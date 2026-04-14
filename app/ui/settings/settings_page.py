@@ -383,12 +383,16 @@ class SettingsPage(QtWidgets.QWidget):
         }
 
     def get_ocr_generic_settings(self):
-        return {
+        settings = {
             "manga_expansion_percentage": 7,
             "crop_padding_ratio": 0.05,
             "ppocr_retry_crop_ratio_x": 0.06,
             "ppocr_retry_crop_ratio_y": 0.10,
         }
+        benchmark_overlay = getattr(self, "_benchmark_ocr_generic_settings", None)
+        if isinstance(benchmark_overlay, dict):
+            settings.update(benchmark_overlay)
+        return settings
 
     def get_mask_refiner_settings(self):
         return normalized_mask_refiner_settings(

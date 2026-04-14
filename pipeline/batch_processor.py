@@ -51,7 +51,13 @@ from modules.utils.render_style_policy import (
     resolve_render_text_color,
 )
 from modules.utils.translator_utils import get_raw_translation, get_raw_text, format_translations
-from modules.rendering.render import get_best_render_area, pyside_word_wrap, is_vertical_block
+from modules.rendering.render import (
+    describe_render_text_sanitization,
+    describe_render_text_markup,
+    get_best_render_area,
+    is_vertical_block,
+    pyside_word_wrap,
+)
 from modules.utils.device import resolve_device
 from app.path_materialization import ensure_path_materialized
 from app.ui.canvas.save_renderer import ImageSaveRenderer
@@ -105,6 +111,10 @@ class BatchProcessor:
             self.main_page.emit_memlog(tag, **payload)
         except Exception:
             pass
+
+    @staticmethod
+    def _benchmark_stage_ceiling() -> str:
+        return str(os.environ.get("CT_BENCH_STAGE_CEILING", "") or "").strip().lower()
 
     def skip_save(self, directory, timestamp, base_name, extension, archive_bname, image):
         logger.info("Skipping fallback translated image save for '%s'.", base_name)
@@ -786,6 +796,7 @@ class BatchProcessor:
                 try:
                     cache_status = "miss"
                     attempt_count = 0
+                    ocr_page_profile: dict = {}
                     # Runtime startup for local OCR can fail here (e.g. missing Docker image).
                     # Keep it inside the per-page OCR error path so the batch report captures it.
                     self.ocr_handler.ocr.initialize(self.main_page, source_lang)
@@ -801,6 +812,7 @@ class BatchProcessor:
                     else:
                         logger.info("ocr cache miss: running OCR for %d blocks", len(blk_list))
                         self.ocr_handler.ocr.process(image, blk_list)
+                        ocr_page_profile = dict(getattr(self.ocr_handler.ocr, "last_page_profile", {}) or {})
                         apply_ocr_result_dictionary(
                             blk_list,
                             settings_page.get_ocr_result_dictionary_rules(),
@@ -822,6 +834,7 @@ class BatchProcessor:
                         for blk in blk_list:
                             blk.text = ""
                         self.ocr_handler.ocr.process(image, blk_list)
+                        ocr_page_profile = dict(getattr(self.ocr_handler.ocr, "last_page_profile", {}) or {})
                         apply_ocr_result_dictionary(
                             blk_list,
                             settings_page.get_ocr_result_dictionary_rules(),
@@ -876,8 +889,32 @@ class BatchProcessor:
                         ocr_engine=self.ocr_handler.ocr.last_engine_name or "",
                         cache_status=cache_status,
                         attempt_count=attempt_count,
+                        ocr_page_profile=ocr_page_profile,
                         **page_ocr_metrics,
                     )
+                    if self._benchmark_stage_ceiling() == "ocr":
+                        self.main_page.image_ctrl.update_processing_summary(
+                            image_path,
+                            {
+                                "benchmark_stage_ceiling": "ocr",
+                            },
+                        )
+                        self._emit_benchmark_event(
+                            "page_done",
+                            image_path=image_path,
+                            image_index=index,
+                            total_images=total_images,
+                            block_count=len(blk_list or []),
+                            patch_count=0,
+                            stage_ceiling="ocr",
+                        )
+                        self._log_page_done(
+                            index,
+                            total_images,
+                            image_path,
+                        )
+                        self.emit_progress(index, total_images, 10, 10, False)
+                        continue
                     
                 except Exception as e:
                     # if it's a connection/network error, give a short message
@@ -908,6 +945,7 @@ class BatchProcessor:
                         total_images=total_images,
                         failed_stage="ocr",
                         reason=err_msg,
+                        ocr_page_profile=ocr_page_profile,
                         **page_ocr_metrics,
                     )
                     self.main_page.image_ctrl.mark_processing_stage(
@@ -1326,7 +1364,26 @@ class BatchProcessor:
             for blk in blk_list:
                 x1, y1, block_width, block_height = blk.xywh
 
-                translation = blk.translation
+                translation_raw = blk.translation
+                if not translation_raw or len(translation_raw) == 1:
+                    continue
+
+                render_normalization = describe_render_text_sanitization(
+                    translation_raw,
+                    font,
+                    block_index=getattr(blk, "_debug_block_index", None),
+                    image_path=image_path,
+                )
+                translation = render_normalization.text
+                blk._render_translation_raw = str(translation_raw or "")
+                blk._render_text = str(translation or "")
+                blk._render_normalization_applied = bool(
+                    render_normalization.normalization_applied
+                )
+                blk._render_normalization_reasons = list(render_normalization.reasons)
+                blk._render_normalization_replacements = list(
+                    render_normalization.replacements
+                )
                 if not translation or len(translation) == 1:
                     continue
                 
@@ -1351,13 +1408,32 @@ class BatchProcessor:
                     return_metrics=True
                 )
                 
-                # Display text if on current page  
-                if image_path == file_on_display:
-                    self.main_page.blk_rendered.emit(translation, font_size, blk, image_path)
-
                 # Language-specific formatting for state storage
                 if is_no_space_lang(trg_lng_cd):
                     translation = translation.replace(' ', '')
+                render_markup = describe_render_text_markup(translation)
+                blk._render_text = str(translation or "")
+                blk._render_html = str(
+                    render_markup.html_text if render_markup.html_applied else translation or ""
+                )
+                blk._render_html_applied = bool(render_markup.html_applied)
+                blk._render_fallback_font_family = str(
+                    render_markup.fallback_font_family or ""
+                )
+                blk._render_normalization_applied = bool(
+                    render_normalization.normalization_applied
+                    or render_markup.html_applied
+                )
+                blk._render_normalization_reasons = sorted(
+                    set(render_normalization.reasons).union(render_markup.reasons)
+                )
+                blk._render_normalization_replacements = list(
+                    render_normalization.replacements
+                ) + list(render_markup.replacements)
+
+                # Display text if on current page
+                if image_path == file_on_display:
+                    self.main_page.blk_rendered.emit(translation, font_size, blk, image_path)
 
                 # Smart Color Override
                 font_color = resolve_render_text_color(
@@ -1370,7 +1446,7 @@ class BatchProcessor:
 
                 # Use TextItemProperties for consistent text item creation
                 text_props = TextItemProperties(
-                    text=translation,
+                    text=blk._render_html,
                     font_family=font,
                     font_size=font_size,
                     text_color=font_color,
@@ -1399,7 +1475,22 @@ class BatchProcessor:
                         OutlineType.Full_Document)
                     ] if outline else [],
                 )
-                text_items_state.append(text_props.to_dict())
+                text_item_state = text_props.to_dict()
+                text_item_state["translation_raw"] = str(translation_raw or "")
+                text_item_state["render_text"] = str(translation or "")
+                text_item_state["render_html_applied"] = bool(
+                    render_markup.html_applied
+                )
+                text_item_state["render_fallback_font_family"] = str(
+                    render_markup.fallback_font_family or ""
+                )
+                text_item_state["render_normalization_applied"] = bool(
+                    blk._render_normalization_applied
+                )
+                text_item_state["render_normalization_reasons"] = list(
+                    blk._render_normalization_reasons
+                )
+                text_items_state.append(text_item_state)
 
             page_state = self._ensure_page_state(image_path)
             page_state['viewer_state'].update({
