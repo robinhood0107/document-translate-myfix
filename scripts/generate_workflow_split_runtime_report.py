@@ -30,12 +30,21 @@ def _latest_suite() -> dict[str, Any]:
 def _suite_status(suite: dict[str, Any]) -> str:
     if not suite:
         return "measurement_package_locked"
-    completed = suite.get("completed_scenarios", [])
+    completed = set(suite.get("completed_scenarios", []))
+    blocked = set(suite.get("blocked_scenarios", []))
     smoke = bool(suite.get("smoke", False))
-    if completed:
-        if smoke:
-            return "baseline_smoke_completed_with_blocked_stage_batched_candidates"
+    if completed == {
+        "baseline_legacy",
+        "candidate_stage_batched_single_ocr",
+        "candidate_stage_batched_dual_resident",
+    }:
+        return "smoke_suite_completed_all_candidates" if smoke else "requirement_1_full_measurement_completed"
+    if smoke and completed == {"baseline_legacy"} and blocked:
+        return "baseline_smoke_completed_with_blocked_stage_batched_candidates"
+    if completed == {"baseline_legacy"} and blocked:
         return "baseline_measured_with_blocked_stage_batched_candidates"
+    if completed:
+        return "measurement_in_progress"
     return "measurement_package_locked"
 
 
@@ -43,6 +52,12 @@ def _requirement_1_status(suite: dict[str, Any]) -> str:
     if not suite:
         return "not_started"
     completed = set(suite.get("completed_scenarios", []))
+    if {
+        "baseline_legacy",
+        "candidate_stage_batched_single_ocr",
+        "candidate_stage_batched_dual_resident",
+    }.issubset(completed):
+        return "ready_for_gate_review_with_dual_resident_recorded"
     if "baseline_legacy" in completed and "candidate_stage_batched_single_ocr" in completed:
         return "ready_for_gate_review"
     if "baseline_legacy" in completed:
@@ -67,6 +82,7 @@ def _render_results_history(suite: dict[str, Any]) -> str:
         "- 시간 이득은 실측으로만 판정한다.",
         "- Docker compose up / health wait / timeout / retry는 총 시간에서 분리해 기록한다.",
         "- 품질이 같거나 더 좋아야만 승격 후보가 된다.",
+        "- `candidate_stage_batched_dual_resident`는 단일 OCR 후보보다 불리해도 Requirement 1 자체를 무효화하지 않는다.",
         "- `develop`에는 raw benchmark 결과를 옮기지 않는다.",
         "",
         "## Latest Output",
@@ -91,6 +107,7 @@ def _render_results_history(suite: dict[str, Any]) -> str:
                 f"- smoke: `{bool(suite.get('smoke', False))}`",
                 f"- completed_scenarios: `{', '.join(completed) if completed else 'none'}`",
                 f"- blocked_scenarios: `{', '.join(blocked) if blocked else 'none'}`",
+                f"- runner_state: `stage_batched_candidates_runnable`",
                 "",
                 "| scenario | status | report | timing | quality |",
                 "| --- | --- | --- | --- | --- |",
@@ -112,7 +129,7 @@ def _render_results_history(suite: dict[str, Any]) -> str:
         lines.extend(
             [
                 "- latest_suite_record: `not_created_yet`",
-                "- package status: runner/preset/BAT/report generator are locked and ready for smoke execution.",
+                "- package status: runner/preset/BAT/report generator are locked and ready for measured execution.",
             ]
         )
 
@@ -161,7 +178,7 @@ def _render_report(suite: dict[str, Any]) -> str:
         "",
         "## 보고서 목적",
         "",
-        "이 문서는 Requirement 1과 Requirement 2의 최신 measured run을 요약하는 generated report다. 지금 단계의 목표는 먼저 실측 패키지를 고정하고, baseline smoke부터 근거를 쌓아 stage-batched 후보의 공식 판정 준비 상태를 만드는 것이다.",
+        "이 문서는 Requirement 1과 Requirement 2의 최신 measured run을 요약하는 generated report다. 지금 단계의 목표는 실측 패키지를 고정한 뒤 baseline과 stage-batched 후보를 모두 같은 계약 산출물로 측정해 Requirement 1 공식 판정 준비 상태를 만드는 것이다.",
         "",
         "## 최신 요약",
         "",
@@ -173,6 +190,7 @@ def _render_report(suite: dict[str, Any]) -> str:
                 f"- smoke: `{bool(suite.get('smoke', False))}`",
                 f"- completed_scenarios: `{', '.join(suite.get('completed_scenarios', [])) or 'none'}`",
                 f"- blocked_scenarios: `{', '.join(suite.get('blocked_scenarios', [])) or 'none'}`",
+                "- stage_batched_runner: `implemented_on_benchmarking_lab`",
                 "",
                 "| scenario | status | total_elapsed_sec | page_done | page_failed |",
                 "| --- | --- | --- | --- | --- |",
@@ -195,7 +213,7 @@ def _render_report(suite: dict[str, Any]) -> str:
             [
                 "- latest_suite_record: `not_created_yet`",
                 "- baseline smoke: `pending`",
-                "- stage-batched 후보: `contract_locked_but_not_executable_yet`",
+                "- stage-batched 후보: `runner_implemented_waiting_for_first_measured_run`",
             ]
         )
 
@@ -205,15 +223,15 @@ def _render_report(suite: dict[str, Any]) -> str:
             "## 해석",
             "",
             "- 현재 벤치마크 패키지는 `Sample/japan` curated 13장, 공식 시나리오 3개, 필수 산출물 7종, CUDA12/CUDA13 BAT 쌍 기준으로 잠겨 있다.",
-            "- `baseline_legacy`는 즉시 실행 가능하고, `candidate_stage_batched_single_ocr` 및 `candidate_stage_batched_dual_resident`는 하네스 계약대로 결과 파일 구조만 먼저 고정한 상태다.",
-            "- 따라서 지금 보고서는 “Requirement 1 측정 인프라가 잠겼는가”에 대한 상태 보고이며, 최종 성공 판정 보고서는 아니다.",
+            "- `baseline_legacy`와 두 stage-batched candidate는 모두 같은 family runner에서 실행 가능하도록 연결되었고, 최신 suite record가 무엇을 실제로 측정했는지가 현재 상태를 결정한다.",
+            "- 따라서 지금 보고서는 “Requirement 1 측정 인프라와 최신 실측 근거가 어디까지 왔는가”에 대한 상태 보고이며, 최종 성공 판정 보고서는 아니다.",
             "",
             "## 다음 액션",
             "",
-            "1. `run_workflow_split_runtime_cuda13.bat smoke`로 2페이지 smoke를 실행한다.",
-            "2. `baseline_legacy` full 13장 measured run을 누적한다.",
-            "3. stage-batched experimental runner를 benchmarking/lab에서 추가한 뒤 candidate 두 시나리오를 실제 실행한다.",
-            "4. 세 시나리오의 시간/품질/VRAM 근거가 모이면 Requirement 1 성공 게이트를 판정한다.",
+            "1. `baseline_legacy` full 13장 measured run을 누적한다.",
+            "2. `candidate_stage_batched_single_ocr`와 `candidate_stage_batched_dual_resident`를 순서대로 실제 실행한다.",
+            "3. 세 시나리오의 시간/품질/VRAM 근거가 모이면 Requirement 1 성공 게이트를 판정한다.",
+            "4. Requirement 1이 유효하면 `legacy` + `candidate_stage_batched_dual_resident` 제품 승격 구현으로 넘어간다.",
             "",
             "## 저자 및 기여",
             "",

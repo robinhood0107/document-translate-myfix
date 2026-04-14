@@ -31,10 +31,12 @@
 4. `완료` Requirement 1 family runner / preset / BAT / report generator 명세 고정
 5. `완료` Requirement 1 2페이지 smoke baseline 측정 및 근거 파일 고정
 6. `진행 중` Requirement 1 13장 full measured run 누적
-7. `대기` Requirement 1 제품 승격 브랜치에서 `legacy` + `candidate_stage_batched_dual_resident` 정식 전체 플로우 반영
-8. `대기` Requirement 2 family 설계 및 사용자 검수 패키지 설계
-9. `대기` Requirement 2 실측, selector rule 후보 도출, 문제 해결 명세서 누적
-10. `대기` Requirement 2 제품 승격 브랜치 생성 및 develop-safe portfolio 문서 반영
+7. `완료` stage-batched experimental runner 구현 및 candidate suite 연결
+8. `대기` Requirement 1 candidate 2종 full measured run 누적
+9. `대기` Requirement 1 제품 승격 브랜치에서 `legacy` + `candidate_stage_batched_dual_resident` 정식 전체 플로우 반영
+10. `대기` Requirement 2 family 설계 및 사용자 검수 패키지 설계
+11. `대기` Requirement 2 실측, selector rule 후보 도출, 문제 해결 명세서 누적
+12. `대기` Requirement 2 제품 승격 브랜치 생성 및 develop-safe portfolio 문서 반영
 
 ## 프로그램 체크리스트
 
@@ -69,6 +71,7 @@
 - [x] benchmark family runner 명세 고정
 - [x] Windows BAT 쌍 명세 고정
 - [x] `Sample/japan` curated 13장 staging runner 구현
+- [x] stage-batched experimental runner 구현 및 suite 연결
 - [x] `events.jsonl` / `timing_summary.json` / `quality_summary.json` / `vram_snapshots.jsonl` / `docker_timeline.json` 변환 규약 구현
 
 ### D. Requirement 1 측정
@@ -131,3 +134,4 @@
 2. 큰 설계 변경이 생기면 `01_project-spec-and-decision-log-ko.md`에 이유를 남긴다.
 3. 실측이 시작되면 `results-history-ko.md`와 report를 함께 갱신한다.
 4. 문제 해결 명세서는 raw asset history 안에도 남기고, 이 문서에서는 링크만 유지한다.
+5. candidate runner 구현 완료 후에도 latest suite record가 옛 blocked 결과일 수 있으므로, 문서에는 "runner 구현 상태"와 "최신 실측 상태"를 분리해 기록한다.

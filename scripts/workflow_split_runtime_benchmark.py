@@ -54,6 +54,7 @@ SCENARIOS = {
         "label": "Baseline Legacy",
         "preset": "workflow-split-runtime-baseline-legacy",
         "workflow_mode": "legacy_page_pipeline",
+        "runner_kind": "legacy",
         "runtime_mode": "managed",
         "runtime_services": "full",
         "stage_ceiling": "render",
@@ -64,29 +65,24 @@ SCENARIOS = {
         "label": "Candidate Stage-Batched Single OCR",
         "preset": "workflow-split-runtime-stage-batched-single-ocr",
         "workflow_mode": "stage_batched_pipeline",
+        "runner_kind": "stage_batched",
+        "resident_ocr_mode": "single",
         "runtime_mode": "managed",
-        "runtime_services": "full",
+        "runtime_services": "stage-batched",
         "stage_ceiling": "render",
-        "runnable": False,
-        "blocked_reason": (
-            "The benchmark package is locked, but the experimental stage-batched runner does not exist yet. "
-            "Requirement 1 product/runtime code remains intentionally blocked until the benchmark package and "
-            "baseline evidence are in place."
-        ),
+        "runnable": True,
         "description": "Detect all -> OCR all -> translate all -> inpaint all -> render/export all with one OCR runtime.",
     },
     "candidate_stage_batched_dual_resident": {
         "label": "Candidate Stage-Batched Dual Resident",
         "preset": "workflow-split-runtime-stage-batched-dual-resident",
         "workflow_mode": "stage_batched_pipeline",
+        "runner_kind": "stage_batched",
+        "resident_ocr_mode": "dual",
         "runtime_mode": "managed",
-        "runtime_services": "full",
+        "runtime_services": "stage-batched",
         "stage_ceiling": "render",
-        "runnable": False,
-        "blocked_reason": (
-            "The exploratory dual-resident OCR contract is frozen, but execution remains blocked until the "
-            "stage-batched experimental runner is implemented on benchmarking/lab."
-        ),
+        "runnable": True,
         "description": "Exploratory OCR-stage residency contract with MangaLMM and PaddleOCR VL both kept resident.",
     },
 }
@@ -961,6 +957,67 @@ def _run_legacy_baseline(
     )
 
 
+def _run_stage_batched_candidate(
+    *,
+    scenario_name: str,
+    scenario_cfg: dict[str, Any],
+    sample_paths: list[Path],
+    source_lang: str,
+    target_lang: str,
+) -> dict[str, Any]:
+    run_dir = create_run_dir(scenario_name, root=family_output_root())
+    corpus_dir = _stage_curated_corpus(run_dir, sample_paths)
+    env = dict(os.environ)
+    env.setdefault("CT_BENCH_OUTPUT_ROOT", str(family_output_root()))
+    cmd = [
+        sys.executable,
+        "-u",
+        str(SCRIPT_DIR / "benchmark_stage_batched_pipeline.py"),
+        "--preset",
+        scenario_cfg["preset"],
+        "--sample-dir",
+        str(corpus_dir),
+        "--sample-count",
+        str(len(sample_paths)),
+        "--source-lang",
+        source_lang,
+        "--target-lang",
+        target_lang,
+        "--output-dir",
+        str(run_dir),
+        "--resident-ocr-mode",
+        str(scenario_cfg.get("resident_ocr_mode", "single")),
+    ]
+    _log(
+        "scenario 실행: {scenario} preset={preset} resident_ocr_mode={resident} images={count} run_dir={run_dir}".format(
+            scenario=scenario_name,
+            preset=scenario_cfg["preset"],
+            resident=scenario_cfg.get("resident_ocr_mode", "single"),
+            count=len(sample_paths),
+            run_dir=run_dir,
+        )
+    )
+    started = time.perf_counter()
+    completed = _run_command_streaming(
+        cmd=cmd,
+        cwd=ROOT,
+        env=env,
+        step_name=scenario_name,
+    )
+    total_wall_sec = time.perf_counter() - started
+    if completed.returncode != 0:
+        raise RuntimeError(
+            f"{scenario_name} failed with exit code {completed.returncode}.\n"
+            f"stdout:\n{(completed.stdout or '').strip()}"
+        )
+    return _normalize_completed_run(
+        run_dir=run_dir,
+        scenario_name=scenario_name,
+        scenario_cfg=scenario_cfg,
+        total_wall_sec=total_wall_sec,
+    )
+
+
 def _write_suite_record(
     *,
     records: list[dict[str, Any]],
@@ -1002,13 +1059,23 @@ def _run_suite(args: argparse.Namespace) -> int:
         scenario_cfg = SCENARIOS[scenario_name]
         if scenario_cfg.get("runnable", False):
             try:
-                record = _run_legacy_baseline(
-                    scenario_name=scenario_name,
-                    scenario_cfg=scenario_cfg,
-                    sample_paths=sample_paths,
-                    source_lang=args.source_lang,
-                    target_lang=args.target_lang,
-                )
+                runner_kind = str(scenario_cfg.get("runner_kind", "legacy") or "legacy")
+                if runner_kind == "stage_batched":
+                    record = _run_stage_batched_candidate(
+                        scenario_name=scenario_name,
+                        scenario_cfg=scenario_cfg,
+                        sample_paths=sample_paths,
+                        source_lang=args.source_lang,
+                        target_lang=args.target_lang,
+                    )
+                else:
+                    record = _run_legacy_baseline(
+                        scenario_name=scenario_name,
+                        scenario_cfg=scenario_cfg,
+                        sample_paths=sample_paths,
+                        source_lang=args.source_lang,
+                        target_lang=args.target_lang,
+                    )
             except Exception as exc:
                 _log(f"{scenario_name} 실행 실패: {exc}")
                 raise
