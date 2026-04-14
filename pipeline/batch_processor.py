@@ -51,7 +51,12 @@ from modules.utils.render_style_policy import (
     resolve_render_text_color,
 )
 from modules.utils.translator_utils import get_raw_translation, get_raw_text, format_translations
-from modules.rendering.render import get_best_render_area, pyside_word_wrap, is_vertical_block
+from modules.rendering.render import (
+    describe_render_text_sanitization,
+    get_best_render_area,
+    is_vertical_block,
+    pyside_word_wrap,
+)
 from modules.utils.device import resolve_device
 from app.path_materialization import ensure_path_materialized
 from app.ui.canvas.save_renderer import ImageSaveRenderer
@@ -1326,7 +1331,26 @@ class BatchProcessor:
             for blk in blk_list:
                 x1, y1, block_width, block_height = blk.xywh
 
-                translation = blk.translation
+                translation_raw = blk.translation
+                if not translation_raw or len(translation_raw) == 1:
+                    continue
+
+                render_normalization = describe_render_text_sanitization(
+                    translation_raw,
+                    font,
+                    block_index=getattr(blk, "_debug_block_index", None),
+                    image_path=image_path,
+                )
+                translation = render_normalization.text
+                blk._render_translation_raw = str(translation_raw or "")
+                blk._render_text = str(translation or "")
+                blk._render_normalization_applied = bool(
+                    render_normalization.normalization_applied
+                )
+                blk._render_normalization_reasons = list(render_normalization.reasons)
+                blk._render_normalization_replacements = list(
+                    render_normalization.replacements
+                )
                 if not translation or len(translation) == 1:
                     continue
                 
@@ -1358,6 +1382,7 @@ class BatchProcessor:
                 # Language-specific formatting for state storage
                 if is_no_space_lang(trg_lng_cd):
                     translation = translation.replace(' ', '')
+                blk._render_text = str(translation or "")
 
                 # Smart Color Override
                 font_color = resolve_render_text_color(
@@ -1399,7 +1424,16 @@ class BatchProcessor:
                         OutlineType.Full_Document)
                     ] if outline else [],
                 )
-                text_items_state.append(text_props.to_dict())
+                text_item_state = text_props.to_dict()
+                text_item_state["translation_raw"] = str(translation_raw or "")
+                text_item_state["render_text"] = str(translation or "")
+                text_item_state["render_normalization_applied"] = bool(
+                    render_normalization.normalization_applied
+                )
+                text_item_state["render_normalization_reasons"] = list(
+                    render_normalization.reasons
+                )
+                text_items_state.append(text_item_state)
 
             page_state = self._ensure_page_state(image_path)
             page_state['viewer_state'].update({

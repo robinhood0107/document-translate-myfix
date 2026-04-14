@@ -15,7 +15,10 @@ from modules.utils.textblock import adjust_blks_size
 from modules.detection.utils.geometry import shrink_bbox
 from app.ui.canvas.text.vertical_layout import VerticalTextDocumentLayout
 from modules.utils.language_utils import get_language_code
-from modules.utils.text_normalization import DECORATIVE_NOISE_GLYPHS, canonicalize_ellipsis_runs
+from modules.utils.text_normalization import (
+    OCR_DECORATIVE_NOISE_GLYPHS,
+    canonicalize_ellipsis_runs,
+)
 
 from dataclasses import dataclass
 
@@ -41,6 +44,15 @@ class TextRenderingSettings:
     underline: bool
     line_spacing: str
     direction: Qt.LayoutDirection
+
+
+@dataclass
+class RenderSanitizationResult:
+    raw_text: str
+    text: str
+    normalization_applied: bool
+    reasons: list[str]
+    replacements: list[dict]
 
 def array_to_pil(rgb_image: np.ndarray):
     # Image is already in RGB format, just convert to PIL
@@ -79,27 +91,47 @@ def _render_font_supports(metrics: QFontMetrics, ch: str) -> bool:
         return metrics.inFont(ch)
 
 
-def sanitize_render_text(
+def _canonicalize_render_symbol_variants(text: str) -> str:
+    if not text:
+        return ""
+    return (
+        text.replace("❤︎", "♥")
+        .replace("❤️", "♥")
+        .replace("❤", "♥")
+        .replace("♡", "♥")
+    )
+
+
+def describe_render_text_sanitization(
     text: str,
     font_family: str,
     *,
     block_index: int | None = None,
     image_path: str = "",
-) -> str:
+) -> RenderSanitizationResult:
     if not text:
-        return ""
+        return RenderSanitizationResult("", "", False, [], [])
 
-    sanitized = canonicalize_ellipsis_runs(text)
+    raw_text = str(text or "")
+    sanitized = canonicalize_ellipsis_runs(_canonicalize_render_symbol_variants(raw_text))
     effective_family = font_family.strip() if isinstance(font_family, str) and font_family.strip() else QApplication.font().family()
     metrics = QFontMetrics(QFont(effective_family, 12))
     cleaned_parts: list[str] = []
+    replacements: list[dict] = []
+    reasons: list[str] = []
 
-    for ch in sanitized:
+    for index, ch in enumerate(sanitized):
         replacement = ch
         reason = ""
-        if ch in DECORATIVE_NOISE_GLYPHS:
+        if ch in OCR_DECORATIVE_NOISE_GLYPHS:
             replacement = ""
             reason = "decorative-noise"
+        elif ch in {"「", "」", "『", "』"} and not _render_font_supports(metrics, ch):
+            replacement = "\""
+            reason = "quote-to-ascii"
+        elif ch == "♥" and not _render_font_supports(metrics, ch):
+            replacement = ""
+            reason = "heart-dropped"
         elif ch not in {"\n", "\r", "\t"} and not _render_font_supports(metrics, ch):
             category = unicodedata.category(ch)
             if ch in {"…", "⋯"}:
@@ -120,9 +152,40 @@ def sanitize_render_text(
                 reason or "render-normalization",
                 effective_family,
             )
+            reasons.append(reason or "render-normalization")
+            replacements.append(
+                {
+                    "index": int(index),
+                    "char": ch,
+                    "replacement": replacement,
+                    "reason": reason or "render-normalization",
+                }
+            )
         cleaned_parts.append(replacement)
 
-    return "".join(cleaned_parts)
+    normalized = "".join(cleaned_parts)
+    return RenderSanitizationResult(
+        raw_text=raw_text,
+        text=normalized,
+        normalization_applied=bool(replacements),
+        reasons=sorted(set(reasons)),
+        replacements=replacements,
+    )
+
+
+def sanitize_render_text(
+    text: str,
+    font_family: str,
+    *,
+    block_index: int | None = None,
+    image_path: str = "",
+) -> str:
+    return describe_render_text_sanitization(
+        text,
+        font_family,
+        block_index=block_index,
+        image_path=image_path,
+    ).text
 
 def pil_word_wrap(image: Image, tbbox_top_left: Tuple, font_pth: str, text: str, 
                   roi_width, roi_height, align: str, spacing, init_font_size: int, min_font_size: int = 10):

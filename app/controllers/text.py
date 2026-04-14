@@ -15,7 +15,13 @@ from app.ui.canvas.text_item import TextBlockItem
 from app.ui.canvas.text.text_item_properties import TextItemProperties
 
 from modules.utils.textblock import TextBlock
-from modules.rendering.render import TextRenderingSettings, manual_wrap, is_vertical_block, pyside_word_wrap
+from modules.rendering.render import (
+    TextRenderingSettings,
+    describe_render_text_sanitization,
+    manual_wrap,
+    is_vertical_block,
+    pyside_word_wrap,
+)
 from modules.utils.pipeline_config import font_selected
 from modules.utils.language_utils import get_language_code, get_layout_direction, is_no_space_lang
 from modules.utils.common_utils import is_close
@@ -255,7 +261,27 @@ class TextController:
         text_items_state: list[dict] = []
         for original_blk, render_blk in zip(blk_list, render_blocks):
             x1, y1, block_width, block_height = original_blk.xywh
-            translation = render_blk.translation
+            translation_raw = render_blk.translation
+            if not translation_raw or len(translation_raw) == 1:
+                continue
+            render_normalization = describe_render_text_sanitization(
+                translation_raw,
+                render_settings.font_family,
+                block_index=getattr(original_blk, "_debug_block_index", None),
+                image_path=getattr(original_blk, "source_image", "") or "",
+            )
+            translation = render_normalization.text
+            original_blk._render_translation_raw = str(translation_raw or "")
+            original_blk._render_text = str(translation or "")
+            original_blk._render_normalization_applied = bool(
+                render_normalization.normalization_applied
+            )
+            original_blk._render_normalization_reasons = list(
+                render_normalization.reasons
+            )
+            original_blk._render_normalization_replacements = list(
+                render_normalization.replacements
+            )
             if not translation or len(translation) == 1:
                 continue
 
@@ -280,6 +306,7 @@ class TextController:
 
             if is_no_space_lang(trg_lng_cd):
                 wrapped = wrapped.replace(" ", "")
+            original_blk._render_text = str(wrapped or "")
 
             source_rect = self._get_source_rect_for_block(original_blk)
             text_props = self._build_text_item_properties(
@@ -297,7 +324,16 @@ class TextController:
             text_props.transform_origin = (
                 original_blk.tr_origin_point if original_blk.tr_origin_point else (0, 0)
             )
-            text_items_state.append(text_props.to_dict())
+            text_item_state = text_props.to_dict()
+            text_item_state["translation_raw"] = str(translation_raw or "")
+            text_item_state["render_text"] = str(wrapped or "")
+            text_item_state["render_normalization_applied"] = bool(
+                render_normalization.normalization_applied
+            )
+            text_item_state["render_normalization_reasons"] = list(
+                render_normalization.reasons
+            )
+            text_items_state.append(text_item_state)
 
         return text_items_state
 
@@ -1089,7 +1125,27 @@ class TextController:
                             continue
 
                         x1, y1, block_width, block_height = blk.xywh
-                        translation = blk.translation
+                        translation_raw = blk.translation
+                        if not translation_raw or len(translation_raw) == 1:
+                            continue
+                        render_normalization = describe_render_text_sanitization(
+                            translation_raw,
+                            font_family,
+                            block_index=getattr(blk, "_debug_block_index", None),
+                            image_path=file_path,
+                        )
+                        translation = render_normalization.text
+                        blk._render_translation_raw = str(translation_raw or "")
+                        blk._render_text = str(translation or "")
+                        blk._render_normalization_applied = bool(
+                            render_normalization.normalization_applied
+                        )
+                        blk._render_normalization_reasons = list(
+                            render_normalization.reasons
+                        )
+                        blk._render_normalization_replacements = list(
+                            render_normalization.replacements
+                        )
                         if not translation or len(translation) == 1:
                             continue
 
@@ -1113,6 +1169,7 @@ class TextController:
                         )
                         if is_no_space_lang(trg_lng_cd):
                             wrapped = wrapped.replace(" ", "")
+                        blk._render_text = str(wrapped or "")
 
                         source_rect = self._get_source_rect_for_block(blk)
                         text_props = self._build_text_item_properties(
@@ -1130,7 +1187,16 @@ class TextController:
                         text_props.transform_origin = (
                             blk.tr_origin_point if blk.tr_origin_point else (0, 0)
                         )
-                        new_text_items_state.append(text_props.to_dict())
+                        text_item_state = text_props.to_dict()
+                        text_item_state["translation_raw"] = str(translation_raw or "")
+                        text_item_state["render_text"] = str(wrapped or "")
+                        text_item_state["render_normalization_applied"] = bool(
+                            render_normalization.normalization_applied
+                        )
+                        text_item_state["render_normalization_reasons"] = list(
+                            render_normalization.reasons
+                        )
+                        new_text_items_state.append(text_item_state)
 
                     if new_text_items_state:
                         viewer_state["text_items_state"] = existing_text_items + new_text_items_state
