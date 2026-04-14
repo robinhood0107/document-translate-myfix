@@ -37,6 +37,9 @@ class TextBlock(object):
                  ocr_status: str = "",
                  ocr_empty_reason: str = "",
                  ocr_attempt_count: int = 0,
+                 ocr_regions: List[dict] | None = None,
+                 ocr_crop_bbox = None,
+                 ocr_resize_scale: float = 1.0,
                  min_font_size: int = 0,
                  max_font_size: int = 0,
                  font_color: tuple = (),
@@ -72,6 +75,9 @@ class TextBlock(object):
         self.ocr_status = ocr_status
         self.ocr_empty_reason = ocr_empty_reason
         self.ocr_attempt_count = ocr_attempt_count
+        self.ocr_regions = copy.deepcopy(ocr_regions) if ocr_regions is not None else []
+        self.ocr_crop_bbox = copy.deepcopy(ocr_crop_bbox)
+        self.ocr_resize_scale = float(ocr_resize_scale or 1.0)
 
         self.min_font_size = min_font_size
         self.max_font_size = max_font_size
@@ -102,40 +108,12 @@ class TextBlock(object):
         Returns:
             TextBlock: A new TextBlock instance with copied data
         """
-        # Create a new TextBlock with copied numpy arrays and other data
         new_block = TextBlock()
-        
-        # Copy numpy arrays properly
-        new_block.xyxy = self.xyxy.copy() if isinstance(self.xyxy, np.ndarray) else self.xyxy
-        new_block.segm_pts = self.segm_pts.copy() if isinstance(self.segm_pts, np.ndarray) else self.segm_pts
-        new_block.bubble_xyxy = self.bubble_xyxy.copy() if isinstance(self.bubble_xyxy, np.ndarray) else self.bubble_xyxy
-        new_block.ctd_roi_xyxy = self.ctd_roi_xyxy.copy() if isinstance(self.ctd_roi_xyxy, np.ndarray) else copy.deepcopy(self.ctd_roi_xyxy)
-        new_block.cleanup_roi_xyxy = self.cleanup_roi_xyxy.copy() if isinstance(self.cleanup_roi_xyxy, np.ndarray) else copy.deepcopy(self.cleanup_roi_xyxy)
-        new_block.mask_roi_xyxy = self.mask_roi_xyxy.copy() if isinstance(self.mask_roi_xyxy, np.ndarray) else copy.deepcopy(self.mask_roi_xyxy)
-        new_block.inpaint_bboxes = self.inpaint_bboxes.copy() if isinstance(self.inpaint_bboxes, np.ndarray) else self.inpaint_bboxes
-        
-        # Copy simple attributes
-        new_block.text_class = self.text_class
-        new_block.angle = self.angle
-        new_block.tr_origin_point = copy.deepcopy(self.tr_origin_point)
-        new_block.lines = copy.deepcopy(self.lines)
-        new_block.texts = copy.deepcopy(self.texts)
-        new_block.text = self.text
-        new_block.translation = self.translation
-        new_block.rich_text = self.rich_text
-        new_block.line_spacing = self.line_spacing
-        new_block.alignment = self.alignment
-        new_block.source_lang = self.source_lang
-        new_block.target_lang = self.target_lang
-        new_block.ocr_confidence = self.ocr_confidence
-        new_block.ocr_status = self.ocr_status
-        new_block.ocr_empty_reason = self.ocr_empty_reason
-        new_block.ocr_attempt_count = self.ocr_attempt_count
-        new_block.min_font_size = self.min_font_size
-        new_block.max_font_size = self.max_font_size
-        new_block.font_color = self.font_color
-        new_block.direction = self.direction
-        
+        for attr, value in self.__dict__.items():
+            if isinstance(value, np.ndarray):
+                setattr(new_block, attr, value.copy())
+            else:
+                setattr(new_block, attr, copy.deepcopy(value))
         return new_block
 
     def get_text(self) -> str:
@@ -346,4 +324,3 @@ def lists_to_blk_list(blk_list: list[TextBlock], texts_bboxes: list, texts_strin
             blk.text = ' '.join(text for bbox, text in sorted_entries)
 
     return blk_list
-
