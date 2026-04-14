@@ -21,8 +21,33 @@
 4. `develop`에는 raw 결과 없는 요약형 포트폴리오 문서만 둔다.
 5. 문서의 사고과정은 내부 추론 원문이 아니라, "문제를 어떻게 정의했고 어떤 근거로 어떤 결정을 내렸는지"를 시간순 결정 로그로 남긴다.
 6. family 이름은 Requirement 1 기준 `workflow-split-runtime`으로 잠근다.
-7. 13장 기준 데이터셋은 `Sample/japan_vllm_parallel_subset`의 curated subset으로 잠근다.
+7. 하네스의 `Sample/japan_vllm_parallel_subset` 문구는 legacy 표현으로 보고, 실제 코퍼스 루트는 `Sample/japan` curated 13장으로 잠근다.
 8. 원격 push 정책상 benchmark 자산이 포함된 publish 브랜치는 사실상 `benchmarking/lab`이어야 하므로, benchmark family는 `benchmarking/lab`에 직접 반영한다.
+9. Requirement 1 family는 먼저 “실행 계약이 잠긴 패키지”로 완성하고, baseline legacy부터 실측을 시작한다.
+10. stage-batched candidate 두 개는 experimental runner가 추가되기 전까지 blocked 계약 run으로 정직하게 남긴다.
+
+## 운영 기준으로 잠근 입력 세트
+
+- corpus root: `Sample/japan`
+- source language: `Japanese`
+- target language: `Korean`
+- official 13 pages:
+  - `094.png`
+  - `097.png`
+  - `101.png`
+  - `i_099.jpg`
+  - `i_100.jpg`
+  - `i_102.jpg`
+  - `i_105.jpg`
+  - `p_016.jpg`
+  - `p_017.jpg`
+  - `p_018.jpg`
+  - `p_019.jpg`
+  - `p_020.jpg`
+  - `p_021.jpg`
+- smoke pages:
+  - `094.png`
+  - `p_016.jpg`
 
 ## 레포에서 확인한 현재 상태
 
@@ -52,6 +77,15 @@
 - [docs/repo/benchmark-branch-policy-ko.md](/mnt/c/Users/pjjpj/Desktop/openai_manga_translater/comic-translate/docs/repo/benchmark-branch-policy-ko.md:1)에 따라 `develop`에는 benchmark raw docs와 generated assets를 넣지 않는다.
 - 따라서 사용자 요청인 "develop에도 저장"은 `docs/portfolio/...`의 요약형 문서로 해석해 잠갔다.
 
+## 이번 단계에서 실제 구현한 것
+
+1. `workflow_split_runtime` preset 3종 고정
+2. family runner 추가
+3. CUDA12/CUDA13 BAT launcher 추가
+4. generated report 갱신 스크립트 추가
+5. runtime progress를 `metrics.jsonl`에 남길 memlog bridge 추가
+6. runner contract / execution protocol 문제 해결 명세서 추가
+
 ## 단계별 실행 전략
 
 ### Phase 1. Requirement 1 benchmarking/lab
@@ -59,7 +93,7 @@
 - 목적: 시간 이득, Docker 대기 병목, VRAM/ngl 이득, 품질 동등성을 실측으로 판정
 - 산출물:
   - family docs
-  - suite/report placeholder
+  - suite/report
   - problem solving specs
   - raw logs
   - runner/bat/preset
@@ -95,10 +129,17 @@
 1. benchmark 자산 포함 브랜치는 `benchmarking/lab` 외 이름으로 push가 거부되는 운영 제약이 확인되었다.
 2. 단계형 워크플로우가 인페이팅/렌더 순서에 어떤 부수효과를 주는지 아직 실측이 없다.
 3. Requirement 2의 selector rule은 사용자 검수 결과가 쌓이기 전까지 자동 승격하면 안 된다.
+4. Requirement 1 candidate 두 시나리오는 experimental runner가 없어서 아직 실제 실행이 막혀 있다.
 
 ## 다음 액션
 
-1. Requirement 1 family 문서 세트를 먼저 고정한다.
-2. 현재 제품 진입점과 계측 지점을 구조 문서로 정리한다.
-3. `workflow-split-runtime` family runner와 측정 체크포인트 명세를 잠근다.
-4. 첫 measured run 전까지 문제 해결 명세서 템플릿을 준비한다.
+1. `run_workflow_split_runtime_cuda13.bat smoke`로 baseline smoke 실행
+2. baseline 13장 measured run 누적
+3. stage-batched experimental runner 추가
+4. candidate 두 시나리오 실제 측정
+
+## 저자 및 기여
+
+- Idea Origin: User
+- Planning / Measurement Design / Implementation Detailing / Validation: Collaborative
+- Execution Support: Codex

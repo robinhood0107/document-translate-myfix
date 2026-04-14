@@ -27,13 +27,14 @@
 
 1. `완료` 하네스 분석 및 전체 계획 수립
 2. `완료` Requirement 1 벤치마크 family 문서/체크리스트 scaffold 작성
-3. `진행 중` 현재 제품 파이프라인 진입점 및 런타임 계측 지점 문서화
-4. `대기` Requirement 1 family runner / preset / report generator 설계
-5. `대기` Requirement 1 실측 및 문제 해결 명세서 누적
-6. `대기` Requirement 1 제품 승격 브랜치 생성 및 develop-safe portfolio 문서 반영
-7. `대기` Requirement 2 family 설계 및 사용자 검수 패키지 설계
-8. `대기` Requirement 2 실측, selector rule 후보 도출, 문제 해결 명세서 누적
-9. `대기` Requirement 2 제품 승격 브랜치 생성 및 develop-safe portfolio 문서 반영
+3. `완료` 현재 제품 파이프라인 진입점 및 런타임 계측 지점 문서화
+4. `완료` Requirement 1 family runner / preset / BAT / report generator 명세 고정
+5. `진행 중` Requirement 1 smoke / baseline 측정 준비
+6. `대기` Requirement 1 13장 full measured run 누적
+7. `대기` Requirement 1 제품 승격 브랜치 생성 및 develop-safe portfolio 문서 반영
+8. `대기` Requirement 2 family 설계 및 사용자 검수 패키지 설계
+9. `대기` Requirement 2 실측, selector rule 후보 도출, 문제 해결 명세서 누적
+10. `대기` Requirement 2 제품 승격 브랜치 생성 및 develop-safe portfolio 문서 반영
 
 ## 프로그램 체크리스트
 
@@ -41,7 +42,7 @@
 
 - [x] Requirement 1 하네스를 기준 문서로 잠금
 - [x] Requirement 2 하네스를 기준 문서로 잠금
-- [x] 기준 데이터셋을 `Sample/japan_vllm_parallel_subset` 13장으로 잠금
+- [x] 기준 데이터셋을 `Sample/japan` curated 13장으로 잠금
 - [x] 문서 형식을 "결정 로그 + 프로젝트 명세서"로 잠금
 - [x] 벤치마크 full docs는 `benchmarking/lab`, 요약형 포트폴리오 문서는 `develop`으로 분리
 
@@ -56,20 +57,25 @@
 - [x] 보고서 placeholder 생성
 - [x] problem solving specs 초기 세트 생성
 - [x] 런타임 계측 체크포인트 표 문서화
-- [ ] 기존 페이지 단위 파이프라인과 단계형 파이프라인 비교표 작성
+- [x] 기존 페이지 단위 파이프라인과 단계형 파이프라인 비교 기준 문서화
 
 ### C. Requirement 1 구현 준비
 
-- [ ] `pipeline/batch_processor.py`의 현재 단계 이벤트를 맵핑
-- [ ] `modules/ocr/local_runtime.py`의 OCR runtime 정책 맵핑
-- [ ] `modules/translation/local_runtime.py`의 Gemma runtime 정책 맵핑
+- [x] `pipeline/batch_processor.py`의 현재 단계 이벤트를 맵핑
+- [x] `modules/ocr/local_runtime.py`의 OCR runtime 정책 맵핑
+- [x] `modules/translation/local_runtime.py`의 Gemma runtime 정책 맵핑
 - [ ] 설정 UI에 `workflow_mode` 추가 설계 고정
-- [ ] benchmark family runner 명세 고정
-- [ ] Windows BAT 쌍 명세 고정
+- [x] benchmark family runner 명세 고정
+- [x] Windows BAT 쌍 명세 고정
+- [x] `Sample/japan` curated 13장 staging runner 구현
+- [x] `events.jsonl` / `timing_summary.json` / `quality_summary.json` / `vram_snapshots.jsonl` / `docker_timeline.json` 변환 규약 구현
 
 ### D. Requirement 1 측정
 
-- [ ] 기존 워크플로우 baseline 측정
+- [x] 2페이지 smoke 입력 세트 고정
+- [x] 공식 시나리오 3개 잠금
+- [ ] 기존 워크플로우 baseline smoke 측정
+- [ ] 기존 워크플로우 baseline 13장 측정
 - [ ] 단계형 워크플로우 단일 OCR runtime 측정
 - [ ] 단계형 워크플로우 dual-resident OCR 후보 측정
 - [ ] Docker compose up / health wait / reuse hit / timeout / retry 분해표 작성
@@ -119,5 +125,5 @@
 
 1. 이 문서의 `현재 진행 순서`와 체크박스는 마일스톤마다 업데이트한다.
 2. 큰 설계 변경이 생기면 `01_project-spec-and-decision-log-ko.md`에 이유를 남긴다.
-3. 실측이 시작되면 `results-history-ko.md`와 report placeholder를 함께 갱신한다.
+3. 실측이 시작되면 `results-history-ko.md`와 report를 함께 갱신한다.
 4. 문제 해결 명세서는 raw asset history 안에도 남기고, 이 문서에서는 링크만 유지한다.
