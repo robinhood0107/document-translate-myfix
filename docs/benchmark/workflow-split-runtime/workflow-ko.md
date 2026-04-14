@@ -1,0 +1,68 @@
+# Workflow Split Runtime Workflow
+
+## execution_scope
+
+- family: `workflow-split-runtime`
+- corpus: `Sample/japan_vllm_parallel_subset`
+- pages: `13`
+- requirement_gate:
+  - Requirement 1 먼저
+  - Requirement 2는 Requirement 1 성공 후
+
+## Requirement 1 실행 순서
+
+1. 기존 레거시 페이지 단위 파이프라인 baseline 확보
+2. 현재 파이프라인의 detect/OCR/translation/inpaint runtime 진입점 정리
+3. 단계형 워크플로우 후보 정의
+   - legacy page pipeline
+   - stage-batched pipeline with single OCR runtime
+   - stage-batched pipeline with dual-resident OCR candidate
+4. 체크포인트별 timing과 runtime snapshot 수집
+5. Docker compose / health / reuse / timeout / retry 분해
+6. 품질 동등성 검토
+7. 성공 시 제품 승격 대상 runtime surface 확정
+
+## Requirement 1 체크포인트
+
+1. 작업 시작 시각
+2. detect stage start/end
+3. OCR compose up 요청
+4. OCR health wait start/end
+5. MangaLMM 준비 완료
+6. PaddleOCR VL 준비 완료
+7. OCR 실제 처리 start/end
+8. OCR 전체 stage end
+9. Gemma compose up 요청
+10. Gemma health wait start/end
+11. translation 실제 처리 start/end
+12. translation 전체 stage end
+13. inpaint start/end
+14. render/export start/end
+15. batch 전체 완료
+16. timeout / retry / restart / reuse hit 모든 이벤트
+
+## Requirement 2 실행 순서
+
+1. Requirement 1 성공 판정 확인
+2. 13장 기준 detect box count 수집
+3. MangaLMM 결과 수와 `bbox_2d` 성공 여부 수집
+4. PaddleOCR VL 결과와의 차이 수집
+5. 사용자 검수용 page review pack 생성
+6. 사용자 승인/비승인 결과 저장
+7. selector rule 후보 도출
+8. dual-resident runtime 정책과 자동 전환 정책 구현 후보 정리
+
+## 문서화 흐름
+
+1. 마스터 체크리스트 갱신
+2. 프로젝트 명세/결정 로그 갱신
+3. problem solving spec 생성 또는 갱신
+4. results history 업데이트
+5. report placeholder 업데이트
+
+## develop 승격 흐름
+
+1. benchmark/lab에서 full evidence 확보
+2. `develop`용 별도 브랜치에서 benchmark 자산 없이 제품 코드만 이관
+3. `docs/portfolio/...`에 요약형 포트폴리오 문서 저장
+4. commit / push / PR
