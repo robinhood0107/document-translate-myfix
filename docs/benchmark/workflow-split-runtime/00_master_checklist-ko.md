@@ -9,16 +9,16 @@
 
 ## 브랜치 계획
 
-1. `benchmarking/lab` -> `chore/workflow-split-benchmark-harness`
+1. `benchmarking/lab` 직접 반영
    - Requirement 1 full benchmark family
    - raw 결과, full docs, problem solving specs, generated assets
-   - 최종 머지 대상: `benchmarking/lab`
+   - 서버 push 정책상 benchmark 자산 포함 브랜치는 `benchmarking/lab` 외 이름으로 publish 불가
 2. `develop` -> `feature/workflow-split-runtime`
    - 제품 runtime, 설정 UI, generic telemetry, develop-safe portfolio docs
    - 최종 머지 대상: `develop`
-3. `benchmarking/lab` -> `chore/hybrid-ocr-selector-benchmark`
+3. `benchmarking/lab` 직접 반영
    - Requirement 2 full benchmark family, 검수 리포트, selector 근거
-   - 최종 머지 대상: `benchmarking/lab`
+   - 서버 push 정책상 benchmark 자산 포함 브랜치는 `benchmarking/lab` 외 이름으로 publish 불가
 4. `develop` -> `feature/hybrid-ocr-selector`
    - 하이브리드 OCR 선택기, dual-resident 정책, develop-safe portfolio docs
    - 최종 머지 대상: `develop`

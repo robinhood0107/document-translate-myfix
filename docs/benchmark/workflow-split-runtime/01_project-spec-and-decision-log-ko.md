@@ -22,6 +22,7 @@
 5. 문서의 사고과정은 내부 추론 원문이 아니라, "문제를 어떻게 정의했고 어떤 근거로 어떤 결정을 내렸는지"를 시간순 결정 로그로 남긴다.
 6. family 이름은 Requirement 1 기준 `workflow-split-runtime`으로 잠근다.
 7. 13장 기준 데이터셋은 `Sample/japan_vllm_parallel_subset`의 curated subset으로 잠근다.
+8. 원격 push 정책상 benchmark 자산이 포함된 publish 브랜치는 사실상 `benchmarking/lab`이어야 하므로, benchmark family는 `benchmarking/lab`에 직접 반영한다.
 
 ## 레포에서 확인한 현재 상태
 
@@ -91,7 +92,7 @@
 
 ## 아직 열어 둔 기술 리스크
 
-1. `benchmarking/lab` 원격이 fast-forward 상태가 아니므로, 이후 머지 전 기준선 재정렬이 필요하다.
+1. benchmark 자산 포함 브랜치는 `benchmarking/lab` 외 이름으로 push가 거부되는 운영 제약이 확인되었다.
 2. 단계형 워크플로우가 인페이팅/렌더 순서에 어떤 부수효과를 주는지 아직 실측이 없다.
 3. Requirement 2의 selector rule은 사용자 검수 결과가 쌓이기 전까지 자동 승격하면 안 된다.
 
