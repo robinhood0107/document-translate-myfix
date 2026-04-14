@@ -1229,7 +1229,7 @@ class MangaLMMOCREngine(OCREngine):
                 self._chat_completions_url(),
                 json=payload,
                 headers={"Content-Type": "application/json"},
-                timeout=self.request_timeout_sec,
+                timeout=self._requests_timeout(),
             )
         except requests.exceptions.RequestException as exc:
             raise LocalServiceConnectionError(
@@ -1268,6 +1268,12 @@ class MangaLMMOCREngine(OCREngine):
         if self.raw_response_logging:
             logger.info("mangalmm_full_page_ocr raw response json: %s", data)
         return data
+
+    def _requests_timeout(self):
+        if self.use_optimal_plus_contract:
+            # Optimal+ waits for the local LLM to finish once the request was accepted.
+            return (float(self.request_timeout_sec), None)
+        return float(self.request_timeout_sec)
 
     def _extract_text_from_response(self, data: dict) -> str:
         error = data.get("error")
