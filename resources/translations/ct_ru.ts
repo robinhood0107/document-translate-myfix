@@ -956,8 +956,9 @@ Start the server with both the HunyuanOCR GGUF model and the matching mmproj fil
     </message>
     <message>
         <source>Connect Comic Translate to your local MangaLMM llama.cpp server.
-This OCR engine sends full pages or large overlapping tiles to the OpenAI-compatible /chat/completions endpoint.
-MangaLMM runs as page/tile OCR inside the app, then recognized regions are matched back to detected text blocks.
+This OCR engine sends a full page single-shot request to the OpenAI-compatible /chat/completions endpoint.
+The app keeps detector geometry, then matches grounded OCR regions back to detected text blocks.
+Japanese Optimal+ uses an internal MangaLMM contract with PNG, image-first ordering, and guarded retries.
 Keep the default localhost URL if you want Comic Translate to reuse the bundled Docker runtime.</source>
         <translation type="unfinished"></translation>
     </message>
@@ -1003,15 +1004,16 @@ Keep the default localhost URL if you want Comic Translate to reuse the bundled 
     </message>
     <message>
         <source>Recommended values for the bundled MangaLMM runtime:
-- ctx-size 4096: enough for page/tile OCR while keeping VRAM safer
+- ctx-size 4096: enough for full-page OCR while keeping VRAM safer
 - Max Completion Tokens: 256
 - Parallel Workers: 1
 - Request Timeout: 60 seconds
 - Safe Resize: on
 - Max Pixels / Max Long Side: 2116800 / 1728
 Reasoning:
-- Keep a lightly sampled request with temperature 0.1 and top_k 32 internally so the model is less likely to stop at an empty response.
-- Pages larger than the safe limit are split into 1280px tiles with overlap, and OCR region boxes are mapped back to original coordinates.
+- PNG + image-first ordering is the most reliable request format for MangaLMM.
+- Japanese Optimal+ ignores this page&apos;s manual prompt/token profile and uses an internal full-page contract with guarded retries.
+- Direct MangaLMM mode still respects the values on this page.
 - Workers 1 is the safest default when Gemma and MangaLMM stay resident on the same GPU.</source>
         <translation type="unfinished"></translation>
     </message>
