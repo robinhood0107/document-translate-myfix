@@ -6,6 +6,7 @@ import logging
 import imkit as imk
 
 from ..base import LLMTranslation
+from ...ocr.selection import resolve_ocr_engine
 from ...utils.textblock import TextBlock
 from ...utils.translator_utils import (
     build_translation_input_json,
@@ -21,6 +22,7 @@ class BaseLLMTranslation(LLMTranslation):
     """Base class for LLM-based translation engines with shared functionality."""
     
     def __init__(self):
+        self.settings = None
         self.source_lang = None
         self.target_lang = None
         self.api_key = None
@@ -48,6 +50,7 @@ class BaseLLMTranslation(LLMTranslation):
             **kwargs: Engine-specific initialization parameters
         """
         llm_settings = settings.get_llm_settings()
+        self.settings = settings
         self.source_lang = source_lang
         self.target_lang = target_lang
         # Keep image input opt-in. The UI default is unchecked, so missing or
@@ -98,24 +101,44 @@ class BaseLLMTranslation(LLMTranslation):
             
         return blk_list
 
+    def _resolved_ocr_engine(self) -> str:
+        if self.settings is None or not hasattr(self.settings, "get_tool_selection"):
+            return ""
+        try:
+            ocr_mode = self.settings.get_tool_selection("ocr")
+        except Exception:
+            logger.exception("translation input OCR mode lookup failed (%s)", self.translation_mode_label)
+            return ""
+        return resolve_ocr_engine(ocr_mode, self.source_lang)
+
     def _build_translation_input_payloads(self, blk_list: list[TextBlock]) -> tuple[str, str]:
         source_lang_code = self.get_language_code(self.source_lang) or (self.source_lang or "")
+        ocr_engine = self._resolved_ocr_engine()
         raw_json = get_raw_text(blk_list)
-        normalized_json = build_translation_input_json(blk_list, source_lang_code)
+        normalized_json = build_translation_input_json(
+            blk_list,
+            source_lang_code,
+            ocr_engine=ocr_engine,
+        )
         self.last_translation_input_raw_json = raw_json
         self.last_translation_input_normalized_json = normalized_json
 
         changed_blocks = sum(
             1
             for blk in blk_list
-            if normalize_text_for_translation(getattr(blk, "text", ""), source_lang_code)
+            if normalize_text_for_translation(
+                getattr(blk, "text", ""),
+                source_lang_code,
+                ocr_engine=ocr_engine,
+            )
             != str(getattr(blk, "text", "") or "")
         )
         if changed_blocks:
             logger.info(
-                "translation input normalized (%s): source_lang=%s changed_blocks=%d total_blocks=%d",
+                "translation input normalized (%s): source_lang=%s ocr_engine=%s changed_blocks=%d total_blocks=%d",
                 self.translation_mode_label,
                 source_lang_code,
+                ocr_engine or "",
                 changed_blocks,
                 len(blk_list),
             )
@@ -127,7 +150,7 @@ class BaseLLMTranslation(LLMTranslation):
             )
 
         return raw_json, normalized_json
-    
+
     @abstractmethod
     def _perform_translation(self, user_prompt: str, system_prompt: str, image: np.ndarray) -> str:
         """
