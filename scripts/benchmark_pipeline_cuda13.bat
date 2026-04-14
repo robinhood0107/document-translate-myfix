@@ -114,6 +114,8 @@ echo   scripts\benchmark_pipeline_cuda13.bat open
 echo.
 echo Runtime:
 echo   benchmark_pipeline_cuda13.bat uses .venv-win-cuda13
+echo   managed mode now reuses healthy Docker services first and only restarts failed services.
+echo   attach-running mode continues to use the currently running services as-is.
 echo.
 echo Output root:
 echo   %%REPO_ROOT%%\banchmark_result_log

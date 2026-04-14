@@ -9,8 +9,6 @@ import statistics
 import subprocess
 import sys
 import time
-import urllib.error
-import urllib.request
 from pathlib import Path
 from queue import Empty, Queue
 from threading import Thread
@@ -23,17 +21,16 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from benchmark_common import (
-    DEFAULT_CONTAINER_NAMES,
     DEFAULT_SAMPLE_COUNT,
     DEFAULT_SAMPLE_DIR,
     create_run_dir,
+    ensure_managed_runtime_health_first,
     load_metrics,
     load_preset,
-    remove_containers,
     repo_relative_str,
     resolve_corpus,
     run_command,
-    stage_runtime_files,
+    wait_for_url,
     write_json,
 )
 from paddleocr_vl15_compare_gold import build_stability_profile
@@ -43,14 +40,6 @@ FAMILY_OUTPUT_ROOT_NAME = "paddleocr_vl15"
 FAMILY_PRESET_BASE = "paddleocr-vl15-baseline"
 LAST_SUITE_RECORD = "last_paddleocr_vl15_suite.json"
 REPORT_MANIFEST_NAME = "paddleocr_vl15_report_manifest.yaml"
-FULL_RUNTIME_HEALTH_URLS = [
-    "http://127.0.0.1:18080/health",
-    "http://127.0.0.1:18080/v1/models",
-    "http://127.0.0.1:28118/docs",
-]
-OCR_ONLY_HEALTH_URLS = [
-    "http://127.0.0.1:28118/docs",
-]
 DEFAULT_EXECUTION_SCOPE = "detect-ocr"
 LEGACY_EXECUTION_SCOPE = "full-pipeline"
 DEFAULT_SCREEN_SUBSET_SIZE = 10
@@ -156,17 +145,6 @@ def _current_git_sha(ref: str = "HEAD") -> str:
     return (completed.stdout or "").strip()
 
 
-def _wait_for_url(url: str, timeout_sec: int = 180) -> None:
-    started = time.time()
-    while time.time() - started < timeout_sec:
-        try:
-            with urllib.request.urlopen(url, timeout=5):
-                return
-        except Exception:
-            time.sleep(2)
-    raise TimeoutError(f"Timed out waiting for {url}")
-
-
 def _enqueue_output(stream, queue: Queue[tuple[str, str]]) -> None:
     try:
         for line in iter(stream.readline, ""):
@@ -255,13 +233,14 @@ def _materialize_generated_preset(
 
 def _prepare_runtime(preset_ref: str, runtime_dir: Path, *, runtime_services: str) -> dict[str, Any]:
     preset, _ = load_preset(preset_ref)
-    staged = stage_runtime_files(preset, runtime_dir)
-    remove_containers(DEFAULT_CONTAINER_NAMES)
-    if runtime_services != "ocr-only":
-        compose_pull_and_recreate(staged["gemma"]["compose_path"], cwd=runtime_dir / "gemma")
-    compose_pull_and_recreate(staged["ocr"]["compose_path"], cwd=runtime_dir / "ocr")
-    for url in OCR_ONLY_HEALTH_URLS if runtime_services == "ocr-only" else FULL_RUNTIME_HEALTH_URLS:
-        _wait_for_url(url)
+    runtime_state = ensure_managed_runtime_health_first(
+        preset,
+        runtime_dir,
+        runtime_services=runtime_services,
+        log_fn=_log,
+    )
+    staged = runtime_state["staged"]
+    write_json(runtime_dir / "managed_runtime_policy.json", runtime_state["report"])
     return {
         "preset": preset,
         "runtime_dir": runtime_dir,
@@ -518,7 +497,6 @@ def _run_candidate(
         warm_run["official_metrics"] = _official_metrics_for_run(Path(warm_run["run_dir"]), expected_pages or [])
         warm_runs.append(warm_run)
 
-    remove_containers(DEFAULT_CONTAINER_NAMES)
     return {
         "name": name,
         "preset": preset_name,
@@ -1107,7 +1085,6 @@ def main() -> int:
                 output_dir=run_dir,
                 label=run_dir.name,
             )
-            remove_containers(DEFAULT_CONTAINER_NAMES)
             print(repo_relative_str(result["run_dir"]))
         return 0
 

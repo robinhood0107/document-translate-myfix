@@ -9,8 +9,6 @@ import shutil
 import subprocess
 import sys
 import time
-import urllib.error
-import urllib.request
 from pathlib import Path
 from queue import Empty, Queue
 from threading import Thread
@@ -23,19 +21,18 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from benchmark_common import (
-    DEFAULT_CONTAINER_NAMES,
     DEFAULT_SAMPLE_COUNT,
     DEFAULT_SAMPLE_DIR,
     benchmark_output_root,
     create_run_dir,
+    ensure_managed_runtime_health_first,
     load_preset,
-    remove_containers,
     run_command,
     resolve_corpus,
     repo_relative_str,
-    stage_runtime_files,
-    compose_pull_and_recreate,
     collect_llama_cpp_runtime_metadata,
+    url_available,
+    wait_for_url,
     write_json,
 )
 
@@ -202,24 +199,9 @@ def _check_imports() -> None:
             ) from exc
 
 
-def _url_available(url: str, timeout_sec: int = 5) -> bool:
-    try:
-        with urllib.request.urlopen(url, timeout=timeout_sec):
-            return True
-    except (urllib.error.URLError, TimeoutError):
-        return False
-
-
-def _wait_for_url(url: str, timeout_sec: int = 180) -> None:
-    started = time.time()
-    while time.time() - started < timeout_sec:
-        if _url_available(url, timeout_sec=5):
-            return
-        time.sleep(2)
-    raise TimeoutError(f"Timed out waiting for {url}")
-
-
 def _json_post(url: str, payload: dict[str, Any], timeout_sec: int = 60) -> dict[str, Any]:
+    import urllib.request
+
     request = urllib.request.Request(
         url,
         data=json.dumps(payload).encode("utf-8"),
@@ -260,13 +242,13 @@ def _verify_gemma4_runtime(suite_dir: Path) -> dict[str, Any]:
     verification_dir.mkdir(parents=True, exist_ok=True)
 
     preset, _ = load_preset("b8665-schema-control")
-    staged = stage_runtime_files(preset, runtime_dir)
-
-    remove_containers(DEFAULT_CONTAINER_NAMES)
-    compose_pull_and_recreate(staged["gemma"]["compose_path"], cwd=runtime_dir / "gemma")
-    compose_pull_and_recreate(staged["ocr"]["compose_path"], cwd=runtime_dir / "ocr")
-    for url in ATTACH_RUNNING_HEALTH_URLS:
-        _wait_for_url(url)
+    runtime_state = ensure_managed_runtime_health_first(
+        preset,
+        runtime_dir,
+        runtime_services="full",
+        log_fn=_log,
+    )
+    write_json(runtime_dir / "managed_runtime_policy.json", runtime_state["report"])
 
     inspect_completed = run_command(
         ["docker", "inspect", "--format", "{{.Config.Image}}", "gemma-local-server"],
@@ -380,7 +362,7 @@ def _preflight(sample_dir: Path, sample_count: int, *, check_attach_running: boo
         return
     _log("preflight: attach-running 서버 health-check 확인 중...")
     for url in ATTACH_RUNNING_HEALTH_URLS:
-        if not _url_available(url, timeout_sec=5):
+        if not url_available(url, timeout_sec=5):
             raise RuntimeError(
                 "attach-running 기준 서버가 준비되지 않았습니다. "
                 f"응답이 없는 URL: {url}"
@@ -399,11 +381,14 @@ def _snapshot_runtime_files(snapshot_dir: Path) -> None:
 
 
 def _restore_runtime(snapshot_dir: Path) -> None:
+    if all(url_available(url, timeout_sec=5) for url in ATTACH_RUNNING_HEALTH_URLS):
+        _log("restore: 기존 attach-running 서비스가 healthy 상태라 복원을 건너뜁니다")
+        return
+
     gemma_snapshot = snapshot_dir / "docker-compose.yaml"
     ocr_snapshot = snapshot_dir / "paddleocr_vl_docker_files" / "docker-compose.yaml"
 
-    _log("restore: 기존 컨테이너 정리 중...")
-    remove_containers(["gemma-local-server", "paddleocr-server", "paddleocr-vllm"])
+    _log("restore: health-check 실패로 복원을 시작합니다")
     _log("restore: Gemma docker-compose 복원 중...")
     subprocess.run(
         [
@@ -443,7 +428,7 @@ def _restore_runtime(snapshot_dir: Path) -> None:
 
     for url in ATTACH_RUNNING_HEALTH_URLS:
         _log(f"restore: health-check 대기 중... {url}")
-        _wait_for_url(url)
+        wait_for_url(url)
     _log("restore: 모든 서비스 복원 완료")
 
 

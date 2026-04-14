@@ -7,6 +7,8 @@ import os
 import shutil
 import subprocess
 import time
+import urllib.error
+import urllib.request
 from collections import Counter, defaultdict, deque
 from datetime import datetime
 from pathlib import Path
@@ -143,6 +145,145 @@ def resolve_runtime_health_urls(
     elif kind == "mangalmm":
         urls.extend(MANGALMM_OCR_HEALTH_URLS)
     return urls
+
+
+def url_available(url: str, timeout_sec: int = 5) -> bool:
+    try:
+        with urllib.request.urlopen(url, timeout=timeout_sec):
+            return True
+    except (urllib.error.URLError, TimeoutError, ValueError):
+        return False
+
+
+def wait_for_url(url: str, timeout_sec: int = 180, poll_interval_sec: float = 2.0) -> None:
+    started = time.time()
+    while time.time() - started < timeout_sec:
+        if url_available(url, timeout_sec=5):
+            return
+        time.sleep(poll_interval_sec)
+    raise TimeoutError(f"Timed out waiting for {url}")
+
+
+def _normalize_service_names(payload: dict[str, Any] | None) -> list[str]:
+    if not isinstance(payload, dict):
+        return []
+    names: list[str] = []
+    service_name = payload.get("service_name")
+    if isinstance(service_name, str) and service_name.strip():
+        names.append(service_name.strip())
+    service_names = payload.get("service_names")
+    if isinstance(service_names, list):
+        for item in service_names:
+            if isinstance(item, str) and item.strip():
+                names.append(item.strip())
+    return names
+
+
+def ensure_managed_runtime_health_first(
+    preset: dict[str, Any],
+    runtime_dir: str | Path,
+    *,
+    runtime_services: str = "full",
+    quick_timeout_sec: int = 8,
+    boot_timeout_sec: int = 180,
+    log_fn=None,
+) -> dict[str, Any]:
+    base = Path(runtime_dir)
+    staged = stage_runtime_files(preset, base)
+    groups: list[dict[str, Any]] = []
+
+    if runtime_services != "ocr-only":
+        groups.append(
+            {
+                "name": "gemma",
+                "container_names": GEMMA_CONTAINER_NAMES,
+                "health_urls": GEMMA_HEALTH_URLS,
+                "compose_path": staged["gemma"]["compose_path"],
+                "cwd": base / "gemma",
+            }
+        )
+
+    ocr_group_names = _normalize_service_names(staged.get("ocr"))
+    ocr_health_urls: list[str] = []
+    kind = str(staged.get("ocr", {}).get("kind", "") or "")
+    if kind == "paddleocr_vl":
+        ocr_health_urls = list(PADDLEOCR_VL_HEALTH_URLS)
+    elif kind == "hunyuanocr":
+        ocr_health_urls = list(HUNYUAN_OCR_HEALTH_URLS)
+    elif kind == "mangalmm":
+        ocr_health_urls = list(MANGALMM_OCR_HEALTH_URLS)
+    if kind and kind != "internal" and ocr_group_names:
+        groups.append(
+            {
+                "name": "ocr",
+                "container_names": ocr_group_names,
+                "health_urls": ocr_health_urls,
+                "compose_path": staged["ocr"]["compose_path"],
+                "cwd": base / "ocr",
+            }
+        )
+
+    report: dict[str, Any] = {
+        "mode": "health_first_reuse",
+        "runtime_services": runtime_services,
+        "container_names": resolve_runtime_container_names(preset, runtime_services),
+        "health_urls": resolve_runtime_health_urls(preset, runtime_services),
+        "groups": [],
+    }
+
+    for group in groups:
+        failures = [url for url in group["health_urls"] if not url_available(url, timeout_sec=quick_timeout_sec)]
+        if not failures:
+            if log_fn:
+                log_fn(
+                    f"managed runtime group reuse: {group['name']} healthy; "
+                    f"containers={group['container_names']}"
+                )
+            report["groups"].append(
+                {
+                    "name": group["name"],
+                    "action": "reused",
+                    "container_names": group["container_names"],
+                    "health_urls": group["health_urls"],
+                    "failed_urls": [],
+                }
+            )
+            continue
+
+        if log_fn:
+            log_fn(
+                f"managed runtime group restart: {group['name']} health failed; "
+                f"failed_urls={failures}"
+            )
+        remove_containers(group["container_names"])
+        compose_pull_and_recreate(group["compose_path"], cwd=group["cwd"])
+        post_failures: list[str] = []
+        for url in group["health_urls"]:
+            try:
+                wait_for_url(url, timeout_sec=boot_timeout_sec)
+            except Exception:
+                post_failures.append(url)
+        if post_failures:
+            raise RuntimeError(
+                "Managed runtime health-first restart failed for group "
+                f"{group['name']}: failed_urls={post_failures}"
+            )
+        report["groups"].append(
+            {
+                "name": group["name"],
+                "action": "restarted",
+                "container_names": group["container_names"],
+                "health_urls": group["health_urls"],
+                "failed_urls": failures,
+            }
+        )
+
+    return {
+        "staged": staged,
+        "report": report,
+        "container_names": report["container_names"],
+        "health_urls": report["health_urls"],
+    }
 
 
 def repo_root() -> Path:
