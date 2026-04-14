@@ -71,6 +71,11 @@ HUNYUAN_OCR_CONTAINER_NAMES = [
 MANGALMM_OCR_CONTAINER_NAMES = [
     "mangalmm-local-server",
 ]
+OCR_RUNTIME_CONTAINER_NAMES = {
+    "paddleocr_vl": PADDLEOCR_VL_CONTAINER_NAMES,
+    "hunyuanocr": HUNYUAN_OCR_CONTAINER_NAMES,
+    "mangalmm": MANGALMM_OCR_CONTAINER_NAMES,
+}
 DEFAULT_CONTAINER_NAMES = GEMMA_CONTAINER_NAMES + PADDLEOCR_VL_CONTAINER_NAMES
 ALL_BENCHMARK_CONTAINER_NAMES = (
     GEMMA_CONTAINER_NAMES
@@ -151,7 +156,7 @@ def url_available(url: str, timeout_sec: int = 5) -> bool:
     try:
         with urllib.request.urlopen(url, timeout=timeout_sec):
             return True
-    except (urllib.error.URLError, TimeoutError, ValueError):
+    except (urllib.error.URLError, TimeoutError, ValueError, Exception):
         return False
 
 
@@ -169,19 +174,45 @@ def compose_up_detached(
     *,
     cwd: str | Path | None = None,
     project_directory: str | Path | None = None,
+    force_recreate: bool = False,
 ) -> None:
     command = [*resolve_docker_compose_command()]
     if project_directory is not None:
         command.extend(["--project-directory", str(project_directory)])
     command.extend(["-f", str(compose_path), "up", "-d"])
+    if force_recreate:
+        command.append("--force-recreate")
     run_command(command, cwd=cwd)
+
+
+def wait_for_health_urls(
+    urls: list[str],
+    *,
+    timeout_sec: int = 180,
+    poll_interval_sec: float = 2.0,
+) -> list[str]:
+    pending = list(dict.fromkeys(str(url).strip() for url in urls if str(url).strip()))
+    if not pending:
+        return []
+
+    started = time.time()
+    while pending and time.time() - started < timeout_sec:
+        pending = [url for url in pending if not url_available(url, timeout_sec=5)]
+        if not pending:
+            return []
+        time.sleep(poll_interval_sec)
+    return pending
+
+
+def existing_container_names(container_names: list[str]) -> list[str]:
+    return [name for name in container_names if _container_exists(name)]
 
 
 def ensure_compose_groups_health_first(
     groups: list[dict[str, Any]],
     *,
     quick_timeout_sec: int = 8,
-    boot_timeout_sec: int = 180,
+    boot_timeout_sec: int = 300,
     log_fn=None,
 ) -> list[dict[str, Any]]:
     group_reports: list[dict[str, Any]] = []
@@ -204,37 +235,87 @@ def ensure_compose_groups_health_first(
             )
             continue
 
-        if log_fn:
-            log_fn(
-                f"managed runtime group restart: {group['name']} health failed; "
-                f"failed_urls={failures}"
+        preexisting = existing_container_names(group["container_names"])
+        if preexisting:
+            if log_fn:
+                log_fn(
+                    "managed runtime group wait: {name} already running; waiting up to {timeout}s "
+                    "for health before restart; containers={containers}; failed_urls={failed}".format(
+                        name=group["name"],
+                        timeout=boot_timeout_sec,
+                        containers=preexisting,
+                        failed=failures,
+                    )
+                )
+            waited_failures = wait_for_health_urls(
+                group["health_urls"],
+                timeout_sec=boot_timeout_sec,
             )
+            if not waited_failures:
+                group_reports.append(
+                    {
+                        "name": group["name"],
+                        "action": "waited",
+                        "container_names": group["container_names"],
+                        "health_urls": group["health_urls"],
+                        "failed_urls": failures,
+                        "preexisting_container_names": preexisting,
+                    }
+                )
+                continue
+            if log_fn:
+                log_fn(
+                    "managed runtime group restart: {name} stayed unhealthy after wait; "
+                    "containers={containers}; failed_urls={failed}".format(
+                        name=group["name"],
+                        containers=preexisting,
+                        failed=waited_failures,
+                    )
+                )
+        else:
+            if log_fn:
+                log_fn(
+                    "managed runtime group start: {name} containers missing; starting once and "
+                    "waiting up to {timeout}s; failed_urls={failed}".format(
+                        name=group["name"],
+                        timeout=boot_timeout_sec,
+                        failed=failures,
+                    )
+                )
+
         compose_up_detached(
             group["compose_path"],
             cwd=group.get("cwd"),
             project_directory=group.get("project_directory"),
+            force_recreate=bool(preexisting),
         )
-        post_failures: list[str] = []
-        for url in group["health_urls"]:
-            try:
-                wait_for_url(url, timeout_sec=boot_timeout_sec)
-            except Exception:
-                post_failures.append(url)
+        post_failures = wait_for_health_urls(
+            group["health_urls"],
+            timeout_sec=boot_timeout_sec,
+        )
         if post_failures:
             raise RuntimeError(
-                "Managed runtime health-first restart failed for group "
+                "Managed runtime health-first launch failed for group "
                 f"{group['name']}: failed_urls={post_failures}"
             )
         group_reports.append(
             {
                 "name": group["name"],
-                "action": "restarted",
+                "action": "restarted" if preexisting else "started",
                 "container_names": group["container_names"],
                 "health_urls": group["health_urls"],
                 "failed_urls": failures,
+                "preexisting_container_names": preexisting,
             }
         )
     return group_reports
+
+
+def _repo_relative(path: str | Path) -> str:
+    try:
+        return "./" + str(Path(path).resolve().relative_to(ROOT.resolve())).replace("\\", "/")
+    except Exception:
+        return str(path).replace("\\", "/")
 
 
 def _normalize_service_names(payload: dict[str, Any] | None) -> list[str]:
@@ -252,17 +333,89 @@ def _normalize_service_names(payload: dict[str, Any] | None) -> list[str]:
     return names
 
 
+def _docker_ps_snapshot() -> str:
+    completed = run_command(
+        ["docker", "ps", "-a", "--format", "{{.Names}}\t{{.Image}}\t{{.Status}}"],
+        check=False,
+    )
+    lines: list[str] = []
+    for line in (completed.stdout or "").splitlines():
+        name = line.split("\t", 1)[0].strip()
+        if name in ALL_BENCHMARK_CONTAINER_NAMES:
+            lines.append(line.rstrip())
+    if not lines:
+        return "(no benchmark containers)\n"
+    return "\n".join(lines) + "\n"
+
+
+def _write_text(path: Path, text: str) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text, encoding="utf-8")
+
+
+def _other_ocr_container_names(selected_kind: str) -> list[str]:
+    names: list[str] = []
+    for kind, container_names in OCR_RUNTIME_CONTAINER_NAMES.items():
+        if kind != selected_kind:
+            names.extend(container_names)
+    return names
+
+
+def enforce_singleton_ocr_runtime_family(
+    preset: dict[str, Any],
+    runtime_dir: str | Path,
+    *,
+    log_fn=None,
+) -> dict[str, Any]:
+    base = Path(runtime_dir)
+    selected_kind = ocr_runtime_kind(preset)
+    before_path = base / "docker_ps_before_singleton.txt"
+    after_path = base / "docker_ps_after_singleton.txt"
+    _write_text(before_path, _docker_ps_snapshot())
+
+    removed_container_names: list[str] = []
+    if selected_kind in OCR_RUNTIME_CONTAINER_NAMES:
+        candidate_names = _other_ocr_container_names(selected_kind)
+        removed_container_names = [name for name in candidate_names if _container_exists(name)]
+        if removed_container_names:
+            if log_fn:
+                log_fn(
+                    "singleton ocr runtime: selected={selected} pruning={removed}".format(
+                        selected=selected_kind,
+                        removed=removed_container_names,
+                    )
+                )
+            remove_containers(removed_container_names)
+        elif log_fn:
+            log_fn(f"singleton ocr runtime: selected={selected_kind} no extra OCR containers detected")
+    elif log_fn:
+        log_fn(f"singleton ocr runtime: selected={selected_kind} no managed OCR family pruning required")
+
+    _write_text(after_path, _docker_ps_snapshot())
+    return {
+        "selected_ocr_runtime_kind": selected_kind,
+        "removed_container_names": removed_container_names,
+        "docker_ps_before_singleton_path": _repo_relative(before_path),
+        "docker_ps_after_singleton_path": _repo_relative(after_path),
+    }
+
+
 def ensure_managed_runtime_health_first(
     preset: dict[str, Any],
     runtime_dir: str | Path,
     *,
     runtime_services: str = "full",
     quick_timeout_sec: int = 8,
-    boot_timeout_sec: int = 180,
+    boot_timeout_sec: int = 300,
     log_fn=None,
 ) -> dict[str, Any]:
     base = Path(runtime_dir)
     staged = stage_runtime_files(preset, base)
+    singleton_report = enforce_singleton_ocr_runtime_family(
+        preset,
+        base,
+        log_fn=log_fn,
+    )
     groups: list[dict[str, Any]] = []
 
     if runtime_services != "ocr-only":
@@ -301,6 +454,7 @@ def ensure_managed_runtime_health_first(
         "runtime_services": runtime_services,
         "container_names": resolve_runtime_container_names(preset, runtime_services),
         "health_urls": resolve_runtime_health_urls(preset, runtime_services),
+        "singleton_ocr_runtime": singleton_report,
         "groups": ensure_compose_groups_health_first(
             groups,
             quick_timeout_sec=quick_timeout_sec,
@@ -334,10 +488,7 @@ def benchmark_default_output_root() -> Path:
 
 
 def repo_relative_str(path: str | Path) -> str:
-    try:
-        return "./" + str(Path(path).resolve().relative_to(ROOT.resolve())).replace("\\", "/")
-    except Exception:
-        return str(path).replace("\\", "/")
+    return _repo_relative(path)
 
 
 def _resolve_docker_executable() -> str:

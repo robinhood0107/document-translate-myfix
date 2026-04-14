@@ -45,13 +45,11 @@ call "%PYTHON_EXE%" -u "%SCRIPT_DIR%ocr_simpletest_mangalmm_vs_paddle_benchmark.
 exit /b %ERRORLEVEL%
 
 :run_command
-shift
-call "%PYTHON_EXE%" -u "%SCRIPT_DIR%ocr_simpletest_mangalmm_vs_paddle_benchmark.py" run %*
+call "%PYTHON_EXE%" -u "%SCRIPT_DIR%ocr_simpletest_mangalmm_vs_paddle_benchmark.py" %*
 exit /b %ERRORLEVEL%
 
 :summary
-shift
-call "%PYTHON_EXE%" -u "%SCRIPT_DIR%ocr_simpletest_mangalmm_vs_paddle_benchmark.py" summary %*
+call "%PYTHON_EXE%" -u "%SCRIPT_DIR%ocr_simpletest_mangalmm_vs_paddle_benchmark.py" %*
 exit /b %ERRORLEVEL%
 
 :open_dir
