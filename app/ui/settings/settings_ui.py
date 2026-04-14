@@ -13,6 +13,7 @@ from .personalization_page import PersonalizationPage
 from .tools_page import ToolsPage
 from .paddleocr_vl_page import PaddleOCRVLPage
 from .hunyuan_ocr_page import HunyuanOCRPage
+from .mangalmm_ocr_page import MangaLMMOCRPage
 from .gemma_local_server_page import GemmaLocalServerPage
 from .credentials_page import CredentialsPage
 from .llms_page import LlmsPage
@@ -138,11 +139,13 @@ class SettingsPageUI(QtWidgets.QWidget):
             # OCR mappings
             self.tr("Default (existing auto: MangaOCR / PPOCR / Pororo...)"): "default",
             self.tr("Optimal (HunyuanOCR / PaddleOCR VL)"): "best_local",
+            self.tr("Optimal+ (HunyuanOCR / MangaLMM / PaddleOCR VL)"): "best_local_plus",
             self.tr("Microsoft OCR"): "microsoft_ocr",
             self.tr("Google Cloud Vision"): "google_cloud_vision",
             self.tr("Gemini-2.0-Flash"): "gemini_2_0_flash",
             self.tr("PaddleOCR VL"): "paddleocr_vl",
             self.tr("HunyuanOCR"): "hunyuanocr",
+            self.tr("MangaLMM"): "mangalmm",
 
             # Inpainter mappings
             "AOT": "AOT",
@@ -214,6 +217,7 @@ class SettingsPageUI(QtWidgets.QWidget):
             self.tools_page.ocr_combo.setItemData(index, key)
         self.paddleocr_vl_page = PaddleOCRVLPage(parent=self)
         self.hunyuan_ocr_page = HunyuanOCRPage(parent=self)
+        self.mangalmm_ocr_page = MangaLMMOCRPage(parent=self)
         self.gemma_local_server_page = GemmaLocalServerPage(parent=self)
         self.credentials_page = CredentialsPage(
             services=self.credential_services,
@@ -257,6 +261,14 @@ class SettingsPageUI(QtWidgets.QWidget):
         self.hunyuan_ocr_parallel_workers_spinbox = self.hunyuan_ocr_page.parallel_workers_spinbox
         self.hunyuan_ocr_request_timeout_spinbox = self.hunyuan_ocr_page.request_timeout_spinbox
         self.hunyuan_ocr_raw_response_logging_checkbox = self.hunyuan_ocr_page.raw_response_logging_checkbox
+        self.mangalmm_ocr_server_url_input = self.mangalmm_ocr_page.server_url_input
+        self.mangalmm_ocr_max_completion_tokens_spinbox = self.mangalmm_ocr_page.max_completion_tokens_spinbox
+        self.mangalmm_ocr_parallel_workers_spinbox = self.mangalmm_ocr_page.parallel_workers_spinbox
+        self.mangalmm_ocr_request_timeout_spinbox = self.mangalmm_ocr_page.request_timeout_spinbox
+        self.mangalmm_ocr_raw_response_logging_checkbox = self.mangalmm_ocr_page.raw_response_logging_checkbox
+        self.mangalmm_ocr_safe_resize_checkbox = self.mangalmm_ocr_page.safe_resize_checkbox
+        self.mangalmm_ocr_max_pixels_spinbox = self.mangalmm_ocr_page.max_pixels_spinbox
+        self.mangalmm_ocr_max_long_side_spinbox = self.mangalmm_ocr_page.max_long_side_spinbox
         self.gemma_chunk_size_spinbox = self.gemma_local_server_page.chunk_size_spinbox
         self.gemma_max_completion_tokens_spinbox = self.gemma_local_server_page.max_completion_tokens_spinbox
         self.gemma_request_timeout_spinbox = self.gemma_local_server_page.request_timeout_spinbox
@@ -318,6 +330,7 @@ class SettingsPageUI(QtWidgets.QWidget):
         self.stacked_widget.addWidget(self.tools_page)
         self.stacked_widget.addWidget(self.paddleocr_vl_page)
         self.stacked_widget.addWidget(self.hunyuan_ocr_page)
+        self.stacked_widget.addWidget(self.mangalmm_ocr_page)
         self.stacked_widget.addWidget(self.gemma_local_server_page)
         self.stacked_widget.addWidget(self.llms_page)
         self.stacked_widget.addWidget(self.text_rendering_page)
@@ -377,6 +390,7 @@ class SettingsPageUI(QtWidgets.QWidget):
             {"title": self.tr("Tools"), "avatar": MPixmap(".svg")},
             {"title": self.tr("PaddleOCR VL Settings"), "avatar": MPixmap(".svg")},
             {"title": self.tr("HunyuanOCR Settings"), "avatar": MPixmap(".svg")},
+            {"title": self.tr("MangaLMM Settings"), "avatar": MPixmap(".svg")},
             {"title": self.tr("Gemma Local Server Settings"), "avatar": MPixmap(".svg")},
             {"title": self.tr("LLMs"), "avatar": MPixmap(".svg")},
             {"title": self.tr("Text Rendering"), "avatar": MPixmap(".svg")},
