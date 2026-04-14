@@ -88,6 +88,19 @@ class LocalOCRRuntimeManagerTests(unittest.TestCase):
         wait_for_health.assert_called_once()
         run_compose.assert_not_called()
 
+    def test_ensure_engine_waits_for_loading_runtime_before_compose_restart(self) -> None:
+        manager = LocalOCRRuntimeManager()
+        settings_page = _DummySettingsPage()
+
+        with mock.patch.object(manager, "validate_engine", return_value=None), \
+             mock.patch.object(manager, "_probe_health_state", return_value="loading"), \
+             mock.patch.object(manager, "_wait_for_health", return_value=True) as wait_for_health, \
+             mock.patch.object(manager, "_run_compose") as run_compose:
+            manager.ensure_engine("MangaLMM", settings_page)
+
+        wait_for_health.assert_called_once()
+        run_compose.assert_not_called()
+
 
 if __name__ == "__main__":
     unittest.main()
