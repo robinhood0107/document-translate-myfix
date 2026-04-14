@@ -1,6 +1,10 @@
 from __future__ import annotations
 
+import os
+import tempfile
 import unittest
+from pathlib import Path
+from unittest import mock
 
 import numpy as np
 
@@ -39,6 +43,22 @@ class MangaLMMOCRTests(unittest.TestCase):
         self.assertGreater(len(units), 1)
         self.assertEqual(units[0].bbox_xyxy, (0, 0, 1280, 1280))
         self.assertEqual(units[-1].bbox_xyxy, (870, 1755, 2150, 3035))
+
+    def test_build_rescue_units_uses_text_expansion_overrides(self) -> None:
+        engine = MangaLMMOCREngine()
+        engine.rescue_min_size = 0
+        engine.text_expansion_ratio_x = 0.10
+        engine.text_expansion_ratio_y = 0.20
+        blk = TextBlock(
+            text_bbox=np.array([50, 60, 150, 140], dtype=np.int32),
+            bubble_bbox=np.array([40, 50, 160, 150], dtype=np.int32),
+            text_class="text_bubble",
+            source_lang="ja",
+            direction="vertical",
+        )
+        units = engine._build_rescue_units([blk], (200, 200, 3))
+        self.assertEqual(len(units), 1)
+        self.assertEqual(units[0].bbox_xyxy, (28, 30, 172, 170))
 
     def test_dedupe_regions_prefers_farther_from_tile_edge(self) -> None:
         engine = MangaLMMOCREngine()
@@ -186,6 +206,64 @@ class MangaLMMOCRTests(unittest.TestCase):
         )
         self.assertEqual(blk.text, "右左")
         self.assertEqual(len(blk.ocr_regions), 2)
+
+    def test_analyze_region_payload_salvages_object_wrapper(self) -> None:
+        engine = MangaLMMOCREngine()
+        payload = '{"regions":[{"bbox_2d":[10,20,30,40],"text_content":"テスト"}]}'
+        analysis = engine._analyze_region_payload(payload)
+        self.assertEqual(analysis["response_kind"], "json_object_wrapper")
+        self.assertEqual(len(analysis["regions"]), 1)
+
+    def test_initialize_reads_sampling_env_overrides(self) -> None:
+        class _Settings:
+            @staticmethod
+            def get_mangalmm_ocr_settings():
+                return {}
+
+        engine = MangaLMMOCREngine()
+        with mock.patch.dict(
+            os.environ,
+            {
+                "CT_MANGALMM_TEMPERATURE": "0.1",
+                "CT_MANGALMM_TOP_K": "32",
+                "CT_MANGALMM_TEXT_EXPANSION_RATIO_X": "0.12",
+                "CT_MANGALMM_TEXT_EXPANSION_RATIO_Y": "0.14",
+            },
+            clear=False,
+        ):
+            engine.initialize(_Settings())
+        self.assertAlmostEqual(engine.temperature, 0.1, places=3)
+        self.assertEqual(engine.top_k, 32)
+        self.assertAlmostEqual(engine.text_expansion_ratio_x, 0.12, places=3)
+        self.assertAlmostEqual(engine.text_expansion_ratio_y, 0.14, places=3)
+
+    def test_export_debug_artifact_writes_metadata_and_crop(self) -> None:
+        engine = MangaLMMOCREngine()
+        image = np.zeros((32, 48, 3), dtype=np.uint8)
+        blk = TextBlock(
+            text_bbox=np.array([1, 2, 20, 24], dtype=np.int32),
+            bubble_bbox=np.array([0, 0, 30, 30], dtype=np.int32),
+            source_lang="ja",
+            direction="vertical",
+        )
+        with tempfile.TemporaryDirectory() as temp_dir:
+            engine.debug_root = Path(os.path.abspath(temp_dir))
+            engine.debug_export_limit = 4
+            engine._export_debug_artifact(
+                blk=blk,
+                failure_reason="MangaLMM returned no valid OCR regions.",
+                response_kind="plain_text_or_non_json",
+                raw_text="テキストだけ",
+                crop_bbox=(1, 2, 20, 24),
+                crop_source="xyxy",
+                resize_scale=1.0,
+                crop_image=image,
+                request_image=image,
+                analysis={"response_kind": "plain_text_or_non_json"},
+            )
+            exported = list(engine.debug_root.glob("*/meta.json"))
+            self.assertEqual(len(exported), 1)
+            self.assertTrue((exported[0].parent / "crop.jpg").is_file())
 
 
 if __name__ == "__main__":
