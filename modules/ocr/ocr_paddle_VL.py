@@ -16,9 +16,8 @@ from modules.utils.exceptions import (
 )
 from modules.utils.ocr_debug import OCR_STATUS_EMPTY_INITIAL, OCR_STATUS_OK, ensure_three_channel, expand_bbox, set_block_ocr_diagnostics
 from modules.utils.text_normalization import (
-    PADDLE_DECORATIVE_NOISE_GLYPHS,
-    canonicalize_ellipsis_runs,
-    strip_selected_glyphs,
+    DECORATIVE_NOISE_GLYPHS,
+    normalize_decorative_ocr_text,
 )
 from modules.utils.textblock import TextBlock
 
@@ -340,9 +339,10 @@ class PaddleOCRVLEngine(OCREngine):
     def _normalize_output_text(self, text: str) -> str:
         if not text:
             return ""
-        normalized = text.replace("\r\n", "\n").replace("\r", "\n").strip()
-        normalized = strip_selected_glyphs(normalized, PADDLE_DECORATIVE_NOISE_GLYPHS)
-        normalized = canonicalize_ellipsis_runs(normalized)
+        normalized = normalize_decorative_ocr_text(
+            text,
+            glyphs=DECORATIVE_NOISE_GLYPHS,
+        )
         normalized = re.sub(r"\n{3,}", "\n\n", normalized)
         return normalized.strip()
 

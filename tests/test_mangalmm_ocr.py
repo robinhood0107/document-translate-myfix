@@ -166,6 +166,20 @@ class MangaLMMOCRTests(unittest.TestCase):
         self.assertEqual(len(parsed), 1)
         self.assertEqual(parsed[0]["text_content"], "テスト")
 
+    def test_normalize_region_list_strips_decorative_noise_and_drops_empty_regions(self) -> None:
+        engine = MangaLMMOCREngine()
+
+        normalized = engine._normalize_region_list(
+            [
+                {"bbox_2d": [10, 20, 30, 40], "text_content": "⌒テ✺スト︸"},
+                {"bbox_2d": [40, 50, 60, 70], "text_content": "⌒✺︸"},
+            ]
+        )
+
+        self.assertEqual(len(normalized), 1)
+        self.assertEqual(normalized[0]["text_content"], "テスト")
+        self.assertEqual(normalized[0]["raw_text_content"], "⌒テ✺スト︸")
+
     def test_build_request_units_returns_single_full_page_unit(self) -> None:
         engine = MangaLMMOCREngine()
         units = engine._build_request_units((3035, 2150, 3))
@@ -310,6 +324,7 @@ class MangaLMMOCRTests(unittest.TestCase):
                         unit_resize_scale=resize_plan.base_scale,
                         edge_distance=42.0,
                         normalized_text="右",
+                        raw_text="⌒右✺",
                         response_bbox_2d=[51.0, 18.0, 70.0, 49.0],
                         scale_x=resize_plan.scale_x,
                         scale_y=resize_plan.scale_y,
@@ -340,6 +355,8 @@ class MangaLMMOCRTests(unittest.TestCase):
         )
 
         self.assertEqual(blk.text, "右")
+        self.assertEqual(blk.ocr_raw_text, "⌒右✺")
+        self.assertEqual(blk.ocr_sanitized_text, "右")
         self.assertEqual(blk.xyxy.tolist(), original_xyxy.tolist())
         self.assertEqual(blk.ocr_crop_bbox, [0, 0, 2150, 3035])
         self.assertAlmostEqual(blk.ocr_resize_scale, resize_plan.base_scale)
@@ -347,6 +364,7 @@ class MangaLMMOCRTests(unittest.TestCase):
         region = blk.ocr_regions[0]
         self.assertEqual(region["bbox_xyxy"], [122, 42, 168, 118])
         self.assertEqual(region["bbox_xyxy_float"], [121.7, 41.6, 168.4, 118.2])
+        self.assertEqual(region["raw_text"], "⌒右✺")
         self.assertEqual(region["request_shape"], [1270, 900])
         self.assertEqual(region["resize_profile"], "dense")
         self.assertAlmostEqual(region["scale_x"], resize_plan.scale_x)
@@ -487,6 +505,31 @@ class MangaLMMOCRTests(unittest.TestCase):
         self.assertEqual(payload["min_p"], 0.0)
         self.assertEqual(payload["repeat_penalty"], 1.05)
         self.assertEqual(payload["repeat_last_n"], 0)
+        self.assertEqual(post.call_args.kwargs["timeout"], 60.0)
+
+    def test_request_response_text_uses_unbounded_read_timeout_for_optimal_plus(self) -> None:
+        engine = MangaLMMOCREngine()
+        settings = _FakeSettings(selected_ocr_mode=OCR_MODE_BEST_LOCAL_PLUS)
+        engine.initialize(
+            settings,
+            source_lang_english="Japanese",
+            selected_ocr_mode=OCR_MODE_BEST_LOCAL_PLUS,
+        )
+        image = np.zeros((32, 32, 3), dtype=np.uint8)
+        response = mock.Mock()
+        response.status_code = 200
+        response.json.return_value = {
+            "choices": [{"message": {"content": "[]"}}],
+        }
+
+        with mock.patch("modules.ocr.mangalmm_ocr.requests.post", return_value=response) as post:
+            engine._request_response_text(
+                image,
+                max_completion_tokens=2048,
+                prompt_text=engine.STANDARD_PROMPT,
+            )
+
+        self.assertEqual(post.call_args.kwargs["timeout"], (60.0, None))
 
     def test_process_image_uses_retry_ladder_for_optimal_plus_until_match(self) -> None:
         engine = MangaLMMOCREngine()
