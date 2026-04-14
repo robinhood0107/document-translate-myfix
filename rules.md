@@ -62,6 +62,11 @@
   - 품질은 OCR-only
 - OCR benchmark의 hard gate에는 machine-generated translation similarity를 직접 쓰지 말고, 가능하면 사람이 잠근 OCR gold를 공식 품질 기준으로 사용한다.
 - benchmark 자산은 `benchmarking/lab`에만 두고, 제품 반영은 별도 `codex/* -> develop` PR로 승격한다.
+- benchmark managed runtime은 health-check 우선 정책을 기본으로 한다.
+  - 이미 떠 있는 Docker 서비스가 healthy면 절대 재기동하지 않고 그대로 재사용한다.
+  - health-check가 실패한 서비스만 선택적으로 재기동한다.
+  - healthy한 다른 서비스까지 함께 내리거나 recreate하지 않는다.
+  - benchmark 종료 후에도 healthy한 서비스를 정리 목적만으로 강제 종료하지 않는다.
 
 ## 3. 기능 작업 절차
 

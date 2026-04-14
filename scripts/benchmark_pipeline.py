@@ -7,8 +7,6 @@ import os
 import shutil
 import sys
 import time
-import urllib.error
-import urllib.request
 from pathlib import Path
 import traceback
 
@@ -26,18 +24,14 @@ from PySide6.QtWidgets import QApplication
 
 from app.ui.main_window.constants import supported_source_languages, supported_target_languages
 from benchmark_common import (
-    ALL_BENCHMARK_CONTAINER_NAMES,
     create_run_dir,
     load_preset,
-    remove_containers,
     render_summary_markdown,
     resolve_runtime_container_names,
-    resolve_runtime_health_urls,
     resolve_corpus,
     run_command,
-    stage_runtime_files,
-    compose_pull_and_recreate,
     collect_managed_llama_cpp_runtimes,
+    ensure_managed_runtime_health_first,
     summarize_metrics,
     write_json,
 )
@@ -76,17 +70,6 @@ def _restore_settings(snapshot: dict[str, object]) -> None:
     for key, value in snapshot.items():
         settings.setValue(key, value)
     settings.sync()
-
-
-def _wait_for_url(url: str, timeout_sec: int = 180) -> None:
-    started = time.time()
-    while time.time() - started < timeout_sec:
-        try:
-            with urllib.request.urlopen(url, timeout=5):
-                return
-        except Exception:
-            time.sleep(2)
-    raise TimeoutError(f"Timed out waiting for {url}")
 
 
 def _benchmark_font_dirs(target_lang: str) -> list[Path]:
@@ -183,25 +166,15 @@ def _ensure_managed_runtime(
     runtime_services: str = "full",
 ) -> list[str]:
     runtime_dir = run_dir / "runtime"
-    _log(f"managed runtime staging 시작: {runtime_dir}")
-    staged = stage_runtime_files(preset, runtime_dir)
-    container_names = resolve_runtime_container_names(preset, runtime_services)
-    _log("managed runtime 기존 컨테이너 정리 중...")
-    remove_containers(ALL_BENCHMARK_CONTAINER_NAMES)
-    if runtime_services != "ocr-only":
-        _log(f"Gemma compose pull+recreate: {staged['gemma']['compose_path']}")
-        compose_pull_and_recreate(staged["gemma"]["compose_path"], cwd=runtime_dir / "gemma")
-    if staged["ocr"].get("kind") != "internal":
-        _log(f"OCR compose pull+recreate: {staged['ocr']['compose_path']}")
-        compose_pull_and_recreate(staged["ocr"]["compose_path"], cwd=runtime_dir / "ocr")
-    else:
-        _log("OCR runtime kind=internal: 외부 OCR 컨테이너를 띄우지 않습니다")
-    _log("managed runtime health-check 대기 중...")
-    health_urls = resolve_runtime_health_urls(preset, runtime_services)
-    for url in health_urls:
-        _wait_for_url(url)
-    _log("managed runtime health-check 완료")
-    return container_names
+    _log("managed runtime health-first: 기존 서비스 health-check 후 실패한 서비스만 재기동합니다")
+    runtime_state = ensure_managed_runtime_health_first(
+        preset,
+        runtime_dir,
+        runtime_services=runtime_services,
+        log_fn=_log,
+    )
+    write_json(runtime_dir / "managed_runtime_policy.json", runtime_state["report"])
+    return list(runtime_state["container_names"])
 
 
 def _write_container_logs(run_dir: Path, container_names: list[str]) -> None:

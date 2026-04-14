@@ -90,6 +90,18 @@ benchmark family는 가능한 한 아래 구조를 함께 갖춥니다.
   - `docs/assets/benchmarking/<family>/latest`
   - `docs/assets/benchmarking/<family>/history/<snapshot-id>`
 
+## benchmark runtime 재사용 정책
+
+benchmark runner와 suite는 Docker runtime을 아래 정책으로 다룹니다.
+
+- `managed`라도 먼저 기존 서비스의 health-check를 확인합니다.
+- 필요한 health URL이 모두 healthy면 현재 떠 있는 서비스를 그대로 재사용합니다.
+- health-check가 실패한 서비스만 재기동합니다.
+- healthy한 다른 서비스까지 함께 정리하거나 recreate하지 않습니다.
+- benchmark 종료 후에도 healthy한 서비스를 cleanup 목적만으로 내리지 않습니다.
+
+즉, benchmark의 기본 방향은 `재기동 중심`이 아니라 `health-first reuse`입니다. 재기동은 복구 수단이지 기본 동작이 아닙니다.
+
 공식 점수 범위가 파이프라인 전체가 아닌 일부일 경우, 문서와 보고서에서 아래를 반드시 분리합니다.
 
 - 실제 실행 범위

@@ -9,8 +9,6 @@ import statistics
 import subprocess
 import sys
 import time
-import urllib.error
-import urllib.request
 from pathlib import Path
 from queue import Empty, Queue
 from threading import Thread
@@ -21,17 +19,12 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from benchmark_common import (
-    ALL_BENCHMARK_CONTAINER_NAMES,
     collect_managed_llama_cpp_runtimes,
-    compose_pull_and_recreate,
     create_run_dir,
+    ensure_managed_runtime_health_first,
     load_preset,
-    remove_containers,
     repo_relative_str,
-    resolve_runtime_container_names,
-    resolve_runtime_health_urls,
     run_command,
-    stage_runtime_files,
     write_json,
 )
 from modules.utils.gpu_metrics import collect_runtime_snapshot, write_snapshot_json
@@ -108,17 +101,6 @@ def _resolve_sample_paths(sample_dir: str | Path) -> list[Path]:
             "Missing simpletest files: " + ", ".join(missing) + f"\nSample dir: {root}"
         )
     return paths
-
-
-def _wait_for_url(url: str, timeout_sec: int = 180) -> None:
-    started = time.time()
-    while time.time() - started < timeout_sec:
-        try:
-            with urllib.request.urlopen(url, timeout=5):
-                return
-        except Exception:
-            time.sleep(2)
-    raise TimeoutError(f"Timed out waiting for {url}")
 
 
 def _enqueue_output(stream, queue: Queue[tuple[str, str]]) -> None:
@@ -221,15 +203,14 @@ def _boot_runtime(
     runtime_services: str,
 ) -> tuple[dict[str, Any], list[str], dict[str, dict[str, str]]]:
     preset, _ = load_preset(preset_ref)
-    staged = stage_runtime_files(preset, runtime_dir)
-    container_names = resolve_runtime_container_names(preset, runtime_services)
-    remove_containers(ALL_BENCHMARK_CONTAINER_NAMES)
-    if runtime_services != "ocr-only":
-        compose_pull_and_recreate(staged["gemma"]["compose_path"], cwd=runtime_dir / "gemma")
-    if staged["ocr"].get("kind") != "internal":
-        compose_pull_and_recreate(staged["ocr"]["compose_path"], cwd=runtime_dir / "ocr")
-    for url in resolve_runtime_health_urls(preset, runtime_services):
-        _wait_for_url(url)
+    runtime_state = ensure_managed_runtime_health_first(
+        preset,
+        runtime_dir,
+        runtime_services=runtime_services,
+        log_fn=_log,
+    )
+    write_json(runtime_dir / "managed_runtime_policy.json", runtime_state["report"])
+    container_names = list(runtime_state["container_names"])
     runtime_meta = collect_managed_llama_cpp_runtimes(preset, runtime_services)
     return preset, container_names, runtime_meta
 
@@ -243,7 +224,6 @@ def _capture_resident_metrics(
     candidate_dir.mkdir(parents=True, exist_ok=True)
     preset_ref = candidate["preset"]
 
-    remove_containers(ALL_BENCHMARK_CONTAINER_NAMES)
     baseline_snapshot = collect_runtime_snapshot([])
     write_snapshot_json(candidate_dir / "empty_baseline_snapshot.json", baseline_snapshot)
 
@@ -258,8 +238,6 @@ def _capture_resident_metrics(
     write_snapshot_json(candidate_dir / "ocr_only_idle_snapshot.json", ocr_only_snapshot)
     write_json(candidate_dir / "ocr_only_llama_cpp_runtime.json", ocr_only_meta)
     _write_container_logs(candidate_dir / "ocr_only_docker_logs", ocr_only_names)
-    remove_containers(ALL_BENCHMARK_CONTAINER_NAMES)
-
     _log(f"{candidate['key']} full runtime 부팅")
     _, full_names, full_meta = _boot_runtime(
         preset_ref,
@@ -581,8 +559,6 @@ def _run_suite(
                 encoding="utf-8",
             )
             candidate_summaries.append(candidate_summary)
-            remove_containers(ALL_BENCHMARK_CONTAINER_NAMES)
-
         _write_comparison_artifacts(suite_dir=suite_dir, candidate_summaries=candidate_summaries)
         write_json(
             family_output_root() / LAST_SUITE_RECORD,
@@ -594,7 +570,7 @@ def _run_suite(
         )
         return suite_dir
     finally:
-        remove_containers(ALL_BENCHMARK_CONTAINER_NAMES)
+        pass
 
 
 def _summary_from_suite_dir(suite_dir: Path) -> dict[str, Any]:

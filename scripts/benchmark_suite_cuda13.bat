@@ -71,6 +71,7 @@ echo   scripts\benchmark_suite_cuda13.bat --suite-profile gemma-iq4nl-japan-full
 echo.
 echo Runtime:
 echo   benchmark_suite_cuda13.bat uses .venv-win-cuda13
+echo   managed suite steps now health-check existing Docker services first and only restart failed services.
 echo.
 echo Results are saved to:
 echo   %%REPO_ROOT%%\banchmark_result_log

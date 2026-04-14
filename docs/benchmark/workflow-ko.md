@@ -42,7 +42,7 @@ scripts\benchmark_suite_cuda13.bat
 scripts\benchmark_suite_cuda13.bat --suite-profile b8665-gemma4
 ```
 
-이 profile은 `attach-running`이 아니라 `managed-only`로 동작합니다. 이유는 old image와 `ghcr.io/ggml-org/llama.cpp:server-cuda`를 공정하게 비교하려면 suite가 매 단계에서 Docker runtime을 직접 recreate해야 하기 때문입니다.
+이 profile은 `attach-running`이 아니라 `managed-only`로 동작합니다. 다만 현재 managed 정책은 무조건 recreate가 아니라 `health-first reuse`입니다. 즉, 이미 떠 있는 Docker 서비스가 healthy면 그대로 재사용하고, health-check가 실패한 서비스만 재기동합니다.
 
 `b8665-gemma4` profile의 큰 순서는 아래와 같습니다.
 
@@ -76,6 +76,8 @@ managed candidate:
 scripts\benchmark_pipeline_cuda13.bat run translation-ngl23 batch managed 1
 scripts\benchmark_pipeline_cuda13.bat run translation-t06 batch managed 1
 ```
+
+`managed`는 이제 healthy한 Docker 서비스를 우선 재사용합니다. 살아 있는 서비스가 정상일 때는 재기동하지 않고, 실패한 서비스만 복구합니다.
 
 요약 + 문서 재생성:
 
