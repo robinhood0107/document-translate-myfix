@@ -135,6 +135,10 @@ def serialize_inpaint_block(block, index: int) -> dict:
         "render_text": str(
             getattr(block, "_render_text", getattr(block, "translation", "")) or ""
         ),
+        "render_html_applied": bool(getattr(block, "_render_html_applied", False)),
+        "render_fallback_font_family": str(
+            getattr(block, "_render_fallback_font_family", "") or ""
+        ),
         "render_normalization_applied": bool(
             getattr(block, "_render_normalization_applied", False)
         ),

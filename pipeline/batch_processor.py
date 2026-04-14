@@ -53,6 +53,7 @@ from modules.utils.render_style_policy import (
 from modules.utils.translator_utils import get_raw_translation, get_raw_text, format_translations
 from modules.rendering.render import (
     describe_render_text_sanitization,
+    describe_render_text_markup,
     get_best_render_area,
     is_vertical_block,
     pyside_word_wrap,
@@ -1375,14 +1376,32 @@ class BatchProcessor:
                     return_metrics=True
                 )
                 
-                # Display text if on current page  
-                if image_path == file_on_display:
-                    self.main_page.blk_rendered.emit(translation, font_size, blk, image_path)
-
                 # Language-specific formatting for state storage
                 if is_no_space_lang(trg_lng_cd):
                     translation = translation.replace(' ', '')
+                render_markup = describe_render_text_markup(translation)
                 blk._render_text = str(translation or "")
+                blk._render_html = str(
+                    render_markup.html_text if render_markup.html_applied else translation or ""
+                )
+                blk._render_html_applied = bool(render_markup.html_applied)
+                blk._render_fallback_font_family = str(
+                    render_markup.fallback_font_family or ""
+                )
+                blk._render_normalization_applied = bool(
+                    render_normalization.normalization_applied
+                    or render_markup.html_applied
+                )
+                blk._render_normalization_reasons = sorted(
+                    set(render_normalization.reasons).union(render_markup.reasons)
+                )
+                blk._render_normalization_replacements = list(
+                    render_normalization.replacements
+                ) + list(render_markup.replacements)
+
+                # Display text if on current page
+                if image_path == file_on_display:
+                    self.main_page.blk_rendered.emit(translation, font_size, blk, image_path)
 
                 # Smart Color Override
                 font_color = resolve_render_text_color(
@@ -1395,7 +1414,7 @@ class BatchProcessor:
 
                 # Use TextItemProperties for consistent text item creation
                 text_props = TextItemProperties(
-                    text=translation,
+                    text=blk._render_html,
                     font_family=font,
                     font_size=font_size,
                     text_color=font_color,
@@ -1427,11 +1446,17 @@ class BatchProcessor:
                 text_item_state = text_props.to_dict()
                 text_item_state["translation_raw"] = str(translation_raw or "")
                 text_item_state["render_text"] = str(translation or "")
+                text_item_state["render_html_applied"] = bool(
+                    render_markup.html_applied
+                )
+                text_item_state["render_fallback_font_family"] = str(
+                    render_markup.fallback_font_family or ""
+                )
                 text_item_state["render_normalization_applied"] = bool(
-                    render_normalization.normalization_applied
+                    blk._render_normalization_applied
                 )
                 text_item_state["render_normalization_reasons"] = list(
-                    render_normalization.reasons
+                    blk._render_normalization_reasons
                 )
                 text_items_state.append(text_item_state)
 
