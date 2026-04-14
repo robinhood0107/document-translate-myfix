@@ -58,6 +58,17 @@ class TranslationInputNormalizationTests(unittest.TestCase):
             "⌒テ✺スト︸",
         )
 
+    def test_normalize_text_for_translation_preserves_render_handled_glyphs(self) -> None:
+        sample = '「テスト」♡❤♥'
+        self.assertEqual(
+            normalize_text_for_translation(sample, "ja", ocr_engine="MangaLMM"),
+            sample,
+        )
+        self.assertEqual(
+            normalize_text_for_translation(sample, "ja", ocr_engine="PaddleOCR VL"),
+            sample,
+        )
+
     def test_llm_translation_payload_resolves_mangalmm_under_optimal_plus(self) -> None:
         engine = _StubLLMTranslation()
         engine.initialize(_FakeSettings(OCR_MODE_BEST_LOCAL_PLUS), "Japanese", "Korean")
