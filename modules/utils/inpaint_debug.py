@@ -115,6 +115,22 @@ def serialize_inpaint_block(block, index: int) -> dict:
     return {
         "index": int(index),
         "xyxy": [int(float(v)) for v in getattr(block, "xyxy", (0, 0, 0, 0))[:4]],
+        "translation_raw": str(
+            getattr(block, "_render_translation_raw", getattr(block, "translation", "")) or ""
+        ),
+        "render_text": str(
+            getattr(block, "_render_text", getattr(block, "translation", "")) or ""
+        ),
+        "render_html_applied": bool(getattr(block, "_render_html_applied", False)),
+        "render_fallback_font_family": str(
+            getattr(block, "_render_fallback_font_family", "") or ""
+        ),
+        "render_normalization_applied": bool(
+            getattr(block, "_render_normalization_applied", False)
+        ),
+        "render_normalization_reasons": list(
+            getattr(block, "_render_normalization_reasons", []) or []
+        ),
         "bubble_xyxy": (
             [int(float(v)) for v in getattr(block, "bubble_xyxy", ())[:4]]
             if getattr(block, "bubble_xyxy", None) is not None
@@ -122,6 +138,8 @@ def serialize_inpaint_block(block, index: int) -> dict:
         ),
         "text_class": getattr(block, "text_class", "") or "",
         "inpaint_bboxes": inpaint_boxes,
+        "hard_box_applied": bool(getattr(block, "_hard_box_applied", False)),
+        "hard_box_reason_codes": list(getattr(block, "_hard_box_reason_codes", []) or []),
     }
 
 
@@ -156,6 +174,14 @@ def build_inpaint_debug_metadata(
     block_list = list(blocks or [])
     cleanup_stats = cleanup_stats or {}
     hard_box_reason_totals = dict(hard_box_reason_totals or {})
+    if int(hard_box_applied_count or 0) <= 0:
+        hard_box_applied_count = sum(
+            1 for block in block_list if bool(getattr(block, "_hard_box_applied", False))
+        )
+    if not hard_box_reason_totals:
+        for block in block_list:
+            for code in getattr(block, "_hard_box_reason_codes", []) or []:
+                hard_box_reason_totals[str(code)] = int(hard_box_reason_totals.get(str(code), 0) or 0) + 1
     raw_mask_pixels = int(np.count_nonzero(raw_mask)) if raw_mask is not None else 0
     final_mask_pixels = int(np.count_nonzero(final_mask)) if final_mask is not None else 0
     final_mask_pre_expand_pixels = (
