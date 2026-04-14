@@ -21,6 +21,11 @@ from benchmark_common import create_run_dir, repo_relative_str, write_json
 
 FAMILY_NAME = "mangalmm_gemma4_simpletest_tuning"
 LAST_SUITE_RECORD = "last_mangalmm_gemma4_simpletest_tuning_suite.json"
+STAGE1_NAME = "s1_ocr_probe"
+STAGE2_NAME = "s2_ocr_confirm"
+STAGE3_NAME = "s3_gemma_sweep"
+STAGE4_NAME = "s4_thread_check"
+STAGE5_NAME = "s5_confirm"
 BASE_PRESET_PATH = (
     ROOT
     / "benchmarks"
@@ -515,7 +520,7 @@ def _stage1_ocr_probe(suite_dir: Path) -> list[dict[str, Any]]:
     records = [
         _run_candidate(
             suite_dir=suite_dir,
-            stage_name="stage1_ocr_probe",
+            stage_name=STAGE1_NAME,
             candidate_slug=candidate["slug"],
             label=candidate["label"],
             updates=candidate["updates"],
@@ -526,7 +531,7 @@ def _stage1_ocr_probe(suite_dir: Path) -> list[dict[str, Any]]:
     selected = _pick_top(records, count=2, stable_only=True)
     if not selected:
         selected = _pick_top(records, count=2, stable_only=False)
-    _write_stage_summary(suite_dir, "stage1_ocr_probe", records, selected)
+    _write_stage_summary(suite_dir, STAGE1_NAME, records, selected)
     return records
 
 
@@ -536,7 +541,7 @@ def _stage2_ocr_confirm(suite_dir: Path, ocr_candidates: list[dict[str, Any]]) -
         records.append(
             _run_candidate(
                 suite_dir=suite_dir,
-                stage_name="stage2_ocr_confirm",
+                stage_name=STAGE2_NAME,
                 candidate_slug=str(candidate["candidate_slug"]),
                 label=str(candidate["label"]),
                 updates=copy.deepcopy(candidate["updates"]),
@@ -544,7 +549,7 @@ def _stage2_ocr_confirm(suite_dir: Path, ocr_candidates: list[dict[str, Any]]) -
             )
         )
     selected = _pick_top(records, count=1, stable_only=True)
-    _write_stage_summary(suite_dir, "stage2_ocr_confirm", records, selected)
+    _write_stage_summary(suite_dir, STAGE2_NAME, records, selected)
     return records
 
 
@@ -557,7 +562,7 @@ def _stage3_gemma_sweep(suite_dir: Path, ocr_winner: dict[str, Any]) -> list[dic
         records.append(
             _run_candidate(
                 suite_dir=suite_dir,
-                stage_name="stage3_gemma_sweep",
+                stage_name=STAGE3_NAME,
                 candidate_slug=candidate["slug"],
                 label=candidate["label"],
                 updates=merged,
@@ -565,7 +570,7 @@ def _stage3_gemma_sweep(suite_dir: Path, ocr_winner: dict[str, Any]) -> list[dic
             )
         )
     selected = _pick_top(records, count=2, stable_only=True)
-    _write_stage_summary(suite_dir, "stage3_gemma_sweep", records, selected)
+    _write_stage_summary(suite_dir, STAGE3_NAME, records, selected)
     return records
 
 
@@ -577,7 +582,7 @@ def _stage4_thread_check(suite_dir: Path, finalists: list[dict[str, Any]]) -> li
         records.append(
             _run_candidate(
                 suite_dir=suite_dir,
-                stage_name="stage4_thread_check",
+                stage_name=STAGE4_NAME,
                 candidate_slug=f"{finalist['candidate_slug']}_th12",
                 label=f"{finalist['label']} th12",
                 updates=merged,
@@ -585,7 +590,7 @@ def _stage4_thread_check(suite_dir: Path, finalists: list[dict[str, Any]]) -> li
             )
         )
     selected = _pick_top(records, count=2, stable_only=True)
-    _write_stage_summary(suite_dir, "stage4_thread_check", records, selected)
+    _write_stage_summary(suite_dir, STAGE4_NAME, records, selected)
     return records
 
 
@@ -595,7 +600,7 @@ def _stage5_confirm(suite_dir: Path, winner: dict[str, Any]) -> list[dict[str, A
         records.append(
             _run_candidate(
                 suite_dir=suite_dir,
-                stage_name="stage5_confirm",
+                stage_name=STAGE5_NAME,
                 candidate_slug=f"{winner['candidate_slug']}_confirm{repeat_index:02d}",
                 label=f"{winner['label']} confirm {repeat_index}",
                 updates=copy.deepcopy(winner["updates"]),
@@ -603,7 +608,7 @@ def _stage5_confirm(suite_dir: Path, winner: dict[str, Any]) -> list[dict[str, A
             )
         )
     selected = _pick_top(records, count=1, stable_only=True)
-    _write_stage_summary(suite_dir, "stage5_confirm", records, selected)
+    _write_stage_summary(suite_dir, STAGE5_NAME, records, selected)
     return records
 
 
@@ -620,7 +625,7 @@ def _write_latest_suite_record(suite_dir: Path) -> None:
 
 
 def run_until_done(*, suite_dir: Path | None = None) -> Path:
-    actual_suite_dir = suite_dir or create_run_dir(f"{FAMILY_NAME}_suite", root=family_output_root())
+    actual_suite_dir = suite_dir or create_run_dir("mg4_tune_suite", root=family_output_root())
     actual_suite_dir.mkdir(parents=True, exist_ok=True)
     estimate_hours = "about 1.5 to 3 hours on the current CUDA13 setup"
     _write_latest_suite_record(actual_suite_dir)
@@ -636,35 +641,35 @@ def run_until_done(*, suite_dir: Path | None = None) -> Path:
 
     stage_records: dict[str, list[dict[str, Any]]] = {}
     stage1_records = _stage1_ocr_probe(actual_suite_dir)
-    stage_records["stage1_ocr_probe"] = stage1_records
+    stage_records[STAGE1_NAME] = stage1_records
     stage1_selected = _pick_top(stage1_records, count=2, stable_only=True)
     if not stage1_selected:
         stage1_selected = _pick_top(stage1_records, count=2, stable_only=False)
 
     stage2_records = _stage2_ocr_confirm(actual_suite_dir, stage1_selected)
-    stage_records["stage2_ocr_confirm"] = stage2_records
+    stage_records[STAGE2_NAME] = stage2_records
     stage2_winners = _pick_top(stage2_records, count=1, stable_only=True)
     if not stage2_winners:
-        _update_state(actual_suite_dir, status="failed", failure_reason="No stable OCR candidate survived stage2_ocr_confirm.")
+        _update_state(actual_suite_dir, status="failed", failure_reason=f"No stable OCR candidate survived {STAGE2_NAME}.")
         _write_suite_report(actual_suite_dir, stage_records=stage_records, final_winner=None, estimate_hours=estimate_hours)
-        raise RuntimeError("No stable OCR candidate survived stage2_ocr_confirm.")
+        raise RuntimeError(f"No stable OCR candidate survived {STAGE2_NAME}.")
     ocr_winner = stage2_winners[0]
 
     stage3_records = _stage3_gemma_sweep(actual_suite_dir, ocr_winner)
-    stage_records["stage3_gemma_sweep"] = stage3_records
+    stage_records[STAGE3_NAME] = stage3_records
     stage3_finalists = _pick_top(stage3_records, count=2, stable_only=True)
     if not stage3_finalists:
-        _update_state(actual_suite_dir, status="failed", failure_reason="No stable Gemma candidate survived stage3_gemma_sweep.")
+        _update_state(actual_suite_dir, status="failed", failure_reason=f"No stable Gemma candidate survived {STAGE3_NAME}.")
         _write_suite_report(actual_suite_dir, stage_records=stage_records, final_winner=None, estimate_hours=estimate_hours)
-        raise RuntimeError("No stable Gemma candidate survived stage3_gemma_sweep.")
+        raise RuntimeError(f"No stable Gemma candidate survived {STAGE3_NAME}.")
 
     stage4_records = _stage4_thread_check(actual_suite_dir, stage3_finalists)
-    stage_records["stage4_thread_check"] = stage4_records
+    stage_records[STAGE4_NAME] = stage4_records
     combined_finalists = sorted(stage3_finalists + _pick_top(stage4_records, count=2, stable_only=True), key=_candidate_sort_key)
     winner = combined_finalists[0]
 
     stage5_records = _stage5_confirm(actual_suite_dir, winner)
-    stage_records["stage5_confirm"] = stage5_records
+    stage_records[STAGE5_NAME] = stage5_records
     confirm_winners = _pick_top(stage5_records, count=1, stable_only=True)
     final_winner = confirm_winners[0] if confirm_winners else winner
 
