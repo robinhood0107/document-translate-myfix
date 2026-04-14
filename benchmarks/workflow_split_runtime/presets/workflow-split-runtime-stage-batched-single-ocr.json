@@ -4,7 +4,7 @@
   "benchmark_contract": {
     "scenario_name": "candidate_stage_batched_single_ocr",
     "workflow_mode": "stage_batched_pipeline",
-    "execution_status": "blocked_pending_stage_batched_runner",
+    "execution_status": "runnable_experimental_runner_ready",
     "corpus_root": "Sample/japan",
     "source_lang": "Japanese",
     "target_lang": "Korean",

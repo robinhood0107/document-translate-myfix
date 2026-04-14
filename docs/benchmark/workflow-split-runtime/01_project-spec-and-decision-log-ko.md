@@ -24,7 +24,7 @@
 7. 하네스의 `Sample/japan_vllm_parallel_subset` 문구는 legacy 표현으로 보고, 실제 코퍼스 루트는 `Sample/japan` curated 13장으로 잠근다.
 8. 원격 push 정책상 benchmark 자산이 포함된 publish 브랜치는 사실상 `benchmarking/lab`이어야 하므로, benchmark family는 `benchmarking/lab`에 직접 반영한다.
 9. Requirement 1 family는 먼저 “실행 계약이 잠긴 패키지”로 완성하고, baseline legacy부터 실측을 시작한다.
-10. stage-batched candidate 두 개는 experimental runner가 추가되기 전까지 blocked 계약 run으로 정직하게 남긴다.
+10. stage-batched candidate 두 개는 experimental runner 구현 전까지 blocked 계약 run으로 남기고, 구현 후에는 같은 family suite에서 실제 measured run으로 승격한다.
 11. `candidate_stage_batched_dual_resident`는 단일 OCR 후보와의 benchmark 비교 결과가 더 나쁘더라도 Requirement 1 자체를 무효화하는 실패 조건으로 취급하지 않는다.
 12. `candidate_stage_batched_dual_resident`는 최종적으로 설정창에서 사용자가 선택할 수 있는 정식 신규 전체 플로우로 `develop`에 반영하는 것을 기준선으로 잠근다.
 
@@ -88,6 +88,7 @@
 5. runtime progress를 `metrics.jsonl`에 남길 memlog bridge 추가
 6. runner contract / execution protocol 문제 해결 명세서 추가
 7. baseline smoke 실측 완료 및 Docker lifecycle 분해표 고정
+8. stage-batched experimental runner 구현 및 family suite 연결
 
 ## 정책 변경으로 새로 잠근 사항
 
@@ -141,14 +142,14 @@
 1. benchmark 자산 포함 브랜치는 `benchmarking/lab` 외 이름으로 push가 거부되는 운영 제약이 확인되었다.
 2. 단계형 워크플로우가 인페이팅/렌더 순서에 어떤 부수효과를 주는지 아직 실측이 없다.
 3. Requirement 2의 selector rule은 사용자 검수 결과가 쌓이기 전까지 자동 승격하면 안 된다.
-4. Requirement 1 candidate 두 시나리오는 experimental runner가 없어서 아직 실제 실행이 막혀 있다.
+4. 최신 suite record가 옛 blocked 상태를 가리킬 수 있으므로, "runner 구현 완료"와 "latest measured suite"를 구분해서 해석해야 한다.
 
 ## 다음 액션
 
 1. smoke 완료 상태를 체크리스트와 관련 문서에 반영
 2. baseline 13장 measured run 누적
-3. stage-batched experimental runner 추가
-4. candidate 두 시나리오 실제 측정
+3. candidate 두 시나리오 실제 측정
+4. Requirement 1 비교표와 판정 문서 고정
 5. `candidate_stage_batched_dual_resident` 정식 승격 정책을 develop-side 문서에도 반영
 
 ## 저자 및 기여

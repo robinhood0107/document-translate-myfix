@@ -6,6 +6,7 @@
 - 시간 이득은 실측으로만 판정한다.
 - Docker compose up / health wait / timeout / retry는 총 시간에서 분리해 기록한다.
 - 품질이 같거나 더 좋아야만 승격 후보가 된다.
+- `candidate_stage_batched_dual_resident`는 단일 OCR 후보보다 불리해도 Requirement 1 자체를 무효화하지 않는다.
 - `develop`에는 raw benchmark 결과를 옮기지 않는다.
 
 ## Latest Output
@@ -26,6 +27,7 @@
 - smoke: `True`
 - completed_scenarios: `baseline_legacy`
 - blocked_scenarios: `candidate_stage_batched_single_ocr, candidate_stage_batched_dual_resident`
+- runner_state: `stage_batched_candidates_runnable`
 
 | scenario | status | report | timing | quality |
 | --- | --- | --- | --- | --- |
