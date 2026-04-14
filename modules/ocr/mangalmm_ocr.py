@@ -68,6 +68,7 @@ class OCRRegion:
     unit_resize_scale: float
     edge_distance: float
     normalized_text: str
+    response_bbox_2d: list[float] | None = None
 
 
 class MangaLMMOCREngine(OCREngine):
@@ -156,6 +157,7 @@ class MangaLMMOCREngine(OCREngine):
             empty_status=OCR_STATUS_EMPTY_INITIAL,
         )
 
+        rescue_units: list[RequestUnit] = []
         rescue_regions: list[OCRRegion] = []
         if quality.get("low_quality", False):
             rescue_units = self._build_rescue_units(blocks, image.shape)
@@ -177,7 +179,7 @@ class MangaLMMOCREngine(OCREngine):
             "mangalmm_page_tile_ocr complete: blocks=%d page_units=%d rescue_units=%d regions=%d quality=%s elapsed_ms=%.1f",
             len(blocks),
             len(page_units),
-            len(self._build_rescue_units(blocks, image.shape)) if quality.get("low_quality", False) and rescue_regions else 0,
+            len(rescue_units),
             len(page_regions),
             quality.get("reason", "") or "ok",
             (time.perf_counter() - started_at) * 1000.0,
@@ -306,15 +308,12 @@ class MangaLMMOCREngine(OCREngine):
                 )
                 continue
 
-            sorted_entries = sort_textblock_rectangles(
-                [
-                    (tuple(item["region"].bbox_xyxy), item["region"].text)
-                    for item in items
-                    if str(item["region"].text or "").strip()
-                ],
-                blk.source_lang_direction,
-            )
-            texts = [text for _bbox, text in sorted_entries if str(text or "").strip()]
+            sorted_items = self._sort_assigned_items_for_block(items, blk)
+            texts = [
+                str(item["region"].text or "").strip()
+                for item in sorted_items
+                if str(item["region"].text or "").strip()
+            ]
             if is_no_space_lang(getattr(blk, "source_lang", "")):
                 final_text = "".join(texts)
             else:
@@ -334,11 +333,8 @@ class MangaLMMOCREngine(OCREngine):
             blk.texts = texts
             blk.text = final_text
             blk.ocr_regions = [
-                {
-                    "bbox_xyxy": list(item["region"].bbox_xyxy),
-                    "text": item["region"].text,
-                }
-                for item in items
+                self._serialize_region_assignment(item["region"], item["metrics"])
+                for item in sorted_items
             ]
             blk.ocr_crop_bbox = list(source_region.unit_bbox_xyxy)
             blk.ocr_resize_scale = float(source_region.unit_resize_scale)
@@ -359,6 +355,48 @@ class MangaLMMOCREngine(OCREngine):
             )
 
         return summarize_ocr_quality(blk_list)
+
+    def _sort_assigned_items_for_block(
+        self,
+        items: list[dict[str, object]],
+        blk: TextBlock,
+    ) -> list[dict[str, object]]:
+        order_pairs = sort_textblock_rectangles(
+            [
+                (tuple(item["region"].bbox_xyxy), str(index))
+                for index, item in enumerate(items)
+                if str(item["region"].text or "").strip()
+            ],
+            blk.source_lang_direction,
+        )
+        if not order_pairs:
+            return list(items)
+        return [items[int(index_text)] for _bbox, index_text in order_pairs]
+
+    @staticmethod
+    def _serialize_region_assignment(
+        region: OCRRegion,
+        metrics: dict[str, float | bool],
+    ) -> dict[str, object]:
+        return {
+            "bbox_xyxy": list(region.bbox_xyxy),
+            "text": region.text,
+            "unit_bbox_xyxy": list(region.unit_bbox_xyxy),
+            "unit_kind": region.unit_kind,
+            "unit_resize_scale": float(region.unit_resize_scale),
+            "edge_distance": float(region.edge_distance),
+            "normalized_text": region.normalized_text,
+            "response_bbox_2d": list(region.response_bbox_2d or []),
+            "match_metrics": {
+                "ownership_cover": float(metrics["ownership_cover"]),
+                "precision_cover": float(metrics["precision_cover"]),
+                "ownership_iou": float(metrics["ownership_iou"]),
+                "center_in_ownership": bool(metrics["center_in_ownership"]),
+                "center_in_precision": bool(metrics["center_in_precision"]),
+                "center_distance_norm": float(metrics["center_distance_norm"]),
+                "precision_area": int(metrics["precision_area"]),
+            },
+        }
 
     def _select_best_block(
         self,
@@ -395,6 +433,7 @@ class MangaLMMOCREngine(OCREngine):
         region_box: tuple[int, int, int, int],
         blk: TextBlock,
     ) -> dict[str, float | bool] | None:
+        # bubble_xyxy gates ownership; xyxy chooses the concrete block within that owner.
         support_box = self._support_box(blk)
         ownership_box = self._ownership_box(blk)
         precision_box = self._precision_box(blk)
@@ -517,17 +556,27 @@ class MangaLMMOCREngine(OCREngine):
             if not isinstance(bbox, list) or len(bbox) != 4 or not text:
                 continue
             x1_f, y1_f, x2_f, y2_f = [float(value) for value in bbox]
-            local_x1 = max(0.0, min(x1_f, x2_f) * inverse_scale)
-            local_y1 = max(0.0, min(y1_f, y2_f) * inverse_scale)
-            local_x2 = min(float(unit_w), max(x1_f, x2_f) * inverse_scale)
-            local_y2 = min(float(unit_h), max(y1_f, y2_f) * inverse_scale)
+            resp_x1 = min(x1_f, x2_f)
+            resp_y1 = min(y1_f, y2_f)
+            resp_x2 = max(x1_f, x2_f)
+            resp_y2 = max(y1_f, y2_f)
+
+            local_x1 = int(round(resp_x1 * inverse_scale))
+            local_y1 = int(round(resp_y1 * inverse_scale))
+            local_x2 = int(round(resp_x2 * inverse_scale))
+            local_y2 = int(round(resp_y2 * inverse_scale))
+
+            local_x1 = max(0, min(local_x1, unit_w))
+            local_y1 = max(0, min(local_y1, unit_h))
+            local_x2 = max(0, min(local_x2, unit_w))
+            local_y2 = max(0, min(local_y2, unit_h))
             if local_x2 <= local_x1 or local_y2 <= local_y1:
                 continue
 
-            page_x1 = max(unit_x1, min(int(round(unit_x1 + local_x1)), unit_x2))
-            page_y1 = max(unit_y1, min(int(round(unit_y1 + local_y1)), unit_y2))
-            page_x2 = max(unit_x1, min(int(round(unit_x1 + local_x2)), unit_x2))
-            page_y2 = max(unit_y1, min(int(round(unit_y1 + local_y2)), unit_y2))
+            page_x1 = max(unit_x1, min(unit_x1 + local_x1, unit_x2))
+            page_y1 = max(unit_y1, min(unit_y1 + local_y1, unit_y2))
+            page_x2 = max(unit_x1, min(unit_x1 + local_x2, unit_x2))
+            page_y2 = max(unit_y1, min(unit_y1 + local_y2, unit_y2))
             if page_x2 <= page_x1 or page_y2 <= page_y1:
                 continue
 
@@ -541,6 +590,7 @@ class MangaLMMOCREngine(OCREngine):
                     unit_resize_scale=float(scale),
                     edge_distance=edge_distance,
                     normalized_text=self._normalize_text_key(text),
+                    response_bbox_2d=[resp_x1, resp_y1, resp_x2, resp_y2],
                 )
             )
 
@@ -783,6 +833,9 @@ class MangaLMMOCREngine(OCREngine):
         blk.ocr_regions = []
         blk.ocr_crop_bbox = None
         blk.ocr_resize_scale = 1.0
+        blk.ocr_effective_crop_xyxy = None
+        blk.ocr_retry_crop_xyxy = None
+        blk.ocr_crop_source = ""
         set_block_ocr_diagnostics(
             blk,
             text="",
