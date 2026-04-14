@@ -15,6 +15,8 @@ set "PYTHON_EXE=%REPO_ROOT%\.venv-win-cuda13\Scripts\python.exe"
 set "CUDA13_BIN=C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v13.1\bin\x64"
 set "TENSORRT_LIBS=%REPO_ROOT%\.venv-win-cuda13\Lib\site-packages\tensorrt_libs"
 set "CUDNN_BIN=%REPO_ROOT%\.venv-win-cuda13\Lib\site-packages\nvidia\cudnn\bin"
+set "DOCKER_BIN=C:\Program Files\Docker\Docker\resources\bin"
+set "DOCKER_CONFIG=%REPO_ROOT%\.docker-bench"
 
 if not exist "%PYTHON_EXE%" (
     echo CUDA 13 benchmark environment not found: "%PYTHON_EXE%"
@@ -24,6 +26,11 @@ if not exist "%PYTHON_EXE%" (
 if exist "%CUDA13_BIN%" set "PATH=%CUDA13_BIN%;%PATH%"
 if exist "%TENSORRT_LIBS%" set "PATH=%TENSORRT_LIBS%;%PATH%"
 if exist "%CUDNN_BIN%" set "PATH=%CUDNN_BIN%;%PATH%"
+if exist "%DOCKER_BIN%" set "PATH=%DOCKER_BIN%;%PATH%"
+if not exist "%DOCKER_CONFIG%" mkdir "%DOCKER_CONFIG%" >nul 2>&1
+if not exist "%DOCKER_CONFIG%\config.json" (
+    >"%DOCKER_CONFIG%\config.json" echo {}
+)
 
 if "%~1"=="" goto :run_default
 if /I "%~1"=="run" goto :run_command

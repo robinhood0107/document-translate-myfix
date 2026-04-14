@@ -148,6 +148,21 @@ raise RarCannotExec("Cannot find working tool")
 * Microsoft Azure Vision
 * PaddleOCR VL (로컬 Docker `/layout-parsing` 서비스)
 * HunyuanOCR (로컬 `llama.cpp` `/v1/chat/completions` 서비스)
+* MangaLMM (로컬 `llama.cpp` `/v1/chat/completions` 서비스, 일본어 block-crop OCR 후보)
+
+### 로컬 OCR / benchmark 브랜치 상태
+* `MangaLMM` 로컬 OCR runtime은 benchmark 브랜치에서 일본어 block-crop OCR 후보로 추적 중입니다.
+* `Optimal+ (HunyuanOCR / MangaLMM / PaddleOCR VL)`는 설계/승격 후보 상태이며, 아직 기본값으로 고정하지 않았습니다.
+* simpletest 3장 OCR head-to-head family 문서:
+  * [workflow-ko.md](../benchmark/ocr-simpletest-mangalmm-vs-paddle/workflow-ko.md)
+  * [implementation-history-ko.md](../benchmark/ocr-simpletest-mangalmm-vs-paddle/implementation-history-ko.md)
+  * [results-history-ko.md](../benchmark/ocr-simpletest-mangalmm-vs-paddle/results-history-ko.md)
+* MangaLMM 설정/기동 문서:
+  * [docs/mangalmm/local-server-ko.md](../mangalmm/local-server-ko.md)
+  * [mangalmm_docker_files/README.md](../../mangalmm_docker_files/README.md)
+* generated benchmark report:
+  * [ocr-simpletest-mangalmm-vs-paddle-report-ko.md](../banchmark_report/ocr-simpletest-mangalmm-vs-paddle-report-ko.md)
+* benchmark 전용 preset, runner, copied asset, generated report는 `benchmarking/lab` 브랜치에만 유지합니다.
 
 ### 이미지 복원
 분할된 텍스트를 제거하기 위해

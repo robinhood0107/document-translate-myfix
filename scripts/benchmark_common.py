@@ -372,7 +372,9 @@ def _stage_gemma_runtime(preset: dict[str, Any], runtime_dir: Path) -> dict[str,
 
     normalized_volumes: list[Any] = []
     for volume in volumes:
-        if isinstance(volume, str) and volume.startswith("./testmodel:"):
+        if isinstance(volume, str) and (
+            volume.startswith("./testmodel:") or volume.startswith("../testmodel:")
+        ):
             normalized_volumes.append(f"{testmodel_dir.as_posix()}:/models:ro")
         else:
             normalized_volumes.append(volume)
@@ -525,7 +527,9 @@ def _stage_mangalmm_ocr_runtime(preset: dict[str, Any], runtime_dir: Path) -> di
 
     normalized_volumes: list[Any] = []
     for volume in volumes:
-        if isinstance(volume, str) and volume.startswith("./testmodel:"):
+        if isinstance(volume, str) and (
+            volume.startswith("./testmodel:") or volume.startswith("../testmodel:")
+        ):
             normalized_volumes.append(f"{testmodel_dir.as_posix()}:/models:ro")
         else:
             normalized_volumes.append(volume)

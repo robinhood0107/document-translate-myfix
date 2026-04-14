@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import shutil
 import subprocess
 import time
@@ -10,6 +11,7 @@ from typing import Any
 
 DEFAULT_LLAMA_CPP_IMAGE = "ghcr.io/ggml-org/llama.cpp:server-cuda"
 DEFAULT_LLAMA_CPP_PULL_POLICY = "always"
+WINDOWS_DOCKER_BIN = Path(r"C:\Program Files\Docker\Docker\resources\bin")
 
 
 def normalize_llama_cpp_image(image_ref: Any = None) -> str:
@@ -32,7 +34,21 @@ def resolve_docker_executable() -> str:
     docker_exe = shutil.which("docker.exe")
     if docker_exe:
         return docker_exe
+    windows_docker = WINDOWS_DOCKER_BIN / "docker.exe"
+    if windows_docker.is_file():
+        return str(windows_docker)
     return "docker"
+
+
+def _augment_env_with_docker_bin(env: dict[str, str] | None = None) -> dict[str, str] | None:
+    if not WINDOWS_DOCKER_BIN.is_dir():
+        return env
+    merged = dict(os.environ if env is None else env)
+    path_value = merged.get("PATH", "")
+    docker_bin = str(WINDOWS_DOCKER_BIN)
+    if docker_bin.lower() not in path_value.lower():
+        merged["PATH"] = f"{docker_bin}{os.pathsep}{path_value}" if path_value else docker_bin
+    return merged
 
 
 def _format_command_failure(
@@ -59,6 +75,7 @@ def run_docker_command(
     resolved_cmd = list(cmd)
     if resolved_cmd and resolved_cmd[0] == "docker":
         resolved_cmd[0] = resolve_docker_executable()
+    env = _augment_env_with_docker_bin(env)
     completed = subprocess.run(
         resolved_cmd,
         cwd=str(cwd) if cwd is not None else None,
@@ -74,10 +91,14 @@ def run_docker_command(
 
 def resolve_docker_compose_command() -> tuple[str, ...]:
     candidates: list[tuple[str, ...]] = []
-    if shutil.which("docker") or shutil.which("docker.exe"):
+    resolved_docker = resolve_docker_executable()
+    if resolved_docker and (shutil.which("docker") or shutil.which("docker.exe") or Path(resolved_docker).is_file()):
         candidates.append(("docker", "compose"))
     if shutil.which("docker-compose"):
         candidates.append(("docker-compose",))
+    windows_docker_compose = Path(r"C:\Program Files\Docker\Docker\resources\bin\docker-compose.exe")
+    if windows_docker_compose.is_file():
+        candidates.append((str(windows_docker_compose),))
 
     for candidate in candidates:
         probe = run_docker_command([*candidate, "version"], check=False)

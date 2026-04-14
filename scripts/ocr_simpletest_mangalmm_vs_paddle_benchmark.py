@@ -420,11 +420,29 @@ def _pick_winner(candidate_summaries: list[dict[str, Any]]) -> dict[str, Any] | 
         return None
     ranked.sort(
         key=lambda item: (
-            float(item.get("warm_median_elapsed_sec") or 0.0),
+            0 if int(item.get("warm_total_page_failed_count") or 0) == 0 else 1,
             int(item.get("warm_total_page_failed_count") or 0),
+            float(item.get("warm_median_elapsed_sec") or 0.0),
         )
     )
     return ranked[0]
+
+
+def _winner_reason(candidate_summaries: list[dict[str, Any]], winner: dict[str, Any] | None) -> str:
+    if not winner:
+        return "No valid candidate summary was available."
+    successful = [
+        item for item in candidate_summaries if int(item.get("warm_total_page_failed_count") or 0) == 0
+    ]
+    if successful:
+        return (
+            "Lowest warm_median_elapsed_sec among candidates with zero warm page failures. "
+            "Candidates with warm page failures are ranked behind successful runs."
+        )
+    return (
+        "All candidates had warm page failures, so the comparison fell back to the fewest "
+        "warm page failures and then the lowest warm_median_elapsed_sec."
+    )
 
 
 def _render_comparison_markdown(payload: dict[str, Any]) -> str:
@@ -497,9 +515,7 @@ def _write_comparison_artifacts(
         "suite_dir": str(suite_dir),
         "generated_at": time.time(),
         "winner": winner or {},
-        "winner_reason": "Lowest warm_median_elapsed_sec with failures as tie-breaker."
-        if winner
-        else "No valid candidate summary was available.",
+        "winner_reason": _winner_reason(candidate_summaries, winner),
         "candidates": candidate_summaries,
     }
     write_json(suite_dir / "comparison_summary.json", payload)

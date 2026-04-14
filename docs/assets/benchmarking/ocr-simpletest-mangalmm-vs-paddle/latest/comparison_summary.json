@@ -1,0 +1,791 @@
+{
+  "family": "ocr_simpletest_mangalmm_vs_paddle",
+  "suite_dir": "banchmark_result_log/ocr_simpletest_mangalmm_vs_paddle/20260414_090047_ocr_simpletest_mangalmm_vs_paddle_suite",
+  "generated_at": 1776126089.145542,
+  "winner": {
+    "candidate_key": "paddleocr_vl",
+    "candidate_label": "PaddleOCR VL + current promoted Gemma4",
+    "preset": "ocr-simpletest-japan-paddleocr-vl-gemma4",
+    "suite_dir": "C:\\Users\\pjjpj\\Desktop\\openai_manga_translater\\comic-translate-benchmarking\\banchmark_result_log\\ocr_simpletest_mangalmm_vs_paddle\\20260414_090047_ocr_simpletest_mangalmm_vs_paddle_suite",
+    "run_count": 3,
+    "cold_run_dirs": [
+      "./banchmark_result_log/ocr_simpletest_mangalmm_vs_paddle/20260414_090047_ocr_simpletest_mangalmm_vs_paddle_suite/paddleocr_vl/cold1"
+    ],
+    "warm_run_dirs": [
+      "./banchmark_result_log/ocr_simpletest_mangalmm_vs_paddle/20260414_090047_ocr_simpletest_mangalmm_vs_paddle_suite/paddleocr_vl/warm1",
+      "./banchmark_result_log/ocr_simpletest_mangalmm_vs_paddle/20260414_090047_ocr_simpletest_mangalmm_vs_paddle_suite/paddleocr_vl/warm2"
+    ],
+    "cold_elapsed_sec": 179.175,
+    "warm_median_elapsed_sec": 137.48,
+    "warm_median_ocr_total_sec": 72.837,
+    "warm_median_ocr_median_sec": 21.797,
+    "warm_median_detect_ocr_total_sec": 77.308,
+    "warm_median_translate_median_sec": 10.431,
+    "warm_median_gpu_peak_used_mb": 11985,
+    "warm_median_gpu_floor_free_mb": 15,
+    "warm_median_gpu_peak_util_percent": 48,
+    "warm_median_gpu_peak_mem_util_percent": 39,
+    "warm_total_page_failed_count": 0,
+    "resident_metrics": {
+      "baseline_snapshot_path": "./banchmark_result_log/ocr_simpletest_mangalmm_vs_paddle/20260414_090047_ocr_simpletest_mangalmm_vs_paddle_suite/resident_snapshots/paddleocr_vl/empty_baseline_snapshot.json",
+      "ocr_only_idle_snapshot_path": "./banchmark_result_log/ocr_simpletest_mangalmm_vs_paddle/20260414_090047_ocr_simpletest_mangalmm_vs_paddle_suite/resident_snapshots/paddleocr_vl/ocr_only_idle_snapshot.json",
+      "full_idle_snapshot_path": "./banchmark_result_log/ocr_simpletest_mangalmm_vs_paddle/20260414_090047_ocr_simpletest_mangalmm_vs_paddle_suite/resident_snapshots/paddleocr_vl/full_idle_snapshot.json",
+      "ocr_only_idle_gpu_used_delta_mb": 1433,
+      "full_idle_gpu_used_delta_mb": 11103,
+      "gemma_added_idle_gpu_used_delta_mb": 9670,
+      "gpu_floor_free_mb_after_ocr_only": 10155,
+      "gpu_floor_free_mb_after_full_runtime": 485,
+      "llama_cpp_runtime": {
+        "gemma": {
+          "llama_cpp_image": "ghcr.io/ggml-org/llama.cpp:server-cuda",
+          "llama_cpp_digest": "ghcr.io/ggml-org/llama.cpp@sha256:3c1368d98e17df59068d4cccab2f86a8542a92e9c356dfcfbd26a3f964cb33ef",
+          "llama_cpp_version": "version: 8772 (bafae2765)"
+        }
+      },
+      "container_names": [
+        "gemma-local-server",
+        "paddleocr-server",
+        "paddleocr-vllm"
+      ]
+    },
+    "warm_run_summaries": [
+      {
+        "entry_count": 49,
+        "started_at": 1776125234.1717074,
+        "ended_at": 1776125371.79433,
+        "elapsed_sec": 137.623,
+        "tag_counts": {
+          "after_controllers_init": 1,
+          "after_pipeline_init": 1,
+          "after_signal_wiring": 1,
+          "after_super_init": 1,
+          "batch_run_done": 1,
+          "batch_run_start": 1,
+          "benchmark_run_finished": 1,
+          "benchmark_run_start": 1,
+          "detect_end": 3,
+          "detect_start": 3,
+          "idle_15s_deep": 1,
+          "inpaint_end": 3,
+          "inpaint_start": 3,
+          "memlog_start": 1,
+          "memlog_start_deep": 1,
+          "ocr_end": 3,
+          "ocr_start": 3,
+          "page_done": 3,
+          "page_start": 3,
+          "render_end": 3,
+          "render_start": 3,
+          "tick": 2,
+          "translate_end": 3,
+          "translate_start": 3
+        },
+        "stage_stats": {
+          "detect": {
+            "count": 3,
+            "total_sec": 4.439,
+            "median_sec": 1.165,
+            "p95_sec": 2.471,
+            "p99_sec": 2.471,
+            "max_sec": 2.471
+          },
+          "inpaint": {
+            "count": 3,
+            "total_sec": 18.455,
+            "median_sec": 5.039,
+            "p95_sec": 10.024,
+            "p99_sec": 10.024,
+            "max_sec": 10.024
+          },
+          "ocr": {
+            "count": 3,
+            "total_sec": 72.419,
+            "median_sec": 20.803,
+            "p95_sec": 39.138,
+            "p99_sec": 39.138,
+            "max_sec": 39.138
+          },
+          "render": {
+            "count": 3,
+            "total_sec": 1.273,
+            "median_sec": 0.408,
+            "p95_sec": 0.629,
+            "p99_sec": 0.629,
+            "max_sec": 0.629
+          },
+          "translate": {
+            "count": 3,
+            "total_sec": 37.095,
+            "median_sec": 10.265,
+            "p95_sec": 20.195,
+            "p99_sec": 20.195,
+            "max_sec": 20.195
+          }
+        },
+        "page_done_count": 3,
+        "page_failed_count": 0,
+        "gpu_peak_used_mb": 11985,
+        "gpu_floor_free_mb": 15,
+        "gpu_peak_util_percent": 45,
+        "gpu_peak_mem_util_percent": 42,
+        "detect_total_sec": 4.439,
+        "ocr_total_sec": 72.419,
+        "detect_ocr_total_sec": 76.858,
+        "detect_median_sec": 1.165,
+        "ocr_median_sec": 20.803,
+        "ocr_page_p50_sec": 20.803,
+        "ocr_page_p95_sec": 39.138,
+        "ocr_page_p99_sec": 39.138,
+        "translate_median_sec": 10.265,
+        "inpaint_median_sec": 5.039,
+        "gemma_json_retry_count": 0,
+        "gemma_chunk_retry_events": 0,
+        "gemma_truncated_count": 0,
+        "gemma_empty_content_count": 0,
+        "gemma_missing_key_count": 0,
+        "gemma_reasoning_without_final_count": 0,
+        "gemma_schema_validation_fail_count": 0,
+        "ocr_total_block_count": 54,
+        "ocr_empty_block_count": 0,
+        "ocr_low_quality_block_count": 2,
+        "ocr_cache_hit_count": 0,
+        "ocr_empty_rate": 0.0,
+        "ocr_low_quality_rate": 0.037,
+        "llama_cpp_runtime": {
+          "gemma": {
+            "llama_cpp_image": "ghcr.io/ggml-org/llama.cpp:server-cuda",
+            "llama_cpp_digest": "ghcr.io/ggml-org/llama.cpp@sha256:3c1368d98e17df59068d4cccab2f86a8542a92e9c356dfcfbd26a3f964cb33ef",
+            "llama_cpp_version": "version: 8772 (bafae2765)"
+          }
+        },
+        "mode": "batch",
+        "image_count": 3,
+        "image_paths": [
+          "[local-only]",
+          "[local-only]",
+          "[local-only]"
+        ]
+      },
+      {
+        "entry_count": 48,
+        "started_at": 1776125383.87585,
+        "ended_at": 1776125521.2125702,
+        "elapsed_sec": 137.337,
+        "tag_counts": {
+          "after_controllers_init": 1,
+          "after_pipeline_init": 1,
+          "after_signal_wiring": 1,
+          "after_super_init": 1,
+          "batch_run_done": 1,
+          "batch_run_start": 1,
+          "benchmark_run_finished": 1,
+          "benchmark_run_start": 1,
+          "detect_end": 3,
+          "detect_start": 3,
+          "idle_15s_deep": 1,
+          "inpaint_end": 3,
+          "inpaint_start": 3,
+          "memlog_start": 1,
+          "memlog_start_deep": 1,
+          "ocr_end": 3,
+          "ocr_start": 3,
+          "page_done": 3,
+          "page_start": 3,
+          "render_end": 3,
+          "render_start": 3,
+          "tick": 1,
+          "translate_end": 3,
+          "translate_start": 3
+        },
+        "stage_stats": {
+          "detect": {
+            "count": 3,
+            "total_sec": 4.502,
+            "median_sec": 1.11,
+            "p95_sec": 2.389,
+            "p99_sec": 2.389,
+            "max_sec": 2.389
+          },
+          "inpaint": {
+            "count": 3,
+            "total_sec": 19.983,
+            "median_sec": 4.88,
+            "p95_sec": 10.664,
+            "p99_sec": 10.664,
+            "max_sec": 10.664
+          },
+          "ocr": {
+            "count": 3,
+            "total_sec": 73.255,
+            "median_sec": 22.792,
+            "p95_sec": 38.049,
+            "p99_sec": 38.049,
+            "max_sec": 38.049
+          },
+          "render": {
+            "count": 3,
+            "total_sec": 1.493,
+            "median_sec": 0.408,
+            "p95_sec": 0.677,
+            "p99_sec": 0.677,
+            "max_sec": 0.677
+          },
+          "translate": {
+            "count": 3,
+            "total_sec": 34.248,
+            "median_sec": 10.598,
+            "p95_sec": 16.534,
+            "p99_sec": 16.534,
+            "max_sec": 16.534
+          }
+        },
+        "page_done_count": 3,
+        "page_failed_count": 0,
+        "gpu_peak_used_mb": 11985,
+        "gpu_floor_free_mb": 15,
+        "gpu_peak_util_percent": 51,
+        "gpu_peak_mem_util_percent": 36,
+        "detect_total_sec": 4.502,
+        "ocr_total_sec": 73.255,
+        "detect_ocr_total_sec": 77.757,
+        "detect_median_sec": 1.11,
+        "ocr_median_sec": 22.792,
+        "ocr_page_p50_sec": 22.792,
+        "ocr_page_p95_sec": 38.049,
+        "ocr_page_p99_sec": 38.049,
+        "translate_median_sec": 10.598,
+        "inpaint_median_sec": 4.88,
+        "gemma_json_retry_count": 0,
+        "gemma_chunk_retry_events": 0,
+        "gemma_truncated_count": 0,
+        "gemma_empty_content_count": 0,
+        "gemma_missing_key_count": 0,
+        "gemma_reasoning_without_final_count": 0,
+        "gemma_schema_validation_fail_count": 0,
+        "ocr_total_block_count": 54,
+        "ocr_empty_block_count": 0,
+        "ocr_low_quality_block_count": 2,
+        "ocr_cache_hit_count": 0,
+        "ocr_empty_rate": 0.0,
+        "ocr_low_quality_rate": 0.037,
+        "llama_cpp_runtime": {
+          "gemma": {
+            "llama_cpp_image": "ghcr.io/ggml-org/llama.cpp:server-cuda",
+            "llama_cpp_digest": "ghcr.io/ggml-org/llama.cpp@sha256:3c1368d98e17df59068d4cccab2f86a8542a92e9c356dfcfbd26a3f964cb33ef",
+            "llama_cpp_version": "version: 8772 (bafae2765)"
+          }
+        },
+        "mode": "batch",
+        "image_count": 3,
+        "image_paths": [
+          "[local-only]",
+          "[local-only]",
+          "[local-only]"
+        ]
+      }
+    ]
+  },
+  "winner_reason": "Lowest warm_median_elapsed_sec among candidates with zero warm page failures. Candidates with warm page failures are ranked behind successful runs.",
+  "candidates": [
+    {
+      "candidate_key": "paddleocr_vl",
+      "candidate_label": "PaddleOCR VL + current promoted Gemma4",
+      "preset": "ocr-simpletest-japan-paddleocr-vl-gemma4",
+      "suite_dir": "C:\\Users\\pjjpj\\Desktop\\openai_manga_translater\\comic-translate-benchmarking\\banchmark_result_log\\ocr_simpletest_mangalmm_vs_paddle\\20260414_090047_ocr_simpletest_mangalmm_vs_paddle_suite",
+      "run_count": 3,
+      "cold_run_dirs": [
+        "./banchmark_result_log/ocr_simpletest_mangalmm_vs_paddle/20260414_090047_ocr_simpletest_mangalmm_vs_paddle_suite/paddleocr_vl/cold1"
+      ],
+      "warm_run_dirs": [
+        "./banchmark_result_log/ocr_simpletest_mangalmm_vs_paddle/20260414_090047_ocr_simpletest_mangalmm_vs_paddle_suite/paddleocr_vl/warm1",
+        "./banchmark_result_log/ocr_simpletest_mangalmm_vs_paddle/20260414_090047_ocr_simpletest_mangalmm_vs_paddle_suite/paddleocr_vl/warm2"
+      ],
+      "cold_elapsed_sec": 179.175,
+      "warm_median_elapsed_sec": 137.48,
+      "warm_median_ocr_total_sec": 72.837,
+      "warm_median_ocr_median_sec": 21.797,
+      "warm_median_detect_ocr_total_sec": 77.308,
+      "warm_median_translate_median_sec": 10.431,
+      "warm_median_gpu_peak_used_mb": 11985,
+      "warm_median_gpu_floor_free_mb": 15,
+      "warm_median_gpu_peak_util_percent": 48,
+      "warm_median_gpu_peak_mem_util_percent": 39,
+      "warm_total_page_failed_count": 0,
+      "resident_metrics": {
+        "baseline_snapshot_path": "./banchmark_result_log/ocr_simpletest_mangalmm_vs_paddle/20260414_090047_ocr_simpletest_mangalmm_vs_paddle_suite/resident_snapshots/paddleocr_vl/empty_baseline_snapshot.json",
+        "ocr_only_idle_snapshot_path": "./banchmark_result_log/ocr_simpletest_mangalmm_vs_paddle/20260414_090047_ocr_simpletest_mangalmm_vs_paddle_suite/resident_snapshots/paddleocr_vl/ocr_only_idle_snapshot.json",
+        "full_idle_snapshot_path": "./banchmark_result_log/ocr_simpletest_mangalmm_vs_paddle/20260414_090047_ocr_simpletest_mangalmm_vs_paddle_suite/resident_snapshots/paddleocr_vl/full_idle_snapshot.json",
+        "ocr_only_idle_gpu_used_delta_mb": 1433,
+        "full_idle_gpu_used_delta_mb": 11103,
+        "gemma_added_idle_gpu_used_delta_mb": 9670,
+        "gpu_floor_free_mb_after_ocr_only": 10155,
+        "gpu_floor_free_mb_after_full_runtime": 485,
+        "llama_cpp_runtime": {
+          "gemma": {
+            "llama_cpp_image": "ghcr.io/ggml-org/llama.cpp:server-cuda",
+            "llama_cpp_digest": "ghcr.io/ggml-org/llama.cpp@sha256:3c1368d98e17df59068d4cccab2f86a8542a92e9c356dfcfbd26a3f964cb33ef",
+            "llama_cpp_version": "version: 8772 (bafae2765)"
+          }
+        },
+        "container_names": [
+          "gemma-local-server",
+          "paddleocr-server",
+          "paddleocr-vllm"
+        ]
+      },
+      "warm_run_summaries": [
+        {
+          "entry_count": 49,
+          "started_at": 1776125234.1717074,
+          "ended_at": 1776125371.79433,
+          "elapsed_sec": 137.623,
+          "tag_counts": {
+            "after_controllers_init": 1,
+            "after_pipeline_init": 1,
+            "after_signal_wiring": 1,
+            "after_super_init": 1,
+            "batch_run_done": 1,
+            "batch_run_start": 1,
+            "benchmark_run_finished": 1,
+            "benchmark_run_start": 1,
+            "detect_end": 3,
+            "detect_start": 3,
+            "idle_15s_deep": 1,
+            "inpaint_end": 3,
+            "inpaint_start": 3,
+            "memlog_start": 1,
+            "memlog_start_deep": 1,
+            "ocr_end": 3,
+            "ocr_start": 3,
+            "page_done": 3,
+            "page_start": 3,
+            "render_end": 3,
+            "render_start": 3,
+            "tick": 2,
+            "translate_end": 3,
+            "translate_start": 3
+          },
+          "stage_stats": {
+            "detect": {
+              "count": 3,
+              "total_sec": 4.439,
+              "median_sec": 1.165,
+              "p95_sec": 2.471,
+              "p99_sec": 2.471,
+              "max_sec": 2.471
+            },
+            "inpaint": {
+              "count": 3,
+              "total_sec": 18.455,
+              "median_sec": 5.039,
+              "p95_sec": 10.024,
+              "p99_sec": 10.024,
+              "max_sec": 10.024
+            },
+            "ocr": {
+              "count": 3,
+              "total_sec": 72.419,
+              "median_sec": 20.803,
+              "p95_sec": 39.138,
+              "p99_sec": 39.138,
+              "max_sec": 39.138
+            },
+            "render": {
+              "count": 3,
+              "total_sec": 1.273,
+              "median_sec": 0.408,
+              "p95_sec": 0.629,
+              "p99_sec": 0.629,
+              "max_sec": 0.629
+            },
+            "translate": {
+              "count": 3,
+              "total_sec": 37.095,
+              "median_sec": 10.265,
+              "p95_sec": 20.195,
+              "p99_sec": 20.195,
+              "max_sec": 20.195
+            }
+          },
+          "page_done_count": 3,
+          "page_failed_count": 0,
+          "gpu_peak_used_mb": 11985,
+          "gpu_floor_free_mb": 15,
+          "gpu_peak_util_percent": 45,
+          "gpu_peak_mem_util_percent": 42,
+          "detect_total_sec": 4.439,
+          "ocr_total_sec": 72.419,
+          "detect_ocr_total_sec": 76.858,
+          "detect_median_sec": 1.165,
+          "ocr_median_sec": 20.803,
+          "ocr_page_p50_sec": 20.803,
+          "ocr_page_p95_sec": 39.138,
+          "ocr_page_p99_sec": 39.138,
+          "translate_median_sec": 10.265,
+          "inpaint_median_sec": 5.039,
+          "gemma_json_retry_count": 0,
+          "gemma_chunk_retry_events": 0,
+          "gemma_truncated_count": 0,
+          "gemma_empty_content_count": 0,
+          "gemma_missing_key_count": 0,
+          "gemma_reasoning_without_final_count": 0,
+          "gemma_schema_validation_fail_count": 0,
+          "ocr_total_block_count": 54,
+          "ocr_empty_block_count": 0,
+          "ocr_low_quality_block_count": 2,
+          "ocr_cache_hit_count": 0,
+          "ocr_empty_rate": 0.0,
+          "ocr_low_quality_rate": 0.037,
+          "llama_cpp_runtime": {
+            "gemma": {
+              "llama_cpp_image": "ghcr.io/ggml-org/llama.cpp:server-cuda",
+              "llama_cpp_digest": "ghcr.io/ggml-org/llama.cpp@sha256:3c1368d98e17df59068d4cccab2f86a8542a92e9c356dfcfbd26a3f964cb33ef",
+              "llama_cpp_version": "version: 8772 (bafae2765)"
+            }
+          },
+          "mode": "batch",
+          "image_count": 3,
+          "image_paths": [
+            "[local-only]",
+            "[local-only]",
+            "[local-only]"
+          ]
+        },
+        {
+          "entry_count": 48,
+          "started_at": 1776125383.87585,
+          "ended_at": 1776125521.2125702,
+          "elapsed_sec": 137.337,
+          "tag_counts": {
+            "after_controllers_init": 1,
+            "after_pipeline_init": 1,
+            "after_signal_wiring": 1,
+            "after_super_init": 1,
+            "batch_run_done": 1,
+            "batch_run_start": 1,
+            "benchmark_run_finished": 1,
+            "benchmark_run_start": 1,
+            "detect_end": 3,
+            "detect_start": 3,
+            "idle_15s_deep": 1,
+            "inpaint_end": 3,
+            "inpaint_start": 3,
+            "memlog_start": 1,
+            "memlog_start_deep": 1,
+            "ocr_end": 3,
+            "ocr_start": 3,
+            "page_done": 3,
+            "page_start": 3,
+            "render_end": 3,
+            "render_start": 3,
+            "tick": 1,
+            "translate_end": 3,
+            "translate_start": 3
+          },
+          "stage_stats": {
+            "detect": {
+              "count": 3,
+              "total_sec": 4.502,
+              "median_sec": 1.11,
+              "p95_sec": 2.389,
+              "p99_sec": 2.389,
+              "max_sec": 2.389
+            },
+            "inpaint": {
+              "count": 3,
+              "total_sec": 19.983,
+              "median_sec": 4.88,
+              "p95_sec": 10.664,
+              "p99_sec": 10.664,
+              "max_sec": 10.664
+            },
+            "ocr": {
+              "count": 3,
+              "total_sec": 73.255,
+              "median_sec": 22.792,
+              "p95_sec": 38.049,
+              "p99_sec": 38.049,
+              "max_sec": 38.049
+            },
+            "render": {
+              "count": 3,
+              "total_sec": 1.493,
+              "median_sec": 0.408,
+              "p95_sec": 0.677,
+              "p99_sec": 0.677,
+              "max_sec": 0.677
+            },
+            "translate": {
+              "count": 3,
+              "total_sec": 34.248,
+              "median_sec": 10.598,
+              "p95_sec": 16.534,
+              "p99_sec": 16.534,
+              "max_sec": 16.534
+            }
+          },
+          "page_done_count": 3,
+          "page_failed_count": 0,
+          "gpu_peak_used_mb": 11985,
+          "gpu_floor_free_mb": 15,
+          "gpu_peak_util_percent": 51,
+          "gpu_peak_mem_util_percent": 36,
+          "detect_total_sec": 4.502,
+          "ocr_total_sec": 73.255,
+          "detect_ocr_total_sec": 77.757,
+          "detect_median_sec": 1.11,
+          "ocr_median_sec": 22.792,
+          "ocr_page_p50_sec": 22.792,
+          "ocr_page_p95_sec": 38.049,
+          "ocr_page_p99_sec": 38.049,
+          "translate_median_sec": 10.598,
+          "inpaint_median_sec": 4.88,
+          "gemma_json_retry_count": 0,
+          "gemma_chunk_retry_events": 0,
+          "gemma_truncated_count": 0,
+          "gemma_empty_content_count": 0,
+          "gemma_missing_key_count": 0,
+          "gemma_reasoning_without_final_count": 0,
+          "gemma_schema_validation_fail_count": 0,
+          "ocr_total_block_count": 54,
+          "ocr_empty_block_count": 0,
+          "ocr_low_quality_block_count": 2,
+          "ocr_cache_hit_count": 0,
+          "ocr_empty_rate": 0.0,
+          "ocr_low_quality_rate": 0.037,
+          "llama_cpp_runtime": {
+            "gemma": {
+              "llama_cpp_image": "ghcr.io/ggml-org/llama.cpp:server-cuda",
+              "llama_cpp_digest": "ghcr.io/ggml-org/llama.cpp@sha256:3c1368d98e17df59068d4cccab2f86a8542a92e9c356dfcfbd26a3f964cb33ef",
+              "llama_cpp_version": "version: 8772 (bafae2765)"
+            }
+          },
+          "mode": "batch",
+          "image_count": 3,
+          "image_paths": [
+            "[local-only]",
+            "[local-only]",
+            "[local-only]"
+          ]
+        }
+      ]
+    },
+    {
+      "candidate_key": "mangalmm",
+      "candidate_label": "MangaLMM + current promoted Gemma4",
+      "preset": "ocr-simpletest-japan-mangalmm-gemma4",
+      "suite_dir": "C:\\Users\\pjjpj\\Desktop\\openai_manga_translater\\comic-translate-benchmarking\\banchmark_result_log\\ocr_simpletest_mangalmm_vs_paddle\\20260414_090047_ocr_simpletest_mangalmm_vs_paddle_suite",
+      "run_count": 3,
+      "cold_run_dirs": [
+        "./banchmark_result_log/ocr_simpletest_mangalmm_vs_paddle/20260414_090047_ocr_simpletest_mangalmm_vs_paddle_suite/mangalmm/cold1"
+      ],
+      "warm_run_dirs": [
+        "./banchmark_result_log/ocr_simpletest_mangalmm_vs_paddle/20260414_090047_ocr_simpletest_mangalmm_vs_paddle_suite/mangalmm/warm1",
+        "./banchmark_result_log/ocr_simpletest_mangalmm_vs_paddle/20260414_090047_ocr_simpletest_mangalmm_vs_paddle_suite/mangalmm/warm2"
+      ],
+      "cold_elapsed_sec": 43.372,
+      "warm_median_elapsed_sec": 14.58,
+      "warm_median_ocr_total_sec": null,
+      "warm_median_ocr_median_sec": null,
+      "warm_median_detect_ocr_total_sec": 2.692,
+      "warm_median_translate_median_sec": null,
+      "warm_median_gpu_peak_used_mb": 11345.5,
+      "warm_median_gpu_floor_free_mb": 654.5,
+      "warm_median_gpu_peak_util_percent": 71,
+      "warm_median_gpu_peak_mem_util_percent": 63,
+      "warm_total_page_failed_count": 6,
+      "resident_metrics": {
+        "baseline_snapshot_path": "./banchmark_result_log/ocr_simpletest_mangalmm_vs_paddle/20260414_090047_ocr_simpletest_mangalmm_vs_paddle_suite/resident_snapshots/mangalmm/empty_baseline_snapshot.json",
+        "ocr_only_idle_snapshot_path": "./banchmark_result_log/ocr_simpletest_mangalmm_vs_paddle/20260414_090047_ocr_simpletest_mangalmm_vs_paddle_suite/resident_snapshots/mangalmm/ocr_only_idle_snapshot.json",
+        "full_idle_snapshot_path": "./banchmark_result_log/ocr_simpletest_mangalmm_vs_paddle/20260414_090047_ocr_simpletest_mangalmm_vs_paddle_suite/resident_snapshots/mangalmm/full_idle_snapshot.json",
+        "ocr_only_idle_gpu_used_delta_mb": 9865,
+        "full_idle_gpu_used_delta_mb": 11261,
+        "gemma_added_idle_gpu_used_delta_mb": 1396,
+        "gpu_floor_free_mb_after_ocr_only": 1967,
+        "gpu_floor_free_mb_after_full_runtime": 571,
+        "llama_cpp_runtime": {
+          "gemma": {
+            "llama_cpp_image": "ghcr.io/ggml-org/llama.cpp:server-cuda",
+            "llama_cpp_digest": "ghcr.io/ggml-org/llama.cpp@sha256:3c1368d98e17df59068d4cccab2f86a8542a92e9c356dfcfbd26a3f964cb33ef",
+            "llama_cpp_version": "version: 8772 (bafae2765)"
+          },
+          "mangalmm": {
+            "llama_cpp_image": "ghcr.io/ggml-org/llama.cpp:server-cuda",
+            "llama_cpp_digest": "ghcr.io/ggml-org/llama.cpp@sha256:3c1368d98e17df59068d4cccab2f86a8542a92e9c356dfcfbd26a3f964cb33ef",
+            "llama_cpp_version": "version: 8772 (bafae2765)"
+          }
+        },
+        "container_names": [
+          "gemma-local-server",
+          "mangalmm-local-server"
+        ]
+      },
+      "warm_run_summaries": [
+        {
+          "entry_count": 26,
+          "started_at": 1776125827.5101335,
+          "ended_at": 1776125842.2111955,
+          "elapsed_sec": 14.701,
+          "tag_counts": {
+            "after_controllers_init": 1,
+            "after_pipeline_init": 1,
+            "after_signal_wiring": 1,
+            "after_super_init": 1,
+            "batch_run_done": 1,
+            "batch_run_start": 1,
+            "benchmark_run_finished": 1,
+            "benchmark_run_start": 1,
+            "detect_end": 3,
+            "detect_start": 3,
+            "memlog_start": 1,
+            "memlog_start_deep": 1,
+            "ocr_start": 3,
+            "page_failed": 3,
+            "page_start": 3,
+            "tick": 1
+          },
+          "stage_stats": {
+            "detect": {
+              "count": 3,
+              "total_sec": 2.733,
+              "median_sec": 0.211,
+              "p95_sec": 2.37,
+              "p99_sec": 2.37,
+              "max_sec": 2.37
+            }
+          },
+          "page_done_count": 0,
+          "page_failed_count": 3,
+          "gpu_peak_used_mb": 11377,
+          "gpu_floor_free_mb": 623,
+          "gpu_peak_util_percent": 75,
+          "gpu_peak_mem_util_percent": 67,
+          "detect_total_sec": 2.733,
+          "ocr_total_sec": null,
+          "detect_ocr_total_sec": 2.733,
+          "detect_median_sec": 0.211,
+          "ocr_median_sec": null,
+          "ocr_page_p50_sec": null,
+          "ocr_page_p95_sec": null,
+          "ocr_page_p99_sec": null,
+          "translate_median_sec": null,
+          "inpaint_median_sec": null,
+          "gemma_json_retry_count": 0,
+          "gemma_chunk_retry_events": 0,
+          "gemma_truncated_count": 0,
+          "gemma_empty_content_count": 0,
+          "gemma_missing_key_count": 0,
+          "gemma_reasoning_without_final_count": 0,
+          "gemma_schema_validation_fail_count": 0,
+          "ocr_total_block_count": 0,
+          "ocr_empty_block_count": 0,
+          "ocr_low_quality_block_count": 0,
+          "ocr_cache_hit_count": 0,
+          "ocr_empty_rate": null,
+          "ocr_low_quality_rate": null,
+          "llama_cpp_runtime": {
+            "gemma": {
+              "llama_cpp_image": "ghcr.io/ggml-org/llama.cpp:server-cuda",
+              "llama_cpp_digest": "ghcr.io/ggml-org/llama.cpp@sha256:3c1368d98e17df59068d4cccab2f86a8542a92e9c356dfcfbd26a3f964cb33ef",
+              "llama_cpp_version": "version: 8772 (bafae2765)"
+            },
+            "mangalmm": {
+              "llama_cpp_image": "ghcr.io/ggml-org/llama.cpp:server-cuda",
+              "llama_cpp_digest": "ghcr.io/ggml-org/llama.cpp@sha256:3c1368d98e17df59068d4cccab2f86a8542a92e9c356dfcfbd26a3f964cb33ef",
+              "llama_cpp_version": "version: 8772 (bafae2765)"
+            }
+          },
+          "mode": "batch",
+          "image_count": 3,
+          "image_paths": [
+            "[local-only]",
+            "[local-only]",
+            "[local-only]"
+          ]
+        },
+        {
+          "entry_count": 26,
+          "started_at": 1776125849.8286808,
+          "ended_at": 1776125864.2880943,
+          "elapsed_sec": 14.459,
+          "tag_counts": {
+            "after_controllers_init": 1,
+            "after_pipeline_init": 1,
+            "after_signal_wiring": 1,
+            "after_super_init": 1,
+            "batch_run_done": 1,
+            "batch_run_start": 1,
+            "benchmark_run_finished": 1,
+            "benchmark_run_start": 1,
+            "detect_end": 3,
+            "detect_start": 3,
+            "memlog_start": 1,
+            "memlog_start_deep": 1,
+            "ocr_start": 3,
+            "page_failed": 3,
+            "page_start": 3,
+            "tick": 1
+          },
+          "stage_stats": {
+            "detect": {
+              "count": 3,
+              "total_sec": 2.65,
+              "median_sec": 0.202,
+              "p95_sec": 2.297,
+              "p99_sec": 2.297,
+              "max_sec": 2.297
+            }
+          },
+          "page_done_count": 0,
+          "page_failed_count": 3,
+          "gpu_peak_used_mb": 11314,
+          "gpu_floor_free_mb": 686,
+          "gpu_peak_util_percent": 67,
+          "gpu_peak_mem_util_percent": 59,
+          "detect_total_sec": 2.65,
+          "ocr_total_sec": null,
+          "detect_ocr_total_sec": 2.65,
+          "detect_median_sec": 0.202,
+          "ocr_median_sec": null,
+          "ocr_page_p50_sec": null,
+          "ocr_page_p95_sec": null,
+          "ocr_page_p99_sec": null,
+          "translate_median_sec": null,
+          "inpaint_median_sec": null,
+          "gemma_json_retry_count": 0,
+          "gemma_chunk_retry_events": 0,
+          "gemma_truncated_count": 0,
+          "gemma_empty_content_count": 0,
+          "gemma_missing_key_count": 0,
+          "gemma_reasoning_without_final_count": 0,
+          "gemma_schema_validation_fail_count": 0,
+          "ocr_total_block_count": 0,
+          "ocr_empty_block_count": 0,
+          "ocr_low_quality_block_count": 0,
+          "ocr_cache_hit_count": 0,
+          "ocr_empty_rate": null,
+          "ocr_low_quality_rate": null,
+          "llama_cpp_runtime": {
+            "gemma": {
+              "llama_cpp_image": "ghcr.io/ggml-org/llama.cpp:server-cuda",
+              "llama_cpp_digest": "ghcr.io/ggml-org/llama.cpp@sha256:3c1368d98e17df59068d4cccab2f86a8542a92e9c356dfcfbd26a3f964cb33ef",
+              "llama_cpp_version": "version: 8772 (bafae2765)"
+            },
+            "mangalmm": {
+              "llama_cpp_image": "ghcr.io/ggml-org/llama.cpp:server-cuda",
+              "llama_cpp_digest": "ghcr.io/ggml-org/llama.cpp@sha256:3c1368d98e17df59068d4cccab2f86a8542a92e9c356dfcfbd26a3f964cb33ef",
+              "llama_cpp_version": "version: 8772 (bafae2765)"
+            }
+          },
+          "mode": "batch",
+          "image_count": 3,
+          "image_paths": [
+            "[local-only]",
+            "[local-only]",
+            "[local-only]"
+          ]
+        }
+      ]
+    }
+  ]
+}
