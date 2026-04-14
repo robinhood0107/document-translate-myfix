@@ -37,8 +37,9 @@ class MangaLMMOCRPage(QtWidgets.QWidget):
         note = MLabel(
             self.tr(
                 "Connect Comic Translate to your local MangaLMM llama.cpp server.\n"
-                "This OCR engine sends full pages or large overlapping tiles to the OpenAI-compatible /chat/completions endpoint.\n"
-                "MangaLMM runs as page/tile OCR inside the app, then recognized regions are matched back to detected text blocks.\n"
+                "This OCR engine sends a full page single-shot request to the OpenAI-compatible /chat/completions endpoint.\n"
+                "The app keeps detector geometry, then matches grounded OCR regions back to detected text blocks.\n"
+                "Japanese Optimal+ uses an internal MangaLMM contract with PNG, image-first ordering, and guarded retries.\n"
                 "Keep the default localhost URL if you want Comic Translate to reuse the bundled Docker runtime."
             )
         ).secondary()
@@ -62,7 +63,7 @@ class MangaLMMOCRPage(QtWidgets.QWidget):
         max_tokens_layout = QtWidgets.QHBoxLayout()
         max_tokens_layout.addWidget(MLabel(self.tr("Max Completion Tokens")))
         self.max_completion_tokens_spinbox = MSpinBox().small()
-        self.max_completion_tokens_spinbox.setRange(64, 2048)
+        self.max_completion_tokens_spinbox.setRange(64, 4096)
         self.max_completion_tokens_spinbox.setSingleStep(64)
         self.max_completion_tokens_spinbox.setValue(self.DEFAULT_MAX_COMPLETION_TOKENS)
         self.max_completion_tokens_spinbox.setFixedWidth(90)
@@ -126,15 +127,16 @@ class MangaLMMOCRPage(QtWidgets.QWidget):
         tip = MLabel(
             self.tr(
                 "Recommended values for the bundled MangaLMM runtime:\n"
-                "- ctx-size 4096: enough for page/tile OCR while keeping VRAM safer\n"
+                "- ctx-size 4096: enough for full-page OCR while keeping VRAM safer\n"
                 "- Max Completion Tokens: 256\n"
                 "- Parallel Workers: 1\n"
                 "- Request Timeout: 60 seconds\n"
                 "- Safe Resize: on\n"
                 "- Max Pixels / Max Long Side: 2116800 / 1728\n"
                 "Reasoning:\n"
-                "- Keep a lightly sampled request with temperature 0.1 and top_k 32 internally so the model is less likely to stop at an empty response.\n"
-                "- Pages larger than the safe limit are split into 1280px tiles with overlap, and OCR region boxes are mapped back to original coordinates.\n"
+                "- PNG + image-first ordering is the most reliable request format for MangaLMM.\n"
+                "- Japanese Optimal+ ignores this page's manual prompt/token profile and uses an internal full-page contract with guarded retries.\n"
+                "- Direct MangaLMM mode still respects the values on this page.\n"
                 "- Workers 1 is the safest default when Gemma and MangaLMM stay resident on the same GPU."
             )
         ).secondary()
