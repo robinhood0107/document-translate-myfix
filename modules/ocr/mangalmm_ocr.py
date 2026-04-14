@@ -53,10 +53,16 @@ DEFAULT_MANGALMM_DENSE_BLOCK_COUNT = 24
 DEFAULT_MANGALMM_DENSE_SMALL_BLOCK_RATIO = 0.55
 DEFAULT_MANGALMM_DENSE_TEXT_COVER_RATIO = 0.18
 DEFAULT_MANGALMM_SMALL_BLOCK_AREA_RATIO = 0.008
-DEFAULT_MANGALMM_TEMPERATURE = 0.0
+DEFAULT_MANGALMM_TEMPERATURE = 0.1
 DEFAULT_MANGALMM_TOP_K = 1
-DEFAULT_MANGALMM_STANDARD_PROFILE_TOKENS = 512
-DEFAULT_MANGALMM_DENSE_PROFILE_TOKENS = 768
+DEFAULT_MANGALMM_TOP_P = 0.001
+DEFAULT_MANGALMM_MIN_P = 0.0
+DEFAULT_MANGALMM_REPEAT_PENALTY = 1.05
+DEFAULT_MANGALMM_REPEAT_LAST_N = 0
+DEFAULT_MANGALMM_PRESENCE_PENALTY = 0.0
+DEFAULT_MANGALMM_FREQUENCY_PENALTY = 0.0
+DEFAULT_MANGALMM_STANDARD_PROFILE_TOKENS = 2048
+DEFAULT_MANGALMM_DENSE_PROFILE_TOKENS = 1024
 DEFAULT_MANGALMM_DEBUG_EXPORT_LIMIT = 96
 
 
@@ -101,10 +107,14 @@ class MangaLMMOCREngine(OCREngine):
     MAX_COMPLETION_TOKENS_RANGE = (64, 2048)
     PARALLEL_WORKERS_RANGE = (1, 8)
     REQUEST_ENDPOINT_SUFFIX = "/chat/completions"
-    PROMPT = (
-        'Please perform OCR on this image and output only a JSON array of recognized text regions, '
-        'where each item has "bbox_2d" and "text_content". Do not translate. Do not explain. '
-        "Do not add markdown or code fences."
+    STANDARD_PROMPT = (
+        "Please perform OCR on this image and output the recognized Japanese text "
+        "along with its position (grounding)."
+    )
+    DENSE_PROMPT = (
+        "Please perform OCR on this image and output the recognized Japanese text along with its "
+        'position (grounding) as a JSON array. Each item must contain "bbox_2d" and '
+        '"text_content". Do not translate.'
     )
 
     def __init__(self) -> None:
@@ -118,6 +128,12 @@ class MangaLMMOCREngine(OCREngine):
         self.max_long_side = DEFAULT_MANGALMM_MAX_LONG_SIDE
         self.temperature = DEFAULT_MANGALMM_TEMPERATURE
         self.top_k = DEFAULT_MANGALMM_TOP_K
+        self.top_p = DEFAULT_MANGALMM_TOP_P
+        self.min_p = DEFAULT_MANGALMM_MIN_P
+        self.repeat_penalty = DEFAULT_MANGALMM_REPEAT_PENALTY
+        self.repeat_last_n = DEFAULT_MANGALMM_REPEAT_LAST_N
+        self.presence_penalty = DEFAULT_MANGALMM_PRESENCE_PENALTY
+        self.frequency_penalty = DEFAULT_MANGALMM_FREQUENCY_PENALTY
         self.debug_root: Path | None = None
         self.debug_export_limit = DEFAULT_MANGALMM_DEBUG_EXPORT_LIMIT
         self._debug_export_counter = count(1)
@@ -176,6 +192,47 @@ class MangaLMMOCREngine(OCREngine):
             config.get("top_k", DEFAULT_MANGALMM_TOP_K),
             DEFAULT_MANGALMM_TOP_K,
             bounds=(1, 256),
+        )
+        self.top_p = self._read_env_float(
+            "CT_MANGALMM_TOP_P",
+            config.get("top_p", DEFAULT_MANGALMM_TOP_P),
+            DEFAULT_MANGALMM_TOP_P,
+            minimum=0.0,
+            maximum=1.0,
+        )
+        self.min_p = self._read_env_float(
+            "CT_MANGALMM_MIN_P",
+            config.get("min_p", DEFAULT_MANGALMM_MIN_P),
+            DEFAULT_MANGALMM_MIN_P,
+            minimum=0.0,
+            maximum=1.0,
+        )
+        self.repeat_penalty = self._read_env_float(
+            "CT_MANGALMM_REPEAT_PENALTY",
+            config.get("repeat_penalty", DEFAULT_MANGALMM_REPEAT_PENALTY),
+            DEFAULT_MANGALMM_REPEAT_PENALTY,
+            minimum=0.0,
+            maximum=2.0,
+        )
+        self.repeat_last_n = self._read_env_int(
+            "CT_MANGALMM_REPEAT_LAST_N",
+            config.get("repeat_last_n", DEFAULT_MANGALMM_REPEAT_LAST_N),
+            DEFAULT_MANGALMM_REPEAT_LAST_N,
+            bounds=(0, 4096),
+        )
+        self.presence_penalty = self._read_env_float(
+            "CT_MANGALMM_PRESENCE_PENALTY",
+            config.get("presence_penalty", DEFAULT_MANGALMM_PRESENCE_PENALTY),
+            DEFAULT_MANGALMM_PRESENCE_PENALTY,
+            minimum=-2.0,
+            maximum=2.0,
+        )
+        self.frequency_penalty = self._read_env_float(
+            "CT_MANGALMM_FREQUENCY_PENALTY",
+            config.get("frequency_penalty", DEFAULT_MANGALMM_FREQUENCY_PENALTY),
+            DEFAULT_MANGALMM_FREQUENCY_PENALTY,
+            minimum=-2.0,
+            maximum=2.0,
         )
         debug_root_raw = os.getenv("CT_MANGALMM_DEBUG_ROOT", "").strip()
         self.debug_root = Path(debug_root_raw) if debug_root_raw else None
@@ -339,13 +396,19 @@ class MangaLMMOCREngine(OCREngine):
         request_image = self._resize_for_request(crop, resize_plan)
         raw_text = ""
         try:
-            raw_text = self._request_response_text(request_image, resize_plan.max_completion_tokens)
+            prompt_label, prompt_text = self._prompt_for_resize_plan(resize_plan)
+            raw_text = self._request_response_text(
+                request_image,
+                max_completion_tokens=resize_plan.max_completion_tokens,
+                prompt_text=prompt_text,
+            )
             analysis = self._analyze_region_payload(raw_text)
         except (LocalServiceConnectionError, LocalServiceResponseError) as exc:
             self.last_request_metadata = {
                 "original_shape": list(resize_plan.original_shape),
                 "request_shape": list(resize_plan.request_shape),
                 "resize_profile": resize_plan.profile,
+                "prompt_mode": prompt_label,
                 "scale_x": resize_plan.scale_x,
                 "scale_y": resize_plan.scale_y,
                 "base_scale": resize_plan.base_scale,
@@ -376,6 +439,7 @@ class MangaLMMOCREngine(OCREngine):
             "original_shape": list(resize_plan.original_shape),
             "request_shape": list(resize_plan.request_shape),
             "resize_profile": resize_plan.profile,
+            "prompt_mode": prompt_label,
             "scale_x": resize_plan.scale_x,
             "scale_y": resize_plan.scale_y,
             "base_scale": resize_plan.base_scale,
@@ -792,20 +856,37 @@ class MangaLMMOCREngine(OCREngine):
 
         return mapped
 
-    def _request_response_text(self, image: np.ndarray, max_completion_tokens: int) -> str:
+    def _prompt_for_resize_plan(self, resize_plan: ResizePlan) -> tuple[str, str]:
+        if resize_plan.profile == "dense":
+            return ("dense_grounding_json", self.DENSE_PROMPT)
+        return ("standard_grounding", self.STANDARD_PROMPT)
+
+    def _request_response_text(
+        self,
+        image: np.ndarray,
+        *,
+        max_completion_tokens: int,
+        prompt_text: str,
+    ) -> str:
         data_url = self._image_data_url(image)
         payload = {
             "messages": [
                 {
                     "role": "user",
                     "content": [
-                        {"type": "text", "text": self.PROMPT},
                         {"type": "image_url", "image_url": {"url": data_url}},
+                        {"type": "text", "text": prompt_text},
                     ],
                 }
             ],
             "temperature": self.temperature,
             "top_k": self.top_k,
+            "top_p": self.top_p,
+            "min_p": self.min_p,
+            "repeat_penalty": self.repeat_penalty,
+            "repeat_last_n": self.repeat_last_n,
+            "presence_penalty": self.presence_penalty,
+            "frequency_penalty": self.frequency_penalty,
             "max_completion_tokens": int(max_completion_tokens),
         }
         data = self._send_request(payload)
@@ -1072,10 +1153,10 @@ class MangaLMMOCREngine(OCREngine):
     def _image_data_url(self, image: np.ndarray) -> str:
         image_bytes = self._encode_image(image)
         image_b64 = base64.b64encode(image_bytes).decode("ascii")
-        return f"data:image/jpeg;base64,{image_b64}"
+        return f"data:image/png;base64,{image_b64}"
 
     def _encode_image(self, image: np.ndarray) -> bytes:
-        success, encoded = cv2.imencode(".jpg", image)
+        success, encoded = cv2.imencode(".png", image)
         if not success:
             raise LocalServiceResponseError(
                 f"Failed to encode OCR image for {SERVICE_NAME}.",

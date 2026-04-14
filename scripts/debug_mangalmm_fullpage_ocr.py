@@ -22,6 +22,8 @@ from modules.detection.processor import TextBlockDetector
 from modules.ocr.mangalmm_ocr import (
     DEFAULT_MANGALMM_DEBUG_EXPORT_LIMIT,
     DEFAULT_MANGALMM_SERVER_URL,
+    DEFAULT_MANGALMM_TEMPERATURE,
+    DEFAULT_MANGALMM_TOP_K,
     MangaLMMOCREngine,
 )
 from modules.utils.ocr_debug import ensure_three_channel
@@ -234,14 +236,14 @@ def main() -> int:
     parser.add_argument(
         "--temperature",
         type=float,
-        default=0.0,
-        help="Sampling temperature. Default is 0.0.",
+        default=DEFAULT_MANGALMM_TEMPERATURE,
+        help=f"Sampling temperature. Default is {DEFAULT_MANGALMM_TEMPERATURE}.",
     )
     parser.add_argument(
         "--top-k",
         type=int,
-        default=1,
-        help="Top-k sampler value. Default is 1.",
+        default=DEFAULT_MANGALMM_TOP_K,
+        help=f"Top-k sampler value. Default is {DEFAULT_MANGALMM_TOP_K}.",
     )
     parser.add_argument(
         "--max-completion-tokens",
