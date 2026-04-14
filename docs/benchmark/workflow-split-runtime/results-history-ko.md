@@ -10,11 +10,28 @@
 
 ## Latest Output
 
-- current_status: `planning_scaffold_only`
+- current_status: `baseline_smoke_completed_with_blocked_stage_batched_candidates`
 - benchmark_family_created: `true`
-- measured_runs: `0`
-- requirement_1_status: `not_started`
+- measured_runs: `1`
+- requirement_1_status: `baseline_only_measured`
 - requirement_2_status: `blocked_by_requirement_1`
+- source_lang: `Japanese`
+- target_lang: `Korean`
+- corpus_root: `Sample/japan`
+- selected_files: `094.png, p_016.jpg`
+
+## Latest Suite
+
+- latest_suite_record: `banchmark_result_log/workflow-split-runtime/last_workflow_split_runtime_suite.json`
+- smoke: `True`
+- completed_scenarios: `baseline_legacy`
+- blocked_scenarios: `candidate_stage_batched_single_ocr, candidate_stage_batched_dual_resident`
+
+| scenario | status | report | timing | quality |
+| --- | --- | --- | --- | --- |
+| baseline_legacy | completed | `./banchmark_result_log/workflow-split-runtime/20260415_050150_baseline_legacy/report.md` | `./banchmark_result_log/workflow-split-runtime/20260415_050150_baseline_legacy/timing_summary.json` | `./banchmark_result_log/workflow-split-runtime/20260415_050150_baseline_legacy/quality_summary.json` |
+| candidate_stage_batched_single_ocr | blocked | `./banchmark_result_log/workflow-split-runtime/20260415_050749_candidate_stage_batched_single_ocr/report.md` | `./banchmark_result_log/workflow-split-runtime/20260415_050749_candidate_stage_batched_single_ocr/timing_summary.json` | `./banchmark_result_log/workflow-split-runtime/20260415_050749_candidate_stage_batched_single_ocr/quality_summary.json` |
+| candidate_stage_batched_dual_resident | blocked | `./banchmark_result_log/workflow-split-runtime/20260415_050749_candidate_stage_batched_dual_resident/report.md` | `./banchmark_result_log/workflow-split-runtime/20260415_050749_candidate_stage_batched_dual_resident/timing_summary.json` | `./banchmark_result_log/workflow-split-runtime/20260415_050749_candidate_stage_batched_dual_resident/quality_summary.json` |
 
 ## Required Tables
 

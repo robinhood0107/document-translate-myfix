@@ -53,6 +53,7 @@ PRESET_DIRS = [
     ROOT / "benchmarks" / "ocr_combo_ranked" / "presets",
     ROOT / "benchmarks" / "ocr_simpletest_mangalmm_vs_paddle" / "presets",
     ROOT / "benchmarks" / "inpaint_ctd" / "presets",
+    ROOT / "benchmarks" / "workflow_split_runtime" / "presets",
 ]
 OCR_BUNDLE_DIR = ROOT / "paddleocr_vl_docker_files"
 HUNYUAN_OCR_BUNDLE_DIR = ROOT / "hunyuanocr_docker_files"
@@ -217,6 +218,7 @@ def ensure_compose_groups_health_first(
 ) -> list[dict[str, Any]]:
     group_reports: list[dict[str, Any]] = []
     for group in groups:
+        group_checked_at = time.time()
         failures = [url for url in group["health_urls"] if not url_available(url, timeout_sec=quick_timeout_sec)]
         if not failures:
             if log_fn:
@@ -231,6 +233,16 @@ def ensure_compose_groups_health_first(
                     "container_names": group["container_names"],
                     "health_urls": group["health_urls"],
                     "failed_urls": [],
+                    "checked_at": group_checked_at,
+                    "ready_at": time.time(),
+                    "quick_check_timeout_sec": quick_timeout_sec,
+                    "quick_failed_url_count": 0,
+                    "compose_up_started_at": None,
+                    "compose_up_finished_at": None,
+                    "compose_up_elapsed_sec": 0.0,
+                    "health_wait_started_at": None,
+                    "health_wait_finished_at": None,
+                    "health_wait_elapsed_sec": 0.0,
                 }
             )
             continue
@@ -247,10 +259,12 @@ def ensure_compose_groups_health_first(
                         failed=failures,
                     )
                 )
+            wait_started_at = time.time()
             waited_failures = wait_for_health_urls(
                 group["health_urls"],
                 timeout_sec=boot_timeout_sec,
             )
+            wait_finished_at = time.time()
             if not waited_failures:
                 group_reports.append(
                     {
@@ -260,6 +274,16 @@ def ensure_compose_groups_health_first(
                         "health_urls": group["health_urls"],
                         "failed_urls": failures,
                         "preexisting_container_names": preexisting,
+                        "checked_at": group_checked_at,
+                        "ready_at": wait_finished_at,
+                        "quick_check_timeout_sec": quick_timeout_sec,
+                        "quick_failed_url_count": len(failures),
+                        "compose_up_started_at": None,
+                        "compose_up_finished_at": None,
+                        "compose_up_elapsed_sec": 0.0,
+                        "health_wait_started_at": wait_started_at,
+                        "health_wait_finished_at": wait_finished_at,
+                        "health_wait_elapsed_sec": round(wait_finished_at - wait_started_at, 3),
                     }
                 )
                 continue
@@ -283,16 +307,20 @@ def ensure_compose_groups_health_first(
                     )
                 )
 
+        compose_up_started_at = time.time()
         compose_up_detached(
             group["compose_path"],
             cwd=group.get("cwd"),
             project_directory=group.get("project_directory"),
             force_recreate=bool(preexisting),
         )
+        compose_up_finished_at = time.time()
+        health_wait_started_at = time.time()
         post_failures = wait_for_health_urls(
             group["health_urls"],
             timeout_sec=boot_timeout_sec,
         )
+        health_wait_finished_at = time.time()
         if post_failures:
             raise RuntimeError(
                 "Managed runtime health-first launch failed for group "
@@ -306,6 +334,16 @@ def ensure_compose_groups_health_first(
                 "health_urls": group["health_urls"],
                 "failed_urls": failures,
                 "preexisting_container_names": preexisting,
+                "checked_at": group_checked_at,
+                "ready_at": health_wait_finished_at,
+                "quick_check_timeout_sec": quick_timeout_sec,
+                "quick_failed_url_count": len(failures),
+                "compose_up_started_at": compose_up_started_at,
+                "compose_up_finished_at": compose_up_finished_at,
+                "compose_up_elapsed_sec": round(compose_up_finished_at - compose_up_started_at, 3),
+                "health_wait_started_at": health_wait_started_at,
+                "health_wait_finished_at": health_wait_finished_at,
+                "health_wait_elapsed_sec": round(health_wait_finished_at - health_wait_started_at, 3),
             }
         )
     return group_reports

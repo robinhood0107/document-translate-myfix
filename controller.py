@@ -1103,7 +1103,35 @@ class ComicTranslate(ComicTranslateUI):
         if preview_path:
             self._last_runtime_preview_path = preview_path
         self._ensure_automatic_progress_dialog().update_event(event)
+        self._emit_runtime_progress_memlog(event)
         self._log_runtime_progress(event)
+
+    def _emit_runtime_progress_memlog(self, event: dict):
+        if not isinstance(event, dict):
+            return
+        try:
+            self.emit_memlog(
+                "runtime_progress",
+                phase=event.get("phase", ""),
+                service=event.get("service", ""),
+                status=event.get("status", ""),
+                step_key=event.get("step_key", ""),
+                stage_name=event.get("stage_name", ""),
+                message=event.get("message", ""),
+                detail=event.get("detail", ""),
+                page_index=event.get("page_index"),
+                page_total=event.get("page_total"),
+                total_images=event.get("page_total"),
+                image_name=event.get("image_name", ""),
+                image_path=event.get("image_path", ""),
+                preview_path=event.get("preview_path", ""),
+                elapsed_sec=event.get("elapsed_sec"),
+                eta_sec=event.get("eta_sec"),
+                panel_state=event.get("panel_state", ""),
+                panel_message_level=event.get("panel_message_level", ""),
+            )
+        except Exception:
+            logger.debug("Failed to emit runtime progress memlog event.", exc_info=True)
 
     def _log_runtime_progress(self, event: dict):
         logger.info(

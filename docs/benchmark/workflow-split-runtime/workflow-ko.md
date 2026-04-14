@@ -3,8 +3,9 @@
 ## execution_scope
 
 - family: `workflow-split-runtime`
-- corpus: `Sample/japan_vllm_parallel_subset`
+- corpus: `Sample/japan`
 - pages: `13`
+- smoke: `094.png`, `p_016.jpg`
 - requirement_gate:
   - Requirement 1 먼저
   - Requirement 2는 Requirement 1 성공 후
@@ -14,9 +15,9 @@
 1. 기존 레거시 페이지 단위 파이프라인 baseline 확보
 2. 현재 파이프라인의 detect/OCR/translation/inpaint runtime 진입점 정리
 3. 단계형 워크플로우 후보 정의
-   - legacy page pipeline
-   - stage-batched pipeline with single OCR runtime
-   - stage-batched pipeline with dual-resident OCR candidate
+   - `baseline_legacy`
+   - `candidate_stage_batched_single_ocr`
+   - `candidate_stage_batched_dual_resident`
 4. 체크포인트별 timing과 runtime snapshot 수집
 5. Docker compose / health / reuse / timeout / retry 분해
 6. 품질 동등성 검토
@@ -24,22 +25,26 @@
 
 ## Requirement 1 체크포인트
 
-1. 작업 시작 시각
+1. batch run start/end
 2. detect stage start/end
-3. OCR compose up 요청
+3. OCR compose up start/end
 4. OCR health wait start/end
-5. MangaLMM 준비 완료
-6. PaddleOCR VL 준비 완료
-7. OCR 실제 처리 start/end
-8. OCR 전체 stage end
-9. Gemma compose up 요청
-10. Gemma health wait start/end
-11. translation 실제 처리 start/end
-12. translation 전체 stage end
-13. inpaint start/end
-14. render/export start/end
-15. batch 전체 완료
-16. timeout / retry / restart / reuse hit 모든 이벤트
+5. OCR runtime reuse hit
+6. OCR actual start/end
+7. translation compose up start/end
+8. translation health wait start/end
+9. Gemma runtime reuse hit
+10. translation actual start/end
+11. inpaint stage start/end
+12. render/export stage start/end
+13. page done / page failed
+14. timeout / retry / restart / reuse hit 모든 이벤트
+
+## 현재 구현 상태
+
+1. family runner / preset / BAT / report generator는 구현되었다.
+2. `baseline_legacy`는 실제 offscreen app pipeline으로 바로 실행 가능하다.
+3. `candidate_stage_batched_single_ocr`와 `candidate_stage_batched_dual_resident`는 결과 파일 구조까지는 잠겼지만, 아직 experimental runner가 없어 blocked 계약 run으로 기록된다.
 
 ## Requirement 2 실행 순서
 
@@ -58,7 +63,7 @@
 2. 프로젝트 명세/결정 로그 갱신
 3. problem solving spec 생성 또는 갱신
 4. results history 업데이트
-5. report placeholder 업데이트
+5. generated report 업데이트
 
 ## develop 승격 흐름
 
