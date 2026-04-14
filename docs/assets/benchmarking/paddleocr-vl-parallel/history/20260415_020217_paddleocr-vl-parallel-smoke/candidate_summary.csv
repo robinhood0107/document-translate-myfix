@@ -1,0 +1,4 @@
+candidate_key,scheduler_mode,parallel_workers,measured_ocr_total_sec_median,measured_detect_ocr_total_sec_median,measured_ocr_page_p95_sec_median,measured_gpu_peak_used_mb_median,measured_gpu_floor_free_mb_median,measured_page_failed_count_max,measured_ocr_empty_block_count_median,quality_mean_cer,quality_mean_exact_match,quality_gate_pass
+fixed_w8,fixed,8,305.231,348.749,43.893,11828,172,0,0,0.0,1.0,True
+fixed_area_desc_w8,fixed_area_desc,8,290.731,298.464,39.859,10404,1596,0,0,0.0011,0.9953,False
+auto_v1_cap4,auto_v1,4,292.363,298.169,41.442,10402,1598,0,0,0.0011,0.9953,False

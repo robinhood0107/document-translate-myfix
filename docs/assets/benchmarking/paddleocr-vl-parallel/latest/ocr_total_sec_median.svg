@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="980" height="170" viewBox="0 0 980 170" role="img" aria-label="OCR Total Median by Candidate">
+<rect width="100%" height="100%" fill="#ffffff"/>
+<text x="20" y="32" font-size="20" font-family="Segoe UI, Arial, sans-serif" fill="#111111">OCR Total Median by Candidate</text>
+<text x="20" y="50" font-size="12" font-family="Segoe UI, Arial, sans-serif" fill="#555555">Blue = baseline, Green = quality gate pass, Red = quality gate fail</text>
+<text x="20" y="76" font-size="12" font-family="Consolas, Menlo, monospace" fill="#222222">fixed_w8</text>
+<rect x="250" y="62" width="620" height="14" rx="4" fill="#eef2f7"/>
+<rect x="250" y="62" width="620.00" height="14" rx="4" fill="#1565c0"/>
+<text x="880" y="74" font-size="12" font-family="Segoe UI, Arial, sans-serif" fill="#222222">305.2310s</text>
+<text x="20" y="106" font-size="12" font-family="Consolas, Menlo, monospace" fill="#222222">fixed_area_desc_w8</text>
+<rect x="250" y="92" width="620" height="14" rx="4" fill="#eef2f7"/>
+<rect x="250" y="92" width="590.55" height="14" rx="4" fill="#b71c1c"/>
+<text x="880" y="104" font-size="12" font-family="Segoe UI, Arial, sans-serif" fill="#222222">290.7310s</text>
+<text x="20" y="136" font-size="12" font-family="Consolas, Menlo, monospace" fill="#222222">auto_v1_cap4</text>
+<rect x="250" y="122" width="620" height="14" rx="4" fill="#eef2f7"/>
+<rect x="250" y="122" width="593.86" height="14" rx="4" fill="#b71c1c"/>
+<text x="880" y="134" font-size="12" font-family="Segoe UI, Arial, sans-serif" fill="#222222">292.3630s</text>
+</svg>
