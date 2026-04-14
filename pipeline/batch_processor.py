@@ -792,6 +792,7 @@ class BatchProcessor:
                 try:
                     cache_status = "miss"
                     attempt_count = 0
+                    ocr_page_profile: dict = {}
                     # Runtime startup for local OCR can fail here (e.g. missing Docker image).
                     # Keep it inside the per-page OCR error path so the batch report captures it.
                     self.ocr_handler.ocr.initialize(self.main_page, source_lang)
@@ -807,6 +808,7 @@ class BatchProcessor:
                     else:
                         logger.info("ocr cache miss: running OCR for %d blocks", len(blk_list))
                         self.ocr_handler.ocr.process(image, blk_list)
+                        ocr_page_profile = dict(getattr(self.ocr_handler.ocr, "last_page_profile", {}) or {})
                         apply_ocr_result_dictionary(
                             blk_list,
                             settings_page.get_ocr_result_dictionary_rules(),
@@ -828,6 +830,7 @@ class BatchProcessor:
                         for blk in blk_list:
                             blk.text = ""
                         self.ocr_handler.ocr.process(image, blk_list)
+                        ocr_page_profile = dict(getattr(self.ocr_handler.ocr, "last_page_profile", {}) or {})
                         apply_ocr_result_dictionary(
                             blk_list,
                             settings_page.get_ocr_result_dictionary_rules(),
@@ -882,6 +885,7 @@ class BatchProcessor:
                         ocr_engine=self.ocr_handler.ocr.last_engine_name or "",
                         cache_status=cache_status,
                         attempt_count=attempt_count,
+                        ocr_page_profile=ocr_page_profile,
                         **page_ocr_metrics,
                     )
                     
@@ -914,6 +918,7 @@ class BatchProcessor:
                         total_images=total_images,
                         failed_stage="ocr",
                         reason=err_msg,
+                        ocr_page_profile=ocr_page_profile,
                         **page_ocr_metrics,
                     )
                     self.main_page.image_ctrl.mark_processing_stage(
