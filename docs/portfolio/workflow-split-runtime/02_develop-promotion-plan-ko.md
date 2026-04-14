@@ -30,6 +30,33 @@
 5. regression 확인
 6. 번역 자산 갱신
 
+## 브랜치 계획
+
+1. 시작점
+   - benchmark family와 full evidence는 `benchmarking/lab`에서 먼저 정리한다.
+2. Requirement 1 제품 승격
+   - 분기: `develop -> feature/workflow-split-runtime`
+   - 범위: 포트폴리오형 요약 문서 + 제품 코드 + UI/i18n
+   - 목표 머지: `feature/workflow-split-runtime -> develop`
+3. Requirement 2 제품 승격
+   - 전제: Requirement 1 성공
+   - 분기: `develop -> feature/hybrid-ocr-selector`
+   - 범위: selector runtime + dual-resident OCR policy + selector logging + UI/i18n
+   - 목표 머지: `feature/hybrid-ocr-selector -> develop`
+
+## 현재 진행 상태
+
+- `benchmarking/lab` 반영: 완료
+- `feature/workflow-split-runtime` 문서 기준선: 로컬 커밋 완료
+- `feature/workflow-split-runtime` 원격 publish: pre-push 정책 확인 필요
+- 제품 코드 구현: 아직 시작 전
+
+## 현재 블로커와 대응
+
+1. 첫 push 훅이 upstream 부재 상태에서 branch publish 절차를 엄격하게 검사한다.
+2. 블로커가 해소되면 문서 기준선을 먼저 원격에 publish하고, 이후 제품 코드 구현 단계로 넘어간다.
+3. Requirement 1 실측 결과가 없으면 제품 승격 범위는 문서/설계 준비 단계에서 멈춘다.
+
 ## 성공 조건
 
 - 사용자가 설정창에서 두 workflow를 선택할 수 있다.
