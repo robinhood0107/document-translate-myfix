@@ -27,6 +27,7 @@ class OCRProcessor:
         self.source_lang_english = None
         self.last_engine_name = None
         self.last_device = None
+        self.last_page_profile = {}
         
     def initialize(self, main_page: Any, source_lang: str) -> None:
         """
@@ -60,6 +61,7 @@ class OCRProcessor:
             ).__class__.__name__
         except Exception:
             self.last_engine_name = None
+        self.last_page_profile = {}
         
     def _get_english_lang(self, translated_lang: str) -> str:
         return self.main_page.lang_mapping.get(translated_lang, translated_lang)
@@ -93,7 +95,9 @@ class OCRProcessor:
             self.last_device,
             len(blk_list or []),
         )
-        return engine.process_image(img, blk_list)
+        result = engine.process_image(img, blk_list)
+        self.last_page_profile = dict(getattr(engine, "last_page_profile", {}) or {})
+        return result
             
     def _set_source_language(self, blk_list: list[TextBlock]) -> None:
         source_lang_code = language_codes.get(self.source_lang_english, 'en')

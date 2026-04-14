@@ -1,0 +1,45 @@
+{
+  "status": "completed",
+  "family": "paddleocr_vl_parallel",
+  "suite_dir": "./banchmark_result_log/paddleocr_vl_parallel/20260415_020217_paddleocr-vl-parallel-smoke",
+  "sample_dir": "./Sample/japan_vllm_parallel_subset",
+  "page_count": 13,
+  "smoke": true,
+  "warmup_runs": 0,
+  "measured_runs": 1,
+  "candidate_keys": [
+    "fixed_w8",
+    "fixed_area_desc_w8",
+    "auto_v1_cap4"
+  ],
+  "completed_candidate_keys": [
+    "fixed_w8",
+    "fixed_area_desc_w8",
+    "auto_v1_cap4"
+  ],
+  "winner": {
+    "candidate_key": "fixed_w8",
+    "label": "fixed workers=8",
+    "scheduler_mode": "fixed",
+    "parallel_workers": 8,
+    "warmup_run_dirs": [],
+    "measured_run_dirs": [
+      "./banchmark_result_log/paddleocr_vl_parallel/20260415_020217_paddleocr-vl-parallel-smoke/fixed_w8/measured_r1"
+    ],
+    "warmup_count": 0,
+    "measured_count": 1,
+    "measured_elapsed_sec_median": 352.699,
+    "measured_ocr_total_sec_median": 305.231,
+    "measured_detect_ocr_total_sec_median": 348.749,
+    "measured_ocr_page_p95_sec_median": 43.893,
+    "measured_gpu_peak_used_mb_median": 11828,
+    "measured_gpu_floor_free_mb_median": 172,
+    "measured_page_failed_count_max": 0,
+    "measured_ocr_empty_block_count_median": 0,
+    "quality_mean_cer": 0.0,
+    "quality_mean_exact_match": 1.0,
+    "quality_hard_gate_failures": [],
+    "quality_gate_pass": true,
+    "quality_gate_failures": []
+  }
+}

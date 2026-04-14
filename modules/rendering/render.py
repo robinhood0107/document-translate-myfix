@@ -1,11 +1,13 @@
 import logging
 import numpy as np
+import html
 from typing import Tuple, List
 import unicodedata
+from functools import lru_cache
 
 from PIL import Image, ImageFont, ImageDraw
 from PySide6.QtGui import QFont, QFontMetrics, QTextDocument,\
-      QTextCursor, QTextBlockFormat, QTextOption
+      QTextCursor, QTextBlockFormat, QTextOption, QFontDatabase
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QApplication
 
@@ -15,7 +17,11 @@ from modules.utils.textblock import adjust_blks_size
 from modules.detection.utils.geometry import shrink_bbox
 from app.ui.canvas.text.vertical_layout import VerticalTextDocumentLayout
 from modules.utils.language_utils import get_language_code
-from modules.utils.text_normalization import DECORATIVE_NOISE_GLYPHS, canonicalize_ellipsis_runs
+from modules.utils.text_normalization import (
+    OCR_DECORATIVE_NOISE_GLYPHS,
+    RENDER_NORMALIZABLE_GLYPHS,
+    canonicalize_ellipsis_runs,
+)
 
 from dataclasses import dataclass
 
@@ -41,6 +47,35 @@ class TextRenderingSettings:
     underline: bool
     line_spacing: str
     direction: Qt.LayoutDirection
+
+
+@dataclass
+class RenderSanitizationResult:
+    raw_text: str
+    text: str
+    normalization_applied: bool
+    reasons: list[str]
+    replacements: list[dict]
+
+
+@dataclass
+class RenderMarkupResult:
+    text: str
+    html_text: str
+    html_applied: bool
+    reasons: list[str]
+    fallback_font_family: str
+    replacements: list[dict]
+
+
+RENDER_SYMBOL_FALLBACK_FONT_CANDIDATES = (
+    "Malgun Gothic",
+    "Yu Gothic UI",
+    "Meiryo",
+    "MS Gothic",
+    "Segoe UI Symbol",
+    "Segoe UI Emoji",
+)
 
 def array_to_pil(rgb_image: np.ndarray):
     # Image is already in RGB format, just convert to PIL
@@ -79,27 +114,67 @@ def _render_font_supports(metrics: QFontMetrics, ch: str) -> bool:
         return metrics.inFont(ch)
 
 
-def sanitize_render_text(
+def _canonicalize_render_symbol_variants(text: str) -> str:
+    if not text:
+        return ""
+    return (
+        text.replace("❤︎", "♥")
+        .replace("❤️", "♥")
+        .replace("❤", "♥")
+        .replace("♡", "♥")
+    )
+
+
+@lru_cache(maxsize=1)
+def resolve_render_symbol_fallback_font_family() -> str:
+    database = QFontDatabase()
+    families = {family.casefold(): family for family in database.families()}
+    required_chars = tuple(sorted(RENDER_NORMALIZABLE_GLYPHS))
+    for candidate in RENDER_SYMBOL_FALLBACK_FONT_CANDIDATES:
+        actual = families.get(candidate.casefold())
+        if not actual:
+            continue
+        metrics = QFontMetrics(QFont(actual, 12))
+        if all(_render_font_supports(metrics, ch) for ch in required_chars):
+            return actual
+    return ""
+
+
+def describe_render_text_sanitization(
     text: str,
     font_family: str,
     *,
     block_index: int | None = None,
     image_path: str = "",
-) -> str:
+) -> RenderSanitizationResult:
     if not text:
-        return ""
+        return RenderSanitizationResult("", "", False, [], [])
 
-    sanitized = canonicalize_ellipsis_runs(text)
+    raw_text = str(text or "")
+    sanitized = canonicalize_ellipsis_runs(_canonicalize_render_symbol_variants(raw_text))
     effective_family = font_family.strip() if isinstance(font_family, str) and font_family.strip() else QApplication.font().family()
     metrics = QFontMetrics(QFont(effective_family, 12))
+    symbol_fallback_family = resolve_render_symbol_fallback_font_family()
     cleaned_parts: list[str] = []
+    replacements: list[dict] = []
+    reasons: list[str] = []
 
-    for ch in sanitized:
+    for index, ch in enumerate(sanitized):
         replacement = ch
         reason = ""
-        if ch in DECORATIVE_NOISE_GLYPHS:
+        if ch in OCR_DECORATIVE_NOISE_GLYPHS:
             replacement = ""
             reason = "decorative-noise"
+        elif (
+            ch in {"「", "」", "『", "』"}
+            and not symbol_fallback_family
+            and not _render_font_supports(metrics, ch)
+        ):
+            replacement = "\""
+            reason = "quote-to-ascii"
+        elif ch == "♥" and not symbol_fallback_family and not _render_font_supports(metrics, ch):
+            replacement = ""
+            reason = "heart-dropped"
         elif ch not in {"\n", "\r", "\t"} and not _render_font_supports(metrics, ch):
             category = unicodedata.category(ch)
             if ch in {"…", "⋯"}:
@@ -120,9 +195,82 @@ def sanitize_render_text(
                 reason or "render-normalization",
                 effective_family,
             )
+            reasons.append(reason or "render-normalization")
+            replacements.append(
+                {
+                    "index": int(index),
+                    "char": ch,
+                    "replacement": replacement,
+                    "reason": reason or "render-normalization",
+                }
+            )
         cleaned_parts.append(replacement)
 
-    return "".join(cleaned_parts)
+    normalized = "".join(cleaned_parts)
+    return RenderSanitizationResult(
+        raw_text=raw_text,
+        text=normalized,
+        normalization_applied=bool(replacements),
+        reasons=sorted(set(reasons)),
+        replacements=replacements,
+    )
+
+
+def describe_render_text_markup(text: str) -> RenderMarkupResult:
+    if not text:
+        return RenderMarkupResult("", "", False, [], "", [])
+
+    raw_text = str(text or "")
+    fallback_font_family = resolve_render_symbol_fallback_font_family()
+    if not fallback_font_family:
+        return RenderMarkupResult(raw_text, raw_text, False, [], "", [])
+
+    html_parts: list[str] = []
+    replacements: list[dict] = []
+    for index, ch in enumerate(raw_text):
+        if ch == "\n":
+            html_parts.append("<br/>")
+            continue
+        escaped = html.escape(ch)
+        if ch in RENDER_NORMALIZABLE_GLYPHS:
+            html_parts.append(
+                f'<span style="font-family:\'{html.escape(fallback_font_family, quote=True)}\';">{escaped}</span>'
+            )
+            replacements.append(
+                {
+                    "index": int(index),
+                    "char": ch,
+                    "replacement": ch,
+                    "reason": "symbol-fallback-font",
+                }
+            )
+        else:
+            html_parts.append(escaped)
+
+    html_text = "".join(html_parts)
+    return RenderMarkupResult(
+        text=raw_text,
+        html_text=html_text,
+        html_applied=bool(replacements),
+        reasons=["symbol-fallback-font"] if replacements else [],
+        fallback_font_family=fallback_font_family if replacements else "",
+        replacements=replacements,
+    )
+
+
+def sanitize_render_text(
+    text: str,
+    font_family: str,
+    *,
+    block_index: int | None = None,
+    image_path: str = "",
+) -> str:
+    return describe_render_text_sanitization(
+        text,
+        font_family,
+        block_index=block_index,
+        image_path=image_path,
+    ).text
 
 def pil_word_wrap(image: Image, tbbox_top_left: Tuple, font_pth: str, text: str, 
                   roi_width, roi_height, align: str, spacing, init_font_size: int, min_font_size: int = 10):
@@ -460,7 +608,13 @@ def manual_wrap(
             min_font_size,
             vertical
         )
-        
+        render_markup = describe_render_text_markup(translation)
+        blk._render_text = str(translation or "")
+        blk._render_html = str(
+            render_markup.html_text if render_markup.html_applied else translation or ""
+        )
+        blk._render_html_applied = bool(render_markup.html_applied)
+        blk._render_fallback_font_family = str(render_markup.fallback_font_family or "")
         main_page.blk_rendered.emit(translation, font_size, blk, image_path)
 
 
