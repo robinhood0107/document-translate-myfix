@@ -22,6 +22,7 @@ uv.lock
 
 # Test files
 test_*.py
+!tests/test_*.py
 demo_*.py
 
 # Tooling / caches
@@ -34,6 +35,7 @@ htmlcov/
 .DS_Store
 
 #ai models
+/models/
 testmodel
 /Sample/
 /banchmark_result_log/

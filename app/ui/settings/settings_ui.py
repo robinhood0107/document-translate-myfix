@@ -18,10 +18,12 @@ from .gemma_local_server_page import GemmaLocalServerPage
 from .credentials_page import CredentialsPage
 from .llms_page import LlmsPage
 from .text_rendering_page import TextRenderingPage
+from .notifications_page import NotificationsPage
 from .project_page import ProjectPage
 from .export_page import ExportPage
 from .shortcuts_page import ShortcutsPage
 from .about_page import AboutPage
+from .user_dictionaries_page import UserDictionariesPage
 
 
 class CurrentPageStack(QtWidgets.QStackedWidget):
@@ -154,6 +156,9 @@ class SettingsPageUI(QtWidgets.QWidget):
             # Detector mappings
             "RT-DETR-v2": "RT-DETR-v2",
 
+            # Fixed automatic runtime mapping
+            self.tr("RT-DETR-v2 + Legacy BBox Rescue + Source LaMa"): "rtdetr_legacy_bbox_source_lama",
+
             # HD Strategy mappings
             self.tr("Resize"): "Resize",
             self.tr("Original"): "Original",
@@ -177,7 +182,8 @@ class SettingsPageUI(QtWidgets.QWidget):
             self.tr("Yandex"): "Yandex",
         }
 
-        # Create reverse mappings for loading.\n        # Deprecated aliases like "LaMa" should not override canonical UI labels.
+        # Create reverse mappings for loading.
+        # Deprecated aliases like "LaMa" should not override canonical UI labels.
         self.reverse_mappings = {v: k for k, v in self.value_mappings.items()}
         self.reverse_mappings["AOT"] = "AOT"
         self.reverse_mappings["lama_large_512px"] = "lama_large_512px"
@@ -222,6 +228,8 @@ class SettingsPageUI(QtWidgets.QWidget):
         self.text_rendering_page = TextRenderingPage(parent=self)
         self.project_page = ProjectPage(parent=self)
         self.export_page = ExportPage(parent=self)
+        self.user_dictionaries_page = UserDictionariesPage(parent=self)
+        self.notifications_page = NotificationsPage(parent=self)
         self.shortcuts_page = ShortcutsPage(parent=self)
         self.about_page = AboutPage(parent=self)
 
@@ -235,15 +243,6 @@ class SettingsPageUI(QtWidgets.QWidget):
         self.ocr_combo = self.tools_page.ocr_combo
         self.detector_combo = self.tools_page.detector_combo
         self.inpainter_combo = self.tools_page.inpainter_combo
-        self.mask_refiner_combo = self.tools_page.mask_refiner_combo
-        self.keep_existing_lines_checkbox = self.tools_page.keep_existing_lines_checkbox
-        self.ctd_detect_size_combo = self.tools_page.ctd_detect_size_combo
-        self.ctd_det_rearrange_max_batches_combo = self.tools_page.ctd_det_rearrange_max_batches_combo
-        self.ctd_device_combo = self.tools_page.ctd_device_combo
-        self.ctd_font_size_multiplier_spinbox = self.tools_page.ctd_font_size_multiplier_spinbox
-        self.ctd_font_size_max_spinbox = self.tools_page.ctd_font_size_max_spinbox
-        self.ctd_font_size_min_spinbox = self.tools_page.ctd_font_size_min_spinbox
-        self.ctd_mask_dilate_size_spinbox = self.tools_page.ctd_mask_dilate_size_spinbox
         self.inpainter_size_combo = self.tools_page.inpainter_size_combo
         self.inpainter_device_combo = self.tools_page.inpainter_device_combo
         self.inpainter_precision_combo = self.tools_page.inpainter_precision_combo
@@ -273,6 +272,10 @@ class SettingsPageUI(QtWidgets.QWidget):
         self.gemma_chunk_size_spinbox = self.gemma_local_server_page.chunk_size_spinbox
         self.gemma_max_completion_tokens_spinbox = self.gemma_local_server_page.max_completion_tokens_spinbox
         self.gemma_request_timeout_spinbox = self.gemma_local_server_page.request_timeout_spinbox
+        self.gemma_temperature_spinbox = self.gemma_local_server_page.temperature_spinbox
+        self.gemma_top_k_spinbox = self.gemma_local_server_page.top_k_spinbox
+        self.gemma_top_p_spinbox = self.gemma_local_server_page.top_p_spinbox
+        self.gemma_min_p_spinbox = self.gemma_local_server_page.min_p_spinbox
         self.gemma_raw_response_logging_checkbox = self.gemma_local_server_page.raw_response_logging_checkbox
 
         # Credentials
@@ -288,6 +291,11 @@ class SettingsPageUI(QtWidgets.QWidget):
         self.max_font_spinbox = self.text_rendering_page.max_font_spinbox
         self.font_browser = self.text_rendering_page.font_browser
         self.uppercase_checkbox = self.text_rendering_page.uppercase_checkbox
+        self.ocr_dictionary_table = self.user_dictionaries_page.ocr_dictionary_table
+        self.translation_dictionary_table = self.user_dictionaries_page.translation_dictionary_table
+        self.enable_completion_sound_checkbox = self.notifications_page.enable_completion_sound_checkbox
+        self.completion_sound_combo = self.notifications_page.completion_sound_combo
+        self.test_sound_button = self.notifications_page.test_sound_button
 
         # Export
         self.raw_text_checkbox = self.export_page.raw_text_checkbox
@@ -298,6 +306,18 @@ class SettingsPageUI(QtWidgets.QWidget):
         self.mask_overlay_checkbox = self.export_page.mask_overlay_checkbox
         self.cleanup_mask_delta_checkbox = self.export_page.cleanup_mask_delta_checkbox
         self.debug_metadata_checkbox = self.export_page.debug_metadata_checkbox
+        self.individual_format_widget = self.export_page.individual_format_widget
+        self.archive_format_widget = self.export_page.archive_format_widget
+        self.archive_image_format_widget = self.export_page.archive_image_format_widget
+        self.archive_level_widget = self.export_page.archive_level_widget
+        self.automatic_output_target_combo = self.export_page.automatic_output_target_combo
+        self.automatic_output_image_format_combo = self.export_page.automatic_output_image_format_combo
+        self.automatic_output_archive_format_combo = self.export_page.automatic_output_archive_format_combo
+        self.automatic_output_archive_image_format_combo = self.export_page.automatic_output_archive_image_format_combo
+        self.automatic_output_archive_level_spinbox = self.export_page.automatic_output_archive_level_spinbox
+        self.automatic_output_quality_note_label = self.export_page.automatic_output_quality_note_label
+        self.automatic_output_archive_note_label = self.export_page.automatic_output_archive_note_label
+        self.automatic_output_estimate_summary_label = self.export_page.automatic_output_estimate_summary_label
         self.project_autosave_interval_spinbox = self.project_page.project_autosave_interval_spinbox
         self.project_autosave_folder_input = self.project_page.project_autosave_folder_input
 
@@ -314,6 +334,8 @@ class SettingsPageUI(QtWidgets.QWidget):
         self.stacked_widget.addWidget(self.gemma_local_server_page)
         self.stacked_widget.addWidget(self.llms_page)
         self.stacked_widget.addWidget(self.text_rendering_page)
+        self.stacked_widget.addWidget(self.user_dictionaries_page)
+        self.stacked_widget.addWidget(self.notifications_page)
         self.stacked_widget.addWidget(self.project_page)
         self.stacked_widget.addWidget(self.export_page)
         self.stacked_widget.addWidget(self.shortcuts_page)
@@ -372,6 +394,8 @@ class SettingsPageUI(QtWidgets.QWidget):
             {"title": self.tr("Gemma Local Server Settings"), "avatar": MPixmap(".svg")},
             {"title": self.tr("LLMs"), "avatar": MPixmap(".svg")},
             {"title": self.tr("Text Rendering"), "avatar": MPixmap(".svg")},
+            {"title": self.tr("User Dictionaries"), "avatar": MPixmap(".svg")},
+            {"title": self.tr("Notifications"), "avatar": MPixmap(".svg")},
             {"title": self.tr("Project"), "avatar": MPixmap(".svg")},
             {"title": self.tr("Export"), "avatar": MPixmap(".svg")},
             {"title": self.tr("Shortcuts"), "avatar": MPixmap(".svg")},

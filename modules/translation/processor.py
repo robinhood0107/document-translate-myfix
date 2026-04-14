@@ -3,6 +3,7 @@ import numpy as np
 
 from ..utils.textblock import TextBlock
 from ..utils.device import resolve_device
+from .local_runtime import LocalGemmaRuntimeManager
 from .base import LLMTranslation
 from .factory import TranslationFactory
 
@@ -36,6 +37,17 @@ class Translator:
         self.source_lang_en = self._get_english_lang(main_page, self.source_lang)
         self.target_lang = target_lang
         self.target_lang_en = self._get_english_lang(main_page, self.target_lang)
+
+        if self.translator_key == "Custom Local Server(Gemma)":
+            runtime_manager = getattr(main_page, "local_translation_runtime_manager", None)
+            if not isinstance(runtime_manager, LocalGemmaRuntimeManager):
+                runtime_manager = LocalGemmaRuntimeManager()
+                main_page.local_translation_runtime_manager = runtime_manager
+            runtime_manager.ensure_server(
+                self.settings,
+                progress_callback=getattr(main_page, "report_runtime_progress", None),
+                cancel_checker=getattr(main_page, "is_current_task_cancelled", None),
+            )
         
         # Create appropriate engine using factory
         self.engine = TranslationFactory.create_engine(
@@ -65,7 +77,7 @@ class Translator:
             self.settings.ui.tr("Deepseek-v3"): "Deepseek-v3",
             self.settings.ui.tr("GPT-4.1"): "GPT-4.1",
             self.settings.ui.tr("GPT-4.1-mini"): "GPT-4.1-mini",
-            self.settings.ui.tr("Claude-4.5-Sonnet"): "Claude-4.5-Sonnet",
+            self.settings.ui.tr("Claude-4.6-Sonnet"): "Claude-4.6-Sonnet",
             self.settings.ui.tr("Claude-4.5-Haiku"): "Claude-4.5-Haiku",
             self.settings.ui.tr("Gemini-3.0-Flash"): "Gemini-3.0-Flash",
             self.settings.ui.tr("Gemini-2.5-Pro"): "Gemini-2.5-Pro",

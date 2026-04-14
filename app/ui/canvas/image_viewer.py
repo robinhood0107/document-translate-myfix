@@ -13,6 +13,7 @@ from .drawing_manager import DrawingManager
 from .webtoons.webtoon_manager import LazyWebtoonManager
 from .interaction_manager import InteractionManager
 from .event_handler import EventHandler
+from app.ui.commands.base import PatchCommandBase
 
 
 class ImageViewer(QGraphicsView):
@@ -21,6 +22,7 @@ class ImageViewer(QGraphicsView):
     rectangle_selected = Signal(QRectF)
     rectangle_deleted = Signal(QRectF)
     command_emitted = Signal(QtGui.QUndoCommand)
+    restore_stroke_requested = Signal(object)
     connect_rect_item = Signal(MoveableRectItem)
     connect_text_item =  Signal(TextBlockItem)
     page_changed = Signal(int)
@@ -152,10 +154,14 @@ class ImageViewer(QGraphicsView):
         self.current_tool = tool
         if tool == 'pan':
             self.setDragMode(QGraphicsView.ScrollHandDrag)
-        elif tool in ['brush', 'eraser']:
+        elif tool in ['brush', 'eraser', 'exclude', 'restore']:
             self.setDragMode(QGraphicsView.NoDrag)
             if tool == 'brush':
                 cursor = self.drawing_manager.brush_cursor
+            elif tool == 'exclude':
+                cursor = self.drawing_manager.exclude_cursor
+            elif tool == 'restore':
+                cursor = self.drawing_manager.restore_cursor
             else:
                 cursor =  self.drawing_manager.eraser_cursor
             self.setCursor(cursor)
@@ -201,9 +207,14 @@ class ImageViewer(QGraphicsView):
         return self.event_handler.handle_viewport_event(event)
 
     def set_br_er_size(self, size, scaled_size):
-        if self.current_tool == 'brush':
+        if self.current_tool in {'brush', 'exclude', 'restore'}:
             self.drawing_manager.set_brush_size(size, scaled_size)
-            self.setCursor(self.drawing_manager.brush_cursor)
+            if self.current_tool == 'exclude':
+                self.setCursor(self.drawing_manager.exclude_cursor)
+            elif self.current_tool == 'restore':
+                self.setCursor(self.drawing_manager.restore_cursor)
+            else:
+                self.setCursor(self.drawing_manager.brush_cursor)
         elif self.current_tool == 'eraser':
             self.drawing_manager.set_eraser_size(size, scaled_size)
             self.setCursor(self.drawing_manager.eraser_cursor)
@@ -283,12 +294,20 @@ class ImageViewer(QGraphicsView):
             painter.drawPixmap(0, 0, pixmap)
             
             # Updated patch detection logic - patches are now added directly to scene
+            patch_items = []
             for item in self._scene.items():
                 if isinstance(item, QGraphicsPixmapItem) and item != self.photo:
-                    # Check if this is a patch item (has the hash key data)
-                    if item.data(0) is not None:  # HASH_KEY = 0 from PatchCommandBase
-                        pos = item.pos()
-                        painter.drawPixmap(int(pos.x()), int(pos.y()), item.pixmap())
+                    if item.data(PatchCommandBase.HASH_KEY) is not None:
+                        patch_items.append(item)
+            patch_items.sort(
+                key=lambda item: (
+                    float(item.zValue()),
+                    int(item.data(PatchCommandBase.ORDER_KEY) or 0),
+                )
+            )
+            for item in patch_items:
+                pos = item.pos()
+                painter.drawPixmap(int(pos.x()), int(pos.y()), item.pixmap())
             painter.end()
         else:
             qimage = self.photo.pixmap().toImage()

@@ -13,6 +13,8 @@ SUPPORTED_SAVE_AS_EXTS = {'.pdf', '.cbz', '.cb7', '.zip'}
 _IMAGE_EXTENSIONS = ('.jpg', '.jpeg', '.png', '.bmp', '.webp')
 _PDF_CACHE_LOCK = threading.RLock()
 _PDF_CACHE: dict[str, dict] = {}
+_COMIC_CACHE_LOCK = threading.RLock()
+_COMIC_CACHE: dict[str, dict] = {}
 
 
 def close_pdf_cache(file_path: str | None = None) -> None:
@@ -38,6 +40,15 @@ def close_pdf_cache(file_path: str | None = None) -> None:
                     except Exception:
                         pass
             _PDF_CACHE.clear()
+
+
+def close_comic_cache(file_path: str | None = None) -> None:
+    with _COMIC_CACHE_LOCK:
+        if file_path is not None:
+            abs_path = os.path.abspath(file_path)
+            _COMIC_CACHE.pop(abs_path, None)
+        else:
+            _COMIC_CACHE.clear()
 
 def resolve_save_as_ext(input_archive_ext: str, save_as: str | None = None) -> str:
     """Resolve the output archive extension for auto-saved translated archives.
@@ -105,11 +116,96 @@ def _get_cached_pdf(file_path: str):
         return pdf, page_lock
 
 
+def _is_cbz_native_archive(file_lower: str) -> bool:
+    return file_lower.endswith((".cbz", ".cbr"))
+
+
+def _load_comic_archive(file_path: str):
+    from cbz import ComicInfo
+
+    file_lower = file_path.lower()
+    if file_lower.endswith(".cbz"):
+        return ComicInfo.from_cbz(file_path)
+    if file_lower.endswith(".cbr"):
+        return ComicInfo.from_cbr(file_path)
+    raise ValueError("Unsupported cbz-native comic format")
+
+
+def _get_cached_comic(file_path: str):
+    abs_path = os.path.abspath(file_path)
+    stat = os.stat(abs_path)
+    size = int(stat.st_size)
+    mtime_ns = int(stat.st_mtime_ns)
+
+    with _COMIC_CACHE_LOCK:
+        cached = _COMIC_CACHE.get(abs_path)
+        if cached and cached.get("size") == size and cached.get("mtime_ns") == mtime_ns:
+            return cached["comic"]
+
+        comic = _load_comic_archive(abs_path)
+        _COMIC_CACHE[abs_path] = {
+            "comic": comic,
+            "size": size,
+            "mtime_ns": mtime_ns,
+        }
+        return comic
+
+
+def _comic_entry_name(page_index: int, page_name: str, ext: str) -> str:
+    safe_name = os.path.basename(page_name or "").strip()
+    if not safe_name:
+        safe_name = f"page{page_index + 1:04d}{ext}"
+    return f"{page_index + 1:06d}_{safe_name}"
+
+
+def _list_cbz_native_entries(file_path: str) -> list[dict]:
+    comic = _get_cached_comic(file_path)
+    entries: list[dict] = []
+
+    for page_index, page in enumerate(comic):
+        page_name = str(getattr(page, "name", "") or "")
+        page_suffix = str(getattr(page, "suffix", "") or "")
+        ext = _safe_ext(page_suffix or page_name)
+        entries.append({
+            "kind": "archive_entry",
+            "entry_name": _comic_entry_name(page_index, page_name, ext),
+            "ext": ext,
+            "page_index": page_index,
+        })
+
+    return entries
+
+
+def _materialize_cbz_native_entry(file_path: str, entry: dict, output_path: str) -> bool:
+    page_index = int(entry.get("page_index", -1))
+    if page_index < 0:
+        return False
+
+    comic = _get_cached_comic(file_path)
+    if page_index >= len(comic):
+        return False
+
+    content = getattr(comic[page_index], "content", None)
+    if not isinstance(content, (bytes, bytearray)):
+        return False
+
+    out_dir = os.path.dirname(output_path)
+    if out_dir:
+        os.makedirs(out_dir, exist_ok=True)
+
+    with open(output_path, "wb") as dst:
+        dst.write(bytes(content))
+    return True
+
+
 def list_archive_image_entries(file_path: str) -> list[dict]:
     file_lower = file_path.lower()
     entries: list[dict] = []
 
-    if file_lower.endswith(('.cbz', '.zip', '.epub')):
+    if _is_cbz_native_archive(file_lower):
+        entries = _list_cbz_native_entries(file_path)
+
+    elif file_lower.endswith(('.zip', '.epub')):
         with zipfile.ZipFile(file_path, 'r') as archive:
             for name in archive.namelist():
                 if is_image_file(name):
@@ -119,7 +215,7 @@ def list_archive_image_entries(file_path: str) -> list[dict]:
                         "ext": _safe_ext(name),
                     })
 
-    elif file_lower.endswith(('.cbr', '.rar')):
+    elif file_lower.endswith(('.rar',)):
         import rarfile
         with rarfile.RarFile(file_path, 'r') as archive:
             for name in archive.namelist():
@@ -186,13 +282,16 @@ def materialize_archive_entry(file_path: str, entry: dict, output_path: str) -> 
     if out_dir:
         os.makedirs(out_dir, exist_ok=True)
 
-    if file_lower.endswith(('.cbz', '.zip', '.epub')):
+    if _is_cbz_native_archive(file_lower):
+        return _materialize_cbz_native_entry(file_path, entry, output_path)
+
+    if file_lower.endswith(('.zip', '.epub')):
         with zipfile.ZipFile(file_path, 'r') as archive:
             with archive.open(entry_name) as src, open(output_path, "wb") as dst:
                 shutil.copyfileobj(src, dst)
         return True
 
-    if file_lower.endswith(('.cbr', '.rar')):
+    if file_lower.endswith(('.rar',)):
         import rarfile
         with rarfile.RarFile(file_path, 'r') as archive:
             with archive.open(entry_name) as src, open(output_path, "wb") as dst:
@@ -241,7 +340,13 @@ def materialize_archive_entries(file_path: str, items: list[tuple[dict, str]]) -
                     completed += 1
         return completed
 
-    if file_lower.endswith(('.cbz', '.zip', '.epub')):
+    if _is_cbz_native_archive(file_lower):
+        for entry, output_path in items:
+            if _materialize_cbz_native_entry(file_path, entry, output_path):
+                completed += 1
+        return completed
+
+    if file_lower.endswith(('.zip', '.epub')):
         with zipfile.ZipFile(file_path, 'r') as archive:
             for entry, output_path in items:
                 entry_name = str(entry.get("entry_name", ""))
@@ -258,7 +363,7 @@ def materialize_archive_entries(file_path: str, items: list[tuple[dict, str]]) -
                     continue
         return completed
 
-    if file_lower.endswith(('.cbr', '.rar')):
+    if file_lower.endswith(('.rar',)):
         import rarfile
         with rarfile.RarFile(file_path, 'r') as archive:
             for entry, output_path in items:
@@ -388,13 +493,23 @@ def extract_archive(file_path: str, extract_to: str):
 
     return image_paths
 
-def make_cbz(input_dir, output_path='', output_dir='', output_base_name='', save_as_ext='.cbz'):
+def make_cbz(input_dir, output_path='', output_dir='', output_base_name='', save_as_ext='.cbz', compresslevel=None):
     if not output_path:
         output_path = os.path.join(output_dir, f"{output_base_name}_translated{save_as_ext}")
-    
-    with zipfile.ZipFile(output_path, 'w') as archive:
+
+    zip_kwargs = {"mode": "w"}
+    if compresslevel is None:
+        zip_kwargs["compression"] = zipfile.ZIP_STORED
+    elif int(compresslevel) <= 0:
+        zip_kwargs["compression"] = zipfile.ZIP_STORED
+    else:
+        zip_kwargs["compression"] = zipfile.ZIP_DEFLATED
+        zip_kwargs["compresslevel"] = max(1, min(9, int(compresslevel)))
+
+    with zipfile.ZipFile(output_path, **zip_kwargs) as archive:
         for root, dirs, files in os.walk(input_dir):
-            for file in files:
+            dirs.sort(key=natural_sort_key)
+            for file in sorted(files, key=natural_sort_key):
                 if is_image_file(file):
                     file_path = os.path.join(root, file)
                     archive.write(file_path, arcname=os.path.relpath(file_path, input_dir))
@@ -428,7 +543,7 @@ def make_pdf(input_dir, output_path="", output_dir="", output_base_name=""):
     with open(output_path, "wb") as f:
         f.write(img2pdf.convert(sorted_paths))
 
-def make(input_dir, output_path="", save_as_ext="", output_dir="", output_base_name=""):
+def make(input_dir, output_path="", save_as_ext="", output_dir="", output_base_name="", compresslevel=None):
     if not output_path and (not output_dir or not output_base_name):
         raise ValueError("Either output_path or both output_dir and output_base_name must be provided")
     
@@ -436,7 +551,14 @@ def make(input_dir, output_path="", save_as_ext="", output_dir="", output_base_n
         save_as_ext = os.path.splitext(output_path)[1]
 
     if save_as_ext in ['.cbz', '.zip']:
-        make_cbz(input_dir, output_path, output_dir, output_base_name, save_as_ext)
+        make_cbz(
+            input_dir,
+            output_path,
+            output_dir,
+            output_base_name,
+            save_as_ext,
+            compresslevel=compresslevel,
+        )
     elif save_as_ext == '.cb7':
         make_cb7(input_dir, output_path, output_dir, output_base_name)
     elif save_as_ext == '.pdf':

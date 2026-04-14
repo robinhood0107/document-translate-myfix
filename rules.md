@@ -6,15 +6,17 @@
 ## 1. 기본 원칙
 
 - `main`과 `develop`은 보호 브랜치다.
+- `main`, `develop`, `benchmarking/lab`은 장기 유지 브랜치이며 삭제 대상으로 취급하지 않는다.
 - 기능 개발은 반드시 별도 작업 브랜치에서만 한다.
 - 트래킹되는 코드 변경 전에 먼저 브랜치를 만든다.
 - 기능 단위 작업은 `커밋`과 `push`까지 끝나야 완료로 본다.
 - 사용자에게 보이는 UI를 바꾸면 문서, 번역, 필요 시 변경 이력까지 함께 갱신한다.
+- 애매한 점이 있거나 트레이드오프가 발생하면, 추천안과 근거를 함께 사용자에게 질문하고 결정한 뒤 진행한다.
 - 가상환경, 캐시, 임시 산출물은 Git에 올리지 않는다.
 
 ## 2. 브랜치 모델
 
-이 저장소는 엄격한 `main + develop` 모델을 사용한다.
+이 저장소는 엄격한 `main + develop + tag` 모델을 사용한다.
 
 - `main`
   - 배포 기준 브랜치
@@ -23,22 +25,24 @@
   - 통합 기준 브랜치
   - 일반 기능은 모두 이 브랜치로 PR
   - 직접 커밋, 직접 push 금지
-- `release/<version>`
-  - 릴리스 준비 브랜치
-  - `develop`에서 분기 후 안정화
-  - 검증 후 `main`에 병합하고, 다시 `develop`에도 반영
+- `benchmarking/lab`
+  - benchmark 전용 장기 유지 브랜치
+  - benchmark preset, runner, 보고서, 차트, generated asset은 이 브랜치에만 유지
+  - 직접 제품 승격 브랜치로 간주하지 않으며, 검증된 제품 변경만 별도 작업 브랜치로 다시 승격
 - 작업 브랜치
-  - `codex/feature/<slug>`
-  - `codex/fix/<slug>`
-  - `codex/chore/<slug>`
-  - `codex/hotfix/<slug>`
-  - `benchmarking/lab`
+  - `feature/<slug>`
+  - `fix/<slug>`
+  - `chore/<slug>`
+  - `hotfix/<slug>`
+
+릴리스는 별도 `release/*` 브랜치가 아니라 `main`에 머지된 커밋에 버전 태그(`vX.Y.Z`)를 달아 발행한다.
+`codex/` 접두사는 더 이상 사용하지 않는다.
 
 ### 병합 대상
 
-- 일반 기능/수정: `codex/*` -> `develop`
-- 릴리스: `release/<version>` -> `main`, 이후 `develop` 백머지
-- 긴급 수정: `codex/hotfix/<slug>` -> `main`, 이후 `develop` 백머지
+- 일반 기능/수정: `feature/*`, `fix/*`, `chore/*` -> `develop`
+- 긴급 수정: `hotfix/<slug>` -> `main`, 이후 `main` -> `develop` 백머지
+- 릴리스 발행: `main` 머지 후 버전 태그 생성 -> GitHub Release 작성
 - 벤치마크 실험/리포트: `benchmarking/lab`에서만 유지
 
 ## 2-1. 벤치마크 자산 규칙
@@ -47,7 +51,6 @@
 
 - benchmark harness는 가능하면 실제 offscreen 앱 파이프라인을 기준으로 만든다.
 - 공식 점수 범위가 파이프라인 일부일 경우, 실행 범위와 점수 범위를 문서에 분리해 명시한다.
-- 공식 점수가 특정 stage까지만 필요하면, 그 family의 공식 suite는 generic stage ceiling으로 그 stage까지만 실행할 수 있다.
 - Windows benchmark family는 가능하면 `pipeline + suite`, `CUDA12 + CUDA13` BAT 쌍을 함께 제공한다.
 - raw 결과는 `./banchmark_result_log/<family>/` 아래에 남긴다.
 - benchmark family는 최소한 아래 문서 세트를 함께 가진다.
@@ -56,17 +59,7 @@
   - architecture
   - results history
   - generated/latest report
-- 서로 다른 source language 코퍼스를 함께 다루는 family는 단일 글로벌 winner 대신 언어별 추천 정책을 공식 산출물로 채택할 수 있다.
-- OCR 비교 family는 `speed_score_scope`와 `quality_gate_scope`를 분리할 수 있다.
-  - 예: 속도는 full-pipeline elapsed
-  - 품질은 OCR-only
-- OCR benchmark의 hard gate에는 machine-generated translation similarity를 직접 쓰지 말고, 가능하면 사람이 잠근 OCR gold를 공식 품질 기준으로 사용한다.
-- benchmark 자산은 `benchmarking/lab`에만 두고, 제품 반영은 별도 `codex/* -> develop` PR로 승격한다.
-- benchmark managed runtime은 health-check 우선 정책을 기본으로 한다.
-  - 이미 떠 있는 Docker 서비스가 healthy면 절대 재기동하지 않고 그대로 재사용한다.
-  - health-check가 실패한 서비스만 선택적으로 재기동한다.
-  - healthy한 다른 서비스까지 함께 내리거나 recreate하지 않는다.
-  - benchmark 종료 후에도 healthy한 서비스를 정리 목적만으로 강제 종료하지 않는다.
+- benchmark 자산은 `benchmarking/lab`에만 두고, 제품 반영은 별도 `feature/*`, `fix/*`, `chore/*` 작업 브랜치 PR로 승격한다.
 
 ## 3. 기능 작업 절차
 
@@ -85,7 +78,7 @@
 ```bash
 git switch develop
 git pull --ff-only origin develop
-git switch -c codex/feature/example-task
+git switch -c feature/example-task
 ```
 
 작업 후:
@@ -97,7 +90,13 @@ python scripts/compile_translations.py --check
 git status
 git add <intended-files>
 git commit -m "feat(workspace): add retry tooltips"
-git push -u origin codex/feature/example-task
+git push -u origin feature/example-task
+```
+
+Windows launcher/runtime 변경이 포함되면 아래 검증도 추가한다.
+
+```bash
+python scripts/verify_windows_launchers.py
 ```
 
 ## 4. 커밋 규칙
@@ -138,6 +137,7 @@ type(scope): summary
 - 기능 단위 커밋을 만들었다.
 - 브랜치를 원격에 push했다.
 - 병합 대상 브랜치가 맞는 PR을 열었거나 갱신했다.
+- Windows launcher/runtime 또는 pinned CUDA 의존성을 건드렸다면 `.venv-win`, `.venv-win-cuda13`, `run_comic.bat`, `run_comic_cuda13.bat`를 모두 검증했다.
 
 ## 6. 금지 사항
 
@@ -209,21 +209,26 @@ bash scripts/bootstrap_git_hooks.sh
 CI는 필수다. 다음 항목이 통과해야 병합 가능하다.
 
 - 브랜치 이름 규칙 검사
+- PR 대상 브랜치 흐름 검사
+- `main` 문서 승격 allowlist 검사
 - 저장소 위생 검사
 - Python 구문/컴파일 검사
 - 헤드리스 스모크 검사
 - 번역 자산 검사
 
+public/free 저장소의 ruleset은 보호 브랜치, PR 강제, 상태 체크, 태그 보호를 담당한다.
+브랜치 이름 강제, 브랜치 계열별 base 브랜치 적합성, 금지된 tracked 경로, benchmark 전용 자산 분리, `main` 문서 승격 allowlist 검사는 로컬 훅과 CI 정책 스크립트가 계속 담당한다.
+실제 import용 ruleset JSON은 `.github/rulesets/` 아래 파일을 기준으로 관리한다.
+
 ### CD
 
-현재 저장소에는 설치형 패키징 파이프라인이 커밋되어 있지 않으므로, CD v1은 `릴리스 거버넌스`에 집중한다.
+현재 저장소에는 설치형 패키징 파이프라인이 커밋되어 있지 않으므로, CD v1은 `태그 기반 릴리스 거버넌스`에 집중한다.
 
-- `develop`에서 `release/<version>` 생성
-- 릴리스 검증
-- `main` 병합
-- 태그 생성
+- `develop`에서 충분히 검증된 변경만 `main`으로 승격
+- `main` 머지 커밋에 버전 태그 생성
 - GitHub Release 작성
-- `develop` 백머지
+- 필요 시 `pre-release` 표기
+- `hotfix/*`는 `main` 기준으로 처리 후 `develop`에 백머지
 
 ## 10. 브랜치 보호 설정 가이드
 
@@ -233,7 +238,24 @@ GitHub 저장소 설정에서 아래를 권장한다.
 - PR 필수
 - CI 체크 통과 필수
 - force push 금지
+- 버전 태그 보호
 - 관리자 예외는 `hotfix` 절차에 한정
+- public/free ruleset import는 `docs/repo/github-rulesets-public-free-ko.md`와 `.github/rulesets/*.json`을 기준으로 적용한다.
+
+## 10-1. Main 문서 승격 정책
+
+- `main`에는 운영 필수 문서만 허용한다.
+  - 루트: `README.md`, `README_ko.md`, `rules.md`
+  - 변경 이력/감사: `docs/history/*.md`
+  - 운영 문서: `docs/gemma/*.md`, `docs/hunyuan/*.md`, `docs/repo/github-rulesets-public-free-ko.md`, `hunyuanocr_docker_files/README.md`, `paddleocr_vl_docker_files/README.md`
+- `develop`에는 개발/감사/정책 문서를 허용한다.
+- `benchmarking/lab`에는 benchmark 전용 문서를 허용한다.
+- 아래 문서는 `main`에 올리지 않는다.
+  - `docs/i18n/*`
+  - `docs/rendering/*`
+  - `docs/repo/benchmark-branch-policy-ko.md`
+  - benchmark/manual-review/dev-note 성격의 markdown
+- 이 정책은 문서 설명만으로 두지 않고, `main` 대상 PR에서 changed markdown/doc path allowlist 검사로 강제한다.
 
 ## 11. 세션 종료 체크리스트
 
@@ -244,21 +266,7 @@ GitHub 저장소 설정에서 아래를 권장한다.
 - 커밋 메시지가 규칙에 맞는가
 - 첫 push면 `git push -u origin <branch>`를 했는가
 - 이후 push가 최신 상태인가
+- Windows launcher/runtime 관련 변경이면 `python scripts/verify_windows_launchers.py`를 돌렸는가
 - PR이 열려 있거나 최신 커밋이 반영되었는가
 
 사용자가 명시적으로 `로컬만` 원한 경우에만 push 요구를 예외로 둔다.
-
-## 12. Benchmark 분리 원칙
-
-- `main`과 `develop`에는 benchmark-specific 정책, preset, runner, generated report, chart asset을 두지 않는다.
-- benchmark 실험 도구와 문서는 `benchmarking/lab` 브랜치에서만 관리한다.
-- benchmark 결과를 제품 브랜치에 반영할 때는 `benchmarking/lab`를 직접 merge하지 않고, 필요한 제품 변경만 별도 `codex/*` 브랜치에서 다시 정리해 반영한다.
-- 제품 코드에는 benchmark를 위해 필요한 최소 계측만 남긴다.
-  - 허용: stage hook, retry/truncated/quality 통계 surface, generic memlog/gpu snapshot helper
-  - 허용: benchmark로 검증된 제품 기본값 승격
-    - 예: Docker image/pull policy, `response_format_mode`, `response_schema_mode`, `chunk_size`, sampler 기본값, prompt profile, `n_gpu_layers`
-  - 금지: winner 판단, preset 선택, 실험 순서, 차트/문서 생성 로직
-- core 비즈니스 코드는 benchmark runner나 report generator를 import하지 않는다.
-- benchmark 레이어는 raw 결과와 공용 계측 surface를 읽어서 해석한다.
-- benchmark 결과를 근거로 한 제품 기본값 변경 PR은 benchmark 자산만 포함하지 않으면 `develop` 대상 제품 변경 PR로 수용할 수 있다.
-- 상세 운영 기준은 `docs/repo/benchmark-branch-policy-ko.md`를 따른다.
