@@ -63,12 +63,22 @@ def family_output_root() -> Path:
     return root
 
 
+def _resolve_logged_path(value: str | Path) -> Path:
+    path = Path(str(value).strip())
+    if path.is_absolute():
+        return path
+    text = str(path)
+    if text.startswith("./"):
+        return ROOT / text[2:]
+    return ROOT / path
+
+
 def _latest_suite_dir() -> Path | None:
     last_record = family_output_root() / LAST_SUITE_RECORD
     if last_record.is_file():
         try:
             payload = json.loads(last_record.read_text(encoding="utf-8"))
-            suite_dir = Path(str(payload.get("suite_dir", "")).strip())
+            suite_dir = _resolve_logged_path(payload.get("suite_dir", ""))
             if suite_dir.is_dir():
                 return suite_dir
         except Exception:
@@ -258,6 +268,8 @@ def _capture_resident_metrics(
 
     return {
         "baseline_snapshot_path": repo_relative_str(candidate_dir / "empty_baseline_snapshot.json"),
+        "ocr_only_managed_runtime_policy_path": repo_relative_str(candidate_dir / "ocr_only_runtime" / "managed_runtime_policy.json"),
+        "full_managed_runtime_policy_path": repo_relative_str(candidate_dir / "full_runtime" / "managed_runtime_policy.json"),
         "ocr_only_idle_snapshot_path": repo_relative_str(candidate_dir / "ocr_only_idle_snapshot.json"),
         "full_idle_snapshot_path": repo_relative_str(candidate_dir / "full_idle_snapshot.json"),
         "ocr_only_idle_gpu_used_delta_mb": _delta(ocr_used, baseline_used),
@@ -351,7 +363,7 @@ def _build_candidate_summary(
         "candidate_key": candidate["key"],
         "candidate_label": candidate["label"],
         "preset": candidate["preset"],
-        "suite_dir": str(suite_dir),
+        "suite_dir": repo_relative_str(suite_dir),
         "run_count": len(runs),
         "cold_run_dirs": [repo_relative_str(run["run_dir"]) for run in cold_runs],
         "warm_run_dirs": [repo_relative_str(run["run_dir"]) for run in warm_runs],
@@ -392,6 +404,8 @@ def _render_candidate_markdown(summary: dict[str, Any]) -> str:
         "",
         "## Resident VRAM",
         "",
+        f"- ocr_only_managed_runtime_policy_path: `{resident.get('ocr_only_managed_runtime_policy_path')}`",
+        f"- full_managed_runtime_policy_path: `{resident.get('full_managed_runtime_policy_path')}`",
         f"- ocr_only_idle_gpu_used_delta_mb: `{resident.get('ocr_only_idle_gpu_used_delta_mb')}`",
         f"- full_idle_gpu_used_delta_mb: `{resident.get('full_idle_gpu_used_delta_mb')}`",
         f"- gemma_added_idle_gpu_used_delta_mb: `{resident.get('gemma_added_idle_gpu_used_delta_mb')}`",
@@ -489,6 +503,7 @@ def _render_comparison_markdown(payload: dict[str, Any]) -> str:
             "- corpus: `Sample/simpletest` 3 pages (`p_016`, `p_017`, `p_021`)",
             "- run shape: `cold 1 + warm 2`",
             "- benchmark scope: `full-pipeline`",
+            "- Japanese `Optimal+` maps to the `mangalmm` candidate in this family",
             "- translator baseline: current promoted `Gemma4` preset kept fixed",
         ]
     )
@@ -503,7 +518,7 @@ def _write_comparison_artifacts(
     winner = _pick_winner(candidate_summaries)
     payload = {
         "family": FAMILY_NAME,
-        "suite_dir": str(suite_dir),
+        "suite_dir": repo_relative_str(suite_dir),
         "generated_at": time.time(),
         "winner": winner or {},
         "winner_reason": _winner_reason(candidate_summaries, winner),
@@ -522,9 +537,11 @@ def _run_suite(
     sample_dir: Path,
     source_lang: str,
     target_lang: str,
+    suite_dir: Path | None = None,
 ) -> Path:
     _resolve_sample_paths(sample_dir)
-    suite_dir = create_run_dir(f"{FAMILY_NAME}_suite", root=family_output_root())
+    suite_dir = suite_dir.resolve() if suite_dir is not None else create_run_dir(f"{FAMILY_NAME}_suite", root=family_output_root())
+    suite_dir.mkdir(parents=True, exist_ok=True)
     _log(f"suite 시작: {suite_dir}")
     write_json(
         suite_dir / "suite_request.json",
@@ -542,13 +559,19 @@ def _run_suite(
     candidate_summaries: list[dict[str, Any]] = []
     try:
         for candidate in CANDIDATES:
+            candidate_dir = suite_dir / candidate["key"]
+            candidate_summary_path = candidate_dir / "candidate_summary.json"
+            if candidate_summary_path.is_file():
+                _log(f"candidate 재사용: {candidate['label']} -> {candidate_summary_path}")
+                candidate_summaries.append(json.loads(candidate_summary_path.read_text(encoding="utf-8")))
+                continue
+
             _log(f"candidate 시작: {candidate['label']}")
             resident_metrics = _capture_resident_metrics(
                 suite_dir=suite_dir,
                 candidate=candidate,
             )
             runs: list[dict[str, Any]] = []
-            candidate_dir = suite_dir / candidate["key"]
             candidate_dir.mkdir(parents=True, exist_ok=True)
             for phase in ("cold1", "warm1", "warm2"):
                 run_dir = candidate_dir / phase
@@ -577,8 +600,8 @@ def _run_suite(
             family_output_root() / LAST_SUITE_RECORD,
             {
                 "family": FAMILY_NAME,
-                "suite_dir": str(suite_dir),
-                "comparison_summary": str(suite_dir / "comparison_summary.json"),
+                "suite_dir": repo_relative_str(suite_dir),
+                "comparison_summary": repo_relative_str(suite_dir / "comparison_summary.json"),
             },
         )
         return suite_dir
@@ -607,6 +630,7 @@ def _build_parser() -> argparse.ArgumentParser:
     run_parser.add_argument("--sample-dir", default=str(DEFAULT_SAMPLE_DIR))
     run_parser.add_argument("--source-lang", default="Japanese")
     run_parser.add_argument("--target-lang", default="Korean")
+    run_parser.add_argument("--suite-dir", default="")
 
     summary_parser = subparsers.add_parser("summary", help="Regenerate comparison summary from an existing suite dir")
     summary_parser.add_argument("--suite-dir", default="")
@@ -640,6 +664,7 @@ def main(argv: list[str] | None = None) -> int:
         sample_dir=sample_dir,
         source_lang=args.source_lang,
         target_lang=args.target_lang,
+        suite_dir=Path(args.suite_dir) if getattr(args, "suite_dir", "") else None,
     )
     _log(f"suite 완료: {repo_relative_str(suite_dir)}")
     return 0

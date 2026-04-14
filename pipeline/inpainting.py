@@ -37,6 +37,13 @@ class InpaintingHandler:
             self.cached_inpainter_key = inpainter_key
         return self.inpainter_cache
 
+    def inpaint_with_blocks(self, image, mask, blk_list=None, config=None):
+        """Compatibility wrapper for batch/webtoon pipelines on older branches."""
+        del blk_list
+        self._ensure_inpainter()
+        resolved_config = config if config is not None else get_config(self.main_page.settings_page)
+        return self.inpainter_cache(image, mask, resolved_config)
+
     def manual_inpaint(self):
         image_viewer = self.main_page.image_viewer
         settings_page = self.main_page.settings_page
