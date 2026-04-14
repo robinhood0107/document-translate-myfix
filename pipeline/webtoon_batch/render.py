@@ -12,7 +12,12 @@ from app.path_materialization import ensure_path_materialized
 from app.ui.canvas.save_renderer import ImageSaveRenderer
 from app.ui.canvas.text.text_item_properties import TextItemProperties
 from app.ui.canvas.text_item import OutlineInfo, OutlineType
-from modules.rendering.render import get_best_render_area, is_vertical_block, pyside_word_wrap
+from modules.rendering.render import (
+    describe_render_text_sanitization,
+    get_best_render_area,
+    is_vertical_block,
+    pyside_word_wrap,
+)
 from modules.utils.export_paths import export_run_root, reserve_export_run_token, resolve_export_directory
 from modules.utils.automatic_output import (
     build_archive_page_file_name,
@@ -144,7 +149,25 @@ class RenderMixin:
             width = max(1.0, x2 - x1)
             height = max(1.0, y2 - y1)
 
-            translation = block.translation
+            translation_raw = block.translation
+            if not translation_raw:
+                continue
+            render_normalization = describe_render_text_sanitization(
+                translation_raw,
+                font,
+                block_index=getattr(block, "_debug_block_index", None),
+                image_path=image_path,
+            )
+            translation = render_normalization.text
+            block._render_translation_raw = str(translation_raw or "")
+            block._render_text = str(translation or "")
+            block._render_normalization_applied = bool(
+                render_normalization.normalization_applied
+            )
+            block._render_normalization_reasons = list(render_normalization.reasons)
+            block._render_normalization_replacements = list(
+                render_normalization.replacements
+            )
             if not translation:
                 continue
 
@@ -174,6 +197,7 @@ class RenderMixin:
 
             if is_no_space_lang(target_lang_code):
                 wrapped_translation = wrapped_translation.replace(" ", "")
+            block._render_text = str(wrapped_translation or "")
 
             font_color = resolve_render_text_color(
                 block.font_color,
@@ -231,7 +255,16 @@ class RenderMixin:
                 if outline
                 else [],
             )
-            viewer_state["text_items_state"].append(text_props.to_dict())
+            text_item_state = text_props.to_dict()
+            text_item_state["translation_raw"] = str(translation_raw or "")
+            text_item_state["render_text"] = str(wrapped_translation or "")
+            text_item_state["render_normalization_applied"] = bool(
+                render_normalization.normalization_applied
+            )
+            text_item_state["render_normalization_reasons"] = list(
+                render_normalization.reasons
+            )
+            viewer_state["text_items_state"].append(text_item_state)
 
     def _save_final_rendered_page(
         self: WebtoonBatchProcessor, page_idx: int, image_path: str, timestamp: str
