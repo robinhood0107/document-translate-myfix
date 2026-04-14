@@ -1,0 +1,31 @@
+{
+  "mode": "health_first_reuse",
+  "runtime_services": "ocr-only",
+  "container_names": [
+    "paddleocr-server",
+    "paddleocr-vllm"
+  ],
+  "health_urls": [
+    "http://127.0.0.1:28118/docs"
+  ],
+  "singleton_ocr_runtime": {
+    "selected_ocr_runtime_kind": "paddleocr_vl",
+    "removed_container_names": [],
+    "docker_ps_before_singleton_path": "./banchmark_result_log/paddleocr_vl_parallel/20260415_031602_paddleocr-vl-parallel-smoke/runtime/docker_ps_before_singleton.txt",
+    "docker_ps_after_singleton_path": "./banchmark_result_log/paddleocr_vl_parallel/20260415_031602_paddleocr-vl-parallel-smoke/runtime/docker_ps_after_singleton.txt"
+  },
+  "groups": [
+    {
+      "name": "ocr",
+      "action": "reused",
+      "container_names": [
+        "paddleocr-server",
+        "paddleocr-vllm"
+      ],
+      "health_urls": [
+        "http://127.0.0.1:28118/docs"
+      ],
+      "failed_urls": []
+    }
+  ]
+}

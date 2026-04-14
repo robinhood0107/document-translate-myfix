@@ -1,0 +1,22 @@
+{
+  "suite_dir": "./banchmark_result_log/paddleocr_vl_parallel/20260415_031602_paddleocr-vl-parallel-smoke",
+  "baseline_candidate_key": "fixed_w8",
+  "review_candidates": [
+    {
+      "rank": 1,
+      "candidate_key": "fixed_area_desc_w8",
+      "doc_path": "./banchmark_result_log/paddleocr_vl_parallel/20260415_031602_paddleocr-vl-parallel-smoke/review/top1_diff_review.md",
+      "representative_run_dir": "./banchmark_result_log/paddleocr_vl_parallel/20260415_031602_paddleocr-vl-parallel-smoke/fixed_area_desc_w8/measured_r1",
+      "changed_block_count": 0,
+      "page_changed_counts": {}
+    },
+    {
+      "rank": 2,
+      "candidate_key": "auto_v1_cap4",
+      "doc_path": "./banchmark_result_log/paddleocr_vl_parallel/20260415_031602_paddleocr-vl-parallel-smoke/review/top2_diff_review.md",
+      "representative_run_dir": "./banchmark_result_log/paddleocr_vl_parallel/20260415_031602_paddleocr-vl-parallel-smoke/auto_v1_cap4/measured_r1",
+      "changed_block_count": 0,
+      "page_changed_counts": {}
+    }
+  ]
+}

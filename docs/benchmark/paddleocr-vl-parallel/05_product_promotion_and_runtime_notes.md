@@ -4,16 +4,16 @@
 
 subset benchmark winner를 제품 runtime 승격 후보로 올릴 때 필요한 조건과 메모를 남긴다.
 
-이 문서는 benchmark 결과를 곧바로 제품 기본값으로 연결하지 않기 위한 안전장치이기도 하다. 이번 1차는 `hidden flag runtime promotion`까지만 다루며, 제품 기본값 전환은 의도적으로 범위 밖에 둔다.
+이 문서는 benchmark 결과를 곧바로 제품 기본값으로 연결하지 않기 위한 안전장치이기도 하다. 이번 단계는 `PaddleOCR VL 단독 상주 상한선 benchmark` 결과를 사용자 검수 가능한 형태로 정리하고, 승격 여부를 잠그는 것까지를 다룬다.
 
 ## 승격 조건
 
-- subset winner가 품질 게이트를 통과할 것
-- hidden flag 상태로 `develop` PR이 구성되어 있을 것
-- 22장 full corpus 승격 검증 계획이 이어질 것
+- 사용자 검수로 승인된 winner가 존재할 것
+- hidden flag 공통 런타임 인프라가 `develop` 승격 브랜치에 포함될 것
+- benchmark-specific asset이 develop PR에 섞이지 않을 것
 - 제품 코드에는 benchmark-specific preset, runner, raw report가 포함되지 않을 것
 
-즉, develop에 들어가는 것은 “검증된 runtime surface와 hidden mode”이지, benchmark 실험실 전체가 아니다.
+즉, develop에 들어가는 것은 “검증된 runtime surface와 승인된 기본값”이지, benchmark 실험실 전체가 아니다.
 
 ## develop에 남기는 것
 
@@ -36,32 +36,34 @@ subset benchmark winner를 제품 runtime 승격 후보로 올릴 때 필요한 
 
 ## runtime 메모
 
-- 기본 mode는 계속 `fixed`다.
-- `fixed_area_desc`, `auto_v1`는 hidden flag가 있을 때만 활성화된다.
+- 이번 승격 승인 후 제품 기본 mode는 `fixed_area_desc`다.
+- 제품 기본 `parallel_workers`는 `8`이다.
+- `fixed`, `auto_v1`는 hidden override/diagnostic/benchmark mode로 계속 유지한다.
 - `parallel_workers`는 hidden scheduler가 켜질 때 cap으로 동작한다.
 - `OCRProcessor`는 engine의 `last_page_profile`을 전달해야 pipeline benchmark event에서 page profile을 읽을 수 있다.
+- 이번 family는 `runtime_services=ocr-only` 계약을 사용하므로 Gemma preset 필드는 남아 있어도 실제 runtime/VRAM 점유에 참여하지 않는다.
 
 ## promotion 메모
 
-- subset winner는 `develop`에서 hidden flag 상태로만 승격한다.
-- `default on`은 별도 브랜치 `fix/ocr-paddleocr-vl-default-auto-workers`에서 다룬다.
-- 그 단계에서는 22장 full corpus, 더 긴 soak, 필요 시 weighted concurrency 후보 비교까지 포함한다.
+- 사용자 승인으로 `fixed_area_desc_w8`가 최종 winner로 잠겼다.
+- `fix/ocr-paddleocr-vl-final-promote`에서는 공통 런타임 인프라 + 승인된 winner 기본값만 develop에 올린다.
+- 이번 단계에서는 `default on`의 추가 후보 재평가나 22장 full corpus 재검증을 하지 않는다.
 
-## 현재 smoke 기준 판단
+## 현재 메모
 
-최신 smoke 결과에서는 `fixed_w8`만 품질 게이트를 통과했다. 즉, 현재 시점에서 speed-only 개선 후보였던 `fixed_area_desc_w8`, `auto_v1_cap4`는 제품 승격 winner가 아니다.
+최신 single-tenant smoke 결과와 OCR diff review 결과를 합치면 다음 결론이 나온다.
 
-다만 이 결과는 이번 구현이 무효라는 뜻은 아니다. 오히려 다음 두 가지를 분명하게 보여준다.
+- `fixed_area_desc_w8`가 속도 1위다.
+- baseline `fixed_w8` 대비 OCR changed block이 없다.
+- `auto_v1_cap4` 역시 changed block은 없지만 속도는 `fixed_area_desc_w8`보다 느리다.
+- 따라서 이번 라운드의 최종 승격 대상은 `fixed_area_desc_w8`다.
 
-- local VRAM headroom이 낮은 환경에서 `auto_v1`는 실제로 보수적으로 worker를 낮춘다.
-- `job_order=area_desc`와 `auto_v1` 모두 latency 개선 방향성은 있으나, 품질 게이트를 유지하려면 추가 조정이 필요하다.
+현재 제품 승격 메모는 다음과 같다.
 
-따라서 현재 제품 승격 메모는 다음과 같다.
-
-- runtime surface와 hidden scheduler mode는 제품 후보로 유지
-- 기본값은 계속 `fixed`
-- benchmark 결과는 `fixed_area_desc`와 `auto_v1`를 후속 조정 대상으로 기록
-- develop PR은 hidden flag 상태로만 유지하고, winner promotion은 보류
+- runtime surface와 hidden scheduler mode를 develop에 승격
+- 제품 기본값을 `fixed_area_desc_w8`로 변경
+- benchmark 자산과 narrative는 benchmarking/lab에 유지
+- `auto_v1`는 차후 mixed-runtime 조건에서 다시 검토
 
 ## 문서화 메모
 
