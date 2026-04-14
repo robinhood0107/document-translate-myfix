@@ -47,14 +47,14 @@
 ## 현재 진행 상태
 
 - `benchmarking/lab` 반영: 완료
-- `feature/workflow-split-runtime` 문서 기준선: 로컬 커밋 완료
-- `feature/workflow-split-runtime` 원격 publish: pre-push 정책 확인 필요
+- `feature/workflow-split-runtime` 문서 기준선: 원격 push 완료
+- `feature/workflow-split-runtime` 원격 publish: 완료
 - 제품 코드 구현: 아직 시작 전
 
 ## 현재 블로커와 대응
 
-1. 첫 push 훅이 upstream 부재 상태에서 branch publish 절차를 엄격하게 검사한다.
-2. 블로커가 해소되면 문서 기준선을 먼저 원격에 publish하고, 이후 제품 코드 구현 단계로 넘어간다.
+1. 첫 push 훅 이슈는 원격 동일 이름 브랜치 선생성 후 upstream 연결로 해소했다.
+2. 이제 문서 기준선은 원격에 publish된 상태이므로 제품 코드 구현 단계로 넘어갈 준비가 됐다.
 3. Requirement 1 실측 결과가 없으면 제품 승격 범위는 문서/설계 준비 단계에서 멈춘다.
 
 ## 성공 조건

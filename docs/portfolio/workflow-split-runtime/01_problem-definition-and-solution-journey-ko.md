@@ -39,7 +39,7 @@
 
 - `benchmarking/lab`에 Requirement 1 family 문서 기준선을 생성했다.
 - `develop`에는 이 작업을 포트폴리오와 제품 승격 관점에서 읽을 수 있도록 별도 문서 묶음을 시작했다.
-- `feature/workflow-split-runtime`에는 포트폴리오 승격 문서를 로컬 커밋한 상태이며, 첫 push 훅 조건을 확인하는 중이다.
+- `feature/workflow-split-runtime`에는 포트폴리오 승격 문서를 원격까지 publish했고 upstream도 연결했다.
 
 ## 브랜치 전략
 
@@ -48,14 +48,15 @@
 3. Requirement 1 실측 성공 후 `feature/workflow-split-runtime -> develop` 머지를 목표로 한다.
 4. Requirement 2는 `benchmarking/lab` 검수 패키지 확정 후 `feature/hybrid-ocr-selector -> develop` 순서로 진행한다.
 
-## 현재 블로커
+## 운영 중 확인한 해결 사례
 
-- 로컬 pre-push 훅이 첫 upstream 설정 절차를 엄격하게 검사하고 있어 `feature/workflow-split-runtime`의 원격 publish를 막고 있다.
-- 이 블로커는 제품 코드 구현 전에 해결해 두어야 "완료 기준은 commit + push"라는 저장소 규칙을 만족할 수 있다.
+- 로컬 pre-push 훅은 upstream이 없는 첫 push에서 ref 매칭을 엄격하게 검사했다.
+- 해결 방법은 원격에 동일 이름 브랜치를 먼저 만들고 upstream을 연결한 뒤 다시 push하는 것이었다.
+- 이 과정을 통해 "benchmarking/lab에서 문서 기준선 확보 -> feature 브랜치 publish -> 제품 코드 구현" 순서를 안정적으로 재현할 수 있게 됐다.
 
 ## 다음 단계
 
-1. `feature/workflow-split-runtime` 첫 push 블로커 해소
+1. draft PR 생성
 2. `workflow_mode` 제품 설계 반영
 3. runtime lifecycle / telemetry 설계
 4. Requirement 1 실측 결과를 바탕으로 승격 여부 결정
