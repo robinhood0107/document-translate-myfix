@@ -32,6 +32,21 @@ class MangaLMMOCRTests(unittest.TestCase):
         self.assertEqual(mapped[0].bbox_xyxy, [140, 280, 220, 360])
         self.assertEqual(mapped[0].unit_bbox_xyxy, [100, 200, 300, 400])
         self.assertEqual(mapped[0].unit_kind, "page_tile")
+        self.assertEqual(mapped[0].response_bbox_2d, [20.0, 40.0, 60.0, 80.0])
+
+    def test_map_regions_to_page_coords_clamps_hallucinated_bbox_to_original_tile_bounds(self) -> None:
+        engine = MangaLMMOCREngine()
+        regions = [{"bbox_2d": [-10, -15, 120, 130], "text_content": "端"}]
+        mapped = engine._map_regions_to_page_coords(
+            regions,
+            (100, 200, 300, 400),
+            (200, 200),
+            0.5,
+            "page_tile",
+        )
+        self.assertEqual(len(mapped), 1)
+        self.assertEqual(mapped[0].bbox_xyxy, [100, 200, 300, 400])
+        self.assertEqual(mapped[0].response_bbox_2d, [-10.0, -15.0, 120.0, 130.0])
 
     def test_build_request_units_splits_large_pages_into_overlapping_tiles(self) -> None:
         engine = MangaLMMOCREngine()
@@ -124,6 +139,28 @@ class MangaLMMOCRTests(unittest.TestCase):
         assignments = engine._assign_regions_to_blocks([far_region], [blk])
         self.assertEqual(assignments[0], [])
 
+    def test_roi_boxes_do_not_expand_matching_ownership(self) -> None:
+        engine = MangaLMMOCREngine()
+        blk = TextBlock(
+            text_bbox=np.array([20, 20, 80, 80], dtype=np.int32),
+            ctd_roi_bbox=np.array([0, 0, 220, 220], dtype=np.int32),
+            cleanup_roi_bbox=np.array([0, 0, 220, 220], dtype=np.int32),
+            text_class="text_free",
+            source_lang="ja",
+            direction="vertical",
+        )
+        roi_only_region = OCRRegion(
+            bbox_xyxy=[120, 120, 180, 180],
+            text="ROIだけ",
+            unit_bbox_xyxy=[0, 0, 256, 256],
+            unit_kind="page_full",
+            unit_resize_scale=1.0,
+            edge_distance=32.0,
+            normalized_text="roiだけ",
+        )
+        assignments = engine._assign_regions_to_blocks([roi_only_region], [blk])
+        self.assertEqual(assignments[0], [])
+
     def test_apply_assignments_sorts_multiple_regions_in_reading_order(self) -> None:
         engine = MangaLMMOCREngine()
         blk = TextBlock(
@@ -144,6 +181,7 @@ class MangaLMMOCRTests(unittest.TestCase):
                         unit_resize_scale=1.0,
                         edge_distance=70.0,
                         normalized_text="右",
+                        response_bbox_2d=[100.0, 10.0, 140.0, 80.0],
                     ),
                     "metrics": {
                         "ownership_cover": 1.0,
@@ -164,6 +202,7 @@ class MangaLMMOCRTests(unittest.TestCase):
                         unit_resize_scale=1.0,
                         edge_distance=70.0,
                         normalized_text="左",
+                        response_bbox_2d=[20.0, 10.0, 60.0, 80.0],
                     ),
                     "metrics": {
                         "ownership_cover": 1.0,
@@ -186,6 +225,45 @@ class MangaLMMOCRTests(unittest.TestCase):
         )
         self.assertEqual(blk.text, "右左")
         self.assertEqual(len(blk.ocr_regions), 2)
+        self.assertEqual(blk.ocr_regions[0]["response_bbox_2d"], [100.0, 10.0, 140.0, 80.0])
+        self.assertEqual(blk.ocr_regions[0]["unit_kind"], "page_full")
+        self.assertEqual(blk.ocr_regions[0]["unit_bbox_xyxy"], [0, 0, 220, 220])
+        self.assertEqual(blk.ocr_regions[0]["unit_resize_scale"], 1.0)
+        self.assertTrue(blk.ocr_regions[0]["match_metrics"]["center_in_ownership"])
+
+    def test_build_rescue_units_uses_empty_block_support_boxes_only(self) -> None:
+        engine = MangaLMMOCREngine()
+        engine.rescue_context_ratio = 0.0
+        engine.rescue_min_size = 0
+        engine.rescue_gap = 0
+        empty_bubble = TextBlock(
+            text_bbox=np.array([80, 80, 120, 120], dtype=np.int32),
+            bubble_bbox=np.array([50, 50, 150, 150], dtype=np.int32),
+            text_class="text_bubble",
+            source_lang="ja",
+            direction="vertical",
+            text="",
+        )
+        empty_free = TextBlock(
+            text_bbox=np.array([300, 300, 330, 330], dtype=np.int32),
+            ctd_roi_bbox=np.array([250, 250, 420, 420], dtype=np.int32),
+            cleanup_roi_bbox=np.array([240, 240, 430, 430], dtype=np.int32),
+            text_class="text_free",
+            source_lang="ja",
+            direction="vertical",
+            text="",
+        )
+        filled_block = TextBlock(
+            text_bbox=np.array([380, 380, 420, 420], dtype=np.int32),
+            bubble_bbox=np.array([360, 360, 460, 460], dtype=np.int32),
+            text_class="text_bubble",
+            source_lang="ja",
+            direction="vertical",
+            text="이미 있음",
+        )
+        units = engine._build_rescue_units([empty_bubble, empty_free, filled_block], (512, 512, 3))
+        self.assertEqual([unit.unit_kind for unit in units], ["rescue_macro", "rescue_macro"])
+        self.assertEqual([unit.bbox_xyxy for unit in units], [(50, 50, 150, 150), (300, 300, 330, 330)])
 
 
 if __name__ == "__main__":
