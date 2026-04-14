@@ -25,6 +25,8 @@
 8. 원격 push 정책상 benchmark 자산이 포함된 publish 브랜치는 사실상 `benchmarking/lab`이어야 하므로, benchmark family는 `benchmarking/lab`에 직접 반영한다.
 9. Requirement 1 family는 먼저 “실행 계약이 잠긴 패키지”로 완성하고, baseline legacy부터 실측을 시작한다.
 10. stage-batched candidate 두 개는 experimental runner가 추가되기 전까지 blocked 계약 run으로 정직하게 남긴다.
+11. `candidate_stage_batched_dual_resident`는 단일 OCR 후보와의 benchmark 비교 결과가 더 나쁘더라도 Requirement 1 자체를 무효화하는 실패 조건으로 취급하지 않는다.
+12. `candidate_stage_batched_dual_resident`는 최종적으로 설정창에서 사용자가 선택할 수 있는 정식 신규 전체 플로우로 `develop`에 반영하는 것을 기준선으로 잠근다.
 
 ## 운영 기준으로 잠근 입력 세트
 
@@ -85,6 +87,16 @@
 4. generated report 갱신 스크립트 추가
 5. runtime progress를 `metrics.jsonl`에 남길 memlog bridge 추가
 6. runner contract / execution protocol 문제 해결 명세서 추가
+7. baseline smoke 실측 완료 및 Docker lifecycle 분해표 고정
+
+## 정책 변경으로 새로 잠근 사항
+
+사용자 지시에 따라 `candidate_stage_batched_dual_resident`는 더 이상 “불리하면 버릴 수 있는 탐색 후보”가 아니다. 앞으로 이 시나리오는 아래 원칙으로 다룬다.
+
+1. benchmark에서는 계속 baseline 및 single OCR 후보와 비교한다.
+2. 성능이 single OCR 후보보다 불리하더라도 Requirement 1 전체 성공/실패 판정 자체를 무효화하지 않는다.
+3. 최종 제품 승격에서는 `legacy`와 `candidate_stage_batched_dual_resident`를 사용자가 선택할 수 있는 두 개의 전체 플로우를 기본안으로 둔다.
+4. 따라서 이후 문서, 체크리스트, develop 승격 설계는 모두 이 정책을 기준으로 맞춘다.
 
 ## 단계별 실행 전략
 
@@ -133,10 +145,11 @@
 
 ## 다음 액션
 
-1. `run_workflow_split_runtime_cuda13.bat smoke`로 baseline smoke 실행
+1. smoke 완료 상태를 체크리스트와 관련 문서에 반영
 2. baseline 13장 measured run 누적
 3. stage-batched experimental runner 추가
 4. candidate 두 시나리오 실제 측정
+5. `candidate_stage_batched_dual_resident` 정식 승격 정책을 develop-side 문서에도 반영
 
 ## 저자 및 기여
 
