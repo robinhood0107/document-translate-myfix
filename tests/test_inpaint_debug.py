@@ -23,6 +23,8 @@ class _Block:
     translation: str = ""
     _render_translation_raw: str = ""
     _render_text: str = ""
+    _render_html_applied: bool = False
+    _render_fallback_font_family: str = ""
     _render_normalization_applied: bool = False
     _render_normalization_reasons: list[str] = field(default_factory=list)
     inpaint_bboxes: list[list[int]] = field(default_factory=list)
@@ -48,6 +50,8 @@ class InpaintDebugTests(unittest.TestCase):
             translation='본명 「나나세 아야카」 25세♥',
             _render_translation_raw='본명 「나나세 아야카」 25세♥',
             _render_text='본명 "나나세 아야카" 25세',
+            _render_html_applied=True,
+            _render_fallback_font_family="Malgun Gothic",
             _render_normalization_applied=True,
             _render_normalization_reasons=["quote-to-ascii", "heart-dropped"],
             inpaint_bboxes=[[1, 1, 4, 5]],
@@ -90,6 +94,11 @@ class InpaintDebugTests(unittest.TestCase):
         self.assertEqual(
             metadata["blocks"][0]["render_text"],
             '본명 "나나세 아야카" 25세',
+        )
+        self.assertTrue(metadata["blocks"][0]["render_html_applied"])
+        self.assertEqual(
+            metadata["blocks"][0]["render_fallback_font_family"],
+            "Malgun Gothic",
         )
         self.assertTrue(metadata["blocks"][0]["render_normalization_applied"])
         self.assertEqual(
