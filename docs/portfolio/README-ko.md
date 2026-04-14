@@ -12,6 +12,7 @@
 
 - 전체 워크플로우를 단계형으로 분리해 Docker/VRAM 병목을 줄일 수 있는지 검증하는 작업
 - 제품 승격 문서와 진행 체크리스트 포함
+- 현재 설계 문서: workflow mode 저장 구조, 배치 오케스트레이터 분기, runtime lifecycle 일반화 설계
 
 ### 2. Hybrid OCR Selector
 
