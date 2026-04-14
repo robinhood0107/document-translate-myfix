@@ -23,9 +23,8 @@ def resolve_tool(name: str) -> str:
     candidates = [
         Path(sys.executable).with_name(f"pyside6-{name}"),
         Path(sys.executable).resolve().with_name(f"pyside6-{name}"),
-        ROOT / ".venv" / "bin" / f"pyside6-{name}",
-        ROOT / ".venv" / "Scripts" / f"pyside6-{name}.exe",
         ROOT / ".venv-win" / "Scripts" / f"pyside6-{name}.exe",
+        ROOT / ".venv-win-cuda13" / "Scripts" / f"pyside6-{name}.exe",
     ]
     for candidate in candidates:
         if candidate.is_file():
@@ -34,6 +33,21 @@ def resolve_tool(name: str) -> str:
     if found:
         return found
     raise FileNotFoundError(f"Could not find pyside6-{name}. Install PySide6 first.")
+
+
+def to_native_tool_path(path: str | Path, *, for_windows_tool: bool) -> str:
+    text = str(path)
+    if not for_windows_tool:
+        return text
+    if not text.startswith("/"):
+        return text
+    completed = subprocess.run(
+        ["wslpath", "-w", text],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    return completed.stdout.strip()
 
 
 def run(cmd: list[str]) -> None:
@@ -52,13 +66,31 @@ def main() -> int:
 
     lupdate = resolve_tool("lupdate")
     lrelease = resolve_tool("lrelease")
+    lupdate_is_windows = lupdate.lower().endswith(".exe")
+    lrelease_is_windows = lrelease.lower().endswith(".exe")
 
-    run([lupdate, "-no-obsolete", "-extensions", "py", "-locations", "none", *SOURCE_TARGETS, "-ts", *ts_files])
+    source_targets = [
+        to_native_tool_path(path, for_windows_tool=lupdate_is_windows)
+        for path in SOURCE_TARGETS
+    ]
+    translated_ts_files = [
+        to_native_tool_path(path, for_windows_tool=lupdate_is_windows)
+        for path in ts_files
+    ]
+
+    run([lupdate, "-no-obsolete", "-extensions", "py", "-locations", "none", *source_targets, "-ts", *translated_ts_files])
 
     QM_DIR.mkdir(parents=True, exist_ok=True)
     for ts_path in ts_files:
         qm_path = QM_DIR / Path(ts_path).with_suffix(".qm").name
-        run([lrelease, ts_path, "-qm", str(qm_path)])
+        run(
+            [
+                lrelease,
+                to_native_tool_path(ts_path, for_windows_tool=lrelease_is_windows),
+                "-qm",
+                to_native_tool_path(qm_path, for_windows_tool=lrelease_is_windows),
+            ]
+        )
 
     if args.check:
         diff = subprocess.run(
