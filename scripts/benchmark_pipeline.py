@@ -26,6 +26,7 @@ from app.ui.main_window.constants import supported_source_languages, supported_t
 from benchmark_common import (
     create_run_dir,
     load_preset,
+    repo_relative_str,
     render_summary_markdown,
     resolve_runtime_container_names,
     resolve_corpus,
@@ -226,16 +227,52 @@ def _configure_window(window, preset: dict[str, object], source_lang: str, targe
             ui.crop_trigger_spinbox.setValue(int(hd_strategy.get("crop_trigger_size", 512)))
 
     if isinstance(mask_refiner_settings, dict):
-        _set_combo_text(ui.mask_refiner_combo, mask_refiner_settings.get("mask_refiner", "legacy_bbox"))
-        ui.tools_page._update_mask_refiner_widgets(ui.mask_refiner_combo.currentIndex())
-        ui.keep_existing_lines_checkbox.setChecked(bool(mask_refiner_settings.get("keep_existing_lines", False)))
-        _set_combo_text(ui.ctd_detect_size_combo, mask_refiner_settings.get("ctd_detect_size", 1280))
-        _set_combo_text(ui.ctd_det_rearrange_max_batches_combo, mask_refiner_settings.get("ctd_det_rearrange_max_batches", 4))
-        _set_combo_text(ui.ctd_device_combo, mask_refiner_settings.get("ctd_device", "cuda"))
-        ui.ctd_font_size_multiplier_spinbox.setValue(float(mask_refiner_settings.get("ctd_font_size_multiplier", 1.0)))
-        ui.ctd_font_size_max_spinbox.setValue(int(mask_refiner_settings.get("ctd_font_size_max", -1)))
-        ui.ctd_font_size_min_spinbox.setValue(int(mask_refiner_settings.get("ctd_font_size_min", -1)))
-        ui.ctd_mask_dilate_size_spinbox.setValue(int(mask_refiner_settings.get("ctd_mask_dilate_size", 2)))
+        # Some benchmarking/lab UI snapshots keep legacy bbox rescue fixed and
+        # do not expose the older mask refiner widgets. Apply only the controls
+        # that exist so the pipeline remains compatible across branches.
+        mask_refiner_combo = getattr(ui, "mask_refiner_combo", None)
+        if mask_refiner_combo is not None:
+            _set_combo_text(mask_refiner_combo, mask_refiner_settings.get("mask_refiner", "legacy_bbox"))
+            update_mask_widgets = getattr(ui.tools_page, "_update_mask_refiner_widgets", None)
+            if callable(update_mask_widgets):
+                update_mask_widgets(mask_refiner_combo.currentIndex())
+
+        keep_existing_lines_checkbox = getattr(ui, "keep_existing_lines_checkbox", None)
+        if keep_existing_lines_checkbox is not None:
+            keep_existing_lines_checkbox.setChecked(bool(mask_refiner_settings.get("keep_existing_lines", False)))
+
+        ctd_detect_size_combo = getattr(ui, "ctd_detect_size_combo", None)
+        if ctd_detect_size_combo is not None:
+            _set_combo_text(ctd_detect_size_combo, mask_refiner_settings.get("ctd_detect_size", 1280))
+
+        ctd_det_rearrange_max_batches_combo = getattr(ui, "ctd_det_rearrange_max_batches_combo", None)
+        if ctd_det_rearrange_max_batches_combo is not None:
+            _set_combo_text(
+                ctd_det_rearrange_max_batches_combo,
+                mask_refiner_settings.get("ctd_det_rearrange_max_batches", 4),
+            )
+
+        ctd_device_combo = getattr(ui, "ctd_device_combo", None)
+        if ctd_device_combo is not None:
+            _set_combo_text(ctd_device_combo, mask_refiner_settings.get("ctd_device", "cuda"))
+
+        ctd_font_size_multiplier_spinbox = getattr(ui, "ctd_font_size_multiplier_spinbox", None)
+        if ctd_font_size_multiplier_spinbox is not None:
+            ctd_font_size_multiplier_spinbox.setValue(
+                float(mask_refiner_settings.get("ctd_font_size_multiplier", 1.0))
+            )
+
+        ctd_font_size_max_spinbox = getattr(ui, "ctd_font_size_max_spinbox", None)
+        if ctd_font_size_max_spinbox is not None:
+            ctd_font_size_max_spinbox.setValue(int(mask_refiner_settings.get("ctd_font_size_max", -1)))
+
+        ctd_font_size_min_spinbox = getattr(ui, "ctd_font_size_min_spinbox", None)
+        if ctd_font_size_min_spinbox is not None:
+            ctd_font_size_min_spinbox.setValue(int(mask_refiner_settings.get("ctd_font_size_min", -1)))
+
+        ctd_mask_dilate_size_spinbox = getattr(ui, "ctd_mask_dilate_size_spinbox", None)
+        if ctd_mask_dilate_size_spinbox is not None:
+            ctd_mask_dilate_size_spinbox.setValue(int(mask_refiner_settings.get("ctd_mask_dilate_size", 2)))
 
     if isinstance(inpainter_runtime, dict):
         _set_combo_text(ui.inpainter_device_combo, inpainter_runtime.get("device", "cuda"))
@@ -553,7 +590,7 @@ def _run_single_mode(
         {
             "mode": mode,
             "image_count": len(image_paths) if mode != "one-page" else 1,
-            "image_paths": [str(path) for path in image_paths],
+            "image_paths": [repo_relative_str(path) for path in image_paths],
         }
     )
     write_json(run_dir / "summary.json", summary)

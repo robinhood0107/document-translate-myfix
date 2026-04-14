@@ -88,6 +88,33 @@ def _find_export_root(run_dir: Path) -> Path | None:
     return candidates[0] if candidates else None
 
 
+def _find_translated_images(run_dir: Path, export_root: Path | None) -> list[Path]:
+    candidates: list[Path] = []
+    if export_root is not None:
+        translated_dir = export_root / "translated_images"
+        if translated_dir.is_dir():
+            candidates.extend(path for path in translated_dir.iterdir() if path.is_file())
+
+    if not candidates:
+        corpus_dir = run_dir / "corpus"
+        if corpus_dir.is_dir():
+            candidates.extend(
+                path
+                for path in corpus_dir.rglob("*_translated.jpg")
+                if path.is_file()
+            )
+            candidates.extend(
+                path
+                for path in corpus_dir.rglob("*_translated.png")
+                if path.is_file()
+            )
+
+    deduped: dict[str, Path] = {}
+    for path in sorted(candidates):
+        deduped[path.name] = path
+    return [deduped[name] for name in sorted(deduped)]
+
+
 def _copy_candidate_artifacts(
     candidate: dict[str, Any],
     *,
@@ -98,11 +125,10 @@ def _copy_candidate_artifacts(
     warm_run_dirs = [Path(_resolve_path(item)) for item in candidate.get("warm_run_dirs", [])]
     selected_run_dir = next((path for path in reversed(warm_run_dirs) if path.is_dir()), None)
     export_root = _find_export_root(selected_run_dir) if selected_run_dir else None
-    translated_dir = export_root / "translated_images" if export_root else None
 
     copied_images: list[dict[str, str]] = []
-    if translated_dir and translated_dir.is_dir():
-        image_paths = sorted([path for path in translated_dir.iterdir() if path.is_file()])
+    if selected_run_dir is not None:
+        image_paths = _find_translated_images(selected_run_dir, export_root)
         for image_path in image_paths:
             latest_target = latest_dir / "translated_images" / candidate_key / image_path.name
             history_target = history_dir / "translated_images" / candidate_key / image_path.name
