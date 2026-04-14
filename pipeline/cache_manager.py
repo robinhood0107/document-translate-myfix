@@ -1,5 +1,6 @@
 import hashlib
 import logging
+import copy
 
 logger = logging.getLogger(__name__)
 
@@ -150,27 +151,50 @@ class CacheManager:
         if isinstance(result, dict):
             return {
                 "text": result.get("text", "") or "",
+                "texts": copy.deepcopy(result.get("texts", [])) if isinstance(result.get("texts"), list) else [],
                 "confidence": float(result.get("confidence", 0.0) or 0.0),
                 "status": result.get("status", "") or "",
                 "empty_reason": result.get("empty_reason", "") or "",
                 "attempt_count": int(result.get("attempt_count", 0) or 0),
+                "ocr_regions": copy.deepcopy(result.get("ocr_regions", [])) if isinstance(result.get("ocr_regions"), list) else [],
+                "ocr_crop_bbox": copy.deepcopy(result.get("ocr_crop_bbox")),
+                "ocr_resize_scale": float(result.get("ocr_resize_scale", 1.0) or 1.0),
             }
         return {
             "text": result or "",
+            "texts": [result] if result else [],
             "confidence": 0.0,
             "status": "ok" if result else "",
             "empty_reason": "",
             "attempt_count": 1 if result else 0,
+            "ocr_regions": [],
+            "ocr_crop_bbox": None,
+            "ocr_resize_scale": 1.0,
         }
 
     def _build_ocr_cache_payload(self, block):
         return {
             "text": getattr(block, "text", "") or "",
+            "texts": copy.deepcopy(getattr(block, "texts", []) or []),
             "confidence": float(getattr(block, "ocr_confidence", 0.0) or 0.0),
             "status": getattr(block, "ocr_status", "") or "",
             "empty_reason": getattr(block, "ocr_empty_reason", "") or "",
             "attempt_count": int(getattr(block, "ocr_attempt_count", 0) or 0),
+            "ocr_regions": copy.deepcopy(getattr(block, "ocr_regions", []) or []),
+            "ocr_crop_bbox": copy.deepcopy(getattr(block, "ocr_crop_bbox", None)),
+            "ocr_resize_scale": float(getattr(block, "ocr_resize_scale", 1.0) or 1.0),
         }
+
+    def _apply_cached_ocr_payload_to_block(self, block, payload):
+        block.text = payload.get("text", "")
+        block.texts = copy.deepcopy(payload.get("texts", [])) if isinstance(payload.get("texts"), list) else []
+        block.ocr_confidence = payload.get("confidence", 0.0)
+        block.ocr_status = payload.get("status", "")
+        block.ocr_empty_reason = payload.get("empty_reason", "")
+        block.ocr_attempt_count = payload.get("attempt_count", 0)
+        block.ocr_regions = copy.deepcopy(payload.get("ocr_regions", [])) if isinstance(payload.get("ocr_regions"), list) else []
+        block.ocr_crop_bbox = copy.deepcopy(payload.get("ocr_crop_bbox"))
+        block.ocr_resize_scale = payload.get("ocr_resize_scale", 1.0)
 
     def _cache_ocr_results(self, cache_key, blk_list, processed_blk_list=None):
         """Cache OCR results for all blocks"""
@@ -353,11 +377,7 @@ class CacheManager:
             payload = self._get_cached_ocr_payload_for_block(cache_key, block)
             if payload is None:
                 continue
-            block.text = payload.get("text", "")
-            block.ocr_confidence = payload.get("confidence", 0.0)
-            block.ocr_status = payload.get("status", "")
-            block.ocr_empty_reason = payload.get("empty_reason", "")
-            block.ocr_attempt_count = payload.get("attempt_count", 0)
+            self._apply_cached_ocr_payload_to_block(block, payload)
 
     def _apply_cached_translations_to_blocks(self, cache_key, block_list):
         """Apply cached translation results to all blocks in the list"""
