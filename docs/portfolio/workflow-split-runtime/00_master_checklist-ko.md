@@ -18,8 +18,8 @@
 2. `완료` `benchmarking/lab`에 Requirement 1 family 문서/체크리스트 기준선 반영
 3. `완료` `develop`용 포트폴리오 문서 기준선 반영 및 하네스 원문 동기화
 4. `완료` `feature/workflow-split-runtime` 원격 publish와 upstream 연결
-5. `진행 중` draft PR 준비 및 다음 설계 단계 체크리스트 정리
-6. `대기` `workflow_mode` 제품 설계 및 설정 UI 반영
+5. `완료` draft PR 생성 및 진행 창구 확보
+6. `진행 중` `workflow_mode` 제품 설계와 runtime entrypoint 설계 문서화
 7. `대기` generic stage telemetry / runtime lifecycle event 설계
 8. `대기` Requirement 1 승격 코드 구현
 9. `대기` Requirement 2 게이트 문서화 및 사용자 검수 체계 반영
@@ -37,9 +37,9 @@
     - `45232ef` `docs(portfolio): scaffold workflow split promotion docs`
     - `3e36013` `docs(portfolio): update workflow split progress log`
   - current_focus:
-    - draft PR 준비
-    - `workflow_mode` 제품 설계 착수 준비
+    - `workflow_mode` 제품 설계 문서화
     - runtime lifecycle / telemetry 설계 순서 정리
+    - Requirement 1 승격 전 코드 경계 고정
 
 ## 시작 브랜치부터 최종 머지까지
 
@@ -79,7 +79,7 @@
 - [ ] Requirement 1 실측 결과가 시간 이득을 증명
 - [ ] 품질 동등성 확인
 - [ ] benchmark 전용 자산 없이 제품 코드만 선별
-- [ ] `feature/workflow-split-runtime` commit / push / PR
+- [x] `feature/workflow-split-runtime` commit / push / PR
 
 ## 현재 판단
 
@@ -88,5 +88,5 @@
 ## 현재 리스크
 
 1. Requirement 1 실측 로그가 아직 없으므로 제품 코드 승격은 문서 기준선 단계에 머물러 있다.
-2. draft PR가 아직 없으므로 원격 협업 관점의 진행 창구가 비어 있다.
+2. 아직 Requirement 1 실측 근거가 없어서 제품 코드 구현 범위를 넓힐 수 없다.
 3. Hybrid OCR Selector는 Requirement 1 성공 판정 전까지 시작하지 않는다.
