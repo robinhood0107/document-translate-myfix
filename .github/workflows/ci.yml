@@ -108,7 +108,8 @@ jobs:
       - name: Validate repo policy
         env:
           REF_NAME: ${{ github.head_ref || github.ref_name }}
-        run: python scripts/validate_repo_policy.py --mode ci --branch "$REF_NAME"
+          BASE_REF: ${{ github.base_ref }}
+        run: python scripts/validate_repo_policy.py --mode ci --branch "$REF_NAME" --base-branch "$BASE_REF"
 
       - name: Validate Python syntax
         run: python scripts/validate_changed_python.py --all

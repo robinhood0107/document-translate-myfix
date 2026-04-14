@@ -9,6 +9,7 @@ import sys
 PROTECTED_BRANCHES = {"main", "develop"}
 WORK_BRANCH_RE = re.compile(r"^(feature|fix|chore|hotfix)/[a-z0-9][a-z0-9._-]*$")
 BENCHMARK_BRANCH_RE = re.compile(r"^benchmarking/lab$")
+BENCHMARK_WORK_BRANCH_RE = re.compile(r"^(feature|fix|chore)/benchmark[a-z0-9._/-]*$")
 FORBIDDEN_TRACKED_PREFIXES = (
     ".venv/",
     ".venv-win/",
@@ -98,8 +99,19 @@ def validate_tracked_paths() -> list[str]:
     return errors
 
 
-def validate_benchmark_asset_placement(branch: str) -> list[str]:
+def benchmark_assets_allowed(branch: str, base_branch: str = "") -> bool:
+    normalized_base = str(base_branch or "").strip()
     if BENCHMARK_BRANCH_RE.match(branch):
+        return True
+    if BENCHMARK_WORK_BRANCH_RE.match(branch):
+        return True
+    if normalized_base == "benchmarking/lab":
+        return True
+    return False
+
+
+def validate_benchmark_asset_placement(branch: str, base_branch: str = "") -> list[str]:
+    if benchmark_assets_allowed(branch, base_branch):
         return []
 
     errors: list[str] = []
@@ -121,13 +133,14 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="Validate repo branch and tracked-file policy.")
     parser.add_argument("--mode", choices=("commit", "push", "ci"), default="ci")
     parser.add_argument("--branch", help="Branch name to validate. Defaults to current branch.")
+    parser.add_argument("--base-branch", default="", help="Optional PR base branch for CI policy checks.")
     args = parser.parse_args()
 
     branch = args.branch or current_branch()
     errors = []
     errors.extend(validate_branch(branch, args.mode))
     errors.extend(validate_tracked_paths())
-    errors.extend(validate_benchmark_asset_placement(branch))
+    errors.extend(validate_benchmark_asset_placement(branch, args.base_branch))
 
     if errors:
         for error in errors:
