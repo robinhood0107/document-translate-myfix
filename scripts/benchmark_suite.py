@@ -25,6 +25,7 @@ from benchmark_common import (
     DEFAULT_SAMPLE_DIR,
     benchmark_output_root,
     create_run_dir,
+    ensure_compose_groups_health_first,
     ensure_managed_runtime_health_first,
     load_preset,
     run_command,
@@ -389,46 +390,34 @@ def _restore_runtime(snapshot_dir: Path) -> None:
     ocr_snapshot = snapshot_dir / "paddleocr_vl_docker_files" / "docker-compose.yaml"
 
     _log("restore: health-check 실패로 복원을 시작합니다")
-    _log("restore: Gemma docker-compose 복원 중...")
-    subprocess.run(
+    ensure_compose_groups_health_first(
         [
-            "docker",
-            "compose",
-            "--project-directory",
-            str(ROOT),
-            "-f",
-            str(gemma_snapshot),
-            "up",
-            "-d",
-            "--force-recreate",
+            {
+                "name": "gemma",
+                "container_names": ["gemma-local-server"],
+                "health_urls": [
+                    "http://127.0.0.1:18080/health",
+                    "http://127.0.0.1:18080/v1/models",
+                ],
+                "compose_path": gemma_snapshot,
+                "cwd": ROOT,
+                "project_directory": ROOT,
+            },
+            {
+                "name": "ocr",
+                "container_names": ["paddleocr-server", "paddleocr-vllm"],
+                "health_urls": [
+                    "http://127.0.0.1:28118/docs",
+                ],
+                "compose_path": ocr_snapshot,
+                "cwd": ROOT / "paddleocr_vl_docker_files",
+                "project_directory": snapshot_dir / "paddleocr_vl_docker_files",
+            },
         ],
-        check=True,
-        capture_output=True,
-        text=True,
-        cwd=str(ROOT),
+        quick_timeout_sec=5,
+        boot_timeout_sec=180,
+        log_fn=_log,
     )
-    _log("restore: OCR docker-compose 복원 중...")
-    subprocess.run(
-        [
-            "docker",
-            "compose",
-            "--project-directory",
-            str(snapshot_dir / "paddleocr_vl_docker_files"),
-            "-f",
-            str(ocr_snapshot),
-            "up",
-            "-d",
-            "--force-recreate",
-        ],
-        check=True,
-        capture_output=True,
-        text=True,
-        cwd=str(ROOT / "paddleocr_vl_docker_files"),
-    )
-
-    for url in ATTACH_RUNNING_HEALTH_URLS:
-        _log(f"restore: health-check 대기 중... {url}")
-        wait_for_url(url)
     _log("restore: 모든 서비스 복원 완료")
 
 
