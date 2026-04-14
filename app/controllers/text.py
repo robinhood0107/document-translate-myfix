@@ -17,6 +17,7 @@ from app.ui.canvas.text.text_item_properties import TextItemProperties
 from modules.utils.textblock import TextBlock
 from modules.rendering.render import (
     TextRenderingSettings,
+    describe_render_text_markup,
     describe_render_text_sanitization,
     manual_wrap,
     is_vertical_block,
@@ -306,12 +307,30 @@ class TextController:
 
             if is_no_space_lang(trg_lng_cd):
                 wrapped = wrapped.replace(" ", "")
+            render_markup = describe_render_text_markup(wrapped)
             original_blk._render_text = str(wrapped or "")
+            original_blk._render_html = str(
+                render_markup.html_text if render_markup.html_applied else wrapped or ""
+            )
+            original_blk._render_html_applied = bool(render_markup.html_applied)
+            original_blk._render_fallback_font_family = str(
+                render_markup.fallback_font_family or ""
+            )
+            original_blk._render_normalization_applied = bool(
+                render_normalization.normalization_applied
+                or render_markup.html_applied
+            )
+            original_blk._render_normalization_reasons = sorted(
+                set(render_normalization.reasons).union(render_markup.reasons)
+            )
+            original_blk._render_normalization_replacements = list(
+                render_normalization.replacements
+            ) + list(render_markup.replacements)
 
             source_rect = self._get_source_rect_for_block(original_blk)
             text_props = self._build_text_item_properties(
                 original_blk,
-                wrapped,
+                original_blk._render_html,
                 font_size,
                 render_settings,
                 trg_lng_cd,
@@ -327,11 +346,17 @@ class TextController:
             text_item_state = text_props.to_dict()
             text_item_state["translation_raw"] = str(translation_raw or "")
             text_item_state["render_text"] = str(wrapped or "")
+            text_item_state["render_html_applied"] = bool(
+                render_markup.html_applied
+            )
+            text_item_state["render_fallback_font_family"] = str(
+                render_markup.fallback_font_family or ""
+            )
             text_item_state["render_normalization_applied"] = bool(
-                render_normalization.normalization_applied
+                original_blk._render_normalization_applied
             )
             text_item_state["render_normalization_reasons"] = list(
-                render_normalization.reasons
+                original_blk._render_normalization_reasons
             )
             text_items_state.append(text_item_state)
 
@@ -434,9 +459,10 @@ class TextController:
             text = text.replace(' ', '')
 
         render_settings = self.render_settings()
+        render_payload = str(getattr(blk, "_render_html", text) or text)
         properties = self._build_text_item_properties(
             blk,
-            text,
+            render_payload,
             font_size,
             render_settings,
             trg_lng_cd,
@@ -445,7 +471,8 @@ class TextController:
         )
         
         text_item = self.main.image_viewer.add_text_item(properties)
-        text_item.set_plain_text(text)
+        width = properties.width if properties.width is not None else text_item.boundingRect().width()
+        text_item.set_text(properties.text, width)
 
         command = AddTextItemCommand(self.main, text_item)
         self.main.push_command(command)
@@ -1169,12 +1196,30 @@ class TextController:
                         )
                         if is_no_space_lang(trg_lng_cd):
                             wrapped = wrapped.replace(" ", "")
+                        render_markup = describe_render_text_markup(wrapped)
                         blk._render_text = str(wrapped or "")
+                        blk._render_html = str(
+                            render_markup.html_text if render_markup.html_applied else wrapped or ""
+                        )
+                        blk._render_html_applied = bool(render_markup.html_applied)
+                        blk._render_fallback_font_family = str(
+                            render_markup.fallback_font_family or ""
+                        )
+                        blk._render_normalization_applied = bool(
+                            render_normalization.normalization_applied
+                            or render_markup.html_applied
+                        )
+                        blk._render_normalization_reasons = sorted(
+                            set(render_normalization.reasons).union(render_markup.reasons)
+                        )
+                        blk._render_normalization_replacements = list(
+                            render_normalization.replacements
+                        ) + list(render_markup.replacements)
 
                         source_rect = self._get_source_rect_for_block(blk)
                         text_props = self._build_text_item_properties(
                             blk,
-                            wrapped,
+                            blk._render_html,
                             font_size,
                             render_settings,
                             trg_lng_cd,
@@ -1190,11 +1235,17 @@ class TextController:
                         text_item_state = text_props.to_dict()
                         text_item_state["translation_raw"] = str(translation_raw or "")
                         text_item_state["render_text"] = str(wrapped or "")
+                        text_item_state["render_html_applied"] = bool(
+                            render_markup.html_applied
+                        )
+                        text_item_state["render_fallback_font_family"] = str(
+                            render_markup.fallback_font_family or ""
+                        )
                         text_item_state["render_normalization_applied"] = bool(
-                            render_normalization.normalization_applied
+                            blk._render_normalization_applied
                         )
                         text_item_state["render_normalization_reasons"] = list(
-                            render_normalization.reasons
+                            blk._render_normalization_reasons
                         )
                         new_text_items_state.append(text_item_state)
 
