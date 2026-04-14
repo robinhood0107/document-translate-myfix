@@ -4,10 +4,14 @@ import base64
 import json
 import logging
 import math
+import os
 import re
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
+from itertools import count
+from pathlib import Path
+from threading import Lock
 
 import cv2
 import numpy as np
@@ -51,6 +55,9 @@ DEFAULT_MANGALMM_TILE_OVERLAP = 192
 DEFAULT_MANGALMM_RESCUE_CONTEXT_RATIO = 0.25
 DEFAULT_MANGALMM_RESCUE_MIN_SIZE = 512
 DEFAULT_MANGALMM_RESCUE_GAP = 96
+DEFAULT_MANGALMM_TEXT_EXPANSION_RATIO_X = DEFAULT_MANGALMM_RESCUE_CONTEXT_RATIO
+DEFAULT_MANGALMM_TEXT_EXPANSION_RATIO_Y = DEFAULT_MANGALMM_RESCUE_CONTEXT_RATIO
+DEFAULT_MANGALMM_DEBUG_EXPORT_LIMIT = 96
 
 
 @dataclass(slots=True)
@@ -96,6 +103,12 @@ class MangaLMMOCREngine(OCREngine):
         self.rescue_context_ratio = DEFAULT_MANGALMM_RESCUE_CONTEXT_RATIO
         self.rescue_min_size = DEFAULT_MANGALMM_RESCUE_MIN_SIZE
         self.rescue_gap = DEFAULT_MANGALMM_RESCUE_GAP
+        self.text_expansion_ratio_x = DEFAULT_MANGALMM_TEXT_EXPANSION_RATIO_X
+        self.text_expansion_ratio_y = DEFAULT_MANGALMM_TEXT_EXPANSION_RATIO_Y
+        self.debug_root: Path | None = None
+        self.debug_export_limit = DEFAULT_MANGALMM_DEBUG_EXPORT_LIMIT
+        self._debug_export_counter = count(1)
+        self._debug_export_lock = Lock()
 
     def initialize(self, settings, **kwargs) -> None:
         config = settings.get_mangalmm_ocr_settings()
@@ -136,6 +149,49 @@ class MangaLMMOCREngine(OCREngine):
                 (512, 4096),
             ),
         )
+        self.temperature = self._read_env_float(
+            "CT_MANGALMM_TEMPERATURE",
+            config.get("temperature", DEFAULT_MANGALMM_TEMPERATURE),
+            DEFAULT_MANGALMM_TEMPERATURE,
+            minimum=0.0,
+            maximum=2.0,
+        )
+        self.top_k = self._read_env_int(
+            "CT_MANGALMM_TOP_K",
+            config.get("top_k", DEFAULT_MANGALMM_TOP_K),
+            DEFAULT_MANGALMM_TOP_K,
+            bounds=(1, 256),
+        )
+        default_x_ratio = config.get("text_expansion_ratio_x", DEFAULT_MANGALMM_TEXT_EXPANSION_RATIO_X)
+        default_y_ratio = config.get("text_expansion_ratio_y", DEFAULT_MANGALMM_TEXT_EXPANSION_RATIO_Y)
+        shared_ratio = os.getenv("CT_MANGALMM_TEXT_EXPANSION_RATIO", "").strip()
+        if shared_ratio:
+            default_x_ratio = shared_ratio
+            default_y_ratio = shared_ratio
+        self.text_expansion_ratio_x = self._read_env_float(
+            "CT_MANGALMM_TEXT_EXPANSION_RATIO_X",
+            default_x_ratio,
+            DEFAULT_MANGALMM_TEXT_EXPANSION_RATIO_X,
+            minimum=0.0,
+            maximum=1.0,
+        )
+        self.text_expansion_ratio_y = self._read_env_float(
+            "CT_MANGALMM_TEXT_EXPANSION_RATIO_Y",
+            default_y_ratio,
+            DEFAULT_MANGALMM_TEXT_EXPANSION_RATIO_Y,
+            minimum=0.0,
+            maximum=1.0,
+        )
+        debug_root_raw = os.getenv("CT_MANGALMM_DEBUG_ROOT", "").strip()
+        self.debug_root = Path(debug_root_raw) if debug_root_raw else None
+        if self.debug_root is not None:
+            self.debug_root.mkdir(parents=True, exist_ok=True)
+        self.debug_export_limit = self._read_env_int(
+            "CT_MANGALMM_DEBUG_EXPORT_LIMIT",
+            DEFAULT_MANGALMM_DEBUG_EXPORT_LIMIT,
+            DEFAULT_MANGALMM_DEBUG_EXPORT_LIMIT,
+            bounds=(1, 4096),
+        )
 
     def process_image(self, img: np.ndarray, blk_list: list[TextBlock]) -> list[TextBlock]:
         blocks = list(blk_list or [])
@@ -157,8 +213,10 @@ class MangaLMMOCREngine(OCREngine):
         )
 
         rescue_regions: list[OCRRegion] = []
+        rescue_unit_count = 0
         if quality.get("low_quality", False):
             rescue_units = self._build_rescue_units(blocks, image.shape)
+            rescue_unit_count = len(rescue_units)
             if rescue_units:
                 rescue_regions = self._collect_regions_for_units(image, rescue_units)
                 if rescue_regions:
@@ -177,7 +235,7 @@ class MangaLMMOCREngine(OCREngine):
             "mangalmm_page_tile_ocr complete: blocks=%d page_units=%d rescue_units=%d regions=%d quality=%s elapsed_ms=%.1f",
             len(blocks),
             len(page_units),
-            len(self._build_rescue_units(blocks, image.shape)) if quality.get("low_quality", False) and rescue_regions else 0,
+            rescue_unit_count,
             len(page_regions),
             quality.get("reason", "") or "ok",
             (time.perf_counter() - started_at) * 1000.0,
@@ -215,7 +273,8 @@ class MangaLMMOCREngine(OCREngine):
                 self._expand_box_with_min_size(
                     support_box,
                     image_shape,
-                    ratio=self.rescue_context_ratio,
+                    x_ratio=self.text_expansion_ratio_x,
+                    y_ratio=self.text_expansion_ratio_y,
                     min_size=self.rescue_min_size,
                 )
             )
@@ -226,15 +285,20 @@ class MangaLMMOCREngine(OCREngine):
         if not units:
             return []
 
+        worker_count = min(self.parallel_workers, len(units))
         logger.info(
-            "mangalmm_page_tile_ocr start: units=%d workers=%d max_completion_tokens=%d endpoint=%s",
+            "mangalmm_page_tile_ocr start: units=%d workers=%d max_completion_tokens=%d "
+            "temperature=%.3f top_k=%d rescue_ratio=(%.3f, %.3f) endpoint=%s",
             len(units),
-            min(self.parallel_workers, len(units)),
+            worker_count,
             self.max_completion_tokens,
+            self.temperature,
+            self.top_k,
+            self.text_expansion_ratio_x,
+            self.text_expansion_ratio_y,
             self._chat_completions_url(),
         )
 
-        worker_count = min(self.parallel_workers, len(units))
         if worker_count <= 1:
             collected = [self._request_regions_for_unit(image, unit) for unit in units]
         else:
@@ -258,14 +322,69 @@ class MangaLMMOCREngine(OCREngine):
     def _request_regions_for_unit(self, image: np.ndarray, unit: RequestUnit) -> list[OCRRegion]:
         crop = self._crop_image(image, unit.bbox_xyxy)
         if crop is None:
+            self._export_debug_artifact(
+                blk=None,
+                failure_reason="Invalid OCR unit crop bounds.",
+                response_kind="invalid_crop",
+                raw_text="",
+                crop_bbox=unit.bbox_xyxy,
+                crop_source=unit.unit_kind,
+                resize_scale=1.0,
+                crop_image=None,
+                request_image=None,
+                analysis={},
+                unit_bbox=unit.bbox_xyxy,
+                unit_kind=unit.unit_kind,
+            )
             return []
 
         request_image, scale = self._resize_for_request(crop)
         raw_text = self._request_response_text(request_image)
-        regions = self._parse_region_payload(raw_text)
+        analysis = self._analyze_region_payload(raw_text)
+        regions = analysis["regions"]
         if not regions:
+            response_kind = str(analysis.get("response_kind", "") or "unknown")
+            self._export_debug_artifact(
+                blk=None,
+                failure_reason="MangaLMM returned no valid OCR regions.",
+                response_kind=response_kind,
+                raw_text=raw_text,
+                crop_bbox=unit.bbox_xyxy,
+                crop_source=unit.unit_kind,
+                resize_scale=scale,
+                crop_image=crop,
+                request_image=request_image,
+                analysis=analysis,
+                unit_bbox=unit.bbox_xyxy,
+                unit_kind=unit.unit_kind,
+            )
             return []
-        return self._map_regions_to_page_coords(regions, unit.bbox_xyxy, crop.shape[:2], scale, unit.unit_kind)
+
+        mapped = self._map_regions_to_page_coords(
+            regions,
+            unit.bbox_xyxy,
+            crop.shape[:2],
+            scale,
+            unit.unit_kind,
+        )
+        if not mapped:
+            response_kind = str(analysis.get("response_kind", "") or "unknown")
+            self._export_debug_artifact(
+                blk=None,
+                failure_reason="MangaLMM returned OCR regions outside the unit bounds.",
+                response_kind=response_kind,
+                raw_text=raw_text,
+                crop_bbox=unit.bbox_xyxy,
+                crop_source=unit.unit_kind,
+                resize_scale=scale,
+                crop_image=crop,
+                request_image=request_image,
+                analysis=analysis,
+                unit_bbox=unit.bbox_xyxy,
+                unit_kind=unit.unit_kind,
+            )
+            return []
+        return mapped
 
     def _assign_regions_to_blocks(
         self,
@@ -645,27 +764,68 @@ class MangaLMMOCREngine(OCREngine):
         return str(content or "").strip()
 
     def _parse_region_payload(self, text: str) -> list[dict[str, object]]:
+        return self._analyze_region_payload(text)["regions"]
+
+    def _analyze_region_payload(self, text: str) -> dict[str, object]:
         raw = str(text or "").strip()
         if not raw:
-            return []
+            return {
+                "regions": [],
+                "response_kind": "empty",
+                "payload_type": "empty",
+                "raw_length": 0,
+            }
 
-        candidates: list[str] = [raw]
+        candidates: list[tuple[str, str]] = [("raw", raw)]
         unfenced = self._strip_code_fences(raw)
-        if unfenced and unfenced not in candidates:
-            candidates.append(unfenced)
+        if unfenced and unfenced != raw:
+            candidates.append(("unfenced", unfenced))
 
-        for candidate in candidates:
+        for source, candidate in candidates:
             decoded = self._extract_first_json_array(candidate)
             normalized = self._normalize_region_list(decoded)
             if normalized:
-                return normalized
+                response_kind = self._classify_array_response_kind(raw, source, candidate)
+                return {
+                    "regions": normalized,
+                    "response_kind": response_kind,
+                    "payload_type": "json_array",
+                    "raw_length": len(raw),
+                }
+            if isinstance(decoded, list):
+                response_kind = self._classify_array_response_kind(raw, source, candidate)
+                return {
+                    "regions": [],
+                    "response_kind": f"{response_kind}_without_valid_regions",
+                    "payload_type": "json_array",
+                    "raw_length": len(raw),
+                }
 
-        for candidate in candidates:
-            payload = self._extract_first_json_payload(candidate)
-            normalized, _payload_type = self._extract_regions_from_payload(payload)
+        for source, candidate in candidates:
+            decoded = self._extract_first_json_payload(candidate)
+            normalized, payload_type = self._extract_regions_from_payload(decoded)
             if normalized:
-                return normalized
-        return []
+                response_kind = self._classify_payload_response_kind(source, payload_type)
+                return {
+                    "regions": normalized,
+                    "response_kind": response_kind,
+                    "payload_type": payload_type,
+                    "raw_length": len(raw),
+                }
+            if decoded is not None:
+                response_kind = self._classify_payload_response_kind(source, payload_type)
+                return {
+                    "regions": [],
+                    "response_kind": f"{response_kind}_without_regions",
+                    "payload_type": payload_type,
+                    "raw_length": len(raw),
+                }
+        return {
+            "regions": [],
+            "response_kind": "plain_text_or_non_json",
+            "payload_type": "text",
+            "raw_length": len(raw),
+        }
 
     def _extract_first_json_array(self, text: str) -> object:
         decoder = json.JSONDecoder()
@@ -713,6 +873,28 @@ class MangaLMMOCREngine(OCREngine):
                 if normalized:
                     return normalized, f"json_object_wrapper:{key}"
         return [], "json_object" if isinstance(payload, dict) else "unknown_payload"
+
+    @staticmethod
+    def _classify_array_response_kind(raw: str, source: str, candidate: str) -> str:
+        raw_stripped = raw.lstrip()
+        candidate_stripped = candidate.lstrip()
+        if candidate_stripped.startswith("{"):
+            return "json_object_wrapper" if source == "raw" else "salvaged_json_object_wrapper"
+        if source == "unfenced" and raw_stripped.startswith("```"):
+            return "fenced_json_array"
+        if source == "raw" and candidate_stripped.startswith("["):
+            return "json_array"
+        return "wrapped_json_array"
+
+    @staticmethod
+    def _classify_payload_response_kind(source: str, payload_type: str) -> str:
+        if payload_type.startswith("json_object_wrapper"):
+            return "json_object_wrapper" if source == "raw" else "salvaged_json_object_wrapper"
+        if payload_type == "json_single_region_object":
+            return "json_single_region_object" if source == "raw" else "salvaged_json_single_region_object"
+        if payload_type == "json_object":
+            return "json_object" if source == "raw" else "salvaged_json_object"
+        return payload_type if source == "raw" else f"salvaged_{payload_type}"
 
     def _normalize_region_list(self, payload: object) -> list[dict[str, object]]:
         if not isinstance(payload, list):
@@ -777,6 +959,7 @@ class MangaLMMOCREngine(OCREngine):
         *,
         attempt_count: int,
         status: str,
+        raw_text: str = "",
     ) -> None:
         blk.texts = []
         blk.text = ""
@@ -790,7 +973,7 @@ class MangaLMMOCREngine(OCREngine):
             status=status,
             empty_reason=reason,
             attempt_count=attempt_count,
-            raw_text="",
+            raw_text=raw_text,
             sanitized_text="",
         )
 
@@ -832,14 +1015,15 @@ class MangaLMMOCREngine(OCREngine):
         box: tuple[int, int, int, int],
         image_shape: tuple[int, ...],
         *,
-        ratio: float,
+        x_ratio: float,
+        y_ratio: float,
         min_size: int,
     ) -> tuple[int, int, int, int]:
         x1, y1, x2, y2 = [float(v) for v in box]
         width = max(1.0, x2 - x1)
         height = max(1.0, y2 - y1)
-        x_pad = width * ratio
-        y_pad = height * ratio
+        x_pad = width * x_ratio
+        y_pad = height * y_ratio
         cx = (x1 + x2) / 2.0
         cy = (y1 + y2) / 2.0
         half_w = max((width / 2.0) + x_pad, min_size / 2.0)
@@ -965,3 +1149,108 @@ class MangaLMMOCREngine(OCREngine):
         except (TypeError, ValueError):
             parsed = default
         return max(low, min(parsed, high))
+
+    @staticmethod
+    def _read_env_int(
+        env_name: str,
+        config_value,
+        default: int,
+        *,
+        bounds: tuple[int, int],
+    ) -> int:
+        raw = os.getenv(env_name, "").strip()
+        candidate = raw if raw else config_value
+        try:
+            parsed = int(candidate)
+        except (TypeError, ValueError):
+            parsed = default
+        low, high = bounds
+        return max(low, min(parsed, high))
+
+    @staticmethod
+    def _read_env_float(
+        env_name: str,
+        config_value,
+        default: float,
+        *,
+        minimum: float,
+        maximum: float,
+    ) -> float:
+        raw = os.getenv(env_name, "").strip()
+        candidate = raw if raw else config_value
+        try:
+            parsed = float(candidate)
+        except (TypeError, ValueError):
+            parsed = default
+        return max(minimum, min(parsed, maximum))
+
+    def _export_debug_artifact(
+        self,
+        *,
+        blk: TextBlock | None,
+        failure_reason: str,
+        response_kind: str,
+        raw_text: str,
+        crop_bbox,
+        crop_source: str,
+        resize_scale: float,
+        crop_image: np.ndarray | None,
+        request_image: np.ndarray | None,
+        analysis: dict[str, object],
+        unit_bbox=None,
+        unit_kind: str = "",
+    ) -> None:
+        if self.debug_root is None:
+            return
+        with self._debug_export_lock:
+            export_index = next(self._debug_export_counter)
+        if export_index > self.debug_export_limit:
+            return
+
+        artifact_dir = self.debug_root / f"{export_index:04d}_{response_kind}"
+        artifact_dir.mkdir(parents=True, exist_ok=True)
+        metadata = {
+            "failure_reason": failure_reason,
+            "response_kind": response_kind,
+            "raw_text": str(raw_text or ""),
+            "crop_bbox": self._coords_or_none(crop_bbox),
+            "crop_source": crop_source,
+            "resize_scale": float(resize_scale),
+            "crop_shape": self._image_shape_or_none(crop_image),
+            "request_shape": self._image_shape_or_none(request_image),
+            "block_xyxy": self._coords_or_none(getattr(blk, "xyxy", None)) if blk is not None else None,
+            "bubble_xyxy": self._coords_or_none(getattr(blk, "bubble_xyxy", None)) if blk is not None else None,
+            "source_lang": str(getattr(blk, "source_lang", "") or "") if blk is not None else "",
+            "direction": str(getattr(blk, "direction", "") or "") if blk is not None else "",
+            "unit_bbox": self._coords_or_none(unit_bbox),
+            "unit_kind": unit_kind,
+            "analysis": analysis,
+        }
+        (artifact_dir / "meta.json").write_text(
+            json.dumps(metadata, ensure_ascii=False, indent=2) + "\n",
+            encoding="utf-8",
+        )
+        if crop_image is not None and crop_image.size > 0:
+            cv2.imwrite(str(artifact_dir / "crop.jpg"), crop_image)
+        if request_image is not None and request_image.size > 0:
+            cv2.imwrite(str(artifact_dir / "request.jpg"), request_image)
+
+    @staticmethod
+    def _coords_or_none(value) -> list[int] | None:
+        if value is None:
+            return None
+        try:
+            coords = [int(float(item)) for item in value]
+        except Exception:
+            return None
+        return coords if len(coords) == 4 else None
+
+    @staticmethod
+    def _image_shape_or_none(image: np.ndarray | None) -> list[int] | None:
+        if image is None:
+            return None
+        try:
+            height, width = image.shape[:2]
+        except Exception:
+            return None
+        return [int(height), int(width)]
