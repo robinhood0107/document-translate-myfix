@@ -57,79 +57,104 @@ RETRYABLE_INFRA_MARKERS = (
 
 OCR_STAGE_CANDIDATES = [
     {
-        "slug": "ocr_mp1200_ls1280_tok256",
-        "label": "OCR baseline 1200k/1280 tok256",
+        "slug": "ocr_diag_t00_k1_ctx06_mp1200_ls1280_tok256",
+        "label": "Diag baseline t0.0 k1 ctx0.06 1200k/1280 tok256",
         "updates": {
             "mangalmm_ocr_client": {
+                "raw_response_logging": True,
                 "max_pixels": 1_200_000,
                 "max_long_side": 1280,
                 "max_completion_tokens": 256,
+                "temperature": 0.0,
+                "top_k": 1,
+                "text_expansion_ratio_x": 0.06,
+                "text_expansion_ratio_y": 0.06,
+                "debug_export_limit": 160,
             }
         },
     },
     {
-        "slug": "ocr_mp1100_ls1152_tok256",
-        "label": "OCR 1100k/1152 tok256",
+        "slug": "ocr_diag_t01_k32_ctx06_mp1200_ls1280_tok256",
+        "label": "Diag t0.1 k32 ctx0.06 1200k/1280 tok256",
         "updates": {
             "mangalmm_ocr_client": {
+                "raw_response_logging": True,
+                "max_pixels": 1_200_000,
+                "max_long_side": 1280,
+                "max_completion_tokens": 256,
+                "temperature": 0.1,
+                "top_k": 32,
+                "text_expansion_ratio_x": 0.06,
+                "text_expansion_ratio_y": 0.06,
+                "debug_export_limit": 160,
+            }
+        },
+    },
+    {
+        "slug": "ocr_diag_t01_k32_ctx12_mp1200_ls1280_tok256",
+        "label": "Diag t0.1 k32 ctx0.12 1200k/1280 tok256",
+        "updates": {
+            "mangalmm_ocr_client": {
+                "raw_response_logging": True,
+                "max_pixels": 1_200_000,
+                "max_long_side": 1280,
+                "max_completion_tokens": 256,
+                "temperature": 0.1,
+                "top_k": 32,
+                "text_expansion_ratio_x": 0.12,
+                "text_expansion_ratio_y": 0.12,
+                "debug_export_limit": 160,
+            }
+        },
+    },
+    {
+        "slug": "ocr_diag_t01_k48_ctx12_mp1100_ls1152_tok320",
+        "label": "Diag t0.1 k48 ctx0.12 1100k/1152 tok320",
+        "updates": {
+            "mangalmm_ocr_client": {
+                "raw_response_logging": True,
                 "max_pixels": 1_100_000,
                 "max_long_side": 1152,
-                "max_completion_tokens": 256,
+                "max_completion_tokens": 320,
+                "temperature": 0.1,
+                "top_k": 48,
+                "text_expansion_ratio_x": 0.12,
+                "text_expansion_ratio_y": 0.12,
+                "debug_export_limit": 160,
             }
         },
     },
     {
-        "slug": "ocr_mp1000_ls1100_tok256",
-        "label": "OCR 1000k/1100 tok256",
+        "slug": "ocr_diag_t015_k64_ctx18_mp1000_ls1100_tok384",
+        "label": "Diag t0.15 k64 ctx0.18 1000k/1100 tok384",
         "updates": {
             "mangalmm_ocr_client": {
+                "raw_response_logging": True,
                 "max_pixels": 1_000_000,
                 "max_long_side": 1100,
-                "max_completion_tokens": 256,
+                "max_completion_tokens": 384,
+                "temperature": 0.15,
+                "top_k": 64,
+                "text_expansion_ratio_x": 0.18,
+                "text_expansion_ratio_y": 0.16,
+                "debug_export_limit": 160,
             }
         },
     },
     {
-        "slug": "ocr_mp0900_ls1024_tok256",
-        "label": "OCR 900k/1024 tok256",
+        "slug": "ocr_diag_t01_k32_ctx12_mp0900_ls1024_tok320",
+        "label": "Diag t0.1 k32 ctx0.12 900k/1024 tok320",
         "updates": {
             "mangalmm_ocr_client": {
-                "max_pixels": 900_000,
-                "max_long_side": 1024,
-                "max_completion_tokens": 256,
-            }
-        },
-    },
-    {
-        "slug": "ocr_mp0800_ls0960_tok256",
-        "label": "OCR 800k/960 tok256",
-        "updates": {
-            "mangalmm_ocr_client": {
-                "max_pixels": 800_000,
-                "max_long_side": 960,
-                "max_completion_tokens": 256,
-            }
-        },
-    },
-    {
-        "slug": "ocr_mp0900_ls1024_tok320",
-        "label": "OCR 900k/1024 tok320",
-        "updates": {
-            "mangalmm_ocr_client": {
+                "raw_response_logging": True,
                 "max_pixels": 900_000,
                 "max_long_side": 1024,
                 "max_completion_tokens": 320,
-            }
-        },
-    },
-    {
-        "slug": "ocr_mp0800_ls0960_tok320",
-        "label": "OCR 800k/960 tok320",
-        "updates": {
-            "mangalmm_ocr_client": {
-                "max_pixels": 800_000,
-                "max_long_side": 960,
-                "max_completion_tokens": 320,
+                "temperature": 0.1,
+                "top_k": 32,
+                "text_expansion_ratio_x": 0.12,
+                "text_expansion_ratio_y": 0.12,
+                "debug_export_limit": 160,
             }
         },
     },
@@ -307,6 +332,19 @@ def _run_pipeline_once(*, preset_path: Path, run_dir: Path, sample_dir: Path) ->
     ]
     env = dict(os.environ)
     env["CT_BENCH_OUTPUT_ROOT"] = str(family_output_root())
+    preset_payload = _load_json(preset_path)
+    mangalmm_cfg = preset_payload.get("mangalmm_ocr_client", {}) if isinstance(preset_payload, dict) else {}
+    if isinstance(mangalmm_cfg, dict):
+        env["CT_MANGALMM_DEBUG_ROOT"] = str(run_dir / "mangalmm_debug")
+        env["CT_MANGALMM_DEBUG_EXPORT_LIMIT"] = str(int(mangalmm_cfg.get("debug_export_limit", 96)))
+        for config_key, env_name in (
+            ("temperature", "CT_MANGALMM_TEMPERATURE"),
+            ("top_k", "CT_MANGALMM_TOP_K"),
+            ("text_expansion_ratio_x", "CT_MANGALMM_TEXT_EXPANSION_RATIO_X"),
+            ("text_expansion_ratio_y", "CT_MANGALMM_TEXT_EXPANSION_RATIO_Y"),
+        ):
+            if config_key in mangalmm_cfg:
+                env[env_name] = str(mangalmm_cfg[config_key])
     completed = subprocess.run(
         cmd,
         cwd=str(ROOT),
@@ -321,6 +359,39 @@ def _run_pipeline_once(*, preset_path: Path, run_dir: Path, sample_dir: Path) ->
     summary_path = run_dir / "summary.json"
     summary = _load_json(summary_path) if summary_path.is_file() else None
     return completed, summary
+
+
+def _collect_mangalmm_debug_summary(run_dir: Path) -> dict[str, Any]:
+    debug_root = run_dir / "mangalmm_debug"
+    if not debug_root.is_dir():
+        return {}
+
+    response_kind_counts: dict[str, int] = {}
+    failure_reason_counts: dict[str, int] = {}
+    crop_source_counts: dict[str, int] = {}
+    sample_artifacts: list[str] = []
+    artifact_count = 0
+
+    for meta_path in sorted(debug_root.glob("*/meta.json")):
+        payload = _load_json(meta_path)
+        artifact_count += 1
+        response_kind = str(payload.get("response_kind", "") or "unknown")
+        failure_reason = str(payload.get("failure_reason", "") or "unknown")
+        crop_source = str(payload.get("crop_source", "") or "unknown")
+        response_kind_counts[response_kind] = int(response_kind_counts.get(response_kind, 0)) + 1
+        failure_reason_counts[failure_reason] = int(failure_reason_counts.get(failure_reason, 0)) + 1
+        crop_source_counts[crop_source] = int(crop_source_counts.get(crop_source, 0)) + 1
+        if len(sample_artifacts) < 8:
+            sample_artifacts.append(repo_relative_str(meta_path.parent))
+
+    return {
+        "debug_root": repo_relative_str(debug_root),
+        "artifact_count": artifact_count,
+        "response_kind_counts": dict(sorted(response_kind_counts.items())),
+        "failure_reason_counts": dict(sorted(failure_reason_counts.items())),
+        "crop_source_counts": dict(sorted(crop_source_counts.items())),
+        "sample_artifacts": sample_artifacts,
+    }
 
 
 def _gate_reasons(summary: dict[str, Any] | None, expected_pages: int, returncode: int) -> list[str]:
@@ -429,6 +500,7 @@ def _run_candidate(
         "gate_reasons": reasons,
         "updates": updates,
         "summary": final_summary or {},
+        "mangalmm_debug": _collect_mangalmm_debug_summary(final_run_dir),
     }
     write_json(final_run_dir / "tuning_record.json", record)
     return record
@@ -458,6 +530,9 @@ def _report_lines_for_record(record: dict[str, Any]) -> list[str]:
         f"  - translate_median_sec: `{summary.get('translate_median_sec')}`",
         f"  - gpu_peak_used_mb: `{summary.get('gpu_peak_used_mb')}`",
         f"  - gpu_floor_free_mb: `{summary.get('gpu_floor_free_mb')}`",
+        f"  - mangalmm_response_kinds: `{(record.get('mangalmm_debug') or {}).get('response_kind_counts', {})}`",
+        f"  - mangalmm_failure_reasons: `{(record.get('mangalmm_debug') or {}).get('failure_reason_counts', {})}`",
+        f"  - mangalmm_crop_sources: `{(record.get('mangalmm_debug') or {}).get('crop_source_counts', {})}`",
         f"  - run_dir: `{record.get('run_dir')}`",
     ]
 
