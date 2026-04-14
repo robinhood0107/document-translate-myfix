@@ -1,22 +1,22 @@
 {
-  "suite_dir": "./banchmark_result_log/paddleocr_vl_parallel/20260415_020217_paddleocr-vl-parallel-smoke",
-  "winner": {
-    "candidate_key": "fixed_w8",
-    "label": "fixed workers=8",
-    "scheduler_mode": "fixed",
+  "suite_dir": "./banchmark_result_log/paddleocr_vl_parallel/20260415_031602_paddleocr-vl-parallel-smoke",
+  "quality_gate_winner": {
+    "candidate_key": "fixed_area_desc_w8",
+    "label": "fixed_area_desc workers=8",
+    "scheduler_mode": "fixed_area_desc",
     "parallel_workers": 8,
     "warmup_run_dirs": [],
     "measured_run_dirs": [
-      "./banchmark_result_log/paddleocr_vl_parallel/20260415_020217_paddleocr-vl-parallel-smoke/fixed_w8/measured_r1"
+      "./banchmark_result_log/paddleocr_vl_parallel/20260415_031602_paddleocr-vl-parallel-smoke/fixed_area_desc_w8/measured_r1"
     ],
     "warmup_count": 0,
     "measured_count": 1,
-    "measured_elapsed_sec_median": 352.699,
-    "measured_ocr_total_sec_median": 305.231,
-    "measured_detect_ocr_total_sec_median": 348.749,
-    "measured_ocr_page_p95_sec_median": 43.893,
-    "measured_gpu_peak_used_mb_median": 11828,
-    "measured_gpu_floor_free_mb_median": 172,
+    "measured_elapsed_sec_median": 301.593,
+    "measured_ocr_total_sec_median": 292.526,
+    "measured_detect_ocr_total_sec_median": 298.744,
+    "measured_ocr_page_p95_sec_median": 43.66,
+    "measured_gpu_peak_used_mb_median": 9227,
+    "measured_gpu_floor_free_mb_median": 2773,
     "measured_page_failed_count_max": 0,
     "measured_ocr_empty_block_count_median": 0,
     "quality_mean_cer": 0.0,
@@ -25,6 +25,38 @@
     "quality_gate_pass": true,
     "quality_gate_failures": []
   },
+  "review_candidates": [
+    {
+      "candidate_key": "fixed_area_desc_w8",
+      "scheduler_mode": "fixed_area_desc",
+      "parallel_workers": 8,
+      "measured_ocr_total_sec_median": 292.526,
+      "measured_ocr_page_p95_sec_median": 43.66,
+      "measured_elapsed_sec_median": 301.593,
+      "measured_page_failed_count_max": 0,
+      "measured_ocr_empty_block_count_median": 0,
+      "quality_mean_cer": 0.0,
+      "quality_mean_exact_match": 1.0,
+      "quality_gate_pass": true,
+      "quality_gate_failures": []
+    },
+    {
+      "candidate_key": "auto_v1_cap4",
+      "scheduler_mode": "auto_v1",
+      "parallel_workers": 4,
+      "measured_ocr_total_sec_median": 295.765,
+      "measured_ocr_page_p95_sec_median": 40.871,
+      "measured_elapsed_sec_median": 304.779,
+      "measured_page_failed_count_max": 0,
+      "measured_ocr_empty_block_count_median": 0,
+      "quality_mean_cer": 0.0,
+      "quality_mean_exact_match": 1.0,
+      "quality_gate_pass": true,
+      "quality_gate_failures": []
+    }
+  ],
+  "final_promotion_status": "approved_fixed_area_desc_w8",
+  "approved_promotion_candidate": "fixed_area_desc_w8",
   "candidate_count": 3,
-  "pass_candidate_count": 1
+  "pass_candidate_count": 3
 }

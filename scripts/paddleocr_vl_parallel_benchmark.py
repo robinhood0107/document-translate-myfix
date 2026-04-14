@@ -553,6 +553,45 @@ def _winner(candidates: list[dict[str, Any]]) -> dict[str, Any]:
     )[0]
 
 
+def _speed_rank(
+    candidates: list[dict[str, Any]],
+    *,
+    include_baseline: bool,
+    baseline_key: str = BASELINE_CANDIDATE_KEY,
+) -> list[dict[str, Any]]:
+    ranked = [
+        item
+        for item in candidates
+        if include_baseline or str(item.get("candidate_key", "")) != baseline_key
+    ]
+    return sorted(
+        ranked,
+        key=lambda item: (
+            float(item.get("measured_ocr_total_sec_median") or float("inf")),
+            float(item.get("measured_ocr_page_p95_sec_median") or float("inf")),
+            float(item.get("measured_elapsed_sec_median") or float("inf")),
+            str(item.get("candidate_key", "")),
+        ),
+    )
+
+
+def _review_candidate_snapshot(item: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "candidate_key": item.get("candidate_key"),
+        "scheduler_mode": item.get("scheduler_mode"),
+        "parallel_workers": item.get("parallel_workers"),
+        "measured_ocr_total_sec_median": item.get("measured_ocr_total_sec_median"),
+        "measured_ocr_page_p95_sec_median": item.get("measured_ocr_page_p95_sec_median"),
+        "measured_elapsed_sec_median": item.get("measured_elapsed_sec_median"),
+        "measured_page_failed_count_max": item.get("measured_page_failed_count_max"),
+        "measured_ocr_empty_block_count_median": item.get("measured_ocr_empty_block_count_median"),
+        "quality_mean_cer": item.get("quality_mean_cer"),
+        "quality_mean_exact_match": item.get("quality_mean_exact_match"),
+        "quality_gate_pass": item.get("quality_gate_pass"),
+        "quality_gate_failures": item.get("quality_gate_failures"),
+    }
+
+
 def _write_csv(path: Path, rows: list[dict[str, Any]], fieldnames: list[str]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("w", encoding="utf-8", newline="") as fh:
@@ -575,7 +614,10 @@ def _write_problem_solving_specs(
 ) -> None:
     specs_dir = suite_dir / "problem_solving_specs"
     specs_dir.mkdir(parents=True, exist_ok=True)
-    winner = suite_summary.get("winner", {}) or {}
+    quality_gate_winner = suite_summary.get("quality_gate_winner", {}) or {}
+    review_candidates = suite_summary.get("review_candidates", []) or []
+    review_top1 = review_candidates[0] if len(review_candidates) >= 1 else {}
+    review_top2 = review_candidates[1] if len(review_candidates) >= 2 else {}
     spec_payloads = {
         "01_detector_freeze.md": {
             "title": "문제 해결 명세서 01 - Detector Freeze",
@@ -599,18 +641,25 @@ def _write_problem_solving_specs(
             "next_action": "winner 결정",
         },
         "04_winner_decision.md": {
-            "title": "문제 해결 명세서 04 - Winner Decision",
+            "title": "문제 해결 명세서 04 - Review Candidate Selection",
             "condition": "rank_metric=ocr_total_sec median",
-            "measurement": f"winner={winner.get('candidate_key', 'n/a')}",
-            "interpretation": "품질 게이트를 통과한 후보 중 OCR total median이 가장 낮은 후보를 채택했다.",
-            "next_action": "product promotion 판단",
+            "measurement": (
+                f"quality_gate_winner={quality_gate_winner.get('candidate_key', 'n/a')} "
+                f"review_top1={review_top1.get('candidate_key', 'n/a')} "
+                f"review_top2={review_top2.get('candidate_key', 'n/a')}"
+            ),
+            "interpretation": (
+                "속도 랭킹 상위 2개 비-baseline 후보를 사용자 OCR diff 검수 대상으로 고정하고, "
+                "quality gate winner는 보조 해석 지표로만 유지한다."
+            ),
+            "next_action": "user OCR diff review",
         },
         "05_product_promotion.md": {
             "title": "문제 해결 명세서 05 - Product Promotion",
-            "condition": "develop promotion remains hidden-flag only",
-            "measurement": f"winner={winner.get('candidate_key', 'n/a')}",
-            "interpretation": "subset winner는 hidden flag로만 제품 승격 후보가 된다.",
-            "next_action": "22장 full corpus promotion 검증",
+            "condition": "develop promotion requires explicit user approval after OCR diff review",
+            "measurement": f"promotion_status={suite_summary.get('final_promotion_status', 'pending_user_review')}",
+            "interpretation": "develop 기본값 승격은 사용자 검수 승인 전까지 잠겨 있으며, 이번 단계는 review pack 준비까지를 완료 상태로 본다.",
+            "next_action": "prepare develop promotion branch after user approval",
         },
     }
     for filename, payload in spec_payloads.items():
@@ -652,20 +701,43 @@ def _write_problem_solving_specs(
 
 
 def _render_suite_markdown(summary: dict[str, Any]) -> str:
-    winner = summary.get("winner", {}) or {}
+    quality_gate_winner = summary.get("quality_gate_winner", {}) or {}
+    review_candidates = summary.get("review_candidates", []) or []
     lines = [
         "# PaddleOCR VL Parallel Suite Summary",
         "",
         f"- suite_dir: `{summary.get('suite_dir')}`",
+        f"- runtime_contract: `{summary.get('runtime_contract')}`",
+        f"- runtime_services: `{summary.get('runtime_services')}`",
+        f"- stage_ceiling: `{summary.get('stage_ceiling')}`",
         f"- baseline_candidate_key: `{summary.get('baseline_candidate_key')}`",
         f"- page_count: `{summary.get('page_count')}`",
         f"- candidate_count: `{summary.get('candidate_count')}`",
         f"- pass_candidate_count: `{summary.get('pass_candidate_count')}`",
-        f"- winner: `{winner.get('candidate_key', 'n/a')}`",
+        f"- quality_gate_winner: `{quality_gate_winner.get('candidate_key', 'n/a')}`",
+        f"- final_promotion_status: `{summary.get('final_promotion_status', 'pending_user_review')}`",
         "",
-        "| candidate | scheduler | workers | ocr_total_sec_median | ocr_page_p95_sec_median | mean_CER | mean_exact_match | gate_pass |",
-        "| --- | --- | --- | --- | --- | --- | --- | --- |",
+        "## Review Candidates",
+        "",
     ]
+    if review_candidates:
+        for index, item in enumerate(review_candidates, start=1):
+            lines.append(
+                f"- top{index}: `{item.get('candidate_key', 'n/a')}` "
+                f"(ocr_total_sec_median=`{item.get('measured_ocr_total_sec_median', 'n/a')}`, "
+                f"gate_pass=`{item.get('quality_gate_pass', 'n/a')}`)"
+            )
+    else:
+        lines.append("- none")
+    lines.extend(
+        [
+            "",
+            "## Candidate Table",
+            "",
+            "| candidate | scheduler | workers | ocr_total_sec_median | ocr_page_p95_sec_median | mean_CER | mean_exact_match | gate_pass |",
+            "| --- | --- | --- | --- | --- | --- | --- | --- |",
+        ]
+    )
     for item in summary.get("candidates", []):
         lines.append(
             "| {candidate_key} | {scheduler_mode} | {parallel_workers} | {ocr_total} | {p95} | {cer} | {exact} | {passed} |".format(
@@ -839,7 +911,12 @@ def main() -> int:
         if candidate_dir is not None:
             write_json(candidate_dir / "candidate_summary.json", item)
 
-    winner = _winner(candidate_results)
+    quality_gate_winner = _winner(candidate_results)
+    speed_ranked_candidates = _speed_rank(candidate_results, include_baseline=True)
+    review_candidates = [
+        _review_candidate_snapshot(item)
+        for item in _speed_rank(candidate_results, include_baseline=False)[:2]
+    ]
     candidate_results_sorted = sorted(
         candidate_results,
         key=lambda item: (
@@ -857,9 +934,17 @@ def main() -> int:
         "candidate_count": len(candidate_results_sorted),
         "pass_candidate_count": sum(1 for item in candidate_results_sorted if item.get("quality_gate_pass")),
         "baseline_candidate_key": baseline_candidate_key,
+        "runtime_contract": "paddleocr-vl-single-tenant-ocr-only",
+        "runtime_services": DEFAULT_RUNTIME_SERVICES,
+        "stage_ceiling": DEFAULT_STAGE_CEILING,
         "baseline_gold_path": repo_relative_str(baseline_gold_path),
         "detector_manifest_path": repo_relative_str(detector_manifest_path),
-        "winner": winner,
+        "quality_gate_winner": quality_gate_winner,
+        "winner": quality_gate_winner,
+        "speed_ranked_candidates": [_review_candidate_snapshot(item) for item in speed_ranked_candidates],
+        "review_candidate_keys": [str(item.get("candidate_key", "")) for item in review_candidates],
+        "review_candidates": review_candidates,
+        "final_promotion_status": "pending_user_review",
         "candidates": candidate_results_sorted,
     }
     write_json(suite_dir / "suite_summary.json", suite_summary)
@@ -895,7 +980,9 @@ def main() -> int:
         family_output_root() / LAST_SUITE_RECORD,
         {
             "suite_dir": repo_relative_str(suite_dir),
-            "winner": winner,
+            "winner": quality_gate_winner,
+            "quality_gate_winner": quality_gate_winner,
+            "review_candidate_keys": [str(item.get("candidate_key", "")) for item in review_candidates],
         },
     )
     _write_suite_state(
@@ -913,10 +1000,18 @@ def main() -> int:
             "completed_candidate_keys": [item["candidate_key"] for item in candidate_results],
             "started_at": suite_started_at,
             "completed_at": time.time(),
-            "winner": winner,
+            "winner": quality_gate_winner,
+            "quality_gate_winner": quality_gate_winner,
+            "review_candidate_keys": [str(item.get("candidate_key", "")) for item in review_candidates],
+            "final_promotion_status": "pending_user_review",
         },
     )
-    _log(f"suite complete: winner={winner.get('candidate_key', 'n/a')}")
+    _log(
+        "suite complete: quality_gate_winner={winner} review_top1={top1}".format(
+            winner=quality_gate_winner.get("candidate_key", "n/a"),
+            top1=review_candidates[0].get("candidate_key", "n/a") if review_candidates else "n/a",
+        )
+    )
     return 0
 
 
