@@ -37,8 +37,8 @@ class MangaLMMOCRPage(QtWidgets.QWidget):
         note = MLabel(
             self.tr(
                 "Connect Comic Translate to your local MangaLMM llama.cpp server.\n"
-                "This OCR engine sends cropped text regions to the OpenAI-compatible /chat/completions endpoint.\n"
-                "MangaLMM is used as block-crop OCR only, not as full-page spotting inside the app.\n"
+                "This OCR engine sends full pages or large overlapping tiles to the OpenAI-compatible /chat/completions endpoint.\n"
+                "MangaLMM runs as page/tile OCR inside the app, then recognized regions are matched back to detected text blocks.\n"
                 "Keep the default localhost URL if you want Comic Translate to reuse the bundled Docker runtime."
             )
         ).secondary()
@@ -126,15 +126,15 @@ class MangaLMMOCRPage(QtWidgets.QWidget):
         tip = MLabel(
             self.tr(
                 "Recommended values for the bundled MangaLMM runtime:\n"
-                "- ctx-size 4096: enough for block OCR while keeping VRAM safer\n"
+                "- ctx-size 4096: enough for page/tile OCR while keeping VRAM safer\n"
                 "- Max Completion Tokens: 256\n"
                 "- Parallel Workers: 1\n"
                 "- Request Timeout: 60 seconds\n"
                 "- Safe Resize: on\n"
-                "- Max Pixels / Max Long Side: 1200000 / 1280\n"
+                "- Max Pixels / Max Long Side: 2116800 / 1728\n"
                 "Reasoning:\n"
-                "- Keep the request deterministic with temperature 0 and top_k 1 internally.\n"
-                "- Large crops are resized only when needed, and OCR region boxes are mapped back to original coordinates.\n"
+                "- Keep a lightly sampled request with temperature 0.1 and top_k 32 internally so the model is less likely to stop at an empty response.\n"
+                "- Pages larger than the safe limit are split into 1280px tiles with overlap, and OCR region boxes are mapped back to original coordinates.\n"
                 "- Workers 1 is the safest default when Gemma and MangaLMM stay resident on the same GPU."
             )
         ).secondary()

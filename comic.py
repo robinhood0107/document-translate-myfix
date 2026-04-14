@@ -8,7 +8,7 @@ from PySide6.QtCore import QSettings, QTranslator, QLocale, \
     Qt, QTimer, QThread, QObject, Signal, Slot, QEvent
 from PySide6.QtCore import QLibraryInfo
 from PySide6.QtNetwork import QLocalServer, QLocalSocket
-from PySide6.QtWidgets import QApplication
+from PySide6.QtWidgets import QApplication, QMessageBox
 from app.ui.splash_screen import SplashScreen
 
 
@@ -24,6 +24,17 @@ def _single_instance_server_name() -> str:
     seed = os.path.abspath(__file__).lower().encode("utf-8", errors="ignore")
     digest = hashlib.sha1(seed).hexdigest()[:12]
     return f"ComicTranslate-{digest}"
+
+
+def _read_positive_int_env(name: str, default: int = 0) -> int:
+    raw = str(os.environ.get(name, "") or "").strip()
+    if not raw:
+        return default
+    try:
+        value = int(raw)
+    except ValueError:
+        return default
+    return value if value > 0 else default
 
 
 def _encode_ipc_message(payload: dict) -> bytes:
@@ -189,6 +200,7 @@ def main():
     # Get language settings
     settings = QSettings("ComicLabs", "ComicTranslate")
     selected_language = settings.value('language', get_system_language())
+    smoke_exit_ms = _read_positive_int_env("COMIC_SMOKE_EXIT_MS", 0)
     
     # Create worker and thread
     thread = QThread()
@@ -218,11 +230,10 @@ def main():
             norm = os.path.abspath(path)
             if self._ct is not None:
                 try:
-                    if not self._ct._confirm_start_new_project():
-                        return
+                    self._ct._guarded_thread_load_project(norm)
+                    return
                 except Exception:
-                    pass
-                self._ct.project_ctrl.thread_load_project(norm)
+                    self._ct.project_ctrl.thread_load_project(norm)
             else:
                 self._pending_project_file = norm
 
@@ -269,11 +280,15 @@ def main():
 
                 splash.finish(self._ct)
 
+                if smoke_exit_ms > 0:
+                    logging.info("Startup smoke mode enabled; quitting in %d ms", smoke_exit_ms)
+                    QTimer.singleShot(smoke_exit_ms, app.quit)
+
                 if project_file:
                     self.request_open_project(project_file)
                 elif self._pending_project_file:
                     self.request_open_project(self._pending_project_file)
-                else:
+                elif smoke_exit_ms <= 0:
                     # Offer recovery only on plain startup (no explicit project open request).
                     self._ct.project_ctrl.prompt_restore_recovery_if_available()
             except Exception as e:
@@ -312,8 +327,27 @@ def main():
     worker.failed.connect(coordinator.on_failed, Qt.ConnectionType.QueuedConnection)
     thread.started.connect(worker.run)
     
-    # Show splash and start loading thread
+    # Show splash and prepare required local runtime models before controller import.
     splash.show()
+    try:
+        from modules.utils.download import ensure_startup_runtime_models
+
+        ensure_startup_runtime_models(prefer_cuda=True)
+    except Exception as exc:
+        logging.exception("Failed to prepare required local runtime models: %s", exc)
+        splash.close()
+        msg = QMessageBox()
+        msg.setIcon(QMessageBox.Icon.Critical)
+        msg.setWindowTitle("Required Model Download Failed")
+        msg.setText("Failed to prepare required local model files under the project models directory.")
+        msg.setInformativeText(str(exc))
+        try:
+            msg.setDetailedText(str(exc))
+        except Exception:
+            pass
+        msg.exec()
+        raise SystemExit(1)
+
     # Defer starting work until the event loop is running so the splash remains clickable.
     QTimer.singleShot(0, thread.start)
     

@@ -1,0 +1,98 @@
+from __future__ import annotations
+
+import os
+import tempfile
+import unittest
+
+os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+
+from PySide6 import QtCore, QtTest, QtWidgets
+from PySide6.QtGui import QImage
+
+from app.ui.pipeline_status_panel import PipelineStatusPanel
+
+
+class PipelineStatusPanelTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls._app = QtWidgets.QApplication.instance() or QtWidgets.QApplication([])
+
+    def setUp(self) -> None:
+        self.parent = QtWidgets.QWidget()
+        self.parent.setGeometry(0, 0, 1200, 900)
+        self.parent.show()
+        self.panel = PipelineStatusPanel(self.parent)
+        self.panel.set_allowed_area(QtCore.QRect(0, 0, 1200, 900))
+        self.addCleanup(self.panel.deleteLater)
+        self.addCleanup(self.parent.deleteLater)
+
+    def test_panel_defaults_to_embedded_mode(self) -> None:
+        self.assertEqual(self.panel.display_mode(), PipelineStatusPanel.EMBEDDED_MODE)
+        self.assertIs(self.panel.parentWidget(), self.parent)
+
+    def test_toggle_display_mode_switches_to_window_and_back(self) -> None:
+        self.panel.show()
+        QtWidgets.QApplication.processEvents()
+
+        self.panel.set_display_mode(PipelineStatusPanel.WINDOW_MODE)
+        QtWidgets.QApplication.processEvents()
+        self.assertEqual(self.panel.display_mode(), PipelineStatusPanel.WINDOW_MODE)
+        self.assertTrue(bool(self.panel.windowFlags() & QtCore.Qt.WindowType.Window))
+
+        self.panel.set_display_mode(PipelineStatusPanel.EMBEDDED_MODE)
+        QtWidgets.QApplication.processEvents()
+        self.assertEqual(self.panel.display_mode(), PipelineStatusPanel.EMBEDDED_MODE)
+        self.assertIs(self.panel.parentWidget(), self.parent)
+
+    def test_running_event_shows_cancel_and_report(self) -> None:
+        self.panel.update_event(
+            {
+                "phase": "pipeline",
+                "status": "running",
+                "service": "batch",
+                "message": "running",
+                "page_total": 3,
+                "page_index": 1,
+                "image_name": "page01.png",
+                "eta_text": "00:01:00",
+            }
+        )
+        QtWidgets.QApplication.processEvents()
+        self.assertFalse(self.panel.cancel_button.isHidden())
+        self.assertFalse(self.panel.report_button.isHidden())
+        self.assertTrue(self.panel.retry_button.isHidden())
+
+    def test_done_event_updates_preview_and_auto_hides(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            image_path = os.path.join(temp_dir, "preview.png")
+            QImage(120, 220, QImage.Format.Format_RGB32).save(image_path)
+            self.panel.set_output_root(temp_dir)
+            self.panel.update_event(
+                {
+                    "phase": "done",
+                    "status": "completed",
+                    "service": "batch",
+                    "message": "done",
+                    "preview_path": image_path,
+                    "auto_hide_ms": 1,
+                }
+            )
+            QtWidgets.QApplication.processEvents()
+            self.assertFalse(self.panel.open_output_button.isHidden())
+            self.assertFalse(self.panel.close_button.isHidden())
+            self.assertEqual(self.panel._preview_path, image_path)
+            pixmap = self.panel.preview_label.pixmap()
+            self.assertIsNotNone(pixmap)
+            self.assertFalse(pixmap.isNull())
+
+            QtTest.QTest.qWait(50)
+            QtWidgets.QApplication.processEvents()
+            self.assertFalse(self.panel.isVisible())
+
+    def test_hiding_logs_reduces_left_column_width(self) -> None:
+        self.panel.show()
+        QtWidgets.QApplication.processEvents()
+        width_with_logs = self.panel.left_panel.width()
+        self.panel.set_logs_visible(False)
+        QtWidgets.QApplication.processEvents()
+        self.assertLess(self.panel.left_panel.width(), width_with_logs)

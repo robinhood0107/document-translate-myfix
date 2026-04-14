@@ -4,6 +4,7 @@ import tempfile
 import threading
 
 from .archives import (
+    close_comic_cache,
     list_archive_image_entries,
     materialize_archive_entry,
     materialize_archive_entries,
@@ -70,6 +71,7 @@ class FileHandler:
         if not extend:
             for archive in self.archive_info:
                 temp_dir = archive['temp_dir']
+                close_comic_cache(archive.get('archive_path'))
                 _clear_lazy_sources_under_dir(temp_dir)
                 if os.path.exists(temp_dir):
                     shutil.rmtree(temp_dir)
