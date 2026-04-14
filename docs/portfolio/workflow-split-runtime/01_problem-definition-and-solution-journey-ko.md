@@ -26,10 +26,12 @@
 ## 설계 판단
 
 1. Requirement 1과 Requirement 2를 분리한다.
-2. Requirement 1이 성공하기 전까지 Requirement 2 제품 구현은 잠근다.
+2. Requirement 1이 성공하기 전까지 Requirement 2의 자동 선택기 제품 구현은 잠근다.
 3. benchmark full docs/assets는 `benchmarking/lab`에 둔다.
 4. `develop`에는 포트폴리오형 요약 문서만 둔다.
 5. 사고과정 문서는 내부 추론 재현이 아니라, 문제 정의 -> 측정 설계 -> 설계 판단 -> 구현 계획의 결정 로그로 남긴다.
+6. `candidate_stage_batched_dual_resident`는 `candidate_stage_batched_single_ocr`보다 비교 실험 결과가 덜 좋아도 Requirement 1 자체를 무효화하지 않는 정식 신규 전체 플로우 승격 대상으로 잠근다.
+7. 즉 Requirement 2가 새로 추가하는 것은 dual-resident 상주 자체가 아니라, 그 위에서 동작하는 사용자 승인 기반 자동 선택 규칙이다.
 
 ## 실제 운영에서 새로 알게 된 사실
 
@@ -38,6 +40,8 @@
 ## 현재까지의 결과
 
 - `benchmarking/lab`에 Requirement 1 family 문서 기준선을 생성했다.
+- `benchmarking/lab`에 Requirement 1 실측 패키지와 baseline smoke 근거를 확보했다.
+- `benchmarking/lab`과 `feature/workflow-split-runtime` 문서에 `candidate_stage_batched_dual_resident` 정식 승격 정책을 반영하기 시작했다.
 - `develop`에는 이 작업을 포트폴리오와 제품 승격 관점에서 읽을 수 있도록 별도 문서 묶음을 시작했다.
 - `feature/workflow-split-runtime`에는 포트폴리오 승격 문서를 원격까지 publish했고 upstream도 연결했다.
 
@@ -56,7 +60,8 @@
 
 ## 다음 단계
 
-1. draft PR 생성
-2. `workflow_mode` 제품 설계 반영
-3. runtime lifecycle / telemetry 설계
-4. Requirement 1 실측 결과를 바탕으로 승격 여부 결정
+1. `feature/workflow-split-runtime` 포트폴리오 문서에 dual-resident 정식 승격 방향을 반영
+2. Requirement 1 13장 full baseline 누적
+3. experimental candidate runner 실측과 비교표 작성
+4. `workflow_mode` 제품 설계를 `legacy` + `candidate_stage_batched_dual_resident` 기준으로 확정
+5. Requirement 1 실측 결과를 바탕으로 제품 승격 범위를 결정
