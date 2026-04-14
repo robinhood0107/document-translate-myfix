@@ -487,6 +487,31 @@ class MangaLMMOCRTests(unittest.TestCase):
         self.assertEqual(payload["min_p"], 0.0)
         self.assertEqual(payload["repeat_penalty"], 1.05)
         self.assertEqual(payload["repeat_last_n"], 0)
+        self.assertEqual(post.call_args.kwargs["timeout"], 60.0)
+
+    def test_request_response_text_uses_unbounded_read_timeout_for_optimal_plus(self) -> None:
+        engine = MangaLMMOCREngine()
+        settings = _FakeSettings(selected_ocr_mode=OCR_MODE_BEST_LOCAL_PLUS)
+        engine.initialize(
+            settings,
+            source_lang_english="Japanese",
+            selected_ocr_mode=OCR_MODE_BEST_LOCAL_PLUS,
+        )
+        image = np.zeros((32, 32, 3), dtype=np.uint8)
+        response = mock.Mock()
+        response.status_code = 200
+        response.json.return_value = {
+            "choices": [{"message": {"content": "[]"}}],
+        }
+
+        with mock.patch("modules.ocr.mangalmm_ocr.requests.post", return_value=response) as post:
+            engine._request_response_text(
+                image,
+                max_completion_tokens=2048,
+                prompt_text=engine.STANDARD_PROMPT,
+            )
+
+        self.assertEqual(post.call_args.kwargs["timeout"], (60.0, None))
 
     def test_process_image_uses_retry_ladder_for_optimal_plus_until_match(self) -> None:
         engine = MangaLMMOCREngine()
