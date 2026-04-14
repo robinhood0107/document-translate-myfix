@@ -23,6 +23,7 @@ logger = logging.getLogger(__name__)
 ROOT_DIR = Path(__file__).resolve().parents[2]
 DEFAULT_HUNYUAN_N_GPU_LAYERS = "80"
 OCRPreflightProbeResult = Literal["healthy", "unavailable", "not_managed"]
+OCRHealthState = Literal["healthy", "loading", "unavailable"]
 
 _ENGINE_CONFIG = {
     "HunyuanOCR": {
@@ -121,7 +122,7 @@ class LocalOCRRuntimeManager:
         engine_key: str,
         settings_page: Any,
         *,
-        timeout_sec: int = 240,
+        timeout_sec: int = 300,
         progress_callback: Callable[[dict[str, Any]], None] | None = None,
         cancel_checker: Callable[[], bool] | None = None,
     ) -> None:
@@ -132,15 +133,8 @@ class LocalOCRRuntimeManager:
 
             self.validate_engine(engine_key, settings_page)
             config = self._config_for(engine_key)
-            if self._wait_for_health(
-                config["health_url"],
-                timeout_sec=2,
-                progress_callback=progress_callback,
-                cancel_checker=cancel_checker,
-                engine_key=engine_key,
-                step_key="health_probe",
-                message=f"{engine_key} 상태를 확인하는 중...",
-            ):
+            initial_state = self._probe_health_state(config["health_url"])
+            if initial_state == "healthy":
                 self._active_engine = engine_key
                 self._emit_progress(
                     progress_callback,
@@ -150,6 +144,33 @@ class LocalOCRRuntimeManager:
                     message=f"기존 {engine_key} 런타임을 재사용합니다.",
                 )
                 return
+            if initial_state == "loading":
+                self._emit_progress(
+                    progress_callback,
+                    engine_key,
+                    status="waiting_health",
+                    step_key="health_probe",
+                    message=f"{engine_key} 모델 로딩이 끝날 때까지 기다리는 중...",
+                    detail=f"Waiting for {config['health_url']}",
+                )
+                if self._wait_for_health(
+                    config["health_url"],
+                    timeout_sec=min(timeout_sec, 300),
+                    progress_callback=progress_callback,
+                    cancel_checker=cancel_checker,
+                    engine_key=engine_key,
+                    step_key="health_probe",
+                    message=f"{engine_key} 상태를 확인하는 중...",
+                ):
+                    self._active_engine = engine_key
+                    self._emit_progress(
+                        progress_callback,
+                        engine_key,
+                        status="completed",
+                        step_key="health_probe",
+                        message=f"기존 {engine_key} 런타임을 재사용합니다.",
+                    )
+                    return
             if self._active_engine and self._active_engine != engine_key:
                 self._stop_engine(self._active_engine)
 
@@ -324,7 +345,8 @@ class LocalOCRRuntimeManager:
                 raise OperationCancelledError(f"Cancelled while waiting for {engine_key} runtime.")
             try:
                 with urlopen(url, timeout=2) as response:
-                    if getattr(response, "status", 200) < 500:
+                    status = int(getattr(response, "status", 200))
+                    if status != 503 and status < 500:
                         return True
             except (URLError, OSError, ValueError):
                 pass
@@ -339,6 +361,19 @@ class LocalOCRRuntimeManager:
             )
             time.sleep(1)
         return False
+
+    @staticmethod
+    def _probe_health_state(url: str) -> OCRHealthState:
+        try:
+            with urlopen(url, timeout=2) as response:
+                status = int(getattr(response, "status", 200))
+        except (URLError, OSError, ValueError):
+            return "unavailable"
+        if status == 503:
+            return "loading"
+        if status < 500:
+            return "healthy"
+        return "unavailable"
 
     def _emit_progress(
         self,

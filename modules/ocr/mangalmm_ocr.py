@@ -23,7 +23,9 @@ from modules.utils.exceptions import (
 from modules.utils.language_utils import is_no_space_lang
 from modules.utils.ocr_debug import (
     OCR_STATUS_EMPTY_INITIAL,
+    OCR_STATUS_EMPTY_AFTER_RETRY,
     OCR_STATUS_OK,
+    OCR_STATUS_OK_AFTER_RETRY,
     ensure_three_channel,
     set_block_ocr_crop_diagnostics,
     set_block_ocr_diagnostics,
@@ -32,6 +34,7 @@ from modules.utils.ocr_quality import summarize_ocr_quality
 from modules.utils.textblock import TextBlock, sort_textblock_rectangles
 
 from .base import OCREngine
+from .selection import OCR_MODE_BEST_LOCAL_PLUS, normalize_ocr_mode
 
 
 logger = logging.getLogger(__name__)
@@ -61,8 +64,10 @@ DEFAULT_MANGALMM_REPEAT_PENALTY = 1.05
 DEFAULT_MANGALMM_REPEAT_LAST_N = 0
 DEFAULT_MANGALMM_PRESENCE_PENALTY = 0.0
 DEFAULT_MANGALMM_FREQUENCY_PENALTY = 0.0
+DEFAULT_MANGALMM_PNG_COMPRESSION = 1
 DEFAULT_MANGALMM_STANDARD_PROFILE_TOKENS = 2048
 DEFAULT_MANGALMM_DENSE_PROFILE_TOKENS = 1024
+DEFAULT_MANGALMM_RESCUE_PROFILE_TOKENS = 4096
 DEFAULT_MANGALMM_DEBUG_EXPORT_LIMIT = 96
 
 
@@ -87,6 +92,15 @@ class ResizePlan:
 
 
 @dataclass(slots=True)
+class AttemptSpec:
+    index: int
+    resize_plan: ResizePlan
+    prompt_mode: str
+    prompt_text: str
+    attempt_kind: str
+
+
+@dataclass(slots=True)
 class OCRRegion:
     bbox_xyxy: list[int]
     bbox_xyxy_float: list[float]
@@ -104,7 +118,7 @@ class OCRRegion:
 
 
 class MangaLMMOCREngine(OCREngine):
-    MAX_COMPLETION_TOKENS_RANGE = (64, 2048)
+    MAX_COMPLETION_TOKENS_RANGE = (64, 4096)
     PARALLEL_WORKERS_RANGE = (1, 8)
     REQUEST_ENDPOINT_SUFFIX = "/chat/completions"
     STANDARD_PROMPT = (
@@ -134,15 +148,33 @@ class MangaLMMOCREngine(OCREngine):
         self.repeat_last_n = DEFAULT_MANGALMM_REPEAT_LAST_N
         self.presence_penalty = DEFAULT_MANGALMM_PRESENCE_PENALTY
         self.frequency_penalty = DEFAULT_MANGALMM_FREQUENCY_PENALTY
+        self.selected_ocr_mode = ""
+        self.source_lang_english = ""
+        self.contract_mode = "direct_manual"
+        self.use_optimal_plus_contract = False
         self.debug_root: Path | None = None
         self.debug_export_limit = DEFAULT_MANGALMM_DEBUG_EXPORT_LIMIT
         self._debug_export_counter = count(1)
         self._debug_export_lock = Lock()
         self.last_request_metadata: dict[str, object] = {}
         self.last_page_regions: list[dict[str, object]] = []
+        self.last_attempt_history: list[dict[str, object]] = []
 
     def initialize(self, settings, **kwargs) -> None:
         config = settings.get_mangalmm_ocr_settings()
+        selected_mode_raw = kwargs.get("selected_ocr_mode")
+        if selected_mode_raw is None and hasattr(settings, "get_tool_selection"):
+            try:
+                selected_mode_raw = settings.get_tool_selection("ocr")
+            except Exception:
+                selected_mode_raw = ""
+        self.selected_ocr_mode = normalize_ocr_mode(selected_mode_raw)
+        self.source_lang_english = str(kwargs.get("source_lang_english", "") or "")
+        self.use_optimal_plus_contract = (
+            self.selected_ocr_mode == OCR_MODE_BEST_LOCAL_PLUS
+            and self.source_lang_english.strip().casefold() == "japanese"
+        )
+        self.contract_mode = "optimal_plus_japanese" if self.use_optimal_plus_contract else "direct_manual"
         self.server_url = config.get("server_url", DEFAULT_MANGALMM_SERVER_URL) or DEFAULT_MANGALMM_SERVER_URL
         self.max_completion_tokens = self._clamp_int(
             config.get("max_completion_tokens", DEFAULT_MANGALMM_MAX_COMPLETION_TOKENS),
@@ -248,34 +280,138 @@ class MangaLMMOCREngine(OCREngine):
     def process_image(self, img: np.ndarray, blk_list: list[TextBlock]) -> list[TextBlock]:
         blocks = list(blk_list or [])
         self.last_page_regions = []
+        self.last_attempt_history = []
         if not blocks:
             return blk_list
 
         image = ensure_three_channel(img)
         started_at = time.perf_counter()
         page_unit = self._build_request_units(image.shape)[0]
-        resize_plan = self._plan_page_request(image.shape, blocks)
-        page_regions = self._request_regions_for_page(image, page_unit, resize_plan)
+        attempt_specs = self._build_attempt_specs(image.shape, blocks)
+        assignments: dict[int, list[dict[str, object]]] = {index: [] for index in range(len(blocks))}
+        final_attempt: AttemptSpec | None = None
+        quality: dict[str, object] = {}
 
-        assignments = self._assign_regions_to_blocks(page_regions, blocks)
-        quality = self._apply_assignments_to_blocks(
-            blocks,
-            assignments,
-            attempt_count=1,
-            success_status=OCR_STATUS_OK,
-            empty_status=OCR_STATUS_EMPTY_INITIAL,
-            page_bbox=page_unit.bbox_xyxy,
-            resize_plan=resize_plan,
-        )
-        self.last_request_metadata["mapped_region_count"] = len(page_regions)
-        self.last_request_metadata["non_empty_block_count"] = int(quality.get("non_empty", 0) or 0)
+        for attempt_spec in attempt_specs:
+            attempt_result = self._request_regions_for_attempt(image, page_unit, attempt_spec)
+            attempt_assignments = self._assign_regions_to_blocks(attempt_result["regions"], blocks)
+            matched_region_count = sum(len(items) for items in attempt_assignments.values())
+            matched_block_count = sum(1 for items in attempt_assignments.values() if items)
+            attempt_entry = {
+                **attempt_result["metadata"],
+                "attempt_index": int(attempt_spec.index),
+                "attempt_kind": attempt_spec.attempt_kind,
+                "attempt_profile": attempt_spec.resize_plan.profile,
+                "parsed_region_count": int(attempt_result["parsed_region_count"]),
+                "mapped_region_count": int(attempt_result["mapped_region_count"]),
+                "matched_region_count": int(matched_region_count),
+                "matched_block_count": int(matched_block_count),
+                "raw_response_length": len(str(attempt_result["raw_text"] or "")),
+            }
+            failure_reason = ""
+            if int(attempt_result["parsed_region_count"]) <= 0:
+                failure_reason = "no_valid_regions"
+            elif int(attempt_result["mapped_region_count"]) <= 0:
+                failure_reason = "mapped_regions_out_of_bounds"
+            elif matched_block_count <= 0:
+                failure_reason = "no_block_match"
+            attempt_entry["failure_reason"] = failure_reason
+            attempt_entry["final_status"] = "success" if matched_block_count > 0 else "failure"
+            self.last_attempt_history.append(attempt_entry)
+
+            if matched_block_count > 0:
+                assignments = attempt_assignments
+                final_attempt = attempt_spec
+                success_status = OCR_STATUS_OK if attempt_spec.index == 0 else OCR_STATUS_OK_AFTER_RETRY
+                empty_status = OCR_STATUS_EMPTY_INITIAL if attempt_spec.index == 0 else OCR_STATUS_EMPTY_AFTER_RETRY
+                quality = self._apply_assignments_to_blocks(
+                    blocks,
+                    assignments,
+                    attempt_count=attempt_spec.index + 1,
+                    success_status=success_status,
+                    empty_status=empty_status,
+                    page_bbox=page_unit.bbox_xyxy,
+                    resize_plan=attempt_spec.resize_plan,
+                )
+                break
+
+            if failure_reason == "no_block_match":
+                self._export_debug_artifact(
+                    blk=None,
+                    failure_reason="MangaLMM OCR regions did not match any detected block.",
+                    response_kind="no_block_match",
+                    raw_text=str(attempt_result["raw_text"] or ""),
+                    crop_bbox=page_unit.bbox_xyxy,
+                    crop_source=page_unit.unit_kind,
+                    resize_plan=attempt_spec.resize_plan,
+                    crop_image=attempt_result["crop_image"],
+                    request_image=attempt_result["request_image"],
+                    analysis={
+                        **attempt_result["analysis"],
+                        "attempt_index": int(attempt_spec.index),
+                        "attempt_kind": attempt_spec.attempt_kind,
+                        "prompt_mode": attempt_spec.prompt_mode,
+                        "matched_region_count": int(matched_region_count),
+                        "matched_block_count": int(matched_block_count),
+                    },
+                    unit_bbox=page_unit.bbox_xyxy,
+                    unit_kind=page_unit.unit_kind,
+                )
+
+        if final_attempt is None:
+            terminal_attempt = attempt_specs[-1]
+            empty_status = (
+                OCR_STATUS_EMPTY_AFTER_RETRY
+                if len(attempt_specs) > 1 and self.use_optimal_plus_contract
+                else OCR_STATUS_EMPTY_INITIAL
+            )
+            quality = self._apply_assignments_to_blocks(
+                blocks,
+                assignments,
+                attempt_count=len(attempt_specs),
+                success_status=OCR_STATUS_OK_AFTER_RETRY if len(attempt_specs) > 1 else OCR_STATUS_OK,
+                empty_status=empty_status,
+                page_bbox=page_unit.bbox_xyxy,
+                resize_plan=terminal_attempt.resize_plan,
+            )
+            self.last_request_metadata = {
+                **self.last_request_metadata,
+                "attempts": list(self.last_attempt_history),
+                "attempt_count": len(self.last_attempt_history),
+                "retry_count": max(0, len(self.last_attempt_history) - 1),
+                "contract_mode": self.contract_mode,
+                "final_status": "failure",
+                "failure_reason": str(self.last_attempt_history[-1].get("failure_reason", "") or "no_valid_regions"),
+                "matched_region_count": 0,
+                "matched_block_count": 0,
+                "mapped_region_count": len(self.last_page_regions),
+                "non_empty_block_count": int(quality.get("non_empty", 0) or 0),
+                "raw_response_length": len(str(self.last_request_metadata.get("raw_response", "") or "")),
+            }
+        else:
+            self.last_request_metadata = {
+                **self.last_request_metadata,
+                "attempts": list(self.last_attempt_history),
+                "attempt_count": len(self.last_attempt_history),
+                "retry_count": max(0, len(self.last_attempt_history) - 1),
+                "contract_mode": self.contract_mode,
+                "final_status": "success",
+                "failure_reason": "",
+                "matched_region_count": sum(len(items) for items in assignments.values()),
+                "matched_block_count": sum(1 for items in assignments.values() if items),
+                "mapped_region_count": len(self.last_page_regions),
+                "non_empty_block_count": int(quality.get("non_empty", 0) or 0),
+                "raw_response_length": len(str(self.last_request_metadata.get("raw_response", "") or "")),
+            }
 
         logger.info(
-            "mangalmm_full_page_ocr complete: blocks=%d regions=%d profile=%s request_shape=%s quality=%s elapsed_ms=%.1f",
+            "mangalmm_full_page_ocr complete: blocks=%d regions=%d profile=%s request_shape=%s attempts=%d status=%s quality=%s elapsed_ms=%.1f",
             len(blocks),
-            len(page_regions),
-            resize_plan.profile,
-            resize_plan.request_shape,
+            len(self.last_page_regions),
+            self.last_request_metadata.get("resize_profile", ""),
+            self.last_request_metadata.get("request_shape", []),
+            len(self.last_attempt_history),
+            self.last_request_metadata.get("final_status", "unknown"),
             quality.get("reason", "") or "ok",
             (time.perf_counter() - started_at) * 1000.0,
         )
@@ -286,11 +422,29 @@ class MangaLMMOCREngine(OCREngine):
         return [RequestUnit((0, 0, int(image_w), int(image_h)), "page_full")]
 
     def _plan_page_request(self, image_shape: tuple[int, ...], blk_list: list[TextBlock]) -> ResizePlan:
-        image_h, image_w = image_shape[:2]
         profile, block_count, small_block_ratio, text_cover_ratio = self._select_resize_profile(image_shape, blk_list)
+        return self._build_resize_plan(
+            image_shape,
+            profile=profile,
+            block_count=block_count,
+            small_block_ratio=small_block_ratio,
+            text_cover_ratio=text_cover_ratio,
+        )
+
+    def _build_resize_plan(
+        self,
+        image_shape: tuple[int, ...],
+        *,
+        profile: str,
+        block_count: int,
+        small_block_ratio: float,
+        text_cover_ratio: float,
+        max_completion_tokens_override: int | None = None,
+    ) -> ResizePlan:
+        image_h, image_w = image_shape[:2]
         standard_short_side = DEFAULT_MANGALMM_STANDARD_SHORT_SIDE
-        standard_pixel_cap = self.max_pixels
-        standard_long_side = self.max_long_side
+        standard_pixel_cap = DEFAULT_MANGALMM_MAX_PIXELS if self.use_optimal_plus_contract else self.max_pixels
+        standard_long_side = DEFAULT_MANGALMM_MAX_LONG_SIDE if self.use_optimal_plus_contract else self.max_long_side
         if profile == "dense":
             short_side_cap = DEFAULT_MANGALMM_DENSE_SHORT_SIDE
             long_side_cap = DEFAULT_MANGALMM_DENSE_MAX_LONG_SIDE
@@ -319,7 +473,15 @@ class MangaLMMOCREngine(OCREngine):
         request_h = max(1, int(round(image_h * base_scale)))
         scale_x = request_w / float(max(1, image_w))
         scale_y = request_h / float(max(1, image_h))
-        request_tokens = max(self.max_completion_tokens, request_floor_tokens)
+        request_tokens = (
+            int(max_completion_tokens_override)
+            if max_completion_tokens_override is not None
+            else (
+                request_floor_tokens
+                if self.use_optimal_plus_contract
+                else int(self.max_completion_tokens)
+            )
+        )
         return ResizePlan(
             profile=profile,
             original_shape=(int(image_h), int(image_w)),
@@ -332,6 +494,78 @@ class MangaLMMOCREngine(OCREngine):
             small_block_ratio=float(small_block_ratio),
             text_cover_ratio=float(text_cover_ratio),
         )
+
+    def _build_attempt_specs(
+        self,
+        image_shape: tuple[int, ...],
+        blk_list: list[TextBlock],
+    ) -> list[AttemptSpec]:
+        initial_plan = self._plan_page_request(image_shape, blk_list)
+        initial_prompt_mode, initial_prompt_text = self._prompt_for_resize_plan(initial_plan)
+        attempts = [
+            AttemptSpec(
+                index=0,
+                resize_plan=initial_plan,
+                prompt_mode=initial_prompt_mode,
+                prompt_text=initial_prompt_text,
+                attempt_kind="primary",
+            )
+        ]
+        if not self.use_optimal_plus_contract:
+            return attempts
+
+        block_count = initial_plan.block_count
+        small_block_ratio = initial_plan.small_block_ratio
+        text_cover_ratio = initial_plan.text_cover_ratio
+        if initial_plan.profile == "standard":
+            retry_one_plan = self._build_resize_plan(
+                image_shape,
+                profile="dense",
+                block_count=block_count,
+                small_block_ratio=small_block_ratio,
+                text_cover_ratio=text_cover_ratio,
+                max_completion_tokens_override=DEFAULT_MANGALMM_DENSE_PROFILE_TOKENS,
+            )
+            retry_one_mode = "dense_grounding_json"
+            retry_one_prompt = self.DENSE_PROMPT
+        else:
+            retry_one_plan = self._build_resize_plan(
+                image_shape,
+                profile="dense",
+                block_count=block_count,
+                small_block_ratio=small_block_ratio,
+                text_cover_ratio=text_cover_ratio,
+                max_completion_tokens_override=DEFAULT_MANGALMM_STANDARD_PROFILE_TOKENS,
+            )
+            retry_one_mode = "standard_grounding"
+            retry_one_prompt = self.STANDARD_PROMPT
+        attempts.append(
+            AttemptSpec(
+                index=1,
+                resize_plan=retry_one_plan,
+                prompt_mode=retry_one_mode,
+                prompt_text=retry_one_prompt,
+                attempt_kind="smart_retry",
+            )
+        )
+        retry_two_plan = self._build_resize_plan(
+            image_shape,
+            profile="dense",
+            block_count=block_count,
+            small_block_ratio=small_block_ratio,
+            text_cover_ratio=text_cover_ratio,
+            max_completion_tokens_override=DEFAULT_MANGALMM_RESCUE_PROFILE_TOKENS,
+        )
+        attempts.append(
+            AttemptSpec(
+                index=2,
+                resize_plan=retry_two_plan,
+                prompt_mode="dense_grounding_json_rescue",
+                prompt_text=self.DENSE_PROMPT,
+                attempt_kind="rescue_retry",
+            )
+        )
+        return attempts
 
     def _select_resize_profile(
         self,
@@ -365,17 +599,25 @@ class MangaLMMOCREngine(OCREngine):
         )
         return ("dense" if is_dense else "standard", block_count, small_block_ratio, text_cover_ratio)
 
-    def _request_regions_for_page(
+    def _request_regions_for_attempt(
         self,
         image: np.ndarray,
         unit: RequestUnit,
-        resize_plan: ResizePlan,
-    ) -> list[OCRRegion]:
+        attempt_spec: AttemptSpec,
+    ) -> dict[str, object]:
+        resize_plan = attempt_spec.resize_plan
         crop = self._crop_image(image, unit.bbox_xyxy)
         if crop is None:
             self.last_request_metadata = {
                 "error": "Invalid OCR page bounds.",
                 "resize_profile": resize_plan.profile,
+                "attempt_profile": resize_plan.profile,
+                "prompt_mode": attempt_spec.prompt_mode,
+                "attempt_index": int(attempt_spec.index),
+                "attempt_kind": attempt_spec.attempt_kind,
+                "raw_response_length": 0,
+                "parsed_region_count": 0,
+                "mapped_region_count": 0,
             }
             self._export_debug_artifact(
                 blk=None,
@@ -387,20 +629,38 @@ class MangaLMMOCREngine(OCREngine):
                 resize_plan=resize_plan,
                 crop_image=None,
                 request_image=None,
-                analysis={},
+                analysis={
+                    "attempt_index": int(attempt_spec.index),
+                    "attempt_kind": attempt_spec.attempt_kind,
+                    "prompt_mode": attempt_spec.prompt_mode,
+                },
                 unit_bbox=unit.bbox_xyxy,
                 unit_kind=unit.unit_kind,
             )
-            return []
+            self.last_page_regions = []
+            return {
+                "regions": [],
+                "analysis": {
+                    "response_kind": "invalid_crop",
+                    "payload_type": "invalid_crop",
+                    "raw_length": 0,
+                },
+                "raw_text": "",
+                "crop_image": None,
+                "request_image": None,
+                "parsed_region_count": 0,
+                "mapped_region_count": 0,
+                "metadata": dict(self.last_request_metadata),
+            }
 
         request_image = self._resize_for_request(crop, resize_plan)
         raw_text = ""
+        analysis: dict[str, object]
         try:
-            prompt_label, prompt_text = self._prompt_for_resize_plan(resize_plan)
             raw_text = self._request_response_text(
                 request_image,
                 max_completion_tokens=resize_plan.max_completion_tokens,
-                prompt_text=prompt_text,
+                prompt_text=attempt_spec.prompt_text,
             )
             analysis = self._analyze_region_payload(raw_text)
         except (LocalServiceConnectionError, LocalServiceResponseError) as exc:
@@ -408,7 +668,10 @@ class MangaLMMOCREngine(OCREngine):
                 "original_shape": list(resize_plan.original_shape),
                 "request_shape": list(resize_plan.request_shape),
                 "resize_profile": resize_plan.profile,
-                "prompt_mode": prompt_label,
+                "attempt_profile": resize_plan.profile,
+                "prompt_mode": attempt_spec.prompt_mode,
+                "attempt_index": int(attempt_spec.index),
+                "attempt_kind": attempt_spec.attempt_kind,
                 "scale_x": resize_plan.scale_x,
                 "scale_y": resize_plan.scale_y,
                 "base_scale": resize_plan.base_scale,
@@ -418,6 +681,9 @@ class MangaLMMOCREngine(OCREngine):
                 "text_cover_ratio": resize_plan.text_cover_ratio,
                 "error": str(exc),
                 "raw_response": raw_text,
+                "raw_response_length": len(str(raw_text or "")),
+                "parsed_region_count": 0,
+                "mapped_region_count": 0,
             }
             self._export_debug_artifact(
                 blk=None,
@@ -429,7 +695,12 @@ class MangaLMMOCREngine(OCREngine):
                 resize_plan=resize_plan,
                 crop_image=crop,
                 request_image=request_image,
-                analysis={"error": str(exc)},
+                analysis={
+                    "error": str(exc),
+                    "attempt_index": int(attempt_spec.index),
+                    "attempt_kind": attempt_spec.attempt_kind,
+                    "prompt_mode": attempt_spec.prompt_mode,
+                },
                 unit_bbox=unit.bbox_xyxy,
                 unit_kind=unit.unit_kind,
             )
@@ -439,7 +710,10 @@ class MangaLMMOCREngine(OCREngine):
             "original_shape": list(resize_plan.original_shape),
             "request_shape": list(resize_plan.request_shape),
             "resize_profile": resize_plan.profile,
-            "prompt_mode": prompt_label,
+            "attempt_profile": resize_plan.profile,
+            "prompt_mode": attempt_spec.prompt_mode,
+            "attempt_index": int(attempt_spec.index),
+            "attempt_kind": attempt_spec.attempt_kind,
             "scale_x": resize_plan.scale_x,
             "scale_y": resize_plan.scale_y,
             "base_scale": resize_plan.base_scale,
@@ -451,6 +725,7 @@ class MangaLMMOCREngine(OCREngine):
             "payload_type": str(analysis.get("payload_type", "") or "unknown"),
             "region_count": len(analysis.get("regions", []) or []),
             "raw_response": raw_text,
+            "raw_response_length": len(raw_text),
         }
 
         regions = analysis["regions"]
@@ -466,11 +741,26 @@ class MangaLMMOCREngine(OCREngine):
                 resize_plan=resize_plan,
                 crop_image=crop,
                 request_image=request_image,
-                analysis=analysis,
+                analysis={
+                    **analysis,
+                    "attempt_index": int(attempt_spec.index),
+                    "attempt_kind": attempt_spec.attempt_kind,
+                    "prompt_mode": attempt_spec.prompt_mode,
+                },
                 unit_bbox=unit.bbox_xyxy,
                 unit_kind=unit.unit_kind,
             )
-            return []
+            self.last_page_regions = []
+            return {
+                "regions": [],
+                "analysis": analysis,
+                "raw_text": raw_text,
+                "crop_image": crop,
+                "request_image": request_image,
+                "parsed_region_count": 0,
+                "mapped_region_count": 0,
+                "metadata": dict(self.last_request_metadata),
+            }
 
         mapped = self._map_regions_to_page_coords(
             regions,
@@ -479,7 +769,6 @@ class MangaLMMOCREngine(OCREngine):
             resize_plan,
             unit.unit_kind,
         )
-        mapped = self._dedupe_regions(mapped)
         self.last_page_regions = [
             {
                 "bbox_xyxy": list(region.bbox_xyxy),
@@ -497,6 +786,8 @@ class MangaLMMOCREngine(OCREngine):
             for region in mapped
         ]
         if not mapped:
+            self.last_request_metadata["parsed_region_count"] = int(len(regions))
+            self.last_request_metadata["mapped_region_count"] = 0
             response_kind = str(analysis.get("response_kind", "") or "unknown")
             self._export_debug_artifact(
                 blk=None,
@@ -508,11 +799,27 @@ class MangaLMMOCREngine(OCREngine):
                 resize_plan=resize_plan,
                 crop_image=crop,
                 request_image=request_image,
-                analysis=analysis,
+                analysis={
+                    **analysis,
+                    "attempt_index": int(attempt_spec.index),
+                    "attempt_kind": attempt_spec.attempt_kind,
+                    "prompt_mode": attempt_spec.prompt_mode,
+                },
                 unit_bbox=unit.bbox_xyxy,
                 unit_kind=unit.unit_kind,
             )
-            return []
+            return {
+                "regions": [],
+                "analysis": analysis,
+                "raw_text": raw_text,
+                "crop_image": crop,
+                "request_image": request_image,
+                "parsed_region_count": len(regions),
+                "mapped_region_count": 0,
+                "metadata": dict(self.last_request_metadata),
+            }
+        self.last_request_metadata["parsed_region_count"] = int(len(regions))
+        self.last_request_metadata["mapped_region_count"] = int(len(mapped))
         self._export_debug_artifact(
             blk=None,
             failure_reason="",
@@ -525,12 +832,24 @@ class MangaLMMOCREngine(OCREngine):
             request_image=request_image,
             analysis={
                 **analysis,
+                "attempt_index": int(attempt_spec.index),
+                "attempt_kind": attempt_spec.attempt_kind,
+                "prompt_mode": attempt_spec.prompt_mode,
                 "mapped_region_count": len(mapped),
             },
             unit_bbox=unit.bbox_xyxy,
             unit_kind=unit.unit_kind,
         )
-        return mapped
+        return {
+            "regions": mapped,
+            "analysis": analysis,
+            "raw_text": raw_text,
+            "crop_image": crop,
+            "request_image": request_image,
+            "parsed_region_count": len(regions),
+            "mapped_region_count": len(mapped),
+            "metadata": dict(self.last_request_metadata),
+        }
 
     def _assign_regions_to_blocks(
         self,
@@ -577,7 +896,8 @@ class MangaLMMOCREngine(OCREngine):
                 )
                 continue
 
-            sorted_items = self._sort_assigned_items_for_block(items, blk)
+            deduped_items = self._dedupe_assigned_items_for_block(items)
+            sorted_items = self._sort_assigned_items_for_block(deduped_items, blk)
             texts = [
                 str(item["region"].text or "").strip()
                 for item in sorted_items
@@ -588,16 +908,7 @@ class MangaLMMOCREngine(OCREngine):
             else:
                 final_text = " ".join(texts)
 
-            best_item = max(
-                items,
-                key=lambda item: (
-                    float(item["metrics"]["ownership_cover"]),
-                    int(bool(item["metrics"]["center_in_ownership"])),
-                    float(item["metrics"]["precision_cover"]),
-                    float(item["metrics"]["ownership_iou"]),
-                    -float(item["metrics"]["center_distance_norm"]),
-                ),
-            )
+            best_item = max(sorted_items, key=self._region_rank_key)
             source_region: OCRRegion = best_item["region"]
             blk.texts = texts
             blk.text = final_text
@@ -641,6 +952,54 @@ class MangaLMMOCREngine(OCREngine):
         if not order_pairs:
             return list(items)
         return [items[int(index_text)] for _bbox, index_text in order_pairs]
+
+    def _dedupe_assigned_items_for_block(self, items: list[dict[str, object]]) -> list[dict[str, object]]:
+        deduped: list[dict[str, object]] = []
+        for item in items:
+            replaced = False
+            for index, existing in enumerate(deduped):
+                if not self._is_block_local_duplicate(item["region"], existing["region"]):
+                    continue
+                if self._region_rank_key(item) > self._region_rank_key(existing):
+                    deduped[index] = item
+                replaced = True
+                break
+            if not replaced:
+                deduped.append(item)
+        return deduped
+
+    def _is_block_local_duplicate(self, candidate: OCRRegion, existing: OCRRegion) -> bool:
+        if candidate.normalized_text != existing.normalized_text:
+            return False
+        overlap = self._bbox_iou(tuple(candidate.bbox_xyxy), tuple(existing.bbox_xyxy))
+        if overlap < 0.75:
+            return False
+        if len(candidate.text) > 2 and len(existing.text) > 2:
+            return True
+        candidate_center = self._bbox_center(tuple(candidate.bbox_xyxy))
+        existing_center = self._bbox_center(tuple(existing.bbox_xyxy))
+        max_diag = max(
+            1.0,
+            self._bbox_diagonal(tuple(candidate.bbox_xyxy)),
+            self._bbox_diagonal(tuple(existing.bbox_xyxy)),
+        )
+        center_distance_norm = self._distance(candidate_center, existing_center) / max_diag
+        return center_distance_norm <= 0.10
+
+    @staticmethod
+    def _region_rank_key(item: dict[str, object]) -> tuple[float, int, float, float, float, float]:
+        region: OCRRegion = item["region"]
+        metrics = item["metrics"]
+        bbox = region.bbox_xyxy
+        area = int((bbox[2] - bbox[0]) * (bbox[3] - bbox[1]))
+        return (
+            float(area),
+            len(region.text or ""),
+            float(metrics["ownership_cover"]),
+            float(metrics["precision_cover"]),
+            float(metrics["ownership_iou"]),
+            -float(metrics["center_distance_norm"]),
+        )
 
     @staticmethod
     def _serialize_region_assignment(
@@ -752,37 +1111,6 @@ class MangaLMMOCREngine(OCREngine):
         if bubble_box is not None:
             return ownership_cover >= 0.35 or (center_in_ownership and precision_cover >= 0.20)
         return precision_cover >= 0.35 or (center_in_precision and ownership_iou >= 0.10)
-
-    def _dedupe_regions(self, regions: list[OCRRegion]) -> list[OCRRegion]:
-        deduped: list[OCRRegion] = []
-        for region in regions:
-            replaced = False
-            for index, existing in enumerate(deduped):
-                if region.normalized_text != existing.normalized_text:
-                    continue
-                if self._bbox_iou(tuple(region.bbox_xyxy), tuple(existing.bbox_xyxy)) < 0.5:
-                    continue
-                if self._prefer_region(region, existing):
-                    deduped[index] = region
-                replaced = True
-                break
-            if not replaced:
-                deduped.append(region)
-        return deduped
-
-    @staticmethod
-    def _prefer_region(candidate: OCRRegion, existing: OCRRegion) -> bool:
-        candidate_key = (
-            float(candidate.edge_distance),
-            int((candidate.bbox_xyxy[2] - candidate.bbox_xyxy[0]) * (candidate.bbox_xyxy[3] - candidate.bbox_xyxy[1])),
-            len(candidate.text),
-        )
-        existing_key = (
-            float(existing.edge_distance),
-            int((existing.bbox_xyxy[2] - existing.bbox_xyxy[0]) * (existing.bbox_xyxy[3] - existing.bbox_xyxy[1])),
-            len(existing.text),
-        )
-        return candidate_key > existing_key
 
     def _resize_for_request(self, image: np.ndarray, resize_plan: ResizePlan) -> np.ndarray:
         request_h, request_w = resize_plan.request_shape
@@ -1156,7 +1484,11 @@ class MangaLMMOCREngine(OCREngine):
         return f"data:image/png;base64,{image_b64}"
 
     def _encode_image(self, image: np.ndarray) -> bytes:
-        success, encoded = cv2.imencode(".png", image)
+        success, encoded = cv2.imencode(
+            ".png",
+            image,
+            [int(cv2.IMWRITE_PNG_COMPRESSION), int(DEFAULT_MANGALMM_PNG_COMPRESSION)],
+        )
         if not success:
             raise LocalServiceResponseError(
                 f"Failed to encode OCR image for {SERVICE_NAME}.",
@@ -1388,9 +1720,9 @@ class MangaLMMOCREngine(OCREngine):
             encoding="utf-8",
         )
         if crop_image is not None and crop_image.size > 0:
-            cv2.imwrite(str(artifact_dir / "crop.jpg"), crop_image)
+            cv2.imwrite(str(artifact_dir / "crop.png"), crop_image)
         if request_image is not None and request_image.size > 0:
-            cv2.imwrite(str(artifact_dir / "request.jpg"), request_image)
+            cv2.imwrite(str(artifact_dir / "request.png"), request_image)
 
     @staticmethod
     def _coords_or_none(value) -> list[int] | None:
