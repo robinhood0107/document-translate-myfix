@@ -136,6 +136,10 @@ def build_inpaint_debug_metadata(
     hd_strategy: str,
     blocks: Iterable,
     raw_mask: np.ndarray | None,
+    final_mask: np.ndarray | None = None,
+    final_mask_pre_expand: np.ndarray | None = None,
+    final_mask_post_expand: np.ndarray | None = None,
+    residue_mask: np.ndarray | None = None,
     cleanup_delta: np.ndarray | None,
     cleanup_stats: dict | None,
     mask_refiner: str = "legacy_bbox",
@@ -144,12 +148,29 @@ def build_inpaint_debug_metadata(
     refiner_backend: str = "legacy",
     refiner_device: str = "cpu",
     inpainter_backend: str = "unknown",
+    legacy_base_mask: np.ndarray | None = None,
+    hard_box_rescue_mask: np.ndarray | None = None,
+    hard_box_applied_count: int = 0,
+    hard_box_reason_totals: dict | None = None,
 ) -> dict:
     block_list = list(blocks or [])
     cleanup_stats = cleanup_stats or {}
+    hard_box_reason_totals = dict(hard_box_reason_totals or {})
     raw_mask_pixels = int(np.count_nonzero(raw_mask)) if raw_mask is not None else 0
+    final_mask_pixels = int(np.count_nonzero(final_mask)) if final_mask is not None else 0
+    final_mask_pre_expand_pixels = (
+        int(np.count_nonzero(final_mask_pre_expand)) if final_mask_pre_expand is not None else 0
+    )
+    final_mask_post_expand_pixels = (
+        int(np.count_nonzero(final_mask_post_expand)) if final_mask_post_expand is not None else 0
+    )
+    residue_mask_pixels = int(np.count_nonzero(residue_mask)) if residue_mask is not None else 0
     cleanup_delta_pixels = int(np.count_nonzero(cleanup_delta)) if cleanup_delta is not None else 0
     protect_mask_pixels = int(np.count_nonzero(protect_mask)) if protect_mask is not None else 0
+    legacy_base_mask_pixels = int(np.count_nonzero(legacy_base_mask)) if legacy_base_mask is not None else 0
+    hard_box_rescue_mask_pixels = (
+        int(np.count_nonzero(hard_box_rescue_mask)) if hard_box_rescue_mask is not None else 0
+    )
     return {
         "image_path": image_path,
         "run_type": run_type,
@@ -166,7 +187,15 @@ def build_inpaint_debug_metadata(
         "protect_mask_pixel_count": protect_mask_pixels,
         "block_count": len(block_list),
         "raw_mask_pixel_count": raw_mask_pixels,
+        "final_mask_pixel_count": final_mask_pixels,
+        "final_mask_pre_expand_pixel_count": final_mask_pre_expand_pixels,
+        "final_mask_post_expand_pixel_count": final_mask_post_expand_pixels,
+        "residue_mask_pixel_count": residue_mask_pixels,
         "cleanup_delta_pixel_count": cleanup_delta_pixels,
+        "legacy_base_mask_pixel_count": legacy_base_mask_pixels,
+        "hard_box_rescue_mask_pixel_count": hard_box_rescue_mask_pixels,
+        "hard_box_applied_count": int(hard_box_applied_count or 0),
+        "hard_box_reason_totals": hard_box_reason_totals,
         "cleanup_applied": bool(cleanup_stats.get("applied", False)),
         "cleanup_component_count": int(cleanup_stats.get("component_count", 0) or 0),
         "cleanup_block_count": int(cleanup_stats.get("block_count", 0) or 0),
@@ -196,6 +225,7 @@ def export_inpaint_debug_artifacts(
     blocks: Iterable,
     export_settings: dict | None,
     raw_mask: np.ndarray | None,
+    mask_overlay_mask: np.ndarray | None = None,
     cleanup_delta: np.ndarray | None,
     metadata: dict | None,
 ) -> None:
@@ -205,6 +235,10 @@ def export_inpaint_debug_artifacts(
 
     image_rgb = ensure_three_channel(image)
     normalized_raw_mask = _normalize_mask(raw_mask, image_rgb.shape)
+    normalized_mask_overlay = _normalize_mask(
+        mask_overlay_mask if mask_overlay_mask is not None else raw_mask,
+        image_rgb.shape,
+    )
     normalized_cleanup_delta = _normalize_mask(cleanup_delta, image_rgb.shape)
 
     if settings.get("export_detector_overlay", False):
@@ -231,7 +265,7 @@ def export_inpaint_debug_artifacts(
             "mask_overlays",
             archive_bname,
             f"{page_base_name}_mask_overlay.png",
-            _build_mask_overlay(image_rgb, normalized_raw_mask),
+            _build_mask_overlay(image_rgb, normalized_mask_overlay),
         )
 
     if settings.get("export_cleanup_mask_delta", False):
