@@ -105,6 +105,10 @@ class OCRFactory:
             extras["credentials"] = creds
         if device:
             extras["device"] = device
+        if hasattr(settings, "get_ocr_generic_settings"):
+            generic_settings = settings.get_ocr_generic_settings()
+            if isinstance(generic_settings, dict) and generic_settings:
+                extras["ocr_generic"] = generic_settings
         if ocr_key == "PaddleOCR VL":
             extras["paddleocr_vl"] = settings.get_paddleocr_vl_settings()
         if ocr_key == "HunyuanOCR":
