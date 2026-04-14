@@ -9,7 +9,11 @@ from pythainlp.tokenize import word_tokenize
 from .textblock import TextBlock
 import imkit as imk
 from .language_utils import get_language_code, is_no_space_lang
-from .text_normalization import canonicalize_ellipsis_runs, remove_invisible_format_chars
+from .text_normalization import (
+    canonicalize_ellipsis_runs,
+    normalize_decorative_ocr_text,
+    remove_invisible_format_chars,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -44,10 +48,16 @@ def get_raw_text(blk_list: list[TextBlock]):
     return raw_texts_json
 
 
+def _uses_mangalmm_noise_filter(ocr_engine) -> bool:
+    return str(ocr_engine or "").strip() == "MangaLMM"
+
+
 def normalize_text_for_translation(text, source_lang, *, ocr_engine=None) -> str:
-    del ocr_engine
-    normalized = remove_invisible_format_chars(str(text or ""))
-    normalized = normalized.replace("\r\n", "\n").replace("\r", "\n")
+    if _uses_mangalmm_noise_filter(ocr_engine):
+        normalized = normalize_decorative_ocr_text(str(text or ""))
+    else:
+        normalized = remove_invisible_format_chars(str(text or ""))
+        normalized = normalized.replace("\r\n", "\n").replace("\r", "\n")
 
     source_lang_code = get_language_code(str(source_lang or "")) or str(source_lang or "")
     if is_no_space_lang(source_lang_code):
