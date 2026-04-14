@@ -5,7 +5,9 @@ from unittest import mock
 
 import numpy as np
 
+from modules.ocr.factory import OCRFactory
 from modules.ocr.mangalmm_ocr import MangaLMMOCREngine, OCRRegion, ResizePlan
+from modules.ocr.selection import OCR_MODE_BEST_LOCAL_PLUS, OCR_MODE_MANGALMM
 from modules.utils.textblock import TextBlock
 
 
@@ -52,7 +54,109 @@ def _make_blocks(
     return blocks
 
 
+class _FakeSettings:
+    class ui:
+        @staticmethod
+        def tr(value: str) -> str:
+            return value
+
+    def __init__(
+        self,
+        *,
+        selected_ocr_mode: str = OCR_MODE_MANGALMM,
+        max_completion_tokens: int = 256,
+    ) -> None:
+        self._selected_ocr_mode = selected_ocr_mode
+        self._max_completion_tokens = max_completion_tokens
+
+    def get_tool_selection(self, tool_type: str) -> str:
+        if tool_type == "ocr":
+            return self._selected_ocr_mode
+        raise KeyError(tool_type)
+
+    def get_mangalmm_ocr_settings(self) -> dict:
+        return {
+            "server_url": "http://127.0.0.1:28081/v1",
+            "max_completion_tokens": self._max_completion_tokens,
+            "parallel_workers": 1,
+            "request_timeout_sec": 60,
+            "raw_response_logging": False,
+            "safe_resize": True,
+            "max_pixels": 2_116_800,
+            "max_long_side": 1728,
+            "temperature": 0.1,
+            "top_k": 1,
+            "top_p": 0.001,
+            "min_p": 0.0,
+            "repeat_penalty": 1.05,
+            "repeat_last_n": 0,
+            "presence_penalty": 0.0,
+            "frequency_penalty": 0.0,
+        }
+
+    def get_credentials(self, _provider_name: str) -> dict:
+        return {}
+
+    def is_gpu_enabled(self) -> bool:
+        return False
+
+
+def _make_resize_plan(
+    *,
+    profile: str,
+    request_shape: tuple[int, int],
+    original_shape: tuple[int, int] = (3035, 2150),
+    max_completion_tokens: int = 1024,
+    block_count: int = 30,
+    small_block_ratio: float = 0.7,
+    text_cover_ratio: float = 0.2,
+) -> ResizePlan:
+    request_h, request_w = request_shape
+    original_h, original_w = original_shape
+    return ResizePlan(
+        profile=profile,
+        original_shape=original_shape,
+        request_shape=request_shape,
+        base_scale=request_w / float(original_w),
+        scale_x=request_w / float(original_w),
+        scale_y=request_h / float(original_h),
+        max_completion_tokens=max_completion_tokens,
+        block_count=block_count,
+        small_block_ratio=small_block_ratio,
+        text_cover_ratio=text_cover_ratio,
+    )
+
+
 class MangaLMMOCRTests(unittest.TestCase):
+    def setUp(self) -> None:
+        OCRFactory._engines.clear()
+
+    def test_initialize_uses_optimal_plus_contract_for_japanese(self) -> None:
+        engine = MangaLMMOCREngine()
+        settings = _FakeSettings(selected_ocr_mode=OCR_MODE_BEST_LOCAL_PLUS)
+
+        engine.initialize(
+            settings,
+            source_lang_english="Japanese",
+            selected_ocr_mode=OCR_MODE_BEST_LOCAL_PLUS,
+        )
+
+        self.assertTrue(engine.use_optimal_plus_contract)
+        self.assertEqual(engine.contract_mode, "optimal_plus_japanese")
+
+    def test_initialize_keeps_direct_manual_contract_for_direct_mangalmm(self) -> None:
+        engine = MangaLMMOCREngine()
+        settings = _FakeSettings(selected_ocr_mode=OCR_MODE_MANGALMM)
+
+        engine.initialize(
+            settings,
+            source_lang_english="Japanese",
+            selected_ocr_mode=OCR_MODE_MANGALMM,
+        )
+
+        self.assertFalse(engine.use_optimal_plus_contract)
+        self.assertEqual(engine.contract_mode, "direct_manual")
+
     def test_parse_region_payload_salvages_fenced_json(self) -> None:
         engine = MangaLMMOCREngine()
         payload = """```json
@@ -81,8 +185,14 @@ class MangaLMMOCRTests(unittest.TestCase):
         self.assertEqual(standard_profile_15[0], "standard")
         self.assertEqual(standard_profile_9[0], "standard")
 
-    def test_plan_page_request_uses_expected_dense_and_standard_sizes(self) -> None:
+    def test_plan_page_request_uses_fixed_profile_sizes_for_optimal_plus(self) -> None:
         engine = MangaLMMOCREngine()
+        settings = _FakeSettings(selected_ocr_mode=OCR_MODE_BEST_LOCAL_PLUS)
+        engine.initialize(
+            settings,
+            source_lang_english="Japanese",
+            selected_ocr_mode=OCR_MODE_BEST_LOCAL_PLUS,
+        )
 
         dense_plan = engine._plan_page_request((3035, 2150, 3), _make_blocks(30, width=160, height=180))
         standard_plan = engine._plan_page_request((3036, 2150, 3), _make_blocks(15, width=200, height=300))
@@ -98,6 +208,54 @@ class MangaLMMOCRTests(unittest.TestCase):
         self.assertEqual(standard_plan.max_completion_tokens, 2048)
         self.assertAlmostEqual(standard_plan.scale_x, 1224 / 2150.0)
         self.assertAlmostEqual(standard_plan.scale_y, 1728 / 3036.0)
+
+    def test_plan_page_request_respects_manual_token_limit_in_direct_mode(self) -> None:
+        engine = MangaLMMOCREngine()
+        settings = _FakeSettings(selected_ocr_mode=OCR_MODE_MANGALMM, max_completion_tokens=320)
+        engine.initialize(
+            settings,
+            source_lang_english="Japanese",
+            selected_ocr_mode=OCR_MODE_MANGALMM,
+        )
+
+        standard_plan = engine._plan_page_request((3036, 2150, 3), _make_blocks(15, width=200, height=300))
+
+        self.assertEqual(standard_plan.max_completion_tokens, 320)
+
+    def test_build_attempt_specs_keeps_single_attempt_for_direct_mode(self) -> None:
+        engine = MangaLMMOCREngine()
+        settings = _FakeSettings(selected_ocr_mode=OCR_MODE_MANGALMM)
+        engine.initialize(
+            settings,
+            source_lang_english="Japanese",
+            selected_ocr_mode=OCR_MODE_MANGALMM,
+        )
+
+        attempts = engine._build_attempt_specs((3036, 2150, 3), _make_blocks(15, width=200, height=300))
+
+        self.assertEqual(len(attempts), 1)
+        self.assertEqual(attempts[0].attempt_kind, "primary")
+
+    def test_build_attempt_specs_creates_retry_ladder_for_optimal_plus(self) -> None:
+        engine = MangaLMMOCREngine()
+        settings = _FakeSettings(selected_ocr_mode=OCR_MODE_BEST_LOCAL_PLUS)
+        engine.initialize(
+            settings,
+            source_lang_english="Japanese",
+            selected_ocr_mode=OCR_MODE_BEST_LOCAL_PLUS,
+        )
+
+        attempts = engine._build_attempt_specs((3036, 2150, 3), _make_blocks(15, width=200, height=300))
+
+        self.assertEqual(len(attempts), 3)
+        self.assertEqual(
+            [(attempt.index, attempt.attempt_kind, attempt.prompt_mode, attempt.resize_plan.request_shape, attempt.resize_plan.max_completion_tokens) for attempt in attempts],
+            [
+                (0, "primary", "standard_grounding", (1728, 1224), 2048),
+                (1, "smart_retry", "dense_grounding_json", (1270, 899), 1024),
+                (2, "rescue_retry", "dense_grounding_json_rescue", (1270, 899), 4096),
+            ],
+        )
 
     def test_map_regions_to_page_coords_restores_original_coordinates_with_scale_axes(self) -> None:
         engine = MangaLMMOCREngine()
@@ -135,17 +293,10 @@ class MangaLMMOCRTests(unittest.TestCase):
         engine = MangaLMMOCREngine()
         blk = _make_block(120, 40, 170, 120, bubble_bbox=(20, 20, 200, 150))
         original_xyxy = blk.xyxy.copy()
-        resize_plan = ResizePlan(
+        resize_plan = _make_resize_plan(
             profile="dense",
-            original_shape=(3035, 2150),
             request_shape=(1270, 900),
-            base_scale=900 / 2150.0,
-            scale_x=900 / 2150.0,
-            scale_y=1270 / 3035.0,
             max_completion_tokens=1024,
-            block_count=30,
-            small_block_ratio=0.7,
-            text_cover_ratio=0.2,
         )
         assignments = {
             0: [
@@ -201,31 +352,101 @@ class MangaLMMOCRTests(unittest.TestCase):
         self.assertAlmostEqual(region["scale_x"], resize_plan.scale_x)
         self.assertAlmostEqual(region["scale_y"], resize_plan.scale_y)
 
+    def test_dedupe_assigned_items_for_block_removes_only_near_exact_duplicates(self) -> None:
+        engine = MangaLMMOCREngine()
+        region_a = OCRRegion(
+            bbox_xyxy=[20, 20, 60, 80],
+            bbox_xyxy_float=[20.0, 20.0, 60.0, 80.0],
+            text="うわ",
+            unit_bbox_xyxy=[0, 0, 200, 200],
+            unit_kind="page_full",
+            unit_resize_scale=1.0,
+            edge_distance=20.0,
+            normalized_text="うわ",
+            response_bbox_2d=[20.0, 20.0, 60.0, 80.0],
+        )
+        region_b = OCRRegion(
+            bbox_xyxy=[21, 21, 61, 81],
+            bbox_xyxy_float=[21.0, 21.0, 61.0, 81.0],
+            text="うわ",
+            unit_bbox_xyxy=[0, 0, 200, 200],
+            unit_kind="page_full",
+            unit_resize_scale=1.0,
+            edge_distance=21.0,
+            normalized_text="うわ",
+            response_bbox_2d=[21.0, 21.0, 61.0, 81.0],
+        )
+        region_c = OCRRegion(
+            bbox_xyxy=[90, 20, 130, 80],
+            bbox_xyxy_float=[90.0, 20.0, 130.0, 80.0],
+            text="別",
+            unit_bbox_xyxy=[0, 0, 200, 200],
+            unit_kind="page_full",
+            unit_resize_scale=1.0,
+            edge_distance=20.0,
+            normalized_text="別",
+            response_bbox_2d=[90.0, 20.0, 130.0, 80.0],
+        )
+        items = [
+            {
+                "region": region_a,
+                "metrics": {
+                    "ownership_cover": 0.8,
+                    "precision_cover": 0.8,
+                    "ownership_iou": 0.5,
+                    "center_in_ownership": True,
+                    "center_in_precision": True,
+                    "center_distance_norm": 0.1,
+                    "precision_area": 2400,
+                },
+            },
+            {
+                "region": region_b,
+                "metrics": {
+                    "ownership_cover": 0.9,
+                    "precision_cover": 0.9,
+                    "ownership_iou": 0.6,
+                    "center_in_ownership": True,
+                    "center_in_precision": True,
+                    "center_distance_norm": 0.05,
+                    "precision_area": 2400,
+                },
+            },
+            {
+                "region": region_c,
+                "metrics": {
+                    "ownership_cover": 0.9,
+                    "precision_cover": 0.9,
+                    "ownership_iou": 0.6,
+                    "center_in_ownership": True,
+                    "center_in_precision": True,
+                    "center_distance_norm": 0.05,
+                    "precision_area": 2400,
+                },
+            },
+        ]
+
+        deduped = engine._dedupe_assigned_items_for_block(items)
+
+        self.assertEqual(len(deduped), 2)
+        texts = sorted(item["region"].text for item in deduped)
+        self.assertEqual(texts, ["うわ", "別"])
+
     def test_prompt_for_resize_plan_uses_standard_and_dense_variants(self) -> None:
         engine = MangaLMMOCREngine()
-        standard_plan = ResizePlan(
+        standard_plan = _make_resize_plan(
             profile="standard",
-            original_shape=(3036, 2150),
             request_shape=(1728, 1224),
-            base_scale=1224 / 2150.0,
-            scale_x=1224 / 2150.0,
-            scale_y=1728 / 3036.0,
+            original_shape=(3036, 2150),
             max_completion_tokens=2048,
             block_count=15,
             small_block_ratio=0.2,
             text_cover_ratio=0.1,
         )
-        dense_plan = ResizePlan(
+        dense_plan = _make_resize_plan(
             profile="dense",
-            original_shape=(3035, 2150),
             request_shape=(1270, 900),
-            base_scale=900 / 2150.0,
-            scale_x=900 / 2150.0,
-            scale_y=1270 / 3035.0,
             max_completion_tokens=1024,
-            block_count=30,
-            small_block_ratio=0.7,
-            text_cover_ratio=0.2,
         )
 
         self.assertEqual(
@@ -267,21 +488,106 @@ class MangaLMMOCRTests(unittest.TestCase):
         self.assertEqual(payload["repeat_penalty"], 1.05)
         self.assertEqual(payload["repeat_last_n"], 0)
 
-    def test_process_image_does_not_retry_when_page_returns_empty(self) -> None:
+    def test_process_image_uses_retry_ladder_for_optimal_plus_until_match(self) -> None:
         engine = MangaLMMOCREngine()
+        settings = _FakeSettings(selected_ocr_mode=OCR_MODE_BEST_LOCAL_PLUS)
+        engine.initialize(
+            settings,
+            source_lang_english="Japanese",
+            selected_ocr_mode=OCR_MODE_BEST_LOCAL_PLUS,
+        )
         blk = _make_block(20, 20, 80, 80, bubble_bbox=(0, 0, 120, 120))
         image = np.zeros((200, 200, 3), dtype=np.uint8)
+        region = OCRRegion(
+            bbox_xyxy=[22, 22, 78, 78],
+            bbox_xyxy_float=[22.0, 22.0, 78.0, 78.0],
+            text="テスト",
+            unit_bbox_xyxy=[0, 0, 200, 200],
+            unit_kind="page_full",
+            unit_resize_scale=1.0,
+            edge_distance=20.0,
+            normalized_text="テスト",
+            response_bbox_2d=[22.0, 22.0, 78.0, 78.0],
+            request_shape=[1270, 900],
+            resize_profile="dense",
+        )
+        primary = {
+            "regions": [],
+            "analysis": {"response_kind": "empty", "payload_type": "empty"},
+            "raw_text": "",
+            "crop_image": image,
+            "request_image": image,
+            "parsed_region_count": 0,
+            "mapped_region_count": 0,
+            "metadata": {"response_kind": "empty", "prompt_mode": "standard_grounding"},
+        }
+        retry = {
+            "regions": [region],
+            "analysis": {"response_kind": "json_array", "payload_type": "json_array"},
+            "raw_text": '[{"bbox_2d":[22,22,78,78],"text_content":"テスト"}]',
+            "crop_image": image,
+            "request_image": image,
+            "parsed_region_count": 1,
+            "mapped_region_count": 1,
+            "metadata": {"response_kind": "json_array", "prompt_mode": "dense_grounding_json"},
+        }
 
-        with mock.patch.object(engine, "_request_response_text", return_value="") as request_response_text:
+        with mock.patch.object(engine, "_request_regions_for_attempt", side_effect=[primary, retry]) as request_attempt:
             engine.process_image(image, [blk])
 
-        request_response_text.assert_called_once()
+        self.assertEqual(request_attempt.call_count, 2)
+        self.assertEqual(blk.text, "テスト")
+        self.assertEqual(blk.ocr_status, "ok_after_retry")
+        self.assertEqual(engine.last_request_metadata["retry_count"], 1)
+        self.assertEqual(engine.last_request_metadata["final_status"], "success")
+
+    def test_process_image_attempt_two_text_only_is_still_failure(self) -> None:
+        engine = MangaLMMOCREngine()
+        settings = _FakeSettings(selected_ocr_mode=OCR_MODE_BEST_LOCAL_PLUS)
+        engine.initialize(
+            settings,
+            source_lang_english="Japanese",
+            selected_ocr_mode=OCR_MODE_BEST_LOCAL_PLUS,
+        )
+        blk = _make_block(20, 20, 80, 80, bubble_bbox=(0, 0, 120, 120))
+        image = np.zeros((200, 200, 3), dtype=np.uint8)
+        failure_payload = {
+            "regions": [],
+            "analysis": {"response_kind": "plain_text_or_non_json", "payload_type": "text"},
+            "raw_text": "テキストだけ",
+            "crop_image": image,
+            "request_image": image,
+            "parsed_region_count": 0,
+            "mapped_region_count": 0,
+            "metadata": {"response_kind": "plain_text_or_non_json", "prompt_mode": "dense_grounding_json_rescue"},
+        }
+
+        with mock.patch.object(engine, "_request_regions_for_attempt", side_effect=[failure_payload, failure_payload, failure_payload]) as request_attempt:
+            engine.process_image(image, [blk])
+
+        self.assertEqual(request_attempt.call_count, 3)
         self.assertEqual(blk.text, "")
-        self.assertEqual(blk.ocr_status, "empty_initial")
-        self.assertEqual(blk.ocr_crop_bbox, [0, 0, 200, 200])
-        self.assertEqual(engine.last_request_metadata["resize_profile"], "standard")
-        self.assertEqual(engine.last_request_metadata["region_count"], 0)
-        self.assertEqual(engine.last_page_regions, [])
+        self.assertEqual(blk.ocr_status, "empty_after_retry")
+        self.assertEqual(engine.last_request_metadata["final_status"], "failure")
+        self.assertEqual(engine.last_request_metadata["retry_count"], 2)
+
+    def test_create_cache_key_distinguishes_direct_mangalmm_from_optimal_plus(self) -> None:
+        settings = _FakeSettings()
+
+        direct_key = OCRFactory._create_cache_key(
+            "MangaLMM",
+            "Japanese",
+            settings,
+            selected_ocr_mode=OCR_MODE_MANGALMM,
+        )
+        optimal_plus_key = OCRFactory._create_cache_key(
+            "MangaLMM",
+            "Japanese",
+            settings,
+            selected_ocr_mode=OCR_MODE_BEST_LOCAL_PLUS,
+        )
+
+        self.assertNotEqual(direct_key, optimal_plus_key)
 
 
 if __name__ == "__main__":

@@ -60,6 +60,8 @@ class _SettingsStub:
     def get_tool_selection(self, tool_type: str) -> str:
         if tool_type == "detector":
             return "RT-DETR-v2"
+        if tool_type == "ocr":
+            return "best_local_plus"
         raise KeyError(tool_type)
 
     def is_gpu_enabled(self) -> bool:
@@ -193,6 +195,7 @@ def _process_image(
         "status": "success" if not failure and engine.last_page_regions else "failure",
         "failure": failure,
         "request": dict(engine.last_request_metadata),
+        "attempts": list(engine.last_attempt_history),
         "blocks": [_serialize_block(blk) for blk in blocks],
     }
 
@@ -209,6 +212,8 @@ def _process_image(
         "non_empty_block_count": metadata["non_empty_block_count"],
         "resize_profile": metadata["request"].get("resize_profile", ""),
         "request_shape": metadata["request"].get("request_shape", []),
+        "attempt_count": metadata["request"].get("attempt_count", 0),
+        "retry_count": metadata["request"].get("retry_count", 0),
         "output_dir": str(page_output),
         "failure": failure,
     }
@@ -275,7 +280,11 @@ def main() -> int:
 
     detector = TextBlockDetector(settings)
     engine = MangaLMMOCREngine()
-    engine.initialize(settings)
+    engine.initialize(
+        settings,
+        source_lang_english="Japanese",
+        selected_ocr_mode="best_local_plus",
+    )
 
     images = _iter_images(input_dir)
     if not images:
@@ -293,7 +302,8 @@ def main() -> int:
         print(
             f"{result['image']}: status={result['status']} "
             f"profile={result['resize_profile']} request_shape={result['request_shape']} "
-            f"regions={result['mapped_region_count']} output={result['output_dir']}"
+            f"regions={result['mapped_region_count']} retries={result['retry_count']} "
+            f"output={result['output_dir']}"
         )
         if result["failure"]:
             print(f"  failure={result['failure']}")
