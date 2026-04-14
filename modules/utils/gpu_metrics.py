@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import copy
 import json
 import subprocess
+import threading
 import time
 from pathlib import Path
 from typing import Any, Iterable
@@ -13,6 +15,9 @@ DEFAULT_CONTAINER_NAMES = (
     "paddleocr-vllm",
     "mangalmm-local-server",
 )
+_GPU_METRICS_CACHE_LOCK = threading.Lock()
+_GPU_METRICS_CACHE_VALUE: dict[str, Any] | None = None
+_GPU_METRICS_CACHE_EXPIRES_AT = 0.0
 
 
 def _run_capture(cmd: list[str]) -> str:
@@ -74,6 +79,26 @@ def query_gpu_metrics() -> dict[str, Any]:
         "primary": primary,
         "sampled_at": time.time(),
     }
+
+
+def query_gpu_metrics_cached(ttl_sec: float = 1.0) -> dict[str, Any]:
+    global _GPU_METRICS_CACHE_VALUE, _GPU_METRICS_CACHE_EXPIRES_AT
+
+    try:
+        ttl = max(0.0, float(ttl_sec))
+    except (TypeError, ValueError):
+        ttl = 1.0
+
+    now = time.monotonic()
+    with _GPU_METRICS_CACHE_LOCK:
+        if _GPU_METRICS_CACHE_VALUE is not None and now < _GPU_METRICS_CACHE_EXPIRES_AT:
+            return copy.deepcopy(_GPU_METRICS_CACHE_VALUE)
+
+    fresh = query_gpu_metrics()
+    with _GPU_METRICS_CACHE_LOCK:
+        _GPU_METRICS_CACHE_VALUE = copy.deepcopy(fresh)
+        _GPU_METRICS_CACHE_EXPIRES_AT = now + ttl
+    return copy.deepcopy(fresh)
 
 
 def _docker_ps_rows(container_names: Iterable[str] | None = None) -> list[dict[str, Any]]:
