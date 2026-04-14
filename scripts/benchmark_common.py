@@ -18,10 +18,10 @@ import yaml
 
 from modules.utils.llama_cpp_runtime import (
     DEFAULT_LLAMA_CPP_IMAGE,
-    docker_compose_pull_and_up,
     inspect_llama_cpp_runtime,
     normalize_llama_cpp_image,
     normalize_llama_cpp_pull_policy,
+    resolve_docker_compose_command,
 )
 
 
@@ -164,6 +164,79 @@ def wait_for_url(url: str, timeout_sec: int = 180, poll_interval_sec: float = 2.
     raise TimeoutError(f"Timed out waiting for {url}")
 
 
+def compose_up_detached(
+    compose_path: str | Path,
+    *,
+    cwd: str | Path | None = None,
+    project_directory: str | Path | None = None,
+) -> None:
+    command = [*resolve_docker_compose_command()]
+    if project_directory is not None:
+        command.extend(["--project-directory", str(project_directory)])
+    command.extend(["-f", str(compose_path), "up", "-d"])
+    run_command(command, cwd=cwd)
+
+
+def ensure_compose_groups_health_first(
+    groups: list[dict[str, Any]],
+    *,
+    quick_timeout_sec: int = 8,
+    boot_timeout_sec: int = 180,
+    log_fn=None,
+) -> list[dict[str, Any]]:
+    group_reports: list[dict[str, Any]] = []
+    for group in groups:
+        failures = [url for url in group["health_urls"] if not url_available(url, timeout_sec=quick_timeout_sec)]
+        if not failures:
+            if log_fn:
+                log_fn(
+                    f"managed runtime group reuse: {group['name']} healthy; "
+                    f"containers={group['container_names']}"
+                )
+            group_reports.append(
+                {
+                    "name": group["name"],
+                    "action": "reused",
+                    "container_names": group["container_names"],
+                    "health_urls": group["health_urls"],
+                    "failed_urls": [],
+                }
+            )
+            continue
+
+        if log_fn:
+            log_fn(
+                f"managed runtime group restart: {group['name']} health failed; "
+                f"failed_urls={failures}"
+            )
+        compose_up_detached(
+            group["compose_path"],
+            cwd=group.get("cwd"),
+            project_directory=group.get("project_directory"),
+        )
+        post_failures: list[str] = []
+        for url in group["health_urls"]:
+            try:
+                wait_for_url(url, timeout_sec=boot_timeout_sec)
+            except Exception:
+                post_failures.append(url)
+        if post_failures:
+            raise RuntimeError(
+                "Managed runtime health-first restart failed for group "
+                f"{group['name']}: failed_urls={post_failures}"
+            )
+        group_reports.append(
+            {
+                "name": group["name"],
+                "action": "restarted",
+                "container_names": group["container_names"],
+                "health_urls": group["health_urls"],
+                "failed_urls": failures,
+            }
+        )
+    return group_reports
+
+
 def _normalize_service_names(payload: dict[str, Any] | None) -> list[str]:
     if not isinstance(payload, dict):
         return []
@@ -228,55 +301,13 @@ def ensure_managed_runtime_health_first(
         "runtime_services": runtime_services,
         "container_names": resolve_runtime_container_names(preset, runtime_services),
         "health_urls": resolve_runtime_health_urls(preset, runtime_services),
-        "groups": [],
+        "groups": ensure_compose_groups_health_first(
+            groups,
+            quick_timeout_sec=quick_timeout_sec,
+            boot_timeout_sec=boot_timeout_sec,
+            log_fn=log_fn,
+        ),
     }
-
-    for group in groups:
-        failures = [url for url in group["health_urls"] if not url_available(url, timeout_sec=quick_timeout_sec)]
-        if not failures:
-            if log_fn:
-                log_fn(
-                    f"managed runtime group reuse: {group['name']} healthy; "
-                    f"containers={group['container_names']}"
-                )
-            report["groups"].append(
-                {
-                    "name": group["name"],
-                    "action": "reused",
-                    "container_names": group["container_names"],
-                    "health_urls": group["health_urls"],
-                    "failed_urls": [],
-                }
-            )
-            continue
-
-        if log_fn:
-            log_fn(
-                f"managed runtime group restart: {group['name']} health failed; "
-                f"failed_urls={failures}"
-            )
-        remove_containers(group["container_names"])
-        compose_pull_and_recreate(group["compose_path"], cwd=group["cwd"])
-        post_failures: list[str] = []
-        for url in group["health_urls"]:
-            try:
-                wait_for_url(url, timeout_sec=boot_timeout_sec)
-            except Exception:
-                post_failures.append(url)
-        if post_failures:
-            raise RuntimeError(
-                "Managed runtime health-first restart failed for group "
-                f"{group['name']}: failed_urls={post_failures}"
-            )
-        report["groups"].append(
-            {
-                "name": group["name"],
-                "action": "restarted",
-                "container_names": group["container_names"],
-                "health_urls": group["health_urls"],
-                "failed_urls": failures,
-            }
-        )
 
     return {
         "staged": staged,
@@ -752,14 +783,6 @@ def stage_runtime_files(preset: dict[str, Any], runtime_dir: str | Path) -> dict
         "ocr": ocr_runtime,
         "app_settings_path": str(app_settings_path.resolve()),
     }
-
-
-
-
-def compose_pull_and_recreate(compose_path: str | Path, *, cwd: str | Path | None = None) -> None:
-    docker_compose_pull_and_up(compose_path, cwd=cwd)
-
-
 def collect_llama_cpp_runtime_metadata(*, image_ref: str | None = None, container_name: str | None = None) -> dict[str, str]:
     return inspect_llama_cpp_runtime(image_ref=image_ref, container_name=container_name)
 

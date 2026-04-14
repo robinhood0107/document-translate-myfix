@@ -278,6 +278,7 @@ def _run_pipeline_once(
     source_lang: str,
     target_lang: str,
 ) -> dict[str, Any]:
+    preset_payload, _resolved_path = load_preset(preset_ref)
     cmd = [
         sys.executable,
         "-u",
@@ -305,6 +306,18 @@ def _run_pipeline_once(
         str(run_dir),
     ]
     env = dict(os.environ)
+    mangalmm_cfg = preset_payload.get("mangalmm_ocr_client", {}) if isinstance(preset_payload, dict) else {}
+    if isinstance(mangalmm_cfg, dict):
+        env["CT_MANGALMM_DEBUG_ROOT"] = str(run_dir / "mangalmm_debug")
+        env["CT_MANGALMM_DEBUG_EXPORT_LIMIT"] = str(int(mangalmm_cfg.get("debug_export_limit", 96)))
+        for config_key, env_name in (
+            ("temperature", "CT_MANGALMM_TEMPERATURE"),
+            ("top_k", "CT_MANGALMM_TOP_K"),
+            ("text_expansion_ratio_x", "CT_MANGALMM_TEXT_EXPANSION_RATIO_X"),
+            ("text_expansion_ratio_y", "CT_MANGALMM_TEXT_EXPANSION_RATIO_Y"),
+        ):
+            if config_key in mangalmm_cfg:
+                env[env_name] = str(mangalmm_cfg[config_key])
     completed = _run_command_streaming(
         cmd=cmd,
         cwd=ROOT,

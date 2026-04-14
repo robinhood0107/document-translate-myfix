@@ -45,7 +45,12 @@ class OCRProcessor:
         self.last_device = resolve_device(self.settings.is_gpu_enabled())
         runtime_manager = getattr(self.main_page, "local_ocr_runtime_manager", None)
         if isinstance(runtime_manager, LocalOCRRuntimeManager):
-            runtime_manager.ensure_engine(self.ocr_key, self.settings)
+            runtime_manager.ensure_engine(
+                self.ocr_key,
+                self.settings,
+                progress_callback=getattr(self.main_page, "report_runtime_progress", None),
+                cancel_checker=getattr(self.main_page, "is_current_task_cancelled", None),
+            )
         try:
             self.last_engine_name = OCRFactory.create_engine(
                 self.settings,

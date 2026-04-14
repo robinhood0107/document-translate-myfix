@@ -8,16 +8,28 @@ from app.ui.dayu_widgets.button_group import MPushButtonGroup, MToolButtonGroup
 from app.ui.dayu_widgets.check_box import MCheckBox
 from app.ui.dayu_widgets.combo_box import MComboBox, MFontComboBox
 from app.ui.dayu_widgets.divider import MDivider
+from app.ui.dayu_widgets.label import MLabel
 from app.ui.dayu_widgets.line_edit import MLineEdit
 from app.ui.dayu_widgets.loading import MLoading
 from app.ui.dayu_widgets.progress_bar import MProgressBar
 from app.ui.dayu_widgets.push_button import MPushButton
 from app.ui.dayu_widgets.radio_button import MRadioButton
 from app.ui.dayu_widgets.slider import MSlider
+from app.ui.dayu_widgets.spin_box import MSpinBox
 from app.ui.dayu_widgets.text_edit import MTextEdit
 from app.ui.dayu_widgets.tool_button import MToolButton
 from app.ui.search_replace_panel import SearchReplacePanel
 from app.ui.main_window.constants import supported_source_languages, supported_target_languages
+from modules.utils.automatic_output import (
+    OUTPUT_ARCHIVE_FORMAT_CBZ,
+    OUTPUT_ARCHIVE_FORMAT_ZIP,
+    OUTPUT_IMAGE_FORMAT_JPG,
+    OUTPUT_IMAGE_FORMAT_PNG,
+    OUTPUT_IMAGE_FORMAT_SAME,
+    OUTPUT_IMAGE_FORMAT_WEBP,
+    OUTPUT_TARGET_ARCHIVE,
+    OUTPUT_TARGET_IMAGES,
+)
 
 
 class WorkspaceMixin:
@@ -147,10 +159,6 @@ class WorkspaceMixin:
         left_layout = QtWidgets.QVBoxLayout()
         left_layout.addWidget(MDivider())
 
-        self.image_card_layout = QtWidgets.QVBoxLayout()
-        self.image_card_layout.addStretch(1)
-
-        self.page_list.setLayout(self.image_card_layout)
         left_layout.addWidget(self.page_list)
         left_layout.addWidget(self.search_panel)
         left_widget = QtWidgets.QWidget()
@@ -551,22 +559,30 @@ class WorkspaceMixin:
         box_tools_lay.addStretch()
 
         inp_tools_lay = QtWidgets.QHBoxLayout()
+        inpaint_specs = self.get_inpaint_tool_specs()
 
-        self.brush_button = self.create_tool_button(svg="brush-fill.svg", checkable=True)
-        self.brush_button.setToolTip(self.tr("Draw Brush Strokes for Cleaning Image"))
+        self.brush_button = self.create_tool_button(svg=str(inpaint_specs["brush"]["svg"]), checkable=True)
         self.brush_button.clicked.connect(self.toggle_brush_tool)
         self.tool_buttons["brush"] = self.brush_button
 
-        self.eraser_button = self.create_tool_button(svg="eraser_fill.svg", checkable=True)
-        self.eraser_button.setToolTip(self.tr("Erase Brush Strokes"))
+        self.eraser_button = self.create_tool_button(svg=str(inpaint_specs["eraser"]["svg"]), checkable=True)
         self.eraser_button.clicked.connect(self.toggle_eraser_tool)
         self.tool_buttons["eraser"] = self.eraser_button
 
-        self.clear_brush_strokes_button = self.create_tool_button(svg="clear-outlined.svg")
-        self.clear_brush_strokes_button.setToolTip(self.tr("Remove all the brush strokes on the Image"))
+        self.exclude_button = self.create_tool_button(svg=str(inpaint_specs["exclude"]["svg"]), checkable=True)
+        self.exclude_button.clicked.connect(self.toggle_exclude_tool)
+        self.tool_buttons["exclude"] = self.exclude_button
+
+        self.restore_button = self.create_tool_button(svg=str(inpaint_specs["restore"]["svg"]), checkable=True)
+        self.restore_button.clicked.connect(self.toggle_restore_tool)
+        self.tool_buttons["restore"] = self.restore_button
+
+        self.clear_brush_strokes_button = self.create_tool_button(svg=str(inpaint_specs["clear"]["svg"]))
 
         inp_tools_lay.addWidget(self.brush_button)
         inp_tools_lay.addWidget(self.eraser_button)
+        inp_tools_lay.addWidget(self.exclude_button)
+        inp_tools_lay.addWidget(self.restore_button)
         inp_tools_lay.addWidget(self.clear_brush_strokes_button)
         inp_tools_lay.addStretch()
 
@@ -574,8 +590,151 @@ class WorkspaceMixin:
         self.brush_eraser_slider.setMinimum(1)
         self.brush_eraser_slider.setMaximum(100)
         self.brush_eraser_slider.setValue(10)
-        self.brush_eraser_slider.setToolTip(self.tr("Brush/Eraser Size Slider"))
         self.brush_eraser_slider.valueChanged.connect(self.set_brush_eraser_size)
+        self.refresh_inpaint_tool_ui()
+
+        txt_md_div = MDivider(self.tr("TXT/MD"))
+
+        txt_md_buttons_widget = QtWidgets.QWidget()
+        txt_md_buttons_layout = QtWidgets.QGridLayout(txt_md_buttons_widget)
+        txt_md_buttons_layout.setContentsMargins(0, 0, 0, 0)
+        txt_md_buttons_layout.setHorizontalSpacing(6)
+        txt_md_buttons_layout.setVerticalSpacing(6)
+
+        self.export_source_txt_button = MPushButton(self.tr("Export Source TXT")).small()
+        self.export_source_txt_button.setToolTip(
+            self.tr("Export the current project's source text in the TXT exchange format.")
+        )
+        self.import_translation_txt_button = MPushButton(self.tr("Import Translation TXT")).small()
+        self.import_translation_txt_button.setToolTip(
+            self.tr("Import translated text from a TXT exchange file and rebuild text boxes to fit.")
+        )
+        self.export_source_md_button = MPushButton(self.tr("Export Source MD")).small()
+        self.export_source_md_button.setToolTip(
+            self.tr("Export the current project's source text in the Markdown exchange format.")
+        )
+        self.import_translation_md_button = MPushButton(self.tr("Import Translation MD")).small()
+        self.import_translation_md_button.setToolTip(
+            self.tr("Import translated text from a Markdown exchange file and rebuild text boxes to fit.")
+        )
+
+        txt_md_buttons_layout.addWidget(self.export_source_txt_button, 0, 0)
+        txt_md_buttons_layout.addWidget(self.import_translation_txt_button, 0, 1)
+        txt_md_buttons_layout.addWidget(self.export_source_md_button, 1, 0)
+        txt_md_buttons_layout.addWidget(self.import_translation_md_button, 1, 1)
+
+        txt_md_auto_layout = QtWidgets.QVBoxLayout()
+        txt_md_auto_layout.setContentsMargins(0, 0, 0, 0)
+        txt_md_auto_layout.setSpacing(2)
+
+        self.auto_export_source_txt_checkbox = MCheckBox(self.tr("Auto Export Source TXT"))
+        self.auto_export_source_txt_checkbox.setToolTip(
+            self.tr("After a successful automatic run, overwrite the TXT source exchange file with only the pages from that run.")
+        )
+        self.auto_export_source_md_checkbox = MCheckBox(self.tr("Auto Export Source MD"))
+        self.auto_export_source_md_checkbox.setToolTip(
+            self.tr("After a successful automatic run, overwrite the Markdown source exchange file with only the pages from that run.")
+        )
+        self.auto_export_translation_txt_checkbox = MCheckBox(self.tr("Auto Export Translation TXT"))
+        self.auto_export_translation_txt_checkbox.setToolTip(
+            self.tr("After a successful automatic run, overwrite the TXT translation exchange file with only the pages from that run.")
+        )
+        self.auto_export_translation_md_checkbox = MCheckBox(self.tr("Auto Export Translation MD"))
+        self.auto_export_translation_md_checkbox.setToolTip(
+            self.tr("After a successful automatic run, overwrite the Markdown translation exchange file with only the pages from that run.")
+        )
+
+        txt_md_auto_layout.addWidget(self.auto_export_source_txt_checkbox)
+        txt_md_auto_layout.addWidget(self.auto_export_source_md_checkbox)
+        txt_md_auto_layout.addWidget(self.auto_export_translation_txt_checkbox)
+        txt_md_auto_layout.addWidget(self.auto_export_translation_md_checkbox)
+
+        output_div = MDivider(self.tr("Output"))
+        output_widget = QtWidgets.QWidget()
+        output_layout = QtWidgets.QVBoxLayout(output_widget)
+        output_layout.setContentsMargins(0, 0, 0, 0)
+        output_layout.setSpacing(6)
+
+        self.output_use_global_checkbox = MCheckBox(self.tr("Use global output settings"))
+        self.output_use_global_checkbox.setToolTip(
+            self.tr("When enabled, this project inherits the automatic output settings from Settings.")
+        )
+
+        output_target_row = QtWidgets.QHBoxLayout()
+        output_target_label = MLabel(self.tr("Output target"))
+        self.output_target_combo = MComboBox().small()
+        self.output_target_combo.addItem(self.tr("Individual images"), OUTPUT_TARGET_IMAGES)
+        self.output_target_combo.addItem(self.tr("Single archive"), OUTPUT_TARGET_ARCHIVE)
+        output_target_row.addWidget(output_target_label)
+        output_target_row.addWidget(self.output_target_combo, 1)
+
+        self.output_image_format_row = QtWidgets.QWidget()
+        output_image_format_row_layout = QtWidgets.QHBoxLayout(self.output_image_format_row)
+        output_image_format_row_layout.setContentsMargins(0, 0, 0, 0)
+        output_image_format_label = MLabel(self.tr("Image format"))
+        self.output_image_format_combo = MComboBox().small()
+        self.output_image_format_combo.addItem(self.tr("Same as source"), OUTPUT_IMAGE_FORMAT_SAME)
+        self.output_image_format_combo.addItem("PNG", OUTPUT_IMAGE_FORMAT_PNG)
+        self.output_image_format_combo.addItem("JPG", OUTPUT_IMAGE_FORMAT_JPG)
+        self.output_image_format_combo.addItem("WEBP", OUTPUT_IMAGE_FORMAT_WEBP)
+        output_image_format_row_layout.addWidget(output_image_format_label)
+        output_image_format_row_layout.addWidget(self.output_image_format_combo, 1)
+
+        self.output_archive_format_row = QtWidgets.QWidget()
+        output_archive_format_row_layout = QtWidgets.QHBoxLayout(self.output_archive_format_row)
+        output_archive_format_row_layout.setContentsMargins(0, 0, 0, 0)
+        output_archive_format_label = MLabel(self.tr("Archive format"))
+        self.output_archive_format_combo = MComboBox().small()
+        self.output_archive_format_combo.addItem("ZIP", OUTPUT_ARCHIVE_FORMAT_ZIP)
+        self.output_archive_format_combo.addItem("CBZ", OUTPUT_ARCHIVE_FORMAT_CBZ)
+        output_archive_format_row_layout.addWidget(output_archive_format_label)
+        output_archive_format_row_layout.addWidget(self.output_archive_format_combo, 1)
+
+        self.output_archive_image_format_row = QtWidgets.QWidget()
+        output_archive_image_format_row_layout = QtWidgets.QHBoxLayout(self.output_archive_image_format_row)
+        output_archive_image_format_row_layout.setContentsMargins(0, 0, 0, 0)
+        output_archive_image_format_label = MLabel(self.tr("Archive image format"))
+        self.output_archive_image_format_combo = MComboBox().small()
+        self.output_archive_image_format_combo.addItem("PNG", OUTPUT_IMAGE_FORMAT_PNG)
+        self.output_archive_image_format_combo.addItem("JPG", OUTPUT_IMAGE_FORMAT_JPG)
+        self.output_archive_image_format_combo.addItem("WEBP", OUTPUT_IMAGE_FORMAT_WEBP)
+        output_archive_image_format_row_layout.addWidget(output_archive_image_format_label)
+        output_archive_image_format_row_layout.addWidget(self.output_archive_image_format_combo, 1)
+
+        self.output_archive_level_row = QtWidgets.QWidget()
+        output_archive_level_row_layout = QtWidgets.QHBoxLayout(self.output_archive_level_row)
+        output_archive_level_row_layout.setContentsMargins(0, 0, 0, 0)
+        output_archive_level_label = MLabel(self.tr("Compression level"))
+        self.output_archive_level_spinbox = MSpinBox().small()
+        self.output_archive_level_spinbox.setMinimum(0)
+        self.output_archive_level_spinbox.setMaximum(9)
+        self.output_archive_level_spinbox.setValue(6)
+        output_archive_level_row_layout.addWidget(output_archive_level_label)
+        output_archive_level_row_layout.addWidget(self.output_archive_level_spinbox)
+        output_archive_level_row_layout.addStretch(1)
+
+        self.output_quality_note_label = MLabel(
+            self.tr("PNG/JPG/WEBP images are saved at maximum quality.")
+        ).secondary()
+        self.output_quality_note_label.setWordWrap(True)
+
+        self.output_archive_note_label = MLabel(
+            self.tr("Archive compression only affects the ZIP/CBZ container, not image quality.")
+        ).secondary()
+        self.output_archive_note_label.setWordWrap(True)
+
+        self.output_estimate_label = MLabel(self.tr("Load pages to see automatic output estimates.")).secondary()
+        self.output_estimate_label.setWordWrap(True)
+
+        output_layout.addWidget(self.output_use_global_checkbox)
+        output_layout.addLayout(output_target_row)
+        output_layout.addWidget(self.output_image_format_row)
+        output_layout.addWidget(self.output_archive_format_row)
+        output_layout.addWidget(self.output_archive_image_format_row)
+        output_layout.addWidget(self.output_archive_level_row)
+        output_layout.addWidget(self.output_quality_note_label)
+        output_layout.addWidget(self.output_archive_note_label)
+        output_layout.addWidget(self.output_estimate_label)
 
         tools_layout.addLayout(misc_lay)
         box_div = MDivider(self.tr("Box Drawing"))
@@ -586,6 +745,11 @@ class WorkspaceMixin:
         tools_layout.addWidget(inp_div)
         tools_layout.addLayout(inp_tools_lay)
         tools_layout.addWidget(self.brush_eraser_slider)
+        tools_layout.addWidget(txt_md_div)
+        tools_layout.addWidget(txt_md_buttons_widget)
+        tools_layout.addLayout(txt_md_auto_layout)
+        tools_layout.addWidget(output_div)
+        tools_layout.addWidget(output_widget)
         tools_layout.addStretch()
         tools_widget.setLayout(tools_layout)
 
@@ -614,6 +778,7 @@ class WorkspaceMixin:
         splitter.setStretchFactor(0, 40)
         splitter.setStretchFactor(1, 80)
         splitter.setStretchFactor(2, 10)
+        splitter.setSizes([220, 980, 360])
 
         content_layout = QtWidgets.QVBoxLayout()
         content_layout.addLayout(header_layout)
