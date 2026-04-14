@@ -31,6 +31,7 @@ from modules.utils.ocr_debug import (
     set_block_ocr_diagnostics,
 )
 from modules.utils.ocr_quality import summarize_ocr_quality
+from modules.utils.text_normalization import normalize_decorative_ocr_text
 from modules.utils.textblock import TextBlock, sort_textblock_rectangles
 
 from .base import OCREngine
@@ -110,6 +111,7 @@ class OCRRegion:
     unit_resize_scale: float
     edge_distance: float
     normalized_text: str
+    raw_text: str = ""
     response_bbox_2d: list[float] | None = None
     scale_x: float = 1.0
     scale_y: float = 1.0
@@ -774,6 +776,7 @@ class MangaLMMOCREngine(OCREngine):
                 "bbox_xyxy": list(region.bbox_xyxy),
                 "bbox_xyxy_float": list(region.bbox_xyxy_float),
                 "text": region.text,
+                "raw_text": region.raw_text,
                 "unit_bbox_xyxy": list(region.unit_bbox_xyxy),
                 "unit_kind": region.unit_kind,
                 "unit_resize_scale": float(region.unit_resize_scale),
@@ -903,10 +906,17 @@ class MangaLMMOCREngine(OCREngine):
                 for item in sorted_items
                 if str(item["region"].text or "").strip()
             ]
+            raw_texts = [
+                str(item["region"].raw_text or item["region"].text or "").strip()
+                for item in sorted_items
+                if str(item["region"].text or "").strip()
+            ]
             if is_no_space_lang(getattr(blk, "source_lang", "")):
                 final_text = "".join(texts)
+                final_raw_text = "".join(raw_texts)
             else:
                 final_text = " ".join(texts)
+                final_raw_text = " ".join(raw_texts)
 
             best_item = max(sorted_items, key=self._region_rank_key)
             source_region: OCRRegion = best_item["region"]
@@ -930,7 +940,7 @@ class MangaLMMOCREngine(OCREngine):
                 status=success_status,
                 empty_reason="",
                 attempt_count=attempt_count,
-                raw_text=final_text,
+                raw_text=final_raw_text,
                 sanitized_text=final_text,
             )
 
@@ -1010,6 +1020,7 @@ class MangaLMMOCREngine(OCREngine):
             "bbox_xyxy": list(region.bbox_xyxy),
             "bbox_xyxy_float": list(region.bbox_xyxy_float),
             "text": region.text,
+            "raw_text": region.raw_text,
             "unit_bbox_xyxy": list(region.unit_bbox_xyxy),
             "unit_kind": region.unit_kind,
             "unit_resize_scale": float(region.unit_resize_scale),
@@ -1134,6 +1145,7 @@ class MangaLMMOCREngine(OCREngine):
         for region in regions:
             bbox = region.get("bbox_2d")
             text = str(region.get("text_content", "") or "").strip()
+            raw_text = str(region.get("raw_text_content", text) or "").strip()
             if not isinstance(bbox, list) or len(bbox) != 4 or not text:
                 continue
             x1_f, y1_f, x2_f, y2_f = [float(value) for value in bbox]
@@ -1174,6 +1186,7 @@ class MangaLMMOCREngine(OCREngine):
                     unit_resize_scale=float(resize_plan.base_scale),
                     edge_distance=edge_distance,
                     normalized_text=self._normalize_text_key(text),
+                    raw_text=raw_text,
                     response_bbox_2d=[resp_x1, resp_y1, resp_x2, resp_y2],
                     scale_x=float(resize_plan.scale_x),
                     scale_y=float(resize_plan.scale_y),
@@ -1229,7 +1242,7 @@ class MangaLMMOCREngine(OCREngine):
                 self._chat_completions_url(),
                 json=payload,
                 headers={"Content-Type": "application/json"},
-                timeout=self.request_timeout_sec,
+                timeout=self._requests_timeout(),
             )
         except requests.exceptions.RequestException as exc:
             raise LocalServiceConnectionError(
@@ -1268,6 +1281,12 @@ class MangaLMMOCREngine(OCREngine):
         if self.raw_response_logging:
             logger.info("mangalmm_full_page_ocr raw response json: %s", data)
         return data
+
+    def _requests_timeout(self):
+        if self.use_optimal_plus_contract:
+            # Optimal+ waits for the local LLM to finish once the request was accepted.
+            return (float(self.request_timeout_sec), None)
+        return float(self.request_timeout_sec)
 
     def _extract_text_from_response(self, data: dict) -> str:
         error = data.get("error")
@@ -1430,14 +1449,21 @@ class MangaLMMOCREngine(OCREngine):
             if not isinstance(item, dict):
                 continue
             bbox = item.get("bbox_2d")
-            text = str(item.get("text_content", "") or "").strip()
+            raw_text = str(item.get("text_content", "") or "").strip()
+            text = normalize_decorative_ocr_text(raw_text)
             if not isinstance(bbox, list) or len(bbox) != 4 or not text:
                 continue
             try:
                 coords = [float(value) for value in bbox]
             except (TypeError, ValueError):
                 continue
-            normalized.append({"bbox_2d": coords, "text_content": text})
+            normalized.append(
+                {
+                    "bbox_2d": coords,
+                    "text_content": text,
+                    "raw_text_content": raw_text,
+                }
+            )
         return normalized
 
     @staticmethod
