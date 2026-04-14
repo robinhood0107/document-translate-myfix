@@ -129,6 +129,22 @@ def serialize_inpaint_block(block, index: int) -> dict:
     return {
         "index": int(index),
         "xyxy": [int(float(v)) for v in getattr(block, "xyxy", (0, 0, 0, 0))[:4]],
+        "translation_raw": str(
+            getattr(block, "_render_translation_raw", getattr(block, "translation", "")) or ""
+        ),
+        "render_text": str(
+            getattr(block, "_render_text", getattr(block, "translation", "")) or ""
+        ),
+        "render_html_applied": bool(getattr(block, "_render_html_applied", False)),
+        "render_fallback_font_family": str(
+            getattr(block, "_render_fallback_font_family", "") or ""
+        ),
+        "render_normalization_applied": bool(
+            getattr(block, "_render_normalization_applied", False)
+        ),
+        "render_normalization_reasons": list(
+            getattr(block, "_render_normalization_reasons", []) or []
+        ),
         "bubble_xyxy": (
             [int(float(v)) for v in getattr(block, "bubble_xyxy", ())[:4]]
             if getattr(block, "bubble_xyxy", None) is not None
