@@ -40,3 +40,10 @@ testmodel
 /Sample/
 /banchmark_result_log/
 /benchmarks/ocr_combo/
+
+# Benchmark/sample media must stay local-only
+/docs/assets/benchmarking/**/*.png
+/docs/assets/benchmarking/**/*.jpg
+/docs/assets/benchmarking/**/*.jpeg
+/docs/assets/benchmarking/**/*.webp
+/docs/assets/benchmarking/**/*.bmp

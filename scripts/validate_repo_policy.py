@@ -23,6 +23,11 @@ FORBIDDEN_TRACKED_PREFIXES = (
 FORBIDDEN_TRACKED_NAMES = {
     ".DS_Store",
 }
+FORBIDDEN_TRACKED_PATTERNS = (
+    re.compile(r"^Sample/.*$", re.IGNORECASE),
+    re.compile(r"^banchmark_result_log/.*\.(png|jpg|jpeg|webp|bmp)$", re.IGNORECASE),
+    re.compile(r"^docs/assets/benchmarking/.*\.(png|jpg|jpeg|webp|bmp)$", re.IGNORECASE),
+)
 BENCHMARK_ONLY_PREFIXES = (
     "benchmarks/",
     "docs/benchmark/",
@@ -95,6 +100,9 @@ def validate_tracked_paths() -> list[str]:
             errors.append(f"Forbidden tracked file: {normalized}")
             continue
         if any(normalized.startswith(prefix) for prefix in FORBIDDEN_TRACKED_PREFIXES):
+            errors.append(f"Forbidden tracked path: {normalized}")
+            continue
+        if any(pattern.match(normalized) for pattern in FORBIDDEN_TRACKED_PATTERNS):
             errors.append(f"Forbidden tracked path: {normalized}")
     return errors
 
