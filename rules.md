@@ -62,6 +62,9 @@
   - results history
   - generated/latest report
 - benchmark 자산은 `benchmarking/lab`에만 두고, 제품 반영은 별도 `feature/*`, `fix/*`, `chore/*` 작업 브랜치 PR로 승격한다.
+- benchmark에서 사용한 샘플 이미지, 코퍼스 원본 이미지, translated/cropped/cleaned 결과 이미지, detector/mask overlay, 실험 사진, 비교용 PNG/JPG 차트 같은 이미지/사진 바이너리는 어떤 브랜치에도 커밋하지 않는다.
+- `Sample/` 전체와 `banchmark_result_log/`, `docs/assets/benchmarking/` 아래 이미지/사진 파일은 로컬 전용 자산으로 취급하고 `.gitignore` 대상이어야 한다.
+- 실수로 추적된 benchmark/sample 이미지가 생기면 즉시 인덱스에서 제거한다. benchmark 문서 브랜치에도 이미지 바이너리를 남기지 않는다.
 
 ## 3. 기능 작업 절차
 
