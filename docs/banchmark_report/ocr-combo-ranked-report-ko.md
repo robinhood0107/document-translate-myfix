@@ -124,22 +124,10 @@
 | PaddleOCR VL + Gemma | final-confirm-r2 | 775.553 | ready | 0.0603 | 0.1452 | ready |
 | PaddleOCR VL + Gemma | final-confirm-r3 | 800.288 | ready | 0.0603 | 0.1452 | ready |
 
-## Visual Appendix
+## Visual Samples Policy
 
-- page `094`
-  source: `[local-only]`
-  overlay: `[local-only]`
-  winner: `[local-only]`
-  fastest: `[local-only]`
-  lowest_cer: `[local-only]`
-  ppocr: `[local-only]`
-- page `095`
-  source: `[local-only]`
-  overlay: `[local-only]`
-  winner: `[local-only]`
-  fastest: `[local-only]`
-  lowest_cer: `[local-only]`
-  ppocr: `[local-only]`
+- ranked 비교용 source/overlay/translated 시각 샘플은 로컬 benchmark export에만 남긴다.
+- Git에는 표, CSV, OCR debug JSON 경로처럼 재현 가능한 비이미지 근거만 유지한다.
 
 ## Crop Overread Regression
 

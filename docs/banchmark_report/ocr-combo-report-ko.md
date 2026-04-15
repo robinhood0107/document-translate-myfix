@@ -97,31 +97,10 @@
 - japan corpus 권장 OCR: `no winner`
 - mixed corpus 운영 권장 라우팅: 중국어 페이지는 `HunyuanOCR + Gemma`, 일본어 페이지는 `no winner`로 라우팅하고 mixed corpus는 source language 판별 뒤 분기 권장
 
-## Visual Appendix
+## Visual Samples Policy
 
-### china
-- page `0006_0005`
-  source: `[local-only]`
-  overlay: `[local-only]`
-  winner_translated_image: `[local-only]`
-  fastest_failed_translated_image: `[local-only]`
-- page `0008_0007`
-  source: `[local-only]`
-  overlay: `[local-only]`
-  winner_translated_image: `[local-only]`
-  fastest_failed_translated_image: `[local-only]`
-
-### japan
-- page `094`
-  source: `[local-only]`
-  overlay: `[local-only]`
-  winner_translated_image: ``
-  fastest_failed_translated_image: `[local-only]`
-- page `095`
-  source: `[local-only]`
-  overlay: `[local-only]`
-  winner_translated_image: ``
-  fastest_failed_translated_image: `[local-only]`
+- gold review packet의 source/overlay/translated 시각 샘플은 로컬 benchmark export에만 남기고 Git에는 포함하지 않는다.
+- 이 보고서에는 routing 결과와 표/CSV 요약만 남긴다.
 
 ## Artifacts
 

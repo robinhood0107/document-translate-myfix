@@ -30,13 +30,14 @@
 
 이 파일에 각 페이지별 `O / X`를 적으면 된다.
 
-### 4. 참고 출력 이미지
+### 4. 참고 출력 정책
 
-- `banchmark_result_log/workflow-split-runtime/20260415_091848_candidate_stage_batched_dual_resident/094/*_translated.jpg`
+- translated preview 이미지는 로컬 benchmark export에만 남기고 Git에는 포함하지 않는다.
+- 필요하면 로컬 run 폴더에서 직접 열어 보거나 외부 공유 채널로 검수한다.
 
 주의:
 
-- 이 translated image들은 이번 analysis mode에서 `PaddleOCR VL` downstream 기준으로 만들어진 출력이다.
+- 이 translated preview는 이번 analysis mode에서 `PaddleOCR VL` downstream 기준으로 만들어진 출력이다.
 - 즉 이번 Review Pack은 `MangaLMM 결과 자체의 최종 렌더 미리보기`가 아니라, `MangaLMM을 통과시켜도 되는 페이지인지`를 판단하기 위한 metric-based review 단계다.
 
 ## 이번 채점에서 `O / X`의 의미

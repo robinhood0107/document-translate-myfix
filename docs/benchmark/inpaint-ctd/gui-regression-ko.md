@@ -6,7 +6,7 @@
 | 한국어 번역 반영 | PASS | `ct_ko.ts`, `ct_ko.qm`, `compile_translations.py` | 새 ToolsPage 문자열 기준 |
 | One-Page Auto GUI 경유 실행 | PASS | spotlight benchmark 5-way | AOT/lama_large_512px/lama_mpe 모두 완료 |
 | Translate All GUI 경유 실행 | PASS | full suite 5-way | China 8장, japan 22장 완료 |
-| export/debug 산출물 연결 | PASS | spotlight/latest 자산 링크 | source/overlay/mask/cleaned/translated 확인 |
+| export/debug 산출물 연결 | PASS | 로컬 전용 spotlight export 검수 | source/overlay/mask/cleaned/translated는 Git 외부에서 확인 |
 | 프로젝트 재열기 후 export root 유지 | PASS | 기존 export root 회귀 수정 + benchmark 경로 확인 | Temp 저장 버그는 이미 수정됨 |
 | 사람 직접 클릭 수동 회귀 | PENDING | - | 실제 운영자 검수는 별도로 남음 |
 
