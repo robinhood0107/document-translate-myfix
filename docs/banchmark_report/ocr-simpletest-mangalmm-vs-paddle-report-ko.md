@@ -26,16 +26,16 @@
 | paddleocr_vl | 227 | 188 | -39 | 1530 | 1569 |
 | mangalmm | -451 | -514 | -63 | 727 | 790 |
 
-## Candidate Assets
+## Candidate Assets Policy
+
+- selected warm run dir와 export root 같은 실행 메타데이터만 문서에 남긴다.
+- translated image copy는 로컬 검수용 자산으로만 유지하고 Git에는 포함하지 않는다.
 
 ### paddleocr_vl
 
 - selected warm run dir: `./banchmark_result_log/ocr_simpletest_mangalmm_vs_paddle/20260414_152650_ocr_simpletest_mangalmm_vs_paddle_suite/paddleocr_vl/warm2`
 - selected export root: `./banchmark_result_log/ocr_simpletest_mangalmm_vs_paddle/20260414_152650_ocr_simpletest_mangalmm_vs_paddle_suite/paddleocr_vl/warm2/corpus/comic_translate_Apr-14-2026_03-32-38PM`
-- copied translated images:
-  - `[local-only]`
-  - `[local-only]`
-  - `[local-only]`
+- copied translated images: `local-only`
 
 ### mangalmm
 
@@ -55,4 +55,3 @@
 - decision reasons:
   - MangaLMM warm run에서 page_failed_count가 0이 아니므로, 현재 이슈는 Gemma 수치보다 OCR 안정성에 먼저 가깝다
   - simpletest 결과 기준으로는 Gemma4 현행 promoted 값을 유지하고, MangaLMM OCR 성공률과 empty 응답 원인을 먼저 해결하는 편이 안전하다
-

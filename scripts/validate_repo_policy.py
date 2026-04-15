@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+from pathlib import PurePosixPath
 import re
 import subprocess
 import sys
@@ -23,10 +24,31 @@ FORBIDDEN_TRACKED_PREFIXES = (
 FORBIDDEN_TRACKED_NAMES = {
     ".DS_Store",
 }
-FORBIDDEN_TRACKED_PATTERNS = (
-    re.compile(r"^Sample/.*$", re.IGNORECASE),
-    re.compile(r"^banchmark_result_log/.*\.(png|jpg|jpeg|webp|bmp)$", re.IGNORECASE),
-    re.compile(r"^docs/assets/benchmarking/.*\.(png|jpg|jpeg|webp|bmp)$", re.IGNORECASE),
+IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".webp", ".bmp"}
+CHART_IMAGE_PATTERNS = (
+    re.compile(r".*_comparison\.(png|jpg|jpeg|webp|bmp|svg)$", re.IGNORECASE),
+    re.compile(r".*_median\.(png|jpg|jpeg|webp|bmp|svg)$", re.IGNORECASE),
+    re.compile(r".*_score\.(png|jpg|jpeg|webp|bmp|svg)$", re.IGNORECASE),
+    re.compile(r".*_p95\.(png|jpg|jpeg|webp|bmp|svg)$", re.IGNORECASE),
+)
+FORBIDDEN_BENCHMARK_MEDIA_DIR_PARTS = {
+    "spotlight",
+    "translated_images",
+    "review_samples",
+    "source_images",
+    "cleaned_images",
+    "raw_masks",
+    "detector_overlays",
+    "mask_overlays",
+    "cleanup_mask_delta",
+}
+FORBIDDEN_BENCHMARK_MEDIA_NAME_PATTERNS = (
+    re.compile(r".*_translated\.(png|jpg|jpeg|webp|bmp)$", re.IGNORECASE),
+    re.compile(r".*_cleaned\.(png|jpg|jpeg|webp|bmp)$", re.IGNORECASE),
+    re.compile(r".*_raw_mask\.(png|jpg|jpeg|webp|bmp)$", re.IGNORECASE),
+    re.compile(r".*_detector_overlay\.(png|jpg|jpeg|webp|bmp)$", re.IGNORECASE),
+    re.compile(r".*_mask_overlay\.(png|jpg|jpeg|webp|bmp)$", re.IGNORECASE),
+    re.compile(r".*_cleanup_delta\.(png|jpg|jpeg|webp|bmp)$", re.IGNORECASE),
 )
 BENCHMARK_ONLY_PREFIXES = (
     "benchmarks/",
@@ -102,9 +124,46 @@ def validate_tracked_paths() -> list[str]:
         if any(normalized.startswith(prefix) for prefix in FORBIDDEN_TRACKED_PREFIXES):
             errors.append(f"Forbidden tracked path: {normalized}")
             continue
-        if any(pattern.match(normalized) for pattern in FORBIDDEN_TRACKED_PATTERNS):
-            errors.append(f"Forbidden tracked path: {normalized}")
+        if is_forbidden_experimental_media(normalized):
+            errors.append(f"Forbidden tracked experimental/sample media: {normalized}")
     return errors
+
+
+def is_benchmark_chart_media(normalized: str) -> bool:
+    if not normalized.startswith("docs/assets/benchmarking/"):
+        return False
+    filename = PurePosixPath(normalized).name
+    return any(pattern.match(filename) for pattern in CHART_IMAGE_PATTERNS)
+
+
+def is_forbidden_experimental_media(normalized: str) -> bool:
+    path_obj = PurePosixPath(normalized)
+    suffix = path_obj.suffix.lower()
+
+    if normalized.startswith("Sample/"):
+        return True
+
+    if normalized.startswith("banchmark_result_log/") and suffix in IMAGE_EXTENSIONS:
+        return True
+
+    if not normalized.startswith("docs/assets/benchmarking/"):
+        return False
+
+    if suffix == ".svg":
+        return False
+    if suffix not in IMAGE_EXTENSIONS:
+        return False
+    if is_benchmark_chart_media(normalized):
+        return False
+
+    if any(part in FORBIDDEN_BENCHMARK_MEDIA_DIR_PARTS for part in path_obj.parts):
+        return True
+
+    filename = path_obj.name
+    if any(pattern.match(filename) for pattern in FORBIDDEN_BENCHMARK_MEDIA_NAME_PATTERNS):
+        return True
+
+    return True
 
 
 def benchmark_assets_allowed(branch: str, base_branch: str = "") -> bool:

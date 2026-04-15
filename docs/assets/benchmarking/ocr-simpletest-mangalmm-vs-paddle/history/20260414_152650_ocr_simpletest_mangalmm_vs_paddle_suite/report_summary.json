@@ -162,11 +162,7 @@
         },
         "mode": "batch",
         "image_count": 3,
-        "image_paths": [
-          "[local-only]",
-          "[local-only]",
-          "[local-only]"
-        ]
+        "image_paths": ["[local-only]"]
       },
       {
         "entry_count": 48,
@@ -279,11 +275,7 @@
         },
         "mode": "batch",
         "image_count": 3,
-        "image_paths": [
-          "[local-only]",
-          "[local-only]",
-          "[local-only]"
-        ]
+        "image_paths": ["[local-only]"]
       }
     ]
   },
