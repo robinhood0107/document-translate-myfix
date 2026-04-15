@@ -1,6 +1,6 @@
 {
   "name": "workflow-split-runtime-stage-batched-dual-resident",
-  "description": "Requirement 1 exploratory stage-batched contract with MangaLMM and PaddleOCR VL resident during the OCR stage.",
+  "description": "Requirement 1 candidate stage-batched pipeline contract with OCR stage routing equivalent to Japanese Optimal+ analysis mode and Gemma-only translation stage.",
   "benchmark_contract": {
     "scenario_name": "candidate_stage_batched_dual_resident",
     "workflow_mode": "stage_batched_pipeline",
@@ -15,14 +15,11 @@
       "inpaint_all",
       "render_export_all"
     ],
-    "resident_ocr_engines": [
-      "MangaLMM",
-      "PaddleOCR VL"
-    ]
+    "routing_profile": "optimal_plus_japanese_analysis_mode"
   },
   "app": {
     "translator": "Custom Local Server(Gemma)",
-    "ocr": "PaddleOCR VL",
+    "ocr": "Optimal+ (HunyuanOCR / MangaLMM / PaddleOCR VL)",
     "detector": "RT-DETR-v2",
     "inpainter": "lama_large_512px",
     "use_gpu": true,

@@ -5,10 +5,10 @@
 ## 현재 상태
 
 - family: `workflow-split-runtime`
-- status: `baseline_smoke_completed_with_blocked_stage_batched_candidates`
+- status: `requirement_1_full_measurement_completed`
 - corpus: `Sample/japan`
 - pages: `13`
-- requirement_1_status: `baseline_only_measured`
+- requirement_1_status: `ready_for_gate_review_with_dual_resident_recorded`
 - requirement_2_status: `blocked`
 
 ## 보고서 목적
@@ -18,16 +18,16 @@
 ## 최신 요약
 
 - latest_suite_record: `banchmark_result_log/workflow-split-runtime/last_workflow_split_runtime_suite.json`
-- smoke: `True`
-- completed_scenarios: `baseline_legacy`
-- blocked_scenarios: `candidate_stage_batched_single_ocr, candidate_stage_batched_dual_resident`
+- smoke: `False`
+- completed_scenarios: `baseline_legacy, candidate_stage_batched_single_ocr, candidate_stage_batched_dual_resident`
+- blocked_scenarios: `none`
 - stage_batched_runner: `implemented_on_benchmarking_lab`
 
 | scenario | status | total_elapsed_sec | page_done | page_failed |
 | --- | --- | --- | --- | --- |
-| baseline_legacy | completed | 359.756 | 2 | 0 |
-| candidate_stage_batched_single_ocr | blocked |  |  |  |
-| candidate_stage_batched_dual_resident | blocked |  |  |  |
+| baseline_legacy | completed | 995.846 | 13 | 0 |
+| candidate_stage_batched_single_ocr | completed | 714.725 | 13 | 0 |
+| candidate_stage_batched_dual_resident | completed | 1664.021 | 13 | 0 |
 
 ## 해석
 
@@ -37,10 +37,10 @@
 
 ## 다음 액션
 
-1. `baseline_legacy` full 13장 measured run을 누적한다.
-2. `candidate_stage_batched_single_ocr`와 `candidate_stage_batched_dual_resident`를 순서대로 실제 실행한다.
-3. 세 시나리오의 시간/품질/VRAM 근거가 모이면 Requirement 1 성공 게이트를 판정한다.
-4. Requirement 1이 유효하면 `legacy` + `candidate_stage_batched_dual_resident` 제품 승격 구현으로 넘어간다.
+1. 세 시나리오의 시간/품질/VRAM 근거를 비교해 Requirement 1 성공 게이트를 잠근다.
+2. `candidate_stage_batched_dual_resident` sidecar review pack을 사용자 검수 입력으로 정리한다.
+3. Chinese routing smoke와 stage lifecycle 보조 근거를 결정 로그에 반영한다.
+4. Requirement 1이 유효하면 `legacy` + `stage_batched_pipeline` 제품 승격 구현으로 넘어간다.
 
 ## 저자 및 기여
 
