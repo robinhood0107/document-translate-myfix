@@ -35,7 +35,7 @@
 8. `완료` stage-batched OCR routing matrix를 `OCR mode + source_lang` 기준으로 재정의
 9. `완료` Requirement 1 candidate 2종 full measured run 누적
 10. `진행 중` Requirement 1 성공 게이트 비교표와 supplementary smoke 근거 정리
-11. `진행 중` Requirement 2 family 설계 및 사용자 검수 패키지 설계
+11. `진행 중` 사용자 O/X 채점 수집 및 selector threshold 잠금
 12. `대기` Requirement 2 실측, selector rule 후보 도출, 문제 해결 명세서 누적
 13. `대기` Requirement 2 제품 승격 브랜치 생성 및 develop-safe portfolio 문서 반영
 
@@ -107,7 +107,7 @@
 - [ ] Requirement 1 성공 판정 문서가 잠김
 - [x] Requirement 2 family 이름과 검수 프로토콜 문서화
 - [x] MangaLMM vs detect box count vs PaddleOCR VL 비교표 형식 확정
-- [ ] 사용자 승인/비승인 저장 포맷 확정
+- [x] 사용자 승인/비승인 저장 포맷 확정
 - [x] user review gate before selector promotion 문서화
 
 ### G. Requirement 2 측정과 구현
@@ -115,12 +115,12 @@
 - [ ] 13장 페이지별 detect 박스 수 정리
 - [ ] 13장 페이지별 MangaLMM 결과/실패/`bbox_2d` 상태 정리
 - [ ] 13장 페이지별 PaddleOCR VL 보완 결과 정리
-- [ ] `p_016.jpg` 포함 난페이지 사례 문서화
+- [x] `p_016.jpg` 포함 난페이지 사례 문서화
 - [x] 사용자 검수 패키지 생성
 - [ ] selector rule 후보 도출
 - [ ] dual-resident runtime 정책과 selector logging 설계
 - [ ] 제품 옵션 추가 설계
-- [ ] `Optimal+ Japanese` selector 승인 전 `PaddleOCR VL` downstream 기준 잠금
+- [x] `Optimal+ Japanese` selector 승인 전 `PaddleOCR VL` downstream 기준 잠금
 
 ### H. develop 반영
 

@@ -205,8 +205,11 @@
    - 레거시 vs Japanese `Optimal`
    - Japanese `Optimal` vs Japanese `Optimal+ analysis mode`
    - Docker startup / health wait / VRAM / 품질 비교
-2. `Optimal+ Japanese` sidecar review pack을 사용자 검수 입력 포맷으로 정리
-3. 사용자 승인/비승인 저장 포맷을 잠근 뒤 selector threshold 후보 문서를 작성
+2. 아래 문서를 기준으로 사용자 O/X 채점을 수집
+   - `docs/benchmark/workflow-split-runtime/02_review-pack-scoring-guide-ko.md`
+   - `docs/benchmark/workflow-split-runtime/03_requirement-1-gate-and-threshold-proposal-ko.md`
+   - `banchmark_result_log/workflow-split-runtime/20260415_091848_candidate_stage_batched_dual_resident/review_decision_sheet-ko.md`
+3. 사용자 O/X 결과를 기준으로 selector threshold 후보를 잠근다.
 4. Requirement 1 유효성 판정이 끝나면 `feature/workflow-split-runtime`에서 `stage_batched_pipeline` 제품 승격 준비를 시작
 
 ## 저자 및 기여
