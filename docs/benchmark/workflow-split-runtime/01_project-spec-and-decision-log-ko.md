@@ -26,7 +26,13 @@
 9. Requirement 1 family는 먼저 “실행 계약이 잠긴 패키지”로 완성하고, baseline legacy부터 실측을 시작한다.
 10. stage-batched candidate 두 개는 experimental runner 구현 전까지 blocked 계약 run으로 남기고, 구현 후에는 같은 family suite에서 실제 measured run으로 승격한다.
 11. `candidate_stage_batched_dual_resident`는 단일 OCR 후보와의 benchmark 비교 결과가 더 나쁘더라도 Requirement 1 자체를 무효화하는 실패 조건으로 취급하지 않는다.
-12. `candidate_stage_batched_dual_resident`는 최종적으로 설정창에서 사용자가 선택할 수 있는 정식 신규 전체 플로우로 `develop`에 반영하는 것을 기준선으로 잠근다.
+12. 최종 제품 승격 대상은 `candidate_stage_batched_dual_resident` 자체가 아니라 `stage_batched_pipeline`이며, `candidate_stage_batched_dual_resident`는 그 안의 `Optimal+ Japanese analysis mode` benchmark 기준 시나리오로 잠근다.
+13. `stage_batched_pipeline`의 OCR stage Docker routing은 `OCR mode + source language` 기준으로 결정한다.
+14. routing matrix는 다음으로 잠근다.
+    - `Optimal`: Chinese -> `HunyuanOCR` only, Japanese/Other -> `PaddleOCR VL` only
+    - `Optimal+`: Chinese -> `HunyuanOCR` only, Japanese -> `PaddleOCR VL + MangaLMM`, Other -> `PaddleOCR VL` only
+15. OCR stage 종료 후 OCR 관련 Docker는 전부 내려가고, translation stage는 `Gemma4`만 올리는 구조를 유지한다.
+16. `Optimal+ Japanese`는 selector 승인 전까지 `PaddleOCR VL`을 downstream 기준으로 사용하고 `MangaLMM`은 sidecar 비교 데이터로만 수집한다.
 
 ## 운영 기준으로 잠근 입력 세트
 
@@ -92,12 +98,61 @@
 
 ## 정책 변경으로 새로 잠근 사항
 
-사용자 지시에 따라 `candidate_stage_batched_dual_resident`는 더 이상 “불리하면 버릴 수 있는 탐색 후보”가 아니다. 앞으로 이 시나리오는 아래 원칙으로 다룬다.
+사용자 지시에 따라 `candidate_stage_batched_dual_resident`는 더 이상 “불리하면 버릴 수 있는 탐색 후보”가 아니다. 다만 최종 제품 개념은 `dual-resident 전체 플로우`가 아니라 `stage_batched_pipeline`이며, 이 시나리오는 그 안의 `Optimal+ Japanese analysis mode` benchmark 기준으로 다룬다.
 
 1. benchmark에서는 계속 baseline 및 single OCR 후보와 비교한다.
 2. 성능이 single OCR 후보보다 불리하더라도 Requirement 1 전체 성공/실패 판정 자체를 무효화하지 않는다.
-3. 최종 제품 승격에서는 `legacy`와 `candidate_stage_batched_dual_resident`를 사용자가 선택할 수 있는 두 개의 전체 플로우를 기본안으로 둔다.
-4. 따라서 이후 문서, 체크리스트, develop 승격 설계는 모두 이 정책을 기준으로 맞춘다.
+3. 최종 제품 승격에서는 `legacy`와 `stage_batched_pipeline`를 사용자가 선택할 수 있는 두 개의 전체 플로우를 기본안으로 둔다.
+4. `stage_batched_pipeline` 내부 OCR stage residency는 `OCR mode + source_lang`로 결정하며, `Optimal+ Japanese`에서만 `PaddleOCR VL + MangaLMM` dual-resident가 일어난다.
+5. `Optimal+ Japanese` selector 승인 전에는 `PaddleOCR VL`을 downstream 기준으로 고정한다.
+6. 따라서 이후 문서, 체크리스트, develop 승격 설계는 모두 이 정책을 기준으로 맞춘다.
+
+## 최신 실측 결과 요약
+
+### 1. Requirement 1 공식 일본어 13장 suite
+
+- latest suite record: `banchmark_result_log/workflow-split-runtime/last_workflow_split_runtime_suite.json`
+- baseline full run: `20260415_055838_baseline_legacy`
+  - `total_elapsed_sec=995.846`
+  - `page_done_count=13`
+  - `page_failed_count=0`
+- Japanese `Optimal` stage-batched run: `20260415_090653_candidate_stage_batched_single_ocr`
+  - `total_elapsed_sec=714.725`
+  - `page_done_count=13`
+  - `page_failed_count=0`
+- Japanese `Optimal+ analysis mode` stage-batched run: `20260415_091848_candidate_stage_batched_dual_resident`
+  - `total_elapsed_sec=1664.021`
+  - `page_done_count=13`
+  - `page_failed_count=0`
+  - sidecar review pack:
+    - `banchmark_result_log/workflow-split-runtime/20260415_091848_candidate_stage_batched_dual_resident/sidecar_review_pack.json`
+    - `banchmark_result_log/workflow-split-runtime/20260415_091848_candidate_stage_batched_dual_resident/sidecar_review_pack.md`
+
+### 2. Chinese routing smoke
+
+최신 검증 출력은 checkpoint 집계 보정 후 다시 실행한 아래 두 run으로 잠근다.
+
+- `20260415_095534_chinese_optimal_smoke`
+- `20260415_095534_chinese_optimal_plus_smoke`
+
+두 run 모두 아래가 확인되었다.
+
+1. `ocr_stage_policy.json`에서 `Optimal` / `Optimal+` 모두 Chinese 기준 `HunyuanOCR` only로 해석됨
+2. `ocr_stage_shutdown` checkpoint 이후 active container 집합이 빈 배열로 기록됨
+3. `translate_stage_runtime_ready` checkpoint에서는 `gemma-local-server`만 기록됨
+4. 즉 사용자가 의도한 “OCR stage 종료 후 OCR Docker 전부 down -> Gemma만 up” 수명주기가 smoke 수준에서 확인됨
+
+### 3. 계측 의미 보정
+
+초기 Chinese smoke에서는 `translate_stage_runtime_ready`와 이후 checkpoint에 OCR container 이름이 함께 남았다. 원인은 실제 활성 컨테이너가 아니라 `runtime_policy` 누적 이력을 checkpoint에 재사용했기 때문이다.
+
+이 문제는 `scripts/benchmark_stage_batched_pipeline.py`에서 active container 집합을 stage별로 별도 추적하도록 수정해 해결했다. 그 뒤 Chinese smoke를 다시 실행해 아래 semantics를 잠갔다.
+
+- OCR stage ready: OCR container만 기록
+- OCR stage shutdown: 빈 배열
+- translate stage ready / end: Gemma만 기록
+- translate stage shutdown: 빈 배열
+- inpaint / render end: 빈 배열
 
 ## 단계별 실행 전략
 
@@ -146,11 +201,13 @@
 
 ## 다음 액션
 
-1. smoke 완료 상태를 체크리스트와 관련 문서에 반영
-2. baseline 13장 measured run 누적
-3. candidate 두 시나리오 실제 측정
-4. Requirement 1 비교표와 판정 문서 고정
-5. `candidate_stage_batched_dual_resident` 정식 승격 정책을 develop-side 문서에도 반영
+1. Requirement 1 공식 게이트용 비교표를 고정
+   - 레거시 vs Japanese `Optimal`
+   - Japanese `Optimal` vs Japanese `Optimal+ analysis mode`
+   - Docker startup / health wait / VRAM / 품질 비교
+2. `Optimal+ Japanese` sidecar review pack을 사용자 검수 입력 포맷으로 정리
+3. 사용자 승인/비승인 저장 포맷을 잠근 뒤 selector threshold 후보 문서를 작성
+4. Requirement 1 유효성 판정이 끝나면 `feature/workflow-split-runtime`에서 `stage_batched_pipeline` 제품 승격 준비를 시작
 
 ## 저자 및 기여
 

@@ -1,6 +1,6 @@
 {
   "name": "workflow-split-runtime-stage-batched-single-ocr",
-  "description": "Requirement 1 candidate stage-batched pipeline contract with one resident OCR runtime and Gemma stage handoff.",
+  "description": "Requirement 1 candidate stage-batched pipeline contract with OCR stage routing equivalent to Japanese Optimal and Gemma-only translation stage.",
   "benchmark_contract": {
     "scenario_name": "candidate_stage_batched_single_ocr",
     "workflow_mode": "stage_batched_pipeline",
@@ -18,7 +18,7 @@
   },
   "app": {
     "translator": "Custom Local Server(Gemma)",
-    "ocr": "PaddleOCR VL",
+    "ocr": "Optimal (HunyuanOCR / PaddleOCR VL)",
     "detector": "RT-DETR-v2",
     "inpainter": "lama_large_512px",
     "use_gpu": true,

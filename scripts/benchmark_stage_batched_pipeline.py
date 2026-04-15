@@ -11,7 +11,6 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-import imkit as imk
 import requests
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
@@ -23,6 +22,8 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in os.sys.path:
     os.sys.path.insert(0, str(ROOT))
 
+import imkit as imk
+
 from PySide6.QtCore import QCoreApplication
 from PySide6.QtGui import QColor
 from PySide6.QtWidgets import QApplication
@@ -32,29 +33,28 @@ from app.ui.canvas.text.text_item_properties import TextItemProperties
 from app.ui.canvas.text_item import OutlineInfo, OutlineType
 from app.ui.messages import Messages
 from benchmark_common import (
+    ALL_BENCHMARK_CONTAINER_NAMES,
     GEMMA_CONTAINER_NAMES,
     GEMMA_HEALTH_URLS,
     HUNYUAN_OCR_CONTAINER_NAMES,
+    HUNYUAN_OCR_HEALTH_URLS,
     MANGALMM_OCR_CONTAINER_NAMES,
     MANGALMM_OCR_HEALTH_URLS,
     PADDLEOCR_VL_CONTAINER_NAMES,
     PADDLEOCR_VL_HEALTH_URLS,
     collect_managed_llama_cpp_runtimes,
-    collect_runtime_snapshot,
     ensure_compose_groups_health_first,
     load_preset,
     remove_containers,
     render_summary_markdown,
     repo_relative_str,
     resolve_docker_compose_command,
-    resolve_runtime_container_names,
-    resolve_runtime_health_urls,
     resolve_corpus,
     run_command,
     summarize_metrics,
     write_json,
-    write_snapshot_json,
     _stage_gemma_runtime,
+    _stage_hunyuan_ocr_runtime,
     _stage_mangalmm_ocr_runtime,
     _stage_ocr_runtime,
 )
@@ -77,14 +77,19 @@ from modules.rendering.render import (
     pyside_word_wrap,
 )
 from modules.translation.processor import Translator
+from modules.ocr.factory import OCRFactory
+from modules.ocr.selection import STAGE_BATCHED_WORKFLOW_MODE, resolve_stage_batched_ocr_policy
 from modules.utils.correction_dictionary import (
     apply_ocr_result_dictionary,
     apply_translation_result_dictionary,
 )
 from modules.utils.device import resolve_device
-from modules.utils.gpu_metrics import collect_runtime_snapshot as collect_gpu_runtime_snapshot
+from modules.utils.gpu_metrics import (
+    collect_runtime_snapshot as collect_gpu_runtime_snapshot,
+    write_snapshot_json,
+)
 from modules.utils.image_utils import generate_mask
-from modules.utils.language_utils import get_language_code, is_no_space_lang
+from modules.utils.language_utils import get_language_code, is_no_space_lang, language_codes
 from modules.utils.ocr_quality import summarize_ocr_quality
 from modules.utils.pipeline_config import get_config, get_inpainter_runtime
 from modules.utils.render_style_policy import (
@@ -123,6 +128,7 @@ class PageContext:
     inpaint_input_img: Any | None = None
     cleanup_stats: dict[str, Any] = field(default_factory=lambda: {"applied": False, "component_count": 0, "block_count": 0})
     final_output_path: str = ""
+    sidecar_ocr: dict[str, Any] = field(default_factory=dict)
 
 
 def _set_current_image(window, image_path: str) -> None:
@@ -318,6 +324,132 @@ def _mangalmm_runtime_preset(preset: dict[str, Any]) -> dict[str, Any]:
     return payload
 
 
+def _explicit_ocr_runtime_preset(
+    preset: dict[str, Any],
+    engine_key: str,
+) -> dict[str, Any]:
+    payload = copy.deepcopy(preset)
+    app_cfg = payload.setdefault("app", {})
+    if isinstance(app_cfg, dict):
+        app_cfg["ocr"] = engine_key
+    ocr_runtime = payload.setdefault("ocr_runtime", {})
+    if isinstance(ocr_runtime, dict):
+        if engine_key == "PaddleOCR VL":
+            ocr_runtime["kind"] = "paddleocr_vl"
+        elif engine_key == "HunyuanOCR":
+            ocr_runtime["kind"] = "hunyuanocr"
+        elif engine_key == "MangaLMM":
+            ocr_runtime["kind"] = "mangalmm"
+    return payload
+
+
+def _engine_service_name(engine_key: str) -> str:
+    return {
+        "PaddleOCR VL": "paddleocr_vl",
+        "HunyuanOCR": "hunyuanocr",
+        "MangaLMM": "mangalmm",
+    }.get(engine_key, engine_key.lower())
+
+
+def _engine_label(engine_key: str) -> str:
+    return engine_key
+
+
+def _engine_runtime_group_name(engine_key: str) -> str:
+    return f"ocr_{_engine_service_name(engine_key)}"
+
+
+def _engine_container_names(engine_key: str) -> list[str]:
+    return {
+        "PaddleOCR VL": list(PADDLEOCR_VL_CONTAINER_NAMES),
+        "HunyuanOCR": list(HUNYUAN_OCR_CONTAINER_NAMES),
+        "MangaLMM": list(MANGALMM_OCR_CONTAINER_NAMES),
+    }.get(engine_key, [])
+
+
+def _engine_health_urls(engine_key: str) -> list[str]:
+    return {
+        "PaddleOCR VL": list(PADDLEOCR_VL_HEALTH_URLS),
+        "HunyuanOCR": list(HUNYUAN_OCR_HEALTH_URLS),
+        "MangaLMM": list(MANGALMM_OCR_HEALTH_URLS),
+    }.get(engine_key, [])
+
+
+def _prepare_engine_runtime(
+    preset: dict[str, Any],
+    runtime_dir: Path,
+    engine_key: str,
+) -> dict[str, Any]:
+    engine_preset = _explicit_ocr_runtime_preset(preset, engine_key)
+    if engine_key == "PaddleOCR VL":
+        staged = _stage_ocr_runtime(engine_preset, runtime_dir)
+    elif engine_key == "HunyuanOCR":
+        staged = _stage_hunyuan_ocr_runtime(engine_preset, runtime_dir)
+    elif engine_key == "MangaLMM":
+        staged = _stage_mangalmm_ocr_runtime(engine_preset, runtime_dir)
+    else:
+        raise ValueError(f"Unsupported OCR engine for stage-batched runtime: {engine_key}")
+    return {
+        "engine_key": engine_key,
+        "preset": engine_preset,
+        "compose_path": staged["compose_path"],
+        "cwd": runtime_dir,
+    }
+
+
+def _prepare_ocr_stage_runtime(
+    preset: dict[str, Any],
+    run_dir: Path,
+    *,
+    runtime_slug: str,
+    resident_ocr_engines: tuple[str, ...],
+) -> tuple[list[dict[str, Any]], dict[str, Any], dict[str, Any]]:
+    runtime_root = run_dir / "runtime" / "ocr_stage"
+    keep_container_names = _dedupe_strs(
+        [name for engine_key in resident_ocr_engines for name in _engine_container_names(engine_key)]
+    )
+    removed_container_names = list(GEMMA_CONTAINER_NAMES)
+    for engine_key in ("PaddleOCR VL", "HunyuanOCR", "MangaLMM"):
+        for container_name in _engine_container_names(engine_key):
+            if container_name not in keep_container_names:
+                removed_container_names.append(container_name)
+    remove_containers(_dedupe_strs(removed_container_names))
+
+    groups: list[dict[str, Any]] = []
+    for engine_key in resident_ocr_engines:
+        runtime_bundle = _prepare_engine_runtime(
+            preset,
+            runtime_root / _engine_service_name(engine_key),
+            engine_key,
+        )
+        groups.append(
+            {
+                "name": _engine_runtime_group_name(engine_key),
+                "container_names": _engine_container_names(engine_key),
+                "health_urls": _engine_health_urls(engine_key),
+                "compose_path": runtime_bundle["compose_path"],
+                "cwd": runtime_bundle["cwd"],
+                "engine_key": engine_key,
+            }
+        )
+
+    reports = ensure_compose_groups_health_first(groups, log_fn=_log)
+    policy = _runtime_report_template(runtime_slug)
+    policy["container_names"] = _dedupe_strs(
+        [name for group in groups for name in group["container_names"]]
+    )
+    policy["health_urls"] = _dedupe_strs(
+        [url for group in groups for url in group["health_urls"]]
+    )
+    policy["groups"] = reports
+    policy["singleton_ocr_runtime"]["removed_container_names"] = _dedupe_strs(removed_container_names)
+    runtime_meta = {
+        "ocr": {},
+        "gemma": {},
+    }
+    return groups, policy, runtime_meta
+
+
 def _prepare_single_ocr_stage_runtime(
     preset: dict[str, Any],
     run_dir: Path,
@@ -486,10 +618,47 @@ class StageBatchedRunner:
         self.runtime_policy = _runtime_report_template(
             f"stage-batched-{resident_ocr_mode}"
         )
+        self.active_container_names: list[str] = []
         self.llama_cpp_runtime: dict[str, Any] = {}
+        self.ocr_stage_policy: dict[str, Any] = {}
+        self.primary_ocr_engine = ""
+        self.resident_ocr_engines: tuple[str, ...] = ()
 
     def _active_container_names(self) -> list[str]:
-        return _dedupe_strs(list(self.runtime_policy.get("container_names", [])))
+        return _dedupe_strs(list(self.active_container_names))
+
+    def _set_active_container_names(self, container_names: list[str]) -> None:
+        self.active_container_names = _dedupe_strs(list(container_names))
+
+    def _source_lang_english(self, source_lang: str) -> str:
+        assert self.window is not None
+        return self.window.lang_mapping.get(source_lang, source_lang)
+
+    def _resolve_stage_policy(self) -> dict[str, Any]:
+        assert self.window is not None
+        settings_page = self.window.settings_page
+        source_lang_english = self._source_lang_english(self.source_lang)
+        policy = resolve_stage_batched_ocr_policy(
+            STAGE_BATCHED_WORKFLOW_MODE,
+            settings_page.get_tool_selection("ocr"),
+            source_lang_english,
+            settings_page.get_tool_selection("translator"),
+        )
+        policy_dict = policy.to_dict()
+        if not policy.stage_batched_supported:
+            raise RuntimeError(
+                "Stage-batched OCR routing is not supported for this setting combination: "
+                f"{policy.unsupported_reason}"
+            )
+        self.primary_ocr_engine = policy.primary_ocr_engine
+        self.resident_ocr_engines = tuple(policy.resident_ocr_engines)
+        self.ocr_stage_policy = policy_dict
+        return policy_dict
+
+    def _ocr_stage_container_names(self) -> list[str]:
+        return _dedupe_strs(
+            [name for engine_key in self.resident_ocr_engines for name in _engine_container_names(engine_key)]
+        )
 
     def _load_window(self) -> None:
         from controller import ComicTranslate
@@ -659,53 +828,184 @@ class StageBatchedRunner:
     def _prepare_ocr_stage(self) -> list[dict[str, Any]]:
         assert self.window is not None
         image_name = self.pages[0].image_name if self.pages else ""
-        if self.resident_ocr_mode == "dual":
-            groups, policy, runtime_meta = _prepare_dual_ocr_stage_runtime(self.preset, self.run_dir)
+        stage_policy = self._resolve_stage_policy()
+        groups, policy, runtime_meta = _prepare_ocr_stage_runtime(
+            self.preset,
+            self.run_dir,
+            runtime_slug=f"ocr-stage-{stage_policy['normalized_ocr_mode']}",
+            resident_ocr_engines=self.resident_ocr_engines,
+        )
+        policy["ocr_stage_policy"] = stage_policy
+        for engine_key in self.resident_ocr_engines:
             _emit_group_runtime_events(
                 self.window,
                 phase="ocr_startup",
-                service="paddleocr_vl",
-                label="PaddleOCR VL",
-                group_reports=[report for report in policy["groups"] if report.get("name") == "ocr_paddleocr_vl"],
+                service=_engine_service_name(engine_key),
+                label=_engine_label(engine_key),
+                group_reports=[
+                    report
+                    for report in policy["groups"]
+                    if report.get("name") == _engine_runtime_group_name(engine_key)
+                ],
                 total_images=len(self.pages),
                 image_name=image_name,
-            )
-            _emit_group_runtime_events(
-                self.window,
-                phase="ocr_startup",
-                service="mangalmm",
-                label="MangaLMM",
-                group_reports=[report for report in policy["groups"] if report.get("name") == "ocr_mangalmm"],
-                total_images=len(self.pages),
-                image_name=image_name,
-            )
-        else:
-            groups, policy, runtime_meta = _prepare_single_ocr_stage_runtime(self.preset, self.run_dir)
-            _emit_group_runtime_events(
-                self.window,
-                phase="ocr_startup",
-                service="paddleocr_vl",
-                label="PaddleOCR VL",
-                group_reports=policy["groups"],
-                total_images=len(self.pages),
-                image_name=image_name,
-            )
+        )
         self.runtime_policy = _merge_runtime_policy(self.runtime_policy, policy)
+        self._set_active_container_names(list(policy.get("container_names", [])))
         self.llama_cpp_runtime.update(runtime_meta.get("ocr", {}))
         _emit_gpu_checkpoint(self.window, "ocr_stage_runtime_ready", self._active_container_names())
+        write_json(self.run_dir / "runtime" / "ocr_stage_policy.json", stage_policy)
         return groups
+
+    def _clone_blocks(self, blk_list: list[Any]) -> list[Any]:
+        return [blk.deep_copy() if hasattr(blk, "deep_copy") else copy.deepcopy(blk) for blk in blk_list]
+
+    def _apply_source_lang_to_blocks(self, blocks: list[Any], source_lang_english: str) -> None:
+        source_lang_code = language_codes.get(source_lang_english, "en")
+        for blk in blocks:
+            blk.source_lang = source_lang_code
+
+    def _run_ocr_engine(
+        self,
+        *,
+        ctx: PageContext,
+        blocks: list[Any],
+        engine_key: str,
+        use_cache: bool,
+    ) -> dict[str, Any]:
+        assert self.batch is not None and self.window is not None
+        settings_page = self.window.settings_page
+        source_lang_english = self._source_lang_english(ctx.source_lang)
+        self._apply_source_lang_to_blocks(blocks, source_lang_english)
+        selected_ocr_mode = self.ocr_stage_policy.get("normalized_ocr_mode", settings_page.get_tool_selection("ocr"))
+        device = resolve_device(settings_page.is_gpu_enabled())
+        engine = OCRFactory.create_engine(
+            settings_page,
+            source_lang_english,
+            engine_key,
+            selected_ocr_mode=selected_ocr_mode,
+        )
+        engine_name = engine.__class__.__name__
+        cache_status = "bypassed"
+        attempt_count = 0
+        page_profile: dict[str, Any] = {}
+        cache_key = None
+
+        if use_cache:
+            cache_key = self.batch.cache_manager._get_ocr_cache_key(ctx.image, ctx.source_lang, engine_key, device)
+            if self.batch.cache_manager._can_serve_all_blocks_from_ocr_cache(cache_key, blocks):
+                self.batch.cache_manager._apply_cached_ocr_to_blocks(cache_key, blocks)
+                apply_ocr_result_dictionary(
+                    blocks,
+                    settings_page.get_ocr_result_dictionary_rules(),
+                )
+                cache_status = "hit"
+                attempt_count = 1
+
+        if attempt_count == 0:
+            engine.process_image(ctx.image, blocks)
+            page_profile = dict(getattr(engine, "last_page_profile", {}) or {})
+            apply_ocr_result_dictionary(
+                blocks,
+                settings_page.get_ocr_result_dictionary_rules(),
+            )
+            cache_status = "refreshed" if use_cache else "bypassed"
+            attempt_count = 1
+            if use_cache and cache_key is not None:
+                self.batch.cache_manager._cache_ocr_results(cache_key, blocks)
+
+        quality = summarize_ocr_quality(blocks)
+        if quality.get("low_quality", False):
+            attempt_count += 1
+            for blk in blocks:
+                blk.text = ""
+                blk.texts = []
+                blk.ocr_regions = []
+            engine.process_image(ctx.image, blocks)
+            page_profile = dict(getattr(engine, "last_page_profile", {}) or {})
+            apply_ocr_result_dictionary(
+                blocks,
+                settings_page.get_ocr_result_dictionary_rules(),
+            )
+            quality = summarize_ocr_quality(blocks)
+            cache_status = "refreshed" if use_cache else "bypassed"
+            if use_cache and cache_key is not None:
+                self.batch.cache_manager._cache_ocr_results(cache_key, blocks)
+
+        request_metadata = dict(getattr(engine, "last_request_metadata", {}) or {})
+        page_metrics = self.batch._ocr_quality_metrics(quality)
+        return {
+            "blocks": blocks,
+            "quality": quality,
+            "metrics": page_metrics,
+            "engine_name": engine_name,
+            "engine_key": engine_key,
+            "cache_status": cache_status,
+            "attempt_count": attempt_count,
+            "page_profile": page_profile,
+            "request_metadata": request_metadata,
+        }
+
+    def _build_sidecar_summary(
+        self,
+        *,
+        ctx: PageContext,
+        result: dict[str, Any],
+    ) -> dict[str, Any]:
+        blocks = list(result.get("blocks", []) or [])
+        bbox_success_block_count = 0
+        bbox_region_count = 0
+        for blk in blocks:
+            regions = getattr(blk, "ocr_regions", []) or []
+            valid_regions = [
+                region for region in regions
+                if isinstance(region, dict) and len(list(region.get("response_bbox_2d", []) or [])) == 4
+            ]
+            bbox_region_count += len(valid_regions)
+            if valid_regions:
+                bbox_success_block_count += 1
+        raw_request_metadata = dict(result.get("request_metadata", {}) or {})
+        request_metadata = {
+            key: raw_request_metadata.get(key)
+            for key in (
+                "attempt_count",
+                "retry_count",
+                "contract_mode",
+                "final_status",
+                "failure_reason",
+                "matched_region_count",
+                "matched_block_count",
+                "mapped_region_count",
+                "non_empty_block_count",
+                "resize_profile",
+                "request_shape",
+            )
+            if key in raw_request_metadata
+        }
+        summary = {
+            "engine_key": result.get("engine_key", ""),
+            "engine_name": result.get("engine_name", ""),
+            "detect_box_count": len(ctx.blk_list or []),
+            "ocr_block_count": int(result.get("quality", {}).get("block_count", 0) or 0),
+            "ocr_non_empty": int(result.get("quality", {}).get("non_empty", 0) or 0),
+            "ocr_empty": int(result.get("quality", {}).get("empty", 0) or 0),
+            "ocr_single_char_like": int(result.get("quality", {}).get("single_char_like", 0) or 0),
+            "bbox_2d_success_block_count": int(bbox_success_block_count),
+            "bbox_2d_region_count": int(bbox_region_count),
+            "page_profile": result.get("page_profile", {}),
+            "request_metadata": request_metadata,
+        }
+        return summary
 
     def _ocr_all(self) -> None:
         assert self.batch is not None and self.window is not None
         total_images = len(self.pages)
-        settings_page = self.window.settings_page
-        ocr_model = settings_page.get_tool_selection("ocr")
-        device = resolve_device(settings_page.is_gpu_enabled())
         for index, ctx in enumerate(self.pages):
             if ctx.failed_stage:
                 continue
             _set_current_image(self.window, ctx.image_path)
             self.batch.emit_progress(index, total_images, 2, 10, False)
+            page_metrics = self.batch._ocr_quality_metrics(None)
             self.batch._emit_benchmark_event(
                 "ocr_start",
                 image_path=ctx.image_path,
@@ -713,51 +1013,17 @@ class StageBatchedRunner:
                 total_images=total_images,
                 block_count=len(ctx.blk_list or []),
             )
-            cache_key = self.batch.cache_manager._get_ocr_cache_key(ctx.image, ctx.source_lang, ocr_model, device)
-            cache_status = "miss"
-            attempt_count = 0
-            ocr_page_profile: dict[str, Any] = {}
-            page_metrics = self.batch._ocr_quality_metrics(None)
             try:
-                self.window.pipeline.ocr_handler.ocr.initialize(self.window, ctx.source_lang)
-                if self.batch.cache_manager._can_serve_all_blocks_from_ocr_cache(cache_key, ctx.blk_list):
-                    cache_status = "hit"
-                    self.batch.cache_manager._apply_cached_ocr_to_blocks(cache_key, ctx.blk_list)
-                    apply_ocr_result_dictionary(
-                        ctx.blk_list,
-                        settings_page.get_ocr_result_dictionary_rules(),
-                    )
-                    attempt_count = 1
-                else:
-                    self.window.pipeline.ocr_handler.ocr.process(ctx.image, ctx.blk_list)
-                    ocr_page_profile = dict(getattr(self.window.pipeline.ocr_handler.ocr, "last_page_profile", {}) or {})
-                    apply_ocr_result_dictionary(
-                        ctx.blk_list,
-                        settings_page.get_ocr_result_dictionary_rules(),
-                    )
-                    self.batch.cache_manager._cache_ocr_results(cache_key, ctx.blk_list)
-                    cache_status = "refreshed"
-                    attempt_count = 1
-
-                quality = summarize_ocr_quality(ctx.blk_list)
-                self.batch._log_ocr_quality(ctx.image_path, quality, attempt_count)
-                if quality.get("low_quality", False):
-                    attempt_count += 1
-                    for blk in ctx.blk_list:
-                        blk.text = ""
-                    self.window.pipeline.ocr_handler.ocr.process(ctx.image, ctx.blk_list)
-                    ocr_page_profile = dict(getattr(self.window.pipeline.ocr_handler.ocr, "last_page_profile", {}) or {})
-                    apply_ocr_result_dictionary(
-                        ctx.blk_list,
-                        settings_page.get_ocr_result_dictionary_rules(),
-                    )
-                    self.batch.cache_manager._cache_ocr_results(cache_key, ctx.blk_list)
-                    quality = summarize_ocr_quality(ctx.blk_list)
-                    self.batch._log_ocr_quality(ctx.image_path, quality, attempt_count)
-                    cache_status = "refreshed"
-
-                page_metrics = self.batch._ocr_quality_metrics(quality)
+                primary_result = self._run_ocr_engine(
+                    ctx=ctx,
+                    blocks=ctx.blk_list,
+                    engine_key=self.primary_ocr_engine,
+                    use_cache=True,
+                )
+                quality = primary_result["quality"]
+                page_metrics = dict(primary_result["metrics"] or {})
                 ctx.page_ocr_metrics = page_metrics
+                self.batch._log_ocr_quality(ctx.image_path, quality, int(primary_result["attempt_count"]))
                 if quality.get("low_quality", False):
                     err_msg = quality.get("reason") or self.window.tr("OCR quality too low after retry.")
                     self.window.image_ctrl.update_processing_summary(
@@ -776,12 +1042,12 @@ class StageBatchedRunner:
                 self.batch._persist_ocr_state(
                     ctx.image_path,
                     ctx.blk_list,
-                    ocr_model,
-                    self.window.pipeline.ocr_handler.ocr.last_engine_name or "",
-                    device,
+                    self.primary_ocr_engine,
+                    primary_result["engine_name"],
+                    resolve_device(self.window.settings_page.is_gpu_enabled()),
                     quality,
-                    cache_status,
-                    attempt_count,
+                    primary_result["cache_status"],
+                    int(primary_result["attempt_count"]),
                 )
                 self.batch._emit_benchmark_event(
                     "ocr_end",
@@ -789,13 +1055,46 @@ class StageBatchedRunner:
                     image_index=index,
                     total_images=total_images,
                     block_count=len(ctx.blk_list or []),
-                    ocr_model=ocr_model,
-                    ocr_engine=self.window.pipeline.ocr_handler.ocr.last_engine_name or "",
-                    cache_status=cache_status,
-                    attempt_count=attempt_count,
-                    ocr_page_profile=ocr_page_profile,
+                    ocr_model=self.primary_ocr_engine,
+                    ocr_engine=primary_result["engine_name"],
+                    cache_status=primary_result["cache_status"],
+                    attempt_count=int(primary_result["attempt_count"]),
+                    ocr_page_profile=primary_result["page_profile"],
                     **page_metrics,
                 )
+                if self.ocr_stage_policy.get("requires_sidecar_collection", False):
+                    for sidecar_engine in self.resident_ocr_engines:
+                        if sidecar_engine == self.primary_ocr_engine:
+                            continue
+                        sidecar_result = self._run_ocr_engine(
+                            ctx=ctx,
+                            blocks=self._clone_blocks(ctx.blk_list),
+                            engine_key=sidecar_engine,
+                            use_cache=False,
+                        )
+                        ctx.sidecar_ocr[sidecar_engine] = self._build_sidecar_summary(
+                            ctx=ctx,
+                            result=sidecar_result,
+                        )
+                    if ctx.sidecar_ocr:
+                        self.batch._emit_benchmark_event(
+                            "page_quality_snapshot",
+                            image_path=ctx.image_path,
+                            image_index=index,
+                            total_images=total_images,
+                            detect_box_count=len(ctx.blk_list or []),
+                            primary_ocr_engine=self.primary_ocr_engine,
+                            primary_non_empty=ctx.page_ocr_metrics.get("ocr_non_empty", 0),
+                            primary_empty=ctx.page_ocr_metrics.get("ocr_empty", 0),
+                            sidecar_ocr=ctx.sidecar_ocr,
+                        )
+                        self.batch._emit_benchmark_event(
+                            "manual_review_required",
+                            image_path=ctx.image_path,
+                            image_index=index,
+                            total_images=total_images,
+                            review_reason="optimal_plus_japanese_sidecar_comparison",
+                        )
             except Exception as exc:
                 err_msg = self._runtime_error_message(exc, context="ocr")
                 _page_failed(
@@ -823,6 +1122,7 @@ class StageBatchedRunner:
             image_name=image_name,
         )
         self.runtime_policy = _merge_runtime_policy(self.runtime_policy, policy)
+        self._set_active_container_names(list(policy.get("container_names", [])))
         self.llama_cpp_runtime.update(runtime_meta.get("gemma", {}))
         _emit_gpu_checkpoint(self.window, "translate_stage_runtime_ready", self._active_container_names())
         return groups
@@ -915,6 +1215,72 @@ class StageBatchedRunner:
             raise RuntimeError(str(exc)) from exc
         except RuntimeError as exc:
             raise RuntimeError(str(exc)) from exc
+
+    def _write_sidecar_review_pack(self) -> None:
+        if not self.ocr_stage_policy.get("requires_sidecar_collection", False):
+            return
+
+        sidecar_pages: list[dict[str, Any]] = []
+        for ctx in self.pages:
+            if not ctx.sidecar_ocr:
+                continue
+            sidecar_pages.append(
+                {
+                    "image_path": repo_relative_str(ctx.image_path),
+                    "image_name": ctx.image_name,
+                    "detect_box_count": len(ctx.blk_list or []),
+                    "primary_engine": self.primary_ocr_engine,
+                    "primary_metrics": dict(ctx.page_ocr_metrics or {}),
+                    "sidecar": ctx.sidecar_ocr,
+                    "page_failed": bool(ctx.failed_stage),
+                    "page_failed_stage": ctx.failed_stage,
+                    "page_failed_reason": ctx.failed_reason,
+                    "is_hard_page": ctx.image_name == "p_016.jpg",
+                }
+            )
+
+        review_payload = {
+            "workflow_mode": STAGE_BATCHED_WORKFLOW_MODE,
+            "ocr_stage_policy": self.ocr_stage_policy,
+            "page_count": len(sidecar_pages),
+            "pages": sidecar_pages,
+        }
+        write_json(self.run_dir / "sidecar_review_pack.json", review_payload)
+
+        lines = [
+            "# Stage-Batched Optimal+ Japanese Sidecar Review Pack",
+            "",
+            "아이디어 착안자: 사용자",
+            "",
+            "## OCR Stage Policy",
+            "",
+            f"- primary_ocr_engine: `{self.primary_ocr_engine}`",
+            f"- resident_ocr_engines: `{', '.join(self.resident_ocr_engines)}`",
+            f"- requires_sidecar_collection: `{self.ocr_stage_policy.get('requires_sidecar_collection', False)}`",
+            "",
+            "## Page Comparison",
+            "",
+            "| page | detect_box_count | primary_non_empty | primary_empty | sidecar_engine | sidecar_non_empty | sidecar_empty | bbox_2d_success_block_count | hard_page |",
+            "| --- | --- | --- | --- | --- | --- | --- | --- | --- |",
+        ]
+        for page in sidecar_pages:
+            primary_metrics = page.get("primary_metrics", {}) if isinstance(page.get("primary_metrics"), dict) else {}
+            for engine_key, sidecar in (page.get("sidecar", {}) or {}).items():
+                sidecar_metrics = sidecar if isinstance(sidecar, dict) else {}
+                lines.append(
+                    "| {page_name} | {detect} | {primary_non_empty} | {primary_empty} | {engine} | {sidecar_non_empty} | {sidecar_empty} | {bbox_ok} | {hard_page} |".format(
+                        page_name=page.get("image_name", ""),
+                        detect=page.get("detect_box_count", 0),
+                        primary_non_empty=primary_metrics.get("ocr_non_empty", 0),
+                        primary_empty=primary_metrics.get("ocr_empty", 0),
+                        engine=engine_key,
+                        sidecar_non_empty=sidecar_metrics.get("ocr_non_empty", 0),
+                        sidecar_empty=sidecar_metrics.get("ocr_empty", 0),
+                        bbox_ok=sidecar_metrics.get("bbox_2d_success_block_count", 0),
+                        hard_page=page.get("is_hard_page", False),
+                    )
+                )
+        (self.run_dir / "sidecar_review_pack.md").write_text("\n".join(lines).rstrip() + "\n", encoding="utf-8")
 
     def _inpaint_all(self) -> None:
         assert self.batch is not None and self.window is not None
@@ -1266,7 +1632,7 @@ class StageBatchedRunner:
         self.batch._emit_benchmark_event("batch_run_start", total_images=total_images)
         write_snapshot_json(
             self.run_dir / "runtime_snapshot.json",
-            collect_runtime_snapshot(resolve_runtime_container_names(self.preset, "full")),
+            collect_gpu_runtime_snapshot(ALL_BENCHMARK_CONTAINER_NAMES),
         )
         _emit_gpu_checkpoint(self.window, "run_start_pre_runtime", [])
 
@@ -1277,12 +1643,14 @@ class StageBatchedRunner:
             ocr_groups = self._prepare_ocr_stage()
             self._ocr_all()
             _shutdown_runtime_groups(ocr_groups)
-            _emit_gpu_checkpoint(self.window, "ocr_stage_shutdown", resolve_runtime_container_names(self.preset, "ocr-only"))
+            self._set_active_container_names([])
+            _emit_gpu_checkpoint(self.window, "ocr_stage_shutdown", self._active_container_names())
 
             gemma_groups = self._prepare_translate_stage()
             self._translate_all()
             _shutdown_runtime_groups(gemma_groups)
-            _emit_gpu_checkpoint(self.window, "translate_stage_shutdown", GEMMA_CONTAINER_NAMES)
+            self._set_active_container_names([])
+            _emit_gpu_checkpoint(self.window, "translate_stage_shutdown", self._active_container_names())
 
             self._inpaint_all()
             self._render_all()
@@ -1296,6 +1664,7 @@ class StageBatchedRunner:
             )
             page_snapshots_path = _write_page_snapshots(self.window, self.run_dir, self.loaded_paths)
             _log(f"페이지 스냅샷 저장 완료: {page_snapshots_path}")
+            self._write_sidecar_review_pack()
             write_json(self.run_dir / "runtime" / "managed_runtime_policy.json", self.runtime_policy)
             write_json(self.run_dir / "llama_cpp_runtime.json", self.llama_cpp_runtime)
 
@@ -1307,6 +1676,7 @@ class StageBatchedRunner:
                     "image_paths": [repo_relative_str(path) for path in self.loaded_paths],
                     "workflow_mode": "stage_batched_pipeline",
                     "resident_ocr_mode": self.resident_ocr_mode,
+                    "ocr_stage_policy": self.ocr_stage_policy,
                 }
             )
             write_json(self.run_dir / "summary.json", summary)
@@ -1336,7 +1706,7 @@ def main() -> int:
         "--resident-ocr-mode",
         choices=("single", "dual"),
         required=True,
-        help="Whether the OCR stage keeps a single OCR runtime or both PaddleOCR VL and MangaLMM resident.",
+        help="Benchmark scenario label. Actual OCR residency is resolved from the preset OCR mode plus source language.",
     )
     args = parser.parse_args()
 
@@ -1357,6 +1727,7 @@ def main() -> int:
             "runtime_services": "stage-batched",
             "source_lang": args.source_lang,
             "target_lang": args.target_lang,
+            "selected_ocr_mode": str((preset.get("app", {}) or {}).get("ocr", "")),
             "selected_paths": [str(path) for path in selected_paths],
             "staged_paths": [str(path) for path in staged_paths],
         },

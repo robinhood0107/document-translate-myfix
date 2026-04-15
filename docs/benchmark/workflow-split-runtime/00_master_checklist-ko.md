@@ -30,13 +30,14 @@
 3. `완료` 현재 제품 파이프라인 진입점 및 런타임 계측 지점 문서화
 4. `완료` Requirement 1 family runner / preset / BAT / report generator 명세 고정
 5. `완료` Requirement 1 2페이지 smoke baseline 측정 및 근거 파일 고정
-6. `진행 중` Requirement 1 13장 full measured run 누적
+6. `완료` Requirement 1 13장 full measured run 누적
 7. `완료` stage-batched experimental runner 구현 및 candidate suite 연결
-8. `대기` Requirement 1 candidate 2종 full measured run 누적
-9. `대기` Requirement 1 제품 승격 브랜치에서 `legacy` + `candidate_stage_batched_dual_resident` 정식 전체 플로우 반영
-10. `대기` Requirement 2 family 설계 및 사용자 검수 패키지 설계
-11. `대기` Requirement 2 실측, selector rule 후보 도출, 문제 해결 명세서 누적
-12. `대기` Requirement 2 제품 승격 브랜치 생성 및 develop-safe portfolio 문서 반영
+8. `완료` stage-batched OCR routing matrix를 `OCR mode + source_lang` 기준으로 재정의
+9. `완료` Requirement 1 candidate 2종 full measured run 누적
+10. `진행 중` Requirement 1 성공 게이트 비교표와 supplementary smoke 근거 정리
+11. `진행 중` Requirement 2 family 설계 및 사용자 검수 패키지 설계
+12. `대기` Requirement 2 실측, selector rule 후보 도출, 문제 해결 명세서 누적
+13. `대기` Requirement 2 제품 승격 브랜치 생성 및 develop-safe portfolio 문서 반영
 
 ## 프로그램 체크리스트
 
@@ -67,7 +68,8 @@
 - [x] `modules/ocr/local_runtime.py`의 OCR runtime 정책 맵핑
 - [x] `modules/translation/local_runtime.py`의 Gemma runtime 정책 맵핑
 - [ ] 설정 UI에 `workflow_mode` 추가 설계 고정
-- [ ] 설정 UI의 정식 신규 전체 플로우 대상을 `candidate_stage_batched_dual_resident`로 잠금
+- [ ] 설정 UI의 정식 신규 전체 플로우 대상을 `stage_batched_pipeline`으로 잠금
+- [x] `stage_batched OCR stage routing matrix` 문서화
 - [x] benchmark family runner 명세 고정
 - [x] Windows BAT 쌍 명세 고정
 - [x] `Sample/japan` curated 13장 staging runner 구현
@@ -79,9 +81,11 @@
 - [x] 2페이지 smoke 입력 세트 고정
 - [x] 공식 시나리오 3개 잠금
 - [x] 기존 워크플로우 baseline smoke 측정
-- [ ] 기존 워크플로우 baseline 13장 측정
-- [ ] 단계형 워크플로우 단일 OCR runtime 측정
-- [ ] 단계형 워크플로우 dual-resident OCR 후보 측정
+- [x] 기존 워크플로우 baseline 13장 측정
+- [x] 단계형 워크플로우 단일 OCR runtime 측정
+- [x] 단계형 워크플로우 dual-resident OCR 후보 측정
+- [x] Chinese `Optimal` / `Optimal+` smoke 측정
+- [x] Japanese `Optimal+` sidecar comparison pack 생성
 - [x] smoke 기준 Docker compose up / health wait / reuse hit 분해표 작성
 - [ ] full 13장 기준 Docker compose up / health wait / reuse hit / timeout / retry 분해표 작성
 - [ ] VRAM / ngl / idle runtime snapshot 비교
@@ -93,16 +97,18 @@
 - [ ] 총 시간 순이득이 실측으로 확인됨
 - [ ] Docker 재기동 패널티를 포함해도 순이득이 유지됨
 - [ ] 품질이 동일 이상임
-- [ ] 설정창에서 `legacy` / `candidate_stage_batched_dual_resident` 선택안이 설계 완료됨
+- [ ] 설정창에서 `legacy` / `stage_batched_pipeline` 선택안이 설계 완료됨
 - [ ] 제품 코드와 benchmark 코드의 경계가 유지됨
-- [ ] `candidate_stage_batched_dual_resident`가 단일 OCR 후보보다 불리해도 Requirement 1 자체를 무효화하지 않는다는 정책이 문서/승격 계획에 반영됨
+- [x] `candidate_stage_batched_dual_resident`가 단일 OCR 후보보다 불리해도 Requirement 1 자체를 무효화하지 않는다는 정책이 문서/승격 계획에 반영됨
+- [x] `stage_batched_pipeline`의 OCR runtime routing이 `OCR mode + source_lang` 기준으로 잠김
 
 ### F. Requirement 2 사전 게이트
 
 - [ ] Requirement 1 성공 판정 문서가 잠김
-- [ ] Requirement 2 family 이름과 검수 프로토콜 문서화
-- [ ] MangaLMM vs detect box count vs PaddleOCR VL 비교표 형식 확정
+- [x] Requirement 2 family 이름과 검수 프로토콜 문서화
+- [x] MangaLMM vs detect box count vs PaddleOCR VL 비교표 형식 확정
 - [ ] 사용자 승인/비승인 저장 포맷 확정
+- [x] user review gate before selector promotion 문서화
 
 ### G. Requirement 2 측정과 구현
 
@@ -110,17 +116,18 @@
 - [ ] 13장 페이지별 MangaLMM 결과/실패/`bbox_2d` 상태 정리
 - [ ] 13장 페이지별 PaddleOCR VL 보완 결과 정리
 - [ ] `p_016.jpg` 포함 난페이지 사례 문서화
-- [ ] 사용자 검수 패키지 생성
+- [x] 사용자 검수 패키지 생성
 - [ ] selector rule 후보 도출
 - [ ] dual-resident runtime 정책과 selector logging 설계
 - [ ] 제품 옵션 추가 설계
+- [ ] `Optimal+ Japanese` selector 승인 전 `PaddleOCR VL` downstream 기준 잠금
 
 ### H. develop 반영
 
 - [ ] `feature/workflow-split-runtime` 브랜치 생성
 - [ ] develop-safe portfolio 문서 생성
 - [ ] workflow mode 제품 코드 반영
-- [ ] `candidate_stage_batched_dual_resident`를 정식 신규 전체 플로우로 제품 UI에 반영
+- [ ] `stage_batched_pipeline`를 정식 신규 전체 플로우로 제품 UI에 반영
 - [ ] UI 문구 번역 및 `.qm` 갱신
 - [ ] commit / push / PR
 - [ ] `feature/hybrid-ocr-selector` 브랜치 생성

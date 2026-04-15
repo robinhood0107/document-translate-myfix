@@ -71,7 +71,7 @@ SCENARIOS = {
         "runtime_services": "stage-batched",
         "stage_ceiling": "render",
         "runnable": True,
-        "description": "Detect all -> OCR all -> translate all -> inpaint all -> render/export all with one OCR runtime.",
+        "description": "Detect all -> OCR all -> translate all -> inpaint all -> render/export all with OCR stage routing equivalent to Japanese Optimal.",
     },
     "candidate_stage_batched_dual_resident": {
         "label": "Candidate Stage-Batched Dual Resident",
@@ -83,7 +83,7 @@ SCENARIOS = {
         "runtime_services": "stage-batched",
         "stage_ceiling": "render",
         "runnable": True,
-        "description": "Exploratory OCR-stage residency contract with MangaLMM and PaddleOCR VL both kept resident.",
+        "description": "Detect all -> OCR all -> translate all -> inpaint all -> render/export all with OCR stage routing equivalent to Japanese Optimal+ analysis mode.",
     },
 }
 
@@ -147,14 +147,22 @@ def _resolve_scenarios(selected: list[str]) -> list[str]:
     return selected
 
 
-def _resolve_sample_paths(sample_dir: str | Path, *, smoke: bool) -> list[Path]:
+def _resolve_sample_paths(
+    sample_dir: str | Path,
+    *,
+    smoke: bool,
+    sample_files: list[str] | None = None,
+) -> list[Path]:
     root = Path(sample_dir)
     if not root.is_dir():
         raise FileNotFoundError(
             f"Sample directory does not exist: {root}\n"
             "Expected the curated Requirement 1 corpus at ./Sample/japan."
         )
-    filenames = SMOKE_FILES if smoke else OFFICIAL_FILES
+    if sample_files:
+        filenames = tuple(str(name).strip() for name in sample_files if str(name).strip())
+    else:
+        filenames = SMOKE_FILES if smoke else OFFICIAL_FILES
     paths = [root / name for name in filenames]
     missing = [path.name for path in paths if not path.is_file()]
     if missing:
@@ -352,6 +360,8 @@ def _normalize_metrics_events(
         "render_end": "render_stage_end",
         "page_done": "page_done",
         "page_failed": "page_failed",
+        "page_quality_snapshot": "page_quality_snapshot",
+        "manual_review_required": "manual_review_required",
         "benchmark_run_start": "benchmark_run_start",
         "benchmark_run_finished": "benchmark_run_end",
     }
@@ -700,6 +710,7 @@ def _normalize_completed_run(
     metrics_rows = load_metrics(metrics_path)
     page_snapshots = _load_json_if_exists(run_dir / "page_snapshots.json")
     managed_runtime_policy = _load_json_if_exists(run_dir / "runtime" / "managed_runtime_policy.json")
+    ocr_stage_policy = _load_json_if_exists(run_dir / "runtime" / "ocr_stage_policy.json")
     normalized_events = _normalize_metrics_events(
         metrics_rows,
         scenario_name=scenario_name,
@@ -737,6 +748,8 @@ def _normalize_completed_run(
             "corpus_root": repo_relative_str(DEFAULT_SAMPLE_DIR),
         }
     )
+    if ocr_stage_policy:
+        request_payload["ocr_stage_policy"] = ocr_stage_policy
     write_json(run_dir / "benchmark_request.json", request_payload)
     write_json(run_dir / "timing_summary.json", timing_summary)
     write_json(run_dir / "quality_summary.json", quality_summary)
@@ -765,6 +778,12 @@ def _normalize_completed_run(
         "quality_summary_path": repo_relative_str(run_dir / "quality_summary.json"),
         "docker_timeline_path": repo_relative_str(run_dir / "docker_timeline.json"),
         "report_path": repo_relative_str(run_dir / "report.md"),
+        "ocr_stage_policy_path": repo_relative_str(run_dir / "runtime" / "ocr_stage_policy.json")
+        if (run_dir / "runtime" / "ocr_stage_policy.json").is_file()
+        else "",
+        "sidecar_review_pack_path": repo_relative_str(run_dir / "sidecar_review_pack.json")
+        if (run_dir / "sidecar_review_pack.json").is_file()
+        else "",
         "total_elapsed_sec": timing_summary.get("total_elapsed_sec"),
         "page_done_count": quality_summary.get("page_done_count"),
         "page_failed_count": quality_summary.get("page_failed_count"),
@@ -1026,11 +1045,35 @@ def _write_suite_record(
     source_lang: str,
     target_lang: str,
 ) -> Path:
+    latest_existing = _load_json_if_exists(_latest_suite_record_path())
+    selected_files = [path.name for path in sample_paths]
+    if latest_existing:
+        same_context = (
+            bool(latest_existing.get("smoke", False)) == bool(smoke)
+            and list(latest_existing.get("selected_files", [])) == selected_files
+            and str(latest_existing.get("source_lang", "") or "") == str(source_lang or "")
+            and str(latest_existing.get("target_lang", "") or "") == str(target_lang or "")
+        )
+        if same_context:
+            merged: dict[str, dict[str, Any]] = {}
+            for record in latest_existing.get("scenario_records", []):
+                if isinstance(record, dict) and record.get("scenario_name"):
+                    merged[str(record["scenario_name"])] = dict(record)
+            for record in records:
+                if isinstance(record, dict) and record.get("scenario_name"):
+                    merged[str(record["scenario_name"])] = dict(record)
+            ordered_names = [
+                name for name in SCENARIOS.keys() if name in merged
+            ] + [
+                name for name in merged.keys() if name not in SCENARIOS
+            ]
+            records = [merged[name] for name in ordered_names]
+
     suite_payload = {
         "family": FAMILY_NAME,
         "generated_at": time.time(),
         "sample_root": repo_relative_str(DEFAULT_SAMPLE_DIR),
-        "selected_files": [path.name for path in sample_paths],
+        "selected_files": selected_files,
         "source_lang": source_lang,
         "target_lang": target_lang,
         "smoke": smoke,
@@ -1052,7 +1095,11 @@ def _generate_family_report() -> None:
 
 
 def _run_suite(args: argparse.Namespace) -> int:
-    sample_paths = _resolve_sample_paths(args.sample_dir, smoke=args.smoke)
+    sample_paths = _resolve_sample_paths(
+        args.sample_dir,
+        smoke=args.smoke,
+        sample_files=list(args.sample_file or []),
+    )
     scenario_names = _resolve_scenarios(args.scenario)
     records: list[dict[str, Any]] = []
     for scenario_name in scenario_names:
@@ -1134,6 +1181,12 @@ def main() -> int:
     )
     run_parser.add_argument("--source-lang", default=DEFAULT_SOURCE_LANG)
     run_parser.add_argument("--target-lang", default=DEFAULT_TARGET_LANG)
+    run_parser.add_argument(
+        "--sample-file",
+        action="append",
+        default=[],
+        help="Specific file name inside sample-dir. Repeat to pin a custom corpus order.",
+    )
     run_parser.add_argument(
         "--smoke",
         action="store_true",

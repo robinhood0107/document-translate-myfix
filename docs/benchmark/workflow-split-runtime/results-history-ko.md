@@ -7,33 +7,35 @@
 - Docker compose up / health wait / timeout / retry는 총 시간에서 분리해 기록한다.
 - 품질이 같거나 더 좋아야만 승격 후보가 된다.
 - `candidate_stage_batched_dual_resident`는 단일 OCR 후보보다 불리해도 Requirement 1 자체를 무효화하지 않는다.
+- 정식 신규 전체 플로우는 `stage_batched_pipeline`이며, OCR stage resident set은 `OCR mode + source_lang`으로 결정한다.
 - `develop`에는 raw benchmark 결과를 옮기지 않는다.
 
 ## Latest Output
 
-- current_status: `baseline_smoke_completed_with_blocked_stage_batched_candidates`
+- current_status: `requirement_1_full_measurement_completed`
 - benchmark_family_created: `true`
-- measured_runs: `1`
-- requirement_1_status: `baseline_only_measured`
+- measured_runs: `3`
+- requirement_1_status: `ready_for_gate_review_with_dual_resident_recorded`
 - requirement_2_status: `blocked_by_requirement_1`
 - source_lang: `Japanese`
 - target_lang: `Korean`
 - corpus_root: `Sample/japan`
-- selected_files: `094.png, p_016.jpg`
+- selected_files: `094.png, 097.png, 101.png, i_099.jpg, i_100.jpg, i_102.jpg, i_105.jpg, p_016.jpg, p_017.jpg, p_018.jpg, p_019.jpg, p_020.jpg, p_021.jpg`
+- supplementary_routing_smoke: `see 01_project-spec-and-decision-log-ko.md`
 
 ## Latest Suite
 
 - latest_suite_record: `banchmark_result_log/workflow-split-runtime/last_workflow_split_runtime_suite.json`
-- smoke: `True`
-- completed_scenarios: `baseline_legacy`
-- blocked_scenarios: `candidate_stage_batched_single_ocr, candidate_stage_batched_dual_resident`
+- smoke: `False`
+- completed_scenarios: `baseline_legacy, candidate_stage_batched_single_ocr, candidate_stage_batched_dual_resident`
+- blocked_scenarios: `none`
 - runner_state: `stage_batched_candidates_runnable`
 
 | scenario | status | report | timing | quality |
 | --- | --- | --- | --- | --- |
-| baseline_legacy | completed | `./banchmark_result_log/workflow-split-runtime/20260415_050150_baseline_legacy/report.md` | `./banchmark_result_log/workflow-split-runtime/20260415_050150_baseline_legacy/timing_summary.json` | `./banchmark_result_log/workflow-split-runtime/20260415_050150_baseline_legacy/quality_summary.json` |
-| candidate_stage_batched_single_ocr | blocked | `./banchmark_result_log/workflow-split-runtime/20260415_050749_candidate_stage_batched_single_ocr/report.md` | `./banchmark_result_log/workflow-split-runtime/20260415_050749_candidate_stage_batched_single_ocr/timing_summary.json` | `./banchmark_result_log/workflow-split-runtime/20260415_050749_candidate_stage_batched_single_ocr/quality_summary.json` |
-| candidate_stage_batched_dual_resident | blocked | `./banchmark_result_log/workflow-split-runtime/20260415_050749_candidate_stage_batched_dual_resident/report.md` | `./banchmark_result_log/workflow-split-runtime/20260415_050749_candidate_stage_batched_dual_resident/timing_summary.json` | `./banchmark_result_log/workflow-split-runtime/20260415_050749_candidate_stage_batched_dual_resident/quality_summary.json` |
+| baseline_legacy | completed | `./banchmark_result_log/workflow-split-runtime/20260415_055838_baseline_legacy/report.md` | `./banchmark_result_log/workflow-split-runtime/20260415_055838_baseline_legacy/timing_summary.json` | `./banchmark_result_log/workflow-split-runtime/20260415_055838_baseline_legacy/quality_summary.json` |
+| candidate_stage_batched_single_ocr | completed | `./banchmark_result_log/workflow-split-runtime/20260415_090653_candidate_stage_batched_single_ocr/report.md` | `./banchmark_result_log/workflow-split-runtime/20260415_090653_candidate_stage_batched_single_ocr/timing_summary.json` | `./banchmark_result_log/workflow-split-runtime/20260415_090653_candidate_stage_batched_single_ocr/quality_summary.json` |
+| candidate_stage_batched_dual_resident | completed | `./banchmark_result_log/workflow-split-runtime/20260415_091848_candidate_stage_batched_dual_resident/report.md` | `./banchmark_result_log/workflow-split-runtime/20260415_091848_candidate_stage_batched_dual_resident/timing_summary.json` | `./banchmark_result_log/workflow-split-runtime/20260415_091848_candidate_stage_batched_dual_resident/quality_summary.json` |
 
 ## Required Tables
 

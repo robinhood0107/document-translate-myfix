@@ -83,6 +83,7 @@ def _render_results_history(suite: dict[str, Any]) -> str:
         "- Docker compose up / health wait / timeout / retry는 총 시간에서 분리해 기록한다.",
         "- 품질이 같거나 더 좋아야만 승격 후보가 된다.",
         "- `candidate_stage_batched_dual_resident`는 단일 OCR 후보보다 불리해도 Requirement 1 자체를 무효화하지 않는다.",
+        "- 정식 신규 전체 플로우는 `stage_batched_pipeline`이며, OCR stage resident set은 `OCR mode + source_lang`으로 결정한다.",
         "- `develop`에는 raw benchmark 결과를 옮기지 않는다.",
         "",
         "## Latest Output",
@@ -96,6 +97,7 @@ def _render_results_history(suite: dict[str, Any]) -> str:
         f"- target_lang: `{target_lang}`",
         f"- corpus_root: `Sample/japan`",
         f"- selected_files: `{', '.join(selected_files) if selected_files else '094.png, 097.png, 101.png, i_099.jpg, i_100.jpg, i_102.jpg, i_105.jpg, p_016.jpg, p_017.jpg, p_018.jpg, p_019.jpg, p_020.jpg, p_021.jpg'}`",
+        "- supplementary_routing_smoke: `see 01_project-spec-and-decision-log-ko.md`",
         "",
         "## Latest Suite",
         "",
@@ -162,6 +164,20 @@ def _render_results_history(suite: dict[str, Any]) -> str:
 def _render_report(suite: dict[str, Any]) -> str:
     status = _suite_status(suite)
     requirement_1_status = _requirement_1_status(suite)
+    if requirement_1_status == "ready_for_gate_review_with_dual_resident_recorded":
+        next_actions = [
+            "1. 세 시나리오의 시간/품질/VRAM 근거를 비교해 Requirement 1 성공 게이트를 잠근다.",
+            "2. `candidate_stage_batched_dual_resident` sidecar review pack을 사용자 검수 입력으로 정리한다.",
+            "3. Chinese routing smoke와 stage lifecycle 보조 근거를 결정 로그에 반영한다.",
+            "4. Requirement 1이 유효하면 `legacy` + `stage_batched_pipeline` 제품 승격 구현으로 넘어간다.",
+        ]
+    else:
+        next_actions = [
+            "1. `baseline_legacy` full 13장 measured run을 누적한다.",
+            "2. `candidate_stage_batched_single_ocr`(Japanese `Optimal`)와 `candidate_stage_batched_dual_resident`(Japanese `Optimal+ analysis mode`)를 순서대로 실제 실행한다.",
+            "3. 세 시나리오의 시간/품질/VRAM 근거가 모이면 Requirement 1 성공 게이트를 판정한다.",
+            "4. Requirement 1이 유효하면 `legacy` + `stage_batched_pipeline` 제품 승격 구현으로 넘어간다.",
+        ]
     lines = [
         "# Workflow Split Runtime Report",
         "",
@@ -228,10 +244,7 @@ def _render_report(suite: dict[str, Any]) -> str:
             "",
             "## 다음 액션",
             "",
-            "1. `baseline_legacy` full 13장 measured run을 누적한다.",
-            "2. `candidate_stage_batched_single_ocr`와 `candidate_stage_batched_dual_resident`를 순서대로 실제 실행한다.",
-            "3. 세 시나리오의 시간/품질/VRAM 근거가 모이면 Requirement 1 성공 게이트를 판정한다.",
-            "4. Requirement 1이 유효하면 `legacy` + `candidate_stage_batched_dual_resident` 제품 승격 구현으로 넘어간다.",
+            *next_actions,
             "",
             "## 저자 및 기여",
             "",

@@ -18,7 +18,7 @@ description: 13장을 기준으로 전체 파이프라인을 텍스트 감지 ->
 5. 로컬 환경은 `.venv-win`, `.venv-win-cuda13`만 공식 환경으로 사용하라.
 6. 기존 파이프라인과 기존 플로우는 절대로 제거하거나 깨뜨리지 마라. 이번 작업은 "대체"가 아니라 "병행 가능한 신규 워크플로우 추가"다.
 7. 신규 워크플로우는 전체 설정창에서 기존 방식과 새 방식을 선택할 수 있어야 한다.
-8. `candidate_stage_batched_dual_resident`는 측정 결과가 단일 OCR 후보보다 불리하더라도 Requirement 1 자체를 무효화하는 실패 조건으로 취급하지 말고, 최종적으로는 설정창에서 사용자가 선택 가능한 정식 신규 전체 플로우로 승격할 계획을 기준선으로 삼아라.
+8. `candidate_stage_batched_dual_resident`는 측정 결과가 단일 OCR 후보보다 불리하더라도 Requirement 1 자체를 무효화하는 실패 조건으로 취급하지 말고, 최종적으로는 설정창의 정식 신규 전체 플로우 `stage_batched_pipeline` 안에서 `Optimal+ Japanese` routing을 유발하는 benchmark 기준 시나리오로 추적하라.
 9. 사용자에게 보이는 UI 문구를 바꾸면 번역 파일과 컴파일된 `.qm` 자산까지 갱신하라.
 10. 기능 완료 기준은 로컬 수정이 아니라 커밋과 push까지 포함한다. 단, 사용자가 명시적으로 로컬 전용만 요구하면 그때만 예외다.
 11. 모든 발상, 문제 정의, 측정, 구현, 효과 정리는 포트폴리오로 재사용할 수 있을 정도로 상세해야 한다.
@@ -43,7 +43,11 @@ description: 13장을 기준으로 전체 파이프라인을 텍스트 감지 ->
 16. 현재 VRAM 파악 함수와 `vllm` 병렬 처리 최적화를 이용해서 `paddleocr_vl` 활용 폭이 더 넓어졌는지도 연결해서 판단해야 한다.
 17. 페이지 수가 많아질수록 어디에서 시간 병목이 생기는지와 그 해결 방향까지 생각해야 한다.
 18. 1번 요구사항의 성공 기준은 "시간적인 이득이 확실하고, Docker 기동/타임아웃/VRAM/ngl 변수까지 고려해도 속도 증가가 확실하며, 같은 품질을 유지한 채 문제 없이 구현되는 것"이다.
-19. `candidate_stage_batched_dual_resident`는 benchmark 비교 대상인 동시에, 최종적으로는 `develop`에 정식 기능으로 반영할 신규 전체 플로우 후보로 잠가야 한다.
+19. `candidate_stage_batched_dual_resident`는 benchmark 비교 대상인 동시에, 최종적으로는 `develop`에 정식 기능으로 반영할 `stage_batched_pipeline`의 `Optimal+ Japanese analysis mode` 기준 시나리오로 잠가야 한다.
+20. `stage_batched_pipeline`의 OCR stage Docker routing은 반드시 아래 매트릭스를 따라야 한다.
+   - `Optimal`: Chinese -> `HunyuanOCR` only, Japanese/Other -> `PaddleOCR VL` only
+   - `Optimal+`: Chinese -> `HunyuanOCR` only, Japanese -> `PaddleOCR VL + MangaLMM`, Other -> `PaddleOCR VL` only
+   - OCR stage 종료 후 OCR 관련 Docker는 모두 내려가고, 번역 stage에서는 `Gemma4`만 올라가야 한다.
 
 ## 핵심 가설
 
@@ -51,7 +55,7 @@ description: 13장을 기준으로 전체 파이프라인을 텍스트 감지 ->
 2. 번역 단계에서 Gemma4가 차지하던 VRAM을 OCR 단계로 넘기면 OCR 단계의 `ngl`, 배치 처리량, 동시성, 컨테이너 조합 최적화 폭이 커질 수 있다.
 3. 반대로 Docker 재기동, healthcheck 대기, timeout 재시도 비용이 너무 크면 오히려 분리형 워크플로우가 손해일 수 있다.
 4. 따라서 "분리형 워크플로우가 무조건 좋다"를 전제하지 말고 반드시 측정 후 결정해야 한다.
-5. 단, `candidate_stage_batched_dual_resident`가 단일 OCR 후보보다 불리하더라도 그 사실만으로 Requirement 1 전체 결론이나 신규 워크플로우 승격 계획을 무효화하지는 않는다. 이 경우에는 성능 특성과 선택 이유를 문서화한 뒤, 정식 선택 가능한 옵션으로 유지하는 것을 기본안으로 둔다.
+5. 단, `candidate_stage_batched_dual_resident`가 단일 OCR 후보보다 불리하더라도 그 사실만으로 Requirement 1 전체 결론이나 신규 워크플로우 승격 계획을 무효화하지는 않는다. 이 경우에는 성능 특성과 선택 이유를 문서화한 뒤, 정식 선택 가능한 옵션인 `stage_batched_pipeline` 안에서 `Optimal+ Japanese` routing을 유지하는 것을 기본안으로 둔다.
 
 ## 반드시 수행할 조사 범위
 
@@ -61,7 +65,7 @@ description: 13장을 기준으로 전체 파이프라인을 텍스트 감지 ->
    - 기존 워크플로우
    - 전체 OCR 분리 + 전체 번역 분리 워크플로우
    - 전체 OCR 분리 + OCR 단계에서 `mangallm`과 `paddleocr_vl` 동시 상주 후보
-4. 위 조합 중 `candidate_stage_batched_dual_resident`는 단순 탐색용으로만 취급하지 말고, 최종적으로 설정창에서 사용자가 선택할 수 있는 정식 신규 전체 플로우 후보로 추적하라.
+4. 위 조합 중 `candidate_stage_batched_dual_resident`는 단순 탐색용으로만 취급하지 말고, 최종적으로 설정창에서 사용자가 선택할 수 있는 `stage_batched_pipeline`의 핵심 OCR routing 기준 시나리오로 추적하라.
 5. 각 조합마다 VRAM 사용량, `ngl`, 컨테이너 기동시간, healthcheck 대기시간, 실제 페이지 처리시간, timeout 발생 빈도, 재시도 비용, 총 소요시간을 분리해서 측정하라.
 6. 13장 기준 총 시간뿐 아니라, 페이지가 많아졌을 때 어떤 비용이 고정비이고 어떤 비용이 페이지 수에 비례하는지 모델링하라.
 7. 실제 사용자 체감 시간 관점에서 첫 결과가 나오기까지의 시간과 전체 완료 시간 모두를 측정하라.
@@ -123,7 +127,7 @@ description: 13장을 기준으로 전체 파이프라인을 텍스트 감지 ->
 2. 분리형 워크플로우가 유리하다고 입증되면, 기존 파이프라인과 공존하는 방식으로 구현하라.
 3. 신규 워크플로우의 선택지는 설정창에서 명시적으로 고를 수 있어야 한다.
 4. 기존 워크플로우는 회귀 없이 그대로 유지되어야 한다.
-5. 신규 워크플로우의 정식 제품 승격 대상은 `candidate_stage_batched_dual_resident`를 기본안으로 두고, 설정창에서는 최소 `기존 워크플로우`와 `dual-resident stage-batched 워크플로우` 두 개의 전체 플로우가 보이도록 설계하라.
+5. 신규 워크플로우의 정식 제품 승격 대상은 `stage_batched_pipeline`으로 두고, 설정창에서는 최소 `기존 워크플로우`와 `stage-batched workflow` 두 개의 전체 플로우가 보이도록 설계하라. 이때 OCR stage residency는 `OCR mode + source language`로 결정되며, `Optimal+ Japanese`에서만 `PaddleOCR VL + MangaLMM` dual-resident가 일어난다.
 6. 코어 비즈니스 로직을 무리하게 오염시키지 말고, 확장 가능한 클래스/객체 설계를 먼저 제시한 뒤 구현하라.
 7. 단계 분리, 컨테이너 수명주기 제어, VRAM 정책, 타이밍 계측, 보고서 생성 책임을 분리하라.
 8. 시간 측정 로직은 결과 비교에 재사용할 수 있도록 일반화하라.
@@ -155,7 +159,7 @@ description: 13장을 기준으로 전체 파이프라인을 텍스트 감지 ->
 5. 기존 워크플로우는 그대로 남아 있고, 사용자가 설정창에서 두 방식을 선택할 수 있다.
 6. 설계가 프로그램의 근간을 해치지 않을 정도로 안정적이고 객체 책임이 명확하다.
 7. 측정 근거와 문서가 포트폴리오로 재사용 가능할 정도로 상세하다.
-8. `candidate_stage_batched_dual_resident`는 성능 특성이 어떻든 정식 선택 가능한 신규 전체 플로우로 설계와 승격 경로가 문서상으로 잠겨 있다.
+8. `stage_batched_pipeline`는 성능 특성이 어떻든 정식 선택 가능한 신규 전체 플로우로 설계와 승격 경로가 문서상으로 잠겨 있어야 하며, `candidate_stage_batched_dual_resident`는 그 안의 `Optimal+ Japanese` benchmark 기준 시나리오로 유지된다.
 
 ## 실패 조건
 
@@ -166,7 +170,7 @@ description: 13장을 기준으로 전체 파이프라인을 텍스트 감지 ->
 3. VRAM 여유는 늘었지만 실제 총 처리 시간은 좋아지지 않는다.
 4. 구현이 기존 파이프라인을 손상시키거나 과도하게 얽힌다.
 5. 문서와 측정 로그가 부족해서 결론의 근거가 약하다.
-6. 단, `candidate_stage_batched_dual_resident`가 단일 OCR 후보보다 느리다는 사실만으로 Requirement 1 전체를 실패로 판정하지는 마라. 이 경우에는 성능 특성과 제품상 노출 이유를 별도로 정리해야 한다.
+6. 단, `candidate_stage_batched_dual_resident`가 단일 OCR 후보보다 느리다는 사실만으로 Requirement 1 전체를 실패로 판정하지는 마라. 이 경우에는 성능 특성과 제품상 노출 이유, 그리고 왜 `stage_batched_pipeline` 안의 `Optimal+ Japanese` routing을 유지하는지 별도로 정리해야 한다.
 
 ## 최종 실행 지시
 
@@ -176,6 +180,6 @@ description: 13장을 기준으로 전체 파이프라인을 텍스트 감지 ->
 4. 페이지 수가 늘어날수록 어디가 병목이 되는지 설명하라.
 5. 중간중간 문제 해결 명세서를 작성하라.
 6. 이득이 확실할 때만 신규 워크플로우를 설계하고 구현하라.
-7. `candidate_stage_batched_dual_resident`는 단일 OCR 후보와 비교해 불리하더라도 정식 신규 전체 플로우로 승격할 계획을 유지하고, 그 이유와 트레이드오프를 반드시 문서화하라.
+7. `candidate_stage_batched_dual_resident`는 단일 OCR 후보와 비교해 불리하더라도 `stage_batched_pipeline`의 정식 OCR routing 시나리오로 승격 계획을 유지하고, 그 이유와 트레이드오프를 반드시 문서화하라.
 8. 구현 후에는 기존 방식과 신규 방식을 모두 검증하라.
 9. 마지막에는 "왜 이 방식이 맞는지"를 근거 중심으로 결론 내라.
