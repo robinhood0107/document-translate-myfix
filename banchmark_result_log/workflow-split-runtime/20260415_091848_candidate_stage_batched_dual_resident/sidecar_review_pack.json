@@ -1,0 +1,613 @@
+{
+  "workflow_mode": "stage_batched_pipeline",
+  "ocr_stage_policy": {
+    "workflow_mode": "stage_batched_pipeline",
+    "normalized_ocr_mode": "best_local_plus",
+    "source_lang_english": "Japanese",
+    "translator": "Custom Local Server(Gemma)",
+    "ocr_stage_enabled": true,
+    "primary_ocr_engine": "PaddleOCR VL",
+    "resident_ocr_engines": [
+      "PaddleOCR VL",
+      "MangaLMM"
+    ],
+    "requires_sidecar_collection": true,
+    "selector_enabled": false,
+    "translation_stage_runtime": "gemma_local_server",
+    "post_ocr_shutdown_targets": [
+      "PaddleOCR VL",
+      "MangaLMM"
+    ],
+    "stage_batched_supported": true,
+    "fallback_workflow_mode": "",
+    "unsupported_reason": ""
+  },
+  "page_count": 13,
+  "pages": [
+    {
+      "image_path": "[local-only]",
+      "image_name": "094.png",
+      "detect_box_count": 20,
+      "primary_engine": "PaddleOCR VL",
+      "primary_metrics": {
+        "ocr_total_block_count": 20,
+        "ocr_empty_block_count": 0,
+        "ocr_low_quality_block_count": 0
+      },
+      "sidecar": {
+        "MangaLMM": {
+          "engine_key": "MangaLMM",
+          "engine_name": "MangaLMMOCREngine",
+          "detect_box_count": 20,
+          "ocr_block_count": 20,
+          "ocr_non_empty": 15,
+          "ocr_empty": 5,
+          "ocr_single_char_like": 0,
+          "bbox_2d_success_block_count": 15,
+          "bbox_2d_region_count": 16,
+          "page_profile": {},
+          "request_metadata": {
+            "attempt_count": 1,
+            "retry_count": 0,
+            "contract_mode": "optimal_plus_japanese",
+            "final_status": "success",
+            "failure_reason": "",
+            "matched_region_count": 16,
+            "matched_block_count": 15,
+            "mapped_region_count": 19,
+            "non_empty_block_count": 15,
+            "resize_profile": "dense",
+            "request_shape": [
+              1270,
+              887
+            ]
+          }
+        }
+      },
+      "page_failed": false,
+      "page_failed_stage": "",
+      "page_failed_reason": "",
+      "is_hard_page": false
+    },
+    {
+      "image_path": "[local-only]",
+      "image_name": "097.png",
+      "detect_box_count": 13,
+      "primary_engine": "PaddleOCR VL",
+      "primary_metrics": {
+        "ocr_total_block_count": 13,
+        "ocr_empty_block_count": 0,
+        "ocr_low_quality_block_count": 0
+      },
+      "sidecar": {
+        "MangaLMM": {
+          "engine_key": "MangaLMM",
+          "engine_name": "MangaLMMOCREngine",
+          "detect_box_count": 13,
+          "ocr_block_count": 13,
+          "ocr_non_empty": 12,
+          "ocr_empty": 1,
+          "ocr_single_char_like": 0,
+          "bbox_2d_success_block_count": 12,
+          "bbox_2d_region_count": 12,
+          "page_profile": {},
+          "request_metadata": {
+            "attempt_count": 1,
+            "retry_count": 0,
+            "contract_mode": "optimal_plus_japanese",
+            "final_status": "success",
+            "failure_reason": "",
+            "matched_region_count": 12,
+            "matched_block_count": 12,
+            "mapped_region_count": 18,
+            "non_empty_block_count": 12,
+            "resize_profile": "standard",
+            "request_shape": [
+              1728,
+              1206
+            ]
+          }
+        }
+      },
+      "page_failed": false,
+      "page_failed_stage": "",
+      "page_failed_reason": "",
+      "is_hard_page": false
+    },
+    {
+      "image_path": "[local-only]",
+      "image_name": "101.png",
+      "detect_box_count": 6,
+      "primary_engine": "PaddleOCR VL",
+      "primary_metrics": {
+        "ocr_total_block_count": 6,
+        "ocr_empty_block_count": 0,
+        "ocr_low_quality_block_count": 0
+      },
+      "sidecar": {
+        "MangaLMM": {
+          "engine_key": "MangaLMM",
+          "engine_name": "MangaLMMOCREngine",
+          "detect_box_count": 6,
+          "ocr_block_count": 6,
+          "ocr_non_empty": 4,
+          "ocr_empty": 2,
+          "ocr_single_char_like": 0,
+          "bbox_2d_success_block_count": 4,
+          "bbox_2d_region_count": 4,
+          "page_profile": {},
+          "request_metadata": {
+            "attempt_count": 1,
+            "retry_count": 0,
+            "contract_mode": "optimal_plus_japanese",
+            "final_status": "success",
+            "failure_reason": "",
+            "matched_region_count": 4,
+            "matched_block_count": 4,
+            "mapped_region_count": 12,
+            "non_empty_block_count": 4,
+            "resize_profile": "standard",
+            "request_shape": [
+              1728,
+              1206
+            ]
+          }
+        }
+      },
+      "page_failed": false,
+      "page_failed_stage": "",
+      "page_failed_reason": "",
+      "is_hard_page": false
+    },
+    {
+      "image_path": "[local-only]",
+      "image_name": "i_099.jpg",
+      "detect_box_count": 17,
+      "primary_engine": "PaddleOCR VL",
+      "primary_metrics": {
+        "ocr_total_block_count": 17,
+        "ocr_empty_block_count": 0,
+        "ocr_low_quality_block_count": 0
+      },
+      "sidecar": {
+        "MangaLMM": {
+          "engine_key": "MangaLMM",
+          "engine_name": "MangaLMMOCREngine",
+          "detect_box_count": 17,
+          "ocr_block_count": 17,
+          "ocr_non_empty": 14,
+          "ocr_empty": 3,
+          "ocr_single_char_like": 0,
+          "bbox_2d_success_block_count": 14,
+          "bbox_2d_region_count": 15,
+          "page_profile": {},
+          "request_metadata": {
+            "attempt_count": 1,
+            "retry_count": 0,
+            "contract_mode": "optimal_plus_japanese",
+            "final_status": "success",
+            "failure_reason": "",
+            "matched_region_count": 15,
+            "matched_block_count": 14,
+            "mapped_region_count": 25,
+            "non_empty_block_count": 14,
+            "resize_profile": "dense",
+            "request_shape": [
+              1270,
+              900
+            ]
+          }
+        }
+      },
+      "page_failed": false,
+      "page_failed_stage": "",
+      "page_failed_reason": "",
+      "is_hard_page": false
+    },
+    {
+      "image_path": "[local-only]",
+      "image_name": "i_100.jpg",
+      "detect_box_count": 16,
+      "primary_engine": "PaddleOCR VL",
+      "primary_metrics": {
+        "ocr_total_block_count": 16,
+        "ocr_empty_block_count": 0,
+        "ocr_low_quality_block_count": 2
+      },
+      "sidecar": {
+        "MangaLMM": {
+          "engine_key": "MangaLMM",
+          "engine_name": "MangaLMMOCREngine",
+          "detect_box_count": 16,
+          "ocr_block_count": 16,
+          "ocr_non_empty": 14,
+          "ocr_empty": 2,
+          "ocr_single_char_like": 3,
+          "bbox_2d_success_block_count": 14,
+          "bbox_2d_region_count": 14,
+          "page_profile": {},
+          "request_metadata": {
+            "attempt_count": 2,
+            "retry_count": 1,
+            "contract_mode": "optimal_plus_japanese",
+            "final_status": "success",
+            "failure_reason": "",
+            "matched_region_count": 16,
+            "matched_block_count": 14,
+            "mapped_region_count": 29,
+            "non_empty_block_count": 14,
+            "resize_profile": "dense",
+            "request_shape": [
+              1270,
+              900
+            ]
+          }
+        }
+      },
+      "page_failed": false,
+      "page_failed_stage": "",
+      "page_failed_reason": "",
+      "is_hard_page": false
+    },
+    {
+      "image_path": "[local-only]",
+      "image_name": "i_102.jpg",
+      "detect_box_count": 19,
+      "primary_engine": "PaddleOCR VL",
+      "primary_metrics": {
+        "ocr_total_block_count": 19,
+        "ocr_empty_block_count": 0,
+        "ocr_low_quality_block_count": 0
+      },
+      "sidecar": {
+        "MangaLMM": {
+          "engine_key": "MangaLMM",
+          "engine_name": "MangaLMMOCREngine",
+          "detect_box_count": 19,
+          "ocr_block_count": 19,
+          "ocr_non_empty": 15,
+          "ocr_empty": 4,
+          "ocr_single_char_like": 0,
+          "bbox_2d_success_block_count": 15,
+          "bbox_2d_region_count": 15,
+          "page_profile": {},
+          "request_metadata": {
+            "attempt_count": 2,
+            "retry_count": 1,
+            "contract_mode": "optimal_plus_japanese",
+            "final_status": "success",
+            "failure_reason": "",
+            "matched_region_count": 15,
+            "matched_block_count": 15,
+            "mapped_region_count": 32,
+            "non_empty_block_count": 15,
+            "resize_profile": "dense",
+            "request_shape": [
+              1270,
+              900
+            ]
+          }
+        }
+      },
+      "page_failed": false,
+      "page_failed_stage": "",
+      "page_failed_reason": "",
+      "is_hard_page": false
+    },
+    {
+      "image_path": "[local-only]",
+      "image_name": "i_105.jpg",
+      "detect_box_count": 10,
+      "primary_engine": "PaddleOCR VL",
+      "primary_metrics": {
+        "ocr_total_block_count": 10,
+        "ocr_empty_block_count": 0,
+        "ocr_low_quality_block_count": 0
+      },
+      "sidecar": {
+        "MangaLMM": {
+          "engine_key": "MangaLMM",
+          "engine_name": "MangaLMMOCREngine",
+          "detect_box_count": 10,
+          "ocr_block_count": 10,
+          "ocr_non_empty": 6,
+          "ocr_empty": 4,
+          "ocr_single_char_like": 0,
+          "bbox_2d_success_block_count": 6,
+          "bbox_2d_region_count": 6,
+          "page_profile": {},
+          "request_metadata": {
+            "attempt_count": 1,
+            "retry_count": 0,
+            "contract_mode": "optimal_plus_japanese",
+            "final_status": "success",
+            "failure_reason": "",
+            "matched_region_count": 6,
+            "matched_block_count": 6,
+            "mapped_region_count": 14,
+            "non_empty_block_count": 6,
+            "resize_profile": "standard",
+            "request_shape": [
+              1728,
+              1224
+            ]
+          }
+        }
+      },
+      "page_failed": false,
+      "page_failed_stage": "",
+      "page_failed_reason": "",
+      "is_hard_page": false
+    },
+    {
+      "image_path": "[local-only]",
+      "image_name": "p_016.jpg",
+      "detect_box_count": 30,
+      "primary_engine": "PaddleOCR VL",
+      "primary_metrics": {
+        "ocr_total_block_count": 30,
+        "ocr_empty_block_count": 0,
+        "ocr_low_quality_block_count": 0
+      },
+      "sidecar": {
+        "MangaLMM": {
+          "engine_key": "MangaLMM",
+          "engine_name": "MangaLMMOCREngine",
+          "detect_box_count": 30,
+          "ocr_block_count": 30,
+          "ocr_non_empty": 5,
+          "ocr_empty": 25,
+          "ocr_single_char_like": 0,
+          "bbox_2d_success_block_count": 5,
+          "bbox_2d_region_count": 5,
+          "page_profile": {},
+          "request_metadata": {
+            "attempt_count": 2,
+            "retry_count": 1,
+            "contract_mode": "optimal_plus_japanese",
+            "final_status": "success",
+            "failure_reason": "",
+            "matched_region_count": 5,
+            "matched_block_count": 5,
+            "mapped_region_count": 7,
+            "non_empty_block_count": 5,
+            "resize_profile": "dense",
+            "request_shape": [
+              1270,
+              900
+            ]
+          }
+        }
+      },
+      "page_failed": false,
+      "page_failed_stage": "",
+      "page_failed_reason": "",
+      "is_hard_page": true
+    },
+    {
+      "image_path": "[local-only]",
+      "image_name": "p_017.jpg",
+      "detect_box_count": 15,
+      "primary_engine": "PaddleOCR VL",
+      "primary_metrics": {
+        "ocr_total_block_count": 15,
+        "ocr_empty_block_count": 0,
+        "ocr_low_quality_block_count": 0
+      },
+      "sidecar": {
+        "MangaLMM": {
+          "engine_key": "MangaLMM",
+          "engine_name": "MangaLMMOCREngine",
+          "detect_box_count": 15,
+          "ocr_block_count": 15,
+          "ocr_non_empty": 15,
+          "ocr_empty": 0,
+          "ocr_single_char_like": 0,
+          "bbox_2d_success_block_count": 15,
+          "bbox_2d_region_count": 16,
+          "page_profile": {},
+          "request_metadata": {
+            "attempt_count": 1,
+            "retry_count": 0,
+            "contract_mode": "optimal_plus_japanese",
+            "final_status": "success",
+            "failure_reason": "",
+            "matched_region_count": 16,
+            "matched_block_count": 15,
+            "mapped_region_count": 26,
+            "non_empty_block_count": 15,
+            "resize_profile": "standard",
+            "request_shape": [
+              1728,
+              1224
+            ]
+          }
+        }
+      },
+      "page_failed": false,
+      "page_failed_stage": "",
+      "page_failed_reason": "",
+      "is_hard_page": false
+    },
+    {
+      "image_path": "[local-only]",
+      "image_name": "p_018.jpg",
+      "detect_box_count": 18,
+      "primary_engine": "PaddleOCR VL",
+      "primary_metrics": {
+        "ocr_total_block_count": 18,
+        "ocr_empty_block_count": 0,
+        "ocr_low_quality_block_count": 5
+      },
+      "sidecar": {
+        "MangaLMM": {
+          "engine_key": "MangaLMM",
+          "engine_name": "MangaLMMOCREngine",
+          "detect_box_count": 18,
+          "ocr_block_count": 18,
+          "ocr_non_empty": 15,
+          "ocr_empty": 3,
+          "ocr_single_char_like": 4,
+          "bbox_2d_success_block_count": 15,
+          "bbox_2d_region_count": 16,
+          "page_profile": {},
+          "request_metadata": {
+            "attempt_count": 2,
+            "retry_count": 1,
+            "contract_mode": "optimal_plus_japanese",
+            "final_status": "success",
+            "failure_reason": "",
+            "matched_region_count": 16,
+            "matched_block_count": 15,
+            "mapped_region_count": 39,
+            "non_empty_block_count": 15,
+            "resize_profile": "dense",
+            "request_shape": [
+              1270,
+              899
+            ]
+          }
+        }
+      },
+      "page_failed": false,
+      "page_failed_stage": "",
+      "page_failed_reason": "",
+      "is_hard_page": false
+    },
+    {
+      "image_path": "[local-only]",
+      "image_name": "p_019.jpg",
+      "detect_box_count": 9,
+      "primary_engine": "PaddleOCR VL",
+      "primary_metrics": {
+        "ocr_total_block_count": 9,
+        "ocr_empty_block_count": 0,
+        "ocr_low_quality_block_count": 1
+      },
+      "sidecar": {
+        "MangaLMM": {
+          "engine_key": "MangaLMM",
+          "engine_name": "MangaLMMOCREngine",
+          "detect_box_count": 9,
+          "ocr_block_count": 9,
+          "ocr_non_empty": 9,
+          "ocr_empty": 0,
+          "ocr_single_char_like": 1,
+          "bbox_2d_success_block_count": 9,
+          "bbox_2d_region_count": 9,
+          "page_profile": {},
+          "request_metadata": {
+            "attempt_count": 3,
+            "retry_count": 2,
+            "contract_mode": "optimal_plus_japanese",
+            "final_status": "success",
+            "failure_reason": "",
+            "matched_region_count": 12,
+            "matched_block_count": 9,
+            "mapped_region_count": 47,
+            "non_empty_block_count": 9,
+            "resize_profile": "dense",
+            "request_shape": [
+              1270,
+              899
+            ]
+          }
+        }
+      },
+      "page_failed": false,
+      "page_failed_stage": "",
+      "page_failed_reason": "",
+      "is_hard_page": false
+    },
+    {
+      "image_path": "[local-only]",
+      "image_name": "p_020.jpg",
+      "detect_box_count": 30,
+      "primary_engine": "PaddleOCR VL",
+      "primary_metrics": {
+        "ocr_total_block_count": 30,
+        "ocr_empty_block_count": 0,
+        "ocr_low_quality_block_count": 2
+      },
+      "sidecar": {
+        "MangaLMM": {
+          "engine_key": "MangaLMM",
+          "engine_name": "MangaLMMOCREngine",
+          "detect_box_count": 30,
+          "ocr_block_count": 30,
+          "ocr_non_empty": 26,
+          "ocr_empty": 4,
+          "ocr_single_char_like": 2,
+          "bbox_2d_success_block_count": 26,
+          "bbox_2d_region_count": 27,
+          "page_profile": {},
+          "request_metadata": {
+            "attempt_count": 2,
+            "retry_count": 1,
+            "contract_mode": "optimal_plus_japanese",
+            "final_status": "success",
+            "failure_reason": "",
+            "matched_region_count": 27,
+            "matched_block_count": 26,
+            "mapped_region_count": 50,
+            "non_empty_block_count": 26,
+            "resize_profile": "dense",
+            "request_shape": [
+              1270,
+              899
+            ]
+          }
+        }
+      },
+      "page_failed": false,
+      "page_failed_stage": "",
+      "page_failed_reason": "",
+      "is_hard_page": false
+    },
+    {
+      "image_path": "[local-only]",
+      "image_name": "p_021.jpg",
+      "detect_box_count": 9,
+      "primary_engine": "PaddleOCR VL",
+      "primary_metrics": {
+        "ocr_total_block_count": 9,
+        "ocr_empty_block_count": 0,
+        "ocr_low_quality_block_count": 3
+      },
+      "sidecar": {
+        "MangaLMM": {
+          "engine_key": "MangaLMM",
+          "engine_name": "MangaLMMOCREngine",
+          "detect_box_count": 9,
+          "ocr_block_count": 9,
+          "ocr_non_empty": 8,
+          "ocr_empty": 1,
+          "ocr_single_char_like": 2,
+          "bbox_2d_success_block_count": 8,
+          "bbox_2d_region_count": 8,
+          "page_profile": {},
+          "request_metadata": {
+            "attempt_count": 1,
+            "retry_count": 0,
+            "contract_mode": "optimal_plus_japanese",
+            "final_status": "success",
+            "failure_reason": "",
+            "matched_region_count": 8,
+            "matched_block_count": 8,
+            "mapped_region_count": 27,
+            "non_empty_block_count": 8,
+            "resize_profile": "standard",
+            "request_shape": [
+              1728,
+              1224
+            ]
+          }
+        }
+      },
+      "page_failed": false,
+      "page_failed_stage": "",
+      "page_failed_reason": "",
+      "is_hard_page": false
+    }
+  ]
+}
