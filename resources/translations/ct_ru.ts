@@ -2098,8 +2098,36 @@ These values are copied into new series projects and can be adjusted per series.
         <translation type="unfinished"></translation>
     </message>
     <message>
+        <source>Sort</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Manual Queue</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Name (A-Z)</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Name (Z-A)</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Date (Newest First)</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Date (Oldest First)</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
         <source>Queue changes are locked while automatic translation is running.
 The current running item stays fixed, and you can change the queue after the run finishes.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Apply a quick queue sort by name or modified date.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
@@ -3275,6 +3303,25 @@ It may have already been moved, renamed, or deleted.
     </message>
     <message>
         <source>Folder</source>
+        <translation type="unfinished"></translation>
+    </message>
+</context>
+<context>
+    <name>_SeriesItemPreviewPopup</name>
+    <message>
+        <source>Series item</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Preview</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Preview Unavailable</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>This item does not have an image preview, so a file card is shown instead.</source>
         <translation type="unfinished"></translation>
     </message>
 </context>

@@ -1,8 +1,20 @@
 from __future__ import annotations
 
+import hashlib
+import os
+import shutil
+import tempfile
+
 from PySide6 import QtCore, QtGui, QtWidgets
 
+from modules.utils.archives import list_archive_image_entries, materialize_archive_entry
+
 from .dayu_widgets import dayu_theme
+from .dayu_widgets.tool_button import MToolButton
+
+
+_DIRECT_PREVIEW_EXTS = {".png", ".jpg", ".jpeg", ".webp", ".bmp", ".psd"}
+_ARCHIVE_PREVIEW_EXTS = {".pdf", ".epub", ".zip", ".rar", ".7z", ".tar", ".cbz", ".cbr", ".cb7", ".cbt"}
 
 
 def _hex_to_rgba(value: str, alpha: float) -> str:
@@ -11,11 +23,268 @@ def _hex_to_rgba(value: str, alpha: float) -> str:
     return color.name(QtGui.QColor.NameFormat.HexArgb)
 
 
+def _safe_mtime(path: str) -> float:
+    try:
+        return float(os.path.getmtime(path))
+    except OSError:
+        return 0.0
+
+
+class _SeriesItemPreviewPopup(QtWidgets.QFrame):
+    def __init__(self, parent=None):
+        super().__init__(parent, QtCore.Qt.WindowType.ToolTip | QtCore.Qt.WindowType.FramelessWindowHint)
+        self.setAttribute(QtCore.Qt.WidgetAttribute.WA_ShowWithoutActivating, True)
+        self.setObjectName("seriesItemPreviewPopup")
+        self.setWindowFlag(QtCore.Qt.WindowType.NoDropShadowWindowHint, False)
+        self._pixmap_cache: dict[str, QtGui.QPixmap | None] = {}
+        self._preview_temp_dir = tempfile.mkdtemp(prefix="ct_series_preview_")
+
+        shadow = QtWidgets.QGraphicsDropShadowEffect(self)
+        shadow.setBlurRadius(28)
+        shadow.setColor(QtGui.QColor(0, 0, 0, 180))
+        shadow.setOffset(0, 10)
+        self.setGraphicsEffect(shadow)
+
+        layout = QtWidgets.QVBoxLayout(self)
+        layout.setContentsMargins(12, 12, 12, 12)
+        layout.setSpacing(10)
+
+        self.thumbnail_label = QtWidgets.QLabel(self)
+        self.thumbnail_label.setObjectName("seriesItemPreviewThumbnail")
+        self.thumbnail_label.setFixedSize(272, 168)
+        self.thumbnail_label.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
+
+        meta_row = QtWidgets.QHBoxLayout()
+        meta_row.setContentsMargins(0, 0, 0, 0)
+        meta_row.setSpacing(8)
+
+        self.type_chip = QtWidgets.QLabel(self)
+        self.type_chip.setObjectName("seriesItemPreviewChip")
+        self.type_chip.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
+
+        self.path_chip = QtWidgets.QLabel(self)
+        self.path_chip.setObjectName("seriesItemPreviewPath")
+        self.path_chip.setAlignment(QtCore.Qt.AlignmentFlag.AlignRight | QtCore.Qt.AlignmentFlag.AlignVCenter)
+
+        meta_row.addWidget(self.type_chip, 0)
+        meta_row.addWidget(self.path_chip, 1)
+
+        self.title_label = QtWidgets.QLabel(self)
+        self.title_label.setObjectName("seriesItemPreviewTitle")
+        self.title_label.setWordWrap(True)
+
+        self.subtitle_label = QtWidgets.QLabel(self)
+        self.subtitle_label.setObjectName("seriesItemPreviewSubtitle")
+        self.subtitle_label.setWordWrap(True)
+
+        layout.addWidget(self.thumbnail_label)
+        layout.addLayout(meta_row)
+        layout.addWidget(self.title_label)
+        layout.addWidget(self.subtitle_label)
+
+        self._apply_theme_styles()
+
+    def _apply_theme_styles(self) -> None:
+        accent = dayu_theme.primary_color or dayu_theme.yellow or "#fadb14"
+        text = dayu_theme.primary_text_color or "#f5f5f5"
+        sub_text = dayu_theme.secondary_text_color or "#b6b6b6"
+        panel = dayu_theme.background_in_color or "#252a31"
+        border = _hex_to_rgba(accent, 0.22)
+        chip_fill = _hex_to_rgba(accent, 0.16)
+        chip_border = _hex_to_rgba(accent, 0.34)
+        path_fill = _hex_to_rgba(text, 0.06)
+        self.setStyleSheet(
+            f"""
+            QFrame#seriesItemPreviewPopup {{
+                background: {panel};
+                border: 1px solid {border};
+                border-radius: 18px;
+            }}
+            QLabel#seriesItemPreviewThumbnail {{
+                background: {dayu_theme.background_color or "#1f242b"};
+                border: 1px solid {_hex_to_rgba(text, 0.08)};
+                border-radius: 14px;
+                color: {sub_text};
+            }}
+            QLabel#seriesItemPreviewChip {{
+                padding: 4px 10px;
+                border-radius: 999px;
+                background: {chip_fill};
+                border: 1px solid {chip_border};
+                color: {text};
+                font-weight: 700;
+            }}
+            QLabel#seriesItemPreviewPath {{
+                padding: 4px 10px;
+                border-radius: 999px;
+                background: {path_fill};
+                color: {sub_text};
+            }}
+            QLabel#seriesItemPreviewTitle {{
+                color: {text};
+                font-size: 14px;
+                font-weight: 700;
+            }}
+            QLabel#seriesItemPreviewSubtitle {{
+                color: {sub_text};
+                font-size: 12px;
+            }}
+            """
+        )
+
+    def closeEvent(self, event):  # type: ignore[override]
+        try:
+            shutil.rmtree(self._preview_temp_dir, ignore_errors=True)
+        finally:
+            super().closeEvent(event)
+
+    def hide_preview(self) -> None:
+        self.hide()
+
+    def show_preview(self, payload: dict[str, object], global_pos: QtCore.QPoint) -> None:
+        display_name = str(payload.get("display_name") or "")
+        source_path = str(payload.get("source_origin_path") or "")
+        relpath = str(payload.get("source_origin_relpath") or "")
+        ext = os.path.splitext(source_path)[1].lstrip(".").upper() or "FILE"
+        subtitle = relpath or source_path or self.tr("Series item")
+
+        self.type_chip.setText(ext)
+        self.path_chip.setText(self.tr("Preview"))
+        self.title_label.setText(display_name or os.path.basename(source_path) or self.tr("Series item"))
+        self.subtitle_label.setText(subtitle)
+        pixmap = self._load_preview_pixmap(source_path)
+        if pixmap is None or pixmap.isNull():
+            pixmap = self._build_placeholder_pixmap(ext, display_name)
+        self.thumbnail_label.setPixmap(self._rounded_scaled_pixmap(pixmap, self.thumbnail_label.size(), 14))
+        self.adjustSize()
+        self.move(self._bounded_position(global_pos + QtCore.QPoint(22, 18)))
+        self.show()
+        self.raise_()
+
+    def _bounded_position(self, proposed: QtCore.QPoint) -> QtCore.QPoint:
+        screen = QtGui.QGuiApplication.screenAt(proposed) or QtGui.QGuiApplication.primaryScreen()
+        if screen is None:
+            return proposed
+        available = screen.availableGeometry()
+        x = min(proposed.x(), available.right() - self.width() - 12)
+        y = min(proposed.y(), available.bottom() - self.height() - 12)
+        x = max(available.left() + 12, x)
+        y = max(available.top() + 12, y)
+        return QtCore.QPoint(x, y)
+
+    def _rounded_scaled_pixmap(
+        self,
+        pixmap: QtGui.QPixmap,
+        target_size: QtCore.QSize,
+        radius: int,
+    ) -> QtGui.QPixmap:
+        scaled = pixmap.scaled(
+            target_size,
+            QtCore.Qt.AspectRatioMode.KeepAspectRatioByExpanding,
+            QtCore.Qt.TransformationMode.SmoothTransformation,
+        )
+        rounded = QtGui.QPixmap(target_size)
+        rounded.fill(QtCore.Qt.GlobalColor.transparent)
+        painter = QtGui.QPainter(rounded)
+        painter.setRenderHint(QtGui.QPainter.RenderHint.Antialiasing, True)
+        path = QtGui.QPainterPath()
+        path.addRoundedRect(QtCore.QRectF(rounded.rect()), radius, radius)
+        painter.setClipPath(path)
+        x = (target_size.width() - scaled.width()) // 2
+        y = (target_size.height() - scaled.height()) // 2
+        painter.drawPixmap(x, y, scaled)
+        painter.end()
+        return rounded
+
+    def _build_placeholder_pixmap(self, ext: str, title: str) -> QtGui.QPixmap:
+        size = QtCore.QSize(272, 168)
+        pixmap = QtGui.QPixmap(size)
+        pixmap.fill(QtCore.Qt.GlobalColor.transparent)
+        painter = QtGui.QPainter(pixmap)
+        painter.setRenderHint(QtGui.QPainter.RenderHint.Antialiasing, True)
+
+        gradient = QtGui.QLinearGradient(0, 0, size.width(), size.height())
+        gradient.setColorAt(0.0, QtGui.QColor(_hex_to_rgba(dayu_theme.primary_color or "#fadb14", 0.24)))
+        gradient.setColorAt(1.0, QtGui.QColor(dayu_theme.background_out_color or "#3a3f47"))
+        painter.setBrush(QtGui.QBrush(gradient))
+        painter.setPen(QtCore.Qt.PenStyle.NoPen)
+        painter.drawRoundedRect(QtCore.QRectF(0, 0, size.width(), size.height()), 14, 14)
+
+        badge_rect = QtCore.QRectF(16, 16, 90, 38)
+        painter.setBrush(QtGui.QColor(_hex_to_rgba(dayu_theme.background_color or "#171a1f", 0.92)))
+        painter.drawRoundedRect(badge_rect, 12, 12)
+        painter.setPen(QtGui.QColor(dayu_theme.primary_text_color or "#f5f5f5"))
+        badge_font = QtGui.QFont(self.font())
+        badge_font.setBold(True)
+        badge_font.setPointSize(max(10, badge_font.pointSize()))
+        painter.setFont(badge_font)
+        painter.drawText(badge_rect, QtCore.Qt.AlignmentFlag.AlignCenter, ext)
+
+        title_font = QtGui.QFont(self.font())
+        title_font.setBold(True)
+        title_font.setPointSize(max(14, title_font.pointSize() + 2))
+        painter.setFont(title_font)
+        painter.drawText(
+            QtCore.QRectF(18, 72, size.width() - 36, 34),
+            QtCore.Qt.AlignmentFlag.AlignLeft | QtCore.Qt.AlignmentFlag.AlignVCenter,
+            self.tr("Preview Unavailable"),
+        )
+        painter.setPen(QtGui.QColor(dayu_theme.secondary_text_color or "#c0c0c0"))
+        body_font = QtGui.QFont(self.font())
+        body_font.setPointSize(max(10, body_font.pointSize()))
+        painter.setFont(body_font)
+        painter.drawText(
+            QtCore.QRectF(18, 108, size.width() - 36, 42),
+            QtCore.Qt.AlignmentFlag.TextWordWrap,
+            title or self.tr("This item does not have an image preview, so a file card is shown instead."),
+        )
+        painter.end()
+        return pixmap
+
+    def _archive_preview_path(self, source_path: str) -> str:
+        ext = ".png"
+        digest = hashlib.sha1(source_path.encode("utf-8")).hexdigest()
+        return os.path.join(self._preview_temp_dir, f"{digest}{ext}")
+
+    def _load_preview_pixmap(self, source_path: str) -> QtGui.QPixmap | None:
+        clean_path = os.path.normpath(os.path.abspath(source_path or ""))
+        if not clean_path:
+            return None
+        if clean_path in self._pixmap_cache:
+            return self._pixmap_cache[clean_path]
+
+        pixmap: QtGui.QPixmap | None = None
+        ext = os.path.splitext(clean_path)[1].lower()
+        if ext in _DIRECT_PREVIEW_EXTS and os.path.exists(clean_path):
+            loaded = QtGui.QPixmap(clean_path)
+            pixmap = loaded if not loaded.isNull() else None
+        elif ext in _ARCHIVE_PREVIEW_EXTS and os.path.exists(clean_path):
+            preview_path = self._archive_preview_path(clean_path)
+            if not os.path.exists(preview_path):
+                try:
+                    if ext == ".pdf":
+                        entry = {"kind": "pdf_page", "page_index": 0, "ext": ".png"}
+                    else:
+                        entries = list_archive_image_entries(clean_path)
+                        entry = entries[0] if entries else None
+                    if entry is not None:
+                        materialize_archive_entry(clean_path, entry, preview_path)
+                except Exception:
+                    preview_path = ""
+            if preview_path and os.path.exists(preview_path):
+                loaded = QtGui.QPixmap(preview_path)
+                pixmap = loaded if not loaded.isNull() else None
+        self._pixmap_cache[clean_path] = pixmap
+        return pixmap
+
+
 class _SeriesQueueTable(QtWidgets.QTableWidget):
     order_changed = QtCore.Signal(list)
     open_requested = QtCore.Signal(str)
     remove_requested = QtCore.Signal(str)
     queue_index_requested = QtCore.Signal(str, int)
+    hover_preview_requested = QtCore.Signal(dict, QtCore.QPoint)
+    hover_preview_hidden = QtCore.Signal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -23,6 +292,7 @@ class _SeriesQueueTable(QtWidgets.QTableWidget):
         self._queue_running = False
         self._active_item_id = ""
         self._lock_reason = ""
+        self._hovered_item_id = ""
         self.setColumnCount(6)
         self.setHorizontalHeaderLabels(
             [
@@ -43,6 +313,9 @@ class _SeriesQueueTable(QtWidgets.QTableWidget):
         self.setAlternatingRowColors(True)
         self.setShowGrid(False)
         self.setFrameShape(QtWidgets.QFrame.Shape.NoFrame)
+        self.setMouseTracking(True)
+        self.viewport().setMouseTracking(True)
+        self.viewport().installEventFilter(self)
         self.verticalHeader().setVisible(False)
         self.verticalHeader().setDefaultSectionSize(40)
         self.setHorizontalScrollMode(QtWidgets.QAbstractItemView.ScrollMode.ScrollPerPixel)
@@ -74,6 +347,7 @@ class _SeriesQueueTable(QtWidgets.QTableWidget):
         accent = dayu_theme.primary_color or dayu_theme.yellow or "#fadb14"
         accent_soft = _hex_to_rgba(accent, 0.18)
         handle = _hex_to_rgba(text, 0.22)
+        danger_soft = _hex_to_rgba("#ff7875", 0.18)
         self.setStyleSheet(
             f"""
             QTableWidget {{
@@ -113,6 +387,19 @@ class _SeriesQueueTable(QtWidgets.QTableWidget):
                 background: {handle};
                 border-radius: 6px;
                 min-height: 28px;
+            }}
+            QToolButton#seriesRemoveButton {{
+                min-width: 28px;
+                min-height: 28px;
+                max-width: 28px;
+                max-height: 28px;
+                border: none;
+                border-radius: 10px;
+                background: transparent;
+                padding: 0;
+            }}
+            QToolButton#seriesRemoveButton:hover {{
+                background: {danger_soft};
             }}
             QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{
                 height: 0;
@@ -198,6 +485,13 @@ class _SeriesQueueTable(QtWidgets.QTableWidget):
                 table_item.setBackground(QtGui.QBrush())
                 table_item.setToolTip("")
 
+    def _row_payload(self, row: int) -> dict[str, object]:
+        queue_item = self.item(row, 0)
+        if queue_item is None:
+            return {}
+        payload = queue_item.data(QtCore.Qt.ItemDataRole.UserRole + 1)
+        return dict(payload or {})
+
     def set_series_items(self, items: list[dict[str, object]]) -> None:
         self._suppress_item_changed = True
         self.setRowCount(len(items))
@@ -205,15 +499,28 @@ class _SeriesQueueTable(QtWidgets.QTableWidget):
             item_id = str(item.get("series_item_id") or "")
             queue_text = f"{int(item.get('queue_index', row + 1) or (row + 1)):02d}"
             status = str(item.get("status") or "pending")
+            source_path = str(item.get("source_origin_path") or "")
+            payload = {
+                "series_item_id": item_id,
+                "display_name": str(item.get("display_name") or ""),
+                "source_origin_path": source_path,
+                "source_origin_relpath": str(item.get("source_origin_relpath") or ""),
+                "source_kind": str(item.get("source_kind") or ""),
+                "status": status,
+                "queue_index": int(item.get("queue_index", row + 1) or (row + 1)),
+                "modified_ts": _safe_mtime(source_path),
+            }
 
             queue_item = QtWidgets.QTableWidgetItem(queue_text)
             queue_item.setTextAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
             queue_item.setData(QtCore.Qt.ItemDataRole.UserRole, item_id)
+            queue_item.setData(QtCore.Qt.ItemDataRole.UserRole + 1, payload)
             queue_item.setFlags(self._queue_item_flags())
 
             name_item = QtWidgets.QTableWidgetItem(str(item.get("display_name") or ""))
             name_item.setData(QtCore.Qt.ItemDataRole.UserRole, item_id)
-            name_item.setToolTip(str(item.get("source_origin_path") or ""))
+            name_item.setData(QtCore.Qt.ItemDataRole.UserRole + 1, payload)
+            name_item.setToolTip(source_path)
             name_item.setFlags(self._name_item_flags())
 
             source_kind = str(item.get("source_kind") or "")
@@ -232,8 +539,8 @@ class _SeriesQueueTable(QtWidgets.QTableWidget):
             status_item.setFlags(QtCore.Qt.ItemFlag.ItemIsEnabled | QtCore.Qt.ItemFlag.ItemIsSelectable)
             status_item.setTextAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
 
-            remove_button = QtWidgets.QToolButton(self)
-            remove_button.setText("×")
+            remove_button = MToolButton(self).svg("trash_line.svg").small().icon_only()
+            remove_button.setObjectName("seriesRemoveButton")
             remove_button.setToolTip(
                 self._lock_reason if self._queue_running else self.tr("Remove from series")
             )
@@ -323,6 +630,49 @@ class _SeriesQueueTable(QtWidgets.QTableWidget):
             item_id = str(queue_item.data(QtCore.Qt.ItemDataRole.UserRole) or "")
         if item_id:
             self.open_requested.emit(item_id)
+
+    def sorted_item_ids(self, mode: str) -> list[str]:
+        rows = []
+        for row in range(self.rowCount()):
+            payload = self._row_payload(row)
+            if payload:
+                rows.append(payload)
+        if mode == "name_asc":
+            rows.sort(key=lambda item: (str(item.get("display_name") or "").casefold(), str(item.get("source_origin_path") or "").casefold()))
+        elif mode == "name_desc":
+            rows.sort(key=lambda item: (str(item.get("display_name") or "").casefold(), str(item.get("source_origin_path") or "").casefold()), reverse=True)
+        elif mode == "date_desc":
+            rows.sort(key=lambda item: (float(item.get("modified_ts") or 0.0), str(item.get("display_name") or "").casefold()), reverse=True)
+        elif mode == "date_asc":
+            rows.sort(key=lambda item: (float(item.get("modified_ts") or 0.0), str(item.get("display_name") or "").casefold()))
+        return [str(item.get("series_item_id") or "") for item in rows if str(item.get("series_item_id") or "").strip()]
+
+    def eventFilter(self, watched, event):  # type: ignore[override]
+        if watched is self.viewport():
+            event_type = event.type()
+            if event_type == QtCore.QEvent.Type.MouseMove:
+                mouse_event = event
+                row = self.rowAt(mouse_event.pos().y())
+                if row < 0:
+                    if self._hovered_item_id:
+                        self._hovered_item_id = ""
+                        self.hover_preview_hidden.emit()
+                    return super().eventFilter(watched, event)
+                payload = self._row_payload(row)
+                item_id = str(payload.get("series_item_id") or "")
+                if not item_id:
+                    return super().eventFilter(watched, event)
+                self._hovered_item_id = item_id
+                self.hover_preview_requested.emit(payload, self.viewport().mapToGlobal(mouse_event.pos()))
+            elif event_type in {
+                QtCore.QEvent.Type.Leave,
+                QtCore.QEvent.Type.Hide,
+                QtCore.QEvent.Type.WindowDeactivate,
+            }:
+                if self._hovered_item_id:
+                    self._hovered_item_id = ""
+                    self.hover_preview_hidden.emit()
+        return super().eventFilter(watched, event)
 
 
 class _SeriesQuickSettings(QtWidgets.QWidget):
@@ -636,6 +986,8 @@ class SeriesTreeJumpDialog(QtWidgets.QDialog):
         self.setWindowTitle(self.tr("Tree Jump"))
         self.resize(520, 620)
         self.setMinimumSize(460, 500)
+        self.setSizeGripEnabled(True)
+        self.setWindowFlag(QtCore.Qt.WindowType.WindowMaximizeButtonHint, True)
 
         accent = dayu_theme.primary_color or dayu_theme.yellow or "#fadb14"
         text = dayu_theme.primary_text_color or "#d9d9d9"
@@ -827,6 +1179,17 @@ class SeriesWorkspace(QtWidgets.QWidget):
         action_row.addWidget(self.add_files_button)
         action_row.addWidget(self.add_folder_button)
         action_row.addStretch(1)
+        self.sort_label = QtWidgets.QLabel(self.tr("Sort"))
+        self.sort_label.setObjectName("seriesQuickNote")
+        self.sort_combo = QtWidgets.QComboBox(self)
+        self.sort_combo.addItem(self.tr("Manual Queue"), "manual")
+        self.sort_combo.addItem(self.tr("Name (A-Z)"), "name_asc")
+        self.sort_combo.addItem(self.tr("Name (Z-A)"), "name_desc")
+        self.sort_combo.addItem(self.tr("Date (Newest First)"), "date_desc")
+        self.sort_combo.addItem(self.tr("Date (Oldest First)"), "date_asc")
+        self.sort_combo.setMinimumWidth(180)
+        action_row.addWidget(self.sort_label)
+        action_row.addWidget(self.sort_combo)
         left_layout.addLayout(action_row)
 
         self.queue_notice = QtWidgets.QLabel("")
@@ -855,6 +1218,13 @@ class SeriesWorkspace(QtWidgets.QWidget):
         self.body_splitter.setStretchFactor(1, 0)
         self.body_splitter.setSizes([860, 360])
 
+        self._hover_preview_popup = _SeriesItemPreviewPopup(self)
+        self._hover_preview_timer = QtCore.QTimer(self)
+        self._hover_preview_timer.setSingleShot(True)
+        self._hover_preview_timer.setInterval(140)
+        self._pending_preview_payload: dict[str, object] = {}
+        self._pending_preview_pos = QtCore.QPoint()
+
         self.back_button.clicked.connect(self.back_requested)
         self.forward_button.clicked.connect(self.forward_requested)
         self.tree_button.clicked.connect(self.tree_jump_requested)
@@ -865,12 +1235,16 @@ class SeriesWorkspace(QtWidgets.QWidget):
         self.queue_table.remove_requested.connect(self.remove_item_requested)
         self.queue_table.order_changed.connect(self.reorder_requested)
         self.queue_table.queue_index_requested.connect(self.queue_index_requested)
+        self.queue_table.hover_preview_requested.connect(self._queue_hover_requested)
+        self.queue_table.hover_preview_hidden.connect(self._hide_hover_preview)
         self.quick_settings.auto_translate_requested.connect(self.auto_translate_requested)
         self.status_panel.pause_requested.connect(self.pause_requested)
         self.status_panel.resume_requested.connect(self.resume_requested)
         self.status_panel.open_failed_requested.connect(self.open_failed_item_requested)
         self.quick_settings.open_series_settings_requested.connect(self.open_series_settings_requested)
         self.quick_settings.changed.connect(self._emit_global_settings_changed)
+        self.sort_combo.currentIndexChanged.connect(self._on_sort_changed)
+        self._hover_preview_timer.timeout.connect(self._show_pending_hover_preview)
         self._apply_theme_styles()
 
     def _apply_theme_styles(self) -> None:
@@ -987,6 +1361,9 @@ class SeriesWorkspace(QtWidgets.QWidget):
             QLabel#seriesStatusNote {{
                 color: {sub_text};
             }}
+            QLabel#seriesPreviewHelper {{
+                color: {sub_text};
+            }}
             QPushButton#seriesAutoTranslateButton {{
                 background: {accent};
                 border: 1px solid {accent};
@@ -1009,6 +1386,14 @@ class SeriesWorkspace(QtWidgets.QWidget):
             """
         )
         self.queue_table.apply_theme_styles()
+
+    def _set_sort_mode(self, mode: str) -> None:
+        index = self.sort_combo.findData(mode)
+        if index < 0:
+            index = 0
+        blocker = QtCore.QSignalBlocker(self.sort_combo)
+        self.sort_combo.setCurrentIndex(index)
+        del blocker
 
     def configure_options(self, *, languages, ocr_modes, translators, workflow_modes) -> None:
         self.quick_settings.set_options(
@@ -1064,6 +1449,7 @@ class SeriesWorkspace(QtWidgets.QWidget):
         self.title_label.setText(series_file)
         self.scope_badge.setText(self.tr("Series Project"))
         lock_reason = self._queue_lock_reason()
+        self._hide_hover_preview()
         self.queue_table.set_interaction_state(
             queue_running=queue_running,
             active_item_id=active_item_id,
@@ -1080,6 +1466,8 @@ class SeriesWorkspace(QtWidgets.QWidget):
         self.open_button.setEnabled(bool(items) and not controls_locked)
         self.add_files_button.setEnabled(not controls_locked)
         self.add_folder_button.setEnabled(not controls_locked)
+        self.sort_combo.setEnabled(not controls_locked and len(items) > 1)
+        self.sort_combo.setToolTip(lock_reason if controls_locked else self.tr("Apply a quick queue sort by name or modified date."))
         self.open_button.setToolTip(lock_reason if controls_locked else self.tr("Open the selected child project."))
         self.add_files_button.setToolTip(lock_reason if controls_locked else self.tr("Add supported files to this series."))
         self.add_folder_button.setToolTip(lock_reason if controls_locked else self.tr("Scan and add a folder to this series."))
@@ -1115,6 +1503,37 @@ class SeriesWorkspace(QtWidgets.QWidget):
         item_id = self.queue_table.selected_item_id()
         if item_id:
             self.open_item_requested.emit(item_id)
+
+    def _on_sort_changed(self) -> None:
+        mode = str(self.sort_combo.currentData() or "manual")
+        if mode == "manual":
+            return
+        ordered_ids = self.queue_table.sorted_item_ids(mode)
+        if ordered_ids:
+            self.reorder_requested.emit(ordered_ids)
+        self._set_sort_mode("manual")
+
+    def _queue_hover_requested(self, payload: dict[str, object], global_pos: QtCore.QPoint) -> None:
+        self._pending_preview_payload = dict(payload or {})
+        self._pending_preview_pos = QtCore.QPoint(global_pos)
+        if self._hover_preview_popup.isVisible():
+            self._hover_preview_popup.show_preview(self._pending_preview_payload, self._pending_preview_pos)
+            return
+        self._hover_preview_timer.start()
+
+    def _show_pending_hover_preview(self) -> None:
+        if not self._pending_preview_payload:
+            return
+        self._hover_preview_popup.show_preview(self._pending_preview_payload, self._pending_preview_pos)
+
+    def _hide_hover_preview(self) -> None:
+        self._hover_preview_timer.stop()
+        self._pending_preview_payload = {}
+        self._hover_preview_popup.hide_preview()
+
+    def hideEvent(self, event):  # type: ignore[override]
+        self._hide_hover_preview()
+        super().hideEvent(event)
 
     def _emit_global_settings_changed(self) -> None:
         self.global_settings_changed.emit(self.quick_settings.values())

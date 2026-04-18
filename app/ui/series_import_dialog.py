@@ -19,7 +19,7 @@ class _SeriesImportTable(QtWidgets.QTableWidget):
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setColumnCount(5)
+        self.setColumnCount(6)
         self.setHorizontalHeaderLabels(
             [
                 self.tr("Use"),
@@ -136,6 +136,8 @@ class SeriesImportDialog(QtWidgets.QDialog):
         self.setWindowTitle(self.tr("Create Series Project"))
         self.resize(1080, 700)
         self.setMinimumSize(900, 620)
+        self.setSizeGripEnabled(True)
+        self.setWindowFlag(QtCore.Qt.WindowType.WindowMaximizeButtonHint, True)
         self.setModal(True)
         layout = QtWidgets.QVBoxLayout(self)
         layout.setContentsMargins(20, 18, 20, 18)
