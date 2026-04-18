@@ -1928,6 +1928,30 @@ This folder is separate from Auto-Recover snapshots.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
+        <source>Sort</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Manual Queue</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Name (A-Z)</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Name (Z-A)</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Date (Newest First)</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Date (Oldest First)</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
         <source>Only checked files will be added. You can still reorder or remove queue items later from the series board.</source>
         <translation type="unfinished"></translation>
     </message>
@@ -3239,6 +3263,10 @@ It may have already been moved, renamed, or deleted.
     <message>
         <source>Name</source>
         <translation type="unfinished">Name</translation>
+    </message>
+    <message>
+        <source>Modified</source>
+        <translation type="unfinished"></translation>
     </message>
     <message>
         <source>Type</source>

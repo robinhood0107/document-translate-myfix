@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+from datetime import datetime
 
 from PySide6 import QtCore, QtGui, QtWidgets
 
@@ -24,6 +25,7 @@ class _SeriesImportTable(QtWidgets.QTableWidget):
                 self.tr("Use"),
                 self.tr("Queue"),
                 self.tr("Name"),
+                self.tr("Modified"),
                 self.tr("Type"),
                 self.tr("Folder"),
             ]
@@ -51,11 +53,13 @@ class _SeriesImportTable(QtWidgets.QTableWidget):
         header.setSectionResizeMode(1, QtWidgets.QHeaderView.ResizeMode.ResizeToContents)
         header.setSectionResizeMode(2, QtWidgets.QHeaderView.ResizeMode.Stretch)
         header.setSectionResizeMode(3, QtWidgets.QHeaderView.ResizeMode.ResizeToContents)
-        header.setSectionResizeMode(4, QtWidgets.QHeaderView.ResizeMode.Stretch)
+        header.setSectionResizeMode(4, QtWidgets.QHeaderView.ResizeMode.ResizeToContents)
+        header.setSectionResizeMode(5, QtWidgets.QHeaderView.ResizeMode.Stretch)
 
         self.setColumnWidth(0, 64)
         self.setColumnWidth(1, 72)
-        self.setColumnWidth(3, 88)
+        self.setColumnWidth(3, 156)
+        self.setColumnWidth(4, 88)
 
         self.apply_theme_styles()
 
@@ -127,6 +131,7 @@ class SeriesImportDialog(QtWidgets.QDialog):
         self._root_dir = os.path.normpath(os.path.abspath(root_dir or ""))
         self._paths = [os.path.normpath(os.path.abspath(path)) for path in paths]
         self._suppress_item_changed = False
+        self._sort_mode = "manual"
 
         self.setWindowTitle(self.tr("Create Series Project"))
         self.resize(1080, 700)
@@ -208,12 +213,34 @@ class SeriesImportDialog(QtWidgets.QDialog):
         board_title_wrap.addWidget(board_title)
         board_title_wrap.addWidget(self.helper_label)
 
+        right_controls = QtWidgets.QVBoxLayout()
+        right_controls.setContentsMargins(0, 0, 0, 0)
+        right_controls.setSpacing(8)
+
+        sort_row = QtWidgets.QHBoxLayout()
+        sort_row.setContentsMargins(0, 0, 0, 0)
+        sort_row.setSpacing(8)
+
+        self.sort_label = QtWidgets.QLabel(self.tr("Sort"))
+        self.sort_label.setObjectName("seriesImportSectionTitle")
+        self.sort_combo = QtWidgets.QComboBox(self)
+        self.sort_combo.addItem(self.tr("Manual Queue"), "manual")
+        self.sort_combo.addItem(self.tr("Name (A-Z)"), "name_asc")
+        self.sort_combo.addItem(self.tr("Name (Z-A)"), "name_desc")
+        self.sort_combo.addItem(self.tr("Date (Newest First)"), "date_desc")
+        self.sort_combo.addItem(self.tr("Date (Oldest First)"), "date_asc")
+
         self.selected_label = QtWidgets.QLabel("")
         self.selected_label.setObjectName("seriesImportChip")
         self.selected_label.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
 
+        sort_row.addWidget(self.sort_label, 0)
+        sort_row.addWidget(self.sort_combo, 1)
+        right_controls.addLayout(sort_row)
+        right_controls.addWidget(self.selected_label, 0, QtCore.Qt.AlignmentFlag.AlignRight)
+
         board_header.addLayout(board_title_wrap, 1)
-        board_header.addWidget(self.selected_label, 0, QtCore.Qt.AlignmentFlag.AlignTop)
+        board_header.addLayout(right_controls, 0)
         board_layout.addLayout(board_header)
 
         self.table = _SeriesImportTable(self)
@@ -256,6 +283,7 @@ class SeriesImportDialog(QtWidgets.QDialog):
         self.create_button.clicked.connect(self._accept_if_valid)
         self.select_all_button.clicked.connect(lambda: self._set_all_checked(True))
         self.clear_all_button.clicked.connect(lambda: self._set_all_checked(False))
+        self.sort_combo.currentIndexChanged.connect(self._on_sort_changed)
         self.table.order_changed.connect(self._sync_after_drag_drop)
         self.table.itemChanged.connect(self._on_item_changed)
 
@@ -351,6 +379,27 @@ class SeriesImportDialog(QtWidgets.QDialog):
             QPushButton#seriesImportGhost {{
                 background: transparent;
             }}
+            QComboBox {{
+                min-height: 34px;
+                padding: 0 12px;
+                border-radius: 10px;
+                border: 1px solid {border};
+                background: {window};
+                color: {text};
+                selection-background-color: {accent_soft};
+            }}
+            QComboBox::drop-down {{
+                border: none;
+                width: 28px;
+                background: transparent;
+            }}
+            QComboBox QAbstractItemView {{
+                background: {panel};
+                color: {text};
+                border: 1px solid {border};
+                selection-background-color: {accent_soft};
+                selection-color: {text};
+            }}
             """
         )
         self.table.apply_theme_styles()
@@ -364,11 +413,17 @@ class SeriesImportDialog(QtWidgets.QDialog):
                 rel_dir = os.path.dirname(rel_path)
             except ValueError:
                 rel_dir = os.path.dirname(path)
+            try:
+                modified_ts = float(os.path.getmtime(path))
+            except OSError:
+                modified_ts = 0.0
             entries.append(
                 {
                     "queue_index": index,
                     "path": path,
                     "name": os.path.basename(path),
+                    "modified_ts": modified_ts,
+                    "modified_display": self._format_timestamp(modified_ts),
                     "type": os.path.splitext(path)[1].lstrip(".").upper(),
                     "folder": rel_dir.replace("\\", "/"),
                     "include": True,
@@ -376,69 +431,152 @@ class SeriesImportDialog(QtWidgets.QDialog):
             )
         return entries
 
+    def _format_timestamp(self, timestamp: float) -> str:
+        if not timestamp:
+            return "—"
+        try:
+            return datetime.fromtimestamp(timestamp).strftime("%Y-%m-%d %H:%M")
+        except (OverflowError, OSError, ValueError):
+            return "—"
+
+    def _set_row(self, row: int, entry: dict[str, object]) -> None:
+        include_item = QtWidgets.QTableWidgetItem()
+        include_item.setFlags(
+            QtCore.Qt.ItemFlag.ItemIsEnabled
+            | QtCore.Qt.ItemFlag.ItemIsSelectable
+            | QtCore.Qt.ItemFlag.ItemIsUserCheckable
+        )
+        include_item.setCheckState(
+            QtCore.Qt.CheckState.Checked if bool(entry.get("include", True)) else QtCore.Qt.CheckState.Unchecked
+        )
+        include_item.setData(QtCore.Qt.ItemDataRole.UserRole, entry["path"])
+        include_item.setToolTip(str(entry["path"]))
+
+        queue_item = QtWidgets.QTableWidgetItem(f"{int(entry['queue_index']):02d}")
+        queue_item.setData(QtCore.Qt.ItemDataRole.UserRole, entry["path"])
+
+        name_item = QtWidgets.QTableWidgetItem(str(entry["name"]))
+        name_item.setData(QtCore.Qt.ItemDataRole.UserRole, entry["path"])
+        name_item.setFlags(
+            QtCore.Qt.ItemFlag.ItemIsEnabled
+            | QtCore.Qt.ItemFlag.ItemIsSelectable
+            | QtCore.Qt.ItemFlag.ItemIsDragEnabled
+        )
+        name_item.setToolTip(str(entry["path"]))
+
+        modified_item = QtWidgets.QTableWidgetItem(str(entry.get("modified_display") or "—"))
+        modified_item.setData(QtCore.Qt.ItemDataRole.UserRole, float(entry.get("modified_ts") or 0.0))
+        modified_item.setFlags(QtCore.Qt.ItemFlag.ItemIsEnabled | QtCore.Qt.ItemFlag.ItemIsSelectable)
+        modified_item.setTextAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
+
+        type_item = QtWidgets.QTableWidgetItem(str(entry["type"]))
+        type_item.setFlags(QtCore.Qt.ItemFlag.ItemIsEnabled | QtCore.Qt.ItemFlag.ItemIsSelectable)
+
+        folder_item = QtWidgets.QTableWidgetItem(str(entry["folder"] or self.tr("Root Folder")))
+        folder_item.setFlags(QtCore.Qt.ItemFlag.ItemIsEnabled | QtCore.Qt.ItemFlag.ItemIsSelectable)
+        folder_item.setToolTip(str(entry["folder"]))
+
+        self.table.setItem(row, 0, include_item)
+        self.table.setItem(row, 1, queue_item)
+        self.table.setItem(row, 2, name_item)
+        self.table.setItem(row, 3, modified_item)
+        self.table.setItem(row, 4, type_item)
+        self.table.setItem(row, 5, folder_item)
+        self._decorate_row(row)
+
     def _decorate_row(self, row: int) -> None:
         queue_item = self.table.item(row, 1)
         name_item = self.table.item(row, 2)
-        type_item = self.table.item(row, 3)
-        folder_item = self.table.item(row, 4)
+        modified_item = self.table.item(row, 3)
+        type_item = self.table.item(row, 4)
+        folder_item = self.table.item(row, 5)
+        accent = QtGui.QColor(dayu_theme.primary_color or dayu_theme.yellow or "#fadb14")
+        sub = QtGui.QColor(dayu_theme.secondary_text_color or "#a6a6a6")
         if queue_item is not None:
             queue_item.setTextAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
             font = queue_item.font()
             font.setBold(True)
             queue_item.setFont(font)
-            queue_item.setForeground(QtGui.QBrush(QtGui.QColor("#dcebff")))
+            queue_item.setForeground(QtGui.QBrush(accent))
         if name_item is not None:
             font = name_item.font()
             font.setBold(True)
             name_item.setFont(font)
+        if modified_item is not None:
+            modified_item.setForeground(QtGui.QBrush(sub))
         if type_item is not None:
             type_item.setTextAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
-            type_item.setForeground(QtGui.QBrush(QtGui.QColor("#8fd7ff")))
+            type_item.setForeground(QtGui.QBrush(accent))
         if folder_item is not None:
-            folder_item.setForeground(QtGui.QBrush(QtGui.QColor("#8f9aad")))
+            folder_item.setForeground(QtGui.QBrush(sub))
 
     def _populate_table(self) -> None:
         entries = self._build_entries()
         self._suppress_item_changed = True
         self.table.setRowCount(len(entries))
         for row, entry in enumerate(entries):
-            include_item = QtWidgets.QTableWidgetItem()
-            include_item.setFlags(
-                QtCore.Qt.ItemFlag.ItemIsEnabled
-                | QtCore.Qt.ItemFlag.ItemIsSelectable
-                | QtCore.Qt.ItemFlag.ItemIsUserCheckable
-            )
-            include_item.setCheckState(QtCore.Qt.CheckState.Checked)
-            include_item.setData(QtCore.Qt.ItemDataRole.UserRole, entry["path"])
-            include_item.setToolTip(str(entry["path"]))
-
-            queue_item = QtWidgets.QTableWidgetItem(f"{int(entry['queue_index']):02d}")
-            queue_item.setData(QtCore.Qt.ItemDataRole.UserRole, entry["path"])
-
-            name_item = QtWidgets.QTableWidgetItem(str(entry["name"]))
-            name_item.setData(QtCore.Qt.ItemDataRole.UserRole, entry["path"])
-            name_item.setFlags(
-                QtCore.Qt.ItemFlag.ItemIsEnabled
-                | QtCore.Qt.ItemFlag.ItemIsSelectable
-                | QtCore.Qt.ItemFlag.ItemIsDragEnabled
-            )
-            name_item.setToolTip(str(entry["path"]))
-
-            type_item = QtWidgets.QTableWidgetItem(str(entry["type"]))
-            type_item.setFlags(QtCore.Qt.ItemFlag.ItemIsEnabled | QtCore.Qt.ItemFlag.ItemIsSelectable)
-
-            folder_item = QtWidgets.QTableWidgetItem(str(entry["folder"] or self.tr("Root Folder")))
-            folder_item.setFlags(QtCore.Qt.ItemFlag.ItemIsEnabled | QtCore.Qt.ItemFlag.ItemIsSelectable)
-            folder_item.setToolTip(str(entry["folder"]))
-
-            self.table.setItem(row, 0, include_item)
-            self.table.setItem(row, 1, queue_item)
-            self.table.setItem(row, 2, name_item)
-            self.table.setItem(row, 3, type_item)
-            self.table.setItem(row, 4, folder_item)
-            self._decorate_row(row)
+            self._set_row(row, entry)
         self._suppress_item_changed = False
         self._refresh_summary()
+
+    def _snapshot_rows(self) -> list[dict[str, object]]:
+        rows = []
+        for row in range(self.table.rowCount()):
+            include_item = self.table.item(row, 0)
+            queue_item = self.table.item(row, 1)
+            name_item = self.table.item(row, 2)
+            modified_item = self.table.item(row, 3)
+            type_item = self.table.item(row, 4)
+            folder_item = self.table.item(row, 5)
+            path = str(include_item.data(QtCore.Qt.ItemDataRole.UserRole) or "") if include_item is not None else ""
+            rows.append(
+                {
+                    "queue_index": row + 1,
+                    "path": path,
+                    "name": name_item.text() if name_item is not None else "",
+                    "modified_ts": float(modified_item.data(QtCore.Qt.ItemDataRole.UserRole) or 0.0)
+                    if modified_item is not None else 0.0,
+                    "modified_display": modified_item.text() if modified_item is not None else "—",
+                    "type": type_item.text() if type_item is not None else "",
+                    "folder": folder_item.text() if folder_item is not None else "",
+                    "include": include_item.checkState() == QtCore.Qt.CheckState.Checked if include_item is not None else False,
+                }
+            )
+        return rows
+
+    def _rebuild_rows(self, entries: list[dict[str, object]]) -> None:
+        self._suppress_item_changed = True
+        self.table.setRowCount(len(entries))
+        for row, entry in enumerate(entries):
+            entry = dict(entry)
+            entry["queue_index"] = row + 1
+            self._set_row(row, entry)
+        self._suppress_item_changed = False
+        self._refresh_summary()
+
+    def _set_sort_mode(self, mode: str) -> None:
+        self._sort_mode = mode
+        index = self.sort_combo.findData(mode)
+        if index >= 0 and self.sort_combo.currentIndex() != index:
+            blocker = QtCore.QSignalBlocker(self.sort_combo)
+            self.sort_combo.setCurrentIndex(index)
+            del blocker
+
+    def _on_sort_changed(self) -> None:
+        mode = str(self.sort_combo.currentData() or "manual")
+        self._sort_mode = mode
+        if mode == "manual":
+            return
+        rows = self._snapshot_rows()
+        if mode == "name_asc":
+            rows.sort(key=lambda row: (str(row["name"]).casefold(), str(row["path"]).casefold()))
+        elif mode == "name_desc":
+            rows.sort(key=lambda row: (str(row["name"]).casefold(), str(row["path"]).casefold()), reverse=True)
+        elif mode == "date_desc":
+            rows.sort(key=lambda row: (float(row["modified_ts"]), str(row["name"]).casefold()), reverse=True)
+        elif mode == "date_asc":
+            rows.sort(key=lambda row: (float(row["modified_ts"]), str(row["name"]).casefold()))
+        self._rebuild_rows(rows)
 
     def _set_all_checked(self, checked: bool) -> None:
         self._suppress_item_changed = True
@@ -458,6 +596,7 @@ class SeriesImportDialog(QtWidgets.QDialog):
                 queue_item.setText(f"{row + 1:02d}")
             self._decorate_row(row)
         self._suppress_item_changed = False
+        self._set_sort_mode("manual")
         self._refresh_summary()
 
     def _on_item_changed(self, item: QtWidgets.QTableWidgetItem) -> None:
@@ -474,6 +613,7 @@ class SeriesImportDialog(QtWidgets.QDialog):
                 self._move_row(current_row, requested_row)
             else:
                 item.setText(f"{current_row + 1:02d}")
+            self._set_sort_mode("manual")
         self._refresh_summary()
 
     def _move_row(self, source_row: int, target_row: int) -> None:
@@ -493,9 +633,9 @@ class SeriesImportDialog(QtWidgets.QDialog):
         total = self.table.rowCount()
         selected = len(self.selected_paths())
         folders = {
-            str(self.table.item(row, 4).text() or "")
+            str(self.table.item(row, 5).text() or "")
             for row in range(total)
-            if self.table.item(row, 4) is not None
+            if self.table.item(row, 5) is not None
         }
         self.summary_chip.setText(
             self.tr("{total} files found").format(total=total)
