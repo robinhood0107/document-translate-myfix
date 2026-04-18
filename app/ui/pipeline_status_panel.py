@@ -46,6 +46,7 @@ class PipelineStatusPanel(QtWidgets.QFrame):
     WINDOW_MODE = "window"
 
     cancel_requested = QtCore.Signal()
+    pause_requested = QtCore.Signal()
     retry_requested = QtCore.Signal()
     open_settings_requested = QtCore.Signal()
     report_requested = QtCore.Signal()
@@ -74,6 +75,8 @@ class PipelineStatusPanel(QtWidgets.QFrame):
         self._output_root = ""
         self._details_visible = True
         self._current_state = "idle"
+        self._series_queue_pause_visible = False
+        self._series_queue_pause_requested = False
         self._window_geometry = QtCore.QRect()
         self._embedded_geometry = QtCore.QRect()
 
@@ -239,6 +242,9 @@ class PipelineStatusPanel(QtWidgets.QFrame):
         action_layout.setContentsMargins(0, 0, 0, 0)
         action_layout.setSpacing(8)
 
+        self.pause_button = QtWidgets.QPushButton(self.tr("Pause"))
+        self.pause_button.clicked.connect(self.pause_requested.emit)
+
         self.cancel_button = QtWidgets.QPushButton(self.tr("Cancel"))
         self.cancel_button.setObjectName("dangerAction")
         self.cancel_button.clicked.connect(self.cancel_requested.emit)
@@ -261,6 +267,7 @@ class PipelineStatusPanel(QtWidgets.QFrame):
         self.close_button.clicked.connect(self.close_panel)
 
         self._action_buttons = [
+            self.pause_button,
             self.cancel_button,
             self.report_button,
             self.retry_button,
@@ -321,6 +328,19 @@ class PipelineStatusPanel(QtWidgets.QFrame):
         layout.addWidget(label, row, 0)
         layout.addWidget(value, row, 1)
         return value
+
+    def set_series_queue_pause_visible(self, visible: bool, *, pause_requested: bool = False) -> None:
+        self._series_queue_pause_visible = bool(visible)
+        self._series_queue_pause_requested = bool(pause_requested)
+        self.pause_button.setText(
+            self.tr("Pause Requested")
+            if self._series_queue_pause_requested
+            else self.tr("Pause")
+        )
+        self.pause_button.setEnabled(
+            self._series_queue_pause_visible and not self._series_queue_pause_requested
+        )
+        self._apply_state(self._current_state)
 
     def display_mode(self) -> str:
         return self._display_mode
@@ -743,6 +763,7 @@ class PipelineStatusPanel(QtWidgets.QFrame):
             else self.tr("Status")
         )
         self.state_label.setText(state_map.get(state, state))
+        self.pause_button.setVisible(state == "running" and self._series_queue_pause_visible)
         self.cancel_button.setVisible(state == "running")
         self.report_button.setVisible(state in {"running", "done", "failed", "cancelled"})
         self.retry_button.setVisible(state == "failed")

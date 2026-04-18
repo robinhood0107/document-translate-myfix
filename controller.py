@@ -16,6 +16,7 @@ from app.ui.dayu_widgets.qt import MPixmap
 from app.ui.main_window import ComicTranslateUI
 from app.ui.messages import Messages
 from app.projects.project_types import (
+    PROJECT_KIND_SERIES,
     PROJECT_KIND_SINGLE,
     has_project_file_extension,
     is_series_project_file,
@@ -280,6 +281,7 @@ class ComicTranslate(ComicTranslateUI):
         self.retry_failed_button.clicked.connect(self.retry_failed_batch_pages)
         self.one_page_auto_button.clicked.connect(self.start_one_page_auto_process)
         self.pipeline_status_panel.cancel_requested.connect(self._on_automatic_progress_cancel)
+        self.pipeline_status_panel.pause_requested.connect(self.series_ctrl.pause_queue_translation)
         self.pipeline_status_panel.retry_requested.connect(self._on_automatic_progress_retry)
         self.pipeline_status_panel.open_settings_requested.connect(self._on_automatic_progress_open_settings)
         self.pipeline_status_panel.report_requested.connect(self.show_latest_batch_report)
@@ -395,6 +397,9 @@ class ComicTranslate(ComicTranslateUI):
         self.series_workspace.forward_requested.connect(self.series_ctrl.request_forward)
         self.series_workspace.tree_jump_requested.connect(self.series_ctrl.request_tree_jump)
         self.series_workspace.auto_translate_requested.connect(self.series_ctrl.start_queue_translation)
+        self.series_workspace.pause_requested.connect(self.series_ctrl.pause_queue_translation)
+        self.series_workspace.resume_requested.connect(self.series_ctrl.resume_queue_translation)
+        self.series_workspace.open_failed_item_requested.connect(self.series_ctrl.open_last_failed_item)
         self.series_workspace.open_series_settings_requested.connect(self.series_ctrl.edit_series_settings_dialog)
         self.series_workspace.global_settings_changed.connect(self.series_ctrl.request_global_settings_change)
 
@@ -987,6 +992,11 @@ class ComicTranslate(ComicTranslateUI):
     def mark_project_dirty(self):
         self._bump_dirty_revision()
         self._manual_dirty = True
+        try:
+            if getattr(self, "project_kind", PROJECT_KIND_SINGLE) == PROJECT_KIND_SERIES:
+                self.series_ctrl.notify_active_child_dirty()
+        except Exception:
+            pass
         self._update_window_modified()
 
     def set_project_clean(self):
@@ -1671,6 +1681,10 @@ class ComicTranslate(ComicTranslateUI):
         self.progress_bar.setVisible(True)
         self.batch_report_ctrl.refresh_action_buttons()
         self._show_automatic_progress_dialog(selected_paths, run_type)
+        self.pipeline_status_panel.set_series_queue_pause_visible(
+            run_type == "series_queue",
+            pause_requested=False,
+        )
 
         if self.webtoon_mode:
             self.run_threaded(
@@ -1809,6 +1823,7 @@ class ComicTranslate(ComicTranslateUI):
         self.selected_batch = []
 
         panel = self.pipeline_status_panel
+        panel.set_series_queue_pause_visible(False, pause_requested=False)
         panel.set_output_root(self._last_batch_output_root)
         if was_cancelled:
             self.set_pipeline_overlay_active(False)

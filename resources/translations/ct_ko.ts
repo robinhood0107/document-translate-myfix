@@ -1662,6 +1662,10 @@ Approximate GPU usage:
         <translation>로그</translation>
     </message>
     <message>
+        <source>Pause</source>
+        <translation>일시정지</translation>
+    </message>
+    <message>
         <source>Report</source>
         <translation>리포트</translation>
     </message>
@@ -1680,6 +1684,10 @@ Approximate GPU usage:
     <message>
         <source>Close</source>
         <translation>닫기</translation>
+    </message>
+    <message>
+        <source>Pause Requested</source>
+        <translation>일시정지 요청됨</translation>
     </message>
     <message>
         <source>Window</source>
@@ -1797,7 +1805,8 @@ These snapshots are not your main project file; use Save/Auto-Save for normal pr
     <message>
         <source>These are normal .ctpr or .seriesctpr project files saved while Auto-Save is enabled.
 This folder is separate from Auto-Recover snapshots.</source>
-        <translation type="unfinished"></translation>
+        <translation>자동 저장이 켜져 있을 때 저장되는 일반 `.ctpr` 또는 `.seriesctpr` 프로젝트 파일입니다.
+이 폴더는 자동 복구 스냅샷 폴더와 별도로 관리됩니다.</translation>
     </message>
     <message>
         <source>Auto-Save folder:</source>
@@ -2079,6 +2088,14 @@ These values are copied into new series projects and can be adjusted per series.
         <translation>시리즈 프로젝트</translation>
     </message>
     <message>
+        <source>Recovered Snapshot</source>
+        <translation>복구본 열림</translation>
+    </message>
+    <message>
+        <source>Child Changes Not Synced</source>
+        <translation>세부 프로젝트 변경 미반영</translation>
+    </message>
+    <message>
         <source>Open Selected</source>
         <translation>선택한 프로젝트 열기</translation>
     </message>
@@ -2111,6 +2128,10 @@ The current running item stays fixed, and you can change the queue after the run
     <message>
         <source>Run automatic translation in queue order.</source>
         <translation>대기열 순서대로 자동 번역을 시작합니다.</translation>
+    </message>
+    <message>
+        <source>Resume the paused queue from the queue status panel.</source>
+        <translation>대기열 상태 패널에서 일시정지된 대기열을 다시 시작하세요.</translation>
     </message>
     <message>
         <source>Automatic translation is already running.</source>
@@ -2342,7 +2363,7 @@ Restart now?</source>
     </message>
     <message>
         <source>Series</source>
-        <translation type="unfinished"></translation>
+        <translation>시리즈</translation>
     </message>
     <message>
         <source>Shortcuts</source>
@@ -3372,6 +3393,112 @@ It may have already been moved, renamed, or deleted.
     </message>
 </context>
 <context>
+    <name>_SeriesRunSummaryPanel</name>
+    <message>
+        <source>Last Queue Run</source>
+        <translation>최근 대기열 실행</translation>
+    </message>
+    <message>
+        <source>Done:</source>
+        <translation>완료:</translation>
+    </message>
+    <message>
+        <source>Failed:</source>
+        <translation>실패:</translation>
+    </message>
+    <message>
+        <source>Skipped:</source>
+        <translation>건너뜀:</translation>
+    </message>
+    <message>
+        <source>Total time:</source>
+        <translation>총 시간:</translation>
+    </message>
+    <message>
+        <source>Started / Finished:</source>
+        <translation>시작 / 종료:</translation>
+    </message>
+    <message>
+        <source>{seconds} sec</source>
+        <translation>{seconds}초</translation>
+    </message>
+    <message>
+        <source>{started} → {finished}</source>
+        <translation>{started} → {finished}</translation>
+    </message>
+</context>
+<context>
+    <name>_SeriesStatusPanel</name>
+    <message>
+        <source>Queue Status</source>
+        <translation>대기열 상태</translation>
+    </message>
+    <message>
+        <source>Monitor the current queue execution and control safe pause/resume behavior here.</source>
+        <translation>현재 대기열 실행 상태를 확인하고, 안전하게 일시정지/재개를 제어합니다.</translation>
+    </message>
+    <message>
+        <source>State:</source>
+        <translation>상태:</translation>
+    </message>
+    <message>
+        <source>Current item:</source>
+        <translation>현재 항목:</translation>
+    </message>
+    <message>
+        <source>Next item:</source>
+        <translation>다음 예정 항목:</translation>
+    </message>
+    <message>
+        <source>Last failed item:</source>
+        <translation>마지막 실패 항목:</translation>
+    </message>
+    <message>
+        <source>Retries left:</source>
+        <translation>남은 재시도:</translation>
+    </message>
+    <message>
+        <source>Last run time:</source>
+        <translation>마지막 실행 시각:</translation>
+    </message>
+    <message>
+        <source>Pause</source>
+        <translation>일시정지</translation>
+    </message>
+    <message>
+        <source>Resume</source>
+        <translation>재개</translation>
+    </message>
+    <message>
+        <source>Open Failed Item</source>
+        <translation>실패 항목 열기</translation>
+    </message>
+    <message>
+        <source>Idle</source>
+        <translation>대기 중</translation>
+    </message>
+    <message>
+        <source>Running</source>
+        <translation>실행 중</translation>
+    </message>
+    <message>
+        <source>Paused</source>
+        <translation>일시정지됨</translation>
+    </message>
+    <message>
+        <source>#{index:02d} · {name}</source>
+        <translation>#{index:02d} · {name}</translation>
+    </message>
+    <message>
+        <source>{state} (pause requested)</source>
+        <translation>{state} (일시정지 요청됨)</translation>
+    </message>
+    <message>
+        <source>Pause Requested</source>
+        <translation>일시정지 요청됨</translation>
+    </message>
+</context>
+<context>
     <name>self.main</name>
     <message>
         <source>Project Recovery</source>
@@ -3429,19 +3556,19 @@ Do you want to restore it?</source>
     </message>
     <message>
         <source>RecoveredProject.seriesctpr</source>
-        <translation type="unfinished"></translation>
+        <translation>RecoveredProject.seriesctpr</translation>
     </message>
     <message>
         <source>RecoveredProject.ctpr</source>
-        <translation type="unfinished"></translation>
+        <translation>RecoveredProject.ctpr</translation>
     </message>
     <message>
         <source>Save Series Project As</source>
-        <translation type="unfinished"></translation>
+        <translation>시리즈 프로젝트 다른 이름으로 저장</translation>
     </message>
     <message>
         <source>Save Project As</source>
-        <translation type="unfinished"></translation>
+        <translation>프로젝트 다른 이름으로 저장</translation>
     </message>
     <message>
         <source>A project file already exists at this location.
@@ -3506,6 +3633,14 @@ It may have been moved, renamed, or deleted.
         <translation>영어</translation>
     </message>
     <message>
+        <source>Recovered Snapshot</source>
+        <translation>복구본 열림</translation>
+    </message>
+    <message>
+        <source>Child Changes Not Synced</source>
+        <translation>세부 프로젝트 변경 미반영</translation>
+    </message>
+    <message>
         <source>Child Project - {child} · {series}[*]</source>
         <translation>세부 프로젝트 - {child} · {series}[*]</translation>
     </message>
@@ -3526,6 +3661,18 @@ It may have been moved, renamed, or deleted.
 이동되었거나 이름이 바뀌었거나 삭제되었을 수 있습니다.
 
 {path}</translation>
+    </message>
+    <message>
+        <source>The previous automatic translation run was interrupted and restored as paused.</source>
+        <translation>이전 자동 번역 실행이 중단되어 일시정지 상태로 복구되었습니다.</translation>
+    </message>
+    <message>
+        <source>Already in this series: {count}</source>
+        <translation>이미 이 시리즈에 포함된 항목: {count}</translation>
+    </message>
+    <message>
+        <source>Duplicate selections removed: {count}</source>
+        <translation>중복 선택에서 제외된 항목: {count}</translation>
     </message>
     <message>
         <source>Select Series Root Folder</source>

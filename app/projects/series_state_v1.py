@@ -31,6 +31,10 @@ SERIES_QUEUE_STATUS_DONE = "done"
 SERIES_QUEUE_STATUS_FAILED = "failed"
 SERIES_QUEUE_STATUS_SKIPPED = "skipped"
 
+SERIES_QUEUE_STATE_IDLE = "idle"
+SERIES_QUEUE_STATE_RUNNING = "running"
+SERIES_QUEUE_STATE_PAUSED = "paused"
+
 SERIES_SOURCE_KIND_FILE = "source_file"
 SERIES_SOURCE_KIND_CTPR = "ctpr_import"
 
@@ -53,6 +57,8 @@ SUPPORTED_SERIES_SOURCE_EXTS = {
     ".cbt",
     PROJECT_FILE_EXT,
 }
+
+_UNSET = object()
 
 
 def _now_iso() -> str:
@@ -143,6 +149,100 @@ def normalize_series_settings(data: dict[str, object] | None) -> dict[str, objec
     return merged
 
 
+def default_series_run_summary() -> dict[str, object]:
+    return {
+        "done_count": 0,
+        "failed_count": 0,
+        "skipped_count": 0,
+        "duration_sec": None,
+        "started_at": None,
+        "finished_at": None,
+    }
+
+
+def normalize_series_run_summary(data: dict[str, object] | None) -> dict[str, object]:
+    merged = dict(default_series_run_summary())
+    if isinstance(data, dict):
+        merged.update(data)
+    merged["done_count"] = max(0, int(merged.get("done_count", 0) or 0))
+    merged["failed_count"] = max(0, int(merged.get("failed_count", 0) or 0))
+    merged["skipped_count"] = max(0, int(merged.get("skipped_count", 0) or 0))
+    duration = merged.get("duration_sec")
+    merged["duration_sec"] = None if duration in (None, "") else max(0, int(duration))
+    merged["started_at"] = str(merged.get("started_at") or "").strip() or None
+    merged["finished_at"] = str(merged.get("finished_at") or "").strip() or None
+    return merged
+
+
+def default_series_queue_runtime() -> dict[str, object]:
+    return {
+        "queue_state": SERIES_QUEUE_STATE_IDLE,
+        "pause_requested": False,
+        "pending_item_ids": [],
+        "active_item_id": None,
+        "completed_item_ids": [],
+        "failed_item_ids": [],
+        "skipped_item_ids": [],
+        "failed_item_id": None,
+        "retry_remaining_by_item": {},
+        "last_run_started_at": None,
+        "last_run_finished_at": None,
+        "last_run_summary": default_series_run_summary(),
+    }
+
+
+def normalize_series_queue_runtime(data: dict[str, object] | None) -> dict[str, object]:
+    merged = dict(default_series_queue_runtime())
+    if isinstance(data, dict):
+        merged.update(data)
+    queue_state = str(merged.get("queue_state") or SERIES_QUEUE_STATE_IDLE).strip().lower()
+    if queue_state not in {
+        SERIES_QUEUE_STATE_IDLE,
+        SERIES_QUEUE_STATE_RUNNING,
+        SERIES_QUEUE_STATE_PAUSED,
+    }:
+        queue_state = SERIES_QUEUE_STATE_IDLE
+    merged["queue_state"] = queue_state
+    merged["pause_requested"] = bool(merged.get("pause_requested", False))
+    merged["pending_item_ids"] = [
+        str(item_id)
+        for item_id in list(merged.get("pending_item_ids") or [])
+        if str(item_id or "").strip()
+    ]
+    merged["active_item_id"] = str(merged.get("active_item_id") or "").strip() or None
+    merged["completed_item_ids"] = [
+        str(item_id)
+        for item_id in list(merged.get("completed_item_ids") or [])
+        if str(item_id or "").strip()
+    ]
+    merged["failed_item_ids"] = [
+        str(item_id)
+        for item_id in list(merged.get("failed_item_ids") or [])
+        if str(item_id or "").strip()
+    ]
+    merged["skipped_item_ids"] = [
+        str(item_id)
+        for item_id in list(merged.get("skipped_item_ids") or [])
+        if str(item_id or "").strip()
+    ]
+    merged["failed_item_id"] = str(merged.get("failed_item_id") or "").strip() or None
+    retry_remaining = {}
+    for item_id, remaining in dict(merged.get("retry_remaining_by_item") or {}).items():
+        clean_id = str(item_id or "").strip()
+        if not clean_id:
+            continue
+        retry_remaining[clean_id] = max(0, int(remaining or 0))
+    merged["retry_remaining_by_item"] = retry_remaining
+    merged["last_run_started_at"] = str(merged.get("last_run_started_at") or "").strip() or None
+    merged["last_run_finished_at"] = str(merged.get("last_run_finished_at") or "").strip() or None
+    merged["last_run_summary"] = normalize_series_run_summary(
+        merged.get("last_run_summary")
+        if isinstance(merged.get("last_run_summary"), dict)
+        else None
+    )
+    return merged
+
+
 def default_series_global_settings() -> dict[str, object]:
     return {
         "source_language": "",
@@ -200,6 +300,45 @@ def scan_series_source_files(root_dir: str) -> list[str]:
     return results
 
 
+def normalized_series_source_path(path: str) -> str:
+    return os.path.normcase(os.path.normpath(os.path.abspath(path or "")))
+
+
+def filter_series_candidate_paths(
+    existing_source_paths: Iterable[str],
+    candidate_paths: Iterable[str],
+) -> dict[str, list[str]]:
+    existing = {
+        normalized_series_source_path(path)
+        for path in existing_source_paths
+        if str(path or "").strip()
+    }
+    seen_new: set[str] = set()
+    accepted: list[str] = []
+    skipped_existing: list[str] = []
+    skipped_duplicates: list[str] = []
+
+    for path in candidate_paths:
+        clean_path = os.path.normpath(os.path.abspath(path or ""))
+        normalized = normalized_series_source_path(clean_path)
+        if not normalized:
+            continue
+        if normalized in existing:
+            skipped_existing.append(clean_path)
+            continue
+        if normalized in seen_new:
+            skipped_duplicates.append(clean_path)
+            continue
+        seen_new.add(normalized)
+        accepted.append(clean_path)
+
+    return {
+        "accepted": accepted,
+        "skipped_existing": skipped_existing,
+        "skipped_duplicates": skipped_duplicates,
+    }
+
+
 def relative_series_source_path(root_dir: str, path: str) -> str:
     root = os.path.normpath(os.path.abspath(root_dir or ""))
     target = os.path.normpath(os.path.abspath(path or ""))
@@ -209,6 +348,31 @@ def relative_series_source_path(root_dir: str, path: str) -> str:
         return os.path.relpath(target, root)
     except ValueError:
         return os.path.basename(target)
+
+
+def _ordered_items(items: Iterable[dict[str, object]]) -> list[dict[str, object]]:
+    return sorted(
+        [dict(item) for item in items],
+        key=lambda item: int(item.get("queue_index", 0) or 0),
+    )
+
+
+def ordered_series_item_ids(items: Iterable[dict[str, object]]) -> list[str]:
+    return [
+        str(item.get("series_item_id") or "")
+        for item in _ordered_items(items)
+        if str(item.get("series_item_id") or "").strip()
+    ]
+
+
+def pending_series_item_ids(items: Iterable[dict[str, object]]) -> list[str]:
+    return [
+        str(item.get("series_item_id") or "")
+        for item in _ordered_items(items)
+        if str(item.get("series_item_id") or "").strip()
+        and str(item.get("status") or SERIES_QUEUE_STATUS_PENDING).strip().lower()
+        == SERIES_QUEUE_STATUS_PENDING
+    ]
 
 
 @dataclass
@@ -484,12 +648,7 @@ def create_series_project(
         "series_settings": normalize_series_settings(series_settings),
         "global_settings": normalize_series_global_settings(global_settings),
         "series_navigation_history": {"back": [], "forward": []},
-        "series_queue_runtime": {
-            "active_item_id": None,
-            "completed_item_ids": [],
-            "failed_item_id": None,
-            "last_run_at": None,
-        },
+        "series_queue_runtime": normalize_series_queue_runtime(None),
     }
     project_map = {
         str(project["project_hash"]): dict(project)
@@ -518,6 +677,11 @@ def load_series_project(file_name: str) -> dict[str, object]:
         manifest["global_settings"] = normalize_series_global_settings(
             manifest.get("global_settings")
             if isinstance(manifest.get("global_settings"), dict)
+            else None
+        )
+        manifest["series_queue_runtime"] = normalize_series_queue_runtime(
+            manifest.get("series_queue_runtime")
+            if isinstance(manifest.get("series_queue_runtime"), dict)
             else None
         )
         items = [
@@ -590,6 +754,11 @@ def save_series_manifest(
         if isinstance(next_manifest.get("global_settings"), dict)
         else None
     )
+    next_manifest["series_queue_runtime"] = normalize_series_queue_runtime(
+        next_manifest.get("series_queue_runtime")
+        if isinstance(next_manifest.get("series_queue_runtime"), dict)
+        else None
+    )
     next_items = list(items) if items is not None else list(state["items"])
     next_projects = embedded_projects or _load_embedded_projects(file_name)
     _write_series_snapshot(
@@ -599,6 +768,93 @@ def save_series_manifest(
         embedded_projects=next_projects,
     )
     return next_manifest
+
+
+def build_series_run_summary(
+    *,
+    done_count: int,
+    failed_count: int,
+    skipped_count: int,
+    started_at: str | None,
+    finished_at: str | None,
+) -> dict[str, object]:
+    duration_sec = None
+    try:
+        if started_at and finished_at:
+            started = datetime.fromisoformat(str(started_at))
+            finished = datetime.fromisoformat(str(finished_at))
+            duration_sec = max(0, int((finished - started).total_seconds()))
+    except ValueError:
+        duration_sec = None
+    return normalize_series_run_summary(
+        {
+            "done_count": done_count,
+            "failed_count": failed_count,
+            "skipped_count": skipped_count,
+            "duration_sec": duration_sec,
+            "started_at": started_at,
+            "finished_at": finished_at,
+        }
+    )
+
+
+def normalize_series_recovery_state(
+    manifest: dict[str, object],
+    items: list[dict[str, object]],
+) -> tuple[dict[str, object], list[dict[str, object]], bool]:
+    next_manifest = dict(manifest)
+    next_items = [dict(item) for item in items]
+    queue_runtime = normalize_series_queue_runtime(next_manifest.get("series_queue_runtime"))
+    item_by_id = {
+        str(item.get("series_item_id") or ""): item
+        for item in next_items
+        if str(item.get("series_item_id") or "").strip()
+    }
+    running_item_ids = [
+        item_id
+        for item_id, item in item_by_id.items()
+        if str(item.get("status") or "").strip().lower() == SERIES_QUEUE_STATUS_RUNNING
+    ]
+    active_item_id = str(queue_runtime.get("active_item_id") or "").strip() or None
+    should_pause = bool(
+        queue_runtime.get("queue_state") == SERIES_QUEUE_STATE_RUNNING
+        or active_item_id
+        or running_item_ids
+    )
+    changed = False
+
+    if should_pause:
+        for item_id in running_item_ids:
+            item = item_by_id[item_id]
+            item["status"] = SERIES_QUEUE_STATUS_PENDING
+            item["updated_at"] = _now_iso()
+            changed = True
+
+        if not active_item_id and running_item_ids:
+            active_item_id = running_item_ids[0]
+            changed = True
+
+        pending_ids = [
+            item_id
+            for item_id in list(queue_runtime.get("pending_item_ids") or [])
+            if item_id in item_by_id
+        ]
+        if active_item_id and active_item_id in item_by_id:
+            pending_ids = [item_id for item_id in pending_ids if item_id != active_item_id]
+            pending_ids.insert(0, active_item_id)
+
+        for item_id in pending_series_item_ids(next_items):
+            if item_id not in pending_ids:
+                pending_ids.append(item_id)
+
+        queue_runtime["queue_state"] = SERIES_QUEUE_STATE_PAUSED
+        queue_runtime["pause_requested"] = False
+        queue_runtime["pending_item_ids"] = pending_ids
+        queue_runtime["active_item_id"] = None
+        changed = True
+
+    next_manifest["series_queue_runtime"] = normalize_series_queue_runtime(queue_runtime)
+    return next_manifest, next_items, changed
 
 
 def add_series_paths(
@@ -678,18 +934,50 @@ def update_series_child_from_file(
 def update_series_queue_runtime(
     file_name: str,
     *,
-    active_item_id: str | None = None,
-    failed_item_id: str | None = None,
-    completed_item_ids: Iterable[str] | None = None,
+    queue_state: str | object = _UNSET,
+    pause_requested: bool | object = _UNSET,
+    pending_item_ids: Iterable[str] | object = _UNSET,
+    active_item_id: str | None | object = _UNSET,
+    failed_item_ids: Iterable[str] | object = _UNSET,
+    skipped_item_ids: Iterable[str] | object = _UNSET,
+    failed_item_id: str | None | object = _UNSET,
+    completed_item_ids: Iterable[str] | object = _UNSET,
+    retry_remaining_by_item: dict[str, int] | object = _UNSET,
+    last_run_started_at: str | None | object = _UNSET,
+    last_run_finished_at: str | None | object = _UNSET,
+    last_run_summary: dict[str, object] | object = _UNSET,
 ) -> dict[str, object]:
     state = load_series_project(file_name)
     manifest = dict(state["manifest"])
-    queue_runtime = dict(manifest.get("series_queue_runtime") or {})
-    queue_runtime["active_item_id"] = active_item_id
-    queue_runtime["failed_item_id"] = failed_item_id
-    if completed_item_ids is not None:
-        queue_runtime["completed_item_ids"] = list(completed_item_ids)
-    queue_runtime["last_run_at"] = _now_iso()
+    queue_runtime = normalize_series_queue_runtime(manifest.get("series_queue_runtime"))
+    if queue_state is not _UNSET:
+        queue_runtime["queue_state"] = queue_state
+    if pause_requested is not _UNSET:
+        queue_runtime["pause_requested"] = bool(pause_requested)
+    if pending_item_ids is not _UNSET:
+        queue_runtime["pending_item_ids"] = list(pending_item_ids or [])
+    if active_item_id is not _UNSET:
+        queue_runtime["active_item_id"] = active_item_id
+    if failed_item_ids is not _UNSET:
+        queue_runtime["failed_item_ids"] = list(failed_item_ids or [])
+    if skipped_item_ids is not _UNSET:
+        queue_runtime["skipped_item_ids"] = list(skipped_item_ids or [])
+    if failed_item_id is not _UNSET:
+        queue_runtime["failed_item_id"] = failed_item_id
+    if completed_item_ids is not _UNSET:
+        queue_runtime["completed_item_ids"] = list(completed_item_ids or [])
+    if retry_remaining_by_item is not _UNSET:
+        queue_runtime["retry_remaining_by_item"] = dict(retry_remaining_by_item or {})
+    if last_run_started_at is not _UNSET:
+        queue_runtime["last_run_started_at"] = last_run_started_at
+    if last_run_finished_at is not _UNSET:
+        queue_runtime["last_run_finished_at"] = last_run_finished_at
+    if last_run_summary is not _UNSET:
+        queue_runtime["last_run_summary"] = (
+            normalize_series_run_summary(last_run_summary)
+            if isinstance(last_run_summary, dict)
+            else default_series_run_summary()
+        )
     manifest["series_queue_runtime"] = queue_runtime
     save_series_manifest(file_name, manifest=manifest, items=state["items"])
     return manifest

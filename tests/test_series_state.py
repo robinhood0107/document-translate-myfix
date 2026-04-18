@@ -15,9 +15,12 @@ from app.projects.project_types import (
 )
 from app.projects.series_state_v1 import (
     create_series_project,
+    filter_series_candidate_paths,
     load_series_project,
     materialize_series_child_project,
     normalize_series_global_settings,
+    normalize_series_queue_runtime,
+    normalize_series_recovery_state,
     normalize_series_settings,
     relative_series_source_path,
     scan_series_source_files,
@@ -86,6 +89,59 @@ class SeriesStateTests(unittest.TestCase):
         self.assertEqual(normalized["ocr"], "paddleocr_vl")
         self.assertEqual(normalized["workflow_mode"], "stage_batched_pipeline")
         self.assertFalse(normalized["use_gpu"])
+
+    def test_normalize_series_queue_runtime_defaults_to_idle_pause_safe_shape(self) -> None:
+        runtime = normalize_series_queue_runtime(
+            {
+                "queue_state": "unknown",
+                "pause_requested": 1,
+                "pending_item_ids": ["a", "", None],
+                "completed_item_ids": ["b", ""],
+                "failed_item_ids": ["c", ""],
+                "skipped_item_ids": ["d", ""],
+                "retry_remaining_by_item": {"x": -1, "": 3},
+            }
+        )
+        self.assertEqual(runtime["queue_state"], "idle")
+        self.assertTrue(runtime["pause_requested"])
+        self.assertEqual(runtime["pending_item_ids"], ["a"])
+        self.assertEqual(runtime["completed_item_ids"], ["b"])
+        self.assertEqual(runtime["failed_item_ids"], ["c"])
+        self.assertEqual(runtime["skipped_item_ids"], ["d"])
+        self.assertEqual(runtime["retry_remaining_by_item"], {"x": 0})
+
+    def test_filter_series_candidate_paths_blocks_existing_and_duplicate_inputs(self) -> None:
+        filtered = filter_series_candidate_paths(
+            existing_source_paths=["/tmp/a.png"],
+            candidate_paths=["/tmp/a.png", "/tmp/b.png", "/tmp/b.png", "/tmp/c.ctpr"],
+        )
+        self.assertEqual(filtered["accepted"], [os.path.abspath("/tmp/b.png"), os.path.abspath("/tmp/c.ctpr")])
+        self.assertEqual(filtered["skipped_existing"], [os.path.abspath("/tmp/a.png")])
+        self.assertEqual(filtered["skipped_duplicates"], [os.path.abspath("/tmp/b.png")])
+
+    def test_normalize_series_recovery_state_converts_running_to_paused(self) -> None:
+        manifest = {
+            "series_queue_runtime": {
+                "queue_state": "running",
+                "active_item_id": "item-2",
+                "pending_item_ids": ["item-3"],
+                "completed_item_ids": ["item-1"],
+            }
+        }
+        items = [
+            {"series_item_id": "item-1", "queue_index": 1, "status": "done"},
+            {"series_item_id": "item-2", "queue_index": 2, "status": "running"},
+            {"series_item_id": "item-3", "queue_index": 3, "status": "pending"},
+        ]
+        next_manifest, next_items, changed = normalize_series_recovery_state(manifest, items)
+        self.assertTrue(changed)
+        self.assertEqual(next_manifest["series_queue_runtime"]["queue_state"], "paused")
+        self.assertIsNone(next_manifest["series_queue_runtime"]["active_item_id"])
+        self.assertEqual(next_manifest["series_queue_runtime"]["pending_item_ids"], ["item-2", "item-3"])
+        self.assertEqual(
+            [item["status"] for item in next_items],
+            ["done", "pending", "pending"],
+        )
 
     def test_project_type_helpers_cover_series_extension(self) -> None:
         self.assertTrue(has_project_file_extension("test.ctpr"))
