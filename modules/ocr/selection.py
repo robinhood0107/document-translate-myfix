@@ -4,7 +4,6 @@ from dataclasses import asdict, dataclass
 
 OCR_MODE_DEFAULT = "default"
 OCR_MODE_BEST_LOCAL = "best_local"
-OCR_MODE_BEST_LOCAL_PLUS = "best_local_plus"
 OCR_MODE_MICROSOFT = "microsoft_ocr"
 OCR_MODE_GOOGLE = "google_cloud_vision"
 OCR_MODE_GEMINI = "gemini_2_0_flash"
@@ -14,12 +13,12 @@ OCR_MODE_MANGALMM = "mangalmm"
 
 OCR_DEFAULT_LABEL = "Default (existing auto: MangaOCR / PPOCR / Pororo...)"
 OCR_OPTIMAL_LABEL = "Optimal (HunyuanOCR / PaddleOCR VL)"
-OCR_OPTIMAL_PLUS_LABEL = "Optimal+ (HunyuanOCR / MangaLMM / PaddleOCR VL)"
+_LEGACY_OPTIMAL_PLUS_MODE = "best_local_plus"
+_LEGACY_OPTIMAL_PLUS_LABEL = "Optimal+ (HunyuanOCR / MangaLMM / PaddleOCR VL)"
 
 OCR_MODE_OPTIONS: tuple[tuple[str, str], ...] = (
     (OCR_MODE_DEFAULT, OCR_DEFAULT_LABEL),
     (OCR_MODE_BEST_LOCAL, OCR_OPTIMAL_LABEL),
-    (OCR_MODE_BEST_LOCAL_PLUS, OCR_OPTIMAL_PLUS_LABEL),
     (OCR_MODE_MICROSOFT, "Microsoft OCR"),
     (OCR_MODE_GOOGLE, "Google Cloud Vision"),
     (OCR_MODE_GEMINI, "Gemini-2.0-Flash"),
@@ -55,8 +54,8 @@ _ALIASES: dict[str, str] = {
     OCR_DEFAULT_LABEL: OCR_MODE_DEFAULT,
     OCR_MODE_BEST_LOCAL: OCR_MODE_BEST_LOCAL,
     OCR_OPTIMAL_LABEL: OCR_MODE_BEST_LOCAL,
-    OCR_MODE_BEST_LOCAL_PLUS: OCR_MODE_BEST_LOCAL_PLUS,
-    OCR_OPTIMAL_PLUS_LABEL: OCR_MODE_BEST_LOCAL_PLUS,
+    _LEGACY_OPTIMAL_PLUS_MODE: OCR_MODE_BEST_LOCAL,
+    _LEGACY_OPTIMAL_PLUS_LABEL: OCR_MODE_BEST_LOCAL,
     OCR_MODE_MICROSOFT: OCR_MODE_MICROSOFT,
     "Microsoft OCR": OCR_MODE_MICROSOFT,
     OCR_MODE_GOOGLE: OCR_MODE_GOOGLE,
@@ -112,12 +111,6 @@ def resolve_ocr_engine(mode: str | None, source_lang_english: str | None) -> str
     if normalized == OCR_MODE_BEST_LOCAL:
         if is_chinese_source_language(source_lang_english):
             return "HunyuanOCR"
-        return "PaddleOCR VL"
-    if normalized == OCR_MODE_BEST_LOCAL_PLUS:
-        if is_chinese_source_language(source_lang_english):
-            return "HunyuanOCR"
-        if str(source_lang_english or "").strip().casefold() == "japanese":
-            return "MangaLMM"
         return "PaddleOCR VL"
     return OCR_MODE_TO_ENGINE.get(normalized, "Default")
 
@@ -213,17 +206,6 @@ def resolve_stage_batched_ocr_policy(
         if is_chinese_source_language(source_lang_text):
             resident_engines = ("HunyuanOCR",)
             primary_engine = "HunyuanOCR"
-        else:
-            resident_engines = ("PaddleOCR VL",)
-            primary_engine = "PaddleOCR VL"
-    elif normalized_mode == OCR_MODE_BEST_LOCAL_PLUS:
-        if is_chinese_source_language(source_lang_text):
-            resident_engines = ("HunyuanOCR",)
-            primary_engine = "HunyuanOCR"
-        elif is_japanese_source_language(source_lang_text):
-            resident_engines = ("PaddleOCR VL", "MangaLMM")
-            primary_engine = "PaddleOCR VL"
-            requires_sidecar_collection = True
         else:
             resident_engines = ("PaddleOCR VL",)
             primary_engine = "PaddleOCR VL"

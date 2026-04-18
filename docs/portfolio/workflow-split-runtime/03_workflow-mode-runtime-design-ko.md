@@ -46,6 +46,7 @@ detect all
 이번 승격에서 제품 운영안은 `PaddleOCR VL 중심`이다.
 
 - Japanese `Optimal` -> `PaddleOCR VL`
+- legacy `best_local_plus` / `Optimal+` 저장값은 `Optimal`로 정규화
 - stage-batched 제품 모드에서는 single-runtime route만 허용
 - `MangaLMM` sidecar/selector route는 benchmark 실패로 제외
 
