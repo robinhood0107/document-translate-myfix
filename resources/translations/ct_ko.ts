@@ -1969,8 +1969,24 @@ This folder is separate from Auto-Recover snapshots.</source>
         <translation>시리즈 프로젝트 만들기</translation>
     </message>
     <message>
-        <source>Select the files to include in the new `.seriesctpr`, then reorder the queue by drag-and-drop or by editing the queue number.</source>
-        <translation>새 `.seriesctpr`에 포함할 파일을 고른 뒤, 드래그 앤 드롭 또는 대기열 번호 수정으로 순서를 정렬하세요.</translation>
+        <source>Choose the files to embed into the new `.seriesctpr`, then arrange the reading queue with drag-and-drop or precise queue numbers.</source>
+        <translation>새 `.seriesctpr`에 포함할 파일을 고른 뒤, 드래그 앤 드롭이나 대기열 번호 수정으로 읽기 순서를 정리하세요.</translation>
+    </message>
+    <message>
+        <source>Series Root Folder</source>
+        <translation>시리즈 루트 폴더</translation>
+    </message>
+    <message>
+        <source>Queue Preview</source>
+        <translation>대기열 미리보기</translation>
+    </message>
+    <message>
+        <source>Checked rows will be embedded. Drag rows to reorder them, or edit the queue number for exact placement.</source>
+        <translation>체크된 행만 포함됩니다. 드래그로 순서를 바꾸거나, 대기열 번호를 직접 수정해 정확한 위치로 옮길 수 있습니다.</translation>
+    </message>
+    <message>
+        <source>Only checked files will be added. You can still reorder or remove queue items later from the series board.</source>
+        <translation>체크된 파일만 추가됩니다. 이후에도 시리즈 보드에서 대기열 순서를 바꾸거나 항목을 제거할 수 있습니다.</translation>
     </message>
     <message>
         <source>Select All</source>
@@ -1989,8 +2005,16 @@ This folder is separate from Auto-Recover snapshots.</source>
         <translation>시리즈 만들기</translation>
     </message>
     <message>
-        <source>{selected} / {total} items selected</source>
-        <translation>{total}개 중 {selected}개 선택됨</translation>
+        <source>Root Folder</source>
+        <translation>루트 폴더</translation>
+    </message>
+    <message>
+        <source>{total} files found</source>
+        <translation>{total}개 파일 검색됨</translation>
+    </message>
+    <message>
+        <source>{selected} selected · {folders} folders</source>
+        <translation>{selected}개 선택됨 · {folders}개 폴더</translation>
     </message>
     <message>
         <source>Select at least one file to include in the series.</source>
