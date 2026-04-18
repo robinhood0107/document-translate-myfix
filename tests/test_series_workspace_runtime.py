@@ -7,6 +7,7 @@ import unittest
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PySide6 import QtWidgets
+from shiboken6 import isValid
 
 from app.ui.series_workspace import SeriesWorkspace
 
@@ -204,6 +205,28 @@ class SeriesWorkspaceRuntimeTests(unittest.TestCase):
 
         self.assertEqual(captured, [["item-2", "item-1"]])
         self.assertEqual(self.widget.sort_combo.currentData(), "manual")
+
+    def test_close_with_visible_hover_preview_cleans_up_safely(self) -> None:
+        self.widget.set_series_state(
+            series_file="demo.seriesctpr",
+            items=self._items(),
+            queue_running=False,
+            active_item_id="",
+            queue_runtime={"queue_state": "idle", "last_run_summary": {}},
+        )
+        payload = self._items()[0]
+        popup = self.widget._hover_preview_popup
+
+        self.widget._queue_hover_requested(payload, self.widget.mapToGlobal(self.widget.rect().center()))
+        self.widget._show_pending_hover_preview()
+        QtWidgets.QApplication.processEvents()
+
+        self.assertTrue(popup.isVisible())
+
+        self.widget.close()
+        QtWidgets.QApplication.processEvents()
+
+        self.assertFalse(isValid(popup) and popup.isVisible())
 
 
 if __name__ == "__main__":

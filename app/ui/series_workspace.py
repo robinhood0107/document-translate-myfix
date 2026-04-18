@@ -141,6 +141,14 @@ class _SeriesItemPreviewPopup(QtWidgets.QFrame):
     def hide_preview(self) -> None:
         self.hide()
 
+    def shutdown(self) -> None:
+        self.hide()
+        try:
+            shutil.rmtree(self._preview_temp_dir, ignore_errors=True)
+        except Exception:
+            pass
+        self._pixmap_cache.clear()
+
     def show_preview(self, payload: dict[str, object], global_pos: QtCore.QPoint) -> None:
         display_name = str(payload.get("display_name") or "")
         source_path = str(payload.get("source_origin_path") or "")
@@ -235,7 +243,8 @@ class _SeriesItemPreviewPopup(QtWidgets.QFrame):
         painter.setFont(body_font)
         painter.drawText(
             QtCore.QRectF(18, 108, size.width() - 36, 42),
-            QtCore.Qt.AlignmentFlag.TextWordWrap,
+            int(QtCore.Qt.AlignmentFlag.AlignLeft | QtCore.Qt.AlignmentFlag.AlignTop)
+            | int(QtCore.Qt.TextFlag.TextWordWrap),
             title or self.tr("This item does not have an image preview, so a file card is shown instead."),
         )
         painter.end()
@@ -673,6 +682,15 @@ class _SeriesQueueTable(QtWidgets.QTableWidget):
                     self._hovered_item_id = ""
                     self.hover_preview_hidden.emit()
         return super().eventFilter(watched, event)
+
+    def closeEvent(self, event):  # type: ignore[override]
+        try:
+            viewport = self.viewport()
+            if viewport is not None:
+                viewport.removeEventFilter(self)
+        except Exception:
+            pass
+        super().closeEvent(event)
 
 
 class _SeriesQuickSettings(QtWidgets.QWidget):
@@ -1534,6 +1552,23 @@ class SeriesWorkspace(QtWidgets.QWidget):
     def hideEvent(self, event):  # type: ignore[override]
         self._hide_hover_preview()
         super().hideEvent(event)
+
+    def closeEvent(self, event):  # type: ignore[override]
+        self._hide_hover_preview()
+        try:
+            self.queue_table.hover_preview_requested.disconnect(self._queue_hover_requested)
+        except Exception:
+            pass
+        try:
+            self.queue_table.hover_preview_hidden.disconnect(self._hide_hover_preview)
+        except Exception:
+            pass
+        try:
+            self._hover_preview_popup.shutdown()
+            self._hover_preview_popup.deleteLater()
+        except Exception:
+            pass
+        super().closeEvent(event)
 
     def _emit_global_settings_changed(self) -> None:
         self.global_settings_changed.emit(self.quick_settings.values())
