@@ -1912,7 +1912,23 @@ This folder is separate from Auto-Recover snapshots.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>Select the files to include in the new `.seriesctpr`, then reorder the queue by drag-and-drop or by editing the queue number.</source>
+        <source>Choose the files to embed into the new `.seriesctpr`, then arrange the reading queue with drag-and-drop or precise queue numbers.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Series Root Folder</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Queue Preview</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Checked rows will be embedded. Drag rows to reorder them, or edit the queue number for exact placement.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Only checked files will be added. You can still reorder or remove queue items later from the series board.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
@@ -1932,7 +1948,15 @@ This folder is separate from Auto-Recover snapshots.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>{selected} / {total} items selected</source>
+        <source>Root Folder</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>{total} files found</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>{selected} selected · {folders} folders</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
