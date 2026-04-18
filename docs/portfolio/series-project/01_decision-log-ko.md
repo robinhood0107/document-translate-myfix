@@ -47,7 +47,39 @@
 ### 실행 중 대기열 변경 정책
 
 - 현재 제품은 실행 시작 시점 snapshot 기반 queue runner를 사용한다.
-- 따라서 실행 중 live reorder는 지원하지 않는다.
+- 따라서 실행 중 live reorder는 제품 계획에서 제외한다.
 - 실행 중에는 queue 순서 변경, 항목 추가/제거, 시리즈 전역 설정 변경을 UI와 controller 양쪽에서 잠근다.
 - 사용자가 오해하지 않도록 running 상태에서는 잠긴 컨트롤을 비활성화하고 안내 문구를 함께 보여준다.
-- 다음 단계 live reorder는 `현재 running 고정`, `남은 pending만 재계산`, `실행 중 add/remove 금지` 계약을 기준으로만 검토한다.
+
+### Pause / Resume
+
+- `Pause`는 현재 항목 완료 후 정지로 고정한다.
+- 즉시 중단형 pause는 배치 취소/partial child 상태/무결성 처리 비용이 커서 채택하지 않는다.
+- `Resume`은 paused 상태에서만 허용한다.
+- paused 상태에서는 running 항목이 없으므로 queue reorder, add/remove, 전역 설정 변경을 다시 허용한다.
+- paused 또는 stop-on-failure 상태가 되면 series board로 복귀해 `Resume`과 `실패 항목 열기`를 일관되게 제공한다.
+
+### 중복 입력 정책
+
+- 같은 원본 파일 또는 같은 `.ctpr`를 다시 추가하려 하면 차단하고 경고한다.
+- 자동 병합/덮어쓰기는 이번 단계에 넣지 않는다.
+- 중복 판정은 `source_origin_path`의 정규화된 절대 경로 기준으로 한다.
+
+### recovery 정책
+
+- recovery에서 `running` 상태를 발견하면 자동 재개하지 않고 `paused`로 정규화한다.
+- active item이 남아 있으면 `pending`으로 되돌려 맨 앞에 복귀시킨다.
+- recovery 이후 기본 동작은 “사용자가 확인 후 Resume”이다.
+
+### 실행 상태 가시성
+
+- 시리즈 우측 패널은 `Queue Status`와 `Last Queue Run`으로 나눈다.
+- 최근 한 번의 실행 요약은 완료/실패/건너뜀/총 시간/시작-종료 시각만 저장한다.
+- `실패 항목 열기`는 board 기반 수동 진입을 기본으로 한다.
+
+### dirty 표시 정책
+
+- 시리즈 board의 reorder/add/remove/settings 변경은 save-through이므로 `시리즈 자체 미저장` 배지를 기본으로 두지 않는다.
+- 대신 아래 둘만 명시적으로 표시한다.
+  - `세부 프로젝트 변경 미반영`
+  - `복구본 열림`

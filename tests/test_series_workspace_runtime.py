@@ -64,6 +64,14 @@ class SeriesWorkspaceRuntimeTests(unittest.TestCase):
             items=self._items(),
             queue_running=True,
             active_item_id="item-2",
+            queue_runtime={
+                "queue_state": "running",
+                "active_item_id": "item-2",
+                "pending_item_ids": [],
+                "failed_item_id": None,
+                "retry_remaining_by_item": {"item-2": 1},
+                "last_run_summary": {},
+            },
         )
         QtWidgets.QApplication.processEvents()
 
@@ -81,6 +89,10 @@ class SeriesWorkspaceRuntimeTests(unittest.TestCase):
         self.assertFalse(self.widget.tree_button.isEnabled())
         self.assertFalse(self.widget.quick_settings.auto_translate_button.isEnabled())
         self.assertFalse(self.widget.queue_notice.isHidden())
+        self.assertEqual(self.widget.status_panel.state_value.text(), "Running")
+        self.assertEqual(self.widget.status_panel.current_item_value.text(), "#02 · chapter-02.ctpr")
+        self.assertFalse(self.widget.status_panel.pause_button.isHidden())
+        self.assertTrue(self.widget.status_panel.resume_button.isHidden())
         self.assertEqual(self.widget.queue_table.item(0, 4).text(), "Pending")
         self.assertEqual(self.widget.queue_table.item(1, 4).text(), "Running")
         self.assertTrue(self.widget.queue_table.item(1, 1).font().bold())
@@ -93,6 +105,20 @@ class SeriesWorkspaceRuntimeTests(unittest.TestCase):
             items=self._items(),
             queue_running=False,
             active_item_id="",
+            queue_runtime={
+                "queue_state": "idle",
+                "active_item_id": None,
+                "pending_item_ids": [],
+                "failed_item_id": None,
+                "last_run_summary": {
+                    "done_count": 2,
+                    "failed_count": 0,
+                    "skipped_count": 0,
+                    "duration_sec": 42,
+                    "started_at": "2026-04-19T10:00:00",
+                    "finished_at": "2026-04-19T10:00:42",
+                },
+            },
         )
         QtWidgets.QApplication.processEvents()
 
@@ -110,9 +136,45 @@ class SeriesWorkspaceRuntimeTests(unittest.TestCase):
         self.assertTrue(self.widget.tree_button.isEnabled())
         self.assertTrue(self.widget.quick_settings.auto_translate_button.isEnabled())
         self.assertTrue(self.widget.queue_notice.isHidden())
+        self.assertEqual(self.widget.status_panel.state_value.text(), "Idle")
+        self.assertTrue(self.widget.status_panel.pause_button.isHidden())
+        self.assertTrue(self.widget.status_panel.resume_button.isHidden())
+        self.assertEqual(self.widget.summary_panel.done_value.text(), "2")
+        self.assertEqual(self.widget.summary_panel.duration_value.text(), "42 sec")
         self.assertEqual(self.widget.queue_table.item(0, 4).text(), "Pending")
         self.assertEqual(self.widget.queue_table.item(1, 4).text(), "Running")
         self.assertTrue(self.widget.queue_table.cellWidget(0, 5).isEnabled())
+
+    def test_paused_queue_shows_resume_and_unlocks_reorder(self) -> None:
+        self.widget.set_navigation_state(can_back=False, can_forward=False)
+        self.widget.set_series_state(
+            series_file="demo.seriesctpr",
+            items=self._items(),
+            queue_running=False,
+            active_item_id="",
+            queue_runtime={
+                "queue_state": "paused",
+                "active_item_id": None,
+                "pending_item_ids": ["item-1"],
+                "failed_item_id": "item-2",
+                "retry_remaining_by_item": {"item-2": 0},
+                "last_run_summary": {},
+            },
+            child_unsynced_dirty=True,
+            recovery_loaded=True,
+        )
+        QtWidgets.QApplication.processEvents()
+
+        self.assertEqual(
+            self.widget.queue_table.dragDropMode(),
+            QtWidgets.QAbstractItemView.DragDropMode.InternalMove,
+        )
+        self.assertFalse(self.widget.quick_settings.auto_translate_button.isEnabled())
+        self.assertFalse(self.widget.status_panel.resume_button.isHidden())
+        self.assertTrue(self.widget.status_panel.resume_button.isEnabled())
+        self.assertTrue(self.widget.status_panel.open_failed_button.isEnabled())
+        self.assertFalse(self.widget.recovery_badge.isHidden())
+        self.assertFalse(self.widget.unsynced_badge.isHidden())
 
 
 if __name__ == "__main__":

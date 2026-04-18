@@ -19,8 +19,15 @@
 - 대기열 실패 정책은 `Settings > Series`에서 설정한다.
 - 일반 프로젝트 히스토리와 시리즈 히스토리는 분리한다.
 - 실행 중에는 queue 순서 변경, 항목 추가/제거, 시리즈 전역 설정 변경을 잠근다.
-- 실행 중 live reorder는 이번 단계에서 지원하지 않는다.
-- 다음 단계에서 live reorder를 도입하더라도 `현재 running 고정 + 남은 pending만 재계산 + 실행 중 add/remove 금지` 규칙을 유지한다.
+- 실행 중 live reorder는 제품 계획에서 제외한다.
+- `Pause`는 현재 항목 완료 후 정지로만 지원한다.
+- `Resume`은 paused 상태에서 남은 pending만 이어서 순차 실행한다.
+- paused 또는 stop-on-failure 상태가 되면 board에서 `Resume`과 `실패 항목 열기`를 제공한다.
+- 중복 원본 파일/`.ctpr` 추가는 차단하고 경고만 보여준다.
+- recovery에서 `running` 상태로 복원되면 자동 재개하지 않고 `paused` 상태로 정규화한다.
+- 시리즈 board 변경은 save-through이므로 `시리즈 자체 미저장` 배지는 기본적으로 두지 않는다.
+- 대신 `세부 프로젝트 변경 미반영`, `복구본 열림` 상태만 명시적으로 드러낸다.
+- 우측 패널에는 `Queue Status`와 `Last Queue Run` 요약을 함께 둔다.
 
 ## 구현 범위
 
@@ -29,6 +36,9 @@
 - series workspace
 - child project 진입/복귀
 - series queue 실행
+- pause / resume
+- queue status + last run summary
+- duplicate import guard
 - 시리즈 전용 settings
 - `.ctpr`/`.seriesctpr` atomic save
 - startup/home/open/save/recovery/recent 확장
@@ -38,3 +48,4 @@
 - webtoon 전용 흐름 변경
 - benchmark 전용 자산
 - MangaLMM hybrid 재도입
+- 실행 중 live reorder

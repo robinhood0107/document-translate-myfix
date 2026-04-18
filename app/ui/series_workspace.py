@@ -387,6 +387,178 @@ class _SeriesQuickSettings(QtWidgets.QWidget):
             combo.setCurrentIndex(index)
 
 
+class _SeriesStatusPanel(QtWidgets.QWidget):
+    pause_requested = QtCore.Signal()
+    resume_requested = QtCore.Signal()
+    open_failed_requested = QtCore.Signal()
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        layout = QtWidgets.QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(10)
+
+        header = QtWidgets.QLabel(self.tr("Queue Status"))
+        header.setObjectName("seriesStatusHeader")
+        note = QtWidgets.QLabel(
+            self.tr(
+                "Monitor the current queue execution and control safe pause/resume behavior here."
+            )
+        )
+        note.setWordWrap(True)
+        note.setObjectName("seriesStatusNote")
+
+        self.state_value = QtWidgets.QLabel("—")
+        self.current_item_value = QtWidgets.QLabel("—")
+        self.current_item_value.setWordWrap(True)
+        self.next_item_value = QtWidgets.QLabel("—")
+        self.next_item_value.setWordWrap(True)
+        self.failed_item_value = QtWidgets.QLabel("—")
+        self.failed_item_value.setWordWrap(True)
+        self.retry_remaining_value = QtWidgets.QLabel("—")
+        self.last_run_value = QtWidgets.QLabel("—")
+        self.last_run_value.setWordWrap(True)
+
+        form = QtWidgets.QFormLayout()
+        form.addRow(self.tr("State:"), self.state_value)
+        form.addRow(self.tr("Current item:"), self.current_item_value)
+        form.addRow(self.tr("Next item:"), self.next_item_value)
+        form.addRow(self.tr("Last failed item:"), self.failed_item_value)
+        form.addRow(self.tr("Retries left:"), self.retry_remaining_value)
+        form.addRow(self.tr("Last run time:"), self.last_run_value)
+
+        button_row = QtWidgets.QHBoxLayout()
+        self.pause_button = QtWidgets.QPushButton(self.tr("Pause"))
+        self.resume_button = QtWidgets.QPushButton(self.tr("Resume"))
+        self.open_failed_button = QtWidgets.QPushButton(self.tr("Open Failed Item"))
+        button_row.addWidget(self.pause_button)
+        button_row.addWidget(self.resume_button)
+        button_row.addWidget(self.open_failed_button)
+
+        layout.addWidget(header)
+        layout.addWidget(note)
+        layout.addLayout(form)
+        layout.addLayout(button_row)
+
+        self.pause_button.clicked.connect(self.pause_requested.emit)
+        self.resume_button.clicked.connect(self.resume_requested.emit)
+        self.open_failed_button.clicked.connect(self.open_failed_requested.emit)
+
+    def _state_label(self, queue_state: str) -> str:
+        mapping = {
+            "idle": self.tr("Idle"),
+            "running": self.tr("Running"),
+            "paused": self.tr("Paused"),
+        }
+        return mapping.get(str(queue_state or "").strip().lower(), self.tr("Idle"))
+
+    def _item_label(self, item_map: dict[str, dict[str, object]], item_id: str | None) -> str:
+        if not item_id:
+            return "—"
+        item = item_map.get(str(item_id))
+        if item is None:
+            return "—"
+        queue_index = int(item.get("queue_index", 0) or 0)
+        display_name = str(item.get("display_name") or item_id)
+        return self.tr("#{index:02d} · {name}").format(index=queue_index, name=display_name)
+
+    def set_runtime(self, queue_runtime: dict[str, object], items: list[dict[str, object]]) -> None:
+        runtime = dict(queue_runtime or {})
+        item_map = {
+            str(item.get("series_item_id") or ""): item
+            for item in items
+            if str(item.get("series_item_id") or "").strip()
+        }
+        queue_state = str(runtime.get("queue_state") or "idle").strip().lower()
+        pause_requested = bool(runtime.get("pause_requested", False))
+        active_item_id = str(runtime.get("active_item_id") or "").strip() or None
+        failed_item_id = str(runtime.get("failed_item_id") or "").strip() or None
+        pending_ids = [
+            str(item_id)
+            for item_id in list(runtime.get("pending_item_ids") or [])
+            if str(item_id or "").strip()
+        ]
+        retry_remaining_by_item = dict(runtime.get("retry_remaining_by_item") or {})
+        last_run_finished_at = str(runtime.get("last_run_finished_at") or "").strip() or None
+        last_run_started_at = str(runtime.get("last_run_started_at") or "").strip() or None
+
+        self.state_value.setText(
+            self.tr("{state} (pause requested)").format(state=self._state_label(queue_state))
+            if queue_state == "running" and pause_requested
+            else self._state_label(queue_state)
+        )
+        self.current_item_value.setText(self._item_label(item_map, active_item_id))
+        next_item_id = pending_ids[0] if pending_ids else None
+        self.next_item_value.setText(self._item_label(item_map, next_item_id))
+        self.failed_item_value.setText(self._item_label(item_map, failed_item_id))
+        retry_target = active_item_id or failed_item_id or ""
+        retries_left = retry_remaining_by_item.get(retry_target, 0)
+        self.retry_remaining_value.setText(str(int(retries_left or 0)))
+        self.last_run_value.setText(last_run_finished_at or last_run_started_at or "—")
+
+        self.pause_button.setVisible(queue_state == "running")
+        self.pause_button.setEnabled(queue_state == "running" and not pause_requested)
+        self.pause_button.setText(self.tr("Pause") if not pause_requested else self.tr("Pause Requested"))
+        self.resume_button.setVisible(queue_state == "paused")
+        self.resume_button.setEnabled(queue_state == "paused" and bool(pending_ids))
+        self.open_failed_button.setEnabled(bool(failed_item_id) and queue_state != "running")
+
+
+class _SeriesRunSummaryPanel(QtWidgets.QWidget):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        layout = QtWidgets.QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(10)
+
+        header = QtWidgets.QLabel(self.tr("Last Queue Run"))
+        header.setObjectName("seriesSummaryHeader")
+
+        self.done_value = QtWidgets.QLabel("0")
+        self.failed_value = QtWidgets.QLabel("0")
+        self.skipped_value = QtWidgets.QLabel("0")
+        self.duration_value = QtWidgets.QLabel("—")
+        self.window_value = QtWidgets.QLabel("—")
+        self.window_value.setWordWrap(True)
+
+        form = QtWidgets.QFormLayout()
+        form.addRow(self.tr("Done:"), self.done_value)
+        form.addRow(self.tr("Failed:"), self.failed_value)
+        form.addRow(self.tr("Skipped:"), self.skipped_value)
+        form.addRow(self.tr("Total time:"), self.duration_value)
+        form.addRow(self.tr("Started / Finished:"), self.window_value)
+
+        layout.addWidget(header)
+        layout.addLayout(form)
+
+    def set_summary(self, summary: dict[str, object] | None) -> None:
+        payload = dict(summary or {})
+        done_count = int(payload.get("done_count", 0) or 0)
+        failed_count = int(payload.get("failed_count", 0) or 0)
+        skipped_count = int(payload.get("skipped_count", 0) or 0)
+        duration = payload.get("duration_sec")
+        started_at = str(payload.get("started_at") or "").strip() or None
+        finished_at = str(payload.get("finished_at") or "").strip() or None
+
+        self.done_value.setText(str(done_count))
+        self.failed_value.setText(str(failed_count))
+        self.skipped_value.setText(str(skipped_count))
+        self.duration_value.setText(
+            self.tr("{seconds} sec").format(seconds=int(duration))
+            if duration not in (None, "")
+            else "—"
+        )
+        if started_at or finished_at:
+            self.window_value.setText(
+                self.tr("{started} → {finished}").format(
+                    started=started_at or "—",
+                    finished=finished_at or "—",
+                )
+            )
+        else:
+            self.window_value.setText("—")
+
+
 class SeriesTreeJumpDialog(QtWidgets.QDialog):
     def __init__(self, items: list[dict[str, object]], parent=None):
         super().__init__(parent)
@@ -459,6 +631,9 @@ class SeriesWorkspace(QtWidgets.QWidget):
     forward_requested = QtCore.Signal()
     tree_jump_requested = QtCore.Signal()
     auto_translate_requested = QtCore.Signal()
+    pause_requested = QtCore.Signal()
+    resume_requested = QtCore.Signal()
+    open_failed_item_requested = QtCore.Signal()
     open_series_settings_requested = QtCore.Signal()
     global_settings_changed = QtCore.Signal(dict)
 
@@ -494,6 +669,18 @@ class SeriesWorkspace(QtWidgets.QWidget):
         top_row.addWidget(self.title_label, 1)
         layout.addLayout(top_row)
 
+        badge_row = QtWidgets.QHBoxLayout()
+        self.recovery_badge = QtWidgets.QLabel(self.tr("Recovered Snapshot"))
+        self.recovery_badge.setObjectName("seriesRecoveryBadge")
+        self.recovery_badge.hide()
+        self.unsynced_badge = QtWidgets.QLabel(self.tr("Child Changes Not Synced"))
+        self.unsynced_badge.setObjectName("seriesUnsyncedBadge")
+        self.unsynced_badge.hide()
+        badge_row.addWidget(self.recovery_badge, 0)
+        badge_row.addWidget(self.unsynced_badge, 0)
+        badge_row.addStretch(1)
+        layout.addLayout(badge_row)
+
         body = QtWidgets.QHBoxLayout()
         body.setSpacing(12)
         layout.addLayout(body, 1)
@@ -524,10 +711,14 @@ class SeriesWorkspace(QtWidgets.QWidget):
         body.addWidget(left_panel, 1)
 
         self.quick_settings = _SeriesQuickSettings(self)
+        self.status_panel = _SeriesStatusPanel(self)
+        self.summary_panel = _SeriesRunSummaryPanel(self)
         quick_frame = QtWidgets.QFrame(self)
         quick_frame.setObjectName("seriesQuickFrame")
         quick_frame_layout = QtWidgets.QVBoxLayout(quick_frame)
         quick_frame_layout.setContentsMargins(12, 12, 12, 12)
+        quick_frame_layout.addWidget(self.status_panel)
+        quick_frame_layout.addWidget(self.summary_panel)
         quick_frame_layout.addWidget(self.quick_settings)
         quick_frame.setMinimumWidth(320)
         quick_frame.setMaximumWidth(420)
@@ -544,6 +735,9 @@ class SeriesWorkspace(QtWidgets.QWidget):
         self.queue_table.order_changed.connect(self.reorder_requested)
         self.queue_table.queue_index_requested.connect(self.queue_index_requested)
         self.quick_settings.auto_translate_requested.connect(self.auto_translate_requested)
+        self.status_panel.pause_requested.connect(self.pause_requested)
+        self.status_panel.resume_requested.connect(self.resume_requested)
+        self.status_panel.open_failed_requested.connect(self.open_failed_item_requested)
         self.quick_settings.open_series_settings_requested.connect(self.open_series_settings_requested)
         self.quick_settings.changed.connect(self._emit_global_settings_changed)
 
@@ -592,8 +786,12 @@ class SeriesWorkspace(QtWidgets.QWidget):
         items: list[dict[str, object]],
         queue_running: bool = False,
         active_item_id: str | None = None,
+        queue_runtime: dict[str, object] | None = None,
+        child_unsynced_dirty: bool = False,
+        recovery_loaded: bool = False,
     ) -> None:
         self._queue_running = bool(queue_running)
+        queue_state = str((queue_runtime or {}).get("queue_state") or "idle").strip().lower()
         self.title_label.setText(series_file)
         self.scope_badge.setText(self.tr("Series Project"))
         lock_reason = self._queue_lock_reason()
@@ -603,6 +801,12 @@ class SeriesWorkspace(QtWidgets.QWidget):
             lock_reason=lock_reason,
         )
         self.queue_table.set_series_items(items)
+        self.status_panel.set_runtime(queue_runtime or {}, items)
+        self.summary_panel.set_summary(
+            dict((queue_runtime or {}).get("last_run_summary") or {})
+        )
+        self.recovery_badge.setVisible(bool(recovery_loaded))
+        self.unsynced_badge.setVisible(bool(child_unsynced_dirty))
         controls_locked = bool(queue_running)
         self.open_button.setEnabled(bool(items) and not controls_locked)
         self.add_files_button.setEnabled(not controls_locked)
@@ -611,10 +815,14 @@ class SeriesWorkspace(QtWidgets.QWidget):
         self.add_files_button.setToolTip(lock_reason if controls_locked else self.tr("Add supported files to this series."))
         self.add_folder_button.setToolTip(lock_reason if controls_locked else self.tr("Scan and add a folder to this series."))
         self.quick_settings.set_locked(controls_locked, lock_reason)
-        self.quick_settings.auto_translate_button.setEnabled(bool(items) and not queue_running)
+        self.quick_settings.auto_translate_button.setEnabled(
+            bool(items) and not queue_running and queue_state != "paused"
+        )
         self.quick_settings.auto_translate_button.setToolTip(
             self.tr("Run automatic translation in queue order.")
-            if not queue_running
+            if not queue_running and queue_state != "paused"
+            else self.tr("Resume the paused queue from the queue status panel.")
+            if queue_state == "paused"
             else self.tr("Automatic translation is already running.")
         )
         self.queue_notice.setVisible(controls_locked)

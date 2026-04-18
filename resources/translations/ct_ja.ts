@@ -1606,6 +1606,10 @@ Approximate GPU usage:
         <translation>ログ</translation>
     </message>
     <message>
+        <source>Pause</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
         <source>Report</source>
         <translation>レポート</translation>
     </message>
@@ -1624,6 +1628,10 @@ Approximate GPU usage:
     <message>
         <source>Close</source>
         <translation>閉じる</translation>
+    </message>
+    <message>
+        <source>Pause Requested</source>
+        <translation type="unfinished"></translation>
     </message>
     <message>
         <source>Window</source>
@@ -2022,6 +2030,14 @@ These values are copied into new series projects and can be adjusted per series.
         <translation type="unfinished"></translation>
     </message>
     <message>
+        <source>Recovered Snapshot</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Child Changes Not Synced</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
         <source>Open Selected</source>
         <translation type="unfinished"></translation>
     </message>
@@ -2052,6 +2068,10 @@ The current running item stays fixed, and you can change the queue after the run
     </message>
     <message>
         <source>Run automatic translation in queue order.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Resume the paused queue from the queue status panel.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
@@ -3309,6 +3329,112 @@ It may have already been moved, renamed, or deleted.
     </message>
 </context>
 <context>
+    <name>_SeriesRunSummaryPanel</name>
+    <message>
+        <source>Last Queue Run</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Done:</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Failed:</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Skipped:</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Total time:</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Started / Finished:</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>{seconds} sec</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>{started} → {finished}</source>
+        <translation type="unfinished"></translation>
+    </message>
+</context>
+<context>
+    <name>_SeriesStatusPanel</name>
+    <message>
+        <source>Queue Status</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Monitor the current queue execution and control safe pause/resume behavior here.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>State:</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Current item:</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Next item:</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Last failed item:</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Retries left:</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Last run time:</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Pause</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Resume</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Open Failed Item</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Idle</source>
+        <translation type="unfinished">待機中</translation>
+    </message>
+    <message>
+        <source>Running</source>
+        <translation type="unfinished">実行中</translation>
+    </message>
+    <message>
+        <source>Paused</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>#{index:02d} · {name}</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>{state} (pause requested)</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Pause Requested</source>
+        <translation type="unfinished"></translation>
+    </message>
+</context>
+<context>
     <name>self.main</name>
     <message>
         <source>Project Recovery</source>
@@ -3433,6 +3559,14 @@ It may have been moved, renamed, or deleted.
         <translation>英語</translation>
     </message>
     <message>
+        <source>Recovered Snapshot</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Child Changes Not Synced</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
         <source>Child Project - {child} · {series}[*]</source>
         <translation type="unfinished"></translation>
     </message>
@@ -3449,6 +3583,18 @@ It may have been moved, renamed, or deleted.
 It may have been moved, renamed, or deleted.
 
 {path}</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>The previous automatic translation run was interrupted and restored as paused.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Already in this series: {count}</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Duplicate selections removed: {count}</source>
         <translation type="unfinished"></translation>
     </message>
     <message>

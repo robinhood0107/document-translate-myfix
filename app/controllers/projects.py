@@ -585,7 +585,7 @@ class ProjectController:
             return
 
         if recovery_file.lower().endswith(SERIES_PROJECT_FILE_EXT):
-            self.main.series_ctrl.thread_load_series_project(recovery_file)
+            self.main.series_ctrl.thread_load_series_project(recovery_file, recovery_loaded=True)
             return
 
         self.main.image_ctrl.clear_state()
