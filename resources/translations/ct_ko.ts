@@ -2156,10 +2156,38 @@ These values are copied into new series projects and can be adjusted per series.
         <translation>폴더 추가</translation>
     </message>
     <message>
+        <source>Sort</source>
+        <translation>정렬</translation>
+    </message>
+    <message>
+        <source>Manual Queue</source>
+        <translation>수동 대기열</translation>
+    </message>
+    <message>
+        <source>Name (A-Z)</source>
+        <translation>이름순 (A-Z)</translation>
+    </message>
+    <message>
+        <source>Name (Z-A)</source>
+        <translation>이름순 (Z-A)</translation>
+    </message>
+    <message>
+        <source>Date (Newest First)</source>
+        <translation>날짜순 (최신 먼저)</translation>
+    </message>
+    <message>
+        <source>Date (Oldest First)</source>
+        <translation>날짜순 (오래된 순)</translation>
+    </message>
+    <message>
         <source>Queue changes are locked while automatic translation is running.
 The current running item stays fixed, and you can change the queue after the run finishes.</source>
         <translation>자동 번역 실행 중에는 대기열 변경이 잠깁니다.
 현재 실행 중 항목은 고정되며, 변경은 실행 종료 후 가능합니다.</translation>
+    </message>
+    <message>
+        <source>Apply a quick queue sort by name or modified date.</source>
+        <translation>이름이나 수정일 기준으로 현재 대기열을 빠르게 다시 정렬합니다.</translation>
     </message>
     <message>
         <source>Open the selected child project.</source>
@@ -3343,6 +3371,25 @@ It may have already been moved, renamed, or deleted.
     </message>
 </context>
 <context>
+    <name>_SeriesItemPreviewPopup</name>
+    <message>
+        <source>Series item</source>
+        <translation>시리즈 항목</translation>
+    </message>
+    <message>
+        <source>Preview</source>
+        <translation>대표 썸네일</translation>
+    </message>
+    <message>
+        <source>Preview Unavailable</source>
+        <translation>미리보기를 불러올 수 없음</translation>
+    </message>
+    <message>
+        <source>This item does not have an image preview, so a file card is shown instead.</source>
+        <translation>이 항목은 이미지 미리보기를 바로 만들 수 없어 파일 카드로 대신 보여줍니다.</translation>
+    </message>
+</context>
+<context>
     <name>_SeriesQueueTable</name>
     <message>
         <source>No.</source>
@@ -3398,7 +3445,7 @@ It may have already been moved, renamed, or deleted.
     </message>
     <message>
         <source>Remove from series</source>
-        <translation>시리즈에서 제거</translation>
+        <translation>시리즈에서 제외</translation>
     </message>
 </context>
 <context>
@@ -3744,11 +3791,11 @@ It may have been moved, renamed, or deleted.
     </message>
     <message>
         <source>Remove From Series</source>
-        <translation>시리즈에서 제거</translation>
+        <translation>시리즈 항목 제거</translation>
     </message>
     <message>
         <source>Remove &apos;{name}&apos; from this series project?</source>
-        <translation>&apos;{name}&apos; 항목을 이 시리즈 프로젝트에서 제거할까요?</translation>
+        <translation>이 시리즈 프로젝트에서 &apos;{name}&apos; 항목을 제거할까요?</translation>
     </message>
     <message>
         <source>Add Files To Series</source>

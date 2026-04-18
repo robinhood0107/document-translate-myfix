@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import tempfile
 import unittest
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
@@ -17,6 +18,7 @@ class SeriesWorkspaceRuntimeTests(unittest.TestCase):
 
     def setUp(self) -> None:
         self.widget = SeriesWorkspace()
+        self.temp_dir = tempfile.TemporaryDirectory()
         self.widget.configure_options(
             languages=[("Japanese", "Japanese"), ("Korean", "Korean")],
             ocr_modes=[("best_local", "Optimal (HunyuanOCR / PaddleOCR VL)")],
@@ -33,6 +35,16 @@ class SeriesWorkspaceRuntimeTests(unittest.TestCase):
                 "use_gpu": True,
             }
         )
+        self._path_a = os.path.join(self.temp_dir.name, "chapter-01.ctpr")
+        self._path_b = os.path.join(self.temp_dir.name, "nested", "chapter-02.png")
+        os.makedirs(os.path.dirname(self._path_b), exist_ok=True)
+        with open(self._path_a, "wb") as fh:
+            fh.write(b"ctpr")
+        with open(self._path_b, "wb") as fh:
+            fh.write(b"png")
+        os.utime(self._path_a, (1_700_000_000, 1_700_000_000))
+        os.utime(self._path_b, (1_800_000_000, 1_800_000_000))
+        self.addCleanup(self.temp_dir.cleanup)
         self.addCleanup(self.widget.deleteLater)
 
     def _items(self) -> list[dict[str, object]]:
@@ -43,7 +55,7 @@ class SeriesWorkspaceRuntimeTests(unittest.TestCase):
                 "display_name": "chapter-01.ctpr",
                 "source_kind": "ctpr_import",
                 "source_origin_relpath": "chapter-01.ctpr",
-                "source_origin_path": "/tmp/chapter-01.ctpr",
+                "source_origin_path": self._path_a,
                 "status": "pending",
             },
             {
@@ -52,7 +64,7 @@ class SeriesWorkspaceRuntimeTests(unittest.TestCase):
                 "display_name": "chapter-02.ctpr",
                 "source_kind": "source_file",
                 "source_origin_relpath": "nested/chapter-02.png",
-                "source_origin_path": "/tmp/nested/chapter-02.png",
+                "source_origin_path": self._path_b,
                 "status": "running",
             },
         ]
@@ -175,6 +187,23 @@ class SeriesWorkspaceRuntimeTests(unittest.TestCase):
         self.assertTrue(self.widget.status_panel.open_failed_button.isEnabled())
         self.assertFalse(self.widget.recovery_badge.isHidden())
         self.assertFalse(self.widget.unsynced_badge.isHidden())
+
+    def test_sort_combo_emits_reorder_and_resets_to_manual(self) -> None:
+        self.widget.set_series_state(
+            series_file="demo.seriesctpr",
+            items=self._items(),
+            queue_running=False,
+            active_item_id="",
+            queue_runtime={"queue_state": "idle", "last_run_summary": {}},
+        )
+        captured: list[list[str]] = []
+        self.widget.reorder_requested.connect(captured.append)
+
+        self.widget.sort_combo.setCurrentIndex(self.widget.sort_combo.findData("date_desc"))
+        QtWidgets.QApplication.processEvents()
+
+        self.assertEqual(captured, [["item-2", "item-1"]])
+        self.assertEqual(self.widget.sort_combo.currentData(), "manual")
 
 
 if __name__ == "__main__":
