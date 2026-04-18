@@ -227,6 +227,7 @@ def _configure_window(window, preset: dict[str, object], source_lang: str, targe
             ui.crop_trigger_spinbox.setValue(int(hd_strategy.get("crop_trigger_size", 512)))
 
     if isinstance(mask_refiner_settings, dict):
+        setattr(window.settings_page, "_benchmark_mask_refiner_settings", dict(mask_refiner_settings))
         # Some benchmarking/lab UI snapshots keep legacy bbox rescue fixed and
         # do not expose the older mask refiner widgets. Apply only the controls
         # that exist so the pipeline remains compatible across branches.

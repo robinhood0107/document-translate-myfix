@@ -136,7 +136,7 @@ stage-batched 시나리오의 분해표는 아래와 같다.
 
 1. Requirement 1은 `flow gain confirmed`로 잠근다.
 2. `feature/workflow-split-runtime`에서 `stage_batched_pipeline`를 제품 승격 대상으로 준비한다.
-3. hybrid selector 대신, 현재 레거시로 강제되고 있는 마스킹 경로를 사용자가 의도한 방식으로 교체하는 별도 검증/구현을 다음 우선순위로 둔다.
+3. hybrid selector 대신, CTD 마스킹 경로를 실제 배치/benchmark 경로에 연결하고 residue cleanup smoke를 통과시킨 뒤 제품 승격으로 넘어간다.
 
 ## 8. Requirement 2 종료 결론
 
@@ -152,3 +152,23 @@ stage-batched 시나리오의 분해표는 아래와 같다.
 
 - `legacy_page_pipeline`
 - `stage_batched_pipeline + Japanese Optimal(PaddleOCR VL 중심)`
+
+## 9. CTD 마스킹 연결 상태
+
+2026-04-18 기준 benchmark 경로에서 CTD 마스킹 연결과 residue cleanup smoke가 통과했다.
+
+- smoke inputs:
+  - `094.png`
+  - `p_016.jpg`
+- representative metadata:
+  - `banchmark_result_log/inpaint_debug/20260418_150438_sample-debug-export/japan/debug_metadata/094_debug.json`
+  - `banchmark_result_log/inpaint_debug/20260418_150441_sample-debug-export/japan/debug_metadata/p_016_debug.json`
+
+두 output 모두 아래를 만족한다.
+
+- `mask_refiner == "ctd"`
+- `keep_existing_lines == true`
+- `protect_mask_applied == true`
+- `cleanup_applied == true`
+
+따라서 Requirement 1 gate 이후 남아 있던 마지막 benchmark blocker는 “CTD 마스크 경로가 실제로 연결되었는가”였고, 이 항목은 현재 `passed_smoke_on_benchmarking_lab` 상태로 본다.
