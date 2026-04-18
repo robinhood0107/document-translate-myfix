@@ -4,6 +4,14 @@ import os
 
 from PySide6 import QtCore, QtGui, QtWidgets
 
+from .dayu_widgets import dayu_theme
+
+
+def _hex_to_rgba(value: str, alpha: float) -> str:
+    color = QtGui.QColor(value)
+    color.setAlphaF(max(0.0, min(1.0, alpha)))
+    return color.name(QtGui.QColor.NameFormat.HexArgb)
+
 
 class _SeriesImportTable(QtWidgets.QTableWidget):
     order_changed = QtCore.Signal()
@@ -49,48 +57,62 @@ class _SeriesImportTable(QtWidgets.QTableWidget):
         self.setColumnWidth(1, 72)
         self.setColumnWidth(3, 88)
 
+        self.apply_theme_styles()
+
+    def apply_theme_styles(self) -> None:
+        text = dayu_theme.primary_text_color or "#d9d9d9"
+        sub_text = dayu_theme.secondary_text_color or "#a6a6a6"
+        panel = dayu_theme.background_color or "#323232"
+        panel_alt = dayu_theme.background_in_color or "#3a3a3a"
+        header = dayu_theme.background_out_color or "#494949"
+        border = dayu_theme.divider_color or "#262626"
+        accent = dayu_theme.primary_color or dayu_theme.yellow or "#fadb14"
+        accent_soft = _hex_to_rgba(accent, 0.18)
+        handle = _hex_to_rgba(text, 0.22)
+
         self.setStyleSheet(
-            """
-            QTableWidget {
-                background: #181c22;
-                border: 1px solid rgba(255, 255, 255, 0.10);
-                border-radius: 14px;
-                alternate-background-color: #1f242c;
-                color: #eef2f7;
-                selection-background-color: rgba(79, 141, 255, 0.20);
-                selection-color: #ffffff;
+            f"""
+            QTableWidget {{
+                background: {panel};
+                border: 1px solid {border};
+                border-radius: 12px;
+                alternate-background-color: {panel_alt};
+                color: {text};
+                selection-background-color: {accent_soft};
+                selection-color: {text};
                 outline: none;
-            }
-            QTableWidget::item {
-                padding: 8px 10px;
+            }}
+            QTableWidget::item {{
+                background: transparent;
+                padding: 7px 10px;
                 border: none;
-                border-bottom: 1px solid rgba(255, 255, 255, 0.05);
-            }
-            QTableWidget::item:selected {
-                background: rgba(79, 141, 255, 0.22);
-                color: #ffffff;
-            }
-            QHeaderView::section {
-                background: #242b35;
-                color: #dce7f5;
+                border-bottom: 1px solid {border};
+            }}
+            QTableWidget::item:selected {{
+                background: {accent_soft};
+                color: {text};
+            }}
+            QHeaderView::section {{
+                background: {header};
+                color: {text};
                 border: none;
-                border-bottom: 1px solid rgba(255, 255, 255, 0.12);
+                border-bottom: 1px solid {border};
                 padding: 10px 12px;
                 font-weight: 600;
-            }
-            QScrollBar:vertical {
+            }}
+            QScrollBar:vertical {{
                 background: transparent;
                 width: 12px;
                 margin: 8px 0 8px 0;
-            }
-            QScrollBar::handle:vertical {
-                background: rgba(255, 255, 255, 0.18);
+            }}
+            QScrollBar::handle:vertical {{
+                background: {handle};
                 border-radius: 6px;
                 min-height: 28px;
-            }
-            QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
+            }}
+            QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{
                 height: 0;
-            }
+            }}
             """
         )
 
@@ -110,75 +132,6 @@ class SeriesImportDialog(QtWidgets.QDialog):
         self.resize(1080, 700)
         self.setMinimumSize(900, 620)
         self.setModal(True)
-        self.setStyleSheet(
-            """
-            QDialog {
-                background: #10141a;
-                color: #eef2f7;
-            }
-            QLabel#seriesImportHeroTitle {
-                font-size: 22px;
-                font-weight: 700;
-                color: #f5f7fb;
-            }
-            QLabel#seriesImportHeroNote {
-                font-size: 13px;
-                color: #b9c4d3;
-            }
-            QLabel#seriesImportSectionTitle {
-                font-size: 12px;
-                font-weight: 700;
-                color: #d8e1ed;
-                letter-spacing: 0.3px;
-            }
-            QLabel#seriesImportRootPath {
-                padding: 10px 12px;
-                border-radius: 10px;
-                background: rgba(255, 255, 255, 0.05);
-                color: #e4ebf5;
-                border: 1px solid rgba(255, 255, 255, 0.08);
-            }
-            QLabel#seriesImportChip {
-                padding: 6px 12px;
-                border-radius: 999px;
-                background: rgba(79, 141, 255, 0.16);
-                color: #ddebff;
-                border: 1px solid rgba(79, 141, 255, 0.34);
-                font-weight: 600;
-            }
-            QFrame#seriesImportHero,
-            QFrame#seriesImportBoard,
-            QFrame#seriesImportFooter {
-                background: #151a20;
-                border: 1px solid rgba(255, 255, 255, 0.08);
-                border-radius: 16px;
-            }
-            QPushButton {
-                min-height: 36px;
-                padding: 0 16px;
-                border-radius: 10px;
-                border: 1px solid rgba(255, 255, 255, 0.10);
-                background: rgba(255, 255, 255, 0.06);
-                color: #eef2f7;
-                font-weight: 600;
-            }
-            QPushButton:hover {
-                background: rgba(255, 255, 255, 0.10);
-            }
-            QPushButton#seriesImportPrimary {
-                background: #4f8dff;
-                border: 1px solid #6ea2ff;
-                color: white;
-            }
-            QPushButton#seriesImportPrimary:hover {
-                background: #6a9eff;
-            }
-            QPushButton#seriesImportGhost {
-                background: transparent;
-            }
-            """
-        )
-
         layout = QtWidgets.QVBoxLayout(self)
         layout.setContentsMargins(20, 18, 20, 18)
         layout.setSpacing(14)
@@ -306,7 +259,101 @@ class SeriesImportDialog(QtWidgets.QDialog):
         self.table.order_changed.connect(self._sync_after_drag_drop)
         self.table.itemChanged.connect(self._on_item_changed)
 
+        self._apply_theme_styles()
         self._populate_table()
+
+    def _apply_theme_styles(self) -> None:
+        accent = dayu_theme.primary_color or dayu_theme.yellow or "#fadb14"
+        text = dayu_theme.primary_text_color or "#d9d9d9"
+        sub_text = dayu_theme.secondary_text_color or "#a6a6a6"
+        window = dayu_theme.background_color or "#323232"
+        panel = dayu_theme.background_in_color or "#3a3a3a"
+        header = dayu_theme.background_out_color or "#494949"
+        border = dayu_theme.divider_color or "#262626"
+        accent_soft = _hex_to_rgba(accent, 0.16)
+        accent_border = _hex_to_rgba(accent, 0.38)
+        button_hover = _hex_to_rgba(text, 0.08)
+        button_fill = _hex_to_rgba(text, 0.04)
+
+        self.setStyleSheet(
+            f"""
+            QDialog {{
+                background: {window};
+                color: {text};
+            }}
+            QLabel {{
+                background: transparent;
+                border: none;
+            }}
+            QLabel#seriesImportHeroTitle {{
+                font-size: 24px;
+                font-weight: 700;
+                color: {text};
+                background: transparent;
+            }}
+            QLabel#seriesImportHeroNote {{
+                font-size: 13px;
+                color: {sub_text};
+                line-height: 1.35;
+                background: transparent;
+            }}
+            QLabel#seriesImportSectionTitle {{
+                font-size: 11px;
+                font-weight: 700;
+                color: {sub_text};
+                letter-spacing: 0.4px;
+                text-transform: uppercase;
+                background: transparent;
+            }}
+            QLabel#seriesImportRootPath {{
+                padding: 11px 12px;
+                border-radius: 10px;
+                background: {window};
+                color: {text};
+                border: 1px solid {border};
+            }}
+            QLabel#seriesImportChip {{
+                padding: 6px 12px;
+                border-radius: 999px;
+                background: {accent_soft};
+                color: {text};
+                border: 1px solid {accent_border};
+                font-weight: 600;
+            }}
+            QFrame#seriesImportHero,
+            QFrame#seriesImportBoard,
+            QFrame#seriesImportFooter {{
+                background: {panel};
+                border: 1px solid {border};
+                border-radius: 16px;
+            }}
+            QPushButton {{
+                min-height: 36px;
+                padding: 0 16px;
+                border-radius: 10px;
+                border: 1px solid {border};
+                background: {button_fill};
+                color: {text};
+                font-weight: 600;
+            }}
+            QPushButton:hover {{
+                background: {button_hover};
+            }}
+            QPushButton#seriesImportPrimary {{
+                background: {accent};
+                border: 1px solid {accent};
+                color: #111111;
+            }}
+            QPushButton#seriesImportPrimary:hover {{
+                background: {dayu_theme.primary_4 or accent};
+                border: 1px solid {dayu_theme.primary_4 or accent};
+            }}
+            QPushButton#seriesImportGhost {{
+                background: transparent;
+            }}
+            """
+        )
+        self.table.apply_theme_styles()
 
     def _build_entries(self) -> list[dict[str, object]]:
         entries = []
