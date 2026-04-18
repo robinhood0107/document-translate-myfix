@@ -514,6 +514,12 @@ class SearchReplaceController(QtCore.QObject):
     def search(self, jump_to_first: bool = True):
         panel = self.main.search_panel
         opts = self._gather_options()
+        if not (opts.query or "").strip():
+            panel.set_results([], 0, 0)
+            panel.set_status(QtCore.QCoreApplication.translate("SearchReplaceController", "Ready"))
+            self._matches = []
+            self._active_match_index = -1
+            return
         focus_state = self._capture_focus_state()
         prev_match = None
         if 0 <= self._active_match_index < len(self._matches):
