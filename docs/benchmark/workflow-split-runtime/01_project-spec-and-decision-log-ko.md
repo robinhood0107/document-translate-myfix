@@ -33,6 +33,8 @@
     - `Optimal+`: Chinese -> `HunyuanOCR` only, Japanese -> `PaddleOCR VL + MangaLMM`, Other -> `PaddleOCR VL` only
 15. OCR stage 종료 후 OCR 관련 Docker는 전부 내려가고, translation stage는 `Gemma4`만 올리는 구조를 유지한다.
 16. `Optimal+ Japanese`는 selector 승인 전까지 `PaddleOCR VL`을 downstream 기준으로 사용하고 `MangaLMM`은 sidecar 비교 데이터로만 수집한다.
+17. 2026-04-18 기준으로 Requirement 2의 `MangaLMM` 하이브리드 selector 트랙은 benchmark 실패로 종료한다. 실패 근거는 공식 suite에서 `candidate_stage_batched_dual_resident`가 `candidate_stage_batched_single_ocr`보다 크게 느리고, review pack에서 `text_bubble` 누락/병합-분할 불안정성이 반복 확인되었다는 점이다.
+18. 2026-04-18 기준으로 최종 승격 후보는 `stage_batched_pipeline + PaddleOCR VL 중심(Japanese Optimal)`로 잠근다. 이후 추가 검증 우선순위는 hybrid selector가 아니라 마스킹 경로 보정이다.
 
 ## 운영 기준으로 잠근 입력 세트
 
@@ -128,6 +130,39 @@
     - `banchmark_result_log/workflow-split-runtime/20260415_091848_candidate_stage_batched_dual_resident/sidecar_review_pack.json`
     - `banchmark_result_log/workflow-split-runtime/20260415_091848_candidate_stage_batched_dual_resident/sidecar_review_pack.md`
 
+### 1-1. flow 비교 최종 판정
+
+- `baseline_legacy`: `995.846s`
+- `candidate_stage_batched_single_ocr`: `714.725s`
+- 순이득: `281.121s`
+- 개선률: 약 `28.2%`
+
+이 비교는 공식 suite의 `total_elapsed_sec` 기준이므로 Docker compose up / health wait / stage transition 비용이 이미 포함되어 있다.
+
+- `baseline_legacy`
+  - `total_elapsed_sec=995.846`
+  - `ocr.total_sec=331.850`
+  - `translate.total_sec=567.353`
+- `candidate_stage_batched_single_ocr`
+  - `total_elapsed_sec=714.725`
+  - `compose_up_sec=2.283`
+  - `health_wait_sec=119.021`
+  - `ocr.total_sec=298.000`
+  - `translate.total_sec=229.769`
+
+따라서 사용자가 처음 가설로 세운 “OCR 단계와 번역 단계를 분리하면 Docker 대기를 포함해도 전체 시간이 이득일 수 있는가”에 대한 Requirement 1 핵심 질문은 `Yes`로 판정한다.
+
+### 1-2. 품질 동등성 판정
+
+공식 quality summary 기준으로 `baseline_legacy`와 `candidate_stage_batched_single_ocr`는 다음을 만족한다.
+
+- 두 시나리오 모두 `page_failed_count=0`
+- 두 시나리오 모두 `detect_box_total=212`
+- 두 시나리오 모두 `ocr_non_empty_total=212`
+- hard page `p_016.jpg`에서도 두 시나리오 모두 `ocr_non_empty=30`, `ocr_empty=0`
+
+즉 Requirement 1의 정식 신규 전체 플로우 후보인 `stage_batched_pipeline + Japanese Optimal`은 현재 공식 suite 기준에서 속도 이득과 품질 동등성을 동시에 만족한다.
+
 ### 2. Chinese routing smoke
 
 최신 검증 출력은 checkpoint 집계 보정 후 다시 실행한 아래 두 run으로 잠근다.
@@ -184,6 +219,14 @@
   - selector rule 후보
   - 문제 해결 명세서
 
+### Phase 3 결론 보정
+
+- 2026-04-18 기준 이 Phase는 `failed_closed` 상태로 종료한다.
+- 이유:
+  1. 공식 suite에서 `candidate_stage_batched_dual_resident`가 `1664.021s`로, `candidate_stage_batched_single_ocr`(`714.725s`)보다 크게 느리다.
+  2. review pack에서 `text_bubble` 누락, 인접 bubble 병합, block 분할 불안정성이 반복 확인되었다.
+  3. 따라서 “MangaLMM 먼저 -> 누락만 Paddle fallback” 전략은 현재 benchmark 기준에서 보편적 운영안으로 승격할 수 없다고 판단한다.
+
 ### Phase 4. Requirement 2 develop promotion
 
 - 목적: dual-resident OCR runtime 정책과 selector rule을 제품 옵션으로 반영
@@ -201,16 +244,9 @@
 
 ## 다음 액션
 
-1. Requirement 1 공식 게이트용 비교표를 고정
-   - 레거시 vs Japanese `Optimal`
-   - Japanese `Optimal` vs Japanese `Optimal+ analysis mode`
-   - Docker startup / health wait / VRAM / 품질 비교
-2. 아래 문서를 기준으로 사용자 O/X 채점을 수집
-   - `docs/benchmark/workflow-split-runtime/02_review-pack-scoring-guide-ko.md`
-   - `docs/benchmark/workflow-split-runtime/03_requirement-1-gate-and-threshold-proposal-ko.md`
-   - `banchmark_result_log/workflow-split-runtime/20260415_091848_candidate_stage_batched_dual_resident/review_decision_sheet-ko.md`
-3. 사용자 O/X 결과를 기준으로 selector threshold 후보를 잠근다.
-4. Requirement 1 유효성 판정이 끝나면 `feature/workflow-split-runtime`에서 `stage_batched_pipeline` 제품 승격 준비를 시작
+1. `feature/workflow-split-runtime`에서 `stage_batched_pipeline` 제품 승격 준비를 시작한다.
+2. 제품 승격 전, 현재 배치 경로에서 레거시로 강제되고 있는 마스킹 경로를 사용자가 원하는 방식으로 교체하는 별도 검증/구현 계획을 수립한다.
+3. Requirement 2 문서는 실패/폐기 상태로 남기고, 추가 OCR selector 작업은 새 가설이나 새 엔진 근거가 생기기 전까지 재개하지 않는다.
 
 ## 저자 및 기여
 
