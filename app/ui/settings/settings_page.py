@@ -10,6 +10,7 @@ from PySide6.QtCore import QSettings, QTimer, Qt, Signal
 from PySide6.QtGui import QFont, QFontDatabase
 
 from modules.ocr.selection import (
+    LEGACY_PAGE_WORKFLOW_MODE,
     OCR_DEFAULT_LABEL,
     OCR_MODE_BEST_LOCAL,
     OCR_MODE_BEST_LOCAL_PLUS,
@@ -23,6 +24,8 @@ from modules.ocr.selection import (
     OCR_OPTIMAL_LABEL,
     OCR_OPTIMAL_PLUS_LABEL,
     normalize_ocr_mode,
+    normalize_workflow_mode,
+    STAGE_BATCHED_WORKFLOW_MODE,
 )
 from .settings_ui import SettingsPageUI
 from .gemma_local_server_page import GemmaLocalServerPage
@@ -176,6 +179,7 @@ class SettingsPage(QtWidgets.QWidget):
             self.ui.theme_combo,
             self.ui.translator_combo,
             self.ui.ocr_combo,
+            self.ui.workflow_mode_combo,
             self.ui.detector_combo,
             self.ui.inpainter_combo,
             self.ui.inpaint_strategy_combo,
@@ -278,6 +282,21 @@ class SettingsPage(QtWidgets.QWidget):
             "detector": self.ui.detector_combo,
         }
         return tool_combos[tool_type].currentText()
+
+    def get_workflow_mode(self) -> str:
+        current_data = self.ui.workflow_mode_combo.currentData()
+        if isinstance(current_data, str) and current_data.strip():
+            return normalize_workflow_mode(current_data)
+        return normalize_workflow_mode(self.ui.workflow_mode_combo.currentText())
+
+    def _set_workflow_mode(self, raw_value: str | None) -> None:
+        normalized = normalize_workflow_mode(raw_value)
+        index = self.ui.workflow_mode_combo.findData(normalized)
+        if index != -1:
+            self.ui.workflow_mode_combo.setCurrentIndex(index)
+            return
+        fallback = self.ui.workflow_mode_combo.findData(STAGE_BATCHED_WORKFLOW_MODE)
+        self.ui.workflow_mode_combo.setCurrentIndex(fallback if fallback != -1 else 0)
 
     def get_ocr_mode_label(self, mode_key: str | None = None) -> str:
         normalized = self._normalize_ocr_mode_value(mode_key or self.get_tool_selection("ocr"))
@@ -395,13 +414,32 @@ class SettingsPage(QtWidgets.QWidget):
         return settings
 
     def get_mask_refiner_settings(self):
-        return normalized_mask_refiner_settings(
-            {
-                "mask_refiner": "legacy_bbox",
-                "mask_inpaint_mode": self.get_mask_inpaint_mode(),
-                "keep_existing_lines": False,
-            }
-        )
+        settings = QSettings("ComicLabs", "ComicTranslate")
+        settings.beginGroup("tools")
+        settings.beginGroup("mask_refiner_settings")
+        persisted = {
+            "mask_refiner": settings.value("mask_refiner", "", type=str),
+            "mask_inpaint_mode": settings.value("mask_inpaint_mode", "", type=str),
+            "keep_existing_lines": settings.value("keep_existing_lines", True, type=bool),
+            "ctd_detect_size": settings.value("ctd_detect_size", 1280, type=int),
+            "ctd_det_rearrange_max_batches": settings.value("ctd_det_rearrange_max_batches", 4, type=int),
+            "ctd_device": settings.value("ctd_device", "cuda", type=str),
+            "ctd_font_size_multiplier": settings.value("ctd_font_size_multiplier", 1.0, type=float),
+            "ctd_font_size_max": settings.value("ctd_font_size_max", -1, type=int),
+            "ctd_font_size_min": settings.value("ctd_font_size_min", -1, type=int),
+            "ctd_mask_dilate_size": settings.value("ctd_mask_dilate_size", 2, type=int),
+        }
+        settings.endGroup()
+        settings.endGroup()
+
+        runtime_settings = {
+            "mask_inpaint_mode": self.get_mask_inpaint_mode(),
+        }
+        benchmark_overlay = getattr(self, "_benchmark_mask_refiner_settings", None)
+        if isinstance(benchmark_overlay, dict):
+            runtime_settings.update(benchmark_overlay)
+        persisted.update(runtime_settings)
+        return normalized_mask_refiner_settings(persisted)
 
     def get_inpainter_runtime_settings(self, inpainter_key: str | None = None):
         normalized = normalize_inpainter_key(inpainter_key or self.get_tool_selection("inpainter"))
@@ -582,6 +620,7 @@ class SettingsPage(QtWidgets.QWidget):
             "language": self.get_language(),
             "theme": self.get_theme(),
             "tools": {
+                "workflow_mode": self.get_workflow_mode(),
                 "translator": self.get_tool_selection("translator"),
                 "ocr": self.get_tool_selection("ocr"),
                 "detector": self.get_tool_selection("detector"),
@@ -675,19 +714,6 @@ class SettingsPage(QtWidgets.QWidget):
             process_group(key, value, settings)
 
         settings.beginGroup("tools")
-        settings.beginGroup("mask_refiner_settings")
-        for stale_key in (
-            "ctd_detect_size",
-            "ctd_det_rearrange_max_batches",
-            "ctd_device",
-            "ctd_font_size_multiplier",
-            "ctd_font_size_max",
-            "ctd_font_size_min",
-            "ctd_mask_dilate_size",
-            "keep_existing_lines",
-        ):
-            settings.remove(stale_key)
-        settings.endGroup()
         settings.endGroup()
 
         settings.beginGroup("export")
@@ -749,6 +775,12 @@ class SettingsPage(QtWidgets.QWidget):
             translator = "Claude-4.6-Sonnet"
 
         settings.beginGroup("tools")
+        workflow_mode = settings.value(
+            "workflow_mode",
+            STAGE_BATCHED_WORKFLOW_MODE,
+            type=str,
+        )
+        self._set_workflow_mode(workflow_mode)
         translated_translator = self.ui.reverse_mappings.get(translator, translator)
         if self.ui.translator_combo.findText(translated_translator) != -1:
             self.ui.translator_combo.setCurrentIndex(self.ui.translator_combo.findText(translated_translator))

@@ -65,15 +65,16 @@ class SettingsToolsRuntimeTests(unittest.TestCase):
         self.addCleanup(page.deleteLater)
         return page
 
-    def test_default_mode_uses_legacy_bbox_and_source_lama(self) -> None:
+    def test_default_mode_uses_stage_batched_and_ctd_mask_refiner(self) -> None:
         page = self._make_page()
         page.load_settings()
 
         self.assertEqual(page.get_mask_inpaint_mode(), "rtdetr_legacy_bbox_source_lama")
         self.assertEqual(
             page.ui.tools_page.automatic_runtime_value_label.text(),
-            "RT-DETR-v2 + Legacy BBox Rescue + Source LaMa",
+            "RT-DETR-v2 + CTD Line Protect + Source LaMa",
         )
+        self.assertEqual(page.get_workflow_mode(), "stage_batched_pipeline")
         self.assertEqual(page.get_tool_selection("inpainter"), "lama_large_512px")
         self.assertFalse(page.ui.inpainter_combo.isEnabled())
         self.assertEqual(page.get_tool_selection("detector"), "RT-DETR-v2")
@@ -81,15 +82,17 @@ class SettingsToolsRuntimeTests(unittest.TestCase):
         self.assertFalse(hasattr(page.ui, "mask_inpaint_mode_combo"))
         self.assertFalse(hasattr(page.ui, "mask_refiner_combo"))
         self.assertFalse(hasattr(page.ui, "ctd_settings_widget"))
-        self.assertEqual(page.get_mask_refiner_settings()["mask_refiner"], "legacy_bbox")
-        self.assertFalse(page.get_mask_refiner_settings()["keep_existing_lines"])
+        self.assertEqual(page.get_mask_refiner_settings()["mask_refiner"], "ctd")
+        self.assertTrue(page.get_mask_refiner_settings()["keep_existing_lines"])
 
-    def test_old_hybrid_mode_value_migrates_to_new_legacy_bbox_mode(self) -> None:
+    def test_mask_refiner_settings_round_trip_preserves_ctd_defaults(self) -> None:
         settings = QtCore.QSettings("ComicLabs", "ComicTranslate")
         settings.setValue("tools/detector", "RT-DETR-v2")
         settings.setValue("tools/inpainter", "LaMa")
+        settings.setValue("tools/workflow_mode", "legacy_page_pipeline")
         settings.setValue("tools/mask_refiner_settings/mask_inpaint_mode", "rtdetr_source_ctd_lama")
         settings.setValue("tools/mask_refiner_settings/mask_refiner", "ctd")
+        settings.setValue("tools/mask_refiner_settings/keep_existing_lines", True)
         settings.sync()
 
         page = self._make_page()
@@ -98,16 +101,26 @@ class SettingsToolsRuntimeTests(unittest.TestCase):
         self.assertEqual(page.get_mask_inpaint_mode(), "rtdetr_legacy_bbox_source_lama")
         self.assertEqual(
             page.ui.tools_page.automatic_runtime_value_label.text(),
-            "RT-DETR-v2 + Legacy BBox Rescue + Source LaMa",
+            "RT-DETR-v2 + CTD Line Protect + Source LaMa",
         )
+        self.assertEqual(page.get_workflow_mode(), "legacy_page_pipeline")
         self.assertEqual(page.get_tool_selection("inpainter"), "lama_large_512px")
-        self.assertEqual(page.get_mask_refiner_settings()["mask_refiner"], "legacy_bbox")
-        self.assertFalse(page.get_mask_refiner_settings()["keep_existing_lines"])
+        self.assertEqual(page.get_mask_refiner_settings()["mask_refiner"], "ctd")
+        self.assertTrue(page.get_mask_refiner_settings()["keep_existing_lines"])
         page.save_settings()
+        self.assertEqual(
+            settings.value("tools/workflow_mode", "", type=str),
+            "legacy_page_pipeline",
+        )
         self.assertEqual(
             settings.value("tools/mask_refiner_settings/mask_inpaint_mode", "", type=str),
             "rtdetr_legacy_bbox_source_lama",
         )
+        self.assertEqual(
+            settings.value("tools/mask_refiner_settings/mask_refiner", "", type=str),
+            "ctd",
+        )
+        self.assertTrue(settings.value("tools/mask_refiner_settings/keep_existing_lines", False, type=bool))
 
     def test_notification_settings_round_trip(self) -> None:
         page = self._make_page()
