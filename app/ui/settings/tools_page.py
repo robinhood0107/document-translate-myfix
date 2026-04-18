@@ -5,9 +5,10 @@ from ..dayu_widgets.label import MLabel
 from ..dayu_widgets.spin_box import MSpinBox
 from .utils import create_title_and_combo, set_combo_box_width
 from modules.utils.device import is_gpu_available
+from modules.ocr.selection import WORKFLOW_MODE_OPTIONS
 
 
-DEFAULT_AUTOMATIC_RUNTIME_LABEL = "RT-DETR-v2 + Legacy BBox Rescue + Source LaMa"
+DEFAULT_AUTOMATIC_RUNTIME_LABEL = "RT-DETR-v2 + CTD Line Protect + Source LaMa"
 
 
 class ToolsPage(QtWidgets.QWidget):
@@ -37,15 +38,25 @@ class ToolsPage(QtWidgets.QWidget):
         set_combo_box_width(self.ocr_combo, self.ocr_engines)
         self.ocr_combo.setCurrentText(self.tr("PaddleOCR VL"))
 
+        workflow_modes = [self.tr(label) for _key, label in WORKFLOW_MODE_OPTIONS]
+        workflow_widget, self.workflow_mode_combo = create_title_and_combo(self.tr("Workflow Mode"), workflow_modes, h4=True)
+        set_combo_box_width(self.workflow_mode_combo, workflow_modes)
+
         automatic_runtime_label = MLabel(self.tr("Automatic Runtime")).h4()
         self.automatic_runtime_value_label = MLabel(self.tr(DEFAULT_AUTOMATIC_RUNTIME_LABEL))
         self.automatic_runtime_value_label.setWordWrap(True)
         self.automatic_runtime_hint = MLabel(
             self.tr(
-                "Automatic mode is fixed to RT-DETR-v2 detection, legacy bbox rescue masking, and source block-wise LaMa cleaning."
+                "Automatic runtime is fixed to RT-DETR-v2 detection, CTD line-protect masking, and source block-wise LaMa cleaning."
             )
         )
         self.automatic_runtime_hint.setWordWrap(True)
+        self.workflow_mode_hint = MLabel(
+            self.tr(
+                "Stage-Batched runs detect, OCR, inpaint, translate, and render in stage order. Legacy keeps the original page-by-page loop."
+            )
+        )
+        self.workflow_mode_hint.setWordWrap(True)
 
         detector_widget, self.detector_combo = create_title_and_combo(self.tr("Text Detector"), self.detectors, h4=False)
         set_combo_box_width(self.detector_combo, self.detectors)
@@ -138,6 +149,9 @@ class ToolsPage(QtWidgets.QWidget):
         layout.addWidget(translator_widget)
         layout.addSpacing(10)
         layout.addWidget(ocr_widget)
+        layout.addSpacing(10)
+        layout.addWidget(workflow_widget)
+        layout.addWidget(self.workflow_mode_hint)
         layout.addSpacing(10)
         layout.addWidget(automatic_runtime_label)
         layout.addWidget(self.automatic_runtime_value_label)

@@ -30,6 +30,7 @@ from modules.utils.inpaint_debug import (
     build_inpaint_debug_metadata,
     export_inpaint_debug_artifacts,
 )
+from modules.utils.inpaint_cleanup import refine_bubble_residue_inpaint
 from modules.utils.export_paths import (
     build_export_timestamp,
     export_run_root,
@@ -111,6 +112,10 @@ class BatchProcessor:
             self.main_page.emit_memlog(tag, **payload)
         except Exception:
             pass
+
+    @staticmethod
+    def _benchmark_stage_ceiling() -> str:
+        return str(os.environ.get("CT_BENCH_STAGE_CEILING", "") or "").strip().lower()
 
     def skip_save(self, directory, timestamp, base_name, extension, archive_bname, image):
         logger.info("Skipping fallback translated image save for '%s'.", base_name)
@@ -888,6 +893,29 @@ class BatchProcessor:
                         ocr_page_profile=ocr_page_profile,
                         **page_ocr_metrics,
                     )
+                    if self._benchmark_stage_ceiling() == "ocr":
+                        self.main_page.image_ctrl.update_processing_summary(
+                            image_path,
+                            {
+                                "benchmark_stage_ceiling": "ocr",
+                            },
+                        )
+                        self._emit_benchmark_event(
+                            "page_done",
+                            image_path=image_path,
+                            image_index=index,
+                            total_images=total_images,
+                            block_count=len(blk_list or []),
+                            patch_count=0,
+                            stage_ceiling="ocr",
+                        )
+                        self._log_page_done(
+                            index,
+                            total_images,
+                            image_path,
+                        )
+                        self.emit_progress(index, total_images, 10, 10, False)
+                        continue
                     
                 except Exception as e:
                     # if it's a connection/network error, give a short message
@@ -1037,7 +1065,13 @@ class BatchProcessor:
 
             inpaint_input_img = self.inpainting.inpaint_with_blocks(image, mask, blk_list, config=config)
             inpaint_input_img = imk.convert_scale_abs(inpaint_input_img)
-            cleanup_stats = {"applied": False, "component_count": 0, "block_count": 0}
+            inpaint_input_img, mask, cleanup_stats = refine_bubble_residue_inpaint(
+                inpaint_input_img,
+                mask,
+                blk_list,
+                self.inpainting.inpainter_cache,
+                config,
+            )
 
             # Saving cleaned image
             patches = self.inpainting.get_inpainted_patches(mask, inpaint_input_img)
