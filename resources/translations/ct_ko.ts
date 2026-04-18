@@ -1985,6 +1985,30 @@ This folder is separate from Auto-Recover snapshots.</source>
         <translation>체크된 행만 포함됩니다. 드래그로 순서를 바꾸거나, 대기열 번호를 직접 수정해 정확한 위치로 옮길 수 있습니다.</translation>
     </message>
     <message>
+        <source>Sort</source>
+        <translation>정렬</translation>
+    </message>
+    <message>
+        <source>Manual Queue</source>
+        <translation>수동 대기열</translation>
+    </message>
+    <message>
+        <source>Name (A-Z)</source>
+        <translation>이름순 (A-Z)</translation>
+    </message>
+    <message>
+        <source>Name (Z-A)</source>
+        <translation>이름순 (Z-A)</translation>
+    </message>
+    <message>
+        <source>Date (Newest First)</source>
+        <translation>날짜순 (최신 먼저)</translation>
+    </message>
+    <message>
+        <source>Date (Oldest First)</source>
+        <translation>날짜순 (오래된 순)</translation>
+    </message>
+    <message>
         <source>Only checked files will be added. You can still reorder or remove queue items later from the series board.</source>
         <translation>체크된 파일만 추가됩니다. 이후에도 시리즈 보드에서 대기열 순서를 바꾸거나 항목을 제거할 수 있습니다.</translation>
     </message>
@@ -3304,6 +3328,10 @@ It may have already been moved, renamed, or deleted.
     <message>
         <source>Name</source>
         <translation>이름</translation>
+    </message>
+    <message>
+        <source>Modified</source>
+        <translation>수정일</translation>
     </message>
     <message>
         <source>Type</source>

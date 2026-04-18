@@ -2,6 +2,14 @@ from __future__ import annotations
 
 from PySide6 import QtCore, QtGui, QtWidgets
 
+from .dayu_widgets import dayu_theme
+
+
+def _hex_to_rgba(value: str, alpha: float) -> str:
+    color = QtGui.QColor(value)
+    color.setAlphaF(max(0.0, min(1.0, alpha)))
+    return color.name(QtGui.QColor.NameFormat.HexArgb)
+
 
 class _SeriesQueueTable(QtWidgets.QTableWidget):
     order_changed = QtCore.Signal(list)
@@ -33,8 +41,12 @@ class _SeriesQueueTable(QtWidgets.QTableWidget):
         self.setAcceptDrops(True)
         self.setDropIndicatorShown(True)
         self.setAlternatingRowColors(True)
+        self.setShowGrid(False)
+        self.setFrameShape(QtWidgets.QFrame.Shape.NoFrame)
         self.verticalHeader().setVisible(False)
         self.verticalHeader().setDefaultSectionSize(40)
+        self.setHorizontalScrollMode(QtWidgets.QAbstractItemView.ScrollMode.ScrollPerPixel)
+        self.setVerticalScrollMode(QtWidgets.QAbstractItemView.ScrollMode.ScrollPerPixel)
         self.setEditTriggers(
             QtWidgets.QAbstractItemView.EditTrigger.SelectedClicked
             | QtWidgets.QAbstractItemView.EditTrigger.DoubleClicked
@@ -50,6 +62,63 @@ class _SeriesQueueTable(QtWidgets.QTableWidget):
 
         self.itemChanged.connect(self._on_item_changed)
         self.itemDoubleClicked.connect(self._on_item_double_clicked)
+        self.apply_theme_styles()
+
+    def apply_theme_styles(self) -> None:
+        text = dayu_theme.primary_text_color or "#d9d9d9"
+        sub_text = dayu_theme.secondary_text_color or "#a6a6a6"
+        panel = dayu_theme.background_color or "#323232"
+        panel_alt = dayu_theme.background_in_color or "#3a3a3a"
+        header = dayu_theme.background_out_color or "#494949"
+        border = dayu_theme.divider_color or "#262626"
+        accent = dayu_theme.primary_color or dayu_theme.yellow or "#fadb14"
+        accent_soft = _hex_to_rgba(accent, 0.18)
+        handle = _hex_to_rgba(text, 0.22)
+        self.setStyleSheet(
+            f"""
+            QTableWidget {{
+                background: {panel};
+                border: 1px solid {border};
+                border-radius: 12px;
+                alternate-background-color: {panel_alt};
+                color: {text};
+                selection-background-color: {accent_soft};
+                selection-color: {text};
+                outline: none;
+            }}
+            QTableWidget::item {{
+                background: transparent;
+                border: none;
+                border-bottom: 1px solid {border};
+                padding: 7px 10px;
+            }}
+            QTableWidget::item:selected {{
+                background: {accent_soft};
+                color: {text};
+            }}
+            QHeaderView::section {{
+                background: {header};
+                color: {text};
+                border: none;
+                border-bottom: 1px solid {border};
+                padding: 9px 10px;
+                font-weight: 600;
+            }}
+            QScrollBar:vertical {{
+                background: transparent;
+                width: 12px;
+                margin: 8px 0 8px 0;
+            }}
+            QScrollBar::handle:vertical {{
+                background: {handle};
+                border-radius: 6px;
+                min-height: 28px;
+            }}
+            QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{
+                height: 0;
+            }}
+            """
+        )
 
     def set_interaction_state(
         self,
@@ -103,9 +172,10 @@ class _SeriesQueueTable(QtWidgets.QTableWidget):
 
     def _apply_row_style(self, row: int, *, item_id: str, status: str) -> None:
         is_running = str(status).strip().lower() == "running" or item_id == self._active_item_id
-        muted_color = QtGui.QColor("#7d8590")
-        running_fg = QtGui.QColor("#0b3d91")
-        running_bg = QtGui.QColor("#dbeafe")
+        muted_color = QtGui.QColor(dayu_theme.secondary_text_color or "#a6a6a6")
+        accent = QtGui.QColor(dayu_theme.primary_color or dayu_theme.yellow or "#fadb14")
+        running_fg = QtGui.QColor(dayu_theme.background_color or "#323232")
+        running_bg = QtGui.QColor(accent)
 
         for column in range(5):
             table_item = self.item(row, column)
@@ -564,9 +634,67 @@ class SeriesTreeJumpDialog(QtWidgets.QDialog):
         super().__init__(parent)
         self._selected_item_id = ""
         self.setWindowTitle(self.tr("Tree Jump"))
-        self.resize(480, 560)
+        self.resize(520, 620)
+        self.setMinimumSize(460, 500)
+
+        accent = dayu_theme.primary_color or dayu_theme.yellow or "#fadb14"
+        text = dayu_theme.primary_text_color or "#d9d9d9"
+        sub_text = dayu_theme.secondary_text_color or "#a6a6a6"
+        window = dayu_theme.background_color or "#323232"
+        panel = dayu_theme.background_in_color or "#3a3a3a"
+        header = dayu_theme.background_out_color or "#494949"
+        border = dayu_theme.divider_color or "#262626"
+        accent_soft = _hex_to_rgba(accent, 0.18)
+        button_hover = _hex_to_rgba(text, 0.08)
+        button_fill = _hex_to_rgba(text, 0.04)
+        self.setStyleSheet(
+            f"""
+            QDialog {{
+                background: {window};
+                color: {text};
+            }}
+            QLabel {{
+                background: transparent;
+                color: {sub_text};
+            }}
+            QTreeWidget {{
+                background: {panel};
+                color: {text};
+                border: 1px solid {border};
+                border-radius: 12px;
+                alternate-background-color: {header};
+                selection-background-color: {accent_soft};
+                selection-color: {text};
+            }}
+            QTreeWidget::item {{
+                height: 28px;
+            }}
+            QHeaderView::section {{
+                background: {header};
+                color: {text};
+                border: none;
+                border-bottom: 1px solid {border};
+                padding: 8px 10px;
+                font-weight: 600;
+            }}
+            QPushButton {{
+                min-height: 34px;
+                padding: 0 16px;
+                border-radius: 10px;
+                border: 1px solid {border};
+                background: {button_fill};
+                color: {text};
+                font-weight: 600;
+            }}
+            QPushButton:hover {{
+                background: {button_hover};
+            }}
+            """
+        )
 
         layout = QtWidgets.QVBoxLayout(self)
+        layout.setContentsMargins(16, 16, 16, 16)
+        layout.setSpacing(12)
         note = QtWidgets.QLabel(
             self.tr("Select a series item from the original folder structure or choose the board view.")
         )
@@ -681,9 +809,10 @@ class SeriesWorkspace(QtWidgets.QWidget):
         badge_row.addStretch(1)
         layout.addLayout(badge_row)
 
-        body = QtWidgets.QHBoxLayout()
-        body.setSpacing(12)
-        layout.addLayout(body, 1)
+        self.body_splitter = QtWidgets.QSplitter(QtCore.Qt.Orientation.Horizontal, self)
+        self.body_splitter.setChildrenCollapsible(False)
+        self.body_splitter.setHandleWidth(10)
+        layout.addWidget(self.body_splitter, 1)
 
         left_panel = QtWidgets.QWidget(self)
         left_layout = QtWidgets.QVBoxLayout(left_panel)
@@ -708,7 +837,7 @@ class SeriesWorkspace(QtWidgets.QWidget):
 
         self.queue_table = _SeriesQueueTable(self)
         left_layout.addWidget(self.queue_table, 1)
-        body.addWidget(left_panel, 1)
+        self.body_splitter.addWidget(left_panel)
 
         self.quick_settings = _SeriesQuickSettings(self)
         self.status_panel = _SeriesStatusPanel(self)
@@ -721,8 +850,10 @@ class SeriesWorkspace(QtWidgets.QWidget):
         quick_frame_layout.addWidget(self.summary_panel)
         quick_frame_layout.addWidget(self.quick_settings)
         quick_frame.setMinimumWidth(320)
-        quick_frame.setMaximumWidth(420)
-        body.addWidget(quick_frame, 0)
+        self.body_splitter.addWidget(quick_frame)
+        self.body_splitter.setStretchFactor(0, 1)
+        self.body_splitter.setStretchFactor(1, 0)
+        self.body_splitter.setSizes([860, 360])
 
         self.back_button.clicked.connect(self.back_requested)
         self.forward_button.clicked.connect(self.forward_requested)
@@ -740,6 +871,144 @@ class SeriesWorkspace(QtWidgets.QWidget):
         self.status_panel.open_failed_requested.connect(self.open_failed_item_requested)
         self.quick_settings.open_series_settings_requested.connect(self.open_series_settings_requested)
         self.quick_settings.changed.connect(self._emit_global_settings_changed)
+        self._apply_theme_styles()
+
+    def _apply_theme_styles(self) -> None:
+        accent = dayu_theme.primary_color or dayu_theme.yellow or "#fadb14"
+        text = dayu_theme.primary_text_color or "#d9d9d9"
+        sub_text = dayu_theme.secondary_text_color or "#a6a6a6"
+        window = dayu_theme.background_color or "#323232"
+        panel = dayu_theme.background_in_color or "#3a3a3a"
+        header = dayu_theme.background_out_color or "#494949"
+        border = dayu_theme.divider_color or "#262626"
+        accent_soft = _hex_to_rgba(accent, 0.16)
+        button_fill = _hex_to_rgba(text, 0.04)
+        button_hover = _hex_to_rgba(text, 0.08)
+        badge_fill = _hex_to_rgba(accent, 0.14)
+        badge_border = _hex_to_rgba(accent, 0.34)
+        warning_fill = _hex_to_rgba("#f5a623", 0.14)
+        warning_border = _hex_to_rgba("#f5a623", 0.30)
+        recovery_fill = _hex_to_rgba("#6fb1fc", 0.16)
+        recovery_border = _hex_to_rgba("#6fb1fc", 0.34)
+        self.setStyleSheet(
+            f"""
+            QWidget {{
+                color: {text};
+            }}
+            QLabel {{
+                background: transparent;
+                border: none;
+            }}
+            QToolButton, QPushButton {{
+                min-height: 34px;
+                padding: 0 14px;
+                border-radius: 10px;
+                border: 1px solid {border};
+                background: {button_fill};
+                color: {text};
+                font-weight: 600;
+            }}
+            QToolButton:hover, QPushButton:hover {{
+                background: {button_hover};
+            }}
+            QComboBox {{
+                min-height: 32px;
+                border-radius: 10px;
+                border: 1px solid {border};
+                background: {window};
+                color: {text};
+                padding: 0 10px;
+                selection-background-color: {accent_soft};
+            }}
+            QComboBox::drop-down {{
+                border: none;
+                width: 28px;
+                background: transparent;
+            }}
+            QComboBox QAbstractItemView {{
+                background: {panel};
+                color: {text};
+                border: 1px solid {border};
+                selection-background-color: {accent_soft};
+                selection-color: {text};
+            }}
+            QCheckBox {{
+                color: {text};
+            }}
+            QLabel#seriesScopeBadge {{
+                padding: 5px 12px;
+                border-radius: 999px;
+                background: {badge_fill};
+                border: 1px solid {badge_border};
+                color: {text};
+                font-weight: 700;
+            }}
+            QLabel#seriesTitleLabel {{
+                font-size: 18px;
+                font-weight: 700;
+                color: {text};
+            }}
+            QLabel#seriesQueueNotice {{
+                padding: 10px 12px;
+                border-radius: 10px;
+                background: {warning_fill};
+                border: 1px solid {warning_border};
+                color: {text};
+            }}
+            QLabel#seriesRecoveryBadge {{
+                padding: 5px 10px;
+                border-radius: 999px;
+                background: {recovery_fill};
+                border: 1px solid {recovery_border};
+                color: {text};
+                font-weight: 600;
+            }}
+            QLabel#seriesUnsyncedBadge {{
+                padding: 5px 10px;
+                border-radius: 999px;
+                background: {warning_fill};
+                border: 1px solid {warning_border};
+                color: {text};
+                font-weight: 600;
+            }}
+            QFrame#seriesQuickFrame {{
+                background: {panel};
+                border: 1px solid {border};
+                border-radius: 14px;
+            }}
+            QLabel#seriesQuickHeader,
+            QLabel#seriesStatusHeader,
+            QLabel#seriesSummaryHeader {{
+                font-size: 14px;
+                font-weight: 700;
+                color: {text};
+            }}
+            QLabel#seriesQuickNote,
+            QLabel#seriesStatusNote {{
+                color: {sub_text};
+            }}
+            QPushButton#seriesAutoTranslateButton {{
+                background: {accent};
+                border: 1px solid {accent};
+                color: #111111;
+            }}
+            QPushButton#seriesAutoTranslateButton:hover {{
+                background: {dayu_theme.primary_4 or accent};
+                border: 1px solid {dayu_theme.primary_4 or accent};
+            }}
+            QSplitter::handle {{
+                background: transparent;
+            }}
+            QSplitter::handle:horizontal {{
+                width: 10px;
+                margin: 6px 0;
+                image: none;
+                border-left: 1px solid {border};
+                border-right: 1px solid {border};
+            }}
+            """
+        )
+        self.queue_table.apply_theme_styles()
 
     def configure_options(self, *, languages, ocr_modes, translators, workflow_modes) -> None:
         self.quick_settings.set_options(
