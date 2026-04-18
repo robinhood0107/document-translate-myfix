@@ -39,7 +39,7 @@ class MangaLMMOCRPage(QtWidgets.QWidget):
                 "Connect Comic Translate to your local MangaLMM llama.cpp server.\n"
                 "This OCR engine sends a full page single-shot request to the OpenAI-compatible /chat/completions endpoint.\n"
                 "The app keeps detector geometry, then matches grounded OCR regions back to detected text blocks.\n"
-                "Japanese Optimal+ uses an internal MangaLMM contract with PNG, image-first ordering, and guarded retries.\n"
+                "Direct MangaLMM uses the tuning values on this page for full-page OCR requests.\n"
                 "Keep the default localhost URL if you want Comic Translate to reuse the bundled Docker runtime."
             )
         ).secondary()
@@ -135,9 +135,8 @@ class MangaLMMOCRPage(QtWidgets.QWidget):
                 "- Max Pixels / Max Long Side: 2116800 / 1728\n"
                 "Reasoning:\n"
                 "- PNG + image-first ordering is the most reliable request format for MangaLMM.\n"
-                "- Japanese Optimal+ ignores this page's manual prompt/token profile and uses an internal full-page contract with guarded retries.\n"
-                "- Direct MangaLMM mode still respects the values on this page.\n"
-                "- Workers 1 is the safest default when Gemma and MangaLMM stay resident on the same GPU."
+                "- Direct MangaLMM mode respects the values on this page.\n"
+                "- Workers 1 is the safest default when MangaLMM is the active OCR runtime."
             )
         ).secondary()
         tip.setWordWrap(True)

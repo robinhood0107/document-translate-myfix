@@ -7,7 +7,7 @@ import numpy as np
 
 from modules.ocr.factory import OCRFactory
 from modules.ocr.mangalmm_ocr import MangaLMMOCREngine, OCRRegion, ResizePlan
-from modules.ocr.selection import OCR_MODE_BEST_LOCAL_PLUS, OCR_MODE_MANGALMM
+from modules.ocr.selection import OCR_MODE_BEST_LOCAL, OCR_MODE_MANGALMM
 from modules.utils.textblock import TextBlock
 
 
@@ -131,18 +131,18 @@ class MangaLMMOCRTests(unittest.TestCase):
     def setUp(self) -> None:
         OCRFactory._engines.clear()
 
-    def test_initialize_uses_optimal_plus_contract_for_japanese(self) -> None:
+    def test_initialize_normalizes_legacy_optimal_plus_to_optimal(self) -> None:
         engine = MangaLMMOCREngine()
-        settings = _FakeSettings(selected_ocr_mode=OCR_MODE_BEST_LOCAL_PLUS)
+        settings = _FakeSettings(selected_ocr_mode=OCR_MODE_BEST_LOCAL)
 
         engine.initialize(
             settings,
             source_lang_english="Japanese",
-            selected_ocr_mode=OCR_MODE_BEST_LOCAL_PLUS,
+            selected_ocr_mode="best_local_plus",
         )
 
-        self.assertTrue(engine.use_optimal_plus_contract)
-        self.assertEqual(engine.contract_mode, "optimal_plus_japanese")
+        self.assertEqual(engine.selected_ocr_mode, OCR_MODE_BEST_LOCAL)
+        self.assertEqual(engine.contract_mode, "direct_manual")
 
     def test_initialize_keeps_direct_manual_contract_for_direct_mangalmm(self) -> None:
         engine = MangaLMMOCREngine()
@@ -154,7 +154,6 @@ class MangaLMMOCRTests(unittest.TestCase):
             selected_ocr_mode=OCR_MODE_MANGALMM,
         )
 
-        self.assertFalse(engine.use_optimal_plus_contract)
         self.assertEqual(engine.contract_mode, "direct_manual")
 
     def test_parse_region_payload_salvages_fenced_json(self) -> None:
@@ -199,13 +198,13 @@ class MangaLMMOCRTests(unittest.TestCase):
         self.assertEqual(standard_profile_15[0], "standard")
         self.assertEqual(standard_profile_9[0], "standard")
 
-    def test_plan_page_request_uses_fixed_profile_sizes_for_optimal_plus(self) -> None:
+    def test_plan_page_request_uses_manual_limits_in_direct_mode(self) -> None:
         engine = MangaLMMOCREngine()
-        settings = _FakeSettings(selected_ocr_mode=OCR_MODE_BEST_LOCAL_PLUS)
+        settings = _FakeSettings(selected_ocr_mode=OCR_MODE_MANGALMM)
         engine.initialize(
             settings,
             source_lang_english="Japanese",
-            selected_ocr_mode=OCR_MODE_BEST_LOCAL_PLUS,
+            selected_ocr_mode=OCR_MODE_MANGALMM,
         )
 
         dense_plan = engine._plan_page_request((3035, 2150, 3), _make_blocks(30, width=160, height=180))
@@ -213,13 +212,13 @@ class MangaLMMOCRTests(unittest.TestCase):
 
         self.assertEqual(dense_plan.profile, "dense")
         self.assertEqual(dense_plan.request_shape, (1270, 900))
-        self.assertEqual(dense_plan.max_completion_tokens, 1024)
+        self.assertEqual(dense_plan.max_completion_tokens, 256)
         self.assertAlmostEqual(dense_plan.scale_x, 900 / 2150.0)
         self.assertAlmostEqual(dense_plan.scale_y, 1270 / 3035.0)
 
         self.assertEqual(standard_plan.profile, "standard")
         self.assertEqual(standard_plan.request_shape, (1728, 1224))
-        self.assertEqual(standard_plan.max_completion_tokens, 2048)
+        self.assertEqual(standard_plan.max_completion_tokens, 256)
         self.assertAlmostEqual(standard_plan.scale_x, 1224 / 2150.0)
         self.assertAlmostEqual(standard_plan.scale_y, 1728 / 3036.0)
 
@@ -249,27 +248,6 @@ class MangaLMMOCRTests(unittest.TestCase):
 
         self.assertEqual(len(attempts), 1)
         self.assertEqual(attempts[0].attempt_kind, "primary")
-
-    def test_build_attempt_specs_creates_retry_ladder_for_optimal_plus(self) -> None:
-        engine = MangaLMMOCREngine()
-        settings = _FakeSettings(selected_ocr_mode=OCR_MODE_BEST_LOCAL_PLUS)
-        engine.initialize(
-            settings,
-            source_lang_english="Japanese",
-            selected_ocr_mode=OCR_MODE_BEST_LOCAL_PLUS,
-        )
-
-        attempts = engine._build_attempt_specs((3036, 2150, 3), _make_blocks(15, width=200, height=300))
-
-        self.assertEqual(len(attempts), 3)
-        self.assertEqual(
-            [(attempt.index, attempt.attempt_kind, attempt.prompt_mode, attempt.resize_plan.request_shape, attempt.resize_plan.max_completion_tokens) for attempt in attempts],
-            [
-                (0, "primary", "standard_grounding", (1728, 1224), 2048),
-                (1, "smart_retry", "dense_grounding_json", (1270, 899), 1024),
-                (2, "rescue_retry", "dense_grounding_json_rescue", (1270, 899), 4096),
-            ],
-        )
 
     def test_map_regions_to_page_coords_restores_original_coordinates_with_scale_axes(self) -> None:
         engine = MangaLMMOCREngine()
@@ -507,90 +485,13 @@ class MangaLMMOCRTests(unittest.TestCase):
         self.assertEqual(payload["repeat_last_n"], 0)
         self.assertEqual(post.call_args.kwargs["timeout"], 60.0)
 
-    def test_request_response_text_uses_unbounded_read_timeout_for_optimal_plus(self) -> None:
+    def test_process_image_single_attempt_text_only_is_failure(self) -> None:
         engine = MangaLMMOCREngine()
-        settings = _FakeSettings(selected_ocr_mode=OCR_MODE_BEST_LOCAL_PLUS)
+        settings = _FakeSettings(selected_ocr_mode=OCR_MODE_MANGALMM)
         engine.initialize(
             settings,
             source_lang_english="Japanese",
-            selected_ocr_mode=OCR_MODE_BEST_LOCAL_PLUS,
-        )
-        image = np.zeros((32, 32, 3), dtype=np.uint8)
-        response = mock.Mock()
-        response.status_code = 200
-        response.json.return_value = {
-            "choices": [{"message": {"content": "[]"}}],
-        }
-
-        with mock.patch("modules.ocr.mangalmm_ocr.requests.post", return_value=response) as post:
-            engine._request_response_text(
-                image,
-                max_completion_tokens=2048,
-                prompt_text=engine.STANDARD_PROMPT,
-            )
-
-        self.assertEqual(post.call_args.kwargs["timeout"], (60.0, None))
-
-    def test_process_image_uses_retry_ladder_for_optimal_plus_until_match(self) -> None:
-        engine = MangaLMMOCREngine()
-        settings = _FakeSettings(selected_ocr_mode=OCR_MODE_BEST_LOCAL_PLUS)
-        engine.initialize(
-            settings,
-            source_lang_english="Japanese",
-            selected_ocr_mode=OCR_MODE_BEST_LOCAL_PLUS,
-        )
-        blk = _make_block(20, 20, 80, 80, bubble_bbox=(0, 0, 120, 120))
-        image = np.zeros((200, 200, 3), dtype=np.uint8)
-        region = OCRRegion(
-            bbox_xyxy=[22, 22, 78, 78],
-            bbox_xyxy_float=[22.0, 22.0, 78.0, 78.0],
-            text="テスト",
-            unit_bbox_xyxy=[0, 0, 200, 200],
-            unit_kind="page_full",
-            unit_resize_scale=1.0,
-            edge_distance=20.0,
-            normalized_text="テスト",
-            response_bbox_2d=[22.0, 22.0, 78.0, 78.0],
-            request_shape=[1270, 900],
-            resize_profile="dense",
-        )
-        primary = {
-            "regions": [],
-            "analysis": {"response_kind": "empty", "payload_type": "empty"},
-            "raw_text": "",
-            "crop_image": image,
-            "request_image": image,
-            "parsed_region_count": 0,
-            "mapped_region_count": 0,
-            "metadata": {"response_kind": "empty", "prompt_mode": "standard_grounding"},
-        }
-        retry = {
-            "regions": [region],
-            "analysis": {"response_kind": "json_array", "payload_type": "json_array"},
-            "raw_text": '[{"bbox_2d":[22,22,78,78],"text_content":"テスト"}]',
-            "crop_image": image,
-            "request_image": image,
-            "parsed_region_count": 1,
-            "mapped_region_count": 1,
-            "metadata": {"response_kind": "json_array", "prompt_mode": "dense_grounding_json"},
-        }
-
-        with mock.patch.object(engine, "_request_regions_for_attempt", side_effect=[primary, retry]) as request_attempt:
-            engine.process_image(image, [blk])
-
-        self.assertEqual(request_attempt.call_count, 2)
-        self.assertEqual(blk.text, "テスト")
-        self.assertEqual(blk.ocr_status, "ok_after_retry")
-        self.assertEqual(engine.last_request_metadata["retry_count"], 1)
-        self.assertEqual(engine.last_request_metadata["final_status"], "success")
-
-    def test_process_image_attempt_two_text_only_is_still_failure(self) -> None:
-        engine = MangaLMMOCREngine()
-        settings = _FakeSettings(selected_ocr_mode=OCR_MODE_BEST_LOCAL_PLUS)
-        engine.initialize(
-            settings,
-            source_lang_english="Japanese",
-            selected_ocr_mode=OCR_MODE_BEST_LOCAL_PLUS,
+            selected_ocr_mode=OCR_MODE_MANGALMM,
         )
         blk = _make_block(20, 20, 80, 80, bubble_bbox=(0, 0, 120, 120))
         image = np.zeros((200, 200, 3), dtype=np.uint8)
@@ -602,35 +503,35 @@ class MangaLMMOCRTests(unittest.TestCase):
             "request_image": image,
             "parsed_region_count": 0,
             "mapped_region_count": 0,
-            "metadata": {"response_kind": "plain_text_or_non_json", "prompt_mode": "dense_grounding_json_rescue"},
+            "metadata": {"response_kind": "plain_text_or_non_json", "prompt_mode": "standard_grounding"},
         }
 
-        with mock.patch.object(engine, "_request_regions_for_attempt", side_effect=[failure_payload, failure_payload, failure_payload]) as request_attempt:
+        with mock.patch.object(engine, "_request_regions_for_attempt", return_value=failure_payload) as request_attempt:
             engine.process_image(image, [blk])
 
-        self.assertEqual(request_attempt.call_count, 3)
+        self.assertEqual(request_attempt.call_count, 1)
         self.assertEqual(blk.text, "")
-        self.assertEqual(blk.ocr_status, "empty_after_retry")
+        self.assertEqual(blk.ocr_status, "empty_initial")
         self.assertEqual(engine.last_request_metadata["final_status"], "failure")
-        self.assertEqual(engine.last_request_metadata["retry_count"], 2)
+        self.assertEqual(engine.last_request_metadata["retry_count"], 0)
 
-    def test_create_cache_key_distinguishes_direct_mangalmm_from_optimal_plus(self) -> None:
+    def test_create_cache_key_normalizes_legacy_optimal_plus_value(self) -> None:
         settings = _FakeSettings()
 
-        direct_key = OCRFactory._create_cache_key(
+        legacy_key = OCRFactory._create_cache_key(
             "MangaLMM",
             "Japanese",
             settings,
-            selected_ocr_mode=OCR_MODE_MANGALMM,
+            selected_ocr_mode="best_local_plus",
         )
-        optimal_plus_key = OCRFactory._create_cache_key(
+        optimal_key = OCRFactory._create_cache_key(
             "MangaLMM",
             "Japanese",
             settings,
-            selected_ocr_mode=OCR_MODE_BEST_LOCAL_PLUS,
+            selected_ocr_mode=OCR_MODE_BEST_LOCAL,
         )
 
-        self.assertNotEqual(direct_key, optimal_plus_key)
+        self.assertEqual(legacy_key, optimal_key)
 
 
 if __name__ == "__main__":
