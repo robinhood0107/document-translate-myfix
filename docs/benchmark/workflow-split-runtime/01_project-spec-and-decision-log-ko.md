@@ -62,7 +62,7 @@
 ### 1. 현재 제품 배치 파이프라인
 
 - [batch_processor.py](/mnt/c/Users/pjjpj/Desktop/openai_manga_translater/comic-translate/pipeline/batch_processor.py:730) 기준 실제 순서는 페이지 단위 `detect -> ocr -> inpaint -> translate -> render`다.
-- 즉 사용자가 원하는 `detect all -> ocr all -> translate all -> inpaint all` 구조는 아직 제품에 없다.
+- 즉 사용자가 원하는 전체 단계형(`detect all -> ocr all -> inpaint all -> translate all -> render/export all`) 구조는 아직 제품에 없다.
 
 ### 2. OCR runtime 정책
 

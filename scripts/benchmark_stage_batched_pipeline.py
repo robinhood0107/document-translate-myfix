@@ -1646,13 +1646,13 @@ class StageBatchedRunner:
             self._set_active_container_names([])
             _emit_gpu_checkpoint(self.window, "ocr_stage_shutdown", self._active_container_names())
 
+            self._inpaint_all()
+
             gemma_groups = self._prepare_translate_stage()
             self._translate_all()
             _shutdown_runtime_groups(gemma_groups)
             self._set_active_container_names([])
             _emit_gpu_checkpoint(self.window, "translate_stage_shutdown", self._active_container_names())
-
-            self._inpaint_all()
             self._render_all()
 
             self.batch._emit_benchmark_event("batch_run_done", total_images=total_images)

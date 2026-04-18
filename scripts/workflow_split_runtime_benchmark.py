@@ -71,7 +71,7 @@ SCENARIOS = {
         "runtime_services": "stage-batched",
         "stage_ceiling": "render",
         "runnable": True,
-        "description": "Detect all -> OCR all -> translate all -> inpaint all -> render/export all with OCR stage routing equivalent to Japanese Optimal.",
+        "description": "Detect all -> OCR all -> inpaint all -> translate all -> render/export all with OCR stage routing equivalent to Japanese Optimal.",
     },
     "candidate_stage_batched_dual_resident": {
         "label": "Candidate Stage-Batched Dual Resident",
@@ -83,7 +83,7 @@ SCENARIOS = {
         "runtime_services": "stage-batched",
         "stage_ceiling": "render",
         "runnable": True,
-        "description": "Detect all -> OCR all -> translate all -> inpaint all -> render/export all with OCR stage routing equivalent to Japanese Optimal+ analysis mode.",
+        "description": "Detect all -> OCR all -> inpaint all -> translate all -> render/export all with OCR stage routing equivalent to Japanese Optimal+ analysis mode.",
     },
 }
 
