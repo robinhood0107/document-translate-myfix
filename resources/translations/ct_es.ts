@@ -958,7 +958,7 @@ Start the server with both the HunyuanOCR GGUF model and the matching mmproj fil
         <source>Connect Comic Translate to your local MangaLMM llama.cpp server.
 This OCR engine sends a full page single-shot request to the OpenAI-compatible /chat/completions endpoint.
 The app keeps detector geometry, then matches grounded OCR regions back to detected text blocks.
-Japanese Optimal+ uses an internal MangaLMM contract with PNG, image-first ordering, and guarded retries.
+Direct MangaLMM uses the tuning values on this page for full-page OCR requests.
 Keep the default localhost URL if you want Comic Translate to reuse the bundled Docker runtime.</source>
         <translation type="unfinished"></translation>
     </message>
@@ -1012,9 +1012,8 @@ Keep the default localhost URL if you want Comic Translate to reuse the bundled 
 - Max Pixels / Max Long Side: 2116800 / 1728
 Reasoning:
 - PNG + image-first ordering is the most reliable request format for MangaLMM.
-- Japanese Optimal+ ignores this page&apos;s manual prompt/token profile and uses an internal full-page contract with guarded retries.
-- Direct MangaLMM mode still respects the values on this page.
-- Workers 1 is the safest default when Gemma and MangaLMM stay resident on the same GPU.</source>
+- Direct MangaLMM mode respects the values on this page.
+- Workers 1 is the safest default when MangaLMM is the active OCR runtime.</source>
         <translation type="unfinished"></translation>
     </message>
 </context>
@@ -2068,10 +2067,6 @@ Restart now?</source>
     </message>
     <message>
         <source>Optimal (HunyuanOCR / PaddleOCR VL)</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Optimal+ (HunyuanOCR / MangaLMM / PaddleOCR VL)</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
@@ -3205,10 +3200,6 @@ Es posible que se haya movido, cambiado de nombre o eliminado.
     </message>
     <message>
         <source>Optimal (HunyuanOCR / PaddleOCR VL)</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Optimal+ (HunyuanOCR / MangaLMM / PaddleOCR VL)</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
