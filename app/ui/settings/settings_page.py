@@ -395,13 +395,32 @@ class SettingsPage(QtWidgets.QWidget):
         return settings
 
     def get_mask_refiner_settings(self):
-        return normalized_mask_refiner_settings(
-            {
-                "mask_refiner": "legacy_bbox",
-                "mask_inpaint_mode": self.get_mask_inpaint_mode(),
-                "keep_existing_lines": False,
-            }
-        )
+        settings = QSettings("ComicLabs", "ComicTranslate")
+        settings.beginGroup("tools")
+        settings.beginGroup("mask_refiner_settings")
+        persisted = {
+            "mask_refiner": settings.value("mask_refiner", "", type=str),
+            "mask_inpaint_mode": settings.value("mask_inpaint_mode", "", type=str),
+            "keep_existing_lines": settings.value("keep_existing_lines", True, type=bool),
+            "ctd_detect_size": settings.value("ctd_detect_size", 1280, type=int),
+            "ctd_det_rearrange_max_batches": settings.value("ctd_det_rearrange_max_batches", 4, type=int),
+            "ctd_device": settings.value("ctd_device", "cuda", type=str),
+            "ctd_font_size_multiplier": settings.value("ctd_font_size_multiplier", 1.0, type=float),
+            "ctd_font_size_max": settings.value("ctd_font_size_max", -1, type=int),
+            "ctd_font_size_min": settings.value("ctd_font_size_min", -1, type=int),
+            "ctd_mask_dilate_size": settings.value("ctd_mask_dilate_size", 2, type=int),
+        }
+        settings.endGroup()
+        settings.endGroup()
+
+        runtime_settings = {
+            "mask_inpaint_mode": self.get_mask_inpaint_mode(),
+        }
+        benchmark_overlay = getattr(self, "_benchmark_mask_refiner_settings", None)
+        if isinstance(benchmark_overlay, dict):
+            runtime_settings.update(benchmark_overlay)
+        persisted.update(runtime_settings)
+        return normalized_mask_refiner_settings(persisted)
 
     def get_inpainter_runtime_settings(self, inpainter_key: str | None = None):
         normalized = normalize_inpainter_key(inpainter_key or self.get_tool_selection("inpainter"))
@@ -675,19 +694,6 @@ class SettingsPage(QtWidgets.QWidget):
             process_group(key, value, settings)
 
         settings.beginGroup("tools")
-        settings.beginGroup("mask_refiner_settings")
-        for stale_key in (
-            "ctd_detect_size",
-            "ctd_det_rearrange_max_batches",
-            "ctd_device",
-            "ctd_font_size_multiplier",
-            "ctd_font_size_max",
-            "ctd_font_size_min",
-            "ctd_mask_dilate_size",
-            "keep_existing_lines",
-        ):
-            settings.remove(stale_key)
-        settings.endGroup()
         settings.endGroup()
 
         settings.beginGroup("export")

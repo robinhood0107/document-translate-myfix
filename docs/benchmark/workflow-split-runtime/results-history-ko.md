@@ -13,6 +13,7 @@
 ## Latest Output
 
 - current_status: `requirement_1_flow_gain_confirmed_requirement_2_closed_failed`
+- masking_status: `ctd_rewired_and_smoke_verified`
 - benchmark_family_created: `true`
 - measured_runs: `3`
 - requirement_1_status: `flow_gain_confirmed_with_quality_parity`
@@ -22,6 +23,7 @@
 - corpus_root: `Sample/japan`
 - selected_files: `094.png, 097.png, 101.png, i_099.jpg, i_100.jpg, i_102.jpg, i_105.jpg, p_016.jpg, p_017.jpg, p_018.jpg, p_019.jpg, p_020.jpg, p_021.jpg`
 - supplementary_routing_smoke: `see 01_project-spec-and-decision-log-ko.md`
+- supplementary_masking_smoke: `094.png, p_016.jpg CTD cleanup smoke passed`
 
 ## Latest Suite
 
@@ -59,6 +61,8 @@
 - Requirement 1의 핵심 질문이었던 flow 비교에서는 `stage_batched_pipeline`가 실질적인 시간 이득을 보였다.
 - 이 이득은 `total_elapsed_sec` 기준이므로 Docker compose up / health wait를 포함한 값이다.
 - 반면 `candidate_stage_batched_dual_resident`는 Requirement 2 hybrid selector 트랙의 실패 사례로 기록한다.
+- 2026-04-18 기준 benchmark 경로의 CTD 마스킹 연결과 residue cleanup smoke는 통과했다.
+- 따라서 benchmark/lab 단계의 다음 주요 작업은 제품 브랜치에서 `workflow_mode`와 CTD 마스킹 경로를 승격하는 것이다.
 
 ## Promotion Policy
 

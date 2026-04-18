@@ -89,6 +89,7 @@ from modules.utils.gpu_metrics import (
     write_snapshot_json,
 )
 from modules.utils.image_utils import generate_mask
+from modules.utils.inpaint_cleanup import refine_bubble_residue_inpaint
 from modules.utils.language_utils import get_language_code, is_no_space_lang, language_codes
 from modules.utils.ocr_quality import summarize_ocr_quality
 from modules.utils.pipeline_config import get_config, get_inpainter_runtime
@@ -1323,6 +1324,13 @@ class StageBatchedRunner:
                     config=config,
                 )
                 ctx.inpaint_input_img = imk.convert_scale_abs(ctx.inpaint_input_img)
+                ctx.inpaint_input_img, ctx.mask, ctx.cleanup_stats = refine_bubble_residue_inpaint(
+                    ctx.inpaint_input_img,
+                    ctx.mask,
+                    ctx.blk_list,
+                    self.window.pipeline.inpainting.inpainter_cache,
+                    config,
+                )
                 ctx.patches = self.window.pipeline.inpainting.get_inpainted_patches(ctx.mask, ctx.inpaint_input_img)
                 self.window.patches_processed.emit(ctx.patches, ctx.image_path)
                 self.window.image_ctrl.update_processing_summary(
@@ -1330,9 +1338,9 @@ class StageBatchedRunner:
                     {
                         "inpainter": settings_page.get_tool_selection("inpainter"),
                         "hd_strategy": hd_strategy,
-                        "cleanup_applied": False,
-                        "cleanup_component_count": 0,
-                        "cleanup_block_count": 0,
+                        "cleanup_applied": bool(ctx.cleanup_stats.get("applied", False)),
+                        "cleanup_component_count": int(ctx.cleanup_stats.get("component_count", 0) or 0),
+                        "cleanup_block_count": int(ctx.cleanup_stats.get("block_count", 0) or 0),
                     },
                 )
                 self.batch._write_inpaint_debug_exports(

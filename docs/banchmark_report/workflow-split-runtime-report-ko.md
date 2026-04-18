@@ -6,6 +6,7 @@
 
 - family: `workflow-split-runtime`
 - status: `requirement_1_flow_gain_confirmed_requirement_2_closed_failed`
+- masking_status: `ctd_rewired_and_smoke_verified`
 - corpus: `Sample/japan`
 - pages: `13`
 - requirement_1_status: `flow_gain_confirmed_with_quality_parity`
@@ -40,11 +41,12 @@
 - official quality summary 기준으로 두 시나리오는 모두 `detect_box_total=212`, `ocr_non_empty_total=212`, `page_failed_count=0`이므로 품질 동등성이 유지된다.
 - 따라서 Requirement 1의 결론은 `stage_batched_pipeline`에 실질적 시간 이득이 있으며, 현재 정식 승격 후보는 `Japanese Optimal(PaddleOCR VL 중심)`이라는 것이다.
 - 반면 `candidate_stage_batched_dual_resident`는 `1664.021s`로 공식 suite에서 가장 느렸고, Requirement 2 MangaLMM hybrid selector 트랙은 benchmark 실패로 종료한다.
+- 추가로 2026-04-18 기준 benchmark 경로의 CTD 마스킹 연결과 residue cleanup smoke(`094.png`, `p_016.jpg`)가 통과했다.
 
 ## 다음 액션
 
 1. `feature/workflow-split-runtime`에서 `legacy` + `stage_batched_pipeline` 제품 승격 구현으로 넘어간다.
-2. 다음 검증 우선순위는 hybrid selector가 아니라, 현재 레거시로 강제되는 마스킹 경로를 사용자가 의도한 방식으로 교체하는 작업이다.
+2. 제품 브랜치에서는 benchmark 전용 자산 없이 `workflow_mode`, stage-batched routing, CTD 마스킹 경로를 포팅한다.
 3. Requirement 2는 `failed_closed` 상태로 문서화해 두고, 새 근거가 생기기 전까지 재개하지 않는다.
 
 ## 저자 및 기여

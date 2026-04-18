@@ -2,8 +2,8 @@
 
 ## 기준 문서
 
-- Source of Truth 1: `harness_collection/01_requirement_workflow_split_harness.md`
-- Source of Truth 2: `harness_collection/02_requirement_hybrid_ocr_selector_harness.md`
+- Source of Truth 1: `docs/benchmark/workflow-split-runtime/requirements/01_requirement_workflow_split_harness.md`
+- Source of Truth 2: `docs/benchmark/workflow-split-runtime/requirements/02_requirement_hybrid_ocr_selector_harness.md`
 - 이 문서는 두 하네스를 실제 작업 체크리스트로 변환한 실행 문서다.
 - 아이디어 착안자: 사용자
 
@@ -37,8 +37,9 @@
 10. `완료` Requirement 1 성공 게이트 비교표와 supplementary smoke 근거 정리
 11. `완료` Requirement 1 flow 비교에서 `stage_batched_pipeline`의 실질적인 시간 이득 확인
 12. `완료` Requirement 2 MangaLMM 하이브리드 benchmark를 실패로 종료
-13. `대기` `stage_batched_pipeline` 제품 승격 브랜치 생성 및 develop-safe portfolio 문서 반영
-14. `대기` 마스킹 경로를 현재 의도한 방식으로 교체하는 별도 검증/구현 계획 수립
+13. `완료` CTD 마스킹 경로를 실제 배치/benchmark 경로에 연결하고 2페이지 smoke로 검증
+14. `완료` 하네스 문서를 benchmark canonical docs 경로로 이동
+15. `대기` `stage_batched_pipeline` 제품 승격 브랜치 생성 및 develop-safe portfolio 문서 반영
 
 ## 프로그램 체크리스트
 
@@ -46,6 +47,7 @@
 
 - [x] Requirement 1 하네스를 기준 문서로 잠금
 - [x] Requirement 2 하네스를 기준 문서로 잠금
+- [x] 하네스 canonical 위치를 `docs/benchmark/workflow-split-runtime/requirements/`로 이동
 - [x] 기준 데이터셋을 `Sample/japan` curated 13장으로 잠금
 - [x] 문서 형식을 "결정 로그 + 프로젝트 명세서"로 잠금
 - [x] 벤치마크 full docs는 `benchmarking/lab`, 요약형 포트폴리오 문서는 `develop`으로 분리
@@ -89,6 +91,7 @@
 - [x] Japanese `Optimal+` sidecar comparison pack 생성
 - [x] smoke 기준 Docker compose up / health wait / reuse hit 분해표 작성
 - [x] full 13장 기준 Docker compose up / health wait / reuse hit / timeout / retry 분해표 작성
+- [x] CTD 마스킹 경로 2페이지 smoke (`094.png`, `p_016.jpg`) 검증
 - [ ] VRAM / ngl / idle runtime snapshot 비교
 - [ ] 첫 결과 시간과 전체 완료 시간 비교
 - [ ] 페이지 수 증가 시 고정비/변동비 모델 정리
@@ -98,6 +101,7 @@
 - [x] 총 시간 순이득이 실측으로 확인됨
 - [x] Docker 재기동 패널티를 포함해도 순이득이 유지됨
 - [x] 품질이 동일 이상임
+- [x] benchmark 경로에서 `mask_details.mask_refiner == "ctd"`와 `keep_existing_lines == True`가 smoke로 검증됨
 - [ ] 설정창에서 `legacy` / `stage_batched_pipeline` 선택안이 설계 완료됨
 - [ ] 제품 코드와 benchmark 코드의 경계가 유지됨
 - [x] `candidate_stage_batched_dual_resident`가 단일 OCR 후보보다 불리해도 Requirement 1 자체를 무효화하지 않는다는 정책이 문서/승격 계획에 반영됨

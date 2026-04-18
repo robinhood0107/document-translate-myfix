@@ -35,6 +35,9 @@
 16. `Optimal+ Japanese`는 selector 승인 전까지 `PaddleOCR VL`을 downstream 기준으로 사용하고 `MangaLMM`은 sidecar 비교 데이터로만 수집한다.
 17. 2026-04-18 기준으로 Requirement 2의 `MangaLMM` 하이브리드 selector 트랙은 benchmark 실패로 종료한다. 실패 근거는 공식 suite에서 `candidate_stage_batched_dual_resident`가 `candidate_stage_batched_single_ocr`보다 크게 느리고, review pack에서 `text_bubble` 누락/병합-분할 불안정성이 반복 확인되었다는 점이다.
 18. 2026-04-18 기준으로 최종 승격 후보는 `stage_batched_pipeline + PaddleOCR VL 중심(Japanese Optimal)`로 잠근다. 이후 추가 검증 우선순위는 hybrid selector가 아니라 마스킹 경로 보정이다.
+19. 2026-04-18 기준으로 CTD 마스킹 경로 blocker는 해소되었다. `settings_page.py`, `image_utils.py`, `batch_processor.py`, `benchmark_stage_batched_pipeline.py`를 통해 `mask_refiner=ctd`, `keep_existing_lines=True`, residue cleanup 실제 호출이 benchmark 경로에서 연결되었다.
+20. CTD 연결 확인은 `094.png`, `p_016.jpg` 2페이지 smoke로 잠근다. 두 출력 모두 debug metadata 기준 `mask_refiner=\"ctd\"`, `protect_mask_applied=true`, `cleanup_applied=true`를 만족한다.
+21. 하네스 원문은 더 이상 `harness_collection/`을 source-of-truth로 보지 않고, `docs/benchmark/workflow-split-runtime/requirements/` 아래 canonical benchmark 문서 세트로 편입한다.
 
 ## 운영 기준으로 잠근 입력 세트
 
@@ -177,6 +180,35 @@
 3. `translate_stage_runtime_ready` checkpoint에서는 `gemma-local-server`만 기록됨
 4. 즉 사용자가 의도한 “OCR stage 종료 후 OCR Docker 전부 down -> Gemma만 up” 수명주기가 smoke 수준에서 확인됨
 
+### 4. CTD 마스킹 경로 보정
+
+이전까지는 제품/benchmark 배치 경로 모두 설정과 무관하게 `legacy_bbox` 마스크 생성기로 수렴하는 문제가 있었다. 원인은 세 군데였다.
+
+1. `settings_page.py`가 `get_mask_refiner_settings()`에서 `legacy_bbox`와 `keep_existing_lines=False`를 강제했다.
+2. `modules/utils/image_utils.py`가 들어온 설정을 다시 `legacy_bbox`로 덮어썼다.
+3. `generate_mask()`가 `build_legacy_bbox_mask_details()`만 호출하고 CTD 분기가 없었다.
+
+2026-04-18 수정 이후에는 아래 semantics로 바뀌었다.
+
+1. settings 레이어는 persisted/benchmark override를 포함한 실제 `mask_refiner_settings`를 그대로 정규화해 전달한다.
+2. `generate_mask()`는 `mask_refiner` 값에 따라 `ctd`와 `legacy_bbox`를 분기한다.
+3. `ctd` 경로에서는 protect mask와 hard-box fallback까지 포함한 공통 `mask_details` 계약을 유지한다.
+4. `batch_processor.py`와 `benchmark_stage_batched_pipeline.py` 모두 인페인팅 직후 residue cleanup을 실제 호출한다.
+5. `export_inpaint_debug.py`는 이제 `final_mask`, residue mask, rescue mask를 metadata에 반영한다.
+
+대표 smoke 근거:
+
+- `banchmark_result_log/inpaint_debug/20260418_150438_sample-debug-export/japan/debug_metadata/094_debug.json`
+  - `mask_refiner=ctd`
+  - `protect_mask_applied=true`
+  - `final_mask_pixel_count=223571`
+  - `cleanup_applied=true`
+- `banchmark_result_log/inpaint_debug/20260418_150441_sample-debug-export/japan/debug_metadata/p_016_debug.json`
+  - `mask_refiner=ctd`
+  - `protect_mask_applied=true`
+  - `final_mask_pixel_count=214767`
+  - `cleanup_applied=true`
+
 ### 3. 계측 의미 보정
 
 초기 Chinese smoke에서는 `translate_stage_runtime_ready`와 이후 checkpoint에 OCR container 이름이 함께 남았다. 원인은 실제 활성 컨테이너가 아니라 `runtime_policy` 누적 이력을 checkpoint에 재사용했기 때문이다.
@@ -245,7 +277,7 @@
 ## 다음 액션
 
 1. `feature/workflow-split-runtime`에서 `stage_batched_pipeline` 제품 승격 준비를 시작한다.
-2. 제품 승격 전, 현재 배치 경로에서 레거시로 강제되고 있는 마스킹 경로를 사용자가 원하는 방식으로 교체하는 별도 검증/구현 계획을 수립한다.
+2. `develop` 승격 브랜치에서는 benchmark 전용 자산 없이 `workflow_mode`, stage-batched routing, CTD 마스크 경로가 실제 제품 파이프라인에 반영되도록 포팅한다.
 3. Requirement 2 문서는 실패/폐기 상태로 남기고, 추가 OCR selector 작업은 새 가설이나 새 엔진 근거가 생기기 전까지 재개하지 않는다.
 
 ## 저자 및 기여

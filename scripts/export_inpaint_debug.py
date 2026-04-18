@@ -188,6 +188,10 @@ def _process_image(
         hd_strategy="Resize",
         blocks=blocks,
         raw_mask=raw_mask,
+        final_mask=final_mask,
+        final_mask_pre_expand=mask_details.get("final_mask_pre_expand"),
+        final_mask_post_expand=mask_details.get("final_mask_post_expand"),
+        residue_mask=cleanup_stats.get("residue_mask") if isinstance(cleanup_stats, dict) else None,
         cleanup_delta=cleanup_delta,
         cleanup_stats=cleanup_stats,
         mask_refiner=str(mask_details.get("mask_refiner", "legacy_bbox") or "legacy_bbox"),
@@ -196,6 +200,10 @@ def _process_image(
         refiner_backend=str(mask_details.get("refiner_backend", "legacy") or "legacy"),
         refiner_device=str(mask_details.get("refiner_device", "cpu") or "cpu"),
         inpainter_backend=str(runtime.get("backend", "unknown") or "unknown"),
+        legacy_base_mask=mask_details.get("legacy_base_mask"),
+        hard_box_rescue_mask=mask_details.get("hard_box_rescue_mask"),
+        hard_box_applied_count=int(mask_details.get("hard_box_applied_count", 0) or 0),
+        hard_box_reason_totals=dict(mask_details.get("hard_box_reason_totals", {}) or {}),
     )
     export_inpaint_debug_artifacts(
         export_root=str(corpus_output),
