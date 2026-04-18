@@ -15,6 +15,7 @@ from app.ui.pipeline_status_panel import (
     PipelineInteractionOverlay,
     PipelineStatusPanel,
 )
+from app.ui.series_workspace import SeriesWorkspace
 from app.ui.settings.settings_page import SettingsPage
 from app.ui.startup_home import StartupHomeScreen
 from app.ui.title_bar import CustomTitleBar, RESIZE_MARGIN
@@ -193,8 +194,10 @@ class ComicTranslateUI(
         self._center_stack = QtWidgets.QStackedWidget()
 
         self.startup_home = StartupHomeScreen()
+        self.series_workspace = SeriesWorkspace(self)
         self._center_stack.addWidget(self.startup_home)
         self._center_stack.addWidget(self.main_content_widget)
+        self._center_stack.addWidget(self.series_workspace)
         self._center_stack.addWidget(self.settings_page)
 
         self._center_stack.setCurrentWidget(self.startup_home)
@@ -229,9 +232,31 @@ class ComicTranslateUI(
             if hasattr(self.title_bar, "webtoon_toggle"):
                 self.title_bar.webtoon_toggle.setVisible(visible)
 
+    def _set_series_tools_visible(self, visible: bool) -> None:
+        if hasattr(self, "insert_button"):
+            self.insert_button.setVisible(False)
+        if hasattr(self, "save_browser"):
+            self.save_browser.setVisible(False)
+        if hasattr(self, "save_all_button"):
+            self.save_all_button.setVisible(False)
+        if hasattr(self, "search_sidebar_button"):
+            self.search_sidebar_button.setVisible(False)
+        if hasattr(self, "save_project_button"):
+            self.save_project_button.setVisible(visible)
+        if hasattr(self, "save_as_project_button"):
+            self.save_as_project_button.setVisible(visible)
+        if hasattr(self, "title_bar"):
+            self.title_bar.set_undo_redo_visible(False)
+            self.title_bar.set_autosave_visible(visible)
+            if hasattr(self.title_bar, "webtoon_toggle"):
+                self.title_bar.webtoon_toggle.setVisible(False)
+        if hasattr(self, "search_panel"):
+            self.search_panel.setVisible(False)
+
     def show_home_screen(self) -> None:
         self._finish_settings_resize_preview()
         self._set_document_tools_visible(False)
+        self._set_series_tools_visible(False)
         self._center_stack.setCurrentWidget(self.startup_home)
         self._set_nav_checked_state("home")
         self.set_pipeline_overlay_active(bool(getattr(self, "_batch_active", False)))
@@ -243,6 +268,7 @@ class ComicTranslateUI(
         if not self.settings_page:
             self.settings_page = SettingsPage(self)
         self._finish_settings_resize_preview()
+        self._set_series_tools_visible(False)
         self._center_stack.setCurrentWidget(self.settings_page)
         self._set_nav_checked_state("settings")
         self.set_pipeline_overlay_active(False)
@@ -251,11 +277,20 @@ class ComicTranslateUI(
         self._finish_settings_resize_preview()
         if self.settings_page:
             self._workspace_initialized = True
+            self._set_series_tools_visible(False)
             self._set_document_tools_visible(True)
             self._center_stack.setCurrentWidget(self.main_content_widget)
             self._set_nav_checked_state("main")
             if getattr(self, "_batch_active", False):
                 self.set_pipeline_overlay_active(True)
+
+    def show_series_page(self):
+        self._finish_settings_resize_preview()
+        self._set_document_tools_visible(False)
+        self._set_series_tools_visible(True)
+        self._center_stack.setCurrentWidget(self.series_workspace)
+        self._set_nav_checked_state("main")
+        self.set_pipeline_overlay_active(False)
 
     def _set_nav_checked_state(self, target: str) -> None:
         nav_buttons = (

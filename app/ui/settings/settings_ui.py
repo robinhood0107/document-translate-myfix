@@ -20,6 +20,7 @@ from .llms_page import LlmsPage
 from .text_rendering_page import TextRenderingPage
 from .notifications_page import NotificationsPage
 from .project_page import ProjectPage
+from .series_page import SeriesPage
 from .export_page import ExportPage
 from .shortcuts_page import ShortcutsPage
 from .about_page import AboutPage
@@ -233,6 +234,7 @@ class SettingsPageUI(QtWidgets.QWidget):
         self.llms_page = LlmsPage(parent=self)
         self.text_rendering_page = TextRenderingPage(parent=self)
         self.project_page = ProjectPage(parent=self)
+        self.series_page = SeriesPage(parent=self)
         self.export_page = ExportPage(parent=self)
         self.user_dictionaries_page = UserDictionariesPage(parent=self)
         self.notifications_page = NotificationsPage(parent=self)
@@ -327,6 +329,12 @@ class SettingsPageUI(QtWidgets.QWidget):
         self.automatic_output_estimate_summary_label = self.export_page.automatic_output_estimate_summary_label
         self.project_autosave_interval_spinbox = self.project_page.project_autosave_interval_spinbox
         self.project_autosave_folder_input = self.project_page.project_autosave_folder_input
+        self.series_failure_policy_combo = self.series_page.failure_policy_combo
+        self.series_retry_count_spinbox = self.series_page.retry_count_spinbox
+        self.series_retry_delay_spinbox = self.series_page.retry_delay_spinbox
+        self.series_auto_open_failed_checkbox = self.series_page.auto_open_failed_checkbox
+        self.series_resume_first_incomplete_checkbox = self.series_page.resume_first_incomplete_checkbox
+        self.series_return_to_series_checkbox = self.series_page.return_to_series_checkbox
 
         # System
         self.check_update_button = self.about_page.check_update_button
@@ -344,6 +352,7 @@ class SettingsPageUI(QtWidgets.QWidget):
         self.stacked_widget.addWidget(self.user_dictionaries_page)
         self.stacked_widget.addWidget(self.notifications_page)
         self.stacked_widget.addWidget(self.project_page)
+        self.stacked_widget.addWidget(self.series_page)
         self.stacked_widget.addWidget(self.export_page)
         self.stacked_widget.addWidget(self.shortcuts_page)
         self.stacked_widget.addWidget(self.credentials_page)
@@ -404,6 +413,7 @@ class SettingsPageUI(QtWidgets.QWidget):
             {"title": self.tr("User Dictionaries"), "avatar": MPixmap(".svg")},
             {"title": self.tr("Notifications"), "avatar": MPixmap(".svg")},
             {"title": self.tr("Project"), "avatar": MPixmap(".svg")},
+            {"title": self.tr("Series"), "avatar": MPixmap(".svg")},
             {"title": self.tr("Export"), "avatar": MPixmap(".svg")},
             {"title": self.tr("Shortcuts"), "avatar": MPixmap(".svg")},
             {"title": self.tr("Advanced"), "avatar": MPixmap(".svg")},

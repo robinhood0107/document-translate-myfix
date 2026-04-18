@@ -15,6 +15,11 @@ from PySide6.QtGui import QUndoGroup, QUndoStack, QIcon
 from app.ui.dayu_widgets.qt import MPixmap
 from app.ui.main_window import ComicTranslateUI
 from app.ui.messages import Messages
+from app.projects.project_types import (
+    PROJECT_KIND_SINGLE,
+    has_project_file_extension,
+    is_series_project_file,
+)
 
 from modules.ocr.local_runtime import LocalOCRRuntimeManager
 from modules.translation.local_runtime import LocalGemmaRuntimeManager
@@ -67,6 +72,7 @@ from app.controllers.shortcuts import ShortcutController
 from app.controllers.task_runner import TaskRunnerController
 from app.controllers.batch_report import BatchReportController
 from app.controllers.manual_workflow import ManualWorkflowController
+from app.controllers.series import SeriesController
 from modules.utils.exceptions import (
     LocalServiceError,
     LocalServiceConnectionError,
@@ -142,6 +148,7 @@ class ComicTranslate(ComicTranslateUI):
         self.undo_group = QUndoGroup(self)
         self.undo_stacks: dict[str, QUndoStack] = {}
         self.project_file = None
+        self.project_kind = PROJECT_KIND_SINGLE
         self.temp_dir = tempfile.mkdtemp()
         self._manual_dirty = False
         self._dirty_revision = 0
@@ -175,6 +182,7 @@ class ComicTranslate(ComicTranslateUI):
         self.image_ctrl = ImageStateController(self)
         self.rect_item_ctrl = RectItemController(self)
         self.project_ctrl = ProjectController(self)
+        self.series_ctrl = SeriesController(self)
         self.text_ctrl = TextController(self)
         self.webtoon_ctrl = WebtoonController(self)
         self.search_ctrl = SearchReplaceController(self)
@@ -370,12 +378,25 @@ class ComicTranslate(ComicTranslateUI):
         # Home screen signals
         self.startup_home.sig_open_files.connect(self._guarded_thread_load_images)
         self.startup_home.sig_open_project.connect(self._open_project_from_home)
+        self.startup_home.sig_create_series.connect(self.series_ctrl.prompt_new_series_project)
         self.startup_home._sig_remove_one.connect(self._on_home_remove_recent)
         self.startup_home._sig_clear_all.connect(self._on_home_clear_recent)
         self.startup_home._sig_pin.connect(
             lambda path, pinned: self.project_ctrl.toggle_pin_project(path, pinned)
         )
         self.title_bar.project_target_requested.connect(self._on_project_target_requested)
+        self.series_workspace.open_item_requested.connect(self.series_ctrl.request_open_item)
+        self.series_workspace.remove_item_requested.connect(self.series_ctrl.request_remove_item)
+        self.series_workspace.reorder_requested.connect(self.series_ctrl.request_reorder)
+        self.series_workspace.queue_index_requested.connect(self.series_ctrl.request_queue_index_change)
+        self.series_workspace.add_files_requested.connect(self.series_ctrl.request_add_files)
+        self.series_workspace.add_folder_requested.connect(self.series_ctrl.request_add_folder)
+        self.series_workspace.back_requested.connect(self.series_ctrl.request_back)
+        self.series_workspace.forward_requested.connect(self.series_ctrl.request_forward)
+        self.series_workspace.tree_jump_requested.connect(self.series_ctrl.request_tree_jump)
+        self.series_workspace.auto_translate_requested.connect(self.series_ctrl.start_queue_translation)
+        self.series_workspace.open_series_settings_requested.connect(self.series_ctrl.edit_series_settings_dialog)
+        self.series_workspace.global_settings_changed.connect(self.series_ctrl.request_global_settings_change)
 
     def _set_project_navigation_enabled(self, enabled: bool) -> None:
         widgets = [
@@ -818,6 +839,8 @@ class ComicTranslate(ComicTranslateUI):
     def _reset_to_blank_project_workspace(self) -> None:
         self.project_ctrl.clear_recovery_checkpoint()
         self.image_ctrl.clear_state()
+        self.series_ctrl.reset_series_context()
+        self.project_kind = PROJECT_KIND_SINGLE
         self.central_stack.setCurrentWidget(self.drag_browser)
         if self.webtoon_mode:
             self.webtoon_toggle.setChecked(False)
@@ -836,7 +859,7 @@ class ComicTranslate(ComicTranslateUI):
             self._on_new_project_clicked()
             return
 
-        project_paths = [path for path in normalized_paths if path.lower().endswith(".ctpr")]
+        project_paths = [path for path in normalized_paths if has_project_file_extension(path)]
         if project_paths:
             if len(normalized_paths) != 1:
                 Messages.show_warning(
@@ -854,20 +877,33 @@ class ComicTranslate(ComicTranslateUI):
             return
 
         self._run_guarded_project_transition(
-            lambda: self.image_ctrl.thread_load_images(normalized_paths)
+            lambda: self._open_regular_files(normalized_paths)
         )
 
     def _guarded_thread_load_project(self, path: str):
         normalized_path = os.path.normpath(os.path.abspath(path or ""))
         if not normalized_path:
             return
-        if not normalized_path.lower().endswith(".ctpr"):
+        if not has_project_file_extension(normalized_path):
             self._guarded_thread_load_images([normalized_path])
             return
 
         self._run_guarded_project_transition(
-            lambda: self.project_ctrl.thread_load_project(normalized_path)
+            lambda: self._open_project_by_type(normalized_path)
         )
+
+    def _open_regular_files(self, normalized_paths: list[str]) -> None:
+        self.series_ctrl.reset_series_context()
+        self.project_kind = PROJECT_KIND_SINGLE
+        self.image_ctrl.thread_load_images(normalized_paths)
+
+    def _open_project_by_type(self, normalized_path: str) -> None:
+        if is_series_project_file(normalized_path):
+            self.series_ctrl.thread_load_series_project(normalized_path)
+            return
+        self.series_ctrl.reset_series_context()
+        self.project_kind = PROJECT_KIND_SINGLE
+        self.project_ctrl.thread_load_project(normalized_path)
 
     def _on_new_project_clicked(self):
         """Clear the app to initial state after the shared transition guard passes."""
@@ -894,10 +930,10 @@ class ComicTranslate(ComicTranslateUI):
     # Home screen helper methods
 
     def _open_project_from_home(self, path: str):
-        """Load a .ctpr project selected on the home screen."""
+        """Load a project selected on the home screen."""
         if not path:
             return
-        if not path.lower().endswith(".ctpr"):
+        if not has_project_file_extension(path):
             self._guarded_thread_load_images([path])
             return
         self._guarded_thread_load_project(path)
@@ -1833,6 +1869,13 @@ class ComicTranslate(ComicTranslateUI):
         except Exception:
             pass
         self.batch_report_ctrl.refresh_action_buttons()
+        try:
+            self.series_ctrl.on_batch_process_finished(
+                was_cancelled=was_cancelled,
+                failed=failed,
+            )
+        except Exception:
+            logger.debug("Series queue completion hook failed.", exc_info=True)
 
     def _find_latest_batch_output_root(self, page_paths: list[str]) -> str:
         for file_path in reversed(list(page_paths or [])):

@@ -33,6 +33,7 @@ from app.update_checker import UpdateChecker
 from app.shortcuts import get_default_shortcuts
 from modules.utils.device import is_gpu_available
 from modules.utils.paths import get_default_project_autosave_dir, get_user_data_dir
+from app.projects.series_state_v1 import normalize_series_settings
 from modules.utils.notification_sound import (
     SYSTEM_SOUND_MODE,
     play_completion_sound,
@@ -147,6 +148,7 @@ class SettingsPage(QtWidgets.QWidget):
         self.ui.automatic_output_archive_level_spinbox.valueChanged.connect(self._save_settings_if_not_loading)
         self.ui.user_dictionaries_page.changed.connect(self._save_settings_if_not_loading)
         self.ui.notifications_page.changed.connect(self._save_settings_if_not_loading)
+        self.ui.series_page.changed.connect(self._save_settings_if_not_loading)
         self.ui.notifications_page.test_requested.connect(self.play_test_completion_sound)
         self._connect_live_save_signals()
 
@@ -515,6 +517,9 @@ class SettingsPage(QtWidgets.QWidget):
             "auto_export_translation_md": auto_export_translation_md,
         }
 
+    def get_series_settings(self) -> dict[str, object]:
+        return normalize_series_settings(self.ui.series_page.get_settings())
+
     def get_resolved_automatic_output_settings(
         self,
         project_preferences: Mapping[str, object] | None = None,
@@ -633,6 +638,7 @@ class SettingsPage(QtWidgets.QWidget):
             "gemma_local_server": self.get_gemma_local_server_settings(),
             "llm": self.get_llm_settings(),
             "export": self.get_export_settings(),
+            "series": self.get_series_settings(),
             "notifications": self.get_notification_settings(),
             "shortcuts": self.ui.shortcuts_page.get_shortcuts(),
             "credentials": self.get_credentials(),
@@ -721,6 +727,9 @@ class SettingsPage(QtWidgets.QWidget):
         settings.remove("automatic_output_png_compression_level")
         settings.remove("automatic_output_jpg_quality")
         settings.remove("automatic_output_webp_quality")
+        settings.endGroup()
+
+        settings.beginGroup("series")
         settings.endGroup()
 
         dictionaries = self.get_dictionary_settings()
@@ -1092,6 +1101,21 @@ class SettingsPage(QtWidgets.QWidget):
             owner.auto_export_translation_txt_checkbox.setChecked(bool(auto_export_translation_txt))
         if getattr(owner, "auto_export_translation_md_checkbox", None) is not None:
             owner.auto_export_translation_md_checkbox.setChecked(bool(auto_export_translation_md))
+        settings.endGroup()
+
+        settings.beginGroup("series")
+        self.ui.series_page.set_settings(
+            normalize_series_settings(
+                {
+                    "queue_failure_policy": settings.value("queue_failure_policy", "stop", type=str),
+                    "retry_count": settings.value("retry_count", 0, type=int),
+                    "retry_delay_sec": settings.value("retry_delay_sec", 0, type=int),
+                    "auto_open_failed_child": settings.value("auto_open_failed_child", True, type=bool),
+                    "resume_from_first_incomplete": settings.value("resume_from_first_incomplete", True, type=bool),
+                    "return_to_series_after_completion": settings.value("return_to_series_after_completion", True, type=bool),
+                }
+            )
+        )
         settings.endGroup()
 
         settings.beginGroup("dictionaries")
