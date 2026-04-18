@@ -35,7 +35,7 @@ class ProjectPage(QtWidgets.QWidget):
         autosave_label = MLabel(self.tr("Auto-Save Project Files")).h4()
         autosave_note = MLabel(
             self.tr(
-                "These are normal .ctpr project files saved while Auto-Save is enabled.\n"
+                "These are normal .ctpr or .seriesctpr project files saved while Auto-Save is enabled.\n"
                 "This folder is separate from Auto-Recover snapshots."
             )
         ).secondary()

@@ -9,6 +9,12 @@ from typing import TYPE_CHECKING
 from PySide6 import QtCore, QtGui, QtWidgets
 
 from .dayu_widgets import dayu_theme
+from app.projects.project_types import (
+    PROJECT_FILE_EXT,
+    SERIES_PROJECT_FILE_EXT,
+    has_project_file_extension,
+    strip_project_extension,
+)
 
 if TYPE_CHECKING:
     pass
@@ -23,7 +29,8 @@ IMPORT_EXTS = {
     ".pdf", ".epub",
     ".zip", ".rar", ".7z", ".tar",
     ".cbz", ".cbr", ".cb7", ".cbt",
-    ".ctpr",
+    PROJECT_FILE_EXT,
+    SERIES_PROJECT_FILE_EXT,
 }
 
 
@@ -142,7 +149,7 @@ class _RecentRow(QtWidgets.QFrame):
         txt_col = QtWidgets.QVBoxLayout()
         txt_col.setSpacing(2)
 
-        name   = os.path.splitext(os.path.basename(path))[0]   # strip .ctpr
+        name = strip_project_extension(os.path.basename(path))
         folder = os.path.dirname(path)
         home   = os.path.expanduser("~")
         if folder.startswith(home):
@@ -424,6 +431,7 @@ class _PillButton(QtWidgets.QPushButton):
 class StartupHomeScreen(QtWidgets.QWidget):
     sig_open_files   = QtCore.Signal(list)
     sig_open_project = QtCore.Signal(str)
+    sig_create_series = QtCore.Signal()
     _sig_remove_one  = QtCore.Signal(str)
     _sig_clear_all   = QtCore.Signal()
     _sig_pin         = QtCore.Signal(str, bool)   # (path, pinned)
@@ -474,13 +482,16 @@ class StartupHomeScreen(QtWidgets.QWidget):
         cards_row.setSpacing(12)
         cards_row.setContentsMargins(0, 0, 0, 0)
 
-        self._card_new  = _NewCard("＋", self.tr("New Project"))
+        self._card_new = _NewCard("＋", self.tr("New Project"))
+        self._card_series = _NewCard("🗂", self.tr("New Series Project"))
         self._card_open = _NewCard("📂", self.tr("Open Files"))
 
         self._card_new.clicked.connect(self._on_new_project)
+        self._card_series.clicked.connect(self._on_new_series)
         self._card_open.clicked.connect(self._on_browse)
 
         cards_row.addWidget(self._card_new)
+        cards_row.addWidget(self._card_series)
         cards_row.addWidget(self._card_open)
         cards_row.addStretch()
         vlay.addLayout(cards_row)
@@ -579,6 +590,7 @@ class StartupHomeScreen(QtWidgets.QWidget):
     def set_actions_enabled(self, enabled: bool) -> None:
         self._actions_enabled = bool(enabled)
         self._card_new.setEnabled(enabled)
+        self._card_series.setEnabled(enabled)
         self._card_open.setEnabled(enabled)
         for row in self._rows:
             row.setEnabled(enabled)
@@ -653,6 +665,11 @@ class StartupHomeScreen(QtWidgets.QWidget):
         # We emit an empty list — controller interprets as "new blank project"
         self.sig_open_files.emit([])
 
+    def _on_new_series(self):
+        if not self._actions_enabled:
+            return
+        self.sig_create_series.emit()
+
     def _on_browse(self):
         if not self._actions_enabled:
             return
@@ -665,8 +682,8 @@ class StartupHomeScreen(QtWidgets.QWidget):
         )
         if not paths:
             return
-        projects = [p for p in paths if p.lower().endswith(".ctpr")]
-        images   = [p for p in paths if not p.lower().endswith(".ctpr")]
+        projects = [p for p in paths if has_project_file_extension(p)]
+        images = [p for p in paths if not has_project_file_extension(p)]
         if projects and images:
             QtWidgets.QMessageBox.warning(
                 self,
@@ -741,6 +758,7 @@ class StartupHomeScreen(QtWidgets.QWidget):
             b.apply_theme(d)
 
         self._card_new.apply_theme(d)
+        self._card_series.apply_theme(d)
         self._card_open.apply_theme(d)
 
         for row in self._rows:
@@ -759,8 +777,8 @@ class StartupHomeScreen(QtWidgets.QWidget):
         if not self._actions_enabled:
             return
         valid    = self._valid_urls(event.mimeData().urls())
-        projects = [p for p in valid if p.lower().endswith(".ctpr")]
-        images   = [p for p in valid if not p.lower().endswith(".ctpr")]
+        projects = [p for p in valid if has_project_file_extension(p)]
+        images = [p for p in valid if not has_project_file_extension(p)]
         if projects and images:
             QtWidgets.QMessageBox.warning(
                 self,

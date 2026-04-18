@@ -20,6 +20,7 @@ from app.ui.dayu_widgets.text_edit import MTextEdit
 from app.ui.dayu_widgets.tool_button import MToolButton
 from app.ui.search_replace_panel import SearchReplacePanel
 from app.ui.main_window.constants import supported_source_languages, supported_target_languages
+from app.projects.project_types import PROJECT_FILE_EXT, SERIES_PROJECT_FILE_EXT
 from modules.utils.automatic_output import (
     OUTPUT_ARCHIVE_FORMAT_CBZ,
     OUTPUT_ARCHIVE_FORMAT_ZIP,
@@ -183,7 +184,8 @@ class WorkspaceMixin:
                 ".pdf",
                 ".epub",
                 ".psd",
-                ".ctpr",
+                PROJECT_FILE_EXT,
+                SERIES_PROJECT_FILE_EXT,
             ]
         )
         self.drag_browser.setToolTip(

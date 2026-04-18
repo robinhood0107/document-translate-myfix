@@ -183,6 +183,35 @@ class SettingsToolsRuntimeTests(unittest.TestCase):
         page.save_settings()
         self.assertEqual(settings.value("tools/ocr", "", type=str), "best_local")
 
+    def test_series_settings_round_trip(self) -> None:
+        settings = QtCore.QSettings("ComicLabs", "ComicTranslate")
+        settings.setValue("series/queue_failure_policy", "retry")
+        settings.setValue("series/retry_count", 2)
+        settings.setValue("series/retry_delay_sec", 15)
+        settings.setValue("series/auto_open_failed_child", False)
+        settings.setValue("series/resume_from_first_incomplete", False)
+        settings.setValue("series/return_to_series_after_completion", True)
+        settings.sync()
+
+        page = self._make_page()
+        page.load_settings()
+
+        series_settings = page.get_series_settings()
+        self.assertEqual(series_settings["queue_failure_policy"], "retry")
+        self.assertEqual(series_settings["retry_count"], 2)
+        self.assertEqual(series_settings["retry_delay_sec"], 15)
+        self.assertFalse(series_settings["auto_open_failed_child"])
+        self.assertFalse(series_settings["resume_from_first_incomplete"])
+        self.assertTrue(series_settings["return_to_series_after_completion"])
+
+        page.save_settings()
+        self.assertEqual(settings.value("series/queue_failure_policy", "", type=str), "retry")
+        self.assertEqual(settings.value("series/retry_count", 0, type=int), 2)
+        self.assertEqual(settings.value("series/retry_delay_sec", 0, type=int), 15)
+        self.assertFalse(settings.value("series/auto_open_failed_child", True, type=bool))
+        self.assertFalse(settings.value("series/resume_from_first_incomplete", True, type=bool))
+        self.assertTrue(settings.value("series/return_to_series_after_completion", False, type=bool))
+
 
 if __name__ == "__main__":
     unittest.main()

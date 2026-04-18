@@ -1739,10 +1739,9 @@ Diese Schnappschüsse sind nicht Ihre Hauptprojektdatei; Verwenden Sie „Speich
         <translation>Projektdateien automatisch speichern</translation>
     </message>
     <message>
-        <source>These are normal .ctpr project files saved while Auto-Save is enabled.
+        <source>These are normal .ctpr or .seriesctpr project files saved while Auto-Save is enabled.
 This folder is separate from Auto-Recover snapshots.</source>
-        <translation>Dabei handelt es sich um normale .ctpr-Projektdateien, die bei aktivierter automatischer Speicherung gespeichert werden.
-Dieser Ordner ist von den Auto-Recover-Snapshots getrennt.</translation>
+        <translation type="unfinished"></translation>
     </message>
     <message>
         <source>Auto-Save folder:</source>
@@ -1896,6 +1895,143 @@ Dieser Ordner ist von den Auto-Recover-Snapshots getrennt.</translation>
     <message>
         <source>Search Action...</source>
         <translation>Schließen</translation>
+    </message>
+</context>
+<context>
+    <name>SeriesImportDialog</name>
+    <message>
+        <source>Create Series Project</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Select the files to include in the new `.seriesctpr`, then reorder the queue by drag-and-drop or by editing the queue number.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Select All</source>
+        <translation type="unfinished">Schriftart</translation>
+    </message>
+    <message>
+        <source>Clear All</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Cancel</source>
+        <translation type="unfinished">Abbrechen</translation>
+    </message>
+    <message>
+        <source>Create Series</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>{selected} / {total} items selected</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Select at least one file to include in the series.</source>
+        <translation type="unfinished"></translation>
+    </message>
+</context>
+<context>
+    <name>SeriesPage</name>
+    <message>
+        <source>Series Queue</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Configure the default behavior for `.seriesctpr` queue execution.
+These values are copied into new series projects and can be adjusted per series.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Stop</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Skip</source>
+        <translation type="unfinished">Überspringen</translation>
+    </message>
+    <message>
+        <source>Retry</source>
+        <translation type="unfinished">Erneut versuchen</translation>
+    </message>
+    <message>
+        <source>Open failed child project automatically</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Resume from the first incomplete queue item</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Return to the series board after a child project finishes</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Failure policy:</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Retry count:</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Retry delay (sec):</source>
+        <translation type="unfinished"></translation>
+    </message>
+</context>
+<context>
+    <name>SeriesTreeJumpDialog</name>
+    <message>
+        <source>Tree Jump</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Select a series item from the original folder structure or choose the board view.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Location</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Series Board</source>
+        <translation type="unfinished"></translation>
+    </message>
+</context>
+<context>
+    <name>SeriesWorkspace</name>
+    <message>
+        <source>Back</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Forward</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Tree</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Tree Jump</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Series Project</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Open Selected</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Add Files</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Add Folder</source>
+        <translation type="unfinished"></translation>
     </message>
 </context>
 <context>
@@ -2122,6 +2258,10 @@ Jetzt neu starten?</translation>
         <translation>Projekt</translation>
     </message>
     <message>
+        <source>Series</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
         <source>Shortcuts</source>
         <translation type="unfinished"></translation>
     </message>
@@ -2253,6 +2393,10 @@ Jetzt neu starten?</translation>
     <message>
         <source>New Project</source>
         <translation>Neues Projekt</translation>
+    </message>
+    <message>
+        <source>New Series Project</source>
+        <translation type="unfinished"></translation>
     </message>
     <message>
         <source>Open Files</source>
@@ -3014,6 +3158,103 @@ It may have already been moved, renamed, or deleted.
     </message>
 </context>
 <context>
+    <name>_SeriesImportTable</name>
+    <message>
+        <source>Use</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Queue</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Name</source>
+        <translation type="unfinished">Name</translation>
+    </message>
+    <message>
+        <source>Type</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Folder</source>
+        <translation type="unfinished"></translation>
+    </message>
+</context>
+<context>
+    <name>_SeriesQueueTable</name>
+    <message>
+        <source>No.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Project</source>
+        <translation type="unfinished">Projekt</translation>
+    </message>
+    <message>
+        <source>Type</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Folder</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Status</source>
+        <translation type="unfinished">Status</translation>
+    </message>
+    <message>
+        <source>Source</source>
+        <translation type="unfinished">Quelle</translation>
+    </message>
+    <message>
+        <source>Remove from series</source>
+        <translation type="unfinished"></translation>
+    </message>
+</context>
+<context>
+    <name>_SeriesQuickSettings</name>
+    <message>
+        <source>Global Queue Settings</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>These controls apply to queue execution. Open a child project to edit detailed page-level settings.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Use GPU</source>
+        <translation type="unfinished">GPU verwenden</translation>
+    </message>
+    <message>
+        <source>Source language:</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Target language:</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>OCR:</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Translator:</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Workflow mode:</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Series Settings…</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>대기열대로 자동번역</source>
+        <translation type="unfinished"></translation>
+    </message>
+</context>
+<context>
     <name>self.main</name>
     <message>
         <source>Project Recovery</source>
@@ -3065,6 +3306,22 @@ Möchten Sie es wiederherstellen?</translation>
     </message>
     <message>
         <source>Overwrite Project File</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>RecoveredProject.seriesctpr</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>RecoveredProject.ctpr</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Save Series Project As</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Save Project As</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
@@ -3120,6 +3377,75 @@ Möglicherweise wurde es verschoben, umbenannt oder gelöscht.
     <message>
         <source>English</source>
         <translation>Englisch</translation>
+    </message>
+    <message>
+        <source>Child Project - {child} · {series}[*]</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Series Project - {series}[*]</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>The selected series project file could not be found.
+It may have been moved, renamed, or deleted.
+
+{path}</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Select Series Root Folder</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Create Series Project</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>No supported files were found in the selected folder.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Series Project Files (*.seriesctpr);;All Files (*)</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Remove From Series</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Remove &apos;{name}&apos; from this series project?</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Add Files To Series</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Supported Files ({exts});;All Files (*)</source>
+        <translation type="unfinished">Unterstützte Dateien ({exts});;Alle Dateien (*)</translation>
+    </message>
+    <message>
+        <source>Add Folder To Series</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Series Settings</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Save Series Project</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Failed to synchronize the active child project before saving.
+
+{error}</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>There are no queue items left to run.</source>
+        <translation type="unfinished"></translation>
     </message>
 </context>
 <context>
