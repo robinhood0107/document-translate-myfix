@@ -2033,6 +2033,31 @@ These values are copied into new series projects and can be adjusted per series.
         <source>Add Folder</source>
         <translation type="unfinished"></translation>
     </message>
+    <message>
+        <source>Queue changes are locked while automatic translation is running.
+The current running item stays fixed, and you can change the queue after the run finishes.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Open the selected child project.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Add supported files to this series.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Scan and add a folder to this series.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Run automatic translation in queue order.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Automatic translation is already running.</source>
+        <translation type="unfinished"></translation>
+    </message>
 </context>
 <context>
     <name>SettingsPage</name>
@@ -3204,8 +3229,36 @@ It may have already been moved, renamed, or deleted.
         <translation type="unfinished">Estado</translation>
     </message>
     <message>
-        <source>Source</source>
-        <translation type="unfinished">Origen</translation>
+        <source>Pending</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Running</source>
+        <translation type="unfinished">En ejecución</translation>
+    </message>
+    <message>
+        <source>Done</source>
+        <translation type="unfinished">Completado</translation>
+    </message>
+    <message>
+        <source>Failed</source>
+        <translation type="unfinished">Falló</translation>
+    </message>
+    <message>
+        <source>Skipped</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Currently translating this project in the queue.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Project File</source>
+        <translation type="unfinished">Archivo de proyecto</translation>
+    </message>
+    <message>
+        <source>Source File</source>
+        <translation type="unfinished"></translation>
     </message>
     <message>
         <source>Remove from series</source>
@@ -3251,7 +3304,7 @@ It may have already been moved, renamed, or deleted.
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>대기열대로 자동번역</source>
+        <source>Translate in Queue Order</source>
         <translation type="unfinished"></translation>
     </message>
 </context>
@@ -3385,6 +3438,10 @@ Es posible que se haya movido, cambiado de nombre o eliminado.
     </message>
     <message>
         <source>Series Project - {series}[*]</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Queue changes are locked while automatic translation is running.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>

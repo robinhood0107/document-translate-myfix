@@ -43,3 +43,11 @@
 - Startup Home, 최근 프로젝트, 파일 브라우저, drag/drop에서 `.seriesctpr`를 인식한다.
 - title bar project target popup은 현재 프로젝트 타입에 맞춰 `.ctpr`/`.seriesctpr` suffix를 바꾼다.
 - `Settings > Series`는 새 시리즈의 기본 queue 정책을 저장하며, 시리즈별 settings dialog로도 재사용한다.
+
+### 실행 중 대기열 변경 정책
+
+- 현재 제품은 실행 시작 시점 snapshot 기반 queue runner를 사용한다.
+- 따라서 실행 중 live reorder는 지원하지 않는다.
+- 실행 중에는 queue 순서 변경, 항목 추가/제거, 시리즈 전역 설정 변경을 UI와 controller 양쪽에서 잠근다.
+- 사용자가 오해하지 않도록 running 상태에서는 잠긴 컨트롤을 비활성화하고 안내 문구를 함께 보여준다.
+- 다음 단계 live reorder는 `현재 running 고정`, `남은 pending만 재계산`, `실행 중 add/remove 금지` 계약을 기준으로만 검토한다.

@@ -18,6 +18,9 @@
 - 자동 대기열은 순차 실행만 지원한다.
 - 대기열 실패 정책은 `Settings > Series`에서 설정한다.
 - 일반 프로젝트 히스토리와 시리즈 히스토리는 분리한다.
+- 실행 중에는 queue 순서 변경, 항목 추가/제거, 시리즈 전역 설정 변경을 잠근다.
+- 실행 중 live reorder는 이번 단계에서 지원하지 않는다.
+- 다음 단계에서 live reorder를 도입하더라도 `현재 running 고정 + 남은 pending만 재계산 + 실행 중 add/remove 금지` 규칙을 유지한다.
 
 ## 구현 범위
 
@@ -35,4 +38,3 @@
 - webtoon 전용 흐름 변경
 - benchmark 전용 자산
 - MangaLMM hybrid 재도입
-

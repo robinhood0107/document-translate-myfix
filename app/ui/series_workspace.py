@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from PySide6 import QtCore, QtWidgets
+from PySide6 import QtCore, QtGui, QtWidgets
 
 
 class _SeriesQueueTable(QtWidgets.QTableWidget):
@@ -12,6 +12,9 @@ class _SeriesQueueTable(QtWidgets.QTableWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self._suppress_item_changed = False
+        self._queue_running = False
+        self._active_item_id = ""
+        self._lock_reason = ""
         self.setColumnCount(6)
         self.setHorizontalHeaderLabels(
             [
@@ -48,36 +51,123 @@ class _SeriesQueueTable(QtWidgets.QTableWidget):
         self.itemChanged.connect(self._on_item_changed)
         self.itemDoubleClicked.connect(self._on_item_double_clicked)
 
+    def set_interaction_state(
+        self,
+        *,
+        queue_running: bool,
+        active_item_id: str | None = None,
+        lock_reason: str = "",
+    ) -> None:
+        self._queue_running = bool(queue_running)
+        self._active_item_id = str(active_item_id or "")
+        self._lock_reason = str(lock_reason or "")
+        if self._queue_running:
+            self.setDragDropMode(QtWidgets.QAbstractItemView.DragDropMode.NoDragDrop)
+            self.setDragEnabled(False)
+            self.setAcceptDrops(False)
+            self.setDropIndicatorShown(False)
+            self.setEditTriggers(QtWidgets.QAbstractItemView.EditTrigger.NoEditTriggers)
+        else:
+            self.setDragDropMode(QtWidgets.QAbstractItemView.DragDropMode.InternalMove)
+            self.setDragEnabled(True)
+            self.setAcceptDrops(True)
+            self.setDropIndicatorShown(True)
+            self.setEditTriggers(
+                QtWidgets.QAbstractItemView.EditTrigger.SelectedClicked
+                | QtWidgets.QAbstractItemView.EditTrigger.DoubleClicked
+            )
+        self.viewport().setToolTip(self._lock_reason if self._queue_running else "")
+
+    def _queue_item_flags(self) -> QtCore.Qt.ItemFlag:
+        flags = QtCore.Qt.ItemFlag.ItemIsEnabled | QtCore.Qt.ItemFlag.ItemIsSelectable
+        if not self._queue_running:
+            flags |= QtCore.Qt.ItemFlag.ItemIsEditable
+        return flags
+
+    def _name_item_flags(self) -> QtCore.Qt.ItemFlag:
+        flags = QtCore.Qt.ItemFlag.ItemIsEnabled | QtCore.Qt.ItemFlag.ItemIsSelectable
+        if not self._queue_running:
+            flags |= QtCore.Qt.ItemFlag.ItemIsDragEnabled
+        return flags
+
+    def _status_label(self, status: str) -> str:
+        normalized = str(status or "pending").strip().lower()
+        mapping = {
+            "pending": self.tr("Pending"),
+            "running": self.tr("Running"),
+            "done": self.tr("Done"),
+            "failed": self.tr("Failed"),
+            "skipped": self.tr("Skipped"),
+        }
+        return mapping.get(normalized, normalized or self.tr("Pending"))
+
+    def _apply_row_style(self, row: int, *, item_id: str, status: str) -> None:
+        is_running = str(status).strip().lower() == "running" or item_id == self._active_item_id
+        muted_color = QtGui.QColor("#7d8590")
+        running_fg = QtGui.QColor("#0b3d91")
+        running_bg = QtGui.QColor("#dbeafe")
+
+        for column in range(5):
+            table_item = self.item(row, column)
+            if table_item is None:
+                continue
+            font = table_item.font()
+            font.setBold(is_running)
+            table_item.setFont(font)
+            if is_running:
+                table_item.setForeground(QtGui.QBrush(running_fg))
+                table_item.setBackground(QtGui.QBrush(running_bg))
+                table_item.setToolTip(self.tr("Currently translating this project in the queue."))
+            elif self._queue_running:
+                table_item.setForeground(QtGui.QBrush(muted_color))
+                table_item.setBackground(QtGui.QBrush())
+                if self._lock_reason:
+                    table_item.setToolTip(self._lock_reason)
+            else:
+                table_item.setForeground(QtGui.QBrush())
+                table_item.setBackground(QtGui.QBrush())
+                table_item.setToolTip("")
+
     def set_series_items(self, items: list[dict[str, object]]) -> None:
         self._suppress_item_changed = True
         self.setRowCount(len(items))
         for row, item in enumerate(items):
             item_id = str(item.get("series_item_id") or "")
             queue_text = f"{int(item.get('queue_index', row + 1) or (row + 1)):02d}"
+            status = str(item.get("status") or "pending")
 
             queue_item = QtWidgets.QTableWidgetItem(queue_text)
             queue_item.setTextAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
             queue_item.setData(QtCore.Qt.ItemDataRole.UserRole, item_id)
+            queue_item.setFlags(self._queue_item_flags())
 
             name_item = QtWidgets.QTableWidgetItem(str(item.get("display_name") or ""))
             name_item.setData(QtCore.Qt.ItemDataRole.UserRole, item_id)
             name_item.setToolTip(str(item.get("source_origin_path") or ""))
+            name_item.setFlags(self._name_item_flags())
 
             source_kind = str(item.get("source_kind") or "")
-            source_kind_label = self.tr("Project") if source_kind == "ctpr_import" else self.tr("Source")
+            source_kind_label = (
+                self.tr("Project File")
+                if source_kind == "ctpr_import"
+                else self.tr("Source File")
+            )
             type_item = QtWidgets.QTableWidgetItem(source_kind_label)
             type_item.setFlags(QtCore.Qt.ItemFlag.ItemIsEnabled | QtCore.Qt.ItemFlag.ItemIsSelectable)
 
             folder_item = QtWidgets.QTableWidgetItem(str(item.get("source_origin_relpath") or ""))
             folder_item.setFlags(QtCore.Qt.ItemFlag.ItemIsEnabled | QtCore.Qt.ItemFlag.ItemIsSelectable)
 
-            status_item = QtWidgets.QTableWidgetItem(str(item.get("status") or "pending"))
+            status_item = QtWidgets.QTableWidgetItem(self._status_label(status))
             status_item.setFlags(QtCore.Qt.ItemFlag.ItemIsEnabled | QtCore.Qt.ItemFlag.ItemIsSelectable)
             status_item.setTextAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
 
             remove_button = QtWidgets.QToolButton(self)
             remove_button.setText("×")
-            remove_button.setToolTip(self.tr("Remove from series"))
+            remove_button.setToolTip(
+                self._lock_reason if self._queue_running else self.tr("Remove from series")
+            )
+            remove_button.setEnabled(not self._queue_running)
             remove_button.clicked.connect(lambda _=False, target=item_id: self.remove_requested.emit(target))
 
             self.setItem(row, 0, queue_item)
@@ -86,6 +176,7 @@ class _SeriesQueueTable(QtWidgets.QTableWidget):
             self.setItem(row, 3, folder_item)
             self.setItem(row, 4, status_item)
             self.setCellWidget(row, 5, remove_button)
+            self._apply_row_style(row, item_id=item_id, status=status)
         self._suppress_item_changed = False
 
     def ordered_item_ids(self) -> list[str]:
@@ -107,6 +198,9 @@ class _SeriesQueueTable(QtWidgets.QTableWidget):
         return str(item.data(QtCore.Qt.ItemDataRole.UserRole) or "")
 
     def dropEvent(self, event):  # type: ignore[override]
+        if self._queue_running:
+            event.ignore()
+            return
         super().dropEvent(event)
         self._renumber_rows()
         self.order_changed.emit(self.ordered_item_ids())
@@ -140,6 +234,9 @@ class _SeriesQueueTable(QtWidgets.QTableWidget):
     def _on_item_changed(self, item: QtWidgets.QTableWidgetItem) -> None:
         if self._suppress_item_changed or item is None or item.column() != 0:
             return
+        if self._queue_running:
+            item.setText(f"{item.row() + 1:02d}")
+            return
         item_id = str(item.data(QtCore.Qt.ItemDataRole.UserRole) or "")
         try:
             requested_index = max(1, int(item.text()))
@@ -148,7 +245,7 @@ class _SeriesQueueTable(QtWidgets.QTableWidget):
         self.queue_index_requested.emit(item_id, requested_index)
 
     def _on_item_double_clicked(self, item: QtWidgets.QTableWidgetItem) -> None:
-        if item is None:
+        if item is None or self._queue_running:
             return
         item_id = ""
         queue_item = self.item(item.row(), 0)
@@ -165,6 +262,7 @@ class _SeriesQuickSettings(QtWidgets.QWidget):
 
     def __init__(self, parent=None):
         super().__init__(parent)
+        self._lock_reason = ""
 
         layout = QtWidgets.QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -198,7 +296,7 @@ class _SeriesQuickSettings(QtWidgets.QWidget):
         form.addRow("", self.use_gpu_checkbox)
 
         self.series_settings_button = QtWidgets.QPushButton(self.tr("Series Settings…"))
-        self.auto_translate_button = QtWidgets.QPushButton(self.tr("대기열대로 자동번역"))
+        self.auto_translate_button = QtWidgets.QPushButton(self.tr("Translate in Queue Order"))
         self.auto_translate_button.setObjectName("seriesAutoTranslateButton")
 
         layout.addWidget(header)
@@ -219,6 +317,21 @@ class _SeriesQuickSettings(QtWidgets.QWidget):
         self.use_gpu_checkbox.stateChanged.connect(self.changed)
         self.series_settings_button.clicked.connect(self.open_series_settings_requested)
         self.auto_translate_button.clicked.connect(self.auto_translate_requested)
+
+    def set_locked(self, locked: bool, reason: str = "") -> None:
+        self._lock_reason = str(reason or "")
+        widgets = (
+            self.source_lang_combo,
+            self.target_lang_combo,
+            self.ocr_combo,
+            self.translator_combo,
+            self.workflow_combo,
+            self.use_gpu_checkbox,
+            self.series_settings_button,
+        )
+        for widget in widgets:
+            widget.setEnabled(not locked)
+            widget.setToolTip(self._lock_reason if locked else "")
 
     def set_options(self, *, languages, ocr_modes, translators, workflow_modes) -> None:
         self._populate_combo(self.source_lang_combo, languages)
@@ -351,6 +464,9 @@ class SeriesWorkspace(QtWidgets.QWidget):
 
     def __init__(self, parent=None):
         super().__init__(parent)
+        self._queue_running = False
+        self._can_back = False
+        self._can_forward = False
         layout = QtWidgets.QVBoxLayout(self)
         layout.setContentsMargins(12, 12, 12, 12)
         layout.setSpacing(10)
@@ -397,6 +513,12 @@ class SeriesWorkspace(QtWidgets.QWidget):
         action_row.addStretch(1)
         left_layout.addLayout(action_row)
 
+        self.queue_notice = QtWidgets.QLabel("")
+        self.queue_notice.setObjectName("seriesQueueNotice")
+        self.queue_notice.setWordWrap(True)
+        self.queue_notice.hide()
+        left_layout.addWidget(self.queue_notice)
+
         self.queue_table = _SeriesQueueTable(self)
         left_layout.addWidget(self.queue_table, 1)
         body.addWidget(left_panel, 1)
@@ -440,8 +562,28 @@ class SeriesWorkspace(QtWidgets.QWidget):
         return self.quick_settings.values()
 
     def set_navigation_state(self, *, can_back: bool, can_forward: bool) -> None:
-        self.back_button.setEnabled(can_back)
-        self.forward_button.setEnabled(can_forward)
+        self._can_back = bool(can_back)
+        self._can_forward = bool(can_forward)
+        self._apply_navigation_state()
+
+    def _queue_lock_reason(self) -> str:
+        return self.tr(
+            "Queue changes are locked while automatic translation is running.\n"
+            "The current running item stays fixed, and you can change the queue after the run finishes."
+        )
+
+    def _apply_navigation_state(self) -> None:
+        self.back_button.setEnabled(self._can_back and not self._queue_running)
+        self.forward_button.setEnabled(self._can_forward and not self._queue_running)
+        self.tree_button.setEnabled(not self._queue_running)
+        if self._queue_running:
+            self.back_button.setToolTip(self._queue_lock_reason())
+            self.forward_button.setToolTip(self._queue_lock_reason())
+            self.tree_button.setToolTip(self._queue_lock_reason())
+        else:
+            self.back_button.setToolTip(self.tr("Back"))
+            self.forward_button.setToolTip(self.tr("Forward"))
+            self.tree_button.setToolTip(self.tr("Tree Jump"))
 
     def set_series_state(
         self,
@@ -449,11 +591,42 @@ class SeriesWorkspace(QtWidgets.QWidget):
         series_file: str,
         items: list[dict[str, object]],
         queue_running: bool = False,
+        active_item_id: str | None = None,
     ) -> None:
+        self._queue_running = bool(queue_running)
         self.title_label.setText(series_file)
         self.scope_badge.setText(self.tr("Series Project"))
+        lock_reason = self._queue_lock_reason()
+        self.queue_table.set_interaction_state(
+            queue_running=queue_running,
+            active_item_id=active_item_id,
+            lock_reason=lock_reason,
+        )
         self.queue_table.set_series_items(items)
+        controls_locked = bool(queue_running)
+        self.open_button.setEnabled(bool(items) and not controls_locked)
+        self.add_files_button.setEnabled(not controls_locked)
+        self.add_folder_button.setEnabled(not controls_locked)
+        self.open_button.setToolTip(lock_reason if controls_locked else self.tr("Open the selected child project."))
+        self.add_files_button.setToolTip(lock_reason if controls_locked else self.tr("Add supported files to this series."))
+        self.add_folder_button.setToolTip(lock_reason if controls_locked else self.tr("Scan and add a folder to this series."))
+        self.quick_settings.set_locked(controls_locked, lock_reason)
         self.quick_settings.auto_translate_button.setEnabled(bool(items) and not queue_running)
+        self.quick_settings.auto_translate_button.setToolTip(
+            self.tr("Run automatic translation in queue order.")
+            if not queue_running
+            else self.tr("Automatic translation is already running.")
+        )
+        self.queue_notice.setVisible(controls_locked)
+        self.queue_notice.setText(
+            self.tr(
+                "Queue changes are locked while automatic translation is running.\n"
+                "The current running item stays fixed, and you can change the queue after the run finishes."
+            )
+            if controls_locked
+            else ""
+        )
+        self._apply_navigation_state()
 
     def prompt_tree_jump(self, items: list[dict[str, object]]) -> str:
         dialog = SeriesTreeJumpDialog(items, self)

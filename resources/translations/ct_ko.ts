@@ -1957,137 +1957,164 @@ This folder is separate from Auto-Recover snapshots.</source>
     <name>SeriesImportDialog</name>
     <message>
         <source>Create Series Project</source>
-        <translation type="unfinished"></translation>
+        <translation>시리즈 프로젝트 만들기</translation>
     </message>
     <message>
         <source>Select the files to include in the new `.seriesctpr`, then reorder the queue by drag-and-drop or by editing the queue number.</source>
-        <translation type="unfinished"></translation>
+        <translation>새 `.seriesctpr`에 포함할 파일을 고른 뒤, 드래그 앤 드롭 또는 대기열 번호 수정으로 순서를 정렬하세요.</translation>
     </message>
     <message>
         <source>Select All</source>
-        <translation type="unfinished">글꼴</translation>
+        <translation>전체 선택</translation>
     </message>
     <message>
         <source>Clear All</source>
-        <translation type="unfinished"></translation>
+        <translation>전체 해제</translation>
     </message>
     <message>
         <source>Cancel</source>
-        <translation type="unfinished">취소</translation>
+        <translation>취소</translation>
     </message>
     <message>
         <source>Create Series</source>
-        <translation type="unfinished"></translation>
+        <translation>시리즈 만들기</translation>
     </message>
     <message>
         <source>{selected} / {total} items selected</source>
-        <translation type="unfinished"></translation>
+        <translation>{total}개 중 {selected}개 선택됨</translation>
     </message>
     <message>
         <source>Select at least one file to include in the series.</source>
-        <translation type="unfinished"></translation>
+        <translation>시리즈에 포함할 파일을 하나 이상 선택하세요.</translation>
     </message>
 </context>
 <context>
     <name>SeriesPage</name>
     <message>
         <source>Series Queue</source>
-        <translation type="unfinished"></translation>
+        <translation>시리즈 대기열</translation>
     </message>
     <message>
         <source>Configure the default behavior for `.seriesctpr` queue execution.
 These values are copied into new series projects and can be adjusted per series.</source>
-        <translation type="unfinished"></translation>
+        <translation>`.seriesctpr` 대기열 실행의 기본 동작을 설정합니다.
+이 값은 새 시리즈 프로젝트에 복사되며, 시리즈별로 다시 조정할 수 있습니다.</translation>
     </message>
     <message>
         <source>Stop</source>
-        <translation type="unfinished"></translation>
+        <translation>중지</translation>
     </message>
     <message>
         <source>Skip</source>
-        <translation type="unfinished">건너뛰기</translation>
+        <translation>건너뛰기</translation>
     </message>
     <message>
         <source>Retry</source>
-        <translation type="unfinished">재시도</translation>
+        <translation>재시도</translation>
     </message>
     <message>
         <source>Open failed child project automatically</source>
-        <translation type="unfinished"></translation>
+        <translation>실패한 세부 프로젝트 자동 열기</translation>
     </message>
     <message>
         <source>Resume from the first incomplete queue item</source>
-        <translation type="unfinished"></translation>
+        <translation>첫 미완료 대기열 항목부터 다시 시작</translation>
     </message>
     <message>
         <source>Return to the series board after a child project finishes</source>
-        <translation type="unfinished"></translation>
+        <translation>세부 프로젝트 완료 후 시리즈 보드로 돌아가기</translation>
     </message>
     <message>
         <source>Failure policy:</source>
-        <translation type="unfinished"></translation>
+        <translation>실패 처리 정책:</translation>
     </message>
     <message>
         <source>Retry count:</source>
-        <translation type="unfinished"></translation>
+        <translation>재시도 횟수:</translation>
     </message>
     <message>
         <source>Retry delay (sec):</source>
-        <translation type="unfinished"></translation>
+        <translation>재시도 대기 시간(초):</translation>
     </message>
 </context>
 <context>
     <name>SeriesTreeJumpDialog</name>
     <message>
         <source>Tree Jump</source>
-        <translation type="unfinished"></translation>
+        <translation>트리 이동</translation>
     </message>
     <message>
         <source>Select a series item from the original folder structure or choose the board view.</source>
-        <translation type="unfinished"></translation>
+        <translation>원래 폴더 구조에서 시리즈 항목을 선택하거나 시리즈 보드로 이동하세요.</translation>
     </message>
     <message>
         <source>Location</source>
-        <translation type="unfinished">위치</translation>
+        <translation>위치</translation>
     </message>
     <message>
         <source>Series Board</source>
-        <translation type="unfinished"></translation>
+        <translation>시리즈 보드</translation>
     </message>
 </context>
 <context>
     <name>SeriesWorkspace</name>
     <message>
         <source>Back</source>
-        <translation type="unfinished"></translation>
+        <translation>뒤로</translation>
     </message>
     <message>
         <source>Forward</source>
-        <translation type="unfinished"></translation>
+        <translation>앞으로</translation>
     </message>
     <message>
         <source>Tree</source>
-        <translation type="unfinished"></translation>
+        <translation>트리</translation>
     </message>
     <message>
         <source>Tree Jump</source>
-        <translation type="unfinished"></translation>
+        <translation>트리 이동</translation>
     </message>
     <message>
         <source>Series Project</source>
-        <translation type="unfinished"></translation>
+        <translation>시리즈 프로젝트</translation>
     </message>
     <message>
         <source>Open Selected</source>
-        <translation type="unfinished"></translation>
+        <translation>선택한 프로젝트 열기</translation>
     </message>
     <message>
         <source>Add Files</source>
-        <translation type="unfinished"></translation>
+        <translation>파일 추가</translation>
     </message>
     <message>
         <source>Add Folder</source>
-        <translation type="unfinished"></translation>
+        <translation>폴더 추가</translation>
+    </message>
+    <message>
+        <source>Queue changes are locked while automatic translation is running.
+The current running item stays fixed, and you can change the queue after the run finishes.</source>
+        <translation>자동 번역 실행 중에는 대기열 변경이 잠깁니다.
+현재 실행 중 항목은 고정되며, 변경은 실행 종료 후 가능합니다.</translation>
+    </message>
+    <message>
+        <source>Open the selected child project.</source>
+        <translation>선택한 세부 프로젝트를 엽니다.</translation>
+    </message>
+    <message>
+        <source>Add supported files to this series.</source>
+        <translation>지원되는 파일을 이 시리즈에 추가합니다.</translation>
+    </message>
+    <message>
+        <source>Scan and add a folder to this series.</source>
+        <translation>폴더를 스캔해 이 시리즈에 추가합니다.</translation>
+    </message>
+    <message>
+        <source>Run automatic translation in queue order.</source>
+        <translation>대기열 순서대로 자동 번역을 시작합니다.</translation>
+    </message>
+    <message>
+        <source>Automatic translation is already running.</source>
+        <translation>자동 번역이 이미 실행 중입니다.</translation>
     </message>
 </context>
 <context>
@@ -2452,7 +2479,7 @@ Restart now?</source>
     </message>
     <message>
         <source>New Series Project</source>
-        <translation type="unfinished"></translation>
+        <translation>새 시리즈 프로젝트</translation>
     </message>
     <message>
         <source>Open Files</source>
@@ -3223,97 +3250,125 @@ It may have already been moved, renamed, or deleted.
     <name>_SeriesImportTable</name>
     <message>
         <source>Use</source>
-        <translation type="unfinished"></translation>
+        <translation>포함</translation>
     </message>
     <message>
         <source>Queue</source>
-        <translation type="unfinished"></translation>
+        <translation>대기열</translation>
     </message>
     <message>
         <source>Name</source>
-        <translation type="unfinished">이름</translation>
+        <translation>이름</translation>
     </message>
     <message>
         <source>Type</source>
-        <translation type="unfinished"></translation>
+        <translation>유형</translation>
     </message>
     <message>
         <source>Folder</source>
-        <translation type="unfinished"></translation>
+        <translation>폴더</translation>
     </message>
 </context>
 <context>
     <name>_SeriesQueueTable</name>
     <message>
         <source>No.</source>
-        <translation type="unfinished"></translation>
+        <translation>순번</translation>
     </message>
     <message>
         <source>Project</source>
-        <translation type="unfinished">프로젝트</translation>
+        <translation>프로젝트</translation>
     </message>
     <message>
         <source>Type</source>
-        <translation type="unfinished"></translation>
+        <translation>유형</translation>
     </message>
     <message>
         <source>Folder</source>
-        <translation type="unfinished"></translation>
+        <translation>폴더</translation>
     </message>
     <message>
         <source>Status</source>
-        <translation type="unfinished">상태</translation>
+        <translation>상태</translation>
     </message>
     <message>
-        <source>Source</source>
-        <translation type="unfinished">소스</translation>
+        <source>Pending</source>
+        <translation>대기 중</translation>
+    </message>
+    <message>
+        <source>Running</source>
+        <translation>실행 중</translation>
+    </message>
+    <message>
+        <source>Done</source>
+        <translation>완료</translation>
+    </message>
+    <message>
+        <source>Failed</source>
+        <translation>실패</translation>
+    </message>
+    <message>
+        <source>Skipped</source>
+        <translation>건너뜀</translation>
+    </message>
+    <message>
+        <source>Currently translating this project in the queue.</source>
+        <translation>현재 대기열에서 이 프로젝트를 자동 번역 중입니다.</translation>
+    </message>
+    <message>
+        <source>Project File</source>
+        <translation>프로젝트 파일</translation>
+    </message>
+    <message>
+        <source>Source File</source>
+        <translation>원본 파일</translation>
     </message>
     <message>
         <source>Remove from series</source>
-        <translation type="unfinished"></translation>
+        <translation>시리즈에서 제거</translation>
     </message>
 </context>
 <context>
     <name>_SeriesQuickSettings</name>
     <message>
         <source>Global Queue Settings</source>
-        <translation type="unfinished"></translation>
+        <translation>대기열 전역 설정</translation>
     </message>
     <message>
         <source>These controls apply to queue execution. Open a child project to edit detailed page-level settings.</source>
-        <translation type="unfinished"></translation>
+        <translation>이 설정은 대기열 자동 실행 전체에 적용됩니다. 세부 페이지 단위 설정은 세부 프로젝트를 열어 조정하세요.</translation>
     </message>
     <message>
         <source>Use GPU</source>
-        <translation type="unfinished">GPU 사용</translation>
+        <translation>GPU 사용</translation>
     </message>
     <message>
         <source>Source language:</source>
-        <translation type="unfinished"></translation>
+        <translation>원본 언어:</translation>
     </message>
     <message>
         <source>Target language:</source>
-        <translation type="unfinished"></translation>
+        <translation>번역 언어:</translation>
     </message>
     <message>
         <source>OCR:</source>
-        <translation type="unfinished"></translation>
+        <translation>OCR:</translation>
     </message>
     <message>
         <source>Translator:</source>
-        <translation type="unfinished"></translation>
+        <translation>번역기:</translation>
     </message>
     <message>
         <source>Workflow mode:</source>
-        <translation type="unfinished"></translation>
+        <translation>워크플로 모드:</translation>
     </message>
     <message>
         <source>Series Settings…</source>
-        <translation type="unfinished"></translation>
+        <translation>시리즈 설정…</translation>
     </message>
     <message>
-        <source>대기열대로 자동번역</source>
-        <translation type="unfinished"></translation>
+        <source>Translate in Queue Order</source>
+        <translation>대기열 순서대로 자동 번역</translation>
     </message>
 </context>
 <context>
@@ -3452,72 +3507,81 @@ It may have been moved, renamed, or deleted.
     </message>
     <message>
         <source>Child Project - {child} · {series}[*]</source>
-        <translation type="unfinished"></translation>
+        <translation>세부 프로젝트 - {child} · {series}[*]</translation>
     </message>
     <message>
         <source>Series Project - {series}[*]</source>
-        <translation type="unfinished"></translation>
+        <translation>시리즈 프로젝트 - {series}[*]</translation>
+    </message>
+    <message>
+        <source>Queue changes are locked while automatic translation is running.</source>
+        <translation>자동 번역 실행 중에는 대기열 변경이 잠깁니다.</translation>
     </message>
     <message>
         <source>The selected series project file could not be found.
 It may have been moved, renamed, or deleted.
 
 {path}</source>
-        <translation type="unfinished"></translation>
+        <translation>선택한 시리즈 프로젝트 파일을 찾을 수 없습니다.
+이동되었거나 이름이 바뀌었거나 삭제되었을 수 있습니다.
+
+{path}</translation>
     </message>
     <message>
         <source>Select Series Root Folder</source>
-        <translation type="unfinished"></translation>
+        <translation>시리즈 루트 폴더 선택</translation>
     </message>
     <message>
         <source>Create Series Project</source>
-        <translation type="unfinished"></translation>
+        <translation>시리즈 프로젝트 만들기</translation>
     </message>
     <message>
         <source>No supported files were found in the selected folder.</source>
-        <translation type="unfinished"></translation>
+        <translation>선택한 폴더에서 지원되는 파일을 찾지 못했습니다.</translation>
     </message>
     <message>
         <source>Series Project Files (*.seriesctpr);;All Files (*)</source>
-        <translation type="unfinished"></translation>
+        <translation>시리즈 프로젝트 파일 (*.seriesctpr);;모든 파일 (*)</translation>
     </message>
     <message>
         <source>Remove From Series</source>
-        <translation type="unfinished"></translation>
+        <translation>시리즈에서 제거</translation>
     </message>
     <message>
         <source>Remove &apos;{name}&apos; from this series project?</source>
-        <translation type="unfinished"></translation>
+        <translation>&apos;{name}&apos; 항목을 이 시리즈 프로젝트에서 제거할까요?</translation>
     </message>
     <message>
         <source>Add Files To Series</source>
-        <translation type="unfinished"></translation>
+        <translation>시리즈에 파일 추가</translation>
     </message>
     <message>
         <source>Supported Files ({exts});;All Files (*)</source>
-        <translation type="unfinished">지원되는 파일({exts});;모든 파일(*)</translation>
+        <translation>지원되는 파일 ({exts});;모든 파일 (*)</translation>
     </message>
     <message>
         <source>Add Folder To Series</source>
-        <translation type="unfinished"></translation>
+        <translation>시리즈에 폴더 추가</translation>
     </message>
     <message>
         <source>Series Settings</source>
-        <translation type="unfinished"></translation>
+        <translation>시리즈 설정</translation>
     </message>
     <message>
         <source>Save Series Project</source>
-        <translation type="unfinished"></translation>
+        <translation>시리즈 프로젝트 저장</translation>
     </message>
     <message>
         <source>Failed to synchronize the active child project before saving.
 
 {error}</source>
-        <translation type="unfinished"></translation>
+        <translation>저장 전에 현재 세부 프로젝트를 시리즈에 동기화하지 못했습니다.
+
+{error}</translation>
     </message>
     <message>
         <source>There are no queue items left to run.</source>
-        <translation type="unfinished"></translation>
+        <translation>실행할 대기열 항목이 남아 있지 않습니다.</translation>
     </message>
 </context>
 <context>
