@@ -198,6 +198,7 @@ class SeriesController(QtCore.QObject):
     def _apply_workspace_state(self) -> None:
         if not self.series_file:
             return
+        queue_runtime = self.series_manifest.get("series_queue_runtime") or {}
         self.main.series_workspace.configure_options(**self._series_workspace_options())
         self.main.series_workspace.set_global_settings(
             normalize_series_global_settings(self.series_manifest.get("global_settings"))
@@ -206,8 +207,23 @@ class SeriesController(QtCore.QObject):
             series_file=self._current_series_display_name(),
             items=list(self.series_items),
             queue_running=self._queue_active,
+            active_item_id=str(queue_runtime.get("active_item_id") or ""),
         )
         self._refresh_workspace_navigation()
+
+    def _queue_change_locked(self) -> bool:
+        return bool(self._queue_active and self.series_file)
+
+    def _show_queue_locked_message(self) -> None:
+        Messages.show_info(
+            self.main,
+            self.main.tr(
+                "Queue changes are locked while automatic translation is running."
+            ),
+            duration=5,
+            closable=True,
+            source="series",
+        )
 
     def _clear_active_child_materialization(self) -> None:
         self.active_child_item_id = None
@@ -432,6 +448,9 @@ class SeriesController(QtCore.QObject):
         return load_state_from_proj_file(self.main, child_project_path)
 
     def request_open_item(self, item_id: str) -> None:
+        if self._queue_change_locked():
+            self._show_queue_locked_message()
+            return
         self.main._run_guarded_project_transition(
             lambda: self._open_item(item_id, push_history=True)
         )
@@ -493,6 +512,9 @@ class SeriesController(QtCore.QObject):
         )
 
     def request_show_board(self) -> None:
+        if self._queue_change_locked():
+            self._show_queue_locked_message()
+            return
         self.main._run_guarded_project_transition(
             lambda: self._show_board(push_history=True)
         )
@@ -512,11 +534,17 @@ class SeriesController(QtCore.QObject):
         self._set_series_window_title()
 
     def request_back(self) -> None:
+        if self._queue_change_locked():
+            self._show_queue_locked_message()
+            return
         if not self.history_back:
             return
         self.main._run_guarded_project_transition(self._navigate_back)
 
     def request_forward(self) -> None:
+        if self._queue_change_locked():
+            self._show_queue_locked_message()
+            return
         if not self.history_forward:
             return
         self.main._run_guarded_project_transition(self._navigate_forward)
@@ -540,6 +568,9 @@ class SeriesController(QtCore.QObject):
         self._restore_view_state(target)
 
     def request_tree_jump(self) -> None:
+        if self._queue_change_locked():
+            self._show_queue_locked_message()
+            return
         if not self.series_file:
             return
         target = self.main.series_workspace.prompt_tree_jump(self.series_items)
@@ -562,6 +593,9 @@ class SeriesController(QtCore.QObject):
         self._show_board(push_history=False)
 
     def request_remove_item(self, item_id: str) -> None:
+        if self._queue_change_locked():
+            self._show_queue_locked_message()
+            return
         if not self.series_file:
             return
         item = self._find_item(item_id)
@@ -583,6 +617,9 @@ class SeriesController(QtCore.QObject):
         self._apply_workspace_state()
 
     def request_reorder(self, ordered_ids: list[str]) -> None:
+        if self._queue_change_locked():
+            self._show_queue_locked_message()
+            return
         if not self.series_file:
             return
         self.series_items = update_series_items_order(self.series_file, ordered_ids)
@@ -590,6 +627,9 @@ class SeriesController(QtCore.QObject):
         self._apply_workspace_state()
 
     def request_queue_index_change(self, item_id: str, requested_index: int) -> None:
+        if self._queue_change_locked():
+            self._show_queue_locked_message()
+            return
         ordered_ids = self.main.series_workspace.queue_table.ordered_item_ids()
         if item_id not in ordered_ids:
             return
@@ -599,6 +639,9 @@ class SeriesController(QtCore.QObject):
         self.request_reorder(ordered_ids)
 
     def request_add_files(self) -> None:
+        if self._queue_change_locked():
+            self._show_queue_locked_message()
+            return
         if not self.series_file:
             return
         exts = " ".join(
@@ -636,6 +679,9 @@ class SeriesController(QtCore.QObject):
         self._append_paths_to_series(paths)
 
     def request_add_folder(self) -> None:
+        if self._queue_change_locked():
+            self._show_queue_locked_message()
+            return
         if not self.series_file:
             return
         root_dir = QtWidgets.QFileDialog.getExistingDirectory(
@@ -690,6 +736,9 @@ class SeriesController(QtCore.QObject):
         )
 
     def request_global_settings_change(self, values: dict[str, object]) -> None:
+        if self._queue_change_locked():
+            self._show_queue_locked_message()
+            return
         if not self.series_file:
             return
         normalized = normalize_series_global_settings(values)
@@ -701,6 +750,9 @@ class SeriesController(QtCore.QObject):
         self._apply_workspace_state()
 
     def edit_series_settings_dialog(self) -> None:
+        if self._queue_change_locked():
+            self._show_queue_locked_message()
+            return
         if not self.series_file:
             return
         dialog = QtWidgets.QDialog(self.main)
