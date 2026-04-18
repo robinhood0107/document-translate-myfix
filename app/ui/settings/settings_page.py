@@ -29,6 +29,7 @@ from .settings_ui import SettingsPageUI
 from .gemma_local_server_page import GemmaLocalServerPage
 from .hunyuan_ocr_page import HunyuanOCRPage
 from .mangalmm_ocr_page import MangaLMMOCRPage
+from app.ui.messages import Messages
 from app.update_checker import UpdateChecker
 from app.shortcuts import get_default_shortcuts
 from modules.utils.device import is_gpu_available
@@ -37,6 +38,7 @@ from app.projects.series_state_v1 import normalize_series_settings
 from modules.utils.notification_sound import (
     SYSTEM_SOUND_MODE,
     play_completion_sound,
+    send_test_ntfy_notification,
 )
 from modules.utils.inpainting_runtime import (
     inpainter_default_settings,
@@ -150,6 +152,7 @@ class SettingsPage(QtWidgets.QWidget):
         self.ui.notifications_page.changed.connect(self._save_settings_if_not_loading)
         self.ui.series_page.changed.connect(self._save_settings_if_not_loading)
         self.ui.notifications_page.test_requested.connect(self.play_test_completion_sound)
+        self.ui.notifications_page.test_ntfy_requested.connect(self.play_test_ntfy_notification)
         self._connect_live_save_signals()
 
     def _save_settings_if_not_loading(self, *_args):
@@ -1137,6 +1140,14 @@ class SettingsPage(QtWidgets.QWidget):
             enable_completion_sound=settings.value("enable_completion_sound", True, type=bool),
             completion_sound_mode=settings.value("completion_sound_mode", SYSTEM_SOUND_MODE, type=str),
             completion_sound_file=settings.value("completion_sound_file", "", type=str),
+            enable_ntfy_notifications=settings.value("enable_ntfy_notifications", False, type=bool),
+            ntfy_server_url=settings.value("ntfy_server_url", "", type=str),
+            ntfy_topic=settings.value("ntfy_topic", "", type=str),
+            ntfy_access_token=settings.value("ntfy_access_token", "", type=str),
+            ntfy_send_success=settings.value("ntfy_send_success", True, type=bool),
+            ntfy_send_failure=settings.value("ntfy_send_failure", True, type=bool),
+            ntfy_send_cancelled=settings.value("ntfy_send_cancelled", True, type=bool),
+            ntfy_timeout_sec=settings.value("ntfy_timeout_sec", 10, type=int),
         )
         settings.endGroup()
 
@@ -1188,6 +1199,37 @@ class SettingsPage(QtWidgets.QWidget):
         play_completion_sound(
             str(settings.get("completion_sound_mode") or SYSTEM_SOUND_MODE),
             str(settings.get("completion_sound_file") or ""),
+        )
+
+    def play_test_ntfy_notification(self) -> None:
+        settings = self.get_notification_settings()
+        if not str(settings.get("ntfy_topic") or "").strip():
+            Messages.show_warning(
+                self,
+                self.tr("Enter an ntfy topic before sending a test notification."),
+                duration=5,
+                closable=True,
+                source="settings",
+            )
+            return
+
+        sent = send_test_ntfy_notification(settings)
+        if sent:
+            Messages.show_success(
+                self,
+                self.tr("Test ntfy notification sent."),
+                duration=5,
+                closable=True,
+                source="settings",
+            )
+            return
+
+        Messages.show_warning(
+            self,
+            self.tr("Unable to send the ntfy test notification right now. Check the settings and try again."),
+            duration=5,
+            closable=True,
+            source="settings",
         )
 
     def _show_message_box(self, icon: QtWidgets.QMessageBox.Icon, title: str, text: str):

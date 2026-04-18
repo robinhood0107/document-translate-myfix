@@ -457,7 +457,8 @@ Cancel the current run or wait for it to finish first.</source>
     </message>
     <message>
         <source>OCR</source>
-        <translation>OCR</translation>
+        <translation>
+        OCR</translation>
     </message>
     <message>
         <source>API Key</source>
@@ -772,7 +773,8 @@ Comic Translate가 필요할 때 기본 제공 Docker 런타임을 시작하게 
     </message>
     <message>
         <source>Server URL</source>
-        <translation>서버 URL</translation>
+        <translation>
+        서버 URL</translation>
     </message>
     <message>
         <source>Hunyuan OCR Tuning</source>
@@ -1319,7 +1321,8 @@ Please check your internet connection.</source>
     </message>
     <message>
         <source>Translator</source>
-        <translation>번역기</translation>
+        <translation>
+        번역기</translation>
     </message>
     <message>
         <source>Gemma local server runtime setup failed</source>
@@ -1388,7 +1391,8 @@ PSD 기능을 사용하려면 설치하세요.</translation>
     </message>
     <message>
         <source>Images</source>
-        <translation>이미지</translation>
+        <translation>
+        이미지</translation>
     </message>
     <message>
         <source>Document</source>
@@ -1460,26 +1464,266 @@ PSD 기능을 사용하려면 설치하세요.</translation>
     </message>
 </context>
 <context>
+    <name>NotificationSound</name>
+    <message>
+        <source>Automatic translation</source>
+        <translation>
+        자동 번역</translation>
+    </message>
+    <message>
+        <source>Current page automatic translation</source>
+        <translation>
+        현재 페이지 자동 번역</translation>
+    </message>
+    <message>
+        <source>Retry failed pages</source>
+        <translation>
+        실패한 페이지 재시도</translation>
+    </message>
+    <message>
+        <source>Series queue automatic translation</source>
+        <translation>
+        시리즈 대기열 자동 번역</translation>
+    </message>
+    <message>
+        <source>Manual task</source>
+        <translation>
+        수동 작업</translation>
+    </message>
+    <message>
+        <source>Notification test</source>
+        <translation>
+        알림 테스트</translation>
+    </message>
+    <message>
+        <source>Automatic translation completed</source>
+        <translation>
+        자동 번역 완료</translation>
+    </message>
+    <message>
+        <source>Automatic translation failed</source>
+        <translation>
+        자동 번역 실패</translation>
+    </message>
+    <message>
+        <source>Automatic translation cancelled</source>
+        <translation>
+        자동 번역 취소</translation>
+    </message>
+    <message>
+        <source>Automatic translation update</source>
+        <translation>
+        자동 번역 업데이트</translation>
+    </message>
+    <message>
+        <source>Completed</source>
+        <translation>
+        완료</translation>
+    </message>
+    <message>
+        <source>Failed</source>
+        <translation>
+        실패</translation>
+    </message>
+    <message>
+        <source>Cancelled</source>
+        <translation>
+        취소됨</translation>
+    </message>
+    <message>
+        <source>Test</source>
+        <translation>
+        테스트</translation>
+    </message>
+    <message>
+        <source>Updated</source>
+        <translation>
+        업데이트됨</translation>
+    </message>
+    <message>
+        <source>Stage-Batched Pipeline (Recommended)</source>
+        <translation>
+        Stage-Batched Pipeline (권장)</translation>
+    </message>
+    <message>
+        <source>Legacy Page Pipeline (Legacy)</source>
+        <translation>
+        Legacy Page Pipeline (레거시)</translation>
+    </message>
+    <message>
+        <source>Optimal (HunyuanOCR / PaddleOCR VL)</source>
+        <translation>
+        최적값 (HunyuanOCR / PaddleOCR VL)</translation>
+    </message>
+    <message>
+        <source>Comic Translate</source>
+        <translation>
+        Comic Translate</translation>
+    </message>
+    <message>
+        <source>Status</source>
+        <translation>
+        상태</translation>
+    </message>
+    <message>
+        <source>Run</source>
+        <translation>
+        실행</translation>
+    </message>
+    <message>
+        <source>Images</source>
+        <translation>이미지</translation>
+    </message>
+    <message>
+        <source>Workflow</source>
+        <translation>
+        워크플로</translation>
+    </message>
+    <message>
+        <source>OCR</source>
+        <translation>OCR</translation>
+    </message>
+    <message>
+        <source>Translator</source>
+        <translation>번역기</translation>
+    </message>
+    <message>
+        <source>Source language</source>
+        <translation>
+        원본 언어</translation>
+    </message>
+    <message>
+        <source>Target language</source>
+        <translation>
+        대상 언어</translation>
+    </message>
+    <message>
+        <source>Output</source>
+        <translation>
+        출력</translation>
+    </message>
+    <message>
+        <source>Summary</source>
+        <translation>
+        요약</translation>
+    </message>
+    <message>
+        <source>Detail</source>
+        <translation>
+        세부 내용</translation>
+    </message>
+    <message>
+        <source>Time</source>
+        <translation>
+        시간</translation>
+    </message>
+    <message>
+        <source>This is a test notification from Comic Translate.</source>
+        <translation>
+        Comic Translate에서 보낸 테스트 알림입니다.</translation>
+    </message>
+</context>
+<context>
     <name>NotificationsPage</name>
     <message>
-        <source>Automatic Completion</source>
-        <translation>자동 완료 알림</translation>
+        <source>Notifications</source>
+        <translation>
+        알림</translation>
+    </message>
+    <message>
+        <source>Configure completion sounds and optional ntfy push notifications for automatic runs.</source>
+        <translation>
+        자동 실행에 대한 완료 알림음과 선택적 ntfy 푸시 알림을 설정합니다.</translation>
+    </message>
+    <message>
+        <source>Automatic Completion Sound</source>
+        <translation>
+        자동 완료 알림음</translation>
     </message>
     <message>
         <source>Play a sound when automatic processing finishes successfully. Custom files must be placed in the repository music folder.</source>
         <translation>자동 처리가 성공적으로 끝나면 소리를 재생합니다. 사용자 지정 파일은 저장소의 music 폴더에 넣어야 합니다.</translation>
     </message>
     <message>
-        <source>Enable Completion Sound</source>
-        <translation>완료 알림음 사용</translation>
+        <source>Enable completion sound</source>
+        <translation>
+        완료 알림음 사용</translation>
     </message>
     <message>
-        <source>Test Sound</source>
-        <translation>소리 테스트</translation>
+        <source>Test sound</source>
+        <translation>
+        알림음 테스트</translation>
     </message>
     <message>
-        <source>Music Folder: {path}</source>
-        <translation>music 폴더: {path}</translation>
+        <source>Music folder: {path}</source>
+        <translation>
+        음악 폴더: {path}</translation>
+    </message>
+    <message>
+        <source>ntfy Push Notifications</source>
+        <translation>
+        ntfy 푸시 알림</translation>
+    </message>
+    <message>
+        <source>Send text-only notifications through ntfy when automatic processing finishes, fails, or is cancelled.
+The app keeps messages below ntfy&apos;s default 4 KiB text limit and never sends attachments.</source>
+        <translation>
+        자동 처리가 완료되거나 실패하거나 취소될 때 ntfy로 텍스트 전용 알림을 보냅니다.
+앱은 메시지를 ntfy 기본 4 KiB 텍스트 제한 이하로 유지하며 첨부파일은 보내지 않습니다.</translation>
+    </message>
+    <message>
+        <source>Enable ntfy notifications</source>
+        <translation>
+        ntfy 알림 사용</translation>
+    </message>
+    <message>
+        <source>Server URL</source>
+        <translation>서버 URL</translation>
+    </message>
+    <message>
+        <source>Topic</source>
+        <translation>
+        토픽</translation>
+    </message>
+    <message>
+        <source>comic-translate</source>
+        <translation>
+        comic-translate</translation>
+    </message>
+    <message>
+        <source>Access token (optional)</source>
+        <translation>
+        액세스 토큰(선택)</translation>
+    </message>
+    <message>
+        <source>Bearer token</source>
+        <translation>
+        Bearer 토큰</translation>
+    </message>
+    <message>
+        <source>Timeout (sec)</source>
+        <translation>
+        시간 제한(초)</translation>
+    </message>
+    <message>
+        <source>Send test notification</source>
+        <translation>
+        테스트 알림 보내기</translation>
+    </message>
+    <message>
+        <source>Notify on completion</source>
+        <translation>
+        완료 시 알림</translation>
+    </message>
+    <message>
+        <source>Notify on failure</source>
+        <translation>
+        실패 시 알림</translation>
+    </message>
+    <message>
+        <source>Notify on cancellation</source>
+        <translation>
+        취소 시 알림</translation>
     </message>
     <message>
         <source>System sound</source>
@@ -2245,6 +2489,21 @@ Restart now?</source>
     <message>
         <source>Checking...</source>
         <translation>확인 중...</translation>
+    </message>
+    <message>
+        <source>Enter an ntfy topic before sending a test notification.</source>
+        <translation>
+        테스트 알림을 보내기 전에 ntfy 토픽을 입력하세요.</translation>
+    </message>
+    <message>
+        <source>Test ntfy notification sent.</source>
+        <translation>
+        테스트 ntfy 알림을 전송했습니다.</translation>
+    </message>
+    <message>
+        <source>Unable to send the ntfy test notification right now. Check the settings and try again.</source>
+        <translation>
+        지금은 ntfy 테스트 알림을 보낼 수 없습니다. 설정을 확인한 뒤 다시 시도하세요.</translation>
     </message>
     <message>
         <source>Check for Updates</source>
