@@ -2,25 +2,27 @@
 
 ## 목적
 
-- `develop`에는 benchmark raw 결과 대신, 사용자 제안과 설계/문제 해결 과정을 재사용 가능한 문서로 남긴다.
-- full benchmark docs/assets/history는 `benchmarking/lab`에 남긴다.
+- `develop`에는 benchmark raw 결과 대신, 사용자 제안과 제품 승격에 필요한 요약 문서만 남긴다.
+- canonical benchmark docs와 full evidence는 `benchmarking/lab`에 둔다.
 - 아이디어 착안자: 사용자
 
 ## 현재 문서 묶음
 
 ### 1. Workflow Split Runtime
 
-- 전체 워크플로우를 단계형으로 분리해 Docker/VRAM 병목을 줄일 수 있는지 검증하는 작업
-- 제품 승격 문서와 진행 체크리스트 포함
-- 현재 설계 문서: workflow mode 저장 구조, 배치 오케스트레이터 분기, runtime lifecycle 일반화 설계
+- 전체 워크플로우를 단계형으로 분리해 시간 이득을 확보한 작업
+- 현재 제품 승격 대상:
+  - `Stage-Batched Pipeline (Recommended)`
+  - `Legacy Page Pipeline (Legacy)`
+- 마지막 기술 blocker였던 CTD 마스킹 경로 연결까지 포함해 정리
 
 ### 2. Hybrid OCR Selector
 
-- Requirement 1 성공 후 MangaLMM과 PaddleOCR VL의 페이지별 전환 기준을 만드는 작업
-- 사용자 검수 기반 selector rule 설계 문서 포함
+- `MangaLMM` hybrid selector 실험 기록
+- 현재 상태: `failed_closed`
 
 ## 문서 원칙
 
-1. 내부 추론 원문 대신 결정 로그를 남긴다.
-2. 사용자 제안, 문제 정의, 측정 설계, 구현 방향, 효과, 남은 리스크를 빠짐없이 적는다.
-3. raw benchmark 결과는 링크만 하거나 별도 branch 존재를 설명하고, `develop`에는 직접 들고 오지 않는다.
+1. benchmark canonical 문서는 `benchmarking/lab` 기준으로 본다.
+2. `develop`에는 제품 코드와 직접 연결되는 요약만 남긴다.
+3. raw benchmark 결과, chart asset, review pack은 `develop`에 들고 오지 않는다.

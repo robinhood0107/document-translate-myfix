@@ -1300,6 +1300,18 @@ Please check your internet connection.</source>
         <translation>{service} 런타임 준비 실패</translation>
     </message>
     <message>
+        <source>Stage-Batched Pipeline currently supports only single-runtime OCR routes in product mode.</source>
+        <translation>Stage-Batched Pipeline은 현재 제품 모드에서 단일 런타임 OCR 경로만 지원합니다.</translation>
+    </message>
+    <message>
+        <source>Stage-Batched Pipeline is not supported for the current OCR/translator/language combination: {reason}</source>
+        <translation>현재 OCR/번역기/언어 조합에서는 Stage-Batched Pipeline을 지원하지 않습니다: {reason}</translation>
+    </message>
+    <message>
+        <source>Unsupported workflow mode combination</source>
+        <translation>지원되지 않는 워크플로우 모드 조합</translation>
+    </message>
+    <message>
         <source>Missing translator</source>
         <translation>번역기 누락</translation>
     </message>
@@ -2124,6 +2136,18 @@ Restart now?</source>
         <translation>MangaLMM</translation>
     </message>
     <message>
+        <source>Stage-Batched Pipeline (Recommended)</source>
+        <translation>Stage-Batched Pipeline (권장)</translation>
+    </message>
+    <message>
+        <source>Legacy Page Pipeline (Legacy)</source>
+        <translation>Legacy Page Pipeline (레거시)</translation>
+    </message>
+    <message>
+        <source>RT-DETR-v2 + CTD Line Protect + Source LaMa</source>
+        <translation>RT-DETR-v2 + CTD Line Protect + Source LaMa</translation>
+    </message>
+    <message>
         <source>RT-DETR-v2 + Legacy BBox Rescue + Source LaMa</source>
         <translation>RT-DETR-v2 + Legacy BBox Rescue + Source LaMa</translation>
     </message>
@@ -2440,6 +2464,18 @@ Adjust the size used by add, erase, exclude, and restore brushes.</source>
         <translation>PaddleOCR VL</translation>
     </message>
     <message>
+        <source>Workflow Mode</source>
+        <translation>워크플로우 모드</translation>
+    </message>
+    <message>
+        <source>Automatic runtime is fixed to RT-DETR-v2 detection, CTD line-protect masking, and source block-wise LaMa cleaning.</source>
+        <translation>자동 런타임은 RT-DETR-v2 감지, CTD line-protect 마스킹, source block-wise LaMa 클리닝으로 고정됩니다.</translation>
+    </message>
+    <message>
+        <source>Stage-Batched runs detect, OCR, inpaint, translate, and render in stage order. Legacy keeps the original page-by-page loop.</source>
+        <translation>Stage-Batched는 detect, OCR, inpaint, translate, render를 단계 순서대로 실행합니다. Legacy는 기존 페이지 단위 루프를 유지합니다.</translation>
+    </message>
+    <message>
         <source>Text Detector</source>
         <translation>텍스트 감지기</translation>
     </message>
@@ -2470,10 +2506,6 @@ Adjust the size used by add, erase, exclude, and restore brushes.</source>
     <message>
         <source>Automatic Runtime</source>
         <translation>자동 런타임</translation>
-    </message>
-    <message>
-        <source>Automatic mode is fixed to RT-DETR-v2 detection, legacy bbox rescue masking, and source block-wise LaMa cleaning.</source>
-        <translation>자동 모드는 RT-DETR-v2 탐지, 레거시 bbox rescue 마스킹, source block-wise LaMa 클리닝으로 고정됩니다.</translation>
     </message>
     <message>
         <source>precision</source>

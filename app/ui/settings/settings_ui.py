@@ -2,7 +2,7 @@
 from PySide6 import QtWidgets
 from PySide6 import QtCore
 
-from modules.ocr.selection import OCR_MODE_OPTIONS
+from modules.ocr.selection import OCR_MODE_OPTIONS, WORKFLOW_MODE_OPTIONS
 
 from ..dayu_widgets.clickable_card import ClickMeta
 from ..dayu_widgets.divider import MDivider
@@ -147,6 +147,10 @@ class SettingsPageUI(QtWidgets.QWidget):
             self.tr("HunyuanOCR"): "hunyuanocr",
             self.tr("MangaLMM"): "mangalmm",
 
+            # Workflow mode mappings
+            self.tr("Stage-Batched Pipeline (Recommended)"): "stage_batched_pipeline",
+            self.tr("Legacy Page Pipeline (Legacy)"): "legacy_page_pipeline",
+
             # Inpainter mappings
             "AOT": "AOT",
             "lama_large_512px": "lama_large_512px",
@@ -157,6 +161,7 @@ class SettingsPageUI(QtWidgets.QWidget):
             "RT-DETR-v2": "RT-DETR-v2",
 
             # Fixed automatic runtime mapping
+            self.tr("RT-DETR-v2 + CTD Line Protect + Source LaMa"): "rtdetr_legacy_bbox_source_lama",
             self.tr("RT-DETR-v2 + Legacy BBox Rescue + Source LaMa"): "rtdetr_legacy_bbox_source_lama",
 
             # HD Strategy mappings
@@ -213,6 +218,8 @@ class SettingsPageUI(QtWidgets.QWidget):
             inpaint_strategy=self.inpaint_strategy,
             parent=self,
         )
+        for index, (key, _label) in enumerate(WORKFLOW_MODE_OPTIONS):
+            self.tools_page.workflow_mode_combo.setItemData(index, key)
         for index, key in enumerate(self.ocr_engine_keys):
             self.tools_page.ocr_combo.setItemData(index, key)
         self.paddleocr_vl_page = PaddleOCRVLPage(parent=self)
@@ -241,6 +248,7 @@ class SettingsPageUI(QtWidgets.QWidget):
         # Tools
         self.translator_combo = self.tools_page.translator_combo
         self.ocr_combo = self.tools_page.ocr_combo
+        self.workflow_mode_combo = self.tools_page.workflow_mode_combo
         self.detector_combo = self.tools_page.detector_combo
         self.inpainter_combo = self.tools_page.inpainter_combo
         self.inpainter_size_combo = self.tools_page.inpainter_size_combo

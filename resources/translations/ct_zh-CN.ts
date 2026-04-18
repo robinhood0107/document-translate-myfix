@@ -1255,6 +1255,18 @@ Please check your internet connection.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
+        <source>Stage-Batched Pipeline currently supports only single-runtime OCR routes in product mode.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Stage-Batched Pipeline is not supported for the current OCR/translator/language combination: {reason}</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Unsupported workflow mode combination</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
         <source>Missing translator</source>
         <translation type="unfinished"></translation>
     </message>
@@ -2106,6 +2118,18 @@ Restart now?</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
+        <source>Stage-Batched Pipeline (Recommended)</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Legacy Page Pipeline (Legacy)</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>RT-DETR-v2 + CTD Line Protect + Source LaMa</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
         <source>RT-DETR-v2 + Legacy BBox Rescue + Source LaMa</source>
         <translation type="unfinished"></translation>
     </message>
@@ -2386,10 +2410,6 @@ Adjust the size used by add, erase, exclude, and restore brushes.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>Automatic mode is fixed to RT-DETR-v2 detection, legacy bbox rescue masking, and source block-wise LaMa cleaning.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
         <source>Text Detector</source>
         <translation>文本检测器</translation>
     </message>
@@ -2400,6 +2420,18 @@ Adjust the size used by add, erase, exclude, and restore brushes.</source>
     <message>
         <source>Image Cleaning</source>
         <translation>图像清理</translation>
+    </message>
+    <message>
+        <source>Workflow Mode</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Automatic runtime is fixed to RT-DETR-v2 detection, CTD line-protect masking, and source block-wise LaMa cleaning.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Stage-Batched runs detect, OCR, inpaint, translate, and render in stage order. Legacy keeps the original page-by-page loop.</source>
+        <translation type="unfinished"></translation>
     </message>
     <message>
         <source>Inpainter</source>

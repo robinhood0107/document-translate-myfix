@@ -1,67 +1,67 @@
-# Workflow Split Runtime Problem Definition And Solution Journey
+# Workflow Split Runtime Problem Definition And Journey
 
-## 문제 정의
+## 사용자 문제 정의
 
-사용자는 현재 페이지 단위 파이프라인이 Docker 기동 대기와 healthcheck 지연 때문에 전체 성능을 제대로 끌어내지 못하고 있다고 판단했다. 특히 OCR runtime과 Gemma4 runtime이 동시에 오래 상주하는 구조는 VRAM을 보수적으로 쓰게 만들 수 있으며, 페이지 수가 늘수록 고정비와 단계 전환 비용이 사용자 체감 시간에 불리하게 작용할 수 있다.
+사용자는 배치 파이프라인이 페이지 단위로 `detect -> OCR -> inpaint -> translate`를 반복하면서 Docker 기동/healthcheck와 VRAM 회수가 비효율적으로 일어나는 점을 문제로 보았다. 특히 `Gemma` 번역 런타임의 기동 시간이 길기 때문에, 전체 워크플로우를 단계형으로 분리하면 시간이 줄어드는지 검증해 달라고 요청했다.
 
-## 사용자 착안
+## Requirement 1 결론
 
-사용자는 전체 프로젝트를 다음 순서로 재구성해 보자고 제안했다.
+benchmark canonical 문서 기준 Requirement 1은 성공했다.
 
-1. 텍스트 감지 전체 수행
-2. OCR 전체 수행
-3. 번역 전체 수행
-4. 인페이팅 전체 수행
+- 기존 `legacy_page_pipeline`: `995.846s`
+- `stage_batched_pipeline`의 승격 후보인 Japanese `Optimal(PaddleOCR VL 중심)`: `714.725s`
+- 시간 이득: `281.121s`
+- 개선률: 약 `28.2%`
 
-이때 OCR 단계에는 OCR 컨테이너만, 번역 단계에는 Gemma4만 올려서 VRAM을 단계별로 재배치하면 더 공격적인 `ngl`과 병렬성이 가능할지 검증하고자 했다.
+동시에 OCR parity도 benchmark 기준으로 유지됐다.
 
-## 우리가 확인한 현재 상태
+- `detect_box_total=212`
+- `ocr_non_empty_total=212`
+- `page_failed_count=0`
 
-- 제품 배치 파이프라인은 페이지 단위 `detect -> ocr -> inpaint -> translate -> render` 구조다.
-- OCR runtime은 한 번에 하나의 엔진만 활성화한다.
-- Gemma runtime은 별도 lifecycle로 동작한다.
-- 설정 UI에는 workflow mode가 없다.
-- benchmark full docs는 `develop`에 실을 수 없는 저장소 정책이 있다.
+즉 이번 승격의 핵심은 OCR 품질 재논쟁이 아니라, benchmark winner를 제품 코드로 안전하게 연결하는 일이다.
 
-## 설계 판단
+## Requirement 2 결론
 
-1. Requirement 1과 Requirement 2를 분리한다.
-2. Requirement 1이 성공하기 전까지 Requirement 2의 자동 선택기 제품 구현은 잠근다.
-3. benchmark full docs/assets는 `benchmarking/lab`에 둔다.
-4. `develop`에는 포트폴리오형 요약 문서만 둔다.
-5. 사고과정 문서는 내부 추론 재현이 아니라, 문제 정의 -> 측정 설계 -> 설계 판단 -> 구현 계획의 결정 로그로 남긴다.
-6. `candidate_stage_batched_dual_resident`는 `candidate_stage_batched_single_ocr`보다 비교 실험 결과가 덜 좋아도 Requirement 1 자체를 무효화하지 않는 정식 신규 전체 플로우 승격 대상으로 잠근다.
-7. 즉 Requirement 2가 새로 추가하는 것은 dual-resident 상주 자체가 아니라, 그 위에서 동작하는 사용자 승인 기반 자동 선택 규칙이다.
+`MangaLMM` hybrid selector는 benchmark 실패로 종료했다.
 
-## 실제 운영에서 새로 알게 된 사실
+이유는 아래 두 가지다.
 
-원격 push 정책을 확인한 결과, benchmark 자산이 포함된 브랜치는 사실상 `benchmarking/lab` 이름으로 publish해야 했다. 즉 benchmark family 문서와 raw evidence는 `benchmarking/lab`에 직접 반영하고, `develop`은 summary + product promotion만 담당하는 구조가 저장소 현실과 가장 잘 맞는다.
+1. 속도
+   - `Paddle OCR-only warm`: 약 `300.437s`
+   - `MangaLMM OCR-only warm`: 약 `365.250s`
+2. 품질
+   - detector block과 `MangaLMM` 결과를 좌표 매칭으로 비교했을 때 `text_bubble` 누락과 merge/split 오류가 반복됐다.
 
-## 현재까지의 결과
+따라서 제품 승격 범위에서 `MangaLMM hybrid`는 제외하고, `stage_batched + PaddleOCR VL 중심`만 남긴다.
 
-- `benchmarking/lab`에 Requirement 1 family 문서 기준선을 생성했다.
-- `benchmarking/lab`에 Requirement 1 실측 패키지와 baseline smoke 근거를 확보했다.
-- `benchmarking/lab`과 `feature/workflow-split-runtime` 문서에 `candidate_stage_batched_dual_resident` 정식 승격 정책을 반영하기 시작했다.
-- `develop`에는 이 작업을 포트폴리오와 제품 승격 관점에서 읽을 수 있도록 별도 문서 묶음을 시작했다.
-- `feature/workflow-split-runtime`에는 포트폴리오 승격 문서를 원격까지 publish했고 upstream도 연결했다.
+## 마지막 blocker
 
-## 브랜치 전략
+benchmark 결론을 제품에 옮기기 전 마지막 blocker는 `순서`가 아니라 `마스킹 경로`였다.
 
-1. full benchmark evidence와 raw 결과는 `benchmarking/lab`에 유지한다.
-2. 제품 승격 문서와 실제 제품 코드는 `develop` 기준 feature 브랜치에서 정리한다.
-3. Requirement 1 실측 성공 후 `feature/workflow-split-runtime -> develop` 머지를 목표로 한다.
-4. Requirement 2는 `benchmarking/lab` 검수 패키지 확정 후 `feature/hybrid-ocr-selector -> develop` 순서로 진행한다.
+문제는 세 군데에서 동시에 발생했다.
 
-## 운영 중 확인한 해결 사례
+1. `SettingsPage.get_mask_refiner_settings()`가 실질적으로 `legacy_bbox`를 강제
+2. `modules/utils/image_utils.py`가 들어온 설정을 다시 legacy로 덮어씀
+3. `generate_mask()`가 최종적으로 legacy builder만 호출
 
-- 로컬 pre-push 훅은 upstream이 없는 첫 push에서 ref 매칭을 엄격하게 검사했다.
-- 해결 방법은 원격에 동일 이름 브랜치를 먼저 만들고 upstream을 연결한 뒤 다시 push하는 것이었다.
-- 이 과정을 통해 "benchmarking/lab에서 문서 기준선 확보 -> feature 브랜치 publish -> 제품 코드 구현" 순서를 안정적으로 재현할 수 있게 됐다.
+즉 detector는 최신이었지만, 실제 배치 루트는 계속 legacy mask path를 타고 있었다.
 
-## 다음 단계
+## 현재 해결 방향
 
-1. `feature/workflow-split-runtime` 포트폴리오 문서에 dual-resident 정식 승격 방향을 반영
-2. Requirement 1 13장 full baseline 누적
-3. experimental candidate runner 실측과 비교표 작성
-4. `workflow_mode` 제품 설계를 `legacy` + `candidate_stage_batched_dual_resident` 기준으로 확정
-5. Requirement 1 실측 결과를 바탕으로 제품 승격 범위를 결정
+이번 제품 승격에서 해결하는 것은 아래다.
+
+1. `CTD + keep_existing_lines=True`를 실제 배치/단계형 루트에 연결
+2. residue cleanup을 placeholder가 아니라 실제로 호출
+3. `workflow_mode`를 Settings > Tools에 추가
+4. 제품 노출 플로우를 아래 두 개로 고정
+   - `Stage-Batched Pipeline (Recommended)`
+   - `Legacy Page Pipeline (Legacy)`
+
+## 지금 남은 일
+
+1. product branch에서 대표 smoke와 i18n 갱신 완료
+2. `feature/workflow-split-runtime` commit / push
+3. `develop` 승격 PR 갱신
+
+benchmark raw docs와 canonical 하네스는 계속 `benchmarking/lab`에 두고, `develop`에는 이 요약만 남긴다.

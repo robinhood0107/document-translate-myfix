@@ -4,7 +4,11 @@ from typing import TYPE_CHECKING
 
 from PySide6.QtCore import QCoreApplication
 
-from modules.ocr.selection import resolve_ocr_engine
+from modules.ocr.selection import (
+    resolve_ocr_engine,
+    resolve_stage_batched_ocr_policy,
+    STAGE_BATCHED_WORKFLOW_MODE,
+)
 from modules.ocr.local_runtime import LocalOCRRuntimeManager
 from modules.translation.local_runtime import LocalGemmaRuntimeManager
 from modules.inpainting.aot import AOT
@@ -115,6 +119,7 @@ def validate_ocr(
 ):
     settings_page = main.settings_page
     ocr_tool = settings_page.get_tool_selection("ocr")
+    workflow_mode = settings_page.get_workflow_mode()
 
     if not ocr_tool:
         if hasattr(main, "batch_report_ctrl"):
@@ -127,7 +132,16 @@ def validate_ocr(
 
     source_lang = source_lang or main.s_combo.currentText()
     source_lang_english = main.lang_mapping.get(source_lang, source_lang)
-    normalized_tool = resolve_ocr_engine(ocr_tool, source_lang_english)
+    if workflow_mode == STAGE_BATCHED_WORKFLOW_MODE:
+        policy = resolve_stage_batched_ocr_policy(
+            workflow_mode,
+            ocr_tool,
+            source_lang_english,
+            settings_page.get_tool_selection("translator"),
+        )
+        normalized_tool = policy.primary_ocr_engine if policy.stage_batched_supported else ""
+    else:
+        normalized_tool = resolve_ocr_engine(ocr_tool, source_lang_english)
     if normalized_tool in {"PaddleOCR VL", "HunyuanOCR", "MangaLMM"}:
         local_service_configs = {
             "PaddleOCR VL": (
@@ -201,6 +215,45 @@ def validate_ocr(
         return False
 
     return True
+
+
+def validate_workflow_mode(
+    main: ComicTranslate,
+    source_lang: str | None = None,
+) -> bool:
+    settings_page = main.settings_page
+    workflow_mode = settings_page.get_workflow_mode()
+    if workflow_mode != STAGE_BATCHED_WORKFLOW_MODE:
+        return True
+
+    source_lang = source_lang or main.s_combo.currentText()
+    source_lang_english = main.lang_mapping.get(source_lang, source_lang)
+    policy = resolve_stage_batched_ocr_policy(
+        workflow_mode,
+        settings_page.get_tool_selection("ocr"),
+        source_lang_english,
+        settings_page.get_tool_selection("translator"),
+    )
+    if policy.stage_batched_supported and not policy.requires_sidecar_collection:
+        return True
+
+    if policy.requires_sidecar_collection:
+        reason = QCoreApplication.translate(
+            "Messages",
+            "Stage-Batched Pipeline currently supports only single-runtime OCR routes in product mode.",
+        )
+    else:
+        reason = QCoreApplication.translate(
+            "Messages",
+            "Stage-Batched Pipeline is not supported for the current OCR/translator/language combination: {reason}",
+        ).format(reason=policy.unsupported_reason)
+    if hasattr(main, "batch_report_ctrl"):
+        main.batch_report_ctrl.register_preflight_error(
+            QCoreApplication.translate("Messages", "Unsupported workflow mode combination"),
+            reason,
+        )
+    Messages.show_error(main, reason, duration=None, closable=True, source="batch")
+    return False
 
 
 def validate_translator(main: ComicTranslate, target_lang: str):
@@ -282,6 +335,8 @@ def validate_settings(
     source_lang: str | None = None,
     preflight_cache: dict[str, str] | None = None,
 ):
+    if not validate_workflow_mode(main, source_lang=source_lang):
+        return False
     if not validate_ocr(main, source_lang=source_lang, preflight_cache=preflight_cache):
         return False
     if not validate_translator(main, target_lang):
