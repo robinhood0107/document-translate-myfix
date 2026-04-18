@@ -4,7 +4,7 @@
 
 ## 목적
 
-이 문서는 현재까지의 Requirement 1 실측 결과를 정리하고, `MangaLMM -> PaddleOCR VL fallback` 기준선을 잠그기 위한 provisional threshold 제안을 문서화한다.
+이 문서는 현재까지의 Requirement 1 실측 결과를 정리하고, flow 비교의 최종 판정과 Requirement 2 hybrid selector 트랙의 종료 결론을 남긴다. 아래 threshold 내용은 historical proposal이며, 2026-04-18 기준으로는 실제 제품 승격 기준으로 채택하지 않는다.
 
 ## 1. 총 실측 기준에서 가장 빠른 구성
 
@@ -21,12 +21,14 @@
 - Docker 기동과 health wait를 포함한 총 실측 기준으로는 `candidate_stage_batched_single_ocr`가 가장 빠르다.
 - `candidate_stage_batched_single_ocr`는 `baseline_legacy`보다 약 `28.2%` 빠르다.
 - `candidate_stage_batched_dual_resident`는 현재 형태로는 가장 느리다.
+- `candidate_stage_batched_single_ocr`와 `baseline_legacy`는 공식 quality summary 기준으로 `detect_box_total=212`, `ocr_non_empty_total=212`, `page_failed_count=0`를 동일하게 만족한다.
 
 이 값은 다음을 뜻한다.
 
 1. `stage_batched_pipeline` 자체는 일본어 기준에서 시간 이득 가능성이 있다.
 2. 하지만 `Optimal+ analysis mode`처럼 `PaddleOCR VL + MangaLMM`를 모든 페이지에 다 돌리는 방식은 steady-state 기본값으로는 비효율적이다.
 3. 따라서 `Optimal+ Japanese`는 지금 단계에서는 “정식 기본 OCR 전략”이 아니라 “selector 기준을 만들기 위한 분석 모드”로 봐야 한다.
+4. 2026-04-18 기준 최종 승격 후보는 `stage_batched_pipeline + Japanese Optimal(PaddleOCR VL 중심)`이다.
 
 ## 2. Docker 기동/대기 시간을 포함해서 봤을 때의 해석
 
@@ -132,7 +134,21 @@ stage-batched 시나리오의 분해표는 아래와 같다.
 
 ## 7. 다음 단계
 
-1. 사용자가 `review_decision_sheet-ko.md`에 `O / X`를 매긴다.
-2. 그 결과를 기반으로 threshold를 최종 잠근다.
-3. selector-enabled rerun을 다시 측정한다.
-4. 그 결과가 만족스러우면 `develop` 승격 준비로 넘어간다.
+1. Requirement 1은 `flow gain confirmed`로 잠근다.
+2. `feature/workflow-split-runtime`에서 `stage_batched_pipeline`를 제품 승격 대상으로 준비한다.
+3. hybrid selector 대신, 현재 레거시로 강제되고 있는 마스킹 경로를 사용자가 의도한 방식으로 교체하는 별도 검증/구현을 다음 우선순위로 둔다.
+
+## 8. Requirement 2 종료 결론
+
+2026-04-18 기준으로 Requirement 2의 `MangaLMM` hybrid selector benchmark는 `failed_closed`로 종료한다.
+
+근거는 아래와 같다.
+
+1. 공식 suite에서 `candidate_stage_batched_dual_resident`는 `1664.021s`로, `candidate_stage_batched_single_ocr`(`714.725s`)보다 현저히 느리다.
+2. review pack 기준으로 `text_bubble` 누락, 인접 bubble 병합, block 분할 불안정성이 반복 관찰되었다.
+3. 따라서 현재 상태의 `MangaLMM first + selective Paddle fallback`은 benchmark 기준으로 설명 가능하고 재현 가능한 운영안까지 올라오지 못했다.
+
+결론적으로 이 문서의 threshold 제안은 historical note로만 남기고, 현 시점 제품 승격 기준은 다음으로 단순화한다.
+
+- `legacy_page_pipeline`
+- `stage_batched_pipeline + Japanese Optimal(PaddleOCR VL 중심)`

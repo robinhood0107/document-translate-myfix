@@ -12,11 +12,11 @@
 
 ## Latest Output
 
-- current_status: `requirement_1_full_measurement_completed`
+- current_status: `requirement_1_flow_gain_confirmed_requirement_2_closed_failed`
 - benchmark_family_created: `true`
 - measured_runs: `3`
-- requirement_1_status: `ready_for_gate_review_with_dual_resident_recorded`
-- requirement_2_status: `blocked_by_requirement_1`
+- requirement_1_status: `flow_gain_confirmed_with_quality_parity`
+- requirement_2_status: `closed_failed_by_user_decision_after_benchmark`
 - source_lang: `Japanese`
 - target_lang: `Korean`
 - corpus_root: `Sample/japan`
@@ -46,11 +46,25 @@
 5. 품질 동등성 비교표
 6. 사용자 검수 결과 표
 
+## Final Flow Comparison
+
+| scenario | total_elapsed_sec | delta_vs_baseline_sec | delta_vs_baseline_pct | quality_note |
+| --- | ---: | ---: | ---: | --- |
+| `baseline_legacy` | `995.846` | `0.000` | `0.0%` | `detect_box_total=212`, `ocr_non_empty_total=212`, `page_failed_count=0` |
+| `candidate_stage_batched_single_ocr` | `714.725` | `-281.121` | `-28.2%` | `detect_box_total=212`, `ocr_non_empty_total=212`, `page_failed_count=0` |
+| `candidate_stage_batched_dual_resident` | `1664.021` | `+668.175` | `+67.1%` | `analysis mode only, not a promotion candidate` |
+
+해석:
+
+- Requirement 1의 핵심 질문이었던 flow 비교에서는 `stage_batched_pipeline`가 실질적인 시간 이득을 보였다.
+- 이 이득은 `total_elapsed_sec` 기준이므로 Docker compose up / health wait를 포함한 값이다.
+- 반면 `candidate_stage_batched_dual_resident`는 Requirement 2 hybrid selector 트랙의 실패 사례로 기록한다.
+
 ## Promotion Policy
 
 - Requirement 1:
   - benchmark/lab에서 full evidence 고정
   - develop에는 runtime/code/doc summary만 승격
 - Requirement 2:
-  - 사용자 승인 전에는 selector default-on 승격 금지
-  - 사용자가 승인한 임계값만 selector rule 후보로 승격 가능
+  - 2026-04-18 기준 `failed_closed`
+  - 새로운 근거가 생기기 전까지 selector default-on 승격을 진행하지 않음
