@@ -456,7 +456,8 @@ Cancel the current run or wait for it to finish first.</source>
     </message>
     <message>
         <source>OCR</source>
-        <translation>OCR</translation>
+        <translation>
+        OCR</translation>
     </message>
     <message>
         <source>API Key</source>
@@ -755,7 +756,8 @@ Start the server with both the HunyuanOCR GGUF model and the matching mmproj fil
     </message>
     <message>
         <source>Server URL</source>
-        <translation type="unfinished"></translation>
+        <translation>
+        サーバー URL</translation>
     </message>
     <message>
         <source>Hunyuan OCR Tuning</source>
@@ -964,7 +966,8 @@ Keep the default localhost URL if you want Comic Translate to reuse the bundled 
     </message>
     <message>
         <source>Server URL</source>
-        <translation type="unfinished"></translation>
+        <translation type="unfinished">
+        サーバー URL</translation>
     </message>
     <message>
         <source>MangaLMM OCR Tuning</source>
@@ -1276,7 +1279,8 @@ Open Batch Report to see all skipped images and reasons.</source>
     </message>
     <message>
         <source>Translator</source>
-        <translation>翻訳者</translation>
+        <translation>
+        翻訳エンジン</translation>
     </message>
     <message>
         <source>Gemma local server runtime setup failed</source>
@@ -1344,7 +1348,8 @@ Install it to use PSD features.</source>
     </message>
     <message>
         <source>Images</source>
-        <translation>画像</translation>
+        <translation>
+        画像</translation>
     </message>
     <message>
         <source>Document</source>
@@ -1416,26 +1421,267 @@ Install it to use PSD features.</source>
     </message>
 </context>
 <context>
+    <name>NotificationSound</name>
+    <message>
+        <source>Automatic translation</source>
+        <translation>
+        自動翻訳</translation>
+    </message>
+    <message>
+        <source>Current page automatic translation</source>
+        <translation>
+        現在のページを自動翻訳</translation>
+    </message>
+    <message>
+        <source>Retry failed pages</source>
+        <translation>
+        失敗したページを再試行</translation>
+    </message>
+    <message>
+        <source>Series queue automatic translation</source>
+        <translation>
+        シリーズ待機列の自動翻訳</translation>
+    </message>
+    <message>
+        <source>Manual task</source>
+        <translation>
+        手動タスク</translation>
+    </message>
+    <message>
+        <source>Notification test</source>
+        <translation>
+        通知テスト</translation>
+    </message>
+    <message>
+        <source>Automatic translation completed</source>
+        <translation>
+        自動翻訳が完了しました</translation>
+    </message>
+    <message>
+        <source>Automatic translation failed</source>
+        <translation>
+        自動翻訳に失敗しました</translation>
+    </message>
+    <message>
+        <source>Automatic translation cancelled</source>
+        <translation>
+        自動翻訳がキャンセルされました</translation>
+    </message>
+    <message>
+        <source>Automatic translation update</source>
+        <translation>
+        自動翻訳の更新</translation>
+    </message>
+    <message>
+        <source>Completed</source>
+        <translation>
+        完了</translation>
+    </message>
+    <message>
+        <source>Failed</source>
+        <translation>
+        失敗</translation>
+    </message>
+    <message>
+        <source>Cancelled</source>
+        <translation>
+        キャンセル済み</translation>
+    </message>
+    <message>
+        <source>Test</source>
+        <translation>
+        テスト</translation>
+    </message>
+    <message>
+        <source>Updated</source>
+        <translation>
+        更新済み</translation>
+    </message>
+    <message>
+        <source>Stage-Batched Pipeline (Recommended)</source>
+        <translation>
+        Stage-Batched Pipeline（推奨）</translation>
+    </message>
+    <message>
+        <source>Legacy Page Pipeline (Legacy)</source>
+        <translation>
+        Legacy Page Pipeline（レガシー）</translation>
+    </message>
+    <message>
+        <source>Optimal (HunyuanOCR / PaddleOCR VL)</source>
+        <translation>
+        最適（HunyuanOCR / PaddleOCR VL）</translation>
+    </message>
+    <message>
+        <source>Comic Translate</source>
+        <translation>
+        Comic Translate</translation>
+    </message>
+    <message>
+        <source>Status</source>
+        <translation>
+        状態</translation>
+    </message>
+    <message>
+        <source>Run</source>
+        <translation>
+        実行</translation>
+    </message>
+    <message>
+        <source>Images</source>
+        <translation>画像</translation>
+    </message>
+    <message>
+        <source>Workflow</source>
+        <translation>
+        ワークフロー</translation>
+    </message>
+    <message>
+        <source>OCR</source>
+        <translation>OCR</translation>
+    </message>
+    <message>
+        <source>Translator</source>
+        <translation>翻訳者</translation>
+    </message>
+    <message>
+        <source>Source language</source>
+        <translation>
+        原文言語</translation>
+    </message>
+    <message>
+        <source>Target language</source>
+        <translation>
+        翻訳先言語</translation>
+    </message>
+    <message>
+        <source>Output</source>
+        <translation>
+        出力</translation>
+    </message>
+    <message>
+        <source>Summary</source>
+        <translation>
+        要約</translation>
+    </message>
+    <message>
+        <source>Detail</source>
+        <translation>
+        詳細</translation>
+    </message>
+    <message>
+        <source>Time</source>
+        <translation>
+        時刻</translation>
+    </message>
+    <message>
+        <source>This is a test notification from Comic Translate.</source>
+        <translation>
+        これは Comic Translate からのテスト通知です。</translation>
+    </message>
+</context>
+<context>
     <name>NotificationsPage</name>
     <message>
-        <source>Automatic Completion</source>
-        <translation>自動処理の完了</translation>
+        <source>Notifications</source>
+        <translation>
+        通知</translation>
+    </message>
+    <message>
+        <source>Configure completion sounds and optional ntfy push notifications for automatic runs.</source>
+        <translation>
+        自動実行の完了音と任意の ntfy プッシュ通知を設定します。</translation>
+    </message>
+    <message>
+        <source>Automatic Completion Sound</source>
+        <translation>
+        自動完了サウンド</translation>
     </message>
     <message>
         <source>Play a sound when automatic processing finishes successfully. Custom files must be placed in the repository music folder.</source>
         <translation>自動処理が正常に完了したら音を再生します。カスタムファイルはリポジトリの music フォルダーに配置してください。</translation>
     </message>
     <message>
-        <source>Enable Completion Sound</source>
-        <translation>完了音を有効にする</translation>
+        <source>Enable completion sound</source>
+        <translation>
+        完了音を有効にする</translation>
     </message>
     <message>
-        <source>Test Sound</source>
-        <translation>音をテスト</translation>
+        <source>Test sound</source>
+        <translation>
+        サウンドをテスト</translation>
     </message>
     <message>
-        <source>Music Folder: {path}</source>
-        <translation>music フォルダー: {path}</translation>
+        <source>Music folder: {path}</source>
+        <translation>
+        音楽フォルダー: {path}</translation>
+    </message>
+    <message>
+        <source>ntfy Push Notifications</source>
+        <translation>
+        ntfy プッシュ通知</translation>
+    </message>
+    <message>
+        <source>Send text-only notifications through ntfy when automatic processing finishes, fails, or is cancelled.
+The app keeps messages below ntfy&apos;s default 4 KiB text limit and never sends attachments.</source>
+        <translation>
+        自動処理が完了、失敗、またはキャンセルされたときに、ntfy でテキストのみの通知を送信します。
+アプリはメッセージを ntfy の既定 4 KiB テキスト制限未満に保ち、添付ファイルは送信しません。</translation>
+    </message>
+    <message>
+        <source>Enable ntfy notifications</source>
+        <translation>
+        ntfy 通知を有効にする</translation>
+    </message>
+    <message>
+        <source>Server URL</source>
+        <translation type="unfinished">
+        サーバー URL</translation>
+    </message>
+    <message>
+        <source>Topic</source>
+        <translation>
+        トピック</translation>
+    </message>
+    <message>
+        <source>comic-translate</source>
+        <translation>
+        comic-translate</translation>
+    </message>
+    <message>
+        <source>Access token (optional)</source>
+        <translation>
+        アクセストークン（任意）</translation>
+    </message>
+    <message>
+        <source>Bearer token</source>
+        <translation>
+        Bearer トークン</translation>
+    </message>
+    <message>
+        <source>Timeout (sec)</source>
+        <translation>
+        タイムアウト（秒）</translation>
+    </message>
+    <message>
+        <source>Send test notification</source>
+        <translation>
+        テスト通知を送信</translation>
+    </message>
+    <message>
+        <source>Notify on completion</source>
+        <translation>
+        完了時に通知</translation>
+    </message>
+    <message>
+        <source>Notify on failure</source>
+        <translation>
+        失敗時に通知</translation>
+    </message>
+    <message>
+        <source>Notify on cancellation</source>
+        <translation>
+        キャンセル時に通知</translation>
     </message>
     <message>
         <source>System sound</source>
@@ -1457,7 +1703,8 @@ Leave markdown or visualization options disabled unless you need debugging.</sou
     </message>
     <message>
         <source>Server URL</source>
-        <translation type="unfinished"></translation>
+        <translation type="unfinished">
+        サーバー URL</translation>
     </message>
     <message>
         <source>Response Options</source>
@@ -2188,6 +2435,21 @@ Restart now?</source>
         <translation>チェック中...</translation>
     </message>
     <message>
+        <source>Enter an ntfy topic before sending a test notification.</source>
+        <translation>
+        テスト通知を送信する前に ntfy トピックを入力してください。</translation>
+    </message>
+    <message>
+        <source>Test ntfy notification sent.</source>
+        <translation>
+        ntfy テスト通知を送信しました。</translation>
+    </message>
+    <message>
+        <source>Unable to send the ntfy test notification right now. Check the settings and try again.</source>
+        <translation>
+        現在 ntfy テスト通知を送信できません。設定を確認してから再試行してください。</translation>
+    </message>
+    <message>
         <source>Check for Updates</source>
         <translation>アップデートをチェックする</translation>
     </message>
@@ -2364,7 +2626,8 @@ Restart now?</source>
     </message>
     <message>
         <source>Optimal (HunyuanOCR / PaddleOCR VL)</source>
-        <translation type="unfinished"></translation>
+        <translation type="unfinished">
+        最適（HunyuanOCR / PaddleOCR VL）</translation>
     </message>
     <message>
         <source>MangaLMM</source>
@@ -2372,11 +2635,13 @@ Restart now?</source>
     </message>
     <message>
         <source>Stage-Batched Pipeline (Recommended)</source>
-        <translation type="unfinished"></translation>
+        <translation type="unfinished">
+        Stage-Batched Pipeline（推奨）</translation>
     </message>
     <message>
         <source>Legacy Page Pipeline (Legacy)</source>
-        <translation type="unfinished"></translation>
+        <translation type="unfinished">
+        Legacy Page Pipeline（レガシー）</translation>
     </message>
     <message>
         <source>RT-DETR-v2 + CTD Line Protect + Source LaMa</source>
@@ -3146,7 +3411,8 @@ back on the Image (for further editing)</source>
     </message>
     <message>
         <source>Output</source>
-        <translation type="unfinished"></translation>
+        <translation type="unfinished">
+        出力</translation>
     </message>
     <message>
         <source>Use global output settings</source>
@@ -3828,7 +4094,8 @@ It may have been moved, renamed, or deleted.
     </message>
     <message>
         <source>Optimal (HunyuanOCR / PaddleOCR VL)</source>
-        <translation type="unfinished"></translation>
+        <translation type="unfinished">
+        最適（HunyuanOCR / PaddleOCR VL）</translation>
     </message>
     <message>
         <source>Microsoft OCR</source>

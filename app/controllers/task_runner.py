@@ -100,6 +100,10 @@ class TaskRunnerController:
     ):
         worker = GenericWorker(callback, *args, **kwargs)
 
+        def _clear_current_worker() -> None:
+            if getattr(self.main, "current_worker", None) is worker:
+                self.main.current_worker = None
+
         if result_callback:
             worker.signals.result.connect(
                 lambda result: QtCore.QTimer.singleShot(
@@ -114,7 +118,15 @@ class TaskRunnerController:
             )
         if finished_callback:
             worker.signals.finished.connect(
-                lambda: QtCore.QTimer.singleShot(0, self.main, finished_callback)
+                lambda: QtCore.QTimer.singleShot(
+                    0,
+                    self.main,
+                    lambda: (_clear_current_worker(), finished_callback())[1],
+                )
+            )
+        else:
+            worker.signals.finished.connect(
+                lambda: QtCore.QTimer.singleShot(0, self.main, _clear_current_worker)
             )
 
         self.main.current_worker = worker

@@ -167,6 +167,11 @@ OCR:
 
 ## 빠른 사용법
 
+조금 더 자세한 설치/실행 경로는 아래 문서를 같이 보세요.
+
+- [docs/setup/quickstart.md](docs/setup/quickstart.md)
+- [docs/setup/quickstart-ko.md](docs/setup/quickstart-ko.md)
+
 ### 1. 앱 실행
 
 런처는 첫 실행 시 필요한 로컬 runtime 환경을 스스로 생성하거나 갱신합니다.
@@ -210,6 +215,37 @@ Settings에서 아래 중 하나를 선택합니다.
 
 - `Default (existing auto: MangaOCR / PPOCR / Pororo...)`: 기존 자동 OCR 경로 유지
 - `Optimal (HunyuanOCR / PaddleOCR VL)`: 중국어는 `HunyuanOCR`, 일본어/기타 언어는 `PaddleOCR VL`로 라우팅
+
+### 5. 선택 알림 설정 (ntfy)
+
+`Settings > Notifications`에서 아래를 설정할 수 있습니다.
+
+- 완료 알림음
+- ntfy 서버 URL / topic / 선택 access token
+- 완료 / 실패 / 취소 시 전송 여부
+
+앱은 ntfy로 텍스트만 보내며, 본문은 ntfy 기본 텍스트 제한을 넘지 않도록 줄입니다.
+
+공식 ntfy 문서:
+
+- [Publish notifications](https://docs.ntfy.sh/publish/)
+- [Server configuration](https://docs.ntfy.sh/config/)
+
+## 이 저장소가 사용하는 Docker 이미지
+
+현재 추적 중인 compose/runtime 이미지:
+
+- Gemma 로컬 서버: `ghcr.io/ggml-org/llama.cpp:server-cuda`
+- HunyuanOCR 로컬 서버: `ghcr.io/ggml-org/llama.cpp:server-cuda`
+- PaddleOCR VL 런타임: `ccr-2vdh3abv-pub.cnc.bj.baidubce.com/paddlepaddle/paddleocr-genai-vllm-server:latest-nvidia-gpu-offline`
+
+## 참고 설치 문서
+
+- [docs/setup/quickstart.md](docs/setup/quickstart.md)
+- [docs/setup/quickstart-ko.md](docs/setup/quickstart-ko.md)
+- [docs/gemma/local-server-ko.md](docs/gemma/local-server-ko.md)
+- [docs/hunyuan/local-server-ko.md](docs/hunyuan/local-server-ko.md)
+- [paddleocr_vl_docker_files/README.md](paddleocr_vl_docker_files/README.md)
 
 ## 저장소 문서
 

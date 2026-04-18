@@ -456,7 +456,8 @@ Annulez l&apos;exécution en cours ou attendez qu&apos;elle se termine.</transla
     </message>
     <message>
         <source>OCR</source>
-        <translation>OCR</translation>
+        <translation>
+        OCR</translation>
     </message>
     <message>
         <source>API Key</source>
@@ -755,7 +756,8 @@ Start the server with both the HunyuanOCR GGUF model and the matching mmproj fil
     </message>
     <message>
         <source>Server URL</source>
-        <translation type="unfinished"></translation>
+        <translation>
+        URL du serveur</translation>
     </message>
     <message>
         <source>Hunyuan OCR Tuning</source>
@@ -964,7 +966,8 @@ Keep the default localhost URL if you want Comic Translate to reuse the bundled 
     </message>
     <message>
         <source>Server URL</source>
-        <translation type="unfinished"></translation>
+        <translation type="unfinished">
+        URL du serveur</translation>
     </message>
     <message>
         <source>MangaLMM OCR Tuning</source>
@@ -1276,7 +1279,8 @@ Veuillez vérifier votre connexion Internet.</translation>
     </message>
     <message>
         <source>Translator</source>
-        <translation>Traducteur</translation>
+        <translation>
+        Traducteur</translation>
     </message>
     <message>
         <source>Gemma local server runtime setup failed</source>
@@ -1344,7 +1348,8 @@ Install it to use PSD features.</source>
     </message>
     <message>
         <source>Images</source>
-        <translation>Images</translation>
+        <translation>
+        Images</translation>
     </message>
     <message>
         <source>Document</source>
@@ -1416,26 +1421,267 @@ Install it to use PSD features.</source>
     </message>
 </context>
 <context>
+    <name>NotificationSound</name>
+    <message>
+        <source>Automatic translation</source>
+        <translation>
+        Traduction automatique</translation>
+    </message>
+    <message>
+        <source>Current page automatic translation</source>
+        <translation>
+        Traduction automatique de la page actuelle</translation>
+    </message>
+    <message>
+        <source>Retry failed pages</source>
+        <translation>
+        Réessayer les pages en échec</translation>
+    </message>
+    <message>
+        <source>Series queue automatic translation</source>
+        <translation>
+        Traduction automatique de la file de série</translation>
+    </message>
+    <message>
+        <source>Manual task</source>
+        <translation>
+        Tâche manuelle</translation>
+    </message>
+    <message>
+        <source>Notification test</source>
+        <translation>
+        Test de notification</translation>
+    </message>
+    <message>
+        <source>Automatic translation completed</source>
+        <translation>
+        Traduction automatique terminée</translation>
+    </message>
+    <message>
+        <source>Automatic translation failed</source>
+        <translation>
+        Échec de la traduction automatique</translation>
+    </message>
+    <message>
+        <source>Automatic translation cancelled</source>
+        <translation>
+        Traduction automatique annulée</translation>
+    </message>
+    <message>
+        <source>Automatic translation update</source>
+        <translation>
+        Mise à jour de la traduction automatique</translation>
+    </message>
+    <message>
+        <source>Completed</source>
+        <translation>
+        Terminé</translation>
+    </message>
+    <message>
+        <source>Failed</source>
+        <translation>
+        Échec</translation>
+    </message>
+    <message>
+        <source>Cancelled</source>
+        <translation>
+        Annulé</translation>
+    </message>
+    <message>
+        <source>Test</source>
+        <translation>
+        Test</translation>
+    </message>
+    <message>
+        <source>Updated</source>
+        <translation>
+        Mis à jour</translation>
+    </message>
+    <message>
+        <source>Stage-Batched Pipeline (Recommended)</source>
+        <translation>
+        Pipeline stage-batched (recommandé)</translation>
+    </message>
+    <message>
+        <source>Legacy Page Pipeline (Legacy)</source>
+        <translation>
+        Pipeline page par page hérité (legacy)</translation>
+    </message>
+    <message>
+        <source>Optimal (HunyuanOCR / PaddleOCR VL)</source>
+        <translation>
+        Optimal (HunyuanOCR / PaddleOCR VL)</translation>
+    </message>
+    <message>
+        <source>Comic Translate</source>
+        <translation>
+        Comic Translate</translation>
+    </message>
+    <message>
+        <source>Status</source>
+        <translation>
+        État</translation>
+    </message>
+    <message>
+        <source>Run</source>
+        <translation>
+        Exécution</translation>
+    </message>
+    <message>
+        <source>Images</source>
+        <translation>Images</translation>
+    </message>
+    <message>
+        <source>Workflow</source>
+        <translation>
+        Flux de travail</translation>
+    </message>
+    <message>
+        <source>OCR</source>
+        <translation>OCR</translation>
+    </message>
+    <message>
+        <source>Translator</source>
+        <translation>Traducteur</translation>
+    </message>
+    <message>
+        <source>Source language</source>
+        <translation>
+        Langue source</translation>
+    </message>
+    <message>
+        <source>Target language</source>
+        <translation>
+        Langue cible</translation>
+    </message>
+    <message>
+        <source>Output</source>
+        <translation>
+        Sortie</translation>
+    </message>
+    <message>
+        <source>Summary</source>
+        <translation>
+        Résumé</translation>
+    </message>
+    <message>
+        <source>Detail</source>
+        <translation>
+        Détail</translation>
+    </message>
+    <message>
+        <source>Time</source>
+        <translation>
+        Heure</translation>
+    </message>
+    <message>
+        <source>This is a test notification from Comic Translate.</source>
+        <translation>
+        Ceci est une notification de test envoyée par Comic Translate.</translation>
+    </message>
+</context>
+<context>
     <name>NotificationsPage</name>
     <message>
-        <source>Automatic Completion</source>
-        <translation>Fin automatique</translation>
+        <source>Notifications</source>
+        <translation>
+        Notifications</translation>
+    </message>
+    <message>
+        <source>Configure completion sounds and optional ntfy push notifications for automatic runs.</source>
+        <translation>
+        Configurez le son de fin et les notifications push ntfy facultatives pour les exécutions automatiques.</translation>
+    </message>
+    <message>
+        <source>Automatic Completion Sound</source>
+        <translation>
+        Son de fin automatique</translation>
     </message>
     <message>
         <source>Play a sound when automatic processing finishes successfully. Custom files must be placed in the repository music folder.</source>
         <translation>Jouer un son lorsque le traitement automatique se termine avec succès. Les fichiers personnalisés doivent être placés dans le dossier music du dépôt.</translation>
     </message>
     <message>
-        <source>Enable Completion Sound</source>
-        <translation>Activer le son de fin</translation>
+        <source>Enable completion sound</source>
+        <translation>
+        Activer le son de fin</translation>
     </message>
     <message>
-        <source>Test Sound</source>
-        <translation>Tester le son</translation>
+        <source>Test sound</source>
+        <translation>
+        Tester le son</translation>
     </message>
     <message>
-        <source>Music Folder: {path}</source>
-        <translation>Dossier music : {path}</translation>
+        <source>Music folder: {path}</source>
+        <translation>
+        Dossier de musique : {path}</translation>
+    </message>
+    <message>
+        <source>ntfy Push Notifications</source>
+        <translation>
+        Notifications push ntfy</translation>
+    </message>
+    <message>
+        <source>Send text-only notifications through ntfy when automatic processing finishes, fails, or is cancelled.
+The app keeps messages below ntfy&apos;s default 4 KiB text limit and never sends attachments.</source>
+        <translation>
+        Envoyez des notifications texte uniquement via ntfy lorsque le traitement automatique se termine, échoue ou est annulé.
+L’application garde les messages sous la limite de texte par défaut de 4 Kio de ntfy et n’envoie jamais de pièces jointes.</translation>
+    </message>
+    <message>
+        <source>Enable ntfy notifications</source>
+        <translation>
+        Activer les notifications ntfy</translation>
+    </message>
+    <message>
+        <source>Server URL</source>
+        <translation type="unfinished">
+        URL du serveur</translation>
+    </message>
+    <message>
+        <source>Topic</source>
+        <translation>
+        Sujet</translation>
+    </message>
+    <message>
+        <source>comic-translate</source>
+        <translation>
+        comic-translate</translation>
+    </message>
+    <message>
+        <source>Access token (optional)</source>
+        <translation>
+        Jeton d’accès (optionnel)</translation>
+    </message>
+    <message>
+        <source>Bearer token</source>
+        <translation>
+        Jeton Bearer</translation>
+    </message>
+    <message>
+        <source>Timeout (sec)</source>
+        <translation>
+        Délai d’attente (sec)</translation>
+    </message>
+    <message>
+        <source>Send test notification</source>
+        <translation>
+        Envoyer une notification de test</translation>
+    </message>
+    <message>
+        <source>Notify on completion</source>
+        <translation>
+        Notifier à la fin</translation>
+    </message>
+    <message>
+        <source>Notify on failure</source>
+        <translation>
+        Notifier en cas d’échec</translation>
+    </message>
+    <message>
+        <source>Notify on cancellation</source>
+        <translation>
+        Notifier en cas d’annulation</translation>
     </message>
     <message>
         <source>System sound</source>
@@ -1457,7 +1703,8 @@ Leave markdown or visualization options disabled unless you need debugging.</sou
     </message>
     <message>
         <source>Server URL</source>
-        <translation type="unfinished"></translation>
+        <translation type="unfinished">
+        URL du serveur</translation>
     </message>
     <message>
         <source>Response Options</source>
@@ -2188,6 +2435,21 @@ Redémarrer maintenant ?</translation>
         <translation>Vérification...</translation>
     </message>
     <message>
+        <source>Enter an ntfy topic before sending a test notification.</source>
+        <translation>
+        Saisissez un sujet ntfy avant d’envoyer une notification de test.</translation>
+    </message>
+    <message>
+        <source>Test ntfy notification sent.</source>
+        <translation>
+        Notification de test ntfy envoyée.</translation>
+    </message>
+    <message>
+        <source>Unable to send the ntfy test notification right now. Check the settings and try again.</source>
+        <translation>
+        Impossible d’envoyer la notification de test ntfy pour le moment. Vérifiez les paramètres et réessayez.</translation>
+    </message>
+    <message>
         <source>Check for Updates</source>
         <translation>Vérifier les mises à jour</translation>
     </message>
@@ -2324,7 +2586,8 @@ Redémarrer maintenant ?</translation>
     </message>
     <message>
         <source>Optimal (HunyuanOCR / PaddleOCR VL)</source>
-        <translation type="unfinished"></translation>
+        <translation type="unfinished">
+        Optimal (HunyuanOCR / PaddleOCR VL)</translation>
     </message>
     <message>
         <source>MangaLMM</source>
@@ -2332,11 +2595,13 @@ Redémarrer maintenant ?</translation>
     </message>
     <message>
         <source>Stage-Batched Pipeline (Recommended)</source>
-        <translation type="unfinished"></translation>
+        <translation type="unfinished">
+        Pipeline stage-batched (recommandé)</translation>
     </message>
     <message>
         <source>Legacy Page Pipeline (Legacy)</source>
-        <translation type="unfinished"></translation>
+        <translation type="unfinished">
+        Pipeline page par page hérité (legacy)</translation>
     </message>
     <message>
         <source>RT-DETR-v2 + CTD Line Protect + Source LaMa</source>
@@ -3145,7 +3410,8 @@ back on the Image (for further editing)</source>
     </message>
     <message>
         <source>Output</source>
-        <translation type="unfinished"></translation>
+        <translation type="unfinished">
+        Sortie</translation>
     </message>
     <message>
         <source>Use global output settings</source>
@@ -3827,7 +4093,8 @@ It may have been moved, renamed, or deleted.
     </message>
     <message>
         <source>Optimal (HunyuanOCR / PaddleOCR VL)</source>
-        <translation type="unfinished"></translation>
+        <translation type="unfinished">
+        Optimal (HunyuanOCR / PaddleOCR VL)</translation>
     </message>
     <message>
         <source>Microsoft OCR</source>

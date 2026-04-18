@@ -456,7 +456,8 @@ Geçerli çalıştırmayı iptal edin ya da tamamlanmasını bekleyin.</translat
     </message>
     <message>
         <source>OCR</source>
-        <translation>OCR</translation>
+        <translation>
+        OCR</translation>
     </message>
     <message>
         <source>API Key</source>
@@ -755,7 +756,8 @@ Start the server with both the HunyuanOCR GGUF model and the matching mmproj fil
     </message>
     <message>
         <source>Server URL</source>
-        <translation type="unfinished"></translation>
+        <translation>
+        Sunucu URL’si</translation>
     </message>
     <message>
         <source>Hunyuan OCR Tuning</source>
@@ -964,7 +966,8 @@ Keep the default localhost URL if you want Comic Translate to reuse the bundled 
     </message>
     <message>
         <source>Server URL</source>
-        <translation type="unfinished"></translation>
+        <translation type="unfinished">
+        Sunucu URL’si</translation>
     </message>
     <message>
         <source>MangaLMM OCR Tuning</source>
@@ -1276,7 +1279,8 @@ Lütfen internet bağlantınızı kontrol edin.</translation>
     </message>
     <message>
         <source>Translator</source>
-        <translation>Çevirmen</translation>
+        <translation>
+        Çevirmen</translation>
     </message>
     <message>
         <source>Gemma local server runtime setup failed</source>
@@ -1344,7 +1348,8 @@ Install it to use PSD features.</source>
     </message>
     <message>
         <source>Images</source>
-        <translation>Resimler</translation>
+        <translation>
+        Görseller</translation>
     </message>
     <message>
         <source>Document</source>
@@ -1416,26 +1421,267 @@ Install it to use PSD features.</source>
     </message>
 </context>
 <context>
+    <name>NotificationSound</name>
+    <message>
+        <source>Automatic translation</source>
+        <translation>
+        Otomatik çeviri</translation>
+    </message>
+    <message>
+        <source>Current page automatic translation</source>
+        <translation>
+        Geçerli sayfanın otomatik çevirisi</translation>
+    </message>
+    <message>
+        <source>Retry failed pages</source>
+        <translation>
+        Başarısız sayfaları yeniden dene</translation>
+    </message>
+    <message>
+        <source>Series queue automatic translation</source>
+        <translation>
+        Seri kuyruğu otomatik çevirisi</translation>
+    </message>
+    <message>
+        <source>Manual task</source>
+        <translation>
+        Manuel görev</translation>
+    </message>
+    <message>
+        <source>Notification test</source>
+        <translation>
+        Bildirim testi</translation>
+    </message>
+    <message>
+        <source>Automatic translation completed</source>
+        <translation>
+        Otomatik çeviri tamamlandı</translation>
+    </message>
+    <message>
+        <source>Automatic translation failed</source>
+        <translation>
+        Otomatik çeviri başarısız oldu</translation>
+    </message>
+    <message>
+        <source>Automatic translation cancelled</source>
+        <translation>
+        Otomatik çeviri iptal edildi</translation>
+    </message>
+    <message>
+        <source>Automatic translation update</source>
+        <translation>
+        Otomatik çeviri güncellemesi</translation>
+    </message>
+    <message>
+        <source>Completed</source>
+        <translation>
+        Tamamlandı</translation>
+    </message>
+    <message>
+        <source>Failed</source>
+        <translation>
+        Başarısız</translation>
+    </message>
+    <message>
+        <source>Cancelled</source>
+        <translation>
+        İptal edildi</translation>
+    </message>
+    <message>
+        <source>Test</source>
+        <translation>
+        Test</translation>
+    </message>
+    <message>
+        <source>Updated</source>
+        <translation>
+        Güncellendi</translation>
+    </message>
+    <message>
+        <source>Stage-Batched Pipeline (Recommended)</source>
+        <translation>
+        Stage-Batched Pipeline (önerilen)</translation>
+    </message>
+    <message>
+        <source>Legacy Page Pipeline (Legacy)</source>
+        <translation>
+        Legacy Page Pipeline (legacy)</translation>
+    </message>
+    <message>
+        <source>Optimal (HunyuanOCR / PaddleOCR VL)</source>
+        <translation>
+        Optimal (HunyuanOCR / PaddleOCR VL)</translation>
+    </message>
+    <message>
+        <source>Comic Translate</source>
+        <translation>
+        Comic Translate</translation>
+    </message>
+    <message>
+        <source>Status</source>
+        <translation>
+        Durum</translation>
+    </message>
+    <message>
+        <source>Run</source>
+        <translation>
+        Çalıştırma</translation>
+    </message>
+    <message>
+        <source>Images</source>
+        <translation>Resimler</translation>
+    </message>
+    <message>
+        <source>Workflow</source>
+        <translation>
+        İş akışı</translation>
+    </message>
+    <message>
+        <source>OCR</source>
+        <translation>OCR</translation>
+    </message>
+    <message>
+        <source>Translator</source>
+        <translation>Çevirmen</translation>
+    </message>
+    <message>
+        <source>Source language</source>
+        <translation>
+        Kaynak dil</translation>
+    </message>
+    <message>
+        <source>Target language</source>
+        <translation>
+        Hedef dil</translation>
+    </message>
+    <message>
+        <source>Output</source>
+        <translation>
+        Çıktı</translation>
+    </message>
+    <message>
+        <source>Summary</source>
+        <translation>
+        Özet</translation>
+    </message>
+    <message>
+        <source>Detail</source>
+        <translation>
+        Ayrıntı</translation>
+    </message>
+    <message>
+        <source>Time</source>
+        <translation>
+        Zaman</translation>
+    </message>
+    <message>
+        <source>This is a test notification from Comic Translate.</source>
+        <translation>
+        Bu, Comic Translate tarafından gönderilen bir test bildirimidir.</translation>
+    </message>
+</context>
+<context>
     <name>NotificationsPage</name>
     <message>
-        <source>Automatic Completion</source>
-        <translation>Otomatik tamamlama</translation>
+        <source>Notifications</source>
+        <translation>
+        Bildirimler</translation>
+    </message>
+    <message>
+        <source>Configure completion sounds and optional ntfy push notifications for automatic runs.</source>
+        <translation>
+        Otomatik çalıştırmalar için tamamlanma sesini ve isteğe bağlı ntfy anlık bildirimlerini yapılandırın.</translation>
+    </message>
+    <message>
+        <source>Automatic Completion Sound</source>
+        <translation>
+        Otomatik tamamlanma sesi</translation>
     </message>
     <message>
         <source>Play a sound when automatic processing finishes successfully. Custom files must be placed in the repository music folder.</source>
         <translation>Otomatik işlem başarıyla tamamlandığında bir ses çal. Özel dosyalar depo içindeki music klasörüne yerleştirilmelidir.</translation>
     </message>
     <message>
-        <source>Enable Completion Sound</source>
-        <translation>Tamamlama sesini etkinleştir</translation>
+        <source>Enable completion sound</source>
+        <translation>
+        Tamamlanma sesini etkinleştir</translation>
     </message>
     <message>
-        <source>Test Sound</source>
-        <translation>Sesi test et</translation>
+        <source>Test sound</source>
+        <translation>
+        Sesi test et</translation>
     </message>
     <message>
-        <source>Music Folder: {path}</source>
-        <translation>music klasörü: {path}</translation>
+        <source>Music folder: {path}</source>
+        <translation>
+        Müzik klasörü: {path}</translation>
+    </message>
+    <message>
+        <source>ntfy Push Notifications</source>
+        <translation>
+        ntfy anlık bildirimleri</translation>
+    </message>
+    <message>
+        <source>Send text-only notifications through ntfy when automatic processing finishes, fails, or is cancelled.
+The app keeps messages below ntfy&apos;s default 4 KiB text limit and never sends attachments.</source>
+        <translation>
+        Otomatik işleme tamamlandığında, başarısız olduğunda veya iptal edildiğinde ntfy üzerinden yalnızca metin bildirimleri gönderin.
+Uygulama mesajları ntfy’nin varsayılan 4 KiB metin sınırının altında tutar ve asla ek göndermez.</translation>
+    </message>
+    <message>
+        <source>Enable ntfy notifications</source>
+        <translation>
+        ntfy bildirimlerini etkinleştir</translation>
+    </message>
+    <message>
+        <source>Server URL</source>
+        <translation type="unfinished">
+        Sunucu URL’si</translation>
+    </message>
+    <message>
+        <source>Topic</source>
+        <translation>
+        Konu</translation>
+    </message>
+    <message>
+        <source>comic-translate</source>
+        <translation>
+        comic-translate</translation>
+    </message>
+    <message>
+        <source>Access token (optional)</source>
+        <translation>
+        Erişim belirteci (isteğe bağlı)</translation>
+    </message>
+    <message>
+        <source>Bearer token</source>
+        <translation>
+        Bearer belirteci</translation>
+    </message>
+    <message>
+        <source>Timeout (sec)</source>
+        <translation>
+        Zaman aşımı (sn)</translation>
+    </message>
+    <message>
+        <source>Send test notification</source>
+        <translation>
+        Test bildirimi gönder</translation>
+    </message>
+    <message>
+        <source>Notify on completion</source>
+        <translation>
+        Tamamlandığında bildir</translation>
+    </message>
+    <message>
+        <source>Notify on failure</source>
+        <translation>
+        Başarısız olursa bildir</translation>
+    </message>
+    <message>
+        <source>Notify on cancellation</source>
+        <translation>
+        İptal edilirse bildir</translation>
     </message>
     <message>
         <source>System sound</source>
@@ -1457,7 +1703,8 @@ Leave markdown or visualization options disabled unless you need debugging.</sou
     </message>
     <message>
         <source>Server URL</source>
-        <translation type="unfinished"></translation>
+        <translation type="unfinished">
+        Sunucu URL’si</translation>
     </message>
     <message>
         <source>Response Options</source>
@@ -2188,6 +2435,21 @@ Restart now?</source>
         <translation>Kontrol ediliyor...</translation>
     </message>
     <message>
+        <source>Enter an ntfy topic before sending a test notification.</source>
+        <translation>
+        Bir test bildirimi göndermeden önce ntfy konusu girin.</translation>
+    </message>
+    <message>
+        <source>Test ntfy notification sent.</source>
+        <translation>
+        ntfy test bildirimi gönderildi.</translation>
+    </message>
+    <message>
+        <source>Unable to send the ntfy test notification right now. Check the settings and try again.</source>
+        <translation>
+        Şu anda ntfy test bildirimi gönderilemiyor. Ayarları kontrol edip yeniden deneyin.</translation>
+    </message>
+    <message>
         <source>Check for Updates</source>
         <translation>Güncellemeleri Kontrol Et</translation>
     </message>
@@ -2364,7 +2626,8 @@ Restart now?</source>
     </message>
     <message>
         <source>Optimal (HunyuanOCR / PaddleOCR VL)</source>
-        <translation type="unfinished"></translation>
+        <translation type="unfinished">
+        Optimal (HunyuanOCR / PaddleOCR VL)</translation>
     </message>
     <message>
         <source>MangaLMM</source>
@@ -2372,11 +2635,13 @@ Restart now?</source>
     </message>
     <message>
         <source>Stage-Batched Pipeline (Recommended)</source>
-        <translation type="unfinished"></translation>
+        <translation type="unfinished">
+        Stage-Batched Pipeline (önerilen)</translation>
     </message>
     <message>
         <source>Legacy Page Pipeline (Legacy)</source>
-        <translation type="unfinished"></translation>
+        <translation type="unfinished">
+        Legacy Page Pipeline (legacy)</translation>
     </message>
     <message>
         <source>RT-DETR-v2 + CTD Line Protect + Source LaMa</source>
@@ -3145,7 +3410,8 @@ back on the Image (for further editing)</source>
     </message>
     <message>
         <source>Output</source>
-        <translation type="unfinished"></translation>
+        <translation type="unfinished">
+        Çıktı</translation>
     </message>
     <message>
         <source>Use global output settings</source>
@@ -3827,7 +4093,8 @@ It may have been moved, renamed, or deleted.
     </message>
     <message>
         <source>Optimal (HunyuanOCR / PaddleOCR VL)</source>
-        <translation type="unfinished"></translation>
+        <translation type="unfinished">
+        Optimal (HunyuanOCR / PaddleOCR VL)</translation>
     </message>
     <message>
         <source>Microsoft OCR</source>

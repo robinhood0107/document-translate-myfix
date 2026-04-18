@@ -456,7 +456,8 @@ Cancel the current run or wait for it to finish first.</source>
     </message>
     <message>
         <source>OCR</source>
-        <translation>OCR</translation>
+        <translation>
+        OCR</translation>
     </message>
     <message>
         <source>API Key</source>
@@ -755,7 +756,8 @@ Start the server with both the HunyuanOCR GGUF model and the matching mmproj fil
     </message>
     <message>
         <source>Server URL</source>
-        <translation type="unfinished"></translation>
+        <translation>
+        服务器 URL</translation>
     </message>
     <message>
         <source>Hunyuan OCR Tuning</source>
@@ -964,7 +966,8 @@ Keep the default localhost URL if you want Comic Translate to reuse the bundled 
     </message>
     <message>
         <source>Server URL</source>
-        <translation type="unfinished"></translation>
+        <translation type="unfinished">
+        服务器 URL</translation>
     </message>
     <message>
         <source>MangaLMM OCR Tuning</source>
@@ -1275,7 +1278,8 @@ Please check your internet connection.</source>
     </message>
     <message>
         <source>Translator</source>
-        <translation>翻译器</translation>
+        <translation>
+        翻译器</translation>
     </message>
     <message>
         <source>Gemma local server runtime setup failed</source>
@@ -1343,7 +1347,8 @@ Install it to use PSD features.</source>
     </message>
     <message>
         <source>Images</source>
-        <translation>图片</translation>
+        <translation>
+        图像</translation>
     </message>
     <message>
         <source>Document</source>
@@ -1415,26 +1420,267 @@ Install it to use PSD features.</source>
     </message>
 </context>
 <context>
+    <name>NotificationSound</name>
+    <message>
+        <source>Automatic translation</source>
+        <translation>
+        自动翻译</translation>
+    </message>
+    <message>
+        <source>Current page automatic translation</source>
+        <translation>
+        当前页面自动翻译</translation>
+    </message>
+    <message>
+        <source>Retry failed pages</source>
+        <translation>
+        重试失败页面</translation>
+    </message>
+    <message>
+        <source>Series queue automatic translation</source>
+        <translation>
+        系列队列自动翻译</translation>
+    </message>
+    <message>
+        <source>Manual task</source>
+        <translation>
+        手动任务</translation>
+    </message>
+    <message>
+        <source>Notification test</source>
+        <translation>
+        通知测试</translation>
+    </message>
+    <message>
+        <source>Automatic translation completed</source>
+        <translation>
+        自动翻译已完成</translation>
+    </message>
+    <message>
+        <source>Automatic translation failed</source>
+        <translation>
+        自动翻译失败</translation>
+    </message>
+    <message>
+        <source>Automatic translation cancelled</source>
+        <translation>
+        自动翻译已取消</translation>
+    </message>
+    <message>
+        <source>Automatic translation update</source>
+        <translation>
+        自动翻译更新</translation>
+    </message>
+    <message>
+        <source>Completed</source>
+        <translation>
+        已完成</translation>
+    </message>
+    <message>
+        <source>Failed</source>
+        <translation>
+        失败</translation>
+    </message>
+    <message>
+        <source>Cancelled</source>
+        <translation>
+        已取消</translation>
+    </message>
+    <message>
+        <source>Test</source>
+        <translation>
+        测试</translation>
+    </message>
+    <message>
+        <source>Updated</source>
+        <translation>
+        已更新</translation>
+    </message>
+    <message>
+        <source>Stage-Batched Pipeline (Recommended)</source>
+        <translation>
+        Stage-Batched Pipeline（推荐）</translation>
+    </message>
+    <message>
+        <source>Legacy Page Pipeline (Legacy)</source>
+        <translation>
+        Legacy Page Pipeline（旧版）</translation>
+    </message>
+    <message>
+        <source>Optimal (HunyuanOCR / PaddleOCR VL)</source>
+        <translation>
+        最佳（HunyuanOCR / PaddleOCR VL）</translation>
+    </message>
+    <message>
+        <source>Comic Translate</source>
+        <translation>
+        Comic Translate</translation>
+    </message>
+    <message>
+        <source>Status</source>
+        <translation>
+        状态</translation>
+    </message>
+    <message>
+        <source>Run</source>
+        <translation>
+        运行</translation>
+    </message>
+    <message>
+        <source>Images</source>
+        <translation>图片</translation>
+    </message>
+    <message>
+        <source>Workflow</source>
+        <translation>
+        工作流</translation>
+    </message>
+    <message>
+        <source>OCR</source>
+        <translation>OCR</translation>
+    </message>
+    <message>
+        <source>Translator</source>
+        <translation>翻译器</translation>
+    </message>
+    <message>
+        <source>Source language</source>
+        <translation>
+        源语言</translation>
+    </message>
+    <message>
+        <source>Target language</source>
+        <translation>
+        目标语言</translation>
+    </message>
+    <message>
+        <source>Output</source>
+        <translation>
+        输出</translation>
+    </message>
+    <message>
+        <source>Summary</source>
+        <translation>
+        摘要</translation>
+    </message>
+    <message>
+        <source>Detail</source>
+        <translation>
+        详情</translation>
+    </message>
+    <message>
+        <source>Time</source>
+        <translation>
+        时间</translation>
+    </message>
+    <message>
+        <source>This is a test notification from Comic Translate.</source>
+        <translation>
+        这是来自 Comic Translate 的测试通知。</translation>
+    </message>
+</context>
+<context>
     <name>NotificationsPage</name>
     <message>
-        <source>Automatic Completion</source>
-        <translation>自动处理完成</translation>
+        <source>Notifications</source>
+        <translation>
+        通知</translation>
+    </message>
+    <message>
+        <source>Configure completion sounds and optional ntfy push notifications for automatic runs.</source>
+        <translation>
+        为自动运行配置完成提示音和可选的 ntfy 推送通知。</translation>
+    </message>
+    <message>
+        <source>Automatic Completion Sound</source>
+        <translation>
+        自动完成提示音</translation>
     </message>
     <message>
         <source>Play a sound when automatic processing finishes successfully. Custom files must be placed in the repository music folder.</source>
         <translation>自动处理成功完成时播放声音。自定义文件必须放在仓库的 music 文件夹中。</translation>
     </message>
     <message>
-        <source>Enable Completion Sound</source>
-        <translation>启用完成提示音</translation>
+        <source>Enable completion sound</source>
+        <translation>
+        启用完成提示音</translation>
     </message>
     <message>
-        <source>Test Sound</source>
-        <translation>测试声音</translation>
+        <source>Test sound</source>
+        <translation>
+        测试提示音</translation>
     </message>
     <message>
-        <source>Music Folder: {path}</source>
-        <translation>music 文件夹：{path}</translation>
+        <source>Music folder: {path}</source>
+        <translation>
+        音乐文件夹：{path}</translation>
+    </message>
+    <message>
+        <source>ntfy Push Notifications</source>
+        <translation>
+        ntfy 推送通知</translation>
+    </message>
+    <message>
+        <source>Send text-only notifications through ntfy when automatic processing finishes, fails, or is cancelled.
+The app keeps messages below ntfy&apos;s default 4 KiB text limit and never sends attachments.</source>
+        <translation>
+        当自动处理完成、失败或取消时，通过 ntfy 发送纯文本通知。
+应用会将消息保持在 ntfy 默认的 4 KiB 文本限制以内，并且绝不会发送附件。</translation>
+    </message>
+    <message>
+        <source>Enable ntfy notifications</source>
+        <translation>
+        启用 ntfy 通知</translation>
+    </message>
+    <message>
+        <source>Server URL</source>
+        <translation type="unfinished">
+        服务器 URL</translation>
+    </message>
+    <message>
+        <source>Topic</source>
+        <translation>
+        主题</translation>
+    </message>
+    <message>
+        <source>comic-translate</source>
+        <translation>
+        comic-translate</translation>
+    </message>
+    <message>
+        <source>Access token (optional)</source>
+        <translation>
+        访问令牌（可选）</translation>
+    </message>
+    <message>
+        <source>Bearer token</source>
+        <translation>
+        Bearer 令牌</translation>
+    </message>
+    <message>
+        <source>Timeout (sec)</source>
+        <translation>
+        超时（秒）</translation>
+    </message>
+    <message>
+        <source>Send test notification</source>
+        <translation>
+        发送测试通知</translation>
+    </message>
+    <message>
+        <source>Notify on completion</source>
+        <translation>
+        完成时通知</translation>
+    </message>
+    <message>
+        <source>Notify on failure</source>
+        <translation>
+        失败时通知</translation>
+    </message>
+    <message>
+        <source>Notify on cancellation</source>
+        <translation>
+        取消时通知</translation>
     </message>
     <message>
         <source>System sound</source>
@@ -1456,7 +1702,8 @@ Leave markdown or visualization options disabled unless you need debugging.</sou
     </message>
     <message>
         <source>Server URL</source>
-        <translation type="unfinished"></translation>
+        <translation type="unfinished">
+        服务器 URL</translation>
     </message>
     <message>
         <source>Response Options</source>
@@ -2187,6 +2434,21 @@ Restart now?</source>
         <translation>正在检查...</translation>
     </message>
     <message>
+        <source>Enter an ntfy topic before sending a test notification.</source>
+        <translation>
+        发送测试通知前，请先输入 ntfy 主题。</translation>
+    </message>
+    <message>
+        <source>Test ntfy notification sent.</source>
+        <translation>
+        已发送 ntfy 测试通知。</translation>
+    </message>
+    <message>
+        <source>Unable to send the ntfy test notification right now. Check the settings and try again.</source>
+        <translation>
+        当前无法发送 ntfy 测试通知。请检查设置后重试。</translation>
+    </message>
+    <message>
         <source>Check for Updates</source>
         <translation>检查更新</translation>
     </message>
@@ -2363,7 +2625,8 @@ Restart now?</source>
     </message>
     <message>
         <source>Optimal (HunyuanOCR / PaddleOCR VL)</source>
-        <translation type="unfinished"></translation>
+        <translation type="unfinished">
+        最佳（HunyuanOCR / PaddleOCR VL）</translation>
     </message>
     <message>
         <source>MangaLMM</source>
@@ -2371,11 +2634,13 @@ Restart now?</source>
     </message>
     <message>
         <source>Stage-Batched Pipeline (Recommended)</source>
-        <translation type="unfinished"></translation>
+        <translation type="unfinished">
+        Stage-Batched Pipeline（推荐）</translation>
     </message>
     <message>
         <source>Legacy Page Pipeline (Legacy)</source>
-        <translation type="unfinished"></translation>
+        <translation type="unfinished">
+        Legacy Page Pipeline（旧版）</translation>
     </message>
     <message>
         <source>RT-DETR-v2 + CTD Line Protect + Source LaMa</source>
@@ -3143,7 +3408,8 @@ back on the Image (for further editing)</source>
     </message>
     <message>
         <source>Output</source>
-        <translation type="unfinished"></translation>
+        <translation type="unfinished">
+        输出</translation>
     </message>
     <message>
         <source>Use global output settings</source>
@@ -3825,7 +4091,8 @@ It may have been moved, renamed, or deleted.
     </message>
     <message>
         <source>Optimal (HunyuanOCR / PaddleOCR VL)</source>
-        <translation type="unfinished"></translation>
+        <translation type="unfinished">
+        最佳（HunyuanOCR / PaddleOCR VL）</translation>
     </message>
     <message>
         <source>Microsoft OCR</source>

@@ -173,6 +173,7 @@ class ComicTranslate(ComicTranslateUI):
         self._current_batch_run_type = None
         self._last_batch_request_paths = []
         self._last_batch_run_type = "batch"
+        self._last_batch_failure_detail = ""
         self._automatic_progress_settings_target = None
         self._last_runtime_preview_path = ""
         self._last_batch_output_root = ""
@@ -1109,6 +1110,8 @@ class ComicTranslate(ComicTranslateUI):
     def report_runtime_progress(self, payload: dict[str, Any]):
         if not isinstance(payload, dict):
             return
+        if getattr(self, "_is_shutting_down", False):
+            return
         try:
             self.runtime_progress_update.emit(dict(payload))
         except Exception:
@@ -1144,6 +1147,15 @@ class ComicTranslate(ComicTranslateUI):
     def on_runtime_progress_update(self, payload: dict):
         if not isinstance(payload, dict):
             return
+        if getattr(self, "_is_shutting_down", False):
+            return
+        if self._batch_cancel_requested:
+            phase = str(payload.get("phase") or "").strip().lower()
+            status = str(payload.get("status") or "").strip().lower()
+            terminal_phases = {"done"}
+            terminal_statuses = {"cancelled", "failed", "completed"}
+            if phase not in terminal_phases and status not in terminal_statuses:
+                return
         event = self._automatic_progress_tracker.enrich(payload)
         preview_path = str(event.get("preview_path") or "").strip()
         if preview_path:
@@ -1202,6 +1214,9 @@ class ComicTranslate(ComicTranslateUI):
     def default_error_handler(self, error_tuple: Tuple):
         exctype, value, traceback_str = error_tuple
 
+        if getattr(self, "_is_shutting_down", False):
+            return
+
         if issubclass(exctype, OperationCancelledError):
             self.pipeline_status_panel.update_event({
                 "phase": "done",
@@ -1215,7 +1230,19 @@ class ComicTranslate(ComicTranslateUI):
             return
 
         if self._batch_active:
+            if self._batch_cancel_requested:
+                self.pipeline_status_panel.update_event({
+                    "phase": "done",
+                    "status": "cancelled",
+                    "service": "batch",
+                    "message": self.tr("작업이 취소되었습니다."),
+                    "panel_state": "cancelled",
+                })
+                self.set_pipeline_overlay_active(False)
+                self.loading.setVisible(False)
+                return
             self._batch_failed = True
+            self._last_batch_failure_detail = str(value)
             service_name = getattr(value, "service_name", "Gemma") if isinstance(value, BaseException) else "Gemma"
             self._automatic_progress_settings_target = getattr(value, "settings_page_name", self.tr("Gemma Local Server Settings"))
             service_key = "gemma" if "gemma" in service_name.lower() else ("paddleocr_vl" if "paddle" in service_name.lower() else "batch")
@@ -1654,6 +1681,7 @@ class ComicTranslate(ComicTranslateUI):
         self._last_batch_request_paths = list(selected_paths)
         self._last_batch_run_type = run_type
         self._batch_failed = False
+        self._last_batch_failure_detail = ""
         ocr_preflight_cache: dict[str, str] = {}
 
         for path in selected_paths:
@@ -1802,6 +1830,9 @@ class ComicTranslate(ComicTranslateUI):
         self._batch_cancel_requested = False
         self._batch_failed = False
         self._current_batch_run_type = None
+        if getattr(self, "_is_shutting_down", False):
+            self.selected_batch = []
+            return
         self._set_project_navigation_enabled(True)
         report = self._finalize_batch_report(was_cancelled)
         archive_path = ""
@@ -1835,10 +1866,31 @@ class ComicTranslate(ComicTranslateUI):
                 "message": self.tr("작업이 취소되었습니다."),
                 "panel_state": "cancelled",
             })
+            notify_pipeline_event(
+                {
+                    "event_type": "pipeline_cancelled",
+                    "run_type": self._last_batch_run_type,
+                    "image_count": total_images,
+                    "source_language": self.s_combo.currentText(),
+                    "target_language": self.t_combo.currentText(),
+                    "output_root": self._last_batch_output_root,
+                }
+            )
         elif failed:
             self.set_pipeline_overlay_active(False)
             panel.show()
             panel.raise_()
+            notify_pipeline_event(
+                {
+                    "event_type": "pipeline_failed",
+                    "run_type": self._last_batch_run_type,
+                    "image_count": total_images,
+                    "source_language": self.s_combo.currentText(),
+                    "target_language": self.t_combo.currentText(),
+                    "output_root": self._last_batch_output_root,
+                    "detail": self._last_batch_failure_detail,
+                }
+            )
         else:
             self.set_pipeline_overlay_active(False)
             self._automatic_progress_tracker.record_batch_completion(success=True, total_images=total_images)
@@ -1864,8 +1916,9 @@ class ComicTranslate(ComicTranslateUI):
                     "run_type": self._last_batch_run_type,
                     "success": True,
                     "image_count": total_images,
+                    "source_language": self.s_combo.currentText(),
+                    "target_language": self.t_combo.currentText(),
                     "output_root": self._last_batch_output_root,
-                    "message": self.tr("자동번역이 완료되었습니다."),
                 }
             )
 
@@ -2069,6 +2122,7 @@ class ComicTranslate(ComicTranslateUI):
         if getattr(self, "_is_shutting_down", False):
             return
         self._is_shutting_down = True
+        self._batch_cancel_requested = True
 
         self.batch_report_ctrl.shutdown()
 

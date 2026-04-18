@@ -39,3 +39,47 @@ class NotificationSoundTests(unittest.TestCase):
             self.assertTrue(notification_sound.play_completion_sound("file", "missing.wav"))
             play_system.assert_called_once()
 
+    def test_normalize_ntfy_settings_applies_defaults(self) -> None:
+        normalized = notification_sound.normalize_ntfy_settings(
+            {
+                "enable_ntfy_notifications": True,
+                "ntfy_server_url": "https://ntfy.example.com////",
+                "ntfy_timeout_sec": 999,
+            }
+        )
+
+        self.assertTrue(normalized["enable_ntfy_notifications"])
+        self.assertEqual(normalized["ntfy_server_url"], "https://ntfy.example.com")
+        self.assertEqual(normalized["ntfy_timeout_sec"], 60)
+        self.assertEqual(normalized["ntfy_topic"], "")
+        self.assertTrue(normalized["ntfy_send_success"])
+
+    def test_build_ntfy_message_stays_within_safe_limit(self) -> None:
+        long_text = "가" * 5000
+        with mock.patch(
+            "modules.utils.notification_sound._current_tool_summary",
+            return_value={
+                "workflow": "Stage-Batched Pipeline (Recommended)",
+                "ocr": "Optimal (HunyuanOCR / PaddleOCR VL)",
+                "translator": "Custom Local Server(Gemma)",
+            },
+        ):
+            message = notification_sound.build_ntfy_message(
+                {
+                    "event_type": "pipeline_failed",
+                    "run_type": "batch",
+                    "image_count": 25,
+                    "message": long_text,
+                    "detail": long_text,
+                    "source_language": "日本語",
+                    "target_language": "한국어",
+                    "output_root": "C:/temp/output",
+                }
+            )
+
+        self.assertLessEqual(
+            len(message["body"].encode("utf-8")),
+            notification_sound.NTFY_SAFE_MESSAGE_LIMIT_BYTES,
+        )
+        self.assertEqual(message["priority"], "high")
+

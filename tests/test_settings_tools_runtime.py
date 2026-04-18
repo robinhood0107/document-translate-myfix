@@ -133,12 +133,36 @@ class SettingsToolsRuntimeTests(unittest.TestCase):
         page.ui.notifications_page.enable_completion_sound_checkbox.setChecked(False)
         combo = page.ui.notifications_page.completion_sound_combo
         combo.setCurrentIndex(1)
+        page.ui.notifications_page.enable_ntfy_checkbox.setChecked(True)
+        page.ui.notifications_page.ntfy_server_url_input.setText("https://ntfy.example.com")
+        page.ui.notifications_page.ntfy_topic_input.setText("comic-translate")
+        page.ui.notifications_page.ntfy_access_token_input.setText("secret-token")
+        page.ui.notifications_page.ntfy_failure_checkbox.setChecked(False)
+        page.ui.notifications_page.ntfy_cancelled_checkbox.setChecked(True)
+        page.ui.notifications_page.ntfy_timeout_spinbox.setValue(12)
         page.save_settings()
 
         settings = QtCore.QSettings("ComicLabs", "ComicTranslate")
         self.assertFalse(settings.value("notifications/enable_completion_sound", True, type=bool))
         self.assertEqual(settings.value("notifications/completion_sound_mode", "", type=str), "file")
         self.assertEqual(settings.value("notifications/completion_sound_file", "", type=str), "notify.wav")
+        self.assertTrue(settings.value("notifications/enable_ntfy_notifications", False, type=bool))
+        self.assertEqual(
+            settings.value("notifications/ntfy_server_url", "", type=str),
+            "https://ntfy.example.com",
+        )
+        self.assertEqual(
+            settings.value("notifications/ntfy_topic", "", type=str),
+            "comic-translate",
+        )
+        self.assertEqual(
+            settings.value("notifications/ntfy_access_token", "", type=str),
+            "secret-token",
+        )
+        self.assertTrue(settings.value("notifications/ntfy_send_success", False, type=bool))
+        self.assertFalse(settings.value("notifications/ntfy_send_failure", True, type=bool))
+        self.assertTrue(settings.value("notifications/ntfy_send_cancelled", False, type=bool))
+        self.assertEqual(settings.value("notifications/ntfy_timeout_sec", 0, type=int), 12)
 
     def test_mangalmm_settings_round_trip(self) -> None:
         page = self._make_page()

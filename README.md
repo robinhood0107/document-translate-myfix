@@ -167,6 +167,11 @@ Audit document:
 
 ## Quick Start
 
+For a more explicit setup path, see:
+
+- [docs/setup/quickstart.md](docs/setup/quickstart.md)
+- [docs/setup/quickstart-ko.md](docs/setup/quickstart-ko.md)
+
 ### 1. Launch the application
 
 The launchers create or update their own local runtime environment on first run.
@@ -210,6 +215,37 @@ In Settings, choose:
 
 - `Default (existing auto: MangaOCR / PPOCR / Pororo...)` to keep legacy OCR routing
 - `Optimal (HunyuanOCR / PaddleOCR VL)` to route Chinese to `HunyuanOCR` and Japanese/other languages to `PaddleOCR VL`
+
+### 5. Optional ntfy notifications
+
+Open `Settings > Notifications` to configure:
+
+- completion sound
+- ntfy server URL / topic / optional token
+- whether to send on completion / failure / cancellation
+
+The app sends plain-text-only ntfy notifications and keeps the message body below the default ntfy text limit documented by ntfy.
+
+Official ntfy docs:
+
+- [Publish notifications](https://docs.ntfy.sh/publish/)
+- [Server configuration](https://docs.ntfy.sh/config/)
+
+## Docker Images Used by This Repository
+
+Tracked compose/runtime images used by the repo:
+
+- Gemma local server: `ghcr.io/ggml-org/llama.cpp:server-cuda`
+- HunyuanOCR local server: `ghcr.io/ggml-org/llama.cpp:server-cuda`
+- PaddleOCR VL runtime: `ccr-2vdh3abv-pub.cnc.bj.baidubce.com/paddlepaddle/paddleocr-genai-vllm-server:latest-nvidia-gpu-offline`
+
+## Reference Setup Docs
+
+- [docs/setup/quickstart.md](docs/setup/quickstart.md)
+- [docs/setup/quickstart-ko.md](docs/setup/quickstart-ko.md)
+- [docs/gemma/local-server-ko.md](docs/gemma/local-server-ko.md)
+- [docs/hunyuan/local-server-ko.md](docs/hunyuan/local-server-ko.md)
+- [paddleocr_vl_docker_files/README.md](paddleocr_vl_docker_files/README.md)
 
 ## Repository Documents
 
