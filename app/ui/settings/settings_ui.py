@@ -139,7 +139,6 @@ class SettingsPageUI(QtWidgets.QWidget):
             # OCR mappings
             self.tr("Default (existing auto: MangaOCR / PPOCR / Pororo...)"): "default",
             self.tr("Optimal (HunyuanOCR / PaddleOCR VL)"): "best_local",
-            self.tr("Optimal+ (HunyuanOCR / MangaLMM / PaddleOCR VL)"): "best_local_plus",
             self.tr("Microsoft OCR"): "microsoft_ocr",
             self.tr("Google Cloud Vision"): "google_cloud_vision",
             self.tr("Gemini-2.0-Flash"): "gemini_2_0_flash",

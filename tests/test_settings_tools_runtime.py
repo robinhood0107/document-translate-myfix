@@ -153,11 +153,11 @@ class SettingsToolsRuntimeTests(unittest.TestCase):
         page.ui.mangalmm_ocr_safe_resize_checkbox.setChecked(False)
         page.ui.mangalmm_ocr_max_pixels_spinbox.setValue(1500000)
         page.ui.mangalmm_ocr_max_long_side_spinbox.setValue(1408)
-        page._set_ocr_mode("best_local_plus")
+        page._set_ocr_mode("mangalmm")
         page.save_settings()
 
         settings = QtCore.QSettings("ComicLabs", "ComicTranslate")
-        self.assertEqual(settings.value("tools/ocr", "", type=str), "best_local_plus")
+        self.assertEqual(settings.value("tools/ocr", "", type=str), "mangalmm")
         self.assertEqual(settings.value("mangalmm_ocr/server_url", "", type=str), "http://127.0.0.1:28081/v1")
         self.assertEqual(settings.value("mangalmm_ocr/max_completion_tokens", 0, type=int), 320)
         self.assertEqual(settings.value("mangalmm_ocr/parallel_workers", 0, type=int), 1)
@@ -166,6 +166,22 @@ class SettingsToolsRuntimeTests(unittest.TestCase):
         self.assertFalse(settings.value("mangalmm_ocr/safe_resize", True, type=bool))
         self.assertEqual(settings.value("mangalmm_ocr/max_pixels", 0, type=int), 1500000)
         self.assertEqual(settings.value("mangalmm_ocr/max_long_side", 0, type=int), 1408)
+
+    def test_legacy_optimal_plus_setting_loads_as_optimal(self) -> None:
+        settings = QtCore.QSettings("ComicLabs", "ComicTranslate")
+        settings.setValue("tools/ocr", "best_local_plus")
+        settings.sync()
+
+        page = self._make_page()
+        page.load_settings()
+
+        combo_items = [page.ui.ocr_combo.itemText(index) for index in range(page.ui.ocr_combo.count())]
+        self.assertNotIn("Optimal+ (HunyuanOCR / MangaLMM / PaddleOCR VL)", combo_items)
+        self.assertEqual(page.get_tool_selection("ocr"), "best_local")
+        self.assertEqual(page.get_ocr_mode_label(), "Optimal (HunyuanOCR / PaddleOCR VL)")
+
+        page.save_settings()
+        self.assertEqual(settings.value("tools/ocr", "", type=str), "best_local")
 
 
 if __name__ == "__main__":

@@ -34,6 +34,7 @@
 - `render/export all`
 
 이번 승격에서는 benchmark winner 기준으로 Japanese `Optimal -> PaddleOCR VL` 경로를 기본 운영안으로 본다.
+`Optimal+` preset은 benchmark 실패로 제품 surface에서 제거하고, 과거 저장값은 `Optimal`로 자동 보정한다.
 
 ### `Legacy Page Pipeline (Legacy)`
 

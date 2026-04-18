@@ -5,7 +5,7 @@ import unittest
 
 import numpy as np
 
-from modules.ocr.selection import OCR_MODE_BEST_LOCAL_PLUS, OCR_MODE_PADDLE_VL
+from modules.ocr.selection import OCR_MODE_MANGALMM, OCR_MODE_PADDLE_VL
 from modules.translation.llm.base import BaseLLMTranslation
 from modules.utils.text_normalization import normalize_decorative_ocr_text
 from modules.utils.textblock import TextBlock
@@ -69,9 +69,9 @@ class TranslationInputNormalizationTests(unittest.TestCase):
             sample,
         )
 
-    def test_llm_translation_payload_resolves_mangalmm_under_optimal_plus(self) -> None:
+    def test_llm_translation_payload_resolves_mangalmm_under_direct_mode(self) -> None:
         engine = _StubLLMTranslation()
-        engine.initialize(_FakeSettings(OCR_MODE_BEST_LOCAL_PLUS), "Japanese", "Korean")
+        engine.initialize(_FakeSettings(OCR_MODE_MANGALMM), "Japanese", "Korean")
         blk = _make_block("⌒テ✺スト︸")
 
         raw_json, normalized_json = engine._build_translation_input_payloads([blk])
