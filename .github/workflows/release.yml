@@ -75,8 +75,10 @@ jobs:
         run: |
           python -m nuitka `
             --standalone `
+            --low-memory `
             --assume-yes-for-downloads `
             --enable-plugin=pyside6 `
+            --module-parameter=torch-disable-jit=no `
             --windows-console-mode=disable `
             --windows-icon-from-ico=resources/icons/icon.ico `
             --company-name="ComicLabs" `
@@ -85,6 +87,7 @@ jobs:
             --product-version="$env:APP_VERSION" `
             --output-dir=build/nuitka `
             --output-filename=comic-translate `
+            --include-windows-runtime-dlls=yes `
             --include-data-dir=resources=resources `
             --include-data-dir=music=music `
             comic.py
