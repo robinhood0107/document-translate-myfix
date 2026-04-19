@@ -18,10 +18,14 @@ FORBIDDEN_TRACKED_PREFIXES = (
     ".mypy_cache/",
     ".ruff_cache/",
     ".idea/",
+    "fonts/",
 )
 FORBIDDEN_TRACKED_NAMES = {
     ".DS_Store",
 }
+FORBIDDEN_TRACKED_PATTERNS = (
+    re.compile(r"(?i)^.+\.(ttf|otf|woff|woff2|ttc|fon)$"),
+)
 BENCHMARK_ONLY_PREFIXES = (
     "benchmarks/",
     "docs/benchmark/",
@@ -95,6 +99,9 @@ def validate_tracked_paths() -> list[str]:
             continue
         if any(normalized.startswith(prefix) for prefix in FORBIDDEN_TRACKED_PREFIXES):
             errors.append(f"Forbidden tracked path: {normalized}")
+            continue
+        if any(pattern.match(normalized) for pattern in FORBIDDEN_TRACKED_PATTERNS):
+            errors.append(f"Forbidden tracked font asset: {normalized}")
     return errors
 
 

@@ -37,6 +37,7 @@ htmlcov/
 #ai models
 /models/
 testmodel
+/fonts/
 /Sample/
 /banchmark_result_log/
 /benchmarks/ocr_combo/

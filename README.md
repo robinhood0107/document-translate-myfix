@@ -33,6 +33,25 @@ The fork is maintained around a practical desktop workflow:
 
 This repository started from [ogkalu2/comic-translate](https://github.com/ogkalu2/comic-translate) and should be understood as a downstream, product-focused fork/derivative of that upstream work. It began from the upstream `v2.6.7` codebase and then diverged with local runtime, OCR, Windows, and workflow changes.
 
+## License and Redistribution
+
+The upstream project is distributed under the Apache License 2.0, and this fork keeps that license basis for the upstream-derived code in this repository.
+
+If you publicly redistribute this fork or a modified build of it, the practical minimum checklist is:
+
+- include the Apache 2.0 license text with the redistributed work
+- keep upstream copyright, patent, attribution, and origin notices that still apply
+- make it clear that this repository is a modified downstream fork/derivative, not the original upstream project
+- add prominent notices for files you modified when redistributing the source
+- review third-party asset licenses separately from the code license
+
+Important notes:
+
+- This repository is a derivative/fork, not a clean-room reimplementation.
+- Refactoring, porting to another language, or removing features does not by itself remove Apache 2.0 obligations if the result is still derived from the upstream work.
+- Model weights, Docker images, fonts, datasets, and checkpoints may have their own licenses and usage restrictions. You must review those separately before shipping or commercializing a build.
+- Bundled font binaries are intentionally not distributed from this repository. Users should supply their own fonts where needed.
+
 ## Third-Party Models and Runtime Notice
 
 This project uses, downloads, or interoperates with third-party models, checkpoints, and runtime images. The copyright, license, and usage terms for those assets belong to their original authors and distributors, and this repository does not claim ownership of them. You are responsible for reviewing and complying with each upstream model/runtime license before using them.
