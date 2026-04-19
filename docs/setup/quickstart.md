@@ -149,6 +149,7 @@ Inpainting:
 
 Official Windows release packages are published only from `vX.Y.Z` tags that point to commits already contained in `main`.
 
+- preflight requirement: run `Release Preflight` on `main` and wait for a green Windows Nuitka build before tagging
 - release trigger: Git tag push
 - accepted tag shape: `vX.Y.Z`
 - build target: Windows executable package built with `Nuitka`
