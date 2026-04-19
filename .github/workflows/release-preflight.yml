@@ -1,6 +1,14 @@
 name: Release Preflight
 
 on:
+  push:
+    branches:
+      - main
+    paths:
+      - ".github/workflows/release-preflight.yml"
+      - ".github/workflows/release.yml"
+      - "scripts/build_windows_release_nuitka.ps1"
+      - "app/version.py"
   workflow_dispatch:
 
 permissions:
