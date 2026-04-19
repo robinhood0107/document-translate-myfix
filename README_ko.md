@@ -93,7 +93,9 @@ OCR:
 
 - `develop`: 다음 제품 작업을 통합하는 브랜치
 - `main`: 실제 출하 기준선
-- 릴리스: `main` 커밋에 버전 태그를 달아 GitHub Release 생성
+- 공식 릴리스: `main`에 포함된 커밋에만 `vX.Y.Z` 버전 태그를 달아 GitHub Release 생성
+- Windows 릴리스 자산: 해당 태그에서 `Nuitka`로 exe 패키징 후 업로드
+- 모델, 체크포인트, Docker 런타임은 exe에 포함하지 않고 별도 준비 대상으로 유지
 - `release/*` 브랜치는 사용하지 않음
 
 저장소 운영 기준 문서는 [rules.md](rules.md)입니다.

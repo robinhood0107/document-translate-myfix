@@ -144,3 +144,15 @@ Inpainting:
 - [/README_ko.md](/mnt/c/Users/pjjpj/Desktop/openai_manga_translater/comic-translate/README_ko.md)
 - [/docs/gemma/local-server-ko.md](/mnt/c/Users/pjjpj/Desktop/openai_manga_translater/comic-translate/docs/gemma/local-server-ko.md)
 - [/docs/hunyuan/local-server-ko.md](/mnt/c/Users/pjjpj/Desktop/openai_manga_translater/comic-translate/docs/hunyuan/local-server-ko.md)
+
+## 8. Official Windows release packages
+
+Official Windows release packages are published only from `vX.Y.Z` tags that point to commits already contained in `main`.
+
+- release trigger: Git tag push
+- accepted tag shape: `vX.Y.Z`
+- build target: Windows executable package built with `Nuitka`
+- bundled scope: app/runtime shell only
+- not bundled: models, checkpoints, Docker runtimes
+
+If you need the full local runtime stack, follow the runtime setup steps in this quickstart after downloading the release package.

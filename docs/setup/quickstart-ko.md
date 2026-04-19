@@ -147,3 +147,15 @@ OCR:
 - [/README_ko.md](/mnt/c/Users/pjjpj/Desktop/openai_manga_translater/comic-translate/README_ko.md)
 - [/docs/gemma/local-server-ko.md](/mnt/c/Users/pjjpj/Desktop/openai_manga_translater/comic-translate/docs/gemma/local-server-ko.md)
 - [/docs/hunyuan/local-server-ko.md](/mnt/c/Users/pjjpj/Desktop/openai_manga_translater/comic-translate/docs/hunyuan/local-server-ko.md)
+
+## 8. 공식 Windows 릴리스 패키지
+
+공식 Windows 릴리스 패키지는 `main`에 포함된 커밋에만 `vX.Y.Z` 태그를 달았을 때 생성됩니다.
+
+- 릴리스 트리거: Git 태그 push
+- 허용 태그 형식: `vX.Y.Z`
+- 빌드 대상: `Nuitka` 기반 Windows exe 패키지
+- 포함 범위: 앱 본체와 실행 셸
+- 미포함 범위: 모델, 체크포인트, Docker 런타임
+
+릴리스 패키지만으로 전체 로컬 런타임이 완성되지는 않으므로, 내려받은 뒤 이 가이드의 런타임 설정 단계를 이어서 진행하면 됩니다.
