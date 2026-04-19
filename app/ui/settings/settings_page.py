@@ -29,13 +29,16 @@ from .settings_ui import SettingsPageUI
 from .gemma_local_server_page import GemmaLocalServerPage
 from .hunyuan_ocr_page import HunyuanOCRPage
 from .mangalmm_ocr_page import MangaLMMOCRPage
+from app.ui.messages import Messages
 from app.update_checker import UpdateChecker
 from app.shortcuts import get_default_shortcuts
 from modules.utils.device import is_gpu_available
 from modules.utils.paths import get_default_project_autosave_dir, get_user_data_dir
+from app.projects.series_state_v1 import normalize_series_settings
 from modules.utils.notification_sound import (
     SYSTEM_SOUND_MODE,
     play_completion_sound,
+    send_test_ntfy_notification,
 )
 from modules.utils.inpainting_runtime import (
     inpainter_default_settings,
@@ -147,7 +150,9 @@ class SettingsPage(QtWidgets.QWidget):
         self.ui.automatic_output_archive_level_spinbox.valueChanged.connect(self._save_settings_if_not_loading)
         self.ui.user_dictionaries_page.changed.connect(self._save_settings_if_not_loading)
         self.ui.notifications_page.changed.connect(self._save_settings_if_not_loading)
+        self.ui.series_page.changed.connect(self._save_settings_if_not_loading)
         self.ui.notifications_page.test_requested.connect(self.play_test_completion_sound)
+        self.ui.notifications_page.test_ntfy_requested.connect(self.play_test_ntfy_notification)
         self._connect_live_save_signals()
 
     def _save_settings_if_not_loading(self, *_args):
@@ -515,6 +520,9 @@ class SettingsPage(QtWidgets.QWidget):
             "auto_export_translation_md": auto_export_translation_md,
         }
 
+    def get_series_settings(self) -> dict[str, object]:
+        return normalize_series_settings(self.ui.series_page.get_settings())
+
     def get_resolved_automatic_output_settings(
         self,
         project_preferences: Mapping[str, object] | None = None,
@@ -633,6 +641,7 @@ class SettingsPage(QtWidgets.QWidget):
             "gemma_local_server": self.get_gemma_local_server_settings(),
             "llm": self.get_llm_settings(),
             "export": self.get_export_settings(),
+            "series": self.get_series_settings(),
             "notifications": self.get_notification_settings(),
             "shortcuts": self.ui.shortcuts_page.get_shortcuts(),
             "credentials": self.get_credentials(),
@@ -721,6 +730,9 @@ class SettingsPage(QtWidgets.QWidget):
         settings.remove("automatic_output_png_compression_level")
         settings.remove("automatic_output_jpg_quality")
         settings.remove("automatic_output_webp_quality")
+        settings.endGroup()
+
+        settings.beginGroup("series")
         settings.endGroup()
 
         dictionaries = self.get_dictionary_settings()
@@ -1094,6 +1106,21 @@ class SettingsPage(QtWidgets.QWidget):
             owner.auto_export_translation_md_checkbox.setChecked(bool(auto_export_translation_md))
         settings.endGroup()
 
+        settings.beginGroup("series")
+        self.ui.series_page.set_settings(
+            normalize_series_settings(
+                {
+                    "queue_failure_policy": settings.value("queue_failure_policy", "stop", type=str),
+                    "retry_count": settings.value("retry_count", 0, type=int),
+                    "retry_delay_sec": settings.value("retry_delay_sec", 0, type=int),
+                    "auto_open_failed_child": settings.value("auto_open_failed_child", True, type=bool),
+                    "resume_from_first_incomplete": settings.value("resume_from_first_incomplete", True, type=bool),
+                    "return_to_series_after_completion": settings.value("return_to_series_after_completion", True, type=bool),
+                }
+            )
+        )
+        settings.endGroup()
+
         settings.beginGroup("dictionaries")
         ocr_rules_json = settings.value("ocr_substitutions_json", "[]", type=str)
         translation_rules_json = settings.value("translation_substitutions_json", "[]", type=str)
@@ -1113,6 +1140,14 @@ class SettingsPage(QtWidgets.QWidget):
             enable_completion_sound=settings.value("enable_completion_sound", True, type=bool),
             completion_sound_mode=settings.value("completion_sound_mode", SYSTEM_SOUND_MODE, type=str),
             completion_sound_file=settings.value("completion_sound_file", "", type=str),
+            enable_ntfy_notifications=settings.value("enable_ntfy_notifications", False, type=bool),
+            ntfy_server_url=settings.value("ntfy_server_url", "", type=str),
+            ntfy_topic=settings.value("ntfy_topic", "", type=str),
+            ntfy_access_token=settings.value("ntfy_access_token", "", type=str),
+            ntfy_send_success=settings.value("ntfy_send_success", True, type=bool),
+            ntfy_send_failure=settings.value("ntfy_send_failure", True, type=bool),
+            ntfy_send_cancelled=settings.value("ntfy_send_cancelled", True, type=bool),
+            ntfy_timeout_sec=settings.value("ntfy_timeout_sec", 10, type=int),
         )
         settings.endGroup()
 
@@ -1164,6 +1199,37 @@ class SettingsPage(QtWidgets.QWidget):
         play_completion_sound(
             str(settings.get("completion_sound_mode") or SYSTEM_SOUND_MODE),
             str(settings.get("completion_sound_file") or ""),
+        )
+
+    def play_test_ntfy_notification(self) -> None:
+        settings = self.get_notification_settings()
+        if not str(settings.get("ntfy_topic") or "").strip():
+            Messages.show_warning(
+                self,
+                self.tr("Enter an ntfy topic before sending a test notification."),
+                duration=5,
+                closable=True,
+                source="settings",
+            )
+            return
+
+        sent = send_test_ntfy_notification(settings)
+        if sent:
+            Messages.show_success(
+                self,
+                self.tr("Test ntfy notification sent."),
+                duration=5,
+                closable=True,
+                source="settings",
+            )
+            return
+
+        Messages.show_warning(
+            self,
+            self.tr("Unable to send the ntfy test notification right now. Check the settings and try again."),
+            duration=5,
+            closable=True,
+            source="settings",
         )
 
     def _show_message_box(self, icon: QtWidgets.QMessageBox.Icon, title: str, text: str):

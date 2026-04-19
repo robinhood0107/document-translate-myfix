@@ -19,6 +19,10 @@ from app.ui.list_view import PageListItemData
 from app.ui.list_view_image_loader import ListViewImageLoader
 from app.thread_worker import GenericWorker
 from app.path_materialization import ensure_path_materialized
+from app.projects.project_types import (
+    PROJECT_KIND_SINGLE,
+    has_project_file_extension,
+)
 from modules.utils.archives import natural_sort_key
 from modules.utils.export_paths import normalize_export_source_record
 from modules.utils.automatic_output import default_project_output_preferences
@@ -547,6 +551,7 @@ class ImageStateController:
         self.main.image_patches.clear()
         self.main.in_memory_patches.clear()
         self.main.project_file = None
+        self.main.project_kind = PROJECT_KIND_SINGLE
         self.main.project_output_preferences = default_project_output_preferences()
         self.main.clear_automatic_output_metric_cache()
         try:
@@ -576,9 +581,9 @@ class ImageStateController:
             for path in (paths or [])
             if isinstance(path, str) and path
         ]
-        if normalized_paths and any(path.lower().endswith(".ctpr") for path in normalized_paths):
-            if len(normalized_paths) == 1 and normalized_paths[0].lower().endswith(".ctpr"):
-                self.main.project_ctrl.thread_load_project(normalized_paths[0])
+        if normalized_paths and any(has_project_file_extension(path) for path in normalized_paths):
+            if len(normalized_paths) == 1 and has_project_file_extension(normalized_paths[0]):
+                self.main._open_project_by_type(normalized_paths[0])
                 return
             self.main.default_error_handler(
                 (

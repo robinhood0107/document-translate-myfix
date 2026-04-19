@@ -10,7 +10,7 @@ ALLOWED_DOC_PATTERNS = (
     re.compile(r"^README\.md$"),
     re.compile(r"^README_ko\.md$"),
     re.compile(r"^rules\.md$"),
-    re.compile(r"^docs/history/[^/]+\.md$"),
+    re.compile(r"^docs/setup/quickstart(?:-ko)?\.md$"),
     re.compile(r"^docs/gemma/[^/]+\.md$"),
     re.compile(r"^docs/hunyuan/[^/]+\.md$"),
     re.compile(r"^docs/repo/github-rulesets-public-free-ko\.md$"),
@@ -56,7 +56,7 @@ def validate_main_docs_policy(base_sha: str, head_sha: str) -> list[str]:
         if is_allowed(path):
             continue
         errors.append(
-            f"Disallowed markdown/doc path for main PR: {path}. Main only accepts operational docs and history docs."
+            f"Disallowed markdown/doc path for main PR: {path}. Main only accepts minimal public operational docs."
         )
     return errors
 

@@ -456,7 +456,8 @@ Cancel the current run or wait for it to finish first.</source>
     </message>
     <message>
         <source>OCR</source>
-        <translation>OCR</translation>
+        <translation>
+        OCR</translation>
     </message>
     <message>
         <source>API Key</source>
@@ -755,7 +756,8 @@ Start the server with both the HunyuanOCR GGUF model and the matching mmproj fil
     </message>
     <message>
         <source>Server URL</source>
-        <translation type="unfinished"></translation>
+        <translation>
+        服务器 URL</translation>
     </message>
     <message>
         <source>Hunyuan OCR Tuning</source>
@@ -964,7 +966,8 @@ Keep the default localhost URL if you want Comic Translate to reuse the bundled 
     </message>
     <message>
         <source>Server URL</source>
-        <translation type="unfinished"></translation>
+        <translation type="unfinished">
+        服务器 URL</translation>
     </message>
     <message>
         <source>MangaLMM OCR Tuning</source>
@@ -1275,7 +1278,8 @@ Please check your internet connection.</source>
     </message>
     <message>
         <source>Translator</source>
-        <translation>翻译器</translation>
+        <translation>
+        翻译器</translation>
     </message>
     <message>
         <source>Gemma local server runtime setup failed</source>
@@ -1343,7 +1347,8 @@ Install it to use PSD features.</source>
     </message>
     <message>
         <source>Images</source>
-        <translation>图片</translation>
+        <translation>
+        图像</translation>
     </message>
     <message>
         <source>Document</source>
@@ -1415,26 +1420,267 @@ Install it to use PSD features.</source>
     </message>
 </context>
 <context>
+    <name>NotificationSound</name>
+    <message>
+        <source>Automatic translation</source>
+        <translation>
+        自动翻译</translation>
+    </message>
+    <message>
+        <source>Current page automatic translation</source>
+        <translation>
+        当前页面自动翻译</translation>
+    </message>
+    <message>
+        <source>Retry failed pages</source>
+        <translation>
+        重试失败页面</translation>
+    </message>
+    <message>
+        <source>Series queue automatic translation</source>
+        <translation>
+        系列队列自动翻译</translation>
+    </message>
+    <message>
+        <source>Manual task</source>
+        <translation>
+        手动任务</translation>
+    </message>
+    <message>
+        <source>Notification test</source>
+        <translation>
+        通知测试</translation>
+    </message>
+    <message>
+        <source>Automatic translation completed</source>
+        <translation>
+        自动翻译已完成</translation>
+    </message>
+    <message>
+        <source>Automatic translation failed</source>
+        <translation>
+        自动翻译失败</translation>
+    </message>
+    <message>
+        <source>Automatic translation cancelled</source>
+        <translation>
+        自动翻译已取消</translation>
+    </message>
+    <message>
+        <source>Automatic translation update</source>
+        <translation>
+        自动翻译更新</translation>
+    </message>
+    <message>
+        <source>Completed</source>
+        <translation>
+        已完成</translation>
+    </message>
+    <message>
+        <source>Failed</source>
+        <translation>
+        失败</translation>
+    </message>
+    <message>
+        <source>Cancelled</source>
+        <translation>
+        已取消</translation>
+    </message>
+    <message>
+        <source>Test</source>
+        <translation>
+        测试</translation>
+    </message>
+    <message>
+        <source>Updated</source>
+        <translation>
+        已更新</translation>
+    </message>
+    <message>
+        <source>Stage-Batched Pipeline (Recommended)</source>
+        <translation>
+        Stage-Batched Pipeline（推荐）</translation>
+    </message>
+    <message>
+        <source>Legacy Page Pipeline (Legacy)</source>
+        <translation>
+        Legacy Page Pipeline（旧版）</translation>
+    </message>
+    <message>
+        <source>Optimal (HunyuanOCR / PaddleOCR VL)</source>
+        <translation>
+        最佳（HunyuanOCR / PaddleOCR VL）</translation>
+    </message>
+    <message>
+        <source>Comic Translate</source>
+        <translation>
+        Comic Translate</translation>
+    </message>
+    <message>
+        <source>Status</source>
+        <translation>
+        状态</translation>
+    </message>
+    <message>
+        <source>Run</source>
+        <translation>
+        运行</translation>
+    </message>
+    <message>
+        <source>Images</source>
+        <translation>图片</translation>
+    </message>
+    <message>
+        <source>Workflow</source>
+        <translation>
+        工作流</translation>
+    </message>
+    <message>
+        <source>OCR</source>
+        <translation>OCR</translation>
+    </message>
+    <message>
+        <source>Translator</source>
+        <translation>翻译器</translation>
+    </message>
+    <message>
+        <source>Source language</source>
+        <translation>
+        源语言</translation>
+    </message>
+    <message>
+        <source>Target language</source>
+        <translation>
+        目标语言</translation>
+    </message>
+    <message>
+        <source>Output</source>
+        <translation>
+        输出</translation>
+    </message>
+    <message>
+        <source>Summary</source>
+        <translation>
+        摘要</translation>
+    </message>
+    <message>
+        <source>Detail</source>
+        <translation>
+        详情</translation>
+    </message>
+    <message>
+        <source>Time</source>
+        <translation>
+        时间</translation>
+    </message>
+    <message>
+        <source>This is a test notification from Comic Translate.</source>
+        <translation>
+        这是来自 Comic Translate 的测试通知。</translation>
+    </message>
+</context>
+<context>
     <name>NotificationsPage</name>
     <message>
-        <source>Automatic Completion</source>
-        <translation>自动处理完成</translation>
+        <source>Notifications</source>
+        <translation>
+        通知</translation>
+    </message>
+    <message>
+        <source>Configure completion sounds and optional ntfy push notifications for automatic runs.</source>
+        <translation>
+        为自动运行配置完成提示音和可选的 ntfy 推送通知。</translation>
+    </message>
+    <message>
+        <source>Automatic Completion Sound</source>
+        <translation>
+        自动完成提示音</translation>
     </message>
     <message>
         <source>Play a sound when automatic processing finishes successfully. Custom files must be placed in the repository music folder.</source>
         <translation>自动处理成功完成时播放声音。自定义文件必须放在仓库的 music 文件夹中。</translation>
     </message>
     <message>
-        <source>Enable Completion Sound</source>
-        <translation>启用完成提示音</translation>
+        <source>Enable completion sound</source>
+        <translation>
+        启用完成提示音</translation>
     </message>
     <message>
-        <source>Test Sound</source>
-        <translation>测试声音</translation>
+        <source>Test sound</source>
+        <translation>
+        测试提示音</translation>
     </message>
     <message>
-        <source>Music Folder: {path}</source>
-        <translation>music 文件夹：{path}</translation>
+        <source>Music folder: {path}</source>
+        <translation>
+        音乐文件夹：{path}</translation>
+    </message>
+    <message>
+        <source>ntfy Push Notifications</source>
+        <translation>
+        ntfy 推送通知</translation>
+    </message>
+    <message>
+        <source>Send text-only notifications through ntfy when automatic processing finishes, fails, or is cancelled.
+The app keeps messages below ntfy&apos;s default 4 KiB text limit and never sends attachments.</source>
+        <translation>
+        当自动处理完成、失败或取消时，通过 ntfy 发送纯文本通知。
+应用会将消息保持在 ntfy 默认的 4 KiB 文本限制以内，并且绝不会发送附件。</translation>
+    </message>
+    <message>
+        <source>Enable ntfy notifications</source>
+        <translation>
+        启用 ntfy 通知</translation>
+    </message>
+    <message>
+        <source>Server URL</source>
+        <translation type="unfinished">
+        服务器 URL</translation>
+    </message>
+    <message>
+        <source>Topic</source>
+        <translation>
+        主题</translation>
+    </message>
+    <message>
+        <source>comic-translate</source>
+        <translation>
+        comic-translate</translation>
+    </message>
+    <message>
+        <source>Access token (optional)</source>
+        <translation>
+        访问令牌（可选）</translation>
+    </message>
+    <message>
+        <source>Bearer token</source>
+        <translation>
+        Bearer 令牌</translation>
+    </message>
+    <message>
+        <source>Timeout (sec)</source>
+        <translation>
+        超时（秒）</translation>
+    </message>
+    <message>
+        <source>Send test notification</source>
+        <translation>
+        发送测试通知</translation>
+    </message>
+    <message>
+        <source>Notify on completion</source>
+        <translation>
+        完成时通知</translation>
+    </message>
+    <message>
+        <source>Notify on failure</source>
+        <translation>
+        失败时通知</translation>
+    </message>
+    <message>
+        <source>Notify on cancellation</source>
+        <translation>
+        取消时通知</translation>
     </message>
     <message>
         <source>System sound</source>
@@ -1456,7 +1702,8 @@ Leave markdown or visualization options disabled unless you need debugging.</sou
     </message>
     <message>
         <source>Server URL</source>
-        <translation type="unfinished"></translation>
+        <translation type="unfinished">
+        服务器 URL</translation>
     </message>
     <message>
         <source>Response Options</source>
@@ -1605,6 +1852,10 @@ Approximate GPU usage:
         <translation>日志</translation>
     </message>
     <message>
+        <source>Pause</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
         <source>Report</source>
         <translation>报告</translation>
     </message>
@@ -1623,6 +1874,10 @@ Approximate GPU usage:
     <message>
         <source>Close</source>
         <translation>关闭</translation>
+    </message>
+    <message>
+        <source>Pause Requested</source>
+        <translation type="unfinished"></translation>
     </message>
     <message>
         <source>Window</source>
@@ -1738,10 +1993,9 @@ These snapshots are not your main project file; use Save/Auto-Save for normal pr
         <translation>自动保存项目文件</translation>
     </message>
     <message>
-        <source>These are normal .ctpr project files saved while Auto-Save is enabled.
+        <source>These are normal .ctpr or .seriesctpr project files saved while Auto-Save is enabled.
 This folder is separate from Auto-Recover snapshots.</source>
-        <translation>这些是启用自动保存时保存的正常 .ctpr 项目文件。
-该文件夹与自动恢复快照分开。</translation>
+        <translation type="unfinished"></translation>
     </message>
     <message>
         <source>Auto-Save folder:</source>
@@ -1898,6 +2152,256 @@ This folder is separate from Auto-Recover snapshots.</source>
     </message>
 </context>
 <context>
+    <name>SeriesImportDialog</name>
+    <message>
+        <source>Create Series Project</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Choose the files to embed into the new `.seriesctpr`, then arrange the reading queue with drag-and-drop or precise queue numbers.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Series Root Folder</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Queue Preview</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Checked rows will be embedded. Drag rows to reorder them, or edit the queue number for exact placement.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Sort</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Manual Queue</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Name (A-Z)</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Name (Z-A)</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Date (Newest First)</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Date (Oldest First)</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Only checked files will be added. You can still reorder or remove queue items later from the series board.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Select All</source>
+        <translation type="unfinished">字体</translation>
+    </message>
+    <message>
+        <source>Clear All</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Cancel</source>
+        <translation type="unfinished">取消</translation>
+    </message>
+    <message>
+        <source>Create Series</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Root Folder</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>{total} files found</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>{selected} selected · {folders} folders</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Select at least one file to include in the series.</source>
+        <translation type="unfinished"></translation>
+    </message>
+</context>
+<context>
+    <name>SeriesPage</name>
+    <message>
+        <source>Series Queue</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Configure the default behavior for `.seriesctpr` queue execution.
+These values are copied into new series projects and can be adjusted per series.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Stop</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Skip</source>
+        <translation type="unfinished">跳过</translation>
+    </message>
+    <message>
+        <source>Retry</source>
+        <translation type="unfinished">重试</translation>
+    </message>
+    <message>
+        <source>Open failed child project automatically</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Resume from the first incomplete queue item</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Return to the series board after a child project finishes</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Failure policy:</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Retry count:</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Retry delay (sec):</source>
+        <translation type="unfinished"></translation>
+    </message>
+</context>
+<context>
+    <name>SeriesTreeJumpDialog</name>
+    <message>
+        <source>Tree Jump</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Select a series item from the original folder structure or choose the board view.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Location</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Series Board</source>
+        <translation type="unfinished"></translation>
+    </message>
+</context>
+<context>
+    <name>SeriesWorkspace</name>
+    <message>
+        <source>Back</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Forward</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Tree</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Tree Jump</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Series Project</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Recovered Snapshot</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Child Changes Not Synced</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Open Selected</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Add Files</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Add Folder</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Sort</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Manual Queue</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Name (A-Z)</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Name (Z-A)</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Date (Newest First)</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Date (Oldest First)</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Queue changes are locked while automatic translation is running.
+The current running item stays fixed, and you can change the queue after the run finishes.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Apply a quick queue sort by name or modified date.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Open the selected child project.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Add supported files to this series.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Scan and add a folder to this series.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Run automatic translation in queue order.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Resume the paused queue from the queue status panel.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Automatic translation is already running.</source>
+        <translation type="unfinished"></translation>
+    </message>
+</context>
+<context>
     <name>SettingsPage</name>
     <message>
         <source>OK</source>
@@ -1928,6 +2432,21 @@ Restart now?</source>
     <message>
         <source>Checking...</source>
         <translation>正在检查...</translation>
+    </message>
+    <message>
+        <source>Enter an ntfy topic before sending a test notification.</source>
+        <translation>
+        发送测试通知前，请先输入 ntfy 主题。</translation>
+    </message>
+    <message>
+        <source>Test ntfy notification sent.</source>
+        <translation>
+        已发送 ntfy 测试通知。</translation>
+    </message>
+    <message>
+        <source>Unable to send the ntfy test notification right now. Check the settings and try again.</source>
+        <translation>
+        当前无法发送 ntfy 测试通知。请检查设置后重试。</translation>
     </message>
     <message>
         <source>Check for Updates</source>
@@ -2106,7 +2625,8 @@ Restart now?</source>
     </message>
     <message>
         <source>Optimal (HunyuanOCR / PaddleOCR VL)</source>
-        <translation type="unfinished"></translation>
+        <translation type="unfinished">
+        最佳（HunyuanOCR / PaddleOCR VL）</translation>
     </message>
     <message>
         <source>MangaLMM</source>
@@ -2114,11 +2634,13 @@ Restart now?</source>
     </message>
     <message>
         <source>Stage-Batched Pipeline (Recommended)</source>
-        <translation type="unfinished"></translation>
+        <translation type="unfinished">
+        Stage-Batched Pipeline（推荐）</translation>
     </message>
     <message>
         <source>Legacy Page Pipeline (Legacy)</source>
-        <translation type="unfinished"></translation>
+        <translation type="unfinished">
+        Legacy Page Pipeline（旧版）</translation>
     </message>
     <message>
         <source>RT-DETR-v2 + CTD Line Protect + Source LaMa</source>
@@ -2171,6 +2693,10 @@ Restart now?</source>
     <message>
         <source>Project</source>
         <translation>项目</translation>
+    </message>
+    <message>
+        <source>Series</source>
+        <translation type="unfinished"></translation>
     </message>
     <message>
         <source>Export</source>
@@ -2252,6 +2778,10 @@ Restart now?</source>
     <message>
         <source>New Project</source>
         <translation>新建项目</translation>
+    </message>
+    <message>
+        <source>New Series Project</source>
+        <translation type="unfinished"></translation>
     </message>
     <message>
         <source>Open Files</source>
@@ -2878,7 +3408,8 @@ back on the Image (for further editing)</source>
     </message>
     <message>
         <source>Output</source>
-        <translation type="unfinished"></translation>
+        <translation type="unfinished">
+        输出</translation>
     </message>
     <message>
         <source>Use global output settings</source>
@@ -3012,6 +3543,260 @@ It may have already been moved, renamed, or deleted.
     </message>
 </context>
 <context>
+    <name>_SeriesImportTable</name>
+    <message>
+        <source>Use</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Queue</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Name</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Modified</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Type</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Folder</source>
+        <translation type="unfinished"></translation>
+    </message>
+</context>
+<context>
+    <name>_SeriesItemPreviewPopup</name>
+    <message>
+        <source>Series item</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Preview</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Preview Unavailable</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>This item does not have an image preview, so a file card is shown instead.</source>
+        <translation type="unfinished"></translation>
+    </message>
+</context>
+<context>
+    <name>_SeriesQueueTable</name>
+    <message>
+        <source>No.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Project</source>
+        <translation type="unfinished">项目</translation>
+    </message>
+    <message>
+        <source>Type</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Folder</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Status</source>
+        <translation type="unfinished">状态</translation>
+    </message>
+    <message>
+        <source>Pending</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Running</source>
+        <translation type="unfinished">运行中</translation>
+    </message>
+    <message>
+        <source>Done</source>
+        <translation type="unfinished">完成</translation>
+    </message>
+    <message>
+        <source>Failed</source>
+        <translation type="unfinished">失败</translation>
+    </message>
+    <message>
+        <source>Skipped</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Currently translating this project in the queue.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Project File</source>
+        <translation type="unfinished">项目文件</translation>
+    </message>
+    <message>
+        <source>Source File</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Remove from series</source>
+        <translation type="unfinished"></translation>
+    </message>
+</context>
+<context>
+    <name>_SeriesQuickSettings</name>
+    <message>
+        <source>Global Queue Settings</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>These controls apply to queue execution. Open a child project to edit detailed page-level settings.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Use GPU</source>
+        <translation type="unfinished">使用 GPU</translation>
+    </message>
+    <message>
+        <source>Source language:</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Target language:</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>OCR:</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Translator:</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Workflow mode:</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Series Settings…</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Translate in Queue Order</source>
+        <translation type="unfinished"></translation>
+    </message>
+</context>
+<context>
+    <name>_SeriesRunSummaryPanel</name>
+    <message>
+        <source>Last Queue Run</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Done:</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Failed:</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Skipped:</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Total time:</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Started / Finished:</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>{seconds} sec</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>{started} → {finished}</source>
+        <translation type="unfinished"></translation>
+    </message>
+</context>
+<context>
+    <name>_SeriesStatusPanel</name>
+    <message>
+        <source>Queue Status</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Monitor the current queue execution and control safe pause/resume behavior here.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>State:</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Current item:</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Next item:</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Last failed item:</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Retries left:</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Last run time:</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Pause</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Resume</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Open Failed Item</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Idle</source>
+        <translation type="unfinished">空闲</translation>
+    </message>
+    <message>
+        <source>Running</source>
+        <translation type="unfinished">运行中</translation>
+    </message>
+    <message>
+        <source>Paused</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>#{index:02d} · {name}</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>{state} (pause requested)</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Pause Requested</source>
+        <translation type="unfinished"></translation>
+    </message>
+</context>
+<context>
     <name>self.main</name>
     <message>
         <source>Project Recovery</source>
@@ -3063,6 +3848,22 @@ Do you want to restore it?</source>
     </message>
     <message>
         <source>Overwrite Project File</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>RecoveredProject.seriesctpr</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>RecoveredProject.ctpr</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Save Series Project As</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Save Project As</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
@@ -3118,6 +3919,99 @@ It may have been moved, renamed, or deleted.
     <message>
         <source>English</source>
         <translation>英语</translation>
+    </message>
+    <message>
+        <source>Recovered Snapshot</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Child Changes Not Synced</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Child Project - {child} · {series}[*]</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Series Project - {series}[*]</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Queue changes are locked while automatic translation is running.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>The selected series project file could not be found.
+It may have been moved, renamed, or deleted.
+
+{path}</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>The previous automatic translation run was interrupted and restored as paused.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Already in this series: {count}</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Duplicate selections removed: {count}</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Select Series Root Folder</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Create Series Project</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>No supported files were found in the selected folder.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Series Project Files (*.seriesctpr);;All Files (*)</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Remove From Series</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Remove &apos;{name}&apos; from this series project?</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Add Files To Series</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Supported Files ({exts});;All Files (*)</source>
+        <translation type="unfinished">支持的文件 ({exts});;所有文件 (*)</translation>
+    </message>
+    <message>
+        <source>Add Folder To Series</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Series Settings</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Save Series Project</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Failed to synchronize the active child project before saving.
+
+{error}</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>There are no queue items left to run.</source>
+        <translation type="unfinished"></translation>
     </message>
 </context>
 <context>
@@ -3197,7 +4091,8 @@ It may have been moved, renamed, or deleted.
     </message>
     <message>
         <source>Optimal (HunyuanOCR / PaddleOCR VL)</source>
-        <translation type="unfinished"></translation>
+        <translation type="unfinished">
+        最佳（HunyuanOCR / PaddleOCR VL）</translation>
     </message>
     <message>
         <source>Microsoft OCR</source>

@@ -133,12 +133,36 @@ class SettingsToolsRuntimeTests(unittest.TestCase):
         page.ui.notifications_page.enable_completion_sound_checkbox.setChecked(False)
         combo = page.ui.notifications_page.completion_sound_combo
         combo.setCurrentIndex(1)
+        page.ui.notifications_page.enable_ntfy_checkbox.setChecked(True)
+        page.ui.notifications_page.ntfy_server_url_input.setText("https://ntfy.example.com")
+        page.ui.notifications_page.ntfy_topic_input.setText("comic-translate")
+        page.ui.notifications_page.ntfy_access_token_input.setText("secret-token")
+        page.ui.notifications_page.ntfy_failure_checkbox.setChecked(False)
+        page.ui.notifications_page.ntfy_cancelled_checkbox.setChecked(True)
+        page.ui.notifications_page.ntfy_timeout_spinbox.setValue(12)
         page.save_settings()
 
         settings = QtCore.QSettings("ComicLabs", "ComicTranslate")
         self.assertFalse(settings.value("notifications/enable_completion_sound", True, type=bool))
         self.assertEqual(settings.value("notifications/completion_sound_mode", "", type=str), "file")
         self.assertEqual(settings.value("notifications/completion_sound_file", "", type=str), "notify.wav")
+        self.assertTrue(settings.value("notifications/enable_ntfy_notifications", False, type=bool))
+        self.assertEqual(
+            settings.value("notifications/ntfy_server_url", "", type=str),
+            "https://ntfy.example.com",
+        )
+        self.assertEqual(
+            settings.value("notifications/ntfy_topic", "", type=str),
+            "comic-translate",
+        )
+        self.assertEqual(
+            settings.value("notifications/ntfy_access_token", "", type=str),
+            "secret-token",
+        )
+        self.assertTrue(settings.value("notifications/ntfy_send_success", False, type=bool))
+        self.assertFalse(settings.value("notifications/ntfy_send_failure", True, type=bool))
+        self.assertTrue(settings.value("notifications/ntfy_send_cancelled", False, type=bool))
+        self.assertEqual(settings.value("notifications/ntfy_timeout_sec", 0, type=int), 12)
 
     def test_mangalmm_settings_round_trip(self) -> None:
         page = self._make_page()
@@ -182,6 +206,35 @@ class SettingsToolsRuntimeTests(unittest.TestCase):
 
         page.save_settings()
         self.assertEqual(settings.value("tools/ocr", "", type=str), "best_local")
+
+    def test_series_settings_round_trip(self) -> None:
+        settings = QtCore.QSettings("ComicLabs", "ComicTranslate")
+        settings.setValue("series/queue_failure_policy", "retry")
+        settings.setValue("series/retry_count", 2)
+        settings.setValue("series/retry_delay_sec", 15)
+        settings.setValue("series/auto_open_failed_child", False)
+        settings.setValue("series/resume_from_first_incomplete", False)
+        settings.setValue("series/return_to_series_after_completion", True)
+        settings.sync()
+
+        page = self._make_page()
+        page.load_settings()
+
+        series_settings = page.get_series_settings()
+        self.assertEqual(series_settings["queue_failure_policy"], "retry")
+        self.assertEqual(series_settings["retry_count"], 2)
+        self.assertEqual(series_settings["retry_delay_sec"], 15)
+        self.assertFalse(series_settings["auto_open_failed_child"])
+        self.assertFalse(series_settings["resume_from_first_incomplete"])
+        self.assertTrue(series_settings["return_to_series_after_completion"])
+
+        page.save_settings()
+        self.assertEqual(settings.value("series/queue_failure_policy", "", type=str), "retry")
+        self.assertEqual(settings.value("series/retry_count", 0, type=int), 2)
+        self.assertEqual(settings.value("series/retry_delay_sec", 0, type=int), 15)
+        self.assertFalse(settings.value("series/auto_open_failed_child", True, type=bool))
+        self.assertFalse(settings.value("series/resume_from_first_incomplete", True, type=bool))
+        self.assertTrue(settings.value("series/return_to_series_after_completion", False, type=bool))
 
 
 if __name__ == "__main__":

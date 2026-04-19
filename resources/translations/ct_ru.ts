@@ -456,7 +456,8 @@ Cancel the current run or wait for it to finish first.</source>
     </message>
     <message>
         <source>OCR</source>
-        <translation>Распознавание текста</translation>
+        <translation>
+        OCR</translation>
     </message>
     <message>
         <source>API Key</source>
@@ -755,7 +756,8 @@ Start the server with both the HunyuanOCR GGUF model and the matching mmproj fil
     </message>
     <message>
         <source>Server URL</source>
-        <translation type="unfinished"></translation>
+        <translation>
+        URL сервера</translation>
     </message>
     <message>
         <source>Hunyuan OCR Tuning</source>
@@ -964,7 +966,8 @@ Keep the default localhost URL if you want Comic Translate to reuse the bundled 
     </message>
     <message>
         <source>Server URL</source>
-        <translation type="unfinished"></translation>
+        <translation type="unfinished">
+        URL сервера</translation>
     </message>
     <message>
         <source>MangaLMM OCR Tuning</source>
@@ -1276,7 +1279,8 @@ Please check your internet connection.</source>
     </message>
     <message>
         <source>Translator</source>
-        <translation>Переводчик</translation>
+        <translation>
+        Переводчик</translation>
     </message>
     <message>
         <source>Gemma local server runtime setup failed</source>
@@ -1344,7 +1348,8 @@ Install it to use PSD features.</source>
     </message>
     <message>
         <source>Images</source>
-        <translation>Изображения</translation>
+        <translation>
+        Изображения</translation>
     </message>
     <message>
         <source>Document</source>
@@ -1416,26 +1421,267 @@ Install it to use PSD features.</source>
     </message>
 </context>
 <context>
+    <name>NotificationSound</name>
+    <message>
+        <source>Automatic translation</source>
+        <translation>
+        Автоматический перевод</translation>
+    </message>
+    <message>
+        <source>Current page automatic translation</source>
+        <translation>
+        Автоматический перевод текущей страницы</translation>
+    </message>
+    <message>
+        <source>Retry failed pages</source>
+        <translation>
+        Повторить неудачные страницы</translation>
+    </message>
+    <message>
+        <source>Series queue automatic translation</source>
+        <translation>
+        Автоматический перевод очереди серии</translation>
+    </message>
+    <message>
+        <source>Manual task</source>
+        <translation>
+        Ручная задача</translation>
+    </message>
+    <message>
+        <source>Notification test</source>
+        <translation>
+        Тест уведомления</translation>
+    </message>
+    <message>
+        <source>Automatic translation completed</source>
+        <translation>
+        Автоматический перевод завершён</translation>
+    </message>
+    <message>
+        <source>Automatic translation failed</source>
+        <translation>
+        Сбой автоматического перевода</translation>
+    </message>
+    <message>
+        <source>Automatic translation cancelled</source>
+        <translation>
+        Автоматический перевод отменён</translation>
+    </message>
+    <message>
+        <source>Automatic translation update</source>
+        <translation>
+        Обновление автоматического перевода</translation>
+    </message>
+    <message>
+        <source>Completed</source>
+        <translation>
+        Завершено</translation>
+    </message>
+    <message>
+        <source>Failed</source>
+        <translation>
+        Ошибка</translation>
+    </message>
+    <message>
+        <source>Cancelled</source>
+        <translation>
+        Отменено</translation>
+    </message>
+    <message>
+        <source>Test</source>
+        <translation>
+        Тест</translation>
+    </message>
+    <message>
+        <source>Updated</source>
+        <translation>
+        Обновлено</translation>
+    </message>
+    <message>
+        <source>Stage-Batched Pipeline (Recommended)</source>
+        <translation>
+        Stage-Batched Pipeline (рекомендуется)</translation>
+    </message>
+    <message>
+        <source>Legacy Page Pipeline (Legacy)</source>
+        <translation>
+        Legacy Page Pipeline (legacy)</translation>
+    </message>
+    <message>
+        <source>Optimal (HunyuanOCR / PaddleOCR VL)</source>
+        <translation>
+        Оптимально (HunyuanOCR / PaddleOCR VL)</translation>
+    </message>
+    <message>
+        <source>Comic Translate</source>
+        <translation>
+        Comic Translate</translation>
+    </message>
+    <message>
+        <source>Status</source>
+        <translation>
+        Статус</translation>
+    </message>
+    <message>
+        <source>Run</source>
+        <translation>
+        Запуск</translation>
+    </message>
+    <message>
+        <source>Images</source>
+        <translation>Изображения</translation>
+    </message>
+    <message>
+        <source>Workflow</source>
+        <translation>
+        Рабочий процесс</translation>
+    </message>
+    <message>
+        <source>OCR</source>
+        <translation>Распознавание текста</translation>
+    </message>
+    <message>
+        <source>Translator</source>
+        <translation>Переводчик</translation>
+    </message>
+    <message>
+        <source>Source language</source>
+        <translation>
+        Исходный язык</translation>
+    </message>
+    <message>
+        <source>Target language</source>
+        <translation>
+        Целевой язык</translation>
+    </message>
+    <message>
+        <source>Output</source>
+        <translation>
+        Вывод</translation>
+    </message>
+    <message>
+        <source>Summary</source>
+        <translation>
+        Сводка</translation>
+    </message>
+    <message>
+        <source>Detail</source>
+        <translation>
+        Подробности</translation>
+    </message>
+    <message>
+        <source>Time</source>
+        <translation>
+        Время</translation>
+    </message>
+    <message>
+        <source>This is a test notification from Comic Translate.</source>
+        <translation>
+        Это тестовое уведомление от Comic Translate.</translation>
+    </message>
+</context>
+<context>
     <name>NotificationsPage</name>
     <message>
-        <source>Automatic Completion</source>
-        <translation>Завершение автообработки</translation>
+        <source>Notifications</source>
+        <translation>
+        Уведомления</translation>
+    </message>
+    <message>
+        <source>Configure completion sounds and optional ntfy push notifications for automatic runs.</source>
+        <translation>
+        Настройте звук завершения и дополнительные push-уведомления ntfy для автоматических запусков.</translation>
+    </message>
+    <message>
+        <source>Automatic Completion Sound</source>
+        <translation>
+        Звук автоматического завершения</translation>
     </message>
     <message>
         <source>Play a sound when automatic processing finishes successfully. Custom files must be placed in the repository music folder.</source>
         <translation>Проигрывать звук после успешного завершения автоматической обработки. Пользовательские файлы должны находиться в папке music репозитория.</translation>
     </message>
     <message>
-        <source>Enable Completion Sound</source>
-        <translation>Включить звук завершения</translation>
+        <source>Enable completion sound</source>
+        <translation>
+        Включить звук завершения</translation>
     </message>
     <message>
-        <source>Test Sound</source>
-        <translation>Проверить звук</translation>
+        <source>Test sound</source>
+        <translation>
+        Проверить звук</translation>
     </message>
     <message>
-        <source>Music Folder: {path}</source>
-        <translation>Папка music: {path}</translation>
+        <source>Music folder: {path}</source>
+        <translation>
+        Папка музыки: {path}</translation>
+    </message>
+    <message>
+        <source>ntfy Push Notifications</source>
+        <translation>
+        Push-уведомления ntfy</translation>
+    </message>
+    <message>
+        <source>Send text-only notifications through ntfy when automatic processing finishes, fails, or is cancelled.
+The app keeps messages below ntfy&apos;s default 4 KiB text limit and never sends attachments.</source>
+        <translation>
+        Отправляйте через ntfy только текстовые уведомления, когда автоматическая обработка завершается, завершается ошибкой или отменяется.
+Приложение удерживает сообщение ниже стандартного текстового лимита ntfy в 4 КиБ и никогда не отправляет вложения.</translation>
+    </message>
+    <message>
+        <source>Enable ntfy notifications</source>
+        <translation>
+        Включить уведомления ntfy</translation>
+    </message>
+    <message>
+        <source>Server URL</source>
+        <translation type="unfinished">
+        URL сервера</translation>
+    </message>
+    <message>
+        <source>Topic</source>
+        <translation>
+        Тема</translation>
+    </message>
+    <message>
+        <source>comic-translate</source>
+        <translation>
+        comic-translate</translation>
+    </message>
+    <message>
+        <source>Access token (optional)</source>
+        <translation>
+        Токен доступа (необязательно)</translation>
+    </message>
+    <message>
+        <source>Bearer token</source>
+        <translation>
+        Bearer токен</translation>
+    </message>
+    <message>
+        <source>Timeout (sec)</source>
+        <translation>
+        Тайм-аут (сек)</translation>
+    </message>
+    <message>
+        <source>Send test notification</source>
+        <translation>
+        Отправить тестовое уведомление</translation>
+    </message>
+    <message>
+        <source>Notify on completion</source>
+        <translation>
+        Уведомлять о завершении</translation>
+    </message>
+    <message>
+        <source>Notify on failure</source>
+        <translation>
+        Уведомлять об ошибке</translation>
+    </message>
+    <message>
+        <source>Notify on cancellation</source>
+        <translation>
+        Уведомлять об отмене</translation>
     </message>
     <message>
         <source>System sound</source>
@@ -1457,7 +1703,8 @@ Leave markdown or visualization options disabled unless you need debugging.</sou
     </message>
     <message>
         <source>Server URL</source>
-        <translation type="unfinished"></translation>
+        <translation type="unfinished">
+        URL сервера</translation>
     </message>
     <message>
         <source>Response Options</source>
@@ -1606,6 +1853,10 @@ Approximate GPU usage:
         <translation>Логи</translation>
     </message>
     <message>
+        <source>Pause</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
         <source>Report</source>
         <translation>Отчёт</translation>
     </message>
@@ -1624,6 +1875,10 @@ Approximate GPU usage:
     <message>
         <source>Close</source>
         <translation>Закрыть</translation>
+    </message>
+    <message>
+        <source>Pause Requested</source>
+        <translation type="unfinished"></translation>
     </message>
     <message>
         <source>Window</source>
@@ -1739,10 +1994,9 @@ These snapshots are not your main project file; use Save/Auto-Save for normal pr
         <translation>Автосохранение файлов проекта</translation>
     </message>
     <message>
-        <source>These are normal .ctpr project files saved while Auto-Save is enabled.
+        <source>These are normal .ctpr or .seriesctpr project files saved while Auto-Save is enabled.
 This folder is separate from Auto-Recover snapshots.</source>
-        <translation>Это обычные файлы проекта .ctpr, сохраняемые при включенном автосохранении.
-Эта папка отделена от снимков автоматического восстановления.</translation>
+        <translation type="unfinished"></translation>
     </message>
     <message>
         <source>Auto-Save folder:</source>
@@ -1899,6 +2153,256 @@ This folder is separate from Auto-Recover snapshots.</source>
     </message>
 </context>
 <context>
+    <name>SeriesImportDialog</name>
+    <message>
+        <source>Create Series Project</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Choose the files to embed into the new `.seriesctpr`, then arrange the reading queue with drag-and-drop or precise queue numbers.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Series Root Folder</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Queue Preview</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Checked rows will be embedded. Drag rows to reorder them, or edit the queue number for exact placement.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Sort</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Manual Queue</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Name (A-Z)</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Name (Z-A)</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Date (Newest First)</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Date (Oldest First)</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Only checked files will be added. You can still reorder or remove queue items later from the series board.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Select All</source>
+        <translation type="unfinished">Шрифт</translation>
+    </message>
+    <message>
+        <source>Clear All</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Cancel</source>
+        <translation type="unfinished">Отмена</translation>
+    </message>
+    <message>
+        <source>Create Series</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Root Folder</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>{total} files found</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>{selected} selected · {folders} folders</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Select at least one file to include in the series.</source>
+        <translation type="unfinished"></translation>
+    </message>
+</context>
+<context>
+    <name>SeriesPage</name>
+    <message>
+        <source>Series Queue</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Configure the default behavior for `.seriesctpr` queue execution.
+These values are copied into new series projects and can be adjusted per series.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Stop</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Skip</source>
+        <translation type="unfinished">Пропустить</translation>
+    </message>
+    <message>
+        <source>Retry</source>
+        <translation type="unfinished">Повторить</translation>
+    </message>
+    <message>
+        <source>Open failed child project automatically</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Resume from the first incomplete queue item</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Return to the series board after a child project finishes</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Failure policy:</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Retry count:</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Retry delay (sec):</source>
+        <translation type="unfinished"></translation>
+    </message>
+</context>
+<context>
+    <name>SeriesTreeJumpDialog</name>
+    <message>
+        <source>Tree Jump</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Select a series item from the original folder structure or choose the board view.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Location</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Series Board</source>
+        <translation type="unfinished"></translation>
+    </message>
+</context>
+<context>
+    <name>SeriesWorkspace</name>
+    <message>
+        <source>Back</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Forward</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Tree</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Tree Jump</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Series Project</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Recovered Snapshot</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Child Changes Not Synced</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Open Selected</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Add Files</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Add Folder</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Sort</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Manual Queue</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Name (A-Z)</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Name (Z-A)</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Date (Newest First)</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Date (Oldest First)</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Queue changes are locked while automatic translation is running.
+The current running item stays fixed, and you can change the queue after the run finishes.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Apply a quick queue sort by name or modified date.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Open the selected child project.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Add supported files to this series.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Scan and add a folder to this series.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Run automatic translation in queue order.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Resume the paused queue from the queue status panel.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Automatic translation is already running.</source>
+        <translation type="unfinished"></translation>
+    </message>
+</context>
+<context>
     <name>SettingsPage</name>
     <message>
         <source>OK</source>
@@ -1929,6 +2433,21 @@ Restart now?</source>
     <message>
         <source>Checking...</source>
         <translation>Проверка...</translation>
+    </message>
+    <message>
+        <source>Enter an ntfy topic before sending a test notification.</source>
+        <translation>
+        Введите тему ntfy перед отправкой тестового уведомления.</translation>
+    </message>
+    <message>
+        <source>Test ntfy notification sent.</source>
+        <translation>
+        Тестовое уведомление ntfy отправлено.</translation>
+    </message>
+    <message>
+        <source>Unable to send the ntfy test notification right now. Check the settings and try again.</source>
+        <translation>
+        Сейчас не удалось отправить тестовое уведомление ntfy. Проверьте настройки и попробуйте снова.</translation>
     </message>
     <message>
         <source>Check for Updates</source>
@@ -2067,7 +2586,8 @@ Restart now?</source>
     </message>
     <message>
         <source>Optimal (HunyuanOCR / PaddleOCR VL)</source>
-        <translation type="unfinished"></translation>
+        <translation type="unfinished">
+        Оптимально (HunyuanOCR / PaddleOCR VL)</translation>
     </message>
     <message>
         <source>MangaLMM</source>
@@ -2075,11 +2595,13 @@ Restart now?</source>
     </message>
     <message>
         <source>Stage-Batched Pipeline (Recommended)</source>
-        <translation type="unfinished"></translation>
+        <translation type="unfinished">
+        Stage-Batched Pipeline (рекомендуется)</translation>
     </message>
     <message>
         <source>Legacy Page Pipeline (Legacy)</source>
-        <translation type="unfinished"></translation>
+        <translation type="unfinished">
+        Legacy Page Pipeline (legacy)</translation>
     </message>
     <message>
         <source>RT-DETR-v2 + CTD Line Protect + Source LaMa</source>
@@ -2120,6 +2642,10 @@ Restart now?</source>
     <message>
         <source>Project</source>
         <translation>Проект</translation>
+    </message>
+    <message>
+        <source>Series</source>
+        <translation type="unfinished"></translation>
     </message>
     <message>
         <source>Shortcuts</source>
@@ -2253,6 +2779,10 @@ Restart now?</source>
     <message>
         <source>New Project</source>
         <translation>Новый проект</translation>
+    </message>
+    <message>
+        <source>New Series Project</source>
+        <translation type="unfinished"></translation>
     </message>
     <message>
         <source>Open Files</source>
@@ -2881,7 +3411,8 @@ back on the Image (for further editing)</source>
     </message>
     <message>
         <source>Output</source>
-        <translation type="unfinished"></translation>
+        <translation type="unfinished">
+        Вывод</translation>
     </message>
     <message>
         <source>Use global output settings</source>
@@ -3015,6 +3546,260 @@ It may have already been moved, renamed, or deleted.
     </message>
 </context>
 <context>
+    <name>_SeriesImportTable</name>
+    <message>
+        <source>Use</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Queue</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Name</source>
+        <translation type="unfinished">Имя</translation>
+    </message>
+    <message>
+        <source>Modified</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Type</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Folder</source>
+        <translation type="unfinished"></translation>
+    </message>
+</context>
+<context>
+    <name>_SeriesItemPreviewPopup</name>
+    <message>
+        <source>Series item</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Preview</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Preview Unavailable</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>This item does not have an image preview, so a file card is shown instead.</source>
+        <translation type="unfinished"></translation>
+    </message>
+</context>
+<context>
+    <name>_SeriesQueueTable</name>
+    <message>
+        <source>No.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Project</source>
+        <translation type="unfinished">Проект</translation>
+    </message>
+    <message>
+        <source>Type</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Folder</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Status</source>
+        <translation type="unfinished">Состояние</translation>
+    </message>
+    <message>
+        <source>Pending</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Running</source>
+        <translation type="unfinished">Выполняется</translation>
+    </message>
+    <message>
+        <source>Done</source>
+        <translation type="unfinished">Готово</translation>
+    </message>
+    <message>
+        <source>Failed</source>
+        <translation type="unfinished">Сбой</translation>
+    </message>
+    <message>
+        <source>Skipped</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Currently translating this project in the queue.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Project File</source>
+        <translation type="unfinished">Файл проекта</translation>
+    </message>
+    <message>
+        <source>Source File</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Remove from series</source>
+        <translation type="unfinished"></translation>
+    </message>
+</context>
+<context>
+    <name>_SeriesQuickSettings</name>
+    <message>
+        <source>Global Queue Settings</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>These controls apply to queue execution. Open a child project to edit detailed page-level settings.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Use GPU</source>
+        <translation type="unfinished">Использовать GPU</translation>
+    </message>
+    <message>
+        <source>Source language:</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Target language:</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>OCR:</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Translator:</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Workflow mode:</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Series Settings…</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Translate in Queue Order</source>
+        <translation type="unfinished"></translation>
+    </message>
+</context>
+<context>
+    <name>_SeriesRunSummaryPanel</name>
+    <message>
+        <source>Last Queue Run</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Done:</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Failed:</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Skipped:</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Total time:</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Started / Finished:</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>{seconds} sec</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>{started} → {finished}</source>
+        <translation type="unfinished"></translation>
+    </message>
+</context>
+<context>
+    <name>_SeriesStatusPanel</name>
+    <message>
+        <source>Queue Status</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Monitor the current queue execution and control safe pause/resume behavior here.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>State:</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Current item:</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Next item:</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Last failed item:</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Retries left:</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Last run time:</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Pause</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Resume</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Open Failed Item</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Idle</source>
+        <translation type="unfinished">Ожидание</translation>
+    </message>
+    <message>
+        <source>Running</source>
+        <translation type="unfinished">Выполняется</translation>
+    </message>
+    <message>
+        <source>Paused</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>#{index:02d} · {name}</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>{state} (pause requested)</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Pause Requested</source>
+        <translation type="unfinished"></translation>
+    </message>
+</context>
+<context>
     <name>self.main</name>
     <message>
         <source>Project Recovery</source>
@@ -3066,6 +3851,22 @@ Do you want to restore it?</source>
     </message>
     <message>
         <source>Overwrite Project File</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>RecoveredProject.seriesctpr</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>RecoveredProject.ctpr</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Save Series Project As</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Save Project As</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
@@ -3121,6 +3922,99 @@ It may have been moved, renamed, or deleted.
     <message>
         <source>English</source>
         <translation>Английский</translation>
+    </message>
+    <message>
+        <source>Recovered Snapshot</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Child Changes Not Synced</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Child Project - {child} · {series}[*]</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Series Project - {series}[*]</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Queue changes are locked while automatic translation is running.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>The selected series project file could not be found.
+It may have been moved, renamed, or deleted.
+
+{path}</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>The previous automatic translation run was interrupted and restored as paused.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Already in this series: {count}</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Duplicate selections removed: {count}</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Select Series Root Folder</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Create Series Project</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>No supported files were found in the selected folder.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Series Project Files (*.seriesctpr);;All Files (*)</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Remove From Series</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Remove &apos;{name}&apos; from this series project?</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Add Files To Series</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Supported Files ({exts});;All Files (*)</source>
+        <translation type="unfinished">Поддерживаемые файлы ({exts});;Все файлы (*)</translation>
+    </message>
+    <message>
+        <source>Add Folder To Series</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Series Settings</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Save Series Project</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Failed to synchronize the active child project before saving.
+
+{error}</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>There are no queue items left to run.</source>
+        <translation type="unfinished"></translation>
     </message>
 </context>
 <context>
@@ -3200,7 +4094,8 @@ It may have been moved, renamed, or deleted.
     </message>
     <message>
         <source>Optimal (HunyuanOCR / PaddleOCR VL)</source>
-        <translation type="unfinished"></translation>
+        <translation type="unfinished">
+        Оптимально (HunyuanOCR / PaddleOCR VL)</translation>
     </message>
     <message>
         <source>Microsoft OCR</source>

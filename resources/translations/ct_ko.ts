@@ -457,7 +457,8 @@ Cancel the current run or wait for it to finish first.</source>
     </message>
     <message>
         <source>OCR</source>
-        <translation>OCR</translation>
+        <translation>
+        OCR</translation>
     </message>
     <message>
         <source>API Key</source>
@@ -772,7 +773,8 @@ Comic Translate가 필요할 때 기본 제공 Docker 런타임을 시작하게 
     </message>
     <message>
         <source>Server URL</source>
-        <translation>서버 URL</translation>
+        <translation>
+        서버 URL</translation>
     </message>
     <message>
         <source>Hunyuan OCR Tuning</source>
@@ -1319,7 +1321,8 @@ Please check your internet connection.</source>
     </message>
     <message>
         <source>Translator</source>
-        <translation>번역기</translation>
+        <translation>
+        번역기</translation>
     </message>
     <message>
         <source>Gemma local server runtime setup failed</source>
@@ -1388,7 +1391,8 @@ PSD 기능을 사용하려면 설치하세요.</translation>
     </message>
     <message>
         <source>Images</source>
-        <translation>이미지</translation>
+        <translation>
+        이미지</translation>
     </message>
     <message>
         <source>Document</source>
@@ -1460,26 +1464,266 @@ PSD 기능을 사용하려면 설치하세요.</translation>
     </message>
 </context>
 <context>
+    <name>NotificationSound</name>
+    <message>
+        <source>Automatic translation</source>
+        <translation>
+        자동 번역</translation>
+    </message>
+    <message>
+        <source>Current page automatic translation</source>
+        <translation>
+        현재 페이지 자동 번역</translation>
+    </message>
+    <message>
+        <source>Retry failed pages</source>
+        <translation>
+        실패한 페이지 재시도</translation>
+    </message>
+    <message>
+        <source>Series queue automatic translation</source>
+        <translation>
+        시리즈 대기열 자동 번역</translation>
+    </message>
+    <message>
+        <source>Manual task</source>
+        <translation>
+        수동 작업</translation>
+    </message>
+    <message>
+        <source>Notification test</source>
+        <translation>
+        알림 테스트</translation>
+    </message>
+    <message>
+        <source>Automatic translation completed</source>
+        <translation>
+        자동 번역 완료</translation>
+    </message>
+    <message>
+        <source>Automatic translation failed</source>
+        <translation>
+        자동 번역 실패</translation>
+    </message>
+    <message>
+        <source>Automatic translation cancelled</source>
+        <translation>
+        자동 번역 취소</translation>
+    </message>
+    <message>
+        <source>Automatic translation update</source>
+        <translation>
+        자동 번역 업데이트</translation>
+    </message>
+    <message>
+        <source>Completed</source>
+        <translation>
+        완료</translation>
+    </message>
+    <message>
+        <source>Failed</source>
+        <translation>
+        실패</translation>
+    </message>
+    <message>
+        <source>Cancelled</source>
+        <translation>
+        취소됨</translation>
+    </message>
+    <message>
+        <source>Test</source>
+        <translation>
+        테스트</translation>
+    </message>
+    <message>
+        <source>Updated</source>
+        <translation>
+        업데이트됨</translation>
+    </message>
+    <message>
+        <source>Stage-Batched Pipeline (Recommended)</source>
+        <translation>
+        Stage-Batched Pipeline (권장)</translation>
+    </message>
+    <message>
+        <source>Legacy Page Pipeline (Legacy)</source>
+        <translation>
+        Legacy Page Pipeline (레거시)</translation>
+    </message>
+    <message>
+        <source>Optimal (HunyuanOCR / PaddleOCR VL)</source>
+        <translation>
+        최적값 (HunyuanOCR / PaddleOCR VL)</translation>
+    </message>
+    <message>
+        <source>Comic Translate</source>
+        <translation>
+        Comic Translate</translation>
+    </message>
+    <message>
+        <source>Status</source>
+        <translation>
+        상태</translation>
+    </message>
+    <message>
+        <source>Run</source>
+        <translation>
+        실행</translation>
+    </message>
+    <message>
+        <source>Images</source>
+        <translation>이미지</translation>
+    </message>
+    <message>
+        <source>Workflow</source>
+        <translation>
+        워크플로</translation>
+    </message>
+    <message>
+        <source>OCR</source>
+        <translation>OCR</translation>
+    </message>
+    <message>
+        <source>Translator</source>
+        <translation>번역기</translation>
+    </message>
+    <message>
+        <source>Source language</source>
+        <translation>
+        원본 언어</translation>
+    </message>
+    <message>
+        <source>Target language</source>
+        <translation>
+        대상 언어</translation>
+    </message>
+    <message>
+        <source>Output</source>
+        <translation>
+        출력</translation>
+    </message>
+    <message>
+        <source>Summary</source>
+        <translation>
+        요약</translation>
+    </message>
+    <message>
+        <source>Detail</source>
+        <translation>
+        세부 내용</translation>
+    </message>
+    <message>
+        <source>Time</source>
+        <translation>
+        시간</translation>
+    </message>
+    <message>
+        <source>This is a test notification from Comic Translate.</source>
+        <translation>
+        Comic Translate에서 보낸 테스트 알림입니다.</translation>
+    </message>
+</context>
+<context>
     <name>NotificationsPage</name>
     <message>
-        <source>Automatic Completion</source>
-        <translation>자동 완료 알림</translation>
+        <source>Notifications</source>
+        <translation>
+        알림</translation>
+    </message>
+    <message>
+        <source>Configure completion sounds and optional ntfy push notifications for automatic runs.</source>
+        <translation>
+        자동 실행에 대한 완료 알림음과 선택적 ntfy 푸시 알림을 설정합니다.</translation>
+    </message>
+    <message>
+        <source>Automatic Completion Sound</source>
+        <translation>
+        자동 완료 알림음</translation>
     </message>
     <message>
         <source>Play a sound when automatic processing finishes successfully. Custom files must be placed in the repository music folder.</source>
         <translation>자동 처리가 성공적으로 끝나면 소리를 재생합니다. 사용자 지정 파일은 저장소의 music 폴더에 넣어야 합니다.</translation>
     </message>
     <message>
-        <source>Enable Completion Sound</source>
-        <translation>완료 알림음 사용</translation>
+        <source>Enable completion sound</source>
+        <translation>
+        완료 알림음 사용</translation>
     </message>
     <message>
-        <source>Test Sound</source>
-        <translation>소리 테스트</translation>
+        <source>Test sound</source>
+        <translation>
+        알림음 테스트</translation>
     </message>
     <message>
-        <source>Music Folder: {path}</source>
-        <translation>music 폴더: {path}</translation>
+        <source>Music folder: {path}</source>
+        <translation>
+        음악 폴더: {path}</translation>
+    </message>
+    <message>
+        <source>ntfy Push Notifications</source>
+        <translation>
+        ntfy 푸시 알림</translation>
+    </message>
+    <message>
+        <source>Send text-only notifications through ntfy when automatic processing finishes, fails, or is cancelled.
+The app keeps messages below ntfy&apos;s default 4 KiB text limit and never sends attachments.</source>
+        <translation>
+        자동 처리가 완료되거나 실패하거나 취소될 때 ntfy로 텍스트 전용 알림을 보냅니다.
+앱은 메시지를 ntfy 기본 4 KiB 텍스트 제한 이하로 유지하며 첨부파일은 보내지 않습니다.</translation>
+    </message>
+    <message>
+        <source>Enable ntfy notifications</source>
+        <translation>
+        ntfy 알림 사용</translation>
+    </message>
+    <message>
+        <source>Server URL</source>
+        <translation>서버 URL</translation>
+    </message>
+    <message>
+        <source>Topic</source>
+        <translation>
+        토픽</translation>
+    </message>
+    <message>
+        <source>comic-translate</source>
+        <translation>
+        comic-translate</translation>
+    </message>
+    <message>
+        <source>Access token (optional)</source>
+        <translation>
+        액세스 토큰(선택)</translation>
+    </message>
+    <message>
+        <source>Bearer token</source>
+        <translation>
+        Bearer 토큰</translation>
+    </message>
+    <message>
+        <source>Timeout (sec)</source>
+        <translation>
+        시간 제한(초)</translation>
+    </message>
+    <message>
+        <source>Send test notification</source>
+        <translation>
+        테스트 알림 보내기</translation>
+    </message>
+    <message>
+        <source>Notify on completion</source>
+        <translation>
+        완료 시 알림</translation>
+    </message>
+    <message>
+        <source>Notify on failure</source>
+        <translation>
+        실패 시 알림</translation>
+    </message>
+    <message>
+        <source>Notify on cancellation</source>
+        <translation>
+        취소 시 알림</translation>
     </message>
     <message>
         <source>System sound</source>
@@ -1662,6 +1906,10 @@ Approximate GPU usage:
         <translation>로그</translation>
     </message>
     <message>
+        <source>Pause</source>
+        <translation>일시정지</translation>
+    </message>
+    <message>
         <source>Report</source>
         <translation>리포트</translation>
     </message>
@@ -1680,6 +1928,10 @@ Approximate GPU usage:
     <message>
         <source>Close</source>
         <translation>닫기</translation>
+    </message>
+    <message>
+        <source>Pause Requested</source>
+        <translation>일시정지 요청됨</translation>
     </message>
     <message>
         <source>Window</source>
@@ -1795,10 +2047,10 @@ These snapshots are not your main project file; use Save/Auto-Save for normal pr
         <translation>프로젝트 파일 자동 저장</translation>
     </message>
     <message>
-        <source>These are normal .ctpr project files saved while Auto-Save is enabled.
+        <source>These are normal .ctpr or .seriesctpr project files saved while Auto-Save is enabled.
 This folder is separate from Auto-Recover snapshots.</source>
-        <translation>자동 저장이 활성화된 동안 저장된 일반 .ctpr 프로젝트 파일입니다.
-이 폴더는 자동 복구 스냅샷과 별개입니다.</translation>
+        <translation>자동 저장이 켜져 있을 때 저장되는 일반 `.ctpr` 또는 `.seriesctpr` 프로젝트 파일입니다.
+이 폴더는 자동 복구 스냅샷 폴더와 별도로 관리됩니다.</translation>
     </message>
     <message>
         <source>Auto-Save folder:</source>
@@ -1955,6 +2207,258 @@ This folder is separate from Auto-Recover snapshots.</source>
     </message>
 </context>
 <context>
+    <name>SeriesImportDialog</name>
+    <message>
+        <source>Create Series Project</source>
+        <translation>시리즈 프로젝트 만들기</translation>
+    </message>
+    <message>
+        <source>Choose the files to embed into the new `.seriesctpr`, then arrange the reading queue with drag-and-drop or precise queue numbers.</source>
+        <translation>새 `.seriesctpr`에 포함할 파일을 고른 뒤, 드래그 앤 드롭이나 대기열 번호 수정으로 읽기 순서를 정리하세요.</translation>
+    </message>
+    <message>
+        <source>Series Root Folder</source>
+        <translation>시리즈 루트 폴더</translation>
+    </message>
+    <message>
+        <source>Queue Preview</source>
+        <translation>대기열 미리보기</translation>
+    </message>
+    <message>
+        <source>Checked rows will be embedded. Drag rows to reorder them, or edit the queue number for exact placement.</source>
+        <translation>체크된 행만 포함됩니다. 드래그로 순서를 바꾸거나, 대기열 번호를 직접 수정해 정확한 위치로 옮길 수 있습니다.</translation>
+    </message>
+    <message>
+        <source>Sort</source>
+        <translation>정렬</translation>
+    </message>
+    <message>
+        <source>Manual Queue</source>
+        <translation>수동 대기열</translation>
+    </message>
+    <message>
+        <source>Name (A-Z)</source>
+        <translation>이름순 (A-Z)</translation>
+    </message>
+    <message>
+        <source>Name (Z-A)</source>
+        <translation>이름순 (Z-A)</translation>
+    </message>
+    <message>
+        <source>Date (Newest First)</source>
+        <translation>날짜순 (최신 먼저)</translation>
+    </message>
+    <message>
+        <source>Date (Oldest First)</source>
+        <translation>날짜순 (오래된 순)</translation>
+    </message>
+    <message>
+        <source>Only checked files will be added. You can still reorder or remove queue items later from the series board.</source>
+        <translation>체크된 파일만 추가됩니다. 이후에도 시리즈 보드에서 대기열 순서를 바꾸거나 항목을 제거할 수 있습니다.</translation>
+    </message>
+    <message>
+        <source>Select All</source>
+        <translation>전체 선택</translation>
+    </message>
+    <message>
+        <source>Clear All</source>
+        <translation>전체 해제</translation>
+    </message>
+    <message>
+        <source>Cancel</source>
+        <translation>취소</translation>
+    </message>
+    <message>
+        <source>Create Series</source>
+        <translation>시리즈 만들기</translation>
+    </message>
+    <message>
+        <source>Root Folder</source>
+        <translation>루트 폴더</translation>
+    </message>
+    <message>
+        <source>{total} files found</source>
+        <translation>{total}개 파일 검색됨</translation>
+    </message>
+    <message>
+        <source>{selected} selected · {folders} folders</source>
+        <translation>{selected}개 선택됨 · {folders}개 폴더</translation>
+    </message>
+    <message>
+        <source>Select at least one file to include in the series.</source>
+        <translation>시리즈에 포함할 파일을 하나 이상 선택하세요.</translation>
+    </message>
+</context>
+<context>
+    <name>SeriesPage</name>
+    <message>
+        <source>Series Queue</source>
+        <translation>시리즈 대기열</translation>
+    </message>
+    <message>
+        <source>Configure the default behavior for `.seriesctpr` queue execution.
+These values are copied into new series projects and can be adjusted per series.</source>
+        <translation>`.seriesctpr` 대기열 실행의 기본 동작을 설정합니다.
+이 값은 새 시리즈 프로젝트에 복사되며, 시리즈별로 다시 조정할 수 있습니다.</translation>
+    </message>
+    <message>
+        <source>Stop</source>
+        <translation>중지</translation>
+    </message>
+    <message>
+        <source>Skip</source>
+        <translation>건너뛰기</translation>
+    </message>
+    <message>
+        <source>Retry</source>
+        <translation>재시도</translation>
+    </message>
+    <message>
+        <source>Open failed child project automatically</source>
+        <translation>실패한 세부 프로젝트 자동 열기</translation>
+    </message>
+    <message>
+        <source>Resume from the first incomplete queue item</source>
+        <translation>첫 미완료 대기열 항목부터 다시 시작</translation>
+    </message>
+    <message>
+        <source>Return to the series board after a child project finishes</source>
+        <translation>세부 프로젝트 완료 후 시리즈 보드로 돌아가기</translation>
+    </message>
+    <message>
+        <source>Failure policy:</source>
+        <translation>실패 처리 정책:</translation>
+    </message>
+    <message>
+        <source>Retry count:</source>
+        <translation>재시도 횟수:</translation>
+    </message>
+    <message>
+        <source>Retry delay (sec):</source>
+        <translation>재시도 대기 시간(초):</translation>
+    </message>
+</context>
+<context>
+    <name>SeriesTreeJumpDialog</name>
+    <message>
+        <source>Tree Jump</source>
+        <translation>트리 이동</translation>
+    </message>
+    <message>
+        <source>Select a series item from the original folder structure or choose the board view.</source>
+        <translation>원래 폴더 구조에서 시리즈 항목을 선택하거나 시리즈 보드로 이동하세요.</translation>
+    </message>
+    <message>
+        <source>Location</source>
+        <translation>위치</translation>
+    </message>
+    <message>
+        <source>Series Board</source>
+        <translation>시리즈 보드</translation>
+    </message>
+</context>
+<context>
+    <name>SeriesWorkspace</name>
+    <message>
+        <source>Back</source>
+        <translation>뒤로</translation>
+    </message>
+    <message>
+        <source>Forward</source>
+        <translation>앞으로</translation>
+    </message>
+    <message>
+        <source>Tree</source>
+        <translation>트리</translation>
+    </message>
+    <message>
+        <source>Tree Jump</source>
+        <translation>트리 이동</translation>
+    </message>
+    <message>
+        <source>Series Project</source>
+        <translation>시리즈 프로젝트</translation>
+    </message>
+    <message>
+        <source>Recovered Snapshot</source>
+        <translation>복구본 열림</translation>
+    </message>
+    <message>
+        <source>Child Changes Not Synced</source>
+        <translation>세부 프로젝트 변경 미반영</translation>
+    </message>
+    <message>
+        <source>Open Selected</source>
+        <translation>선택한 프로젝트 열기</translation>
+    </message>
+    <message>
+        <source>Add Files</source>
+        <translation>파일 추가</translation>
+    </message>
+    <message>
+        <source>Add Folder</source>
+        <translation>폴더 추가</translation>
+    </message>
+    <message>
+        <source>Sort</source>
+        <translation>정렬</translation>
+    </message>
+    <message>
+        <source>Manual Queue</source>
+        <translation>수동 대기열</translation>
+    </message>
+    <message>
+        <source>Name (A-Z)</source>
+        <translation>이름순 (A-Z)</translation>
+    </message>
+    <message>
+        <source>Name (Z-A)</source>
+        <translation>이름순 (Z-A)</translation>
+    </message>
+    <message>
+        <source>Date (Newest First)</source>
+        <translation>날짜순 (최신 먼저)</translation>
+    </message>
+    <message>
+        <source>Date (Oldest First)</source>
+        <translation>날짜순 (오래된 순)</translation>
+    </message>
+    <message>
+        <source>Queue changes are locked while automatic translation is running.
+The current running item stays fixed, and you can change the queue after the run finishes.</source>
+        <translation>자동 번역 실행 중에는 대기열 변경이 잠깁니다.
+현재 실행 중 항목은 고정되며, 변경은 실행 종료 후 가능합니다.</translation>
+    </message>
+    <message>
+        <source>Apply a quick queue sort by name or modified date.</source>
+        <translation>이름이나 수정일 기준으로 현재 대기열을 빠르게 다시 정렬합니다.</translation>
+    </message>
+    <message>
+        <source>Open the selected child project.</source>
+        <translation>선택한 세부 프로젝트를 엽니다.</translation>
+    </message>
+    <message>
+        <source>Add supported files to this series.</source>
+        <translation>지원되는 파일을 이 시리즈에 추가합니다.</translation>
+    </message>
+    <message>
+        <source>Scan and add a folder to this series.</source>
+        <translation>폴더를 스캔해 이 시리즈에 추가합니다.</translation>
+    </message>
+    <message>
+        <source>Run automatic translation in queue order.</source>
+        <translation>대기열 순서대로 자동 번역을 시작합니다.</translation>
+    </message>
+    <message>
+        <source>Resume the paused queue from the queue status panel.</source>
+        <translation>대기열 상태 패널에서 일시정지된 대기열을 다시 시작하세요.</translation>
+    </message>
+    <message>
+        <source>Automatic translation is already running.</source>
+        <translation>자동 번역이 이미 실행 중입니다.</translation>
+    </message>
+</context>
+<context>
     <name>SettingsPage</name>
     <message>
         <source>OK</source>
@@ -1985,6 +2489,21 @@ Restart now?</source>
     <message>
         <source>Checking...</source>
         <translation>확인 중...</translation>
+    </message>
+    <message>
+        <source>Enter an ntfy topic before sending a test notification.</source>
+        <translation>
+        테스트 알림을 보내기 전에 ntfy 토픽을 입력하세요.</translation>
+    </message>
+    <message>
+        <source>Test ntfy notification sent.</source>
+        <translation>
+        테스트 ntfy 알림을 전송했습니다.</translation>
+    </message>
+    <message>
+        <source>Unable to send the ntfy test notification right now. Check the settings and try again.</source>
+        <translation>
+        지금은 ntfy 테스트 알림을 보낼 수 없습니다. 설정을 확인한 뒤 다시 시도하세요.</translation>
     </message>
     <message>
         <source>Check for Updates</source>
@@ -2178,6 +2697,10 @@ Restart now?</source>
         <translation>프로젝트</translation>
     </message>
     <message>
+        <source>Series</source>
+        <translation>시리즈</translation>
+    </message>
+    <message>
         <source>Shortcuts</source>
         <translation>단축키</translation>
     </message>
@@ -2309,6 +2832,10 @@ Restart now?</source>
     <message>
         <source>New Project</source>
         <translation>새 프로젝트</translation>
+    </message>
+    <message>
+        <source>New Series Project</source>
+        <translation>새 시리즈 프로젝트</translation>
     </message>
     <message>
         <source>Open Files</source>
@@ -3076,6 +3603,260 @@ It may have already been moved, renamed, or deleted.
     </message>
 </context>
 <context>
+    <name>_SeriesImportTable</name>
+    <message>
+        <source>Use</source>
+        <translation>포함</translation>
+    </message>
+    <message>
+        <source>Queue</source>
+        <translation>대기열</translation>
+    </message>
+    <message>
+        <source>Name</source>
+        <translation>이름</translation>
+    </message>
+    <message>
+        <source>Modified</source>
+        <translation>수정일</translation>
+    </message>
+    <message>
+        <source>Type</source>
+        <translation>유형</translation>
+    </message>
+    <message>
+        <source>Folder</source>
+        <translation>폴더</translation>
+    </message>
+</context>
+<context>
+    <name>_SeriesItemPreviewPopup</name>
+    <message>
+        <source>Series item</source>
+        <translation>시리즈 항목</translation>
+    </message>
+    <message>
+        <source>Preview</source>
+        <translation>대표 썸네일</translation>
+    </message>
+    <message>
+        <source>Preview Unavailable</source>
+        <translation>미리보기를 불러올 수 없음</translation>
+    </message>
+    <message>
+        <source>This item does not have an image preview, so a file card is shown instead.</source>
+        <translation>이 항목은 이미지 미리보기를 바로 만들 수 없어 파일 카드로 대신 보여줍니다.</translation>
+    </message>
+</context>
+<context>
+    <name>_SeriesQueueTable</name>
+    <message>
+        <source>No.</source>
+        <translation>순번</translation>
+    </message>
+    <message>
+        <source>Project</source>
+        <translation>프로젝트</translation>
+    </message>
+    <message>
+        <source>Type</source>
+        <translation>유형</translation>
+    </message>
+    <message>
+        <source>Folder</source>
+        <translation>폴더</translation>
+    </message>
+    <message>
+        <source>Status</source>
+        <translation>상태</translation>
+    </message>
+    <message>
+        <source>Pending</source>
+        <translation>대기 중</translation>
+    </message>
+    <message>
+        <source>Running</source>
+        <translation>실행 중</translation>
+    </message>
+    <message>
+        <source>Done</source>
+        <translation>완료</translation>
+    </message>
+    <message>
+        <source>Failed</source>
+        <translation>실패</translation>
+    </message>
+    <message>
+        <source>Skipped</source>
+        <translation>건너뜀</translation>
+    </message>
+    <message>
+        <source>Currently translating this project in the queue.</source>
+        <translation>현재 대기열에서 이 프로젝트를 자동 번역 중입니다.</translation>
+    </message>
+    <message>
+        <source>Project File</source>
+        <translation>프로젝트 파일</translation>
+    </message>
+    <message>
+        <source>Source File</source>
+        <translation>원본 파일</translation>
+    </message>
+    <message>
+        <source>Remove from series</source>
+        <translation>시리즈에서 제외</translation>
+    </message>
+</context>
+<context>
+    <name>_SeriesQuickSettings</name>
+    <message>
+        <source>Global Queue Settings</source>
+        <translation>대기열 전역 설정</translation>
+    </message>
+    <message>
+        <source>These controls apply to queue execution. Open a child project to edit detailed page-level settings.</source>
+        <translation>이 설정은 대기열 자동 실행 전체에 적용됩니다. 세부 페이지 단위 설정은 세부 프로젝트를 열어 조정하세요.</translation>
+    </message>
+    <message>
+        <source>Use GPU</source>
+        <translation>GPU 사용</translation>
+    </message>
+    <message>
+        <source>Source language:</source>
+        <translation>원본 언어:</translation>
+    </message>
+    <message>
+        <source>Target language:</source>
+        <translation>번역 언어:</translation>
+    </message>
+    <message>
+        <source>OCR:</source>
+        <translation>OCR:</translation>
+    </message>
+    <message>
+        <source>Translator:</source>
+        <translation>번역기:</translation>
+    </message>
+    <message>
+        <source>Workflow mode:</source>
+        <translation>워크플로 모드:</translation>
+    </message>
+    <message>
+        <source>Series Settings…</source>
+        <translation>시리즈 설정…</translation>
+    </message>
+    <message>
+        <source>Translate in Queue Order</source>
+        <translation>대기열 순서대로 자동 번역</translation>
+    </message>
+</context>
+<context>
+    <name>_SeriesRunSummaryPanel</name>
+    <message>
+        <source>Last Queue Run</source>
+        <translation>최근 대기열 실행</translation>
+    </message>
+    <message>
+        <source>Done:</source>
+        <translation>완료:</translation>
+    </message>
+    <message>
+        <source>Failed:</source>
+        <translation>실패:</translation>
+    </message>
+    <message>
+        <source>Skipped:</source>
+        <translation>건너뜀:</translation>
+    </message>
+    <message>
+        <source>Total time:</source>
+        <translation>총 시간:</translation>
+    </message>
+    <message>
+        <source>Started / Finished:</source>
+        <translation>시작 / 종료:</translation>
+    </message>
+    <message>
+        <source>{seconds} sec</source>
+        <translation>{seconds}초</translation>
+    </message>
+    <message>
+        <source>{started} → {finished}</source>
+        <translation>{started} → {finished}</translation>
+    </message>
+</context>
+<context>
+    <name>_SeriesStatusPanel</name>
+    <message>
+        <source>Queue Status</source>
+        <translation>대기열 상태</translation>
+    </message>
+    <message>
+        <source>Monitor the current queue execution and control safe pause/resume behavior here.</source>
+        <translation>현재 대기열 실행 상태를 확인하고, 안전하게 일시정지/재개를 제어합니다.</translation>
+    </message>
+    <message>
+        <source>State:</source>
+        <translation>상태:</translation>
+    </message>
+    <message>
+        <source>Current item:</source>
+        <translation>현재 항목:</translation>
+    </message>
+    <message>
+        <source>Next item:</source>
+        <translation>다음 예정 항목:</translation>
+    </message>
+    <message>
+        <source>Last failed item:</source>
+        <translation>마지막 실패 항목:</translation>
+    </message>
+    <message>
+        <source>Retries left:</source>
+        <translation>남은 재시도:</translation>
+    </message>
+    <message>
+        <source>Last run time:</source>
+        <translation>마지막 실행 시각:</translation>
+    </message>
+    <message>
+        <source>Pause</source>
+        <translation>일시정지</translation>
+    </message>
+    <message>
+        <source>Resume</source>
+        <translation>재개</translation>
+    </message>
+    <message>
+        <source>Open Failed Item</source>
+        <translation>실패 항목 열기</translation>
+    </message>
+    <message>
+        <source>Idle</source>
+        <translation>대기 중</translation>
+    </message>
+    <message>
+        <source>Running</source>
+        <translation>실행 중</translation>
+    </message>
+    <message>
+        <source>Paused</source>
+        <translation>일시정지됨</translation>
+    </message>
+    <message>
+        <source>#{index:02d} · {name}</source>
+        <translation>#{index:02d} · {name}</translation>
+    </message>
+    <message>
+        <source>{state} (pause requested)</source>
+        <translation>{state} (일시정지 요청됨)</translation>
+    </message>
+    <message>
+        <source>Pause Requested</source>
+        <translation>일시정지 요청됨</translation>
+    </message>
+</context>
+<context>
     <name>self.main</name>
     <message>
         <source>Project Recovery</source>
@@ -3130,6 +3911,22 @@ Do you want to restore it?</source>
     <message>
         <source>Overwrite Project File</source>
         <translation>프로젝트 파일 덮어쓰기</translation>
+    </message>
+    <message>
+        <source>RecoveredProject.seriesctpr</source>
+        <translation>RecoveredProject.seriesctpr</translation>
+    </message>
+    <message>
+        <source>RecoveredProject.ctpr</source>
+        <translation>RecoveredProject.ctpr</translation>
+    </message>
+    <message>
+        <source>Save Series Project As</source>
+        <translation>시리즈 프로젝트 다른 이름으로 저장</translation>
+    </message>
+    <message>
+        <source>Save Project As</source>
+        <translation>프로젝트 다른 이름으로 저장</translation>
     </message>
     <message>
         <source>A project file already exists at this location.
@@ -3192,6 +3989,104 @@ It may have been moved, renamed, or deleted.
     <message>
         <source>English</source>
         <translation>영어</translation>
+    </message>
+    <message>
+        <source>Recovered Snapshot</source>
+        <translation>복구본 열림</translation>
+    </message>
+    <message>
+        <source>Child Changes Not Synced</source>
+        <translation>세부 프로젝트 변경 미반영</translation>
+    </message>
+    <message>
+        <source>Child Project - {child} · {series}[*]</source>
+        <translation>세부 프로젝트 - {child} · {series}[*]</translation>
+    </message>
+    <message>
+        <source>Series Project - {series}[*]</source>
+        <translation>시리즈 프로젝트 - {series}[*]</translation>
+    </message>
+    <message>
+        <source>Queue changes are locked while automatic translation is running.</source>
+        <translation>자동 번역 실행 중에는 대기열 변경이 잠깁니다.</translation>
+    </message>
+    <message>
+        <source>The selected series project file could not be found.
+It may have been moved, renamed, or deleted.
+
+{path}</source>
+        <translation>선택한 시리즈 프로젝트 파일을 찾을 수 없습니다.
+이동되었거나 이름이 바뀌었거나 삭제되었을 수 있습니다.
+
+{path}</translation>
+    </message>
+    <message>
+        <source>The previous automatic translation run was interrupted and restored as paused.</source>
+        <translation>이전 자동 번역 실행이 중단되어 일시정지 상태로 복구되었습니다.</translation>
+    </message>
+    <message>
+        <source>Already in this series: {count}</source>
+        <translation>이미 이 시리즈에 포함된 항목: {count}</translation>
+    </message>
+    <message>
+        <source>Duplicate selections removed: {count}</source>
+        <translation>중복 선택에서 제외된 항목: {count}</translation>
+    </message>
+    <message>
+        <source>Select Series Root Folder</source>
+        <translation>시리즈 루트 폴더 선택</translation>
+    </message>
+    <message>
+        <source>Create Series Project</source>
+        <translation>시리즈 프로젝트 만들기</translation>
+    </message>
+    <message>
+        <source>No supported files were found in the selected folder.</source>
+        <translation>선택한 폴더에서 지원되는 파일을 찾지 못했습니다.</translation>
+    </message>
+    <message>
+        <source>Series Project Files (*.seriesctpr);;All Files (*)</source>
+        <translation>시리즈 프로젝트 파일 (*.seriesctpr);;모든 파일 (*)</translation>
+    </message>
+    <message>
+        <source>Remove From Series</source>
+        <translation>시리즈 항목 제거</translation>
+    </message>
+    <message>
+        <source>Remove &apos;{name}&apos; from this series project?</source>
+        <translation>이 시리즈 프로젝트에서 &apos;{name}&apos; 항목을 제거할까요?</translation>
+    </message>
+    <message>
+        <source>Add Files To Series</source>
+        <translation>시리즈에 파일 추가</translation>
+    </message>
+    <message>
+        <source>Supported Files ({exts});;All Files (*)</source>
+        <translation>지원되는 파일 ({exts});;모든 파일 (*)</translation>
+    </message>
+    <message>
+        <source>Add Folder To Series</source>
+        <translation>시리즈에 폴더 추가</translation>
+    </message>
+    <message>
+        <source>Series Settings</source>
+        <translation>시리즈 설정</translation>
+    </message>
+    <message>
+        <source>Save Series Project</source>
+        <translation>시리즈 프로젝트 저장</translation>
+    </message>
+    <message>
+        <source>Failed to synchronize the active child project before saving.
+
+{error}</source>
+        <translation>저장 전에 현재 세부 프로젝트를 시리즈에 동기화하지 못했습니다.
+
+{error}</translation>
+    </message>
+    <message>
+        <source>There are no queue items left to run.</source>
+        <translation>실행할 대기열 항목이 남아 있지 않습니다.</translation>
     </message>
 </context>
 <context>
