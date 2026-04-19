@@ -227,11 +227,12 @@ public/free 저장소의 ruleset은 보호 브랜치, PR 강제, 상태 체크, 
 
 ### CD
 
-현재 저장소에는 설치형 패키징 파이프라인이 커밋되어 있지 않으므로, CD v1은 `태그 기반 릴리스 거버넌스`에 집중한다.
+CD는 `main`에 포함된 `vX.Y.Z` 태그 기반 릴리스만 공식 경로로 인정한다.
 
 - `develop`에서 충분히 검증된 변경만 `main`으로 승격
-- `main` 머지 커밋에 버전 태그 생성
-- GitHub Release 작성
+- `main`에 포함된 커밋에만 버전 태그(`vX.Y.Z`) 생성
+- 해당 태그에서 Windows `Nuitka` 빌드 + GitHub Release 자산 생성
+- `develop`이나 feature 브랜치에 달린 태그는 공식 릴리스로 취급하지 않음
 - 필요 시 `pre-release` 표기
 - `hotfix/*`는 `main` 기준으로 처리 후 `develop`에 백머지
 
