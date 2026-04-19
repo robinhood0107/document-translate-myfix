@@ -251,11 +251,12 @@ GitHub 저장소 설정에서 아래를 권장한다.
 
 - `main`에는 운영 필수 문서만 허용한다.
   - 루트: `README.md`, `README_ko.md`, `rules.md`
-  - 변경 이력/감사: `docs/history/*.md`
+  - 설치/운영: `docs/setup/quickstart*.md`
   - 운영 문서: `docs/gemma/*.md`, `docs/hunyuan/*.md`, `docs/repo/github-rulesets-public-free-ko.md`, `hunyuanocr_docker_files/README.md`, `paddleocr_vl_docker_files/README.md`
 - `develop`에는 개발/감사/정책 문서를 허용한다.
 - `benchmarking/lab`에는 benchmark 전용 문서를 허용한다.
 - 아래 문서는 `main`에 올리지 않는다.
+  - `docs/history/*`
   - `docs/i18n/*`
   - `docs/rendering/*`
   - `docs/repo/benchmark-branch-policy-ko.md`
