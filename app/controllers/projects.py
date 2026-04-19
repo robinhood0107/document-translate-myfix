@@ -28,6 +28,15 @@ from app.projects.project_state import (
     load_state_from_proj_file,
     save_state_to_proj_file,
 )
+from app.projects.project_types import (
+    PROJECT_FILE_EXT,
+    PROJECT_KIND_SERIES,
+    PROJECT_KIND_SINGLE,
+    SERIES_PROJECT_FILE_EXT,
+    ensure_project_extension,
+    project_extension_for_kind,
+    project_file_filter_for_kind,
+)
 from modules.utils.archives import make
 from modules.utils.paths import get_user_data_dir, get_default_project_autosave_dir
 
@@ -55,6 +64,18 @@ class ProjectController:
     # Recent projects (persisted via QSettings)
 
     MAX_RECENT = 15
+
+    def _current_project_kind(self) -> str:
+        return str(getattr(self.main, "project_kind", PROJECT_KIND_SINGLE) or PROJECT_KIND_SINGLE)
+
+    def _project_extension(self, kind: str | None = None) -> str:
+        return project_extension_for_kind(kind or self._current_project_kind())
+
+    def _recovered_project_display_name(self, kind: str | None = None) -> str:
+        effective_kind = kind or self._current_project_kind()
+        if effective_kind == PROJECT_KIND_SERIES:
+            return self.main.tr("RecoveredProject.seriesctpr")
+        return self.main.tr("RecoveredProject.ctpr")
 
     def _read_autosave_enabled_setting(self) -> bool:
         settings = QSettings("ComicLabs", "ComicTranslate")
@@ -270,7 +291,7 @@ class ProjectController:
         return os.path.join(get_user_data_dir(), "autosave")
 
     def _recovery_project_path(self) -> str:
-        return os.path.join(self._autosave_dir(), "project_recovery.ctpr")
+        return os.path.join(self._autosave_dir(), f"project_recovery{self._project_extension()}")
 
     def _configured_project_autosave_dir(self) -> str:
         export_settings = self.main.settings_page.get_export_settings()
@@ -291,27 +312,32 @@ class ProjectController:
         base_name = "project"
 
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        candidate = os.path.join(autosave_dir, f"{base_name}_{timestamp}.ctpr")
+        extension = self._project_extension()
+        candidate = os.path.join(autosave_dir, f"{base_name}_{timestamp}{extension}")
         if not os.path.exists(candidate):
             return candidate
 
         for seq in range(1, 1000):
-            seq_candidate = os.path.join(autosave_dir, f"{base_name}_{timestamp}_{seq:03d}.ctpr")
+            seq_candidate = os.path.join(
+                autosave_dir,
+                f"{base_name}_{timestamp}_{seq:03d}{extension}",
+            )
             if not os.path.exists(seq_candidate):
                 return seq_candidate
 
         # Extremely unlikely fallback; keeps behavior deterministic if all sequence
         # slots are exhausted for the same timestamp.
         fallback_timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
-        return os.path.join(autosave_dir, f"{base_name}_{fallback_timestamp}.ctpr")
+        return os.path.join(autosave_dir, f"{base_name}_{fallback_timestamp}{extension}")
 
     def clear_recovery_checkpoint(self):
-        recovery_file = self._recovery_project_path()
-        if os.path.exists(recovery_file):
-            try:
-                os.remove(recovery_file)
-            except Exception:
-                logger.debug("Failed to remove recovery project file: %s", recovery_file)
+        for extension in (PROJECT_FILE_EXT, SERIES_PROJECT_FILE_EXT):
+            recovery_file = os.path.join(self._autosave_dir(), f"project_recovery{extension}")
+            if os.path.exists(recovery_file):
+                try:
+                    os.remove(recovery_file)
+                except Exception:
+                    logger.debug("Failed to remove recovery project file: %s", recovery_file)
 
     def _on_autosave_timeout(self):
         # Interval timer is reserved for recovery checkpoints.
@@ -330,6 +356,8 @@ class ProjectController:
         (which the batch processor uses for cancel detection). A GenericWorker
         is started directly on the shared threadpool instead.
         """
+        if self._current_project_kind() == PROJECT_KIND_SERIES:
+            return
         autosave_enabled = bool(
             self.main.settings_page.get_export_settings().get("project_autosave_enabled", False)
         )
@@ -395,6 +423,9 @@ class ProjectController:
         self._realtime_autosave_timer.start()
 
     def autosave_project(self, prefer_project_file: bool = True):
+        if self._current_project_kind() == PROJECT_KIND_SERIES:
+            self._autosave_series_project(prefer_project_file=prefer_project_file)
+            return
         if self._autosave_save_pending:
             if prefer_project_file:
                 self._autosave_retrigger_requested = True
@@ -452,11 +483,76 @@ class ProjectController:
 
         self.main.run_threaded(self.save_project, None, on_error, on_finished, target_file)
 
+    def _autosave_series_project(self, prefer_project_file: bool = True):
+        if self._autosave_save_pending:
+            if prefer_project_file:
+                self._autosave_retrigger_requested = True
+            return
+        if not getattr(self.main, "series_ctrl", None) or not self.main.series_ctrl.has_series_loaded():
+            return
+        if getattr(self.main, "_batch_active", False):
+            return
+        if not self.main.has_unsaved_changes():
+            return
+
+        autosave_enabled = bool(
+            self.main.settings_page.get_export_settings().get("project_autosave_enabled", False)
+        )
+        self._ensure_autosave_project_file_if_needed()
+        use_project_file = bool(prefer_project_file and autosave_enabled and self.main.project_file)
+        target_file = self.main.project_file if use_project_file else self._recovery_project_path()
+        if not target_file:
+            return
+
+        autosave_start_revision = self.main._dirty_revision
+        self._autosave_save_pending = True
+        try:
+            self.main.series_ctrl.sync_active_child_to_series()
+        except Exception:
+            self._autosave_save_pending = False
+            logger.warning("Series autosave sync failed.", exc_info=True)
+            return
+
+        def worker() -> str:
+            current_series = str(self.main.series_ctrl.series_file or "")
+            if not current_series:
+                raise FileNotFoundError("Series project file is not available for autosave.")
+            if target_file != current_series:
+                shutil.copyfile(current_series, target_file)
+            return target_file
+
+        def on_error(error_tuple):
+            self._autosave_save_pending = False
+            exctype, value, _ = error_tuple
+            logger.warning("Series autosave failed: %s: %s", exctype.__name__, value)
+            if self._autosave_retrigger_requested:
+                self._autosave_retrigger_requested = False
+                self._realtime_autosave_timer.start()
+
+        def on_finished():
+            self._autosave_save_pending = False
+            if use_project_file and self.main._dirty_revision == autosave_start_revision:
+                self.main.set_project_clean()
+                self.add_recent_project(target_file)
+                self._refresh_home_screen()
+            if self._autosave_retrigger_requested:
+                self._autosave_retrigger_requested = False
+                self._realtime_autosave_timer.start()
+
+        self.main.run_threaded(worker, None, on_error, on_finished)
+
     def prompt_restore_recovery_if_available(self) -> bool:
         if self.main.image_files:
             return False
 
-        recovery_file = self._recovery_project_path()
+        candidates = [
+            os.path.join(self._autosave_dir(), f"project_recovery{PROJECT_FILE_EXT}"),
+            os.path.join(self._autosave_dir(), f"project_recovery{SERIES_PROJECT_FILE_EXT}"),
+        ]
+        existing = [path for path in candidates if os.path.exists(path)]
+        if not existing:
+            return False
+        recovery_file = max(existing, key=lambda path: os.path.getmtime(path))
         if not os.path.exists(recovery_file):
             return False
 
@@ -488,8 +584,12 @@ class ProjectController:
         if not os.path.exists(recovery_file):
             return
 
+        if recovery_file.lower().endswith(SERIES_PROJECT_FILE_EXT):
+            self.main.series_ctrl.thread_load_series_project(recovery_file, recovery_loaded=True)
+            return
+
         self.main.image_ctrl.clear_state()
-        self.main.setWindowTitle(f"{self.main.tr('RecoveredProject.ctpr')}[*]")
+        self.main.setWindowTitle(f"{self._recovered_project_display_name(PROJECT_KIND_SINGLE)}[*]")
 
         load_failed = {"value": False}
 
@@ -503,7 +603,8 @@ class ProjectController:
             self.update_ui_from_project()
             # Keep recovered data as an unsaved project so users can choose a destination.
             self.main.project_file = None
-            self.main.setWindowTitle(f"{self.main.tr('RecoveredProject.ctpr')}[*]")
+            self.main.project_kind = PROJECT_KIND_SINGLE
+            self.main.setWindowTitle(f"{self._recovered_project_display_name(PROJECT_KIND_SINGLE)}[*]")
             self.main.mark_project_dirty()
             self.clear_recovery_checkpoint()
 
@@ -945,12 +1046,13 @@ class ProjectController:
         }
 
     def launch_save_proj_dialog(self):
+        kind = self._current_project_kind()
         file_dialog = QtWidgets.QFileDialog()
         file_name, _ = file_dialog.getSaveFileName(
             self.main,
-            "Save Project As",
-            "untitled",
-            "Project Files (*.ctpr);;All Files (*)"
+            self.main.tr("Save Series Project As") if kind == PROJECT_KIND_SERIES else self.main.tr("Save Project As"),
+            f"untitled{self._project_extension(kind)}",
+            project_file_filter_for_kind(kind),
         )
 
         return file_name
@@ -997,6 +1099,8 @@ class ProjectController:
             self.main.image_ctrl.save_current_image_state()
 
     def thread_save_project(self, post_save_callback=None) -> bool:
+        if self._current_project_kind() == PROJECT_KIND_SERIES:
+            return bool(self.main.series_ctrl.thread_save_series(post_save_callback=post_save_callback))
         file_name = ""
         self.save_current_state()
         if self.main.project_file:
@@ -1010,6 +1114,11 @@ class ProjectController:
         return False
 
     def thread_save_as_project(self, post_save_callback=None) -> bool:
+        if self._current_project_kind() == PROJECT_KIND_SERIES:
+            file_name = self.launch_save_proj_dialog()
+            if file_name:
+                return bool(self.main.series_ctrl.thread_save_series(file_name, post_save_callback=post_save_callback))
+            return False
         file_name = self.launch_save_proj_dialog()
         if file_name:
             self.save_current_state()
@@ -1018,6 +1127,59 @@ class ProjectController:
         return False
 
     def thread_change_project_file(self, target_path: str) -> bool:
+        if self._current_project_kind() == PROJECT_KIND_SERIES:
+            current_path = (
+                os.path.normpath(os.path.abspath(self.main.series_ctrl.series_file))
+                if self.main.series_ctrl.series_file
+                else None
+            )
+            target_path = ensure_project_extension(target_path, SERIES_PROJECT_FILE_EXT)
+            if current_path and target_path == current_path:
+                return self.thread_save_project()
+            if os.path.exists(target_path) and target_path != current_path:
+                overwrite = QtWidgets.QMessageBox.question(
+                    self.main,
+                    self.main.tr("Overwrite Project File"),
+                    self.main.tr(
+                        "A project file already exists at this location.\n\n{path}\n\nOverwrite it?"
+                    ).format(path=target_path),
+                    QtWidgets.QMessageBox.StandardButton.Yes | QtWidgets.QMessageBox.StandardButton.No,
+                    QtWidgets.QMessageBox.StandardButton.No,
+                )
+                if overwrite != QtWidgets.QMessageBox.StandardButton.Yes:
+                    return False
+
+            def _post_save() -> None:
+                if current_path and current_path != target_path and os.path.isfile(current_path):
+                    try:
+                        os.remove(current_path)
+                    except OSError as exc:
+                        QtWidgets.QMessageBox.warning(
+                            self.main,
+                            self.main.tr("Old Project File Kept"),
+                            self.main.tr(
+                                "The project was saved to the new location, but the old file could not be removed.\n\n{path}\n\n{error}"
+                            ).format(path=current_path, error=str(exc)),
+                        )
+                if current_path and current_path != target_path:
+                    self.remove_recent_project(current_path)
+                self.add_recent_project(target_path)
+                self._refresh_home_screen()
+                action_text = (
+                    self.main.tr("Project file saved.")
+                    if not current_path
+                    else self.main.tr("Project file renamed.")
+                    if os.path.dirname(current_path) == os.path.dirname(target_path)
+                    else self.main.tr("Project file moved.")
+                )
+                QtWidgets.QMessageBox.information(
+                    self.main,
+                    self.main.tr("Project File"),
+                    action_text,
+                )
+
+            return bool(self.main.series_ctrl.thread_save_series(target_path, post_save_callback=_post_save))
+
         target_path = os.path.normpath(os.path.abspath(os.path.expanduser(target_path or "")))
         if not target_path:
             return False
@@ -1104,6 +1266,8 @@ class ProjectController:
         return True
 
     def save_project(self, file_name):
+        if self._current_project_kind() == PROJECT_KIND_SERIES:
+            raise RuntimeError("Series projects must be saved through SeriesController.")
         save_state_to_proj_file(self.main, file_name)
 
     def update_ui_from_project(self):
@@ -1166,6 +1330,7 @@ class ProjectController:
             self._refresh_home_screen()
             self.main.setWindowTitle("Project1.ctpr[*]")
             self.main.project_file = None
+            self.main.project_kind = PROJECT_KIND_SINGLE
             QtWidgets.QMessageBox.warning(
                 self.main,
                 self.main.tr("Project Not Found"),
@@ -1182,6 +1347,7 @@ class ProjectController:
         if clear_recovery:
             self.clear_recovery_checkpoint()
         self.main.image_ctrl.clear_state()
+        self.main.project_kind = PROJECT_KIND_SINGLE
         self.main.setWindowTitle(f"{os.path.basename(normalized_path)}[*]")
 
         def _on_load_finished():
@@ -1193,6 +1359,7 @@ class ProjectController:
             self.main.default_error_handler(error_tuple)
             exctype, value, _ = error_tuple
             self.main.project_file = None
+            self.main.project_kind = PROJECT_KIND_SINGLE
             self.main.setWindowTitle("Project1.ctpr[*]")
             if exctype is FileNotFoundError or isinstance(value, FileNotFoundError):
                 self.remove_recent_project(normalized_path)
@@ -1210,6 +1377,7 @@ class ProjectController:
         if not os.path.isfile(file_name):
             raise FileNotFoundError(file_name)
         self.main.project_file = file_name
+        self.main.project_kind = PROJECT_KIND_SINGLE
         return load_state_from_proj_file(self.main, file_name)
     
     def load_state_to_ui(self, saved_ctx: str):

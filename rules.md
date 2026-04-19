@@ -14,6 +14,7 @@
 - 사용자에게 보이는 UI를 바꾸면 문서, 번역, 필요 시 변경 이력까지 함께 갱신한다.
 - 애매한 점이 있거나 트레이드오프가 발생하면, 추천안과 근거를 함께 사용자에게 질문하고 결정한 뒤 진행한다.
 - 가상환경, 캐시, 임시 산출물은 Git에 올리지 않는다.
+- 폰트 바이너리(`*.ttf`, `*.otf`, `*.woff`, `*.woff2`, `*.ttc`, `*.fon`)와 루트 `fonts/` 디렉터리는 Git에 올리지 않는다.
 - 로컬 작업용 가상환경은 `.venv-win`, `.venv-win-cuda13`만 공식 사용한다. `.venv`는 repo workflow 기준 환경으로 사용하지 않는다.
 
 ## 2. 브랜치 모델
@@ -149,6 +150,7 @@ type(scope): summary
 - push 없이 기능 완료로 간주
 - 서로 무관한 변경을 한 커밋/한 PR에 혼합
 - 트래킹된 `.venv*`, `__pycache__`, 임시 DB, 캐시 파일 추가
+- 트래킹된 폰트 바이너리 또는 루트 `fonts/` 디렉터리 추가
 - 번역이 필요한 UI 텍스트를 소스만 바꾸고 `.ts`/`.qm` 갱신 생략
 
 ## 7. 번역 규칙
@@ -249,11 +251,12 @@ GitHub 저장소 설정에서 아래를 권장한다.
 
 - `main`에는 운영 필수 문서만 허용한다.
   - 루트: `README.md`, `README_ko.md`, `rules.md`
-  - 변경 이력/감사: `docs/history/*.md`
+  - 설치/운영: `docs/setup/quickstart*.md`
   - 운영 문서: `docs/gemma/*.md`, `docs/hunyuan/*.md`, `docs/repo/github-rulesets-public-free-ko.md`, `hunyuanocr_docker_files/README.md`, `paddleocr_vl_docker_files/README.md`
 - `develop`에는 개발/감사/정책 문서를 허용한다.
 - `benchmarking/lab`에는 benchmark 전용 문서를 허용한다.
 - 아래 문서는 `main`에 올리지 않는다.
+  - `docs/history/*`
   - `docs/i18n/*`
   - `docs/rendering/*`
   - `docs/repo/benchmark-branch-policy-ko.md`

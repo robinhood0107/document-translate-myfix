@@ -33,6 +33,18 @@ The fork is maintained around a practical desktop workflow:
 
 This repository started from [ogkalu2/comic-translate](https://github.com/ogkalu2/comic-translate) and should be understood as a downstream, product-focused fork/derivative of that upstream work. It began from the upstream `v2.6.7` codebase and then diverged with local runtime, OCR, Windows, and workflow changes.
 
+## License and Redistribution
+
+The upstream project is distributed under the Apache License 2.0, and this fork keeps that license basis for the upstream-derived code in this repository.
+
+If you publicly redistribute this fork or a modified build of it, the practical minimum checklist is:
+
+- include the Apache 2.0 license text with the redistributed work
+- keep upstream copyright, patent, attribution, and origin notices that still apply
+- make it clear that this repository is a modified downstream fork/derivative, not the original upstream project
+- add prominent notices for files you modified when redistributing the source
+- review third-party asset licenses separately from the code license
+
 ## Third-Party Models and Runtime Notice
 
 This project uses, downloads, or interoperates with third-party models, checkpoints, and runtime images. The copyright, license, and usage terms for those assets belong to their original authors and distributors, and this repository does not claim ownership of them. You are responsible for reviewing and complying with each upstream model/runtime license before using them.
@@ -167,6 +179,11 @@ Audit document:
 
 ## Quick Start
 
+For a more explicit setup path, see:
+
+- [docs/setup/quickstart.md](docs/setup/quickstart.md)
+- [docs/setup/quickstart-ko.md](docs/setup/quickstart-ko.md)
+
 ### 1. Launch the application
 
 The launchers create or update their own local runtime environment on first run.
@@ -210,6 +227,37 @@ In Settings, choose:
 
 - `Default (existing auto: MangaOCR / PPOCR / Pororo...)` to keep legacy OCR routing
 - `Optimal (HunyuanOCR / PaddleOCR VL)` to route Chinese to `HunyuanOCR` and Japanese/other languages to `PaddleOCR VL`
+
+### 5. Optional ntfy notifications
+
+Open `Settings > Notifications` to configure:
+
+- completion sound
+- ntfy server URL / topic / optional token
+- whether to send on completion / failure / cancellation
+
+The app sends plain-text-only ntfy notifications and keeps the message body below the default ntfy text limit documented by ntfy.
+
+Official ntfy docs:
+
+- [Publish notifications](https://docs.ntfy.sh/publish/)
+- [Server configuration](https://docs.ntfy.sh/config/)
+
+## Docker Images Used by This Repository
+
+Tracked compose/runtime images used by the repo:
+
+- Gemma local server: `ghcr.io/ggml-org/llama.cpp:server-cuda`
+- HunyuanOCR local server: `ghcr.io/ggml-org/llama.cpp:server-cuda`
+- PaddleOCR VL runtime: `ccr-2vdh3abv-pub.cnc.bj.baidubce.com/paddlepaddle/paddleocr-genai-vllm-server:latest-nvidia-gpu-offline`
+
+## Reference Setup Docs
+
+- [docs/setup/quickstart.md](docs/setup/quickstart.md)
+- [docs/setup/quickstart-ko.md](docs/setup/quickstart-ko.md)
+- [docs/gemma/local-server-ko.md](docs/gemma/local-server-ko.md)
+- [docs/hunyuan/local-server-ko.md](docs/hunyuan/local-server-ko.md)
+- [paddleocr_vl_docker_files/README.md](paddleocr_vl_docker_files/README.md)
 
 ## Repository Documents
 
