@@ -159,10 +159,7 @@ OCR:
 - target language 확장과 RTL 개선
 - webtoon/list-view 관련 선택 이식 수정
 
-검수 문서:
-
-- [docs/history/v267-to-v270-backport-audit.md](docs/history/v267-to-v270-backport-audit.md)
-- [docs/history/v267-to-v270-backport-audit-ko.md](docs/history/v267-to-v270-backport-audit-ko.md)
+상세 검수 문서는 `develop`에만 유지하고, 공개용 `main` 문서 세트에는 승격하지 않습니다.
 
 ### `v2.7.0 -> v2.7.1`
 
@@ -174,10 +171,7 @@ OCR:
 - import 메뉴에서 `Project File` 옆 `PSD` 정리
 - 앱 버전 `2.7.1` 반영
 
-검수 문서:
-
-- [docs/history/v270-to-v271-backport-audit.md](docs/history/v270-to-v271-backport-audit.md)
-- [docs/history/v270-to-v271-backport-audit-ko.md](docs/history/v270-to-v271-backport-audit-ko.md)
+상세 검수 문서는 `develop`에만 유지하고, 공개용 `main` 문서 세트에는 승격하지 않습니다.
 
 ## 빠른 사용법
 
@@ -264,15 +258,14 @@ Settings에서 아래 중 하나를 선택합니다.
 ## 저장소 문서
 
 - [rules.md](rules.md)
-- [docs/history/change-log.md](docs/history/change-log.md)
-- [docs/history/change-log-ko.md](docs/history/change-log-ko.md)
+`main`의 공개 문서 세트는 최소 운영 문서만 남기며, 더 깊은 변경 이력과 감사 문서는 `develop`에 유지합니다.
 - [docs/gemma/local-server-ko.md](docs/gemma/local-server-ko.md)
 - [docs/hunyuan/local-server-ko.md](docs/hunyuan/local-server-ko.md)
 - [docs/repo/github-rulesets-public-free-ko.md](docs/repo/github-rulesets-public-free-ko.md)
 
 ## Legacy Localized README
 
-`docs/i18n/` 아래 예전 localized README는 더 이상 source of truth가 아닙니다.
+공개 브랜치 기준 source of truth는 루트 `README.md`, `README_ko.md`입니다.
 
 현재 기준 문서는 아래 둘입니다.
 

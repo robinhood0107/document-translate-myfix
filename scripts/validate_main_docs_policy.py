@@ -21,7 +21,15 @@ ALLOWED_DOC_PATTERNS = (
 
 def git_diff_name_status(base_sha: str, head_sha: str) -> list[list[str]]:
     result = subprocess.run(
-        ["git", "diff", "--name-status", "--find-renames", f"{base_sha}..{head_sha}"],
+        [
+            "git",
+            "-c",
+            "core.quotepath=false",
+            "diff",
+            "--name-status",
+            "--find-renames",
+            f"{base_sha}..{head_sha}",
+        ],
         check=True,
         capture_output=True,
         text=True,
