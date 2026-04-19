@@ -11,6 +11,11 @@ python -m nuitka `
   --assume-yes-for-downloads `
   --enable-plugin=pyside6 `
   --module-parameter=torch-disable-jit=no `
+  --nofollow-import-to=sympy `
+  --nofollow-import-to=mpmath `
+  --nofollow-import-to=isympy `
+  --nofollow-import-to=onnxruntime.tools `
+  --nofollow-import-to=onnxruntime.transformers `
   --windows-console-mode=disable `
   --windows-icon-from-ico=resources/icons/icon.ico `
   --company-name="ComicLabs" `
