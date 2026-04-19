@@ -94,6 +94,7 @@ This repository now uses a strict `main + develop + tag` model.
 - `develop` is the integration branch for upcoming product work.
 - `main` is the shipping baseline.
 - Official releases are created only from `vX.Y.Z` version tags that point to commits already contained in `main`.
+- Before creating a release tag, run the `Release Preflight` workflow on `main` and wait for a green Windows Nuitka build.
 - The Windows release asset is built with `Nuitka` and published as a GitHub Release artifact from that tag.
 - Models, checkpoints, and Docker runtimes are not bundled into the release executable and remain separately provisioned.
 - `release/*` branches are not used.

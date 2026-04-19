@@ -152,6 +152,7 @@ OCR:
 
 공식 Windows 릴리스 패키지는 `main`에 포함된 커밋에만 `vX.Y.Z` 태그를 달았을 때 생성됩니다.
 
+- preflight 요구사항: 태그를 만들기 전에 `main`에서 `Release Preflight`를 먼저 실행해 Windows Nuitka 빌드 green 확인
 - 릴리스 트리거: Git 태그 push
 - 허용 태그 형식: `vX.Y.Z`
 - 빌드 대상: `Nuitka` 기반 Windows exe 패키지
