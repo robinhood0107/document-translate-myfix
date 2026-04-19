@@ -159,10 +159,7 @@ The `v2.7.0` backport brought in selected user-facing features such as:
 - new target languages and improved RTL handling
 - selected webtoon/list-view behavior fixes
 
-Audit document:
-
-- [docs/history/v267-to-v270-backport-audit.md](docs/history/v267-to-v270-backport-audit.md)
-- [docs/history/v267-to-v270-backport-audit-ko.md](docs/history/v267-to-v270-backport-audit-ko.md)
+Audit details stay on `develop` and are not promoted to the public `main` documentation set.
 
 ### `v2.7.0 -> v2.7.1`
 
@@ -174,10 +171,7 @@ The `v2.7.1` round selectively applies the upstream fixes that matter to this fo
 - import menu cleanup so `PSD` appears next to `Project File`
 - app version bump to `2.7.1`
 
-Audit document:
-
-- [docs/history/v270-to-v271-backport-audit.md](docs/history/v270-to-v271-backport-audit.md)
-- [docs/history/v270-to-v271-backport-audit-ko.md](docs/history/v270-to-v271-backport-audit-ko.md)
+Audit details stay on `develop` and are not promoted to the public `main` documentation set.
 
 ## Quick Start
 
@@ -264,15 +258,14 @@ Tracked compose/runtime images used by the repo:
 ## Repository Documents
 
 - [rules.md](rules.md)
-- [docs/history/change-log.md](docs/history/change-log.md)
-- [docs/history/change-log-ko.md](docs/history/change-log-ko.md)
+Release-facing documentation for `main` is intentionally kept minimal; deeper history and audit notes remain on `develop`.
 - [docs/gemma/local-server-ko.md](docs/gemma/local-server-ko.md)
 - [docs/hunyuan/local-server-ko.md](docs/hunyuan/local-server-ko.md)
 - [docs/repo/github-rulesets-public-free-ko.md](docs/repo/github-rulesets-public-free-ko.md)
 
 ## Legacy Localized READMEs
 
-The old localized README files under `docs/i18n/` are no longer the source of truth for this fork.
+The root `README.md` and `README_ko.md` are the source of truth for the public branch documentation set.
 
 Use:
 
