@@ -1,0 +1,23 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+MSG_FILE="${1:?commit message file is required}"
+SUBJECT="$(sed -n '1p' "$MSG_FILE" | tr -d '\r')"
+
+REGEX='^(feat|fix|docs|chore|refactor|test|ci|build|perf|revert)(\([a-z0-9._/-]+\))?!?: .{3,72}$'
+
+if [[ "$SUBJECT" =~ ^(Merge|Revert|fixup!|squash!) ]]; then
+  exit 0
+fi
+
+if [[ ! "$SUBJECT" =~ $REGEX ]]; then
+  cat >&2 <<'EOF'
+Invalid commit message.
+Use: type(scope): summary
+Allowed types: feat, fix, docs, chore, refactor, test, ci, build, perf, revert
+Example: feat(workspace): add retry tooltips
+EOF
+  exit 1
+fi
+
+exit 0

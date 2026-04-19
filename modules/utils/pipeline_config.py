@@ -1,11 +1,26 @@
 from __future__ import annotations
 
-from PySide6.QtCore import QCoreApplication
 from typing import TYPE_CHECKING
-from modules.inpainting.lama import LaMa
-from modules.inpainting.mi_gan import MIGAN
+
+from PySide6.QtCore import QCoreApplication
+
+from modules.ocr.selection import (
+    resolve_ocr_engine,
+    resolve_stage_batched_ocr_policy,
+    STAGE_BATCHED_WORKFLOW_MODE,
+)
+from modules.ocr.local_runtime import LocalOCRRuntimeManager
+from modules.translation.local_runtime import LocalGemmaRuntimeManager
 from modules.inpainting.aot import AOT
+from modules.inpainting.lama_variants import LaMaLarge512px, LaMaMPE
+from modules.inpainting.mi_gan import MIGAN
 from modules.inpainting.schema import Config
+from modules.utils.exceptions import LocalServiceConnectionError, LocalServiceSetupError
+from modules.utils.inpainting_runtime import (
+    inpainter_backend_for,
+    inpainter_default_settings,
+    normalize_inpainter_key,
+)
 from app.ui.messages import Messages
 from app.ui.settings.settings_page import SettingsPage
 
@@ -13,14 +28,18 @@ if TYPE_CHECKING:
     from controller import ComicTranslate
 
 inpaint_map = {
-    "LaMa": LaMa,
-    "MI-GAN": MIGAN,
     "AOT": AOT,
+    "lama_large_512px": LaMaLarge512px,
+    "lama_mpe": LaMaMPE,
+    "MI-GAN": MIGAN,
+    # Backward compatibility for older saved settings or stale project metadata.
+    "LaMa": LaMaLarge512px,
 }
 
 FIELD_LABELS = {
     "api_key": "API Key",
     "api_url": "Endpoint URL",
+    "server_url": "Server URL",
     "model": "Model",
     "api_key_ocr": "OCR API Key",
     "endpoint": "Endpoint URL",
@@ -37,10 +56,11 @@ OCR_REQUIREMENTS = {
 }
 
 TRANSLATOR_REQUIREMENTS = {
-    "Custom": ("Custom", ("api_key", "api_url", "model")),
+    "Custom Service": ("Custom Service", ("api_key", "api_url", "model")),
+    "Custom Local Server(Gemma)": ("Custom Local Server(Gemma)", ("api_url", "model")),
     "GPT-4.1": ("Open AI GPT", ("api_key",)),
     "GPT-4.1-mini": ("Open AI GPT", ("api_key",)),
-    "Claude-4.5-Sonnet": ("Anthropic Claude", ("api_key",)),
+    "Claude-4.6-Sonnet": ("Anthropic Claude", ("api_key",)),
     "Claude-4.5-Haiku": ("Anthropic Claude", ("api_key",)),
     "Gemini-2.5-Pro": ("Google Gemini", ("api_key",)),
     "Gemini-3.0-Flash": ("Google Gemini", ("api_key",)),
@@ -50,17 +70,32 @@ TRANSLATOR_REQUIREMENTS = {
     "Yandex": ("Yandex", ("api_key", "folder_id")),
 }
 
+
 def get_config(settings_page: SettingsPage):
     strategy_settings = settings_page.get_hd_strategy_settings()
     if strategy_settings['strategy'] == settings_page.ui.tr("Resize"):
-        config = Config(hd_strategy="Resize", hd_strategy_resize_limit = strategy_settings['resize_limit'])
-    elif strategy_settings['strategy'] == settings_page.ui.tr("Crop"):
-        config = Config(hd_strategy="Crop", hd_strategy_crop_margin = strategy_settings['crop_margin'],
-                        hd_strategy_crop_trigger_size = strategy_settings['crop_trigger_size'])
-    else:
-        config = Config(hd_strategy="Original")
+        return Config(hd_strategy="Resize", hd_strategy_resize_limit=strategy_settings['resize_limit'])
+    if strategy_settings['strategy'] == settings_page.ui.tr("Crop"):
+        return Config(
+            hd_strategy="Crop",
+            hd_strategy_crop_margin=strategy_settings['crop_margin'],
+            hd_strategy_crop_trigger_size=strategy_settings['crop_trigger_size'],
+        )
+    return Config(hd_strategy="Original")
 
-    return config
+
+def get_inpainter_runtime(settings_page: SettingsPage, inpainter_key: str | None = None) -> dict:
+    requested = inpainter_key or settings_page.get_tool_selection("inpainter")
+    normalized = normalize_inpainter_key(requested)
+    defaults = inpainter_default_settings(normalized)
+    runtime_settings = settings_page.get_inpainter_runtime_settings(normalized)
+    merged = dict(defaults)
+    merged.update(runtime_settings)
+    merged["key"] = normalized
+    merged["backend"] = str(merged.get("backend") or inpainter_backend_for(normalized))
+    if not settings_page.is_gpu_enabled():
+        merged["device"] = "cpu"
+    return merged
 
 
 def _missing_fields(creds: dict, required_fields: tuple[str, ...]) -> list[str]:
@@ -69,19 +104,105 @@ def _missing_fields(creds: dict, required_fields: tuple[str, ...]) -> list[str]:
 
 def _show_missing_credentials(main: ComicTranslate, provider_name: str, missing_fields: list[str]) -> None:
     field_text = ", ".join(FIELD_LABELS.get(field, field) for field in missing_fields)
+    if hasattr(main, "batch_report_ctrl"):
+        main.batch_report_ctrl.register_preflight_error(
+            QCoreApplication.translate("Messages", "Missing credentials for {provider}").format(provider=provider_name),
+            QCoreApplication.translate("Messages", "Required fields: {fields}").format(fields=field_text),
+        )
     Messages.show_missing_credentials_error(main, provider_name, field_text)
 
-def validate_ocr(main: ComicTranslate):
-    """Ensure the selected OCR tool has the credentials it needs."""
+
+def validate_ocr(
+    main: ComicTranslate,
+    source_lang: str | None = None,
+    preflight_cache: dict[str, str] | None = None,
+):
     settings_page = main.settings_page
-    settings = settings_page.get_all_settings()
-    ocr_tool = settings['tools']['ocr']
+    ocr_tool = settings_page.get_tool_selection("ocr")
+    workflow_mode = settings_page.get_workflow_mode()
 
     if not ocr_tool:
+        if hasattr(main, "batch_report_ctrl"):
+            main.batch_report_ctrl.register_preflight_error(
+                QCoreApplication.translate("Messages", "Missing OCR tool"),
+                QCoreApplication.translate("Messages", "No Text Recognition model selected."),
+            )
         Messages.show_missing_tool_error(main, QCoreApplication.translate("Messages", "Text Recognition model"))
         return False
 
-    normalized_tool = settings_page.ui.value_mappings.get(ocr_tool, ocr_tool)
+    source_lang = source_lang or main.s_combo.currentText()
+    source_lang_english = main.lang_mapping.get(source_lang, source_lang)
+    if workflow_mode == STAGE_BATCHED_WORKFLOW_MODE:
+        policy = resolve_stage_batched_ocr_policy(
+            workflow_mode,
+            ocr_tool,
+            source_lang_english,
+            settings_page.get_tool_selection("translator"),
+        )
+        normalized_tool = policy.primary_ocr_engine if policy.stage_batched_supported else ""
+    else:
+        normalized_tool = resolve_ocr_engine(ocr_tool, source_lang_english)
+    if normalized_tool in {"PaddleOCR VL", "HunyuanOCR", "MangaLMM"}:
+        local_service_configs = {
+            "PaddleOCR VL": (
+                "PaddleOCR VL",
+                settings_page.ui.tr("PaddleOCR VL Settings"),
+                settings_page.get_paddleocr_vl_settings(),
+            ),
+            "HunyuanOCR": (
+                "HunyuanOCR",
+                settings_page.ui.tr("HunyuanOCR Settings"),
+                settings_page.get_hunyuan_ocr_settings(),
+            ),
+            "MangaLMM": (
+                "MangaLMM",
+                settings_page.ui.tr("MangaLMM Settings"),
+                settings_page.get_mangalmm_ocr_settings(),
+            ),
+        }
+        service_name, settings_page_name, service_settings = local_service_configs[normalized_tool]
+        if not service_settings.get("server_url", "").strip():
+            if hasattr(main, "batch_report_ctrl"):
+                main.batch_report_ctrl.register_preflight_error(
+                    QCoreApplication.translate("Messages", "{service} settings missing").format(service=service_name),
+                    QCoreApplication.translate("Messages", "Required fields: {fields}").format(fields=FIELD_LABELS["server_url"]),
+                )
+            Messages.show_missing_local_service_config_error(
+                main,
+                service_name,
+                FIELD_LABELS["server_url"],
+                settings_page_name=settings_page_name,
+            )
+            return False
+        runtime_manager = getattr(main, "local_ocr_runtime_manager", None)
+        if not isinstance(runtime_manager, LocalOCRRuntimeManager):
+            runtime_manager = LocalOCRRuntimeManager()
+            main.local_ocr_runtime_manager = runtime_manager
+        try:
+            runtime_manager.validate_engine(normalized_tool, settings_page)
+        except LocalServiceSetupError as exc:
+            if hasattr(main, "batch_report_ctrl"):
+                main.batch_report_ctrl.register_preflight_error(
+                    QCoreApplication.translate("Messages", "{service} runtime setup failed").format(service=service_name),
+                    str(exc),
+                )
+            Messages.show_local_service_error(
+                main,
+                details=str(exc),
+                service_name=service_name,
+                settings_page_name=settings_page_name,
+                error_kind="setup",
+            )
+            return False
+        cache_key = runtime_manager.preflight_cache_key(normalized_tool, settings_page)
+        if cache_key:
+            probe_result = preflight_cache.get(cache_key) if preflight_cache is not None else None
+            if probe_result is None:
+                probe_result = runtime_manager.probe_managed_engine(normalized_tool, settings_page)
+                if preflight_cache is not None:
+                    preflight_cache[cache_key] = probe_result
+        return True
+
     provider = OCR_REQUIREMENTS.get(normalized_tool)
     if provider is None:
         return True
@@ -96,13 +217,56 @@ def validate_ocr(main: ComicTranslate):
     return True
 
 
+def validate_workflow_mode(
+    main: ComicTranslate,
+    source_lang: str | None = None,
+) -> bool:
+    settings_page = main.settings_page
+    workflow_mode = settings_page.get_workflow_mode()
+    if workflow_mode != STAGE_BATCHED_WORKFLOW_MODE:
+        return True
+
+    source_lang = source_lang or main.s_combo.currentText()
+    source_lang_english = main.lang_mapping.get(source_lang, source_lang)
+    policy = resolve_stage_batched_ocr_policy(
+        workflow_mode,
+        settings_page.get_tool_selection("ocr"),
+        source_lang_english,
+        settings_page.get_tool_selection("translator"),
+    )
+    if policy.stage_batched_supported and not policy.requires_sidecar_collection:
+        return True
+
+    if policy.requires_sidecar_collection:
+        reason = QCoreApplication.translate(
+            "Messages",
+            "Stage-Batched Pipeline currently supports only single-runtime OCR routes in product mode.",
+        )
+    else:
+        reason = QCoreApplication.translate(
+            "Messages",
+            "Stage-Batched Pipeline is not supported for the current OCR/translator/language combination: {reason}",
+        ).format(reason=policy.unsupported_reason)
+    if hasattr(main, "batch_report_ctrl"):
+        main.batch_report_ctrl.register_preflight_error(
+            QCoreApplication.translate("Messages", "Unsupported workflow mode combination"),
+            reason,
+        )
+    Messages.show_error(main, reason, duration=None, closable=True, source="batch")
+    return False
+
+
 def validate_translator(main: ComicTranslate, target_lang: str):
-    """Ensure the selected translator has the credentials it needs."""
     settings_page = main.settings_page
     settings = settings_page.get_all_settings()
     translator_tool = settings['tools']['translator']
 
     if not translator_tool:
+        if hasattr(main, "batch_report_ctrl"):
+            main.batch_report_ctrl.register_preflight_error(
+                QCoreApplication.translate("Messages", "Missing translator"),
+                QCoreApplication.translate("Messages", "No Translator selected."),
+            )
         Messages.show_missing_tool_error(main, QCoreApplication.translate("Messages", "Translator"))
         return False
 
@@ -115,26 +279,68 @@ def validate_translator(main: ComicTranslate, target_lang: str):
     creds = settings_page.get_credentials(provider_name)
     missing_fields = _missing_fields(creds, required_fields)
     if missing_fields:
-        if normalized_tool == "Custom":
-            Messages.show_custom_not_configured_error(main)
+        if normalized_tool == "Custom Service":
+            Messages.show_custom_service_not_configured_error(main)
+        elif normalized_tool == "Custom Local Server(Gemma)":
+            Messages.show_custom_local_gemma_not_configured_error(main)
         else:
             _show_missing_credentials(main, provider_name, missing_fields)
         return False
 
+    if normalized_tool == "Custom Local Server(Gemma)":
+        runtime_manager = getattr(main, "local_translation_runtime_manager", None)
+        if not isinstance(runtime_manager, LocalGemmaRuntimeManager):
+            runtime_manager = LocalGemmaRuntimeManager()
+            main.local_translation_runtime_manager = runtime_manager
+        try:
+            # Keep automatic-run preflight cheap on the UI thread.
+            # The actual managed-runtime startup/connection check still happens
+            # inside the worker when the translator is instantiated.
+            runtime_manager.validate_server(settings_page)
+        except (LocalServiceSetupError, LocalServiceConnectionError) as exc:
+            if hasattr(main, "batch_report_ctrl"):
+                title = (
+                    QCoreApplication.translate("Messages", "Gemma local server runtime setup failed")
+                    if isinstance(exc, LocalServiceSetupError)
+                    else QCoreApplication.translate("Messages", "Gemma local server is unavailable")
+                )
+                main.batch_report_ctrl.register_preflight_error(title, str(exc))
+            Messages.show_local_service_error(
+                main,
+                details=str(exc),
+                service_name="Gemma",
+                settings_page_name=settings_page.ui.tr("Gemma Local Server Settings"),
+                error_kind="setup" if isinstance(exc, LocalServiceSetupError) else "connection",
+            )
+            return False
+
     return True
+
 
 def font_selected(main: ComicTranslate):
     if not main.render_settings().font_family:
+        if hasattr(main, "batch_report_ctrl"):
+            main.batch_report_ctrl.register_preflight_error(
+                QCoreApplication.translate("Messages", "No font selected"),
+                QCoreApplication.translate("Messages", "Go to Settings > Text Rendering > Font to select or import one."),
+            )
         Messages.select_font_error(main)
         return False
     return True
 
-def validate_settings(main: ComicTranslate, target_lang: str):
-    if not validate_ocr(main):
+
+def validate_settings(
+    main: ComicTranslate,
+    target_lang: str,
+    source_lang: str | None = None,
+    preflight_cache: dict[str, str] | None = None,
+):
+    if not validate_workflow_mode(main, source_lang=source_lang):
+        return False
+    if not validate_ocr(main, source_lang=source_lang, preflight_cache=preflight_cache):
         return False
     if not validate_translator(main, target_lang):
         return False
     if not font_selected(main):
         return False
-    
     return True

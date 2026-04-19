@@ -66,7 +66,11 @@ def filter_and_fix_bboxes(
 
 def get_inpaint_bboxes(
     text_bbox: list[float], 
-    image: np.ndarray
+    image: np.ndarray,
+    bubble_bbox: Optional[list[float]] = None,
+    width_expansion_percentage: int = 10,
+    height_expansion_percentage: int = 18,
+    min_padding_px: int = 12,
 ) -> list[list[int]]:
     """
     Get inpaint bounding boxes for a text region.
@@ -78,7 +82,30 @@ def get_inpaint_bboxes(
     Returns:
         list of inpaint bounding boxes
     """
-    x1, y1, x2, y2 = adjust_text_line_coordinates(text_bbox, 0, 10, image)
+    tx1, ty1, tx2, ty2 = [int(v) for v in text_bbox]
+    x1, y1, x2, y2 = adjust_text_line_coordinates(
+        text_bbox,
+        width_expansion_percentage,
+        height_expansion_percentage,
+        image,
+    )
+
+    pad_x = max(min_padding_px, int(round(max(1, tx2 - tx1) * 0.08)))
+    pad_y = max(min_padding_px, int(round(max(1, ty2 - ty1) * 0.12)))
+    x1 = max(0, min(x1, tx1 - pad_x))
+    y1 = max(0, min(y1, ty1 - pad_y))
+    x2 = min(image.shape[1], max(x2, tx2 + pad_x))
+    y2 = min(image.shape[0], max(y2, ty2 + pad_y))
+
+    if bubble_bbox is not None and len(bubble_bbox) >= 4:
+        bx1, by1, bx2, by2 = [int(v) for v in bubble_bbox[:4]]
+        x1 = max(x1, bx1)
+        y1 = max(y1, by1)
+        x2 = min(x2, bx2)
+        y2 = min(y2, by2)
+
+    if x2 <= x1 or y2 <= y1:
+        return []
         
     # Crop the image to the text bounding box
     crop = image[y1:y2, x1:x2]

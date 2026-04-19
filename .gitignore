@@ -11,6 +11,7 @@ __pycache__/
 .env
 .venv
 .venv-win
+.venv-win-cuda13
 env/
 venv/
 
@@ -21,5 +22,22 @@ uv.lock
 
 # Test files
 test_*.py
+!tests/test_*.py
 demo_*.py
+
+# Tooling / caches
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+htmlcov/
+.coverage
+.idea/
+.DS_Store
+
+#ai models
+/models/
+testmodel
+/fonts/
+/Sample/
+/banchmark_result_log/
 /benchmarks/ocr_combo/

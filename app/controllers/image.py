@@ -4,18 +4,35 @@ import os
 import imkit as imk
 import numpy as np
 from typing import TYPE_CHECKING, List
+from datetime import datetime
 from PySide6 import QtCore, QtWidgets, QtGui
 
-from app.ui.dayu_widgets.clickable_card import ClickMeta
 from app.ui.dayu_widgets.message import MMessage
 from app.ui.messages import Messages
 from app.ui.commands.image import SetImageCommand, ToggleSkipImagesCommand
 from app.ui.commands.inpaint import PatchInsertCommand
 from app.ui.commands.inpaint import PatchCommandBase
 from app.ui.commands.box import AddTextItemCommand
+from app.controllers.psd_importer import ImportedPsdPage, import_psd_files, prepare_psd_font_catalog
+from app.controllers.psd_support import ensure_photoshopapi_available
+from app.ui.list_view import PageListItemData
 from app.ui.list_view_image_loader import ListViewImageLoader
 from app.thread_worker import GenericWorker
 from app.path_materialization import ensure_path_materialized
+from app.projects.project_types import (
+    PROJECT_KIND_SINGLE,
+    has_project_file_extension,
+)
+from modules.utils.archives import natural_sort_key
+from modules.utils.export_paths import normalize_export_source_record
+from modules.utils.automatic_output import default_project_output_preferences
+from modules.utils.file_handler import get_prepared_path_source
+from modules.utils.inpaint_strokes import (
+    PATCH_KIND_INPAINT,
+    PATCH_KIND_RESTORE,
+    STROKE_ROLE_ADD,
+    normalize_patch_kind,
+)
 
 if TYPE_CHECKING:
     from controller import ComicTranslate
@@ -34,9 +51,220 @@ class ImageStateController:
         
         # Initialize lazy image loader for list view
         self.page_list_loader = ListViewImageLoader(
-            self.main.page_list,
+            self.main.page_list.content_view(),
             avatar_size=(35, 50)
         )
+        self.page_list_loader.set_model(self.main.page_list.model())
+        initial_size = self.main.page_list.thumbnail_size()
+        self.page_list_loader.set_avatar_size(initial_size.width(), initial_size.height())
+        self.main.page_list.thumbnail_size_changed.connect(self.page_list_loader.set_avatar_size)
+
+    def ensure_page_state(self, file_path: str) -> dict:
+        state = self.main.image_states.setdefault(file_path, {})
+        state.setdefault('viewer_state', {})
+        state.setdefault('source_lang', self.main.s_combo.currentText())
+        state.setdefault('target_lang', self.main.t_combo.currentText())
+        state.setdefault('brush_strokes', [])
+        state.setdefault('blk_list', [])
+        state.setdefault('skip', False)
+        return state
+
+    def apply_languages_to_paths(
+        self,
+        paths: list[str],
+        source_lang: str,
+        target_lang: str,
+    ) -> None:
+        for file_path in paths or []:
+            state = self.ensure_page_state(file_path)
+            state["source_lang"] = source_lang
+            state["target_lang"] = target_lang
+
+    def _resolve_page_sort_source(self, file_path: str) -> tuple[str, str]:
+        source_records = getattr(self.main, "export_source_by_path", {}) or {}
+        source_record = normalize_export_source_record(source_records.get(file_path))
+        if source_record is not None:
+            return source_record["source_path"], source_record["kind"]
+
+        lazy_source = get_prepared_path_source(file_path)
+        archive_path = str((lazy_source or {}).get("archive_path", "")).strip()
+        if archive_path:
+            return os.path.abspath(archive_path), "archive"
+
+        return os.path.abspath(file_path), "file"
+
+    def _safe_mtime(self, path: str) -> float:
+        if not path:
+            return 0.0
+        try:
+            return float(os.path.getmtime(path))
+        except Exception:
+            return 0.0
+
+    def _build_page_list_items(self) -> list[PageListItemData]:
+        items: list[PageListItemData] = []
+        for file_path in self.main.image_files:
+            source_path, source_kind = self._resolve_page_sort_source(file_path)
+            items.append(
+                PageListItemData(
+                    file_path=file_path,
+                    file_name=os.path.basename(file_path),
+                    display_name=os.path.basename(file_path),
+                    skipped=bool(self.main.image_states.get(file_path, {}).get("skip", False)),
+                    modified_at=self._safe_mtime(source_path or file_path),
+                    source_path=source_path,
+                    source_kind=source_kind,
+                )
+            )
+        return items
+
+    def _restore_page_selection(self, selected_paths: list[str], current_file: str | None) -> None:
+        if selected_paths:
+            self.main.page_list.set_selected_paths(selected_paths, current_file)
+        elif current_file in self.main.image_files:
+            self.main.page_list.setCurrentRow(self.main.image_files.index(current_file))
+        elif self.main.image_files:
+            self.main.page_list.setCurrentRow(0)
+
+    def _apply_image_order(self, new_order: list[str], *, clear_active_sort: bool = False) -> None:
+        if not new_order or new_order == self.main.image_files:
+            return
+
+        current_file = self._current_file_path()
+        selected_paths = self.main.page_list.selected_file_paths()
+        if current_file:
+            self.save_current_image_state()
+
+        self.invalidate_pending_nav_loads()
+        self.main.image_files = list(new_order)
+
+        if current_file in self.main.image_files:
+            self.main.curr_img_idx = self.main.image_files.index(current_file)
+        elif self.main.image_files:
+            self.main.curr_img_idx = 0
+        else:
+            self.main.curr_img_idx = -1
+
+        if self.main.webtoon_mode and hasattr(self.main.image_viewer, "webtoon_manager"):
+            manager = self.main.image_viewer.webtoon_manager
+            try:
+                manager.scene_item_manager.save_all_scene_items_to_states()
+            except Exception:
+                pass
+            manager.load_images_lazy(self.main.image_files, max(0, self.main.curr_img_idx))
+
+        self.main.page_list.blockSignals(True)
+        if clear_active_sort:
+            self.main.page_list.clear_active_sort()
+        self.update_image_cards()
+        self._restore_page_selection(selected_paths, current_file)
+        if 0 <= self.main.curr_img_idx < len(self.main.image_files):
+            current_path = self.main.image_files[self.main.curr_img_idx]
+            if current_path in self.main.undo_stacks:
+                self.main.undo_group.setActiveStack(self.main.undo_stacks[current_path])
+            self.page_list_loader.force_load_image(self.main.curr_img_idx)
+        self.main.page_list.blockSignals(False)
+        self.main.mark_project_dirty()
+
+    def _default_export_group_name(self, file_path: str) -> str:
+        state = self.main.image_states.get(file_path, {})
+        group_name = str(state.get("export_group_name", "")).strip()
+        if group_name:
+            return group_name
+        project_ctrl = getattr(self.main, "project_ctrl", None)
+        if project_ctrl is not None:
+            try:
+                bundle_name = str(project_ctrl._get_export_bundle_name() or "").strip()
+                if bundle_name:
+                    return bundle_name
+            except Exception:
+                pass
+        return os.path.splitext(os.path.basename(file_path))[0] or "chapter"
+
+    def _build_image_state(
+        self,
+        file_path: str,
+        viewer_state: dict,
+        brush_strokes: list,
+        blk_list: list,
+        skip_status: bool,
+        existing_state: dict | None = None,
+    ) -> dict:
+        state = dict(existing_state or self.main.image_states.get(file_path, {}) or {})
+        state.update(
+            {
+                "viewer_state": viewer_state,
+                "source_lang": self.main.s_combo.currentText(),
+                "target_lang": self.main.t_combo.currentText(),
+                "brush_strokes": brush_strokes,
+                "blk_list": blk_list,
+                "skip": bool(skip_status),
+                "export_group_name": str(
+                    state.get("export_group_name") or self._default_export_group_name(file_path)
+                ).strip(),
+            }
+        )
+        return state
+
+    def reset_processing_summary(self, file_path: str, run_type: str = "manual") -> dict:
+        state = self.ensure_page_state(file_path)
+        summary = {
+            "last_run_timestamp": datetime.now().isoformat(timespec="seconds"),
+            "run_type": run_type,
+            "source_lang": state.get("source_lang", self.main.s_combo.currentText()),
+            "target_lang": state.get("target_lang", self.main.t_combo.currentText()),
+            "stage_status": {},
+            "last_failure_reason": "",
+        }
+        state["processing_summary"] = summary
+        return summary
+
+    def _deep_merge_dict(self, target: dict, patch: dict) -> dict:
+        for key, value in (patch or {}).items():
+            if isinstance(value, dict) and isinstance(target.get(key), dict):
+                self._deep_merge_dict(target[key], value)
+            else:
+                target[key] = value
+        return target
+
+    def update_processing_summary(self, file_path: str, patch: dict | None = None, **kwargs) -> dict:
+        state = self.ensure_page_state(file_path)
+        summary = state.get("processing_summary")
+        if not isinstance(summary, dict):
+            summary = self.reset_processing_summary(file_path, run_type="manual")
+        merged_patch = {}
+        if patch:
+            merged_patch.update(patch)
+        if kwargs:
+            merged_patch.update(kwargs)
+        self._deep_merge_dict(summary, merged_patch)
+        summary["last_run_timestamp"] = datetime.now().isoformat(timespec="seconds")
+        state["processing_summary"] = summary
+        return summary
+
+    def mark_processing_stage(
+        self,
+        file_path: str,
+        stage: str,
+        status: str,
+        reason: str = "",
+        **extra,
+    ) -> dict:
+        summary = self.update_processing_summary(file_path)
+        stage_status = summary.setdefault("stage_status", {})
+        payload = {
+            "status": status,
+            "updated_at": datetime.now().isoformat(timespec="seconds"),
+        }
+        if reason:
+            payload["reason"] = reason
+            if status == "failed":
+                summary["last_failure_reason"] = reason
+        if extra:
+            payload.update(extra)
+        stage_status[stage] = payload
+        summary["stage_status"] = stage_status
+        return self.update_processing_summary(file_path, {"stage_status": stage_status})
 
     def _is_content_flagged_error(self, error: str) -> bool:
         lowered = (error or "").lower()
@@ -232,8 +460,72 @@ class ImageStateController:
         rgb_image = imk.read_image(file_path)
         return rgb_image
 
+    def invalidate_pending_nav_loads(self):
+        """Ignore stale async navigation results after page/state mutations."""
+        self._nav_request_id += 1
+        self._nav_worker = None
+
+    def _evict_loaded_image(self, file_path: str):
+        self.main.image_data.pop(file_path, None)
+        self.main.in_memory_history[file_path] = []
+        self.main.in_memory_patches.pop(file_path, None)
+
+    def sync_loaded_image_cache(self, preferred_file_path: str | None = None):
+        """Keep loaded_images aligned with image_data entries that are really in memory."""
+        valid_paths = set(self.main.image_files)
+        materialized_paths = {
+            path
+            for path, image in self.main.image_data.items()
+            if path in valid_paths and image is not None
+        }
+
+        ordered: list[str] = []
+        seen: set[str] = set()
+
+        def _append(path: str):
+            if path in materialized_paths and path not in seen:
+                ordered.append(path)
+                seen.add(path)
+
+        for path in self.main.loaded_images:
+            _append(path)
+
+        for path in self.main.image_files:
+            if path == preferred_file_path:
+                continue
+            _append(path)
+
+        if preferred_file_path is not None and preferred_file_path in materialized_paths:
+            if preferred_file_path in seen:
+                ordered = [path for path in ordered if path != preferred_file_path]
+                seen.discard(preferred_file_path)
+            ordered.append(preferred_file_path)
+            seen.add(preferred_file_path)
+
+        max_images = max(1, int(getattr(self.main, "max_images_in_memory", 1) or 1))
+        while len(ordered) > max_images:
+            self._evict_loaded_image(ordered.pop(0))
+
+        self.main.loaded_images = ordered
+
+    def register_loaded_image(self, file_path: str):
+        """Mark a page as resident in memory and evict older cached pages."""
+        self.sync_loaded_image_cache()
+        if self.main.image_data.get(file_path) is None:
+            return
+
+        if file_path in self.main.loaded_images:
+            self.main.loaded_images.remove(file_path)
+        self.main.loaded_images.append(file_path)
+
+        max_images = max(1, int(getattr(self.main, "max_images_in_memory", 1) or 1))
+        while len(self.main.loaded_images) > max_images:
+            oldest_image = self.main.loaded_images.pop(0)
+            self._evict_loaded_image(oldest_image)
+
 
     def clear_state(self):
+        self.invalidate_pending_nav_loads()
         # Clear existing image data
         self.main.setWindowTitle("Project1.ctpr[*]")
         self._close_transient_skip_notice()
@@ -241,6 +533,7 @@ class ImageStateController:
         self._page_skip_errors.clear()
         self._suppress_dismiss_message_ids.clear()
         self.main.image_files = []
+        self.main.export_source_by_path = {}
         self.main.image_states.clear()
         self.main.image_data.clear()
         self.main.image_history.clear()
@@ -258,45 +551,153 @@ class ImageStateController:
         self.main.image_patches.clear()
         self.main.in_memory_patches.clear()
         self.main.project_file = None
+        self.main.project_kind = PROJECT_KIND_SINGLE
+        self.main.project_output_preferences = default_project_output_preferences()
+        self.main.clear_automatic_output_metric_cache()
+        try:
+            self.main.batch_report_ctrl.clear_latest_report()
+        except Exception:
+            pass
         self.main.image_cards.clear()
         self.main.current_card = None
         self.main.page_list.blockSignals(True)
         self.main.page_list.clear()
+        self.main.page_list.clear_active_sort()
         self.main.page_list.blockSignals(False)
         self.page_list_loader.clear()
+        self.main.refresh_automatic_output_controls()
 
         # Reset current_image_index
         self.main.curr_img_idx = -1
         self.main.set_project_clean()
+        try:
+            self.main.batch_report_ctrl.refresh_action_buttons()
+        except Exception:
+            pass
 
     def thread_load_images(self, paths: List[str]):
-        if paths and paths[0].lower().endswith('.ctpr'):
-            self.main.project_ctrl.thread_load_project(paths[0])
+        normalized_paths = [
+            os.path.normpath(os.path.abspath(path))
+            for path in (paths or [])
+            if isinstance(path, str) and path
+        ]
+        if normalized_paths and any(has_project_file_extension(path) for path in normalized_paths):
+            if len(normalized_paths) == 1 and has_project_file_extension(normalized_paths[0]):
+                self.main._open_project_by_type(normalized_paths[0])
+                return
+            self.main.default_error_handler(
+                (
+                    ValueError,
+                    ValueError(
+                        "Project files cannot be opened together with other imported files."
+                    ),
+                    "",
+                )
+            )
             return
 
-        # If autosave is active and a project file is already chosen, preserve
-        # the association so the title and autosave target survive the state reset.
-        try:
-            autosave_enabled = bool(
-                hasattr(self.main, 'title_bar')
-                and self.main.title_bar.autosave_switch.isChecked()
+        psd_paths = [p for p in normalized_paths if p.lower().endswith(".psd")]
+        if psd_paths:
+            if len(psd_paths) != len(normalized_paths):
+                self.main.default_error_handler(
+                    (
+                        ValueError,
+                        ValueError(
+                            "PSD import does not support mixing PSD files with other file types in one load request."
+                        ),
+                        "",
+                    )
+                )
+                return
+            if not ensure_photoshopapi_available(self.main):
+                return
+            try:
+                prepare_psd_font_catalog()
+            except Exception:
+                pass
+            self.main.project_ctrl.clear_recovery_checkpoint()
+            self.clear_state()
+            self.main.run_threaded(
+                self._import_psd_files,
+                self.on_psd_imported,
+                self.main.default_error_handler,
+                None,
+                psd_paths,
             )
-        except Exception:
-            autosave_enabled = False
-        prev_project_file = self.main.project_file if autosave_enabled else None
+            return
 
         self.main.project_ctrl.clear_recovery_checkpoint()
         self.clear_state()
-        if prev_project_file:
-            self.main.project_file = prev_project_file
-            self.main.setWindowTitle(f"{os.path.basename(prev_project_file)}[*]")
-        self.main.run_threaded(self.load_initial_image, self.on_initial_image_loaded, self.main.default_error_handler, None, paths)
+        self.main.run_threaded(
+            self.load_initial_image,
+            self.on_initial_image_loaded,
+            self.main.default_error_handler,
+            None,
+            normalized_paths,
+        )
+
+    def _import_psd_files(self, psd_paths: List[str]) -> list[ImportedPsdPage]:
+        return import_psd_files(psd_paths)
+
+    def on_psd_imported(self, pages: list[ImportedPsdPage]):
+        if not pages:
+            self.main.image_viewer.clear_scene()
+            return
+
+        warnings: list[str] = []
+
+        for page in pages:
+            file_path = page.image_path
+            rgb_image = page.rgb_image
+            if page.warning:
+                warnings.append(f"{os.path.basename(page.source_path)}: {page.warning}")
+
+            self.main.image_files.append(file_path)
+            self.main.image_data[file_path] = rgb_image
+            self.main.image_history[file_path] = [file_path]
+            self.main.in_memory_history[file_path] = [rgb_image.copy()]
+            self.main.current_history_index[file_path] = 0
+            self.main.image_states[file_path] = self._build_image_state(
+                file_path,
+                page.viewer_state,
+                [],
+                [],
+                False,
+            )
+
+            stack = QtGui.QUndoStack(self.main)
+            stack.cleanChanged.connect(self.main._update_window_modified)
+            stack.indexChanged.connect(self.main._bump_dirty_revision)
+            stack.indexChanged.connect(self.main.refresh_inpaint_tool_ui)
+            try:
+                if hasattr(self.main, "search_ctrl") and self.main.search_ctrl is not None:
+                    stack.indexChanged.connect(self.main.search_ctrl.on_undo_redo)
+            except Exception:
+                pass
+            self.main.undo_stacks[file_path] = stack
+            self.main.undo_group.addStack(stack)
+
+        self.main.page_list.blockSignals(True)
+        self.update_image_cards()
+        self.main.page_list.setCurrentRow(0)
+        self.main.page_list.blockSignals(False)
+        self.highlight_card(0)
+
+        self.display_image_from_loaded(self.main.image_data[self.main.image_files[0]], 0, switch_page=False)
+        self.main.image_viewer.resetTransform()
+        self.main.image_viewer.fitInView()
+        self.main.mark_project_dirty()
+
+        unique_warnings = list(dict.fromkeys(warnings))
+        if unique_warnings:
+            self._show_transient_skip_notice(unique_warnings[0], MMessage.WarningType)
 
     def thread_insert(self, paths: List[str]):
         if self.main.image_files:
             def on_files_prepared(prepared_files):
                 if not prepared_files:
                     return
+                self.invalidate_pending_nav_loads()
                 # Save current state and determine insert position
                 self.save_current_image_state()
                 
@@ -315,21 +716,23 @@ class ImageStateController:
                     
                     # Initialize empty image state for new files
                     skip_status = False
-                    self.main.image_states[file_path] = {
-                        'viewer_state': {},
-                        'source_lang': self.main.s_combo.currentText(),
-                        'target_lang': self.main.t_combo.currentText(),
-                        'brush_strokes': [],
-                        'blk_list': [],  # New images start with empty block list
-                        'skip': skip_status,
-                    }
+                    self.main.image_states[file_path] = self._build_image_state(
+                        file_path,
+                        {},
+                        [],
+                        [],
+                        skip_status,
+                    )
                     
                     # Create undo stack for new file
                     stack = QtGui.QUndoStack(self.main)
                     stack.cleanChanged.connect(self.main._update_window_modified)
                     stack.indexChanged.connect(self.main._bump_dirty_revision)
+                    stack.indexChanged.connect(self.main.refresh_inpaint_tool_ui)
                     self.main.undo_stacks[file_path] = stack
                     self.main.undo_group.addStack(stack)
+
+                self.main.page_list.clear_active_sort()
                 
                 # Handle webtoon mode specific updates
                 if self.main.webtoon_mode:
@@ -341,7 +744,6 @@ class ImageStateController:
                         self.update_image_cards()
                         self.main.page_list.blockSignals(True)
                         self.main.page_list.setCurrentRow(insert_position)
-                        self.highlight_card(insert_position)
                         self.main.page_list.blockSignals(False)
                         
                         # Update current index to the first inserted image
@@ -353,7 +755,6 @@ class ImageStateController:
                         self.update_image_cards()
                         self.main.page_list.blockSignals(True)
                         self.main.page_list.setCurrentRow(current_page)
-                        self.highlight_card(current_page)
                         self.main.page_list.blockSignals(False)
                 else:
                     # Handle normal mode
@@ -387,6 +788,7 @@ class ImageStateController:
             stack = QtGui.QUndoStack(self.main)
             stack.cleanChanged.connect(self.main._update_window_modified)
             stack.indexChanged.connect(self.main._bump_dirty_revision)
+            stack.indexChanged.connect(self.main.refresh_inpaint_tool_ui)
             try:
                 if hasattr(self.main, "search_ctrl") and self.main.search_ctrl is not None:
                     stack.indexChanged.connect(self.main.search_ctrl.on_undo_redo)
@@ -398,9 +800,10 @@ class ImageStateController:
         if self.main.image_files:
             self.main.page_list.blockSignals(True)
             self.update_image_cards()
-            self.main.page_list.blockSignals(False)
             self.main.page_list.setCurrentRow(0)
-            self.main.loaded_images.append(self.main.image_files[0])
+            self.main.page_list.blockSignals(False)
+            self.display_image_from_loaded(self.main.image_data[self.main.image_files[0]], 0, switch_page=False)
+            self.register_loaded_image(self.main.image_files[0])
         else:
             self.main.image_viewer.clear_scene()
 
@@ -408,138 +811,91 @@ class ImageStateController:
         self.main.image_viewer.fitInView()
         if self.main.image_files:
             self.main.mark_project_dirty()
+        try:
+            self.main.batch_report_ctrl.refresh_action_buttons()
+        except Exception:
+            pass
 
     def update_image_cards(self):
-        # Clear existing items
-        self.main.page_list.clear()
+        self.main.page_list.set_page_items(self._build_page_list_items())
         self.main.image_cards.clear()
         self.main.current_card = None
-
-        # Add new items
-        for index, file_path in enumerate(self.main.image_files):
-            file_name = os.path.basename(file_path)
-            list_item = QtWidgets.QListWidgetItem(file_name)
-            list_item.setData(QtCore.Qt.ItemDataRole.UserRole, file_path)
-            card = ClickMeta(extra=False, avatar_size=(35, 50))
-            card.setup_data({
-                "title": file_name,
-                # Avatar will be loaded lazily
-            })
-            
-            # Set the list item size hint to match the card size
-            list_item.setSizeHint(card.sizeHint())
-            
-            # re-apply strike-through if previously skipped
-            if self.main.image_states.get(file_path, {}).get('skip'):
-                card.set_skipped(True)
-            self.main.page_list.addItem(list_item)
-            self.main.page_list.setItemWidget(list_item, card)
-            self.main.image_cards.append(card)
-
-        # Initialize lazy loading for the new cards
-        self.page_list_loader.set_file_paths(self.main.image_files, self.main.image_cards)
-
-    def _resolve_reordered_paths(self, ordered_items: list[str]) -> list[str] | None:
-        current_files = self.main.image_files
-        if len(ordered_items) != len(current_files):
-            return None
-
-        current_set = set(current_files)
-        name_to_paths: dict[str, list[str]] = {}
-        for path in current_files:
-            name_to_paths.setdefault(os.path.basename(path), []).append(path)
-
-        resolved: list[str] = []
-        used: set[str] = set()
-
-        for token in ordered_items:
-            chosen = None
-
-            if token in current_set and token not in used:
-                chosen = token
-            else:
-                candidates = name_to_paths.get(token, [])
-                while candidates and candidates[0] in used:
-                    candidates.pop(0)
-                if candidates:
-                    chosen = candidates.pop(0)
-
-            if not chosen:
-                return None
-
-            used.add(chosen)
-            resolved.append(chosen)
-
-            chosen_name = os.path.basename(chosen)
-            remaining = name_to_paths.get(chosen_name, [])
-            if chosen in remaining:
-                remaining.remove(chosen)
-
-        if set(resolved) != current_set:
-            return None
-        return resolved
+        self.page_list_loader.set_model(self.main.page_list.model())
+        self.page_list_loader.set_file_paths(self.main.image_files)
+        self.main.refresh_automatic_output_controls()
 
     def handle_image_reorder(self, ordered_items: list[str]):
         if not self.main.image_files:
             return
+        new_order = [path for path in ordered_items if path in self.main.image_files]
+        if len(new_order) != len(self.main.image_files):
+            return
+        self._apply_image_order(new_order, clear_active_sort=True)
 
-        new_order = self._resolve_reordered_paths(ordered_items)
-        if not new_order or new_order == self.main.image_files:
+    def sort_images(self, sort_key: str, direction: str) -> None:
+        if len(self.main.image_files) < 2:
             return
 
-        current_file = self._current_file_path()
-        if current_file:
-            self.save_current_image_state()
+        ordered_paths = list(self.main.image_files)
+        current_order = {path: idx for idx, path in enumerate(ordered_paths)}
+        metadata = {
+            path: {
+                "basename_key": natural_sort_key(os.path.basename(path)),
+                "mtime": self._safe_mtime(self._resolve_page_sort_source(path)[0] or path),
+                "current_order": current_order[path],
+            }
+            for path in ordered_paths
+        }
 
-        self.main.image_files = new_order
-
-        if current_file in self.main.image_files:
-            self.main.curr_img_idx = self.main.image_files.index(current_file)
-        elif self.main.image_files:
-            self.main.curr_img_idx = 0
+        if sort_key == "name":
+            ordered_paths.sort(key=lambda path: metadata[path]["current_order"])
+            ordered_paths.sort(
+                key=lambda path: metadata[path]["basename_key"],
+                reverse=(direction == "desc"),
+            )
+        elif sort_key == "date":
+            ordered_paths.sort(key=lambda path: metadata[path]["current_order"])
+            ordered_paths.sort(key=lambda path: metadata[path]["basename_key"])
+            ordered_paths.sort(
+                key=lambda path: metadata[path]["mtime"],
+                reverse=(direction == "desc"),
+            )
         else:
-            self.main.curr_img_idx = -1
+            return
 
-        if self.main.webtoon_mode and hasattr(self.main.image_viewer, "webtoon_manager"):
-            manager = self.main.image_viewer.webtoon_manager
-            try:
-                manager.scene_item_manager.save_all_scene_items_to_states()
-            except Exception:
-                pass
-            current_page = max(0, self.main.curr_img_idx)
-            manager.load_images_lazy(self.main.image_files, current_page)
-
-        self.main.page_list.blockSignals(True)
-        self.update_image_cards()
-        if 0 <= self.main.curr_img_idx < len(self.main.image_files):
-            self.main.page_list.setCurrentRow(self.main.curr_img_idx)
-            self.highlight_card(self.main.curr_img_idx)
-            self.page_list_loader.force_load_image(self.main.curr_img_idx)
-            current_path = self.main.image_files[self.main.curr_img_idx]
-            if current_path in self.main.undo_stacks:
-                self.main.undo_group.setActiveStack(self.main.undo_stacks[current_path])
-        self.main.page_list.blockSignals(False)
-
-        self.main.mark_project_dirty()
+        self._apply_image_order(ordered_paths)
 
     def on_card_selected(self, current, previous):
-        if not current:
+        if current is None:
             self._hide_active_page_skip_error()
             return
 
-        file_path = current.data(QtCore.Qt.ItemDataRole.UserRole)
-        if isinstance(file_path, str) and file_path in self.main.image_files:
-            index = self.main.image_files.index(file_path)
-        else:
-            index = self.main.page_list.row(current)
+        index = -1
+        file_path = None
+        if hasattr(current, "isValid"):
+            if not current.isValid():
+                self._hide_active_page_skip_error()
+                return
+            index = current.row()
+            file_path = current.data(QtCore.Qt.ItemDataRole.UserRole)
+        elif isinstance(current, int):
+            index = current
+
+        if not isinstance(file_path, str) or file_path not in self.main.image_files:
             if not (0 <= index < len(self.main.image_files)):
                 self._hide_active_page_skip_error()
                 return
             file_path = self.main.image_files[index]
+        else:
+            index = self.main.image_files.index(file_path)
         self.main.curr_tblock_item = None
         # Force load the selected image thumbnail
         self.page_list_loader.force_load_image(index)
         self._hide_active_page_skip_error()
+        try:
+            self.main.batch_report_ctrl.refresh_action_buttons()
+        except Exception:
+            pass
 
         # Avoid circular calls when in webtoon mode
         if getattr(self.main, '_processing_page_change', False):
@@ -585,8 +941,7 @@ class ImageStateController:
         if self.main.image_files:
             new_index = self.main.curr_img_idx + direction
             if 0 <= new_index < len(self.main.image_files):
-                item = self.main.page_list.item(new_index)
-                self.main.page_list.setCurrentItem(item)
+                self.main.page_list.setCurrentRow(new_index)
 
     def _run_async_nav_load(self, index: int):
         """Load a selected image asynchronously without entering the batch queue.
@@ -617,10 +972,12 @@ class ImageStateController:
             self.display_image_from_loaded(result, index)
 
         worker.signals.result.connect(
-            lambda result: QtCore.QTimer.singleShot(0, lambda: _on_result(result))
+            lambda result: QtCore.QTimer.singleShot(0, self.main, lambda: _on_result(result))
         )
         worker.signals.error.connect(
-            lambda error: QtCore.QTimer.singleShot(0, lambda: self.main.default_error_handler(error))
+            lambda error: QtCore.QTimer.singleShot(
+                0, self.main, lambda: self.main.default_error_handler(error)
+            )
         )
         self._nav_worker = worker
         self.main.threadpool.start(worker)
@@ -649,54 +1006,38 @@ class ImageStateController:
                         'bbox': saved['bbox'],
                         'image': rgb_img,
                         'hash': saved['hash'],
+                        'kind': normalize_patch_kind(saved.get('kind', PATCH_KIND_INPAINT)),
+                        'order': int(saved.get('order', 0) or 0),
                     })
         if loaded:
             self.main.in_memory_patches.setdefault(file_path, []).extend(loaded)
 
     def highlight_card(self, index: int):
-        """Highlight a single card (used for programmatic selection when signals are blocked)."""
-        # Clear highlights from all cards first
-        for card in self.main.image_cards:
-            card.set_highlight(False)
-            
-        # Highlight the specified card
-        if 0 <= index < len(self.main.image_cards):
-            self.main.image_cards[index].set_highlight(True)
-            self.main.current_card = self.main.image_cards[index]
+        """Track the current page path for code that expects a selected page."""
+        if 0 <= index < len(self.main.image_files):
+            self.main.current_card = self.main.image_files[index]
         else:
             self.main.current_card = None
 
     def on_selection_changed(self, selected_indices: list):
-        """Handle selection changes and update visual highlighting for all selected cards."""
-        # Clear highlights from all cards first
-        for card in self.main.image_cards:
-            card.set_highlight(False)
-        
-        # Highlight all selected cards
-        for index in selected_indices:
-            if 0 <= index < len(self.main.image_cards):
-                self.main.image_cards[index].set_highlight(True)
-        
-        # Keep track of the current card
+        """Keep track of the most recent selected page path."""
         if selected_indices:
-            current_index = selected_indices[-1]  # Use the last selected as current
-            if 0 <= current_index < len(self.main.image_cards):
-                self.main.current_card = self.main.image_cards[current_index]
+            current_index = selected_indices[-1]
+            if 0 <= current_index < len(self.main.image_files):
+                self.main.current_card = self.main.image_files[current_index]
         else:
             self.main.current_card = None
 
-    def handle_image_deletion(self, file_names: list[str]):
-        """Handles the deletion of images based on the provided file names."""
+    def handle_image_deletion(self, file_paths: list[str]):
+        """Handles the deletion of images based on the provided file paths."""
 
+        self.invalidate_pending_nav_loads()
         self.save_current_image_state()
         removed_any = False
         
         # Delete the files first.
-        for file_name in file_names:
-            # Find the full file path based on the file name
-            file_path = next((f for f in self.main.image_files if os.path.basename(f) == file_name), None)
-            
-            if file_path:
+        for file_path in file_paths:
+            if file_path in self.main.image_files:
                 # Remove from the image_files list
                 self.main.image_files.remove(file_path)
                 removed_any = True
@@ -728,12 +1069,12 @@ class ImageStateController:
         if self.main.webtoon_mode:
             # Use non-destructive page removal in webtoon mode
             if self.main.image_files:
+                self.main.page_list.clear_active_sort()
                 # Get full file paths of deleted files from the webtoon manager's file paths
                 webtoon_file_paths = self.main.image_viewer.webtoon_manager.image_loader.image_file_paths
                 deleted_file_paths = []
-                for file_name in file_names:
-                    # Find matching file paths in webtoon manager
-                    matching_paths = [fp for fp in webtoon_file_paths if os.path.basename(fp) == file_name]
+                for file_path in file_paths:
+                    matching_paths = [fp for fp in webtoon_file_paths if fp == file_path]
                     deleted_file_paths.extend(matching_paths)
                 
                 # Remove pages non-destructively from webtoon manager
@@ -748,7 +1089,6 @@ class ImageStateController:
                     self.update_image_cards()
                     self.main.page_list.blockSignals(True)
                     self.main.page_list.setCurrentRow(current_page)
-                    self.highlight_card(current_page)
                     self.main.page_list.blockSignals(False)
                 else:
                     # Fallback to full reload if non-destructive removal failed
@@ -757,7 +1097,6 @@ class ImageStateController:
                     self.update_image_cards()
                     self.main.page_list.blockSignals(True)
                     self.main.page_list.setCurrentRow(current_page)
-                    self.highlight_card(current_page)
                     self.main.page_list.blockSignals(False)
             else:
                 # If no images remain, exit webtoon mode and reset to drag browser
@@ -773,6 +1112,7 @@ class ImageStateController:
         else:
             # Handle normal mode
             if self.main.image_files:
+                self.main.page_list.clear_active_sort()
                 if self.main.curr_img_idx >= len(self.main.image_files):
                     self.main.curr_img_idx = len(self.main.image_files) - 1
 
@@ -783,7 +1123,6 @@ class ImageStateController:
                 self.update_image_cards()
                 self.main.page_list.blockSignals(True)
                 self.main.page_list.setCurrentRow(new_index)
-                self.highlight_card(new_index)
                 self.main.page_list.blockSignals(False)
             else:
                 # If no images remain, reset the view to the drag browser.
@@ -803,19 +1142,15 @@ class ImageStateController:
             self.main.mark_project_dirty()
 
 
-    def handle_toggle_skip_images(self, file_names: list[str], skip_status: bool):
+    def handle_toggle_skip_images(self, file_paths: list[str], skip_status: bool):
         """
         Handle toggling skip status for images
         
         Args:
-            file_names: List of file names to update
+            file_paths: List of file paths to update
             skip_status: If True, mark as skipped; if False, mark as not skipped
         """
-        file_paths = []
-        for name in file_names:
-            path = next((p for p in self.main.image_files if os.path.basename(p) == name), None)
-            if path:
-                file_paths.append(path)
+        file_paths = [path for path in file_paths if path in self.main.image_files]
 
         if not file_paths:
             return
@@ -837,6 +1172,8 @@ class ImageStateController:
             self.main.mark_project_dirty()
 
     def display_image_from_loaded(self, rgb_image, index: int, switch_page: bool = True):
+        if not (0 <= index < len(self.main.image_files)):
+            return
         file_path = self.main.image_files[index]
         self.main.image_data[file_path] = rgb_image
         
@@ -847,16 +1184,7 @@ class ImageStateController:
             self.main.current_history_index[file_path] = 0
 
         self.display_image(index, switch_page)
-
-        # Manage loaded images
-        if file_path not in self.main.loaded_images:
-            self.main.loaded_images.append(file_path)
-            if len(self.main.loaded_images) > self.main.max_images_in_memory:
-                oldest_image = self.main.loaded_images.pop(0)
-                del self.main.image_data[oldest_image]
-                self.main.in_memory_history[oldest_image] = []
-
-                self.main.in_memory_patches.pop(oldest_image, None)
+        self.register_loaded_image(file_path)
 
     def set_image(self, rgb_img: np.ndarray, push: bool = True):
         if self.main.curr_img_idx >= 0:
@@ -878,7 +1206,9 @@ class ImageStateController:
                 prop = {
                     'bbox': saved['bbox'],
                     'image': match['image'],
-                    'hash': saved['hash']
+                    'hash': saved['hash'],
+                    'kind': normalize_patch_kind(saved.get('kind', match.get('kind', PATCH_KIND_INPAINT))),
+                    'order': int(saved.get('order', match.get('order', 0)) or 0),
                 }
             else:
                 # load into memory
@@ -887,13 +1217,88 @@ class ImageStateController:
                 prop = {
                     'bbox': saved['bbox'],
                     'image': rgb_img,
-                    'hash': saved['hash']
+                    'hash': saved['hash'],
+                    'kind': normalize_patch_kind(saved.get('kind', PATCH_KIND_INPAINT)),
+                    'order': int(saved.get('order', 0) or 0),
                 }
                 self.main.in_memory_patches[file_path].append(prop)
             
             # draw it
             if not PatchCommandBase.find_matching_item(self.main.image_viewer._scene, prop):   
                 PatchCommandBase.create_patch_item(prop, self.main.image_viewer)
+
+    def _current_file_path(self) -> str | None:
+        if 0 <= self.main.curr_img_idx < len(self.main.image_files):
+            return self.main.image_files[self.main.curr_img_idx]
+        return None
+
+    def current_page_has_inpaint_patches(self) -> bool:
+        file_path = self._current_file_path()
+        if not file_path:
+            return False
+        return bool(self.main.image_patches.get(file_path, []))
+
+    def apply_restore_stroke(self, payload: dict):
+        if not payload:
+            return
+
+        file_path = self._current_file_path()
+        if not file_path or not self.current_page_has_inpaint_patches():
+            self.main.refresh_inpaint_tool_ui()
+            return
+
+        image = self.main.image_data.get(file_path)
+        if image is None:
+            image = self.load_image(file_path)
+            if image is not None:
+                self.main.image_data[file_path] = image
+        if image is None:
+            return
+
+        stroke_path = payload.get("path")
+        if stroke_path is None:
+            return
+
+        stroke_width = max(1, int(payload.get("width", self.main.image_viewer.brush_size)))
+        page_index = self.main.curr_img_idx
+        if self.main.webtoon_mode:
+            page_index = int(payload.get("page_index", self.main.curr_img_idx))
+            stroke_path = self.main.image_viewer.webtoon_manager.coordinate_converter.convert_path_to_page_local(
+                stroke_path,
+                page_index,
+            )
+
+        mask = self.main.pipeline.inpainting._generate_mask_from_saved_strokes(
+            [{
+                "path": stroke_path,
+                "width": stroke_width,
+                "brush": "#00000000",
+                "role": STROKE_ROLE_ADD,
+            }],
+            image,
+        )
+        patches = self.main.pipeline.inpainting.extract_patches_from_image(
+            mask,
+            image,
+            kind=PATCH_KIND_RESTORE,
+        )
+        if not patches:
+            return
+
+        if self.main.webtoon_mode:
+            for patch in patches:
+                x, y, _w, _h = patch["bbox"]
+                scene_pos = self.main.image_viewer.page_to_scene_coordinates(
+                    page_index,
+                    QtCore.QPointF(x, y),
+                )
+                if scene_pos is not None:
+                    patch["scene_pos"] = [scene_pos.x(), scene_pos.y()]
+                    patch["page_index"] = page_index
+
+        self.on_inpaint_patches_processed(patches, file_path)
+        self.main.mark_project_dirty()
+        self.main.refresh_inpaint_tool_ui()
 
     def save_current_image(self, file_path: str):
         if self.main.webtoon_mode:
@@ -907,15 +1312,15 @@ class ImageStateController:
 
     def save_image_state(self, file: str):
         # For regular mode only
-        skip_status = self.main.image_states.get(file, {}).get('skip', False)
-        self.main.image_states[file] = {
-            'viewer_state': self.main.image_viewer.save_state(),
-            'source_lang': self.main.s_combo.currentText(),
-            'target_lang': self.main.t_combo.currentText(),
-            'brush_strokes': self.main.image_viewer.save_brush_strokes(),
-            'blk_list': self.main.blk_list.copy(),  # Store a copy of the list, not a reference
-            'skip': skip_status,
-        }
+        existing = dict(self.main.image_states.get(file, {}))
+        self.main.image_states[file] = self._build_image_state(
+            file,
+            self.main.image_viewer.save_state(),
+            self.main.image_viewer.save_brush_strokes(),
+            self.main.blk_list.copy(),
+            existing.get('skip', False),
+            existing,
+        )
 
     def save_current_image_state(self):
         if self.main.curr_img_idx >= 0:
@@ -988,6 +1393,7 @@ class ImageStateController:
         finally:
             viewer.setUpdatesEnabled(True)
             viewer.viewport().update()
+            self.main.refresh_inpaint_tool_ui()
 
     def display_image(self, index: int, switch_page: bool = True):
         if 0 <= index < len(self.main.image_files):
@@ -1028,6 +1434,7 @@ class ImageStateController:
             if first_time_display and not self.main.webtoon_mode:
                 self.main.image_viewer.fitInView()
                 self.main.displayed_images.add(file_path)  # Mark this image as displayed
+            self.main.refresh_inpaint_tool_ui()
 
     def on_image_processed(self, index: int, image: np.ndarray, image_path: str):
         file_on_display = self.main.image_files[self.main.curr_img_idx]
@@ -1095,6 +1502,7 @@ class ImageStateController:
         finally:
             viewer.setUpdatesEnabled(True)
             viewer.viewport().update()
+            self.main.refresh_inpaint_tool_ui()
 
     def on_image_skipped(self, image_path: str, skip_reason: str, error: str):
         summarized_error = self._summarize_skip_error(error)
@@ -1169,10 +1577,12 @@ class ImageStateController:
         # Create the command for the specific page
         command = PatchInsertCommand(self.main, patches, file_path, display=should_display)
         target_stack.push(command)
+        self.main.refresh_inpaint_tool_ui()
 
     def apply_inpaint_patches(self, patches):
         command = PatchInsertCommand(self.main, patches, self.main.image_files[self.main.curr_img_idx])
         self.main.undo_group.activeStack().push(command)
+        self.main.refresh_inpaint_tool_ui()
 
     def cleanup(self):
         """Clean up resources, including the lazy loader."""

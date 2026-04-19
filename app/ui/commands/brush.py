@@ -1,7 +1,8 @@
-from typing import List
+from typing import List, Iterable
 from PySide6.QtGui import QUndoCommand
 from PySide6.QtWidgets import QGraphicsPathItem
 from .base import PathCommandBase, PathProperties
+from modules.utils.inpaint_strokes import normalize_stroke_role
 
 class BrushStrokeCommand(QUndoCommand, PathCommandBase):
     def __init__(self, viewer, path_item: QGraphicsPathItem):
@@ -45,17 +46,22 @@ class SegmentBoxesCommand(QUndoCommand, PathCommandBase):
         self.scene.update()
 
 class ClearBrushStrokesCommand(QUndoCommand, PathCommandBase):
-    def __init__(self, viewer):
+    def __init__(self, viewer, roles: Iterable[str] | None = None):
         super().__init__()
         self.viewer = viewer
         self.scene = viewer._scene
         self.properties_list = []
+        self.roles = set(roles or [])
 
     def redo(self):
         self.properties_list = []
         for item in self.scene.items():
             if isinstance(item, QGraphicsPathItem) and item != self.viewer.photo:
-                self.properties_list.append(self.save_path_properties(item))
+                props = self.save_path_properties(item)
+                role = normalize_stroke_role(props.get("role"), brush=props.get("brush"))
+                if self.roles and role not in self.roles:
+                    continue
+                self.properties_list.append(props)
                 self.scene.removeItem(item)
         self.scene.update()
         

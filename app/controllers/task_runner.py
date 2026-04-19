@@ -69,12 +69,12 @@ class TaskRunnerController:
         def enhanced_finished_callback():
             if operation["finished_callback"]:
                 operation["finished_callback"]()
-            QtCore.QTimer.singleShot(0, self._process_next_operation)
+            QtCore.QTimer.singleShot(0, self.main, self._process_next_operation)
 
         def enhanced_error_callback(error_tuple):
             if operation["error_callback"]:
                 operation["error_callback"](error_tuple)
-            QtCore.QTimer.singleShot(0, self._process_next_operation)
+            QtCore.QTimer.singleShot(0, self.main, self._process_next_operation)
 
         def enhanced_result_callback(result):
             if operation["result_callback"]:
@@ -100,18 +100,34 @@ class TaskRunnerController:
     ):
         worker = GenericWorker(callback, *args, **kwargs)
 
+        def _clear_current_worker() -> None:
+            if getattr(self.main, "current_worker", None) is worker:
+                self.main.current_worker = None
+
         if result_callback:
             worker.signals.result.connect(
                 lambda result: QtCore.QTimer.singleShot(
-                    0, lambda: result_callback(result)
+                    0, self.main, lambda: result_callback(result)
                 )
             )
         if error_callback:
             worker.signals.error.connect(
-                lambda error: QtCore.QTimer.singleShot(0, lambda: error_callback(error))
+                lambda error: QtCore.QTimer.singleShot(
+                    0, self.main, lambda: error_callback(error)
+                )
             )
         if finished_callback:
-            worker.signals.finished.connect(finished_callback)
+            worker.signals.finished.connect(
+                lambda: QtCore.QTimer.singleShot(
+                    0,
+                    self.main,
+                    lambda: (_clear_current_worker(), finished_callback())[1],
+                )
+            )
+        else:
+            worker.signals.finished.connect(
+                lambda: QtCore.QTimer.singleShot(0, self.main, _clear_current_worker)
+            )
 
         self.main.current_worker = worker
         self.main.threadpool.start(worker)

@@ -26,6 +26,24 @@ class TextItemManager:
     def initialize(self):
         """Initialize or reset the text item manager state."""
         pass
+
+    def _rect_to_scene(self, rect: tuple[float, float, float, float] | None, page_idx: int):
+        if rect is None:
+            return None
+        x, y, width, height = rect
+        scene_pos = self.coordinate_converter.page_local_to_scene_position(
+            QPointF(x, y), page_idx
+        )
+        return (scene_pos.x(), scene_pos.y(), width, height)
+
+    def _rect_to_page_local(self, rect: tuple[float, float, float, float] | None, page_idx: int):
+        if rect is None:
+            return None
+        x, y, width, height = rect
+        page_local_pos = self.coordinate_converter.scene_to_page_local_position(
+            QPointF(x, y), page_idx
+        )
+        return (page_local_pos.x(), page_local_pos.y(), width, height)
     
     def load_text_items(self, state: dict, page_idx: int):
         """Load text items for a specific page."""
@@ -38,6 +56,14 @@ class TextItemManager:
             # Update position in the data and create TextItemProperties
             text_data = text_data.copy()  # Don't modify the original
             text_data['position'] = (scene_pos.x(), scene_pos.y())
+            text_data['source_rect'] = self._rect_to_scene(
+                text_data.get('source_rect'),
+                page_idx,
+            )
+            text_data['block_anchor'] = self._rect_to_scene(
+                text_data.get('block_anchor'),
+                page_idx,
+            )
             text_item = self.viewer.add_text_item(text_data)
     
     def unload_text_items(self, page_idx: int, page_y: float, page_bottom: float, file_path: str):
@@ -60,6 +86,14 @@ class TextItemManager:
                     text_props = TextItemProperties.from_text_item(text_item)
                     # Override position to use page-local coordinates
                     text_props.position = (page_local_pos.x(), page_local_pos.y())
+                    text_props.source_rect = self._rect_to_page_local(
+                        text_props.source_rect,
+                        page_idx,
+                    )
+                    text_props.block_anchor = self._rect_to_page_local(
+                        text_props.block_anchor,
+                        page_idx,
+                    )
                     
                     text_items_data.append(text_props.to_dict())
                     text_items_to_remove.append(text_item)
@@ -191,6 +225,18 @@ class TextItemManager:
             'width': clipped_size[0],
             # Note: Height will be recalculated when the text item is recreated
         })
+        clipped_data['source_rect'] = (
+            clipped_position[0],
+            clipped_position[1],
+            clipped_size[0],
+            clipped_size[1],
+        )
+        clipped_data['block_anchor'] = (
+            clipped_position[0],
+            clipped_position[1],
+            clipped_size[0],
+            clipped_size[1],
+        )
         return clipped_data
     
     def save_text_items_to_states(self, scene_items_by_page: dict):
@@ -227,6 +273,14 @@ class TextItemManager:
                             'width': text_item.boundingRect().width(),
                             'height': text_item.boundingRect().height()
                         })
+                        base_text_data['source_rect'] = self._rect_to_page_local(
+                            base_text_data.get('source_rect'),
+                            page_idx,
+                        )
+                        base_text_data['block_anchor'] = self._rect_to_page_local(
+                            base_text_data.get('block_anchor'),
+                            page_idx,
+                        )
                         scene_items_by_page[page_idx]['text_items'].append(base_text_data)
                 else:
                     # Text spans multiple pages - need to clip and split
@@ -348,6 +402,14 @@ class TextItemManager:
                         target_page_local_pos = self.coordinate_converter.scene_to_page_local_position(scene_pos, page_idx)
                         clipped_text_data = text_item_data.copy()
                         clipped_text_data['position'] = (target_page_local_pos.x(), target_page_local_pos.y())
+                        clipped_text_data['source_rect'] = self._rect_to_page_local(
+                            clipped_text_data.get('source_rect'),
+                            page_idx,
+                        )
+                        clipped_text_data['block_anchor'] = self._rect_to_page_local(
+                            clipped_text_data.get('block_anchor'),
+                            page_idx,
+                        )
                         scene_items_by_page[page_idx]['text_items'].append(clipped_text_data)
                 else:
                     # Text spans multiple pages - need to clip and split
@@ -593,6 +655,13 @@ class TextItemManager:
             'width': right_x - left_x,
             'height': bottom_y - top_y
         })
+        base_data['source_rect'] = (
+            local_pos.x(),
+            local_pos.y(),
+            right_x - left_x,
+            bottom_y - top_y,
+        )
+        base_data['block_anchor'] = tuple(base_data['source_rect'])
         
         # Remove all items from their current pages
         for item in group:

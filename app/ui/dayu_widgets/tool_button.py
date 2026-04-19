@@ -42,29 +42,42 @@ class MToolButton(QtWidgets.QToolButton):
     @QtCore.Slot(bool)
     def _polish_icon(self, checked=None):
         if self._dayu_svg:
-            if self.isCheckable() and self.isChecked():
+            if self.property("tool_unavailable"):
+                self.setIcon(MIcon(self._dayu_svg))
+            elif self.isCheckable() and self.isChecked():
                 self.setIcon(MIcon(self._dayu_svg, dayu_theme.primary_color))
             else:
                 self.setIcon(MIcon(self._dayu_svg))
+        self._sync_visual_state()
+
+    def _sync_visual_state(self):
+        effect = self.graphicsEffect()
+        dimmed = (not self.isEnabled()) or bool(self.property("tool_unavailable"))
+        if dimmed:
+            if effect is None:
+                effect = QtWidgets.QGraphicsOpacityEffect(self)
+                self.setGraphicsEffect(effect)
+            effect.setOpacity(0.35)
+        elif effect is not None:
+            effect.setOpacity(1.0)
 
     def changeEvent(self, event):
         """Override change event to reset icon when enabled state changes"""
         if event.type() == QtCore.QEvent.EnabledChange:
             self._polish_icon()
-            effect = self.graphicsEffect()
-            if not self.isEnabled():
-                if effect is None:
-                    effect = QtWidgets.QGraphicsOpacityEffect(self)
-                    self.setGraphicsEffect(effect)
-                effect.setOpacity(0.35)
-            else:
-                if effect is not None:
-                    effect.setOpacity(1.0)
         return super(MToolButton, self).changeEvent(event)
+
+    def event(self, event):
+        if (
+            event.type() == QtCore.QEvent.DynamicPropertyChange
+            and bytes(event.propertyName()) == b"tool_unavailable"
+        ):
+            self._polish_icon()
+        return super(MToolButton, self).event(event)
 
     def enterEvent(self, event):
         """Override enter event to highlight the icon"""
-        if self._dayu_svg and self.isEnabled():
+        if self._dayu_svg and self.isEnabled() and not self.property("tool_unavailable"):
             self.setIcon(MIcon(self._dayu_svg, dayu_theme.primary_color))
         return super(MToolButton, self).enterEvent(event)
 

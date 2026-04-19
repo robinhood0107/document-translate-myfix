@@ -8,19 +8,66 @@ from app.ui.dayu_widgets.button_group import MPushButtonGroup, MToolButtonGroup
 from app.ui.dayu_widgets.check_box import MCheckBox
 from app.ui.dayu_widgets.combo_box import MComboBox, MFontComboBox
 from app.ui.dayu_widgets.divider import MDivider
+from app.ui.dayu_widgets.label import MLabel
 from app.ui.dayu_widgets.line_edit import MLineEdit
 from app.ui.dayu_widgets.loading import MLoading
 from app.ui.dayu_widgets.progress_bar import MProgressBar
 from app.ui.dayu_widgets.push_button import MPushButton
 from app.ui.dayu_widgets.radio_button import MRadioButton
 from app.ui.dayu_widgets.slider import MSlider
+from app.ui.dayu_widgets.spin_box import MSpinBox
 from app.ui.dayu_widgets.text_edit import MTextEdit
 from app.ui.dayu_widgets.tool_button import MToolButton
 from app.ui.search_replace_panel import SearchReplacePanel
 from app.ui.main_window.constants import supported_source_languages, supported_target_languages
+from app.projects.project_types import PROJECT_FILE_EXT, SERIES_PROJECT_FILE_EXT
+from modules.utils.automatic_output import (
+    OUTPUT_ARCHIVE_FORMAT_CBZ,
+    OUTPUT_ARCHIVE_FORMAT_ZIP,
+    OUTPUT_IMAGE_FORMAT_JPG,
+    OUTPUT_IMAGE_FORMAT_PNG,
+    OUTPUT_IMAGE_FORMAT_SAME,
+    OUTPUT_IMAGE_FORMAT_WEBP,
+    OUTPUT_TARGET_ARCHIVE,
+    OUTPUT_TARGET_IMAGES,
+)
 
 
 class WorkspaceMixin:
+    def _create_scope_badge(self, text: str, tooltip: str = ""):
+        badge = QtWidgets.QLabel(text)
+        badge.setStyleSheet(
+            "QLabel {"
+            "background-color: #4a4a4a;"
+            "color: #f0f0f0;"
+            "border-radius: 8px;"
+            "padding: 1px 6px;"
+            "font-size: 10px;"
+            "font-weight: 600;"
+            "}"
+        )
+        if tooltip:
+            badge.setToolTip(tooltip)
+        return badge
+
+    def _create_render_field_label(self, text: str):
+        label = QtWidgets.QLabel(text)
+        label.setProperty("render_field_label", "true")
+        label.setMinimumWidth(60)
+        label.setAlignment(QtCore.Qt.AlignmentFlag.AlignLeft | QtCore.Qt.AlignmentFlag.AlignVCenter)
+        return label
+
+    def _create_render_section_widget(self):
+        widget = QtWidgets.QWidget()
+        widget.setProperty("render_section", "true")
+        return widget
+
+    def _style_render_choice_group(self, button_group: MToolButtonGroup):
+        for button in button_group.get_button_group().buttons():
+            button.setProperty("render_choice", "true")
+            button.setMinimumHeight(30)
+            button.setMinimumWidth(46)
+
     def _create_main_content(self):
         content_widget = QtWidgets.QWidget()
 
@@ -81,6 +128,19 @@ class WorkspaceMixin:
         self.batch_report_button = MPushButton(self.tr("Report"))
         self.batch_report_button.setEnabled(False)
         self.batch_report_button.setFocusPolicy(QtCore.Qt.FocusPolicy.NoFocus)
+        self.batch_report_button.setToolTip(self.tr("Open the latest automatic processing report."))
+        self.retry_failed_button = MPushButton(self.tr("Retry Failed"))
+        self.retry_failed_button.setEnabled(False)
+        self.retry_failed_button.setFocusPolicy(QtCore.Qt.FocusPolicy.NoFocus)
+        self.retry_failed_button.setToolTip(
+            self.tr("Retry only the pages that failed in the latest automatic run.")
+        )
+        self.one_page_auto_button = MPushButton(self.tr("One-Page Auto"))
+        self.one_page_auto_button.setEnabled(False)
+        self.one_page_auto_button.setFocusPolicy(QtCore.Qt.FocusPolicy.NoFocus)
+        self.one_page_auto_button.setToolTip(
+            self.tr("Automatically process only the current page with the current automatic settings.")
+        )
 
         header_layout.addWidget(self.hbutton_group)
         header_layout.addWidget(self.loading)
@@ -91,6 +151,8 @@ class WorkspaceMixin:
         header_layout.addWidget(self.translate_button)
         header_layout.addWidget(self.cancel_button)
         header_layout.addWidget(self.batch_report_button)
+        header_layout.addWidget(self.retry_failed_button)
+        header_layout.addWidget(self.one_page_auto_button)
 
         self.search_panel = SearchReplacePanel(self)
         self.search_panel.setVisible(False)
@@ -98,10 +160,6 @@ class WorkspaceMixin:
         left_layout = QtWidgets.QVBoxLayout()
         left_layout.addWidget(MDivider())
 
-        self.image_card_layout = QtWidgets.QVBoxLayout()
-        self.image_card_layout.addStretch(1)
-
-        self.page_list.setLayout(self.image_card_layout)
         left_layout.addWidget(self.page_list)
         left_layout.addWidget(self.search_panel)
         left_widget = QtWidgets.QWidget()
@@ -125,7 +183,9 @@ class WorkspaceMixin:
                 ".cbt",
                 ".pdf",
                 ".epub",
-                ".ctpr",
+                ".psd",
+                PROJECT_FILE_EXT,
+                SERIES_PROJECT_FILE_EXT,
             ]
         )
         self.drag_browser.setToolTip(
@@ -164,13 +224,46 @@ class WorkspaceMixin:
         t_combo_text_layout.addWidget(self.t_text_edit)
         input_layout.addLayout(t_combo_text_layout)
 
+        self.ocr_warning_label = QtWidgets.QLabel()
+        self.ocr_warning_label.setWordWrap(True)
+        self.ocr_warning_label.setVisible(False)
+        self.ocr_warning_label.setStyleSheet(
+            "QLabel { color: #f5c26b; background-color: #3b3020; border: 1px solid #8a6631; border-radius: 4px; padding: 6px; }"
+        )
+
         text_render_layout = QtWidgets.QVBoxLayout()
+        render_policy_hint = QtWidgets.QLabel(
+            self.tr(
+                "New Render items and Translate All use the controls below. "
+                "Font size edits only the currently selected text item."
+            )
+        )
+        render_policy_hint.setWordWrap(True)
+
+        color_policy_hint = QtWidgets.QLabel(
+            self.tr(
+                "Text color follows the detected source text by default. "
+                "Enable 'Use Selected Color' to override it."
+            )
+        )
+        color_policy_hint.setWordWrap(True)
+
+        self.smart_global_apply_all_checkbox = MCheckBox(self.tr("Apply All SMART Globally"))
+        self.smart_global_apply_all_checkbox.hide()
+
         font_settings_layout = QtWidgets.QHBoxLayout()
 
         self.font_dropdown = MFontComboBox().small()
-        self.font_dropdown.setToolTip(self.tr("Font"))
+        self.font_dropdown.setToolTip(
+            self.tr("Font family used for new Render items and Translate All output.")
+        )
         self.font_size_dropdown = MComboBox().small()
-        self.font_size_dropdown.setToolTip(self.tr("Font Size"))
+        self.font_size_dropdown.setToolTip(
+            self.tr(
+                "Edits only the selected text item. New renders still auto-fit "
+                "using the min/max font size settings."
+            )
+        )
         self.font_size_dropdown.addItems(
             ["4", "6", "8", "9", "10", "11", "12", "14", "16", "18", "20", "22", "24", "28", "32", "36", "48", "72"]
         )
@@ -179,7 +272,9 @@ class WorkspaceMixin:
         self.font_size_dropdown.set_editable(True)
 
         self.line_spacing_dropdown = MComboBox().small()
-        self.line_spacing_dropdown.setToolTip(self.tr("Line Spacing"))
+        self.line_spacing_dropdown.setToolTip(
+            self.tr("Line spacing used for new Render items and Translate All output.")
+        )
         self.line_spacing_dropdown.addItems(["1.0", "1.1", "1.2", "1.3", "1.4", "1.5"])
         self.line_spacing_dropdown.setFixedWidth(60)
         self.line_spacing_dropdown.set_editable(True)
@@ -189,8 +284,6 @@ class WorkspaceMixin:
         font_settings_layout.addWidget(self.line_spacing_dropdown)
         font_settings_layout.addStretch()
 
-        main_text_settings_layout = QtWidgets.QHBoxLayout()
-
         settings = QSettings("ComicLabs", "ComicTranslate")
         settings.beginGroup("text_rendering")
         dflt_clr = settings.value("color", "#000000")
@@ -198,10 +291,26 @@ class WorkspaceMixin:
         settings.endGroup()
 
         self.block_font_color_button = QtWidgets.QPushButton()
-        self.block_font_color_button.setToolTip(self.tr("Font Color"))
+        self.block_font_color_button.setToolTip(
+            self.tr(
+                "Choose the fallback text color. By default the app keeps the "
+                "detected source text color unless you enable 'Use Selected Color'."
+            )
+        )
         self.block_font_color_button.setFixedSize(30, 30)
         self.block_font_color_button.setStyleSheet(f"background-color: {dflt_clr}; border: none; border-radius: 5px;")
         self.block_font_color_button.setProperty("selected_color", dflt_clr)
+        self.force_font_color_checkbox = MCheckBox(self.tr("Use Selected Color"))
+        self.force_font_color_checkbox.setToolTip(
+            self.tr(
+                "Ignore detected source text color and use the selected color "
+                "for all new Render items and Translate All output."
+            )
+        )
+        self.force_font_color_checkbox.setSizePolicy(
+            QtWidgets.QSizePolicy.Policy.Maximum,
+            QtWidgets.QSizePolicy.Policy.Fixed,
+        )
 
         self.alignment_tool_group = MToolButtonGroup(orientation=QtCore.Qt.Horizontal, exclusive=True)
         alignment_tools = [
@@ -211,49 +320,179 @@ class WorkspaceMixin:
         ]
         self.alignment_tool_group.set_button_list(alignment_tools)
         self.alignment_tool_group.set_dayu_checked(1)
+        self.alignment_tool_group.setToolTip(
+            self.tr("Horizontal alignment for new Render items and Translate All output.")
+        )
+
+        self.vertical_alignment_tool_group = MToolButtonGroup(
+            orientation=QtCore.Qt.Horizontal,
+            exclusive=True,
+        )
+        self.vertical_alignment_tool_group.set_button_list(
+            [
+                {"text": self.tr("Top"), "checkable": True, "tooltip": self.tr("Place text at the top of the source text box.")},
+                {"text": self.tr("Center"), "checkable": True, "tooltip": self.tr("Place text in the vertical center of the source text box.")},
+                {"text": self.tr("Bottom"), "checkable": True, "tooltip": self.tr("Place text at the bottom of the source text box.")},
+            ]
+        )
+        self.vertical_alignment_tool_group.set_dayu_checked(0)
+        self._style_render_choice_group(self.vertical_alignment_tool_group)
+
+        for button in self.alignment_tool_group.get_button_group().buttons():
+            button.setMinimumSize(30, 30)
 
         self.bold_button = self.create_tool_button(svg="bold.svg", checkable=True)
-        self.bold_button.setToolTip(self.tr("Bold"))
+        self.bold_button.setToolTip(
+            self.tr("Bold style for new Render items and Translate All output.")
+        )
         self.italic_button = self.create_tool_button(svg="italic.svg", checkable=True)
-        self.italic_button.setToolTip(self.tr("Italic"))
+        self.italic_button.setToolTip(
+            self.tr("Italic style for new Render items and Translate All output.")
+        )
         self.underline_button = self.create_tool_button(svg="underline.svg", checkable=True)
-        self.underline_button.setToolTip(self.tr("Underline"))
-
-        main_text_settings_layout.addWidget(self.block_font_color_button)
-        main_text_settings_layout.addWidget(self.alignment_tool_group)
-        main_text_settings_layout.addWidget(self.bold_button)
-        main_text_settings_layout.addWidget(self.italic_button)
-        main_text_settings_layout.addWidget(self.underline_button)
-        main_text_settings_layout.addStretch()
+        self.underline_button.setToolTip(
+            self.tr("Underline style for new Render items and Translate All output.")
+        )
+        for button in (self.bold_button, self.italic_button, self.underline_button):
+            button.setMinimumSize(30, 30)
 
         outline_settings_layout = QtWidgets.QHBoxLayout()
 
         self.outline_checkbox = MCheckBox(self.tr("Outline"))
         self.outline_checkbox.setChecked(dflt_outline_check)
+        self.outline_checkbox.hide()
+
+        self.outline_mode_group = MToolButtonGroup(
+            orientation=QtCore.Qt.Horizontal,
+            exclusive=True,
+        )
+        self.outline_mode_group.set_button_list(
+            [
+                {"text": self.tr("OFF"), "checkable": True, "tooltip": self.tr("Disable outline globally.")},
+                {"text": self.tr("ON"), "checkable": True, "tooltip": self.tr("Enable outline globally.")},
+            ]
+        )
+        self.outline_mode_group.set_dayu_checked(1 if dflt_outline_check else 0)
+        self._style_render_choice_group(self.outline_mode_group)
 
         self.outline_font_color_button = QtWidgets.QPushButton()
-        self.outline_font_color_button.setToolTip(self.tr("Outline Color"))
+        self.outline_font_color_button.setToolTip(
+            self.tr("Outline color for new Render items and Translate All output.")
+        )
         self.outline_font_color_button.setFixedSize(30, 30)
         self.outline_font_color_button.setStyleSheet("background-color: white; border: none; border-radius: 5px;")
         self.outline_font_color_button.setProperty("selected_color", "#ffffff")
 
         self.outline_width_dropdown = MComboBox().small()
         self.outline_width_dropdown.setFixedWidth(60)
-        self.outline_width_dropdown.setToolTip(self.tr("Outline Width"))
+        self.outline_width_dropdown.setToolTip(
+            self.tr("Outline width for new Render items and Translate All output.")
+        )
         self.outline_width_dropdown.addItems(["1.0", "1.15", "1.3", "1.4", "1.5"])
         self.outline_width_dropdown.set_editable(True)
 
-        outline_settings_layout.addWidget(self.outline_checkbox)
+        render_controls_widget = QtWidgets.QWidget()
+        render_controls_widget.setObjectName("renderControlsContainer")
+        render_controls_widget.setStyleSheet(
+            f"""
+            QWidget#renderControlsContainer QWidget[render_section="true"] {{
+                border: 1px solid #474747;
+                border-radius: 6px;
+                background-color: #353535;
+            }}
+            QWidget#renderControlsContainer QLabel[render_field_label="true"] {{
+                color: #f0f0f0;
+                font-weight: 600;
+                border: none;
+                background: transparent;
+                padding-right: 8px;
+            }}
+            QWidget#renderControlsContainer MToolButton[render_choice="true"] {{
+                padding: 0 10px;
+                min-height: 30px;
+                border: 1px solid #5a5a5a;
+                border-radius: 5px;
+                background-color: #3b3b3b;
+            }}
+            QWidget#renderControlsContainer MToolButton[render_choice="true"]:hover {{
+                color: {dayu_theme.primary_color};
+                border-color: {dayu_theme.primary_color};
+            }}
+            QWidget#renderControlsContainer MToolButton[render_choice="true"]:checked {{
+                color: {dayu_theme.primary_color};
+                border: 1px solid {dayu_theme.primary_color};
+                background-color: #4b3a12;
+            }}
+            """
+        )
+        render_controls_layout = QtWidgets.QVBoxLayout(render_controls_widget)
+        render_controls_layout.setContentsMargins(0, 0, 0, 0)
+        render_controls_layout.setSpacing(8)
+
+        color_group_widget = self._create_render_section_widget()
+        color_group_layout = QtWidgets.QGridLayout(color_group_widget)
+        color_group_layout.setContentsMargins(10, 8, 10, 8)
+        color_group_layout.setHorizontalSpacing(10)
+        color_group_layout.setVerticalSpacing(6)
+        color_group_layout.setColumnStretch(1, 1)
+        color_group_layout.addWidget(self._create_render_field_label(self.tr("Text Color")), 0, 0)
+        color_group_layout.addWidget(
+            self.block_font_color_button,
+            0,
+            1,
+            alignment=QtCore.Qt.AlignmentFlag.AlignLeft,
+        )
+        color_group_layout.addWidget(self.force_font_color_checkbox, 1, 0, 1, 2)
+
+        alignment_group_widget = self._create_render_section_widget()
+        alignment_group_layout = QtWidgets.QGridLayout(alignment_group_widget)
+        alignment_group_layout.setContentsMargins(10, 8, 10, 8)
+        alignment_group_layout.setHorizontalSpacing(10)
+        alignment_group_layout.setVerticalSpacing(6)
+        alignment_group_layout.setColumnStretch(1, 1)
+        alignment_group_layout.addWidget(self._create_render_field_label(self.tr("Horizontal")), 0, 0)
+        alignment_group_layout.addWidget(self.alignment_tool_group, 0, 1)
+        alignment_group_layout.addWidget(self._create_render_field_label(self.tr("Vertical")), 1, 0)
+        alignment_group_layout.addWidget(self.vertical_alignment_tool_group, 1, 1)
+
+        style_controls_widget = QtWidgets.QWidget()
+        style_controls_layout = QtWidgets.QHBoxLayout(style_controls_widget)
+        style_controls_layout.setContentsMargins(0, 0, 0, 0)
+        style_controls_layout.setSpacing(4)
+        style_controls_layout.addWidget(self.bold_button)
+        style_controls_layout.addWidget(self.italic_button)
+        style_controls_layout.addWidget(self.underline_button)
+        style_controls_layout.addStretch()
+
+        outline_settings_layout.setContentsMargins(0, 0, 0, 0)
+        outline_settings_layout.setSpacing(6)
+        outline_settings_layout.addWidget(self.outline_mode_group)
         outline_settings_layout.addWidget(self.outline_font_color_button)
         outline_settings_layout.addWidget(self.outline_width_dropdown)
         outline_settings_layout.addStretch()
 
+        style_outline_group_widget = self._create_render_section_widget()
+        style_outline_group_layout = QtWidgets.QGridLayout(style_outline_group_widget)
+        style_outline_group_layout.setContentsMargins(10, 8, 10, 8)
+        style_outline_group_layout.setHorizontalSpacing(10)
+        style_outline_group_layout.setVerticalSpacing(6)
+        style_outline_group_layout.setColumnStretch(1, 1)
+        style_outline_group_layout.addWidget(self._create_render_field_label(self.tr("Style")), 0, 0)
+        style_outline_group_layout.addWidget(style_controls_widget, 0, 1)
+        style_outline_group_layout.addWidget(self._create_render_field_label(self.tr("Outline")), 1, 0)
+        style_outline_group_layout.addLayout(outline_settings_layout, 1, 1)
+
+        render_controls_layout.addWidget(color_group_widget)
+        render_controls_layout.addWidget(alignment_group_widget)
+        render_controls_layout.addWidget(style_outline_group_widget)
+
         rendering_divider_top = MDivider()
         rendering_divider_bottom = MDivider()
         text_render_layout.addWidget(rendering_divider_top)
+        text_render_layout.addWidget(render_policy_hint)
+        text_render_layout.addWidget(color_policy_hint)
         text_render_layout.addLayout(font_settings_layout)
-        text_render_layout.addLayout(main_text_settings_layout)
-        text_render_layout.addLayout(outline_settings_layout)
+        text_render_layout.addWidget(render_controls_widget)
         text_render_layout.addWidget(rendering_divider_bottom)
 
         tools_widget = QtWidgets.QWidget()
@@ -322,22 +561,30 @@ class WorkspaceMixin:
         box_tools_lay.addStretch()
 
         inp_tools_lay = QtWidgets.QHBoxLayout()
+        inpaint_specs = self.get_inpaint_tool_specs()
 
-        self.brush_button = self.create_tool_button(svg="brush-fill.svg", checkable=True)
-        self.brush_button.setToolTip(self.tr("Draw Brush Strokes for Cleaning Image"))
+        self.brush_button = self.create_tool_button(svg=str(inpaint_specs["brush"]["svg"]), checkable=True)
         self.brush_button.clicked.connect(self.toggle_brush_tool)
         self.tool_buttons["brush"] = self.brush_button
 
-        self.eraser_button = self.create_tool_button(svg="eraser_fill.svg", checkable=True)
-        self.eraser_button.setToolTip(self.tr("Erase Brush Strokes"))
+        self.eraser_button = self.create_tool_button(svg=str(inpaint_specs["eraser"]["svg"]), checkable=True)
         self.eraser_button.clicked.connect(self.toggle_eraser_tool)
         self.tool_buttons["eraser"] = self.eraser_button
 
-        self.clear_brush_strokes_button = self.create_tool_button(svg="clear-outlined.svg")
-        self.clear_brush_strokes_button.setToolTip(self.tr("Remove all the brush strokes on the Image"))
+        self.exclude_button = self.create_tool_button(svg=str(inpaint_specs["exclude"]["svg"]), checkable=True)
+        self.exclude_button.clicked.connect(self.toggle_exclude_tool)
+        self.tool_buttons["exclude"] = self.exclude_button
+
+        self.restore_button = self.create_tool_button(svg=str(inpaint_specs["restore"]["svg"]), checkable=True)
+        self.restore_button.clicked.connect(self.toggle_restore_tool)
+        self.tool_buttons["restore"] = self.restore_button
+
+        self.clear_brush_strokes_button = self.create_tool_button(svg=str(inpaint_specs["clear"]["svg"]))
 
         inp_tools_lay.addWidget(self.brush_button)
         inp_tools_lay.addWidget(self.eraser_button)
+        inp_tools_lay.addWidget(self.exclude_button)
+        inp_tools_lay.addWidget(self.restore_button)
         inp_tools_lay.addWidget(self.clear_brush_strokes_button)
         inp_tools_lay.addStretch()
 
@@ -345,8 +592,151 @@ class WorkspaceMixin:
         self.brush_eraser_slider.setMinimum(1)
         self.brush_eraser_slider.setMaximum(100)
         self.brush_eraser_slider.setValue(10)
-        self.brush_eraser_slider.setToolTip(self.tr("Brush/Eraser Size Slider"))
         self.brush_eraser_slider.valueChanged.connect(self.set_brush_eraser_size)
+        self.refresh_inpaint_tool_ui()
+
+        txt_md_div = MDivider(self.tr("TXT/MD"))
+
+        txt_md_buttons_widget = QtWidgets.QWidget()
+        txt_md_buttons_layout = QtWidgets.QGridLayout(txt_md_buttons_widget)
+        txt_md_buttons_layout.setContentsMargins(0, 0, 0, 0)
+        txt_md_buttons_layout.setHorizontalSpacing(6)
+        txt_md_buttons_layout.setVerticalSpacing(6)
+
+        self.export_source_txt_button = MPushButton(self.tr("Export Source TXT")).small()
+        self.export_source_txt_button.setToolTip(
+            self.tr("Export the current project's source text in the TXT exchange format.")
+        )
+        self.import_translation_txt_button = MPushButton(self.tr("Import Translation TXT")).small()
+        self.import_translation_txt_button.setToolTip(
+            self.tr("Import translated text from a TXT exchange file and rebuild text boxes to fit.")
+        )
+        self.export_source_md_button = MPushButton(self.tr("Export Source MD")).small()
+        self.export_source_md_button.setToolTip(
+            self.tr("Export the current project's source text in the Markdown exchange format.")
+        )
+        self.import_translation_md_button = MPushButton(self.tr("Import Translation MD")).small()
+        self.import_translation_md_button.setToolTip(
+            self.tr("Import translated text from a Markdown exchange file and rebuild text boxes to fit.")
+        )
+
+        txt_md_buttons_layout.addWidget(self.export_source_txt_button, 0, 0)
+        txt_md_buttons_layout.addWidget(self.import_translation_txt_button, 0, 1)
+        txt_md_buttons_layout.addWidget(self.export_source_md_button, 1, 0)
+        txt_md_buttons_layout.addWidget(self.import_translation_md_button, 1, 1)
+
+        txt_md_auto_layout = QtWidgets.QVBoxLayout()
+        txt_md_auto_layout.setContentsMargins(0, 0, 0, 0)
+        txt_md_auto_layout.setSpacing(2)
+
+        self.auto_export_source_txt_checkbox = MCheckBox(self.tr("Auto Export Source TXT"))
+        self.auto_export_source_txt_checkbox.setToolTip(
+            self.tr("After a successful automatic run, overwrite the TXT source exchange file with only the pages from that run.")
+        )
+        self.auto_export_source_md_checkbox = MCheckBox(self.tr("Auto Export Source MD"))
+        self.auto_export_source_md_checkbox.setToolTip(
+            self.tr("After a successful automatic run, overwrite the Markdown source exchange file with only the pages from that run.")
+        )
+        self.auto_export_translation_txt_checkbox = MCheckBox(self.tr("Auto Export Translation TXT"))
+        self.auto_export_translation_txt_checkbox.setToolTip(
+            self.tr("After a successful automatic run, overwrite the TXT translation exchange file with only the pages from that run.")
+        )
+        self.auto_export_translation_md_checkbox = MCheckBox(self.tr("Auto Export Translation MD"))
+        self.auto_export_translation_md_checkbox.setToolTip(
+            self.tr("After a successful automatic run, overwrite the Markdown translation exchange file with only the pages from that run.")
+        )
+
+        txt_md_auto_layout.addWidget(self.auto_export_source_txt_checkbox)
+        txt_md_auto_layout.addWidget(self.auto_export_source_md_checkbox)
+        txt_md_auto_layout.addWidget(self.auto_export_translation_txt_checkbox)
+        txt_md_auto_layout.addWidget(self.auto_export_translation_md_checkbox)
+
+        output_div = MDivider(self.tr("Output"))
+        output_widget = QtWidgets.QWidget()
+        output_layout = QtWidgets.QVBoxLayout(output_widget)
+        output_layout.setContentsMargins(0, 0, 0, 0)
+        output_layout.setSpacing(6)
+
+        self.output_use_global_checkbox = MCheckBox(self.tr("Use global output settings"))
+        self.output_use_global_checkbox.setToolTip(
+            self.tr("When enabled, this project inherits the automatic output settings from Settings.")
+        )
+
+        output_target_row = QtWidgets.QHBoxLayout()
+        output_target_label = MLabel(self.tr("Output target"))
+        self.output_target_combo = MComboBox().small()
+        self.output_target_combo.addItem(self.tr("Individual images"), OUTPUT_TARGET_IMAGES)
+        self.output_target_combo.addItem(self.tr("Single archive"), OUTPUT_TARGET_ARCHIVE)
+        output_target_row.addWidget(output_target_label)
+        output_target_row.addWidget(self.output_target_combo, 1)
+
+        self.output_image_format_row = QtWidgets.QWidget()
+        output_image_format_row_layout = QtWidgets.QHBoxLayout(self.output_image_format_row)
+        output_image_format_row_layout.setContentsMargins(0, 0, 0, 0)
+        output_image_format_label = MLabel(self.tr("Image format"))
+        self.output_image_format_combo = MComboBox().small()
+        self.output_image_format_combo.addItem(self.tr("Same as source"), OUTPUT_IMAGE_FORMAT_SAME)
+        self.output_image_format_combo.addItem("PNG", OUTPUT_IMAGE_FORMAT_PNG)
+        self.output_image_format_combo.addItem("JPG", OUTPUT_IMAGE_FORMAT_JPG)
+        self.output_image_format_combo.addItem("WEBP", OUTPUT_IMAGE_FORMAT_WEBP)
+        output_image_format_row_layout.addWidget(output_image_format_label)
+        output_image_format_row_layout.addWidget(self.output_image_format_combo, 1)
+
+        self.output_archive_format_row = QtWidgets.QWidget()
+        output_archive_format_row_layout = QtWidgets.QHBoxLayout(self.output_archive_format_row)
+        output_archive_format_row_layout.setContentsMargins(0, 0, 0, 0)
+        output_archive_format_label = MLabel(self.tr("Archive format"))
+        self.output_archive_format_combo = MComboBox().small()
+        self.output_archive_format_combo.addItem("ZIP", OUTPUT_ARCHIVE_FORMAT_ZIP)
+        self.output_archive_format_combo.addItem("CBZ", OUTPUT_ARCHIVE_FORMAT_CBZ)
+        output_archive_format_row_layout.addWidget(output_archive_format_label)
+        output_archive_format_row_layout.addWidget(self.output_archive_format_combo, 1)
+
+        self.output_archive_image_format_row = QtWidgets.QWidget()
+        output_archive_image_format_row_layout = QtWidgets.QHBoxLayout(self.output_archive_image_format_row)
+        output_archive_image_format_row_layout.setContentsMargins(0, 0, 0, 0)
+        output_archive_image_format_label = MLabel(self.tr("Archive image format"))
+        self.output_archive_image_format_combo = MComboBox().small()
+        self.output_archive_image_format_combo.addItem("PNG", OUTPUT_IMAGE_FORMAT_PNG)
+        self.output_archive_image_format_combo.addItem("JPG", OUTPUT_IMAGE_FORMAT_JPG)
+        self.output_archive_image_format_combo.addItem("WEBP", OUTPUT_IMAGE_FORMAT_WEBP)
+        output_archive_image_format_row_layout.addWidget(output_archive_image_format_label)
+        output_archive_image_format_row_layout.addWidget(self.output_archive_image_format_combo, 1)
+
+        self.output_archive_level_row = QtWidgets.QWidget()
+        output_archive_level_row_layout = QtWidgets.QHBoxLayout(self.output_archive_level_row)
+        output_archive_level_row_layout.setContentsMargins(0, 0, 0, 0)
+        output_archive_level_label = MLabel(self.tr("Compression level"))
+        self.output_archive_level_spinbox = MSpinBox().small()
+        self.output_archive_level_spinbox.setMinimum(0)
+        self.output_archive_level_spinbox.setMaximum(9)
+        self.output_archive_level_spinbox.setValue(6)
+        output_archive_level_row_layout.addWidget(output_archive_level_label)
+        output_archive_level_row_layout.addWidget(self.output_archive_level_spinbox)
+        output_archive_level_row_layout.addStretch(1)
+
+        self.output_quality_note_label = MLabel(
+            self.tr("PNG/JPG/WEBP images are saved at maximum quality.")
+        ).secondary()
+        self.output_quality_note_label.setWordWrap(True)
+
+        self.output_archive_note_label = MLabel(
+            self.tr("Archive compression only affects the ZIP/CBZ container, not image quality.")
+        ).secondary()
+        self.output_archive_note_label.setWordWrap(True)
+
+        self.output_estimate_label = MLabel(self.tr("Load pages to see automatic output estimates.")).secondary()
+        self.output_estimate_label.setWordWrap(True)
+
+        output_layout.addWidget(self.output_use_global_checkbox)
+        output_layout.addLayout(output_target_row)
+        output_layout.addWidget(self.output_image_format_row)
+        output_layout.addWidget(self.output_archive_format_row)
+        output_layout.addWidget(self.output_archive_image_format_row)
+        output_layout.addWidget(self.output_archive_level_row)
+        output_layout.addWidget(self.output_quality_note_label)
+        output_layout.addWidget(self.output_archive_note_label)
+        output_layout.addWidget(self.output_estimate_label)
 
         tools_layout.addLayout(misc_lay)
         box_div = MDivider(self.tr("Box Drawing"))
@@ -357,6 +747,11 @@ class WorkspaceMixin:
         tools_layout.addWidget(inp_div)
         tools_layout.addLayout(inp_tools_lay)
         tools_layout.addWidget(self.brush_eraser_slider)
+        tools_layout.addWidget(txt_md_div)
+        tools_layout.addWidget(txt_md_buttons_widget)
+        tools_layout.addLayout(txt_md_auto_layout)
+        tools_layout.addWidget(output_div)
+        tools_layout.addWidget(output_widget)
         tools_layout.addStretch()
         tools_widget.setLayout(tools_layout)
 
@@ -368,6 +763,7 @@ class WorkspaceMixin:
         tools_scroll.setFocusPolicy(QtCore.Qt.FocusPolicy.NoFocus)
 
         right_layout.addLayout(input_layout)
+        right_layout.addWidget(self.ocr_warning_label)
         right_layout.addLayout(text_render_layout)
         right_layout.addWidget(tools_scroll, 1)
 
@@ -379,11 +775,12 @@ class WorkspaceMixin:
         splitter.addWidget(central_widget)
         splitter.addWidget(right_widget)
 
-        right_widget.setMinimumWidth(240)
+        right_widget.setMinimumWidth(320)
 
         splitter.setStretchFactor(0, 40)
         splitter.setStretchFactor(1, 80)
         splitter.setStretchFactor(2, 10)
+        splitter.setSizes([220, 980, 360])
 
         content_layout = QtWidgets.QVBoxLayout()
         content_layout.addLayout(header_layout)

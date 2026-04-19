@@ -2,121 +2,306 @@
 <!DOCTYPE TS>
 <TS version="2.1" language="fr_FR">
 <context>
-    <name></name>
-    <message>
-        <location filename="../../modules/utils/pipeline_config.py" line="71"/>
-        <source>Custom</source>
-        <translation>Personnalisé</translation>
-    </message>
-</context>
-<context>
     <name>AboutPage</name>
     <message>
-        <location filename="../../app/ui/settings/about_page.py" line="14"/>
         <source>App Information</source>
         <translation>Informations sur l&apos;application</translation>
     </message>
     <message>
-        <location filename="../../app/ui/settings/about_page.py" line="19"/>
         <source>Current Version:</source>
         <translation>Version actuelle :</translation>
     </message>
     <message>
-        <location filename="../../app/ui/settings/about_page.py" line="29"/>
         <source>Check for Updates</source>
         <translation>Vérifier les mises à jour</translation>
     </message>
 </context>
 <context>
-    <name>AccountPage</name>
+    <name>AutomaticProgress</name>
     <message>
-        <location filename="../../app/ui/settings/account_page.py" line="22"/>
-        <source>Sign in to Comic Translate</source>
-        <translation>Connectez-vous à Comic Translate</translation>
+        <source>Calculating</source>
+        <translation type="unfinished">Calcul en cours</translation>
     </message>
     <message>
-        <location filename="../../app/ui/settings/account_page.py" line="26"/>
-        <source>Sign in to use Comic Translate, see your credits balance, and purchase additional credits.</source>
-        <translation>Connectez-vous pour utiliser Comic Translate, voir votre solde de crédits et acheter des crédits supplémentaires.</translation>
+        <source>Recent History</source>
+        <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../app/ui/settings/account_page.py" line="33"/>
-        <source>Sign In</source>
-        <translation>Connexion</translation>
+        <source>Live Learning</source>
+        <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../app/ui/settings/account_page.py" line="43"/>
-        <location filename="../../app/ui/settings/account_page.py" line="85"/>
-        <source>See model credit costs</source>
-        <translation>Voir le coût en crédits des modèles</translation>
+        <source>Live Stable</source>
+        <translation type="unfinished"></translation>
+    </message>
+</context>
+<context>
+    <name>AutomaticProgressDialog</name>
+    <message>
+        <source>Automatic Translation Progress</source>
+        <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../app/ui/settings/account_page.py" line="60"/>
-        <source>Account Information</source>
-        <translation>Informations du compte</translation>
+        <source>자동번역 준비 중</source>
+        <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../app/ui/settings/account_page.py" line="63"/>
-        <source>Email:</source>
-        <translation>Email :</translation>
+        <source>초기화 중...</source>
+        <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../app/ui/settings/account_page.py" line="70"/>
-        <source>Subscription Tier:</source>
-        <translation>Niveau d&apos;abonnement :</translation>
+        <source>경과 시간</source>
+        <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../app/ui/settings/account_page.py" line="77"/>
-        <source>Credits:</source>
-        <translation>Crédits :</translation>
+        <source>남은 시간</source>
+        <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../app/ui/settings/account_page.py" line="92"/>
-        <source>Buy Credits</source>
-        <translation>Acheter des crédits</translation>
+        <source>예상 완료 시각</source>
+        <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../app/ui/settings/account_page.py" line="95"/>
-        <source>Sign Out</source>
-        <translation>Déconnexion</translation>
+        <source>ETA 신뢰도</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>현재 작업</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>서비스</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>페이지</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>단계</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>파일명</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>세부 로그</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>재시도</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Settings 열기</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Cancel</source>
+        <translation type="unfinished">Annuler</translation>
+    </message>
+    <message>
+        <source>닫기</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Calculating</source>
+        <translation type="unfinished">Calcul en cours</translation>
+    </message>
+    <message>
+        <source>작업이 취소되었습니다.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>자동번역 진행 중</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>작업이 실패했습니다.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>자동번역이 완료되었습니다.</source>
+        <translation type="unfinished"></translation>
     </message>
 </context>
 <context>
     <name>ComicTranslate</name>
     <message>
-        <location filename="../../controller.py" line="449"/>
-        <location filename="../../controller.py" line="459"/>
+        <source>Project files cannot be opened together with other imported files.
+Choose either a project file or image/document/archive files.</source>
+        <translation>Les fichiers de projet ne peuvent pas être ouverts avec d&apos;autres fichiers importés.
+Choisissez soit un fichier de projet, soit uniquement des fichiers image/document/archive.</translation>
+    </message>
+    <message>
+        <source>Gemma와 OCR 준비를 확인하는 중...</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>취소 중...</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>PaddleOCR VL Settings</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>HunyuanOCR Settings</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Gemma Local Server Settings</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>작업이 취소되었습니다.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>자동번역 준비 또는 실행에 실패했습니다.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
         <source>Error</source>
         <translation>Erreur</translation>
     </message>
     <message>
-        <location filename="../../controller.py" line="646"/>
-        <location filename="../../controller.py" line="657"/>
+        <source>No pages are loaded for TXT/MD import or export.</source>
+        <translation>Aucune page n&apos;est chargée pour l&apos;import ou l&apos;export TXT/MD.</translation>
+    </message>
+    <message>
+        <source>TXT/MD import and export require unique page file names.
+Rename duplicate pages first.
+Duplicates:
+{names}</source>
+        <translation>L&apos;import et l&apos;export TXT/MD nécessitent des noms de fichier de page uniques.
+Renommez d&apos;abord les pages en double.
+Doublons :
+{names}</translation>
+    </message>
+    <message>
+        <source>TXT/MD Export Failed</source>
+        <translation>Échec de l&apos;export TXT/MD</translation>
+    </message>
+    <message>
+        <source>Failed to export source text.</source>
+        <translation>Impossible d&apos;exporter le texte source.</translation>
+    </message>
+    <message>
+        <source>Exported source text to:
+{path}</source>
+        <translation>Texte source exporté vers :
+{path}</translation>
+    </message>
+    <message>
+        <source>Translation imported and matched successfully.</source>
+        <translation>La traduction a été importée et associée avec succès.</translation>
+    </message>
+    <message>
+        <source>Imported TXT/MD content was only partially matched. Make sure the file follows the exported exchange format.</source>
+        <translation>Le contenu TXT/MD importé n&apos;a été associé que partiellement. Vérifiez que le fichier suit le format d&apos;échange exporté.</translation>
+    </message>
+    <message>
+        <source>Missing pages:</source>
+        <translation>Pages manquantes :</translation>
+    </message>
+    <message>
+        <source>Unexpected pages:</source>
+        <translation>Pages inattendues :</translation>
+    </message>
+    <message>
+        <source>Unmatched pages:</source>
+        <translation>Pages non correspondantes :</translation>
+    </message>
+    <message>
+        <source>TXT Files (*.txt *.TXT)</source>
+        <translation>Fichiers TXT (*.txt *.TXT)</translation>
+    </message>
+    <message>
+        <source>Markdown Files (*.md *.MD)</source>
+        <translation>Fichiers Markdown (*.md *.MD)</translation>
+    </message>
+    <message>
+        <source>Import Translation</source>
+        <translation>Importer la traduction</translation>
+    </message>
+    <message>
+        <source>TXT/MD Import Failed</source>
+        <translation>Échec de l&apos;import TXT/MD</translation>
+    </message>
+    <message>
+        <source>Failed to import translation text.</source>
+        <translation>Impossible d&apos;importer le texte traduit.</translation>
+    </message>
+    <message>
+        <source>Automatic TXT/MD export failed for {target}{suffix}.</source>
+        <translation>L&apos;export TXT/MD automatique a échoué pour {target}{suffix}.</translation>
+    </message>
+    <message>
+        <source>One-Page Auto</source>
+        <translation type="unfinished">Auto sur une page</translation>
+    </message>
+    <message>
+        <source>Translate All</source>
+        <translation type="unfinished">Traduire tout</translation>
+    </message>
+    <message>
+        <source>No failed pages from the latest batch are available to retry.</source>
+        <translation>Aucune page en échec du dernier traitement par lot n&apos;est disponible pour une nouvelle tentative.</translation>
+    </message>
+    <message>
+        <source>No current page is available for automatic processing.</source>
+        <translation>Aucune page actuelle n&apos;est disponible pour le traitement automatique.</translation>
+    </message>
+    <message>
+        <source>자동번역이 완료되었습니다.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
         <source>Downloading model file: {filename}</source>
         <translation>Téléchargement du fichier modèle : {filename}</translation>
     </message>
     <message>
-        <location filename="../../controller.py" line="688"/>
         <source>Unsaved Changes</source>
         <translation>Modifications non enregistrées</translation>
     </message>
     <message>
-        <location filename="../../controller.py" line="689"/>
+        <source>Load pages to see automatic output estimates.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Archive estimates (PNG / JPG / WEBP):</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>{name}: {size}, {time}, {ratio}</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Images are saved individually at maximum quality.
+Translated and cleaned images are exported.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Project switching is unavailable while automatic processing is running.
+Cancel the current run or wait for it to finish first.</source>
+        <translation>Le changement de projet n&apos;est pas disponible pendant l&apos;exécution du traitement automatique.
+Annulez l&apos;exécution en cours ou attendez qu&apos;elle se termine.</translation>
+    </message>
+    <message>
         <source>Save changes to this file?</source>
         <translation>Enregistrer les modifications de ce fichier ?</translation>
     </message>
     <message>
-        <location filename="../../controller.py" line="690"/>
         <source>Save</source>
         <translation>Enregistrer</translation>
     </message>
     <message>
-        <location filename="../../controller.py" line="691"/>
         <source>Don&apos;t Save</source>
         <translation>Ne pas enregistrer</translation>
     </message>
     <message>
-        <location filename="../../controller.py" line="692"/>
         <source>Cancel</source>
         <translation>Annuler</translation>
     </message>
@@ -124,178 +309,187 @@
 <context>
     <name>ComicTranslateUI</name>
     <message>
-        <location filename="../../app/ui/main_window/window.py" line="56"/>
         <source>English</source>
         <translation>Anglais</translation>
     </message>
     <message>
-        <location filename="../../app/ui/main_window/window.py" line="57"/>
         <source>Korean</source>
         <translation>Coréen</translation>
     </message>
     <message>
-        <location filename="../../app/ui/main_window/window.py" line="58"/>
         <source>Japanese</source>
         <translation>Japonais</translation>
     </message>
     <message>
-        <location filename="../../app/ui/main_window/window.py" line="59"/>
         <source>French</source>
         <translation>Français</translation>
     </message>
     <message>
-        <location filename="../../app/ui/main_window/window.py" line="60"/>
         <source>Simplified Chinese</source>
         <translation>Chinois simplifié</translation>
     </message>
     <message>
-        <location filename="../../app/ui/main_window/window.py" line="61"/>
         <source>Traditional Chinese</source>
         <translation>Chinois traditionnel</translation>
     </message>
     <message>
-        <location filename="../../app/ui/main_window/window.py" line="62"/>
         <source>Chinese</source>
         <translation>Chinois</translation>
     </message>
     <message>
-        <location filename="../../app/ui/main_window/window.py" line="63"/>
         <source>Russian</source>
         <translation>Russe</translation>
     </message>
     <message>
-        <location filename="../../app/ui/main_window/window.py" line="64"/>
         <source>German</source>
         <translation>Allemand</translation>
     </message>
     <message>
-        <location filename="../../app/ui/main_window/window.py" line="65"/>
         <source>Dutch</source>
         <translation>Néerlandais</translation>
     </message>
     <message>
-        <location filename="../../app/ui/main_window/window.py" line="66"/>
         <source>Spanish</source>
         <translation>Espagnol</translation>
     </message>
     <message>
-        <location filename="../../app/ui/main_window/window.py" line="67"/>
         <source>Italian</source>
         <translation>Italien</translation>
     </message>
     <message>
-        <location filename="../../app/ui/main_window/window.py" line="68"/>
         <source>Turkish</source>
         <translation>Turc</translation>
     </message>
     <message>
-        <location filename="../../app/ui/main_window/window.py" line="69"/>
         <source>Polish</source>
         <translation>Polonais</translation>
     </message>
     <message>
-        <location filename="../../app/ui/main_window/window.py" line="70"/>
         <source>Portuguese</source>
         <translation>Portugais</translation>
     </message>
     <message>
-        <location filename="../../app/ui/main_window/window.py" line="71"/>
         <source>Brazilian Portuguese</source>
         <translation>Portugais brésilien</translation>
     </message>
     <message>
-        <location filename="../../app/ui/main_window/window.py" line="72"/>
         <source>Thai</source>
         <translation>Thaï</translation>
     </message>
     <message>
-        <location filename="../../app/ui/main_window/window.py" line="73"/>
         <source>Vietnamese</source>
         <translation>Vietnamien</translation>
     </message>
     <message>
-        <location filename="../../app/ui/main_window/window.py" line="74"/>
         <source>Indonesian</source>
         <translation>Indonésien</translation>
     </message>
     <message>
-        <location filename="../../app/ui/main_window/window.py" line="75"/>
         <source>Hungarian</source>
         <translation>Hongrois</translation>
     </message>
     <message>
-        <location filename="../../app/ui/main_window/window.py" line="76"/>
         <source>Finnish</source>
         <translation>Finnois</translation>
     </message>
     <message>
-        <location filename="../../app/ui/main_window/window.py" line="77"/>
         <source>Arabic</source>
         <translation>Arabe</translation>
     </message>
     <message>
-        <location filename="../../app/ui/main_window/window.py" line="78"/>
+        <source>Hebrew</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
         <source>Czech</source>
         <translation>Tchèque</translation>
     </message>
     <message>
-        <location filename="../../app/ui/main_window/window.py" line="79"/>
+        <source>Croatian</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
         <source>Persian</source>
         <translation>Persan</translation>
     </message>
     <message>
-        <location filename="../../app/ui/main_window/window.py" line="80"/>
         <source>Romanian</source>
         <translation>Roumain</translation>
     </message>
     <message>
-        <location filename="../../app/ui/main_window/window.py" line="81"/>
         <source>Mongolian</source>
         <translation>Mongol</translation>
     </message>
 </context>
 <context>
+    <name>CorrectionDictionaryTable</name>
+    <message>
+        <source>Keyword</source>
+        <translation>Mot-clé</translation>
+    </message>
+    <message>
+        <source>Substitution</source>
+        <translation>Remplacement</translation>
+    </message>
+    <message>
+        <source>Use regex</source>
+        <translation>Utiliser une regex</translation>
+    </message>
+    <message>
+        <source>Case sensitive</source>
+        <translation>Respecter la casse</translation>
+    </message>
+    <message>
+        <source>New</source>
+        <translation>Nouveau</translation>
+    </message>
+    <message>
+        <source>Delete</source>
+        <translation>Supprimer</translation>
+    </message>
+</context>
+<context>
     <name>CredentialsPage</name>
     <message>
-        <location filename="../../app/ui/settings/credentials_page.py" line="18"/>
         <source>Save Keys</source>
         <translation>Enregistrer les clés</translation>
     </message>
     <message>
-        <location filename="../../app/ui/settings/credentials_page.py" line="21"/>
-        <source>These settings are for advanced users who wish to use their own Custom API endpoints (e.g. Local Language Models) for translation. For most users, no configuration is needed here.</source>
-        <translation>Ces paramètres sont destinés aux utilisateurs avancés qui souhaitent utiliser leurs propres points de terminaison d&apos;API personnalisés (par exemple, des modèles de langue locaux) pour la traduction. Pour la plupart des utilisateurs, aucune configuration n&apos;est nécessaire ici.</translation>
-    </message>
-    <message>
-        <location filename="../../app/ui/settings/credentials_page.py" line="41"/>
         <source>OCR</source>
-        <translation>OCR</translation>
+        <translation>
+        OCR</translation>
     </message>
     <message>
-        <location filename="../../app/ui/settings/credentials_page.py" line="47"/>
-        <location filename="../../app/ui/settings/credentials_page.py" line="91"/>
-        <location filename="../../app/ui/settings/credentials_page.py" line="140"/>
         <source>API Key</source>
         <translation>Clé API</translation>
     </message>
     <message>
-        <location filename="../../app/ui/settings/credentials_page.py" line="56"/>
-        <location filename="../../app/ui/settings/credentials_page.py" line="100"/>
         <source>Endpoint URL</source>
         <translation>URL du point de terminaison</translation>
     </message>
     <message>
-        <location filename="../../app/ui/settings/credentials_page.py" line="109"/>
+        <source>Translate</source>
+        <translation type="unfinished">Traduire</translation>
+    </message>
+    <message>
+        <source>Region</source>
+        <translation>OCR</translation>
+    </message>
+    <message>
         <source>Model</source>
         <translation>Modèle</translation>
     </message>
     <message>
-        <location filename="../../app/ui/settings/credentials_page.py" line="120"/>
+        <source>Configure provider API keys or local server endpoints here.
+Use Custom Service for authenticated OpenAI-compatible providers.
+Use Custom Local Server(Gemma) with the included Gemma Docker setup.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
         <source>Secret Key</source>
         <translation>Clé secrète</translation>
     </message>
     <message>
-        <location filename="../../app/ui/settings/credentials_page.py" line="129"/>
         <source>Folder ID</source>
         <translation>ID du dossier</translation>
     </message>
@@ -303,382 +497,1304 @@
 <context>
     <name>CustomTitleBar</name>
     <message>
-        <location filename="../../app/ui/title_bar.py" line="298"/>
         <source>Auto-Save</source>
         <translation>Sauvegarde automatique</translation>
     </message>
     <message>
-        <location filename="../../app/ui/title_bar.py" line="305"/>
         <source>Auto-Save Project</source>
         <translation>Sauvegarde automatique du projet</translation>
+    </message>
+    <message>
+        <source>Rename or move the current project file</source>
+        <translation type="unfinished"></translation>
+    </message>
+</context>
+<context>
+    <name>ExportChaptersDialog</name>
+    <message>
+        <source>Partition Export</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Pages with the same chapter name are exported together. Edit the Chapter column to merge or split chapters.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Output folder</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Browse</source>
+        <translation type="unfinished">Parcourir</translation>
+    </message>
+    <message>
+        <source>Selected pages</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>New chapter name</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Apply</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Page</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>File</source>
+        <translation type="unfinished">Fichier</translation>
+    </message>
+    <message>
+        <source>Chapter</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Export targets</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Reset Chapters</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Select Export Folder</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Output Folder Required</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Choose an existing output folder.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Chapter Name Required</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Each page must belong to a non-empty chapter.</source>
+        <translation type="unfinished"></translation>
     </message>
 </context>
 <context>
     <name>ExportPage</name>
     <message>
-        <location filename="../../app/ui/settings/export_page.py" line="11"/>
         <source>Automatic Mode</source>
         <translation>Mode automatique</translation>
     </message>
     <message>
-        <location filename="../../app/ui/settings/export_page.py" line="14"/>
         <source>Selected exports are saved to comic_translate_&lt;timestamp&gt; in the same directory as the input file/archive.</source>
         <translation>Les exportations sélectionnées sont enregistrées dans comic_translate_&lt;timestamp&gt; dans le même répertoire que le fichier/archive d&apos;entrée.</translation>
     </message>
     <message>
-        <location filename="../../app/ui/settings/export_page.py" line="18"/>
         <source>Export Raw Text</source>
         <translation>Exporter le texte brut</translation>
     </message>
     <message>
-        <location filename="../../app/ui/settings/export_page.py" line="19"/>
         <source>Export Translated text</source>
         <translation>Exporter le texte traduit</translation>
     </message>
     <message>
-        <location filename="../../app/ui/settings/export_page.py" line="20"/>
         <source>Export Inpainted Image</source>
         <translation>Exporter l&apos;image inpaintée</translation>
+    </message>
+    <message>
+        <source>Export Detector Overlay (Debug)</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Export Raw Inpaint Mask (Debug)</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Export Mask Overlay (Debug)</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Export Cleanup Mask Delta (Debug)</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Export Debug Metadata (Debug)</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Automatic Output</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>These defaults control automatic output after batch translation.
+Project-specific quick settings can override them for the current project.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Default output target:</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Individual images</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Single archive</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Default image format:</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Default archive format:</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Default archive image format:</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Default archive compression level:</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>PNG/JPG/WEBP images are saved at maximum quality.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Archive compression only affects the ZIP/CBZ container, not image quality.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Load pages to see automatic output estimates.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Same as source</source>
+        <translation type="unfinished"></translation>
+    </message>
+</context>
+<context>
+    <name>GemmaLocalServerPage</name>
+    <message>
+        <source>Gemma Local Server Settings</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Comic Translate can reuse your local Gemma Docker server for translation.
+1. Keep the existing Gemma container running if it is already healthy.
+2. In Settings &gt; Credentials, use Endpoint URL `http://127.0.0.1:18080/v1`.
+3. Set Model to the exact GGUF filename in `testmodel/` (recommended: `gemma-4-26B-IQ4_NL.gguf`).
+Automatic translation reuses an existing Gemma runtime first and only runs `docker compose up -d` when needed.
+If responses are truncated, lower Chunk Size or Max Completion Tokens before recreating the container.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Gemma Translation Tuning</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Chunk Size</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Max Completion Tokens</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Request Timeout (sec)</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Advanced Sampler Settings</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Temperature</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Top K</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Top P</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Min P</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Raw Response Log</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Promoted winner defaults for the bundled Gemma runtime:
+- Chunk Size: 6
+- Max Completion Tokens: 512
+- Request Timeout: 180 seconds
+- Temperature: 0.7
+- Top K / Top P / Min P: 64 / 0.95 / 0.0</source>
+        <translation type="unfinished"></translation>
+    </message>
+</context>
+<context>
+    <name>HunyuanOCRPage</name>
+    <message>
+        <source>HunyuanOCR Settings</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Connect Comic Translate to your local HunyuanOCR llama.cpp server.
+This OCR engine sends cropped text regions to the OpenAI-compatible /chat/completions endpoint.
+Keep the default localhost URL if you want Comic Translate to start the bundled Docker runtime on demand.
+Start the server with both the HunyuanOCR GGUF model and the matching mmproj file.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Server URL</source>
+        <translation>
+        URL du serveur</translation>
+    </message>
+    <message>
+        <source>Hunyuan OCR Tuning</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Max Completion Tokens</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Parallel Workers</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Request Timeout (sec)</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Raw Response Log</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Recommended starting values for the included HunyuanOCR Docker setup:
+- Max Completion Tokens: 256
+- Parallel Workers: 2
+- Request Timeout: 60 seconds</source>
+        <translation type="unfinished"></translation>
     </message>
 </context>
 <context>
     <name>LlmsPage</name>
     <message>
-        <location filename="../../app/ui/settings/llms_page.py" line="14"/>
         <source>Provide Image as Input to AI</source>
         <translation>Fournir l&apos;image comme entrée à l&apos;IA</translation>
     </message>
     <message>
-        <location filename="../../app/ui/settings/llms_page.py" line="19"/>
         <source>Extra Context:</source>
         <translation>Contexte supplémentaire :</translation>
     </message>
 </context>
 <context>
+    <name>MBigView</name>
+    <message>
+        <source>No Data</source>
+        <translation>Modèle</translation>
+    </message>
+</context>
+<context>
+    <name>MClickBrowserFilePushButton</name>
+    <message>
+        <source>Click to browser file</source>
+        <translation type="unfinished"></translation>
+    </message>
+</context>
+<context>
+    <name>MClickBrowserFileToolButton</name>
+    <message>
+        <source>Click to browser file</source>
+        <translation type="unfinished"></translation>
+    </message>
+</context>
+<context>
+    <name>MClickBrowserFolderPushButton</name>
+    <message>
+        <source>Click to browser folder</source>
+        <translation type="unfinished"></translation>
+    </message>
+</context>
+<context>
+    <name>MClickBrowserFolderToolButton</name>
+    <message>
+        <source>Click to browser folder</source>
+        <translation type="unfinished"></translation>
+    </message>
+</context>
+<context>
+    <name>MClickSaveFileToolButton</name>
+    <message>
+        <source>Click to save file</source>
+        <translation type="unfinished"></translation>
+    </message>
+</context>
+<context>
+    <name>MColorChart</name>
+    <message>
+        <source>Click to Copy Color</source>
+        <translation type="unfinished"></translation>
+    </message>
+</context>
+<context>
+    <name>MComboBox</name>
+    <message>
+        <source>Please Select</source>
+        <translation type="unfinished"></translation>
+    </message>
+</context>
+<context>
+    <name>MDragFileButton</name>
+    <message>
+        <source>Click to browser file</source>
+        <translation type="unfinished"></translation>
+    </message>
+</context>
+<context>
+    <name>MDragFolderButton</name>
+    <message>
+        <source>Click or drag folder here</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Click to browser folder or drag folder here</source>
+        <translation type="unfinished"></translation>
+    </message>
+</context>
+<context>
+    <name>MFontComboBox</name>
+    <message>
+        <source>Please Select</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Font</source>
+        <translation type="unfinished">Police</translation>
+    </message>
+</context>
+<context>
+    <name>MHeaderView</name>
+    <message>
+        <source>Select All</source>
+        <translation>Police</translation>
+    </message>
+    <message>
+        <source>Select None</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Select Invert</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Fit Size</source>
+        <translation type="unfinished"></translation>
+    </message>
+</context>
+<context>
+    <name>MLineEdit</name>
+    <message>
+        <source>Enter key word to search...</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Error Detail Information</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Error information will be here...</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Click button to browser files</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Click button to set save file</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Click button to browser folder</source>
+        <translation type="unfinished"></translation>
+    </message>
+</context>
+<context>
+    <name>MListView</name>
+    <message>
+        <source>No Data</source>
+        <translation type="unfinished"></translation>
+    </message>
+</context>
+<context>
+    <name>MTableView</name>
+    <message>
+        <source>No Data</source>
+        <translation type="unfinished"></translation>
+    </message>
+</context>
+<context>
+    <name>MTreeView</name>
+    <message>
+        <source>No Data</source>
+        <translation type="unfinished"></translation>
+    </message>
+</context>
+<context>
+    <name>MangaLMMOCRPage</name>
+    <message>
+        <source>MangaLMM Settings</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Connect Comic Translate to your local MangaLMM llama.cpp server.
+This OCR engine sends a full page single-shot request to the OpenAI-compatible /chat/completions endpoint.
+The app keeps detector geometry, then matches grounded OCR regions back to detected text blocks.
+Direct MangaLMM uses the tuning values on this page for full-page OCR requests.
+Keep the default localhost URL if you want Comic Translate to reuse the bundled Docker runtime.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Server URL</source>
+        <translation type="unfinished">
+        URL du serveur</translation>
+    </message>
+    <message>
+        <source>MangaLMM OCR Tuning</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Max Completion Tokens</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Parallel Workers</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Request Timeout (sec)</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Raw Response Log</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Safe Resize</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Enable Safe Resize</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Max Pixels</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Max Long Side</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Recommended values for the bundled MangaLMM runtime:
+- ctx-size 4096: enough for full-page OCR while keeping VRAM safer
+- Max Completion Tokens: 256
+- Parallel Workers: 1
+- Request Timeout: 60 seconds
+- Safe Resize: on
+- Max Pixels / Max Long Side: 2116800 / 1728
+Reasoning:
+- PNG + image-first ordering is the most reliable request format for MangaLMM.
+- Direct MangaLMM mode respects the values on this page.
+- Workers 1 is the safest default when MangaLMM is the active OCR runtime.</source>
+        <translation type="unfinished"></translation>
+    </message>
+</context>
+<context>
     <name>Messages</name>
     <message>
-        <location filename="../../app/controllers/image.py" line="1183"/>
         <source>Skipping:</source>
         <translation>Passage à la suite :</translation>
     </message>
     <message>
-        <location filename="../../app/controllers/task_runner.py" line="148"/>
         <source>Cancelling... %p%</source>
         <translation>Annulation... %p%</translation>
     </message>
     <message>
-        <location filename="../../controller.py" line="611"/>
         <source>Processing:</source>
         <translation>Traitement en cours :</translation>
     </message>
     <message>
-        <location filename="../../controller.py" line="614"/>
         <source>Archiving:</source>
         <translation>Archivage en cours :</translation>
     </message>
     <message>
-        <location filename="../../app/ui/messages.py" line="11"/>
         <source>Comic has been Translated!</source>
         <translation>La bande dessinée a été traduite !</translation>
     </message>
     <message>
-        <location filename="../../app/ui/messages.py" line="23"/>
         <source>No Font selected.
 Go to Settings &gt; Text Rendering &gt; Font to select or import one </source>
         <translation>Aucune police sélectionnée.
 Allez dans Paramètres &gt; Rendu du texte &gt; Police pour en sélectionner ou en importer une</translation>
     </message>
     <message>
-        <location filename="../../app/ui/messages.py" line="35"/>
-        <source>Please sign in or sign up via Settings &gt; Account to continue.</source>
-        <translation>Veuillez vous connecter ou vous inscrire via Paramètres &gt; Compte pour continuer.</translation>
-    </message>
-    <message>
-        <location filename="../../app/ui/messages.py" line="47"/>
         <source>The translator does not support the selected target language. Please choose a different language or tool.</source>
         <translation>Le traducteur ne prend pas en charge la langue cible sélectionnée. Veuillez choisir une autre langue ou un autre outil.</translation>
     </message>
     <message>
-        <location filename="../../app/ui/messages.py" line="59"/>
         <source>No {} selected. Please select a {} in Settings &gt; Tools.</source>
         <translation>Aucun(e) {} sélectionné(e). Veuillez sélectionner un(e) {} dans Paramètres &gt; Outils.</translation>
     </message>
     <message>
-        <location filename="../../app/ui/messages.py" line="80"/>
-        <source>Insufficient credits to perform this action.
-Go to Settings &gt; Account to buy more credits.</source>
-        <translation>Crédits insuffisants pour effectuer cette action.
-Allez dans Paramètres &gt; Compte pour acheter plus de crédits.</translation>
+        <source>Custom Local Server(Gemma) requires your local Gemma endpoint and model.
+Please set Endpoint URL and Model in Settings &gt; Credentials.</source>
+        <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../app/ui/messages.py" line="99"/>
-        <source>Custom requires advanced API configuration. Most users should use the Credits system instead.
-Please sign in via Settings &gt; Account to use credits, or configure Custom API settings in Settings &gt; Advanced.</source>
-        <translation>Le mode personnalisé nécessite une configuration avancée de l&apos;API. La plupart des utilisateurs devraient utiliser le système de crédits à la place.
-Veuillez vous connecter via Paramètres &gt; Compte pour utiliser des crédits, ou configurer l&apos;API personnalisée dans Paramètres &gt; Avancé.</translation>
-    </message>
-    <message>
-        <location filename="../../app/ui/messages.py" line="135"/>
         <source>Copy</source>
         <translation>Copier</translation>
     </message>
     <message>
-        <location filename="../../app/ui/messages.py" line="159"/>
         <source>We encountered an unexpected server error.
 Please try again in a few moments.</source>
         <translation>Nous avons rencontré une erreur serveur inattendue.
 Veuillez réessayer dans quelques instants.</translation>
     </message>
     <message>
-        <location filename="../../app/ui/messages.py" line="160"/>
         <source>The external service provider is having trouble.
 Please try again later.</source>
         <translation>Le fournisseur de services externe rencontre des difficultés.
 Veuillez réessayer plus tard.</translation>
     </message>
     <message>
-        <location filename="../../app/ui/messages.py" line="161"/>
         <source>The server is currently busy or under maintenance.
 Please try again shortly.</source>
         <translation>Le serveur est actuellement occupé ou en maintenance.
 Veuillez réessayer sous peu.</translation>
     </message>
     <message>
-        <location filename="../../app/ui/messages.py" line="162"/>
         <source>The server took too long to respond.
 Please check your connection or try again later.</source>
         <translation>Le serveur a mis trop de temps à répondre.
 Veuillez vérifier votre connexion ou réessayer plus tard.</translation>
     </message>
     <message>
-        <location filename="../../app/ui/messages.py" line="167"/>
         <source>The selected text recognition tool is not supported.
 Please select a different tool in Settings.</source>
         <translation>L&apos;outil de reconnaissance de texte sélectionné n&apos;est pas pris en charge.
 Veuillez sélectionner un autre outil dans les Paramètres.</translation>
     </message>
     <message>
-        <location filename="../../app/ui/messages.py" line="169"/>
         <source>The selected translator is not supported.
 Please select a different tool in Settings.</source>
         <translation>Le traducteur sélectionné n&apos;est pas pris en charge.
 Veuillez sélectionner un autre outil dans les Paramètres.</translation>
     </message>
     <message>
-        <location filename="../../app/ui/messages.py" line="171"/>
         <source>The selected tool is not supported.
 Please select a different tool in Settings.</source>
         <translation>L&apos;outil sélectionné n&apos;est pas pris en charge.
 Veuillez sélectionner un autre outil dans les Paramètres.</translation>
     </message>
     <message>
-        <location filename="../../app/ui/messages.py" line="249"/>
+        <source>Unable to prepare the local {service} runtime.
+Check Settings &gt; {settings_page} and make sure Docker is available.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Confirm Automatic Processing</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Review the automatic processing settings before starting.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Run: {run_label}</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Pages: {page_count}</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Source Language: {source_lang}</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Target Language: {target_lang}</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Text Recognition Mode: {ocr_mode}</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Resolved Text Recognition: {ocr_engine}</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Start</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Cancel</source>
+        <translation type="unfinished">Annuler</translation>
+    </message>
+    <message>
         <source>{0} image(s) were skipped in this batch.
 Open Batch Report to see all skipped images and reasons.</source>
         <translation>{0} image(s) ignorée(s) dans ce lot.
 Ouvrez le Rapport de lot pour voir toutes les images ignorées et les raisons.</translation>
     </message>
     <message>
-        <location filename="../../app/ui/messages.py" line="214"/>
         <source>Text Recognition blocked: The AI provider flagged this content.
 Please try a different Text Recognition tool.</source>
         <translation>Reconnaissance de texte bloquée : Le fournisseur IA a signalé ce contenu.
 Veuillez essayer un outil de reconnaissance de texte différent.</translation>
     </message>
     <message>
-        <location filename="../../app/ui/messages.py" line="219"/>
+        <source>The local {service} service returned an invalid response.
+Check Settings &gt; {settings_page} and review the local service logs.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Unable to reach the local {service} service.
+Check Settings &gt; {settings_page} and make sure the local service is running.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
         <source>Translation blocked: The AI provider flagged this content.
 Please try a different translator.</source>
         <translation>Traduction bloquée : Le fournisseur IA a signalé ce contenu.
 Veuillez essayer un traducteur différent.</translation>
     </message>
     <message>
-        <location filename="../../app/ui/messages.py" line="224"/>
         <source>Operation blocked: The AI provider flagged this content.
 Please try a different tool.</source>
         <translation>Opération bloquée : Le fournisseur IA a signalé ce contenu.
 Veuillez essayer un outil différent.</translation>
     </message>
     <message>
-        <location filename="../../app/ui/messages.py" line="88"/>
-        <location filename="../../app/ui/messages.py" line="136"/>
         <source>OK</source>
         <translation>OK</translation>
     </message>
     <message>
-        <location filename="../../app/ui/messages.py" line="79"/>
-        <source>Insufficient Credits</source>
-        <translation>Crédits insuffisants</translation>
+        <source>Required fields: {fields}</source>
+        <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../app/ui/messages.py" line="137"/>
+        <source>Please fill in the required credential fields.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Missing credentials for {provider}.
+Configure them in Settings &gt; Credentials.
+{details}</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Please fill in the required settings fields.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Missing settings for {service}.
+Configure them in Settings &gt; {settings_page}.
+{details}</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>PaddleOCR VL Settings</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Custom Service requires an OpenAI-compatible API configuration.
+Please set API Key, Endpoint URL, and Model in Settings &gt; Credentials.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
         <source>Close</source>
         <translation>Fermer</translation>
     </message>
     <message>
-        <location filename="../../app/ui/messages.py" line="199"/>
-        <location filename="../../pipeline/batch_processor.py" line="174"/>
-        <location filename="../../pipeline/batch_processor.py" line="277"/>
-        <location filename="../../pipeline/webtoon_batch/chunk.py" line="206"/>
-        <location filename="../../pipeline/webtoon_batch/chunk.py" line="306"/>
         <source>Unable to connect to the server.
 Please check your internet connection.</source>
         <translation>Impossible de se connecter au serveur.
 Veuillez vérifier votre connexion Internet.</translation>
     </message>
     <message>
-        <location filename="../../modules/utils/pipeline_config.py" line="42"/>
+        <source>Missing credentials for {provider}</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Missing OCR tool</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>No Text Recognition model selected.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
         <source>Text Recognition model</source>
         <translation>Modèle de reconnaissance de texte</translation>
     </message>
     <message>
-        <location filename="../../modules/utils/pipeline_config.py" line="61"/>
+        <source>{service} settings missing</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>{service} runtime setup failed</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Stage-Batched Pipeline currently supports only single-runtime OCR routes in product mode.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Stage-Batched Pipeline is not supported for the current OCR/translator/language combination: {reason}</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Unsupported workflow mode combination</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Missing translator</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>No Translator selected.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
         <source>Translator</source>
-        <translation>Traducteur</translation>
+        <translation>
+        Traducteur</translation>
+    </message>
+    <message>
+        <source>Gemma local server runtime setup failed</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Gemma local server is unavailable</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>No font selected</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Go to Settings &gt; Text Rendering &gt; Font to select or import one.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>OCR result is empty for this block.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Initial crop is empty.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>OCR returned empty text on the initial crop.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Retry crop is empty after expansion.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Retry also failed after contrast preprocessing.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>This PSD was exported by this application, but it now contains Photoshop features that are not fully supported on import. It may not appear exactly as it did in Photoshop.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Imported a PSD that was not exported by this application. Visible image layers were flattened, and unsupported Photoshop features may not match exactly.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>PSD import/export requires the optional Python package &apos;PhotoshopAPI&apos;.
+Install it to use PSD features.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>PSD Feature Unavailable</source>
+        <translation type="unfinished"></translation>
     </message>
 </context>
 <context>
     <name>NavRailMixin</name>
     <message>
-        <location filename="../../app/ui/main_window/builders/nav.py" line="25"/>
         <source>New Project</source>
         <translation>Nouveau projet</translation>
     </message>
     <message>
-        <location filename="../../app/ui/main_window/builders/nav.py" line="31"/>
         <source>Import Images, PDFs, Epubs or Comic Book Archive Files (cbr, cbz, etc). This will Open a new project</source>
         <translation>Importer des images, des PDF, des fichiers Epub ou des archives de bandes dessinées (cbr, cbz, etc). Cela ouvrira un nouveau projet</translation>
     </message>
     <message>
-        <location filename="../../app/ui/main_window/builders/nav.py" line="54"/>
         <source>Images</source>
-        <translation>Images</translation>
+        <translation>
+        Images</translation>
     </message>
     <message>
-        <location filename="../../app/ui/main_window/builders/nav.py" line="57"/>
         <source>Document</source>
         <translation>Document</translation>
     </message>
     <message>
-        <location filename="../../app/ui/main_window/builders/nav.py" line="60"/>
         <source>Archive</source>
         <translation>Archive</translation>
     </message>
     <message>
-        <location filename="../../app/ui/main_window/builders/nav.py" line="64"/>
         <source>Comic Book Archive</source>
         <translation>Archive de bandes dessinées</translation>
     </message>
     <message>
-        <location filename="../../app/ui/main_window/builders/nav.py" line="68"/>
         <source>Project File</source>
         <translation>Fichier de projet</translation>
     </message>
     <message>
-        <location filename="../../app/ui/main_window/builders/nav.py" line="75"/>
+        <source>PSD</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
         <source>Save Currently Loaded Image</source>
         <translation>Enregistrer l&apos;image actuellement chargée</translation>
     </message>
     <message>
-        <location filename="../../app/ui/main_window/builders/nav.py" line="79"/>
         <source>Save Project</source>
         <translation>Enregistrer le projet</translation>
     </message>
     <message>
-        <location filename="../../app/ui/main_window/builders/nav.py" line="83"/>
         <source>Save as</source>
         <translation>Enregistrer sous</translation>
     </message>
     <message>
-        <location filename="../../app/ui/main_window/builders/nav.py" line="94"/>
         <source>Export all Images</source>
         <translation>Exporter toutes les images</translation>
     </message>
     <message>
-        <location filename="../../app/ui/main_window/builders/nav.py" line="105"/>
         <source>ZIP</source>
         <translation>ZIP</translation>
     </message>
     <message>
-        <location filename="../../app/ui/main_window/builders/nav.py" line="111"/>
         <source>CBZ</source>
         <translation>CBZ</translation>
     </message>
     <message>
-        <location filename="../../app/ui/main_window/builders/nav.py" line="117"/>
         <source>PDF</source>
         <translation>PDF</translation>
     </message>
     <message>
-        <location filename="../../app/ui/main_window/builders/nav.py" line="123"/>
-        <source>PSD</source>
-        <translation>PSD</translation>
-    </message>
-    <message>
-        <location filename="../../app/ui/main_window/builders/nav.py" line="129"/>
         <source>Home</source>
         <translation>Accueil</translation>
     </message>
     <message>
-        <location filename="../../app/ui/main_window/builders/nav.py" line="133"/>
+        <source>Open Latest Recent Project</source>
+        <translation>Ouvrir le projet récemment ouvert</translation>
+    </message>
+    <message>
         <source>Settings</source>
         <translation>Paramètres</translation>
     </message>
     <message>
-        <location filename="../../app/ui/main_window/builders/nav.py" line="142"/>
         <source>Search / Replace (Ctrl+F)</source>
         <translation>Rechercher / Remplacer (Ctrl+F)</translation>
     </message>
     <message>
-        <location filename="../../app/ui/main_window/builders/nav.py" line="149"/>
         <source>Insert files into current project</source>
         <translation>Insérer des fichiers dans le projet actuel</translation>
     </message>
+</context>
+<context>
+    <name>NotificationSound</name>
     <message>
-        <location filename="../../app/ui/main_window/builders/nav.py" line="240"/>
-        <source>Start New Project</source>
-        <translation>Démarrer un nouveau projet</translation>
+        <source>Automatic translation</source>
+        <translation>
+        Traduction automatique</translation>
     </message>
     <message>
-        <location filename="../../app/ui/main_window/builders/nav.py" line="241"/>
-        <source>Your current project has unsaved changes. Start a new project?</source>
-        <translation>Votre projet actuel comporte des modifications non enregistrées. Démarrer un nouveau projet ?</translation>
+        <source>Current page automatic translation</source>
+        <translation>
+        Traduction automatique de la page actuelle</translation>
     </message>
     <message>
-        <location filename="../../app/ui/main_window/builders/nav.py" line="242"/>
-        <source>Yes</source>
-        <translation>Oui</translation>
+        <source>Retry failed pages</source>
+        <translation>
+        Réessayer les pages en échec</translation>
     </message>
     <message>
-        <location filename="../../app/ui/main_window/builders/nav.py" line="243"/>
-        <source>No</source>
-        <translation>Non</translation>
+        <source>Series queue automatic translation</source>
+        <translation>
+        Traduction automatique de la file de série</translation>
+    </message>
+    <message>
+        <source>Manual task</source>
+        <translation>
+        Tâche manuelle</translation>
+    </message>
+    <message>
+        <source>Notification test</source>
+        <translation>
+        Test de notification</translation>
+    </message>
+    <message>
+        <source>Automatic translation completed</source>
+        <translation>
+        Traduction automatique terminée</translation>
+    </message>
+    <message>
+        <source>Automatic translation failed</source>
+        <translation>
+        Échec de la traduction automatique</translation>
+    </message>
+    <message>
+        <source>Automatic translation cancelled</source>
+        <translation>
+        Traduction automatique annulée</translation>
+    </message>
+    <message>
+        <source>Automatic translation update</source>
+        <translation>
+        Mise à jour de la traduction automatique</translation>
+    </message>
+    <message>
+        <source>Completed</source>
+        <translation>
+        Terminé</translation>
+    </message>
+    <message>
+        <source>Failed</source>
+        <translation>
+        Échec</translation>
+    </message>
+    <message>
+        <source>Cancelled</source>
+        <translation>
+        Annulé</translation>
+    </message>
+    <message>
+        <source>Test</source>
+        <translation>
+        Test</translation>
+    </message>
+    <message>
+        <source>Updated</source>
+        <translation>
+        Mis à jour</translation>
+    </message>
+    <message>
+        <source>Stage-Batched Pipeline (Recommended)</source>
+        <translation>
+        Pipeline stage-batched (recommandé)</translation>
+    </message>
+    <message>
+        <source>Legacy Page Pipeline (Legacy)</source>
+        <translation>
+        Pipeline page par page hérité (legacy)</translation>
+    </message>
+    <message>
+        <source>Optimal (HunyuanOCR / PaddleOCR VL)</source>
+        <translation>
+        Optimal (HunyuanOCR / PaddleOCR VL)</translation>
+    </message>
+    <message>
+        <source>Comic Translate</source>
+        <translation>
+        Comic Translate</translation>
+    </message>
+    <message>
+        <source>Status</source>
+        <translation>
+        État</translation>
+    </message>
+    <message>
+        <source>Run</source>
+        <translation>
+        Exécution</translation>
+    </message>
+    <message>
+        <source>Images</source>
+        <translation>Images</translation>
+    </message>
+    <message>
+        <source>Workflow</source>
+        <translation>
+        Flux de travail</translation>
+    </message>
+    <message>
+        <source>OCR</source>
+        <translation>OCR</translation>
+    </message>
+    <message>
+        <source>Translator</source>
+        <translation>Traducteur</translation>
+    </message>
+    <message>
+        <source>Source language</source>
+        <translation>
+        Langue source</translation>
+    </message>
+    <message>
+        <source>Target language</source>
+        <translation>
+        Langue cible</translation>
+    </message>
+    <message>
+        <source>Output</source>
+        <translation>
+        Sortie</translation>
+    </message>
+    <message>
+        <source>Summary</source>
+        <translation>
+        Résumé</translation>
+    </message>
+    <message>
+        <source>Detail</source>
+        <translation>
+        Détail</translation>
+    </message>
+    <message>
+        <source>Time</source>
+        <translation>
+        Heure</translation>
+    </message>
+    <message>
+        <source>This is a test notification from Comic Translate.</source>
+        <translation>
+        Ceci est une notification de test envoyée par Comic Translate.</translation>
+    </message>
+</context>
+<context>
+    <name>NotificationsPage</name>
+    <message>
+        <source>Notifications</source>
+        <translation>
+        Notifications</translation>
+    </message>
+    <message>
+        <source>Configure completion sounds and optional ntfy push notifications for automatic runs.</source>
+        <translation>
+        Configurez le son de fin et les notifications push ntfy facultatives pour les exécutions automatiques.</translation>
+    </message>
+    <message>
+        <source>Automatic Completion Sound</source>
+        <translation>
+        Son de fin automatique</translation>
+    </message>
+    <message>
+        <source>Play a sound when automatic processing finishes successfully. Custom files must be placed in the repository music folder.</source>
+        <translation>Jouer un son lorsque le traitement automatique se termine avec succès. Les fichiers personnalisés doivent être placés dans le dossier music du dépôt.</translation>
+    </message>
+    <message>
+        <source>Enable completion sound</source>
+        <translation>
+        Activer le son de fin</translation>
+    </message>
+    <message>
+        <source>Test sound</source>
+        <translation>
+        Tester le son</translation>
+    </message>
+    <message>
+        <source>Music folder: {path}</source>
+        <translation>
+        Dossier de musique : {path}</translation>
+    </message>
+    <message>
+        <source>ntfy Push Notifications</source>
+        <translation>
+        Notifications push ntfy</translation>
+    </message>
+    <message>
+        <source>Send text-only notifications through ntfy when automatic processing finishes, fails, or is cancelled.
+The app keeps messages below ntfy&apos;s default 4 KiB text limit and never sends attachments.</source>
+        <translation>
+        Envoyez des notifications texte uniquement via ntfy lorsque le traitement automatique se termine, échoue ou est annulé.
+L’application garde les messages sous la limite de texte par défaut de 4 Kio de ntfy et n’envoie jamais de pièces jointes.</translation>
+    </message>
+    <message>
+        <source>Enable ntfy notifications</source>
+        <translation>
+        Activer les notifications ntfy</translation>
+    </message>
+    <message>
+        <source>Server URL</source>
+        <translation type="unfinished">
+        URL du serveur</translation>
+    </message>
+    <message>
+        <source>Topic</source>
+        <translation>
+        Sujet</translation>
+    </message>
+    <message>
+        <source>comic-translate</source>
+        <translation>
+        comic-translate</translation>
+    </message>
+    <message>
+        <source>Access token (optional)</source>
+        <translation>
+        Jeton d’accès (optionnel)</translation>
+    </message>
+    <message>
+        <source>Bearer token</source>
+        <translation>
+        Jeton Bearer</translation>
+    </message>
+    <message>
+        <source>Timeout (sec)</source>
+        <translation>
+        Délai d’attente (sec)</translation>
+    </message>
+    <message>
+        <source>Send test notification</source>
+        <translation>
+        Envoyer une notification de test</translation>
+    </message>
+    <message>
+        <source>Notify on completion</source>
+        <translation>
+        Notifier à la fin</translation>
+    </message>
+    <message>
+        <source>Notify on failure</source>
+        <translation>
+        Notifier en cas d’échec</translation>
+    </message>
+    <message>
+        <source>Notify on cancellation</source>
+        <translation>
+        Notifier en cas d’annulation</translation>
+    </message>
+    <message>
+        <source>System sound</source>
+        <translation>Son système</translation>
+    </message>
+</context>
+<context>
+    <name>PaddleOCRVLPage</name>
+    <message>
+        <source>PaddleOCR VL Settings</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Connect Comic Translate to your local PaddleOCR VL Docker service.
+This OCR engine sends cropped text regions to the /layout-parsing endpoint.
+Keep the default localhost URL if you want Comic Translate to start the bundled Docker runtime on demand.
+Leave markdown or visualization options disabled unless you need debugging.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Server URL</source>
+        <translation type="unfinished">
+        URL du serveur</translation>
+    </message>
+    <message>
+        <source>Response Options</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Prettify Markdown</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Visualize</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Performance</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Estimated VRAM usage depends on page size, image resolution, and the Docker service build.
+Recommended starting points:
+- Up to 8 GB VRAM: 128 to 256 tokens, 1 worker
+- 10 to 12 GB VRAM: 256 tokens, 2 workers
+- 16 GB VRAM: 256 to 512 tokens, 2 to 3 workers
+- 24 GB or more: 512 tokens, 3 to 4 workers for dense pages
+Approximate GPU usage:
+- 256 tokens / 2 workers: about 5 to 7 GB
+- 512 tokens / 2 workers: about 7 to 10 GB
+- 1024 tokens / 2 workers: about 10 GB or more</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Max New Tokens</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Parallel Workers</source>
+        <translation type="unfinished"></translation>
     </message>
 </context>
 <context>
     <name>PageListView</name>
     <message>
-        <location filename="../../app/ui/list_view.py" line="73"/>
+        <source>Name</source>
+        <translation>Nom</translation>
+    </message>
+    <message>
+        <source>Date</source>
+        <translation>Date</translation>
+    </message>
+    <message>
+        <source>Sort by Name</source>
+        <translation>Trier par nom</translation>
+    </message>
+    <message>
+        <source>Name: A to Z</source>
+        <translation>Nom : A à Z</translation>
+    </message>
+    <message>
+        <source>Name: Z to A</source>
+        <translation>Nom : Z à A</translation>
+    </message>
+    <message>
+        <source>Sort by Date</source>
+        <translation>Trier par date</translation>
+    </message>
+    <message>
+        <source>Date: Newest First</source>
+        <translation>Date : plus récent d&apos;abord</translation>
+    </message>
+    <message>
+        <source>Date: Oldest First</source>
+        <translation>Date : plus ancien d&apos;abord</translation>
+    </message>
+    <message>
         <source>Insert</source>
         <translation>Insérer</translation>
     </message>
     <message>
-        <location filename="../../app/ui/list_view.py" line="74"/>
         <source>Delete</source>
         <translation>Supprimer</translation>
     </message>
     <message>
-        <location filename="../../app/ui/list_view.py" line="79"/>
         <source>Unskip</source>
         <translation>Ne plus ignorer</translation>
     </message>
     <message>
-        <location filename="../../app/ui/list_view.py" line="82"/>
         <source>Skip</source>
         <translation>Ignorer</translation>
     </message>
     <message>
-        <location filename="../../app/ui/list_view.py" line="88"/>
         <source>Translate</source>
         <translation>Traduire</translation>
     </message>
@@ -686,69 +1802,219 @@ Veuillez vérifier votre connexion Internet.</translation>
 <context>
     <name>PersonalizationPage</name>
     <message>
-        <location filename="../../app/ui/settings/personalization_page.py" line="12"/>
         <source>Language</source>
         <translation>Langue</translation>
     </message>
     <message>
-        <location filename="../../app/ui/settings/personalization_page.py" line="14"/>
         <source>Theme</source>
         <translation>Thème</translation>
     </message>
 </context>
 <context>
+    <name>PipelineStatusPanel</name>
+    <message>
+        <source>Pipeline Status</source>
+        <translation>État du pipeline</translation>
+    </message>
+    <message>
+        <source>Idle</source>
+        <translation>Au repos</translation>
+    </message>
+    <message>
+        <source>Service</source>
+        <translation>Service</translation>
+    </message>
+    <message>
+        <source>Progress</source>
+        <translation>Progression</translation>
+    </message>
+    <message>
+        <source>File</source>
+        <translation>Fichier</translation>
+    </message>
+    <message>
+        <source>ETA</source>
+        <translation>ETA</translation>
+    </message>
+    <message>
+        <source>Message</source>
+        <translation>Message</translation>
+    </message>
+    <message>
+        <source>No Preview</source>
+        <translation>Aucun aperçu</translation>
+    </message>
+    <message>
+        <source>Cancel</source>
+        <translation>Annuler</translation>
+    </message>
+    <message>
+        <source>Logs</source>
+        <translation>Journaux</translation>
+    </message>
+    <message>
+        <source>Pause</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Report</source>
+        <translation>Rapport</translation>
+    </message>
+    <message>
+        <source>Retry</source>
+        <translation>Réessayer</translation>
+    </message>
+    <message>
+        <source>Settings</source>
+        <translation>Paramètres</translation>
+    </message>
+    <message>
+        <source>Open Output</source>
+        <translation>Ouvrir la sortie</translation>
+    </message>
+    <message>
+        <source>Close</source>
+        <translation>Fermer</translation>
+    </message>
+    <message>
+        <source>Pause Requested</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Window</source>
+        <translation>Fenêtre</translation>
+    </message>
+    <message>
+        <source>Switch to window mode</source>
+        <translation>Passer en mode fenêtre</translation>
+    </message>
+    <message>
+        <source>Embed</source>
+        <translation>Intégrer</translation>
+    </message>
+    <message>
+        <source>Switch to embedded mode</source>
+        <translation>Passer en mode intégré</translation>
+    </message>
+    <message>
+        <source>Hide logs</source>
+        <translation>Masquer les journaux</translation>
+    </message>
+    <message>
+        <source>Show logs</source>
+        <translation>Afficher les journaux</translation>
+    </message>
+    <message>
+        <source>Automatic</source>
+        <translation>Automatique</translation>
+    </message>
+    <message>
+        <source>Calculating</source>
+        <translation>Calcul en cours</translation>
+    </message>
+    <message>
+        <source>Status</source>
+        <translation>État</translation>
+    </message>
+    <message>
+        <source>Info</source>
+        <translation>Info</translation>
+    </message>
+    <message>
+        <source>Success</source>
+        <translation>Succès</translation>
+    </message>
+    <message>
+        <source>Warning</source>
+        <translation>Avertissement</translation>
+    </message>
+    <message>
+        <source>Error</source>
+        <translation>Erreur</translation>
+    </message>
+    <message>
+        <source>Download</source>
+        <translation>Téléchargement</translation>
+    </message>
+    <message>
+        <source>Local Service</source>
+        <translation>Service local</translation>
+    </message>
+    <message>
+        <source>Network</source>
+        <translation>Réseau</translation>
+    </message>
+    <message>
+        <source>Content Filter</source>
+        <translation>Filtre de contenu</translation>
+    </message>
+    <message>
+        <source>Batch Report</source>
+        <translation>Rapport de lot</translation>
+    </message>
+    <message>
+        <source>Pipeline</source>
+        <translation>Pipeline</translation>
+    </message>
+    <message>
+        <source>Running</source>
+        <translation>En cours</translation>
+    </message>
+    <message>
+        <source>Done</source>
+        <translation>Terminé</translation>
+    </message>
+    <message>
+        <source>Failed</source>
+        <translation>Échec</translation>
+    </message>
+    <message>
+        <source>Cancelled</source>
+        <translation>Annulé</translation>
+    </message>
+</context>
+<context>
     <name>ProjectPage</name>
     <message>
-        <location filename="../../app/ui/settings/project_page.py" line="14"/>
         <source>Auto-Recover</source>
         <translation>Récupération automatique</translation>
     </message>
     <message>
-        <location filename="../../app/ui/settings/project_page.py" line="17"/>
         <source>Auto-Recover saves recovery snapshots in the background so work can be restored after a crash.
 These snapshots are not your main project file; use Save/Auto-Save for normal project saves.</source>
         <translation>La récupération automatique enregistre les instantanés de récupération en arrière-plan afin que le travail puisse être restauré après un crash.
 Ces instantanés ne constituent pas votre fichier de projet principal&#xa0;; utilisez Save/Auto-Save pour les sauvegardes normales du projet.</translation>
     </message>
     <message>
-        <location filename="../../app/ui/settings/project_page.py" line="25"/>
         <source>Create recovery snapshot every (minutes):</source>
         <translation>Créez un instantané de récupération toutes les (minutes)&#xa0;:</translation>
     </message>
     <message>
-        <location filename="../../app/ui/settings/project_page.py" line="35"/>
         <source>Auto-Save Project Files</source>
         <translation>Enregistrement automatique des fichiers de projet</translation>
     </message>
     <message>
-        <location filename="../../app/ui/settings/project_page.py" line="38"/>
-        <source>These are normal .ctpr project files saved while Auto-Save is enabled.
+        <source>These are normal .ctpr or .seriesctpr project files saved while Auto-Save is enabled.
 This folder is separate from Auto-Recover snapshots.</source>
-        <translation>Il s&apos;agit de fichiers de projet .ctpr normaux enregistrés lorsque l&apos;enregistrement automatique est activé.
-Ce dossier est distinct des instantanés de récupération automatique.</translation>
+        <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../app/ui/settings/project_page.py" line="46"/>
         <source>Auto-Save folder:</source>
         <translation>Dossier d&apos;enregistrement automatique&#xa0;:</translation>
     </message>
     <message>
-        <location filename="../../app/ui/settings/project_page.py" line="51"/>
         <source>Select a folder for auto-saved project files</source>
         <translation>Sélectionnez un dossier pour les fichiers de projet enregistrés automatiquement</translation>
     </message>
     <message>
-        <location filename="../../app/ui/settings/project_page.py" line="54"/>
         <source>Browse</source>
         <translation>Parcourir</translation>
     </message>
     <message>
-        <location filename="../../app/ui/settings/project_page.py" line="56"/>
         <source>Reset</source>
         <translation>Réinitialiser</translation>
     </message>
     <message>
-        <location filename="../../app/ui/settings/project_page.py" line="78"/>
         <source>Choose Auto-Save Folder</source>
         <translation>Choisissez le dossier d&apos;enregistrement automatique</translation>
     </message>
@@ -756,53 +2022,42 @@ Ce dossier est distinct des instantanés de récupération automatique.</transla
 <context>
     <name>SearchReplaceController</name>
     <message>
-        <location filename="../../app/controllers/search_replace.py" line="435"/>
         <source>Empty query</source>
         <translation>Requête vide</translation>
     </message>
     <message>
-        <location filename="../../app/controllers/search_replace.py" line="524"/>
         <source>Search Error</source>
         <translation>Erreur de recherche</translation>
     </message>
     <message>
-        <location filename="../../app/controllers/search_replace.py" line="577"/>
         <source>Ready</source>
         <translation>Prêt</translation>
     </message>
     <message>
-        <location filename="../../app/controllers/search_replace.py" line="590"/>
         <source>No results</source>
         <translation>Aucun résultat</translation>
     </message>
     <message>
-        <location filename="../../app/controllers/search_replace.py" line="1062"/>
-        <location filename="../../app/controllers/search_replace.py" line="1146"/>
         <source>Replace Error</source>
         <translation>Erreur de remplacement</translation>
     </message>
     <message>
-        <location filename="../../app/controllers/search_replace.py" line="1132"/>
         <source>Replace</source>
         <translation>Remplacer</translation>
     </message>
     <message>
-        <location filename="../../app/controllers/search_replace.py" line="1137"/>
         <source>Replaced 1 occurrence(s)</source>
         <translation>1 occurrence remplacée</translation>
     </message>
     <message>
-        <location filename="../../app/controllers/search_replace.py" line="1215"/>
         <source>Replace All</source>
         <translation>Tout remplacer</translation>
     </message>
     <message>
-        <location filename="../../app/controllers/search_replace.py" line="1223"/>
         <source>Replaced {0} occurrence(s)</source>
         <translation>{0} occurrence(s) remplacée(s)</translation>
     </message>
     <message>
-        <location filename="../../app/controllers/search_replace.py" line="1225"/>
         <source>No replacements</source>
         <translation>Aucun remplacement</translation>
     </message>
@@ -810,305 +2065,431 @@ Ce dossier est distinct des instantanés de récupération automatique.</transla
 <context>
     <name>SearchReplacePanel</name>
     <message>
-        <location filename="../../app/ui/search_replace_panel.py" line="71"/>
         <source>Search</source>
         <translation>Rechercher</translation>
     </message>
     <message>
-        <location filename="../../app/ui/search_replace_panel.py" line="77"/>
         <source>Previous match (Ctrl+Enter)</source>
         <translation>Match précédent (Ctrl+Entrée)</translation>
     </message>
     <message>
-        <location filename="../../app/ui/search_replace_panel.py" line="81"/>
         <source>Next match (Enter)</source>
         <translation>Match suivant (Entrée)</translation>
     </message>
     <message>
-        <location filename="../../app/ui/search_replace_panel.py" line="85"/>
         <source>Clear (Esc)</source>
         <translation>Effacer (Esc)</translation>
     </message>
     <message>
-        <location filename="../../app/ui/search_replace_panel.py" line="114"/>
         <source>Find</source>
         <translation>Trouver</translation>
     </message>
     <message>
-        <location filename="../../app/ui/search_replace_panel.py" line="135"/>
         <source>Match case</source>
         <translation>Respecter la casse</translation>
     </message>
     <message>
-        <location filename="../../app/ui/search_replace_panel.py" line="143"/>
         <source>Match whole word</source>
         <translation>Mot entier</translation>
     </message>
     <message>
-        <location filename="../../app/ui/search_replace_panel.py" line="151"/>
         <source>Use regular expression</source>
         <translation>Utiliser une expression régulière</translation>
     </message>
     <message>
-        <location filename="../../app/ui/search_replace_panel.py" line="172"/>
-        <location filename="../../app/ui/search_replace_panel.py" line="326"/>
         <source>0 results</source>
         <translation>0 résultats</translation>
     </message>
     <message>
-        <location filename="../../app/ui/search_replace_panel.py" line="196"/>
-        <location filename="../../app/ui/search_replace_panel.py" line="216"/>
         <source>Replace</source>
         <translation>Remplacer</translation>
     </message>
     <message>
-        <location filename="../../app/ui/search_replace_panel.py" line="211"/>
         <source>Preserve case (match original capitalization)</source>
         <translation>Préserver la casse (respecter la capitalisation d&apos;origine)</translation>
     </message>
     <message>
-        <location filename="../../app/ui/search_replace_panel.py" line="222"/>
         <source>Replace All</source>
         <translation>Tout remplacer</translation>
     </message>
     <message>
-        <location filename="../../app/ui/search_replace_panel.py" line="256"/>
         <source>Current Image</source>
         <translation>Image actuelle</translation>
     </message>
     <message>
-        <location filename="../../app/ui/search_replace_panel.py" line="255"/>
         <source>All Images</source>
         <translation>Toutes les images</translation>
     </message>
     <message>
-        <location filename="../../app/ui/search_replace_panel.py" line="257"/>
         <source>Search Scope</source>
         <translation>Portée de la recherche</translation>
     </message>
     <message>
-        <location filename="../../app/ui/search_replace_panel.py" line="261"/>
         <source>Target</source>
         <translation>Cible</translation>
     </message>
     <message>
-        <location filename="../../app/ui/search_replace_panel.py" line="262"/>
         <source>Source</source>
         <translation>Source</translation>
     </message>
     <message>
-        <location filename="../../app/ui/search_replace_panel.py" line="263"/>
         <source>Search in original source or translated target text</source>
         <translation>Rechercher dans la source originale ou le texte cible traduit</translation>
     </message>
     <message>
-        <location filename="../../app/ui/search_replace_panel.py" line="271"/>
-        <location filename="../../app/ui/search_replace_panel.py" line="318"/>
         <source>Ready</source>
         <translation>Prêt</translation>
     </message>
     <message>
-        <location filename="../../app/ui/search_replace_panel.py" line="328"/>
         <source>{0} results in {1} image(s)</source>
         <translation>{0} résultats dans {1} image(s)</translation>
     </message>
 </context>
 <context>
+    <name>SearchableMenuBase</name>
+    <message>
+        <source>Search Action...</source>
+        <translation>Fermer</translation>
+    </message>
+</context>
+<context>
+    <name>SeriesImportDialog</name>
+    <message>
+        <source>Create Series Project</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Choose the files to embed into the new `.seriesctpr`, then arrange the reading queue with drag-and-drop or precise queue numbers.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Series Root Folder</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Queue Preview</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Checked rows will be embedded. Drag rows to reorder them, or edit the queue number for exact placement.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Sort</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Manual Queue</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Name (A-Z)</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Name (Z-A)</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Date (Newest First)</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Date (Oldest First)</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Only checked files will be added. You can still reorder or remove queue items later from the series board.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Select All</source>
+        <translation type="unfinished">Police</translation>
+    </message>
+    <message>
+        <source>Clear All</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Cancel</source>
+        <translation type="unfinished">Annuler</translation>
+    </message>
+    <message>
+        <source>Create Series</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Root Folder</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>{total} files found</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>{selected} selected · {folders} folders</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Select at least one file to include in the series.</source>
+        <translation type="unfinished"></translation>
+    </message>
+</context>
+<context>
+    <name>SeriesPage</name>
+    <message>
+        <source>Series Queue</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Configure the default behavior for `.seriesctpr` queue execution.
+These values are copied into new series projects and can be adjusted per series.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Stop</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Skip</source>
+        <translation type="unfinished">Ignorer</translation>
+    </message>
+    <message>
+        <source>Retry</source>
+        <translation type="unfinished">Réessayer</translation>
+    </message>
+    <message>
+        <source>Open failed child project automatically</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Resume from the first incomplete queue item</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Return to the series board after a child project finishes</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Failure policy:</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Retry count:</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Retry delay (sec):</source>
+        <translation type="unfinished"></translation>
+    </message>
+</context>
+<context>
+    <name>SeriesTreeJumpDialog</name>
+    <message>
+        <source>Tree Jump</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Select a series item from the original folder structure or choose the board view.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Location</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Series Board</source>
+        <translation type="unfinished"></translation>
+    </message>
+</context>
+<context>
+    <name>SeriesWorkspace</name>
+    <message>
+        <source>Back</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Forward</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Tree</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Tree Jump</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Series Project</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Recovered Snapshot</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Child Changes Not Synced</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Open Selected</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Add Files</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Add Folder</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Sort</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Manual Queue</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Name (A-Z)</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Name (Z-A)</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Date (Newest First)</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Date (Oldest First)</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Queue changes are locked while automatic translation is running.
+The current running item stays fixed, and you can change the queue after the run finishes.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Apply a quick queue sort by name or modified date.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Open the selected child project.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Add supported files to this series.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Scan and add a folder to this series.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Run automatic translation in queue order.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Resume the paused queue from the queue status panel.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Automatic translation is already running.</source>
+        <translation type="unfinished"></translation>
+    </message>
+</context>
+<context>
     <name>SettingsPage</name>
     <message>
-        <location filename="../../app/ui/settings/settings_page.py" line="483"/>
         <source>OK</source>
         <translation>OK</translation>
     </message>
     <message>
-        <location filename="../../app/ui/settings/settings_page.py" line="492"/>
-        <location filename="../../app/ui/settings/settings_page.py" line="837"/>
         <source>Yes</source>
         <translation>Oui</translation>
     </message>
     <message>
-        <location filename="../../app/ui/settings/settings_page.py" line="493"/>
-        <location filename="../../app/ui/settings/settings_page.py" line="838"/>
         <source>No</source>
         <translation>Non</translation>
     </message>
     <message>
-        <location filename="../../app/ui/settings/settings_page.py" line="502"/>
         <source>Restart Required</source>
         <translation>Redémarrage requis</translation>
     </message>
     <message>
-        <location filename="../../app/ui/settings/settings_page.py" line="554"/>
-        <source>Failed to initiate sign-in process.</source>
-        <translation>Échec de l&apos;initialisation du processus de connexion.</translation>
-    </message>
-    <message>
-        <location filename="../../app/ui/settings/settings_page.py" line="571"/>
-        <location filename="../../app/ui/settings/settings_page.py" line="799"/>
-        <source>Sign In</source>
-        <translation>Connexion</translation>
-    </message>
-    <message>
-        <location filename="../../app/ui/settings/settings_page.py" line="588"/>
-        <source>Sign In Required</source>
-        <translation>Connexion requise</translation>
-    </message>
-    <message>
-        <location filename="../../app/ui/settings/settings_page.py" line="589"/>
-        <source>Please sign in to purchase or manage credits.</source>
-        <translation>Veuillez vous connecter pour acheter ou gérer des crédits.</translation>
-    </message>
-    <message>
-        <location filename="../../app/ui/settings/settings_page.py" line="598"/>
-        <source>Unable to Open Browser</source>
-        <translation>Impossible d&apos;ouvrir le navigateur</translation>
-    </message>
-    <message>
-        <location filename="../../app/ui/settings/settings_page.py" line="599"/>
-        <source>Please open the pricing page in your browser: {url}</source>
-        <translation>Veuillez ouvrir la page des tarifs dans votre navigateur : {url}</translation>
-    </message>
-    <message>
-        <location filename="../../app/ui/settings/settings_page.py" line="503"/>
         <source>The application needs to restart for the language changes to take effect.
 Restart now?</source>
         <translation>L&apos;application doit redémarrer pour que les modifications de langue prennent effet.
 Redémarrer maintenant ?</translation>
     </message>
     <message>
-        <location filename="../../app/ui/settings/settings_page.py" line="546"/>
-        <location filename="../../app/ui/settings/settings_page.py" line="882"/>
         <source>Cancel</source>
         <translation>Annuler</translation>
     </message>
     <message>
-        <location filename="../../app/ui/settings/settings_page.py" line="671"/>
-        <source>Sign In Error</source>
-        <translation>Erreur de connexion</translation>
-    </message>
-    <message>
-        <location filename="../../app/ui/settings/settings_page.py" line="672"/>
-        <source>Authentication failed: {error}</source>
-        <translation>Échec de l&apos;authentification : {error}</translation>
-    </message>
-    <message>
-        <location filename="../../app/ui/settings/settings_page.py" line="686"/>
-        <source>Confirm Sign Out</source>
-        <translation>Confirmer la déconnexion</translation>
-    </message>
-    <message>
-        <location filename="../../app/ui/settings/settings_page.py" line="687"/>
-        <source>Are you sure you want to sign out?</source>
-        <translation>Êtes-vous sûr de vouloir vous déconnecter ?</translation>
-    </message>
-    <message>
-        <location filename="../../app/ui/settings/settings_page.py" line="691"/>
-        <source>Signing Out...</source>
-        <translation>Déconnexion en cours...</translation>
-    </message>
-    <message>
-        <location filename="../../app/ui/settings/settings_page.py" line="714"/>
-        <location filename="../../app/ui/settings/settings_page.py" line="792"/>
-        <source>Sign Out</source>
-        <translation>Déconnexion</translation>
-    </message>
-    <message>
-        <location filename="../../app/ui/settings/settings_page.py" line="730"/>
-        <source>Session Expired</source>
-        <translation>Session expirée</translation>
-    </message>
-    <message>
-        <location filename="../../app/ui/settings/settings_page.py" line="731"/>
-        <source>Your session has expired. Please sign in again.</source>
-        <translation>Votre session a expiré. Veuillez vous reconnecter.</translation>
-    </message>
-    <message>
-        <location filename="../../app/ui/settings/settings_page.py" line="745"/>
-        <location filename="../../app/ui/settings/settings_page.py" line="748"/>
-        <location filename="../../app/ui/settings/settings_page.py" line="767"/>
-        <source>N/A</source>
-        <translation>Non disponible</translation>
-    </message>
-    <message>
-        <location filename="../../app/ui/settings/settings_page.py" line="759"/>
-        <source>Free</source>
-        <translation>Gratuit</translation>
-    </message>
-    <message>
-        <location filename="../../app/ui/settings/settings_page.py" line="774"/>
-        <source>Subscription</source>
-        <translation>Abonnement</translation>
-    </message>
-    <message>
-        <location filename="../../app/ui/settings/settings_page.py" line="777"/>
-        <source>One-time</source>
-        <translation>Unique</translation>
-    </message>
-    <message>
-        <location filename="../../app/ui/settings/settings_page.py" line="780"/>
-        <location filename="../../app/ui/settings/settings_page.py" line="785"/>
-        <source>Total</source>
-        <translation>Total</translation>
-    </message>
-    <message>
-        <location filename="../../app/ui/settings/settings_page.py" line="814"/>
         <source>Checking...</source>
         <translation>Vérification...</translation>
     </message>
     <message>
-        <location filename="../../app/ui/settings/settings_page.py" line="820"/>
-        <location filename="../../app/ui/settings/settings_page.py" line="857"/>
-        <location filename="../../app/ui/settings/settings_page.py" line="870"/>
+        <source>Enter an ntfy topic before sending a test notification.</source>
+        <translation>
+        Saisissez un sujet ntfy avant d’envoyer une notification de test.</translation>
+    </message>
+    <message>
+        <source>Test ntfy notification sent.</source>
+        <translation>
+        Notification de test ntfy envoyée.</translation>
+    </message>
+    <message>
+        <source>Unable to send the ntfy test notification right now. Check the settings and try again.</source>
+        <translation>
+        Impossible d’envoyer la notification de test ntfy pour le moment. Vérifiez les paramètres et réessayez.</translation>
+    </message>
+    <message>
         <source>Check for Updates</source>
         <translation>Vérifier les mises à jour</translation>
     </message>
     <message>
-        <location filename="../../app/ui/settings/settings_page.py" line="830"/>
         <source>Update Available</source>
         <translation>Mise à jour disponible</translation>
     </message>
     <message>
-        <location filename="../../app/ui/settings/settings_page.py" line="833"/>
         <source>A new version {version} is available.</source>
         <translation>Une nouvelle version {version} est disponible.</translation>
     </message>
     <message>
-        <location filename="../../app/ui/settings/settings_page.py" line="834"/>
         <source>Release Notes</source>
         <translation>Notes de version</translation>
     </message>
     <message>
-        <location filename="../../app/ui/settings/settings_page.py" line="842"/>
         <source>Skip This Version</source>
         <translation>Ignorer cette version</translation>
     </message>
     <message>
-        <location filename="../../app/ui/settings/settings_page.py" line="860"/>
         <source>Up to Date</source>
         <translation>À jour</translation>
     </message>
     <message>
-        <location filename="../../app/ui/settings/settings_page.py" line="861"/>
         <source>You are using the latest version.</source>
         <translation>Vous utilisez la dernière version.</translation>
     </message>
     <message>
-        <location filename="../../app/ui/settings/settings_page.py" line="876"/>
         <source>Update Error</source>
         <translation>Erreur de mise à jour</translation>
     </message>
     <message>
-        <location filename="../../app/ui/settings/settings_page.py" line="882"/>
         <source>Downloading update...</source>
         <translation>Téléchargement de la mise à jour...</translation>
     </message>
     <message>
-        <location filename="../../app/ui/settings/settings_page.py" line="899"/>
         <source>Download Complete</source>
         <translation>Téléchargement terminé</translation>
     </message>
     <message>
-        <location filename="../../app/ui/settings/settings_page.py" line="900"/>
         <source>Installer downloaded to {path}. Run it now?</source>
         <translation>L&apos;installateur a été téléchargé dans {path}. L&apos;exécuter maintenant ?</translation>
     </message>
@@ -1116,870 +2497,1414 @@ Redémarrer maintenant ?</translation>
 <context>
     <name>SettingsPageUI</name>
     <message>
-        <location filename="../../app/ui/settings/settings_ui.py" line="58"/>
-        <location filename="../../app/ui/settings/settings_ui.py" line="125"/>
-        <source>Default</source>
-        <translation>Par défaut</translation>
-    </message>
-    <message>
-        <location filename="../../app/ui/settings/settings_ui.py" line="59"/>
-        <location filename="../../app/ui/settings/settings_ui.py" line="126"/>
         <source>Microsoft OCR</source>
         <translation>Microsoft OCR</translation>
     </message>
     <message>
-        <location filename="../../app/ui/settings/settings_ui.py" line="127"/>
         <source>Google Cloud Vision</source>
         <translation>Google Cloud Vision</translation>
     </message>
     <message>
-        <location filename="../../app/ui/settings/settings_ui.py" line="60"/>
         <source>Gemini-2.0-Flash</source>
         <translation>Gemini-2.0-Flash</translation>
     </message>
     <message>
-        <location filename="../../app/ui/settings/settings_ui.py" line="73"/>
-        <location filename="../../app/ui/settings/settings_ui.py" line="115"/>
         <source>GPT-4.1-mini</source>
         <translation>GPT-4.1-mini</translation>
     </message>
     <message>
-        <location filename="../../app/ui/settings/settings_ui.py" line="62"/>
-        <location filename="../../app/ui/settings/settings_ui.py" line="137"/>
         <source>Resize</source>
         <translation>Redimensionner</translation>
     </message>
     <message>
-        <location filename="../../app/ui/settings/settings_ui.py" line="62"/>
-        <location filename="../../app/ui/settings/settings_ui.py" line="138"/>
+        <source>PaddleOCR VL</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>HunyuanOCR</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
         <source>Original</source>
         <translation>Original</translation>
     </message>
     <message>
-        <location filename="../../app/ui/settings/settings_ui.py" line="62"/>
-        <location filename="../../app/ui/settings/settings_ui.py" line="139"/>
         <source>Crop</source>
         <translation>Rogner</translation>
     </message>
     <message>
-        <location filename="../../app/ui/settings/settings_ui.py" line="63"/>
-        <location filename="../../app/ui/settings/settings_ui.py" line="108"/>
         <source>Dark</source>
         <translation>Sombre</translation>
     </message>
     <message>
-        <location filename="../../app/ui/settings/settings_ui.py" line="63"/>
-        <location filename="../../app/ui/settings/settings_ui.py" line="109"/>
         <source>Light</source>
         <translation>Clair</translation>
     </message>
     <message>
-        <location filename="../../app/ui/settings/settings_ui.py" line="64"/>
-        <location filename="../../app/ui/settings/settings_ui.py" line="142"/>
         <source>Left</source>
         <translation>Gauche</translation>
     </message>
     <message>
-        <location filename="../../app/ui/settings/settings_ui.py" line="64"/>
-        <location filename="../../app/ui/settings/settings_ui.py" line="143"/>
         <source>Center</source>
         <translation>Centre</translation>
     </message>
     <message>
-        <location filename="../../app/ui/settings/settings_ui.py" line="64"/>
-        <location filename="../../app/ui/settings/settings_ui.py" line="144"/>
         <source>Right</source>
         <translation>Droite</translation>
     </message>
     <message>
-        <location filename="../../app/ui/settings/settings_ui.py" line="71"/>
-        <location filename="../../app/ui/settings/settings_ui.py" line="119"/>
+        <source>Custom Service</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
         <source>Gemini-3.0-Flash</source>
         <translation>Gemini-3.0-Flash</translation>
     </message>
     <message>
-        <location filename="../../app/ui/settings/settings_ui.py" line="149"/>
         <source>Open AI GPT</source>
         <translation>OpenAI GPT</translation>
     </message>
     <message>
-        <location filename="../../app/ui/settings/settings_ui.py" line="150"/>
+        <source>Custom Local Server(Gemma)</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
         <source>Microsoft Azure</source>
         <translation>Microsoft Azure</translation>
     </message>
     <message>
-        <location filename="../../app/ui/settings/settings_ui.py" line="151"/>
         <source>Google Cloud</source>
         <translation>Google Cloud</translation>
     </message>
     <message>
-        <location filename="../../app/ui/settings/settings_ui.py" line="306"/>
+        <source>Claude-4.6-Sonnet</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Default (existing auto: MangaOCR / PPOCR / Pororo...)</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Optimal (HunyuanOCR / PaddleOCR VL)</source>
+        <translation type="unfinished">
+        Optimal (HunyuanOCR / PaddleOCR VL)</translation>
+    </message>
+    <message>
+        <source>MangaLMM</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Stage-Batched Pipeline (Recommended)</source>
+        <translation type="unfinished">
+        Pipeline stage-batched (recommandé)</translation>
+    </message>
+    <message>
+        <source>Legacy Page Pipeline (Legacy)</source>
+        <translation type="unfinished">
+        Pipeline page par page hérité (legacy)</translation>
+    </message>
+    <message>
+        <source>RT-DETR-v2 + CTD Line Protect + Source LaMa</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>RT-DETR-v2 + Legacy BBox Rescue + Source LaMa</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>PaddleOCR VL Settings</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>HunyuanOCR Settings</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>MangaLMM Settings</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Gemma Local Server Settings</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
         <source>LLMs</source>
         <translation>LLMs</translation>
     </message>
     <message>
-        <location filename="../../app/ui/settings/settings_ui.py" line="308"/>
+        <source>User Dictionaries</source>
+        <translation>Dictionnaires utilisateur</translation>
+    </message>
+    <message>
+        <source>Notifications</source>
+        <translation>Notifications</translation>
+    </message>
+    <message>
         <source>Project</source>
         <translation>Projet</translation>
     </message>
     <message>
-        <location filename="../../app/ui/settings/settings_ui.py" line="310"/>
+        <source>Series</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Shortcuts</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
         <source>Advanced</source>
         <translation>Avancé</translation>
     </message>
     <message>
-        <location filename="../../app/ui/settings/settings_ui.py" line="311"/>
         <source>About</source>
         <translation>À propos</translation>
     </message>
     <message>
-        <location filename="../../app/ui/settings/settings_ui.py" line="67"/>
-        <location filename="../../app/ui/settings/settings_ui.py" line="77"/>
-        <location filename="../../app/ui/settings/settings_ui.py" line="112"/>
-        <location filename="../../app/ui/settings/settings_ui.py" line="147"/>
-        <source>Custom</source>
-        <translation>Personnalisé</translation>
-    </message>
-    <message>
-        <location filename="../../app/ui/settings/settings_ui.py" line="148"/>
         <source>Deepseek</source>
         <translation>Deepseek</translation>
     </message>
     <message>
-        <location filename="../../app/ui/settings/settings_ui.py" line="152"/>
         <source>Google Gemini</source>
         <translation>Google Gemini</translation>
     </message>
     <message>
-        <location filename="../../app/ui/settings/settings_ui.py" line="116"/>
-        <location filename="../../app/ui/settings/settings_ui.py" line="153"/>
         <source>DeepL</source>
         <translation>DeepL</translation>
     </message>
     <message>
-        <location filename="../../app/ui/settings/settings_ui.py" line="154"/>
         <source>Anthropic Claude</source>
         <translation>Anthropic Claude</translation>
     </message>
     <message>
-        <location filename="../../app/ui/settings/settings_ui.py" line="121"/>
-        <location filename="../../app/ui/settings/settings_ui.py" line="155"/>
         <source>Yandex</source>
         <translation>Yandex</translation>
     </message>
     <message>
-        <location filename="../../app/ui/settings/settings_ui.py" line="72"/>
-        <location filename="../../app/ui/settings/settings_ui.py" line="114"/>
         <source>GPT-4.1</source>
         <translation>GPT-4.1</translation>
     </message>
     <message>
-        <location filename="../../app/ui/settings/settings_ui.py" line="74"/>
-        <location filename="../../app/ui/settings/settings_ui.py" line="117"/>
-        <source>Claude-4.5-Sonnet</source>
-        <translation>Claude-4.5-Sonnet</translation>
-    </message>
-    <message>
-        <location filename="../../app/ui/settings/settings_ui.py" line="75"/>
-        <location filename="../../app/ui/settings/settings_ui.py" line="118"/>
         <source>Claude-4.5-Haiku</source>
         <translation>Claude-4.5-Haiku</translation>
     </message>
     <message>
-        <location filename="../../app/ui/settings/settings_ui.py" line="76"/>
-        <location filename="../../app/ui/settings/settings_ui.py" line="113"/>
         <source>Deepseek-v3</source>
         <translation>Deepseek-v3</translation>
     </message>
     <message>
-        <location filename="../../app/ui/settings/settings_ui.py" line="120"/>
         <source>Gemini-2.5-Pro</source>
         <translation>Gemini-2.5-Pro</translation>
     </message>
     <message>
-        <location filename="../../app/ui/settings/settings_ui.py" line="304"/>
-        <source>Account</source>
-        <translation>Compte</translation>
-    </message>
-    <message>
-        <location filename="../../app/ui/settings/settings_ui.py" line="122"/>
         <source>Microsoft Translator</source>
         <translation>Microsoft Translator</translation>
     </message>
     <message>
-        <location filename="../../app/ui/settings/settings_ui.py" line="303"/>
         <source>Personalization</source>
         <translation>Personnalisation</translation>
     </message>
     <message>
-        <location filename="../../app/ui/settings/settings_ui.py" line="305"/>
         <source>Tools</source>
         <translation>Outils</translation>
     </message>
     <message>
-        <location filename="../../app/ui/settings/settings_ui.py" line="307"/>
         <source>Text Rendering</source>
         <translation>Rendu du texte</translation>
     </message>
     <message>
-        <location filename="../../app/ui/settings/settings_ui.py" line="309"/>
         <source>Export</source>
         <translation>Exporter</translation>
     </message>
 </context>
 <context>
+    <name>ShortcutDefinitions</name>
+    <message>
+        <source>Undo</source>
+        <translation type="unfinished">Annuler</translation>
+    </message>
+    <message>
+        <source>Undo the last editing action.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Redo</source>
+        <translation type="unfinished">Rétablir</translation>
+    </message>
+    <message>
+        <source>Redo the previously undone action.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Delete Selected Box</source>
+        <translation type="unfinished">Supprimer la zone sélectionnée</translation>
+    </message>
+    <message>
+        <source>Delete the currently selected text box.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Restore Text Blocks</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Draw saved text blocks back onto the image for editing.</source>
+        <translation type="unfinished"></translation>
+    </message>
+</context>
+<context>
+    <name>ShortcutsPage</name>
+    <message>
+        <source>Keyboard Shortcuts</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Assign shortcuts for common editing actions. Leave a field empty to disable that shortcut.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Reset</source>
+        <translation type="unfinished">Réinitialiser</translation>
+    </message>
+    <message>
+        <source>Reset All Shortcuts</source>
+        <translation type="unfinished"></translation>
+    </message>
+</context>
+<context>
     <name>StartupHomeScreen</name>
     <message>
-        <location filename="../../app/ui/startup_home.py" line="400"/>
         <source>New</source>
         <translation>Nouveau</translation>
     </message>
     <message>
-        <location filename="../../app/ui/startup_home.py" line="412"/>
         <source>New Project</source>
         <translation>Nouveau projet</translation>
     </message>
     <message>
-        <location filename="../../app/ui/startup_home.py" line="413"/>
-        <location filename="../../app/ui/startup_home.py" line="585"/>
+        <source>New Series Project</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
         <source>Open Files</source>
         <translation>Ouvrir des fichiers</translation>
     </message>
     <message>
-        <location filename="../../app/ui/startup_home.py" line="423"/>
         <source>Drag and drop files anywhere on this page to open them.</source>
         <translation>Faites glisser et déposez des fichiers n&apos;importe où sur cette page pour les ouvrir.</translation>
     </message>
     <message>
-        <location filename="../../app/ui/startup_home.py" line="444"/>
         <source>Recent</source>
         <translation>Récent</translation>
     </message>
     <message>
-        <location filename="../../app/ui/startup_home.py" line="445"/>
         <source>Pinned</source>
         <translation>Épinglé</translation>
     </message>
     <message>
-        <location filename="../../app/ui/startup_home.py" line="457"/>
         <source>Search</source>
         <translation>Rechercher</translation>
     </message>
     <message>
-        <location filename="../../app/ui/startup_home.py" line="470"/>
         <source>Name</source>
         <translation>Nom</translation>
     </message>
     <message>
-        <location filename="../../app/ui/startup_home.py" line="471"/>
         <source>Date modified</source>
         <translation>Date de modification</translation>
     </message>
     <message>
-        <location filename="../../app/ui/startup_home.py" line="498"/>
         <source>No recent projects.
 Open or create a project to get started.</source>
         <translation>Aucun projet récent.
 Ouvrez ou créez un projet pour commencer.</translation>
     </message>
     <message>
-        <location filename="../../app/ui/startup_home.py" line="587"/>
         <source>Supported Files ({exts});;All Files (*)</source>
         <translation>Fichiers pris en charge ({exts});;Tous les fichiers (*)</translation>
+    </message>
+    <message>
+        <source>Project files cannot be opened together with other imported files.
+Choose either a project file or image/document/archive files.</source>
+        <translation>Les fichiers de projet ne peuvent pas être ouverts avec d&apos;autres fichiers importés.
+Choisissez soit un fichier de projet, soit uniquement des fichiers image/document/archive.</translation>
     </message>
 </context>
 <context>
     <name>TextRenderingPage</name>
     <message>
-        <location filename="../../app/ui/settings/text_rendering_page.py" line="17"/>
         <source>Minimum Font Size:</source>
         <translation>Taille minimale de la police :</translation>
     </message>
     <message>
-        <location filename="../../app/ui/settings/text_rendering_page.py" line="18"/>
         <source>Maximum Font Size:</source>
         <translation>Taille maximale de la police :</translation>
     </message>
     <message>
-        <location filename="../../app/ui/settings/text_rendering_page.py" line="38"/>
         <source>Font:</source>
         <translation>Police :</translation>
     </message>
     <message>
-        <location filename="../../app/ui/settings/text_rendering_page.py" line="41"/>
         <source>Import Font:</source>
         <translation>Importer une police :</translation>
     </message>
     <message>
-        <location filename="../../app/ui/settings/text_rendering_page.py" line="44"/>
         <source>Import the Font to use for Rendering Text on Images</source>
         <translation>Importer la police à utiliser pour le rendu du texte sur les images</translation>
     </message>
     <message>
-        <location filename="../../app/ui/settings/text_rendering_page.py" line="56"/>
         <source>Render Text in UpperCase</source>
         <translation>Afficher le texte en majuscules</translation>
     </message>
 </context>
 <context>
+    <name>ToolStateMixin</name>
+    <message>
+        <source>Add Inpaint Mask
+Paint areas to clean before running inpainting.
+These pixels are added to the final mask.</source>
+        <translation>Ajouter un masque d&apos;inpainting
+Peignez les zones a nettoyer avant de lancer l&apos;inpainting.
+Ces pixels sont ajoutes au masque final.</translation>
+    </message>
+    <message>
+        <source>Erase Mask Strokes
+Remove parts of drawn add/exclude strokes.
+This edits mask strokes only and does not change applied patches.</source>
+        <translation>Effacer les traits du masque
+Retirez des portions des traits d&apos;ajout/exclusion dessines.
+Cela modifie uniquement les traits du masque et ne change pas les patchs deja appliques.</translation>
+    </message>
+    <message>
+        <source>Exclude from Inpainting
+Protect areas from inpainting.
+Excluded pixels are removed from the final mask even if they were auto-detected or painted.</source>
+        <translation>Exclure de l&apos;inpainting
+Protegez des zones contre l&apos;inpainting.
+Les pixels exclus sont retires du masque final, meme s&apos;ils ont ete detectes automatiquement ou peints manuellement.</translation>
+    </message>
+    <message>
+        <source>Restore Original over Inpainted Area
+Paint over an inpainted result to bring back the original image.
+This creates a restore patch above existing inpaint patches on the current page.</source>
+        <translation>Restaurer l&apos;original sur la zone retouchee
+Peignez sur un resultat retouche pour retrouver l&apos;image d&apos;origine.
+Cela cree un patch de restauration au-dessus des patchs d&apos;inpainting existants sur la page actuelle.</translation>
+    </message>
+    <message>
+        <source>Restore Original over Inpainted Area
+No inpainted patch exists on this page yet.
+Run inpainting first, then use this tool to recover original pixels where needed.</source>
+        <translation>Restaurer l&apos;original sur la zone retouchee
+Aucun patch d&apos;inpainting n&apos;existe encore sur cette page.
+Lancez d&apos;abord l&apos;inpainting, puis utilisez cet outil pour recuperer les pixels d&apos;origine si besoin.</translation>
+    </message>
+    <message>
+        <source>Clear Inpaint Mask Strokes
+Remove all add/exclude mask strokes on the current page.
+Applied inpaint and restore patches are kept; use Undo to revert patch changes.</source>
+        <translation>Effacer les traits du masque d&apos;inpainting
+Supprimez tous les traits de masque d&apos;ajout/exclusion sur la page actuelle.
+Les patchs d&apos;inpainting et de restauration appliques sont conserves ; utilisez Annuler pour revenir sur les changements de patch.</translation>
+    </message>
+    <message>
+        <source>Inpaint Brush Size
+Adjust the size used by add, erase, exclude, and restore brushes.</source>
+        <translation>Taille du pinceau d&apos;inpainting
+Ajustez la taille utilisee par les pinceaux d&apos;ajout, d&apos;effacement, d&apos;exclusion et de restauration.</translation>
+    </message>
+</context>
+<context>
     <name>ToolsPage</name>
     <message>
-        <location filename="../../app/ui/settings/tools_page.py" line="27"/>
         <source>Translator</source>
         <translation>Traducteur</translation>
     </message>
     <message>
-        <location filename="../../app/ui/settings/tools_page.py" line="30"/>
+        <source>Custom Local Server(Gemma)</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
         <source>Text Recognition</source>
         <translation>Reconnaissance de texte</translation>
     </message>
     <message>
-        <location filename="../../app/ui/settings/tools_page.py" line="33"/>
+        <source>PaddleOCR VL</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Automatic Runtime</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
         <source>Text Detector</source>
         <translation>Détecteur de texte</translation>
     </message>
     <message>
-        <location filename="../../app/ui/settings/tools_page.py" line="36"/>
+        <source>device</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
         <source>Image Cleaning</source>
         <translation>Nettoyage d&apos;image</translation>
     </message>
     <message>
-        <location filename="../../app/ui/settings/tools_page.py" line="37"/>
+        <source>Workflow Mode</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Automatic runtime is fixed to RT-DETR-v2 detection, CTD line-protect masking, and source block-wise LaMa cleaning.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Stage-Batched runs detect, OCR, inpaint, translate, and render in stage order. Legacy keeps the original page-by-page loop.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
         <source>Inpainter</source>
         <translation>Inpainter</translation>
     </message>
     <message>
-        <location filename="../../app/ui/settings/tools_page.py" line="39"/>
-        <source>AOT</source>
-        <translation>AOT</translation>
+        <source>inpaint_size</source>
+        <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../app/ui/settings/tools_page.py" line="41"/>
+        <source>precision</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
         <source>HD Strategy</source>
         <translation>Stratégie HD</translation>
     </message>
     <message>
-        <location filename="../../app/ui/settings/tools_page.py" line="43"/>
-        <location filename="../../app/ui/settings/tools_page.py" line="127"/>
         <source>Resize</source>
         <translation>Redimensionner</translation>
     </message>
     <message>
-        <location filename="../../app/ui/settings/tools_page.py" line="53"/>
         <source>Resize Limit:</source>
         <translation>Limite de redimensionnement&#xa0;:</translation>
     </message>
     <message>
-        <location filename="../../app/ui/settings/tools_page.py" line="54"/>
         <source>Resize the longer side of the image to a specific size,
 then do inpainting on the resized image.</source>
         <translation>Redimensionner le côté le plus long de l&apos;image à une taille spécifique,
 puis effectuer l&apos;inpainting sur l&apos;image redimensionnée.</translation>
     </message>
     <message>
-        <location filename="../../app/ui/settings/tools_page.py" line="70"/>
         <source>Crop masking area from the original image to do inpainting.</source>
         <translation>Rogner la zone de masquage de l&apos;image d&apos;origine pour effectuer l&apos;inpainting.</translation>
     </message>
     <message>
-        <location filename="../../app/ui/settings/tools_page.py" line="72"/>
         <source>Crop Margin:</source>
         <translation>Marge de rognage&#xa0;:</translation>
     </message>
     <message>
-        <location filename="../../app/ui/settings/tools_page.py" line="82"/>
         <source>Crop Trigger Size:</source>
         <translation>Taille de déclenchement du rognage&#xa0;:</translation>
     </message>
     <message>
-        <location filename="../../app/ui/settings/tools_page.py" line="104"/>
         <source>Use GPU</source>
         <translation>Utiliser le GPU</translation>
     </message>
     <message>
-        <location filename="../../app/ui/settings/tools_page.py" line="128"/>
         <source>Crop</source>
         <translation>Rogner</translation>
     </message>
     <message>
-        <location filename="../../app/ui/settings/tools_page.py" line="129"/>
         <source>Original</source>
         <translation>Original</translation>
+    </message>
+    <message>
+        <source>lama_large_512px</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>lama_mpe</source>
+        <translation type="unfinished"></translation>
+    </message>
+</context>
+<context>
+    <name>UserDictionariesPage</name>
+    <message>
+        <source>Correction dictionaries rewrite OCR and translation results before they are saved to the project.</source>
+        <translation>Les dictionnaires de correction réécrivent les résultats OCR et de traduction avant leur enregistrement dans le projet.</translation>
+    </message>
+    <message>
+        <source>OCR Result Dictionary</source>
+        <translation>Dictionnaire des résultats OCR</translation>
+    </message>
+    <message>
+        <source>Apply these substitutions immediately after OCR returns text, before the source text is stored.</source>
+        <translation>Appliquez ces remplacements immédiatement après le retour du texte OCR, avant d&apos;enregistrer le texte source.</translation>
+    </message>
+    <message>
+        <source>Translation Result Dictionary</source>
+        <translation>Dictionnaire des résultats de traduction</translation>
+    </message>
+    <message>
+        <source>Apply these substitutions immediately after translation or TXT/MD import returns text, before the translation is stored.</source>
+        <translation>Appliquez ces remplacements immédiatement après le retour du texte traduit ou importé depuis TXT/MD, avant d&apos;enregistrer la traduction.</translation>
     </message>
 </context>
 <context>
     <name>WorkspaceMixin</name>
     <message>
-        <location filename="../../app/ui/main_window/builders/workspace.py" line="33"/>
         <source>Undo</source>
         <translation>Annuler</translation>
     </message>
     <message>
-        <location filename="../../app/ui/main_window/builders/workspace.py" line="34"/>
         <source>Redo</source>
         <translation>Rétablir</translation>
     </message>
     <message>
-        <location filename="../../app/ui/main_window/builders/workspace.py" line="39"/>
         <source>Detect</source>
         <translation>Détecter</translation>
     </message>
     <message>
-        <location filename="../../app/ui/main_window/builders/workspace.py" line="40"/>
         <source>Recognize</source>
         <translation>Reconnaître</translation>
     </message>
     <message>
-        <location filename="../../app/ui/main_window/builders/workspace.py" line="41"/>
         <source>Translate</source>
         <translation>Traduire</translation>
     </message>
     <message>
-        <location filename="../../app/ui/main_window/builders/workspace.py" line="42"/>
         <source>Segment</source>
         <translation>Segmenter</translation>
     </message>
     <message>
-        <location filename="../../app/ui/main_window/builders/workspace.py" line="43"/>
         <source>Clean</source>
         <translation>Nettoyer</translation>
     </message>
     <message>
-        <location filename="../../app/ui/main_window/builders/workspace.py" line="44"/>
         <source>Render</source>
         <translation>Rendre</translation>
     </message>
     <message>
-        <location filename="../../app/ui/main_window/builders/workspace.py" line="61"/>
         <source>Manual</source>
         <translation>Manuel</translation>
     </message>
     <message>
-        <location filename="../../app/ui/main_window/builders/workspace.py" line="64"/>
         <source>Automatic</source>
         <translation>Automatique</translation>
     </message>
     <message>
-        <location filename="../../app/ui/main_window/builders/workspace.py" line="73"/>
         <source>Toggle Webtoon Mode. For comics that are read in long vertical strips</source>
         <translation>Activer le mode Webtoon. Pour les bandes dessinées lues en longues bandes verticales</translation>
     </message>
     <message>
-        <location filename="../../app/ui/main_window/builders/workspace.py" line="77"/>
         <source>Translate All</source>
         <translation>Traduire tout</translation>
     </message>
     <message>
-        <location filename="../../app/ui/main_window/builders/workspace.py" line="80"/>
         <source>Cancel</source>
         <translation>Annuler</translation>
     </message>
     <message>
-        <location filename="../../app/ui/main_window/builders/workspace.py" line="83"/>
         <source>Report</source>
         <translation>Rapport</translation>
     </message>
     <message>
-        <location filename="../../app/ui/main_window/builders/workspace.py" line="114"/>
+        <source>Open the latest automatic processing report.</source>
+        <translation>Ouvrir le dernier rapport de traitement automatique.</translation>
+    </message>
+    <message>
+        <source>Retry Failed</source>
+        <translation>Relancer les échecs</translation>
+    </message>
+    <message>
+        <source>Retry only the pages that failed in the latest automatic run.</source>
+        <translation>Relancer uniquement les pages ayant échoué lors de la dernière exécution automatique.</translation>
+    </message>
+    <message>
+        <source>One-Page Auto</source>
+        <translation>Auto sur une page</translation>
+    </message>
+    <message>
+        <source>Automatically process only the current page with the current automatic settings.</source>
+        <translation>Traiter automatiquement uniquement la page actuelle avec les paramètres automatiques en cours.</translation>
+    </message>
+    <message>
         <source>Click or drag files here</source>
         <translation>Cliquez ou faites glisser les fichiers ici</translation>
     </message>
     <message>
-        <location filename="../../app/ui/main_window/builders/workspace.py" line="135"/>
         <source>Import Images, PDFs, Epubs or Comic Book Archive Files(cbr, cbz, etc)</source>
         <translation>Importer des images, des PDF, des fichiers Epub ou des archives de bandes dessinées (cbr, cbz, etc.)</translation>
     </message>
     <message>
-        <location filename="../../app/ui/main_window/builders/workspace.py" line="153"/>
         <source>Source Language</source>
         <translation>Langue source</translation>
     </message>
     <message>
-        <location filename="../../app/ui/main_window/builders/workspace.py" line="163"/>
         <source>Target Language</source>
         <translation>Langue cible</translation>
     </message>
     <message>
-        <location filename="../../app/ui/main_window/builders/workspace.py" line="174"/>
-        <source>Font</source>
-        <translation>Police</translation>
+        <source>New Render items and Translate All use the controls below. Font size edits only the currently selected text item.</source>
+        <translation>Les nouveaux éléments rendus et la sortie de « Tout traduire » utilisent les réglages ci-dessous. La taille de police ne modifie que l’élément de texte actuellement sélectionné.</translation>
     </message>
     <message>
-        <location filename="../../app/ui/main_window/builders/workspace.py" line="189"/>
-        <source>Font Size</source>
-        <translation>Taille de la police</translation>
+        <source>Text color follows the detected source text by default. Enable &apos;Use Selected Color&apos; to override it.</source>
+        <translation>La couleur du texte suit par défaut la couleur du texte source détectée. Activez « Utiliser la couleur choisie » pour la remplacer.</translation>
     </message>
     <message>
-        <location filename="../../app/ui/main_window/builders/workspace.py" line="198"/>
-        <source>Line Spacing</source>
-        <translation>Interligne</translation>
+        <source>Apply All SMART Globally</source>
+        <translation>Appliquer globalement tous les réglages SMART</translation>
     </message>
     <message>
-        <location filename="../../app/ui/main_window/builders/workspace.py" line="217"/>
-        <source>Font Color</source>
-        <translation>Couleur de la police</translation>
+        <source>Font family used for new Render items and Translate All output.</source>
+        <translation>Police utilisée pour les nouveaux éléments rendus et la sortie de « Tout traduire ».</translation>
     </message>
     <message>
-        <location filename="../../app/ui/main_window/builders/workspace.py" line="232"/>
-        <source>Bold</source>
-        <translation>Gras</translation>
+        <source>Edits only the selected text item. New renders still auto-fit using the min/max font size settings.</source>
+        <translation>Modifie uniquement l’élément de texte actuellement sélectionné. Les nouveaux rendus s’ajustent toujours automatiquement selon les réglages de taille minimale/maximale de police.</translation>
     </message>
     <message>
-        <location filename="../../app/ui/main_window/builders/workspace.py" line="234"/>
-        <source>Italic</source>
-        <translation>Italique</translation>
+        <source>Line spacing used for new Render items and Translate All output.</source>
+        <translation>Interligne utilisée pour les nouveaux éléments rendus et la sortie de « Tout traduire ».</translation>
     </message>
     <message>
-        <location filename="../../app/ui/main_window/builders/workspace.py" line="236"/>
-        <source>Underline</source>
-        <translation>Souligné</translation>
+        <source>Choose the fallback text color. By default the app keeps the detected source text color unless you enable &apos;Use Selected Color&apos;.</source>
+        <translation>Choisissez la couleur de texte de secours. Par défaut, l’application conserve la couleur du texte source détectée, sauf si vous activez « Utiliser la couleur choisie ».</translation>
     </message>
     <message>
-        <location filename="../../app/ui/main_window/builders/workspace.py" line="247"/>
+        <source>Use Selected Color</source>
+        <translation>Utiliser la couleur choisie</translation>
+    </message>
+    <message>
+        <source>Ignore detected source text color and use the selected color for all new Render items and Translate All output.</source>
+        <translation>Ignore la couleur du texte source détectée et utilise la couleur sélectionnée pour tous les nouveaux éléments rendus et la sortie de « Tout traduire ».</translation>
+    </message>
+    <message>
+        <source>Horizontal alignment for new Render items and Translate All output.</source>
+        <translation>Alignement horizontal pour les nouveaux éléments rendus et la sortie de « Tout traduire ».</translation>
+    </message>
+    <message>
+        <source>Text Color</source>
+        <translation>Couleur du texte</translation>
+    </message>
+    <message>
+        <source>Horizontal</source>
+        <translation>Horizontal</translation>
+    </message>
+    <message>
+        <source>Vertical</source>
+        <translation>Vertical</translation>
+    </message>
+    <message>
+        <source>Style</source>
+        <translation>Style</translation>
+    </message>
+    <message>
+        <source>When enabled, this project inherits the automatic output settings from Settings.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Output target</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Individual images</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Single archive</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Image format</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Archive format</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Archive image format</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Compression level</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>PNG/JPG/WEBP images are saved at maximum quality.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Archive compression only affects the ZIP/CBZ container, not image quality.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Load pages to see automatic output estimates.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Top</source>
+        <translation>Haut</translation>
+    </message>
+    <message>
+        <source>Place text at the top of the source text box.</source>
+        <translation>Place le texte en haut de la zone de texte source.</translation>
+    </message>
+    <message>
+        <source>Center</source>
+        <translation>Centre</translation>
+    </message>
+    <message>
+        <source>Place text in the vertical center of the source text box.</source>
+        <translation>Place le texte au centre vertical de la zone de texte source.</translation>
+    </message>
+    <message>
+        <source>Bottom</source>
+        <translation>Bas</translation>
+    </message>
+    <message>
+        <source>Place text at the bottom of the source text box.</source>
+        <translation>Place le texte en bas de la zone de texte source.</translation>
+    </message>
+    <message>
+        <source>Bold style for new Render items and Translate All output.</source>
+        <translation>Style gras pour les nouveaux éléments rendus et la sortie de « Tout traduire ».</translation>
+    </message>
+    <message>
+        <source>Italic style for new Render items and Translate All output.</source>
+        <translation>Style italique pour les nouveaux éléments rendus et la sortie de « Tout traduire ».</translation>
+    </message>
+    <message>
+        <source>Underline style for new Render items and Translate All output.</source>
+        <translation>Style souligné pour les nouveaux éléments rendus et la sortie de « Tout traduire ».</translation>
+    </message>
+    <message>
+        <source>OFF</source>
+        <translation>DÉSACTIVÉ</translation>
+    </message>
+    <message>
+        <source>Disable outline globally.</source>
+        <translation>Désactive le contour globalement.</translation>
+    </message>
+    <message>
+        <source>ON</source>
+        <translation>ACTIVÉ</translation>
+    </message>
+    <message>
+        <source>Enable outline globally.</source>
+        <translation>Active le contour globalement.</translation>
+    </message>
+    <message>
+        <source>Outline color for new Render items and Translate All output.</source>
+        <translation>Couleur du contour pour les nouveaux éléments rendus et la sortie de « Tout traduire ».</translation>
+    </message>
+    <message>
+        <source>Outline width for new Render items and Translate All output.</source>
+        <translation>Épaisseur du contour pour les nouveaux éléments rendus et la sortie de « Tout traduire ».</translation>
+    </message>
+    <message>
         <source>Outline</source>
         <translation>Contour</translation>
     </message>
     <message>
-        <location filename="../../app/ui/main_window/builders/workspace.py" line="251"/>
-        <source>Outline Color</source>
-        <translation>Couleur du contour</translation>
-    </message>
-    <message>
-        <location filename="../../app/ui/main_window/builders/workspace.py" line="258"/>
-        <source>Outline Width</source>
-        <translation>Largeur du contour</translation>
-    </message>
-    <message>
-        <location filename="../../app/ui/main_window/builders/workspace.py" line="281"/>
         <source>Pan Image</source>
         <translation>Déplacer l&apos;image</translation>
     </message>
     <message>
-        <location filename="../../app/ui/main_window/builders/workspace.py" line="285"/>
         <source>Set for all</source>
         <translation>Définir pour tous</translation>
     </message>
     <message>
-        <location filename="../../app/ui/main_window/builders/workspace.py" line="287"/>
         <source>Sets the Source and Target Language on the current page for all pages</source>
         <translation>Définit la langue source et la langue cible sur la page actuelle pour toutes les pages</translation>
     </message>
     <message>
-        <location filename="../../app/ui/main_window/builders/workspace.py" line="297"/>
         <source>Draw or Select Text Boxes</source>
         <translation>Dessiner ou sélectionner des zones de texte</translation>
     </message>
     <message>
-        <location filename="../../app/ui/main_window/builders/workspace.py" line="302"/>
         <source>Delete Selected Box</source>
         <translation>Supprimer la zone sélectionnée</translation>
     </message>
     <message>
-        <location filename="../../app/ui/main_window/builders/workspace.py" line="305"/>
         <source>Remove all the Boxes on the Image</source>
         <translation>Supprimer toutes les boîtes sur l&apos;image</translation>
     </message>
     <message>
-        <location filename="../../app/ui/main_window/builders/workspace.py" line="310"/>
         <source>Draws all the Text Blocks in the existing Text Block List
 back on the Image (for further editing)</source>
         <translation>Redessine tous les blocs de texte de la liste existante sur l&apos;image (pour une édition ultérieure)</translation>
     </message>
     <message>
-        <location filename="../../app/ui/main_window/builders/workspace.py" line="321"/>
         <source>Reduce the size of all blocks</source>
         <translation>Réduire la taille de tous les blocs</translation>
     </message>
     <message>
-        <location filename="../../app/ui/main_window/builders/workspace.py" line="332"/>
         <source>Increase the size of all blocks</source>
         <translation>Augmenter la taille de tous les blocs</translation>
     </message>
     <message>
-        <location filename="../../app/ui/main_window/builders/workspace.py" line="343"/>
-        <source>Draw Brush Strokes for Cleaning Image</source>
-        <translation>Tracer des coups de pinceau pour nettoyer l&apos;image</translation>
+        <source>TXT/MD</source>
+        <translation>TXT/MD</translation>
     </message>
     <message>
-        <location filename="../../app/ui/main_window/builders/workspace.py" line="348"/>
-        <source>Erase Brush Strokes</source>
-        <translation>Effacer les coups de pinceau</translation>
+        <source>Export Source TXT</source>
+        <translation>Exporter le texte source TXT</translation>
     </message>
     <message>
-        <location filename="../../app/ui/main_window/builders/workspace.py" line="353"/>
-        <source>Remove all the brush strokes on the Image</source>
-        <translation>Supprimer tous les coups de pinceau sur l&apos;image</translation>
+        <source>Export the current project&apos;s source text in the TXT exchange format.</source>
+        <translation>Exporte le texte source du projet actuel au format d&apos;échange TXT.</translation>
     </message>
     <message>
-        <location filename="../../app/ui/main_window/builders/workspace.py" line="364"/>
-        <source>Brush/Eraser Size Slider</source>
-        <translation>Curseur de taille du pinceau/gomme</translation>
+        <source>Import Translation TXT</source>
+        <translation>Importer la traduction TXT</translation>
     </message>
     <message>
-        <location filename="../../app/ui/main_window/builders/workspace.py" line="368"/>
+        <source>Import translated text from a TXT exchange file and rebuild text boxes to fit.</source>
+        <translation>Importe le texte traduit depuis un fichier d&apos;échange TXT et reconstruit les zones de texte pour qu&apos;elles s&apos;ajustent.</translation>
+    </message>
+    <message>
+        <source>Export Source MD</source>
+        <translation>Exporter le texte source MD</translation>
+    </message>
+    <message>
+        <source>Export the current project&apos;s source text in the Markdown exchange format.</source>
+        <translation>Exporte le texte source du projet actuel au format d&apos;échange Markdown.</translation>
+    </message>
+    <message>
+        <source>Import Translation MD</source>
+        <translation>Importer la traduction MD</translation>
+    </message>
+    <message>
+        <source>Import translated text from a Markdown exchange file and rebuild text boxes to fit.</source>
+        <translation>Importe le texte traduit depuis un fichier d&apos;échange Markdown et reconstruit les zones de texte pour qu&apos;elles s&apos;ajustent.</translation>
+    </message>
+    <message>
+        <source>Auto Export Source TXT</source>
+        <translation>Export automatique du texte source TXT</translation>
+    </message>
+    <message>
+        <source>After a successful automatic run, overwrite the TXT source exchange file with only the pages from that run.</source>
+        <translation>Après une exécution automatique réussie, remplace le fichier d&apos;échange source TXT par les seules pages de cette exécution.</translation>
+    </message>
+    <message>
+        <source>Auto Export Source MD</source>
+        <translation>Export automatique du texte source MD</translation>
+    </message>
+    <message>
+        <source>After a successful automatic run, overwrite the Markdown source exchange file with only the pages from that run.</source>
+        <translation>Après une exécution automatique réussie, remplace le fichier d&apos;échange source Markdown par les seules pages de cette exécution.</translation>
+    </message>
+    <message>
+        <source>Auto Export Translation TXT</source>
+        <translation>Export automatique de la traduction TXT</translation>
+    </message>
+    <message>
+        <source>After a successful automatic run, overwrite the TXT translation exchange file with only the pages from that run.</source>
+        <translation>Après une exécution automatique réussie, remplace le fichier d&apos;échange de traduction TXT par les seules pages de cette exécution.</translation>
+    </message>
+    <message>
+        <source>Auto Export Translation MD</source>
+        <translation>Export automatique de la traduction MD</translation>
+    </message>
+    <message>
+        <source>After a successful automatic run, overwrite the Markdown translation exchange file with only the pages from that run.</source>
+        <translation>Après une exécution automatique réussie, remplace le fichier d&apos;échange de traduction Markdown par les seules pages de cette exécution.</translation>
+    </message>
+    <message>
+        <source>Output</source>
+        <translation type="unfinished">
+        Sortie</translation>
+    </message>
+    <message>
+        <source>Use global output settings</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Same as source</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
         <source>Box Drawing</source>
         <translation>Dessin de boîte</translation>
     </message>
     <message>
-        <location filename="../../app/ui/main_window/builders/workspace.py" line="372"/>
         <source>Inpainting</source>
         <translation>Inpainting</translation>
     </message>
 </context>
 <context>
+    <name>_PageListContentView</name>
+    <message>
+        <source>{count} pages</source>
+        <translation>{count} pages</translation>
+    </message>
+</context>
+<context>
+    <name>_ProjectDetailsPopup</name>
+    <message>
+        <source>File name</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Location</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Browse</source>
+        <translation type="unfinished">Parcourir</translation>
+    </message>
+    <message>
+        <source>Apply</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Apply to rename or move the current project file.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Apply to save the current project file with a new name or location.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Choose Project Folder</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Project File</source>
+        <translation type="unfinished">Fichier de projet</translation>
+    </message>
+    <message>
+        <source>Enter a file name.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Choose a folder location.</source>
+        <translation type="unfinished"></translation>
+    </message>
+</context>
+<context>
     <name>_RecentRow</name>
     <message>
-        <location filename="../../app/ui/startup_home.py" line="294"/>
         <source>Open</source>
         <translation>Ouvrir</translation>
     </message>
     <message>
-        <location filename="../../app/ui/startup_home.py" line="295"/>
         <source>Open File Location</source>
         <translation>Emplacement du fichier ouvert</translation>
     </message>
     <message>
-        <location filename="../../app/ui/startup_home.py" line="297"/>
+        <source>Copy Path</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
         <source>Unpin</source>
         <translation>Détacher</translation>
     </message>
     <message>
-        <location filename="../../app/ui/startup_home.py" line="297"/>
         <source>Pin to list</source>
         <translation>Épingler à la liste</translation>
     </message>
     <message>
-        <location filename="../../app/ui/startup_home.py" line="299"/>
         <source>Remove from Recent</source>
         <translation>Supprimer des récents</translation>
+    </message>
+    <message>
+        <source>Delete File</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>File Not Found</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>The selected project file could not be found.
+It may have already been moved, renamed, or deleted.
+
+{path}</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Are you sure you want to permanently delete this project file?</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Delete</source>
+        <translation>Supprimer</translation>
+    </message>
+    <message>
+        <source>Cancel</source>
+        <translation type="unfinished">Annuler</translation>
+    </message>
+    <message>
+        <source>Delete Failed</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Could not delete the selected project file.
+
+{error}</source>
+        <translation type="unfinished"></translation>
+    </message>
+</context>
+<context>
+    <name>_SeriesImportTable</name>
+    <message>
+        <source>Use</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Queue</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Name</source>
+        <translation type="unfinished">Nom</translation>
+    </message>
+    <message>
+        <source>Modified</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Type</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Folder</source>
+        <translation type="unfinished"></translation>
+    </message>
+</context>
+<context>
+    <name>_SeriesItemPreviewPopup</name>
+    <message>
+        <source>Series item</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Preview</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Preview Unavailable</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>This item does not have an image preview, so a file card is shown instead.</source>
+        <translation type="unfinished"></translation>
+    </message>
+</context>
+<context>
+    <name>_SeriesQueueTable</name>
+    <message>
+        <source>No.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Project</source>
+        <translation type="unfinished">Projet</translation>
+    </message>
+    <message>
+        <source>Type</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Folder</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Status</source>
+        <translation type="unfinished">État</translation>
+    </message>
+    <message>
+        <source>Pending</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Running</source>
+        <translation type="unfinished">En cours</translation>
+    </message>
+    <message>
+        <source>Done</source>
+        <translation type="unfinished">Terminé</translation>
+    </message>
+    <message>
+        <source>Failed</source>
+        <translation type="unfinished">Échec</translation>
+    </message>
+    <message>
+        <source>Skipped</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Currently translating this project in the queue.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Project File</source>
+        <translation type="unfinished">Fichier de projet</translation>
+    </message>
+    <message>
+        <source>Source File</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Remove from series</source>
+        <translation type="unfinished"></translation>
+    </message>
+</context>
+<context>
+    <name>_SeriesQuickSettings</name>
+    <message>
+        <source>Global Queue Settings</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>These controls apply to queue execution. Open a child project to edit detailed page-level settings.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Use GPU</source>
+        <translation type="unfinished">Utiliser le GPU</translation>
+    </message>
+    <message>
+        <source>Source language:</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Target language:</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>OCR:</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Translator:</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Workflow mode:</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Series Settings…</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Translate in Queue Order</source>
+        <translation type="unfinished"></translation>
+    </message>
+</context>
+<context>
+    <name>_SeriesRunSummaryPanel</name>
+    <message>
+        <source>Last Queue Run</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Done:</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Failed:</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Skipped:</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Total time:</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Started / Finished:</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>{seconds} sec</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>{started} → {finished}</source>
+        <translation type="unfinished"></translation>
+    </message>
+</context>
+<context>
+    <name>_SeriesStatusPanel</name>
+    <message>
+        <source>Queue Status</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Monitor the current queue execution and control safe pause/resume behavior here.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>State:</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Current item:</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Next item:</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Last failed item:</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Retries left:</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Last run time:</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Pause</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Resume</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Open Failed Item</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Idle</source>
+        <translation type="unfinished">Au repos</translation>
+    </message>
+    <message>
+        <source>Running</source>
+        <translation type="unfinished">En cours</translation>
+    </message>
+    <message>
+        <source>Paused</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>#{index:02d} · {name}</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>{state} (pause requested)</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Pause Requested</source>
+        <translation type="unfinished"></translation>
     </message>
 </context>
 <context>
     <name>self.main</name>
     <message>
-        <location filename="../../app/controllers/batch_report.py" line="76"/>
-        <source>The AI provider flagged this content</source>
-        <translation>Le fournisseur IA a signalé ce contenu</translation>
-    </message>
-    <message>
-        <location filename="../../app/controllers/batch_report.py" line="78"/>
-        <source>Insufficient credits</source>
-        <translation>Crédits insuffisants</translation>
-    </message>
-    <message>
-        <location filename="../../app/controllers/batch_report.py" line="80"/>
-        <source>Request timed out</source>
-        <translation>Délai de requête dépassé</translation>
-    </message>
-    <message>
-        <location filename="../../app/controllers/batch_report.py" line="86"/>
-        <source>Rate limited by provider</source>
-        <translation>Limite de débit du fournisseur</translation>
-    </message>
-    <message>
-        <location filename="../../app/controllers/batch_report.py" line="93"/>
-        <source>Authentication failed</source>
-        <translation>Authentification échouée</translation>
-    </message>
-    <message>
-        <location filename="../../app/controllers/batch_report.py" line="100"/>
-        <source>Network or connection error</source>
-        <translation>Erreur réseau ou de connexion</translation>
-    </message>
-    <message>
-        <location filename="../../app/controllers/batch_report.py" line="109"/>
-        <source>Provider unavailable</source>
-        <translation>Fournisseur indisponible</translation>
-    </message>
-    <message>
-        <location filename="../../app/controllers/batch_report.py" line="115"/>
-        <source>Invalid translation response</source>
-        <translation>Réponse de traduction invalide</translation>
-    </message>
-    <message>
-        <location filename="../../app/controllers/batch_report.py" line="116"/>
-        <source>Unexpected tool error</source>
-        <translation>Erreur d&apos;outil inattendue</translation>
-    </message>
-    <message>
-        <location filename="../../app/controllers/batch_report.py" line="124"/>
-        <location filename="../../app/controllers/batch_report.py" line="173"/>
-        <source>Try another text recognition tool</source>
-        <translation>Essayez un autre outil de reconnaissance de texte</translation>
-    </message>
-    <message>
-        <location filename="../../app/controllers/batch_report.py" line="128"/>
-        <location filename="../../app/controllers/batch_report.py" line="177"/>
-        <source>Try another translator</source>
-        <translation>Essayez un autre traducteur</translation>
-    </message>
-    <message>
-        <location filename="../../app/controllers/batch_report.py" line="129"/>
-        <source>Try another tool</source>
-        <translation>Essayez un autre outil</translation>
-    </message>
-    <message>
-        <location filename="../../app/controllers/batch_report.py" line="131"/>
-        <source>Buy more credits</source>
-        <translation>Acheter plus de crédits</translation>
-    </message>
-    <message>
-        <location filename="../../app/controllers/batch_report.py" line="133"/>
-        <location filename="../../app/controllers/batch_report.py" line="168"/>
-        <location filename="../../app/controllers/batch_report.py" line="178"/>
-        <source>Try again</source>
-        <translation>Réessayer</translation>
-    </message>
-    <message>
-        <location filename="../../app/controllers/batch_report.py" line="139"/>
-        <source>Wait and try again</source>
-        <translation>Attendre et réessayer</translation>
-    </message>
-    <message>
-        <location filename="../../app/controllers/batch_report.py" line="146"/>
-        <source>Check API settings</source>
-        <translation>Vérifier les paramètres API</translation>
-    </message>
-    <message>
-        <location filename="../../app/controllers/batch_report.py" line="153"/>
-        <source>Check your connection</source>
-        <translation>Vérifier votre connexion</translation>
-    </message>
-    <message>
-        <location filename="../../app/controllers/batch_report.py" line="162"/>
-        <source>Try again later</source>
-        <translation>Réessayer plus tard</translation>
-    </message>
-    <message>
-        <location filename="../../app/controllers/batch_report.py" line="184"/>
-        <source>No text blocks detected</source>
-        <translation>Aucun bloc de texte détecté</translation>
-    </message>
-    <message>
-        <location filename="../../app/controllers/batch_report.py" line="185"/>
-        <source>Text recognition failed</source>
-        <translation>Échec de la reconnaissance de texte</translation>
-    </message>
-    <message>
-        <location filename="../../app/controllers/batch_report.py" line="186"/>
-        <source>Translation failed</source>
-        <translation>Échec de la traduction</translation>
-    </message>
-    <message>
-        <location filename="../../app/controllers/batch_report.py" line="187"/>
-        <source>Webtoon text recognition chunk failed</source>
-        <translation>Échec du fragment de reconnaissance de texte webtoon</translation>
-    </message>
-    <message>
-        <location filename="../../app/controllers/batch_report.py" line="189"/>
-        <source>Webtoon translation chunk failed</source>
-        <translation>Échec du fragment de traduction webtoon</translation>
-    </message>
-    <message>
-        <location filename="../../app/controllers/batch_report.py" line="192"/>
-        <source>Page processing failed</source>
-        <translation>Échec du traitement de la page</translation>
-    </message>
-    <message>
-        <location filename="../../app/controllers/batch_report.py" line="253"/>
-        <source>This image is not in the current project.</source>
-        <translation>Cette image n&apos;est pas dans le projet actuel.</translation>
-    </message>
-    <message>
-        <location filename="../../app/controllers/batch_report.py" line="279"/>
-        <source>Cancelled</source>
-        <translation>Annulé</translation>
-    </message>
-    <message>
-        <location filename="../../app/controllers/batch_report.py" line="279"/>
-        <source>Completed</source>
-        <translation>Terminé</translation>
-    </message>
-    <message>
-        <location filename="../../app/controllers/batch_report.py" line="282"/>
-        <source>{0}  |  Updated {1}</source>
-        <translation>{0}  |  Mis à jour {1}</translation>
-    </message>
-    <message>
-        <location filename="../../app/controllers/batch_report.py" line="309"/>
-        <source>Total</source>
-        <translation>Total</translation>
-    </message>
-    <message>
-        <location filename="../../app/controllers/batch_report.py" line="310"/>
-        <location filename="../../app/controllers/batch_report.py" line="356"/>
-        <source>Skipped</source>
-        <translation>Ignoré</translation>
-    </message>
-    <message>
-        <location filename="../../app/controllers/batch_report.py" line="320"/>
-        <source>Skipped Images ({0})</source>
-        <translation>Images ignorées ({0})</translation>
-    </message>
-    <message>
-        <location filename="../../app/controllers/batch_report.py" line="327"/>
-        <source>Double-click a row to open that page.</source>
-        <translation>Double-cliquez sur une ligne pour ouvrir cette page.</translation>
-    </message>
-    <message>
-        <location filename="../../app/controllers/batch_report.py" line="332"/>
-        <source>Image</source>
-        <translation>Image</translation>
-    </message>
-    <message>
-        <location filename="../../app/controllers/batch_report.py" line="332"/>
-        <source>Reason</source>
-        <translation>Raison</translation>
-    </message>
-    <message>
-        <location filename="../../app/controllers/batch_report.py" line="366"/>
-        <source>No skipped images in this batch.</source>
-        <translation>Aucune image ignorée dans ce lot.</translation>
-    </message>
-    <message>
-        <location filename="../../app/controllers/batch_report.py" line="377"/>
-        <source>No batch report is available yet.</source>
-        <translation>Aucun rapport de lot disponible pour l&apos;instant.</translation>
-    </message>
-    <message>
-        <location filename="../../app/controllers/batch_report.py" line="391"/>
-        <source>Batch Report</source>
-        <translation>Rapport de lot</translation>
-    </message>
-    <message>
-        <location filename="../../app/controllers/projects.py" line="438"/>
         <source>Project Recovery</source>
         <translation>Récupération de projet</translation>
     </message>
     <message>
-        <location filename="../../app/controllers/projects.py" line="439"/>
         <source>An autosaved project from a previous session was found.</source>
         <translation>Un projet enregistré automatiquement lors d&apos;une session précédente a été trouvé.</translation>
     </message>
     <message>
-        <location filename="../../app/controllers/projects.py" line="441"/>
         <source>Last autosave: {saved_at}
 Do you want to restore it?</source>
         <translation>Dernière sauvegarde automatique&#xa0;:&#xa0;{saved_at}
 Voulez-vous le restaurer ?</translation>
     </message>
     <message>
-        <location filename="../../app/controllers/projects.py" line="443"/>
         <source>Restore</source>
         <translation>Restaurer</translation>
     </message>
     <message>
-        <location filename="../../app/controllers/projects.py" line="444"/>
         <source>Discard</source>
         <translation>Ignorer</translation>
     </message>
     <message>
-        <location filename="../../app/controllers/projects.py" line="841"/>
+        <source>Export PSD As</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>PSD Files (*.psd);;All Files (*)</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Export PSD</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Project File</source>
+        <translation type="unfinished">Fichier de projet</translation>
+    </message>
+    <message>
+        <source>Choose an existing folder for the project file.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Could not create the selected project folder.
+
+{error}</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Overwrite Project File</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>RecoveredProject.seriesctpr</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>RecoveredProject.ctpr</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Save Series Project As</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Save Project As</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>A project file already exists at this location.
+
+{path}
+
+Overwrite it?</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Old Project File Kept</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>The project was saved to the new location, but the old file could not be removed.
+
+{path}
+
+{error}</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Project file saved.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Project file renamed.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Project file moved.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
         <source>Project Not Found</source>
         <translation>Projet introuvable</translation>
     </message>
     <message>
-        <location filename="../../app/controllers/projects.py" line="843"/>
         <source>The selected project file could not be found.
 It may have been moved, renamed, or deleted.
 
@@ -1990,91 +3915,165 @@ Il a peut-être été déplacé, renommé ou supprimé.
 {chemin}</translation>
     </message>
     <message>
-        <location filename="../../app/controllers/projects.py" line="921"/>
         <source>Korean</source>
         <translation>Coréen</translation>
     </message>
     <message>
-        <location filename="../../app/controllers/projects.py" line="922"/>
         <source>English</source>
         <translation>Anglais</translation>
+    </message>
+    <message>
+        <source>Recovered Snapshot</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Child Changes Not Synced</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Child Project - {child} · {series}[*]</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Series Project - {series}[*]</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Queue changes are locked while automatic translation is running.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>The selected series project file could not be found.
+It may have been moved, renamed, or deleted.
+
+{path}</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>The previous automatic translation run was interrupted and restored as paused.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Already in this series: {count}</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Duplicate selections removed: {count}</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Select Series Root Folder</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Create Series Project</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>No supported files were found in the selected folder.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Series Project Files (*.seriesctpr);;All Files (*)</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Remove From Series</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Remove &apos;{name}&apos; from this series project?</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Add Files To Series</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Supported Files ({exts});;All Files (*)</source>
+        <translation type="unfinished">Fichiers pris en charge ({exts});;Tous les fichiers (*)</translation>
+    </message>
+    <message>
+        <source>Add Folder To Series</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Series Settings</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Save Series Project</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Failed to synchronize the active child project before saving.
+
+{error}</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>There are no queue items left to run.</source>
+        <translation type="unfinished"></translation>
+    </message>
+</context>
+<context>
+    <name>self.main_page</name>
+    <message>
+        <source>OCR quality too low after retry.</source>
+        <translation type="unfinished"></translation>
     </message>
 </context>
 <context>
     <name>self.settings.ui</name>
     <message>
-        <location filename="../../modules/ocr/processor.py" line="63"/>
-        <location filename="../../modules/translation/processor.py" line="61"/>
         <source>GPT-4.1-mini</source>
         <translation>GPT-4.1-mini</translation>
     </message>
     <message>
-        <location filename="../../modules/ocr/processor.py" line="64"/>
-        <source>Microsoft OCR</source>
-        <translation>Microsoft OCR</translation>
+        <source>Custom Service</source>
+        <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../modules/ocr/processor.py" line="65"/>
-        <source>Google Cloud Vision</source>
-        <translation>Google Cloud Vision</translation>
+        <source>Custom Local Server(Gemma)</source>
+        <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../modules/ocr/processor.py" line="66"/>
-        <source>Gemini-2.0-Flash</source>
-        <translation>Gemini-2.0-Flash</translation>
+        <source>Custom Local Server</source>
+        <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../modules/ocr/processor.py" line="67"/>
-        <source>Default</source>
-        <translation>Par défaut</translation>
-    </message>
-    <message>
-        <location filename="../../modules/translation/processor.py" line="58"/>
-        <source>Custom</source>
-        <translation>Personnalisé</translation>
-    </message>
-    <message>
-        <location filename="../../modules/translation/processor.py" line="59"/>
         <source>Deepseek-v3</source>
         <translation>Deepseek-v3</translation>
     </message>
     <message>
-        <location filename="../../modules/translation/processor.py" line="60"/>
         <source>GPT-4.1</source>
         <translation>GPT-4.1</translation>
     </message>
     <message>
-        <location filename="../../modules/translation/processor.py" line="62"/>
-        <source>Claude-4.5-Sonnet</source>
-        <translation>Claude-4.5-Sonnet</translation>
+        <source>Claude-4.6-Sonnet</source>
+        <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../../modules/translation/processor.py" line="63"/>
         <source>Claude-4.5-Haiku</source>
         <translation>Claude-4.5-Haiku</translation>
     </message>
     <message>
-        <location filename="../../modules/translation/processor.py" line="64"/>
         <source>Gemini-3.0-Flash</source>
         <translation>Gemini-3.0-Flash</translation>
     </message>
     <message>
-        <location filename="../../modules/translation/processor.py" line="65"/>
         <source>Gemini-2.5-Pro</source>
         <translation>Gemini-2.5-Pro</translation>
     </message>
     <message>
-        <location filename="../../modules/translation/processor.py" line="66"/>
         <source>Microsoft Translator</source>
         <translation>Microsoft Translator</translation>
     </message>
     <message>
-        <location filename="../../modules/translation/processor.py" line="67"/>
         <source>DeepL</source>
         <translation>DeepL</translation>
     </message>
     <message>
-        <location filename="../../modules/translation/processor.py" line="68"/>
         <source>Yandex</source>
         <translation>Yandex</translation>
     </message>
@@ -2082,8 +4081,6 @@ Il a peut-être été déplacé, renommé ou supprimé.
 <context>
     <name>self.settings_page.ui</name>
     <message>
-        <location filename="../../app/ui/main_window/window.py" line="250"/>
-        <location filename="../../app/ui/main_window/window.py" line="257"/>
         <source>Light</source>
         <translation>Clair</translation>
     </message>
@@ -2091,12 +4088,43 @@ Il a peut-être été déplacé, renommé ou supprimé.
 <context>
     <name>self.ui</name>
     <message>
-        <location filename="../../app/ui/settings/settings_page.py" line="175"/>
+        <source>Default</source>
+        <translation type="unfinished">Par défaut</translation>
+    </message>
+    <message>
+        <source>Optimal (HunyuanOCR / PaddleOCR VL)</source>
+        <translation type="unfinished">
+        Optimal (HunyuanOCR / PaddleOCR VL)</translation>
+    </message>
+    <message>
+        <source>Microsoft OCR</source>
+        <translation type="unfinished">Microsoft OCR</translation>
+    </message>
+    <message>
+        <source>Google Cloud Vision</source>
+        <translation type="unfinished">Google Cloud Vision</translation>
+    </message>
+    <message>
+        <source>Gemini-2.0-Flash</source>
+        <translation type="unfinished">Gemini-2.0-Flash</translation>
+    </message>
+    <message>
+        <source>PaddleOCR VL</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>HunyuanOCR</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>MangaLMM</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
         <source>Resize</source>
         <translation>Redimensionner</translation>
     </message>
     <message>
-        <location filename="../../app/ui/settings/settings_page.py" line="177"/>
         <source>Crop</source>
         <translation>Rogner</translation>
     </message>
@@ -2104,73 +4132,86 @@ Il a peut-être été déplacé, renommé ou supprimé.
 <context>
     <name>settings.ui</name>
     <message>
-        <location filename="../../modules/ocr/factory.py" line="176"/>
-        <location filename="../../modules/translation/microsoft.py" line="25"/>
         <source>Microsoft Azure</source>
         <translation>Microsoft Azure</translation>
     </message>
     <message>
-        <location filename="../../modules/ocr/factory.py" line="186"/>
         <source>Google Cloud</source>
         <translation>Google Cloud</translation>
     </message>
     <message>
-        <location filename="../../modules/ocr/factory.py" line="193"/>
-        <location filename="../../modules/translation/llm/gpt.py" line="33"/>
         <source>Open AI GPT</source>
         <translation>OpenAI GPT</translation>
     </message>
     <message>
-        <location filename="../../modules/ocr/gemini_ocr.py" line="31"/>
-        <location filename="../../modules/translation/llm/gemini.py" line="31"/>
         <source>Google Gemini</source>
         <translation>Google Gemini</translation>
     </message>
     <message>
-        <location filename="../../modules/translation/deepl.py" line="29"/>
         <source>DeepL</source>
         <translation>DeepL</translation>
     </message>
     <message>
-        <location filename="../../modules/translation/llm/claude.py" line="35"/>
         <source>Anthropic Claude</source>
         <translation>Anthropic Claude</translation>
     </message>
     <message>
-        <location filename="../../modules/translation/llm/deepseek.py" line="29"/>
         <source>Deepseek</source>
         <translation>Deepseek</translation>
     </message>
     <message>
-        <location filename="../../modules/translation/yandex.py" line="22"/>
         <source>Yandex</source>
         <translation>Yandex</translation>
+    </message>
+    <message>
+        <source>Custom Local Server(Gemma)</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Custom Service</source>
+        <translation type="unfinished"></translation>
     </message>
 </context>
 <context>
     <name>settings_page.ui</name>
     <message>
-        <location filename="../../modules/utils/pipeline_config.py" line="23"/>
         <source>Resize</source>
         <translation>Redimensionner</translation>
     </message>
     <message>
-        <location filename="../../modules/utils/pipeline_config.py" line="25"/>
         <source>Crop</source>
         <translation>Rogner</translation>
+    </message>
+    <message>
+        <source>PaddleOCR VL Settings</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>HunyuanOCR Settings</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>MangaLMM Settings</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Gemma Local Server Settings</source>
+        <translation type="unfinished"></translation>
     </message>
 </context>
 <context>
     <name>view</name>
     <message>
-        <location filename="../../app/ui/canvas/rectangle.py" line="72"/>
         <source>OCR</source>
         <translation>OCR</translation>
     </message>
     <message>
-        <location filename="../../app/ui/canvas/rectangle.py" line="73"/>
         <source>Translate</source>
         <translation>Traduire</translation>
+    </message>
+    <message>
+        <source>No Data</source>
+        <translation>OK</translation>
     </message>
 </context>
 </TS>

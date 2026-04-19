@@ -1,5 +1,9 @@
 import sys
 
+if sys.platform == "win32":
+    import ctypes
+    from ctypes import wintypes
+
 from PySide6 import QtCore, QtGui, QtWidgets
 
 from app.ui.canvas.image_viewer import ImageViewer
@@ -7,12 +11,56 @@ from app.ui.dayu_widgets import dayu_theme
 from app.ui.dayu_widgets.divider import MDivider
 from app.ui.dayu_widgets.theme import MTheme
 from app.ui.list_view import PageListView
+from app.ui.pipeline_status_panel import (
+    PipelineInteractionOverlay,
+    PipelineStatusPanel,
+)
+from app.ui.series_workspace import SeriesWorkspace
 from app.ui.settings.settings_page import SettingsPage
 from app.ui.startup_home import StartupHomeScreen
-from app.ui.title_bar import CustomTitleBar
+from app.ui.title_bar import CustomTitleBar, RESIZE_MARGIN
 from .builders import MainWindowBuildersMixin
 from .frame import EdgeResizer
 from .tools import ToolStateMixin
+from modules.utils.render_style_policy import (
+    VERTICAL_ALIGNMENT_BOTTOM,
+    VERTICAL_ALIGNMENT_CENTER,
+    VERTICAL_ALIGNMENT_TOP,
+)
+
+if sys.platform == "win32":
+    WM_NCHITTEST = 0x0084
+    HTCLIENT = 1
+    HTCAPTION = 2
+    HTLEFT = 10
+    HTRIGHT = 11
+    HTTOP = 12
+    HTTOPLEFT = 13
+    HTTOPRIGHT = 14
+    HTBOTTOM = 15
+    HTBOTTOMLEFT = 16
+    HTBOTTOMRIGHT = 17
+    GWL_STYLE = -16
+    WS_MINIMIZEBOX = 0x00020000
+    WS_MAXIMIZEBOX = 0x00010000
+    WS_THICKFRAME = 0x00040000
+    WS_SYSMENU = 0x00080000
+    SWP_NOSIZE = 0x0001
+    SWP_NOMOVE = 0x0002
+    SWP_NOZORDER = 0x0004
+    SWP_NOACTIVATE = 0x0010
+    SWP_FRAMECHANGED = 0x0020
+
+    class _WinMSG(ctypes.Structure):
+        _fields_ = [
+            ("hwnd", wintypes.HWND),
+            ("message", wintypes.UINT),
+            ("wParam", wintypes.WPARAM),
+            ("lParam", wintypes.LPARAM),
+            ("time", wintypes.DWORD),
+            ("pt", wintypes.POINT),
+            ("lPrivate", wintypes.DWORD),
+        ]
 
 
 class ComicTranslateUI(
@@ -22,10 +70,16 @@ class ComicTranslateUI(
 ):
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setWindowFlags(self.windowFlags() | QtCore.Qt.WindowType.FramelessWindowHint)
+        self.setWindowFlags(
+            self.windowFlags()
+            | QtCore.Qt.WindowType.FramelessWindowHint
+            | QtCore.Qt.WindowType.WindowSystemMenuHint
+            | QtCore.Qt.WindowType.WindowMinMaxButtonsHint
+        )
 
         if sys.platform == "win32":
             self.setAttribute(QtCore.Qt.WidgetAttribute.WA_TranslucentBackground, True)
+            self._win_snap_style_applied = False
         self.setWindowTitle("Comic Translate[*]")
 
         screen = QtWidgets.QApplication.primaryScreen()
@@ -47,6 +101,7 @@ class ComicTranslateUI(
         self._workspace_initialized = False
         self.tool_buttons = {}
         self.page_list = PageListView()
+        self.export_source_by_path = {}
 
         self.webtoon_mode = False
 
@@ -76,7 +131,9 @@ class ComicTranslateUI(
             self.tr("Hungarian"): "Hungarian",
             self.tr("Finnish"): "Finnish",
             self.tr("Arabic"): "Arabic",
+            self.tr("Hebrew"): "Hebrew",
             self.tr("Czech"): "Czech",
+            self.tr("Croatian"): "Croatian",
             self.tr("Persian"): "Persian",
             self.tr("Romanian"): "Romanian",
             self.tr("Mongolian"): "Mongolian",
@@ -87,6 +144,11 @@ class ComicTranslateUI(
             0: QtCore.Qt.AlignmentFlag.AlignLeft,
             1: QtCore.Qt.AlignmentFlag.AlignCenter,
             2: QtCore.Qt.AlignmentFlag.AlignRight,
+        }
+        self.button_to_vertical_alignment = {
+            0: VERTICAL_ALIGNMENT_TOP,
+            1: VERTICAL_ALIGNMENT_CENTER,
+            2: VERTICAL_ALIGNMENT_BOTTOM,
         }
 
         self._init_ui()
@@ -116,6 +178,7 @@ class ComicTranslateUI(
         self._edge_resizer = EdgeResizer(self)
 
         main_widget = QtWidgets.QWidget()
+        self._main_body_widget = main_widget
         self.main_layout = QtWidgets.QHBoxLayout()
         main_widget.setLayout(self.main_layout)
         outer_layout.addWidget(main_widget)
@@ -131,14 +194,24 @@ class ComicTranslateUI(
         self._center_stack = QtWidgets.QStackedWidget()
 
         self.startup_home = StartupHomeScreen()
+        self.series_workspace = SeriesWorkspace(self)
         self._center_stack.addWidget(self.startup_home)
         self._center_stack.addWidget(self.main_content_widget)
+        self._center_stack.addWidget(self.series_workspace)
         self._center_stack.addWidget(self.settings_page)
 
         self._center_stack.setCurrentWidget(self.startup_home)
         self._set_document_tools_visible(False)
 
         self.main_layout.addWidget(self._center_stack)
+
+        self._runtime_overlay_host = outer_widget
+        self.pipeline_overlay = PipelineInteractionOverlay(outer_widget)
+        self.pipeline_overlay.hide()
+        self.pipeline_status_panel = PipelineStatusPanel(outer_widget)
+        self.pipeline_status_panel.setWindowIcon(self.windowIcon())
+        self.pipeline_status_panel.hide()
+        self._update_runtime_surface_geometry()
 
     def _set_document_tools_visible(self, visible: bool) -> None:
         tools = [
@@ -159,32 +232,94 @@ class ComicTranslateUI(
             if hasattr(self.title_bar, "webtoon_toggle"):
                 self.title_bar.webtoon_toggle.setVisible(visible)
 
+    def _set_series_tools_visible(self, visible: bool) -> None:
+        if hasattr(self, "insert_button"):
+            self.insert_button.setVisible(False)
+        if hasattr(self, "save_browser"):
+            self.save_browser.setVisible(False)
+        if hasattr(self, "save_all_button"):
+            self.save_all_button.setVisible(False)
+        if hasattr(self, "search_sidebar_button"):
+            self.search_sidebar_button.setVisible(False)
+        if hasattr(self, "save_project_button"):
+            self.save_project_button.setVisible(visible)
+        if hasattr(self, "save_as_project_button"):
+            self.save_as_project_button.setVisible(visible)
+        if hasattr(self, "title_bar"):
+            self.title_bar.set_undo_redo_visible(False)
+            self.title_bar.set_autosave_visible(visible)
+            if hasattr(self.title_bar, "webtoon_toggle"):
+                self.title_bar.webtoon_toggle.setVisible(False)
+        if hasattr(self, "search_panel"):
+            self.search_panel.setVisible(False)
+
     def show_home_screen(self) -> None:
         self._finish_settings_resize_preview()
         self._set_document_tools_visible(False)
+        self._set_series_tools_visible(False)
         self._center_stack.setCurrentWidget(self.startup_home)
+        self._set_nav_checked_state("home")
+        self.set_pipeline_overlay_active(bool(getattr(self, "_batch_active", False)))
 
     def show_home(self) -> None:
-        if self._workspace_initialized:
-            self.show_main_page()
-            return
         self.show_home_screen()
 
     def show_settings_page(self):
         if not self.settings_page:
             self.settings_page = SettingsPage(self)
         self._finish_settings_resize_preview()
+        self._set_series_tools_visible(False)
         self._center_stack.setCurrentWidget(self.settings_page)
+        self._set_nav_checked_state("settings")
+        self.set_pipeline_overlay_active(False)
 
     def show_main_page(self):
         self._finish_settings_resize_preview()
         if self.settings_page:
             self._workspace_initialized = True
+            self._set_series_tools_visible(False)
             self._set_document_tools_visible(True)
             self._center_stack.setCurrentWidget(self.main_content_widget)
+            self._set_nav_checked_state("main")
+            if getattr(self, "_batch_active", False):
+                self.set_pipeline_overlay_active(True)
+
+    def show_series_page(self):
+        self._finish_settings_resize_preview()
+        self._set_document_tools_visible(False)
+        self._set_series_tools_visible(True)
+        self._center_stack.setCurrentWidget(self.series_workspace)
+        self._set_nav_checked_state("main")
+        self.set_pipeline_overlay_active(False)
+
+    def _set_nav_checked_state(self, target: str) -> None:
+        nav_buttons = (
+            getattr(self, "home_nav_button", None),
+            getattr(self, "settings_nav_button", None),
+        )
+        home_checked = target == "home"
+        settings_checked = target == "settings"
+        button_group = None
+        if hasattr(self, "nav_tool_group") and self.nav_tool_group is not None:
+            button_group = self.nav_tool_group.get_button_group()
+        previous_exclusive = None
+        if button_group is not None:
+            previous_exclusive = button_group.exclusive()
+            button_group.setExclusive(False)
+        for button, checked in zip(nav_buttons, (home_checked, settings_checked)):
+            if button is None:
+                continue
+            try:
+                with QtCore.QSignalBlocker(button):
+                    button.setChecked(bool(checked))
+            except Exception:
+                button.setChecked(bool(checked))
+        if button_group is not None and previous_exclusive is not None:
+            button_group.setExclusive(previous_exclusive)
 
     def resizeEvent(self, event: QtGui.QResizeEvent) -> None:  # type: ignore[override]
         super().resizeEvent(event)
+        self._update_runtime_surface_geometry()
         if sys.platform != "win32":
             return
         if not hasattr(self, "_center_stack") or self._center_stack.currentWidget() is not self.settings_page:
@@ -224,6 +359,71 @@ class ComicTranslateUI(
             if hasattr(self, "settings_page") and self.settings_page is not None:
                 self.settings_page.update()
 
+    def _runtime_surface_area(self) -> QtCore.QRect:
+        if not hasattr(self, "_main_body_widget") or self._main_body_widget is None:
+            return QtCore.QRect()
+        return self._main_body_widget.geometry()
+
+    def _update_runtime_surface_geometry(self) -> None:
+        area = self._runtime_surface_area()
+        if hasattr(self, "pipeline_overlay") and self.pipeline_overlay is not None:
+            self.pipeline_overlay.setGeometry(area)
+        if hasattr(self, "pipeline_status_panel") and self.pipeline_status_panel is not None:
+            self.pipeline_status_panel.set_anchor_rect(area.adjusted(8, 8, -8, -8))
+            if self.pipeline_status_panel.isVisible() and (
+                self.pipeline_status_panel.display_mode() == PipelineStatusPanel.EMBEDDED_MODE
+                or not self.pipeline_status_panel.isMinimized()
+            ):
+                self.pipeline_status_panel.raise_()
+
+    def set_pipeline_overlay_active(self, active: bool) -> None:
+        if not hasattr(self, "pipeline_overlay"):
+            return
+        if active:
+            self.pipeline_overlay.show()
+            self.pipeline_overlay.raise_()
+            if hasattr(self, "pipeline_status_panel"):
+                if self.pipeline_status_panel.isVisible() and (
+                    self.pipeline_status_panel.display_mode() == PipelineStatusPanel.EMBEDDED_MODE
+                    or not self.pipeline_status_panel.isMinimized()
+                ):
+                    self.pipeline_status_panel.raise_()
+        else:
+            self.pipeline_overlay.hide()
+
+    def route_passive_message(
+        self,
+        level: str,
+        text: str,
+        *,
+        duration: int | None = None,
+        closable: bool = True,
+        source: str = "generic",
+    ):
+        if not hasattr(self, "pipeline_status_panel") or self.pipeline_status_panel is None:
+            return None
+        current_widget = self._center_stack.currentWidget() if hasattr(self, "_center_stack") else None
+        if current_widget is self.startup_home and not self.pipeline_status_panel.isVisible():
+            return None
+        self.pipeline_status_panel.show_passive_message(
+            level,
+            text,
+            duration=duration,
+            closable=closable,
+            source=source,
+        )
+        self.pipeline_status_panel.raise_()
+        return self.pipeline_status_panel
+
+    def set_download_status(self, text: str | None) -> None:
+        if not hasattr(self, "pipeline_status_panel") or self.pipeline_status_panel is None:
+            return
+        if text:
+            self.pipeline_status_panel.show_download_message(text)
+            self.pipeline_status_panel.raise_()
+        else:
+            self.pipeline_status_panel.clear_download_message()
+
 
     def changeEvent(self, event: QtCore.QEvent) -> None:  # type: ignore[override]
         super().changeEvent(event)
@@ -238,12 +438,109 @@ class ComicTranslateUI(
 
     if sys.platform == "win32":
 
+        def showEvent(self, event: QtGui.QShowEvent) -> None:  # type: ignore[override]
+            super().showEvent(event)
+            if not self._win_snap_style_applied:
+                self._apply_windows_snap_window_style()
+
         def paintEvent(self, event: QtGui.QPaintEvent) -> None:  # type: ignore[override]
             p = QtGui.QPainter(self)
             p.setCompositionMode(QtGui.QPainter.CompositionMode.CompositionMode_Source)
             p.fillRect(self.rect(), self.palette().window())
             p.end()
             super().paintEvent(event)
+
+        def nativeEvent(self, event_type: bytes, message: int):  # type: ignore[override]
+            if isinstance(event_type, str):
+                native_event_type = event_type.encode("ascii", errors="ignore")
+            else:
+                native_event_type = bytes(event_type)
+            if native_event_type in (b"windows_generic_MSG", b"windows_dispatcher_MSG"):
+                msg_ptr = int(message)
+                if not msg_ptr:
+                    return super().nativeEvent(event_type, message)
+                msg = ctypes.cast(msg_ptr, ctypes.POINTER(_WinMSG)).contents
+                if msg.message == WM_NCHITTEST:
+                    x = ctypes.c_short(msg.lParam & 0xFFFF).value
+                    y = ctypes.c_short((msg.lParam >> 16) & 0xFFFF).value
+                    hit = self._windows_hit_test(QtCore.QPoint(x, y))
+                    if hit is not None:
+                        return True, int(hit)
+            return super().nativeEvent(event_type, message)
+
+        def _apply_windows_snap_window_style(self) -> None:
+            hwnd = int(self.winId())
+            if hwnd == 0:
+                return
+            user32 = ctypes.windll.user32
+            get_long_ptr = user32.GetWindowLongPtrW
+            set_long_ptr = user32.SetWindowLongPtrW
+            long_ptr_t = ctypes.c_longlong if ctypes.sizeof(ctypes.c_void_p) == 8 else ctypes.c_long
+            get_long_ptr.argtypes = [wintypes.HWND, ctypes.c_int]
+            get_long_ptr.restype = long_ptr_t
+            set_long_ptr.argtypes = [wintypes.HWND, ctypes.c_int, long_ptr_t]
+            set_long_ptr.restype = long_ptr_t
+            user32.SetWindowPos.argtypes = [
+                wintypes.HWND,
+                wintypes.HWND,
+                ctypes.c_int,
+                ctypes.c_int,
+                ctypes.c_int,
+                ctypes.c_int,
+                ctypes.c_uint,
+            ]
+            user32.SetWindowPos.restype = wintypes.BOOL
+
+            style = int(get_long_ptr(hwnd, GWL_STYLE))
+            snap_style_mask = WS_MINIMIZEBOX | WS_MAXIMIZEBOX | WS_THICKFRAME | WS_SYSMENU
+            if (style & snap_style_mask) != snap_style_mask:
+                set_long_ptr(hwnd, GWL_STYLE, long_ptr_t(style | snap_style_mask))
+                user32.SetWindowPos(
+                    hwnd,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED,
+                )
+            self._win_snap_style_applied = True
+
+        def _windows_hit_test(self, global_pos: QtCore.QPoint) -> int | None:
+            local_pos = self.mapFromGlobal(global_pos)
+            rect = self.rect()
+            if not rect.contains(local_pos):
+                return None
+
+            if not (self.isMaximized() or self.isFullScreen()):
+                near_left = local_pos.x() < RESIZE_MARGIN
+                near_right = local_pos.x() >= rect.width() - RESIZE_MARGIN
+                near_top = local_pos.y() < RESIZE_MARGIN
+                near_bottom = local_pos.y() >= rect.height() - RESIZE_MARGIN
+
+                if near_top and near_left:
+                    return HTTOPLEFT
+                if near_top and near_right:
+                    return HTTOPRIGHT
+                if near_bottom and near_left:
+                    return HTBOTTOMLEFT
+                if near_bottom and near_right:
+                    return HTBOTTOMRIGHT
+                if near_left:
+                    return HTLEFT
+                if near_right:
+                    return HTRIGHT
+                if near_top:
+                    return HTTOP
+                if near_bottom:
+                    return HTBOTTOM
+
+            if hasattr(self, "title_bar") and self.title_bar.isVisible():
+                title_pos = self.title_bar.mapFromGlobal(global_pos)
+                if self.title_bar.is_caption_draggable(title_pos):
+                    return HTCAPTION
+
+            return HTCLIENT
 
     def _apply_title_bar_style(self, theme: str) -> None:
         if not hasattr(self, "title_bar"):

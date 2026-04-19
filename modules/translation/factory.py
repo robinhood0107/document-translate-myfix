@@ -9,7 +9,8 @@ from .llm.gpt import GPTTranslation
 from .llm.claude import ClaudeTranslation
 from .llm.gemini import GeminiTranslation
 from .llm.deepseek import DeepseekTranslation
-from .llm.custom import CustomTranslation
+from .llm.custom_service import CustomServiceTranslation
+from .llm.custom_local_gemma import CustomLocalGemmaTranslation
 
 
 class TranslationFactory:
@@ -25,12 +26,16 @@ class TranslationFactory:
     }
     
     # Map LLM identifiers to their engine classes
-    LLM_ENGINE_IDENTIFIERS = {
-        "GPT": GPTTranslation,
-        "Claude": ClaudeTranslation,
-        "Gemini": GeminiTranslation,
-        "Deepseek": DeepseekTranslation,
-        "Custom": CustomTranslation
+    LLM_ENGINES = {
+        "GPT-4.1": GPTTranslation,
+        "GPT-4.1-mini": GPTTranslation,
+        "Claude-4.6-Sonnet": ClaudeTranslation,
+        "Claude-4.5-Haiku": ClaudeTranslation,
+        "Gemini-2.5-Pro": GeminiTranslation,
+        "Gemini-3.0-Flash": GeminiTranslation,
+        "Deepseek-v3": DeepseekTranslation,
+        "Custom Service": CustomServiceTranslation,
+        "Custom Local Server(Gemma)": CustomLocalGemmaTranslation,
     }
     
     DEFAULT_LLM_ENGINE = GPTTranslation
@@ -79,11 +84,9 @@ class TranslationFactory:
         if translator_key in cls.TRADITIONAL_ENGINES:
             return cls.TRADITIONAL_ENGINES[translator_key]
         
-        # Otherwise look for matching LLM engine (substring match)
-        for identifier, engine_class in cls.LLM_ENGINE_IDENTIFIERS.items():
-            if identifier in translator_key:
-                return engine_class
-        
+        if translator_key in cls.LLM_ENGINES:
+            return cls.LLM_ENGINES[translator_key]
+
         # Default to LLM engine if no match found
         return cls.DEFAULT_LLM_ENGINE
     
@@ -115,10 +118,11 @@ class TranslationFactory:
             extras["credentials"] = creds
 
         # If it's an LLM, also grab the llm settings
-        is_llm = any(identifier in translator_key
-                     for identifier in cls.LLM_ENGINE_IDENTIFIERS)
+        is_llm = translator_key in cls.LLM_ENGINES
         if is_llm:
             extras["llm"] = settings.get_llm_settings()
+        if translator_key == "Custom Local Server(Gemma)":
+            extras["gemma_local_server"] = settings.get_gemma_local_server_settings()
 
         if not extras:
             return base

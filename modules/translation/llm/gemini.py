@@ -1,9 +1,13 @@
 from typing import Any
+import logging
 import numpy as np
 import requests
+import time
 
 from .base import BaseLLMTranslation
 from ...utils.translator_utils import MODEL_MAP
+
+logger = logging.getLogger(__name__)
 
 
 class GeminiTranslation(BaseLLMTranslation):
@@ -33,6 +37,78 @@ class GeminiTranslation(BaseLLMTranslation):
         
         # Map friendly model name to API model name
         self.model_api_name = MODEL_MAP.get(self.model_name)
+
+    def _get_retry_delay(self, response: requests.Response | None, attempt: int) -> float:
+        """Prefer server-provided retry hints, otherwise use exponential backoff."""
+        if response is not None:
+            retry_after = response.headers.get("Retry-After")
+            if retry_after:
+                try:
+                    return max(float(retry_after), 0.0)
+                except ValueError:
+                    pass
+
+            try:
+                error = response.json().get("error", {})
+                for detail in error.get("details", []):
+                    retry_delay = detail.get("retryDelay")
+                    if isinstance(retry_delay, str) and retry_delay.endswith("s"):
+                        return max(float(retry_delay[:-1]), 0.0)
+            except Exception:
+                pass
+
+        return min(2 ** (attempt - 1), 8)
+
+    def _should_retry_status(self, status_code: int) -> bool:
+        return status_code in {408, 425, 429, 500, 502, 503, 504}
+
+    def _post_with_retries(self, url: str, headers: dict[str, str], payload: dict[str, Any]) -> requests.Response:
+        """Retry transient Gemini failures instead of skipping the page immediately."""
+        max_attempts = 4
+        read_timeout = max(self.timeout, 90)
+
+        for attempt in range(1, max_attempts + 1):
+            response = None
+            try:
+                response = requests.post(
+                    url,
+                    headers=headers,
+                    json=payload,
+                    timeout=(10, read_timeout),
+                )
+            except (requests.exceptions.Timeout, requests.exceptions.ConnectionError) as exc:
+                if attempt >= max_attempts:
+                    raise
+
+                delay = self._get_retry_delay(None, attempt)
+                logger.warning(
+                    "Gemini request failed with %s. Retrying in %.1fs (%d/%d)",
+                    type(exc).__name__,
+                    delay,
+                    attempt,
+                    max_attempts,
+                )
+                time.sleep(delay)
+                continue
+
+            if response.status_code == 200:
+                return response
+
+            if self._should_retry_status(response.status_code) and attempt < max_attempts:
+                delay = self._get_retry_delay(response, attempt)
+                logger.warning(
+                    "Gemini request returned %s. Retrying in %.1fs (%d/%d)",
+                    response.status_code,
+                    delay,
+                    attempt,
+                    max_attempts,
+                )
+                time.sleep(delay)
+                continue
+
+            return response
+
+        raise RuntimeError("Gemini retry loop exited unexpectedly")
     
     def _perform_translation(self, user_prompt: str, system_prompt: str, image: np.ndarray) -> str:
         """
@@ -107,12 +183,7 @@ class GeminiTranslation(BaseLLMTranslation):
             "Content-Type": "application/json"
         }
         
-        response = requests.post(
-            url, 
-            headers=headers, 
-            json=payload,
-            timeout=self.timeout
-        )
+        response = self._post_with_retries(url, headers, payload)
         
         # Handle response
         if response.status_code != 200:

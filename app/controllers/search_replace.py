@@ -514,6 +514,12 @@ class SearchReplaceController(QtCore.QObject):
     def search(self, jump_to_first: bool = True):
         panel = self.main.search_panel
         opts = self._gather_options()
+        if not (opts.query or "").strip():
+            panel.set_results([], 0, 0)
+            panel.set_status(QtCore.QCoreApplication.translate("SearchReplaceController", "Ready"))
+            self._matches = []
+            self._active_match_index = -1
+            return
         focus_state = self._capture_focus_state()
         prev_match = None
         if 0 <= self._active_match_index < len(self._matches):
@@ -754,6 +760,7 @@ class SearchReplaceController(QtCore.QObject):
             self.main.t_text_edit.setPlainText(getattr(blk, "translation", "") or "")
             self.main.s_text_edit.blockSignals(False)
             self.main.t_text_edit.blockSignals(False)
+            self.main.text_ctrl.update_ocr_warning(blk)
         except Exception:
             pass
 
@@ -935,13 +942,13 @@ class SearchReplaceController(QtCore.QObject):
         viewer_state = state.get("viewer_state") or {}
         text_items_state = viewer_state.get("text_items_state") or []
         for ti in text_items_state:
-            pos = ti.get("position") or (None, None)
+            anchor = ti.get("block_anchor") or ti.get("source_rect") or ti.get("position") or (None, None)
             rot = float(ti.get("rotation") or 0.0)
-            if pos[0] is None:
+            if anchor[0] is None:
                 continue
             if (
-                is_close(float(pos[0]), float(key.xyxy[0]), 5)
-                and is_close(float(pos[1]), float(key.xyxy[1]), 5)
+                is_close(float(anchor[0]), float(key.xyxy[0]), 5)
+                and is_close(float(anchor[1]), float(key.xyxy[1]), 5)
                 and is_close(rot, key.angle, 1.0)
             ):
                 return ti
@@ -996,8 +1003,16 @@ class SearchReplaceController(QtCore.QObject):
             # If there's a rendered TextBlockItem corresponding to this block, keep it in sync.
             try:
                 for text_item in self.main.image_viewer.text_items:
-                    x = float(text_item.pos().x())
-                    y = float(text_item.pos().y())
+                    anchor = (
+                        getattr(text_item, "block_anchor", None)
+                        or getattr(text_item, "source_rect", None)
+                    )
+                    if anchor is not None:
+                        x = float(anchor[0])
+                        y = float(anchor[1])
+                    else:
+                        x = float(text_item.pos().x())
+                        y = float(text_item.pos().y())
                     rot = float(text_item.rotation())
                     if is_close(x, key.xyxy[0], 5) and is_close(y, key.xyxy[1], 5) and is_close(rot, key.angle, 1.0):
                         if html_override is not None:

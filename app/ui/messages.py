@@ -5,40 +5,70 @@ from PySide6 import QtWidgets
 class Messages:
 
     @staticmethod
-    def show_translation_complete(parent):
+    def _show_passive(parent, level: str, text: str, *, duration=None, closable=True, source: str = "generic"):
+        router = getattr(parent, "route_passive_message", None)
+        if callable(router):
+            handled = router(
+                level,
+                text,
+                duration=duration,
+                closable=closable,
+                source=source,
+            )
+            if handled is not None:
+                return handled
+        fallback = {
+            "info": MMessage.info,
+            "success": MMessage.success,
+            "warning": MMessage.warning,
+            "error": MMessage.error,
+        }.get(level, MMessage.info)
+        return fallback(
+            text=text,
+            parent=parent,
+            duration=duration,
+            closable=closable,
+        )
 
-        MMessage.success(
-            text=QCoreApplication.translate(
-                "Messages", 
+    @staticmethod
+    def show_info(parent, text: str, *, duration=None, closable=True, source: str = "generic"):
+        return Messages._show_passive(parent, "info", text, duration=duration, closable=closable, source=source)
+
+    @staticmethod
+    def show_success(parent, text: str, *, duration=None, closable=True, source: str = "generic"):
+        return Messages._show_passive(parent, "success", text, duration=duration, closable=closable, source=source)
+
+    @staticmethod
+    def show_warning(parent, text: str, *, duration=None, closable=True, source: str = "generic"):
+        return Messages._show_passive(parent, "warning", text, duration=duration, closable=closable, source=source)
+
+    @staticmethod
+    def show_error(parent, text: str, *, duration=None, closable=True, source: str = "generic"):
+        return Messages._show_passive(parent, "error", text, duration=duration, closable=closable, source=source)
+
+    @staticmethod
+    def show_translation_complete(parent):
+        return Messages.show_success(
+            parent,
+            QCoreApplication.translate(
+                "Messages",
                 "Comic has been Translated!"
             ),
-            parent=parent,
             duration=None,
-            closable=True
+            closable=True,
+            source="batch",
         )
 
     @staticmethod
     def select_font_error(parent):
-        MMessage.error(
-            text=QCoreApplication.translate(
+        return Messages.show_error(
+            parent,
+            QCoreApplication.translate(
                 "Messages", 
                 "No Font selected.\nGo to Settings > Text Rendering > Font to select or import one "
             ),
-            parent=parent,
             duration=None,
-            closable=True
-        )
-
-    @staticmethod
-    def show_not_logged_in_error(parent):
-        MMessage.error(
-            text=QCoreApplication.translate(
-                "Messages",
-                "Sign-in is only required for hosted credits.\nConfigure local or provider API credentials in Settings > Credentials to continue."
-            ),
-            parent=parent,
-            duration=None,
-            closable=True
+            closable=True,
         )
 
     @staticmethod
@@ -51,78 +81,94 @@ class Messages:
             if fields_text
             else QCoreApplication.translate("Messages", "Please fill in the required credential fields.")
         )
-        MMessage.error(
-            text=QCoreApplication.translate(
+        return Messages.show_error(
+            parent,
+            QCoreApplication.translate(
                 "Messages",
                 "Missing credentials for {provider}.\nConfigure them in Settings > Credentials.\n{details}"
             ).format(provider=provider_name, details=details),
-            parent=parent,
             duration=None,
-            closable=True
+            closable=True,
+        )
+
+    @staticmethod
+    def show_missing_local_service_config_error(
+        parent,
+        service_name: str,
+        fields_text: str = "",
+        settings_page_name: str | None = None,
+    ):
+        details = (
+            QCoreApplication.translate(
+                "Messages",
+                "Required fields: {fields}"
+            ).format(fields=fields_text)
+            if fields_text
+            else QCoreApplication.translate("Messages", "Please fill in the required settings fields.")
+        )
+        page_name = settings_page_name or QCoreApplication.translate("Messages", "PaddleOCR VL Settings")
+        return Messages.show_error(
+            parent,
+            QCoreApplication.translate(
+                "Messages",
+                "Missing settings for {service}.\nConfigure them in Settings > {settings_page}.\n{details}"
+            ).format(
+                service=service_name,
+                settings_page=page_name,
+                details=details,
+            ),
+            duration=None,
+            closable=True,
         )
 
     @staticmethod
     def show_translator_language_not_supported(parent):
-        MMessage.error(
-            text=QCoreApplication.translate(
+        return Messages.show_error(
+            parent,
+            QCoreApplication.translate(
                 "Messages",
                 "The translator does not support the selected target language. Please choose a different language or tool."
             ),
-            parent=parent,
             duration=None,
-            closable=True
+            closable=True,
         )
 
     @staticmethod
     def show_missing_tool_error(parent, tool_name):
-        MMessage.error(
-            text=QCoreApplication.translate(
+        return Messages.show_error(
+            parent,
+            QCoreApplication.translate(
                 "Messages",
                 "No {} selected. Please select a {} in Settings > Tools."
             ).format(tool_name, tool_name),
-            parent=parent,
             duration=None,
-            closable=True
+            closable=True,
         )
 
     @staticmethod
-    def show_insufficient_credits_error(parent, details: str = None):
-        """
-        Show an error message when the user has insufficient credits.
-        
-        Args:
-            parent: parent widget
-            details: optional detailed message from backend
-        """
-        msg = QtWidgets.QMessageBox(parent)
-        msg.setIcon(QtWidgets.QMessageBox.Warning)
-        msg.setWindowTitle(QCoreApplication.translate("Messages", "Insufficient Credits"))
-        msg.setText(QCoreApplication.translate(
-            "Messages", 
-            "Insufficient credits to perform this action.\nGo to Settings > Account to buy more credits."
-        ))
-        
-        if details:
-            msg.setDetailedText(details)
-            
-        ok_btn = msg.addButton(QCoreApplication.translate("Messages", "OK"), QtWidgets.QMessageBox.ButtonRole.AcceptRole)
-        msg.setDefaultButton(ok_btn)
-        msg.exec()
-
-    @staticmethod
-    def show_custom_not_configured_error(parent):
-        """
-        Show an error message when Custom is selected without proper configuration.
-        """
-        MMessage.error(
-            text=QCoreApplication.translate(
+    def show_custom_service_not_configured_error(parent):
+        return Messages.show_error(
+            parent,
+            QCoreApplication.translate(
                 "Messages",
-                "Custom requires an OpenAI-compatible API configuration.\n"
+                "Custom Service requires an OpenAI-compatible API configuration.\n"
                 "Please set API Key, Endpoint URL, and Model in Settings > Credentials."
             ),
-            parent=parent,
             duration=None,
-            closable=True
+            closable=True,
+        )
+
+    @staticmethod
+    def show_custom_local_gemma_not_configured_error(parent):
+        return Messages.show_error(
+            parent,
+            QCoreApplication.translate(
+                "Messages",
+                "Custom Local Server(Gemma) requires your local Gemma endpoint and model.\n"
+                "Please set Endpoint URL and Model in Settings > Credentials."
+            ),
+            duration=None,
+            closable=True,
         )
 
     @staticmethod
@@ -202,11 +248,12 @@ class Messages:
             context: optional context ('translation', 'ocr', or None for generic)
         """
         text = Messages.get_server_error_text(status_code, context)
-        MMessage.error(
-            text=text,
-            parent=parent,
+        return Messages.show_error(
+            parent,
+            text,
             duration=None,
-            closable=True
+            closable=True,
+            source="local_service",
         )
 
     @staticmethod
@@ -214,15 +261,118 @@ class Messages:
         """
         Show a user-friendly error for network/connectivity issues.
         """
-        MMessage.error(
-            text=QCoreApplication.translate(
+        return Messages.show_error(
+            parent,
+            QCoreApplication.translate(
                 "Messages", 
                 "Unable to connect to the server.\nPlease check your internet connection."
             ),
-            parent=parent,
             duration=None,
-            closable=True
+            closable=True,
+            source="network",
         )
+
+    @staticmethod
+    def show_local_service_error(
+        parent,
+        details: str = None,
+        *,
+        service_name: str = "PaddleOCR VL",
+        settings_page_name: str | None = None,
+        error_kind: str = "connection",
+    ):
+        """
+        Show a user-friendly error when a required local OCR service is unavailable.
+        """
+        page_name = settings_page_name or QCoreApplication.translate("Messages", "PaddleOCR VL Settings")
+        if error_kind == "response":
+            text = QCoreApplication.translate(
+                "Messages",
+                "The local {service} service returned an invalid response.\nCheck Settings > {settings_page} and review the local service logs."
+            ).format(service=service_name, settings_page=page_name)
+        elif error_kind == "setup":
+            text = QCoreApplication.translate(
+                "Messages",
+                "Unable to prepare the local {service} runtime.\nCheck Settings > {settings_page} and make sure Docker is available."
+            ).format(service=service_name, settings_page=page_name)
+        else:
+            text = QCoreApplication.translate(
+                "Messages",
+                "Unable to reach the local {service} service.\nCheck Settings > {settings_page} and make sure the local service is running."
+            ).format(service=service_name, settings_page=page_name)
+
+        if details and details.strip() != text.strip():
+            text = f"{text}\n{details}"
+        return Messages.show_error(
+            parent,
+            text,
+            duration=None,
+            closable=True,
+            source="local_service",
+        )
+
+    @staticmethod
+    def confirm_automatic_run(
+        parent,
+        *,
+        run_label: str,
+        page_count: int,
+        source_lang: str,
+        target_lang: str,
+        ocr_mode_label: str,
+        resolved_ocr_label: str | None = None,
+    ) -> bool:
+        msg = QtWidgets.QMessageBox(parent)
+        msg.setIcon(QtWidgets.QMessageBox.Question)
+        msg.setWindowTitle(
+            QCoreApplication.translate("Messages", "Confirm Automatic Processing")
+        )
+
+        lines = [
+            QCoreApplication.translate(
+                "Messages",
+                "Review the automatic processing settings before starting.",
+            ),
+            "",
+            QCoreApplication.translate("Messages", "Run: {run_label}").format(
+                run_label=run_label
+            ),
+            QCoreApplication.translate("Messages", "Pages: {page_count}").format(
+                page_count=page_count
+            ),
+            QCoreApplication.translate("Messages", "Source Language: {source_lang}").format(
+                source_lang=source_lang
+            ),
+            QCoreApplication.translate("Messages", "Target Language: {target_lang}").format(
+                target_lang=target_lang
+            ),
+            QCoreApplication.translate("Messages", "Text Recognition Mode: {ocr_mode}").format(
+                ocr_mode=ocr_mode_label
+            ),
+        ]
+        if resolved_ocr_label:
+            lines.append(
+                QCoreApplication.translate(
+                    "Messages",
+                    "Resolved Text Recognition: {ocr_engine}",
+                ).format(ocr_engine=resolved_ocr_label)
+            )
+        msg.setText("\n".join(lines))
+        try:
+            msg.setTextInteractionFlags(Qt.TextSelectableByMouse | Qt.TextSelectableByKeyboard)
+        except Exception:
+            pass
+        start_btn = msg.addButton(
+            QCoreApplication.translate("Messages", "Start"),
+            QtWidgets.QMessageBox.ButtonRole.AcceptRole,
+        )
+        msg.addButton(
+            QCoreApplication.translate("Messages", "Cancel"),
+            QtWidgets.QMessageBox.ButtonRole.RejectRole,
+        )
+        msg.setDefaultButton(start_btn)
+        msg.exec()
+        return msg.clickedButton() == start_btn
 
     @staticmethod
     def get_content_flagged_text(details: str = None, context: str = "Operation") -> str:
@@ -253,11 +403,12 @@ class Messages:
         Show a friendly error when content is blocked by safety filters.
         """
         msg_text = Messages.get_content_flagged_text(details=details, context=context)
-        return MMessage.error(
-            text=msg_text,
-            parent=parent,
+        return Messages.show_error(
+            parent,
+            msg_text,
             duration=duration,
-            closable=closable
+            closable=closable,
+            source="content_filter",
         )
 
     @staticmethod
@@ -269,10 +420,10 @@ class Messages:
             "Messages",
             "{0} image(s) were skipped in this batch.\nOpen Batch Report to see all skipped images and reasons."
         ).format(skipped_count)
-        return MMessage.warning(
-            text=text,
-            parent=parent,
+        return Messages.show_warning(
+            parent,
+            text,
             duration=None,
-            closable=True
+            closable=True,
+            source="batch",
         )
-

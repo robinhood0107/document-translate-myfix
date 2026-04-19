@@ -10,7 +10,7 @@ from typing import TYPE_CHECKING
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import imkit as imk
 
-from modules.utils.archives import close_pdf_cache
+from modules.utils.archives import close_comic_cache, close_pdf_cache
 from .parsers import ProjectEncoder, ProjectDecoder, ensure_string_keys
 from .project_state_v2 import (
     close_cached_connection as close_state_v2_cached_connection,
@@ -19,6 +19,8 @@ from .project_state_v2 import (
     load_state_from_proj_file_v2,
     save_state_to_proj_file_v2,
 )
+from modules.utils.export_paths import normalize_export_source_record
+from modules.utils.inpaint_strokes import PATCH_KIND_INPAINT, normalize_patch_kind
 
 if TYPE_CHECKING:
     from controller import ComicTranslate
@@ -48,6 +50,7 @@ def close_state_store(file_name: str | None = None) -> None:
     close_state_v2_cached_connection(file_name)
     # Release cached pdfplumber objects to free memory.
     close_pdf_cache()
+    close_comic_cache()
 
 
 def ensure_project_blob_materialized(path: str) -> bool:
@@ -186,6 +189,13 @@ def load_state_from_proj_file(comic_translate: ComicTranslate, file_name: str):
     comic_translate.image_files = [
         original_to_temp.get(file, file) for file in original_image_files
     ]
+    saved_export_sources = state.get('page_export_sources', {}) or {}
+    comic_translate.export_source_by_path = {
+        original_to_temp.get(page_path, page_path): normalized
+        for page_path, source in saved_export_sources.items()
+        for normalized in [normalize_export_source_record(source)]
+        if normalized is not None
+    }
 
     image_states = state.get('image_states', {})
     comic_translate.image_states = {
@@ -202,15 +212,22 @@ def load_state_from_proj_file(comic_translate: ComicTranslate, file_name: str):
         original_to_temp.get(i, i) for i in displayed_images
     )
     
-    loaded_images = state.get('loaded_images', [])
-    comic_translate.loaded_images = [
-        original_to_temp.get(file, file) for file in loaded_images
-    ]
-
     comic_translate.image_data = {
         original_to_temp.get(file, file): img 
         for file, img in image_data.items()
     }
+
+    restored_loaded_images = [
+        original_to_temp.get(file, file) for file in state.get('loaded_images', [])
+    ]
+    materialized_image_paths = {
+        path for path, img in comic_translate.image_data.items() if img is not None
+    }
+    comic_translate.loaded_images = [
+        path
+        for path in restored_loaded_images
+        if path in comic_translate.image_files and path in materialized_image_paths
+    ]
 
     comic_translate.in_memory_history = {
         original_to_temp.get(file, file): imgs 
@@ -231,9 +248,13 @@ def load_state_from_proj_file(comic_translate: ComicTranslate, file_name: str):
             for p in patch_list:
                 abs_png = _join_from_archive_relpath(unique_patches_dir, p.get('png_path', ''))
                 if os.path.isfile(abs_png):  
-                    new_list.append({'bbox': p['bbox'],
-                                    'png_path': abs_png,
-                                    'hash': p['hash']})
+                    new_list.append({
+                        'bbox': p['bbox'],
+                        'png_path': abs_png,
+                        'hash': p['hash'],
+                        'kind': normalize_patch_kind(p.get('kind', PATCH_KIND_INPAINT)),
+                        'order': int(p.get('order', len(new_list) + 1) or (len(new_list) + 1)),
+                    })
             if new_list:
                 reconstructed[page_path] = new_list
 
@@ -245,4 +266,3 @@ def load_state_from_proj_file(comic_translate: ComicTranslate, file_name: str):
     # restore LLM extra context
     saved_ctx = state.get('llm_extra_context', '')
     return saved_ctx
-

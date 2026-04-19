@@ -7,7 +7,9 @@ from pipeline.ocr_handler import OCRHandler
 from pipeline.translation_handler import TranslationHandler
 from pipeline.segmentation_handler import SegmentationHandler
 from pipeline.batch_processor import BatchProcessor
+from pipeline.stage_batched_processor import StageBatchedProcessor
 from pipeline.webtoon_batch import WebtoonBatchProcessor
+from modules.ocr.selection import STAGE_BATCHED_WORKFLOW_MODE
 
 logger = logging.getLogger(__name__)
 
@@ -33,6 +35,13 @@ class ComicTranslatePipeline:
             self.block_detection, 
             self.inpainting, 
             self.ocr_handler
+        )
+        self.stage_batched_processor = StageBatchedProcessor(
+            main_page,
+            self.cache_manager,
+            self.block_detection,
+            self.inpainting,
+            self.ocr_handler,
         )
         
         # Pass shared handlers to the WebtoonBatchProcessor
@@ -145,6 +154,9 @@ class ComicTranslatePipeline:
     # Batch processing methods
     def batch_process(self, selected_paths=None):
         """Regular batch processing."""
+        workflow_mode = self.main_page.settings_page.get_workflow_mode()
+        if workflow_mode == STAGE_BATCHED_WORKFLOW_MODE:
+            return self.stage_batched_processor.batch_process(selected_paths)
         return self.batch_processor.batch_process(selected_paths)
     
     def webtoon_batch_process(self, selected_paths=None):
