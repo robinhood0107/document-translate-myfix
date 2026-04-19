@@ -4,6 +4,7 @@ import tempfile
 import threading
 
 from .archives import (
+    close_comic_cache,
     list_archive_image_entries,
     materialize_archive_entry,
     materialize_archive_entries,
@@ -24,6 +25,17 @@ def _clear_lazy_sources_under_dir(base_dir: str) -> None:
         stale_paths = [p for p in _LAZY_SOURCE_BY_PATH if p.startswith(base)]
         for p in stale_paths:
             _LAZY_SOURCE_BY_PATH.pop(p, None)
+
+
+def get_prepared_path_source(path: str) -> dict | None:
+    if not path:
+        return None
+    abs_path = os.path.abspath(path)
+    with _LAZY_SOURCE_LOCK:
+        source = _LAZY_SOURCE_BY_PATH.get(abs_path)
+    if not isinstance(source, dict):
+        return None
+    return dict(source)
 
 
 def ensure_prepared_path_materialized(path: str) -> bool:
@@ -59,6 +71,7 @@ class FileHandler:
         if not extend:
             for archive in self.archive_info:
                 temp_dir = archive['temp_dir']
+                close_comic_cache(archive.get('archive_path'))
                 _clear_lazy_sources_under_dir(temp_dir)
                 if os.path.exists(temp_dir):
                     shutil.rmtree(temp_dir)

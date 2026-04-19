@@ -46,7 +46,10 @@ class NavRailMixin:
         self.comic_browser_button.set_dayu_filters([".cbz", ".cbr", ".cb7", ".cbt"])
 
         self.project_browser_button = MClickBrowserFileToolButton(multiple=False)
-        self.project_browser_button.set_dayu_filters([".ctpr"])
+        self.project_browser_button.set_dayu_filters([PROJECT_FILE_EXT, SERIES_PROJECT_FILE_EXT])
+
+        self.psd_browser_button = MClickBrowserFileToolButton(multiple=True)
+        self.psd_browser_button.set_dayu_filters([".psd"])
 
         self.tool_menu = MMenu(parent=self)
 
@@ -66,6 +69,9 @@ class NavRailMixin:
 
         project_action = self.tool_menu.addAction(MIcon("ct-file-icon.svg"), self.tr("Project File"))
         project_action.triggered.connect(self.project_browser_button.clicked)
+
+        psd_action = self.tool_menu.addAction(MIcon("psd-file.svg"), self.tr("PSD"))
+        psd_action.triggered.connect(self.psd_browser_button.clicked)
 
         self.save_browser = MClickSaveFileToolButton()
         save_file_types = [("Images", ["png", "jpg", "jpeg", "webp", "bmp"])]
@@ -116,10 +122,21 @@ class NavRailMixin:
         )
         export_document_action.triggered.connect(lambda: self._export_all_as("pdf"))
 
+        export_psd_action = self.export_menu.addAction(
+            MIcon("psd-file.svg"),
+            self.tr("PSD"),
+        )
+        export_psd_action.triggered.connect(self._on_export_psd_requested)
+
 
         nav_tool_group = MToolButtonGroup(orientation=QtCore.Qt.Vertical, exclusive=True)
         nav_tools = [
             {"svg": "home_line.svg", "checkable": True, "tooltip": self.tr("Home"), "clicked": self.show_home},
+            {
+                "svg": "tabler--history.svg",
+                "checkable": False,
+                "tooltip": self.tr("Open Latest Recent Project"),
+            },
             {
                 "svg": "settings.svg",
                 "checkable": True,
@@ -128,7 +145,12 @@ class NavRailMixin:
             },
         ]
         nav_tool_group.set_button_list(nav_tools)
-        nav_tool_group.get_button_group().buttons()[0].setChecked(True)
+        self.nav_tool_group = nav_tool_group
+        button_group = nav_tool_group.get_button_group()
+        self.home_nav_button = button_group.button(0)
+        self.recent_project_button = button_group.button(1)
+        self.settings_nav_button = button_group.button(2)
+        self.home_nav_button.setChecked(True)
 
         self.search_sidebar_button = MToolButton()
         self.search_sidebar_button.set_dayu_svg("search_line.svg")
@@ -216,36 +238,16 @@ class NavRailMixin:
                 btn.setChecked(False)
         self._set_search_sidebar_visible(False)
 
-    def _confirm_start_new_project(self) -> bool:
-        try:
-            if hasattr(self, "text_ctrl"):
-                self.text_ctrl._commit_pending_text_command()
-            if hasattr(self, "has_unsaved_changes"):
-                has_unsaved = bool(self.has_unsaved_changes())
-            else:
-                has_unsaved = (getattr(self, "project_file", None) is None) and bool(getattr(self, "image_files", []))
-        except Exception:
-            has_unsaved = False
-
-        if has_unsaved:
-            msg_box = QtWidgets.QMessageBox(self)
-            msg_box.setIcon(QtWidgets.QMessageBox.Question)
-            msg_box.setWindowTitle(self.tr("Start New Project"))
-            msg_box.setText(self.tr("Your current project has unsaved changes. Start a new project?"))
-            yes_btn = msg_box.addButton(self.tr("Yes"), QtWidgets.QMessageBox.ButtonRole.AcceptRole)
-            no_btn = msg_box.addButton(self.tr("No"), QtWidgets.QMessageBox.ButtonRole.RejectRole)
-            msg_box.setDefaultButton(no_btn)
-            msg_box.exec()
-            return msg_box.clickedButton() == yes_btn
-        return True
-
     def show_tool_menu(self):
-        if not self._confirm_start_new_project():
-            return
         self.tool_menu.exec_(self.tool_browser.mapToGlobal(self.tool_browser.rect().bottomLeft()))
 
     def show_export_menu(self):
         self.export_menu.exec_(self.save_all_button.mapToGlobal(self.save_all_button.rect().bottomLeft()))
+
+    def _on_export_psd_requested(self):
+        project_ctrl = getattr(self, "project_ctrl", None)
+        if project_ctrl is not None:
+            project_ctrl.export_to_psd_dialog()
 
     def _export_all_as(self, extension: str):
         extension = (extension or "").lower().lstrip(".")
@@ -270,3 +272,4 @@ class NavRailMixin:
             button.clicked.connect(clicked)
 
         return button
+from app.projects.project_types import PROJECT_FILE_EXT, SERIES_PROJECT_FILE_EXT

@@ -1,11 +1,14 @@
 from typing import List, Tuple
 import numpy as np
 import copy
+import re
 from PIL import Image, ImageDraw
 from collections import defaultdict, deque
 from ..detection.utils.text_lines import group_items_into_lines
 from modules.detection.utils.geometry import does_rectangle_fit, is_mostly_contained
 from modules.utils.language_utils import is_no_space_lang
+
+_CJK_PATTERN = re.compile(r'[\uac00-\ud7a3\u3040-\u30ff\u4e00-\u9FFF]')
 
 class TextBlock(object):
     """
@@ -15,6 +18,9 @@ class TextBlock(object):
                  text_bbox: np.ndarray = None,
                  bubble_bbox: np.ndarray = None,
                  text_class: str = "",
+                 mask_roi_bbox = None,
+                 ctd_roi_bbox = None,
+                 cleanup_roi_bbox = None,
                  inpaint_bboxes = None,
                  lines: List = None,
                  text_segm_points: np.ndarray = None, 
@@ -22,10 +28,18 @@ class TextBlock(object):
                  text: str = "",
                  texts: List[str] = None,
                  translation: str = "",
+                 rich_text: str = "",
                  line_spacing = 1,
                  alignment: str = '',
                  source_lang: str = "",
                  target_lang: str = "",
+                 ocr_confidence: float = 0.0,
+                 ocr_status: str = "",
+                 ocr_empty_reason: str = "",
+                 ocr_attempt_count: int = 0,
+                 ocr_regions: List[dict] | None = None,
+                 ocr_crop_bbox = None,
+                 ocr_resize_scale: float = 1.0,
                  min_font_size: int = 0,
                  max_font_size: int = 0,
                  font_color: tuple = (),
@@ -35,6 +49,9 @@ class TextBlock(object):
         self.xyxy = text_bbox
         self.segm_pts = text_segm_points
         self.bubble_xyxy = bubble_bbox
+        self.ctd_roi_xyxy = ctd_roi_bbox if ctd_roi_bbox is not None else mask_roi_bbox
+        self.cleanup_roi_xyxy = cleanup_roi_bbox if cleanup_roi_bbox is not None else self.ctd_roi_xyxy
+        self.mask_roi_xyxy = self.ctd_roi_xyxy
         self.text_class = text_class
         self.angle = angle
         self.tr_origin_point = ()
@@ -47,12 +64,20 @@ class TextBlock(object):
         self.texts = texts if texts is not None else []
         self.text = ' '.join(self.texts) if self.texts else text
         self.translation = translation
+        self.rich_text = rich_text
 
         self.line_spacing = line_spacing
         self.alignment = alignment
         
         self.source_lang = source_lang
         self.target_lang = target_lang
+        self.ocr_confidence = ocr_confidence
+        self.ocr_status = ocr_status
+        self.ocr_empty_reason = ocr_empty_reason
+        self.ocr_attempt_count = ocr_attempt_count
+        self.ocr_regions = copy.deepcopy(ocr_regions) if ocr_regions is not None else []
+        self.ocr_crop_bbox = copy.deepcopy(ocr_crop_bbox)
+        self.ocr_resize_scale = float(ocr_resize_scale or 1.0)
 
         self.min_font_size = min_font_size
         self.max_font_size = max_font_size
@@ -83,32 +108,33 @@ class TextBlock(object):
         Returns:
             TextBlock: A new TextBlock instance with copied data
         """
-        # Create a new TextBlock with copied numpy arrays and other data
         new_block = TextBlock()
-        
-        # Copy numpy arrays properly
-        new_block.xyxy = self.xyxy.copy() if isinstance(self.xyxy, np.ndarray) else self.xyxy
-        new_block.segm_pts = self.segm_pts.copy() if isinstance(self.segm_pts, np.ndarray) else self.segm_pts
-        new_block.bubble_xyxy = self.bubble_xyxy.copy() if isinstance(self.bubble_xyxy, np.ndarray) else self.bubble_xyxy
-        new_block.inpaint_bboxes = self.inpaint_bboxes.copy() if isinstance(self.inpaint_bboxes, np.ndarray) else self.inpaint_bboxes
-        
-        # Copy simple attributes
-        new_block.text_class = self.text_class
-        new_block.angle = self.angle
-        new_block.tr_origin_point = copy.deepcopy(self.tr_origin_point)
-        new_block.lines = copy.deepcopy(self.lines)
-        new_block.texts = copy.deepcopy(self.texts)
-        new_block.text = self.text
-        new_block.translation = self.translation
-        new_block.line_spacing = self.line_spacing
-        new_block.alignment = self.alignment
-        new_block.source_lang = self.source_lang
-        new_block.target_lang = self.target_lang
-        new_block.min_font_size = self.min_font_size
-        new_block.max_font_size = self.max_font_size
-        new_block.font_color = self.font_color
-        
+        for attr, value in self.__dict__.items():
+            if isinstance(value, np.ndarray):
+                setattr(new_block, attr, value.copy())
+            else:
+                setattr(new_block, attr, copy.deepcopy(value))
         return new_block
+
+    def get_text(self) -> str:
+        if isinstance(self.text, str):
+            return self.text
+
+        text_list = self.text if isinstance(self.text, list) else self.texts
+        if not isinstance(text_list, list):
+            return str(text_list or "")
+
+        result = ""
+        for index, fragment in enumerate(text_list):
+            current = str(fragment or "")
+            result += current
+            if index + 1 >= len(text_list):
+                continue
+            next_fragment = str(text_list[index + 1] or "")
+            if _CJK_PATTERN.search(current) or _CJK_PATTERN.search(next_fragment):
+                continue
+            result += " "
+        return result
 
 def sort_blk_list(blk_list: List[TextBlock], right_to_left=True) -> List[TextBlock]:
     # Sort blk_list from right to left, top to bottom
@@ -298,4 +324,3 @@ def lists_to_blk_list(blk_list: list[TextBlock], texts_bboxes: list, texts_strin
             blk.text = ' '.join(text for bbox, text in sorted_entries)
 
     return blk_list
-

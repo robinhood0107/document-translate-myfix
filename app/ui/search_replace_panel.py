@@ -308,14 +308,26 @@ class SearchReplacePanel(QtWidgets.QWidget):
         )
 
     def _schedule_live_search(self, *_args):
+        if not (self.find_input.text() or "").strip():
+            self._live_timer.stop()
+            self.set_results([], 0, 0)
+            self.set_status(self.tr("Ready"))
+            return
         if self._live_timer.isActive():
             self._live_timer.stop()
         self._live_timer.start()
 
     def _clear_find(self):
+        self._live_timer.stop()
+        blocker = QtCore.QSignalBlocker(self.find_input)
         self.find_input.clear()
+        del blocker
         self.set_results([], 0, 0)
         self.set_status(self.tr("Ready"))
+
+    def hideEvent(self, event):  # type: ignore[override]
+        self._live_timer.stop()
+        super().hideEvent(event)
 
     def set_status(self, text: str):
         self.status_label.setText(text)

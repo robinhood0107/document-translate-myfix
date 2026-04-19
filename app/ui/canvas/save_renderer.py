@@ -2,6 +2,7 @@ from PySide6 import QtCore, QtGui, QtWidgets
 import imkit as imk
 import numpy as np
 from app.path_materialization import ensure_path_materialized
+from app.ui.commands.base import PatchCommandBase
 from .text_item import TextBlockItem
 from .text.text_item_properties import TextItemProperties
 
@@ -49,6 +50,9 @@ class ImageSaveRenderer:
                 italic=text_props.italic,
                 underline=text_props.underline,
                 direction=text_props.direction,
+                vertical_alignment=text_props.vertical_alignment,
+                source_rect=text_props.source_rect,
+                block_anchor=text_props.block_anchor,
             )
 
             text_item.set_text(text_props.text, text_props.width)
@@ -59,7 +63,10 @@ class ImageSaveRenderer:
             text_item.setPos(QtCore.QPointF(*text_props.position))
             text_item.setRotation(text_props.rotation)
             text_item.setScale(text_props.scale)
+            text_item.set_source_rect(text_props.source_rect)
+            text_item.set_block_anchor(text_props.block_anchor)
             text_item.set_vertical(bool(text_props.vertical))
+            text_item.set_vertical_alignment(text_props.vertical_alignment)
             text_item.selection_outlines = text_props.selection_outlines
             text_item.update()
 
@@ -130,7 +137,26 @@ class ImageSaveRenderer:
                     # Create a new text item state for the spanning portion.
                     # It's a full copy, but its position causes clipping.
                     spanning_text_item = text_item.copy()
+                    old_pos = text_item.get('position', (0, 0))
+                    delta_x = new_pos[0] - old_pos[0]
+                    delta_y = new_pos[1] - old_pos[1]
                     spanning_text_item['position'] = new_pos
+                    if spanning_text_item.get('source_rect') is not None:
+                        x, y, width, height = spanning_text_item['source_rect']
+                        spanning_text_item['source_rect'] = (
+                            x + delta_x,
+                            y + delta_y,
+                            width,
+                            height,
+                        )
+                    if spanning_text_item.get('block_anchor') is not None:
+                        x, y, width, height = spanning_text_item['block_anchor']
+                        spanning_text_item['block_anchor'] = (
+                            x + delta_x,
+                            y + delta_y,
+                            width,
+                            height,
+                        )
                     existing_text_items.append(spanning_text_item)
 
         viewer_state['text_items_state'] = existing_text_items
@@ -191,7 +217,12 @@ class ImageSaveRenderer:
     def apply_patches(self, patches: list[dict]):
         """Apply inpainting patches to the image."""
 
-        for patch in patches:
+        ordered_patches = sorted(
+            patches,
+            key=lambda patch: int(patch.get("order", 0) or 0),
+        )
+
+        for fallback_order, patch in enumerate(ordered_patches, start=1):
             # Extract data from the patch dict
             x, y, w, h = patch['bbox']
             if 'png_path' in patch:
@@ -211,7 +242,8 @@ class ImageSaveRenderer:
             
             # Position the patch relative to its parent (pixmap_item)
             patch_item.setPos(x, y)
-            patch_item.setZValue(self.pixmap_item.zValue() + 0.5)
+            patch_order = int(patch.get("order", fallback_order) or fallback_order)
+            patch_item.setZValue(PatchCommandBase.patch_z_value({"order": patch_order}))
 
 
 

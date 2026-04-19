@@ -9,16 +9,28 @@ from typing import TYPE_CHECKING
 from PySide6 import QtCore, QtGui, QtWidgets
 
 from .dayu_widgets import dayu_theme
+from app.projects.project_types import (
+    PROJECT_FILE_EXT,
+    SERIES_PROJECT_FILE_EXT,
+    has_project_file_extension,
+    strip_project_extension,
+)
 
 if TYPE_CHECKING:
     pass
+
+try:
+    from send2trash import send2trash
+except Exception:  # pragma: no cover - optional dependency
+    send2trash = None
 
 IMPORT_EXTS = {
     ".png", ".jpg", ".jpeg", ".webp", ".bmp", ".psd",
     ".pdf", ".epub",
     ".zip", ".rar", ".7z", ".tar",
     ".cbz", ".cbr", ".cb7", ".cbt",
-    ".ctpr",
+    PROJECT_FILE_EXT,
+    SERIES_PROJECT_FILE_EXT,
 }
 
 
@@ -137,7 +149,7 @@ class _RecentRow(QtWidgets.QFrame):
         txt_col = QtWidgets.QVBoxLayout()
         txt_col.setSpacing(2)
 
-        name   = os.path.splitext(os.path.basename(path))[0]   # strip .ctpr
+        name = strip_project_extension(os.path.basename(path))
         folder = os.path.dirname(path)
         home   = os.path.expanduser("~")
         if folder.startswith(home):
@@ -293,10 +305,13 @@ class _RecentRow(QtWidgets.QFrame):
         """)
         menu.addAction(self.tr("Open"), lambda: self.sig_open.emit(self._path))
         menu.addAction(self.tr("Open File Location"), self._open_folder)
+        menu.addAction(self.tr("Copy Path"), self._copy_path_to_clipboard)
         menu.addSeparator()
         pin_label = self.tr("Unpin") if self._pinned else self.tr("Pin to list")
         menu.addAction(pin_label, self._toggle_pin)
         menu.addAction(self.tr("Remove from Recent"), lambda: self.sig_remove.emit(self._path))
+        menu.addSeparator()
+        menu.addAction(self.tr("Delete File"), self._delete_file)
         menu.exec(gpos)
 
     def _open_folder(self):
@@ -307,6 +322,62 @@ class _RecentRow(QtWidgets.QFrame):
             subprocess.Popen(["open", "-R", self._path])
         else:
             subprocess.Popen(["xdg-open", folder])
+
+    def _copy_path_to_clipboard(self):
+        clipboard = QtWidgets.QApplication.clipboard()
+        if clipboard is not None:
+            clipboard.setText(os.path.normpath(self._path))
+
+    def _delete_file(self):
+        normalized_path = os.path.normpath(self._path)
+        dialog_parent = self.window() if isinstance(self.window(), QtWidgets.QWidget) else self
+        if not os.path.exists(normalized_path):
+            QtWidgets.QMessageBox.warning(
+                dialog_parent,
+                self.tr("File Not Found"),
+                self.tr(
+                    "The selected project file could not be found.\n"
+                    "It may have already been moved, renamed, or deleted.\n\n{path}"
+                ).format(path=normalized_path),
+            )
+            self.sig_remove.emit(self._path)
+            return
+
+        msg_box = QtWidgets.QMessageBox(dialog_parent)
+        msg_box.setIcon(QtWidgets.QMessageBox.Icon.Warning)
+        msg_box.setWindowTitle(self.tr("Delete File"))
+        msg_box.setText(self.tr("Are you sure you want to permanently delete this project file?"))
+        msg_box.setInformativeText(normalized_path)
+        delete_btn = msg_box.addButton(
+            self.tr("Delete"),
+            QtWidgets.QMessageBox.ButtonRole.DestructiveRole,
+        )
+        cancel_btn = msg_box.addButton(
+            self.tr("Cancel"),
+            QtWidgets.QMessageBox.ButtonRole.RejectRole,
+        )
+        msg_box.setDefaultButton(cancel_btn)
+        msg_box.exec()
+
+        if msg_box.clickedButton() is not delete_btn:
+            return
+
+        try:
+            if send2trash is not None:
+                send2trash(normalized_path)
+            else:
+                os.remove(normalized_path)
+        except OSError as exc:
+            QtWidgets.QMessageBox.critical(
+                dialog_parent,
+                self.tr("Delete Failed"),
+                self.tr("Could not delete the selected project file.\n\n{error}").format(
+                    error=str(exc)
+                ),
+            )
+            return
+
+        self.sig_remove.emit(self._path)
 
     def _toggle_pin(self):
         self._pinned = not self._pinned
@@ -360,6 +431,7 @@ class _PillButton(QtWidgets.QPushButton):
 class StartupHomeScreen(QtWidgets.QWidget):
     sig_open_files   = QtCore.Signal(list)
     sig_open_project = QtCore.Signal(str)
+    sig_create_series = QtCore.Signal()
     _sig_remove_one  = QtCore.Signal(str)
     _sig_clear_all   = QtCore.Signal()
     _sig_pin         = QtCore.Signal(str, bool)   # (path, pinned)
@@ -372,6 +444,7 @@ class StartupHomeScreen(QtWidgets.QWidget):
         self._is_dark = True
         self._filter  = "recent"             # "recent" | "pinned"
         self._search  = ""
+        self._actions_enabled = True
         self._build()
         self._refresh_theme()
 
@@ -409,13 +482,16 @@ class StartupHomeScreen(QtWidgets.QWidget):
         cards_row.setSpacing(12)
         cards_row.setContentsMargins(0, 0, 0, 0)
 
-        self._card_new  = _NewCard("＋", self.tr("New Project"))
+        self._card_new = _NewCard("＋", self.tr("New Project"))
+        self._card_series = _NewCard("🗂", self.tr("New Series Project"))
         self._card_open = _NewCard("📂", self.tr("Open Files"))
 
         self._card_new.clicked.connect(self._on_new_project)
+        self._card_series.clicked.connect(self._on_new_series)
         self._card_open.clicked.connect(self._on_browse)
 
         cards_row.addWidget(self._card_new)
+        cards_row.addWidget(self._card_series)
         cards_row.addWidget(self._card_open)
         cards_row.addStretch()
         vlay.addLayout(cards_row)
@@ -507,9 +583,17 @@ class StartupHomeScreen(QtWidgets.QWidget):
     # Public API 
 
     def populate(self, recent: list[dict]) -> None:
-        """Rebuild rows from [{path, mtime}, …] list (newest modified first)."""
+        """Rebuild rows from [{path, mtime}, …] list ordered by recent-open recency."""
         self._all_entries = recent
         self._rebuild_rows()
+
+    def set_actions_enabled(self, enabled: bool) -> None:
+        self._actions_enabled = bool(enabled)
+        self._card_new.setEnabled(enabled)
+        self._card_series.setEnabled(enabled)
+        self._card_open.setEnabled(enabled)
+        for row in self._rows:
+            row.setEnabled(enabled)
 
     def apply_theme(self, is_dark: bool) -> None:
         self._is_dark = is_dark
@@ -548,6 +632,7 @@ class StartupHomeScreen(QtWidgets.QWidget):
                 continue
             row = _RecentRow(path, mtime, pinned=e.get("pinned", False), parent=self._rows_w)
             row.apply_theme(self._is_dark)
+            row.setEnabled(self._actions_enabled)
             row.sig_open.connect(self.sig_open_project)
             row.sig_remove.connect(self._on_remove)
             row.sig_pin.connect(self._on_pin)
@@ -575,10 +660,19 @@ class StartupHomeScreen(QtWidgets.QWidget):
 
     def _on_new_project(self):
         """Emit via sig so controller can clear state & show home."""
+        if not self._actions_enabled:
+            return
         # We emit an empty list — controller interprets as "new blank project"
         self.sig_open_files.emit([])
 
+    def _on_new_series(self):
+        if not self._actions_enabled:
+            return
+        self.sig_create_series.emit()
+
     def _on_browse(self):
+        if not self._actions_enabled:
+            return
         exts = " ".join(f"*{e}" for e in sorted(IMPORT_EXTS))
         paths, _ = QtWidgets.QFileDialog.getOpenFileNames(
             self,
@@ -588,8 +682,18 @@ class StartupHomeScreen(QtWidgets.QWidget):
         )
         if not paths:
             return
-        projects = [p for p in paths if p.lower().endswith(".ctpr")]
-        images   = [p for p in paths if not p.lower().endswith(".ctpr")]
+        projects = [p for p in paths if has_project_file_extension(p)]
+        images = [p for p in paths if not has_project_file_extension(p)]
+        if projects and images:
+            QtWidgets.QMessageBox.warning(
+                self,
+                self.tr("Open Files"),
+                self.tr(
+                    "Project files cannot be opened together with other imported files.\n"
+                    "Choose either a project file or image/document/archive files."
+                ),
+            )
+            return
         if projects:
             self.sig_open_project.emit(projects[0])
         if images:
@@ -654,6 +758,7 @@ class StartupHomeScreen(QtWidgets.QWidget):
             b.apply_theme(d)
 
         self._card_new.apply_theme(d)
+        self._card_series.apply_theme(d)
         self._card_open.apply_theme(d)
 
         for row in self._rows:
@@ -662,14 +767,28 @@ class StartupHomeScreen(QtWidgets.QWidget):
     # Drop support on the whole screen 
 
     def dragEnterEvent(self, event: QtGui.QDragEnterEvent):
+        if not self._actions_enabled:
+            return
         if event.mimeData().hasUrls():
             if self._valid_urls(event.mimeData().urls()):
                 event.acceptProposedAction()
 
     def dropEvent(self, event: QtGui.QDropEvent):
+        if not self._actions_enabled:
+            return
         valid    = self._valid_urls(event.mimeData().urls())
-        projects = [p for p in valid if p.lower().endswith(".ctpr")]
-        images   = [p for p in valid if not p.lower().endswith(".ctpr")]
+        projects = [p for p in valid if has_project_file_extension(p)]
+        images = [p for p in valid if not has_project_file_extension(p)]
+        if projects and images:
+            QtWidgets.QMessageBox.warning(
+                self,
+                self.tr("Open Files"),
+                self.tr(
+                    "Project files cannot be opened together with other imported files.\n"
+                    "Choose either a project file or image/document/archive files."
+                ),
+            )
+            return
         if projects:
             self.sig_open_project.emit(projects[0])
         if images:

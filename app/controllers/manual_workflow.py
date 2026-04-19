@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from typing import TYPE_CHECKING, Any, Sequence
 
 from PySide6 import QtCore
@@ -9,9 +10,15 @@ from modules.detection.utils.content import get_inpaint_bboxes
 from modules.ocr.processor import OCRProcessor
 from modules.rendering.render import pyside_word_wrap, is_vertical_block, get_best_render_area
 from modules.translation.processor import Translator
+from modules.utils.correction_dictionary import (
+    apply_ocr_result_dictionary,
+    apply_translation_result_dictionary,
+)
 from modules.utils.common_utils import is_close
 from modules.utils.device import resolve_device
+from modules.utils.inpaint_strokes import retain_non_manual_strokes
 from modules.utils.language_utils import get_language_code, is_no_space_lang
+from modules.utils.ocr_quality import summarize_ocr_quality
 from modules.utils.pipeline_config import validate_ocr, validate_translator
 from modules.utils.textblock import sort_blk_list
 from modules.utils.translator_utils import is_there_text, format_translations, set_upper_case
@@ -21,6 +28,8 @@ if TYPE_CHECKING:
     from app.ui.canvas.text_item import TextBlockItem
     from controller import ComicTranslate
     from modules.utils.textblock import TextBlock
+
+logger = logging.getLogger(__name__)
 
 
 class ManualWorkflowController:
@@ -142,9 +151,33 @@ class ManualWorkflowController:
                     state = self.main.image_states.get(file_path)
                     if state is None:
                         continue
+                    self.main.image_ctrl.reset_processing_summary(file_path, run_type="manual")
                     state["blk_list"] = blk_list
                     viewer_state = state.setdefault("viewer_state", {})
                     viewer_state["rectangles"] = self._serialize_rectangles_from_blocks(blk_list)
+                    self.main.image_ctrl.update_processing_summary(
+                        file_path,
+                        {
+                            "detector_key": self.main.settings_page.get_tool_selection("detector") or "RT-DETR-v2",
+                            "detector_engine": getattr(
+                                self.main.pipeline.block_detection.block_detector_cache,
+                                "last_engine_name",
+                                "",
+                            ),
+                            "device": getattr(
+                                self.main.pipeline.block_detection.block_detector_cache,
+                                "last_device",
+                                "",
+                            ),
+                            "block_count": len(blk_list or []),
+                        },
+                    )
+                    self.main.image_ctrl.mark_processing_stage(
+                        file_path,
+                        "detect",
+                        "completed",
+                        block_count=len(blk_list or []),
+                    )
                     if file_path == current_file:
                         current_blocks = blk_list
 
@@ -205,12 +238,12 @@ class ManualWorkflowController:
             context = self._prepare_multi_page_context(selected_paths)
             source_lang_fallback = self.main.s_combo.currentText()
 
-            def ocr_selected_pages() -> dict[str, list[TextBlock]]:
+            def ocr_selected_pages() -> dict[str, tuple[list[TextBlock], str, dict, str]]:
                 cache_manager = self.main.pipeline.cache_manager
                 ocr = OCRProcessor()
                 ocr_model = self.main.settings_page.get_tool_selection("ocr")
                 device = resolve_device(self.main.settings_page.is_gpu_enabled())
-                results: dict[str, list[TextBlock]] = {}
+                results: dict[str, tuple[list[TextBlock], str, dict, str]] = {}
                 for file_path in selected_paths:
                     state = self.main.image_states.get(file_path, {})
                     blk_list = state.get("blk_list", [])
@@ -220,23 +253,70 @@ class ManualWorkflowController:
                     if image is None:
                         continue
                     source_lang = state.get("source_lang", source_lang_fallback)
+                    ocr.initialize(self.main, source_lang)
                     cache_key = cache_manager._get_ocr_cache_key(image, source_lang, ocr_model, device)
                     if cache_manager._can_serve_all_blocks_from_ocr_cache(cache_key, blk_list):
                         cache_manager._apply_cached_ocr_to_blocks(cache_key, blk_list)
+                        apply_ocr_result_dictionary(
+                            blk_list,
+                            self.main.settings_page.get_ocr_result_dictionary_rules(),
+                        )
+                        cache_status = "hit"
                     else:
-                        ocr.initialize(self.main, source_lang)
                         ocr.process(image, blk_list)
+                        apply_ocr_result_dictionary(
+                            blk_list,
+                            self.main.settings_page.get_ocr_result_dictionary_rules(),
+                        )
                         cache_manager._cache_ocr_results(cache_key, blk_list)
-                    results[file_path] = blk_list
+                        cache_status = "refreshed"
+                    quality = summarize_ocr_quality(blk_list)
+                    logger.info(
+                        "ocr quality summary: image=%s blocks=%d non_empty=%d empty=%d single_char_like=%d cache=%s",
+                        file_path.rsplit("/", 1)[-1],
+                        quality.get("block_count", 0),
+                        quality.get("non_empty", 0),
+                        quality.get("empty", 0),
+                        quality.get("single_char_like", 0),
+                        cache_status,
+                    )
+                    results[file_path] = (
+                        blk_list,
+                        cache_status,
+                        quality,
+                        ocr.last_engine_name or "",
+                    )
                 return results
 
-            def on_ocr_ready(results: dict[str, list[TextBlock]]) -> None:
+            def on_ocr_ready(results: dict[str, tuple[list[TextBlock], str, dict, str]]) -> None:
                 current_file = context["current_file"]
-                for file_path, blk_list in (results or {}).items():
+                for file_path, payload in (results or {}).items():
+                    blk_list, cache_status, quality, ocr_engine = payload
                     state = self.main.image_states.get(file_path)
                     if state is None:
                         continue
                     state["blk_list"] = blk_list
+                    self.main.image_ctrl.update_processing_summary(
+                        file_path,
+                        {
+                            "ocr_key": self.main.settings_page.get_tool_selection("ocr"),
+                            "ocr_engine": ocr_engine,
+                            "device": resolve_device(self.main.settings_page.is_gpu_enabled()),
+                            "block_count": len(blk_list or []),
+                            "ocr_quality_counts": {
+                                "non_empty": quality.get("non_empty", 0),
+                                "empty": quality.get("empty", 0),
+                                "single_char_like": quality.get("single_char_like", 0),
+                            },
+                        },
+                    )
+                    self.main.image_ctrl.mark_processing_stage(
+                        file_path,
+                        "ocr",
+                        "completed",
+                        cache_status=cache_status,
+                        quality=quality,
+                    )
                     if file_path == current_file:
                         self.main.blk_list = blk_list.copy()
 
@@ -300,9 +380,9 @@ class ManualWorkflowController:
             translator_key = settings_page.get_tool_selection("translator")
             upper_case = settings_page.ui.uppercase_checkbox.isChecked()
 
-            def translate_selected_pages() -> dict[str, list[TextBlock]]:
+            def translate_selected_pages() -> dict[str, tuple[list[TextBlock], str, str]]:
                 cache_manager = self.main.pipeline.cache_manager
-                results: dict[str, list[TextBlock]] = {}
+                results: dict[str, tuple[list[TextBlock], str, str]] = {}
                 for file_path in selected_paths:
                     state = self.main.image_states.get(file_path, {})
                     blk_list = state.get("blk_list", [])
@@ -323,20 +403,49 @@ class ManualWorkflowController:
                     )
                     if cache_manager._can_serve_all_blocks_from_translation_cache(cache_key, blk_list):
                         cache_manager._apply_cached_translations_to_blocks(cache_key, blk_list)
+                        apply_translation_result_dictionary(
+                            blk_list,
+                            self.main.settings_page.get_translation_result_dictionary_rules(),
+                        )
+                        cache_status = "hit"
                     else:
                         translator.translate(blk_list, image, extra_context)
+                        apply_translation_result_dictionary(
+                            blk_list,
+                            self.main.settings_page.get_translation_result_dictionary_rules(),
+                        )
                         cache_manager._cache_translation_results(cache_key, blk_list)
+                        cache_status = "refreshed"
                     set_upper_case(blk_list, upper_case)
-                    results[file_path] = blk_list
+                    results[file_path] = (
+                        blk_list,
+                        cache_status,
+                        translator.engine.__class__.__name__,
+                    )
                 return results
 
-            def on_translation_ready(results: dict[str, list[TextBlock]]) -> None:
+            def on_translation_ready(results: dict[str, tuple[list[TextBlock], str, str]]) -> None:
                 current_file = context["current_file"]
-                for file_path, blk_list in (results or {}).items():
+                for file_path, payload in (results or {}).items():
+                    blk_list, cache_status, translator_engine = payload
                     state = self.main.image_states.get(file_path)
                     if state is None:
                         continue
                     state["blk_list"] = blk_list
+                    self.main.image_ctrl.update_processing_summary(
+                        file_path,
+                        {
+                            "translator_key": translator_key,
+                            "translator_engine": translator_engine,
+                            "block_count": len(blk_list or []),
+                        },
+                    )
+                    self.main.image_ctrl.mark_processing_stage(
+                        file_path,
+                        "translation",
+                        "completed",
+                        cache_status=cache_status,
+                    )
                     if file_path == current_file:
                         self.main.blk_list = blk_list.copy()
 
@@ -388,14 +497,26 @@ class ManualWorkflowController:
         
         def set_new_text(
             text_item: TextBlockItem, 
-            wrapped: str, 
-            font_size: int
+            blk: TextBlock,
+            wrap_result: tuple,
         ) -> None:
-            
+            wrapped, font_size, rendered_width, rendered_height = wrap_result
             if is_no_space_lang(trg_lng_cd):
                 wrapped = wrapped.replace(" ", "")
-            text_item.set_plain_text(wrapped)
-            text_item.set_font_size(font_size)
+            source_rect = self.main.text_ctrl._get_text_item_layout_rect(text_item, blk)
+            block_anchor = self.main.text_ctrl._get_block_anchor_for_item(text_item, blk)
+            text_props = self.main.text_ctrl._build_text_item_properties(
+                blk,
+                wrapped,
+                font_size,
+                rs,
+                trg_lng_cd,
+                source_rect=source_rect,
+                block_anchor=block_anchor,
+                rendered_width=rendered_width,
+                rendered_height=rendered_height,
+            )
+            self.main.text_ctrl._apply_text_item_properties(text_item, text_props, wrapped)
 
         text_items_to_process = self._get_visible_text_items()
         if not text_items_to_process:
@@ -410,44 +531,33 @@ class ManualWorkflowController:
         def on_format_finished() -> None:
             for text_item in text_items_to_process:
                 text_item.handleDeselection()
-                x1, y1 = int(text_item.pos().x()), int(text_item.pos().y())
-                rot = text_item.rotation()
-
-                blk = next(
-                    (
-                        b
-                        for b in self.main.blk_list
-                        if is_close(b.xyxy[0], x1, 5)
-                        and is_close(b.xyxy[1], y1, 5)
-                        and is_close(b.angle, rot, 1)
-                    ),
-                    None,
-                )
+                blk = self.main.text_ctrl._find_text_block_for_item(text_item)
                 if not (blk and blk.translation):
                     continue
 
                 vertical = is_vertical_block(blk, trg_lng_cd)
                 wrap_args = (
                     blk.translation,
-                    text_item.font_family,
+                    rs.font_family,
                     blk.xyxy[2] - blk.xyxy[0],
                     blk.xyxy[3] - blk.xyxy[1],
-                    float(text_item.line_spacing),
-                    float(text_item.outline_width),
-                    text_item.bold,
-                    text_item.italic,
-                    text_item.underline,
-                    text_item.alignment,
-                    text_item.direction,
+                    float(rs.line_spacing),
+                    float(rs.outline_width),
+                    rs.bold,
+                    rs.italic,
+                    rs.underline,
+                    self.main.button_to_alignment[rs.alignment_id],
+                    rs.direction,
                     rs.max_font_size,
                     rs.min_font_size,
                     vertical,
+                    True,
                 )
 
                 self.main.run_threaded(
                     pyside_word_wrap,
-                    lambda wrap_res, ti=text_item: set_new_text(
-                        ti, wrap_res[0], wrap_res[1]
+                    lambda wrap_res, ti=text_item, current_blk=blk: set_new_text(
+                        ti, current_blk, wrap_res
                     ),
                     self.main.default_error_handler,
                     None,
@@ -526,11 +636,11 @@ class ManualWorkflowController:
 
                     state = self.main.image_states.get(file_path)
                     if state is not None:
-                        state['brush_strokes'] = []
+                        state['brush_strokes'] = retain_non_manual_strokes(state.get('brush_strokes', []))
                     processed_any = True
 
                 if not self.main.webtoon_mode and current_file in (results or {}):
-                    self.main.image_viewer.clear_brush_strokes(page_switch=True)
+                    self.main.image_viewer.clear_brush_strokes()
 
                 if self.main.webtoon_mode and context["current_page_unloaded"]:
                     self._reload_current_webtoon_page()
@@ -602,7 +712,11 @@ class ManualWorkflowController:
                         if image is None:
                             continue
                         for blk in blk_list:
-                            blk.inpaint_bboxes = get_inpaint_bboxes(blk.xyxy, image)
+                            blk.inpaint_bboxes = get_inpaint_bboxes(
+                                blk.xyxy,
+                                image,
+                                bubble_bbox=getattr(blk, "bubble_xyxy", None),
+                            )
                         results[file_path] = blk_list
                     return results
 
@@ -667,7 +781,11 @@ class ManualWorkflowController:
                         image = self.main.image_viewer.get_image_array()
                         results: list[tuple[TextBlock, Any]] = []
                         for blk in self.main.blk_list:
-                            bboxes = get_inpaint_bboxes(blk.xyxy, image)
+                            bboxes = get_inpaint_bboxes(
+                                blk.xyxy,
+                                image,
+                                bubble_bbox=getattr(blk, "bubble_xyxy", None),
+                            )
                             results.append((blk, bboxes))
                         return results
 

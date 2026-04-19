@@ -150,7 +150,8 @@ class CoordinateConverter:
                 'path': local_path,
                 'pen': stroke_item.pen().color().name() if hasattr(stroke_item, 'pen') else '#80ff0000',
                 'brush': stroke_item.brush().color().name() if hasattr(stroke_item, 'brush') else '#00000000',
-                'width': stroke_item.pen().width() if hasattr(stroke_item, 'pen') else 25
+                'width': stroke_item.pen().width() if hasattr(stroke_item, 'pen') else 25,
+                'role': stroke_item.data(0x100),
             }
         
         return None

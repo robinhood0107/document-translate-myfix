@@ -1,0 +1,64 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$ROOT_DIR"
+
+REMOTE_NAME="${1:-}"
+BRANCH_NAME="$(git branch --show-current)"
+
+resolve_python() {
+  if [[ -x "$ROOT_DIR/.venv-win/Scripts/python.exe" ]]; then
+    echo "$ROOT_DIR/.venv-win/Scripts/python.exe"
+    return
+  fi
+  if [[ -x "$ROOT_DIR/.venv-win-cuda13/Scripts/python.exe" ]]; then
+    echo "$ROOT_DIR/.venv-win-cuda13/Scripts/python.exe"
+    return
+  fi
+  if command -v python >/dev/null 2>&1; then
+    command -v python
+    return
+  fi
+  if command -v python3 >/dev/null 2>&1; then
+    command -v python3
+    return
+  fi
+  echo "Python interpreter not found." >&2
+  exit 1
+}
+
+PYTHON_BIN="$(resolve_python)"
+"$PYTHON_BIN" scripts/validate_repo_policy.py --mode push --branch "$BRANCH_NAME"
+
+if [[ "$REMOTE_NAME" != "origin" ]]; then
+  echo "Pushes must target the 'origin' remote." >&2
+  exit 1
+fi
+
+UPSTREAM_BRANCH="$(git rev-parse --abbrev-ref --symbolic-full-name '@{u}' 2>/dev/null || true)"
+
+if [[ -z "$UPSTREAM_BRANCH" ]]; then
+  ALLOW_FIRST_PUSH="false"
+  while read -r LOCAL_REF _ REMOTE_REF _; do
+    if [[ "$LOCAL_REF" == "refs/heads/$BRANCH_NAME" && "$REMOTE_REF" == "refs/heads/$BRANCH_NAME" ]]; then
+      ALLOW_FIRST_PUSH="true"
+      break
+    fi
+  done
+  if [[ "$ALLOW_FIRST_PUSH" != "true" ]]; then
+    echo "First push must be: git push -u origin $BRANCH_NAME" >&2
+    exit 1
+  fi
+else
+  if [[ "$UPSTREAM_BRANCH" != "origin/$BRANCH_NAME" ]]; then
+    echo "Current branch must track origin/$BRANCH_NAME before push." >&2
+    exit 1
+  fi
+fi
+
+"$PYTHON_BIN" scripts/validate_changed_python.py --all
+"$PYTHON_BIN" scripts/headless_smoke.py
+"$PYTHON_BIN" scripts/compile_translations.py --check
+
+exit 0

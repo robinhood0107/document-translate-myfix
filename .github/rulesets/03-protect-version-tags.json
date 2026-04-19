@@ -1,0 +1,31 @@
+{
+  "name": "Protect version tags",
+  "target": "tag",
+  "source_type": "Repository",
+  "enforcement": "active",
+  "conditions": {
+    "ref_name": {
+      "include": [
+        "refs/tags/v*"
+      ],
+      "exclude": []
+    }
+  },
+  "rules": [
+    {
+      "type": "deletion"
+    },
+    {
+      "type": "non_fast_forward"
+    },
+    {
+      "type": "tag_name_pattern",
+      "parameters": {
+        "name": "Semantic version tags",
+        "negate": false,
+        "operator": "regex",
+        "pattern": "^v[0-9]+\\.[0-9]+\\.[0-9]+([.-][0-9A-Za-z._-]+)?$"
+      }
+    }
+  ]
+}

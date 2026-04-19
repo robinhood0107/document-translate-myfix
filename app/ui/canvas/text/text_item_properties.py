@@ -3,6 +3,11 @@ from typing import Optional, List, Any
 from PySide6.QtGui import QColor
 from PySide6.QtCore import Qt
 from app.ui.canvas.text_item import OutlineType
+from modules.utils.render_style_policy import (
+    VERTICAL_ALIGNMENT_TOP,
+    build_rect_tuple,
+    coerce_vertical_alignment,
+)
 
 @dataclass
 class TextItemProperties:
@@ -31,6 +36,9 @@ class TextItemProperties:
     width: Optional[float] = None
     height: Optional[float] = None
     vertical: bool = False
+    vertical_alignment: str = VERTICAL_ALIGNMENT_TOP
+    source_rect: Optional[tuple] = None
+    block_anchor: Optional[tuple] = None
     
     # Advanced properties
     selection_outlines: list = field(default_factory=list)
@@ -97,6 +105,21 @@ class TextItemProperties:
         props.width = data.get('width')
         props.height = data.get('height')
         props.vertical = data.get('vertical', False)
+        props.vertical_alignment = coerce_vertical_alignment(
+            data.get('vertical_alignment', VERTICAL_ALIGNMENT_TOP)
+        )
+        source_rect = data.get('source_rect')
+        if source_rect is not None:
+            props.source_rect = tuple(float(v) for v in source_rect)
+        elif props.width is not None and props.height is not None:
+            props.source_rect = build_rect_tuple(
+                props.position[0], props.position[1], props.width, props.height
+            )
+        block_anchor = data.get('block_anchor')
+        if block_anchor is not None:
+            props.block_anchor = tuple(float(v) for v in block_anchor)
+        elif props.source_rect is not None:
+            props.block_anchor = tuple(props.source_rect)
         
         # Advanced
         props.selection_outlines = data.get('selection_outlines', [])
@@ -135,6 +158,22 @@ class TextItemProperties:
         props.width = item.boundingRect().width()
         props.height = item.boundingRect().height()
         props.vertical = getattr(item, 'vertical', False)
+        props.vertical_alignment = coerce_vertical_alignment(
+            getattr(item, 'vertical_alignment', VERTICAL_ALIGNMENT_TOP)
+        )
+        if getattr(item, 'source_rect', None) is not None:
+            props.source_rect = tuple(float(v) for v in item.source_rect)
+        else:
+            props.source_rect = build_rect_tuple(
+                item.pos().x(),
+                item.pos().y(),
+                item.boundingRect().width(),
+                item.boundingRect().height(),
+            )
+        if getattr(item, 'block_anchor', None) is not None:
+            props.block_anchor = tuple(float(v) for v in item.block_anchor)
+        else:
+            props.block_anchor = tuple(props.source_rect) if props.source_rect else None
         
         # Advanced properties
         props.selection_outlines = getattr(item, 'selection_outlines', []).copy()
@@ -164,6 +203,9 @@ class TextItemProperties:
             'width': self.width,
             'height': self.height,
             'vertical': self.vertical,
+            'vertical_alignment': self.vertical_alignment,
+            'source_rect': self.source_rect,
+            'block_anchor': self.block_anchor,
             'selection_outlines': self.selection_outlines,
         }
 

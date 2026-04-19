@@ -6,9 +6,10 @@ import requests
 import logging
 import traceback
 import imkit as imk
+import numpy as np
 import time
+from collections import deque
 from typing import TYPE_CHECKING
-from datetime import datetime
 from typing import List
 from PySide6.QtCore import QCoreApplication
 from PySide6.QtGui import QColor
@@ -16,14 +17,51 @@ from PySide6.QtGui import QColor
 from modules.detection.processor import TextBlockDetector
 from modules.translation.processor import Translator
 from modules.utils.textblock import sort_blk_list
-from modules.utils.pipeline_config import inpaint_map, get_config
-from modules.utils.image_utils import generate_mask, get_smart_text_color
+from modules.utils.pipeline_config import inpaint_map, get_config, get_inpainter_runtime
+from modules.utils.image_utils import generate_mask
 from modules.utils.language_utils import get_language_code, is_no_space_lang
+from modules.utils.ocr_quality import summarize_ocr_quality
+from modules.utils.correction_dictionary import (
+    apply_ocr_result_dictionary,
+    apply_translation_result_dictionary,
+)
+from modules.utils.ocr_debug import export_ocr_debug_artifacts
+from modules.utils.inpaint_debug import (
+    build_inpaint_debug_metadata,
+    export_inpaint_debug_artifacts,
+)
+from modules.utils.inpaint_cleanup import refine_bubble_residue_inpaint
+from modules.utils.export_paths import (
+    build_export_timestamp,
+    export_run_root,
+    reserve_export_run_token,
+    resolve_export_directory,
+)
+from modules.utils.automatic_output import (
+    build_archive_page_file_name,
+    build_archive_staging_dir,
+    build_output_file_name,
+    is_individual_images_mode,
+    is_single_archive_mode,
+    write_archive_image,
+    write_output_image,
+)
+from modules.utils.render_style_policy import (
+    VERTICAL_ALIGNMENT_TOP,
+    build_rect_tuple,
+    resolve_render_text_color,
+)
 from modules.utils.translator_utils import get_raw_translation, get_raw_text, format_translations
-from modules.rendering.render import get_best_render_area, pyside_word_wrap, is_vertical_block
+from modules.rendering.render import (
+    describe_render_text_sanitization,
+    describe_render_text_markup,
+    get_best_render_area,
+    is_vertical_block,
+    pyside_word_wrap,
+)
 from modules.utils.device import resolve_device
-from modules.utils.exceptions import InsufficientCreditsException
 from app.path_materialization import ensure_path_materialized
+from app.ui.canvas.save_renderer import ImageSaveRenderer
 from app.ui.canvas.text_item import OutlineInfo, OutlineType
 from app.ui.canvas.text.text_item_properties import TextItemProperties
 from app.ui.messages import Messages
@@ -56,12 +94,129 @@ class BatchProcessor:
         self.block_detection = block_detection_handler
         self.inpainting = inpainting_handler
         self.ocr_handler = ocr_handler
+        self._run_started_at: float | None = None
+        self._page_started_at: float | None = None
+        self._progress_image_path: str | None = None
+        self._recent_page_durations = deque(maxlen=5)
+
+    def _emit_benchmark_event(self, tag: str, image_path: str | None = None, **extra) -> None:
+        payload = {
+            "pipeline_mode": "batch",
+            "run_type": self._current_run_type(),
+        }
+        if image_path:
+            payload["image_path"] = image_path
+            payload["image_name"] = os.path.basename(image_path)
+        payload.update(extra)
+        try:
+            self.main_page.emit_memlog(tag, **payload)
+        except Exception:
+            pass
+
+    @staticmethod
+    def _benchmark_stage_ceiling() -> str:
+        return str(os.environ.get("CT_BENCH_STAGE_CEILING", "") or "").strip().lower()
 
     def skip_save(self, directory, timestamp, base_name, extension, archive_bname, image):
         logger.info("Skipping fallback translated image save for '%s'.", base_name)
 
+    @staticmethod
+    def _format_duration(seconds: float | None) -> str:
+        if seconds is None or seconds < 0:
+            return "n/a"
+        total_seconds = int(round(seconds))
+        hours, remainder = divmod(total_seconds, 3600)
+        minutes, secs = divmod(remainder, 60)
+        return f"{hours:02d}:{minutes:02d}:{secs:02d}"
+
+    def _estimate_eta_seconds(self, index: int, total: int) -> float | None:
+        if self._run_started_at is None:
+            return None
+        completed_pages = max(index, 0)
+        if completed_pages <= 0:
+            return None
+        recent = list(self._recent_page_durations)
+        avg_page = (sum(recent) / len(recent)) if recent else ((time.monotonic() - self._run_started_at) / completed_pages)
+        remaining_pages = max(total - index, 0)
+        return avg_page * remaining_pages
+
+    def _log_page_start(self, index: int, total: int, image_path: str) -> None:
+        self._progress_image_path = image_path
+        self._page_started_at = time.monotonic()
+        run_elapsed = (self._page_started_at - self._run_started_at) if self._run_started_at is not None else None
+        logger.info(
+            "Batch page start: page=%d/%d image=%s elapsed=%s eta=%s",
+            index + 1,
+            total,
+            os.path.basename(image_path),
+            self._format_duration(run_elapsed),
+            self._format_duration(self._estimate_eta_seconds(index, total)),
+        )
+        self._report_runtime_progress(
+            phase="pipeline",
+            service="batch",
+            status="starting",
+            step_key="page_start",
+            stage_name="page_start",
+            message=f"{index + 1}/{total} 페이지를 준비하는 중...",
+            page_index=index,
+            page_total=total,
+            image_name=os.path.basename(image_path),
+        )
+
+    def _log_page_done(
+        self,
+        index: int,
+        total: int,
+        image_path: str,
+        *,
+        preview_path: str = "",
+    ) -> None:
+        now = time.monotonic()
+        page_elapsed = None
+        if self._page_started_at is not None:
+            page_elapsed = now - self._page_started_at
+            self._recent_page_durations.append(page_elapsed)
+        run_elapsed = (now - self._run_started_at) if self._run_started_at is not None else None
+        avg_page = (sum(self._recent_page_durations) / len(self._recent_page_durations)) if self._recent_page_durations else None
+        remaining_pages = max(total - (index + 1), 0)
+        eta = (avg_page * remaining_pages) if avg_page is not None else None
+        logger.info(
+            "Batch page done: page=%d/%d image=%s page_elapsed=%s elapsed=%s avg_page=%s eta=%s",
+            index + 1,
+            total,
+            os.path.basename(image_path),
+            self._format_duration(page_elapsed),
+            self._format_duration(run_elapsed),
+            self._format_duration(avg_page),
+            self._format_duration(eta),
+        )
+        self._report_runtime_progress(
+            phase="pipeline",
+            service="batch",
+            status="completed",
+            step_key="page_done",
+            stage_name="page_done",
+            message=f"{index + 1}/{total} 페이지 처리가 완료되었습니다.",
+            page_index=index,
+            page_total=total,
+            image_name=os.path.basename(image_path),
+            preview_path=preview_path,
+            panel_state="running",
+            panel_message_level="success",
+        )
+
+    def _report_runtime_progress(self, **payload):
+        callback = getattr(self.main_page, "report_runtime_progress", None)
+        if not callable(callback):
+            return
+        try:
+            callback(payload)
+        except Exception:
+            logger.debug("Failed to forward automatic progress payload.", exc_info=True)
+
     def emit_progress(self, index, total, step, steps, change_name):
-        """Wrapper around main_page.progress_update.emit that logs a human-readable stage."""
+        """Wrapper around main_page.progress_update.emit that logs current batch position with ETA."""
         stage_map = {
             0: 'start-image',
             1: 'text-block-detection',
@@ -74,7 +229,36 @@ class BatchProcessor:
             10: 'save-and-finish',
         }
         stage_name = stage_map.get(step, f'stage-{step}')
-        logger.info(f"Progress: image_index={index}/{total} step={step}/{steps} ({stage_name}) change_name={change_name}")
+        image_name = os.path.basename(self._progress_image_path) if self._progress_image_path else '-'
+        run_elapsed = (time.monotonic() - self._run_started_at) if self._run_started_at is not None else None
+        page_elapsed = (time.monotonic() - self._page_started_at) if self._page_started_at is not None else None
+        percent = 0.0
+        total_units = max(total * steps, 1)
+        current_units = min(max(index * steps + step, 0), total_units)
+        percent = (current_units / total_units) * 100.0
+        logger.info(
+            "Batch progress: page=%d/%d image=%s stage=%s overall=%.1f%% elapsed=%s page_elapsed=%s eta=%s",
+            index + 1 if total else 0,
+            total,
+            image_name,
+            stage_name,
+            percent,
+            self._format_duration(run_elapsed),
+            self._format_duration(page_elapsed),
+            self._format_duration(self._estimate_eta_seconds(index, total)),
+        )
+        if step > 0:
+            self._report_runtime_progress(
+                phase="pipeline",
+                service="batch",
+                status="running",
+                step_key=stage_name,
+                stage_name=stage_name,
+                message=f"{index + 1}/{total} 페이지 {stage_name} 단계 진행 중...",
+                page_index=index,
+                page_total=total,
+                image_name=image_name,
+            )
         self.main_page.progress_update.emit(index, total, step, steps, change_name)
 
     def log_skipped_image(self, directory, timestamp, image_path, reason="", full_traceback=""):
@@ -85,10 +269,374 @@ class BatchProcessor:
         worker = getattr(self.main_page, "current_worker", None)
         return bool(worker and worker.is_cancelled)
 
+    def _current_run_type(self) -> str:
+        return str(getattr(self.main_page, "_current_batch_run_type", "batch") or "batch")
+
+    def _ocr_quality_metrics(self, quality: dict | None) -> dict[str, int]:
+        quality = quality or {}
+        return {
+            "ocr_total_block_count": int(quality.get("block_count", 0) or 0),
+            "ocr_empty_block_count": int(quality.get("empty", 0) or 0),
+            # Treat suspiciously short OCR outputs as low-quality block candidates.
+            "ocr_low_quality_block_count": int(quality.get("single_char_like", 0) or 0),
+        }
+
+    def _translation_benchmark_metrics(self, translator) -> dict[str, int]:
+        engine = getattr(translator, "engine", None)
+        stats = getattr(engine, "last_benchmark_stats", {}) if engine is not None else {}
+        return {
+            "gemma_json_retry_count": int(stats.get("gemma_json_retry_count", 0) or 0),
+            "gemma_chunk_retry_events": int(stats.get("gemma_chunk_retry_events", 0) or 0),
+            "gemma_truncated_count": int(stats.get("gemma_truncated_count", 0) or 0),
+            "gemma_empty_content_count": int(stats.get("gemma_empty_content_count", 0) or 0),
+        }
+
+    def _effective_export_settings(self, settings_page) -> dict:
+        return dict(self.main_page.get_resolved_export_settings())
+
+    def _resolve_export_token(self, directory: str, base_timestamp: str) -> str:
+        cache = getattr(self, "_export_run_tokens", None)
+        if cache is None:
+            cache = {}
+            self._export_run_tokens = cache
+        return reserve_export_run_token(directory, base_timestamp, cache)
+
+    def _write_json_exports(
+        self,
+        directory: str,
+        timestamp: str,
+        archive_bname: str,
+        image_path: str,
+        image,
+        blk_list,
+        page_state: dict,
+        source_lang: str,
+        export_settings: dict,
+    ) -> None:
+        page_base_name = os.path.splitext(os.path.basename(image_path))[0]
+        blocks = list(blk_list or [])
+
+        if export_settings.get("export_raw_text", False):
+            path = os.path.join(directory, f"comic_translate_{timestamp}", "raw_texts", archive_bname)
+            os.makedirs(path, exist_ok=True)
+            with open(os.path.join(path, f"{page_base_name}_raw.json"), "w", encoding="UTF-8") as file:
+                file.write(get_raw_text(blocks))
+
+        if export_settings.get("export_translated_text", False):
+            path = os.path.join(directory, f"comic_translate_{timestamp}", "translated_texts", archive_bname)
+            os.makedirs(path, exist_ok=True)
+            with open(os.path.join(path, f"{page_base_name}_translated.json"), "w", encoding="UTF-8") as file:
+                file.write(get_raw_translation(blocks))
+
+        if export_settings.get("export_raw_text", False) or export_settings.get("export_translated_text", False):
+            ocr_summary = page_state.get("processing_summary", {})
+            debug_path = os.path.join(
+                directory,
+                f"comic_translate_{timestamp}",
+                "ocr_debugs",
+                archive_bname,
+            )
+            export_ocr_debug_artifacts(
+                debug_path,
+                page_base_name,
+                image,
+                blocks,
+                ocr_summary.get("ocr_engine", ""),
+                page_state.get("source_lang", source_lang),
+            )
+
+    def _build_cleanup_delta_mask(self, base_mask, final_mask):
+        if base_mask is None and final_mask is None:
+            return None
+        if final_mask is None:
+            return None
+        final_arr = np.asarray(final_mask)
+        if final_arr.ndim == 3:
+            final_arr = final_arr[:, :, 0]
+        if base_mask is None:
+            base_arr = np.zeros_like(final_arr, dtype=np.uint8)
+        else:
+            base_arr = np.asarray(base_mask)
+            if base_arr.ndim == 3:
+                base_arr = base_arr[:, :, 0]
+        return np.where((final_arr > 0) & (base_arr <= 0), 255, 0).astype(np.uint8)
+
+    def _write_inpaint_debug_exports(
+        self,
+        *,
+        export_root: str,
+        archive_bname: str,
+        image_path: str,
+        image,
+        blk_list,
+        export_settings: dict,
+        raw_mask,
+        final_mask,
+        detector_key: str,
+        detector_engine: str,
+        detector_device: str,
+        inpainter_key: str,
+        hd_strategy: str,
+        cleanup_stats: dict | None,
+        mask_details: dict | None = None,
+        inpainter_backend: str = "unknown",
+    ) -> None:
+        mask_details = mask_details or {}
+        base_mask = mask_details.get("legacy_base_mask", raw_mask if raw_mask is not None else mask_details.get("final_mask", final_mask))
+        cleanup_delta = self._build_cleanup_delta_mask(base_mask, final_mask)
+        residue_mask = (cleanup_stats or {}).get("residue_mask") if cleanup_stats else None
+        mask_overlay_mask = mask_details.get("final_mask", final_mask)
+        metadata = build_inpaint_debug_metadata(
+            image_path=image_path,
+            run_type=self._current_run_type(),
+            detector_key=detector_key,
+            detector_engine=detector_engine,
+            device=detector_device,
+            inpainter=inpainter_key,
+            hd_strategy=hd_strategy,
+            blocks=blk_list or [],
+            raw_mask=raw_mask,
+            final_mask=final_mask,
+            final_mask_pre_expand=mask_details.get("final_mask_pre_expand"),
+            final_mask_post_expand=mask_details.get("final_mask_post_expand"),
+            residue_mask=residue_mask,
+            cleanup_delta=cleanup_delta,
+            cleanup_stats=cleanup_stats,
+            mask_refiner=str(mask_details.get("mask_refiner", "legacy_bbox") or "legacy_bbox"),
+            protect_mask_applied=bool(mask_details.get("keep_existing_lines", False)),
+            protect_mask=mask_details.get("protect_mask"),
+            refiner_backend=str(mask_details.get("refiner_backend", "legacy") or "legacy"),
+            refiner_device=str(mask_details.get("refiner_device", "cpu") or "cpu"),
+            inpainter_backend=inpainter_backend,
+            legacy_base_mask=mask_details.get("legacy_base_mask"),
+            hard_box_rescue_mask=mask_details.get("hard_box_rescue_mask"),
+            hard_box_applied_count=int(mask_details.get("hard_box_applied_count", 0) or 0),
+            hard_box_reason_totals=dict(mask_details.get("hard_box_reason_totals", {}) or {}),
+        )
+        export_inpaint_debug_artifacts(
+            export_root=export_root,
+            archive_bname=archive_bname,
+            page_base_name=os.path.splitext(os.path.basename(image_path))[0],
+            image=image,
+            blocks=blk_list or [],
+            export_settings=export_settings,
+            raw_mask=raw_mask,
+            mask_overlay_mask=mask_overlay_mask,
+            cleanup_delta=cleanup_delta,
+            metadata=metadata,
+        )
+
+    def _write_final_render_export(
+        self,
+        directory: str,
+        export_token: str,
+        image_path: str,
+        image,
+        patches,
+        viewer_state: dict,
+        export_settings: dict[str, object],
+        *,
+        page_index: int,
+        total_pages: int,
+    ) -> tuple[str, str]:
+        page_base_name = os.path.splitext(os.path.basename(image_path))[0]
+        series_dir = self.main_page.get_automatic_output_series_dir(
+            directory,
+            anchor_path=self.main_page.image_files[0] if self.main_page.image_files else image_path,
+        )
+        renderer = ImageSaveRenderer(image)
+        renderer.apply_patches(patches or [])
+        renderer.add_state_to_image(viewer_state or {})
+        final_rgb = renderer.render_to_image()
+        if is_single_archive_mode(export_settings):
+            staging_dir = build_archive_staging_dir(series_dir, export_token)
+            os.makedirs(staging_dir, exist_ok=True)
+            output_path = os.path.join(
+                staging_dir,
+                build_archive_page_file_name(
+                    page_index,
+                    total_pages,
+                    page_base_name,
+                    str(
+                        export_settings.get(
+                            "resolved_automatic_output_archive_image_format",
+                            "png",
+                        )
+                    ),
+                ),
+            )
+            write_archive_image(
+                output_path,
+                final_rgb,
+                resolved_settings=export_settings,
+            )
+            return output_path, series_dir
+
+        os.makedirs(series_dir, exist_ok=True)
+        output_path = os.path.join(
+            series_dir,
+            build_output_file_name(
+                page_base_name,
+                "translated",
+                image_path,
+                export_settings,
+            ),
+        )
+        write_output_image(
+            output_path,
+            final_rgb,
+            source_path=image_path,
+            resolved_settings=export_settings,
+        )
+        return output_path, series_dir
+
+    def _ensure_page_state(self, image_path: str) -> dict:
+        return self.main_page.image_ctrl.ensure_page_state(image_path)
+
+    def _serialize_rectangles_from_blocks(self, blk_list) -> list[dict]:
+        rects: list[dict] = []
+        for blk in blk_list or []:
+            x1, y1, x2, y2 = blk.xyxy
+            rects.append(
+                {
+                    "rect": (float(x1), float(y1), float(x2 - x1), float(y2 - y1)),
+                    "rotation": float(getattr(blk, "angle", 0)),
+                    "transform_origin": tuple(blk.tr_origin_point)
+                    if getattr(blk, "tr_origin_point", None)
+                    else (0.0, 0.0),
+                }
+            )
+        return rects
+
+    def _start_page_summary(self, image_path: str, source_lang: str, target_lang: str) -> None:
+        state = self._ensure_page_state(image_path)
+        summary = self.main_page.image_ctrl.reset_processing_summary(
+            image_path, run_type=self._current_run_type()
+        )
+        self.main_page.image_ctrl.update_processing_summary(
+            image_path,
+            {
+                "source_lang": source_lang,
+                "target_lang": target_lang,
+                "device": resolve_device(self.main_page.settings_page.is_gpu_enabled()),
+                "stage_status": summary.get("stage_status", {}),
+            },
+        )
+        state["source_lang"] = source_lang
+        state["target_lang"] = target_lang
+
+    def _persist_detect_state(
+        self,
+        image_path: str,
+        blk_list,
+        detector_key: str,
+        detector_engine: str,
+        image,
+    ) -> None:
+        state = self._ensure_page_state(image_path)
+        state["blk_list"] = blk_list
+        viewer_state = state.setdefault("viewer_state", {})
+        viewer_state["rectangles"] = self._serialize_rectangles_from_blocks(blk_list)
+        self.main_page.image_ctrl.update_processing_summary(
+            image_path,
+            {
+                "detector_key": detector_key,
+                "detector_engine": detector_engine,
+                "block_count": len(blk_list or []),
+                "image_shape": list(getattr(image, "shape", []) or []),
+            },
+        )
+        self.main_page.image_ctrl.mark_processing_stage(
+            image_path,
+            "detect",
+            "completed",
+            block_count=len(blk_list or []),
+        )
+
+    def _persist_ocr_state(
+        self,
+        image_path: str,
+        blk_list,
+        ocr_key: str,
+        ocr_engine: str,
+        device: str,
+        quality: dict,
+        cache_status: str,
+        attempt_count: int,
+    ) -> None:
+        state = self._ensure_page_state(image_path)
+        state["blk_list"] = blk_list
+        self.main_page.image_ctrl.update_processing_summary(
+            image_path,
+            {
+                "ocr_key": ocr_key,
+                "ocr_engine": ocr_engine,
+                "device": device,
+                "block_count": len(blk_list or []),
+                "ocr_quality_counts": {
+                    "non_empty": quality.get("non_empty", 0),
+                    "empty": quality.get("empty", 0),
+                    "single_char_like": quality.get("single_char_like", 0),
+                },
+            },
+        )
+        self.main_page.image_ctrl.mark_processing_stage(
+            image_path,
+            "ocr",
+            "completed",
+            cache_status=cache_status,
+            attempt_count=attempt_count,
+            quality=quality,
+        )
+
+    def _persist_translation_state(
+        self,
+        image_path: str,
+        blk_list,
+        translator_key: str,
+        translator_engine: str,
+        cache_status: str,
+    ) -> None:
+        state = self._ensure_page_state(image_path)
+        state["blk_list"] = blk_list
+        self.main_page.image_ctrl.update_processing_summary(
+            image_path,
+            {
+                "translator_key": translator_key,
+                "translator_engine": translator_engine,
+                "block_count": len(blk_list or []),
+            },
+        )
+        self.main_page.image_ctrl.mark_processing_stage(
+            image_path,
+            "translation",
+            "completed",
+            cache_status=cache_status,
+        )
+
+    def _log_ocr_quality(self, image_path: str, quality: dict, attempt: int) -> None:
+        logger.info(
+            "ocr quality summary: image=%s attempt=%d blocks=%d non_empty=%d empty=%d single_char_like=%d low_quality=%s reason=%s",
+            os.path.basename(image_path),
+            attempt,
+            quality.get("block_count", 0),
+            quality.get("non_empty", 0),
+            quality.get("empty", 0),
+            quality.get("single_char_like", 0),
+            quality.get("low_quality", False),
+            quality.get("reason", ""),
+        )
+
     def batch_process(self, selected_paths: List[str] = None):
-        timestamp = datetime.now().strftime("%b-%d-%Y_%I-%M-%S%p")
+        timestamp = build_export_timestamp()
+        self._export_run_tokens = {}
+        self._run_started_at = time.monotonic()
+        self._page_started_at = None
+        self._progress_image_path = None
+        self._recent_page_durations.clear()
         image_list = selected_paths if selected_paths is not None else self.main_page.image_files
         total_images = len(image_list)
+        self._emit_benchmark_event("batch_run_start", total_images=total_images)
         try:
             if self.main_page.file_handler.should_pre_materialize(image_list):
                 count = self.main_page.file_handler.pre_materialize(image_list)
@@ -98,76 +646,277 @@ class BatchProcessor:
 
         for index, image_path in enumerate(image_list):
             if self._is_cancelled():
+                self._emit_benchmark_event("batch_run_cancelled", image_path=image_path, image_index=index, total_images=total_images)
                 return
 
-            file_on_display = self.main_page.image_files[self.main_page.curr_img_idx]
+            file_on_display = None
+            if 0 <= self.main_page.curr_img_idx < len(self.main_page.image_files):
+                file_on_display = self.main_page.image_files[self.main_page.curr_img_idx]
 
             # index, step, total_steps, change_name
             self.emit_progress(index, total_images, 0, 10, True)
 
             settings_page = self.main_page.settings_page
-            source_lang = self.main_page.image_states[image_path]['source_lang']
-            target_lang = self.main_page.image_states[image_path]['target_lang']
+            export_settings = self._effective_export_settings(settings_page)
+            hd_strategy_settings = settings_page.get_hd_strategy_settings()
+            hd_strategy = settings_page.ui.value_mappings.get(
+                hd_strategy_settings.get("strategy", ""),
+                hd_strategy_settings.get("strategy", ""),
+            )
+            page_state = self._ensure_page_state(image_path)
+            source_lang = page_state['source_lang']
+            target_lang = page_state['target_lang']
+            self._start_page_summary(image_path, source_lang, target_lang)
+            self._log_page_start(index, total_images, image_path)
+            self._emit_benchmark_event(
+                "page_start",
+                image_path=image_path,
+                image_index=index,
+                total_images=total_images,
+                source_lang=source_lang,
+                target_lang=target_lang,
+            )
+            page_ocr_metrics = self._ocr_quality_metrics(None)
+            page_translation_metrics = self._translation_benchmark_metrics(None)
 
             target_lang_en = self.main_page.lang_mapping.get(target_lang, None)
             trg_lng_cd = get_language_code(target_lang_en)
             
             base_name = os.path.splitext(os.path.basename(image_path))[0].strip()
             extension = os.path.splitext(image_path)[1]
-            directory = os.path.dirname(image_path)
+            directory, archive_bname = resolve_export_directory(
+                image_path,
+                archive_info=self.main_page.file_handler.archive_info,
+                source_records=getattr(self.main_page, "export_source_by_path", {}),
+                project_file=getattr(self.main_page, "project_file", None),
+                temp_dir=getattr(self.main_page, "temp_dir", None),
+            )
 
-            archive_bname = ""
-            for archive in self.main_page.file_handler.archive_info:
-                images = archive['extracted_images']
-                archive_path = archive['archive_path']
+            export_token = self._resolve_export_token(directory, timestamp)
+            export_root = export_run_root(directory, export_token)
+            self.main_page.image_ctrl.update_processing_summary(
+                image_path,
+                {
+                    "export_root": export_root,
+                    "export_settings": {
+                        "export_raw_text": bool(export_settings.get("export_raw_text", False)),
+                        "export_translated_text": bool(export_settings.get("export_translated_text", False)),
+                        "export_inpainted_image": bool(export_settings.get("export_inpainted_image", False)),
+                        "export_detector_overlay": bool(export_settings.get("export_detector_overlay", False)),
+                        "export_raw_mask": bool(export_settings.get("export_raw_mask", False)),
+                        "export_mask_overlay": bool(export_settings.get("export_mask_overlay", False)),
+                        "export_cleanup_mask_delta": bool(export_settings.get("export_cleanup_mask_delta", False)),
+                        "export_debug_metadata": bool(export_settings.get("export_debug_metadata", False)),
+                    },
+                },
+            )
 
-                for img_pth in images:
-                    if img_pth == image_path:
-                        directory = os.path.dirname(archive_path)
-                        archive_bname = os.path.splitext(os.path.basename(archive_path))[0].strip()
-
-            ensure_path_materialized(image_path)
-            image = imk.read_image(image_path)
+            image = self.main_page.image_ctrl.load_image(image_path)
+            if image is None:
+                ensure_path_materialized(image_path)
+                image = imk.read_image(image_path)
 
             # skip UI-skipped images
-            state = self.main_page.image_states.get(image_path, {})
-            if state.get('skip', False):
-                self.skip_save(directory, timestamp, base_name, extension, archive_bname, image)
-                self.log_skipped_image(directory, timestamp, image_path, "User-skipped")
+            if page_state.get('skip', False):
+                self.skip_save(directory, export_token, base_name, extension, archive_bname, image)
+                self.log_skipped_image(directory, export_token, image_path, "User-skipped")
                 continue
 
             # Text Block Detection
             self.emit_progress(index, total_images, 1, 10, False)
             if self._is_cancelled():
+                self._emit_benchmark_event("batch_run_cancelled", image_path=image_path, image_index=index, total_images=total_images)
                 return
+            self._emit_benchmark_event(
+                "detect_start",
+                image_path=image_path,
+                image_index=index,
+                total_images=total_images,
+            )
 
             # Use the shared block detector from the handler
             if self.block_detection.block_detector_cache is None:
                 self.block_detection.block_detector_cache = TextBlockDetector(settings_page)
             
             blk_list = self.block_detection.block_detector_cache.detect(image)
+            precomputed_mask_details = self.block_detection.block_detector_cache.last_mask_details
+            detector_key = self.block_detection.block_detector_cache.detector or settings_page.get_tool_selection('detector') or 'RT-DETR-v2'
+            detector_engine = self.block_detection.block_detector_cache.last_engine_name or ""
+            detector_device = self.block_detection.block_detector_cache.last_device or resolve_device(
+                settings_page.is_gpu_enabled(), backend='onnx'
+            )
+            source_lang_english = self.main_page.lang_mapping.get(source_lang, source_lang)
+            rtl = source_lang_english == 'Japanese'
+            if blk_list:
+                get_best_render_area(blk_list, image)
+                blk_list = sort_blk_list(blk_list, rtl)
+                self._persist_detect_state(
+                    image_path,
+                    blk_list,
+                    detector_key,
+                    detector_engine,
+                    image,
+                )
+                self._emit_benchmark_event(
+                    "detect_end",
+                    image_path=image_path,
+                    image_index=index,
+                    total_images=total_images,
+                    block_count=len(blk_list or []),
+                    detector_key=detector_key,
+                    detector_engine=detector_engine,
+                )
+            else:
+                self._emit_benchmark_event(
+                    "detect_end",
+                    image_path=image_path,
+                    image_index=index,
+                    total_images=total_images,
+                    block_count=0,
+                    detector_key=detector_key,
+                    detector_engine=detector_engine,
+                )
 
             self.emit_progress(index, total_images, 2, 10, False)
             if self._is_cancelled():
+                self._emit_benchmark_event("batch_run_cancelled", image_path=image_path, image_index=index, total_images=total_images)
                 return
 
             if blk_list:
+                self._emit_benchmark_event(
+                    "ocr_start",
+                    image_path=image_path,
+                    image_index=index,
+                    total_images=total_images,
+                    block_count=len(blk_list or []),
+                )
                 # Get ocr cache key for batch processing
                 ocr_model = settings_page.get_tool_selection('ocr')
                 device = resolve_device(settings_page.is_gpu_enabled())
                 cache_key = self.cache_manager._get_ocr_cache_key(image, source_lang, ocr_model, device)
-                # Use the shared OCR processor from the handler
-                self.ocr_handler.ocr.initialize(self.main_page, source_lang)
                 try:
-                    self.ocr_handler.ocr.process(image, blk_list)
-                    # Cache the OCR results for potential future use
-                    self.cache_manager._cache_ocr_results(cache_key, self.main_page.blk_list)
-                    source_lang_english = self.main_page.lang_mapping.get(source_lang, source_lang)
-                    rtl = True if source_lang_english == 'Japanese' else False
-                    blk_list = sort_blk_list(blk_list, rtl)
+                    cache_status = "miss"
+                    attempt_count = 0
+                    ocr_page_profile: dict = {}
+                    # Runtime startup for local OCR can fail here (e.g. missing Docker image).
+                    # Keep it inside the per-page OCR error path so the batch report captures it.
+                    self.ocr_handler.ocr.initialize(self.main_page, source_lang)
+                    if self.cache_manager._can_serve_all_blocks_from_ocr_cache(cache_key, blk_list):
+                        cache_status = "hit"
+                        logger.info("ocr cache hit: using cached OCR for %d blocks", len(blk_list))
+                        self.cache_manager._apply_cached_ocr_to_blocks(cache_key, blk_list)
+                        apply_ocr_result_dictionary(
+                            blk_list,
+                            settings_page.get_ocr_result_dictionary_rules(),
+                        )
+                        attempt_count = 1
+                    else:
+                        logger.info("ocr cache miss: running OCR for %d blocks", len(blk_list))
+                        self.ocr_handler.ocr.process(image, blk_list)
+                        ocr_page_profile = dict(getattr(self.ocr_handler.ocr, "last_page_profile", {}) or {})
+                        apply_ocr_result_dictionary(
+                            blk_list,
+                            settings_page.get_ocr_result_dictionary_rules(),
+                        )
+                        self.cache_manager._cache_ocr_results(cache_key, blk_list)
+                        cache_status = "refreshed"
+                        attempt_count = 1
+
+                    quality = summarize_ocr_quality(blk_list)
+                    self._log_ocr_quality(image_path, quality, attempt_count)
+
+                    if quality.get("low_quality", False):
+                        attempt_count += 1
+                        logger.info(
+                            "ocr quality gate triggered retry for %s: %s",
+                            os.path.basename(image_path),
+                            quality.get("reason", ""),
+                        )
+                        for blk in blk_list:
+                            blk.text = ""
+                        self.ocr_handler.ocr.process(image, blk_list)
+                        ocr_page_profile = dict(getattr(self.ocr_handler.ocr, "last_page_profile", {}) or {})
+                        apply_ocr_result_dictionary(
+                            blk_list,
+                            settings_page.get_ocr_result_dictionary_rules(),
+                        )
+                        self.cache_manager._cache_ocr_results(cache_key, blk_list)
+                        quality = summarize_ocr_quality(blk_list)
+                        self._log_ocr_quality(image_path, quality, attempt_count)
+                        cache_status = "refreshed"
+
+                    if quality.get("low_quality", False):
+                        err_msg = quality.get("reason") or self.main_page.tr("OCR quality too low after retry.")
+                        self.main_page.image_ctrl.update_processing_summary(
+                            image_path,
+                            {
+                                "ocr_quality_counts": {
+                                    "non_empty": quality.get("non_empty", 0),
+                                    "empty": quality.get("empty", 0),
+                                    "single_char_like": quality.get("single_char_like", 0),
+                                },
+                                "last_failure_reason": err_msg,
+                            },
+                        )
+                        self.main_page.image_ctrl.mark_processing_stage(
+                            image_path,
+                            "ocr",
+                            "failed",
+                            reason=err_msg,
+                            quality=quality,
+                            cache_status=cache_status,
+                            attempt_count=attempt_count,
+                        )
+                        raise RuntimeError(err_msg)
+
+                    self._persist_ocr_state(
+                        image_path,
+                        blk_list,
+                        ocr_model,
+                        self.ocr_handler.ocr.last_engine_name or "",
+                        device,
+                        quality,
+                        cache_status,
+                        attempt_count,
+                    )
+                    page_ocr_metrics = self._ocr_quality_metrics(quality)
+                    self._emit_benchmark_event(
+                        "ocr_end",
+                        image_path=image_path,
+                        image_index=index,
+                        total_images=total_images,
+                        block_count=len(blk_list or []),
+                        ocr_model=ocr_model,
+                        ocr_engine=self.ocr_handler.ocr.last_engine_name or "",
+                        cache_status=cache_status,
+                        attempt_count=attempt_count,
+                        ocr_page_profile=ocr_page_profile,
+                        **page_ocr_metrics,
+                    )
+                    if self._benchmark_stage_ceiling() == "ocr":
+                        self.main_page.image_ctrl.update_processing_summary(
+                            image_path,
+                            {
+                                "benchmark_stage_ceiling": "ocr",
+                            },
+                        )
+                        self._emit_benchmark_event(
+                            "page_done",
+                            image_path=image_path,
+                            image_index=index,
+                            total_images=total_images,
+                            block_count=len(blk_list or []),
+                            patch_count=0,
+                            stage_ceiling="ocr",
+                        )
+                        self._log_page_done(
+                            index,
+                            total_images,
+                            image_path,
+                        )
+                        self.emit_progress(index, total_images, 10, 10, False)
+                        continue
                     
-                except InsufficientCreditsException:
-                    raise
                 except Exception as e:
                     # if it's a connection/network error, give a short message
                     if isinstance(e, requests.exceptions.ConnectionError):
@@ -190,37 +939,106 @@ class BatchProcessor:
                         err_msg = str(e)
 
                     logger.exception(f"OCR processing failed: {err_msg}")
+                    self._emit_benchmark_event(
+                        "page_failed",
+                        image_path=image_path,
+                        image_index=index,
+                        total_images=total_images,
+                        failed_stage="ocr",
+                        reason=err_msg,
+                        ocr_page_profile=ocr_page_profile,
+                        **page_ocr_metrics,
+                    )
+                    self.main_page.image_ctrl.mark_processing_stage(
+                        image_path,
+                        "ocr",
+                        "failed",
+                        reason=err_msg,
+                    )
                     reason = f"OCR: {err_msg}"
                     full_traceback = traceback.format_exc()
-                    self.skip_save(directory, timestamp, base_name, extension, archive_bname, image)
+                    self.skip_save(directory, export_token, base_name, extension, archive_bname, image)
                     self.main_page.image_skipped.emit(image_path, "OCR", err_msg)
-                    self.log_skipped_image(directory, timestamp, image_path, reason, full_traceback)
+                    self.log_skipped_image(directory, export_token, image_path, reason, full_traceback)
                     continue
             else:
-                self.skip_save(directory, timestamp, base_name, extension, archive_bname, image)
+                page_state = self._ensure_page_state(image_path)
+                page_state["blk_list"] = []
+                page_state.setdefault("viewer_state", {})["rectangles"] = []
+                self.main_page.image_ctrl.mark_processing_stage(
+                    image_path,
+                    "detect",
+                    "failed",
+                    reason="No text blocks detected.",
+                )
+                self._write_inpaint_debug_exports(
+                    export_root=export_root,
+                    archive_bname=archive_bname,
+                    image_path=image_path,
+                    image=image,
+                    blk_list=[],
+                    export_settings=export_settings,
+                    raw_mask=None,
+                    final_mask=None,
+                    detector_key=detector_key,
+                    detector_engine=detector_engine,
+                    detector_device=detector_device,
+                    inpainter_key=settings_page.get_tool_selection('inpainter'),
+                    hd_strategy=hd_strategy,
+                    cleanup_stats={"applied": False, "component_count": 0, "block_count": 0},
+                    mask_details={
+                        "mask_refiner": settings_page.get_mask_refiner_settings().get("mask_refiner", "legacy_bbox"),
+                        "mask_inpaint_mode": settings_page.get_mask_refiner_settings().get("mask_inpaint_mode", "rtdetr_legacy_bbox_source_lama"),
+                    },
+                    inpainter_backend=get_inpainter_runtime(settings_page)["backend"],
+                )
+                self.skip_save(directory, export_token, base_name, extension, archive_bname, image)
                 self.main_page.image_skipped.emit(image_path, "Text Blocks", "")
-                self.log_skipped_image(directory, timestamp, image_path, "No text blocks detected")
+                self.log_skipped_image(directory, export_token, image_path, "No text blocks detected")
+                self._emit_benchmark_event(
+                    "page_failed",
+                    image_path=image_path,
+                    image_index=index,
+                    total_images=total_images,
+                    failed_stage="detect",
+                    reason="No text blocks detected.",
+                    **page_ocr_metrics,
+                )
                 continue
 
             self.emit_progress(index, total_images, 3, 10, False)
             if self._is_cancelled():
+                self._emit_benchmark_event("batch_run_cancelled", image_path=image_path, image_index=index, total_images=total_images)
                 return
+            self._emit_benchmark_event(
+                "inpaint_start",
+                image_path=image_path,
+                image_index=index,
+                total_images=total_images,
+                block_count=len(blk_list or []),
+            )
 
             # Clean Image of text
-            export_settings = settings_page.get_export_settings()
 
             # Use the shared inpainter from the handler
-            if self.inpainting.inpainter_cache is None or self.inpainting.cached_inpainter_key != settings_page.get_tool_selection('inpainter'):
-                backend = 'onnx'
+            runtime = get_inpainter_runtime(settings_page)
+            inpainter_key = runtime["key"]
+            inpainter_backend = runtime["backend"]
+            if self.inpainting.inpainter_cache is None or self.inpainting.cached_inpainter_key != inpainter_key:
                 device = resolve_device(
                     settings_page.is_gpu_enabled(),
-                    backend=backend
+                    backend=inpainter_backend,
                 )
-                inpainter_key = settings_page.get_tool_selection('inpainter')
                 InpainterClass = inpaint_map[inpainter_key]
-                logger.info("pre-inpaint: initializing inpainter '%s' on device %s", inpainter_key, device)
+                logger.info("pre-inpaint: initializing inpainter '%s' on device %s (backend=%s)", inpainter_key, device, inpainter_backend)
                 t0 = time.time()
-                self.inpainting.inpainter_cache = InpainterClass(device, backend=backend)
+                self.inpainting.inpainter_cache = InpainterClass(
+                    device,
+                    backend=inpainter_backend,
+                    runtime_device=runtime.get("device", device),
+                    inpaint_size=runtime.get("inpaint_size"),
+                    precision=runtime.get("precision"),
+                )
                 self.inpainting.cached_inpainter_key = inpainter_key
                 t1 = time.time()
                 logger.info("pre-inpaint: inpainter initialized in %.2fs", t1 - t0)
@@ -228,16 +1046,32 @@ class BatchProcessor:
             config = get_config(settings_page)
             logger.info("pre-inpaint: generating mask (blk_list=%d blocks)", len(blk_list))
             t0 = time.time()
-            mask = generate_mask(image, blk_list)
+            mask_settings = settings_page.get_mask_refiner_settings()
+            mask_details = generate_mask(
+                image,
+                blk_list,
+                settings=mask_settings,
+                return_details=True,
+                precomputed_mask_details=precomputed_mask_details,
+            )
+            mask = mask_details["final_mask"]
+            raw_mask = mask_details["raw_mask"]
             t1 = time.time()
-            logger.info("pre-inpaint: mask generated in %.2fs (mask shape=%s)", t1 - t0, getattr(mask, 'shape', None))
+            logger.info("pre-inpaint: mask generated in %.2fs (mask shape=%s, refiner=%s backend=%s)", t1 - t0, getattr(mask, 'shape', None), mask_details.get("mask_refiner"), mask_details.get("refiner_backend"))
 
             self.emit_progress(index, total_images, 4, 10, False)
             if self._is_cancelled():
                 return
 
-            inpaint_input_img = self.inpainting.inpainter_cache(image, mask, config)
+            inpaint_input_img = self.inpainting.inpaint_with_blocks(image, mask, blk_list, config=config)
             inpaint_input_img = imk.convert_scale_abs(inpaint_input_img)
+            inpaint_input_img, mask, cleanup_stats = refine_bubble_residue_inpaint(
+                inpaint_input_img,
+                mask,
+                blk_list,
+                self.inpainting.inpainter_cache,
+                config,
+            )
 
             # Saving cleaned image
             patches = self.inpainting.get_inpainted_patches(mask, inpaint_input_img)
@@ -245,20 +1079,96 @@ class BatchProcessor:
 
             # inpaint_input_img is already in RGB format
 
-            if export_settings['export_inpainted_image']:
-                path = os.path.join(directory, f"comic_translate_{timestamp}", "cleaned_images", archive_bname)
-                if not os.path.exists(path):
-                    os.makedirs(path, exist_ok=True)
-                imk.write_image(os.path.join(path, f"{base_name}_cleaned{extension}"), inpaint_input_img)
+            if export_settings['export_inpainted_image'] and is_individual_images_mode(export_settings):
+                path = self.main_page.get_automatic_output_series_dir(
+                    directory,
+                    anchor_path=self.main_page.image_files[0] if self.main_page.image_files else image_path,
+                )
+                os.makedirs(path, exist_ok=True)
+                cleaned_output_path = os.path.join(
+                    path,
+                    build_output_file_name(
+                        base_name,
+                        "cleaned",
+                        image_path,
+                        export_settings,
+                    ),
+                )
+                write_output_image(
+                    cleaned_output_path,
+                    inpaint_input_img,
+                    source_path=image_path,
+                    resolved_settings=export_settings,
+                )
+                self.main_page.image_ctrl.update_processing_summary(
+                    image_path,
+                    {"cleaned_image_path": cleaned_output_path},
+                )
+            elif not is_individual_images_mode(export_settings):
+                self.main_page.image_ctrl.update_processing_summary(
+                    image_path,
+                    {"cleaned_image_path": ""},
+                )
+            self.main_page.image_ctrl.update_processing_summary(
+                image_path,
+                {
+                    "inpainter": settings_page.get_tool_selection('inpainter'),
+                    "hd_strategy": hd_strategy,
+                    "cleanup_applied": bool(cleanup_stats.get("applied", False)),
+                    "cleanup_component_count": int(cleanup_stats.get("component_count", 0) or 0),
+                    "cleanup_block_count": int(cleanup_stats.get("block_count", 0) or 0),
+                },
+            )
+            self._write_inpaint_debug_exports(
+                export_root=export_root,
+                archive_bname=archive_bname,
+                image_path=image_path,
+                image=image,
+                blk_list=blk_list,
+                export_settings=export_settings,
+                raw_mask=raw_mask,
+                final_mask=mask,
+                detector_key=detector_key,
+                detector_engine=detector_engine,
+                detector_device=detector_device,
+                inpainter_key=inpainter_key,
+                hd_strategy=hd_strategy,
+                cleanup_stats=cleanup_stats,
+                mask_details=mask_details,
+                inpainter_backend=inpainter_backend,
+            )
+            self.main_page.image_ctrl.mark_processing_stage(
+                image_path,
+                "inpaint",
+                "completed",
+                patch_count=len(patches or []),
+            )
+            self._emit_benchmark_event(
+                "inpaint_end",
+                image_path=image_path,
+                image_index=index,
+                total_images=total_images,
+                block_count=len(blk_list or []),
+                patch_count=len(patches or []),
+            )
 
             self.emit_progress(index, total_images, 5, 10, False)
             if self._is_cancelled():
+                self._emit_benchmark_event("batch_run_cancelled", image_path=image_path, image_index=index, total_images=total_images)
                 return
 
             # Get Translations/ Export if selected
             extra_context = settings_page.get_llm_settings()['extra_context']
             translator_key = settings_page.get_tool_selection('translator')
             translator = Translator(self.main_page, source_lang, target_lang)
+            self._emit_benchmark_event(
+                "translate_start",
+                image_path=image_path,
+                image_index=index,
+                total_images=total_images,
+                block_count=len(blk_list or []),
+                translator_key=translator_key,
+            )
             
             # Get translation cache key for batch processing
             translation_cache_key = self.cache_manager._get_translation_cache_key(
@@ -266,11 +1176,44 @@ class BatchProcessor:
             )
             
             try:
-                translator.translate(blk_list, image, extra_context)
-                # Cache the translation results for potential future use
-                self.cache_manager._cache_translation_results(translation_cache_key, blk_list)
-            except InsufficientCreditsException:
-                raise
+                translation_cache_status = "miss"
+                if self.cache_manager._can_serve_all_blocks_from_translation_cache(translation_cache_key, blk_list):
+                    self.cache_manager._apply_cached_translations_to_blocks(translation_cache_key, blk_list)
+                    apply_translation_result_dictionary(
+                        blk_list,
+                        settings_page.get_translation_result_dictionary_rules(),
+                    )
+                    translation_cache_status = "hit"
+                    logger.info("Using cached translation results for all %d blocks", len(blk_list))
+                else:
+                    translator.translate(blk_list, image, extra_context)
+                    apply_translation_result_dictionary(
+                        blk_list,
+                        settings_page.get_translation_result_dictionary_rules(),
+                    )
+                    # Cache the translation results for potential future use
+                    self.cache_manager._cache_translation_results(translation_cache_key, blk_list)
+                    translation_cache_status = "refreshed"
+                    logger.info("Translation completed and cached for %d blocks", len(blk_list))
+                page_translation_metrics = self._translation_benchmark_metrics(translator)
+                self._persist_translation_state(
+                    image_path,
+                    blk_list,
+                    translator_key,
+                    translator.engine.__class__.__name__,
+                    translation_cache_status,
+                )
+                self._emit_benchmark_event(
+                    "translate_end",
+                    image_path=image_path,
+                    image_index=index,
+                    total_images=total_images,
+                    block_count=len(blk_list or []),
+                    translator_key=translator_key,
+                    translator_engine=translator.engine.__class__.__name__,
+                    cache_status=translation_cache_status,
+                    **page_translation_metrics,
+                )
             except Exception as e:
                 # if it's a connection/network error, give a short message
                 if isinstance(e, requests.exceptions.ConnectionError):
@@ -293,14 +1236,31 @@ class BatchProcessor:
                     err_msg = str(e)
 
                 logger.exception(f"Translation failed: {err_msg}")
+                page_translation_metrics = self._translation_benchmark_metrics(translator)
+                self._emit_benchmark_event(
+                    "page_failed",
+                    image_path=image_path,
+                    image_index=index,
+                    total_images=total_images,
+                    failed_stage="translation",
+                    reason=err_msg,
+                    **page_translation_metrics,
+                )
+                self.main_page.image_ctrl.mark_processing_stage(
+                    image_path,
+                    "translation",
+                    "failed",
+                    reason=err_msg,
+                )
                 reason = f"Translator: {err_msg}"
                 full_traceback = traceback.format_exc()
-                self.skip_save(directory, timestamp, base_name, extension, archive_bname, image)
+                self.skip_save(directory, export_token, base_name, extension, archive_bname, image)
                 self.main_page.image_skipped.emit(image_path, "Translator", err_msg)
-                self.log_skipped_image(directory, timestamp, image_path, reason, full_traceback)
+                self.log_skipped_image(directory, export_token, image_path, reason, full_traceback)
                 continue
 
             if self._is_cancelled():
+                self._emit_benchmark_event("batch_run_cancelled", image_path=image_path, image_index=index, total_images=total_images)
                 return
 
             entire_raw_text = get_raw_text(blk_list)
@@ -312,48 +1272,76 @@ class BatchProcessor:
                 translated_text_obj = json.loads(entire_translated_text)
                 
                 if (not raw_text_obj) or (not translated_text_obj):
-                    self.skip_save(directory, timestamp, base_name, extension, archive_bname, image)
+                    self._emit_benchmark_event(
+                        "page_failed",
+                        image_path=image_path,
+                        image_index=index,
+                        total_images=total_images,
+                        failed_stage="translation",
+                        reason="Translator returned empty JSON.",
+                        **page_translation_metrics,
+                    )
+                    self.main_page.image_ctrl.mark_processing_stage(
+                        image_path,
+                        "translation",
+                        "failed",
+                        reason="Translator returned empty JSON.",
+                    )
+                    self.skip_save(directory, export_token, base_name, extension, archive_bname, image)
                     self.main_page.image_skipped.emit(image_path, "Translator", "")
-                    self.log_skipped_image(directory, timestamp, image_path, "Translator: empty JSON")
+                    self.log_skipped_image(directory, export_token, image_path, "Translator: empty JSON")
                     continue
             except json.JSONDecodeError as e:
                 # Handle invalid JSON
                 error_message = str(e)
                 reason = f"Translator: JSONDecodeError: {error_message}"
                 logger.exception(reason)
+                self._emit_benchmark_event(
+                    "page_failed",
+                    image_path=image_path,
+                    image_index=index,
+                    total_images=total_images,
+                    failed_stage="translation",
+                    reason=error_message,
+                    **page_translation_metrics,
+                )
+                self.main_page.image_ctrl.mark_processing_stage(
+                    image_path,
+                    "translation",
+                    "failed",
+                    reason=error_message,
+                )
                 full_traceback = traceback.format_exc()
-                self.skip_save(directory, timestamp, base_name, extension, archive_bname, image)
+                self.skip_save(directory, export_token, base_name, extension, archive_bname, image)
                 self.main_page.image_skipped.emit(image_path, "Translator", error_message)
-                self.log_skipped_image(directory, timestamp, image_path, reason, full_traceback)
+                self.log_skipped_image(directory, export_token, image_path, reason, full_traceback)
                 continue
 
-            if export_settings['export_raw_text']:
-                path = os.path.join(directory, f"comic_translate_{timestamp}", "raw_texts", archive_bname)
-                if not os.path.exists(path):
-                    os.makedirs(path, exist_ok=True)
-                with open(
-                    os.path.join(path, os.path.splitext(os.path.basename(image_path))[0] + "_raw.json"),
-                    'w',
-                    encoding='UTF-8',
-                ) as file:
-                    file.write(entire_raw_text)
-
-            if export_settings['export_translated_text']:
-                path = os.path.join(directory, f"comic_translate_{timestamp}", "translated_texts", archive_bname)
-                if not os.path.exists(path):
-                    os.makedirs(path, exist_ok=True)
-                with open(
-                    os.path.join(path, os.path.splitext(os.path.basename(image_path))[0] + "_translated.json"),
-                    'w',
-                    encoding='UTF-8',
-                ) as file:
-                    file.write(entire_translated_text)
+            self._write_json_exports(
+                directory,
+                export_token,
+                archive_bname,
+                image_path,
+                image,
+                blk_list,
+                page_state,
+                source_lang,
+                export_settings,
+            )
 
             self.emit_progress(index, total_images, 7, 10, False)
             if self._is_cancelled():
+                self._emit_benchmark_event("batch_run_cancelled", image_path=image_path, image_index=index, total_images=total_images)
                 return
 
             # Text Rendering
+            self._emit_benchmark_event(
+                "render_start",
+                image_path=image_path,
+                image_index=index,
+                total_images=total_images,
+                block_count=len(blk_list or []),
+            )
             render_settings = self.main_page.render_settings()
             upper_case = render_settings.upper_case
             outline = render_settings.outline
@@ -373,13 +1361,36 @@ class BatchProcessor:
             underline = render_settings.underline
             alignment_id = render_settings.alignment_id
             alignment = self.main_page.button_to_alignment[alignment_id]
+            vertical_alignment = self.main_page.button_to_vertical_alignment.get(
+                render_settings.vertical_alignment_id,
+                VERTICAL_ALIGNMENT_TOP,
+            )
             direction = render_settings.direction
                 
             text_items_state = []
             for blk in blk_list:
                 x1, y1, block_width, block_height = blk.xywh
 
-                translation = blk.translation
+                translation_raw = blk.translation
+                if not translation_raw or len(translation_raw) == 1:
+                    continue
+
+                render_normalization = describe_render_text_sanitization(
+                    translation_raw,
+                    font,
+                    block_index=getattr(blk, "_debug_block_index", None),
+                    image_path=image_path,
+                )
+                translation = render_normalization.text
+                blk._render_translation_raw = str(translation_raw or "")
+                blk._render_text = str(translation or "")
+                blk._render_normalization_applied = bool(
+                    render_normalization.normalization_applied
+                )
+                blk._render_normalization_reasons = list(render_normalization.reasons)
+                blk._render_normalization_replacements = list(
+                    render_normalization.replacements
+                )
                 if not translation or len(translation) == 1:
                     continue
                 
@@ -404,20 +1415,45 @@ class BatchProcessor:
                     return_metrics=True
                 )
                 
-                # Display text if on current page  
-                if image_path == file_on_display:
-                    self.main_page.blk_rendered.emit(translation, font_size, blk, image_path)
-
                 # Language-specific formatting for state storage
                 if is_no_space_lang(trg_lng_cd):
                     translation = translation.replace(' ', '')
+                render_markup = describe_render_text_markup(translation)
+                blk._render_text = str(translation or "")
+                blk._render_html = str(
+                    render_markup.html_text if render_markup.html_applied else translation or ""
+                )
+                blk._render_html_applied = bool(render_markup.html_applied)
+                blk._render_fallback_font_family = str(
+                    render_markup.fallback_font_family or ""
+                )
+                blk._render_normalization_applied = bool(
+                    render_normalization.normalization_applied
+                    or render_markup.html_applied
+                )
+                blk._render_normalization_reasons = sorted(
+                    set(render_normalization.reasons).union(render_markup.reasons)
+                )
+                blk._render_normalization_replacements = list(
+                    render_normalization.replacements
+                ) + list(render_markup.replacements)
+
+                # Display text if on current page
+                if image_path == file_on_display:
+                    self.main_page.blk_rendered.emit(translation, font_size, blk, image_path)
 
                 # Smart Color Override
-                font_color = get_smart_text_color(blk.font_color, setting_font_color)
+                font_color = resolve_render_text_color(
+                    blk.font_color,
+                    setting_font_color,
+                    render_settings.force_font_color,
+                    render_settings.smart_global_apply_all,
+                )
+                source_rect = build_rect_tuple(x1, y1, block_width, block_height)
 
                 # Use TextItemProperties for consistent text item creation
                 text_props = TextItemProperties(
-                    text=translation,
+                    text=blk._render_html,
                     font_family=font,
                     font_size=font_size,
                     text_color=font_color,
@@ -436,6 +1472,9 @@ class BatchProcessor:
                     height=rendered_height,
                     direction=direction,
                     vertical=vertical,
+                    vertical_alignment=vertical_alignment,
+                    source_rect=source_rect,
+                    block_anchor=source_rect,
                     selection_outlines=[
                         OutlineInfo(0, len(translation), 
                         outline_color, 
@@ -443,24 +1482,51 @@ class BatchProcessor:
                         OutlineType.Full_Document)
                     ] if outline else [],
                 )
-                text_items_state.append(text_props.to_dict())
+                text_item_state = text_props.to_dict()
+                text_item_state["translation_raw"] = str(translation_raw or "")
+                text_item_state["render_text"] = str(translation or "")
+                text_item_state["render_html_applied"] = bool(
+                    render_markup.html_applied
+                )
+                text_item_state["render_fallback_font_family"] = str(
+                    render_markup.fallback_font_family or ""
+                )
+                text_item_state["render_normalization_applied"] = bool(
+                    blk._render_normalization_applied
+                )
+                text_item_state["render_normalization_reasons"] = list(
+                    blk._render_normalization_reasons
+                )
+                text_items_state.append(text_item_state)
 
-            self.main_page.image_states[image_path]['viewer_state'].update({
+            page_state = self._ensure_page_state(image_path)
+            page_state['viewer_state'].update({
                 'text_items_state': text_items_state
-                })
-            
-            self.main_page.image_states[image_path]['viewer_state'].update({
+            })
+            page_state['viewer_state'].update({
                 'push_to_stack': True
-                })
+            })
+            self.main_page.image_ctrl.mark_processing_stage(
+                image_path,
+                "render",
+                "completed",
+                text_item_count=len(text_items_state),
+            )
             
             self.emit_progress(index, total_images, 9, 10, False)
             if self._is_cancelled():
+                self._emit_benchmark_event("batch_run_cancelled", image_path=image_path, image_index=index, total_images=total_images)
                 return
 
             # Saving blocks with texts to history
-            self.main_page.image_states[image_path].update({
-                'blk_list': blk_list                   
+            page_state.update({
+                'blk_list': blk_list
             })
+            self.main_page.image_ctrl.mark_processing_stage(
+                image_path,
+                "pipeline",
+                "completed",
+            )
 
             # Notify UI that this page's render state is finalized.
             # This enables a deterministic refresh when the user navigates to this page
@@ -468,7 +1534,49 @@ class BatchProcessor:
             self.main_page.render_state_ready.emit(image_path)
 
             if image_path == file_on_display:
-                self.main_page.blk_list = blk_list
+                self.main_page.blk_list = blk_list.copy()
+
+            final_output_path, final_output_root = self._write_final_render_export(
+                directory,
+                export_token,
+                image_path,
+                image,
+                patches,
+                page_state.get("viewer_state", {}),
+                export_settings,
+                page_index=index,
+                total_pages=total_images,
+            )
+            logger.info("Saved final translated image to %s", final_output_path)
+            self.main_page.image_ctrl.update_processing_summary(
+                image_path,
+                {
+                    "translated_image_path": final_output_path,
+                    "export_root": final_output_root,
+                },
+            )
+            self._emit_benchmark_event(
+                "render_end",
+                image_path=image_path,
+                image_index=index,
+                total_images=total_images,
+                block_count=len(blk_list or []),
+                translated_image_path=final_output_path,
+            )
+            self._emit_benchmark_event(
+                "page_done",
+                image_path=image_path,
+                image_index=index,
+                total_images=total_images,
+                block_count=len(blk_list or []),
+                patch_count=len(patches or []),
+            )
+            self._log_page_done(
+                index,
+                total_images,
+                image_path,
+                preview_path=final_output_path,
+            )
 
             self.emit_progress(index, total_images, 10, 10, False)
-
+        self._emit_benchmark_event("batch_run_done", total_images=total_images)

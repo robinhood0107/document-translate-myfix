@@ -10,7 +10,13 @@ from typing import TYPE_CHECKING
 import msgpack
 
 from .parsers import ProjectDecoder, ProjectEncoder, ensure_string_keys
-from modules.utils.file_handler import ensure_prepared_path_materialized
+from modules.utils.automatic_output import (
+    default_project_output_preferences,
+    normalize_project_output_preferences,
+)
+from modules.utils.export_paths import normalize_export_source_record
+from modules.utils.file_handler import ensure_prepared_path_materialized, get_prepared_path_source
+from modules.utils.inpaint_strokes import PATCH_KIND_INPAINT, normalize_patch_kind
 
 if TYPE_CHECKING:
     from controller import ComicTranslate
@@ -101,7 +107,7 @@ def _init_schema(conn: sqlite3.Connection) -> None:
 
 def _configure_connection(conn: sqlite3.Connection) -> None:
     conn.execute("PRAGMA journal_mode=DELETE")
-    conn.execute("PRAGMA synchronous=NORMAL")
+    conn.execute("PRAGMA synchronous=FULL")
     conn.execute("PRAGMA temp_store=MEMORY")
 
 
@@ -202,23 +208,12 @@ def save_state_to_proj_file_v2(comic_translate: "ComicTranslate", file_name: str
     if target_dir:
         os.makedirs(target_dir, exist_ok=True)
 
-    existing_is_sqlite = is_sqlite_project_file(file_name)
-    use_temp_and_replace = os.path.exists(file_name) and not existing_is_sqlite
-    if use_temp_and_replace:
-        fd, temp_db_path = tempfile.mkstemp(prefix=".ctprv2_tmp_", suffix=".ctpr", dir=target_dir or None)
-        os.close(fd)
-        db_path = temp_db_path
-    else:
-        temp_db_path = None
-        db_path = file_name
-
-    if use_temp_and_replace:
-        conn = sqlite3.connect(db_path, check_same_thread=False, timeout=30.0)
-        _configure_connection(conn)
-        _init_schema(conn)
-        conn_lock = threading.RLock()
-    else:
-        conn, conn_lock = _get_cached_connection(db_path)
+    fd, temp_db_path = tempfile.mkstemp(prefix=".ctprv2_tmp_", suffix=".ctpr", dir=target_dir or None)
+    os.close(fd)
+    conn = sqlite3.connect(temp_db_path, check_same_thread=False, timeout=30.0)
+    _configure_connection(conn)
+    _init_schema(conn)
+    conn_lock = threading.RLock()
 
     # Track which hashes have been written in this save so we don't re-read
     # the same file twice, but do NOT hold the payload bytes in memory.
@@ -320,11 +315,17 @@ def save_state_to_proj_file_v2(comic_translate: "ComicTranslate", file_name: str
 
     for page_path, patch_list in comic_translate.image_patches.items():
         image_patches_references[page_path] = []
-        for patch in patch_list:
+        for idx, patch in enumerate(patch_list, start=1):
             src_png = patch["png_path"]
             blob_hash = add_blob_if_needed(src_png, "patch")
             image_patches_references[page_path].append(
-                {"bbox": patch["bbox"], "png_hash": blob_hash, "hash": patch["hash"]}
+                {
+                    "bbox": patch["bbox"],
+                    "png_hash": blob_hash,
+                    "hash": patch["hash"],
+                    "kind": normalize_patch_kind(patch.get("kind", PATCH_KIND_INPAINT)),
+                    "order": int(patch.get("order", idx) or idx),
+                }
             )
 
     page_paths = list(
@@ -349,15 +350,56 @@ def save_state_to_proj_file_v2(comic_translate: "ComicTranslate", file_name: str
         }
         page_rows[page_path] = msgpack.packb(row_payload, default=encoder.encode, use_bin_type=True)
 
+    def resolve_page_export_source(path: str) -> dict[str, str]:
+        source_records = getattr(comic_translate, "export_source_by_path", {}) or {}
+        source_record = normalize_export_source_record(source_records.get(path))
+        if source_record is not None:
+            return source_record
+
+        lazy_source = get_prepared_path_source(path)
+        archive_path = str((lazy_source or {}).get("archive_path", "")).strip()
+        if archive_path:
+            return {
+                "kind": "archive",
+                "source_path": os.path.abspath(archive_path),
+            }
+
+        project_file = getattr(comic_translate, "project_file", None)
+        temp_dir = getattr(comic_translate, "temp_dir", None)
+        abs_path = os.path.abspath(path)
+        if project_file and temp_dir:
+            abs_temp_dir = os.path.abspath(temp_dir)
+            prefix = abs_temp_dir if abs_temp_dir.endswith(os.sep) else f"{abs_temp_dir}{os.sep}"
+            if abs_path == abs_temp_dir or abs_path.startswith(prefix):
+                return {
+                    "kind": "file",
+                    "source_path": os.path.abspath(project_file),
+                }
+
+        return {
+            "kind": "file",
+            "source_path": abs_path,
+        }
+
+    page_export_sources = {
+        file_path: resolve_page_export_source(file_path)
+        for file_path in comic_translate.image_files
+    }
+
     manifest = {
         "current_image_index": comic_translate.curr_img_idx,
         "original_image_files": comic_translate.image_files,
+        "page_export_sources": page_export_sources,
         "current_history_index": comic_translate.current_history_index,
         "displayed_images": list(comic_translate.displayed_images),
         "loaded_images": comic_translate.loaded_images,
         "llm_extra_context": comic_translate.settings_page.get_llm_settings().get("extra_context", ""),
         "webtoon_mode": comic_translate.webtoon_mode,
         "webtoon_view_state": comic_translate.image_viewer.webtoon_view_state,
+        "latest_automatic_report": comic_translate.batch_report_ctrl.export_latest_report_for_project(),
+        **normalize_project_output_preferences(
+            getattr(comic_translate, "project_output_preferences", default_project_output_preferences())
+        ),
         "unique_images": ensure_string_keys(unique_images),
     }
     manifest_blob = msgpack.packb(manifest, default=encoder.encode, use_bin_type=True)
@@ -408,10 +450,17 @@ def save_state_to_proj_file_v2(comic_translate: "ComicTranslate", file_name: str
                     )
 
     finally:
-        if use_temp_and_replace:
-            conn.close()
-    if use_temp_and_replace and temp_db_path is not None:
+        conn.close()
+    try:
+        close_cached_connection(file_name)
         os.replace(temp_db_path, file_name)
+    except Exception:
+        if os.path.exists(temp_db_path):
+            try:
+                os.remove(temp_db_path)
+            except OSError:
+                pass
+        raise
 
 
 def _materialize_from_manifest_and_pages(
@@ -506,6 +555,13 @@ def _materialize_from_manifest_and_pages(
 
     original_image_files = manifest.get("original_image_files", [])
     comic_translate.image_files = [original_to_temp.get(file, file) for file in original_image_files]
+    saved_export_sources = manifest.get("page_export_sources", {}) or {}
+    comic_translate.export_source_by_path = {
+        original_to_temp.get(page_path, page_path): normalized
+        for page_path, source in saved_export_sources.items()
+        for normalized in [normalize_export_source_record(source)]
+        if normalized is not None
+    }
 
     comic_translate.image_states = {
         original_to_temp.get(page, page): (row.get("image_state", {}) or {})
@@ -520,12 +576,21 @@ def _materialize_from_manifest_and_pages(
     displayed_images = manifest.get("displayed_images", [])
     comic_translate.displayed_images = set(original_to_temp.get(i, i) for i in displayed_images)
 
-    loaded_images = manifest.get("loaded_images", [])
-    comic_translate.loaded_images = [original_to_temp.get(file, file) for file in loaded_images]
-
     comic_translate.image_data = {
         original_to_temp.get(file, file): img for file, img in image_data.items()
     }
+
+    restored_loaded_images = [
+        original_to_temp.get(file, file) for file in manifest.get("loaded_images", [])
+    ]
+    materialized_image_paths = {
+        path for path, img in comic_translate.image_data.items() if img is not None
+    }
+    comic_translate.loaded_images = [
+        path
+        for path in restored_loaded_images
+        if path in comic_translate.image_files and path in materialized_image_paths
+    ]
 
     comic_translate.in_memory_history = {
         original_to_temp.get(file, file): imgs for file, imgs in in_memory_history.items()
@@ -556,7 +621,15 @@ def _materialize_from_manifest_and_pages(
             patch_disk_path = os.path.join(page_folder, f"{idx}_{png_hash[:12]}{ext}")
             register_lazy_blob_path(project_file, patch_disk_path, str(png_hash))
 
-            new_list.append({"bbox": patch["bbox"], "png_path": patch_disk_path, "hash": patch["hash"]})
+            new_list.append(
+                {
+                    "bbox": patch["bbox"],
+                    "png_path": patch_disk_path,
+                    "hash": patch["hash"],
+                    "kind": normalize_patch_kind(patch.get("kind", PATCH_KIND_INPAINT)),
+                    "order": int(patch.get("order", idx + 1) or (idx + 1)),
+                }
+            )
 
         if new_list:
             reconstructed[page_path] = new_list
@@ -564,6 +637,43 @@ def _materialize_from_manifest_and_pages(
     comic_translate.image_patches = {
         original_to_temp.get(page, page): plist for page, plist in reconstructed.items()
     }
+
+    latest_report = manifest.get("latest_automatic_report")
+    if latest_report:
+        latest_report = dict(latest_report)
+        latest_report["paths"] = [
+            original_to_temp.get(path, path) for path in latest_report.get("paths", [])
+        ]
+        latest_report["retry_paths"] = [
+            original_to_temp.get(path, path)
+            for path in latest_report.get("retry_paths", [])
+        ]
+        normalized_entries = []
+        for entry in latest_report.get("skipped_entries", []):
+            normalized = dict(entry)
+            image_path = normalized.get("image_path")
+            if image_path:
+                normalized["image_path"] = original_to_temp.get(image_path, image_path)
+            normalized_entries.append(normalized)
+        latest_report["skipped_entries"] = normalized_entries
+    comic_translate.batch_report_ctrl.import_latest_report_from_project(
+        latest_report,
+        refresh=False,
+    )
+    comic_translate.project_output_preferences = normalize_project_output_preferences(
+        {
+            "output_use_global": manifest.get("output_use_global"),
+            "output_target": manifest.get("output_target"),
+            "output_image_format": manifest.get("output_image_format"),
+            "output_archive_format": manifest.get("output_archive_format"),
+            "output_archive_image_format": manifest.get("output_archive_image_format"),
+            "output_archive_compression_level": manifest.get("output_archive_compression_level"),
+            "output_format_override_mode": manifest.get("output_format_override_mode"),
+            "output_format_override_value": manifest.get("output_format_override_value"),
+            "output_preset_override_mode": manifest.get("output_preset_override_mode"),
+            "output_preset_override_value": manifest.get("output_preset_override_value"),
+        }
+    )
 
     return manifest.get("llm_extra_context", "")
 
@@ -596,12 +706,24 @@ def _load_from_legacy_state_blob(
     manifest = {
         "current_image_index": state.get("current_image_index", 0),
         "original_image_files": state.get("original_image_files", []),
+        "page_export_sources": state.get("page_export_sources", {}),
         "current_history_index": state.get("current_history_index", {}),
         "displayed_images": state.get("displayed_images", []),
         "loaded_images": state.get("loaded_images", []),
         "llm_extra_context": state.get("llm_extra_context", ""),
         "webtoon_mode": state.get("webtoon_mode", False),
         "webtoon_view_state": state.get("webtoon_view_state", {}),
+        "latest_automatic_report": state.get("latest_automatic_report"),
+        "output_use_global": state.get("output_use_global"),
+        "output_target": state.get("output_target"),
+        "output_image_format": state.get("output_image_format"),
+        "output_archive_format": state.get("output_archive_format"),
+        "output_archive_image_format": state.get("output_archive_image_format"),
+        "output_archive_compression_level": state.get("output_archive_compression_level"),
+        "output_format_override_mode": state.get("output_format_override_mode"),
+        "output_format_override_value": state.get("output_format_override_value"),
+        "output_preset_override_mode": state.get("output_preset_override_mode"),
+        "output_preset_override_value": state.get("output_preset_override_value"),
         "unique_images": state.get("unique_images", {}),
     }
 

@@ -4,6 +4,7 @@ import uuid
 from PySide6.QtGui import QUndoCommand
 from .base import PatchCommandBase
 import imkit as imk
+from modules.utils.inpaint_strokes import PATCH_KIND_INPAINT, normalize_patch_kind
 
 class PatchInsertCommand(QUndoCommand, PatchCommandBase):
     """
@@ -20,10 +21,14 @@ class PatchInsertCommand(QUndoCommand, PatchCommandBase):
 
         # prepare lists of patch properties with composite hashes for deduplication
         self.properties_list = []
+        existing = ct.image_patches.get(file_path, [])
+        next_order = max((int(p.get("order", idx) or idx) for idx, p in enumerate(existing, start=1)), default=0) + 1
         for idx, patch in enumerate(patches):
             # Extract data from patch dictionary
             bbox = patch['bbox']
             patch_img = patch['image']
+            kind = normalize_patch_kind(patch.get('kind', PATCH_KIND_INPAINT))
+            order = int(patch.get('order', next_order + idx) or (next_order + idx))
 
             # spill every image patch to a temp PNG (if not already on disk)
             sub_dir = os.path.join(ct.temp_dir,
@@ -37,12 +42,16 @@ class PatchInsertCommand(QUndoCommand, PatchCommandBase):
             with open(png_path, 'rb') as f:
                 img_bytes = f.read()
             bbox_bytes = str(bbox).encode('utf-8')
-            img_hash = hashlib.sha256(img_bytes + bbox_bytes).hexdigest()
+            kind_bytes = kind.encode('utf-8')
+            order_bytes = str(order).encode('utf-8')
+            img_hash = hashlib.sha256(img_bytes + bbox_bytes + kind_bytes + order_bytes).hexdigest()
 
             prop = {
                 'bbox': bbox,
                 'png_path': png_path,
-                'hash': img_hash
+                'hash': img_hash,
+                'kind': kind,
+                'order': order,
             }
             
             # Add webtoon mode information if present
@@ -68,7 +77,9 @@ class PatchInsertCommand(QUndoCommand, PatchCommandBase):
             patch_entry = {
                 'bbox': prop['bbox'],
                 'png_path': prop['png_path'],
-                'hash': prop['hash']
+                'hash': prop['hash'],
+                'kind': prop['kind'],
+                'order': prop['order'],
             }
             # Save scene position and page index for webtoon mode
             if 'scene_pos' in prop:
@@ -83,7 +94,9 @@ class PatchInsertCommand(QUndoCommand, PatchCommandBase):
                 mem_list.append({
                     'bbox': prop['bbox'],
                     'image': img_data,
-                    'hash': prop['hash']
+                    'hash': prop['hash'],
+                    'kind': prop['kind'],
+                    'order': prop['order'],
                 })
 
     def _unregister_patches(self):

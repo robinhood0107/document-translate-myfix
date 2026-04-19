@@ -1,182 +1,273 @@
-# Comic Translate
-English | [한국어](docs/README_ko.md) | [Français](docs/README_fr.md) | [简体中文](docs/README_zh-CN.md)
+[English](README.md) | [한국어](README_ko.md)
 
-<img src="https://i.imgur.com/QUVK6mK.png">
+# Comic Translate Fork
 
-## Intro
-Many Automatic Manga Translators exist. Very few properly support comics of other kinds in other languages. 
-This project was created to utilize the ability of State of the Art (SOTA) Large Language Models (LLMs) like GPT and translate comics from all over the world. 
+This repository is a local-first fork of upstream `comic-translate` that started from the upstream `v2.6.7` codebase and then diverged with product-specific runtime, OCR, workflow, and Windows setup changes.
 
-Currently, it supports translating comics from the following languages: English, Korean, Japanese, French, Simplified Chinese, Traditional Chinese, Russian, German, Dutch, Spanish and Italian. It can translate to the above mentioned and more. 
+The fork is maintained around a practical desktop workflow:
 
-- [The State of Machine Translation](#the-state-of-machine-translation)
-- [Preview](#comic-samples)
-- [Getting Started](#installation)
-    - [Installation](#installation)
-        - [Download](#download)
-        - [From Source](#from-source)
-    - [Usage](#usage)
-        - [Tips](#tips)
+- local Gemma translation runtime support
+- local OCR runtimes such as `PaddleOCR VL` and `HunyuanOCR`
+- Windows-oriented setup and launch tooling
+- selective manual backports from upstream `v2.7.0` and `v2.7.1`
+- benchmark work isolated from product branches
 
-- [How it works](#how-it-works)
-    - [Text Detection](#text-detection)
-    - [OCR](#OCR)
-    - [Inpainting](#inpainting)
-    - [Translation](#translation)
-    - [Text Rendering](#text-rendering)
+## Important Features
 
-- [Acknowledgements](#acknowledgements)
+- Local Gemma translation runtime for desktop-first translation workflows.
+- Local OCR runtimes with optimal routing between `HunyuanOCR` and `PaddleOCR VL`.
+- Inpainting add, exclude, and restore tools with saved mask and patch state.
+- TXT/MD source export and translation import with OCR and translation correction dictionaries.
+- CBZ/CBR comic archive import with lazy page materialization.
+- Bottom-left automatic pipeline status panel with overlay locking and latest-result preview.
 
-## The State of Machine Translation
-For a couple dozen languages, the best Machine Translator is not Google Translate, Papago or even DeepL, but a SOTA LLM like GPT-4, and by far. 
-This is very apparent for distant language pairs (Korean<->English, Japanese<->English etc) where other translators still often devolve into gibberish.
-Excerpt from "The Walking Practice"(보행 연습) by Dolki Min(돌기민)
-![Model](https://i.imgur.com/72jvLBa.png)
+## Supporting Features
 
-## Comic Samples
-GPT-4 as Translator.
-Note: Some of these also have Official English Translations
+- Reuse-only OCR preflight checks avoid restarting already running local OCR containers.
+- Automatic runs update the latest completed translated image preview page by page.
+- Completion sounds support the system alert or repo-provided `music/*.wav` files.
+- Windows launchers bootstrap `.venv-win` and `.venv-win-cuda13` automatically.
+- Localized tooltips, help text, and compiled Qt translation assets stay aligned with UI changes.
 
-[The Wretched of the High Seas](https://www.drakoo.fr/bd/drakoo/les_damnes_du_grand_large/les_damnes_du_grand_large_-_histoire_complete/9782382330128)
+## Origin and Upstream Attribution
 
-<img src="https://i.imgur.com/75HwK4r.jpg" width="49%"> <img src="https://i.imgur.com/3oRt5fX.jpg" width="49%">
+This repository started from [ogkalu2/comic-translate](https://github.com/ogkalu2/comic-translate) and should be understood as a downstream, product-focused fork/derivative of that upstream work. It began from the upstream `v2.6.7` codebase and then diverged with local runtime, OCR, Windows, and workflow changes.
 
-[Journey to the West](https://ac.qq.com/Comic/comicInfo/id/541812)
+## License and Redistribution
 
-<img src="https://i.imgur.com/zk7yiKe.jpg" width="49%"> <img src="https://i.imgur.com/4ycSi8j.jpg" width="49%">
+The upstream project is distributed under the Apache License 2.0, and this fork keeps that license basis for the upstream-derived code in this repository.
 
-[The Wormworld Saga](https://wormworldsaga.com/index.php)
+If you publicly redistribute this fork or a modified build of it, the practical minimum checklist is:
 
-<img src="https://i.imgur.com/cVVGVXp.jpg" width="49%"> <img src="https://i.imgur.com/SSl81sb.jpg" width="49%">
+- include the Apache 2.0 license text with the redistributed work
+- keep upstream copyright, patent, attribution, and origin notices that still apply
+- make it clear that this repository is a modified downstream fork/derivative, not the original upstream project
+- add prominent notices for files you modified when redistributing the source
+- review third-party asset licenses separately from the code license
 
-[Frieren: Beyond Journey's End](https://renta.papy.co.jp/renta/sc/frm/item/220775/title/742932/)
+## Third-Party Models and Runtime Notice
 
-<img src="https://i.imgur.com/ANGHVhG.png" width="49%"> <img src="https://i.imgur.com/r5YOE26.png" width="49%">
+This project uses, downloads, or interoperates with third-party models, checkpoints, and runtime images. The copyright, license, and usage terms for those assets belong to their original authors and distributors, and this repository does not claim ownership of them. You are responsible for reviewing and complying with each upstream model/runtime license before using them.
 
-[Days of Sand](https://9ekunst.nl/2021/05/20/nieuw-album-van-aimee-de-jongh-is-benauwend-als-een-zandstorm/)
+### Models and runtimes used by the product code
 
-<img src="https://i.imgur.com/m7PDiXN.jpg" width="49%"> <img src="https://i.imgur.com/eUwTGnn.jpg" width="49%">
+Detection / masking:
+- [RT-DETR v2](https://huggingface.co/ogkalu/comic-text-and-bubble-detector)
+- [ComicTextDetector (CTD)](https://github.com/zyddnys/manga-image-translator/releases/tag/beta-0.3) (`comictextdetector.pt`, `comictextdetector.pt.onnx`)
+- [Font Detector](https://huggingface.co/gyrojeff/YuzuMarker.FontDetection)
 
-[Player (OH Hyeon-Jun)](https://comic.naver.com/webtoon/list?titleId=745876&page=1&sort=ASC&tab=fri)
+OCR:
+- [MangaOCR](https://huggingface.co/kha-white/manga-ocr-base)
+- [MangaOCR ONNX](https://huggingface.co/mayocream/manga-ocr-onnx)
+- [Pororo OCR](https://huggingface.co/ogkalu/pororo)
+- [PPOCRv5 / RapidOCR](https://www.modelscope.cn/models/RapidAI/RapidOCR)
+- [PaddleOCR VL](https://github.com/PaddlePaddle/PaddleOCR)
+- [HunyuanOCR](https://github.com/Tencent-Hunyuan/HunyuanOCR)
 
-<img src="https://i.imgur.com/KGwiHJh.jpg" width="49%"> <img src="https://i.imgur.com/B8RMbRQ.jpg" width="49%">
+Inpainting:
+- [AOT](https://huggingface.co/ogkalu/aot-inpainting)
+- [LaMa legacy runtime](https://github.com/Sanster/models/releases/tag/AnimeMangaInpainting)
+- [lama_large_512px](https://huggingface.co/dreMaz/AnimeMangaInpainting)
+- [lama_mpe / manga-image-translator inpainting checkpoint](https://github.com/zyddnys/manga-image-translator/releases/tag/beta-0.3)
+- [MI-GAN](https://github.com/Sanster/models/releases/tag/migan)
 
-[Carbon & Silicon](https://www.amazon.com/Carbone-Silicium-French-Mathieu-Bablet-ebook/dp/B0C1LTGZ85/)
+Local translation/runtime:
+- [Gemma](https://ai.google.dev/gemma) local GGUF runtime
+- [llama.cpp](https://github.com/ggml-org/llama.cpp) Docker runtime image
 
-<img src="https://i.imgur.com/h51XJx4.jpg" width="49%"> <img src="https://i.imgur.com/sLitjUY.jpg" width="49%">
+### Auto-downloaded vs user-supplied assets
 
-## Installation
-### Download
-Download and install Comic Translate for Windows and macOS from [here](https://www.comic-translate.com). 
+Automatically downloaded by the app when missing:
+- CTD model files (`comictextdetector.pt`, `comictextdetector.pt.onnx`)
+- Inpainting checkpoints such as `AOT`, `lama_large_512px`, and `lama_mpe`
+- OCR checkpoints such as `MangaOCR`, `Pororo OCR`, and `PPOCRv5`
 
->Ignore Smart Screen for Windows (Click More info > Run anyway). For macOS, after trying to open, go to Settings > Privacy and Security > Scroll down and click Open Anyway. 
+Provided separately by the user or local runtime bundle:
+- Gemma GGUF files mounted into the local translation runtime
+- HunyuanOCR GGUF and mmproj files
+- PaddleOCR VL Docker/runtime bundle files
 
-> Note: GPU acceleration is currently only available when running from source.
+## Release Policy
 
-### From Source
-Alternatively, if you'd like to run the source code directly.
+This repository now uses a strict `main + develop + tag` model.
 
-Install Python 3.12. Tick "Add python.exe to PATH" during the setup.
+- `develop` is the integration branch for upcoming product work.
+- `main` is the shipping baseline.
+- Official releases are created only from `vX.Y.Z` version tags that point to commits already contained in `main`.
+- The Windows release asset is built with `Nuitka` and published as a GitHub Release artifact from that tag.
+- Models, checkpoints, and Docker runtimes are not bundled into the release executable and remain separately provisioned.
+- `release/*` branches are not used.
+
+The authoritative repository policy lives in [rules.md](rules.md).
+
+## Fork Improvements Since Upstream `v2.6.7`
+
+Local product work since the `v2.6.7` base has focused on a few technical areas.
+
+### Rendering and manual editing
+
+- documented and then centralized shared render policy behavior
+- expanded render state with forced color, block anchoring, source rect tracking, and vertical alignment metadata
+- refined the render panel layout, wording, and selection affordances
+- kept manual rendering and batch/webtoon rendering on the same shared policy path
+
+### Windows runtime and repo workflow
+
+- added dedicated Windows launchers and a CUDA13 environment path
+- made `run_comic.bat` and `run_comic_cuda13.bat` self-bootstrapping for local venv/runtime setup
+- hardened local Git hook setup and CI validation flow
+- cleaned branch policy and standardized on `feature/*`, `fix/*`, `chore/*`, `hotfix/*`, `benchmarking/lab`
+
+### OCR quality and diagnostics
+
+- added block-local OCR fallback and suspicious-result retry behavior
+- added bubble residue cleanup and mask widening for residual glyph removal
+- improved one-page auto / batch OCR parity and diagnostics
+- added local PaddleOCR VL support and tuned its defaults
+- added local HunyuanOCR support
+- added `Optimal (HunyuanOCR / PaddleOCR VL)` OCR routing with run-start language confirmation and on-demand local runtime management
+
+### Local translation runtime
+
+- specialized the local Gemma translation server flow
+- split custom translator modes and improved keyless local endpoint support
+- normalized Gemma input and sanitized problematic glyphs
+- aligned local sampler/runtime defaults with measured benchmark presets
+
+### Benchmarking and branch separation
+
+- added a dedicated benchmark toolkit and one-click runners
+- separated benchmark harness/report assets from product branches
+- codified the `benchmarking/lab` promotion boundary
+
+## Selective Backports
+
+This fork does not merge upstream releases wholesale. Instead, it performs selective compare-based backports and adapts only the changes that fit the local product structure.
+
+### `v2.6.7 -> v2.7.0`
+
+The `v2.7.0` backport brought in selected user-facing features such as:
+
+- configurable keyboard shortcuts
+- PSD export and PSD import
+- chapter-aware export flow
+- project rename/move actions
+- startup recent-project actions such as copy path and delete file
+- multi-select text block formatting
+- undo text render as a single undo step
+- unlimited extra context for the custom translator
+- new target languages and improved RTL handling
+- selected webtoon/list-view behavior fixes
+
+Audit details stay on `develop` and are not promoted to the public `main` documentation set.
+
+### `v2.7.0 -> v2.7.1`
+
+The `v2.7.1` round selectively applies the upstream fixes that matter to this fork:
+
+- PSD import stabilization with explicit font-catalog preparation and safer decode fallback logging
+- main-thread-safe `QTimer.singleShot(...)` dispatch for async UI callbacks
+- list thumbnail loading reworked around `QImage` in the worker thread and `QPixmap` conversion on the main thread
+- import menu cleanup so `PSD` appears next to `Project File`
+- app version bump to `2.7.1`
+
+Audit details stay on `develop` and are not promoted to the public `main` documentation set.
+
+## Quick Start
+
+For a more explicit setup path, see:
+
+- [docs/setup/quickstart.md](docs/setup/quickstart.md)
+- [docs/setup/quickstart-ko.md](docs/setup/quickstart-ko.md)
+
+### 1. Launch the application
+
+The launchers create or update their own local runtime environment on first run.
+
+
+Default Windows runtime:
+
+```bat
+run_comic.bat
+```
+
+CUDA13 runtime:
+
+```bat
+run_comic_cuda13.bat
+```
+
+### 2. Optional local translation runtime
+
+Start the local Gemma server from the repository root:
+
 ```bash
-https://www.python.org/downloads/
+docker compose up -d
 ```
-Install git
+
+Then use `Custom Local Server(Gemma)` in the app.
+
+### 3. Optional local OCR runtimes
+
+HunyuanOCR:
+
 ```bash
-https://git-scm.com/
-```
-Install uv
-```
-https://docs.astral.sh/uv/getting-started/installation/
+docker compose -f hunyuanocr_docker_files/docker-compose.yaml up -d
 ```
 
-Then, in the command line
-```bash
-git clone https://github.com/ogkalu2/comic-translate
-cd comic-translate
-uv init --python 3.12
-```
-and install the requirements
-```bash
-uv add -r requirements.txt --compile-bytecode
-```
+PaddleOCR VL uses the tracked bundle under [paddleocr_vl_docker_files/README.md](paddleocr_vl_docker_files/README.md).
 
-To Update, run this in the comic-translate folder
-```bash
-git pull
-uv init --python 3.12 (Note: only run this line if you did not use uv for the first time installation)
-uv add -r requirements.txt --compile-bytecode
-```
+### 4. Recommended OCR setting
 
-If you have an NVIDIA GPU, then it is recommended to run
-```bash
-uv pip install onnxruntime-gpu
-```
+In Settings, choose:
 
-## Usage
-In the comic-translate directory, run
-```bash
-uv run comic.py
-```
-This will launch the GUI
+- `Default (existing auto: MangaOCR / PPOCR / Pororo...)` to keep legacy OCR routing
+- `Optimal (HunyuanOCR / PaddleOCR VL)` to route Chinese to `HunyuanOCR` and Japanese/other languages to `PaddleOCR VL`
 
-### Tips
-* If you have a CBR file, you'll need to install Winrar or 7-Zip then add the folder it's installed to (e.g "C:\Program Files\WinRAR" for Windows) to Path. If it's installed but not to Path, you may get the error, 
-```bash
-raise RarCannotExec("Cannot find working tool")
-```
-In that case, Instructions for [Windows](https://www.windowsdigitals.com/add-folder-to-path-environment-variable-in-windows-11-10/), [Linux](https://linuxize.com/post/how-to-add-directory-to-path-in-linux/), [Mac](https://techpp.com/2021/09/08/set-path-variable-in-macos-guide/)
+### 5. Optional ntfy notifications
 
-* Make sure the selected Font supports characters of the target language
-* v2.0 introduces a Manual Mode. When you run into issues with Automatic Mode (No text detected, Incorrect OCR, Insufficient Cleaning etc), you are now able to make corrections. Simply Undo the Image and toggle Manual Mode.
-* In Automatic Mode, Once an Image has been processed, it is loaded in the Viewer or stored to be loaded on switch so you can keep reading in the app as the other Images are being translated.
-* Ctrl + Mouse Wheel to Zoom otherwise Vertical Scrolling
-* The Usual Trackpad Gestures work for viewing the Image
-* Right, Left Keys to Navigate Between Images
+Open `Settings > Notifications` to configure:
 
-## How it works
-### Speech Bubble Detection and Text Segmentation
-[bubble-and-text-detector](https://huggingface.co/ogkalu/comic-text-and-bubble-detector). RT-DETR-v2 model trained on 11k images of comics (Manga, Webtoons, Western).
-Algorithmic segmentation based on the boxes provided from the detection model.
+- completion sound
+- ntfy server URL / topic / optional token
+- whether to send on completion / failure / cancellation
 
-<img src="https://i.imgur.com/TlzVH3j.jpg" width="49%"> <img src="https://i.imgur.com/h18XrYT.jpg" width="49%"> 
+The app sends plain-text-only ntfy notifications and keeps the message body below the default ntfy text limit documented by ntfy.
 
-### OCR
-By Default:
-* [manga-ocr](https://github.com/kha-white/manga-ocr) for Japanese
-* [Pororo](https://github.com/yunwoong7/korean_ocr_using_pororo) for Korean 
-* [PPOCRv5](https://www.paddleocr.ai/main/en/version3.x/algorithm/PP-OCRv5/PP-OCRv5.html) for Everything Else
+Official ntfy docs:
 
-Optional:
+- [Publish notifications](https://docs.ntfy.sh/publish/)
+- [Server configuration](https://docs.ntfy.sh/config/)
 
-These can be used for any of the supported languages.
+## Docker Images Used by This Repository
 
-* Gemini 2.0 Flash
-* Microsoft Azure Vision
+Tracked compose/runtime images used by the repo:
 
-### Inpainting
-To remove the segmented text
-* A [Manga/Anime finetuned](https://huggingface.co/dreMaz/AnimeMangaInpainting) [lama](https://github.com/advimman/lama) checkpoint. Implementation courtsey of [lama-cleaner](https://github.com/Sanster/lama-cleaner)
-* [AOT-GAN](https://arxiv.org/abs/2104.01431) based model by [zyddnys](https://github.com/zyddnys)
+- Gemma local server: `ghcr.io/ggml-org/llama.cpp:server-cuda`
+- HunyuanOCR local server: `ghcr.io/ggml-org/llama.cpp:server-cuda`
+- PaddleOCR VL runtime: `ccr-2vdh3abv-pub.cnc.bj.baidubce.com/paddlepaddle/paddleocr-genai-vllm-server:latest-nvidia-gpu-offline`
 
-<img src="https://i.imgur.com/cVVGVXp.jpg" width="49%"> <img src="https://i.imgur.com/bLkPyqG.jpg" width="49%">
+## Reference Setup Docs
 
-### Translation
-Currently, this supports using GPT-4.1, Claude-4.5, 
-Gemini-2.5.
+- [docs/setup/quickstart.md](docs/setup/quickstart.md)
+- [docs/setup/quickstart-ko.md](docs/setup/quickstart-ko.md)
+- [docs/gemma/local-server-ko.md](docs/gemma/local-server-ko.md)
+- [docs/hunyuan/local-server-ko.md](docs/hunyuan/local-server-ko.md)
+- [paddleocr_vl_docker_files/README.md](paddleocr_vl_docker_files/README.md)
 
-All LLMs are fed the entire page text to aid translations. 
-There is also the Option to provide the Image itself for further context. 
+## Repository Documents
 
-### Text Rendering
-Wrapped text in bounding boxes obtained from bubbles and text.
+- [rules.md](rules.md)
+Release-facing documentation for `main` is intentionally kept minimal; deeper history and audit notes remain on `develop`.
+- [docs/gemma/local-server-ko.md](docs/gemma/local-server-ko.md)
+- [docs/hunyuan/local-server-ko.md](docs/hunyuan/local-server-ko.md)
+- [docs/repo/github-rulesets-public-free-ko.md](docs/repo/github-rulesets-public-free-ko.md)
 
-## Acknowledgements
+## Legacy Localized READMEs
 
-* [https://github.com/Sanster/lama-cleaner](https://github.com/Sanster/lama-cleaner)
-* [https://huggingface.co/dreMaz](https://huggingface.co/dreMaz)
-* [https://github.com/yunwoong7/korean_ocr_using_pororo](https://github.com/yunwoong7/korean_ocr_using_pororo)
-* [https://github.com/kha-white/manga-ocr](https://github.com/kha-white/manga-ocr)
-* [https://github.com/JaidedAI/EasyOCR](https://github.com/JaidedAI/EasyOCR)
-* [https://github.com/PaddlePaddle/PaddleOCR](https://github.com/PaddlePaddle/PaddleOCR)
-* [https://github.com/RapidAI/RapidOCR](https://github.com/RapidAI/RapidOCR)
-* [https://github.com/phenom-films/dayu_widgets](https://github.com/phenom-films/dayu_widgets)
+The root `README.md` and `README_ko.md` are the source of truth for the public branch documentation set.
+
+Use:
+
+- [README.md](README.md) for the English source of truth
+- [README_ko.md](README_ko.md) for the Korean source of truth
