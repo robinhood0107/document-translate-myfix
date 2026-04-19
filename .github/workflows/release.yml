@@ -73,24 +73,7 @@ jobs:
       - name: Build Windows package with Nuitka
         shell: pwsh
         run: |
-          python -m nuitka `
-            --standalone `
-            --low-memory `
-            --assume-yes-for-downloads `
-            --enable-plugin=pyside6 `
-            --module-parameter=torch-disable-jit=no `
-            --windows-console-mode=disable `
-            --windows-icon-from-ico=resources/icons/icon.ico `
-            --company-name="ComicLabs" `
-            --product-name="Comic Translate" `
-            --file-version="$env:APP_VERSION.0" `
-            --product-version="$env:APP_VERSION" `
-            --output-dir=build/nuitka `
-            --output-filename=comic-translate `
-            --include-windows-runtime-dlls=yes `
-            --include-data-dir=resources=resources `
-            --include-data-dir=music=music `
-            comic.py
+          ./scripts/build_windows_release_nuitka.ps1 -AppVersion "$env:APP_VERSION"
 
       - name: Stage release bundle
         shell: pwsh

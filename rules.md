@@ -229,6 +229,7 @@ public/free 저장소의 ruleset은 보호 브랜치, PR 강제, 상태 체크, 
 
 CD는 `main`에 포함된 `vX.Y.Z` 태그 기반 릴리스만 공식 경로로 인정한다.
 
+- 버전 태그를 달기 전, `main`에서 `Release Preflight` 워크플로를 먼저 green으로 확인한다.
 - `develop`에서 충분히 검증된 변경만 `main`으로 승격
 - `main`에 포함된 커밋에만 버전 태그(`vX.Y.Z`) 생성
 - 해당 태그에서 Windows `Nuitka` 빌드 + GitHub Release 자산 생성

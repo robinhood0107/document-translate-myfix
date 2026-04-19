@@ -94,6 +94,7 @@ OCR:
 - `develop`: 다음 제품 작업을 통합하는 브랜치
 - `main`: 실제 출하 기준선
 - 공식 릴리스: `main`에 포함된 커밋에만 `vX.Y.Z` 버전 태그를 달아 GitHub Release 생성
+- 버전 태그 생성 전: `main`에서 `Release Preflight` 워크플로를 먼저 실행해 Windows Nuitka 빌드 green 확인
 - Windows 릴리스 자산: 해당 태그에서 `Nuitka`로 exe 패키징 후 업로드
 - 모델, 체크포인트, Docker 런타임은 exe에 포함하지 않고 별도 준비 대상으로 유지
 - `release/*` 브랜치는 사용하지 않음
