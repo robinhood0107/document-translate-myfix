@@ -1,6 +1,6 @@
 [English](README.md) | [한국어](README_ko.md)
 
-# Comic Translate Fork
+# Document Translate Fork
 
 This repository is a local-first fork of upstream `comic-translate` that started from the upstream `v2.6.7` codebase and then diverged with product-specific runtime, OCR, workflow, and Windows setup changes.
 
