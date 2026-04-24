@@ -80,7 +80,7 @@ jobs:
         run: |
           $bundleDir = "build/release/comic-translate-$env:RELEASE_TAG-windows-x64"
           New-Item -ItemType Directory -Force -Path $bundleDir | Out-Null
-          Copy-Item -Recurse -Force "build/nuitka/comic-translate.dist/*" $bundleDir
+          Copy-Item -Recurse -Force "build/nuitka/comic.dist/*" $bundleDir
           Copy-Item -Force LICENSE $bundleDir
           Copy-Item -Force README.md $bundleDir
           Copy-Item -Force README_ko.md $bundleDir
