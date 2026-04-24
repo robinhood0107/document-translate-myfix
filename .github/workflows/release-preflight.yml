@@ -61,5 +61,5 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: comic-translate-preflight-${{ github.run_number }}-windows-x64
-          path: build/nuitka/comic-translate.dist
+          path: build/nuitka/comic.dist
           if-no-files-found: error
