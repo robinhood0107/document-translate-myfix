@@ -11,6 +11,7 @@ from modules.utils.archives import list_archive_image_entries, materialize_archi
 
 from .dayu_widgets import dayu_theme
 from .dayu_widgets.tool_button import MToolButton
+from .settings.series_page import SeriesPage
 
 
 _DIRECT_PREVIEW_EXTS = {".png", ".jpg", ".jpeg", ".webp", ".bmp", ".psd"}
@@ -733,13 +734,26 @@ class _SeriesQuickSettings(QtWidgets.QWidget):
         form.addRow(self.tr("Workflow mode:"), self.workflow_combo)
         form.addRow("", self.use_gpu_checkbox)
 
-        self.series_settings_button = QtWidgets.QPushButton(self.tr("Series Settings…"))
+        self.render_summary_label = QtWidgets.QLabel(self.tr("Render: --"))
+        self.render_summary_label.setObjectName("seriesQuickNote")
+        self.render_summary_label.setWordWrap(True)
+        self.export_summary_label = QtWidgets.QLabel(self.tr("Export: --"))
+        self.export_summary_label.setObjectName("seriesQuickNote")
+        self.export_summary_label.setWordWrap(True)
+
+        self._series_settings_tooltip = self.tr(
+            "Edit queue, pipeline, render, export, and debug defaults for this series."
+        )
+        self.series_settings_button = QtWidgets.QPushButton(self.tr("Series Design / Global Settings…"))
+        self.series_settings_button.setToolTip(self._series_settings_tooltip)
         self.auto_translate_button = QtWidgets.QPushButton(self.tr("Translate in Queue Order"))
         self.auto_translate_button.setObjectName("seriesAutoTranslateButton")
 
         layout.addWidget(header)
         layout.addWidget(note)
         layout.addLayout(form)
+        layout.addWidget(self.render_summary_label)
+        layout.addWidget(self.export_summary_label)
         layout.addWidget(self.series_settings_button)
         layout.addWidget(self.auto_translate_button)
         layout.addStretch(1)
@@ -769,7 +783,10 @@ class _SeriesQuickSettings(QtWidgets.QWidget):
         )
         for widget in widgets:
             widget.setEnabled(not locked)
-            widget.setToolTip(self._lock_reason if locked else "")
+            if widget is self.series_settings_button:
+                widget.setToolTip(self._lock_reason if locked else self._series_settings_tooltip)
+            else:
+                widget.setToolTip(self._lock_reason if locked else "")
 
     def set_options(self, *, languages, ocr_modes, translators, workflow_modes) -> None:
         self._populate_combo(self.source_lang_combo, languages)
@@ -805,6 +822,7 @@ class _SeriesQuickSettings(QtWidgets.QWidget):
         self._set_combo_value(self.translator_combo, str(values.get("translator") or ""))
         self._set_combo_value(self.workflow_combo, str(values.get("workflow_mode") or ""))
         self.use_gpu_checkbox.setChecked(bool(values.get("use_gpu", True)))
+        self._update_summaries(values)
         del blockers
 
     def values(self) -> dict[str, object]:
@@ -824,11 +842,719 @@ class _SeriesQuickSettings(QtWidgets.QWidget):
         if index >= 0:
             combo.setCurrentIndex(index)
 
+    def _update_summaries(self, values: dict[str, object]) -> None:
+        render = values.get("render_settings")
+        render = render if isinstance(render, dict) else {}
+        font = str(render.get("font_family") or "--")
+        max_font = render.get("max_font_size", "--")
+        line_spacing = str(render.get("line_spacing") or "--")
+        align_labels = [self.tr("left"), self.tr("center"), self.tr("right")]
+        align_id = int(render.get("alignment_id", 1) or 1)
+        align = align_labels[align_id] if 0 <= align_id < len(align_labels) else self.tr("center")
+        outline = (
+            self.tr("outline {width}").format(width=str(render.get("outline_width") or "1.0"))
+            if bool(render.get("outline", False))
+            else self.tr("outline off")
+        )
+        self.render_summary_label.setText(
+            self.tr("Render: {font} / max {max_font} / line {line_spacing} / {align} / {outline}").format(
+                font=font,
+                max_font=max_font,
+                line_spacing=line_spacing,
+                align=align,
+                outline=outline,
+            )
+        )
+
+        export = values.get("export_settings")
+        export = export if isinstance(export, dict) else {}
+        target = str(export.get("automatic_output_target") or "--")
+        debug_keys = (
+            "export_inpainted_image",
+            "export_detector_overlay",
+            "export_raw_mask",
+            "export_mask_overlay",
+            "export_cleanup_mask_delta",
+            "export_debug_metadata",
+        )
+        debug_count = sum(1 for key in debug_keys if bool(export.get(key, False)))
+        self.export_summary_label.setText(
+            self.tr("Export: {target} / debug {count} enabled").format(
+                target=target,
+                count=debug_count,
+            )
+        )
+
+
+class SeriesSettingsDialog(QtWidgets.QDialog):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle(self.tr("Series Design / Global Settings"))
+        self.setObjectName("seriesSettingsDialog")
+        self.resize(940, 860)
+        self.setMinimumSize(820, 640)
+        self._output_options: dict[str, list[tuple[str, str]]] = {}
+
+        root = QtWidgets.QVBoxLayout(self)
+        root.setContentsMargins(18, 18, 18, 18)
+        root.setSpacing(12)
+
+        title = QtWidgets.QLabel(self.tr("Series Design / Global Settings"), self)
+        title.setObjectName("seriesSettingsTitle")
+        subtitle = QtWidgets.QLabel(
+            self.tr(
+                "These defaults are applied when the series queue runs. Child projects keep their own page-level edits."
+            ),
+            self,
+        )
+        subtitle.setObjectName("seriesSettingsSubtitle")
+        subtitle.setWordWrap(True)
+        root.addWidget(title)
+        root.addWidget(subtitle)
+
+        self.tabs = QtWidgets.QTabWidget(self)
+        self.tabs.setObjectName("seriesSettingsTabs")
+        self.tabs.setDocumentMode(True)
+        root.addWidget(self.tabs, 1)
+
+        self._build_queue_tab()
+
+        self._build_pipeline_tab()
+        self._build_render_tab()
+        self._build_export_tab()
+
+        buttons = QtWidgets.QDialogButtonBox(
+            QtWidgets.QDialogButtonBox.StandardButton.Ok
+            | QtWidgets.QDialogButtonBox.StandardButton.Cancel
+        )
+        buttons.accepted.connect(self.accept)
+        buttons.rejected.connect(self.reject)
+        root.addWidget(buttons)
+        self._apply_style()
+
+    def _build_queue_tab(self) -> None:
+        tab, layout = self._make_scroll_tab()
+        self.queue_page = SeriesPage(tab)
+        layout.addWidget(self.queue_page)
+        layout.addStretch(1)
+        self.tabs.addTab(tab, self.tr("Queue"))
+
+    def _build_pipeline_tab(self) -> None:
+        tab, layout = self._make_scroll_tab()
+
+        self.source_lang_combo = QtWidgets.QComboBox(tab)
+        self.target_lang_combo = QtWidgets.QComboBox(tab)
+        self.ocr_combo = QtWidgets.QComboBox(tab)
+        self.translator_combo = QtWidgets.QComboBox(tab)
+        self.workflow_combo = QtWidgets.QComboBox(tab)
+        self.use_gpu_checkbox = QtWidgets.QCheckBox(self.tr("Use GPU"), tab)
+        self.use_gpu_checkbox.setChecked(True)
+
+        language_form = self._make_rows_layout(
+            self._make_field_row(self.tr("Source language:"), self.source_lang_combo),
+            self._make_field_row(self.tr("Target language:"), self.target_lang_combo),
+        )
+        self.pipeline_language_group = self._make_section(
+            self.tr("Languages"),
+            self.tr("Set the source and target language for every queued child project."),
+            language_form,
+        )
+
+        runtime_form = self._make_rows_layout(
+            self._make_field_row(self.tr("OCR:"), self.ocr_combo),
+            self._make_field_row(self.tr("Translator:"), self.translator_combo),
+            self._make_field_row(self.tr("Workflow mode:"), self.workflow_combo),
+            self._make_check_row(self.use_gpu_checkbox),
+        )
+        self.pipeline_runtime_group = self._make_section(
+            self.tr("Pipeline Runtime"),
+            self.tr("Choose the queue workflow and the runtime services it should use."),
+            runtime_form,
+        )
+        layout.addWidget(self.pipeline_language_group)
+        layout.addWidget(self.pipeline_runtime_group)
+        layout.addStretch(1)
+        self.tabs.addTab(tab, self.tr("Pipeline"))
+
+    def _build_render_tab(self) -> None:
+        tab, layout = self._make_scroll_tab()
+
+        self.font_combo = QtWidgets.QComboBox(tab)
+        self.font_combo.setEditable(True)
+        self.min_font_spin = QtWidgets.QSpinBox(tab)
+        self.min_font_spin.setRange(1, 300)
+        self.max_font_spin = QtWidgets.QSpinBox(tab)
+        self.max_font_spin.setRange(1, 300)
+        self.line_spacing_combo = QtWidgets.QComboBox(tab)
+        self.line_spacing_combo.setEditable(True)
+        self.line_spacing_combo.addItems(["1.0", "1.1", "1.2", "1.3", "1.4", "1.5"])
+        self.text_color_button = self._make_color_button("#000000")
+        self.force_color_checkbox = QtWidgets.QCheckBox(self.tr("Use Selected Color"), tab)
+        self.horizontal_alignment_combo = QtWidgets.QComboBox(tab)
+        self.horizontal_alignment_combo.addItem(self.tr("Left"), 0)
+        self.horizontal_alignment_combo.addItem(self.tr("Center"), 1)
+        self.horizontal_alignment_combo.addItem(self.tr("Right"), 2)
+        self.vertical_alignment_combo = QtWidgets.QComboBox(tab)
+        self.vertical_alignment_combo.addItem(self.tr("Top"), 0)
+        self.vertical_alignment_combo.addItem(self.tr("Center"), 1)
+        self.vertical_alignment_combo.addItem(self.tr("Bottom"), 2)
+        self.bold_checkbox = QtWidgets.QCheckBox(self.tr("Bold"), tab)
+        self.italic_checkbox = QtWidgets.QCheckBox(self.tr("Italic"), tab)
+        self.underline_checkbox = QtWidgets.QCheckBox(self.tr("Underline"), tab)
+        self.uppercase_checkbox = QtWidgets.QCheckBox(self.tr("Uppercase"), tab)
+        self.outline_checkbox = QtWidgets.QCheckBox(self.tr("Outline"), tab)
+        self.outline_color_button = self._make_color_button("#ffffff")
+        self.outline_width_combo = QtWidgets.QComboBox(tab)
+        self.outline_width_combo.setEditable(True)
+        self.outline_width_combo.addItems(["1.0", "1.15", "1.3", "1.4", "1.5", "2.0", "3.0"])
+
+        style_row = QtWidgets.QWidget(tab)
+        style_layout = QtWidgets.QHBoxLayout(style_row)
+        style_layout.setContentsMargins(0, 0, 0, 0)
+        style_layout.addWidget(self.bold_checkbox)
+        style_layout.addWidget(self.italic_checkbox)
+        style_layout.addWidget(self.underline_checkbox)
+        style_layout.addWidget(self.uppercase_checkbox)
+        style_layout.addStretch(1)
+
+        color_row = QtWidgets.QWidget(tab)
+        color_layout = QtWidgets.QHBoxLayout(color_row)
+        color_layout.setContentsMargins(0, 0, 0, 0)
+        color_layout.addWidget(self.text_color_button)
+        color_layout.addWidget(self.force_color_checkbox)
+        color_layout.addStretch(1)
+
+        outline_row = QtWidgets.QWidget(tab)
+        outline_layout = QtWidgets.QHBoxLayout(outline_row)
+        outline_layout.setContentsMargins(0, 0, 0, 0)
+        outline_layout.addWidget(self.outline_checkbox)
+        outline_layout.addWidget(self.outline_color_button)
+        outline_layout.addWidget(self.outline_width_combo)
+        outline_layout.addStretch(1)
+
+        typography_form = self._make_rows_layout(
+            self._make_field_row(self.tr("Font:"), self.font_combo),
+            self._make_field_row(self.tr("Min font size:"), self.min_font_spin),
+            self._make_field_row(self.tr("Max font size:"), self.max_font_spin),
+            self._make_field_row(self.tr("Line spacing:"), self.line_spacing_combo),
+        )
+        self.render_typography_group = self._make_section(
+            self.tr("Typography"),
+            self.tr("Control the base font and automatic font-fit limits for generated text."),
+            typography_form,
+        )
+
+        color_form = self._make_rows_layout(
+            self._make_field_row(self.tr("Text color:"), color_row),
+        )
+        self.render_color_group = self._make_section(
+            self.tr("Color"),
+            self.tr("Use a fixed text color when the queue renders translated pages."),
+            color_form,
+        )
+
+        alignment_form = self._make_rows_layout(
+            self._make_field_row(self.tr("Horizontal:"), self.horizontal_alignment_combo),
+            self._make_field_row(self.tr("Vertical:"), self.vertical_alignment_combo),
+        )
+        self.render_alignment_group = self._make_section(
+            self.tr("Alignment"),
+            self.tr("Align text inside each detected text box."),
+            alignment_form,
+        )
+
+        style_form = self._make_rows_layout(
+            self._make_field_row(self.tr("Style:"), style_row),
+            self._make_field_row(self.tr("Outline:"), outline_row),
+        )
+        self.render_style_group = self._make_section(
+            self.tr("Style and Outline"),
+            self.tr("Apply emphasis and outline defaults across the series queue."),
+            style_form,
+        )
+        layout.addWidget(self.render_typography_group)
+        layout.addWidget(self.render_color_group)
+        layout.addWidget(self.render_alignment_group)
+        layout.addWidget(self.render_style_group)
+        layout.addStretch(1)
+        self.tabs.addTab(tab, self.tr("Render"))
+
+    def _build_export_tab(self) -> None:
+        tab, layout = self._make_scroll_tab()
+
+        self.output_target_combo = QtWidgets.QComboBox(tab)
+        self.output_image_format_combo = QtWidgets.QComboBox(tab)
+        self.output_archive_format_combo = QtWidgets.QComboBox(tab)
+        self.output_archive_image_format_combo = QtWidgets.QComboBox(tab)
+        self.output_archive_level_spin = QtWidgets.QSpinBox(tab)
+        self.output_archive_level_spin.setRange(0, 9)
+        form = self._make_rows_layout(
+            self._make_field_row(self.tr("Output target:"), self.output_target_combo),
+            self._make_field_row(self.tr("Image format:"), self.output_image_format_combo),
+            self._make_field_row(self.tr("Archive format:"), self.output_archive_format_combo),
+            self._make_field_row(self.tr("Archive image format:"), self.output_archive_image_format_combo),
+            self._make_field_row(self.tr("Archive compression:"), self.output_archive_level_spin),
+        )
+        self.export_output_group = self._make_section(
+            self.tr("Final Output"),
+            self.tr("Choose where the completed translated result is saved."),
+            form,
+        )
+
+        self.export_raw_text_checkbox = QtWidgets.QCheckBox(self.tr("Raw source text"), tab)
+        self.export_translated_text_checkbox = QtWidgets.QCheckBox(self.tr("Translated text"), tab)
+        text_exports_layout = self._make_rows_layout(
+            self._make_check_row(self.export_raw_text_checkbox),
+            self._make_check_row(self.export_translated_text_checkbox),
+        )
+        self.export_text_group = self._make_section(
+            self.tr("Text Exports"),
+            self.tr("Write OCR and translation text files next to the queue output."),
+            text_exports_layout,
+        )
+
+        self.export_inpainted_image_checkbox = QtWidgets.QCheckBox(self.tr("Inpainted image"), tab)
+        self.export_detector_overlay_checkbox = QtWidgets.QCheckBox(self.tr("Detector overlay"), tab)
+        self.export_raw_mask_checkbox = QtWidgets.QCheckBox(self.tr("Raw inpaint mask"), tab)
+        self.export_mask_overlay_checkbox = QtWidgets.QCheckBox(self.tr("Mask overlay"), tab)
+        self.export_cleanup_mask_delta_checkbox = QtWidgets.QCheckBox(self.tr("Cleanup mask delta"), tab)
+        self.export_debug_metadata_checkbox = QtWidgets.QCheckBox(self.tr("Debug metadata"), tab)
+        debug_layout = QtWidgets.QVBoxLayout()
+        debug_layout.setContentsMargins(0, 0, 0, 0)
+        debug_layout.setSpacing(8)
+        for checkbox in (
+            self.export_inpainted_image_checkbox,
+            self.export_detector_overlay_checkbox,
+            self.export_raw_mask_checkbox,
+            self.export_mask_overlay_checkbox,
+            self.export_cleanup_mask_delta_checkbox,
+            self.export_debug_metadata_checkbox,
+        ):
+            debug_layout.addWidget(self._make_check_row(checkbox))
+        self.export_debug_group = self._make_section(
+            self.tr("Debug Artifacts"),
+            self.tr(
+                "Only checked debug artifacts are created. When unchecked, the status panel logs that preview generation is disabled."
+            ),
+            debug_layout,
+        )
+        layout.addWidget(self.export_output_group)
+        layout.addWidget(self.export_text_group)
+        layout.addWidget(self.export_debug_group)
+        layout.addStretch(1)
+        self.tabs.addTab(tab, self.tr("Export / Debug"))
+
+    def _make_scroll_tab(self) -> tuple[QtWidgets.QScrollArea, QtWidgets.QVBoxLayout]:
+        content = QtWidgets.QWidget(self)
+        content.setObjectName("seriesSettingsTabContent")
+        layout = QtWidgets.QVBoxLayout(content)
+        layout.setContentsMargins(12, 20, 12, 12)
+        layout.setSpacing(22)
+        scroll = QtWidgets.QScrollArea(self)
+        scroll.setObjectName("seriesSettingsScroll")
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QtWidgets.QFrame.Shape.NoFrame)
+        scroll.setWidget(content)
+        return scroll, layout
+
+    def _make_rows_layout(self, *rows: QtWidgets.QWidget) -> QtWidgets.QVBoxLayout:
+        layout = QtWidgets.QVBoxLayout()
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(10)
+        for row in rows:
+            layout.addWidget(row)
+        return layout
+
+    def _make_field_row(self, label_text: str, widget: QtWidgets.QWidget) -> QtWidgets.QWidget:
+        row = QtWidgets.QFrame(self)
+        row.setObjectName("seriesSettingsFieldRow")
+        row_layout = QtWidgets.QHBoxLayout(row)
+        row_layout.setContentsMargins(0, 0, 0, 0)
+        row_layout.setSpacing(12)
+        label = QtWidgets.QLabel(label_text, row)
+        label.setObjectName("seriesSettingsFieldLabel")
+        label.setAlignment(QtCore.Qt.AlignmentFlag.AlignLeft | QtCore.Qt.AlignmentFlag.AlignVCenter)
+        label.setFixedWidth(132)
+        widget.setSizePolicy(QtWidgets.QSizePolicy.Policy.Expanding, QtWidgets.QSizePolicy.Policy.Fixed)
+        row_layout.addWidget(label, 0)
+        row_layout.addWidget(widget, 1)
+        return row
+
+    def _make_check_row(self, checkbox: QtWidgets.QCheckBox) -> QtWidgets.QWidget:
+        row = QtWidgets.QFrame(self)
+        row.setObjectName("seriesSettingsCheckRow")
+        row_layout = QtWidgets.QHBoxLayout(row)
+        row_layout.setContentsMargins(8, 2, 8, 2)
+        row_layout.setSpacing(0)
+        checkbox.setSizePolicy(QtWidgets.QSizePolicy.Policy.Expanding, QtWidgets.QSizePolicy.Policy.Fixed)
+        row_layout.addWidget(checkbox, 1)
+        return row
+
+    def _make_section(
+        self,
+        title: str,
+        note: str,
+        child_layout: QtWidgets.QLayout,
+    ) -> QtWidgets.QFrame:
+        section = QtWidgets.QFrame(self)
+        section.setObjectName("seriesSettingsSection")
+        section.setProperty("section_title", title)
+        layout = QtWidgets.QVBoxLayout(section)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
+
+        header = QtWidgets.QFrame(section)
+        header.setObjectName("seriesSettingsSectionHeader")
+        header_layout = QtWidgets.QHBoxLayout(header)
+        header_layout.setContentsMargins(14, 10, 14, 6)
+        header_layout.setSpacing(10)
+        accent_bar = QtWidgets.QFrame(header)
+        accent_bar.setObjectName("seriesSettingsSectionAccent")
+        accent_bar.setFixedSize(4, 18)
+        title_label = QtWidgets.QLabel(title, header)
+        title_label.setObjectName("seriesSettingsSectionTitle")
+        header_layout.addWidget(accent_bar, 0, QtCore.Qt.AlignmentFlag.AlignVCenter)
+        header_layout.addWidget(title_label, 1)
+        layout.addWidget(header)
+
+        if note:
+            note_label = QtWidgets.QLabel(note, section)
+            note_label.setObjectName("seriesSettingsSectionNote")
+            note_label.setWordWrap(True)
+            layout.addWidget(note_label)
+
+        body = QtWidgets.QWidget(section)
+        body.setObjectName("seriesSettingsSectionBody")
+        body_layout = QtWidgets.QVBoxLayout(body)
+        body_layout.setContentsMargins(14, 8, 14, 14)
+        body_layout.setSpacing(0)
+        body_layout.addLayout(child_layout)
+        layout.addWidget(body)
+        return section
+
+    def _configure_form(self, form: QtWidgets.QFormLayout) -> None:
+        form.setContentsMargins(0, 0, 0, 0)
+        form.setHorizontalSpacing(14)
+        form.setVerticalSpacing(10)
+        form.setLabelAlignment(QtCore.Qt.AlignmentFlag.AlignLeft)
+
+    def _apply_style(self) -> None:
+        accent = dayu_theme.primary_color or dayu_theme.yellow or "#fadb14"
+        text = dayu_theme.primary_text_color or "#d9d9d9"
+        sub_text = dayu_theme.secondary_text_color or "#a6a6a6"
+        window = dayu_theme.background_color or "#323232"
+        panel = dayu_theme.background_in_color or "#3a3a3a"
+        panel_alt = dayu_theme.background_out_color or "#494949"
+        border = dayu_theme.divider_color or "#262626"
+        section_bg = dayu_theme.background_out_color or "#4a4a4a"
+        row_bg = dayu_theme.background_in_color or "#383838"
+        row_border = _hex_to_rgba(accent, 0.32)
+        input_bg = dayu_theme.background_color or "#303030"
+        accent_soft = _hex_to_rgba(accent, 0.16)
+        hover = _hex_to_rgba(text, 0.08)
+        self.setStyleSheet(
+            f"""
+            QDialog#seriesSettingsDialog {{
+                background: {window};
+                color: {text};
+                font-size: 14px;
+            }}
+            QLabel#seriesSettingsTitle {{
+                color: {text};
+                font-size: 22px;
+                font-weight: 700;
+            }}
+            QLabel#seriesSettingsSubtitle {{
+                color: {sub_text};
+                font-size: 14px;
+                padding-bottom: 2px;
+            }}
+            QTabWidget#seriesSettingsTabs::pane {{
+                border: none;
+                background: transparent;
+                top: 0;
+            }}
+            QTabBar::tab {{
+                min-width: 104px;
+                min-height: 46px;
+                padding: 0 18px;
+                margin-right: 6px;
+                border: 1px solid {border};
+                border-bottom: none;
+                border-top-left-radius: 7px;
+                border-top-right-radius: 7px;
+                background: {panel_alt};
+                color: {sub_text};
+                font-size: 14px;
+            }}
+            QTabBar::tab:selected {{
+                background: {section_bg};
+                color: {accent};
+                font-weight: 700;
+            }}
+            QTabBar::tab:hover {{
+                background: {hover};
+                color: {text};
+            }}
+            QScrollArea#seriesSettingsScroll,
+            QWidget#seriesSettingsTabContent {{
+                background: transparent;
+            }}
+            QFrame#seriesSettingsSection {{
+                background: {section_bg};
+                border: 1px solid {border};
+                border-radius: 7px;
+            }}
+            QFrame#seriesSettingsSectionHeader,
+            QWidget#seriesSettingsSectionBody {{
+                background: transparent;
+                border: none;
+            }}
+            QFrame#seriesSettingsSectionAccent {{
+                background: {accent};
+                border-radius: 2px;
+            }}
+            QLabel#seriesSettingsSectionTitle {{
+                color: {accent};
+                background: transparent;
+                font-size: 16px;
+                font-weight: 700;
+            }}
+            QLabel#seriesSettingsSectionNote {{
+                color: {sub_text};
+                background: transparent;
+                font-size: 13px;
+                padding: 0 14px 4px 28px;
+                border: none;
+            }}
+            QLabel {{
+                color: {text};
+            }}
+            QFrame#seriesSettingsFieldRow {{
+                background: {row_bg};
+                border-left: 2px solid {row_border};
+                border-radius: 4px;
+                min-height: 39px;
+            }}
+            QLabel#seriesSettingsFieldLabel {{
+                color: {text};
+                background: transparent;
+                font-size: 14px;
+                font-weight: 700;
+                padding: 9px 8px;
+                border: none;
+            }}
+            QFrame#seriesSettingsCheckRow {{
+                background: {row_bg};
+                border-left: 2px solid {row_border};
+                border-radius: 4px;
+                min-height: 31px;
+            }}
+            QComboBox, QSpinBox {{
+                min-height: 34px;
+                border-radius: 6px;
+                border: 1px solid {border};
+                background: {input_bg};
+                color: {text};
+                font-size: 14px;
+                padding: 0 8px;
+                selection-background-color: {accent_soft};
+            }}
+            QComboBox::drop-down {{
+                border: none;
+                width: 26px;
+            }}
+            QComboBox QAbstractItemView {{
+                background: {panel};
+                color: {text};
+                border: 1px solid {border};
+                selection-background-color: {accent_soft};
+                selection-color: {text};
+            }}
+            QCheckBox {{
+                color: {text};
+                font-size: 14px;
+                spacing: 8px;
+            }}
+            QCheckBox::indicator {{
+                width: 14px;
+                height: 14px;
+            }}
+            QPushButton {{
+                min-height: 30px;
+                border-radius: 6px;
+                border: 1px solid {border};
+                background: {panel_alt};
+                color: {text};
+                padding: 0 14px;
+            }}
+            QPushButton:hover {{
+                background: {hover};
+            }}
+            QDialogButtonBox QPushButton {{
+                min-width: 82px;
+            }}
+            """
+        )
+
+    def _make_color_button(self, color: str) -> QtWidgets.QPushButton:
+        button = QtWidgets.QPushButton(self)
+        button.setFixedSize(34, 28)
+        self._set_button_color(button, color)
+        button.clicked.connect(lambda _checked=False, b=button: self._choose_button_color(b))
+        return button
+
+    def _choose_button_color(self, button: QtWidgets.QPushButton) -> None:
+        current = QtGui.QColor(str(button.property("selected_color") or "#000000"))
+        color = QtWidgets.QColorDialog.getColor(current, self, self.tr("Select Color"))
+        if color.isValid():
+            self._set_button_color(button, color.name())
+
+    def _set_button_color(self, button: QtWidgets.QPushButton, color: str) -> None:
+        value = str(color or "#000000")
+        button.setProperty("selected_color", value)
+        button.setStyleSheet(f"background-color: {value}; border: 1px solid #555; border-radius: 5px;")
+
+    def configure_options(
+        self,
+        *,
+        languages: list[tuple[str, str]],
+        ocr_modes: list[tuple[str, str]],
+        translators: list[tuple[str, str]],
+        workflow_modes: list[tuple[str, str]],
+        fonts: list[str],
+        output_options: dict[str, list[tuple[str, str]]],
+    ) -> None:
+        self._populate_combo(self.source_lang_combo, languages)
+        self._populate_combo(self.target_lang_combo, languages)
+        self._populate_combo(self.ocr_combo, ocr_modes)
+        self._populate_combo(self.translator_combo, translators)
+        self._populate_combo(self.workflow_combo, workflow_modes)
+        self.font_combo.clear()
+        for font in fonts:
+            if font:
+                self.font_combo.addItem(str(font), str(font))
+        self._output_options = dict(output_options or {})
+        self._populate_combo(self.output_target_combo, self._output_options.get("automatic_output_target", []))
+        self._populate_combo(self.output_image_format_combo, self._output_options.get("automatic_output_image_format", []))
+        self._populate_combo(self.output_archive_format_combo, self._output_options.get("automatic_output_archive_format", []))
+        self._populate_combo(self.output_archive_image_format_combo, self._output_options.get("automatic_output_archive_image_format", []))
+
+    def set_payload(self, series_settings: dict[str, object], global_settings: dict[str, object]) -> None:
+        self.queue_page.set_settings(series_settings)
+        self._set_combo_value(self.source_lang_combo, str(global_settings.get("source_language") or ""))
+        self._set_combo_value(self.target_lang_combo, str(global_settings.get("target_language") or ""))
+        self._set_combo_value(self.ocr_combo, str(global_settings.get("ocr") or ""))
+        self._set_combo_value(self.translator_combo, str(global_settings.get("translator") or ""))
+        self._set_combo_value(self.workflow_combo, str(global_settings.get("workflow_mode") or ""))
+        self.use_gpu_checkbox.setChecked(bool(global_settings.get("use_gpu", True)))
+        self._set_render_values(global_settings.get("render_settings") if isinstance(global_settings.get("render_settings"), dict) else {})
+        self._set_export_values(global_settings.get("export_settings") if isinstance(global_settings.get("export_settings"), dict) else {})
+
+    def payload(self) -> tuple[dict[str, object], dict[str, object]]:
+        return self.queue_page.get_settings(), {
+            "source_language": str(self.source_lang_combo.currentData() or ""),
+            "target_language": str(self.target_lang_combo.currentData() or ""),
+            "ocr": str(self.ocr_combo.currentData() or ""),
+            "translator": str(self.translator_combo.currentData() or ""),
+            "workflow_mode": str(self.workflow_combo.currentData() or ""),
+            "use_gpu": self.use_gpu_checkbox.isChecked(),
+            "render_settings": self._render_values(),
+            "export_settings": self._export_values(),
+        }
+
+    def _set_render_values(self, values: dict[str, object]) -> None:
+        font = str(values.get("font_family") or "")
+        if font and self.font_combo.findText(font) < 0:
+            self.font_combo.addItem(font, font)
+        if font:
+            self.font_combo.setCurrentText(font)
+        self.min_font_spin.setValue(max(1, int(values.get("min_font_size", 5) or 5)))
+        self.max_font_spin.setValue(max(1, int(values.get("max_font_size", 40) or 40)))
+        self.line_spacing_combo.setCurrentText(str(values.get("line_spacing") or "1.0"))
+        self._set_button_color(self.text_color_button, str(values.get("color") or "#000000"))
+        self.force_color_checkbox.setChecked(bool(values.get("force_font_color", False)))
+        self._set_combo_value(self.horizontal_alignment_combo, int(values.get("alignment_id", 1) or 1))
+        self._set_combo_value(self.vertical_alignment_combo, int(values.get("vertical_alignment_id", 0) or 0))
+        self.bold_checkbox.setChecked(bool(values.get("bold", False)))
+        self.italic_checkbox.setChecked(bool(values.get("italic", False)))
+        self.underline_checkbox.setChecked(bool(values.get("underline", False)))
+        self.uppercase_checkbox.setChecked(bool(values.get("upper_case", False)))
+        self.outline_checkbox.setChecked(bool(values.get("outline", True)))
+        self._set_button_color(self.outline_color_button, str(values.get("outline_color") or "#ffffff"))
+        self.outline_width_combo.setCurrentText(str(values.get("outline_width") or "1.0"))
+
+    def _render_values(self) -> dict[str, object]:
+        return {
+            "alignment_id": int(self.horizontal_alignment_combo.currentData() or 0),
+            "vertical_alignment_id": int(self.vertical_alignment_combo.currentData() or 0),
+            "font_family": str(self.font_combo.currentText() or ""),
+            "min_font_size": int(self.min_font_spin.value()),
+            "max_font_size": int(self.max_font_spin.value()),
+            "color": str(self.text_color_button.property("selected_color") or "#000000"),
+            "force_font_color": self.force_color_checkbox.isChecked(),
+            "upper_case": self.uppercase_checkbox.isChecked(),
+            "outline": self.outline_checkbox.isChecked(),
+            "outline_color": str(self.outline_color_button.property("selected_color") or "#ffffff"),
+            "outline_width": str(self.outline_width_combo.currentText() or "1.0"),
+            "bold": self.bold_checkbox.isChecked(),
+            "italic": self.italic_checkbox.isChecked(),
+            "underline": self.underline_checkbox.isChecked(),
+            "line_spacing": str(self.line_spacing_combo.currentText() or "1.0"),
+        }
+
+    def _set_export_values(self, values: dict[str, object]) -> None:
+        self.export_raw_text_checkbox.setChecked(bool(values.get("export_raw_text", False)))
+        self.export_translated_text_checkbox.setChecked(bool(values.get("export_translated_text", False)))
+        self.export_inpainted_image_checkbox.setChecked(bool(values.get("export_inpainted_image", False)))
+        self.export_detector_overlay_checkbox.setChecked(bool(values.get("export_detector_overlay", False)))
+        self.export_raw_mask_checkbox.setChecked(bool(values.get("export_raw_mask", False)))
+        self.export_mask_overlay_checkbox.setChecked(bool(values.get("export_mask_overlay", False)))
+        self.export_cleanup_mask_delta_checkbox.setChecked(bool(values.get("export_cleanup_mask_delta", False)))
+        self.export_debug_metadata_checkbox.setChecked(bool(values.get("export_debug_metadata", False)))
+        self._set_combo_value(self.output_target_combo, str(values.get("automatic_output_target") or ""))
+        self._set_combo_value(self.output_image_format_combo, str(values.get("automatic_output_image_format") or ""))
+        self._set_combo_value(self.output_archive_format_combo, str(values.get("automatic_output_archive_format") or ""))
+        self._set_combo_value(self.output_archive_image_format_combo, str(values.get("automatic_output_archive_image_format") or ""))
+        self.output_archive_level_spin.setValue(max(0, min(9, int(values.get("automatic_output_archive_compression_level", 6) or 6))))
+
+    def _export_values(self) -> dict[str, object]:
+        return {
+            "export_raw_text": self.export_raw_text_checkbox.isChecked(),
+            "export_translated_text": self.export_translated_text_checkbox.isChecked(),
+            "export_inpainted_image": self.export_inpainted_image_checkbox.isChecked(),
+            "export_detector_overlay": self.export_detector_overlay_checkbox.isChecked(),
+            "export_raw_mask": self.export_raw_mask_checkbox.isChecked(),
+            "export_mask_overlay": self.export_mask_overlay_checkbox.isChecked(),
+            "export_cleanup_mask_delta": self.export_cleanup_mask_delta_checkbox.isChecked(),
+            "export_debug_metadata": self.export_debug_metadata_checkbox.isChecked(),
+            "automatic_output_target": str(self.output_target_combo.currentData() or ""),
+            "automatic_output_image_format": str(self.output_image_format_combo.currentData() or ""),
+            "automatic_output_archive_format": str(self.output_archive_format_combo.currentData() or ""),
+            "automatic_output_archive_image_format": str(self.output_archive_image_format_combo.currentData() or ""),
+            "automatic_output_archive_compression_level": int(self.output_archive_level_spin.value()),
+        }
+
+    def _populate_combo(self, combo: QtWidgets.QComboBox, options: list[tuple[str, str]]) -> None:
+        combo.clear()
+        for value, label in options or []:
+            combo.addItem(str(label), value)
+
+    def _set_combo_value(self, combo: QtWidgets.QComboBox, value: object) -> None:
+        index = combo.findData(value)
+        if index < 0 and isinstance(value, str):
+            index = combo.findText(value)
+        if index < 0 and combo.count() > 0:
+            index = 0
+        if index >= 0:
+            combo.setCurrentIndex(index)
+
 
 class _SeriesStatusPanel(QtWidgets.QWidget):
     pause_requested = QtCore.Signal()
     resume_requested = QtCore.Signal()
     open_failed_requested = QtCore.Signal()
+    open_current_requested = QtCore.Signal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -868,9 +1594,11 @@ class _SeriesStatusPanel(QtWidgets.QWidget):
         button_row = QtWidgets.QHBoxLayout()
         self.pause_button = QtWidgets.QPushButton(self.tr("Pause"))
         self.resume_button = QtWidgets.QPushButton(self.tr("Resume"))
+        self.open_current_button = QtWidgets.QPushButton(self.tr("Open Current Item"))
         self.open_failed_button = QtWidgets.QPushButton(self.tr("Open Failed Item"))
         button_row.addWidget(self.pause_button)
         button_row.addWidget(self.resume_button)
+        button_row.addWidget(self.open_current_button)
         button_row.addWidget(self.open_failed_button)
 
         layout.addWidget(header)
@@ -880,6 +1608,7 @@ class _SeriesStatusPanel(QtWidgets.QWidget):
 
         self.pause_button.clicked.connect(self.pause_requested.emit)
         self.resume_button.clicked.connect(self.resume_requested.emit)
+        self.open_current_button.clicked.connect(self.open_current_requested.emit)
         self.open_failed_button.clicked.connect(self.open_failed_requested.emit)
 
     def _state_label(self, queue_state: str) -> str:
@@ -939,6 +1668,8 @@ class _SeriesStatusPanel(QtWidgets.QWidget):
         self.pause_button.setText(self.tr("Pause") if not pause_requested else self.tr("Pause Requested"))
         self.resume_button.setVisible(queue_state == "paused")
         self.resume_button.setEnabled(queue_state == "paused" and bool(pending_ids))
+        self.open_current_button.setVisible(queue_state == "running")
+        self.open_current_button.setEnabled(bool(active_item_id))
         self.open_failed_button.setEnabled(bool(failed_item_id) and queue_state != "running")
 
 
@@ -1132,6 +1863,7 @@ class SeriesWorkspace(QtWidgets.QWidget):
     pause_requested = QtCore.Signal()
     resume_requested = QtCore.Signal()
     open_failed_item_requested = QtCore.Signal()
+    open_current_item_requested = QtCore.Signal()
     open_series_settings_requested = QtCore.Signal()
     global_settings_changed = QtCore.Signal(dict)
 
@@ -1259,6 +1991,7 @@ class SeriesWorkspace(QtWidgets.QWidget):
         self.status_panel.pause_requested.connect(self.pause_requested)
         self.status_panel.resume_requested.connect(self.resume_requested)
         self.status_panel.open_failed_requested.connect(self.open_failed_item_requested)
+        self.status_panel.open_current_requested.connect(self.open_current_item_requested)
         self.quick_settings.open_series_settings_requested.connect(self.open_series_settings_requested)
         self.quick_settings.changed.connect(self._emit_global_settings_changed)
         self.sort_combo.currentIndexChanged.connect(self._on_sort_changed)

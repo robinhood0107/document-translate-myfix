@@ -6,8 +6,10 @@ from modules.ocr.selection import (
     OCR_MODE_BEST_LOCAL,
     OCR_MODE_DEFAULT,
     OCR_OPTIMAL_LABEL,
+    STAGE_BATCHED_WORKFLOW_MODE,
     normalize_ocr_mode,
     resolve_ocr_engine,
+    resolve_stage_batched_ocr_policy,
 )
 
 
@@ -39,6 +41,29 @@ class OCRSelectionTests(unittest.TestCase):
 
     def test_best_local_routes_other_languages_to_paddle(self) -> None:
         self.assertEqual(resolve_ocr_engine(OCR_MODE_BEST_LOCAL, "English"), "PaddleOCR VL")
+
+    def test_stage_batched_accepts_legacy_gemma_alias(self) -> None:
+        policy = resolve_stage_batched_ocr_policy(
+            STAGE_BATCHED_WORKFLOW_MODE,
+            "paddleocr_vl",
+            "Japanese",
+            "gemma_local",
+        )
+
+        self.assertTrue(policy.stage_batched_supported)
+        self.assertEqual(policy.translator, "Custom Local Server(Gemma)")
+        self.assertEqual(policy.primary_ocr_engine, "PaddleOCR VL")
+
+    def test_stage_batched_accepts_localized_gemma_label(self) -> None:
+        policy = resolve_stage_batched_ocr_policy(
+            STAGE_BATCHED_WORKFLOW_MODE,
+            "paddleocr_vl",
+            "Japanese",
+            "사용자 지정 로컬 서버(Gemma)",
+        )
+
+        self.assertTrue(policy.stage_batched_supported)
+        self.assertEqual(policy.translator, "Custom Local Server(Gemma)")
 
 if __name__ == "__main__":
     unittest.main()

@@ -89,6 +89,49 @@ class PipelineStatusPanelTests(unittest.TestCase):
             QtWidgets.QApplication.processEvents()
             self.assertFalse(self.panel.isVisible())
 
+    def test_running_event_without_preview_keeps_existing_preview(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            image_path = os.path.join(temp_dir, "preview.png")
+            QImage(120, 220, QImage.Format.Format_RGB32).save(image_path)
+            self.panel.update_event(
+                {
+                    "phase": "pipeline",
+                    "status": "running",
+                    "service": "batch",
+                    "message": "preview",
+                    "preview_path": image_path,
+                }
+            )
+            self.panel.update_event(
+                {
+                    "phase": "pipeline",
+                    "status": "running",
+                    "service": "batch",
+                    "message": "still running",
+                }
+            )
+            QtWidgets.QApplication.processEvents()
+
+            self.assertEqual(self.panel._preview_path, image_path)
+            pixmap = self.panel.preview_label.pixmap()
+            self.assertIsNotNone(pixmap)
+            self.assertFalse(pixmap.isNull())
+
+    def test_completed_sub_event_does_not_mark_pipeline_done(self) -> None:
+        self.panel.update_event(
+            {
+                "phase": "pipeline",
+                "status": "completed",
+                "panel_state": "running",
+                "service": "batch",
+                "message": "page done",
+            }
+        )
+        QtWidgets.QApplication.processEvents()
+
+        self.assertEqual(self.panel._current_state, "running")
+        self.assertTrue(self.panel._pipeline_active)
+
     def test_hiding_logs_reduces_left_column_width(self) -> None:
         self.panel.show()
         QtWidgets.QApplication.processEvents()
