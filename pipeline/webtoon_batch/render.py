@@ -18,6 +18,7 @@ from modules.rendering.render import (
     describe_render_text_markup,
     describe_render_text_sanitization,
     get_best_render_area,
+    get_render_fit_clearance_for_block,
     is_vertical_block,
     pyside_word_wrap,
 )
@@ -193,6 +194,10 @@ class RenderMixin:
                 max_font_size,
                 min_font_size,
                 vertical,
+                fit_clearance=get_render_fit_clearance_for_block(
+                    block,
+                    outline_width,
+                ),
                 return_metrics=True,
             )
 
