@@ -53,6 +53,7 @@ from modules.utils.render_style_policy import (
 from modules.utils.translator_utils import get_raw_translation, get_raw_text, format_translations
 from modules.rendering.render import (
     build_render_rects_for_block,
+    build_text_item_layout_geometry,
     describe_render_text_sanitization,
     describe_render_text_markup,
     get_best_render_area,
@@ -1668,6 +1669,11 @@ class BatchProcessor:
                     self.main_page.blk_rendered.emit(translation, font_size, blk, image_path)
 
                 source_rect, block_anchor = build_render_rects_for_block(blk)
+                position, item_width, item_height = build_text_item_layout_geometry(
+                    source_rect,
+                    rendered_height,
+                    vertical_alignment,
+                )
 
                 # Use TextItemProperties for consistent text item creation
                 text_props = TextItemProperties(
@@ -1682,12 +1688,12 @@ class BatchProcessor:
                     bold=bold,
                     italic=italic,
                     underline=underline,
-                    position=(x1, y1),
+                    position=position,
                     rotation=blk.angle,
                     scale=1.0,
                     transform_origin=blk.tr_origin_point,
-                    width=rendered_width,
-                    height=rendered_height,
+                    width=item_width,
+                    height=item_height,
                     direction=direction,
                     vertical=vertical,
                     vertical_alignment=vertical_alignment,

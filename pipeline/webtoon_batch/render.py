@@ -14,6 +14,7 @@ from app.ui.canvas.text.text_item_properties import TextItemProperties
 from app.ui.canvas.text_item import OutlineInfo, OutlineType
 from modules.rendering.render import (
     build_render_rects_for_block,
+    build_text_item_layout_geometry,
     describe_render_text_markup,
     describe_render_text_sanitization,
     get_best_render_area,
@@ -235,6 +236,11 @@ class RenderMixin:
             ) + list(render_markup.replacements)
 
             source_rect, block_anchor = build_render_rects_for_block(block)
+            position, item_width, item_height = build_text_item_layout_geometry(
+                source_rect,
+                rendered_height,
+                vertical_alignment,
+            )
             text_props = TextItemProperties(
                 text=block._render_html,
                 font_family=font,
@@ -247,12 +253,12 @@ class RenderMixin:
                 bold=bold,
                 italic=italic,
                 underline=underline,
-                position=(x1, y1),
+                position=position,
                 rotation=block.angle,
                 scale=1.0,
                 transform_origin=block.tr_origin_point if block.tr_origin_point else (0, 0),
-                width=rendered_width,
-                height=rendered_height,
+                width=item_width,
+                height=item_height,
                 direction=direction,
                 vertical=vertical,
                 vertical_alignment=vertical_alignment,
