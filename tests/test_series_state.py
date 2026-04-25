@@ -18,6 +18,7 @@ from app.projects.series_state_v1 import (
     filter_series_candidate_paths,
     load_series_project,
     materialize_series_child_project,
+    merge_series_global_settings,
     normalize_series_global_settings,
     normalize_series_queue_runtime,
     normalize_series_recovery_state,
@@ -82,13 +83,55 @@ class SeriesStateTests(unittest.TestCase):
                 "translator": "gemma_local",
                 "workflow_mode": "stage_batched_pipeline",
                 "use_gpu": 0,
+                "export_settings": {"export_raw_mask": True},
+                "render_settings": {"alignment_id": 1},
             }
         )
         self.assertEqual(normalized["source_language"], "Japanese")
         self.assertEqual(normalized["target_language"], "Korean")
         self.assertEqual(normalized["ocr"], "paddleocr_vl")
+        self.assertEqual(normalized["translator"], "Custom Local Server(Gemma)")
         self.assertEqual(normalized["workflow_mode"], "stage_batched_pipeline")
         self.assertFalse(normalized["use_gpu"])
+        self.assertEqual(normalized["export_settings"], {"export_raw_mask": True})
+        self.assertEqual(normalized["render_settings"], {"alignment_id": 1})
+
+    def test_normalize_series_global_settings_accepts_localized_gemma_label(self) -> None:
+        normalized = normalize_series_global_settings(
+            {
+                "translator": "사용자 지정 로컬 서버(Gemma)",
+                "render_settings": {"font_family": "Ownglyph gumama3"},
+                "export_settings": {"export_raw_mask": True},
+            }
+        )
+
+        self.assertEqual(normalized["translator"], "Custom Local Server(Gemma)")
+        self.assertEqual(normalized["render_settings"]["font_family"], "Ownglyph gumama3")
+        self.assertTrue(normalized["export_settings"]["export_raw_mask"])
+
+    def test_merge_series_global_settings_preserves_nested_render_export(self) -> None:
+        merged = merge_series_global_settings(
+            {
+                "source_language": "Japanese",
+                "target_language": "Korean",
+                "ocr": "best_local",
+                "translator": "Custom Local Server(Gemma)",
+                "workflow_mode": "stage_batched_pipeline",
+                "use_gpu": True,
+                "render_settings": {"font_family": "Ownglyph gumama3", "max_font_size": 40},
+                "export_settings": {"export_raw_mask": True},
+            },
+            {
+                "translator": "gemma_local",
+                "use_gpu": False,
+            },
+        )
+
+        self.assertEqual(merged["translator"], "Custom Local Server(Gemma)")
+        self.assertFalse(merged["use_gpu"])
+        self.assertEqual(merged["render_settings"]["font_family"], "Ownglyph gumama3")
+        self.assertEqual(merged["render_settings"]["max_font_size"], 40)
+        self.assertTrue(merged["export_settings"]["export_raw_mask"])
 
     def test_normalize_series_queue_runtime_defaults_to_idle_pause_safe_shape(self) -> None:
         runtime = normalize_series_queue_runtime(

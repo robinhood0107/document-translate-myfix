@@ -41,6 +41,13 @@ LOCAL_OCR_ENGINES = frozenset({"PaddleOCR VL", "HunyuanOCR", "MangaLMM"})
 STAGE_BATCHED_WORKFLOW_MODE = "stage_batched_pipeline"
 LEGACY_PAGE_WORKFLOW_MODE = "legacy_page_pipeline"
 GEMMA_TRANSLATOR_KEY = "Custom Local Server(Gemma)"
+_TRANSLATOR_ALIASES: dict[str, str] = {
+    GEMMA_TRANSLATOR_KEY: GEMMA_TRANSLATOR_KEY,
+    "Custom Local Server": GEMMA_TRANSLATOR_KEY,
+    "gemma_local": GEMMA_TRANSLATOR_KEY,
+    "사용자 지정 로컬 서버": GEMMA_TRANSLATOR_KEY,
+    "사용자 지정 로컬 서버(Gemma)": GEMMA_TRANSLATOR_KEY,
+}
 WORKFLOW_MODE_STAGE_BATCHED_LABEL = "Stage-Batched Pipeline (Recommended)"
 WORKFLOW_MODE_LEGACY_LABEL = "Legacy Page Pipeline (Legacy)"
 WORKFLOW_MODE_OPTIONS: tuple[tuple[str, str], ...] = (
@@ -119,6 +126,11 @@ def is_local_ocr_engine(engine_key: str | None) -> bool:
     return str(engine_key or "").strip() in LOCAL_OCR_ENGINES
 
 
+def normalize_translator_key(value: str | None) -> str:
+    raw = str(value or "").strip()
+    return _TRANSLATOR_ALIASES.get(raw, raw)
+
+
 @dataclass(frozen=True)
 class OCRStageRoutingPolicy:
     workflow_mode: str
@@ -149,7 +161,7 @@ def resolve_stage_batched_ocr_policy(
     workflow_mode_text = str(workflow_mode or "").strip() or LEGACY_PAGE_WORKFLOW_MODE
     normalized_mode = normalize_ocr_mode(ocr_mode)
     source_lang_text = str(source_lang_english or "").strip() or "Unknown"
-    translator_text = str(translator or "").strip()
+    translator_text = normalize_translator_key(translator)
 
     if workflow_mode_text != STAGE_BATCHED_WORKFLOW_MODE:
         primary_engine = resolve_ocr_engine(normalized_mode, source_lang_text)

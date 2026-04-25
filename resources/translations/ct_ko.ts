@@ -1910,6 +1910,14 @@ Approximate GPU usage:
         <translation>일시정지</translation>
     </message>
     <message>
+        <source>Series Board</source>
+        <translation>시리즈 보드</translation>
+    </message>
+    <message>
+        <source>Current Item</source>
+        <translation>현재 항목</translation>
+    </message>
+    <message>
         <source>Report</source>
         <translation>리포트</translation>
     </message>
@@ -2336,6 +2344,265 @@ These values are copied into new series projects and can be adjusted per series.
     <message>
         <source>Retry delay (sec):</source>
         <translation>재시도 대기 시간(초):</translation>
+    </message>
+</context>
+<context>
+    <name>SeriesSettingsDialog</name>
+    <message>
+        <source>Series Design / Global Settings</source>
+        <translation>시리즈 디자인 / 전체 설정</translation>
+    </message>
+    <message>
+        <source>These defaults are applied when the series queue runs. Child projects keep their own page-level edits.</source>
+        <translation>이 기본값은 시리즈 대기열 실행 시 적용됩니다. 세부 프로젝트의 페이지별 편집 내용은 그대로 유지됩니다.</translation>
+    </message>
+    <message>
+        <source>Queue</source>
+        <translation type="unfinished">대기열</translation>
+    </message>
+    <message>
+        <source>Use GPU</source>
+        <translation type="unfinished">GPU 사용</translation>
+    </message>
+    <message>
+        <source>Source language:</source>
+        <translation type="unfinished">원본 언어:</translation>
+    </message>
+    <message>
+        <source>Target language:</source>
+        <translation type="unfinished">번역 언어:</translation>
+    </message>
+    <message>
+        <source>Languages</source>
+        <translation>언어</translation>
+    </message>
+    <message>
+        <source>Set the source and target language for every queued child project.</source>
+        <translation>대기열의 모든 세부 프로젝트에 적용할 원본/번역 언어를 설정합니다.</translation>
+    </message>
+    <message>
+        <source>OCR:</source>
+        <translation type="unfinished">OCR:</translation>
+    </message>
+    <message>
+        <source>Translator:</source>
+        <translation type="unfinished">번역기:</translation>
+    </message>
+    <message>
+        <source>Workflow mode:</source>
+        <translation type="unfinished">워크플로 모드:</translation>
+    </message>
+    <message>
+        <source>Pipeline Runtime</source>
+        <translation>파이프라인 런타임</translation>
+    </message>
+    <message>
+        <source>Choose the queue workflow and the runtime services it should use.</source>
+        <translation>대기열이 사용할 워크플로와 런타임 서비스를 선택합니다.</translation>
+    </message>
+    <message>
+        <source>Pipeline</source>
+        <translation type="unfinished">파이프라인</translation>
+    </message>
+    <message>
+        <source>Use Selected Color</source>
+        <translation type="unfinished">선택한 색상 사용</translation>
+    </message>
+    <message>
+        <source>Left</source>
+        <translation type="unfinished">왼쪽</translation>
+    </message>
+    <message>
+        <source>Center</source>
+        <translation type="unfinished">가운데</translation>
+    </message>
+    <message>
+        <source>Right</source>
+        <translation type="unfinished">오른쪽</translation>
+    </message>
+    <message>
+        <source>Top</source>
+        <translation type="unfinished">상단</translation>
+    </message>
+    <message>
+        <source>Bottom</source>
+        <translation type="unfinished">하단</translation>
+    </message>
+    <message>
+        <source>Bold</source>
+        <translation>굵게</translation>
+    </message>
+    <message>
+        <source>Italic</source>
+        <translation>기울임</translation>
+    </message>
+    <message>
+        <source>Underline</source>
+        <translation>밑줄</translation>
+    </message>
+    <message>
+        <source>Uppercase</source>
+        <translation>대문자</translation>
+    </message>
+    <message>
+        <source>Outline</source>
+        <translation type="unfinished">윤곽선</translation>
+    </message>
+    <message>
+        <source>Font:</source>
+        <translation type="unfinished">글꼴:</translation>
+    </message>
+    <message>
+        <source>Min font size:</source>
+        <translation>최소 글꼴 크기:</translation>
+    </message>
+    <message>
+        <source>Max font size:</source>
+        <translation>최대 글꼴 크기:</translation>
+    </message>
+    <message>
+        <source>Line spacing:</source>
+        <translation>줄간격:</translation>
+    </message>
+    <message>
+        <source>Typography</source>
+        <translation>글꼴과 크기</translation>
+    </message>
+    <message>
+        <source>Control the base font and automatic font-fit limits for generated text.</source>
+        <translation>생성되는 텍스트의 기본 글꼴과 자동 맞춤 크기 범위를 조정합니다.</translation>
+    </message>
+    <message>
+        <source>Text color:</source>
+        <translation>텍스트 색상:</translation>
+    </message>
+    <message>
+        <source>Color</source>
+        <translation>색상</translation>
+    </message>
+    <message>
+        <source>Use a fixed text color when the queue renders translated pages.</source>
+        <translation>대기열에서 번역 페이지를 렌더링할 때 고정 텍스트 색상을 사용합니다.</translation>
+    </message>
+    <message>
+        <source>Horizontal:</source>
+        <translation>가로:</translation>
+    </message>
+    <message>
+        <source>Vertical:</source>
+        <translation>세로:</translation>
+    </message>
+    <message>
+        <source>Alignment</source>
+        <translation>정렬</translation>
+    </message>
+    <message>
+        <source>Align text inside each detected text box.</source>
+        <translation>감지된 각 텍스트 박스 안에서 텍스트를 정렬합니다.</translation>
+    </message>
+    <message>
+        <source>Style:</source>
+        <translation>스타일:</translation>
+    </message>
+    <message>
+        <source>Outline:</source>
+        <translation>윤곽선:</translation>
+    </message>
+    <message>
+        <source>Style and Outline</source>
+        <translation>스타일과 윤곽선</translation>
+    </message>
+    <message>
+        <source>Apply emphasis and outline defaults across the series queue.</source>
+        <translation>시리즈 대기열 전체에 강조 스타일과 윤곽선 기본값을 적용합니다.</translation>
+    </message>
+    <message>
+        <source>Render</source>
+        <translation type="unfinished">렌더링</translation>
+    </message>
+    <message>
+        <source>Output target:</source>
+        <translation>출력 대상:</translation>
+    </message>
+    <message>
+        <source>Image format:</source>
+        <translation>이미지 형식:</translation>
+    </message>
+    <message>
+        <source>Archive format:</source>
+        <translation>아카이브 형식:</translation>
+    </message>
+    <message>
+        <source>Archive image format:</source>
+        <translation>아카이브 이미지 형식:</translation>
+    </message>
+    <message>
+        <source>Archive compression:</source>
+        <translation>아카이브 압축률:</translation>
+    </message>
+    <message>
+        <source>Final Output</source>
+        <translation>최종 출력</translation>
+    </message>
+    <message>
+        <source>Choose where the completed translated result is saved.</source>
+        <translation>완성된 번역 결과를 저장할 위치와 형식을 선택합니다.</translation>
+    </message>
+    <message>
+        <source>Raw source text</source>
+        <translation>원문 텍스트</translation>
+    </message>
+    <message>
+        <source>Translated text</source>
+        <translation>번역문 텍스트</translation>
+    </message>
+    <message>
+        <source>Text Exports</source>
+        <translation>텍스트 내보내기</translation>
+    </message>
+    <message>
+        <source>Write OCR and translation text files next to the queue output.</source>
+        <translation>OCR 결과와 번역문 텍스트 파일을 대기열 출력 위치에 함께 저장합니다.</translation>
+    </message>
+    <message>
+        <source>Inpainted image</source>
+        <translation>인페인팅된 이미지</translation>
+    </message>
+    <message>
+        <source>Detector overlay</source>
+        <translation>감지 오버레이</translation>
+    </message>
+    <message>
+        <source>Raw inpaint mask</source>
+        <translation>원본 인페인트 마스크</translation>
+    </message>
+    <message>
+        <source>Mask overlay</source>
+        <translation>마스크 오버레이</translation>
+    </message>
+    <message>
+        <source>Cleanup mask delta</source>
+        <translation>클린업 마스크 차이</translation>
+    </message>
+    <message>
+        <source>Debug metadata</source>
+        <translation>디버그 메타데이터</translation>
+    </message>
+    <message>
+        <source>Debug Artifacts</source>
+        <translation>디버그 산출물</translation>
+    </message>
+    <message>
+        <source>Only checked debug artifacts are created. When unchecked, the status panel logs that preview generation is disabled.</source>
+        <translation>체크한 디버그 산출물만 생성합니다. 체크가 꺼져 있으면 상태 패널에 미리보기 생성이 비활성화되었다는 로그만 남깁니다.</translation>
+    </message>
+    <message>
+        <source>Export / Debug</source>
+        <translation>출력 / 디버그</translation>
+    </message>
+    <message>
+        <source>Select Color</source>
+        <translation>색상 선택</translation>
     </message>
 </context>
 <context>
@@ -3742,12 +4009,52 @@ It may have already been moved, renamed, or deleted.
         <translation>워크플로 모드:</translation>
     </message>
     <message>
-        <source>Series Settings…</source>
-        <translation>시리즈 설정…</translation>
+        <source>Render: --</source>
+        <translation>렌더링: --</translation>
+    </message>
+    <message>
+        <source>Export: --</source>
+        <translation>출력: --</translation>
+    </message>
+    <message>
+        <source>Edit queue, pipeline, render, export, and debug defaults for this series.</source>
+        <translation>이 시리즈의 대기열, 파이프라인, 렌더링, 출력, 디버그 기본값을 편집합니다.</translation>
+    </message>
+    <message>
+        <source>Series Design / Global Settings…</source>
+        <translation>시리즈 디자인 / 전체 설정...</translation>
     </message>
     <message>
         <source>Translate in Queue Order</source>
         <translation>대기열 순서대로 자동 번역</translation>
+    </message>
+    <message>
+        <source>left</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>center</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>right</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>outline {width}</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>outline off</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Render: {font} / max {max_font} / line {line_spacing} / {align} / {outline}</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Export: {target} / debug {count} enabled</source>
+        <translation type="unfinished"></translation>
     </message>
 </context>
 <context>
@@ -3826,6 +4133,10 @@ It may have already been moved, renamed, or deleted.
     <message>
         <source>Resume</source>
         <translation>재개</translation>
+    </message>
+    <message>
+        <source>Open Current Item</source>
+        <translation>현재 항목 열기</translation>
     </message>
     <message>
         <source>Open Failed Item</source>
@@ -4067,10 +4378,6 @@ It may have been moved, renamed, or deleted.
     <message>
         <source>Add Folder To Series</source>
         <translation>시리즈에 폴더 추가</translation>
-    </message>
-    <message>
-        <source>Series Settings</source>
-        <translation>시리즈 설정</translation>
     </message>
     <message>
         <source>Save Series Project</source>
