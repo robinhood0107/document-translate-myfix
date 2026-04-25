@@ -8,6 +8,7 @@ from PySide6 import QtCore, QtWidgets
 
 from modules.rendering.render import (
     build_render_rects_for_block,
+    build_text_item_layout_geometry,
     get_best_render_area,
     pyside_word_wrap,
 )
@@ -134,3 +135,14 @@ class RenderBubbleFitTests(unittest.TestCase):
         self.assertLessEqual(width_60, 635)
         self.assertLessEqual(height_60, 286)
         self.assertGreaterEqual(font_60, font_30)
+
+    def test_text_item_geometry_keeps_layout_width_for_center_alignment(self) -> None:
+        position, width, height = build_text_item_layout_geometry(
+            (100, 50, 600, 300),
+            rendered_height=180,
+            vertical_alignment="center",
+        )
+
+        self.assertEqual(position, (100.0, 110.0))
+        self.assertEqual(width, 600.0)
+        self.assertEqual(height, 180)
