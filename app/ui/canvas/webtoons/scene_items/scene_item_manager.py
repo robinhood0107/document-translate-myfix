@@ -11,6 +11,7 @@ from .text_item_manager import TextItemManager
 from .brush_stroke_manager import BrushStrokeManager
 from .text_block_manager import TextBlockManager
 from .patch_manager import PatchManager
+from modules.rendering.rich_text import should_use_rich_text
 
 
 class SceneItemManager:
@@ -225,7 +226,7 @@ class SceneItemManager:
                         
                         text_content = text_item_data.get('text', '')
                         plain_text = text_content
-                        if '<' in text_content and '>' in text_content: # Simple HTML check
+                        if should_use_rich_text(text_content):
                             temp_doc = QTextDocument()
                             temp_doc.setHtml(text_content)
                             plain_text = temp_doc.toPlainText()
@@ -234,9 +235,8 @@ class SceneItemManager:
                         break
     
     def _is_html(self, text):
-        """Check if text contains HTML tags."""
-        import re
-        return bool(re.search(r'<[^>]+>', text))
+        """Check if text contains app-trusted rich text."""
+        return should_use_rich_text(text)
     
     def clear(self):
         """Clear all scene item management state."""

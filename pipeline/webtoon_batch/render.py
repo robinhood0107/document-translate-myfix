@@ -197,7 +197,24 @@ class RenderMixin:
 
             if is_no_space_lang(target_lang_code):
                 wrapped_translation = wrapped_translation.replace(" ", "")
-            render_markup = describe_render_text_markup(wrapped_translation)
+            font_color = resolve_render_text_color(
+                block.font_color,
+                base_font_color,
+                render_settings.force_font_color,
+                render_settings.smart_global_apply_all,
+            )
+            render_markup = describe_render_text_markup(
+                wrapped_translation,
+                font_family=font,
+                font_size=font_size,
+                text_color=font_color,
+                alignment=alignment,
+                line_spacing=line_spacing,
+                bold=bold,
+                italic=italic,
+                underline=underline,
+                direction=direction,
+            )
             block._render_text = str(wrapped_translation or "")
             block._render_html = str(
                 render_markup.html_text if render_markup.html_applied else wrapped_translation or ""
@@ -217,12 +234,6 @@ class RenderMixin:
                 render_normalization.replacements
             ) + list(render_markup.replacements)
 
-            font_color = resolve_render_text_color(
-                block.font_color,
-                base_font_color,
-                render_settings.force_font_color,
-                render_settings.smart_global_apply_all,
-            )
             source_rect = build_rect_tuple(x1, y1, width, height)
             text_props = TextItemProperties(
                 text=block._render_html,
