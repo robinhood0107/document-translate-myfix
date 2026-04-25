@@ -189,7 +189,6 @@ class SeriesWorkspaceRuntimeTests(unittest.TestCase):
         self.addCleanup(dialog.deleteLater)
         self.assertEqual(dialog.windowTitle(), "Series Design / Global Settings")
         self.assertGreaterEqual(dialog.minimumWidth(), 820)
-        self.assertEqual(dialog.header_line.objectName(), "seriesSettingsHeaderLine")
         dialog.configure_options(
             languages=[("Japanese", "Japanese"), ("Korean", "Korean")],
             ocr_modes=[("best_local", "Optimal")],

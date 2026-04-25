@@ -911,11 +911,6 @@ class SeriesSettingsDialog(QtWidgets.QDialog):
         subtitle.setWordWrap(True)
         root.addWidget(title)
         root.addWidget(subtitle)
-        self.header_line = QtWidgets.QFrame(self)
-        self.header_line.setObjectName("seriesSettingsHeaderLine")
-        self.header_line.setFrameShape(QtWidgets.QFrame.Shape.HLine)
-        self.header_line.setFrameShadow(QtWidgets.QFrame.Shadow.Plain)
-        root.addWidget(self.header_line)
 
         self.tabs = QtWidgets.QTabWidget(self)
         self.tabs.setObjectName("seriesSettingsTabs")
@@ -1273,12 +1268,6 @@ class SeriesSettingsDialog(QtWidgets.QDialog):
                 color: {sub_text};
                 font-size: 14px;
                 padding-bottom: 2px;
-            }}
-            QFrame#seriesSettingsHeaderLine {{
-                color: {sub_text};
-                background: {sub_text};
-                min-height: 1px;
-                max-height: 1px;
             }}
             QTabWidget#seriesSettingsTabs::pane {{
                 border: none;
