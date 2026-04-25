@@ -57,6 +57,7 @@ from modules.rendering.render import (
     describe_render_text_sanitization,
     describe_render_text_markup,
     get_best_render_area,
+    get_render_fit_clearance_for_block,
     is_vertical_block,
     pyside_word_wrap,
 )
@@ -1621,6 +1622,10 @@ class BatchProcessor:
                     max_font_size, 
                     min_font_size,
                     vertical,
+                    fit_clearance=get_render_fit_clearance_for_block(
+                        blk,
+                        outline_width,
+                    ),
                     return_metrics=True
                 )
                 
