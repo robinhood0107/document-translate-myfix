@@ -87,6 +87,9 @@ HORIZONTAL_BUBBLE_SHRINK_PERCENT = 0.18
 VERTICAL_BUBBLE_SHRINK_PERCENT = 0.30
 MIN_BUBBLE_TEXT_CONTAINMENT = 0.60
 MIN_BUBBLE_RENDER_AREA_GAIN = 0.90
+DETECTED_BUBBLE_FIT_CLEARANCE_PX = 8.0
+DETECTED_BUBBLE_OUTLINE_CLEARANCE_MULTIPLIER = 2.0
+DETECTED_BUBBLE_MIN_FIT_DIMENSION_PX = 16.0
 
 _CJK_RE = re.compile(r"[\uac00-\ud7a3\u3040-\u30ff\u4e00-\u9fff]")
 _BREAK_BEFORE_FORBIDDEN = set(".,!?;:)]}，。！？、；：）」』】》〉…")
@@ -466,6 +469,24 @@ def build_text_item_layout_geometry(
     return (source_x, position_y), source_width, rendered_height
 
 
+def get_render_fit_clearance_for_block(
+    blk: TextBlock,
+    outline_width: float | int | str = 0.0,
+) -> float:
+    """Return extra inner fit clearance for text rendered inside detected bubbles."""
+    if getattr(blk, "_render_area_source", "") != "detected_bubble":
+        return 0.0
+    try:
+        outline = max(0.0, float(outline_width))
+    except (TypeError, ValueError):
+        outline = 0.0
+    return max(
+        DETECTED_BUBBLE_FIT_CLEARANCE_PX,
+        (outline * DETECTED_BUBBLE_OUTLINE_CLEARANCE_MULTIPLIER)
+        + DETECTED_BUBBLE_FIT_CLEARANCE_PX,
+    )
+
+
 def _reset_render_area_metadata(blk: TextBlock) -> None:
     original = _current_anchor_xyxy(blk)
     bubble = _normalize_xyxy(getattr(blk, "bubble_xyxy", None))
@@ -759,6 +780,7 @@ def pyside_word_wrap(
     init_font_size: int, 
     min_font_size: int = 10, 
     vertical: bool = False,
+    fit_clearance: float = 0.0,
     return_metrics: bool = False
 ) -> tuple:
     
@@ -837,13 +859,26 @@ def pyside_word_wrap(
         
         return width, height
 
+    try:
+        clearance = max(0.0, float(fit_clearance))
+    except (TypeError, ValueError):
+        clearance = 0.0
+    fit_roi_width = max(
+        DETECTED_BUBBLE_MIN_FIT_DIMENSION_PX,
+        float(roi_width) - (clearance * 2.0),
+    )
+    fit_roi_height = max(
+        DETECTED_BUBBLE_MIN_FIT_DIMENSION_PX,
+        float(roi_height) - (clearance * 2.0),
+    )
+
     def wrap_and_size(font_size):
         if vertical:
-            lines = _greedy_wrap_lines(text, font_size, eval_metrics, roi_width, roi_height, vertical)
+            lines = _greedy_wrap_lines(text, font_size, eval_metrics, fit_roi_width, fit_roi_height, vertical)
         else:
-            lines = _balanced_wrap_lines(text, font_size, eval_metrics, roi_width, roi_height)
+            lines = _balanced_wrap_lines(text, font_size, eval_metrics, fit_roi_width, fit_roi_height)
             if not lines:
-                lines = _greedy_wrap_lines(text, font_size, eval_metrics, roi_width, roi_height, vertical)
+                lines = _greedy_wrap_lines(text, font_size, eval_metrics, fit_roi_width, fit_roi_height, vertical)
         wrapped = "\n".join(lines)
         w, h = eval_metrics(wrapped, font_size, vertical)
         return wrapped, w, h
@@ -856,7 +891,7 @@ def pyside_word_wrap(
     while lo <= hi:
         mid = (lo + hi) // 2
         wrapped, w, h = wrap_and_size(mid)
-        if w <= roi_width and h <= roi_height:
+        if w <= fit_roi_width and h <= fit_roi_height:
             found_fit = True
             best_text, best_size = wrapped, mid
             lo = mid + 1
@@ -865,8 +900,19 @@ def pyside_word_wrap(
 
     # if nothing ever fit, force a wrap at the minimum size
     if not found_fit:
-        best_text, w, h = wrap_and_size(min_font_size)
-        best_size = min_font_size
+        lo, hi = 1, max(1, min_font_size - 1)
+        while lo <= hi:
+            mid = (lo + hi) // 2
+            wrapped, w, h = wrap_and_size(mid)
+            if w <= fit_roi_width and h <= fit_roi_height:
+                found_fit = True
+                best_text, best_size = wrapped, mid
+                lo = mid + 1
+            else:
+                hi = mid - 1
+        if not found_fit:
+            best_text, w, h = wrap_and_size(1)
+            best_size = 1
 
     if return_metrics:
         # Match persisted state to the text item's actual geometry.
@@ -968,7 +1014,8 @@ def manual_wrap(
             direction, 
             init_font_size, 
             min_font_size,
-            vertical
+            vertical,
+            fit_clearance=get_render_fit_clearance_for_block(blk, outline_width),
         )
         render_markup = describe_render_text_markup(
             translation,
