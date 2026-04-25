@@ -11,6 +11,7 @@ from modules.utils.archives import list_archive_image_entries, materialize_archi
 
 from .dayu_widgets import dayu_theme
 from .dayu_widgets.tool_button import MToolButton
+from .settings.series_page import SeriesPage
 
 
 _DIRECT_PREVIEW_EXTS = {".png", ".jpg", ".jpeg", ".webp", ".bmp", ".psd"}
@@ -733,6 +734,13 @@ class _SeriesQuickSettings(QtWidgets.QWidget):
         form.addRow(self.tr("Workflow mode:"), self.workflow_combo)
         form.addRow("", self.use_gpu_checkbox)
 
+        self.render_summary_label = QtWidgets.QLabel(self.tr("Render: --"))
+        self.render_summary_label.setObjectName("seriesQuickNote")
+        self.render_summary_label.setWordWrap(True)
+        self.export_summary_label = QtWidgets.QLabel(self.tr("Export: --"))
+        self.export_summary_label.setObjectName("seriesQuickNote")
+        self.export_summary_label.setWordWrap(True)
+
         self.series_settings_button = QtWidgets.QPushButton(self.tr("Series Settings…"))
         self.auto_translate_button = QtWidgets.QPushButton(self.tr("Translate in Queue Order"))
         self.auto_translate_button.setObjectName("seriesAutoTranslateButton")
@@ -740,6 +748,8 @@ class _SeriesQuickSettings(QtWidgets.QWidget):
         layout.addWidget(header)
         layout.addWidget(note)
         layout.addLayout(form)
+        layout.addWidget(self.render_summary_label)
+        layout.addWidget(self.export_summary_label)
         layout.addWidget(self.series_settings_button)
         layout.addWidget(self.auto_translate_button)
         layout.addStretch(1)
@@ -805,6 +815,7 @@ class _SeriesQuickSettings(QtWidgets.QWidget):
         self._set_combo_value(self.translator_combo, str(values.get("translator") or ""))
         self._set_combo_value(self.workflow_combo, str(values.get("workflow_mode") or ""))
         self.use_gpu_checkbox.setChecked(bool(values.get("use_gpu", True)))
+        self._update_summaries(values)
         del blockers
 
     def values(self) -> dict[str, object]:
@@ -819,6 +830,365 @@ class _SeriesQuickSettings(QtWidgets.QWidget):
 
     def _set_combo_value(self, combo: QtWidgets.QComboBox, value: str) -> None:
         index = combo.findData(value)
+        if index < 0 and combo.count() > 0:
+            index = 0
+        if index >= 0:
+            combo.setCurrentIndex(index)
+
+    def _update_summaries(self, values: dict[str, object]) -> None:
+        render = values.get("render_settings")
+        render = render if isinstance(render, dict) else {}
+        font = str(render.get("font_family") or "--")
+        max_font = render.get("max_font_size", "--")
+        line_spacing = str(render.get("line_spacing") or "--")
+        align_labels = [self.tr("left"), self.tr("center"), self.tr("right")]
+        align_id = int(render.get("alignment_id", 1) or 1)
+        align = align_labels[align_id] if 0 <= align_id < len(align_labels) else self.tr("center")
+        outline = (
+            self.tr("outline {width}").format(width=str(render.get("outline_width") or "1.0"))
+            if bool(render.get("outline", False))
+            else self.tr("outline off")
+        )
+        self.render_summary_label.setText(
+            self.tr("Render: {font} / max {max_font} / line {line_spacing} / {align} / {outline}").format(
+                font=font,
+                max_font=max_font,
+                line_spacing=line_spacing,
+                align=align,
+                outline=outline,
+            )
+        )
+
+        export = values.get("export_settings")
+        export = export if isinstance(export, dict) else {}
+        target = str(export.get("automatic_output_target") or "--")
+        debug_keys = (
+            "export_inpainted_image",
+            "export_detector_overlay",
+            "export_raw_mask",
+            "export_mask_overlay",
+            "export_cleanup_mask_delta",
+            "export_debug_metadata",
+        )
+        debug_count = sum(1 for key in debug_keys if bool(export.get(key, False)))
+        self.export_summary_label.setText(
+            self.tr("Export: {target} / debug {count} enabled").format(
+                target=target,
+                count=debug_count,
+            )
+        )
+
+
+class SeriesSettingsDialog(QtWidgets.QDialog):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle(self.tr("Series Settings"))
+        self.resize(680, 620)
+        self._output_options: dict[str, list[tuple[str, str]]] = {}
+
+        root = QtWidgets.QVBoxLayout(self)
+        root.setContentsMargins(14, 14, 14, 14)
+        root.setSpacing(10)
+
+        self.tabs = QtWidgets.QTabWidget(self)
+        root.addWidget(self.tabs, 1)
+
+        self.queue_page = SeriesPage(self)
+        self.tabs.addTab(self.queue_page, self.tr("Queue"))
+
+        self._build_pipeline_tab()
+        self._build_render_tab()
+        self._build_export_tab()
+
+        buttons = QtWidgets.QDialogButtonBox(
+            QtWidgets.QDialogButtonBox.StandardButton.Ok
+            | QtWidgets.QDialogButtonBox.StandardButton.Cancel
+        )
+        buttons.accepted.connect(self.accept)
+        buttons.rejected.connect(self.reject)
+        root.addWidget(buttons)
+
+    def _build_pipeline_tab(self) -> None:
+        tab = QtWidgets.QWidget(self)
+        layout = QtWidgets.QFormLayout(tab)
+        layout.setContentsMargins(12, 12, 12, 12)
+        layout.setSpacing(10)
+
+        self.source_lang_combo = QtWidgets.QComboBox(tab)
+        self.target_lang_combo = QtWidgets.QComboBox(tab)
+        self.ocr_combo = QtWidgets.QComboBox(tab)
+        self.translator_combo = QtWidgets.QComboBox(tab)
+        self.workflow_combo = QtWidgets.QComboBox(tab)
+        self.use_gpu_checkbox = QtWidgets.QCheckBox(self.tr("Use GPU"), tab)
+        self.use_gpu_checkbox.setChecked(True)
+
+        layout.addRow(self.tr("Source language:"), self.source_lang_combo)
+        layout.addRow(self.tr("Target language:"), self.target_lang_combo)
+        layout.addRow(self.tr("OCR:"), self.ocr_combo)
+        layout.addRow(self.tr("Translator:"), self.translator_combo)
+        layout.addRow(self.tr("Workflow mode:"), self.workflow_combo)
+        layout.addRow("", self.use_gpu_checkbox)
+        self.tabs.addTab(tab, self.tr("Pipeline"))
+
+    def _build_render_tab(self) -> None:
+        tab = QtWidgets.QWidget(self)
+        layout = QtWidgets.QFormLayout(tab)
+        layout.setContentsMargins(12, 12, 12, 12)
+        layout.setSpacing(10)
+
+        self.font_combo = QtWidgets.QComboBox(tab)
+        self.font_combo.setEditable(True)
+        self.min_font_spin = QtWidgets.QSpinBox(tab)
+        self.min_font_spin.setRange(1, 300)
+        self.max_font_spin = QtWidgets.QSpinBox(tab)
+        self.max_font_spin.setRange(1, 300)
+        self.line_spacing_combo = QtWidgets.QComboBox(tab)
+        self.line_spacing_combo.setEditable(True)
+        self.line_spacing_combo.addItems(["1.0", "1.1", "1.2", "1.3", "1.4", "1.5"])
+        self.text_color_button = self._make_color_button("#000000")
+        self.force_color_checkbox = QtWidgets.QCheckBox(self.tr("Use Selected Color"), tab)
+        self.horizontal_alignment_combo = QtWidgets.QComboBox(tab)
+        self.horizontal_alignment_combo.addItem(self.tr("Left"), 0)
+        self.horizontal_alignment_combo.addItem(self.tr("Center"), 1)
+        self.horizontal_alignment_combo.addItem(self.tr("Right"), 2)
+        self.vertical_alignment_combo = QtWidgets.QComboBox(tab)
+        self.vertical_alignment_combo.addItem(self.tr("Top"), 0)
+        self.vertical_alignment_combo.addItem(self.tr("Center"), 1)
+        self.vertical_alignment_combo.addItem(self.tr("Bottom"), 2)
+        self.bold_checkbox = QtWidgets.QCheckBox(self.tr("Bold"), tab)
+        self.italic_checkbox = QtWidgets.QCheckBox(self.tr("Italic"), tab)
+        self.underline_checkbox = QtWidgets.QCheckBox(self.tr("Underline"), tab)
+        self.uppercase_checkbox = QtWidgets.QCheckBox(self.tr("Uppercase"), tab)
+        self.outline_checkbox = QtWidgets.QCheckBox(self.tr("Outline"), tab)
+        self.outline_color_button = self._make_color_button("#ffffff")
+        self.outline_width_combo = QtWidgets.QComboBox(tab)
+        self.outline_width_combo.setEditable(True)
+        self.outline_width_combo.addItems(["1.0", "1.15", "1.3", "1.4", "1.5", "2.0", "3.0"])
+
+        style_row = QtWidgets.QWidget(tab)
+        style_layout = QtWidgets.QHBoxLayout(style_row)
+        style_layout.setContentsMargins(0, 0, 0, 0)
+        style_layout.addWidget(self.bold_checkbox)
+        style_layout.addWidget(self.italic_checkbox)
+        style_layout.addWidget(self.underline_checkbox)
+        style_layout.addWidget(self.uppercase_checkbox)
+        style_layout.addStretch(1)
+
+        color_row = QtWidgets.QWidget(tab)
+        color_layout = QtWidgets.QHBoxLayout(color_row)
+        color_layout.setContentsMargins(0, 0, 0, 0)
+        color_layout.addWidget(self.text_color_button)
+        color_layout.addWidget(self.force_color_checkbox)
+        color_layout.addStretch(1)
+
+        outline_row = QtWidgets.QWidget(tab)
+        outline_layout = QtWidgets.QHBoxLayout(outline_row)
+        outline_layout.setContentsMargins(0, 0, 0, 0)
+        outline_layout.addWidget(self.outline_checkbox)
+        outline_layout.addWidget(self.outline_color_button)
+        outline_layout.addWidget(self.outline_width_combo)
+        outline_layout.addStretch(1)
+
+        layout.addRow(self.tr("Font:"), self.font_combo)
+        layout.addRow(self.tr("Min font size:"), self.min_font_spin)
+        layout.addRow(self.tr("Max font size:"), self.max_font_spin)
+        layout.addRow(self.tr("Line spacing:"), self.line_spacing_combo)
+        layout.addRow(self.tr("Text color:"), color_row)
+        layout.addRow(self.tr("Horizontal:"), self.horizontal_alignment_combo)
+        layout.addRow(self.tr("Vertical:"), self.vertical_alignment_combo)
+        layout.addRow(self.tr("Style:"), style_row)
+        layout.addRow(self.tr("Outline:"), outline_row)
+        self.tabs.addTab(tab, self.tr("Render"))
+
+    def _build_export_tab(self) -> None:
+        tab = QtWidgets.QWidget(self)
+        layout = QtWidgets.QVBoxLayout(tab)
+        layout.setContentsMargins(12, 12, 12, 12)
+        layout.setSpacing(10)
+
+        form = QtWidgets.QFormLayout()
+        self.output_target_combo = QtWidgets.QComboBox(tab)
+        self.output_image_format_combo = QtWidgets.QComboBox(tab)
+        self.output_archive_format_combo = QtWidgets.QComboBox(tab)
+        self.output_archive_image_format_combo = QtWidgets.QComboBox(tab)
+        self.output_archive_level_spin = QtWidgets.QSpinBox(tab)
+        self.output_archive_level_spin.setRange(0, 9)
+        form.addRow(self.tr("Output target:"), self.output_target_combo)
+        form.addRow(self.tr("Image format:"), self.output_image_format_combo)
+        form.addRow(self.tr("Archive format:"), self.output_archive_format_combo)
+        form.addRow(self.tr("Archive image format:"), self.output_archive_image_format_combo)
+        form.addRow(self.tr("Archive compression:"), self.output_archive_level_spin)
+        layout.addLayout(form)
+
+        self.export_raw_text_checkbox = QtWidgets.QCheckBox(self.tr("Export Raw Text"), tab)
+        self.export_translated_text_checkbox = QtWidgets.QCheckBox(self.tr("Export Translated Text"), tab)
+        self.export_inpainted_image_checkbox = QtWidgets.QCheckBox(self.tr("Export Inpainted Image"), tab)
+        self.export_detector_overlay_checkbox = QtWidgets.QCheckBox(self.tr("Export Detector Overlay"), tab)
+        self.export_raw_mask_checkbox = QtWidgets.QCheckBox(self.tr("Export Raw Mask"), tab)
+        self.export_mask_overlay_checkbox = QtWidgets.QCheckBox(self.tr("Export Mask Overlay"), tab)
+        self.export_cleanup_mask_delta_checkbox = QtWidgets.QCheckBox(self.tr("Export Cleanup Mask Delta"), tab)
+        self.export_debug_metadata_checkbox = QtWidgets.QCheckBox(self.tr("Export Debug Metadata"), tab)
+        for checkbox in (
+            self.export_raw_text_checkbox,
+            self.export_translated_text_checkbox,
+            self.export_inpainted_image_checkbox,
+            self.export_detector_overlay_checkbox,
+            self.export_raw_mask_checkbox,
+            self.export_mask_overlay_checkbox,
+            self.export_cleanup_mask_delta_checkbox,
+            self.export_debug_metadata_checkbox,
+        ):
+            layout.addWidget(checkbox)
+        layout.addStretch(1)
+        self.tabs.addTab(tab, self.tr("Export / Debug"))
+
+    def _make_color_button(self, color: str) -> QtWidgets.QPushButton:
+        button = QtWidgets.QPushButton(self)
+        button.setFixedSize(34, 28)
+        self._set_button_color(button, color)
+        button.clicked.connect(lambda _checked=False, b=button: self._choose_button_color(b))
+        return button
+
+    def _choose_button_color(self, button: QtWidgets.QPushButton) -> None:
+        current = QtGui.QColor(str(button.property("selected_color") or "#000000"))
+        color = QtWidgets.QColorDialog.getColor(current, self, self.tr("Select Color"))
+        if color.isValid():
+            self._set_button_color(button, color.name())
+
+    def _set_button_color(self, button: QtWidgets.QPushButton, color: str) -> None:
+        value = str(color or "#000000")
+        button.setProperty("selected_color", value)
+        button.setStyleSheet(f"background-color: {value}; border: 1px solid #555; border-radius: 5px;")
+
+    def configure_options(
+        self,
+        *,
+        languages: list[tuple[str, str]],
+        ocr_modes: list[tuple[str, str]],
+        translators: list[tuple[str, str]],
+        workflow_modes: list[tuple[str, str]],
+        fonts: list[str],
+        output_options: dict[str, list[tuple[str, str]]],
+    ) -> None:
+        self._populate_combo(self.source_lang_combo, languages)
+        self._populate_combo(self.target_lang_combo, languages)
+        self._populate_combo(self.ocr_combo, ocr_modes)
+        self._populate_combo(self.translator_combo, translators)
+        self._populate_combo(self.workflow_combo, workflow_modes)
+        self.font_combo.clear()
+        for font in fonts:
+            if font:
+                self.font_combo.addItem(str(font), str(font))
+        self._output_options = dict(output_options or {})
+        self._populate_combo(self.output_target_combo, self._output_options.get("automatic_output_target", []))
+        self._populate_combo(self.output_image_format_combo, self._output_options.get("automatic_output_image_format", []))
+        self._populate_combo(self.output_archive_format_combo, self._output_options.get("automatic_output_archive_format", []))
+        self._populate_combo(self.output_archive_image_format_combo, self._output_options.get("automatic_output_archive_image_format", []))
+
+    def set_payload(self, series_settings: dict[str, object], global_settings: dict[str, object]) -> None:
+        self.queue_page.set_settings(series_settings)
+        self._set_combo_value(self.source_lang_combo, str(global_settings.get("source_language") or ""))
+        self._set_combo_value(self.target_lang_combo, str(global_settings.get("target_language") or ""))
+        self._set_combo_value(self.ocr_combo, str(global_settings.get("ocr") or ""))
+        self._set_combo_value(self.translator_combo, str(global_settings.get("translator") or ""))
+        self._set_combo_value(self.workflow_combo, str(global_settings.get("workflow_mode") or ""))
+        self.use_gpu_checkbox.setChecked(bool(global_settings.get("use_gpu", True)))
+        self._set_render_values(global_settings.get("render_settings") if isinstance(global_settings.get("render_settings"), dict) else {})
+        self._set_export_values(global_settings.get("export_settings") if isinstance(global_settings.get("export_settings"), dict) else {})
+
+    def payload(self) -> tuple[dict[str, object], dict[str, object]]:
+        return self.queue_page.get_settings(), {
+            "source_language": str(self.source_lang_combo.currentData() or ""),
+            "target_language": str(self.target_lang_combo.currentData() or ""),
+            "ocr": str(self.ocr_combo.currentData() or ""),
+            "translator": str(self.translator_combo.currentData() or ""),
+            "workflow_mode": str(self.workflow_combo.currentData() or ""),
+            "use_gpu": self.use_gpu_checkbox.isChecked(),
+            "render_settings": self._render_values(),
+            "export_settings": self._export_values(),
+        }
+
+    def _set_render_values(self, values: dict[str, object]) -> None:
+        font = str(values.get("font_family") or "")
+        if font and self.font_combo.findText(font) < 0:
+            self.font_combo.addItem(font, font)
+        if font:
+            self.font_combo.setCurrentText(font)
+        self.min_font_spin.setValue(max(1, int(values.get("min_font_size", 5) or 5)))
+        self.max_font_spin.setValue(max(1, int(values.get("max_font_size", 40) or 40)))
+        self.line_spacing_combo.setCurrentText(str(values.get("line_spacing") or "1.0"))
+        self._set_button_color(self.text_color_button, str(values.get("color") or "#000000"))
+        self.force_color_checkbox.setChecked(bool(values.get("force_font_color", False)))
+        self._set_combo_value(self.horizontal_alignment_combo, int(values.get("alignment_id", 1) or 1))
+        self._set_combo_value(self.vertical_alignment_combo, int(values.get("vertical_alignment_id", 0) or 0))
+        self.bold_checkbox.setChecked(bool(values.get("bold", False)))
+        self.italic_checkbox.setChecked(bool(values.get("italic", False)))
+        self.underline_checkbox.setChecked(bool(values.get("underline", False)))
+        self.uppercase_checkbox.setChecked(bool(values.get("upper_case", False)))
+        self.outline_checkbox.setChecked(bool(values.get("outline", True)))
+        self._set_button_color(self.outline_color_button, str(values.get("outline_color") or "#ffffff"))
+        self.outline_width_combo.setCurrentText(str(values.get("outline_width") or "1.0"))
+
+    def _render_values(self) -> dict[str, object]:
+        return {
+            "alignment_id": int(self.horizontal_alignment_combo.currentData() or 0),
+            "vertical_alignment_id": int(self.vertical_alignment_combo.currentData() or 0),
+            "font_family": str(self.font_combo.currentText() or ""),
+            "min_font_size": int(self.min_font_spin.value()),
+            "max_font_size": int(self.max_font_spin.value()),
+            "color": str(self.text_color_button.property("selected_color") or "#000000"),
+            "force_font_color": self.force_color_checkbox.isChecked(),
+            "upper_case": self.uppercase_checkbox.isChecked(),
+            "outline": self.outline_checkbox.isChecked(),
+            "outline_color": str(self.outline_color_button.property("selected_color") or "#ffffff"),
+            "outline_width": str(self.outline_width_combo.currentText() or "1.0"),
+            "bold": self.bold_checkbox.isChecked(),
+            "italic": self.italic_checkbox.isChecked(),
+            "underline": self.underline_checkbox.isChecked(),
+            "line_spacing": str(self.line_spacing_combo.currentText() or "1.0"),
+        }
+
+    def _set_export_values(self, values: dict[str, object]) -> None:
+        self.export_raw_text_checkbox.setChecked(bool(values.get("export_raw_text", False)))
+        self.export_translated_text_checkbox.setChecked(bool(values.get("export_translated_text", False)))
+        self.export_inpainted_image_checkbox.setChecked(bool(values.get("export_inpainted_image", False)))
+        self.export_detector_overlay_checkbox.setChecked(bool(values.get("export_detector_overlay", False)))
+        self.export_raw_mask_checkbox.setChecked(bool(values.get("export_raw_mask", False)))
+        self.export_mask_overlay_checkbox.setChecked(bool(values.get("export_mask_overlay", False)))
+        self.export_cleanup_mask_delta_checkbox.setChecked(bool(values.get("export_cleanup_mask_delta", False)))
+        self.export_debug_metadata_checkbox.setChecked(bool(values.get("export_debug_metadata", False)))
+        self._set_combo_value(self.output_target_combo, str(values.get("automatic_output_target") or ""))
+        self._set_combo_value(self.output_image_format_combo, str(values.get("automatic_output_image_format") or ""))
+        self._set_combo_value(self.output_archive_format_combo, str(values.get("automatic_output_archive_format") or ""))
+        self._set_combo_value(self.output_archive_image_format_combo, str(values.get("automatic_output_archive_image_format") or ""))
+        self.output_archive_level_spin.setValue(max(0, min(9, int(values.get("automatic_output_archive_compression_level", 6) or 6))))
+
+    def _export_values(self) -> dict[str, object]:
+        return {
+            "export_raw_text": self.export_raw_text_checkbox.isChecked(),
+            "export_translated_text": self.export_translated_text_checkbox.isChecked(),
+            "export_inpainted_image": self.export_inpainted_image_checkbox.isChecked(),
+            "export_detector_overlay": self.export_detector_overlay_checkbox.isChecked(),
+            "export_raw_mask": self.export_raw_mask_checkbox.isChecked(),
+            "export_mask_overlay": self.export_mask_overlay_checkbox.isChecked(),
+            "export_cleanup_mask_delta": self.export_cleanup_mask_delta_checkbox.isChecked(),
+            "export_debug_metadata": self.export_debug_metadata_checkbox.isChecked(),
+            "automatic_output_target": str(self.output_target_combo.currentData() or ""),
+            "automatic_output_image_format": str(self.output_image_format_combo.currentData() or ""),
+            "automatic_output_archive_format": str(self.output_archive_format_combo.currentData() or ""),
+            "automatic_output_archive_image_format": str(self.output_archive_image_format_combo.currentData() or ""),
+            "automatic_output_archive_compression_level": int(self.output_archive_level_spin.value()),
+        }
+
+    def _populate_combo(self, combo: QtWidgets.QComboBox, options: list[tuple[str, str]]) -> None:
+        combo.clear()
+        for value, label in options or []:
+            combo.addItem(str(label), value)
+
+    def _set_combo_value(self, combo: QtWidgets.QComboBox, value: object) -> None:
+        index = combo.findData(value)
+        if index < 0 and isinstance(value, str):
+            index = combo.findText(value)
         if index < 0 and combo.count() > 0:
             index = 0
         if index >= 0:

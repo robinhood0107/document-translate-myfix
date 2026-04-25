@@ -26,6 +26,7 @@ from app.projects.series_state_v1 import (
     filter_series_candidate_paths,
     load_series_project,
     materialize_series_child_project,
+    merge_series_global_settings,
     normalize_series_global_settings,
     normalize_series_queue_runtime,
     normalize_series_recovery_state,
@@ -43,7 +44,7 @@ from app.projects.series_state_v1 import (
     update_series_settings,
 )
 from app.ui.series_import_dialog import SeriesImportDialog
-from app.ui.settings.series_page import SeriesPage
+from app.ui.series_workspace import SeriesSettingsDialog
 from app.ui.messages import Messages
 
 if TYPE_CHECKING:
@@ -307,6 +308,29 @@ class SeriesController(QtCore.QObject):
             "translators": translator_options,
             "ocr_modes": ocr_options,
             "workflow_modes": workflow_options,
+        }
+
+    def _series_font_options_from_main(self) -> list[str]:
+        combo = self.main.font_dropdown
+        fonts = [combo.itemText(index) for index in range(combo.count())]
+        current = combo.currentText()
+        if current and current not in fonts:
+            fonts.insert(0, current)
+        return [font for font in fonts if font]
+
+    def _combo_options_from_main(self, combo: QtWidgets.QComboBox) -> list[tuple[str, str]]:
+        return [
+            (str(combo.itemData(index) or ""), combo.itemText(index))
+            for index in range(combo.count())
+        ]
+
+    def _series_output_options_from_main(self) -> dict[str, list[tuple[str, str]]]:
+        ui = self.main.settings_page.ui
+        return {
+            "automatic_output_target": self._combo_options_from_main(ui.automatic_output_target_combo),
+            "automatic_output_image_format": self._combo_options_from_main(ui.automatic_output_image_format_combo),
+            "automatic_output_archive_format": self._combo_options_from_main(ui.automatic_output_archive_format_combo),
+            "automatic_output_archive_image_format": self._combo_options_from_main(ui.automatic_output_archive_image_format_combo),
         }
 
     def _apply_workspace_state(self) -> None:
@@ -724,7 +748,9 @@ class SeriesController(QtCore.QObject):
         if "upper_case" in settings:
             ui.uppercase_checkbox.setChecked(bool(settings.get("upper_case", False)))
         if "outline" in settings:
-            self.main.outline_mode_group.set_dayu_checked(1 if bool(settings.get("outline", False)) else 0)
+            outline_value = bool(settings.get("outline", False))
+            self.main.outline_checkbox.setChecked(outline_value)
+            self.main.outline_mode_group.set_dayu_checked(1 if outline_value else 0)
         if settings.get("outline_color"):
             outline_color = str(settings.get("outline_color") or "#ffffff")
             self.main.outline_font_color_button.setStyleSheet(
@@ -1048,9 +1074,12 @@ class SeriesController(QtCore.QObject):
             return
         if not self.series_file:
             return
-        merged = normalize_series_global_settings(self.series_manifest.get("global_settings"))
-        merged.update(dict(values or {}))
-        normalized = normalize_series_global_settings(merged)
+        normalized = merge_series_global_settings(
+            self.series_manifest.get("global_settings")
+            if isinstance(self.series_manifest.get("global_settings"), dict)
+            else None,
+            values,
+        )
         self.series_manifest = update_series_global_settings(self.series_file, normalized)
         loaded = load_series_project(self.series_file)
         self.series_manifest = dict(loaded["manifest"])
@@ -1064,26 +1093,30 @@ class SeriesController(QtCore.QObject):
             return
         if not self.series_file:
             return
-        dialog = QtWidgets.QDialog(self.main)
-        dialog.setWindowTitle(self.main.tr("Series Settings"))
-        dialog.resize(520, 320)
-        layout = QtWidgets.QVBoxLayout(dialog)
-        page = SeriesPage(dialog)
-        page.set_settings(normalize_series_settings(self.series_manifest.get("series_settings")))
-        layout.addWidget(page)
-        buttons = QtWidgets.QDialogButtonBox(
-            QtWidgets.QDialogButtonBox.StandardButton.Ok
-            | QtWidgets.QDialogButtonBox.StandardButton.Cancel
+        dialog = SeriesSettingsDialog(self.main)
+        dialog.configure_options(
+            **self._series_workspace_options(),
+            fonts=self._series_font_options_from_main(),
+            output_options=self._series_output_options_from_main(),
         )
-        buttons.accepted.connect(dialog.accept)
-        buttons.rejected.connect(dialog.reject)
-        layout.addWidget(buttons)
+        global_settings = normalize_series_global_settings(self.series_manifest.get("global_settings"))
+        if not isinstance(global_settings.get("render_settings"), dict) or not global_settings.get("render_settings"):
+            global_settings["render_settings"] = self._series_render_settings_from_main()
+        if not isinstance(global_settings.get("export_settings"), dict) or not global_settings.get("export_settings"):
+            global_settings["export_settings"] = self.main.settings_page.get_export_settings()
+        dialog.set_payload(
+            normalize_series_settings(self.series_manifest.get("series_settings")),
+            global_settings,
+        )
         if dialog.exec() != QtWidgets.QDialog.DialogCode.Accepted:
             return
-        self.series_manifest = update_series_settings(self.series_file, page.get_settings())
+        series_settings, next_global_settings = dialog.payload()
+        self.series_manifest = update_series_settings(self.series_file, series_settings)
+        self.series_manifest = update_series_global_settings(self.series_file, next_global_settings)
         loaded = load_series_project(self.series_file)
         self.series_manifest = dict(loaded["manifest"])
         self.series_items = list(loaded["items"])
+        self._apply_series_globals_to_main()
         self._apply_workspace_state()
 
     def sync_active_child_to_series(self) -> None:

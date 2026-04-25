@@ -63,6 +63,8 @@ _UNSET = object()
 _TRANSLATOR_ALIASES = {
     "gemma_local": "Custom Local Server(Gemma)",
     "Custom Local Server": "Custom Local Server(Gemma)",
+    "사용자 지정 로컬 서버": "Custom Local Server(Gemma)",
+    "사용자 지정 로컬 서버(Gemma)": "Custom Local Server(Gemma)",
 }
 
 
@@ -256,6 +258,8 @@ def default_series_global_settings() -> dict[str, object]:
         "translator": "",
         "workflow_mode": "",
         "use_gpu": True,
+        "export_settings": {},
+        "render_settings": {},
     }
 
 
@@ -270,7 +274,27 @@ def normalize_series_global_settings(data: dict[str, object] | None) -> dict[str
     merged["translator"] = _TRANSLATOR_ALIASES.get(translator, translator)
     merged["workflow_mode"] = str(merged.get("workflow_mode") or "").strip()
     merged["use_gpu"] = bool(merged.get("use_gpu", True))
+    merged["export_settings"] = (
+        dict(merged.get("export_settings") or {})
+        if isinstance(merged.get("export_settings"), dict)
+        else {}
+    )
+    merged["render_settings"] = (
+        dict(merged.get("render_settings") or {})
+        if isinstance(merged.get("render_settings"), dict)
+        else {}
+    )
     return merged
+
+
+def merge_series_global_settings(
+    current: dict[str, object] | None,
+    updates: dict[str, object] | None,
+) -> dict[str, object]:
+    merged = normalize_series_global_settings(current)
+    if isinstance(updates, dict):
+        merged.update(updates)
+    return normalize_series_global_settings(merged)
 
 
 def scan_series_source_files(root_dir: str) -> list[str]:

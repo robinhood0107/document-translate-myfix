@@ -54,5 +54,16 @@ class OCRSelectionTests(unittest.TestCase):
         self.assertEqual(policy.translator, "Custom Local Server(Gemma)")
         self.assertEqual(policy.primary_ocr_engine, "PaddleOCR VL")
 
+    def test_stage_batched_accepts_localized_gemma_label(self) -> None:
+        policy = resolve_stage_batched_ocr_policy(
+            STAGE_BATCHED_WORKFLOW_MODE,
+            "paddleocr_vl",
+            "Japanese",
+            "사용자 지정 로컬 서버(Gemma)",
+        )
+
+        self.assertTrue(policy.stage_batched_supported)
+        self.assertEqual(policy.translator, "Custom Local Server(Gemma)")
+
 if __name__ == "__main__":
     unittest.main()

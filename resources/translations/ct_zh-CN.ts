@@ -2291,6 +2291,189 @@ These values are copied into new series projects and can be adjusted per series.
     </message>
 </context>
 <context>
+    <name>SeriesSettingsDialog</name>
+    <message>
+        <source>Series Settings</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Queue</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Use GPU</source>
+        <translation type="unfinished">使用 GPU</translation>
+    </message>
+    <message>
+        <source>Source language:</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Target language:</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>OCR:</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Translator:</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Workflow mode:</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Pipeline</source>
+        <translation type="unfinished">流水线</translation>
+    </message>
+    <message>
+        <source>Use Selected Color</source>
+        <translation type="unfinished">使用所选颜色</translation>
+    </message>
+    <message>
+        <source>Left</source>
+        <translation type="unfinished">左对齐</translation>
+    </message>
+    <message>
+        <source>Center</source>
+        <translation type="unfinished">居中</translation>
+    </message>
+    <message>
+        <source>Right</source>
+        <translation type="unfinished">右对齐</translation>
+    </message>
+    <message>
+        <source>Top</source>
+        <translation type="unfinished">顶部</translation>
+    </message>
+    <message>
+        <source>Bottom</source>
+        <translation type="unfinished">底部</translation>
+    </message>
+    <message>
+        <source>Bold</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Italic</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Underline</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Uppercase</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Outline</source>
+        <translation type="unfinished">描边</translation>
+    </message>
+    <message>
+        <source>Font:</source>
+        <translation type="unfinished">字体：</translation>
+    </message>
+    <message>
+        <source>Min font size:</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Max font size:</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Line spacing:</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Text color:</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Horizontal:</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Vertical:</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Style:</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Outline:</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Render</source>
+        <translation type="unfinished">渲染</translation>
+    </message>
+    <message>
+        <source>Output target:</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Image format:</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Archive format:</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Archive image format:</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Archive compression:</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Export Raw Text</source>
+        <translation type="unfinished">导出原始文本</translation>
+    </message>
+    <message>
+        <source>Export Translated Text</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Export Inpainted Image</source>
+        <translation type="unfinished">导出修复后的图片</translation>
+    </message>
+    <message>
+        <source>Export Detector Overlay</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Export Raw Mask</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Export Mask Overlay</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Export Cleanup Mask Delta</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Export Debug Metadata</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Export / Debug</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Select Color</source>
+        <translation type="unfinished"></translation>
+    </message>
+</context>
+<context>
     <name>SeriesTreeJumpDialog</name>
     <message>
         <source>Tree Jump</source>
@@ -3690,11 +3873,47 @@ It may have already been moved, renamed, or deleted.
         <translation type="unfinished"></translation>
     </message>
     <message>
+        <source>Render: --</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Export: --</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
         <source>Series Settings…</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
         <source>Translate in Queue Order</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>left</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>center</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>right</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>outline {width}</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>outline off</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Render: {font} / max {max_font} / line {line_spacing} / {align} / {outline}</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Export: {target} / debug {count} enabled</source>
         <translation type="unfinished"></translation>
     </message>
 </context>
@@ -4005,10 +4224,6 @@ It may have been moved, renamed, or deleted.
     </message>
     <message>
         <source>Add Folder To Series</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Series Settings</source>
         <translation type="unfinished"></translation>
     </message>
     <message>

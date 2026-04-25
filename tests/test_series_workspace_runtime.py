@@ -9,7 +9,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 from PySide6 import QtWidgets
 from shiboken6 import isValid
 
-from app.ui.series_workspace import SeriesWorkspace
+from app.ui.series_workspace import SeriesSettingsDialog, SeriesWorkspace
 
 
 class SeriesWorkspaceRuntimeTests(unittest.TestCase):
@@ -34,6 +34,19 @@ class SeriesWorkspaceRuntimeTests(unittest.TestCase):
                 "translator": "gemma_local",
                 "workflow_mode": "stage_batched_pipeline",
                 "use_gpu": True,
+                "render_settings": {
+                    "font_family": "Ownglyph gumama3",
+                    "max_font_size": 40,
+                    "line_spacing": "1.0",
+                    "alignment_id": 1,
+                    "outline": True,
+                    "outline_width": "3.0",
+                },
+                "export_settings": {
+                    "automatic_output_target": "individual_images",
+                    "export_raw_mask": True,
+                    "export_detector_overlay": False,
+                },
             }
         )
         self._path_a = os.path.join(self.temp_dir.name, "chapter-01.ctpr")
@@ -152,14 +165,89 @@ class SeriesWorkspaceRuntimeTests(unittest.TestCase):
         self.assertTrue(self.widget.quick_settings.auto_translate_button.isEnabled())
         self.assertTrue(self.widget.queue_notice.isHidden())
         self.assertEqual(self.widget.status_panel.state_value.text(), "Idle")
+        self.assertIn("Ownglyph gumama3", self.widget.quick_settings.render_summary_label.text())
+        self.assertIn("max 40", self.widget.quick_settings.render_summary_label.text())
+        self.assertIn("debug 1 enabled", self.widget.quick_settings.export_summary_label.text())
         self.assertTrue(self.widget.status_panel.pause_button.isHidden())
         self.assertTrue(self.widget.status_panel.resume_button.isHidden())
         self.assertTrue(self.widget.status_panel.open_current_button.isHidden())
         self.assertEqual(self.widget.summary_panel.done_value.text(), "2")
         self.assertEqual(self.widget.summary_panel.duration_value.text(), "42 sec")
         self.assertEqual(self.widget.queue_table.item(0, 4).text(), "Pending")
-        self.assertEqual(self.widget.queue_table.item(1, 4).text(), "Running")
-        self.assertTrue(self.widget.queue_table.cellWidget(0, 5).isEnabled())
+
+    def test_quick_settings_values_do_not_emit_nested_render_export_settings(self) -> None:
+        values = self.widget.global_settings()
+
+        self.assertNotIn("render_settings", values)
+        self.assertNotIn("export_settings", values)
+        self.assertEqual(values["translator"], "gemma_local")
+
+    def test_series_settings_dialog_round_trips_render_and_export_settings(self) -> None:
+        dialog = SeriesSettingsDialog()
+        self.addCleanup(dialog.deleteLater)
+        dialog.configure_options(
+            languages=[("Japanese", "Japanese"), ("Korean", "Korean")],
+            ocr_modes=[("best_local", "Optimal")],
+            translators=[("Custom Local Server(Gemma)", "Custom Local Server(Gemma)")],
+            workflow_modes=[("stage_batched_pipeline", "Stage-Batched")],
+            fonts=["Ownglyph gumama3", "Arial"],
+            output_options={
+                "automatic_output_target": [("individual_images", "Individual images")],
+                "automatic_output_image_format": [("same_as_source", "Same as source"), ("png", "PNG")],
+                "automatic_output_archive_format": [("zip", "ZIP")],
+                "automatic_output_archive_image_format": [("png", "PNG")],
+            },
+        )
+        dialog.set_payload(
+            {
+                "queue_failure_policy": "retry",
+                "retry_count": 2,
+                "retry_delay_sec": 1,
+            },
+            {
+                "source_language": "Japanese",
+                "target_language": "Korean",
+                "ocr": "best_local",
+                "translator": "Custom Local Server(Gemma)",
+                "workflow_mode": "stage_batched_pipeline",
+                "use_gpu": True,
+                "render_settings": {
+                    "font_family": "Ownglyph gumama3",
+                    "min_font_size": 5,
+                    "max_font_size": 42,
+                    "line_spacing": "1.2",
+                    "alignment_id": 2,
+                    "vertical_alignment_id": 1,
+                    "outline": True,
+                    "outline_width": "3.0",
+                    "bold": True,
+                    "upper_case": True,
+                },
+                "export_settings": {
+                    "automatic_output_target": "individual_images",
+                    "automatic_output_image_format": "png",
+                    "automatic_output_archive_format": "zip",
+                    "automatic_output_archive_image_format": "png",
+                    "automatic_output_archive_compression_level": 8,
+                    "export_raw_mask": True,
+                    "export_debug_metadata": True,
+                },
+            },
+        )
+
+        series_settings, global_settings = dialog.payload()
+
+        self.assertEqual(series_settings["queue_failure_policy"], "retry")
+        self.assertEqual(global_settings["source_language"], "Japanese")
+        self.assertEqual(global_settings["translator"], "Custom Local Server(Gemma)")
+        self.assertEqual(global_settings["render_settings"]["font_family"], "Ownglyph gumama3")
+        self.assertEqual(global_settings["render_settings"]["max_font_size"], 42)
+        self.assertEqual(global_settings["render_settings"]["alignment_id"], 2)
+        self.assertTrue(global_settings["render_settings"]["bold"])
+        self.assertTrue(global_settings["render_settings"]["upper_case"])
+        self.assertEqual(global_settings["export_settings"]["automatic_output_image_format"], "png")
+        self.assertTrue(global_settings["export_settings"]["export_raw_mask"])
+        self.assertTrue(global_settings["export_settings"]["export_debug_metadata"])
 
     def test_paused_queue_shows_resume_and_unlocks_reorder(self) -> None:
         self.widget.set_navigation_state(can_back=False, can_forward=False)

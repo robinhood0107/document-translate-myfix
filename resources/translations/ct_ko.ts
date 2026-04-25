@@ -2347,6 +2347,189 @@ These values are copied into new series projects and can be adjusted per series.
     </message>
 </context>
 <context>
+    <name>SeriesSettingsDialog</name>
+    <message>
+        <source>Series Settings</source>
+        <translation type="unfinished">시리즈 설정</translation>
+    </message>
+    <message>
+        <source>Queue</source>
+        <translation type="unfinished">대기열</translation>
+    </message>
+    <message>
+        <source>Use GPU</source>
+        <translation type="unfinished">GPU 사용</translation>
+    </message>
+    <message>
+        <source>Source language:</source>
+        <translation type="unfinished">원본 언어:</translation>
+    </message>
+    <message>
+        <source>Target language:</source>
+        <translation type="unfinished">번역 언어:</translation>
+    </message>
+    <message>
+        <source>OCR:</source>
+        <translation type="unfinished">OCR:</translation>
+    </message>
+    <message>
+        <source>Translator:</source>
+        <translation type="unfinished">번역기:</translation>
+    </message>
+    <message>
+        <source>Workflow mode:</source>
+        <translation type="unfinished">워크플로 모드:</translation>
+    </message>
+    <message>
+        <source>Pipeline</source>
+        <translation type="unfinished">파이프라인</translation>
+    </message>
+    <message>
+        <source>Use Selected Color</source>
+        <translation type="unfinished">선택한 색상 사용</translation>
+    </message>
+    <message>
+        <source>Left</source>
+        <translation type="unfinished">왼쪽</translation>
+    </message>
+    <message>
+        <source>Center</source>
+        <translation type="unfinished">가운데</translation>
+    </message>
+    <message>
+        <source>Right</source>
+        <translation type="unfinished">오른쪽</translation>
+    </message>
+    <message>
+        <source>Top</source>
+        <translation type="unfinished">상단</translation>
+    </message>
+    <message>
+        <source>Bottom</source>
+        <translation type="unfinished">하단</translation>
+    </message>
+    <message>
+        <source>Bold</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Italic</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Underline</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Uppercase</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Outline</source>
+        <translation type="unfinished">윤곽선</translation>
+    </message>
+    <message>
+        <source>Font:</source>
+        <translation type="unfinished">글꼴:</translation>
+    </message>
+    <message>
+        <source>Min font size:</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Max font size:</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Line spacing:</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Text color:</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Horizontal:</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Vertical:</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Style:</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Outline:</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Render</source>
+        <translation type="unfinished">렌더링</translation>
+    </message>
+    <message>
+        <source>Output target:</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Image format:</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Archive format:</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Archive image format:</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Archive compression:</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Export Raw Text</source>
+        <translation type="unfinished">원시 텍스트 내보내기</translation>
+    </message>
+    <message>
+        <source>Export Translated Text</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Export Inpainted Image</source>
+        <translation type="unfinished">인페인팅된 이미지 내보내기</translation>
+    </message>
+    <message>
+        <source>Export Detector Overlay</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Export Raw Mask</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Export Mask Overlay</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Export Cleanup Mask Delta</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Export Debug Metadata</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Export / Debug</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Select Color</source>
+        <translation type="unfinished"></translation>
+    </message>
+</context>
+<context>
     <name>SeriesTreeJumpDialog</name>
     <message>
         <source>Tree Jump</source>
@@ -3750,12 +3933,48 @@ It may have already been moved, renamed, or deleted.
         <translation>워크플로 모드:</translation>
     </message>
     <message>
+        <source>Render: --</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Export: --</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
         <source>Series Settings…</source>
         <translation>시리즈 설정…</translation>
     </message>
     <message>
         <source>Translate in Queue Order</source>
         <translation>대기열 순서대로 자동 번역</translation>
+    </message>
+    <message>
+        <source>left</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>center</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>right</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>outline {width}</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>outline off</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Render: {font} / max {max_font} / line {line_spacing} / {align} / {outline}</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Export: {target} / debug {count} enabled</source>
+        <translation type="unfinished"></translation>
     </message>
 </context>
 <context>
@@ -4079,10 +4298,6 @@ It may have been moved, renamed, or deleted.
     <message>
         <source>Add Folder To Series</source>
         <translation>시리즈에 폴더 추가</translation>
-    </message>
-    <message>
-        <source>Series Settings</source>
-        <translation>시리즈 설정</translation>
     </message>
     <message>
         <source>Save Series Project</source>

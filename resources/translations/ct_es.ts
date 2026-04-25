@@ -2292,6 +2292,189 @@ These values are copied into new series projects and can be adjusted per series.
     </message>
 </context>
 <context>
+    <name>SeriesSettingsDialog</name>
+    <message>
+        <source>Series Settings</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Queue</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Use GPU</source>
+        <translation type="unfinished">Usar GPU</translation>
+    </message>
+    <message>
+        <source>Source language:</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Target language:</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>OCR:</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Translator:</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Workflow mode:</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Pipeline</source>
+        <translation type="unfinished">Canalización</translation>
+    </message>
+    <message>
+        <source>Use Selected Color</source>
+        <translation type="unfinished">Usar el color seleccionado</translation>
+    </message>
+    <message>
+        <source>Left</source>
+        <translation type="unfinished">Izquierda</translation>
+    </message>
+    <message>
+        <source>Center</source>
+        <translation type="unfinished">Centro</translation>
+    </message>
+    <message>
+        <source>Right</source>
+        <translation type="unfinished">Derecha</translation>
+    </message>
+    <message>
+        <source>Top</source>
+        <translation type="unfinished">Arriba</translation>
+    </message>
+    <message>
+        <source>Bottom</source>
+        <translation type="unfinished">Abajo</translation>
+    </message>
+    <message>
+        <source>Bold</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Italic</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Underline</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Uppercase</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Outline</source>
+        <translation type="unfinished">Contorno</translation>
+    </message>
+    <message>
+        <source>Font:</source>
+        <translation type="unfinished">Fuente:</translation>
+    </message>
+    <message>
+        <source>Min font size:</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Max font size:</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Line spacing:</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Text color:</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Horizontal:</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Vertical:</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Style:</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Outline:</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Render</source>
+        <translation type="unfinished">Renderizar</translation>
+    </message>
+    <message>
+        <source>Output target:</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Image format:</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Archive format:</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Archive image format:</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Archive compression:</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Export Raw Text</source>
+        <translation type="unfinished">Exportar Texto sin Formato</translation>
+    </message>
+    <message>
+        <source>Export Translated Text</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Export Inpainted Image</source>
+        <translation type="unfinished">Exportar Imagen Inpainted</translation>
+    </message>
+    <message>
+        <source>Export Detector Overlay</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Export Raw Mask</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Export Mask Overlay</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Export Cleanup Mask Delta</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Export Debug Metadata</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Export / Debug</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Select Color</source>
+        <translation type="unfinished"></translation>
+    </message>
+</context>
+<context>
     <name>SeriesTreeJumpDialog</name>
     <message>
         <source>Tree Jump</source>
@@ -3693,11 +3876,47 @@ It may have already been moved, renamed, or deleted.
         <translation type="unfinished"></translation>
     </message>
     <message>
+        <source>Render: --</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Export: --</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
         <source>Series Settings…</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
         <source>Translate in Queue Order</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>left</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>center</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>right</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>outline {width}</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>outline off</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Render: {font} / max {max_font} / line {line_spacing} / {align} / {outline}</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Export: {target} / debug {count} enabled</source>
         <translation type="unfinished"></translation>
     </message>
 </context>
@@ -4008,10 +4227,6 @@ It may have been moved, renamed, or deleted.
     </message>
     <message>
         <source>Add Folder To Series</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Series Settings</source>
         <translation type="unfinished"></translation>
     </message>
     <message>

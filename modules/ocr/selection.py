@@ -45,6 +45,8 @@ _TRANSLATOR_ALIASES: dict[str, str] = {
     GEMMA_TRANSLATOR_KEY: GEMMA_TRANSLATOR_KEY,
     "Custom Local Server": GEMMA_TRANSLATOR_KEY,
     "gemma_local": GEMMA_TRANSLATOR_KEY,
+    "사용자 지정 로컬 서버": GEMMA_TRANSLATOR_KEY,
+    "사용자 지정 로컬 서버(Gemma)": GEMMA_TRANSLATOR_KEY,
 }
 WORKFLOW_MODE_STAGE_BATCHED_LABEL = "Stage-Batched Pipeline (Recommended)"
 WORKFLOW_MODE_LEGACY_LABEL = "Legacy Page Pipeline (Legacy)"
