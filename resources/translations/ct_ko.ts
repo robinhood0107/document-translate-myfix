@@ -1910,6 +1910,14 @@ Approximate GPU usage:
         <translation>일시정지</translation>
     </message>
     <message>
+        <source>Series Board</source>
+        <translation>시리즈 보드</translation>
+    </message>
+    <message>
+        <source>Current Item</source>
+        <translation>현재 항목</translation>
+    </message>
+    <message>
         <source>Report</source>
         <translation>리포트</translation>
     </message>
@@ -3826,6 +3834,10 @@ It may have already been moved, renamed, or deleted.
     <message>
         <source>Resume</source>
         <translation>재개</translation>
+    </message>
+    <message>
+        <source>Open Current Item</source>
+        <translation>현재 항목 열기</translation>
     </message>
     <message>
         <source>Open Failed Item</source>

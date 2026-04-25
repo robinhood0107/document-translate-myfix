@@ -1857,6 +1857,14 @@ Approximate GPU usage:
         <translation type="unfinished"></translation>
     </message>
     <message>
+        <source>Series Board</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Current Item</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
         <source>Report</source>
         <translation>Bericht</translation>
     </message>
@@ -3767,6 +3775,10 @@ It may have already been moved, renamed, or deleted.
     </message>
     <message>
         <source>Resume</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Open Current Item</source>
         <translation type="unfinished"></translation>
     </message>
     <message>

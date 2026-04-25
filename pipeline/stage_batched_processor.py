@@ -4,8 +4,9 @@ import json
 import logging
 import os
 import time
+from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Callable
 
 import imkit as imk
 from PySide6.QtCore import QCoreApplication
@@ -31,7 +32,6 @@ from modules.rendering.render import (
 )
 from modules.translation.local_runtime import LocalGemmaRuntimeManager
 from modules.translation.processor import Translator
-from modules.utils.automatic_output import is_individual_images_mode
 from modules.utils.correction_dictionary import (
     apply_ocr_result_dictionary,
     apply_translation_result_dictionary,
@@ -98,6 +98,146 @@ class StageBatchedProcessor(BatchProcessor):
     def __init__(self, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
         self._timestamp: str = ""
+        self._prewarm_executor: ThreadPoolExecutor | None = None
+        self._prewarm_jobs: dict[str, Future] = {}
+
+    def _stage_tr(self, text: str) -> str:
+        return QCoreApplication.translate("StageBatchedProcessor", text)
+
+    def _prewarm_progress(self, **payload: Any) -> None:
+        payload.setdefault("phase", "runtime_prewarm")
+        payload.setdefault("service", "batch")
+        payload.setdefault("status", "running")
+        payload["runtime_prewarm"] = True
+        self._report_runtime_progress(**payload)
+
+    def _ensure_prewarm_executor(self) -> ThreadPoolExecutor:
+        if self._prewarm_executor is None:
+            self._prewarm_executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="ct-stage-prewarm")
+        return self._prewarm_executor
+
+    def _start_prewarm(self, key: str, label: str, service: str, fn: Callable[[], None]) -> None:
+        if key in self._prewarm_jobs:
+            return
+        self._prewarm_progress(
+            service=service,
+            status="starting",
+            step_key=f"{key}_prewarm",
+            message=self._stage_tr("{label} Docker 예열을 시작합니다.").format(label=label),
+        )
+
+        def runner() -> None:
+            fn()
+            self._prewarm_progress(
+                service=service,
+                status="ready",
+                step_key=f"{key}_prewarm_ready",
+                message=self._stage_tr("{label} Docker 예열이 완료되었습니다.").format(label=label),
+            )
+
+        self._prewarm_jobs[key] = self._ensure_prewarm_executor().submit(runner)
+
+    def _await_prewarm_or_run(
+        self,
+        key: str,
+        label: str,
+        service: str,
+        fallback: Callable[[], None],
+    ) -> None:
+        job = self._prewarm_jobs.pop(key, None)
+        if job is None:
+            fallback()
+            return
+        try:
+            job.result()
+        except Exception as exc:
+            logger.warning("%s prewarm failed; falling back to synchronous startup: %s", label, exc)
+            self._prewarm_progress(
+                service=service,
+                status="running",
+                runtime_prewarm_status="failed",
+                step_key=f"{key}_prewarm_failed",
+                message=self._stage_tr("{label} 예열 실패. 해당 단계에서 다시 준비합니다.").format(label=label),
+                detail=str(exc),
+            )
+            fallback()
+
+    def _shutdown_prewarm_executor(self) -> None:
+        executor = self._prewarm_executor
+        self._prewarm_executor = None
+        self._prewarm_jobs.clear()
+        if executor is not None:
+            executor.shutdown(wait=False, cancel_futures=True)
+
+    def _start_ocr_prewarm(self, policy: dict[str, Any]) -> None:
+        runtime_manager = getattr(self.main_page, "local_ocr_runtime_manager", None)
+        if not isinstance(runtime_manager, LocalOCRRuntimeManager):
+            return
+        settings_page = self.main_page.settings_page
+        engine_key = str(policy["primary_ocr_engine"])
+        service = "paddleocr_vl" if "paddle" in engine_key.lower() else "hunyuanocr" if "hunyuan" in engine_key.lower() else engine_key.lower()
+        self._start_prewarm(
+            "ocr",
+            "OCR",
+            service,
+            lambda: runtime_manager.ensure_engine(
+                engine_key,
+                settings_page,
+                progress_callback=getattr(self.main_page, "report_runtime_progress", None),
+                cancel_checker=getattr(self.main_page, "is_current_task_cancelled", None),
+            ),
+        )
+
+    def _await_ocr_runtime(self, policy: dict[str, Any]) -> None:
+        runtime_manager = getattr(self.main_page, "local_ocr_runtime_manager", None)
+        if not isinstance(runtime_manager, LocalOCRRuntimeManager):
+            return
+        settings_page = self.main_page.settings_page
+        engine_key = str(policy["primary_ocr_engine"])
+        service = "paddleocr_vl" if "paddle" in engine_key.lower() else "hunyuanocr" if "hunyuan" in engine_key.lower() else engine_key.lower()
+        self._await_prewarm_or_run(
+            "ocr",
+            "OCR",
+            service,
+            lambda: runtime_manager.ensure_engine(
+                engine_key,
+                settings_page,
+                progress_callback=getattr(self.main_page, "report_runtime_progress", None),
+                cancel_checker=getattr(self.main_page, "is_current_task_cancelled", None),
+            ),
+        )
+
+    def _start_gemma_prewarm(self) -> None:
+        runtime_manager = getattr(self.main_page, "local_translation_runtime_manager", None)
+        if not isinstance(runtime_manager, LocalGemmaRuntimeManager):
+            return
+        settings_page = self.main_page.settings_page
+        self._start_prewarm(
+            "gemma",
+            "Gemma",
+            "gemma",
+            lambda: runtime_manager.ensure_server(
+                settings_page,
+                progress_callback=getattr(self.main_page, "report_runtime_progress", None),
+                cancel_checker=getattr(self.main_page, "is_current_task_cancelled", None),
+            ),
+        )
+
+    def _await_gemma_runtime(self) -> None:
+        runtime_manager = getattr(self.main_page, "local_translation_runtime_manager", None)
+        if not isinstance(runtime_manager, LocalGemmaRuntimeManager):
+            return
+        settings_page = self.main_page.settings_page
+        self._await_prewarm_or_run(
+            "gemma",
+            "Gemma",
+            "gemma",
+            lambda: runtime_manager.ensure_server(
+                settings_page,
+                progress_callback=getattr(self.main_page, "report_runtime_progress", None),
+                cancel_checker=getattr(self.main_page, "is_current_task_cancelled", None),
+            ),
+        )
 
     def _set_current_image(self, image_path: str) -> None:
         try:
@@ -252,6 +392,24 @@ class StageBatchedProcessor(BatchProcessor):
                     detector_key=ctx.detector_key,
                     detector_engine=ctx.detector_engine,
                 )
+                export_settings = self._effective_export_settings(settings_page)
+                detector_overlay_path = self._write_detector_overlay_debug_image(
+                    export_root=ctx.export_root,
+                    archive_bname=ctx.archive_bname,
+                    image_path=ctx.image_path,
+                    image=ctx.image,
+                    blk_list=ctx.blk_list,
+                    export_settings=export_settings,
+                )
+                self._maybe_emit_preview_image(
+                    index=index,
+                    total=total_images,
+                    image_path=ctx.image_path,
+                    stage_key="detector_overlay",
+                    stage_label="텍스트 감지",
+                    export_settings=export_settings,
+                    preferred_path=detector_overlay_path,
+                )
                 continue
 
             state = self._ensure_page_state(ctx.image_path)
@@ -356,13 +514,7 @@ class StageBatchedProcessor(BatchProcessor):
         total_images = len(pages)
         settings_page = self.main_page.settings_page
         runtime_manager = getattr(self.main_page, "local_ocr_runtime_manager", None)
-        if isinstance(runtime_manager, LocalOCRRuntimeManager):
-            runtime_manager.ensure_engine(
-                str(policy["primary_ocr_engine"]),
-                settings_page,
-                progress_callback=getattr(self.main_page, "report_runtime_progress", None),
-                cancel_checker=getattr(self.main_page, "is_current_task_cancelled", None),
-            )
+        self._await_ocr_runtime(policy)
 
         for index, ctx in enumerate(pages):
             if ctx.failed_stage:
@@ -449,6 +601,7 @@ class StageBatchedProcessor(BatchProcessor):
         )
         runtime = self._ensure_inpainter()
         config = get_config(settings_page)
+        self._start_gemma_prewarm()
 
         for index, ctx in enumerate(pages):
             if ctx.failed_stage:
@@ -493,34 +646,18 @@ class StageBatchedProcessor(BatchProcessor):
                         "cleanup_block_count": int(ctx.cleanup_stats.get("block_count", 0) or 0),
                     },
                 )
-                if export_settings["export_inpainted_image"] and is_individual_images_mode(export_settings):
-                    path = self.main_page.get_automatic_output_series_dir(
-                        ctx.directory,
-                        anchor_path=self.main_page.image_files[0] if self.main_page.image_files else ctx.image_path,
-                    )
-                    os.makedirs(path, exist_ok=True)
-                    from modules.utils.automatic_output import write_output_image, build_output_file_name
-
-                    cleaned_output_path = os.path.join(
-                        path,
-                        build_output_file_name(
-                            os.path.splitext(os.path.basename(ctx.image_path))[0],
-                            "cleaned",
-                            ctx.image_path,
-                            export_settings,
-                        ),
-                    )
-                    write_output_image(
-                        cleaned_output_path,
-                        ctx.inpaint_input_img,
-                        source_path=ctx.image_path,
-                        resolved_settings=export_settings,
-                    )
-                    self.main_page.image_ctrl.update_processing_summary(
-                        ctx.image_path,
-                        {"cleaned_image_path": cleaned_output_path},
-                    )
-                self._write_inpaint_debug_exports(
+                cleaned_output_path = self._write_inpainted_debug_image(
+                    export_root=ctx.export_root,
+                    archive_bname=ctx.archive_bname,
+                    image_path=ctx.image_path,
+                    cleaned_image=ctx.inpaint_input_img,
+                    export_settings=export_settings,
+                )
+                self.main_page.image_ctrl.update_processing_summary(
+                    ctx.image_path,
+                    {"cleaned_image_path": cleaned_output_path},
+                )
+                debug_paths = self._write_inpaint_debug_exports(
                     export_root=ctx.export_root,
                     archive_bname=ctx.archive_bname,
                     image_path=ctx.image_path,
@@ -537,6 +674,42 @@ class StageBatchedProcessor(BatchProcessor):
                     cleanup_stats=ctx.cleanup_stats,
                     mask_details=ctx.mask_details,
                     inpainter_backend=runtime["backend"],
+                )
+                self._maybe_emit_preview_image(
+                    index=index,
+                    total=total_images,
+                    image_path=ctx.image_path,
+                    stage_key="raw_mask",
+                    stage_label="원본 마스크",
+                    export_settings=export_settings,
+                    preferred_path=debug_paths.get("raw_mask", ""),
+                )
+                self._maybe_emit_preview_image(
+                    index=index,
+                    total=total_images,
+                    image_path=ctx.image_path,
+                    stage_key="mask_overlay",
+                    stage_label="마스크 오버레이",
+                    export_settings=export_settings,
+                    preferred_path=debug_paths.get("mask_overlay", ""),
+                )
+                self._maybe_emit_preview_image(
+                    index=index,
+                    total=total_images,
+                    image_path=ctx.image_path,
+                    stage_key="cleanup_delta",
+                    stage_label="정리 마스크 변화량",
+                    export_settings=export_settings,
+                    preferred_path=debug_paths.get("cleanup_delta", ""),
+                )
+                self._maybe_emit_preview_image(
+                    index=index,
+                    total=total_images,
+                    image_path=ctx.image_path,
+                    stage_key="inpainted_image",
+                    stage_label="인페인트 결과",
+                    export_settings=export_settings,
+                    preferred_path=cleaned_output_path,
                 )
                 self.main_page.image_ctrl.mark_processing_stage(
                     ctx.image_path,
@@ -568,18 +741,24 @@ class StageBatchedProcessor(BatchProcessor):
         extra_context = settings_page.get_llm_settings()["extra_context"]
         translator_key = settings_page.get_tool_selection("translator")
         runtime_manager = getattr(self.main_page, "local_translation_runtime_manager", None)
-        if isinstance(runtime_manager, LocalGemmaRuntimeManager):
-            runtime_manager.ensure_server(
-                settings_page,
-                progress_callback=getattr(self.main_page, "report_runtime_progress", None),
-                cancel_checker=getattr(self.main_page, "is_current_task_cancelled", None),
-            )
+        self._await_gemma_runtime()
 
         for index, ctx in enumerate(pages):
             if ctx.failed_stage:
                 continue
             self._set_current_image(ctx.image_path)
             self.emit_progress(index, total_images, 7, 10, False)
+            self._report_runtime_progress(
+                phase="pipeline",
+                service="gemma",
+                status="running",
+                step_key="translation",
+                stage_name="translation",
+                message=f"{index + 1}/{total_images} 페이지 Gemma 번역 중...",
+                page_index=index,
+                page_total=total_images,
+                image_name=ctx.image_name,
+            )
             self._emit_benchmark_event(
                 "translate_start",
                 image_path=ctx.image_path,
@@ -855,6 +1034,7 @@ class StageBatchedProcessor(BatchProcessor):
         pages = self._load_page_contexts(image_list)
         policy = self._ensure_stage_policy(pages)
         try:
+            self._start_ocr_prewarm(policy)
             self._detect_all(pages)
             self._ocr_all(pages, policy)
             self._inpaint_all(pages)
@@ -862,4 +1042,5 @@ class StageBatchedProcessor(BatchProcessor):
             self._render_all(pages)
             self._emit_benchmark_event("batch_run_done", total_images=total_images)
         finally:
+            self._shutdown_prewarm_executor()
             self._progress_image_path = None

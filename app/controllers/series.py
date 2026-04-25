@@ -244,8 +244,30 @@ class SeriesController(QtCore.QObject):
                 "translator": translator_value,
                 "workflow_mode": self.main.settings_page.get_workflow_mode(),
                 "use_gpu": self.main.settings_page.is_gpu_enabled(),
+                "export_settings": self.main.settings_page.get_export_settings(),
+                "render_settings": self._series_render_settings_from_main(),
             }
         )
+
+    def _series_render_settings_from_main(self) -> dict[str, object]:
+        render_settings = self.main.render_settings()
+        return {
+            "alignment_id": int(render_settings.alignment_id),
+            "vertical_alignment_id": int(render_settings.vertical_alignment_id),
+            "font_family": str(render_settings.font_family or ""),
+            "min_font_size": int(render_settings.min_font_size),
+            "max_font_size": int(render_settings.max_font_size),
+            "color": str(render_settings.color or ""),
+            "force_font_color": bool(render_settings.force_font_color),
+            "upper_case": bool(render_settings.upper_case),
+            "outline": bool(render_settings.outline),
+            "outline_color": str(render_settings.outline_color or ""),
+            "outline_width": str(render_settings.outline_width or "1.0"),
+            "bold": bool(render_settings.bold),
+            "italic": bool(render_settings.italic),
+            "underline": bool(render_settings.underline),
+            "line_spacing": str(render_settings.line_spacing or "1.0"),
+        }
 
     def _series_workspace_options(self) -> dict[str, list[tuple[str, str]]]:
         language_options = [
@@ -640,6 +662,88 @@ class SeriesController(QtCore.QObject):
             if index >= 0:
                 self.main.settings_page.ui.translator_combo.setCurrentIndex(index)
         self.main.settings_page.ui.use_gpu_checkbox.setChecked(bool(global_settings.get("use_gpu", True)))
+        export_settings = global_settings.get("export_settings")
+        if isinstance(export_settings, dict):
+            self._apply_series_export_settings_to_main(export_settings)
+        render_settings = global_settings.get("render_settings")
+        if isinstance(render_settings, dict):
+            self._apply_series_render_settings_to_main(render_settings)
+
+    def _set_combo_data(self, combo: QtWidgets.QComboBox, value: object) -> None:
+        index = combo.findData(value)
+        if index >= 0:
+            combo.setCurrentIndex(index)
+
+    def _apply_series_export_settings_to_main(self, settings: dict[str, object]) -> None:
+        ui = self.main.settings_page.ui
+        checkbox_map = {
+            "export_raw_text": ui.raw_text_checkbox,
+            "export_translated_text": ui.translated_text_checkbox,
+            "export_inpainted_image": ui.inpainted_image_checkbox,
+            "export_detector_overlay": ui.detector_overlay_checkbox,
+            "export_raw_mask": ui.raw_mask_checkbox,
+            "export_mask_overlay": ui.mask_overlay_checkbox,
+            "export_cleanup_mask_delta": ui.cleanup_mask_delta_checkbox,
+            "export_debug_metadata": ui.debug_metadata_checkbox,
+        }
+        for key, checkbox in checkbox_map.items():
+            if key in settings:
+                checkbox.setChecked(bool(settings.get(key, False)))
+        self._set_combo_data(ui.automatic_output_target_combo, settings.get("automatic_output_target"))
+        self._set_combo_data(ui.automatic_output_image_format_combo, settings.get("automatic_output_image_format"))
+        self._set_combo_data(ui.automatic_output_archive_format_combo, settings.get("automatic_output_archive_format"))
+        self._set_combo_data(
+            ui.automatic_output_archive_image_format_combo,
+            settings.get("automatic_output_archive_image_format"),
+        )
+        if "automatic_output_archive_compression_level" in settings:
+            ui.automatic_output_archive_level_spinbox.setValue(
+                max(0, min(9, int(settings.get("automatic_output_archive_compression_level") or 6)))
+            )
+
+    def _apply_series_render_settings_to_main(self, settings: dict[str, object]) -> None:
+        if "alignment_id" in settings:
+            self.main.alignment_tool_group.set_dayu_checked(int(settings.get("alignment_id") or 0))
+        if "vertical_alignment_id" in settings:
+            self.main.vertical_alignment_tool_group.set_dayu_checked(int(settings.get("vertical_alignment_id") or 0))
+        if settings.get("font_family"):
+            self.main.set_font(str(settings.get("font_family") or ""))
+        ui = self.main.settings_page.ui
+        if "min_font_size" in settings:
+            ui.min_font_spinbox.setValue(int(settings.get("min_font_size") or ui.min_font_spinbox.value()))
+        if "max_font_size" in settings:
+            ui.max_font_spinbox.setValue(int(settings.get("max_font_size") or ui.max_font_spinbox.value()))
+        if settings.get("color"):
+            color = str(settings.get("color") or "")
+            self.main.block_font_color_button.setStyleSheet(
+                f"background-color: {color}; border: none; border-radius: 5px;"
+            )
+            self.main.block_font_color_button.setProperty("selected_color", color)
+        if "force_font_color" in settings:
+            self.main.force_font_color_checkbox.setChecked(bool(settings.get("force_font_color", False)))
+        if "upper_case" in settings:
+            ui.uppercase_checkbox.setChecked(bool(settings.get("upper_case", False)))
+        if "outline" in settings:
+            self.main.outline_mode_group.set_dayu_checked(1 if bool(settings.get("outline", False)) else 0)
+        if settings.get("outline_color"):
+            outline_color = str(settings.get("outline_color") or "#ffffff")
+            self.main.outline_font_color_button.setStyleSheet(
+                f"background-color: {outline_color}; border: none; border-radius: 5px;"
+            )
+            self.main.outline_font_color_button.setProperty("selected_color", outline_color)
+        if settings.get("outline_width"):
+            self.main.outline_width_dropdown.setCurrentText(str(settings.get("outline_width") or "1.0"))
+        if "bold" in settings:
+            self.main.bold_button.setChecked(bool(settings.get("bold", False)))
+        if "italic" in settings:
+            self.main.italic_button.setChecked(bool(settings.get("italic", False)))
+        if "underline" in settings:
+            self.main.underline_button.setChecked(bool(settings.get("underline", False)))
+        if settings.get("line_spacing"):
+            self.main.line_spacing_dropdown.setCurrentText(str(settings.get("line_spacing") or "1.0"))
+        outline_enabled = bool(settings.get("outline", self.main.outline_checkbox.isChecked()))
+        self.main.outline_font_color_button.setEnabled(outline_enabled)
+        self.main.outline_width_dropdown.setEnabled(outline_enabled)
 
     def _open_child_worker(self, child_project_path: str) -> str:
         return load_state_from_proj_file(self.main, child_project_path)
@@ -944,7 +1048,9 @@ class SeriesController(QtCore.QObject):
             return
         if not self.series_file:
             return
-        normalized = normalize_series_global_settings(values)
+        merged = normalize_series_global_settings(self.series_manifest.get("global_settings"))
+        merged.update(dict(values or {}))
+        normalized = normalize_series_global_settings(merged)
         self.series_manifest = update_series_global_settings(self.series_file, normalized)
         loaded = load_series_project(self.series_file)
         self.series_manifest = dict(loaded["manifest"])
@@ -1167,6 +1273,28 @@ class SeriesController(QtCore.QObject):
         if not failed_item_id:
             return
         self.request_open_item(failed_item_id)
+
+    def open_active_queue_item(self) -> None:
+        if not self.series_file:
+            return
+        active_item_id = str(self.active_queue_runtime().get("active_item_id") or "").strip()
+        if not active_item_id:
+            return
+        if self.is_child_project_active() and str(self.active_child_item_id) == active_item_id:
+            self.main.show_main_page()
+            self._set_series_window_title(self._active_child_display_name())
+            return
+        self._open_item(active_item_id, push_history=False)
+
+    def show_board_during_queue(self) -> None:
+        if not self.series_file:
+            return
+        if self._queue_active and self.is_child_project_active():
+            self._apply_workspace_state()
+            self.main.show_series_page()
+            self._set_series_window_title()
+            return
+        self.request_show_board()
 
     def _finalize_queue_summary(self, *, failed_count: int = 0, skipped_count: int = 0) -> dict[str, object]:
         queue_runtime = self.active_queue_runtime()

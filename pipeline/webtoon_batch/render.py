@@ -24,7 +24,6 @@ from modules.utils.automatic_output import (
     build_archive_page_file_name,
     build_archive_staging_dir,
     build_output_file_name,
-    is_individual_images_mode,
     is_single_archive_mode,
     write_archive_image,
     write_output_image,
@@ -345,16 +344,13 @@ class RenderMixin:
             self.log_skipped_image(directory, export_token, image_path, reason)
             return
 
-        if export_settings["export_inpainted_image"] and is_individual_images_mode(export_settings):
+        if export_settings["export_inpainted_image"]:
             renderer = ImageSaveRenderer(image)
             patches = self.final_patches_for_save.get(image_path, [])
             renderer.apply_patches(patches)
-            path = self.main_page.get_automatic_output_series_dir(
-                directory,
-                anchor_path=self.main_page.image_files[0] if self.main_page.image_files else image_path,
-            )
-            os.makedirs(path, exist_ok=True)
             cleaned_image_rgb = renderer.render_to_image()
+            path = os.path.join(export_root, "inpainted_images", archive_bname)
+            os.makedirs(path, exist_ok=True)
             cleaned_output_path = os.path.join(
                 path,
                 build_output_file_name(
@@ -374,7 +370,7 @@ class RenderMixin:
                 image_path,
                 {"cleaned_image_path": cleaned_output_path},
             )
-        elif not is_individual_images_mode(export_settings):
+        else:
             self.main_page.image_ctrl.update_processing_summary(
                 image_path,
                 {"cleaned_image_path": ""},

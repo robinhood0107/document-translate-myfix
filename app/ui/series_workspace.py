@@ -829,6 +829,7 @@ class _SeriesStatusPanel(QtWidgets.QWidget):
     pause_requested = QtCore.Signal()
     resume_requested = QtCore.Signal()
     open_failed_requested = QtCore.Signal()
+    open_current_requested = QtCore.Signal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -868,9 +869,11 @@ class _SeriesStatusPanel(QtWidgets.QWidget):
         button_row = QtWidgets.QHBoxLayout()
         self.pause_button = QtWidgets.QPushButton(self.tr("Pause"))
         self.resume_button = QtWidgets.QPushButton(self.tr("Resume"))
+        self.open_current_button = QtWidgets.QPushButton(self.tr("Open Current Item"))
         self.open_failed_button = QtWidgets.QPushButton(self.tr("Open Failed Item"))
         button_row.addWidget(self.pause_button)
         button_row.addWidget(self.resume_button)
+        button_row.addWidget(self.open_current_button)
         button_row.addWidget(self.open_failed_button)
 
         layout.addWidget(header)
@@ -880,6 +883,7 @@ class _SeriesStatusPanel(QtWidgets.QWidget):
 
         self.pause_button.clicked.connect(self.pause_requested.emit)
         self.resume_button.clicked.connect(self.resume_requested.emit)
+        self.open_current_button.clicked.connect(self.open_current_requested.emit)
         self.open_failed_button.clicked.connect(self.open_failed_requested.emit)
 
     def _state_label(self, queue_state: str) -> str:
@@ -939,6 +943,8 @@ class _SeriesStatusPanel(QtWidgets.QWidget):
         self.pause_button.setText(self.tr("Pause") if not pause_requested else self.tr("Pause Requested"))
         self.resume_button.setVisible(queue_state == "paused")
         self.resume_button.setEnabled(queue_state == "paused" and bool(pending_ids))
+        self.open_current_button.setVisible(queue_state == "running")
+        self.open_current_button.setEnabled(bool(active_item_id))
         self.open_failed_button.setEnabled(bool(failed_item_id) and queue_state != "running")
 
 
@@ -1132,6 +1138,7 @@ class SeriesWorkspace(QtWidgets.QWidget):
     pause_requested = QtCore.Signal()
     resume_requested = QtCore.Signal()
     open_failed_item_requested = QtCore.Signal()
+    open_current_item_requested = QtCore.Signal()
     open_series_settings_requested = QtCore.Signal()
     global_settings_changed = QtCore.Signal(dict)
 
@@ -1259,6 +1266,7 @@ class SeriesWorkspace(QtWidgets.QWidget):
         self.status_panel.pause_requested.connect(self.pause_requested)
         self.status_panel.resume_requested.connect(self.resume_requested)
         self.status_panel.open_failed_requested.connect(self.open_failed_item_requested)
+        self.status_panel.open_current_requested.connect(self.open_current_item_requested)
         self.quick_settings.open_series_settings_requested.connect(self.open_series_settings_requested)
         self.quick_settings.changed.connect(self._emit_global_settings_changed)
         self.sort_combo.currentIndexChanged.connect(self._on_sort_changed)

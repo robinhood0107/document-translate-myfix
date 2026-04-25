@@ -177,6 +177,7 @@ class ComicTranslate(ComicTranslateUI):
         self._automatic_progress_settings_target = None
         self._last_runtime_preview_path = ""
         self._last_batch_output_root = ""
+        self._intermediate_preview_disabled_notices = set()
         self._automatic_progress_tracker = AutomaticProgressTracker()
         self.local_ocr_runtime_manager = LocalOCRRuntimeManager()
         self.local_translation_runtime_manager = LocalGemmaRuntimeManager()
@@ -287,6 +288,8 @@ class ComicTranslate(ComicTranslateUI):
         self.pipeline_status_panel.open_settings_requested.connect(self._on_automatic_progress_open_settings)
         self.pipeline_status_panel.report_requested.connect(self.show_latest_batch_report)
         self.pipeline_status_panel.open_output_requested.connect(self._open_latest_batch_output)
+        self.pipeline_status_panel.open_series_board_requested.connect(self.series_ctrl.show_board_during_queue)
+        self.pipeline_status_panel.open_current_series_item_requested.connect(self.series_ctrl.open_active_queue_item)
         self.set_all_button.clicked.connect(self.text_ctrl.set_src_trg_all)
         self.clear_rectangles_button.clicked.connect(self.image_viewer.clear_rectangles)
         self.clear_brush_strokes_button.clicked.connect(self.image_viewer.clear_brush_strokes)
@@ -401,6 +404,7 @@ class ComicTranslate(ComicTranslateUI):
         self.series_workspace.pause_requested.connect(self.series_ctrl.pause_queue_translation)
         self.series_workspace.resume_requested.connect(self.series_ctrl.resume_queue_translation)
         self.series_workspace.open_failed_item_requested.connect(self.series_ctrl.open_last_failed_item)
+        self.series_workspace.open_current_item_requested.connect(self.series_ctrl.open_active_queue_item)
         self.series_workspace.open_series_settings_requested.connect(self.series_ctrl.edit_series_settings_dialog)
         self.series_workspace.global_settings_changed.connect(self.series_ctrl.request_global_settings_change)
 
@@ -1120,6 +1124,12 @@ class ComicTranslate(ComicTranslateUI):
     def _ensure_automatic_progress_dialog(self):
         return self.pipeline_status_panel
 
+    def _prepare_intermediate_preview_run(self, run_type: str) -> None:
+        self._intermediate_preview_disabled_notices = set()
+
+    def _cleanup_intermediate_preview_run(self, *, keep_failed: bool = False) -> None:
+        self._intermediate_preview_disabled_notices = set()
+
     def _show_automatic_progress_dialog(self, selected_paths: list[str], run_type: str):
         self._automatic_progress_tracker.reset(page_total=len(selected_paths), run_type=run_type)
         self._last_runtime_preview_path = ""
@@ -1691,6 +1701,11 @@ class ComicTranslate(ComicTranslateUI):
             if not validate_settings(self, tgt, source_lang=src, preflight_cache=ocr_preflight_cache):
                 return False
 
+        prepare_preview_run = getattr(self, "_prepare_intermediate_preview_run", None)
+        if callable(prepare_preview_run):
+            prepare_preview_run(run_type)
+        else:
+            self._intermediate_preview_disabled_notices = set()
         self.image_ctrl.clear_page_skip_errors_for_paths(selected_paths)
         self._start_batch_report(selected_paths, run_type=run_type)
         self.selected_batch = selected_paths
@@ -1922,6 +1937,7 @@ class ComicTranslate(ComicTranslateUI):
                 }
             )
 
+        self._cleanup_intermediate_preview_run(keep_failed=bool(failed and not was_cancelled))
         if report and report["skipped_count"] > 0:
             Messages.show_batch_skipped_summary(self, report["skipped_count"])
         elif not was_cancelled and not failed:

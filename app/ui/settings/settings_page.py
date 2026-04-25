@@ -268,6 +268,11 @@ class SettingsPage(QtWidgets.QWidget):
             if isinstance(current_data, str) and current_data.strip():
                 return self._normalize_ocr_mode_value(current_data)
             return self._normalize_ocr_mode_value(combo.currentText())
+        if tool_type == "translator":
+            current_data = combo.currentData()
+            if isinstance(current_data, str) and current_data.strip():
+                return current_data.strip()
+            return self.ui.value_mappings.get(combo.currentText(), combo.currentText())
         if tool_type == "inpainter":
             return "lama_large_512px"
         if tool_type == "detector":

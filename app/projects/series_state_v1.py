@@ -60,6 +60,11 @@ SUPPORTED_SERIES_SOURCE_EXTS = {
 
 _UNSET = object()
 
+_TRANSLATOR_ALIASES = {
+    "gemma_local": "Custom Local Server(Gemma)",
+    "Custom Local Server": "Custom Local Server(Gemma)",
+}
+
 
 def _now_iso() -> str:
     return datetime.now().isoformat(timespec="seconds")
@@ -261,7 +266,8 @@ def normalize_series_global_settings(data: dict[str, object] | None) -> dict[str
     merged["source_language"] = str(merged.get("source_language") or "").strip()
     merged["target_language"] = str(merged.get("target_language") or "").strip()
     merged["ocr"] = str(merged.get("ocr") or "").strip()
-    merged["translator"] = str(merged.get("translator") or "").strip()
+    translator = str(merged.get("translator") or "").strip()
+    merged["translator"] = _TRANSLATOR_ALIASES.get(translator, translator)
     merged["workflow_mode"] = str(merged.get("workflow_mode") or "").strip()
     merged["use_gpu"] = bool(merged.get("use_gpu", True))
     return merged

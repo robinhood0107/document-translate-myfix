@@ -82,13 +82,18 @@ class SeriesStateTests(unittest.TestCase):
                 "translator": "gemma_local",
                 "workflow_mode": "stage_batched_pipeline",
                 "use_gpu": 0,
+                "export_settings": {"export_raw_mask": True},
+                "render_settings": {"alignment_id": 1},
             }
         )
         self.assertEqual(normalized["source_language"], "Japanese")
         self.assertEqual(normalized["target_language"], "Korean")
         self.assertEqual(normalized["ocr"], "paddleocr_vl")
+        self.assertEqual(normalized["translator"], "Custom Local Server(Gemma)")
         self.assertEqual(normalized["workflow_mode"], "stage_batched_pipeline")
         self.assertFalse(normalized["use_gpu"])
+        self.assertEqual(normalized["export_settings"], {"export_raw_mask": True})
+        self.assertEqual(normalized["render_settings"], {"alignment_id": 1})
 
     def test_normalize_series_queue_runtime_defaults_to_idle_pause_safe_shape(self) -> None:
         runtime = normalize_series_queue_runtime(

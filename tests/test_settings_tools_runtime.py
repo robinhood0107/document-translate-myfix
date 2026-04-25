@@ -85,6 +85,17 @@ class SettingsToolsRuntimeTests(unittest.TestCase):
         self.assertEqual(page.get_mask_refiner_settings()["mask_refiner"], "ctd")
         self.assertTrue(page.get_mask_refiner_settings()["keep_existing_lines"])
 
+    def test_translator_selection_returns_canonical_item_data_for_localized_labels(self) -> None:
+        page = self._make_page()
+        page.load_settings()
+
+        index = page.ui.translator_combo.findData("Custom Local Server(Gemma)")
+        self.assertGreaterEqual(index, 0)
+        page.ui.translator_combo.setItemText(index, "사용자 지정 로컬 서버(Gemma)")
+        page.ui.translator_combo.setCurrentIndex(index)
+
+        self.assertEqual(page.get_tool_selection("translator"), "Custom Local Server(Gemma)")
+
     def test_mask_refiner_settings_round_trip_preserves_ctd_defaults(self) -> None:
         settings = QtCore.QSettings("ComicLabs", "ComicTranslate")
         settings.setValue("tools/detector", "RT-DETR-v2")
