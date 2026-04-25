@@ -8,6 +8,7 @@ from PySide6.QtCore import QPointF, Qt, QRectF
 from PySide6.QtGui import QTextDocument, QTextCursor
 from app.ui.canvas.text_item import TextBlockItem
 from app.ui.canvas.text.text_item_properties import TextItemProperties
+from modules.rendering.rich_text import repair_text_item_html, should_use_rich_text
 
 
 class TextItemManager:
@@ -160,7 +161,7 @@ class TextItemManager:
         temp_cursor = QTextCursor(temp_doc)
         temp_cursor.insertFragment(cursor.selection())
         
-        return temp_doc.toHtml()
+        return repair_text_item_html(temp_doc.toHtml(), TextItemProperties.from_text_item(text_item))
     
     def _split_text_by_characters(self, text_item, clip_ratios: dict) -> str:
         """
@@ -212,7 +213,7 @@ class TextItemManager:
         temp_cursor = QTextCursor(temp_doc)
         temp_cursor.insertFragment(cursor.selection())
         
-        return temp_doc.toHtml()
+        return repair_text_item_html(temp_doc.toHtml(), TextItemProperties.from_text_item(text_item))
     
     def _create_clipped_text_data(self, original_text_data: dict, clipped_text: str, 
                                  clipped_position: tuple[float, float], 
@@ -365,7 +366,12 @@ class TextItemManager:
                         # Set the text as HTML to preserve formatting
                         text_content = text_data.get('text', '')
                         if text_content:
-                            self._document.setHtml(text_content)
+                            if should_use_rich_text(text_content):
+                                self._document.setHtml(
+                                    repair_text_item_html(text_content, text_data)
+                                )
+                            else:
+                                self._document.setPlainText(text_content)
                     
                     def pos(self):
                         return self._pos
@@ -450,8 +456,7 @@ class TextItemManager:
         """Extract plain text from potential HTML content."""
         if not text:
             return ""
-        # Quick check for HTML tags
-        if '<' not in text or '>' not in text:
+        if not should_use_rich_text(text):
             return text
             
         # Use QTextDocument to extract plain text
@@ -709,6 +714,5 @@ class TextItemManager:
         return merged_doc.toHtml()
     
     def _is_html(self, text):
-        """Check if text contains HTML tags."""
-        import re
-        return bool(re.search(r'<[^>]+>', text))
+        """Check if text contains app-trusted rich text."""
+        return should_use_rich_text(text)

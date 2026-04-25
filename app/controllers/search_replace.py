@@ -9,6 +9,7 @@ from PySide6 import QtCore, QtGui
 from PySide6.QtGui import QTextCursor
 
 from modules.utils.common_utils import is_close
+from modules.rendering.rich_text import repair_text_item_html, should_use_rich_text
 from app.ui.commands.search_replace import ReplaceBlocksCommand, ReplaceChange
 
 if TYPE_CHECKING:
@@ -135,9 +136,7 @@ def _make_preview(text: str, start: int, end: int, radius: int = 30) -> str:
     return f"{prefix}{safe[left:right]}{suffix}"
 
 def _looks_like_html(text: str) -> bool:
-    if not text:
-        return False
-    return bool(re.search(r"<[^>]+>", text))
+    return should_use_rich_text(text)
 
 
 def _to_qt_plain(text: str) -> str:
@@ -983,7 +982,7 @@ class SearchReplaceController(QtCore.QObject):
                                 doc = QtGui.QTextDocument()
                                 doc.setHtml(existing)
                                 if _apply_text_delta_to_document(doc, new_text):
-                                    ti["text"] = doc.toHtml()
+                                    ti["text"] = repair_text_item_html(doc.toHtml(), ti)
                             except Exception:
                                 pass
                         else:
@@ -1025,7 +1024,7 @@ class SearchReplaceController(QtCore.QObject):
                                     doc = QtGui.QTextDocument()
                                     doc.setHtml(existing)
                                     if _apply_text_delta_to_document(doc, new_text):
-                                        html = doc.toHtml()
+                                        html = repair_text_item_html(doc.toHtml(), text_item)
                             except Exception:
                                 html = None
                             self.main.text_ctrl.apply_text_from_command(text_item, new_text, html=html, blk=blk)
@@ -1097,6 +1096,7 @@ class SearchReplaceController(QtCore.QObject):
                 )
                 if count <= 0 or new_text == old_text:
                     return
+                new_html = repair_text_item_html(new_html, ti)
                 old_html = existing_html
             else:
                 old_text = None
@@ -1189,6 +1189,7 @@ class SearchReplaceController(QtCore.QObject):
                     )
                     if count <= 0 or new_text == old_text:
                         continue
+                    new_html = repair_text_item_html(new_html, ti)
                     old_html = existing_html
                 else:
                     old_text = blk.translation

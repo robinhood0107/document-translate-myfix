@@ -14,6 +14,7 @@ from app.controllers.psd_support import import_photoshopapi
 from app.path_materialization import ensure_path_materialized
 from app.ui.canvas.text.text_item_properties import TextItemProperties
 from app.ui.canvas.text_item import OutlineType
+from modules.rendering.rich_text import repair_text_item_html, should_use_rich_text
 
 logger = logging.getLogger(__name__)
 
@@ -175,7 +176,10 @@ def _extract_plain_text(html_value: str) -> tuple[str, float]:
         return "", 4.0
 
     document = QtGui.QTextDocument()
-    document.setHtml(html_value)
+    if should_use_rich_text(html_value):
+        document.setHtml(repair_text_item_html(html_value, {}))
+    else:
+        document.setPlainText(html_value)
     plain_text = (
         document.toPlainText()
         .replace("\u2028", "\n")

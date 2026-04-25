@@ -872,21 +872,46 @@ class StageBatchedProcessor(BatchProcessor):
             )
             if is_no_space_lang(trg_lng_cd):
                 translation = translation.replace(" ", "")
-            render_markup = describe_render_text_markup(translation)
             font_color = resolve_render_text_color(
                 blk.font_color,
                 setting_font_color,
                 render_settings.force_font_color,
                 render_settings.smart_global_apply_all,
             )
-            source_rect = build_rect_tuple(x1, y1, block_width, block_height)
-            outline_color = QColor(render_settings.outline_color) if render_settings.outline else None
-            text_props = TextItemProperties(
-                text=render_markup.html_text if render_markup.html_applied else translation,
+            alignment = self.main_page.button_to_alignment[render_settings.alignment_id]
+            render_markup = describe_render_text_markup(
+                translation,
                 font_family=font,
                 font_size=font_size,
                 text_color=font_color,
-                alignment=self.main_page.button_to_alignment[render_settings.alignment_id],
+                alignment=alignment,
+                line_spacing=float(render_settings.line_spacing),
+                bold=render_settings.bold,
+                italic=render_settings.italic,
+                underline=render_settings.underline,
+                direction=render_settings.direction,
+            )
+            blk._render_text = str(translation or "")
+            blk._render_html = str(render_markup.html_text if render_markup.html_applied else translation)
+            blk._render_html_applied = bool(render_markup.html_applied)
+            blk._render_fallback_font_family = str(render_markup.fallback_font_family or "")
+            blk._render_normalization_applied = bool(
+                render_normalization.normalization_applied or render_markup.html_applied
+            )
+            blk._render_normalization_reasons = sorted(
+                set(render_normalization.reasons).union(render_markup.reasons)
+            )
+            blk._render_normalization_replacements = list(
+                render_normalization.replacements
+            ) + list(render_markup.replacements)
+            source_rect = build_rect_tuple(x1, y1, block_width, block_height)
+            outline_color = QColor(render_settings.outline_color) if render_settings.outline else None
+            text_props = TextItemProperties(
+                text=blk._render_html,
+                font_family=font,
+                font_size=font_size,
+                text_color=font_color,
+                alignment=alignment,
                 line_spacing=float(render_settings.line_spacing),
                 outline_color=outline_color,
                 outline_width=float(render_settings.outline_width),
@@ -921,6 +946,15 @@ class StageBatchedProcessor(BatchProcessor):
             text_item_state["translation_raw"] = str(translation_raw or "")
             text_item_state["render_text"] = str(translation or "")
             text_item_state["render_html_applied"] = bool(render_markup.html_applied)
+            text_item_state["render_fallback_font_family"] = str(
+                render_markup.fallback_font_family or ""
+            )
+            text_item_state["render_normalization_applied"] = bool(
+                blk._render_normalization_applied
+            )
+            text_item_state["render_normalization_reasons"] = list(
+                blk._render_normalization_reasons
+            )
             text_items_state.append(text_item_state)
             if ctx.image_path == file_on_display:
                 self.main_page.blk_rendered.emit(translation, font_size, blk, ctx.image_path)
