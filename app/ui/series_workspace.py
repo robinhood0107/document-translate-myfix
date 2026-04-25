@@ -1200,19 +1200,42 @@ class SeriesSettingsDialog(QtWidgets.QDialog):
         title: str,
         note: str,
         child_layout: QtWidgets.QLayout,
-    ) -> QtWidgets.QGroupBox:
-        group = QtWidgets.QGroupBox(title, self)
-        group.setObjectName("seriesSettingsSection")
-        layout = QtWidgets.QVBoxLayout(group)
-        layout.setContentsMargins(14, 22, 14, 14)
-        layout.setSpacing(10)
+    ) -> QtWidgets.QFrame:
+        section = QtWidgets.QFrame(self)
+        section.setObjectName("seriesSettingsSection")
+        section.setProperty("section_title", title)
+        layout = QtWidgets.QVBoxLayout(section)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
+
+        header = QtWidgets.QFrame(section)
+        header.setObjectName("seriesSettingsSectionHeader")
+        header_layout = QtWidgets.QHBoxLayout(header)
+        header_layout.setContentsMargins(14, 10, 14, 6)
+        header_layout.setSpacing(10)
+        accent_bar = QtWidgets.QFrame(header)
+        accent_bar.setObjectName("seriesSettingsSectionAccent")
+        accent_bar.setFixedSize(4, 18)
+        title_label = QtWidgets.QLabel(title, header)
+        title_label.setObjectName("seriesSettingsSectionTitle")
+        header_layout.addWidget(accent_bar, 0, QtCore.Qt.AlignmentFlag.AlignVCenter)
+        header_layout.addWidget(title_label, 1)
+        layout.addWidget(header)
+
         if note:
-            note_label = QtWidgets.QLabel(note, group)
+            note_label = QtWidgets.QLabel(note, section)
             note_label.setObjectName("seriesSettingsSectionNote")
             note_label.setWordWrap(True)
             layout.addWidget(note_label)
-        layout.addLayout(child_layout)
-        return group
+
+        body = QtWidgets.QWidget(section)
+        body.setObjectName("seriesSettingsSectionBody")
+        body_layout = QtWidgets.QVBoxLayout(body)
+        body_layout.setContentsMargins(14, 8, 14, 14)
+        body_layout.setSpacing(0)
+        body_layout.addLayout(child_layout)
+        layout.addWidget(body)
+        return section
 
     def _configure_form(self, form: QtWidgets.QFormLayout) -> None:
         form.setContentsMargins(0, 0, 0, 0)
@@ -1230,7 +1253,7 @@ class SeriesSettingsDialog(QtWidgets.QDialog):
         border = dayu_theme.divider_color or "#262626"
         section_bg = dayu_theme.background_out_color or "#4a4a4a"
         row_bg = dayu_theme.background_in_color or "#383838"
-        label_bg = _hex_to_rgba(text, 0.08)
+        row_border = _hex_to_rgba(accent, 0.32)
         input_bg = dayu_theme.background_color or "#303030"
         accent_soft = _hex_to_rgba(accent, 0.16)
         hover = _hex_to_rgba(text, 0.08)
@@ -1239,14 +1262,16 @@ class SeriesSettingsDialog(QtWidgets.QDialog):
             QDialog#seriesSettingsDialog {{
                 background: {window};
                 color: {text};
+                font-size: 14px;
             }}
             QLabel#seriesSettingsTitle {{
                 color: {text};
-                font-size: 20px;
+                font-size: 22px;
                 font-weight: 700;
             }}
             QLabel#seriesSettingsSubtitle {{
                 color: {sub_text};
+                font-size: 14px;
                 padding-bottom: 2px;
             }}
             QFrame#seriesSettingsHeaderLine {{
@@ -1261,8 +1286,8 @@ class SeriesSettingsDialog(QtWidgets.QDialog):
                 top: 0;
             }}
             QTabBar::tab {{
-                min-width: 92px;
-                min-height: 42px;
+                min-width: 104px;
+                min-height: 46px;
                 padding: 0 18px;
                 margin-right: 6px;
                 border: 1px solid {border};
@@ -1271,6 +1296,7 @@ class SeriesSettingsDialog(QtWidgets.QDialog):
                 border-top-right-radius: 7px;
                 background: {panel_alt};
                 color: {sub_text};
+                font-size: 14px;
             }}
             QTabBar::tab:selected {{
                 background: {section_bg};
@@ -1285,26 +1311,31 @@ class SeriesSettingsDialog(QtWidgets.QDialog):
             QWidget#seriesSettingsTabContent {{
                 background: transparent;
             }}
-            QGroupBox#seriesSettingsSection {{
+            QFrame#seriesSettingsSection {{
                 background: {section_bg};
                 border: 1px solid {border};
                 border-radius: 7px;
-                margin-top: 12px;
-                color: {text};
-                font-weight: 700;
             }}
-            QGroupBox#seriesSettingsSection::title {{
-                subcontrol-origin: margin;
-                left: 14px;
-                padding: 1px 8px;
-                color: {text};
-                background: {input_bg};
-                border-radius: 3px;
+            QFrame#seriesSettingsSectionHeader,
+            QWidget#seriesSettingsSectionBody {{
+                background: transparent;
+                border: none;
+            }}
+            QFrame#seriesSettingsSectionAccent {{
+                background: {accent};
+                border-radius: 2px;
+            }}
+            QLabel#seriesSettingsSectionTitle {{
+                color: {accent};
+                background: transparent;
+                font-size: 16px;
+                font-weight: 700;
             }}
             QLabel#seriesSettingsSectionNote {{
                 color: {sub_text};
-                background: {row_bg};
-                padding: 5px 7px;
+                background: transparent;
+                font-size: 13px;
+                padding: 0 14px 4px 28px;
                 border: none;
             }}
             QLabel {{
@@ -1312,29 +1343,31 @@ class SeriesSettingsDialog(QtWidgets.QDialog):
             }}
             QFrame#seriesSettingsFieldRow {{
                 background: {row_bg};
-                border: none;
+                border-left: 2px solid {row_border};
                 border-radius: 4px;
-                min-height: 34px;
+                min-height: 39px;
             }}
             QLabel#seriesSettingsFieldLabel {{
-                background: {label_bg};
                 color: {text};
+                background: transparent;
+                font-size: 14px;
                 font-weight: 700;
-                padding: 7px 8px;
+                padding: 9px 8px;
                 border: none;
             }}
             QFrame#seriesSettingsCheckRow {{
                 background: {row_bg};
-                border: none;
+                border-left: 2px solid {row_border};
                 border-radius: 4px;
-                min-height: 24px;
+                min-height: 31px;
             }}
             QComboBox, QSpinBox {{
-                min-height: 30px;
+                min-height: 34px;
                 border-radius: 6px;
                 border: 1px solid {border};
                 background: {input_bg};
                 color: {text};
+                font-size: 14px;
                 padding: 0 8px;
                 selection-background-color: {accent_soft};
             }}
@@ -1351,6 +1384,7 @@ class SeriesSettingsDialog(QtWidgets.QDialog):
             }}
             QCheckBox {{
                 color: {text};
+                font-size: 14px;
                 spacing: 8px;
             }}
             QCheckBox::indicator {{
