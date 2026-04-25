@@ -25,6 +25,7 @@ from modules.ocr.selection import (
 )
 from modules.rendering.render import (
     build_render_rects_for_block,
+    build_text_item_layout_geometry,
     describe_render_text_markup,
     describe_render_text_sanitization,
     get_best_render_area,
@@ -905,6 +906,15 @@ class StageBatchedProcessor(BatchProcessor):
                 render_normalization.replacements
             ) + list(render_markup.replacements)
             source_rect, block_anchor = build_render_rects_for_block(blk)
+            vertical_alignment = self.main_page.button_to_vertical_alignment.get(
+                render_settings.vertical_alignment_id,
+                VERTICAL_ALIGNMENT_TOP,
+            )
+            position, item_width, item_height = build_text_item_layout_geometry(
+                source_rect,
+                rendered_height,
+                vertical_alignment,
+            )
             outline_color = QColor(render_settings.outline_color) if render_settings.outline else None
             text_props = TextItemProperties(
                 text=blk._render_html,
@@ -918,18 +928,15 @@ class StageBatchedProcessor(BatchProcessor):
                 bold=render_settings.bold,
                 italic=render_settings.italic,
                 underline=render_settings.underline,
-                position=(x1, y1),
+                position=position,
                 rotation=blk.angle,
                 scale=1.0,
                 transform_origin=blk.tr_origin_point,
-                width=rendered_width,
-                height=rendered_height,
+                width=item_width,
+                height=item_height,
                 direction=render_settings.direction,
                 vertical=vertical,
-                vertical_alignment=self.main_page.button_to_vertical_alignment.get(
-                    render_settings.vertical_alignment_id,
-                    VERTICAL_ALIGNMENT_TOP,
-                ),
+                vertical_alignment=vertical_alignment,
                 source_rect=source_rect,
                 block_anchor=block_anchor,
                 selection_outlines=[

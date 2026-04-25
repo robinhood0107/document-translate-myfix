@@ -18,6 +18,7 @@ from modules.utils.textblock import TextBlock
 from modules.rendering.render import (
     TextRenderingSettings,
     build_render_rects_for_block,
+    build_text_item_layout_geometry,
     describe_render_text_markup,
     describe_render_text_sanitization,
     get_best_render_area,
@@ -32,7 +33,6 @@ from modules.utils.render_style_policy import (
     VERTICAL_ALIGNMENT_TOP,
     build_rect_tuple,
     coerce_vertical_alignment,
-    compute_vertical_aligned_y,
     resolve_render_text_color,
 )
 from modules.utils.translator_utils import format_translations
@@ -186,14 +186,11 @@ class TextController:
             QColor(render_settings.outline_color) if render_settings.outline else None
         )
         vertical = is_vertical_block(blk, target_lang_code)
-        position_y = source_rect[1]
-        if rendered_height is not None:
-            position_y = compute_vertical_aligned_y(
-                source_rect[1],
-                source_rect[3],
-                rendered_height,
-                vertical_alignment,
-            )
+        position, item_width, item_height = build_text_item_layout_geometry(
+            source_rect,
+            rendered_height,
+            vertical_alignment,
+        )
 
         return TextItemProperties(
             text=text,
@@ -208,10 +205,10 @@ class TextController:
             italic=render_settings.italic,
             underline=render_settings.underline,
             direction=render_settings.direction,
-            position=(source_rect[0], position_y),
+            position=position,
             rotation=blk.angle,
-            width=rendered_width,
-            height=rendered_height,
+            width=item_width,
+            height=item_height,
             vertical=vertical,
             vertical_alignment=vertical_alignment,
             source_rect=source_rect,

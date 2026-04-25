@@ -23,6 +23,10 @@ from modules.utils.text_normalization import (
     RENDER_NORMALIZABLE_GLYPHS,
     canonicalize_ellipsis_runs,
 )
+from modules.utils.render_style_policy import (
+    VERTICAL_ALIGNMENT_TOP,
+    compute_vertical_aligned_y,
+)
 from modules.rendering.rich_text import build_styled_render_html
 
 from dataclasses import dataclass
@@ -442,6 +446,24 @@ def build_render_rects_for_block(blk: TextBlock) -> tuple[tuple[float, float, fl
     anchor_xyxy = _current_anchor_xyxy(blk)
     block_anchor = _xyxy_to_rect_tuple(anchor_xyxy)
     return source_rect, block_anchor
+
+
+def build_text_item_layout_geometry(
+    source_rect: tuple[float, float, float, float],
+    rendered_height: float | None = None,
+    vertical_alignment: str | None = VERTICAL_ALIGNMENT_TOP,
+) -> tuple[tuple[float, float], float, float | None]:
+    """Return text item geometry that keeps paragraph alignment relative to source_rect."""
+    source_x, source_y, source_width, source_height = [float(v) for v in source_rect]
+    position_y = source_y
+    if rendered_height is not None:
+        position_y = compute_vertical_aligned_y(
+            source_y,
+            source_height,
+            rendered_height,
+            vertical_alignment,
+        )
+    return (source_x, position_y), source_width, rendered_height
 
 
 def _reset_render_area_metadata(blk: TextBlock) -> None:
