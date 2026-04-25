@@ -159,6 +159,8 @@ class SeriesWorkspaceRuntimeTests(unittest.TestCase):
         self.assertTrue(self.widget.add_folder_button.isEnabled())
         self.assertTrue(self.widget.quick_settings.source_lang_combo.isEnabled())
         self.assertTrue(self.widget.quick_settings.series_settings_button.isEnabled())
+        self.assertIn("Design", self.widget.quick_settings.series_settings_button.text())
+        self.assertIn("render", self.widget.quick_settings.series_settings_button.toolTip().lower())
         self.assertTrue(self.widget.back_button.isEnabled())
         self.assertFalse(self.widget.forward_button.isEnabled())
         self.assertTrue(self.widget.tree_button.isEnabled())
@@ -185,6 +187,7 @@ class SeriesWorkspaceRuntimeTests(unittest.TestCase):
     def test_series_settings_dialog_round_trips_render_and_export_settings(self) -> None:
         dialog = SeriesSettingsDialog()
         self.addCleanup(dialog.deleteLater)
+        self.assertEqual(dialog.windowTitle(), "Series Design / Global Settings")
         dialog.configure_options(
             languages=[("Japanese", "Japanese"), ("Korean", "Korean")],
             ocr_modes=[("best_local", "Optimal")],
@@ -216,11 +219,16 @@ class SeriesWorkspaceRuntimeTests(unittest.TestCase):
                     "min_font_size": 5,
                     "max_font_size": 42,
                     "line_spacing": "1.2",
+                    "color": "#123456",
+                    "force_font_color": True,
                     "alignment_id": 2,
                     "vertical_alignment_id": 1,
                     "outline": True,
+                    "outline_color": "#abcdef",
                     "outline_width": "3.0",
                     "bold": True,
+                    "italic": True,
+                    "underline": True,
                     "upper_case": True,
                 },
                 "export_settings": {
@@ -229,7 +237,13 @@ class SeriesWorkspaceRuntimeTests(unittest.TestCase):
                     "automatic_output_archive_format": "zip",
                     "automatic_output_archive_image_format": "png",
                     "automatic_output_archive_compression_level": 8,
+                    "export_raw_text": True,
+                    "export_translated_text": True,
+                    "export_inpainted_image": True,
+                    "export_detector_overlay": True,
                     "export_raw_mask": True,
+                    "export_mask_overlay": True,
+                    "export_cleanup_mask_delta": True,
                     "export_debug_metadata": True,
                 },
             },
@@ -237,16 +251,34 @@ class SeriesWorkspaceRuntimeTests(unittest.TestCase):
 
         series_settings, global_settings = dialog.payload()
 
+        self.assertEqual(dialog.tabs.count(), 4)
+        self.assertEqual(dialog.render_typography_group.title(), "Typography")
+        self.assertEqual(dialog.render_alignment_group.title(), "Alignment")
+        self.assertEqual(dialog.export_output_group.title(), "Final Output")
+        self.assertEqual(dialog.export_text_group.title(), "Text Exports")
+        self.assertEqual(dialog.export_debug_group.title(), "Debug Artifacts")
         self.assertEqual(series_settings["queue_failure_policy"], "retry")
         self.assertEqual(global_settings["source_language"], "Japanese")
         self.assertEqual(global_settings["translator"], "Custom Local Server(Gemma)")
         self.assertEqual(global_settings["render_settings"]["font_family"], "Ownglyph gumama3")
         self.assertEqual(global_settings["render_settings"]["max_font_size"], 42)
+        self.assertEqual(global_settings["render_settings"]["color"], "#123456")
+        self.assertTrue(global_settings["render_settings"]["force_font_color"])
         self.assertEqual(global_settings["render_settings"]["alignment_id"], 2)
+        self.assertEqual(global_settings["render_settings"]["vertical_alignment_id"], 1)
         self.assertTrue(global_settings["render_settings"]["bold"])
+        self.assertTrue(global_settings["render_settings"]["italic"])
+        self.assertTrue(global_settings["render_settings"]["underline"])
         self.assertTrue(global_settings["render_settings"]["upper_case"])
+        self.assertEqual(global_settings["render_settings"]["outline_color"], "#abcdef")
         self.assertEqual(global_settings["export_settings"]["automatic_output_image_format"], "png")
+        self.assertTrue(global_settings["export_settings"]["export_raw_text"])
+        self.assertTrue(global_settings["export_settings"]["export_translated_text"])
+        self.assertTrue(global_settings["export_settings"]["export_inpainted_image"])
+        self.assertTrue(global_settings["export_settings"]["export_detector_overlay"])
         self.assertTrue(global_settings["export_settings"]["export_raw_mask"])
+        self.assertTrue(global_settings["export_settings"]["export_mask_overlay"])
+        self.assertTrue(global_settings["export_settings"]["export_cleanup_mask_delta"])
         self.assertTrue(global_settings["export_settings"]["export_debug_metadata"])
 
     def test_paused_queue_shows_resume_and_unlocks_reorder(self) -> None:

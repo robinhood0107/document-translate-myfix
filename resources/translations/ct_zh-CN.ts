@@ -2293,7 +2293,11 @@ These values are copied into new series projects and can be adjusted per series.
 <context>
     <name>SeriesSettingsDialog</name>
     <message>
-        <source>Series Settings</source>
+        <source>Series Design / Global Settings</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>These defaults are applied when the series queue runs. Child projects keep their own page-level edits.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
@@ -2313,6 +2317,14 @@ These values are copied into new series projects and can be adjusted per series.
         <translation type="unfinished"></translation>
     </message>
     <message>
+        <source>Languages</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Set the source and target language for every queued child project.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
         <source>OCR:</source>
         <translation type="unfinished"></translation>
     </message>
@@ -2322,6 +2334,14 @@ These values are copied into new series projects and can be adjusted per series.
     </message>
     <message>
         <source>Workflow mode:</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Pipeline Runtime</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Choose the queue workflow and the runtime services it should use.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
@@ -2389,7 +2409,23 @@ These values are copied into new series projects and can be adjusted per series.
         <translation type="unfinished"></translation>
     </message>
     <message>
+        <source>Typography</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Control the base font and automatic font-fit limits for generated text.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
         <source>Text color:</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Color</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Use a fixed text color when the queue renders translated pages.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
@@ -2401,11 +2437,27 @@ These values are copied into new series projects and can be adjusted per series.
         <translation type="unfinished"></translation>
     </message>
     <message>
+        <source>Alignment</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Align text inside each detected text box.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
         <source>Style:</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
         <source>Outline:</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Style and Outline</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Apply emphasis and outline defaults across the series queue.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
@@ -2433,35 +2485,59 @@ These values are copied into new series projects and can be adjusted per series.
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>Export Raw Text</source>
-        <translation type="unfinished">导出原始文本</translation>
-    </message>
-    <message>
-        <source>Export Translated Text</source>
+        <source>Final Output</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>Export Inpainted Image</source>
-        <translation type="unfinished">导出修复后的图片</translation>
-    </message>
-    <message>
-        <source>Export Detector Overlay</source>
+        <source>Choose where the completed translated result is saved.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>Export Raw Mask</source>
+        <source>Raw source text</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>Export Mask Overlay</source>
+        <source>Translated text</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>Export Cleanup Mask Delta</source>
+        <source>Text Exports</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>Export Debug Metadata</source>
+        <source>Write OCR and translation text files next to the queue output.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Inpainted image</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Detector overlay</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Raw inpaint mask</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Mask overlay</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Cleanup mask delta</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Debug metadata</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Debug Artifacts</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Only checked debug artifacts are created. When unchecked, the status panel logs that preview generation is disabled.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
@@ -3881,7 +3957,11 @@ It may have already been moved, renamed, or deleted.
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>Series Settings…</source>
+        <source>Edit queue, pipeline, render, export, and debug defaults for this series.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Series Design / Global Settings…</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
