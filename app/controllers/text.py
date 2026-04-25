@@ -233,7 +233,7 @@ class TextController:
         text_item.vertical_alignment = coerce_vertical_alignment(
             text_props.vertical_alignment
         )
-        text_item.set_plain_text(text)
+        text_item.set_text(text, text_props.width or text_item.boundingRect().width())
         text_item.set_direction(text_props.direction)
         text_item.set_vertical(bool(text_props.vertical))
         text_item.set_vertical_alignment(text_props.vertical_alignment)
@@ -307,7 +307,18 @@ class TextController:
 
             if is_no_space_lang(trg_lng_cd):
                 wrapped = wrapped.replace(" ", "")
-            render_markup = describe_render_text_markup(wrapped)
+            render_markup = describe_render_text_markup(
+                wrapped,
+                font_family=render_settings.font_family,
+                font_size=font_size,
+                text_color=self._resolve_font_color(original_blk, render_settings),
+                alignment=self.main.button_to_alignment[render_settings.alignment_id],
+                line_spacing=float(render_settings.line_spacing),
+                bold=render_settings.bold,
+                italic=render_settings.italic,
+                underline=render_settings.underline,
+                direction=render_settings.direction,
+            )
             original_blk._render_text = str(wrapped or "")
             original_blk._render_html = str(
                 render_markup.html_text if render_markup.html_applied else wrapped or ""
@@ -747,7 +758,7 @@ class TextController:
             if text_item and text_item in self.main.image_viewer._scene.items():
                 if html is not None:
                     if text_item.document().toHtml() != html:
-                        text_item.document().setHtml(html)
+                        text_item.set_text(html, text_item.boundingRect().width())
                 elif text_item.toPlainText() != text:
                     text_item.set_plain_text(text)
             if blk is None:
@@ -1196,7 +1207,18 @@ class TextController:
                         )
                         if is_no_space_lang(trg_lng_cd):
                             wrapped = wrapped.replace(" ", "")
-                        render_markup = describe_render_text_markup(wrapped)
+                        render_markup = describe_render_text_markup(
+                            wrapped,
+                            font_family=font_family,
+                            font_size=font_size,
+                            text_color=self._resolve_font_color(blk, render_settings),
+                            alignment=alignment,
+                            line_spacing=line_spacing,
+                            bold=bold,
+                            italic=italic,
+                            underline=underline,
+                            direction=direction,
+                        )
                         blk._render_text = str(wrapped or "")
                         blk._render_html = str(
                             render_markup.html_text if render_markup.html_applied else wrapped or ""

@@ -22,6 +22,7 @@ from modules.utils.text_normalization import (
     RENDER_NORMALIZABLE_GLYPHS,
     canonicalize_ellipsis_runs,
 )
+from modules.rendering.rich_text import build_styled_render_html
 
 from dataclasses import dataclass
 
@@ -216,12 +217,51 @@ def describe_render_text_sanitization(
     )
 
 
-def describe_render_text_markup(text: str) -> RenderMarkupResult:
+def describe_render_text_markup(
+    text: str,
+    *,
+    font_family: str = "",
+    font_size: float | None = None,
+    text_color=None,
+    alignment: Qt.AlignmentFlag = Qt.AlignmentFlag.AlignCenter,
+    line_spacing: float = 1.0,
+    bold: bool = False,
+    italic: bool = False,
+    underline: bool = False,
+    direction: Qt.LayoutDirection = Qt.LayoutDirection.LeftToRight,
+) -> RenderMarkupResult:
     if not text:
         return RenderMarkupResult("", "", False, [], "", [])
 
     raw_text = str(text or "")
     fallback_font_family = resolve_render_symbol_fallback_font_family()
+    use_full_html = font_size is not None
+    if use_full_html:
+        styled = build_styled_render_html(
+            raw_text,
+            font_family=font_family,
+            font_size=float(font_size or 20),
+            text_color=text_color,
+            alignment=alignment,
+            line_spacing=float(line_spacing or 1.0),
+            bold=bold,
+            italic=italic,
+            underline=underline,
+            direction=direction,
+            fallback_font_family=fallback_font_family,
+        )
+        reasons = ["styled-render-html"]
+        if styled.replacements:
+            reasons.append("symbol-fallback-font")
+        return RenderMarkupResult(
+            text=raw_text,
+            html_text=styled.html_text,
+            html_applied=True,
+            reasons=reasons,
+            fallback_font_family=styled.fallback_font_family,
+            replacements=styled.replacements,
+        )
+
     if not fallback_font_family:
         return RenderMarkupResult(raw_text, raw_text, False, [], "", [])
 
@@ -608,7 +648,17 @@ def manual_wrap(
             min_font_size,
             vertical
         )
-        render_markup = describe_render_text_markup(translation)
+        render_markup = describe_render_text_markup(
+            translation,
+            font_family=font_family,
+            font_size=font_size,
+            alignment=alignment,
+            line_spacing=line_spacing,
+            bold=bold,
+            italic=italic,
+            underline=underline,
+            direction=direction,
+        )
         blk._render_text = str(translation or "")
         blk._render_html = str(
             render_markup.html_text if render_markup.html_applied else translation or ""

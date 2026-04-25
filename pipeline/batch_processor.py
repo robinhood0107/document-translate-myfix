@@ -1626,7 +1626,24 @@ class BatchProcessor:
                 # Language-specific formatting for state storage
                 if is_no_space_lang(trg_lng_cd):
                     translation = translation.replace(' ', '')
-                render_markup = describe_render_text_markup(translation)
+                font_color = resolve_render_text_color(
+                    blk.font_color,
+                    setting_font_color,
+                    render_settings.force_font_color,
+                    render_settings.smart_global_apply_all,
+                )
+                render_markup = describe_render_text_markup(
+                    translation,
+                    font_family=font,
+                    font_size=font_size,
+                    text_color=font_color,
+                    alignment=alignment,
+                    line_spacing=line_spacing,
+                    bold=bold,
+                    italic=italic,
+                    underline=underline,
+                    direction=direction,
+                )
                 blk._render_text = str(translation or "")
                 blk._render_html = str(
                     render_markup.html_text if render_markup.html_applied else translation or ""
@@ -1650,13 +1667,6 @@ class BatchProcessor:
                 if image_path == file_on_display:
                     self.main_page.blk_rendered.emit(translation, font_size, blk, image_path)
 
-                # Smart Color Override
-                font_color = resolve_render_text_color(
-                    blk.font_color,
-                    setting_font_color,
-                    render_settings.force_font_color,
-                    render_settings.smart_global_apply_all,
-                )
                 source_rect = build_rect_tuple(x1, y1, block_width, block_height)
 
                 # Use TextItemProperties for consistent text item creation
