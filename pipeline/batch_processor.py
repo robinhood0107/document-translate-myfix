@@ -48,11 +48,11 @@ from modules.utils.automatic_output import (
 )
 from modules.utils.render_style_policy import (
     VERTICAL_ALIGNMENT_TOP,
-    build_rect_tuple,
     resolve_render_text_color,
 )
 from modules.utils.translator_utils import get_raw_translation, get_raw_text, format_translations
 from modules.rendering.render import (
+    build_render_rects_for_block,
     describe_render_text_sanitization,
     describe_render_text_markup,
     get_best_render_area,
@@ -1667,7 +1667,7 @@ class BatchProcessor:
                 if image_path == file_on_display:
                     self.main_page.blk_rendered.emit(translation, font_size, blk, image_path)
 
-                source_rect = build_rect_tuple(x1, y1, block_width, block_height)
+                source_rect, block_anchor = build_render_rects_for_block(blk)
 
                 # Use TextItemProperties for consistent text item creation
                 text_props = TextItemProperties(
@@ -1692,7 +1692,7 @@ class BatchProcessor:
                     vertical=vertical,
                     vertical_alignment=vertical_alignment,
                     source_rect=source_rect,
-                    block_anchor=source_rect,
+                    block_anchor=block_anchor,
                     selection_outlines=[
                         OutlineInfo(0, len(translation), 
                         outline_color, 
@@ -1708,6 +1708,18 @@ class BatchProcessor:
                 )
                 text_item_state["render_fallback_font_family"] = str(
                     render_markup.fallback_font_family or ""
+                )
+                text_item_state["render_area_source"] = str(
+                    getattr(blk, "_render_area_source", "text_bbox") or "text_bbox"
+                )
+                text_item_state["render_source_xyxy"] = list(
+                    getattr(blk, "_render_area_xyxy", []) or []
+                )
+                text_item_state["render_anchor_xyxy"] = list(
+                    getattr(blk, "_render_original_xyxy", []) or []
+                )
+                text_item_state["render_bubble_xyxy"] = list(
+                    getattr(blk, "_render_bubble_xyxy", []) or []
                 )
                 text_item_state["render_normalization_applied"] = bool(
                     blk._render_normalization_applied

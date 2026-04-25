@@ -24,6 +24,7 @@ from modules.ocr.selection import (
     resolve_stage_batched_ocr_policy,
 )
 from modules.rendering.render import (
+    build_render_rects_for_block,
     describe_render_text_markup,
     describe_render_text_sanitization,
     get_best_render_area,
@@ -49,7 +50,6 @@ from modules.utils.ocr_quality import summarize_ocr_quality
 from modules.utils.pipeline_config import get_config, get_inpainter_runtime, inpaint_map
 from modules.utils.render_style_policy import (
     VERTICAL_ALIGNMENT_TOP,
-    build_rect_tuple,
     resolve_render_text_color,
 )
 from modules.utils.textblock import sort_blk_list
@@ -904,7 +904,7 @@ class StageBatchedProcessor(BatchProcessor):
             blk._render_normalization_replacements = list(
                 render_normalization.replacements
             ) + list(render_markup.replacements)
-            source_rect = build_rect_tuple(x1, y1, block_width, block_height)
+            source_rect, block_anchor = build_render_rects_for_block(blk)
             outline_color = QColor(render_settings.outline_color) if render_settings.outline else None
             text_props = TextItemProperties(
                 text=blk._render_html,
@@ -931,7 +931,7 @@ class StageBatchedProcessor(BatchProcessor):
                     VERTICAL_ALIGNMENT_TOP,
                 ),
                 source_rect=source_rect,
-                block_anchor=source_rect,
+                block_anchor=block_anchor,
                 selection_outlines=[
                     OutlineInfo(
                         0,
@@ -948,6 +948,18 @@ class StageBatchedProcessor(BatchProcessor):
             text_item_state["render_html_applied"] = bool(render_markup.html_applied)
             text_item_state["render_fallback_font_family"] = str(
                 render_markup.fallback_font_family or ""
+            )
+            text_item_state["render_area_source"] = str(
+                getattr(blk, "_render_area_source", "text_bbox") or "text_bbox"
+            )
+            text_item_state["render_source_xyxy"] = list(
+                getattr(blk, "_render_area_xyxy", []) or []
+            )
+            text_item_state["render_anchor_xyxy"] = list(
+                getattr(blk, "_render_original_xyxy", []) or []
+            )
+            text_item_state["render_bubble_xyxy"] = list(
+                getattr(blk, "_render_bubble_xyxy", []) or []
             )
             text_item_state["render_normalization_applied"] = bool(
                 blk._render_normalization_applied
