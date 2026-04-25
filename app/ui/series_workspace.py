@@ -891,8 +891,8 @@ class SeriesSettingsDialog(QtWidgets.QDialog):
         super().__init__(parent)
         self.setWindowTitle(self.tr("Series Design / Global Settings"))
         self.setObjectName("seriesSettingsDialog")
-        self.resize(760, 680)
-        self.setMinimumSize(700, 560)
+        self.resize(940, 860)
+        self.setMinimumSize(820, 640)
         self._output_options: dict[str, list[tuple[str, str]]] = {}
 
         root = QtWidgets.QVBoxLayout(self)
@@ -911,6 +911,11 @@ class SeriesSettingsDialog(QtWidgets.QDialog):
         subtitle.setWordWrap(True)
         root.addWidget(title)
         root.addWidget(subtitle)
+        self.header_line = QtWidgets.QFrame(self)
+        self.header_line.setObjectName("seriesSettingsHeaderLine")
+        self.header_line.setFrameShape(QtWidgets.QFrame.Shape.HLine)
+        self.header_line.setFrameShadow(QtWidgets.QFrame.Shadow.Plain)
+        root.addWidget(self.header_line)
 
         self.tabs = QtWidgets.QTabWidget(self)
         self.tabs.setObjectName("seriesSettingsTabs")
@@ -950,22 +955,22 @@ class SeriesSettingsDialog(QtWidgets.QDialog):
         self.use_gpu_checkbox = QtWidgets.QCheckBox(self.tr("Use GPU"), tab)
         self.use_gpu_checkbox.setChecked(True)
 
-        language_form = QtWidgets.QFormLayout()
-        self._configure_form(language_form)
-        language_form.addRow(self.tr("Source language:"), self.source_lang_combo)
-        language_form.addRow(self.tr("Target language:"), self.target_lang_combo)
+        language_form = self._make_rows_layout(
+            self._make_field_row(self.tr("Source language:"), self.source_lang_combo),
+            self._make_field_row(self.tr("Target language:"), self.target_lang_combo),
+        )
         self.pipeline_language_group = self._make_section(
             self.tr("Languages"),
             self.tr("Set the source and target language for every queued child project."),
             language_form,
         )
 
-        runtime_form = QtWidgets.QFormLayout()
-        self._configure_form(runtime_form)
-        runtime_form.addRow(self.tr("OCR:"), self.ocr_combo)
-        runtime_form.addRow(self.tr("Translator:"), self.translator_combo)
-        runtime_form.addRow(self.tr("Workflow mode:"), self.workflow_combo)
-        runtime_form.addRow("", self.use_gpu_checkbox)
+        runtime_form = self._make_rows_layout(
+            self._make_field_row(self.tr("OCR:"), self.ocr_combo),
+            self._make_field_row(self.tr("Translator:"), self.translator_combo),
+            self._make_field_row(self.tr("Workflow mode:"), self.workflow_combo),
+            self._make_check_row(self.use_gpu_checkbox),
+        )
         self.pipeline_runtime_group = self._make_section(
             self.tr("Pipeline Runtime"),
             self.tr("Choose the queue workflow and the runtime services it should use."),
@@ -1032,41 +1037,41 @@ class SeriesSettingsDialog(QtWidgets.QDialog):
         outline_layout.addWidget(self.outline_width_combo)
         outline_layout.addStretch(1)
 
-        typography_form = QtWidgets.QFormLayout()
-        self._configure_form(typography_form)
-        typography_form.addRow(self.tr("Font:"), self.font_combo)
-        typography_form.addRow(self.tr("Min font size:"), self.min_font_spin)
-        typography_form.addRow(self.tr("Max font size:"), self.max_font_spin)
-        typography_form.addRow(self.tr("Line spacing:"), self.line_spacing_combo)
+        typography_form = self._make_rows_layout(
+            self._make_field_row(self.tr("Font:"), self.font_combo),
+            self._make_field_row(self.tr("Min font size:"), self.min_font_spin),
+            self._make_field_row(self.tr("Max font size:"), self.max_font_spin),
+            self._make_field_row(self.tr("Line spacing:"), self.line_spacing_combo),
+        )
         self.render_typography_group = self._make_section(
             self.tr("Typography"),
             self.tr("Control the base font and automatic font-fit limits for generated text."),
             typography_form,
         )
 
-        color_form = QtWidgets.QFormLayout()
-        self._configure_form(color_form)
-        color_form.addRow(self.tr("Text color:"), color_row)
+        color_form = self._make_rows_layout(
+            self._make_field_row(self.tr("Text color:"), color_row),
+        )
         self.render_color_group = self._make_section(
             self.tr("Color"),
             self.tr("Use a fixed text color when the queue renders translated pages."),
             color_form,
         )
 
-        alignment_form = QtWidgets.QFormLayout()
-        self._configure_form(alignment_form)
-        alignment_form.addRow(self.tr("Horizontal:"), self.horizontal_alignment_combo)
-        alignment_form.addRow(self.tr("Vertical:"), self.vertical_alignment_combo)
+        alignment_form = self._make_rows_layout(
+            self._make_field_row(self.tr("Horizontal:"), self.horizontal_alignment_combo),
+            self._make_field_row(self.tr("Vertical:"), self.vertical_alignment_combo),
+        )
         self.render_alignment_group = self._make_section(
             self.tr("Alignment"),
             self.tr("Align text inside each detected text box."),
             alignment_form,
         )
 
-        style_form = QtWidgets.QFormLayout()
-        self._configure_form(style_form)
-        style_form.addRow(self.tr("Style:"), style_row)
-        style_form.addRow(self.tr("Outline:"), outline_row)
+        style_form = self._make_rows_layout(
+            self._make_field_row(self.tr("Style:"), style_row),
+            self._make_field_row(self.tr("Outline:"), outline_row),
+        )
         self.render_style_group = self._make_section(
             self.tr("Style and Outline"),
             self.tr("Apply emphasis and outline defaults across the series queue."),
@@ -1082,19 +1087,19 @@ class SeriesSettingsDialog(QtWidgets.QDialog):
     def _build_export_tab(self) -> None:
         tab, layout = self._make_scroll_tab()
 
-        form = QtWidgets.QFormLayout()
-        self._configure_form(form)
         self.output_target_combo = QtWidgets.QComboBox(tab)
         self.output_image_format_combo = QtWidgets.QComboBox(tab)
         self.output_archive_format_combo = QtWidgets.QComboBox(tab)
         self.output_archive_image_format_combo = QtWidgets.QComboBox(tab)
         self.output_archive_level_spin = QtWidgets.QSpinBox(tab)
         self.output_archive_level_spin.setRange(0, 9)
-        form.addRow(self.tr("Output target:"), self.output_target_combo)
-        form.addRow(self.tr("Image format:"), self.output_image_format_combo)
-        form.addRow(self.tr("Archive format:"), self.output_archive_format_combo)
-        form.addRow(self.tr("Archive image format:"), self.output_archive_image_format_combo)
-        form.addRow(self.tr("Archive compression:"), self.output_archive_level_spin)
+        form = self._make_rows_layout(
+            self._make_field_row(self.tr("Output target:"), self.output_target_combo),
+            self._make_field_row(self.tr("Image format:"), self.output_image_format_combo),
+            self._make_field_row(self.tr("Archive format:"), self.output_archive_format_combo),
+            self._make_field_row(self.tr("Archive image format:"), self.output_archive_image_format_combo),
+            self._make_field_row(self.tr("Archive compression:"), self.output_archive_level_spin),
+        )
         self.export_output_group = self._make_section(
             self.tr("Final Output"),
             self.tr("Choose where the completed translated result is saved."),
@@ -1103,10 +1108,10 @@ class SeriesSettingsDialog(QtWidgets.QDialog):
 
         self.export_raw_text_checkbox = QtWidgets.QCheckBox(self.tr("Raw source text"), tab)
         self.export_translated_text_checkbox = QtWidgets.QCheckBox(self.tr("Translated text"), tab)
-        text_exports_layout = QtWidgets.QVBoxLayout()
-        text_exports_layout.setSpacing(8)
-        text_exports_layout.addWidget(self.export_raw_text_checkbox)
-        text_exports_layout.addWidget(self.export_translated_text_checkbox)
+        text_exports_layout = self._make_rows_layout(
+            self._make_check_row(self.export_raw_text_checkbox),
+            self._make_check_row(self.export_translated_text_checkbox),
+        )
         self.export_text_group = self._make_section(
             self.tr("Text Exports"),
             self.tr("Write OCR and translation text files next to the queue output."),
@@ -1120,6 +1125,7 @@ class SeriesSettingsDialog(QtWidgets.QDialog):
         self.export_cleanup_mask_delta_checkbox = QtWidgets.QCheckBox(self.tr("Cleanup mask delta"), tab)
         self.export_debug_metadata_checkbox = QtWidgets.QCheckBox(self.tr("Debug metadata"), tab)
         debug_layout = QtWidgets.QVBoxLayout()
+        debug_layout.setContentsMargins(0, 0, 0, 0)
         debug_layout.setSpacing(8)
         for checkbox in (
             self.export_inpainted_image_checkbox,
@@ -1129,7 +1135,7 @@ class SeriesSettingsDialog(QtWidgets.QDialog):
             self.export_cleanup_mask_delta_checkbox,
             self.export_debug_metadata_checkbox,
         ):
-            debug_layout.addWidget(checkbox)
+            debug_layout.addWidget(self._make_check_row(checkbox))
         self.export_debug_group = self._make_section(
             self.tr("Debug Artifacts"),
             self.tr(
@@ -1147,14 +1153,47 @@ class SeriesSettingsDialog(QtWidgets.QDialog):
         content = QtWidgets.QWidget(self)
         content.setObjectName("seriesSettingsTabContent")
         layout = QtWidgets.QVBoxLayout(content)
-        layout.setContentsMargins(12, 12, 12, 12)
-        layout.setSpacing(12)
+        layout.setContentsMargins(12, 20, 12, 12)
+        layout.setSpacing(22)
         scroll = QtWidgets.QScrollArea(self)
         scroll.setObjectName("seriesSettingsScroll")
         scroll.setWidgetResizable(True)
         scroll.setFrameShape(QtWidgets.QFrame.Shape.NoFrame)
         scroll.setWidget(content)
         return scroll, layout
+
+    def _make_rows_layout(self, *rows: QtWidgets.QWidget) -> QtWidgets.QVBoxLayout:
+        layout = QtWidgets.QVBoxLayout()
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(10)
+        for row in rows:
+            layout.addWidget(row)
+        return layout
+
+    def _make_field_row(self, label_text: str, widget: QtWidgets.QWidget) -> QtWidgets.QWidget:
+        row = QtWidgets.QFrame(self)
+        row.setObjectName("seriesSettingsFieldRow")
+        row_layout = QtWidgets.QHBoxLayout(row)
+        row_layout.setContentsMargins(0, 0, 0, 0)
+        row_layout.setSpacing(12)
+        label = QtWidgets.QLabel(label_text, row)
+        label.setObjectName("seriesSettingsFieldLabel")
+        label.setAlignment(QtCore.Qt.AlignmentFlag.AlignLeft | QtCore.Qt.AlignmentFlag.AlignVCenter)
+        label.setFixedWidth(132)
+        widget.setSizePolicy(QtWidgets.QSizePolicy.Policy.Expanding, QtWidgets.QSizePolicy.Policy.Fixed)
+        row_layout.addWidget(label, 0)
+        row_layout.addWidget(widget, 1)
+        return row
+
+    def _make_check_row(self, checkbox: QtWidgets.QCheckBox) -> QtWidgets.QWidget:
+        row = QtWidgets.QFrame(self)
+        row.setObjectName("seriesSettingsCheckRow")
+        row_layout = QtWidgets.QHBoxLayout(row)
+        row_layout.setContentsMargins(8, 2, 8, 2)
+        row_layout.setSpacing(0)
+        checkbox.setSizePolicy(QtWidgets.QSizePolicy.Policy.Expanding, QtWidgets.QSizePolicy.Policy.Fixed)
+        row_layout.addWidget(checkbox, 1)
+        return row
 
     def _make_section(
         self,
@@ -1165,8 +1204,8 @@ class SeriesSettingsDialog(QtWidgets.QDialog):
         group = QtWidgets.QGroupBox(title, self)
         group.setObjectName("seriesSettingsSection")
         layout = QtWidgets.QVBoxLayout(group)
-        layout.setContentsMargins(14, 20, 14, 14)
-        layout.setSpacing(8)
+        layout.setContentsMargins(14, 22, 14, 14)
+        layout.setSpacing(10)
         if note:
             note_label = QtWidgets.QLabel(note, group)
             note_label.setObjectName("seriesSettingsSectionNote")
@@ -1189,6 +1228,10 @@ class SeriesSettingsDialog(QtWidgets.QDialog):
         panel = dayu_theme.background_in_color or "#3a3a3a"
         panel_alt = dayu_theme.background_out_color or "#494949"
         border = dayu_theme.divider_color or "#262626"
+        section_bg = dayu_theme.background_out_color or "#4a4a4a"
+        row_bg = dayu_theme.background_in_color or "#383838"
+        label_bg = _hex_to_rgba(text, 0.08)
+        input_bg = dayu_theme.background_color or "#303030"
         accent_soft = _hex_to_rgba(accent, 0.16)
         hover = _hex_to_rgba(text, 0.08)
         self.setStyleSheet(
@@ -1199,62 +1242,98 @@ class SeriesSettingsDialog(QtWidgets.QDialog):
             }}
             QLabel#seriesSettingsTitle {{
                 color: {text};
-                font-size: 18px;
+                font-size: 20px;
                 font-weight: 700;
             }}
-            QLabel#seriesSettingsSubtitle,
-            QLabel#seriesSettingsSectionNote {{
+            QLabel#seriesSettingsSubtitle {{
                 color: {sub_text};
+                padding-bottom: 2px;
+            }}
+            QFrame#seriesSettingsHeaderLine {{
+                color: {sub_text};
+                background: {sub_text};
+                min-height: 1px;
+                max-height: 1px;
             }}
             QTabWidget#seriesSettingsTabs::pane {{
-                border: 1px solid {border};
-                border-radius: 8px;
-                background: {panel};
-                top: -1px;
+                border: none;
+                background: transparent;
+                top: 0;
             }}
             QTabBar::tab {{
-                min-height: 30px;
-                padding: 6px 16px;
-                margin-right: 4px;
+                min-width: 92px;
+                min-height: 42px;
+                padding: 0 18px;
+                margin-right: 6px;
                 border: 1px solid {border};
                 border-bottom: none;
-                border-top-left-radius: 8px;
-                border-top-right-radius: 8px;
+                border-top-left-radius: 7px;
+                border-top-right-radius: 7px;
                 background: {panel_alt};
                 color: {sub_text};
             }}
             QTabBar::tab:selected {{
-                background: {panel};
+                background: {section_bg};
                 color: {accent};
                 font-weight: 700;
+            }}
+            QTabBar::tab:hover {{
+                background: {hover};
+                color: {text};
             }}
             QScrollArea#seriesSettingsScroll,
             QWidget#seriesSettingsTabContent {{
                 background: transparent;
             }}
             QGroupBox#seriesSettingsSection {{
-                background: {panel_alt};
+                background: {section_bg};
                 border: 1px solid {border};
-                border-radius: 8px;
-                margin-top: 10px;
+                border-radius: 7px;
+                margin-top: 12px;
                 color: {text};
                 font-weight: 700;
             }}
             QGroupBox#seriesSettingsSection::title {{
                 subcontrol-origin: margin;
-                left: 12px;
-                padding: 0 6px;
+                left: 14px;
+                padding: 1px 8px;
                 color: {text};
-                background: {panel_alt};
+                background: {input_bg};
+                border-radius: 3px;
+            }}
+            QLabel#seriesSettingsSectionNote {{
+                color: {sub_text};
+                background: {row_bg};
+                padding: 5px 7px;
+                border: none;
             }}
             QLabel {{
                 color: {text};
+            }}
+            QFrame#seriesSettingsFieldRow {{
+                background: {row_bg};
+                border: none;
+                border-radius: 4px;
+                min-height: 34px;
+            }}
+            QLabel#seriesSettingsFieldLabel {{
+                background: {label_bg};
+                color: {text};
+                font-weight: 700;
+                padding: 7px 8px;
+                border: none;
+            }}
+            QFrame#seriesSettingsCheckRow {{
+                background: {row_bg};
+                border: none;
+                border-radius: 4px;
+                min-height: 24px;
             }}
             QComboBox, QSpinBox {{
                 min-height: 30px;
                 border-radius: 6px;
                 border: 1px solid {border};
-                background: {window};
+                background: {input_bg};
                 color: {text};
                 padding: 0 8px;
                 selection-background-color: {accent_soft};
@@ -1273,6 +1352,10 @@ class SeriesSettingsDialog(QtWidgets.QDialog):
             QCheckBox {{
                 color: {text};
                 spacing: 8px;
+            }}
+            QCheckBox::indicator {{
+                width: 14px;
+                height: 14px;
             }}
             QPushButton {{
                 min-height: 30px;

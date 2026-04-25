@@ -188,6 +188,8 @@ class SeriesWorkspaceRuntimeTests(unittest.TestCase):
         dialog = SeriesSettingsDialog()
         self.addCleanup(dialog.deleteLater)
         self.assertEqual(dialog.windowTitle(), "Series Design / Global Settings")
+        self.assertGreaterEqual(dialog.minimumWidth(), 820)
+        self.assertEqual(dialog.header_line.objectName(), "seriesSettingsHeaderLine")
         dialog.configure_options(
             languages=[("Japanese", "Japanese"), ("Korean", "Korean")],
             ocr_modes=[("best_local", "Optimal")],
@@ -257,6 +259,8 @@ class SeriesWorkspaceRuntimeTests(unittest.TestCase):
         self.assertEqual(dialog.export_output_group.title(), "Final Output")
         self.assertEqual(dialog.export_text_group.title(), "Text Exports")
         self.assertEqual(dialog.export_debug_group.title(), "Debug Artifacts")
+        self.assertGreaterEqual(len(dialog.findChildren(QtWidgets.QFrame, "seriesSettingsFieldRow")), 10)
+        self.assertGreaterEqual(len(dialog.findChildren(QtWidgets.QFrame, "seriesSettingsCheckRow")), 8)
         self.assertEqual(series_settings["queue_failure_policy"], "retry")
         self.assertEqual(global_settings["source_language"], "Japanese")
         self.assertEqual(global_settings["translator"], "Custom Local Server(Gemma)")
