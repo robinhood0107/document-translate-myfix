@@ -13,6 +13,7 @@ from app.ui.canvas.save_renderer import ImageSaveRenderer
 from app.ui.canvas.text.text_item_properties import TextItemProperties
 from app.ui.canvas.text_item import OutlineInfo, OutlineType
 from modules.rendering.render import (
+    build_render_rects_for_block,
     describe_render_text_markup,
     describe_render_text_sanitization,
     get_best_render_area,
@@ -36,7 +37,6 @@ from modules.utils.inpaint_debug import (
 )
 from modules.utils.render_style_policy import (
     VERTICAL_ALIGNMENT_TOP,
-    build_rect_tuple,
     resolve_render_text_color,
 )
 from modules.utils.textblock import TextBlock
@@ -234,7 +234,7 @@ class RenderMixin:
                 render_normalization.replacements
             ) + list(render_markup.replacements)
 
-            source_rect = build_rect_tuple(x1, y1, width, height)
+            source_rect, block_anchor = build_render_rects_for_block(block)
             text_props = TextItemProperties(
                 text=block._render_html,
                 font_family=font,
@@ -257,7 +257,7 @@ class RenderMixin:
                 vertical=vertical,
                 vertical_alignment=vertical_alignment,
                 source_rect=source_rect,
-                block_anchor=source_rect,
+                block_anchor=block_anchor,
                 selection_outlines=[
                     OutlineInfo(
                         0,
@@ -278,6 +278,18 @@ class RenderMixin:
             )
             text_item_state["render_fallback_font_family"] = str(
                 render_markup.fallback_font_family or ""
+            )
+            text_item_state["render_area_source"] = str(
+                getattr(block, "_render_area_source", "text_bbox") or "text_bbox"
+            )
+            text_item_state["render_source_xyxy"] = list(
+                getattr(block, "_render_area_xyxy", []) or []
+            )
+            text_item_state["render_anchor_xyxy"] = list(
+                getattr(block, "_render_original_xyxy", []) or []
+            )
+            text_item_state["render_bubble_xyxy"] = list(
+                getattr(block, "_render_bubble_xyxy", []) or []
             )
             text_item_state["render_normalization_applied"] = bool(
                 block._render_normalization_applied
