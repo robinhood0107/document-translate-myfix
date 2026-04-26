@@ -17,8 +17,12 @@ from app.ui.canvas.text.text_item_properties import TextItemProperties
 from modules.utils.textblock import TextBlock
 from modules.rendering.render import (
     TextRenderingSettings,
+    build_render_rects_for_block,
+    build_text_item_layout_geometry,
     describe_render_text_markup,
     describe_render_text_sanitization,
+    get_best_render_area,
+    get_render_fit_clearance_for_block,
     manual_wrap,
     is_vertical_block,
     pyside_word_wrap,
@@ -30,7 +34,6 @@ from modules.utils.render_style_policy import (
     VERTICAL_ALIGNMENT_TOP,
     build_rect_tuple,
     coerce_vertical_alignment,
-    compute_vertical_aligned_y,
     resolve_render_text_color,
 )
 from modules.utils.translator_utils import format_translations
@@ -94,8 +97,14 @@ class TextController:
         )
 
     def _get_source_rect_for_block(self, blk: TextBlock) -> tuple[float, float, float, float]:
-        x1, y1, width, height = blk.xywh
-        return build_rect_tuple(x1, y1, width, height)
+        source_rect, _block_anchor = build_render_rects_for_block(blk)
+        return source_rect
+
+    def _get_render_rects_for_block(
+        self,
+        blk: TextBlock,
+    ) -> tuple[tuple[float, float, float, float], tuple[float, float, float, float]]:
+        return build_render_rects_for_block(blk)
 
     def _get_text_item_layout_rect(
         self,
@@ -137,8 +146,8 @@ class TextController:
         return next(
             (
                 blk for blk in self.main.blk_list
-                if is_close(float(blk.xyxy[0]), float(anchor_x), 5)
-                and is_close(float(blk.xyxy[1]), float(anchor_y), 5)
+                if is_close(float(self._get_render_rects_for_block(blk)[1][0]), float(anchor_x), 5)
+                and is_close(float(self._get_render_rects_for_block(blk)[1][1]), float(anchor_y), 5)
                 and is_close(float(blk.angle), float(rotation), 1)
             ),
             None,
@@ -178,14 +187,11 @@ class TextController:
             QColor(render_settings.outline_color) if render_settings.outline else None
         )
         vertical = is_vertical_block(blk, target_lang_code)
-        position_y = source_rect[1]
-        if rendered_height is not None:
-            position_y = compute_vertical_aligned_y(
-                source_rect[1],
-                source_rect[3],
-                rendered_height,
-                vertical_alignment,
-            )
+        position, item_width, item_height = build_text_item_layout_geometry(
+            source_rect,
+            rendered_height,
+            vertical_alignment,
+        )
 
         return TextItemProperties(
             text=text,
@@ -200,10 +206,10 @@ class TextController:
             italic=render_settings.italic,
             underline=render_settings.underline,
             direction=render_settings.direction,
-            position=(source_rect[0], position_y),
+            position=position,
             rotation=blk.angle,
-            width=rendered_width,
-            height=rendered_height,
+            width=item_width,
+            height=item_height,
             vertical=vertical,
             vertical_alignment=vertical_alignment,
             source_rect=source_rect,
@@ -233,7 +239,7 @@ class TextController:
         text_item.vertical_alignment = coerce_vertical_alignment(
             text_props.vertical_alignment
         )
-        text_item.set_plain_text(text)
+        text_item.set_text(text, text_props.width or text_item.boundingRect().width())
         text_item.set_direction(text_props.direction)
         text_item.set_vertical(bool(text_props.vertical))
         text_item.set_vertical_alignment(text_props.vertical_alignment)
@@ -258,10 +264,11 @@ class TextController:
             trg_lng_cd,
             upper_case=render_settings.upper_case,
         )
+        get_best_render_area(render_blocks, None)
 
         text_items_state: list[dict] = []
         for original_blk, render_blk in zip(blk_list, render_blocks):
-            x1, y1, block_width, block_height = original_blk.xywh
+            x1, y1, block_width, block_height = render_blk.xywh
             translation_raw = render_blk.translation
             if not translation_raw or len(translation_raw) == 1:
                 continue
@@ -286,7 +293,7 @@ class TextController:
             if not translation or len(translation) == 1:
                 continue
 
-            vertical = is_vertical_block(original_blk, trg_lng_cd)
+            vertical = is_vertical_block(render_blk, trg_lng_cd)
             wrapped, font_size, rendered_width, rendered_height = pyside_word_wrap(
                 translation,
                 render_settings.font_family,
@@ -302,12 +309,27 @@ class TextController:
                 render_settings.max_font_size,
                 render_settings.min_font_size,
                 vertical,
+                fit_clearance=get_render_fit_clearance_for_block(
+                    render_blk,
+                    render_settings.outline_width,
+                ),
                 return_metrics=True,
             )
 
             if is_no_space_lang(trg_lng_cd):
                 wrapped = wrapped.replace(" ", "")
-            render_markup = describe_render_text_markup(wrapped)
+            render_markup = describe_render_text_markup(
+                wrapped,
+                font_family=render_settings.font_family,
+                font_size=font_size,
+                text_color=self._resolve_font_color(original_blk, render_settings),
+                alignment=self.main.button_to_alignment[render_settings.alignment_id],
+                line_spacing=float(render_settings.line_spacing),
+                bold=render_settings.bold,
+                italic=render_settings.italic,
+                underline=render_settings.underline,
+                direction=render_settings.direction,
+            )
             original_blk._render_text = str(wrapped or "")
             original_blk._render_html = str(
                 render_markup.html_text if render_markup.html_applied else wrapped or ""
@@ -327,7 +349,7 @@ class TextController:
                 render_normalization.replacements
             ) + list(render_markup.replacements)
 
-            source_rect = self._get_source_rect_for_block(original_blk)
+            source_rect, block_anchor = self._get_render_rects_for_block(render_blk)
             text_props = self._build_text_item_properties(
                 original_blk,
                 original_blk._render_html,
@@ -335,7 +357,7 @@ class TextController:
                 render_settings,
                 trg_lng_cd,
                 source_rect=source_rect,
-                block_anchor=source_rect,
+                block_anchor=block_anchor,
                 rendered_width=rendered_width,
                 rendered_height=rendered_height,
             )
@@ -351,6 +373,18 @@ class TextController:
             )
             text_item_state["render_fallback_font_family"] = str(
                 render_markup.fallback_font_family or ""
+            )
+            text_item_state["render_area_source"] = str(
+                getattr(render_blk, "_render_area_source", "text_bbox") or "text_bbox"
+            )
+            text_item_state["render_source_xyxy"] = list(
+                getattr(render_blk, "_render_area_xyxy", []) or []
+            )
+            text_item_state["render_anchor_xyxy"] = list(
+                getattr(render_blk, "_render_original_xyxy", []) or []
+            )
+            text_item_state["render_bubble_xyxy"] = list(
+                getattr(render_blk, "_render_bubble_xyxy", []) or []
             )
             text_item_state["render_normalization_applied"] = bool(
                 original_blk._render_normalization_applied
@@ -460,14 +494,15 @@ class TextController:
 
         render_settings = self.render_settings()
         render_payload = str(getattr(blk, "_render_html", text) or text)
+        source_rect, block_anchor = self._get_render_rects_for_block(blk)
         properties = self._build_text_item_properties(
             blk,
             render_payload,
             font_size,
             render_settings,
             trg_lng_cd,
-            source_rect=self._get_source_rect_for_block(blk),
-            block_anchor=self._get_source_rect_for_block(blk),
+            source_rect=source_rect,
+            block_anchor=block_anchor,
         )
         
         text_item = self.main.image_viewer.add_text_item(properties)
@@ -747,7 +782,7 @@ class TextController:
             if text_item and text_item in self.main.image_viewer._scene.items():
                 if html is not None:
                     if text_item.document().toHtml() != html:
-                        text_item.document().setHtml(html)
+                        text_item.set_text(html, text_item.boundingRect().width())
                 elif text_item.toPlainText() != text:
                     text_item.set_plain_text(text)
             if blk is None:
@@ -1144,10 +1179,12 @@ class TextController:
                         )
                         for item in existing_text_items
                     }
+                    get_best_render_area(blk_list, None)
 
                     new_text_items_state = []
                     for blk in blk_list:
-                        blk_key = (int(blk.xyxy[0]), int(blk.xyxy[1]), float(blk.angle))
+                        _source_rect, block_anchor = self._get_render_rects_for_block(blk)
+                        blk_key = (int(block_anchor[0]), int(block_anchor[1]), float(blk.angle))
                         if blk_key in existing_keys:
                             continue
 
@@ -1192,11 +1229,26 @@ class TextController:
                             max_font_size,
                             min_font_size,
                             vertical,
+                            fit_clearance=get_render_fit_clearance_for_block(
+                                blk,
+                                outline_width,
+                            ),
                             return_metrics=True,
                         )
                         if is_no_space_lang(trg_lng_cd):
                             wrapped = wrapped.replace(" ", "")
-                        render_markup = describe_render_text_markup(wrapped)
+                        render_markup = describe_render_text_markup(
+                            wrapped,
+                            font_family=font_family,
+                            font_size=font_size,
+                            text_color=self._resolve_font_color(blk, render_settings),
+                            alignment=alignment,
+                            line_spacing=line_spacing,
+                            bold=bold,
+                            italic=italic,
+                            underline=underline,
+                            direction=direction,
+                        )
                         blk._render_text = str(wrapped or "")
                         blk._render_html = str(
                             render_markup.html_text if render_markup.html_applied else wrapped or ""
@@ -1216,7 +1268,7 @@ class TextController:
                             render_normalization.replacements
                         ) + list(render_markup.replacements)
 
-                        source_rect = self._get_source_rect_for_block(blk)
+                        source_rect, block_anchor = self._get_render_rects_for_block(blk)
                         text_props = self._build_text_item_properties(
                             blk,
                             blk._render_html,
@@ -1224,7 +1276,7 @@ class TextController:
                             render_settings,
                             trg_lng_cd,
                             source_rect=source_rect,
-                            block_anchor=source_rect,
+                            block_anchor=block_anchor,
                             rendered_width=rendered_width,
                             rendered_height=rendered_height,
                         )
@@ -1240,6 +1292,18 @@ class TextController:
                         )
                         text_item_state["render_fallback_font_family"] = str(
                             render_markup.fallback_font_family or ""
+                        )
+                        text_item_state["render_area_source"] = str(
+                            getattr(blk, "_render_area_source", "text_bbox") or "text_bbox"
+                        )
+                        text_item_state["render_source_xyxy"] = list(
+                            getattr(blk, "_render_area_xyxy", []) or []
+                        )
+                        text_item_state["render_anchor_xyxy"] = list(
+                            getattr(blk, "_render_original_xyxy", []) or []
+                        )
+                        text_item_state["render_bubble_xyxy"] = list(
+                            getattr(blk, "_render_bubble_xyxy", []) or []
                         )
                         text_item_state["render_normalization_applied"] = bool(
                             blk._render_normalization_applied
@@ -1307,7 +1371,11 @@ class TextController:
             # Identify new blocks based on position and rotation
             new_blocks = [
                 blk for blk in self.main.blk_list
-                if (int(blk.xyxy[0]), int(blk.xyxy[1]), blk.angle) not in existing_text_items.values()
+                if (
+                    int(self._get_render_rects_for_block(blk)[1][0]),
+                    int(self._get_render_rects_for_block(blk)[1][1]),
+                    blk.angle,
+                ) not in existing_text_items.values()
             ]
 
             self.main.image_viewer.clear_rectangles()

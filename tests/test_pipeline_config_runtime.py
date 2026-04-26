@@ -34,6 +34,9 @@ class _FakeSettingsPage:
             return self._translator
         raise AssertionError(key)
 
+    def get_workflow_mode(self) -> str:
+        return "legacy_page_pipeline"
+
     def get_paddleocr_vl_settings(self) -> dict:
         return {"server_url": self._server_url}
 

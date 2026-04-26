@@ -8,6 +8,7 @@ from modules.utils.render_style_policy import (
     build_rect_tuple,
     coerce_vertical_alignment,
 )
+from modules.rendering.rich_text import repair_text_item_html
 
 @dataclass
 class TextItemProperties:
@@ -123,6 +124,7 @@ class TextItemProperties:
         
         # Advanced
         props.selection_outlines = data.get('selection_outlines', [])
+        props.text = repair_text_item_html(props.text, props)
         
         return props
     
@@ -177,6 +179,7 @@ class TextItemProperties:
         
         # Advanced properties
         props.selection_outlines = getattr(item, 'selection_outlines', []).copy()
+        props.text = repair_text_item_html(props.text, props)
         
         return props
     
