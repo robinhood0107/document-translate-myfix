@@ -1718,6 +1718,7 @@ class ComicTranslate(ComicTranslateUI):
         self._batch_active = True
         self._batch_cancel_requested = False
         self._set_project_navigation_enabled(False)
+        self.set_runtime_editing_locked(True)
         self.translate_button.setEnabled(False)
         self.cancel_button.setEnabled(True)
         self.save_as_project_button.setEnabled(False)
@@ -1849,6 +1850,7 @@ class ComicTranslate(ComicTranslateUI):
         if getattr(self, "_is_shutting_down", False):
             self.selected_batch = []
             return
+        self.set_runtime_editing_locked(False)
         self._set_project_navigation_enabled(True)
         report = self._finalize_batch_report(was_cancelled)
         archive_path = ""
