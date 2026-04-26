@@ -102,6 +102,7 @@ class ComicTranslateUI(
         self.tool_buttons = {}
         self.page_list = PageListView()
         self.export_source_by_path = {}
+        self._runtime_edit_lock_enabled_states: dict[QtWidgets.QWidget, bool] = {}
 
         self.webtoon_mode = False
 
@@ -390,6 +391,61 @@ class ComicTranslateUI(
     def _update_runtime_overlay_clear_rects(self) -> None:
         if hasattr(self, "pipeline_overlay") and self.pipeline_overlay is not None:
             self.pipeline_overlay.set_clear_rects(self._runtime_overlay_clear_rects())
+
+    def _runtime_edit_lock_widgets(self) -> list[QtWidgets.QWidget]:
+        widgets: list[QtWidgets.QWidget] = []
+
+        def add(widget) -> None:
+            if isinstance(widget, QtWidgets.QWidget) and widget not in widgets:
+                widgets.append(widget)
+
+        for attr_name in (
+            "runtime_page_list_widget",
+            "runtime_canvas_widget",
+            "runtime_settings_widget",
+            "manual_radio",
+            "automatic_radio",
+            "translate_button",
+            "retry_failed_button",
+            "one_page_auto_button",
+            "webtoon_toggle",
+            "insert_button",
+            "save_project_button",
+            "save_as_project_button",
+            "search_sidebar_button",
+            "home_nav_button",
+            "settings_nav_button",
+            "search_panel",
+        ):
+            add(getattr(self, attr_name, None))
+
+        for group_name in ("hbutton_group", "undo_tool_group"):
+            group_widget = getattr(self, group_name, None)
+            add(group_widget)
+            button_group_getter = getattr(group_widget, "get_button_group", None)
+            if callable(button_group_getter):
+                button_group = button_group_getter()
+                for button in button_group.buttons():
+                    add(button)
+
+        return widgets
+
+    def set_runtime_editing_locked(self, locked: bool) -> None:
+        widgets = self._runtime_edit_lock_widgets()
+        if locked:
+            for widget in widgets:
+                if widget in self._runtime_edit_lock_enabled_states:
+                    continue
+                self._runtime_edit_lock_enabled_states[widget] = widget.isEnabled()
+                widget.setEnabled(False)
+            return
+
+        for widget, was_enabled in list(self._runtime_edit_lock_enabled_states.items()):
+            try:
+                widget.setEnabled(was_enabled)
+            except RuntimeError:
+                pass
+        self._runtime_edit_lock_enabled_states.clear()
 
     def _update_runtime_surface_geometry(self) -> None:
         area = self._runtime_surface_area()
