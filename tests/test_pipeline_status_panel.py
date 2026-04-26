@@ -209,3 +209,22 @@ class PipelineInteractionOverlayTests(unittest.TestCase):
             image.pixelColor(12, 12).getRgb(),
             image.pixelColor(320, 180).getRgb(),
         )
+
+    def test_overlay_can_keep_action_rects_clear(self) -> None:
+        parent = QtWidgets.QWidget()
+        parent.setGeometry(0, 0, 240, 160)
+        overlay = PipelineInteractionOverlay(parent)
+        overlay.setGeometry(parent.rect())
+        overlay.set_clear_rects([QtCore.QRect(80, 50, 60, 30)])
+        self.addCleanup(overlay.deleteLater)
+        self.addCleanup(parent.deleteLater)
+        parent.show()
+        overlay.show()
+        QtWidgets.QApplication.processEvents()
+
+        image = QImage(240, 160, QImage.Format.Format_ARGB32)
+        image.fill(QtCore.Qt.GlobalColor.transparent)
+        overlay.render(image)
+
+        self.assertEqual(image.pixelColor(20, 20).alpha(), overlay.DIM_COLOR.alpha())
+        self.assertEqual(image.pixelColor(100, 65).alpha(), 0)
