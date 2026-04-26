@@ -71,6 +71,7 @@ class ControllerBatchPreflightTests(unittest.TestCase):
         controller._start_batch_report = mock.Mock()
         controller._show_automatic_progress_dialog = mock.Mock()
         controller._set_project_navigation_enabled = mock.Mock()
+        controller.set_runtime_editing_locked = mock.Mock()
         controller.batch_mode_selected = mock.Mock()
         controller.run_threaded = mock.Mock()
         controller.default_error_handler = mock.Mock()

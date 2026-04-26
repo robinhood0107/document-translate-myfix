@@ -769,6 +769,9 @@ class WorkspaceMixin:
 
         right_widget = QtWidgets.QWidget()
         right_widget.setLayout(right_layout)
+        self.runtime_page_list_widget = left_widget
+        self.runtime_canvas_widget = central_widget
+        self.runtime_settings_widget = right_widget
 
         splitter = QtWidgets.QSplitter()
         splitter.addWidget(left_widget)
