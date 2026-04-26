@@ -42,6 +42,37 @@ class ProjectNavigationRuntimeTests(unittest.TestCase):
         self.assertFalse(window.home_nav_button.isChecked())
         self.assertTrue(window.settings_nav_button.isChecked())
 
+    def test_runtime_editing_lock_disables_editing_surfaces_but_keeps_run_actions(self) -> None:
+        window = ComicTranslateUI()
+        self.addCleanup(window.deleteLater)
+        window.cancel_button.setEnabled(True)
+        window.batch_report_button.setEnabled(True)
+        window.retry_failed_button.setEnabled(False)
+
+        window.set_runtime_editing_locked(True)
+
+        self.assertFalse(window.runtime_page_list_widget.isEnabled())
+        self.assertFalse(window.runtime_canvas_widget.isEnabled())
+        self.assertFalse(window.runtime_settings_widget.isEnabled())
+        self.assertFalse(window.font_dropdown.isEnabled())
+        self.assertFalse(window.manual_radio.isEnabled())
+        self.assertFalse(window.automatic_radio.isEnabled())
+        self.assertFalse(window.retry_failed_button.isEnabled())
+        self.assertTrue(window.cancel_button.isEnabled())
+        self.assertTrue(window.batch_report_button.isEnabled())
+
+        window.set_runtime_editing_locked(False)
+
+        self.assertTrue(window.runtime_page_list_widget.isEnabled())
+        self.assertTrue(window.runtime_canvas_widget.isEnabled())
+        self.assertTrue(window.runtime_settings_widget.isEnabled())
+        self.assertTrue(window.font_dropdown.isEnabled())
+        self.assertTrue(window.manual_radio.isEnabled())
+        self.assertTrue(window.automatic_radio.isEnabled())
+        self.assertFalse(window.retry_failed_button.isEnabled())
+        self.assertTrue(window.cancel_button.isEnabled())
+        self.assertTrue(window.batch_report_button.isEnabled())
+
 
 class RecentProjectOrderingTests(unittest.TestCase):
     @classmethod
