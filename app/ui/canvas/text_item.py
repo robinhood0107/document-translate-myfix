@@ -13,6 +13,11 @@ from modules.utils.render_style_policy import (
     coerce_vertical_alignment,
     compute_vertical_aligned_y,
 )
+from modules.rendering.rich_text import (
+    apply_document_base_style,
+    repair_render_html_style,
+    should_use_rich_text,
+)
 
 
 @dataclass
@@ -234,9 +239,23 @@ class TextBlockItem(QGraphicsTextItem):
             self.update()
 
     def set_text(self, text, width):
+        width = self.boundingRect().width() if width is None else width
         if self.is_html(text):
-            self.setHtml(text)
+            html = repair_render_html_style(
+                text,
+                font_family=self.font_family,
+                font_size=self.font_size,
+                text_color=self.text_color,
+                alignment=self.alignment,
+                line_spacing=self.line_spacing,
+                bold=self.bold,
+                italic=self.italic,
+                underline=self.underline,
+                direction=self.direction,
+            )
+            self.setHtml(html)
             self.setTextWidth(width)
+            self.apply_base_document_style()
             self.set_outline(self.outline_color, self.outline_width)
             self.apply_vertical_alignment()
         else:
@@ -248,9 +267,21 @@ class TextBlockItem(QGraphicsTextItem):
         self.apply_vertical_alignment()
 
     def is_html(self, text):
-        import re
-        # Simple check for HTML tags
-        return bool(re.search(r'<[^>]+>', text))
+        return should_use_rich_text(text)
+
+    def apply_base_document_style(self):
+        apply_document_base_style(
+            self.document(),
+            font_family=self.font_family,
+            font_size=self.font_size,
+            text_color=self.text_color,
+            alignment=self.alignment,
+            line_spacing=self.line_spacing,
+            bold=self.bold,
+            italic=self.italic,
+            underline=self.underline,
+            direction=self.direction,
+        )
 
     def set_font(self, font_family, font_size):
         if not self.textCursor().hasSelection():
@@ -996,4 +1027,3 @@ class TextBlockItem(QGraphicsTextItem):
         new_instance.setScale(self.scale())
         new_instance.__dict__.update(copy.copy(self.__dict__))
         return new_instance
-
