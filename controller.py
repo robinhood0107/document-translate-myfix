@@ -1190,13 +1190,14 @@ class ComicTranslate(ComicTranslateUI):
 
     def _on_automatic_progress_cancel(self):
         self.cancel_current_task()
-        self._ensure_automatic_progress_dialog().show_passive_message(
-            "info",
-            self.tr("취소 중..."),
-            duration=None,
-            closable=False,
-            source="pipeline",
-        )
+        self._ensure_automatic_progress_dialog().update_event({
+            "phase": "pipeline",
+            "service": "batch",
+            "status": "cancelling",
+            "step_key": "cancel",
+            "message": self.tr("취소 중..."),
+            "panel_state": "cancelling",
+        })
 
     def _on_automatic_progress_retry(self):
         if self._batch_active or not self._last_batch_request_paths:

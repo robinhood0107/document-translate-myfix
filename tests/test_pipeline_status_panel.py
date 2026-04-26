@@ -9,7 +9,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 from PySide6 import QtCore, QtTest, QtWidgets
 from PySide6.QtGui import QImage
 
-from app.ui.pipeline_status_panel import PipelineStatusPanel
+from app.ui.pipeline_status_panel import PipelineInteractionOverlay, PipelineStatusPanel
 
 
 class PipelineStatusPanelTests(unittest.TestCase):
@@ -61,6 +61,26 @@ class PipelineStatusPanelTests(unittest.TestCase):
         self.assertFalse(self.panel.cancel_button.isHidden())
         self.assertFalse(self.panel.report_button.isHidden())
         self.assertTrue(self.panel.retry_button.isHidden())
+
+    def test_cancelling_event_keeps_status_controls_available(self) -> None:
+        self.panel.update_event(
+            {
+                "phase": "pipeline",
+                "status": "cancelling",
+                "panel_state": "cancelling",
+                "service": "batch",
+                "message": "cancelling",
+            }
+        )
+        QtWidgets.QApplication.processEvents()
+
+        self.assertEqual(self.panel._current_state, "cancelling")
+        self.assertFalse(self.panel.cancel_button.isHidden())
+        self.assertFalse(self.panel.cancel_button.isEnabled())
+        self.assertFalse(self.panel.report_button.isHidden())
+        self.assertTrue(self.panel.report_button.isEnabled())
+        self.assertTrue(self.panel.mode_button.isEnabled())
+        self.assertTrue(self.panel.logs_button.isEnabled())
 
     def test_done_event_updates_preview_and_auto_hides(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -139,3 +159,53 @@ class PipelineStatusPanelTests(unittest.TestCase):
         self.panel.set_logs_visible(False)
         QtWidgets.QApplication.processEvents()
         self.assertLess(self.panel.left_panel.width(), width_with_logs)
+
+    def test_progress_events_do_not_reset_user_resized_geometry(self) -> None:
+        self.panel.show()
+        self.panel.setGeometry(80, 90, 760, 500)
+        QtWidgets.QApplication.processEvents()
+        expected = QtCore.QRect(self.panel.geometry())
+
+        self.panel.update_event(
+            {
+                "phase": "pipeline",
+                "status": "running",
+                "service": "batch",
+                "message": "still running",
+                "page_total": 10,
+                "page_index": 2,
+            }
+        )
+        QtWidgets.QApplication.processEvents()
+
+        self.assertEqual(self.panel.geometry(), expected)
+
+
+class PipelineInteractionOverlayTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls._app = QtWidgets.QApplication.instance() or QtWidgets.QApplication([])
+
+    def test_overlay_uses_light_pass_through_dim_without_center_card(self) -> None:
+        parent = QtWidgets.QWidget()
+        parent.setGeometry(0, 0, 640, 360)
+        overlay = PipelineInteractionOverlay(parent)
+        overlay.setGeometry(parent.rect())
+        self.addCleanup(overlay.deleteLater)
+        self.addCleanup(parent.deleteLater)
+        parent.show()
+        overlay.show()
+        QtWidgets.QApplication.processEvents()
+
+        self.assertTrue(
+            overlay.testAttribute(QtCore.Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+        )
+        self.assertEqual(overlay.DIM_COLOR.alpha(), 31)
+
+        image = QImage(640, 360, QImage.Format.Format_ARGB32)
+        image.fill(QtCore.Qt.GlobalColor.transparent)
+        overlay.render(image)
+        self.assertEqual(
+            image.pixelColor(12, 12).getRgb(),
+            image.pixelColor(320, 180).getRgb(),
+        )
