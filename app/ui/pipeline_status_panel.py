@@ -10,26 +10,16 @@ def _panel_tr(text: str) -> str:
 
 
 class PipelineInteractionOverlay(QtWidgets.QWidget):
+    DIM_COLOR = QtGui.QColor(10, 12, 16, 31)
+
     def __init__(self, parent=None):
         super().__init__(parent)
+        self.setAttribute(QtCore.Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
         self.hide()
 
     def paintEvent(self, event: QtGui.QPaintEvent) -> None:  # type: ignore[override]
         painter = QtGui.QPainter(self)
-        painter.setRenderHint(QtGui.QPainter.RenderHint.Antialiasing)
-        painter.fillRect(self.rect(), QtGui.QColor(10, 12, 16, 144))
-
-        card_width = min(max(420, self.width() // 2), 760)
-        card_height = min(max(120, self.height() // 7), 180)
-        card_rect = QtCore.QRect(0, 0, card_width, card_height)
-        card_rect.moveCenter(self.rect().center())
-        card_rect.translate(0, -self.height() // 6)
-
-        painter.setPen(QtGui.QPen(QtGui.QColor(255, 255, 255, 26), 1))
-        painter.setBrush(QtGui.QColor(255, 255, 255, 14))
-        painter.drawRoundedRect(card_rect, 18, 18)
-
-        super().paintEvent(event)
+        painter.fillRect(self.rect(), self.DIM_COLOR)
 
 
 class _PreviewLabel(QtWidgets.QLabel):
@@ -789,6 +779,9 @@ class PipelineStatusPanel(QtWidgets.QFrame):
         elif panel_state == "cancelled" or status == "cancelled":
             self._pipeline_active = False
             self._apply_state("cancelled")
+        elif panel_state == "cancelling" or status == "cancelling":
+            self._pipeline_active = True
+            self._apply_state("cancelling")
         else:
             self._pipeline_active = True
             self._apply_state("running")
@@ -851,21 +844,23 @@ class PipelineStatusPanel(QtWidgets.QFrame):
         state_map = {
             "idle": self.tr("Idle"),
             "running": self.tr("Running"),
+            "cancelling": self.tr("Running"),
             "done": self.tr("Done"),
             "failed": self.tr("Failed"),
             "cancelled": self.tr("Cancelled"),
         }
         self.title_label.setText(
             self.tr("Pipeline Status")
-            if state in {"idle", "running", "done", "failed", "cancelled"}
+            if state in {"idle", "running", "cancelling", "done", "failed", "cancelled"}
             else self.tr("Status")
         )
         self.state_label.setText(state_map.get(state, state))
         self.pause_button.setVisible(state == "running" and self._series_queue_pause_visible)
         self.series_board_button.setVisible(state == "running" and self._series_queue_pause_visible)
         self.current_item_button.setVisible(state == "running" and self._series_queue_pause_visible)
-        self.cancel_button.setVisible(state == "running")
-        self.report_button.setVisible(state in {"running", "done", "failed", "cancelled"})
+        self.cancel_button.setVisible(state in {"running", "cancelling"})
+        self.cancel_button.setEnabled(state == "running")
+        self.report_button.setVisible(state in {"running", "cancelling", "done", "failed", "cancelled"})
         self.retry_button.setVisible(state == "failed")
         self.settings_button.setVisible(state == "failed")
         self.open_output_button.setVisible(state == "done" and self.has_output_root())
