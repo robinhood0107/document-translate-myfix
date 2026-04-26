@@ -80,17 +80,18 @@ class SettingsPageUI(QtWidgets.QWidget):
             self.tr("Google Cloud"),
         ]
         
-        self.supported_translators = [
-            self.tr("Gemini-2.5-Pro"),
-            self.tr("Gemini-3.0-Flash"),
-            self.tr("GPT-4.1"),
-            self.tr("GPT-4.1-mini"),
-            self.tr("Claude-4.6-Sonnet"),
-            self.tr("Claude-4.5-Haiku"),
-            self.tr("Deepseek-v3"),
-            self.tr("Custom Service"),
-            self.tr("Custom Local Server(Gemma)"),
+        self.translator_keys = [
+            "Gemini-2.5-Pro",
+            "Gemini-3.0-Flash",
+            "GPT-4.1",
+            "GPT-4.1-mini",
+            "Claude-4.6-Sonnet",
+            "Claude-4.5-Haiku",
+            "Deepseek-v3",
+            "Custom Service",
+            "Custom Local Server(Gemma)",
         ]
+        self.supported_translators = [self.tr(key) for key in self.translator_keys]
         
         self.languages = [
             'English', 
@@ -218,6 +219,8 @@ class SettingsPageUI(QtWidgets.QWidget):
             inpaint_strategy=self.inpaint_strategy,
             parent=self,
         )
+        for index, key in enumerate(self.translator_keys):
+            self.tools_page.translator_combo.setItemData(index, key)
         for index, (key, _label) in enumerate(WORKFLOW_MODE_OPTIONS):
             self.tools_page.workflow_mode_combo.setItemData(index, key)
         for index, key in enumerate(self.ocr_engine_keys):

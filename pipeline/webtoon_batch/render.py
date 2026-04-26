@@ -13,9 +13,12 @@ from app.ui.canvas.save_renderer import ImageSaveRenderer
 from app.ui.canvas.text.text_item_properties import TextItemProperties
 from app.ui.canvas.text_item import OutlineInfo, OutlineType
 from modules.rendering.render import (
+    build_render_rects_for_block,
+    build_text_item_layout_geometry,
     describe_render_text_markup,
     describe_render_text_sanitization,
     get_best_render_area,
+    get_render_fit_clearance_for_block,
     is_vertical_block,
     pyside_word_wrap,
 )
@@ -24,7 +27,6 @@ from modules.utils.automatic_output import (
     build_archive_page_file_name,
     build_archive_staging_dir,
     build_output_file_name,
-    is_individual_images_mode,
     is_single_archive_mode,
     write_archive_image,
     write_output_image,
@@ -37,7 +39,6 @@ from modules.utils.inpaint_debug import (
 )
 from modules.utils.render_style_policy import (
     VERTICAL_ALIGNMENT_TOP,
-    build_rect_tuple,
     resolve_render_text_color,
 )
 from modules.utils.textblock import TextBlock
@@ -193,12 +194,33 @@ class RenderMixin:
                 max_font_size,
                 min_font_size,
                 vertical,
+                fit_clearance=get_render_fit_clearance_for_block(
+                    block,
+                    outline_width,
+                ),
                 return_metrics=True,
             )
 
             if is_no_space_lang(target_lang_code):
                 wrapped_translation = wrapped_translation.replace(" ", "")
-            render_markup = describe_render_text_markup(wrapped_translation)
+            font_color = resolve_render_text_color(
+                block.font_color,
+                base_font_color,
+                render_settings.force_font_color,
+                render_settings.smart_global_apply_all,
+            )
+            render_markup = describe_render_text_markup(
+                wrapped_translation,
+                font_family=font,
+                font_size=font_size,
+                text_color=font_color,
+                alignment=alignment,
+                line_spacing=line_spacing,
+                bold=bold,
+                italic=italic,
+                underline=underline,
+                direction=direction,
+            )
             block._render_text = str(wrapped_translation or "")
             block._render_html = str(
                 render_markup.html_text if render_markup.html_applied else wrapped_translation or ""
@@ -218,13 +240,12 @@ class RenderMixin:
                 render_normalization.replacements
             ) + list(render_markup.replacements)
 
-            font_color = resolve_render_text_color(
-                block.font_color,
-                base_font_color,
-                render_settings.force_font_color,
-                render_settings.smart_global_apply_all,
+            source_rect, block_anchor = build_render_rects_for_block(block)
+            position, item_width, item_height = build_text_item_layout_geometry(
+                source_rect,
+                rendered_height,
+                vertical_alignment,
             )
-            source_rect = build_rect_tuple(x1, y1, width, height)
             text_props = TextItemProperties(
                 text=block._render_html,
                 font_family=font,
@@ -237,17 +258,17 @@ class RenderMixin:
                 bold=bold,
                 italic=italic,
                 underline=underline,
-                position=(x1, y1),
+                position=position,
                 rotation=block.angle,
                 scale=1.0,
                 transform_origin=block.tr_origin_point if block.tr_origin_point else (0, 0),
-                width=rendered_width,
-                height=rendered_height,
+                width=item_width,
+                height=item_height,
                 direction=direction,
                 vertical=vertical,
                 vertical_alignment=vertical_alignment,
                 source_rect=source_rect,
-                block_anchor=source_rect,
+                block_anchor=block_anchor,
                 selection_outlines=[
                     OutlineInfo(
                         0,
@@ -268,6 +289,18 @@ class RenderMixin:
             )
             text_item_state["render_fallback_font_family"] = str(
                 render_markup.fallback_font_family or ""
+            )
+            text_item_state["render_area_source"] = str(
+                getattr(block, "_render_area_source", "text_bbox") or "text_bbox"
+            )
+            text_item_state["render_source_xyxy"] = list(
+                getattr(block, "_render_area_xyxy", []) or []
+            )
+            text_item_state["render_anchor_xyxy"] = list(
+                getattr(block, "_render_original_xyxy", []) or []
+            )
+            text_item_state["render_bubble_xyxy"] = list(
+                getattr(block, "_render_bubble_xyxy", []) or []
             )
             text_item_state["render_normalization_applied"] = bool(
                 block._render_normalization_applied
@@ -345,16 +378,13 @@ class RenderMixin:
             self.log_skipped_image(directory, export_token, image_path, reason)
             return
 
-        if export_settings["export_inpainted_image"] and is_individual_images_mode(export_settings):
+        if export_settings["export_inpainted_image"]:
             renderer = ImageSaveRenderer(image)
             patches = self.final_patches_for_save.get(image_path, [])
             renderer.apply_patches(patches)
-            path = self.main_page.get_automatic_output_series_dir(
-                directory,
-                anchor_path=self.main_page.image_files[0] if self.main_page.image_files else image_path,
-            )
-            os.makedirs(path, exist_ok=True)
             cleaned_image_rgb = renderer.render_to_image()
+            path = os.path.join(export_root, "inpainted_images", archive_bname)
+            os.makedirs(path, exist_ok=True)
             cleaned_output_path = os.path.join(
                 path,
                 build_output_file_name(
@@ -374,7 +404,7 @@ class RenderMixin:
                 image_path,
                 {"cleaned_image_path": cleaned_output_path},
             )
-        elif not is_individual_images_mode(export_settings):
+        else:
             self.main_page.image_ctrl.update_processing_summary(
                 image_path,
                 {"cleaned_image_path": ""},

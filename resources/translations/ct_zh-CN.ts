@@ -1856,6 +1856,14 @@ Approximate GPU usage:
         <translation type="unfinished"></translation>
     </message>
     <message>
+        <source>Series Board</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Current Item</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
         <source>Report</source>
         <translation>报告</translation>
     </message>
@@ -2279,6 +2287,265 @@ These values are copied into new series projects and can be adjusted per series.
     </message>
     <message>
         <source>Retry delay (sec):</source>
+        <translation type="unfinished"></translation>
+    </message>
+</context>
+<context>
+    <name>SeriesSettingsDialog</name>
+    <message>
+        <source>Series Design / Global Settings</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>These defaults are applied when the series queue runs. Child projects keep their own page-level edits.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Queue</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Use GPU</source>
+        <translation type="unfinished">使用 GPU</translation>
+    </message>
+    <message>
+        <source>Source language:</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Target language:</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Languages</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Set the source and target language for every queued child project.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>OCR:</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Translator:</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Workflow mode:</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Pipeline Runtime</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Choose the queue workflow and the runtime services it should use.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Pipeline</source>
+        <translation type="unfinished">流水线</translation>
+    </message>
+    <message>
+        <source>Use Selected Color</source>
+        <translation type="unfinished">使用所选颜色</translation>
+    </message>
+    <message>
+        <source>Left</source>
+        <translation type="unfinished">左对齐</translation>
+    </message>
+    <message>
+        <source>Center</source>
+        <translation type="unfinished">居中</translation>
+    </message>
+    <message>
+        <source>Right</source>
+        <translation type="unfinished">右对齐</translation>
+    </message>
+    <message>
+        <source>Top</source>
+        <translation type="unfinished">顶部</translation>
+    </message>
+    <message>
+        <source>Bottom</source>
+        <translation type="unfinished">底部</translation>
+    </message>
+    <message>
+        <source>Bold</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Italic</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Underline</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Uppercase</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Outline</source>
+        <translation type="unfinished">描边</translation>
+    </message>
+    <message>
+        <source>Font:</source>
+        <translation type="unfinished">字体：</translation>
+    </message>
+    <message>
+        <source>Min font size:</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Max font size:</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Line spacing:</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Typography</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Control the base font and automatic font-fit limits for generated text.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Text color:</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Color</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Use a fixed text color when the queue renders translated pages.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Horizontal:</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Vertical:</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Alignment</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Align text inside each detected text box.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Style:</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Outline:</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Style and Outline</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Apply emphasis and outline defaults across the series queue.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Render</source>
+        <translation type="unfinished">渲染</translation>
+    </message>
+    <message>
+        <source>Output target:</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Image format:</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Archive format:</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Archive image format:</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Archive compression:</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Final Output</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Choose where the completed translated result is saved.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Raw source text</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Translated text</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Text Exports</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Write OCR and translation text files next to the queue output.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Inpainted image</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Detector overlay</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Raw inpaint mask</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Mask overlay</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Cleanup mask delta</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Debug metadata</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Debug Artifacts</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Only checked debug artifacts are created. When unchecked, the status panel logs that preview generation is disabled.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Export / Debug</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Select Color</source>
         <translation type="unfinished"></translation>
     </message>
 </context>
@@ -3682,11 +3949,51 @@ It may have already been moved, renamed, or deleted.
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>Series Settings…</source>
+        <source>Render: --</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Export: --</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Edit queue, pipeline, render, export, and debug defaults for this series.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Series Design / Global Settings…</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
         <source>Translate in Queue Order</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>left</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>center</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>right</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>outline {width}</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>outline off</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Render: {font} / max {max_font} / line {line_spacing} / {align} / {outline}</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Export: {target} / debug {count} enabled</source>
         <translation type="unfinished"></translation>
     </message>
 </context>
@@ -3765,6 +4072,10 @@ It may have already been moved, renamed, or deleted.
     </message>
     <message>
         <source>Resume</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Open Current Item</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
@@ -3993,10 +4304,6 @@ It may have been moved, renamed, or deleted.
     </message>
     <message>
         <source>Add Folder To Series</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Series Settings</source>
         <translation type="unfinished"></translation>
     </message>
     <message>

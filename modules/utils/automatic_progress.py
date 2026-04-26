@@ -195,12 +195,25 @@ class AutomaticProgressTracker:
         stage_name = str(event.get("stage_name") or "")
         stage_order = {
             "page_start": 0,
+            "start-image": 0,
             "detect": 1,
+            "text-block-detection": 1,
+            "detector_overlay": 1,
             "ocr": 2,
+            "ocr-processing": 2,
             "inpaint": 3,
+            "pre-inpaint-setup": 3,
+            "generate-mask": 3,
+            "inpainting": 3,
+            "raw_mask": 3,
+            "mask_overlay": 3,
+            "cleanup_delta": 3,
+            "inpainted_image": 3,
             "translation": 4,
             "render": 5,
+            "text-rendering-prepare": 5,
             "save": 6,
+            "save-and-finish": 6,
             "page_done": 7,
         }
         units = page_total * 8

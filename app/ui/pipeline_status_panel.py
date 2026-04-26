@@ -10,26 +10,29 @@ def _panel_tr(text: str) -> str:
 
 
 class PipelineInteractionOverlay(QtWidgets.QWidget):
+    DIM_COLOR = QtGui.QColor(10, 12, 16, 31)
+
     def __init__(self, parent=None):
         super().__init__(parent)
+        self.setAttribute(QtCore.Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
+        self.setAttribute(QtCore.Qt.WidgetAttribute.WA_NoSystemBackground, True)
+        self.setAttribute(QtCore.Qt.WidgetAttribute.WA_TranslucentBackground, True)
+        self.setAutoFillBackground(False)
+        self._clear_rects: list[QtCore.QRect] = []
         self.hide()
+
+    def set_clear_rects(self, rects: list[QtCore.QRect]) -> None:
+        self._clear_rects = [QtCore.QRect(rect) for rect in rects if rect and not rect.isEmpty()]
+        self.update()
 
     def paintEvent(self, event: QtGui.QPaintEvent) -> None:  # type: ignore[override]
         painter = QtGui.QPainter(self)
-        painter.setRenderHint(QtGui.QPainter.RenderHint.Antialiasing)
-        painter.fillRect(self.rect(), QtGui.QColor(10, 12, 16, 144))
-
-        card_width = min(max(420, self.width() // 2), 760)
-        card_height = min(max(120, self.height() // 7), 180)
-        card_rect = QtCore.QRect(0, 0, card_width, card_height)
-        card_rect.moveCenter(self.rect().center())
-        card_rect.translate(0, -self.height() // 6)
-
-        painter.setPen(QtGui.QPen(QtGui.QColor(255, 255, 255, 26), 1))
-        painter.setBrush(QtGui.QColor(255, 255, 255, 14))
-        painter.drawRoundedRect(card_rect, 18, 18)
-
-        super().paintEvent(event)
+        if self._clear_rects:
+            region = QtGui.QRegion(self.rect())
+            for rect in self._clear_rects:
+                region -= QtGui.QRegion(rect.adjusted(-4, -4, 4, 4))
+            painter.setClipRegion(region)
+        painter.fillRect(self.rect(), self.DIM_COLOR)
 
 
 class _PreviewLabel(QtWidgets.QLabel):
@@ -51,6 +54,9 @@ class PipelineStatusPanel(QtWidgets.QFrame):
     open_settings_requested = QtCore.Signal()
     report_requested = QtCore.Signal()
     open_output_requested = QtCore.Signal()
+    open_series_board_requested = QtCore.Signal()
+    open_current_series_item_requested = QtCore.Signal()
+    panel_hidden = QtCore.Signal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -79,6 +85,11 @@ class PipelineStatusPanel(QtWidgets.QFrame):
         self._series_queue_pause_requested = False
         self._window_geometry = QtCore.QRect()
         self._embedded_geometry = QtCore.QRect()
+        self._resize_margin = 8
+        self._resize_active = False
+        self._resize_edges = set()
+        self._resize_start_global = QtCore.QPoint()
+        self._resize_start_geometry = QtCore.QRect()
 
         self.setAttribute(QtCore.Qt.WidgetAttribute.WA_QuitOnClose, False)
         self.setObjectName("pipelineStatusPanel")
@@ -245,6 +256,12 @@ class PipelineStatusPanel(QtWidgets.QFrame):
         self.pause_button = QtWidgets.QPushButton(self.tr("Pause"))
         self.pause_button.clicked.connect(self.pause_requested.emit)
 
+        self.series_board_button = QtWidgets.QPushButton(self.tr("Series Board"))
+        self.series_board_button.clicked.connect(self.open_series_board_requested.emit)
+
+        self.current_item_button = QtWidgets.QPushButton(self.tr("Current Item"))
+        self.current_item_button.clicked.connect(self.open_current_series_item_requested.emit)
+
         self.cancel_button = QtWidgets.QPushButton(self.tr("Cancel"))
         self.cancel_button.setObjectName("dangerAction")
         self.cancel_button.clicked.connect(self.cancel_requested.emit)
@@ -268,6 +285,8 @@ class PipelineStatusPanel(QtWidgets.QFrame):
 
         self._action_buttons = [
             self.pause_button,
+            self.series_board_button,
+            self.current_item_button,
             self.cancel_button,
             self.report_button,
             self.retry_button,
@@ -340,6 +359,8 @@ class PipelineStatusPanel(QtWidgets.QFrame):
         self.pause_button.setEnabled(
             self._series_queue_pause_visible and not self._series_queue_pause_requested
         )
+        self.series_board_button.setVisible(self._series_queue_pause_visible)
+        self.current_item_button.setVisible(self._series_queue_pause_visible)
         self._apply_state(self._current_state)
 
     def display_mode(self) -> str:
@@ -445,6 +466,8 @@ class PipelineStatusPanel(QtWidgets.QFrame):
         if watched is self.header_widget and self._display_mode == self.EMBEDDED_MODE:
             if event.type() == QtCore.QEvent.Type.MouseButtonPress:
                 mouse_event = event
+                if self._resize_edges_for_pos(self.mapFromGlobal(mouse_event.globalPosition().toPoint())):
+                    return False
                 if mouse_event.button() == QtCore.Qt.MouseButton.LeftButton:
                     self._drag_active = True
                     self._drag_offset = mouse_event.globalPosition().toPoint() - self.mapToGlobal(self.rect().topLeft())
@@ -465,10 +488,87 @@ class PipelineStatusPanel(QtWidgets.QFrame):
                 return True
         return super().eventFilter(watched, event)
 
+    def _resize_edges_for_pos(self, pos: QtCore.QPoint) -> set[str]:
+        if self._display_mode != self.EMBEDDED_MODE:
+            return set()
+        rect = self.rect()
+        margin = self._resize_margin
+        edges: set[str] = set()
+        if pos.x() <= rect.left() + margin:
+            edges.add("left")
+        elif pos.x() >= rect.right() - margin:
+            edges.add("right")
+        if pos.y() <= rect.top() + margin:
+            edges.add("top")
+        elif pos.y() >= rect.bottom() - margin:
+            edges.add("bottom")
+        return edges
+
+    def _cursor_for_edges(self, edges: set[str]) -> QtCore.Qt.CursorShape:
+        if {"left", "top"}.issubset(edges) or {"right", "bottom"}.issubset(edges):
+            return QtCore.Qt.CursorShape.SizeFDiagCursor
+        if {"right", "top"}.issubset(edges) or {"left", "bottom"}.issubset(edges):
+            return QtCore.Qt.CursorShape.SizeBDiagCursor
+        if "left" in edges or "right" in edges:
+            return QtCore.Qt.CursorShape.SizeHorCursor
+        if "top" in edges or "bottom" in edges:
+            return QtCore.Qt.CursorShape.SizeVerCursor
+        return QtCore.Qt.CursorShape.ArrowCursor
+
+    def mousePressEvent(self, event: QtGui.QMouseEvent) -> None:  # type: ignore[override]
+        if event.button() == QtCore.Qt.MouseButton.LeftButton and self._display_mode == self.EMBEDDED_MODE:
+            edges = self._resize_edges_for_pos(event.position().toPoint())
+            if edges:
+                self._resize_active = True
+                self._resize_edges = edges
+                self._resize_start_global = event.globalPosition().toPoint()
+                self._resize_start_geometry = QtCore.QRect(self.geometry())
+                self._user_positioned = True
+                event.accept()
+                return
+        super().mousePressEvent(event)
+
+    def mouseMoveEvent(self, event: QtGui.QMouseEvent) -> None:  # type: ignore[override]
+        if self._resize_active and self._display_mode == self.EMBEDDED_MODE:
+            delta = event.globalPosition().toPoint() - self._resize_start_global
+            rect = QtCore.QRect(self._resize_start_geometry)
+            if "left" in self._resize_edges:
+                rect.setLeft(rect.left() + delta.x())
+            if "right" in self._resize_edges:
+                rect.setRight(rect.right() + delta.x())
+            if "top" in self._resize_edges:
+                rect.setTop(rect.top() + delta.y())
+            if "bottom" in self._resize_edges:
+                rect.setBottom(rect.bottom() + delta.y())
+            self.setGeometry(self._clamp_embedded_geometry(rect))
+            event.accept()
+            return
+        edges = self._resize_edges_for_pos(event.position().toPoint())
+        self.setCursor(QtGui.QCursor(self._cursor_for_edges(edges)))
+        super().mouseMoveEvent(event)
+
+    def mouseReleaseEvent(self, event: QtGui.QMouseEvent) -> None:  # type: ignore[override]
+        if self._resize_active and event.button() == QtCore.Qt.MouseButton.LeftButton:
+            self._resize_active = False
+            self._resize_edges = set()
+            self.unsetCursor()
+            event.accept()
+            return
+        super().mouseReleaseEvent(event)
+
+    def leaveEvent(self, event: QtCore.QEvent) -> None:  # type: ignore[override]
+        if not self._resize_active:
+            self.unsetCursor()
+        super().leaveEvent(event)
+
     def showEvent(self, event: QtGui.QShowEvent) -> None:  # type: ignore[override]
         if not self._user_positioned:
             self._position_from_anchor()
         super().showEvent(event)
+
+    def hideEvent(self, event: QtGui.QHideEvent) -> None:  # type: ignore[override]
+        super().hideEvent(event)
+        self.panel_hidden.emit()
 
     def resizeEvent(self, event: QtGui.QResizeEvent) -> None:  # type: ignore[override]
         super().resizeEvent(event)
@@ -645,6 +745,7 @@ class PipelineStatusPanel(QtWidgets.QFrame):
     def update_event(self, event: dict) -> None:
         phase = str(event.get("phase") or "")
         status = str(event.get("status") or "")
+        panel_state = str(event.get("panel_state") or "").strip().lower()
         page_total = int(event.get("page_total") or 0)
         page_index = event.get("page_index")
         service_key = str(event.get("service") or "-")
@@ -652,7 +753,9 @@ class PipelineStatusPanel(QtWidgets.QFrame):
             "batch": self.tr("Automatic"),
             "gemma": "Gemma",
             "paddleocr_vl": "PaddleOCR VL",
+            "paddleocr-vl": "PaddleOCR VL",
             "hunyuanocr": "HunyuanOCR",
+            "mangalmm": "MangaLMM",
         }
 
         self.cancel_auto_close()
@@ -672,25 +775,31 @@ class PipelineStatusPanel(QtWidgets.QFrame):
         self.file_value.setText(str(event.get("image_name") or "-"))
         self.eta_value.setText(str(event.get("eta_text") or self.tr("Calculating")))
         self.message_value.setText(str(event.get("message") or "-"))
-        self._set_preview_path(event.get("preview_path"))
+        if "preview_path" in event:
+            preview_path = str(event.get("preview_path") or "").strip()
+            if preview_path or bool(event.get("clear_preview", False)):
+                self._set_preview_path(preview_path)
 
         detail = str(event.get("detail") or "")
         log_line = str(event.get("message") or detail or "")
         if log_line:
             self._append_log(log_line)
 
-        if phase == "done" or status == "completed":
+        if phase == "done" or panel_state == "done":
             self._pipeline_active = False
             self._apply_state("done")
             auto_hide_ms = int(event.get("auto_hide_ms") or 0)
             if auto_hide_ms > 0:
                 self.schedule_auto_close(auto_hide_ms)
-        elif status == "failed" or phase == "error":
+        elif panel_state == "failed" or status == "failed" or phase == "error":
             self._pipeline_active = False
             self._apply_state("failed")
-        elif status == "cancelled":
+        elif panel_state == "cancelled" or status == "cancelled":
             self._pipeline_active = False
             self._apply_state("cancelled")
+        elif panel_state == "cancelling" or status == "cancelling":
+            self._pipeline_active = True
+            self._apply_state("cancelling")
         else:
             self._pipeline_active = True
             self._apply_state("running")
@@ -753,19 +862,23 @@ class PipelineStatusPanel(QtWidgets.QFrame):
         state_map = {
             "idle": self.tr("Idle"),
             "running": self.tr("Running"),
+            "cancelling": self.tr("Running"),
             "done": self.tr("Done"),
             "failed": self.tr("Failed"),
             "cancelled": self.tr("Cancelled"),
         }
         self.title_label.setText(
             self.tr("Pipeline Status")
-            if state in {"idle", "running", "done", "failed", "cancelled"}
+            if state in {"idle", "running", "cancelling", "done", "failed", "cancelled"}
             else self.tr("Status")
         )
         self.state_label.setText(state_map.get(state, state))
         self.pause_button.setVisible(state == "running" and self._series_queue_pause_visible)
-        self.cancel_button.setVisible(state == "running")
-        self.report_button.setVisible(state in {"running", "done", "failed", "cancelled"})
+        self.series_board_button.setVisible(state == "running" and self._series_queue_pause_visible)
+        self.current_item_button.setVisible(state == "running" and self._series_queue_pause_visible)
+        self.cancel_button.setVisible(state in {"running", "cancelling"})
+        self.cancel_button.setEnabled(state == "running")
+        self.report_button.setVisible(state in {"running", "cancelling", "done", "failed", "cancelled"})
         self.retry_button.setVisible(state == "failed")
         self.settings_button.setVisible(state == "failed")
         self.open_output_button.setVisible(state == "done" and self.has_output_root())
