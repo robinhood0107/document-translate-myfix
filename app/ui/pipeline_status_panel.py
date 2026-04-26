@@ -15,10 +15,23 @@ class PipelineInteractionOverlay(QtWidgets.QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setAttribute(QtCore.Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
+        self.setAttribute(QtCore.Qt.WidgetAttribute.WA_NoSystemBackground, True)
+        self.setAttribute(QtCore.Qt.WidgetAttribute.WA_TranslucentBackground, True)
+        self.setAutoFillBackground(False)
+        self._clear_rects: list[QtCore.QRect] = []
         self.hide()
+
+    def set_clear_rects(self, rects: list[QtCore.QRect]) -> None:
+        self._clear_rects = [QtCore.QRect(rect) for rect in rects if rect and not rect.isEmpty()]
+        self.update()
 
     def paintEvent(self, event: QtGui.QPaintEvent) -> None:  # type: ignore[override]
         painter = QtGui.QPainter(self)
+        if self._clear_rects:
+            region = QtGui.QRegion(self.rect())
+            for rect in self._clear_rects:
+                region -= QtGui.QRegion(rect.adjusted(-4, -4, 4, 4))
+            painter.setClipRegion(region)
         painter.fillRect(self.rect(), self.DIM_COLOR)
 
 
@@ -43,6 +56,7 @@ class PipelineStatusPanel(QtWidgets.QFrame):
     open_output_requested = QtCore.Signal()
     open_series_board_requested = QtCore.Signal()
     open_current_series_item_requested = QtCore.Signal()
+    panel_hidden = QtCore.Signal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -551,6 +565,10 @@ class PipelineStatusPanel(QtWidgets.QFrame):
         if not self._user_positioned:
             self._position_from_anchor()
         super().showEvent(event)
+
+    def hideEvent(self, event: QtGui.QHideEvent) -> None:  # type: ignore[override]
+        super().hideEvent(event)
+        self.panel_hidden.emit()
 
     def resizeEvent(self, event: QtGui.QResizeEvent) -> None:  # type: ignore[override]
         super().resizeEvent(event)

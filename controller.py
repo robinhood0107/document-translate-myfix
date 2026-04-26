@@ -1873,7 +1873,7 @@ class ComicTranslate(ComicTranslateUI):
         panel.set_series_queue_pause_visible(False, pause_requested=False)
         panel.set_output_root(self._last_batch_output_root)
         if was_cancelled:
-            self.set_pipeline_overlay_active(False)
+            self.set_pipeline_overlay_active(True)
             panel.update_event({
                 "phase": "done",
                 "service": "batch",
@@ -1893,7 +1893,7 @@ class ComicTranslate(ComicTranslateUI):
                 }
             )
         elif failed:
-            self.set_pipeline_overlay_active(False)
+            self.set_pipeline_overlay_active(True)
             panel.show()
             panel.raise_()
             notify_pipeline_event(
@@ -1908,7 +1908,7 @@ class ComicTranslate(ComicTranslateUI):
                 }
             )
         else:
-            self.set_pipeline_overlay_active(False)
+            self.set_pipeline_overlay_active(True)
             self._automatic_progress_tracker.record_batch_completion(success=True, total_images=total_images)
             self.on_runtime_progress_update({
                 "phase": "done",
