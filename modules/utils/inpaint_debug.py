@@ -271,17 +271,21 @@ def build_inpaint_debug_metadata(
     }
 
 
-def _write_image(base_dir: str, folder: str, archive_bname: str, filename: str, image: np.ndarray) -> None:
+def _write_image(base_dir: str, folder: str, archive_bname: str, filename: str, image: np.ndarray) -> str:
     target_dir = os.path.join(base_dir, folder, archive_bname)
     os.makedirs(target_dir, exist_ok=True)
-    imk.write_image(os.path.join(target_dir, filename), image)
+    path = os.path.join(target_dir, filename)
+    imk.write_image(path, image)
+    return path
 
 
-def _write_json(base_dir: str, folder: str, archive_bname: str, filename: str, payload: dict) -> None:
+def _write_json(base_dir: str, folder: str, archive_bname: str, filename: str, payload: dict) -> str:
     target_dir = os.path.join(base_dir, folder, archive_bname)
     os.makedirs(target_dir, exist_ok=True)
-    with open(os.path.join(target_dir, filename), "w", encoding="utf-8") as fh:
+    path = os.path.join(target_dir, filename)
+    with open(path, "w", encoding="utf-8") as fh:
         json.dump(payload, fh, ensure_ascii=False, indent=2)
+    return path
 
 
 def export_inpaint_debug_artifacts(
@@ -296,18 +300,19 @@ def export_inpaint_debug_artifacts(
     mask_overlay_mask: np.ndarray | None = None,
     cleanup_delta: np.ndarray | None = None,
     metadata: dict | None = None,
-) -> None:
+) -> dict[str, str]:
     settings = export_settings or {}
     if not has_debug_exports(settings):
-        return
+        return {}
 
     image_rgb = ensure_three_channel(image)
     normalized_raw_mask = _normalize_mask(raw_mask, image_rgb.shape)
     normalized_mask_overlay = _normalize_mask(mask_overlay_mask, image_rgb.shape)
     normalized_cleanup_delta = _normalize_mask(cleanup_delta, image_rgb.shape)
+    written: dict[str, str] = {}
 
     if settings.get("export_detector_overlay", False):
-        _write_image(
+        written["detector_overlay"] = _write_image(
             export_root,
             "detector_overlays",
             archive_bname,
@@ -316,7 +321,7 @@ def export_inpaint_debug_artifacts(
         )
 
     if settings.get("export_raw_mask", False):
-        _write_image(
+        written["raw_mask"] = _write_image(
             export_root,
             "raw_masks",
             archive_bname,
@@ -325,7 +330,7 @@ def export_inpaint_debug_artifacts(
         )
 
     if settings.get("export_mask_overlay", False):
-        _write_image(
+        written["mask_overlay"] = _write_image(
             export_root,
             "mask_overlays",
             archive_bname,
@@ -334,7 +339,7 @@ def export_inpaint_debug_artifacts(
         )
 
     if settings.get("export_cleanup_mask_delta", False):
-        _write_image(
+        written["cleanup_delta"] = _write_image(
             export_root,
             "cleanup_mask_delta",
             archive_bname,
@@ -343,10 +348,11 @@ def export_inpaint_debug_artifacts(
         )
 
     if settings.get("export_debug_metadata", False):
-        _write_json(
+        written["debug_metadata"] = _write_json(
             export_root,
             "debug_metadata",
             archive_bname,
             f"{page_base_name}_debug.json",
             metadata or {},
         )
+    return written

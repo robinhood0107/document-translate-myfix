@@ -27,6 +27,7 @@ from modules.utils.correction_dictionary import (
 )
 from modules.utils.ocr_debug import export_ocr_debug_artifacts
 from modules.utils.inpaint_debug import (
+    build_detector_overlay,
     build_inpaint_debug_metadata,
     export_inpaint_debug_artifacts,
 )
@@ -41,21 +42,22 @@ from modules.utils.automatic_output import (
     build_archive_page_file_name,
     build_archive_staging_dir,
     build_output_file_name,
-    is_individual_images_mode,
     is_single_archive_mode,
     write_archive_image,
     write_output_image,
 )
 from modules.utils.render_style_policy import (
     VERTICAL_ALIGNMENT_TOP,
-    build_rect_tuple,
     resolve_render_text_color,
 )
 from modules.utils.translator_utils import get_raw_translation, get_raw_text, format_translations
 from modules.rendering.render import (
+    build_render_rects_for_block,
+    build_text_item_layout_geometry,
     describe_render_text_sanitization,
     describe_render_text_markup,
     get_best_render_area,
+    get_render_fit_clearance_for_block,
     is_vertical_block,
     pyside_word_wrap,
 )
@@ -294,6 +296,122 @@ class BatchProcessor:
     def _effective_export_settings(self, settings_page) -> dict:
         return dict(self.main_page.get_resolved_export_settings())
 
+    def _preview_export_key(self, stage_key: str) -> str:
+        return {
+            "detector_overlay": "export_detector_overlay",
+            "raw_mask": "export_raw_mask",
+            "mask_overlay": "export_mask_overlay",
+            "cleanup_delta": "export_cleanup_mask_delta",
+            "inpainted_image": "export_inpainted_image",
+        }.get(stage_key, "")
+
+    def _preview_export_enabled(self, export_settings: dict | None, stage_key: str) -> bool:
+        export_key = self._preview_export_key(stage_key)
+        return bool(export_key and (export_settings or {}).get(export_key, False))
+
+    def _emit_intermediate_preview(
+        self,
+        *,
+        index: int,
+        total: int,
+        image_path: str,
+        stage_key: str,
+        stage_label: str,
+        preview_path: str,
+        temporary: bool = False,
+    ) -> None:
+        if not preview_path:
+            return
+        self._report_runtime_progress(
+            phase="pipeline",
+            service="batch",
+            status="running",
+            step_key=f"preview_{stage_key}",
+            stage_name=stage_key,
+            message=f"{index + 1}/{total} 페이지 {stage_label} 미리보기를 표시합니다.",
+            page_index=index,
+            page_total=total,
+            image_name=os.path.basename(image_path),
+            preview_path=preview_path,
+            preview_stage=stage_key,
+            preview_kind=stage_label,
+            temporary_preview=bool(temporary),
+        )
+
+    def _emit_intermediate_preview_disabled(
+        self,
+        *,
+        stage_key: str,
+        stage_label: str,
+        index: int,
+        total: int,
+        image_path: str,
+    ) -> None:
+        notices = getattr(self.main_page, "_intermediate_preview_disabled_notices", None)
+        if notices is None:
+            notices = set()
+            setattr(self.main_page, "_intermediate_preview_disabled_notices", notices)
+        if stage_key in notices:
+            return
+        notices.add(stage_key)
+        self._report_runtime_progress(
+            phase="pipeline",
+            service="batch",
+            status="running",
+            step_key=f"preview_{stage_key}_disabled",
+            stage_name=stage_key,
+            message=f"{stage_label} 미리보기: 디버그 export의 해당 체크가 꺼져 있어 생성하지 않습니다.",
+            detail=f"{self._preview_export_key(stage_key) or stage_key}=False",
+            page_index=index,
+            page_total=total,
+            image_name=os.path.basename(image_path),
+            preview_disabled_reason="intermediate_preview_disabled",
+        )
+
+    def _maybe_emit_preview_image(
+        self,
+        *,
+        index: int,
+        total: int,
+        image_path: str,
+        stage_key: str,
+        stage_label: str,
+        export_settings: dict | None,
+        preferred_path: str = "",
+    ) -> None:
+        if not self._preview_export_enabled(export_settings, stage_key):
+            self._emit_intermediate_preview_disabled(
+                stage_key=stage_key,
+                stage_label=stage_label,
+                index=index,
+                total=total,
+                image_path=image_path,
+            )
+            return
+        if preferred_path and os.path.isfile(preferred_path):
+            self._emit_intermediate_preview(
+                index=index,
+                total=total,
+                image_path=image_path,
+                stage_key=stage_key,
+                stage_label=stage_label,
+                preview_path=preferred_path,
+                temporary=False,
+            )
+            return
+        self._report_runtime_progress(
+            phase="pipeline",
+            service="batch",
+            status="running",
+            step_key=f"preview_{stage_key}_missing",
+            stage_name=stage_key,
+            message=f"{stage_label} 미리보기 파일을 찾지 못해 표시하지 못했습니다.",
+            page_index=index,
+            page_total=total,
+            image_name=os.path.basename(image_path),
+            preview_disabled_reason="preview_file_missing",
+        )
+
     def _resolve_export_token(self, directory: str, base_timestamp: str) -> str:
         cache = getattr(self, "_export_run_tokens", None)
         if cache is None:
@@ -361,6 +479,56 @@ class BatchProcessor:
                 base_arr = base_arr[:, :, 0]
         return np.where((final_arr > 0) & (base_arr <= 0), 255, 0).astype(np.uint8)
 
+    def _write_inpainted_debug_image(
+        self,
+        *,
+        export_root: str,
+        archive_bname: str,
+        image_path: str,
+        cleaned_image,
+        export_settings: dict,
+    ) -> str:
+        if not export_settings.get("export_inpainted_image", False):
+            return ""
+        page_base_name = os.path.splitext(os.path.basename(image_path))[0]
+        output_dir = os.path.join(export_root, "inpainted_images", archive_bname)
+        os.makedirs(output_dir, exist_ok=True)
+        output_path = os.path.join(
+            output_dir,
+            build_output_file_name(
+                page_base_name,
+                "cleaned",
+                image_path,
+                export_settings,
+            ),
+        )
+        write_output_image(
+            output_path,
+            cleaned_image,
+            source_path=image_path,
+            resolved_settings=export_settings,
+        )
+        return output_path
+
+    def _write_detector_overlay_debug_image(
+        self,
+        *,
+        export_root: str,
+        archive_bname: str,
+        image_path: str,
+        image,
+        blk_list,
+        export_settings: dict,
+    ) -> str:
+        if not export_settings.get("export_detector_overlay", False):
+            return ""
+        page_base_name = os.path.splitext(os.path.basename(image_path))[0]
+        output_dir = os.path.join(export_root, "detector_overlays", archive_bname)
+        os.makedirs(output_dir, exist_ok=True)
+        output_path = os.path.join(output_dir, f"{page_base_name}_detector_overlay.png")
+        imk.write_image(output_path, build_detector_overlay(image, blk_list or []))
+        return output_path
+
     def _write_inpaint_debug_exports(
         self,
         *,
@@ -380,7 +548,7 @@ class BatchProcessor:
         cleanup_stats: dict | None,
         mask_details: dict | None = None,
         inpainter_backend: str = "unknown",
-    ) -> None:
+    ) -> dict[str, str]:
         mask_details = mask_details or {}
         base_mask = mask_details.get("legacy_base_mask", raw_mask if raw_mask is not None else mask_details.get("final_mask", final_mask))
         cleanup_delta = self._build_cleanup_delta_mask(base_mask, final_mask)
@@ -413,7 +581,7 @@ class BatchProcessor:
             hard_box_applied_count=int(mask_details.get("hard_box_applied_count", 0) or 0),
             hard_box_reason_totals=dict(mask_details.get("hard_box_reason_totals", {}) or {}),
         )
-        export_inpaint_debug_artifacts(
+        return export_inpaint_debug_artifacts(
             export_root=export_root,
             archive_bname=archive_bname,
             page_base_name=os.path.splitext(os.path.basename(image_path))[0],
@@ -766,6 +934,23 @@ class BatchProcessor:
                     detector_key=detector_key,
                     detector_engine=detector_engine,
                 )
+                detector_overlay_path = self._write_detector_overlay_debug_image(
+                    export_root=export_root,
+                    archive_bname=archive_bname,
+                    image_path=image_path,
+                    image=image,
+                    blk_list=blk_list,
+                    export_settings=export_settings,
+                )
+                self._maybe_emit_preview_image(
+                    index=index,
+                    total=total_images,
+                    image_path=image_path,
+                    stage_key="detector_overlay",
+                    stage_label="텍스트 감지",
+                    export_settings=export_settings,
+                    preferred_path=detector_overlay_path,
+                )
             else:
                 self._emit_benchmark_event(
                     "detect_end",
@@ -1073,42 +1258,20 @@ class BatchProcessor:
                 config,
             )
 
-            # Saving cleaned image
             patches = self.inpainting.get_inpainted_patches(mask, inpaint_input_img)
             self.main_page.patches_processed.emit(patches, image_path)
 
-            # inpaint_input_img is already in RGB format
-
-            if export_settings['export_inpainted_image'] and is_individual_images_mode(export_settings):
-                path = self.main_page.get_automatic_output_series_dir(
-                    directory,
-                    anchor_path=self.main_page.image_files[0] if self.main_page.image_files else image_path,
-                )
-                os.makedirs(path, exist_ok=True)
-                cleaned_output_path = os.path.join(
-                    path,
-                    build_output_file_name(
-                        base_name,
-                        "cleaned",
-                        image_path,
-                        export_settings,
-                    ),
-                )
-                write_output_image(
-                    cleaned_output_path,
-                    inpaint_input_img,
-                    source_path=image_path,
-                    resolved_settings=export_settings,
-                )
-                self.main_page.image_ctrl.update_processing_summary(
-                    image_path,
-                    {"cleaned_image_path": cleaned_output_path},
-                )
-            elif not is_individual_images_mode(export_settings):
-                self.main_page.image_ctrl.update_processing_summary(
-                    image_path,
-                    {"cleaned_image_path": ""},
-                )
+            cleaned_output_path = self._write_inpainted_debug_image(
+                export_root=export_root,
+                archive_bname=archive_bname,
+                image_path=image_path,
+                cleaned_image=inpaint_input_img,
+                export_settings=export_settings,
+            )
+            self.main_page.image_ctrl.update_processing_summary(
+                image_path,
+                {"cleaned_image_path": cleaned_output_path},
+            )
             self.main_page.image_ctrl.update_processing_summary(
                 image_path,
                 {
@@ -1119,7 +1282,7 @@ class BatchProcessor:
                     "cleanup_block_count": int(cleanup_stats.get("block_count", 0) or 0),
                 },
             )
-            self._write_inpaint_debug_exports(
+            debug_paths = self._write_inpaint_debug_exports(
                 export_root=export_root,
                 archive_bname=archive_bname,
                 image_path=image_path,
@@ -1136,6 +1299,42 @@ class BatchProcessor:
                 cleanup_stats=cleanup_stats,
                 mask_details=mask_details,
                 inpainter_backend=inpainter_backend,
+            )
+            self._maybe_emit_preview_image(
+                index=index,
+                total=total_images,
+                image_path=image_path,
+                stage_key="raw_mask",
+                stage_label="원본 마스크",
+                export_settings=export_settings,
+                preferred_path=debug_paths.get("raw_mask", ""),
+            )
+            self._maybe_emit_preview_image(
+                index=index,
+                total=total_images,
+                image_path=image_path,
+                stage_key="mask_overlay",
+                stage_label="마스크 오버레이",
+                export_settings=export_settings,
+                preferred_path=debug_paths.get("mask_overlay", ""),
+            )
+            self._maybe_emit_preview_image(
+                index=index,
+                total=total_images,
+                image_path=image_path,
+                stage_key="cleanup_delta",
+                stage_label="정리 마스크 변화량",
+                export_settings=export_settings,
+                preferred_path=debug_paths.get("cleanup_delta", ""),
+            )
+            self._maybe_emit_preview_image(
+                index=index,
+                total=total_images,
+                image_path=image_path,
+                stage_key="inpainted_image",
+                stage_label="인페인트 결과",
+                export_settings=export_settings,
+                preferred_path=cleaned_output_path,
             )
             self.main_page.image_ctrl.mark_processing_stage(
                 image_path,
@@ -1161,6 +1360,17 @@ class BatchProcessor:
             extra_context = settings_page.get_llm_settings()['extra_context']
             translator_key = settings_page.get_tool_selection('translator')
             translator = Translator(self.main_page, source_lang, target_lang)
+            self._report_runtime_progress(
+                phase="pipeline",
+                service="gemma" if "gemma" in str(translator_key).lower() else "batch",
+                status="running",
+                step_key="translation",
+                stage_name="translation",
+                message=f"{index + 1}/{total_images} 페이지 번역 중...",
+                page_index=index,
+                page_total=total_images,
+                image_name=os.path.basename(image_path),
+            )
             self._emit_benchmark_event(
                 "translate_start",
                 image_path=image_path,
@@ -1412,13 +1622,34 @@ class BatchProcessor:
                     max_font_size, 
                     min_font_size,
                     vertical,
+                    fit_clearance=get_render_fit_clearance_for_block(
+                        blk,
+                        outline_width,
+                    ),
                     return_metrics=True
                 )
                 
                 # Language-specific formatting for state storage
                 if is_no_space_lang(trg_lng_cd):
                     translation = translation.replace(' ', '')
-                render_markup = describe_render_text_markup(translation)
+                font_color = resolve_render_text_color(
+                    blk.font_color,
+                    setting_font_color,
+                    render_settings.force_font_color,
+                    render_settings.smart_global_apply_all,
+                )
+                render_markup = describe_render_text_markup(
+                    translation,
+                    font_family=font,
+                    font_size=font_size,
+                    text_color=font_color,
+                    alignment=alignment,
+                    line_spacing=line_spacing,
+                    bold=bold,
+                    italic=italic,
+                    underline=underline,
+                    direction=direction,
+                )
                 blk._render_text = str(translation or "")
                 blk._render_html = str(
                     render_markup.html_text if render_markup.html_applied else translation or ""
@@ -1442,14 +1673,12 @@ class BatchProcessor:
                 if image_path == file_on_display:
                     self.main_page.blk_rendered.emit(translation, font_size, blk, image_path)
 
-                # Smart Color Override
-                font_color = resolve_render_text_color(
-                    blk.font_color,
-                    setting_font_color,
-                    render_settings.force_font_color,
-                    render_settings.smart_global_apply_all,
+                source_rect, block_anchor = build_render_rects_for_block(blk)
+                position, item_width, item_height = build_text_item_layout_geometry(
+                    source_rect,
+                    rendered_height,
+                    vertical_alignment,
                 )
-                source_rect = build_rect_tuple(x1, y1, block_width, block_height)
 
                 # Use TextItemProperties for consistent text item creation
                 text_props = TextItemProperties(
@@ -1464,17 +1693,17 @@ class BatchProcessor:
                     bold=bold,
                     italic=italic,
                     underline=underline,
-                    position=(x1, y1),
+                    position=position,
                     rotation=blk.angle,
                     scale=1.0,
                     transform_origin=blk.tr_origin_point,
-                    width=rendered_width,
-                    height=rendered_height,
+                    width=item_width,
+                    height=item_height,
                     direction=direction,
                     vertical=vertical,
                     vertical_alignment=vertical_alignment,
                     source_rect=source_rect,
-                    block_anchor=source_rect,
+                    block_anchor=block_anchor,
                     selection_outlines=[
                         OutlineInfo(0, len(translation), 
                         outline_color, 
@@ -1490,6 +1719,18 @@ class BatchProcessor:
                 )
                 text_item_state["render_fallback_font_family"] = str(
                     render_markup.fallback_font_family or ""
+                )
+                text_item_state["render_area_source"] = str(
+                    getattr(blk, "_render_area_source", "text_bbox") or "text_bbox"
+                )
+                text_item_state["render_source_xyxy"] = list(
+                    getattr(blk, "_render_area_xyxy", []) or []
+                )
+                text_item_state["render_anchor_xyxy"] = list(
+                    getattr(blk, "_render_original_xyxy", []) or []
+                )
+                text_item_state["render_bubble_xyxy"] = list(
+                    getattr(blk, "_render_bubble_xyxy", []) or []
                 )
                 text_item_state["render_normalization_applied"] = bool(
                     blk._render_normalization_applied

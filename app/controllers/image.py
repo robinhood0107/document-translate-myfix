@@ -1490,6 +1490,8 @@ class ImageStateController:
             for data in viewer_state.get('text_items_state', []):
                 viewer.add_text_item(data)
 
+            self.load_patch_state(file_path)
+
             if viewer_state.get('push_to_stack', False):
                 stack = self.main.undo_stacks.get(file_path)
                 if stack:

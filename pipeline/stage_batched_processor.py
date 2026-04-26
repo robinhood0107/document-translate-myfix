@@ -4,8 +4,9 @@ import json
 import logging
 import os
 import time
+from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Callable
 
 import imkit as imk
 from PySide6.QtCore import QCoreApplication
@@ -23,15 +24,17 @@ from modules.ocr.selection import (
     resolve_stage_batched_ocr_policy,
 )
 from modules.rendering.render import (
+    build_render_rects_for_block,
+    build_text_item_layout_geometry,
     describe_render_text_markup,
     describe_render_text_sanitization,
     get_best_render_area,
+    get_render_fit_clearance_for_block,
     is_vertical_block,
     pyside_word_wrap,
 )
 from modules.translation.local_runtime import LocalGemmaRuntimeManager
 from modules.translation.processor import Translator
-from modules.utils.automatic_output import is_individual_images_mode
 from modules.utils.correction_dictionary import (
     apply_ocr_result_dictionary,
     apply_translation_result_dictionary,
@@ -42,6 +45,7 @@ from modules.utils.export_paths import (
     reserve_export_run_token,
     resolve_export_directory,
 )
+from modules.utils.exceptions import OperationCancelledError
 from modules.utils.image_utils import generate_mask
 from modules.utils.inpaint_cleanup import refine_bubble_residue_inpaint
 from modules.utils.language_utils import get_language_code, is_no_space_lang, language_codes
@@ -49,7 +53,6 @@ from modules.utils.ocr_quality import summarize_ocr_quality
 from modules.utils.pipeline_config import get_config, get_inpainter_runtime, inpaint_map
 from modules.utils.render_style_policy import (
     VERTICAL_ALIGNMENT_TOP,
-    build_rect_tuple,
     resolve_render_text_color,
 )
 from modules.utils.textblock import sort_blk_list
@@ -98,6 +101,162 @@ class StageBatchedProcessor(BatchProcessor):
     def __init__(self, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
         self._timestamp: str = ""
+        self._prewarm_executor: ThreadPoolExecutor | None = None
+        self._prewarm_jobs: dict[str, Future] = {}
+
+    def _stage_tr(self, text: str) -> str:
+        return QCoreApplication.translate("StageBatchedProcessor", text)
+
+    def _prewarm_progress(self, **payload: Any) -> None:
+        payload.setdefault("phase", "runtime_prewarm")
+        payload.setdefault("service", "batch")
+        payload.setdefault("status", "running")
+        payload["runtime_prewarm"] = True
+        self._report_runtime_progress(**payload)
+
+    def _raise_if_cancelled(self) -> None:
+        checker = getattr(self.main_page, "is_current_task_cancelled", None)
+        try:
+            cancelled = bool(checker()) if callable(checker) else bool(self._is_cancelled())
+        except Exception:
+            cancelled = bool(self._is_cancelled())
+        if cancelled:
+            raise OperationCancelledError("Automatic translation was cancelled.")
+
+    def _ensure_prewarm_executor(self) -> ThreadPoolExecutor:
+        if self._prewarm_executor is None:
+            self._prewarm_executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="ct-stage-prewarm")
+        return self._prewarm_executor
+
+    def _start_prewarm(self, key: str, label: str, service: str, fn: Callable[[], None]) -> None:
+        if key in self._prewarm_jobs:
+            return
+        self._raise_if_cancelled()
+        self._prewarm_progress(
+            service=service,
+            status="starting",
+            step_key=f"{key}_prewarm",
+            message=self._stage_tr("{label} Docker 예열을 시작합니다.").format(label=label),
+        )
+
+        def runner() -> None:
+            fn()
+            self._prewarm_progress(
+                service=service,
+                status="ready",
+                step_key=f"{key}_prewarm_ready",
+                message=self._stage_tr("{label} Docker 예열이 완료되었습니다.").format(label=label),
+            )
+
+        self._prewarm_jobs[key] = self._ensure_prewarm_executor().submit(runner)
+
+    def _await_prewarm_or_run(
+        self,
+        key: str,
+        label: str,
+        service: str,
+        fallback: Callable[[], None],
+    ) -> None:
+        self._raise_if_cancelled()
+        job = self._prewarm_jobs.pop(key, None)
+        if job is None:
+            fallback()
+            self._raise_if_cancelled()
+            return
+        try:
+            job.result()
+        except OperationCancelledError:
+            raise
+        except Exception as exc:
+            self._raise_if_cancelled()
+            logger.warning("%s prewarm failed; falling back to synchronous startup: %s", label, exc)
+            self._prewarm_progress(
+                service=service,
+                status="running",
+                runtime_prewarm_status="failed",
+                step_key=f"{key}_prewarm_failed",
+                message=self._stage_tr("{label} 예열 실패. 해당 단계에서 다시 준비합니다.").format(label=label),
+                detail=str(exc),
+            )
+            fallback()
+        self._raise_if_cancelled()
+
+    def _shutdown_prewarm_executor(self) -> None:
+        executor = self._prewarm_executor
+        self._prewarm_executor = None
+        self._prewarm_jobs.clear()
+        if executor is not None:
+            executor.shutdown(wait=False, cancel_futures=True)
+
+    def _start_ocr_prewarm(self, policy: dict[str, Any]) -> None:
+        runtime_manager = getattr(self.main_page, "local_ocr_runtime_manager", None)
+        if not isinstance(runtime_manager, LocalOCRRuntimeManager):
+            return
+        settings_page = self.main_page.settings_page
+        engine_key = str(policy["primary_ocr_engine"])
+        service = "paddleocr_vl" if "paddle" in engine_key.lower() else "hunyuanocr" if "hunyuan" in engine_key.lower() else engine_key.lower()
+        self._start_prewarm(
+            "ocr",
+            "OCR",
+            service,
+            lambda: runtime_manager.ensure_engine(
+                engine_key,
+                settings_page,
+                progress_callback=getattr(self.main_page, "report_runtime_progress", None),
+                cancel_checker=getattr(self.main_page, "is_current_task_cancelled", None),
+            ),
+        )
+
+    def _await_ocr_runtime(self, policy: dict[str, Any]) -> None:
+        runtime_manager = getattr(self.main_page, "local_ocr_runtime_manager", None)
+        if not isinstance(runtime_manager, LocalOCRRuntimeManager):
+            return
+        settings_page = self.main_page.settings_page
+        engine_key = str(policy["primary_ocr_engine"])
+        service = "paddleocr_vl" if "paddle" in engine_key.lower() else "hunyuanocr" if "hunyuan" in engine_key.lower() else engine_key.lower()
+        self._await_prewarm_or_run(
+            "ocr",
+            "OCR",
+            service,
+            lambda: runtime_manager.ensure_engine(
+                engine_key,
+                settings_page,
+                progress_callback=getattr(self.main_page, "report_runtime_progress", None),
+                cancel_checker=getattr(self.main_page, "is_current_task_cancelled", None),
+            ),
+        )
+
+    def _start_gemma_prewarm(self) -> None:
+        runtime_manager = getattr(self.main_page, "local_translation_runtime_manager", None)
+        if not isinstance(runtime_manager, LocalGemmaRuntimeManager):
+            return
+        settings_page = self.main_page.settings_page
+        self._start_prewarm(
+            "gemma",
+            "Gemma",
+            "gemma",
+            lambda: runtime_manager.ensure_server(
+                settings_page,
+                progress_callback=getattr(self.main_page, "report_runtime_progress", None),
+                cancel_checker=getattr(self.main_page, "is_current_task_cancelled", None),
+            ),
+        )
+
+    def _await_gemma_runtime(self) -> None:
+        runtime_manager = getattr(self.main_page, "local_translation_runtime_manager", None)
+        if not isinstance(runtime_manager, LocalGemmaRuntimeManager):
+            return
+        settings_page = self.main_page.settings_page
+        self._await_prewarm_or_run(
+            "gemma",
+            "Gemma",
+            "gemma",
+            lambda: runtime_manager.ensure_server(
+                settings_page,
+                progress_callback=getattr(self.main_page, "report_runtime_progress", None),
+                cancel_checker=getattr(self.main_page, "is_current_task_cancelled", None),
+            ),
+        )
 
     def _set_current_image(self, image_path: str) -> None:
         try:
@@ -198,6 +357,7 @@ class StageBatchedProcessor(BatchProcessor):
             self.block_detection.block_detector_cache = detector
 
         for index, ctx in enumerate(pages):
+            self._raise_if_cancelled()
             self._set_current_image(ctx.image_path)
             self.emit_progress(index, total_images, 0, 10, True)
             self._start_page_summary(ctx.image_path, ctx.source_lang, ctx.target_lang)
@@ -227,6 +387,7 @@ class StageBatchedProcessor(BatchProcessor):
                 ctx.image = imk.read_image(ctx.image_path)
 
             blk_list = detector.detect(ctx.image)
+            self._raise_if_cancelled()
             ctx.precomputed_mask_details = detector.last_mask_details
             ctx.detector_key = detector.detector or settings_page.get_tool_selection("detector") or "RT-DETR-v2"
             ctx.detector_engine = detector.last_engine_name or ""
@@ -251,6 +412,24 @@ class StageBatchedProcessor(BatchProcessor):
                     block_count=len(ctx.blk_list or []),
                     detector_key=ctx.detector_key,
                     detector_engine=ctx.detector_engine,
+                )
+                export_settings = self._effective_export_settings(settings_page)
+                detector_overlay_path = self._write_detector_overlay_debug_image(
+                    export_root=ctx.export_root,
+                    archive_bname=ctx.archive_bname,
+                    image_path=ctx.image_path,
+                    image=ctx.image,
+                    blk_list=ctx.blk_list,
+                    export_settings=export_settings,
+                )
+                self._maybe_emit_preview_image(
+                    index=index,
+                    total=total_images,
+                    image_path=ctx.image_path,
+                    stage_key="detector_overlay",
+                    stage_label="텍스트 감지",
+                    export_settings=export_settings,
+                    preferred_path=detector_overlay_path,
                 )
                 continue
 
@@ -286,6 +465,7 @@ class StageBatchedProcessor(BatchProcessor):
                 reason="No text blocks detected.",
                 extra=self._ocr_quality_metrics(None),
             )
+            self._raise_if_cancelled()
 
     def _run_primary_ocr(self, ctx: StagePageContext, policy: dict[str, Any]) -> dict[str, Any]:
         settings_page = self.main_page.settings_page
@@ -356,15 +536,10 @@ class StageBatchedProcessor(BatchProcessor):
         total_images = len(pages)
         settings_page = self.main_page.settings_page
         runtime_manager = getattr(self.main_page, "local_ocr_runtime_manager", None)
-        if isinstance(runtime_manager, LocalOCRRuntimeManager):
-            runtime_manager.ensure_engine(
-                str(policy["primary_ocr_engine"]),
-                settings_page,
-                progress_callback=getattr(self.main_page, "report_runtime_progress", None),
-                cancel_checker=getattr(self.main_page, "is_current_task_cancelled", None),
-            )
+        self._await_ocr_runtime(policy)
 
         for index, ctx in enumerate(pages):
+            self._raise_if_cancelled()
             if ctx.failed_stage:
                 continue
             self._set_current_image(ctx.image_path)
@@ -378,6 +553,7 @@ class StageBatchedProcessor(BatchProcessor):
             )
             try:
                 result = self._run_primary_ocr(ctx, policy)
+                self._raise_if_cancelled()
                 quality = result["quality"]
                 self._log_ocr_quality(ctx.image_path, quality, int(result["attempt_count"]))
                 if quality.get("low_quality", False):
@@ -407,6 +583,8 @@ class StageBatchedProcessor(BatchProcessor):
                     ocr_page_profile=result["page_profile"],
                     **ctx.page_ocr_metrics,
                 )
+            except OperationCancelledError:
+                raise
             except Exception as exc:
                 self._mark_page_failed(
                     ctx,
@@ -419,6 +597,7 @@ class StageBatchedProcessor(BatchProcessor):
 
         if isinstance(runtime_manager, LocalOCRRuntimeManager):
             runtime_manager.shutdown()
+        self._raise_if_cancelled()
 
     def _ensure_inpainter(self):
         settings_page = self.main_page.settings_page
@@ -449,8 +628,10 @@ class StageBatchedProcessor(BatchProcessor):
         )
         runtime = self._ensure_inpainter()
         config = get_config(settings_page)
+        self._start_gemma_prewarm()
 
         for index, ctx in enumerate(pages):
+            self._raise_if_cancelled()
             if ctx.failed_stage:
                 continue
             self._set_current_image(ctx.image_path)
@@ -472,7 +653,9 @@ class StageBatchedProcessor(BatchProcessor):
                 )
                 ctx.mask = ctx.mask_details["final_mask"]
                 ctx.raw_mask = ctx.mask_details["raw_mask"]
+                self._raise_if_cancelled()
                 ctx.inpaint_input_img = self.inpainting.inpaint_with_blocks(ctx.image, ctx.mask, ctx.blk_list, config=config)
+                self._raise_if_cancelled()
                 ctx.inpaint_input_img = imk.convert_scale_abs(ctx.inpaint_input_img)
                 ctx.inpaint_input_img, ctx.mask, ctx.cleanup_stats = refine_bubble_residue_inpaint(
                     ctx.inpaint_input_img,
@@ -481,6 +664,7 @@ class StageBatchedProcessor(BatchProcessor):
                     self.inpainting.inpainter_cache,
                     config,
                 )
+                self._raise_if_cancelled()
                 ctx.patches = self.inpainting.get_inpainted_patches(ctx.mask, ctx.inpaint_input_img)
                 self.main_page.patches_processed.emit(ctx.patches, ctx.image_path)
                 self.main_page.image_ctrl.update_processing_summary(
@@ -493,34 +677,18 @@ class StageBatchedProcessor(BatchProcessor):
                         "cleanup_block_count": int(ctx.cleanup_stats.get("block_count", 0) or 0),
                     },
                 )
-                if export_settings["export_inpainted_image"] and is_individual_images_mode(export_settings):
-                    path = self.main_page.get_automatic_output_series_dir(
-                        ctx.directory,
-                        anchor_path=self.main_page.image_files[0] if self.main_page.image_files else ctx.image_path,
-                    )
-                    os.makedirs(path, exist_ok=True)
-                    from modules.utils.automatic_output import write_output_image, build_output_file_name
-
-                    cleaned_output_path = os.path.join(
-                        path,
-                        build_output_file_name(
-                            os.path.splitext(os.path.basename(ctx.image_path))[0],
-                            "cleaned",
-                            ctx.image_path,
-                            export_settings,
-                        ),
-                    )
-                    write_output_image(
-                        cleaned_output_path,
-                        ctx.inpaint_input_img,
-                        source_path=ctx.image_path,
-                        resolved_settings=export_settings,
-                    )
-                    self.main_page.image_ctrl.update_processing_summary(
-                        ctx.image_path,
-                        {"cleaned_image_path": cleaned_output_path},
-                    )
-                self._write_inpaint_debug_exports(
+                cleaned_output_path = self._write_inpainted_debug_image(
+                    export_root=ctx.export_root,
+                    archive_bname=ctx.archive_bname,
+                    image_path=ctx.image_path,
+                    cleaned_image=ctx.inpaint_input_img,
+                    export_settings=export_settings,
+                )
+                self.main_page.image_ctrl.update_processing_summary(
+                    ctx.image_path,
+                    {"cleaned_image_path": cleaned_output_path},
+                )
+                debug_paths = self._write_inpaint_debug_exports(
                     export_root=ctx.export_root,
                     archive_bname=ctx.archive_bname,
                     image_path=ctx.image_path,
@@ -538,6 +706,42 @@ class StageBatchedProcessor(BatchProcessor):
                     mask_details=ctx.mask_details,
                     inpainter_backend=runtime["backend"],
                 )
+                self._maybe_emit_preview_image(
+                    index=index,
+                    total=total_images,
+                    image_path=ctx.image_path,
+                    stage_key="raw_mask",
+                    stage_label="원본 마스크",
+                    export_settings=export_settings,
+                    preferred_path=debug_paths.get("raw_mask", ""),
+                )
+                self._maybe_emit_preview_image(
+                    index=index,
+                    total=total_images,
+                    image_path=ctx.image_path,
+                    stage_key="mask_overlay",
+                    stage_label="마스크 오버레이",
+                    export_settings=export_settings,
+                    preferred_path=debug_paths.get("mask_overlay", ""),
+                )
+                self._maybe_emit_preview_image(
+                    index=index,
+                    total=total_images,
+                    image_path=ctx.image_path,
+                    stage_key="cleanup_delta",
+                    stage_label="정리 마스크 변화량",
+                    export_settings=export_settings,
+                    preferred_path=debug_paths.get("cleanup_delta", ""),
+                )
+                self._maybe_emit_preview_image(
+                    index=index,
+                    total=total_images,
+                    image_path=ctx.image_path,
+                    stage_key="inpainted_image",
+                    stage_label="인페인트 결과",
+                    export_settings=export_settings,
+                    preferred_path=cleaned_output_path,
+                )
                 self.main_page.image_ctrl.mark_processing_stage(
                     ctx.image_path,
                     "inpaint",
@@ -552,6 +756,8 @@ class StageBatchedProcessor(BatchProcessor):
                     block_count=len(ctx.blk_list or []),
                     patch_count=len(ctx.patches or []),
                 )
+            except OperationCancelledError:
+                raise
             except Exception as exc:
                 self._mark_page_failed(
                     ctx,
@@ -568,18 +774,25 @@ class StageBatchedProcessor(BatchProcessor):
         extra_context = settings_page.get_llm_settings()["extra_context"]
         translator_key = settings_page.get_tool_selection("translator")
         runtime_manager = getattr(self.main_page, "local_translation_runtime_manager", None)
-        if isinstance(runtime_manager, LocalGemmaRuntimeManager):
-            runtime_manager.ensure_server(
-                settings_page,
-                progress_callback=getattr(self.main_page, "report_runtime_progress", None),
-                cancel_checker=getattr(self.main_page, "is_current_task_cancelled", None),
-            )
+        self._await_gemma_runtime()
 
         for index, ctx in enumerate(pages):
+            self._raise_if_cancelled()
             if ctx.failed_stage:
                 continue
             self._set_current_image(ctx.image_path)
             self.emit_progress(index, total_images, 7, 10, False)
+            self._report_runtime_progress(
+                phase="pipeline",
+                service="gemma",
+                status="running",
+                step_key="translation",
+                stage_name="translation",
+                message=f"{index + 1}/{total_images} 페이지 Gemma 번역 중...",
+                page_index=index,
+                page_total=total_images,
+                image_name=ctx.image_name,
+            )
             self._emit_benchmark_event(
                 "translate_start",
                 image_path=ctx.image_path,
@@ -603,6 +816,7 @@ class StageBatchedProcessor(BatchProcessor):
                     translation_cache_status = "hit"
                 else:
                     translator.translate(ctx.blk_list, ctx.image, extra_context)
+                    self._raise_if_cancelled()
                     apply_translation_result_dictionary(
                         ctx.blk_list,
                         settings_page.get_translation_result_dictionary_rules(),
@@ -632,6 +846,9 @@ class StageBatchedProcessor(BatchProcessor):
                 translated_text_obj = json.loads(get_raw_translation(ctx.blk_list))
                 if (not raw_text_obj) or (not translated_text_obj):
                     raise RuntimeError("Translator returned empty JSON.")
+                self._raise_if_cancelled()
+            except OperationCancelledError:
+                raise
             except Exception as exc:
                 self._mark_page_failed(
                     ctx,
@@ -644,6 +861,7 @@ class StageBatchedProcessor(BatchProcessor):
 
         if isinstance(runtime_manager, LocalGemmaRuntimeManager):
             runtime_manager.shutdown()
+        self._raise_if_cancelled()
 
     def _render_page_text_items(
         self,
@@ -689,45 +907,80 @@ class StageBatchedProcessor(BatchProcessor):
                 render_settings.max_font_size,
                 render_settings.min_font_size,
                 vertical,
+                fit_clearance=get_render_fit_clearance_for_block(
+                    blk,
+                    render_settings.outline_width,
+                ),
                 return_metrics=True,
             )
             if is_no_space_lang(trg_lng_cd):
                 translation = translation.replace(" ", "")
-            render_markup = describe_render_text_markup(translation)
             font_color = resolve_render_text_color(
                 blk.font_color,
                 setting_font_color,
                 render_settings.force_font_color,
                 render_settings.smart_global_apply_all,
             )
-            source_rect = build_rect_tuple(x1, y1, block_width, block_height)
-            outline_color = QColor(render_settings.outline_color) if render_settings.outline else None
-            text_props = TextItemProperties(
-                text=render_markup.html_text if render_markup.html_applied else translation,
+            alignment = self.main_page.button_to_alignment[render_settings.alignment_id]
+            render_markup = describe_render_text_markup(
+                translation,
                 font_family=font,
                 font_size=font_size,
                 text_color=font_color,
-                alignment=self.main_page.button_to_alignment[render_settings.alignment_id],
+                alignment=alignment,
+                line_spacing=float(render_settings.line_spacing),
+                bold=render_settings.bold,
+                italic=render_settings.italic,
+                underline=render_settings.underline,
+                direction=render_settings.direction,
+            )
+            blk._render_text = str(translation or "")
+            blk._render_html = str(render_markup.html_text if render_markup.html_applied else translation)
+            blk._render_html_applied = bool(render_markup.html_applied)
+            blk._render_fallback_font_family = str(render_markup.fallback_font_family or "")
+            blk._render_normalization_applied = bool(
+                render_normalization.normalization_applied or render_markup.html_applied
+            )
+            blk._render_normalization_reasons = sorted(
+                set(render_normalization.reasons).union(render_markup.reasons)
+            )
+            blk._render_normalization_replacements = list(
+                render_normalization.replacements
+            ) + list(render_markup.replacements)
+            source_rect, block_anchor = build_render_rects_for_block(blk)
+            vertical_alignment = self.main_page.button_to_vertical_alignment.get(
+                render_settings.vertical_alignment_id,
+                VERTICAL_ALIGNMENT_TOP,
+            )
+            position, item_width, item_height = build_text_item_layout_geometry(
+                source_rect,
+                rendered_height,
+                vertical_alignment,
+            )
+            outline_color = QColor(render_settings.outline_color) if render_settings.outline else None
+            text_props = TextItemProperties(
+                text=blk._render_html,
+                font_family=font,
+                font_size=font_size,
+                text_color=font_color,
+                alignment=alignment,
                 line_spacing=float(render_settings.line_spacing),
                 outline_color=outline_color,
                 outline_width=float(render_settings.outline_width),
                 bold=render_settings.bold,
                 italic=render_settings.italic,
                 underline=render_settings.underline,
-                position=(x1, y1),
+                position=position,
                 rotation=blk.angle,
                 scale=1.0,
                 transform_origin=blk.tr_origin_point,
-                width=rendered_width,
-                height=rendered_height,
+                width=item_width,
+                height=item_height,
                 direction=render_settings.direction,
                 vertical=vertical,
-                vertical_alignment=self.main_page.button_to_vertical_alignment.get(
-                    render_settings.vertical_alignment_id,
-                    VERTICAL_ALIGNMENT_TOP,
-                ),
+                vertical_alignment=vertical_alignment,
                 source_rect=source_rect,
-                block_anchor=source_rect,
+                block_anchor=block_anchor,
                 selection_outlines=[
                     OutlineInfo(
                         0,
@@ -742,6 +995,27 @@ class StageBatchedProcessor(BatchProcessor):
             text_item_state["translation_raw"] = str(translation_raw or "")
             text_item_state["render_text"] = str(translation or "")
             text_item_state["render_html_applied"] = bool(render_markup.html_applied)
+            text_item_state["render_fallback_font_family"] = str(
+                render_markup.fallback_font_family or ""
+            )
+            text_item_state["render_area_source"] = str(
+                getattr(blk, "_render_area_source", "text_bbox") or "text_bbox"
+            )
+            text_item_state["render_source_xyxy"] = list(
+                getattr(blk, "_render_area_xyxy", []) or []
+            )
+            text_item_state["render_anchor_xyxy"] = list(
+                getattr(blk, "_render_original_xyxy", []) or []
+            )
+            text_item_state["render_bubble_xyxy"] = list(
+                getattr(blk, "_render_bubble_xyxy", []) or []
+            )
+            text_item_state["render_normalization_applied"] = bool(
+                blk._render_normalization_applied
+            )
+            text_item_state["render_normalization_reasons"] = list(
+                blk._render_normalization_reasons
+            )
             text_items_state.append(text_item_state)
             if ctx.image_path == file_on_display:
                 self.main_page.blk_rendered.emit(translation, font_size, blk, ctx.image_path)
@@ -766,6 +1040,7 @@ class StageBatchedProcessor(BatchProcessor):
         trg_lng_cd = get_language_code(target_lang_en)
         render_settings = self.main_page.render_settings()
         for index, ctx in enumerate(pages):
+            self._raise_if_cancelled()
             if ctx.failed_stage:
                 continue
             self._set_current_image(ctx.image_path)
@@ -790,8 +1065,10 @@ class StageBatchedProcessor(BatchProcessor):
             )
             try:
                 format_translations(ctx.blk_list, trg_lng_cd, upper_case=render_settings.upper_case)
+                self._raise_if_cancelled()
                 get_best_render_area(ctx.blk_list, ctx.image, ctx.inpaint_input_img)
                 self._render_page_text_items(ctx, render_settings=render_settings, trg_lng_cd=trg_lng_cd)
+                self._raise_if_cancelled()
                 page_state = self._ensure_page_state(ctx.image_path)
                 final_output_path, final_output_root = self._write_final_render_export(
                     ctx.directory,
@@ -828,6 +1105,9 @@ class StageBatchedProcessor(BatchProcessor):
                     patch_count=len(ctx.patches or []),
                 )
                 self._log_page_done(index, total_images, ctx.image_path, preview_path=final_output_path)
+                self._raise_if_cancelled()
+            except OperationCancelledError:
+                raise
             except Exception as exc:
                 self._mark_page_failed(
                     ctx,
@@ -855,11 +1135,22 @@ class StageBatchedProcessor(BatchProcessor):
         pages = self._load_page_contexts(image_list)
         policy = self._ensure_stage_policy(pages)
         try:
+            self._raise_if_cancelled()
+            self._start_ocr_prewarm(policy)
+            self._raise_if_cancelled()
             self._detect_all(pages)
+            self._raise_if_cancelled()
             self._ocr_all(pages, policy)
+            self._raise_if_cancelled()
             self._inpaint_all(pages)
+            self._raise_if_cancelled()
             self._translate_all(pages)
+            self._raise_if_cancelled()
             self._render_all(pages)
             self._emit_benchmark_event("batch_run_done", total_images=total_images)
+        except OperationCancelledError:
+            self._emit_benchmark_event("batch_run_cancelled", total_images=total_images)
+            return
         finally:
+            self._shutdown_prewarm_executor()
             self._progress_image_path = None
