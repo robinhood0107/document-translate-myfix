@@ -774,6 +774,7 @@ class WorkspaceMixin:
         splitter.addWidget(left_widget)
         splitter.addWidget(central_widget)
         splitter.addWidget(right_widget)
+        self.runtime_dimmable_widget = splitter
 
         right_widget.setMinimumWidth(320)
 

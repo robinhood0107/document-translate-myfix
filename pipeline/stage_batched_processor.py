@@ -45,6 +45,7 @@ from modules.utils.export_paths import (
     reserve_export_run_token,
     resolve_export_directory,
 )
+from modules.utils.exceptions import OperationCancelledError
 from modules.utils.image_utils import generate_mask
 from modules.utils.inpaint_cleanup import refine_bubble_residue_inpaint
 from modules.utils.language_utils import get_language_code, is_no_space_lang, language_codes
@@ -113,6 +114,15 @@ class StageBatchedProcessor(BatchProcessor):
         payload["runtime_prewarm"] = True
         self._report_runtime_progress(**payload)
 
+    def _raise_if_cancelled(self) -> None:
+        checker = getattr(self.main_page, "is_current_task_cancelled", None)
+        try:
+            cancelled = bool(checker()) if callable(checker) else bool(self._is_cancelled())
+        except Exception:
+            cancelled = bool(self._is_cancelled())
+        if cancelled:
+            raise OperationCancelledError("Automatic translation was cancelled.")
+
     def _ensure_prewarm_executor(self) -> ThreadPoolExecutor:
         if self._prewarm_executor is None:
             self._prewarm_executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="ct-stage-prewarm")
@@ -121,6 +131,7 @@ class StageBatchedProcessor(BatchProcessor):
     def _start_prewarm(self, key: str, label: str, service: str, fn: Callable[[], None]) -> None:
         if key in self._prewarm_jobs:
             return
+        self._raise_if_cancelled()
         self._prewarm_progress(
             service=service,
             status="starting",
@@ -146,13 +157,18 @@ class StageBatchedProcessor(BatchProcessor):
         service: str,
         fallback: Callable[[], None],
     ) -> None:
+        self._raise_if_cancelled()
         job = self._prewarm_jobs.pop(key, None)
         if job is None:
             fallback()
+            self._raise_if_cancelled()
             return
         try:
             job.result()
+        except OperationCancelledError:
+            raise
         except Exception as exc:
+            self._raise_if_cancelled()
             logger.warning("%s prewarm failed; falling back to synchronous startup: %s", label, exc)
             self._prewarm_progress(
                 service=service,
@@ -163,6 +179,7 @@ class StageBatchedProcessor(BatchProcessor):
                 detail=str(exc),
             )
             fallback()
+        self._raise_if_cancelled()
 
     def _shutdown_prewarm_executor(self) -> None:
         executor = self._prewarm_executor
@@ -340,6 +357,7 @@ class StageBatchedProcessor(BatchProcessor):
             self.block_detection.block_detector_cache = detector
 
         for index, ctx in enumerate(pages):
+            self._raise_if_cancelled()
             self._set_current_image(ctx.image_path)
             self.emit_progress(index, total_images, 0, 10, True)
             self._start_page_summary(ctx.image_path, ctx.source_lang, ctx.target_lang)
@@ -369,6 +387,7 @@ class StageBatchedProcessor(BatchProcessor):
                 ctx.image = imk.read_image(ctx.image_path)
 
             blk_list = detector.detect(ctx.image)
+            self._raise_if_cancelled()
             ctx.precomputed_mask_details = detector.last_mask_details
             ctx.detector_key = detector.detector or settings_page.get_tool_selection("detector") or "RT-DETR-v2"
             ctx.detector_engine = detector.last_engine_name or ""
@@ -446,6 +465,7 @@ class StageBatchedProcessor(BatchProcessor):
                 reason="No text blocks detected.",
                 extra=self._ocr_quality_metrics(None),
             )
+            self._raise_if_cancelled()
 
     def _run_primary_ocr(self, ctx: StagePageContext, policy: dict[str, Any]) -> dict[str, Any]:
         settings_page = self.main_page.settings_page
@@ -519,6 +539,7 @@ class StageBatchedProcessor(BatchProcessor):
         self._await_ocr_runtime(policy)
 
         for index, ctx in enumerate(pages):
+            self._raise_if_cancelled()
             if ctx.failed_stage:
                 continue
             self._set_current_image(ctx.image_path)
@@ -532,6 +553,7 @@ class StageBatchedProcessor(BatchProcessor):
             )
             try:
                 result = self._run_primary_ocr(ctx, policy)
+                self._raise_if_cancelled()
                 quality = result["quality"]
                 self._log_ocr_quality(ctx.image_path, quality, int(result["attempt_count"]))
                 if quality.get("low_quality", False):
@@ -561,6 +583,8 @@ class StageBatchedProcessor(BatchProcessor):
                     ocr_page_profile=result["page_profile"],
                     **ctx.page_ocr_metrics,
                 )
+            except OperationCancelledError:
+                raise
             except Exception as exc:
                 self._mark_page_failed(
                     ctx,
@@ -573,6 +597,7 @@ class StageBatchedProcessor(BatchProcessor):
 
         if isinstance(runtime_manager, LocalOCRRuntimeManager):
             runtime_manager.shutdown()
+        self._raise_if_cancelled()
 
     def _ensure_inpainter(self):
         settings_page = self.main_page.settings_page
@@ -606,6 +631,7 @@ class StageBatchedProcessor(BatchProcessor):
         self._start_gemma_prewarm()
 
         for index, ctx in enumerate(pages):
+            self._raise_if_cancelled()
             if ctx.failed_stage:
                 continue
             self._set_current_image(ctx.image_path)
@@ -627,7 +653,9 @@ class StageBatchedProcessor(BatchProcessor):
                 )
                 ctx.mask = ctx.mask_details["final_mask"]
                 ctx.raw_mask = ctx.mask_details["raw_mask"]
+                self._raise_if_cancelled()
                 ctx.inpaint_input_img = self.inpainting.inpaint_with_blocks(ctx.image, ctx.mask, ctx.blk_list, config=config)
+                self._raise_if_cancelled()
                 ctx.inpaint_input_img = imk.convert_scale_abs(ctx.inpaint_input_img)
                 ctx.inpaint_input_img, ctx.mask, ctx.cleanup_stats = refine_bubble_residue_inpaint(
                     ctx.inpaint_input_img,
@@ -636,6 +664,7 @@ class StageBatchedProcessor(BatchProcessor):
                     self.inpainting.inpainter_cache,
                     config,
                 )
+                self._raise_if_cancelled()
                 ctx.patches = self.inpainting.get_inpainted_patches(ctx.mask, ctx.inpaint_input_img)
                 self.main_page.patches_processed.emit(ctx.patches, ctx.image_path)
                 self.main_page.image_ctrl.update_processing_summary(
@@ -727,6 +756,8 @@ class StageBatchedProcessor(BatchProcessor):
                     block_count=len(ctx.blk_list or []),
                     patch_count=len(ctx.patches or []),
                 )
+            except OperationCancelledError:
+                raise
             except Exception as exc:
                 self._mark_page_failed(
                     ctx,
@@ -746,6 +777,7 @@ class StageBatchedProcessor(BatchProcessor):
         self._await_gemma_runtime()
 
         for index, ctx in enumerate(pages):
+            self._raise_if_cancelled()
             if ctx.failed_stage:
                 continue
             self._set_current_image(ctx.image_path)
@@ -784,6 +816,7 @@ class StageBatchedProcessor(BatchProcessor):
                     translation_cache_status = "hit"
                 else:
                     translator.translate(ctx.blk_list, ctx.image, extra_context)
+                    self._raise_if_cancelled()
                     apply_translation_result_dictionary(
                         ctx.blk_list,
                         settings_page.get_translation_result_dictionary_rules(),
@@ -813,6 +846,9 @@ class StageBatchedProcessor(BatchProcessor):
                 translated_text_obj = json.loads(get_raw_translation(ctx.blk_list))
                 if (not raw_text_obj) or (not translated_text_obj):
                     raise RuntimeError("Translator returned empty JSON.")
+                self._raise_if_cancelled()
+            except OperationCancelledError:
+                raise
             except Exception as exc:
                 self._mark_page_failed(
                     ctx,
@@ -825,6 +861,7 @@ class StageBatchedProcessor(BatchProcessor):
 
         if isinstance(runtime_manager, LocalGemmaRuntimeManager):
             runtime_manager.shutdown()
+        self._raise_if_cancelled()
 
     def _render_page_text_items(
         self,
@@ -1003,6 +1040,7 @@ class StageBatchedProcessor(BatchProcessor):
         trg_lng_cd = get_language_code(target_lang_en)
         render_settings = self.main_page.render_settings()
         for index, ctx in enumerate(pages):
+            self._raise_if_cancelled()
             if ctx.failed_stage:
                 continue
             self._set_current_image(ctx.image_path)
@@ -1027,8 +1065,10 @@ class StageBatchedProcessor(BatchProcessor):
             )
             try:
                 format_translations(ctx.blk_list, trg_lng_cd, upper_case=render_settings.upper_case)
+                self._raise_if_cancelled()
                 get_best_render_area(ctx.blk_list, ctx.image, ctx.inpaint_input_img)
                 self._render_page_text_items(ctx, render_settings=render_settings, trg_lng_cd=trg_lng_cd)
+                self._raise_if_cancelled()
                 page_state = self._ensure_page_state(ctx.image_path)
                 final_output_path, final_output_root = self._write_final_render_export(
                     ctx.directory,
@@ -1065,6 +1105,9 @@ class StageBatchedProcessor(BatchProcessor):
                     patch_count=len(ctx.patches or []),
                 )
                 self._log_page_done(index, total_images, ctx.image_path, preview_path=final_output_path)
+                self._raise_if_cancelled()
+            except OperationCancelledError:
+                raise
             except Exception as exc:
                 self._mark_page_failed(
                     ctx,
@@ -1092,13 +1135,22 @@ class StageBatchedProcessor(BatchProcessor):
         pages = self._load_page_contexts(image_list)
         policy = self._ensure_stage_policy(pages)
         try:
+            self._raise_if_cancelled()
             self._start_ocr_prewarm(policy)
+            self._raise_if_cancelled()
             self._detect_all(pages)
+            self._raise_if_cancelled()
             self._ocr_all(pages, policy)
+            self._raise_if_cancelled()
             self._inpaint_all(pages)
+            self._raise_if_cancelled()
             self._translate_all(pages)
+            self._raise_if_cancelled()
             self._render_all(pages)
             self._emit_benchmark_event("batch_run_done", total_images=total_images)
+        except OperationCancelledError:
+            self._emit_benchmark_event("batch_run_cancelled", total_images=total_images)
+            return
         finally:
             self._shutdown_prewarm_executor()
             self._progress_image_path = None
