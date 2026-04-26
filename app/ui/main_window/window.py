@@ -362,6 +362,17 @@ class ComicTranslateUI(
     def _runtime_surface_area(self) -> QtCore.QRect:
         if not hasattr(self, "_main_body_widget") or self._main_body_widget is None:
             return QtCore.QRect()
+        if (
+            hasattr(self, "_center_stack")
+            and self._center_stack.currentWidget() is getattr(self, "main_content_widget", None)
+            and hasattr(self, "runtime_dimmable_widget")
+            and self.runtime_dimmable_widget is not None
+        ):
+            top_left = self.runtime_dimmable_widget.mapTo(
+                self._runtime_overlay_host,
+                self.runtime_dimmable_widget.rect().topLeft(),
+            )
+            return QtCore.QRect(top_left, self.runtime_dimmable_widget.size())
         return self._main_body_widget.geometry()
 
     def _update_runtime_surface_geometry(self) -> None:
