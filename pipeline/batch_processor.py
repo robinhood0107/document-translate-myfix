@@ -212,6 +212,16 @@ class BatchProcessor:
         callback = getattr(self.main_page, "report_runtime_progress", None)
         if not callable(callback):
             return
+        payload = dict(payload)
+        source_preview = str(payload.pop("source_preview_path", "") or "").strip()
+        if (
+            source_preview
+            and not str(payload.get("preview_path") or "").strip()
+            and str(payload.get("status") or "").strip().lower() == "running"
+            and str(payload.get("step_key") or "").strip() != "save-and-finish"
+        ):
+            payload["preview_path"] = source_preview
+            payload["preview_kind"] = "source_fallback"
         try:
             callback(payload)
         except Exception:
@@ -260,6 +270,7 @@ class BatchProcessor:
                 page_index=index,
                 page_total=total,
                 image_name=image_name,
+                source_preview_path=self._progress_image_path,
             )
         self.main_page.progress_update.emit(index, total, step, steps, change_name)
 
@@ -1628,6 +1639,18 @@ class BatchProcessor:
                     ),
                     return_metrics=True
                 )
+                blk._text_fit_status = (
+                    "needs_review"
+                    if rendered_width > block_width or rendered_height > block_height
+                    else "fit"
+                )
+                blk._text_fit_metrics = {
+                    "rendered_width": float(rendered_width),
+                    "rendered_height": float(rendered_height),
+                    "box_width": float(block_width),
+                    "box_height": float(block_height),
+                    "font_size": float(font_size),
+                }
                 
                 # Language-specific formatting for state storage
                 if is_no_space_lang(trg_lng_cd):
@@ -1737,6 +1760,12 @@ class BatchProcessor:
                 )
                 text_item_state["render_normalization_reasons"] = list(
                     blk._render_normalization_reasons
+                )
+                text_item_state["text_fit_status"] = str(
+                    getattr(blk, "_text_fit_status", "fit") or "fit"
+                )
+                text_item_state["text_fit_metrics"] = dict(
+                    getattr(blk, "_text_fit_metrics", {}) or {}
                 )
                 text_items_state.append(text_item_state)
 

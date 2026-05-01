@@ -1133,6 +1133,8 @@ class ComicTranslate(ComicTranslateUI):
     def _show_automatic_progress_dialog(self, selected_paths: list[str], run_type: str):
         self._automatic_progress_tracker.reset(page_total=len(selected_paths), run_type=run_type)
         self._last_runtime_preview_path = ""
+        self._last_runtime_preview_kind = ""
+        self._last_runtime_preview_page_index = None
         self._last_batch_output_root = ""
         panel = self._ensure_automatic_progress_dialog()
         panel.prepare_for_new_run()
@@ -1168,10 +1170,65 @@ class ComicTranslate(ComicTranslateUI):
                 return
         event = self._automatic_progress_tracker.enrich(payload)
         preview_path = str(event.get("preview_path") or "").strip()
+        preview_kind = str(event.get("preview_kind") or "").strip()
+        page_index = event.get("page_index")
+        if (
+            preview_path
+            and preview_kind == "source_fallback"
+            and self._last_runtime_preview_path
+            and self._last_runtime_preview_page_index == page_index
+            and self._last_runtime_preview_kind != "source_fallback"
+        ):
+            event.pop("preview_path", None)
+            preview_path = ""
         if preview_path:
             self._last_runtime_preview_path = preview_path
+            self._last_runtime_preview_kind = preview_kind
+            self._last_runtime_preview_page_index = page_index
+        self._follow_runtime_page(event)
         self._ensure_automatic_progress_dialog().update_event(event)
         self._log_runtime_progress(event)
+
+    def _follow_runtime_page(self, event: dict[str, Any]) -> None:
+        if str(event.get("phase") or "") != "pipeline":
+            return
+        if str(event.get("status") or "").strip().lower() not in {"running", "completed"}:
+            return
+        page_index = event.get("page_index")
+        try:
+            index = int(page_index)
+        except (TypeError, ValueError):
+            return
+        if index < 0 or index >= len(getattr(self, "image_files", []) or []):
+            return
+        if index == getattr(self, "curr_img_idx", -1):
+            return
+        if getattr(self, "_runtime_following_page", False):
+            return
+
+        self._runtime_following_page = True
+        try:
+            page_list = getattr(self, "page_list", None)
+            if page_list is not None:
+                page_list.blockSignals(True)
+                try:
+                    page_list.setCurrentRow(index)
+                finally:
+                    page_list.blockSignals(False)
+            image_ctrl = getattr(self, "image_ctrl", None)
+            if getattr(self, "webtoon_mode", False):
+                self.curr_img_idx = index
+                viewer = getattr(self, "image_viewer", None)
+                if viewer is not None:
+                    viewer.scroll_to_page(index)
+                if image_ctrl is not None:
+                    image_ctrl.highlight_card(index)
+            elif image_ctrl is not None:
+                image_ctrl.display_image(index, switch_page=False)
+        except Exception:
+            logger.debug("Failed to follow runtime page index %s.", index, exc_info=True)
+        finally:
+            self._runtime_following_page = False
 
     def _log_runtime_progress(self, event: dict):
         logger.info(
