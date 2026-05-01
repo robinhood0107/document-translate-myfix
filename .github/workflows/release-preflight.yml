@@ -8,6 +8,7 @@ on:
       - ".github/workflows/release-preflight.yml"
       - ".github/workflows/release.yml"
       - "scripts/build_windows_release_nuitka.ps1"
+      - "scripts/build_windows_release_nuitka_onefile.ps1"
       - "app/version.py"
   workflow_dispatch:
 
@@ -57,9 +58,21 @@ jobs:
         run: |
           ./scripts/build_windows_release_nuitka.ps1 -AppVersion "$env:APP_VERSION"
 
+      - name: Build Windows onefile executable with Nuitka
+        shell: pwsh
+        run: |
+          ./scripts/build_windows_release_nuitka_onefile.ps1 -AppVersion "$env:APP_VERSION"
+
       - name: Upload preflight bundle
         uses: actions/upload-artifact@v4
         with:
           name: comic-translate-preflight-${{ github.run_number }}-windows-x64
           path: build/nuitka/comic.dist
+          if-no-files-found: error
+
+      - name: Upload preflight onefile executable
+        uses: actions/upload-artifact@v4
+        with:
+          name: comic-translate-preflight-${{ github.run_number }}-windows-x64-exe
+          path: build/nuitka-onefile/comic-translate.exe
           if-no-files-found: error

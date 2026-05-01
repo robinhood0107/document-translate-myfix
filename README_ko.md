@@ -1,8 +1,8 @@
 [English](README.md) | [한국어](README_ko.md)
 
-# Comic Translate 포크
+# Document Translate
 
-이 저장소는 upstream `comic-translate` `v2.6.7` 코드베이스에서 시작한 뒤, 로컬 런타임/OCR/워크플로/Windows 환경 쪽으로 제품화 수정을 누적한 local-first 포크입니다.
+Document Translate는 upstream `comic-translate` `v2.6.7` 코드베이스에서 시작한 뒤, 로컬 런타임/OCR/워크플로/Windows 환경 쪽으로 제품화 수정을 누적한 local-first 데스크톱 번역 워크플로입니다.
 
 이 포크는 아래 워크플로를 중심으로 유지됩니다.
 
@@ -95,7 +95,7 @@ OCR:
 - `main`: 실제 출하 기준선
 - 공식 릴리스: `main`에 포함된 커밋에만 `vX.Y.Z` 버전 태그를 달아 GitHub Release 생성
 - 버전 태그 생성 전: `main`에서 `Release Preflight` 워크플로를 먼저 실행해 Windows Nuitka 빌드 green 확인
-- Windows 릴리스 자산: 해당 태그에서 `Nuitka`로 exe 패키징 후 업로드
+- Windows 릴리스 자산: 해당 태그에서 `Nuitka`로 portable zip 1개와 단일 exe 1개를 빌드해 업로드
 - 모델, 체크포인트, Docker 런타임은 exe에 포함하지 않고 별도 준비 대상으로 유지
 - `release/*` 브랜치는 사용하지 않음
 

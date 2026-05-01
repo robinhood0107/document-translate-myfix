@@ -1,8 +1,8 @@
 [English](README.md) | [한국어](README_ko.md)
 
-# Comic Translate Fork
+# Document Translate
 
-This repository is a local-first fork of upstream `comic-translate` that started from the upstream `v2.6.7` codebase and then diverged with product-specific runtime, OCR, workflow, and Windows setup changes.
+Document Translate is a local-first desktop translation workflow that started from upstream `comic-translate` `v2.6.7` and then diverged with product-specific runtime, OCR, workflow, and Windows setup changes.
 
 The fork is maintained around a practical desktop workflow:
 
@@ -95,7 +95,7 @@ This repository now uses a strict `main + develop + tag` model.
 - `main` is the shipping baseline.
 - Official releases are created only from `vX.Y.Z` version tags that point to commits already contained in `main`.
 - Before creating a release tag, run the `Release Preflight` workflow on `main` and wait for a green Windows Nuitka build.
-- The Windows release asset is built with `Nuitka` and published as a GitHub Release artifact from that tag.
+- The Windows release assets are built with `Nuitka` and published from that tag as one portable zip and one single-file exe.
 - Models, checkpoints, and Docker runtimes are not bundled into the release executable and remain separately provisioned.
 - `release/*` branches are not used.
 
