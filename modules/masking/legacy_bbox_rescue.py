@@ -5,6 +5,11 @@ from typing import Any
 import cv2
 import numpy as np
 
+from modules.utils.inpaint_envelope import (
+    build_text_free_erase_envelope,
+    mask_for_xyxy,
+    merge_close_components_within_envelope,
+)
 from modules.utils.textblock import TextBlock
 
 
@@ -258,6 +263,8 @@ def build_block_rescue_mask(
     if text_class == "text_bubble":
         rescue_roi = _expand_xyxy(bbox, image_rgb.shape, ratio=0.08, min_px=4, max_px=12)
         rescue_roi = _intersect_xyxy(rescue_roi, bubble)
+    elif text_class == "text_free":
+        rescue_roi = build_text_free_erase_envelope(block, image_rgb.shape, residue_risk=True)
     else:
         rescue_roi = _expand_xyxy(bbox, image_rgb.shape, ratio=0.06, min_px=3, max_px=8)
     if rescue_roi is None:
@@ -326,6 +333,15 @@ def build_block_rescue_mask(
             filtered,
             cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3)),
             iterations=1,
+        )
+
+    if text_class == "text_free":
+        envelope_local = mask_for_xyxy(rescue_raw.shape, (0, 0, rx2 - rx1, ry2 - ry1))
+        filtered = cv2.bitwise_or(filtered, envelope_local)
+        filtered = merge_close_components_within_envelope(
+            filtered,
+            (0, 0, rx2 - rx1, ry2 - ry1),
+            kernel_size=5,
         )
 
     rescue_mask = np.zeros_like(empty_mask, dtype=np.uint8)

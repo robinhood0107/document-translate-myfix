@@ -913,6 +913,18 @@ class StageBatchedProcessor(BatchProcessor):
                 ),
                 return_metrics=True,
             )
+            blk._text_fit_status = (
+                "needs_review"
+                if rendered_width > block_width or rendered_height > block_height
+                else "fit"
+            )
+            blk._text_fit_metrics = {
+                "rendered_width": float(rendered_width),
+                "rendered_height": float(rendered_height),
+                "box_width": float(block_width),
+                "box_height": float(block_height),
+                "font_size": float(font_size),
+            }
             if is_no_space_lang(trg_lng_cd):
                 translation = translation.replace(" ", "")
             font_color = resolve_render_text_color(
@@ -1015,6 +1027,12 @@ class StageBatchedProcessor(BatchProcessor):
             )
             text_item_state["render_normalization_reasons"] = list(
                 blk._render_normalization_reasons
+            )
+            text_item_state["text_fit_status"] = str(
+                getattr(blk, "_text_fit_status", "fit") or "fit"
+            )
+            text_item_state["text_fit_metrics"] = dict(
+                getattr(blk, "_text_fit_metrics", {}) or {}
             )
             text_items_state.append(text_item_state)
             if ctx.image_path == file_on_display:
