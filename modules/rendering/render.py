@@ -887,7 +887,8 @@ def pyside_word_wrap(
     best_text, best_size = text, init_font_size
     found_fit = False
 
-    lo, hi = min_font_size, init_font_size
+    readable_min_font_size = min(int(init_font_size), max(int(min_font_size), 12))
+    lo, hi = readable_min_font_size, init_font_size
     while lo <= hi:
         mid = (lo + hi) // 2
         wrapped, w, h = wrap_and_size(mid)
@@ -898,21 +899,12 @@ def pyside_word_wrap(
         else:
             hi = mid - 1
 
-    # if nothing ever fit, force a wrap at the minimum size
+    # If nothing fits, keep the configured readable floor instead of shrinking
+    # text into an unreadable 1pt fallback. The caller can flag the block for
+    # review from the returned metrics if the document exceeds the box.
     if not found_fit:
-        lo, hi = 1, max(1, min_font_size - 1)
-        while lo <= hi:
-            mid = (lo + hi) // 2
-            wrapped, w, h = wrap_and_size(mid)
-            if w <= fit_roi_width and h <= fit_roi_height:
-                found_fit = True
-                best_text, best_size = wrapped, mid
-                lo = mid + 1
-            else:
-                hi = mid - 1
-        if not found_fit:
-            best_text, w, h = wrap_and_size(1)
-            best_size = 1
+        best_text, _w, _h = wrap_and_size(readable_min_font_size)
+        best_size = readable_min_font_size
 
     if return_metrics:
         # Match persisted state to the text item's actual geometry.

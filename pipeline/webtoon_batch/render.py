@@ -200,6 +200,18 @@ class RenderMixin:
                 ),
                 return_metrics=True,
             )
+            block._text_fit_status = (
+                "needs_review"
+                if rendered_width > width or rendered_height > height
+                else "fit"
+            )
+            block._text_fit_metrics = {
+                "rendered_width": float(rendered_width),
+                "rendered_height": float(rendered_height),
+                "box_width": float(width),
+                "box_height": float(height),
+                "font_size": float(font_size),
+            }
 
             if is_no_space_lang(target_lang_code):
                 wrapped_translation = wrapped_translation.replace(" ", "")
@@ -307,6 +319,12 @@ class RenderMixin:
             )
             text_item_state["render_normalization_reasons"] = list(
                 block._render_normalization_reasons
+            )
+            text_item_state["text_fit_status"] = str(
+                getattr(block, "_text_fit_status", "fit") or "fit"
+            )
+            text_item_state["text_fit_metrics"] = dict(
+                getattr(block, "_text_fit_metrics", {}) or {}
             )
             viewer_state["text_items_state"].append(text_item_state)
 
