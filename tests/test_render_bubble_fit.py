@@ -214,3 +214,27 @@ class RenderBubbleFitTests(unittest.TestCase):
         )
 
         self.assertEqual(get_render_fit_clearance_for_block(free, 3.0), 0.0)
+
+    def test_korean_wrap_does_not_shrink_below_readable_floor(self) -> None:
+        wrapped, font_size, width, height = pyside_word_wrap(
+            "매끈매끈하고 매끄러워요... ♥",
+            "Ownglyph gumama3",
+            40,
+            24,
+            1.0,
+            2.0,
+            False,
+            False,
+            False,
+            QtCore.Qt.AlignmentFlag.AlignCenter,
+            QtCore.Qt.LayoutDirection.LeftToRight,
+            30,
+            5,
+            False,
+            return_metrics=True,
+        )
+
+        self.assertGreaterEqual(font_size, 12)
+        self.assertTrue(wrapped)
+        self.assertGreater(width, 0)
+        self.assertGreater(height, 0)

@@ -7,6 +7,7 @@ import numpy as np
 
 from modules.masking.legacy_bbox_mask import build_legacy_bbox_mask_details
 from modules.masking.legacy_bbox_rescue import build_block_rescue_mask
+from modules.utils.inpaint_envelope import build_text_free_erase_envelope
 from modules.utils.textblock import TextBlock
 
 
@@ -131,6 +132,27 @@ class LegacyBBoxMaskTests(unittest.TestCase):
         self.assertEqual(int(np.count_nonzero(final_mask[11:15, 11:15])), 16)
         self.assertEqual(int(np.count_nonzero(final_mask[15:18, 15:18])), 9)
         self.assertEqual(int(np.count_nonzero(final_mask)), 25)
+
+    def test_text_free_erase_envelope_is_modest_and_taller_for_vertical_text(self) -> None:
+        block = _block(xyxy=[40, 20, 50, 70], text_class="text_free")
+
+        normal = build_text_free_erase_envelope(block, (100, 100, 3))
+        risk = build_text_free_erase_envelope(block, (100, 100, 3), residue_risk=True)
+
+        self.assertEqual(normal, (38, 13, 52, 77))
+        self.assertEqual(risk, (37, 13, 53, 77))
+
+    @mock.patch("modules.masking.legacy_bbox_mask.get_inpaint_bboxes", return_value=[])
+    def test_text_free_legacy_mask_falls_back_to_erase_envelope(self, _mock_bboxes) -> None:
+        image = np.zeros((100, 100, 3), dtype=np.uint8)
+        block = _block(xyxy=[40, 20, 50, 70], text_class="text_free")
+
+        details = build_legacy_bbox_mask_details(image, [block])
+        final_mask = details["final_mask"]
+
+        self.assertGreater(int(np.count_nonzero(final_mask[13:77, 36:54])), 0)
+        self.assertEqual(int(np.count_nonzero(final_mask[:13, :])), 0)
+        self.assertEqual(int(np.count_nonzero(final_mask[:, :36])), 0)
 
 
 if __name__ == "__main__":
