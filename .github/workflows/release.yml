@@ -75,6 +75,11 @@ jobs:
         run: |
           ./scripts/build_windows_release_nuitka.ps1 -AppVersion "$env:APP_VERSION"
 
+      - name: Build Windows onefile executable with Nuitka
+        shell: pwsh
+        run: |
+          ./scripts/build_windows_release_nuitka_onefile.ps1 -AppVersion "$env:APP_VERSION"
+
       - name: Stage release bundle
         shell: pwsh
         run: |
@@ -93,9 +98,17 @@ jobs:
           if (Test-Path $zipPath) { Remove-Item -Force $zipPath }
           Compress-Archive -Path "$bundleDir/*" -DestinationPath $zipPath
 
+      - name: Stage onefile executable
+        shell: pwsh
+        run: |
+          $exeSource = "build/nuitka-onefile/comic-translate.exe"
+          $exePath = "build/release/comic-translate-$env:RELEASE_TAG-windows-x64.exe"
+          Copy-Item -Force $exeSource $exePath
+
       - name: Upload GitHub Release asset
         uses: softprops/action-gh-release@v2
         with:
           generate_release_notes: true
           files: |
             build/release/comic-translate-${{ github.ref_name }}-windows-x64.zip
+            build/release/comic-translate-${{ github.ref_name }}-windows-x64.exe
