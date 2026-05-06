@@ -8,7 +8,7 @@ from app.ui.canvas.rectangle import MoveableRectItem
 from app.ui.commands.box import AddRectangleCommand, BoxesChangeCommand
 
 from modules.detection.utils.geometry import do_rectangles_overlap
-from modules.utils.textblock import TextBlock
+from modules.utils.textblock import TextBlock, ensure_text_block_id
 
 if TYPE_CHECKING:
     from controller import ComicTranslate
@@ -73,6 +73,7 @@ class RectItemController:
         new_rect_coords = (x1, y1, x1 + w, y1 + h)
 
         new_blk = TextBlock(text_bbox=np.array(new_rect_coords))
+        rect_item.block_id = ensure_text_block_id(new_blk)
         self.main.blk_list.append(new_blk)
         command = AddRectangleCommand(self.main, rect_item, new_blk, self.main.blk_list)
         self.main.undo_group.activeStack().push(command)
@@ -87,11 +88,16 @@ class RectItemController:
             old_rect_coords: tuple, 
             new_rect_coords: tuple, 
             new_angle: float, 
-            new_tr_origin: QPointF
+            new_tr_origin: QPointF,
+            block_id: str = "",
         ):
         # Find the corresponding TextBlock in blk_list
+        block_id = str(block_id or "")
         for blk in self.main.blk_list:
-            if do_rectangles_overlap(blk.xyxy, old_rect_coords, 0.2):
+            if (
+                (block_id and str(getattr(blk, "block_id", "") or "") == block_id)
+                or do_rectangles_overlap(blk.xyxy, old_rect_coords, 0.2)
+            ):
                 # Update the TextBlock coordinates
                 blk.xyxy[:] = [int(new_rect_coords[0]), 
                                int(new_rect_coords[1]),
@@ -109,7 +115,8 @@ class RectItemController:
             old_state.rect, 
             new_state.rect,
             new_state.rotation,
-            new_state.transform_origin
+            new_state.transform_origin,
+            str(getattr(new_state, "block_id", "") or getattr(old_state, "block_id", "") or ""),
         )
 
 
@@ -120,7 +127,10 @@ class RectItemController:
         return None
 
     def find_corresponding_rect(self, tblock: TextBlock, iou_threshold: int):
+        block_id = ensure_text_block_id(tblock)
         for rect in self.main.image_viewer.rectangles:
+            if block_id and str(getattr(rect, "block_id", "") or "") == block_id:
+                return rect
             mp_rect = rect.mapRectToScene(rect.rect())
             x1, y1, w, h = mp_rect.getRect()
             rect_coord = (x1, y1, x1 + w, y1 + h)

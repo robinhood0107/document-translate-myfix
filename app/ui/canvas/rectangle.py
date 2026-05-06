@@ -11,6 +11,7 @@ class RectState:
     rect: tuple  # (x1, y1, x2, y2)
     rotation: float
     transform_origin: QPointF
+    block_id: str = ""
 
     @classmethod
     def from_item(cls, item: QGraphicsRectItem):
@@ -19,7 +20,8 @@ class RectState:
         return cls(
             rect=rect,
             rotation=item.rotation(),
-            transform_origin=item.transformOriginPoint()
+            transform_origin=item.transformOriginPoint(),
+            block_id=str(getattr(item, "block_id", "") or "")
         )
 
 class RectSignals(QObject):
@@ -30,6 +32,7 @@ class RectSignals(QObject):
 class MoveableRectItem(QGraphicsRectItem):
     def __init__(self, rect=None, parent=None):
         super().__init__(rect, parent)
+        self.block_id = ""
         # Signals must be per-item; sharing one QObject across all rectangles
         # causes every context-menu action to fire handlers for every rectangle.
         self.signals = RectSignals()

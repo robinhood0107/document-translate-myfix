@@ -15,6 +15,14 @@
         <source>Check for Updates</source>
         <translation>Verifica aggiornamenti</translation>
     </message>
+    <message>
+        <source>Developer Mode</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Also check the document-translate-myfix fork when checking for updates.</source>
+        <translation type="unfinished"></translation>
+    </message>
 </context>
 <context>
     <name>AutomaticProgress</name>
@@ -265,6 +273,30 @@ Duplicati:
     <message>
         <source>Unsaved Changes</source>
         <translation>Modifiche non salvate</translation>
+    </message>
+    <message>
+        <source> (Update Archive)</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Rerender Current Image</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Rerender Changed Images</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Rerender All Images</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>{count} image(s) have unapplied render changes.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>All render outputs are up to date.</source>
+        <translation type="unfinished"></translation>
     </message>
     <message>
         <source>Load pages to see automatic output estimates.</source>
@@ -2749,6 +2781,22 @@ Riavviare ora?</translation>
         <translation>Errore di aggiornamento</translation>
     </message>
     <message>
+        <source>Developer Update Available</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>A developer fork update {version} is available.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Developer Update Error</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Fork update check failed: {message}</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
         <source>Downloading update...</source>
         <translation>Download aggiornamento in corso...</translation>
     </message>
@@ -2999,6 +3047,14 @@ Riavviare ora?</translation>
     </message>
     <message>
         <source>Redo the previously undone action.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Save Project</source>
+        <translation type="unfinished">Salva progetto</translation>
+    </message>
+    <message>
+        <source>Save editable state and update dirty render output.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
@@ -3463,6 +3519,22 @@ quindi esegui l&apos;inpainting sull&apos;immagine ridimensionata.</translation>
         <translation>Stile</translation>
     </message>
     <message>
+        <source>Create or edit dotted text boxes. The dotted frame is editor-only and is not rendered into the final image.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Delete the selected text box or block box</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Draw or select OCR/block boxes used for detection, OCR, translation, and inpainting.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Remove all block boxes on the image</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
         <source>When enabled, this project inherits the automatic output settings from Settings.</source>
         <translation type="unfinished"></translation>
     </message>
@@ -3504,6 +3576,50 @@ quindi esegui l&apos;inpainting sull&apos;immagine ridimensionata.</translation>
     </message>
     <message>
         <source>Load pages to see automatic output estimates.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>All render outputs are up to date.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Rerender Current Image</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Save editable state, then write the current dirty page to the final output.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Rerender Changed Images</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Write only pages with unapplied render changes to the final output.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Rerender All Images</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Rebuild final output for every loaded page.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Open Output Folder</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Open the folder where final render output is written.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Text Boxes</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Block Boxes</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
@@ -3581,18 +3697,6 @@ quindi esegui l&apos;inpainting sull&apos;immagine ridimensionata.</translation>
     <message>
         <source>Sets the Source and Target Language on the current page for all pages</source>
         <translation>Imposta la lingua di origine e di destinazione sulla pagina corrente per tutte le pagine</translation>
-    </message>
-    <message>
-        <source>Draw or Select Text Boxes</source>
-        <translation>Disegna o seleziona caselle di testo</translation>
-    </message>
-    <message>
-        <source>Delete Selected Box</source>
-        <translation>Elimina casella selezionata</translation>
-    </message>
-    <message>
-        <source>Remove all the Boxes on the Image</source>
-        <translation>Rimuovi tutte le caselle sull&apos;immagine</translation>
     </message>
     <message>
         <source>Draws all the Text Blocks in the existing Text Block List
@@ -3688,10 +3792,6 @@ sull&apos;immagine (per ulteriori modifiche)</translation>
     <message>
         <source>Same as source</source>
         <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Box Drawing</source>
-        <translation>Disegno casella</translation>
     </message>
     <message>
         <source>Inpainting</source>
@@ -4170,6 +4270,26 @@ Vuoi ripristinarlo?</translation>
     </message>
     <message>
         <source>RecoveredProject.ctpr</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Rerender Output</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>There are no render changes to apply.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Render output was updated.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Archive staging was incomplete, so all pages were rendered before rebuilding the archive.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>변경된 {count}개의 이미지가 렌더링 저장됩니다. 저장하시겠습니까?</source>
         <translation type="unfinished"></translation>
     </message>
     <message>

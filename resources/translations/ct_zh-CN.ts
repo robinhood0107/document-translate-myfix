@@ -15,6 +15,14 @@
         <source>Check for Updates</source>
         <translation>检查更新</translation>
     </message>
+    <message>
+        <source>Developer Mode</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Also check the document-translate-myfix fork when checking for updates.</source>
+        <translation type="unfinished"></translation>
+    </message>
 </context>
 <context>
     <name>AutomaticProgress</name>
@@ -265,6 +273,30 @@ Duplicates:
     <message>
         <source>Unsaved Changes</source>
         <translation>未保存的更改</translation>
+    </message>
+    <message>
+        <source> (Update Archive)</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Rerender Current Image</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Rerender Changed Images</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Rerender All Images</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>{count} image(s) have unapplied render changes.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>All render outputs are up to date.</source>
+        <translation type="unfinished"></translation>
     </message>
     <message>
         <source>Load pages to see automatic output estimates.</source>
@@ -2748,6 +2780,22 @@ Restart now?</source>
         <translation>更新错误</translation>
     </message>
     <message>
+        <source>Developer Update Available</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>A developer fork update {version} is available.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Developer Update Error</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Fork update check failed: {message}</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
         <source>Downloading update...</source>
         <translation>正在下载更新...</translation>
     </message>
@@ -2998,6 +3046,14 @@ Restart now?</source>
     </message>
     <message>
         <source>Redo the previously undone action.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Save Project</source>
+        <translation type="unfinished">保存项目</translation>
+    </message>
+    <message>
+        <source>Save editable state and update dirty render output.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
@@ -3461,6 +3517,22 @@ then do inpainting on the resized image.</source>
         <translation>样式</translation>
     </message>
     <message>
+        <source>Create or edit dotted text boxes. The dotted frame is editor-only and is not rendered into the final image.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Delete the selected text box or block box</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Draw or select OCR/block boxes used for detection, OCR, translation, and inpainting.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Remove all block boxes on the image</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
         <source>When enabled, this project inherits the automatic output settings from Settings.</source>
         <translation type="unfinished"></translation>
     </message>
@@ -3502,6 +3574,50 @@ then do inpainting on the resized image.</source>
     </message>
     <message>
         <source>Load pages to see automatic output estimates.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>All render outputs are up to date.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Rerender Current Image</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Save editable state, then write the current dirty page to the final output.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Rerender Changed Images</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Write only pages with unapplied render changes to the final output.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Rerender All Images</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Rebuild final output for every loaded page.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Open Output Folder</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Open the folder where final render output is written.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Text Boxes</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Block Boxes</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
@@ -3579,18 +3695,6 @@ then do inpainting on the resized image.</source>
     <message>
         <source>Sets the Source and Target Language on the current page for all pages</source>
         <translation>将当前页的源语言和目标语言应用到所有页面</translation>
-    </message>
-    <message>
-        <source>Draw or Select Text Boxes</source>
-        <translation>绘制或选择文本框</translation>
-    </message>
-    <message>
-        <source>Delete Selected Box</source>
-        <translation>删除选中的框</translation>
-    </message>
-    <message>
-        <source>Remove all the Boxes on the Image</source>
-        <translation>移除图片上的所有框</translation>
     </message>
     <message>
         <source>Draws all the Text Blocks in the existing Text Block List
@@ -3685,10 +3789,6 @@ back on the Image (for further editing)</source>
     <message>
         <source>Same as source</source>
         <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Box Drawing</source>
-        <translation>框绘制</translation>
     </message>
     <message>
         <source>Inpainting</source>
@@ -4167,6 +4267,26 @@ Do you want to restore it?</source>
     </message>
     <message>
         <source>RecoveredProject.ctpr</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Rerender Output</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>There are no render changes to apply.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Render output was updated.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Archive staging was incomplete, so all pages were rendered before rebuilding the archive.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>변경된 {count}개의 이미지가 렌더링 저장됩니다. 저장하시겠습니까?</source>
         <translation type="unfinished"></translation>
     </message>
     <message>

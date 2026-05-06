@@ -2,6 +2,7 @@ from typing import List, Tuple
 import numpy as np
 import copy
 import re
+import uuid
 from PIL import Image, ImageDraw
 from collections import defaultdict, deque
 from ..detection.utils.text_lines import group_items_into_lines
@@ -9,6 +10,18 @@ from modules.detection.utils.geometry import does_rectangle_fit, is_mostly_conta
 from modules.utils.language_utils import is_no_space_lang
 
 _CJK_PATTERN = re.compile(r'[\uac00-\ud7a3\u3040-\u30ff\u4e00-\u9FFF]')
+
+
+def new_text_block_id() -> str:
+    return uuid.uuid4().hex
+
+
+def ensure_text_block_id(block) -> str:
+    block_id = str(getattr(block, "block_id", "") or "").strip()
+    if not block_id:
+        block_id = new_text_block_id()
+        setattr(block, "block_id", block_id)
+    return block_id
 
 class TextBlock(object):
     """
@@ -44,8 +57,10 @@ class TextBlock(object):
                  max_font_size: int = 0,
                  font_color: tuple = (),
                  direction: str = "",
+                 block_id: str = "",
                  **kwargs) -> None:
         
+        self.block_id = str(block_id or kwargs.pop("block_id", "") or new_text_block_id())
         self.xyxy = text_bbox
         self.segm_pts = text_segm_points
         self.bubble_xyxy = bubble_bbox

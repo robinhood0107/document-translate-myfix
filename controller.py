@@ -148,6 +148,7 @@ class ComicTranslate(ComicTranslateUI):
 
         self.undo_group = QUndoGroup(self)
         self.undo_stacks: dict[str, QUndoStack] = {}
+        self.undo_group.activeStackChanged.connect(self.update_undo_redo_actions)
         self.project_file = None
         self.project_kind = PROJECT_KIND_SINGLE
         self.temp_dir = tempfile.mkdtemp()
@@ -157,6 +158,7 @@ class ComicTranslate(ComicTranslateUI):
         self.project_output_preferences = default_project_output_preferences()
         self._automatic_output_controls_updating = False
         self._automatic_output_page_metrics_cache: dict[str, dict[str, object]] = {}
+        self._render_dirty_ui_refresh_pending = False
 
         self.pipeline = ComicTranslatePipeline(self)
         try:
@@ -273,8 +275,10 @@ class ComicTranslate(ComicTranslateUI):
         self.hbutton_group.get_button_group().buttons()[4].clicked.connect(self.inpaint_and_set)
         self.hbutton_group.get_button_group().buttons()[5].clicked.connect(self.text_ctrl.render_text)
 
-        self.undo_tool_group.get_button_group().buttons()[0].clicked.connect(self.undo_group.undo)
-        self.undo_tool_group.get_button_group().buttons()[1].clicked.connect(self.undo_group.redo)
+        undo_buttons = self.undo_tool_group.get_button_group().buttons()
+        undo_buttons[0].clicked.connect(self._perform_toolbar_undo)
+        undo_buttons[1].clicked.connect(self._perform_toolbar_redo)
+        self.update_undo_redo_actions()
 
         # Connect other buttons and widgets
         self.translate_button.clicked.connect(self.start_batch_process)
@@ -321,7 +325,17 @@ class ComicTranslate(ComicTranslateUI):
             self.settings_page.ui.automatic_output_archive_image_format_combo.currentIndexChanged,
             self.settings_page.ui.automatic_output_archive_level_spinbox.valueChanged,
         ):
-            signal.connect(self.refresh_automatic_output_controls)
+            signal.connect(self._on_global_output_settings_changed)
+        self.rerender_current_button.clicked.connect(
+            lambda: self.project_ctrl.rerender_output_scope("current")
+        )
+        self.rerender_dirty_button.clicked.connect(
+            lambda: self.project_ctrl.rerender_output_scope("dirty")
+        )
+        self.rerender_all_button.clicked.connect(
+            lambda: self.project_ctrl.rerender_output_scope("all")
+        )
+        self.open_output_folder_button.clicked.connect(self.project_ctrl.open_output_folder)
 
         # Connect text edit widgets
         self.s_text_edit.textChanged.connect(self.text_ctrl.update_text_block)
@@ -333,6 +347,7 @@ class ComicTranslate(ComicTranslateUI):
         # Connect image viewer signals for both modes
         self.image_viewer.rectangle_selected.connect(self.rect_item_ctrl.handle_rectangle_selection)
         self.image_viewer.rectangle_created.connect(self.rect_item_ctrl.handle_rectangle_creation)
+        self.image_viewer.text_box_created.connect(self.text_ctrl.handle_text_box_creation)
         self.image_viewer.rectangle_deleted.connect(self.rect_item_ctrl.handle_rectangle_deletion)
         self.image_viewer.command_emitted.connect(self.push_command)
         self.image_viewer.restore_stroke_requested.connect(self.image_ctrl.apply_restore_stroke)
@@ -453,6 +468,7 @@ class ComicTranslate(ComicTranslateUI):
         self.project_output_preferences = normalized
         self.refresh_automatic_output_controls()
         if changed and mark_dirty and self.image_files:
+            self.mark_all_render_dirty()
             self.mark_project_dirty()
 
     def get_resolved_export_settings(self) -> dict[str, object]:
@@ -463,6 +479,151 @@ class ComicTranslate(ComicTranslateUI):
             )
         )
         return export_settings
+
+    def _on_global_output_settings_changed(self, *_args) -> None:
+        self.refresh_automatic_output_controls()
+        try:
+            if self.image_files and self.get_project_output_preferences().get("output_use_global", True):
+                self.mark_all_render_dirty()
+        except Exception:
+            logger.debug("Failed to mark outputs dirty after global output setting change.", exc_info=True)
+
+    def _current_image_path(self) -> str | None:
+        if 0 <= self.curr_img_idx < len(self.image_files):
+            return self.image_files[self.curr_img_idx]
+        return None
+
+    def create_undo_stack_for_path(self, file_path: str) -> QUndoStack:
+        stack = QUndoStack(self)
+        self.register_undo_stack_for_path(file_path, stack)
+        return stack
+
+    def register_undo_stack_for_path(self, file_path: str, stack: QUndoStack) -> None:
+        if not file_path or stack is None:
+            return
+        stack.cleanChanged.connect(self._update_window_modified)
+        stack.indexChanged.connect(self._bump_dirty_revision)
+        stack.indexChanged.connect(lambda _index=0, path=file_path: self.mark_render_dirty(path))
+        stack.indexChanged.connect(self.refresh_inpaint_tool_ui)
+        stack.canUndoChanged.connect(lambda _can=False: self.update_undo_redo_actions())
+        stack.canRedoChanged.connect(lambda _can=False: self.update_undo_redo_actions())
+        try:
+            if hasattr(self, "search_ctrl") and self.search_ctrl is not None:
+                stack.indexChanged.connect(self.search_ctrl.on_undo_redo)
+        except Exception:
+            pass
+        self.undo_stacks[file_path] = stack
+        self.undo_group.addStack(stack)
+        self.update_undo_redo_actions()
+
+    def update_undo_redo_actions(self, *_args) -> None:
+        buttons = []
+        try:
+            buttons = self.undo_tool_group.get_button_group().buttons()
+        except Exception:
+            buttons = []
+        stack = self.undo_group.activeStack()
+        can_undo = bool(stack is not None and stack.canUndo())
+        can_redo = bool(stack is not None and stack.canRedo())
+        if len(buttons) >= 2:
+            buttons[0].setEnabled(can_undo)
+            buttons[1].setEnabled(can_redo)
+
+    def _perform_toolbar_undo(self) -> None:
+        stack = self.undo_group.activeStack()
+        if stack is not None and stack.canUndo():
+            self.undo_group.undo()
+
+    def _perform_toolbar_redo(self) -> None:
+        stack = self.undo_group.activeStack()
+        if stack is not None and stack.canRedo():
+            self.undo_group.redo()
+
+    def render_dirty_paths(self, *, exclude_current: bool = False) -> list[str]:
+        current = self._current_image_path()
+        dirty_paths = []
+        for file_path in self.image_files:
+            if exclude_current and file_path == current:
+                continue
+            state = self.image_ctrl.ensure_page_state(file_path)
+            if bool(state.get("render_dirty", False)):
+                dirty_paths.append(file_path)
+        return dirty_paths
+
+    def mark_render_dirty(self, file_path: str | None = None) -> None:
+        path = file_path or self._current_image_path()
+        if not path:
+            return
+        state = self.image_ctrl.ensure_page_state(path)
+        state["render_dirty"] = True
+        self.refresh_render_dirty_ui()
+
+    def mark_render_dirty_for_paths(self, paths: list[str] | tuple[str, ...] | set[str]) -> None:
+        changed = False
+        for path in paths or []:
+            if path not in self.image_files:
+                continue
+            state = self.image_ctrl.ensure_page_state(path)
+            if not state.get("render_dirty", False):
+                state["render_dirty"] = True
+                changed = True
+        if changed:
+            self.refresh_render_dirty_ui()
+
+    def mark_all_render_dirty(self) -> None:
+        self.mark_render_dirty_for_paths(list(self.image_files))
+
+    def mark_render_clean(
+        self,
+        file_path: str,
+        *,
+        signature: str = "",
+        rendered_at: str = "",
+        output_path: str = "",
+    ) -> None:
+        if not file_path:
+            return
+        state = self.image_ctrl.ensure_page_state(file_path)
+        state["render_dirty"] = False
+        if signature:
+            state["last_render_signature"] = signature
+        if rendered_at:
+            state["last_rendered_at"] = rendered_at
+        if output_path:
+            state["last_render_output_path"] = output_path
+        self.refresh_render_dirty_ui()
+
+    def refresh_render_dirty_ui(self) -> None:
+        if self._render_dirty_ui_refresh_pending:
+            return
+        self._render_dirty_ui_refresh_pending = True
+
+        def _apply() -> None:
+            self._render_dirty_ui_refresh_pending = False
+            if not hasattr(self, "output_dirty_label"):
+                return
+            dirty_count = len(self.render_dirty_paths())
+            current_dirty = bool(
+                self._current_image_path()
+                and self.image_ctrl.ensure_page_state(self._current_image_path()).get("render_dirty", False)
+            )
+            archive_mode = is_single_archive_mode(self.get_resolved_export_settings())
+            suffix = self.tr(" (Update Archive)") if archive_mode else ""
+            self.rerender_current_button.setText(self.tr("Rerender Current Image") + suffix)
+            self.rerender_dirty_button.setText(self.tr("Rerender Changed Images") + suffix)
+            self.rerender_all_button.setText(self.tr("Rerender All Images") + suffix)
+            self.rerender_current_button.setEnabled(bool(self.image_files) and current_dirty)
+            self.rerender_dirty_button.setEnabled(dirty_count > 0)
+            self.rerender_all_button.setEnabled(bool(self.image_files))
+            self.open_output_folder_button.setEnabled(bool(self.image_files))
+            if dirty_count:
+                self.output_dirty_label.setText(
+                    self.tr("{count} image(s) have unapplied render changes.").format(count=dirty_count)
+                )
+            else:
+                self.output_dirty_label.setText(self.tr("All render outputs are up to date."))
+
+        QtCore.QTimer.singleShot(0, self, _apply)
 
     def get_automatic_output_series_dir(
         self,
@@ -740,6 +901,7 @@ class ComicTranslate(ComicTranslateUI):
                         "Images are saved individually at maximum quality.\nTranslated and cleaned images are exported."
                     )
                 )
+        self.refresh_render_dirty_ui()
 
     def _on_project_output_use_global_changed(self, state: int) -> None:
         if self._automatic_output_controls_updating:
@@ -997,6 +1159,7 @@ class ComicTranslate(ComicTranslateUI):
     def mark_project_dirty(self):
         self._bump_dirty_revision()
         self._manual_dirty = True
+        self.mark_render_dirty()
         try:
             if getattr(self, "project_kind", PROJECT_KIND_SINGLE) == PROJECT_KIND_SERIES:
                 self.series_ctrl.notify_active_child_dirty()
@@ -1610,6 +1773,7 @@ class ComicTranslate(ComicTranslateUI):
             if matched_paths:
                 self.text_ctrl.rebuild_text_items_state_for_paths(matched_paths)
                 self._refresh_after_translation_import(matched_paths)
+                self.mark_render_dirty_for_paths(matched_paths)
                 self.mark_project_dirty()
 
             message = self._build_translation_import_message(all_matched, match_result)

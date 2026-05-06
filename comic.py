@@ -37,6 +37,22 @@ def _read_positive_int_env(name: str, default: int = 0) -> int:
     return value if value > 0 else default
 
 
+def _is_packaged_app() -> bool:
+    return bool(getattr(sys, "frozen", False) or "__compiled__" in globals())
+
+
+def _configure_portable_io_dirs() -> None:
+    if not _is_packaged_app():
+        return
+    exe_dir = os.path.dirname(os.path.abspath(sys.executable))
+    input_dir = os.path.join(exe_dir, "input")
+    output_dir = os.path.join(exe_dir, "output")
+    os.makedirs(input_dir, exist_ok=True)
+    os.makedirs(output_dir, exist_ok=True)
+    os.environ.setdefault("COMIC_TRANSLATE_PORTABLE_INPUT_DIR", input_dir)
+    os.environ.setdefault("COMIC_TRANSLATE_PORTABLE_OUTPUT_DIR", output_dir)
+
+
 def _encode_ipc_message(payload: dict) -> bytes:
     return (json.dumps(payload, ensure_ascii=False) + "\n").encode("utf-8", errors="ignore")
 
@@ -150,6 +166,7 @@ def main():
     logging.basicConfig(
         level=logging.INFO,
     )
+    _configure_portable_io_dirs()
     
     if sys.platform == "win32":
         # Necessary Workaround to set Taskbar Icon on Windows

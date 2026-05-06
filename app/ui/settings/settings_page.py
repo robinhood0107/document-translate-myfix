@@ -119,6 +119,14 @@ class SettingsPage(QtWidgets.QWidget):
         self.update_checker.error_occurred.connect(self.on_update_error)
         self.update_checker.download_progress.connect(self.on_download_progress)
         self.update_checker.download_finished.connect(self.on_download_finished)
+        self.fork_update_checker = UpdateChecker(
+            "robinhood0107",
+            "document-translate-myfix",
+            allow_release_link_without_installer=True,
+        )
+        self.fork_update_checker.update_available.connect(self.on_fork_update_available)
+        self.fork_update_checker.up_to_date.connect(self.on_fork_up_to_date)
+        self.fork_update_checker.error_occurred.connect(self.on_fork_update_error)
         self.update_dialog = None
 
         self._setup_connections()
@@ -133,6 +141,7 @@ class SettingsPage(QtWidgets.QWidget):
         self.ui.lang_combo.currentTextChanged.connect(self.on_language_changed)
         self.ui.font_browser.sig_files_changed.connect(self.import_font)
         self.ui.check_update_button.clicked.connect(self.check_for_updates)
+        self.ui.developer_mode_checkbox.stateChanged.connect(self._save_settings_if_not_loading)
         self.ui.shortcuts_page.shortcut_changed.connect(self.on_shortcut_changed)
         self.ui.translator_combo.currentTextChanged.connect(self._sync_extra_context_limit)
         self.ui.raw_text_checkbox.stateChanged.connect(self._save_settings_if_not_loading)
@@ -740,6 +749,11 @@ class SettingsPage(QtWidgets.QWidget):
         settings.beginGroup("series")
         settings.endGroup()
 
+        settings.setValue(
+            "updates/developer_mode",
+            bool(self.ui.developer_mode_checkbox.isChecked()),
+        )
+
         dictionaries = self.get_dictionary_settings()
         settings.beginGroup("dictionaries")
         settings.setValue(
@@ -1186,6 +1200,10 @@ class SettingsPage(QtWidgets.QWidget):
                     )
         settings.endGroup()
 
+        self.ui.developer_mode_checkbox.setChecked(
+            settings.value("updates/developer_mode", False, type=bool)
+        )
+
         self._current_language = self.ui.lang_combo.currentText()
         self._loading_settings = False
         owner = self.window()
@@ -1297,6 +1315,8 @@ class SettingsPage(QtWidgets.QWidget):
             self.ui.check_update_button.setEnabled(False)
             self.ui.check_update_button.setText(self.tr("Checking..."))
         self.update_checker.check_for_updates()
+        if bool(self.ui.developer_mode_checkbox.isChecked()):
+            self.fork_update_checker.check_for_updates()
 
     def on_update_available(self, version, release_url, download_url):
         if not self._is_background_check:
@@ -1363,6 +1383,45 @@ class SettingsPage(QtWidgets.QWidget):
             message,
         )
 
+    def on_fork_update_available(self, version, release_url, download_url):
+        settings = QSettings("ComicLabs", "ComicTranslate")
+        ignored_version = settings.value("updates/fork_ignored_version", "")
+        if self._is_background_check and version == ignored_version:
+            return
+
+        msg_box = QtWidgets.QMessageBox(self)
+        msg_box.setWindowTitle(self.tr("Developer Update Available"))
+        msg_box.setTextFormat(Qt.RichText)
+        msg_box.setTextInteractionFlags(Qt.TextBrowserInteraction)
+        msg_box.setText(
+            self.tr("A developer fork update {version} is available.").format(version=version)
+        )
+        link_text = self.tr("Release Notes")
+        msg_box.setInformativeText(f'<a href="{release_url}" style="color: #4da6ff;">{link_text}</a>')
+        msg_box.addButton(self.tr("OK"), QtWidgets.QMessageBox.ButtonRole.AcceptRole)
+        skip_btn = None
+        if self._is_background_check:
+            skip_btn = msg_box.addButton(
+                self.tr("Skip This Version"),
+                QtWidgets.QMessageBox.ButtonRole.ApplyRole,
+            )
+        msg_box.exec()
+        if skip_btn and msg_box.clickedButton() == skip_btn:
+            settings.setValue("updates/fork_ignored_version", version)
+
+    def on_fork_up_to_date(self):
+        logger.info("Developer fork update check: up to date.")
+
+    def on_fork_update_error(self, message):
+        if self._is_background_check:
+            logger.error(f"Background developer fork update check failed: {message}")
+            return
+        self._show_message_box(
+            QtWidgets.QMessageBox.Icon.Warning,
+            self.tr("Developer Update Error"),
+            self.tr("Fork update check failed: {message}").format(message=message),
+        )
+
     def start_download(self, url):
         self.update_dialog = QtWidgets.QProgressDialog(
             self.tr("Downloading update..."),
@@ -1399,6 +1458,10 @@ class SettingsPage(QtWidgets.QWidget):
 
         try:
             self.update_checker.shutdown()
+        except Exception:
+            pass
+        try:
+            self.fork_update_checker.shutdown()
         except Exception:
             pass
 

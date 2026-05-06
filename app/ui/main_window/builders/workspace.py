@@ -514,18 +514,31 @@ class WorkspaceMixin:
         misc_lay.addWidget(self.set_all_button)
         misc_lay.addStretch()
 
+        text_box_tools_lay = QtWidgets.QHBoxLayout()
+
+        self.text_box_button = self.create_tool_button(svg="edit_line.svg", checkable=True)
+        self.text_box_button.setToolTip(
+            self.tr("Create or edit dotted text boxes. The dotted frame is editor-only and is not rendered into the final image.")
+        )
+        self.text_box_button.clicked.connect(self.toggle_text_box_tool)
+        self.tool_buttons["text_box"] = self.text_box_button
+
+        self.delete_button = self.create_tool_button(svg="trash_line.svg", checkable=False)
+        self.delete_button.setToolTip(self.tr("Delete the selected text box or block box"))
+
+        text_box_tools_lay.addWidget(self.text_box_button)
+        text_box_tools_lay.addWidget(self.delete_button)
+        text_box_tools_lay.addStretch()
+
         box_tools_lay = QtWidgets.QHBoxLayout()
 
         self.box_button = self.create_tool_button(svg="select.svg", checkable=True)
-        self.box_button.setToolTip(self.tr("Draw or Select Text Boxes"))
+        self.box_button.setToolTip(self.tr("Draw or select OCR/block boxes used for detection, OCR, translation, and inpainting."))
         self.box_button.clicked.connect(self.toggle_box_tool)
         self.tool_buttons["box"] = self.box_button
 
-        self.delete_button = self.create_tool_button(svg="trash_line.svg", checkable=False)
-        self.delete_button.setToolTip(self.tr("Delete Selected Box"))
-
         self.clear_rectangles_button = self.create_tool_button(svg="clear-outlined.svg")
-        self.clear_rectangles_button.setToolTip(self.tr("Remove all the Boxes on the Image"))
+        self.clear_rectangles_button.setToolTip(self.tr("Remove all block boxes on the image"))
 
         self.draw_blklist_blks = self.create_tool_button(svg="gridicons--create.svg")
         self.draw_blklist_blks.setToolTip(
@@ -536,7 +549,6 @@ class WorkspaceMixin:
         )
 
         box_tools_lay.addWidget(self.box_button)
-        box_tools_lay.addWidget(self.delete_button)
         box_tools_lay.addWidget(self.clear_rectangles_button)
         box_tools_lay.addWidget(self.draw_blklist_blks)
 
@@ -728,18 +740,55 @@ class WorkspaceMixin:
         self.output_estimate_label = MLabel(self.tr("Load pages to see automatic output estimates.")).secondary()
         self.output_estimate_label.setWordWrap(True)
 
+        self.output_dirty_label = MLabel(self.tr("All render outputs are up to date.")).secondary()
+        self.output_dirty_label.setWordWrap(True)
+
+        output_rerender_buttons_widget = QtWidgets.QWidget()
+        output_rerender_buttons_layout = QtWidgets.QGridLayout(output_rerender_buttons_widget)
+        output_rerender_buttons_layout.setContentsMargins(0, 0, 0, 0)
+        output_rerender_buttons_layout.setHorizontalSpacing(6)
+        output_rerender_buttons_layout.setVerticalSpacing(6)
+
+        self.rerender_current_button = MPushButton(self.tr("Rerender Current Image")).small()
+        self.rerender_current_button.setToolTip(
+            self.tr("Save editable state, then write the current dirty page to the final output.")
+        )
+        self.rerender_dirty_button = MPushButton(self.tr("Rerender Changed Images")).small()
+        self.rerender_dirty_button.setToolTip(
+            self.tr("Write only pages with unapplied render changes to the final output.")
+        )
+        self.rerender_all_button = MPushButton(self.tr("Rerender All Images")).small()
+        self.rerender_all_button.setToolTip(
+            self.tr("Rebuild final output for every loaded page.")
+        )
+        self.open_output_folder_button = MPushButton(self.tr("Open Output Folder")).small()
+        self.open_output_folder_button.setToolTip(
+            self.tr("Open the folder where final render output is written.")
+        )
+
+        output_rerender_buttons_layout.addWidget(self.rerender_current_button, 0, 0)
+        output_rerender_buttons_layout.addWidget(self.rerender_dirty_button, 0, 1)
+        output_rerender_buttons_layout.addWidget(self.rerender_all_button, 1, 0)
+        output_rerender_buttons_layout.addWidget(self.open_output_folder_button, 1, 1)
+
         output_layout.addWidget(self.output_use_global_checkbox)
         output_layout.addLayout(output_target_row)
         output_layout.addWidget(self.output_image_format_row)
         output_layout.addWidget(self.output_archive_format_row)
         output_layout.addWidget(self.output_archive_image_format_row)
         output_layout.addWidget(self.output_archive_level_row)
+        output_layout.addWidget(self.output_dirty_label)
+        output_layout.addWidget(output_rerender_buttons_widget)
         output_layout.addWidget(self.output_quality_note_label)
         output_layout.addWidget(self.output_archive_note_label)
         output_layout.addWidget(self.output_estimate_label)
 
         tools_layout.addLayout(misc_lay)
-        box_div = MDivider(self.tr("Box Drawing"))
+        text_box_div = MDivider(self.tr("Text Boxes"))
+        tools_layout.addWidget(text_box_div)
+        tools_layout.addLayout(text_box_tools_lay)
+
+        box_div = MDivider(self.tr("Block Boxes"))
         tools_layout.addWidget(box_div)
         tools_layout.addLayout(box_tools_lay)
 
