@@ -52,6 +52,7 @@ class ShortcutController:
         handlers = {
             "undo": self._undo,
             "redo": self._redo,
+            "save_project": self._save_project,
             "delete_selected_box": self._delete_selected_box,
             "restore_text_blocks": self._restore_text_blocks,
         }
@@ -76,19 +77,68 @@ class ShortcutController:
         )
         return isinstance(focus_widget, editable_types)
 
+    def _try_focused_undo(self) -> bool:
+        focus_widget = QtWidgets.QApplication.focusWidget()
+        if isinstance(focus_widget, (QtWidgets.QLineEdit, QtWidgets.QTextEdit, QtWidgets.QPlainTextEdit)):
+            focus_widget.undo()
+            return True
+        if isinstance(focus_widget, QtWidgets.QAbstractSpinBox):
+            line_edit = focus_widget.lineEdit()
+            if line_edit is not None:
+                line_edit.undo()
+                return True
+        text_item = getattr(self.main, "curr_tblock_item", None)
+        if text_item is not None and getattr(text_item, "editing_mode", False):
+            document = text_item.document()
+            if document is not None:
+                document.undo()
+                return True
+        return False
+
+    def _try_focused_redo(self) -> bool:
+        focus_widget = QtWidgets.QApplication.focusWidget()
+        if isinstance(focus_widget, (QtWidgets.QLineEdit, QtWidgets.QTextEdit, QtWidgets.QPlainTextEdit)):
+            focus_widget.redo()
+            return True
+        if isinstance(focus_widget, QtWidgets.QAbstractSpinBox):
+            line_edit = focus_widget.lineEdit()
+            if line_edit is not None:
+                line_edit.redo()
+                return True
+        text_item = getattr(self.main, "curr_tblock_item", None)
+        if text_item is not None and getattr(text_item, "editing_mode", False):
+            document = text_item.document()
+            if document is not None:
+                document.redo()
+                return True
+        return False
+
     def _undo(self) -> None:
-        if not self._workspace_is_active() or self._is_text_input_focused():
+        if not self._workspace_is_active():
+            return
+        if self._try_focused_undo():
             return
         stack = self.main.undo_group.activeStack()
         if stack is not None and stack.canUndo():
             self.main.undo_group.undo()
 
     def _redo(self) -> None:
-        if not self._workspace_is_active() or self._is_text_input_focused():
+        if not self._workspace_is_active():
+            return
+        if self._try_focused_redo():
             return
         stack = self.main.undo_group.activeStack()
         if stack is not None and stack.canRedo():
             self.main.undo_group.redo()
+
+    def _save_project(self) -> None:
+        if not self._workspace_is_active():
+            return
+        try:
+            self.main.text_ctrl._commit_pending_text_command()
+        except Exception:
+            pass
+        self.main.project_ctrl.thread_save_project()
 
     def _delete_selected_box(self) -> None:
         if not self._workspace_is_active() or self._is_text_input_focused():

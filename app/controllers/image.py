@@ -5,7 +5,7 @@ import imkit as imk
 import numpy as np
 from typing import TYPE_CHECKING, List
 from datetime import datetime
-from PySide6 import QtCore, QtWidgets, QtGui
+from PySide6 import QtCore, QtWidgets
 
 from app.ui.dayu_widgets.message import MMessage
 from app.ui.messages import Messages
@@ -13,6 +13,8 @@ from app.ui.commands.image import SetImageCommand, ToggleSkipImagesCommand
 from app.ui.commands.inpaint import PatchInsertCommand
 from app.ui.commands.inpaint import PatchCommandBase
 from app.ui.commands.box import AddTextItemCommand
+from app.ui.canvas.rectangle import MoveableRectItem
+from app.ui.canvas.text_item import TextBlockItem
 from app.controllers.psd_importer import ImportedPsdPage, import_psd_files, prepare_psd_font_catalog
 from app.controllers.psd_support import ensure_photoshopapi_available
 from app.ui.list_view import PageListItemData
@@ -26,6 +28,7 @@ from app.projects.project_types import (
 from modules.utils.archives import natural_sort_key
 from modules.utils.export_paths import normalize_export_source_record
 from modules.utils.automatic_output import default_project_output_preferences
+from modules.utils.textblock import ensure_text_block_id
 from modules.utils.file_handler import get_prepared_path_source
 from modules.utils.inpaint_strokes import (
     PATCH_KIND_INPAINT,
@@ -67,6 +70,9 @@ class ImageStateController:
         state.setdefault('brush_strokes', [])
         state.setdefault('blk_list', [])
         state.setdefault('skip', False)
+        state.setdefault('render_dirty', False)
+        state.setdefault('last_render_signature', "")
+        state.setdefault('last_rendered_at', "")
         return state
 
     def apply_languages_to_paths(
@@ -164,6 +170,7 @@ class ImageStateController:
                 self.main.undo_group.setActiveStack(self.main.undo_stacks[current_path])
             self.page_list_loader.force_load_image(self.main.curr_img_idx)
         self.main.page_list.blockSignals(False)
+        self.main.mark_all_render_dirty()
         self.main.mark_project_dirty()
 
     def _default_export_group_name(self, file_path: str) -> str:
@@ -240,6 +247,15 @@ class ImageStateController:
         self._deep_merge_dict(summary, merged_patch)
         summary["last_run_timestamp"] = datetime.now().isoformat(timespec="seconds")
         state["processing_summary"] = summary
+        translated_output = str(summary.get("translated_image_path", "") or "").strip()
+        if translated_output and "translated_image_path" in merged_patch:
+            state["render_dirty"] = False
+            state["last_rendered_at"] = datetime.now().isoformat(timespec="seconds")
+            state["last_render_output_path"] = translated_output
+            try:
+                self.main.refresh_render_dirty_ui()
+            except Exception:
+                pass
         return summary
 
     def mark_processing_stage(
@@ -665,17 +681,7 @@ class ImageStateController:
                 False,
             )
 
-            stack = QtGui.QUndoStack(self.main)
-            stack.cleanChanged.connect(self.main._update_window_modified)
-            stack.indexChanged.connect(self.main._bump_dirty_revision)
-            stack.indexChanged.connect(self.main.refresh_inpaint_tool_ui)
-            try:
-                if hasattr(self.main, "search_ctrl") and self.main.search_ctrl is not None:
-                    stack.indexChanged.connect(self.main.search_ctrl.on_undo_redo)
-            except Exception:
-                pass
-            self.main.undo_stacks[file_path] = stack
-            self.main.undo_group.addStack(stack)
+            self.main.create_undo_stack_for_path(file_path)
 
         self.main.page_list.blockSignals(True)
         self.update_image_cards()
@@ -725,12 +731,7 @@ class ImageStateController:
                     )
                     
                     # Create undo stack for new file
-                    stack = QtGui.QUndoStack(self.main)
-                    stack.cleanChanged.connect(self.main._update_window_modified)
-                    stack.indexChanged.connect(self.main._bump_dirty_revision)
-                    stack.indexChanged.connect(self.main.refresh_inpaint_tool_ui)
-                    self.main.undo_stacks[file_path] = stack
-                    self.main.undo_group.addStack(stack)
+                    self.main.create_undo_stack_for_path(file_path)
 
                 self.main.page_list.clear_active_sort()
                 
@@ -766,6 +767,7 @@ class ImageStateController:
                     new_index = self.main.image_files.index(path)
                     im = self.load_image(path)
                     self.display_image_from_loaded(im, new_index, False)
+                self.main.mark_all_render_dirty()
                 self.main.mark_project_dirty()
 
             self.main.run_threaded(
@@ -785,17 +787,7 @@ class ImageStateController:
 
         for file in self.main.image_files:
             self.save_image_state(file)
-            stack = QtGui.QUndoStack(self.main)
-            stack.cleanChanged.connect(self.main._update_window_modified)
-            stack.indexChanged.connect(self.main._bump_dirty_revision)
-            stack.indexChanged.connect(self.main.refresh_inpaint_tool_ui)
-            try:
-                if hasattr(self.main, "search_ctrl") and self.main.search_ctrl is not None:
-                    stack.indexChanged.connect(self.main.search_ctrl.on_undo_redo)
-            except Exception:
-                pass
-            self.main.undo_stacks[file] = stack
-            self.main.undo_group.addStack(stack)
+            self.main.create_undo_stack_for_path(file)
 
         if self.main.image_files:
             self.main.page_list.blockSignals(True)
@@ -1139,6 +1131,7 @@ class ImageStateController:
             self.main.project_ctrl.clear_recovery_checkpoint()
 
         if removed_any:
+            self.main.mark_all_render_dirty()
             self.main.mark_project_dirty()
 
 
@@ -1164,6 +1157,7 @@ class ImageStateController:
             return
 
         command = ToggleSkipImagesCommand(self.main, file_paths, skip_status)
+        self.main.mark_render_dirty_for_paths(file_paths)
         stack = self.main.undo_group.activeStack()
         if stack:
             stack.push(command)
@@ -1312,6 +1306,18 @@ class ImageStateController:
 
     def save_image_state(self, file: str):
         # For regular mode only
+        for blk in self.main.blk_list:
+            ensure_text_block_id(blk)
+        for item in self.main.image_viewer._scene.items():
+            if isinstance(item, MoveableRectItem) and not getattr(item, "block_id", ""):
+                rect = item.mapRectToScene(item.rect()).getCoords()
+                blk = self.main.rect_item_ctrl.find_corresponding_text_block(rect, 0.5)
+                if blk is not None:
+                    item.block_id = ensure_text_block_id(blk)
+            elif isinstance(item, TextBlockItem) and not getattr(item, "block_id", ""):
+                blk = self.main.text_ctrl._find_text_block_for_item(item)
+                if blk is not None:
+                    item.block_id = ensure_text_block_id(blk)
         existing = dict(self.main.image_states.get(file, {}))
         self.main.image_states[file] = self._build_image_state(
             file,
@@ -1321,6 +1327,21 @@ class ImageStateController:
             existing.get('skip', False),
             existing,
         )
+        last_signature = str(existing.get("last_render_signature", "") or "")
+        if last_signature and not self.main.image_states[file].get("render_dirty", False):
+            project_ctrl = getattr(self.main, "project_ctrl", None)
+            if project_ctrl is not None:
+                try:
+                    current_signature = project_ctrl._render_signature_for_path(
+                        file,
+                        self.main.image_states[file].get("viewer_state", {}),
+                        self.main.get_resolved_export_settings(),
+                    )
+                    if current_signature != last_signature:
+                        self.main.image_states[file]["render_dirty"] = True
+                        self.main.refresh_render_dirty_ui()
+                except Exception:
+                    pass
 
     def save_current_image_state(self):
         if self.main.curr_img_idx >= 0:
@@ -1397,8 +1418,15 @@ class ImageStateController:
 
     def display_image(self, index: int, switch_page: bool = True):
         if 0 <= index < len(self.main.image_files):
+            previous_path = self._current_file_path()
             if switch_page:
+                try:
+                    self.main.text_ctrl._commit_pending_text_command()
+                except Exception:
+                    pass
                 self.save_current_image_state()
+                if previous_path and previous_path != self.main.image_files[index]:
+                    self.main.project_ctrl.rerender_dirty_page_on_leave(previous_path)
             self.main.curr_img_idx = index
             file_path = self.main.image_files[index]
 

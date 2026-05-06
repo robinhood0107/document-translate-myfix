@@ -15,6 +15,14 @@
         <source>Check for Updates</source>
         <translation>업데이트 확인</translation>
     </message>
+    <message>
+        <source>Developer Mode</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Also check the document-translate-myfix fork when checking for updates.</source>
+        <translation type="unfinished"></translation>
+    </message>
 </context>
 <context>
     <name>AutomaticProgress</name>
@@ -265,6 +273,30 @@ Duplicates:
     <message>
         <source>Unsaved Changes</source>
         <translation>저장되지 않은 변경 사항</translation>
+    </message>
+    <message>
+        <source> (Update Archive)</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Rerender Current Image</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Rerender Changed Images</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Rerender All Images</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>{count} image(s) have unapplied render changes.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>All render outputs are up to date.</source>
+        <translation type="unfinished"></translation>
     </message>
     <message>
         <source>Load pages to see automatic output estimates.</source>
@@ -2805,6 +2837,22 @@ Restart now?</source>
         <translation>업데이트 오류</translation>
     </message>
     <message>
+        <source>Developer Update Available</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>A developer fork update {version} is available.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Developer Update Error</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Fork update check failed: {message}</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
         <source>Downloading update...</source>
         <translation>업데이트 다운로드 중...</translation>
     </message>
@@ -3053,6 +3101,14 @@ Restart now?</source>
     <message>
         <source>Redo the previously undone action.</source>
         <translation>방금 실행 취소한 작업을 다시 실행합니다.</translation>
+    </message>
+    <message>
+        <source>Save Project</source>
+        <translation type="unfinished">프로젝트 저장</translation>
+    </message>
+    <message>
+        <source>Save editable state and update dirty render output.</source>
+        <translation type="unfinished"></translation>
     </message>
     <message>
         <source>Delete Selected Box</source>
@@ -3516,6 +3572,22 @@ then do inpainting on the resized image.</source>
         <translation>스타일</translation>
     </message>
     <message>
+        <source>Create or edit dotted text boxes. The dotted frame is editor-only and is not rendered into the final image.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Delete the selected text box or block box</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Draw or select OCR/block boxes used for detection, OCR, translation, and inpainting.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Remove all block boxes on the image</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
         <source>When enabled, this project inherits the automatic output settings from Settings.</source>
         <translation>켜면 이 프로젝트는 설정의 자동 출력 값을 그대로 상속합니다.</translation>
     </message>
@@ -3558,6 +3630,50 @@ then do inpainting on the resized image.</source>
     <message>
         <source>Load pages to see automatic output estimates.</source>
         <translation>자동 출력 예상치를 보려면 페이지를 불러오세요.</translation>
+    </message>
+    <message>
+        <source>All render outputs are up to date.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Rerender Current Image</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Save editable state, then write the current dirty page to the final output.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Rerender Changed Images</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Write only pages with unapplied render changes to the final output.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Rerender All Images</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Rebuild final output for every loaded page.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Open Output Folder</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Open the folder where final render output is written.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Text Boxes</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Block Boxes</source>
+        <translation type="unfinished"></translation>
     </message>
     <message>
         <source>Top</source>
@@ -3634,18 +3750,6 @@ then do inpainting on the resized image.</source>
     <message>
         <source>Sets the Source and Target Language on the current page for all pages</source>
         <translation>현재 페이지의 출발어 및 대상 언어를 모든 페이지에 설정합니다.</translation>
-    </message>
-    <message>
-        <source>Draw or Select Text Boxes</source>
-        <translation>텍스트 상자 그리기 또는 선택</translation>
-    </message>
-    <message>
-        <source>Delete Selected Box</source>
-        <translation>선택한 상자 삭제</translation>
-    </message>
-    <message>
-        <source>Remove all the Boxes on the Image</source>
-        <translation>이미지에서 모든 상자 제거</translation>
     </message>
     <message>
         <source>Draws all the Text Blocks in the existing Text Block List
@@ -3740,10 +3844,6 @@ back on the Image (for further editing)</source>
     <message>
         <source>Same as source</source>
         <translation>원본과 동일</translation>
-    </message>
-    <message>
-        <source>Box Drawing</source>
-        <translation>상자 그리기</translation>
     </message>
     <message>
         <source>Inpainting</source>
@@ -4230,6 +4330,26 @@ Do you want to restore it?</source>
     <message>
         <source>RecoveredProject.ctpr</source>
         <translation>RecoveredProject.ctpr</translation>
+    </message>
+    <message>
+        <source>Rerender Output</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>There are no render changes to apply.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Render output was updated.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Archive staging was incomplete, so all pages were rendered before rebuilding the archive.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>변경된 {count}개의 이미지가 렌더링 저장됩니다. 저장하시겠습니까?</source>
+        <translation type="unfinished"></translation>
     </message>
     <message>
         <source>Save Series Project As</source>

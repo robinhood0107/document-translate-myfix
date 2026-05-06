@@ -9,12 +9,12 @@ from PySide6 import QtCore
 from PySide6.QtGui import QColor, QTextCursor
 
 from app.ui.commands.textformat import TextFormatCommand
-from app.ui.commands.box import AddTextItemCommand, ResizeBlocksCommand
+from app.ui.commands.box import AddTextBoxCommand, AddTextItemCommand, ResizeBlocksCommand
 from app.ui.commands.text_edit import TextEditCommand
 from app.ui.canvas.text_item import TextBlockItem
 from app.ui.canvas.text.text_item_properties import TextItemProperties
 
-from modules.utils.textblock import TextBlock
+from modules.utils.textblock import TextBlock, ensure_text_block_id
 from modules.rendering.render import (
     TextRenderingSettings,
     build_render_rects_for_block,
@@ -153,6 +153,70 @@ class TextController:
             None,
         )
 
+    def _find_text_block_by_id(self, block_id: str | None) -> TextBlock | None:
+        normalized = str(block_id or "").strip()
+        if not normalized:
+            return None
+        return next(
+            (
+                blk for blk in self.main.blk_list
+                if str(getattr(blk, "block_id", "") or "") == normalized
+            ),
+            None,
+        )
+
+    def handle_text_box_creation(self, rect: QtCore.QRectF):
+        if rect is None or rect.width() <= 0 or rect.height() <= 0:
+            return
+
+        x1 = int(rect.x())
+        y1 = int(rect.y())
+        x2 = int(rect.x() + rect.width())
+        y2 = int(rect.y() + rect.height())
+        new_blk = TextBlock(text_bbox=np.array((x1, y1, x2, y2)), text="", translation="")
+        block_id = ensure_text_block_id(new_blk)
+        source_rect = (float(x1), float(y1), float(x2 - x1), float(y2 - y1))
+        render_settings = self.render_settings()
+        props = TextItemProperties(
+            block_id=block_id,
+            text="",
+            font_family=render_settings.font_family,
+            font_size=max(float(render_settings.min_font_size or 12), 1.0),
+            text_color=QColor(render_settings.color),
+            alignment=self.main.button_to_alignment[render_settings.alignment_id],
+            line_spacing=float(render_settings.line_spacing),
+            outline_color=QColor(render_settings.outline_color) if render_settings.outline else None,
+            outline_width=float(render_settings.outline_width),
+            bold=render_settings.bold,
+            italic=render_settings.italic,
+            underline=render_settings.underline,
+            direction=render_settings.direction,
+            position=(float(x1), float(y1)),
+            rotation=0,
+            width=float(x2 - x1),
+            height=float(y2 - y1),
+            vertical=False,
+            vertical_alignment=self._get_vertical_alignment(render_settings.vertical_alignment_id),
+            source_rect=source_rect,
+            block_anchor=source_rect,
+            editor_frame=True,
+        )
+
+        self.main.blk_list.append(new_blk)
+        text_item = self.main.image_viewer.add_text_item(props)
+        command = AddTextBoxCommand(self.main, text_item, new_blk, self.main.blk_list)
+        stack = self.main.undo_group.activeStack()
+        if stack:
+            stack.push(command)
+        else:
+            self.main.mark_project_dirty()
+
+        self.main.image_viewer.deselect_all()
+        text_item.selected = True
+        text_item.setSelected(True)
+        text_item.item_selected.emit(text_item)
+        text_item.enter_editing_mode()
+
     def _resolve_font_color(
         self,
         blk: TextBlock,
@@ -194,6 +258,7 @@ class TextController:
         )
 
         return TextItemProperties(
+            block_id=ensure_text_block_id(blk),
             text=text,
             font_family=render_settings.font_family,
             font_size=font_size,
@@ -234,6 +299,8 @@ class TextController:
         text_item.italic = text_props.italic
         text_item.underline = text_props.underline
         text_item.direction = text_props.direction
+        text_item.block_id = str(text_props.block_id or getattr(text_item, "block_id", "") or "")
+        text_item.editor_frame = bool(text_props.editor_frame)
         text_item.set_source_rect(text_props.source_rect)
         text_item.set_block_anchor(text_props.block_anchor)
         text_item.vertical_alignment = coerce_vertical_alignment(
@@ -518,10 +585,9 @@ class TextController:
         self._last_item_text[text_item] = text_item.toPlainText()
         self._last_item_html[text_item] = text_item.document().toHtml()
 
-        self.main.curr_tblock = self._find_text_block_for_anchor(
-            self._get_block_anchor_for_item(text_item),
-            text_item.rotation(),
-        )
+        self.main.curr_tblock = self._find_text_block_for_item(text_item)
+        if self.main.curr_tblock is not None and not getattr(text_item, "block_id", ""):
+            text_item.block_id = ensure_text_block_id(self.main.curr_tblock)
 
         # Update both s_text_edit and t_text_edit
         if self.main.curr_tblock:
@@ -708,6 +774,10 @@ class TextController:
     def _find_text_block_for_item(self, text_item: TextBlockItem) -> TextBlock | None:
         if not text_item:
             return None
+
+        block = self._find_text_block_by_id(getattr(text_item, "block_id", ""))
+        if block is not None:
+            return block
 
         return self._find_text_block_for_anchor(
             self._get_block_anchor_for_item(text_item),
@@ -1171,6 +1241,11 @@ class TextController:
 
                     viewer_state = state.setdefault("viewer_state", {})
                     existing_text_items = list(viewer_state.get("text_items_state", []))
+                    existing_block_ids = {
+                        str(item.get("block_id", "") or "")
+                        for item in existing_text_items
+                        if str(item.get("block_id", "") or "")
+                    }
                     existing_keys = {
                         (
                             int(item.get("block_anchor", item.get("position", (0, 0)))[0]),
@@ -1183,6 +1258,9 @@ class TextController:
 
                     new_text_items_state = []
                     for blk in blk_list:
+                        blk_block_id = ensure_text_block_id(blk)
+                        if blk_block_id in existing_block_ids:
+                            continue
                         _source_rect, block_anchor = self._get_render_rects_for_block(blk)
                         blk_key = (int(block_anchor[0]), int(block_anchor[1]), float(blk.angle))
                         if blk_key in existing_keys:
@@ -1357,9 +1435,14 @@ class TextController:
                 if item not in self.main.image_viewer._scene.items():
                     self.main.image_viewer._scene.addItem(item)
 
-            # Create a dictionary to map text items to their anchor boxes and rotations
-            existing_text_items = {
-                item: (
+            existing_block_ids = {
+                str(getattr(item, "block_id", "") or "")
+                for item in self.main.image_viewer.text_items
+                if str(getattr(item, "block_id", "") or "")
+            }
+            # Keep the old anchor fallback for projects created before block IDs.
+            existing_text_item_anchors = {
+                (
                     int(self._get_block_anchor_for_item(item)[0]),
                     int(self._get_block_anchor_for_item(item)[1]),
                     item.rotation(),
@@ -1371,11 +1454,12 @@ class TextController:
             # Identify new blocks based on position and rotation
             new_blocks = [
                 blk for blk in self.main.blk_list
-                if (
+                if ensure_text_block_id(blk) not in existing_block_ids
+                and (
                     int(self._get_render_rects_for_block(blk)[1][0]),
                     int(self._get_render_rects_for_block(blk)[1][1]),
                     blk.angle,
-                ) not in existing_text_items.values()
+                ) not in existing_text_item_anchors
             ]
 
             self.main.image_viewer.clear_rectangles()

@@ -1,7 +1,7 @@
 from PySide6.QtWidgets import QGraphicsTextItem, QGraphicsItem, \
      QApplication, QWidget, QStyleOptionGraphicsItem
 from PySide6.QtGui import QFont, QCursor, QColor, \
-     QTextCharFormat, QTextBlockFormat, QTextCursor, QPainter
+     QTextCharFormat, QTextBlockFormat, QTextCursor, QPainter, QPen
 from PySide6.QtCore import Qt, QRectF, Signal, QPointF
 import math, copy
 from dataclasses import dataclass
@@ -25,6 +25,7 @@ class TextBlockState:
     rect: tuple  
     rotation: float
     transform_origin: QPointF
+    block_id: str = ""
 
     @classmethod
     def from_item(cls, item: QGraphicsTextItem):
@@ -33,7 +34,8 @@ class TextBlockState:
         return cls(
             rect=rect,
             rotation=item.rotation(),
-            transform_origin=item.transformOriginPoint()
+            transform_origin=item.transformOriginPoint(),
+            block_id=str(getattr(item, "block_id", "") or "")
         )
     
 class OutlineType(Enum):
@@ -70,9 +72,12 @@ class TextBlockItem(QGraphicsTextItem):
              direction=Qt.LayoutDirection.LeftToRight,
              vertical_alignment=VERTICAL_ALIGNMENT_TOP,
              source_rect=None,
-             block_anchor=None):
+             block_anchor=None,
+             block_id="",
+             editor_frame=False):
 
         super().__init__(text)
+        self.block_id = str(block_id or "")
         self.text_color = render_color
         self.outline = True if outline_color else False
         self.outline_color = outline_color
@@ -91,6 +96,7 @@ class TextBlockItem(QGraphicsTextItem):
         self.vertical_alignment = coerce_vertical_alignment(vertical_alignment)
         self.source_rect = tuple(source_rect) if source_rect is not None else None
         self.block_anchor = tuple(block_anchor) if block_anchor is not None else None
+        self.editor_frame = bool(editor_frame)
 
         self.selected = False
         self.resizing = False
@@ -126,6 +132,8 @@ class TextBlockItem(QGraphicsTextItem):
         self._apply_text_direction()
 
     def set_source_rect(self, source_rect):
+        if bool(getattr(self, "editor_frame", False)):
+            self.prepareGeometryChange()
         if source_rect is None:
             self.source_rect = None
             return
@@ -144,6 +152,17 @@ class TextBlockItem(QGraphicsTextItem):
             self.boundingRect().width(),
             self.boundingRect().height(),
         )
+
+    def boundingRect(self):
+        rect = super().boundingRect()
+        if bool(getattr(self, "editor_frame", False)) and self.source_rect is not None:
+            try:
+                _x, _y, width, height = self.source_rect
+                frame_rect = QRectF(0, 0, max(float(width), 1.0), max(float(height), 1.0))
+                rect = rect.united(frame_rect)
+            except Exception:
+                pass
+        return rect
 
     def set_vertical_alignment(self, vertical_alignment: str):
         self.vertical_alignment = coerce_vertical_alignment(vertical_alignment)
@@ -531,6 +550,19 @@ class TextBlockItem(QGraphicsTextItem):
 
         # Draw the normal text on top
         super().paint(painter, option, widget)
+
+        if bool(getattr(self, "editor_frame", False)) and self.source_rect is not None:
+            try:
+                _x, _y, width, height = self.source_rect
+                painter.save()
+                pen = QPen(QColor(255, 213, 74, 220), 1.5, Qt.PenStyle.DashLine)
+                pen.setCosmetic(True)
+                painter.setPen(pen)
+                painter.setBrush(Qt.BrushStyle.NoBrush)
+                painter.drawRect(QRectF(0, 0, max(float(width), 1.0), max(float(height), 1.0)))
+                painter.restore()
+            except Exception:
+                pass
 
     def set_bold(self, state):
         if not self.textCursor().hasSelection():
@@ -1018,6 +1050,8 @@ class TextBlockItem(QGraphicsTextItem):
             vertical_alignment=self.vertical_alignment,
             source_rect=self.source_rect,
             block_anchor=self.block_anchor,
+            block_id=self.block_id,
+            editor_frame=self.editor_frame,
         )
         
         new_instance.set_text(self.toHtml(), self.boundingRect().width())

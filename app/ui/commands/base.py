@@ -106,6 +106,7 @@ class RectCommandBase:
     def save_rect_properties(item):
         """Save properties of a path item"""
         return {
+            'block_id': str(getattr(item, 'block_id', '') or ''),
             'pos':(item.pos().x(), item.pos().y()),
             'rotation': item.rotation(),
             'width': item.boundingRect().width(),
@@ -123,15 +124,24 @@ class RectCommandBase:
         rotation = properties['rotation']
         
         # Use the viewer's add_rectangle method for consistent handling
-        rect_item = viewer.add_rectangle(rect, position, rotation, transform_origin)
+        rect_item = viewer.add_rectangle(
+            rect,
+            position,
+            rotation,
+            transform_origin,
+            str(properties.get('block_id', '') or ''),
+        )
         return rect_item
 
 
     @staticmethod
     def find_matching_rect(scene, properties):
         """Find an item in the scene matching the given properties"""
+        block_id = str((properties or {}).get('block_id', '') or '')
         for item in scene.items():
             if isinstance(item, MoveableRectItem):
+                if block_id and str(getattr(item, 'block_id', '') or '') == block_id:
+                    return item
                 if (is_close(item.pos().x(), properties['pos'][0]) and
                     is_close(item.pos().y(), properties['pos'][1]) and
                     is_close(item.boundingRect().width(), properties['width']) and
@@ -144,11 +154,17 @@ class RectCommandBase:
     
     @staticmethod
     def save_blk_properties(blk):
-        prp = blk.__dict__
+        prp = blk.__dict__.copy()
         return prp
     
     @staticmethod
     def find_matching_blk(blk_list, properties):
+        block_id = str((properties or {}).get('block_id', '') or '')
+        if block_id:
+            for blk in blk_list:
+                if str(getattr(blk, 'block_id', '') or '') == block_id:
+                    return blk
+
         for blk in blk_list:
             # Get current block's properties
             current_props = blk.__dict__.copy()
@@ -214,8 +230,12 @@ class RectCommandBase:
     @staticmethod
     def find_matching_txt_item(scene, properties):
         """Find a TextBlockItem in the scene matching the given properties"""
+        block_id = str(getattr(properties, 'block_id', '') or '')
         for item in scene.items():
             if isinstance(item, TextBlockItem):
+                if block_id and str(getattr(item, 'block_id', '') or '') == block_id:
+                    return item
+                transform_origin = properties.transform_origin or (0, 0)
                 # Compare all relevant properties with is_close for numerical values
                 if (item.font_family == properties.font_family and
                     is_close(item.font_size, properties.font_size) and
@@ -231,8 +251,8 @@ class RectCommandBase:
                     is_close(item.pos().y(), properties.position[1]) and
                     is_close(item.rotation(), properties.rotation) and
                     is_close(item.scale(), properties.scale) and
-                    is_close(item.transformOriginPoint().x(), properties.transform_origin[0]) and
-                    is_close(item.transformOriginPoint().y(), properties.transform_origin[1]) and
+                    is_close(item.transformOriginPoint().x(), transform_origin[0]) and
+                    is_close(item.transformOriginPoint().y(), transform_origin[1]) and
                     is_close(item.boundingRect().width(), properties.width) and
                     getattr(item, "vertical_alignment", "top") == getattr(properties, "vertical_alignment", "top")):
                     return item
@@ -318,4 +338,3 @@ class PatchCommandBase:
                 return itm
                 
         return None
-

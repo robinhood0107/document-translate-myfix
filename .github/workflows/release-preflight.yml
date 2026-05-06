@@ -1,0 +1,129 @@
+name: Release Preflight
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - ".github/workflows/release-preflight.yml"
+      - ".github/workflows/release.yml"
+      - "scripts/build_windows_release_nuitka.ps1"
+      - "scripts/build_windows_release_nuitka_onefile.ps1"
+      - "scripts/build_windows_gpu_portable.ps1"
+      - "app/version.py"
+      - "comic.py"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-windows-cpu-preflight:
+    if: github.ref_name == 'main'
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Read app version
+        shell: pwsh
+        run: |
+          $version = python -c "from pathlib import Path; ns = {}; exec(Path('app/version.py').read_text(encoding='utf-8'), ns); print(ns['__version__'])"
+          $version = $version.Trim()
+          if ($version -notmatch '^\d+\.\d+\.\d+$') {
+            throw 'app/version.py must contain a semantic version.'
+          }
+          "APP_VERSION=$version" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+      - name: Install build dependencies
+        shell: pwsh
+        run: |
+          python -m pip install --upgrade pip wheel setuptools
+          python -m pip install -r requirements.txt
+          python -m pip uninstall -y onnxruntime-gpu
+          python -m pip install onnxruntime
+          python -m pip install --index-url https://download.pytorch.org/whl/cpu torch==2.11.0 torchvision==0.26.0
+          python -m pip install "nuitka>=2.7" "ordered-set>=4.1.0" "zstandard>=0.23.0"
+
+      - name: Validate translations
+        shell: pwsh
+        run: |
+          python scripts/compile_translations.py --check
+
+      - name: Build Windows package with Nuitka
+        shell: pwsh
+        run: |
+          ./scripts/build_windows_release_nuitka.ps1 -AppVersion "$env:APP_VERSION"
+
+      - name: Build Windows onefile executable with Nuitka
+        shell: pwsh
+        run: |
+          ./scripts/build_windows_release_nuitka_onefile.ps1 -AppVersion "$env:APP_VERSION"
+
+      - name: Upload preflight bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: comic-translate-preflight-${{ github.run_number }}-windows-x64
+          path: build/nuitka/comic.dist
+          if-no-files-found: error
+
+      - name: Upload preflight onefile executable
+        uses: actions/upload-artifact@v4
+        with:
+          name: comic-translate-preflight-${{ github.run_number }}-windows-x64-exe
+          path: build/nuitka-onefile/comic-translate.exe
+          if-no-files-found: error
+
+  build-windows-gpu-portable-preflight:
+    if: github.ref_name == 'main'
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Read app version
+        shell: pwsh
+        run: |
+          $version = python -c "from pathlib import Path; ns = {}; exec(Path('app/version.py').read_text(encoding='utf-8'), ns); print(ns['__version__'])"
+          $version = $version.Trim()
+          if ($version -notmatch '^\d+\.\d+\.\d+$') {
+            throw 'app/version.py must contain a semantic version.'
+          }
+          "APP_VERSION=$version" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+      - name: Install GPU build dependencies
+        shell: pwsh
+        run: |
+          python -m pip install --upgrade pip wheel setuptools
+          python -m pip install -r requirements.txt
+          python -m pip uninstall -y onnxruntime
+          python -m pip install onnxruntime-gpu
+          python -m pip install --index-url https://download.pytorch.org/whl/cu130 torch==2.11.0 torchvision==0.26.0
+          python -m pip install "nuitka>=2.7" "ordered-set>=4.1.0" "zstandard>=0.23.0"
+
+      - name: Validate translations
+        shell: pwsh
+        run: |
+          python scripts/compile_translations.py --check
+
+      - name: Build Windows GPU portable package with Nuitka
+        shell: pwsh
+        run: |
+          ./scripts/build_windows_gpu_portable.ps1 -AppVersion "$env:APP_VERSION"
+
+      - name: Upload preflight GPU portable bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: comic-translate-preflight-${{ github.run_number }}-windows-x64-gpu-portable
+          path: build/nuitka-gpu/comic.dist
+          if-no-files-found: error

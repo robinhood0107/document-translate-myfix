@@ -27,6 +27,12 @@ SHORTCUT_DEFINITIONS: tuple[ShortcutDefinition, ...] = (
         default="Ctrl+Y",
     ),
     ShortcutDefinition(
+        id="save_project",
+        label=QT_TRANSLATE_NOOP("ShortcutDefinitions", "Save Project"),
+        description=QT_TRANSLATE_NOOP("ShortcutDefinitions", "Save editable state and update dirty render output."),
+        default="Ctrl+S",
+    ),
+    ShortcutDefinition(
         id="delete_selected_box",
         label=QT_TRANSLATE_NOOP("ShortcutDefinitions", "Delete Selected Box"),
         description=QT_TRANSLATE_NOOP("ShortcutDefinitions", "Delete the currently selected text box."),

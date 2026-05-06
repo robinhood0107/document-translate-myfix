@@ -6,6 +6,7 @@ from .base import RectCommandBase
 from ..canvas.rectangle import MoveableRectItem
 from ..canvas.text_item import TextBlockItem
 from pipeline.webtoon_utils import get_first_visible_block
+from modules.utils.textblock import ensure_text_block_id
 
 
 class AddRectangleCommand(QUndoCommand, RectCommandBase):
@@ -46,6 +47,7 @@ class BoxesChangeCommand(QUndoCommand, RectCommandBase):
         self.old_xyxy = [int(c) for c in old_state.rect]
         self.old_angle = old_state.rotation
         self.old_tr_origin = (old_state.transform_origin.x(), old_state.transform_origin.y())
+        self.block_id = str(getattr(old_state, "block_id", "") or getattr(new_state, "block_id", "") or "")
 
         self.new_xyxy = [int(c) for c in new_state.rect]
         self.new_angle = new_state.rotation
@@ -53,38 +55,47 @@ class BoxesChangeCommand(QUndoCommand, RectCommandBase):
 
     def redo(self):
         for blk in self.blk_list:
-            if (np.array_equal(blk.xyxy, self.old_xyxy) and
-                blk.angle == self.old_angle):
+            if (
+                (self.block_id and str(getattr(blk, "block_id", "") or "") == self.block_id)
+                or (np.array_equal(blk.xyxy, self.old_xyxy) and blk.angle == self.old_angle)
+            ):
             
                 blk.xyxy[:] = self.new_xyxy
                 blk.angle = self.new_angle
                 blk.tr_origin_point = self.new_tr_origin
 
                 self.find_and_update_item(self.scene, self.old_xyxy, self.old_angle, 
-                                                self.new_xyxy, self.new_angle, self.new_tr_origin)
+                                                self.new_xyxy, self.new_angle, self.new_tr_origin, self.block_id)
                 self.scene.update()
 
     def undo(self):
         for blk in self.blk_list:
-            if (np.array_equal(blk.xyxy, self.new_xyxy) and
-                blk.angle == self.new_angle ):
+            if (
+                (self.block_id and str(getattr(blk, "block_id", "") or "") == self.block_id)
+                or (np.array_equal(blk.xyxy, self.new_xyxy) and blk.angle == self.new_angle)
+            ):
                 
                 blk.xyxy[:] = self.old_xyxy
                 blk.angle = self.old_angle
                 blk.tr_origin_point = self.old_tr_origin
 
                 self.find_and_update_item(self.scene, self.new_xyxy, self.new_angle, 
-                                        self.old_xyxy, self.old_angle, self.old_tr_origin)
+                                        self.old_xyxy, self.old_angle, self.old_tr_origin, self.block_id)
                 self.scene.update()
 
     @staticmethod
-    def find_and_update_item(scene, old_xyxy, old_angle, new_xyxy, new_angle, new_tr_origin):
+    def find_and_update_item(scene, old_xyxy, old_angle, new_xyxy, new_angle, new_tr_origin, block_id=""):
         for item in scene.items():
             # Check if item position and properties match
             if (isinstance(item, (MoveableRectItem, TextBlockItem)) and
-                int(item.pos().x()) == int(old_xyxy[0]) and 
-                int(item.pos().y()) == int(old_xyxy[1]) and
-                int(item.rotation()) == int(old_angle)):
+                (
+                    (block_id and str(getattr(item, "block_id", "") or "") == block_id)
+                    or (
+                        int(item.pos().x()) == int(old_xyxy[0]) and
+                        int(item.pos().y()) == int(old_xyxy[1]) and
+                        int(item.rotation()) == int(old_angle)
+                    )
+                )):
 
                 new_width = new_xyxy[2] - new_xyxy[0]
                 new_height = new_xyxy[3] - new_xyxy[1]
@@ -92,6 +103,13 @@ class BoxesChangeCommand(QUndoCommand, RectCommandBase):
                 if isinstance(item, MoveableRectItem):
                     rect = QRectF(0, 0, new_width, new_height)
                     item.setRect(rect)
+                elif isinstance(item, TextBlockItem):
+                    item.set_source_rect((new_xyxy[0], new_xyxy[1], new_width, new_height))
+                    item.set_block_anchor((new_xyxy[0], new_xyxy[1], new_width, new_height))
+                    if getattr(item, "vertical", False) and getattr(item, "layout", None):
+                        item.layout.set_max_size(new_width, new_height)
+                    else:
+                        item.setTextWidth(new_width)
 
                 item.setTransformOriginPoint(QPointF(*new_tr_origin))
                 item.setPos(new_xyxy[0], new_xyxy[1])
@@ -129,7 +147,13 @@ class ResizeBlocksCommand(QUndoCommand):
             x1, y1, x2, y2 = blk.xyxy
             rect = QRectF(0, 0, x2 - x1, y2 - y1)
             transform_origin = QPointF(*blk.tr_origin_point) if blk.tr_origin_point else None
-            rect_item = viewer.add_rectangle(rect, QPointF(x1, y1), blk.angle, transform_origin)
+            rect_item = viewer.add_rectangle(
+                rect,
+                QPointF(x1, y1),
+                blk.angle,
+                transform_origin,
+                ensure_text_block_id(blk),
+            )
             self.main.connect_rect_item_signals(rect_item)
 
         if self.main.webtoon_mode:
@@ -238,5 +262,38 @@ class AddTextItemCommand(QUndoCommand, RectCommandBase):
             self.viewer.text_items.remove(matching_txt_item)
             self.scene.update()
 
+
+class AddTextBoxCommand(QUndoCommand, RectCommandBase):
+    def __init__(self, main_page, text_item, blk, blk_list):
+        super().__init__()
+        self.ct = main_page
+        self.viewer = main_page.image_viewer
+        self.scene = self.viewer._scene
+        self.txt_item_prp = self.save_txt_item_properties(text_item)
+        self.blk_properties = self.save_blk_properties(blk)
+        self.blk_list = blk_list
+
+    def redo(self):
+        if not self.find_matching_blk(self.blk_list, self.blk_properties):
+            self.blk_list.append(self.create_new_blk(self.blk_properties))
+
+        if not self.find_matching_txt_item(self.scene, self.txt_item_prp):
+            self.create_new_txt_item(self.txt_item_prp, self.viewer)
+
+    def undo(self):
+        matching_txt_item = self.find_matching_txt_item(self.scene, self.txt_item_prp)
+        if matching_txt_item:
+            self.scene.removeItem(matching_txt_item)
+            if matching_txt_item in self.viewer.text_items:
+                self.viewer.text_items.remove(matching_txt_item)
+            if self.ct.curr_tblock_item is matching_txt_item:
+                self.ct.curr_tblock_item = None
+            self.scene.update()
+
+        matching_blk = self.find_matching_blk(self.blk_list, self.blk_properties)
+        if matching_blk:
+            if self.ct.curr_tblock is matching_blk:
+                self.ct.curr_tblock = None
+            self.blk_list.remove(matching_blk)
  
 
