@@ -63,3 +63,4 @@
 
 - `01-parallelism-audit-ko.md`: 현재 병목과 speedup 계산
 - `02-implementation-spec-ko.md`: AST 기반 코드 검토와 구현 명세
+- `03-final-execution-plan-ko.md`: 동시성 제외 후 최종 실행 순서와 PR별 준비 명세

@@ -12,7 +12,7 @@
 - 이후 문서는 번호 prefix로 정렬한다.
   - `01-...-audit-ko.md`: 관측, 로그, 계산 근거
   - `02-...-implementation-spec-ko.md`: AST/코드 검토 기반 구현 명세
-  - `03-...`: PR별 설계, 실험 결과, 사용자 검토 기록
+  - `03-...`: 최종 실행 계획, PR별 설계, 실험 결과, 사용자 검토 기록
 - 테스트 로그, 이미지 산출물, benchmark raw output은 repo 밖 validation log 또는 `benchmarking/lab` 정책 위치에 둔다. 이 폴더에는 추적 가능한 문서와 링크만 둔다.
 
 ## 현재 프로젝트

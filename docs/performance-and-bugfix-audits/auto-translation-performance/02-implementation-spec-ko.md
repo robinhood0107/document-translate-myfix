@@ -118,7 +118,7 @@ PaddleOCR VL 기본 `parallel_workers`는 최대 8이고, Hunyuan OCR도 block-l
 
 ### PR 1: Gemma/OCR readiness cache
 
-Branch: `perf/runtime-readiness-cache`
+Branch: `chore/runtime-readiness-cache`
 
 수정 대상:
 
@@ -156,7 +156,7 @@ Branch: `perf/runtime-readiness-cache`
 
 ### PR 2: stage-batched Translator reuse
 
-Branch: `perf/stage-batched-translator-reuse`
+Branch: `chore/stage-batched-translator-reuse`
 
 수정 대상:
 
@@ -189,7 +189,7 @@ Branch: `perf/stage-batched-translator-reuse`
 
 ### PR 3: GPU-safe prewarm scheduling
 
-Branch: `perf/gpu-safe-prewarm-scheduling`
+Branch: `chore/gpu-safe-prewarm-scheduling`
 
 수정 대상:
 
@@ -220,7 +220,7 @@ Branch: `perf/gpu-safe-prewarm-scheduling`
 
 ### PR 4: performance telemetry cleanup
 
-Branch: `perf/auto-translation-telemetry`
+Branch: `chore/auto-translation-telemetry`
 
 수정 대상:
 
