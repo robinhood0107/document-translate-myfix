@@ -20,6 +20,15 @@ def _block(*, xyxy, text_class="text_free") -> TextBlock:
     )
 
 
+def _bubble_block(*, xyxy, bubble_xyxy) -> TextBlock:
+    return TextBlock(
+        text_bbox=np.asarray(xyxy, dtype=np.int32),
+        bubble_bbox=np.asarray(bubble_xyxy, dtype=np.int32),
+        text_class="text_bubble",
+        text="demo",
+    )
+
+
 class TextFreeStrictMaskingTests(unittest.TestCase):
     def test_text_free_ctd_roi_uses_modest_erase_envelope(self) -> None:
         block = _block(xyxy=[40, 20, 50, 70])
@@ -101,6 +110,38 @@ class TextFreeStrictMaskingTests(unittest.TestCase):
         self.assertIs(merged_mask, mask)
         self.assertFalse(stats["applied"])
         self.assertEqual(stats["pass2_text_free_candidate_count"], 0)
+
+    def test_residue_cleanup_does_not_count_text_free_in_mixed_pages(self) -> None:
+        image = np.zeros((24, 24, 3), dtype=np.uint8)
+        mask = np.zeros((24, 24), dtype=np.uint8)
+        mask[2:8, 2:8] = 255
+        mask[14:20, 14:20] = 255
+        bubble = _bubble_block(xyxy=[2, 2, 8, 8], bubble_xyxy=[0, 0, 10, 10])
+        text_free = _block(xyxy=[14, 14, 20, 20])
+
+        def fake_inpainter(input_image, input_mask, _config):
+            output = input_image.copy()
+            output[input_mask > 0] = 127
+            return output
+
+        with mock.patch(
+            "modules.utils.inpaint_cleanup.detect_content_in_bbox",
+            return_value=[(2, 2, 4, 4)],
+        ):
+            cleaned, merged_mask, stats = refine_bubble_residue_inpaint(
+                image,
+                mask,
+                [bubble, text_free],
+                fake_inpainter,
+                object(),
+            )
+
+        self.assertIsNot(cleaned, image)
+        self.assertIsNot(merged_mask, mask)
+        self.assertTrue(stats["applied"])
+        self.assertGreater(stats["pass2_bubble_candidate_count"], 0)
+        self.assertEqual(stats["pass2_text_free_candidate_count"], 0)
+        self.assertEqual(stats["pass2_text_free_kept_count"], 0)
 
 
 if __name__ == "__main__":
