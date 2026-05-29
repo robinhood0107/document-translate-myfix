@@ -9,6 +9,7 @@ set "PYTHON_EXE=%VENV_DIR%\Scripts\python.exe"
 set "TORCH_LIB=%VENV_DIR%\Lib\site-packages\torch\lib"
 set "TENSORRT_LIBS=%VENV_DIR%\Lib\site-packages\tensorrt_libs"
 set "CUDNN_BIN=%VENV_DIR%\Lib\site-packages\nvidia\cudnn\bin"
+set "NVIDIA_CU13_BIN=%VENV_DIR%\Lib\site-packages\nvidia\cu13\bin\x86_64"
 set "CUBLAS_BIN=%VENV_DIR%\Lib\site-packages\nvidia\cublas\bin"
 set "CUDA_RUNTIME_BIN=%VENV_DIR%\Lib\site-packages\nvidia\cuda_runtime\bin"
 set "CUDA_NVRTC_BIN=%VENV_DIR%\Lib\site-packages\nvidia\cuda_nvrtc\bin"
@@ -36,7 +37,7 @@ if not exist "%PYTHON_EXE%" (
 )
 
 echo [bootstrap] Checking .venv-win-cuda13 (CUDA 13.x)...
-"%PYTHON_EXE%" -c "import importlib.metadata as md, sys, torch; required={'torch':'2.11.0+cu130','torchvision':'0.26.0+cu130','setuptools':'80.9.0','einops':'0.8.2'}; required_any=('onnxruntime-gpu','PySide6'); ok=all(md.version(k)==v for k,v in required.items()) and all(md.version(k) for k in required_any) and getattr(torch.version,'cuda',None)=='13.0'; raise SystemExit(0 if ok else 1)" >nul 2>&1
+"%PYTHON_EXE%" -c "import importlib.metadata as md, sys, torch; required={'torch':'2.11.0+cu130','torchvision':'0.26.0+cu130','onnxruntime-gpu':'1.26.0.dev20260408003','setuptools':'80.9.0','einops':'0.8.2'}; required_any=('PySide6',); ok=all(md.version(k)==v for k,v in required.items()) and all(md.version(k) for k in required_any) and getattr(torch.version,'cuda',None)=='13.0'; raise SystemExit(0 if ok else 1)" >nul 2>&1
 if errorlevel 1 (
     echo [bootstrap] Installing pinned runtime for .venv-win-cuda13...
     "%PYTHON_EXE%" -m pip install --upgrade pip wheel setuptools==80.9.0
@@ -44,29 +45,14 @@ if errorlevel 1 (
         popd >nul
         exit /b 1
     )
-    "%PYTHON_EXE%" -m pip install -r requirements.txt
-    if errorlevel 1 (
-        popd >nul
-        exit /b 1
-    )
-    "%PYTHON_EXE%" -m pip install --upgrade einops==0.8.2
-    if errorlevel 1 (
-        popd >nul
-        exit /b 1
-    )
-    "%PYTHON_EXE%" -m pip install --upgrade --force-reinstall --index-url https://download.pytorch.org/whl/cu130 torch==2.11.0+cu130 torchvision==0.26.0+cu130
-    if errorlevel 1 (
-        popd >nul
-        exit /b 1
-    )
-    "%PYTHON_EXE%" -m pip install --upgrade --force-reinstall setuptools==80.9.0
+    "%PYTHON_EXE%" -m pip install -r requirements-cuda13.txt
     if errorlevel 1 (
         popd >nul
         exit /b 1
     )
 )
 
-"%PYTHON_EXE%" -c "import importlib.metadata as md, sys, torch; required={'torch':'2.11.0+cu130','torchvision':'0.26.0+cu130','setuptools':'80.9.0','einops':'0.8.2'}; required_any=('onnxruntime-gpu','PySide6'); ok=all(md.version(k)==v for k,v in required.items()) and all(md.version(k) for k in required_any) and getattr(torch.version,'cuda',None)=='13.0'; raise SystemExit(0 if ok else 1)"
+"%PYTHON_EXE%" -c "import importlib.metadata as md, sys, torch; required={'torch':'2.11.0+cu130','torchvision':'0.26.0+cu130','onnxruntime-gpu':'1.26.0.dev20260408003','setuptools':'80.9.0','einops':'0.8.2'}; required_any=('PySide6',); ok=all(md.version(k)==v for k,v in required.items()) and all(md.version(k) for k in required_any) and getattr(torch.version,'cuda',None)=='13.0'; raise SystemExit(0 if ok else 1)"
 if errorlevel 1 (
     echo [bootstrap] .venv-win-cuda13 verification failed.
     popd >nul
@@ -76,6 +62,7 @@ if errorlevel 1 (
 if exist "%TORCH_LIB%" set "PATH=%TORCH_LIB%;%PATH%"
 if exist "%TENSORRT_LIBS%" set "PATH=%TENSORRT_LIBS%;%PATH%"
 if exist "%CUDNN_BIN%" set "PATH=%CUDNN_BIN%;%PATH%"
+if exist "%NVIDIA_CU13_BIN%" set "PATH=%NVIDIA_CU13_BIN%;%PATH%"
 if exist "%CUBLAS_BIN%" set "PATH=%CUBLAS_BIN%;%PATH%"
 if exist "%CUDA_RUNTIME_BIN%" set "PATH=%CUDA_RUNTIME_BIN%;%PATH%"
 if exist "%CUDA_NVRTC_BIN%" set "PATH=%CUDA_NVRTC_BIN%;%PATH%"
@@ -95,12 +82,14 @@ if defined COMIC_BOOTSTRAP_ONLY (
     exit /b 0
 )
 
-echo [bootstrap] Preparing required local runtime models...
-"%PYTHON_EXE%" -c "from modules.utils.download import ensure_startup_runtime_models; ensure_startup_runtime_models(prefer_cuda=True)"
-if errorlevel 1 (
-    echo [bootstrap] Required local model preparation failed.
-    popd >nul
-    exit /b 1
+if not defined COMIC_SKIP_STARTUP_MODELS if not defined COMIC_SMOKE_EXIT_MS (
+    echo [bootstrap] Preparing required local runtime models...
+    "%PYTHON_EXE%" -c "from modules.utils.download import ensure_startup_runtime_models; ensure_startup_runtime_models(prefer_cuda=True)"
+    if errorlevel 1 (
+        echo [bootstrap] Required local model preparation failed.
+        popd >nul
+        exit /b 1
+    )
 )
 
 "%PYTHON_EXE%" comic.py %*

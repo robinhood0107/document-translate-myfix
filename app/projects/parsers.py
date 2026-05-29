@@ -1,7 +1,7 @@
 import numpy as np
 from PySide6 import QtGui
 from PySide6.QtCore import Qt
-from modules.utils.textblock import TextBlock
+from modules.utils.textblock import TextBlock, ensure_text_block_id
 from ..ui.canvas.text_item import OutlineInfo, OutlineType
 
 class ProjectEncoder:
@@ -164,6 +164,7 @@ class ProjectDecoder:
     def decode_textblock(obj):
         text_block = TextBlock()
         text_block.__dict__.update(obj['data'])  
+        ensure_text_block_id(text_block)
         return text_block
 
     @staticmethod

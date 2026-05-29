@@ -3,7 +3,7 @@ from typing import List
 from PySide6 import QtCore
 
 from modules.detection.processor import TextBlockDetector
-from modules.utils.textblock import TextBlock, sort_blk_list
+from modules.utils.textblock import TextBlock, ensure_text_block_id, sort_blk_list
 from modules.rendering.render import get_best_render_area
 from pipeline.webtoon_utils import get_first_visible_block
 
@@ -24,6 +24,7 @@ class BlockDetectionHandler:
             x1, y1, x2, y2 = blk.xyxy
             rects.append(
                 {
+                    "block_id": ensure_text_block_id(blk),
                     "rect": (float(x1), float(y1), float(x2 - x1), float(y2 - y1)),
                     "rotation": float(getattr(blk, "angle", 0)),
                     "transform_origin": tuple(blk.tr_origin_point)
@@ -48,7 +49,11 @@ class BlockDetectionHandler:
                 
                 # Use the new add_rectangle method for consistent handling
                 rect_item = self.main_page.image_viewer.add_rectangle(
-                    rect, QtCore.QPointF(x1, y1), blk.angle, transform_origin
+                    rect,
+                    QtCore.QPointF(x1, y1),
+                    blk.angle,
+                    transform_origin,
+                    ensure_text_block_id(blk),
                 )
                 self.main_page.connect_rect_item_signals(rect_item)
 

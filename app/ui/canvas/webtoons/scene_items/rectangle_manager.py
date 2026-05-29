@@ -44,7 +44,8 @@ class RectangleManager:
                 rect=rect,
                 position=scene_pos, 
                 rotation=rect_data['rotation'],
-                origin=origin
+                origin=origin,
+                block_id=str(rect_data.get('block_id', '') or ''),
             )
             
             # Connect signals - the viewer's add_rectangle should handle this
@@ -74,6 +75,7 @@ class RectangleManager:
                     page_local_pos = self.coordinate_converter.scene_to_page_local_position(scene_pos, page_idx)
                     
                     rect_data = {
+                        'block_id': getattr(rect_item, 'block_id', ''),
                         'rect': (page_local_pos.x(), page_local_pos.y(), 
                                 rect_item.boundingRect().width(), rect_item.boundingRect().height()),
                         'rotation': rect_item.rotation(),
