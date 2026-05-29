@@ -64,6 +64,25 @@ class BatchReportRuntimeTests(unittest.TestCase):
         self.assertEqual(reexported["preflight_errors"], payload["preflight_errors"])
         self.assertTrue(imported_main.batch_report_button.enabled)
 
+    def test_inpaint_skip_preserves_stage_and_boundary_reason(self) -> None:
+        main = _FakeMain()
+        ctrl = BatchReportController(main)
+        ctrl.start_batch_report(["/tmp/page-001.png"], run_type="batch")
+
+        ctrl.register_batch_skip(
+            "/tmp/page-001.png",
+            "inpaint",
+            "IndexError: index 2160 is out of bounds for axis 0 with size 2160\n\nTraceback...",
+        )
+        finalized = ctrl.finalize_batch_report(False)
+
+        self.assertIsNotNone(finalized)
+        entry = finalized["skipped_entries"][0]
+        self.assertEqual(entry["stages"], ["inpaint"])
+        self.assertIn("index 2160", entry["errors"][0])
+        self.assertIn("Inpainting failed", entry["reasons"][0])
+        self.assertIn("Mask boundary exceeded image bounds", entry["reasons"][0])
+
 
 if __name__ == "__main__":
     unittest.main()

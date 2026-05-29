@@ -206,6 +206,11 @@ class BatchReportController:
             return ""
 
         lowered = summary.lower()
+        if "out of bounds" in lowered and "index" in lowered:
+            return QtCore.QCoreApplication.translate(
+                "BatchReportController",
+                "Mask boundary exceeded image bounds",
+            )
         if self._is_content_flagged_error_text(summary):
             return self._tr("The AI provider flagged this content")
         if "timed out" in lowered or "timeout" in lowered:
@@ -299,6 +304,11 @@ class BatchReportController:
 
         if skip_reason == "Text Blocks":
             return ""
+        if "inpaint" in (skip_reason or "").lower():
+            return QtCore.QCoreApplication.translate(
+                "BatchReportController",
+                "Try rerunning inpainting",
+            )
         if "ocr" in (skip_reason or "").lower():
             return self._tr("Try another text recognition tool")
         if "translator" in (skip_reason or "").lower() or "translation" in (
@@ -313,6 +323,14 @@ class BatchReportController:
         reason_map = {
             "Text Blocks": self._tr("No text blocks detected"),
             "OCR": self._tr("Text recognition failed"),
+            "inpaint": QtCore.QCoreApplication.translate(
+                "BatchReportController",
+                "Inpainting failed",
+            ),
+            "Inpaint": QtCore.QCoreApplication.translate(
+                "BatchReportController",
+                "Inpainting failed",
+            ),
             "Translator": self._tr("Translation failed"),
             "OCR Chunk Failed": self._tr("Webtoon text recognition chunk failed"),
             "Translation Chunk Failed": self._tr(
@@ -344,10 +362,17 @@ class BatchReportController:
             report["skipped"][image_path] = {
                 "image_path": image_path,
                 "image_name": os.path.basename(image_path),
+                "stages": [skip_reason] if skip_reason else [],
+                "errors": [self._sanitize_batch_skip_error(error)] if error else [],
                 "reasons": [reason_text] if reason_text else [],
             }
             return
 
+        if skip_reason and skip_reason not in existing.setdefault("stages", []):
+            existing["stages"].append(skip_reason)
+        sanitized_error = self._sanitize_batch_skip_error(error)
+        if sanitized_error and sanitized_error not in existing.setdefault("errors", []):
+            existing["errors"].append(sanitized_error)
         if reason_text and reason_text not in existing["reasons"]:
             existing["reasons"].append(reason_text)
 
