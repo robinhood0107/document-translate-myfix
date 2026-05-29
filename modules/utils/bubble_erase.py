@@ -15,6 +15,7 @@ from modules.utils.mask_roi import build_text_prior_mask, normalize_xyxy
 
 ERASE_MODE_TEXT_FREE_LAMA = "text_free_lama"
 ERASE_MODE_BUBBLE_FLAT_FILL = "bubble_flat_fill"
+ERASE_MODE_BUBBLE_GRADIENT_FILL = "bubble_gradient_fill"
 ERASE_MODE_BUBBLE_TELEA = "bubble_telea"
 ERASE_MODE_BUBBLE_LAMA_FALLBACK = "bubble_lama_fallback"
 ERASE_MODE_BUBBLE_SKIPPED = "bubble_skipped"
@@ -68,7 +69,13 @@ def _rule_like_component(width: int, height: int, area: int) -> bool:
     return aspect >= 10.0 and fill_ratio >= 0.30
 
 
-def _component_filtered_mask(candidate: np.ndarray, seed_gate: np.ndarray, *, max_bbox_ratio: float = 0.22) -> np.ndarray:
+def _component_filtered_mask(
+    candidate: np.ndarray,
+    seed_gate: np.ndarray,
+    *,
+    max_bbox_ratio: float = 0.22,
+    min_area: int = 3,
+) -> np.ndarray:
     if candidate.size == 0 or not np.any(candidate) or not np.any(seed_gate):
         return np.zeros_like(candidate, dtype=np.uint8)
     roi_h, roi_w = candidate.shape[:2]
@@ -81,7 +88,7 @@ def _component_filtered_mask(candidate: np.ndarray, seed_gate: np.ndarray, *, ma
     output = np.zeros_like(candidate, dtype=np.uint8)
     for label_idx in range(1, labels_count):
         x, y, w, h, area = stats[label_idx]
-        if int(area) < 3 or w <= 0 or h <= 0:
+        if int(area) < int(min_area) or w <= 0 or h <= 0:
             continue
         if int(w * h) > int(round(roi_area * max_bbox_ratio)):
             continue
@@ -94,12 +101,35 @@ def _component_filtered_mask(candidate: np.ndarray, seed_gate: np.ndarray, *, ma
     return np.where(output > 0, 255, 0).astype(np.uint8)
 
 
+def _non_boxy_seed_mask(seed: np.ndarray) -> np.ndarray:
+    if seed.size == 0 or not np.any(seed):
+        return np.zeros_like(seed, dtype=np.uint8)
+    labels_count, labels, stats, _centroids = cv2.connectedComponentsWithStats(
+        (seed > 0).astype(np.uint8),
+        8,
+        cv2.CV_32S,
+    )
+    output = np.zeros_like(seed, dtype=np.uint8)
+    for label_idx in range(1, labels_count):
+        x, y, w, h, area = stats[label_idx]
+        if int(area) <= 0 or w <= 0 or h <= 0:
+            continue
+        bbox_area = max(1, int(w) * int(h))
+        fill_ratio = float(area) / float(bbox_area)
+        if bbox_area >= 64 and fill_ratio >= 0.78:
+            continue
+        component = labels[y:y + h, x:x + w] == label_idx
+        output[y:y + h, x:x + w][component] = 255
+    return np.where(output > 0, 255, 0).astype(np.uint8)
+
+
 def build_bubble_residual_edit_mask(
     image_rgb: np.ndarray,
     source_mask: np.ndarray,
     block,
     *,
     seed_dilate_px: int = 8,
+    final_dilate_px: int = 4,
 ) -> tuple[np.ndarray, BubbleEraseBlockStats]:
     edit_mask = np.zeros(image_rgb.shape[:2], dtype=np.uint8)
     if getattr(block, "text_class", "") != "text_bubble":
@@ -141,9 +171,33 @@ def build_bubble_residual_edit_mask(
     dark = np.where(gray <= dark_threshold, 255, 0).astype(np.uint8)
     candidates = np.where(((bright > 0) | (dark > 0)) & (candidate_gate > 0) & (protect <= 0), 255, 0).astype(np.uint8)
     residual = _component_filtered_mask(candidates, seed_gate)
-    merged = np.where(((seed > 0) | (residual > 0)) & (protect <= 0), 255, 0).astype(np.uint8)
+    source_glyphs = _non_boxy_seed_mask(seed)
+    prior_candidates = np.where(((bright > 0) | (dark > 0)) & (prior > 0) & (protect <= 0), 255, 0).astype(np.uint8)
+    if np.any(prior_candidates):
+        prior_candidates = cv2.morphologyEx(
+            prior_candidates,
+            cv2.MORPH_CLOSE,
+            np.ones((3, 3), np.uint8),
+            iterations=1,
+        )
+    orphan_glyphs = _component_filtered_mask(
+        prior_candidates,
+        prior,
+        max_bbox_ratio=0.45,
+        min_area=4,
+    )
+    merged = np.where(
+        ((source_glyphs > 0) | (residual > 0) | (orphan_glyphs > 0)) & (protect <= 0),
+        255,
+        0,
+    ).astype(np.uint8)
     if np.any(merged):
-        merged = cv2.dilate(merged, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3)), iterations=1)
+        final_px = max(1, int(final_dilate_px))
+        merged = cv2.dilate(
+            merged,
+            cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (2 * final_px + 1, 2 * final_px + 1), (final_px, final_px)),
+            iterations=1,
+        )
         merged = np.where((merged > 0) & (protect <= 0), 255, 0).astype(np.uint8)
 
     edit_mask[y1:y2, x1:x2] = merged
@@ -219,6 +273,190 @@ def _local_median_fill(image_rgb: np.ndarray, edit_mask: np.ndarray) -> np.ndarr
     return composite_with_edit_mask(image_rgb, output, mask)
 
 
+def _trimmed_background_pixels(
+    image_rgb: np.ndarray,
+    edit_mask: np.ndarray,
+    roi: tuple[int, int, int, int],
+) -> np.ndarray:
+    x1, y1, x2, y2 = roi
+    crop = np.asarray(image_rgb)[y1:y2, x1:x2]
+    mask_crop = normalize_edit_mask(edit_mask, image_rgb.shape)[y1:y2, x1:x2]
+    protect = _bubble_border_protect_mask(mask_crop.shape, width=4)
+    bg_pixels = crop[(mask_crop <= 0) & (protect <= 0)]
+    if bg_pixels.size == 0:
+        return bg_pixels
+    gray = _to_gray(bg_pixels.reshape((-1, 1, bg_pixels.shape[-1]))).reshape(-1) if crop.ndim == 3 else bg_pixels.reshape(-1)
+    low = float(np.percentile(gray, 15))
+    high = float(np.percentile(gray, 85))
+    keep = (gray >= low) & (gray <= high)
+    if np.count_nonzero(keep) < 8:
+        return bg_pixels
+    return bg_pixels[keep]
+
+
+def _bubble_roi_background_metrics(
+    image_rgb: np.ndarray,
+    edit_mask: np.ndarray,
+    roi: tuple[int, int, int, int],
+) -> tuple[np.ndarray, np.ndarray, float]:
+    x1, y1, x2, y2 = roi
+    crop = np.asarray(image_rgb)[y1:y2, x1:x2]
+    if crop.size == 0:
+        return np.zeros((0,), dtype=np.uint8), np.zeros((0, 0), dtype=bool), 1.0
+    mask_crop = normalize_edit_mask(edit_mask, image_rgb.shape)[y1:y2, x1:x2]
+    protect = _bubble_border_protect_mask(mask_crop.shape, width=4)
+    gray = _to_gray(crop)
+    bg_region = (mask_crop <= 0) & (protect <= 0)
+    bg_pixels = gray[bg_region]
+    if bg_pixels.size == 0:
+        return bg_pixels, bg_region, 1.0
+    edges = cv2.Canny(gray, 50, 150)
+    edge_density = float(np.count_nonzero(edges[bg_region])) / float(max(1, int(np.count_nonzero(bg_region))))
+    horizontal_pairs = bg_region[:, 1:] & bg_region[:, :-1]
+    vertical_pairs = bg_region[1:, :] & bg_region[:-1, :]
+    horizontal_jumps = np.abs(gray[:, 1:].astype(np.int16) - gray[:, :-1].astype(np.int16)) >= 18
+    vertical_jumps = np.abs(gray[1:, :].astype(np.int16) - gray[:-1, :].astype(np.int16)) >= 18
+    pair_count = int(np.count_nonzero(horizontal_pairs)) + int(np.count_nonzero(vertical_pairs))
+    jump_count = int(np.count_nonzero(horizontal_jumps & horizontal_pairs)) + int(np.count_nonzero(vertical_jumps & vertical_pairs))
+    texture_density = float(jump_count) / float(max(1, pair_count))
+    edge_density = max(edge_density, texture_density)
+    return bg_pixels, bg_region, edge_density
+
+
+def _should_use_bubble_roi_flat_fill(
+    image_rgb: np.ndarray,
+    edit_mask: np.ndarray,
+    bubble_roi: tuple[int, int, int, int] | None,
+) -> bool:
+    if bubble_roi is None:
+        return False
+    bg_pixels = _trimmed_background_pixels(image_rgb, edit_mask, bubble_roi)
+    if bg_pixels.size == 0:
+        return False
+    gray = (
+        _to_gray(bg_pixels.reshape((-1, 1, bg_pixels.shape[-1]))).reshape(-1)
+        if bg_pixels.ndim == 2
+        else bg_pixels.reshape(-1)
+    )
+    if gray.size == 0:
+        return False
+    iqr = float(np.percentile(gray, 75) - np.percentile(gray, 25))
+    spread = float(np.percentile(gray, 90) - np.percentile(gray, 10))
+    _bg_pixels, _bg_region, edge_density = _bubble_roi_background_metrics(image_rgb, edit_mask, bubble_roi)
+    return iqr <= 10.0 and spread <= 28.0 and edge_density <= 0.08
+
+
+def _should_use_bubble_roi_gradient_fill(
+    image_rgb: np.ndarray,
+    edit_mask: np.ndarray,
+    bubble_roi: tuple[int, int, int, int] | None,
+) -> bool:
+    if bubble_roi is None:
+        return False
+    bg_pixels, bg_region, edge_density = _bubble_roi_background_metrics(image_rgb, edit_mask, bubble_roi)
+    if bg_pixels.size < 64 or np.count_nonzero(bg_region) < 64:
+        return False
+    return edge_density <= 0.09
+
+
+def _bubble_roi_median_fill(
+    image_rgb: np.ndarray,
+    edit_mask: np.ndarray,
+    bubble_roi: tuple[int, int, int, int],
+) -> np.ndarray:
+    mask = normalize_edit_mask(edit_mask, image_rgb.shape)
+    output = np.asarray(image_rgb).copy()
+    bg_pixels = _trimmed_background_pixels(image_rgb, mask, bubble_roi)
+    if bg_pixels.size == 0:
+        return _local_median_fill(image_rgb, mask)
+    fill_value = np.median(bg_pixels, axis=0)
+    if output.ndim == 2:
+        output[mask > 0] = np.uint8(np.clip(round(float(fill_value)), 0, 255))
+    else:
+        output[mask > 0] = np.clip(np.round(fill_value), 0, 255).astype(output.dtype)
+    return composite_with_edit_mask(image_rgb, output, mask)
+
+
+def _bubble_roi_gradient_fill(
+    image_rgb: np.ndarray,
+    edit_mask: np.ndarray,
+    bubble_roi: tuple[int, int, int, int],
+) -> np.ndarray:
+    mask = normalize_edit_mask(edit_mask, image_rgb.shape)
+    output = np.asarray(image_rgb).copy()
+    x1, y1, x2, y2 = bubble_roi
+    crop = output[y1:y2, x1:x2].copy()
+    mask_crop = mask[y1:y2, x1:x2]
+    if crop.size == 0 or not np.any(mask_crop):
+        return composite_with_edit_mask(image_rgb, output, mask)
+
+    protect = _bubble_border_protect_mask(mask_crop.shape, width=5)
+    gray = _to_gray(crop)
+
+    labels_count, labels, stats, _centroids = cv2.connectedComponentsWithStats(
+        (mask_crop > 0).astype(np.uint8),
+        8,
+        cv2.CV_32S,
+    )
+    if labels_count <= 1:
+        return _bubble_roi_median_fill(image_rgb, mask, bubble_roi)
+
+    for label_idx in range(1, labels_count):
+        x, y, w, h, area = stats[label_idx]
+        if int(area) <= 0 or w <= 0 or h <= 0:
+            continue
+        component = np.zeros_like(mask_crop, dtype=np.uint8)
+        component[y:y + h, x:x + w][labels[y:y + h, x:x + w] == label_idx] = 255
+        fit_region = np.zeros_like(mask_crop, dtype=bool)
+        for radius in (10, 16, 24, 32):
+            ring = _ring_mask(component, radius=radius)
+            candidate_region = (ring > 0) & (mask_crop <= 0) & (protect <= 0)
+            candidate_values = gray[candidate_region]
+            if candidate_values.size >= max(32, min(256, int(area) // 2)):
+                low = float(np.percentile(candidate_values, 15))
+                high = float(np.percentile(candidate_values, 85))
+                fit_region = candidate_region & (gray >= low) & (gray <= high)
+                if np.count_nonzero(fit_region) >= 32:
+                    break
+                fit_region = candidate_region
+                break
+        yy, xx = np.nonzero(fit_region)
+        if yy.size < 32:
+            continue
+        if yy.size > 3000:
+            sample_indices = np.linspace(0, yy.size - 1, 3000).astype(np.int32)
+            yy = yy[sample_indices]
+            xx = xx[sample_indices]
+
+        target_y, target_x = np.nonzero(component > 0)
+        design = np.stack(
+            [
+                xx.astype(np.float64),
+                yy.astype(np.float64),
+                np.ones_like(xx, dtype=np.float64),
+            ],
+            axis=1,
+        )
+        target_design = np.stack(
+            [
+                target_x.astype(np.float64),
+                target_y.astype(np.float64),
+                np.ones_like(target_x, dtype=np.float64),
+            ],
+            axis=1,
+        )
+        if crop.ndim == 2:
+            coeffs, *_ = np.linalg.lstsq(design, crop[yy, xx].astype(np.float64), rcond=None)
+            crop[target_y, target_x] = np.clip(np.round(target_design @ coeffs), 0, 255).astype(crop.dtype)
+        else:
+            channel_count = min(3, crop.shape[2])
+            for channel in range(channel_count):
+                coeffs, *_ = np.linalg.lstsq(design, crop[yy, xx, channel].astype(np.float64), rcond=None)
+                crop[target_y, target_x, channel] = np.clip(np.round(target_design @ coeffs), 0, 255).astype(crop.dtype)
+    output[y1:y2, x1:x2] = crop
+    return composite_with_edit_mask(image_rgb, output, mask)
+
+
 def _telea_fill(image_rgb: np.ndarray, edit_mask: np.ndarray, *, radius: int = 3) -> np.ndarray:
     mask = normalize_edit_mask(edit_mask, image_rgb.shape)
     if not np.any(mask):
@@ -234,10 +472,19 @@ def _telea_fill(image_rgb: np.ndarray, edit_mask: np.ndarray, *, radius: int = 3
     return composite_with_edit_mask(image_rgb, filled, mask)
 
 
-def _fill_bubble_mask(image_rgb: np.ndarray, edit_mask: np.ndarray) -> tuple[np.ndarray, str]:
+def _fill_bubble_mask(
+    image_rgb: np.ndarray,
+    edit_mask: np.ndarray,
+    *,
+    bubble_roi: tuple[int, int, int, int] | None = None,
+) -> tuple[np.ndarray, str]:
+    if _should_use_bubble_roi_flat_fill(image_rgb, edit_mask, bubble_roi):
+        return _bubble_roi_median_fill(image_rgb, edit_mask, bubble_roi), ERASE_MODE_BUBBLE_FLAT_FILL
+    if _should_use_bubble_roi_gradient_fill(image_rgb, edit_mask, bubble_roi):
+        return _bubble_roi_gradient_fill(image_rgb, edit_mask, bubble_roi), ERASE_MODE_BUBBLE_GRADIENT_FILL
     if _should_use_flat_fill(image_rgb, edit_mask):
         return _local_median_fill(image_rgb, edit_mask), ERASE_MODE_BUBBLE_FLAT_FILL
-    return _telea_fill(image_rgb, edit_mask, radius=3), ERASE_MODE_BUBBLE_TELEA
+    return _telea_fill(image_rgb, edit_mask, radius=2), ERASE_MODE_BUBBLE_TELEA
 
 
 def fill_bubble_edit_mask(image_rgb: np.ndarray, edit_mask: np.ndarray) -> tuple[np.ndarray, str]:
@@ -300,7 +547,7 @@ def erase_text_bubble_regions(
             )
             continue
 
-        filled, mode = _fill_bubble_mask(original_image, edit_mask)
+        filled, mode = _fill_bubble_mask(original_image, edit_mask, bubble_roi=bubble_roi)
         result = composite_with_edit_mask(result, filled, edit_mask)
         union_edit_mask = np.where((union_edit_mask > 0) | (edit_mask > 0), 255, 0).astype(np.uint8)
         applied_blocks += 1
