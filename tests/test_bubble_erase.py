@@ -6,9 +6,11 @@ import numpy as np
 
 from modules.utils.bubble_erase import (
     BubbleEraseBlockStats,
+    ERASE_MODE_BUBBLE_FLAT_FILL,
     ERASE_MODE_BUBBLE_SKIPPED,
     ERASE_MODE_BUBBLE_TELEA,
     build_bubble_residual_edit_mask,
+    erase_text_bubble_regions,
     mask_pixel_count,
     set_block_erase_metadata,
 )
@@ -89,6 +91,58 @@ class BubbleResidualMaskTests(unittest.TestCase):
         self.assertEqual(stats.mode, ERASE_MODE_BUBBLE_SKIPPED)
         self.assertEqual(stats.skipped_reason, "not_text_bubble")
         self.assertEqual(mask_pixel_count(edit_mask), 0)
+
+
+class BubbleFillBackendTests(unittest.TestCase):
+    def test_flat_bubble_fill_changes_only_edit_mask(self) -> None:
+        original = np.full((48, 48, 3), 128, dtype=np.uint8)
+        original[20:24, 20:24] = 245
+        current = original.copy()
+        current[0, 0] = [5, 6, 7]
+        source_mask = np.zeros((48, 48), dtype=np.uint8)
+        source_mask[20:24, 20:24] = 255
+        block = _block(xyxy=[18, 18, 28, 28], bubble_xyxy=[8, 8, 40, 40])
+
+        result = erase_text_bubble_regions(original, current, source_mask, [block])
+
+        self.assertTrue(result.stats["applied"])
+        self.assertEqual(result.stats["changed_outside_edit_mask_pixel_count"], 0)
+        self.assertEqual(block._erase_mode, ERASE_MODE_BUBBLE_FLAT_FILL)
+        self.assertTrue(np.all(result.image[0, 0] == current[0, 0]))
+        self.assertLess(int(np.mean(result.image[20:24, 20:24])), 180)
+
+    def test_complex_bubble_uses_telea_and_preserves_outside_mask(self) -> None:
+        original = np.full((56, 56, 3), 128, dtype=np.uint8)
+        for x in range(8, 48, 4):
+            original[8:48, x:x + 2] = 80
+        original[24:28, 24:28] = 245
+        current = original.copy()
+        current[1, 1] = [9, 10, 11]
+        source_mask = np.zeros((56, 56), dtype=np.uint8)
+        source_mask[24:28, 24:28] = 255
+        block = _block(xyxy=[20, 20, 34, 34], bubble_xyxy=[8, 8, 48, 48])
+
+        result = erase_text_bubble_regions(original, current, source_mask, [block])
+
+        self.assertTrue(result.stats["applied"])
+        self.assertEqual(result.stats["changed_outside_edit_mask_pixel_count"], 0)
+        self.assertEqual(block._erase_mode, ERASE_MODE_BUBBLE_TELEA)
+        self.assertTrue(np.all(result.image[1, 1] == current[1, 1]))
+
+    def test_text_free_blocks_are_not_modified_by_bubble_erase(self) -> None:
+        original = np.full((32, 32, 3), 128, dtype=np.uint8)
+        current = original.copy()
+        current[10:14, 10:14] = 64
+        source_mask = np.zeros((32, 32), dtype=np.uint8)
+        source_mask[10:14, 10:14] = 255
+        block = _block(xyxy=[8, 8, 16, 16], text_class="text_free")
+
+        result = erase_text_bubble_regions(original, current, source_mask, [block])
+
+        self.assertFalse(result.stats["applied"])
+        self.assertEqual(mask_pixel_count(result.edit_mask), 0)
+        self.assertTrue(np.array_equal(result.image, current))
+        self.assertEqual(block._erase_mode, "text_free_lama")
 
 
 if __name__ == "__main__":
