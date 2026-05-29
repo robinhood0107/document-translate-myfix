@@ -347,6 +347,16 @@ def _run_lama_or_fallback(
     return composite_with_edit_mask(image, converted, mask)
 
 
+def _maybe_return_edit_mask(
+    result: np.ndarray,
+    edit_mask: np.ndarray | None,
+    return_edit_mask: bool,
+) -> np.ndarray | tuple[np.ndarray, np.ndarray | None]:
+    if return_edit_mask:
+        return result, edit_mask
+    return result
+
+
 def source_lama_blockwise_inpaint(
     image: np.ndarray,
     mask: np.ndarray,
@@ -355,16 +365,19 @@ def source_lama_blockwise_inpaint(
     config,
     *,
     check_need_inpaint: bool = True,
-) -> np.ndarray:
+    return_edit_mask: bool = False,
+) -> np.ndarray | tuple[np.ndarray, np.ndarray | None]:
     if image is None or mask is None or not np.any(mask) or not blocks:
         result = inpainter(image, mask, config)
         converted = imk.convert_scale_abs(result)
-        return composite_with_edit_mask(image, converted, mask)
+        cleaned = composite_with_edit_mask(image, converted, mask)
+        edit_mask = normalize_edit_mask(mask, image.shape) if image is not None and mask is not None else mask
+        return _maybe_return_edit_mask(cleaned, edit_mask, return_edit_mask)
 
     source_mask = normalize_edit_mask(mask, image.shape)
     bubble_mask, bubble_blocks, lama_blocks = _split_bubble_source_mask(source_mask, blocks, image.shape)
     if not bubble_blocks:
-        return _run_lama_or_fallback(
+        cleaned = _run_lama_or_fallback(
             image,
             source_mask,
             list(blocks or []),
@@ -372,6 +385,7 @@ def source_lama_blockwise_inpaint(
             config,
             check_need_inpaint=check_need_inpaint,
         )
+        return _maybe_return_edit_mask(cleaned, source_mask, return_edit_mask)
 
     lama_mask = np.where((source_mask > 0) & (bubble_mask <= 0), 255, 0).astype(np.uint8)
     cleaned = _run_lama_or_fallback(
@@ -384,4 +398,5 @@ def source_lama_blockwise_inpaint(
     )
     bubble_result = erase_text_bubble_regions(image, cleaned, bubble_mask, bubble_blocks, config)
     combined_mask = np.where((lama_mask > 0) | (bubble_result.edit_mask > 0), 255, 0).astype(np.uint8)
-    return composite_with_edit_mask(image, bubble_result.image, combined_mask)
+    result = composite_with_edit_mask(image, bubble_result.image, combined_mask)
+    return _maybe_return_edit_mask(result, combined_mask, return_edit_mask)

@@ -192,14 +192,16 @@ def _process_image(
         if mask is not None and np.any(mask):
             raw_mask = mask_details["raw_mask"]
             config = get_config(settings)
-            cleaned = source_lama_blockwise_inpaint(
+            cleaned, inpaint_edit_mask = source_lama_blockwise_inpaint(
                 image,
                 mask,
                 blocks,
                 inpainter,
                 config,
                 check_need_inpaint=True,
+                return_edit_mask=True,
             )
+            mask = np.where((mask > 0) | (inpaint_edit_mask > 0), 255, 0).astype(np.uint8)
             cleaned, final_mask, cleanup_stats = refine_bubble_residue_inpaint(
                 cleaned,
                 mask,

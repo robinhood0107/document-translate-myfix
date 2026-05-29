@@ -105,6 +105,28 @@ def test_source_lama_blockwise_routes_bubbles_without_calling_lama_fallback() ->
     assert int(np.mean(result[20:24, 20:24])) < 180
 
 
+def test_source_lama_blockwise_returns_expanded_bubble_edit_mask() -> None:
+    image = np.full((48, 48, 3), 128, dtype=np.uint8)
+    image[20:24, 24:27] = 245
+    mask = np.zeros((48, 48), dtype=np.uint8)
+    mask[20:24, 20:24] = 255
+    block = _text_block(xyxy=[18, 18, 30, 28], bubble_xyxy=[8, 8, 40, 40], text_class="text_bubble")
+
+    result, edit_mask = source_lama_blockwise_inpaint(
+        image,
+        mask,
+        [block],
+        _CallableInpainter(),
+        config=None,
+        return_edit_mask=True,
+    )
+
+    assert np.count_nonzero(edit_mask) > np.count_nonzero(mask)
+    assert np.count_nonzero(edit_mask[20:24, 24:27]) > 0
+    changed = np.any(result != image, axis=2)
+    assert np.count_nonzero(changed & (edit_mask <= 0)) == 0
+
+
 def test_source_lama_blockwise_keeps_text_free_on_lama_path(monkeypatch) -> None:
     image = np.full((56, 56, 3), 128, dtype=np.uint8)
     image[14:18, 14:18] = 245
