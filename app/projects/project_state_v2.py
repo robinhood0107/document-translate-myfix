@@ -14,7 +14,7 @@ from modules.utils.automatic_output import (
     default_project_output_preferences,
     normalize_project_output_preferences,
 )
-from modules.utils.export_paths import normalize_export_source_record
+from modules.utils.export_paths import normalize_export_source_record, sanitize_export_path_component
 from modules.utils.file_handler import ensure_prepared_path_materialized, get_prepared_path_source
 from modules.utils.inpaint_strokes import PATCH_KIND_INPAINT, normalize_patch_kind
 
@@ -27,6 +27,12 @@ _CONN_CACHE_LOCK = threading.RLock()
 _CONN_CACHE: dict[str, tuple[sqlite3.Connection, threading.RLock]] = {}
 _LAZY_BLOB_LOCK = threading.RLock()
 _LAZY_BLOBS_BY_PATH: dict[str, tuple[str, str]] = {}
+
+
+def make_project_load_temp_dir(file_name: str) -> str:
+    project_stem = os.path.splitext(os.path.basename(file_name))[0]
+    safe_stem = sanitize_export_path_component(project_stem, fallback="project")[:80]
+    return tempfile.mkdtemp(prefix=f"tmp_{safe_stem}_")
 
 
 def is_sqlite_project_file(file_name: str) -> bool:
@@ -470,7 +476,7 @@ def _materialize_from_manifest_and_pages(
     page_rows: dict[str, dict],
 ):
     if not hasattr(comic_translate, "temp_dir"):
-        comic_translate.temp_dir = tempfile.mkdtemp()
+        comic_translate.temp_dir = make_project_load_temp_dir(project_file)
 
     image_data = comic_translate.image_data
     temp_dir = comic_translate.temp_dir
