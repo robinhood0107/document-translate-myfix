@@ -11,7 +11,6 @@ from modules.utils.bubble_erase import (
     ERASE_MODE_BUBBLE_TELEA,
     build_bubble_residual_edit_mask,
     erase_text_bubble_regions,
-    fill_bubble_edit_mask,
     mask_pixel_count,
     set_block_erase_metadata,
 )
@@ -112,20 +111,7 @@ class BubbleFillBackendTests(unittest.TestCase):
         self.assertTrue(np.all(result.image[0, 0] == current[0, 0]))
         self.assertLess(int(np.mean(result.image[20:24, 20:24])), 180)
 
-    def test_complex_backend_can_use_telea_and_preserves_outside_mask(self) -> None:
-        original = np.full((56, 56, 3), 128, dtype=np.uint8)
-        for x in range(8, 48, 4):
-            original[8:48, x:x + 2] = 80
-        original[24:28, 24:28] = 245
-        source_mask = np.zeros((56, 56), dtype=np.uint8)
-        source_mask[24:28, 24:28] = 255
-
-        filled, mode = fill_bubble_edit_mask(original, source_mask)
-
-        self.assertEqual(mode, ERASE_MODE_BUBBLE_TELEA)
-        self.assertTrue(np.all(filled[1, 1] == original[1, 1]))
-
-    def test_bubble_region_route_prefers_flat_fill_for_clean_letter_erasure(self) -> None:
+    def test_complex_bubble_uses_telea_and_preserves_outside_mask(self) -> None:
         original = np.full((56, 56, 3), 128, dtype=np.uint8)
         for x in range(8, 48, 4):
             original[8:48, x:x + 2] = 80
@@ -140,7 +126,7 @@ class BubbleFillBackendTests(unittest.TestCase):
 
         self.assertTrue(result.stats["applied"])
         self.assertEqual(result.stats["changed_outside_edit_mask_pixel_count"], 0)
-        self.assertEqual(block._erase_mode, ERASE_MODE_BUBBLE_FLAT_FILL)
+        self.assertEqual(block._erase_mode, ERASE_MODE_BUBBLE_TELEA)
         self.assertTrue(np.all(result.image[1, 1] == current[1, 1]))
 
     def test_text_free_blocks_are_not_modified_by_bubble_erase(self) -> None:
