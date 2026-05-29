@@ -423,12 +423,17 @@ class BatchProcessor:
             preview_disabled_reason="preview_file_missing",
         )
 
-    def _resolve_export_token(self, directory: str, base_timestamp: str) -> str:
+    def _resolve_export_token(
+        self,
+        directory: str,
+        base_timestamp: str,
+        source_name: str | None = None,
+    ) -> str:
         cache = getattr(self, "_export_run_tokens", None)
         if cache is None:
             cache = {}
             self._export_run_tokens = cache
-        return reserve_export_run_token(directory, base_timestamp, cache)
+        return reserve_export_run_token(directory, base_timestamp, cache, source_name=source_name)
 
     def _write_json_exports(
         self,
@@ -444,15 +449,16 @@ class BatchProcessor:
     ) -> None:
         page_base_name = os.path.splitext(os.path.basename(image_path))[0]
         blocks = list(blk_list or [])
+        export_root = export_run_root(directory, timestamp, archive_bname)
 
         if export_settings.get("export_raw_text", False):
-            path = os.path.join(directory, f"comic_translate_{timestamp}", "raw_texts", archive_bname)
+            path = os.path.join(export_root, "raw_texts", archive_bname)
             os.makedirs(path, exist_ok=True)
             with open(os.path.join(path, f"{page_base_name}_raw.json"), "w", encoding="UTF-8") as file:
                 file.write(get_raw_text(blocks))
 
         if export_settings.get("export_translated_text", False):
-            path = os.path.join(directory, f"comic_translate_{timestamp}", "translated_texts", archive_bname)
+            path = os.path.join(export_root, "translated_texts", archive_bname)
             os.makedirs(path, exist_ok=True)
             with open(os.path.join(path, f"{page_base_name}_translated.json"), "w", encoding="UTF-8") as file:
                 file.write(get_raw_translation(blocks))
@@ -460,8 +466,7 @@ class BatchProcessor:
         if export_settings.get("export_raw_text", False) or export_settings.get("export_translated_text", False):
             ocr_summary = page_state.get("processing_summary", {})
             debug_path = os.path.join(
-                directory,
-                f"comic_translate_{timestamp}",
+                export_root,
                 "ocr_debugs",
                 archive_bname,
             )
@@ -871,8 +876,8 @@ class BatchProcessor:
                 temp_dir=getattr(self.main_page, "temp_dir", None),
             )
 
-            export_token = self._resolve_export_token(directory, timestamp)
-            export_root = export_run_root(directory, export_token)
+            export_token = self._resolve_export_token(directory, timestamp, archive_bname)
+            export_root = export_run_root(directory, export_token, archive_bname)
             self.main_page.image_ctrl.update_processing_summary(
                 image_path,
                 {

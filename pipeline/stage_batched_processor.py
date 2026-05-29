@@ -4,6 +4,7 @@ import json
 import logging
 import os
 import time
+import traceback
 from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import dataclass, field
 from typing import Any, Callable
@@ -42,7 +43,7 @@ from modules.utils.correction_dictionary import (
 from modules.utils.device import resolve_device
 from modules.utils.export_paths import (
     build_export_timestamp,
-    reserve_export_run_token,
+    export_run_root,
     resolve_export_directory,
 )
 from modules.utils.exceptions import OperationCancelledError
@@ -282,8 +283,8 @@ class StageBatchedProcessor(BatchProcessor):
                 project_file=getattr(self.main_page, "project_file", None),
                 temp_dir=getattr(self.main_page, "temp_dir", None),
             )
-            export_token = self._resolve_export_token(directory, self._timestamp)
-            export_root = os.path.join(directory, f"comic_translate_{export_token}")
+            export_token = self._resolve_export_token(directory, self._timestamp, archive_bname)
+            export_root = export_run_root(directory, export_token, archive_bname)
             pages.append(
                 StagePageContext(
                     image_path=image_path,
@@ -328,6 +329,7 @@ class StageBatchedProcessor(BatchProcessor):
         total_images: int,
         stage: str,
         reason: str,
+        detail: str | None = None,
         extra: dict[str, Any] | None = None,
     ) -> None:
         ctx.failed_stage = stage
@@ -346,7 +348,7 @@ class StageBatchedProcessor(BatchProcessor):
             reason=reason,
             **(extra or {}),
         )
-        self.main_page.image_skipped.emit(ctx.image_path, stage, reason)
+        self.main_page.image_skipped.emit(ctx.image_path, stage, detail or reason)
 
     def _detect_all(self, pages: list[StagePageContext]) -> None:
         total_images = len(pages)
@@ -759,12 +761,14 @@ class StageBatchedProcessor(BatchProcessor):
             except OperationCancelledError:
                 raise
             except Exception as exc:
+                detail = f"{type(exc).__name__}: {exc}\n\n{traceback.format_exc()}"
                 self._mark_page_failed(
                     ctx,
                     index=index,
                     total_images=total_images,
                     stage="inpaint",
                     reason=str(exc),
+                    detail=detail,
                     extra={**ctx.page_ocr_metrics, **ctx.page_translation_metrics},
                 )
 
