@@ -2,11 +2,14 @@ from __future__ import annotations
 
 import os
 import unittest
+from pathlib import Path
 from unittest import mock
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PySide6 import QtCore, QtGui, QtWidgets
+
+import imkit as imk
 
 from app.ui.canvas.text_item import TextBlockItem
 from modules.rendering.render import (
@@ -86,6 +89,59 @@ class RenderNormalizationTests(unittest.TestCase):
         self.assertEqual(result.text, '「테스트」♥')
         self.assertIn("decorative-noise", result.reasons)
         self.assertNotIn("quote-to-ascii", result.reasons)
+
+    def test_severe_repetition_is_collapsed_before_rendering(self) -> None:
+        with mock.patch(
+            "modules.rendering.render.resolve_render_symbol_fallback_font_family",
+            return_value="FallbackFont",
+        ), mock.patch(
+            "modules.rendering.render._render_font_supports",
+            return_value=True,
+        ):
+            result = describe_render_text_sanitization("으" * 80, "StubFont")
+
+        self.assertEqual(result.text, "으으으으...")
+        self.assertTrue(result.normalization_applied)
+        self.assertIn("severe-repetition", result.reasons)
+
+    def test_multichar_sfx_repetition_is_not_collapsed_before_rendering(self) -> None:
+        text = "으아" * 30
+        with mock.patch(
+            "modules.rendering.render.resolve_render_symbol_fallback_font_family",
+            return_value="FallbackFont",
+        ), mock.patch(
+            "modules.rendering.render._render_font_supports",
+            return_value=True,
+        ):
+            result = describe_render_text_sanitization(text, "StubFont")
+
+        self.assertEqual(result.text, text)
+        self.assertFalse(result.normalization_applied)
+
+    def test_sample_japan_101_known_gemma_runaway_collapses_before_rendering(self) -> None:
+        sample_path = Path(__file__).resolve().parents[1] / "Sample" / "japan" / "101.png"
+        self.assertTrue(sample_path.exists())
+        image = imk.read_image(str(sample_path))
+        self.assertIsNotNone(image)
+        self.assertEqual(tuple(image.shape[:2]), (2885, 2014))
+
+        with mock.patch(
+            "modules.rendering.render.resolve_render_symbol_fallback_font_family",
+            return_value="FallbackFont",
+        ), mock.patch(
+            "modules.rendering.render._render_font_supports",
+            return_value=True,
+        ):
+            result = describe_render_text_sanitization(
+                "으" * 152,
+                "StubFont",
+                block_index=1,
+                image_path=str(sample_path),
+            )
+
+        self.assertEqual(result.text, "으으으으...")
+        self.assertTrue(result.normalization_applied)
+        self.assertIn("severe-repetition", result.reasons)
 
     def test_styled_markup_keeps_base_font_size_with_fallback_spans(self) -> None:
         with mock.patch(
