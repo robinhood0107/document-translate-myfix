@@ -50,6 +50,7 @@ from modules.utils.render_style_policy import (
     VERTICAL_ALIGNMENT_TOP,
     resolve_render_text_color,
 )
+from modules.utils.exceptions import OperationCancelledError
 from modules.utils.translator_utils import get_raw_translation, get_raw_text, format_translations
 from modules.rendering.render import (
     build_render_rects_for_block,
@@ -303,6 +304,49 @@ class BatchProcessor:
             "gemma_truncated_count": int(stats.get("gemma_truncated_count", 0) or 0),
             "gemma_empty_content_count": int(stats.get("gemma_empty_content_count", 0) or 0),
         }
+
+    def _handle_legacy_inpaint_failure(
+        self,
+        *,
+        index: int,
+        total_images: int,
+        image_path: str,
+        directory: str,
+        export_token: str,
+        base_name: str,
+        extension: str,
+        archive_bname: str,
+        image,
+        error: Exception,
+        page_ocr_metrics: dict | None = None,
+        page_translation_metrics: dict | None = None,
+    ) -> None:
+        err_msg = str(error)
+        detail = f"{type(error).__name__}: {error}\n\n{traceback.format_exc()}"
+        logger.exception("Inpaint processing failed: %s", err_msg)
+        self.main_page.image_ctrl.update_processing_summary(
+            image_path,
+            {"last_failure_reason": err_msg},
+        )
+        self.main_page.image_ctrl.mark_processing_stage(
+            image_path,
+            "inpaint",
+            "failed",
+            reason=err_msg,
+        )
+        self._emit_benchmark_event(
+            "page_failed",
+            image_path=image_path,
+            image_index=index,
+            total_images=total_images,
+            failed_stage="inpaint",
+            reason=err_msg,
+            **(page_ocr_metrics or {}),
+            **(page_translation_metrics or {}),
+        )
+        self.skip_save(directory, export_token, base_name, extension, archive_bname, image)
+        self.main_page.image_skipped.emit(image_path, "inpaint", detail)
+        self.log_skipped_image(directory, export_token, image_path, f"Inpaint: {err_msg}", detail)
 
     def _effective_export_settings(self, settings_page) -> dict:
         return dict(self.main_page.get_resolved_export_settings())
@@ -1219,153 +1263,173 @@ class BatchProcessor:
                 block_count=len(blk_list or []),
             )
 
-            # Clean Image of text
+            try:
+                # Clean Image of text
 
-            # Use the shared inpainter from the handler
-            runtime = get_inpainter_runtime(settings_page)
-            inpainter_key = runtime["key"]
-            inpainter_backend = runtime["backend"]
-            if self.inpainting.inpainter_cache is None or self.inpainting.cached_inpainter_key != inpainter_key:
-                device = resolve_device(
-                    settings_page.is_gpu_enabled(),
-                    backend=inpainter_backend,
-                )
-                InpainterClass = inpaint_map[inpainter_key]
-                logger.info("pre-inpaint: initializing inpainter '%s' on device %s (backend=%s)", inpainter_key, device, inpainter_backend)
+                # Use the shared inpainter from the handler
+                runtime = get_inpainter_runtime(settings_page)
+                inpainter_key = runtime["key"]
+                inpainter_backend = runtime["backend"]
+                if self.inpainting.inpainter_cache is None or self.inpainting.cached_inpainter_key != inpainter_key:
+                    device = resolve_device(
+                        settings_page.is_gpu_enabled(),
+                        backend=inpainter_backend,
+                    )
+                    InpainterClass = inpaint_map[inpainter_key]
+                    logger.info("pre-inpaint: initializing inpainter '%s' on device %s (backend=%s)", inpainter_key, device, inpainter_backend)
+                    t0 = time.time()
+                    self.inpainting.inpainter_cache = InpainterClass(
+                        device,
+                        backend=inpainter_backend,
+                        runtime_device=runtime.get("device", device),
+                        inpaint_size=runtime.get("inpaint_size"),
+                        precision=runtime.get("precision"),
+                    )
+                    self.inpainting.cached_inpainter_key = inpainter_key
+                    t1 = time.time()
+                    logger.info("pre-inpaint: inpainter initialized in %.2fs", t1 - t0)
+
+                config = get_config(settings_page)
+                logger.info("pre-inpaint: generating mask (blk_list=%d blocks)", len(blk_list))
                 t0 = time.time()
-                self.inpainting.inpainter_cache = InpainterClass(
-                    device,
-                    backend=inpainter_backend,
-                    runtime_device=runtime.get("device", device),
-                    inpaint_size=runtime.get("inpaint_size"),
-                    precision=runtime.get("precision"),
+                mask_settings = settings_page.get_mask_refiner_settings()
+                mask_details = generate_mask(
+                    image,
+                    blk_list,
+                    settings=mask_settings,
+                    return_details=True,
+                    precomputed_mask_details=precomputed_mask_details,
                 )
-                self.inpainting.cached_inpainter_key = inpainter_key
+                mask = mask_details["final_mask"]
+                raw_mask = mask_details["raw_mask"]
                 t1 = time.time()
-                logger.info("pre-inpaint: inpainter initialized in %.2fs", t1 - t0)
+                logger.info("pre-inpaint: mask generated in %.2fs (mask shape=%s, refiner=%s backend=%s)", t1 - t0, getattr(mask, 'shape', None), mask_details.get("mask_refiner"), mask_details.get("refiner_backend"))
 
-            config = get_config(settings_page)
-            logger.info("pre-inpaint: generating mask (blk_list=%d blocks)", len(blk_list))
-            t0 = time.time()
-            mask_settings = settings_page.get_mask_refiner_settings()
-            mask_details = generate_mask(
-                image,
-                blk_list,
-                settings=mask_settings,
-                return_details=True,
-                precomputed_mask_details=precomputed_mask_details,
-            )
-            mask = mask_details["final_mask"]
-            raw_mask = mask_details["raw_mask"]
-            t1 = time.time()
-            logger.info("pre-inpaint: mask generated in %.2fs (mask shape=%s, refiner=%s backend=%s)", t1 - t0, getattr(mask, 'shape', None), mask_details.get("mask_refiner"), mask_details.get("refiner_backend"))
+                self.emit_progress(index, total_images, 4, 10, False)
+                if self._is_cancelled():
+                    return
 
-            self.emit_progress(index, total_images, 4, 10, False)
-            if self._is_cancelled():
+                inpaint_input_img = self.inpainting.inpaint_with_blocks(image, mask, blk_list, config=config)
+                inpaint_input_img = imk.convert_scale_abs(inpaint_input_img)
+                inpaint_input_img, mask, cleanup_stats = refine_bubble_residue_inpaint(
+                    inpaint_input_img,
+                    mask,
+                    blk_list,
+                    self.inpainting.inpainter_cache,
+                    config,
+                )
+
+                patches = self.inpainting.get_inpainted_patches(mask, inpaint_input_img)
+                self.main_page.patches_processed.emit(patches, image_path)
+
+                cleaned_output_path = self._write_inpainted_debug_image(
+                    export_root=export_root,
+                    archive_bname=archive_bname,
+                    image_path=image_path,
+                    cleaned_image=inpaint_input_img,
+                    export_settings=export_settings,
+                )
+                self.main_page.image_ctrl.update_processing_summary(
+                    image_path,
+                    {"cleaned_image_path": cleaned_output_path},
+                )
+                self.main_page.image_ctrl.update_processing_summary(
+                    image_path,
+                    {
+                        "inpainter": settings_page.get_tool_selection('inpainter'),
+                        "hd_strategy": hd_strategy,
+                        "cleanup_applied": bool(cleanup_stats.get("applied", False)),
+                        "cleanup_component_count": int(cleanup_stats.get("component_count", 0) or 0),
+                        "cleanup_block_count": int(cleanup_stats.get("block_count", 0) or 0),
+                    },
+                )
+                debug_paths = self._write_inpaint_debug_exports(
+                    export_root=export_root,
+                    archive_bname=archive_bname,
+                    image_path=image_path,
+                    image=image,
+                    blk_list=blk_list,
+                    export_settings=export_settings,
+                    raw_mask=raw_mask,
+                    final_mask=mask,
+                    detector_key=detector_key,
+                    detector_engine=detector_engine,
+                    detector_device=detector_device,
+                    inpainter_key=inpainter_key,
+                    hd_strategy=hd_strategy,
+                    cleanup_stats=cleanup_stats,
+                    mask_details=mask_details,
+                    inpainter_backend=inpainter_backend,
+                )
+                self._maybe_emit_preview_image(
+                    index=index,
+                    total=total_images,
+                    image_path=image_path,
+                    stage_key="raw_mask",
+                    stage_label="원본 마스크",
+                    export_settings=export_settings,
+                    preferred_path=debug_paths.get("raw_mask", ""),
+                )
+                self._maybe_emit_preview_image(
+                    index=index,
+                    total=total_images,
+                    image_path=image_path,
+                    stage_key="mask_overlay",
+                    stage_label="마스크 오버레이",
+                    export_settings=export_settings,
+                    preferred_path=debug_paths.get("mask_overlay", ""),
+                )
+                self._maybe_emit_preview_image(
+                    index=index,
+                    total=total_images,
+                    image_path=image_path,
+                    stage_key="cleanup_delta",
+                    stage_label="정리 마스크 변화량",
+                    export_settings=export_settings,
+                    preferred_path=debug_paths.get("cleanup_delta", ""),
+                )
+                self._maybe_emit_preview_image(
+                    index=index,
+                    total=total_images,
+                    image_path=image_path,
+                    stage_key="inpainted_image",
+                    stage_label="인페인트 결과",
+                    export_settings=export_settings,
+                    preferred_path=cleaned_output_path,
+                )
+                self.main_page.image_ctrl.mark_processing_stage(
+                    image_path,
+                    "inpaint",
+                    "completed",
+                    patch_count=len(patches or []),
+                )
+                self._emit_benchmark_event(
+                    "inpaint_end",
+                    image_path=image_path,
+                    image_index=index,
+                    total_images=total_images,
+                    block_count=len(blk_list or []),
+                    patch_count=len(patches or []),
+                )
+            except OperationCancelledError:
+                self._emit_benchmark_event("batch_run_cancelled", image_path=image_path, image_index=index, total_images=total_images)
                 return
-
-            inpaint_input_img = self.inpainting.inpaint_with_blocks(image, mask, blk_list, config=config)
-            inpaint_input_img = imk.convert_scale_abs(inpaint_input_img)
-            inpaint_input_img, mask, cleanup_stats = refine_bubble_residue_inpaint(
-                inpaint_input_img,
-                mask,
-                blk_list,
-                self.inpainting.inpainter_cache,
-                config,
-            )
-
-            patches = self.inpainting.get_inpainted_patches(mask, inpaint_input_img)
-            self.main_page.patches_processed.emit(patches, image_path)
-
-            cleaned_output_path = self._write_inpainted_debug_image(
-                export_root=export_root,
-                archive_bname=archive_bname,
-                image_path=image_path,
-                cleaned_image=inpaint_input_img,
-                export_settings=export_settings,
-            )
-            self.main_page.image_ctrl.update_processing_summary(
-                image_path,
-                {"cleaned_image_path": cleaned_output_path},
-            )
-            self.main_page.image_ctrl.update_processing_summary(
-                image_path,
-                {
-                    "inpainter": settings_page.get_tool_selection('inpainter'),
-                    "hd_strategy": hd_strategy,
-                    "cleanup_applied": bool(cleanup_stats.get("applied", False)),
-                    "cleanup_component_count": int(cleanup_stats.get("component_count", 0) or 0),
-                    "cleanup_block_count": int(cleanup_stats.get("block_count", 0) or 0),
-                },
-            )
-            debug_paths = self._write_inpaint_debug_exports(
-                export_root=export_root,
-                archive_bname=archive_bname,
-                image_path=image_path,
-                image=image,
-                blk_list=blk_list,
-                export_settings=export_settings,
-                raw_mask=raw_mask,
-                final_mask=mask,
-                detector_key=detector_key,
-                detector_engine=detector_engine,
-                detector_device=detector_device,
-                inpainter_key=inpainter_key,
-                hd_strategy=hd_strategy,
-                cleanup_stats=cleanup_stats,
-                mask_details=mask_details,
-                inpainter_backend=inpainter_backend,
-            )
-            self._maybe_emit_preview_image(
-                index=index,
-                total=total_images,
-                image_path=image_path,
-                stage_key="raw_mask",
-                stage_label="원본 마스크",
-                export_settings=export_settings,
-                preferred_path=debug_paths.get("raw_mask", ""),
-            )
-            self._maybe_emit_preview_image(
-                index=index,
-                total=total_images,
-                image_path=image_path,
-                stage_key="mask_overlay",
-                stage_label="마스크 오버레이",
-                export_settings=export_settings,
-                preferred_path=debug_paths.get("mask_overlay", ""),
-            )
-            self._maybe_emit_preview_image(
-                index=index,
-                total=total_images,
-                image_path=image_path,
-                stage_key="cleanup_delta",
-                stage_label="정리 마스크 변화량",
-                export_settings=export_settings,
-                preferred_path=debug_paths.get("cleanup_delta", ""),
-            )
-            self._maybe_emit_preview_image(
-                index=index,
-                total=total_images,
-                image_path=image_path,
-                stage_key="inpainted_image",
-                stage_label="인페인트 결과",
-                export_settings=export_settings,
-                preferred_path=cleaned_output_path,
-            )
-            self.main_page.image_ctrl.mark_processing_stage(
-                image_path,
-                "inpaint",
-                "completed",
-                patch_count=len(patches or []),
-            )
-            self._emit_benchmark_event(
-                "inpaint_end",
-                image_path=image_path,
-                image_index=index,
-                total_images=total_images,
-                block_count=len(blk_list or []),
-                patch_count=len(patches or []),
-            )
+            except Exception as e:
+                self._handle_legacy_inpaint_failure(
+                    index=index,
+                    total_images=total_images,
+                    image_path=image_path,
+                    directory=directory,
+                    export_token=export_token,
+                    base_name=base_name,
+                    extension=extension,
+                    archive_bname=archive_bname,
+                    image=image,
+                    error=e,
+                    page_ocr_metrics=page_ocr_metrics,
+                    page_translation_metrics=page_translation_metrics,
+                )
+                continue
 
             self.emit_progress(index, total_images, 5, 10, False)
             if self._is_cancelled():
