@@ -72,38 +72,47 @@ stage-batched translation은 모든 페이지가 같은 source/target/tool 설�
 - source_lang, target_lang, translator_key, Gemma settings, LLM extra context가 바뀌면 재사용하지 않는다.
 - legacy/manual/webtoon은 별도 PR에서 다룬다. 이 경로들은 사용자 선택 페이지와 visible area, per-page state가 섞이므로 stage-batched보다 보수적으로 접근한다.
 
-### P3. Translation concurrency는 앱과 llama.cpp 양쪽이 맞아야 함
+### P3. Translation concurrency는 현재 활성 계획에서 제외
 
 `docker-compose.yaml`은 `LLAMA_N_PARALLEL`을 받지만 기본값은 1이고, 앱은 순차 요청이다. 서버 parallel slot만 올려도 앱이 한 번에 요청을 하나만 보내면 효과가 작다.
 
-개선 원칙:
+현재 판단:
 
-- `LLAMA_N_PARALLEL=2` 실험은 앱 bounded concurrency 2와 함께 한다.
-- page 결과는 원래 page index 순서대로 commit한다.
-- JSON parse 실패, retry, timeout, truncate, empty content metrics를 page별로 남긴다.
-- 긴 페이지 또는 많은 block chunk는 concurrency 1로 자동 degrade할 수 있어야 한다.
+- 사용자 환경에서는 Gemma가 GPU util 85% 이상 또는 VRAM 여유 2~3GB 미만에 거의 항상 도달한다.
+- 이 조건에서는 app concurrency 2와 `LLAMA_N_PARALLEL=2`가 속도 개선보다 latency 증가, KV cache 압박, timeout, JSON retry 증가로 이어질 가능성이 높다.
+- 따라서 Gemma page concurrency는 develop 제품 계획에서 제외한다.
+- 필요하면 `benchmarking/lab`에서만 별도 실험한다.
 
-### P4. OCR page concurrency는 기존 block concurrency와 곱해짐
+### P4. OCR page concurrency는 현재 활성 계획에서 제외
 
 PaddleOCR VL 기본 `parallel_workers`는 최대 8이고, Hunyuan OCR도 block-level thread pool을 사용한다. page concurrency 2를 단순히 얹으면 crop request가 최대 16개 이상 동시에 날아갈 수 있다.
 
-개선 원칙:
+현재 판단:
 
-- 총 in-flight OCR request budget을 둔다.
-- `page_concurrency * block_workers <= global_budget`을 만족하도록 조정한다.
-- GPU memory, GPU util, crop area p90, timeout을 benchmark에 기록한다.
+- Gemma가 이미 GPU를 거의 점유하는 환경에서는 OCR page concurrency가 전체 pipeline을 더 빠르게 하기보다 runtime queue 경합을 키울 가능성이 크다.
+- OCR page concurrency는 develop 제품 계획에서 제외한다.
+- 기존 block-level worker tuning과 GPU metrics 기록만 유지한다.
 
-### P5. Debug/output writer는 분리 가능하지만 결과물 보장이 먼저임
+### P5. Async debug/output writer는 현재 활성 계획에서 제외
 
 현재 cleaned image, detector overlay, raw mask, mask overlay, cleanup delta, debug metadata, final output image는 page loop에서 동기 저장된다.
 
+현재 판단:
+
+- 비동기 writer는 GPU를 더 쓰지는 않지만, 결과물 생성 타이밍, cancel/drain, 실패 보고 정책을 바꾸는 동시성 변경이다.
+- 먼저 동기 I/O가 실제 병목인지 계측한다.
+- I/O가 stage 시간의 10% 이상임이 확인되기 전에는 활성 제품 계획에서 제외한다.
+
+### P6. GPU-safe prewarm scheduling이 필요함
+
+현재 stage-batched는 inpaint stage 시작 시 Gemma prewarm을 시작한다. GPU가 여유 있으면 startup wait를 숨기는 좋은 전략이지만, Gemma가 GPU를 거의 점유하는 환경에서는 prewarm이 inpaint/OCR과 자원 경합을 일으킬 수 있다.
+
 개선 원칙:
 
-- 모델 inference와 Qt render thread-safety는 건드리지 않고 write만 bounded queue로 분리한다.
-- queue size는 1 또는 2로 시작한다. 이미지 array copy 비용과 메모리 사용량 때문이다.
-- cancellation 시 queue drain 정책을 명확히 한다.
-- write 실패는 page summary/report에 남긴다.
-- 이미지 결과물 변경이므로 synthetic/edge/sample 이미지 산출물을 저장하고 사용자 검토를 요청한다.
+- prewarm 시작 전에 GPU util, VRAM 여유, 현재 stage를 확인한다.
+- GPU util 85% 이상 또는 VRAM 여유 2~3GB 미만이면 GPU runtime prewarm overlap을 피한다.
+- prewarm을 생략하거나 stage 끝으로 미루는 경우 benchmark event에 이유를 남긴다.
+- 결과물, OCR/번역 텍스트, 모델 설정은 바꾸지 않는다.
 
 ## 구현 PR 계획
 
@@ -178,106 +187,60 @@ Branch: `perf/stage-batched-translator-reuse`
 - `tests/test_batch_report_runtime.py`
 - validation/translation check
 
-### PR 3: Gemma bounded concurrency 실험
+### PR 3: GPU-safe prewarm scheduling
 
-Branch: `perf/gemma-bounded-concurrency`
-
-기본값: off
+Branch: `perf/gpu-safe-prewarm-scheduling`
 
 수정 대상:
 
 - `pipeline/stage_batched_processor.py`
-- `modules/translation/llm/custom_local_gemma.py`
-- settings/pipeline config는 최소 범위로 추가
+- `modules/utils/gpu_metrics.py`
+- 필요 시 benchmark event payload만 최소 추가
 
 명세:
 
-- 설정값 예: `translation_page_concurrency`, default 1.
-- concurrency 1이면 현행 동작과 동일해야 한다.
-- concurrency > 1이면 page 작업을 bounded executor로 실행하되, commit은 page index 순서로 한다.
-- 각 page result에는 translator stats, cache status, exception detail을 포함한다.
-- retry/chunk split 로직은 engine 내부 기존 로직을 그대로 사용한다.
-- `LLAMA_N_PARALLEL`, request timeout, token stats를 benchmark event에 남긴다.
+- Gemma prewarm 시작 전에 GPU snapshot을 읽는다.
+- GPU util 85% 이상 또는 VRAM free 3072MB 미만이면 inpaint/OCR stage 중 Gemma prewarm overlap을 피한다.
+- prewarm을 미룬 경우 `_await_gemma_runtime()`에서 동기 준비하되, wait duration과 reason을 event로 남긴다.
+- GPU metrics unavailable이면 현행 prewarm 정책을 유지하되 `gpu_metrics_unavailable` reason을 남긴다.
+- 결과물과 모델 설정은 바꾸지 않는다.
 
 테스트:
 
-- mock translator로 concurrency 2일 때 completion order가 뒤섞여도 page state commit 순서가 안정적인지 확인한다.
-- 한 page exception이 batch abort가 아니라 해당 page failed인지 확인한다.
-- cancellation 시 pending future가 취소되는지 확인한다.
+- GPU snapshot이 saturated이면 `_start_gemma_prewarm()`이 executor submit을 하지 않는지 확인한다.
+- GPU snapshot이 여유 있으면 기존 prewarm을 유지하는지 확인한다.
+- metrics unavailable에서는 기존 동작과 호환되는지 확인한다.
+- cancel 상태에서는 prewarm scheduling이 fallback 작업을 시작하지 않는지 확인한다.
 
-사용자 검토:
+검증:
 
-- 실제 테스트 이미지/페이지 subset으로 translation JSON과 최종 이미지 샘플을 validation log에 저장한다.
-- 병합 전 사용자에게 결과물 검토를 요청한다.
+- `tests/test_stage_batched_cancel.py`
+- 신규 `tests/test_stage_batched_prewarm_scheduling.py`
+- validation/translation check
 
-### PR 4: async debug/output writer
+### PR 4: performance telemetry cleanup
 
-Branch: `perf/async-output-writer`
-
-기본값: off 또는 debug-output 전용 opt-in
+Branch: `perf/auto-translation-telemetry`
 
 수정 대상:
 
-- 새 모듈 후보: `modules/utils/async_output_writer.py`
 - `pipeline/stage_batched_processor.py`
 - `pipeline/batch_processor.py`
-- `pipeline/webtoon_batch/render.py`
-- `modules/utils/inpaint_debug.py`
-- `modules/utils/automatic_output.py`
+- `modules/translation/local_runtime.py`
+- `modules/ocr/local_runtime.py`
 
 명세:
 
-- writer는 `ThreadPoolExecutor(max_workers=1)` 또는 dedicated worker thread 하나로 시작한다.
-- task는 path, image copy, writer callable, metadata를 가진다.
-- queue size는 1 또는 2로 제한한다.
-- submit이 막히면 backpressure로 page loop가 기다린다. 무제한 memory growth는 금지한다.
-- batch 완료/취소/오류 시 `drain()` 또는 `cancel_pending()` 정책을 명시한다.
-- write failure는 page summary와 batch report에 남긴다.
+- runtime probe duration, model check duration, prewarm wait duration, skipped prewarm reason, stage gap을 event에 남긴다.
+- 제품 동작과 결과물은 바꾸지 않는다.
+- 기존 benchmark event schema와 호환되게 optional field만 추가한다.
 
 테스트:
 
-- synthetic RGB image write, raw mask write, metadata JSON write가 모두 완료되는지 확인한다.
-- writer failure가 조용히 묻히지 않는지 확인한다.
-- cancellation path에서 pending task가 처리/취소 정책대로 남는지 확인한다.
+- mock clock으로 duration field가 남는지 확인한다.
+- 기존 report/batch tests가 깨지지 않는지 확인한다.
 
-사용자 검토:
-
-- synthetic, boundary, 실제 샘플 이미지를 각각 저장한다.
-- 기존 동기 write 결과와 async writer 결과의 파일 수, 크기, pixel equality 또는 허용 차이를 비교한다.
-- 결과물 경로를 PR에 남기고 사용자 검토를 요청한다.
-
-### PR 5: OCR page concurrency 실험
-
-Branch: `perf/ocr-page-concurrency`
-
-기본값: off
-
-수정 대상:
-
-- `pipeline/stage_batched_processor.py`
-- `modules/ocr/processor.py` 또는 새 orchestration helper
-- 설정/benchmark event 최소 추가
-
-명세:
-
-- `ocr_page_concurrency` default 1.
-- `global_ocr_request_budget`을 둔다.
-- PaddleOCR VL/Hunyuan `parallel_workers`와 page concurrency의 곱이 budget을 넘지 않게 한다.
-- OCR cache hit page는 executor에 넣지 않거나 즉시 완료 처리한다.
-- page 결과 commit은 원래 page 순서를 보장한다.
-
-테스트:
-
-- mock OCR engine으로 concurrency budget이 지켜지는지 확인한다.
-- OCR cache hit/miss 혼합에서 state와 benchmark event가 유지되는지 확인한다.
-- 한 page OCR 실패가 다른 page를 막지 않는지 확인한다.
-
-사용자 검토:
-
-- OCR JSON/텍스트 결과가 concurrency 1과 2에서 동일한지 샘플 비교한다.
-- OCR crop/debug output이 있으면 결과물 경로를 사용자에게 전달한다.
-
-### PR 6: inpaint concurrency benchmark-only
+### 보류: inpaint concurrency benchmark-only
 
 Branch: `benchmarking/lab` 전용 실험 또는 별도 benchmark branch 후 `benchmarking/lab` PR
 
@@ -291,8 +254,9 @@ Branch: `benchmarking/lab` 전용 실험 또는 별도 benchmark branch 후 `ben
 ## 금지선
 
 - readiness cache와 object reuse PR에서 output image, OCR text, translation text를 바꾸지 않는다.
-- async writer 전에는 Qt render 작업을 worker로 옮기지 않는다.
-- concurrency PR에서 retry/report/cancel semantics를 단순화하지 않는다.
+- Qt render 작업을 worker로 옮기지 않는다.
+- Gemma/OCR/inpaint page concurrency는 develop 제품 PR에 넣지 않는다.
+- `LLAMA_N_PARALLEL > 1`을 develop 기본값으로 올리지 않는다.
 - benchmark-only asset을 `develop` 제품 PR에 섞지 않는다.
 - 검증 산출물을 repo에 커밋하지 않는다.
 
@@ -301,5 +265,5 @@ Branch: `benchmarking/lab` 전용 실험 또는 별도 benchmark branch 후 `ben
 - Micro PR 후 반복 Gemma/OCR runtime progress 로그가 같은 batch/config 안에서 사라진다.
 - repeated ensure 테스트가 실제 probe 호출 횟수를 검증한다.
 - stage-batched Translator reuse 후 기존 batch report와 page summaries가 동일하게 남는다.
-- concurrency default 1에서 기존 테스트와 산출물이 동일하다.
-- default-off 실험에서 before/after benchmark와 사용자 검토 산출물이 남는다.
+- GPU 포화 상태에서는 Gemma prewarm이 inpaint/OCR과 불필요하게 겹치지 않는다.
+- telemetry PR 후 다음 성능 PR의 before/after 비교가 가능하다.

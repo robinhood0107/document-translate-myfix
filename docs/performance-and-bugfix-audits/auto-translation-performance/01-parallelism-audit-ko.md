@@ -148,13 +148,28 @@ legacy page pipeline benchmark에는 `ocr_runtime_reuse_hit`가 13회 기록되�
 - 정상 localhost health 응답이면 작다.
 - 모델 로딩/health busy 상태에서는 수십 초 이상 줄일 수 있다.
 
-## 병렬화 후보와 예상 개선
+## 병렬화 후보와 현재 판단
+
+사용자 환경에서는 Gemma 실행 중 GPU util 85% 이상 또는 VRAM 여유 2~3GB 미만 조건에 거의 항상 도달한다. 따라서 아래 병렬화 후보는 “활성 제품 계획”이 아니라 왜 보류하는지 남기는 판단 근거다.
 
 ### P-003 Translation HTTP concurrency + llama.cpp parallel slots
 
 현재 `docker-compose.yaml`은 `LLAMA_N_PARALLEL:-1`이다. 앱은 translation page loop를 순차 실행하므로 서버에 동시 요청이 들어가지 않는다.
 
-도입 방식:
+현재 판단:
+
+- 활성 계획에서 제외한다.
+- `LLAMA_N_PARALLEL=2` 또는 app concurrency 2는 GPU/KV cache 경합을 늘릴 가능성이 높다.
+- 지금 환경에서는 동시 요청 2개가 token/sec를 2배로 만들기보다 각 요청 latency를 늘릴 가능성이 크다.
+- 이 실험은 필요하면 `benchmarking/lab`에서만 수행한다.
+
+보류 조건:
+
+- GPU util이 번역 중 85% 미만으로 안정적이거나 VRAM 여유가 3GB 이상일 때
+- concurrency 2에서 total token/sec가 1.3x 이상 증가할 때
+- JSON retry, truncation, timeout, empty content가 증가하지 않을 때
+
+기존 도입 아이디어는 아래와 같지만 현재 활성 계획은 아니다.
 
 - 앱 쪽: translation page 작업을 bounded queue로 실행한다. 시작값은 concurrency 2.
 - 서버 쪽: `LLAMA_N_PARALLEL=2`, 필요 시 `--cont-batching` 지원 여부를 런타임 로그로 확인한다.
@@ -182,7 +197,14 @@ Part 3 translation span은 634s다.
 
 `PaddleOCRVLEngine`은 이미 block 단위 내부 `ThreadPoolExecutor`를 사용한다. 즉 페이지 안에서 여러 crop OCR 요청은 병렬화되어 있다. 아직 남은 후보는 페이지 단위 OCR concurrency다.
 
-도입 방식:
+현재 판단:
+
+- 활성 계획에서 제외한다.
+- page concurrency는 기존 block worker 수와 곱해져 GPU/HTTP server 부하를 급격히 키운다.
+- Gemma가 이미 GPU를 거의 점유하는 환경에서는 OCR page concurrency가 전체 pipeline을 더 불안정하게 만들 수 있다.
+- 필요하면 `benchmarking/lab`에서만 실험한다.
+
+기존 도입 아이디어는 아래와 같지만 현재 활성 계획은 아니다.
 
 - OCR stage에서 page concurrency 2를 실험한다.
 - OCR 서버가 queue/parallel worker를 감당하는지 GPU utilization, VRAM, timeout을 같이 기록한다.
@@ -217,7 +239,13 @@ Part 3 inpaint span은 1777s로 가장 크다. 이 run에서는 patch 합계가 
 - debug metadata JSON
 - preview emit
 
-도입 방식:
+현재 판단:
+
+- 활성 계획에서 제외한다.
+- GPU-bound 동시성은 아니지만 writer queue도 결과물 누락, cancel/drain, 실패 보고 정책을 바꾸는 동시성 변경이다.
+- 먼저 동기 I/O가 실제 병목인지 계측한다. I/O가 inpaint/render 시간의 10% 이상임이 확인될 때만 별도 계획으로 되살린다.
+
+기존 도입 아이디어는 아래와 같지만 현재 활성 계획은 아니다.
 
 - 모델 inference 자체는 우선 순차 유지한다.
 - debug/output write만 bounded writer queue로 넘긴다.
@@ -253,6 +281,11 @@ inpaint model을 페이지 단위로 병렬 실행하면 이론상 효과가 가
 
 하지만 단일 GPU에서는 위험도가 높다. 같은 모델을 여러 process에 로드하면 VRAM을 중복 사용하고, 같은 GPU queue에서 context switching만 늘 수 있다. 먼저 mask generation/debug writing을 분리하고, 그 다음 GPU utilization/VRAM이 여유 있을 때만 page concurrency 2를 실험한다.
 
+현재 판단:
+
+- 활성 계획에서 제외한다.
+- 이 항목은 `benchmarking/lab` 전용으로만 남긴다.
+
 ### P-007 Render/export 병렬화
 
 Part 3 render/export span은 205s다. 전체 5.4%라 우선순위는 낮다.
@@ -262,10 +295,12 @@ Part 3 render/export span은 205s다. 전체 5.4%라 우선순위는 낮다.
 - Qt text layout과 `QFontMetrics`/`QPainter`는 GUI thread와 thread-safety를 매우 조심해야 한다.
 - 단순 final image composite/write는 worker 후보지만, 텍스트 layout 자체를 병렬화하는 것은 위험하다.
 
-권장:
+현재 판단:
 
-- 최종 이미지 write만 writer queue로 넘기는 것부터 본다.
-- text item state 생성은 그대로 둔다.
+- 활성 계획에서 제외한다.
+- render/export는 전체 5.4%라 우선순위가 낮고, writer queue도 결과물 보장과 cancel/drain 정책을 바꾸는 동시성 변경이다.
+- 먼저 telemetry로 실제 I/O 병목이 있는지 확인한다.
+- text item state 생성과 Qt render thread는 현행 유지한다.
 
 ## 전체 speedup 계산
 
@@ -291,12 +326,10 @@ speedup = 1.75x
 | 시나리오 | 구성 | 예상 전체 시간 | 예상 speedup |
 | --- | --- | ---: | ---: |
 | Micro | Gemma/OCR readiness cache, Translator reuse | 3730~3765s | 1.00~1.01x |
-| Conservative | Micro + translation concurrency 2에서 1.3~1.5x + debug writer queue 10% overlap | 3270~3440s | 1.10~1.15x |
-| Balanced | Conservative + OCR page concurrency 1.25~1.5x | 3000~3270s | 1.15~1.26x |
-| Aggressive | OCR 1.5x + translation 2.0x + inpaint 1.5x | 약 2586s | 1.46x |
-| Theoretical | OCR/inpaint/translation 모두 완전 2x, 경합 없음 | 약 2153s | 1.75x |
+| Safe Scheduling | Micro + GPU 포화 시 prewarm overlap 회피 + stage gap 계측 | 3700~3765s | 1.00~1.02x |
+| I/O Evidence Only | 동기 I/O 병목이 10% 이상으로 확인된 뒤 별도 검토 | 미정 | 미정 |
 
-목표는 처음부터 aggressive가 아니라 Conservative를 먼저 구현해 회귀 위험 없이 10% 안팎을 확보하는 것이다. 이후 benchmark로 Balanced/Aggressive를 검증한다.
+현재 목표는 동시성으로 큰 speedup을 노리는 것이 아니라, GPU 포화 환경에서 자원 경합을 줄이고 반복 probe를 제거해 안정성을 높이는 것이다.
 
 ## 구현 로드맵
 
@@ -315,29 +348,20 @@ speedup = 1.75x
 - legacy/manual/webtoon은 별도 검토
 - 테스트: 캐시 hit/miss, translation metrics, failure reporting 유지
 
-### PR 3: Gemma bounded concurrency experiment
+### PR 3: GPU-safe prewarm scheduling
 
-- feature flag 기본 off
-- `LLAMA_N_PARALLEL`과 app concurrency를 같이 기록
-- concurrency 1/2/4 benchmark
-- JSON parse 실패율, retry, timeout, VRAM, tok/sec 기록
-- 결과물 번역 JSON과 최종 이미지 샘플을 사용자 검토
+- GPU util/VRAM headroom을 기준으로 Gemma prewarm overlap을 제한한다.
+- Gemma가 이미 GPU를 거의 점유하는 환경에서는 inpaint/OCR 중 추가 runtime prewarm을 피한다.
+- prewarm wait, skipped prewarm reason, GPU snapshot을 benchmark event에 남긴다.
+- 결과물은 바꾸지 않는다.
 
-### PR 4: async debug/output writer
+### PR 4: performance telemetry cleanup
 
-- inpaint/debug/final output write를 bounded queue로 분리
-- queue drain, cancellation, failure report 보장
-- 테스트 이미지로 output 파일 존재/내용 검증
-- 사용자에게 비교 산출물 검토 요청
+- runtime probe 시간, model check 시간, prewarm wait, stage gap, page duration을 일관된 event로 남긴다.
+- 추후 최적화 전후 비교가 가능하게 한다.
+- 동시성, 결과물, 모델 설정은 바꾸지 않는다.
 
-### PR 5: OCR page concurrency experiment
-
-- feature flag 기본 off
-- OCR page concurrency와 block `parallel_workers`의 곱을 제한
-- GPU utilization/VRAM/timeout 기록
-- 테스트 이미지와 OCR JSON 비교 필요
-
-### PR 6: inpaint concurrency benchmark only
+### 보류: inpaint concurrency benchmark only
 
 - 제품 변경 전 `benchmarking/lab`에서 먼저 실험
 - single GPU에서 page concurrency 2가 실제로 빠른지 확인
@@ -348,5 +372,5 @@ speedup = 1.75x
 - 지금 보이는 Gemma 반복 확인은 확실한 낭비다. 다만 정상 localhost 응답 기준으로는 전체 병목 1순위가 아니다.
 - 실제 Part 3 병목은 inpaint 47.1%, OCR 21.8%, translation 16.8%다.
 - 가장 안전한 첫 개선은 readiness cache + Translator reuse다.
-- 성능을 크게 끌어올리려면 translation concurrency, OCR page concurrency, debug writer queue가 필요하다.
-- 단일 GPU에서 inpaint/OCR/Gemma를 동시에 세게 밀어붙이는 방식은 benchmark 없이 제품에 넣으면 안 된다.
+- 현재 GPU 포화 환경에서는 translation concurrency, OCR page concurrency, inpaint concurrency, async writer를 활성 계획에서 제외한다.
+- 앞으로 해야 할 일은 더 세게 밀어붙이는 것이 아니라 GPU 자원 경합을 줄이고, prewarm/probe/stage gap을 계측 가능하게 만드는 것이다.

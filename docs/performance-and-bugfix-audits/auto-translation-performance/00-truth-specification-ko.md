@@ -11,7 +11,8 @@
 - PaddleOCR VL과 Hunyuan OCR은 이미 block 단위 내부 `ThreadPoolExecutor`를 사용한다. 따라서 page 단위 OCR concurrency는 기존 block worker 수와 곱해져 runtime 부하가 커질 수 있다.
 - inpaint/debug/final output write는 현재 대부분 동기 경로다. 특히 cleaned image, raw mask, overlay, cleanup delta, debug metadata, final output write가 page loop 안에서 바로 실행된다.
 - Gemma HTTP translation request는 `requests.post()` 기반 동기 호출이다. 앱 쪽 page loop도 순차이므로 `LLAMA_N_PARALLEL`을 2 이상으로 올려도 앱이 동시에 요청하지 않으면 효과가 제한된다.
-- 단일 GPU에서 OCR, inpaint, Gemma를 동시에 강하게 밀어붙이는 방식은 benchmark 없이 제품 기본값으로 넣지 않는다.
+- 사용자 환경에서는 Gemma 실행 중 GPU util 85% 이상 또는 VRAM 여유 2~3GB 미만 조건에 거의 항상 도달한다. 따라서 GPU-bound page concurrency는 현재 활성 제품 계획에서 제외한다.
+- 단일 GPU에서 OCR, inpaint, Gemma를 동시에 강하게 밀어붙이는 방식은 현재 develop 제품 계획에 넣지 않는다.
 
 ## 불변 조건
 
@@ -21,6 +22,8 @@
 - cancellation은 실패나 skip으로 기록하지 않는다.
 - external runtime startup/probe cache는 연결 오류, HTTP 오류, 모델 불일치, 설정 변경 시 invalidate할 수 있어야 한다.
 - Qt render/layout 객체를 임의 worker thread로 옮기지 않는다.
+- `LLAMA_N_PARALLEL > 1`, Gemma page concurrency, OCR page concurrency, inpaint page concurrency는 기본값 또는 활성 제품 PR로 도입하지 않는다.
+- 비동기 writer도 결과물 보장과 cancel/drain 정책이 필요한 동시성 변경이므로, I/O 병목이 별도로 입증되기 전에는 활성 계획에서 제외한다.
 - `main`, `develop`, `benchmarking/lab` 장기 브랜치 정책과 `rules.md`를 우선한다.
 
 ## 성능개선 우선순위
@@ -32,16 +35,22 @@
 2. Translator stage reuse
    - stage-batched translation loop에서 `Translator`를 page마다 만들지 않는다.
    - source/target/translator/settings invariant가 같을 때만 재사용한다.
-3. Bounded Gemma concurrency 실험
-   - 앱 동시 요청 수와 `LLAMA_N_PARALLEL`을 함께 기록한다.
-   - 품질/JSON 안정성/VRAM/tok-per-sec를 함께 본다.
-4. Async debug/output writer
-   - 모델 inference는 먼저 유지하고 이미지/JSON write만 bounded queue로 분리한다.
-   - queue drain, cancel, failure report를 먼저 설계한다.
-5. OCR page concurrency 실험
-   - 기존 block worker와 곱해지는 총 in-flight 요청 수를 제한한다.
-6. Inpaint page concurrency
-   - 제품 변경 전 benchmark-only로 검증한다.
+3. GPU-safe prewarm scheduling
+   - Gemma prewarm이 inpaint/OCR의 GPU 작업과 싸우지 않도록 스케줄링한다.
+   - GPU util 85% 이상 또는 VRAM 여유 2~3GB 미만이면 prewarm overlap을 피한다.
+4. 성능 계측 보강
+   - runtime probe 시간, model check 시간, stage gap, prewarm wait, per-stage duration을 남긴다.
+   - 동시성 없이도 개선 전후를 비교할 수 있게 한다.
+
+## 활성 계획에서 제외한 항목
+
+- Gemma page concurrency 2 이상
+- `LLAMA_N_PARALLEL > 1` 제품 기본값
+- OCR page concurrency
+- inpaint page concurrency
+- async output/debug writer
+
+위 항목은 현재 GPU 포화 환경에서는 빠를 가능성보다 자원 경합, latency 증가, OOM, timeout, 결과물 누락 리스크가 더 크다. 필요하면 `benchmarking/lab`에서만 별도 실험한다.
 
 ## 증거 로그
 
