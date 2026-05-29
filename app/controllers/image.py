@@ -336,6 +336,7 @@ class ImageStateController:
             ),
             "Translator": t("Messages", "Could not get translations.\nSkipping:"),
             "OCR Chunk Failed": t("Messages", "Could not recognize webtoon chunk.\nSkipping:"),
+            "Translation": t("Messages", "Could not translate webtoon chunk.\nSkipping:"),
             "Translation Chunk Failed": t("Messages", "Could not translate webtoon chunk.\nSkipping:"),
         }
 
