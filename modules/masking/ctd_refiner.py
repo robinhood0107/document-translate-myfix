@@ -328,10 +328,20 @@ def _refine_mask_roi(image: np.ndarray, pred_mask: np.ndarray) -> np.ndarray:
 def _expand_final_mask_crop(final_crop: np.ndarray, text_class: str) -> np.ndarray:
     if final_crop.size == 0 or not np.any(final_crop):
         return np.zeros_like(final_crop)
-    iterations = 2 if text_class == "text_bubble" else 2
+    iterations = 2 if text_class == "text_bubble" else 3
     kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3))
     expanded = cv2.dilate(final_crop, kernel, iterations=max(1, int(iterations)))
     return np.where(expanded > 0, 255, 0).astype(np.uint8)
+
+
+def _is_text_free_rule_like_component(w: int, h: int, area: int) -> bool:
+    long_side = max(int(w), int(h))
+    short_side = min(int(w), int(h))
+    if long_side < 48 or short_side > 5:
+        return False
+    aspect = float(long_side) / float(max(1, short_side))
+    fill_ratio = float(area) / float(max(1, int(w) * int(h)))
+    return aspect >= 16.0 and fill_ratio >= 0.35
 
 
 def _filter_candidate_mask(candidate_mask: np.ndarray, prior_mask: np.ndarray, text_class: str) -> np.ndarray:
@@ -340,17 +350,19 @@ def _filter_candidate_mask(candidate_mask: np.ndarray, prior_mask: np.ndarray, t
 
     roi_h, roi_w = candidate_mask.shape[:2]
     roi_area = max(1, roi_h * roi_w)
-    max_bbox_ratio = 0.50 if text_class == 'text_bubble' else 0.34
+    max_bbox_ratio = 0.50 if text_class == 'text_bubble' else 0.92
     edge_bbox_ratio = 0.14
 
     num_labels, labels, stats, _centroids = cv2.connectedComponentsWithStats((candidate_mask > 0).astype(np.uint8), 8, cv2.CV_32S)
     filtered = np.zeros_like(candidate_mask, dtype=np.uint8)
     for label_idx in range(1, num_labels):
-        x, y, w, h, _area = stats[label_idx]
+        x, y, w, h, area = stats[label_idx]
         if w <= 0 or h <= 0:
             continue
         bbox_area = int(w * h)
         if bbox_area > int(round(roi_area * max_bbox_ratio)):
+            continue
+        if text_class == 'text_free' and _is_text_free_rule_like_component(int(w), int(h), int(area)):
             continue
 
         component = labels[y:y + h, x:x + w] == label_idx
@@ -358,7 +370,7 @@ def _filter_candidate_mask(candidate_mask: np.ndarray, prior_mask: np.ndarray, t
             continue
 
         touches_edge = x == 0 or y == 0 or (x + w) >= roi_w or (y + h) >= roi_h
-        if touches_edge and bbox_area > int(round(roi_area * edge_bbox_ratio)):
+        if text_class != 'text_free' and touches_edge and bbox_area > int(round(roi_area * edge_bbox_ratio)):
             continue
 
         filtered[y:y + h, x:x + w][component] = 255
@@ -478,10 +490,14 @@ class CTDRefiner:
                 continue
 
             constrained_raw = cv2.bitwise_and(raw_crop, prior_mask)
-            refined_crop = _refine_mask_roi(crop, raw_crop)
-            constrained_refined = cv2.bitwise_and(refined_crop, prior_mask) if np.any(refined_crop) else np.zeros_like(raw_crop)
-            candidate_crop = cv2.bitwise_or(constrained_raw, constrained_refined) if np.any(constrained_refined) else constrained_raw
             text_class = getattr(block, 'text_class', '') or ''
+            if text_class == 'text_free':
+                constrained_refined = np.zeros_like(raw_crop)
+                candidate_crop = constrained_raw
+            else:
+                refined_crop = _refine_mask_roi(crop, raw_crop)
+                constrained_refined = cv2.bitwise_and(refined_crop, prior_mask) if np.any(refined_crop) else np.zeros_like(raw_crop)
+                candidate_crop = cv2.bitwise_or(constrained_raw, constrained_refined) if np.any(constrained_refined) else constrained_raw
             filtered_crop = _filter_candidate_mask(candidate_crop, prior_mask, text_class)
             final_crop = cv2.bitwise_and(filtered_crop, prior_mask)
             expanded_final_crop = _expand_final_mask_crop(final_crop, text_class)
