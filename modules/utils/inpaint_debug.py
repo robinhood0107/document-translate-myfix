@@ -191,6 +191,10 @@ def serialize_inpaint_block(block, index: int) -> dict:
         "rescue_mask_pixel_count": int(getattr(block, "_rescue_mask_pixel_count", 0) or 0),
         "final_mask_pixel_count": int(getattr(block, "_final_mask_pixel_count", 0) or 0),
         "hard_box_metrics": dict(getattr(block, "_hard_box_metrics", {}) or {}),
+        "erase_mode": str(getattr(block, "_erase_mode", "") or ""),
+        "erase_edit_pixel_count": int(getattr(block, "_erase_edit_pixel_count", 0) or 0),
+        "erase_protect_pixel_count": int(getattr(block, "_erase_protect_pixel_count", 0) or 0),
+        "erase_skipped_reason": str(getattr(block, "_erase_skipped_reason", "") or ""),
     }
 
 
