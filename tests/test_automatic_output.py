@@ -16,6 +16,7 @@ from modules.utils.automatic_output import (
     OUTPUT_TARGET_ARCHIVE,
     build_archive_file_name,
     build_archive_page_file_name,
+    build_series_output_dir,
     build_output_file_name,
     default_global_output_settings,
     estimate_archive_options_for_pages,
@@ -23,6 +24,7 @@ from modules.utils.automatic_output import (
     format_estimate_seconds_text,
     format_estimate_size_text,
     resolve_automatic_output_settings,
+    resolve_series_folder_name,
     sanitize_series_folder_name,
     write_archive_image,
     write_output_image,
@@ -33,6 +35,27 @@ class AutomaticOutputTests(unittest.TestCase):
     def test_series_folder_name_strips_trailing_version_suffix(self) -> None:
         self.assertEqual(sanitize_series_folder_name("My Series c12 v03"), "My Series")
         self.assertEqual(sanitize_series_folder_name("Title[v2] c001"), "Title[v2]")
+
+    def test_series_output_dir_uses_result_prefix(self) -> None:
+        output_dir = build_series_output_dir("/tmp/project", "False_Honour_8_Part_3_English")
+
+        self.assertEqual(
+            os.path.basename(output_dir),
+            "result_False_Honour_8_Part_3_English",
+        )
+
+    def test_series_folder_name_resolves_source_for_temp_page(self) -> None:
+        folder_name = resolve_series_folder_name(
+            "/mnt/c/Users/pjjpj/project/tmpabc/001.png",
+            source_records={
+                r"C:\Users\pjjpj\project\tmpabc\001.png": {
+                    "kind": "archive",
+                    "source_path": r"C:\Users\pjjpj\project\False_Honour_8_Part_3_English.pdf",
+                }
+            },
+        )
+
+        self.assertEqual(folder_name, "False_Honour_8_Part_3_English")
 
     def test_resolved_settings_apply_project_override(self) -> None:
         settings = resolve_automatic_output_settings(

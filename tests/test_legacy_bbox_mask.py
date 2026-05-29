@@ -3,6 +3,7 @@ from __future__ import annotations
 import unittest
 from unittest import mock
 
+import imkit as imk
 import numpy as np
 
 from modules.masking.legacy_bbox_mask import build_legacy_bbox_mask_details
@@ -153,6 +154,36 @@ class LegacyBBoxMaskTests(unittest.TestCase):
         self.assertGreater(int(np.count_nonzero(final_mask[13:77, 36:54])), 0)
         self.assertEqual(int(np.count_nonzero(final_mask[:13, :])), 0)
         self.assertEqual(int(np.count_nonzero(final_mask[:, :36])), 0)
+
+    @mock.patch(
+        "modules.masking.legacy_bbox_mask.get_inpaint_bboxes",
+        return_value=[[22, 15, 30, 20]],
+    )
+    def test_text_free_bottom_right_edge_mask_does_not_index_past_image(self, _mock_bboxes) -> None:
+        image = np.zeros((20, 30, 3), dtype=np.uint8)
+        block = _block(xyxy=[22, 15, 30, 20], text_class="text_free")
+
+        details = build_legacy_bbox_mask_details(image, [block])
+
+        self.assertEqual(details["final_mask"].shape, (20, 30))
+        self.assertGreater(int(np.count_nonzero(details["final_mask"])), 0)
+
+    def test_fill_poly_clips_bottom_right_edge_points(self) -> None:
+        image = np.zeros((20, 30), dtype=np.uint8)
+        polygon = np.array(
+            [
+                [20, 10],
+                [35, 10],
+                [35, 25],
+                [20, 25],
+            ],
+            dtype=np.int32,
+        )
+
+        result = imk.fill_poly(image, polygon, 255)
+
+        self.assertEqual(result.shape, (20, 30))
+        self.assertGreater(int(np.count_nonzero(result)), 0)
 
 
 if __name__ == "__main__":
