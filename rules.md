@@ -64,6 +64,18 @@
   - generated/latest report
 - benchmark 자산은 `benchmarking/lab`에만 두고, 제품 반영은 별도 `feature/*`, `fix/*`, `chore/*` 작업 브랜치 PR로 승격한다.
 
+## 2-2. 성능개선/버그수정 감사 문서 규칙
+
+성능개선, 안정화, 버그 헌팅처럼 제품 동작을 장기간 추적하며 여러 문서가 생기는 작업은 `docs/repo/`에 섞지 않는다.
+
+- 프로젝트별 문서 루트는 `docs/performance-and-bugfix-audits/<project-slug>/`를 사용한다.
+- 성능개선 프로젝트는 `00-truth-specification-ko.md`를 최상단 진실명세서로 둔다.
+- 진실명세서에는 현재 확정 사실, 불변 조건, 금지선, 검증 로그 위치, 후속 문서 링크를 적는다.
+- 감사, 계산, 구현 명세, PR별 설계 문서는 `01-...`, `02-...`처럼 번호 prefix를 붙여 정렬한다.
+- 서로 다른 주제는 같은 폴더에 합치지 않는다. 예를 들어 자동번역 성능개선과 Runtime/UI 버그 헌팅은 별도 project slug를 사용한다.
+- 이미지 결과물, OCR/번역 품질, inpaint/render/export 산출물이 바뀌는 성능개선은 테스트 이미지와 결과물을 repo 밖 validation log에 저장하고, 병합 전 사용자 검토를 요청한다.
+- benchmark raw output, preset, runner, chart asset은 여전히 `benchmarking/lab` 정책을 따른다.
+
 ## 3. 기능 작업 절차
 
 모든 기능 추가/수정은 아래 순서를 지킨다.
