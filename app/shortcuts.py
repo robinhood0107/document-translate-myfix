@@ -35,7 +35,7 @@ SHORTCUT_DEFINITIONS: tuple[ShortcutDefinition, ...] = (
     ShortcutDefinition(
         id="delete_selected_box",
         label=QT_TRANSLATE_NOOP("ShortcutDefinitions", "Delete Selected Box"),
-        description=QT_TRANSLATE_NOOP("ShortcutDefinitions", "Delete the currently selected text box."),
+        description=QT_TRANSLATE_NOOP("ShortcutDefinitions", "Delete the currently selected text or block box."),
         default="Delete",
     ),
     ShortcutDefinition(

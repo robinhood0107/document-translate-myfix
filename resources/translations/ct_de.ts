@@ -306,7 +306,19 @@ Duplikate:
         <translation type="unfinished"></translation>
     </message>
     <message>
+        <source>Open Output Folder</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Unapplied {count}</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
         <source>{count} image(s) have unapplied render changes.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Up to date</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
@@ -3082,7 +3094,7 @@ Jetzt neu starten?</translation>
         <translation type="unfinished">Ausgewähltes Feld löschen</translation>
     </message>
     <message>
-        <source>Delete the currently selected text box.</source>
+        <source>Delete the currently selected text or block box.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
@@ -3422,6 +3434,14 @@ then do inpainting on the resized image.</source>
         <translation>Rendern</translation>
     </message>
     <message>
+        <source>Up to date</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Final render output status</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
         <source>Manual</source>
         <translation>Manuell</translation>
     </message>
@@ -3542,10 +3562,6 @@ then do inpainting on the resized image.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>Delete the selected text box or block box</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
         <source>Draw or select OCR/block boxes used for detection, OCR, translation, and inpainting.</source>
         <translation type="unfinished"></translation>
     </message>
@@ -3606,15 +3622,7 @@ then do inpainting on the resized image.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>Save editable state, then write the current dirty page to the final output.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
         <source>Rerender Changed Images</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Write only pages with unapplied render changes to the final output.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
@@ -3622,15 +3630,7 @@ then do inpainting on the resized image.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>Rebuild final output for every loaded page.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
         <source>Open Output Folder</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Open the folder where final render output is written.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
@@ -3716,6 +3716,14 @@ then do inpainting on the resized image.</source>
     <message>
         <source>Sets the Source and Target Language on the current page for all pages</source>
         <translation>Legt die Quell- und Zielsprache auf der aktuellen Seite für alle Seiten fest</translation>
+    </message>
+    <message>
+        <source>Delete the selected text box</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Delete the selected block box</source>
+        <translation type="unfinished"></translation>
     </message>
     <message>
         <source>Draws all the Text Blocks in the existing Text Block List

@@ -9,7 +9,7 @@ from PySide6 import QtCore
 from PySide6.QtGui import QColor, QTextCursor
 
 from app.ui.commands.textformat import TextFormatCommand
-from app.ui.commands.box import AddTextBoxCommand, AddTextItemCommand, ResizeBlocksCommand
+from app.ui.commands.box import AddTextBoxCommand, AddTextItemCommand, ResizeBlocksCommand, TextBoxChangeCommand
 from app.ui.commands.text_edit import TextEditCommand
 from app.ui.canvas.text_item import TextBlockItem
 from app.ui.canvas.text.text_item_properties import TextItemProperties
@@ -174,6 +174,7 @@ class TextController:
         x2 = int(rect.x() + rect.width())
         y2 = int(rect.y() + rect.height())
         new_blk = TextBlock(text_bbox=np.array((x1, y1, x2, y2)), text="", translation="")
+        new_blk.manual_text_box = True
         block_id = ensure_text_block_id(new_blk)
         source_rect = (float(x1), float(y1), float(x2 - x1), float(y2 - y1))
         render_settings = self.render_settings()
@@ -212,6 +213,8 @@ class TextController:
             self.main.mark_project_dirty()
 
         self.main.image_viewer.deselect_all()
+        self.main.curr_tblock = new_blk
+        self.main.curr_tblock_item = text_item
         text_item.selected = True
         text_item.setSelected(True)
         text_item.item_selected.emit(text_item)
@@ -502,6 +505,10 @@ class TextController:
                 text_item.change_undo.disconnect(self.main.rect_item_ctrl.rect_change_undo)
             except (TypeError, RuntimeError):
                 pass
+            try:
+                text_item.change_undo.disconnect(self.text_box_change_undo)
+            except (TypeError, RuntimeError):
+                pass
 
         if not hasattr(text_item, "_ct_text_changed_slot"):
             text_item._ct_text_changed_slot = (
@@ -512,7 +519,7 @@ class TextController:
         text_item.item_deselected.connect(self.on_text_item_deselected)
         text_item.text_changed.connect(text_item._ct_text_changed_slot)
         text_item.text_highlighted.connect(self.set_values_from_highlight)
-        text_item.change_undo.connect(self.main.rect_item_ctrl.rect_change_undo)
+        text_item.change_undo.connect(self.text_box_change_undo)
         self._last_item_text[text_item] = text_item.toPlainText()
         self._last_item_html[text_item] = text_item.document().toHtml()
         text_item._ct_signals_connected = True
@@ -601,6 +608,7 @@ class TextController:
         self.main.t_text_edit.blockSignals(False)
 
         self.set_values_for_blk_item(text_item)
+        self.main.refresh_box_delete_ui()
 
     def on_text_item_deselected(self):
         self._commit_pending_text_command()
@@ -610,6 +618,7 @@ class TextController:
                 self.on_text_item_selected(selected_items[-1])
             return
         self.clear_text_edits()
+        self.main.refresh_box_delete_ui()
 
     def _selected_text_items(self) -> list[TextBlockItem]:
         selected_items = self.main.image_viewer.get_selected_text_items()
@@ -764,6 +773,15 @@ class TextController:
         if len(self.main.blk_list) == 0:
             return
         command = ResizeBlocksCommand(self.main, self.main.blk_list, diff)
+        stack = self.main.undo_group.activeStack()
+        if stack:
+            stack.push(command)
+        else:
+            command.redo()
+            self.main.mark_project_dirty()
+
+    def text_box_change_undo(self, old_state, new_state):
+        command = TextBoxChangeCommand(self.main, old_state, new_state)
         stack = self.main.undo_group.activeStack()
         if stack:
             stack.push(command)

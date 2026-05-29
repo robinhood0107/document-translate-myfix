@@ -31,10 +31,11 @@ LAUNCHERS = (
         "expected_versions": {
             "torch": "2.11.0+cu130",
             "torchvision": "0.26.0+cu130",
+            "onnxruntime-gpu": "1.26.0.dev20260408003",
             "setuptools": "80.9.0",
             "einops": "0.8.2",
         },
-        "required_any": ("onnxruntime-gpu", "PySide6"),
+        "required_any": ("PySide6",),
         "expected_cuda": "13.0",
     },
 )
@@ -115,6 +116,7 @@ def verify_bootstrap(cfg: dict) -> None:
 def verify_smoke(cfg: dict) -> None:
     command = (
         "set CT_DISABLE_UPDATE_CHECK=1 && "
+        "set COMIC_SKIP_STARTUP_MODELS=1 && "
         "set COMIC_SMOKE_EXIT_MS=1500 && "
         f"call {cfg['bat']}"
     )

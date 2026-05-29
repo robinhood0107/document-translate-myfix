@@ -393,10 +393,10 @@ class ImageViewer(QGraphicsView):
 
     def create_text_box_preview_item(self, rect: QRectF):
         item = QtWidgets.QGraphicsRectItem(rect)
-        pen = QtGui.QPen(QtGui.QColor(255, 213, 74, 220), 1.5, Qt.PenStyle.DashLine)
+        pen = QtGui.QPen(QtGui.QColor(238, 238, 238, 220), 1.5, Qt.PenStyle.DashLine)
         pen.setCosmetic(True)
         item.setPen(pen)
-        item.setBrush(QtGui.QBrush(QtGui.QColor(255, 213, 74, 32)))
+        item.setBrush(QtGui.QBrush(QtGui.QColor(238, 238, 238, 34)))
         item.setZValue(2)
         self._scene.addItem(item)
         return item

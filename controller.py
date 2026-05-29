@@ -26,7 +26,7 @@ from modules.ocr.local_runtime import LocalOCRRuntimeManager
 from modules.translation.local_runtime import LocalGemmaRuntimeManager
 from modules.ocr.selection import OCR_MODE_BEST_LOCAL, normalize_ocr_mode, resolve_ocr_engine
 from app.ui.canvas.text_item import TextBlockItem
-from app.ui.commands.box import DeleteBoxesCommand
+from app.ui.commands.box import DeleteBoxesCommand, DeleteTextBoxCommand
 from app.path_materialization import ensure_path_materialized
 
 from modules.utils.textblock import TextBlock
@@ -217,6 +217,7 @@ class ComicTranslate(ComicTranslateUI):
         self.project_ctrl.load_main_page_settings()
         self.settings_page.load_settings()
         self.refresh_inpaint_tool_ui()
+        self.refresh_box_delete_ui()
         self.project_ctrl.initialize_autosave()
 
         # Populate the home screen with any previously-saved recent projects
@@ -305,6 +306,8 @@ class ComicTranslate(ComicTranslateUI):
         self.change_all_blocks_size_dec.clicked.connect(lambda: self.text_ctrl.change_all_blocks_size(-int(self.change_all_blocks_size_diff.text())))
         self.change_all_blocks_size_inc.clicked.connect(lambda: self.text_ctrl.change_all_blocks_size(int(self.change_all_blocks_size_diff.text())))
         self.delete_button.clicked.connect(self.delete_selected_box)
+        if hasattr(self, "delete_block_button"):
+            self.delete_block_button.clicked.connect(self.delete_selected_box)
         for checkbox in (
             self.auto_export_source_txt_checkbox,
             self.auto_export_source_md_checkbox,
@@ -609,21 +612,38 @@ class ComicTranslate(ComicTranslateUI):
             )
             archive_mode = is_single_archive_mode(self.get_resolved_export_settings())
             suffix = self.tr(" (Update Archive)") if archive_mode else ""
-            self.rerender_current_button.setText(self.tr("Rerender Current Image") + suffix)
-            self.rerender_dirty_button.setText(self.tr("Rerender Changed Images") + suffix)
-            self.rerender_all_button.setText(self.tr("Rerender All Images") + suffix)
+            self.rerender_current_button.setToolTip(self.tr("Rerender Current Image") + suffix)
+            self.rerender_dirty_button.setToolTip(self.tr("Rerender Changed Images") + suffix)
+            self.rerender_all_button.setToolTip(self.tr("Rerender All Images") + suffix)
+            self.open_output_folder_button.setToolTip(self.tr("Open Output Folder"))
             self.rerender_current_button.setEnabled(bool(self.image_files) and current_dirty)
             self.rerender_dirty_button.setEnabled(dirty_count > 0)
             self.rerender_all_button.setEnabled(bool(self.image_files))
             self.open_output_folder_button.setEnabled(bool(self.image_files))
             if dirty_count:
+                if hasattr(self, "render_dirty_badge"):
+                    self.render_dirty_badge.setText(self.tr("Unapplied {count}").format(count=dirty_count))
                 self.output_dirty_label.setText(
                     self.tr("{count} image(s) have unapplied render changes.").format(count=dirty_count)
                 )
             else:
+                if hasattr(self, "render_dirty_badge"):
+                    self.render_dirty_badge.setText(self.tr("Up to date"))
                 self.output_dirty_label.setText(self.tr("All render outputs are up to date."))
 
         QtCore.QTimer.singleShot(0, self, _apply)
+
+    def refresh_box_delete_ui(self) -> None:
+        try:
+            text_selected = bool(self.image_viewer.get_selected_text_items())
+            block_selected = bool(self.image_viewer.selected_rect)
+        except Exception:
+            text_selected = False
+            block_selected = False
+        if hasattr(self, "delete_button"):
+            self.delete_button.setEnabled(text_selected)
+        if hasattr(self, "delete_block_button"):
+            self.delete_block_button.setEnabled(block_selected)
 
     def get_automatic_output_series_dir(
         self,
@@ -1191,8 +1211,17 @@ class ComicTranslate(ComicTranslateUI):
             self.undo_group.activeStack().push(command)
 
     def delete_selected_box(self):
-        if self.curr_tblock:
-            # Create and push the delete command
+        try:
+            self.text_ctrl._commit_pending_text_command()
+        except Exception:
+            pass
+
+        selected_text_items = self.image_viewer.get_selected_text_items()
+        if selected_text_items:
+            text_item = selected_text_items[-1]
+            blk = self.text_ctrl._find_text_block_for_item(text_item)
+            command = DeleteTextBoxCommand(self, text_item, blk, self.blk_list)
+        elif self.image_viewer.selected_rect and self.curr_tblock:
             command = DeleteBoxesCommand(
                 self,
                 self.image_viewer.selected_rect,
@@ -1200,7 +1229,16 @@ class ComicTranslate(ComicTranslateUI):
                 self.curr_tblock,
                 self.blk_list,
             )
-            self.undo_group.activeStack().push(command)
+        else:
+            return
+
+        stack = self.undo_group.activeStack()
+        if stack:
+            stack.push(command)
+        else:
+            command.redo()
+            self.mark_project_dirty()
+        self.refresh_box_delete_ui()
 
     def restore_text_blocks(self):
         if not self.webtoon_mode:

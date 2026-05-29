@@ -143,6 +143,9 @@ class ShortcutController:
     def _delete_selected_box(self) -> None:
         if not self._workspace_is_active() or self._is_text_input_focused():
             return
+        text_item = getattr(self.main, "curr_tblock_item", None)
+        if text_item is not None and getattr(text_item, "editing_mode", False):
+            return
         self.main.delete_selected_box()
 
     def _restore_text_blocks(self) -> None:
