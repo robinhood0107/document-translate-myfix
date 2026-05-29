@@ -5,7 +5,11 @@ from dataclasses import dataclass
 import cv2
 import numpy as np
 
-from modules.utils.inpaint_composite import normalize_edit_mask
+from modules.utils.inpaint_composite import (
+    composite_with_edit_mask,
+    count_changed_outside_edit_mask,
+    normalize_edit_mask,
+)
 from modules.utils.mask_roi import build_text_prior_mask, normalize_xyxy
 
 
@@ -22,6 +26,14 @@ class BubbleEraseBlockStats:
     edit_pixel_count: int = 0
     protect_pixel_count: int = 0
     skipped_reason: str = ""
+
+
+@dataclass(slots=True)
+class BubbleEraseResult:
+    image: np.ndarray
+    edit_mask: np.ndarray
+    expanded_bubble_mask: np.ndarray
+    stats: dict
 
 
 def set_block_erase_metadata(block, stats: BubbleEraseBlockStats) -> None:
@@ -141,3 +153,181 @@ def build_bubble_residual_edit_mask(
         protect_pixel_count=mask_pixel_count(protect),
     )
     return edit_mask, stats
+
+
+def _ring_mask(mask: np.ndarray, *, radius: int) -> np.ndarray:
+    binary = np.where(mask > 0, 255, 0).astype(np.uint8)
+    if not np.any(binary):
+        return np.zeros_like(binary, dtype=np.uint8)
+    px = max(1, int(radius))
+    kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (2 * px + 1, 2 * px + 1), (px, px))
+    dilated = cv2.dilate(binary, kernel, iterations=1)
+    return np.where((dilated > 0) & (binary <= 0), 255, 0).astype(np.uint8)
+
+
+def _to_gray(image: np.ndarray) -> np.ndarray:
+    if image.ndim == 2:
+        return image.astype(np.uint8)
+    if image.shape[2] >= 3:
+        return cv2.cvtColor(image[:, :, :3], cv2.COLOR_RGB2GRAY)
+    return image[:, :, 0].astype(np.uint8)
+
+
+def _should_use_flat_fill(image_rgb: np.ndarray, edit_mask: np.ndarray) -> bool:
+    ring = _ring_mask(edit_mask, radius=6)
+    if not np.any(ring):
+        return True
+    gray = _to_gray(image_rgb)
+    ring_pixels = gray[ring > 0]
+    if ring_pixels.size == 0:
+        return True
+    spread = float(np.percentile(ring_pixels, 95) - np.percentile(ring_pixels, 5))
+    std = float(np.std(ring_pixels))
+    edges = cv2.Canny(gray, 50, 150)
+    edge_density = float(np.count_nonzero(edges[ring > 0])) / float(max(1, ring_pixels.size))
+    return std <= 12.0 and spread <= 36.0 and edge_density <= 0.08
+
+
+def _local_median_fill(image_rgb: np.ndarray, edit_mask: np.ndarray) -> np.ndarray:
+    mask = normalize_edit_mask(edit_mask, image_rgb.shape)
+    output = np.asarray(image_rgb).copy()
+    if not np.any(mask):
+        return output
+
+    labels_count, labels, stats, _centroids = cv2.connectedComponentsWithStats(
+        (mask > 0).astype(np.uint8),
+        8,
+        cv2.CV_32S,
+    )
+    for label_idx in range(1, labels_count):
+        x, y, w, h, area = stats[label_idx]
+        if int(area) <= 0 or w <= 0 or h <= 0:
+            continue
+        component = np.zeros_like(mask, dtype=np.uint8)
+        component[y:y + h, x:x + w][labels[y:y + h, x:x + w] == label_idx] = 255
+        ring = _ring_mask(component, radius=5)
+        ring_pixels = output[ring > 0]
+        if ring_pixels.size == 0:
+            ring_pixels = output[mask <= 0]
+        if ring_pixels.size == 0:
+            continue
+        fill_value = np.median(ring_pixels, axis=0)
+        if output.ndim == 2:
+            output[component > 0] = np.uint8(np.clip(round(float(fill_value)), 0, 255))
+        else:
+            output[component > 0] = np.clip(np.round(fill_value), 0, 255).astype(output.dtype)
+    return composite_with_edit_mask(image_rgb, output, mask)
+
+
+def _telea_fill(image_rgb: np.ndarray, edit_mask: np.ndarray, *, radius: int = 3) -> np.ndarray:
+    mask = normalize_edit_mask(edit_mask, image_rgb.shape)
+    if not np.any(mask):
+        return np.asarray(image_rgb).copy()
+    image = np.asarray(image_rgb)
+    if image.ndim == 3 and image.shape[2] > 3:
+        rgb = image[:, :, :3]
+        filled_rgb = cv2.inpaint(rgb, mask, max(1, int(radius)), cv2.INPAINT_TELEA)
+        filled = image.copy()
+        filled[:, :, :3] = filled_rgb
+    else:
+        filled = cv2.inpaint(image, mask, max(1, int(radius)), cv2.INPAINT_TELEA)
+    return composite_with_edit_mask(image_rgb, filled, mask)
+
+
+def _fill_bubble_mask(image_rgb: np.ndarray, edit_mask: np.ndarray) -> tuple[np.ndarray, str]:
+    if _should_use_flat_fill(image_rgb, edit_mask):
+        return _local_median_fill(image_rgb, edit_mask), ERASE_MODE_BUBBLE_FLAT_FILL
+    return _telea_fill(image_rgb, edit_mask, radius=3), ERASE_MODE_BUBBLE_TELEA
+
+
+def erase_text_bubble_regions(
+    original_image: np.ndarray,
+    current_cleaned: np.ndarray,
+    source_mask: np.ndarray,
+    blocks: list,
+    config=None,
+) -> BubbleEraseResult:
+    if original_image is None or current_cleaned is None:
+        empty_shape = (0, 0) if original_image is None else original_image.shape[:2]
+        empty_mask = np.zeros(empty_shape, dtype=np.uint8)
+        return BubbleEraseResult(
+            image=current_cleaned,
+            edit_mask=empty_mask,
+            expanded_bubble_mask=empty_mask.copy(),
+            stats={
+                "applied": False,
+                "block_count": 0,
+                "applied_block_count": 0,
+                "edit_pixel_count": 0,
+                "changed_outside_edit_mask_pixel_count": 0,
+                "blocks": [],
+            },
+        )
+
+    result = np.asarray(current_cleaned).copy()
+    source = normalize_edit_mask(source_mask, original_image.shape)
+    union_edit_mask = np.zeros(original_image.shape[:2], dtype=np.uint8)
+    bubble_roi_mask = np.zeros(original_image.shape[:2], dtype=np.uint8)
+    block_entries: list[dict] = []
+    applied_blocks = 0
+
+    for index, block in enumerate(list(blocks or [])):
+        if getattr(block, "text_class", "") != "text_bubble":
+            if getattr(block, "text_class", "") == "text_free":
+                set_block_erase_metadata(block, BubbleEraseBlockStats(mode=ERASE_MODE_TEXT_FREE_LAMA))
+            continue
+
+        bubble_roi = normalize_xyxy(getattr(block, "bubble_xyxy", None), original_image.shape)
+        if bubble_roi is not None:
+            x1, y1, x2, y2 = bubble_roi
+            bubble_roi_mask[y1:y2, x1:x2] = 255
+
+        edit_mask, mask_stats = build_bubble_residual_edit_mask(original_image, source, block)
+        if not np.any(edit_mask):
+            set_block_erase_metadata(block, mask_stats)
+            block_entries.append(
+                {
+                    "index": index,
+                    "mode": mask_stats.mode,
+                    "edit_pixel_count": 0,
+                    "protect_pixel_count": mask_stats.protect_pixel_count,
+                    "skipped_reason": mask_stats.skipped_reason,
+                }
+            )
+            continue
+
+        filled, mode = _fill_bubble_mask(original_image, edit_mask)
+        result = composite_with_edit_mask(result, filled, edit_mask)
+        union_edit_mask = np.where((union_edit_mask > 0) | (edit_mask > 0), 255, 0).astype(np.uint8)
+        applied_blocks += 1
+        block_stats = BubbleEraseBlockStats(
+            mode=mode,
+            edit_pixel_count=mask_pixel_count(edit_mask),
+            protect_pixel_count=mask_stats.protect_pixel_count,
+        )
+        set_block_erase_metadata(block, block_stats)
+        block_entries.append(
+            {
+                "index": index,
+                "mode": mode,
+                "edit_pixel_count": block_stats.edit_pixel_count,
+                "protect_pixel_count": block_stats.protect_pixel_count,
+                "skipped_reason": "",
+            }
+        )
+
+    result = composite_with_edit_mask(current_cleaned, result, union_edit_mask)
+    outside_changed = count_changed_outside_edit_mask(current_cleaned, result, union_edit_mask)
+    return BubbleEraseResult(
+        image=result,
+        edit_mask=union_edit_mask,
+        expanded_bubble_mask=bubble_roi_mask,
+        stats={
+            "applied": bool(applied_blocks),
+            "block_count": len(list(blocks or [])),
+            "applied_block_count": applied_blocks,
+            "edit_pixel_count": mask_pixel_count(union_edit_mask),
+            "changed_outside_edit_mask_pixel_count": int(outside_changed),
+            "blocks": block_entries,
+        },
+    )
