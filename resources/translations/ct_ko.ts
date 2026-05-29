@@ -135,6 +135,21 @@
     </message>
 </context>
 <context>
+    <name>BatchReportController</name>
+    <message>
+        <source>Mask boundary exceeded image bounds</source>
+        <translation>마스크 경계가 이미지 범위를 벗어났습니다</translation>
+    </message>
+    <message>
+        <source>Try rerunning inpainting</source>
+        <translation>인페인트를 다시 실행해 보세요</translation>
+    </message>
+    <message>
+        <source>Inpainting failed</source>
+        <translation>인페인트 실패</translation>
+    </message>
+</context>
+<context>
     <name>ComicTranslate</name>
     <message>
         <source>Project files cannot be opened together with other imported files.
@@ -1087,6 +1102,12 @@ Reasoning:
 </context>
 <context>
     <name>Messages</name>
+    <message>
+        <source>Could not inpaint detected text.
+Skipping:</source>
+        <translation>감지된 텍스트를 인페인트하지 못했습니다.
+건너뛰기:</translation>
+    </message>
     <message>
         <source>Skipping:</source>
         <translation>건너뛰기:</translation>

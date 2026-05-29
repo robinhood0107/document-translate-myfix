@@ -55,13 +55,16 @@ class RenderMixin:
         return dict(self.main_page.get_resolved_export_settings())
 
     def _resolve_export_token(
-        self: WebtoonBatchProcessor, directory: str, base_timestamp: str
+        self: WebtoonBatchProcessor,
+        directory: str,
+        base_timestamp: str,
+        source_name: str | None = None,
     ) -> str:
         cache = getattr(self, "_export_run_tokens", None)
         if cache is None:
             cache = {}
             self._export_run_tokens = cache
-        return reserve_export_run_token(directory, base_timestamp, cache)
+        return reserve_export_run_token(directory, base_timestamp, cache, source_name=source_name)
 
     def _prepare_page_blocks_for_render(
         self: WebtoonBatchProcessor,
@@ -370,8 +373,8 @@ class RenderMixin:
         )
 
         export_settings = self._effective_export_settings()
-        export_token = self._resolve_export_token(directory, timestamp)
-        export_root = export_run_root(directory, export_token)
+        export_token = self._resolve_export_token(directory, timestamp, archive_bname)
+        export_root = export_run_root(directory, export_token, archive_bname)
         self.main_page.image_ctrl.update_processing_summary(
             image_path,
             {
@@ -431,9 +434,7 @@ class RenderMixin:
         blk_list = self.main_page.image_states[image_path].get("blk_list", [])
 
         if export_settings["export_raw_text"] and blk_list:
-            path = os.path.join(
-                directory, f"comic_translate_{export_token}", "raw_texts", archive_bname
-            )
+            path = os.path.join(export_root, "raw_texts", archive_bname)
             if not os.path.exists(path):
                 os.makedirs(path, exist_ok=True)
             raw_text = get_raw_text(blk_list)
@@ -442,8 +443,7 @@ class RenderMixin:
 
         if export_settings["export_translated_text"] and blk_list:
             path = os.path.join(
-                directory,
-                f"comic_translate_{export_token}",
+                export_root,
                 "translated_texts",
                 archive_bname,
             )
@@ -460,8 +460,7 @@ class RenderMixin:
         if (export_settings["export_raw_text"] or export_settings["export_translated_text"]) and blk_list:
             summary = self.main_page.image_states[image_path].get("processing_summary", {})
             path = os.path.join(
-                directory,
-                f"comic_translate_{export_token}",
+                export_root,
                 "ocr_debugs",
                 archive_bname,
             )

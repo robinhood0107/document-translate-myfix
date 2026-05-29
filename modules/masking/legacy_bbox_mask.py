@@ -44,6 +44,22 @@ def _mask_for_xyxy(image_shape: tuple[int, ...], xyxy: tuple[int, int, int, int]
     return mask
 
 
+def _clip_polygon_to_image(poly: np.ndarray, image_shape: tuple[int, ...]) -> np.ndarray | None:
+    h, w = image_shape[:2]
+    if h <= 0 or w <= 0:
+        return None
+    clipped = np.asarray(poly, dtype=np.int32).copy()
+    if clipped.ndim != 2 or clipped.shape[0] < 3 or clipped.shape[1] != 2:
+        return None
+    clipped[:, 0] = np.clip(clipped[:, 0], 0, w - 1)
+    clipped[:, 1] = np.clip(clipped[:, 1], 0, h - 1)
+    if np.unique(clipped, axis=0).shape[0] < 3:
+        return None
+    if cv2.contourArea(clipped.astype(np.float32)) <= 0:
+        return None
+    return clipped
+
+
 def _build_legacy_base_block_mask(
     img: np.ndarray,
     blk: TextBlock,
@@ -103,7 +119,9 @@ def _build_legacy_base_block_mask(
         pts_f = (pts.astype(np.float32) - pad_offset) * ds
         pts_f[:, 0] += min_x
         pts_f[:, 1] += min_y
-        polys.append(pts_f.astype(np.int32))
+        clipped_poly = _clip_polygon_to_image(pts_f, img.shape)
+        if clipped_poly is not None:
+            polys.append(clipped_poly)
     if not polys:
         return np.zeros((h, w), dtype=np.uint8), bboxes
 
