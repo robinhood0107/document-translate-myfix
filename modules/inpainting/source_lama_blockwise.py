@@ -11,7 +11,7 @@ from modules.inpainting.lama_torch_network import load_lama_mpe
 from modules.source_parity_vendor.utils.imgproc_utils import enlarge_window, resize_keepasp
 from modules.source_parity_vendor.utils.textblock import TextBlock as SourceLaMaTextBlock
 from modules.source_parity_vendor.utils.textblock_mask import extract_ballon_mask
-from modules.utils.bubble_erase import erase_text_bubble_regions
+from modules.utils.bubble_erase import ERASE_MODE_BUBBLE_LAMA_FALLBACK, erase_text_bubble_regions
 from modules.utils.download import ModelDownloader, ModelID
 from modules.utils.inpaint_composite import composite_with_edit_mask, normalize_edit_mask
 from modules.utils.mask_roi import normalize_xyxy
@@ -397,6 +397,23 @@ def source_lama_blockwise_inpaint(
         check_need_inpaint=check_need_inpaint,
     )
     bubble_result = erase_text_bubble_regions(image, cleaned, bubble_mask, bubble_blocks, config)
-    combined_mask = np.where((lama_mask > 0) | (bubble_result.edit_mask > 0), 255, 0).astype(np.uint8)
-    result = composite_with_edit_mask(image, bubble_result.image, combined_mask)
+    fallback_mask = normalize_edit_mask(getattr(bubble_result, "fallback_mask", None), image.shape)
+    result_image = bubble_result.image
+    if np.any(fallback_mask):
+        fallback_blocks = [
+            block
+            for block in bubble_blocks
+            if getattr(block, "_erase_mode", "") == ERASE_MODE_BUBBLE_LAMA_FALLBACK
+        ]
+        fallback_result = _run_lama_or_fallback(
+            result_image,
+            fallback_mask,
+            fallback_blocks,
+            inpainter,
+            config,
+            check_need_inpaint=False,
+        )
+        result_image = composite_with_edit_mask(result_image, fallback_result, fallback_mask)
+    combined_mask = np.where((lama_mask > 0) | (bubble_result.edit_mask > 0) | (fallback_mask > 0), 255, 0).astype(np.uint8)
+    result = composite_with_edit_mask(image, result_image, combined_mask)
     return _maybe_return_edit_mask(result, combined_mask, return_edit_mask)

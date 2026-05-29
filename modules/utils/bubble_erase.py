@@ -33,6 +33,7 @@ class BubbleEraseBlockStats:
 class BubbleEraseResult:
     image: np.ndarray
     edit_mask: np.ndarray
+    fallback_mask: np.ndarray
     expanded_bubble_mask: np.ndarray
     stats: dict
 
@@ -57,6 +58,92 @@ def _bubble_border_protect_mask(shape: tuple[int, int], width: int = 3) -> np.nd
         return protect
     cv2.rectangle(protect, (0, 0), (w - 1, h - 1), 255, thickness=max(1, int(width)))
     return protect
+
+
+def _bubble_interior_cap_mask(crop: np.ndarray, seed_mask: np.ndarray) -> np.ndarray:
+    if crop.size == 0 or seed_mask.size == 0:
+        return np.zeros(seed_mask.shape, dtype=np.uint8)
+    try:
+        from modules.source_parity_vendor.utils.textblock_mask import extract_ballon_mask
+
+        balloon_mask, _non_text_mask = extract_ballon_mask(crop, seed_mask)
+    except Exception:
+        return np.full(seed_mask.shape, 255, dtype=np.uint8)
+    if balloon_mask is None or balloon_mask.size == 0:
+        return np.full(seed_mask.shape, 255, dtype=np.uint8)
+    if balloon_mask.shape[:2] != seed_mask.shape[:2]:
+        balloon_mask = cv2.resize(balloon_mask, (seed_mask.shape[1], seed_mask.shape[0]), interpolation=cv2.INTER_NEAREST)
+    cap = np.where(balloon_mask > 0, 255, 0).astype(np.uint8)
+    area_ratio = float(np.count_nonzero(cap)) / float(max(1, cap.size))
+    if area_ratio < 0.20:
+        return np.full(seed_mask.shape, 255, dtype=np.uint8)
+    if area_ratio < 0.995:
+        cap = cv2.erode(cap, np.ones((3, 3), np.uint8), iterations=1)
+    return np.where(cap > 0, 255, 0).astype(np.uint8)
+
+
+def _line_art_protect_mask(crop: np.ndarray) -> np.ndarray:
+    if crop.size == 0:
+        return np.zeros(crop.shape[:2], dtype=np.uint8)
+    gray = _to_gray(crop)
+    h, w = gray.shape[:2]
+    if h <= 0 or w <= 0:
+        return np.zeros((h, w), dtype=np.uint8)
+    edges = cv2.Canny(gray, 40, 120)
+    min_line_length = max(28, int(round(min(h, w) * 0.18)))
+    lines = cv2.HoughLinesP(
+        edges,
+        1,
+        np.pi / 180.0,
+        threshold=max(18, min_line_length // 2),
+        minLineLength=min_line_length,
+        maxLineGap=6,
+    )
+    protect = np.zeros((h, w), dtype=np.uint8)
+    if lines is None:
+        return protect
+    for line in lines[:, 0, :]:
+        x1, y1, x2, y2 = [int(v) for v in line]
+        length = float(np.hypot(x2 - x1, y2 - y1))
+        if length < min_line_length:
+            continue
+        cv2.line(protect, (x1, y1), (x2, y2), 255, thickness=4, lineType=cv2.LINE_AA)
+    return np.where(protect > 0, 255, 0).astype(np.uint8)
+
+
+def _edit_mask_near_line_art(
+    image_rgb: np.ndarray,
+    edit_mask: np.ndarray,
+    bubble_roi: tuple[int, int, int, int] | None,
+) -> bool:
+    if bubble_roi is None:
+        return False
+    x1, y1, x2, y2 = bubble_roi
+    crop = np.asarray(image_rgb)[y1:y2, x1:x2]
+    mask_crop = normalize_edit_mask(edit_mask, image_rgb.shape)[y1:y2, x1:x2]
+    if crop.size == 0 or not np.any(mask_crop):
+        return False
+    line_mask = _line_art_protect_mask(crop)
+    if not np.any(line_mask):
+        return False
+    near_mask = cv2.dilate(mask_crop, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (7, 7)), iterations=1)
+    overlap = np.count_nonzero((line_mask > 0) & (near_mask > 0))
+    return overlap >= max(8, int(np.count_nonzero(mask_crop) * 0.002))
+
+
+def _line_art_protect_mask_for_roi(
+    image_rgb: np.ndarray,
+    bubble_roi: tuple[int, int, int, int] | None,
+) -> np.ndarray:
+    protect = np.zeros(image_rgb.shape[:2], dtype=np.uint8)
+    if bubble_roi is None:
+        return protect
+    x1, y1, x2, y2 = bubble_roi
+    crop = np.asarray(image_rgb)[y1:y2, x1:x2]
+    if crop.size == 0:
+        return protect
+    protect[y1:y2, x1:x2] = _line_art_protect_mask(crop)
+    return np.where(protect > 0, 255, 0).astype(np.uint8)
 
 
 def _rule_like_component(width: int, height: int, area: int) -> bool:
@@ -130,6 +217,7 @@ def build_bubble_residual_edit_mask(
     *,
     seed_dilate_px: int = 8,
     final_dilate_px: int = 4,
+    protect_line_art: bool = True,
 ) -> tuple[np.ndarray, BubbleEraseBlockStats]:
     edit_mask = np.zeros(image_rgb.shape[:2], dtype=np.uint8)
     if getattr(block, "text_class", "") != "text_bubble":
@@ -155,7 +243,15 @@ def build_bubble_residual_edit_mask(
     kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (2 * px + 1, 2 * px + 1), (px, px))
     seed_gate = cv2.dilate(seed, kernel, iterations=1)
     candidate_gate = np.where((seed_gate > 0) & (prior > 0), 255, 0).astype(np.uint8)
-    protect = _bubble_border_protect_mask(seed.shape, width=3)
+    interior_cap = _bubble_interior_cap_mask(crop, seed)
+    line_protect = _line_art_protect_mask(crop) if bool(protect_line_art) else np.zeros_like(seed, dtype=np.uint8)
+    protect = np.where(
+        (_bubble_border_protect_mask(seed.shape, width=3) > 0)
+        | (interior_cap <= 0)
+        | (line_protect > 0),
+        255,
+        0,
+    ).astype(np.uint8)
 
     safe_bg = gray[(candidate_gate <= 0) & (protect <= 0)]
     if safe_bg.size == 0:
@@ -330,6 +426,8 @@ def _should_use_bubble_roi_flat_fill(
 ) -> bool:
     if bubble_roi is None:
         return False
+    if _edit_mask_near_line_art(image_rgb, edit_mask, bubble_roi):
+        return False
     bg_pixels = _trimmed_background_pixels(image_rgb, edit_mask, bubble_roi)
     if bg_pixels.size == 0:
         return False
@@ -352,6 +450,8 @@ def _should_use_bubble_roi_gradient_fill(
     bubble_roi: tuple[int, int, int, int] | None,
 ) -> bool:
     if bubble_roi is None:
+        return False
+    if _edit_mask_near_line_art(image_rgb, edit_mask, bubble_roi):
         return False
     bg_pixels, bg_region, edge_density = _bubble_roi_background_metrics(image_rgb, edit_mask, bubble_roi)
     if bg_pixels.size < 64 or np.count_nonzero(bg_region) < 64:
@@ -504,12 +604,15 @@ def erase_text_bubble_regions(
         return BubbleEraseResult(
             image=current_cleaned,
             edit_mask=empty_mask,
+            fallback_mask=empty_mask.copy(),
             expanded_bubble_mask=empty_mask.copy(),
             stats={
                 "applied": False,
                 "block_count": 0,
                 "applied_block_count": 0,
+                "fallback_block_count": 0,
                 "edit_pixel_count": 0,
+                "fallback_pixel_count": 0,
                 "changed_outside_edit_mask_pixel_count": 0,
                 "blocks": [],
             },
@@ -518,9 +621,11 @@ def erase_text_bubble_regions(
     result = np.asarray(current_cleaned).copy()
     source = normalize_edit_mask(source_mask, original_image.shape)
     union_edit_mask = np.zeros(original_image.shape[:2], dtype=np.uint8)
+    fallback_mask = np.zeros(original_image.shape[:2], dtype=np.uint8)
     bubble_roi_mask = np.zeros(original_image.shape[:2], dtype=np.uint8)
     block_entries: list[dict] = []
     applied_blocks = 0
+    fallback_blocks = 0
 
     for index, block in enumerate(list(blocks or [])):
         if getattr(block, "text_class", "") != "text_bubble":
@@ -534,6 +639,46 @@ def erase_text_bubble_regions(
             bubble_roi_mask[y1:y2, x1:x2] = 255
 
         edit_mask, mask_stats = build_bubble_residual_edit_mask(original_image, source, block)
+        line_art_intrusion = (
+            _edit_mask_near_line_art(original_image, source, bubble_roi)
+            or _edit_mask_near_line_art(original_image, edit_mask, bubble_roi)
+        )
+        if line_art_intrusion:
+            fallback_edit_mask, fallback_stats = build_bubble_residual_edit_mask(
+                original_image,
+                source,
+                block,
+                protect_line_art=False,
+            )
+            line_protect = _line_art_protect_mask_for_roi(original_image, bubble_roi)
+            fallback_edit_mask = np.where(
+                (fallback_edit_mask > 0) & ((line_protect <= 0) | (source > 0)),
+                255,
+                0,
+            ).astype(np.uint8)
+            if not np.any(fallback_edit_mask):
+                fallback_edit_mask = edit_mask
+            if np.any(fallback_edit_mask):
+                fallback_blocks += 1
+                fallback_mask = np.where((fallback_mask > 0) | (fallback_edit_mask > 0), 255, 0).astype(np.uint8)
+                block_stats = BubbleEraseBlockStats(
+                    mode=ERASE_MODE_BUBBLE_LAMA_FALLBACK,
+                    edit_pixel_count=mask_pixel_count(fallback_edit_mask),
+                    protect_pixel_count=max(mask_stats.protect_pixel_count, fallback_stats.protect_pixel_count),
+                    skipped_reason="line_art_intrusion",
+                )
+                set_block_erase_metadata(block, block_stats)
+                block_entries.append(
+                    {
+                        "index": index,
+                        "mode": block_stats.mode,
+                        "edit_pixel_count": block_stats.edit_pixel_count,
+                        "protect_pixel_count": block_stats.protect_pixel_count,
+                        "skipped_reason": block_stats.skipped_reason,
+                    }
+                )
+                continue
+
         if not np.any(edit_mask):
             set_block_erase_metadata(block, mask_stats)
             block_entries.append(
@@ -572,12 +717,15 @@ def erase_text_bubble_regions(
     return BubbleEraseResult(
         image=result,
         edit_mask=union_edit_mask,
+        fallback_mask=fallback_mask,
         expanded_bubble_mask=bubble_roi_mask,
         stats={
-            "applied": bool(applied_blocks),
+            "applied": bool(applied_blocks or fallback_blocks),
             "block_count": len(list(blocks or [])),
             "applied_block_count": applied_blocks,
+            "fallback_block_count": fallback_blocks,
             "edit_pixel_count": mask_pixel_count(union_edit_mask),
+            "fallback_pixel_count": mask_pixel_count(fallback_mask),
             "changed_outside_edit_mask_pixel_count": int(outside_changed),
             "blocks": block_entries,
         },
