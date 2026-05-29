@@ -21,6 +21,7 @@ from modules.rendering.render import (
     get_render_fit_clearance_for_block,
     is_vertical_block,
     pyside_word_wrap,
+    should_skip_inpaint_review_render,
 )
 from modules.utils.export_paths import export_run_root, reserve_export_run_token, resolve_export_directory
 from modules.utils.automatic_output import (
@@ -150,6 +151,8 @@ class RenderMixin:
         page_scene_offset = self._get_page_scene_offset(page_index)
 
         for block in blocks:
+            if should_skip_inpaint_review_render(block):
+                continue
             x1, y1, x2, y2 = [float(v) for v in block.xyxy]
             width = max(1.0, x2 - x1)
             height = max(1.0, y2 - y1)
@@ -523,6 +526,9 @@ class RenderMixin:
             hard_box_rescue_mask=mask_details.get("hard_box_rescue_mask"),
             hard_box_applied_count=int(mask_details.get("hard_box_applied_count", 0) or 0),
             hard_box_reason_totals=dict(mask_details.get("hard_box_reason_totals", {}) or {}),
+            text_free_rescue_mask=mask_details.get("text_free_rescue_mask"),
+            text_free_rescue_applied_count=int(mask_details.get("text_free_rescue_applied_count", 0) or 0),
+            text_free_rescue_reason_totals=dict(mask_details.get("text_free_rescue_reason_totals", {}) or {}),
         )
         export_inpaint_debug_artifacts(
             export_root=export_root,

@@ -10,6 +10,7 @@ from PySide6.QtGui import QColor
 from modules.masking import (
     CTDRefiner,
     CTDRefinerSettings,
+    apply_text_free_rescue_mask,
     build_legacy_bbox_mask_details,
     build_protect_mask,
 )
@@ -98,10 +99,12 @@ def _ctd_details(
     fallback_used = bool(ctd_result.fallback_used)
     refiner_backend = str(ctd_result.backend or "ctd")
     final_mask = protected_mask
+    final_mask_before_text_free_rescue = final_mask.copy()
     legacy_fallback_details: dict[str, Any] | None = None
 
     if not np.any(final_mask) and np.any(ctd_final_mask):
         final_mask = ctd_final_mask.copy()
+        final_mask_before_text_free_rescue = final_mask.copy()
         fallback_used = True
         refiner_backend = f"{refiner_backend}+protect_fallback"
 
@@ -117,22 +120,48 @@ def _ctd_details(
             255,
             0,
         ).astype(np.uint8)
+        final_mask_before_text_free_rescue = final_mask.copy()
         fallback_used = True
         refiner_backend = f"{refiner_backend}+legacy_bbox_fallback"
+
+    text_free_rescue_details = {
+        "text_free_rescue_mask": np.zeros_like(final_mask, dtype=np.uint8),
+        "text_free_rescue_applied_count": 0,
+        "text_free_rescue_reason_totals": {},
+        "text_free_rescue_mask_pixel_count": 0,
+    }
+    if block_list and str(cfg.get("mask_refiner", "ctd") or "ctd") != "legacy_bbox":
+        final_mask, text_free_rescue_details = apply_text_free_rescue_mask(
+            img,
+            block_list,
+            final_mask,
+        )
+        if int(text_free_rescue_details.get("text_free_rescue_applied_count", 0) or 0) > 0:
+            refiner_backend = f"{refiner_backend}+text_free_rescue"
 
     details = {
         "raw_mask": raw_mask,
         "refined_mask": refined_mask,
         "protect_mask": np.where(np.asarray(protect_mask) > 0, 255, 0).astype(np.uint8),
-        "final_mask_pre_expand": final_mask.copy(),
+        "final_mask_pre_expand": final_mask_before_text_free_rescue.copy(),
         "final_mask_post_expand": final_mask.copy(),
         "final_mask": final_mask.copy(),
         "legacy_base_mask": None,
         "hard_box_rescue_mask": None,
+        "text_free_rescue_mask": text_free_rescue_details["text_free_rescue_mask"],
         "hard_box_applied_count": 0,
         "hard_box_reason_totals": {},
+        "text_free_rescue_applied_count": int(
+            text_free_rescue_details.get("text_free_rescue_applied_count", 0) or 0
+        ),
+        "text_free_rescue_reason_totals": dict(
+            text_free_rescue_details.get("text_free_rescue_reason_totals", {}) or {}
+        ),
         "legacy_base_mask_pixel_count": 0,
         "hard_box_rescue_mask_pixel_count": 0,
+        "text_free_rescue_mask_pixel_count": int(
+            text_free_rescue_details.get("text_free_rescue_mask_pixel_count", 0) or 0
+        ),
         "final_mask_pixel_count": int(np.count_nonzero(final_mask)),
         "mask_refiner": "ctd",
         "keep_existing_lines": bool(cfg.get("keep_existing_lines", True)),

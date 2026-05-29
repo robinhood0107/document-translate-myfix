@@ -12,6 +12,7 @@ from modules.rendering.render import (
     get_best_render_area,
     get_render_fit_clearance_for_block,
     pyside_word_wrap,
+    should_skip_inpaint_review_render,
 )
 from modules.utils.textblock import TextBlock
 
@@ -214,6 +215,17 @@ class RenderBubbleFitTests(unittest.TestCase):
         )
 
         self.assertEqual(get_render_fit_clearance_for_block(free, 3.0), 0.0)
+
+    def test_inpaint_needs_review_block_is_marked_for_render_skip(self) -> None:
+        free = _block(
+            xyxy=[100, 100, 180, 160],
+            text_class="text_free",
+        )
+        free._inpaint_needs_review = True
+
+        self.assertTrue(should_skip_inpaint_review_render(free))
+        self.assertEqual(free._render_skipped_reason, "inpaint_needs_review")
+        self.assertEqual(free._text_fit_status, "needs_review")
 
     def test_korean_wrap_does_not_shrink_below_readable_floor(self) -> None:
         wrapped, font_size, width, height = pyside_word_wrap(

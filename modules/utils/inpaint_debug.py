@@ -180,6 +180,35 @@ def serialize_inpaint_block(block, index: int) -> dict:
         ),
         "hard_box_applied": bool(getattr(block, "_hard_box_applied", False)),
         "hard_box_reason_codes": list(getattr(block, "_hard_box_reason_codes", []) or []),
+        "text_free_mask_coverage": float(getattr(block, "_text_free_mask_coverage", 0.0) or 0.0),
+        "text_free_rescue_applied": bool(getattr(block, "_text_free_rescue_applied", False)),
+        "text_free_rescue_reason_codes": list(
+            getattr(block, "_text_free_rescue_reason_codes", []) or []
+        ),
+        "text_free_rescue_roi_xyxy": (
+            [int(float(v)) for v in getattr(block, "_text_free_rescue_roi_xyxy", ())[:4]]
+            if getattr(block, "_text_free_rescue_roi_xyxy", None) is not None
+            else None
+        ),
+        "text_free_rescue_fill_ratio": float(
+            getattr(block, "_text_free_rescue_fill_ratio", 0.0) or 0.0
+        ),
+        "text_free_rescue_pixel_count": int(
+            getattr(block, "_text_free_rescue_pixel_count", 0) or 0
+        ),
+        "text_free_rescue_metrics": dict(getattr(block, "_text_free_rescue_metrics", {}) or {}),
+        "inpaint_residual_status": str(getattr(block, "_inpaint_residual_status", "") or ""),
+        "inpaint_needs_review": bool(getattr(block, "_inpaint_needs_review", False)),
+        "inpaint_residual_component_count": int(
+            getattr(block, "_inpaint_residual_component_count", 0) or 0
+        ),
+        "inpaint_residual_area_ratio": float(
+            getattr(block, "_inpaint_residual_area_ratio", 0.0) or 0.0
+        ),
+        "inpaint_residual_reason_codes": list(
+            getattr(block, "_inpaint_residual_reason_codes", []) or []
+        ),
+        "render_skipped_reason": str(getattr(block, "_render_skipped_reason", "") or ""),
         "hard_box_rescue_roi_xyxy": (
             [int(float(v)) for v in getattr(block, "_hard_box_rescue_roi_xyxy", ())[:4]]
             if getattr(block, "_hard_box_rescue_roi_xyxy", None) is not None
@@ -221,6 +250,9 @@ def build_inpaint_debug_metadata(
     hard_box_rescue_mask: np.ndarray | None = None,
     hard_box_applied_count: int | None = None,
     hard_box_reason_totals: dict | None = None,
+    text_free_rescue_mask: np.ndarray | None = None,
+    text_free_rescue_applied_count: int | None = None,
+    text_free_rescue_reason_totals: dict | None = None,
 ) -> dict:
     block_list = list(blocks or [])
     if final_mask is not None:
@@ -236,6 +268,7 @@ def build_inpaint_debug_metadata(
     protect_mask_pixels = int(np.count_nonzero(protect_mask)) if protect_mask is not None else 0
     legacy_base_mask_pixels = int(np.count_nonzero(legacy_base_mask)) if legacy_base_mask is not None else 0
     hard_box_rescue_mask_pixels = int(np.count_nonzero(hard_box_rescue_mask)) if hard_box_rescue_mask is not None else 0
+    text_free_rescue_mask_pixels = int(np.count_nonzero(text_free_rescue_mask)) if text_free_rescue_mask is not None else 0
     if hard_box_applied_count is None:
         hard_box_applied_count = sum(1 for block in block_list if bool(getattr(block, "_hard_box_applied", False)))
     if hard_box_reason_totals is None:
@@ -244,6 +277,16 @@ def build_inpaint_debug_metadata(
             for code in list(getattr(block, "_hard_box_reason_codes", []) or []):
                 reason_totals[code] = reason_totals.get(code, 0) + 1
         hard_box_reason_totals = reason_totals
+    if text_free_rescue_applied_count is None:
+        text_free_rescue_applied_count = sum(
+            1 for block in block_list if bool(getattr(block, "_text_free_rescue_applied", False))
+        )
+    if text_free_rescue_reason_totals is None:
+        reason_totals = {}
+        for block in block_list:
+            for code in list(getattr(block, "_text_free_rescue_reason_codes", []) or []):
+                reason_totals[code] = reason_totals.get(code, 0) + 1
+        text_free_rescue_reason_totals = reason_totals
     return {
         "image_path": image_path,
         "run_type": run_type,
@@ -262,6 +305,7 @@ def build_inpaint_debug_metadata(
         "raw_mask_pixel_count": raw_mask_pixels,
         "legacy_base_mask_pixel_count": legacy_base_mask_pixels,
         "hard_box_rescue_mask_pixel_count": hard_box_rescue_mask_pixels,
+        "text_free_rescue_mask_pixel_count": text_free_rescue_mask_pixels,
         "final_mask_pixel_count": final_mask_pixels,
         "final_mask_pre_expand_pixel_count": final_mask_pre_expand_pixels,
         "final_mask_post_expand_pixel_count": final_mask_post_expand_pixels,
@@ -269,6 +313,8 @@ def build_inpaint_debug_metadata(
         "cleanup_delta_pixel_count": cleanup_delta_pixels,
         "hard_box_applied_count": int(hard_box_applied_count or 0),
         "hard_box_reason_totals": dict(hard_box_reason_totals or {}),
+        "text_free_rescue_applied_count": int(text_free_rescue_applied_count or 0),
+        "text_free_rescue_reason_totals": dict(text_free_rescue_reason_totals or {}),
         "cleanup_applied": bool(cleanup_stats.get("applied", False)),
         "cleanup_component_count": int(cleanup_stats.get("component_count", 0) or 0),
         "cleanup_block_count": int(cleanup_stats.get("block_count", 0) or 0),
@@ -279,6 +325,9 @@ def build_inpaint_debug_metadata(
         "pass2_bubble_kept_count": int(cleanup_stats.get("pass2_bubble_kept_count", 0) or 0),
         "pass2_text_free_candidate_count": int(cleanup_stats.get("pass2_text_free_candidate_count", 0) or 0),
         "pass2_text_free_kept_count": int(cleanup_stats.get("pass2_text_free_kept_count", 0) or 0),
+        "inpaint_residual_checked_count": int(cleanup_stats.get("inpaint_residual_checked_count", 0) or 0),
+        "inpaint_needs_review_count": int(cleanup_stats.get("inpaint_needs_review_count", 0) or 0),
+        "inpaint_residual_reason_totals": dict(cleanup_stats.get("inpaint_residual_reason_totals", {}) or {}),
         "pass2_name": str(cleanup_stats.get("pass_name", "") or ""),
         "blocks": [serialize_inpaint_block(block, idx) for idx, block in enumerate(block_list)],
     }

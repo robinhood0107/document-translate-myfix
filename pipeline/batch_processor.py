@@ -15,6 +15,7 @@ from PySide6.QtCore import QCoreApplication
 from PySide6.QtGui import QColor
 
 from modules.detection.processor import TextBlockDetector
+from modules.masking import mark_text_free_inpaint_residuals
 from modules.translation.processor import Translator
 from modules.utils.textblock import sort_blk_list
 from modules.utils.pipeline_config import inpaint_map, get_config, get_inpainter_runtime
@@ -61,6 +62,7 @@ from modules.rendering.render import (
     get_render_fit_clearance_for_block,
     is_vertical_block,
     pyside_word_wrap,
+    should_skip_inpaint_review_render,
 )
 from modules.utils.device import resolve_device
 from app.path_materialization import ensure_path_materialized
@@ -640,6 +642,9 @@ class BatchProcessor:
             hard_box_rescue_mask=mask_details.get("hard_box_rescue_mask"),
             hard_box_applied_count=int(mask_details.get("hard_box_applied_count", 0) or 0),
             hard_box_reason_totals=dict(mask_details.get("hard_box_reason_totals", {}) or {}),
+            text_free_rescue_mask=mask_details.get("text_free_rescue_mask"),
+            text_free_rescue_applied_count=int(mask_details.get("text_free_rescue_applied_count", 0) or 0),
+            text_free_rescue_reason_totals=dict(mask_details.get("text_free_rescue_reason_totals", {}) or {}),
         )
         return export_inpaint_debug_artifacts(
             export_root=export_root,
@@ -1318,6 +1323,8 @@ class BatchProcessor:
                     self.inpainting.inpainter_cache,
                     config,
                 )
+                residual_stats = mark_text_free_inpaint_residuals(inpaint_input_img, blk_list)
+                cleanup_stats.update(residual_stats)
 
                 patches = self.inpainting.get_inpainted_patches(mask, inpaint_input_img)
                 self.main_page.patches_processed.emit(patches, image_path)
@@ -1341,6 +1348,8 @@ class BatchProcessor:
                         "cleanup_applied": bool(cleanup_stats.get("applied", False)),
                         "cleanup_component_count": int(cleanup_stats.get("component_count", 0) or 0),
                         "cleanup_block_count": int(cleanup_stats.get("block_count", 0) or 0),
+                        "text_free_rescue_count": int(mask_details.get("text_free_rescue_applied_count", 0) or 0),
+                        "inpaint_needs_review_count": int(cleanup_stats.get("inpaint_needs_review_count", 0) or 0),
                     },
                 )
                 debug_paths = self._write_inpaint_debug_exports(
@@ -1658,7 +1667,11 @@ class BatchProcessor:
             direction = render_settings.direction
                 
             text_items_state = []
+            render_skipped_inpaint_review_count = 0
             for blk in blk_list:
+                if should_skip_inpaint_review_render(blk):
+                    render_skipped_inpaint_review_count += 1
+                    continue
                 x1, y1, block_width, block_height = blk.xywh
 
                 translation_raw = blk.translation
@@ -1850,6 +1863,7 @@ class BatchProcessor:
                 "render",
                 "completed",
                 text_item_count=len(text_items_state),
+                render_skipped_inpaint_review_count=render_skipped_inpaint_review_count,
             )
             
             self.emit_progress(index, total_images, 9, 10, False)

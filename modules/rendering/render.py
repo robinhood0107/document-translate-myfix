@@ -125,6 +125,14 @@ def is_vertical_block(blk, lang_code: str | None) -> bool:
     return getattr(blk, "direction", "") == "vertical" and is_vertical_language_code(lang_code)
 
 
+def should_skip_inpaint_review_render(blk) -> bool:
+    if bool(getattr(blk, "_inpaint_needs_review", False)):
+        setattr(blk, "_render_skipped_reason", "inpaint_needs_review")
+        setattr(blk, "_text_fit_status", "needs_review")
+        return True
+    return False
+
+
 def _render_font_supports(metrics: QFontMetrics, ch: str) -> bool:
     try:
         return metrics.inFontUcs4(ord(ch))

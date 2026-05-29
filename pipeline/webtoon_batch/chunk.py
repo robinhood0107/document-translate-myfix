@@ -10,6 +10,7 @@ from PySide6.QtCore import QCoreApplication
 
 from app.ui.messages import Messages
 from modules.detection.processor import TextBlockDetector
+from modules.masking import mark_text_free_inpaint_residuals
 from modules.translation.processor import Translator
 from modules.utils.correction_dictionary import (
     apply_ocr_result_dictionary,
@@ -275,6 +276,7 @@ class ChunkMixin:
         inpainted = self.inpainting.inpaint_with_blocks(image, mask, mask_blocks, config=config)
         inpainted = imk.convert_scale_abs(inpainted)
         cleanup_stats = {"applied": False, "component_count": 0, "block_count": 0}
+        cleanup_stats.update(mark_text_free_inpaint_residuals(inpainted, mask_blocks))
         self._emit_benchmark_event(
             "inpaint_end",
             image_path=image_path,

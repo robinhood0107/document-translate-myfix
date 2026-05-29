@@ -18,6 +18,7 @@ from app.ui.canvas.text.text_item_properties import TextItemProperties
 from app.ui.canvas.text_item import OutlineInfo, OutlineType
 from app.ui.messages import Messages
 from modules.detection.processor import TextBlockDetector
+from modules.masking import mark_text_free_inpaint_residuals
 from modules.ocr.factory import OCRFactory
 from modules.ocr.local_runtime import LocalOCRRuntimeManager
 from modules.ocr.selection import (
@@ -33,6 +34,7 @@ from modules.rendering.render import (
     get_render_fit_clearance_for_block,
     is_vertical_block,
     pyside_word_wrap,
+    should_skip_inpaint_review_render,
 )
 from modules.translation.local_runtime import LocalGemmaRuntimeManager
 from modules.translation.processor import Translator
@@ -666,6 +668,8 @@ class StageBatchedProcessor(BatchProcessor):
                     self.inpainting.inpainter_cache,
                     config,
                 )
+                residual_stats = mark_text_free_inpaint_residuals(ctx.inpaint_input_img, ctx.blk_list)
+                ctx.cleanup_stats.update(residual_stats)
                 self._raise_if_cancelled()
                 ctx.patches = self.inpainting.get_inpainted_patches(ctx.mask, ctx.inpaint_input_img)
                 self.main_page.patches_processed.emit(ctx.patches, ctx.image_path)
@@ -677,6 +681,8 @@ class StageBatchedProcessor(BatchProcessor):
                         "cleanup_applied": bool(ctx.cleanup_stats.get("applied", False)),
                         "cleanup_component_count": int(ctx.cleanup_stats.get("component_count", 0) or 0),
                         "cleanup_block_count": int(ctx.cleanup_stats.get("block_count", 0) or 0),
+                        "text_free_rescue_count": int(ctx.mask_details.get("text_free_rescue_applied_count", 0) or 0),
+                        "inpaint_needs_review_count": int(ctx.cleanup_stats.get("inpaint_needs_review_count", 0) or 0),
                     },
                 )
                 cleaned_output_path = self._write_inpainted_debug_image(
@@ -881,7 +887,11 @@ class StageBatchedProcessor(BatchProcessor):
             file_on_display = self.main_page.image_files[self.main_page.curr_img_idx]
 
         text_items_state: list[dict[str, Any]] = []
+        render_skipped_inpaint_review_count = 0
         for blk in ctx.blk_list:
+            if should_skip_inpaint_review_render(blk):
+                render_skipped_inpaint_review_count += 1
+                continue
             x1, y1, block_width, block_height = blk.xywh
             translation_raw = blk.translation
             if not translation_raw or len(translation_raw) == 1:
@@ -1050,6 +1060,7 @@ class StageBatchedProcessor(BatchProcessor):
             "render",
             "completed",
             text_item_count=len(text_items_state),
+            render_skipped_inpaint_review_count=render_skipped_inpaint_review_count,
         )
         self.main_page.image_ctrl.mark_processing_stage(ctx.image_path, "pipeline", "completed")
         self.main_page.render_state_ready.emit(ctx.image_path)

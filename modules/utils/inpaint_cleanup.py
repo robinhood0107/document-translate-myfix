@@ -134,11 +134,11 @@ def refine_bubble_residue_inpaint(
             continue
 
         roi_area = max(1, (rx2 - rx1) * (ry2 - ry1))
-        max_bbox_ratio = 0.20 if text_class == "text_bubble" else 0.16
-        edge_bbox_ratio = 0.10
+        max_bbox_ratio = 0.20 if text_class == "text_bubble" else 0.08
+        edge_bbox_ratio = 0.10 if text_class == "text_bubble" else 0.06
         gray = imk.to_gray(crop)
         local_components = 0
-        max_local_components = 35
+        max_local_components = 35 if text_class == "text_bubble" else 12
 
         for lx1, ly1, lx2, ly2 in residual_boxes:
             if local_components >= max_local_components:
@@ -163,6 +163,10 @@ def refine_bubble_residue_inpaint(
                 continue
             prior_overlap_ratio = float(np.count_nonzero(prior_crop > 0)) / float(max(1, bbox_area))
             if prior_overlap_ratio <= 0.0:
+                continue
+            if text_class != "text_bubble" and prior_overlap_ratio < 0.35:
+                continue
+            if text_class != "text_bubble" and touches_edge:
                 continue
             if touches_edge and prior_overlap_ratio < 0.20 and bbox_area > int(round(roi_area * edge_bbox_ratio)):
                 continue

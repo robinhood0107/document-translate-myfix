@@ -18,6 +18,7 @@ import imkit as imk
 import numpy as np
 
 from modules.detection.processor import TextBlockDetector
+from modules.masking import mark_text_free_inpaint_residuals
 from modules.utils.device import resolve_device
 from modules.utils.image_utils import generate_mask
 from modules.utils.inpaint_cleanup import refine_bubble_residue_inpaint
@@ -173,6 +174,7 @@ def _process_image(
                 inpainter,
                 get_config(settings),
             )
+            cleanup_stats.update(mark_text_free_inpaint_residuals(cleaned, blocks))
         else:
             final_mask = mask
 
@@ -204,6 +206,9 @@ def _process_image(
         hard_box_rescue_mask=mask_details.get("hard_box_rescue_mask"),
         hard_box_applied_count=int(mask_details.get("hard_box_applied_count", 0) or 0),
         hard_box_reason_totals=dict(mask_details.get("hard_box_reason_totals", {}) or {}),
+        text_free_rescue_mask=mask_details.get("text_free_rescue_mask"),
+        text_free_rescue_applied_count=int(mask_details.get("text_free_rescue_applied_count", 0) or 0),
+        text_free_rescue_reason_totals=dict(mask_details.get("text_free_rescue_reason_totals", {}) or {}),
     )
     export_inpaint_debug_artifacts(
         export_root=str(corpus_output),
