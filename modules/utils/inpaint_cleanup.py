@@ -8,6 +8,7 @@ import imkit as imk
 import numpy as np
 
 from modules.detection.utils.content import detect_content_in_bbox
+from modules.utils.inpaint_composite import composite_with_edit_mask
 from modules.utils.mask_roi import build_text_prior_mask, normalize_xyxy, resolve_block_residue_roi
 from modules.utils.textblock import TextBlock
 
@@ -250,6 +251,7 @@ def refine_bubble_residue_inpaint(
 
     refined_image = inpainter(inpainted_image, residue_mask, config)
     refined_image = imk.convert_scale_abs(refined_image)
+    refined_image = composite_with_edit_mask(inpainted_image, refined_image, residue_mask)
     merged_mask = np.where((mask > 0) | (residue_mask > 0), 255, 0).astype(np.uint8)
 
     logger.info(

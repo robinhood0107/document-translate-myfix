@@ -12,6 +12,7 @@ from modules.source_parity_vendor.utils.imgproc_utils import enlarge_window, res
 from modules.source_parity_vendor.utils.textblock import TextBlock as SourceLaMaTextBlock
 from modules.source_parity_vendor.utils.textblock_mask import extract_ballon_mask
 from modules.utils.download import ModelDownloader, ModelID
+from modules.utils.inpaint_composite import composite_with_edit_mask
 from modules.utils.textblock import TextBlock
 
 
@@ -205,6 +206,7 @@ class SourceLaMaLarge:
                                 return np.concatenate([result_rgb, original_alpha], axis=2)
                             return result_rgb
             result_rgb = self.memory_safe_inpaint(img_rgb, mask, textblock_list)
+            result_rgb = composite_with_edit_mask(img_rgb, result_rgb, mask)
             if original_alpha is not None:
                 result_alpha = _inpaint_handle_alpha_channel(original_alpha, mask)
                 return np.concatenate([result_rgb, result_alpha], axis=2)
@@ -243,9 +245,10 @@ class SourceLaMaLarge:
             work_mask[xyxy[1]:xyxy[3], xyxy[0]:xyxy[2]] = 0
 
         if original_alpha is not None:
+            inpainted = composite_with_edit_mask(img_rgb, inpainted, original_mask)
             result_alpha = _inpaint_handle_alpha_channel(original_alpha, original_mask)
             return np.concatenate([inpainted, result_alpha], axis=2)
-        return inpainted
+        return composite_with_edit_mask(img_rgb, inpainted, original_mask)
 
 
 _INPAINTER_CACHE: dict[SourceLaMaKey, SourceLaMaLarge] = {}
@@ -297,12 +300,14 @@ def source_lama_blockwise_inpaint(
 ) -> np.ndarray:
     if image is None or mask is None or not np.any(mask) or not blocks:
         result = inpainter(image, mask, config)
-        return imk.convert_scale_abs(result)
+        converted = imk.convert_scale_abs(result)
+        return composite_with_edit_mask(image, converted, mask)
 
     source_blocks = _resolve_source_blocks(blocks)
     if not source_blocks:
         result = inpainter(image, mask, config)
-        return imk.convert_scale_abs(result)
+        converted = imk.convert_scale_abs(result)
+        return composite_with_edit_mask(image, converted, mask)
 
     device = str(getattr(inpainter, "runtime_device", getattr(inpainter, "device", "cuda")) or "cuda")
     precision = str(getattr(inpainter, "precision", "bf16") or "bf16")
@@ -314,4 +319,5 @@ def source_lama_blockwise_inpaint(
         source_blocks,
         check_need_inpaint=check_need_inpaint,
     )
-    return imk.convert_scale_abs(result)
+    converted = imk.convert_scale_abs(result)
+    return composite_with_edit_mask(image, converted, mask)
