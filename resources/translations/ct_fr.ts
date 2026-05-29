@@ -646,8 +646,8 @@ Use Custom Local Server(Gemma) with the included Gemma Docker setup.</source>
         <translation>Mode automatique</translation>
     </message>
     <message>
-        <source>Selected exports are saved to comic_translate_&lt;timestamp&gt; in the same directory as the input file/archive.</source>
-        <translation>Les exportations sélectionnées sont enregistrées dans comic_translate_&lt;timestamp&gt; dans le même répertoire que le fichier/archive d&apos;entrée.</translation>
+        <source>Selected automatic-mode export artifacts are saved to log_&lt;source&gt;_&lt;timestamp&gt; in the same directory as the input file/archive.</source>
+        <translation>Les artefacts d&apos;exportation du mode automatique sélectionnés sont enregistrés dans log_&lt;source&gt;_&lt;timestamp&gt;, dans le même dossier que le fichier ou l&apos;archive d&apos;entrée.</translation>
     </message>
     <message>
         <source>Export Raw Text</source>
