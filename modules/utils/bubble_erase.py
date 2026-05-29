@@ -234,26 +234,14 @@ def _telea_fill(image_rgb: np.ndarray, edit_mask: np.ndarray, *, radius: int = 3
     return composite_with_edit_mask(image_rgb, filled, mask)
 
 
-def _fill_bubble_mask(
-    image_rgb: np.ndarray,
-    edit_mask: np.ndarray,
-    *,
-    prefer_flat: bool = False,
-) -> tuple[np.ndarray, str]:
-    if prefer_flat:
-        return _local_median_fill(image_rgb, edit_mask), ERASE_MODE_BUBBLE_FLAT_FILL
+def _fill_bubble_mask(image_rgb: np.ndarray, edit_mask: np.ndarray) -> tuple[np.ndarray, str]:
     if _should_use_flat_fill(image_rgb, edit_mask):
         return _local_median_fill(image_rgb, edit_mask), ERASE_MODE_BUBBLE_FLAT_FILL
     return _telea_fill(image_rgb, edit_mask, radius=3), ERASE_MODE_BUBBLE_TELEA
 
 
-def fill_bubble_edit_mask(
-    image_rgb: np.ndarray,
-    edit_mask: np.ndarray,
-    *,
-    prefer_flat: bool = False,
-) -> tuple[np.ndarray, str]:
-    return _fill_bubble_mask(image_rgb, edit_mask, prefer_flat=prefer_flat)
+def fill_bubble_edit_mask(image_rgb: np.ndarray, edit_mask: np.ndarray) -> tuple[np.ndarray, str]:
+    return _fill_bubble_mask(image_rgb, edit_mask)
 
 
 def erase_text_bubble_regions(
@@ -312,7 +300,7 @@ def erase_text_bubble_regions(
             )
             continue
 
-        filled, mode = _fill_bubble_mask(original_image, edit_mask, prefer_flat=True)
+        filled, mode = _fill_bubble_mask(original_image, edit_mask)
         result = composite_with_edit_mask(result, filled, edit_mask)
         union_edit_mask = np.where((union_edit_mask > 0) | (edit_mask > 0), 255, 0).astype(np.uint8)
         applied_blocks += 1
