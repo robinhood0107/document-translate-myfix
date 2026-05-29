@@ -23,6 +23,7 @@ from modules.utils.text_normalization import (
     RENDER_NORMALIZABLE_GLYPHS,
     canonicalize_ellipsis_runs,
 )
+from modules.utils.repetition_guard import guard_severe_repetition
 from modules.utils.render_style_policy import (
     VERTICAL_ALIGNMENT_TOP,
     compute_vertical_aligned_y,
@@ -170,12 +171,33 @@ def describe_render_text_sanitization(
 
     raw_text = str(text or "")
     sanitized = canonicalize_ellipsis_runs(_canonicalize_render_symbol_variants(raw_text))
-    effective_family = font_family.strip() if isinstance(font_family, str) and font_family.strip() else QApplication.font().family()
-    metrics = QFontMetrics(QFont(effective_family, 12))
-    symbol_fallback_family = resolve_render_symbol_fallback_font_family()
     cleaned_parts: list[str] = []
     replacements: list[dict] = []
     reasons: list[str] = []
+    repetition_guard = guard_severe_repetition(sanitized)
+    if repetition_guard.changed:
+        analysis = repetition_guard.analysis
+        logger.warning(
+            "render repetition guard applied: image=%s block=%s comparable_length=%d longest_run_char=%r longest_run_length=%d",
+            image_path or "",
+            block_index if block_index is not None else -1,
+            analysis.comparable_length,
+            analysis.longest_run_char,
+            analysis.longest_run_length,
+        )
+        reasons.append(repetition_guard.reason)
+        replacements.append(
+            {
+                "index": 0,
+                "char": sanitized,
+                "replacement": repetition_guard.text,
+                "reason": repetition_guard.reason,
+            }
+        )
+        sanitized = repetition_guard.text
+    effective_family = font_family.strip() if isinstance(font_family, str) and font_family.strip() else QApplication.font().family()
+    metrics = QFontMetrics(QFont(effective_family, 12))
+    symbol_fallback_family = resolve_render_symbol_fallback_font_family()
 
     for index, ch in enumerate(sanitized):
         replacement = ch
