@@ -326,6 +326,14 @@ class ImageStateController:
         message_map = {
             "Text Blocks": t("Messages", "No Text Blocks Detected.\nSkipping:"),
             "OCR": t("Messages", "Could not recognize detected text.\nSkipping:"),
+            "inpaint": QtCore.QCoreApplication.translate(
+                "Messages",
+                "Could not inpaint detected text.\nSkipping:",
+            ),
+            "Inpaint": QtCore.QCoreApplication.translate(
+                "Messages",
+                "Could not inpaint detected text.\nSkipping:",
+            ),
             "Translator": t("Messages", "Could not get translations.\nSkipping:"),
             "OCR Chunk Failed": t("Messages", "Could not recognize webtoon chunk.\nSkipping:"),
             "Translation Chunk Failed": t("Messages", "Could not translate webtoon chunk.\nSkipping:"),
@@ -1537,7 +1545,7 @@ class ImageStateController:
     def on_image_skipped(self, image_path: str, skip_reason: str, error: str):
         summarized_error = self._summarize_skip_error(error)
         if hasattr(self.main, "register_batch_skip"):
-            self.main.register_batch_skip(image_path, skip_reason, summarized_error)
+            self.main.register_batch_skip(image_path, skip_reason, error)
 
         if self._is_content_flagged_error(error):
             reason = summarized_error.split(": ")[-1] if ": " in summarized_error else summarized_error
