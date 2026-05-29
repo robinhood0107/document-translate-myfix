@@ -66,6 +66,7 @@ class LocalOCRRuntimeManager:
         self._lock = threading.RLock()
         self._compose_command: tuple[str, ...] | None = None
         self._active_engine: str | None = None
+        self._readiness_cache: set[tuple[str, str, str]] = set()
 
     def validate_engine(self, engine_key: str, settings_page: Any) -> None:
         if not is_local_ocr_engine(engine_key):
@@ -131,10 +132,73 @@ class LocalOCRRuntimeManager:
                 self._deactivate_active_engine()
                 return
 
-            self.validate_engine(engine_key, settings_page)
-            config = self._config_for(engine_key)
-            initial_state = self._probe_health_state(config["health_url"])
-            if initial_state == "healthy":
+            cache_key = self._readiness_cache_key(engine_key, settings_page, managed=True)
+            if self._is_cancelled(cancel_checker):
+                self._readiness_cache.discard(cache_key)
+                raise OperationCancelledError(f"Cancelled while preparing {engine_key} runtime.")
+            if self._active_engine and self._active_engine != engine_key:
+                self._stop_engine(self._active_engine)
+                self._active_engine = None
+                self._readiness_cache.clear()
+            if cache_key in self._readiness_cache:
+                self._active_engine = engine_key
+                self._emit_readiness_cache_hit(progress_callback, engine_key)
+                return
+
+            try:
+                self._ensure_engine_uncached(
+                    engine_key,
+                    settings_page,
+                    timeout_sec=timeout_sec,
+                    progress_callback=progress_callback,
+                    cancel_checker=cancel_checker,
+                )
+            except (LocalServiceSetupError, OperationCancelledError):
+                self._readiness_cache.discard(cache_key)
+                raise
+            else:
+                self._readiness_cache.add(cache_key)
+
+    def _ensure_engine_uncached(
+        self,
+        engine_key: str,
+        settings_page: Any,
+        *,
+        timeout_sec: int,
+        progress_callback: Callable[[dict[str, Any]], None] | None,
+        cancel_checker: Callable[[], bool] | None,
+    ) -> None:
+        self.validate_engine(engine_key, settings_page)
+        config = self._config_for(engine_key)
+        initial_state = self._probe_health_state(config["health_url"])
+        if initial_state == "healthy":
+            self._active_engine = engine_key
+            self._emit_progress(
+                progress_callback,
+                engine_key,
+                status="completed",
+                step_key="health_probe",
+                message=f"기존 {engine_key} 런타임을 재사용합니다.",
+            )
+            return
+        if initial_state == "loading":
+            self._emit_progress(
+                progress_callback,
+                engine_key,
+                status="waiting_health",
+                step_key="health_probe",
+                message=f"{engine_key} 모델 로딩이 끝날 때까지 기다리는 중...",
+                detail=f"Waiting for {config['health_url']}",
+            )
+            if self._wait_for_health(
+                config["health_url"],
+                timeout_sec=min(timeout_sec, 300),
+                progress_callback=progress_callback,
+                cancel_checker=cancel_checker,
+                engine_key=engine_key,
+                step_key="health_probe",
+                message=f"{engine_key} 상태를 확인하는 중...",
+            ):
                 self._active_engine = engine_key
                 self._emit_progress(
                     progress_callback,
@@ -144,83 +208,56 @@ class LocalOCRRuntimeManager:
                     message=f"기존 {engine_key} 런타임을 재사용합니다.",
                 )
                 return
-            if initial_state == "loading":
-                self._emit_progress(
-                    progress_callback,
-                    engine_key,
-                    status="waiting_health",
-                    step_key="health_probe",
-                    message=f"{engine_key} 모델 로딩이 끝날 때까지 기다리는 중...",
-                    detail=f"Waiting for {config['health_url']}",
-                )
-                if self._wait_for_health(
-                    config["health_url"],
-                    timeout_sec=min(timeout_sec, 300),
-                    progress_callback=progress_callback,
-                    cancel_checker=cancel_checker,
-                    engine_key=engine_key,
-                    step_key="health_probe",
-                    message=f"{engine_key} 상태를 확인하는 중...",
-                ):
-                    self._active_engine = engine_key
-                    self._emit_progress(
-                        progress_callback,
-                        engine_key,
-                        status="completed",
-                        step_key="health_probe",
-                        message=f"기존 {engine_key} 런타임을 재사용합니다.",
-                    )
-                    return
-            if self._active_engine and self._active_engine != engine_key:
-                self._stop_engine(self._active_engine)
 
-            self._emit_progress(
-                progress_callback,
+        self._emit_progress(
+            progress_callback,
+            engine_key,
+            status="starting",
+            step_key="compose_up",
+            message=f"{engine_key} 컨테이너를 시작하는 중...",
+            detail="docker compose up -d",
+        )
+        self._run_compose(engine_key, "up", "-d", step_name="up")
+        self._emit_progress(
+            progress_callback,
+            engine_key,
+            status="completed",
+            step_key="compose_up",
+            message=f"{engine_key} 컨테이너 시작 명령을 보냈습니다.",
+        )
+        if not self._wait_for_health(
+            config["health_url"],
+            timeout_sec=timeout_sec,
+            progress_callback=progress_callback,
+            cancel_checker=cancel_checker,
+            engine_key=engine_key,
+            step_key="health_wait",
+            message=f"{engine_key} health 기다리는 중...",
+        ):
+            raise self._build_setup_error(
                 engine_key,
-                status="starting",
-                step_key="compose_up",
-                message=f"{engine_key} 컨테이너를 시작하는 중...",
-                detail="docker compose up -d",
+                (
+                    f"Timed out while waiting for {engine_key} at {config['health_url']} "
+                    f"after docker compose up -d of {config['compose_file'].name}."
+                ),
             )
-            self._run_compose(engine_key, "up", "-d", step_name="up")
-            self._emit_progress(
-                progress_callback,
-                engine_key,
-                status="completed",
-                step_key="compose_up",
-                message=f"{engine_key} 컨테이너 시작 명령을 보냈습니다.",
-            )
-            if not self._wait_for_health(
-                config["health_url"],
-                timeout_sec=timeout_sec,
-                progress_callback=progress_callback,
-                cancel_checker=cancel_checker,
-                engine_key=engine_key,
-                step_key="health_wait",
-                message=f"{engine_key} health 기다리는 중...",
-            ):
-                raise self._build_setup_error(
-                    engine_key,
-                    (
-                        f"Timed out while waiting for {engine_key} at {config['health_url']} "
-                        f"after docker compose up -d of {config['compose_file'].name}."
-                    ),
-                )
-            self._active_engine = engine_key
-            self._emit_progress(
-                progress_callback,
-                engine_key,
-                status="completed",
-                step_key="health_wait",
-                message=f"{engine_key} health 확인이 완료되었습니다.",
-            )
-            self._log_runtime_metadata(engine_key)
+        self._active_engine = engine_key
+        self._emit_progress(
+            progress_callback,
+            engine_key,
+            status="completed",
+            step_key="health_wait",
+            message=f"{engine_key} health 확인이 완료되었습니다.",
+        )
+        self._log_runtime_metadata(engine_key)
 
     def shutdown(self) -> None:
         with self._lock:
+            self._readiness_cache.clear()
             self._deactivate_active_engine()
 
     def _deactivate_active_engine(self) -> None:
+        self._readiness_cache.clear()
         if not self._active_engine:
             return
         try:
@@ -284,6 +321,30 @@ class LocalOCRRuntimeManager:
         if engine_key == "PaddleOCR VL":
             return str(settings_page.get_paddleocr_vl_settings().get("server_url", "")).strip()
         return ""
+
+    def _readiness_cache_key(
+        self,
+        engine_key: str,
+        settings_page: Any,
+        *,
+        managed: bool,
+    ) -> tuple[str, str, str]:
+        mode = "managed" if managed else "unmanaged"
+        return (engine_key, _normalize_url(self._resolve_server_url(engine_key, settings_page)), mode)
+
+    def _emit_readiness_cache_hit(
+        self,
+        progress_callback: Callable[[dict[str, Any]], None] | None,
+        engine_key: str,
+    ) -> None:
+        self._emit_progress(
+            progress_callback,
+            engine_key,
+            status="completed",
+            step_key="readiness_cache",
+            message=f"기존 {engine_key} 런타임을 재사용합니다.",
+            readiness_cache_hit=True,
+        )
 
     def _config_for(self, engine_key: str) -> dict[str, Any]:
         try:
