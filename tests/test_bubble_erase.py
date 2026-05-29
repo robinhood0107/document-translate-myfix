@@ -8,6 +8,7 @@ from modules.utils.bubble_erase import (
     BubbleEraseBlockStats,
     ERASE_MODE_BUBBLE_FLAT_FILL,
     ERASE_MODE_BUBBLE_GRADIENT_FILL,
+    ERASE_MODE_BUBBLE_LAMA_FALLBACK,
     ERASE_MODE_BUBBLE_SKIPPED,
     ERASE_MODE_BUBBLE_TELEA,
     build_bubble_residual_edit_mask,
@@ -220,6 +221,27 @@ class BubbleFillBackendTests(unittest.TestCase):
             abs(int(np.mean(result.image[28:48, 30:52])) - int(np.mean(expected_background[28:48, 30:52]))),
             12,
         )
+
+    def test_line_art_bubble_defers_to_lama_fallback_without_flattening(self) -> None:
+        original = np.full((96, 96, 3), 150, dtype=np.uint8)
+        original[46:49, 8:88] = 20
+        original[12:84, 68:71] = 30
+        original[30:52, 32:38] = 245
+        original[30:52, 48:54] = 245
+        current = original.copy()
+        source_mask = np.zeros((96, 96), dtype=np.uint8)
+        source_mask[30:52, 32:38] = 255
+        source_mask[30:52, 48:54] = 255
+        block = _block(xyxy=[26, 24, 60, 58], bubble_xyxy=[8, 8, 88, 88])
+
+        result = erase_text_bubble_regions(original, current, source_mask, [block])
+
+        self.assertTrue(result.stats["applied"])
+        self.assertEqual(block._erase_mode, ERASE_MODE_BUBBLE_LAMA_FALLBACK)
+        self.assertEqual(result.stats["fallback_block_count"], 1)
+        self.assertEqual(mask_pixel_count(result.edit_mask), 0)
+        self.assertGreater(mask_pixel_count(result.fallback_mask), 0)
+        self.assertTrue(np.array_equal(result.image, current))
 
     def test_text_free_blocks_are_not_modified_by_bubble_erase(self) -> None:
         original = np.full((32, 32, 3), 128, dtype=np.uint8)

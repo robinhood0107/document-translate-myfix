@@ -164,3 +164,48 @@ def test_source_lama_blockwise_keeps_text_free_on_lama_path(monkeypatch) -> None
     assert np.all(result[34:38, 34:38] == 77)
     assert bubble_block._erase_mode == "bubble_flat_fill"
     assert int(np.mean(result[14:18, 14:18])) < 180
+
+
+def test_source_lama_blockwise_routes_line_art_bubbles_to_lama_fallback(monkeypatch) -> None:
+    image = np.full((96, 96, 3), 150, dtype=np.uint8)
+    image[46:49, 8:88] = 20
+    image[12:84, 68:71] = 30
+    image[30:52, 32:38] = 245
+    image[30:52, 48:54] = 245
+    mask = np.zeros((96, 96), dtype=np.uint8)
+    mask[30:52, 32:38] = 255
+    mask[30:52, 48:54] = 255
+    block = _text_block(xyxy=[26, 24, 60, 58], bubble_xyxy=[8, 8, 88, 88], text_class="text_bubble")
+    seen: dict[str, np.ndarray] = {}
+
+    class _FakeSourceLaMa:
+        def inpaint(self, source_image, source_mask, source_blocks, check_need_inpaint=True):
+            seen["mask"] = source_mask.copy()
+            seen["block_count"] = np.asarray([len(source_blocks)], dtype=np.int32)
+            output = source_image.copy()
+            output[source_mask > 0] = 77
+            return output
+
+    monkeypatch.setattr(
+        "modules.inpainting.source_lama_blockwise.get_source_lama_large",
+        lambda **_kwargs: _FakeSourceLaMa(),
+    )
+
+    result, edit_mask = source_lama_blockwise_inpaint(
+        image,
+        mask,
+        [block],
+        _CallableInpainter(),
+        config=None,
+        return_edit_mask=True,
+    )
+
+    assert block._erase_mode == "bubble_lama_fallback"
+    assert int(seen["block_count"][0]) == 1
+    assert np.count_nonzero(seen["mask"]) > 0
+    assert np.count_nonzero(seen["mask"][46:49, 8:24]) == 0
+    assert np.count_nonzero(seen["mask"][46:49, 60:88]) == 0
+    assert np.all(result[46:49, 8:24] == image[46:49, 8:24])
+    assert np.all(result[46:49, 60:88] == image[46:49, 60:88])
+    changed = np.any(result != image, axis=2)
+    assert np.count_nonzero(changed & (edit_mask <= 0)) == 0
