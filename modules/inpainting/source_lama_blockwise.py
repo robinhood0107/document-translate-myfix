@@ -11,8 +11,10 @@ from modules.inpainting.lama_torch_network import load_lama_mpe
 from modules.source_parity_vendor.utils.imgproc_utils import enlarge_window, resize_keepasp
 from modules.source_parity_vendor.utils.textblock import TextBlock as SourceLaMaTextBlock
 from modules.source_parity_vendor.utils.textblock_mask import extract_ballon_mask
+from modules.utils.bubble_erase import erase_text_bubble_regions
 from modules.utils.download import ModelDownloader, ModelID
-from modules.utils.inpaint_composite import composite_with_edit_mask
+from modules.utils.inpaint_composite import composite_with_edit_mask, normalize_edit_mask
+from modules.utils.mask_roi import normalize_xyxy
 from modules.utils.textblock import TextBlock
 
 
@@ -289,19 +291,41 @@ def _resolve_source_blocks(blocks: list[TextBlock]) -> list[SourceLaMaTextBlock]
     return resolved
 
 
-def source_lama_blockwise_inpaint(
+def _split_bubble_source_mask(
+    mask: np.ndarray,
+    blocks: list[TextBlock],
+    image_shape: tuple[int, ...],
+) -> tuple[np.ndarray, list[TextBlock], list[TextBlock]]:
+    source_mask = normalize_edit_mask(mask, image_shape)
+    bubble_mask = np.zeros(image_shape[:2], dtype=np.uint8)
+    bubble_blocks: list[TextBlock] = []
+    lama_blocks: list[TextBlock] = []
+    for block in list(blocks or []):
+        if getattr(block, "text_class", "") != "text_bubble":
+            lama_blocks.append(block)
+            continue
+        bubble_blocks.append(block)
+        roi = normalize_xyxy(getattr(block, "bubble_xyxy", None), image_shape)
+        if roi is None:
+            roi = normalize_xyxy(getattr(block, "xyxy", None), image_shape)
+        if roi is None:
+            continue
+        x1, y1, x2, y2 = roi
+        bubble_mask[y1:y2, x1:x2] = np.where(source_mask[y1:y2, x1:x2] > 0, 255, bubble_mask[y1:y2, x1:x2])
+    return bubble_mask, bubble_blocks, lama_blocks
+
+
+def _run_lama_or_fallback(
     image: np.ndarray,
     mask: np.ndarray,
     blocks: list[TextBlock],
     inpainter,
     config,
     *,
-    check_need_inpaint: bool = True,
+    check_need_inpaint: bool,
 ) -> np.ndarray:
-    if image is None or mask is None or not np.any(mask) or not blocks:
-        result = inpainter(image, mask, config)
-        converted = imk.convert_scale_abs(result)
-        return composite_with_edit_mask(image, converted, mask)
+    if not np.any(mask):
+        return np.asarray(image).copy()
 
     source_blocks = _resolve_source_blocks(blocks)
     if not source_blocks:
@@ -321,3 +345,43 @@ def source_lama_blockwise_inpaint(
     )
     converted = imk.convert_scale_abs(result)
     return composite_with_edit_mask(image, converted, mask)
+
+
+def source_lama_blockwise_inpaint(
+    image: np.ndarray,
+    mask: np.ndarray,
+    blocks: list[TextBlock],
+    inpainter,
+    config,
+    *,
+    check_need_inpaint: bool = True,
+) -> np.ndarray:
+    if image is None or mask is None or not np.any(mask) or not blocks:
+        result = inpainter(image, mask, config)
+        converted = imk.convert_scale_abs(result)
+        return composite_with_edit_mask(image, converted, mask)
+
+    source_mask = normalize_edit_mask(mask, image.shape)
+    bubble_mask, bubble_blocks, lama_blocks = _split_bubble_source_mask(source_mask, blocks, image.shape)
+    if not bubble_blocks:
+        return _run_lama_or_fallback(
+            image,
+            source_mask,
+            list(blocks or []),
+            inpainter,
+            config,
+            check_need_inpaint=check_need_inpaint,
+        )
+
+    lama_mask = np.where((source_mask > 0) & (bubble_mask <= 0), 255, 0).astype(np.uint8)
+    cleaned = _run_lama_or_fallback(
+        image,
+        lama_mask,
+        lama_blocks,
+        inpainter,
+        config,
+        check_need_inpaint=check_need_inpaint,
+    )
+    bubble_result = erase_text_bubble_regions(image, cleaned, bubble_mask, bubble_blocks, config)
+    combined_mask = np.where((lama_mask > 0) | (bubble_result.edit_mask > 0), 255, 0).astype(np.uint8)
+    return composite_with_edit_mask(image, bubble_result.image, combined_mask)
