@@ -341,6 +341,7 @@ class SettingsPageUI(QtWidgets.QWidget):
 
         # System
         self.check_update_button = self.about_page.check_update_button
+        self.developer_mode_checkbox = self.about_page.developer_mode_checkbox
 
 
         # Add pages to stacked widget (order must match navbar order)

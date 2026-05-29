@@ -23,10 +23,19 @@ class UpdateChecker(QObject):
     REPO_OWNER = "ogkalu2"
     REPO_NAME = "comic-translate"
 
-    def __init__(self):
+    def __init__(
+        self,
+        repo_owner: str | None = None,
+        repo_name: str | None = None,
+        *,
+        allow_release_link_without_installer: bool = False,
+    ):
         super().__init__()
         self._worker_thread = None
         self._worker = None
+        self.repo_owner = repo_owner or self.REPO_OWNER
+        self.repo_name = repo_name or self.REPO_NAME
+        self.allow_release_link_without_installer = allow_release_link_without_installer
 
     def _safe_stop_thread(self):
         try:
@@ -45,7 +54,12 @@ class UpdateChecker(QObject):
         self._safe_stop_thread()
             
         self._worker_thread = QThread()
-        self._worker = UpdateWorker(self.REPO_OWNER, self.REPO_NAME, __version__)
+        self._worker = UpdateWorker(
+            self.repo_owner,
+            self.repo_name,
+            __version__,
+            allow_release_link_without_installer=self.allow_release_link_without_installer,
+        )
         self._worker.moveToThread(self._worker_thread)
         
         self._worker.finished.connect(self._worker_thread.quit)
@@ -104,18 +118,53 @@ class UpdateWorker(QObject):
     error = Signal(str)
     finished = Signal()
 
-    def __init__(self, owner, repo, current_version):
+    def __init__(
+        self,
+        owner,
+        repo,
+        current_version,
+        *,
+        allow_release_link_without_installer: bool = False,
+    ):
         super().__init__()
         self.owner = owner
         self.repo = repo
         self.current_version = current_version
+        self.allow_release_link_without_installer = allow_release_link_without_installer
+
+    def _latest_release_or_tag(self) -> dict:
+        release_url = f"https://api.github.com/repos/{self.owner}/{self.repo}/releases/latest"
+        response = requests.get(release_url, timeout=10)
+        if response.status_code != 404:
+            response.raise_for_status()
+            return response.json()
+
+        tags_url = f"https://api.github.com/repos/{self.owner}/{self.repo}/tags?per_page=50"
+        tags_response = requests.get(tags_url, timeout=10)
+        tags_response.raise_for_status()
+        candidates = []
+        for tag in tags_response.json() or []:
+            raw_name = str(tag.get("name", "") or "")
+            normalized = raw_name.lstrip("v")
+            try:
+                parsed = version.parse(normalized)
+            except Exception:
+                continue
+            if parsed.is_prerelease:
+                continue
+            candidates.append((parsed, raw_name))
+        if not candidates:
+            raise RuntimeError("Could not parse version from releases or tags.")
+        _parsed, tag_name = max(candidates, key=lambda item: item[0])
+        return {
+            "tag_name": tag_name,
+            "html_url": f"https://github.com/{self.owner}/{self.repo}/releases/tag/{tag_name}",
+            "assets": [],
+        }
 
     def run(self):
         try:
-            url = f"https://api.github.com/repos/{self.owner}/{self.repo}/releases/latest"
-            response = requests.get(url, timeout=10)
-            response.raise_for_status()
-            data = response.json()
+            data = self._latest_release_or_tag()
             
             latest_tag = data.get("tag_name", "").lstrip("v")
             if not latest_tag:
@@ -138,7 +187,7 @@ class UpdateWorker(QObject):
                             asset_url = asset["browser_download_url"]
                             break
                 
-                if asset_url:
+                if asset_url or self.allow_release_link_without_installer:
                     self.update_available.emit(latest_tag, data.get("html_url", ""), asset_url)
                 else:
                     self.error.emit(f"New version {latest_tag} available, but no installer found for your OS.")
