@@ -2,7 +2,6 @@
 
 import msgpack
 import os
-import tempfile
 import zipfile
 import shutil
 from pathlib import PurePosixPath
@@ -17,6 +16,7 @@ from .project_state_v2 import (
     ensure_lazy_blob_materialized,
     is_sqlite_project_file,
     load_state_from_proj_file_v2,
+    make_project_load_temp_dir,
     save_state_to_proj_file_v2,
 )
 from modules.utils.export_paths import normalize_export_source_record
@@ -69,7 +69,7 @@ def load_state_from_proj_file(comic_translate: ComicTranslate, file_name: str):
     decoder = ProjectDecoder()
 
     if not hasattr(comic_translate, 'temp_dir'):
-        comic_translate.temp_dir = tempfile.mkdtemp()
+        comic_translate.temp_dir = make_project_load_temp_dir(file_name)
 
     # Use local references to attributes for faster access
     image_data = comic_translate.image_data
