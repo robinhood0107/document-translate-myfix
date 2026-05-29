@@ -250,7 +250,7 @@ def refine_bubble_residue_inpaint(
     if not np.any(residue_mask):
         return inpainted_image, mask, _empty_pass2_stats(mask.shape)
 
-    refined_image, pass2_backend = fill_bubble_edit_mask(inpainted_image, residue_mask)
+    refined_image, pass2_backend = fill_bubble_edit_mask(inpainted_image, residue_mask, prefer_flat=True)
     refined_image = imk.convert_scale_abs(refined_image)
     refined_image = composite_with_edit_mask(inpainted_image, refined_image, residue_mask)
     merged_mask = np.where((mask > 0) | (residue_mask > 0), 255, 0).astype(np.uint8)
