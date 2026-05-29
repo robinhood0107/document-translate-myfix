@@ -15,6 +15,20 @@ from modules.utils.download import ModelDownloader, ModelID
 from modules.utils.textblock import TextBlock
 
 
+def _clip_half_open_bbox(xyxy, im_w: int, im_h: int) -> list[int] | None:
+    try:
+        x1, y1, x2, y2 = [int(v) for v in xyxy]
+    except Exception:
+        return None
+    x1 = max(0, min(int(im_w), x1))
+    x2 = max(0, min(int(im_w), x2))
+    y1 = max(0, min(int(im_h), y1))
+    y2 = max(0, min(int(im_h), y2))
+    if x2 <= x1 or y2 <= y1:
+        return None
+    return [x1, y1, x2, y2]
+
+
 def _inpaint_handle_alpha_channel(original_alpha: np.ndarray, mask: np.ndarray) -> np.ndarray:
     result_alpha = original_alpha.copy()
     mask_dilated = cv2.dilate((mask > 127).astype(np.uint8), np.ones((15, 15), np.uint8), iterations=1)
@@ -201,10 +215,14 @@ class SourceLaMaLarge:
         original_mask = mask.copy()
         work_mask = mask.copy()
         for blk in textblock_list:
-            xyxy = [int(v) for v in getattr(blk, "xyxy", [0, 0, 0, 0])]
+            xyxy = _clip_half_open_bbox(getattr(blk, "xyxy", [0, 0, 0, 0]), im_w, im_h)
+            if xyxy is None:
+                continue
             xyxy_e = enlarge_window(xyxy, im_w, im_h, ratio=1.7)
             image_crop = inpainted[xyxy_e[1]:xyxy_e[3], xyxy_e[0]:xyxy_e[2]]
             mask_crop = work_mask[xyxy_e[1]:xyxy_e[3], xyxy_e[0]:xyxy_e[2]]
+            if image_crop.size == 0 or mask_crop.size == 0:
+                continue
             need_inpaint = True
             if self.check_need_inpaint or check_need_inpaint:
                 ballon_msk, non_text_msk = extract_ballon_mask(image_crop, mask_crop)
