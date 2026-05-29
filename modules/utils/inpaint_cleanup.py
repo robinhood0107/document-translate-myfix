@@ -12,6 +12,7 @@ from modules.utils.mask_roi import build_text_prior_mask, normalize_xyxy, resolv
 from modules.utils.textblock import TextBlock
 
 logger = logging.getLogger(__name__)
+RESIDUE_SOURCE_MASK_DILATE_PX = 2
 
 
 def _empty_pass2_stats(mask_shape: tuple[int, int]) -> dict:
@@ -26,6 +27,9 @@ def _empty_pass2_stats(mask_shape: tuple[int, int]) -> dict:
         "pass2_bubble_kept_count": 0,
         "pass2_text_free_candidate_count": 0,
         "pass2_text_free_kept_count": 0,
+        "residue_mask_pre_cap_pixel_count": 0,
+        "residue_mask_cap_pixel_count": 0,
+        "residue_mask_cap_dilate_px": RESIDUE_SOURCE_MASK_DILATE_PX,
     }
 
 
@@ -52,6 +56,29 @@ def _component_boxes_from_mask(mask: np.ndarray, *, min_area: int) -> list[tuple
             continue
         boxes.append((int(x), int(y), int(x + w), int(y + h)))
     return boxes
+
+
+def _residue_source_cap(mask: np.ndarray, *, dilate_px: int = RESIDUE_SOURCE_MASK_DILATE_PX) -> np.ndarray:
+    if mask is None or mask.size == 0 or not np.any(mask):
+        return np.zeros_like(mask, dtype=np.uint8)
+    binary = np.where(mask > 0, 255, 0).astype(np.uint8)
+    px = max(0, int(dilate_px))
+    if px <= 0:
+        return binary
+    kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (2 * px + 1, 2 * px + 1), (px, px))
+    return np.where(cv2.dilate(binary, kernel, iterations=1) > 0, 255, 0).astype(np.uint8)
+
+
+def _cap_residue_mask_to_source_mask(
+    residue_mask: np.ndarray,
+    source_mask: np.ndarray,
+    *,
+    dilate_px: int = RESIDUE_SOURCE_MASK_DILATE_PX,
+) -> np.ndarray:
+    if residue_mask is None or residue_mask.size == 0 or not np.any(residue_mask):
+        return np.zeros_like(residue_mask, dtype=np.uint8)
+    cap = _residue_source_cap(source_mask, dilate_px=dilate_px)
+    return np.where((residue_mask > 0) & (cap > 0), 255, 0).astype(np.uint8)
 
 
 def _build_bubble_faint_boxes(crop: np.ndarray, prior_mask: np.ndarray) -> list[tuple[int, int, int, int]]:
@@ -96,14 +123,17 @@ def refine_bubble_residue_inpaint(
     text_free_candidate_count = 0
     text_free_kept_count = 0
     page_cap_hit = False
+    source_cap = _residue_source_cap(mask, dilate_px=RESIDUE_SOURCE_MASK_DILATE_PX)
 
     for idx, blk in enumerate(block_list):
         if getattr(blk, "xyxy", None) is None:
             continue
 
+        text_class = getattr(blk, "text_class", "") or ""
+        if text_class != "text_bubble":
+            continue
+
         residue_roi = normalize_xyxy(getattr(blk, "cleanup_roi_xyxy", None), inpainted_image.shape)
-        if (getattr(blk, "text_class", "") or "") != "text_bubble":
-            residue_roi = normalize_xyxy(getattr(blk, "ctd_roi_xyxy", None), inpainted_image.shape)
         if residue_roi is None:
             residue_roi = resolve_block_residue_roi(blk, inpainted_image.shape)
         if residue_roi is None:
@@ -115,7 +145,6 @@ def refine_bubble_residue_inpaint(
         if crop.size == 0:
             continue
 
-        text_class = getattr(blk, "text_class", "") or ""
         prior_mask = build_text_prior_mask(
             inpainted_image,
             blk,
@@ -183,7 +212,11 @@ def refine_bubble_residue_inpaint(
             if gx2 <= gx1 or gy2 <= gy1:
                 continue
 
-            residue_mask[gy1:gy2, gx1:gx2] = 255
+            allowed_crop = source_cap[gy1:gy2, gx1:gx2] > 0
+            if allowed_crop.size == 0 or not np.any(allowed_crop):
+                continue
+            residue_mask_crop = residue_mask[gy1:gy2, gx1:gx2]
+            residue_mask_crop[allowed_crop] = 255
             local_components += 1
             component_count += 1
             if text_class == "text_bubble":
@@ -205,6 +238,13 @@ def refine_bubble_residue_inpaint(
 
     residue_mask = imk.dilate(residue_mask, np.ones((3, 3), np.uint8), iterations=1)
     residue_mask = np.where((residue_mask > 0) & (residue_roi_union > 0), 255, 0).astype(np.uint8)
+    residue_mask_pre_cap_pixel_count = int(np.count_nonzero(residue_mask))
+    residue_mask = _cap_residue_mask_to_source_mask(
+        residue_mask,
+        mask,
+        dilate_px=RESIDUE_SOURCE_MASK_DILATE_PX,
+    )
+    residue_mask_cap_pixel_count = int(np.count_nonzero(residue_mask))
     if not np.any(residue_mask):
         return inpainted_image, mask, _empty_pass2_stats(mask.shape)
 
@@ -230,4 +270,7 @@ def refine_bubble_residue_inpaint(
         "pass2_bubble_kept_count": bubble_kept_count,
         "pass2_text_free_candidate_count": text_free_candidate_count,
         "pass2_text_free_kept_count": text_free_kept_count,
+        "residue_mask_pre_cap_pixel_count": residue_mask_pre_cap_pixel_count,
+        "residue_mask_cap_pixel_count": residue_mask_cap_pixel_count,
+        "residue_mask_cap_dilate_px": RESIDUE_SOURCE_MASK_DILATE_PX,
     }
