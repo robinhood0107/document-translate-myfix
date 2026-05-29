@@ -96,6 +96,43 @@ class WorkspaceMixin:
         for button in self.hbutton_group.get_button_group().buttons():
             button.setFocusPolicy(QtCore.Qt.FocusPolicy.NoFocus)
 
+        render_save_widget = QtWidgets.QWidget()
+        render_save_widget.setObjectName("renderSaveHeaderGroup")
+        render_save_widget.setStyleSheet(
+            """
+            QWidget#renderSaveHeaderGroup {
+                background-color: rgba(255, 255, 255, 18);
+                border: 1px solid rgba(255, 255, 255, 36);
+                border-radius: 4px;
+            }
+            """
+        )
+        render_save_layout = QtWidgets.QHBoxLayout(render_save_widget)
+        render_save_layout.setContentsMargins(6, 2, 6, 2)
+        render_save_layout.setSpacing(4)
+
+        self.render_dirty_badge = self._create_scope_badge(self.tr("Up to date"))
+        self.render_dirty_badge.setToolTip(self.tr("Final render output status"))
+
+        self.rerender_current_button = self.create_tool_button(svg="refresh_line.svg")
+        self.rerender_current_button.setToolTip(self.tr("Rerender Current Image"))
+        self.rerender_current_button.setFocusPolicy(QtCore.Qt.FocusPolicy.NoFocus)
+        self.rerender_dirty_button = self.create_tool_button(svg="save-all.svg")
+        self.rerender_dirty_button.setToolTip(self.tr("Rerender Changed Images"))
+        self.rerender_dirty_button.setFocusPolicy(QtCore.Qt.FocusPolicy.NoFocus)
+        self.rerender_all_button = self.create_tool_button(svg="pipeline_render.svg")
+        self.rerender_all_button.setToolTip(self.tr("Rerender All Images"))
+        self.rerender_all_button.setFocusPolicy(QtCore.Qt.FocusPolicy.NoFocus)
+        self.open_output_folder_button = self.create_tool_button(svg="folder-open.svg")
+        self.open_output_folder_button.setToolTip(self.tr("Open Output Folder"))
+        self.open_output_folder_button.setFocusPolicy(QtCore.Qt.FocusPolicy.NoFocus)
+
+        render_save_layout.addWidget(self.render_dirty_badge)
+        render_save_layout.addWidget(self.rerender_current_button)
+        render_save_layout.addWidget(self.rerender_dirty_button)
+        render_save_layout.addWidget(self.rerender_all_button)
+        render_save_layout.addWidget(self.open_output_folder_button)
+
         self.progress_bar = MProgressBar().auto_color()
         self.progress_bar.setValue(0)
         self.progress_bar.setVisible(False)
@@ -143,6 +180,7 @@ class WorkspaceMixin:
         )
 
         header_layout.addWidget(self.hbutton_group)
+        header_layout.addWidget(render_save_widget)
         header_layout.addWidget(self.loading)
         header_layout.addStretch()
         header_layout.addWidget(self.webtoon_toggle)
@@ -524,7 +562,7 @@ class WorkspaceMixin:
         self.tool_buttons["text_box"] = self.text_box_button
 
         self.delete_button = self.create_tool_button(svg="trash_line.svg", checkable=False)
-        self.delete_button.setToolTip(self.tr("Delete the selected text box or block box"))
+        self.delete_button.setToolTip(self.tr("Delete the selected text box"))
 
         text_box_tools_lay.addWidget(self.text_box_button)
         text_box_tools_lay.addWidget(self.delete_button)
@@ -536,6 +574,9 @@ class WorkspaceMixin:
         self.box_button.setToolTip(self.tr("Draw or select OCR/block boxes used for detection, OCR, translation, and inpainting."))
         self.box_button.clicked.connect(self.toggle_box_tool)
         self.tool_buttons["box"] = self.box_button
+
+        self.delete_block_button = self.create_tool_button(svg="trash_line.svg", checkable=False)
+        self.delete_block_button.setToolTip(self.tr("Delete the selected block box"))
 
         self.clear_rectangles_button = self.create_tool_button(svg="clear-outlined.svg")
         self.clear_rectangles_button.setToolTip(self.tr("Remove all block boxes on the image"))
@@ -549,6 +590,7 @@ class WorkspaceMixin:
         )
 
         box_tools_lay.addWidget(self.box_button)
+        box_tools_lay.addWidget(self.delete_block_button)
         box_tools_lay.addWidget(self.clear_rectangles_button)
         box_tools_lay.addWidget(self.draw_blklist_blks)
 
@@ -743,34 +785,6 @@ class WorkspaceMixin:
         self.output_dirty_label = MLabel(self.tr("All render outputs are up to date.")).secondary()
         self.output_dirty_label.setWordWrap(True)
 
-        output_rerender_buttons_widget = QtWidgets.QWidget()
-        output_rerender_buttons_layout = QtWidgets.QGridLayout(output_rerender_buttons_widget)
-        output_rerender_buttons_layout.setContentsMargins(0, 0, 0, 0)
-        output_rerender_buttons_layout.setHorizontalSpacing(6)
-        output_rerender_buttons_layout.setVerticalSpacing(6)
-
-        self.rerender_current_button = MPushButton(self.tr("Rerender Current Image")).small()
-        self.rerender_current_button.setToolTip(
-            self.tr("Save editable state, then write the current dirty page to the final output.")
-        )
-        self.rerender_dirty_button = MPushButton(self.tr("Rerender Changed Images")).small()
-        self.rerender_dirty_button.setToolTip(
-            self.tr("Write only pages with unapplied render changes to the final output.")
-        )
-        self.rerender_all_button = MPushButton(self.tr("Rerender All Images")).small()
-        self.rerender_all_button.setToolTip(
-            self.tr("Rebuild final output for every loaded page.")
-        )
-        self.open_output_folder_button = MPushButton(self.tr("Open Output Folder")).small()
-        self.open_output_folder_button.setToolTip(
-            self.tr("Open the folder where final render output is written.")
-        )
-
-        output_rerender_buttons_layout.addWidget(self.rerender_current_button, 0, 0)
-        output_rerender_buttons_layout.addWidget(self.rerender_dirty_button, 0, 1)
-        output_rerender_buttons_layout.addWidget(self.rerender_all_button, 1, 0)
-        output_rerender_buttons_layout.addWidget(self.open_output_folder_button, 1, 1)
-
         output_layout.addWidget(self.output_use_global_checkbox)
         output_layout.addLayout(output_target_row)
         output_layout.addWidget(self.output_image_format_row)
@@ -778,7 +792,6 @@ class WorkspaceMixin:
         output_layout.addWidget(self.output_archive_image_format_row)
         output_layout.addWidget(self.output_archive_level_row)
         output_layout.addWidget(self.output_dirty_label)
-        output_layout.addWidget(output_rerender_buttons_widget)
         output_layout.addWidget(self.output_quality_note_label)
         output_layout.addWidget(self.output_archive_note_label)
         output_layout.addWidget(self.output_estimate_label)

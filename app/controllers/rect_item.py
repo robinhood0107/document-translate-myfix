@@ -64,6 +64,7 @@ class RectItemController:
             self.main.t_text_edit.clear()
             self.main.curr_tblock = None
             self.main.text_ctrl.update_ocr_warning(None)
+        self.main.refresh_box_delete_ui()
 
     def handle_rectangle_creation(self, rect_item: MoveableRectItem):
         self.connect_rect_item_signals(rect_item)

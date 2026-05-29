@@ -8,9 +8,11 @@ param(
 
     [int]$Jobs = 0,
 
-    [string]$OutputDir = "build/nuitka-gpu",
+    [string]$OutputName = "comic-translate-gpu",
 
-    [string]$OutputName = "comic-translate-gpu"
+    [string]$OutputDir = "build/nuitka-gpu-onefile",
+
+    [switch]$NoCompression
 )
 
 $ErrorActionPreference = "Stop"
@@ -22,10 +24,15 @@ if (-not $Fast) {
 if ($Jobs -gt 0) {
   $extraNuitkaArgs += "--jobs=$Jobs"
 }
+if ($NoCompression) {
+  $extraNuitkaArgs += "--onefile-no-compression"
+}
 
 & $PythonPath -m nuitka `
-  --standalone `
+  --onefile `
   $extraNuitkaArgs `
+  --onefile-tempdir-spec="{CACHE_DIR}/{COMPANY}/$OutputName/{VERSION}" `
+  --onefile-child-grace-time=30000 `
   --assume-yes-for-downloads `
   --enable-plugin=pyside6 `
   --module-parameter=torch-disable-jit=no `

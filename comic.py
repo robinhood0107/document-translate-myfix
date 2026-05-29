@@ -37,6 +37,15 @@ def _read_positive_int_env(name: str, default: int = 0) -> int:
     return value if value > 0 else default
 
 
+def _read_bool_env(name: str) -> bool:
+    raw = str(os.environ.get(name, "") or "").strip().lower()
+    return raw in {"1", "true", "yes", "on"}
+
+
+def _should_skip_startup_runtime_models(smoke_exit_ms: int) -> bool:
+    return smoke_exit_ms > 0 or _read_bool_env("COMIC_SKIP_STARTUP_MODELS")
+
+
 def _is_packaged_app() -> bool:
     return bool(getattr(sys, "frozen", False) or "__compiled__" in globals())
 
@@ -346,24 +355,27 @@ def main():
     
     # Show splash and prepare required local runtime models before controller import.
     splash.show()
-    try:
-        from modules.utils.download import ensure_startup_runtime_models
-
-        ensure_startup_runtime_models(prefer_cuda=True)
-    except Exception as exc:
-        logging.exception("Failed to prepare required local runtime models: %s", exc)
-        splash.close()
-        msg = QMessageBox()
-        msg.setIcon(QMessageBox.Icon.Critical)
-        msg.setWindowTitle("Required Model Download Failed")
-        msg.setText("Failed to prepare required local model files under the project models directory.")
-        msg.setInformativeText(str(exc))
+    if _should_skip_startup_runtime_models(smoke_exit_ms):
+        logging.info("Skipping startup runtime model preparation.")
+    else:
         try:
-            msg.setDetailedText(str(exc))
-        except Exception:
-            pass
-        msg.exec()
-        raise SystemExit(1)
+            from modules.utils.download import ensure_startup_runtime_models
+
+            ensure_startup_runtime_models(prefer_cuda=True)
+        except Exception as exc:
+            logging.exception("Failed to prepare required local runtime models: %s", exc)
+            splash.close()
+            msg = QMessageBox()
+            msg.setIcon(QMessageBox.Icon.Critical)
+            msg.setWindowTitle("Required Model Download Failed")
+            msg.setText("Failed to prepare required local model files under the project models directory.")
+            msg.setInformativeText(str(exc))
+            try:
+                msg.setDetailedText(str(exc))
+            except Exception:
+                pass
+            msg.exec()
+            raise SystemExit(1)
 
     # Defer starting work until the event loop is running so the splash remains clickable.
     QTimer.singleShot(0, thread.start)

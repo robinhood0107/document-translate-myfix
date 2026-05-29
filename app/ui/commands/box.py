@@ -244,6 +244,123 @@ class DeleteBoxesCommand(QUndoCommand, RectCommandBase):
         if self.txt_item_prp and not self.find_matching_txt_item(self.scene, self.txt_item_prp):
             text_item = self.create_new_txt_item(self.txt_item_prp, self.viewer)
 
+class TextBoxChangeCommand(QUndoCommand, RectCommandBase):
+    def __init__(self, main_page, old_state, new_state):
+        super().__init__()
+        self.ct = main_page
+        self.viewer = main_page.image_viewer
+        self.scene = self.viewer._scene
+        self.old_state = old_state
+        self.new_state = new_state
+        self.block_id = str(getattr(old_state, "block_id", "") or getattr(new_state, "block_id", "") or "")
+
+    def _find_text_item(self, state=None):
+        if self.block_id:
+            for item in self.scene.items():
+                if isinstance(item, TextBlockItem) and str(getattr(item, "block_id", "") or "") == self.block_id:
+                    return item
+
+        state = state or self.new_state
+        x1, y1, _x2, _y2 = [float(v) for v in state.rect]
+        for item in self.scene.items():
+            if not isinstance(item, TextBlockItem):
+                continue
+            if (
+                abs(float(item.pos().x()) - x1) <= 1
+                and abs(float(item.pos().y()) - y1) <= 1
+                and abs(float(item.rotation()) - float(state.rotation)) <= 1
+            ):
+                return item
+        return None
+
+    @staticmethod
+    def _apply_state_to_item(item, state):
+        x1, y1, x2, y2 = [float(v) for v in state.rect]
+        width = max(x2 - x1, 1.0)
+        height = max(y2 - y1, 1.0)
+        source_rect = getattr(state, "source_rect", None)
+        if source_rect is None:
+            source_rect = (x1, y1, width, height)
+        layout_width = float(getattr(state, "text_width", 0.0) or 0.0)
+        if layout_width <= 0:
+            try:
+                layout_width = float(source_rect[2])
+            except Exception:
+                layout_width = width
+
+        item.set_source_rect(source_rect)
+        if getattr(item, "vertical", False) and getattr(item, "layout", None):
+            item.layout.set_max_size(layout_width, height)
+        else:
+            item.setTextWidth(layout_width)
+
+        font_size = float(getattr(state, "font_size", 0.0) or 0.0)
+        if font_size > 0 and abs(float(getattr(item, "font_size", font_size)) - font_size) > 0.001:
+            item.font_size = font_size
+            item.set_font_size(font_size)
+
+        item.setPos(QPointF(x1, y1))
+        item.setTransformOriginPoint(state.transform_origin)
+        item.setRotation(state.rotation)
+        item.update()
+
+    def redo(self):
+        item = self._find_text_item(self.old_state)
+        if item:
+            self._apply_state_to_item(item, self.new_state)
+            self.scene.update()
+
+    def undo(self):
+        item = self._find_text_item(self.new_state)
+        if item:
+            self._apply_state_to_item(item, self.old_state)
+            self.scene.update()
+
+
+class DeleteTextBoxCommand(QUndoCommand, RectCommandBase):
+    def __init__(self, main_page, text_item, blk=None, blk_list=None):
+        super().__init__()
+        self.ct = main_page
+        self.viewer = main_page.image_viewer
+        self.scene = self.viewer._scene
+        self.txt_item_prp = self.save_txt_item_properties(text_item) if text_item else None
+        self.blk_list = blk_list if blk_list is not None else main_page.blk_list
+        self.blk_properties = (
+            self.save_blk_properties(blk)
+            if blk is not None and bool(getattr(blk, "manual_text_box", False))
+            else None
+        )
+
+    def redo(self):
+        matching_txt_item = self.find_matching_txt_item(self.scene, self.txt_item_prp) if self.txt_item_prp else None
+        if matching_txt_item:
+            matching_txt_item.handleDeselection()
+            self.scene.removeItem(matching_txt_item)
+            if matching_txt_item in self.viewer.text_items:
+                self.viewer.text_items.remove(matching_txt_item)
+            if self.ct.curr_tblock_item is matching_txt_item:
+                self.ct.curr_tblock_item = None
+            self.scene.update()
+
+        if self.blk_properties:
+            matching_blk = self.find_matching_blk(self.blk_list, self.blk_properties)
+            if matching_blk:
+                if self.ct.curr_tblock is matching_blk:
+                    self.ct.curr_tblock = None
+                self.blk_list.remove(matching_blk)
+
+        if self.ct.curr_tblock_item is None:
+            self.ct.text_ctrl.clear_text_edits()
+
+    def undo(self):
+        if self.blk_properties and not self.find_matching_blk(self.blk_list, self.blk_properties):
+            self.blk_list.append(self.create_new_blk(self.blk_properties))
+
+        if self.txt_item_prp and not self.find_matching_txt_item(self.scene, self.txt_item_prp):
+            self.create_new_txt_item(self.txt_item_prp, self.viewer)
+            self.scene.update()
+
+
 class AddTextItemCommand(QUndoCommand, RectCommandBase):
     def __init__(self, main_page, text_item):
         super().__init__()

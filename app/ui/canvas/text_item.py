@@ -26,16 +26,23 @@ class TextBlockState:
     rotation: float
     transform_origin: QPointF
     block_id: str = ""
+    font_size: float = 0.0
+    text_width: float = 0.0
+    source_rect: tuple | None = None
 
     @classmethod
     def from_item(cls, item: QGraphicsTextItem):
         """Create TextBlockState from a TextBlockItem"""
+        source_rect = getattr(item, "source_rect", None)
         rect = QRectF(item.pos(), item.boundingRect().size()).getCoords()
         return cls(
             rect=rect,
             rotation=item.rotation(),
             transform_origin=item.transformOriginPoint(),
-            block_id=str(getattr(item, "block_id", "") or "")
+            block_id=str(getattr(item, "block_id", "") or ""),
+            font_size=float(getattr(item, "font_size", 0.0) or 0.0),
+            text_width=float(item.textWidth()) if hasattr(item, "textWidth") else 0.0,
+            source_rect=tuple(source_rect) if source_rect is not None else None,
         )
     
 class OutlineType(Enum):
@@ -155,14 +162,32 @@ class TextBlockItem(QGraphicsTextItem):
 
     def boundingRect(self):
         rect = super().boundingRect()
-        if bool(getattr(self, "editor_frame", False)) and self.source_rect is not None:
-            try:
-                _x, _y, width, height = self.source_rect
-                frame_rect = QRectF(0, 0, max(float(width), 1.0), max(float(height), 1.0))
-                rect = rect.united(frame_rect)
-            except Exception:
-                pass
+        frame_rect = self._editor_frame_rect()
+        if frame_rect is not None:
+            rect = rect.united(frame_rect)
         return rect
+
+    def _editor_frame_rect(self):
+        if not bool(getattr(self, "editor_frame", False)) or self.source_rect is None:
+            return None
+        try:
+            _x, _y, width, height = self.source_rect
+            return QRectF(0, 0, max(float(width), 1.0), max(float(height), 1.0))
+        except Exception:
+            return None
+
+    def shape(self):
+        path = super().shape()
+        frame_rect = self._editor_frame_rect()
+        if frame_rect is not None:
+            path.addRect(frame_rect)
+        return path
+
+    def contains(self, point):
+        frame_rect = self._editor_frame_rect()
+        if frame_rect is not None and frame_rect.contains(point):
+            return True
+        return super().contains(point)
 
     def set_vertical_alignment(self, vertical_alignment: str):
         self.vertical_alignment = coerce_vertical_alignment(vertical_alignment)
@@ -555,10 +580,13 @@ class TextBlockItem(QGraphicsTextItem):
             try:
                 _x, _y, width, height = self.source_rect
                 painter.save()
-                pen = QPen(QColor(255, 213, 74, 220), 1.5, Qt.PenStyle.DashLine)
+                selected = bool(getattr(self, "selected", False) or self.isSelected())
+                frame_color = QColor(238, 238, 238, 230) if selected else QColor(205, 205, 205, 190)
+                fill_color = QColor(238, 238, 238, 38) if selected else QColor(205, 205, 205, 24)
+                pen = QPen(frame_color, 1.5 if selected else 1.25, Qt.PenStyle.DashLine)
                 pen.setCosmetic(True)
                 painter.setPen(pen)
-                painter.setBrush(Qt.BrushStyle.NoBrush)
+                painter.setBrush(fill_color)
                 painter.drawRect(QRectF(0, 0, max(float(width), 1.0), max(float(height), 1.0)))
                 painter.restore()
             except Exception:
