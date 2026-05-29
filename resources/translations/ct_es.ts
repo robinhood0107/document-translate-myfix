@@ -127,6 +127,21 @@
     </message>
 </context>
 <context>
+    <name>BatchReportController</name>
+    <message>
+        <source>Mask boundary exceeded image bounds</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Try rerunning inpainting</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Inpainting failed</source>
+        <translation type="unfinished"></translation>
+    </message>
+</context>
+<context>
     <name>ComicTranslate</name>
     <message>
         <source>Project files cannot be opened together with other imported files.
@@ -1022,6 +1037,11 @@ Reasoning:
 </context>
 <context>
     <name>Messages</name>
+    <message>
+        <source>Could not inpaint detected text.
+Skipping:</source>
+        <translation type="unfinished"></translation>
+    </message>
     <message>
         <source>Skipping:</source>
         <translation>Saltando:</translation>
