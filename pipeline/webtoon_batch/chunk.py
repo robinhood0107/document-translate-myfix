@@ -203,7 +203,7 @@ class ChunkMixin:
         except Exception as error:
             err_msg = self._extract_error_message(error, context="translation")
             logger.exception("Translation failed for %s: %s", image_path, err_msg)
-            self.main_page.image_skipped.emit(image_path, "Translation", err_msg)
+            self.main_page.image_skipped.emit(image_path, "Translation Chunk Failed", err_msg)
             self._emit_benchmark_event(
                 "page_failed",
                 image_path=image_path,

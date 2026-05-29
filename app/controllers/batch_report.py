@@ -333,6 +333,7 @@ class BatchReportController:
             ),
             "Translator": self._tr("Translation failed"),
             "OCR Chunk Failed": self._tr("Webtoon text recognition chunk failed"),
+            "Translation": self._tr("Webtoon translation chunk failed"),
             "Translation Chunk Failed": self._tr(
                 "Webtoon translation chunk failed"
             ),
