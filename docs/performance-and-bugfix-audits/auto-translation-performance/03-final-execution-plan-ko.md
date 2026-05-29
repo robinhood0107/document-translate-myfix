@@ -47,31 +47,40 @@
 
 - `modules/translation/local_runtime.py`
 - `modules/ocr/local_runtime.py`
-- `modules/translation/processor.py`
-- `modules/ocr/processor.py`
-- 필요 시 stage-batched runtime event payload
 
 구현 원칙:
 
-- cache key는 runtime kind, endpoint/base URL, model name, source/target 또는 OCR engine config처럼 readiness 결과를 바꿀 수 있는 값으로 만든다.
-- cache hit이면 실제 health/model HTTP probe를 생략한다.
-- connection error, HTTP error, model mismatch, timeout, 설정 변경 시 cache를 invalidate한다.
-- progress/log에는 반복 확인 대신 cache hit/miss가 계측으로 남아야 한다.
+- `Translator`와 `OCRProcessor.initialize()` 호출 구조는 이번 PR에서 바꾸지 않는다.
+- Gemma cache key는 normalized API base URL, configured model name, managed/unmanaged mode로 만든다.
+- OCR cache key는 OCR engine key, normalized server URL, managed mode로 만든다.
+- cache hit이면 실제 health/model HTTP probe를 생략하고 `readiness_cache_hit=True` progress event를 남긴다.
+- connection error, HTTP error, model mismatch, timeout, cancel, 설정 변경 시 cache를 seed하지 않거나 invalidate한다.
+- `shutdown()`과 active OCR engine stop은 readiness cache를 clear한다.
 - 결과 이미지, OCR 텍스트, 번역 텍스트는 바뀌면 안 된다.
 
 테스트:
 
-- Gemma readiness cache hit/miss 단위 테스트
-- Gemma failure 후 invalidate 단위 테스트
-- OCR readiness cache hit/miss 단위 테스트
-- OCR 설정 변경 시 cache miss 테스트
-- stage-batched translation/OCR 기존 report regression 테스트
+- Gemma first ensure는 health/model check를 수행하고, second ensure는 같은 key에서 둘 다 생략한다.
+- Gemma model mismatch 또는 connection failure 후 다음 ensure가 cache hit 하지 않는다.
+- OCR first ensure는 health check를 수행하고, second ensure는 같은 engine/url에서 health check를 생략한다.
+- OCR engine 또는 URL 변경 시 cache miss가 발생한다.
+- cancel 중에는 successful readiness cache가 기록되지 않는다.
+- `Sample/japan/094.png`, `095.png`, `096.png` 실제 path를 쓰는 mocked pytest에서 3개 page 반복 초기화의 readiness probe 호출이 1회로 제한되는지 검증한다.
 
 검증:
 
-- `.venv-win/Scripts/python.exe -m pytest <new-runtime-cache-tests> tests/test_batch_report_runtime.py`
+- `.venv-win/Scripts/python.exe -m pytest tests/test_local_gemma_runtime.py tests/test_local_ocr_runtime.py tests/test_runtime_readiness_cache_sample_japan.py tests/test_batch_report_runtime.py`
 - `.venv-win/Scripts/python.exe scripts/validate_changed_python.py --all`
 - `.venv-win/Scripts/python.exe scripts/compile_translations.py --check`
+
+실제 GPU 전과정 측정:
+
+- PR 1은 `Sample/japan` 22장 전체를 before/after로 모두 실행한다.
+- before log: `C:\Users\pjjpj\Desktop\openai_manga_translater\comic-translate_validation_logs\2026-05-29\auto-translation-performance\chore-runtime-readiness-cache\before\`
+- after log: `C:\Users\pjjpj\Desktop\openai_manga_translater\comic-translate_validation_logs\2026-05-29\auto-translation-performance\chore-runtime-readiness-cache\after\`
+- 각 run은 시작/종료 시각, wall-clock elapsed time, stage별 event, output root, output file count, skip/fail reason, Gemma/OCR readiness event count, readiness cache hit count를 남긴다.
+- 실제 GPU runtime이 준비되지 않거나 22장 전과정이 실패하면 PR 생성 전에 멈추고 `blocked-runtime-unavailable` 또는 실패 reason을 보고한다.
+- after가 before보다 5% 이상 느려지면 원인 분석 후 PR 전 사용자에게 보고한다.
 
 사용자 검토:
 
