@@ -240,6 +240,10 @@ def _fill_bubble_mask(image_rgb: np.ndarray, edit_mask: np.ndarray) -> tuple[np.
     return _telea_fill(image_rgb, edit_mask, radius=3), ERASE_MODE_BUBBLE_TELEA
 
 
+def fill_bubble_edit_mask(image_rgb: np.ndarray, edit_mask: np.ndarray) -> tuple[np.ndarray, str]:
+    return _fill_bubble_mask(image_rgb, edit_mask)
+
+
 def erase_text_bubble_regions(
     original_image: np.ndarray,
     current_cleaned: np.ndarray,

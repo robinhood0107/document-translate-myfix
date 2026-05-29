@@ -120,9 +120,7 @@ class TextFreeStrictMaskingTests(unittest.TestCase):
         text_free = _block(xyxy=[14, 14, 20, 20])
 
         def fake_inpainter(input_image, input_mask, _config):
-            output = input_image.copy()
-            output[input_mask > 0] = 127
-            return output
+            raise AssertionError("bubble cleanup must use the safe fill backend, not LaMa pass2")
 
         with mock.patch(
             "modules.utils.inpaint_cleanup.detect_content_in_bbox",
@@ -139,6 +137,7 @@ class TextFreeStrictMaskingTests(unittest.TestCase):
         self.assertIsNot(cleaned, image)
         self.assertIsNot(merged_mask, mask)
         self.assertTrue(stats["applied"])
+        self.assertEqual(stats["pass2_backend"], "bubble_flat_fill")
         self.assertGreater(stats["pass2_bubble_candidate_count"], 0)
         self.assertEqual(stats["pass2_text_free_candidate_count"], 0)
         self.assertEqual(stats["pass2_text_free_kept_count"], 0)

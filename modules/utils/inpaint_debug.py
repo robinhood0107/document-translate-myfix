@@ -286,6 +286,7 @@ def build_inpaint_debug_metadata(
         "pass2_residue_mask_pre_cap_pixel_count": int(cleanup_stats.get("residue_mask_pre_cap_pixel_count", 0) or 0),
         "pass2_residue_mask_cap_pixel_count": int(cleanup_stats.get("residue_mask_cap_pixel_count", 0) or 0),
         "pass2_residue_mask_cap_dilate_px": int(cleanup_stats.get("residue_mask_cap_dilate_px", 0) or 0),
+        "pass2_backend": str(cleanup_stats.get("pass2_backend", "") or ""),
         "pass2_name": str(cleanup_stats.get("pass_name", "") or ""),
         "blocks": [serialize_inpaint_block(block, idx) for idx, block in enumerate(block_list)],
     }

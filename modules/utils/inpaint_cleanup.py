@@ -8,6 +8,7 @@ import imkit as imk
 import numpy as np
 
 from modules.detection.utils.content import detect_content_in_bbox
+from modules.utils.bubble_erase import fill_bubble_edit_mask
 from modules.utils.inpaint_composite import composite_with_edit_mask
 from modules.utils.mask_roi import build_text_prior_mask, normalize_xyxy, resolve_block_residue_roi
 from modules.utils.textblock import TextBlock
@@ -31,6 +32,7 @@ def _empty_pass2_stats(mask_shape: tuple[int, int]) -> dict:
         "residue_mask_pre_cap_pixel_count": 0,
         "residue_mask_cap_pixel_count": 0,
         "residue_mask_cap_dilate_px": RESIDUE_SOURCE_MASK_DILATE_PX,
+        "pass2_backend": "",
     }
 
 
@@ -109,7 +111,6 @@ def refine_bubble_residue_inpaint(
         inpainted_image is None
         or mask is None
         or not block_list
-        or inpainter is None
         or not np.any(mask)
     ):
         return inpainted_image, mask, _empty_pass2_stats(mask.shape if mask is not None else inpainted_image.shape[:2])
@@ -249,7 +250,7 @@ def refine_bubble_residue_inpaint(
     if not np.any(residue_mask):
         return inpainted_image, mask, _empty_pass2_stats(mask.shape)
 
-    refined_image = inpainter(inpainted_image, residue_mask, config)
+    refined_image, pass2_backend = fill_bubble_edit_mask(inpainted_image, residue_mask)
     refined_image = imk.convert_scale_abs(refined_image)
     refined_image = composite_with_edit_mask(inpainted_image, refined_image, residue_mask)
     merged_mask = np.where((mask > 0) | (residue_mask > 0), 255, 0).astype(np.uint8)
@@ -275,4 +276,5 @@ def refine_bubble_residue_inpaint(
         "residue_mask_pre_cap_pixel_count": residue_mask_pre_cap_pixel_count,
         "residue_mask_cap_pixel_count": residue_mask_cap_pixel_count,
         "residue_mask_cap_dilate_px": RESIDUE_SOURCE_MASK_DILATE_PX,
+        "pass2_backend": pass2_backend,
     }
