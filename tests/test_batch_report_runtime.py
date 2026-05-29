@@ -8,6 +8,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 from PySide6 import QtWidgets
 
 from app.controllers.batch_report import BatchReportController
+from app.controllers.image import ImageStateController
 
 
 class _FakeButton:
@@ -82,6 +83,32 @@ class BatchReportRuntimeTests(unittest.TestCase):
         self.assertIn("index 2160", entry["errors"][0])
         self.assertIn("Inpainting failed", entry["reasons"][0])
         self.assertIn("Mask boundary exceeded image bounds", entry["reasons"][0])
+
+    def test_legacy_translation_skip_reason_maps_to_webtoon_translation(self) -> None:
+        main = _FakeMain()
+        ctrl = BatchReportController(main)
+        ctrl.start_batch_report(["/tmp/page-001.png"], run_type="webtoon_batch")
+
+        ctrl.register_batch_skip("/tmp/page-001.png", "Translation", "translator timed out")
+        finalized = ctrl.finalize_batch_report(False)
+
+        self.assertIsNotNone(finalized)
+        entry = finalized["skipped_entries"][0]
+        self.assertEqual(entry["stages"], ["Translation"])
+        self.assertIn("Webtoon translation chunk failed", entry["reasons"][0])
+        self.assertNotIn("Page processing failed", entry["reasons"][0])
+
+    def test_legacy_translation_skip_reason_message_is_not_generic(self) -> None:
+        ctrl = object.__new__(ImageStateController)
+
+        message = ctrl._build_skip_message(
+            "/tmp/page-001.png",
+            "Translation",
+            "translator timed out",
+        )
+
+        self.assertIn("Could not translate webtoon chunk", message)
+        self.assertNotIn("Page processing failed", message)
 
 
 if __name__ == "__main__":
