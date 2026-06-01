@@ -216,6 +216,57 @@ class PaddleOCRVLEngineTests(unittest.TestCase):
         self.assertIsNotNone(record["elapsed_ms"])
         self.assertEqual(record["status"], "ok")
 
+    def test_schema_only_layout_labels_are_marked_empty(self) -> None:
+        engine = PaddleOCRVLEngine()
+        engine.initialize(_FakeSettings(scheduler_mode="fixed", parallel_workers=1))
+        img = np.zeros((300, 300, 3), dtype=np.uint8)
+        blocks = [_make_block(10, 10, 110, 110)]
+        schema_text = "\n".join(
+            [
+                "number",
+                "footnote",
+                "header",
+                "header_image",
+                "footer",
+                "footer_image",
+                "aside_text",
+                "ocr",
+            ]
+        )
+
+        with mock.patch.object(engine, "_request_ocr_text", return_value=schema_text):
+            engine.process_image(img, blocks)
+
+        self.assertEqual(blocks[0].text, "")
+        self.assertEqual(blocks[0].ocr_status, "empty_initial")
+        self.assertEqual(blocks[0].ocr_raw_text, schema_text)
+        self.assertEqual(blocks[0].ocr_sanitized_text, "")
+        self.assertIn("layout schema labels", blocks[0].ocr_empty_reason)
+        self.assertEqual(engine.last_page_profile["request_records"][0]["status"], "schema_only")
+
+    def test_schema_words_inside_real_paddleocr_vl_text_are_preserved(self) -> None:
+        engine = PaddleOCRVLEngine()
+        engine.initialize(_FakeSettings(scheduler_mode="fixed", parallel_workers=1))
+        img = np.zeros((300, 300, 3), dtype=np.uint8)
+        valid_samples = [
+            "PATREON.COM/YTSNOW YTSNOW.FANBOX.CC",
+            "number 4",
+            "footer note",
+            "OCR settings",
+            "これは本文です",
+            "header\nHello world",
+        ]
+
+        for sample in valid_samples:
+            with self.subTest(sample=sample):
+                blocks = [_make_block(10, 10, 110, 110)]
+                with mock.patch.object(engine, "_request_ocr_text", return_value=sample):
+                    engine.process_image(img, blocks)
+
+                self.assertEqual(blocks[0].text, sample)
+                self.assertEqual(blocks[0].ocr_status, "ok")
+                self.assertEqual(engine.last_page_profile["request_records"][0]["status"], "ok")
+
     def test_query_gpu_metrics_cached_reuses_recent_sample(self) -> None:
         payload = {"available": True, "sampled_at": 1.0}
 
