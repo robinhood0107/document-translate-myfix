@@ -43,6 +43,20 @@ class PaddleOCRVLEngine(OCREngine):
     LARGE_CROP_RATIO_THRESHOLD = 0.02
     MEDIUM_CROP_RATIO_THRESHOLD = 0.008
     ALLOWED_SCHEDULER_MODES = frozenset({"fixed", "fixed_area_desc", "auto_v1"})
+    LAYOUT_SCHEMA_TOKENS = frozenset(
+        {
+            "number",
+            "footnote",
+            "header",
+            "header_image",
+            "footer",
+            "footer_image",
+            "aside_text",
+            "ocr",
+        }
+    )
+    STRONG_LAYOUT_SCHEMA_TOKENS = frozenset({"footnote", "header_image", "footer_image", "aside_text"})
+    LAYOUT_SCHEMA_EMPTY_REASON = "PaddleOCR VL returned layout schema labels instead of OCR text."
 
     def __init__(self) -> None:
         self.server_url = self.DEFAULT_SERVER_URL
@@ -186,7 +200,10 @@ class PaddleOCRVLEngine(OCREngine):
 
             raw_text = self._request_ocr_text(crop)
             cleaned = self._normalize_output_text(raw_text)
-            if cleaned:
+            if cleaned and self._is_layout_schema_only_text(cleaned):
+                self._mark_empty(blk, self.LAYOUT_SCHEMA_EMPTY_REASON, raw_text=raw_text)
+                record["status"] = "schema_only"
+            elif cleaned:
                 set_block_ocr_diagnostics(
                     blk,
                     text=cleaned,
@@ -592,6 +609,27 @@ class PaddleOCRVLEngine(OCREngine):
         )
         normalized = re.sub(r"\n{3,}", "\n\n", normalized)
         return normalized.strip()
+
+    @classmethod
+    def _is_layout_schema_only_text(cls, text: str) -> bool:
+        if not text:
+            return False
+
+        tokens = []
+        for raw_token in re.split(r"\s+", text.strip().lower()):
+            token = raw_token.strip("`*_#-:;,.[](){}<>")
+            if token:
+                tokens.append(token)
+
+        if len(tokens) < 3:
+            return False
+        if any(re.search(r"[^a-z_]", token) for token in tokens):
+            return False
+
+        token_set = set(tokens)
+        if not token_set.issubset(cls.LAYOUT_SCHEMA_TOKENS):
+            return False
+        return bool(token_set & cls.STRONG_LAYOUT_SCHEMA_TOKENS)
 
     def _markdown_to_text(self, text: str) -> str:
         if not text:
