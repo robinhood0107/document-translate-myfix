@@ -167,7 +167,10 @@ Official Windows release packages are published only from `vX.Y.Z` tags that poi
 - release trigger: Git tag push
 - accepted tag shape: `vX.Y.Z`
 - build target: Windows executable/portable packages built with `Nuitka`
+- release order: local Windows Nuitka build verification, then `main` promotion, then Windows CI preflight, then tag release CI
 - bundled scope: app, Python runtime, PySide6, torch/onnxruntime runtime, translations/resources
 - not bundled: models, checkpoints, Docker runtimes, NVIDIA driver
+
+Before promoting a release candidate to `main`, run the relevant Nuitka build scripts from Windows PowerShell and record the successful commands and `build/nuitka-*` outputs in the PR. WSL-only checks are not a substitute for this local Windows build verification.
 
 If you need the full local runtime stack, follow the runtime setup steps in this quickstart after downloading the release package.
