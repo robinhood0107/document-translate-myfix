@@ -95,6 +95,7 @@ This repository now uses a strict `main + develop + tag` model.
 - `main` is the shipping baseline.
 - Official releases are created only from `vX.Y.Z` version tags that point to commits already contained in `main`.
 - The Windows release asset is built with `Nuitka` and published as a GitHub Release artifact from that tag.
+- Release candidates that touch Nuitka packaging, release assets, Windows runtime pins, or `main` promotion must first pass a local Windows PowerShell Nuitka build before CI/release workflows are used as the second verification layer.
 - Models, checkpoints, and Docker runtimes are not bundled into the release executable and remain separately provisioned.
 - `release/*` branches are not used.
 
