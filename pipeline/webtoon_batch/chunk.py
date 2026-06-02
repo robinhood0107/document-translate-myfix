@@ -17,6 +17,7 @@ from modules.utils.correction_dictionary import (
 )
 from modules.utils.device import resolve_device
 from modules.utils.image_utils import generate_mask
+from modules.utils.ocr_debug import drop_layout_schema_only_ocr_blocks
 from modules.utils.pipeline_config import get_config, get_inpainter_runtime, inpaint_map
 from modules.utils.textblock import TextBlock, sort_blk_list
 
@@ -141,6 +142,13 @@ class ChunkMixin:
                 blocks,
                 self.main_page.settings_page.get_ocr_result_dictionary_rules(),
             )
+            blocks, schema_only_blocks = drop_layout_schema_only_ocr_blocks(blocks)
+            if schema_only_blocks:
+                logger.info(
+                    "Dropped %d PaddleOCR VL schema-only OCR block(s) before webtoon inpaint (%s).",
+                    len(schema_only_blocks),
+                    reason,
+                )
             if sort_after:
                 source_lang_en = self.main_page.lang_mapping.get(source_lang, source_lang)
                 rtl = source_lang_en == "Japanese"
@@ -203,7 +211,7 @@ class ChunkMixin:
         except Exception as error:
             err_msg = self._extract_error_message(error, context="translation")
             logger.exception("Translation failed for %s: %s", image_path, err_msg)
-            self.main_page.image_skipped.emit(image_path, "Translation", err_msg)
+            self.main_page.image_skipped.emit(image_path, "Translation Chunk Failed", err_msg)
             self._emit_benchmark_event(
                 "page_failed",
                 image_path=image_path,

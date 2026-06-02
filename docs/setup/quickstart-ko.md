@@ -5,7 +5,7 @@
 ## 1. 준비물
 
 - Windows 10/11
-- Python 3.11
+- Python 3.12 이상
 - Git
 - GPU 지원이 켜진 Docker Desktop
 - 로컬 Gemma / HunyuanOCR / PaddleOCR VL 가속을 쓰려면 NVIDIA 드라이버와 CUDA 호환 GPU
@@ -27,6 +27,21 @@ run_comic_cuda13.bat
 ```
 
 이 런처들은 `.venv-win`, `.venv-win-cuda13` 환경을 자동 bootstrap합니다.
+CUDA13 경로는 공식 ONNX Runtime CUDA13 nightly feed를 사용합니다. CUDA13 GPU wheel은 아직 기본 PyPI `onnxruntime-gpu` 패키지 경로가 아니기 때문입니다.
+
+수동으로 venv를 만들고 pip 한 번으로 설치하려면 아래 중 하나를 사용합니다.
+
+```bat
+py -3.12 -m venv .venv-win
+.venv-win\Scripts\python.exe -m pip install -r requirements-cuda12.txt
+```
+
+```bat
+py -3.12 -m venv .venv-win-cuda13
+.venv-win-cuda13\Scripts\python.exe -m pip install -r requirements-cuda13.txt
+```
+
+`requirements.txt`는 기본 Windows CUDA12 런타임용 별칭이며, 공통 의존성은 `requirements-base.txt`에 모아둡니다.
 
 ## 3. 선택 로컬 런타임
 
@@ -152,11 +167,13 @@ OCR:
 
 공식 Windows 릴리스 패키지는 `main`에 포함된 커밋에만 `vX.Y.Z` 태그를 달았을 때 생성됩니다.
 
-- preflight 요구사항: 태그를 만들기 전에 `main`에서 `Release Preflight`를 먼저 실행해 Windows Nuitka 빌드 green 확인
 - 릴리스 트리거: Git 태그 push
 - 허용 태그 형식: `vX.Y.Z`
-- 빌드 대상: `Nuitka` 기반 Windows exe 패키지
-- 포함 범위: 앱 본체와 실행 셸
-- 미포함 범위: 모델, 체크포인트, Docker 런타임
+- 빌드 대상: `Nuitka` 기반 Windows exe/portable 패키지
+- 릴리스 순서: Windows 로컬 Nuitka 빌드 검증, `main` 승격, Windows CI preflight, 태그 기반 release CI
+- 포함 범위: 앱 본체, Python 런타임, PySide6, torch/onnxruntime 런타임, 번역/resources
+- 미포함 범위: 모델, 체크포인트, Docker 런타임, NVIDIA 드라이버
+
+릴리스 후보를 `main`으로 승격하기 전에는 Windows PowerShell에서 필요한 Nuitka 빌드 스크립트를 직접 실행하고, 성공한 명령과 `build/nuitka-*` 산출물 경로를 PR에 기록합니다. WSL 전용 확인은 Windows 로컬 빌드 검증을 대체하지 않습니다.
 
 릴리스 패키지만으로 전체 로컬 런타임이 완성되지는 않으므로, 내려받은 뒤 이 가이드의 런타임 설정 단계를 이어서 진행하면 됩니다.

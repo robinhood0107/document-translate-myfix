@@ -12,6 +12,7 @@ from .base import BaseLLMTranslation
 from ...utils.textblock import TextBlock
 from ...utils.translator_utils import extract_json_object
 from ...utils.exceptions import LocalServiceConnectionError, LocalServiceResponseError
+from ...utils.repetition_guard import guard_severe_repetition
 
 logger = logging.getLogger(__name__)
 
@@ -79,6 +80,7 @@ class CustomLocalGemmaTranslation(BaseLLMTranslation):
             "gemma_missing_key_count": 0,
             "gemma_reasoning_without_final_count": 0,
             "gemma_schema_validation_fail_count": 0,
+            "gemma_repetition_guard_count": 0,
         }
 
     @staticmethod
@@ -251,6 +253,11 @@ class CustomLocalGemmaTranslation(BaseLLMTranslation):
 
             for original_blk, translated_blk in zip(blk_list, working_blocks):
                 original_blk.translation = translated_blk.translation
+                guard_metadata = getattr(translated_blk, "_translation_repetition_guard", None)
+                if guard_metadata is not None:
+                    setattr(original_blk, "_translation_repetition_guard", guard_metadata)
+                elif hasattr(original_blk, "_translation_repetition_guard"):
+                    delattr(original_blk, "_translation_repetition_guard")
 
             logger.info(
                 "translation parsed successfully (%s): updated_blocks=%d total_blocks=%d",
@@ -387,7 +394,22 @@ class CustomLocalGemmaTranslation(BaseLLMTranslation):
 
         for index, blk in enumerate(blk_list):
             value = translation_dict[f"block_{index}"]
-            blk.translation = value if isinstance(value, str) or value is None else str(value)
+            translated = value if isinstance(value, str) or value is None else str(value)
+            if translated:
+                repetition_guard = guard_severe_repetition(translated)
+                if repetition_guard.changed:
+                    self._current_benchmark_stats["gemma_repetition_guard_count"] += 1
+                    setattr(blk, "_translation_repetition_guard", repetition_guard.to_dict())
+                    analysis = repetition_guard.analysis
+                    logger.warning(
+                        "gemma repetition guard applied: block=%d comparable_length=%d longest_run_char=%r longest_run_length=%d",
+                        index,
+                        analysis.comparable_length,
+                        analysis.longest_run_char,
+                        analysis.longest_run_length,
+                    )
+                    translated = repetition_guard.text
+            blk.translation = translated
 
         return len(blk_list)
 

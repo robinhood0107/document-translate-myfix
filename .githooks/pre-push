@@ -29,7 +29,7 @@ resolve_python() {
 }
 
 PYTHON_BIN="$(resolve_python)"
-"$PYTHON_BIN" scripts/validate_repo_policy.py --mode push --branch "$BRANCH_NAME"
+"$PYTHON_BIN" scripts/validate_repo_policy.py --mode push --branch "$BRANCH_NAME" </dev/null
 
 if [[ "$REMOTE_NAME" != "origin" ]]; then
   echo "Pushes must target the 'origin' remote." >&2
@@ -57,8 +57,8 @@ else
   fi
 fi
 
-"$PYTHON_BIN" scripts/validate_changed_python.py --all
-"$PYTHON_BIN" scripts/headless_smoke.py
-"$PYTHON_BIN" scripts/compile_translations.py --check
+"$PYTHON_BIN" scripts/validate_changed_python.py --all </dev/null
+"$PYTHON_BIN" scripts/headless_smoke.py </dev/null
+"$PYTHON_BIN" scripts/compile_translations.py --check </dev/null
 
 exit 0

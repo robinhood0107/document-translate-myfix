@@ -4,7 +4,7 @@ import unittest
 from unittest import mock
 
 from modules.ocr.local_runtime import LocalOCRRuntimeManager
-from modules.utils.exceptions import LocalServiceSetupError
+from modules.utils.exceptions import LocalServiceSetupError, OperationCancelledError
 from modules.utils.llama_cpp_runtime import DEFAULT_LLAMA_CPP_IMAGE
 
 
@@ -100,6 +100,60 @@ class LocalOCRRuntimeManagerTests(unittest.TestCase):
 
         wait_for_health.assert_called_once()
         run_compose.assert_not_called()
+
+    def test_ensure_engine_reuses_readiness_cache_for_same_engine_url(self) -> None:
+        manager = LocalOCRRuntimeManager()
+        settings_page = _DummySettingsPage()
+        events: list[dict] = []
+
+        with mock.patch.object(manager, "validate_engine", return_value=None), \
+             mock.patch.object(manager, "_probe_health_state", return_value="healthy") as probe_health, \
+             mock.patch.object(manager, "_run_compose") as run_compose:
+            manager.ensure_engine("PaddleOCR VL", settings_page, progress_callback=events.append)
+            manager.ensure_engine("PaddleOCR VL", settings_page, progress_callback=events.append)
+
+        self.assertEqual(probe_health.call_count, 1)
+        run_compose.assert_not_called()
+        self.assertTrue(any(event.get("readiness_cache_hit") for event in events))
+
+    def test_ensure_engine_cache_misses_when_managed_url_changes(self) -> None:
+        manager = LocalOCRRuntimeManager()
+        first_settings = _DummySettingsPage(paddle_url="http://127.0.0.1:28118/layout-parsing")
+        second_settings = _DummySettingsPage(paddle_url="http://127.0.0.1:28118/alternate")
+
+        with mock.patch.object(manager, "should_manage_engine", return_value=True), \
+             mock.patch.object(manager, "validate_engine", return_value=None), \
+             mock.patch.object(manager, "_probe_health_state", return_value="healthy") as probe_health:
+            manager.ensure_engine("PaddleOCR VL", first_settings)
+            manager.ensure_engine("PaddleOCR VL", second_settings)
+
+        self.assertEqual(probe_health.call_count, 2)
+
+    def test_ensure_engine_cache_misses_and_stops_active_runtime_when_engine_changes(self) -> None:
+        manager = LocalOCRRuntimeManager()
+        settings_page = _DummySettingsPage()
+
+        with mock.patch.object(manager, "validate_engine", return_value=None), \
+             mock.patch.object(manager, "_probe_health_state", return_value="healthy") as probe_health, \
+             mock.patch.object(manager, "_stop_engine") as stop_engine:
+            manager.ensure_engine("PaddleOCR VL", settings_page)
+            manager.ensure_engine("HunyuanOCR", settings_page)
+
+        self.assertEqual(probe_health.call_count, 2)
+        stop_engine.assert_called_once_with("PaddleOCR VL")
+
+    def test_cancelled_ensure_engine_does_not_seed_readiness_cache(self) -> None:
+        manager = LocalOCRRuntimeManager()
+        settings_page = _DummySettingsPage()
+        cancel = mock.Mock(side_effect=[True, False])
+
+        with mock.patch.object(manager, "validate_engine", return_value=None), \
+             mock.patch.object(manager, "_probe_health_state", return_value="healthy") as probe_health:
+            with self.assertRaises(OperationCancelledError):
+                manager.ensure_engine("PaddleOCR VL", settings_page, cancel_checker=cancel)
+            manager.ensure_engine("PaddleOCR VL", settings_page, cancel_checker=cancel)
+
+        self.assertEqual(probe_health.call_count, 1)
 
 
 if __name__ == "__main__":

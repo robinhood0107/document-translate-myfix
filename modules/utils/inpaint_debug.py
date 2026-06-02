@@ -9,6 +9,7 @@ import numpy as np
 from PIL import Image, ImageDraw
 
 from modules.utils.mask_roi import get_mask_roi_type
+from modules.utils.inpaint_envelope import build_text_free_erase_envelope
 
 
 def ensure_three_channel(image: np.ndarray) -> np.ndarray:
@@ -125,6 +126,10 @@ def serialize_inpaint_block(block, index: int) -> dict:
     if raw_inpaint_boxes is not None:
         for box in raw_inpaint_boxes:
             inpaint_boxes.append([int(float(v)) for v in box[:4]])
+    image_shape = getattr(block, "_debug_image_shape", None)
+    text_free_envelope = None
+    if image_shape is not None:
+        text_free_envelope = build_text_free_erase_envelope(block, image_shape)
 
     return {
         "index": int(index),
@@ -168,6 +173,11 @@ def serialize_inpaint_block(block, index: int) -> dict:
         "roi_type": get_mask_roi_type(block),
         "text_class": getattr(block, "text_class", "") or "",
         "inpaint_bboxes": inpaint_boxes,
+        "text_free_erase_envelope_xyxy": (
+            [int(v) for v in text_free_envelope]
+            if text_free_envelope is not None
+            else None
+        ),
         "hard_box_applied": bool(getattr(block, "_hard_box_applied", False)),
         "hard_box_reason_codes": list(getattr(block, "_hard_box_reason_codes", []) or []),
         "hard_box_rescue_roi_xyxy": (
@@ -181,6 +191,10 @@ def serialize_inpaint_block(block, index: int) -> dict:
         "rescue_mask_pixel_count": int(getattr(block, "_rescue_mask_pixel_count", 0) or 0),
         "final_mask_pixel_count": int(getattr(block, "_final_mask_pixel_count", 0) or 0),
         "hard_box_metrics": dict(getattr(block, "_hard_box_metrics", {}) or {}),
+        "erase_mode": str(getattr(block, "_erase_mode", "") or ""),
+        "erase_edit_pixel_count": int(getattr(block, "_erase_edit_pixel_count", 0) or 0),
+        "erase_protect_pixel_count": int(getattr(block, "_erase_protect_pixel_count", 0) or 0),
+        "erase_skipped_reason": str(getattr(block, "_erase_skipped_reason", "") or ""),
     }
 
 
@@ -213,6 +227,9 @@ def build_inpaint_debug_metadata(
     hard_box_reason_totals: dict | None = None,
 ) -> dict:
     block_list = list(blocks or [])
+    if final_mask is not None:
+        for block in block_list:
+            block._debug_image_shape = final_mask.shape
     cleanup_stats = cleanup_stats or {}
     raw_mask_pixels = int(np.count_nonzero(raw_mask)) if raw_mask is not None else 0
     final_mask_pixels = int(np.count_nonzero(final_mask)) if final_mask is not None else 0
@@ -266,6 +283,10 @@ def build_inpaint_debug_metadata(
         "pass2_bubble_kept_count": int(cleanup_stats.get("pass2_bubble_kept_count", 0) or 0),
         "pass2_text_free_candidate_count": int(cleanup_stats.get("pass2_text_free_candidate_count", 0) or 0),
         "pass2_text_free_kept_count": int(cleanup_stats.get("pass2_text_free_kept_count", 0) or 0),
+        "pass2_residue_mask_pre_cap_pixel_count": int(cleanup_stats.get("residue_mask_pre_cap_pixel_count", 0) or 0),
+        "pass2_residue_mask_cap_pixel_count": int(cleanup_stats.get("residue_mask_cap_pixel_count", 0) or 0),
+        "pass2_residue_mask_cap_dilate_px": int(cleanup_stats.get("residue_mask_cap_dilate_px", 0) or 0),
+        "pass2_backend": str(cleanup_stats.get("pass2_backend", "") or ""),
         "pass2_name": str(cleanup_stats.get("pass_name", "") or ""),
         "blocks": [serialize_inpaint_block(block, idx) for idx, block in enumerate(block_list)],
     }
