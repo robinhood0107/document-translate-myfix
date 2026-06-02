@@ -51,6 +51,7 @@ from modules.utils.exceptions import OperationCancelledError
 from modules.utils.image_utils import generate_mask
 from modules.utils.inpaint_cleanup import refine_bubble_residue_inpaint
 from modules.utils.language_utils import get_language_code, is_no_space_lang, language_codes
+from modules.utils.ocr_debug import drop_layout_schema_only_ocr_blocks
 from modules.utils.ocr_quality import summarize_ocr_quality
 from modules.utils.pipeline_config import get_config, get_inpainter_runtime, inpaint_map
 from modules.utils.render_style_policy import (
@@ -524,6 +525,17 @@ class StageBatchedProcessor(BatchProcessor):
             cache_status = "refreshed"
             quality = summarize_ocr_quality(ctx.blk_list)
             engine_name = engine.__class__.__name__
+
+        ctx.blk_list, schema_only_blocks = drop_layout_schema_only_ocr_blocks(ctx.blk_list)
+        if schema_only_blocks:
+            logger.info(
+                "Dropped %d PaddleOCR VL schema-only OCR block(s) before stage-batched inpaint for %s.",
+                len(schema_only_blocks),
+                ctx.image_name,
+            )
+            quality = summarize_ocr_quality(ctx.blk_list)
+            page_profile = dict(page_profile or {})
+            page_profile["schema_only_dropped_block_count"] = len(schema_only_blocks)
 
         metrics = self._ocr_quality_metrics(quality)
         return {
