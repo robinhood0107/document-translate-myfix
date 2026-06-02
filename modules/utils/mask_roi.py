@@ -64,6 +64,11 @@ def resolve_block_ctd_roi(block, image_shape: tuple[int, int] | tuple[int, int, 
     if mask_alias is not None:
         return mask_alias
 
+    if text_class == 'text_free':
+        envelope = build_text_free_erase_envelope(block, image_shape)
+        if envelope is not None:
+            return envelope
+
     return _expand_bbox(
         getattr(block, 'xyxy', None),
         image_shape,
