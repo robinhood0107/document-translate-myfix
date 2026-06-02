@@ -26,7 +26,7 @@ from modules.ocr.local_runtime import LocalOCRRuntimeManager
 from modules.translation.local_runtime import LocalGemmaRuntimeManager
 from modules.ocr.selection import OCR_MODE_BEST_LOCAL, normalize_ocr_mode, resolve_ocr_engine
 from app.ui.canvas.text_item import TextBlockItem
-from app.ui.commands.box import DeleteBoxesCommand
+from app.ui.commands.box import DeleteBoxesCommand, DeleteTextBoxCommand
 from app.path_materialization import ensure_path_materialized
 
 from modules.utils.textblock import TextBlock
@@ -148,6 +148,7 @@ class ComicTranslate(ComicTranslateUI):
 
         self.undo_group = QUndoGroup(self)
         self.undo_stacks: dict[str, QUndoStack] = {}
+        self.undo_group.activeStackChanged.connect(self.update_undo_redo_actions)
         self.project_file = None
         self.project_kind = PROJECT_KIND_SINGLE
         self.temp_dir = tempfile.mkdtemp()
@@ -157,6 +158,7 @@ class ComicTranslate(ComicTranslateUI):
         self.project_output_preferences = default_project_output_preferences()
         self._automatic_output_controls_updating = False
         self._automatic_output_page_metrics_cache: dict[str, dict[str, object]] = {}
+        self._render_dirty_ui_refresh_pending = False
 
         self.pipeline = ComicTranslatePipeline(self)
         try:
@@ -215,6 +217,7 @@ class ComicTranslate(ComicTranslateUI):
         self.project_ctrl.load_main_page_settings()
         self.settings_page.load_settings()
         self.refresh_inpaint_tool_ui()
+        self.refresh_box_delete_ui()
         self.project_ctrl.initialize_autosave()
 
         # Populate the home screen with any previously-saved recent projects
@@ -273,8 +276,10 @@ class ComicTranslate(ComicTranslateUI):
         self.hbutton_group.get_button_group().buttons()[4].clicked.connect(self.inpaint_and_set)
         self.hbutton_group.get_button_group().buttons()[5].clicked.connect(self.text_ctrl.render_text)
 
-        self.undo_tool_group.get_button_group().buttons()[0].clicked.connect(self.undo_group.undo)
-        self.undo_tool_group.get_button_group().buttons()[1].clicked.connect(self.undo_group.redo)
+        undo_buttons = self.undo_tool_group.get_button_group().buttons()
+        undo_buttons[0].clicked.connect(self._perform_toolbar_undo)
+        undo_buttons[1].clicked.connect(self._perform_toolbar_redo)
+        self.update_undo_redo_actions()
 
         # Connect other buttons and widgets
         self.translate_button.clicked.connect(self.start_batch_process)
@@ -301,6 +306,8 @@ class ComicTranslate(ComicTranslateUI):
         self.change_all_blocks_size_dec.clicked.connect(lambda: self.text_ctrl.change_all_blocks_size(-int(self.change_all_blocks_size_diff.text())))
         self.change_all_blocks_size_inc.clicked.connect(lambda: self.text_ctrl.change_all_blocks_size(int(self.change_all_blocks_size_diff.text())))
         self.delete_button.clicked.connect(self.delete_selected_box)
+        if hasattr(self, "delete_block_button"):
+            self.delete_block_button.clicked.connect(self.delete_selected_box)
         for checkbox in (
             self.auto_export_source_txt_checkbox,
             self.auto_export_source_md_checkbox,
@@ -321,7 +328,17 @@ class ComicTranslate(ComicTranslateUI):
             self.settings_page.ui.automatic_output_archive_image_format_combo.currentIndexChanged,
             self.settings_page.ui.automatic_output_archive_level_spinbox.valueChanged,
         ):
-            signal.connect(self.refresh_automatic_output_controls)
+            signal.connect(self._on_global_output_settings_changed)
+        self.rerender_current_button.clicked.connect(
+            lambda: self.project_ctrl.rerender_output_scope("current")
+        )
+        self.rerender_dirty_button.clicked.connect(
+            lambda: self.project_ctrl.rerender_output_scope("dirty")
+        )
+        self.rerender_all_button.clicked.connect(
+            lambda: self.project_ctrl.rerender_output_scope("all")
+        )
+        self.open_output_folder_button.clicked.connect(self.project_ctrl.open_output_folder)
 
         # Connect text edit widgets
         self.s_text_edit.textChanged.connect(self.text_ctrl.update_text_block)
@@ -333,6 +350,7 @@ class ComicTranslate(ComicTranslateUI):
         # Connect image viewer signals for both modes
         self.image_viewer.rectangle_selected.connect(self.rect_item_ctrl.handle_rectangle_selection)
         self.image_viewer.rectangle_created.connect(self.rect_item_ctrl.handle_rectangle_creation)
+        self.image_viewer.text_box_created.connect(self.text_ctrl.handle_text_box_creation)
         self.image_viewer.rectangle_deleted.connect(self.rect_item_ctrl.handle_rectangle_deletion)
         self.image_viewer.command_emitted.connect(self.push_command)
         self.image_viewer.restore_stroke_requested.connect(self.image_ctrl.apply_restore_stroke)
@@ -453,6 +471,7 @@ class ComicTranslate(ComicTranslateUI):
         self.project_output_preferences = normalized
         self.refresh_automatic_output_controls()
         if changed and mark_dirty and self.image_files:
+            self.mark_all_render_dirty()
             self.mark_project_dirty()
 
     def get_resolved_export_settings(self) -> dict[str, object]:
@@ -463,6 +482,168 @@ class ComicTranslate(ComicTranslateUI):
             )
         )
         return export_settings
+
+    def _on_global_output_settings_changed(self, *_args) -> None:
+        self.refresh_automatic_output_controls()
+        try:
+            if self.image_files and self.get_project_output_preferences().get("output_use_global", True):
+                self.mark_all_render_dirty()
+        except Exception:
+            logger.debug("Failed to mark outputs dirty after global output setting change.", exc_info=True)
+
+    def _current_image_path(self) -> str | None:
+        if 0 <= self.curr_img_idx < len(self.image_files):
+            return self.image_files[self.curr_img_idx]
+        return None
+
+    def create_undo_stack_for_path(self, file_path: str) -> QUndoStack:
+        stack = QUndoStack(self)
+        self.register_undo_stack_for_path(file_path, stack)
+        return stack
+
+    def register_undo_stack_for_path(self, file_path: str, stack: QUndoStack) -> None:
+        if not file_path or stack is None:
+            return
+        stack.cleanChanged.connect(self._update_window_modified)
+        stack.indexChanged.connect(self._bump_dirty_revision)
+        stack.indexChanged.connect(lambda _index=0, path=file_path: self.mark_render_dirty(path))
+        stack.indexChanged.connect(self.refresh_inpaint_tool_ui)
+        stack.canUndoChanged.connect(lambda _can=False: self.update_undo_redo_actions())
+        stack.canRedoChanged.connect(lambda _can=False: self.update_undo_redo_actions())
+        try:
+            if hasattr(self, "search_ctrl") and self.search_ctrl is not None:
+                stack.indexChanged.connect(self.search_ctrl.on_undo_redo)
+        except Exception:
+            pass
+        self.undo_stacks[file_path] = stack
+        self.undo_group.addStack(stack)
+        self.update_undo_redo_actions()
+
+    def update_undo_redo_actions(self, *_args) -> None:
+        buttons = []
+        try:
+            buttons = self.undo_tool_group.get_button_group().buttons()
+        except Exception:
+            buttons = []
+        stack = self.undo_group.activeStack()
+        can_undo = bool(stack is not None and stack.canUndo())
+        can_redo = bool(stack is not None and stack.canRedo())
+        if len(buttons) >= 2:
+            buttons[0].setEnabled(can_undo)
+            buttons[1].setEnabled(can_redo)
+
+    def _perform_toolbar_undo(self) -> None:
+        stack = self.undo_group.activeStack()
+        if stack is not None and stack.canUndo():
+            self.undo_group.undo()
+
+    def _perform_toolbar_redo(self) -> None:
+        stack = self.undo_group.activeStack()
+        if stack is not None and stack.canRedo():
+            self.undo_group.redo()
+
+    def render_dirty_paths(self, *, exclude_current: bool = False) -> list[str]:
+        current = self._current_image_path()
+        dirty_paths = []
+        for file_path in self.image_files:
+            if exclude_current and file_path == current:
+                continue
+            state = self.image_ctrl.ensure_page_state(file_path)
+            if bool(state.get("render_dirty", False)):
+                dirty_paths.append(file_path)
+        return dirty_paths
+
+    def mark_render_dirty(self, file_path: str | None = None) -> None:
+        path = file_path or self._current_image_path()
+        if not path:
+            return
+        state = self.image_ctrl.ensure_page_state(path)
+        state["render_dirty"] = True
+        self.refresh_render_dirty_ui()
+
+    def mark_render_dirty_for_paths(self, paths: list[str] | tuple[str, ...] | set[str]) -> None:
+        changed = False
+        for path in paths or []:
+            if path not in self.image_files:
+                continue
+            state = self.image_ctrl.ensure_page_state(path)
+            if not state.get("render_dirty", False):
+                state["render_dirty"] = True
+                changed = True
+        if changed:
+            self.refresh_render_dirty_ui()
+
+    def mark_all_render_dirty(self) -> None:
+        self.mark_render_dirty_for_paths(list(self.image_files))
+
+    def mark_render_clean(
+        self,
+        file_path: str,
+        *,
+        signature: str = "",
+        rendered_at: str = "",
+        output_path: str = "",
+    ) -> None:
+        if not file_path:
+            return
+        state = self.image_ctrl.ensure_page_state(file_path)
+        state["render_dirty"] = False
+        if signature:
+            state["last_render_signature"] = signature
+        if rendered_at:
+            state["last_rendered_at"] = rendered_at
+        if output_path:
+            state["last_render_output_path"] = output_path
+        self.refresh_render_dirty_ui()
+
+    def refresh_render_dirty_ui(self) -> None:
+        if self._render_dirty_ui_refresh_pending:
+            return
+        self._render_dirty_ui_refresh_pending = True
+
+        def _apply() -> None:
+            self._render_dirty_ui_refresh_pending = False
+            if not hasattr(self, "output_dirty_label"):
+                return
+            dirty_count = len(self.render_dirty_paths())
+            current_dirty = bool(
+                self._current_image_path()
+                and self.image_ctrl.ensure_page_state(self._current_image_path()).get("render_dirty", False)
+            )
+            archive_mode = is_single_archive_mode(self.get_resolved_export_settings())
+            suffix = self.tr(" (Update Archive)") if archive_mode else ""
+            self.rerender_current_button.setToolTip(self.tr("Rerender Current Image") + suffix)
+            self.rerender_dirty_button.setToolTip(self.tr("Rerender Changed Images") + suffix)
+            self.rerender_all_button.setToolTip(self.tr("Rerender All Images") + suffix)
+            self.open_output_folder_button.setToolTip(self.tr("Open Output Folder"))
+            self.rerender_current_button.setEnabled(bool(self.image_files) and current_dirty)
+            self.rerender_dirty_button.setEnabled(dirty_count > 0)
+            self.rerender_all_button.setEnabled(bool(self.image_files))
+            self.open_output_folder_button.setEnabled(bool(self.image_files))
+            if dirty_count:
+                if hasattr(self, "render_dirty_badge"):
+                    self.render_dirty_badge.setText(self.tr("Unapplied {count}").format(count=dirty_count))
+                self.output_dirty_label.setText(
+                    self.tr("{count} image(s) have unapplied render changes.").format(count=dirty_count)
+                )
+            else:
+                if hasattr(self, "render_dirty_badge"):
+                    self.render_dirty_badge.setText(self.tr("Up to date"))
+                self.output_dirty_label.setText(self.tr("All render outputs are up to date."))
+
+        QtCore.QTimer.singleShot(0, self, _apply)
+
+    def refresh_box_delete_ui(self) -> None:
+        try:
+            text_selected = bool(self.image_viewer.get_selected_text_items())
+            block_selected = bool(self.image_viewer.selected_rect)
+        except Exception:
+            text_selected = False
+            block_selected = False
+        if hasattr(self, "delete_button"):
+            self.delete_button.setEnabled(text_selected)
+        if hasattr(self, "delete_block_button"):
+            self.delete_block_button.setEnabled(block_selected)
 
     def get_automatic_output_series_dir(
         self,
@@ -740,6 +921,7 @@ class ComicTranslate(ComicTranslateUI):
                         "Images are saved individually at maximum quality.\nTranslated and cleaned images are exported."
                     )
                 )
+        self.refresh_render_dirty_ui()
 
     def _on_project_output_use_global_changed(self, state: int) -> None:
         if self._automatic_output_controls_updating:
@@ -997,6 +1179,7 @@ class ComicTranslate(ComicTranslateUI):
     def mark_project_dirty(self):
         self._bump_dirty_revision()
         self._manual_dirty = True
+        self.mark_render_dirty()
         try:
             if getattr(self, "project_kind", PROJECT_KIND_SINGLE) == PROJECT_KIND_SERIES:
                 self.series_ctrl.notify_active_child_dirty()
@@ -1028,8 +1211,17 @@ class ComicTranslate(ComicTranslateUI):
             self.undo_group.activeStack().push(command)
 
     def delete_selected_box(self):
-        if self.curr_tblock:
-            # Create and push the delete command
+        try:
+            self.text_ctrl._commit_pending_text_command()
+        except Exception:
+            pass
+
+        selected_text_items = self.image_viewer.get_selected_text_items()
+        if selected_text_items:
+            text_item = selected_text_items[-1]
+            blk = self.text_ctrl._find_text_block_for_item(text_item)
+            command = DeleteTextBoxCommand(self, text_item, blk, self.blk_list)
+        elif self.image_viewer.selected_rect and self.curr_tblock:
             command = DeleteBoxesCommand(
                 self,
                 self.image_viewer.selected_rect,
@@ -1037,7 +1229,16 @@ class ComicTranslate(ComicTranslateUI):
                 self.curr_tblock,
                 self.blk_list,
             )
-            self.undo_group.activeStack().push(command)
+        else:
+            return
+
+        stack = self.undo_group.activeStack()
+        if stack:
+            stack.push(command)
+        else:
+            command.redo()
+            self.mark_project_dirty()
+        self.refresh_box_delete_ui()
 
     def restore_text_blocks(self):
         if not self.webtoon_mode:
@@ -1133,6 +1334,8 @@ class ComicTranslate(ComicTranslateUI):
     def _show_automatic_progress_dialog(self, selected_paths: list[str], run_type: str):
         self._automatic_progress_tracker.reset(page_total=len(selected_paths), run_type=run_type)
         self._last_runtime_preview_path = ""
+        self._last_runtime_preview_kind = ""
+        self._last_runtime_preview_page_index = None
         self._last_batch_output_root = ""
         panel = self._ensure_automatic_progress_dialog()
         panel.prepare_for_new_run()
@@ -1168,10 +1371,65 @@ class ComicTranslate(ComicTranslateUI):
                 return
         event = self._automatic_progress_tracker.enrich(payload)
         preview_path = str(event.get("preview_path") or "").strip()
+        preview_kind = str(event.get("preview_kind") or "").strip()
+        page_index = event.get("page_index")
+        if (
+            preview_path
+            and preview_kind == "source_fallback"
+            and self._last_runtime_preview_path
+            and self._last_runtime_preview_page_index == page_index
+            and self._last_runtime_preview_kind != "source_fallback"
+        ):
+            event.pop("preview_path", None)
+            preview_path = ""
         if preview_path:
             self._last_runtime_preview_path = preview_path
+            self._last_runtime_preview_kind = preview_kind
+            self._last_runtime_preview_page_index = page_index
+        self._follow_runtime_page(event)
         self._ensure_automatic_progress_dialog().update_event(event)
         self._log_runtime_progress(event)
+
+    def _follow_runtime_page(self, event: dict[str, Any]) -> None:
+        if str(event.get("phase") or "") != "pipeline":
+            return
+        if str(event.get("status") or "").strip().lower() not in {"running", "completed"}:
+            return
+        page_index = event.get("page_index")
+        try:
+            index = int(page_index)
+        except (TypeError, ValueError):
+            return
+        if index < 0 or index >= len(getattr(self, "image_files", []) or []):
+            return
+        if index == getattr(self, "curr_img_idx", -1):
+            return
+        if getattr(self, "_runtime_following_page", False):
+            return
+
+        self._runtime_following_page = True
+        try:
+            page_list = getattr(self, "page_list", None)
+            if page_list is not None:
+                page_list.blockSignals(True)
+                try:
+                    page_list.setCurrentRow(index)
+                finally:
+                    page_list.blockSignals(False)
+            image_ctrl = getattr(self, "image_ctrl", None)
+            if getattr(self, "webtoon_mode", False):
+                self.curr_img_idx = index
+                viewer = getattr(self, "image_viewer", None)
+                if viewer is not None:
+                    viewer.scroll_to_page(index)
+                if image_ctrl is not None:
+                    image_ctrl.highlight_card(index)
+            elif image_ctrl is not None:
+                image_ctrl.display_image(index, switch_page=False)
+        except Exception:
+            logger.debug("Failed to follow runtime page index %s.", index, exc_info=True)
+        finally:
+            self._runtime_following_page = False
 
     def _log_runtime_progress(self, event: dict):
         logger.info(
@@ -1553,6 +1811,7 @@ class ComicTranslate(ComicTranslateUI):
             if matched_paths:
                 self.text_ctrl.rebuild_text_items_state_for_paths(matched_paths)
                 self._refresh_after_translation_import(matched_paths)
+                self.mark_render_dirty_for_paths(matched_paths)
                 self.mark_project_dirty()
 
             message = self._build_translation_import_message(all_matched, match_result)

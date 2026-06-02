@@ -23,6 +23,7 @@ from modules.utils.text_normalization import (
     RENDER_NORMALIZABLE_GLYPHS,
     canonicalize_ellipsis_runs,
 )
+from modules.utils.repetition_guard import guard_severe_repetition
 from modules.utils.render_style_policy import (
     VERTICAL_ALIGNMENT_TOP,
     compute_vertical_aligned_y,
@@ -170,12 +171,33 @@ def describe_render_text_sanitization(
 
     raw_text = str(text or "")
     sanitized = canonicalize_ellipsis_runs(_canonicalize_render_symbol_variants(raw_text))
-    effective_family = font_family.strip() if isinstance(font_family, str) and font_family.strip() else QApplication.font().family()
-    metrics = QFontMetrics(QFont(effective_family, 12))
-    symbol_fallback_family = resolve_render_symbol_fallback_font_family()
     cleaned_parts: list[str] = []
     replacements: list[dict] = []
     reasons: list[str] = []
+    repetition_guard = guard_severe_repetition(sanitized)
+    if repetition_guard.changed:
+        analysis = repetition_guard.analysis
+        logger.warning(
+            "render repetition guard applied: image=%s block=%s comparable_length=%d longest_run_char=%r longest_run_length=%d",
+            image_path or "",
+            block_index if block_index is not None else -1,
+            analysis.comparable_length,
+            analysis.longest_run_char,
+            analysis.longest_run_length,
+        )
+        reasons.append(repetition_guard.reason)
+        replacements.append(
+            {
+                "index": 0,
+                "char": sanitized,
+                "replacement": repetition_guard.text,
+                "reason": repetition_guard.reason,
+            }
+        )
+        sanitized = repetition_guard.text
+    effective_family = font_family.strip() if isinstance(font_family, str) and font_family.strip() else QApplication.font().family()
+    metrics = QFontMetrics(QFont(effective_family, 12))
+    symbol_fallback_family = resolve_render_symbol_fallback_font_family()
 
     for index, ch in enumerate(sanitized):
         replacement = ch
@@ -887,7 +909,8 @@ def pyside_word_wrap(
     best_text, best_size = text, init_font_size
     found_fit = False
 
-    lo, hi = min_font_size, init_font_size
+    readable_min_font_size = min(int(init_font_size), max(int(min_font_size), 12))
+    lo, hi = readable_min_font_size, init_font_size
     while lo <= hi:
         mid = (lo + hi) // 2
         wrapped, w, h = wrap_and_size(mid)
@@ -898,21 +921,12 @@ def pyside_word_wrap(
         else:
             hi = mid - 1
 
-    # if nothing ever fit, force a wrap at the minimum size
+    # If nothing fits, keep the configured readable floor instead of shrinking
+    # text into an unreadable 1pt fallback. The caller can flag the block for
+    # review from the returned metrics if the document exceeds the box.
     if not found_fit:
-        lo, hi = 1, max(1, min_font_size - 1)
-        while lo <= hi:
-            mid = (lo + hi) // 2
-            wrapped, w, h = wrap_and_size(mid)
-            if w <= fit_roi_width and h <= fit_roi_height:
-                found_fit = True
-                best_text, best_size = wrapped, mid
-                lo = mid + 1
-            else:
-                hi = mid - 1
-        if not found_fit:
-            best_text, w, h = wrap_and_size(1)
-            best_size = 1
+        best_text, _w, _h = wrap_and_size(readable_min_font_size)
+        best_size = readable_min_font_size
 
     if return_metrics:
         # Match persisted state to the text item's actual geometry.

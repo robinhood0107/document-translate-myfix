@@ -15,6 +15,14 @@
         <source>Check for Updates</source>
         <translation>업데이트 확인</translation>
     </message>
+    <message>
+        <source>Developer Mode</source>
+        <translation>개발자 모드</translation>
+    </message>
+    <message>
+        <source>Also check the document-translate-myfix fork when checking for updates.</source>
+        <translation>업데이트를 확인할 때 document-translate-myfix 포크도 함께 확인합니다.</translation>
+    </message>
 </context>
 <context>
     <name>AutomaticProgress</name>
@@ -124,6 +132,21 @@
     <message>
         <source>자동번역이 완료되었습니다.</source>
         <translation>자동번역이 완료되었습니다.</translation>
+    </message>
+</context>
+<context>
+    <name>BatchReportController</name>
+    <message>
+        <source>Mask boundary exceeded image bounds</source>
+        <translation>마스크 경계가 이미지 범위를 벗어났습니다</translation>
+    </message>
+    <message>
+        <source>Try rerunning inpainting</source>
+        <translation>인페인트를 다시 실행해 보세요</translation>
+    </message>
+    <message>
+        <source>Inpainting failed</source>
+        <translation>인페인트 실패</translation>
     </message>
 </context>
 <context>
@@ -265,6 +288,42 @@ Duplicates:
     <message>
         <source>Unsaved Changes</source>
         <translation>저장되지 않은 변경 사항</translation>
+    </message>
+    <message>
+        <source> (Update Archive)</source>
+        <translation> (압축파일 갱신)</translation>
+    </message>
+    <message>
+        <source>Rerender Current Image</source>
+        <translation>현재 이미지 재렌더 저장</translation>
+    </message>
+    <message>
+        <source>Rerender Changed Images</source>
+        <translation>변경된 이미지 모두 재렌더 저장</translation>
+    </message>
+    <message>
+        <source>Rerender All Images</source>
+        <translation>전체 이미지 재렌더 저장</translation>
+    </message>
+    <message>
+        <source>Open Output Folder</source>
+        <translation>출력 폴더 열기</translation>
+    </message>
+    <message>
+        <source>Unapplied {count}</source>
+        <translation>미반영 {count}개</translation>
+    </message>
+    <message>
+        <source>{count} image(s) have unapplied render changes.</source>
+        <translation>{count}개의 이미지에 아직 반영되지 않은 렌더 변경사항이 있습니다.</translation>
+    </message>
+    <message>
+        <source>Up to date</source>
+        <translation>반영 완료</translation>
+    </message>
+    <message>
+        <source>All render outputs are up to date.</source>
+        <translation>모든 렌더 출력이 최신 상태입니다.</translation>
     </message>
     <message>
         <source>Load pages to see automatic output estimates.</source>
@@ -590,8 +649,8 @@ Use Custom Local Server(Gemma) with the included Gemma Docker setup.</source>
         <translation>자동 모드</translation>
     </message>
     <message>
-        <source>Selected exports are saved to comic_translate_&lt;timestamp&gt; in the same directory as the input file/archive.</source>
-        <translation>선택한 내보내기는 입력 파일/아카이브와 동일한 디렉터리의 comic_translate_&lt;timestamp&gt;에 저장됩니다.</translation>
+        <source>Selected automatic-mode export artifacts are saved to log_&lt;source&gt;_&lt;timestamp&gt; in the same directory as the input file/archive.</source>
+        <translation>선택한 자동 모드 내보내기 산출물은 입력 파일/아카이브와 같은 폴더의 log_&lt;source&gt;_&lt;timestamp&gt;에 저장됩니다.</translation>
     </message>
     <message>
         <source>Export Raw Text</source>
@@ -990,7 +1049,7 @@ Comic Translate가 기본 제공 Docker 런타임을 재사용하게 하려면 �
     </message>
     <message>
         <source>Server URL</source>
-        <translation type="unfinished">서버 URL</translation>
+        <translation>서버 URL</translation>
     </message>
     <message>
         <source>MangaLMM OCR Tuning</source>
@@ -998,19 +1057,19 @@ Comic Translate가 기본 제공 Docker 런타임을 재사용하게 하려면 �
     </message>
     <message>
         <source>Max Completion Tokens</source>
-        <translation type="unfinished">최대 완료 토큰</translation>
+        <translation>최대 완료 토큰</translation>
     </message>
     <message>
         <source>Parallel Workers</source>
-        <translation type="unfinished">병렬 작업 수</translation>
+        <translation>병렬 작업 수</translation>
     </message>
     <message>
         <source>Request Timeout (sec)</source>
-        <translation type="unfinished">요청 타임아웃(초)</translation>
+        <translation>요청 타임아웃(초)</translation>
     </message>
     <message>
         <source>Raw Response Log</source>
-        <translation type="unfinished">원시 응답 로그</translation>
+        <translation>원시 응답 로그</translation>
     </message>
     <message>
         <source>Safe Resize</source>
@@ -1055,6 +1114,12 @@ Reasoning:
 </context>
 <context>
     <name>Messages</name>
+    <message>
+        <source>Could not inpaint detected text.
+Skipping:</source>
+        <translation>감지된 텍스트를 인페인트하지 못했습니다.
+건너뛰기:</translation>
+    </message>
     <message>
         <source>Skipping:</source>
         <translation>건너뛰기:</translation>
@@ -2358,19 +2423,19 @@ These values are copied into new series projects and can be adjusted per series.
     </message>
     <message>
         <source>Queue</source>
-        <translation type="unfinished">대기열</translation>
+        <translation>대기열</translation>
     </message>
     <message>
         <source>Use GPU</source>
-        <translation type="unfinished">GPU 사용</translation>
+        <translation>GPU 사용</translation>
     </message>
     <message>
         <source>Source language:</source>
-        <translation type="unfinished">원본 언어:</translation>
+        <translation>원본 언어:</translation>
     </message>
     <message>
         <source>Target language:</source>
-        <translation type="unfinished">번역 언어:</translation>
+        <translation>번역 언어:</translation>
     </message>
     <message>
         <source>Languages</source>
@@ -2382,15 +2447,15 @@ These values are copied into new series projects and can be adjusted per series.
     </message>
     <message>
         <source>OCR:</source>
-        <translation type="unfinished">OCR:</translation>
+        <translation>OCR:</translation>
     </message>
     <message>
         <source>Translator:</source>
-        <translation type="unfinished">번역기:</translation>
+        <translation>번역기:</translation>
     </message>
     <message>
         <source>Workflow mode:</source>
-        <translation type="unfinished">워크플로 모드:</translation>
+        <translation>워크플로 모드:</translation>
     </message>
     <message>
         <source>Pipeline Runtime</source>
@@ -2402,31 +2467,31 @@ These values are copied into new series projects and can be adjusted per series.
     </message>
     <message>
         <source>Pipeline</source>
-        <translation type="unfinished">파이프라인</translation>
+        <translation>파이프라인</translation>
     </message>
     <message>
         <source>Use Selected Color</source>
-        <translation type="unfinished">선택한 색상 사용</translation>
+        <translation>선택한 색상 사용</translation>
     </message>
     <message>
         <source>Left</source>
-        <translation type="unfinished">왼쪽</translation>
+        <translation>왼쪽</translation>
     </message>
     <message>
         <source>Center</source>
-        <translation type="unfinished">가운데</translation>
+        <translation>가운데</translation>
     </message>
     <message>
         <source>Right</source>
-        <translation type="unfinished">오른쪽</translation>
+        <translation>오른쪽</translation>
     </message>
     <message>
         <source>Top</source>
-        <translation type="unfinished">상단</translation>
+        <translation>상단</translation>
     </message>
     <message>
         <source>Bottom</source>
-        <translation type="unfinished">하단</translation>
+        <translation>하단</translation>
     </message>
     <message>
         <source>Bold</source>
@@ -2446,11 +2511,11 @@ These values are copied into new series projects and can be adjusted per series.
     </message>
     <message>
         <source>Outline</source>
-        <translation type="unfinished">윤곽선</translation>
+        <translation>윤곽선</translation>
     </message>
     <message>
         <source>Font:</source>
-        <translation type="unfinished">글꼴:</translation>
+        <translation>글꼴:</translation>
     </message>
     <message>
         <source>Min font size:</source>
@@ -2518,7 +2583,7 @@ These values are copied into new series projects and can be adjusted per series.
     </message>
     <message>
         <source>Render</source>
-        <translation type="unfinished">렌더링</translation>
+        <translation>렌더링</translation>
     </message>
     <message>
         <source>Output target:</source>
@@ -2805,6 +2870,22 @@ Restart now?</source>
         <translation>업데이트 오류</translation>
     </message>
     <message>
+        <source>Developer Update Available</source>
+        <translation>개발자 업데이트 사용 가능</translation>
+    </message>
+    <message>
+        <source>A developer fork update {version} is available.</source>
+        <translation>개발자 포크 업데이트 {version}을 사용할 수 있습니다.</translation>
+    </message>
+    <message>
+        <source>Developer Update Error</source>
+        <translation>개발자 업데이트 오류</translation>
+    </message>
+    <message>
+        <source>Fork update check failed: {message}</source>
+        <translation>포크 업데이트 확인 실패: {message}</translation>
+    </message>
+    <message>
         <source>Downloading update...</source>
         <translation>업데이트 다운로드 중...</translation>
     </message>
@@ -3055,12 +3136,20 @@ Restart now?</source>
         <translation>방금 실행 취소한 작업을 다시 실행합니다.</translation>
     </message>
     <message>
+        <source>Save Project</source>
+        <translation>프로젝트 저장</translation>
+    </message>
+    <message>
+        <source>Save editable state and update dirty render output.</source>
+        <translation>편집 상태를 저장하고 미반영 렌더 출력을 갱신합니다.</translation>
+    </message>
+    <message>
         <source>Delete Selected Box</source>
         <translation>선택한 상자 삭제</translation>
     </message>
     <message>
-        <source>Delete the currently selected text box.</source>
-        <translation>현재 선택된 텍스트 상자를 삭제합니다.</translation>
+        <source>Delete the currently selected text or block box.</source>
+        <translation>현재 선택한 텍스트 상자 또는 블록 상자를 삭제합니다.</translation>
     </message>
     <message>
         <source>Restore Text Blocks</source>
@@ -3400,6 +3489,14 @@ then do inpainting on the resized image.</source>
         <translation>렌더링</translation>
     </message>
     <message>
+        <source>Up to date</source>
+        <translation>반영 완료</translation>
+    </message>
+    <message>
+        <source>Final render output status</source>
+        <translation>최종 렌더 출력 상태</translation>
+    </message>
+    <message>
         <source>Manual</source>
         <translation>수동</translation>
     </message>
@@ -3516,6 +3613,18 @@ then do inpainting on the resized image.</source>
         <translation>스타일</translation>
     </message>
     <message>
+        <source>Create or edit dotted text boxes. The dotted frame is editor-only and is not rendered into the final image.</source>
+        <translation>점선 텍스트 상자를 만들거나 편집합니다. 점선 프레임은 편집기 전용이며 최종 이미지에는 렌더링되지 않습니다.</translation>
+    </message>
+    <message>
+        <source>Draw or select OCR/block boxes used for detection, OCR, translation, and inpainting.</source>
+        <translation>감지, OCR, 번역, 인페인팅에 사용하는 OCR/블록 상자를 그리거나 선택합니다.</translation>
+    </message>
+    <message>
+        <source>Remove all block boxes on the image</source>
+        <translation>이미지의 모든 블록 상자를 제거합니다.</translation>
+    </message>
+    <message>
         <source>When enabled, this project inherits the automatic output settings from Settings.</source>
         <translation>켜면 이 프로젝트는 설정의 자동 출력 값을 그대로 상속합니다.</translation>
     </message>
@@ -3558,6 +3667,34 @@ then do inpainting on the resized image.</source>
     <message>
         <source>Load pages to see automatic output estimates.</source>
         <translation>자동 출력 예상치를 보려면 페이지를 불러오세요.</translation>
+    </message>
+    <message>
+        <source>All render outputs are up to date.</source>
+        <translation>모든 렌더 출력이 최신 상태입니다.</translation>
+    </message>
+    <message>
+        <source>Rerender Current Image</source>
+        <translation>현재 이미지 재렌더 저장</translation>
+    </message>
+    <message>
+        <source>Rerender Changed Images</source>
+        <translation>변경된 이미지 모두 재렌더 저장</translation>
+    </message>
+    <message>
+        <source>Rerender All Images</source>
+        <translation>전체 이미지 재렌더 저장</translation>
+    </message>
+    <message>
+        <source>Open Output Folder</source>
+        <translation>출력 폴더 열기</translation>
+    </message>
+    <message>
+        <source>Text Boxes</source>
+        <translation>텍스트 상자</translation>
+    </message>
+    <message>
+        <source>Block Boxes</source>
+        <translation>블록 상자</translation>
     </message>
     <message>
         <source>Top</source>
@@ -3636,16 +3773,12 @@ then do inpainting on the resized image.</source>
         <translation>현재 페이지의 출발어 및 대상 언어를 모든 페이지에 설정합니다.</translation>
     </message>
     <message>
-        <source>Draw or Select Text Boxes</source>
-        <translation>텍스트 상자 그리기 또는 선택</translation>
+        <source>Delete the selected text box</source>
+        <translation>선택한 텍스트 상자를 삭제합니다.</translation>
     </message>
     <message>
-        <source>Delete Selected Box</source>
-        <translation>선택한 상자 삭제</translation>
-    </message>
-    <message>
-        <source>Remove all the Boxes on the Image</source>
-        <translation>이미지에서 모든 상자 제거</translation>
+        <source>Delete the selected block box</source>
+        <translation>선택한 블록 상자를 삭제합니다.</translation>
     </message>
     <message>
         <source>Draws all the Text Blocks in the existing Text Block List
@@ -3740,10 +3873,6 @@ back on the Image (for further editing)</source>
     <message>
         <source>Same as source</source>
         <translation>원본과 동일</translation>
-    </message>
-    <message>
-        <source>Box Drawing</source>
-        <translation>상자 그리기</translation>
     </message>
     <message>
         <source>Inpainting</source>
@@ -4030,31 +4159,31 @@ It may have already been moved, renamed, or deleted.
     </message>
     <message>
         <source>left</source>
-        <translation type="unfinished"></translation>
+        <translation>왼쪽</translation>
     </message>
     <message>
         <source>center</source>
-        <translation type="unfinished"></translation>
+        <translation>가운데</translation>
     </message>
     <message>
         <source>right</source>
-        <translation type="unfinished"></translation>
+        <translation>오른쪽</translation>
     </message>
     <message>
         <source>outline {width}</source>
-        <translation type="unfinished"></translation>
+        <translation>윤곽선 {width}</translation>
     </message>
     <message>
         <source>outline off</source>
-        <translation type="unfinished"></translation>
+        <translation>윤곽선 꺼짐</translation>
     </message>
     <message>
         <source>Render: {font} / max {max_font} / line {line_spacing} / {align} / {outline}</source>
-        <translation type="unfinished"></translation>
+        <translation>렌더링: {font} / 최대 {max_font} / 줄 {line_spacing} / {align} / {outline}</translation>
     </message>
     <message>
         <source>Export: {target} / debug {count} enabled</source>
-        <translation type="unfinished"></translation>
+        <translation>출력: {target} / 디버그 {count}개 켜짐</translation>
     </message>
 </context>
 <context>
@@ -4230,6 +4359,26 @@ Do you want to restore it?</source>
     <message>
         <source>RecoveredProject.ctpr</source>
         <translation>RecoveredProject.ctpr</translation>
+    </message>
+    <message>
+        <source>Rerender Output</source>
+        <translation>렌더 출력 재생성</translation>
+    </message>
+    <message>
+        <source>There are no render changes to apply.</source>
+        <translation>적용할 렌더 변경사항이 없습니다.</translation>
+    </message>
+    <message>
+        <source>Render output was updated.</source>
+        <translation>렌더 출력이 갱신되었습니다.</translation>
+    </message>
+    <message>
+        <source>Archive staging was incomplete, so all pages were rendered before rebuilding the archive.</source>
+        <translation>압축파일 준비 이미지가 불완전해서 압축파일을 다시 만들기 전에 모든 페이지를 렌더링했습니다.</translation>
+    </message>
+    <message>
+        <source>변경된 {count}개의 이미지가 렌더링 저장됩니다. 저장하시겠습니까?</source>
+        <translation>변경된 {count}개의 이미지가 렌더링 저장됩니다. 저장하시겠습니까?</translation>
     </message>
     <message>
         <source>Save Series Project As</source>

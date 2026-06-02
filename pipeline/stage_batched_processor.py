@@ -4,11 +4,13 @@ import json
 import logging
 import os
 import time
+import traceback
 from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import dataclass, field
 from typing import Any, Callable
 
 import imkit as imk
+import numpy as np
 from PySide6.QtCore import QCoreApplication
 from PySide6.QtGui import QColor
 
@@ -42,13 +44,14 @@ from modules.utils.correction_dictionary import (
 from modules.utils.device import resolve_device
 from modules.utils.export_paths import (
     build_export_timestamp,
-    reserve_export_run_token,
+    export_run_root,
     resolve_export_directory,
 )
 from modules.utils.exceptions import OperationCancelledError
 from modules.utils.image_utils import generate_mask
 from modules.utils.inpaint_cleanup import refine_bubble_residue_inpaint
 from modules.utils.language_utils import get_language_code, is_no_space_lang, language_codes
+from modules.utils.ocr_debug import drop_layout_schema_only_ocr_blocks
 from modules.utils.ocr_quality import summarize_ocr_quality
 from modules.utils.pipeline_config import get_config, get_inpainter_runtime, inpaint_map
 from modules.utils.render_style_policy import (
@@ -282,8 +285,8 @@ class StageBatchedProcessor(BatchProcessor):
                 project_file=getattr(self.main_page, "project_file", None),
                 temp_dir=getattr(self.main_page, "temp_dir", None),
             )
-            export_token = self._resolve_export_token(directory, self._timestamp)
-            export_root = os.path.join(directory, f"comic_translate_{export_token}")
+            export_token = self._resolve_export_token(directory, self._timestamp, archive_bname)
+            export_root = export_run_root(directory, export_token, archive_bname)
             pages.append(
                 StagePageContext(
                     image_path=image_path,
@@ -328,6 +331,7 @@ class StageBatchedProcessor(BatchProcessor):
         total_images: int,
         stage: str,
         reason: str,
+        detail: str | None = None,
         extra: dict[str, Any] | None = None,
     ) -> None:
         ctx.failed_stage = stage
@@ -346,7 +350,7 @@ class StageBatchedProcessor(BatchProcessor):
             reason=reason,
             **(extra or {}),
         )
-        self.main_page.image_skipped.emit(ctx.image_path, stage, reason)
+        self.main_page.image_skipped.emit(ctx.image_path, stage, detail or reason)
 
     def _detect_all(self, pages: list[StagePageContext]) -> None:
         total_images = len(pages)
@@ -522,6 +526,17 @@ class StageBatchedProcessor(BatchProcessor):
             quality = summarize_ocr_quality(ctx.blk_list)
             engine_name = engine.__class__.__name__
 
+        ctx.blk_list, schema_only_blocks = drop_layout_schema_only_ocr_blocks(ctx.blk_list)
+        if schema_only_blocks:
+            logger.info(
+                "Dropped %d PaddleOCR VL schema-only OCR block(s) before stage-batched inpaint for %s.",
+                len(schema_only_blocks),
+                ctx.image_name,
+            )
+            quality = summarize_ocr_quality(ctx.blk_list)
+            page_profile = dict(page_profile or {})
+            page_profile["schema_only_dropped_block_count"] = len(schema_only_blocks)
+
         metrics = self._ocr_quality_metrics(quality)
         return {
             "quality": quality,
@@ -657,6 +672,9 @@ class StageBatchedProcessor(BatchProcessor):
                 ctx.inpaint_input_img = self.inpainting.inpaint_with_blocks(ctx.image, ctx.mask, ctx.blk_list, config=config)
                 self._raise_if_cancelled()
                 ctx.inpaint_input_img = imk.convert_scale_abs(ctx.inpaint_input_img)
+                inpaint_edit_mask = getattr(self.inpainting, "last_inpaint_edit_mask", None)
+                if inpaint_edit_mask is not None:
+                    ctx.mask = np.where((ctx.mask > 0) | (inpaint_edit_mask > 0), 255, 0).astype(np.uint8)
                 ctx.inpaint_input_img, ctx.mask, ctx.cleanup_stats = refine_bubble_residue_inpaint(
                     ctx.inpaint_input_img,
                     ctx.mask,
@@ -759,12 +777,14 @@ class StageBatchedProcessor(BatchProcessor):
             except OperationCancelledError:
                 raise
             except Exception as exc:
+                detail = f"{type(exc).__name__}: {exc}\n\n{traceback.format_exc()}"
                 self._mark_page_failed(
                     ctx,
                     index=index,
                     total_images=total_images,
                     stage="inpaint",
                     reason=str(exc),
+                    detail=detail,
                     extra={**ctx.page_ocr_metrics, **ctx.page_translation_metrics},
                 )
 
@@ -913,6 +933,18 @@ class StageBatchedProcessor(BatchProcessor):
                 ),
                 return_metrics=True,
             )
+            blk._text_fit_status = (
+                "needs_review"
+                if rendered_width > block_width or rendered_height > block_height
+                else "fit"
+            )
+            blk._text_fit_metrics = {
+                "rendered_width": float(rendered_width),
+                "rendered_height": float(rendered_height),
+                "box_width": float(block_width),
+                "box_height": float(block_height),
+                "font_size": float(font_size),
+            }
             if is_no_space_lang(trg_lng_cd):
                 translation = translation.replace(" ", "")
             font_color = resolve_render_text_color(
@@ -1015,6 +1047,12 @@ class StageBatchedProcessor(BatchProcessor):
             )
             text_item_state["render_normalization_reasons"] = list(
                 blk._render_normalization_reasons
+            )
+            text_item_state["text_fit_status"] = str(
+                getattr(blk, "_text_fit_status", "fit") or "fit"
+            )
+            text_item_state["text_fit_metrics"] = dict(
+                getattr(blk, "_text_fit_metrics", {}) or {}
             )
             text_items_state.append(text_item_state)
             if ctx.image_path == file_on_display:

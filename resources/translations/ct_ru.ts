@@ -15,6 +15,14 @@
         <source>Check for Updates</source>
         <translation>Проверить обновления</translation>
     </message>
+    <message>
+        <source>Developer Mode</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Also check the document-translate-myfix fork when checking for updates.</source>
+        <translation type="unfinished"></translation>
+    </message>
 </context>
 <context>
     <name>AutomaticProgress</name>
@@ -123,6 +131,21 @@
     </message>
     <message>
         <source>자동번역이 완료되었습니다.</source>
+        <translation type="unfinished"></translation>
+    </message>
+</context>
+<context>
+    <name>BatchReportController</name>
+    <message>
+        <source>Mask boundary exceeded image bounds</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Try rerunning inpainting</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Inpainting failed</source>
         <translation type="unfinished"></translation>
     </message>
 </context>
@@ -265,6 +288,42 @@ Duplicates:
     <message>
         <source>Unsaved Changes</source>
         <translation>Несохранённые изменения</translation>
+    </message>
+    <message>
+        <source> (Update Archive)</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Rerender Current Image</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Rerender Changed Images</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Rerender All Images</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Open Output Folder</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Unapplied {count}</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>{count} image(s) have unapplied render changes.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Up to date</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>All render outputs are up to date.</source>
+        <translation type="unfinished"></translation>
     </message>
     <message>
         <source>Load pages to see automatic output estimates.</source>
@@ -587,8 +646,8 @@ Use Custom Local Server(Gemma) with the included Gemma Docker setup.</source>
         <translation>Автоматический режим</translation>
     </message>
     <message>
-        <source>Selected exports are saved to comic_translate_&lt;timestamp&gt; in the same directory as the input file/archive.</source>
-        <translation>Выбранные экспортированные файлы сохраняются в comic_translate_&lt;timestamp&gt; в том же каталоге, что и входной файл/архив.</translation>
+        <source>Selected automatic-mode export artifacts are saved to log_&lt;source&gt;_&lt;timestamp&gt; in the same directory as the input file/archive.</source>
+        <translation>Выбранные артефакты экспорта автоматического режима сохраняются в log_&lt;source&gt;_&lt;timestamp&gt; в той же папке, что и входной файл/архив.</translation>
     </message>
     <message>
         <source>Export Raw Text</source>
@@ -1022,6 +1081,11 @@ Reasoning:
 </context>
 <context>
     <name>Messages</name>
+    <message>
+        <source>Could not inpaint detected text.
+Skipping:</source>
+        <translation type="unfinished"></translation>
+    </message>
     <message>
         <source>Skipping:</source>
         <translation>Пропускаем:</translation>
@@ -2749,6 +2813,22 @@ Restart now?</source>
         <translation>Ошибка обновления</translation>
     </message>
     <message>
+        <source>Developer Update Available</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>A developer fork update {version} is available.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Developer Update Error</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Fork update check failed: {message}</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
         <source>Downloading update...</source>
         <translation>Загрузка обновления...</translation>
     </message>
@@ -3002,11 +3082,19 @@ Restart now?</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
+        <source>Save Project</source>
+        <translation type="unfinished">Сохранить проект</translation>
+    </message>
+    <message>
+        <source>Save editable state and update dirty render output.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
         <source>Delete Selected Box</source>
         <translation type="unfinished">Удалить выбранный блок</translation>
     </message>
     <message>
-        <source>Delete the currently selected text box.</source>
+        <source>Delete the currently selected text or block box.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
@@ -3347,6 +3435,14 @@ then do inpainting on the resized image.</source>
         <translation>Отрисовка</translation>
     </message>
     <message>
+        <source>Up to date</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Final render output status</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
         <source>Manual</source>
         <translation>Вручную</translation>
     </message>
@@ -3463,6 +3559,18 @@ then do inpainting on the resized image.</source>
         <translation>Стиль</translation>
     </message>
     <message>
+        <source>Create or edit dotted text boxes. The dotted frame is editor-only and is not rendered into the final image.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Draw or select OCR/block boxes used for detection, OCR, translation, and inpainting.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Remove all block boxes on the image</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
         <source>When enabled, this project inherits the automatic output settings from Settings.</source>
         <translation type="unfinished"></translation>
     </message>
@@ -3504,6 +3612,34 @@ then do inpainting on the resized image.</source>
     </message>
     <message>
         <source>Load pages to see automatic output estimates.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>All render outputs are up to date.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Rerender Current Image</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Rerender Changed Images</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Rerender All Images</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Open Output Folder</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Text Boxes</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Block Boxes</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
@@ -3583,16 +3719,12 @@ then do inpainting on the resized image.</source>
         <translation>Устанавливает исходный и целевой язык на текущей странице для всех страниц</translation>
     </message>
     <message>
-        <source>Draw or Select Text Boxes</source>
-        <translation>Нарисовать или выбрать текстовые блоки</translation>
+        <source>Delete the selected text box</source>
+        <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>Delete Selected Box</source>
-        <translation>Удалить выбранный блок</translation>
-    </message>
-    <message>
-        <source>Remove all the Boxes on the Image</source>
-        <translation>Удалить все блоки на изображении</translation>
+        <source>Delete the selected block box</source>
+        <translation type="unfinished"></translation>
     </message>
     <message>
         <source>Draws all the Text Blocks in the existing Text Block List
@@ -3688,10 +3820,6 @@ back on the Image (for further editing)</source>
     <message>
         <source>Same as source</source>
         <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Box Drawing</source>
-        <translation>Рисование блоков</translation>
     </message>
     <message>
         <source>Inpainting</source>
@@ -4170,6 +4298,26 @@ Do you want to restore it?</source>
     </message>
     <message>
         <source>RecoveredProject.ctpr</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Rerender Output</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>There are no render changes to apply.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Render output was updated.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Archive staging was incomplete, so all pages were rendered before rebuilding the archive.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>변경된 {count}개의 이미지가 렌더링 저장됩니다. 저장하시겠습니까?</source>
         <translation type="unfinished"></translation>
     </message>
     <message>

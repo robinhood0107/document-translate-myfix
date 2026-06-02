@@ -1,6 +1,7 @@
 from PySide6 import QtWidgets, QtCore
 from ..dayu_widgets.label import MLabel
 from ..dayu_widgets.push_button import MPushButton
+from ..dayu_widgets.check_box import MCheckBox
 from app.version import __version__
 
 class AboutPage(QtWidgets.QWidget):
@@ -32,6 +33,12 @@ class AboutPage(QtWidgets.QWidget):
         update_layout.addStretch()
         
         layout.addLayout(update_layout)
+
+        self.developer_mode_checkbox = MCheckBox(self.tr("Developer Mode"))
+        self.developer_mode_checkbox.setToolTip(
+            self.tr("Also check the document-translate-myfix fork when checking for updates.")
+        )
+        layout.addWidget(self.developer_mode_checkbox)
         
         layout.addStretch()
         

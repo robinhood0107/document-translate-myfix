@@ -10,7 +10,7 @@ from typing import Iterable, Mapping
 import numpy as np
 from PIL import Image
 
-from .export_paths import normalize_export_source_record
+from .export_paths import resolve_export_source_identity
 
 
 OUTPUT_TARGET_IMAGES = "individual_images"
@@ -422,24 +422,22 @@ def resolve_series_folder_name(
     project_file: str | None = None,
     temp_dir: str | None = None,
 ) -> str:
-    abs_anchor = os.path.abspath(str(anchor_path or "")) if anchor_path else ""
-    source_record = None
-    if source_records and abs_anchor:
-        source_record = normalize_export_source_record(source_records.get(anchor_path))
-        if source_record is None:
-            source_record = normalize_export_source_record(source_records.get(abs_anchor))
-    if source_record is not None:
-        stem = os.path.splitext(os.path.basename(source_record["source_path"]))[0].strip()
-        return sanitize_series_folder_name(stem)
-    if project_file and _path_within(abs_anchor, temp_dir):
-        stem = os.path.splitext(os.path.basename(project_file))[0].strip()
-        return sanitize_series_folder_name(stem)
-    stem = os.path.splitext(os.path.basename(abs_anchor))[0].strip()
-    return sanitize_series_folder_name(stem)
+    if not anchor_path:
+        return sanitize_series_folder_name("")
+    identity = resolve_export_source_identity(
+        str(anchor_path),
+        source_records=source_records,
+        project_file=project_file,
+        temp_dir=temp_dir,
+    )
+    return sanitize_series_folder_name(identity.get("source_name", ""))
 
 
 def build_series_output_dir(base_dir: str, series_folder_name: str) -> str:
-    return os.path.join(base_dir, sanitize_series_folder_name(series_folder_name))
+    folder_name = sanitize_series_folder_name(series_folder_name)
+    if not folder_name.lower().startswith("result_"):
+        folder_name = f"result_{folder_name}"
+    return os.path.join(base_dir, folder_name)
 
 
 def interpolate_metric(value: int, anchors: Mapping[int, tuple[float, float]]) -> tuple[float, float]:

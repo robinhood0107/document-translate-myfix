@@ -8,6 +8,12 @@ import numpy as np
 
 from modules.detection.utils.content import get_inpaint_bboxes
 from modules.masking.legacy_bbox_rescue import build_block_rescue_mask
+from modules.utils.inpaint_envelope import (
+    append_unique_box,
+    build_text_free_erase_envelope,
+    mask_for_xyxy,
+    merge_close_components_within_envelope,
+)
 from modules.utils.mask_inpaint_mode import DEFAULT_MASK_INPAINT_MODE
 from modules.utils.textblock import TextBlock
 
@@ -38,6 +44,22 @@ def _mask_for_xyxy(image_shape: tuple[int, ...], xyxy: tuple[int, int, int, int]
     return mask
 
 
+def _clip_polygon_to_image(poly: np.ndarray, image_shape: tuple[int, ...]) -> np.ndarray | None:
+    h, w = image_shape[:2]
+    if h <= 0 or w <= 0:
+        return None
+    clipped = np.asarray(poly, dtype=np.int32).copy()
+    if clipped.ndim != 2 or clipped.shape[0] < 3 or clipped.shape[1] != 2:
+        return None
+    clipped[:, 0] = np.clip(clipped[:, 0], 0, w - 1)
+    clipped[:, 1] = np.clip(clipped[:, 1], 0, h - 1)
+    if np.unique(clipped, axis=0).shape[0] < 3:
+        return None
+    if cv2.contourArea(clipped.astype(np.float32)) <= 0:
+        return None
+    return clipped
+
+
 def _build_legacy_base_block_mask(
     img: np.ndarray,
     blk: TextBlock,
@@ -52,14 +74,18 @@ def _build_legacy_base_block_mask(
     roi = roi_override
     if roi is None and getattr(blk, "text_class", None) == "text_bubble":
         roi = _normalize_xyxy(getattr(blk, "bubble_xyxy", None), img.shape)
+    text_class = getattr(blk, "text_class", "") or ""
+    text_free_envelope = build_text_free_erase_envelope(blk, img.shape)
     bboxes = get_inpaint_bboxes(
         blk.xyxy,
         img,
         bubble_bbox=roi,
     )
+    if text_class == "text_free":
+        bboxes = append_unique_box(bboxes, text_free_envelope)
     blk.inpaint_bboxes = bboxes
     if bboxes is None or len(bboxes) == 0:
-        return np.zeros((h, w), dtype=np.uint8), bboxes
+        return mask_for_xyxy(img.shape, text_free_envelope), bboxes
 
     xs = [x for x1, _, x2, _ in bboxes for x in (x1, x2)]
     ys = [y for _, y1, _, y2 in bboxes for y in (y1, y2)]
@@ -93,7 +119,9 @@ def _build_legacy_base_block_mask(
         pts_f = (pts.astype(np.float32) - pad_offset) * ds
         pts_f[:, 0] += min_x
         pts_f[:, 1] += min_y
-        polys.append(pts_f.astype(np.int32))
+        clipped_poly = _clip_polygon_to_image(pts_f, img.shape)
+        if clipped_poly is not None:
+            polys.append(clipped_poly)
     if not polys:
         return np.zeros((h, w), dtype=np.uint8), bboxes
 
@@ -136,6 +164,12 @@ def _build_legacy_base_block_mask(
     dilated = imk.dilate(block_mask, dil_kernel, iterations=4)
     if roi is not None:
         dilated = cv2.bitwise_and(dilated, _mask_for_xyxy(img.shape, roi))
+    if text_class == "text_free":
+        dilated = merge_close_components_within_envelope(
+            dilated,
+            text_free_envelope,
+            kernel_size=5,
+        )
     return np.where(dilated > 0, 255, 0).astype(np.uint8), bboxes
 
 

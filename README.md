@@ -1,8 +1,8 @@
 [English](README.md) | [한국어](README_ko.md)
 
-# Document Translate
+# Comic Translate Fork
 
-Document Translate is a local-first desktop translation workflow that started from upstream `comic-translate` `v2.6.7` and then diverged with product-specific runtime, OCR, workflow, and Windows setup changes.
+This repository is a local-first fork of upstream `comic-translate` that started from the upstream `v2.6.7` codebase and then diverged with product-specific runtime, OCR, workflow, and Windows setup changes.
 
 The fork is maintained around a practical desktop workflow:
 
@@ -94,8 +94,8 @@ This repository now uses a strict `main + develop + tag` model.
 - `develop` is the integration branch for upcoming product work.
 - `main` is the shipping baseline.
 - Official releases are created only from `vX.Y.Z` version tags that point to commits already contained in `main`.
-- Before creating a release tag, run the `Release Preflight` workflow on `main` and wait for a green Windows Nuitka build.
-- The Windows release assets are built with `Nuitka` and published from that tag as one portable zip and one single-file exe.
+- The Windows release asset is built with `Nuitka` and published as a GitHub Release artifact from that tag.
+- Release candidates that touch Nuitka packaging, release assets, Windows runtime pins, or `main` promotion must first pass a local Windows PowerShell Nuitka build before CI/release workflows are used as the second verification layer.
 - Models, checkpoints, and Docker runtimes are not bundled into the release executable and remain separately provisioned.
 - `release/*` branches are not used.
 
@@ -160,7 +160,10 @@ The `v2.7.0` backport brought in selected user-facing features such as:
 - new target languages and improved RTL handling
 - selected webtoon/list-view behavior fixes
 
-Audit details stay on `develop` and are not promoted to the public `main` documentation set.
+Audit document:
+
+- [docs/history/v267-to-v270-backport-audit.md](docs/history/v267-to-v270-backport-audit.md)
+- [docs/history/v267-to-v270-backport-audit-ko.md](docs/history/v267-to-v270-backport-audit-ko.md)
 
 ### `v2.7.0 -> v2.7.1`
 
@@ -172,7 +175,10 @@ The `v2.7.1` round selectively applies the upstream fixes that matter to this fo
 - import menu cleanup so `PSD` appears next to `Project File`
 - app version bump to `2.7.1`
 
-Audit details stay on `develop` and are not promoted to the public `main` documentation set.
+Audit document:
+
+- [docs/history/v270-to-v271-backport-audit.md](docs/history/v270-to-v271-backport-audit.md)
+- [docs/history/v270-to-v271-backport-audit-ko.md](docs/history/v270-to-v271-backport-audit-ko.md)
 
 ## Quick Start
 
@@ -259,14 +265,15 @@ Tracked compose/runtime images used by the repo:
 ## Repository Documents
 
 - [rules.md](rules.md)
-Release-facing documentation for `main` is intentionally kept minimal; deeper history and audit notes remain on `develop`.
+- [docs/history/change-log.md](docs/history/change-log.md)
+- [docs/history/change-log-ko.md](docs/history/change-log-ko.md)
 - [docs/gemma/local-server-ko.md](docs/gemma/local-server-ko.md)
 - [docs/hunyuan/local-server-ko.md](docs/hunyuan/local-server-ko.md)
 - [docs/repo/github-rulesets-public-free-ko.md](docs/repo/github-rulesets-public-free-ko.md)
 
 ## Legacy Localized READMEs
 
-The root `README.md` and `README_ko.md` are the source of truth for the public branch documentation set.
+The old localized README files under `docs/i18n/` are no longer the source of truth for this fork.
 
 Use:
 

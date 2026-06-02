@@ -11,8 +11,25 @@ from modules.inpainting.lama_torch_network import load_lama_mpe
 from modules.source_parity_vendor.utils.imgproc_utils import enlarge_window, resize_keepasp
 from modules.source_parity_vendor.utils.textblock import TextBlock as SourceLaMaTextBlock
 from modules.source_parity_vendor.utils.textblock_mask import extract_ballon_mask
+from modules.utils.bubble_erase import ERASE_MODE_BUBBLE_LAMA_FALLBACK, erase_text_bubble_regions
 from modules.utils.download import ModelDownloader, ModelID
+from modules.utils.inpaint_composite import composite_with_edit_mask, normalize_edit_mask
+from modules.utils.mask_roi import normalize_xyxy
 from modules.utils.textblock import TextBlock
+
+
+def _clip_half_open_bbox(xyxy, im_w: int, im_h: int) -> list[int] | None:
+    try:
+        x1, y1, x2, y2 = [int(v) for v in xyxy]
+    except Exception:
+        return None
+    x1 = max(0, min(int(im_w), x1))
+    x2 = max(0, min(int(im_w), x2))
+    y1 = max(0, min(int(im_h), y1))
+    y2 = max(0, min(int(im_h), y2))
+    if x2 <= x1 or y2 <= y1:
+        return None
+    return [x1, y1, x2, y2]
 
 
 def _inpaint_handle_alpha_channel(original_alpha: np.ndarray, mask: np.ndarray) -> np.ndarray:
@@ -191,6 +208,7 @@ class SourceLaMaLarge:
                                 return np.concatenate([result_rgb, original_alpha], axis=2)
                             return result_rgb
             result_rgb = self.memory_safe_inpaint(img_rgb, mask, textblock_list)
+            result_rgb = composite_with_edit_mask(img_rgb, result_rgb, mask)
             if original_alpha is not None:
                 result_alpha = _inpaint_handle_alpha_channel(original_alpha, mask)
                 return np.concatenate([result_rgb, result_alpha], axis=2)
@@ -201,10 +219,14 @@ class SourceLaMaLarge:
         original_mask = mask.copy()
         work_mask = mask.copy()
         for blk in textblock_list:
-            xyxy = [int(v) for v in getattr(blk, "xyxy", [0, 0, 0, 0])]
+            xyxy = _clip_half_open_bbox(getattr(blk, "xyxy", [0, 0, 0, 0]), im_w, im_h)
+            if xyxy is None:
+                continue
             xyxy_e = enlarge_window(xyxy, im_w, im_h, ratio=1.7)
             image_crop = inpainted[xyxy_e[1]:xyxy_e[3], xyxy_e[0]:xyxy_e[2]]
             mask_crop = work_mask[xyxy_e[1]:xyxy_e[3], xyxy_e[0]:xyxy_e[2]]
+            if image_crop.size == 0 or mask_crop.size == 0:
+                continue
             need_inpaint = True
             if self.check_need_inpaint or check_need_inpaint:
                 ballon_msk, non_text_msk = extract_ballon_mask(image_crop, mask_crop)
@@ -225,9 +247,10 @@ class SourceLaMaLarge:
             work_mask[xyxy[1]:xyxy[3], xyxy[0]:xyxy[2]] = 0
 
         if original_alpha is not None:
+            inpainted = composite_with_edit_mask(img_rgb, inpainted, original_mask)
             result_alpha = _inpaint_handle_alpha_channel(original_alpha, original_mask)
             return np.concatenate([inpainted, result_alpha], axis=2)
-        return inpainted
+        return composite_with_edit_mask(img_rgb, inpainted, original_mask)
 
 
 _INPAINTER_CACHE: dict[SourceLaMaKey, SourceLaMaLarge] = {}
@@ -268,23 +291,47 @@ def _resolve_source_blocks(blocks: list[TextBlock]) -> list[SourceLaMaTextBlock]
     return resolved
 
 
-def source_lama_blockwise_inpaint(
+def _split_bubble_source_mask(
+    mask: np.ndarray,
+    blocks: list[TextBlock],
+    image_shape: tuple[int, ...],
+) -> tuple[np.ndarray, list[TextBlock], list[TextBlock]]:
+    source_mask = normalize_edit_mask(mask, image_shape)
+    bubble_mask = np.zeros(image_shape[:2], dtype=np.uint8)
+    bubble_blocks: list[TextBlock] = []
+    lama_blocks: list[TextBlock] = []
+    for block in list(blocks or []):
+        if getattr(block, "text_class", "") != "text_bubble":
+            lama_blocks.append(block)
+            continue
+        bubble_blocks.append(block)
+        roi = normalize_xyxy(getattr(block, "bubble_xyxy", None), image_shape)
+        if roi is None:
+            roi = normalize_xyxy(getattr(block, "xyxy", None), image_shape)
+        if roi is None:
+            continue
+        x1, y1, x2, y2 = roi
+        bubble_mask[y1:y2, x1:x2] = np.where(source_mask[y1:y2, x1:x2] > 0, 255, bubble_mask[y1:y2, x1:x2])
+    return bubble_mask, bubble_blocks, lama_blocks
+
+
+def _run_lama_or_fallback(
     image: np.ndarray,
     mask: np.ndarray,
     blocks: list[TextBlock],
     inpainter,
     config,
     *,
-    check_need_inpaint: bool = True,
+    check_need_inpaint: bool,
 ) -> np.ndarray:
-    if image is None or mask is None or not np.any(mask) or not blocks:
-        result = inpainter(image, mask, config)
-        return imk.convert_scale_abs(result)
+    if not np.any(mask):
+        return np.asarray(image).copy()
 
     source_blocks = _resolve_source_blocks(blocks)
     if not source_blocks:
         result = inpainter(image, mask, config)
-        return imk.convert_scale_abs(result)
+        converted = imk.convert_scale_abs(result)
+        return composite_with_edit_mask(image, converted, mask)
 
     device = str(getattr(inpainter, "runtime_device", getattr(inpainter, "device", "cuda")) or "cuda")
     precision = str(getattr(inpainter, "precision", "bf16") or "bf16")
@@ -296,4 +343,77 @@ def source_lama_blockwise_inpaint(
         source_blocks,
         check_need_inpaint=check_need_inpaint,
     )
-    return imk.convert_scale_abs(result)
+    converted = imk.convert_scale_abs(result)
+    return composite_with_edit_mask(image, converted, mask)
+
+
+def _maybe_return_edit_mask(
+    result: np.ndarray,
+    edit_mask: np.ndarray | None,
+    return_edit_mask: bool,
+) -> np.ndarray | tuple[np.ndarray, np.ndarray | None]:
+    if return_edit_mask:
+        return result, edit_mask
+    return result
+
+
+def source_lama_blockwise_inpaint(
+    image: np.ndarray,
+    mask: np.ndarray,
+    blocks: list[TextBlock],
+    inpainter,
+    config,
+    *,
+    check_need_inpaint: bool = True,
+    return_edit_mask: bool = False,
+) -> np.ndarray | tuple[np.ndarray, np.ndarray | None]:
+    if image is None or mask is None or not np.any(mask) or not blocks:
+        result = inpainter(image, mask, config)
+        converted = imk.convert_scale_abs(result)
+        cleaned = composite_with_edit_mask(image, converted, mask)
+        edit_mask = normalize_edit_mask(mask, image.shape) if image is not None and mask is not None else mask
+        return _maybe_return_edit_mask(cleaned, edit_mask, return_edit_mask)
+
+    source_mask = normalize_edit_mask(mask, image.shape)
+    bubble_mask, bubble_blocks, lama_blocks = _split_bubble_source_mask(source_mask, blocks, image.shape)
+    if not bubble_blocks:
+        cleaned = _run_lama_or_fallback(
+            image,
+            source_mask,
+            list(blocks or []),
+            inpainter,
+            config,
+            check_need_inpaint=check_need_inpaint,
+        )
+        return _maybe_return_edit_mask(cleaned, source_mask, return_edit_mask)
+
+    lama_mask = np.where((source_mask > 0) & (bubble_mask <= 0), 255, 0).astype(np.uint8)
+    cleaned = _run_lama_or_fallback(
+        image,
+        lama_mask,
+        lama_blocks,
+        inpainter,
+        config,
+        check_need_inpaint=check_need_inpaint,
+    )
+    bubble_result = erase_text_bubble_regions(image, cleaned, bubble_mask, bubble_blocks, config)
+    fallback_mask = normalize_edit_mask(getattr(bubble_result, "fallback_mask", None), image.shape)
+    result_image = bubble_result.image
+    if np.any(fallback_mask):
+        fallback_blocks = [
+            block
+            for block in bubble_blocks
+            if getattr(block, "_erase_mode", "") == ERASE_MODE_BUBBLE_LAMA_FALLBACK
+        ]
+        fallback_result = _run_lama_or_fallback(
+            result_image,
+            fallback_mask,
+            fallback_blocks,
+            inpainter,
+            config,
+            check_need_inpaint=False,
+        )
+        result_image = composite_with_edit_mask(result_image, fallback_result, fallback_mask)
+    combined_mask = np.where((lama_mask > 0) | (bubble_result.edit_mask > 0) | (fallback_mask > 0), 255, 0).astype(np.uint8)
+    result = composite_with_edit_mask(image, result_image, combined_mask)
+    return _maybe_return_edit_mask(result, combined_mask, return_edit_mask)
