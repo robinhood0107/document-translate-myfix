@@ -27,6 +27,7 @@ class InpaintingHandler:
         self.main_page = main_page
         self.inpainter_cache = None
         self.cached_inpainter_key = None
+        self.last_inpaint_edit_mask = None
 
     def _ensure_inpainter(self):
         settings_page = self.main_page.settings_page
@@ -70,20 +71,24 @@ class InpaintingHandler:
         return inpaint_input_img
 
     def inpaint_with_blocks(self, image: np.ndarray, mask: np.ndarray, blk_list, config=None):
+        self.last_inpaint_edit_mask = None
         if image is None or mask is None:
             return None
         self._ensure_inpainter()
         if config is None:
             config = get_config(self.main_page.settings_page)
         blocks = list(blk_list or [])
-        return source_lama_blockwise_inpaint(
+        result, edit_mask = source_lama_blockwise_inpaint(
             image,
             mask,
             blocks,
             self.inpainter_cache,
             config,
             check_need_inpaint=True,
+            return_edit_mask=True,
         )
+        self.last_inpaint_edit_mask = edit_mask
+        return result
 
     def _qimage_to_np(self, qimg: QImage):
         if qimg.width() <= 0 or qimg.height() <= 0:
