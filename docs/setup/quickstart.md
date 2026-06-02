@@ -5,7 +5,7 @@ This guide is the shortest path from a fresh checkout to a working local setup.
 ## 1. Prerequisites
 
 - Windows 10/11
-- Python 3.11
+- Python 3.12 or newer
 - Git
 - Docker Desktop with GPU support enabled
 - NVIDIA driver / CUDA-compatible GPU if you want local Gemma, HunyuanOCR, or PaddleOCR VL acceleration
@@ -25,6 +25,21 @@ run_comic_cuda13.bat
 ```
 
 The launchers bootstrap `.venv-win` or `.venv-win-cuda13` automatically.
+The CUDA13 path uses the official ONNX Runtime CUDA13 nightly feed because CUDA13 GPU wheels are not the default PyPI `onnxruntime-gpu` package yet.
+
+If you prefer to create a venv manually and install everything with one pip command, use one of these runtime-specific requirement files:
+
+```bat
+py -3.12 -m venv .venv-win
+.venv-win\Scripts\python.exe -m pip install -r requirements-cuda12.txt
+```
+
+```bat
+py -3.12 -m venv .venv-win-cuda13
+.venv-win-cuda13\Scripts\python.exe -m pip install -r requirements-cuda13.txt
+```
+
+`requirements.txt` is the default Windows CUDA12 alias. Shared dependencies live in `requirements-base.txt`.
 
 ## 3. Optional local runtimes
 
@@ -149,11 +164,13 @@ Inpainting:
 
 Official Windows release packages are published only from `vX.Y.Z` tags that point to commits already contained in `main`.
 
-- preflight requirement: run `Release Preflight` on `main` and wait for a green Windows Nuitka build before tagging
 - release trigger: Git tag push
 - accepted tag shape: `vX.Y.Z`
-- build target: Windows executable package built with `Nuitka`
-- bundled scope: app/runtime shell only
-- not bundled: models, checkpoints, Docker runtimes
+- build target: Windows executable/portable packages built with `Nuitka`
+- release order: local Windows Nuitka build verification, then `main` promotion, then Windows CI preflight, then tag release CI
+- bundled scope: app, Python runtime, PySide6, torch/onnxruntime runtime, translations/resources
+- not bundled: models, checkpoints, Docker runtimes, NVIDIA driver
+
+Before promoting a release candidate to `main`, run the relevant Nuitka build scripts from Windows PowerShell and record the successful commands and `build/nuitka-*` outputs in the PR. WSL-only checks are not a substitute for this local Windows build verification.
 
 If you need the full local runtime stack, follow the runtime setup steps in this quickstart after downloading the release package.

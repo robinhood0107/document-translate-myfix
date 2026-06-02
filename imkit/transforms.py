@@ -311,7 +311,10 @@ def fill_poly(
         color (int, optional): The color value to fill the polygon with.
                                Defaults to 1.
     """
-    
+    height, width = image.shape[:2]
+    if height <= 0 or width <= 0:
+        return image
+
     # Handle single array input (convert to list for uniform processing)
     if isinstance(pts, np.ndarray):
         polygons = [pts]
@@ -329,6 +332,14 @@ def fill_poly(
         else:
             # Try a generic reshape that handles both cases
             reshaped_poly = polygon.reshape(-1, 2)
+
+        if reshaped_poly.shape[0] < 3:
+            continue
+        reshaped_poly = np.asarray(reshaped_poly, dtype=np.int64).copy()
+        reshaped_poly[:, 0] = np.clip(reshaped_poly[:, 0], 0, width - 1)
+        reshaped_poly[:, 1] = np.clip(reshaped_poly[:, 1], 0, height - 1)
+        if np.unique(reshaped_poly, axis=0).shape[0] < 3:
+            continue
 
         # Swap x and y coordinates to convert from (x, y) to (y, x)
         mahotas_poly = reshaped_poly[:, ::-1]

@@ -25,7 +25,7 @@ from modules.utils.correction_dictionary import (
     apply_ocr_result_dictionary,
     apply_translation_result_dictionary,
 )
-from modules.utils.ocr_debug import export_ocr_debug_artifacts
+from modules.utils.ocr_debug import drop_layout_schema_only_ocr_blocks, export_ocr_debug_artifacts
 from modules.utils.inpaint_debug import (
     build_detector_overlay,
     build_inpaint_debug_metadata,
@@ -50,6 +50,7 @@ from modules.utils.render_style_policy import (
     VERTICAL_ALIGNMENT_TOP,
     resolve_render_text_color,
 )
+from modules.utils.exceptions import OperationCancelledError
 from modules.utils.translator_utils import get_raw_translation, get_raw_text, format_translations
 from modules.rendering.render import (
     build_render_rects_for_block,
@@ -212,6 +213,16 @@ class BatchProcessor:
         callback = getattr(self.main_page, "report_runtime_progress", None)
         if not callable(callback):
             return
+        payload = dict(payload)
+        source_preview = str(payload.pop("source_preview_path", "") or "").strip()
+        if (
+            source_preview
+            and not str(payload.get("preview_path") or "").strip()
+            and str(payload.get("status") or "").strip().lower() == "running"
+            and str(payload.get("step_key") or "").strip() != "save-and-finish"
+        ):
+            payload["preview_path"] = source_preview
+            payload["preview_kind"] = "source_fallback"
         try:
             callback(payload)
         except Exception:
@@ -260,6 +271,7 @@ class BatchProcessor:
                 page_index=index,
                 page_total=total,
                 image_name=image_name,
+                source_preview_path=self._progress_image_path,
             )
         self.main_page.progress_update.emit(index, total, step, steps, change_name)
 
@@ -292,6 +304,49 @@ class BatchProcessor:
             "gemma_truncated_count": int(stats.get("gemma_truncated_count", 0) or 0),
             "gemma_empty_content_count": int(stats.get("gemma_empty_content_count", 0) or 0),
         }
+
+    def _handle_legacy_inpaint_failure(
+        self,
+        *,
+        index: int,
+        total_images: int,
+        image_path: str,
+        directory: str,
+        export_token: str,
+        base_name: str,
+        extension: str,
+        archive_bname: str,
+        image,
+        error: Exception,
+        page_ocr_metrics: dict | None = None,
+        page_translation_metrics: dict | None = None,
+    ) -> None:
+        err_msg = str(error)
+        detail = f"{type(error).__name__}: {error}\n\n{traceback.format_exc()}"
+        logger.exception("Inpaint processing failed: %s", err_msg)
+        self.main_page.image_ctrl.update_processing_summary(
+            image_path,
+            {"last_failure_reason": err_msg},
+        )
+        self.main_page.image_ctrl.mark_processing_stage(
+            image_path,
+            "inpaint",
+            "failed",
+            reason=err_msg,
+        )
+        self._emit_benchmark_event(
+            "page_failed",
+            image_path=image_path,
+            image_index=index,
+            total_images=total_images,
+            failed_stage="inpaint",
+            reason=err_msg,
+            **(page_ocr_metrics or {}),
+            **(page_translation_metrics or {}),
+        )
+        self.skip_save(directory, export_token, base_name, extension, archive_bname, image)
+        self.main_page.image_skipped.emit(image_path, "inpaint", detail)
+        self.log_skipped_image(directory, export_token, image_path, f"Inpaint: {err_msg}", detail)
 
     def _effective_export_settings(self, settings_page) -> dict:
         return dict(self.main_page.get_resolved_export_settings())
@@ -412,12 +467,17 @@ class BatchProcessor:
             preview_disabled_reason="preview_file_missing",
         )
 
-    def _resolve_export_token(self, directory: str, base_timestamp: str) -> str:
+    def _resolve_export_token(
+        self,
+        directory: str,
+        base_timestamp: str,
+        source_name: str | None = None,
+    ) -> str:
         cache = getattr(self, "_export_run_tokens", None)
         if cache is None:
             cache = {}
             self._export_run_tokens = cache
-        return reserve_export_run_token(directory, base_timestamp, cache)
+        return reserve_export_run_token(directory, base_timestamp, cache, source_name=source_name)
 
     def _write_json_exports(
         self,
@@ -433,15 +493,16 @@ class BatchProcessor:
     ) -> None:
         page_base_name = os.path.splitext(os.path.basename(image_path))[0]
         blocks = list(blk_list or [])
+        export_root = export_run_root(directory, timestamp, archive_bname)
 
         if export_settings.get("export_raw_text", False):
-            path = os.path.join(directory, f"comic_translate_{timestamp}", "raw_texts", archive_bname)
+            path = os.path.join(export_root, "raw_texts", archive_bname)
             os.makedirs(path, exist_ok=True)
             with open(os.path.join(path, f"{page_base_name}_raw.json"), "w", encoding="UTF-8") as file:
                 file.write(get_raw_text(blocks))
 
         if export_settings.get("export_translated_text", False):
-            path = os.path.join(directory, f"comic_translate_{timestamp}", "translated_texts", archive_bname)
+            path = os.path.join(export_root, "translated_texts", archive_bname)
             os.makedirs(path, exist_ok=True)
             with open(os.path.join(path, f"{page_base_name}_translated.json"), "w", encoding="UTF-8") as file:
                 file.write(get_raw_translation(blocks))
@@ -449,8 +510,7 @@ class BatchProcessor:
         if export_settings.get("export_raw_text", False) or export_settings.get("export_translated_text", False):
             ocr_summary = page_state.get("processing_summary", {})
             debug_path = os.path.join(
-                directory,
-                f"comic_translate_{timestamp}",
+                export_root,
                 "ocr_debugs",
                 archive_bname,
             )
@@ -860,8 +920,8 @@ class BatchProcessor:
                 temp_dir=getattr(self.main_page, "temp_dir", None),
             )
 
-            export_token = self._resolve_export_token(directory, timestamp)
-            export_root = export_run_root(directory, export_token)
+            export_token = self._resolve_export_token(directory, timestamp, archive_bname)
+            export_root = export_run_root(directory, export_token, archive_bname)
             self.main_page.image_ctrl.update_processing_summary(
                 image_path,
                 {
@@ -1054,6 +1114,39 @@ class BatchProcessor:
                         )
                         raise RuntimeError(err_msg)
 
+                    blk_list, schema_only_blocks = drop_layout_schema_only_ocr_blocks(blk_list)
+                    if schema_only_blocks:
+                        logger.info(
+                            "Dropped %d PaddleOCR VL schema-only OCR block(s) before inpaint for %s.",
+                            len(schema_only_blocks),
+                            os.path.basename(image_path),
+                        )
+                        quality = summarize_ocr_quality(blk_list)
+                        self._emit_benchmark_event(
+                            "ocr_schema_only_blocks_dropped",
+                            image_path=image_path,
+                            image_index=index,
+                            total_images=total_images,
+                            dropped_block_count=len(schema_only_blocks),
+                            remaining_block_count=len(blk_list or []),
+                        )
+                        if quality.get("low_quality", False):
+                            err_msg = quality.get("reason") or "No OCR text remains after dropping schema-only blocks."
+                            self.main_page.image_ctrl.update_processing_summary(
+                                image_path,
+                                {
+                                    "last_failure_reason": err_msg,
+                                    "ocr_schema_only_dropped_block_count": len(schema_only_blocks),
+                                },
+                            )
+                            self.main_page.image_ctrl.mark_processing_stage(
+                                image_path,
+                                "ocr",
+                                "failed",
+                                reason=err_msg,
+                            )
+                            raise RuntimeError(err_msg)
+
                     self._persist_ocr_state(
                         image_path,
                         blk_list,
@@ -1203,153 +1296,176 @@ class BatchProcessor:
                 block_count=len(blk_list or []),
             )
 
-            # Clean Image of text
+            try:
+                # Clean Image of text
 
-            # Use the shared inpainter from the handler
-            runtime = get_inpainter_runtime(settings_page)
-            inpainter_key = runtime["key"]
-            inpainter_backend = runtime["backend"]
-            if self.inpainting.inpainter_cache is None or self.inpainting.cached_inpainter_key != inpainter_key:
-                device = resolve_device(
-                    settings_page.is_gpu_enabled(),
-                    backend=inpainter_backend,
-                )
-                InpainterClass = inpaint_map[inpainter_key]
-                logger.info("pre-inpaint: initializing inpainter '%s' on device %s (backend=%s)", inpainter_key, device, inpainter_backend)
+                # Use the shared inpainter from the handler
+                runtime = get_inpainter_runtime(settings_page)
+                inpainter_key = runtime["key"]
+                inpainter_backend = runtime["backend"]
+                if self.inpainting.inpainter_cache is None or self.inpainting.cached_inpainter_key != inpainter_key:
+                    device = resolve_device(
+                        settings_page.is_gpu_enabled(),
+                        backend=inpainter_backend,
+                    )
+                    InpainterClass = inpaint_map[inpainter_key]
+                    logger.info("pre-inpaint: initializing inpainter '%s' on device %s (backend=%s)", inpainter_key, device, inpainter_backend)
+                    t0 = time.time()
+                    self.inpainting.inpainter_cache = InpainterClass(
+                        device,
+                        backend=inpainter_backend,
+                        runtime_device=runtime.get("device", device),
+                        inpaint_size=runtime.get("inpaint_size"),
+                        precision=runtime.get("precision"),
+                    )
+                    self.inpainting.cached_inpainter_key = inpainter_key
+                    t1 = time.time()
+                    logger.info("pre-inpaint: inpainter initialized in %.2fs", t1 - t0)
+
+                config = get_config(settings_page)
+                logger.info("pre-inpaint: generating mask (blk_list=%d blocks)", len(blk_list))
                 t0 = time.time()
-                self.inpainting.inpainter_cache = InpainterClass(
-                    device,
-                    backend=inpainter_backend,
-                    runtime_device=runtime.get("device", device),
-                    inpaint_size=runtime.get("inpaint_size"),
-                    precision=runtime.get("precision"),
+                mask_settings = settings_page.get_mask_refiner_settings()
+                mask_details = generate_mask(
+                    image,
+                    blk_list,
+                    settings=mask_settings,
+                    return_details=True,
+                    precomputed_mask_details=precomputed_mask_details,
                 )
-                self.inpainting.cached_inpainter_key = inpainter_key
+                mask = mask_details["final_mask"]
+                raw_mask = mask_details["raw_mask"]
                 t1 = time.time()
-                logger.info("pre-inpaint: inpainter initialized in %.2fs", t1 - t0)
+                logger.info("pre-inpaint: mask generated in %.2fs (mask shape=%s, refiner=%s backend=%s)", t1 - t0, getattr(mask, 'shape', None), mask_details.get("mask_refiner"), mask_details.get("refiner_backend"))
 
-            config = get_config(settings_page)
-            logger.info("pre-inpaint: generating mask (blk_list=%d blocks)", len(blk_list))
-            t0 = time.time()
-            mask_settings = settings_page.get_mask_refiner_settings()
-            mask_details = generate_mask(
-                image,
-                blk_list,
-                settings=mask_settings,
-                return_details=True,
-                precomputed_mask_details=precomputed_mask_details,
-            )
-            mask = mask_details["final_mask"]
-            raw_mask = mask_details["raw_mask"]
-            t1 = time.time()
-            logger.info("pre-inpaint: mask generated in %.2fs (mask shape=%s, refiner=%s backend=%s)", t1 - t0, getattr(mask, 'shape', None), mask_details.get("mask_refiner"), mask_details.get("refiner_backend"))
+                self.emit_progress(index, total_images, 4, 10, False)
+                if self._is_cancelled():
+                    return
 
-            self.emit_progress(index, total_images, 4, 10, False)
-            if self._is_cancelled():
+                inpaint_input_img = self.inpainting.inpaint_with_blocks(image, mask, blk_list, config=config)
+                inpaint_input_img = imk.convert_scale_abs(inpaint_input_img)
+                inpaint_edit_mask = getattr(self.inpainting, "last_inpaint_edit_mask", None)
+                if inpaint_edit_mask is not None:
+                    mask = np.where((mask > 0) | (inpaint_edit_mask > 0), 255, 0).astype(np.uint8)
+                inpaint_input_img, mask, cleanup_stats = refine_bubble_residue_inpaint(
+                    inpaint_input_img,
+                    mask,
+                    blk_list,
+                    self.inpainting.inpainter_cache,
+                    config,
+                )
+
+                patches = self.inpainting.get_inpainted_patches(mask, inpaint_input_img)
+                self.main_page.patches_processed.emit(patches, image_path)
+
+                cleaned_output_path = self._write_inpainted_debug_image(
+                    export_root=export_root,
+                    archive_bname=archive_bname,
+                    image_path=image_path,
+                    cleaned_image=inpaint_input_img,
+                    export_settings=export_settings,
+                )
+                self.main_page.image_ctrl.update_processing_summary(
+                    image_path,
+                    {"cleaned_image_path": cleaned_output_path},
+                )
+                self.main_page.image_ctrl.update_processing_summary(
+                    image_path,
+                    {
+                        "inpainter": settings_page.get_tool_selection('inpainter'),
+                        "hd_strategy": hd_strategy,
+                        "cleanup_applied": bool(cleanup_stats.get("applied", False)),
+                        "cleanup_component_count": int(cleanup_stats.get("component_count", 0) or 0),
+                        "cleanup_block_count": int(cleanup_stats.get("block_count", 0) or 0),
+                    },
+                )
+                debug_paths = self._write_inpaint_debug_exports(
+                    export_root=export_root,
+                    archive_bname=archive_bname,
+                    image_path=image_path,
+                    image=image,
+                    blk_list=blk_list,
+                    export_settings=export_settings,
+                    raw_mask=raw_mask,
+                    final_mask=mask,
+                    detector_key=detector_key,
+                    detector_engine=detector_engine,
+                    detector_device=detector_device,
+                    inpainter_key=inpainter_key,
+                    hd_strategy=hd_strategy,
+                    cleanup_stats=cleanup_stats,
+                    mask_details=mask_details,
+                    inpainter_backend=inpainter_backend,
+                )
+                self._maybe_emit_preview_image(
+                    index=index,
+                    total=total_images,
+                    image_path=image_path,
+                    stage_key="raw_mask",
+                    stage_label="원본 마스크",
+                    export_settings=export_settings,
+                    preferred_path=debug_paths.get("raw_mask", ""),
+                )
+                self._maybe_emit_preview_image(
+                    index=index,
+                    total=total_images,
+                    image_path=image_path,
+                    stage_key="mask_overlay",
+                    stage_label="마스크 오버레이",
+                    export_settings=export_settings,
+                    preferred_path=debug_paths.get("mask_overlay", ""),
+                )
+                self._maybe_emit_preview_image(
+                    index=index,
+                    total=total_images,
+                    image_path=image_path,
+                    stage_key="cleanup_delta",
+                    stage_label="정리 마스크 변화량",
+                    export_settings=export_settings,
+                    preferred_path=debug_paths.get("cleanup_delta", ""),
+                )
+                self._maybe_emit_preview_image(
+                    index=index,
+                    total=total_images,
+                    image_path=image_path,
+                    stage_key="inpainted_image",
+                    stage_label="인페인트 결과",
+                    export_settings=export_settings,
+                    preferred_path=cleaned_output_path,
+                )
+                self.main_page.image_ctrl.mark_processing_stage(
+                    image_path,
+                    "inpaint",
+                    "completed",
+                    patch_count=len(patches or []),
+                )
+                self._emit_benchmark_event(
+                    "inpaint_end",
+                    image_path=image_path,
+                    image_index=index,
+                    total_images=total_images,
+                    block_count=len(blk_list or []),
+                    patch_count=len(patches or []),
+                )
+            except OperationCancelledError:
+                self._emit_benchmark_event("batch_run_cancelled", image_path=image_path, image_index=index, total_images=total_images)
                 return
-
-            inpaint_input_img = self.inpainting.inpaint_with_blocks(image, mask, blk_list, config=config)
-            inpaint_input_img = imk.convert_scale_abs(inpaint_input_img)
-            inpaint_input_img, mask, cleanup_stats = refine_bubble_residue_inpaint(
-                inpaint_input_img,
-                mask,
-                blk_list,
-                self.inpainting.inpainter_cache,
-                config,
-            )
-
-            patches = self.inpainting.get_inpainted_patches(mask, inpaint_input_img)
-            self.main_page.patches_processed.emit(patches, image_path)
-
-            cleaned_output_path = self._write_inpainted_debug_image(
-                export_root=export_root,
-                archive_bname=archive_bname,
-                image_path=image_path,
-                cleaned_image=inpaint_input_img,
-                export_settings=export_settings,
-            )
-            self.main_page.image_ctrl.update_processing_summary(
-                image_path,
-                {"cleaned_image_path": cleaned_output_path},
-            )
-            self.main_page.image_ctrl.update_processing_summary(
-                image_path,
-                {
-                    "inpainter": settings_page.get_tool_selection('inpainter'),
-                    "hd_strategy": hd_strategy,
-                    "cleanup_applied": bool(cleanup_stats.get("applied", False)),
-                    "cleanup_component_count": int(cleanup_stats.get("component_count", 0) or 0),
-                    "cleanup_block_count": int(cleanup_stats.get("block_count", 0) or 0),
-                },
-            )
-            debug_paths = self._write_inpaint_debug_exports(
-                export_root=export_root,
-                archive_bname=archive_bname,
-                image_path=image_path,
-                image=image,
-                blk_list=blk_list,
-                export_settings=export_settings,
-                raw_mask=raw_mask,
-                final_mask=mask,
-                detector_key=detector_key,
-                detector_engine=detector_engine,
-                detector_device=detector_device,
-                inpainter_key=inpainter_key,
-                hd_strategy=hd_strategy,
-                cleanup_stats=cleanup_stats,
-                mask_details=mask_details,
-                inpainter_backend=inpainter_backend,
-            )
-            self._maybe_emit_preview_image(
-                index=index,
-                total=total_images,
-                image_path=image_path,
-                stage_key="raw_mask",
-                stage_label="원본 마스크",
-                export_settings=export_settings,
-                preferred_path=debug_paths.get("raw_mask", ""),
-            )
-            self._maybe_emit_preview_image(
-                index=index,
-                total=total_images,
-                image_path=image_path,
-                stage_key="mask_overlay",
-                stage_label="마스크 오버레이",
-                export_settings=export_settings,
-                preferred_path=debug_paths.get("mask_overlay", ""),
-            )
-            self._maybe_emit_preview_image(
-                index=index,
-                total=total_images,
-                image_path=image_path,
-                stage_key="cleanup_delta",
-                stage_label="정리 마스크 변화량",
-                export_settings=export_settings,
-                preferred_path=debug_paths.get("cleanup_delta", ""),
-            )
-            self._maybe_emit_preview_image(
-                index=index,
-                total=total_images,
-                image_path=image_path,
-                stage_key="inpainted_image",
-                stage_label="인페인트 결과",
-                export_settings=export_settings,
-                preferred_path=cleaned_output_path,
-            )
-            self.main_page.image_ctrl.mark_processing_stage(
-                image_path,
-                "inpaint",
-                "completed",
-                patch_count=len(patches or []),
-            )
-            self._emit_benchmark_event(
-                "inpaint_end",
-                image_path=image_path,
-                image_index=index,
-                total_images=total_images,
-                block_count=len(blk_list or []),
-                patch_count=len(patches or []),
-            )
+            except Exception as e:
+                self._handle_legacy_inpaint_failure(
+                    index=index,
+                    total_images=total_images,
+                    image_path=image_path,
+                    directory=directory,
+                    export_token=export_token,
+                    base_name=base_name,
+                    extension=extension,
+                    archive_bname=archive_bname,
+                    image=image,
+                    error=e,
+                    page_ocr_metrics=page_ocr_metrics,
+                    page_translation_metrics=page_translation_metrics,
+                )
+                continue
 
             self.emit_progress(index, total_images, 5, 10, False)
             if self._is_cancelled():
@@ -1628,6 +1744,18 @@ class BatchProcessor:
                     ),
                     return_metrics=True
                 )
+                blk._text_fit_status = (
+                    "needs_review"
+                    if rendered_width > block_width or rendered_height > block_height
+                    else "fit"
+                )
+                blk._text_fit_metrics = {
+                    "rendered_width": float(rendered_width),
+                    "rendered_height": float(rendered_height),
+                    "box_width": float(block_width),
+                    "box_height": float(block_height),
+                    "font_size": float(font_size),
+                }
                 
                 # Language-specific formatting for state storage
                 if is_no_space_lang(trg_lng_cd):
@@ -1737,6 +1865,12 @@ class BatchProcessor:
                 )
                 text_item_state["render_normalization_reasons"] = list(
                     blk._render_normalization_reasons
+                )
+                text_item_state["text_fit_status"] = str(
+                    getattr(blk, "_text_fit_status", "fit") or "fit"
+                )
+                text_item_state["text_fit_metrics"] = dict(
+                    getattr(blk, "_text_fit_metrics", {}) or {}
                 )
                 text_items_state.append(text_item_state)
 

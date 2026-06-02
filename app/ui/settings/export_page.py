@@ -25,7 +25,7 @@ class ExportPage(QtWidgets.QWidget):
         batch_label = MLabel(self.tr("Automatic Mode")).h4()
         batch_note = MLabel(
             self.tr(
-                "Selected exports are saved to comic_translate_<timestamp> in the same directory as the input file/archive."
+                "Selected automatic-mode export artifacts are saved to log_<source>_<timestamp> in the same directory as the input file/archive."
             )
         ).secondary()
         batch_note.setWordWrap(True)

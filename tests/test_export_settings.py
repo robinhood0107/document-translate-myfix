@@ -4,6 +4,13 @@ import unittest
 from types import SimpleNamespace
 from unittest import mock
 
+import os
+
+os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+
+from PySide6 import QtWidgets
+
+from app.ui.settings.export_page import ExportPage
 from app.ui.settings.settings_page import SettingsPage
 
 
@@ -81,6 +88,10 @@ class _FakePage:
 
 
 class ExportSettingsTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls._app = QtWidgets.QApplication.instance() or QtWidgets.QApplication([])
+
     def test_get_export_settings_includes_debug_flags(self) -> None:
         page = _FakePage()
         with mock.patch("app.ui.settings.settings_page.QSettings", return_value=_FakeQSettings()):
@@ -108,6 +119,16 @@ class ExportSettingsTests(unittest.TestCase):
         self.assertFalse(settings["auto_export_source_md"])
         self.assertTrue(settings["auto_export_translation_txt"])
         self.assertFalse(settings["auto_export_translation_md"])
+
+    def test_export_page_help_text_uses_source_named_log_folder(self) -> None:
+        page = ExportPage()
+
+        label_text = "\n".join(
+            label.text() for label in page.findChildren(QtWidgets.QLabel)
+        )
+
+        self.assertIn("log_<source>_<timestamp>", label_text)
+        self.assertNotIn("comic_translate_<timestamp>", label_text)
 
 
 if __name__ == "__main__":
