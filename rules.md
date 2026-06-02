@@ -114,6 +114,18 @@ Windows launcher/runtime 변경이 포함되면 아래 검증도 추가한다.
 python scripts/verify_windows_launchers.py
 ```
 
+Nuitka 패키징, 릴리스 workflow, release asset 경로, pinned Windows 런타임, 또는 `main` 승격 릴리스 후보를 다루는 변경은 CI 전에 Windows 로컬에서 실제 빌드 가능성을 먼저 확인한다.
+
+- Windows PowerShell에서 repo 루트 기준으로 실행한다. WSL 검증은 대체로 인정하지 않는다.
+- 최소 확인:
+  - `python scripts/compile_translations.py --check`
+  - `./scripts/build_windows_gpu_portable.ps1 -AppVersion "<version>"`
+  - `./scripts/build_windows_gpu_onefile.ps1 -AppVersion "<version>" -OutputName "comic-translate-gpu-cuda13" -NoCompression`
+- CUDA12 release asset, CUDA12 runtime, 또는 CUDA12 packaging을 건드렸다면 아래도 추가한다.
+  - `./scripts/build_windows_gpu_onefile.ps1 -AppVersion "<version>" -OutputName "comic-translate-gpu-cuda12" -NoCompression`
+- PR 본문에는 실행한 Windows 명령, 성공 여부, 생성된 `build/nuitka-*` 산출물 경로를 적는다.
+- 이 로컬 Windows Nuitka 확인 뒤에 main 승격 PR, main preflight CI, 태그 기반 release CI 순서로 진행한다.
+
 ## 4. 커밋 규칙
 
 커밋 제목은 아래 형식을 기본으로 사용한다.
@@ -242,7 +254,9 @@ public/free 저장소의 ruleset은 보호 브랜치, PR 강제, 상태 체크, 
 CD는 `main`에 포함된 `vX.Y.Z` 태그 기반 릴리스만 공식 경로로 인정한다.
 
 - `develop`에서 충분히 검증된 변경만 `main`으로 승격
+- Nuitka/release 후보는 `main` 승격 전에 Windows 로컬에서 실제 Nuitka 빌드 성공을 먼저 확인
 - `main`에 포함된 커밋에만 버전 태그(`vX.Y.Z`) 생성
+- `main` 반영 후 Windows release-preflight CI로 Nuitka 빌드를 다시 확인
 - 해당 태그에서 Windows `Nuitka` 빌드 + GitHub Release 자산 생성
 - `develop`이나 feature 브랜치에 달린 태그는 공식 릴리스로 취급하지 않음
 - 필요 시 `pre-release` 표기
@@ -264,6 +278,7 @@ GitHub 저장소 설정에서 아래를 권장한다.
 
 - `main`에는 운영 필수 문서만 허용한다.
   - 루트: `README.md`, `README_ko.md`, `rules.md`
+  - GitHub 운영: `.github/PULL_REQUEST_TEMPLATE.md`
   - 설치/운영: `docs/setup/quickstart*.md`
   - 운영 문서: `docs/gemma/*.md`, `docs/hunyuan/*.md`, `docs/repo/github-rulesets-public-free-ko.md`, `hunyuanocr_docker_files/README.md`, `paddleocr_vl_docker_files/README.md`
 - `develop`에는 개발/감사/정책 문서를 허용한다.
@@ -286,6 +301,7 @@ GitHub 저장소 설정에서 아래를 권장한다.
 - 첫 push면 `git push -u origin <branch>`를 했는가
 - 이후 push가 최신 상태인가
 - Windows launcher/runtime 관련 변경이면 `python scripts/verify_windows_launchers.py`를 돌렸는가
+- Nuitka/release/main 승격 후보이면 Windows 로컬 PowerShell에서 Nuitka portable/onefile 빌드를 먼저 성공시켰는가
 - PR이 열려 있거나 최신 커밋이 반영되었는가
 
 사용자가 명시적으로 `로컬만` 원한 경우에만 push 요구를 예외로 둔다.
