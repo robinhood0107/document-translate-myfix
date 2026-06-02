@@ -191,6 +191,10 @@ def serialize_inpaint_block(block, index: int) -> dict:
         "rescue_mask_pixel_count": int(getattr(block, "_rescue_mask_pixel_count", 0) or 0),
         "final_mask_pixel_count": int(getattr(block, "_final_mask_pixel_count", 0) or 0),
         "hard_box_metrics": dict(getattr(block, "_hard_box_metrics", {}) or {}),
+        "erase_mode": str(getattr(block, "_erase_mode", "") or ""),
+        "erase_edit_pixel_count": int(getattr(block, "_erase_edit_pixel_count", 0) or 0),
+        "erase_protect_pixel_count": int(getattr(block, "_erase_protect_pixel_count", 0) or 0),
+        "erase_skipped_reason": str(getattr(block, "_erase_skipped_reason", "") or ""),
     }
 
 
@@ -279,6 +283,10 @@ def build_inpaint_debug_metadata(
         "pass2_bubble_kept_count": int(cleanup_stats.get("pass2_bubble_kept_count", 0) or 0),
         "pass2_text_free_candidate_count": int(cleanup_stats.get("pass2_text_free_candidate_count", 0) or 0),
         "pass2_text_free_kept_count": int(cleanup_stats.get("pass2_text_free_kept_count", 0) or 0),
+        "pass2_residue_mask_pre_cap_pixel_count": int(cleanup_stats.get("residue_mask_pre_cap_pixel_count", 0) or 0),
+        "pass2_residue_mask_cap_pixel_count": int(cleanup_stats.get("residue_mask_cap_pixel_count", 0) or 0),
+        "pass2_residue_mask_cap_dilate_px": int(cleanup_stats.get("residue_mask_cap_dilate_px", 0) or 0),
+        "pass2_backend": str(cleanup_stats.get("pass2_backend", "") or ""),
         "pass2_name": str(cleanup_stats.get("pass_name", "") or ""),
         "blocks": [serialize_inpaint_block(block, idx) for idx, block in enumerate(block_list)],
     }

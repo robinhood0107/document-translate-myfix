@@ -1344,6 +1344,9 @@ class BatchProcessor:
 
                 inpaint_input_img = self.inpainting.inpaint_with_blocks(image, mask, blk_list, config=config)
                 inpaint_input_img = imk.convert_scale_abs(inpaint_input_img)
+                inpaint_edit_mask = getattr(self.inpainting, "last_inpaint_edit_mask", None)
+                if inpaint_edit_mask is not None:
+                    mask = np.where((mask > 0) | (inpaint_edit_mask > 0), 255, 0).astype(np.uint8)
                 inpaint_input_img, mask, cleanup_stats = refine_bubble_residue_inpaint(
                     inpaint_input_img,
                     mask,

@@ -10,6 +10,7 @@ from dataclasses import dataclass, field
 from typing import Any, Callable
 
 import imkit as imk
+import numpy as np
 from PySide6.QtCore import QCoreApplication
 from PySide6.QtGui import QColor
 
@@ -671,6 +672,9 @@ class StageBatchedProcessor(BatchProcessor):
                 ctx.inpaint_input_img = self.inpainting.inpaint_with_blocks(ctx.image, ctx.mask, ctx.blk_list, config=config)
                 self._raise_if_cancelled()
                 ctx.inpaint_input_img = imk.convert_scale_abs(ctx.inpaint_input_img)
+                inpaint_edit_mask = getattr(self.inpainting, "last_inpaint_edit_mask", None)
+                if inpaint_edit_mask is not None:
+                    ctx.mask = np.where((ctx.mask > 0) | (inpaint_edit_mask > 0), 255, 0).astype(np.uint8)
                 ctx.inpaint_input_img, ctx.mask, ctx.cleanup_stats = refine_bubble_residue_inpaint(
                     ctx.inpaint_input_img,
                     ctx.mask,
