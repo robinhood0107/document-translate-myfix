@@ -18,7 +18,14 @@ from modules.utils.exceptions import (
     LocalServiceResponseError,
 )
 from modules.utils.gpu_metrics import query_gpu_metrics_cached
-from modules.utils.ocr_debug import OCR_STATUS_EMPTY_INITIAL, OCR_STATUS_OK, ensure_three_channel, expand_bbox, set_block_ocr_diagnostics
+from modules.utils.ocr_debug import (
+    OCR_EMPTY_REASON_LAYOUT_SCHEMA_LABELS,
+    OCR_STATUS_EMPTY_INITIAL,
+    OCR_STATUS_OK,
+    ensure_three_channel,
+    expand_bbox,
+    set_block_ocr_diagnostics,
+)
 from modules.utils.text_normalization import (
     DECORATIVE_NOISE_GLYPHS,
     normalize_decorative_ocr_text,
@@ -56,7 +63,7 @@ class PaddleOCRVLEngine(OCREngine):
         }
     )
     STRONG_LAYOUT_SCHEMA_TOKENS = frozenset({"footnote", "header_image", "footer_image", "aside_text"})
-    LAYOUT_SCHEMA_EMPTY_REASON = "PaddleOCR VL returned layout schema labels instead of OCR text."
+    LAYOUT_SCHEMA_EMPTY_REASON = OCR_EMPTY_REASON_LAYOUT_SCHEMA_LABELS
 
     def __init__(self) -> None:
         self.server_url = self.DEFAULT_SERVER_URL
