@@ -7,6 +7,7 @@ import subprocess
 import sys
 
 ALLOWED_DOC_PATTERNS = (
+    re.compile(r"^\.github/PULL_REQUEST_TEMPLATE\.md$"),
     re.compile(r"^README\.md$"),
     re.compile(r"^README_ko\.md$"),
     re.compile(r"^rules\.md$"),
@@ -21,15 +22,7 @@ ALLOWED_DOC_PATTERNS = (
 
 def git_diff_name_status(base_sha: str, head_sha: str) -> list[list[str]]:
     result = subprocess.run(
-        [
-            "git",
-            "-c",
-            "core.quotepath=false",
-            "diff",
-            "--name-status",
-            "--find-renames",
-            f"{base_sha}..{head_sha}",
-        ],
+        ["git", "diff", "--name-status", "--find-renames", f"{base_sha}..{head_sha}"],
         check=True,
         capture_output=True,
         text=True,

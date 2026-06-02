@@ -20,7 +20,7 @@ class _Signal:
 
 
 class _FakeUpdateChecker:
-    def __init__(self) -> None:
+    def __init__(self, *_args, **_kwargs) -> None:
         self.update_available = _Signal()
         self.up_to_date = _Signal()
         self.error_occurred = _Signal()

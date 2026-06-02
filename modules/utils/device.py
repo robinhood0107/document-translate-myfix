@@ -29,6 +29,8 @@ def prepare_windows_onnxruntime_dlls() -> None:
                 root / "nvidia" / "cuda_runtime" / "bin",
                 root / "nvidia" / "cuda_nvrtc" / "bin",
                 root / "nvidia" / "nvjitlink" / "bin",
+                root / "nvidia" / "cu12" / "bin" / "x86_64",
+                root / "nvidia" / "cu13" / "bin" / "x86_64",
             ]
         )
 

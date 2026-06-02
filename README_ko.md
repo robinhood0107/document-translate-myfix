@@ -1,8 +1,8 @@
 [English](README.md) | [한국어](README_ko.md)
 
-# Document Translate
+# Comic Translate 포크
 
-Document Translate는 upstream `comic-translate` `v2.6.7` 코드베이스에서 시작한 뒤, 로컬 런타임/OCR/워크플로/Windows 환경 쪽으로 제품화 수정을 누적한 local-first 데스크톱 번역 워크플로입니다.
+이 저장소는 upstream `comic-translate` `v2.6.7` 코드베이스에서 시작한 뒤, 로컬 런타임/OCR/워크플로/Windows 환경 쪽으로 제품화 수정을 누적한 local-first 포크입니다.
 
 이 포크는 아래 워크플로를 중심으로 유지됩니다.
 
@@ -94,8 +94,7 @@ OCR:
 - `develop`: 다음 제품 작업을 통합하는 브랜치
 - `main`: 실제 출하 기준선
 - 공식 릴리스: `main`에 포함된 커밋에만 `vX.Y.Z` 버전 태그를 달아 GitHub Release 생성
-- 버전 태그 생성 전: `main`에서 `Release Preflight` 워크플로를 먼저 실행해 Windows Nuitka 빌드 green 확인
-- Windows 릴리스 자산: 해당 태그에서 `Nuitka`로 portable zip 1개와 단일 exe 1개를 빌드해 업로드
+- Windows 릴리스 자산: 해당 태그에서 `Nuitka`로 exe 패키징 후 업로드
 - 모델, 체크포인트, Docker 런타임은 exe에 포함하지 않고 별도 준비 대상으로 유지
 - `release/*` 브랜치는 사용하지 않음
 
@@ -160,7 +159,10 @@ OCR:
 - target language 확장과 RTL 개선
 - webtoon/list-view 관련 선택 이식 수정
 
-상세 검수 문서는 `develop`에만 유지하고, 공개용 `main` 문서 세트에는 승격하지 않습니다.
+검수 문서:
+
+- [docs/history/v267-to-v270-backport-audit.md](docs/history/v267-to-v270-backport-audit.md)
+- [docs/history/v267-to-v270-backport-audit-ko.md](docs/history/v267-to-v270-backport-audit-ko.md)
 
 ### `v2.7.0 -> v2.7.1`
 
@@ -172,7 +174,10 @@ OCR:
 - import 메뉴에서 `Project File` 옆 `PSD` 정리
 - 앱 버전 `2.7.1` 반영
 
-상세 검수 문서는 `develop`에만 유지하고, 공개용 `main` 문서 세트에는 승격하지 않습니다.
+검수 문서:
+
+- [docs/history/v270-to-v271-backport-audit.md](docs/history/v270-to-v271-backport-audit.md)
+- [docs/history/v270-to-v271-backport-audit-ko.md](docs/history/v270-to-v271-backport-audit-ko.md)
 
 ## 빠른 사용법
 
@@ -259,14 +264,15 @@ Settings에서 아래 중 하나를 선택합니다.
 ## 저장소 문서
 
 - [rules.md](rules.md)
-`main`의 공개 문서 세트는 최소 운영 문서만 남기며, 더 깊은 변경 이력과 감사 문서는 `develop`에 유지합니다.
+- [docs/history/change-log.md](docs/history/change-log.md)
+- [docs/history/change-log-ko.md](docs/history/change-log-ko.md)
 - [docs/gemma/local-server-ko.md](docs/gemma/local-server-ko.md)
 - [docs/hunyuan/local-server-ko.md](docs/hunyuan/local-server-ko.md)
 - [docs/repo/github-rulesets-public-free-ko.md](docs/repo/github-rulesets-public-free-ko.md)
 
 ## Legacy Localized README
 
-공개 브랜치 기준 source of truth는 루트 `README.md`, `README_ko.md`입니다.
+`docs/i18n/` 아래 예전 localized README는 더 이상 source of truth가 아닙니다.
 
 현재 기준 문서는 아래 둘입니다.
 

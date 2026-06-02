@@ -12,6 +12,7 @@ OCR_STATUS_OK = "ok"
 OCR_STATUS_EMPTY_INITIAL = "empty_initial"
 OCR_STATUS_OK_AFTER_RETRY = "ok_after_retry"
 OCR_STATUS_EMPTY_AFTER_RETRY = "empty_after_retry"
+OCR_EMPTY_REASON_LAYOUT_SCHEMA_LABELS = "PaddleOCR VL returned layout schema labels instead of OCR text."
 DEFAULT_RETRY_CROP_X_RATIO = 0.06
 DEFAULT_RETRY_CROP_Y_RATIO = 0.10
 
@@ -246,6 +247,25 @@ def is_block_ocr_empty(block) -> bool:
         OCR_STATUS_EMPTY_INITIAL,
         OCR_STATUS_EMPTY_AFTER_RETRY,
     }
+
+
+def is_layout_schema_only_ocr_rejection(block) -> bool:
+    return (
+        is_block_ocr_empty(block)
+        and not str(getattr(block, "text", "") or "").strip()
+        and str(getattr(block, "ocr_empty_reason", "") or "") == OCR_EMPTY_REASON_LAYOUT_SCHEMA_LABELS
+    )
+
+
+def drop_layout_schema_only_ocr_blocks(blocks) -> tuple[list, list]:
+    kept = []
+    dropped = []
+    for block in list(blocks or []):
+        if is_layout_schema_only_ocr_rejection(block):
+            dropped.append(block)
+        else:
+            kept.append(block)
+    return kept, dropped
 
 
 def build_ocr_debug_payload(
