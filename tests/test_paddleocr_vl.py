@@ -11,6 +11,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 from app.ui.settings.settings_page import SettingsPage
 from modules.ocr.factory import OCRFactory
 from modules.ocr.ocr_paddle_VL import PaddleOCRVLEngine
+from modules.utils.ocr_debug import drop_layout_schema_only_ocr_blocks
 from modules.utils import gpu_metrics as gpu_metrics_module
 from modules.utils.textblock import TextBlock
 
@@ -243,6 +244,33 @@ class PaddleOCRVLEngineTests(unittest.TestCase):
         self.assertEqual(blocks[0].ocr_sanitized_text, "")
         self.assertIn("layout schema labels", blocks[0].ocr_empty_reason)
         self.assertEqual(engine.last_page_profile["request_records"][0]["status"], "schema_only")
+
+    def test_schema_only_layout_blocks_are_dropped_before_masking(self) -> None:
+        engine = PaddleOCRVLEngine()
+        engine.initialize(_FakeSettings(scheduler_mode="fixed", parallel_workers=1))
+        img = np.zeros((300, 300, 3), dtype=np.uint8)
+        schema_block = _make_block(10, 10, 110, 110)
+        valid_block = _make_block(130, 10, 230, 110)
+        schema_text = "\n".join(
+            [
+                "number",
+                "footnote",
+                "header",
+                "header_image",
+                "footer",
+                "footer_image",
+                "aside_text",
+                "ocr",
+            ]
+        )
+
+        with mock.patch.object(engine, "_request_ocr_text", side_effect=[schema_text, "PATREON.COM/YTSNOW"]):
+            engine.process_image(img, [schema_block, valid_block])
+
+        kept, dropped = drop_layout_schema_only_ocr_blocks([schema_block, valid_block])
+
+        self.assertEqual(kept, [valid_block])
+        self.assertEqual(dropped, [schema_block])
 
     def test_schema_words_inside_real_paddleocr_vl_text_are_preserved(self) -> None:
         engine = PaddleOCRVLEngine()

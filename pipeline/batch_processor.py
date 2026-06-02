@@ -25,7 +25,7 @@ from modules.utils.correction_dictionary import (
     apply_ocr_result_dictionary,
     apply_translation_result_dictionary,
 )
-from modules.utils.ocr_debug import export_ocr_debug_artifacts
+from modules.utils.ocr_debug import drop_layout_schema_only_ocr_blocks, export_ocr_debug_artifacts
 from modules.utils.inpaint_debug import (
     build_detector_overlay,
     build_inpaint_debug_metadata,
@@ -1113,6 +1113,39 @@ class BatchProcessor:
                             attempt_count=attempt_count,
                         )
                         raise RuntimeError(err_msg)
+
+                    blk_list, schema_only_blocks = drop_layout_schema_only_ocr_blocks(blk_list)
+                    if schema_only_blocks:
+                        logger.info(
+                            "Dropped %d PaddleOCR VL schema-only OCR block(s) before inpaint for %s.",
+                            len(schema_only_blocks),
+                            os.path.basename(image_path),
+                        )
+                        quality = summarize_ocr_quality(blk_list)
+                        self._emit_benchmark_event(
+                            "ocr_schema_only_blocks_dropped",
+                            image_path=image_path,
+                            image_index=index,
+                            total_images=total_images,
+                            dropped_block_count=len(schema_only_blocks),
+                            remaining_block_count=len(blk_list or []),
+                        )
+                        if quality.get("low_quality", False):
+                            err_msg = quality.get("reason") or "No OCR text remains after dropping schema-only blocks."
+                            self.main_page.image_ctrl.update_processing_summary(
+                                image_path,
+                                {
+                                    "last_failure_reason": err_msg,
+                                    "ocr_schema_only_dropped_block_count": len(schema_only_blocks),
+                                },
+                            )
+                            self.main_page.image_ctrl.mark_processing_stage(
+                                image_path,
+                                "ocr",
+                                "failed",
+                                reason=err_msg,
+                            )
+                            raise RuntimeError(err_msg)
 
                     self._persist_ocr_state(
                         image_path,
