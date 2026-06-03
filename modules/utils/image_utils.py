@@ -99,6 +99,32 @@ def _ctd_details(
     refiner_backend = str(ctd_result.backend or "ctd")
     final_mask = protected_mask
     legacy_fallback_details: dict[str, Any] | None = None
+    legacy_rescue_details: dict[str, Any] | None = None
+    hard_box_rescue_used = False
+
+    if block_list:
+        legacy_rescue_details = _legacy_details(
+            img,
+            block_list,
+            cfg,
+            default_padding=default_padding,
+        )
+        rescue_mask = np.where(
+            np.asarray(legacy_rescue_details.get("hard_box_rescue_mask")) > 0,
+            255,
+            0,
+        ).astype(np.uint8)
+        if np.any(rescue_mask):
+            protected_rescue_mask = np.where(
+                (rescue_mask > 0) & (np.asarray(protect_mask) <= 0),
+                255,
+                0,
+            ).astype(np.uint8)
+            before_count = int(np.count_nonzero(final_mask))
+            final_mask = np.where((final_mask > 0) | (protected_rescue_mask > 0), 255, 0).astype(np.uint8)
+            hard_box_rescue_used = int(np.count_nonzero(final_mask)) > before_count
+            if hard_box_rescue_used:
+                refiner_backend = f"{refiner_backend}+hard_box_rescue"
 
     if not np.any(final_mask) and np.any(ctd_final_mask):
         final_mask = ctd_final_mask.copy()
@@ -106,7 +132,7 @@ def _ctd_details(
         refiner_backend = f"{refiner_backend}+protect_fallback"
 
     if not np.any(final_mask) and block_list:
-        legacy_fallback_details = _legacy_details(
+        legacy_fallback_details = legacy_rescue_details or _legacy_details(
             img,
             block_list,
             cfg,
@@ -139,15 +165,17 @@ def _ctd_details(
         "refiner_backend": refiner_backend,
         "refiner_device": str(cfg.get("ctd_device", "cuda") or "cuda"),
         "fallback_used": fallback_used,
+        "hard_box_rescue_used": hard_box_rescue_used,
         "mask_inpaint_mode": str(cfg.get("mask_inpaint_mode", DEFAULT_MASK_INPAINT_MODE) or DEFAULT_MASK_INPAINT_MODE),
     }
-    if legacy_fallback_details:
-        details["legacy_base_mask"] = legacy_fallback_details.get("legacy_base_mask")
-        details["hard_box_rescue_mask"] = legacy_fallback_details.get("hard_box_rescue_mask")
-        details["hard_box_applied_count"] = int(legacy_fallback_details.get("hard_box_applied_count", 0) or 0)
-        details["hard_box_reason_totals"] = dict(legacy_fallback_details.get("hard_box_reason_totals", {}) or {})
-        details["legacy_base_mask_pixel_count"] = int(legacy_fallback_details.get("legacy_base_mask_pixel_count", 0) or 0)
-        details["hard_box_rescue_mask_pixel_count"] = int(legacy_fallback_details.get("hard_box_rescue_mask_pixel_count", 0) or 0)
+    legacy_details = legacy_fallback_details or legacy_rescue_details
+    if legacy_details:
+        details["legacy_base_mask"] = legacy_details.get("legacy_base_mask")
+        details["hard_box_rescue_mask"] = legacy_details.get("hard_box_rescue_mask")
+        details["hard_box_applied_count"] = int(legacy_details.get("hard_box_applied_count", 0) or 0)
+        details["hard_box_reason_totals"] = dict(legacy_details.get("hard_box_reason_totals", {}) or {})
+        details["legacy_base_mask_pixel_count"] = int(legacy_details.get("legacy_base_mask_pixel_count", 0) or 0)
+        details["hard_box_rescue_mask_pixel_count"] = int(legacy_details.get("hard_box_rescue_mask_pixel_count", 0) or 0)
     return details
 
 
