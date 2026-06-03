@@ -97,7 +97,7 @@ docker compose -f paddleocr_vl_docker_files/docker-compose.yaml pull --policy al
 docker compose -f paddleocr_vl_docker_files/docker-compose.yaml up -d --force-recreate
 ```
 
-bundle 파일 설명은 [/paddleocr_vl_docker_files/README.md](/mnt/c/Users/pjjpj/Desktop/openai_manga_translater/comic-translate/paddleocr_vl_docker_files/README.md)를 참고하세요.
+bundle 파일 설명은 [/paddleocr_vl_docker_files/README.md](/paddleocr_vl_docker_files/README.md)를 참고하세요.
 
 ## 4. 권장 앱 설정
 
@@ -158,10 +158,10 @@ OCR:
 
 ## 7. 같이 보면 좋은 문서
 
-- [/README.md](/mnt/c/Users/pjjpj/Desktop/openai_manga_translater/comic-translate/README.md)
-- [/README_ko.md](/mnt/c/Users/pjjpj/Desktop/openai_manga_translater/comic-translate/README_ko.md)
-- [/docs/gemma/local-server-ko.md](/mnt/c/Users/pjjpj/Desktop/openai_manga_translater/comic-translate/docs/gemma/local-server-ko.md)
-- [/docs/hunyuan/local-server-ko.md](/mnt/c/Users/pjjpj/Desktop/openai_manga_translater/comic-translate/docs/hunyuan/local-server-ko.md)
+- [/README.md](/README.md)
+- [/README_ko.md](/README_ko.md)
+- [/docs/gemma/local-server-ko.md](/docs/gemma/local-server-ko.md)
+- [/docs/hunyuan/local-server-ko.md](/docs/hunyuan/local-server-ko.md)
 
 ## 8. 공식 Windows 릴리스 패키지
 

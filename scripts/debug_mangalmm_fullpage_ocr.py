@@ -220,7 +220,7 @@ def _process_image(
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Debug full-page single-shot MangaLMM OCR with Sample/simpletest.")
+    parser = argparse.ArgumentParser(description="Debug full-page single-shot MangaLMM OCR with local simple test input.")
     parser.add_argument(
         "--input-dir",
         type=Path,
