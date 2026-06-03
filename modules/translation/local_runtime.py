@@ -177,6 +177,7 @@ class LocalGemmaRuntimeManager:
                 message="Gemma 상태를 확인하는 중...",
                 detail=f"Endpoint: {_RUNTIME_CONFIG['managed_url']}",
             )
+            started_or_recreated = False
             if self._wait_for_any_probe(
                 [_RUNTIME_CONFIG["health_url"], _RUNTIME_CONFIG["models_url"]],
                 timeout_sec=2,
@@ -192,24 +193,43 @@ class LocalGemmaRuntimeManager:
                     step_key="health_probe",
                     message="이미 실행 중인 Gemma 런타임을 재사용합니다.",
                 )
-                self._validate_model_with_progress(api_base_url, model_name, progress_callback)
-                self._log_runtime_metadata()
-                return
+                try:
+                    self._validate_model_with_progress(api_base_url, model_name, progress_callback)
+                except LocalServiceResponseError as exc:
+                    self._emit_progress(
+                        progress_callback,
+                        status="starting",
+                        step_key="compose_recreate",
+                        message="Gemma 모델이 설정과 달라 컨테이너를 다시 시작하는 중...",
+                        detail=str(exc),
+                    )
+                    self._run_compose("up", "-d", "--force-recreate", step_name="recreate", model_name=model_name)
+                    started_or_recreated = True
+                    self._emit_progress(
+                        progress_callback,
+                        status="completed",
+                        step_key="compose_recreate",
+                        message="Gemma 컨테이너 재시작 명령을 보냈습니다.",
+                    )
+                else:
+                    self._log_runtime_metadata()
+                    return
 
-            self._emit_progress(
-                progress_callback,
-                status="starting",
-                step_key="compose_up",
-                message="Gemma 컨테이너를 시작하는 중...",
-                detail="docker compose up -d",
-            )
-            self._run_compose("up", "-d", step_name="up", model_name=model_name)
-            self._emit_progress(
-                progress_callback,
-                status="completed",
-                step_key="compose_up",
-                message="Gemma 컨테이너 시작 명령을 보냈습니다.",
-            )
+            if not started_or_recreated:
+                self._emit_progress(
+                    progress_callback,
+                    status="starting",
+                    step_key="compose_up",
+                    message="Gemma 컨테이너를 시작하는 중...",
+                    detail="docker compose up -d",
+                )
+                self._run_compose("up", "-d", step_name="up", model_name=model_name)
+                self._emit_progress(
+                    progress_callback,
+                    status="completed",
+                    step_key="compose_up",
+                    message="Gemma 컨테이너 시작 명령을 보냈습니다.",
+                )
             if not self._wait_for_any_probe(
                 [_RUNTIME_CONFIG["health_url"], _RUNTIME_CONFIG["models_url"]],
                 timeout_sec=timeout_sec,

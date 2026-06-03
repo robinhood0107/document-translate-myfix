@@ -1376,48 +1376,34 @@ class ImageStateController:
             if file_path in self.main.image_states:
                 state = self.main.image_states[file_path]
 
-                # Skip state loading for newly inserted images (which have empty viewer_state)
-                # This prevents loading of incomplete state or invalid transform data.
-                # As soon as an image is saved once, it will have a populated viewer_state.
-                if state.get('viewer_state'):
+                viewer_state = state.get('viewer_state', {})
+                if not isinstance(viewer_state, dict):
+                    viewer_state = {}
+                    state['viewer_state'] = viewer_state
+                push_to_stack = viewer_state.get('push_to_stack', False)
 
-                    push_to_stack = state.get('viewer_state', {}).get('push_to_stack', False)
+                self.main.blk_list = list(state.get('blk_list', []))
+                viewer.load_state(viewer_state)
+                # Block signals to prevent triggering save when loading state
+                self.main.s_combo.blockSignals(True)
+                self.main.t_combo.blockSignals(True)
+                self.main.s_combo.setCurrentText(state.get('source_lang', self.main.s_combo.currentText()))
+                self.main.t_combo.setCurrentText(state.get('target_lang', self.main.t_combo.currentText()))
+                self.main.s_combo.blockSignals(False)
+                self.main.t_combo.blockSignals(False)
+                viewer.load_brush_strokes(state.get('brush_strokes', []))
 
-                    self.main.blk_list = state['blk_list'].copy()  # Load a copy of the list, not a reference
-                    viewer.load_state(state['viewer_state'])
-                    # Block signals to prevent triggering save when loading state
-                    self.main.s_combo.blockSignals(True)
-                    self.main.t_combo.blockSignals(True)
-                    self.main.s_combo.setCurrentText(state['source_lang'])
-                    self.main.t_combo.setCurrentText(state['target_lang'])
-                    self.main.s_combo.blockSignals(False)
-                    self.main.t_combo.blockSignals(False)
-                    viewer.load_brush_strokes(state['brush_strokes'])
+                # add_text_item/add_rectangle used by load_state already emit the
+                # viewer's connect_* signals, so no extra signal wiring is needed here.
+                if push_to_stack:
+                    self.main.undo_stacks[file_path].beginMacro('text_items_rendered')
+                    for text_item in viewer.text_items:
+                        command = AddTextItemCommand(self.main, text_item)
+                        self.main.undo_stacks[file_path].push(command)
+                    self.main.undo_stacks[file_path].endMacro()
+                    viewer_state.update({'push_to_stack': False})
 
-                    # add_text_item/add_rectangle used by load_state already emit the
-                    # viewer's connect_* signals, so no extra signal wiring is needed here.
-                    if push_to_stack:
-                        self.main.undo_stacks[file_path].beginMacro('text_items_rendered')
-                        for text_item in viewer.text_items:
-                            command = AddTextItemCommand(self.main, text_item)
-                            self.main.undo_stacks[file_path].push(command)
-                        self.main.undo_stacks[file_path].endMacro()
-                        state['viewer_state'].update({'push_to_stack': False})
-
-                    self.load_patch_state(file_path)
-                else:
-                    # New image - just set language preferences and clear everything else
-                    self.main.blk_list = []
-                    # Block signals to prevent triggering save when loading state
-                    self.main.s_combo.blockSignals(True)
-                    self.main.t_combo.blockSignals(True)
-                    self.main.s_combo.setCurrentText(state.get('source_lang', self.main.s_combo.currentText()))
-                    self.main.t_combo.setCurrentText(state.get('target_lang', self.main.t_combo.currentText()))
-                    self.main.s_combo.blockSignals(False)
-                    self.main.t_combo.blockSignals(False)
-                    viewer.clear_rectangles(page_switch=True)
-                    viewer.clear_brush_strokes(page_switch=True)
-                    viewer.clear_text_items()
+                self.load_patch_state(file_path)
 
             self.main.text_ctrl.clear_text_edits()
         finally:

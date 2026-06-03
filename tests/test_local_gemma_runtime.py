@@ -41,11 +41,14 @@ class LocalGemmaRuntimeManagerTests(unittest.TestCase):
         self.assertEqual(validate_model.call_count, 1)
         self.assertTrue(any(event.get("readiness_cache_hit") for event in events))
 
-    def test_model_mismatch_does_not_seed_readiness_cache(self) -> None:
+    def test_managed_model_mismatch_recreates_container_and_seeds_readiness_cache(self) -> None:
         manager = LocalGemmaRuntimeManager()
-        settings_page = _DummyGemmaSettingsPage()
+        settings_page = _DummyGemmaSettingsPage(api_url="http://127.0.0.1:18080/v1")
+        events: list[dict] = []
 
-        with mock.patch.object(manager, "_wait_for_any_probe", return_value=True) as wait_for_probe, \
+        with mock.patch("modules.translation.local_runtime.Path.is_file", return_value=True), \
+             mock.patch.object(manager, "_wait_for_any_probe", side_effect=[True, True]) as wait_for_probe, \
+             mock.patch.object(manager, "_run_compose") as run_compose, \
              mock.patch.object(
                  manager,
                  "_validate_model_with_progress",
@@ -58,11 +61,19 @@ class LocalGemmaRuntimeManagerTests(unittest.TestCase):
                      None,
                  ],
              ):
-            with self.assertRaises(LocalServiceResponseError):
-                manager.ensure_server(settings_page)
-            manager.ensure_server(settings_page)
+            manager.ensure_server(settings_page, progress_callback=events.append)
+            manager.ensure_server(settings_page, progress_callback=events.append)
 
         self.assertEqual(wait_for_probe.call_count, 2)
+        run_compose.assert_called_once_with(
+            "up",
+            "-d",
+            "--force-recreate",
+            step_name="recreate",
+            model_name="gemma-test.gguf",
+        )
+        self.assertTrue(any(event.get("step_key") == "compose_recreate" for event in events))
+        self.assertTrue(any(event.get("readiness_cache_hit") for event in events))
 
     def test_connection_failure_does_not_seed_readiness_cache(self) -> None:
         manager = LocalGemmaRuntimeManager()

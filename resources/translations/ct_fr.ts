@@ -162,6 +162,10 @@ Choisissez soit un fichier de projet, soit uniquement des fichiers image/documen
         <translation type="unfinished"></translation>
     </message>
     <message>
+        <source>Finalizing archive... %p%</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
         <source>취소 중...</source>
         <translation type="unfinished"></translation>
     </message>
@@ -279,6 +283,18 @@ Doublons :
     </message>
     <message>
         <source>자동번역이 완료되었습니다.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>페이지 처리가 완료되었습니다. 최종 아카이브 생성 중...</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Failed to apply automatic archive output result.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>최종 아카이브 생성에 실패했습니다.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
@@ -1253,6 +1269,10 @@ Veuillez essayer un outil différent.</translation>
     <message>
         <source>OK</source>
         <translation>OK</translation>
+    </message>
+    <message>
+        <source>Please Wait</source>
+        <translation type="unfinished"></translation>
     </message>
     <message>
         <source>Required fields: {fields}</source>
@@ -4328,6 +4348,10 @@ Voulez-vous le restaurer ?</translation>
         <translation type="unfinished"></translation>
     </message>
     <message>
+        <source>Creating project file...</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
         <source>A project file already exists at this location.
 
 {path}
@@ -4425,6 +4449,10 @@ It may have been moved, renamed, or deleted.
         <translation type="unfinished"></translation>
     </message>
     <message>
+        <source>Scanning series folder...</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
         <source>Create Series Project</source>
         <translation type="unfinished"></translation>
     </message>
@@ -4434,6 +4462,10 @@ It may have been moved, renamed, or deleted.
     </message>
     <message>
         <source>Series Project Files (*.seriesctpr);;All Files (*)</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Creating series project...</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
@@ -4454,6 +4486,10 @@ It may have been moved, renamed, or deleted.
     </message>
     <message>
         <source>Add Folder To Series</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Saving series project file...</source>
         <translation type="unfinished"></translation>
     </message>
     <message>

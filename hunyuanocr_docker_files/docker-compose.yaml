@@ -20,9 +20,9 @@ services:
       start_period: 20s
     command:
       - -m
-      - /models/HunyuanOCR-BF16.gguf
+      - /models/HunyuanOCR.Q8_0.gguf
       - --mmproj
-      - /models/mmproj-HunyuanOCR-BF16.gguf
+      - /models/HunyuanOCR.mmproj-Q8_0.gguf
       - --host
       - 0.0.0.0
       - --port
@@ -37,3 +37,5 @@ services:
       - "0"
       - --n-gpu-layers
       - "${LLAMA_N_GPU_LAYERS:-99}"
+      - --image-max-tokens
+      - "${LLAMA_IMAGE_MAX_TOKENS:-1024}"

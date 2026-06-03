@@ -1,13 +1,19 @@
 from __future__ import annotations
 
 import os
+import tempfile
 import unittest
+import zipfile
 from types import SimpleNamespace
 from unittest import mock
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
+import numpy as np
+from PIL import Image as PILImage
+
 from controller import ComicTranslate
+from modules.utils.automatic_output import OUTPUT_TARGET_ARCHIVE
 
 
 class _Toggle:
@@ -36,15 +42,23 @@ class _WidgetState:
 
 
 class _ImageCtrl:
-    def __init__(self, page_states: dict[str, dict[str, str]]) -> None:
+    def __init__(self, page_states: dict[str, dict]) -> None:
         self._page_states = page_states
         self.cleared_paths: list[str] | None = None
+        self.summary_updates: list[tuple[str, dict]] = []
 
     def ensure_page_state(self, path: str) -> dict[str, str]:
         return self._page_states[path]
 
     def clear_page_skip_errors_for_paths(self, paths: list[str]) -> None:
         self.cleared_paths = list(paths)
+
+    def update_processing_summary(self, path: str, patch: dict) -> dict:
+        state = self._page_states.setdefault(path, {})
+        summary = state.setdefault("processing_summary", {})
+        summary.update(patch)
+        self.summary_updates.append((path, dict(patch)))
+        return summary
 
 
 class _BatchReportCtrl:
@@ -60,6 +74,12 @@ class _DummyController(SimpleNamespace):
 
 
 class ControllerBatchPreflightTests(unittest.TestCase):
+    @staticmethod
+    def _write_png(path: str, value: int = 0) -> None:
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        image = np.full((4, 4, 3), value, dtype=np.uint8)
+        PILImage.fromarray(image).save(path, format="PNG")
+
     def _build_controller(self) -> _DummyController:
         page_states = {
             "page-a.png": {"target_lang": "English", "source_lang": "Japanese"},
@@ -121,6 +141,179 @@ class ControllerBatchPreflightTests(unittest.TestCase):
 
         controller._confirm_and_apply_auto_languages.assert_called_once_with(["page-a.png"], "one_page_auto")
         controller._start_batch_process_for_paths.assert_called_once_with(["page-a.png"], run_type="one_page_auto")
+
+    def test_finalize_single_archive_output_builds_cbz_from_staging_dir(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            series_dir = os.path.join(temp_dir, "series")
+            staging_dir = os.path.join(series_dir, ".archive_staging_test")
+            os.makedirs(staging_dir)
+            staged_a = os.path.join(staging_dir, "001.png")
+            staged_b = os.path.join(staging_dir, "002.png")
+            self._write_png(staged_a, 16)
+            self._write_png(staged_b, 32)
+
+            page_a = os.path.join(temp_dir, "source-a.png")
+            page_b = os.path.join(temp_dir, "source-b.png")
+            page_states = {
+                page_a: {
+                    "processing_summary": {
+                        "translated_image_path": staged_a,
+                        "export_root": series_dir,
+                    }
+                },
+                page_b: {
+                    "processing_summary": {
+                        "translated_image_path": staged_b,
+                        "export_root": series_dir,
+                    }
+                },
+            }
+            controller = _DummyController()
+            controller.image_states = page_states
+            controller.image_ctrl = _ImageCtrl(page_states)
+            controller._txt_md_bundle_name = lambda: "demo"
+            controller.temp_dir = temp_dir
+            controller._last_runtime_preview_path = ""
+            controller.file_handler = SimpleNamespace(archive_info=[])
+            controller.export_source_by_path = {}
+            controller.project_file = None
+            controller.get_resolved_export_settings = lambda: {
+                "resolved_automatic_output_target": OUTPUT_TARGET_ARCHIVE,
+                "resolved_automatic_output_archive_format": "cbz",
+                "resolved_automatic_output_archive_image_format": "png",
+                "resolved_automatic_output_archive_compression_level": 6,
+            }
+
+            archive_path = ComicTranslate._finalize_single_archive_output(controller, [page_a, page_b])
+
+            self.assertEqual(archive_path, os.path.join(series_dir, "demo_translated.cbz"))
+            self.assertTrue(os.path.isfile(archive_path))
+            self.assertFalse(os.path.exists(staging_dir))
+            with zipfile.ZipFile(archive_path) as archive:
+                self.assertEqual(archive.namelist(), ["001_source-a.png", "002_source-b.png"])
+            for page_path in (page_a, page_b):
+                summary = page_states[page_path]["processing_summary"]
+                self.assertEqual(summary["translated_image_path"], archive_path)
+                self.assertEqual(summary["export_root"], series_dir)
+
+    def test_finalize_archive_output_saves_next_to_original_archive(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            source_archive = os.path.join(temp_dir, "我的妈妈被损友穿上了 v01 c01 (E).cbz")
+            with open(source_archive, "wb") as handle:
+                handle.write(b"placeholder")
+            series_dir = os.path.join(temp_dir, "result")
+            staging_dir = os.path.join(series_dir, ".archive_staging_test")
+            staged_a = os.path.join(staging_dir, "001.png")
+            staged_b = os.path.join(staging_dir, "002.png")
+            self._write_png(staged_a, 16)
+            self._write_png(staged_b, 32)
+
+            page_a = os.path.join(temp_dir, "extract", "001.png")
+            page_b = os.path.join(temp_dir, "extract", "002.png")
+            page_states = {
+                page_a: {"processing_summary": {"translated_image_path": staged_a, "export_root": series_dir}},
+                page_b: {"processing_summary": {"translated_image_path": staged_b, "export_root": series_dir}},
+            }
+            controller = _DummyController()
+            controller.image_states = page_states
+            controller.image_ctrl = _ImageCtrl(page_states)
+            controller._txt_md_bundle_name = lambda: "fallback"
+            controller.temp_dir = temp_dir
+            controller._last_runtime_preview_path = ""
+            controller.file_handler = SimpleNamespace(archive_info=[])
+            controller.export_source_by_path = {
+                page_a: {"kind": "archive", "source_path": source_archive},
+                page_b: {"kind": "archive", "source_path": source_archive},
+            }
+            controller.project_file = None
+            controller.get_resolved_export_settings = lambda: {
+                "resolved_automatic_output_target": OUTPUT_TARGET_ARCHIVE,
+                "resolved_automatic_output_archive_format": "cbz",
+                "resolved_automatic_output_archive_image_format": "png",
+                "resolved_automatic_output_archive_compression_level": 6,
+            }
+
+            archive_path = ComicTranslate._finalize_single_archive_output(controller, [page_a, page_b])
+
+            expected = os.path.join(temp_dir, "我的妈妈被损友穿上了 v01 c01 (E)_translated.cbz")
+            self.assertEqual(archive_path, expected)
+            self.assertTrue(os.path.isfile(expected))
+            self.assertFalse(os.path.exists(staging_dir))
+            with zipfile.ZipFile(expected) as archive:
+                self.assertEqual(archive.namelist(), ["001_001.png", "002_002.png"])
+            for page_path in (page_a, page_b):
+                summary = page_states[page_path]["processing_summary"]
+                self.assertEqual(summary["translated_image_path"], expected)
+                self.assertEqual(summary["export_root"], temp_dir)
+
+    def test_finalize_archive_output_includes_original_when_no_rendered_page_exists(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            page = os.path.join(temp_dir, "no-text-page.png")
+            self._write_png(page, 48)
+            page_states = {page: {"processing_summary": {}}}
+            controller = _DummyController()
+            controller.image_states = page_states
+            controller.image_ctrl = _ImageCtrl(page_states)
+            controller._txt_md_bundle_name = lambda: "fallback"
+            controller.temp_dir = temp_dir
+            controller._last_runtime_preview_path = ""
+            controller.file_handler = SimpleNamespace(archive_info=[])
+            controller.export_source_by_path = {}
+            controller.project_file = None
+            controller.get_resolved_export_settings = lambda: {
+                "resolved_automatic_output_target": OUTPUT_TARGET_ARCHIVE,
+                "resolved_automatic_output_archive_format": "cbz",
+                "resolved_automatic_output_archive_image_format": "png",
+                "resolved_automatic_output_archive_compression_level": 6,
+            }
+
+            archive_path = ComicTranslate._finalize_single_archive_output(controller, [page])
+
+            expected = os.path.join(temp_dir, "no-text-page_translated.cbz")
+            self.assertEqual(archive_path, expected)
+            self.assertTrue(os.path.isfile(expected))
+            with zipfile.ZipFile(expected) as archive:
+                self.assertEqual(archive.namelist(), ["001_no-text-page.png"])
+
+    def test_build_archive_output_reports_progress_before_applying_state(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            page = os.path.join(temp_dir, "page.png")
+            self._write_png(page, 64)
+            page_states = {page: {"processing_summary": {}}}
+            controller = _DummyController()
+            controller.image_states = page_states
+            controller.image_ctrl = _ImageCtrl(page_states)
+            controller._txt_md_bundle_name = lambda: "demo"
+            controller.temp_dir = temp_dir
+            controller._last_runtime_preview_path = ""
+            controller.file_handler = SimpleNamespace(archive_info=[])
+            controller.export_source_by_path = {}
+            controller.project_file = None
+            controller.get_resolved_export_settings = lambda: {
+                "resolved_automatic_output_target": OUTPUT_TARGET_ARCHIVE,
+                "resolved_automatic_output_archive_format": "cbz",
+                "resolved_automatic_output_archive_image_format": "png",
+                "resolved_automatic_output_archive_compression_level": 6,
+            }
+            events: list[dict] = []
+
+            result = ComicTranslate._build_single_archive_output(
+                controller,
+                [page],
+                progress_callback=events.append,
+            )
+
+            archive_path = os.path.join(temp_dir, "page_translated.cbz")
+            self.assertEqual(result["archive_path"], archive_path)
+            self.assertTrue(os.path.isfile(archive_path))
+            self.assertEqual(page_states[page]["processing_summary"], {})
+            self.assertTrue(any("압축" in str(event.get("message", "")) for event in events))
+
+            ComicTranslate._apply_single_archive_output_result(controller, result)
+
+            summary = page_states[page]["processing_summary"]
+            self.assertEqual(summary["translated_image_path"], archive_path)
+            self.assertEqual(summary["export_root"], temp_dir)
 
 
 if __name__ == "__main__":

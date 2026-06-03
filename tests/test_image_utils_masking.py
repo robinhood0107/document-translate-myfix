@@ -49,6 +49,57 @@ class ImageUtilsMaskingTests(unittest.TestCase):
         self.assertGreater(int(np.count_nonzero(details["protect_mask"])), 0)
         self.assertEqual(int(np.count_nonzero(details["final_mask"])), int(np.count_nonzero(base_mask)) - 4)
 
+    def test_generate_mask_ctd_path_unions_hard_box_rescue_without_protected_pixels(self) -> None:
+        image = np.zeros((16, 16, 3), dtype=np.uint8)
+        block = TextBlock(
+            text_bbox=np.array([2, 2, 10, 10]),
+            text_class="text_free",
+        )
+        ctd_mask = np.zeros((16, 16), dtype=np.uint8)
+        ctd_mask[2:4, 2:4] = 255
+        protect_mask = np.zeros((16, 16), dtype=np.uint8)
+        protect_mask[5:6, 5:6] = 255
+        rescue_mask = np.zeros((16, 16), dtype=np.uint8)
+        rescue_mask[5:8, 5:8] = 255
+        legacy_details = {
+            "legacy_base_mask": np.zeros((16, 16), dtype=np.uint8),
+            "hard_box_rescue_mask": rescue_mask,
+            "hard_box_applied_count": 1,
+            "hard_box_reason_totals": {"color_core_detected": 1},
+            "legacy_base_mask_pixel_count": 0,
+            "hard_box_rescue_mask_pixel_count": int(np.count_nonzero(rescue_mask)),
+        }
+
+        with (
+            mock.patch("modules.utils.image_utils.CTDRefiner") as refiner_cls,
+            mock.patch("modules.utils.image_utils.build_protect_mask", return_value=protect_mask),
+            mock.patch(
+                "modules.utils.image_utils.build_legacy_bbox_mask_details",
+                return_value=legacy_details,
+            ),
+        ):
+            refiner_cls.return_value.refine.return_value = SimpleNamespace(
+                raw_mask=ctd_mask.copy(),
+                refined_mask=ctd_mask.copy(),
+                final_mask=ctd_mask.copy(),
+                backend="torch",
+                device="cuda",
+                fallback_used=False,
+            )
+            details = generate_mask(
+                image,
+                [block],
+                settings={"mask_refiner": "ctd", "keep_existing_lines": True},
+                return_details=True,
+            )
+
+        final_mask = details["final_mask"]
+        self.assertTrue(details["hard_box_rescue_used"])
+        self.assertIn("hard_box_rescue", details["refiner_backend"])
+        self.assertEqual(int(final_mask[5, 5]), 0)
+        self.assertEqual(int(final_mask[6, 6]), 255)
+        self.assertEqual(int(final_mask[2, 2]), 255)
+
     def test_generate_mask_legacy_mode_still_uses_legacy_builder(self) -> None:
         image = np.zeros((8, 8, 3), dtype=np.uint8)
         legacy_details = {
