@@ -2689,6 +2689,14 @@ These values are copied into new series projects and can be adjusted per series.
         <source>Select Color</source>
         <translation>색상 선택</translation>
     </message>
+    <message>
+        <source>Creates one ZIP/CBZ after the queue finishes. Use this when you want a single translated archive.</source>
+        <translation>대기열이 끝난 뒤 ZIP/CBZ 하나를 만듭니다. 번역 결과를 단일 아카이브로 저장할 때 사용합니다.</translation>
+    </message>
+    <message>
+        <source>Saves translated pages as individual image files and skips final ZIP/CBZ creation, so the series can move to the next item faster.</source>
+        <translation>번역된 페이지를 개별 이미지 파일로 저장하고 최종 ZIP/CBZ 생성을 건너뜁니다. 시리즈가 다음 항목으로 더 빠르게 넘어갑니다.</translation>
+    </message>
 </context>
 <context>
     <name>SeriesTreeJumpDialog</name>
@@ -4200,6 +4208,18 @@ It may have already been moved, renamed, or deleted.
     <message>
         <source>Render: {font} / max {max_font} / line {line_spacing} / {align} / {outline}</source>
         <translation>렌더링: {font} / 최대 {max_font} / 줄 {line_spacing} / {align} / {outline}</translation>
+    </message>
+    <message>
+        <source>Single archive ({format})</source>
+        <translation>단일 아카이브({format})</translation>
+    </message>
+    <message>
+        <source>same as source</source>
+        <translation>원본과 동일</translation>
+    </message>
+    <message>
+        <source>Individual images ({format})</source>
+        <translation>개별 이미지({format})</translation>
     </message>
     <message>
         <source>Export: {target} / debug {count} enabled</source>

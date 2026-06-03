@@ -170,6 +170,7 @@ class SeriesWorkspaceRuntimeTests(unittest.TestCase):
         self.assertEqual(self.widget.status_panel.state_value.text(), "Idle")
         self.assertIn("Ownglyph gumama3", self.widget.quick_settings.render_summary_label.text())
         self.assertIn("max 40", self.widget.quick_settings.render_summary_label.text())
+        self.assertIn("Individual images", self.widget.quick_settings.export_summary_label.text())
         self.assertIn("debug 1 enabled", self.widget.quick_settings.export_summary_label.text())
         self.assertTrue(self.widget.status_panel.pause_button.isHidden())
         self.assertTrue(self.widget.status_panel.resume_button.isHidden())
@@ -327,6 +328,11 @@ class SeriesWorkspaceRuntimeTests(unittest.TestCase):
         self.assertGreaterEqual(dialog.output_target_combo.findData(OUTPUT_TARGET_IMAGES), 0)
         self.assertGreaterEqual(dialog.output_target_combo.findData(OUTPUT_TARGET_ARCHIVE), 0)
         self.assertEqual(dialog.output_target_combo.currentData(), OUTPUT_TARGET_ARCHIVE)
+        self.assertTrue(dialog.output_image_format_row.isHidden())
+        self.assertFalse(dialog.output_archive_format_row.isHidden())
+        self.assertFalse(dialog.output_archive_image_format_row.isHidden())
+        self.assertFalse(dialog.output_archive_level_row.isHidden())
+        self.assertIn("ZIP/CBZ", dialog.output_mode_note_label.text())
 
         dialog.output_target_combo.setCurrentIndex(
             dialog.output_target_combo.findData(OUTPUT_TARGET_IMAGES)
@@ -337,6 +343,11 @@ class SeriesWorkspaceRuntimeTests(unittest.TestCase):
             global_settings["export_settings"]["automatic_output_target"],
             OUTPUT_TARGET_IMAGES,
         )
+        self.assertFalse(dialog.output_image_format_row.isHidden())
+        self.assertTrue(dialog.output_archive_format_row.isHidden())
+        self.assertTrue(dialog.output_archive_image_format_row.isHidden())
+        self.assertTrue(dialog.output_archive_level_row.isHidden())
+        self.assertIn("skips final ZIP/CBZ", dialog.output_mode_note_label.text())
 
     def test_paused_queue_shows_resume_and_unlocks_reorder(self) -> None:
         self.widget.set_navigation_state(can_back=False, can_forward=False)
