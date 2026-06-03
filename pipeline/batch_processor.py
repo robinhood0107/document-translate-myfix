@@ -1070,7 +1070,7 @@ class BatchProcessor:
                     quality = summarize_ocr_quality(blk_list)
                     self._log_ocr_quality(image_path, quality, attempt_count)
 
-                    if quality.get("low_quality", False):
+                    if quality.get("low_quality", False) and int(quality.get("non_empty", 0) or 0) > 0:
                         attempt_count += 1
                         logger.info(
                             "ocr quality gate triggered retry for %s: %s",
@@ -1130,7 +1130,7 @@ class BatchProcessor:
                             dropped_block_count=len(schema_only_blocks),
                             remaining_block_count=len(blk_list or []),
                         )
-                        if quality.get("low_quality", False):
+                        if quality.get("low_quality", False) and int(quality.get("non_empty", 0) or 0) > 0:
                             err_msg = quality.get("reason") or "No OCR text remains after dropping schema-only blocks."
                             self.main_page.image_ctrl.update_processing_summary(
                                 image_path,
@@ -1146,6 +1146,102 @@ class BatchProcessor:
                                 reason=err_msg,
                             )
                             raise RuntimeError(err_msg)
+
+                    if not blk_list or int(quality.get("non_empty", 0) or 0) <= 0:
+                        blk_list = []
+                        page_state = self._ensure_page_state(image_path)
+                        page_state["blk_list"] = []
+                        page_state.setdefault("viewer_state", {})["rectangles"] = []
+                        self.main_page.image_ctrl.mark_processing_stage(
+                            image_path,
+                            "ocr",
+                            "completed",
+                            reason="no_text_detected",
+                            quality=quality,
+                            cache_status=cache_status,
+                            attempt_count=attempt_count,
+                        )
+                        page_ocr_metrics = self._ocr_quality_metrics(quality)
+                        self._emit_benchmark_event(
+                            "ocr_end",
+                            image_path=image_path,
+                            image_index=index,
+                            total_images=total_images,
+                            block_count=0,
+                            ocr_model=ocr_model,
+                            ocr_engine=self.ocr_handler.ocr.last_engine_name or "",
+                            cache_status=cache_status,
+                            attempt_count=attempt_count,
+                            skip_reason="no_text_detected",
+                            **page_ocr_metrics,
+                        )
+                        self.main_page.image_ctrl.mark_processing_stage(
+                            image_path,
+                            "inpaint",
+                            "skipped",
+                            reason="no_text_detected",
+                        )
+                        self.main_page.image_ctrl.mark_processing_stage(
+                            image_path,
+                            "translation",
+                            "skipped",
+                            reason="no_text_detected",
+                        )
+                        self.main_page.image_ctrl.mark_processing_stage(
+                            image_path,
+                            "render",
+                            "completed",
+                            text_item_count=0,
+                            reason="no_text_detected",
+                        )
+                        page_state.setdefault("viewer_state", {}).update(
+                            {"text_items_state": [], "push_to_stack": True}
+                        )
+                        self.main_page.image_ctrl.mark_processing_stage(
+                            image_path,
+                            "pipeline",
+                            "completed",
+                            reason="no_text_detected",
+                        )
+                        self.main_page.render_state_ready.emit(image_path)
+                        final_output_path, final_output_root = self._write_final_render_export(
+                            directory,
+                            export_token,
+                            image_path,
+                            image,
+                            [],
+                            page_state.get("viewer_state", {}),
+                            export_settings,
+                            page_index=index,
+                            total_pages=total_images,
+                        )
+                        self.main_page.image_ctrl.update_processing_summary(
+                            image_path,
+                            {
+                                "translated_image_path": final_output_path,
+                                "translated_page_image_path": final_output_path,
+                                "export_root": final_output_root,
+                                "skip_reason": "no_text_detected",
+                            },
+                        )
+                        self._emit_benchmark_event(
+                            "page_done",
+                            image_path=image_path,
+                            image_index=index,
+                            total_images=total_images,
+                            block_count=0,
+                            patch_count=0,
+                            skip_reason="no_text_detected",
+                            **page_ocr_metrics,
+                        )
+                        self._log_page_done(
+                            index,
+                            total_images,
+                            image_path,
+                            preview_path=final_output_path,
+                        )
+                        self.emit_progress(index, total_images, 10, 10, False)
+                        continue
 
                     self._persist_ocr_state(
                         image_path,
@@ -1246,8 +1342,9 @@ class BatchProcessor:
                 self.main_page.image_ctrl.mark_processing_stage(
                     image_path,
                     "detect",
-                    "failed",
+                    "completed",
                     reason="No text blocks detected.",
+                    block_count=0,
                 )
                 self._write_inpaint_debug_exports(
                     export_root=export_root,
@@ -1270,18 +1367,79 @@ class BatchProcessor:
                     },
                     inpainter_backend=get_inpainter_runtime(settings_page)["backend"],
                 )
-                self.skip_save(directory, export_token, base_name, extension, archive_bname, image)
-                self.main_page.image_skipped.emit(image_path, "Text Blocks", "")
-                self.log_skipped_image(directory, export_token, image_path, "No text blocks detected")
+                self.main_page.image_ctrl.mark_processing_stage(
+                    image_path,
+                    "ocr",
+                    "skipped",
+                    reason="no_text_detected",
+                )
+                self.main_page.image_ctrl.mark_processing_stage(
+                    image_path,
+                    "inpaint",
+                    "skipped",
+                    reason="no_text_detected",
+                )
+                self.main_page.image_ctrl.mark_processing_stage(
+                    image_path,
+                    "translation",
+                    "skipped",
+                    reason="no_text_detected",
+                )
+                self.main_page.image_ctrl.mark_processing_stage(
+                    image_path,
+                    "render",
+                    "completed",
+                    text_item_count=0,
+                    reason="no_text_detected",
+                )
+                page_state.setdefault("viewer_state", {}).update(
+                    {"text_items_state": [], "push_to_stack": True}
+                )
+                page_state["blk_list"] = []
+                self.main_page.image_ctrl.mark_processing_stage(
+                    image_path,
+                    "pipeline",
+                    "completed",
+                    reason="no_text_detected",
+                )
+                self.main_page.render_state_ready.emit(image_path)
+                final_output_path, final_output_root = self._write_final_render_export(
+                    directory,
+                    export_token,
+                    image_path,
+                    image,
+                    [],
+                    page_state.get("viewer_state", {}),
+                    export_settings,
+                    page_index=index,
+                    total_pages=total_images,
+                )
+                self.main_page.image_ctrl.update_processing_summary(
+                    image_path,
+                    {
+                        "translated_image_path": final_output_path,
+                        "translated_page_image_path": final_output_path,
+                        "export_root": final_output_root,
+                        "skip_reason": "no_text_detected",
+                    },
+                )
                 self._emit_benchmark_event(
-                    "page_failed",
+                    "page_done",
                     image_path=image_path,
                     image_index=index,
                     total_images=total_images,
-                    failed_stage="detect",
-                    reason="No text blocks detected.",
+                    block_count=0,
+                    patch_count=0,
+                    skip_reason="no_text_detected",
                     **page_ocr_metrics,
                 )
+                self._log_page_done(
+                    index,
+                    total_images,
+                    image_path,
+                    preview_path=final_output_path,
+                )
+                self.emit_progress(index, total_images, 10, 10, False)
                 continue
 
             self.emit_progress(index, total_images, 3, 10, False)
@@ -1927,6 +2085,7 @@ class BatchProcessor:
                 image_path,
                 {
                     "translated_image_path": final_output_path,
+                    "translated_page_image_path": final_output_path,
                     "export_root": final_output_root,
                 },
             )

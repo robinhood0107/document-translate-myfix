@@ -557,8 +557,14 @@ class SeriesController(QtCore.QObject):
             return
 
         self.main.loading.setVisible(True)
+        scan_dialog = Messages.show_busy(
+            self.main,
+            self.main.tr("Scanning series folder..."),
+            title=self.main.tr("Create Series Project"),
+        )
 
         def on_result(paths: list[str]) -> None:
+            Messages.close_busy(scan_dialog, force=True)
             self.main.loading.setVisible(False)
             if not paths:
                 QtWidgets.QMessageBox.information(
@@ -596,12 +602,25 @@ class SeriesController(QtCore.QObject):
             global_settings = self._series_global_settings_from_main()
             series_settings = self.main.settings_page.get_series_settings()
             self.main.loading.setVisible(True)
+            create_dialog = Messages.show_busy(
+                self.main,
+                self.main.tr("Creating series project..."),
+                title=self.main.tr("Create Series Project"),
+            )
+
+            def on_create_error(error_tuple) -> None:
+                Messages.close_busy(create_dialog, force=True)
+                self.main.default_error_handler(error_tuple)
+
+            def on_create_finished() -> None:
+                Messages.close_busy(create_dialog)
+                self.main.loading.setVisible(False)
 
             self.main.run_threaded(
                 self._build_series_project_worker,
                 lambda state: self._apply_new_series_result(target_path, state),
-                self.main.default_error_handler,
-                lambda: self.main.loading.setVisible(False),
+                on_create_error,
+                on_create_finished,
                 target_path,
                 root_dir,
                 selected_paths,
@@ -610,6 +629,7 @@ class SeriesController(QtCore.QObject):
             )
 
         def on_error(error_tuple) -> None:
+            Messages.close_busy(scan_dialog, force=True)
             self.main.loading.setVisible(False)
             self.main.default_error_handler(error_tuple)
 
@@ -617,7 +637,7 @@ class SeriesController(QtCore.QObject):
             scan_series_source_files,
             on_result,
             on_error,
-            None,
+            lambda: Messages.close_busy(scan_dialog, force=True),
             root_dir,
         )
 
@@ -1151,10 +1171,18 @@ class SeriesController(QtCore.QObject):
             target_path or self.series_file,
             SERIES_PROJECT_FILE_EXT,
         )
+        self.main.loading.setVisible(True)
+        busy_dialog = Messages.show_busy(
+            self.main,
+            self.main.tr("Saving series project file..."),
+            title=self.main.tr("Project File"),
+        )
         if self.is_child_project_active():
             try:
                 self.sync_active_child_to_series()
             except Exception as exc:
+                Messages.close_busy(busy_dialog, force=True)
+                self.main.loading.setVisible(False)
                 QtWidgets.QMessageBox.warning(
                     self.main,
                     self.main.tr("Save Series Project"),
@@ -1163,7 +1191,6 @@ class SeriesController(QtCore.QObject):
                     ),
                 )
                 return False
-        self.main.loading.setVisible(True)
 
         def worker() -> str:
             target_dir = os.path.dirname(os.path.abspath(target))
@@ -1190,12 +1217,17 @@ class SeriesController(QtCore.QObject):
             self.main.set_project_clean()
             self.main.project_ctrl.clear_recovery_checkpoint()
 
+        def on_error(error_tuple) -> None:
+            Messages.close_busy(busy_dialog, force=True)
+            self.main.default_error_handler(error_tuple)
+
         def on_finished() -> None:
+            Messages.close_busy(busy_dialog)
             self.main.loading.setVisible(False)
             if post_save_callback is not None:
                 post_save_callback()
 
-        self.main.run_threaded(worker, on_result, self.main.default_error_handler, on_finished)
+        self.main.run_threaded(worker, on_result, on_error, on_finished)
         return True
 
     def _update_queue_runtime(

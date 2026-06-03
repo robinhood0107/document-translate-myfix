@@ -162,6 +162,10 @@ Choose either a project file or image/document/archive files.</source>
         <translation>Gemma와 OCR 준비를 확인하는 중...</translation>
     </message>
     <message>
+        <source>Finalizing archive... %p%</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
         <source>취소 중...</source>
         <translation>취소 중...</translation>
     </message>
@@ -280,6 +284,18 @@ Duplicates:
     <message>
         <source>자동번역이 완료되었습니다.</source>
         <translation>자동번역이 완료되었습니다.</translation>
+    </message>
+    <message>
+        <source>페이지 처리가 완료되었습니다. 최종 아카이브 생성 중...</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Failed to apply automatic archive output result.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>최종 아카이브 생성에 실패했습니다.</source>
+        <translation type="unfinished"></translation>
     </message>
     <message>
         <source>Downloading model file: {filename}</source>
@@ -1114,6 +1130,10 @@ Reasoning:
 </context>
 <context>
     <name>Messages</name>
+    <message>
+        <source>Please Wait</source>
+        <translation>잠시만 기다려주세요</translation>
+    </message>
     <message>
         <source>Could not inpaint detected text.
 Skipping:</source>
@@ -4389,6 +4409,10 @@ Do you want to restore it?</source>
         <translation>프로젝트 다른 이름으로 저장</translation>
     </message>
     <message>
+        <source>Creating project file...</source>
+        <translation>프로젝트 파일을 만드는 중입니다...</translation>
+    </message>
+    <message>
         <source>A project file already exists at this location.
 
 {path}
@@ -4501,6 +4525,14 @@ It may have been moved, renamed, or deleted.
         <translation>시리즈 프로젝트 만들기</translation>
     </message>
     <message>
+        <source>Scanning series folder...</source>
+        <translation>시리즈 폴더를 확인하는 중입니다...</translation>
+    </message>
+    <message>
+        <source>Creating series project...</source>
+        <translation>시리즈 프로젝트를 만드는 중입니다...</translation>
+    </message>
+    <message>
         <source>No supported files were found in the selected folder.</source>
         <translation>선택한 폴더에서 지원되는 파일을 찾지 못했습니다.</translation>
     </message>
@@ -4531,6 +4563,10 @@ It may have been moved, renamed, or deleted.
     <message>
         <source>Save Series Project</source>
         <translation>시리즈 프로젝트 저장</translation>
+    </message>
+    <message>
+        <source>Saving series project file...</source>
+        <translation>시리즈 프로젝트 파일을 저장하는 중입니다...</translation>
     </message>
     <message>
         <source>Failed to synchronize the active child project before saving.

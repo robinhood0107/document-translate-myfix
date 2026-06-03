@@ -16,6 +16,7 @@ from modules.utils.automatic_output import (
     OUTPUT_TARGET_ARCHIVE,
     build_archive_file_name,
     build_archive_page_file_name,
+    build_translated_archive_file_name,
     build_series_output_dir,
     build_output_file_name,
     default_global_output_settings,
@@ -24,6 +25,7 @@ from modules.utils.automatic_output import (
     format_estimate_seconds_text,
     format_estimate_size_text,
     resolve_automatic_output_settings,
+    resolve_forced_archive_output_path,
     resolve_series_folder_name,
     sanitize_series_folder_name,
     write_archive_image,
@@ -146,6 +148,66 @@ class AutomaticOutputTests(unittest.TestCase):
             build_archive_file_name("Series c01 v02", OUTPUT_ARCHIVE_FORMAT_CBZ),
             "Series_translated.cbz",
         )
+
+    def test_translated_archive_file_name_preserves_source_version_suffix_and_format(self) -> None:
+        self.assertEqual(
+            build_translated_archive_file_name(
+                "我的妈妈被损友穿上了 v01 c01 (E)",
+                OUTPUT_ARCHIVE_FORMAT_ZIP,
+            ),
+            "我的妈妈被损友穿上了 v01 c01 (E)_translated.zip",
+        )
+        self.assertEqual(
+            build_translated_archive_file_name(
+                "我的妈妈被损友穿上了 v01 c01 (E)",
+                OUTPUT_ARCHIVE_FORMAT_CBZ,
+            ),
+            "我的妈妈被损友穿上了 v01 c01 (E)_translated.cbz",
+        )
+
+    def test_forced_archive_output_path_uses_archive_parent_for_single_source(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            page_a = os.path.join(temp_dir, "extract", "001.png")
+            page_b = os.path.join(temp_dir, "extract", "002.png")
+            archive_path = os.path.join(temp_dir, "chapter v01 c01 (E).cbz")
+            output_path, output_root = resolve_forced_archive_output_path(
+                [page_a, page_b],
+                fallback_dir=os.path.join(temp_dir, "fallback"),
+                fallback_bundle_name="fallback",
+                archive_format=OUTPUT_ARCHIVE_FORMAT_CBZ,
+                source_records={
+                    page_a: {"kind": "archive", "source_path": archive_path},
+                    page_b: {"kind": "archive", "source_path": archive_path},
+                },
+            )
+            self.assertEqual(output_root, temp_dir)
+            self.assertEqual(
+                output_path,
+                os.path.join(temp_dir, "chapter v01 c01 (E)_translated.cbz"),
+            )
+
+    def test_forced_archive_output_path_uses_single_loose_image_parent(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            page = os.path.join(temp_dir, "page 001.png")
+            output_path, output_root = resolve_forced_archive_output_path(
+                [page],
+                fallback_dir=os.path.join(temp_dir, "fallback"),
+                fallback_bundle_name="fallback",
+                archive_format=OUTPUT_ARCHIVE_FORMAT_ZIP,
+            )
+            self.assertEqual(output_root, temp_dir)
+            self.assertEqual(output_path, os.path.join(temp_dir, "page 001_translated.zip"))
+
+    def test_forced_archive_output_path_falls_back_for_mixed_sources(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            output_path, output_root = resolve_forced_archive_output_path(
+                [os.path.join(temp_dir, "a.png"), os.path.join(temp_dir, "b.png")],
+                fallback_dir=os.path.join(temp_dir, "result_demo"),
+                fallback_bundle_name="demo",
+                archive_format=OUTPUT_ARCHIVE_FORMAT_CBZ,
+            )
+            self.assertEqual(output_root, os.path.join(temp_dir, "result_demo"))
+            self.assertEqual(output_path, os.path.join(temp_dir, "result_demo", "demo_translated.cbz"))
 
 
 if __name__ == "__main__":

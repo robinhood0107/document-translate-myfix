@@ -12,6 +12,7 @@ services:
     environment:
       NVIDIA_VISIBLE_DEVICES: all
       NVIDIA_DRIVER_CAPABILITIES: compute,utility
+      LLAMA_MODEL_FILE: ${LLAMA_MODEL_FILE:-gemma-4-26B-IQ4_NL.gguf}
     volumes:
       - ./testmodel:/models:ro
     healthcheck:

@@ -1,8 +1,131 @@
 from .dayu_widgets.message import MMessage
 from PySide6.QtCore import QCoreApplication, Qt
-from PySide6 import QtWidgets
+from PySide6 import QtCore, QtWidgets
+
+
+class _BusyDialog(QtWidgets.QDialog):
+    def __init__(self, parent, text: str, title: str):
+        super().__init__(parent)
+        self.setObjectName("busyDialog")
+        self.setWindowTitle(title)
+        self.setWindowModality(Qt.WindowModality.ApplicationModal)
+        self.setWindowFlags(
+            Qt.WindowType.Dialog
+            | Qt.WindowType.CustomizeWindowHint
+            | Qt.WindowType.WindowTitleHint
+            | Qt.WindowType.WindowStaysOnTopHint
+        )
+        self.setFixedWidth(360)
+
+        layout = QtWidgets.QVBoxLayout(self)
+        layout.setContentsMargins(22, 18, 22, 18)
+        layout.setSpacing(12)
+
+        label = QtWidgets.QLabel(text, self)
+        label.setObjectName("busyDialogLabel")
+        label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        label.setWordWrap(True)
+        self.message_label = label
+
+        progress = QtWidgets.QProgressBar(self)
+        progress.setObjectName("busyDialogProgress")
+        progress.setRange(0, 0)
+        progress.setTextVisible(False)
+        progress.setFixedHeight(8)
+        self.progress_bar = progress
+
+        layout.addWidget(label)
+        layout.addWidget(progress)
+        self.setStyleSheet("""
+            QDialog#busyDialog {
+                background: #2f2f2f;
+                border: 1px solid rgba(255, 255, 255, 48);
+                border-radius: 8px;
+            }
+            QLabel#busyDialogLabel {
+                color: #f2f2f2;
+                font-size: 13px;
+                font-weight: 600;
+                background: transparent;
+            }
+            QProgressBar#busyDialogProgress {
+                border: none;
+                border-radius: 4px;
+                background: rgba(255, 255, 255, 36);
+            }
+            QProgressBar#busyDialogProgress::chunk {
+                border-radius: 4px;
+                background: #1677ff;
+            }
+        """)
+
+    def labelText(self) -> str:
+        return self.message_label.text()
+
+    def minimum(self) -> int:
+        return self.progress_bar.minimum()
+
+    def maximum(self) -> int:
+        return self.progress_bar.maximum()
+
+    def showEvent(self, event):  # type: ignore[override]
+        super().showEvent(event)
+        if self.parentWidget() is not None:
+            parent_geo = self.parentWidget().window().geometry()
+            self.move(parent_geo.center() - self.rect().center())
+        self.raise_()
+        self.activateWindow()
+
 
 class Messages:
+    @staticmethod
+    def show_busy(parent, text: str, *, title: str | None = None, minimum_visible_ms: int = 700):
+        dialog = _BusyDialog(
+            parent,
+            text,
+            title or QCoreApplication.translate("Messages", "Please Wait"),
+        )
+        dialog._busy_timer = QtCore.QElapsedTimer()
+        dialog._busy_timer.start()
+        dialog._busy_minimum_visible_ms = max(0, int(minimum_visible_ms))
+        dialog._busy_close_requested = False
+        dialog.show()
+        dialog.raise_()
+        dialog.activateWindow()
+        QtWidgets.QApplication.processEvents()
+        return dialog
+
+    @staticmethod
+    def close_busy(dialog, *, force: bool = False) -> None:
+        if dialog is None:
+            return
+        try:
+            if bool(getattr(dialog, "_busy_close_requested", False)):
+                return
+            timer = getattr(dialog, "_busy_timer", None)
+            minimum_ms = int(getattr(dialog, "_busy_minimum_visible_ms", 0) or 0)
+            elapsed_ms = timer.elapsed() if timer is not None and timer.isValid() else minimum_ms
+            remaining_ms = max(0, minimum_ms - elapsed_ms)
+            if remaining_ms > 0 and not force:
+                dialog._busy_close_requested = True
+                QtCore.QTimer.singleShot(
+                    remaining_ms,
+                    dialog,
+                    lambda: Messages._close_busy_now(dialog),
+                )
+                return
+            Messages._close_busy_now(dialog)
+        except RuntimeError:
+            pass
+
+    @staticmethod
+    def _close_busy_now(dialog) -> None:
+        try:
+            dialog.hide()
+            dialog.close()
+            dialog.deleteLater()
+        except RuntimeError:
+            pass
 
     @staticmethod
     def _show_passive(parent, level: str, text: str, *, duration=None, closable=True, source: str = "generic"):
