@@ -26,7 +26,7 @@
 
 ## 검증 로그 규칙
 
-- 감사 로그 루트: `/mnt/c/Users/pjjpj/Desktop/openai_manga_translater/comic-translate_validation_logs/2026-05-29/bug-hunt/<audit-id>/`
+- 감사 로그 루트: `<validation-log-root>/2026-05-29/bug-hunt/<audit-id>/`
 - 각 명령은 `2>&1 | tee <logfile>`로 저장한다.
 - 로그와 빌드 산출물은 커밋하지 않는다.
 - 버그 수정 PR 본문에는 실행 명령, pass/fail 요약, 로그 경로를 남긴다.

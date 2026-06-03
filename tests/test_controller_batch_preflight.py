@@ -198,7 +198,7 @@ class ControllerBatchPreflightTests(unittest.TestCase):
 
     def test_finalize_archive_output_saves_next_to_original_archive(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
-            source_archive = os.path.join(temp_dir, "我的妈妈被损友穿上了 v01 c01 (E).cbz")
+            source_archive = os.path.join(temp_dir, "example source chapter v01 c01 (E).cbz")
             with open(source_archive, "wb") as handle:
                 handle.write(b"placeholder")
             series_dir = os.path.join(temp_dir, "result")
@@ -235,7 +235,7 @@ class ControllerBatchPreflightTests(unittest.TestCase):
 
             archive_path = ComicTranslate._finalize_single_archive_output(controller, [page_a, page_b])
 
-            expected = os.path.join(temp_dir, "我的妈妈被损友穿上了 v01 c01 (E)_translated.cbz")
+            expected = os.path.join(temp_dir, "example source chapter v01 c01 (E)_translated.cbz")
             self.assertEqual(archive_path, expected)
             self.assertTrue(os.path.isfile(expected))
             self.assertFalse(os.path.exists(staging_dir))

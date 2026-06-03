@@ -8,4 +8,4 @@ Automatic Mode 디버그 내보내기는 원인을 아래 3가지로 나눠서 �
 
 `Translate All`과 `One-Page Auto`는 같은 export 설정을 공유하고, 같은 `comic_translate_<timestamp>` 트리에 저장됩니다.
 
-대량 검수는 `scripts/export_inpaint_debug.py`를 사용하면 되고, `Sample/japan`, `Sample/China`를 현재 detector/mask/inpaint/cleanup 흐름으로 돌려 `banchmark_result_log/inpaint_debug/...` 아래에 결과를 남깁니다.
+대량 검수는 `scripts/export_inpaint_debug.py`를 사용하면 되고, `<sample-input-root>/japan`, `<sample-input-root>/China`를 현재 detector/mask/inpaint/cleanup 흐름으로 돌려 `banchmark_result_log/inpaint_debug/...` 아래에 결과를 남깁니다.

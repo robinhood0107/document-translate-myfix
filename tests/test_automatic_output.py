@@ -39,25 +39,25 @@ class AutomaticOutputTests(unittest.TestCase):
         self.assertEqual(sanitize_series_folder_name("Title[v2] c001"), "Title[v2]")
 
     def test_series_output_dir_uses_result_prefix(self) -> None:
-        output_dir = build_series_output_dir("/tmp/project", "False_Honour_8_Part_3_English")
+        output_dir = build_series_output_dir("/tmp/project", "example_source_chapter")
 
         self.assertEqual(
             os.path.basename(output_dir),
-            "result_False_Honour_8_Part_3_English",
+            "result_example_source_chapter",
         )
 
     def test_series_folder_name_resolves_source_for_temp_page(self) -> None:
         folder_name = resolve_series_folder_name(
-            "/mnt/c/Users/pjjpj/project/tmpabc/001.png",
+            "/mnt/c/ExampleWorkspace/project/tmpabc/001.png",
             source_records={
-                r"C:\Users\pjjpj\project\tmpabc\001.png": {
+                r"C:\ExampleWorkspace\project\tmpabc\001.png": {
                     "kind": "archive",
-                    "source_path": r"C:\Users\pjjpj\project\False_Honour_8_Part_3_English.pdf",
+                    "source_path": r"C:\ExampleWorkspace\project\example_source_chapter.pdf",
                 }
             },
         )
 
-        self.assertEqual(folder_name, "False_Honour_8_Part_3_English")
+        self.assertEqual(folder_name, "example_source_chapter")
 
     def test_resolved_settings_apply_project_override(self) -> None:
         settings = resolve_automatic_output_settings(
@@ -152,17 +152,17 @@ class AutomaticOutputTests(unittest.TestCase):
     def test_translated_archive_file_name_preserves_source_version_suffix_and_format(self) -> None:
         self.assertEqual(
             build_translated_archive_file_name(
-                "我的妈妈被损友穿上了 v01 c01 (E)",
+                "example source chapter v01 c01 (E)",
                 OUTPUT_ARCHIVE_FORMAT_ZIP,
             ),
-            "我的妈妈被损友穿上了 v01 c01 (E)_translated.zip",
+            "example source chapter v01 c01 (E)_translated.zip",
         )
         self.assertEqual(
             build_translated_archive_file_name(
-                "我的妈妈被损友穿上了 v01 c01 (E)",
+                "example source chapter v01 c01 (E)",
                 OUTPUT_ARCHIVE_FORMAT_CBZ,
             ),
-            "我的妈妈被损友穿上了 v01 c01 (E)_translated.cbz",
+            "example source chapter v01 c01 (E)_translated.cbz",
         )
 
     def test_forced_archive_output_path_uses_archive_parent_for_single_source(self) -> None:

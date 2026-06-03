@@ -9,12 +9,13 @@
 - `main`, `develop`, `benchmarking/lab`은 장기 유지 브랜치이며 삭제 대상으로 취급하지 않는다.
 - 기능 개발은 반드시 별도 작업 브랜치에서만 한다.
 - 트래킹되는 코드 변경 전에 먼저 브랜치를 만든다.
-- 이 저장소에서는 Git worktree를 새로 만들지 않는다. 항상 `C:\Users\pjjpj\Desktop\openai_manga_translater\comic-translate` 폴더 안에서 브랜치만 전환하며 작업한다.
+- 이 저장소에서는 Git worktree를 새로 만들지 않는다. 항상 `C:\path\to\comic-translate` 폴더 안에서 브랜치만 전환하며 작업한다.
 - 기능 단위 작업은 `커밋`과 `push`까지 끝나야 완료로 본다.
 - 사용자에게 보이는 UI를 바꾸면 문서, 번역, 필요 시 변경 이력까지 함께 갱신한다.
 - 애매한 점이 있거나 트레이드오프가 발생하면, 추천안과 근거를 함께 사용자에게 질문하고 결정한 뒤 진행한다.
 - 가상환경, 캐시, 임시 산출물은 Git에 올리지 않는다.
 - 폰트 바이너리(`*.ttf`, `*.otf`, `*.woff`, `*.woff2`, `*.ttc`, `*.fon`)와 루트 `fonts/` 디렉터리는 Git에 올리지 않는다.
+- 테스트 원본, 실제 작품명, 사용자 로컬 절대경로, OCR/번역/인페인트/렌더 결과물, benchmark raw output은 파일 경로와 문서/테스트 내용 양쪽 모두에서 Git에 올리지 않는다.
 - 로컬 작업용 가상환경은 `.venv-win`, `.venv-win-cuda13`만 공식 사용한다. `.venv`는 repo workflow 기준 환경으로 사용하지 않는다.
 
 ## 2. 브랜치 모델
@@ -55,7 +56,7 @@
 - benchmark harness는 가능하면 실제 offscreen 앱 파이프라인을 기준으로 만든다.
 - 공식 점수 범위가 파이프라인 일부일 경우, 실행 범위와 점수 범위를 문서에 분리해 명시한다.
 - Windows benchmark family는 가능하면 `pipeline + suite`, `CUDA12 + CUDA13` BAT 쌍을 함께 제공한다.
-- raw 결과는 `./banchmark_result_log/<family>/` 아래에 남긴다.
+- raw 결과는 repo 밖 local validation log에 남긴다. `banchmark_result_log/`, `docs/assets/benchmarking/`, 이미지/아카이브/로그 산출물은 Git에 올리지 않는다.
 - benchmark family는 최소한 아래 문서 세트를 함께 가진다.
   - workflow
   - usage
@@ -63,6 +64,21 @@
   - results history
   - generated/latest report
 - benchmark 자산은 `benchmarking/lab`에만 두고, 제품 반영은 별도 `feature/*`, `fix/*`, `chore/*` 작업 브랜치 PR로 승격한다.
+- `benchmarking/lab`도 실제 샘플 이미지, 테스트 결과 이미지, OCR/번역 로그, 작품명, 사용자 로컬 경로를 보관하는 장소로 쓰지 않는다.
+
+## 2-1-1. 민감 산출물 / 원본명 금지 규칙
+
+아래 항목은 경로뿐 아니라 문서, 테스트 fixture, PR 설명에 내용으로도 넣지 않는다.
+
+- 실제 작품명, 원본 파일명, 시리즈명, 사용자가 제공한 민감한 title/slug
+- `C:\Users\...`, `/mnt/c/Users/...` 같은 사용자 로컬 절대경로
+- `Sample/`, `testmodel/`, `build/`, `banchmark_result_log/`, `docs/assets/benchmarking/`
+- `result_*`, `log_*` 형태의 자동번역/검증 출력 폴더
+- `.zip`, `.cbz`, `.rar`, `.7z`, `.log` 산출물
+- 앱 static/icon으로 명확히 허용된 자산을 제외한 `.png`, `.jpg`, `.jpeg`, `.webp`, `.gif`, `.bmp`, `.tiff` 미디어
+
+테스트에는 `example_source_chapter`, `example source chapter v01 c01 (E)`, `C:\ExampleWorkspace\...`, `<validation-log-root>`, `<benchmark-log-root>` 같은 중립 fixture만 사용한다.
+이 규칙은 `scripts/validate_repo_policy.py`가 커밋, push, CI에서 검사한다.
 
 ## 2-2. 성능개선/버그수정 감사 문서 규칙
 
@@ -175,6 +191,7 @@ type(scope): summary
 - 서로 무관한 변경을 한 커밋/한 PR에 혼합
 - 트래킹된 `.venv*`, `__pycache__`, 임시 DB, 캐시 파일 추가
 - 트래킹된 폰트 바이너리 또는 루트 `fonts/` 디렉터리 추가
+- 테스트 원본/결과 이미지, 로그, 압축 결과물, 실제 작품명/원본명, 사용자 로컬 절대경로 추가
 - 번역이 필요한 UI 텍스트를 소스만 바꾸고 `.ts`/`.qm` 갱신 생략
 
 ## 7. 번역 규칙
