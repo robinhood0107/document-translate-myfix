@@ -10,6 +10,7 @@ from PySide6 import QtWidgets
 from shiboken6 import isValid
 
 from app.ui.series_workspace import SeriesSettingsDialog, SeriesWorkspace
+from modules.utils.automatic_output import OUTPUT_TARGET_ARCHIVE, OUTPUT_TARGET_IMAGES
 
 
 class SeriesWorkspaceRuntimeTests(unittest.TestCase):
@@ -284,6 +285,58 @@ class SeriesWorkspaceRuntimeTests(unittest.TestCase):
         self.assertTrue(global_settings["export_settings"]["export_mask_overlay"])
         self.assertTrue(global_settings["export_settings"]["export_cleanup_mask_delta"])
         self.assertTrue(global_settings["export_settings"]["export_debug_metadata"])
+
+    def test_series_settings_dialog_can_select_individual_image_output(self) -> None:
+        dialog = SeriesSettingsDialog()
+        self.addCleanup(dialog.deleteLater)
+        dialog.configure_options(
+            languages=[("Japanese", "Japanese"), ("Korean", "Korean")],
+            ocr_modes=[("best_local", "Optimal")],
+            translators=[("gemma_local", "Custom Local Server(Gemma)")],
+            workflow_modes=[("stage_batched_pipeline", "Stage-Batched")],
+            fonts=["Arial"],
+            output_options={
+                "automatic_output_target": [
+                    (OUTPUT_TARGET_IMAGES, "Individual images"),
+                    (OUTPUT_TARGET_ARCHIVE, "Single archive"),
+                ],
+                "automatic_output_image_format": [("same_as_source", "Same as source")],
+                "automatic_output_archive_format": [("zip", "ZIP"), ("cbz", "CBZ")],
+                "automatic_output_archive_image_format": [("png", "PNG")],
+            },
+        )
+        dialog.set_payload(
+            {},
+            {
+                "source_language": "Japanese",
+                "target_language": "Korean",
+                "ocr": "best_local",
+                "translator": "gemma_local",
+                "workflow_mode": "stage_batched_pipeline",
+                "use_gpu": True,
+                "export_settings": {
+                    "automatic_output_target": OUTPUT_TARGET_ARCHIVE,
+                    "automatic_output_image_format": "same_as_source",
+                    "automatic_output_archive_format": "zip",
+                    "automatic_output_archive_image_format": "png",
+                    "automatic_output_archive_compression_level": 6,
+                },
+            },
+        )
+
+        self.assertGreaterEqual(dialog.output_target_combo.findData(OUTPUT_TARGET_IMAGES), 0)
+        self.assertGreaterEqual(dialog.output_target_combo.findData(OUTPUT_TARGET_ARCHIVE), 0)
+        self.assertEqual(dialog.output_target_combo.currentData(), OUTPUT_TARGET_ARCHIVE)
+
+        dialog.output_target_combo.setCurrentIndex(
+            dialog.output_target_combo.findData(OUTPUT_TARGET_IMAGES)
+        )
+        _series_settings, global_settings = dialog.payload()
+
+        self.assertEqual(
+            global_settings["export_settings"]["automatic_output_target"],
+            OUTPUT_TARGET_IMAGES,
+        )
 
     def test_paused_queue_shows_resume_and_unlocks_reorder(self) -> None:
         self.widget.set_navigation_state(can_back=False, can_forward=False)

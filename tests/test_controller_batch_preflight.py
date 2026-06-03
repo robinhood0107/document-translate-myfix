@@ -13,7 +13,7 @@ import numpy as np
 from PIL import Image as PILImage
 
 from controller import ComicTranslate
-from modules.utils.automatic_output import OUTPUT_TARGET_ARCHIVE
+from modules.utils.automatic_output import OUTPUT_TARGET_ARCHIVE, OUTPUT_TARGET_IMAGES
 
 
 class _Toggle:
@@ -141,6 +141,53 @@ class ControllerBatchPreflightTests(unittest.TestCase):
 
         controller._confirm_and_apply_auto_languages.assert_called_once_with(["page-a.png"], "one_page_auto")
         controller._start_batch_process_for_paths.assert_called_once_with(["page-a.png"], run_type="one_page_auto")
+
+    def _build_batch_finished_controller(self, output_target: str) -> _DummyController:
+        controller = _DummyController()
+        controller._memlogger = None
+        controller._batch_cancel_requested = False
+        controller._batch_failed = False
+        controller.selected_batch = ["page-a.png", "page-b.png"]
+        controller._batch_active = True
+        controller._current_batch_run_type = "series_queue"
+        controller._is_shutting_down = False
+        controller._finalize_batch_report = mock.Mock(return_value={"skipped_count": 0})
+        controller.get_resolved_export_settings = mock.Mock(
+            return_value={"resolved_automatic_output_target": output_target}
+        )
+        controller._start_batch_archive_finalization = mock.Mock()
+        controller._finish_batch_process_ui = mock.Mock()
+        return controller
+
+    def test_batch_finished_skips_archive_finalization_for_individual_images(self) -> None:
+        controller = self._build_batch_finished_controller(OUTPUT_TARGET_IMAGES)
+
+        ComicTranslate.on_batch_process_finished(controller)
+
+        controller._start_batch_archive_finalization.assert_not_called()
+        controller._finish_batch_process_ui.assert_called_once_with(
+            was_cancelled=False,
+            failed=False,
+            total_images=2,
+            completed_batch_paths=["page-a.png", "page-b.png"],
+            report={"skipped_count": 0},
+        )
+        self.assertFalse(controller._batch_active)
+        self.assertFalse(controller._batch_cancel_requested)
+        self.assertFalse(controller._batch_failed)
+        self.assertIsNone(controller._current_batch_run_type)
+
+    def test_batch_finished_finalizes_archive_only_for_single_archive_target(self) -> None:
+        controller = self._build_batch_finished_controller(OUTPUT_TARGET_ARCHIVE)
+
+        ComicTranslate.on_batch_process_finished(controller)
+
+        controller._finish_batch_process_ui.assert_not_called()
+        controller._start_batch_archive_finalization.assert_called_once_with(
+            completed_batch_paths=["page-a.png", "page-b.png"],
+            total_images=2,
+            report={"skipped_count": 0},
+        )
 
     def test_finalize_single_archive_output_builds_cbz_from_staging_dir(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
