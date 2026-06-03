@@ -591,6 +591,7 @@ class RenderMixin:
             image_path,
             {
                 "translated_image_path": output_path,
+                "translated_page_image_path": output_path,
                 "export_root": translated_dir,
             },
         )

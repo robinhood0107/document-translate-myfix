@@ -215,6 +215,7 @@ class AutomaticProgressTracker:
             "save": 6,
             "save-and-finish": 6,
             "page_done": 7,
+            "finalizing_archive": 8,
         }
         units = page_total * 8
         current_units = min(max(page_index * 8 + stage_order.get(stage_name, 0), 0), units)
