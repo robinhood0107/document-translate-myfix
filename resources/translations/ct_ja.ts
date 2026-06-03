@@ -2633,6 +2633,14 @@ These values are copied into new series projects and can be adjusted per series.
         <source>Select Color</source>
         <translation type="unfinished"></translation>
     </message>
+    <message>
+        <source>Creates one ZIP/CBZ after the queue finishes. Use this when you want a single translated archive.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Saves translated pages as individual image files and skips final ZIP/CBZ creation, so the series can move to the next item faster.</source>
+        <translation type="unfinished"></translation>
+    </message>
 </context>
 <context>
     <name>SeriesTreeJumpDialog</name>
@@ -4141,6 +4149,18 @@ It may have already been moved, renamed, or deleted.
     </message>
     <message>
         <source>Render: {font} / max {max_font} / line {line_spacing} / {align} / {outline}</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Single archive ({format})</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>same as source</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Individual images ({format})</source>
         <translation type="unfinished"></translation>
     </message>
     <message>

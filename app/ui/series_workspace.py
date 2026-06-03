@@ -8,6 +8,7 @@ import tempfile
 from PySide6 import QtCore, QtGui, QtWidgets
 
 from modules.utils.archives import list_archive_image_entries, materialize_archive_entry
+from modules.utils.automatic_output import OUTPUT_TARGET_ARCHIVE, OUTPUT_TARGET_IMAGES
 
 from .dayu_widgets import dayu_theme
 from .dayu_widgets.tool_button import MToolButton
@@ -869,6 +870,20 @@ class _SeriesQuickSettings(QtWidgets.QWidget):
         export = values.get("export_settings")
         export = export if isinstance(export, dict) else {}
         target = str(export.get("automatic_output_target") or "--")
+        if target == OUTPUT_TARGET_ARCHIVE:
+            archive_format = str(export.get("automatic_output_archive_format") or "--").upper()
+            target_label = self.tr("Single archive ({format})").format(format=archive_format)
+        elif target == OUTPUT_TARGET_IMAGES:
+            image_format = str(export.get("automatic_output_image_format") or "")
+            if image_format == "same_as_source":
+                image_format_label = self.tr("same as source")
+            elif image_format:
+                image_format_label = image_format.upper()
+            else:
+                image_format_label = "--"
+            target_label = self.tr("Individual images ({format})").format(format=image_format_label)
+        else:
+            target_label = target
         debug_keys = (
             "export_inpainted_image",
             "export_detector_overlay",
@@ -880,7 +895,7 @@ class _SeriesQuickSettings(QtWidgets.QWidget):
         debug_count = sum(1 for key in debug_keys if bool(export.get(key, False)))
         self.export_summary_label.setText(
             self.tr("Export: {target} / debug {count} enabled").format(
-                target=target,
+                target=target_label,
                 count=debug_count,
             )
         )
@@ -1088,12 +1103,21 @@ class SeriesSettingsDialog(QtWidgets.QDialog):
         self.output_archive_image_format_combo = QtWidgets.QComboBox(tab)
         self.output_archive_level_spin = QtWidgets.QSpinBox(tab)
         self.output_archive_level_spin.setRange(0, 9)
+        self.output_mode_note_label = QtWidgets.QLabel(tab)
+        self.output_mode_note_label.setObjectName("seriesSettingsSectionNote")
+        self.output_mode_note_label.setWordWrap(True)
+        self.output_target_row = self._make_field_row(self.tr("Output target:"), self.output_target_combo)
+        self.output_image_format_row = self._make_field_row(self.tr("Image format:"), self.output_image_format_combo)
+        self.output_archive_format_row = self._make_field_row(self.tr("Archive format:"), self.output_archive_format_combo)
+        self.output_archive_image_format_row = self._make_field_row(self.tr("Archive image format:"), self.output_archive_image_format_combo)
+        self.output_archive_level_row = self._make_field_row(self.tr("Archive compression:"), self.output_archive_level_spin)
         form = self._make_rows_layout(
-            self._make_field_row(self.tr("Output target:"), self.output_target_combo),
-            self._make_field_row(self.tr("Image format:"), self.output_image_format_combo),
-            self._make_field_row(self.tr("Archive format:"), self.output_archive_format_combo),
-            self._make_field_row(self.tr("Archive image format:"), self.output_archive_image_format_combo),
-            self._make_field_row(self.tr("Archive compression:"), self.output_archive_level_spin),
+            self.output_target_row,
+            self.output_mode_note_label,
+            self.output_image_format_row,
+            self.output_archive_format_row,
+            self.output_archive_image_format_row,
+            self.output_archive_level_row,
         )
         self.export_output_group = self._make_section(
             self.tr("Final Output"),
@@ -1143,6 +1167,7 @@ class SeriesSettingsDialog(QtWidgets.QDialog):
         layout.addWidget(self.export_debug_group)
         layout.addStretch(1)
         self.tabs.addTab(tab, self.tr("Export / Debug"))
+        self.output_target_combo.currentIndexChanged.connect(self._refresh_export_mode_visibility)
 
     def _make_scroll_tab(self) -> tuple[QtWidgets.QScrollArea, QtWidgets.QVBoxLayout]:
         content = QtWidgets.QWidget(self)
@@ -1439,6 +1464,7 @@ class SeriesSettingsDialog(QtWidgets.QDialog):
         self._populate_combo(self.output_image_format_combo, self._output_options.get("automatic_output_image_format", []))
         self._populate_combo(self.output_archive_format_combo, self._output_options.get("automatic_output_archive_format", []))
         self._populate_combo(self.output_archive_image_format_combo, self._output_options.get("automatic_output_archive_image_format", []))
+        self._refresh_export_mode_visibility()
 
     def set_payload(self, series_settings: dict[str, object], global_settings: dict[str, object]) -> None:
         self.queue_page.set_settings(series_settings)
@@ -1517,6 +1543,24 @@ class SeriesSettingsDialog(QtWidgets.QDialog):
         self._set_combo_value(self.output_archive_format_combo, str(values.get("automatic_output_archive_format") or ""))
         self._set_combo_value(self.output_archive_image_format_combo, str(values.get("automatic_output_archive_image_format") or ""))
         self.output_archive_level_spin.setValue(max(0, min(9, int(values.get("automatic_output_archive_compression_level", 6) or 6))))
+        self._refresh_export_mode_visibility()
+
+    def _refresh_export_mode_visibility(self) -> None:
+        target = str(self.output_target_combo.currentData() or "")
+        archive_mode = target == OUTPUT_TARGET_ARCHIVE
+        image_mode = not archive_mode
+        self.output_image_format_row.setVisible(image_mode)
+        self.output_archive_format_row.setVisible(archive_mode)
+        self.output_archive_image_format_row.setVisible(archive_mode)
+        self.output_archive_level_row.setVisible(archive_mode)
+        if archive_mode:
+            self.output_mode_note_label.setText(
+                self.tr("Creates one ZIP/CBZ after the queue finishes. Use this when you want a single translated archive.")
+            )
+        else:
+            self.output_mode_note_label.setText(
+                self.tr("Saves translated pages as individual image files and skips final ZIP/CBZ creation, so the series can move to the next item faster.")
+            )
 
     def _export_values(self) -> dict[str, object]:
         return {
