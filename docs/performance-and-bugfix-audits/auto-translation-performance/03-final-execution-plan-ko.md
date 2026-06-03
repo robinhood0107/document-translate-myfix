@@ -65,7 +65,7 @@
 - OCR first ensure는 health check를 수행하고, second ensure는 같은 engine/url에서 health check를 생략한다.
 - OCR engine 또는 URL 변경 시 cache miss가 발생한다.
 - cancel 중에는 successful readiness cache가 기록되지 않는다.
-- `Sample/japan/094.png`, `095.png`, `096.png` 실제 path를 쓰는 mocked pytest에서 3개 page 반복 초기화의 readiness probe 호출이 1회로 제한되는지 검증한다.
+- `<sample-input-root>/japan/094.png`, `095.png`, `096.png` 실제 path를 쓰는 mocked pytest에서 3개 page 반복 초기화의 readiness probe 호출이 1회로 제한되는지 검증한다.
 
 검증:
 
@@ -75,9 +75,9 @@
 
 실제 GPU 전과정 측정:
 
-- PR 1은 `Sample/japan` 22장 전체를 before/after로 모두 실행한다.
-- before log: `C:\Users\pjjpj\Desktop\openai_manga_translater\comic-translate_validation_logs\2026-05-29\auto-translation-performance\chore-runtime-readiness-cache\before\`
-- after log: `C:\Users\pjjpj\Desktop\openai_manga_translater\comic-translate_validation_logs\2026-05-29\auto-translation-performance\chore-runtime-readiness-cache\after\`
+- PR 1은 `<sample-input-root>/japan` 22장 전체를 before/after로 모두 실행한다.
+- before log: `C:\path\to\comic-translate_validation_logs\2026-05-29\auto-translation-performance\chore-runtime-readiness-cache\before\`
+- after log: `C:\path\to\comic-translate_validation_logs\2026-05-29\auto-translation-performance\chore-runtime-readiness-cache\after\`
 - 각 run은 시작/종료 시각, wall-clock elapsed time, stage별 event, output root, output file count, skip/fail reason, Gemma/OCR readiness event count, readiness cache hit count를 남긴다.
 - 실제 GPU runtime이 준비되지 않거나 22장 전과정이 실패하면 PR 생성 전에 멈추고 `blocked-runtime-unavailable` 또는 실패 reason을 보고한다.
 - after가 before보다 5% 이상 느려지면 원인 분석 후 PR 전 사용자에게 보고한다.
@@ -219,7 +219,7 @@
 각 PR의 검증 로그는 repo 밖에 저장한다.
 
 ```text
-C:\Users\pjjpj\Desktop\openai_manga_translater\comic-translate_validation_logs\2026-05-29\auto-translation-performance\<branch-slug>\
+C:\path\to\comic-translate_validation_logs\2026-05-29\auto-translation-performance\<branch-slug>\
 ```
 
 각 PR 본문에는 실행 명령, pass/fail 요약, 로그 파일 경로를 남긴다. 로그와 테스트 산출물은 커밋하지 않는다.

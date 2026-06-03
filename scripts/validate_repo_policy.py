@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+from pathlib import Path
 import re
 import subprocess
 import sys
@@ -13,24 +14,37 @@ FORBIDDEN_TRACKED_PREFIXES = (
     ".venv/",
     ".venv-win/",
     ".venv-win-cuda13/",
+    "Sample/",
     "__pycache__/",
     ".pytest_cache/",
     ".mypy_cache/",
     ".ruff_cache/",
     ".idea/",
+    "build/",
+    "banchmark_result_log/",
+    "docs/assets/benchmarking/",
     "fonts/",
+    "testmodel/",
 )
 FORBIDDEN_TRACKED_NAMES = {
     ".DS_Store",
 }
 FORBIDDEN_TRACKED_PATTERNS = (
     re.compile(r"(?i)^.+\.(ttf|otf|woff|woff2|ttc|fon)$"),
+    re.compile(r"(?i)(^|/)(result_|log_)[^/]+/"),
+)
+ALLOWED_MEDIA_PREFIXES = (
+    "resources/icons/",
+    "resources/static/",
+)
+PRIVATE_ARTIFACT_PATTERNS = (
+    re.compile(r"(?i)^.+\.(cbz|zip|rar|7z|log)$"),
+    re.compile(r"(?i)^.+\.(png|jpe?g|webp|gif|bmp|tiff?)$"),
 )
 BENCHMARK_ONLY_PREFIXES = (
     "benchmarks/",
     "docs/benchmark/",
     "docs/banchmark_report/",
-    "docs/assets/benchmarking/",
 )
 BENCHMARK_ONLY_FILE_PATTERNS = (
     re.compile(r"^scripts/benchmark_[^/]+$"),
@@ -40,6 +54,64 @@ BENCHMARK_ONLY_FILE_PATTERNS = (
     re.compile(r"^scripts/compare_translation_exports\.py$"),
     re.compile(r"^scripts/apply_benchmark_preset\.py$"),
     re.compile(r"^scripts/paddleocr_vl15_[^/]+$"),
+)
+CONTENT_TEXT_EXTENSIONS = {
+    ".bat",
+    ".cfg",
+    ".css",
+    ".csv",
+    ".html",
+    ".ini",
+    ".json",
+    ".md",
+    ".ps1",
+    ".py",
+    ".qss",
+    ".sh",
+    ".toml",
+    ".ts",
+    ".txt",
+    ".yaml",
+    ".yml",
+}
+CONTENT_TEXT_NAMES = {
+    ".gitignore",
+    ".gitattributes",
+    "AGENTS.md",
+    "Dockerfile",
+    "LICENSE",
+    "README.md",
+    "README_ko.md",
+    "rules.md",
+}
+LOCAL_WINDOWS_USER_PATH_PATTERN = "C:" + r"\Users\pjjpj"
+LOCAL_WSL_USER_PATH_PATTERN = "/mnt/c/Users/" + "pjjpj"
+PRIVATE_SOURCE_TITLE_PATTERNS = (
+    "False_" + "Honour",
+    "我的" + "妈妈",
+    "损" + "友",
+    "警" + "花",
+    "郑家" + "仪",
+)
+FORBIDDEN_CONTENT_PATTERNS = (
+    (
+        "local user path",
+        re.compile(
+            r"(?i)("
+            + re.escape(LOCAL_WINDOWS_USER_PATH_PATTERN)
+            + "|"
+            + re.escape(LOCAL_WSL_USER_PATH_PATTERN)
+            + ")"
+        ),
+    ),
+    (
+        "private source title",
+        re.compile("|".join(re.escape(pattern) for pattern in PRIVATE_SOURCE_TITLE_PATTERNS)),
+    ),
+    (
+        "concrete benchmark output path",
+        re.compile(r"(?i)(banchmark_result_log|docs/assets/benchmarking)/[^\s`\"']*/20\d{6,}"),
+    ),
 )
 
 
@@ -94,14 +166,67 @@ def validate_tracked_paths() -> list[str]:
     errors: list[str] = []
     for path in git_lines(["ls-files"]):
         normalized = path.replace("\\", "/")
-        if normalized in FORBIDDEN_TRACKED_NAMES:
-            errors.append(f"Forbidden tracked file: {normalized}")
+        errors.extend(validate_tracked_path_name(normalized))
+    return errors
+
+
+def validate_tracked_path_name(normalized: str) -> list[str]:
+    errors: list[str] = []
+    if normalized in FORBIDDEN_TRACKED_NAMES:
+        errors.append(f"Forbidden tracked file: {normalized}")
+        return errors
+    if any(normalized.startswith(prefix) for prefix in FORBIDDEN_TRACKED_PREFIXES):
+        errors.append(f"Forbidden tracked path: {normalized}")
+        return errors
+    if any(pattern.match(normalized) for pattern in FORBIDDEN_TRACKED_PATTERNS):
+        errors.append(f"Forbidden tracked generated/log path: {normalized}")
+    if (
+        any(pattern.match(normalized) for pattern in PRIVATE_ARTIFACT_PATTERNS)
+        and not any(normalized.startswith(prefix) for prefix in ALLOWED_MEDIA_PREFIXES)
+    ):
+        errors.append(f"Forbidden tracked private artifact/media file: {normalized}")
+    return errors
+
+
+def is_text_candidate(path: str) -> bool:
+    normalized = path.replace("\\", "/")
+    name = normalized.rsplit("/", 1)[-1]
+    if name in CONTENT_TEXT_NAMES:
+        return True
+    return Path(name).suffix.lower() in CONTENT_TEXT_EXTENSIONS
+
+
+def scan_sensitive_content(path: str, text: str) -> list[str]:
+    errors: list[str] = []
+    for label, pattern in FORBIDDEN_CONTENT_PATTERNS:
+        for match in pattern.finditer(text):
+            line_number = text.count("\n", 0, match.start()) + 1
+            errors.append(f"Forbidden {label} in {path}:{line_number}")
+            break
+    return errors
+
+
+def validate_sensitive_content() -> list[str]:
+    errors: list[str] = []
+    for path in git_lines(["ls-files"]):
+        normalized = path.replace("\\", "/")
+        if not is_text_candidate(normalized):
             continue
-        if any(normalized.startswith(prefix) for prefix in FORBIDDEN_TRACKED_PREFIXES):
-            errors.append(f"Forbidden tracked path: {normalized}")
+        try:
+            raw = Path(path).read_bytes()
+        except OSError as exc:
+            errors.append(f"Could not read tracked file {normalized}: {exc}")
             continue
-        if any(pattern.match(normalized) for pattern in FORBIDDEN_TRACKED_PATTERNS):
-            errors.append(f"Forbidden tracked font asset: {normalized}")
+        if b"\0" in raw:
+            continue
+        try:
+            text = raw.decode("utf-8")
+        except UnicodeDecodeError:
+            try:
+                text = raw.decode("utf-8-sig")
+            except UnicodeDecodeError:
+                continue
+        errors.extend(scan_sensitive_content(normalized, text))
     return errors
 
 
@@ -134,6 +259,7 @@ def main() -> int:
     errors = []
     errors.extend(validate_branch(branch, args.mode))
     errors.extend(validate_tracked_paths())
+    errors.extend(validate_sensitive_content())
     errors.extend(validate_benchmark_asset_placement(branch))
 
     if errors:

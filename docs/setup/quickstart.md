@@ -94,7 +94,7 @@ docker compose -f paddleocr_vl_docker_files/docker-compose.yaml pull --policy al
 docker compose -f paddleocr_vl_docker_files/docker-compose.yaml up -d --force-recreate
 ```
 
-For bundle details, see [/paddleocr_vl_docker_files/README.md](/mnt/c/Users/pjjpj/Desktop/openai_manga_translater/comic-translate/paddleocr_vl_docker_files/README.md).
+For bundle details, see [/paddleocr_vl_docker_files/README.md](/paddleocr_vl_docker_files/README.md).
 
 ## 4. Recommended app settings
 
@@ -155,10 +155,10 @@ Inpainting:
 
 ## 7. Related docs
 
-- [/README.md](/mnt/c/Users/pjjpj/Desktop/openai_manga_translater/comic-translate/README.md)
-- [/README_ko.md](/mnt/c/Users/pjjpj/Desktop/openai_manga_translater/comic-translate/README_ko.md)
-- [/docs/gemma/local-server-ko.md](/mnt/c/Users/pjjpj/Desktop/openai_manga_translater/comic-translate/docs/gemma/local-server-ko.md)
-- [/docs/hunyuan/local-server-ko.md](/mnt/c/Users/pjjpj/Desktop/openai_manga_translater/comic-translate/docs/hunyuan/local-server-ko.md)
+- [/README.md](/README.md)
+- [/README_ko.md](/README_ko.md)
+- [/docs/gemma/local-server-ko.md](/docs/gemma/local-server-ko.md)
+- [/docs/hunyuan/local-server-ko.md](/docs/hunyuan/local-server-ko.md)
 
 ## 8. Official Windows release packages
 

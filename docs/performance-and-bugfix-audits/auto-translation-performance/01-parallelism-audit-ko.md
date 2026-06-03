@@ -12,16 +12,16 @@
 ## 근거 자료
 
 - 실제 프로젝트 상태:
-  - `C:\Users\pjjpj\Desktop\openai_manga_translater\comic-translate-project\project_20260529_034843.ctpr`
-  - `C:\Users\pjjpj\Desktop\openai_manga_translater\comic-translate-project\False_Honour_8_Part_3_English.ctpr`
+  - `C:\path\to\comic-translate-project\project_20260529_034843.ctpr`
+  - `C:\path\to\comic-translate-project\example_source_chapter.ctpr`
 - 기존 benchmark 산출물:
-  - `banchmark_result_log/workflow-split-runtime/20260415_055838_baseline_legacy/timing_summary.json`
-  - `banchmark_result_log/workflow-split-runtime/20260415_090653_candidate_stage_batched_single_ocr/timing_summary.json`
-  - `banchmark_result_log/workflow-split-runtime/20260415_091848_candidate_stage_batched_dual_resident/timing_summary.json`
+  - `<benchmark-log-root>/workflow-split-runtime/<run-id>/timing_summary.json`
+  - `<benchmark-log-root>/workflow-split-runtime/<run-id>/timing_summary.json`
+  - `<benchmark-log-root>/workflow-split-runtime/<run-id>/timing_summary.json`
 - 추출 로그:
-  - `C:\Users\pjjpj\Desktop\openai_manga_translater\comic-translate_validation_logs\2026-05-29\chore-auto-translation-performance-audit\performance_audit_extract.log`
-  - `C:\Users\pjjpj\Desktop\openai_manga_translater\comic-translate_validation_logs\2026-05-29\chore-auto-translation-performance-audit\performance_audit_extract.json`
-  - `C:\Users\pjjpj\Desktop\openai_manga_translater\comic-translate_validation_logs\2026-05-29\chore-auto-translation-performance-audit\gemma_endpoint_timing.log`
+  - `C:\path\to\comic-translate_validation_logs\2026-05-29\chore-auto-translation-performance-audit\performance_audit_extract.log`
+  - `C:\path\to\comic-translate_validation_logs\2026-05-29\chore-auto-translation-performance-audit\performance_audit_extract.json`
+  - `C:\path\to\comic-translate_validation_logs\2026-05-29\chore-auto-translation-performance-audit\gemma_endpoint_timing.log`
 - 계산 원칙:
   - Amdahl, G. M. “Validity of the Single Processor Approach to Achieving Large Scale Computing Capabilities”, 1967. https://www.cs.cmu.edu/~18742/papers/Amdahl1967.pdf
   - Gustafson, J. L. “Reevaluating Amdahl’s Law”, Communications of the ACM, 1988. https://cacm.acm.org/research/reevaluating-amdahls-law/
@@ -46,7 +46,7 @@
 
 ## 실제 Part 3 전체 run 계측
 
-`False_Honour_8_Part_3_English.ctpr`의 page state timestamp 기준이다. stage의 첫 완료 시각과 마지막 완료 시각 사이 span이므로 정확한 wall-clock stage runtime과 완전히 같지는 않지만, 364페이지 run의 병목 분포를 보기에 충분하다.
+`example_source_chapter.ctpr`의 page state timestamp 기준이다. stage의 첫 완료 시각과 마지막 완료 시각 사이 span이므로 정확한 wall-clock stage runtime과 완전히 같지는 않지만, 364페이지 run의 병목 분포를 보기에 충분하다.
 
 | stage | 완료 페이지 | span | 비중 |
 | --- | ---: | ---: | ---: |
@@ -227,7 +227,7 @@ Part 3 OCR span은 821s다.
 
 ### P-005 Inpaint/debug output 비동기화
 
-Part 3 inpaint span은 1777s로 가장 크다. 이 run에서는 patch 합계가 9038개, median 20개, max 348개다. 또한 `log_False_Honour_8_Part_3_English.../inpainted_images`의 cleaned image는 페이지당 약 24.9MB 수준이라, cleaned PNG만으로도 약 9GB가 만들어진다.
+Part 3 inpaint span은 1777s로 가장 크다. 이 run에서는 patch 합계가 9038개, median 20개, max 348개다. 또한 `log_example_source_chapter.../inpainted_images`의 cleaned image는 페이지당 약 24.9MB 수준이라, cleaned PNG만으로도 약 9GB가 만들어진다.
 
 관련 동기 I/O:
 
