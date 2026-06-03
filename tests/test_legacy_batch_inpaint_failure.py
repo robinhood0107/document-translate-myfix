@@ -55,7 +55,7 @@ def test_legacy_inpaint_failure_records_stage_and_traceback() -> None:
             export_token="May-29-2026_03-48-56AM",
             base_name="page-031",
             extension=".png",
-            archive_bname="False_Honour_8_Part_3_English",
+            archive_bname="example_source_chapter",
             image=np.zeros((8, 8, 3), dtype=np.uint8),
             error=error,
             page_ocr_metrics={"ocr_total_block_count": 1},

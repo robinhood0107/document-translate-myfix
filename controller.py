@@ -2485,7 +2485,7 @@ class ComicTranslate(ComicTranslateUI):
             self.selected_batch = []
             return
         report = self._finalize_batch_report(was_cancelled)
-        if not was_cancelled and not failed:
+        if not was_cancelled and not failed and is_single_archive_mode(self.get_resolved_export_settings()):
             self._start_batch_archive_finalization(
                 completed_batch_paths=completed_batch_paths,
                 total_images=total_images,

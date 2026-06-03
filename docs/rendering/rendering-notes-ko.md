@@ -6,7 +6,7 @@
 
 ### 헤더 UI 구성
 
-- 헤더 컨트롤은 [workspace.py](/mnt/c/Users/pjjpj/Desktop/openai_manga_translater/comic-translate/app/ui/main_window/builders/workspace.py)에서 생성됩니다.
+- 헤더 컨트롤은 [workspace.py](/app/ui/main_window/builders/workspace.py)에서 생성됩니다.
 - `self.hbutton_group`에는 아래 6개 버튼이 들어갑니다.
   - `Detect`
   - `Recognize`
@@ -29,9 +29,9 @@
 
 ### 수동 / 자동 진입점
 
-- 수동 버튼은 모두 [controller.py](/mnt/c/Users/pjjpj/Desktop/openai_manga_translater/comic-translate/controller.py)의 기존 진입점을 그대로 탑니다.
+- 수동 버튼은 모두 [controller.py](/controller.py)의 기존 진입점을 그대로 탑니다.
 - 자동 처리는 `controller.start_batch_process()`를 유일한 진입점으로 유지합니다.
-- 일반 배치는 [batch_processor.py](/mnt/c/Users/pjjpj/Desktop/openai_manga_translater/comic-translate/pipeline/batch_processor.py), 웹툰 배치는 `pipeline.webtoon_batch_process()` 경로를 사용합니다.
+- 일반 배치는 [batch_processor.py](/pipeline/batch_processor.py), 웹툰 배치는 `pipeline.webtoon_batch_process()` 경로를 사용합니다.
 
 ## 렌더 설정의 현재 동작
 
@@ -127,25 +127,25 @@
 
 ### 공통 정책 / 상태
 
-- [render_style_policy.py](/mnt/c/Users/pjjpj/Desktop/openai_manga_translater/comic-translate/modules/utils/render_style_policy.py)
-- [render.py](/mnt/c/Users/pjjpj/Desktop/openai_manga_translater/comic-translate/modules/rendering/render.py)
-- [text_item_properties.py](/mnt/c/Users/pjjpj/Desktop/openai_manga_translater/comic-translate/app/ui/canvas/text/text_item_properties.py)
-- [text_item.py](/mnt/c/Users/pjjpj/Desktop/openai_manga_translater/comic-translate/app/ui/canvas/text_item.py)
+- [render_style_policy.py](/modules/utils/render_style_policy.py)
+- [render.py](/modules/rendering/render.py)
+- [text_item_properties.py](/app/ui/canvas/text/text_item_properties.py)
+- [text_item.py](/app/ui/canvas/text_item.py)
 
 ### UI / 컨트롤러
 
-- [workspace.py](/mnt/c/Users/pjjpj/Desktop/openai_manga_translater/comic-translate/app/ui/main_window/builders/workspace.py)
-- [window.py](/mnt/c/Users/pjjpj/Desktop/openai_manga_translater/comic-translate/app/ui/main_window/window.py)
-- [controller.py](/mnt/c/Users/pjjpj/Desktop/openai_manga_translater/comic-translate/controller.py)
-- [text.py](/mnt/c/Users/pjjpj/Desktop/openai_manga_translater/comic-translate/app/controllers/text.py)
+- [workspace.py](/app/ui/main_window/builders/workspace.py)
+- [window.py](/app/ui/main_window/window.py)
+- [controller.py](/controller.py)
+- [text.py](/app/controllers/text.py)
 
 ### 저장 / 복원 / 배치
 
-- [manual_workflow.py](/mnt/c/Users/pjjpj/Desktop/openai_manga_translater/comic-translate/app/controllers/manual_workflow.py)
-- [batch_processor.py](/mnt/c/Users/pjjpj/Desktop/openai_manga_translater/comic-translate/pipeline/batch_processor.py)
-- [render.py](/mnt/c/Users/pjjpj/Desktop/openai_manga_translater/comic-translate/pipeline/webtoon_batch/render.py)
-- [image_viewer.py](/mnt/c/Users/pjjpj/Desktop/openai_manga_translater/comic-translate/app/ui/canvas/image_viewer.py)
-- [save_renderer.py](/mnt/c/Users/pjjpj/Desktop/openai_manga_translater/comic-translate/app/ui/canvas/save_renderer.py)
+- [manual_workflow.py](/app/controllers/manual_workflow.py)
+- [batch_processor.py](/pipeline/batch_processor.py)
+- [render.py](/pipeline/webtoon_batch/render.py)
+- [image_viewer.py](/app/ui/canvas/image_viewer.py)
+- [save_renderer.py](/app/ui/canvas/save_renderer.py)
 
 ## 검증 메모
 
