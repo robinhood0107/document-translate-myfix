@@ -11,6 +11,35 @@ from modules.utils.textblock import TextBlock
 
 
 class ImageUtilsMaskingTests(unittest.TestCase):
+    def test_generate_mask_applies_default_final_d08_dilation(self) -> None:
+        image = np.zeros((32, 32, 3), dtype=np.uint8)
+        base_mask = np.zeros((32, 32), dtype=np.uint8)
+        base_mask[16, 16] = 255
+
+        with (
+            mock.patch("modules.utils.image_utils.CTDRefiner") as refiner_cls,
+            mock.patch("modules.utils.image_utils.build_protect_mask", return_value=np.zeros((32, 32), dtype=np.uint8)),
+        ):
+            refiner_cls.return_value.refine.return_value = SimpleNamespace(
+                raw_mask=base_mask.copy(),
+                refined_mask=base_mask.copy(),
+                final_mask=base_mask.copy(),
+                backend="torch",
+                device="cuda",
+                fallback_used=False,
+            )
+            details = generate_mask(
+                image,
+                [],
+                settings={"mask_refiner": "ctd", "keep_existing_lines": False},
+                return_details=True,
+            )
+
+        self.assertEqual(details["final_mask_dilate_size"], 8)
+        self.assertGreater(int(np.count_nonzero(details["final_mask"])), 1)
+        self.assertEqual(int(details["final_mask"][16, 16]), 255)
+        self.assertEqual(int(details["final_mask"][16, 24]), 255)
+
     def test_generate_mask_ctd_path_honors_protect_mask(self) -> None:
         image = np.zeros((16, 16, 3), dtype=np.uint8)
         block = TextBlock(
@@ -38,7 +67,7 @@ class ImageUtilsMaskingTests(unittest.TestCase):
             details = generate_mask(
                 image,
                 [block],
-                settings={"mask_refiner": "ctd", "keep_existing_lines": True},
+                settings={"mask_refiner": "ctd", "keep_existing_lines": True, "final_mask_dilate_size": 0},
                 return_details=True,
             )
 
@@ -90,7 +119,7 @@ class ImageUtilsMaskingTests(unittest.TestCase):
             details = generate_mask(
                 image,
                 [block],
-                settings={"mask_refiner": "ctd", "keep_existing_lines": True},
+                settings={"mask_refiner": "ctd", "keep_existing_lines": True, "final_mask_dilate_size": 0},
                 return_details=True,
             )
 
@@ -139,7 +168,7 @@ class ImageUtilsMaskingTests(unittest.TestCase):
             details = generate_mask(
                 image,
                 [block],
-                settings={"mask_refiner": "ctd", "keep_existing_lines": True},
+                settings={"mask_refiner": "ctd", "keep_existing_lines": True, "final_mask_dilate_size": 0},
                 return_details=True,
             )
 
@@ -181,7 +210,7 @@ class ImageUtilsMaskingTests(unittest.TestCase):
             details = generate_mask(
                 image,
                 [],
-                settings={"mask_refiner": "legacy_bbox"},
+                settings={"mask_refiner": "legacy_bbox", "final_mask_dilate_size": 0},
                 return_details=True,
             )
 

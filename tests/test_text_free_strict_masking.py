@@ -5,7 +5,12 @@ from unittest import mock
 
 import numpy as np
 
-from modules.masking.ctd_refiner import CTDRefiner, _filter_candidate_mask
+from modules.masking.ctd_refiner import (
+    CTDRefiner,
+    _filter_candidate_mask,
+    _text_bubble_polarity_glyph_mask,
+    _text_free_glyph_color_mask,
+)
 from modules.utils.inpaint_cleanup import _cap_residue_mask_to_source_mask, refine_bubble_residue_inpaint
 from modules.utils.mask_roi import resolve_block_ctd_roi
 from modules.utils.textblock import TextBlock
@@ -56,6 +61,86 @@ class TextFreeStrictMaskingTests(unittest.TestCase):
         result = _filter_candidate_mask(candidate, prior, "text_free")
 
         self.assertEqual(int(np.count_nonzero(result)), 0)
+
+    def test_text_free_glyph_color_mask_adds_bright_fill_inside_prior(self) -> None:
+        image = np.full((40, 40, 3), 80, dtype=np.uint8)
+        image[12:24, 14:28] = [245, 245, 238]
+        prior = np.zeros((40, 40), dtype=np.uint8)
+        prior[8:30, 8:32] = 255
+        anchor = np.zeros_like(prior)
+        anchor[12:24, 14:17] = 255
+
+        result = _text_free_glyph_color_mask(image, prior, anchor)
+
+        self.assertEqual(int(result[18, 22]), 255)
+        self.assertGreater(int(np.count_nonzero(result)), int(np.count_nonzero(anchor)))
+
+    def test_text_free_glyph_color_mask_rejects_large_edge_background(self) -> None:
+        image = np.full((40, 40, 3), 245, dtype=np.uint8)
+        prior = np.full((40, 40), 255, dtype=np.uint8)
+        anchor = np.zeros_like(prior)
+
+        result = _text_free_glyph_color_mask(image, prior, anchor)
+
+        self.assertEqual(int(np.count_nonzero(result)), 0)
+
+    def test_text_free_glyph_color_mask_limits_warm_shadow_to_anchor_area(self) -> None:
+        image = np.full((50, 50, 3), 70, dtype=np.uint8)
+        image[16:26, 16:26] = [245, 245, 238]
+        image[16:26, 27:37] = [190, 155, 88]
+        image[38:44, 38:44] = [190, 155, 88]
+        prior = np.full((50, 50), 255, dtype=np.uint8)
+        anchor = np.zeros((50, 50), dtype=np.uint8)
+        anchor[16:26, 16:26] = 255
+
+        result = _text_free_glyph_color_mask(image, prior, anchor)
+
+        self.assertEqual(int(result[20, 31]), 255)
+        self.assertEqual(int(result[41, 41]), 0)
+
+    def test_text_bubble_polarity_mask_adds_dark_glyph_and_white_outline(self) -> None:
+        image = np.full((70, 60, 3), 118, dtype=np.uint8)
+        image[8:10, 8:10] = [245, 245, 245]
+        image[18:52, 24:42] = [245, 245, 245]
+        image[21:49, 27:39] = [12, 12, 12]
+        search = np.zeros((70, 60), dtype=np.uint8)
+        search[14:56, 18:48] = 255
+
+        result = _text_bubble_polarity_glyph_mask(image, search)
+
+        self.assertEqual(int(result[30, 32]), 255)
+        self.assertEqual(int(result[20, 27]), 255)
+        self.assertEqual(int(result[8, 8]), 0)
+
+    def test_text_bubble_polarity_mask_rejects_bright_bubble_background(self) -> None:
+        image = np.full((64, 64, 3), 244, dtype=np.uint8)
+        search = np.full((64, 64), 255, dtype=np.uint8)
+
+        result = _text_bubble_polarity_glyph_mask(image, search)
+
+        self.assertEqual(int(np.count_nonzero(result)), 0)
+
+    def test_text_bubble_refiner_merges_polarity_mask_outside_sparse_prior(self) -> None:
+        image = np.full((80, 80, 3), 122, dtype=np.uint8)
+        image[28:54, 31:47] = [246, 246, 246]
+        image[31:51, 34:44] = [14, 14, 14]
+        block = _bubble_block(xyxy=[26, 24, 51, 58], bubble_xyxy=[8, 8, 72, 72])
+        block.inpaint_bboxes = [[12, 12, 16, 16]]
+        refiner = CTDRefiner()
+
+        def fake_raw(crop: np.ndarray) -> np.ndarray:
+            raw = np.zeros(crop.shape[:2], dtype=np.uint8)
+            raw[4:8, 4:8] = 255
+            return raw
+
+        with (
+            mock.patch.object(refiner, "_infer_raw_mask", side_effect=fake_raw),
+            mock.patch("modules.masking.ctd_refiner._expand_final_mask_crop", side_effect=lambda mask, _text_class: mask),
+        ):
+            result = refiner.refine(image, [block])
+
+        self.assertEqual(int(result.final_mask[40, 38]), 255)
+        self.assertEqual(int(result.final_mask[29, 32]), 255)
 
     def test_text_free_refiner_does_not_merge_refined_roi_fill(self) -> None:
         image = np.zeros((32, 32, 3), dtype=np.uint8)
