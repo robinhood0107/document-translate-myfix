@@ -70,6 +70,10 @@ def _ctd_settings_from_cfg(cfg: dict[str, Any]) -> CTDRefinerSettings:
     )
 
 
+def _allows_ctd_hard_box_rescue(block) -> bool:
+    return str(getattr(block, "text_class", "") or "") != "text_free"
+
+
 def _ctd_details(
     img: np.ndarray,
     blk_list,
@@ -102,10 +106,11 @@ def _ctd_details(
     legacy_rescue_details: dict[str, Any] | None = None
     hard_box_rescue_used = False
 
-    if block_list:
+    hard_box_rescue_blocks = [block for block in block_list if _allows_ctd_hard_box_rescue(block)]
+    if hard_box_rescue_blocks:
         legacy_rescue_details = _legacy_details(
             img,
-            block_list,
+            hard_box_rescue_blocks,
             cfg,
             default_padding=default_padding,
         )
