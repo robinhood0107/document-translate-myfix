@@ -11,6 +11,35 @@ from modules.utils.textblock import TextBlock
 
 
 class ImageUtilsMaskingTests(unittest.TestCase):
+    def test_generate_mask_applies_default_final_d08_dilation(self) -> None:
+        image = np.zeros((32, 32, 3), dtype=np.uint8)
+        base_mask = np.zeros((32, 32), dtype=np.uint8)
+        base_mask[16, 16] = 255
+
+        with (
+            mock.patch("modules.utils.image_utils.CTDRefiner") as refiner_cls,
+            mock.patch("modules.utils.image_utils.build_protect_mask", return_value=np.zeros((32, 32), dtype=np.uint8)),
+        ):
+            refiner_cls.return_value.refine.return_value = SimpleNamespace(
+                raw_mask=base_mask.copy(),
+                refined_mask=base_mask.copy(),
+                final_mask=base_mask.copy(),
+                backend="torch",
+                device="cuda",
+                fallback_used=False,
+            )
+            details = generate_mask(
+                image,
+                [],
+                settings={"mask_refiner": "ctd", "keep_existing_lines": False},
+                return_details=True,
+            )
+
+        self.assertEqual(details["final_mask_dilate_size"], 8)
+        self.assertGreater(int(np.count_nonzero(details["final_mask"])), 1)
+        self.assertEqual(int(details["final_mask"][16, 16]), 255)
+        self.assertEqual(int(details["final_mask"][16, 24]), 255)
+
     def test_generate_mask_ctd_path_honors_protect_mask(self) -> None:
         image = np.zeros((16, 16, 3), dtype=np.uint8)
         block = TextBlock(
@@ -38,7 +67,7 @@ class ImageUtilsMaskingTests(unittest.TestCase):
             details = generate_mask(
                 image,
                 [block],
-                settings={"mask_refiner": "ctd", "keep_existing_lines": True},
+                settings={"mask_refiner": "ctd", "keep_existing_lines": True, "final_mask_dilate_size": 0},
                 return_details=True,
             )
 
@@ -49,11 +78,12 @@ class ImageUtilsMaskingTests(unittest.TestCase):
         self.assertGreater(int(np.count_nonzero(details["protect_mask"])), 0)
         self.assertEqual(int(np.count_nonzero(details["final_mask"])), int(np.count_nonzero(base_mask)) - 4)
 
-    def test_generate_mask_ctd_path_unions_hard_box_rescue_without_protected_pixels(self) -> None:
+    def test_generate_mask_ctd_path_unions_bubble_hard_box_rescue_without_protected_pixels(self) -> None:
         image = np.zeros((16, 16, 3), dtype=np.uint8)
         block = TextBlock(
             text_bbox=np.array([2, 2, 10, 10]),
-            text_class="text_free",
+            bubble_bbox=np.array([1, 1, 12, 12]),
+            text_class="text_bubble",
         )
         ctd_mask = np.zeros((16, 16), dtype=np.uint8)
         ctd_mask[2:4, 2:4] = 255
@@ -89,7 +119,7 @@ class ImageUtilsMaskingTests(unittest.TestCase):
             details = generate_mask(
                 image,
                 [block],
-                settings={"mask_refiner": "ctd", "keep_existing_lines": True},
+                settings={"mask_refiner": "ctd", "keep_existing_lines": True, "final_mask_dilate_size": 0},
                 return_details=True,
             )
 
@@ -98,6 +128,56 @@ class ImageUtilsMaskingTests(unittest.TestCase):
         self.assertIn("hard_box_rescue", details["refiner_backend"])
         self.assertEqual(int(final_mask[5, 5]), 0)
         self.assertEqual(int(final_mask[6, 6]), 255)
+        self.assertEqual(int(final_mask[2, 2]), 255)
+
+    def test_generate_mask_ctd_path_does_not_union_text_free_hard_box_rescue(self) -> None:
+        image = np.zeros((16, 16, 3), dtype=np.uint8)
+        block = TextBlock(
+            text_bbox=np.array([2, 2, 10, 10]),
+            text_class="text_free",
+        )
+        ctd_mask = np.zeros((16, 16), dtype=np.uint8)
+        ctd_mask[2:4, 2:4] = 255
+        rescue_mask = np.zeros((16, 16), dtype=np.uint8)
+        rescue_mask[5:12, 5:12] = 255
+        legacy_details = {
+            "legacy_base_mask": np.zeros((16, 16), dtype=np.uint8),
+            "hard_box_rescue_mask": rescue_mask,
+            "hard_box_applied_count": 1,
+            "hard_box_reason_totals": {"color_core_detected": 1},
+            "legacy_base_mask_pixel_count": 0,
+            "hard_box_rescue_mask_pixel_count": int(np.count_nonzero(rescue_mask)),
+        }
+
+        with (
+            mock.patch("modules.utils.image_utils.CTDRefiner") as refiner_cls,
+            mock.patch("modules.utils.image_utils.build_protect_mask", return_value=np.zeros((16, 16), dtype=np.uint8)),
+            mock.patch(
+                "modules.utils.image_utils.build_legacy_bbox_mask_details",
+                return_value=legacy_details,
+            ) as legacy_builder,
+        ):
+            refiner_cls.return_value.refine.return_value = SimpleNamespace(
+                raw_mask=ctd_mask.copy(),
+                refined_mask=ctd_mask.copy(),
+                final_mask=ctd_mask.copy(),
+                backend="torch",
+                device="cuda",
+                fallback_used=False,
+            )
+            details = generate_mask(
+                image,
+                [block],
+                settings={"mask_refiner": "ctd", "keep_existing_lines": True, "final_mask_dilate_size": 0},
+                return_details=True,
+            )
+
+        legacy_builder.assert_not_called()
+        final_mask = details["final_mask"]
+        self.assertFalse(details["hard_box_rescue_used"])
+        self.assertNotIn("hard_box_rescue", details["refiner_backend"])
+        self.assertEqual(int(np.count_nonzero(final_mask)), int(np.count_nonzero(ctd_mask)))
+        self.assertEqual(int(final_mask[6, 6]), 0)
         self.assertEqual(int(final_mask[2, 2]), 255)
 
     def test_generate_mask_legacy_mode_still_uses_legacy_builder(self) -> None:
@@ -130,7 +210,7 @@ class ImageUtilsMaskingTests(unittest.TestCase):
             details = generate_mask(
                 image,
                 [],
-                settings={"mask_refiner": "legacy_bbox"},
+                settings={"mask_refiner": "legacy_bbox", "final_mask_dilate_size": 0},
                 return_details=True,
             )
 
