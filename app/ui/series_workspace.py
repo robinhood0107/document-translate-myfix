@@ -294,6 +294,7 @@ class _SeriesQueueTable(QtWidgets.QTableWidget):
     open_requested = QtCore.Signal(str)
     remove_requested = QtCore.Signal(str)
     queue_index_requested = QtCore.Signal(str, int)
+    status_change_requested = QtCore.Signal(str, str)
     hover_preview_requested = QtCore.Signal(dict, QtCore.QPoint)
     hover_preview_hidden = QtCore.Signal()
 
@@ -584,6 +585,63 @@ class _SeriesQueueTable(QtWidgets.QTableWidget):
         if item is None:
             return ""
         return str(item.data(QtCore.Qt.ItemDataRole.UserRole) or "")
+
+    def selected_payload(self) -> dict[str, object]:
+        row = self.currentRow()
+        if row < 0:
+            return {}
+        return self._row_payload(row)
+
+    def selected_status(self) -> str:
+        return str(self.selected_payload().get("status") or "pending").strip().lower()
+
+    def _can_change_status(self, payload: dict[str, object], target_status: str) -> bool:
+        item_id = str(payload.get("series_item_id") or "").strip()
+        current_status = str(payload.get("status") or "pending").strip().lower()
+        target = str(target_status or "").strip().lower()
+        return bool(
+            item_id
+            and not self._queue_running
+            and target in {"pending", "done"}
+            and current_status != target
+        )
+
+    def can_change_selected_status_to(self, target_status: str) -> bool:
+        return self._can_change_status(self.selected_payload(), target_status)
+
+    def _emit_status_change(self, payload: dict[str, object], target_status: str) -> None:
+        if not self._can_change_status(payload, target_status):
+            return
+        item_id = str(payload.get("series_item_id") or "").strip()
+        self.status_change_requested.emit(item_id, str(target_status).strip().lower())
+
+    def build_status_change_menu(self, payload: dict[str, object] | None = None) -> QtWidgets.QMenu:
+        target_payload = self.selected_payload() if payload is None else dict(payload or {})
+        menu = QtWidgets.QMenu(self)
+        mark_done_action = menu.addAction(self.tr("Mark as Done"))
+        reset_pending_action = menu.addAction(self.tr("Reset to Pending"))
+        mark_done_action.setEnabled(self._can_change_status(target_payload, "done"))
+        reset_pending_action.setEnabled(self._can_change_status(target_payload, "pending"))
+        if self._queue_running:
+            locked_reason = self._lock_reason or self.tr(
+                "Status cannot be changed while automatic translation is running. "
+                "Pause first, then change it."
+            )
+            mark_done_action.setToolTip(locked_reason)
+            reset_pending_action.setToolTip(locked_reason)
+        mark_done_action.triggered.connect(lambda _=False: self._emit_status_change(target_payload, "done"))
+        reset_pending_action.triggered.connect(lambda _=False: self._emit_status_change(target_payload, "pending"))
+        return menu
+
+    def contextMenuEvent(self, event):  # type: ignore[override]
+        row = self.rowAt(event.pos().y())
+        payload = {}
+        if row >= 0:
+            self.selectRow(row)
+            payload = self._row_payload(row)
+        menu = self.build_status_change_menu(payload)
+        if menu.actions():
+            menu.exec(event.globalPos())
 
     def dropEvent(self, event):  # type: ignore[override]
         if self._queue_running:
@@ -1898,6 +1956,7 @@ class SeriesWorkspace(QtWidgets.QWidget):
     remove_item_requested = QtCore.Signal(str)
     reorder_requested = QtCore.Signal(list)
     queue_index_requested = QtCore.Signal(str, int)
+    status_change_requested = QtCore.Signal(str, str)
     add_files_requested = QtCore.Signal()
     add_folder_requested = QtCore.Signal()
     back_requested = QtCore.Signal()
@@ -1967,9 +2026,17 @@ class SeriesWorkspace(QtWidgets.QWidget):
 
         action_row = QtWidgets.QHBoxLayout()
         self.open_button = QtWidgets.QPushButton(self.tr("Open Selected"))
+        self.status_button = QtWidgets.QToolButton(self)
+        self.status_button.setText(self.tr("Change Status"))
+        self.status_button.setPopupMode(QtWidgets.QToolButton.ToolButtonPopupMode.InstantPopup)
+        self.status_menu = QtWidgets.QMenu(self.status_button)
+        self.mark_done_action = self.status_menu.addAction(self.tr("Mark as Done"))
+        self.reset_pending_action = self.status_menu.addAction(self.tr("Reset to Pending"))
+        self.status_button.setMenu(self.status_menu)
         self.add_files_button = QtWidgets.QPushButton(self.tr("Add Files"))
         self.add_folder_button = QtWidgets.QPushButton(self.tr("Add Folder"))
         action_row.addWidget(self.open_button)
+        action_row.addWidget(self.status_button)
         action_row.addWidget(self.add_files_button)
         action_row.addWidget(self.add_folder_button)
         action_row.addStretch(1)
@@ -2029,8 +2096,13 @@ class SeriesWorkspace(QtWidgets.QWidget):
         self.queue_table.remove_requested.connect(self.remove_item_requested)
         self.queue_table.order_changed.connect(self.reorder_requested)
         self.queue_table.queue_index_requested.connect(self.queue_index_requested)
+        self.queue_table.status_change_requested.connect(self.status_change_requested.emit)
+        self.queue_table.itemSelectionChanged.connect(self._update_status_actions)
         self.queue_table.hover_preview_requested.connect(self._queue_hover_requested)
         self.queue_table.hover_preview_hidden.connect(self._hide_hover_preview)
+        self.mark_done_action.triggered.connect(lambda _=False: self._emit_selected_status_change("done"))
+        self.reset_pending_action.triggered.connect(lambda _=False: self._emit_selected_status_change("pending"))
+        self.status_menu.aboutToShow.connect(self._update_status_actions)
         self.quick_settings.auto_translate_requested.connect(self.auto_translate_requested)
         self.status_panel.pause_requested.connect(self.pause_requested)
         self.status_panel.resume_requested.connect(self.resume_requested)
@@ -2266,6 +2338,7 @@ class SeriesWorkspace(QtWidgets.QWidget):
         self.open_button.setToolTip(lock_reason if controls_locked else self.tr("Open the selected child project."))
         self.add_files_button.setToolTip(lock_reason if controls_locked else self.tr("Add supported files to this series."))
         self.add_folder_button.setToolTip(lock_reason if controls_locked else self.tr("Scan and add a folder to this series."))
+        self._update_status_actions()
         self.quick_settings.set_locked(controls_locked, lock_reason)
         self.quick_settings.auto_translate_button.setEnabled(
             bool(items) and not queue_running and queue_state != "paused"
@@ -2298,6 +2371,39 @@ class SeriesWorkspace(QtWidgets.QWidget):
         item_id = self.queue_table.selected_item_id()
         if item_id:
             self.open_item_requested.emit(item_id)
+
+    def _status_change_lock_reason(self) -> str:
+        return self.tr(
+            "Status cannot be changed while automatic translation is running. "
+            "Pause first, then change it."
+        )
+
+    def _emit_selected_status_change(self, target_status: str) -> None:
+        if not self.queue_table.can_change_selected_status_to(target_status):
+            return
+        item_id = self.queue_table.selected_item_id()
+        if item_id:
+            self.status_change_requested.emit(item_id, str(target_status).strip().lower())
+
+    def _update_status_actions(self) -> None:
+        selected = bool(self.queue_table.selected_item_id())
+        controls_locked = bool(self._queue_running)
+        can_mark_done = self.queue_table.can_change_selected_status_to("done")
+        can_reset_pending = self.queue_table.can_change_selected_status_to("pending")
+        self.mark_done_action.setEnabled(can_mark_done)
+        self.reset_pending_action.setEnabled(can_reset_pending)
+        self.status_button.setEnabled(
+            selected and not controls_locked and (can_mark_done or can_reset_pending)
+        )
+        if controls_locked:
+            tooltip = self._status_change_lock_reason()
+        elif not selected:
+            tooltip = self.tr("Select a series item to change its status.")
+        else:
+            tooltip = self.tr("Mark the selected item as done or return it to pending.")
+        self.status_button.setToolTip(tooltip)
+        self.mark_done_action.setToolTip(tooltip if controls_locked else "")
+        self.reset_pending_action.setToolTip(tooltip if controls_locked else "")
 
     def _on_sort_changed(self) -> None:
         mode = str(self.sort_combo.currentData() or "manual")

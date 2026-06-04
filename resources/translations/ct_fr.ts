@@ -2696,6 +2696,18 @@ These values are copied into new series projects and can be adjusted per series.
         <translation type="unfinished"></translation>
     </message>
     <message>
+        <source>Change Status</source>
+        <translation>Changer le statut</translation>
+    </message>
+    <message>
+        <source>Mark as Done</source>
+        <translation>Marquer comme terminé</translation>
+    </message>
+    <message>
+        <source>Reset to Pending</source>
+        <translation>Remettre en attente</translation>
+    </message>
+    <message>
         <source>Add Files</source>
         <translation type="unfinished"></translation>
     </message>
@@ -2759,6 +2771,18 @@ The current running item stays fixed, and you can change the queue after the run
     <message>
         <source>Automatic translation is already running.</source>
         <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Status cannot be changed while automatic translation is running. Pause first, then change it.</source>
+        <translation>Le statut ne peut pas être modifié pendant l&apos;exécution de la traduction automatique. Mettez-la d&apos;abord en pause, puis modifiez-le.</translation>
+    </message>
+    <message>
+        <source>Select a series item to change its status.</source>
+        <translation>Sélectionnez un élément de série dont modifier le statut.</translation>
+    </message>
+    <message>
+        <source>Mark the selected item as done or return it to pending.</source>
+        <translation>Marquez l&apos;élément sélectionné comme terminé ou remettez-le en attente.</translation>
     </message>
 </context>
 <context>
@@ -4071,6 +4095,18 @@ It may have already been moved, renamed, or deleted.
         <source>Remove from series</source>
         <translation type="unfinished"></translation>
     </message>
+    <message>
+        <source>Mark as Done</source>
+        <translation>Marquer comme terminé</translation>
+    </message>
+    <message>
+        <source>Reset to Pending</source>
+        <translation>Remettre en attente</translation>
+    </message>
+    <message>
+        <source>Status cannot be changed while automatic translation is running. Pause first, then change it.</source>
+        <translation>Le statut ne peut pas être modifié pendant l&apos;exécution de la traduction automatique. Mettez-la d&apos;abord en pause, puis modifiez-le.</translation>
+    </message>
 </context>
 <context>
     <name>_SeriesQuickSettings</name>
@@ -4495,6 +4531,10 @@ It may have been moved, renamed, or deleted.
     <message>
         <source>Remove &apos;{name}&apos; from this series project?</source>
         <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Series item status can only be changed to Pending or Done.</source>
+        <translation>Le statut d&apos;un élément de série ne peut être défini que sur En attente ou Terminé.</translation>
     </message>
     <message>
         <source>Add Files To Series</source>

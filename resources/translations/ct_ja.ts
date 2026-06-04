@@ -2696,6 +2696,18 @@ These values are copied into new series projects and can be adjusted per series.
         <translation type="unfinished"></translation>
     </message>
     <message>
+        <source>Change Status</source>
+        <translation>状態を変更</translation>
+    </message>
+    <message>
+        <source>Mark as Done</source>
+        <translation>完了としてマーク</translation>
+    </message>
+    <message>
+        <source>Reset to Pending</source>
+        <translation>待機中に戻す</translation>
+    </message>
+    <message>
         <source>Add Files</source>
         <translation type="unfinished"></translation>
     </message>
@@ -2759,6 +2771,18 @@ The current running item stays fixed, and you can change the queue after the run
     <message>
         <source>Automatic translation is already running.</source>
         <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Status cannot be changed while automatic translation is running. Pause first, then change it.</source>
+        <translation>自動翻訳の実行中は状態を変更できません。先に一時停止してから変更してください。</translation>
+    </message>
+    <message>
+        <source>Select a series item to change its status.</source>
+        <translation>状態を変更するシリーズ項目を選択してください。</translation>
+    </message>
+    <message>
+        <source>Mark the selected item as done or return it to pending.</source>
+        <translation>選択した項目を完了にするか、待機中に戻します。</translation>
     </message>
 </context>
 <context>
@@ -4072,6 +4096,18 @@ It may have already been moved, renamed, or deleted.
         <source>Remove from series</source>
         <translation type="unfinished"></translation>
     </message>
+    <message>
+        <source>Mark as Done</source>
+        <translation>完了としてマーク</translation>
+    </message>
+    <message>
+        <source>Reset to Pending</source>
+        <translation>待機中に戻す</translation>
+    </message>
+    <message>
+        <source>Status cannot be changed while automatic translation is running. Pause first, then change it.</source>
+        <translation>自動翻訳の実行中は状態を変更できません。先に一時停止してから変更してください。</translation>
+    </message>
 </context>
 <context>
     <name>_SeriesQuickSettings</name>
@@ -4496,6 +4532,10 @@ It may have been moved, renamed, or deleted.
     <message>
         <source>Remove &apos;{name}&apos; from this series project?</source>
         <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Series item status can only be changed to Pending or Done.</source>
+        <translation>シリーズ項目の状態は「待機中」または「完了」にのみ変更できます。</translation>
     </message>
     <message>
         <source>Add Files To Series</source>

@@ -37,6 +37,7 @@ from app.projects.series_state_v1 import (
     scan_series_source_files,
     update_series_child_from_file,
     update_series_global_settings,
+    update_series_item_manual_status,
     update_series_item_status,
     update_series_items_order,
     update_series_navigation_history,
@@ -986,6 +987,47 @@ class SeriesController(QtCore.QObject):
         insert_at = max(0, min(len(ordered_ids), requested_index - 1))
         ordered_ids.insert(insert_at, item_id)
         self.request_reorder(ordered_ids)
+
+    def request_item_status_change(self, item_id: str, target_status: str) -> None:
+        if self._queue_change_locked():
+            self._show_queue_locked_message()
+            return
+        if not self.series_file:
+            return
+        target = str(target_status or "").strip().lower()
+        if target not in {"pending", "done"}:
+            Messages.show_info(
+                self.main,
+                self.main.tr("Series item status can only be changed to Pending or Done."),
+                duration=5,
+                closable=True,
+                source="series",
+            )
+            return
+        try:
+            state = update_series_item_manual_status(
+                self.series_file,
+                series_item_id=item_id,
+                status=target,
+            )
+        except KeyError:
+            return
+        self.series_manifest = dict(state["manifest"])
+        self.series_items = list(state["items"])
+        queue_runtime = self.active_queue_runtime()
+        self._pause_requested = bool(queue_runtime.get("pause_requested", False))
+        self._queue_pending_ids = list(queue_runtime.get("pending_item_ids") or [])
+        self._queue_completed_ids = list(queue_runtime.get("completed_item_ids") or [])
+        self._queue_failed_ids = list(queue_runtime.get("failed_item_ids") or [])
+        self._queue_skipped_ids = list(queue_runtime.get("skipped_item_ids") or [])
+        self._queue_retry_remaining = dict(queue_runtime.get("retry_remaining_by_item") or {})
+        if hasattr(self.main, "pipeline_status_panel"):
+            queue_state = str(queue_runtime.get("queue_state") or "idle").strip().lower()
+            self.main.pipeline_status_panel.set_series_queue_pause_visible(
+                queue_state == "paused",
+                pause_requested=False,
+            )
+        self._apply_workspace_state()
 
     def request_add_files(self) -> None:
         if self._queue_change_locked():

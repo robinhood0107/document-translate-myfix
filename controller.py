@@ -415,6 +415,7 @@ class ComicTranslate(ComicTranslateUI):
         self.series_workspace.remove_item_requested.connect(self.series_ctrl.request_remove_item)
         self.series_workspace.reorder_requested.connect(self.series_ctrl.request_reorder)
         self.series_workspace.queue_index_requested.connect(self.series_ctrl.request_queue_index_change)
+        self.series_workspace.status_change_requested.connect(self.series_ctrl.request_item_status_change)
         self.series_workspace.add_files_requested.connect(self.series_ctrl.request_add_files)
         self.series_workspace.add_folder_requested.connect(self.series_ctrl.request_add_folder)
         self.series_workspace.back_requested.connect(self.series_ctrl.request_back)
