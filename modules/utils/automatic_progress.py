@@ -17,22 +17,139 @@ AUTOMATIC_PROGRESS_TRANSLATIONS = {
     "live_stable": QCoreApplication.translate("AutomaticProgress", "Live Stable"),
 }
 
-# Seed ETA from measured stage-batched runs so a fresh install does not show
-# "Calculating" for an entire first archive. Values are intentionally generic:
-# 51 completed archive-like runs, 4,984 pages, measured from log artifacts only.
-STATISTICAL_PIPELINE_RUN_COUNT = 51
-STATISTICAL_PIPELINE_PAGE_COUNT = 4984
-STATISTICAL_PIPELINE_PREP_SEC = 31 * 60 + 7
-STATISTICAL_PIPELINE_VISUAL_SEC = 5 * 3600 + 16 * 60 + 17
-STATISTICAL_PIPELINE_TRANSITION_SEC = 2 * 3600 + 23 * 60 + 45
-STATISTICAL_PIPELINE_TEXT_SEC = 26 * 60 + 50
+# Anonymized wall-clock samples: (page_count, elapsed_seconds). The tracker fits
+# a tiny weighted linear model from these samples, then gives local history a
+# higher weight so the equation adapts to the user's hardware and settings.
+PIPELINE_ETA_SEED_SAMPLES: tuple[tuple[int, int], ...] = (
+    (100, 12 * 60 + 7),
+    (99, 15 * 60 + 40),
+    (98, 12 * 60 + 42),
+    (86, 9 * 60 + 9),
+    (111, 12 * 60 + 56),
+    (92, 10 * 60 + 31),
+    (96, 10 * 60 + 8),
+    (91, 9 * 60 + 49),
+    (90, 10 * 60 + 12),
+    (116, 12 * 60 + 5),
+    (100, 9 * 60 + 58),
+    (91, 9 * 60 + 58),
+    (90, 9 * 60),
+    (91, 10 * 60 + 7),
+    (90, 9 * 60 + 27),
+    (87, 8 * 60 + 52),
+    (91, 9 * 60 + 58),
+    (91, 10 * 60 + 43),
+    (111, 11 * 60 + 2),
+    (105, 11 * 60 + 20),
+    (98, 10 * 60 + 9),
+    (102, 11 * 60 + 29),
+    (105, 9 * 60 + 51),
+    (122, 11 * 60 + 12),
+    (107, 10 * 60 + 6),
+    (100, 10 * 60 + 12),
+    (112, 13 * 60 + 12),
+    (105, 12 * 60 + 45),
+    (110, 9 * 60 + 9),
+    (103, 11 * 60),
+    (109, 11 * 60 + 21),
+    (106, 9 * 60 + 21),
+    (106, 10 * 60 + 16),
+    (93, 10 * 60 + 27),
+    (92, 8 * 60 + 19),
+    (89, 8 * 60 + 19),
+    (90, 8 * 60 + 29),
+    (91, 10 * 60 + 6),
+    (90, 9 * 60 + 39),
+    (99, 13 * 60 + 5),
+    (91, 10 * 60 + 21),
+    (90, 9 * 60),
+    (93, 9 * 60 + 59),
+    (94, 10 * 60 + 36),
+    (93, 11 * 60 + 32),
+    (90, 8 * 60 + 46),
+    (92, 9 * 60 + 9),
+    (92, 10 * 60 + 41),
+    (95, 16 * 60 + 15),
+    (101, 17 * 60 + 32),
+    (98, 12 * 60 + 13),
+)
+PIPELINE_ETA_HISTORY_WEIGHT = 8.0
+PIPELINE_ETA_MIN_SEC_PER_PAGE = 1.0
+PIPELINE_ETA_MAX_SEC_PER_PAGE = 30.0
 
-STATISTICAL_PIPELINE_FIXED_SEC_PER_RUN = (
-    STATISTICAL_PIPELINE_PREP_SEC + STATISTICAL_PIPELINE_TRANSITION_SEC
-) / STATISTICAL_PIPELINE_RUN_COUNT
-STATISTICAL_PIPELINE_SEC_PER_PAGE = (
-    STATISTICAL_PIPELINE_VISUAL_SEC + STATISTICAL_PIPELINE_TEXT_SEC
-) / STATISTICAL_PIPELINE_PAGE_COUNT
+
+def _coerce_finite_float(value: Any) -> float | None:
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return None
+    if not math.isfinite(number):
+        return None
+    return number
+
+
+def _fit_weighted_linear_eta_model(samples: list[tuple[float, float, float]]) -> tuple[float, float] | None:
+    valid = [
+        (pages, elapsed, weight)
+        for pages, elapsed, weight in samples
+        if pages > 0 and elapsed > 0 and weight > 0
+    ]
+    if not valid:
+        return None
+
+    if len(valid) == 1:
+        pages, elapsed, _weight = valid[0]
+        return 0.0, elapsed / pages
+
+    weight_sum = sum(weight for _pages, _elapsed, weight in valid)
+    mean_pages = sum(pages * weight for pages, _elapsed, weight in valid) / weight_sum
+    mean_elapsed = sum(elapsed * weight for _pages, elapsed, weight in valid) / weight_sum
+    variance = sum(weight * (pages - mean_pages) ** 2 for pages, _elapsed, weight in valid)
+
+    if variance <= 1e-9:
+        slope = sum(weight * (elapsed / pages) for pages, elapsed, weight in valid) / weight_sum
+        return 0.0, _clamp_pipeline_slope(slope)
+
+    covariance = sum(
+        weight * (pages - mean_pages) * (elapsed - mean_elapsed)
+        for pages, elapsed, weight in valid
+    )
+    slope = covariance / variance
+    if slope <= 0 or not math.isfinite(slope):
+        slope = sum(weight * (elapsed / pages) for pages, elapsed, weight in valid) / weight_sum
+        return 0.0, _clamp_pipeline_slope(slope)
+
+    intercept = mean_elapsed - slope * mean_pages
+    return max(intercept, 0.0), _clamp_pipeline_slope(slope)
+
+
+def _clamp_pipeline_slope(slope: float) -> float:
+    return min(max(float(slope), PIPELINE_ETA_MIN_SEC_PER_PAGE), PIPELINE_ETA_MAX_SEC_PER_PAGE)
+
+
+def _pipeline_history_samples(history: list[Any]) -> list[tuple[float, float, float]]:
+    samples: list[tuple[float, float, float]] = []
+    for item in history:
+        if not isinstance(item, dict):
+            continue
+        pages = _coerce_finite_float(item.get("image_count"))
+        if pages is None or pages <= 0:
+            continue
+        elapsed = _coerce_finite_float(item.get("elapsed_sec"))
+        if elapsed is None or elapsed <= 0:
+            per_page = _coerce_finite_float(item.get("per_page_sec"))
+            elapsed = per_page * pages if per_page is not None and per_page > 0 else None
+        if elapsed is None or elapsed <= 0:
+            continue
+        samples.append((pages, elapsed, PIPELINE_ETA_HISTORY_WEIGHT))
+    return samples
+
+
+def _fit_pipeline_eta_model(history: list[Any]) -> tuple[tuple[float, float] | None, bool]:
+    samples = [(float(pages), float(elapsed), 1.0) for pages, elapsed in PIPELINE_ETA_SEED_SAMPLES]
+    history_samples = _pipeline_history_samples(history)
+    samples.extend(history_samples)
+    return _fit_weighted_linear_eta_model(samples), bool(history_samples)
 
 
 def format_duration(seconds: float | None) -> str:
@@ -180,12 +297,10 @@ class AutomaticProgressTracker:
         completed_pages = len(self.completed_page_durations)
         if completed_pages == 0:
             recent = self._read_history(self.BATCH_HISTORY_GROUP, "recent")
-            per_page = _median_field(recent, "per_page_sec")
-            if per_page is not None:
-                return per_page * self.page_total, AUTOMATIC_PROGRESS_TRANSLATIONS["recent_history"]
-            statistical_eta = self._estimate_statistical_pipeline_eta(now)
-            if statistical_eta is not None:
-                return statistical_eta, AUTOMATIC_PROGRESS_TRANSLATIONS["live_learning"]
+            learned_eta, used_history = self._estimate_learned_pipeline_eta(now, recent)
+            if learned_eta is not None:
+                confidence_key = "recent_history" if used_history else "live_learning"
+                return learned_eta, AUTOMATIC_PROGRESS_TRANSLATIONS[confidence_key]
             return None, AUTOMATIC_PROGRESS_TRANSLATIONS["calculating"]
 
         if completed_pages < 3:
@@ -205,15 +320,16 @@ class AutomaticProgressTracker:
 
         return remaining, AUTOMATIC_PROGRESS_TRANSLATIONS["live_stable"]
 
-    def _estimate_statistical_pipeline_eta(self, now: float) -> float | None:
+    def _estimate_learned_pipeline_eta(self, now: float, history: list[Any]) -> tuple[float | None, bool]:
         if self.page_total <= 0:
-            return None
-        estimated_total = (
-            STATISTICAL_PIPELINE_FIXED_SEC_PER_RUN
-            + STATISTICAL_PIPELINE_SEC_PER_PAGE * self.page_total
-        )
+            return None, False
+        model, used_history = _fit_pipeline_eta_model(history)
+        if model is None:
+            return None, used_history
+        intercept, sec_per_page = model
+        estimated_total = intercept + sec_per_page * self.page_total
         elapsed = max(now - self.run_started_at, 0.0)
-        return max(estimated_total - elapsed, 0.0)
+        return max(estimated_total - elapsed, 0.0), used_history
 
     def _estimate_progress(self, event: dict[str, Any]) -> float:
         if str(event.get("phase") or "") != "pipeline":
@@ -283,12 +399,3 @@ def _median_number(values: list[Any]) -> float | None:
     if len(numbers) % 2:
         return numbers[mid]
     return (numbers[mid - 1] + numbers[mid]) / 2.0
-
-
-def _median_field(values: list[Any], field: str) -> float | None:
-    return _median_number([
-        float(item[field])
-        for item in values
-        if isinstance(item, dict) and field in item
-        and isinstance(item[field], (int, float))
-    ])
