@@ -444,6 +444,7 @@ class SettingsPage(QtWidgets.QWidget):
             "ctd_font_size_max": settings.value("ctd_font_size_max", -1, type=int),
             "ctd_font_size_min": settings.value("ctd_font_size_min", -1, type=int),
             "ctd_mask_dilate_size": settings.value("ctd_mask_dilate_size", 2, type=int),
+            "final_mask_dilate_size": settings.value("final_mask_dilate_size", 8, type=int),
         }
         settings.endGroup()
         settings.endGroup()

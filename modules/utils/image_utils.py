@@ -3,6 +3,7 @@ from __future__ import annotations
 import base64
 from typing import Any
 
+import cv2
 import imkit as imk
 import numpy as np
 from PySide6.QtGui import QColor
@@ -70,6 +71,23 @@ def _ctd_settings_from_cfg(cfg: dict[str, Any]) -> CTDRefinerSettings:
     )
 
 
+def _allows_ctd_hard_box_rescue(block) -> bool:
+    return str(getattr(block, "text_class", "") or "") != "text_free"
+
+
+def _dilate_final_mask(mask: np.ndarray, size: int) -> np.ndarray:
+    mask_arr = np.where(np.asarray(mask) > 0, 255, 0).astype(np.uint8)
+    if int(size) <= 0 or mask_arr.size == 0 or not np.any(mask_arr):
+        return mask_arr
+    radius = int(size)
+    kernel = cv2.getStructuringElement(
+        cv2.MORPH_ELLIPSE,
+        (radius * 2 + 1, radius * 2 + 1),
+        (radius, radius),
+    )
+    return np.where(cv2.dilate(mask_arr, kernel, iterations=1) > 0, 255, 0).astype(np.uint8)
+
+
 def _ctd_details(
     img: np.ndarray,
     blk_list,
@@ -102,10 +120,11 @@ def _ctd_details(
     legacy_rescue_details: dict[str, Any] | None = None
     hard_box_rescue_used = False
 
-    if block_list:
+    hard_box_rescue_blocks = [block for block in block_list if _allows_ctd_hard_box_rescue(block)]
+    if hard_box_rescue_blocks:
         legacy_rescue_details = _legacy_details(
             img,
-            block_list,
+            hard_box_rescue_blocks,
             cfg,
             default_padding=default_padding,
         )
@@ -224,6 +243,15 @@ def generate_mask(
         details["refiner_device"] = str(cfg.get("ctd_device", "cuda") or "cuda")
         details["fallback_used"] = True
         details["mask_inpaint_mode"] = cfg["mask_inpaint_mode"]
+
+    final_dilate_size = int(cfg.get("final_mask_dilate_size", 8) or 0)
+    if final_dilate_size > 0:
+        final_mask = _dilate_final_mask(details.get("final_mask"), final_dilate_size)
+        details["final_mask_post_expand"] = final_mask.copy()
+        details["final_mask"] = final_mask
+        details["final_mask_pixel_count"] = int(np.count_nonzero(final_mask))
+    details["final_mask_dilate_size"] = final_dilate_size
+
     if return_details:
         return details
     return details["final_mask"]

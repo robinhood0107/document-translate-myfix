@@ -6,6 +6,7 @@ from ..utils.textblock import TextBlock
 from .utils.geometry import does_rectangle_fit, do_rectangles_overlap, \
     merge_overlapping_boxes
 from .font.engine import FontEngineFactory
+from .utils.bubble_text_rescue import detect_bubble_text_rescue_boxes
 from .utils.content import filter_and_fix_bboxes
 
 
@@ -54,6 +55,7 @@ class DetectionEngine(ABC):
 
         text_blocks = []
         text_matched = [False] * len(text_boxes)  # Track matched text boxes
+        matched_bubble_indices = set()
         
         # Set bubble_boxes to empty array if None
         if bubble_boxes is None:
@@ -95,7 +97,7 @@ class DetectionEngine(ABC):
                     )
                     continue
                 
-                for bble_box in bubble_boxes:
+                for bubble_idx, bble_box in enumerate(bubble_boxes):
                     if bble_box is None:
                         continue
                     if does_rectangle_fit(bble_box, txt_box):
@@ -110,6 +112,7 @@ class DetectionEngine(ABC):
                             )
                         )
                         text_matched[txt_idx] = True  
+                        matched_bubble_indices.add(bubble_idx)
                         break
                     elif do_rectangles_overlap(bble_box, txt_box):
                         # Text overlaps with a bubble
@@ -123,6 +126,7 @@ class DetectionEngine(ABC):
                             )
                         )
                         text_matched[txt_idx] = True  
+                        matched_bubble_indices.add(bubble_idx)
                         break
                 
                 if not text_matched[txt_idx]:
@@ -134,6 +138,23 @@ class DetectionEngine(ABC):
                             font_color=text_color,
                         )
                     )
+
+        unmatched_bubbles = [
+            bubble_box
+            for bubble_idx, bubble_box in enumerate(bubble_boxes)
+            if bubble_idx not in matched_bubble_indices
+        ]
+        for text_box, bubble_box in detect_bubble_text_rescue_boxes(image, unmatched_bubbles, text_boxes):
+            x1, y1, x2, y2 = [int(v) for v in text_box]
+            direction = 'vertical' if (y2 - y1) >= (x2 - x1) * 1.15 else 'horizontal'
+            text_blocks.append(
+                TextBlock(
+                    text_bbox=np.asarray(text_box, dtype=np.int32),
+                    bubble_bbox=np.asarray(bubble_box, dtype=np.int32),
+                    text_class='text_bubble',
+                    direction=direction,
+                )
+            )
         
         return text_blocks
     
