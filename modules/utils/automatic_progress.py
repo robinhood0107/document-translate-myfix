@@ -17,6 +17,23 @@ AUTOMATIC_PROGRESS_TRANSLATIONS = {
     "live_stable": QCoreApplication.translate("AutomaticProgress", "Live Stable"),
 }
 
+# Seed ETA from measured stage-batched runs so a fresh install does not show
+# "Calculating" for an entire first archive. Values are intentionally generic:
+# 51 completed archive-like runs, 4,984 pages, measured from log artifacts only.
+STATISTICAL_PIPELINE_RUN_COUNT = 51
+STATISTICAL_PIPELINE_PAGE_COUNT = 4984
+STATISTICAL_PIPELINE_PREP_SEC = 31 * 60 + 7
+STATISTICAL_PIPELINE_VISUAL_SEC = 5 * 3600 + 16 * 60 + 17
+STATISTICAL_PIPELINE_TRANSITION_SEC = 2 * 3600 + 23 * 60 + 45
+STATISTICAL_PIPELINE_TEXT_SEC = 26 * 60 + 50
+
+STATISTICAL_PIPELINE_FIXED_SEC_PER_RUN = (
+    STATISTICAL_PIPELINE_PREP_SEC + STATISTICAL_PIPELINE_TRANSITION_SEC
+) / STATISTICAL_PIPELINE_RUN_COUNT
+STATISTICAL_PIPELINE_SEC_PER_PAGE = (
+    STATISTICAL_PIPELINE_VISUAL_SEC + STATISTICAL_PIPELINE_TEXT_SEC
+) / STATISTICAL_PIPELINE_PAGE_COUNT
+
 
 def format_duration(seconds: float | None) -> str:
     if seconds is None:
@@ -166,6 +183,9 @@ class AutomaticProgressTracker:
             per_page = _median_field(recent, "per_page_sec")
             if per_page is not None:
                 return per_page * self.page_total, AUTOMATIC_PROGRESS_TRANSLATIONS["recent_history"]
+            statistical_eta = self._estimate_statistical_pipeline_eta(now)
+            if statistical_eta is not None:
+                return statistical_eta, AUTOMATIC_PROGRESS_TRANSLATIONS["live_learning"]
             return None, AUTOMATIC_PROGRESS_TRANSLATIONS["calculating"]
 
         if completed_pages < 3:
@@ -184,6 +204,16 @@ class AutomaticProgressTracker:
                 remaining += max((sum(stage_history) / len(stage_history)) - current_elapsed, 0.0)
 
         return remaining, AUTOMATIC_PROGRESS_TRANSLATIONS["live_stable"]
+
+    def _estimate_statistical_pipeline_eta(self, now: float) -> float | None:
+        if self.page_total <= 0:
+            return None
+        estimated_total = (
+            STATISTICAL_PIPELINE_FIXED_SEC_PER_RUN
+            + STATISTICAL_PIPELINE_SEC_PER_PAGE * self.page_total
+        )
+        elapsed = max(now - self.run_started_at, 0.0)
+        return max(estimated_total - elapsed, 0.0)
 
     def _estimate_progress(self, event: dict[str, Any]) -> float:
         if str(event.get("phase") or "") != "pipeline":
