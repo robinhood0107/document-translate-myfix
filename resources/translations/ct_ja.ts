@@ -3100,7 +3100,7 @@ Restart now?</source>
     </message>
     <message>
         <source>Export</source>
-        <translation>輸出</translation>
+        <translation>書き出し</translation>
     </message>
     <message>
         <source>Shortcuts</source>
@@ -4377,12 +4377,32 @@ Do you want to restore it?</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
+        <source>Restoring project file...</source>
+        <translation>プロジェクトファイルを復元しています...</translation>
+    </message>
+    <message>
+        <source>Exporting image...</source>
+        <translation>画像を書き出しています...</translation>
+    </message>
+    <message>
+        <source>Export</source>
+        <translation>書き出し</translation>
+    </message>
+    <message>
+        <source>Exporting PSD...</source>
+        <translation>PSDを書き出しています...</translation>
+    </message>
+    <message>
         <source>Rerender Output</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
         <source>There are no render changes to apply.</source>
         <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Rendering output...</source>
+        <translation>出力をレンダリングしています...</translation>
     </message>
     <message>
         <source>Render output was updated.</source>
@@ -4455,6 +4475,10 @@ It may have been moved, renamed, or deleted.
 {path}</translation>
     </message>
     <message>
+        <source>Loading project file...</source>
+        <translation>プロジェクトファイルを読み込んでいます...</translation>
+    </message>
+    <message>
         <source>Korean</source>
         <translation>韓国人</translation>
     </message>
@@ -4488,6 +4512,10 @@ It may have been moved, renamed, or deleted.
 
 {path}</source>
         <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Loading series project...</source>
+        <translation>シリーズプロジェクトを読み込んでいます...</translation>
     </message>
     <message>
         <source>The previous automatic translation run was interrupted and restored as paused.</source>
@@ -4526,6 +4554,10 @@ It may have been moved, renamed, or deleted.
         <translation type="unfinished"></translation>
     </message>
     <message>
+        <source>Opening series item...</source>
+        <translation>シリーズ項目を開いています...</translation>
+    </message>
+    <message>
         <source>Remove From Series</source>
         <translation type="unfinished"></translation>
     </message>
@@ -4558,6 +4590,10 @@ It may have been moved, renamed, or deleted.
         <translation type="unfinished"></translation>
     </message>
     <message>
+        <source>Adding files to series...</source>
+        <translation>シリーズにファイルを追加しています...</translation>
+    </message>
+    <message>
         <source>Saving series project file...</source>
         <translation type="unfinished"></translation>
     </message>
@@ -4578,6 +4614,50 @@ It may have been moved, renamed, or deleted.
     <message>
         <source>Preparing automatic translation...</source>
         <translation>自動翻訳を準備しています...</translation>
+    </message>
+    <message>
+        <source>Importing PSD files...</source>
+        <translation>PSDファイルを読み込んでいます...</translation>
+    </message>
+    <message>
+        <source>Import</source>
+        <translation>読み込み</translation>
+    </message>
+    <message>
+        <source>Loading images...</source>
+        <translation>画像を読み込んでいます...</translation>
+    </message>
+    <message>
+        <source>Importing pages...</source>
+        <translation>ページを読み込んでいます...</translation>
+    </message>
+    <message>
+        <source>Processing</source>
+        <translation>処理中</translation>
+    </message>
+    <message>
+        <source>Preparing text detection...</source>
+        <translation>テキスト検出を準備しています...</translation>
+    </message>
+    <message>
+        <source>Preparing OCR...</source>
+        <translation>OCRを準備しています...</translation>
+    </message>
+    <message>
+        <source>Preparing translation...</source>
+        <translation>翻訳を準備しています...</translation>
+    </message>
+    <message>
+        <source>Preparing inpainting...</source>
+        <translation>インペイントを準備しています...</translation>
+    </message>
+    <message>
+        <source>Preparing segmentation...</source>
+        <translation>セグメンテーションを準備しています...</translation>
+    </message>
+    <message>
+        <source>Rendering text...</source>
+        <translation>テキストをレンダリングしています...</translation>
     </message>
 </context>
 <context>

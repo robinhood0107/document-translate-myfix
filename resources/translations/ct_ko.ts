@@ -4437,12 +4437,32 @@ Do you want to restore it?</source>
         <translation>RecoveredProject.ctpr</translation>
     </message>
     <message>
+        <source>Restoring project file...</source>
+        <translation>프로젝트 파일을 복원하는 중입니다...</translation>
+    </message>
+    <message>
+        <source>Exporting image...</source>
+        <translation>이미지를 내보내는 중입니다...</translation>
+    </message>
+    <message>
+        <source>Export</source>
+        <translation>내보내기</translation>
+    </message>
+    <message>
+        <source>Exporting PSD...</source>
+        <translation>PSD를 내보내는 중입니다...</translation>
+    </message>
+    <message>
         <source>Rerender Output</source>
         <translation>렌더 출력 재생성</translation>
     </message>
     <message>
         <source>There are no render changes to apply.</source>
         <translation>적용할 렌더 변경사항이 없습니다.</translation>
+    </message>
+    <message>
+        <source>Rendering output...</source>
+        <translation>출력을 렌더링하는 중입니다...</translation>
     </message>
     <message>
         <source>Render output was updated.</source>
@@ -4523,6 +4543,10 @@ It may have been moved, renamed, or deleted.
 {길}</translation>
     </message>
     <message>
+        <source>Loading project file...</source>
+        <translation>프로젝트 파일을 불러오는 중입니다...</translation>
+    </message>
+    <message>
         <source>Korean</source>
         <translation>한국어</translation>
     </message>
@@ -4561,6 +4585,10 @@ It may have been moved, renamed, or deleted.
 {path}</translation>
     </message>
     <message>
+        <source>Loading series project...</source>
+        <translation>시리즈 프로젝트를 불러오는 중입니다...</translation>
+    </message>
+    <message>
         <source>The previous automatic translation run was interrupted and restored as paused.</source>
         <translation>이전 자동 번역 실행이 중단되어 일시정지 상태로 복구되었습니다.</translation>
     </message>
@@ -4579,6 +4607,14 @@ It may have been moved, renamed, or deleted.
     <message>
         <source>Create Series Project</source>
         <translation>시리즈 프로젝트 만들기</translation>
+    </message>
+    <message>
+        <source>Opening series item...</source>
+        <translation>시리즈 항목을 여는 중입니다...</translation>
+    </message>
+    <message>
+        <source>Adding files to series...</source>
+        <translation>시리즈에 파일을 추가하는 중입니다...</translation>
     </message>
     <message>
         <source>Preparing automatic translation...</source>
@@ -4651,6 +4687,50 @@ It may have been moved, renamed, or deleted.
     <message>
         <source>There are no queue items left to run.</source>
         <translation>실행할 대기열 항목이 남아 있지 않습니다.</translation>
+    </message>
+    <message>
+        <source>Importing PSD files...</source>
+        <translation>PSD 파일을 가져오는 중입니다...</translation>
+    </message>
+    <message>
+        <source>Import</source>
+        <translation>가져오기</translation>
+    </message>
+    <message>
+        <source>Loading images...</source>
+        <translation>이미지를 불러오는 중입니다...</translation>
+    </message>
+    <message>
+        <source>Importing pages...</source>
+        <translation>페이지를 가져오는 중입니다...</translation>
+    </message>
+    <message>
+        <source>Processing</source>
+        <translation>처리 중</translation>
+    </message>
+    <message>
+        <source>Preparing text detection...</source>
+        <translation>글자 검출을 준비하는 중입니다...</translation>
+    </message>
+    <message>
+        <source>Preparing OCR...</source>
+        <translation>OCR을 준비하는 중입니다...</translation>
+    </message>
+    <message>
+        <source>Preparing translation...</source>
+        <translation>번역을 준비하는 중입니다...</translation>
+    </message>
+    <message>
+        <source>Preparing inpainting...</source>
+        <translation>인페인팅을 준비하는 중입니다...</translation>
+    </message>
+    <message>
+        <source>Preparing segmentation...</source>
+        <translation>세그먼테이션을 준비하는 중입니다...</translation>
+    </message>
+    <message>
+        <source>Rendering text...</source>
+        <translation>텍스트를 렌더링하는 중입니다...</translation>
     </message>
 </context>
 <context>

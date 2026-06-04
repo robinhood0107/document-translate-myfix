@@ -4377,12 +4377,32 @@ Do you want to restore it?</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
+        <source>Restoring project file...</source>
+        <translation>Восстановление файла проекта...</translation>
+    </message>
+    <message>
+        <source>Exporting image...</source>
+        <translation>Экспорт изображения...</translation>
+    </message>
+    <message>
+        <source>Export</source>
+        <translation>Экспорт</translation>
+    </message>
+    <message>
+        <source>Exporting PSD...</source>
+        <translation>Экспорт PSD...</translation>
+    </message>
+    <message>
         <source>Rerender Output</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
         <source>There are no render changes to apply.</source>
         <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Rendering output...</source>
+        <translation>Рендеринг результата...</translation>
     </message>
     <message>
         <source>Render output was updated.</source>
@@ -4455,6 +4475,10 @@ It may have been moved, renamed, or deleted.
 {путь}</translation>
     </message>
     <message>
+        <source>Loading project file...</source>
+        <translation>Загрузка файла проекта...</translation>
+    </message>
+    <message>
         <source>Korean</source>
         <translation>Корейский</translation>
     </message>
@@ -4488,6 +4512,10 @@ It may have been moved, renamed, or deleted.
 
 {path}</source>
         <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Loading series project...</source>
+        <translation>Загрузка проекта серии...</translation>
     </message>
     <message>
         <source>The previous automatic translation run was interrupted and restored as paused.</source>
@@ -4526,6 +4554,10 @@ It may have been moved, renamed, or deleted.
         <translation type="unfinished"></translation>
     </message>
     <message>
+        <source>Opening series item...</source>
+        <translation>Открытие элемента серии...</translation>
+    </message>
+    <message>
         <source>Remove From Series</source>
         <translation type="unfinished"></translation>
     </message>
@@ -4558,6 +4590,10 @@ It may have been moved, renamed, or deleted.
         <translation type="unfinished"></translation>
     </message>
     <message>
+        <source>Adding files to series...</source>
+        <translation>Добавление файлов в серию...</translation>
+    </message>
+    <message>
         <source>Saving series project file...</source>
         <translation type="unfinished"></translation>
     </message>
@@ -4578,6 +4614,50 @@ It may have been moved, renamed, or deleted.
     <message>
         <source>Preparing automatic translation...</source>
         <translation>Подготовка автоматического перевода...</translation>
+    </message>
+    <message>
+        <source>Importing PSD files...</source>
+        <translation>Импорт файлов PSD...</translation>
+    </message>
+    <message>
+        <source>Import</source>
+        <translation>Импорт</translation>
+    </message>
+    <message>
+        <source>Loading images...</source>
+        <translation>Загрузка изображений...</translation>
+    </message>
+    <message>
+        <source>Importing pages...</source>
+        <translation>Импорт страниц...</translation>
+    </message>
+    <message>
+        <source>Processing</source>
+        <translation>Обработка</translation>
+    </message>
+    <message>
+        <source>Preparing text detection...</source>
+        <translation>Подготовка распознавания областей текста...</translation>
+    </message>
+    <message>
+        <source>Preparing OCR...</source>
+        <translation>Подготовка OCR...</translation>
+    </message>
+    <message>
+        <source>Preparing translation...</source>
+        <translation>Подготовка перевода...</translation>
+    </message>
+    <message>
+        <source>Preparing inpainting...</source>
+        <translation>Подготовка инпейнтинга...</translation>
+    </message>
+    <message>
+        <source>Preparing segmentation...</source>
+        <translation>Подготовка сегментации...</translation>
+    </message>
+    <message>
+        <source>Rendering text...</source>
+        <translation>Рендеринг текста...</translation>
     </message>
 </context>
 <context>

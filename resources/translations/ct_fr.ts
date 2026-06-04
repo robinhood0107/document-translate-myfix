@@ -4376,12 +4376,32 @@ Voulez-vous le restaurer ?</translation>
         <translation type="unfinished"></translation>
     </message>
     <message>
+        <source>Restoring project file...</source>
+        <translation>Restauration du fichier de projet...</translation>
+    </message>
+    <message>
+        <source>Exporting image...</source>
+        <translation>Exportation de l&apos;image...</translation>
+    </message>
+    <message>
+        <source>Export</source>
+        <translation>Exporter</translation>
+    </message>
+    <message>
+        <source>Exporting PSD...</source>
+        <translation>Exportation du PSD...</translation>
+    </message>
+    <message>
         <source>Rerender Output</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
         <source>There are no render changes to apply.</source>
         <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Rendering output...</source>
+        <translation>Rendu de la sortie...</translation>
     </message>
     <message>
         <source>Render output was updated.</source>
@@ -4454,6 +4474,10 @@ Il a peut-être été déplacé, renommé ou supprimé.
 {chemin}</translation>
     </message>
     <message>
+        <source>Loading project file...</source>
+        <translation>Chargement du fichier de projet...</translation>
+    </message>
+    <message>
         <source>Korean</source>
         <translation>Coréen</translation>
     </message>
@@ -4487,6 +4511,10 @@ It may have been moved, renamed, or deleted.
 
 {path}</source>
         <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Loading series project...</source>
+        <translation>Chargement du projet de série...</translation>
     </message>
     <message>
         <source>The previous automatic translation run was interrupted and restored as paused.</source>
@@ -4525,6 +4553,10 @@ It may have been moved, renamed, or deleted.
         <translation type="unfinished"></translation>
     </message>
     <message>
+        <source>Opening series item...</source>
+        <translation>Ouverture de l&apos;élément de série...</translation>
+    </message>
+    <message>
         <source>Remove From Series</source>
         <translation type="unfinished"></translation>
     </message>
@@ -4557,6 +4589,10 @@ It may have been moved, renamed, or deleted.
         <translation type="unfinished"></translation>
     </message>
     <message>
+        <source>Adding files to series...</source>
+        <translation>Ajout des fichiers à la série...</translation>
+    </message>
+    <message>
         <source>Saving series project file...</source>
         <translation type="unfinished"></translation>
     </message>
@@ -4577,6 +4613,50 @@ It may have been moved, renamed, or deleted.
     <message>
         <source>Preparing automatic translation...</source>
         <translation>Préparation de la traduction automatique...</translation>
+    </message>
+    <message>
+        <source>Importing PSD files...</source>
+        <translation>Importation des fichiers PSD...</translation>
+    </message>
+    <message>
+        <source>Import</source>
+        <translation>Importer</translation>
+    </message>
+    <message>
+        <source>Loading images...</source>
+        <translation>Chargement des images...</translation>
+    </message>
+    <message>
+        <source>Importing pages...</source>
+        <translation>Importation des pages...</translation>
+    </message>
+    <message>
+        <source>Processing</source>
+        <translation>Traitement</translation>
+    </message>
+    <message>
+        <source>Preparing text detection...</source>
+        <translation>Préparation de la détection de texte...</translation>
+    </message>
+    <message>
+        <source>Preparing OCR...</source>
+        <translation>Préparation de l&apos;OCR...</translation>
+    </message>
+    <message>
+        <source>Preparing translation...</source>
+        <translation>Préparation de la traduction...</translation>
+    </message>
+    <message>
+        <source>Preparing inpainting...</source>
+        <translation>Préparation de l&apos;inpainting...</translation>
+    </message>
+    <message>
+        <source>Preparing segmentation...</source>
+        <translation>Préparation de la segmentation...</translation>
+    </message>
+    <message>
+        <source>Rendering text...</source>
+        <translation>Rendu du texte...</translation>
     </message>
 </context>
 <context>

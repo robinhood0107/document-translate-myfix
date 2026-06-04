@@ -3100,7 +3100,7 @@ Restart now?</source>
     </message>
     <message>
         <source>Export</source>
-        <translation>Dışa Aktar</translation>
+        <translation>Dışa aktar</translation>
     </message>
     <message>
         <source>Shortcuts</source>
@@ -4376,12 +4376,32 @@ Geri yüklemek istiyor musunuz?</translation>
         <translation type="unfinished"></translation>
     </message>
     <message>
+        <source>Restoring project file...</source>
+        <translation>Proje dosyası geri yükleniyor...</translation>
+    </message>
+    <message>
+        <source>Exporting image...</source>
+        <translation>Görsel dışa aktarılıyor...</translation>
+    </message>
+    <message>
+        <source>Export</source>
+        <translation>Dışa aktar</translation>
+    </message>
+    <message>
+        <source>Exporting PSD...</source>
+        <translation>PSD dışa aktarılıyor...</translation>
+    </message>
+    <message>
         <source>Rerender Output</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
         <source>There are no render changes to apply.</source>
         <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Rendering output...</source>
+        <translation>Çıktı işleniyor...</translation>
     </message>
     <message>
         <source>Render output was updated.</source>
@@ -4454,6 +4474,10 @@ Taşınmış, yeniden adlandırılmış veya silinmiş olabilir.
 {yol}</translation>
     </message>
     <message>
+        <source>Loading project file...</source>
+        <translation>Proje dosyası yükleniyor...</translation>
+    </message>
+    <message>
         <source>Korean</source>
         <translation>Korece</translation>
     </message>
@@ -4487,6 +4511,10 @@ It may have been moved, renamed, or deleted.
 
 {path}</source>
         <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Loading series project...</source>
+        <translation>Seri projesi yükleniyor...</translation>
     </message>
     <message>
         <source>The previous automatic translation run was interrupted and restored as paused.</source>
@@ -4525,6 +4553,10 @@ It may have been moved, renamed, or deleted.
         <translation type="unfinished"></translation>
     </message>
     <message>
+        <source>Opening series item...</source>
+        <translation>Seri öğesi açılıyor...</translation>
+    </message>
+    <message>
         <source>Remove From Series</source>
         <translation type="unfinished"></translation>
     </message>
@@ -4557,6 +4589,10 @@ It may have been moved, renamed, or deleted.
         <translation type="unfinished"></translation>
     </message>
     <message>
+        <source>Adding files to series...</source>
+        <translation>Dosyalar seriye ekleniyor...</translation>
+    </message>
+    <message>
         <source>Saving series project file...</source>
         <translation type="unfinished"></translation>
     </message>
@@ -4577,6 +4613,50 @@ It may have been moved, renamed, or deleted.
     <message>
         <source>Preparing automatic translation...</source>
         <translation>Otomatik çeviri hazırlanıyor...</translation>
+    </message>
+    <message>
+        <source>Importing PSD files...</source>
+        <translation>PSD dosyaları içe aktarılıyor...</translation>
+    </message>
+    <message>
+        <source>Import</source>
+        <translation>İçe aktar</translation>
+    </message>
+    <message>
+        <source>Loading images...</source>
+        <translation>Görseller yükleniyor...</translation>
+    </message>
+    <message>
+        <source>Importing pages...</source>
+        <translation>Sayfalar içe aktarılıyor...</translation>
+    </message>
+    <message>
+        <source>Processing</source>
+        <translation>İşleniyor</translation>
+    </message>
+    <message>
+        <source>Preparing text detection...</source>
+        <translation>Metin algılama hazırlanıyor...</translation>
+    </message>
+    <message>
+        <source>Preparing OCR...</source>
+        <translation>OCR hazırlanıyor...</translation>
+    </message>
+    <message>
+        <source>Preparing translation...</source>
+        <translation>Çeviri hazırlanıyor...</translation>
+    </message>
+    <message>
+        <source>Preparing inpainting...</source>
+        <translation>Inpainting hazırlanıyor...</translation>
+    </message>
+    <message>
+        <source>Preparing segmentation...</source>
+        <translation>Segmentasyon hazırlanıyor...</translation>
+    </message>
+    <message>
+        <source>Rendering text...</source>
+        <translation>Metin işleniyor...</translation>
     </message>
 </context>
 <context>

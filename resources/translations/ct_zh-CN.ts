@@ -4374,12 +4374,32 @@ Do you want to restore it?</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
+        <source>Restoring project file...</source>
+        <translation>正在恢复项目文件...</translation>
+    </message>
+    <message>
+        <source>Exporting image...</source>
+        <translation>正在导出图像...</translation>
+    </message>
+    <message>
+        <source>Export</source>
+        <translation>导出</translation>
+    </message>
+    <message>
+        <source>Exporting PSD...</source>
+        <translation>正在导出 PSD...</translation>
+    </message>
+    <message>
         <source>Rerender Output</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
         <source>There are no render changes to apply.</source>
         <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Rendering output...</source>
+        <translation>正在渲染输出...</translation>
     </message>
     <message>
         <source>Render output was updated.</source>
@@ -4452,6 +4472,10 @@ It may have been moved, renamed, or deleted.
 {小路}</translation>
     </message>
     <message>
+        <source>Loading project file...</source>
+        <translation>正在加载项目文件...</translation>
+    </message>
+    <message>
         <source>Korean</source>
         <translation>韩语</translation>
     </message>
@@ -4485,6 +4509,10 @@ It may have been moved, renamed, or deleted.
 
 {path}</source>
         <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Loading series project...</source>
+        <translation>正在加载系列项目...</translation>
     </message>
     <message>
         <source>The previous automatic translation run was interrupted and restored as paused.</source>
@@ -4523,6 +4551,10 @@ It may have been moved, renamed, or deleted.
         <translation type="unfinished"></translation>
     </message>
     <message>
+        <source>Opening series item...</source>
+        <translation>正在打开系列项目条目...</translation>
+    </message>
+    <message>
         <source>Remove From Series</source>
         <translation type="unfinished"></translation>
     </message>
@@ -4555,6 +4587,10 @@ It may have been moved, renamed, or deleted.
         <translation type="unfinished"></translation>
     </message>
     <message>
+        <source>Adding files to series...</source>
+        <translation>正在向系列添加文件...</translation>
+    </message>
+    <message>
         <source>Saving series project file...</source>
         <translation type="unfinished"></translation>
     </message>
@@ -4575,6 +4611,50 @@ It may have been moved, renamed, or deleted.
     <message>
         <source>Preparing automatic translation...</source>
         <translation>正在准备自动翻译...</translation>
+    </message>
+    <message>
+        <source>Importing PSD files...</source>
+        <translation>正在导入 PSD 文件...</translation>
+    </message>
+    <message>
+        <source>Import</source>
+        <translation>导入</translation>
+    </message>
+    <message>
+        <source>Loading images...</source>
+        <translation>正在加载图像...</translation>
+    </message>
+    <message>
+        <source>Importing pages...</source>
+        <translation>正在导入页面...</translation>
+    </message>
+    <message>
+        <source>Processing</source>
+        <translation>处理中</translation>
+    </message>
+    <message>
+        <source>Preparing text detection...</source>
+        <translation>正在准备文字检测...</translation>
+    </message>
+    <message>
+        <source>Preparing OCR...</source>
+        <translation>正在准备 OCR...</translation>
+    </message>
+    <message>
+        <source>Preparing translation...</source>
+        <translation>正在准备翻译...</translation>
+    </message>
+    <message>
+        <source>Preparing inpainting...</source>
+        <translation>正在准备修补...</translation>
+    </message>
+    <message>
+        <source>Preparing segmentation...</source>
+        <translation>正在准备分割...</translation>
+    </message>
+    <message>
+        <source>Rendering text...</source>
+        <translation>正在渲染文字...</translation>
     </message>
 </context>
 <context>

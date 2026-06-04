@@ -640,24 +640,46 @@ class ImageStateController:
                 prepare_psd_font_catalog()
             except Exception:
                 pass
+            busy_dialog = Messages.show_busy(
+                self.main,
+                self.main.tr("Importing PSD files..."),
+                title=self.main.tr("Import"),
+                minimum_visible_ms=300,
+            )
             self.main.project_ctrl.clear_recovery_checkpoint()
             self.clear_state()
+
+            def on_psd_error(error_tuple):
+                Messages.close_busy(busy_dialog, force=True)
+                self.main.default_error_handler(error_tuple)
+
             self.main.run_threaded(
                 self._import_psd_files,
                 self.on_psd_imported,
-                self.main.default_error_handler,
-                None,
+                on_psd_error,
+                lambda: Messages.close_busy(busy_dialog),
                 psd_paths,
             )
             return
 
+        busy_dialog = Messages.show_busy(
+            self.main,
+            self.main.tr("Loading images..."),
+            title=self.main.tr("Import"),
+            minimum_visible_ms=300,
+        )
         self.main.project_ctrl.clear_recovery_checkpoint()
         self.clear_state()
+
+        def on_load_error(error_tuple):
+            Messages.close_busy(busy_dialog, force=True)
+            self.main.default_error_handler(error_tuple)
+
         self.main.run_threaded(
             self.load_initial_image,
             self.on_initial_image_loaded,
-            self.main.default_error_handler,
-            None,
+            on_load_error,
+            lambda: Messages.close_busy(busy_dialog),
             normalized_paths,
         )
 
@@ -709,6 +731,13 @@ class ImageStateController:
 
     def thread_insert(self, paths: List[str]):
         if self.main.image_files:
+            busy_dialog = Messages.show_busy(
+                self.main,
+                self.main.tr("Importing pages..."),
+                title=self.main.tr("Import"),
+                minimum_visible_ms=300,
+            )
+
             def on_files_prepared(prepared_files):
                 if not prepared_files:
                     return
@@ -779,10 +808,16 @@ class ImageStateController:
                 self.main.mark_all_render_dirty()
                 self.main.mark_project_dirty()
 
+            def on_insert_error(error_tuple):
+                Messages.close_busy(busy_dialog, force=True)
+                self.main.default_error_handler(error_tuple)
+
             self.main.run_threaded(
                 lambda: self.main.file_handler.prepare_files(paths, True),
                 on_files_prepared,
-                self.main.default_error_handler)
+                on_insert_error,
+                lambda: Messages.close_busy(busy_dialog),
+            )
         else:
             self.thread_load_images(paths)
 

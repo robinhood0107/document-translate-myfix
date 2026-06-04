@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 import shutil
 import tempfile
+import traceback
 from typing import TYPE_CHECKING, Callable
 
 from PySide6 import QtCore, QtWidgets
@@ -407,6 +408,12 @@ class SeriesController(QtCore.QObject):
             return
 
         self.main.loading.setVisible(True)
+        busy_dialog = Messages.show_busy(
+            self.main,
+            self.main.tr("Loading series project..."),
+            title=self.main.tr("Series Project"),
+            minimum_visible_ms=300,
+        )
         previous_project = getattr(self.main, "project_file", None)
         if isinstance(previous_project, str) and previous_project and previous_project != normalized_path:
             close_state_store(previous_project)
@@ -457,10 +464,12 @@ class SeriesController(QtCore.QObject):
                 )
 
         def on_error(error_tuple) -> None:
+            Messages.close_busy(busy_dialog, force=True)
             self.main.loading.setVisible(False)
             self.main.default_error_handler(error_tuple)
 
         def on_finished() -> None:
+            Messages.close_busy(busy_dialog)
             self.main.loading.setVisible(False)
             self.main.project_ctrl.add_recent_project(normalized_path)
             self.main.project_ctrl._refresh_home_screen()
@@ -818,25 +827,40 @@ class SeriesController(QtCore.QObject):
         if push_history:
             self._push_history()
 
-        work_dir = tempfile.mkdtemp(prefix="series_child_", dir=self.main.temp_dir)
-        child_project_path = materialize_series_child_project(
-            self.series_file,
-            item,
-            temp_dir=work_dir,
+        self.main.loading.setVisible(True)
+        busy_dialog = Messages.show_busy(
+            self.main,
+            self.main.tr("Opening series item..."),
+            title=self.main.tr("Series Project"),
+            minimum_visible_ms=300,
         )
+        work_dir = tempfile.mkdtemp(prefix="series_child_", dir=self.main.temp_dir)
+        try:
+            child_project_path = materialize_series_child_project(
+                self.series_file,
+                item,
+                temp_dir=work_dir,
+            )
+        except Exception as exc:
+            Messages.close_busy(busy_dialog, force=True)
+            self.main.loading.setVisible(False)
+            shutil.rmtree(work_dir, ignore_errors=True)
+            self.main.default_error_handler((type(exc), exc, traceback.format_exc()))
+            return
         old_temp_dir = self.active_child_temp_dir
         self.main.image_ctrl.clear_state()
-        self.main.loading.setVisible(True)
 
         def on_result(saved_ctx: str) -> None:
             self.main.project_ctrl.load_state_to_ui(saved_ctx)
 
         def on_error(error_tuple) -> None:
+            Messages.close_busy(busy_dialog, force=True)
             self.main.loading.setVisible(False)
             self.main.default_error_handler(error_tuple)
             shutil.rmtree(work_dir, ignore_errors=True)
 
         def on_finished() -> None:
+            Messages.close_busy(busy_dialog)
             self.main.loading.setVisible(False)
             if old_temp_dir and old_temp_dir != work_dir:
                 shutil.rmtree(old_temp_dir, ignore_errors=True)
@@ -1091,8 +1115,15 @@ class SeriesController(QtCore.QObject):
         if not root_dir:
             return
         self.main.loading.setVisible(True)
+        scan_dialog = Messages.show_busy(
+            self.main,
+            self.main.tr("Scanning series folder..."),
+            title=self.main.tr("Series Project"),
+            minimum_visible_ms=300,
+        )
 
         def on_result(paths: list[str]) -> None:
+            Messages.close_busy(scan_dialog, force=True)
             self.main.loading.setVisible(False)
             if not paths:
                 return
@@ -1101,11 +1132,19 @@ class SeriesController(QtCore.QObject):
                 return
             self._append_paths_to_series(dialog.selected_paths())
 
+        def on_error(error_tuple) -> None:
+            Messages.close_busy(scan_dialog, force=True)
+            self.main.default_error_handler(error_tuple)
+
+        def on_finished() -> None:
+            Messages.close_busy(scan_dialog, force=True)
+            self.main.loading.setVisible(False)
+
         self.main.run_threaded(
             scan_series_source_files,
             on_result,
-            self.main.default_error_handler,
-            lambda: self.main.loading.setVisible(False),
+            on_error,
+            on_finished,
             root_dir,
         )
 
@@ -1118,6 +1157,12 @@ class SeriesController(QtCore.QObject):
         root_dir = str(self.series_manifest.get("root_dir") or os.path.dirname(paths[0]))
         global_settings = normalize_series_global_settings(self.series_manifest.get("global_settings"))
         self.main.loading.setVisible(True)
+        busy_dialog = Messages.show_busy(
+            self.main,
+            self.main.tr("Adding files to series..."),
+            title=self.main.tr("Series Project"),
+            minimum_visible_ms=300,
+        )
 
         def on_result(items: list[dict[str, object]]) -> None:
             loaded = load_series_project(self.series_file)
@@ -1126,11 +1171,19 @@ class SeriesController(QtCore.QObject):
             self._sync_paused_pending_runtime()
             self._apply_workspace_state()
 
+        def on_error(error_tuple) -> None:
+            Messages.close_busy(busy_dialog, force=True)
+            self.main.default_error_handler(error_tuple)
+
+        def on_finished() -> None:
+            Messages.close_busy(busy_dialog)
+            self.main.loading.setVisible(False)
+
         self.main.run_threaded(
             add_series_paths,
             on_result,
-            self.main.default_error_handler,
-            lambda: self.main.loading.setVisible(False),
+            on_error,
+            on_finished,
             self.series_file,
             root_dir=root_dir,
             paths=list(paths),

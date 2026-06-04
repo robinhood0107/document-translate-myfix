@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING
 from PySide6 import QtCore
 from PySide6.QtGui import QColor, QTextCursor
 
+from app.ui.messages import Messages
 from app.ui.commands.textformat import TextFormatCommand
 from app.ui.commands.box import AddTextBoxCommand, AddTextItemCommand, ResizeBlocksCommand, TextBoxChangeCommand
 from app.ui.commands.text_edit import TextEditCommand
@@ -1219,6 +1220,10 @@ class TextController:
         self._end_render_macro()
         self.main.default_error_handler(error_tuple)
 
+    def _handle_render_busy_error(self, busy_dialog, error_tuple: tuple):
+        Messages.close_busy(busy_dialog, force=True)
+        self._handle_render_error(error_tuple)
+
     def render_text(self):
         selected_paths = self.main.get_selected_page_paths()
         if self.main.image_viewer.hasPhoto() and len(selected_paths) > 1:
@@ -1228,6 +1233,12 @@ class TextController:
             self.clear_text_edits()
             self.main.loading.setVisible(True)
             self.main.disable_hbutton_group()
+            busy_dialog = Messages.show_busy(
+                self.main,
+                self.main.tr("Rendering text..."),
+                title=self.main.tr("Processing"),
+                minimum_visible_ms=300,
+            )
 
             context = self.main.manual_workflow_ctrl._prepare_multi_page_context(selected_paths)
             render_settings = self.render_settings()
@@ -1432,11 +1443,15 @@ class TextController:
 
                 self.main.mark_project_dirty()
 
+            def on_selected_render_finished() -> None:
+                Messages.close_busy(busy_dialog)
+                self.main.on_manual_finished()
+
             self.main.run_threaded(
                 render_selected_pages,
                 on_selected_render_ready,
-                self.main.default_error_handler,
-                self.main.on_manual_finished,
+                lambda error_tuple: self._handle_render_busy_error(busy_dialog, error_tuple),
+                on_selected_render_finished,
             )
             return
 
@@ -1447,6 +1462,12 @@ class TextController:
             self.clear_text_edits()
             self.main.loading.setVisible(True)
             self.main.disable_hbutton_group()
+            busy_dialog = Messages.show_busy(
+                self.main,
+                self.main.tr("Rendering text..."),
+                title=self.main.tr("Processing"),
+                minimum_visible_ms=300,
+            )
 
             # Add items to the scene if they're not already present
             for item in self.main.image_viewer.text_items:
@@ -1519,8 +1540,8 @@ class TextController:
 
             self.main.run_threaded(
                 manual_wrap, 
-                self.on_render_complete, 
-                self._handle_render_error,
+                lambda result: self.on_render_complete(result, busy_dialog),
+                lambda error_tuple: self._handle_render_busy_error(busy_dialog, error_tuple),
                 None, 
                 self.main, 
                 new_blocks, 
@@ -1537,8 +1558,9 @@ class TextController:
                 min_font_size
             )
 
-    def on_render_complete(self, rendered_image: np.ndarray):
+    def on_render_complete(self, rendered_image: np.ndarray, busy_dialog=None):
         # self.main.set_image(rendered_image) 
+        Messages.close_busy(busy_dialog)
         self.main.loading.setVisible(False)
         self.main.enable_hbutton_group()
         self._end_render_macro()

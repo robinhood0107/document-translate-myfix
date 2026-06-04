@@ -603,6 +603,12 @@ class ProjectController:
             self.main.series_ctrl.thread_load_series_project(recovery_file, recovery_loaded=True)
             return
 
+        busy_dialog = Messages.show_busy(
+            self.main,
+            self.main.tr("Restoring project file..."),
+            title=self.main.tr("Project File"),
+            minimum_visible_ms=300,
+        )
         self.main.image_ctrl.clear_state()
         self.main.setWindowTitle(f"{self._recovered_project_display_name(PROJECT_KIND_SINGLE)}[*]")
 
@@ -610,9 +616,11 @@ class ProjectController:
 
         def on_error(error_tuple):
             load_failed["value"] = True
+            Messages.close_busy(busy_dialog, force=True)
             self.main.default_error_handler(error_tuple)
 
         def on_finished():
+            Messages.close_busy(busy_dialog)
             if load_failed["value"]:
                 return
             self.update_ui_from_project()
@@ -633,11 +641,26 @@ class ProjectController:
 
     def save_and_make(self, output_path: str):
         self.main.loading.setVisible(True)
+        busy_dialog = Messages.show_busy(
+            self.main,
+            self.main.tr("Exporting image..."),
+            title=self.main.tr("Export"),
+            minimum_visible_ms=300,
+        )
+
+        def on_error(error_tuple):
+            Messages.close_busy(busy_dialog, force=True)
+            self.main.default_error_handler(error_tuple)
+
+        def on_finished():
+            Messages.close_busy(busy_dialog)
+            self.main.loading.setVisible(False)
+
         self.main.run_threaded(
             self.save_and_make_worker,
             None,
-            self.main.default_error_handler,
-            lambda: self.main.loading.setVisible(False),
+            on_error,
+            on_finished,
             output_path,
         )
 
@@ -691,11 +714,26 @@ class ProjectController:
         all_pages_current_state = self._build_all_pages_current_state()
         bundle_name = self._get_export_bundle_name()
         self.main.loading.setVisible(True)
+        busy_dialog = Messages.show_busy(
+            self.main,
+            self.main.tr("Exporting PSD..."),
+            title=self.main.tr("Export"),
+            minimum_visible_ms=300,
+        )
+
+        def on_error(error_tuple):
+            Messages.close_busy(busy_dialog, force=True)
+            self.main.default_error_handler(error_tuple)
+
+        def on_finished():
+            Messages.close_busy(busy_dialog)
+            self.main.loading.setVisible(False)
+
         self.main.run_threaded(
             self._write_psd_worker,
             None,
-            self.main.default_error_handler,
-            lambda: self.main.loading.setVisible(False),
+            on_error,
+            on_finished,
             output_folder,
             all_pages_current_state,
             bundle_name,
@@ -709,11 +747,26 @@ class ProjectController:
         all_pages_current_state = self._build_all_pages_current_state()
         bundle_name = self._get_export_bundle_name()
         self.main.loading.setVisible(True)
+        busy_dialog = Messages.show_busy(
+            self.main,
+            self.main.tr("Exporting PSD..."),
+            title=self.main.tr("Export"),
+            minimum_visible_ms=300,
+        )
+
+        def on_error(error_tuple):
+            Messages.close_busy(busy_dialog, force=True)
+            self.main.default_error_handler(error_tuple)
+
+        def on_finished():
+            Messages.close_busy(busy_dialog)
+            self.main.loading.setVisible(False)
+
         self.main.run_threaded(
             self._write_psd_plan_worker,
             None,
-            self.main.default_error_handler,
-            lambda: self.main.loading.setVisible(False),
+            on_error,
+            on_finished,
             export_plan,
             all_pages_current_state,
             bundle_name,
@@ -1329,15 +1382,23 @@ class ProjectController:
         failed = {"value": False}
         self.main.loading.setVisible(True)
         self.main.disable_hbutton_group()
+        busy_dialog = Messages.show_busy(
+            self.main,
+            self.main.tr("Rendering output..."),
+            title=self.main.tr("Rerender Output"),
+            minimum_visible_ms=300,
+        )
 
         def on_result(result: dict[str, object]) -> None:
             result_holder.update(result or {})
 
         def on_error(error_tuple) -> None:
             failed["value"] = True
+            Messages.close_busy(busy_dialog, force=True)
             self.main.default_error_handler(error_tuple)
 
         def on_finished() -> None:
+            Messages.close_busy(busy_dialog)
             self.main.on_manual_finished()
             self.main.refresh_render_dirty_ui()
             if not failed["value"] and not quiet:
@@ -1904,16 +1965,24 @@ class ProjectController:
             close_state_store(prev_project_file)
         if clear_recovery:
             self.clear_recovery_checkpoint()
+        busy_dialog = Messages.show_busy(
+            self.main,
+            self.main.tr("Loading project file..."),
+            title=self.main.tr("Project File"),
+            minimum_visible_ms=300,
+        )
         self.main.image_ctrl.clear_state()
         self.main.project_kind = PROJECT_KIND_SINGLE
         self.main.setWindowTitle(f"{os.path.basename(normalized_path)}[*]")
 
         def _on_load_finished():
+            Messages.close_busy(busy_dialog)
             self.add_recent_project(normalized_path)
             self._refresh_home_screen()
             self.update_ui_from_project()
 
         def _on_load_error(error_tuple):
+            Messages.close_busy(busy_dialog, force=True)
             self.main.default_error_handler(error_tuple)
             exctype, value, _ = error_tuple
             self.main.project_file = None
