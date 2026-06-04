@@ -2680,7 +2680,7 @@ These values are copied into new series projects and can be adjusted per series.
     </message>
     <message>
         <source>Series Project</source>
-        <translation type="unfinished"></translation>
+        <translation>系列项目</translation>
     </message>
     <message>
         <source>Recovered Snapshot</source>
@@ -4535,6 +4535,14 @@ It may have been moved, renamed, or deleted.
         <translation>系列项目状态只能更改为待处理或完成。</translation>
     </message>
     <message>
+        <source>Updating series item status...</source>
+        <translation>正在更新系列项目状态...</translation>
+    </message>
+    <message>
+        <source>Series Project</source>
+        <translation>系列项目</translation>
+    </message>
+    <message>
         <source>Add Files To Series</source>
         <translation type="unfinished"></translation>
     </message>
@@ -4563,6 +4571,10 @@ It may have been moved, renamed, or deleted.
     <message>
         <source>There are no queue items left to run.</source>
         <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Preparing automatic translation...</source>
+        <translation>正在准备自动翻译...</translation>
     </message>
 </context>
 <context>

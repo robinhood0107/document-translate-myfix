@@ -2681,7 +2681,7 @@ These values are copied into new series projects and can be adjusted per series.
     </message>
     <message>
         <source>Series Project</source>
-        <translation type="unfinished"></translation>
+        <translation>シリーズプロジェクト</translation>
     </message>
     <message>
         <source>Recovered Snapshot</source>
@@ -4538,6 +4538,14 @@ It may have been moved, renamed, or deleted.
         <translation>シリーズ項目の状態は「待機中」または「完了」にのみ変更できます。</translation>
     </message>
     <message>
+        <source>Updating series item status...</source>
+        <translation>シリーズ項目の状態を更新しています...</translation>
+    </message>
+    <message>
+        <source>Series Project</source>
+        <translation>シリーズプロジェクト</translation>
+    </message>
+    <message>
         <source>Add Files To Series</source>
         <translation type="unfinished"></translation>
     </message>
@@ -4566,6 +4574,10 @@ It may have been moved, renamed, or deleted.
     <message>
         <source>There are no queue items left to run.</source>
         <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Preparing automatic translation...</source>
+        <translation>自動翻訳を準備しています...</translation>
     </message>
 </context>
 <context>

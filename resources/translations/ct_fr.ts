@@ -2681,7 +2681,7 @@ These values are copied into new series projects and can be adjusted per series.
     </message>
     <message>
         <source>Series Project</source>
-        <translation type="unfinished"></translation>
+        <translation>Projet de série</translation>
     </message>
     <message>
         <source>Recovered Snapshot</source>
@@ -4537,6 +4537,14 @@ It may have been moved, renamed, or deleted.
         <translation>Le statut d&apos;un élément de série ne peut être défini que sur En attente ou Terminé.</translation>
     </message>
     <message>
+        <source>Updating series item status...</source>
+        <translation>Mise à jour du statut de l&apos;élément de série...</translation>
+    </message>
+    <message>
+        <source>Series Project</source>
+        <translation>Projet de série</translation>
+    </message>
+    <message>
         <source>Add Files To Series</source>
         <translation type="unfinished"></translation>
     </message>
@@ -4565,6 +4573,10 @@ It may have been moved, renamed, or deleted.
     <message>
         <source>There are no queue items left to run.</source>
         <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Preparing automatic translation...</source>
+        <translation>Préparation de la traduction automatique...</translation>
     </message>
 </context>
 <context>

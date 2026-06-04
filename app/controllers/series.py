@@ -1004,6 +1004,12 @@ class SeriesController(QtCore.QObject):
                 source="series",
             )
             return
+        busy_dialog = Messages.show_busy(
+            self.main,
+            self.main.tr("Updating series item status..."),
+            title=self.main.tr("Series Project"),
+            minimum_visible_ms=300,
+        )
         try:
             state = update_series_item_manual_status(
                 self.series_file,
@@ -1012,6 +1018,8 @@ class SeriesController(QtCore.QObject):
             )
         except KeyError:
             return
+        finally:
+            Messages.close_busy(busy_dialog)
         self.series_manifest = dict(state["manifest"])
         self.series_items = list(state["items"])
         queue_runtime = self.active_queue_runtime()
@@ -1624,31 +1632,40 @@ class SeriesController(QtCore.QObject):
             )
             return
 
-        self._queue_active = True
-        self._pause_requested = False
-        self.main.pipeline_status_panel.set_series_queue_pause_visible(True, pause_requested=False)
-        self._queue_pending_ids = pending_ids
-        self._queue_completed_ids = []
-        self._queue_failed_ids = []
-        self._queue_skipped_ids = []
-        self._queue_retry_remaining = {}
-        started_at = QtCore.QDateTime.currentDateTime().toString(QtCore.Qt.DateFormat.ISODate)
-        self._update_queue_runtime(
-            queue_state="running",
-            pause_requested=False,
-            pending_item_ids=list(self._queue_pending_ids),
-            active_item_id=None,
-            failed_item_ids=[],
-            skipped_item_ids=[],
-            failed_item_id=None,
-            completed_item_ids=list(self._queue_completed_ids),
-            retry_remaining_by_item={},
-            last_run_started_at=started_at,
-            last_run_finished_at=None,
-            last_run_summary=self.active_queue_runtime().get("last_run_summary") or {},
+        busy_dialog = Messages.show_busy(
+            self.main,
+            self.main.tr("Preparing automatic translation..."),
+            title=self.main.tr("Series Project"),
+            minimum_visible_ms=300,
         )
-        self._apply_workspace_state()
-        self._run_next_queue_item()
+        self._queue_active = True
+        try:
+            self._pause_requested = False
+            self.main.pipeline_status_panel.set_series_queue_pause_visible(True, pause_requested=False)
+            self._queue_pending_ids = pending_ids
+            self._queue_completed_ids = []
+            self._queue_failed_ids = []
+            self._queue_skipped_ids = []
+            self._queue_retry_remaining = {}
+            started_at = QtCore.QDateTime.currentDateTime().toString(QtCore.Qt.DateFormat.ISODate)
+            self._update_queue_runtime(
+                queue_state="running",
+                pause_requested=False,
+                pending_item_ids=list(self._queue_pending_ids),
+                active_item_id=None,
+                failed_item_ids=[],
+                skipped_item_ids=[],
+                failed_item_id=None,
+                completed_item_ids=list(self._queue_completed_ids),
+                retry_remaining_by_item={},
+                last_run_started_at=started_at,
+                last_run_finished_at=None,
+                last_run_summary=self.active_queue_runtime().get("last_run_summary") or {},
+            )
+            self._apply_workspace_state()
+            self._run_next_queue_item()
+        finally:
+            Messages.close_busy(busy_dialog)
 
     def _run_next_queue_item(self) -> None:
         if not self._queue_active:

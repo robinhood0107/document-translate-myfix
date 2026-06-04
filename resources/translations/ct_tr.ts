@@ -2681,7 +2681,7 @@ These values are copied into new series projects and can be adjusted per series.
     </message>
     <message>
         <source>Series Project</source>
-        <translation type="unfinished"></translation>
+        <translation>Seri Projesi</translation>
     </message>
     <message>
         <source>Recovered Snapshot</source>
@@ -4537,6 +4537,14 @@ It may have been moved, renamed, or deleted.
         <translation>Seri öğesi durumu yalnızca Beklemede veya Tamamlandı olarak değiştirilebilir.</translation>
     </message>
     <message>
+        <source>Updating series item status...</source>
+        <translation>Seri öğesi durumu güncelleniyor...</translation>
+    </message>
+    <message>
+        <source>Series Project</source>
+        <translation>Seri Projesi</translation>
+    </message>
+    <message>
         <source>Add Files To Series</source>
         <translation type="unfinished"></translation>
     </message>
@@ -4565,6 +4573,10 @@ It may have been moved, renamed, or deleted.
     <message>
         <source>There are no queue items left to run.</source>
         <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Preparing automatic translation...</source>
+        <translation>Otomatik çeviri hazırlanıyor...</translation>
     </message>
 </context>
 <context>

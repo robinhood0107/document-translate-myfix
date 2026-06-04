@@ -4581,6 +4581,10 @@ It may have been moved, renamed, or deleted.
         <translation>시리즈 프로젝트 만들기</translation>
     </message>
     <message>
+        <source>Preparing automatic translation...</source>
+        <translation>자동 번역을 준비하는 중...</translation>
+    </message>
+    <message>
         <source>Scanning series folder...</source>
         <translation>시리즈 폴더를 확인하는 중입니다...</translation>
     </message>
@@ -4607,6 +4611,14 @@ It may have been moved, renamed, or deleted.
     <message>
         <source>Series item status can only be changed to Pending or Done.</source>
         <translation>시리즈 항목 상태는 대기 중 또는 완료로만 변경할 수 있습니다.</translation>
+    </message>
+    <message>
+        <source>Updating series item status...</source>
+        <translation>시리즈 항목 상태를 변경하는 중...</translation>
+    </message>
+    <message>
+        <source>Series Project</source>
+        <translation>시리즈 프로젝트</translation>
     </message>
     <message>
         <source>Add Files To Series</source>
