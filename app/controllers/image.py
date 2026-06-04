@@ -572,7 +572,7 @@ class ImageStateController:
         self.main.image_viewer.clear_text_items()
         self.main.loaded_images = []
         self.main.in_memory_history.clear()
-        self.main.undo_stacks.clear()
+        self.main.clear_undo_stacks()
         self.main.image_patches.clear()
         self.main.in_memory_patches.clear()
         self.main.project_file = None
@@ -1088,12 +1088,7 @@ class ImageStateController:
                 self.main.image_patches.pop(file_path, None)  
                 self.main.in_memory_patches.pop(file_path, None)  
 
-                if file_path in self.main.undo_stacks:
-                    stack = self.main.undo_stacks[file_path]
-                    self.main.undo_group.removeStack(stack)
-                
-                # Remove from other collections
-                self.main.undo_stacks.pop(file_path, None)
+                self.main.remove_undo_stack_for_path(file_path)
                     
                 if file_path in self.main.displayed_images:
                     self.main.displayed_images.remove(file_path)

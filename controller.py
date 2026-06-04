@@ -504,9 +504,44 @@ class ComicTranslate(ComicTranslateUI):
         self.register_undo_stack_for_path(file_path, stack)
         return stack
 
+    def _disconnect_undo_stack_signals(self, stack: QUndoStack) -> None:
+        for signal_name in ("cleanChanged", "indexChanged", "canUndoChanged", "canRedoChanged"):
+            try:
+                getattr(stack, signal_name).disconnect()
+            except (RuntimeError, TypeError):
+                pass
+
+    def _detach_undo_stack(self, stack: QUndoStack | None) -> None:
+        if stack is None:
+            return
+        self._disconnect_undo_stack_signals(stack)
+        try:
+            self.undo_group.removeStack(stack)
+        except RuntimeError:
+            pass
+        try:
+            stack.setParent(None)
+            stack.deleteLater()
+        except RuntimeError:
+            pass
+
+    def remove_undo_stack_for_path(self, file_path: str) -> None:
+        stack = self.undo_stacks.pop(file_path, None)
+        self._detach_undo_stack(stack)
+        self.update_undo_redo_actions()
+
+    def clear_undo_stacks(self) -> None:
+        for stack in list(self.undo_stacks.values()):
+            self._detach_undo_stack(stack)
+        self.undo_stacks.clear()
+        self.update_undo_redo_actions()
+
     def register_undo_stack_for_path(self, file_path: str, stack: QUndoStack) -> None:
         if not file_path or stack is None:
             return
+        existing_stack = self.undo_stacks.get(file_path)
+        if existing_stack is not None and existing_stack is not stack:
+            self._detach_undo_stack(existing_stack)
         stack.cleanChanged.connect(self._update_window_modified)
         stack.indexChanged.connect(self._bump_dirty_revision)
         stack.indexChanged.connect(lambda _index=0, path=file_path: self.mark_render_dirty(path))
@@ -523,12 +558,17 @@ class ComicTranslate(ComicTranslateUI):
         self.update_undo_redo_actions()
 
     def update_undo_redo_actions(self, *_args) -> None:
+        if getattr(self, "_is_shutting_down", False):
+            return
         buttons = []
         try:
             buttons = self.undo_tool_group.get_button_group().buttons()
         except Exception:
             buttons = []
-        stack = self.undo_group.activeStack()
+        try:
+            stack = self.undo_group.activeStack()
+        except RuntimeError:
+            return
         can_undo = bool(stack is not None and stack.canUndo())
         can_redo = bool(stack is not None and stack.canRedo())
         if len(buttons) >= 2:
@@ -557,6 +597,8 @@ class ComicTranslate(ComicTranslateUI):
         return dirty_paths
 
     def mark_render_dirty(self, file_path: str | None = None) -> None:
+        if getattr(self, "_is_shutting_down", False):
+            return
         path = file_path or self._current_image_path()
         if not path:
             return
@@ -565,6 +607,8 @@ class ComicTranslate(ComicTranslateUI):
         self.refresh_render_dirty_ui()
 
     def mark_render_dirty_for_paths(self, paths: list[str] | tuple[str, ...] | set[str]) -> None:
+        if getattr(self, "_is_shutting_down", False):
+            return
         changed = False
         for path in paths or []:
             if path not in self.image_files:
@@ -600,12 +644,16 @@ class ComicTranslate(ComicTranslateUI):
         self.refresh_render_dirty_ui()
 
     def refresh_render_dirty_ui(self) -> None:
+        if getattr(self, "_is_shutting_down", False):
+            return
         if self._render_dirty_ui_refresh_pending:
             return
         self._render_dirty_ui_refresh_pending = True
 
         def _apply() -> None:
             self._render_dirty_ui_refresh_pending = False
+            if getattr(self, "_is_shutting_down", False):
+                return
             if not hasattr(self, "output_dirty_label"):
                 return
             dirty_count = len(self.render_dirty_paths())
@@ -2691,6 +2739,11 @@ class ComicTranslate(ComicTranslateUI):
         try:
             self.threadpool.clear()
             self.threadpool.waitForDone(2000)
+        except Exception:
+            pass
+
+        try:
+            self.clear_undo_stacks()
         except Exception:
             pass
 
