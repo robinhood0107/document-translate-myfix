@@ -158,6 +158,10 @@ Choose either a project file or image/document/archive files.</source>
 Scegli un file di progetto oppure solo file immagine/documento/archivio.</translation>
     </message>
     <message>
+        <source>일시정지 요청됨. 현재 안전 지점에서 멈춥니다.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
         <source>Gemma와 OCR 준비를 확인하는 중...</source>
         <translation type="unfinished"></translation>
     </message>
@@ -179,6 +183,10 @@ Scegli un file di progetto oppure solo file immagine/documento/archivio.</transl
     </message>
     <message>
         <source>Gemma Local Server Settings</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>일시정지 중...</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
@@ -280,6 +288,10 @@ Duplicati:
     <message>
         <source>No current page is available for automatic processing.</source>
         <translation>Nessuna pagina corrente è disponibile per l&apos;elaborazione automatica.</translation>
+    </message>
+    <message>
+        <source>일시정지되었습니다. 시리즈 대기열에서 재개할 수 있습니다.</source>
+        <translation type="unfinished"></translation>
     </message>
     <message>
         <source>자동번역이 완료되었습니다.</source>
@@ -1985,6 +1997,38 @@ Approximate GPU usage:
         <translation>Integra</translation>
     </message>
     <message>
+        <source>Opening series board...</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Opening current item...</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Opening report...</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Preparing retry...</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Opening settings...</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Opening output...</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Closing status panel...</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Cancelling...</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
         <source>Switch to embedded mode</source>
         <translation>Passa alla modalità integrata</translation>
     </message>
@@ -1995,6 +2039,14 @@ Approximate GPU usage:
     <message>
         <source>Show logs</source>
         <translation>Mostra log</translation>
+    </message>
+    <message>
+        <source>Pause requested. The current safe checkpoint will stop the queue.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>취소 중...</source>
+        <translation type="unfinished"></translation>
     </message>
     <message>
         <source>Automatic</source>
@@ -2047,6 +2099,10 @@ Approximate GPU usage:
     <message>
         <source>Pipeline</source>
         <translation>Pipeline</translation>
+    </message>
+    <message>
+        <source>Paused</source>
+        <translation type="unfinished"></translation>
     </message>
     <message>
         <source>Running</source>

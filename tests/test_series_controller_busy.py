@@ -22,9 +22,13 @@ class _VisibleStub:
 class _PipelineStatusStub:
     def __init__(self) -> None:
         self.pause_visible_calls: list[tuple[bool, bool]] = []
+        self.events: list[dict] = []
 
     def set_series_queue_pause_visible(self, visible: bool, *, pause_requested: bool) -> None:
         self.pause_visible_calls.append((bool(visible), bool(pause_requested)))
+
+    def update_event(self, event: dict) -> None:
+        self.events.append(dict(event))
 
 
 class _SeriesWorkspaceStub:
@@ -47,9 +51,14 @@ class _MainStub(QtCore.QObject):
         self.loading = _VisibleStub()
         self.pipeline_status_panel = _PipelineStatusStub()
         self.series_workspace = _SeriesWorkspaceStub()
+        self.batch_pause_requested = False
 
     def tr(self, text: str) -> str:
         return text
+
+    def request_current_batch_pause(self) -> bool:
+        self.batch_pause_requested = True
+        return True
 
 
 class SeriesControllerBusyTests(unittest.TestCase):
@@ -126,6 +135,55 @@ class SeriesControllerBusyTests(unittest.TestCase):
             self.assertEqual(show_busy.call_args.kwargs["minimum_visible_ms"], 300)
             run_next.assert_called_once()
             close_busy.assert_called_once_with(busy_dialog)
+
+    def test_pause_queue_translation_requests_current_batch_pause(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            controller = self._controller(self._series_file(temp_dir, status="running"))
+            controller._queue_active = True
+            controller._queue_pending_ids = []
+            controller._queue_completed_ids = []
+            controller._queue_failed_ids = []
+            controller._queue_skipped_ids = []
+            controller._queue_retry_remaining = {}
+
+            with mock.patch.object(controller, "_apply_workspace_state"):
+                controller.pause_queue_translation()
+
+            self.assertTrue(controller._pause_requested)
+            self.assertTrue(controller.main.batch_pause_requested)
+            self.assertEqual(controller.main.pipeline_status_panel.pause_visible_calls[-1], (True, True))
+
+    def test_paused_batch_returns_active_item_to_pending_queue(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            controller = self._controller(self._series_file(temp_dir, status="running"))
+            controller._queue_active = True
+            controller._pause_requested = True
+            controller._queue_pending_ids = []
+            controller._queue_completed_ids = []
+            controller._queue_failed_ids = []
+            controller._queue_skipped_ids = []
+            controller._queue_retry_remaining = {"item-1": 1}
+            controller.active_child_item_id = "item-1"
+            controller.is_child_project_active = mock.Mock(return_value=True)
+            controller.sync_active_child_to_series = mock.Mock()
+            controller._apply_workspace_state = mock.Mock()
+            controller._show_board = mock.Mock()
+
+            controller.on_batch_process_finished(
+                was_cancelled=False,
+                failed=False,
+                was_paused=True,
+            )
+
+            state = load_series_project(controller.series_file)
+            runtime = state["manifest"]["series_queue_runtime"]
+            self.assertEqual(state["items"][0]["status"], "pending")
+            self.assertEqual(runtime["queue_state"], "paused")
+            self.assertEqual(runtime["pending_item_ids"], ["item-1"])
+            self.assertIsNone(runtime["active_item_id"])
+            self.assertFalse(runtime["pause_requested"])
+            self.assertFalse(controller._queue_active)
+            self.assertFalse(controller._pause_requested)
 
 
 if __name__ == "__main__":

@@ -158,6 +158,10 @@ Choose either a project file or image/document/archive files.</source>
 프로젝트 파일만 선택하거나 이미지/문서/압축 파일만 선택하세요.</translation>
     </message>
     <message>
+        <source>일시정지 요청됨. 현재 안전 지점에서 멈춥니다.</source>
+        <translation>일시정지 요청됨. 현재 안전 지점에서 멈춥니다.</translation>
+    </message>
+    <message>
         <source>Gemma와 OCR 준비를 확인하는 중...</source>
         <translation>Gemma와 OCR 준비를 확인하는 중...</translation>
     </message>
@@ -180,6 +184,10 @@ Choose either a project file or image/document/archive files.</source>
     <message>
         <source>Gemma Local Server Settings</source>
         <translation>Gemma 로컬 서버 설정</translation>
+    </message>
+    <message>
+        <source>일시정지 중...</source>
+        <translation>일시정지 중...</translation>
     </message>
     <message>
         <source>작업이 취소되었습니다.</source>
@@ -280,6 +288,10 @@ Duplicates:
     <message>
         <source>No current page is available for automatic processing.</source>
         <translation>자동 처리할 현재 페이지가 없습니다.</translation>
+    </message>
+    <message>
+        <source>일시정지되었습니다. 시리즈 대기열에서 재개할 수 있습니다.</source>
+        <translation>일시정지되었습니다. 시리즈 대기열에서 재개할 수 있습니다.</translation>
     </message>
     <message>
         <source>자동번역이 완료되었습니다.</source>
@@ -2039,6 +2051,38 @@ Approximate GPU usage:
         <translation>내부</translation>
     </message>
     <message>
+        <source>Opening series board...</source>
+        <translation>시리즈 보드 여는 중...</translation>
+    </message>
+    <message>
+        <source>Opening current item...</source>
+        <translation>현재 항목 여는 중...</translation>
+    </message>
+    <message>
+        <source>Opening report...</source>
+        <translation>리포트 여는 중...</translation>
+    </message>
+    <message>
+        <source>Preparing retry...</source>
+        <translation>재시도 준비 중...</translation>
+    </message>
+    <message>
+        <source>Opening settings...</source>
+        <translation>설정 여는 중...</translation>
+    </message>
+    <message>
+        <source>Opening output...</source>
+        <translation>출력 폴더 여는 중...</translation>
+    </message>
+    <message>
+        <source>Closing status panel...</source>
+        <translation>상태 패널 닫는 중...</translation>
+    </message>
+    <message>
+        <source>Cancelling...</source>
+        <translation>취소 중...</translation>
+    </message>
+    <message>
         <source>Switch to embedded mode</source>
         <translation>내부 위젯 모드로 전환</translation>
     </message>
@@ -2049,6 +2093,14 @@ Approximate GPU usage:
     <message>
         <source>Show logs</source>
         <translation>로그 보기</translation>
+    </message>
+    <message>
+        <source>Pause requested. The current safe checkpoint will stop the queue.</source>
+        <translation>일시정지 요청됨. 현재 안전 지점에서 대기열을 멈춥니다.</translation>
+    </message>
+    <message>
+        <source>취소 중...</source>
+        <translation>취소 중...</translation>
     </message>
     <message>
         <source>Automatic</source>
@@ -2101,6 +2153,10 @@ Approximate GPU usage:
     <message>
         <source>Pipeline</source>
         <translation>파이프라인</translation>
+    </message>
+    <message>
+        <source>Paused</source>
+        <translation>일시정지됨</translation>
     </message>
     <message>
         <source>Running</source>

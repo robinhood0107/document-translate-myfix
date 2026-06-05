@@ -173,6 +173,7 @@ class ComicTranslate(ComicTranslateUI):
         self.current_worker = None
         self._batch_active = False
         self._batch_cancel_requested = False
+        self._batch_pause_requested = False
         self._batch_failed = False
         self._current_batch_run_type = None
         self._last_batch_request_paths = []
@@ -1357,11 +1358,40 @@ class ComicTranslate(ComicTranslateUI):
         self.task_runner_ctrl.clear_operation_queue()
 
     def cancel_current_task(self):
+        self._batch_pause_requested = False
         self.task_runner_ctrl.cancel_current_task()
 
     def is_current_task_cancelled(self) -> bool:
         worker = getattr(self, "current_worker", None)
-        return bool(self._batch_cancel_requested or (worker and worker.is_cancelled))
+        return bool(
+            self._batch_cancel_requested
+            or self._batch_pause_requested
+            or (worker and worker.is_cancelled)
+        )
+
+    def request_current_batch_pause(self) -> bool:
+        if not self._batch_active:
+            return False
+        self._batch_pause_requested = True
+        worker = getattr(self, "current_worker", None)
+        if worker:
+            worker.cancel()
+        self.clear_operation_queue()
+        panel = getattr(self, "pipeline_status_panel", None)
+        update_event = getattr(panel, "update_event", None)
+        if callable(update_event):
+            update_event({
+                "phase": "pipeline",
+                "service": "batch",
+                "status": "running",
+                "step_key": "pause",
+                "message": self.tr("일시정지 요청됨. 현재 안전 지점에서 멈춥니다."),
+                "panel_state": "running",
+            })
+        return True
+
+    def is_current_batch_pause_requested(self) -> bool:
+        return bool(self._batch_pause_requested)
 
     def report_runtime_progress(self, payload: dict[str, Any]):
         if not isinstance(payload, dict):
@@ -1418,8 +1448,10 @@ class ComicTranslate(ComicTranslateUI):
             status = str(payload.get("status") or "").strip().lower()
             terminal_phases = {"done"}
             terminal_statuses = {"cancelled", "failed", "completed"}
+            passthrough_statuses = {"cancelling"}
             if phase not in terminal_phases and status not in terminal_statuses:
-                return
+                if status not in passthrough_statuses:
+                    return
         event = self._automatic_progress_tracker.enrich(payload)
         if str(event.get("step_key") or "") == "finalizing_archive":
             self.progress_bar.setVisible(True)
@@ -1503,6 +1535,7 @@ class ComicTranslate(ComicTranslateUI):
         )
 
     def _on_automatic_progress_cancel(self):
+        self._batch_pause_requested = False
         self.cancel_current_task()
         self._ensure_automatic_progress_dialog().update_event({
             "phase": "pipeline",
@@ -1543,6 +1576,17 @@ class ComicTranslate(ComicTranslateUI):
             return
 
         if issubclass(exctype, OperationCancelledError):
+            if self._batch_pause_requested and not self._batch_cancel_requested:
+                self.pipeline_status_panel.update_event({
+                    "phase": "pipeline",
+                    "status": "running",
+                    "service": "batch",
+                    "message": self.tr("일시정지 중..."),
+                    "panel_state": "running",
+                })
+                self.set_pipeline_overlay_active(False)
+                self.loading.setVisible(False)
+                return
             self.pipeline_status_panel.update_event({
                 "phase": "done",
                 "status": "cancelled",
@@ -2178,6 +2222,7 @@ class ComicTranslate(ComicTranslateUI):
         self._last_batch_request_paths = list(selected_paths)
         self._last_batch_run_type = run_type
         self._batch_failed = False
+        self._batch_pause_requested = False
         self._last_batch_failure_detail = ""
         ocr_preflight_cache: dict[str, str] = {}
 
@@ -2328,6 +2373,7 @@ class ComicTranslate(ComicTranslateUI):
         completed_batch_paths: list[str],
         report,
         archive_path: str = "",
+        was_paused: bool = False,
     ) -> None:
         self._last_batch_output_root = self._find_latest_batch_output_root(completed_batch_paths)
         if archive_path:
@@ -2364,6 +2410,16 @@ class ComicTranslate(ComicTranslateUI):
                     "output_root": self._last_batch_output_root,
                 }
             )
+        elif was_paused:
+            self.set_pipeline_overlay_active(True)
+            panel.update_event({
+                "phase": "done",
+                "service": "batch",
+                "status": "paused",
+                "step_key": "paused",
+                "message": self.tr("일시정지되었습니다. 시리즈 대기열에서 재개할 수 있습니다."),
+                "panel_state": "paused",
+            })
         elif failed:
             self.set_pipeline_overlay_active(True)
             panel.show()
@@ -2410,10 +2466,10 @@ class ComicTranslate(ComicTranslateUI):
                 }
             )
 
-        self._cleanup_intermediate_preview_run(keep_failed=bool(failed and not was_cancelled))
-        if report and report["skipped_count"] > 0:
+        self._cleanup_intermediate_preview_run(keep_failed=bool(failed and not was_cancelled and not was_paused))
+        if report and report["skipped_count"] > 0 and not was_paused:
             Messages.show_batch_skipped_summary(self, report["skipped_count"])
-        elif not was_cancelled and not failed:
+        elif not was_cancelled and not failed and not was_paused:
             self._run_txt_md_auto_exports(completed_batch_paths)
             Messages.show_translation_complete(self)
 
@@ -2430,6 +2486,7 @@ class ComicTranslate(ComicTranslateUI):
             self.series_ctrl.on_batch_process_finished(
                 was_cancelled=was_cancelled,
                 failed=failed,
+                was_paused=was_paused,
             )
         except Exception:
             logger.debug("Series queue completion hook failed.", exc_info=True)
@@ -2522,19 +2579,26 @@ class ComicTranslate(ComicTranslateUI):
                 self._memlogger.emit("batch_finished")
         except Exception:
             pass
-        was_cancelled = self._batch_cancel_requested
+        was_paused = self._batch_pause_requested and not self._batch_cancel_requested
+        was_cancelled = self._batch_cancel_requested and not was_paused
         failed = self._batch_failed
         total_images = len(self.selected_batch)
         completed_batch_paths = list(self.selected_batch)
         self._batch_active = False
         self._batch_cancel_requested = False
+        self._batch_pause_requested = False
         self._batch_failed = False
         self._current_batch_run_type = None
         if getattr(self, "_is_shutting_down", False):
             self.selected_batch = []
             return
         report = self._finalize_batch_report(was_cancelled)
-        if not was_cancelled and not failed and is_single_archive_mode(self.get_resolved_export_settings()):
+        if (
+            not was_cancelled
+            and not was_paused
+            and not failed
+            and is_single_archive_mode(self.get_resolved_export_settings())
+        ):
             self._start_batch_archive_finalization(
                 completed_batch_paths=completed_batch_paths,
                 total_images=total_images,
@@ -2548,6 +2612,7 @@ class ComicTranslate(ComicTranslateUI):
             total_images=total_images,
             completed_batch_paths=completed_batch_paths,
             report=report,
+            was_paused=was_paused,
         )
 
     def _find_latest_batch_output_root(self, page_paths: list[str]) -> str:
@@ -2728,6 +2793,7 @@ class ComicTranslate(ComicTranslateUI):
             return
         self._is_shutting_down = True
         self._batch_cancel_requested = True
+        self._batch_pause_requested = False
 
         self.batch_report_ctrl.shutdown()
 

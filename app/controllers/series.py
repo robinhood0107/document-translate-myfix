@@ -1392,6 +1392,9 @@ class SeriesController(QtCore.QObject):
             last_run_finished_at=queue_runtime.get("last_run_finished_at"),
             last_run_summary=queue_runtime.get("last_run_summary") or {},
         )
+        request_batch_pause = getattr(self.main, "request_current_batch_pause", None)
+        if callable(request_batch_pause):
+            request_batch_pause()
         self._apply_workspace_state()
 
     def resume_queue_translation(self) -> None:
@@ -1476,7 +1479,13 @@ class SeriesController(QtCore.QObject):
             finished_at=finished_at,
         )
 
-    def on_batch_process_finished(self, *, was_cancelled: bool, failed: bool) -> None:
+    def on_batch_process_finished(
+        self,
+        *,
+        was_cancelled: bool,
+        failed: bool,
+        was_paused: bool = False,
+    ) -> None:
         if not self.is_child_project_active():
             return
 
@@ -1492,6 +1501,39 @@ class SeriesController(QtCore.QObject):
         current_item_id = str(self.active_child_item_id or "")
         series_settings = normalize_series_settings(self.series_manifest.get("series_settings"))
         queue_runtime = self.active_queue_runtime()
+
+        if was_paused:
+            if current_item_id:
+                self.series_items = update_series_item_status(
+                    self.series_file,
+                    series_item_id=current_item_id,
+                    status="pending",
+                )
+                loaded = load_series_project(self.series_file)
+                self.series_manifest = dict(loaded["manifest"])
+                self.series_items = list(loaded["items"])
+            pending_ids = pending_series_item_ids(self.series_items)
+            self._queue_pending_ids = list(pending_ids)
+            self._queue_active = False
+            self._pause_requested = False
+            self.main.pipeline_status_panel.set_series_queue_pause_visible(False, pause_requested=False)
+            self._update_queue_runtime(
+                queue_state="paused",
+                pause_requested=False,
+                pending_item_ids=list(self._queue_pending_ids),
+                active_item_id=None,
+                failed_item_ids=list(self._queue_failed_ids),
+                skipped_item_ids=list(self._queue_skipped_ids),
+                failed_item_id=queue_runtime.get("failed_item_id"),
+                completed_item_ids=list(self._queue_completed_ids),
+                retry_remaining_by_item=dict(self._queue_retry_remaining),
+                last_run_started_at=queue_runtime.get("last_run_started_at"),
+                last_run_finished_at=None,
+                last_run_summary=queue_runtime.get("last_run_summary") or {},
+            )
+            self._apply_workspace_state()
+            QtCore.QTimer.singleShot(0, self.main, lambda: self._show_board(push_history=False))
+            return
 
         if was_cancelled:
             self._queue_active = False
