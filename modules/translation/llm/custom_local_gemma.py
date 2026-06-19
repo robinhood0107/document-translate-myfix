@@ -1,11 +1,15 @@
 from __future__ import annotations
 
+from collections import OrderedDict
 from typing import Any
 from textwrap import dedent
+import copy
+import hashlib
 import json
 import logging
 import os
 import re
+import threading
 
 import numpy as np
 import requests
@@ -32,6 +36,9 @@ DEFAULT_GEMMA_RESPONSE_SCHEMA_MODE = "blocks"
 DEFAULT_GEMMA_THINK_BRIEFLY_PROMPT = False
 DEFAULT_GEMMA_PROMPT_PROFILE = "gemma4_balanced"
 DEFAULT_GEMMA_CONTEXTUAL_MERGE_INPUT = True
+DEFAULT_GEMMA_EXACT_PROMPT_CACHE = True
+DEFAULT_GEMMA_EXACT_PROMPT_CACHE_MAX_ENTRIES = 2048
+DEFAULT_GEMMA_PRESERVE_EXISTING_TRANSLATIONS = False
 STRICT_GEMMA_PROMPT_PROFILE = "gemma4_strict_json"
 GEMMA_PROMPT_PROFILES = {
     "legacy": "legacy",
@@ -58,6 +65,9 @@ class GemmaLocalServerTruncatedError(GemmaLocalServerResponseError):
 class CustomLocalGemmaTranslation(BaseLLMTranslation):
     """Translation engine specialized for the local Gemma llama.cpp server."""
 
+    _exact_prompt_cache: OrderedDict[str, dict] = OrderedDict()
+    _exact_prompt_cache_lock = threading.Lock()
+
     def __init__(self):
         super().__init__()
         self.api_base_url = DEFAULT_GEMMA_LOCAL_ENDPOINT
@@ -65,13 +75,20 @@ class CustomLocalGemmaTranslation(BaseLLMTranslation):
         self.chunk_size = DEFAULT_GEMMA_CHUNK_SIZE
         self.raw_response_logging = False
         self.translation_mode_label = "Custom Local Server(Gemma)"
+        self.temperature = DEFAULT_GEMMA_TRANSLATION_TEMPERATURE
         self.top_k = DEFAULT_GEMMA_TRANSLATION_TOP_K
+        self.top_p = DEFAULT_GEMMA_TRANSLATION_TOP_P
         self.min_p = DEFAULT_GEMMA_TRANSLATION_MIN_P
+        self.max_tokens = DEFAULT_GEMMA_MAX_COMPLETION_TOKENS
         self.response_format_mode = DEFAULT_GEMMA_RESPONSE_FORMAT_MODE
         self.response_schema_mode = DEFAULT_GEMMA_RESPONSE_SCHEMA_MODE
         self.think_briefly_prompt = DEFAULT_GEMMA_THINK_BRIEFLY_PROMPT
         self.prompt_profile = DEFAULT_GEMMA_PROMPT_PROFILE
         self.contextual_merge_input = DEFAULT_GEMMA_CONTEXTUAL_MERGE_INPUT
+        self.exact_prompt_cache_enabled = DEFAULT_GEMMA_EXACT_PROMPT_CACHE
+        self.exact_prompt_cache_max_entries = DEFAULT_GEMMA_EXACT_PROMPT_CACHE_MAX_ENTRIES
+        self.preserve_existing_translations = DEFAULT_GEMMA_PRESERVE_EXISTING_TRANSLATIONS
+        self._http_session = requests.Session()
         self.last_benchmark_stats = self._new_benchmark_stats()
         self._current_benchmark_stats = self._new_benchmark_stats()
 
@@ -87,6 +104,10 @@ class CustomLocalGemmaTranslation(BaseLLMTranslation):
             "gemma_schema_validation_fail_count": 0,
             "gemma_repetition_guard_count": 0,
             "gemma_contextual_merge_fallback_count": 0,
+            "gemma_network_request_count": 0,
+            "gemma_exact_prompt_cache_hit_count": 0,
+            "gemma_exact_prompt_cache_store_count": 0,
+            "gemma_preserved_existing_translation_count": 0,
         }
 
     @staticmethod
@@ -236,6 +257,24 @@ class CustomLocalGemmaTranslation(BaseLLMTranslation):
             "CT_GEMMA_THINK_BRIEFLY_PROMPT",
             DEFAULT_GEMMA_THINK_BRIEFLY_PROMPT,
         )
+        self.exact_prompt_cache_enabled = self._env_or_config_bool(
+            gemma_settings,
+            "exact_prompt_cache_enabled",
+            "CT_GEMMA_EXACT_PROMPT_CACHE",
+            DEFAULT_GEMMA_EXACT_PROMPT_CACHE,
+        )
+        self.exact_prompt_cache_max_entries = self._env_or_config_int(
+            gemma_settings,
+            "exact_prompt_cache_max_entries",
+            "CT_GEMMA_EXACT_PROMPT_CACHE_MAX_ENTRIES",
+            DEFAULT_GEMMA_EXACT_PROMPT_CACHE_MAX_ENTRIES,
+        )
+        self.preserve_existing_translations = self._env_or_config_bool(
+            gemma_settings,
+            "preserve_existing_translations",
+            "CT_GEMMA_PRESERVE_EXISTING_TRANSLATIONS",
+            DEFAULT_GEMMA_PRESERVE_EXISTING_TRANSLATIONS,
+        )
         self.contextual_merge_input = DEFAULT_GEMMA_CONTEXTUAL_MERGE_INPUT
         self.img_as_llm_input = False
         self.last_benchmark_stats = self._new_benchmark_stats()
@@ -352,6 +391,10 @@ class CustomLocalGemmaTranslation(BaseLLMTranslation):
         system_prompt = self._build_system_prompt(extra_context, prompt_profile=prompt_profile)
         updated_count = 0
         for index, blk in enumerate(blk_list):
+            if self._should_preserve_existing_translation(blk):
+                self._current_benchmark_stats["gemma_preserved_existing_translation_count"] += 1
+                updated_count += 1
+                continue
             user_prompt = self._build_contextual_single_block_user_prompt(blk_list, index)
             response_data = self._request_translation(
                 system_prompt,
@@ -363,6 +406,12 @@ class CustomLocalGemmaTranslation(BaseLLMTranslation):
                 expected_keys=["translation"],
                 block_count=1,
                 prompt_profile=prompt_profile,
+            )
+            self._store_exact_prompt_cache(
+                system_prompt,
+                user_prompt,
+                ["translation"],
+                response_data,
             )
             self._apply_translation_value(blk, index, translation_dict.get("translation"))
             updated_count += 1
@@ -377,6 +426,10 @@ class CustomLocalGemmaTranslation(BaseLLMTranslation):
     ) -> int:
         updated_count = 0
         for blk in blk_list:
+            if self._should_preserve_existing_translation(blk):
+                self._current_benchmark_stats["gemma_preserved_existing_translation_count"] += 1
+                updated_count += 1
+                continue
             updated_count += self._translate_chunk(
                 [blk],
                 extra_context,
@@ -393,6 +446,15 @@ class CustomLocalGemmaTranslation(BaseLLMTranslation):
         prompt_profile: str,
         use_contextual_merge: bool,
     ) -> int:
+        preserved_indices: set[int] = set()
+        if self.preserve_existing_translations:
+            preserved_indices = {
+                index for index, blk in enumerate(blk_list) if self._should_preserve_existing_translation(blk)
+            }
+            if len(preserved_indices) == len(blk_list):
+                self._current_benchmark_stats["gemma_preserved_existing_translation_count"] += len(blk_list)
+                return len(blk_list)
+
         system_prompt = self._build_system_prompt(extra_context, prompt_profile=prompt_profile)
         expected_keys = self._expected_block_keys(blk_list)
         if use_contextual_merge:
@@ -406,8 +468,17 @@ class CustomLocalGemmaTranslation(BaseLLMTranslation):
             block_count=len(blk_list),
             prompt_profile=prompt_profile,
         )
+        self._store_exact_prompt_cache(
+            system_prompt,
+            user_prompt,
+            expected_keys,
+            response_data,
+        )
 
         for index, blk in enumerate(blk_list):
+            if index in preserved_indices:
+                self._current_benchmark_stats["gemma_preserved_existing_translation_count"] += 1
+                continue
             self._apply_translation_value(blk, index, translation_dict[f"block_{index}"])
 
         return len(blk_list)
@@ -628,14 +699,14 @@ class CustomLocalGemmaTranslation(BaseLLMTranslation):
             )
         return prompt
 
-    def _request_translation(
+    def _build_request_payload(
         self,
         system_prompt: str,
         user_prompt: str,
         *,
         expected_keys: list[str] | None = None,
-    ) -> dict:
-        payload = {
+    ) -> dict[str, Any]:
+        return {
             "model": self.model,
             "messages": [
                 {
@@ -654,10 +725,91 @@ class CustomLocalGemmaTranslation(BaseLLMTranslation):
             "max_completion_tokens": self.max_tokens,
             "response_format": self._build_response_format(user_prompt, expected_keys=expected_keys),
         }
+
+    @staticmethod
+    def _payload_hash(payload: dict[str, Any]) -> str:
+        encoded = json.dumps(
+            payload,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+        return hashlib.sha256(encoded).hexdigest()
+
+    def _exact_prompt_cache_key(
+        self,
+        system_prompt: str,
+        user_prompt: str,
+        expected_keys: list[str] | None,
+    ) -> str:
+        payload = self._build_request_payload(
+            system_prompt,
+            user_prompt,
+            expected_keys=expected_keys,
+        )
+        return self._payload_hash(payload)
+
+    def _get_exact_prompt_cache(self, cache_key: str) -> dict | None:
+        if not self.exact_prompt_cache_enabled:
+            return None
+        with self._exact_prompt_cache_lock:
+            response_data = self._exact_prompt_cache.get(cache_key)
+            if response_data is None:
+                return None
+            self._exact_prompt_cache.move_to_end(cache_key)
+        self._current_benchmark_stats["gemma_exact_prompt_cache_hit_count"] += 1
+        return copy.deepcopy(response_data)
+
+    def _store_exact_prompt_cache(
+        self,
+        system_prompt: str,
+        user_prompt: str,
+        expected_keys: list[str] | None,
+        response_data: dict,
+    ) -> None:
+        if not self.exact_prompt_cache_enabled:
+            return
+        max_entries = max(0, int(self.exact_prompt_cache_max_entries or 0))
+        if max_entries <= 0:
+            return
+        cache_key = self._exact_prompt_cache_key(system_prompt, user_prompt, expected_keys)
+        with self._exact_prompt_cache_lock:
+            is_new_entry = cache_key not in self._exact_prompt_cache
+            self._exact_prompt_cache[cache_key] = copy.deepcopy(response_data)
+            self._exact_prompt_cache.move_to_end(cache_key)
+            while len(self._exact_prompt_cache) > max_entries:
+                self._exact_prompt_cache.popitem(last=False)
+        if is_new_entry:
+            self._current_benchmark_stats["gemma_exact_prompt_cache_store_count"] += 1
+
+    def _should_preserve_existing_translation(self, blk: TextBlock) -> bool:
+        if not self.preserve_existing_translations:
+            return False
+        translation = getattr(blk, "translation", "") or ""
+        return bool(str(translation).strip())
+
+    def _request_translation(
+        self,
+        system_prompt: str,
+        user_prompt: str,
+        *,
+        expected_keys: list[str] | None = None,
+    ) -> dict:
+        payload = self._build_request_payload(
+            system_prompt,
+            user_prompt,
+            expected_keys=expected_keys,
+        )
+        cache_key = self._payload_hash(payload)
+        cached_response = self._get_exact_prompt_cache(cache_key)
+        if cached_response is not None:
+            return cached_response
+
         headers = {"Content-Type": "application/json"}
 
         try:
-            response = requests.post(
+            self._current_benchmark_stats["gemma_network_request_count"] += 1
+            response = self._http_session.post(
                 f"{self.api_base_url}/chat/completions",
                 headers=headers,
                 json=payload,

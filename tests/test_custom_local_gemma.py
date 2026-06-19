@@ -167,6 +167,105 @@ class CustomLocalGemmaRepetitionGuardTests(unittest.TestCase):
         self.assertEqual(blocks[0].translation, "하지만 자지가 나를 정복했어.")
         self.assertEqual(engine.last_benchmark_stats["gemma_contextual_merge_fallback_count"], 1)
 
+    def test_exact_prompt_cache_reuses_successful_response_without_second_request(self) -> None:
+        engine = self._engine()
+        engine.exact_prompt_cache_enabled = True
+        engine.exact_prompt_cache_max_entries = 16
+        engine._exact_prompt_cache.clear()
+        blocks = [
+            TextBlock(text_bbox=np.array([0, 0, 100, 100]), text="Hello."),
+        ]
+        network_calls = 0
+
+        def fake_post(*args, **kwargs):
+            nonlocal network_calls
+            network_calls += 1
+
+            class FakeResponse:
+                def raise_for_status(self) -> None:
+                    return None
+
+                def json(self) -> dict:
+                    return _response({"translation": "안녕."})
+
+            return FakeResponse()
+
+        with mock.patch.object(engine._http_session, "post", side_effect=fake_post):
+            engine.translate(blocks, np.zeros((1, 1, 3), dtype=np.uint8), "")
+            blocks[0].translation = ""
+            engine.translate(blocks, np.zeros((1, 1, 3), dtype=np.uint8), "")
+
+        self.assertEqual(blocks[0].translation, "안녕.")
+        self.assertEqual(network_calls, 1)
+        self.assertEqual(engine.last_benchmark_stats["gemma_exact_prompt_cache_hit_count"], 1)
+        self.assertEqual(engine.last_benchmark_stats["gemma_network_request_count"], 0)
+
+    def test_preserve_existing_translations_skips_network_and_keeps_value(self) -> None:
+        engine = self._engine()
+        engine.preserve_existing_translations = True
+        blocks = [
+            TextBlock(text_bbox=np.array([0, 0, 100, 100]), text="Hello."),
+            TextBlock(text_bbox=np.array([0, 100, 100, 200]), text="Bye."),
+        ]
+        blocks[0].translation = "기존 번역"
+
+        def fake_request(system_prompt: str, user_prompt: str, *, expected_keys=None) -> dict:
+            payload = json.loads(user_prompt)
+            self.assertEqual(payload["target_block"], "block_1")
+            return _response({"translation": "잘 가."})
+
+        with mock.patch.object(engine, "_request_translation", side_effect=fake_request) as request_mock:
+            engine.translate(blocks, np.zeros((1, 1, 3), dtype=np.uint8), "")
+
+        self.assertEqual(request_mock.call_count, 1)
+        self.assertEqual(blocks[0].translation, "기존 번역")
+        self.assertEqual(blocks[1].translation, "잘 가.")
+        self.assertEqual(engine.last_benchmark_stats["gemma_preserved_existing_translation_count"], 1)
+
+    def test_preserve_existing_partial_non_contextual_chunk_keeps_original_payload_shape(self) -> None:
+        engine = self._engine()
+        engine.contextual_merge_input = False
+        engine.preserve_existing_translations = True
+        blocks = [
+            TextBlock(text_bbox=np.array([0, 0, 100, 100]), text="Hello."),
+            TextBlock(text_bbox=np.array([0, 100, 100, 200]), text="Bye."),
+        ]
+        blocks[0].translation = "기존 번역"
+
+        def fake_request(system_prompt: str, user_prompt: str, *, expected_keys=None) -> dict:
+            payload = json.loads(user_prompt)
+            self.assertEqual(list(payload.keys()), ["block_0", "block_1"])
+            self.assertEqual(expected_keys, ["block_0", "block_1"])
+            return _response({"block_0": "새 번역", "block_1": "잘 가."})
+
+        with mock.patch.object(engine, "_request_translation", side_effect=fake_request) as request_mock:
+            engine.translate(blocks, np.zeros((1, 1, 3), dtype=np.uint8), "")
+
+        self.assertEqual(request_mock.call_count, 1)
+        self.assertEqual(blocks[0].translation, "기존 번역")
+        self.assertEqual(blocks[1].translation, "잘 가.")
+        self.assertEqual(engine.last_benchmark_stats["gemma_preserved_existing_translation_count"], 1)
+
+    def test_request_payload_hash_changes_with_sampling_settings(self) -> None:
+        engine = self._engine()
+        system_prompt = engine._build_system_prompt("", prompt_profile=DEFAULT_GEMMA_PROMPT_PROFILE)
+        user_prompt = json.dumps({"translation": "Hello."})
+        first_payload = engine._build_request_payload(
+            system_prompt,
+            user_prompt,
+            expected_keys=["translation"],
+        )
+        first_hash = engine._payload_hash(first_payload)
+
+        engine.temperature = 0.1
+        second_payload = engine._build_request_payload(
+            system_prompt,
+            user_prompt,
+            expected_keys=["translation"],
+        )
+
+        self.assertNotEqual(first_hash, engine._payload_hash(second_payload))
+
 
 if __name__ == "__main__":
     unittest.main()
