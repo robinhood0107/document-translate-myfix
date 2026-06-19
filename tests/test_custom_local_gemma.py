@@ -8,6 +8,8 @@ import numpy as np
 
 from modules.translation.llm.custom_local_gemma import (
     DEFAULT_GEMMA_PROMPT_PROFILE,
+    GEMMA_CONTEXTUAL_MERGE_STRATEGY_FAST_MULTI,
+    GEMMA_CONTEXTUAL_MERGE_STRATEGY_SINGLE_BLOCK,
     CustomLocalGemmaTranslation,
 )
 from modules.utils.textblock import TextBlock
@@ -46,6 +48,7 @@ class CustomLocalGemmaRepetitionGuardTests(unittest.TestCase):
         engine.chunk_size = 6
         engine.max_tokens = 512
         engine.timeout = 1
+        engine.contextual_merge_strategy = GEMMA_CONTEXTUAL_MERGE_STRATEGY_SINGLE_BLOCK
         return engine
 
     def test_severe_output_repetition_is_collapsed_after_json_parse(self) -> None:
@@ -130,6 +133,69 @@ class CustomLocalGemmaRepetitionGuardTests(unittest.TestCase):
             schema["json_schema"]["schema"]["required"],
             ["translation"],
         )
+
+    def test_fast_multi_strategy_uses_current_merged_context_prompt_once(self) -> None:
+        engine = self._engine()
+        engine.contextual_merge_strategy = GEMMA_CONTEXTUAL_MERGE_STRATEGY_FAST_MULTI
+        engine.source_lang = "English"
+        blocks = [
+            TextBlock(text_bbox=np.array([0, 0, 100, 100]), text="Ah..."),
+            TextBlock(text_bbox=np.array([0, 100, 100, 200]), text="I'm dizzy."),
+        ]
+        requests = []
+
+        def fake_request(system_prompt: str, user_prompt: str, *, expected_keys=None) -> dict:
+            requests.append(
+                {
+                    "system_prompt": system_prompt,
+                    "user_prompt": user_prompt,
+                    "expected_keys": expected_keys,
+                }
+            )
+            return _response({"block_0": "아...", "block_1": "어지러워."})
+
+        with mock.patch.object(engine, "_request_translation", side_effect=fake_request):
+            engine.translate(blocks, np.zeros((1, 1, 3), dtype=np.uint8), "")
+
+        self.assertEqual(len(requests), 1)
+        self.assertEqual(requests[0]["expected_keys"], ["block_0", "block_1"])
+        payload = json.loads(requests[0]["user_prompt"])
+        self.assertEqual(list(payload.keys()), ["merged_context"])
+        self.assertIn("[[block_0]] Ah...", payload["merged_context"])
+        self.assertIn("[[block_1]] I'm dizzy.", payload["merged_context"])
+        self.assertIn("continuous comic passage", requests[0]["system_prompt"])
+        self.assertEqual(blocks[0].translation, "아...")
+        self.assertEqual(blocks[1].translation, "어지러워.")
+
+    def test_fast_multi_strategy_falls_back_to_single_block_on_invalid_json(self) -> None:
+        engine = self._engine()
+        engine.contextual_merge_strategy = GEMMA_CONTEXTUAL_MERGE_STRATEGY_FAST_MULTI
+        engine.source_lang = "English"
+        blocks = [
+            TextBlock(text_bbox=np.array([0, 0, 100, 100]), text="Ah..."),
+            TextBlock(text_bbox=np.array([0, 100, 100, 200]), text="I'm dizzy."),
+        ]
+        prompts = []
+
+        def fake_request(system_prompt: str, user_prompt: str, *, expected_keys=None) -> dict:
+            payload = json.loads(user_prompt)
+            prompts.append(payload)
+            if list(payload.keys()) == ["merged_context"]:
+                return _response({"translation": "bad shape"})
+            if payload["target_block"] == "block_0":
+                return _response({"translation": "아..."})
+            return _response({"translation": "어지러워."})
+
+        with mock.patch.object(engine, "_request_translation", side_effect=fake_request):
+            engine.translate(blocks, np.zeros((1, 1, 3), dtype=np.uint8), "")
+
+        self.assertEqual(list(prompts[0].keys()), ["merged_context"])
+        self.assertEqual(list(prompts[1].keys()), ["merged_context"])
+        self.assertEqual(list(prompts[2].keys()), ["merged_context", "target_block", "target_text"])
+        self.assertEqual(list(prompts[3].keys()), ["merged_context", "target_block", "target_text"])
+        self.assertEqual(blocks[0].translation, "아...")
+        self.assertEqual(blocks[1].translation, "어지러워.")
+        self.assertEqual(engine.last_benchmark_stats["gemma_contextual_merge_fallback_count"], 1)
 
     def test_channel_tokens_are_removed_before_translation_assignment(self) -> None:
         engine = self._engine()

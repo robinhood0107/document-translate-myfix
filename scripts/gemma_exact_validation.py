@@ -5,6 +5,7 @@ import hashlib
 import html
 import json
 import os
+import re
 import sqlite3
 import sys
 import tempfile
@@ -33,6 +34,11 @@ from modules.translation.llm.custom_local_gemma import (
     CustomLocalGemmaTranslation,
 )
 from modules.utils.textblock import TextBlock, ensure_text_block_id
+
+SENSITIVE_SOURCE_RE = re.compile(
+    r"\b(cock|dick|pussy|sex|fuck|naked|nude|porn|rape|cum|breast|virgin|woman|girl|body)\b",
+    re.IGNORECASE,
+)
 
 
 def _sha256_text(value: Any) -> str:
@@ -673,6 +679,16 @@ def _sample_blocks(item: dict[str, Any]) -> list[str]:
     return [str(item.get("source") or "")]
 
 
+def _sample_saved_translations(item: dict[str, Any], block_count: int) -> list[str | None]:
+    saved = item.get("saved_translations")
+    if not isinstance(saved, list):
+        return [None] * block_count
+    result = [str(value) if value is not None else "" for value in saved[:block_count]]
+    while len(result) < block_count:
+        result.append(None)
+    return result
+
+
 def _shadow_text_blocks(blocks: list[str]) -> list[TextBlock]:
     result: list[TextBlock] = []
     for text in blocks:
@@ -680,6 +696,161 @@ def _shadow_text_blocks(blocks: list[str]) -> list[TextBlock]:
         block.text = str(text or "")
         result.append(block)
     return result
+
+
+def _chunk_reason(blocks: list[TextBlock], *, base_reason: str = "") -> str:
+    sensitive_count = sum(1 for block in blocks if SENSITIVE_SOURCE_RE.search(str(getattr(block, "text", "") or "")))
+    total_chars = sum(len(str(getattr(block, "text", "") or "")) for block in blocks)
+    labels: list[str] = []
+    if base_reason:
+        labels.append(base_reason)
+    if sensitive_count:
+        labels.append(f"sensitive_terms={sensitive_count}")
+    if len(blocks) > 1:
+        labels.append(f"context_blocks={len(blocks)}")
+    labels.append(f"chars={total_chars}")
+    return ", ".join(labels)
+
+
+def select_canary_samples(
+    input_root: Path,
+    output_dir: Path,
+    defaults: ValidationSettings,
+    *,
+    project_count: int,
+    max_project_blocks: int,
+    max_samples_per_project: int,
+) -> dict[str, Any]:
+    output_dir.mkdir(parents=True, exist_ok=True)
+    series_paths = sorted(input_root.rglob("*.seriesctpr"))
+    project_rows: list[dict[str, Any]] = []
+
+    for series_index, series_path in enumerate(series_paths):
+        try:
+            series_state = load_series_project(str(series_path))
+        except Exception:
+            continue
+        for project_index, item in enumerate(series_state.get("items") or []):
+            try:
+                project_blob = _load_series_project_blob_for_item(series_path, item)
+                pages = list(_iter_project_pages(project_blob))
+            except Exception:
+                continue
+
+            chunks: list[dict[str, Any]] = []
+            total_blocks = 0
+            translated_blocks = 0
+            sensitive_blocks = 0
+            for page_index, page_path, page_state, extra_context in pages:
+                blocks = [
+                    block
+                    for block in (_to_text_block(value) for value in (page_state.get("blk_list") or []))
+                    if block is not None
+                ]
+                if not blocks:
+                    continue
+                page_settings = _settings_from_page(page_state, defaults)
+                total_blocks += len(blocks)
+                translated_blocks += sum(1 for block in blocks if str(getattr(block, "translation", "") or "").strip())
+                for chunk_start in range(0, len(blocks), page_settings.chunk_size):
+                    chunk = blocks[chunk_start : chunk_start + page_settings.chunk_size]
+                    sensitive_count = sum(
+                        1
+                        for block in chunk
+                        if SENSITIVE_SOURCE_RE.search(str(getattr(block, "text", "") or ""))
+                    )
+                    sensitive_blocks += sensitive_count
+                    chunks.append(
+                        {
+                            "page_index": page_index,
+                            "chunk_start": chunk_start,
+                            "blocks": chunk,
+                            "page_state": page_state,
+                            "extra_context": extra_context,
+                            "sensitive_count": sensitive_count,
+                            "total_chars": sum(len(str(getattr(block, "text", "") or "")) for block in chunk),
+                        }
+                    )
+
+            if total_blocks <= 0 or translated_blocks <= 0:
+                continue
+            if total_blocks > max_project_blocks:
+                continue
+            project_rows.append(
+                {
+                    "series_index": series_index,
+                    "series_path": series_path,
+                    "project_index": project_index,
+                    "item": item,
+                    "project_id": _anonymous_id("item", series_index, project_index, item.get("series_item_id")),
+                    "pages": len(pages),
+                    "blocks": total_blocks,
+                    "translated_blocks": translated_blocks,
+                    "sensitive_blocks": sensitive_blocks,
+                    "chunks": chunks,
+                }
+            )
+
+    project_rows.sort(key=lambda row: (row["sensitive_blocks"] == 0, -row["sensitive_blocks"], row["blocks"]))
+    selected_projects = project_rows[: max(0, project_count)]
+    samples: list[dict[str, Any]] = []
+    selected_summary: list[dict[str, Any]] = []
+
+    for project in selected_projects:
+        chunks = list(project["chunks"])
+        chunks.sort(
+            key=lambda chunk: (
+                chunk["sensitive_count"] == 0,
+                -chunk["sensitive_count"],
+                -len(chunk["blocks"]),
+                -chunk["total_chars"],
+            )
+        )
+        selected_chunks = chunks[: max(1, max_samples_per_project)]
+        selected_summary.append(
+            {
+                "project_id": project["project_id"],
+                "series_index": project["series_index"],
+                "project_index": project["project_index"],
+                "pages": project["pages"],
+                "blocks": project["blocks"],
+                "translated_blocks": project["translated_blocks"],
+                "sensitive_blocks": project["sensitive_blocks"],
+                "sample_chunks": len(selected_chunks),
+            }
+        )
+        for chunk_index, chunk in enumerate(selected_chunks):
+            page_state = chunk["page_state"]
+            page_settings = _settings_from_page(page_state, defaults)
+            blocks = chunk["blocks"]
+            samples.append(
+                {
+                    "id": f"{project['project_id']}:p{chunk['page_index']:04d}:c{chunk['chunk_start']:03d}",
+                    "project_id": project["project_id"],
+                    "reason": _chunk_reason(blocks, base_reason=f"project_canary_{chunk_index + 1}"),
+                    "source_lang": page_settings.source_lang,
+                    "target_lang": page_settings.target_lang,
+                    "extra_context": chunk["extra_context"],
+                    "blocks": [str(getattr(block, "text", "") or "") for block in blocks],
+                    "saved_translations": [str(getattr(block, "translation", "") or "") for block in blocks],
+                }
+            )
+
+    samples_path = output_dir / "canary_samples.json"
+    summary_path = output_dir / "canary_summary.json"
+    samples_path.write_text(json.dumps({"samples": samples}, ensure_ascii=False, indent=2), encoding="utf-8")
+    summary = {
+        "samples_path": str(samples_path),
+        "selected_projects": selected_summary,
+        "sample_count": len(samples),
+        "available_project_count": len(project_rows),
+        "privacy": {
+            "raw_canary_text_written": True,
+            "git_safe": False,
+        },
+    }
+    summary_path.write_text(json.dumps(summary, ensure_ascii=False, indent=2, sort_keys=True), encoding="utf-8")
+    return summary
 
 
 def run_fast_multi_shadow(
@@ -702,9 +873,11 @@ def run_fast_multi_shadow(
 
     results: list[dict[str, Any]] = []
     review_items: list[dict[str, Any]] = []
+    saved_review_items: list[dict[str, Any]] = []
     counters = {
         "samples": 0,
         "blocks": 0,
+        "saved_changed_blocks": 0,
         "changed_blocks": 0,
         "failed_samples": 0,
     }
@@ -716,6 +889,7 @@ def run_fast_multi_shadow(
         sample_id = str(item.get("id") or f"sample-{sample_index + 1:03d}")
         reason = str(item.get("reason") or "")
         blocks_text = _sample_blocks(item)
+        saved_translations = _sample_saved_translations(item, len(blocks_text))
         blocks = _shadow_text_blocks(blocks_text)
         sample_context = str(item.get("extra_context") or extra_context or "")
         source_lang = str(item.get("source_lang") or settings.source_lang)
@@ -764,10 +938,23 @@ def run_fast_multi_shadow(
 
             for block_index, source_text in enumerate(blocks_text):
                 key = f"block_{block_index}"
+                saved = saved_translations[block_index]
                 single = single_values[block_index]
                 multi = engine._strip_channel_tokens(multi_values.get(key, ""))
+                saved_changed = saved is not None and saved != single
                 changed = single != multi
                 counters["blocks"] += 1
+                if saved_changed:
+                    counters["saved_changed_blocks"] += 1
+                    saved_review_items.append(
+                        {
+                            "id": f"{sample_id}:{key}:saved-vs-single",
+                            "reason": reason,
+                            "source": source_text,
+                            "baseline": saved,
+                            "candidate": single,
+                        }
+                    )
                 if changed:
                     counters["changed_blocks"] += 1
                     review_items.append(
@@ -783,10 +970,13 @@ def run_fast_multi_shadow(
                     {
                         "block_key": key,
                         "source": source_text,
+                        "saved": saved,
                         "single": single,
                         "fast_multi": multi,
+                        "saved_changed": saved_changed,
                         "changed": changed,
                         "source_hash": _sha256_text(source_text),
+                        "saved_hash": _sha256_text(saved),
                         "single_hash": _sha256_text(single),
                         "fast_multi_hash": _sha256_text(multi),
                     }
@@ -799,12 +989,18 @@ def run_fast_multi_shadow(
     raw_result_path = output_dir / "fast_multi_shadow_results.json"
     summary_path = output_dir / "fast_multi_shadow_summary.json"
     review_diff_path = output_dir / "fast_multi_review_diff.json"
+    saved_review_diff_path = output_dir / "saved_vs_single_review_diff.json"
     raw_result_path.write_text(json.dumps({"samples": results}, ensure_ascii=False, indent=2), encoding="utf-8")
     review_diff_path.write_text(json.dumps({"items": review_items}, ensure_ascii=False, indent=2), encoding="utf-8")
+    saved_review_diff_path.write_text(
+        json.dumps({"items": saved_review_items}, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
     summary = {
         "counters": counters,
         "raw_result_path": str(raw_result_path),
         "review_diff_path": str(review_diff_path),
+        "saved_review_diff_path": str(saved_review_diff_path),
         "settings_hash": _settings_hash(settings),
         "privacy": {
             "raw_shadow_text_written": True,
@@ -866,6 +1062,25 @@ def main(argv: list[str] | None = None) -> int:
     review.add_argument("--diff", required=True, type=Path)
     review.add_argument("--output-dir", type=Path, default=_default_output_dir())
 
+    canary = subparsers.add_parser("select-canary", help="Create local-only canary samples from private .seriesctpr projects.")
+    canary.add_argument("--input-root", required=True, type=Path)
+    canary.add_argument("--output-dir", type=Path, default=_default_output_dir())
+    canary.add_argument("--project-count", default=3, type=int)
+    canary.add_argument("--max-project-blocks", default=300, type=int)
+    canary.add_argument("--max-samples-per-project", default=8, type=int)
+    canary.add_argument("--source-lang", default="Chinese")
+    canary.add_argument("--target-lang", default="Korean")
+    canary.add_argument("--model", default="gemma-4-26B-IQ4_NL.gguf")
+    canary.add_argument("--chunk-size", default=DEFAULT_GEMMA_CHUNK_SIZE)
+    canary.add_argument("--max-tokens", default=DEFAULT_GEMMA_MAX_COMPLETION_TOKENS)
+    canary.add_argument("--temperature", default=DEFAULT_GEMMA_TRANSLATION_TEMPERATURE)
+    canary.add_argument("--top-k", default=DEFAULT_GEMMA_TRANSLATION_TOP_K)
+    canary.add_argument("--top-p", default=DEFAULT_GEMMA_TRANSLATION_TOP_P)
+    canary.add_argument("--min-p", default=DEFAULT_GEMMA_TRANSLATION_MIN_P)
+    canary.add_argument("--prompt-profile", default=DEFAULT_GEMMA_PROMPT_PROFILE)
+    canary.add_argument("--response-format-mode", default=DEFAULT_GEMMA_RESPONSE_FORMAT_MODE)
+    canary.add_argument("--response-schema-mode", default=DEFAULT_GEMMA_RESPONSE_SCHEMA_MODE)
+
     shadow = subparsers.add_parser("fast-multi-shadow", help="Run current single-block and fast multi translations for local samples.")
     shadow.add_argument("--samples", required=True, type=Path)
     shadow.add_argument("--output-dir", type=Path, default=_default_output_dir())
@@ -898,6 +1113,17 @@ def main(argv: list[str] | None = None) -> int:
         result = make_review_board(args.diff, args.output_dir)
         print(json.dumps(result, ensure_ascii=False, indent=2, sort_keys=True))
         return 0
+    if args.command == "select-canary":
+        result = select_canary_samples(
+            args.input_root,
+            args.output_dir,
+            _parse_settings(args),
+            project_count=args.project_count,
+            max_project_blocks=args.max_project_blocks,
+            max_samples_per_project=args.max_samples_per_project,
+        )
+        print(json.dumps(result, ensure_ascii=False, indent=2, sort_keys=True))
+        return 0 if result["sample_count"] > 0 else 2
     if args.command == "fast-multi-shadow":
         result = run_fast_multi_shadow(
             args.samples,

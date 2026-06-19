@@ -212,6 +212,33 @@ class GemmaExactValidationTests(unittest.TestCase):
             self.assertIn("\\u003csource>", html_text)
             self.assertNotIn("\\n\\n<span", html_text)
 
+    def test_select_canary_samples_writes_local_raw_samples_and_summary(self) -> None:
+        module = _load_validation_module()
+        with tempfile.TemporaryDirectory() as temp_dir:
+            self._series_project(temp_dir)
+            output_dir = Path(temp_dir) / "canary"
+
+            summary = module.select_canary_samples(
+                Path(temp_dir),
+                output_dir,
+                self._settings(),
+                project_count=1,
+                max_project_blocks=10,
+                max_samples_per_project=1,
+            )
+
+            self.assertEqual(summary["sample_count"], 1)
+            self.assertFalse(summary["privacy"]["git_safe"])
+            samples_path = Path(summary["samples_path"])
+            self.assertTrue(samples_path.is_file())
+            samples = json.loads(samples_path.read_text(encoding="utf-8"))["samples"]
+            self.assertEqual(len(samples), 1)
+            self.assertEqual(samples[0]["blocks"], ["Alpha source line."])
+            self.assertEqual(samples[0]["saved_translations"], ["Saved target line."])
+            summary_text = (output_dir / "canary_summary.json").read_text(encoding="utf-8")
+            self.assertNotIn("Alpha source line.", summary_text)
+            self.assertNotIn("Saved target line.", summary_text)
+
 
 if __name__ == "__main__":
     unittest.main()

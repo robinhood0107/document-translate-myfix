@@ -36,6 +36,13 @@ DEFAULT_GEMMA_RESPONSE_SCHEMA_MODE = "blocks"
 DEFAULT_GEMMA_THINK_BRIEFLY_PROMPT = False
 DEFAULT_GEMMA_PROMPT_PROFILE = "gemma4_balanced"
 DEFAULT_GEMMA_CONTEXTUAL_MERGE_INPUT = True
+GEMMA_CONTEXTUAL_MERGE_STRATEGY_SINGLE_BLOCK = "single_block"
+GEMMA_CONTEXTUAL_MERGE_STRATEGY_FAST_MULTI = "fast_multi"
+GEMMA_CONTEXTUAL_MERGE_STRATEGIES = {
+    GEMMA_CONTEXTUAL_MERGE_STRATEGY_SINGLE_BLOCK,
+    GEMMA_CONTEXTUAL_MERGE_STRATEGY_FAST_MULTI,
+}
+DEFAULT_GEMMA_CONTEXTUAL_MERGE_STRATEGY = GEMMA_CONTEXTUAL_MERGE_STRATEGY_SINGLE_BLOCK
 DEFAULT_GEMMA_EXACT_PROMPT_CACHE = True
 DEFAULT_GEMMA_EXACT_PROMPT_CACHE_MAX_ENTRIES = 2048
 DEFAULT_GEMMA_PRESERVE_EXISTING_TRANSLATIONS = False
@@ -85,6 +92,7 @@ class CustomLocalGemmaTranslation(BaseLLMTranslation):
         self.think_briefly_prompt = DEFAULT_GEMMA_THINK_BRIEFLY_PROMPT
         self.prompt_profile = DEFAULT_GEMMA_PROMPT_PROFILE
         self.contextual_merge_input = DEFAULT_GEMMA_CONTEXTUAL_MERGE_INPUT
+        self.contextual_merge_strategy = DEFAULT_GEMMA_CONTEXTUAL_MERGE_STRATEGY
         self.exact_prompt_cache_enabled = DEFAULT_GEMMA_EXACT_PROMPT_CACHE
         self.exact_prompt_cache_max_entries = DEFAULT_GEMMA_EXACT_PROMPT_CACHE_MAX_ENTRIES
         self.preserve_existing_translations = DEFAULT_GEMMA_PRESERVE_EXISTING_TRANSLATIONS
@@ -173,6 +181,13 @@ class CustomLocalGemmaTranslation(BaseLLMTranslation):
         if normalized in GEMMA_RESPONSE_SCHEMA_MODES:
             return normalized
         return DEFAULT_GEMMA_RESPONSE_SCHEMA_MODE
+
+    @staticmethod
+    def _normalize_contextual_merge_strategy(raw_value: str) -> str:
+        normalized = (raw_value or "").strip().lower().replace("-", "_")
+        if normalized in GEMMA_CONTEXTUAL_MERGE_STRATEGIES:
+            return normalized
+        return DEFAULT_GEMMA_CONTEXTUAL_MERGE_STRATEGY
 
     def initialize(
         self,
@@ -275,6 +290,14 @@ class CustomLocalGemmaTranslation(BaseLLMTranslation):
             "CT_GEMMA_PRESERVE_EXISTING_TRANSLATIONS",
             DEFAULT_GEMMA_PRESERVE_EXISTING_TRANSLATIONS,
         )
+        self.contextual_merge_strategy = self._normalize_contextual_merge_strategy(
+            self._env_or_config_str(
+                gemma_settings,
+                "contextual_merge_strategy",
+                "CT_GEMMA_CONTEXTUAL_MERGE_STRATEGY",
+                DEFAULT_GEMMA_CONTEXTUAL_MERGE_STRATEGY,
+            )
+        )
         self.contextual_merge_input = DEFAULT_GEMMA_CONTEXTUAL_MERGE_INPUT
         self.img_as_llm_input = False
         self.last_benchmark_stats = self._new_benchmark_stats()
@@ -322,6 +345,13 @@ class CustomLocalGemmaTranslation(BaseLLMTranslation):
     ) -> int:
         def _translate_with_profile(prompt_profile: str) -> int:
             if self.contextual_merge_input:
+                if self.contextual_merge_strategy == GEMMA_CONTEXTUAL_MERGE_STRATEGY_FAST_MULTI:
+                    return self._translate_chunk(
+                        blk_list,
+                        extra_context,
+                        prompt_profile=prompt_profile,
+                        use_contextual_merge=True,
+                    )
                 return self._translate_contextual_single_blocks(
                     blk_list,
                     extra_context,
@@ -351,6 +381,20 @@ class CustomLocalGemmaTranslation(BaseLLMTranslation):
 
             if self.contextual_merge_input:
                 self._current_benchmark_stats["gemma_contextual_merge_fallback_count"] += 1
+                if self.contextual_merge_strategy == GEMMA_CONTEXTUAL_MERGE_STRATEGY_FAST_MULTI:
+                    logger.warning(
+                        "gemma fast multi merge failed for %d block(s); falling back to contextual single-block requests. reason=%s",
+                        len(blk_list),
+                        exc,
+                    )
+                    try:
+                        return self._translate_contextual_single_blocks(
+                            blk_list,
+                            extra_context,
+                            prompt_profile=self.prompt_profile,
+                        )
+                    except GemmaLocalServerResponseError as fallback_exc:
+                        exc = fallback_exc
                 logger.warning(
                     "gemma contextual single-block merge failed for %d block(s); falling back to isolated per-block JSON. reason=%s",
                     len(blk_list),
