@@ -158,6 +158,10 @@ Choose either a project file or image/document/archive files.</source>
 Bir proje dosyası ya da yalnızca görüntü/belge/arşiv dosyaları seçin.</translation>
     </message>
     <message>
+        <source>일시정지 요청됨. 현재 안전 지점에서 멈춥니다.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
         <source>Gemma와 OCR 준비를 확인하는 중...</source>
         <translation type="unfinished"></translation>
     </message>
@@ -179,6 +183,10 @@ Bir proje dosyası ya da yalnızca görüntü/belge/arşiv dosyaları seçin.</t
     </message>
     <message>
         <source>Gemma Local Server Settings</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>일시정지 중...</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
@@ -280,6 +288,10 @@ Yinelenenler:
     <message>
         <source>No current page is available for automatic processing.</source>
         <translation>Otomatik işleme için kullanılabilir bir mevcut sayfa yok.</translation>
+    </message>
+    <message>
+        <source>일시정지되었습니다. 시리즈 대기열에서 재개할 수 있습니다.</source>
+        <translation type="unfinished"></translation>
     </message>
     <message>
         <source>자동번역이 완료되었습니다.</source>
@@ -1985,6 +1997,38 @@ Approximate GPU usage:
         <translation>Göm</translation>
     </message>
     <message>
+        <source>Opening series board...</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Opening current item...</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Opening report...</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Preparing retry...</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Opening settings...</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Opening output...</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Closing status panel...</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Cancelling...</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
         <source>Switch to embedded mode</source>
         <translation>Gömülü moda geç</translation>
     </message>
@@ -1995,6 +2039,14 @@ Approximate GPU usage:
     <message>
         <source>Show logs</source>
         <translation>Günlüğü göster</translation>
+    </message>
+    <message>
+        <source>Pause requested. The current safe checkpoint will stop the queue.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>취소 중...</source>
+        <translation type="unfinished"></translation>
     </message>
     <message>
         <source>Automatic</source>
@@ -2047,6 +2099,10 @@ Approximate GPU usage:
     <message>
         <source>Pipeline</source>
         <translation>İşlem hattı</translation>
+    </message>
+    <message>
+        <source>Paused</source>
+        <translation type="unfinished"></translation>
     </message>
     <message>
         <source>Running</source>
@@ -2681,7 +2737,7 @@ These values are copied into new series projects and can be adjusted per series.
     </message>
     <message>
         <source>Series Project</source>
-        <translation type="unfinished"></translation>
+        <translation>Seri Projesi</translation>
     </message>
     <message>
         <source>Recovered Snapshot</source>
@@ -2694,6 +2750,18 @@ These values are copied into new series projects and can be adjusted per series.
     <message>
         <source>Open Selected</source>
         <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Change Status</source>
+        <translation>Durumu değiştir</translation>
+    </message>
+    <message>
+        <source>Mark as Done</source>
+        <translation>Tamamlandı olarak işaretle</translation>
+    </message>
+    <message>
+        <source>Reset to Pending</source>
+        <translation>Beklemeye geri al</translation>
     </message>
     <message>
         <source>Add Files</source>
@@ -2759,6 +2827,18 @@ The current running item stays fixed, and you can change the queue after the run
     <message>
         <source>Automatic translation is already running.</source>
         <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Status cannot be changed while automatic translation is running. Pause first, then change it.</source>
+        <translation>Otomatik çeviri çalışırken durum değiştirilemez. Önce duraklatın, ardından değiştirin.</translation>
+    </message>
+    <message>
+        <source>Select a series item to change its status.</source>
+        <translation>Durumunu değiştirmek için bir seri öğesi seçin.</translation>
+    </message>
+    <message>
+        <source>Mark the selected item as done or return it to pending.</source>
+        <translation>Seçili öğeyi tamamlandı olarak işaretleyin veya beklemeye geri alın.</translation>
     </message>
 </context>
 <context>
@@ -3076,7 +3156,7 @@ Restart now?</source>
     </message>
     <message>
         <source>Export</source>
-        <translation>Dışa Aktar</translation>
+        <translation>Dışa aktar</translation>
     </message>
     <message>
         <source>Shortcuts</source>
@@ -4071,6 +4151,18 @@ It may have already been moved, renamed, or deleted.
         <source>Remove from series</source>
         <translation type="unfinished"></translation>
     </message>
+    <message>
+        <source>Mark as Done</source>
+        <translation>Tamamlandı olarak işaretle</translation>
+    </message>
+    <message>
+        <source>Reset to Pending</source>
+        <translation>Beklemeye geri al</translation>
+    </message>
+    <message>
+        <source>Status cannot be changed while automatic translation is running. Pause first, then change it.</source>
+        <translation>Otomatik çeviri çalışırken durum değiştirilemez. Önce duraklatın, ardından değiştirin.</translation>
+    </message>
 </context>
 <context>
     <name>_SeriesQuickSettings</name>
@@ -4340,12 +4432,32 @@ Geri yüklemek istiyor musunuz?</translation>
         <translation type="unfinished"></translation>
     </message>
     <message>
+        <source>Restoring project file...</source>
+        <translation>Proje dosyası geri yükleniyor...</translation>
+    </message>
+    <message>
+        <source>Exporting image...</source>
+        <translation>Görsel dışa aktarılıyor...</translation>
+    </message>
+    <message>
+        <source>Export</source>
+        <translation>Dışa aktar</translation>
+    </message>
+    <message>
+        <source>Exporting PSD...</source>
+        <translation>PSD dışa aktarılıyor...</translation>
+    </message>
+    <message>
         <source>Rerender Output</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
         <source>There are no render changes to apply.</source>
         <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Rendering output...</source>
+        <translation>Çıktı işleniyor...</translation>
     </message>
     <message>
         <source>Render output was updated.</source>
@@ -4418,6 +4530,10 @@ Taşınmış, yeniden adlandırılmış veya silinmiş olabilir.
 {yol}</translation>
     </message>
     <message>
+        <source>Loading project file...</source>
+        <translation>Proje dosyası yükleniyor...</translation>
+    </message>
+    <message>
         <source>Korean</source>
         <translation>Korece</translation>
     </message>
@@ -4451,6 +4567,10 @@ It may have been moved, renamed, or deleted.
 
 {path}</source>
         <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Loading series project...</source>
+        <translation>Seri projesi yükleniyor...</translation>
     </message>
     <message>
         <source>The previous automatic translation run was interrupted and restored as paused.</source>
@@ -4489,12 +4609,28 @@ It may have been moved, renamed, or deleted.
         <translation type="unfinished"></translation>
     </message>
     <message>
+        <source>Opening series item...</source>
+        <translation>Seri öğesi açılıyor...</translation>
+    </message>
+    <message>
         <source>Remove From Series</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
         <source>Remove &apos;{name}&apos; from this series project?</source>
         <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Series item status can only be changed to Pending or Done.</source>
+        <translation>Seri öğesi durumu yalnızca Beklemede veya Tamamlandı olarak değiştirilebilir.</translation>
+    </message>
+    <message>
+        <source>Updating series item status...</source>
+        <translation>Seri öğesi durumu güncelleniyor...</translation>
+    </message>
+    <message>
+        <source>Series Project</source>
+        <translation>Seri Projesi</translation>
     </message>
     <message>
         <source>Add Files To Series</source>
@@ -4507,6 +4643,10 @@ It may have been moved, renamed, or deleted.
     <message>
         <source>Add Folder To Series</source>
         <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Adding files to series...</source>
+        <translation>Dosyalar seriye ekleniyor...</translation>
     </message>
     <message>
         <source>Saving series project file...</source>
@@ -4525,6 +4665,54 @@ It may have been moved, renamed, or deleted.
     <message>
         <source>There are no queue items left to run.</source>
         <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Preparing automatic translation...</source>
+        <translation>Otomatik çeviri hazırlanıyor...</translation>
+    </message>
+    <message>
+        <source>Importing PSD files...</source>
+        <translation>PSD dosyaları içe aktarılıyor...</translation>
+    </message>
+    <message>
+        <source>Import</source>
+        <translation>İçe aktar</translation>
+    </message>
+    <message>
+        <source>Loading images...</source>
+        <translation>Görseller yükleniyor...</translation>
+    </message>
+    <message>
+        <source>Importing pages...</source>
+        <translation>Sayfalar içe aktarılıyor...</translation>
+    </message>
+    <message>
+        <source>Processing</source>
+        <translation>İşleniyor</translation>
+    </message>
+    <message>
+        <source>Preparing text detection...</source>
+        <translation>Metin algılama hazırlanıyor...</translation>
+    </message>
+    <message>
+        <source>Preparing OCR...</source>
+        <translation>OCR hazırlanıyor...</translation>
+    </message>
+    <message>
+        <source>Preparing translation...</source>
+        <translation>Çeviri hazırlanıyor...</translation>
+    </message>
+    <message>
+        <source>Preparing inpainting...</source>
+        <translation>Inpainting hazırlanıyor...</translation>
+    </message>
+    <message>
+        <source>Preparing segmentation...</source>
+        <translation>Segmentasyon hazırlanıyor...</translation>
+    </message>
+    <message>
+        <source>Rendering text...</source>
+        <translation>Metin işleniyor...</translation>
     </message>
 </context>
 <context>

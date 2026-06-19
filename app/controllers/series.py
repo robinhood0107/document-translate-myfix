@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 import shutil
 import tempfile
+import traceback
 from typing import TYPE_CHECKING, Callable
 
 from PySide6 import QtCore, QtWidgets
@@ -37,6 +38,7 @@ from app.projects.series_state_v1 import (
     scan_series_source_files,
     update_series_child_from_file,
     update_series_global_settings,
+    update_series_item_manual_status,
     update_series_item_status,
     update_series_items_order,
     update_series_navigation_history,
@@ -406,6 +408,12 @@ class SeriesController(QtCore.QObject):
             return
 
         self.main.loading.setVisible(True)
+        busy_dialog = Messages.show_busy(
+            self.main,
+            self.main.tr("Loading series project..."),
+            title=self.main.tr("Series Project"),
+            minimum_visible_ms=300,
+        )
         previous_project = getattr(self.main, "project_file", None)
         if isinstance(previous_project, str) and previous_project and previous_project != normalized_path:
             close_state_store(previous_project)
@@ -456,10 +464,12 @@ class SeriesController(QtCore.QObject):
                 )
 
         def on_error(error_tuple) -> None:
+            Messages.close_busy(busy_dialog, force=True)
             self.main.loading.setVisible(False)
             self.main.default_error_handler(error_tuple)
 
         def on_finished() -> None:
+            Messages.close_busy(busy_dialog)
             self.main.loading.setVisible(False)
             self.main.project_ctrl.add_recent_project(normalized_path)
             self.main.project_ctrl._refresh_home_screen()
@@ -817,25 +827,40 @@ class SeriesController(QtCore.QObject):
         if push_history:
             self._push_history()
 
-        work_dir = tempfile.mkdtemp(prefix="series_child_", dir=self.main.temp_dir)
-        child_project_path = materialize_series_child_project(
-            self.series_file,
-            item,
-            temp_dir=work_dir,
+        self.main.loading.setVisible(True)
+        busy_dialog = Messages.show_busy(
+            self.main,
+            self.main.tr("Opening series item..."),
+            title=self.main.tr("Series Project"),
+            minimum_visible_ms=300,
         )
+        work_dir = tempfile.mkdtemp(prefix="series_child_", dir=self.main.temp_dir)
+        try:
+            child_project_path = materialize_series_child_project(
+                self.series_file,
+                item,
+                temp_dir=work_dir,
+            )
+        except Exception as exc:
+            Messages.close_busy(busy_dialog, force=True)
+            self.main.loading.setVisible(False)
+            shutil.rmtree(work_dir, ignore_errors=True)
+            self.main.default_error_handler((type(exc), exc, traceback.format_exc()))
+            return
         old_temp_dir = self.active_child_temp_dir
         self.main.image_ctrl.clear_state()
-        self.main.loading.setVisible(True)
 
         def on_result(saved_ctx: str) -> None:
             self.main.project_ctrl.load_state_to_ui(saved_ctx)
 
         def on_error(error_tuple) -> None:
+            Messages.close_busy(busy_dialog, force=True)
             self.main.loading.setVisible(False)
             self.main.default_error_handler(error_tuple)
             shutil.rmtree(work_dir, ignore_errors=True)
 
         def on_finished() -> None:
+            Messages.close_busy(busy_dialog)
             self.main.loading.setVisible(False)
             if old_temp_dir and old_temp_dir != work_dir:
                 shutil.rmtree(old_temp_dir, ignore_errors=True)
@@ -987,6 +1012,55 @@ class SeriesController(QtCore.QObject):
         ordered_ids.insert(insert_at, item_id)
         self.request_reorder(ordered_ids)
 
+    def request_item_status_change(self, item_id: str, target_status: str) -> None:
+        if self._queue_change_locked():
+            self._show_queue_locked_message()
+            return
+        if not self.series_file:
+            return
+        target = str(target_status or "").strip().lower()
+        if target not in {"pending", "done"}:
+            Messages.show_info(
+                self.main,
+                self.main.tr("Series item status can only be changed to Pending or Done."),
+                duration=5,
+                closable=True,
+                source="series",
+            )
+            return
+        busy_dialog = Messages.show_busy(
+            self.main,
+            self.main.tr("Updating series item status..."),
+            title=self.main.tr("Series Project"),
+            minimum_visible_ms=300,
+        )
+        try:
+            state = update_series_item_manual_status(
+                self.series_file,
+                series_item_id=item_id,
+                status=target,
+            )
+        except KeyError:
+            return
+        finally:
+            Messages.close_busy(busy_dialog)
+        self.series_manifest = dict(state["manifest"])
+        self.series_items = list(state["items"])
+        queue_runtime = self.active_queue_runtime()
+        self._pause_requested = bool(queue_runtime.get("pause_requested", False))
+        self._queue_pending_ids = list(queue_runtime.get("pending_item_ids") or [])
+        self._queue_completed_ids = list(queue_runtime.get("completed_item_ids") or [])
+        self._queue_failed_ids = list(queue_runtime.get("failed_item_ids") or [])
+        self._queue_skipped_ids = list(queue_runtime.get("skipped_item_ids") or [])
+        self._queue_retry_remaining = dict(queue_runtime.get("retry_remaining_by_item") or {})
+        if hasattr(self.main, "pipeline_status_panel"):
+            queue_state = str(queue_runtime.get("queue_state") or "idle").strip().lower()
+            self.main.pipeline_status_panel.set_series_queue_pause_visible(
+                queue_state == "paused",
+                pause_requested=False,
+            )
+        self._apply_workspace_state()
+
     def request_add_files(self) -> None:
         if self._queue_change_locked():
             self._show_queue_locked_message()
@@ -1041,8 +1115,15 @@ class SeriesController(QtCore.QObject):
         if not root_dir:
             return
         self.main.loading.setVisible(True)
+        scan_dialog = Messages.show_busy(
+            self.main,
+            self.main.tr("Scanning series folder..."),
+            title=self.main.tr("Series Project"),
+            minimum_visible_ms=300,
+        )
 
         def on_result(paths: list[str]) -> None:
+            Messages.close_busy(scan_dialog, force=True)
             self.main.loading.setVisible(False)
             if not paths:
                 return
@@ -1051,11 +1132,19 @@ class SeriesController(QtCore.QObject):
                 return
             self._append_paths_to_series(dialog.selected_paths())
 
+        def on_error(error_tuple) -> None:
+            Messages.close_busy(scan_dialog, force=True)
+            self.main.default_error_handler(error_tuple)
+
+        def on_finished() -> None:
+            Messages.close_busy(scan_dialog, force=True)
+            self.main.loading.setVisible(False)
+
         self.main.run_threaded(
             scan_series_source_files,
             on_result,
-            self.main.default_error_handler,
-            lambda: self.main.loading.setVisible(False),
+            on_error,
+            on_finished,
             root_dir,
         )
 
@@ -1068,6 +1157,12 @@ class SeriesController(QtCore.QObject):
         root_dir = str(self.series_manifest.get("root_dir") or os.path.dirname(paths[0]))
         global_settings = normalize_series_global_settings(self.series_manifest.get("global_settings"))
         self.main.loading.setVisible(True)
+        busy_dialog = Messages.show_busy(
+            self.main,
+            self.main.tr("Adding files to series..."),
+            title=self.main.tr("Series Project"),
+            minimum_visible_ms=300,
+        )
 
         def on_result(items: list[dict[str, object]]) -> None:
             loaded = load_series_project(self.series_file)
@@ -1076,11 +1171,19 @@ class SeriesController(QtCore.QObject):
             self._sync_paused_pending_runtime()
             self._apply_workspace_state()
 
+        def on_error(error_tuple) -> None:
+            Messages.close_busy(busy_dialog, force=True)
+            self.main.default_error_handler(error_tuple)
+
+        def on_finished() -> None:
+            Messages.close_busy(busy_dialog)
+            self.main.loading.setVisible(False)
+
         self.main.run_threaded(
             add_series_paths,
             on_result,
-            self.main.default_error_handler,
-            lambda: self.main.loading.setVisible(False),
+            on_error,
+            on_finished,
             self.series_file,
             root_dir=root_dir,
             paths=list(paths),
@@ -1289,6 +1392,9 @@ class SeriesController(QtCore.QObject):
             last_run_finished_at=queue_runtime.get("last_run_finished_at"),
             last_run_summary=queue_runtime.get("last_run_summary") or {},
         )
+        request_batch_pause = getattr(self.main, "request_current_batch_pause", None)
+        if callable(request_batch_pause):
+            request_batch_pause()
         self._apply_workspace_state()
 
     def resume_queue_translation(self) -> None:
@@ -1373,7 +1479,13 @@ class SeriesController(QtCore.QObject):
             finished_at=finished_at,
         )
 
-    def on_batch_process_finished(self, *, was_cancelled: bool, failed: bool) -> None:
+    def on_batch_process_finished(
+        self,
+        *,
+        was_cancelled: bool,
+        failed: bool,
+        was_paused: bool = False,
+    ) -> None:
         if not self.is_child_project_active():
             return
 
@@ -1389,6 +1501,39 @@ class SeriesController(QtCore.QObject):
         current_item_id = str(self.active_child_item_id or "")
         series_settings = normalize_series_settings(self.series_manifest.get("series_settings"))
         queue_runtime = self.active_queue_runtime()
+
+        if was_paused:
+            if current_item_id:
+                self.series_items = update_series_item_status(
+                    self.series_file,
+                    series_item_id=current_item_id,
+                    status="pending",
+                )
+                loaded = load_series_project(self.series_file)
+                self.series_manifest = dict(loaded["manifest"])
+                self.series_items = list(loaded["items"])
+            pending_ids = pending_series_item_ids(self.series_items)
+            self._queue_pending_ids = list(pending_ids)
+            self._queue_active = False
+            self._pause_requested = False
+            self.main.pipeline_status_panel.set_series_queue_pause_visible(False, pause_requested=False)
+            self._update_queue_runtime(
+                queue_state="paused",
+                pause_requested=False,
+                pending_item_ids=list(self._queue_pending_ids),
+                active_item_id=None,
+                failed_item_ids=list(self._queue_failed_ids),
+                skipped_item_ids=list(self._queue_skipped_ids),
+                failed_item_id=queue_runtime.get("failed_item_id"),
+                completed_item_ids=list(self._queue_completed_ids),
+                retry_remaining_by_item=dict(self._queue_retry_remaining),
+                last_run_started_at=queue_runtime.get("last_run_started_at"),
+                last_run_finished_at=None,
+                last_run_summary=queue_runtime.get("last_run_summary") or {},
+            )
+            self._apply_workspace_state()
+            QtCore.QTimer.singleShot(0, self.main, lambda: self._show_board(push_history=False))
+            return
 
         if was_cancelled:
             self._queue_active = False
@@ -1582,31 +1727,40 @@ class SeriesController(QtCore.QObject):
             )
             return
 
-        self._queue_active = True
-        self._pause_requested = False
-        self.main.pipeline_status_panel.set_series_queue_pause_visible(True, pause_requested=False)
-        self._queue_pending_ids = pending_ids
-        self._queue_completed_ids = []
-        self._queue_failed_ids = []
-        self._queue_skipped_ids = []
-        self._queue_retry_remaining = {}
-        started_at = QtCore.QDateTime.currentDateTime().toString(QtCore.Qt.DateFormat.ISODate)
-        self._update_queue_runtime(
-            queue_state="running",
-            pause_requested=False,
-            pending_item_ids=list(self._queue_pending_ids),
-            active_item_id=None,
-            failed_item_ids=[],
-            skipped_item_ids=[],
-            failed_item_id=None,
-            completed_item_ids=list(self._queue_completed_ids),
-            retry_remaining_by_item={},
-            last_run_started_at=started_at,
-            last_run_finished_at=None,
-            last_run_summary=self.active_queue_runtime().get("last_run_summary") or {},
+        busy_dialog = Messages.show_busy(
+            self.main,
+            self.main.tr("Preparing automatic translation..."),
+            title=self.main.tr("Series Project"),
+            minimum_visible_ms=300,
         )
-        self._apply_workspace_state()
-        self._run_next_queue_item()
+        self._queue_active = True
+        try:
+            self._pause_requested = False
+            self.main.pipeline_status_panel.set_series_queue_pause_visible(True, pause_requested=False)
+            self._queue_pending_ids = pending_ids
+            self._queue_completed_ids = []
+            self._queue_failed_ids = []
+            self._queue_skipped_ids = []
+            self._queue_retry_remaining = {}
+            started_at = QtCore.QDateTime.currentDateTime().toString(QtCore.Qt.DateFormat.ISODate)
+            self._update_queue_runtime(
+                queue_state="running",
+                pause_requested=False,
+                pending_item_ids=list(self._queue_pending_ids),
+                active_item_id=None,
+                failed_item_ids=[],
+                skipped_item_ids=[],
+                failed_item_id=None,
+                completed_item_ids=list(self._queue_completed_ids),
+                retry_remaining_by_item={},
+                last_run_started_at=started_at,
+                last_run_finished_at=None,
+                last_run_summary=self.active_queue_runtime().get("last_run_summary") or {},
+            )
+            self._apply_workspace_state()
+            self._run_next_queue_item()
+        finally:
+            Messages.close_busy(busy_dialog)
 
     def _run_next_queue_item(self) -> None:
         if not self._queue_active:

@@ -280,6 +280,12 @@ class BatchProcessor:
         return
 
     def _is_cancelled(self) -> bool:
+        checker = getattr(self.main_page, "is_current_task_cancelled", None)
+        if callable(checker):
+            try:
+                return bool(checker())
+            except Exception:
+                pass
         worker = getattr(self.main_page, "current_worker", None)
         return bool(worker and worker.is_cancelled)
 
@@ -562,7 +568,7 @@ class BatchProcessor:
                 export_settings,
             ),
         )
-        write_output_image(
+        output_path = write_output_image(
             output_path,
             cleaned_image,
             source_path=image_path,
@@ -668,7 +674,7 @@ class BatchProcessor:
         total_pages: int,
     ) -> tuple[str, str]:
         page_base_name = os.path.splitext(os.path.basename(image_path))[0]
-        series_dir = self.main_page.get_automatic_output_series_dir(
+        series_dir = self.main_page.get_reserved_automatic_output_series_dir(
             directory,
             anchor_path=self.main_page.image_files[0] if self.main_page.image_files else image_path,
         )
@@ -710,7 +716,7 @@ class BatchProcessor:
                 export_settings,
             ),
         )
-        write_output_image(
+        output_path = write_output_image(
             output_path,
             final_rgb,
             source_path=image_path,
@@ -858,6 +864,9 @@ class BatchProcessor:
     def batch_process(self, selected_paths: List[str] = None):
         timestamp = build_export_timestamp()
         self._export_run_tokens = {}
+        reset_output_reservations = getattr(self.main_page, "reset_automatic_output_reservations", None)
+        if callable(reset_output_reservations):
+            reset_output_reservations()
         self._run_started_at = time.monotonic()
         self._page_started_at = None
         self._progress_image_path = None
