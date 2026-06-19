@@ -142,6 +142,51 @@ class GemmaExactValidationTests(unittest.TestCase):
         )
         return series_path
 
+    def _series_project_with_two_items(self, temp_dir: str) -> str:
+        series_path = os.path.join(temp_dir, "queue.seriesctpr")
+        payload = self._project_blob(temp_dir)
+        create_series_project(
+            series_path,
+            root_dir=temp_dir,
+            items=[
+                {
+                    "series_item_id": "item-1",
+                    "queue_index": 1,
+                    "display_name": "example_other_chapter_source",
+                    "source_kind": "archive",
+                    "source_origin_path": os.path.join(temp_dir, "example_other_chapter_source"),
+                    "source_origin_relpath": "example_other_chapter_source",
+                    "imported_at": "2026-01-01T00:00:00",
+                    "updated_at": "2026-01-01T00:00:00",
+                    "status": "done",
+                    "embedded_project_blob_hash": "hash-1",
+                    "child_page_count": 1,
+                },
+                {
+                    "series_item_id": "item-2",
+                    "queue_index": 2,
+                    "display_name": "example_selected_chapter_source",
+                    "source_kind": "archive",
+                    "source_origin_path": os.path.join(temp_dir, "example_selected_chapter_source"),
+                    "source_origin_relpath": "example_selected_chapter_source",
+                    "imported_at": "2026-01-01T00:00:00",
+                    "updated_at": "2026-01-01T00:00:00",
+                    "status": "done",
+                    "embedded_project_blob_hash": "hash-1",
+                    "child_page_count": 1,
+                },
+            ],
+            embedded_projects=[
+                {
+                    "project_hash": "hash-1",
+                    "display_name": "example_project.ctpr",
+                    "project_size": len(payload),
+                    "project_blob": payload,
+                }
+            ],
+        )
+        return series_path
+
     def test_baseline_writes_hashes_without_raw_text(self) -> None:
         module = _load_validation_module()
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -212,6 +257,46 @@ class GemmaExactValidationTests(unittest.TestCase):
             self.assertIn("\\u003csource>", html_text)
             self.assertNotIn("\\n\\n<span", html_text)
 
+    def test_review_board_keeps_comparison_scroll_inside_panel(self) -> None:
+        module = _load_validation_module()
+        with tempfile.TemporaryDirectory() as temp_dir:
+            diff_path = Path(temp_dir) / "diff.json"
+            diff_path.write_text(
+                json.dumps(
+                    {
+                        "items": [
+                            {
+                                "id": "sample-001",
+                                "reason": "long review sample",
+                                "source": "\n".join(f"source line {index}" for index in range(80)),
+                                "baseline": "\n".join(f"baseline line {index}" for index in range(80)),
+                                "candidate": "\n".join(f"candidate line {index}" for index in range(80)),
+                            },
+                            {
+                                "id": "sample-002",
+                                "reason": "second sample",
+                                "source": "second source",
+                                "baseline": "second baseline",
+                                "candidate": "second candidate",
+                            },
+                        ]
+                    },
+                    ensure_ascii=False,
+                ),
+                encoding="utf-8",
+            )
+
+            result = module.make_review_board(diff_path, Path(temp_dir) / "out")
+
+            html_text = Path(result["index_html"]).read_text(encoding="utf-8")
+            self.assertIn('id="previousSample"', html_text)
+            self.assertIn('id="nextSample"', html_text)
+            self.assertIn("function setCurrent", html_text)
+            self.assertRegex(html_text, r"body\s*\{[^}]*overflow:\s*hidden")
+            self.assertRegex(html_text, r"\.comparison-grid\s*\{[^}]*overflow:\s*hidden")
+            self.assertRegex(html_text, r"\.box\s*\{[^}]*overflow:\s*auto")
+            self.assertRegex(html_text, r"\.actions\s*\{[^}]*position:\s*sticky")
+
     def test_select_canary_samples_writes_local_raw_samples_and_summary(self) -> None:
         module = _load_validation_module()
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -238,6 +323,25 @@ class GemmaExactValidationTests(unittest.TestCase):
             summary_text = (output_dir / "canary_summary.json").read_text(encoding="utf-8")
             self.assertNotIn("Alpha source line.", summary_text)
             self.assertNotIn("Saved target line.", summary_text)
+
+    def test_select_canary_samples_can_filter_by_source_metadata(self) -> None:
+        module = _load_validation_module()
+        with tempfile.TemporaryDirectory() as temp_dir:
+            self._series_project_with_two_items(temp_dir)
+            output_dir = Path(temp_dir) / "canary"
+
+            summary = module.select_canary_samples(
+                Path(temp_dir),
+                output_dir,
+                self._settings(),
+                project_count=1,
+                max_project_blocks=10,
+                max_samples_per_project=1,
+                source_filter="example_selected_chapter",
+            )
+
+            self.assertEqual(summary["sample_count"], 1)
+            self.assertEqual(summary["selected_projects"][0]["project_index"], 1)
 
 
 if __name__ == "__main__":

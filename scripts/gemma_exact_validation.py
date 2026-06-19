@@ -534,23 +534,31 @@ def make_review_board(diff_path: Path, output_dir: Path) -> dict[str, Any]:
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Gemma Translation Review</title>
   <style>
-    body {{ margin: 0; background: #202124; color: #f3f4f6; font-family: Arial, sans-serif; }}
-    header {{ padding: 18px 22px; border-bottom: 1px solid #3a3d42; background: #2b2c30; }}
-    main {{ display: grid; grid-template-columns: 280px 1fr; min-height: calc(100vh - 74px); }}
-    aside {{ border-right: 1px solid #3a3d42; padding: 14px; overflow: auto; }}
+    * {{ box-sizing: border-box; }}
+    body {{ margin: 0; height: 100vh; overflow: hidden; background: #202124; color: #f3f4f6; font-family: Arial, sans-serif; }}
+    header {{ height: 74px; padding: 12px 22px; border-bottom: 1px solid #3a3d42; background: #2b2c30; }}
+    header h1 {{ margin: 0 0 4px; font-size: 24px; }}
+    main {{ display: grid; grid-template-columns: minmax(220px, 300px) minmax(0, 1fr); height: calc(100vh - 74px); overflow: hidden; }}
+    aside {{ min-height: 0; border-right: 1px solid #3a3d42; padding: 14px; overflow: auto; }}
     button {{ border: 1px solid #5f6368; background: #33363b; color: #f3f4f6; border-radius: 6px; padding: 9px 12px; cursor: pointer; }}
     button:hover {{ background: #42464d; }}
+    button:disabled {{ opacity: 0.45; cursor: default; }}
     .item {{ width: 100%; margin-bottom: 8px; text-align: left; }}
     .item.active {{ border-color: #ffd400; color: #ffd400; }}
-    .panel {{ padding: 20px; max-width: 1200px; }}
-    .grid {{ display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }}
-    .box {{ background: #2b2c30; border: 1px solid #44474d; border-radius: 8px; padding: 14px; white-space: pre-wrap; line-height: 1.55; overflow-wrap: anywhere; }}
+    .panel {{ min-width: 0; min-height: 0; padding: 18px 20px; display: flex; flex-direction: column; overflow: hidden; }}
+    .review-topbar {{ display: flex; align-items: flex-start; justify-content: space-between; gap: 14px; margin-bottom: 10px; }}
+    .review-title {{ min-width: 0; }}
+    .review-title h2 {{ margin: 0 0 4px; font-size: 20px; overflow-wrap: anywhere; }}
+    .nav-actions {{ display: flex; gap: 8px; flex: 0 0 auto; }}
+    .comparison-grid {{ flex: 1 1 auto; min-height: 0; display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); grid-template-rows: minmax(120px, 0.8fr) minmax(170px, 1fr); gap: 14px; overflow: hidden; }}
+    .box {{ min-height: 0; overflow: auto; background: #2b2c30; border: 1px solid #44474d; border-radius: 8px; padding: 14px; white-space: pre-wrap; line-height: 1.55; overflow-wrap: anywhere; }}
     .source {{ grid-column: 1 / -1; }}
-    .actions {{ display: flex; flex-wrap: wrap; gap: 10px; margin: 18px 0; }}
+    .actions {{ position: sticky; bottom: 0; z-index: 2; display: flex; flex-wrap: wrap; gap: 10px; margin: 12px 0 0; padding: 12px 0; background: #202124; }}
     .approve {{ border-color: #81c995; }}
     .changed {{ border-color: #fdd663; }}
     .reject {{ border-color: #f28b82; }}
-    textarea {{ width: 100%; min-height: 150px; background: #151618; color: #dfe3ea; border: 1px solid #44474d; border-radius: 8px; padding: 10px; }}
+    textarea {{ width: 100%; min-height: 72px; max-height: 120px; resize: vertical; background: #151618; color: #dfe3ea; border: 1px solid #44474d; border-radius: 8px; padding: 10px; }}
+    h3 {{ margin: 6px 0 8px; font-size: 16px; }}
     .meta {{ color: #bdc1c6; font-size: 13px; margin-top: 4px; }}
   </style>
 </head>
@@ -565,9 +573,17 @@ def make_review_board(diff_path: Path, output_dir: Path) -> dict[str, Any]:
     <div id="list"></div>
   </aside>
   <section class="panel">
-    <h2 id="title"></h2>
-    <div id="reason" class="meta"></div>
-    <div class="grid">
+    <div class="review-topbar">
+      <div class="review-title">
+        <h2 id="title"></h2>
+        <div id="reason" class="meta"></div>
+      </div>
+      <div class="nav-actions">
+        <button id="previousSample">이전</button>
+        <button id="nextSample">다음</button>
+      </div>
+    </div>
+    <div class="comparison-grid">
       <div class="box source"><strong>원문 OCR</strong><br><br><span id="source"></span></div>
       <div class="box"><strong>기존 번역</strong><br><br><span id="baseline"></span></div>
       <div class="box"><strong>후보 번역</strong><br><br><span id="candidate"></span></div>
@@ -613,6 +629,18 @@ function render() {{
   document.getElementById("baseline").textContent = escapeText(item.baseline);
   document.getElementById("candidate").textContent = escapeText(item.candidate);
   document.getElementById("decisions").value = JSON.stringify(decisions, null, 2);
+  document.getElementById("previousSample").disabled = current <= 0;
+  document.getElementById("nextSample").disabled = current >= ITEMS.length - 1;
+}}
+
+function setCurrent(index) {{
+  if (!ITEMS.length) {{
+    current = 0;
+    render();
+    return;
+  }}
+  current = Math.max(0, Math.min(index, ITEMS.length - 1));
+  render();
 }}
 
 async function persist() {{
@@ -638,9 +666,23 @@ document.querySelectorAll("[data-decision]").forEach((button) => {{
       reviewed_at: new Date().toISOString()
     }};
     await persist();
-    if (current < ITEMS.length - 1) current += 1;
-    render();
+    setCurrent(current + 1);
   }};
+}});
+
+document.getElementById("previousSample").onclick = () => setCurrent(current - 1);
+document.getElementById("nextSample").onclick = () => setCurrent(current + 1);
+document.addEventListener("keydown", (event) => {{
+  const tag = String(event.target && event.target.tagName || "").toLowerCase();
+  if (tag === "textarea" || tag === "input") return;
+  if (event.key === "ArrowLeft" || event.key === "k") {{
+    event.preventDefault();
+    setCurrent(current - 1);
+  }}
+  if (event.key === "ArrowRight" || event.key === "j") {{
+    event.preventDefault();
+    setCurrent(current + 1);
+  }}
 }});
 
 document.getElementById("download").onclick = () => {{
@@ -720,10 +762,12 @@ def select_canary_samples(
     project_count: int,
     max_project_blocks: int,
     max_samples_per_project: int,
+    source_filter: str = "",
 ) -> dict[str, Any]:
     output_dir.mkdir(parents=True, exist_ok=True)
     series_paths = sorted(input_root.rglob("*.seriesctpr"))
     project_rows: list[dict[str, Any]] = []
+    normalized_source_filter = source_filter.casefold().strip()
 
     for series_index, series_path in enumerate(series_paths):
         try:
@@ -731,6 +775,13 @@ def select_canary_samples(
         except Exception:
             continue
         for project_index, item in enumerate(series_state.get("items") or []):
+            if normalized_source_filter:
+                source_metadata = " ".join(
+                    str(item.get(key) or "")
+                    for key in ("display_name", "source_origin_path", "source_origin_relpath")
+                ).casefold()
+                if normalized_source_filter not in source_metadata:
+                    continue
             try:
                 project_blob = _load_series_project_blob_for_item(series_path, item)
                 pages = list(_iter_project_pages(project_blob))
@@ -1068,6 +1119,11 @@ def main(argv: list[str] | None = None) -> int:
     canary.add_argument("--project-count", default=3, type=int)
     canary.add_argument("--max-project-blocks", default=300, type=int)
     canary.add_argument("--max-samples-per-project", default=8, type=int)
+    canary.add_argument(
+        "--source-filter",
+        default="",
+        help="Only select series items whose display name or source path contains this text.",
+    )
     canary.add_argument("--source-lang", default="Chinese")
     canary.add_argument("--target-lang", default="Korean")
     canary.add_argument("--model", default="gemma-4-26B-IQ4_NL.gguf")
@@ -1121,6 +1177,7 @@ def main(argv: list[str] | None = None) -> int:
             project_count=args.project_count,
             max_project_blocks=args.max_project_blocks,
             max_samples_per_project=args.max_samples_per_project,
+            source_filter=args.source_filter,
         )
         print(json.dumps(result, ensure_ascii=False, indent=2, sort_keys=True))
         return 0 if result["sample_count"] > 0 else 2
