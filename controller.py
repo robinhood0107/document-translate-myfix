@@ -50,6 +50,8 @@ from modules.utils.automatic_output import (
     is_single_archive_mode,
     normalize_project_output_preferences,
     preserve_preview_file,
+    reserve_unique_dir,
+    reserve_unique_path,
     resolve_automatic_output_settings,
     resolve_forced_archive_output_path,
     resolve_series_folder_name,
@@ -713,6 +715,28 @@ class ComicTranslate(ComicTranslateUI):
             temp_dir=self.temp_dir,
         )
         return build_series_output_dir(base_dir, folder_name)
+
+    def reset_automatic_output_reservations(self) -> None:
+        self._automatic_output_dir_reservations = {}
+
+    def get_reserved_automatic_output_series_dir(
+        self,
+        base_dir: str,
+        *,
+        anchor_path: str | None = None,
+    ) -> str:
+        output_dir = self.get_automatic_output_series_dir(base_dir, anchor_path=anchor_path)
+        key = os.path.normcase(os.path.abspath(output_dir))
+        cache = getattr(self, "_automatic_output_dir_reservations", None)
+        if cache is None:
+            cache = {}
+            self._automatic_output_dir_reservations = cache
+        reserved = cache.get(key)
+        if reserved:
+            return reserved
+        reserved = reserve_unique_dir(output_dir)
+        cache[key] = reserved
+        return reserved
 
     def _get_automatic_output_page_metric(self, file_path: str) -> dict[str, object] | None:
         if not file_path:
@@ -1766,15 +1790,11 @@ class ComicTranslate(ComicTranslateUI):
         )
 
     def _txt_md_auto_save_path(self, target: str, suffix: str) -> str:
-        series_dir = self.get_automatic_output_series_dir(
+        series_dir = self.get_reserved_automatic_output_series_dir(
             self._txt_md_default_dir(),
             anchor_path=self.image_files[0] if self.image_files else "",
         )
-        os.makedirs(series_dir, exist_ok=True)
-        return os.path.join(
-            series_dir,
-            f"{self._txt_md_bundle_name()}_{target}{suffix}",
-        )
+        return reserve_unique_path(os.path.join(series_dir, f"{self._txt_md_bundle_name()}_{target}{suffix}"))
 
     def _write_txt_md_exchange(
         self,
@@ -2088,6 +2108,7 @@ class ComicTranslate(ComicTranslateUI):
             project_file=getattr(self, "project_file", None),
             temp_dir=getattr(self, "temp_dir", None),
         )
+        archive_path = reserve_unique_path(archive_path)
         os.makedirs(archive_root, exist_ok=True)
         final_staging_dir = tempfile.mkdtemp(prefix="ct_archive_finalize_", dir=getattr(self, "temp_dir", None) or None)
         archive_page_format = str(
@@ -2224,6 +2245,9 @@ class ComicTranslate(ComicTranslateUI):
         self._batch_failed = False
         self._batch_pause_requested = False
         self._last_batch_failure_detail = ""
+        reset_output_reservations = getattr(self, "reset_automatic_output_reservations", None)
+        if callable(reset_output_reservations):
+            reset_output_reservations()
         ocr_preflight_cache: dict[str, str] = {}
 
         for path in selected_paths:

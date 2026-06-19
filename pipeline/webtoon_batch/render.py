@@ -415,7 +415,7 @@ class RenderMixin:
                     export_settings,
                 ),
             )
-            write_output_image(
+            cleaned_output_path = write_output_image(
                 cleaned_output_path,
                 cleaned_image_rgb,
                 source_path=image_path,
@@ -542,7 +542,7 @@ class RenderMixin:
         renderer.apply_patches(patches)
         viewer_state = self.main_page.image_states[image_path].get("viewer_state", {})
         renderer.add_state_to_image(viewer_state, page_idx, self.main_page)
-        translated_dir = self.main_page.get_automatic_output_series_dir(
+        translated_dir = self.main_page.get_reserved_automatic_output_series_dir(
             directory,
             anchor_path=self.main_page.image_files[0] if self.main_page.image_files else image_path,
         )
@@ -580,7 +580,7 @@ class RenderMixin:
                     export_settings,
                 ),
             )
-            write_output_image(
+            output_path = write_output_image(
                 output_path,
                 translated_image_rgb,
                 source_path=image_path,

@@ -49,6 +49,7 @@ from modules.utils.automatic_output import (
     build_archive_staging_dir,
     build_output_file_name,
     is_single_archive_mode,
+    reserve_unique_path,
     resolve_forced_archive_output_path,
     write_archive_image,
     write_output_image,
@@ -965,7 +966,7 @@ class ProjectController:
                 renderer.save_image(sv_pth)
 
             # Call make function
-            make(temp_dir, output_path)
+            make(temp_dir, reserve_unique_path(output_path))
         finally:
             # Clean up temp directory
             shutil.rmtree(temp_dir)
@@ -1054,7 +1055,7 @@ class ProjectController:
                 export_settings,
             ),
         )
-        write_output_image(
+        output_path = write_output_image(
             output_path,
             final_rgb,
             source_path=file_path,
@@ -1165,6 +1166,7 @@ class ProjectController:
             export_settings.get("resolved_automatic_output_archive_format", "cbz") or "cbz"
         )
         archive_path, archive_root = self._forced_archive_output_path(fallback_dir, archive_format)
+        archive_path = reserve_unique_path(archive_path)
         os.makedirs(archive_root, exist_ok=True)
         archive_image_format = str(
             export_settings.get("resolved_automatic_output_archive_image_format", "png") or "png"
@@ -1222,8 +1224,10 @@ class ProjectController:
     ) -> dict[str, object]:
         base_dir = self._get_default_export_dir()
         anchor = self.main.image_files[0] if self.main.image_files else ""
-        series_dir = self.main.get_automatic_output_series_dir(base_dir, anchor_path=anchor)
-        os.makedirs(series_dir, exist_ok=True)
+        reset_output_reservations = getattr(self.main, "reset_automatic_output_reservations", None)
+        if callable(reset_output_reservations):
+            reset_output_reservations()
+        series_dir = self.main.get_reserved_automatic_output_series_dir(base_dir, anchor_path=anchor)
 
         total_pages = len(self.main.image_files)
         archive_mode = is_single_archive_mode(export_settings)
