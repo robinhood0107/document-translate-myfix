@@ -293,6 +293,38 @@ def build_output_file_name(
     return f"{page_base_name}_{variant}{ext}"
 
 
+def reserve_unique_path(path: str) -> str:
+    """Return a path that does not currently exist, preserving the extension."""
+    candidate = os.path.abspath(str(path or ""))
+    if not candidate:
+        raise ValueError("Cannot reserve an empty output path")
+    if not os.path.exists(candidate):
+        return candidate
+
+    root, ext = os.path.splitext(candidate)
+    for index in range(1, 10000):
+        next_candidate = f"{root}_{index:03d}{ext}"
+        if not os.path.exists(next_candidate):
+            return next_candidate
+    raise FileExistsError(f"No available output path for {candidate!r}")
+
+
+def reserve_unique_dir(path: str) -> str:
+    """Create and return a directory path without reusing an existing directory."""
+    candidate = os.path.abspath(str(path or ""))
+    if not candidate:
+        raise ValueError("Cannot reserve an empty output directory")
+
+    for index in range(0, 10000):
+        next_candidate = candidate if index == 0 else f"{candidate}_{index:03d}"
+        try:
+            os.makedirs(next_candidate, exist_ok=False)
+            return next_candidate
+        except FileExistsError:
+            continue
+    raise FileExistsError(f"No available output directory for {candidate!r}")
+
+
 def build_archive_page_file_name(
     page_index: int,
     total_pages: int,
@@ -430,6 +462,7 @@ def write_output_image(
     source_path: str | None,
     resolved_settings: Mapping[str, object] | None,
 ) -> str:
+    output_path = reserve_unique_path(output_path)
     requested = str(
         (resolved_settings or {}).get("resolved_automatic_output_image_format", DEFAULT_OUTPUT_IMAGE_FORMAT)
     )
@@ -499,11 +532,11 @@ def resolve_series_folder_name(
         project_file=project_file,
         temp_dir=temp_dir,
     )
-    return sanitize_series_folder_name(identity.get("source_name", ""))
+    return sanitize_export_path_component(identity.get("source_name", ""))
 
 
 def build_series_output_dir(base_dir: str, series_folder_name: str) -> str:
-    folder_name = sanitize_series_folder_name(series_folder_name)
+    folder_name = sanitize_export_path_component(series_folder_name)
     if not folder_name.lower().startswith("result_"):
         folder_name = f"result_{folder_name}"
     return os.path.join(base_dir, folder_name)

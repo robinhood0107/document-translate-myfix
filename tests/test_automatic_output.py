@@ -26,11 +26,14 @@ from modules.utils.automatic_output import (
     format_estimate_size_text,
     resolve_automatic_output_settings,
     resolve_forced_archive_output_path,
+    reserve_unique_dir,
+    reserve_unique_path,
     resolve_series_folder_name,
     sanitize_series_folder_name,
     write_archive_image,
     write_output_image,
 )
+from modules.utils.archives import make as make_archive
 
 
 class AutomaticOutputTests(unittest.TestCase):
@@ -46,6 +49,14 @@ class AutomaticOutputTests(unittest.TestCase):
             "result_example_source_chapter",
         )
 
+    def test_series_output_dir_preserves_chapter_suffix(self) -> None:
+        output_dir = build_series_output_dir("/tmp/project", "source chapter v01 c14")
+
+        self.assertEqual(
+            os.path.basename(output_dir),
+            "result_source chapter v01 c14",
+        )
+
     def test_series_folder_name_resolves_source_for_temp_page(self) -> None:
         folder_name = resolve_series_folder_name(
             "/mnt/c/ExampleWorkspace/project/tmpabc/001.png",
@@ -58,6 +69,19 @@ class AutomaticOutputTests(unittest.TestCase):
         )
 
         self.assertEqual(folder_name, "example_source_chapter")
+
+    def test_series_folder_name_preserves_source_chapter_suffix(self) -> None:
+        folder_name = resolve_series_folder_name(
+            "/mnt/c/ExampleWorkspace/project/tmpabc/001.png",
+            source_records={
+                r"C:\ExampleWorkspace\project\tmpabc\001.png": {
+                    "kind": "archive",
+                    "source_path": r"C:\ExampleWorkspace\project\source chapter v01 c14.cbz",
+                }
+            },
+        )
+
+        self.assertEqual(folder_name, "source chapter v01 c14")
 
     def test_resolved_settings_apply_project_override(self) -> None:
         settings = resolve_automatic_output_settings(
@@ -109,6 +133,70 @@ class AutomaticOutputTests(unittest.TestCase):
                 },
             )
             self.assertTrue(os.path.isfile(output_path))
+
+    def test_reserve_unique_dir_uses_suffix_when_directory_exists(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            output_dir = os.path.join(temp_dir, "result_source chapter v01 c14")
+            os.makedirs(output_dir)
+
+            reserved = reserve_unique_dir(output_dir)
+
+            self.assertEqual(os.path.basename(reserved), "result_source chapter v01 c14_001")
+            self.assertTrue(os.path.isdir(reserved))
+
+    def test_write_output_image_never_overwrites_existing_file(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            output_path = os.path.join(temp_dir, "001_translated.png")
+            with open(output_path, "wb") as handle:
+                handle.write(b"keep-me")
+            image = np.zeros((20, 10, 3), dtype=np.uint8)
+
+            actual_path = write_output_image(
+                output_path,
+                image,
+                source_path="/tmp/source.png",
+                resolved_settings={
+                    "resolved_automatic_output_image_format": OUTPUT_IMAGE_FORMAT_PNG,
+                },
+            )
+
+            self.assertEqual(os.path.basename(actual_path), "001_translated_001.png")
+            with open(output_path, "rb") as handle:
+                self.assertEqual(handle.read(), b"keep-me")
+            self.assertTrue(os.path.isfile(actual_path))
+
+    def test_reserve_unique_path_preserves_extension(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            output_path = os.path.join(temp_dir, "chapter_translated.cbz")
+            with open(output_path, "wb") as handle:
+                handle.write(b"old")
+
+            reserved = reserve_unique_path(output_path)
+
+            self.assertEqual(os.path.basename(reserved), "chapter_translated_001.cbz")
+
+    def test_make_archive_refuses_to_overwrite_existing_output(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            source_dir = os.path.join(temp_dir, "pages")
+            os.makedirs(source_dir)
+            image = np.zeros((20, 10, 3), dtype=np.uint8)
+            write_archive_image(
+                os.path.join(source_dir, "001.png"),
+                image,
+                resolved_settings={
+                    "resolved_automatic_output_archive_image_format": OUTPUT_IMAGE_FORMAT_PNG,
+                },
+            )
+            archive_path = os.path.join(temp_dir, "chapter_translated.cbz")
+            with open(archive_path, "wb") as handle:
+                handle.write(b"old")
+
+            with self.assertRaises(FileExistsError):
+                make_archive(source_dir, output_path=archive_path)
+
+            reserved = reserve_unique_path(archive_path)
+            make_archive(source_dir, output_path=reserved)
+            self.assertTrue(os.path.isfile(reserved))
 
     def test_write_archive_image_creates_requested_file(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

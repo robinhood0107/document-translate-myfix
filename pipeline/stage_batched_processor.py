@@ -1264,6 +1264,9 @@ class StageBatchedProcessor(BatchProcessor):
     def batch_process(self, selected_paths: list[str] | None = None):
         image_list = selected_paths if selected_paths is not None else self.main_page.image_files
         total_images = len(image_list)
+        reset_output_reservations = getattr(self.main_page, "reset_automatic_output_reservations", None)
+        if callable(reset_output_reservations):
+            reset_output_reservations()
         self._run_started_at = time.monotonic()
         self._page_started_at = None
         self._progress_image_path = None

@@ -146,6 +146,7 @@ class ControllerBatchPreflightTests(unittest.TestCase):
         controller = _DummyController()
         controller._memlogger = None
         controller._batch_cancel_requested = False
+        controller._batch_pause_requested = False
         controller._batch_failed = False
         controller.selected_batch = ["page-a.png", "page-b.png"]
         controller._batch_active = True
@@ -171,6 +172,7 @@ class ControllerBatchPreflightTests(unittest.TestCase):
             total_images=2,
             completed_batch_paths=["page-a.png", "page-b.png"],
             report={"skipped_count": 0},
+            was_paused=False,
         )
         self.assertFalse(controller._batch_active)
         self.assertFalse(controller._batch_cancel_requested)
@@ -188,6 +190,25 @@ class ControllerBatchPreflightTests(unittest.TestCase):
             total_images=2,
             report={"skipped_count": 0},
         )
+
+    def test_paused_batch_skips_archive_finalization(self) -> None:
+        controller = self._build_batch_finished_controller(OUTPUT_TARGET_ARCHIVE)
+        controller._batch_pause_requested = True
+
+        ComicTranslate.on_batch_process_finished(controller)
+
+        controller._start_batch_archive_finalization.assert_not_called()
+        controller._finish_batch_process_ui.assert_called_once_with(
+            was_cancelled=False,
+            failed=False,
+            total_images=2,
+            completed_batch_paths=["page-a.png", "page-b.png"],
+            report={"skipped_count": 0},
+            was_paused=True,
+        )
+        self.assertFalse(controller._batch_active)
+        self.assertFalse(controller._batch_cancel_requested)
+        self.assertFalse(controller._batch_pause_requested)
 
     def test_finalize_single_archive_output_builds_cbz_from_staging_dir(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

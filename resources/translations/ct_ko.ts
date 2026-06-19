@@ -158,6 +158,10 @@ Choose either a project file or image/document/archive files.</source>
 프로젝트 파일만 선택하거나 이미지/문서/압축 파일만 선택하세요.</translation>
     </message>
     <message>
+        <source>일시정지 요청됨. 현재 안전 지점에서 멈춥니다.</source>
+        <translation>일시정지 요청됨. 현재 안전 지점에서 멈춥니다.</translation>
+    </message>
+    <message>
         <source>Gemma와 OCR 준비를 확인하는 중...</source>
         <translation>Gemma와 OCR 준비를 확인하는 중...</translation>
     </message>
@@ -180,6 +184,10 @@ Choose either a project file or image/document/archive files.</source>
     <message>
         <source>Gemma Local Server Settings</source>
         <translation>Gemma 로컬 서버 설정</translation>
+    </message>
+    <message>
+        <source>일시정지 중...</source>
+        <translation>일시정지 중...</translation>
     </message>
     <message>
         <source>작업이 취소되었습니다.</source>
@@ -280,6 +288,10 @@ Duplicates:
     <message>
         <source>No current page is available for automatic processing.</source>
         <translation>자동 처리할 현재 페이지가 없습니다.</translation>
+    </message>
+    <message>
+        <source>일시정지되었습니다. 시리즈 대기열에서 재개할 수 있습니다.</source>
+        <translation>일시정지되었습니다. 시리즈 대기열에서 재개할 수 있습니다.</translation>
     </message>
     <message>
         <source>자동번역이 완료되었습니다.</source>
@@ -2039,6 +2051,38 @@ Approximate GPU usage:
         <translation>내부</translation>
     </message>
     <message>
+        <source>Opening series board...</source>
+        <translation>시리즈 보드 여는 중...</translation>
+    </message>
+    <message>
+        <source>Opening current item...</source>
+        <translation>현재 항목 여는 중...</translation>
+    </message>
+    <message>
+        <source>Opening report...</source>
+        <translation>리포트 여는 중...</translation>
+    </message>
+    <message>
+        <source>Preparing retry...</source>
+        <translation>재시도 준비 중...</translation>
+    </message>
+    <message>
+        <source>Opening settings...</source>
+        <translation>설정 여는 중...</translation>
+    </message>
+    <message>
+        <source>Opening output...</source>
+        <translation>출력 폴더 여는 중...</translation>
+    </message>
+    <message>
+        <source>Closing status panel...</source>
+        <translation>상태 패널 닫는 중...</translation>
+    </message>
+    <message>
+        <source>Cancelling...</source>
+        <translation>취소 중...</translation>
+    </message>
+    <message>
         <source>Switch to embedded mode</source>
         <translation>내부 위젯 모드로 전환</translation>
     </message>
@@ -2049,6 +2093,14 @@ Approximate GPU usage:
     <message>
         <source>Show logs</source>
         <translation>로그 보기</translation>
+    </message>
+    <message>
+        <source>Pause requested. The current safe checkpoint will stop the queue.</source>
+        <translation>일시정지 요청됨. 현재 안전 지점에서 대기열을 멈춥니다.</translation>
+    </message>
+    <message>
+        <source>취소 중...</source>
+        <translation>취소 중...</translation>
     </message>
     <message>
         <source>Automatic</source>
@@ -2101,6 +2153,10 @@ Approximate GPU usage:
     <message>
         <source>Pipeline</source>
         <translation>파이프라인</translation>
+    </message>
+    <message>
+        <source>Paused</source>
+        <translation>일시정지됨</translation>
     </message>
     <message>
         <source>Running</source>
@@ -2752,6 +2808,18 @@ These values are copied into new series projects and can be adjusted per series.
         <translation>선택한 프로젝트 열기</translation>
     </message>
     <message>
+        <source>Change Status</source>
+        <translation>상태 변경</translation>
+    </message>
+    <message>
+        <source>Mark as Done</source>
+        <translation>완료로 표시</translation>
+    </message>
+    <message>
+        <source>Reset to Pending</source>
+        <translation>대기 중으로 되돌리기</translation>
+    </message>
+    <message>
         <source>Add Files</source>
         <translation>파일 추가</translation>
     </message>
@@ -2816,6 +2884,18 @@ The current running item stays fixed, and you can change the queue after the run
     <message>
         <source>Automatic translation is already running.</source>
         <translation>자동 번역이 이미 실행 중입니다.</translation>
+    </message>
+    <message>
+        <source>Status cannot be changed while automatic translation is running. Pause first, then change it.</source>
+        <translation>자동 번역 실행 중에는 상태를 바꿀 수 없습니다. 먼저 일시정지한 뒤 변경하세요.</translation>
+    </message>
+    <message>
+        <source>Select a series item to change its status.</source>
+        <translation>상태를 변경할 시리즈 항목을 선택하세요.</translation>
+    </message>
+    <message>
+        <source>Mark the selected item as done or return it to pending.</source>
+        <translation>선택한 항목을 완료로 표시하거나 대기 중으로 되돌립니다.</translation>
     </message>
 </context>
 <context>
@@ -4130,6 +4210,18 @@ It may have already been moved, renamed, or deleted.
         <source>Remove from series</source>
         <translation>시리즈에서 제외</translation>
     </message>
+    <message>
+        <source>Mark as Done</source>
+        <translation>완료로 표시</translation>
+    </message>
+    <message>
+        <source>Reset to Pending</source>
+        <translation>대기 중으로 되돌리기</translation>
+    </message>
+    <message>
+        <source>Status cannot be changed while automatic translation is running. Pause first, then change it.</source>
+        <translation>자동 번역 실행 중에는 상태를 바꿀 수 없습니다. 먼저 일시정지한 뒤 변경하세요.</translation>
+    </message>
 </context>
 <context>
     <name>_SeriesQuickSettings</name>
@@ -4401,12 +4493,32 @@ Do you want to restore it?</source>
         <translation>RecoveredProject.ctpr</translation>
     </message>
     <message>
+        <source>Restoring project file...</source>
+        <translation>프로젝트 파일을 복원하는 중입니다...</translation>
+    </message>
+    <message>
+        <source>Exporting image...</source>
+        <translation>이미지를 내보내는 중입니다...</translation>
+    </message>
+    <message>
+        <source>Export</source>
+        <translation>내보내기</translation>
+    </message>
+    <message>
+        <source>Exporting PSD...</source>
+        <translation>PSD를 내보내는 중입니다...</translation>
+    </message>
+    <message>
         <source>Rerender Output</source>
         <translation>렌더 출력 재생성</translation>
     </message>
     <message>
         <source>There are no render changes to apply.</source>
         <translation>적용할 렌더 변경사항이 없습니다.</translation>
+    </message>
+    <message>
+        <source>Rendering output...</source>
+        <translation>출력을 렌더링하는 중입니다...</translation>
     </message>
     <message>
         <source>Render output was updated.</source>
@@ -4487,6 +4599,10 @@ It may have been moved, renamed, or deleted.
 {길}</translation>
     </message>
     <message>
+        <source>Loading project file...</source>
+        <translation>프로젝트 파일을 불러오는 중입니다...</translation>
+    </message>
+    <message>
         <source>Korean</source>
         <translation>한국어</translation>
     </message>
@@ -4525,6 +4641,10 @@ It may have been moved, renamed, or deleted.
 {path}</translation>
     </message>
     <message>
+        <source>Loading series project...</source>
+        <translation>시리즈 프로젝트를 불러오는 중입니다...</translation>
+    </message>
+    <message>
         <source>The previous automatic translation run was interrupted and restored as paused.</source>
         <translation>이전 자동 번역 실행이 중단되어 일시정지 상태로 복구되었습니다.</translation>
     </message>
@@ -4543,6 +4663,18 @@ It may have been moved, renamed, or deleted.
     <message>
         <source>Create Series Project</source>
         <translation>시리즈 프로젝트 만들기</translation>
+    </message>
+    <message>
+        <source>Opening series item...</source>
+        <translation>시리즈 항목을 여는 중입니다...</translation>
+    </message>
+    <message>
+        <source>Adding files to series...</source>
+        <translation>시리즈에 파일을 추가하는 중입니다...</translation>
+    </message>
+    <message>
+        <source>Preparing automatic translation...</source>
+        <translation>자동 번역을 준비하는 중...</translation>
     </message>
     <message>
         <source>Scanning series folder...</source>
@@ -4567,6 +4699,18 @@ It may have been moved, renamed, or deleted.
     <message>
         <source>Remove &apos;{name}&apos; from this series project?</source>
         <translation>이 시리즈 프로젝트에서 &apos;{name}&apos; 항목을 제거할까요?</translation>
+    </message>
+    <message>
+        <source>Series item status can only be changed to Pending or Done.</source>
+        <translation>시리즈 항목 상태는 대기 중 또는 완료로만 변경할 수 있습니다.</translation>
+    </message>
+    <message>
+        <source>Updating series item status...</source>
+        <translation>시리즈 항목 상태를 변경하는 중...</translation>
+    </message>
+    <message>
+        <source>Series Project</source>
+        <translation>시리즈 프로젝트</translation>
     </message>
     <message>
         <source>Add Files To Series</source>
@@ -4599,6 +4743,50 @@ It may have been moved, renamed, or deleted.
     <message>
         <source>There are no queue items left to run.</source>
         <translation>실행할 대기열 항목이 남아 있지 않습니다.</translation>
+    </message>
+    <message>
+        <source>Importing PSD files...</source>
+        <translation>PSD 파일을 가져오는 중입니다...</translation>
+    </message>
+    <message>
+        <source>Import</source>
+        <translation>가져오기</translation>
+    </message>
+    <message>
+        <source>Loading images...</source>
+        <translation>이미지를 불러오는 중입니다...</translation>
+    </message>
+    <message>
+        <source>Importing pages...</source>
+        <translation>페이지를 가져오는 중입니다...</translation>
+    </message>
+    <message>
+        <source>Processing</source>
+        <translation>처리 중</translation>
+    </message>
+    <message>
+        <source>Preparing text detection...</source>
+        <translation>글자 검출을 준비하는 중입니다...</translation>
+    </message>
+    <message>
+        <source>Preparing OCR...</source>
+        <translation>OCR을 준비하는 중입니다...</translation>
+    </message>
+    <message>
+        <source>Preparing translation...</source>
+        <translation>번역을 준비하는 중입니다...</translation>
+    </message>
+    <message>
+        <source>Preparing inpainting...</source>
+        <translation>인페인팅을 준비하는 중입니다...</translation>
+    </message>
+    <message>
+        <source>Preparing segmentation...</source>
+        <translation>세그먼테이션을 준비하는 중입니다...</translation>
+    </message>
+    <message>
+        <source>Rendering text...</source>
+        <translation>텍스트를 렌더링하는 중입니다...</translation>
     </message>
 </context>
 <context>

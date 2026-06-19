@@ -158,6 +158,10 @@ Choose either a project file or image/document/archive files.</source>
 プロジェクトファイルだけを選ぶか、画像・ドキュメント・アーカイブファイルだけを選択してください。</translation>
     </message>
     <message>
+        <source>일시정지 요청됨. 현재 안전 지점에서 멈춥니다.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
         <source>Gemma와 OCR 준비를 확인하는 중...</source>
         <translation type="unfinished"></translation>
     </message>
@@ -179,6 +183,10 @@ Choose either a project file or image/document/archive files.</source>
     </message>
     <message>
         <source>Gemma Local Server Settings</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>일시정지 중...</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
@@ -280,6 +288,10 @@ Duplicates:
     <message>
         <source>No current page is available for automatic processing.</source>
         <translation>自動処理できる現在のページがありません。</translation>
+    </message>
+    <message>
+        <source>일시정지되었습니다. 시리즈 대기열에서 재개할 수 있습니다.</source>
+        <translation type="unfinished"></translation>
     </message>
     <message>
         <source>자동번역이 완료되었습니다.</source>
@@ -1985,6 +1997,38 @@ Approximate GPU usage:
         <translation>埋め込み</translation>
     </message>
     <message>
+        <source>Opening series board...</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Opening current item...</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Opening report...</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Preparing retry...</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Opening settings...</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Opening output...</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Closing status panel...</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Cancelling...</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
         <source>Switch to embedded mode</source>
         <translation>埋め込みモードに切り替え</translation>
     </message>
@@ -1995,6 +2039,14 @@ Approximate GPU usage:
     <message>
         <source>Show logs</source>
         <translation>ログを表示</translation>
+    </message>
+    <message>
+        <source>Pause requested. The current safe checkpoint will stop the queue.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>취소 중...</source>
+        <translation type="unfinished"></translation>
     </message>
     <message>
         <source>Automatic</source>
@@ -2047,6 +2099,10 @@ Approximate GPU usage:
     <message>
         <source>Pipeline</source>
         <translation>パイプライン</translation>
+    </message>
+    <message>
+        <source>Paused</source>
+        <translation type="unfinished"></translation>
     </message>
     <message>
         <source>Running</source>
@@ -2681,7 +2737,7 @@ These values are copied into new series projects and can be adjusted per series.
     </message>
     <message>
         <source>Series Project</source>
-        <translation type="unfinished"></translation>
+        <translation>シリーズプロジェクト</translation>
     </message>
     <message>
         <source>Recovered Snapshot</source>
@@ -2694,6 +2750,18 @@ These values are copied into new series projects and can be adjusted per series.
     <message>
         <source>Open Selected</source>
         <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Change Status</source>
+        <translation>状態を変更</translation>
+    </message>
+    <message>
+        <source>Mark as Done</source>
+        <translation>完了としてマーク</translation>
+    </message>
+    <message>
+        <source>Reset to Pending</source>
+        <translation>待機中に戻す</translation>
     </message>
     <message>
         <source>Add Files</source>
@@ -2759,6 +2827,18 @@ The current running item stays fixed, and you can change the queue after the run
     <message>
         <source>Automatic translation is already running.</source>
         <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Status cannot be changed while automatic translation is running. Pause first, then change it.</source>
+        <translation>自動翻訳の実行中は状態を変更できません。先に一時停止してから変更してください。</translation>
+    </message>
+    <message>
+        <source>Select a series item to change its status.</source>
+        <translation>状態を変更するシリーズ項目を選択してください。</translation>
+    </message>
+    <message>
+        <source>Mark the selected item as done or return it to pending.</source>
+        <translation>選択した項目を完了にするか、待機中に戻します。</translation>
     </message>
 </context>
 <context>
@@ -3076,7 +3156,7 @@ Restart now?</source>
     </message>
     <message>
         <source>Export</source>
-        <translation>輸出</translation>
+        <translation>書き出し</translation>
     </message>
     <message>
         <source>Shortcuts</source>
@@ -4072,6 +4152,18 @@ It may have already been moved, renamed, or deleted.
         <source>Remove from series</source>
         <translation type="unfinished"></translation>
     </message>
+    <message>
+        <source>Mark as Done</source>
+        <translation>完了としてマーク</translation>
+    </message>
+    <message>
+        <source>Reset to Pending</source>
+        <translation>待機中に戻す</translation>
+    </message>
+    <message>
+        <source>Status cannot be changed while automatic translation is running. Pause first, then change it.</source>
+        <translation>自動翻訳の実行中は状態を変更できません。先に一時停止してから変更してください。</translation>
+    </message>
 </context>
 <context>
     <name>_SeriesQuickSettings</name>
@@ -4341,12 +4433,32 @@ Do you want to restore it?</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
+        <source>Restoring project file...</source>
+        <translation>プロジェクトファイルを復元しています...</translation>
+    </message>
+    <message>
+        <source>Exporting image...</source>
+        <translation>画像を書き出しています...</translation>
+    </message>
+    <message>
+        <source>Export</source>
+        <translation>書き出し</translation>
+    </message>
+    <message>
+        <source>Exporting PSD...</source>
+        <translation>PSDを書き出しています...</translation>
+    </message>
+    <message>
         <source>Rerender Output</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
         <source>There are no render changes to apply.</source>
         <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Rendering output...</source>
+        <translation>出力をレンダリングしています...</translation>
     </message>
     <message>
         <source>Render output was updated.</source>
@@ -4419,6 +4531,10 @@ It may have been moved, renamed, or deleted.
 {path}</translation>
     </message>
     <message>
+        <source>Loading project file...</source>
+        <translation>プロジェクトファイルを読み込んでいます...</translation>
+    </message>
+    <message>
         <source>Korean</source>
         <translation>韓国人</translation>
     </message>
@@ -4452,6 +4568,10 @@ It may have been moved, renamed, or deleted.
 
 {path}</source>
         <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Loading series project...</source>
+        <translation>シリーズプロジェクトを読み込んでいます...</translation>
     </message>
     <message>
         <source>The previous automatic translation run was interrupted and restored as paused.</source>
@@ -4490,12 +4610,28 @@ It may have been moved, renamed, or deleted.
         <translation type="unfinished"></translation>
     </message>
     <message>
+        <source>Opening series item...</source>
+        <translation>シリーズ項目を開いています...</translation>
+    </message>
+    <message>
         <source>Remove From Series</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
         <source>Remove &apos;{name}&apos; from this series project?</source>
         <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Series item status can only be changed to Pending or Done.</source>
+        <translation>シリーズ項目の状態は「待機中」または「完了」にのみ変更できます。</translation>
+    </message>
+    <message>
+        <source>Updating series item status...</source>
+        <translation>シリーズ項目の状態を更新しています...</translation>
+    </message>
+    <message>
+        <source>Series Project</source>
+        <translation>シリーズプロジェクト</translation>
     </message>
     <message>
         <source>Add Files To Series</source>
@@ -4508,6 +4644,10 @@ It may have been moved, renamed, or deleted.
     <message>
         <source>Add Folder To Series</source>
         <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Adding files to series...</source>
+        <translation>シリーズにファイルを追加しています...</translation>
     </message>
     <message>
         <source>Saving series project file...</source>
@@ -4526,6 +4666,54 @@ It may have been moved, renamed, or deleted.
     <message>
         <source>There are no queue items left to run.</source>
         <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Preparing automatic translation...</source>
+        <translation>自動翻訳を準備しています...</translation>
+    </message>
+    <message>
+        <source>Importing PSD files...</source>
+        <translation>PSDファイルを読み込んでいます...</translation>
+    </message>
+    <message>
+        <source>Import</source>
+        <translation>読み込み</translation>
+    </message>
+    <message>
+        <source>Loading images...</source>
+        <translation>画像を読み込んでいます...</translation>
+    </message>
+    <message>
+        <source>Importing pages...</source>
+        <translation>ページを読み込んでいます...</translation>
+    </message>
+    <message>
+        <source>Processing</source>
+        <translation>処理中</translation>
+    </message>
+    <message>
+        <source>Preparing text detection...</source>
+        <translation>テキスト検出を準備しています...</translation>
+    </message>
+    <message>
+        <source>Preparing OCR...</source>
+        <translation>OCRを準備しています...</translation>
+    </message>
+    <message>
+        <source>Preparing translation...</source>
+        <translation>翻訳を準備しています...</translation>
+    </message>
+    <message>
+        <source>Preparing inpainting...</source>
+        <translation>インペイントを準備しています...</translation>
+    </message>
+    <message>
+        <source>Preparing segmentation...</source>
+        <translation>セグメンテーションを準備しています...</translation>
+    </message>
+    <message>
+        <source>Rendering text...</source>
+        <translation>テキストをレンダリングしています...</translation>
     </message>
 </context>
 <context>
