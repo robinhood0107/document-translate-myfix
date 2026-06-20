@@ -36,13 +36,14 @@ DEFAULT_GEMMA_RESPONSE_SCHEMA_MODE = "blocks"
 DEFAULT_GEMMA_THINK_BRIEFLY_PROMPT = False
 DEFAULT_GEMMA_PROMPT_PROFILE = "gemma4_balanced"
 DEFAULT_GEMMA_CONTEXTUAL_MERGE_INPUT = True
+# 한국어: single_block은 폐기된 설정 alias입니다. 런타임 전략으로 등록하지 않으며 fast_multi로 정규화됩니다.
+# English: single_block is a retired config alias. It is not a runtime strategy and normalizes to fast_multi.
 GEMMA_CONTEXTUAL_MERGE_STRATEGY_SINGLE_BLOCK = "single_block"
 GEMMA_CONTEXTUAL_MERGE_STRATEGY_FAST_MULTI = "fast_multi"
 GEMMA_CONTEXTUAL_MERGE_STRATEGIES = {
-    GEMMA_CONTEXTUAL_MERGE_STRATEGY_SINGLE_BLOCK,
     GEMMA_CONTEXTUAL_MERGE_STRATEGY_FAST_MULTI,
 }
-DEFAULT_GEMMA_CONTEXTUAL_MERGE_STRATEGY = GEMMA_CONTEXTUAL_MERGE_STRATEGY_SINGLE_BLOCK
+DEFAULT_GEMMA_CONTEXTUAL_MERGE_STRATEGY = GEMMA_CONTEXTUAL_MERGE_STRATEGY_FAST_MULTI
 DEFAULT_GEMMA_EXACT_PROMPT_CACHE = True
 DEFAULT_GEMMA_EXACT_PROMPT_CACHE_MAX_ENTRIES = 2048
 DEFAULT_GEMMA_PRESERVE_EXISTING_TRANSLATIONS = False
@@ -345,17 +346,11 @@ class CustomLocalGemmaTranslation(BaseLLMTranslation):
     ) -> int:
         def _translate_with_profile(prompt_profile: str) -> int:
             if self.contextual_merge_input:
-                if self.contextual_merge_strategy == GEMMA_CONTEXTUAL_MERGE_STRATEGY_FAST_MULTI:
-                    return self._translate_chunk(
-                        blk_list,
-                        extra_context,
-                        prompt_profile=prompt_profile,
-                        use_contextual_merge=True,
-                    )
-                return self._translate_contextual_single_blocks(
+                return self._translate_chunk(
                     blk_list,
                     extra_context,
                     prompt_profile=prompt_profile,
+                    use_contextual_merge=True,
                 )
             return self._translate_chunk(
                 blk_list,
@@ -381,22 +376,8 @@ class CustomLocalGemmaTranslation(BaseLLMTranslation):
 
             if self.contextual_merge_input:
                 self._current_benchmark_stats["gemma_contextual_merge_fallback_count"] += 1
-                if self.contextual_merge_strategy == GEMMA_CONTEXTUAL_MERGE_STRATEGY_FAST_MULTI:
-                    logger.warning(
-                        "gemma fast multi merge failed for %d block(s); falling back to contextual single-block requests. reason=%s",
-                        len(blk_list),
-                        exc,
-                    )
-                    try:
-                        return self._translate_contextual_single_blocks(
-                            blk_list,
-                            extra_context,
-                            prompt_profile=self.prompt_profile,
-                        )
-                    except GemmaLocalServerResponseError as fallback_exc:
-                        exc = fallback_exc
                 logger.warning(
-                    "gemma contextual single-block merge failed for %d block(s); falling back to isolated per-block JSON. reason=%s",
+                    "gemma fast multi merge failed for %d block(s); falling back to isolated per-block JSON. reason=%s",
                     len(blk_list),
                     exc,
                 )
@@ -424,42 +405,6 @@ class CustomLocalGemmaTranslation(BaseLLMTranslation):
             left = self._translate_chunk_with_retry(blk_list[:split_point], extra_context)
             right = self._translate_chunk_with_retry(blk_list[split_point:], extra_context)
             return left + right
-
-    def _translate_contextual_single_blocks(
-        self,
-        blk_list: list[TextBlock],
-        extra_context: str,
-        *,
-        prompt_profile: str,
-    ) -> int:
-        system_prompt = self._build_system_prompt(extra_context, prompt_profile=prompt_profile)
-        updated_count = 0
-        for index, blk in enumerate(blk_list):
-            if self._should_preserve_existing_translation(blk):
-                self._current_benchmark_stats["gemma_preserved_existing_translation_count"] += 1
-                updated_count += 1
-                continue
-            user_prompt = self._build_contextual_single_block_user_prompt(blk_list, index)
-            response_data = self._request_translation(
-                system_prompt,
-                user_prompt,
-                expected_keys=["translation"],
-            )
-            translation_dict = self._extract_translation_dict(
-                response_data,
-                expected_keys=["translation"],
-                block_count=1,
-                prompt_profile=prompt_profile,
-            )
-            self._store_exact_prompt_cache(
-                system_prompt,
-                user_prompt,
-                ["translation"],
-                response_data,
-            )
-            self._apply_translation_value(blk, index, translation_dict.get("translation"))
-            updated_count += 1
-        return updated_count
 
     def _translate_isolated_blocks(
         self,

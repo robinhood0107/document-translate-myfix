@@ -12,6 +12,9 @@ from modules.translation.llm.custom_local_gemma import (
     GEMMA_CONTEXTUAL_MERGE_STRATEGY_SINGLE_BLOCK,
     CustomLocalGemmaTranslation,
 )
+from modules.translation.llm.legacy.custom_local_gemma_single_block_legacy import (
+    disabled_legacy_contextual_single_block_translation,
+)
 from modules.utils.textblock import TextBlock
 
 
@@ -48,7 +51,7 @@ class CustomLocalGemmaRepetitionGuardTests(unittest.TestCase):
         engine.chunk_size = 6
         engine.max_tokens = 512
         engine.timeout = 1
-        engine.contextual_merge_strategy = GEMMA_CONTEXTUAL_MERGE_STRATEGY_SINGLE_BLOCK
+        engine.contextual_merge_strategy = GEMMA_CONTEXTUAL_MERGE_STRATEGY_FAST_MULTI
         return engine
 
     def test_severe_output_repetition_is_collapsed_after_json_parse(self) -> None:
@@ -60,7 +63,7 @@ class CustomLocalGemmaRepetitionGuardTests(unittest.TestCase):
             )
         ]
 
-        with mock.patch.object(engine, "_request_translation", return_value=_response({"translation": "으" * 80})):
+        with mock.patch.object(engine, "_request_translation", return_value=_response({"block_0": "으" * 80})):
             engine.translate(blocks, np.zeros((1, 1, 3), dtype=np.uint8), "")
 
         self.assertEqual(blocks[0].translation, "으으으으...")
@@ -76,14 +79,14 @@ class CustomLocalGemmaRepetitionGuardTests(unittest.TestCase):
             )
         ]
 
-        with mock.patch.object(engine, "_request_translation", return_value=_response({"translation": "푸르르르르"})):
+        with mock.patch.object(engine, "_request_translation", return_value=_response({"block_0": "푸르르르르"})):
             engine.translate(blocks, np.zeros((1, 1, 3), dtype=np.uint8), "")
 
         self.assertEqual(blocks[0].translation, "푸르르르르")
         self.assertEqual(engine.last_benchmark_stats["gemma_repetition_guard_count"], 0)
         self.assertFalse(hasattr(blocks[0], "_translation_repetition_guard"))
 
-    def test_contextual_merge_prompt_wraps_chunk_but_applies_block_response(self) -> None:
+    def test_default_contextual_merge_uses_fast_multi_prompt_once(self) -> None:
         engine = self._engine()
         engine.source_lang = "English"
         blocks = [
@@ -100,11 +103,6 @@ class CustomLocalGemmaRepetitionGuardTests(unittest.TestCase):
                     "expected_keys": expected_keys,
                 }
             )
-            if expected_keys == ["translation"]:
-                payload = json.loads(user_prompt)
-                if payload["target_block"] == "block_0":
-                    return _response({"translation": "아..."})
-                return _response({"translation": "어지러워."})
             return _response({"block_0": "아...", "block_1": "어지러워."})
 
         with mock.patch.object(engine, "_request_translation", side_effect=fake_request):
@@ -112,16 +110,13 @@ class CustomLocalGemmaRepetitionGuardTests(unittest.TestCase):
 
         self.assertEqual(blocks[0].translation, "아...")
         self.assertEqual(blocks[1].translation, "어지러워.")
-        self.assertEqual(len(requests), 2)
-        self.assertEqual(requests[0]["expected_keys"], ["translation"])
-        self.assertEqual(requests[1]["expected_keys"], ["translation"])
+        self.assertEqual(len(requests), 1)
+        self.assertEqual(requests[0]["expected_keys"], ["block_0", "block_1"])
 
         payload = json.loads(requests[0]["user_prompt"])
-        self.assertEqual(list(payload.keys()), ["merged_context", "target_block", "target_text"])
+        self.assertEqual(list(payload.keys()), ["merged_context"])
         self.assertIn("[[block_0]] Ah...", payload["merged_context"])
         self.assertIn("[[block_1]] I'm dizzy.", payload["merged_context"])
-        self.assertEqual(payload["target_block"], "block_0")
-        self.assertEqual(payload["target_text"], "Ah...")
         self.assertIn("continuous comic passage", requests[0]["system_prompt"])
 
         schema = engine._build_response_format(
@@ -131,8 +126,19 @@ class CustomLocalGemmaRepetitionGuardTests(unittest.TestCase):
         self.assertEqual(schema["type"], "json_schema")
         self.assertEqual(
             schema["json_schema"]["schema"]["required"],
-            ["translation"],
+            ["block_0", "block_1"],
         )
+
+    def test_retired_single_block_strategy_normalizes_to_fast_multi(self) -> None:
+        normalized = CustomLocalGemmaTranslation._normalize_contextual_merge_strategy(
+            GEMMA_CONTEXTUAL_MERGE_STRATEGY_SINGLE_BLOCK
+        )
+
+        self.assertEqual(normalized, GEMMA_CONTEXTUAL_MERGE_STRATEGY_FAST_MULTI)
+
+    def test_legacy_single_block_reference_is_disabled(self) -> None:
+        with self.assertRaises(RuntimeError):
+            disabled_legacy_contextual_single_block_translation()
 
     def test_fast_multi_strategy_uses_current_merged_context_prompt_once(self) -> None:
         engine = self._engine()
@@ -167,7 +173,7 @@ class CustomLocalGemmaRepetitionGuardTests(unittest.TestCase):
         self.assertEqual(blocks[0].translation, "아...")
         self.assertEqual(blocks[1].translation, "어지러워.")
 
-    def test_fast_multi_strategy_falls_back_to_single_block_on_invalid_json(self) -> None:
+    def test_fast_multi_strategy_falls_back_to_isolated_json_on_invalid_json(self) -> None:
         engine = self._engine()
         engine.contextual_merge_strategy = GEMMA_CONTEXTUAL_MERGE_STRATEGY_FAST_MULTI
         engine.source_lang = "English"
@@ -182,17 +188,17 @@ class CustomLocalGemmaRepetitionGuardTests(unittest.TestCase):
             prompts.append(payload)
             if list(payload.keys()) == ["merged_context"]:
                 return _response({"translation": "bad shape"})
-            if payload["target_block"] == "block_0":
-                return _response({"translation": "아..."})
-            return _response({"translation": "어지러워."})
+            if payload["block_0"] == "Ah...":
+                return _response({"block_0": "아..."})
+            return _response({"block_0": "어지러워."})
 
         with mock.patch.object(engine, "_request_translation", side_effect=fake_request):
             engine.translate(blocks, np.zeros((1, 1, 3), dtype=np.uint8), "")
 
         self.assertEqual(list(prompts[0].keys()), ["merged_context"])
         self.assertEqual(list(prompts[1].keys()), ["merged_context"])
-        self.assertEqual(list(prompts[2].keys()), ["merged_context", "target_block", "target_text"])
-        self.assertEqual(list(prompts[3].keys()), ["merged_context", "target_block", "target_text"])
+        self.assertEqual(list(prompts[2].keys()), ["block_0"])
+        self.assertEqual(list(prompts[3].keys()), ["block_0"])
         self.assertEqual(blocks[0].translation, "아...")
         self.assertEqual(blocks[1].translation, "어지러워.")
         self.assertEqual(engine.last_benchmark_stats["gemma_contextual_merge_fallback_count"], 1)
@@ -202,7 +208,7 @@ class CustomLocalGemmaRepetitionGuardTests(unittest.TestCase):
         blocks = [
             TextBlock(text_bbox=np.array([0, 0, 100, 100]), text="Hello."),
         ]
-        content = '<|channel>thought\n<channel|>{"translation": "<|channel>thought\\n<channel|>안녕."}'
+        content = '<|channel>thought\n<channel|>{"block_0": "<|channel>thought\\n<channel|>안녕."}'
 
         with mock.patch.object(engine, "_request_translation", return_value=_raw_response(content)):
             engine.translate(blocks, np.zeros((1, 1, 3), dtype=np.uint8), "")
@@ -226,8 +232,8 @@ class CustomLocalGemmaRepetitionGuardTests(unittest.TestCase):
         with mock.patch.object(engine, "_request_translation", side_effect=fake_request):
             engine.translate(blocks, np.zeros((1, 1, 3), dtype=np.uint8), "")
 
-        self.assertEqual(list(prompts[0].keys()), ["merged_context", "target_block", "target_text"])
-        self.assertEqual(list(prompts[1].keys()), ["merged_context", "target_block", "target_text"])
+        self.assertEqual(list(prompts[0].keys()), ["merged_context"])
+        self.assertEqual(list(prompts[1].keys()), ["merged_context"])
         self.assertIn("block_0", prompts[2])
         self.assertNotIn("merged_context", prompts[2])
         self.assertEqual(blocks[0].translation, "하지만 자지가 나를 정복했어.")
@@ -252,7 +258,7 @@ class CustomLocalGemmaRepetitionGuardTests(unittest.TestCase):
                     return None
 
                 def json(self) -> dict:
-                    return _response({"translation": "안녕."})
+                    return _response({"block_0": "안녕."})
 
             return FakeResponse()
 
@@ -277,8 +283,9 @@ class CustomLocalGemmaRepetitionGuardTests(unittest.TestCase):
 
         def fake_request(system_prompt: str, user_prompt: str, *, expected_keys=None) -> dict:
             payload = json.loads(user_prompt)
-            self.assertEqual(payload["target_block"], "block_1")
-            return _response({"translation": "잘 가."})
+            self.assertEqual(list(payload.keys()), ["merged_context"])
+            self.assertEqual(expected_keys, ["block_0", "block_1"])
+            return _response({"block_0": "새 번역", "block_1": "잘 가."})
 
         with mock.patch.object(engine, "_request_translation", side_effect=fake_request) as request_mock:
             engine.translate(blocks, np.zeros((1, 1, 3), dtype=np.uint8), "")
