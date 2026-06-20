@@ -7,6 +7,7 @@ import json
 import os
 import re
 import shutil
+import subprocess
 import sys
 import time
 from pathlib import Path
@@ -27,10 +28,13 @@ if str(SCRIPT_DIR) not in sys.path:
 from PySide6.QtWidgets import QApplication
 
 from benchmark_common import (
+    GEMMA_CONTAINER_NAMES,
     create_run_dir,
     load_preset,
+    remove_containers,
     render_summary_markdown,
     repo_relative_str,
+    run_command,
     summarize_metrics,
     write_json,
 )
@@ -43,7 +47,6 @@ from benchmark_stage_batched_pipeline import (
 )
 from modules.ocr.selection import (
     OCR_MODE_BEST_LOCAL,
-    OCR_MODE_BEST_LOCAL_PLUS,
     OCR_MODE_HUNYUAN,
     OCR_MODE_MANGALMM,
     OCR_MODE_PADDLE_VL,
@@ -62,11 +65,218 @@ from modules.utils.textblock import sort_blk_list
 
 DEFAULT_FAST_PRESET = "workflow-split-runtime-stage-batched-single-ocr"
 DEFAULT_OPTIMAL_PLUS_PRESET = "workflow-split-runtime-stage-batched-dual-resident"
+RUNTIME_REUSE_MODES = ("cold", "signature", "warm")
+SPEED_PROFILES: dict[str, dict[str, Any]] = {
+    "baseline-safe": {
+        "gemma_ctx_size": 4096,
+        "compression_level": 6,
+        "runtime_reuse_mode": "signature",
+    },
+    "ctx3072-fast": {
+        "gemma_ctx_size": 3072,
+        "compression_level": 6,
+        "runtime_reuse_mode": "signature",
+    },
+    "ctx2560-aggressive": {
+        "gemma_ctx_size": 2560,
+        "compression_level": 6,
+        "runtime_reuse_mode": "signature",
+    },
+    "ctx2560-fast-archive": {
+        "gemma_ctx_size": 2560,
+        "compression_level": 0,
+        "runtime_reuse_mode": "signature",
+    },
+    "ctx2048-gpu23-fast": {
+        "gemma_ctx_size": 2048,
+        "gemma_gpu_layers": 23,
+        "compression_level": 0,
+        "runtime_reuse_mode": "signature",
+    },
+    "ctx1792-gpu23-extreme": {
+        "gemma_ctx_size": 1792,
+        "gemma_gpu_layers": 23,
+        "compression_level": 0,
+        "runtime_reuse_mode": "signature",
+    },
+    "ctx1536-gpu23-shadow": {
+        "gemma_ctx_size": 1536,
+        "gemma_gpu_layers": 23,
+        "compression_level": 0,
+        "runtime_reuse_mode": "signature",
+        "allow_failure": True,
+    },
+    "ctx1280-gpu23-shadow": {
+        "gemma_ctx_size": 1280,
+        "gemma_gpu_layers": 23,
+        "compression_level": 0,
+        "runtime_reuse_mode": "signature",
+        "allow_failure": True,
+    },
+    "ctx1024-gpu23-shadow": {
+        "gemma_ctx_size": 1024,
+        "gemma_gpu_layers": 23,
+        "compression_level": 0,
+        "runtime_reuse_mode": "signature",
+        "allow_failure": True,
+    },
+    "ctx768-gpu23-shadow": {
+        "gemma_ctx_size": 768,
+        "gemma_gpu_layers": 23,
+        "compression_level": 0,
+        "runtime_reuse_mode": "signature",
+        "allow_failure": True,
+    },
+    "ctx3072-fast-archive": {
+        "gemma_ctx_size": 3072,
+        "compression_level": 0,
+        "runtime_reuse_mode": "signature",
+    },
+    "warm-reuse": {
+        "gemma_ctx_size": 3072,
+        "compression_level": 0,
+        "runtime_reuse_mode": "warm",
+    },
+    "ctx3072-gpu24-extreme": {
+        "gemma_ctx_size": 3072,
+        "gemma_gpu_layers": 24,
+        "compression_level": 0,
+        "runtime_reuse_mode": "signature",
+        "allow_failure": True,
+    },
+    "ctx2560-gpu24-extreme": {
+        "gemma_ctx_size": 2560,
+        "gemma_gpu_layers": 24,
+        "compression_level": 0,
+        "runtime_reuse_mode": "signature",
+        "allow_failure": True,
+    },
+    "ctx2560-gpu25-danger": {
+        "gemma_ctx_size": 2560,
+        "gemma_gpu_layers": 25,
+        "compression_level": 0,
+        "runtime_reuse_mode": "cold",
+        "allow_failure": True,
+    },
+    "ctx2048-gpu24-extreme": {
+        "gemma_ctx_size": 2048,
+        "gemma_gpu_layers": 24,
+        "compression_level": 0,
+        "runtime_reuse_mode": "signature",
+        "allow_failure": True,
+    },
+    "ctx1792-gpu24-shadow": {
+        "gemma_ctx_size": 1792,
+        "gemma_gpu_layers": 24,
+        "compression_level": 0,
+        "runtime_reuse_mode": "signature",
+        "allow_failure": True,
+    },
+    "ctx2048-gpu25-danger": {
+        "gemma_ctx_size": 2048,
+        "gemma_gpu_layers": 25,
+        "compression_level": 0,
+        "runtime_reuse_mode": "cold",
+        "allow_failure": True,
+    },
+    "ctx2048-gpu26-danger": {
+        "gemma_ctx_size": 2048,
+        "gemma_gpu_layers": 26,
+        "compression_level": 0,
+        "runtime_reuse_mode": "cold",
+        "allow_failure": True,
+    },
+    "ctx2048-threads14": {
+        "gemma_ctx_size": 2048,
+        "gemma_threads": 14,
+        "gemma_gpu_layers": 23,
+        "compression_level": 0,
+        "runtime_reuse_mode": "signature",
+    },
+    "ctx2048-batch1024": {
+        "gemma_ctx_size": 2048,
+        "gemma_gpu_layers": 23,
+        "gemma_batch_size": 1024,
+        "gemma_ubatch_size": 512,
+        "compression_level": 0,
+        "runtime_reuse_mode": "signature",
+        "allow_failure": True,
+    },
+    "ctx2048-batch2048": {
+        "gemma_ctx_size": 2048,
+        "gemma_gpu_layers": 23,
+        "gemma_batch_size": 2048,
+        "gemma_ubatch_size": 512,
+        "compression_level": 0,
+        "runtime_reuse_mode": "signature",
+        "allow_failure": True,
+    },
+    "ctx2048-flash-attn": {
+        "gemma_ctx_size": 2048,
+        "gemma_gpu_layers": 23,
+        "gemma_flash_attn": True,
+        "compression_level": 0,
+        "runtime_reuse_mode": "signature",
+        "allow_failure": True,
+    },
+    "ctx2048-q8-kv": {
+        "gemma_ctx_size": 2048,
+        "gemma_gpu_layers": 23,
+        "gemma_cache_type_k": "q8_0",
+        "gemma_cache_type_v": "q8_0",
+        "compression_level": 0,
+        "runtime_reuse_mode": "signature",
+        "allow_failure": True,
+    },
+    "ctx2048-no-warmup": {
+        "gemma_ctx_size": 2048,
+        "gemma_gpu_layers": 23,
+        "gemma_no_warmup": True,
+        "compression_level": 0,
+        "runtime_reuse_mode": "signature",
+        "allow_failure": True,
+    },
+    "ctx2048-np2": {
+        "gemma_ctx_size": 2048,
+        "gemma_gpu_layers": 23,
+        "gemma_n_parallel": 2,
+        "compression_level": 0,
+        "runtime_reuse_mode": "signature",
+        "allow_failure": True,
+    },
+    "ctx3072-threads12": {
+        "gemma_ctx_size": 3072,
+        "gemma_threads": 12,
+        "compression_level": 0,
+        "runtime_reuse_mode": "signature",
+    },
+    "danger-shadow": {
+        "gemma_ctx_size": 2048,
+        "compression_level": 0,
+        "runtime_reuse_mode": "cold",
+        "allow_failure": True,
+    },
+}
 SUPPORTED_ARCHIVE_EXTENSIONS = {".cbz", ".zip", ".cbr", ".cbt", ".cb7", ".rar", ".7z", ".tar", ".pdf", ".epub"}
 OCR_TRANSIENT_RETRY_ATTEMPTS = 6
 OCR_TRANSIENT_RETRY_DELAY_SEC = 8.0
 _ILLEGAL_FILE_CHARS_RE = re.compile(r'[<>:"/\\|?*\x00-\x1f]')
 _WHITESPACE_RE = re.compile(r"\s+")
+_GEMMA_COMMAND_OPTION_ALIASES: dict[str, tuple[str, ...]] = {
+    "context_size": ("-c", "--ctx-size", "--context-size"),
+    "threads": ("-t", "--threads"),
+    "n_gpu_layers": ("--n-gpu-layers", "--gpu-layers"),
+    "n_parallel": ("-np", "--parallel", "--n-parallel"),
+    "predict": ("-n", "--n-predict", "--predict"),
+    "batch_size": ("-b", "--batch-size"),
+    "ubatch_size": ("-ub", "--ubatch-size"),
+    "cache_type_k": ("--cache-type-k",),
+    "cache_type_v": ("--cache-type-v",),
+}
+_GEMMA_COMMAND_FLAG_ALIASES: dict[str, tuple[str, ...]] = {
+    "flash_attn": ("--flash-attn",),
+    "no_warmup": ("--no-warmup",),
+}
 
 
 def _set_combo_data(combo, value: str) -> None:
@@ -83,7 +293,7 @@ def resolve_ocr_mode_value(mode: str) -> str:
     if normalized in {"fastest", "optimal", "best-local"}:
         return OCR_MODE_BEST_LOCAL
     if normalized in {"optimal-plus", "optimal+", "best-local-plus"}:
-        return OCR_MODE_BEST_LOCAL_PLUS
+        return OCR_MODE_BEST_LOCAL
     if normalized in {"paddle", "paddleocr", "paddleocr-vl"}:
         return OCR_MODE_PADDLE_VL
     if normalized in {"hunyuan", "hunyuanocr"}:
@@ -94,7 +304,133 @@ def resolve_ocr_mode_value(mode: str) -> str:
 
 
 def default_preset_for_ocr_mode(mode: str) -> str:
-    return DEFAULT_OPTIMAL_PLUS_PRESET if resolve_ocr_mode_value(mode) == OCR_MODE_BEST_LOCAL_PLUS else DEFAULT_FAST_PRESET
+    normalized = str(mode or "").strip().lower().replace("_", "-")
+    return DEFAULT_OPTIMAL_PLUS_PRESET if normalized in {"optimal-plus", "optimal+", "best-local-plus"} else DEFAULT_FAST_PRESET
+
+
+def resolve_speed_profile(profile_name: str | None) -> dict[str, Any]:
+    normalized = str(profile_name or "").strip()
+    if not normalized:
+        return {}
+    try:
+        return copy.deepcopy(SPEED_PROFILES[normalized])
+    except KeyError as exc:
+        raise ValueError(f"Unsupported speed profile: {profile_name}") from exc
+
+
+def _int_or_none(value: Any) -> int | None:
+    if value is None:
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def build_gemma_runtime_overrides(
+    *,
+    context_size: int | None = None,
+    threads: int | None = None,
+    n_gpu_layers: int | None = None,
+    n_parallel: int | None = None,
+    predict: int | None = None,
+    batch_size: int | None = None,
+    ubatch_size: int | None = None,
+    cache_type_k: str | None = None,
+    cache_type_v: str | None = None,
+    flash_attn: bool | None = None,
+    no_warmup: bool | None = None,
+) -> dict[str, Any]:
+    values = {
+        "context_size": _int_or_none(context_size),
+        "threads": _int_or_none(threads),
+        "n_gpu_layers": _int_or_none(n_gpu_layers),
+        "n_parallel": _int_or_none(n_parallel),
+        "predict": _int_or_none(predict),
+        "batch_size": _int_or_none(batch_size),
+        "ubatch_size": _int_or_none(ubatch_size),
+    }
+    out: dict[str, Any] = {key: value for key, value in values.items() if value is not None}
+    if cache_type_k:
+        out["cache_type_k"] = str(cache_type_k).strip()
+    if cache_type_v:
+        out["cache_type_v"] = str(cache_type_v).strip()
+    if flash_attn is not None:
+        out["flash_attn"] = bool(flash_attn)
+    if no_warmup is not None:
+        out["no_warmup"] = bool(no_warmup)
+    return out
+
+
+def _command_option_value(command: list[str], aliases: tuple[str, ...]) -> str | None:
+    for index, token in enumerate(command):
+        token_text = str(token)
+        for alias in aliases:
+            if token_text == alias and index + 1 < len(command):
+                return str(command[index + 1])
+            prefix = f"{alias}="
+            if token_text.startswith(prefix):
+                return token_text[len(prefix) :]
+    return None
+
+
+def gemma_command_matches_overrides(command: list[str], overrides: dict[str, Any]) -> bool:
+    for key, expected in overrides.items():
+        if expected is None:
+            continue
+        if key in _GEMMA_COMMAND_OPTION_ALIASES:
+            actual = _command_option_value(command, _GEMMA_COMMAND_OPTION_ALIASES[key])
+            if actual is None:
+                return False
+            if key in {"cache_type_k", "cache_type_v"}:
+                if str(actual).strip() != str(expected).strip():
+                    return False
+            elif str(actual).strip() != str(int(expected)):
+                return False
+        elif key in _GEMMA_COMMAND_FLAG_ALIASES:
+            aliases = _GEMMA_COMMAND_FLAG_ALIASES[key]
+            has_flag = any(str(item) in aliases for item in command)
+            if bool(expected) != has_flag:
+                return False
+    return True
+
+
+def inspect_container_command(container_name: str) -> list[str] | None:
+    try:
+        completed = run_command(
+            ["docker", "inspect", container_name, "--format", "{{json .Config.Cmd}}"],
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if completed.returncode != 0:
+        return None
+    payload = (completed.stdout or "").strip()
+    if not payload:
+        return None
+    try:
+        value = json.loads(payload)
+    except json.JSONDecodeError:
+        return None
+    if not isinstance(value, list):
+        return None
+    return [str(item) for item in value]
+
+
+def stop_gemma_for_stage_isolation() -> bool:
+    running_containers = [
+        name
+        for name in GEMMA_CONTAINER_NAMES
+        if inspect_container_command(name) is not None
+    ]
+    if not running_containers:
+        return False
+    _log(
+        "Stage-Batched isolation: stopping pre-existing Gemma containers before OCR/inpaint stages: "
+        f"{running_containers}"
+    )
+    remove_containers(running_containers)
+    return True
 
 
 def is_archive_like_path(path: Path) -> bool:
@@ -244,6 +580,12 @@ def apply_source_records(window, loaded_paths: list[str], input_paths: list[Path
     }
 
 
+def apply_attach_running_gemma_endpoint(window) -> None:
+    widget = getattr(window.settings_page.ui, "credential_widgets", {}).get("Custom Local Server(Gemma)_api_url")
+    if widget is not None:
+        widget.setText("http://localhost:18080/v1")
+
+
 class ArchiveStageBatchedRunner(StageBatchedRunner):
     def __init__(
         self,
@@ -254,6 +596,8 @@ class ArchiveStageBatchedRunner(StageBatchedRunner):
         input_paths: list[Path],
         write_next_to_source: bool,
         keep_staging: bool,
+        runtime_reuse_mode: str = "signature",
+        gemma_runtime_overrides: dict[str, Any] | None = None,
         **kwargs: Any,
     ) -> None:
         super().__init__(**kwargs)
@@ -263,6 +607,10 @@ class ArchiveStageBatchedRunner(StageBatchedRunner):
         self.input_paths = [path.resolve() for path in input_paths]
         self.write_next_to_source = bool(write_next_to_source)
         self.keep_staging = bool(keep_staging)
+        self.runtime_reuse_mode = str(runtime_reuse_mode or "signature").strip().lower()
+        if self.runtime_reuse_mode not in RUNTIME_REUSE_MODES:
+            raise ValueError(f"Unsupported runtime reuse mode: {runtime_reuse_mode}")
+        self.gemma_runtime_overrides = dict(gemma_runtime_overrides or {})
         self.final_archive_path = ""
         self.final_archive_root = ""
         self.final_archive_page_count = 0
@@ -280,6 +628,11 @@ class ArchiveStageBatchedRunner(StageBatchedRunner):
             archive_image_format=self.archive_image_format,
             compression_level=self.compression_level,
         )
+        apply_attach_running_gemma_endpoint(self.window)
+
+    def run(self) -> dict[str, Any]:
+        stop_gemma_for_stage_isolation()
+        return super().run()
 
     def _no_text_contexts(self) -> list[Any]:
         return [ctx for ctx in self.pages if bool(getattr(ctx, "no_text_detected", False))]
@@ -457,6 +810,44 @@ class ArchiveStageBatchedRunner(StageBatchedRunner):
         self._mark_no_text_stage_skipped("translation")
         return self._temporarily_skip_no_text(super()._translate_all)
 
+    def _prepare_translate_stage(self) -> list[dict[str, Any]]:
+        self._enforce_gemma_reuse_policy()
+        return super()._prepare_translate_stage()
+
+    def _enforce_gemma_reuse_policy(self) -> None:
+        if self.runtime_reuse_mode == "cold":
+            _log("Gemma runtime reuse mode=cold: recreating Gemma container before translate stage")
+            remove_containers(GEMMA_CONTAINER_NAMES)
+            return
+
+        if not self.gemma_runtime_overrides:
+            _log(
+                f"Gemma runtime reuse mode={self.runtime_reuse_mode}: no explicit runtime overrides; "
+                "health-first reuse remains enabled"
+            )
+            return
+
+        stale_containers: list[str] = []
+        for name in GEMMA_CONTAINER_NAMES:
+            command = inspect_container_command(name)
+            if command is None:
+                continue
+            if not gemma_command_matches_overrides(command, self.gemma_runtime_overrides):
+                stale_containers.append(name)
+
+        if stale_containers:
+            _log(
+                "Gemma runtime signature mismatch: recreating containers={containers} overrides={overrides}".format(
+                    containers=stale_containers,
+                    overrides=self.gemma_runtime_overrides,
+                )
+            )
+            remove_containers(stale_containers)
+        else:
+            _log(
+                f"Gemma runtime reuse mode={self.runtime_reuse_mode}: existing command signature is compatible"
+            )
+
     def _archive_output_root(self) -> Path:
         if self.write_next_to_source and len(self.input_paths) == 1:
             return self.input_paths[0].parent
@@ -569,6 +960,7 @@ def patch_preset_for_run(
     ocr_mode: str,
     disable_line_protect: bool = False,
     ctd_mask_dilate_size: int | None = None,
+    gemma_runtime_overrides: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     patched = copy.deepcopy(preset)
     app_cfg = patched.setdefault("app", {})
@@ -581,6 +973,10 @@ def patch_preset_for_run(
     if ctd_mask_dilate_size is not None:
         mask_cfg = patched.setdefault("mask_refiner_settings", {})
         mask_cfg["ctd_mask_dilate_size"] = int(ctd_mask_dilate_size)
+    if gemma_runtime_overrides:
+        gemma_cfg = patched.setdefault("gemma", {})
+        for key, value in gemma_runtime_overrides.items():
+            gemma_cfg[key] = value
     return patched
 
 
@@ -593,6 +989,8 @@ def update_summary_with_archive(run_dir: Path, summary: dict[str, Any], runner: 
             "archive_format": runner.archive_format,
             "archive_image_format": runner.archive_image_format,
             "archive_compression_level": runner.compression_level,
+            "runtime_reuse_mode": runner.runtime_reuse_mode,
+            "gemma_runtime_overrides": runner.gemma_runtime_overrides,
             "write_next_to_source": runner.write_next_to_source,
             "keep_staging": runner.keep_staging,
             "render_fit_summary_path": runner.render_fit_summary_path,
@@ -621,7 +1019,20 @@ def main() -> int:
     parser.add_argument("--output-dir", default="", help="Exact run directory. Overrides --output-root.")
     parser.add_argument("--archive-format", default=OUTPUT_ARCHIVE_FORMAT_CBZ, choices=(OUTPUT_ARCHIVE_FORMAT_CBZ, OUTPUT_ARCHIVE_FORMAT_ZIP))
     parser.add_argument("--archive-image-format", default=OUTPUT_IMAGE_FORMAT_PNG, choices=("png", "jpg", "webp"))
-    parser.add_argument("--compression-level", type=int, default=6)
+    parser.add_argument("--compression-level", type=int, default=None)
+    parser.add_argument("--gemma-ctx-size", type=int, default=None, help="Override Gemma llama.cpp context size for this benchmark run.")
+    parser.add_argument("--gemma-threads", type=int, default=None, help="Override Gemma llama.cpp thread count for this benchmark run.")
+    parser.add_argument("--gemma-gpu-layers", type=int, default=None, help="Override Gemma llama.cpp GPU layer count for this benchmark run.")
+    parser.add_argument("--gemma-n-parallel", type=int, default=None, help="Override Gemma llama.cpp parallel slot count for this benchmark run.")
+    parser.add_argument("--gemma-predict", type=int, default=None, help="Override Gemma llama.cpp server default predict limit for this benchmark run.")
+    parser.add_argument("--gemma-batch-size", type=int, default=None, help="Override Gemma llama.cpp batch size for this benchmark run.")
+    parser.add_argument("--gemma-ubatch-size", type=int, default=None, help="Override Gemma llama.cpp ubatch size for this benchmark run.")
+    parser.add_argument("--gemma-cache-type-k", default="", help="Override Gemma llama.cpp KV cache key type, e.g. f16 or q8_0.")
+    parser.add_argument("--gemma-cache-type-v", default="", help="Override Gemma llama.cpp KV cache value type, e.g. f16 or q8_0.")
+    parser.add_argument("--gemma-flash-attn", action="store_true", help="Enable llama.cpp flash attention for this benchmark run if supported.")
+    parser.add_argument("--gemma-no-warmup", action="store_true", help="Disable llama.cpp warmup for this benchmark run if supported.")
+    parser.add_argument("--runtime-reuse-mode", default="", choices=RUNTIME_REUSE_MODES)
+    parser.add_argument("--speed-profile", default="", choices=tuple(SPEED_PROFILES.keys()))
     parser.add_argument("--write-next-to-source", action="store_true", help="Write final translated archive next to the source archive.")
     parser.add_argument("--discard-staging", action="store_true", help="Delete rendered page staging after final archive creation.")
     parser.add_argument(
@@ -642,6 +1053,27 @@ def main() -> int:
     if missing:
         raise FileNotFoundError(f"Input path(s) not found: {missing}")
 
+    speed_profile = resolve_speed_profile(args.speed_profile)
+    compression_level = int(
+        args.compression_level
+        if args.compression_level is not None
+        else speed_profile.get("compression_level", 6)
+    )
+    runtime_reuse_mode = str(args.runtime_reuse_mode or speed_profile.get("runtime_reuse_mode", "signature"))
+    gemma_runtime_overrides = build_gemma_runtime_overrides(
+        context_size=args.gemma_ctx_size if args.gemma_ctx_size is not None else speed_profile.get("gemma_ctx_size"),
+        threads=args.gemma_threads if args.gemma_threads is not None else speed_profile.get("gemma_threads"),
+        n_gpu_layers=args.gemma_gpu_layers if args.gemma_gpu_layers is not None else speed_profile.get("gemma_gpu_layers"),
+        n_parallel=args.gemma_n_parallel if args.gemma_n_parallel is not None else speed_profile.get("gemma_n_parallel"),
+        predict=args.gemma_predict if args.gemma_predict is not None else speed_profile.get("gemma_predict"),
+        batch_size=args.gemma_batch_size if args.gemma_batch_size is not None else speed_profile.get("gemma_batch_size"),
+        ubatch_size=args.gemma_ubatch_size if args.gemma_ubatch_size is not None else speed_profile.get("gemma_ubatch_size"),
+        cache_type_k=args.gemma_cache_type_k or speed_profile.get("gemma_cache_type_k"),
+        cache_type_v=args.gemma_cache_type_v or speed_profile.get("gemma_cache_type_v"),
+        flash_attn=True if args.gemma_flash_attn else speed_profile.get("gemma_flash_attn"),
+        no_warmup=True if args.gemma_no_warmup else speed_profile.get("gemma_no_warmup"),
+    )
+
     preset_name = args.preset or default_preset_for_ocr_mode(args.ocr_mode)
     preset, preset_path = load_preset(preset_name)
     preset = patch_preset_for_run(
@@ -649,9 +1081,10 @@ def main() -> int:
         ocr_mode=args.ocr_mode,
         disable_line_protect=bool(args.disable_line_protect),
         ctd_mask_dilate_size=args.ctd_mask_dilate_size,
+        gemma_runtime_overrides=gemma_runtime_overrides,
     )
     run_dir = Path(args.output_dir).resolve() if args.output_dir else create_run_dir(
-        f"stage_batched_archive_{resolve_ocr_mode_value(args.ocr_mode)}",
+        f"stage_batched_archive_{str(args.ocr_mode).replace('+', 'plus')}_{args.speed_profile or 'custom'}",
         root=Path(args.output_root).resolve() if args.output_root else None,
     )
     run_dir.mkdir(parents=True, exist_ok=True)
@@ -669,7 +1102,10 @@ def main() -> int:
             "input_paths": [str(path) for path in input_paths],
             "archive_format": args.archive_format,
             "archive_image_format": args.archive_image_format,
-            "compression_level": args.compression_level,
+            "compression_level": compression_level,
+            "speed_profile": args.speed_profile,
+            "runtime_reuse_mode": runtime_reuse_mode,
+            "gemma_runtime_overrides": gemma_runtime_overrides,
             "write_next_to_source": bool(args.write_next_to_source),
             "disable_line_protect": bool(args.disable_line_protect),
             "ctd_mask_dilate_size": args.ctd_mask_dilate_size,
@@ -688,10 +1124,12 @@ def main() -> int:
         resident_ocr_mode=resolve_ocr_mode_value(args.ocr_mode),
         archive_format=args.archive_format,
         archive_image_format=args.archive_image_format,
-        compression_level=args.compression_level,
+        compression_level=compression_level,
         input_paths=input_paths,
         write_next_to_source=bool(args.write_next_to_source),
         keep_staging=not bool(args.discard_staging),
+        runtime_reuse_mode=runtime_reuse_mode,
+        gemma_runtime_overrides=gemma_runtime_overrides,
     )
 
     try:

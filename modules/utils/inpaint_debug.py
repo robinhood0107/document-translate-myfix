@@ -89,9 +89,11 @@ def build_detector_overlay(image: np.ndarray, blocks: Iterable) -> np.ndarray:
     canvas = Image.fromarray(ensure_three_channel(image))
     draw = ImageDraw.Draw(canvas)
     palette = {
-        "bubble": (255, 170, 0),
+        "bubble": (63, 135, 245),
         "text_bubble": (54, 197, 94),
-        "text_free": (63, 135, 245),
+        "text_free": (255, 64, 64),
+        "ctd_roi": (60, 220, 255),
+        "cleanup_roi": (255, 214, 10),
     }
 
     for x1, y1, x2, y2 in _collect_bubble_boxes(blocks):
@@ -104,6 +106,16 @@ def build_detector_overlay(image: np.ndarray, blocks: Iterable) -> np.ndarray:
         x1, y1, x2, y2 = [int(float(v)) for v in bbox[:4]]
         color = palette.get(getattr(block, "text_class", ""), (255, 64, 64))
         draw.rectangle([x1, y1, x2, y2], outline=color, width=2)
+
+        ctd_roi = getattr(block, "ctd_roi_xyxy", None) or getattr(block, "mask_roi_xyxy", None)
+        if ctd_roi is not None and len(ctd_roi) >= 4:
+            rx1, ry1, rx2, ry2 = [int(float(v)) for v in ctd_roi[:4]]
+            draw.rectangle([rx1, ry1, rx2, ry2], outline=palette["ctd_roi"], width=1)
+
+        cleanup_roi = getattr(block, "cleanup_roi_xyxy", None)
+        if cleanup_roi is not None and len(cleanup_roi) >= 4:
+            cx1, cy1, cx2, cy2 = [int(float(v)) for v in cleanup_roi[:4]]
+            draw.rectangle([cx1, cy1, cx2, cy2], outline=palette["cleanup_roi"], width=1)
 
     return np.array(canvas, dtype=np.uint8)
 
@@ -143,6 +155,22 @@ def serialize_inpaint_block(block, index: int) -> dict:
             if getattr(block, "bubble_xyxy", None) is not None
             else None
         ),
+        "ctd_roi_xyxy": (
+            [int(float(v)) for v in getattr(block, "ctd_roi_xyxy", ())[:4]]
+            if getattr(block, "ctd_roi_xyxy", None) is not None
+            else None
+        ),
+        "cleanup_roi_xyxy": (
+            [int(float(v)) for v in getattr(block, "cleanup_roi_xyxy", ())[:4]]
+            if getattr(block, "cleanup_roi_xyxy", None) is not None
+            else None
+        ),
+        "mask_roi_xyxy": (
+            [int(float(v)) for v in getattr(block, "mask_roi_xyxy", ())[:4]]
+            if getattr(block, "mask_roi_xyxy", None) is not None
+            else None
+        ),
+        "roi_type": get_mask_roi_type(block),
         "text_class": getattr(block, "text_class", "") or "",
         "inpaint_bboxes": inpaint_boxes,
         "text_free_erase_envelope_xyxy": (
@@ -185,8 +213,8 @@ def build_inpaint_debug_metadata(
     final_mask_pre_expand: np.ndarray | None = None,
     final_mask_post_expand: np.ndarray | None = None,
     residue_mask: np.ndarray | None = None,
-    cleanup_delta: np.ndarray | None,
-    cleanup_stats: dict | None,
+    cleanup_delta: np.ndarray | None = None,
+    cleanup_stats: dict | None = None,
     mask_refiner: str = "legacy_bbox",
     protect_mask_applied: bool = False,
     protect_mask: np.ndarray | None = None,
@@ -195,7 +223,7 @@ def build_inpaint_debug_metadata(
     inpainter_backend: str = "unknown",
     legacy_base_mask: np.ndarray | None = None,
     hard_box_rescue_mask: np.ndarray | None = None,
-    hard_box_applied_count: int = 0,
+    hard_box_applied_count: int | None = None,
     hard_box_reason_totals: dict | None = None,
 ) -> dict:
     block_list = list(blocks or [])
@@ -203,30 +231,23 @@ def build_inpaint_debug_metadata(
         for block in block_list:
             block._debug_image_shape = final_mask.shape
     cleanup_stats = cleanup_stats or {}
-    hard_box_reason_totals = dict(hard_box_reason_totals or {})
-    if int(hard_box_applied_count or 0) <= 0:
-        hard_box_applied_count = sum(
-            1 for block in block_list if bool(getattr(block, "_hard_box_applied", False))
-        )
-    if not hard_box_reason_totals:
-        for block in block_list:
-            for code in getattr(block, "_hard_box_reason_codes", []) or []:
-                hard_box_reason_totals[str(code)] = int(hard_box_reason_totals.get(str(code), 0) or 0) + 1
     raw_mask_pixels = int(np.count_nonzero(raw_mask)) if raw_mask is not None else 0
     final_mask_pixels = int(np.count_nonzero(final_mask)) if final_mask is not None else 0
-    final_mask_pre_expand_pixels = (
-        int(np.count_nonzero(final_mask_pre_expand)) if final_mask_pre_expand is not None else 0
-    )
-    final_mask_post_expand_pixels = (
-        int(np.count_nonzero(final_mask_post_expand)) if final_mask_post_expand is not None else 0
-    )
+    final_mask_pre_expand_pixels = int(np.count_nonzero(final_mask_pre_expand)) if final_mask_pre_expand is not None else 0
+    final_mask_post_expand_pixels = int(np.count_nonzero(final_mask_post_expand)) if final_mask_post_expand is not None else 0
     residue_mask_pixels = int(np.count_nonzero(residue_mask)) if residue_mask is not None else 0
     cleanup_delta_pixels = int(np.count_nonzero(cleanup_delta)) if cleanup_delta is not None else 0
     protect_mask_pixels = int(np.count_nonzero(protect_mask)) if protect_mask is not None else 0
     legacy_base_mask_pixels = int(np.count_nonzero(legacy_base_mask)) if legacy_base_mask is not None else 0
-    hard_box_rescue_mask_pixels = (
-        int(np.count_nonzero(hard_box_rescue_mask)) if hard_box_rescue_mask is not None else 0
-    )
+    hard_box_rescue_mask_pixels = int(np.count_nonzero(hard_box_rescue_mask)) if hard_box_rescue_mask is not None else 0
+    if hard_box_applied_count is None:
+        hard_box_applied_count = sum(1 for block in block_list if bool(getattr(block, "_hard_box_applied", False)))
+    if hard_box_reason_totals is None:
+        reason_totals: dict[str, int] = {}
+        for block in block_list:
+            for code in list(getattr(block, "_hard_box_reason_codes", []) or []):
+                reason_totals[code] = reason_totals.get(code, 0) + 1
+        hard_box_reason_totals = reason_totals
     return {
         "image_path": image_path,
         "run_type": run_type,
@@ -243,15 +264,15 @@ def build_inpaint_debug_metadata(
         "protect_mask_pixel_count": protect_mask_pixels,
         "block_count": len(block_list),
         "raw_mask_pixel_count": raw_mask_pixels,
+        "legacy_base_mask_pixel_count": legacy_base_mask_pixels,
+        "hard_box_rescue_mask_pixel_count": hard_box_rescue_mask_pixels,
         "final_mask_pixel_count": final_mask_pixels,
         "final_mask_pre_expand_pixel_count": final_mask_pre_expand_pixels,
         "final_mask_post_expand_pixel_count": final_mask_post_expand_pixels,
         "residue_mask_pixel_count": residue_mask_pixels,
         "cleanup_delta_pixel_count": cleanup_delta_pixels,
-        "legacy_base_mask_pixel_count": legacy_base_mask_pixels,
-        "hard_box_rescue_mask_pixel_count": hard_box_rescue_mask_pixels,
         "hard_box_applied_count": int(hard_box_applied_count or 0),
-        "hard_box_reason_totals": hard_box_reason_totals,
+        "hard_box_reason_totals": dict(hard_box_reason_totals or {}),
         "cleanup_applied": bool(cleanup_stats.get("applied", False)),
         "cleanup_component_count": int(cleanup_stats.get("component_count", 0) or 0),
         "cleanup_block_count": int(cleanup_stats.get("block_count", 0) or 0),
@@ -296,7 +317,7 @@ def export_inpaint_debug_artifacts(
     image: np.ndarray,
     blocks: Iterable,
     export_settings: dict | None,
-    raw_mask: np.ndarray | None,
+    raw_mask: np.ndarray | None = None,
     mask_overlay_mask: np.ndarray | None = None,
     cleanup_delta: np.ndarray | None = None,
     metadata: dict | None = None,
@@ -307,10 +328,7 @@ def export_inpaint_debug_artifacts(
 
     image_rgb = ensure_three_channel(image)
     normalized_raw_mask = _normalize_mask(raw_mask, image_rgb.shape)
-    normalized_mask_overlay = _normalize_mask(
-        mask_overlay_mask if mask_overlay_mask is not None else raw_mask,
-        image_rgb.shape,
-    )
+    normalized_mask_overlay = _normalize_mask(mask_overlay_mask, image_rgb.shape)
     normalized_cleanup_delta = _normalize_mask(cleanup_delta, image_rgb.shape)
     written: dict[str, str] = {}
 

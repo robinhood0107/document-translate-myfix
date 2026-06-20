@@ -1500,7 +1500,6 @@ class ComicTranslate(ComicTranslateUI):
             self._last_runtime_preview_page_index = page_index
         self._follow_runtime_page(event)
         self._ensure_automatic_progress_dialog().update_event(event)
-        self._emit_runtime_progress_memlog(event)
         self._log_runtime_progress(event)
 
     def _follow_runtime_page(self, event: dict[str, Any]) -> None:
