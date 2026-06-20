@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 from textwrap import dedent
+from dataclasses import dataclass
 import json
 import logging
 import os
@@ -21,6 +22,7 @@ logger = logging.getLogger(__name__)
 DEFAULT_GEMMA_LOCAL_ENDPOINT = "http://127.0.0.1:18080/v1"
 DEFAULT_GEMMA_LOCAL_MODEL = "gemma-4-26B-IQ4_NL.gguf"
 DEFAULT_GEMMA_CHUNK_SIZE = 6
+DEFAULT_GEMMA_CONTEXT_SIZE = 2048
 DEFAULT_GEMMA_MAX_COMPLETION_TOKENS = 512
 DEFAULT_GEMMA_REQUEST_TIMEOUT_SEC = 180
 DEFAULT_GEMMA_TRANSLATION_TEMPERATURE = 0.7
@@ -33,6 +35,19 @@ DEFAULT_GEMMA_THINK_BRIEFLY_PROMPT = False
 DEFAULT_GEMMA_PROMPT_PROFILE = "gemma4_balanced"
 DEFAULT_GEMMA_CONTEXTUAL_MERGE_INPUT = True
 STRICT_GEMMA_PROMPT_PROFILE = "gemma4_strict_json"
+GEMMA_ROUTE_SAFE_FAST_MULTI = "safe_fast_multi"
+GEMMA_ROUTE_RISKY_SINGLE_BLOCK = "risky_single_block"
+GEMMA_ROUTE_HUGE_SEGMENT_BLOCK = "huge_segment_block"
+GEMMA_PREFLIGHT_SYSTEM_TOKENS_EST = 430
+GEMMA_PREFLIGHT_SAFE_CTX_RATIO = 0.58
+GEMMA_PREFLIGHT_HUGE_CTX_RATIO = 0.78
+GEMMA_PREFLIGHT_MAX_SAFE_BLOCKS = 10
+GEMMA_PREFLIGHT_MAX_SAFE_BLOCK_CHARS = 360
+GEMMA_PREFLIGHT_MAX_SAFE_TOTAL_CHARS = 900
+GEMMA_PREFLIGHT_MAX_SAFE_LINES = 10
+GEMMA_PREFLIGHT_RISKY_FULL_PACK_CHARS = 650
+GEMMA_PREFLIGHT_HUGE_BLOCK_CHARS = 240
+GEMMA_PREFLIGHT_HUGE_LINES = 18
 GEMMA_PROMPT_PROFILES = {
     "legacy": "legacy",
     "gemma4_balanced": "gemma4_balanced",
@@ -41,6 +56,23 @@ GEMMA_PROMPT_PROFILES = {
 GEMMA_RESPONSE_FORMAT_MODES = {"json_object", "json_schema"}
 GEMMA_RESPONSE_SCHEMA_MODES = {"blocks"}
 GEMMA_CHANNEL_TOKEN_RE = re.compile(r"<\|channel\>[^\r\n<]*|<channel\|>")
+
+
+@dataclass(frozen=True)
+class GemmaPreflightDecision:
+    route: str
+    prompt_tokens_est: int
+    block_count: int
+    total_chars: int
+    max_block_chars: int
+    line_count: int
+
+
+@dataclass(frozen=True)
+class GemmaPreflightJob:
+    route: str
+    blocks: list[TextBlock]
+    decision: GemmaPreflightDecision
 
 
 class GemmaLocalServerResponseError(RuntimeError):
@@ -63,15 +95,20 @@ class CustomLocalGemmaTranslation(BaseLLMTranslation):
         self.api_base_url = DEFAULT_GEMMA_LOCAL_ENDPOINT
         self.model = DEFAULT_GEMMA_LOCAL_MODEL
         self.chunk_size = DEFAULT_GEMMA_CHUNK_SIZE
+        self.max_tokens = DEFAULT_GEMMA_MAX_COMPLETION_TOKENS
+        self.timeout = DEFAULT_GEMMA_REQUEST_TIMEOUT_SEC
         self.raw_response_logging = False
         self.translation_mode_label = "Custom Local Server(Gemma)"
+        self.temperature = DEFAULT_GEMMA_TRANSLATION_TEMPERATURE
         self.top_k = DEFAULT_GEMMA_TRANSLATION_TOP_K
+        self.top_p = DEFAULT_GEMMA_TRANSLATION_TOP_P
         self.min_p = DEFAULT_GEMMA_TRANSLATION_MIN_P
         self.response_format_mode = DEFAULT_GEMMA_RESPONSE_FORMAT_MODE
         self.response_schema_mode = DEFAULT_GEMMA_RESPONSE_SCHEMA_MODE
         self.think_briefly_prompt = DEFAULT_GEMMA_THINK_BRIEFLY_PROMPT
         self.prompt_profile = DEFAULT_GEMMA_PROMPT_PROFILE
         self.contextual_merge_input = DEFAULT_GEMMA_CONTEXTUAL_MERGE_INPUT
+        self.context_size = DEFAULT_GEMMA_CONTEXT_SIZE
         self.last_benchmark_stats = self._new_benchmark_stats()
         self._current_benchmark_stats = self._new_benchmark_stats()
 
@@ -87,6 +124,17 @@ class CustomLocalGemmaTranslation(BaseLLMTranslation):
             "gemma_schema_validation_fail_count": 0,
             "gemma_repetition_guard_count": 0,
             "gemma_contextual_merge_fallback_count": 0,
+            "safe_fast_multi_chunks": 0,
+            "risky_single_block_chunks": 0,
+            "huge_segment_block_chunks": 0,
+            "adaptive_packed_chunks": 0,
+            "gemma_retry_count": 0,
+            "gemma_fallback_count": 0,
+            "segment_block_count": 0,
+            "segment_request_count": 0,
+            "json_failure_count": 0,
+            "missing_translation_count": 0,
+            "truncation_count": 0,
         }
 
     @staticmethod
@@ -237,6 +285,12 @@ class CustomLocalGemmaTranslation(BaseLLMTranslation):
             DEFAULT_GEMMA_THINK_BRIEFLY_PROMPT,
         )
         self.contextual_merge_input = DEFAULT_GEMMA_CONTEXTUAL_MERGE_INPUT
+        self.context_size = self._env_or_config_int(
+            gemma_settings,
+            "context_size",
+            "CT_GEMMA_CONTEXT_SIZE",
+            DEFAULT_GEMMA_CONTEXT_SIZE,
+        )
         self.img_as_llm_input = False
         self.last_benchmark_stats = self._new_benchmark_stats()
 
@@ -254,9 +308,13 @@ class CustomLocalGemmaTranslation(BaseLLMTranslation):
         self._current_benchmark_stats = self._new_benchmark_stats()
 
         try:
-            for start in range(0, len(working_blocks), self.chunk_size):
-                chunk = working_blocks[start : start + self.chunk_size]
-                updated_blocks += self._translate_chunk_with_retry(chunk, extra_context)
+            if self.contextual_merge_input:
+                for job in self._build_preflight_jobs(working_blocks):
+                    updated_blocks += self._translate_preflight_job(job, extra_context)
+            else:
+                for start in range(0, len(working_blocks), self.chunk_size):
+                    chunk = working_blocks[start : start + self.chunk_size]
+                    updated_blocks += self._translate_chunk_with_retry(chunk, extra_context)
 
             for original_blk, translated_blk in zip(blk_list, working_blocks):
                 original_blk.translation = translated_blk.translation
@@ -275,6 +333,113 @@ class CustomLocalGemmaTranslation(BaseLLMTranslation):
             return blk_list
         finally:
             self.last_benchmark_stats = dict(self._current_benchmark_stats)
+
+    def _build_preflight_jobs(self, blk_list: list[TextBlock]) -> list[GemmaPreflightJob]:
+        jobs: list[GemmaPreflightJob] = []
+        current_pack: list[TextBlock] = []
+
+        def flush_pack() -> None:
+            nonlocal current_pack
+            if not current_pack:
+                return
+            decision = self._decide_preflight_route(current_pack)
+            jobs.append(GemmaPreflightJob(decision.route, list(current_pack), decision))
+            current_pack = []
+
+        for blk in blk_list:
+            single_decision = self._decide_preflight_route([blk])
+            if single_decision.route != GEMMA_ROUTE_SAFE_FAST_MULTI:
+                flush_pack()
+                jobs.append(GemmaPreflightJob(single_decision.route, [blk], single_decision))
+                continue
+
+            candidate = [*current_pack, blk]
+            candidate_decision = self._decide_preflight_route(candidate)
+            if candidate_decision.route == GEMMA_ROUTE_SAFE_FAST_MULTI:
+                current_pack = candidate
+                continue
+
+            flush_pack()
+            current_pack = [blk]
+
+        flush_pack()
+        return jobs
+
+    def _decide_preflight_route(self, blk_list: list[TextBlock]) -> GemmaPreflightDecision:
+        texts = [str(getattr(blk, "text", "") or "") for blk in blk_list]
+        block_count = len(texts)
+        total_chars = sum(len(text) for text in texts)
+        max_block_chars = max([len(text) for text in texts] or [0])
+        line_count = max([self._count_text_lines(text) for text in texts] or [0])
+        prompt_tokens_est = self._estimate_merged_prompt_tokens(texts)
+
+        for text in texts:
+            single_prompt_tokens = self._estimate_merged_prompt_tokens([text])
+            if (
+                single_prompt_tokens + self.max_tokens > self.context_size * GEMMA_PREFLIGHT_HUGE_CTX_RATIO
+                or len(text) >= GEMMA_PREFLIGHT_HUGE_BLOCK_CHARS
+                or self._count_text_lines(text) >= GEMMA_PREFLIGHT_HUGE_LINES
+            ):
+                return GemmaPreflightDecision(
+                    GEMMA_ROUTE_HUGE_SEGMENT_BLOCK,
+                    prompt_tokens_est,
+                    block_count,
+                    total_chars,
+                    max_block_chars,
+                    line_count,
+                )
+
+        safe = (
+            prompt_tokens_est + self.max_tokens <= self.context_size * GEMMA_PREFLIGHT_SAFE_CTX_RATIO
+            and max_block_chars < GEMMA_PREFLIGHT_MAX_SAFE_BLOCK_CHARS
+            and total_chars < GEMMA_PREFLIGHT_MAX_SAFE_TOTAL_CHARS
+            and line_count < GEMMA_PREFLIGHT_MAX_SAFE_LINES
+            and block_count <= GEMMA_PREFLIGHT_MAX_SAFE_BLOCKS
+            and not (
+                block_count >= DEFAULT_GEMMA_CHUNK_SIZE
+                and total_chars >= GEMMA_PREFLIGHT_RISKY_FULL_PACK_CHARS
+            )
+        )
+        route = GEMMA_ROUTE_SAFE_FAST_MULTI if safe else GEMMA_ROUTE_RISKY_SINGLE_BLOCK
+        return GemmaPreflightDecision(
+            route,
+            prompt_tokens_est,
+            block_count,
+            total_chars,
+            max_block_chars,
+            line_count,
+        )
+
+    def _translate_preflight_job(
+        self,
+        job: GemmaPreflightJob,
+        extra_context: str,
+    ) -> int:
+        if job.route == GEMMA_ROUTE_SAFE_FAST_MULTI:
+            self._current_benchmark_stats["safe_fast_multi_chunks"] += 1
+            if len(job.blocks) > DEFAULT_GEMMA_CHUNK_SIZE:
+                self._current_benchmark_stats["adaptive_packed_chunks"] += 1
+            return self._translate_chunk(
+                job.blocks,
+                extra_context,
+                prompt_profile=self.prompt_profile,
+                use_contextual_merge=True,
+            )
+        if job.route == GEMMA_ROUTE_RISKY_SINGLE_BLOCK:
+            self._current_benchmark_stats["risky_single_block_chunks"] += 1
+            return self._translate_contextual_single_blocks(
+                job.blocks,
+                extra_context,
+                prompt_profile=self.prompt_profile,
+            )
+        if job.route == GEMMA_ROUTE_HUGE_SEGMENT_BLOCK:
+            self._current_benchmark_stats["huge_segment_block_chunks"] += 1
+            updated = 0
+            for blk in job.blocks:
+                self._translate_huge_segment_block(blk, extra_context)
+                updated += 1
+            return updated
+        raise GemmaLocalServerResponseError(f"Unknown Gemma preflight route: {job.route}")
 
     def _translate_chunk_with_retry(
         self,
@@ -412,6 +577,153 @@ class CustomLocalGemmaTranslation(BaseLLMTranslation):
 
         return len(blk_list)
 
+    @staticmethod
+    def _count_text_lines(text: str) -> int:
+        normalized = str(text or "")
+        return max(1, len(normalized.splitlines()))
+
+    @staticmethod
+    def _estimate_text_tokens(text: str) -> int:
+        tokens = 0.0
+        for ch in str(text or ""):
+            if ch.isspace():
+                tokens += 0.15
+            elif "\u4e00" <= ch <= "\u9fff":
+                tokens += 1.05
+            elif "\u3040" <= ch <= "\u30ff" or "\uac00" <= ch <= "\ud7af":
+                tokens += 0.95
+            elif ch.isascii() and ch.isalnum():
+                tokens += 0.35
+            else:
+                tokens += 0.55
+        return max(1, int(np.ceil(tokens)))
+
+    def _estimate_merged_prompt_tokens(self, texts: list[str]) -> int:
+        return (
+            GEMMA_PREFLIGHT_SYSTEM_TOKENS_EST
+            + 28
+            + sum(self._estimate_text_tokens(text) for text in texts)
+            + len(texts) * 10
+        )
+
+    def _split_text_for_segments(self, text: str) -> list[str]:
+        normalized = str(text or "").strip()
+        if not normalized:
+            return [""]
+
+        budget_chars = 180
+        separators = [
+            "\n\n",
+            "\n",
+            ". ",
+            "! ",
+            "? ",
+            "。 ",
+            "！ ",
+            "？ ",
+            "; ",
+            ", ",
+            " ",
+        ]
+        queue = [normalized]
+        for separator in separators:
+            next_queue: list[str] = []
+            for item in queue:
+                if len(item) <= budget_chars:
+                    next_queue.append(item)
+                    continue
+                parts = item.split(separator)
+                if len(parts) <= 1:
+                    next_queue.append(item)
+                    continue
+                for index, part in enumerate(parts):
+                    if not part:
+                        continue
+                    suffix = separator if index + 1 < len(parts) else ""
+                    next_queue.append(part + suffix)
+            queue = next_queue
+
+        segments: list[str] = []
+        current = ""
+        for item in queue:
+            if not item:
+                continue
+            candidate = current + item if current else item
+            if current and len(candidate) > budget_chars:
+                segments.append(current.strip())
+                current = item
+            else:
+                current = candidate
+        if current:
+            segments.append(current.strip())
+
+        hard_split_segments: list[str] = []
+        for segment in segments:
+            if len(segment) <= budget_chars:
+                hard_split_segments.append(segment)
+                continue
+            hard_split_segments.extend(
+                segment[index : index + budget_chars].strip()
+                for index in range(0, len(segment), budget_chars)
+            )
+        return [segment for segment in hard_split_segments if segment] or [normalized]
+
+    def _build_contextual_segment_user_prompt(
+        self,
+        segments: list[str],
+        target_index: int,
+    ) -> str:
+        merged_lines = [
+            f"[[block_{index}]] {segment}"
+            for index, segment in enumerate(segments)
+        ]
+        return json.dumps(
+            {
+                "merged_context": "\n".join(merged_lines),
+                "target_block": f"block_{target_index}",
+                "target_text": segments[target_index],
+            },
+            ensure_ascii=False,
+            indent=4,
+        )
+
+    def _translate_huge_segment_block(
+        self,
+        blk: TextBlock,
+        extra_context: str,
+        *,
+        prompt_profile: str | None = None,
+    ) -> None:
+        segments = self._split_text_for_segments(str(getattr(blk, "text", "") or ""))
+        system_prompt = self._build_system_prompt(
+            extra_context,
+            prompt_profile=prompt_profile or self.prompt_profile,
+        )
+        translated_segments: list[str] = []
+        self._current_benchmark_stats["segment_block_count"] += 1
+        for index, _segment in enumerate(segments):
+            user_prompt = self._build_contextual_segment_user_prompt(segments, index)
+            self._current_benchmark_stats["segment_request_count"] += 1
+            response_data = self._request_translation(
+                system_prompt,
+                user_prompt,
+                expected_keys=["translation"],
+            )
+            translation_dict = self._extract_translation_dict(
+                response_data,
+                expected_keys=["translation"],
+                block_count=1,
+                prompt_profile=prompt_profile or self.prompt_profile,
+            )
+            translated = translation_dict.get("translation")
+            if not isinstance(translated, str) or not translated.strip():
+                self._current_benchmark_stats["missing_translation_count"] += 1
+                raise GemmaLocalServerResponseError(
+                    "Gemma segment response did not include a usable translation."
+                )
+            translated_segments.append(self._strip_channel_tokens(translated))
+        self._apply_translation_value(blk, 0, " ".join(translated_segments))
+
     def _extract_translation_dict(
         self,
         response_data: dict,
@@ -448,6 +760,7 @@ class CustomLocalGemmaTranslation(BaseLLMTranslation):
 
         if finish_reason == "length":
             self._current_benchmark_stats["gemma_truncated_count"] += 1
+            self._current_benchmark_stats["truncation_count"] += 1
             raise GemmaLocalServerTruncatedError(
                 "Gemma local server response was truncated before the final JSON was completed. "
                 "Reduce Chunk Size or increase LLAMA_CTX_SIZE.",
@@ -469,6 +782,7 @@ class CustomLocalGemmaTranslation(BaseLLMTranslation):
             translation_dict = extract_json_object(self._strip_channel_tokens(content))
         except Exception as exc:
             self._current_benchmark_stats["gemma_json_retry_count"] += 1
+            self._current_benchmark_stats["json_failure_count"] += 1
             raise GemmaLocalServerResponseError(
                 "Gemma local server did not return a valid JSON object in message.content.",
                 strict_retryable=True,
@@ -478,8 +792,10 @@ class CustomLocalGemmaTranslation(BaseLLMTranslation):
         unexpected_keys = [key for key in translation_dict if key not in expected_keys]
         if missing_keys or unexpected_keys:
             self._current_benchmark_stats["gemma_json_retry_count"] += 1
+            self._current_benchmark_stats["json_failure_count"] += 1
             if missing_keys:
                 self._current_benchmark_stats["gemma_missing_key_count"] += len(missing_keys)
+                self._current_benchmark_stats["missing_translation_count"] += len(missing_keys)
             if self.response_format_mode == "json_schema":
                 self._current_benchmark_stats["gemma_schema_validation_fail_count"] += 1
             reasons: list[str] = []

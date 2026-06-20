@@ -35,6 +35,9 @@ DEFAULT_GEMMA_HEALTH_URL = "http://127.0.0.1:18080/health"
 DEFAULT_GEMMA_MODELS_URL = "http://127.0.0.1:18080/v1/models"
 DEFAULT_GEMMA_SETTINGS_PAGE = "Gemma Local Server Settings"
 DEFAULT_GEMMA_STARTUP_TIMEOUT_SEC = 420
+DEFAULT_GEMMA_DOCKER_CONTEXT_SIZE = "2048"
+DEFAULT_GEMMA_DOCKER_N_PARALLEL = "1"
+DEFAULT_GEMMA_DOCKER_GPU_LAYERS = "26"
 
 _RUNTIME_CONFIG = {
     "compose_file": ROOT_DIR / "docker-compose.yaml",
@@ -212,8 +215,31 @@ class LocalGemmaRuntimeManager:
                         message="Gemma 컨테이너 재시작 명령을 보냈습니다.",
                     )
                 else:
-                    self._log_runtime_metadata()
-                    return
+                    if not self._managed_runtime_matches_expected_signature(model_name):
+                        self._emit_progress(
+                            progress_callback,
+                            status="starting",
+                            step_key="compose_recreate",
+                            message="Gemma 런타임 설정이 달라 컨테이너를 다시 시작하는 중...",
+                            detail="Existing Gemma container command does not match the bundled runtime defaults.",
+                        )
+                        self._run_compose(
+                            "up",
+                            "-d",
+                            "--force-recreate",
+                            step_name="recreate",
+                            model_name=model_name,
+                        )
+                        started_or_recreated = True
+                        self._emit_progress(
+                            progress_callback,
+                            status="completed",
+                            step_key="compose_recreate",
+                            message="Gemma 컨테이너 재시작 명령을 보냈습니다.",
+                        )
+                    else:
+                        self._log_runtime_metadata()
+                        return
 
             if not started_or_recreated:
                 self._emit_progress(
@@ -335,6 +361,62 @@ class LocalGemmaRuntimeManager:
         model_file = Path(str(model_name or DEFAULT_GEMMA_LOCAL_MODEL)).name
         env["LLAMA_MODEL_FILE"] = model_file
         return env
+
+    def _expected_runtime_signature(self, model_name: str | None = None) -> dict[str, str]:
+        env = self._build_env(model_name)
+        return {
+            "model": f"/models/{Path(str(env.get('LLAMA_MODEL_FILE') or DEFAULT_GEMMA_LOCAL_MODEL)).name}",
+            "ctx": str(env.get("LLAMA_CTX_SIZE") or DEFAULT_GEMMA_DOCKER_CONTEXT_SIZE),
+            "parallel": str(env.get("LLAMA_N_PARALLEL") or DEFAULT_GEMMA_DOCKER_N_PARALLEL),
+            "gpu_layers": str(env.get("LLAMA_N_GPU_LAYERS") or DEFAULT_GEMMA_DOCKER_GPU_LAYERS),
+        }
+
+    @staticmethod
+    def _command_arg_value(args: list[str], names: set[str]) -> str:
+        for index, arg in enumerate(args):
+            if arg in names and index + 1 < len(args):
+                return str(args[index + 1])
+        return ""
+
+    def _inspect_managed_container_command(self) -> list[str]:
+        completed = run_docker_command(
+            [
+                "docker",
+                "inspect",
+                "--format",
+                "{{json .Config.Cmd}}",
+                _RUNTIME_CONFIG["container_name"],
+            ],
+            check=False,
+        )
+        if completed.returncode != 0:
+            return []
+        try:
+            parsed = json.loads((completed.stdout or "").strip() or "[]")
+        except json.JSONDecodeError:
+            return []
+        if not isinstance(parsed, list):
+            return []
+        return [str(item) for item in parsed]
+
+    def _managed_runtime_matches_expected_signature(self, model_name: str | None = None) -> bool:
+        args = self._inspect_managed_container_command()
+        if not args:
+            return False
+        expected = self._expected_runtime_signature(model_name)
+        actual = {
+            "model": self._command_arg_value(args, {"-m", "--model"}),
+            "ctx": self._command_arg_value(args, {"-c", "--ctx-size", "--context-size"}),
+            "parallel": self._command_arg_value(args, {"-np", "--parallel", "--parallel-slots"}),
+            "gpu_layers": self._command_arg_value(args, {"--n-gpu-layers", "-ngl"}),
+        }
+        if Path(actual["model"]).name != Path(expected["model"]).name:
+            return False
+        return (
+            actual["ctx"] == expected["ctx"]
+            and actual["parallel"] == expected["parallel"]
+            and actual["gpu_layers"] == expected["gpu_layers"]
+        )
 
     def _run_compose(self, *compose_args: str, step_name: str, model_name: str | None = None) -> None:
         compose_file = Path(_RUNTIME_CONFIG["compose_file"])
