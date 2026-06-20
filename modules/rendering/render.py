@@ -91,6 +91,10 @@ MIN_BUBBLE_RENDER_AREA_GAIN = 0.90
 DETECTED_BUBBLE_FIT_CLEARANCE_PX = 8.0
 DETECTED_BUBBLE_OUTLINE_CLEARANCE_MULTIPLIER = 2.0
 DETECTED_BUBBLE_MIN_FIT_DIMENSION_PX = 16.0
+DETECTED_BUBBLE_UNDERFILL_AREA_RATIO = 0.32
+DETECTED_BUBBLE_UNDERFILL_HEIGHT_RATIO = 0.55
+DETECTED_BUBBLE_DYNAMIC_FONT_HEIGHT_RATIO = 0.45
+DETECTED_BUBBLE_DYNAMIC_FONT_CAP = 96
 
 _CJK_RE = re.compile(r"[\uac00-\ud7a3\u3040-\u30ff\u4e00-\u9fff]")
 _BREAK_BEFORE_FORBIDDEN = set(".,!?;:)]}，。！？、；：）」』】》〉…")
@@ -507,6 +511,56 @@ def get_render_fit_clearance_for_block(
         (outline * DETECTED_BUBBLE_OUTLINE_CLEARANCE_MULTIPLIER)
         + DETECTED_BUBBLE_FIT_CLEARANCE_PX,
     )
+
+
+def get_dynamic_bubble_font_cap(
+    blk: TextBlock,
+    configured_max_font_size: int | float,
+    rendered_width: float,
+    rendered_height: float,
+    vertical: bool,
+    final_font_size: int | float | None = None,
+) -> int:
+    """Return a larger cap only for underfilled detected text bubbles."""
+    try:
+        base_max = int(round(float(configured_max_font_size)))
+    except (TypeError, ValueError):
+        return 0
+    if base_max <= 0:
+        return base_max
+    if vertical or getattr(blk, "direction", "") == "vertical":
+        return base_max
+    if getattr(blk, "text_class", "") != "text_bubble":
+        return base_max
+    if getattr(blk, "_render_area_source", "") != "detected_bubble":
+        return base_max
+    if final_font_size is not None:
+        try:
+            if float(final_font_size) < float(base_max):
+                return base_max
+        except (TypeError, ValueError):
+            return base_max
+
+    source_xyxy = _normalize_xyxy(getattr(blk, "_render_area_xyxy", None))
+    if source_xyxy is None or not _bbox_has_area(source_xyxy):
+        return base_max
+    source_width = float(source_xyxy[2] - source_xyxy[0])
+    source_height = float(source_xyxy[3] - source_xyxy[1])
+    if source_width <= 0.0 or source_height <= 0.0:
+        return base_max
+
+    area_ratio = (max(0.0, float(rendered_width)) * max(0.0, float(rendered_height))) / (
+        source_width * source_height
+    )
+    height_ratio = max(0.0, float(rendered_height)) / source_height
+    if (
+        area_ratio >= DETECTED_BUBBLE_UNDERFILL_AREA_RATIO
+        or height_ratio >= DETECTED_BUBBLE_UNDERFILL_HEIGHT_RATIO
+    ):
+        return base_max
+
+    dynamic_cap = int(source_height * DETECTED_BUBBLE_DYNAMIC_FONT_HEIGHT_RATIO)
+    return int(min(DETECTED_BUBBLE_DYNAMIC_FONT_CAP, max(base_max, dynamic_cap)))
 
 
 def _reset_render_area_metadata(blk: TextBlock) -> None:
@@ -979,6 +1033,84 @@ def pyside_word_wrap(
     #     mutable_message = min_text
 
     # return mutable_message, font_size
+
+
+def refit_detected_bubble_text_if_underfilled(
+    blk: TextBlock,
+    text: str,
+    font_input: str,
+    roi_width: int | float,
+    roi_height: int | float,
+    line_spacing: float,
+    outline_width: float,
+    bold: bool,
+    italic: bool,
+    underline: bool,
+    alignment: Qt.AlignmentFlag,
+    direction: Qt.LayoutDirection,
+    configured_max_font_size: int | float,
+    min_font_size: int | float,
+    vertical: bool,
+    fit_clearance: float,
+    current_wrapped_text: str,
+    current_font_size: int | float,
+    current_rendered_width: float,
+    current_rendered_height: float,
+) -> tuple[str, int | float, float, float]:
+    dynamic_cap = get_dynamic_bubble_font_cap(
+        blk,
+        configured_max_font_size,
+        current_rendered_width,
+        current_rendered_height,
+        vertical,
+        final_font_size=current_font_size,
+    )
+    try:
+        if dynamic_cap <= int(round(float(configured_max_font_size))):
+            return (
+                current_wrapped_text,
+                current_font_size,
+                current_rendered_width,
+                current_rendered_height,
+            )
+    except (TypeError, ValueError):
+        return (
+            current_wrapped_text,
+            current_font_size,
+            current_rendered_width,
+            current_rendered_height,
+        )
+
+    candidate_text, candidate_size, candidate_width, candidate_height = pyside_word_wrap(
+        text,
+        font_input,
+        int(roi_width),
+        int(roi_height),
+        line_spacing,
+        outline_width,
+        bold,
+        italic,
+        underline,
+        alignment,
+        direction,
+        dynamic_cap,
+        int(min_font_size),
+        vertical,
+        fit_clearance=fit_clearance,
+        return_metrics=True,
+    )
+    if (
+        candidate_width <= float(roi_width)
+        and candidate_height <= float(roi_height)
+        and float(candidate_size) >= float(current_font_size)
+    ):
+        return candidate_text, candidate_size, candidate_width, candidate_height
+    return (
+        current_wrapped_text,
+        current_font_size,
+        current_rendered_width,
+        current_rendered_height,
+    )
 
 def manual_wrap(
     main_page, 

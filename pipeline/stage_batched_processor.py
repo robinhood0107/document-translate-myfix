@@ -34,6 +34,7 @@ from modules.rendering.render import (
     get_render_fit_clearance_for_block,
     is_vertical_block,
     pyside_word_wrap,
+    refit_detected_bubble_text_if_underfilled,
 )
 from modules.translation.local_runtime import LocalGemmaRuntimeManager
 from modules.translation.processor import Translator
@@ -1013,8 +1014,14 @@ class StageBatchedProcessor(BatchProcessor):
             if not translation or len(translation) == 1:
                 continue
             vertical = is_vertical_block(blk, trg_lng_cd)
+            text_to_wrap = translation
+            alignment = self.main_page.button_to_alignment[render_settings.alignment_id]
+            fit_clearance = get_render_fit_clearance_for_block(
+                blk,
+                render_settings.outline_width,
+            )
             translation, font_size, rendered_width, rendered_height = pyside_word_wrap(
-                translation,
+                text_to_wrap,
                 font,
                 block_width,
                 block_height,
@@ -1023,16 +1030,37 @@ class StageBatchedProcessor(BatchProcessor):
                 render_settings.bold,
                 render_settings.italic,
                 render_settings.underline,
-                self.main_page.button_to_alignment[render_settings.alignment_id],
+                alignment,
                 render_settings.direction,
                 render_settings.max_font_size,
                 render_settings.min_font_size,
                 vertical,
-                fit_clearance=get_render_fit_clearance_for_block(
-                    blk,
-                    render_settings.outline_width,
-                ),
+                fit_clearance=fit_clearance,
                 return_metrics=True,
+            )
+            translation, font_size, rendered_width, rendered_height = (
+                refit_detected_bubble_text_if_underfilled(
+                    blk,
+                    text_to_wrap,
+                    font,
+                    block_width,
+                    block_height,
+                    float(render_settings.line_spacing),
+                    float(render_settings.outline_width),
+                    render_settings.bold,
+                    render_settings.italic,
+                    render_settings.underline,
+                    alignment,
+                    render_settings.direction,
+                    render_settings.max_font_size,
+                    render_settings.min_font_size,
+                    vertical,
+                    fit_clearance,
+                    translation,
+                    font_size,
+                    rendered_width,
+                    rendered_height,
+                )
             )
             blk._text_fit_status = (
                 "needs_review"
@@ -1054,7 +1082,6 @@ class StageBatchedProcessor(BatchProcessor):
                 render_settings.force_font_color,
                 render_settings.smart_global_apply_all,
             )
-            alignment = self.main_page.button_to_alignment[render_settings.alignment_id]
             render_markup = describe_render_text_markup(
                 translation,
                 font_family=font,
