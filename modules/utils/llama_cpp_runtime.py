@@ -1,17 +1,14 @@
 from __future__ import annotations
 
 import json
-import os
 import shutil
 import subprocess
-import time
 from pathlib import Path
 from typing import Any
 
 
 DEFAULT_LLAMA_CPP_IMAGE = "ghcr.io/ggml-org/llama.cpp:server-cuda"
 DEFAULT_LLAMA_CPP_PULL_POLICY = "always"
-WINDOWS_DOCKER_BIN = Path(r"C:\Program Files\Docker\Docker\resources\bin")
 
 
 def normalize_llama_cpp_image(image_ref: Any = None) -> str:
@@ -34,35 +31,7 @@ def resolve_docker_executable() -> str:
     docker_exe = shutil.which("docker.exe")
     if docker_exe:
         return docker_exe
-    windows_docker = WINDOWS_DOCKER_BIN / "docker.exe"
-    if windows_docker.is_file():
-        return str(windows_docker)
     return "docker"
-
-
-def _augment_env_with_docker_bin(env: dict[str, str] | None = None) -> dict[str, str] | None:
-    if not WINDOWS_DOCKER_BIN.is_dir():
-        return env
-    merged = dict(os.environ if env is None else env)
-    path_value = merged.get("PATH", "")
-    docker_bin = str(WINDOWS_DOCKER_BIN)
-    if docker_bin.lower() not in path_value.lower():
-        merged["PATH"] = f"{docker_bin}{os.pathsep}{path_value}" if path_value else docker_bin
-    return merged
-
-
-def _format_command_failure(
-    resolved_cmd: list[str],
-    completed: subprocess.CompletedProcess[str],
-    *,
-    cwd: str | Path | None = None,
-) -> str:
-    return (
-        f"Command failed (exit={completed.returncode}): {' '.join(resolved_cmd)}\n"
-        f"cwd={cwd}\n"
-        f"stdout:\n{(completed.stdout or '').strip()}\n"
-        f"stderr:\n{(completed.stderr or '').strip()}"
-    )
 
 
 def run_docker_command(
@@ -75,7 +44,6 @@ def run_docker_command(
     resolved_cmd = list(cmd)
     if resolved_cmd and resolved_cmd[0] == "docker":
         resolved_cmd[0] = resolve_docker_executable()
-    env = _augment_env_with_docker_bin(env)
     completed = subprocess.run(
         resolved_cmd,
         cwd=str(cwd) if cwd is not None else None,
@@ -85,20 +53,22 @@ def run_docker_command(
         text=True,
     )
     if check and completed.returncode != 0:
-        raise RuntimeError(_format_command_failure(resolved_cmd, completed, cwd=cwd))
+        detail = (
+            f"Command failed (exit={completed.returncode}): {' '.join(resolved_cmd)}\n"
+            f"cwd={cwd}\n"
+            f"stdout:\n{(completed.stdout or '').strip()}\n"
+            f"stderr:\n{(completed.stderr or '').strip()}"
+        )
+        raise RuntimeError(detail)
     return completed
 
 
 def resolve_docker_compose_command() -> tuple[str, ...]:
     candidates: list[tuple[str, ...]] = []
-    resolved_docker = resolve_docker_executable()
-    if resolved_docker and (shutil.which("docker") or shutil.which("docker.exe") or Path(resolved_docker).is_file()):
+    if shutil.which("docker") or shutil.which("docker.exe"):
         candidates.append(("docker", "compose"))
     if shutil.which("docker-compose"):
         candidates.append(("docker-compose",))
-    windows_docker_compose = Path(r"C:\Program Files\Docker\Docker\resources\bin\docker-compose.exe")
-    if windows_docker_compose.is_file():
-        candidates.append((str(windows_docker_compose),))
 
     for candidate in candidates:
         probe = run_docker_command([*candidate, "version"], check=False)
@@ -122,37 +92,17 @@ def docker_compose_pull_latest(
     )
 
 
-def _is_retryable_compose_up_failure(completed: subprocess.CompletedProcess[str]) -> bool:
-    details = ((completed.stdout or "") + "\n" + (completed.stderr or "")).lower()
-    retry_markers = (
-        'removal of container',
-        'already in progress',
-        'container name',
-        'is already in use',
-        'network has active endpoints',
-    )
-    return any(marker in details for marker in retry_markers)
-
-
 def docker_compose_up_force_recreate(
     compose_file: str | Path,
     *,
     cwd: str | Path | None = None,
     env: dict[str, str] | None = None,
 ) -> subprocess.CompletedProcess[str]:
-    resolved_cmd = [*resolve_docker_compose_command(), "-f", str(compose_file), "up", "-d", "--force-recreate"]
-    last_completed: subprocess.CompletedProcess[str] | None = None
-    for attempt in range(5):
-        completed = run_docker_command(resolved_cmd, cwd=cwd, env=env, check=False)
-        if completed.returncode == 0:
-            return completed
-        last_completed = completed
-        if attempt < 4 and _is_retryable_compose_up_failure(completed):
-            time.sleep(2 + attempt)
-            continue
-        raise RuntimeError(_format_command_failure(resolved_cmd, completed, cwd=cwd))
-    assert last_completed is not None
-    raise RuntimeError(_format_command_failure(resolved_cmd, last_completed, cwd=cwd))
+    return run_docker_command(
+        [*resolve_docker_compose_command(), "-f", str(compose_file), "up", "-d", "--force-recreate"],
+        cwd=cwd,
+        env=env,
+    )
 
 
 def docker_compose_pull_and_up(

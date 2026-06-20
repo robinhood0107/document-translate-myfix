@@ -3,7 +3,11 @@ from __future__ import annotations
 import unittest
 from unittest import mock
 
-from modules.translation.local_runtime import LocalGemmaRuntimeManager
+from modules.translation.local_runtime import (
+    LocalGemmaRuntimeManager,
+    _model_ids_match,
+    _normalize_model_id_for_compare,
+)
 from modules.utils.exceptions import (
     LocalServiceConnectionError,
     LocalServiceResponseError,
@@ -27,6 +31,25 @@ class _DummyGemmaSettingsPage:
 
 
 class LocalGemmaRuntimeManagerTests(unittest.TestCase):
+    def test_model_id_compare_accepts_container_model_paths(self) -> None:
+        self.assertEqual(
+            _normalize_model_id_for_compare("/models/gemma-4-26B-IQ4_NL.gguf"),
+            "gemma-4-26B-IQ4_NL.gguf",
+        )
+        self.assertTrue(
+            _model_ids_match(
+                "gemma-4-26B-IQ4_NL.gguf",
+                "/models/gemma-4-26B-IQ4_NL.gguf",
+            )
+        )
+        self.assertTrue(
+            _model_ids_match(
+                "/models/gemma-4-26B-IQ4_NL.gguf",
+                "gemma-4-26B-IQ4_NL.gguf",
+            )
+        )
+        self.assertFalse(_model_ids_match("gemma-a.gguf", "/models/gemma-b.gguf"))
+
     def test_ensure_server_reuses_readiness_cache_for_same_endpoint_model(self) -> None:
         manager = LocalGemmaRuntimeManager()
         settings_page = _DummyGemmaSettingsPage()

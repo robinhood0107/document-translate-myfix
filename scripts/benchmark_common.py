@@ -722,6 +722,16 @@ def _update_command_option(command: list[Any], option: str, values: list[str]) -
         command.insert(index + offset, value)
 
 
+def _remove_command_flag(command: list[Any], flag: str) -> None:
+    command[:] = [item for item in command if str(item) != flag]
+
+
+def _set_command_flag(command: list[Any], flag: str, enabled: bool) -> None:
+    _remove_command_flag(command, flag)
+    if enabled:
+        command.append(flag)
+
+
 def _stage_gemma_runtime(preset: dict[str, Any], runtime_dir: Path) -> dict[str, Any]:
     runtime_dir.mkdir(parents=True, exist_ok=True)
     compose = _python3_yaml_load(ROOT_GEMMA_COMPOSE)
@@ -767,6 +777,18 @@ def _stage_gemma_runtime(preset: dict[str, Any], runtime_dir: Path) -> dict[str,
         )
     if gemma.get("predict") is not None:
         _update_command_option(command, "-n", [str(gemma["predict"])])
+    if gemma.get("batch_size") is not None:
+        _update_command_option(command, "-b", [str(gemma["batch_size"])])
+    if gemma.get("ubatch_size") is not None:
+        _update_command_option(command, "-ub", [str(gemma["ubatch_size"])])
+    if gemma.get("cache_type_k") is not None:
+        _update_command_option(command, "--cache-type-k", [str(gemma["cache_type_k"])])
+    if gemma.get("cache_type_v") is not None:
+        _update_command_option(command, "--cache-type-v", [str(gemma["cache_type_v"])])
+    if gemma.get("flash_attn") is not None:
+        _set_command_flag(command, "--flash-attn", bool(gemma["flash_attn"]))
+    if gemma.get("no_warmup") is not None:
+        _set_command_flag(command, "--no-warmup", bool(gemma["no_warmup"]))
 
     service["command"] = command
     compose_path = runtime_dir / "docker-compose.yaml"

@@ -8,6 +8,7 @@ import numpy as np
 
 from modules.masking.ctd_vendor.ctd import TextDetBase, TextDetBaseDNN
 from modules.utils.download import ModelDownloader, ModelID
+from modules.utils.mask_roi import build_text_prior_mask, normalize_xyxy, resolve_block_ctd_roi
 from modules.utils.textblock import TextBlock
 
 
@@ -27,6 +28,8 @@ class MaskGenerationResult:
     raw_mask: np.ndarray
     refined_mask: np.ndarray
     protect_mask: np.ndarray
+    final_mask_pre_expand: np.ndarray
+    final_mask_post_expand: np.ndarray
     final_mask: np.ndarray
     backend: str
     device: str
@@ -727,23 +730,26 @@ class CTDRefiner:
             raw_mask = cv2.dilate(raw_mask, element)
         return np.where(raw_mask > 0, 255, 0).astype(np.uint8)
 
-    def _compose_by_blocks(self, image_rgb: np.ndarray, refined_mask: np.ndarray, blocks: list[TextBlock]) -> np.ndarray:
-        composed = np.zeros_like(refined_mask)
+    def refine(self, image_rgb: np.ndarray, blocks: Iterable[TextBlock]) -> MaskGenerationResult:
+        block_list = list(blocks or [])
         im_h, im_w = image_rgb.shape[:2]
-        for block in blocks:
-            if getattr(block, "xyxy", None) is None:
+        raw_mask = np.zeros((im_h, im_w), dtype=np.uint8)
+        refined_mask = np.zeros_like(raw_mask)
+        final_mask_pre_expand = np.zeros_like(raw_mask)
+        final_mask_post_expand = np.zeros_like(raw_mask)
+        final_mask = np.zeros_like(raw_mask)
+
+        for block in block_list:
+            roi = resolve_block_ctd_roi(block, image_rgb.shape)
+            if roi is None:
                 continue
-            if getattr(block, "text_class", "") == "text_bubble" and getattr(block, "bubble_xyxy", None) is not None:
-                x1, y1, x2, y2 = [int(float(v)) for v in block.bubble_xyxy[:4]]
-            else:
-                x1, y1, x2, y2 = _enlarge_window(block.xyxy, im_w, im_h)
+            x1, y1, x2, y2 = roi
             if x2 <= x1 or y2 <= y1:
                 continue
-            block_slice = refined_mask[y1:y2, x1:x2]
-            if not np.any(block_slice):
+
+            crop = np.ascontiguousarray(image_rgb[y1:y2, x1:x2])
+            if crop.size == 0:
                 continue
-            composed[y1:y2, x1:x2] = cv2.bitwise_or(composed[y1:y2, x1:x2], block_slice)
-        return np.where(composed > 0, 255, 0).astype(np.uint8)
 
             raw_crop = self._infer_raw_mask(crop)
             if raw_crop.size == 0 or not np.any(raw_crop):
@@ -792,7 +798,9 @@ class CTDRefiner:
             raw_mask=np.where(raw_mask > 0, 255, 0).astype(np.uint8),
             refined_mask=np.where(refined_mask > 0, 255, 0).astype(np.uint8),
             protect_mask=np.zeros_like(raw_mask),
-            final_mask=np.where(composed_mask > 0, 255, 0).astype(np.uint8),
+            final_mask_pre_expand=np.where(final_mask_pre_expand > 0, 255, 0).astype(np.uint8),
+            final_mask_post_expand=np.where(final_mask_post_expand > 0, 255, 0).astype(np.uint8),
+            final_mask=np.where(final_mask > 0, 255, 0).astype(np.uint8),
             backend=self.backend,
             device=self.settings.device,
             fallback_used=False,
