@@ -1,0 +1,158 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  verify-main-tag:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.value }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Validate version tag format
+        id: version
+        shell: bash
+        run: |
+          set -euo pipefail
+          tag="${GITHUB_REF_NAME}"
+          if [[ ! "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::Only semantic version tags like vX.Y.Z are supported."
+            exit 1
+          fi
+          echo "value=${tag#v}" >> "$GITHUB_OUTPUT"
+
+      - name: Ensure tagged commit is contained in main
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch --no-tags origin main
+          if ! git merge-base --is-ancestor "$GITHUB_SHA" "origin/main"; then
+            echo "::error::Release tags are allowed only for commits already contained in origin/main."
+            exit 1
+          fi
+
+  build-windows-gpu-portable-release:
+    runs-on: windows-latest
+    needs: verify-main-tag
+    env:
+      APP_VERSION: ${{ needs.verify-main-tag.outputs.version }}
+      RELEASE_TAG: ${{ github.ref_name }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install GPU build dependencies
+        shell: pwsh
+        run: |
+          python -m pip install --upgrade pip wheel setuptools
+          python -m pip install -r requirements-cuda13.txt
+          python -m pip install "nuitka>=2.7" "ordered-set>=4.1.0" "zstandard>=0.23.0"
+
+      - name: Validate translations
+        shell: pwsh
+        run: |
+          python scripts/compile_translations.py --check
+
+      - name: Build Windows GPU portable package with Nuitka
+        shell: pwsh
+        run: |
+          ./scripts/build_windows_gpu_portable.ps1 -AppVersion "$env:APP_VERSION"
+
+      - name: Build Windows GPU onefile executable with Nuitka
+        shell: pwsh
+        run: |
+          ./scripts/build_windows_gpu_onefile.ps1 -AppVersion "$env:APP_VERSION" -OutputName "comic-translate-gpu-cuda13" -NoCompression
+
+      - name: Stage GPU portable bundle
+        shell: pwsh
+        run: |
+          $bundleDir = "build/release/comic-translate-$env:RELEASE_TAG-windows-x64-gpu-portable"
+          New-Item -ItemType Directory -Force -Path $bundleDir | Out-Null
+          Copy-Item -Recurse -Force "build/nuitka-gpu/comic.dist/*" $bundleDir
+          Copy-Item -Force LICENSE $bundleDir
+          Copy-Item -Force README.md $bundleDir
+          Copy-Item -Force README_ko.md $bundleDir
+          New-Item -ItemType Directory -Force -Path "$bundleDir/input" | Out-Null
+          New-Item -ItemType Directory -Force -Path "$bundleDir/output" | Out-Null
+
+      - name: Archive GPU portable bundle
+        shell: pwsh
+        run: |
+          $bundleDir = "build/release/comic-translate-$env:RELEASE_TAG-windows-x64-gpu-portable"
+          $zipPath = "$bundleDir.zip"
+          if (Test-Path $zipPath) { Remove-Item -Force $zipPath }
+          Compress-Archive -Path "$bundleDir/*" -DestinationPath $zipPath
+
+      - name: Stage GPU onefile executable
+        shell: pwsh
+        run: |
+          $exeSource = "build/nuitka-gpu-onefile/comic-translate-gpu-cuda13.exe"
+          $exePath = "build/release/comic-translate-$env:RELEASE_TAG-windows-x64-gpu-cuda13.exe"
+          Copy-Item -Force $exeSource $exePath
+
+      - name: Upload GPU GitHub Release asset
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            build/release/comic-translate-${{ github.ref_name }}-windows-x64-gpu-portable.zip
+            build/release/comic-translate-${{ github.ref_name }}-windows-x64-gpu-cuda13.exe
+
+  build-windows-gpu-cuda12-onefile-release:
+    runs-on: windows-latest
+    needs: verify-main-tag
+    env:
+      APP_VERSION: ${{ needs.verify-main-tag.outputs.version }}
+      RELEASE_TAG: ${{ github.ref_name }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install CUDA 12 GPU build dependencies
+        shell: pwsh
+        run: |
+          python -m pip install --upgrade pip wheel setuptools
+          python -m pip install -r requirements-cuda12.txt
+          python -m pip install "nuitka>=2.7" "ordered-set>=4.1.0" "zstandard>=0.23.0"
+
+      - name: Validate translations
+        shell: pwsh
+        run: |
+          python scripts/compile_translations.py --check
+
+      - name: Build Windows GPU CUDA 12 onefile executable with Nuitka
+        shell: pwsh
+        run: |
+          ./scripts/build_windows_gpu_onefile.ps1 -AppVersion "$env:APP_VERSION" -OutputName "comic-translate-gpu-cuda12" -NoCompression
+
+      - name: Stage GPU CUDA 12 onefile executable
+        shell: pwsh
+        run: |
+          $exeSource = "build/nuitka-gpu-onefile/comic-translate-gpu-cuda12.exe"
+          $exePath = "build/release/comic-translate-$env:RELEASE_TAG-windows-x64-gpu-cuda12.exe"
+          New-Item -ItemType Directory -Force -Path "build/release" | Out-Null
+          Copy-Item -Force $exeSource $exePath
+
+      - name: Upload GPU CUDA 12 GitHub Release asset
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            build/release/comic-translate-${{ github.ref_name }}-windows-x64-gpu-cuda12.exe

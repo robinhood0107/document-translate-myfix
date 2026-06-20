@@ -35,6 +35,10 @@ class _Block:
     _legacy_mask_pixel_count: int = 0
     _rescue_mask_pixel_count: int = 0
     _final_mask_pixel_count: int = 0
+    _erase_mode: str = ""
+    _erase_edit_pixel_count: int = 0
+    _erase_protect_pixel_count: int = 0
+    _erase_skipped_reason: str = ""
 
 
 class InpaintDebugTests(unittest.TestCase):
@@ -62,6 +66,9 @@ class InpaintDebugTests(unittest.TestCase):
             _legacy_mask_pixel_count=4,
             _rescue_mask_pixel_count=2,
             _final_mask_pixel_count=6,
+            _erase_mode="bubble_flat_fill",
+            _erase_edit_pixel_count=12,
+            _erase_protect_pixel_count=3,
         )
 
         metadata = build_inpaint_debug_metadata(
@@ -105,6 +112,9 @@ class InpaintDebugTests(unittest.TestCase):
             metadata["blocks"][0]["render_normalization_reasons"],
             ["quote-to-ascii", "heart-dropped"],
         )
+        self.assertEqual(metadata["blocks"][0]["erase_mode"], "bubble_flat_fill")
+        self.assertEqual(metadata["blocks"][0]["erase_edit_pixel_count"], 12)
+        self.assertEqual(metadata["blocks"][0]["erase_protect_pixel_count"], 3)
 
     def test_export_artifacts_only_writes_selected_debug_outputs(self) -> None:
         image = np.full((10, 12, 3), 255, dtype=np.uint8)

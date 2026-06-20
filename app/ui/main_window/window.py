@@ -15,6 +15,7 @@ from app.ui.pipeline_status_panel import (
     PipelineInteractionOverlay,
     PipelineStatusPanel,
 )
+from app.ui.series_workspace import SeriesWorkspace
 from app.ui.settings.settings_page import SettingsPage
 from app.ui.startup_home import StartupHomeScreen
 from app.ui.title_bar import CustomTitleBar, RESIZE_MARGIN
@@ -101,6 +102,7 @@ class ComicTranslateUI(
         self.tool_buttons = {}
         self.page_list = PageListView()
         self.export_source_by_path = {}
+        self._runtime_edit_lock_enabled_states: dict[QtWidgets.QWidget, bool] = {}
 
         self.webtoon_mode = False
 
@@ -193,8 +195,10 @@ class ComicTranslateUI(
         self._center_stack = QtWidgets.QStackedWidget()
 
         self.startup_home = StartupHomeScreen()
+        self.series_workspace = SeriesWorkspace(self)
         self._center_stack.addWidget(self.startup_home)
         self._center_stack.addWidget(self.main_content_widget)
+        self._center_stack.addWidget(self.series_workspace)
         self._center_stack.addWidget(self.settings_page)
 
         self._center_stack.setCurrentWidget(self.startup_home)
@@ -207,6 +211,7 @@ class ComicTranslateUI(
         self.pipeline_overlay.hide()
         self.pipeline_status_panel = PipelineStatusPanel(outer_widget)
         self.pipeline_status_panel.setWindowIcon(self.windowIcon())
+        self.pipeline_status_panel.panel_hidden.connect(self._on_pipeline_status_panel_hidden)
         self.pipeline_status_panel.hide()
         self._update_runtime_surface_geometry()
 
@@ -229,9 +234,31 @@ class ComicTranslateUI(
             if hasattr(self.title_bar, "webtoon_toggle"):
                 self.title_bar.webtoon_toggle.setVisible(visible)
 
+    def _set_series_tools_visible(self, visible: bool) -> None:
+        if hasattr(self, "insert_button"):
+            self.insert_button.setVisible(False)
+        if hasattr(self, "save_browser"):
+            self.save_browser.setVisible(False)
+        if hasattr(self, "save_all_button"):
+            self.save_all_button.setVisible(False)
+        if hasattr(self, "search_sidebar_button"):
+            self.search_sidebar_button.setVisible(False)
+        if hasattr(self, "save_project_button"):
+            self.save_project_button.setVisible(visible)
+        if hasattr(self, "save_as_project_button"):
+            self.save_as_project_button.setVisible(visible)
+        if hasattr(self, "title_bar"):
+            self.title_bar.set_undo_redo_visible(False)
+            self.title_bar.set_autosave_visible(visible)
+            if hasattr(self.title_bar, "webtoon_toggle"):
+                self.title_bar.webtoon_toggle.setVisible(False)
+        if hasattr(self, "search_panel"):
+            self.search_panel.setVisible(False)
+
     def show_home_screen(self) -> None:
         self._finish_settings_resize_preview()
         self._set_document_tools_visible(False)
+        self._set_series_tools_visible(False)
         self._center_stack.setCurrentWidget(self.startup_home)
         self._set_nav_checked_state("home")
         self.set_pipeline_overlay_active(bool(getattr(self, "_batch_active", False)))
@@ -243,6 +270,7 @@ class ComicTranslateUI(
         if not self.settings_page:
             self.settings_page = SettingsPage(self)
         self._finish_settings_resize_preview()
+        self._set_series_tools_visible(False)
         self._center_stack.setCurrentWidget(self.settings_page)
         self._set_nav_checked_state("settings")
         self.set_pipeline_overlay_active(False)
@@ -251,11 +279,20 @@ class ComicTranslateUI(
         self._finish_settings_resize_preview()
         if self.settings_page:
             self._workspace_initialized = True
+            self._set_series_tools_visible(False)
             self._set_document_tools_visible(True)
             self._center_stack.setCurrentWidget(self.main_content_widget)
             self._set_nav_checked_state("main")
             if getattr(self, "_batch_active", False):
                 self.set_pipeline_overlay_active(True)
+
+    def show_series_page(self):
+        self._finish_settings_resize_preview()
+        self._set_document_tools_visible(False)
+        self._set_series_tools_visible(True)
+        self._center_stack.setCurrentWidget(self.series_workspace)
+        self._set_nav_checked_state("main")
+        self.set_pipeline_overlay_active(bool(getattr(self, "_batch_active", False)))
 
     def _set_nav_checked_state(self, target: str) -> None:
         nav_buttons = (
@@ -329,10 +366,92 @@ class ComicTranslateUI(
             return QtCore.QRect()
         return self._main_body_widget.geometry()
 
+    def _runtime_overlay_clear_rects(self) -> list[QtCore.QRect]:
+        if not hasattr(self, "pipeline_overlay") or self.pipeline_overlay is None:
+            return []
+        if not bool(getattr(self, "_batch_active", False)):
+            return []
+        controls = [
+            getattr(self, "cancel_button", None),
+            getattr(self, "batch_report_button", None),
+        ]
+        rects: list[QtCore.QRect] = []
+        for widget in controls:
+            if (
+                widget is None
+                or not widget.isVisible()
+                or not widget.isEnabled()
+                or widget.window() is not self
+            ):
+                continue
+            top_left = self.pipeline_overlay.mapFromGlobal(widget.mapToGlobal(QtCore.QPoint(0, 0)))
+            rects.append(QtCore.QRect(top_left, widget.size()))
+        return rects
+
+    def _update_runtime_overlay_clear_rects(self) -> None:
+        if hasattr(self, "pipeline_overlay") and self.pipeline_overlay is not None:
+            self.pipeline_overlay.set_clear_rects(self._runtime_overlay_clear_rects())
+
+    def _runtime_edit_lock_widgets(self) -> list[QtWidgets.QWidget]:
+        widgets: list[QtWidgets.QWidget] = []
+
+        def add(widget) -> None:
+            if isinstance(widget, QtWidgets.QWidget) and widget not in widgets:
+                widgets.append(widget)
+
+        for attr_name in (
+            "runtime_page_list_widget",
+            "runtime_canvas_widget",
+            "runtime_settings_widget",
+            "manual_radio",
+            "automatic_radio",
+            "translate_button",
+            "retry_failed_button",
+            "one_page_auto_button",
+            "webtoon_toggle",
+            "insert_button",
+            "save_project_button",
+            "save_as_project_button",
+            "search_sidebar_button",
+            "home_nav_button",
+            "settings_nav_button",
+            "search_panel",
+        ):
+            add(getattr(self, attr_name, None))
+
+        for group_name in ("hbutton_group", "undo_tool_group"):
+            group_widget = getattr(self, group_name, None)
+            add(group_widget)
+            button_group_getter = getattr(group_widget, "get_button_group", None)
+            if callable(button_group_getter):
+                button_group = button_group_getter()
+                for button in button_group.buttons():
+                    add(button)
+
+        return widgets
+
+    def set_runtime_editing_locked(self, locked: bool) -> None:
+        widgets = self._runtime_edit_lock_widgets()
+        if locked:
+            for widget in widgets:
+                if widget in self._runtime_edit_lock_enabled_states:
+                    continue
+                self._runtime_edit_lock_enabled_states[widget] = widget.isEnabled()
+                widget.setEnabled(False)
+            return
+
+        for widget, was_enabled in list(self._runtime_edit_lock_enabled_states.items()):
+            try:
+                widget.setEnabled(was_enabled)
+            except RuntimeError:
+                pass
+        self._runtime_edit_lock_enabled_states.clear()
+
     def _update_runtime_surface_geometry(self) -> None:
         area = self._runtime_surface_area()
         if hasattr(self, "pipeline_overlay") and self.pipeline_overlay is not None:
             self.pipeline_overlay.setGeometry(area)
+            self._update_runtime_overlay_clear_rects()
         if hasattr(self, "pipeline_status_panel") and self.pipeline_status_panel is not None:
             self.pipeline_status_panel.set_anchor_rect(area.adjusted(8, 8, -8, -8))
             if self.pipeline_status_panel.isVisible() and (
@@ -345,6 +464,8 @@ class ComicTranslateUI(
         if not hasattr(self, "pipeline_overlay"):
             return
         if active:
+            self._update_runtime_surface_geometry()
+            self._update_runtime_overlay_clear_rects()
             self.pipeline_overlay.show()
             self.pipeline_overlay.raise_()
             if hasattr(self, "pipeline_status_panel"):
@@ -355,6 +476,11 @@ class ComicTranslateUI(
                     self.pipeline_status_panel.raise_()
         else:
             self.pipeline_overlay.hide()
+            self.pipeline_overlay.set_clear_rects([])
+
+    def _on_pipeline_status_panel_hidden(self) -> None:
+        if not bool(getattr(self, "_batch_active", False)):
+            self.set_pipeline_overlay_active(False)
 
     def route_passive_message(
         self,

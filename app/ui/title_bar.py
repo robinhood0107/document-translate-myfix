@@ -11,6 +11,11 @@ if sys.platform == "win32":
 
 from PySide6 import QtCore, QtGui, QtWidgets
 from PySide6.QtCore import Qt
+from app.projects.project_types import (
+    project_extension_for_kind,
+    project_kind_for_path,
+    strip_project_extension,
+)
 from .dayu_widgets import dayu_theme
 from .dayu_widgets.switch import MSwitch
 
@@ -331,6 +336,13 @@ class _ProjectDetailsPopup(QtWidgets.QFrame):
 
         self.setFixedWidth(380)
 
+    def _window_project_kind(self, window: QtWidgets.QWidget | None) -> str:
+        explicit_kind = getattr(window, "project_kind", None) if window is not None else None
+        if explicit_kind:
+            return str(explicit_kind)
+        project_path = getattr(window, "project_file", None) if window is not None else None
+        return project_kind_for_path(str(project_path or ""))
+
     def apply_colors(self, bg: str, fg: str) -> None:
         fg_color = QtGui.QColor(fg)
         is_light_theme = fg_color.lightness() < 128
@@ -409,10 +421,13 @@ class _ProjectDetailsPopup(QtWidgets.QFrame):
         """)
 
     def prepare_for_window(self, window: QtWidgets.QWidget | None) -> None:
+        project_kind = self._window_project_kind(window)
+        extension = project_extension_for_kind(project_kind)
+        self.extension_label.setText(extension)
         project_path = getattr(window, "project_file", None) if window is not None else None
         if isinstance(project_path, str) and project_path:
             current_project_path = os.path.normpath(os.path.abspath(project_path))
-            stem = os.path.splitext(os.path.basename(current_project_path))[0]
+            stem = strip_project_extension(os.path.basename(current_project_path))
             directory = os.path.dirname(current_project_path)
             hint = self.tr("Apply to rename or move the current project file.")
         else:
@@ -465,8 +480,9 @@ class _ProjectDetailsPopup(QtWidgets.QFrame):
     def _emit_apply(self) -> None:
         stem = self.name_edit.text().strip()
         directory = os.path.expanduser(self.location_edit.text().strip())
-        if stem.lower().endswith(".ctpr"):
-            stem = stem[:-5]
+        extension = self.extension_label.text().strip() or ".ctpr"
+        if stem.lower().endswith(extension.lower()):
+            stem = stem[: -len(extension)]
 
         if not stem:
             QtWidgets.QMessageBox.warning(
@@ -486,7 +502,7 @@ class _ProjectDetailsPopup(QtWidgets.QFrame):
             self.location_edit.setFocus(Qt.FocusReason.PopupFocusReason)
             return
 
-        self.project_target_requested.emit(os.path.join(directory, f"{stem}.ctpr"))
+        self.project_target_requested.emit(os.path.join(directory, f"{stem}{extension}"))
         self.hide()
 
 
@@ -784,7 +800,12 @@ class CustomTitleBar(QtWidgets.QWidget):
         self._layout_title_label()
 
     def _refresh_project_button(self) -> None:
-        display_name = _project_stem_from_title(self._title_text) or "Project1"
+        window = self.window()
+        project_path = getattr(window, "project_file", None) if window is not None else None
+        if isinstance(project_path, str) and project_path:
+            display_name = strip_project_extension(os.path.basename(project_path)) or "Project1"
+        else:
+            display_name = _project_stem_from_title(self._title_text) or "Project1"
         fm = self.fontMetrics()
         elided = fm.elidedText(display_name, Qt.TextElideMode.ElideRight, 180)
         self.project_button.setText(f"{elided}  v")
@@ -918,9 +939,7 @@ def _clean_title(title: str, is_modified: bool = False) -> str:
 
 def _project_stem_from_title(title: str) -> str:
     cleaned = title.replace("*", "").strip()
-    if cleaned.lower().endswith(".ctpr"):
-        cleaned = cleaned[:-5]
-    return os.path.basename(cleaned).strip()
+    return os.path.basename(strip_project_extension(cleaned)).strip()
 
 
 def _default_project_directory(window: QtWidgets.QWidget | None) -> str:

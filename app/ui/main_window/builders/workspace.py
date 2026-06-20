@@ -20,6 +20,7 @@ from app.ui.dayu_widgets.text_edit import MTextEdit
 from app.ui.dayu_widgets.tool_button import MToolButton
 from app.ui.search_replace_panel import SearchReplacePanel
 from app.ui.main_window.constants import supported_source_languages, supported_target_languages
+from app.projects.project_types import PROJECT_FILE_EXT, SERIES_PROJECT_FILE_EXT
 from modules.utils.automatic_output import (
     OUTPUT_ARCHIVE_FORMAT_CBZ,
     OUTPUT_ARCHIVE_FORMAT_ZIP,
@@ -95,6 +96,43 @@ class WorkspaceMixin:
         for button in self.hbutton_group.get_button_group().buttons():
             button.setFocusPolicy(QtCore.Qt.FocusPolicy.NoFocus)
 
+        render_save_widget = QtWidgets.QWidget()
+        render_save_widget.setObjectName("renderSaveHeaderGroup")
+        render_save_widget.setStyleSheet(
+            """
+            QWidget#renderSaveHeaderGroup {
+                background-color: rgba(255, 255, 255, 18);
+                border: 1px solid rgba(255, 255, 255, 36);
+                border-radius: 4px;
+            }
+            """
+        )
+        render_save_layout = QtWidgets.QHBoxLayout(render_save_widget)
+        render_save_layout.setContentsMargins(6, 2, 6, 2)
+        render_save_layout.setSpacing(4)
+
+        self.render_dirty_badge = self._create_scope_badge(self.tr("Up to date"))
+        self.render_dirty_badge.setToolTip(self.tr("Final render output status"))
+
+        self.rerender_current_button = self.create_tool_button(svg="refresh_line.svg")
+        self.rerender_current_button.setToolTip(self.tr("Rerender Current Image"))
+        self.rerender_current_button.setFocusPolicy(QtCore.Qt.FocusPolicy.NoFocus)
+        self.rerender_dirty_button = self.create_tool_button(svg="save-all.svg")
+        self.rerender_dirty_button.setToolTip(self.tr("Rerender Changed Images"))
+        self.rerender_dirty_button.setFocusPolicy(QtCore.Qt.FocusPolicy.NoFocus)
+        self.rerender_all_button = self.create_tool_button(svg="pipeline_render.svg")
+        self.rerender_all_button.setToolTip(self.tr("Rerender All Images"))
+        self.rerender_all_button.setFocusPolicy(QtCore.Qt.FocusPolicy.NoFocus)
+        self.open_output_folder_button = self.create_tool_button(svg="folder-open.svg")
+        self.open_output_folder_button.setToolTip(self.tr("Open Output Folder"))
+        self.open_output_folder_button.setFocusPolicy(QtCore.Qt.FocusPolicy.NoFocus)
+
+        render_save_layout.addWidget(self.render_dirty_badge)
+        render_save_layout.addWidget(self.rerender_current_button)
+        render_save_layout.addWidget(self.rerender_dirty_button)
+        render_save_layout.addWidget(self.rerender_all_button)
+        render_save_layout.addWidget(self.open_output_folder_button)
+
         self.progress_bar = MProgressBar().auto_color()
         self.progress_bar.setValue(0)
         self.progress_bar.setVisible(False)
@@ -142,6 +180,7 @@ class WorkspaceMixin:
         )
 
         header_layout.addWidget(self.hbutton_group)
+        header_layout.addWidget(render_save_widget)
         header_layout.addWidget(self.loading)
         header_layout.addStretch()
         header_layout.addWidget(self.webtoon_toggle)
@@ -183,7 +222,8 @@ class WorkspaceMixin:
                 ".pdf",
                 ".epub",
                 ".psd",
-                ".ctpr",
+                PROJECT_FILE_EXT,
+                SERIES_PROJECT_FILE_EXT,
             ]
         )
         self.drag_browser.setToolTip(
@@ -512,18 +552,34 @@ class WorkspaceMixin:
         misc_lay.addWidget(self.set_all_button)
         misc_lay.addStretch()
 
+        text_box_tools_lay = QtWidgets.QHBoxLayout()
+
+        self.text_box_button = self.create_tool_button(svg="edit_line.svg", checkable=True)
+        self.text_box_button.setToolTip(
+            self.tr("Create or edit dotted text boxes. The dotted frame is editor-only and is not rendered into the final image.")
+        )
+        self.text_box_button.clicked.connect(self.toggle_text_box_tool)
+        self.tool_buttons["text_box"] = self.text_box_button
+
+        self.delete_button = self.create_tool_button(svg="trash_line.svg", checkable=False)
+        self.delete_button.setToolTip(self.tr("Delete the selected text box"))
+
+        text_box_tools_lay.addWidget(self.text_box_button)
+        text_box_tools_lay.addWidget(self.delete_button)
+        text_box_tools_lay.addStretch()
+
         box_tools_lay = QtWidgets.QHBoxLayout()
 
         self.box_button = self.create_tool_button(svg="select.svg", checkable=True)
-        self.box_button.setToolTip(self.tr("Draw or Select Text Boxes"))
+        self.box_button.setToolTip(self.tr("Draw or select OCR/block boxes used for detection, OCR, translation, and inpainting."))
         self.box_button.clicked.connect(self.toggle_box_tool)
         self.tool_buttons["box"] = self.box_button
 
-        self.delete_button = self.create_tool_button(svg="trash_line.svg", checkable=False)
-        self.delete_button.setToolTip(self.tr("Delete Selected Box"))
+        self.delete_block_button = self.create_tool_button(svg="trash_line.svg", checkable=False)
+        self.delete_block_button.setToolTip(self.tr("Delete the selected block box"))
 
         self.clear_rectangles_button = self.create_tool_button(svg="clear-outlined.svg")
-        self.clear_rectangles_button.setToolTip(self.tr("Remove all the Boxes on the Image"))
+        self.clear_rectangles_button.setToolTip(self.tr("Remove all block boxes on the image"))
 
         self.draw_blklist_blks = self.create_tool_button(svg="gridicons--create.svg")
         self.draw_blklist_blks.setToolTip(
@@ -534,7 +590,7 @@ class WorkspaceMixin:
         )
 
         box_tools_lay.addWidget(self.box_button)
-        box_tools_lay.addWidget(self.delete_button)
+        box_tools_lay.addWidget(self.delete_block_button)
         box_tools_lay.addWidget(self.clear_rectangles_button)
         box_tools_lay.addWidget(self.draw_blklist_blks)
 
@@ -726,18 +782,26 @@ class WorkspaceMixin:
         self.output_estimate_label = MLabel(self.tr("Load pages to see automatic output estimates.")).secondary()
         self.output_estimate_label.setWordWrap(True)
 
+        self.output_dirty_label = MLabel(self.tr("All render outputs are up to date.")).secondary()
+        self.output_dirty_label.setWordWrap(True)
+
         output_layout.addWidget(self.output_use_global_checkbox)
         output_layout.addLayout(output_target_row)
         output_layout.addWidget(self.output_image_format_row)
         output_layout.addWidget(self.output_archive_format_row)
         output_layout.addWidget(self.output_archive_image_format_row)
         output_layout.addWidget(self.output_archive_level_row)
+        output_layout.addWidget(self.output_dirty_label)
         output_layout.addWidget(self.output_quality_note_label)
         output_layout.addWidget(self.output_archive_note_label)
         output_layout.addWidget(self.output_estimate_label)
 
         tools_layout.addLayout(misc_lay)
-        box_div = MDivider(self.tr("Box Drawing"))
+        text_box_div = MDivider(self.tr("Text Boxes"))
+        tools_layout.addWidget(text_box_div)
+        tools_layout.addLayout(text_box_tools_lay)
+
+        box_div = MDivider(self.tr("Block Boxes"))
         tools_layout.addWidget(box_div)
         tools_layout.addLayout(box_tools_lay)
 
@@ -767,6 +831,9 @@ class WorkspaceMixin:
 
         right_widget = QtWidgets.QWidget()
         right_widget.setLayout(right_layout)
+        self.runtime_page_list_widget = left_widget
+        self.runtime_canvas_widget = central_widget
+        self.runtime_settings_widget = right_widget
 
         splitter = QtWidgets.QSplitter()
         splitter.addWidget(left_widget)

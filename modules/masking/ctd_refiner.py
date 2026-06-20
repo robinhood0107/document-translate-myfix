@@ -313,6 +313,338 @@ def _det_rearrange_forward(img, dbnet_batch_forward, tgt_size=1280, max_batch_si
     return db, mask
 
 
+def _refine_mask_roi(image: np.ndarray, pred_mask: np.ndarray) -> np.ndarray:
+    if image.size == 0 or pred_mask.size == 0 or not np.any(pred_mask):
+        return np.zeros_like(pred_mask)
+    mask_list = _get_topk_masklist(image, pred_mask)
+    mask_list += _get_otsuthresh_masklist(image, pred_mask)
+    merged = _merge_mask_list(mask_list, pred_mask)
+    return np.where(merged > 0, 255, 0).astype(np.uint8)
+
+
+def _expand_final_mask_crop(final_crop: np.ndarray, text_class: str) -> np.ndarray:
+    if final_crop.size == 0 or not np.any(final_crop):
+        return np.zeros_like(final_crop)
+    iterations = 2 if text_class == "text_bubble" else 3
+    kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3))
+    expanded = cv2.dilate(final_crop, kernel, iterations=max(1, int(iterations)))
+    return np.where(expanded > 0, 255, 0).astype(np.uint8)
+
+
+def _is_text_free_rule_like_component(w: int, h: int, area: int) -> bool:
+    long_side = max(int(w), int(h))
+    short_side = min(int(w), int(h))
+    if long_side < 48 or short_side > 5:
+        return False
+    aspect = float(long_side) / float(max(1, short_side))
+    fill_ratio = float(area) / float(max(1, int(w) * int(h)))
+    return aspect >= 16.0 and fill_ratio >= 0.35
+
+
+def _filter_text_free_glyph_color_mask(candidate_mask: np.ndarray) -> np.ndarray:
+    if candidate_mask.size == 0 or not np.any(candidate_mask):
+        return np.zeros_like(candidate_mask, dtype=np.uint8)
+
+    roi_h, roi_w = candidate_mask.shape[:2]
+    roi_area = max(1, roi_h * roi_w)
+    max_bbox_ratio = 0.35
+    edge_bbox_ratio = 0.08
+
+    num_labels, labels, stats, _centroids = cv2.connectedComponentsWithStats(
+        (candidate_mask > 0).astype(np.uint8),
+        8,
+        cv2.CV_32S,
+    )
+    filtered = np.zeros_like(candidate_mask, dtype=np.uint8)
+    for label_idx in range(1, num_labels):
+        x, y, w, h, area = stats[label_idx]
+        if int(area) < 8 or w <= 0 or h <= 0:
+            continue
+        bbox_area = int(w * h)
+        if bbox_area > int(round(roi_area * max_bbox_ratio)):
+            continue
+        if _is_text_free_rule_like_component(int(w), int(h), int(area)):
+            continue
+
+        touches_edge = x == 0 or y == 0 or (x + w) >= roi_w or (y + h) >= roi_h
+        if touches_edge and bbox_area > int(round(roi_area * edge_bbox_ratio)):
+            continue
+
+        component = labels[y:y + h, x:x + w] == label_idx
+        filtered[y:y + h, x:x + w][component] = 255
+
+    return np.where(filtered > 0, 255, 0).astype(np.uint8)
+
+
+def _filter_bubble_polarity_glyph_mask(candidate_mask: np.ndarray, search_mask: np.ndarray) -> np.ndarray:
+    if (
+        candidate_mask.size == 0
+        or search_mask.size == 0
+        or candidate_mask.shape[:2] != search_mask.shape[:2]
+        or not np.any(candidate_mask)
+        or not np.any(search_mask)
+    ):
+        return np.zeros_like(candidate_mask, dtype=np.uint8)
+
+    search = np.where(search_mask > 0, 255, 0).astype(np.uint8)
+    candidate = np.where((candidate_mask > 0) & (search > 0), 255, 0).astype(np.uint8)
+    if not np.any(candidate):
+        return np.zeros_like(candidate, dtype=np.uint8)
+
+    search_coords = cv2.findNonZero(search)
+    if search_coords is None:
+        return np.zeros_like(candidate, dtype=np.uint8)
+    sx, sy, sw, sh = cv2.boundingRect(search_coords)
+    sx2 = sx + sw
+    sy2 = sy + sh
+    search_area = max(1, int(sw) * int(sh))
+    min_area = max(8, int(round(search_area * 0.00025)))
+    max_bbox_ratio = 0.45
+    edge_bbox_ratio = 0.16
+
+    num_labels, labels, stats, _centroids = cv2.connectedComponentsWithStats(
+        (candidate > 0).astype(np.uint8),
+        8,
+        cv2.CV_32S,
+    )
+    filtered = np.zeros_like(candidate, dtype=np.uint8)
+    for label_idx in range(1, num_labels):
+        x, y, w, h, area = stats[label_idx]
+        if int(area) < min_area or w <= 0 or h <= 0:
+            continue
+        bbox_area = int(w * h)
+        if bbox_area > int(round(search_area * max_bbox_ratio)):
+            continue
+        if _is_text_free_rule_like_component(int(w), int(h), int(area)):
+            continue
+
+        touches_search_edge = x <= sx or y <= sy or (x + w) >= sx2 or (y + h) >= sy2
+        if touches_search_edge and bbox_area > int(round(search_area * edge_bbox_ratio)):
+            continue
+
+        component = labels[y:y + h, x:x + w] == label_idx
+        filtered[y:y + h, x:x + w][component] = 255
+
+    return np.where(filtered > 0, 255, 0).astype(np.uint8)
+
+
+def _filter_bubble_dark_glyph_anchor_mask(candidate_mask: np.ndarray, search_mask: np.ndarray) -> np.ndarray:
+    if (
+        candidate_mask.size == 0
+        or search_mask.size == 0
+        or candidate_mask.shape[:2] != search_mask.shape[:2]
+        or not np.any(candidate_mask)
+        or not np.any(search_mask)
+    ):
+        return np.zeros_like(candidate_mask, dtype=np.uint8)
+
+    search = np.where(search_mask > 0, 255, 0).astype(np.uint8)
+    candidate = np.where((candidate_mask > 0) & (search > 0), 255, 0).astype(np.uint8)
+    if not np.any(candidate):
+        return np.zeros_like(candidate, dtype=np.uint8)
+
+    search_coords = cv2.findNonZero(search)
+    if search_coords is None:
+        return np.zeros_like(candidate, dtype=np.uint8)
+    sx, sy, sw, sh = cv2.boundingRect(search_coords)
+    sx2 = sx + sw
+    sy2 = sy + sh
+    search_area = max(1, int(sw) * int(sh))
+    min_area = max(8, int(round(search_area * 0.00015)))
+    max_bbox_ratio = 0.55
+    edge_bbox_ratio = 0.10
+
+    num_labels, labels, stats, _centroids = cv2.connectedComponentsWithStats(
+        (candidate > 0).astype(np.uint8),
+        8,
+        cv2.CV_32S,
+    )
+    filtered = np.zeros_like(candidate, dtype=np.uint8)
+    for label_idx in range(1, num_labels):
+        x, y, w, h, area = stats[label_idx]
+        if int(area) < min_area or w <= 0 or h <= 0:
+            continue
+        bbox_area = int(w * h)
+        if bbox_area > int(round(search_area * max_bbox_ratio)):
+            continue
+
+        long_side = max(int(w), int(h))
+        short_side = min(int(w), int(h))
+        aspect = float(long_side) / float(max(1, short_side))
+        fill_ratio = float(area) / float(max(1, bbox_area))
+        if short_side <= 4 and long_side >= 24:
+            continue
+        if aspect >= 12.0:
+            continue
+        if aspect >= 6.0 and fill_ratio <= 0.22:
+            continue
+        if _is_text_free_rule_like_component(int(w), int(h), int(area)):
+            continue
+
+        touches_search_edge = x <= sx or y <= sy or (x + w) >= sx2 or (y + h) >= sy2
+        if touches_search_edge and bbox_area > int(round(search_area * edge_bbox_ratio)):
+            continue
+
+        component = labels[y:y + h, x:x + w] == label_idx
+        filtered[y:y + h, x:x + w][component] = 255
+
+    return np.where(filtered > 0, 255, 0).astype(np.uint8)
+
+
+def _block_text_search_mask(block, roi: tuple[int, int, int, int], image_shape) -> np.ndarray:
+    x1, y1, x2, y2 = roi
+    search = np.zeros((y2 - y1, x2 - x1), dtype=np.uint8)
+    text_box = normalize_xyxy(getattr(block, 'xyxy', None), image_shape)
+    if text_box is None:
+        return search
+
+    tx1, ty1, tx2, ty2 = text_box
+    pad = max(3, int(round(min(max(1, tx2 - tx1), max(1, ty2 - ty1)) * 0.08)))
+    bx1 = max(x1, tx1 - pad)
+    by1 = max(y1, ty1 - pad)
+    bx2 = min(x2, tx2 + pad)
+    by2 = min(y2, ty2 + pad)
+    if bx2 <= bx1 or by2 <= by1:
+        return search
+
+    search[by1 - y1:by2 - y1, bx1 - x1:bx2 - x1] = 255
+    return search
+
+
+def _text_bubble_polarity_glyph_mask(image_rgb: np.ndarray, search_mask: np.ndarray) -> np.ndarray:
+    if (
+        image_rgb.size == 0
+        or search_mask.size == 0
+        or image_rgb.shape[:2] != search_mask.shape[:2]
+        or not np.any(search_mask)
+    ):
+        return np.zeros(search_mask.shape[:2], dtype=np.uint8)
+
+    crop = np.ascontiguousarray(image_rgb.astype(np.uint8, copy=False))
+    gray = cv2.cvtColor(crop, cv2.COLOR_RGB2GRAY)
+    hsv = cv2.cvtColor(crop, cv2.COLOR_RGB2HSV)
+    sat = hsv[:, :, 1]
+
+    search = search_mask > 0
+    search_values = gray[search]
+    if search_values.size < 8:
+        return np.zeros_like(search_mask, dtype=np.uint8)
+
+    mean = float(np.mean(search_values))
+    std = max(1.0, float(np.std(search_values)))
+    dark_ceiling = int(round(min(125.0, max(35.0, mean - std * 0.30))))
+    dark_candidate = np.where(
+        (gray <= dark_ceiling) & search,
+        255,
+        0,
+    ).astype(np.uint8)
+    dark_anchor = _filter_bubble_dark_glyph_anchor_mask(dark_candidate, search_mask)
+    if not np.any(dark_anchor):
+        return np.zeros_like(search_mask, dtype=np.uint8)
+
+    bright_floor = int(round(max(165.0, min(230.0, mean + std * 0.45))))
+    outline_kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (7, 7))
+    outline_zone = cv2.dilate(dark_anchor, outline_kernel, iterations=1)
+    bright_candidate = np.where(
+        (gray >= bright_floor) & (sat <= 90) & (outline_zone > 0) & search,
+        255,
+        0,
+    ).astype(np.uint8)
+    bright_mask = _filter_bubble_polarity_glyph_mask(bright_candidate, search_mask)
+
+    glyph_mask = cv2.bitwise_or(bright_mask, dark_anchor)
+    glyph_mask = cv2.dilate(glyph_mask, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3)), iterations=1)
+    return np.where((glyph_mask > 0) & search, 255, 0).astype(np.uint8)
+
+
+def _text_free_glyph_color_mask(
+    image_rgb: np.ndarray,
+    prior_mask: np.ndarray,
+    anchor_mask: np.ndarray,
+) -> np.ndarray:
+    if (
+        image_rgb.size == 0
+        or prior_mask.size == 0
+        or image_rgb.shape[:2] != prior_mask.shape[:2]
+        or image_rgb.shape[:2] != anchor_mask.shape[:2]
+    ):
+        return np.zeros(prior_mask.shape[:2], dtype=np.uint8)
+
+    prior = prior_mask > 0
+    if not np.any(prior):
+        return np.zeros_like(prior_mask, dtype=np.uint8)
+
+    crop = np.ascontiguousarray(image_rgb.astype(np.uint8, copy=False))
+    hsv = cv2.cvtColor(crop, cv2.COLOR_RGB2HSV)
+    hue = hsv[:, :, 0]
+    sat = hsv[:, :, 1]
+    val = hsv[:, :, 2]
+
+    bright_candidate = np.where((val >= 185) & (sat <= 95) & prior, 255, 0).astype(np.uint8)
+    bright_mask = _filter_text_free_glyph_color_mask(bright_candidate)
+    bright_pixels = int(np.count_nonzero(bright_mask))
+
+    anchor = np.where(anchor_mask > 0, 255, 0).astype(np.uint8)
+    if np.any(anchor):
+        anchor_kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (7, 7))
+        anchor = cv2.dilate(anchor, anchor_kernel, iterations=2)
+    warm_candidate = np.where(
+        (val >= 135)
+        & (sat <= 150)
+        & (hue >= 10)
+        & (hue <= 45)
+        & prior
+        & (anchor > 0),
+        255,
+        0,
+    ).astype(np.uint8)
+    warm_mask = _filter_text_free_glyph_color_mask(warm_candidate)
+    warm_pixels = int(np.count_nonzero(warm_mask))
+
+    glyph_mask = bright_mask
+    if warm_pixels > 0 and (bright_pixels == 0 or warm_pixels >= int(round(bright_pixels * 0.75))):
+        glyph_mask = cv2.bitwise_or(glyph_mask, warm_mask)
+
+    if np.any(glyph_mask):
+        kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3))
+        glyph_mask = cv2.dilate(glyph_mask, kernel, iterations=1)
+    return np.where(glyph_mask > 0, 255, 0).astype(np.uint8)
+
+
+def _filter_candidate_mask(candidate_mask: np.ndarray, prior_mask: np.ndarray, text_class: str) -> np.ndarray:
+    if candidate_mask.size == 0 or not np.any(candidate_mask) or not np.any(prior_mask):
+        return np.zeros_like(candidate_mask)
+
+    roi_h, roi_w = candidate_mask.shape[:2]
+    roi_area = max(1, roi_h * roi_w)
+    max_bbox_ratio = 0.50 if text_class == 'text_bubble' else 0.92
+    edge_bbox_ratio = 0.14
+
+    num_labels, labels, stats, _centroids = cv2.connectedComponentsWithStats((candidate_mask > 0).astype(np.uint8), 8, cv2.CV_32S)
+    filtered = np.zeros_like(candidate_mask, dtype=np.uint8)
+    for label_idx in range(1, num_labels):
+        x, y, w, h, area = stats[label_idx]
+        if w <= 0 or h <= 0:
+            continue
+        bbox_area = int(w * h)
+        if bbox_area > int(round(roi_area * max_bbox_ratio)):
+            continue
+        if text_class == 'text_free' and _is_text_free_rule_like_component(int(w), int(h), int(area)):
+            continue
+
+        component = labels[y:y + h, x:x + w] == label_idx
+        if not np.any(prior_mask[y:y + h, x:x + w][component] > 0):
+            continue
+
+        touches_edge = x == 0 or y == 0 or (x + w) >= roi_w or (y + h) >= roi_h
+        if text_class != 'text_free' and touches_edge and bbox_area > int(round(roi_area * edge_bbox_ratio)):
+            continue
+
+        filtered[y:y + h, x:x + w][component] = 255
+
+    return np.where(filtered > 0, 255, 0).astype(np.uint8)
+
+
 class CTDRefiner:
     def __init__(self, settings: CTDRefinerSettings | None = None) -> None:
         self.settings = settings or CTDRefinerSettings()
@@ -413,11 +745,49 @@ class CTDRefiner:
             composed[y1:y2, x1:x2] = cv2.bitwise_or(composed[y1:y2, x1:x2], block_slice)
         return np.where(composed > 0, 255, 0).astype(np.uint8)
 
-    def refine(self, image_rgb: np.ndarray, blocks: Iterable[TextBlock]) -> MaskGenerationResult:
-        block_list = list(blocks or [])
-        raw_mask = self._infer_raw_mask(image_rgb)
-        refined_mask = _refine_mask(image_rgb, raw_mask, block_list) if block_list else raw_mask.copy()
-        composed_mask = self._compose_by_blocks(image_rgb, refined_mask, block_list) if block_list else refined_mask.copy()
+            raw_crop = self._infer_raw_mask(crop)
+            if raw_crop.size == 0 or not np.any(raw_crop):
+                continue
+
+            prior_mask = build_text_prior_mask(image_rgb, block, roi, dilate_iterations=2)
+            if not np.any(prior_mask):
+                continue
+
+            constrained_raw = cv2.bitwise_and(raw_crop, prior_mask)
+            text_class = getattr(block, 'text_class', '') or ''
+            polarity_glyph_mask = np.zeros_like(raw_crop)
+            if text_class == 'text_free':
+                constrained_refined = np.zeros_like(raw_crop)
+                glyph_color_mask = _text_free_glyph_color_mask(crop, prior_mask, constrained_raw)
+                candidate_crop = (
+                    cv2.bitwise_or(constrained_raw, glyph_color_mask)
+                    if np.any(glyph_color_mask)
+                    else constrained_raw
+                )
+                candidate_prior_mask = prior_mask
+            else:
+                refined_crop = _refine_mask_roi(crop, raw_crop)
+                constrained_refined = cv2.bitwise_and(refined_crop, prior_mask) if np.any(refined_crop) else np.zeros_like(raw_crop)
+                candidate_crop = cv2.bitwise_or(constrained_raw, constrained_refined) if np.any(constrained_refined) else constrained_raw
+                candidate_prior_mask = prior_mask
+                if text_class == 'text_bubble':
+                    search_mask = _block_text_search_mask(block, roi, image_rgb.shape)
+                    polarity_glyph_mask = _text_bubble_polarity_glyph_mask(crop, search_mask)
+                    if np.any(polarity_glyph_mask):
+                        candidate_crop = cv2.bitwise_or(candidate_crop, polarity_glyph_mask)
+                        candidate_prior_mask = cv2.bitwise_or(candidate_prior_mask, polarity_glyph_mask)
+            filtered_crop = _filter_candidate_mask(candidate_crop, candidate_prior_mask, text_class)
+            final_crop = cv2.bitwise_and(filtered_crop, candidate_prior_mask)
+            if np.any(polarity_glyph_mask):
+                final_crop = cv2.bitwise_or(final_crop, polarity_glyph_mask)
+            expanded_final_crop = _expand_final_mask_crop(final_crop, text_class)
+
+            raw_mask[y1:y2, x1:x2] = cv2.bitwise_or(raw_mask[y1:y2, x1:x2], constrained_raw)
+            refined_mask[y1:y2, x1:x2] = cv2.bitwise_or(refined_mask[y1:y2, x1:x2], constrained_refined)
+            final_mask_pre_expand[y1:y2, x1:x2] = cv2.bitwise_or(final_mask_pre_expand[y1:y2, x1:x2], final_crop)
+            final_mask_post_expand[y1:y2, x1:x2] = cv2.bitwise_or(final_mask_post_expand[y1:y2, x1:x2], expanded_final_crop)
+            final_mask[y1:y2, x1:x2] = cv2.bitwise_or(final_mask[y1:y2, x1:x2], expanded_final_crop)
+
         return MaskGenerationResult(
             raw_mask=np.where(raw_mask > 0, 255, 0).astype(np.uint8),
             refined_mask=np.where(refined_mask > 0, 255, 0).astype(np.uint8),

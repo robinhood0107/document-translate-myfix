@@ -28,7 +28,7 @@ services:
       - --port
       - "8080"
       - -c
-      - "4096"
+      - "${LLAMA_CTX_SIZE:-8192}"
       - -np
       - "1"
       - -t

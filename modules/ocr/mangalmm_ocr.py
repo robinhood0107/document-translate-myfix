@@ -35,7 +35,7 @@ from modules.utils.text_normalization import normalize_decorative_ocr_text
 from modules.utils.textblock import TextBlock, sort_textblock_rectangles
 
 from .base import OCREngine
-from .selection import OCR_MODE_BEST_LOCAL_PLUS, normalize_ocr_mode
+from .selection import normalize_ocr_mode
 
 
 logger = logging.getLogger(__name__)
@@ -153,7 +153,6 @@ class MangaLMMOCREngine(OCREngine):
         self.selected_ocr_mode = ""
         self.source_lang_english = ""
         self.contract_mode = "direct_manual"
-        self.use_optimal_plus_contract = False
         self.debug_root: Path | None = None
         self.debug_export_limit = DEFAULT_MANGALMM_DEBUG_EXPORT_LIMIT
         self._debug_export_counter = count(1)
@@ -172,11 +171,7 @@ class MangaLMMOCREngine(OCREngine):
                 selected_mode_raw = ""
         self.selected_ocr_mode = normalize_ocr_mode(selected_mode_raw)
         self.source_lang_english = str(kwargs.get("source_lang_english", "") or "")
-        self.use_optimal_plus_contract = (
-            self.selected_ocr_mode == OCR_MODE_BEST_LOCAL_PLUS
-            and self.source_lang_english.strip().casefold() == "japanese"
-        )
-        self.contract_mode = "optimal_plus_japanese" if self.use_optimal_plus_contract else "direct_manual"
+        self.contract_mode = "direct_manual"
         self.server_url = config.get("server_url", DEFAULT_MANGALMM_SERVER_URL) or DEFAULT_MANGALMM_SERVER_URL
         self.max_completion_tokens = self._clamp_int(
             config.get("max_completion_tokens", DEFAULT_MANGALMM_MAX_COMPLETION_TOKENS),
@@ -362,17 +357,12 @@ class MangaLMMOCREngine(OCREngine):
 
         if final_attempt is None:
             terminal_attempt = attempt_specs[-1]
-            empty_status = (
-                OCR_STATUS_EMPTY_AFTER_RETRY
-                if len(attempt_specs) > 1 and self.use_optimal_plus_contract
-                else OCR_STATUS_EMPTY_INITIAL
-            )
             quality = self._apply_assignments_to_blocks(
                 blocks,
                 assignments,
                 attempt_count=len(attempt_specs),
                 success_status=OCR_STATUS_OK_AFTER_RETRY if len(attempt_specs) > 1 else OCR_STATUS_OK,
-                empty_status=empty_status,
+                empty_status=OCR_STATUS_EMPTY_INITIAL,
                 page_bbox=page_unit.bbox_xyxy,
                 resize_plan=terminal_attempt.resize_plan,
             )
@@ -445,18 +435,16 @@ class MangaLMMOCREngine(OCREngine):
     ) -> ResizePlan:
         image_h, image_w = image_shape[:2]
         standard_short_side = DEFAULT_MANGALMM_STANDARD_SHORT_SIDE
-        standard_pixel_cap = DEFAULT_MANGALMM_MAX_PIXELS if self.use_optimal_plus_contract else self.max_pixels
-        standard_long_side = DEFAULT_MANGALMM_MAX_LONG_SIDE if self.use_optimal_plus_contract else self.max_long_side
+        standard_pixel_cap = self.max_pixels
+        standard_long_side = self.max_long_side
         if profile == "dense":
             short_side_cap = DEFAULT_MANGALMM_DENSE_SHORT_SIDE
             long_side_cap = DEFAULT_MANGALMM_DENSE_MAX_LONG_SIDE
             pixel_cap = DEFAULT_MANGALMM_DENSE_MAX_PIXELS
-            request_floor_tokens = DEFAULT_MANGALMM_DENSE_PROFILE_TOKENS
         else:
             short_side_cap = standard_short_side
             long_side_cap = standard_long_side
             pixel_cap = standard_pixel_cap
-            request_floor_tokens = DEFAULT_MANGALMM_STANDARD_PROFILE_TOKENS
 
         short_side = float(min(image_w, image_h))
         long_side = float(max(image_w, image_h))
@@ -478,11 +466,7 @@ class MangaLMMOCREngine(OCREngine):
         request_tokens = (
             int(max_completion_tokens_override)
             if max_completion_tokens_override is not None
-            else (
-                request_floor_tokens
-                if self.use_optimal_plus_contract
-                else int(self.max_completion_tokens)
-            )
+            else int(self.max_completion_tokens)
         )
         return ResizePlan(
             profile=profile,
@@ -513,60 +497,6 @@ class MangaLMMOCREngine(OCREngine):
                 attempt_kind="primary",
             )
         ]
-        if not self.use_optimal_plus_contract:
-            return attempts
-
-        block_count = initial_plan.block_count
-        small_block_ratio = initial_plan.small_block_ratio
-        text_cover_ratio = initial_plan.text_cover_ratio
-        if initial_plan.profile == "standard":
-            retry_one_plan = self._build_resize_plan(
-                image_shape,
-                profile="dense",
-                block_count=block_count,
-                small_block_ratio=small_block_ratio,
-                text_cover_ratio=text_cover_ratio,
-                max_completion_tokens_override=DEFAULT_MANGALMM_DENSE_PROFILE_TOKENS,
-            )
-            retry_one_mode = "dense_grounding_json"
-            retry_one_prompt = self.DENSE_PROMPT
-        else:
-            retry_one_plan = self._build_resize_plan(
-                image_shape,
-                profile="dense",
-                block_count=block_count,
-                small_block_ratio=small_block_ratio,
-                text_cover_ratio=text_cover_ratio,
-                max_completion_tokens_override=DEFAULT_MANGALMM_STANDARD_PROFILE_TOKENS,
-            )
-            retry_one_mode = "standard_grounding"
-            retry_one_prompt = self.STANDARD_PROMPT
-        attempts.append(
-            AttemptSpec(
-                index=1,
-                resize_plan=retry_one_plan,
-                prompt_mode=retry_one_mode,
-                prompt_text=retry_one_prompt,
-                attempt_kind="smart_retry",
-            )
-        )
-        retry_two_plan = self._build_resize_plan(
-            image_shape,
-            profile="dense",
-            block_count=block_count,
-            small_block_ratio=small_block_ratio,
-            text_cover_ratio=text_cover_ratio,
-            max_completion_tokens_override=DEFAULT_MANGALMM_RESCUE_PROFILE_TOKENS,
-        )
-        attempts.append(
-            AttemptSpec(
-                index=2,
-                resize_plan=retry_two_plan,
-                prompt_mode="dense_grounding_json_rescue",
-                prompt_text=self.DENSE_PROMPT,
-                attempt_kind="rescue_retry",
-            )
-        )
         return attempts
 
     def _select_resize_profile(
@@ -1283,9 +1213,6 @@ class MangaLMMOCREngine(OCREngine):
         return data
 
     def _requests_timeout(self):
-        if self.use_optimal_plus_contract:
-            # Optimal+ waits for the local LLM to finish once the request was accepted.
-            return (float(self.request_timeout_sec), None)
         return float(self.request_timeout_sec)
 
     def _extract_text_from_response(self, data: dict) -> str:

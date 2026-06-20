@@ -6,6 +6,7 @@ import cv2
 import numpy as np
 
 from modules.detection.utils.content import get_inpaint_bboxes
+from modules.utils.inpaint_envelope import build_text_free_erase_envelope
 
 
 def normalize_xyxy(box, image_shape: tuple[int, int] | tuple[int, int, int]) -> tuple[int, int, int, int] | None:
@@ -62,6 +63,11 @@ def resolve_block_ctd_roi(block, image_shape: tuple[int, int] | tuple[int, int, 
     mask_alias = normalize_xyxy(getattr(block, 'mask_roi_xyxy', None), image_shape)
     if mask_alias is not None:
         return mask_alias
+
+    if text_class == 'text_free':
+        envelope = build_text_free_erase_envelope(block, image_shape)
+        if envelope is not None:
+            return envelope
 
     return _expand_bbox(
         getattr(block, 'xyxy', None),
@@ -140,6 +146,13 @@ def build_text_prior_mask(
     prior = np.zeros((y2 - y1, x2 - x1), dtype=np.uint8)
     if getattr(block, 'xyxy', None) is None:
         return prior
+
+    envelope = build_text_free_erase_envelope(block, image_rgb.shape)
+    if envelope is not None:
+        clipped_envelope = _clip_box_to_roi(envelope, roi)
+        if clipped_envelope is not None:
+            bx1, by1, bx2, by2 = clipped_envelope
+            prior[by1 - y1:by2 - y1, bx1 - x1:bx2 - x1] = 255
 
     prior_boxes = getattr(block, 'inpaint_bboxes', None)
     if prior_boxes is None:

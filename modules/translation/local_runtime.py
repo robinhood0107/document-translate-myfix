@@ -86,6 +86,7 @@ class LocalGemmaRuntimeManager:
         self._lock = threading.RLock()
         self._compose_command: tuple[str, ...] | None = None
         self._managed_active = False
+        self._readiness_cache: set[tuple[str, str, str]] = set()
 
     def validate_server(self, settings_page: Any) -> None:
         api_base_url, _ = self._resolve_credentials(settings_page)
@@ -117,40 +118,104 @@ class LocalGemmaRuntimeManager:
             if not api_base_url:
                 raise self._build_setup_error("Endpoint URL is empty.")
 
-            if self.should_manage_server(settings_page):
-                self.validate_server(settings_page)
-                model_file = Path(ROOT_DIR / "testmodel" / Path(model_name).name)
-                if not model_file.is_file():
-                    raise self._build_setup_error(
-                        f"Configured Gemma model file was not found: {model_file}"
-                    )
+            managed = self.should_manage_server(settings_page)
+            cache_key = self._readiness_cache_key(api_base_url, model_name, managed)
+            if self._is_cancelled(cancel_checker):
+                self._readiness_cache.discard(cache_key)
+                raise OperationCancelledError("Cancelled while preparing Gemma runtime.")
 
-                self._emit_progress(
-                    progress_callback,
-                    status="starting",
-                    step_key="health_probe",
-                    message="Gemma 상태를 확인하는 중...",
-                    detail=f"Endpoint: {_RUNTIME_CONFIG['managed_url']}",
-                )
-                if self._wait_for_any_probe(
-                    [_RUNTIME_CONFIG["health_url"], _RUNTIME_CONFIG["models_url"]],
-                    timeout_sec=2,
+            if cache_key in self._readiness_cache:
+                if managed:
+                    self._managed_active = True
+                self._emit_readiness_cache_hit(progress_callback, managed=managed)
+                return
+
+            try:
+                self._ensure_server_uncached(
+                    settings_page,
+                    api_base_url=api_base_url,
+                    model_name=model_name,
+                    managed=managed,
+                    timeout_sec=timeout_sec,
                     progress_callback=progress_callback,
                     cancel_checker=cancel_checker,
+                )
+            except (
+                LocalServiceConnectionError,
+                LocalServiceResponseError,
+                LocalServiceSetupError,
+                OperationCancelledError,
+            ):
+                self._readiness_cache.discard(cache_key)
+                raise
+            else:
+                self._readiness_cache.add(cache_key)
+
+    def _ensure_server_uncached(
+        self,
+        settings_page: Any,
+        *,
+        api_base_url: str,
+        model_name: str,
+        managed: bool,
+        timeout_sec: int,
+        progress_callback: Callable[[dict[str, Any]], None] | None,
+        cancel_checker: Callable[[], bool] | None,
+    ) -> None:
+        if managed:
+            self.validate_server(settings_page)
+            model_file = Path(ROOT_DIR / "testmodel" / Path(model_name).name)
+            if not model_file.is_file():
+                raise self._build_setup_error(
+                    f"Configured Gemma model file was not found: {model_file}"
+                )
+
+            self._emit_progress(
+                progress_callback,
+                status="starting",
+                step_key="health_probe",
+                message="Gemma 상태를 확인하는 중...",
+                detail=f"Endpoint: {_RUNTIME_CONFIG['managed_url']}",
+            )
+            started_or_recreated = False
+            if self._wait_for_any_probe(
+                [_RUNTIME_CONFIG["health_url"], _RUNTIME_CONFIG["models_url"]],
+                timeout_sec=2,
+                progress_callback=progress_callback,
+                cancel_checker=cancel_checker,
+                step_key="health_probe",
+                message="기존 Gemma 런타임 재사용 가능 여부를 확인하는 중...",
+            ):
+                self._managed_active = True
+                self._emit_progress(
+                    progress_callback,
+                    status="completed",
                     step_key="health_probe",
-                    message="기존 Gemma 런타임 재사용 가능 여부를 확인하는 중...",
-                ):
-                    self._managed_active = True
+                    message="이미 실행 중인 Gemma 런타임을 재사용합니다.",
+                )
+                try:
+                    self._validate_model_with_progress(api_base_url, model_name, progress_callback)
+                except LocalServiceResponseError as exc:
+                    self._emit_progress(
+                        progress_callback,
+                        status="starting",
+                        step_key="compose_recreate",
+                        message="Gemma 모델이 설정과 달라 컨테이너를 다시 시작하는 중...",
+                        detail=str(exc),
+                    )
+                    self._run_compose("up", "-d", "--force-recreate", step_name="recreate", model_name=model_name)
+                    started_or_recreated = True
                     self._emit_progress(
                         progress_callback,
                         status="completed",
-                        step_key="health_probe",
-                        message="이미 실행 중인 Gemma 런타임을 재사용합니다.",
+                        step_key="compose_recreate",
+                        message="Gemma 컨테이너 재시작 명령을 보냈습니다.",
                     )
-                    self._validate_model_with_progress(api_base_url, model_name, progress_callback)
+                else:
                     self._log_runtime_metadata()
                     return
 
+            if not started_or_recreated:
                 self._emit_progress(
                     progress_callback,
                     status="starting",
@@ -165,58 +230,59 @@ class LocalGemmaRuntimeManager:
                     step_key="compose_up",
                     message="Gemma 컨테이너 시작 명령을 보냈습니다.",
                 )
-                if not self._wait_for_any_probe(
-                    [_RUNTIME_CONFIG["health_url"], _RUNTIME_CONFIG["models_url"]],
-                    timeout_sec=timeout_sec,
-                    progress_callback=progress_callback,
-                    cancel_checker=cancel_checker,
-                    step_key="health_wait",
-                    message="Gemma health 기다리는 중...",
-                ):
-                    raise self._build_setup_error(
-                        (
-                            f"Timed out while waiting for Gemma at {_RUNTIME_CONFIG['health_url']} "
-                            f"after docker compose up -d of {_RUNTIME_CONFIG['compose_file'].name}."
-                        ),
-                    )
-                self._managed_active = True
-                self._emit_progress(
-                    progress_callback,
-                    status="completed",
-                    step_key="health_wait",
-                    message="Gemma health 확인이 완료되었습니다.",
-                )
-                self._validate_model_with_progress(api_base_url, model_name, progress_callback)
-                self._log_runtime_metadata()
-                return
-
-            self._emit_progress(
-                progress_callback,
-                status="starting",
-                step_key="health_probe",
-                message="Gemma endpoint에 연결을 확인하는 중...",
-            )
             if not self._wait_for_any_probe(
-                _derive_probe_urls(api_base_url),
-                timeout_sec=5,
+                [_RUNTIME_CONFIG["health_url"], _RUNTIME_CONFIG["models_url"]],
+                timeout_sec=timeout_sec,
                 progress_callback=progress_callback,
                 cancel_checker=cancel_checker,
-                step_key="health_probe",
-                message="Gemma endpoint에 연결을 확인하는 중...",
+                step_key="health_wait",
+                message="Gemma health 기다리는 중...",
             ):
-                raise self._build_connection_error(
-                    f"Unable to reach local Gemma server at {api_base_url}.",
+                raise self._build_setup_error(
+                    (
+                        f"Timed out while waiting for Gemma at {_RUNTIME_CONFIG['health_url']} "
+                        f"after docker compose up -d of {_RUNTIME_CONFIG['compose_file'].name}."
+                    ),
                 )
+            self._managed_active = True
             self._emit_progress(
                 progress_callback,
                 status="completed",
-                step_key="health_probe",
-                message="Gemma endpoint 연결이 확인되었습니다.",
+                step_key="health_wait",
+                message="Gemma health 확인이 완료되었습니다.",
             )
             self._validate_model_with_progress(api_base_url, model_name, progress_callback)
+            self._log_runtime_metadata()
+            return
+
+        self._emit_progress(
+            progress_callback,
+            status="starting",
+            step_key="health_probe",
+            message="Gemma endpoint에 연결을 확인하는 중...",
+        )
+        if not self._wait_for_any_probe(
+            _derive_probe_urls(api_base_url),
+            timeout_sec=5,
+            progress_callback=progress_callback,
+            cancel_checker=cancel_checker,
+            step_key="health_probe",
+            message="Gemma endpoint에 연결을 확인하는 중...",
+        ):
+            raise self._build_connection_error(
+                f"Unable to reach local Gemma server at {api_base_url}.",
+            )
+        self._emit_progress(
+            progress_callback,
+            status="completed",
+            step_key="health_probe",
+            message="Gemma endpoint 연결이 확인되었습니다.",
+        )
+        self._validate_model_with_progress(api_base_url, model_name, progress_callback)
 
     def shutdown(self) -> None:
         with self._lock:
+            self._readiness_cache.clear()
             if not self._managed_active:
                 return
             try:
@@ -231,6 +297,26 @@ class LocalGemmaRuntimeManager:
         api_base_url = str((creds or {}).get("api_url", "")).strip().rstrip("/")
         model_name = str((creds or {}).get("model", "")).strip() or DEFAULT_GEMMA_LOCAL_MODEL
         return api_base_url, model_name
+
+    @staticmethod
+    def _readiness_cache_key(api_base_url: str, model_name: str, managed: bool) -> tuple[str, str, str]:
+        mode = "managed" if managed else "unmanaged"
+        return (_normalize_url(api_base_url), str(model_name or "").strip(), mode)
+
+    def _emit_readiness_cache_hit(
+        self,
+        progress_callback: Callable[[dict[str, Any]], None] | None,
+        *,
+        managed: bool,
+    ) -> None:
+        message = "이미 실행 중인 Gemma 런타임을 재사용합니다." if managed else "Gemma endpoint 연결이 확인되었습니다."
+        self._emit_progress(
+            progress_callback,
+            status="completed",
+            step_key="readiness_cache",
+            message=message,
+            readiness_cache_hit=True,
+        )
 
     def _resolve_compose_command(self) -> tuple[str, ...]:
         if self._compose_command is not None:

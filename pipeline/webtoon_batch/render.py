@@ -13,9 +13,12 @@ from app.ui.canvas.save_renderer import ImageSaveRenderer
 from app.ui.canvas.text.text_item_properties import TextItemProperties
 from app.ui.canvas.text_item import OutlineInfo, OutlineType
 from modules.rendering.render import (
+    build_render_rects_for_block,
+    build_text_item_layout_geometry,
     describe_render_text_markup,
     describe_render_text_sanitization,
     get_best_render_area,
+    get_render_fit_clearance_for_block,
     is_vertical_block,
     pyside_word_wrap,
 )
@@ -24,7 +27,6 @@ from modules.utils.automatic_output import (
     build_archive_page_file_name,
     build_archive_staging_dir,
     build_output_file_name,
-    is_individual_images_mode,
     is_single_archive_mode,
     write_archive_image,
     write_output_image,
@@ -37,7 +39,6 @@ from modules.utils.inpaint_debug import (
 )
 from modules.utils.render_style_policy import (
     VERTICAL_ALIGNMENT_TOP,
-    build_rect_tuple,
     resolve_render_text_color,
 )
 from modules.utils.textblock import TextBlock
@@ -54,13 +55,16 @@ class RenderMixin:
         return dict(self.main_page.get_resolved_export_settings())
 
     def _resolve_export_token(
-        self: WebtoonBatchProcessor, directory: str, base_timestamp: str
+        self: WebtoonBatchProcessor,
+        directory: str,
+        base_timestamp: str,
+        source_name: str | None = None,
     ) -> str:
         cache = getattr(self, "_export_run_tokens", None)
         if cache is None:
             cache = {}
             self._export_run_tokens = cache
-        return reserve_export_run_token(directory, base_timestamp, cache)
+        return reserve_export_run_token(directory, base_timestamp, cache, source_name=source_name)
 
     def _prepare_page_blocks_for_render(
         self: WebtoonBatchProcessor,
@@ -193,12 +197,45 @@ class RenderMixin:
                 max_font_size,
                 min_font_size,
                 vertical,
+                fit_clearance=get_render_fit_clearance_for_block(
+                    block,
+                    outline_width,
+                ),
                 return_metrics=True,
             )
+            block._text_fit_status = (
+                "needs_review"
+                if rendered_width > width or rendered_height > height
+                else "fit"
+            )
+            block._text_fit_metrics = {
+                "rendered_width": float(rendered_width),
+                "rendered_height": float(rendered_height),
+                "box_width": float(width),
+                "box_height": float(height),
+                "font_size": float(font_size),
+            }
 
             if is_no_space_lang(target_lang_code):
                 wrapped_translation = wrapped_translation.replace(" ", "")
-            render_markup = describe_render_text_markup(wrapped_translation)
+            font_color = resolve_render_text_color(
+                block.font_color,
+                base_font_color,
+                render_settings.force_font_color,
+                render_settings.smart_global_apply_all,
+            )
+            render_markup = describe_render_text_markup(
+                wrapped_translation,
+                font_family=font,
+                font_size=font_size,
+                text_color=font_color,
+                alignment=alignment,
+                line_spacing=line_spacing,
+                bold=bold,
+                italic=italic,
+                underline=underline,
+                direction=direction,
+            )
             block._render_text = str(wrapped_translation or "")
             block._render_html = str(
                 render_markup.html_text if render_markup.html_applied else wrapped_translation or ""
@@ -218,13 +255,12 @@ class RenderMixin:
                 render_normalization.replacements
             ) + list(render_markup.replacements)
 
-            font_color = resolve_render_text_color(
-                block.font_color,
-                base_font_color,
-                render_settings.force_font_color,
-                render_settings.smart_global_apply_all,
+            source_rect, block_anchor = build_render_rects_for_block(block)
+            position, item_width, item_height = build_text_item_layout_geometry(
+                source_rect,
+                rendered_height,
+                vertical_alignment,
             )
-            source_rect = build_rect_tuple(x1, y1, width, height)
             text_props = TextItemProperties(
                 text=block._render_html,
                 font_family=font,
@@ -237,17 +273,17 @@ class RenderMixin:
                 bold=bold,
                 italic=italic,
                 underline=underline,
-                position=(x1, y1),
+                position=position,
                 rotation=block.angle,
                 scale=1.0,
                 transform_origin=block.tr_origin_point if block.tr_origin_point else (0, 0),
-                width=rendered_width,
-                height=rendered_height,
+                width=item_width,
+                height=item_height,
                 direction=direction,
                 vertical=vertical,
                 vertical_alignment=vertical_alignment,
                 source_rect=source_rect,
-                block_anchor=source_rect,
+                block_anchor=block_anchor,
                 selection_outlines=[
                     OutlineInfo(
                         0,
@@ -269,11 +305,29 @@ class RenderMixin:
             text_item_state["render_fallback_font_family"] = str(
                 render_markup.fallback_font_family or ""
             )
+            text_item_state["render_area_source"] = str(
+                getattr(block, "_render_area_source", "text_bbox") or "text_bbox"
+            )
+            text_item_state["render_source_xyxy"] = list(
+                getattr(block, "_render_area_xyxy", []) or []
+            )
+            text_item_state["render_anchor_xyxy"] = list(
+                getattr(block, "_render_original_xyxy", []) or []
+            )
+            text_item_state["render_bubble_xyxy"] = list(
+                getattr(block, "_render_bubble_xyxy", []) or []
+            )
             text_item_state["render_normalization_applied"] = bool(
                 block._render_normalization_applied
             )
             text_item_state["render_normalization_reasons"] = list(
                 block._render_normalization_reasons
+            )
+            text_item_state["text_fit_status"] = str(
+                getattr(block, "_text_fit_status", "fit") or "fit"
+            )
+            text_item_state["text_fit_metrics"] = dict(
+                getattr(block, "_text_fit_metrics", {}) or {}
             )
             viewer_state["text_items_state"].append(text_item_state)
 
@@ -319,8 +373,8 @@ class RenderMixin:
         )
 
         export_settings = self._effective_export_settings()
-        export_token = self._resolve_export_token(directory, timestamp)
-        export_root = export_run_root(directory, export_token)
+        export_token = self._resolve_export_token(directory, timestamp, archive_bname)
+        export_root = export_run_root(directory, export_token, archive_bname)
         self.main_page.image_ctrl.update_processing_summary(
             image_path,
             {
@@ -345,16 +399,13 @@ class RenderMixin:
             self.log_skipped_image(directory, export_token, image_path, reason)
             return
 
-        if export_settings["export_inpainted_image"] and is_individual_images_mode(export_settings):
+        if export_settings["export_inpainted_image"]:
             renderer = ImageSaveRenderer(image)
             patches = self.final_patches_for_save.get(image_path, [])
             renderer.apply_patches(patches)
-            path = self.main_page.get_automatic_output_series_dir(
-                directory,
-                anchor_path=self.main_page.image_files[0] if self.main_page.image_files else image_path,
-            )
-            os.makedirs(path, exist_ok=True)
             cleaned_image_rgb = renderer.render_to_image()
+            path = os.path.join(export_root, "inpainted_images", archive_bname)
+            os.makedirs(path, exist_ok=True)
             cleaned_output_path = os.path.join(
                 path,
                 build_output_file_name(
@@ -364,7 +415,7 @@ class RenderMixin:
                     export_settings,
                 ),
             )
-            write_output_image(
+            cleaned_output_path = write_output_image(
                 cleaned_output_path,
                 cleaned_image_rgb,
                 source_path=image_path,
@@ -374,7 +425,7 @@ class RenderMixin:
                 image_path,
                 {"cleaned_image_path": cleaned_output_path},
             )
-        elif not is_individual_images_mode(export_settings):
+        else:
             self.main_page.image_ctrl.update_processing_summary(
                 image_path,
                 {"cleaned_image_path": ""},
@@ -383,9 +434,7 @@ class RenderMixin:
         blk_list = self.main_page.image_states[image_path].get("blk_list", [])
 
         if export_settings["export_raw_text"] and blk_list:
-            path = os.path.join(
-                directory, f"comic_translate_{export_token}", "raw_texts", archive_bname
-            )
+            path = os.path.join(export_root, "raw_texts", archive_bname)
             if not os.path.exists(path):
                 os.makedirs(path, exist_ok=True)
             raw_text = get_raw_text(blk_list)
@@ -394,8 +443,7 @@ class RenderMixin:
 
         if export_settings["export_translated_text"] and blk_list:
             path = os.path.join(
-                directory,
-                f"comic_translate_{export_token}",
+                export_root,
                 "translated_texts",
                 archive_bname,
             )
@@ -412,8 +460,7 @@ class RenderMixin:
         if (export_settings["export_raw_text"] or export_settings["export_translated_text"]) and blk_list:
             summary = self.main_page.image_states[image_path].get("processing_summary", {})
             path = os.path.join(
-                directory,
-                f"comic_translate_{export_token}",
+                export_root,
                 "ocr_debugs",
                 archive_bname,
             )
@@ -495,7 +542,7 @@ class RenderMixin:
         renderer.apply_patches(patches)
         viewer_state = self.main_page.image_states[image_path].get("viewer_state", {})
         renderer.add_state_to_image(viewer_state, page_idx, self.main_page)
-        translated_dir = self.main_page.get_automatic_output_series_dir(
+        translated_dir = self.main_page.get_reserved_automatic_output_series_dir(
             directory,
             anchor_path=self.main_page.image_files[0] if self.main_page.image_files else image_path,
         )
@@ -533,7 +580,7 @@ class RenderMixin:
                     export_settings,
                 ),
             )
-            write_output_image(
+            output_path = write_output_image(
                 output_path,
                 translated_image_rgb,
                 source_path=image_path,
@@ -544,6 +591,7 @@ class RenderMixin:
             image_path,
             {
                 "translated_image_path": output_path,
+                "translated_page_image_path": output_path,
                 "export_root": translated_dir,
             },
         )

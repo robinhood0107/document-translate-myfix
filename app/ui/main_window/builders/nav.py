@@ -46,7 +46,7 @@ class NavRailMixin:
         self.comic_browser_button.set_dayu_filters([".cbz", ".cbr", ".cb7", ".cbt"])
 
         self.project_browser_button = MClickBrowserFileToolButton(multiple=False)
-        self.project_browser_button.set_dayu_filters([".ctpr"])
+        self.project_browser_button.set_dayu_filters([PROJECT_FILE_EXT, SERIES_PROJECT_FILE_EXT])
 
         self.psd_browser_button = MClickBrowserFileToolButton(multiple=True)
         self.psd_browser_button.set_dayu_filters([".psd"])
@@ -272,3 +272,4 @@ class NavRailMixin:
             button.clicked.connect(clicked)
 
         return button
+from app.projects.project_types import PROJECT_FILE_EXT, SERIES_PROJECT_FILE_EXT

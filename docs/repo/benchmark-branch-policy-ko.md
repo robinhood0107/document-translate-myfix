@@ -6,7 +6,8 @@
 
 - `main`에는 배포에 필요한 제품 코드만 남깁니다.
 - `develop`에는 통합 대상 제품 코드만 남깁니다.
-- benchmark 실험, preset, 보고서, 차트, 결과 로그는 `benchmarking/lab` 브랜치에서만 유지합니다.
+- benchmark 실험 코드와 제품에 필요한 요약 문서는 `benchmarking/lab` 브랜치에서 관리할 수 있습니다.
+- benchmark raw output, 차트 이미지, 결과 로그, 샘플 이미지, 원본명/작품명은 Git에 보관하지 않습니다.
 - benchmark harness는 가능하면 실제 offscreen 앱 파이프라인을 기준으로 유지합니다.
 
 핵심 원칙은 다음과 같습니다.
@@ -36,7 +37,8 @@
 ### `benchmarking/lab`
 
 - benchmark 전용 장기 브랜치
-- 실험 preset, runner, suite, compare 스크립트, generated report, 차트, 실험 문서를 유지
+- 실험 preset, runner, suite, compare 스크립트, 제품에 필요한 요약 문서를 유지
+- raw output, generated chart, docker/runtime log, 샘플 이미지, 사용자 로컬 경로는 보관 금지
 - `develop`의 최신 제품 코드를 주기적으로 받아서 실험
 
 ## `develop`로 가져와도 되는 파일
@@ -69,6 +71,9 @@ benchmark 실험 결과를 바탕으로 아래 종류의 변경만 `develop` 후
 - `docs/banchmark_report/`
 - `docs/assets/benchmarking/`
 - benchmark 결과 수치, 승자 preset 설명, 차트 링크가 들어간 README 변경
+- `Sample/`, `testmodel/`, `build/`, `banchmark_result_log/`
+- `result_*`, `log_*` 출력 폴더
+- 실제 작품명, 원본 파일명, 사용자 로컬 절대경로가 들어간 테스트 fixture 또는 문서
 
 ## benchmark family 구조 규칙
 
@@ -79,7 +84,7 @@ benchmark family는 가능한 한 아래 구조를 함께 갖춥니다.
   - `suite` BAT
   - CUDA12 / CUDA13 쌍
 - 결과 루트
-  - `./banchmark_result_log/<family>/`
+  - repo 밖 local validation log, 예: `<benchmark-log-root>/<family>/`
 - 문서 세트
   - `docs/benchmark/<family>/workflow-ko.md`
   - `docs/benchmark/<family>/usage-ko.md`
@@ -87,8 +92,8 @@ benchmark family는 가능한 한 아래 구조를 함께 갖춥니다.
   - `docs/benchmark/<family>/results-history-ko.md`
   - `docs/banchmark_report/<family>-report-ko.md`
 - generated 자산
-  - `docs/assets/benchmarking/<family>/latest`
-  - `docs/assets/benchmarking/<family>/history/<snapshot-id>`
+  - Git에 보관하지 않습니다.
+  - 필요한 경우 PR 설명에는 중립화한 외부 검증 로그 위치나 요약 수치만 적습니다.
 
 ## benchmark runtime 재사용 정책
 
@@ -126,7 +131,7 @@ OCR 비교 family는 아래처럼 scope를 분리할 수 있습니다.
 
 ## benchmark 결과를 `develop`로 반영하는 절차
 
-1. `benchmarking/lab`에서 실험을 완료합니다.
+1. 로컬 validation log에서 실험을 완료합니다.
 2. 결과를 읽고 제품에 실제로 필요한 변경만 추립니다.
 3. 새 `codex/*` 작업 브랜치를 `develop`에서 분기합니다.
 4. benchmark 전용 파일은 제외하고 아래만 수동으로 옮깁니다.
@@ -136,7 +141,7 @@ OCR 비교 family는 아래처럼 scope를 분리할 수 있습니다.
 5. `develop` 대상 검증을 수행합니다.
 6. benchmark 결과 자체는 merge하지 않고, 제품에 필요한 결정만 merge합니다.
 
-즉, `benchmarking/lab`에서 `develop`로 전체 브랜치를 merge하는 것이 아니라, 검증된 제품 변경만 별도 브랜치에서 다시 정리해 반영하는 것이 원칙입니다.
+즉, raw benchmark 결과를 제품 브랜치로 merge하지 않고, 검증된 제품 변경만 별도 브랜치에서 다시 정리해 반영하는 것이 원칙입니다.
 
 ## 유지보수 관점 기준
 
@@ -155,8 +160,8 @@ OCR 비교 family는 아래처럼 scope를 분리할 수 있습니다.
 ## 문서 운영 기준
 
 - 제품 브랜치의 README는 제품 사용 문서만 유지합니다.
-- benchmark 설명과 결과 해석은 `benchmarking/lab` 쪽 문서에서만 유지합니다.
+- benchmark 설명과 결과 해석은 민감하지 않은 요약만 유지합니다.
 - 같은 목적의 benchmark 문서는 가능한 한 통합합니다.
   - 사용법/운영 절차는 하나의 문서
   - 아키텍처/경계 원칙은 하나의 문서
-  - 생성 결과는 generated report 하나로 유지
+  - 생성 결과는 repo 밖 validation log에 유지

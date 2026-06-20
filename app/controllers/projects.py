@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import copy
+import hashlib
 import logging
 import os
 import re
@@ -12,9 +13,12 @@ from datetime import datetime
 from typing import TYPE_CHECKING
 from dataclasses import asdict, is_dataclass
 
-from PySide6 import QtWidgets, QtCore
+import msgpack
+import numpy as np
+from PIL import Image as PILImage
+
+from PySide6 import QtWidgets, QtCore, QtGui
 from PySide6.QtCore import QSettings, QPointF
-from PySide6.QtGui import QUndoStack
 
 from app.thread_worker import GenericWorker
 from app.controllers.psd_exporter import PsdPageData, export_psd_pages
@@ -28,7 +32,28 @@ from app.projects.project_state import (
     load_state_from_proj_file,
     save_state_to_proj_file,
 )
-from modules.utils.archives import make
+from app.projects.project_types import (
+    PROJECT_FILE_EXT,
+    PROJECT_KIND_SERIES,
+    PROJECT_KIND_SINGLE,
+    SERIES_PROJECT_FILE_EXT,
+    ensure_project_extension,
+    project_extension_for_kind,
+    project_file_filter_for_kind,
+)
+from app.projects.parsers import ProjectEncoder
+from app.ui.messages import Messages
+from modules.utils.archives import is_image_file, make
+from modules.utils.automatic_output import (
+    build_archive_page_file_name,
+    build_archive_staging_dir,
+    build_output_file_name,
+    is_single_archive_mode,
+    reserve_unique_path,
+    resolve_forced_archive_output_path,
+    write_archive_image,
+    write_output_image,
+)
 from modules.utils.paths import get_user_data_dir, get_default_project_autosave_dir
 
 logger = logging.getLogger(__name__)
@@ -55,6 +80,18 @@ class ProjectController:
     # Recent projects (persisted via QSettings)
 
     MAX_RECENT = 15
+
+    def _current_project_kind(self) -> str:
+        return str(getattr(self.main, "project_kind", PROJECT_KIND_SINGLE) or PROJECT_KIND_SINGLE)
+
+    def _project_extension(self, kind: str | None = None) -> str:
+        return project_extension_for_kind(kind or self._current_project_kind())
+
+    def _recovered_project_display_name(self, kind: str | None = None) -> str:
+        effective_kind = kind or self._current_project_kind()
+        if effective_kind == PROJECT_KIND_SERIES:
+            return self.main.tr("RecoveredProject.seriesctpr")
+        return self.main.tr("RecoveredProject.ctpr")
 
     def _read_autosave_enabled_setting(self) -> bool:
         settings = QSettings("ComicLabs", "ComicTranslate")
@@ -270,7 +307,7 @@ class ProjectController:
         return os.path.join(get_user_data_dir(), "autosave")
 
     def _recovery_project_path(self) -> str:
-        return os.path.join(self._autosave_dir(), "project_recovery.ctpr")
+        return os.path.join(self._autosave_dir(), f"project_recovery{self._project_extension()}")
 
     def _configured_project_autosave_dir(self) -> str:
         export_settings = self.main.settings_page.get_export_settings()
@@ -291,27 +328,32 @@ class ProjectController:
         base_name = "project"
 
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        candidate = os.path.join(autosave_dir, f"{base_name}_{timestamp}.ctpr")
+        extension = self._project_extension()
+        candidate = os.path.join(autosave_dir, f"{base_name}_{timestamp}{extension}")
         if not os.path.exists(candidate):
             return candidate
 
         for seq in range(1, 1000):
-            seq_candidate = os.path.join(autosave_dir, f"{base_name}_{timestamp}_{seq:03d}.ctpr")
+            seq_candidate = os.path.join(
+                autosave_dir,
+                f"{base_name}_{timestamp}_{seq:03d}{extension}",
+            )
             if not os.path.exists(seq_candidate):
                 return seq_candidate
 
         # Extremely unlikely fallback; keeps behavior deterministic if all sequence
         # slots are exhausted for the same timestamp.
         fallback_timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
-        return os.path.join(autosave_dir, f"{base_name}_{fallback_timestamp}.ctpr")
+        return os.path.join(autosave_dir, f"{base_name}_{fallback_timestamp}{extension}")
 
     def clear_recovery_checkpoint(self):
-        recovery_file = self._recovery_project_path()
-        if os.path.exists(recovery_file):
-            try:
-                os.remove(recovery_file)
-            except Exception:
-                logger.debug("Failed to remove recovery project file: %s", recovery_file)
+        for extension in (PROJECT_FILE_EXT, SERIES_PROJECT_FILE_EXT):
+            recovery_file = os.path.join(self._autosave_dir(), f"project_recovery{extension}")
+            if os.path.exists(recovery_file):
+                try:
+                    os.remove(recovery_file)
+                except Exception:
+                    logger.debug("Failed to remove recovery project file: %s", recovery_file)
 
     def _on_autosave_timeout(self):
         # Interval timer is reserved for recovery checkpoints.
@@ -330,6 +372,8 @@ class ProjectController:
         (which the batch processor uses for cancel detection). A GenericWorker
         is started directly on the shared threadpool instead.
         """
+        if self._current_project_kind() == PROJECT_KIND_SERIES:
+            return
         autosave_enabled = bool(
             self.main.settings_page.get_export_settings().get("project_autosave_enabled", False)
         )
@@ -395,6 +439,9 @@ class ProjectController:
         self._realtime_autosave_timer.start()
 
     def autosave_project(self, prefer_project_file: bool = True):
+        if self._current_project_kind() == PROJECT_KIND_SERIES:
+            self._autosave_series_project(prefer_project_file=prefer_project_file)
+            return
         if self._autosave_save_pending:
             if prefer_project_file:
                 self._autosave_retrigger_requested = True
@@ -452,11 +499,76 @@ class ProjectController:
 
         self.main.run_threaded(self.save_project, None, on_error, on_finished, target_file)
 
+    def _autosave_series_project(self, prefer_project_file: bool = True):
+        if self._autosave_save_pending:
+            if prefer_project_file:
+                self._autosave_retrigger_requested = True
+            return
+        if not getattr(self.main, "series_ctrl", None) or not self.main.series_ctrl.has_series_loaded():
+            return
+        if getattr(self.main, "_batch_active", False):
+            return
+        if not self.main.has_unsaved_changes():
+            return
+
+        autosave_enabled = bool(
+            self.main.settings_page.get_export_settings().get("project_autosave_enabled", False)
+        )
+        self._ensure_autosave_project_file_if_needed()
+        use_project_file = bool(prefer_project_file and autosave_enabled and self.main.project_file)
+        target_file = self.main.project_file if use_project_file else self._recovery_project_path()
+        if not target_file:
+            return
+
+        autosave_start_revision = self.main._dirty_revision
+        self._autosave_save_pending = True
+        try:
+            self.main.series_ctrl.sync_active_child_to_series()
+        except Exception:
+            self._autosave_save_pending = False
+            logger.warning("Series autosave sync failed.", exc_info=True)
+            return
+
+        def worker() -> str:
+            current_series = str(self.main.series_ctrl.series_file or "")
+            if not current_series:
+                raise FileNotFoundError("Series project file is not available for autosave.")
+            if target_file != current_series:
+                shutil.copyfile(current_series, target_file)
+            return target_file
+
+        def on_error(error_tuple):
+            self._autosave_save_pending = False
+            exctype, value, _ = error_tuple
+            logger.warning("Series autosave failed: %s: %s", exctype.__name__, value)
+            if self._autosave_retrigger_requested:
+                self._autosave_retrigger_requested = False
+                self._realtime_autosave_timer.start()
+
+        def on_finished():
+            self._autosave_save_pending = False
+            if use_project_file and self.main._dirty_revision == autosave_start_revision:
+                self.main.set_project_clean()
+                self.add_recent_project(target_file)
+                self._refresh_home_screen()
+            if self._autosave_retrigger_requested:
+                self._autosave_retrigger_requested = False
+                self._realtime_autosave_timer.start()
+
+        self.main.run_threaded(worker, None, on_error, on_finished)
+
     def prompt_restore_recovery_if_available(self) -> bool:
         if self.main.image_files:
             return False
 
-        recovery_file = self._recovery_project_path()
+        candidates = [
+            os.path.join(self._autosave_dir(), f"project_recovery{PROJECT_FILE_EXT}"),
+            os.path.join(self._autosave_dir(), f"project_recovery{SERIES_PROJECT_FILE_EXT}"),
+        ]
+        existing = [path for path in candidates if os.path.exists(path)]
+        if not existing:
+            return False
+        recovery_file = max(existing, key=lambda path: os.path.getmtime(path))
         if not os.path.exists(recovery_file):
             return False
 
@@ -488,22 +600,35 @@ class ProjectController:
         if not os.path.exists(recovery_file):
             return
 
+        if recovery_file.lower().endswith(SERIES_PROJECT_FILE_EXT):
+            self.main.series_ctrl.thread_load_series_project(recovery_file, recovery_loaded=True)
+            return
+
+        busy_dialog = Messages.show_busy(
+            self.main,
+            self.main.tr("Restoring project file..."),
+            title=self.main.tr("Project File"),
+            minimum_visible_ms=300,
+        )
         self.main.image_ctrl.clear_state()
-        self.main.setWindowTitle(f"{self.main.tr('RecoveredProject.ctpr')}[*]")
+        self.main.setWindowTitle(f"{self._recovered_project_display_name(PROJECT_KIND_SINGLE)}[*]")
 
         load_failed = {"value": False}
 
         def on_error(error_tuple):
             load_failed["value"] = True
+            Messages.close_busy(busy_dialog, force=True)
             self.main.default_error_handler(error_tuple)
 
         def on_finished():
+            Messages.close_busy(busy_dialog)
             if load_failed["value"]:
                 return
             self.update_ui_from_project()
             # Keep recovered data as an unsaved project so users can choose a destination.
             self.main.project_file = None
-            self.main.setWindowTitle(f"{self.main.tr('RecoveredProject.ctpr')}[*]")
+            self.main.project_kind = PROJECT_KIND_SINGLE
+            self.main.setWindowTitle(f"{self._recovered_project_display_name(PROJECT_KIND_SINGLE)}[*]")
             self.main.mark_project_dirty()
             self.clear_recovery_checkpoint()
 
@@ -517,11 +642,26 @@ class ProjectController:
 
     def save_and_make(self, output_path: str):
         self.main.loading.setVisible(True)
+        busy_dialog = Messages.show_busy(
+            self.main,
+            self.main.tr("Exporting image..."),
+            title=self.main.tr("Export"),
+            minimum_visible_ms=300,
+        )
+
+        def on_error(error_tuple):
+            Messages.close_busy(busy_dialog, force=True)
+            self.main.default_error_handler(error_tuple)
+
+        def on_finished():
+            Messages.close_busy(busy_dialog)
+            self.main.loading.setVisible(False)
+
         self.main.run_threaded(
             self.save_and_make_worker,
             None,
-            self.main.default_error_handler,
-            lambda: self.main.loading.setVisible(False),
+            on_error,
+            on_finished,
             output_path,
         )
 
@@ -575,11 +715,26 @@ class ProjectController:
         all_pages_current_state = self._build_all_pages_current_state()
         bundle_name = self._get_export_bundle_name()
         self.main.loading.setVisible(True)
+        busy_dialog = Messages.show_busy(
+            self.main,
+            self.main.tr("Exporting PSD..."),
+            title=self.main.tr("Export"),
+            minimum_visible_ms=300,
+        )
+
+        def on_error(error_tuple):
+            Messages.close_busy(busy_dialog, force=True)
+            self.main.default_error_handler(error_tuple)
+
+        def on_finished():
+            Messages.close_busy(busy_dialog)
+            self.main.loading.setVisible(False)
+
         self.main.run_threaded(
             self._write_psd_worker,
             None,
-            self.main.default_error_handler,
-            lambda: self.main.loading.setVisible(False),
+            on_error,
+            on_finished,
             output_folder,
             all_pages_current_state,
             bundle_name,
@@ -593,11 +748,26 @@ class ProjectController:
         all_pages_current_state = self._build_all_pages_current_state()
         bundle_name = self._get_export_bundle_name()
         self.main.loading.setVisible(True)
+        busy_dialog = Messages.show_busy(
+            self.main,
+            self.main.tr("Exporting PSD..."),
+            title=self.main.tr("Export"),
+            minimum_visible_ms=300,
+        )
+
+        def on_error(error_tuple):
+            Messages.close_busy(busy_dialog, force=True)
+            self.main.default_error_handler(error_tuple)
+
+        def on_finished():
+            Messages.close_busy(busy_dialog)
+            self.main.loading.setVisible(False)
+
         self.main.run_threaded(
             self._write_psd_plan_worker,
             None,
-            self.main.default_error_handler,
-            lambda: self.main.loading.setVisible(False),
+            on_error,
+            on_finished,
             export_plan,
             all_pages_current_state,
             bundle_name,
@@ -796,10 +966,552 @@ class ProjectController:
                 renderer.save_image(sv_pth)
 
             # Call make function
-            make(temp_dir, output_path)
+            make(temp_dir, reserve_unique_path(output_path))
         finally:
             # Clean up temp directory
             shutil.rmtree(temp_dir)
+
+    def _render_signature_for_path(
+        self,
+        file_path: str,
+        viewer_state: dict,
+        export_settings: dict[str, object],
+    ) -> str:
+        state = self.main.image_states.get(file_path, {})
+        payload = {
+            "viewer_state": viewer_state or {},
+            "blk_list": state.get("blk_list", []),
+            "brush_strokes": state.get("brush_strokes", []),
+            "image_patches": self.main.image_patches.get(file_path, []),
+            "source_lang": state.get("source_lang", ""),
+            "target_lang": state.get("target_lang", ""),
+            "skip": bool(state.get("skip", False)),
+            "export_settings": {
+                key: export_settings.get(key)
+                for key in (
+                    "resolved_automatic_output_target",
+                    "resolved_automatic_output_image_format",
+                    "resolved_automatic_output_archive_format",
+                    "resolved_automatic_output_archive_image_format",
+                    "resolved_automatic_output_archive_compression_level",
+                )
+            },
+        }
+        packed = msgpack.packb(
+            payload,
+            default=ProjectEncoder().encode,
+            use_bin_type=True,
+            strict_types=False,
+        )
+        return hashlib.sha256(packed).hexdigest()
+
+    def _render_page_output(
+        self,
+        *,
+        file_path: str,
+        page_index: int,
+        total_pages: int,
+        viewer_state: dict,
+        temp_main_page_context,
+        export_settings: dict[str, object],
+        series_dir: str,
+        staging_dir: str,
+    ) -> str:
+        rgb_img = self.main.load_image(file_path)
+        renderer = ImageSaveRenderer(rgb_img)
+        renderer.apply_patches(copy.deepcopy(self.main.image_patches.get(file_path, [])))
+        if self.main.webtoon_mode and temp_main_page_context is not None:
+            renderer.add_state_to_image(copy.deepcopy(viewer_state), page_index, temp_main_page_context)
+        else:
+            renderer.add_state_to_image(copy.deepcopy(viewer_state))
+        final_rgb = renderer.render_to_image()
+
+        page_base_name = os.path.splitext(os.path.basename(file_path))[0]
+        if is_single_archive_mode(export_settings):
+            os.makedirs(staging_dir, exist_ok=True)
+            output_path = os.path.join(
+                staging_dir,
+                build_archive_page_file_name(
+                    page_index,
+                    total_pages,
+                    page_base_name,
+                    str(export_settings.get("resolved_automatic_output_archive_image_format", "png")),
+                ),
+            )
+            write_archive_image(
+                output_path,
+                final_rgb,
+                resolved_settings=export_settings,
+            )
+            return output_path
+
+        os.makedirs(series_dir, exist_ok=True)
+        output_path = os.path.join(
+            series_dir,
+            build_output_file_name(
+                page_base_name,
+                "translated",
+                file_path,
+                export_settings,
+            ),
+        )
+        output_path = write_output_image(
+            output_path,
+            final_rgb,
+            source_path=file_path,
+            resolved_settings=export_settings,
+        )
+        return output_path
+
+    def _archive_stage_path_for_page(
+        self,
+        *,
+        file_path: str,
+        page_index: int,
+        total_pages: int,
+        export_settings: dict[str, object],
+        staging_dir: str,
+    ) -> str:
+        page_base_name = os.path.splitext(os.path.basename(file_path))[0]
+        return os.path.join(
+            staging_dir,
+            build_archive_page_file_name(
+                page_index,
+                total_pages,
+                page_base_name,
+                str(export_settings.get("resolved_automatic_output_archive_image_format", "png")),
+            ),
+        )
+
+    def _forced_archive_output_path(
+        self,
+        fallback_dir: str,
+        archive_format: str | None = None,
+    ) -> tuple[str, str]:
+        return resolve_forced_archive_output_path(
+            self.main.image_files,
+            fallback_dir=fallback_dir,
+            fallback_bundle_name=self._get_export_bundle_name(),
+            archive_format=archive_format,
+            archive_info=getattr(getattr(self.main, "file_handler", None), "archive_info", None),
+            source_records=getattr(self.main, "export_source_by_path", {}),
+            project_file=getattr(self.main, "project_file", None),
+            temp_dir=getattr(self.main, "temp_dir", None),
+        )
+
+    def _page_image_source_for_archive(
+        self,
+        *,
+        file_path: str,
+        page_index: int,
+        total_pages: int,
+        export_settings: dict[str, object],
+        staging_dir: str,
+        output_by_path: dict[str, str],
+    ) -> str:
+        candidates: list[str] = []
+        rendered_output = output_by_path.get(file_path, "")
+        if rendered_output:
+            candidates.append(rendered_output)
+        if staging_dir:
+            candidates.append(
+                self._archive_stage_path_for_page(
+                    file_path=file_path,
+                    page_index=page_index,
+                    total_pages=total_pages,
+                    export_settings=export_settings,
+                    staging_dir=staging_dir,
+                )
+            )
+        state = self.main.image_ctrl.ensure_page_state(file_path)
+        summary = state.get("processing_summary", {})
+        if isinstance(summary, dict):
+            candidates.extend(
+                [
+                    str(summary.get("translated_page_image_path", "") or ""),
+                    str(summary.get("translated_image_path", "") or ""),
+                    str(state.get("last_render_output_path", "") or ""),
+                ]
+            )
+        candidates.append(file_path)
+        for candidate in candidates:
+            candidate = str(candidate or "").strip()
+            if candidate and os.path.isfile(candidate) and is_image_file(candidate):
+                return candidate
+        return ""
+
+    def _write_archive_stage_page_from_path(
+        self,
+        *,
+        source_path: str,
+        output_path: str,
+        export_settings: dict[str, object],
+    ) -> None:
+        with PILImage.open(source_path) as image:
+            write_archive_image(
+                output_path,
+                np.asarray(image.convert("RGB")),
+                resolved_settings=export_settings,
+            )
+
+    def _build_forced_archive_from_page_sources(
+        self,
+        *,
+        output_by_path: dict[str, str],
+        export_settings: dict[str, object],
+        fallback_dir: str,
+        staging_dir: str = "",
+    ) -> tuple[str, str]:
+        archive_format = str(
+            export_settings.get("resolved_automatic_output_archive_format", "cbz") or "cbz"
+        )
+        archive_path, archive_root = self._forced_archive_output_path(fallback_dir, archive_format)
+        archive_path = reserve_unique_path(archive_path)
+        os.makedirs(archive_root, exist_ok=True)
+        archive_image_format = str(
+            export_settings.get("resolved_automatic_output_archive_image_format", "png") or "png"
+        )
+        compression_level = int(
+            export_settings.get("resolved_automatic_output_archive_compression_level", 6) or 6
+        )
+        final_staging_dir = tempfile.mkdtemp(
+            prefix="ct_archive_finalize_",
+            dir=getattr(self.main, "temp_dir", None) or None,
+        )
+        try:
+            total_pages = len(self.main.image_files)
+            for page_index, file_path in enumerate(self.main.image_files):
+                source_path = self._page_image_source_for_archive(
+                    file_path=file_path,
+                    page_index=page_index,
+                    total_pages=total_pages,
+                    export_settings=export_settings,
+                    staging_dir=staging_dir,
+                    output_by_path=output_by_path,
+                )
+                if not source_path:
+                    continue
+                page_base_name = os.path.splitext(os.path.basename(file_path))[0]
+                output_path = os.path.join(
+                    final_staging_dir,
+                    build_archive_page_file_name(
+                        page_index,
+                        total_pages,
+                        page_base_name,
+                        archive_image_format,
+                    ),
+                )
+                self._write_archive_stage_page_from_path(
+                    source_path=source_path,
+                    output_path=output_path,
+                    export_settings=export_settings,
+                )
+            make(
+                final_staging_dir,
+                output_path=archive_path,
+                compresslevel=compression_level,
+            )
+        finally:
+            shutil.rmtree(final_staging_dir, ignore_errors=True)
+        return archive_path, archive_root
+
+    def _rerender_output_worker(
+        self,
+        requested_paths: list[str],
+        scope: str,
+        all_pages_current_state: dict[str, dict],
+        export_settings: dict[str, object],
+    ) -> dict[str, object]:
+        base_dir = self._get_default_export_dir()
+        anchor = self.main.image_files[0] if self.main.image_files else ""
+        reset_output_reservations = getattr(self.main, "reset_automatic_output_reservations", None)
+        if callable(reset_output_reservations):
+            reset_output_reservations()
+        series_dir = self.main.get_reserved_automatic_output_series_dir(base_dir, anchor_path=anchor)
+
+        total_pages = len(self.main.image_files)
+        archive_mode = is_single_archive_mode(export_settings)
+        staging_dir = ""
+        archive_path = ""
+        render_paths = [path for path in requested_paths if path in self.main.image_files]
+        expanded_to_all = False
+
+        if archive_mode:
+            staging_dir = build_archive_staging_dir(series_dir, "manual_rerender")
+            if scope != "all":
+                missing_stage = []
+                for page_index, file_path in enumerate(self.main.image_files):
+                    stage_path = self._archive_stage_path_for_page(
+                        file_path=file_path,
+                        page_index=page_index,
+                        total_pages=total_pages,
+                        export_settings=export_settings,
+                        staging_dir=staging_dir,
+                    )
+                    if not os.path.isfile(stage_path):
+                        missing_stage.append(file_path)
+                if missing_stage:
+                    render_paths = list(self.main.image_files)
+                    expanded_to_all = True
+            if scope == "all" or expanded_to_all:
+                shutil.rmtree(staging_dir, ignore_errors=True)
+
+        temp_main_page_context = None
+        if self.main.webtoon_mode:
+            temp_main_page_context = type(
+                "TempMainPage",
+                (object,),
+                {
+                    "image_files": self.main.image_files,
+                    "image_states": all_pages_current_state,
+                },
+            )()
+
+        rendered_paths: list[str] = []
+        output_by_path: dict[str, str] = {}
+        rendered_at = datetime.now().isoformat(timespec="seconds")
+        for file_path in render_paths:
+            page_index = self.main.image_files.index(file_path)
+            viewer_state = all_pages_current_state[file_path].get("viewer_state", {})
+            output_path = self._render_page_output(
+                file_path=file_path,
+                page_index=page_index,
+                total_pages=total_pages,
+                viewer_state=viewer_state,
+                temp_main_page_context=temp_main_page_context,
+                export_settings=export_settings,
+                series_dir=series_dir,
+                staging_dir=staging_dir,
+            )
+            signature = self._render_signature_for_path(file_path, viewer_state, export_settings)
+            self.main.mark_render_clean(
+                file_path,
+                signature=signature,
+                rendered_at=rendered_at,
+                output_path=output_path,
+            )
+            self.main.image_ctrl.update_processing_summary(
+                file_path,
+                {
+                    "translated_image_path": output_path,
+                    "translated_page_image_path": output_path,
+                    "export_root": series_dir,
+                    "render_trigger": scope,
+                },
+            )
+            rendered_paths.append(file_path)
+            output_by_path[file_path] = output_path
+
+        archive_path, archive_root = self._build_forced_archive_from_page_sources(
+            output_by_path=output_by_path,
+            export_settings=export_settings,
+            fallback_dir=series_dir,
+            staging_dir=staging_dir,
+        )
+        for file_path in self.main.image_files:
+            state = self.main.image_ctrl.ensure_page_state(file_path)
+            previous_page_output = ""
+            summary = state.get("processing_summary", {})
+            if isinstance(summary, dict):
+                previous_page_output = str(
+                    summary.get("translated_page_image_path")
+                    or summary.get("translated_image_path")
+                    or state.get("last_render_output_path")
+                    or ""
+                ).strip()
+                if previous_page_output and not is_image_file(previous_page_output):
+                    previous_page_output = ""
+                summary["translated_image_path"] = archive_path
+                summary["translated_page_image_path"] = previous_page_output
+                summary["export_root"] = archive_root
+                state["processing_summary"] = summary
+            state["last_render_output_path"] = archive_path
+        output_root = archive_path
+
+        return {
+            "rendered_paths": rendered_paths,
+            "output_by_path": output_by_path,
+            "output_root": output_root,
+            "series_dir": series_dir,
+            "archive_path": archive_path,
+            "archive_mode": archive_mode,
+            "expanded_to_all": expanded_to_all,
+        }
+
+    def _paths_for_rerender_scope(self, scope: str, explicit_paths: list[str] | None = None) -> list[str]:
+        if explicit_paths is not None:
+            return [path for path in explicit_paths if path in self.main.image_files]
+        if scope == "current":
+            current_path = self.main._current_image_path()
+            return [current_path] if current_path else []
+        if scope == "dirty":
+            return self.main.render_dirty_paths()
+        if scope == "all":
+            return list(self.main.image_files)
+        return []
+
+    def rerender_output_scope(
+        self,
+        scope: str,
+        *,
+        paths: list[str] | None = None,
+        quiet: bool = False,
+        save_state_first: bool = True,
+        post_render_callback=None,
+    ) -> bool:
+        if not self.main.image_files:
+            return False
+        if save_state_first:
+            try:
+                self.main.text_ctrl._commit_pending_text_command()
+            except Exception:
+                pass
+            self.save_current_state()
+
+        requested_paths = self._paths_for_rerender_scope(scope, paths)
+        if not requested_paths:
+            if not quiet:
+                QtWidgets.QMessageBox.information(
+                    self.main,
+                    self.main.tr("Rerender Output"),
+                    self.main.tr("There are no render changes to apply."),
+                )
+            if post_render_callback:
+                post_render_callback()
+            return False
+
+        all_pages_current_state = self._build_all_pages_current_state()
+        export_settings = self.main.get_resolved_export_settings()
+        result_holder: dict[str, object] = {}
+        failed = {"value": False}
+        self.main.loading.setVisible(True)
+        self.main.disable_hbutton_group()
+        busy_dialog = Messages.show_busy(
+            self.main,
+            self.main.tr("Rendering output..."),
+            title=self.main.tr("Rerender Output"),
+            minimum_visible_ms=300,
+        )
+
+        def on_result(result: dict[str, object]) -> None:
+            result_holder.update(result or {})
+
+        def on_error(error_tuple) -> None:
+            failed["value"] = True
+            Messages.close_busy(busy_dialog, force=True)
+            self.main.default_error_handler(error_tuple)
+
+        def on_finished() -> None:
+            Messages.close_busy(busy_dialog)
+            self.main.on_manual_finished()
+            self.main.refresh_render_dirty_ui()
+            if not failed["value"] and not quiet:
+                output_root = str(result_holder.get("output_root", "") or "")
+                message = self.main.tr("Render output was updated.")
+                if result_holder.get("expanded_to_all"):
+                    message += "\n" + self.main.tr(
+                        "Archive staging was incomplete, so all pages were rendered before rebuilding the archive."
+                    )
+                if output_root:
+                    message += "\n\n" + output_root
+                QtWidgets.QMessageBox.information(
+                    self.main,
+                    self.main.tr("Rerender Output"),
+                    message,
+                )
+            if post_render_callback and not failed["value"]:
+                post_render_callback()
+
+        self.main.run_threaded(
+            self._rerender_output_worker,
+            on_result,
+            on_error,
+            on_finished,
+            requested_paths,
+            scope,
+            all_pages_current_state,
+            export_settings,
+        )
+        return True
+
+    def rerender_dirty_page_on_leave(self, file_path: str) -> bool:
+        autosave_enabled = bool(
+            self.main.settings_page.get_export_settings().get("project_autosave_enabled", False)
+        )
+        if not autosave_enabled:
+            return False
+        if file_path not in self.main.image_files:
+            return False
+        state = self.main.image_ctrl.ensure_page_state(file_path)
+        if not state.get("render_dirty", False):
+            return False
+        return self.rerender_output_scope(
+            "current",
+            paths=[file_path],
+            quiet=True,
+            save_state_first=False,
+        )
+
+    def _after_manual_project_save(self, post_save_callback=None) -> None:
+        current_path = self.main._current_image_path()
+
+        def finish_after_optional_other_pages() -> None:
+            other_dirty = self.main.render_dirty_paths(exclude_current=True)
+            if other_dirty:
+                answer = QtWidgets.QMessageBox.question(
+                    self.main,
+                    self.main.tr("Rerender Output"),
+                    self.main.tr(
+                        "변경된 {count}개의 이미지가 렌더링 저장됩니다. 저장하시겠습니까?"
+                    ).format(count=len(other_dirty)),
+                    QtWidgets.QMessageBox.StandardButton.Save
+                    | QtWidgets.QMessageBox.StandardButton.No,
+                    QtWidgets.QMessageBox.StandardButton.Save,
+                )
+                if answer == QtWidgets.QMessageBox.StandardButton.Save:
+                    self.rerender_output_scope(
+                        "dirty",
+                        paths=other_dirty,
+                        quiet=True,
+                        save_state_first=False,
+                        post_render_callback=post_save_callback,
+                    )
+                    return
+            if post_save_callback:
+                post_save_callback()
+
+        if (
+            current_path
+            and current_path in self.main.image_files
+            and self.main.image_ctrl.ensure_page_state(current_path).get("render_dirty", False)
+        ):
+            self.rerender_output_scope(
+                "current",
+                paths=[current_path],
+                quiet=True,
+                save_state_first=False,
+                post_render_callback=finish_after_optional_other_pages,
+            )
+            return
+
+        finish_after_optional_other_pages()
+
+    def open_output_folder(self) -> None:
+        if not self.main.image_files:
+            return
+        base_dir = self._get_default_export_dir()
+        anchor = self.main.image_files[0]
+        series_dir = self.main.get_automatic_output_series_dir(base_dir, anchor_path=anchor)
+        export_settings = self.main.get_resolved_export_settings()
+        archive_format = str(
+            export_settings.get("resolved_automatic_output_archive_format", "cbz") or "cbz"
+        )
+        archive_path, archive_root = self._forced_archive_output_path(series_dir, archive_format)
+        target = archive_path if os.path.isfile(archive_path) else archive_root
+        if not os.path.exists(target):
+            os.makedirs(series_dir, exist_ok=True)
+            target = series_dir
+        QtGui.QDesktopServices.openUrl(QtCore.QUrl.fromLocalFile(target))
 
     def _build_all_pages_current_state(self) -> dict[str, dict]:
         all_pages_current_state: dict[str, dict] = {}
@@ -868,6 +1580,10 @@ class ProjectController:
         return "comic_translate_export"
 
     def _get_default_export_dir(self) -> str:
+        portable_output_dir = str(os.environ.get("COMIC_TRANSLATE_PORTABLE_OUTPUT_DIR", "") or "").strip()
+        if portable_output_dir:
+            os.makedirs(portable_output_dir, exist_ok=True)
+            return portable_output_dir
         if self.main.project_file:
             return os.path.dirname(self.main.project_file)
         if self.main.image_files:
@@ -945,12 +1661,13 @@ class ProjectController:
         }
 
     def launch_save_proj_dialog(self):
+        kind = self._current_project_kind()
         file_dialog = QtWidgets.QFileDialog()
         file_name, _ = file_dialog.getSaveFileName(
             self.main,
-            "Save Project As",
-            "untitled",
-            "Project Files (*.ctpr);;All Files (*)"
+            self.main.tr("Save Series Project As") if kind == PROJECT_KIND_SERIES else self.main.tr("Save Project As"),
+            f"untitled{self._project_extension(kind)}",
+            project_file_filter_for_kind(kind),
         )
 
         return file_name
@@ -961,6 +1678,11 @@ class ProjectController:
         self.main.project_file = file_name
         self.main.setWindowTitle(f"{os.path.basename(file_name)}[*]")
         self.main.loading.setVisible(True)
+        busy_dialog = Messages.show_busy(
+            self.main,
+            self.main.tr("Creating project file..."),
+            title=self.main.tr("Project File"),
+        )
         self.main.disable_hbutton_group()
         save_failed = {'value': False}
         save_start_revision = self.main._dirty_revision
@@ -969,9 +1691,11 @@ class ProjectController:
             save_failed['value'] = True
             self.main.project_file = prev_project_file
             self.main.setWindowTitle(prev_window_title)
+            Messages.close_busy(busy_dialog, force=True)
             self.main.default_error_handler(error_tuple)
 
         def on_finished():
+            Messages.close_busy(busy_dialog)
             self.main.on_manual_finished()
             if not save_failed['value']:
                 # Close the old project's DB connection only after the save
@@ -997,6 +1721,8 @@ class ProjectController:
             self.main.image_ctrl.save_current_image_state()
 
     def thread_save_project(self, post_save_callback=None) -> bool:
+        if self._current_project_kind() == PROJECT_KIND_SERIES:
+            return bool(self.main.series_ctrl.thread_save_series(post_save_callback=post_save_callback))
         file_name = ""
         self.save_current_state()
         if self.main.project_file:
@@ -1005,19 +1731,83 @@ class ProjectController:
             file_name = self.launch_save_proj_dialog()
 
         if file_name:
-            self.run_save_proj(file_name, post_save_callback)
+            self.run_save_proj(
+                file_name,
+                lambda: self._after_manual_project_save(post_save_callback),
+            )
             return True
         return False
 
     def thread_save_as_project(self, post_save_callback=None) -> bool:
+        if self._current_project_kind() == PROJECT_KIND_SERIES:
+            file_name = self.launch_save_proj_dialog()
+            if file_name:
+                return bool(self.main.series_ctrl.thread_save_series(file_name, post_save_callback=post_save_callback))
+            return False
         file_name = self.launch_save_proj_dialog()
         if file_name:
             self.save_current_state()
-            self.run_save_proj(file_name, post_save_callback)
+            self.run_save_proj(
+                file_name,
+                lambda: self._after_manual_project_save(post_save_callback),
+            )
             return True
         return False
 
     def thread_change_project_file(self, target_path: str) -> bool:
+        if self._current_project_kind() == PROJECT_KIND_SERIES:
+            current_path = (
+                os.path.normpath(os.path.abspath(self.main.series_ctrl.series_file))
+                if self.main.series_ctrl.series_file
+                else None
+            )
+            target_path = ensure_project_extension(target_path, SERIES_PROJECT_FILE_EXT)
+            if current_path and target_path == current_path:
+                return self.thread_save_project()
+            if os.path.exists(target_path) and target_path != current_path:
+                overwrite = QtWidgets.QMessageBox.question(
+                    self.main,
+                    self.main.tr("Overwrite Project File"),
+                    self.main.tr(
+                        "A project file already exists at this location.\n\n{path}\n\nOverwrite it?"
+                    ).format(path=target_path),
+                    QtWidgets.QMessageBox.StandardButton.Yes | QtWidgets.QMessageBox.StandardButton.No,
+                    QtWidgets.QMessageBox.StandardButton.No,
+                )
+                if overwrite != QtWidgets.QMessageBox.StandardButton.Yes:
+                    return False
+
+            def _post_save() -> None:
+                if current_path and current_path != target_path and os.path.isfile(current_path):
+                    try:
+                        os.remove(current_path)
+                    except OSError as exc:
+                        QtWidgets.QMessageBox.warning(
+                            self.main,
+                            self.main.tr("Old Project File Kept"),
+                            self.main.tr(
+                                "The project was saved to the new location, but the old file could not be removed.\n\n{path}\n\n{error}"
+                            ).format(path=current_path, error=str(exc)),
+                        )
+                if current_path and current_path != target_path:
+                    self.remove_recent_project(current_path)
+                self.add_recent_project(target_path)
+                self._refresh_home_screen()
+                action_text = (
+                    self.main.tr("Project file saved.")
+                    if not current_path
+                    else self.main.tr("Project file renamed.")
+                    if os.path.dirname(current_path) == os.path.dirname(target_path)
+                    else self.main.tr("Project file moved.")
+                )
+                QtWidgets.QMessageBox.information(
+                    self.main,
+                    self.main.tr("Project File"),
+                    action_text,
+                )
+
+            return bool(self.main.series_ctrl.thread_save_series(target_path, post_save_callback=_post_save))
+
         target_path = os.path.normpath(os.path.abspath(os.path.expanduser(target_path or "")))
         if not target_path:
             return False
@@ -1104,6 +1894,8 @@ class ProjectController:
         return True
 
     def save_project(self, file_name):
+        if self._current_project_kind() == PROJECT_KIND_SERIES:
+            raise RuntimeError("Series projects must be saved through SeriesController.")
         save_state_to_proj_file(self.main, file_name)
 
     def update_ui_from_project(self):
@@ -1127,12 +1919,7 @@ class ProjectController:
         self.main.page_list.blockSignals(False)
 
         for file in self.main.image_files:
-            stack = QUndoStack(self.main)
-            stack.cleanChanged.connect(self.main._update_window_modified)
-            stack.indexChanged.connect(self.main._bump_dirty_revision)
-            stack.indexChanged.connect(self.main.refresh_inpaint_tool_ui)
-            self.main.undo_stacks[file] = stack
-            self.main.undo_group.addStack(stack)
+            self.main.create_undo_stack_for_path(file)
 
         self.main.run_threaded(
             lambda: self.main.load_image(self.main.image_files[index]),
@@ -1166,6 +1953,7 @@ class ProjectController:
             self._refresh_home_screen()
             self.main.setWindowTitle("Project1.ctpr[*]")
             self.main.project_file = None
+            self.main.project_kind = PROJECT_KIND_SINGLE
             QtWidgets.QMessageBox.warning(
                 self.main,
                 self.main.tr("Project Not Found"),
@@ -1181,18 +1969,28 @@ class ProjectController:
             close_state_store(prev_project_file)
         if clear_recovery:
             self.clear_recovery_checkpoint()
+        busy_dialog = Messages.show_busy(
+            self.main,
+            self.main.tr("Loading project file..."),
+            title=self.main.tr("Project File"),
+            minimum_visible_ms=300,
+        )
         self.main.image_ctrl.clear_state()
+        self.main.project_kind = PROJECT_KIND_SINGLE
         self.main.setWindowTitle(f"{os.path.basename(normalized_path)}[*]")
 
         def _on_load_finished():
+            Messages.close_busy(busy_dialog)
             self.add_recent_project(normalized_path)
             self._refresh_home_screen()
             self.update_ui_from_project()
 
         def _on_load_error(error_tuple):
+            Messages.close_busy(busy_dialog, force=True)
             self.main.default_error_handler(error_tuple)
             exctype, value, _ = error_tuple
             self.main.project_file = None
+            self.main.project_kind = PROJECT_KIND_SINGLE
             self.main.setWindowTitle("Project1.ctpr[*]")
             if exctype is FileNotFoundError or isinstance(value, FileNotFoundError):
                 self.remove_recent_project(normalized_path)
@@ -1210,6 +2008,7 @@ class ProjectController:
         if not os.path.isfile(file_name):
             raise FileNotFoundError(file_name)
         self.main.project_file = file_name
+        self.main.project_kind = PROJECT_KIND_SINGLE
         return load_state_from_proj_file(self.main, file_name)
     
     def load_state_to_ui(self, saved_ctx: str):

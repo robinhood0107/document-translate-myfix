@@ -5,7 +5,7 @@ import imkit as imk
 import numpy as np
 from typing import TYPE_CHECKING, List
 from datetime import datetime
-from PySide6 import QtCore, QtWidgets, QtGui
+from PySide6 import QtCore, QtWidgets
 
 from app.ui.dayu_widgets.message import MMessage
 from app.ui.messages import Messages
@@ -13,15 +13,22 @@ from app.ui.commands.image import SetImageCommand, ToggleSkipImagesCommand
 from app.ui.commands.inpaint import PatchInsertCommand
 from app.ui.commands.inpaint import PatchCommandBase
 from app.ui.commands.box import AddTextItemCommand
+from app.ui.canvas.rectangle import MoveableRectItem
+from app.ui.canvas.text_item import TextBlockItem
 from app.controllers.psd_importer import ImportedPsdPage, import_psd_files, prepare_psd_font_catalog
 from app.controllers.psd_support import ensure_photoshopapi_available
 from app.ui.list_view import PageListItemData
 from app.ui.list_view_image_loader import ListViewImageLoader
 from app.thread_worker import GenericWorker
 from app.path_materialization import ensure_path_materialized
+from app.projects.project_types import (
+    PROJECT_KIND_SINGLE,
+    has_project_file_extension,
+)
 from modules.utils.archives import natural_sort_key
 from modules.utils.export_paths import normalize_export_source_record
 from modules.utils.automatic_output import default_project_output_preferences
+from modules.utils.textblock import ensure_text_block_id
 from modules.utils.file_handler import get_prepared_path_source
 from modules.utils.inpaint_strokes import (
     PATCH_KIND_INPAINT,
@@ -63,6 +70,9 @@ class ImageStateController:
         state.setdefault('brush_strokes', [])
         state.setdefault('blk_list', [])
         state.setdefault('skip', False)
+        state.setdefault('render_dirty', False)
+        state.setdefault('last_render_signature', "")
+        state.setdefault('last_rendered_at', "")
         return state
 
     def apply_languages_to_paths(
@@ -160,6 +170,7 @@ class ImageStateController:
                 self.main.undo_group.setActiveStack(self.main.undo_stacks[current_path])
             self.page_list_loader.force_load_image(self.main.curr_img_idx)
         self.main.page_list.blockSignals(False)
+        self.main.mark_all_render_dirty()
         self.main.mark_project_dirty()
 
     def _default_export_group_name(self, file_path: str) -> str:
@@ -236,6 +247,15 @@ class ImageStateController:
         self._deep_merge_dict(summary, merged_patch)
         summary["last_run_timestamp"] = datetime.now().isoformat(timespec="seconds")
         state["processing_summary"] = summary
+        translated_output = str(summary.get("translated_image_path", "") or "").strip()
+        if translated_output and "translated_image_path" in merged_patch:
+            state["render_dirty"] = False
+            state["last_rendered_at"] = datetime.now().isoformat(timespec="seconds")
+            state["last_render_output_path"] = translated_output
+            try:
+                self.main.refresh_render_dirty_ui()
+            except Exception:
+                pass
         return summary
 
     def mark_processing_stage(
@@ -306,8 +326,17 @@ class ImageStateController:
         message_map = {
             "Text Blocks": t("Messages", "No Text Blocks Detected.\nSkipping:"),
             "OCR": t("Messages", "Could not recognize detected text.\nSkipping:"),
+            "inpaint": QtCore.QCoreApplication.translate(
+                "Messages",
+                "Could not inpaint detected text.\nSkipping:",
+            ),
+            "Inpaint": QtCore.QCoreApplication.translate(
+                "Messages",
+                "Could not inpaint detected text.\nSkipping:",
+            ),
             "Translator": t("Messages", "Could not get translations.\nSkipping:"),
             "OCR Chunk Failed": t("Messages", "Could not recognize webtoon chunk.\nSkipping:"),
+            "Translation": t("Messages", "Could not translate webtoon chunk.\nSkipping:"),
             "Translation Chunk Failed": t("Messages", "Could not translate webtoon chunk.\nSkipping:"),
         }
 
@@ -543,10 +572,11 @@ class ImageStateController:
         self.main.image_viewer.clear_text_items()
         self.main.loaded_images = []
         self.main.in_memory_history.clear()
-        self.main.undo_stacks.clear()
+        self.main.clear_undo_stacks()
         self.main.image_patches.clear()
         self.main.in_memory_patches.clear()
         self.main.project_file = None
+        self.main.project_kind = PROJECT_KIND_SINGLE
         self.main.project_output_preferences = default_project_output_preferences()
         self.main.clear_automatic_output_metric_cache()
         try:
@@ -576,9 +606,9 @@ class ImageStateController:
             for path in (paths or [])
             if isinstance(path, str) and path
         ]
-        if normalized_paths and any(path.lower().endswith(".ctpr") for path in normalized_paths):
-            if len(normalized_paths) == 1 and normalized_paths[0].lower().endswith(".ctpr"):
-                self.main.project_ctrl.thread_load_project(normalized_paths[0])
+        if normalized_paths and any(has_project_file_extension(path) for path in normalized_paths):
+            if len(normalized_paths) == 1 and has_project_file_extension(normalized_paths[0]):
+                self.main._open_project_by_type(normalized_paths[0])
                 return
             self.main.default_error_handler(
                 (
@@ -610,24 +640,46 @@ class ImageStateController:
                 prepare_psd_font_catalog()
             except Exception:
                 pass
+            busy_dialog = Messages.show_busy(
+                self.main,
+                self.main.tr("Importing PSD files..."),
+                title=self.main.tr("Import"),
+                minimum_visible_ms=300,
+            )
             self.main.project_ctrl.clear_recovery_checkpoint()
             self.clear_state()
+
+            def on_psd_error(error_tuple):
+                Messages.close_busy(busy_dialog, force=True)
+                self.main.default_error_handler(error_tuple)
+
             self.main.run_threaded(
                 self._import_psd_files,
                 self.on_psd_imported,
-                self.main.default_error_handler,
-                None,
+                on_psd_error,
+                lambda: Messages.close_busy(busy_dialog),
                 psd_paths,
             )
             return
 
+        busy_dialog = Messages.show_busy(
+            self.main,
+            self.main.tr("Loading images..."),
+            title=self.main.tr("Import"),
+            minimum_visible_ms=300,
+        )
         self.main.project_ctrl.clear_recovery_checkpoint()
         self.clear_state()
+
+        def on_load_error(error_tuple):
+            Messages.close_busy(busy_dialog, force=True)
+            self.main.default_error_handler(error_tuple)
+
         self.main.run_threaded(
             self.load_initial_image,
             self.on_initial_image_loaded,
-            self.main.default_error_handler,
-            None,
+            on_load_error,
+            lambda: Messages.close_busy(busy_dialog),
             normalized_paths,
         )
 
@@ -660,17 +712,7 @@ class ImageStateController:
                 False,
             )
 
-            stack = QtGui.QUndoStack(self.main)
-            stack.cleanChanged.connect(self.main._update_window_modified)
-            stack.indexChanged.connect(self.main._bump_dirty_revision)
-            stack.indexChanged.connect(self.main.refresh_inpaint_tool_ui)
-            try:
-                if hasattr(self.main, "search_ctrl") and self.main.search_ctrl is not None:
-                    stack.indexChanged.connect(self.main.search_ctrl.on_undo_redo)
-            except Exception:
-                pass
-            self.main.undo_stacks[file_path] = stack
-            self.main.undo_group.addStack(stack)
+            self.main.create_undo_stack_for_path(file_path)
 
         self.main.page_list.blockSignals(True)
         self.update_image_cards()
@@ -689,6 +731,13 @@ class ImageStateController:
 
     def thread_insert(self, paths: List[str]):
         if self.main.image_files:
+            busy_dialog = Messages.show_busy(
+                self.main,
+                self.main.tr("Importing pages..."),
+                title=self.main.tr("Import"),
+                minimum_visible_ms=300,
+            )
+
             def on_files_prepared(prepared_files):
                 if not prepared_files:
                     return
@@ -720,12 +769,7 @@ class ImageStateController:
                     )
                     
                     # Create undo stack for new file
-                    stack = QtGui.QUndoStack(self.main)
-                    stack.cleanChanged.connect(self.main._update_window_modified)
-                    stack.indexChanged.connect(self.main._bump_dirty_revision)
-                    stack.indexChanged.connect(self.main.refresh_inpaint_tool_ui)
-                    self.main.undo_stacks[file_path] = stack
-                    self.main.undo_group.addStack(stack)
+                    self.main.create_undo_stack_for_path(file_path)
 
                 self.main.page_list.clear_active_sort()
                 
@@ -761,12 +805,19 @@ class ImageStateController:
                     new_index = self.main.image_files.index(path)
                     im = self.load_image(path)
                     self.display_image_from_loaded(im, new_index, False)
+                self.main.mark_all_render_dirty()
                 self.main.mark_project_dirty()
+
+            def on_insert_error(error_tuple):
+                Messages.close_busy(busy_dialog, force=True)
+                self.main.default_error_handler(error_tuple)
 
             self.main.run_threaded(
                 lambda: self.main.file_handler.prepare_files(paths, True),
                 on_files_prepared,
-                self.main.default_error_handler)
+                on_insert_error,
+                lambda: Messages.close_busy(busy_dialog),
+            )
         else:
             self.thread_load_images(paths)
 
@@ -780,17 +831,7 @@ class ImageStateController:
 
         for file in self.main.image_files:
             self.save_image_state(file)
-            stack = QtGui.QUndoStack(self.main)
-            stack.cleanChanged.connect(self.main._update_window_modified)
-            stack.indexChanged.connect(self.main._bump_dirty_revision)
-            stack.indexChanged.connect(self.main.refresh_inpaint_tool_ui)
-            try:
-                if hasattr(self.main, "search_ctrl") and self.main.search_ctrl is not None:
-                    stack.indexChanged.connect(self.main.search_ctrl.on_undo_redo)
-            except Exception:
-                pass
-            self.main.undo_stacks[file] = stack
-            self.main.undo_group.addStack(stack)
+            self.main.create_undo_stack_for_path(file)
 
         if self.main.image_files:
             self.main.page_list.blockSignals(True)
@@ -1047,12 +1088,7 @@ class ImageStateController:
                 self.main.image_patches.pop(file_path, None)  
                 self.main.in_memory_patches.pop(file_path, None)  
 
-                if file_path in self.main.undo_stacks:
-                    stack = self.main.undo_stacks[file_path]
-                    self.main.undo_group.removeStack(stack)
-                
-                # Remove from other collections
-                self.main.undo_stacks.pop(file_path, None)
+                self.main.remove_undo_stack_for_path(file_path)
                     
                 if file_path in self.main.displayed_images:
                     self.main.displayed_images.remove(file_path)
@@ -1134,6 +1170,7 @@ class ImageStateController:
             self.main.project_ctrl.clear_recovery_checkpoint()
 
         if removed_any:
+            self.main.mark_all_render_dirty()
             self.main.mark_project_dirty()
 
 
@@ -1159,6 +1196,7 @@ class ImageStateController:
             return
 
         command = ToggleSkipImagesCommand(self.main, file_paths, skip_status)
+        self.main.mark_render_dirty_for_paths(file_paths)
         stack = self.main.undo_group.activeStack()
         if stack:
             stack.push(command)
@@ -1307,6 +1345,18 @@ class ImageStateController:
 
     def save_image_state(self, file: str):
         # For regular mode only
+        for blk in self.main.blk_list:
+            ensure_text_block_id(blk)
+        for item in self.main.image_viewer._scene.items():
+            if isinstance(item, MoveableRectItem) and not getattr(item, "block_id", ""):
+                rect = item.mapRectToScene(item.rect()).getCoords()
+                blk = self.main.rect_item_ctrl.find_corresponding_text_block(rect, 0.5)
+                if blk is not None:
+                    item.block_id = ensure_text_block_id(blk)
+            elif isinstance(item, TextBlockItem) and not getattr(item, "block_id", ""):
+                blk = self.main.text_ctrl._find_text_block_for_item(item)
+                if blk is not None:
+                    item.block_id = ensure_text_block_id(blk)
         existing = dict(self.main.image_states.get(file, {}))
         self.main.image_states[file] = self._build_image_state(
             file,
@@ -1316,6 +1366,21 @@ class ImageStateController:
             existing.get('skip', False),
             existing,
         )
+        last_signature = str(existing.get("last_render_signature", "") or "")
+        if last_signature and not self.main.image_states[file].get("render_dirty", False):
+            project_ctrl = getattr(self.main, "project_ctrl", None)
+            if project_ctrl is not None:
+                try:
+                    current_signature = project_ctrl._render_signature_for_path(
+                        file,
+                        self.main.image_states[file].get("viewer_state", {}),
+                        self.main.get_resolved_export_settings(),
+                    )
+                    if current_signature != last_signature:
+                        self.main.image_states[file]["render_dirty"] = True
+                        self.main.refresh_render_dirty_ui()
+                except Exception:
+                    pass
 
     def save_current_image_state(self):
         if self.main.curr_img_idx >= 0:
@@ -1341,48 +1406,34 @@ class ImageStateController:
             if file_path in self.main.image_states:
                 state = self.main.image_states[file_path]
 
-                # Skip state loading for newly inserted images (which have empty viewer_state)
-                # This prevents loading of incomplete state or invalid transform data.
-                # As soon as an image is saved once, it will have a populated viewer_state.
-                if state.get('viewer_state'):
+                viewer_state = state.get('viewer_state', {})
+                if not isinstance(viewer_state, dict):
+                    viewer_state = {}
+                    state['viewer_state'] = viewer_state
+                push_to_stack = viewer_state.get('push_to_stack', False)
 
-                    push_to_stack = state.get('viewer_state', {}).get('push_to_stack', False)
+                self.main.blk_list = list(state.get('blk_list', []))
+                viewer.load_state(viewer_state)
+                # Block signals to prevent triggering save when loading state
+                self.main.s_combo.blockSignals(True)
+                self.main.t_combo.blockSignals(True)
+                self.main.s_combo.setCurrentText(state.get('source_lang', self.main.s_combo.currentText()))
+                self.main.t_combo.setCurrentText(state.get('target_lang', self.main.t_combo.currentText()))
+                self.main.s_combo.blockSignals(False)
+                self.main.t_combo.blockSignals(False)
+                viewer.load_brush_strokes(state.get('brush_strokes', []))
 
-                    self.main.blk_list = state['blk_list'].copy()  # Load a copy of the list, not a reference
-                    viewer.load_state(state['viewer_state'])
-                    # Block signals to prevent triggering save when loading state
-                    self.main.s_combo.blockSignals(True)
-                    self.main.t_combo.blockSignals(True)
-                    self.main.s_combo.setCurrentText(state['source_lang'])
-                    self.main.t_combo.setCurrentText(state['target_lang'])
-                    self.main.s_combo.blockSignals(False)
-                    self.main.t_combo.blockSignals(False)
-                    viewer.load_brush_strokes(state['brush_strokes'])
+                # add_text_item/add_rectangle used by load_state already emit the
+                # viewer's connect_* signals, so no extra signal wiring is needed here.
+                if push_to_stack:
+                    self.main.undo_stacks[file_path].beginMacro('text_items_rendered')
+                    for text_item in viewer.text_items:
+                        command = AddTextItemCommand(self.main, text_item)
+                        self.main.undo_stacks[file_path].push(command)
+                    self.main.undo_stacks[file_path].endMacro()
+                    viewer_state.update({'push_to_stack': False})
 
-                    # add_text_item/add_rectangle used by load_state already emit the
-                    # viewer's connect_* signals, so no extra signal wiring is needed here.
-                    if push_to_stack:
-                        self.main.undo_stacks[file_path].beginMacro('text_items_rendered')
-                        for text_item in viewer.text_items:
-                            command = AddTextItemCommand(self.main, text_item)
-                            self.main.undo_stacks[file_path].push(command)
-                        self.main.undo_stacks[file_path].endMacro()
-                        state['viewer_state'].update({'push_to_stack': False})
-
-                    self.load_patch_state(file_path)
-                else:
-                    # New image - just set language preferences and clear everything else
-                    self.main.blk_list = []
-                    # Block signals to prevent triggering save when loading state
-                    self.main.s_combo.blockSignals(True)
-                    self.main.t_combo.blockSignals(True)
-                    self.main.s_combo.setCurrentText(state.get('source_lang', self.main.s_combo.currentText()))
-                    self.main.t_combo.setCurrentText(state.get('target_lang', self.main.t_combo.currentText()))
-                    self.main.s_combo.blockSignals(False)
-                    self.main.t_combo.blockSignals(False)
-                    viewer.clear_rectangles(page_switch=True)
-                    viewer.clear_brush_strokes(page_switch=True)
-                    viewer.clear_text_items()
+                self.load_patch_state(file_path)
 
             self.main.text_ctrl.clear_text_edits()
         finally:
@@ -1392,8 +1443,15 @@ class ImageStateController:
 
     def display_image(self, index: int, switch_page: bool = True):
         if 0 <= index < len(self.main.image_files):
+            previous_path = self._current_file_path()
             if switch_page:
+                try:
+                    self.main.text_ctrl._commit_pending_text_command()
+                except Exception:
+                    pass
                 self.save_current_image_state()
+                if previous_path and previous_path != self.main.image_files[index]:
+                    self.main.project_ctrl.rerender_dirty_page_on_leave(previous_path)
             self.main.curr_img_idx = index
             file_path = self.main.image_files[index]
 
@@ -1485,6 +1543,8 @@ class ImageStateController:
             for data in viewer_state.get('text_items_state', []):
                 viewer.add_text_item(data)
 
+            self.load_patch_state(file_path)
+
             if viewer_state.get('push_to_stack', False):
                 stack = self.main.undo_stacks.get(file_path)
                 if stack:
@@ -1502,7 +1562,7 @@ class ImageStateController:
     def on_image_skipped(self, image_path: str, skip_reason: str, error: str):
         summarized_error = self._summarize_skip_error(error)
         if hasattr(self.main, "register_batch_skip"):
-            self.main.register_batch_skip(image_path, skip_reason, summarized_error)
+            self.main.register_batch_skip(image_path, skip_reason, error)
 
         if self._is_content_flagged_error(error):
             reason = summarized_error.split(": ")[-1] if ": " in summarized_error else summarized_error

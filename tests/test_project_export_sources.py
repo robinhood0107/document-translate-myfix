@@ -1,10 +1,15 @@
 from __future__ import annotations
 
 import os
+import shutil
 import tempfile
 import unittest
+import zipfile
 from types import SimpleNamespace
 
+import msgpack
+
+from app.projects.project_state import load_state_from_proj_file
 from app.projects.project_state_v2 import (
     close_cached_connection,
     load_state_from_proj_file_v2,
@@ -57,6 +62,53 @@ class _FakeProjectMain:
 
 
 class ProjectExportSourceRoundTripTests(unittest.TestCase):
+    def test_v1_project_load_temp_dir_uses_project_stem_prefix(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            project_path = os.path.join(temp_dir, "legacy chapter.ctpr")
+            state = {
+                "current_image_index": 0,
+                "webtoon_mode": False,
+                "webtoon_view_state": {},
+                "original_image_files": [],
+                "image_states": {},
+                "current_history_index": {},
+                "displayed_images": [],
+                "loaded_images": [],
+                "llm_extra_context": "",
+            }
+            with zipfile.ZipFile(project_path, "w") as archive:
+                archive.writestr("state.msgpack", msgpack.packb(state, use_bin_type=True))
+
+            restored_main = _FakeProjectMain()
+            try:
+                load_state_from_proj_file(restored_main, project_path)
+
+                temp_basename = os.path.basename(restored_main.temp_dir)
+                self.assertTrue(temp_basename.startswith("tmp_legacy chapter_"))
+            finally:
+                shutil.rmtree(getattr(restored_main, "temp_dir", ""), ignore_errors=True)
+
+    def test_v2_project_load_temp_dir_uses_project_stem_prefix(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            image_path = os.path.join(temp_dir, "page.png")
+            project_path = os.path.join(temp_dir, "v2 chapter.ctpr")
+            with open(image_path, "wb") as fh:
+                fh.write(b"not-a-real-png-but-good-enough")
+
+            source_main = _FakeProjectMain(image_path=image_path)
+            source_main.project_file = project_path
+
+            restored_main = _FakeProjectMain()
+            try:
+                save_state_to_proj_file_v2(source_main, project_path)
+                load_state_from_proj_file_v2(restored_main, project_path)
+
+                temp_basename = os.path.basename(restored_main.temp_dir)
+                self.assertTrue(temp_basename.startswith("tmp_v2 chapter_"))
+            finally:
+                close_cached_connection(project_path)
+                shutil.rmtree(getattr(restored_main, "temp_dir", ""), ignore_errors=True)
+
     def test_v2_project_round_trip_restores_export_source_mapping(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             image_path = os.path.join(temp_dir, "page.png")

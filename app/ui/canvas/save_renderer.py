@@ -53,6 +53,8 @@ class ImageSaveRenderer:
                 vertical_alignment=text_props.vertical_alignment,
                 source_rect=text_props.source_rect,
                 block_anchor=text_props.block_anchor,
+                block_id=text_props.block_id,
+                editor_frame=False,
             )
 
             text_item.set_text(text_props.text, text_props.width)
@@ -65,6 +67,8 @@ class ImageSaveRenderer:
             text_item.setScale(text_props.scale)
             text_item.set_source_rect(text_props.source_rect)
             text_item.set_block_anchor(text_props.block_anchor)
+            text_item.block_id = str(text_props.block_id or "")
+            text_item.editor_frame = False
             text_item.set_vertical(bool(text_props.vertical))
             text_item.set_vertical_alignment(text_props.vertical_alignment)
             text_item.selection_outlines = text_props.selection_outlines
@@ -244,6 +248,5 @@ class ImageSaveRenderer:
             patch_item.setPos(x, y)
             patch_order = int(patch.get("order", fallback_order) or fallback_order)
             patch_item.setZValue(PatchCommandBase.patch_z_value({"order": patch_order}))
-
 
 

@@ -3,6 +3,7 @@ from __future__ import annotations
 import base64
 from typing import Any
 
+import cv2
 import imkit as imk
 import numpy as np
 from PySide6.QtGui import QColor
@@ -70,6 +71,23 @@ def _ctd_settings_from_cfg(cfg: dict[str, Any]) -> CTDRefinerSettings:
     )
 
 
+def _allows_ctd_hard_box_rescue(block) -> bool:
+    return str(getattr(block, "text_class", "") or "") != "text_free"
+
+
+def _dilate_final_mask(mask: np.ndarray, size: int) -> np.ndarray:
+    mask_arr = np.where(np.asarray(mask) > 0, 255, 0).astype(np.uint8)
+    if int(size) <= 0 or mask_arr.size == 0 or not np.any(mask_arr):
+        return mask_arr
+    radius = int(size)
+    kernel = cv2.getStructuringElement(
+        cv2.MORPH_ELLIPSE,
+        (radius * 2 + 1, radius * 2 + 1),
+        (radius, radius),
+    )
+    return np.where(cv2.dilate(mask_arr, kernel, iterations=1) > 0, 255, 0).astype(np.uint8)
+
+
 def _ctd_details(
     img: np.ndarray,
     blk_list,
@@ -99,6 +117,33 @@ def _ctd_details(
     refiner_backend = str(ctd_result.backend or "ctd")
     final_mask = protected_mask
     legacy_fallback_details: dict[str, Any] | None = None
+    legacy_rescue_details: dict[str, Any] | None = None
+    hard_box_rescue_used = False
+
+    hard_box_rescue_blocks = [block for block in block_list if _allows_ctd_hard_box_rescue(block)]
+    if hard_box_rescue_blocks:
+        legacy_rescue_details = _legacy_details(
+            img,
+            hard_box_rescue_blocks,
+            cfg,
+            default_padding=default_padding,
+        )
+        rescue_mask = np.where(
+            np.asarray(legacy_rescue_details.get("hard_box_rescue_mask")) > 0,
+            255,
+            0,
+        ).astype(np.uint8)
+        if np.any(rescue_mask):
+            protected_rescue_mask = np.where(
+                (rescue_mask > 0) & (np.asarray(protect_mask) <= 0),
+                255,
+                0,
+            ).astype(np.uint8)
+            before_count = int(np.count_nonzero(final_mask))
+            final_mask = np.where((final_mask > 0) | (protected_rescue_mask > 0), 255, 0).astype(np.uint8)
+            hard_box_rescue_used = int(np.count_nonzero(final_mask)) > before_count
+            if hard_box_rescue_used:
+                refiner_backend = f"{refiner_backend}+hard_box_rescue"
 
     if not np.any(final_mask) and np.any(ctd_final_mask):
         final_mask = ctd_final_mask.copy()
@@ -106,7 +151,7 @@ def _ctd_details(
         refiner_backend = f"{refiner_backend}+protect_fallback"
 
     if not np.any(final_mask) and block_list:
-        legacy_fallback_details = _legacy_details(
+        legacy_fallback_details = legacy_rescue_details or _legacy_details(
             img,
             block_list,
             cfg,
@@ -139,15 +184,17 @@ def _ctd_details(
         "refiner_backend": refiner_backend,
         "refiner_device": str(cfg.get("ctd_device", "cuda") or "cuda"),
         "fallback_used": fallback_used,
+        "hard_box_rescue_used": hard_box_rescue_used,
         "mask_inpaint_mode": str(cfg.get("mask_inpaint_mode", DEFAULT_MASK_INPAINT_MODE) or DEFAULT_MASK_INPAINT_MODE),
     }
-    if legacy_fallback_details:
-        details["legacy_base_mask"] = legacy_fallback_details.get("legacy_base_mask")
-        details["hard_box_rescue_mask"] = legacy_fallback_details.get("hard_box_rescue_mask")
-        details["hard_box_applied_count"] = int(legacy_fallback_details.get("hard_box_applied_count", 0) or 0)
-        details["hard_box_reason_totals"] = dict(legacy_fallback_details.get("hard_box_reason_totals", {}) or {})
-        details["legacy_base_mask_pixel_count"] = int(legacy_fallback_details.get("legacy_base_mask_pixel_count", 0) or 0)
-        details["hard_box_rescue_mask_pixel_count"] = int(legacy_fallback_details.get("hard_box_rescue_mask_pixel_count", 0) or 0)
+    legacy_details = legacy_fallback_details or legacy_rescue_details
+    if legacy_details:
+        details["legacy_base_mask"] = legacy_details.get("legacy_base_mask")
+        details["hard_box_rescue_mask"] = legacy_details.get("hard_box_rescue_mask")
+        details["hard_box_applied_count"] = int(legacy_details.get("hard_box_applied_count", 0) or 0)
+        details["hard_box_reason_totals"] = dict(legacy_details.get("hard_box_reason_totals", {}) or {})
+        details["legacy_base_mask_pixel_count"] = int(legacy_details.get("legacy_base_mask_pixel_count", 0) or 0)
+        details["hard_box_rescue_mask_pixel_count"] = int(legacy_details.get("hard_box_rescue_mask_pixel_count", 0) or 0)
     return details
 
 
@@ -196,6 +243,15 @@ def generate_mask(
         details["refiner_device"] = str(cfg.get("ctd_device", "cuda") or "cuda")
         details["fallback_used"] = True
         details["mask_inpaint_mode"] = cfg["mask_inpaint_mode"]
+
+    final_dilate_size = int(cfg.get("final_mask_dilate_size", 8) or 0)
+    if final_dilate_size > 0:
+        final_mask = _dilate_final_mask(details.get("final_mask"), final_dilate_size)
+        details["final_mask_post_expand"] = final_mask.copy()
+        details["final_mask"] = final_mask
+        details["final_mask_pixel_count"] = int(np.count_nonzero(final_mask))
+    details["final_mask_dilate_size"] = final_dilate_size
+
     if return_details:
         return details
     return details["final_mask"]

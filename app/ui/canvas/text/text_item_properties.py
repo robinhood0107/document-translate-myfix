@@ -8,10 +8,12 @@ from modules.utils.render_style_policy import (
     build_rect_tuple,
     coerce_vertical_alignment,
 )
+from modules.rendering.rich_text import repair_text_item_html
 
 @dataclass
 class TextItemProperties:
     """Dataclass for TextBlockItem properties to reduce duplication in construction"""
+    block_id: str = ""
     text: str = ""
     font_family: str = ""
     font_size: float = 20
@@ -42,6 +44,7 @@ class TextItemProperties:
     
     # Advanced properties
     selection_outlines: list = field(default_factory=list)
+    editor_frame: bool = False
             
     @classmethod
     def from_dict(cls, data: dict) -> 'TextItemProperties':
@@ -49,6 +52,7 @@ class TextItemProperties:
         props = cls()
         
         # Basic text properties
+        props.block_id = str(data.get('block_id', '') or '')
         props.text = data.get('text', '')
         props.font_family = data.get('font_family', '')
         props.font_size = data.get('font_size', 20)
@@ -123,6 +127,8 @@ class TextItemProperties:
         
         # Advanced
         props.selection_outlines = data.get('selection_outlines', [])
+        props.editor_frame = bool(data.get('editor_frame', False))
+        props.text = repair_text_item_html(props.text, props)
         
         return props
     
@@ -132,6 +138,7 @@ class TextItemProperties:
         props = cls()
         
         # Basic text properties
+        props.block_id = str(getattr(item, 'block_id', '') or '')
         props.text = item.toHtml()
         props.font_family = item.font_family
         props.font_size = item.font_size
@@ -177,12 +184,15 @@ class TextItemProperties:
         
         # Advanced properties
         props.selection_outlines = getattr(item, 'selection_outlines', []).copy()
+        props.editor_frame = bool(getattr(item, 'editor_frame', False))
+        props.text = repair_text_item_html(props.text, props)
         
         return props
     
     def to_dict(self) -> dict:
         """Convert TextItemProperties to dictionary"""
         return {
+            'block_id': self.block_id,
             'text': self.text,
             'font_family': self.font_family,
             'font_size': self.font_size,
@@ -207,6 +217,7 @@ class TextItemProperties:
             'source_rect': self.source_rect,
             'block_anchor': self.block_anchor,
             'selection_outlines': self.selection_outlines,
+            'editor_frame': self.editor_frame,
         }
 
 

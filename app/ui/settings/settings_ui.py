@@ -2,7 +2,7 @@
 from PySide6 import QtWidgets
 from PySide6 import QtCore
 
-from modules.ocr.selection import OCR_MODE_OPTIONS
+from modules.ocr.selection import OCR_MODE_OPTIONS, WORKFLOW_MODE_OPTIONS
 
 from ..dayu_widgets.clickable_card import ClickMeta
 from ..dayu_widgets.divider import MDivider
@@ -20,6 +20,7 @@ from .llms_page import LlmsPage
 from .text_rendering_page import TextRenderingPage
 from .notifications_page import NotificationsPage
 from .project_page import ProjectPage
+from .series_page import SeriesPage
 from .export_page import ExportPage
 from .shortcuts_page import ShortcutsPage
 from .about_page import AboutPage
@@ -79,17 +80,18 @@ class SettingsPageUI(QtWidgets.QWidget):
             self.tr("Google Cloud"),
         ]
         
-        self.supported_translators = [
-            self.tr("Gemini-2.5-Pro"),
-            self.tr("Gemini-3.0-Flash"),
-            self.tr("GPT-4.1"),
-            self.tr("GPT-4.1-mini"),
-            self.tr("Claude-4.6-Sonnet"),
-            self.tr("Claude-4.5-Haiku"),
-            self.tr("Deepseek-v3"),
-            self.tr("Custom Service"),
-            self.tr("Custom Local Server(Gemma)"),
+        self.translator_keys = [
+            "Gemini-2.5-Pro",
+            "Gemini-3.0-Flash",
+            "GPT-4.1",
+            "GPT-4.1-mini",
+            "Claude-4.6-Sonnet",
+            "Claude-4.5-Haiku",
+            "Deepseek-v3",
+            "Custom Service",
+            "Custom Local Server(Gemma)",
         ]
+        self.supported_translators = [self.tr(key) for key in self.translator_keys]
         
         self.languages = [
             'English', 
@@ -139,13 +141,16 @@ class SettingsPageUI(QtWidgets.QWidget):
             # OCR mappings
             self.tr("Default (existing auto: MangaOCR / PPOCR / Pororo...)"): "default",
             self.tr("Optimal (HunyuanOCR / PaddleOCR VL)"): "best_local",
-            self.tr("Optimal+ (HunyuanOCR / MangaLMM / PaddleOCR VL)"): "best_local_plus",
             self.tr("Microsoft OCR"): "microsoft_ocr",
             self.tr("Google Cloud Vision"): "google_cloud_vision",
             self.tr("Gemini-2.0-Flash"): "gemini_2_0_flash",
             self.tr("PaddleOCR VL"): "paddleocr_vl",
             self.tr("HunyuanOCR"): "hunyuanocr",
             self.tr("MangaLMM"): "mangalmm",
+
+            # Workflow mode mappings
+            self.tr("Stage-Batched Pipeline (Recommended)"): "stage_batched_pipeline",
+            self.tr("Legacy Page Pipeline (Legacy)"): "legacy_page_pipeline",
 
             # Inpainter mappings
             "AOT": "AOT",
@@ -157,6 +162,7 @@ class SettingsPageUI(QtWidgets.QWidget):
             "RT-DETR-v2": "RT-DETR-v2",
 
             # Fixed automatic runtime mapping
+            self.tr("RT-DETR-v2 + CTD Line Protect + Source LaMa"): "rtdetr_legacy_bbox_source_lama",
             self.tr("RT-DETR-v2 + Legacy BBox Rescue + Source LaMa"): "rtdetr_legacy_bbox_source_lama",
 
             # HD Strategy mappings
@@ -213,6 +219,10 @@ class SettingsPageUI(QtWidgets.QWidget):
             inpaint_strategy=self.inpaint_strategy,
             parent=self,
         )
+        for index, key in enumerate(self.translator_keys):
+            self.tools_page.translator_combo.setItemData(index, key)
+        for index, (key, _label) in enumerate(WORKFLOW_MODE_OPTIONS):
+            self.tools_page.workflow_mode_combo.setItemData(index, key)
         for index, key in enumerate(self.ocr_engine_keys):
             self.tools_page.ocr_combo.setItemData(index, key)
         self.paddleocr_vl_page = PaddleOCRVLPage(parent=self)
@@ -227,6 +237,7 @@ class SettingsPageUI(QtWidgets.QWidget):
         self.llms_page = LlmsPage(parent=self)
         self.text_rendering_page = TextRenderingPage(parent=self)
         self.project_page = ProjectPage(parent=self)
+        self.series_page = SeriesPage(parent=self)
         self.export_page = ExportPage(parent=self)
         self.user_dictionaries_page = UserDictionariesPage(parent=self)
         self.notifications_page = NotificationsPage(parent=self)
@@ -241,6 +252,7 @@ class SettingsPageUI(QtWidgets.QWidget):
         # Tools
         self.translator_combo = self.tools_page.translator_combo
         self.ocr_combo = self.tools_page.ocr_combo
+        self.workflow_mode_combo = self.tools_page.workflow_mode_combo
         self.detector_combo = self.tools_page.detector_combo
         self.inpainter_combo = self.tools_page.inpainter_combo
         self.inpainter_size_combo = self.tools_page.inpainter_size_combo
@@ -320,9 +332,16 @@ class SettingsPageUI(QtWidgets.QWidget):
         self.automatic_output_estimate_summary_label = self.export_page.automatic_output_estimate_summary_label
         self.project_autosave_interval_spinbox = self.project_page.project_autosave_interval_spinbox
         self.project_autosave_folder_input = self.project_page.project_autosave_folder_input
+        self.series_failure_policy_combo = self.series_page.failure_policy_combo
+        self.series_retry_count_spinbox = self.series_page.retry_count_spinbox
+        self.series_retry_delay_spinbox = self.series_page.retry_delay_spinbox
+        self.series_auto_open_failed_checkbox = self.series_page.auto_open_failed_checkbox
+        self.series_resume_first_incomplete_checkbox = self.series_page.resume_first_incomplete_checkbox
+        self.series_return_to_series_checkbox = self.series_page.return_to_series_checkbox
 
         # System
         self.check_update_button = self.about_page.check_update_button
+        self.developer_mode_checkbox = self.about_page.developer_mode_checkbox
 
 
         # Add pages to stacked widget (order must match navbar order)
@@ -337,6 +356,7 @@ class SettingsPageUI(QtWidgets.QWidget):
         self.stacked_widget.addWidget(self.user_dictionaries_page)
         self.stacked_widget.addWidget(self.notifications_page)
         self.stacked_widget.addWidget(self.project_page)
+        self.stacked_widget.addWidget(self.series_page)
         self.stacked_widget.addWidget(self.export_page)
         self.stacked_widget.addWidget(self.shortcuts_page)
         self.stacked_widget.addWidget(self.credentials_page)
@@ -397,6 +417,7 @@ class SettingsPageUI(QtWidgets.QWidget):
             {"title": self.tr("User Dictionaries"), "avatar": MPixmap(".svg")},
             {"title": self.tr("Notifications"), "avatar": MPixmap(".svg")},
             {"title": self.tr("Project"), "avatar": MPixmap(".svg")},
+            {"title": self.tr("Series"), "avatar": MPixmap(".svg")},
             {"title": self.tr("Export"), "avatar": MPixmap(".svg")},
             {"title": self.tr("Shortcuts"), "avatar": MPixmap(".svg")},
             {"title": self.tr("Advanced"), "avatar": MPixmap(".svg")},

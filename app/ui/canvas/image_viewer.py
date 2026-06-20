@@ -19,6 +19,7 @@ from app.ui.commands.base import PatchCommandBase
 class ImageViewer(QGraphicsView):
     # Signals
     rectangle_created = Signal(MoveableRectItem)
+    text_box_created = Signal(QRectF)
     rectangle_selected = Signal(QRectF)
     rectangle_deleted = Signal(QRectF)
     command_emitted = Signal(QtGui.QUndoCommand)
@@ -79,6 +80,7 @@ class ImageViewer(QGraphicsView):
         # Box drawing state
         self.start_point: QPointF = None
         self.current_rect: MoveableRectItem = None
+        self.current_text_rect = None
 
     # Properties to maintain public API
     @property
@@ -271,7 +273,17 @@ class ImageViewer(QGraphicsView):
             original_transform = self.transform()
             self._scene.views()[0].resetTransform()
             self._scene.setSceneRect(0, 0, original_size.width(), original_size.height())
-            self._scene.render(painter)
+            editor_frame_items = [
+                item for item in self._scene.items()
+                if isinstance(item, TextBlockItem) and bool(getattr(item, "editor_frame", False))
+            ]
+            for item in editor_frame_items:
+                item.editor_frame = False
+            try:
+                self._scene.render(painter)
+            finally:
+                for item in editor_frame_items:
+                    item.editor_frame = True
             painter.end()
 
 
@@ -379,8 +391,26 @@ class ImageViewer(QGraphicsView):
         self._scene.addItem(rect_item)
         return rect_item
 
-    def add_rectangle(self, rect: QRectF, position: QPointF, rotation: float = 0, origin: QPointF = None) -> MoveableRectItem:
+    def create_text_box_preview_item(self, rect: QRectF):
+        item = QtWidgets.QGraphicsRectItem(rect)
+        pen = QtGui.QPen(QtGui.QColor(238, 238, 238, 220), 1.5, Qt.PenStyle.DashLine)
+        pen.setCosmetic(True)
+        item.setPen(pen)
+        item.setBrush(QtGui.QBrush(QtGui.QColor(238, 238, 238, 34)))
+        item.setZValue(2)
+        self._scene.addItem(item)
+        return item
+
+    def add_rectangle(
+        self,
+        rect: QRectF,
+        position: QPointF,
+        rotation: float = 0,
+        origin: QPointF = None,
+        block_id: str = "",
+    ) -> MoveableRectItem:
         rect_item = self.create_rect_item(rect)
+        rect_item.block_id = str(block_id or "")
         rect_item.setPos(position)
         rect_item.setRotation(rotation)
         if origin:
@@ -422,6 +452,8 @@ class ImageViewer(QGraphicsView):
             vertical_alignment=properties.vertical_alignment,
             source_rect=properties.source_rect,
             block_anchor=properties.block_anchor,
+            block_id=properties.block_id,
+            editor_frame=properties.editor_frame,
         )
         
         # Apply width if specified
@@ -441,6 +473,8 @@ class ImageViewer(QGraphicsView):
         item.setScale(properties.scale)
         item.set_source_rect(properties.source_rect)
         item.set_block_anchor(properties.block_anchor)
+        item.block_id = str(properties.block_id or "")
+        item.editor_frame = bool(properties.editor_frame)
 
         item.set_vertical(bool(properties.vertical))
         item.set_vertical_alignment(properties.vertical_alignment)
@@ -530,6 +564,7 @@ class ImageViewer(QGraphicsView):
         for item in self._scene.items():
             if isinstance(item, MoveableRectItem):
                 rectangles_state.append({
+                    'block_id': getattr(item, 'block_id', ''),
                     'rect': (item.pos().x(), item.pos().y(), item.boundingRect().width(), item.boundingRect().height()),
                     'rotation': item.rotation(),
                     'transform_origin': (item.transformOriginPoint().x(), item.transformOriginPoint().y())
@@ -553,16 +588,55 @@ class ImageViewer(QGraphicsView):
             'text_items_state': text_items_state
         }
 
+    @staticmethod
+    def _state_tuple(value, length: int):
+        if not isinstance(value, (list, tuple)) or len(value) != length:
+            return None
+        try:
+            return tuple(float(item) for item in value)
+        except (TypeError, ValueError):
+            return None
+
     def load_state(self, state: Dict):
-        self.setTransform(QtGui.QTransform(*state['transform']))
-        self.centerOn(QPointF(*state['center']))
-        self.setSceneRect(QRectF(*state['scene_rect']))
+        state = state if isinstance(state, dict) else {}
 
-        for data in state['rectangles']:
-            x, y, w, h = data['rect']
-            origin = QPointF(*data.get('transform_origin', (0,0))) if 'transform_origin' in data else None
-            self.add_rectangle(QRectF(0,0,w,h), QPointF(x,y), data.get('rotation', 0), origin)
+        transform = self._state_tuple(state.get('transform'), 9)
+        if transform is not None:
+            self.setTransform(QtGui.QTransform(*transform))
 
-        for data in state.get('text_items_state', []):
+        center = self._state_tuple(state.get('center'), 2)
+        if center is not None:
+            self.centerOn(QPointF(*center))
+
+        scene_rect = self._state_tuple(state.get('scene_rect'), 4)
+        if scene_rect is not None:
+            self.setSceneRect(QRectF(*scene_rect))
+
+        rectangles = state.get('rectangles', [])
+        if not isinstance(rectangles, list):
+            rectangles = []
+        for data in rectangles:
+            if not isinstance(data, dict):
+                continue
+            rect = self._state_tuple(data.get('rect'), 4)
+            if rect is None:
+                continue
+            x, y, w, h = rect
+            origin_values = self._state_tuple(data.get('transform_origin'), 2)
+            origin = QPointF(*origin_values) if origin_values is not None else None
+            self.add_rectangle(
+                QRectF(0, 0, w, h),
+                QPointF(x, y),
+                data.get('rotation', 0),
+                origin,
+                data.get('block_id', ''),
+            )
+
+        text_items_state = state.get('text_items_state', [])
+        if not isinstance(text_items_state, list):
+            text_items_state = []
+        for data in text_items_state:
+            if not isinstance(data, dict):
+                continue
             # Use the new add_text_item function for consistency
             self.add_text_item(data)
