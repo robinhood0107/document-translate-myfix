@@ -289,6 +289,9 @@ class SettingsPageUI(QtWidgets.QWidget):
         self.gemma_top_p_spinbox = self.gemma_local_server_page.top_p_spinbox
         self.gemma_min_p_spinbox = self.gemma_local_server_page.min_p_spinbox
         self.gemma_raw_response_logging_checkbox = self.gemma_local_server_page.raw_response_logging_checkbox
+        self.gemma_preserve_explicit_context_prompt_checkbox = (
+            self.gemma_local_server_page.preserve_explicit_context_prompt_checkbox
+        )
 
         # Credentials
         self.save_keys_checkbox = self.credentials_page.save_keys_checkbox

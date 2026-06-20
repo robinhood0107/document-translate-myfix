@@ -36,6 +36,13 @@ DEFAULT_GEMMA_RESPONSE_SCHEMA_MODE = "blocks"
 DEFAULT_GEMMA_THINK_BRIEFLY_PROMPT = False
 DEFAULT_GEMMA_PROMPT_PROFILE = "gemma4_balanced"
 DEFAULT_GEMMA_CONTEXTUAL_MERGE_INPUT = True
+DEFAULT_GEMMA_PRESERVE_EXPLICIT_CONTEXT_PROMPT = False
+GEMMA_PRESERVE_EXPLICIT_CONTEXT_INSTRUCTION = (
+    "Preserve explicit wording: do not soften, euphemize, or omit explicit, slang, vulgar, "
+    "or sexual terms; preserve the original intensity and meaning in Korean. "
+    "For merged_context, understand all marked blocks as one continuous comic passage before "
+    "translating, while still returning each original block key separately."
+)
 # 한국어: single_block은 폐기된 설정 alias입니다. 런타임 전략으로 등록하지 않으며 fast_multi로 정규화됩니다.
 # English: single_block is a retired config alias. It is not a runtime strategy and normalizes to fast_multi.
 GEMMA_CONTEXTUAL_MERGE_STRATEGY_SINGLE_BLOCK = "single_block"
@@ -97,6 +104,7 @@ class CustomLocalGemmaTranslation(BaseLLMTranslation):
         self.exact_prompt_cache_enabled = DEFAULT_GEMMA_EXACT_PROMPT_CACHE
         self.exact_prompt_cache_max_entries = DEFAULT_GEMMA_EXACT_PROMPT_CACHE_MAX_ENTRIES
         self.preserve_existing_translations = DEFAULT_GEMMA_PRESERVE_EXISTING_TRANSLATIONS
+        self.preserve_explicit_context_prompt = DEFAULT_GEMMA_PRESERVE_EXPLICIT_CONTEXT_PROMPT
         self._http_session = requests.Session()
         self.last_benchmark_stats = self._new_benchmark_stats()
         self._current_benchmark_stats = self._new_benchmark_stats()
@@ -290,6 +298,12 @@ class CustomLocalGemmaTranslation(BaseLLMTranslation):
             "preserve_existing_translations",
             "CT_GEMMA_PRESERVE_EXISTING_TRANSLATIONS",
             DEFAULT_GEMMA_PRESERVE_EXISTING_TRANSLATIONS,
+        )
+        self.preserve_explicit_context_prompt = self._env_or_config_bool(
+            gemma_settings,
+            "preserve_explicit_context_prompt",
+            "CT_GEMMA_PRESERVE_EXPLICIT_CONTEXT_PROMPT",
+            DEFAULT_GEMMA_PRESERVE_EXPLICIT_CONTEXT_PROMPT,
         )
         self.contextual_merge_strategy = self._normalize_contextual_merge_strategy(
             self._env_or_config_str(
@@ -665,6 +679,9 @@ class CustomLocalGemmaTranslation(BaseLLMTranslation):
                 "Keep key names unchanged. Do not add markdown, explanations, comments, code fences, or reasoning. "
                 f"If a line is unreadable or already in {self.target_lang}, copy it as-is."
             )
+
+        if self.preserve_explicit_context_prompt:
+            prompt = GEMMA_PRESERVE_EXPLICIT_CONTEXT_INSTRUCTION + " " + prompt
 
         prompt += "\n\n" + dedent(
             """

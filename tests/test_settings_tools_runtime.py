@@ -202,6 +202,24 @@ class SettingsToolsRuntimeTests(unittest.TestCase):
         self.assertEqual(settings.value("mangalmm_ocr/max_pixels", 0, type=int), 1500000)
         self.assertEqual(settings.value("mangalmm_ocr/max_long_side", 0, type=int), 1408)
 
+    def test_gemma_explicit_context_prompt_setting_round_trip(self) -> None:
+        page = self._make_page()
+        page.load_settings()
+
+        self.assertFalse(page.ui.gemma_preserve_explicit_context_prompt_checkbox.isChecked())
+        self.assertFalse(page.get_gemma_local_server_settings()["preserve_explicit_context_prompt"])
+
+        page.ui.gemma_preserve_explicit_context_prompt_checkbox.setChecked(True)
+        page.save_settings()
+
+        settings = QtCore.QSettings("ComicLabs", "ComicTranslate")
+        self.assertTrue(settings.value("gemma_local_server/preserve_explicit_context_prompt", False, type=bool))
+
+        reloaded = self._make_page()
+        reloaded.load_settings()
+        self.assertTrue(reloaded.ui.gemma_preserve_explicit_context_prompt_checkbox.isChecked())
+        self.assertTrue(reloaded.get_gemma_local_server_settings()["preserve_explicit_context_prompt"])
+
     def test_legacy_optimal_plus_setting_loads_as_optimal(self) -> None:
         settings = QtCore.QSettings("ComicLabs", "ComicTranslate")
         settings.setValue("tools/ocr", "best_local_plus")

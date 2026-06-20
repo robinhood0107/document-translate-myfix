@@ -213,6 +213,7 @@ class SettingsPage(QtWidgets.QWidget):
             self.ui.mangalmm_ocr_raw_response_logging_checkbox,
             self.ui.mangalmm_ocr_safe_resize_checkbox,
             self.ui.gemma_raw_response_logging_checkbox,
+            self.ui.gemma_preserve_explicit_context_prompt_checkbox,
         ]
         for widget in checkbox_widgets:
             widget.stateChanged.connect(self._save_settings_if_not_loading)
@@ -386,6 +387,9 @@ class SettingsPage(QtWidgets.QWidget):
             "top_p": float(self.ui.gemma_top_p_spinbox.value()),
             "min_p": float(self.ui.gemma_min_p_spinbox.value()),
             "raw_response_logging": self.ui.gemma_raw_response_logging_checkbox.isChecked(),
+            "preserve_explicit_context_prompt": (
+                self.ui.gemma_preserve_explicit_context_prompt_checkbox.isChecked()
+            ),
         }
 
     def get_hunyuan_ocr_settings(self):
@@ -1019,6 +1023,13 @@ class SettingsPage(QtWidgets.QWidget):
         )
         self.ui.gemma_raw_response_logging_checkbox.setChecked(
             settings.value("raw_response_logging", False, type=bool)
+        )
+        self.ui.gemma_preserve_explicit_context_prompt_checkbox.setChecked(
+            settings.value(
+                "preserve_explicit_context_prompt",
+                GemmaLocalServerPage.DEFAULT_PRESERVE_EXPLICIT_CONTEXT_PROMPT,
+                type=bool,
+            )
         )
         settings.endGroup()
 

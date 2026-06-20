@@ -828,6 +828,14 @@ If responses are truncated, lower Chunk Size or Max Completion Tokens before rec
         <translation>원시 응답 로그</translation>
     </message>
     <message>
+        <source>Preserve Explicit Context Prompt</source>
+        <translation>명시적 문맥 프롬프트 보존</translation>
+    </message>
+    <message>
+        <source>Keeps explicit/slang wording closer to the source in merged-context translation.</source>
+        <translation>문맥 병합 번역에서 노골적 표현과 은어를 원문에 더 가깝게 유지합니다.</translation>
+    </message>
+    <message>
         <source>Promoted winner defaults for the bundled Gemma runtime:
 - Chunk Size: 6
 - Max Completion Tokens: 512

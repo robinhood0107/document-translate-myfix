@@ -819,6 +819,14 @@ If responses are truncated, lower Chunk Size or Max Completion Tokens before rec
         <translation type="unfinished"></translation>
     </message>
     <message>
+        <source>Preserve Explicit Context Prompt</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Keeps explicit/slang wording closer to the source in merged-context translation.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
         <source>Promoted winner defaults for the bundled Gemma runtime:
 - Chunk Size: 6
 - Max Completion Tokens: 512

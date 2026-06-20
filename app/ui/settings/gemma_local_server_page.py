@@ -8,6 +8,7 @@ from modules.translation.llm.custom_local_gemma import (
     DEFAULT_GEMMA_LOCAL_ENDPOINT,
     DEFAULT_GEMMA_LOCAL_MODEL,
     DEFAULT_GEMMA_MAX_COMPLETION_TOKENS,
+    DEFAULT_GEMMA_PRESERVE_EXPLICIT_CONTEXT_PROMPT,
     DEFAULT_GEMMA_REQUEST_TIMEOUT_SEC,
     DEFAULT_GEMMA_TRANSLATION_MIN_P,
     DEFAULT_GEMMA_TRANSLATION_TEMPERATURE,
@@ -26,6 +27,7 @@ class GemmaLocalServerPage(QtWidgets.QWidget):
     DEFAULT_TOP_K = DEFAULT_GEMMA_TRANSLATION_TOP_K
     DEFAULT_TOP_P = DEFAULT_GEMMA_TRANSLATION_TOP_P
     DEFAULT_MIN_P = DEFAULT_GEMMA_TRANSLATION_MIN_P
+    DEFAULT_PRESERVE_EXPLICIT_CONTEXT_PROMPT = DEFAULT_GEMMA_PRESERVE_EXPLICIT_CONTEXT_PROMPT
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -88,6 +90,23 @@ class GemmaLocalServerPage(QtWidgets.QWidget):
         timeout_layout.addWidget(self.request_timeout_spinbox)
         timeout_layout.addStretch(1)
         layout.addLayout(timeout_layout)
+
+        self.preserve_explicit_context_prompt_checkbox = MCheckBox(
+            self.tr("Preserve Explicit Context Prompt")
+        )
+        self.preserve_explicit_context_prompt_checkbox.setChecked(
+            self.DEFAULT_PRESERVE_EXPLICIT_CONTEXT_PROMPT
+        )
+        layout.addWidget(self.preserve_explicit_context_prompt_checkbox)
+
+        explicit_prompt_note = MLabel(
+            self.tr(
+                "Keeps explicit/slang wording closer to the source in merged-context translation."
+            )
+        ).secondary()
+        explicit_prompt_note.setWordWrap(True)
+        explicit_prompt_note.setTextFormat(QtCore.Qt.PlainText)
+        layout.addWidget(explicit_prompt_note)
 
         advanced_label = MLabel(self.tr("Advanced Sampler Settings")).h4()
         layout.addWidget(advanced_label)

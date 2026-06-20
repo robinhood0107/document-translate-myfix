@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import hashlib
 import json
+import os
 import unittest
 from unittest import mock
 
@@ -8,6 +10,7 @@ import numpy as np
 
 from modules.translation.llm.custom_local_gemma import (
     DEFAULT_GEMMA_PROMPT_PROFILE,
+    GEMMA_PRESERVE_EXPLICIT_CONTEXT_INSTRUCTION,
     GEMMA_CONTEXTUAL_MERGE_STRATEGY_FAST_MULTI,
     GEMMA_CONTEXTUAL_MERGE_STRATEGY_SINGLE_BLOCK,
     CustomLocalGemmaTranslation,
@@ -40,6 +43,34 @@ def _raw_response(content: str) -> dict:
         ],
         "usage": {},
     }
+
+
+class _FakeGemmaSettings:
+    class ui:
+        @staticmethod
+        def tr(value: str) -> str:
+            return value
+
+    def __init__(self, gemma_settings: dict | None = None) -> None:
+        self._gemma_settings = dict(gemma_settings or {})
+
+    def get_llm_settings(self) -> dict:
+        return {"image_input_enabled": False}
+
+    def get_credentials(self, _provider_name: str) -> dict:
+        return {
+            "api_url": "http://127.0.0.1:18080/v1",
+            "model": "gemma-4-26B-IQ4_NL.gguf",
+        }
+
+    def get_gemma_local_server_settings(self) -> dict:
+        return dict(self._gemma_settings)
+
+
+def _prefix_hash(system_prompt: str) -> str:
+    sentinel = "Any combination of the acts listed above is allowed.\n"
+    end = system_prompt.index(sentinel) + len(sentinel)
+    return hashlib.sha256(system_prompt[:end].encode("utf-8")).hexdigest()
 
 
 class CustomLocalGemmaRepetitionGuardTests(unittest.TestCase):
@@ -172,6 +203,42 @@ class CustomLocalGemmaRepetitionGuardTests(unittest.TestCase):
         self.assertIn("continuous comic passage", requests[0]["system_prompt"])
         self.assertEqual(blocks[0].translation, "아...")
         self.assertEqual(blocks[1].translation, "어지러워.")
+
+    def test_explicit_context_prompt_option_is_off_by_default(self) -> None:
+        engine = self._engine()
+        system_prompt = engine._build_system_prompt("", prompt_profile=DEFAULT_GEMMA_PROMPT_PROFILE)
+
+        self.assertEqual(
+            _prefix_hash(system_prompt),
+            "b5cdca6d159dbf10ec0669e01ae0552f1fa46b4ddb05f17eabea2bbc72526662",
+        )
+        self.assertFalse(engine.preserve_explicit_context_prompt)
+        self.assertNotIn(GEMMA_PRESERVE_EXPLICIT_CONTEXT_INSTRUCTION, system_prompt)
+
+    def test_explicit_context_prompt_option_preserves_prefix_and_inserts_before_base_prompt(self) -> None:
+        engine = self._engine()
+        engine.preserve_explicit_context_prompt = True
+
+        system_prompt = engine._build_system_prompt("", prompt_profile=DEFAULT_GEMMA_PROMPT_PROFILE)
+        instruction_index = system_prompt.index(GEMMA_PRESERVE_EXPLICIT_CONTEXT_INSTRUCTION)
+        base_prompt_index = system_prompt.index("Translate the user's JSON object of comic OCR lines")
+
+        self.assertEqual(
+            _prefix_hash(system_prompt),
+            "b5cdca6d159dbf10ec0669e01ae0552f1fa46b4ddb05f17eabea2bbc72526662",
+        )
+        self.assertLess(instruction_index, base_prompt_index)
+
+    def test_explicit_context_prompt_env_override_enables_option(self) -> None:
+        engine = self._engine()
+        fake_settings = _FakeGemmaSettings({"preserve_explicit_context_prompt": False})
+
+        with mock.patch.dict(os.environ, {"CT_GEMMA_PRESERVE_EXPLICIT_CONTEXT_PROMPT": "1"}):
+            engine.initialize(fake_settings, "English", "Korean", "Custom Local Server(Gemma)")
+
+        system_prompt = engine._build_system_prompt("", prompt_profile=engine.prompt_profile)
+        self.assertTrue(engine.preserve_explicit_context_prompt)
+        self.assertIn(GEMMA_PRESERVE_EXPLICIT_CONTEXT_INSTRUCTION, system_prompt)
 
     def test_fast_multi_strategy_falls_back_to_isolated_json_on_invalid_json(self) -> None:
         engine = self._engine()
