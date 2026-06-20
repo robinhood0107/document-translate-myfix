@@ -56,7 +56,12 @@ class GemmaExactValidationTests(unittest.TestCase):
             response_schema_mode=DEFAULT_GEMMA_RESPONSE_SCHEMA_MODE,
         )
 
-    def _project_blob(self, temp_dir: str) -> bytes:
+    def _project_blob_with_blocks(
+        self,
+        temp_dir: str,
+        texts: list[str],
+        translations: list[str] | None = None,
+    ) -> bytes:
         project_path = os.path.join(temp_dir, "child.ctpr")
         conn = sqlite3.connect(project_path)
         encoder = ProjectEncoder()
@@ -77,11 +82,15 @@ class GemmaExactValidationTests(unittest.TestCase):
                 )
                 """
             )
-            block = TextBlock(
-                text_bbox=np.array([0, 0, 100, 100]),
-                text="Alpha source line.",
-                translation="Saved target line.",
-            )
+            blocks = []
+            translations = translations or []
+            for index, text in enumerate(texts):
+                block = TextBlock(
+                    text_bbox=np.array([0, index * 100, 100, (index + 1) * 100]),
+                    text=text,
+                    translation=translations[index] if index < len(translations) else "",
+                )
+                blocks.append(block)
             manifest = {
                 "original_image_files": ["page-001.png"],
                 "llm_extra_context": "",
@@ -90,7 +99,7 @@ class GemmaExactValidationTests(unittest.TestCase):
                 "image_state": {
                     "source_lang": "English",
                     "target_lang": "Korean",
-                    "blk_list": [block],
+                    "blk_list": blocks,
                 }
             }
             conn.execute(
@@ -109,6 +118,13 @@ class GemmaExactValidationTests(unittest.TestCase):
             conn.close()
         with open(project_path, "rb") as fh:
             return fh.read()
+
+    def _project_blob(self, temp_dir: str) -> bytes:
+        return self._project_blob_with_blocks(
+            temp_dir,
+            ["Alpha source line."],
+            ["Saved target line."],
+        )
 
     def _series_project(self, temp_dir: str) -> str:
         series_path = os.path.join(temp_dir, "queue.seriesctpr")
@@ -297,6 +313,36 @@ class GemmaExactValidationTests(unittest.TestCase):
             self.assertRegex(html_text, r"\.box\s*\{[^}]*overflow:\s*auto")
             self.assertRegex(html_text, r"\.actions\s*\{[^}]*position:\s*sticky")
 
+    def test_review_board_has_filter_controls_for_large_diff_sets(self) -> None:
+        module = _load_validation_module()
+        with tempfile.TemporaryDirectory() as temp_dir:
+            diff_path = Path(temp_dir) / "diff.json"
+            diff_path.write_text(
+                json.dumps(
+                    {
+                        "items": [
+                            {
+                                "id": "sample-001",
+                                "reason": "sensitive_terms=1",
+                                "source": "Line containing a trigger term.",
+                                "baseline": "baseline text",
+                                "candidate": "candidate text",
+                            }
+                        ]
+                    },
+                    ensure_ascii=False,
+                ),
+                encoding="utf-8",
+            )
+
+            result = module.make_review_board(diff_path, Path(temp_dir) / "out")
+
+            html_text = Path(result["index_html"]).read_text(encoding="utf-8")
+            self.assertIn('id="filterMode"', html_text)
+            self.assertIn('value="unreviewed"', html_text)
+            self.assertIn('value="rejected"', html_text)
+            self.assertIn("function filteredItems", html_text)
+
     def test_select_canary_samples_writes_local_raw_samples_and_summary(self) -> None:
         module = _load_validation_module()
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -342,6 +388,159 @@ class GemmaExactValidationTests(unittest.TestCase):
 
             self.assertEqual(summary["sample_count"], 1)
             self.assertEqual(summary["selected_projects"][0]["project_index"], 1)
+
+    def test_select_sensitive_samples_balances_trigger_and_control_without_summary_raw_text(self) -> None:
+        module = _load_validation_module()
+        with tempfile.TemporaryDirectory() as temp_dir:
+            payload = self._project_blob_with_blocks(
+                temp_dir,
+                [
+                    "This quiet control line has no trigger.",
+                    "The tiny dick line should be sampled.",
+                ],
+                [
+                    "control saved translation",
+                    "sensitive saved translation",
+                ],
+            )
+            create_series_project(
+                os.path.join(temp_dir, "queue.seriesctpr"),
+                root_dir=temp_dir,
+                items=[
+                    {
+                        "series_item_id": "item-1",
+                        "queue_index": 1,
+                        "display_name": "example_selected_chapter_source",
+                        "source_kind": "archive",
+                        "source_origin_path": os.path.join(temp_dir, "example_selected_chapter_source"),
+                        "source_origin_relpath": "example_selected_chapter_source",
+                        "imported_at": "2026-01-01T00:00:00",
+                        "updated_at": "2026-01-01T00:00:00",
+                        "status": "done",
+                        "embedded_project_blob_hash": "hash-1",
+                        "child_page_count": 1,
+                    }
+                ],
+                embedded_projects=[
+                    {
+                        "project_hash": "hash-1",
+                        "display_name": "example_project.ctpr",
+                        "project_size": len(payload),
+                        "project_blob": payload,
+                    }
+                ],
+            )
+            output_dir = Path(temp_dir) / "sensitive"
+            settings = self._settings()
+            settings = module.ValidationSettings(
+                source_lang=settings.source_lang,
+                target_lang=settings.target_lang,
+                model=settings.model,
+                chunk_size=1,
+                max_tokens=settings.max_tokens,
+                temperature=settings.temperature,
+                top_k=settings.top_k,
+                top_p=settings.top_p,
+                min_p=settings.min_p,
+                prompt_profile=settings.prompt_profile,
+                response_format_mode=settings.response_format_mode,
+                response_schema_mode=settings.response_schema_mode,
+            )
+
+            summary = module.select_sensitive_samples(
+                Path(temp_dir),
+                output_dir,
+                settings,
+                golden_limit=1,
+                control_limit=1,
+            )
+
+            self.assertEqual(summary["sample_count"], 2)
+            self.assertEqual(summary["sensitive_sample_count"], 1)
+            self.assertEqual(summary["control_sample_count"], 1)
+            self.assertFalse(summary["privacy"]["git_safe"])
+            samples = json.loads(Path(summary["samples_path"]).read_text(encoding="utf-8"))["samples"]
+            self.assertEqual(len(samples), 2)
+            self.assertTrue(any("dick" in " ".join(item["blocks"]) for item in samples))
+            summary_text = (output_dir / "sensitive_summary.json").read_text(encoding="utf-8")
+            self.assertNotIn("tiny dick", summary_text)
+            self.assertNotIn("sensitive saved translation", summary_text)
+
+    def test_sensitive_sampler_matrix_flags_bad_outputs_and_preserves_prompt_prefix_hash(self) -> None:
+        module = _load_validation_module()
+        with tempfile.TemporaryDirectory() as temp_dir:
+            samples_path = Path(temp_dir) / "samples.json"
+            samples_path.write_text(
+                json.dumps(
+                    {
+                        "samples": [
+                            {
+                                "id": "sample-001",
+                                "reason": "sensitive_terms=1",
+                                "source_lang": "English",
+                                "target_lang": "Korean",
+                                "blocks": ["The tiny dick line should keep its meaning."],
+                                "saved_translations": ["saved baseline"],
+                            }
+                        ]
+                    },
+                    ensure_ascii=False,
+                ),
+                encoding="utf-8",
+            )
+            calls = []
+
+            def fake_request(engine, system_prompt, user_prompt, *, expected_keys=None):
+                calls.append(
+                    {
+                        "temperature": engine.temperature,
+                        "top_k": engine.top_k,
+                        "top_p": engine.top_p,
+                        "system_prompt": system_prompt,
+                        "expected_keys": expected_keys,
+                    }
+                )
+                if engine.temperature == 0.7:
+                    return {
+                        "choices": [
+                            {
+                                "finish_reason": "stop",
+                                "message": {"content": json.dumps({"block_0": "와님 typo"})},
+                            }
+                        ],
+                        "usage": {"prompt_tokens": 10, "completion_tokens": 2, "total_tokens": 12},
+                    }
+                return {
+                    "choices": [
+                        {
+                            "finish_reason": "stop",
+                            "message": {"content": json.dumps({"block_0": "안정 번역"})},
+                        }
+                    ],
+                    "usage": {"prompt_tokens": 10, "completion_tokens": 2, "total_tokens": 12},
+                }
+
+            original_request = module.CustomLocalGemmaTranslation._request_translation
+            try:
+                module.CustomLocalGemmaTranslation._request_translation = fake_request
+                summary = module.run_sensitive_sampler_matrix(
+                    samples_path,
+                    Path(temp_dir) / "matrix",
+                    self._settings(),
+                    api_base_url="http://127.0.0.1:18080/v1",
+                    timeout=1.0,
+                )
+            finally:
+                module.CustomLocalGemmaTranslation._request_translation = original_request
+
+            self.assertEqual(summary["counters"]["failed_samples"], 0)
+            self.assertEqual(summary["candidates"]["baseline"]["known_bad_output_count"], 1)
+            self.assertEqual(summary["candidates"]["stable_b"]["known_bad_output_count"], 0)
+            self.assertFalse(summary["prompt_prefix"]["changed"])
+            self.assertEqual({call["expected_keys"][0] for call in calls}, {"block_0"})
+            self.assertIn(0.3, {call["temperature"] for call in calls})
+            review_items = json.loads(Path(summary["review_diff_path"]).read_text(encoding="utf-8"))["items"]
+            self.assertTrue(any(item["candidate_name"] == "stable_b" for item in review_items))
 
 
 if __name__ == "__main__":

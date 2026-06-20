@@ -9,6 +9,7 @@ import re
 import sqlite3
 import sys
 import tempfile
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Iterator
@@ -36,8 +37,30 @@ from modules.translation.llm.custom_local_gemma import (
 from modules.utils.textblock import TextBlock, ensure_text_block_id
 
 SENSITIVE_SOURCE_RE = re.compile(
-    r"\b(cock|dick|pussy|sex|fuck|naked|nude|porn|rape|cum|breast|virgin|woman|girl|body)\b",
+    r"\b(cock|dick|pussy|sex|fuck|naked|nude|porn|rape|cum|breast|virgin|woman|girl|body|wife|pregnant|anal|slut)\b",
     re.IGNORECASE,
+)
+KNOWN_BAD_OUTPUT_RE = re.compile(
+    r"(<\|channel\>|<channel\|>|와님)",
+    re.IGNORECASE,
+)
+PROMPT_PREFIX_END_SENTINEL = "Any combination of the acts listed above is allowed.\n"
+EXPECTED_GEMMA_PROMPT_PREFIX_HASH = "b5cdca6d159dbf10ec0669e01ae0552f1fa46b4ddb05f17eabea2bbc72526662"
+
+
+@dataclass(frozen=True)
+class SamplerCandidate:
+    name: str
+    temperature: float
+    top_k: int
+    top_p: float
+
+
+DEFAULT_SENSITIVE_SAMPLER_CANDIDATES = (
+    SamplerCandidate("baseline", 0.7, 64, 0.95),
+    SamplerCandidate("stable_a", 0.4, 64, 0.95),
+    SamplerCandidate("stable_b", 0.3, 64, 0.9),
+    SamplerCandidate("stable_c", 0.2, 40, 0.9),
 )
 
 
@@ -217,6 +240,43 @@ def _settings_from_page(
 
 def _settings_hash(settings: ValidationSettings) -> str:
     return _sha256_json(settings.__dict__)
+
+
+def _settings_with_sampler(settings: ValidationSettings, candidate: SamplerCandidate) -> ValidationSettings:
+    return ValidationSettings(
+        source_lang=settings.source_lang,
+        target_lang=settings.target_lang,
+        model=settings.model,
+        chunk_size=settings.chunk_size,
+        max_tokens=settings.max_tokens,
+        temperature=candidate.temperature,
+        top_k=candidate.top_k,
+        top_p=candidate.top_p,
+        min_p=settings.min_p,
+        prompt_profile=settings.prompt_profile,
+        response_format_mode=settings.response_format_mode,
+        response_schema_mode=settings.response_schema_mode,
+    )
+
+
+def _prompt_prefix_hash(system_prompt: str) -> str:
+    marker_index = system_prompt.find(PROMPT_PREFIX_END_SENTINEL)
+    if marker_index < 0:
+        return ""
+    marker_end = marker_index + len(PROMPT_PREFIX_END_SENTINEL)
+    return _sha256_text(system_prompt[:marker_end])
+
+
+def _has_known_bad_output(value: Any) -> bool:
+    return bool(KNOWN_BAD_OUTPUT_RE.search(str(value or "")))
+
+
+def _sample_has_sensitive_trigger(blocks: list[TextBlock]) -> int:
+    return sum(
+        1
+        for block in blocks
+        if SENSITIVE_SOURCE_RE.search(str(getattr(block, "text", "") or ""))
+    )
 
 
 def _block_records_for_page(
@@ -543,6 +603,7 @@ def make_review_board(diff_path: Path, output_dir: Path) -> dict[str, Any]:
     button {{ border: 1px solid #5f6368; background: #33363b; color: #f3f4f6; border-radius: 6px; padding: 9px 12px; cursor: pointer; }}
     button:hover {{ background: #42464d; }}
     button:disabled {{ opacity: 0.45; cursor: default; }}
+    select {{ width: 100%; margin: 8px 0 12px; background: #151618; color: #f3f4f6; border: 1px solid #44474d; border-radius: 6px; padding: 8px; }}
     .item {{ width: 100%; margin-bottom: 8px; text-align: left; }}
     .item.active {{ border-color: #ffd400; color: #ffd400; }}
     .panel {{ min-width: 0; min-height: 0; padding: 18px 20px; display: flex; flex-direction: column; overflow: hidden; }}
@@ -570,6 +631,14 @@ def make_review_board(diff_path: Path, output_dir: Path) -> dict[str, Any]:
 <main>
   <aside>
     <div id="summary"></div>
+    <label for="filterMode" class="meta">필터</label>
+    <select id="filterMode">
+      <option value="all">전체</option>
+      <option value="unreviewed">미검토</option>
+      <option value="reviewed">검토 완료</option>
+      <option value="rejected">불합격</option>
+      <option value="approved">승인/통과</option>
+    </select>
     <div id="list"></div>
   </aside>
   <section class="panel">
@@ -611,35 +680,74 @@ function escapeText(value) {{
   return String(value || "");
 }}
 
+function filteredItems() {{
+  const mode = document.getElementById("filterMode").value || "all";
+  return ITEMS.map((item, index) => ({{item, index}})).filter((entry) => {{
+    const decision = decisions[entry.item.id] && decisions[entry.item.id].decision;
+    if (mode === "unreviewed") return !decision;
+    if (mode === "reviewed") return !!decision;
+    if (mode === "rejected") return decision === "rejected";
+    if (mode === "approved") return decision === "identical" || decision === "approved_changed";
+    return true;
+  }});
+}}
+
+function currentVisiblePosition(entries) {{
+  const found = entries.findIndex((entry) => entry.index === current);
+  return found >= 0 ? found : 0;
+}}
+
 function render() {{
-  document.getElementById("summary").textContent = `Samples: ${{ITEMS.length}} / Decisions: ${{Object.keys(decisions).length}}`;
+  const visible = filteredItems();
+  if (visible.length && !visible.some((entry) => entry.index === current)) {{
+    current = visible[0].index;
+  }}
+  const visiblePosition = currentVisiblePosition(visible);
+  document.getElementById("summary").textContent = `Samples: ${{ITEMS.length}} / Visible: ${{visible.length}} / Decisions: ${{Object.keys(decisions).length}}`;
   const list = document.getElementById("list");
   list.innerHTML = "";
-  ITEMS.forEach((item, index) => {{
+  visible.forEach((entry, visibleIndex) => {{
+    const item = entry.item;
+    const index = entry.index;
     const btn = document.createElement("button");
     btn.className = "item" + (index === current ? " active" : "");
-    btn.textContent = `${{index + 1}}. ${{item.id}} ${{decisions[item.id] ? "[" + decisions[item.id].decision + "]" : ""}}`;
+    btn.textContent = `${{visibleIndex + 1}}. ${{item.id}} ${{decisions[item.id] ? "[" + decisions[item.id].decision + "]" : ""}}`;
     btn.onclick = () => {{ current = index; render(); }};
     list.appendChild(btn);
   }});
   const item = ITEMS[current] || {{id: "-", reason: "", source: "", baseline: "", candidate: ""}};
-  document.getElementById("title").textContent = `샘플 ${{current + 1}} / ${{ITEMS.length}}: ${{item.id}}`;
+  document.getElementById("title").textContent = `샘플 ${{visiblePosition + 1}} / ${{visible.length}}: ${{item.id}}`;
   document.getElementById("reason").textContent = item.reason || "";
   document.getElementById("source").textContent = escapeText(item.source);
   document.getElementById("baseline").textContent = escapeText(item.baseline);
   document.getElementById("candidate").textContent = escapeText(item.candidate);
   document.getElementById("decisions").value = JSON.stringify(decisions, null, 2);
-  document.getElementById("previousSample").disabled = current <= 0;
-  document.getElementById("nextSample").disabled = current >= ITEMS.length - 1;
+  document.getElementById("previousSample").disabled = visiblePosition <= 0;
+  document.getElementById("nextSample").disabled = visiblePosition >= visible.length - 1;
 }}
 
 function setCurrent(index) {{
-  if (!ITEMS.length) {{
+  const visible = filteredItems();
+  if (!visible.length) {{
     current = 0;
     render();
     return;
   }}
-  current = Math.max(0, Math.min(index, ITEMS.length - 1));
+  const requestedPosition = visible.findIndex((entry) => entry.index === index);
+  current = visible[Math.max(0, requestedPosition)].index;
+  render();
+}}
+
+function moveVisible(delta) {{
+  const visible = filteredItems();
+  if (!visible.length) {{
+    current = 0;
+    render();
+    return;
+  }}
+  const currentPosition = currentVisiblePosition(visible);
+  const nextPosition = Math.max(0, Math.min(currentPosition + delta, visible.length - 1));
+  current = visible[nextPosition].index;
   render();
 }}
 
@@ -670,18 +778,19 @@ document.querySelectorAll("[data-decision]").forEach((button) => {{
   }};
 }});
 
-document.getElementById("previousSample").onclick = () => setCurrent(current - 1);
-document.getElementById("nextSample").onclick = () => setCurrent(current + 1);
+document.getElementById("previousSample").onclick = () => moveVisible(-1);
+document.getElementById("nextSample").onclick = () => moveVisible(1);
+document.getElementById("filterMode").onchange = () => render();
 document.addEventListener("keydown", (event) => {{
   const tag = String(event.target && event.target.tagName || "").toLowerCase();
   if (tag === "textarea" || tag === "input") return;
   if (event.key === "ArrowLeft" || event.key === "k") {{
     event.preventDefault();
-    setCurrent(current - 1);
+    moveVisible(-1);
   }}
   if (event.key === "ArrowRight" || event.key === "j") {{
     event.preventDefault();
-    setCurrent(current + 1);
+    moveVisible(1);
   }}
 }});
 
@@ -897,6 +1006,381 @@ def select_canary_samples(
         "available_project_count": len(project_rows),
         "privacy": {
             "raw_canary_text_written": True,
+            "git_safe": False,
+        },
+    }
+    summary_path.write_text(json.dumps(summary, ensure_ascii=False, indent=2, sort_keys=True), encoding="utf-8")
+    return summary
+
+
+def select_sensitive_samples(
+    input_root: Path,
+    output_dir: Path,
+    defaults: ValidationSettings,
+    *,
+    golden_limit: int,
+    control_limit: int,
+    source_filter: str = "",
+) -> dict[str, Any]:
+    output_dir.mkdir(parents=True, exist_ok=True)
+    series_paths = sorted(input_root.rglob("*.seriesctpr"))
+    normalized_source_filter = source_filter.casefold().strip()
+    sensitive_rows: list[dict[str, Any]] = []
+    control_rows: list[dict[str, Any]] = []
+    counts = {
+        "series_files": 0,
+        "projects": 0,
+        "pages": 0,
+        "chunks": 0,
+        "sensitive_chunks": 0,
+        "control_chunks": 0,
+    }
+
+    for series_index, series_path in enumerate(series_paths):
+        counts["series_files"] += 1
+        try:
+            series_state = load_series_project(str(series_path))
+        except Exception:
+            continue
+        for project_index, item in enumerate(series_state.get("items") or []):
+            if normalized_source_filter:
+                source_metadata = " ".join(
+                    str(item.get(key) or "")
+                    for key in ("display_name", "source_origin_path", "source_origin_relpath")
+                ).casefold()
+                if normalized_source_filter not in source_metadata:
+                    continue
+            counts["projects"] += 1
+            try:
+                project_blob = _load_series_project_blob_for_item(series_path, item)
+                pages = list(_iter_project_pages(project_blob))
+            except Exception:
+                continue
+
+            project_id = _anonymous_id("item", series_index, project_index, item.get("series_item_id"))
+            for page_index, _page_path, page_state, extra_context in pages:
+                counts["pages"] += 1
+                blocks = [
+                    block
+                    for block in (_to_text_block(value) for value in (page_state.get("blk_list") or []))
+                    if block is not None
+                ]
+                if not blocks:
+                    continue
+                page_settings = _settings_from_page(page_state, defaults)
+                for chunk_start in range(0, len(blocks), page_settings.chunk_size):
+                    chunk = blocks[chunk_start : chunk_start + page_settings.chunk_size]
+                    sensitive_count = _sample_has_sensitive_trigger(chunk)
+                    total_chars = sum(len(str(getattr(block, "text", "") or "")) for block in chunk)
+                    row = {
+                        "id": f"{project_id}:p{page_index:04d}:c{chunk_start:03d}",
+                        "project_id": project_id,
+                        "reason": _chunk_reason(
+                            chunk,
+                            base_reason="sensitive_golden" if sensitive_count else "control",
+                        ),
+                        "source_lang": page_settings.source_lang,
+                        "target_lang": page_settings.target_lang,
+                        "extra_context": extra_context,
+                        "blocks": [str(getattr(block, "text", "") or "") for block in chunk],
+                        "saved_translations": [str(getattr(block, "translation", "") or "") for block in chunk],
+                        "sensitive_count": sensitive_count,
+                        "total_chars": total_chars,
+                        "block_count": len(chunk),
+                    }
+                    counts["chunks"] += 1
+                    if sensitive_count:
+                        counts["sensitive_chunks"] += 1
+                        sensitive_rows.append(row)
+                    else:
+                        counts["control_chunks"] += 1
+                        control_rows.append(row)
+
+    sensitive_rows.sort(
+        key=lambda row: (
+            -int(row["sensitive_count"]),
+            -int(row["block_count"]),
+            -int(row["total_chars"]),
+            str(row["id"]),
+        )
+    )
+    control_rows.sort(
+        key=lambda row: (
+            -int(row["block_count"]),
+            -int(row["total_chars"]),
+            str(row["id"]),
+        )
+    )
+    selected_sensitive = sensitive_rows[: max(0, golden_limit)]
+    selected_control = control_rows[: max(0, control_limit)]
+    samples = selected_sensitive + selected_control
+
+    samples_path = output_dir / "sensitive_samples.json"
+    summary_path = output_dir / "sensitive_summary.json"
+    samples_path.write_text(json.dumps({"samples": samples}, ensure_ascii=False, indent=2), encoding="utf-8")
+    summary = {
+        "samples_path": str(samples_path),
+        "sample_count": len(samples),
+        "sensitive_sample_count": len(selected_sensitive),
+        "control_sample_count": len(selected_control),
+        "counts": counts,
+        "selected": [
+            {
+                "id": row["id"],
+                "reason": row["reason"],
+                "block_count": row["block_count"],
+                "total_chars": row["total_chars"],
+                "sensitive_count": row["sensitive_count"],
+            }
+            for row in samples
+        ],
+        "privacy": {
+            "raw_sample_text_written": True,
+            "summary_contains_raw_text": False,
+            "git_safe": False,
+        },
+    }
+    summary_path.write_text(json.dumps(summary, ensure_ascii=False, indent=2, sort_keys=True), encoding="utf-8")
+    return summary
+
+
+def _usage_from_response(response_data: dict[str, Any]) -> dict[str, int]:
+    usage = response_data.get("usage") or {}
+    return {
+        "prompt_tokens": _safe_int(usage.get("prompt_tokens"), 0),
+        "completion_tokens": _safe_int(usage.get("completion_tokens"), 0),
+        "total_tokens": _safe_int(usage.get("total_tokens"), 0),
+    }
+
+
+def _candidate_result_template(candidate: SamplerCandidate) -> dict[str, Any]:
+    return {
+        "name": candidate.name,
+        "temperature": candidate.temperature,
+        "top_k": candidate.top_k,
+        "top_p": candidate.top_p,
+        "samples": 0,
+        "blocks": 0,
+        "failed_samples": 0,
+        "missing_translation": 0,
+        "empty_translation": 0,
+        "channel_token_residue": 0,
+        "known_bad_output_count": 0,
+        "wall_sec": 0.0,
+        "prompt_tokens": 0,
+        "completion_tokens": 0,
+        "total_tokens": 0,
+        "completion_tps": 0.0,
+        "network_request_count": 0,
+        "fallback_count": 0,
+        "chunk_retry_events": 0,
+        "truncated_count": 0,
+    }
+
+
+def run_sensitive_sampler_matrix(
+    samples_path: Path,
+    output_dir: Path,
+    settings: ValidationSettings,
+    *,
+    api_base_url: str,
+    timeout: float,
+    candidates: tuple[SamplerCandidate, ...] = DEFAULT_SENSITIVE_SAMPLER_CANDIDATES,
+) -> dict[str, Any]:
+    raw_data = json.loads(samples_path.read_text(encoding="utf-8"))
+    samples = raw_data if isinstance(raw_data, list) else raw_data.get("samples", [])
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    results: list[dict[str, Any]] = []
+    review_items: list[dict[str, Any]] = []
+    candidate_summaries = {
+        candidate.name: _candidate_result_template(candidate)
+        for candidate in candidates
+    }
+    counters = {
+        "samples": 0,
+        "blocks": 0,
+        "failed_samples": 0,
+    }
+    observed_prompt_prefix_hashes: set[str] = set()
+    baseline_outputs: dict[str, str] = {}
+
+    for sample_index, item in enumerate(samples):
+        if not isinstance(item, dict):
+            continue
+        counters["samples"] += 1
+        sample_id = str(item.get("id") or f"sample-{sample_index + 1:03d}")
+        blocks_text = _sample_blocks(item)
+        counters["blocks"] += len(blocks_text)
+        blocks = _shadow_text_blocks(blocks_text)
+        sample_context = str(item.get("extra_context") or "")
+        source_lang = str(item.get("source_lang") or settings.source_lang)
+        target_lang = str(item.get("target_lang") or settings.target_lang)
+        expected_keys = [f"block_{index}" for index in range(len(blocks))]
+        sample_result = {
+            "id": sample_id,
+            "reason": str(item.get("reason") or ""),
+            "blocks": [],
+        }
+
+        for candidate in candidates:
+            candidate_settings = _settings_with_sampler(settings, candidate)
+            engine = _engine_for(candidate_settings)
+            engine.api_base_url = api_base_url.rstrip("/")
+            engine.timeout = timeout
+            engine.exact_prompt_cache_enabled = False
+            engine.source_lang = source_lang
+            engine.target_lang = target_lang
+            system_prompt = engine._build_system_prompt(sample_context, prompt_profile=candidate_settings.prompt_profile)
+            prefix_hash = _prompt_prefix_hash(system_prompt)
+            observed_prompt_prefix_hashes.add(prefix_hash)
+            measured_usage = {
+                "prompt_tokens": 0,
+                "completion_tokens": 0,
+                "total_tokens": 0,
+            }
+            original_request = engine._request_translation
+
+            def measured_request(
+                system_prompt: str,
+                user_prompt: str,
+                *,
+                expected_keys: list[str] | None = None,
+            ) -> dict:
+                response_data = original_request(system_prompt, user_prompt, expected_keys=expected_keys)
+                usage = _usage_from_response(response_data)
+                for usage_key, usage_value in usage.items():
+                    measured_usage[usage_key] += usage_value
+                return response_data
+
+            engine._request_translation = measured_request
+            started = time.perf_counter()
+            candidate_summary = candidate_summaries[candidate.name]
+            candidate_summary["samples"] += 1
+            candidate_summary["blocks"] += len(blocks)
+            try:
+                translated_blocks = _shadow_text_blocks(blocks_text)
+                engine.translate(translated_blocks, None, sample_context)
+                elapsed = time.perf_counter() - started
+                candidate_summary["wall_sec"] += elapsed
+                for key, value in measured_usage.items():
+                    candidate_summary[key] += value
+                stats = engine.last_benchmark_stats
+                candidate_summary["network_request_count"] += int(stats.get("gemma_network_request_count", 0))
+                candidate_summary["fallback_count"] += int(stats.get("gemma_contextual_merge_fallback_count", 0))
+                candidate_summary["chunk_retry_events"] += int(stats.get("gemma_chunk_retry_events", 0))
+                candidate_summary["truncated_count"] += int(stats.get("gemma_truncated_count", 0))
+                translations = {
+                    f"block_{index}": str(getattr(block, "translation", "") or "")
+                    for index, block in enumerate(translated_blocks)
+                }
+            except Exception as exc:
+                elapsed = time.perf_counter() - started
+                candidate_summary["wall_sec"] += elapsed
+                for key, value in measured_usage.items():
+                    candidate_summary[key] += value
+                counters["failed_samples"] += 1
+                candidate_summary["failed_samples"] += 1
+                sample_result.setdefault("errors", []).append(
+                    {
+                        "candidate": candidate.name,
+                        "error_type": type(exc).__name__,
+                    }
+                )
+                continue
+            finally:
+                engine._request_translation = original_request
+
+            for block_index, source_text in enumerate(blocks_text):
+                key = f"block_{block_index}"
+                raw_value = translations.get(key)
+                value = engine._strip_channel_tokens(raw_value or "")
+                block_result = {
+                    "candidate": candidate.name,
+                    "block_key": key,
+                    "source_hash": _sha256_text(source_text),
+                    "translation_hash": _sha256_text(value),
+                    "translation_length": len(value),
+                    "known_bad_output": _has_known_bad_output(raw_value) or _has_known_bad_output(value),
+                    "empty_translation": bool(str(source_text or "").strip()) and not bool(value.strip()),
+                    "channel_token_residue": bool(KNOWN_BAD_OUTPUT_RE.search(str(raw_value or "")) and "<" in str(raw_value or "")),
+                }
+                if block_result["known_bad_output"]:
+                    candidate_summary["known_bad_output_count"] += 1
+                if block_result["empty_translation"]:
+                    candidate_summary["empty_translation"] += 1
+                if block_result["channel_token_residue"]:
+                    candidate_summary["channel_token_residue"] += 1
+                if candidate.name == "baseline":
+                    baseline_outputs[f"{sample_id}:{key}"] = value
+                else:
+                    baseline_value = baseline_outputs.get(f"{sample_id}:{key}")
+                    if baseline_value is not None and baseline_value != value:
+                        review_items.append(
+                            {
+                                "id": f"{sample_id}:{key}:{candidate.name}",
+                                "candidate_name": candidate.name,
+                                "reason": f"{item.get('reason') or ''}, sampler={candidate.name}".strip(", "),
+                                "source": source_text,
+                                "baseline": baseline_value,
+                                "candidate": value,
+                            }
+                        )
+                sample_result["blocks"].append(block_result)
+        results.append(sample_result)
+
+    for candidate_summary in candidate_summaries.values():
+        completion_tokens = int(candidate_summary["completion_tokens"])
+        wall_sec = float(candidate_summary["wall_sec"])
+        candidate_summary["wall_sec"] = round(wall_sec, 3)
+        candidate_summary["completion_tps"] = round(completion_tokens / wall_sec, 3) if wall_sec > 0 else 0.0
+
+    eligible_candidates = [
+        row
+        for row in candidate_summaries.values()
+        if row["failed_samples"] == 0
+        and row["missing_translation"] == 0
+        and row["empty_translation"] == 0
+        and row["channel_token_residue"] == 0
+        and row["known_bad_output_count"] == 0
+    ]
+    baseline_bad = candidate_summaries.get("baseline", {}).get("known_bad_output_count", 0)
+    if baseline_bad and eligible_candidates:
+        decision = "human_review_required_for_sensitive_slow_lane"
+        preferred = min(
+            (row for row in eligible_candidates if row["name"] != "baseline"),
+            key=lambda row: (row["wall_sec"], row["temperature"]),
+            default=None,
+        )
+    elif eligible_candidates:
+        decision = "keep_current_fast_multi"
+        preferred = candidate_summaries.get("baseline")
+    else:
+        decision = "no_sampler_candidate_passed_auto_gate"
+        preferred = None
+
+    raw_result_path = output_dir / "sensitive_sampler_matrix_results.json"
+    summary_path = output_dir / "sensitive_sampler_matrix_summary.json"
+    review_diff_path = output_dir / "sensitive_sampler_review_diff.json"
+    raw_result_path.write_text(json.dumps({"samples": results}, ensure_ascii=False, indent=2), encoding="utf-8")
+    review_diff_path.write_text(json.dumps({"items": review_items}, ensure_ascii=False, indent=2), encoding="utf-8")
+    prompt_prefix_changed = observed_prompt_prefix_hashes != {EXPECTED_GEMMA_PROMPT_PREFIX_HASH}
+    summary = {
+        "counters": counters,
+        "candidates": candidate_summaries,
+        "prompt_prefix": {
+            "expected_hash": EXPECTED_GEMMA_PROMPT_PREFIX_HASH,
+            "observed_hashes": sorted(observed_prompt_prefix_hashes),
+            "changed": prompt_prefix_changed,
+        },
+        "auto_recommendation": {
+            "decision": "prompt_prefix_changed_stop" if prompt_prefix_changed else decision,
+            "preferred_candidate": preferred["name"] if preferred else None,
+        },
+        "raw_result_path": str(raw_result_path),
+        "review_diff_path": str(review_diff_path),
+        "privacy": {
+            "raw_matrix_text_written": True,
             "git_safe": False,
         },
     }
@@ -1137,6 +1621,29 @@ def main(argv: list[str] | None = None) -> int:
     canary.add_argument("--response-format-mode", default=DEFAULT_GEMMA_RESPONSE_FORMAT_MODE)
     canary.add_argument("--response-schema-mode", default=DEFAULT_GEMMA_RESPONSE_SCHEMA_MODE)
 
+    sensitive = subparsers.add_parser("select-sensitive", help="Create local-only sensitive trigger and control samples.")
+    sensitive.add_argument("--input-root", required=True, type=Path)
+    sensitive.add_argument("--output-dir", type=Path, default=_default_output_dir())
+    sensitive.add_argument("--golden-limit", default=40, type=int)
+    sensitive.add_argument("--control-limit", default=20, type=int)
+    sensitive.add_argument(
+        "--source-filter",
+        default="",
+        help="Only select series items whose display name or source path contains this text.",
+    )
+    sensitive.add_argument("--source-lang", default="English")
+    sensitive.add_argument("--target-lang", default="Korean")
+    sensitive.add_argument("--model", default="gemma-4-26B-IQ4_NL.gguf")
+    sensitive.add_argument("--chunk-size", default=DEFAULT_GEMMA_CHUNK_SIZE)
+    sensitive.add_argument("--max-tokens", default=DEFAULT_GEMMA_MAX_COMPLETION_TOKENS)
+    sensitive.add_argument("--temperature", default=DEFAULT_GEMMA_TRANSLATION_TEMPERATURE)
+    sensitive.add_argument("--top-k", default=DEFAULT_GEMMA_TRANSLATION_TOP_K)
+    sensitive.add_argument("--top-p", default=DEFAULT_GEMMA_TRANSLATION_TOP_P)
+    sensitive.add_argument("--min-p", default=DEFAULT_GEMMA_TRANSLATION_MIN_P)
+    sensitive.add_argument("--prompt-profile", default=DEFAULT_GEMMA_PROMPT_PROFILE)
+    sensitive.add_argument("--response-format-mode", default=DEFAULT_GEMMA_RESPONSE_FORMAT_MODE)
+    sensitive.add_argument("--response-schema-mode", default=DEFAULT_GEMMA_RESPONSE_SCHEMA_MODE)
+
     shadow = subparsers.add_parser("fast-multi-shadow", help="Run current single-block and fast multi translations for local samples.")
     shadow.add_argument("--samples", required=True, type=Path)
     shadow.add_argument("--output-dir", type=Path, default=_default_output_dir())
@@ -1155,6 +1662,24 @@ def main(argv: list[str] | None = None) -> int:
     shadow.add_argument("--prompt-profile", default=DEFAULT_GEMMA_PROMPT_PROFILE)
     shadow.add_argument("--response-format-mode", default=DEFAULT_GEMMA_RESPONSE_FORMAT_MODE)
     shadow.add_argument("--response-schema-mode", default=DEFAULT_GEMMA_RESPONSE_SCHEMA_MODE)
+
+    matrix = subparsers.add_parser("sensitive-matrix", help="Run sampler candidates for local sensitive samples.")
+    matrix.add_argument("--samples", required=True, type=Path)
+    matrix.add_argument("--output-dir", type=Path, default=_default_output_dir())
+    matrix.add_argument("--api-base-url", default="http://127.0.0.1:18080/v1")
+    matrix.add_argument("--timeout", default=180.0, type=float)
+    matrix.add_argument("--source-lang", default="English")
+    matrix.add_argument("--target-lang", default="Korean")
+    matrix.add_argument("--model", default="gemma-4-26B-IQ4_NL.gguf")
+    matrix.add_argument("--chunk-size", default=DEFAULT_GEMMA_CHUNK_SIZE)
+    matrix.add_argument("--max-tokens", default=DEFAULT_GEMMA_MAX_COMPLETION_TOKENS)
+    matrix.add_argument("--temperature", default=DEFAULT_GEMMA_TRANSLATION_TEMPERATURE)
+    matrix.add_argument("--top-k", default=DEFAULT_GEMMA_TRANSLATION_TOP_K)
+    matrix.add_argument("--top-p", default=DEFAULT_GEMMA_TRANSLATION_TOP_P)
+    matrix.add_argument("--min-p", default=DEFAULT_GEMMA_TRANSLATION_MIN_P)
+    matrix.add_argument("--prompt-profile", default=DEFAULT_GEMMA_PROMPT_PROFILE)
+    matrix.add_argument("--response-format-mode", default=DEFAULT_GEMMA_RESPONSE_FORMAT_MODE)
+    matrix.add_argument("--response-schema-mode", default=DEFAULT_GEMMA_RESPONSE_SCHEMA_MODE)
 
     args = parser.parse_args(argv)
     if args.command == "baseline":
@@ -1181,6 +1706,17 @@ def main(argv: list[str] | None = None) -> int:
         )
         print(json.dumps(result, ensure_ascii=False, indent=2, sort_keys=True))
         return 0 if result["sample_count"] > 0 else 2
+    if args.command == "select-sensitive":
+        result = select_sensitive_samples(
+            args.input_root,
+            args.output_dir,
+            _parse_settings(args),
+            golden_limit=args.golden_limit,
+            control_limit=args.control_limit,
+            source_filter=args.source_filter,
+        )
+        print(json.dumps(result, ensure_ascii=False, indent=2, sort_keys=True))
+        return 0 if result["sample_count"] > 0 else 2
     if args.command == "fast-multi-shadow":
         result = run_fast_multi_shadow(
             args.samples,
@@ -1192,6 +1728,16 @@ def main(argv: list[str] | None = None) -> int:
         )
         print(json.dumps(result, ensure_ascii=False, indent=2, sort_keys=True))
         return 0 if result["counters"]["failed_samples"] == 0 else 2
+    if args.command == "sensitive-matrix":
+        result = run_sensitive_sampler_matrix(
+            args.samples,
+            args.output_dir,
+            _parse_settings(args),
+            api_base_url=args.api_base_url,
+            timeout=args.timeout,
+        )
+        print(json.dumps(result, ensure_ascii=False, indent=2, sort_keys=True))
+        return 0 if result["auto_recommendation"]["preferred_candidate"] and not result["prompt_prefix"]["changed"] else 2
     return 1
 
 
