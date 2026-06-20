@@ -9,6 +9,7 @@ from .archives import (
     materialize_archive_entry,
     materialize_archive_entries,
 )
+from .export_paths import sanitize_export_path_component
 
 _LAZY_SOURCE_LOCK = threading.RLock()
 _LAZY_SOURCE_BY_PATH: dict[str, dict] = {}
@@ -85,7 +86,9 @@ class FileHandler:
             )):
                 print('Indexing archive:', path)
                 archive_dir = os.path.dirname(path)
-                temp_dir = tempfile.mkdtemp(dir=archive_dir)
+                archive_stem = os.path.splitext(os.path.basename(path))[0]
+                temp_prefix = f"tmp_{sanitize_export_path_component(archive_stem)[:80]}_"
+                temp_dir = tempfile.mkdtemp(prefix=temp_prefix, dir=archive_dir)
 
                 entries = list_archive_image_entries(path)
                 total = len(entries)

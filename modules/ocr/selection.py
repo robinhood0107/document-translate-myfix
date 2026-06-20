@@ -4,7 +4,6 @@ from dataclasses import asdict, dataclass
 
 OCR_MODE_DEFAULT = "default"
 OCR_MODE_BEST_LOCAL = "best_local"
-OCR_MODE_BEST_LOCAL_PLUS = "best_local_plus"
 OCR_MODE_MICROSOFT = "microsoft_ocr"
 OCR_MODE_GOOGLE = "google_cloud_vision"
 OCR_MODE_GEMINI = "gemini_2_0_flash"
@@ -14,12 +13,12 @@ OCR_MODE_MANGALMM = "mangalmm"
 
 OCR_DEFAULT_LABEL = "Default (existing auto: MangaOCR / PPOCR / Pororo...)"
 OCR_OPTIMAL_LABEL = "Optimal (HunyuanOCR / PaddleOCR VL)"
-OCR_OPTIMAL_PLUS_LABEL = "Optimal+ (HunyuanOCR / MangaLMM / PaddleOCR VL)"
+_LEGACY_OPTIMAL_PLUS_MODE = "best_local_plus"
+_LEGACY_OPTIMAL_PLUS_LABEL = "Optimal+ (HunyuanOCR / MangaLMM / PaddleOCR VL)"
 
 OCR_MODE_OPTIONS: tuple[tuple[str, str], ...] = (
     (OCR_MODE_DEFAULT, OCR_DEFAULT_LABEL),
     (OCR_MODE_BEST_LOCAL, OCR_OPTIMAL_LABEL),
-    (OCR_MODE_BEST_LOCAL_PLUS, OCR_OPTIMAL_PLUS_LABEL),
     (OCR_MODE_MICROSOFT, "Microsoft OCR"),
     (OCR_MODE_GOOGLE, "Google Cloud Vision"),
     (OCR_MODE_GEMINI, "Gemini-2.0-Flash"),
@@ -42,6 +41,19 @@ LOCAL_OCR_ENGINES = frozenset({"PaddleOCR VL", "HunyuanOCR", "MangaLMM"})
 STAGE_BATCHED_WORKFLOW_MODE = "stage_batched_pipeline"
 LEGACY_PAGE_WORKFLOW_MODE = "legacy_page_pipeline"
 GEMMA_TRANSLATOR_KEY = "Custom Local Server(Gemma)"
+_TRANSLATOR_ALIASES: dict[str, str] = {
+    GEMMA_TRANSLATOR_KEY: GEMMA_TRANSLATOR_KEY,
+    "Custom Local Server": GEMMA_TRANSLATOR_KEY,
+    "gemma_local": GEMMA_TRANSLATOR_KEY,
+    "사용자 지정 로컬 서버": GEMMA_TRANSLATOR_KEY,
+    "사용자 지정 로컬 서버(Gemma)": GEMMA_TRANSLATOR_KEY,
+}
+WORKFLOW_MODE_STAGE_BATCHED_LABEL = "Stage-Batched Pipeline (Recommended)"
+WORKFLOW_MODE_LEGACY_LABEL = "Legacy Page Pipeline (Legacy)"
+WORKFLOW_MODE_OPTIONS: tuple[tuple[str, str], ...] = (
+    (STAGE_BATCHED_WORKFLOW_MODE, WORKFLOW_MODE_STAGE_BATCHED_LABEL),
+    (LEGACY_PAGE_WORKFLOW_MODE, WORKFLOW_MODE_LEGACY_LABEL),
+)
 
 _ALIASES: dict[str, str] = {
     OCR_MODE_DEFAULT: OCR_MODE_DEFAULT,
@@ -49,8 +61,8 @@ _ALIASES: dict[str, str] = {
     OCR_DEFAULT_LABEL: OCR_MODE_DEFAULT,
     OCR_MODE_BEST_LOCAL: OCR_MODE_BEST_LOCAL,
     OCR_OPTIMAL_LABEL: OCR_MODE_BEST_LOCAL,
-    OCR_MODE_BEST_LOCAL_PLUS: OCR_MODE_BEST_LOCAL_PLUS,
-    OCR_OPTIMAL_PLUS_LABEL: OCR_MODE_BEST_LOCAL_PLUS,
+    _LEGACY_OPTIMAL_PLUS_MODE: OCR_MODE_BEST_LOCAL,
+    _LEGACY_OPTIMAL_PLUS_LABEL: OCR_MODE_BEST_LOCAL,
     OCR_MODE_MICROSOFT: OCR_MODE_MICROSOFT,
     "Microsoft OCR": OCR_MODE_MICROSOFT,
     OCR_MODE_GOOGLE: OCR_MODE_GOOGLE,
@@ -64,6 +76,12 @@ _ALIASES: dict[str, str] = {
     OCR_MODE_MANGALMM: OCR_MODE_MANGALMM,
     "MangaLMM": OCR_MODE_MANGALMM,
 }
+_WORKFLOW_ALIASES: dict[str, str] = {
+    STAGE_BATCHED_WORKFLOW_MODE: STAGE_BATCHED_WORKFLOW_MODE,
+    WORKFLOW_MODE_STAGE_BATCHED_LABEL: STAGE_BATCHED_WORKFLOW_MODE,
+    LEGACY_PAGE_WORKFLOW_MODE: LEGACY_PAGE_WORKFLOW_MODE,
+    WORKFLOW_MODE_LEGACY_LABEL: LEGACY_PAGE_WORKFLOW_MODE,
+}
 
 
 def normalize_ocr_mode(value: str | None) -> str:
@@ -71,6 +89,13 @@ def normalize_ocr_mode(value: str | None) -> str:
     if not raw:
         return OCR_MODE_DEFAULT
     return _ALIASES.get(raw, OCR_MODE_DEFAULT)
+
+
+def normalize_workflow_mode(value: str | None) -> str:
+    raw = str(value or "").strip()
+    if not raw:
+        return STAGE_BATCHED_WORKFLOW_MODE
+    return _WORKFLOW_ALIASES.get(raw, STAGE_BATCHED_WORKFLOW_MODE)
 
 
 def is_chinese_source_language(source_lang_english: str | None) -> bool:
@@ -94,17 +119,16 @@ def resolve_ocr_engine(mode: str | None, source_lang_english: str | None) -> str
         if is_chinese_source_language(source_lang_english):
             return "HunyuanOCR"
         return "PaddleOCR VL"
-    if normalized == OCR_MODE_BEST_LOCAL_PLUS:
-        if is_chinese_source_language(source_lang_english):
-            return "HunyuanOCR"
-        if str(source_lang_english or "").strip().casefold() == "japanese":
-            return "MangaLMM"
-        return "PaddleOCR VL"
     return OCR_MODE_TO_ENGINE.get(normalized, "Default")
 
 
 def is_local_ocr_engine(engine_key: str | None) -> bool:
     return str(engine_key or "").strip() in LOCAL_OCR_ENGINES
+
+
+def normalize_translator_key(value: str | None) -> str:
+    raw = str(value or "").strip()
+    return _TRANSLATOR_ALIASES.get(raw, raw)
 
 
 @dataclass(frozen=True)
@@ -137,7 +161,7 @@ def resolve_stage_batched_ocr_policy(
     workflow_mode_text = str(workflow_mode or "").strip() or LEGACY_PAGE_WORKFLOW_MODE
     normalized_mode = normalize_ocr_mode(ocr_mode)
     source_lang_text = str(source_lang_english or "").strip() or "Unknown"
-    translator_text = str(translator or "").strip()
+    translator_text = normalize_translator_key(translator)
 
     if workflow_mode_text != STAGE_BATCHED_WORKFLOW_MODE:
         primary_engine = resolve_ocr_engine(normalized_mode, source_lang_text)
@@ -194,17 +218,6 @@ def resolve_stage_batched_ocr_policy(
         if is_chinese_source_language(source_lang_text):
             resident_engines = ("HunyuanOCR",)
             primary_engine = "HunyuanOCR"
-        else:
-            resident_engines = ("PaddleOCR VL",)
-            primary_engine = "PaddleOCR VL"
-    elif normalized_mode == OCR_MODE_BEST_LOCAL_PLUS:
-        if is_chinese_source_language(source_lang_text):
-            resident_engines = ("HunyuanOCR",)
-            primary_engine = "HunyuanOCR"
-        elif is_japanese_source_language(source_lang_text):
-            resident_engines = ("PaddleOCR VL", "MangaLMM")
-            primary_engine = "PaddleOCR VL"
-            requires_sidecar_collection = True
         else:
             resident_engines = ("PaddleOCR VL",)
             primary_engine = "PaddleOCR VL"

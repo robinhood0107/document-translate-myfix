@@ -10,9 +10,9 @@ from PySide6.QtCore import QSettings, QTimer, Qt, Signal
 from PySide6.QtGui import QFont, QFontDatabase
 
 from modules.ocr.selection import (
+    LEGACY_PAGE_WORKFLOW_MODE,
     OCR_DEFAULT_LABEL,
     OCR_MODE_BEST_LOCAL,
-    OCR_MODE_BEST_LOCAL_PLUS,
     OCR_MODE_DEFAULT,
     OCR_MODE_GEMINI,
     OCR_MODE_GOOGLE,
@@ -21,20 +21,24 @@ from modules.ocr.selection import (
     OCR_MODE_MICROSOFT,
     OCR_MODE_PADDLE_VL,
     OCR_OPTIMAL_LABEL,
-    OCR_OPTIMAL_PLUS_LABEL,
     normalize_ocr_mode,
+    normalize_workflow_mode,
+    STAGE_BATCHED_WORKFLOW_MODE,
 )
 from .settings_ui import SettingsPageUI
 from .gemma_local_server_page import GemmaLocalServerPage
 from .hunyuan_ocr_page import HunyuanOCRPage
 from .mangalmm_ocr_page import MangaLMMOCRPage
+from app.ui.messages import Messages
 from app.update_checker import UpdateChecker
 from app.shortcuts import get_default_shortcuts
 from modules.utils.device import is_gpu_available
 from modules.utils.paths import get_default_project_autosave_dir, get_user_data_dir
+from app.projects.series_state_v1 import normalize_series_settings
 from modules.utils.notification_sound import (
     SYSTEM_SOUND_MODE,
     play_completion_sound,
+    send_test_ntfy_notification,
 )
 from modules.utils.inpainting_runtime import (
     inpainter_default_settings,
@@ -115,6 +119,14 @@ class SettingsPage(QtWidgets.QWidget):
         self.update_checker.error_occurred.connect(self.on_update_error)
         self.update_checker.download_progress.connect(self.on_download_progress)
         self.update_checker.download_finished.connect(self.on_download_finished)
+        self.fork_update_checker = UpdateChecker(
+            "robinhood0107",
+            "document-translate-myfix",
+            allow_release_link_without_installer=True,
+        )
+        self.fork_update_checker.update_available.connect(self.on_fork_update_available)
+        self.fork_update_checker.up_to_date.connect(self.on_fork_up_to_date)
+        self.fork_update_checker.error_occurred.connect(self.on_fork_update_error)
         self.update_dialog = None
 
         self._setup_connections()
@@ -129,6 +141,7 @@ class SettingsPage(QtWidgets.QWidget):
         self.ui.lang_combo.currentTextChanged.connect(self.on_language_changed)
         self.ui.font_browser.sig_files_changed.connect(self.import_font)
         self.ui.check_update_button.clicked.connect(self.check_for_updates)
+        self.ui.developer_mode_checkbox.stateChanged.connect(self._save_settings_if_not_loading)
         self.ui.shortcuts_page.shortcut_changed.connect(self.on_shortcut_changed)
         self.ui.translator_combo.currentTextChanged.connect(self._sync_extra_context_limit)
         self.ui.raw_text_checkbox.stateChanged.connect(self._save_settings_if_not_loading)
@@ -146,7 +159,9 @@ class SettingsPage(QtWidgets.QWidget):
         self.ui.automatic_output_archive_level_spinbox.valueChanged.connect(self._save_settings_if_not_loading)
         self.ui.user_dictionaries_page.changed.connect(self._save_settings_if_not_loading)
         self.ui.notifications_page.changed.connect(self._save_settings_if_not_loading)
+        self.ui.series_page.changed.connect(self._save_settings_if_not_loading)
         self.ui.notifications_page.test_requested.connect(self.play_test_completion_sound)
+        self.ui.notifications_page.test_ntfy_requested.connect(self.play_test_ntfy_notification)
         self._connect_live_save_signals()
 
     def _save_settings_if_not_loading(self, *_args):
@@ -176,6 +191,7 @@ class SettingsPage(QtWidgets.QWidget):
             self.ui.theme_combo,
             self.ui.translator_combo,
             self.ui.ocr_combo,
+            self.ui.workflow_mode_combo,
             self.ui.detector_combo,
             self.ui.inpainter_combo,
             self.ui.inpaint_strategy_combo,
@@ -261,6 +277,11 @@ class SettingsPage(QtWidgets.QWidget):
             if isinstance(current_data, str) and current_data.strip():
                 return self._normalize_ocr_mode_value(current_data)
             return self._normalize_ocr_mode_value(combo.currentText())
+        if tool_type == "translator":
+            current_data = combo.currentData()
+            if isinstance(current_data, str) and current_data.strip():
+                return current_data.strip()
+            return self.ui.value_mappings.get(combo.currentText(), combo.currentText())
         if tool_type == "inpainter":
             return "lama_large_512px"
         if tool_type == "detector":
@@ -279,6 +300,21 @@ class SettingsPage(QtWidgets.QWidget):
         }
         return tool_combos[tool_type].currentText()
 
+    def get_workflow_mode(self) -> str:
+        current_data = self.ui.workflow_mode_combo.currentData()
+        if isinstance(current_data, str) and current_data.strip():
+            return normalize_workflow_mode(current_data)
+        return normalize_workflow_mode(self.ui.workflow_mode_combo.currentText())
+
+    def _set_workflow_mode(self, raw_value: str | None) -> None:
+        normalized = normalize_workflow_mode(raw_value)
+        index = self.ui.workflow_mode_combo.findData(normalized)
+        if index != -1:
+            self.ui.workflow_mode_combo.setCurrentIndex(index)
+            return
+        fallback = self.ui.workflow_mode_combo.findData(STAGE_BATCHED_WORKFLOW_MODE)
+        self.ui.workflow_mode_combo.setCurrentIndex(fallback if fallback != -1 else 0)
+
     def get_ocr_mode_label(self, mode_key: str | None = None) -> str:
         normalized = self._normalize_ocr_mode_value(mode_key or self.get_tool_selection("ocr"))
         index = self.ui.ocr_combo.findData(normalized)
@@ -292,8 +328,7 @@ class SettingsPage(QtWidgets.QWidget):
             self.ui.tr(OCR_DEFAULT_LABEL): OCR_MODE_DEFAULT,
             self.ui.tr("Optimal (HunyuanOCR / PaddleOCR VL)"): OCR_MODE_BEST_LOCAL,
             self.ui.tr(OCR_OPTIMAL_LABEL): OCR_MODE_BEST_LOCAL,
-            self.ui.tr("Optimal+ (HunyuanOCR / MangaLMM / PaddleOCR VL)"): OCR_MODE_BEST_LOCAL_PLUS,
-            self.ui.tr(OCR_OPTIMAL_PLUS_LABEL): OCR_MODE_BEST_LOCAL_PLUS,
+            "Optimal+ (HunyuanOCR / MangaLMM / PaddleOCR VL)": OCR_MODE_BEST_LOCAL,
             self.ui.tr("Microsoft OCR"): OCR_MODE_MICROSOFT,
             self.ui.tr("Google Cloud Vision"): OCR_MODE_GOOGLE,
             self.ui.tr("Gemini-2.0-Flash"): OCR_MODE_GEMINI,
@@ -409,6 +444,7 @@ class SettingsPage(QtWidgets.QWidget):
             "ctd_font_size_max": settings.value("ctd_font_size_max", -1, type=int),
             "ctd_font_size_min": settings.value("ctd_font_size_min", -1, type=int),
             "ctd_mask_dilate_size": settings.value("ctd_mask_dilate_size", 2, type=int),
+            "final_mask_dilate_size": settings.value("final_mask_dilate_size", 8, type=int),
         }
         settings.endGroup()
         settings.endGroup()
@@ -498,6 +534,9 @@ class SettingsPage(QtWidgets.QWidget):
             "auto_export_translation_txt": auto_export_translation_txt,
             "auto_export_translation_md": auto_export_translation_md,
         }
+
+    def get_series_settings(self) -> dict[str, object]:
+        return normalize_series_settings(self.ui.series_page.get_settings())
 
     def get_resolved_automatic_output_settings(
         self,
@@ -601,6 +640,7 @@ class SettingsPage(QtWidgets.QWidget):
             "language": self.get_language(),
             "theme": self.get_theme(),
             "tools": {
+                "workflow_mode": self.get_workflow_mode(),
                 "translator": self.get_tool_selection("translator"),
                 "ocr": self.get_tool_selection("ocr"),
                 "detector": self.get_tool_selection("detector"),
@@ -616,6 +656,7 @@ class SettingsPage(QtWidgets.QWidget):
             "gemma_local_server": self.get_gemma_local_server_settings(),
             "llm": self.get_llm_settings(),
             "export": self.get_export_settings(),
+            "series": self.get_series_settings(),
             "notifications": self.get_notification_settings(),
             "shortcuts": self.ui.shortcuts_page.get_shortcuts(),
             "credentials": self.get_credentials(),
@@ -706,6 +747,14 @@ class SettingsPage(QtWidgets.QWidget):
         settings.remove("automatic_output_webp_quality")
         settings.endGroup()
 
+        settings.beginGroup("series")
+        settings.endGroup()
+
+        settings.setValue(
+            "updates/developer_mode",
+            bool(self.ui.developer_mode_checkbox.isChecked()),
+        )
+
         dictionaries = self.get_dictionary_settings()
         settings.beginGroup("dictionaries")
         settings.setValue(
@@ -755,6 +804,12 @@ class SettingsPage(QtWidgets.QWidget):
             translator = "Claude-4.6-Sonnet"
 
         settings.beginGroup("tools")
+        workflow_mode = settings.value(
+            "workflow_mode",
+            STAGE_BATCHED_WORKFLOW_MODE,
+            type=str,
+        )
+        self._set_workflow_mode(workflow_mode)
         translated_translator = self.ui.reverse_mappings.get(translator, translator)
         if self.ui.translator_combo.findText(translated_translator) != -1:
             self.ui.translator_combo.setCurrentIndex(self.ui.translator_combo.findText(translated_translator))
@@ -1071,6 +1126,21 @@ class SettingsPage(QtWidgets.QWidget):
             owner.auto_export_translation_md_checkbox.setChecked(bool(auto_export_translation_md))
         settings.endGroup()
 
+        settings.beginGroup("series")
+        self.ui.series_page.set_settings(
+            normalize_series_settings(
+                {
+                    "queue_failure_policy": settings.value("queue_failure_policy", "stop", type=str),
+                    "retry_count": settings.value("retry_count", 0, type=int),
+                    "retry_delay_sec": settings.value("retry_delay_sec", 0, type=int),
+                    "auto_open_failed_child": settings.value("auto_open_failed_child", True, type=bool),
+                    "resume_from_first_incomplete": settings.value("resume_from_first_incomplete", True, type=bool),
+                    "return_to_series_after_completion": settings.value("return_to_series_after_completion", True, type=bool),
+                }
+            )
+        )
+        settings.endGroup()
+
         settings.beginGroup("dictionaries")
         ocr_rules_json = settings.value("ocr_substitutions_json", "[]", type=str)
         translation_rules_json = settings.value("translation_substitutions_json", "[]", type=str)
@@ -1090,6 +1160,14 @@ class SettingsPage(QtWidgets.QWidget):
             enable_completion_sound=settings.value("enable_completion_sound", True, type=bool),
             completion_sound_mode=settings.value("completion_sound_mode", SYSTEM_SOUND_MODE, type=str),
             completion_sound_file=settings.value("completion_sound_file", "", type=str),
+            enable_ntfy_notifications=settings.value("enable_ntfy_notifications", False, type=bool),
+            ntfy_server_url=settings.value("ntfy_server_url", "", type=str),
+            ntfy_topic=settings.value("ntfy_topic", "", type=str),
+            ntfy_access_token=settings.value("ntfy_access_token", "", type=str),
+            ntfy_send_success=settings.value("ntfy_send_success", True, type=bool),
+            ntfy_send_failure=settings.value("ntfy_send_failure", True, type=bool),
+            ntfy_send_cancelled=settings.value("ntfy_send_cancelled", True, type=bool),
+            ntfy_timeout_sec=settings.value("ntfy_timeout_sec", 10, type=int),
         )
         settings.endGroup()
 
@@ -1123,6 +1201,10 @@ class SettingsPage(QtWidgets.QWidget):
                     )
         settings.endGroup()
 
+        self.ui.developer_mode_checkbox.setChecked(
+            settings.value("updates/developer_mode", False, type=bool)
+        )
+
         self._current_language = self.ui.lang_combo.currentText()
         self._loading_settings = False
         owner = self.window()
@@ -1141,6 +1223,37 @@ class SettingsPage(QtWidgets.QWidget):
         play_completion_sound(
             str(settings.get("completion_sound_mode") or SYSTEM_SOUND_MODE),
             str(settings.get("completion_sound_file") or ""),
+        )
+
+    def play_test_ntfy_notification(self) -> None:
+        settings = self.get_notification_settings()
+        if not str(settings.get("ntfy_topic") or "").strip():
+            Messages.show_warning(
+                self,
+                self.tr("Enter an ntfy topic before sending a test notification."),
+                duration=5,
+                closable=True,
+                source="settings",
+            )
+            return
+
+        sent = send_test_ntfy_notification(settings)
+        if sent:
+            Messages.show_success(
+                self,
+                self.tr("Test ntfy notification sent."),
+                duration=5,
+                closable=True,
+                source="settings",
+            )
+            return
+
+        Messages.show_warning(
+            self,
+            self.tr("Unable to send the ntfy test notification right now. Check the settings and try again."),
+            duration=5,
+            closable=True,
+            source="settings",
         )
 
     def _show_message_box(self, icon: QtWidgets.QMessageBox.Icon, title: str, text: str):
@@ -1203,6 +1316,8 @@ class SettingsPage(QtWidgets.QWidget):
             self.ui.check_update_button.setEnabled(False)
             self.ui.check_update_button.setText(self.tr("Checking..."))
         self.update_checker.check_for_updates()
+        if bool(self.ui.developer_mode_checkbox.isChecked()):
+            self.fork_update_checker.check_for_updates()
 
     def on_update_available(self, version, release_url, download_url):
         if not self._is_background_check:
@@ -1269,6 +1384,45 @@ class SettingsPage(QtWidgets.QWidget):
             message,
         )
 
+    def on_fork_update_available(self, version, release_url, download_url):
+        settings = QSettings("ComicLabs", "ComicTranslate")
+        ignored_version = settings.value("updates/fork_ignored_version", "")
+        if self._is_background_check and version == ignored_version:
+            return
+
+        msg_box = QtWidgets.QMessageBox(self)
+        msg_box.setWindowTitle(self.tr("Developer Update Available"))
+        msg_box.setTextFormat(Qt.RichText)
+        msg_box.setTextInteractionFlags(Qt.TextBrowserInteraction)
+        msg_box.setText(
+            self.tr("A developer fork update {version} is available.").format(version=version)
+        )
+        link_text = self.tr("Release Notes")
+        msg_box.setInformativeText(f'<a href="{release_url}" style="color: #4da6ff;">{link_text}</a>')
+        msg_box.addButton(self.tr("OK"), QtWidgets.QMessageBox.ButtonRole.AcceptRole)
+        skip_btn = None
+        if self._is_background_check:
+            skip_btn = msg_box.addButton(
+                self.tr("Skip This Version"),
+                QtWidgets.QMessageBox.ButtonRole.ApplyRole,
+            )
+        msg_box.exec()
+        if skip_btn and msg_box.clickedButton() == skip_btn:
+            settings.setValue("updates/fork_ignored_version", version)
+
+    def on_fork_up_to_date(self):
+        logger.info("Developer fork update check: up to date.")
+
+    def on_fork_update_error(self, message):
+        if self._is_background_check:
+            logger.error(f"Background developer fork update check failed: {message}")
+            return
+        self._show_message_box(
+            QtWidgets.QMessageBox.Icon.Warning,
+            self.tr("Developer Update Error"),
+            self.tr("Fork update check failed: {message}").format(message=message),
+        )
+
     def start_download(self, url):
         self.update_dialog = QtWidgets.QProgressDialog(
             self.tr("Downloading update..."),
@@ -1305,6 +1459,10 @@ class SettingsPage(QtWidgets.QWidget):
 
         try:
             self.update_checker.shutdown()
+        except Exception:
+            pass
+        try:
+            self.fork_update_checker.shutdown()
         except Exception:
             pass
 

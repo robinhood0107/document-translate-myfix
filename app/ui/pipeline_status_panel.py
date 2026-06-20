@@ -10,26 +10,29 @@ def _panel_tr(text: str) -> str:
 
 
 class PipelineInteractionOverlay(QtWidgets.QWidget):
+    DIM_COLOR = QtGui.QColor(10, 12, 16, 31)
+
     def __init__(self, parent=None):
         super().__init__(parent)
+        self.setAttribute(QtCore.Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
+        self.setAttribute(QtCore.Qt.WidgetAttribute.WA_NoSystemBackground, True)
+        self.setAttribute(QtCore.Qt.WidgetAttribute.WA_TranslucentBackground, True)
+        self.setAutoFillBackground(False)
+        self._clear_rects: list[QtCore.QRect] = []
         self.hide()
+
+    def set_clear_rects(self, rects: list[QtCore.QRect]) -> None:
+        self._clear_rects = [QtCore.QRect(rect) for rect in rects if rect and not rect.isEmpty()]
+        self.update()
 
     def paintEvent(self, event: QtGui.QPaintEvent) -> None:  # type: ignore[override]
         painter = QtGui.QPainter(self)
-        painter.setRenderHint(QtGui.QPainter.RenderHint.Antialiasing)
-        painter.fillRect(self.rect(), QtGui.QColor(10, 12, 16, 144))
-
-        card_width = min(max(420, self.width() // 2), 760)
-        card_height = min(max(120, self.height() // 7), 180)
-        card_rect = QtCore.QRect(0, 0, card_width, card_height)
-        card_rect.moveCenter(self.rect().center())
-        card_rect.translate(0, -self.height() // 6)
-
-        painter.setPen(QtGui.QPen(QtGui.QColor(255, 255, 255, 26), 1))
-        painter.setBrush(QtGui.QColor(255, 255, 255, 14))
-        painter.drawRoundedRect(card_rect, 18, 18)
-
-        super().paintEvent(event)
+        if self._clear_rects:
+            region = QtGui.QRegion(self.rect())
+            for rect in self._clear_rects:
+                region -= QtGui.QRegion(rect.adjusted(-4, -4, 4, 4))
+            painter.setClipRegion(region)
+        painter.fillRect(self.rect(), self.DIM_COLOR)
 
 
 class _PreviewLabel(QtWidgets.QLabel):
@@ -46,10 +49,14 @@ class PipelineStatusPanel(QtWidgets.QFrame):
     WINDOW_MODE = "window"
 
     cancel_requested = QtCore.Signal()
+    pause_requested = QtCore.Signal()
     retry_requested = QtCore.Signal()
     open_settings_requested = QtCore.Signal()
     report_requested = QtCore.Signal()
     open_output_requested = QtCore.Signal()
+    open_series_board_requested = QtCore.Signal()
+    open_current_series_item_requested = QtCore.Signal()
+    panel_hidden = QtCore.Signal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -74,8 +81,15 @@ class PipelineStatusPanel(QtWidgets.QFrame):
         self._output_root = ""
         self._details_visible = True
         self._current_state = "idle"
+        self._series_queue_pause_visible = False
+        self._series_queue_pause_requested = False
         self._window_geometry = QtCore.QRect()
         self._embedded_geometry = QtCore.QRect()
+        self._resize_margin = 8
+        self._resize_active = False
+        self._resize_edges = set()
+        self._resize_start_global = QtCore.QPoint()
+        self._resize_start_geometry = QtCore.QRect()
 
         self.setAttribute(QtCore.Qt.WidgetAttribute.WA_QuitOnClose, False)
         self.setObjectName("pipelineStatusPanel")
@@ -235,32 +249,87 @@ class PipelineStatusPanel(QtWidgets.QFrame):
         detail_font.setPointSize(max(detail_font.pointSize(), 10) + 1)
         self.details_view.setFont(detail_font)
 
-        action_layout = QtWidgets.QHBoxLayout()
-        action_layout.setContentsMargins(0, 0, 0, 0)
-        action_layout.setSpacing(8)
+        self.action_layout = QtWidgets.QGridLayout()
+        self.action_layout.setContentsMargins(0, 0, 0, 0)
+        self.action_layout.setHorizontalSpacing(8)
+        self.action_layout.setVerticalSpacing(8)
+
+        self.pause_button = QtWidgets.QPushButton(self.tr("Pause"))
+        self.pause_button.clicked.connect(self._on_pause_clicked)
+
+        self.series_board_button = QtWidgets.QPushButton(self.tr("Series Board"))
+        self.series_board_button.clicked.connect(
+            lambda: self._defer_button_action(
+                self.series_board_button,
+                self.open_series_board_requested,
+                self.tr("Opening series board..."),
+            )
+        )
+
+        self.current_item_button = QtWidgets.QPushButton(self.tr("Current Item"))
+        self.current_item_button.clicked.connect(
+            lambda: self._defer_button_action(
+                self.current_item_button,
+                self.open_current_series_item_requested,
+                self.tr("Opening current item..."),
+            )
+        )
 
         self.cancel_button = QtWidgets.QPushButton(self.tr("Cancel"))
         self.cancel_button.setObjectName("dangerAction")
-        self.cancel_button.clicked.connect(self.cancel_requested.emit)
+        self.cancel_button.clicked.connect(self._on_cancel_clicked)
 
         self.report_button = QtWidgets.QPushButton(self.tr("Report"))
-        self.report_button.clicked.connect(self.report_requested.emit)
+        self.report_button.clicked.connect(
+            lambda: self._defer_button_action(
+                self.report_button,
+                self.report_requested,
+                self.tr("Opening report..."),
+            )
+        )
 
         self.retry_button = QtWidgets.QPushButton(self.tr("Retry"))
         self.retry_button.setObjectName("primaryAction")
-        self.retry_button.clicked.connect(self.retry_requested.emit)
+        self.retry_button.clicked.connect(
+            lambda: self._defer_button_action(
+                self.retry_button,
+                self.retry_requested,
+                self.tr("Preparing retry..."),
+            )
+        )
 
         self.settings_button = QtWidgets.QPushButton(self.tr("Settings"))
-        self.settings_button.clicked.connect(self.open_settings_requested.emit)
+        self.settings_button.clicked.connect(
+            lambda: self._defer_button_action(
+                self.settings_button,
+                self.open_settings_requested,
+                self.tr("Opening settings..."),
+            )
+        )
 
         self.open_output_button = QtWidgets.QPushButton(self.tr("Open Output"))
         self.open_output_button.setObjectName("accentAction")
-        self.open_output_button.clicked.connect(self.open_output_requested.emit)
+        self.open_output_button.clicked.connect(
+            lambda: self._defer_button_action(
+                self.open_output_button,
+                self.open_output_requested,
+                self.tr("Opening output..."),
+            )
+        )
 
         self.close_button = QtWidgets.QPushButton(self.tr("Close"))
-        self.close_button.clicked.connect(self.close_panel)
+        self.close_button.clicked.connect(
+            lambda: self._defer_button_action(
+                self.close_button,
+                self.close_panel,
+                self.tr("Closing status panel..."),
+            )
+        )
 
         self._action_buttons = [
+            self.pause_button,
+            self.series_board_button,
+            self.current_item_button,
             self.cancel_button,
             self.report_button,
             self.retry_button,
@@ -268,13 +337,24 @@ class PipelineStatusPanel(QtWidgets.QFrame):
             self.open_output_button,
             self.close_button,
         ]
-        for button in self._action_buttons:
-            action_layout.addWidget(button)
-        action_layout.addStretch(1)
+        self._action_button_text_options = {
+            self.pause_button: [self.tr("Pause"), self.tr("Pause Requested")],
+            self.series_board_button: [self.tr("Series Board")],
+            self.current_item_button: [self.tr("Current Item")],
+            self.cancel_button: [self.tr("Cancel"), self.tr("Cancelling...")],
+            self.report_button: [self.tr("Report")],
+            self.retry_button: [self.tr("Retry")],
+            self.settings_button: [self.tr("Settings")],
+            self.open_output_button: [self.tr("Open Output")],
+            self.close_button: [self.tr("Close")],
+            self.mode_button: [self.tr("Window"), self.tr("Embed")],
+            self.logs_button: [self.tr("Logs")],
+        }
+        self._set_button_min_widths()
 
         left_layout.addLayout(summary_grid)
         left_layout.addWidget(self.details_view, 1)
-        left_layout.addLayout(action_layout)
+        left_layout.addLayout(self.action_layout)
 
         self.preview_frame = QtWidgets.QFrame(self.body_widget)
         self.preview_frame.setObjectName("previewFrame")
@@ -321,6 +401,21 @@ class PipelineStatusPanel(QtWidgets.QFrame):
         layout.addWidget(label, row, 0)
         layout.addWidget(value, row, 1)
         return value
+
+    def set_series_queue_pause_visible(self, visible: bool, *, pause_requested: bool = False) -> None:
+        self._series_queue_pause_visible = bool(visible)
+        self._series_queue_pause_requested = bool(pause_requested)
+        self.pause_button.setText(
+            self.tr("Pause Requested")
+            if self._series_queue_pause_requested
+            else self.tr("Pause")
+        )
+        self.pause_button.setEnabled(
+            self._series_queue_pause_visible and not self._series_queue_pause_requested
+        )
+        self.series_board_button.setVisible(self._series_queue_pause_visible)
+        self.current_item_button.setVisible(self._series_queue_pause_visible)
+        self._apply_state(self._current_state)
 
     def display_mode(self) -> str:
         return self._display_mode
@@ -401,6 +496,7 @@ class PipelineStatusPanel(QtWidgets.QFrame):
         else:
             self.mode_button.setText(self.tr("Embed"))
             self.mode_button.setToolTip(self.tr("Switch to embedded mode"))
+        self._set_button_min_widths()
 
     def set_logs_visible(self, visible: bool) -> None:
         self._details_visible = bool(visible)
@@ -415,16 +511,153 @@ class PipelineStatusPanel(QtWidgets.QFrame):
     def _toggle_details(self, checked: bool) -> None:
         self.set_logs_visible(bool(checked))
 
+    def _minimum_text_width(self, button: QtWidgets.QPushButton, texts: list[str]) -> int:
+        metrics = button.fontMetrics()
+        text_width = max((metrics.horizontalAdvance(text) for text in texts if text), default=0)
+        return max(76, text_width + 36)
+
+    def _set_button_min_widths(self) -> None:
+        if not hasattr(self, "_action_button_text_options"):
+            return
+        for button, texts in self._action_button_text_options.items():
+            minimum = self._minimum_text_width(button, list(texts))
+            button.setMinimumWidth(minimum)
+            horizontal_policy = (
+                QtWidgets.QSizePolicy.Policy.Expanding
+                if button in self._action_buttons
+                else QtWidgets.QSizePolicy.Policy.Minimum
+            )
+            button.setSizePolicy(
+                horizontal_policy,
+                QtWidgets.QSizePolicy.Policy.Fixed,
+            )
+
+    def _relayout_action_buttons(self) -> None:
+        if not hasattr(self, "action_layout"):
+            return
+
+        while self.action_layout.count():
+            item = self.action_layout.takeAt(0)
+            widget = item.widget()
+            if widget is not None:
+                self.action_layout.removeWidget(widget)
+
+        visible_buttons = [button for button in self._action_buttons if not button.isHidden()]
+        if not visible_buttons:
+            return
+
+        spacing = max(0, self.action_layout.horizontalSpacing())
+        available_width = max(
+            self.left_panel.width(),
+            self.left_panel.minimumWidth(),
+            220,
+        )
+        widest_button = max(button.minimumWidth() for button in visible_buttons)
+        columns = max(1, min(3, (available_width + spacing) // max(1, widest_button + spacing)))
+        columns = int(columns)
+
+        for col in range(3):
+            self.action_layout.setColumnStretch(col, 1 if col < columns else 0)
+
+        for index, button in enumerate(visible_buttons):
+            row = index // columns
+            column = index % columns
+            self.action_layout.addWidget(button, row, column)
+
+    def _process_feedback_events(self) -> None:
+        QtWidgets.QApplication.processEvents(
+            QtCore.QEventLoop.ProcessEventsFlag.ExcludeUserInputEvents
+        )
+
+    def _emit_deferred_action(self, button: QtWidgets.QPushButton, action, restore: bool) -> None:
+        try:
+            if hasattr(action, "emit"):
+                action.emit()
+            else:
+                action()
+        finally:
+            if restore:
+                QtCore.QTimer.singleShot(
+                    150,
+                    self,
+                    lambda: self._restore_deferred_button(button),
+                )
+
+    def _restore_deferred_button(self, button: QtWidgets.QPushButton) -> None:
+        try:
+            if button.isVisible() and self._current_state not in {"cancelling"}:
+                button.setEnabled(True)
+        except RuntimeError:
+            return
+
+    def _defer_button_action(
+        self,
+        button: QtWidgets.QPushButton,
+        action,
+        message: str,
+        *,
+        restore: bool = True,
+    ) -> None:
+        if not button.isEnabled():
+            return
+        if message:
+            self.message_value.setText(message)
+            self._append_log(message)
+        button.setEnabled(False)
+        self._process_feedback_events()
+        QtCore.QTimer.singleShot(
+            0,
+            self,
+            lambda: self._emit_deferred_action(button, action, restore),
+        )
+
+    def _show_pause_feedback(self) -> None:
+        self._series_queue_pause_requested = True
+        self.pause_button.setText(self.tr("Pause Requested"))
+        self.pause_button.setEnabled(False)
+        message = self.tr("Pause requested. The current safe checkpoint will stop the queue.")
+        self.message_value.setText(message)
+        self._append_log(message)
+        self._relayout_action_buttons()
+
+    def _on_pause_clicked(self) -> None:
+        if not self.pause_button.isEnabled():
+            return
+        self._show_pause_feedback()
+        self._process_feedback_events()
+        QtCore.QTimer.singleShot(0, self, self.pause_requested.emit)
+
+    def _show_cancel_feedback(self) -> None:
+        self.cancel_button.setText(self.tr("Cancelling..."))
+        self.cancel_button.setEnabled(False)
+        self._pipeline_active = True
+        self._current_state = "cancelling"
+        self.state_label.setText(self.tr("Running"))
+        message = self.tr("취소 중...")
+        self.message_value.setText(message)
+        self._append_log(message)
+        self._relayout_action_buttons()
+
+    def _on_cancel_clicked(self) -> None:
+        if not self.cancel_button.isEnabled():
+            return
+        self._show_cancel_feedback()
+        self._process_feedback_events()
+        QtCore.QTimer.singleShot(0, self, self.cancel_requested.emit)
+
     def _update_left_column_width(self) -> None:
         total_width = max(self.width(), self.minimumWidth())
         target = 340 if self._details_visible else 240
         target = min(target, max(220, total_width // 3))
         self.left_panel.setFixedWidth(target)
+        self._relayout_action_buttons()
 
     def eventFilter(self, watched: QtCore.QObject, event: QtCore.QEvent) -> bool:
         if watched is self.header_widget and self._display_mode == self.EMBEDDED_MODE:
             if event.type() == QtCore.QEvent.Type.MouseButtonPress:
                 mouse_event = event
+                if self._resize_edges_for_pos(self.mapFromGlobal(mouse_event.globalPosition().toPoint())):
+                    return False
                 if mouse_event.button() == QtCore.Qt.MouseButton.LeftButton:
                     self._drag_active = True
                     self._drag_offset = mouse_event.globalPosition().toPoint() - self.mapToGlobal(self.rect().topLeft())
@@ -445,10 +678,87 @@ class PipelineStatusPanel(QtWidgets.QFrame):
                 return True
         return super().eventFilter(watched, event)
 
+    def _resize_edges_for_pos(self, pos: QtCore.QPoint) -> set[str]:
+        if self._display_mode != self.EMBEDDED_MODE:
+            return set()
+        rect = self.rect()
+        margin = self._resize_margin
+        edges: set[str] = set()
+        if pos.x() <= rect.left() + margin:
+            edges.add("left")
+        elif pos.x() >= rect.right() - margin:
+            edges.add("right")
+        if pos.y() <= rect.top() + margin:
+            edges.add("top")
+        elif pos.y() >= rect.bottom() - margin:
+            edges.add("bottom")
+        return edges
+
+    def _cursor_for_edges(self, edges: set[str]) -> QtCore.Qt.CursorShape:
+        if {"left", "top"}.issubset(edges) or {"right", "bottom"}.issubset(edges):
+            return QtCore.Qt.CursorShape.SizeFDiagCursor
+        if {"right", "top"}.issubset(edges) or {"left", "bottom"}.issubset(edges):
+            return QtCore.Qt.CursorShape.SizeBDiagCursor
+        if "left" in edges or "right" in edges:
+            return QtCore.Qt.CursorShape.SizeHorCursor
+        if "top" in edges or "bottom" in edges:
+            return QtCore.Qt.CursorShape.SizeVerCursor
+        return QtCore.Qt.CursorShape.ArrowCursor
+
+    def mousePressEvent(self, event: QtGui.QMouseEvent) -> None:  # type: ignore[override]
+        if event.button() == QtCore.Qt.MouseButton.LeftButton and self._display_mode == self.EMBEDDED_MODE:
+            edges = self._resize_edges_for_pos(event.position().toPoint())
+            if edges:
+                self._resize_active = True
+                self._resize_edges = edges
+                self._resize_start_global = event.globalPosition().toPoint()
+                self._resize_start_geometry = QtCore.QRect(self.geometry())
+                self._user_positioned = True
+                event.accept()
+                return
+        super().mousePressEvent(event)
+
+    def mouseMoveEvent(self, event: QtGui.QMouseEvent) -> None:  # type: ignore[override]
+        if self._resize_active and self._display_mode == self.EMBEDDED_MODE:
+            delta = event.globalPosition().toPoint() - self._resize_start_global
+            rect = QtCore.QRect(self._resize_start_geometry)
+            if "left" in self._resize_edges:
+                rect.setLeft(rect.left() + delta.x())
+            if "right" in self._resize_edges:
+                rect.setRight(rect.right() + delta.x())
+            if "top" in self._resize_edges:
+                rect.setTop(rect.top() + delta.y())
+            if "bottom" in self._resize_edges:
+                rect.setBottom(rect.bottom() + delta.y())
+            self.setGeometry(self._clamp_embedded_geometry(rect))
+            event.accept()
+            return
+        edges = self._resize_edges_for_pos(event.position().toPoint())
+        self.setCursor(QtGui.QCursor(self._cursor_for_edges(edges)))
+        super().mouseMoveEvent(event)
+
+    def mouseReleaseEvent(self, event: QtGui.QMouseEvent) -> None:  # type: ignore[override]
+        if self._resize_active and event.button() == QtCore.Qt.MouseButton.LeftButton:
+            self._resize_active = False
+            self._resize_edges = set()
+            self.unsetCursor()
+            event.accept()
+            return
+        super().mouseReleaseEvent(event)
+
+    def leaveEvent(self, event: QtCore.QEvent) -> None:  # type: ignore[override]
+        if not self._resize_active:
+            self.unsetCursor()
+        super().leaveEvent(event)
+
     def showEvent(self, event: QtGui.QShowEvent) -> None:  # type: ignore[override]
         if not self._user_positioned:
             self._position_from_anchor()
         super().showEvent(event)
+
+    def hideEvent(self, event: QtGui.QHideEvent) -> None:  # type: ignore[override]
+        super().hideEvent(event)
+        self.panel_hidden.emit()
 
     def resizeEvent(self, event: QtGui.QResizeEvent) -> None:  # type: ignore[override]
         super().resizeEvent(event)
@@ -625,6 +935,7 @@ class PipelineStatusPanel(QtWidgets.QFrame):
     def update_event(self, event: dict) -> None:
         phase = str(event.get("phase") or "")
         status = str(event.get("status") or "")
+        panel_state = str(event.get("panel_state") or "").strip().lower()
         page_total = int(event.get("page_total") or 0)
         page_index = event.get("page_index")
         service_key = str(event.get("service") or "-")
@@ -632,7 +943,9 @@ class PipelineStatusPanel(QtWidgets.QFrame):
             "batch": self.tr("Automatic"),
             "gemma": "Gemma",
             "paddleocr_vl": "PaddleOCR VL",
+            "paddleocr-vl": "PaddleOCR VL",
             "hunyuanocr": "HunyuanOCR",
+            "mangalmm": "MangaLMM",
         }
 
         self.cancel_auto_close()
@@ -652,25 +965,34 @@ class PipelineStatusPanel(QtWidgets.QFrame):
         self.file_value.setText(str(event.get("image_name") or "-"))
         self.eta_value.setText(str(event.get("eta_text") or self.tr("Calculating")))
         self.message_value.setText(str(event.get("message") or "-"))
-        self._set_preview_path(event.get("preview_path"))
+        if "preview_path" in event:
+            preview_path = str(event.get("preview_path") or "").strip()
+            if preview_path or bool(event.get("clear_preview", False)):
+                self._set_preview_path(preview_path)
 
         detail = str(event.get("detail") or "")
         log_line = str(event.get("message") or detail or "")
         if log_line:
             self._append_log(log_line)
 
-        if phase == "done" or status == "completed":
+        if panel_state == "failed" or status == "failed" or phase == "error":
+            self._pipeline_active = False
+            self._apply_state("failed")
+        elif panel_state == "cancelled" or status == "cancelled":
+            self._pipeline_active = False
+            self._apply_state("cancelled")
+        elif panel_state == "paused" or status == "paused":
+            self._pipeline_active = False
+            self._apply_state("paused")
+        elif panel_state == "cancelling" or status == "cancelling":
+            self._pipeline_active = True
+            self._apply_state("cancelling")
+        elif phase == "done" or panel_state == "done":
             self._pipeline_active = False
             self._apply_state("done")
             auto_hide_ms = int(event.get("auto_hide_ms") or 0)
             if auto_hide_ms > 0:
                 self.schedule_auto_close(auto_hide_ms)
-        elif status == "failed" or phase == "error":
-            self._pipeline_active = False
-            self._apply_state("failed")
-        elif status == "cancelled":
-            self._pipeline_active = False
-            self._apply_state("cancelled")
         else:
             self._pipeline_active = True
             self._apply_state("running")
@@ -733,19 +1055,31 @@ class PipelineStatusPanel(QtWidgets.QFrame):
         state_map = {
             "idle": self.tr("Idle"),
             "running": self.tr("Running"),
+            "cancelling": self.tr("Running"),
             "done": self.tr("Done"),
             "failed": self.tr("Failed"),
             "cancelled": self.tr("Cancelled"),
+            "paused": self.tr("Paused"),
         }
         self.title_label.setText(
             self.tr("Pipeline Status")
-            if state in {"idle", "running", "done", "failed", "cancelled"}
+            if state in {"idle", "running", "cancelling", "done", "failed", "cancelled", "paused"}
             else self.tr("Status")
         )
         self.state_label.setText(state_map.get(state, state))
-        self.cancel_button.setVisible(state == "running")
-        self.report_button.setVisible(state in {"running", "done", "failed", "cancelled"})
+        if state == "cancelling":
+            self.cancel_button.setText(self.tr("Cancelling..."))
+        else:
+            self.cancel_button.setText(self.tr("Cancel"))
+        self.pause_button.setVisible(state == "running" and self._series_queue_pause_visible)
+        self.series_board_button.setVisible(state == "running" and self._series_queue_pause_visible)
+        self.current_item_button.setVisible(state == "running" and self._series_queue_pause_visible)
+        self.cancel_button.setVisible(state in {"running", "cancelling"})
+        self.cancel_button.setEnabled(state == "running")
+        self.report_button.setVisible(state in {"running", "cancelling", "done", "failed", "cancelled", "paused"})
         self.retry_button.setVisible(state == "failed")
         self.settings_button.setVisible(state == "failed")
         self.open_output_button.setVisible(state == "done" and self.has_output_root())
-        self.close_button.setVisible(state in {"done", "failed", "cancelled"})
+        self.close_button.setVisible(state in {"done", "failed", "cancelled", "paused"})
+        self._set_button_min_widths()
+        self._relayout_action_buttons()

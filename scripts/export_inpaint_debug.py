@@ -125,6 +125,32 @@ def _build_cleanup_delta(raw_mask, final_mask):
     return np.where((final_arr > 0) & (raw_arr <= 0), 255, 0).astype(np.uint8)
 
 
+def _build_changed_pixel_stats(source_image, cleaned_image, final_mask) -> dict[str, int]:
+    if source_image is None or cleaned_image is None or final_mask is None:
+        return {
+            "changed_pixel_count": 0,
+            "changed_inside_final_mask_pixel_count": 0,
+            "changed_outside_final_mask_pixel_count": 0,
+        }
+    source_arr = np.asarray(source_image)
+    cleaned_arr = np.asarray(cleaned_image)
+    if source_arr.shape != cleaned_arr.shape:
+        return {
+            "changed_pixel_count": 0,
+            "changed_inside_final_mask_pixel_count": 0,
+            "changed_outside_final_mask_pixel_count": 0,
+        }
+    mask_arr = np.asarray(final_mask)
+    if mask_arr.ndim == 3:
+        mask_arr = mask_arr[:, :, 0]
+    changed = np.any(np.abs(cleaned_arr.astype(np.int16) - source_arr.astype(np.int16)) > 2, axis=2)
+    return {
+        "changed_pixel_count": int(np.count_nonzero(changed)),
+        "changed_inside_final_mask_pixel_count": int(np.count_nonzero(changed & (mask_arr > 0))),
+        "changed_outside_final_mask_pixel_count": int(np.count_nonzero(changed & (mask_arr <= 0))),
+    }
+
+
 def _write_image(path: Path, image: np.ndarray) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     imk.write_image(str(path), ensure_three_channel(image))
@@ -164,14 +190,23 @@ def _process_image(
         mask = mask_details["final_mask"]
         if mask is not None and np.any(mask):
             raw_mask = mask_details["raw_mask"]
-            cleaned = inpainter(image, mask, get_config(settings))
-            cleaned = imk.convert_scale_abs(cleaned)
+            config = get_config(settings)
+            cleaned, inpaint_edit_mask = source_lama_blockwise_inpaint(
+                image,
+                mask,
+                blocks,
+                inpainter,
+                config,
+                check_need_inpaint=True,
+                return_edit_mask=True,
+            )
+            mask = np.where((mask > 0) | (inpaint_edit_mask > 0), 255, 0).astype(np.uint8)
             cleaned, final_mask, cleanup_stats = refine_bubble_residue_inpaint(
                 cleaned,
                 mask,
                 blocks,
                 inpainter,
-                get_config(settings),
+                config,
             )
         else:
             final_mask = mask
@@ -205,6 +240,7 @@ def _process_image(
         hard_box_applied_count=int(mask_details.get("hard_box_applied_count", 0) or 0),
         hard_box_reason_totals=dict(mask_details.get("hard_box_reason_totals", {}) or {}),
     )
+    metadata.update(_build_changed_pixel_stats(image, cleaned, final_mask))
     export_inpaint_debug_artifacts(
         export_root=str(corpus_output),
         archive_bname="",

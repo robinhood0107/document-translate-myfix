@@ -15,12 +15,18 @@ from PySide6.QtGui import QUndoGroup, QUndoStack, QIcon
 from app.ui.dayu_widgets.qt import MPixmap
 from app.ui.main_window import ComicTranslateUI
 from app.ui.messages import Messages
+from app.projects.project_types import (
+    PROJECT_KIND_SERIES,
+    PROJECT_KIND_SINGLE,
+    has_project_file_extension,
+    is_series_project_file,
+)
 
 from modules.ocr.local_runtime import LocalOCRRuntimeManager
 from modules.translation.local_runtime import LocalGemmaRuntimeManager
 from modules.ocr.selection import OCR_MODE_BEST_LOCAL, normalize_ocr_mode, resolve_ocr_engine
 from app.ui.canvas.text_item import TextBlockItem
-from app.ui.commands.box import DeleteBoxesCommand
+from app.ui.commands.box import DeleteBoxesCommand, DeleteTextBoxCommand
 from app.path_materialization import ensure_path_materialized
 
 from modules.utils.textblock import TextBlock
@@ -33,7 +39,7 @@ from modules.utils.archives import make as make_archive
 from modules.utils.automatic_output import (
     OUTPUT_TARGET_ARCHIVE,
     OUTPUT_TARGET_IMAGES,
-    build_archive_file_name,
+    build_archive_page_file_name,
     build_series_output_dir,
     default_project_output_preferences,
     estimate_archive_options_for_pages,
@@ -44,8 +50,12 @@ from modules.utils.automatic_output import (
     is_single_archive_mode,
     normalize_project_output_preferences,
     preserve_preview_file,
+    reserve_unique_dir,
+    reserve_unique_path,
     resolve_automatic_output_settings,
+    resolve_forced_archive_output_path,
     resolve_series_folder_name,
+    write_archive_image,
 )
 from modules.utils.txt_md_exchange import (
     apply_translation_pages,
@@ -67,6 +77,7 @@ from app.controllers.shortcuts import ShortcutController
 from app.controllers.task_runner import TaskRunnerController
 from app.controllers.batch_report import BatchReportController
 from app.controllers.manual_workflow import ManualWorkflowController
+from app.controllers.series import SeriesController
 from modules.utils.exceptions import (
     LocalServiceError,
     LocalServiceConnectionError,
@@ -141,7 +152,9 @@ class ComicTranslate(ComicTranslateUI):
 
         self.undo_group = QUndoGroup(self)
         self.undo_stacks: dict[str, QUndoStack] = {}
+        self.undo_group.activeStackChanged.connect(self.update_undo_redo_actions)
         self.project_file = None
+        self.project_kind = PROJECT_KIND_SINGLE
         self.temp_dir = tempfile.mkdtemp()
         self._manual_dirty = False
         self._dirty_revision = 0
@@ -149,6 +162,7 @@ class ComicTranslate(ComicTranslateUI):
         self.project_output_preferences = default_project_output_preferences()
         self._automatic_output_controls_updating = False
         self._automatic_output_page_metrics_cache: dict[str, dict[str, object]] = {}
+        self._render_dirty_ui_refresh_pending = False
 
         self.pipeline = ComicTranslatePipeline(self)
         try:
@@ -161,13 +175,16 @@ class ComicTranslate(ComicTranslateUI):
         self.current_worker = None
         self._batch_active = False
         self._batch_cancel_requested = False
+        self._batch_pause_requested = False
         self._batch_failed = False
         self._current_batch_run_type = None
         self._last_batch_request_paths = []
         self._last_batch_run_type = "batch"
+        self._last_batch_failure_detail = ""
         self._automatic_progress_settings_target = None
         self._last_runtime_preview_path = ""
         self._last_batch_output_root = ""
+        self._intermediate_preview_disabled_notices = set()
         self._automatic_progress_tracker = AutomaticProgressTracker()
         self.local_ocr_runtime_manager = LocalOCRRuntimeManager()
         self.local_translation_runtime_manager = LocalGemmaRuntimeManager()
@@ -175,6 +192,7 @@ class ComicTranslate(ComicTranslateUI):
         self.image_ctrl = ImageStateController(self)
         self.rect_item_ctrl = RectItemController(self)
         self.project_ctrl = ProjectController(self)
+        self.series_ctrl = SeriesController(self)
         self.text_ctrl = TextController(self)
         self.webtoon_ctrl = WebtoonController(self)
         self.search_ctrl = SearchReplaceController(self)
@@ -204,6 +222,7 @@ class ComicTranslate(ComicTranslateUI):
         self.project_ctrl.load_main_page_settings()
         self.settings_page.load_settings()
         self.refresh_inpaint_tool_ui()
+        self.refresh_box_delete_ui()
         self.project_ctrl.initialize_autosave()
 
         # Populate the home screen with any previously-saved recent projects
@@ -262,8 +281,10 @@ class ComicTranslate(ComicTranslateUI):
         self.hbutton_group.get_button_group().buttons()[4].clicked.connect(self.inpaint_and_set)
         self.hbutton_group.get_button_group().buttons()[5].clicked.connect(self.text_ctrl.render_text)
 
-        self.undo_tool_group.get_button_group().buttons()[0].clicked.connect(self.undo_group.undo)
-        self.undo_tool_group.get_button_group().buttons()[1].clicked.connect(self.undo_group.redo)
+        undo_buttons = self.undo_tool_group.get_button_group().buttons()
+        undo_buttons[0].clicked.connect(self._perform_toolbar_undo)
+        undo_buttons[1].clicked.connect(self._perform_toolbar_redo)
+        self.update_undo_redo_actions()
 
         # Connect other buttons and widgets
         self.translate_button.clicked.connect(self.start_batch_process)
@@ -272,10 +293,13 @@ class ComicTranslate(ComicTranslateUI):
         self.retry_failed_button.clicked.connect(self.retry_failed_batch_pages)
         self.one_page_auto_button.clicked.connect(self.start_one_page_auto_process)
         self.pipeline_status_panel.cancel_requested.connect(self._on_automatic_progress_cancel)
+        self.pipeline_status_panel.pause_requested.connect(self.series_ctrl.pause_queue_translation)
         self.pipeline_status_panel.retry_requested.connect(self._on_automatic_progress_retry)
         self.pipeline_status_panel.open_settings_requested.connect(self._on_automatic_progress_open_settings)
         self.pipeline_status_panel.report_requested.connect(self.show_latest_batch_report)
         self.pipeline_status_panel.open_output_requested.connect(self._open_latest_batch_output)
+        self.pipeline_status_panel.open_series_board_requested.connect(self.series_ctrl.show_board_during_queue)
+        self.pipeline_status_panel.open_current_series_item_requested.connect(self.series_ctrl.open_active_queue_item)
         self.set_all_button.clicked.connect(self.text_ctrl.set_src_trg_all)
         self.clear_rectangles_button.clicked.connect(self.image_viewer.clear_rectangles)
         self.clear_brush_strokes_button.clicked.connect(self.image_viewer.clear_brush_strokes)
@@ -287,6 +311,8 @@ class ComicTranslate(ComicTranslateUI):
         self.change_all_blocks_size_dec.clicked.connect(lambda: self.text_ctrl.change_all_blocks_size(-int(self.change_all_blocks_size_diff.text())))
         self.change_all_blocks_size_inc.clicked.connect(lambda: self.text_ctrl.change_all_blocks_size(int(self.change_all_blocks_size_diff.text())))
         self.delete_button.clicked.connect(self.delete_selected_box)
+        if hasattr(self, "delete_block_button"):
+            self.delete_block_button.clicked.connect(self.delete_selected_box)
         for checkbox in (
             self.auto_export_source_txt_checkbox,
             self.auto_export_source_md_checkbox,
@@ -307,7 +333,17 @@ class ComicTranslate(ComicTranslateUI):
             self.settings_page.ui.automatic_output_archive_image_format_combo.currentIndexChanged,
             self.settings_page.ui.automatic_output_archive_level_spinbox.valueChanged,
         ):
-            signal.connect(self.refresh_automatic_output_controls)
+            signal.connect(self._on_global_output_settings_changed)
+        self.rerender_current_button.clicked.connect(
+            lambda: self.project_ctrl.rerender_output_scope("current")
+        )
+        self.rerender_dirty_button.clicked.connect(
+            lambda: self.project_ctrl.rerender_output_scope("dirty")
+        )
+        self.rerender_all_button.clicked.connect(
+            lambda: self.project_ctrl.rerender_output_scope("all")
+        )
+        self.open_output_folder_button.clicked.connect(self.project_ctrl.open_output_folder)
 
         # Connect text edit widgets
         self.s_text_edit.textChanged.connect(self.text_ctrl.update_text_block)
@@ -319,6 +355,7 @@ class ComicTranslate(ComicTranslateUI):
         # Connect image viewer signals for both modes
         self.image_viewer.rectangle_selected.connect(self.rect_item_ctrl.handle_rectangle_selection)
         self.image_viewer.rectangle_created.connect(self.rect_item_ctrl.handle_rectangle_creation)
+        self.image_viewer.text_box_created.connect(self.text_ctrl.handle_text_box_creation)
         self.image_viewer.rectangle_deleted.connect(self.rect_item_ctrl.handle_rectangle_deletion)
         self.image_viewer.command_emitted.connect(self.push_command)
         self.image_viewer.restore_stroke_requested.connect(self.image_ctrl.apply_restore_stroke)
@@ -370,12 +407,30 @@ class ComicTranslate(ComicTranslateUI):
         # Home screen signals
         self.startup_home.sig_open_files.connect(self._guarded_thread_load_images)
         self.startup_home.sig_open_project.connect(self._open_project_from_home)
+        self.startup_home.sig_create_series.connect(self.series_ctrl.prompt_new_series_project)
         self.startup_home._sig_remove_one.connect(self._on_home_remove_recent)
         self.startup_home._sig_clear_all.connect(self._on_home_clear_recent)
         self.startup_home._sig_pin.connect(
             lambda path, pinned: self.project_ctrl.toggle_pin_project(path, pinned)
         )
         self.title_bar.project_target_requested.connect(self._on_project_target_requested)
+        self.series_workspace.open_item_requested.connect(self.series_ctrl.request_open_item)
+        self.series_workspace.remove_item_requested.connect(self.series_ctrl.request_remove_item)
+        self.series_workspace.reorder_requested.connect(self.series_ctrl.request_reorder)
+        self.series_workspace.queue_index_requested.connect(self.series_ctrl.request_queue_index_change)
+        self.series_workspace.status_change_requested.connect(self.series_ctrl.request_item_status_change)
+        self.series_workspace.add_files_requested.connect(self.series_ctrl.request_add_files)
+        self.series_workspace.add_folder_requested.connect(self.series_ctrl.request_add_folder)
+        self.series_workspace.back_requested.connect(self.series_ctrl.request_back)
+        self.series_workspace.forward_requested.connect(self.series_ctrl.request_forward)
+        self.series_workspace.tree_jump_requested.connect(self.series_ctrl.request_tree_jump)
+        self.series_workspace.auto_translate_requested.connect(self.series_ctrl.start_queue_translation)
+        self.series_workspace.pause_requested.connect(self.series_ctrl.pause_queue_translation)
+        self.series_workspace.resume_requested.connect(self.series_ctrl.resume_queue_translation)
+        self.series_workspace.open_failed_item_requested.connect(self.series_ctrl.open_last_failed_item)
+        self.series_workspace.open_current_item_requested.connect(self.series_ctrl.open_active_queue_item)
+        self.series_workspace.open_series_settings_requested.connect(self.series_ctrl.edit_series_settings_dialog)
+        self.series_workspace.global_settings_changed.connect(self.series_ctrl.request_global_settings_change)
 
     def _set_project_navigation_enabled(self, enabled: bool) -> None:
         widgets = [
@@ -422,6 +477,7 @@ class ComicTranslate(ComicTranslateUI):
         self.project_output_preferences = normalized
         self.refresh_automatic_output_controls()
         if changed and mark_dirty and self.image_files:
+            self.mark_all_render_dirty()
             self.mark_project_dirty()
 
     def get_resolved_export_settings(self) -> dict[str, object]:
@@ -432,6 +488,216 @@ class ComicTranslate(ComicTranslateUI):
             )
         )
         return export_settings
+
+    def _on_global_output_settings_changed(self, *_args) -> None:
+        self.refresh_automatic_output_controls()
+        try:
+            if self.image_files and self.get_project_output_preferences().get("output_use_global", True):
+                self.mark_all_render_dirty()
+        except Exception:
+            logger.debug("Failed to mark outputs dirty after global output setting change.", exc_info=True)
+
+    def _current_image_path(self) -> str | None:
+        if 0 <= self.curr_img_idx < len(self.image_files):
+            return self.image_files[self.curr_img_idx]
+        return None
+
+    def create_undo_stack_for_path(self, file_path: str) -> QUndoStack:
+        stack = QUndoStack(self)
+        self.register_undo_stack_for_path(file_path, stack)
+        return stack
+
+    def _disconnect_undo_stack_signals(self, stack: QUndoStack) -> None:
+        for signal_name in ("cleanChanged", "indexChanged", "canUndoChanged", "canRedoChanged"):
+            try:
+                getattr(stack, signal_name).disconnect()
+            except (RuntimeError, TypeError):
+                pass
+
+    def _detach_undo_stack(self, stack: QUndoStack | None) -> None:
+        if stack is None:
+            return
+        self._disconnect_undo_stack_signals(stack)
+        try:
+            self.undo_group.removeStack(stack)
+        except RuntimeError:
+            pass
+        try:
+            stack.setParent(None)
+            stack.deleteLater()
+        except RuntimeError:
+            pass
+
+    def remove_undo_stack_for_path(self, file_path: str) -> None:
+        stack = self.undo_stacks.pop(file_path, None)
+        self._detach_undo_stack(stack)
+        self.update_undo_redo_actions()
+
+    def clear_undo_stacks(self) -> None:
+        for stack in list(self.undo_stacks.values()):
+            self._detach_undo_stack(stack)
+        self.undo_stacks.clear()
+        self.update_undo_redo_actions()
+
+    def register_undo_stack_for_path(self, file_path: str, stack: QUndoStack) -> None:
+        if not file_path or stack is None:
+            return
+        existing_stack = self.undo_stacks.get(file_path)
+        if existing_stack is not None and existing_stack is not stack:
+            self._detach_undo_stack(existing_stack)
+        stack.cleanChanged.connect(self._update_window_modified)
+        stack.indexChanged.connect(self._bump_dirty_revision)
+        stack.indexChanged.connect(lambda _index=0, path=file_path: self.mark_render_dirty(path))
+        stack.indexChanged.connect(self.refresh_inpaint_tool_ui)
+        stack.canUndoChanged.connect(lambda _can=False: self.update_undo_redo_actions())
+        stack.canRedoChanged.connect(lambda _can=False: self.update_undo_redo_actions())
+        try:
+            if hasattr(self, "search_ctrl") and self.search_ctrl is not None:
+                stack.indexChanged.connect(self.search_ctrl.on_undo_redo)
+        except Exception:
+            pass
+        self.undo_stacks[file_path] = stack
+        self.undo_group.addStack(stack)
+        self.update_undo_redo_actions()
+
+    def update_undo_redo_actions(self, *_args) -> None:
+        if getattr(self, "_is_shutting_down", False):
+            return
+        buttons = []
+        try:
+            buttons = self.undo_tool_group.get_button_group().buttons()
+        except Exception:
+            buttons = []
+        try:
+            stack = self.undo_group.activeStack()
+        except RuntimeError:
+            return
+        can_undo = bool(stack is not None and stack.canUndo())
+        can_redo = bool(stack is not None and stack.canRedo())
+        if len(buttons) >= 2:
+            buttons[0].setEnabled(can_undo)
+            buttons[1].setEnabled(can_redo)
+
+    def _perform_toolbar_undo(self) -> None:
+        stack = self.undo_group.activeStack()
+        if stack is not None and stack.canUndo():
+            self.undo_group.undo()
+
+    def _perform_toolbar_redo(self) -> None:
+        stack = self.undo_group.activeStack()
+        if stack is not None and stack.canRedo():
+            self.undo_group.redo()
+
+    def render_dirty_paths(self, *, exclude_current: bool = False) -> list[str]:
+        current = self._current_image_path()
+        dirty_paths = []
+        for file_path in self.image_files:
+            if exclude_current and file_path == current:
+                continue
+            state = self.image_ctrl.ensure_page_state(file_path)
+            if bool(state.get("render_dirty", False)):
+                dirty_paths.append(file_path)
+        return dirty_paths
+
+    def mark_render_dirty(self, file_path: str | None = None) -> None:
+        if getattr(self, "_is_shutting_down", False):
+            return
+        path = file_path or self._current_image_path()
+        if not path:
+            return
+        state = self.image_ctrl.ensure_page_state(path)
+        state["render_dirty"] = True
+        self.refresh_render_dirty_ui()
+
+    def mark_render_dirty_for_paths(self, paths: list[str] | tuple[str, ...] | set[str]) -> None:
+        if getattr(self, "_is_shutting_down", False):
+            return
+        changed = False
+        for path in paths or []:
+            if path not in self.image_files:
+                continue
+            state = self.image_ctrl.ensure_page_state(path)
+            if not state.get("render_dirty", False):
+                state["render_dirty"] = True
+                changed = True
+        if changed:
+            self.refresh_render_dirty_ui()
+
+    def mark_all_render_dirty(self) -> None:
+        self.mark_render_dirty_for_paths(list(self.image_files))
+
+    def mark_render_clean(
+        self,
+        file_path: str,
+        *,
+        signature: str = "",
+        rendered_at: str = "",
+        output_path: str = "",
+    ) -> None:
+        if not file_path:
+            return
+        state = self.image_ctrl.ensure_page_state(file_path)
+        state["render_dirty"] = False
+        if signature:
+            state["last_render_signature"] = signature
+        if rendered_at:
+            state["last_rendered_at"] = rendered_at
+        if output_path:
+            state["last_render_output_path"] = output_path
+        self.refresh_render_dirty_ui()
+
+    def refresh_render_dirty_ui(self) -> None:
+        if getattr(self, "_is_shutting_down", False):
+            return
+        if self._render_dirty_ui_refresh_pending:
+            return
+        self._render_dirty_ui_refresh_pending = True
+
+        def _apply() -> None:
+            self._render_dirty_ui_refresh_pending = False
+            if getattr(self, "_is_shutting_down", False):
+                return
+            if not hasattr(self, "output_dirty_label"):
+                return
+            dirty_count = len(self.render_dirty_paths())
+            current_dirty = bool(
+                self._current_image_path()
+                and self.image_ctrl.ensure_page_state(self._current_image_path()).get("render_dirty", False)
+            )
+            archive_mode = is_single_archive_mode(self.get_resolved_export_settings())
+            suffix = self.tr(" (Update Archive)") if archive_mode else ""
+            self.rerender_current_button.setToolTip(self.tr("Rerender Current Image") + suffix)
+            self.rerender_dirty_button.setToolTip(self.tr("Rerender Changed Images") + suffix)
+            self.rerender_all_button.setToolTip(self.tr("Rerender All Images") + suffix)
+            self.open_output_folder_button.setToolTip(self.tr("Open Output Folder"))
+            self.rerender_current_button.setEnabled(bool(self.image_files) and current_dirty)
+            self.rerender_dirty_button.setEnabled(dirty_count > 0)
+            self.rerender_all_button.setEnabled(bool(self.image_files))
+            self.open_output_folder_button.setEnabled(bool(self.image_files))
+            if dirty_count:
+                if hasattr(self, "render_dirty_badge"):
+                    self.render_dirty_badge.setText(self.tr("Unapplied {count}").format(count=dirty_count))
+                self.output_dirty_label.setText(
+                    self.tr("{count} image(s) have unapplied render changes.").format(count=dirty_count)
+                )
+            else:
+                if hasattr(self, "render_dirty_badge"):
+                    self.render_dirty_badge.setText(self.tr("Up to date"))
+                self.output_dirty_label.setText(self.tr("All render outputs are up to date."))
+
+        QtCore.QTimer.singleShot(0, self, _apply)
+
+    def refresh_box_delete_ui(self) -> None:
+        try:
+            text_selected = bool(self.image_viewer.get_selected_text_items())
+            block_selected = bool(self.image_viewer.selected_rect)
+        except Exception:
+            text_selected = False
+            block_selected = False
+        if hasattr(self, "delete_button"):
+            self.delete_button.setEnabled(text_selected)
+        if hasattr(self, "delete_block_button"):
+            self.delete_block_button.setEnabled(block_selected)
 
     def get_automatic_output_series_dir(
         self,
@@ -449,6 +715,28 @@ class ComicTranslate(ComicTranslateUI):
             temp_dir=self.temp_dir,
         )
         return build_series_output_dir(base_dir, folder_name)
+
+    def reset_automatic_output_reservations(self) -> None:
+        self._automatic_output_dir_reservations = {}
+
+    def get_reserved_automatic_output_series_dir(
+        self,
+        base_dir: str,
+        *,
+        anchor_path: str | None = None,
+    ) -> str:
+        output_dir = self.get_automatic_output_series_dir(base_dir, anchor_path=anchor_path)
+        key = os.path.normcase(os.path.abspath(output_dir))
+        cache = getattr(self, "_automatic_output_dir_reservations", None)
+        if cache is None:
+            cache = {}
+            self._automatic_output_dir_reservations = cache
+        reserved = cache.get(key)
+        if reserved:
+            return reserved
+        reserved = reserve_unique_dir(output_dir)
+        cache[key] = reserved
+        return reserved
 
     def _get_automatic_output_page_metric(self, file_path: str) -> dict[str, object] | None:
         if not file_path:
@@ -709,6 +997,7 @@ class ComicTranslate(ComicTranslateUI):
                         "Images are saved individually at maximum quality.\nTranslated and cleaned images are exported."
                     )
                 )
+        self.refresh_render_dirty_ui()
 
     def _on_project_output_use_global_changed(self, state: int) -> None:
         if self._automatic_output_controls_updating:
@@ -818,6 +1107,8 @@ class ComicTranslate(ComicTranslateUI):
     def _reset_to_blank_project_workspace(self) -> None:
         self.project_ctrl.clear_recovery_checkpoint()
         self.image_ctrl.clear_state()
+        self.series_ctrl.reset_series_context()
+        self.project_kind = PROJECT_KIND_SINGLE
         self.central_stack.setCurrentWidget(self.drag_browser)
         if self.webtoon_mode:
             self.webtoon_toggle.setChecked(False)
@@ -836,7 +1127,7 @@ class ComicTranslate(ComicTranslateUI):
             self._on_new_project_clicked()
             return
 
-        project_paths = [path for path in normalized_paths if path.lower().endswith(".ctpr")]
+        project_paths = [path for path in normalized_paths if has_project_file_extension(path)]
         if project_paths:
             if len(normalized_paths) != 1:
                 Messages.show_warning(
@@ -854,20 +1145,33 @@ class ComicTranslate(ComicTranslateUI):
             return
 
         self._run_guarded_project_transition(
-            lambda: self.image_ctrl.thread_load_images(normalized_paths)
+            lambda: self._open_regular_files(normalized_paths)
         )
 
     def _guarded_thread_load_project(self, path: str):
         normalized_path = os.path.normpath(os.path.abspath(path or ""))
         if not normalized_path:
             return
-        if not normalized_path.lower().endswith(".ctpr"):
+        if not has_project_file_extension(normalized_path):
             self._guarded_thread_load_images([normalized_path])
             return
 
         self._run_guarded_project_transition(
-            lambda: self.project_ctrl.thread_load_project(normalized_path)
+            lambda: self._open_project_by_type(normalized_path)
         )
+
+    def _open_regular_files(self, normalized_paths: list[str]) -> None:
+        self.series_ctrl.reset_series_context()
+        self.project_kind = PROJECT_KIND_SINGLE
+        self.image_ctrl.thread_load_images(normalized_paths)
+
+    def _open_project_by_type(self, normalized_path: str) -> None:
+        if is_series_project_file(normalized_path):
+            self.series_ctrl.thread_load_series_project(normalized_path)
+            return
+        self.series_ctrl.reset_series_context()
+        self.project_kind = PROJECT_KIND_SINGLE
+        self.project_ctrl.thread_load_project(normalized_path)
 
     def _on_new_project_clicked(self):
         """Clear the app to initial state after the shared transition guard passes."""
@@ -894,10 +1198,10 @@ class ComicTranslate(ComicTranslateUI):
     # Home screen helper methods
 
     def _open_project_from_home(self, path: str):
-        """Load a .ctpr project selected on the home screen."""
+        """Load a project selected on the home screen."""
         if not path:
             return
-        if not path.lower().endswith(".ctpr"):
+        if not has_project_file_extension(path):
             self._guarded_thread_load_images([path])
             return
         self._guarded_thread_load_project(path)
@@ -951,6 +1255,12 @@ class ComicTranslate(ComicTranslateUI):
     def mark_project_dirty(self):
         self._bump_dirty_revision()
         self._manual_dirty = True
+        self.mark_render_dirty()
+        try:
+            if getattr(self, "project_kind", PROJECT_KIND_SINGLE) == PROJECT_KIND_SERIES:
+                self.series_ctrl.notify_active_child_dirty()
+        except Exception:
+            pass
         self._update_window_modified()
 
     def set_project_clean(self):
@@ -977,8 +1287,17 @@ class ComicTranslate(ComicTranslateUI):
             self.undo_group.activeStack().push(command)
 
     def delete_selected_box(self):
-        if self.curr_tblock:
-            # Create and push the delete command
+        try:
+            self.text_ctrl._commit_pending_text_command()
+        except Exception:
+            pass
+
+        selected_text_items = self.image_viewer.get_selected_text_items()
+        if selected_text_items:
+            text_item = selected_text_items[-1]
+            blk = self.text_ctrl._find_text_block_for_item(text_item)
+            command = DeleteTextBoxCommand(self, text_item, blk, self.blk_list)
+        elif self.image_viewer.selected_rect and self.curr_tblock:
             command = DeleteBoxesCommand(
                 self,
                 self.image_viewer.selected_rect,
@@ -986,7 +1305,16 @@ class ComicTranslate(ComicTranslateUI):
                 self.curr_tblock,
                 self.blk_list,
             )
-            self.undo_group.activeStack().push(command)
+        else:
+            return
+
+        stack = self.undo_group.activeStack()
+        if stack:
+            stack.push(command)
+        else:
+            command.redo()
+            self.mark_project_dirty()
+        self.refresh_box_delete_ui()
 
     def restore_text_blocks(self):
         if not self.webtoon_mode:
@@ -1054,14 +1382,45 @@ class ComicTranslate(ComicTranslateUI):
         self.task_runner_ctrl.clear_operation_queue()
 
     def cancel_current_task(self):
+        self._batch_pause_requested = False
         self.task_runner_ctrl.cancel_current_task()
 
     def is_current_task_cancelled(self) -> bool:
         worker = getattr(self, "current_worker", None)
-        return bool(self._batch_cancel_requested or (worker and worker.is_cancelled))
+        return bool(
+            self._batch_cancel_requested
+            or self._batch_pause_requested
+            or (worker and worker.is_cancelled)
+        )
+
+    def request_current_batch_pause(self) -> bool:
+        if not self._batch_active:
+            return False
+        self._batch_pause_requested = True
+        worker = getattr(self, "current_worker", None)
+        if worker:
+            worker.cancel()
+        self.clear_operation_queue()
+        panel = getattr(self, "pipeline_status_panel", None)
+        update_event = getattr(panel, "update_event", None)
+        if callable(update_event):
+            update_event({
+                "phase": "pipeline",
+                "service": "batch",
+                "status": "running",
+                "step_key": "pause",
+                "message": self.tr("일시정지 요청됨. 현재 안전 지점에서 멈춥니다."),
+                "panel_state": "running",
+            })
+        return True
+
+    def is_current_batch_pause_requested(self) -> bool:
+        return bool(self._batch_pause_requested)
 
     def report_runtime_progress(self, payload: dict[str, Any]):
         if not isinstance(payload, dict):
+            return
+        if getattr(self, "_is_shutting_down", False):
             return
         try:
             self.runtime_progress_update.emit(dict(payload))
@@ -1071,9 +1430,17 @@ class ComicTranslate(ComicTranslateUI):
     def _ensure_automatic_progress_dialog(self):
         return self.pipeline_status_panel
 
+    def _prepare_intermediate_preview_run(self, run_type: str) -> None:
+        self._intermediate_preview_disabled_notices = set()
+
+    def _cleanup_intermediate_preview_run(self, *, keep_failed: bool = False) -> None:
+        self._intermediate_preview_disabled_notices = set()
+
     def _show_automatic_progress_dialog(self, selected_paths: list[str], run_type: str):
         self._automatic_progress_tracker.reset(page_total=len(selected_paths), run_type=run_type)
         self._last_runtime_preview_path = ""
+        self._last_runtime_preview_kind = ""
+        self._last_runtime_preview_page_index = None
         self._last_batch_output_root = ""
         panel = self._ensure_automatic_progress_dialog()
         panel.prepare_for_new_run()
@@ -1098,40 +1465,84 @@ class ComicTranslate(ComicTranslateUI):
     def on_runtime_progress_update(self, payload: dict):
         if not isinstance(payload, dict):
             return
+        if getattr(self, "_is_shutting_down", False):
+            return
+        if self._batch_cancel_requested:
+            phase = str(payload.get("phase") or "").strip().lower()
+            status = str(payload.get("status") or "").strip().lower()
+            terminal_phases = {"done"}
+            terminal_statuses = {"cancelled", "failed", "completed"}
+            passthrough_statuses = {"cancelling"}
+            if phase not in terminal_phases and status not in terminal_statuses:
+                if status not in passthrough_statuses:
+                    return
         event = self._automatic_progress_tracker.enrich(payload)
+        if str(event.get("step_key") or "") == "finalizing_archive":
+            self.progress_bar.setVisible(True)
+            self.progress_bar.setRange(0, 100)
+            self.progress_bar.setValue(100)
+            self.progress_bar.setFormat(self.tr("Finalizing archive... %p%"))
         preview_path = str(event.get("preview_path") or "").strip()
+        preview_kind = str(event.get("preview_kind") or "").strip()
+        page_index = event.get("page_index")
+        if (
+            preview_path
+            and preview_kind == "source_fallback"
+            and self._last_runtime_preview_path
+            and self._last_runtime_preview_page_index == page_index
+            and self._last_runtime_preview_kind != "source_fallback"
+        ):
+            event.pop("preview_path", None)
+            preview_path = ""
         if preview_path:
             self._last_runtime_preview_path = preview_path
+            self._last_runtime_preview_kind = preview_kind
+            self._last_runtime_preview_page_index = page_index
+        self._follow_runtime_page(event)
         self._ensure_automatic_progress_dialog().update_event(event)
         self._emit_runtime_progress_memlog(event)
         self._log_runtime_progress(event)
 
-    def _emit_runtime_progress_memlog(self, event: dict):
-        if not isinstance(event, dict):
+    def _follow_runtime_page(self, event: dict[str, Any]) -> None:
+        if str(event.get("phase") or "") != "pipeline":
             return
+        if str(event.get("status") or "").strip().lower() not in {"running", "completed"}:
+            return
+        page_index = event.get("page_index")
         try:
-            self.emit_memlog(
-                "runtime_progress",
-                phase=event.get("phase", ""),
-                service=event.get("service", ""),
-                status=event.get("status", ""),
-                step_key=event.get("step_key", ""),
-                stage_name=event.get("stage_name", ""),
-                message=event.get("message", ""),
-                detail=event.get("detail", ""),
-                page_index=event.get("page_index"),
-                page_total=event.get("page_total"),
-                total_images=event.get("page_total"),
-                image_name=event.get("image_name", ""),
-                image_path=event.get("image_path", ""),
-                preview_path=event.get("preview_path", ""),
-                elapsed_sec=event.get("elapsed_sec"),
-                eta_sec=event.get("eta_sec"),
-                panel_state=event.get("panel_state", ""),
-                panel_message_level=event.get("panel_message_level", ""),
-            )
+            index = int(page_index)
+        except (TypeError, ValueError):
+            return
+        if index < 0 or index >= len(getattr(self, "image_files", []) or []):
+            return
+        if index == getattr(self, "curr_img_idx", -1):
+            return
+        if getattr(self, "_runtime_following_page", False):
+            return
+
+        self._runtime_following_page = True
+        try:
+            page_list = getattr(self, "page_list", None)
+            if page_list is not None:
+                page_list.blockSignals(True)
+                try:
+                    page_list.setCurrentRow(index)
+                finally:
+                    page_list.blockSignals(False)
+            image_ctrl = getattr(self, "image_ctrl", None)
+            if getattr(self, "webtoon_mode", False):
+                self.curr_img_idx = index
+                viewer = getattr(self, "image_viewer", None)
+                if viewer is not None:
+                    viewer.scroll_to_page(index)
+                if image_ctrl is not None:
+                    image_ctrl.highlight_card(index)
+            elif image_ctrl is not None:
+                image_ctrl.display_image(index, switch_page=False)
         except Exception:
-            logger.debug("Failed to emit runtime progress memlog event.", exc_info=True)
+            logger.debug("Failed to follow runtime page index %s.", index, exc_info=True)
+        finally:
+            self._runtime_following_page = False
 
     def _log_runtime_progress(self, event: dict):
         logger.info(
@@ -1149,14 +1560,16 @@ class ComicTranslate(ComicTranslateUI):
         )
 
     def _on_automatic_progress_cancel(self):
+        self._batch_pause_requested = False
         self.cancel_current_task()
-        self._ensure_automatic_progress_dialog().show_passive_message(
-            "info",
-            self.tr("취소 중..."),
-            duration=None,
-            closable=False,
-            source="pipeline",
-        )
+        self._ensure_automatic_progress_dialog().update_event({
+            "phase": "pipeline",
+            "service": "batch",
+            "status": "cancelling",
+            "step_key": "cancel",
+            "message": self.tr("취소 중..."),
+            "panel_state": "cancelling",
+        })
 
     def _on_automatic_progress_retry(self):
         if self._batch_active or not self._last_batch_request_paths:
@@ -1184,7 +1597,21 @@ class ComicTranslate(ComicTranslateUI):
     def default_error_handler(self, error_tuple: Tuple):
         exctype, value, traceback_str = error_tuple
 
+        if getattr(self, "_is_shutting_down", False):
+            return
+
         if issubclass(exctype, OperationCancelledError):
+            if self._batch_pause_requested and not self._batch_cancel_requested:
+                self.pipeline_status_panel.update_event({
+                    "phase": "pipeline",
+                    "status": "running",
+                    "service": "batch",
+                    "message": self.tr("일시정지 중..."),
+                    "panel_state": "running",
+                })
+                self.set_pipeline_overlay_active(False)
+                self.loading.setVisible(False)
+                return
             self.pipeline_status_panel.update_event({
                 "phase": "done",
                 "status": "cancelled",
@@ -1197,7 +1624,19 @@ class ComicTranslate(ComicTranslateUI):
             return
 
         if self._batch_active:
+            if self._batch_cancel_requested:
+                self.pipeline_status_panel.update_event({
+                    "phase": "done",
+                    "status": "cancelled",
+                    "service": "batch",
+                    "message": self.tr("작업이 취소되었습니다."),
+                    "panel_state": "cancelled",
+                })
+                self.set_pipeline_overlay_active(False)
+                self.loading.setVisible(False)
+                return
             self._batch_failed = True
+            self._last_batch_failure_detail = str(value)
             service_name = getattr(value, "service_name", "Gemma") if isinstance(value, BaseException) else "Gemma"
             self._automatic_progress_settings_target = getattr(value, "settings_page_name", self.tr("Gemma Local Server Settings"))
             service_key = "gemma" if "gemma" in service_name.lower() else ("paddleocr_vl" if "paddle" in service_name.lower() else "batch")
@@ -1352,15 +1791,11 @@ class ComicTranslate(ComicTranslateUI):
         )
 
     def _txt_md_auto_save_path(self, target: str, suffix: str) -> str:
-        series_dir = self.get_automatic_output_series_dir(
+        series_dir = self.get_reserved_automatic_output_series_dir(
             self._txt_md_default_dir(),
             anchor_path=self.image_files[0] if self.image_files else "",
         )
-        os.makedirs(series_dir, exist_ok=True)
-        return os.path.join(
-            series_dir,
-            f"{self._txt_md_bundle_name()}_{target}{suffix}",
-        )
+        return reserve_unique_path(os.path.join(series_dir, f"{self._txt_md_bundle_name()}_{target}{suffix}"))
 
     def _write_txt_md_exchange(
         self,
@@ -1497,6 +1932,7 @@ class ComicTranslate(ComicTranslateUI):
             if matched_paths:
                 self.text_ctrl.rebuild_text_items_state_for_paths(matched_paths)
                 self._refresh_after_translation_import(matched_paths)
+                self.mark_render_dirty_for_paths(matched_paths)
                 self.mark_project_dirty()
 
             message = self._build_translation_import_message(all_matched, match_result)
@@ -1556,74 +1992,246 @@ class ComicTranslate(ComicTranslateUI):
                 )
                 return
 
-    def _finalize_single_archive_output(self, page_paths: list[str]) -> str:
-        export_settings = self.get_resolved_export_settings()
-        if not is_single_archive_mode(export_settings):
-            return ""
+    def _archive_source_for_page(self, file_path: str) -> str:
+        state = self.image_states.get(file_path, {})
+        summary = state.get("processing_summary", {}) if isinstance(state, dict) else {}
+        for key in ("translated_page_image_path", "translated_image_path"):
+            translated_path = str(summary.get(key, "") or "").strip()
+            if translated_path and os.path.isfile(translated_path):
+                if os.path.splitext(translated_path)[1].lower() not in {".zip", ".cbz", ".pdf"}:
+                    return translated_path
+        try:
+            ensure_path_materialized(file_path)
+        except Exception:
+            pass
+        if file_path and os.path.isfile(file_path):
+            return file_path
+        return ""
 
-        staged_paths: list[str] = []
-        series_dir = ""
+    def _write_archive_stage_page(
+        self,
+        *,
+        source_path: str,
+        output_path: str,
+        export_settings: dict[str, object],
+    ) -> None:
+        with PILImage.open(source_path) as image:
+            rgb = image.convert("RGB")
+            write_archive_image(
+                output_path,
+                np.asarray(rgb),
+                resolved_settings=export_settings,
+            )
+
+    def _fallback_archive_output_dir(self, page_paths: list[str], source_paths: list[str]) -> str:
         for file_path in page_paths or []:
             state = self.image_states.get(file_path, {})
             summary = state.get("processing_summary", {}) if isinstance(state, dict) else {}
-            translated_path = str(summary.get("translated_image_path", "") or "").strip()
             export_root = str(summary.get("export_root", "") or "").strip()
-            if export_root and not series_dir:
-                series_dir = export_root
-            if translated_path and os.path.isfile(translated_path):
-                staged_paths.append(translated_path)
-
-        if not staged_paths:
-            return ""
-
-        staging_dir = os.path.dirname(staged_paths[0])
-        if not series_dir:
-            series_dir = os.path.dirname(staging_dir)
-        if not series_dir:
-            return ""
-
-        archive_format = str(
-            export_settings.get("resolved_automatic_output_archive_format", "cbz") or "cbz"
+            if export_root:
+                return export_root
+        if source_paths:
+            source_dir = os.path.dirname(source_paths[0])
+            if os.path.basename(source_dir).startswith(".archive_staging_"):
+                return os.path.dirname(source_dir) or source_dir
+            return source_dir
+        return self.get_automatic_output_series_dir(
+            self._txt_md_default_dir(),
+            anchor_path=page_paths[0] if page_paths else "",
         )
+
+    def _emit_archive_finalization_progress(
+        self,
+        *,
+        message: str,
+        total_images: int,
+        page_index: int | None = None,
+        image_name: str = "",
+        detail: str = "",
+    ) -> None:
+        payload = {
+            "phase": "pipeline",
+            "service": "batch",
+            "status": "running",
+            "step_key": "finalizing_archive",
+            "stage_name": "finalizing_archive",
+            "message": message,
+            "page_total": total_images,
+            "page_index": max(min(int(page_index or 0), max(total_images - 1, 0)), 0) if total_images else None,
+            "image_name": image_name,
+            "panel_state": "running",
+        }
+        if detail:
+            payload["detail"] = detail
+        self.report_runtime_progress(payload)
+
+    def _build_single_archive_output(
+        self,
+        page_paths: list[str],
+        *,
+        progress_callback: Callable[[dict], None] | None = None,
+    ) -> dict[str, object]:
+        export_settings = self.get_resolved_export_settings()
+        archive_items: list[tuple[str, str]] = []
+        archive_source_paths: list[str] = []
+        source_staging_dirs: set[str] = set()
+        for file_path in page_paths or []:
+            source_path = ComicTranslate._archive_source_for_page(self, file_path)
+            if source_path:
+                archive_items.append((file_path, source_path))
+                archive_source_paths.append(source_path)
+                parent_dir = os.path.basename(os.path.dirname(source_path))
+                if parent_dir.startswith(".archive_staging_"):
+                    source_staging_dirs.add(os.path.dirname(source_path))
+
+        if not archive_items:
+            return {
+                "archive_path": "",
+                "archive_root": "",
+                "summary_updates": {},
+                "preserved_preview": "",
+            }
+
+        fallback_dir = ComicTranslate._fallback_archive_output_dir(self, page_paths, archive_source_paths)
         compression_level = int(
             export_settings.get("resolved_automatic_output_archive_compression_level", 6)
         )
-        archive_path = os.path.join(
-            series_dir,
-            build_archive_file_name(self._txt_md_bundle_name(), archive_format),
+        archive_format = str(
+            export_settings.get("resolved_automatic_output_archive_format", "cbz") or "cbz"
+        )
+        archive_path, archive_root = resolve_forced_archive_output_path(
+            page_paths,
+            fallback_dir=fallback_dir,
+            fallback_bundle_name=self._txt_md_bundle_name(),
+            archive_format=archive_format,
+            archive_info=getattr(getattr(self, "file_handler", None), "archive_info", None),
+            source_records=getattr(self, "export_source_by_path", {}),
+            project_file=getattr(self, "project_file", None),
+            temp_dir=getattr(self, "temp_dir", None),
+        )
+        archive_path = reserve_unique_path(archive_path)
+        os.makedirs(archive_root, exist_ok=True)
+        final_staging_dir = tempfile.mkdtemp(prefix="ct_archive_finalize_", dir=getattr(self, "temp_dir", None) or None)
+        archive_page_format = str(
+            export_settings.get("resolved_automatic_output_archive_image_format", "png") or "png"
         )
 
         preview_path = self._last_runtime_preview_path
         preserved_preview = ""
         try:
-            if preview_path and os.path.commonpath(
-                [os.path.abspath(preview_path), os.path.abspath(staging_dir)]
-            ) == os.path.abspath(staging_dir):
+            preview_abs = os.path.abspath(preview_path) if preview_path else ""
+            if preview_abs and any(
+                os.path.commonpath([preview_abs, os.path.abspath(stage_dir)]) == os.path.abspath(stage_dir)
+                for stage_dir in source_staging_dirs
+            ):
                 preserved_preview = preserve_preview_file(preview_path, temp_root=self.temp_dir)
         except Exception:
             preserved_preview = ""
 
-        make_archive(
-            staging_dir,
-            output_path=archive_path,
-            save_as=f".{archive_format}",
-            compresslevel=compression_level,
-        )
+        try:
+            total_pages = len(archive_items)
+            if progress_callback:
+                progress_callback({
+                    "message": "최종 아카이브 준비 중...",
+                    "page_total": total_pages,
+                    "page_index": max(total_pages - 1, 0),
+                    "image_name": os.path.basename(archive_path),
+                })
+            for index, (file_path, source_path) in enumerate(archive_items):
+                page_base_name = os.path.splitext(os.path.basename(file_path))[0]
+                if progress_callback:
+                    progress_callback({
+                        "message": f"최종 아카이브 페이지 준비 중... ({index + 1}/{total_pages})",
+                        "page_total": total_pages,
+                        "page_index": index,
+                        "image_name": os.path.basename(file_path),
+                    })
+                staged_page_path = os.path.join(
+                    final_staging_dir,
+                    build_archive_page_file_name(
+                        index,
+                        total_pages,
+                        page_base_name,
+                        archive_page_format,
+                    ),
+                )
+                ComicTranslate._write_archive_stage_page(
+                    self,
+                    source_path=source_path,
+                    output_path=staged_page_path,
+                    export_settings=export_settings,
+                )
 
-        for file_path in page_paths or []:
-            self.image_ctrl.update_processing_summary(
-                file_path,
-                {
-                    "translated_image_path": archive_path,
-                    "export_root": series_dir,
-                },
+            if progress_callback:
+                progress_callback({
+                    "message": "최종 아카이브 압축 중...",
+                    "page_total": total_pages,
+                    "page_index": max(total_pages - 1, 0),
+                    "image_name": os.path.basename(archive_path),
+                    "detail": archive_path,
+                })
+            make_archive(
+                final_staging_dir,
+                output_path=archive_path,
+                compresslevel=compression_level,
             )
+        finally:
+            shutil.rmtree(final_staging_dir, ignore_errors=True)
 
+        summary_updates: dict[str, dict[str, str]] = {}
+        for file_path in page_paths or []:
+            previous_page_output = ""
+            existing_state = self.image_states.get(file_path, {})
+            if isinstance(existing_state, dict):
+                existing_summary = existing_state.get("processing_summary", {})
+                if isinstance(existing_summary, dict):
+                    previous_page_output = str(
+                        existing_summary.get("translated_page_image_path")
+                        or existing_summary.get("translated_image_path")
+                        or ""
+                    ).strip()
+            if previous_page_output and os.path.splitext(previous_page_output)[1].lower() in {".zip", ".cbz", ".pdf"}:
+                previous_page_output = ""
+            summary_updates[file_path] = {
+                "translated_image_path": archive_path,
+                "translated_page_image_path": previous_page_output,
+                "export_root": archive_root,
+            }
+
+        for stage_dir in source_staging_dirs:
+            shutil.rmtree(stage_dir, ignore_errors=True)
+        if progress_callback:
+            progress_callback({
+                "message": "최종 아카이브 생성 완료.",
+                "page_total": len(archive_items),
+                "page_index": max(len(archive_items) - 1, 0),
+                "image_name": os.path.basename(archive_path),
+                "detail": archive_path,
+            })
+        return {
+            "archive_path": archive_path,
+            "archive_root": archive_root,
+            "summary_updates": summary_updates,
+            "preserved_preview": preserved_preview,
+        }
+
+    def _apply_single_archive_output_result(self, result: dict[str, object]) -> str:
+        archive_path = str(result.get("archive_path", "") or "")
+        if not archive_path:
+            return ""
+        summary_updates = result.get("summary_updates", {})
+        if isinstance(summary_updates, dict):
+            for file_path, patch in summary_updates.items():
+                if isinstance(file_path, str) and isinstance(patch, dict):
+                    self.image_ctrl.update_processing_summary(file_path, patch)
+        preserved_preview = str(result.get("preserved_preview", "") or "")
         if preserved_preview:
             self._last_runtime_preview_path = preserved_preview
-
-        shutil.rmtree(staging_dir, ignore_errors=True)
         return archive_path
+
+    def _finalize_single_archive_output(self, page_paths: list[str]) -> str:
+        result = ComicTranslate._build_single_archive_output(self, page_paths)
+        return ComicTranslate._apply_single_archive_output_result(self, result)
 
     def _start_batch_process_for_paths(self, selected_paths: list[str], run_type: str = "batch") -> bool:
         if not selected_paths:
@@ -1636,6 +2244,11 @@ class ComicTranslate(ComicTranslateUI):
         self._last_batch_request_paths = list(selected_paths)
         self._last_batch_run_type = run_type
         self._batch_failed = False
+        self._batch_pause_requested = False
+        self._last_batch_failure_detail = ""
+        reset_output_reservations = getattr(self, "reset_automatic_output_reservations", None)
+        if callable(reset_output_reservations):
+            reset_output_reservations()
         ocr_preflight_cache: dict[str, str] = {}
 
         for path in selected_paths:
@@ -1645,6 +2258,11 @@ class ComicTranslate(ComicTranslateUI):
             if not validate_settings(self, tgt, source_lang=src, preflight_cache=ocr_preflight_cache):
                 return False
 
+        prepare_preview_run = getattr(self, "_prepare_intermediate_preview_run", None)
+        if callable(prepare_preview_run):
+            prepare_preview_run(run_type)
+        else:
+            self._intermediate_preview_disabled_notices = set()
         self.image_ctrl.clear_page_skip_errors_for_paths(selected_paths)
         self._start_batch_report(selected_paths, run_type=run_type)
         self.selected_batch = selected_paths
@@ -1656,6 +2274,7 @@ class ComicTranslate(ComicTranslateUI):
         self._batch_active = True
         self._batch_cancel_requested = False
         self._set_project_navigation_enabled(False)
+        self.set_runtime_editing_locked(True)
         self.translate_button.setEnabled(False)
         self.cancel_button.setEnabled(True)
         self.save_as_project_button.setEnabled(False)
@@ -1663,6 +2282,10 @@ class ComicTranslate(ComicTranslateUI):
         self.progress_bar.setVisible(True)
         self.batch_report_ctrl.refresh_action_buttons()
         self._show_automatic_progress_dialog(selected_paths, run_type)
+        self.pipeline_status_panel.set_series_queue_pause_visible(
+            run_type == "series_queue",
+            pause_requested=False,
+        )
 
         if self.webtoon_mode:
             self.run_threaded(
@@ -1766,33 +2389,22 @@ class ComicTranslate(ComicTranslateUI):
             return
         self._start_batch_process_for_paths([current_path], run_type="one_page_auto")
 
-    def on_batch_process_finished(self):
-        try:
-            if self._memlogger is not None:
-                self._memlogger.emit("batch_finished")
-        except Exception:
-            pass
-        was_cancelled = self._batch_cancel_requested
-        failed = self._batch_failed
-        total_images = len(self.selected_batch)
-        completed_batch_paths = list(self.selected_batch)
-        self._batch_active = False
-        self._batch_cancel_requested = False
-        self._batch_failed = False
-        self._current_batch_run_type = None
-        self._set_project_navigation_enabled(True)
-        report = self._finalize_batch_report(was_cancelled)
-        archive_path = ""
-        if not was_cancelled and not failed:
-            try:
-                archive_path = self._finalize_single_archive_output(completed_batch_paths)
-            except Exception:
-                logger.exception("Failed to finalize automatic archive output.")
-                failed = True
-                self._batch_failed = True
+    def _finish_batch_process_ui(
+        self,
+        *,
+        was_cancelled: bool,
+        failed: bool,
+        total_images: int,
+        completed_batch_paths: list[str],
+        report,
+        archive_path: str = "",
+        was_paused: bool = False,
+    ) -> None:
         self._last_batch_output_root = self._find_latest_batch_output_root(completed_batch_paths)
         if archive_path:
             self._last_batch_output_root = os.path.dirname(archive_path)
+        self.set_runtime_editing_locked(False)
+        self._set_project_navigation_enabled(True)
         self.progress_bar.setVisible(False)
         self.translate_button.setEnabled(True)
         self.cancel_button.setEnabled(True)
@@ -1801,9 +2413,10 @@ class ComicTranslate(ComicTranslateUI):
         self.selected_batch = []
 
         panel = self.pipeline_status_panel
+        panel.set_series_queue_pause_visible(False, pause_requested=False)
         panel.set_output_root(self._last_batch_output_root)
         if was_cancelled:
-            self.set_pipeline_overlay_active(False)
+            self.set_pipeline_overlay_active(True)
             panel.update_event({
                 "phase": "done",
                 "service": "batch",
@@ -1812,12 +2425,43 @@ class ComicTranslate(ComicTranslateUI):
                 "message": self.tr("작업이 취소되었습니다."),
                 "panel_state": "cancelled",
             })
+            notify_pipeline_event(
+                {
+                    "event_type": "pipeline_cancelled",
+                    "run_type": self._last_batch_run_type,
+                    "image_count": total_images,
+                    "source_language": self.s_combo.currentText(),
+                    "target_language": self.t_combo.currentText(),
+                    "output_root": self._last_batch_output_root,
+                }
+            )
+        elif was_paused:
+            self.set_pipeline_overlay_active(True)
+            panel.update_event({
+                "phase": "done",
+                "service": "batch",
+                "status": "paused",
+                "step_key": "paused",
+                "message": self.tr("일시정지되었습니다. 시리즈 대기열에서 재개할 수 있습니다."),
+                "panel_state": "paused",
+            })
         elif failed:
-            self.set_pipeline_overlay_active(False)
+            self.set_pipeline_overlay_active(True)
             panel.show()
             panel.raise_()
+            notify_pipeline_event(
+                {
+                    "event_type": "pipeline_failed",
+                    "run_type": self._last_batch_run_type,
+                    "image_count": total_images,
+                    "source_language": self.s_combo.currentText(),
+                    "target_language": self.t_combo.currentText(),
+                    "output_root": self._last_batch_output_root,
+                    "detail": self._last_batch_failure_detail,
+                }
+            )
         else:
-            self.set_pipeline_overlay_active(False)
+            self.set_pipeline_overlay_active(True)
             self._automatic_progress_tracker.record_batch_completion(success=True, total_images=total_images)
             self.on_runtime_progress_update({
                 "phase": "done",
@@ -1841,14 +2485,16 @@ class ComicTranslate(ComicTranslateUI):
                     "run_type": self._last_batch_run_type,
                     "success": True,
                     "image_count": total_images,
+                    "source_language": self.s_combo.currentText(),
+                    "target_language": self.t_combo.currentText(),
                     "output_root": self._last_batch_output_root,
-                    "message": self.tr("자동번역이 완료되었습니다."),
                 }
             )
 
-        if report and report["skipped_count"] > 0:
+        self._cleanup_intermediate_preview_run(keep_failed=bool(failed and not was_cancelled and not was_paused))
+        if report and report["skipped_count"] > 0 and not was_paused:
             Messages.show_batch_skipped_summary(self, report["skipped_count"])
-        elif not was_cancelled and not failed:
+        elif not was_cancelled and not failed and not was_paused:
             self._run_txt_md_auto_exports(completed_batch_paths)
             Messages.show_translation_complete(self)
 
@@ -1861,6 +2507,138 @@ class ComicTranslate(ComicTranslateUI):
         except Exception:
             pass
         self.batch_report_ctrl.refresh_action_buttons()
+        try:
+            self.series_ctrl.on_batch_process_finished(
+                was_cancelled=was_cancelled,
+                failed=failed,
+                was_paused=was_paused,
+            )
+        except Exception:
+            logger.debug("Series queue completion hook failed.", exc_info=True)
+
+    def _start_batch_archive_finalization(
+        self,
+        *,
+        completed_batch_paths: list[str],
+        total_images: int,
+        report,
+    ) -> None:
+        self.cancel_button.setEnabled(False)
+        self._emit_archive_finalization_progress(
+            message=self.tr("페이지 처리가 완료되었습니다. 최종 아카이브 생성 중..."),
+            total_images=total_images,
+            page_index=max(total_images - 1, 0),
+        )
+
+        archive_result: dict[str, object] = {}
+        archive_failed = {"value": False, "detail": ""}
+
+        def progress_callback(event: dict) -> None:
+            self._emit_archive_finalization_progress(
+                message=str(event.get("message") or "최종 아카이브 생성 중..."),
+                total_images=int(event.get("page_total") or total_images),
+                page_index=event.get("page_index"),
+                image_name=str(event.get("image_name") or ""),
+                detail=str(event.get("detail") or ""),
+            )
+
+        def worker() -> dict[str, object]:
+            return ComicTranslate._build_single_archive_output(
+                self,
+                completed_batch_paths,
+                progress_callback=progress_callback,
+            )
+
+        def on_result(result: dict[str, object]) -> None:
+            if isinstance(result, dict):
+                archive_result.update(result)
+
+        def on_error(error_tuple) -> None:
+            archive_failed["value"] = True
+            try:
+                exctype, value, traceback_str = error_tuple
+                archive_failed["detail"] = f"{exctype.__name__}: {value}"
+                logger.error("Failed to finalize automatic archive output.\n%s", traceback_str)
+            except Exception:
+                archive_failed["detail"] = str(error_tuple)
+                logger.exception("Failed to finalize automatic archive output.")
+
+        def on_finished() -> None:
+            failed = bool(archive_failed["value"])
+            archive_path = ""
+            if not failed:
+                try:
+                    archive_path = ComicTranslate._apply_single_archive_output_result(self, archive_result)
+                except Exception:
+                    logger.exception("Failed to apply automatic archive output result.")
+                    failed = True
+                    archive_failed["detail"] = self.tr("Failed to apply automatic archive output result.")
+            if failed:
+                self._batch_failed = True
+                self._last_batch_failure_detail = archive_failed["detail"]
+                self.on_runtime_progress_update({
+                    "phase": "error",
+                    "service": "batch",
+                    "status": "failed",
+                    "step_key": "finalizing_archive",
+                    "message": self.tr("최종 아카이브 생성에 실패했습니다."),
+                    "detail": archive_failed["detail"],
+                    "page_total": total_images,
+                    "page_index": max(total_images - 1, 0),
+                    "panel_state": "failed",
+                })
+            self._finish_batch_process_ui(
+                was_cancelled=False,
+                failed=failed,
+                total_images=total_images,
+                completed_batch_paths=completed_batch_paths,
+                report=report,
+                archive_path=archive_path,
+            )
+
+        self.run_threaded_immediate(worker, on_result, on_error, on_finished)
+
+    def on_batch_process_finished(self):
+        try:
+            if self._memlogger is not None:
+                self._memlogger.emit("batch_finished")
+        except Exception:
+            pass
+        was_paused = self._batch_pause_requested and not self._batch_cancel_requested
+        was_cancelled = self._batch_cancel_requested and not was_paused
+        failed = self._batch_failed
+        total_images = len(self.selected_batch)
+        completed_batch_paths = list(self.selected_batch)
+        self._batch_active = False
+        self._batch_cancel_requested = False
+        self._batch_pause_requested = False
+        self._batch_failed = False
+        self._current_batch_run_type = None
+        if getattr(self, "_is_shutting_down", False):
+            self.selected_batch = []
+            return
+        report = self._finalize_batch_report(was_cancelled)
+        if (
+            not was_cancelled
+            and not was_paused
+            and not failed
+            and is_single_archive_mode(self.get_resolved_export_settings())
+        ):
+            self._start_batch_archive_finalization(
+                completed_batch_paths=completed_batch_paths,
+                total_images=total_images,
+                report=report,
+            )
+            return
+
+        self._finish_batch_process_ui(
+            was_cancelled=was_cancelled,
+            failed=failed,
+            total_images=total_images,
+            completed_batch_paths=completed_batch_paths,
+            report=report,
+            was_paused=was_paused,
+        )
 
     def _find_latest_batch_output_root(self, page_paths: list[str]) -> str:
         for file_path in reversed(list(page_paths or [])):
@@ -2039,6 +2817,8 @@ class ComicTranslate(ComicTranslateUI):
         if getattr(self, "_is_shutting_down", False):
             return
         self._is_shutting_down = True
+        self._batch_cancel_requested = True
+        self._batch_pause_requested = False
 
         self.batch_report_ctrl.shutdown()
 
@@ -2050,6 +2830,11 @@ class ComicTranslate(ComicTranslateUI):
         try:
             self.threadpool.clear()
             self.threadpool.waitForDone(2000)
+        except Exception:
+            pass
+
+        try:
+            self.clear_undo_stacks()
         except Exception:
             pass
 

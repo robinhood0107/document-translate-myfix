@@ -82,6 +82,11 @@ class EventHandler:
                     self._press_handle_new_box(scene_pos)
                     return # Stop further processing
 
+            if self.viewer.current_tool == 'text_box' and not isinstance(clicked_item, (TextBlockItem, MoveableRectItem)):
+                if self._is_on_image(scene_pos):
+                    self._press_handle_new_text_box(scene_pos)
+                    return
+
             # If we're interacting with a text item in editing mode, let Qt handle text selection/caret
             if isinstance(clicked_item, TextBlockItem) and clicked_item.editing_mode:
                 QtWidgets.QGraphicsView.mousePressEvent(self.viewer, event)
@@ -125,6 +130,8 @@ class EventHandler:
         
         if self.viewer.current_tool == 'box':
             self._move_handle_box_resize(scene_pos)
+        elif self.viewer.current_tool == 'text_box':
+            self._move_handle_text_box_resize(scene_pos)
 
         self.last_scene_pos = scene_pos
 
@@ -163,6 +170,8 @@ class EventHandler:
             
         if self.viewer.current_tool == 'box':
             self._release_handle_box_creation()
+        elif self.viewer.current_tool == 'text_box':
+            self._release_handle_text_box_creation()
 
     def handle_wheel(self, event: QtGui.QWheelEvent):
         if not self.viewer.hasPhoto(): 
@@ -332,6 +341,11 @@ class EventHandler:
         self.viewer.current_rect = self.viewer.create_rect_item(QtCore.QRectF(0, 0, 0, 0))
         self.viewer.current_rect.setPos(scene_pos)
 
+    def _press_handle_new_text_box(self, scene_pos):
+        self.viewer.start_point = scene_pos
+        self.viewer.current_text_rect = self.viewer.create_text_box_preview_item(QtCore.QRectF(0, 0, 0, 0))
+        self.viewer.current_text_rect.setPos(scene_pos)
+
     def _move_handle_drag(self, event: QtGui.QMouseEvent, scene_pos: QPointF) -> bool:
         """Performs a drag by calling the item's specific move method."""
         if not self.dragged_item:
@@ -417,6 +431,23 @@ class EventHandler:
         
         self.viewer.current_rect.setPos(QPointF(pos_x, pos_y))
         self.viewer.current_rect.setRect(QtCore.QRectF(0, 0, width, height))
+
+    def _move_handle_text_box_resize(self, scene_pos):
+        if not self.viewer.start_point or not self.viewer.current_text_rect:
+            return
+        end_point = self.viewer.constrain_point(scene_pos)
+        width = end_point.x() - self.viewer.start_point.x()
+        height = end_point.y() - self.viewer.start_point.y()
+        pos_x, pos_y = self.viewer.start_point.x(), self.viewer.start_point.y()
+        if width < 0:
+            pos_x = end_point.x()
+            width = abs(width)
+        if height < 0:
+            pos_y = end_point.y()
+            height = abs(height)
+
+        self.viewer.current_text_rect.setPos(QPointF(pos_x, pos_y))
+        self.viewer.current_text_rect.setRect(QtCore.QRectF(0, 0, width, height))
         
     def _release_handle_item_interaction(self) -> bool: # Add return type hint for clarity
         blk_item, rect_item = self.viewer.sel_rot_item()
@@ -459,6 +490,15 @@ class EventHandler:
         elif self.viewer.current_rect:
             self.viewer._scene.removeItem(self.viewer.current_rect)
         self.viewer.current_rect = None
+
+    def _release_handle_text_box_creation(self):
+        item = self.viewer.current_text_rect
+        if item and item.rect().width() > 0 and item.rect().height() > 0:
+            scene_rect = QtCore.QRectF(item.pos(), item.rect().size())
+            self.viewer.text_box_created.emit(scene_rect)
+        if item:
+            self.viewer._scene.removeItem(item)
+        self.viewer.current_text_rect = None
 
     def _handle_pan_gesture(self, gesture):
         delta = gesture.delta().toPoint()

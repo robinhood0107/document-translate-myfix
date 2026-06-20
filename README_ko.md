@@ -33,6 +33,18 @@
 
 이 저장소는 [ogkalu2/comic-translate](https://github.com/ogkalu2/comic-translate) 에서 시작된 downstream 포크/파생 작업입니다. upstream `v2.6.7` 코드베이스에서 출발했고, 이후 로컬 런타임, OCR, Windows 실행 환경, 제품 워크플로 방향으로 분기하며 확장되었습니다.
 
+## 라이선스와 재배포 기준
+
+upstream 프로젝트는 Apache License 2.0으로 배포되며, 이 포크도 upstream에서 파생된 코드에 대해서는 그 라이선스 기반을 유지합니다.
+
+이 포크나 이 포크를 수정한 빌드를 공개 재배포할 때의 최소 기준은 아래입니다.
+
+- 재배포물과 함께 Apache 2.0 라이선스 전문을 포함할 것
+- 아직 적용되는 upstream 저작권, 특허, 출처, 고지 사항을 유지할 것
+- 이 저장소가 원본이 아니라 수정된 downstream 포크/파생 작업임을 명확히 밝힐 것
+- 소스를 재배포할 때는 수정한 파일에 변경 고지를 분명히 남길 것
+- 코드 라이선스와 별개로 서드파티 자산 라이선스를 따로 검토할 것
+
 ## 서드파티 모델 및 런타임 고지
 
 이 프로젝트는 여러 외부 모델, 체크포인트, 런타임 이미지를 사용하거나 자동 다운로드하거나 연동합니다. 해당 자산의 저작권, 라이선스, 사용 조건은 원 저작권자와 원 배포처에 귀속되며, 이 저장소는 그 소유권을 주장하지 않습니다. 사용자는 각 upstream 모델/런타임의 라이선스와 이용 조건을 직접 확인하고 준수해야 합니다.
@@ -81,7 +93,9 @@ OCR:
 
 - `develop`: 다음 제품 작업을 통합하는 브랜치
 - `main`: 실제 출하 기준선
-- 릴리스: `main` 커밋에 버전 태그를 달아 GitHub Release 생성
+- 공식 릴리스: `main`에 포함된 커밋에만 `vX.Y.Z` 버전 태그를 달아 GitHub Release 생성
+- Windows 릴리스 자산: 해당 태그에서 `Nuitka`로 exe 패키징 후 업로드
+- 모델, 체크포인트, Docker 런타임은 exe에 포함하지 않고 별도 준비 대상으로 유지
 - `release/*` 브랜치는 사용하지 않음
 
 저장소 운영 기준 문서는 [rules.md](rules.md)입니다.
@@ -167,6 +181,11 @@ OCR:
 
 ## 빠른 사용법
 
+조금 더 자세한 설치/실행 경로는 아래 문서를 같이 보세요.
+
+- [docs/setup/quickstart.md](docs/setup/quickstart.md)
+- [docs/setup/quickstart-ko.md](docs/setup/quickstart-ko.md)
+
 ### 1. 앱 실행
 
 런처는 첫 실행 시 필요한 로컬 runtime 환경을 스스로 생성하거나 갱신합니다.
@@ -210,6 +229,37 @@ Settings에서 아래 중 하나를 선택합니다.
 
 - `Default (existing auto: MangaOCR / PPOCR / Pororo...)`: 기존 자동 OCR 경로 유지
 - `Optimal (HunyuanOCR / PaddleOCR VL)`: 중국어는 `HunyuanOCR`, 일본어/기타 언어는 `PaddleOCR VL`로 라우팅
+
+### 5. 선택 알림 설정 (ntfy)
+
+`Settings > Notifications`에서 아래를 설정할 수 있습니다.
+
+- 완료 알림음
+- ntfy 서버 URL / topic / 선택 access token
+- 완료 / 실패 / 취소 시 전송 여부
+
+앱은 ntfy로 텍스트만 보내며, 본문은 ntfy 기본 텍스트 제한을 넘지 않도록 줄입니다.
+
+공식 ntfy 문서:
+
+- [Publish notifications](https://docs.ntfy.sh/publish/)
+- [Server configuration](https://docs.ntfy.sh/config/)
+
+## 이 저장소가 사용하는 Docker 이미지
+
+현재 추적 중인 compose/runtime 이미지:
+
+- Gemma 로컬 서버: `ghcr.io/ggml-org/llama.cpp:server-cuda`
+- HunyuanOCR 로컬 서버: `ghcr.io/ggml-org/llama.cpp:server-cuda`
+- PaddleOCR VL 런타임: `ccr-2vdh3abv-pub.cnc.bj.baidubce.com/paddlepaddle/paddleocr-genai-vllm-server:latest-nvidia-gpu-offline`
+
+## 참고 설치 문서
+
+- [docs/setup/quickstart.md](docs/setup/quickstart.md)
+- [docs/setup/quickstart-ko.md](docs/setup/quickstart-ko.md)
+- [docs/gemma/local-server-ko.md](docs/gemma/local-server-ko.md)
+- [docs/hunyuan/local-server-ko.md](docs/hunyuan/local-server-ko.md)
+- [paddleocr_vl_docker_files/README.md](paddleocr_vl_docker_files/README.md)
 
 ## 저장소 문서
 

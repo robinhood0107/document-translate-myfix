@@ -14,6 +14,7 @@ from PySide6 import QtCore, QtGui
 
 from app.controllers.psd_support import import_photoshopapi
 from app.ui.canvas.text_item import OutlineInfo, OutlineType
+from modules.rendering.rich_text import repair_text_item_html
 
 logger = logging.getLogger(__name__)
 
@@ -519,7 +520,7 @@ def _import_text_layer(layer: Any) -> dict[str, Any] | None:
     scale_y = _as_float(getattr(layer, "scale_y", None), scale_x)
     scale = scale_x if abs(scale_x - scale_y) < 1e-3 else (scale_x + scale_y) / 2.0
 
-    return {
+    result = {
         "text": html,
         "font_family": primary["font_family"],
         "font_size": primary["font_size"],
@@ -542,6 +543,8 @@ def _import_text_layer(layer: Any) -> dict[str, Any] | None:
         "vertical": _is_vertical(layer),
         "selection_outlines": outlines,
     }
+    result["text"] = repair_text_item_html(html, result)
+    return result
 
 
 def _read_style_runs(layer: Any, text_u16_len: int) -> list[dict[str, Any]]:

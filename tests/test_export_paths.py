@@ -4,7 +4,11 @@ import os
 import tempfile
 import unittest
 
-from modules.utils.export_paths import resolve_export_directory
+from modules.utils.export_paths import (
+    export_run_root,
+    reserve_export_run_token,
+    resolve_export_directory,
+)
 
 
 class ExportPathResolutionTests(unittest.TestCase):
@@ -46,7 +50,7 @@ class ExportPathResolutionTests(unittest.TestCase):
             )
 
             self.assertEqual(directory, project_dir)
-            self.assertEqual(archive_bname, "")
+            self.assertEqual(archive_bname, "demo")
 
     def test_resolve_export_directory_uses_live_archive_info_when_available(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -67,6 +71,45 @@ class ExportPathResolutionTests(unittest.TestCase):
 
             self.assertEqual(directory, temp_dir)
             self.assertEqual(archive_bname, "series")
+
+    def test_resolve_export_directory_matches_windows_source_record_for_wsl_temp_path(self) -> None:
+        image_path = "/mnt/c/ExampleWorkspace/project/tmpabc/001.png"
+        source_image_path = r"C:\ExampleWorkspace\project\tmpabc\001.png"
+        archive_path = r"C:\ExampleWorkspace\project\example_source_chapter.pdf"
+
+        directory, archive_bname = resolve_export_directory(
+            image_path,
+            source_records={
+                source_image_path: {
+                    "kind": "archive",
+                    "source_path": archive_path,
+                }
+            },
+        )
+
+        self.assertTrue(directory.endswith("project"))
+        self.assertEqual(archive_bname, "example_source_chapter")
+
+    def test_export_run_root_uses_source_named_log_folder(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            cache: dict[str, str] = {}
+            token = reserve_export_run_token(
+                temp_dir,
+                "May-29-2026_03-48-56AM",
+                cache,
+                source_name="example_source_chapter",
+            )
+            run_root = export_run_root(
+                temp_dir,
+                token,
+                source_name="example_source_chapter",
+            )
+
+            self.assertEqual(
+                os.path.basename(run_root),
+                "log_example_source_chapter_May-29-2026_03-48-56AM",
+            )
+            self.assertTrue(os.path.isdir(run_root))
 
 
 if __name__ == "__main__":

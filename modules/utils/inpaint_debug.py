@@ -8,6 +8,9 @@ import imkit as imk
 import numpy as np
 from PIL import Image, ImageDraw
 
+from modules.utils.mask_roi import get_mask_roi_type
+from modules.utils.inpaint_envelope import build_text_free_erase_envelope
+
 
 def ensure_three_channel(image: np.ndarray) -> np.ndarray:
     if image.ndim == 2:
@@ -111,6 +114,10 @@ def serialize_inpaint_block(block, index: int) -> dict:
     if raw_inpaint_boxes is not None:
         for box in raw_inpaint_boxes:
             inpaint_boxes.append([int(float(v)) for v in box[:4]])
+    image_shape = getattr(block, "_debug_image_shape", None)
+    text_free_envelope = None
+    if image_shape is not None:
+        text_free_envelope = build_text_free_erase_envelope(block, image_shape)
 
     return {
         "index": int(index),
@@ -138,8 +145,28 @@ def serialize_inpaint_block(block, index: int) -> dict:
         ),
         "text_class": getattr(block, "text_class", "") or "",
         "inpaint_bboxes": inpaint_boxes,
+        "text_free_erase_envelope_xyxy": (
+            [int(v) for v in text_free_envelope]
+            if text_free_envelope is not None
+            else None
+        ),
         "hard_box_applied": bool(getattr(block, "_hard_box_applied", False)),
         "hard_box_reason_codes": list(getattr(block, "_hard_box_reason_codes", []) or []),
+        "hard_box_rescue_roi_xyxy": (
+            [int(float(v)) for v in getattr(block, "_hard_box_rescue_roi_xyxy", ())[:4]]
+            if getattr(block, "_hard_box_rescue_roi_xyxy", None) is not None
+            else None
+        ),
+        "legacy_fill_ratio": float(getattr(block, "_legacy_fill_ratio", 0.0) or 0.0),
+        "rescue_fill_ratio": float(getattr(block, "_rescue_fill_ratio", 0.0) or 0.0),
+        "legacy_mask_pixel_count": int(getattr(block, "_legacy_mask_pixel_count", 0) or 0),
+        "rescue_mask_pixel_count": int(getattr(block, "_rescue_mask_pixel_count", 0) or 0),
+        "final_mask_pixel_count": int(getattr(block, "_final_mask_pixel_count", 0) or 0),
+        "hard_box_metrics": dict(getattr(block, "_hard_box_metrics", {}) or {}),
+        "erase_mode": str(getattr(block, "_erase_mode", "") or ""),
+        "erase_edit_pixel_count": int(getattr(block, "_erase_edit_pixel_count", 0) or 0),
+        "erase_protect_pixel_count": int(getattr(block, "_erase_protect_pixel_count", 0) or 0),
+        "erase_skipped_reason": str(getattr(block, "_erase_skipped_reason", "") or ""),
     }
 
 
@@ -172,6 +199,9 @@ def build_inpaint_debug_metadata(
     hard_box_reason_totals: dict | None = None,
 ) -> dict:
     block_list = list(blocks or [])
+    if final_mask is not None:
+        for block in block_list:
+            block._debug_image_shape = final_mask.shape
     cleanup_stats = cleanup_stats or {}
     hard_box_reason_totals = dict(hard_box_reason_totals or {})
     if int(hard_box_applied_count or 0) <= 0:
@@ -225,21 +255,37 @@ def build_inpaint_debug_metadata(
         "cleanup_applied": bool(cleanup_stats.get("applied", False)),
         "cleanup_component_count": int(cleanup_stats.get("component_count", 0) or 0),
         "cleanup_block_count": int(cleanup_stats.get("block_count", 0) or 0),
+        "pass2_applied": bool(cleanup_stats.get("applied", False)),
+        "pass2_component_count": int(cleanup_stats.get("component_count", 0) or 0),
+        "pass2_candidate_count": int(cleanup_stats.get("pass2_candidate_count", 0) or 0),
+        "pass2_bubble_candidate_count": int(cleanup_stats.get("pass2_bubble_candidate_count", 0) or 0),
+        "pass2_bubble_kept_count": int(cleanup_stats.get("pass2_bubble_kept_count", 0) or 0),
+        "pass2_text_free_candidate_count": int(cleanup_stats.get("pass2_text_free_candidate_count", 0) or 0),
+        "pass2_text_free_kept_count": int(cleanup_stats.get("pass2_text_free_kept_count", 0) or 0),
+        "pass2_residue_mask_pre_cap_pixel_count": int(cleanup_stats.get("residue_mask_pre_cap_pixel_count", 0) or 0),
+        "pass2_residue_mask_cap_pixel_count": int(cleanup_stats.get("residue_mask_cap_pixel_count", 0) or 0),
+        "pass2_residue_mask_cap_dilate_px": int(cleanup_stats.get("residue_mask_cap_dilate_px", 0) or 0),
+        "pass2_backend": str(cleanup_stats.get("pass2_backend", "") or ""),
+        "pass2_name": str(cleanup_stats.get("pass_name", "") or ""),
         "blocks": [serialize_inpaint_block(block, idx) for idx, block in enumerate(block_list)],
     }
 
 
-def _write_image(base_dir: str, folder: str, archive_bname: str, filename: str, image: np.ndarray) -> None:
+def _write_image(base_dir: str, folder: str, archive_bname: str, filename: str, image: np.ndarray) -> str:
     target_dir = os.path.join(base_dir, folder, archive_bname)
     os.makedirs(target_dir, exist_ok=True)
-    imk.write_image(os.path.join(target_dir, filename), image)
+    path = os.path.join(target_dir, filename)
+    imk.write_image(path, image)
+    return path
 
 
-def _write_json(base_dir: str, folder: str, archive_bname: str, filename: str, payload: dict) -> None:
+def _write_json(base_dir: str, folder: str, archive_bname: str, filename: str, payload: dict) -> str:
     target_dir = os.path.join(base_dir, folder, archive_bname)
     os.makedirs(target_dir, exist_ok=True)
-    with open(os.path.join(target_dir, filename), "w", encoding="utf-8") as fh:
+    path = os.path.join(target_dir, filename)
+    with open(path, "w", encoding="utf-8") as fh:
         json.dump(payload, fh, ensure_ascii=False, indent=2)
+    return path
 
 
 def export_inpaint_debug_artifacts(
@@ -252,12 +298,12 @@ def export_inpaint_debug_artifacts(
     export_settings: dict | None,
     raw_mask: np.ndarray | None,
     mask_overlay_mask: np.ndarray | None = None,
-    cleanup_delta: np.ndarray | None,
-    metadata: dict | None,
-) -> None:
+    cleanup_delta: np.ndarray | None = None,
+    metadata: dict | None = None,
+) -> dict[str, str]:
     settings = export_settings or {}
     if not has_debug_exports(settings):
-        return
+        return {}
 
     image_rgb = ensure_three_channel(image)
     normalized_raw_mask = _normalize_mask(raw_mask, image_rgb.shape)
@@ -266,9 +312,10 @@ def export_inpaint_debug_artifacts(
         image_rgb.shape,
     )
     normalized_cleanup_delta = _normalize_mask(cleanup_delta, image_rgb.shape)
+    written: dict[str, str] = {}
 
     if settings.get("export_detector_overlay", False):
-        _write_image(
+        written["detector_overlay"] = _write_image(
             export_root,
             "detector_overlays",
             archive_bname,
@@ -277,7 +324,7 @@ def export_inpaint_debug_artifacts(
         )
 
     if settings.get("export_raw_mask", False):
-        _write_image(
+        written["raw_mask"] = _write_image(
             export_root,
             "raw_masks",
             archive_bname,
@@ -286,7 +333,7 @@ def export_inpaint_debug_artifacts(
         )
 
     if settings.get("export_mask_overlay", False):
-        _write_image(
+        written["mask_overlay"] = _write_image(
             export_root,
             "mask_overlays",
             archive_bname,
@@ -295,7 +342,7 @@ def export_inpaint_debug_artifacts(
         )
 
     if settings.get("export_cleanup_mask_delta", False):
-        _write_image(
+        written["cleanup_delta"] = _write_image(
             export_root,
             "cleanup_mask_delta",
             archive_bname,
@@ -304,10 +351,11 @@ def export_inpaint_debug_artifacts(
         )
 
     if settings.get("export_debug_metadata", False):
-        _write_json(
+        written["debug_metadata"] = _write_json(
             export_root,
             "debug_metadata",
             archive_bname,
             f"{page_base_name}_debug.json",
             metadata or {},
         )
+    return written

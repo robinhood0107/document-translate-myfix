@@ -1,0 +1,488 @@
+from __future__ import annotations
+
+import os
+import tempfile
+import unittest
+
+os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+
+from PySide6 import QtWidgets
+from shiboken6 import isValid
+
+from app.ui.series_workspace import SeriesSettingsDialog, SeriesWorkspace
+from modules.utils.automatic_output import OUTPUT_TARGET_ARCHIVE, OUTPUT_TARGET_IMAGES
+
+
+class SeriesWorkspaceRuntimeTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls._app = QtWidgets.QApplication.instance() or QtWidgets.QApplication([])
+
+    def setUp(self) -> None:
+        self.widget = SeriesWorkspace()
+        self.temp_dir = tempfile.TemporaryDirectory()
+        self.widget.configure_options(
+            languages=[("Japanese", "Japanese"), ("Korean", "Korean")],
+            ocr_modes=[("best_local", "Optimal (HunyuanOCR / PaddleOCR VL)")],
+            translators=[("gemma_local", "Custom Local Server(Gemma)")],
+            workflow_modes=[("stage_batched_pipeline", "Stage-Batched Pipeline (Recommended)")],
+        )
+        self.widget.set_global_settings(
+            {
+                "source_language": "Japanese",
+                "target_language": "Korean",
+                "ocr": "best_local",
+                "translator": "gemma_local",
+                "workflow_mode": "stage_batched_pipeline",
+                "use_gpu": True,
+                "render_settings": {
+                    "font_family": "Ownglyph gumama3",
+                    "max_font_size": 40,
+                    "line_spacing": "1.0",
+                    "alignment_id": 1,
+                    "outline": True,
+                    "outline_width": "3.0",
+                },
+                "export_settings": {
+                    "automatic_output_target": "individual_images",
+                    "export_raw_mask": True,
+                    "export_detector_overlay": False,
+                },
+            }
+        )
+        self._path_a = os.path.join(self.temp_dir.name, "chapter-01.ctpr")
+        self._path_b = os.path.join(self.temp_dir.name, "nested", "chapter-02.png")
+        os.makedirs(os.path.dirname(self._path_b), exist_ok=True)
+        with open(self._path_a, "wb") as fh:
+            fh.write(b"ctpr")
+        with open(self._path_b, "wb") as fh:
+            fh.write(b"png")
+        os.utime(self._path_a, (1_700_000_000, 1_700_000_000))
+        os.utime(self._path_b, (1_800_000_000, 1_800_000_000))
+        self.addCleanup(self.temp_dir.cleanup)
+        self.addCleanup(self.widget.deleteLater)
+
+    def _items(self) -> list[dict[str, object]]:
+        return [
+            {
+                "series_item_id": "item-1",
+                "queue_index": 1,
+                "display_name": "chapter-01.ctpr",
+                "source_kind": "ctpr_import",
+                "source_origin_relpath": "chapter-01.ctpr",
+                "source_origin_path": self._path_a,
+                "status": "pending",
+            },
+            {
+                "series_item_id": "item-2",
+                "queue_index": 2,
+                "display_name": "chapter-02.ctpr",
+                "source_kind": "source_file",
+                "source_origin_relpath": "nested/chapter-02.png",
+                "source_origin_path": self._path_b,
+                "status": "running",
+            },
+        ]
+
+    def test_running_queue_locks_reorder_and_queue_controls(self) -> None:
+        self.widget.set_navigation_state(can_back=True, can_forward=True)
+        self.widget.set_series_state(
+            series_file="demo.seriesctpr",
+            items=self._items(),
+            queue_running=True,
+            active_item_id="item-2",
+            queue_runtime={
+                "queue_state": "running",
+                "active_item_id": "item-2",
+                "pending_item_ids": [],
+                "failed_item_id": None,
+                "retry_remaining_by_item": {"item-2": 1},
+                "last_run_summary": {},
+            },
+        )
+        QtWidgets.QApplication.processEvents()
+
+        self.assertEqual(
+            self.widget.queue_table.dragDropMode(),
+            QtWidgets.QAbstractItemView.DragDropMode.NoDragDrop,
+        )
+        self.assertFalse(self.widget.open_button.isEnabled())
+        self.assertFalse(self.widget.add_files_button.isEnabled())
+        self.assertFalse(self.widget.add_folder_button.isEnabled())
+        self.assertFalse(self.widget.quick_settings.source_lang_combo.isEnabled())
+        self.assertFalse(self.widget.quick_settings.series_settings_button.isEnabled())
+        self.assertFalse(self.widget.status_button.isEnabled())
+        self.assertFalse(self.widget.mark_done_action.isEnabled())
+        self.assertFalse(self.widget.reset_pending_action.isEnabled())
+        locked_menu = self.widget.queue_table.build_status_change_menu(self._items()[1])
+        self.addCleanup(locked_menu.deleteLater)
+        self.assertFalse(locked_menu.actions()[0].isEnabled())
+        self.assertFalse(locked_menu.actions()[1].isEnabled())
+        self.assertFalse(self.widget.back_button.isEnabled())
+        self.assertFalse(self.widget.forward_button.isEnabled())
+        self.assertFalse(self.widget.tree_button.isEnabled())
+        self.assertFalse(self.widget.quick_settings.auto_translate_button.isEnabled())
+        self.assertFalse(self.widget.queue_notice.isHidden())
+        self.assertEqual(self.widget.status_panel.state_value.text(), "Running")
+        self.assertEqual(self.widget.status_panel.current_item_value.text(), "#02 · chapter-02.ctpr")
+        self.assertFalse(self.widget.status_panel.pause_button.isHidden())
+        self.assertFalse(self.widget.status_panel.open_current_button.isHidden())
+        self.assertTrue(self.widget.status_panel.open_current_button.isEnabled())
+        self.assertTrue(self.widget.status_panel.resume_button.isHidden())
+        self.assertEqual(self.widget.queue_table.item(0, 4).text(), "Pending")
+        self.assertEqual(self.widget.queue_table.item(1, 4).text(), "Running")
+        self.assertTrue(self.widget.queue_table.item(1, 1).font().bold())
+        self.assertFalse(self.widget.queue_table.cellWidget(0, 5).isEnabled())
+
+    def test_idle_queue_restores_controls(self) -> None:
+        self.widget.set_navigation_state(can_back=True, can_forward=False)
+        self.widget.set_series_state(
+            series_file="demo.seriesctpr",
+            items=self._items(),
+            queue_running=False,
+            active_item_id="",
+            queue_runtime={
+                "queue_state": "idle",
+                "active_item_id": None,
+                "pending_item_ids": [],
+                "failed_item_id": None,
+                "last_run_summary": {
+                    "done_count": 2,
+                    "failed_count": 0,
+                    "skipped_count": 0,
+                    "duration_sec": 42,
+                    "started_at": "2026-04-19T10:00:00",
+                    "finished_at": "2026-04-19T10:00:42",
+                },
+            },
+        )
+        QtWidgets.QApplication.processEvents()
+
+        self.assertEqual(
+            self.widget.queue_table.dragDropMode(),
+            QtWidgets.QAbstractItemView.DragDropMode.InternalMove,
+        )
+        self.assertTrue(self.widget.open_button.isEnabled())
+        self.assertTrue(self.widget.add_files_button.isEnabled())
+        self.assertTrue(self.widget.add_folder_button.isEnabled())
+        self.assertTrue(self.widget.quick_settings.source_lang_combo.isEnabled())
+        self.assertTrue(self.widget.quick_settings.series_settings_button.isEnabled())
+        self.assertIn("Design", self.widget.quick_settings.series_settings_button.text())
+        self.assertIn("render", self.widget.quick_settings.series_settings_button.toolTip().lower())
+        self.assertTrue(self.widget.back_button.isEnabled())
+        self.assertFalse(self.widget.forward_button.isEnabled())
+        self.assertTrue(self.widget.tree_button.isEnabled())
+        self.assertTrue(self.widget.quick_settings.auto_translate_button.isEnabled())
+        self.assertTrue(self.widget.queue_notice.isHidden())
+        self.assertEqual(self.widget.status_panel.state_value.text(), "Idle")
+        self.assertFalse(self.widget.status_button.isEnabled())
+        self.assertIn("Ownglyph gumama3", self.widget.quick_settings.render_summary_label.text())
+        self.assertIn("max 40", self.widget.quick_settings.render_summary_label.text())
+        self.assertIn("Individual images", self.widget.quick_settings.export_summary_label.text())
+        self.assertIn("debug 1 enabled", self.widget.quick_settings.export_summary_label.text())
+        self.assertTrue(self.widget.status_panel.pause_button.isHidden())
+        self.assertTrue(self.widget.status_panel.resume_button.isHidden())
+        self.assertTrue(self.widget.status_panel.open_current_button.isHidden())
+        self.assertEqual(self.widget.summary_panel.done_value.text(), "2")
+        self.assertEqual(self.widget.summary_panel.duration_value.text(), "42 sec")
+        self.assertEqual(self.widget.queue_table.item(0, 4).text(), "Pending")
+
+    def test_quick_settings_values_do_not_emit_nested_render_export_settings(self) -> None:
+        values = self.widget.global_settings()
+
+        self.assertNotIn("render_settings", values)
+        self.assertNotIn("export_settings", values)
+        self.assertEqual(values["translator"], "gemma_local")
+
+    def test_series_settings_dialog_round_trips_render_and_export_settings(self) -> None:
+        dialog = SeriesSettingsDialog()
+        self.addCleanup(dialog.deleteLater)
+        self.assertEqual(dialog.windowTitle(), "Series Design / Global Settings")
+        self.assertGreaterEqual(dialog.minimumWidth(), 820)
+        dialog.configure_options(
+            languages=[("Japanese", "Japanese"), ("Korean", "Korean")],
+            ocr_modes=[("best_local", "Optimal")],
+            translators=[("Custom Local Server(Gemma)", "Custom Local Server(Gemma)")],
+            workflow_modes=[("stage_batched_pipeline", "Stage-Batched")],
+            fonts=["Ownglyph gumama3", "Arial"],
+            output_options={
+                "automatic_output_target": [("individual_images", "Individual images")],
+                "automatic_output_image_format": [("same_as_source", "Same as source"), ("png", "PNG")],
+                "automatic_output_archive_format": [("zip", "ZIP")],
+                "automatic_output_archive_image_format": [("png", "PNG")],
+            },
+        )
+        dialog.set_payload(
+            {
+                "queue_failure_policy": "retry",
+                "retry_count": 2,
+                "retry_delay_sec": 1,
+            },
+            {
+                "source_language": "Japanese",
+                "target_language": "Korean",
+                "ocr": "best_local",
+                "translator": "Custom Local Server(Gemma)",
+                "workflow_mode": "stage_batched_pipeline",
+                "use_gpu": True,
+                "render_settings": {
+                    "font_family": "Ownglyph gumama3",
+                    "min_font_size": 5,
+                    "max_font_size": 42,
+                    "line_spacing": "1.2",
+                    "color": "#123456",
+                    "force_font_color": True,
+                    "alignment_id": 2,
+                    "vertical_alignment_id": 1,
+                    "outline": True,
+                    "outline_color": "#abcdef",
+                    "outline_width": "3.0",
+                    "bold": True,
+                    "italic": True,
+                    "underline": True,
+                    "upper_case": True,
+                },
+                "export_settings": {
+                    "automatic_output_target": "individual_images",
+                    "automatic_output_image_format": "png",
+                    "automatic_output_archive_format": "zip",
+                    "automatic_output_archive_image_format": "png",
+                    "automatic_output_archive_compression_level": 8,
+                    "export_raw_text": True,
+                    "export_translated_text": True,
+                    "export_inpainted_image": True,
+                    "export_detector_overlay": True,
+                    "export_raw_mask": True,
+                    "export_mask_overlay": True,
+                    "export_cleanup_mask_delta": True,
+                    "export_debug_metadata": True,
+                },
+            },
+        )
+
+        series_settings, global_settings = dialog.payload()
+
+        self.assertEqual(dialog.tabs.count(), 4)
+        self.assertEqual(dialog.render_typography_group.property("section_title"), "Typography")
+        self.assertEqual(dialog.render_alignment_group.property("section_title"), "Alignment")
+        self.assertEqual(dialog.export_output_group.property("section_title"), "Final Output")
+        self.assertEqual(dialog.export_text_group.property("section_title"), "Text Exports")
+        self.assertEqual(dialog.export_debug_group.property("section_title"), "Debug Artifacts")
+        self.assertGreaterEqual(len(dialog.findChildren(QtWidgets.QLabel, "seriesSettingsSectionTitle")), 8)
+        self.assertGreaterEqual(len(dialog.findChildren(QtWidgets.QFrame, "seriesSettingsFieldRow")), 10)
+        self.assertGreaterEqual(len(dialog.findChildren(QtWidgets.QFrame, "seriesSettingsCheckRow")), 8)
+        self.assertEqual(series_settings["queue_failure_policy"], "retry")
+        self.assertEqual(global_settings["source_language"], "Japanese")
+        self.assertEqual(global_settings["translator"], "Custom Local Server(Gemma)")
+        self.assertEqual(global_settings["render_settings"]["font_family"], "Ownglyph gumama3")
+        self.assertEqual(global_settings["render_settings"]["max_font_size"], 42)
+        self.assertEqual(global_settings["render_settings"]["color"], "#123456")
+        self.assertTrue(global_settings["render_settings"]["force_font_color"])
+        self.assertEqual(global_settings["render_settings"]["alignment_id"], 2)
+        self.assertEqual(global_settings["render_settings"]["vertical_alignment_id"], 1)
+        self.assertTrue(global_settings["render_settings"]["bold"])
+        self.assertTrue(global_settings["render_settings"]["italic"])
+        self.assertTrue(global_settings["render_settings"]["underline"])
+        self.assertTrue(global_settings["render_settings"]["upper_case"])
+        self.assertEqual(global_settings["render_settings"]["outline_color"], "#abcdef")
+        self.assertEqual(global_settings["export_settings"]["automatic_output_image_format"], "png")
+        self.assertTrue(global_settings["export_settings"]["export_raw_text"])
+        self.assertTrue(global_settings["export_settings"]["export_translated_text"])
+        self.assertTrue(global_settings["export_settings"]["export_inpainted_image"])
+        self.assertTrue(global_settings["export_settings"]["export_detector_overlay"])
+        self.assertTrue(global_settings["export_settings"]["export_raw_mask"])
+        self.assertTrue(global_settings["export_settings"]["export_mask_overlay"])
+        self.assertTrue(global_settings["export_settings"]["export_cleanup_mask_delta"])
+        self.assertTrue(global_settings["export_settings"]["export_debug_metadata"])
+
+    def test_series_settings_dialog_can_select_individual_image_output(self) -> None:
+        dialog = SeriesSettingsDialog()
+        self.addCleanup(dialog.deleteLater)
+        dialog.configure_options(
+            languages=[("Japanese", "Japanese"), ("Korean", "Korean")],
+            ocr_modes=[("best_local", "Optimal")],
+            translators=[("gemma_local", "Custom Local Server(Gemma)")],
+            workflow_modes=[("stage_batched_pipeline", "Stage-Batched")],
+            fonts=["Arial"],
+            output_options={
+                "automatic_output_target": [
+                    (OUTPUT_TARGET_IMAGES, "Individual images"),
+                    (OUTPUT_TARGET_ARCHIVE, "Single archive"),
+                ],
+                "automatic_output_image_format": [("same_as_source", "Same as source")],
+                "automatic_output_archive_format": [("zip", "ZIP"), ("cbz", "CBZ")],
+                "automatic_output_archive_image_format": [("png", "PNG")],
+            },
+        )
+        dialog.set_payload(
+            {},
+            {
+                "source_language": "Japanese",
+                "target_language": "Korean",
+                "ocr": "best_local",
+                "translator": "gemma_local",
+                "workflow_mode": "stage_batched_pipeline",
+                "use_gpu": True,
+                "export_settings": {
+                    "automatic_output_target": OUTPUT_TARGET_ARCHIVE,
+                    "automatic_output_image_format": "same_as_source",
+                    "automatic_output_archive_format": "zip",
+                    "automatic_output_archive_image_format": "png",
+                    "automatic_output_archive_compression_level": 6,
+                },
+            },
+        )
+
+        self.assertGreaterEqual(dialog.output_target_combo.findData(OUTPUT_TARGET_IMAGES), 0)
+        self.assertGreaterEqual(dialog.output_target_combo.findData(OUTPUT_TARGET_ARCHIVE), 0)
+        self.assertEqual(dialog.output_target_combo.currentData(), OUTPUT_TARGET_ARCHIVE)
+        self.assertTrue(dialog.output_image_format_row.isHidden())
+        self.assertFalse(dialog.output_archive_format_row.isHidden())
+        self.assertFalse(dialog.output_archive_image_format_row.isHidden())
+        self.assertFalse(dialog.output_archive_level_row.isHidden())
+        self.assertIn("ZIP/CBZ", dialog.output_mode_note_label.text())
+
+        dialog.output_target_combo.setCurrentIndex(
+            dialog.output_target_combo.findData(OUTPUT_TARGET_IMAGES)
+        )
+        _series_settings, global_settings = dialog.payload()
+
+        self.assertEqual(
+            global_settings["export_settings"]["automatic_output_target"],
+            OUTPUT_TARGET_IMAGES,
+        )
+        self.assertFalse(dialog.output_image_format_row.isHidden())
+        self.assertTrue(dialog.output_archive_format_row.isHidden())
+        self.assertTrue(dialog.output_archive_image_format_row.isHidden())
+        self.assertTrue(dialog.output_archive_level_row.isHidden())
+        self.assertIn("skips final ZIP/CBZ", dialog.output_mode_note_label.text())
+
+    def test_paused_queue_shows_resume_and_unlocks_reorder(self) -> None:
+        self.widget.set_navigation_state(can_back=False, can_forward=False)
+        self.widget.set_series_state(
+            series_file="demo.seriesctpr",
+            items=self._items(),
+            queue_running=False,
+            active_item_id="",
+            queue_runtime={
+                "queue_state": "paused",
+                "active_item_id": None,
+                "pending_item_ids": ["item-1"],
+                "failed_item_id": "item-2",
+                "retry_remaining_by_item": {"item-2": 0},
+                "last_run_summary": {},
+            },
+            child_unsynced_dirty=True,
+            recovery_loaded=True,
+        )
+        QtWidgets.QApplication.processEvents()
+
+        self.assertEqual(
+            self.widget.queue_table.dragDropMode(),
+            QtWidgets.QAbstractItemView.DragDropMode.InternalMove,
+        )
+        self.assertFalse(self.widget.quick_settings.auto_translate_button.isEnabled())
+        self.assertFalse(self.widget.status_panel.resume_button.isHidden())
+        self.assertTrue(self.widget.status_panel.resume_button.isEnabled())
+        self.assertTrue(self.widget.status_panel.open_failed_button.isEnabled())
+        self.assertFalse(self.widget.recovery_badge.isHidden())
+        self.assertFalse(self.widget.unsynced_badge.isHidden())
+        self.widget.queue_table.selectRow(1)
+        QtWidgets.QApplication.processEvents()
+        self.assertTrue(self.widget.status_button.isEnabled())
+        self.assertTrue(self.widget.mark_done_action.isEnabled())
+        self.assertTrue(self.widget.reset_pending_action.isEnabled())
+
+    def test_status_change_button_emits_only_pending_or_done_targets(self) -> None:
+        self.widget.set_series_state(
+            series_file="demo.seriesctpr",
+            items=self._items(),
+            queue_running=False,
+            active_item_id="",
+            queue_runtime={"queue_state": "idle", "last_run_summary": {}},
+        )
+        captured: list[tuple[str, str]] = []
+        self.widget.status_change_requested.connect(lambda item_id, status: captured.append((item_id, status)))
+
+        self.widget.queue_table.selectRow(0)
+        QtWidgets.QApplication.processEvents()
+
+        self.assertTrue(self.widget.status_button.isEnabled())
+        self.assertTrue(self.widget.mark_done_action.isEnabled())
+        self.assertFalse(self.widget.reset_pending_action.isEnabled())
+        self.widget.mark_done_action.trigger()
+
+        self.widget.queue_table.selectRow(1)
+        QtWidgets.QApplication.processEvents()
+
+        self.assertTrue(self.widget.status_button.isEnabled())
+        self.assertTrue(self.widget.mark_done_action.isEnabled())
+        self.assertTrue(self.widget.reset_pending_action.isEnabled())
+        self.widget.reset_pending_action.trigger()
+
+        self.assertEqual(captured, [("item-1", "done"), ("item-2", "pending")])
+
+    def test_status_change_context_menu_matches_selected_row_state(self) -> None:
+        self.widget.set_series_state(
+            series_file="demo.seriesctpr",
+            items=self._items(),
+            queue_running=False,
+            active_item_id="",
+            queue_runtime={"queue_state": "idle", "last_run_summary": {}},
+        )
+
+        pending_menu = self.widget.queue_table.build_status_change_menu(self._items()[0])
+        running_menu = self.widget.queue_table.build_status_change_menu(self._items()[1])
+        self.addCleanup(pending_menu.deleteLater)
+        self.addCleanup(running_menu.deleteLater)
+
+        pending_actions = pending_menu.actions()
+        running_actions = running_menu.actions()
+        self.assertEqual([action.text() for action in pending_actions], ["Mark as Done", "Reset to Pending"])
+        self.assertTrue(pending_actions[0].isEnabled())
+        self.assertFalse(pending_actions[1].isEnabled())
+        self.assertTrue(running_actions[0].isEnabled())
+        self.assertTrue(running_actions[1].isEnabled())
+
+    def test_sort_combo_emits_reorder_and_resets_to_manual(self) -> None:
+        self.widget.set_series_state(
+            series_file="demo.seriesctpr",
+            items=self._items(),
+            queue_running=False,
+            active_item_id="",
+            queue_runtime={"queue_state": "idle", "last_run_summary": {}},
+        )
+        captured: list[list[str]] = []
+        self.widget.reorder_requested.connect(captured.append)
+
+        self.widget.sort_combo.setCurrentIndex(self.widget.sort_combo.findData("date_desc"))
+        QtWidgets.QApplication.processEvents()
+
+        self.assertEqual(captured, [["item-2", "item-1"]])
+        self.assertEqual(self.widget.sort_combo.currentData(), "manual")
+
+    def test_close_with_visible_hover_preview_cleans_up_safely(self) -> None:
+        self.widget.set_series_state(
+            series_file="demo.seriesctpr",
+            items=self._items(),
+            queue_running=False,
+            active_item_id="",
+            queue_runtime={"queue_state": "idle", "last_run_summary": {}},
+        )
+        payload = self._items()[0]
+        popup = self.widget._hover_preview_popup
+
+        self.widget._queue_hover_requested(payload, self.widget.mapToGlobal(self.widget.rect().center()))
+        self.widget._show_pending_hover_preview()
+        QtWidgets.QApplication.processEvents()
+
+        self.assertTrue(popup.isVisible())
+
+        self.widget.close()
+        QtWidgets.QApplication.processEvents()
+
+        self.assertFalse(isValid(popup) and popup.isVisible())
+
+
+if __name__ == "__main__":
+    unittest.main()

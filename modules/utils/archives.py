@@ -496,6 +496,8 @@ def extract_archive(file_path: str, extract_to: str):
 def make_cbz(input_dir, output_path='', output_dir='', output_base_name='', save_as_ext='.cbz', compresslevel=None):
     if not output_path:
         output_path = os.path.join(output_dir, f"{output_base_name}_translated{save_as_ext}")
+    if os.path.exists(output_path):
+        raise FileExistsError(f"Output archive already exists: {output_path}")
 
     zip_kwargs = {"mode": "w"}
     if compresslevel is None:
@@ -517,6 +519,8 @@ def make_cbz(input_dir, output_path='', output_dir='', output_base_name='', save
 def make_cb7(input_dir, output_path="", output_dir="", output_base_name=""):
     if not output_path:
         output_path = os.path.join(output_dir, f"{output_base_name}_translated.cb7")
+    if os.path.exists(output_path):
+        raise FileExistsError(f"Output archive already exists: {output_path}")
 
     import py7zr
     with py7zr.SevenZipFile(output_path, 'w') as archive:
@@ -531,6 +535,8 @@ def make_pdf(input_dir, output_path="", output_dir="", output_base_name=""):
     
     if not output_path:
         output_path = os.path.join(output_dir, f"{output_base_name}_translated.pdf")
+    if os.path.exists(output_path):
+        raise FileExistsError(f"Output archive already exists: {output_path}")
 
     image_paths = []
     for root, dirs, files in os.walk(input_dir):

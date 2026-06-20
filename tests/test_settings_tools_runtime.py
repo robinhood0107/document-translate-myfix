@@ -20,7 +20,7 @@ class _Signal:
 
 
 class _FakeUpdateChecker:
-    def __init__(self) -> None:
+    def __init__(self, *_args, **_kwargs) -> None:
         self.update_available = _Signal()
         self.up_to_date = _Signal()
         self.error_occurred = _Signal()
@@ -65,15 +65,16 @@ class SettingsToolsRuntimeTests(unittest.TestCase):
         self.addCleanup(page.deleteLater)
         return page
 
-    def test_default_mode_uses_ctd_mask_refiner_and_source_lama(self) -> None:
+    def test_default_mode_uses_stage_batched_and_ctd_mask_refiner(self) -> None:
         page = self._make_page()
         page.load_settings()
 
         self.assertEqual(page.get_mask_inpaint_mode(), "rtdetr_legacy_bbox_source_lama")
         self.assertEqual(
             page.ui.tools_page.automatic_runtime_value_label.text(),
-            "RT-DETR-v2 + Legacy BBox Rescue + Source LaMa",
+            "RT-DETR-v2 + CTD Line Protect + Source LaMa",
         )
+        self.assertEqual(page.get_workflow_mode(), "stage_batched_pipeline")
         self.assertEqual(page.get_tool_selection("inpainter"), "lama_large_512px")
         self.assertFalse(page.ui.inpainter_combo.isEnabled())
         self.assertEqual(page.get_tool_selection("detector"), "RT-DETR-v2")
@@ -84,10 +85,22 @@ class SettingsToolsRuntimeTests(unittest.TestCase):
         self.assertEqual(page.get_mask_refiner_settings()["mask_refiner"], "ctd")
         self.assertTrue(page.get_mask_refiner_settings()["keep_existing_lines"])
 
+    def test_translator_selection_returns_canonical_item_data_for_localized_labels(self) -> None:
+        page = self._make_page()
+        page.load_settings()
+
+        index = page.ui.translator_combo.findData("Custom Local Server(Gemma)")
+        self.assertGreaterEqual(index, 0)
+        page.ui.translator_combo.setItemText(index, "사용자 지정 로컬 서버(Gemma)")
+        page.ui.translator_combo.setCurrentIndex(index)
+
+        self.assertEqual(page.get_tool_selection("translator"), "Custom Local Server(Gemma)")
+
     def test_mask_refiner_settings_round_trip_preserves_ctd_defaults(self) -> None:
         settings = QtCore.QSettings("ComicLabs", "ComicTranslate")
         settings.setValue("tools/detector", "RT-DETR-v2")
         settings.setValue("tools/inpainter", "LaMa")
+        settings.setValue("tools/workflow_mode", "legacy_page_pipeline")
         settings.setValue("tools/mask_refiner_settings/mask_inpaint_mode", "rtdetr_source_ctd_lama")
         settings.setValue("tools/mask_refiner_settings/mask_refiner", "ctd")
         settings.setValue("tools/mask_refiner_settings/keep_existing_lines", True)
@@ -99,12 +112,17 @@ class SettingsToolsRuntimeTests(unittest.TestCase):
         self.assertEqual(page.get_mask_inpaint_mode(), "rtdetr_legacy_bbox_source_lama")
         self.assertEqual(
             page.ui.tools_page.automatic_runtime_value_label.text(),
-            "RT-DETR-v2 + Legacy BBox Rescue + Source LaMa",
+            "RT-DETR-v2 + CTD Line Protect + Source LaMa",
         )
+        self.assertEqual(page.get_workflow_mode(), "legacy_page_pipeline")
         self.assertEqual(page.get_tool_selection("inpainter"), "lama_large_512px")
         self.assertEqual(page.get_mask_refiner_settings()["mask_refiner"], "ctd")
         self.assertTrue(page.get_mask_refiner_settings()["keep_existing_lines"])
         page.save_settings()
+        self.assertEqual(
+            settings.value("tools/workflow_mode", "", type=str),
+            "legacy_page_pipeline",
+        )
         self.assertEqual(
             settings.value("tools/mask_refiner_settings/mask_inpaint_mode", "", type=str),
             "rtdetr_legacy_bbox_source_lama",
@@ -126,12 +144,36 @@ class SettingsToolsRuntimeTests(unittest.TestCase):
         page.ui.notifications_page.enable_completion_sound_checkbox.setChecked(False)
         combo = page.ui.notifications_page.completion_sound_combo
         combo.setCurrentIndex(1)
+        page.ui.notifications_page.enable_ntfy_checkbox.setChecked(True)
+        page.ui.notifications_page.ntfy_server_url_input.setText("https://ntfy.example.com")
+        page.ui.notifications_page.ntfy_topic_input.setText("comic-translate")
+        page.ui.notifications_page.ntfy_access_token_input.setText("secret-token")
+        page.ui.notifications_page.ntfy_failure_checkbox.setChecked(False)
+        page.ui.notifications_page.ntfy_cancelled_checkbox.setChecked(True)
+        page.ui.notifications_page.ntfy_timeout_spinbox.setValue(12)
         page.save_settings()
 
         settings = QtCore.QSettings("ComicLabs", "ComicTranslate")
         self.assertFalse(settings.value("notifications/enable_completion_sound", True, type=bool))
         self.assertEqual(settings.value("notifications/completion_sound_mode", "", type=str), "file")
         self.assertEqual(settings.value("notifications/completion_sound_file", "", type=str), "notify.wav")
+        self.assertTrue(settings.value("notifications/enable_ntfy_notifications", False, type=bool))
+        self.assertEqual(
+            settings.value("notifications/ntfy_server_url", "", type=str),
+            "https://ntfy.example.com",
+        )
+        self.assertEqual(
+            settings.value("notifications/ntfy_topic", "", type=str),
+            "comic-translate",
+        )
+        self.assertEqual(
+            settings.value("notifications/ntfy_access_token", "", type=str),
+            "secret-token",
+        )
+        self.assertTrue(settings.value("notifications/ntfy_send_success", False, type=bool))
+        self.assertFalse(settings.value("notifications/ntfy_send_failure", True, type=bool))
+        self.assertTrue(settings.value("notifications/ntfy_send_cancelled", False, type=bool))
+        self.assertEqual(settings.value("notifications/ntfy_timeout_sec", 0, type=int), 12)
 
     def test_mangalmm_settings_round_trip(self) -> None:
         page = self._make_page()
@@ -146,11 +188,11 @@ class SettingsToolsRuntimeTests(unittest.TestCase):
         page.ui.mangalmm_ocr_safe_resize_checkbox.setChecked(False)
         page.ui.mangalmm_ocr_max_pixels_spinbox.setValue(1500000)
         page.ui.mangalmm_ocr_max_long_side_spinbox.setValue(1408)
-        page._set_ocr_mode("best_local_plus")
+        page._set_ocr_mode("mangalmm")
         page.save_settings()
 
         settings = QtCore.QSettings("ComicLabs", "ComicTranslate")
-        self.assertEqual(settings.value("tools/ocr", "", type=str), "best_local_plus")
+        self.assertEqual(settings.value("tools/ocr", "", type=str), "mangalmm")
         self.assertEqual(settings.value("mangalmm_ocr/server_url", "", type=str), "http://127.0.0.1:28081/v1")
         self.assertEqual(settings.value("mangalmm_ocr/max_completion_tokens", 0, type=int), 320)
         self.assertEqual(settings.value("mangalmm_ocr/parallel_workers", 0, type=int), 1)
@@ -159,6 +201,51 @@ class SettingsToolsRuntimeTests(unittest.TestCase):
         self.assertFalse(settings.value("mangalmm_ocr/safe_resize", True, type=bool))
         self.assertEqual(settings.value("mangalmm_ocr/max_pixels", 0, type=int), 1500000)
         self.assertEqual(settings.value("mangalmm_ocr/max_long_side", 0, type=int), 1408)
+
+    def test_legacy_optimal_plus_setting_loads_as_optimal(self) -> None:
+        settings = QtCore.QSettings("ComicLabs", "ComicTranslate")
+        settings.setValue("tools/ocr", "best_local_plus")
+        settings.sync()
+
+        page = self._make_page()
+        page.load_settings()
+
+        combo_items = [page.ui.ocr_combo.itemText(index) for index in range(page.ui.ocr_combo.count())]
+        self.assertNotIn("Optimal+ (HunyuanOCR / MangaLMM / PaddleOCR VL)", combo_items)
+        self.assertEqual(page.get_tool_selection("ocr"), "best_local")
+        self.assertEqual(page.get_ocr_mode_label(), "Optimal (HunyuanOCR / PaddleOCR VL)")
+
+        page.save_settings()
+        self.assertEqual(settings.value("tools/ocr", "", type=str), "best_local")
+
+    def test_series_settings_round_trip(self) -> None:
+        settings = QtCore.QSettings("ComicLabs", "ComicTranslate")
+        settings.setValue("series/queue_failure_policy", "retry")
+        settings.setValue("series/retry_count", 2)
+        settings.setValue("series/retry_delay_sec", 15)
+        settings.setValue("series/auto_open_failed_child", False)
+        settings.setValue("series/resume_from_first_incomplete", False)
+        settings.setValue("series/return_to_series_after_completion", True)
+        settings.sync()
+
+        page = self._make_page()
+        page.load_settings()
+
+        series_settings = page.get_series_settings()
+        self.assertEqual(series_settings["queue_failure_policy"], "retry")
+        self.assertEqual(series_settings["retry_count"], 2)
+        self.assertEqual(series_settings["retry_delay_sec"], 15)
+        self.assertFalse(series_settings["auto_open_failed_child"])
+        self.assertFalse(series_settings["resume_from_first_incomplete"])
+        self.assertTrue(series_settings["return_to_series_after_completion"])
+
+        page.save_settings()
+        self.assertEqual(settings.value("series/queue_failure_policy", "", type=str), "retry")
+        self.assertEqual(settings.value("series/retry_count", 0, type=int), 2)
+        self.assertEqual(settings.value("series/retry_delay_sec", 0, type=int), 15)
+        self.assertFalse(settings.value("series/auto_open_failed_child", True, type=bool))
+        self.assertFalse(settings.value("series/resume_from_first_incomplete", True, type=bool))
+        self.assertTrue(settings.value("series/return_to_series_after_completion", False, type=bool))
 
 
 if __name__ == "__main__":

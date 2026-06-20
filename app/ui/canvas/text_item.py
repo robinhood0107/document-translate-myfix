@@ -1,7 +1,7 @@
 from PySide6.QtWidgets import QGraphicsTextItem, QGraphicsItem, \
      QApplication, QWidget, QStyleOptionGraphicsItem
 from PySide6.QtGui import QFont, QCursor, QColor, \
-     QTextCharFormat, QTextBlockFormat, QTextCursor, QPainter
+     QTextCharFormat, QTextBlockFormat, QTextCursor, QPainter, QPen
 from PySide6.QtCore import Qt, QRectF, Signal, QPointF
 import math, copy
 from dataclasses import dataclass
@@ -13,6 +13,11 @@ from modules.utils.render_style_policy import (
     coerce_vertical_alignment,
     compute_vertical_aligned_y,
 )
+from modules.rendering.rich_text import (
+    apply_document_base_style,
+    repair_render_html_style,
+    should_use_rich_text,
+)
 
 
 @dataclass
@@ -20,15 +25,24 @@ class TextBlockState:
     rect: tuple  
     rotation: float
     transform_origin: QPointF
+    block_id: str = ""
+    font_size: float = 0.0
+    text_width: float = 0.0
+    source_rect: tuple | None = None
 
     @classmethod
     def from_item(cls, item: QGraphicsTextItem):
         """Create TextBlockState from a TextBlockItem"""
+        source_rect = getattr(item, "source_rect", None)
         rect = QRectF(item.pos(), item.boundingRect().size()).getCoords()
         return cls(
             rect=rect,
             rotation=item.rotation(),
-            transform_origin=item.transformOriginPoint()
+            transform_origin=item.transformOriginPoint(),
+            block_id=str(getattr(item, "block_id", "") or ""),
+            font_size=float(getattr(item, "font_size", 0.0) or 0.0),
+            text_width=float(item.textWidth()) if hasattr(item, "textWidth") else 0.0,
+            source_rect=tuple(source_rect) if source_rect is not None else None,
         )
     
 class OutlineType(Enum):
@@ -65,9 +79,12 @@ class TextBlockItem(QGraphicsTextItem):
              direction=Qt.LayoutDirection.LeftToRight,
              vertical_alignment=VERTICAL_ALIGNMENT_TOP,
              source_rect=None,
-             block_anchor=None):
+             block_anchor=None,
+             block_id="",
+             editor_frame=False):
 
         super().__init__(text)
+        self.block_id = str(block_id or "")
         self.text_color = render_color
         self.outline = True if outline_color else False
         self.outline_color = outline_color
@@ -86,6 +103,7 @@ class TextBlockItem(QGraphicsTextItem):
         self.vertical_alignment = coerce_vertical_alignment(vertical_alignment)
         self.source_rect = tuple(source_rect) if source_rect is not None else None
         self.block_anchor = tuple(block_anchor) if block_anchor is not None else None
+        self.editor_frame = bool(editor_frame)
 
         self.selected = False
         self.resizing = False
@@ -121,6 +139,8 @@ class TextBlockItem(QGraphicsTextItem):
         self._apply_text_direction()
 
     def set_source_rect(self, source_rect):
+        if bool(getattr(self, "editor_frame", False)):
+            self.prepareGeometryChange()
         if source_rect is None:
             self.source_rect = None
             return
@@ -139,6 +159,35 @@ class TextBlockItem(QGraphicsTextItem):
             self.boundingRect().width(),
             self.boundingRect().height(),
         )
+
+    def boundingRect(self):
+        rect = super().boundingRect()
+        frame_rect = self._editor_frame_rect()
+        if frame_rect is not None:
+            rect = rect.united(frame_rect)
+        return rect
+
+    def _editor_frame_rect(self):
+        if not bool(getattr(self, "editor_frame", False)) or self.source_rect is None:
+            return None
+        try:
+            _x, _y, width, height = self.source_rect
+            return QRectF(0, 0, max(float(width), 1.0), max(float(height), 1.0))
+        except Exception:
+            return None
+
+    def shape(self):
+        path = super().shape()
+        frame_rect = self._editor_frame_rect()
+        if frame_rect is not None:
+            path.addRect(frame_rect)
+        return path
+
+    def contains(self, point):
+        frame_rect = self._editor_frame_rect()
+        if frame_rect is not None and frame_rect.contains(point):
+            return True
+        return super().contains(point)
 
     def set_vertical_alignment(self, vertical_alignment: str):
         self.vertical_alignment = coerce_vertical_alignment(vertical_alignment)
@@ -234,9 +283,23 @@ class TextBlockItem(QGraphicsTextItem):
             self.update()
 
     def set_text(self, text, width):
+        width = self.boundingRect().width() if width is None else width
         if self.is_html(text):
-            self.setHtml(text)
+            html = repair_render_html_style(
+                text,
+                font_family=self.font_family,
+                font_size=self.font_size,
+                text_color=self.text_color,
+                alignment=self.alignment,
+                line_spacing=self.line_spacing,
+                bold=self.bold,
+                italic=self.italic,
+                underline=self.underline,
+                direction=self.direction,
+            )
+            self.setHtml(html)
             self.setTextWidth(width)
+            self.apply_base_document_style()
             self.set_outline(self.outline_color, self.outline_width)
             self.apply_vertical_alignment()
         else:
@@ -248,9 +311,21 @@ class TextBlockItem(QGraphicsTextItem):
         self.apply_vertical_alignment()
 
     def is_html(self, text):
-        import re
-        # Simple check for HTML tags
-        return bool(re.search(r'<[^>]+>', text))
+        return should_use_rich_text(text)
+
+    def apply_base_document_style(self):
+        apply_document_base_style(
+            self.document(),
+            font_family=self.font_family,
+            font_size=self.font_size,
+            text_color=self.text_color,
+            alignment=self.alignment,
+            line_spacing=self.line_spacing,
+            bold=self.bold,
+            italic=self.italic,
+            underline=self.underline,
+            direction=self.direction,
+        )
 
     def set_font(self, font_family, font_size):
         if not self.textCursor().hasSelection():
@@ -500,6 +575,22 @@ class TextBlockItem(QGraphicsTextItem):
 
         # Draw the normal text on top
         super().paint(painter, option, widget)
+
+        if bool(getattr(self, "editor_frame", False)) and self.source_rect is not None:
+            try:
+                _x, _y, width, height = self.source_rect
+                painter.save()
+                selected = bool(getattr(self, "selected", False) or self.isSelected())
+                frame_color = QColor(238, 238, 238, 230) if selected else QColor(205, 205, 205, 190)
+                fill_color = QColor(238, 238, 238, 38) if selected else QColor(205, 205, 205, 24)
+                pen = QPen(frame_color, 1.5 if selected else 1.25, Qt.PenStyle.DashLine)
+                pen.setCosmetic(True)
+                painter.setPen(pen)
+                painter.setBrush(fill_color)
+                painter.drawRect(QRectF(0, 0, max(float(width), 1.0), max(float(height), 1.0)))
+                painter.restore()
+            except Exception:
+                pass
 
     def set_bold(self, state):
         if not self.textCursor().hasSelection():
@@ -987,6 +1078,8 @@ class TextBlockItem(QGraphicsTextItem):
             vertical_alignment=self.vertical_alignment,
             source_rect=self.source_rect,
             block_anchor=self.block_anchor,
+            block_id=self.block_id,
+            editor_frame=self.editor_frame,
         )
         
         new_instance.set_text(self.toHtml(), self.boundingRect().width())
@@ -996,4 +1089,3 @@ class TextBlockItem(QGraphicsTextItem):
         new_instance.setScale(self.scale())
         new_instance.__dict__.update(copy.copy(self.__dict__))
         return new_instance
-

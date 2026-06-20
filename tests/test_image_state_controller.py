@@ -95,7 +95,9 @@ class ImageStateControllerTests(unittest.TestCase):
             side_effect=lambda: setattr(main, "project_file", None)
         )
 
-        controller.thread_load_images(["folder/page.png"])
+        with mock.patch("app.controllers.image.Messages.show_busy", return_value=object()), \
+            mock.patch("app.controllers.image.Messages.close_busy"):
+            controller.thread_load_images(["folder/page.png"])
 
         main.project_ctrl.clear_recovery_checkpoint.assert_called_once()
         controller.clear_state.assert_called_once()

@@ -14,7 +14,7 @@ from modules.utils.automatic_output import (
     default_project_output_preferences,
     normalize_project_output_preferences,
 )
-from modules.utils.export_paths import normalize_export_source_record
+from modules.utils.export_paths import normalize_export_source_record, sanitize_export_path_component
 from modules.utils.file_handler import ensure_prepared_path_materialized, get_prepared_path_source
 from modules.utils.inpaint_strokes import PATCH_KIND_INPAINT, normalize_patch_kind
 
@@ -27,6 +27,12 @@ _CONN_CACHE_LOCK = threading.RLock()
 _CONN_CACHE: dict[str, tuple[sqlite3.Connection, threading.RLock]] = {}
 _LAZY_BLOB_LOCK = threading.RLock()
 _LAZY_BLOBS_BY_PATH: dict[str, tuple[str, str]] = {}
+
+
+def make_project_load_temp_dir(file_name: str) -> str:
+    project_stem = os.path.splitext(os.path.basename(file_name))[0]
+    safe_stem = sanitize_export_path_component(project_stem, fallback="project")[:80]
+    return tempfile.mkdtemp(prefix=f"tmp_{safe_stem}_")
 
 
 def is_sqlite_project_file(file_name: str) -> bool:
@@ -107,7 +113,7 @@ def _init_schema(conn: sqlite3.Connection) -> None:
 
 def _configure_connection(conn: sqlite3.Connection) -> None:
     conn.execute("PRAGMA journal_mode=DELETE")
-    conn.execute("PRAGMA synchronous=NORMAL")
+    conn.execute("PRAGMA synchronous=FULL")
     conn.execute("PRAGMA temp_store=MEMORY")
 
 
@@ -208,23 +214,12 @@ def save_state_to_proj_file_v2(comic_translate: "ComicTranslate", file_name: str
     if target_dir:
         os.makedirs(target_dir, exist_ok=True)
 
-    existing_is_sqlite = is_sqlite_project_file(file_name)
-    use_temp_and_replace = os.path.exists(file_name) and not existing_is_sqlite
-    if use_temp_and_replace:
-        fd, temp_db_path = tempfile.mkstemp(prefix=".ctprv2_tmp_", suffix=".ctpr", dir=target_dir or None)
-        os.close(fd)
-        db_path = temp_db_path
-    else:
-        temp_db_path = None
-        db_path = file_name
-
-    if use_temp_and_replace:
-        conn = sqlite3.connect(db_path, check_same_thread=False, timeout=30.0)
-        _configure_connection(conn)
-        _init_schema(conn)
-        conn_lock = threading.RLock()
-    else:
-        conn, conn_lock = _get_cached_connection(db_path)
+    fd, temp_db_path = tempfile.mkstemp(prefix=".ctprv2_tmp_", suffix=".ctpr", dir=target_dir or None)
+    os.close(fd)
+    conn = sqlite3.connect(temp_db_path, check_same_thread=False, timeout=30.0)
+    _configure_connection(conn)
+    _init_schema(conn)
+    conn_lock = threading.RLock()
 
     # Track which hashes have been written in this save so we don't re-read
     # the same file twice, but do NOT hold the payload bytes in memory.
@@ -461,10 +456,17 @@ def save_state_to_proj_file_v2(comic_translate: "ComicTranslate", file_name: str
                     )
 
     finally:
-        if use_temp_and_replace:
-            conn.close()
-    if use_temp_and_replace and temp_db_path is not None:
+        conn.close()
+    try:
+        close_cached_connection(file_name)
         os.replace(temp_db_path, file_name)
+    except Exception:
+        if os.path.exists(temp_db_path):
+            try:
+                os.remove(temp_db_path)
+            except OSError:
+                pass
+        raise
 
 
 def _materialize_from_manifest_and_pages(
@@ -474,7 +476,7 @@ def _materialize_from_manifest_and_pages(
     page_rows: dict[str, dict],
 ):
     if not hasattr(comic_translate, "temp_dir"):
-        comic_translate.temp_dir = tempfile.mkdtemp()
+        comic_translate.temp_dir = make_project_load_temp_dir(project_file)
 
     image_data = comic_translate.image_data
     temp_dir = comic_translate.temp_dir
