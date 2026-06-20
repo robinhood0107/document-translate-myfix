@@ -9,9 +9,11 @@ from PySide6 import QtCore, QtWidgets
 from modules.rendering.render import (
     build_render_rects_for_block,
     build_text_item_layout_geometry,
+    get_dynamic_bubble_font_cap,
     get_best_render_area,
     get_render_fit_clearance_for_block,
     pyside_word_wrap,
+    refit_detected_bubble_text_if_underfilled,
 )
 from modules.utils.textblock import TextBlock
 
@@ -214,6 +216,119 @@ class RenderBubbleFitTests(unittest.TestCase):
         )
 
         self.assertEqual(get_render_fit_clearance_for_block(free, 3.0), 0.0)
+
+    def test_dynamic_bubble_font_cap_expands_underfilled_detected_bubble(self) -> None:
+        image = np.zeros((800, 800, 3), dtype=np.uint8)
+        block = _block(
+            xyxy=[260, 250, 340, 300],
+            bubble_xyxy=[120, 100, 520, 460],
+        )
+        get_best_render_area([block], image)
+
+        cap = get_dynamic_bubble_font_cap(
+            block,
+            configured_max_font_size=60,
+            rendered_width=120,
+            rendered_height=80,
+            vertical=False,
+        )
+
+        self.assertGreater(cap, 60)
+        self.assertLessEqual(cap, 96)
+
+    def test_dynamic_bubble_font_cap_does_not_change_text_free_or_vertical_blocks(self) -> None:
+        free = _block(
+            xyxy=[100, 100, 180, 160],
+            text_class="text_free",
+            bubble_xyxy=[50, 50, 250, 220],
+        )
+        free._render_area_source = "detected_bubble"
+        free._render_area_xyxy = [50, 50, 250, 220]
+
+        vertical = _block(
+            xyxy=[100, 100, 180, 160],
+            bubble_xyxy=[50, 50, 250, 220],
+        )
+        vertical._render_area_source = "detected_bubble"
+        vertical._render_area_xyxy = [50, 50, 250, 220]
+
+        self.assertEqual(
+            get_dynamic_bubble_font_cap(
+                free,
+                configured_max_font_size=60,
+                rendered_width=50,
+                rendered_height=40,
+                vertical=False,
+            ),
+            60,
+        )
+        self.assertEqual(
+            get_dynamic_bubble_font_cap(
+                vertical,
+                configured_max_font_size=60,
+                rendered_width=50,
+                rendered_height=40,
+                vertical=True,
+            ),
+            60,
+        )
+
+    def test_refit_detected_bubble_text_increases_font_when_cap_was_limiting(self) -> None:
+        image = np.zeros((800, 800, 3), dtype=np.uint8)
+        block = _block(
+            xyxy=[260, 250, 340, 300],
+            bubble_xyxy=[120, 100, 520, 460],
+        )
+        get_best_render_area([block], image)
+        source_rect, _anchor = build_render_rects_for_block(block)
+        text = "괜찮아"
+        clearance = get_render_fit_clearance_for_block(block, 2.0)
+        wrapped, font_size, rendered_width, rendered_height = pyside_word_wrap(
+            text,
+            "Ownglyph gumama3",
+            int(source_rect[2]),
+            int(source_rect[3]),
+            1.0,
+            2.0,
+            False,
+            False,
+            False,
+            QtCore.Qt.AlignmentFlag.AlignCenter,
+            QtCore.Qt.LayoutDirection.LeftToRight,
+            60,
+            5,
+            False,
+            fit_clearance=clearance,
+            return_metrics=True,
+        )
+
+        refit_text, refit_size, refit_width, refit_height = refit_detected_bubble_text_if_underfilled(
+            block,
+            text,
+            "Ownglyph gumama3",
+            int(source_rect[2]),
+            int(source_rect[3]),
+            1.0,
+            2.0,
+            False,
+            False,
+            False,
+            QtCore.Qt.AlignmentFlag.AlignCenter,
+            QtCore.Qt.LayoutDirection.LeftToRight,
+            60,
+            5,
+            False,
+            clearance,
+            wrapped,
+            font_size,
+            rendered_width,
+            rendered_height,
+        )
+
+        self.assertEqual(refit_text.replace("\n", ""), text)
+        self.assertGreater(refit_size, font_size)
+        self.assertLessEqual(refit_width, source_rect[2])
+        self.assertLessEqual(refit_height, source_rect[3])
 
     def test_korean_wrap_does_not_shrink_below_readable_floor(self) -> None:
         wrapped, font_size, width, height = pyside_word_wrap(

@@ -21,6 +21,7 @@ from modules.rendering.render import (
     get_render_fit_clearance_for_block,
     is_vertical_block,
     pyside_word_wrap,
+    refit_detected_bubble_text_if_underfilled,
 )
 from modules.utils.export_paths import export_run_root, reserve_export_run_token, resolve_export_directory
 from modules.utils.automatic_output import (
@@ -177,13 +178,18 @@ class RenderMixin:
                 continue
 
             vertical = is_vertical_block(block, target_lang_code)
+            text_to_wrap = translation
+            fit_clearance = get_render_fit_clearance_for_block(
+                block,
+                outline_width,
+            )
             (
                 wrapped_translation,
                 font_size,
                 rendered_width,
                 rendered_height,
             ) = pyside_word_wrap(
-                translation,
+                text_to_wrap,
                 font,
                 width,
                 height,
@@ -197,11 +203,35 @@ class RenderMixin:
                 max_font_size,
                 min_font_size,
                 vertical,
-                fit_clearance=get_render_fit_clearance_for_block(
-                    block,
-                    outline_width,
-                ),
+                fit_clearance=fit_clearance,
                 return_metrics=True,
+            )
+            (
+                wrapped_translation,
+                font_size,
+                rendered_width,
+                rendered_height,
+            ) = refit_detected_bubble_text_if_underfilled(
+                block,
+                text_to_wrap,
+                font,
+                width,
+                height,
+                line_spacing,
+                outline_width,
+                bold,
+                italic,
+                underline,
+                alignment,
+                direction,
+                max_font_size,
+                min_font_size,
+                vertical,
+                fit_clearance,
+                wrapped_translation,
+                font_size,
+                rendered_width,
+                rendered_height,
             )
             block._text_fit_status = (
                 "needs_review"

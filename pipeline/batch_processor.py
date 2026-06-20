@@ -61,6 +61,7 @@ from modules.rendering.render import (
     get_render_fit_clearance_for_block,
     is_vertical_block,
     pyside_word_wrap,
+    refit_detected_bubble_text_if_underfilled,
 )
 from modules.utils.device import resolve_device
 from app.path_materialization import ensure_path_materialized
@@ -1890,8 +1891,13 @@ class BatchProcessor:
                 # Determine if this block should use vertical rendering
                 vertical = is_vertical_block(blk, trg_lng_cd)
 
+                text_to_wrap = translation
+                fit_clearance = get_render_fit_clearance_for_block(
+                    blk,
+                    outline_width,
+                )
                 translation, font_size, rendered_width, rendered_height = pyside_word_wrap(
-                    translation, 
+                    text_to_wrap,
                     font, 
                     block_width, 
                     block_height,
@@ -1905,11 +1911,32 @@ class BatchProcessor:
                     max_font_size, 
                     min_font_size,
                     vertical,
-                    fit_clearance=get_render_fit_clearance_for_block(
-                        blk,
-                        outline_width,
-                    ),
+                    fit_clearance=fit_clearance,
                     return_metrics=True
+                )
+                translation, font_size, rendered_width, rendered_height = (
+                    refit_detected_bubble_text_if_underfilled(
+                        blk,
+                        text_to_wrap,
+                        font,
+                        block_width,
+                        block_height,
+                        line_spacing,
+                        outline_width,
+                        bold,
+                        italic,
+                        underline,
+                        alignment,
+                        direction,
+                        max_font_size,
+                        min_font_size,
+                        vertical,
+                        fit_clearance,
+                        translation,
+                        font_size,
+                        rendered_width,
+                        rendered_height,
+                    )
                 )
                 blk._text_fit_status = (
                     "needs_review"
