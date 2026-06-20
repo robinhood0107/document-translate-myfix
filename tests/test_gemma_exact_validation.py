@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import importlib.util
+import contextlib
+import io
 import json
 import os
 import sqlite3
@@ -396,11 +398,11 @@ class GemmaExactValidationTests(unittest.TestCase):
                 temp_dir,
                 [
                     "This quiet control line has no trigger.",
-                    "The tiny dick line should be sampled.",
+                    "The wife marker line should be sampled.",
                 ],
                 [
                     "control saved translation",
-                    "sensitive saved translation",
+                    "selected saved translation",
                 ],
             )
             create_series_project(
@@ -461,10 +463,89 @@ class GemmaExactValidationTests(unittest.TestCase):
             self.assertFalse(summary["privacy"]["git_safe"])
             samples = json.loads(Path(summary["samples_path"]).read_text(encoding="utf-8"))["samples"]
             self.assertEqual(len(samples), 2)
-            self.assertTrue(any("dick" in " ".join(item["blocks"]) for item in samples))
+            self.assertTrue(any("wife" in " ".join(item["blocks"]) for item in samples))
             summary_text = (output_dir / "sensitive_summary.json").read_text(encoding="utf-8")
-            self.assertNotIn("tiny dick", summary_text)
-            self.assertNotIn("sensitive saved translation", summary_text)
+            self.assertNotIn("wife marker", summary_text)
+            self.assertNotIn("selected saved translation", summary_text)
+
+    def test_select_sensitive_samples_includes_phrase_and_saved_translation_risk(self) -> None:
+        module = _load_validation_module()
+        with tempfile.TemporaryDirectory() as temp_dir:
+            phrase_source = "pack such " + "a punch"
+            saved_risk = "<|channel>" + "thought"
+            payload = self._project_blob_with_blocks(
+                temp_dir,
+                [
+                    f"This synthetic line can {phrase_source}.",
+                    "This source line looks harmless.",
+                    "A quiet control line.",
+                ],
+                [
+                    "saved neutral translation",
+                    saved_risk,
+                    "control saved translation",
+                ],
+            )
+            create_series_project(
+                os.path.join(temp_dir, "queue.seriesctpr"),
+                root_dir=temp_dir,
+                items=[
+                    {
+                        "series_item_id": "item-1",
+                        "queue_index": 1,
+                        "display_name": "example_selected_chapter_source",
+                        "source_kind": "archive",
+                        "source_origin_path": os.path.join(temp_dir, "example_selected_chapter_source"),
+                        "source_origin_relpath": "example_selected_chapter_source",
+                        "imported_at": "2026-01-01T00:00:00",
+                        "updated_at": "2026-01-01T00:00:00",
+                        "status": "done",
+                        "embedded_project_blob_hash": "hash-1",
+                        "child_page_count": 1,
+                    }
+                ],
+                embedded_projects=[
+                    {
+                        "project_hash": "hash-1",
+                        "display_name": "example_project.ctpr",
+                        "project_size": len(payload),
+                        "project_blob": payload,
+                    }
+                ],
+            )
+            settings = self._settings()
+            settings = module.ValidationSettings(
+                source_lang=settings.source_lang,
+                target_lang=settings.target_lang,
+                model=settings.model,
+                chunk_size=1,
+                max_tokens=settings.max_tokens,
+                temperature=settings.temperature,
+                top_k=settings.top_k,
+                top_p=settings.top_p,
+                min_p=settings.min_p,
+                prompt_profile=settings.prompt_profile,
+                response_format_mode=settings.response_format_mode,
+                response_schema_mode=settings.response_schema_mode,
+            )
+
+            summary = module.select_sensitive_samples(
+                Path(temp_dir),
+                Path(temp_dir) / "sensitive",
+                settings,
+                golden_limit=10,
+                control_limit=1,
+            )
+
+            self.assertEqual(summary["sensitive_sample_count"], 2)
+            self.assertEqual(summary["counts"]["source_trigger_chunks"], 1)
+            self.assertEqual(summary["counts"]["saved_translation_risk_chunks"], 1)
+            reason_text = "\n".join(item["reason"] for item in summary["selected"])
+            self.assertIn("source_phrase", reason_text)
+            self.assertIn("saved_translation_risk", reason_text)
+            summary_text = (Path(temp_dir) / "sensitive" / "sensitive_summary.json").read_text(encoding="utf-8")
+            self.assertNotIn(phrase_source, summary_text)
+            self.assertNotIn(saved_risk, summary_text)
 
     def test_sensitive_sampler_matrix_flags_bad_outputs_and_preserves_prompt_prefix_hash(self) -> None:
         module = _load_validation_module()
@@ -479,7 +560,7 @@ class GemmaExactValidationTests(unittest.TestCase):
                                 "reason": "sensitive_terms=1",
                                 "source_lang": "English",
                                 "target_lang": "Korean",
-                                "blocks": ["The tiny dick line should keep its meaning."],
+                                "blocks": ["The wife marker line should keep its meaning."],
                                 "saved_translations": ["saved baseline"],
                             }
                         ]
@@ -505,7 +586,7 @@ class GemmaExactValidationTests(unittest.TestCase):
                         "choices": [
                             {
                                 "finish_reason": "stop",
-                                "message": {"content": json.dumps({"block_0": "와님 typo"})},
+                                "message": {"content": json.dumps({"block_0": "와" + "님 typo"})},
                             }
                         ],
                         "usage": {"prompt_tokens": 10, "completion_tokens": 2, "total_tokens": 12},
@@ -541,6 +622,72 @@ class GemmaExactValidationTests(unittest.TestCase):
             self.assertIn(0.3, {call["temperature"] for call in calls})
             review_items = json.loads(Path(summary["review_diff_path"]).read_text(encoding="utf-8"))["items"]
             self.assertTrue(any(item["candidate_name"] == "stable_b" for item in review_items))
+
+    def test_sensitive_prompt_matrix_keeps_prefix_and_compares_prompt_candidates(self) -> None:
+        module = _load_validation_module()
+        with tempfile.TemporaryDirectory() as temp_dir:
+            phrase_source = "pack such " + "a punch"
+            samples_path = Path(temp_dir) / "samples.json"
+            samples_path.write_text(
+                json.dumps(
+                    {
+                        "samples": [
+                            {
+                                "id": "sample-001",
+                                "reason": "source_phrase=1",
+                                "source_lang": "English",
+                                "target_lang": "Korean",
+                                "blocks": [f"This synthetic line can {phrase_source}."],
+                                "saved_translations": [""],
+                            }
+                        ]
+                    },
+                    ensure_ascii=False,
+                ),
+                encoding="utf-8",
+            )
+            seen_system_prompts = {}
+
+            def fake_request(engine, system_prompt, user_prompt, *, expected_keys=None):
+                profile = getattr(engine, "_validation_prompt_candidate_name", "unknown")
+                seen_system_prompts[profile] = system_prompt
+                value = "완곡 번역" if profile == "baseline" else "직접 번역"
+                return {
+                    "choices": [
+                        {
+                            "finish_reason": "stop",
+                            "message": {"content": json.dumps({"block_0": value})},
+                        }
+                    ],
+                    "usage": {"prompt_tokens": 10, "completion_tokens": 2, "total_tokens": 12},
+                }
+
+            original_request = module.CustomLocalGemmaTranslation._request_translation
+            try:
+                module.CustomLocalGemmaTranslation._request_translation = fake_request
+                stderr = io.StringIO()
+                with contextlib.redirect_stderr(stderr):
+                    summary = module.run_sensitive_prompt_matrix(
+                        samples_path,
+                        Path(temp_dir) / "prompt-matrix",
+                        self._settings(),
+                        api_base_url="http://127.0.0.1:18080/v1",
+                        timeout=1.0,
+                    )
+            finally:
+                module.CustomLocalGemmaTranslation._request_translation = original_request
+
+            self.assertFalse(summary["prompt_prefix"]["changed"])
+            self.assertIn("baseline", summary["candidates"])
+            self.assertIn("preserve_explicitness", summary["candidates"])
+            self.assertEqual(summary["candidates"]["baseline"]["translation_hashes_changed_vs_baseline"], 0)
+            self.assertEqual(summary["candidates"]["preserve_explicitness"]["translation_hashes_changed_vs_baseline"], 1)
+            self.assertTrue(seen_system_prompts["baseline"].startswith("You are Gemma, a large language model."))
+            self.assertIn("do not soften", seen_system_prompts["preserve_explicitness"])
+            self.assertIn("prompt-matrix progress sample=1/1 candidate=baseline", stderr.getvalue())
+            self.assertNotIn(phrase_source, stderr.getvalue())
+            review_items = json.loads(Path(summary["review_diff_path"]).read_text(encoding="utf-8"))["items"]
+            self.assertTrue(any(item["candidate_name"] == "preserve_explicitness" for item in review_items))
 
 
 if __name__ == "__main__":

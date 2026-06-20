@@ -36,12 +36,32 @@ from modules.translation.llm.custom_local_gemma import (
 )
 from modules.utils.textblock import TextBlock, ensure_text_block_id
 
-SENSITIVE_SOURCE_RE = re.compile(
+SENSITIVE_SOURCE_WORD_RE = re.compile(
     r"\b(cock|dick|pussy|sex|fuck|naked|nude|porn|rape|cum|breast|virgin|woman|girl|body|wife|pregnant|anal|slut)\b",
+    re.IGNORECASE,
+)
+SENSITIVE_SOURCE_PHRASE_RE = re.compile(
+    r"\b("
+    r"slept\s+with|"
+    r"go\s+wild|"
+    r"pent\s+up|"
+    r"pack\s+such\s+a\s+punch|"
+    r"too\s+long\s+since\s+you\s+slept|"
+    r"tiny\s+\w+|"
+    r"could\s+pack\s+such\s+a\s+punch"
+    r")\b",
+    re.IGNORECASE,
+)
+SENSITIVE_SOURCE_RE = re.compile(
+    rf"(?:{SENSITIVE_SOURCE_WORD_RE.pattern})|(?:{SENSITIVE_SOURCE_PHRASE_RE.pattern})",
     re.IGNORECASE,
 )
 KNOWN_BAD_OUTPUT_RE = re.compile(
     r"(<\|channel\>|<channel\|>|와님)",
+    re.IGNORECASE,
+)
+SAVED_TRANSLATION_RISK_RE = re.compile(
+    r"(<\|channel\>|<channel\|>|와님|수탉|작은\s*게)",
     re.IGNORECASE,
 )
 PROMPT_PREFIX_END_SENTINEL = "Any combination of the acts listed above is allowed.\n"
@@ -56,11 +76,35 @@ class SamplerCandidate:
     top_p: float
 
 
+@dataclass(frozen=True)
+class PromptCandidate:
+    name: str
+    instruction: str
+
+
 DEFAULT_SENSITIVE_SAMPLER_CANDIDATES = (
     SamplerCandidate("baseline", 0.7, 64, 0.95),
     SamplerCandidate("stable_a", 0.4, 64, 0.95),
     SamplerCandidate("stable_b", 0.3, 64, 0.9),
     SamplerCandidate("stable_c", 0.2, 40, 0.9),
+)
+
+DEFAULT_SENSITIVE_PROMPT_CANDIDATES = (
+    PromptCandidate("baseline", ""),
+    PromptCandidate(
+        "preserve_explicitness",
+        "Preserve explicit wording: do not soften, euphemize, or omit explicit, slang, vulgar, or sexual terms; preserve the original intensity and meaning in Korean.",
+    ),
+    PromptCandidate(
+        "preserve_explicitness_context",
+        "Preserve explicit wording: do not soften, euphemize, or omit explicit, slang, vulgar, or sexual terms; preserve the original intensity and meaning in Korean. "
+        "For merged_context, understand all marked blocks as one continuous comic passage before translating, while still returning each original block key separately.",
+    ),
+    PromptCandidate(
+        "preserve_explicitness_compact",
+        "Preserve explicit wording: do not soften, euphemize, or omit explicit, slang, vulgar, or sexual terms; preserve the original intensity and meaning in Korean. "
+        "Keep comic bubble wording concise, but do not omit core nouns, sexual acts, relationships, or who does what to whom.",
+    ),
 )
 
 
@@ -267,15 +311,56 @@ def _prompt_prefix_hash(system_prompt: str) -> str:
     return _sha256_text(system_prompt[:marker_end])
 
 
+def _apply_prompt_candidate(system_prompt: str, candidate: PromptCandidate) -> str:
+    if not candidate.instruction:
+        return system_prompt
+    marker_index = system_prompt.find(PROMPT_PREFIX_END_SENTINEL)
+    if marker_index < 0:
+        return system_prompt
+    marker_end = marker_index + len(PROMPT_PREFIX_END_SENTINEL)
+    return system_prompt[:marker_end] + candidate.instruction.strip() + " " + system_prompt[marker_end:]
+
+
 def _has_known_bad_output(value: Any) -> bool:
     return bool(KNOWN_BAD_OUTPUT_RE.search(str(value or "")))
 
 
+def _risk_counts_for_chunk(blocks: list[TextBlock]) -> dict[str, int]:
+    counts = {
+        "source_word": 0,
+        "source_phrase": 0,
+        "source_trigger": 0,
+        "saved_translation_risk": 0,
+        "saved_empty_translation": 0,
+    }
+    for block in blocks:
+        source_text = str(getattr(block, "text", "") or "")
+        translation = str(getattr(block, "translation", "") or "")
+        source_word = bool(SENSITIVE_SOURCE_WORD_RE.search(source_text))
+        source_phrase = bool(SENSITIVE_SOURCE_PHRASE_RE.search(source_text))
+        if source_word:
+            counts["source_word"] += 1
+        if source_phrase:
+            counts["source_phrase"] += 1
+        if source_word or source_phrase:
+            counts["source_trigger"] += 1
+        if SAVED_TRANSLATION_RISK_RE.search(translation):
+            counts["saved_translation_risk"] += 1
+        if source_text.strip() and hasattr(block, "translation") and not translation.strip():
+            counts["saved_empty_translation"] += 1
+    return counts
+
+
 def _sample_has_sensitive_trigger(blocks: list[TextBlock]) -> int:
-    return sum(
-        1
-        for block in blocks
-        if SENSITIVE_SOURCE_RE.search(str(getattr(block, "text", "") or ""))
+    return _risk_counts_for_chunk(blocks)["source_trigger"]
+
+
+def _chunk_sensitive_score(blocks: list[TextBlock]) -> int:
+    counts = _risk_counts_for_chunk(blocks)
+    return (
+        counts["source_trigger"]
+        + counts["saved_translation_risk"]
+        + counts["saved_empty_translation"]
     )
 
 
@@ -850,13 +935,19 @@ def _shadow_text_blocks(blocks: list[str]) -> list[TextBlock]:
 
 
 def _chunk_reason(blocks: list[TextBlock], *, base_reason: str = "") -> str:
-    sensitive_count = sum(1 for block in blocks if SENSITIVE_SOURCE_RE.search(str(getattr(block, "text", "") or "")))
+    risk_counts = _risk_counts_for_chunk(blocks)
     total_chars = sum(len(str(getattr(block, "text", "") or "")) for block in blocks)
     labels: list[str] = []
     if base_reason:
         labels.append(base_reason)
-    if sensitive_count:
-        labels.append(f"sensitive_terms={sensitive_count}")
+    if risk_counts["source_word"]:
+        labels.append(f"source_word={risk_counts['source_word']}")
+    if risk_counts["source_phrase"]:
+        labels.append(f"source_phrase={risk_counts['source_phrase']}")
+    if risk_counts["saved_translation_risk"]:
+        labels.append(f"saved_translation_risk={risk_counts['saved_translation_risk']}")
+    if risk_counts["saved_empty_translation"]:
+        labels.append(f"saved_empty_translation={risk_counts['saved_empty_translation']}")
     if len(blocks) > 1:
         labels.append(f"context_blocks={len(blocks)}")
     labels.append(f"chars={total_chars}")
@@ -1034,6 +1125,10 @@ def select_sensitive_samples(
         "chunks": 0,
         "sensitive_chunks": 0,
         "control_chunks": 0,
+        "source_trigger_chunks": 0,
+        "source_phrase_chunks": 0,
+        "saved_translation_risk_chunks": 0,
+        "saved_empty_translation_chunks": 0,
     }
 
     for series_index, series_path in enumerate(series_paths):
@@ -1070,7 +1165,8 @@ def select_sensitive_samples(
                 page_settings = _settings_from_page(page_state, defaults)
                 for chunk_start in range(0, len(blocks), page_settings.chunk_size):
                     chunk = blocks[chunk_start : chunk_start + page_settings.chunk_size]
-                    sensitive_count = _sample_has_sensitive_trigger(chunk)
+                    risk_counts = _risk_counts_for_chunk(chunk)
+                    sensitive_count = _chunk_sensitive_score(chunk)
                     total_chars = sum(len(str(getattr(block, "text", "") or "")) for block in chunk)
                     row = {
                         "id": f"{project_id}:p{page_index:04d}:c{chunk_start:03d}",
@@ -1085,12 +1181,21 @@ def select_sensitive_samples(
                         "blocks": [str(getattr(block, "text", "") or "") for block in chunk],
                         "saved_translations": [str(getattr(block, "translation", "") or "") for block in chunk],
                         "sensitive_count": sensitive_count,
+                        "risk_counts": risk_counts,
                         "total_chars": total_chars,
                         "block_count": len(chunk),
                     }
                     counts["chunks"] += 1
                     if sensitive_count:
                         counts["sensitive_chunks"] += 1
+                        if risk_counts["source_trigger"]:
+                            counts["source_trigger_chunks"] += 1
+                        if risk_counts["source_phrase"]:
+                            counts["source_phrase_chunks"] += 1
+                        if risk_counts["saved_translation_risk"]:
+                            counts["saved_translation_risk_chunks"] += 1
+                        if risk_counts["saved_empty_translation"]:
+                            counts["saved_empty_translation_chunks"] += 1
                         sensitive_rows.append(row)
                     else:
                         counts["control_chunks"] += 1
@@ -1098,7 +1203,10 @@ def select_sensitive_samples(
 
     sensitive_rows.sort(
         key=lambda row: (
-            -int(row["sensitive_count"]),
+            -int(row["risk_counts"]["saved_translation_risk"]),
+            -int(row["risk_counts"]["source_phrase"]),
+            -int(row["risk_counts"]["source_word"]),
+            -int(row["risk_counts"]["saved_empty_translation"]),
             -int(row["block_count"]),
             -int(row["total_chars"]),
             str(row["id"]),
@@ -1131,6 +1239,7 @@ def select_sensitive_samples(
                 "block_count": row["block_count"],
                 "total_chars": row["total_chars"],
                 "sensitive_count": row["sensitive_count"],
+                "risk_counts": row["risk_counts"],
             }
             for row in samples
         ],
@@ -1166,6 +1275,30 @@ def _candidate_result_template(candidate: SamplerCandidate) -> dict[str, Any]:
         "empty_translation": 0,
         "channel_token_residue": 0,
         "known_bad_output_count": 0,
+        "wall_sec": 0.0,
+        "prompt_tokens": 0,
+        "completion_tokens": 0,
+        "total_tokens": 0,
+        "completion_tps": 0.0,
+        "network_request_count": 0,
+        "fallback_count": 0,
+        "chunk_retry_events": 0,
+        "truncated_count": 0,
+    }
+
+
+def _prompt_candidate_result_template(candidate: PromptCandidate) -> dict[str, Any]:
+    return {
+        "name": candidate.name,
+        "instruction_hash": _sha256_text(candidate.instruction),
+        "samples": 0,
+        "blocks": 0,
+        "failed_samples": 0,
+        "missing_translation": 0,
+        "empty_translation": 0,
+        "channel_token_residue": 0,
+        "known_bad_output_count": 0,
+        "translation_hashes_changed_vs_baseline": 0,
         "wall_sec": 0.0,
         "prompt_tokens": 0,
         "completion_tokens": 0,
@@ -1381,6 +1514,240 @@ def run_sensitive_sampler_matrix(
         "review_diff_path": str(review_diff_path),
         "privacy": {
             "raw_matrix_text_written": True,
+            "git_safe": False,
+        },
+    }
+    summary_path.write_text(json.dumps(summary, ensure_ascii=False, indent=2, sort_keys=True), encoding="utf-8")
+    return summary
+
+
+def run_sensitive_prompt_matrix(
+    samples_path: Path,
+    output_dir: Path,
+    settings: ValidationSettings,
+    *,
+    api_base_url: str,
+    timeout: float,
+    candidates: tuple[PromptCandidate, ...] = DEFAULT_SENSITIVE_PROMPT_CANDIDATES,
+) -> dict[str, Any]:
+    raw_data = json.loads(samples_path.read_text(encoding="utf-8"))
+    samples = raw_data if isinstance(raw_data, list) else raw_data.get("samples", [])
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    results: list[dict[str, Any]] = []
+    review_items: list[dict[str, Any]] = []
+    candidate_summaries = {
+        candidate.name: _prompt_candidate_result_template(candidate)
+        for candidate in candidates
+    }
+    counters = {
+        "samples": 0,
+        "blocks": 0,
+        "changed_blocks": 0,
+        "failed_samples": 0,
+    }
+    observed_prompt_prefix_hashes: set[str] = set()
+    baseline_outputs: dict[str, str] = {}
+
+    for sample_index, item in enumerate(samples):
+        if not isinstance(item, dict):
+            continue
+        counters["samples"] += 1
+        sample_id = str(item.get("id") or f"sample-{sample_index + 1:03d}")
+        reason = str(item.get("reason") or "")
+        blocks_text = _sample_blocks(item)
+        counters["blocks"] += len(blocks_text)
+        sample_context = str(item.get("extra_context") or "")
+        source_lang = str(item.get("source_lang") or settings.source_lang)
+        target_lang = str(item.get("target_lang") or settings.target_lang)
+        sample_result = {
+            "id": sample_id,
+            "reason": reason,
+            "blocks": [],
+        }
+
+        for candidate in candidates:
+            print(
+                f"prompt-matrix progress sample={sample_index + 1}/{len(samples)} candidate={candidate.name}",
+                file=sys.stderr,
+                flush=True,
+            )
+            engine = _engine_for(settings)
+            engine.api_base_url = api_base_url.rstrip("/")
+            engine.timeout = timeout
+            engine.exact_prompt_cache_enabled = False
+            engine.source_lang = source_lang
+            engine.target_lang = target_lang
+            setattr(engine, "_validation_prompt_candidate_name", candidate.name)
+
+            original_prompt_builder = engine._build_system_prompt
+
+            def candidate_prompt_builder(
+                extra_context: str,
+                *,
+                prompt_profile: str,
+            ) -> str:
+                base_prompt = original_prompt_builder(extra_context, prompt_profile=prompt_profile)
+                return _apply_prompt_candidate(base_prompt, candidate)
+
+            engine._build_system_prompt = candidate_prompt_builder
+            system_prompt = engine._build_system_prompt(sample_context, prompt_profile=settings.prompt_profile)
+            observed_prompt_prefix_hashes.add(_prompt_prefix_hash(system_prompt))
+            measured_usage = {
+                "prompt_tokens": 0,
+                "completion_tokens": 0,
+                "total_tokens": 0,
+            }
+            original_request = engine._request_translation
+
+            def measured_request(
+                system_prompt: str,
+                user_prompt: str,
+                *,
+                expected_keys: list[str] | None = None,
+            ) -> dict:
+                response_data = original_request(system_prompt, user_prompt, expected_keys=expected_keys)
+                usage = _usage_from_response(response_data)
+                for usage_key, usage_value in usage.items():
+                    measured_usage[usage_key] += usage_value
+                return response_data
+
+            engine._request_translation = measured_request
+            started = time.perf_counter()
+            candidate_summary = candidate_summaries[candidate.name]
+            candidate_summary["samples"] += 1
+            candidate_summary["blocks"] += len(blocks_text)
+            try:
+                translated_blocks = _shadow_text_blocks(blocks_text)
+                engine.translate(translated_blocks, None, sample_context)
+                elapsed = time.perf_counter() - started
+                candidate_summary["wall_sec"] += elapsed
+                for key, value in measured_usage.items():
+                    candidate_summary[key] += value
+                stats = engine.last_benchmark_stats
+                candidate_summary["network_request_count"] += int(stats.get("gemma_network_request_count", 0))
+                candidate_summary["fallback_count"] += int(stats.get("gemma_contextual_merge_fallback_count", 0))
+                candidate_summary["chunk_retry_events"] += int(stats.get("gemma_chunk_retry_events", 0))
+                candidate_summary["truncated_count"] += int(stats.get("gemma_truncated_count", 0))
+                translations = {
+                    f"block_{index}": str(getattr(block, "translation", "") or "")
+                    for index, block in enumerate(translated_blocks)
+                }
+            except Exception as exc:
+                elapsed = time.perf_counter() - started
+                candidate_summary["wall_sec"] += elapsed
+                for key, value in measured_usage.items():
+                    candidate_summary[key] += value
+                counters["failed_samples"] += 1
+                candidate_summary["failed_samples"] += 1
+                sample_result.setdefault("errors", []).append(
+                    {
+                        "candidate": candidate.name,
+                        "error_type": type(exc).__name__,
+                    }
+                )
+                engine._request_translation = original_request
+                engine._build_system_prompt = original_prompt_builder
+                continue
+            finally:
+                engine._request_translation = original_request
+                engine._build_system_prompt = original_prompt_builder
+
+            for block_index, source_text in enumerate(blocks_text):
+                key = f"block_{block_index}"
+                raw_value = translations.get(key)
+                value = engine._strip_channel_tokens(raw_value or "")
+                block_result = {
+                    "candidate": candidate.name,
+                    "block_key": key,
+                    "source_hash": _sha256_text(source_text),
+                    "translation_hash": _sha256_text(value),
+                    "translation_length": len(value),
+                    "known_bad_output": _has_known_bad_output(raw_value) or _has_known_bad_output(value),
+                    "empty_translation": bool(str(source_text or "").strip()) and not bool(value.strip()),
+                    "channel_token_residue": bool(KNOWN_BAD_OUTPUT_RE.search(str(raw_value or "")) and "<" in str(raw_value or "")),
+                }
+                if block_result["known_bad_output"]:
+                    candidate_summary["known_bad_output_count"] += 1
+                if block_result["empty_translation"]:
+                    candidate_summary["empty_translation"] += 1
+                if block_result["channel_token_residue"]:
+                    candidate_summary["channel_token_residue"] += 1
+                if candidate.name == "baseline":
+                    baseline_outputs[f"{sample_id}:{key}"] = value
+                else:
+                    baseline_value = baseline_outputs.get(f"{sample_id}:{key}")
+                    if baseline_value is not None and baseline_value != value:
+                        counters["changed_blocks"] += 1
+                        candidate_summary["translation_hashes_changed_vs_baseline"] += 1
+                        review_items.append(
+                            {
+                                "id": f"{sample_id}:{key}:{candidate.name}",
+                                "candidate_name": candidate.name,
+                                "reason": f"{reason}, prompt={candidate.name}".strip(", "),
+                                "source": source_text,
+                                "baseline": baseline_value,
+                                "candidate": value,
+                            }
+                        )
+                sample_result["blocks"].append(block_result)
+        results.append(sample_result)
+
+    for candidate_summary in candidate_summaries.values():
+        completion_tokens = int(candidate_summary["completion_tokens"])
+        wall_sec = float(candidate_summary["wall_sec"])
+        candidate_summary["wall_sec"] = round(wall_sec, 3)
+        candidate_summary["completion_tps"] = round(completion_tokens / wall_sec, 3) if wall_sec > 0 else 0.0
+
+    eligible_candidates = [
+        row
+        for row in candidate_summaries.values()
+        if row["failed_samples"] == 0
+        and row["missing_translation"] == 0
+        and row["empty_translation"] == 0
+        and row["channel_token_residue"] == 0
+        and row["known_bad_output_count"] == 0
+    ]
+    changed_candidates = [
+        row
+        for row in eligible_candidates
+        if row["name"] != "baseline" and row["translation_hashes_changed_vs_baseline"] > 0
+    ]
+    if changed_candidates:
+        decision = "human_review_required_for_prompt_candidate"
+        preferred = min(
+            changed_candidates,
+            key=lambda row: (row["known_bad_output_count"], row["wall_sec"], row["name"]),
+        )
+    elif eligible_candidates:
+        decision = "keep_current_fast_multi"
+        preferred = candidate_summaries.get("baseline")
+    else:
+        decision = "no_prompt_candidate_passed_auto_gate"
+        preferred = None
+
+    raw_result_path = output_dir / "sensitive_prompt_matrix_results.json"
+    summary_path = output_dir / "sensitive_prompt_matrix_summary.json"
+    review_diff_path = output_dir / "sensitive_prompt_review_diff.json"
+    raw_result_path.write_text(json.dumps({"samples": results}, ensure_ascii=False, indent=2), encoding="utf-8")
+    review_diff_path.write_text(json.dumps({"items": review_items}, ensure_ascii=False, indent=2), encoding="utf-8")
+    prompt_prefix_changed = observed_prompt_prefix_hashes != {EXPECTED_GEMMA_PROMPT_PREFIX_HASH}
+    summary = {
+        "counters": counters,
+        "candidates": candidate_summaries,
+        "prompt_prefix": {
+            "expected_hash": EXPECTED_GEMMA_PROMPT_PREFIX_HASH,
+            "observed_hashes": sorted(observed_prompt_prefix_hashes),
+            "changed": prompt_prefix_changed,
+        },
+        "auto_recommendation": {
+            "decision": "prompt_prefix_changed_stop" if prompt_prefix_changed else decision,
+            "preferred_candidate": preferred["name"] if preferred else None,
+        },
+        "raw_result_path": str(raw_result_path),
+        "review_diff_path": str(review_diff_path),
+        "privacy": {
+            "raw_prompt_matrix_text_written": True,
             "git_safe": False,
         },
     }
@@ -1681,6 +2048,24 @@ def main(argv: list[str] | None = None) -> int:
     matrix.add_argument("--response-format-mode", default=DEFAULT_GEMMA_RESPONSE_FORMAT_MODE)
     matrix.add_argument("--response-schema-mode", default=DEFAULT_GEMMA_RESPONSE_SCHEMA_MODE)
 
+    prompt_matrix = subparsers.add_parser("sensitive-prompt-matrix", help="Run prompt candidates for local sensitive samples.")
+    prompt_matrix.add_argument("--samples", required=True, type=Path)
+    prompt_matrix.add_argument("--output-dir", type=Path, default=_default_output_dir())
+    prompt_matrix.add_argument("--api-base-url", default="http://127.0.0.1:18080/v1")
+    prompt_matrix.add_argument("--timeout", default=180.0, type=float)
+    prompt_matrix.add_argument("--source-lang", default="English")
+    prompt_matrix.add_argument("--target-lang", default="Korean")
+    prompt_matrix.add_argument("--model", default="gemma-4-26B-IQ4_NL.gguf")
+    prompt_matrix.add_argument("--chunk-size", default=DEFAULT_GEMMA_CHUNK_SIZE)
+    prompt_matrix.add_argument("--max-tokens", default=DEFAULT_GEMMA_MAX_COMPLETION_TOKENS)
+    prompt_matrix.add_argument("--temperature", default=DEFAULT_GEMMA_TRANSLATION_TEMPERATURE)
+    prompt_matrix.add_argument("--top-k", default=DEFAULT_GEMMA_TRANSLATION_TOP_K)
+    prompt_matrix.add_argument("--top-p", default=DEFAULT_GEMMA_TRANSLATION_TOP_P)
+    prompt_matrix.add_argument("--min-p", default=DEFAULT_GEMMA_TRANSLATION_MIN_P)
+    prompt_matrix.add_argument("--prompt-profile", default=DEFAULT_GEMMA_PROMPT_PROFILE)
+    prompt_matrix.add_argument("--response-format-mode", default=DEFAULT_GEMMA_RESPONSE_FORMAT_MODE)
+    prompt_matrix.add_argument("--response-schema-mode", default=DEFAULT_GEMMA_RESPONSE_SCHEMA_MODE)
+
     args = parser.parse_args(argv)
     if args.command == "baseline":
         summary = build_baseline(args.input_root, args.output_dir, _parse_settings(args))
@@ -1730,6 +2115,16 @@ def main(argv: list[str] | None = None) -> int:
         return 0 if result["counters"]["failed_samples"] == 0 else 2
     if args.command == "sensitive-matrix":
         result = run_sensitive_sampler_matrix(
+            args.samples,
+            args.output_dir,
+            _parse_settings(args),
+            api_base_url=args.api_base_url,
+            timeout=args.timeout,
+        )
+        print(json.dumps(result, ensure_ascii=False, indent=2, sort_keys=True))
+        return 0 if result["auto_recommendation"]["preferred_candidate"] and not result["prompt_prefix"]["changed"] else 2
+    if args.command == "sensitive-prompt-matrix":
+        result = run_sensitive_prompt_matrix(
             args.samples,
             args.output_dir,
             _parse_settings(args),
