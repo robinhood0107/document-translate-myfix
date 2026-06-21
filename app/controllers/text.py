@@ -1575,6 +1575,7 @@ class TextController:
             font_family = self.main.font_dropdown.currentText(),
             min_font_size = int(self.main.settings_page.ui.min_font_spinbox.value()),
             max_font_size = int(self.main.settings_page.ui.max_font_spinbox.value()),
+            auto_max_font_size = self.main.settings_page.ui.auto_max_font_checkbox.isChecked(),
             color = self.main.block_font_color_button.property('selected_color'),
             force_font_color = self.main.force_font_color_checkbox.isChecked(),
             smart_global_apply_all = False,

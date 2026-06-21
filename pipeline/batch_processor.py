@@ -1936,6 +1936,7 @@ class BatchProcessor:
                         font_size,
                         rendered_width,
                         rendered_height,
+                        auto_max_font_size=getattr(render_settings, "auto_max_font_size", True),
                     )
                 )
                 blk._text_fit_status = (

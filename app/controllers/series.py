@@ -260,6 +260,7 @@ class SeriesController(QtCore.QObject):
             "font_family": str(render_settings.font_family or ""),
             "min_font_size": int(render_settings.min_font_size),
             "max_font_size": int(render_settings.max_font_size),
+            "auto_max_font_size": bool(render_settings.auto_max_font_size),
             "color": str(render_settings.color or ""),
             "force_font_color": bool(render_settings.force_font_color),
             "upper_case": bool(render_settings.upper_case),
@@ -767,6 +768,8 @@ class SeriesController(QtCore.QObject):
             ui.min_font_spinbox.setValue(int(settings.get("min_font_size") or ui.min_font_spinbox.value()))
         if "max_font_size" in settings:
             ui.max_font_spinbox.setValue(int(settings.get("max_font_size") or ui.max_font_spinbox.value()))
+        if "auto_max_font_size" in settings:
+            ui.auto_max_font_checkbox.setChecked(bool(settings.get("auto_max_font_size", True)))
         if settings.get("color"):
             color = str(settings.get("color") or "")
             self.main.block_font_color_button.setStyleSheet(

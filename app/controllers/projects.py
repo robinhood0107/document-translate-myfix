@@ -2092,6 +2092,9 @@ class ProjectController:
         max_font_size = settings.value('max_font_size', 40) # Default value is 40
         self.main.settings_page.ui.min_font_spinbox.setValue(int(min_font_size))
         self.main.settings_page.ui.max_font_spinbox.setValue(int(max_font_size))
+        self.main.settings_page.ui.auto_max_font_checkbox.setChecked(
+            settings.value('auto_max_font_size', True, type=bool)
+        )
 
         color = settings.value('color', '#000000')
         self.main.block_font_color_button.setStyleSheet(f"background-color: {color}; border: none; border-radius: 5px;")
