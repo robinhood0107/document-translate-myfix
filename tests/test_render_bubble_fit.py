@@ -137,6 +137,24 @@ class RenderBubbleFitTests(unittest.TestCase):
         self.assertEqual(left._render_area_source, "detected_bubble")
         self.assertEqual(right._render_area_source, "detected_bubble")
 
+    def test_detected_bubble_area_does_not_cover_other_text_bbox(self) -> None:
+        image = np.zeros((500, 500, 3), dtype=np.uint8)
+        bubble = _block(
+            xyxy=[120, 120, 180, 165],
+            bubble_xyxy=[80, 80, 340, 260],
+        )
+        nearby_caption = _block(
+            xyxy=[265, 120, 335, 165],
+            text_class="text_free",
+            bubble_xyxy=None,
+        )
+
+        get_best_render_area([bubble, nearby_caption], image)
+
+        self.assertEqual(bubble._render_area_source, "text_bbox")
+        self.assertEqual(bubble.xyxy.tolist(), [120, 120, 180, 165])
+        self.assertEqual(nearby_caption._render_area_source, "text_bbox")
+
     def test_korean_wrap_uses_qt_metrics_and_respects_max_cap(self) -> None:
         text = (
             "세상에... 나, 난 정말 이렇게 빨리 마주칠 줄 몰랐어! "

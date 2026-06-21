@@ -479,6 +479,9 @@ def get_best_render_area(blk_list: List[TextBlock], img, inpainted_img=None):
     conflict_candidate_indexes = _find_overlapping_detected_bubble_candidate_indexes(
         [bounds for _index, bounds in candidates]
     )
+    conflict_candidate_indexes.update(
+        _find_detected_bubble_candidates_covering_other_text_indexes(candidates, blk_list)
+    )
     for candidate_index, (block_index, text_draw_bounds) in enumerate(candidates):
         if candidate_index in conflict_candidate_indexes:
             continue
@@ -513,6 +516,35 @@ def _find_overlapping_detected_bubble_candidate_indexes(
             overlap_ratio = overlap / max(1.0, min(first_area, second_area))
             if overlap_ratio > DETECTED_BUBBLE_MAX_RENDER_AREA_OVERLAP_RATIO:
                 conflicts.update({i, j})
+    return conflicts
+
+
+def _find_detected_bubble_candidates_covering_other_text_indexes(
+    candidates: list[tuple[int, tuple[int, int, int, int]]],
+    blk_list: List[TextBlock],
+) -> set[int]:
+    conflicts: set[int] = set()
+    original_boxes = [
+        _normalize_xyxy(getattr(blk, "_render_original_xyxy", None)) or _current_anchor_xyxy(blk)
+        for blk in blk_list
+    ]
+    for candidate_index, (block_index, candidate_box) in enumerate(candidates):
+        candidate_area = _bbox_area(candidate_box)
+        if candidate_area <= 0.0:
+            continue
+        for other_index, other_box in enumerate(original_boxes):
+            if other_index == block_index or other_box is None:
+                continue
+            other_area = _bbox_area(other_box)
+            if other_area <= 0.0:
+                continue
+            overlap = _intersection_area(candidate_box, other_box)
+            if overlap <= 0.0:
+                continue
+            overlap_ratio = overlap / max(1.0, min(candidate_area, other_area))
+            if overlap_ratio > DETECTED_BUBBLE_MAX_RENDER_AREA_OVERLAP_RATIO:
+                conflicts.add(candidate_index)
+                break
     return conflicts
 
 
