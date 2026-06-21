@@ -2546,6 +2546,14 @@ These values are copied into new series projects and can be adjusted per series.
         <translation>파이프라인</translation>
     </message>
     <message>
+        <source>Auto Maximum Font Size</source>
+        <translation>최대 글꼴 크기 자동 판단</translation>
+    </message>
+    <message>
+        <source>Automatically expands the maximum font size inside detected speech bubbles when the fitted text is too small.</source>
+        <translation>감지된 말풍선 안에서 맞춤 텍스트가 너무 작으면 최대 글꼴 크기를 자동으로 확장합니다.</translation>
+    </message>
+    <message>
         <source>Use Selected Color</source>
         <translation>선택한 색상 사용</translation>
     </message>
@@ -3355,6 +3363,14 @@ Choose either a project file or image/document/archive files.</source>
     <message>
         <source>Maximum Font Size:</source>
         <translation>최대 글꼴 크기:</translation>
+    </message>
+    <message>
+        <source>Auto Maximum Font Size</source>
+        <translation>최대 글꼴 크기 자동 판단</translation>
+    </message>
+    <message>
+        <source>Automatically expands the maximum font size inside detected speech bubbles when the fitted text is too small.</source>
+        <translation>감지된 말풍선 안에서 맞춤 텍스트가 너무 작으면 최대 글꼴 크기를 자동으로 확장합니다.</translation>
     </message>
     <message>
         <source>Font:</source>

@@ -1058,6 +1058,11 @@ class SeriesSettingsDialog(QtWidgets.QDialog):
         self.min_font_spin.setRange(1, 300)
         self.max_font_spin = QtWidgets.QSpinBox(tab)
         self.max_font_spin.setRange(1, 300)
+        self.auto_max_font_checkbox = QtWidgets.QCheckBox(self.tr("Auto Maximum Font Size"), tab)
+        self.auto_max_font_checkbox.setChecked(True)
+        self.auto_max_font_checkbox.setToolTip(
+            self.tr("Automatically expands the maximum font size inside detected speech bubbles when the fitted text is too small.")
+        )
         self.line_spacing_combo = QtWidgets.QComboBox(tab)
         self.line_spacing_combo.setEditable(True)
         self.line_spacing_combo.addItems(["1.0", "1.1", "1.2", "1.3", "1.4", "1.5"])
@@ -1109,6 +1114,7 @@ class SeriesSettingsDialog(QtWidgets.QDialog):
             self._make_field_row(self.tr("Font:"), self.font_combo),
             self._make_field_row(self.tr("Min font size:"), self.min_font_spin),
             self._make_field_row(self.tr("Max font size:"), self.max_font_spin),
+            self._make_check_row(self.auto_max_font_checkbox),
             self._make_field_row(self.tr("Line spacing:"), self.line_spacing_combo),
         )
         self.render_typography_group = self._make_section(
@@ -1555,6 +1561,7 @@ class SeriesSettingsDialog(QtWidgets.QDialog):
             self.font_combo.setCurrentText(font)
         self.min_font_spin.setValue(max(1, int(values.get("min_font_size", 5) or 5)))
         self.max_font_spin.setValue(max(1, int(values.get("max_font_size", 40) or 40)))
+        self.auto_max_font_checkbox.setChecked(bool(values.get("auto_max_font_size", True)))
         self.line_spacing_combo.setCurrentText(str(values.get("line_spacing") or "1.0"))
         self._set_button_color(self.text_color_button, str(values.get("color") or "#000000"))
         self.force_color_checkbox.setChecked(bool(values.get("force_font_color", False)))
@@ -1575,6 +1582,7 @@ class SeriesSettingsDialog(QtWidgets.QDialog):
             "font_family": str(self.font_combo.currentText() or ""),
             "min_font_size": int(self.min_font_spin.value()),
             "max_font_size": int(self.max_font_spin.value()),
+            "auto_max_font_size": self.auto_max_font_checkbox.isChecked(),
             "color": str(self.text_color_button.property("selected_color") or "#000000"),
             "force_font_color": self.force_color_checkbox.isChecked(),
             "upper_case": self.uppercase_checkbox.isChecked(),

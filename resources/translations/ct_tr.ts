@@ -2490,6 +2490,14 @@ These values are copied into new series projects and can be adjusted per series.
         <translation type="unfinished">İşlem hattı</translation>
     </message>
     <message>
+        <source>Auto Maximum Font Size</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Automatically expands the maximum font size inside detected speech bubbles when the fitted text is too small.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
         <source>Use Selected Color</source>
         <translation type="unfinished">Seçili rengi kullan</translation>
     </message>
@@ -3301,6 +3309,14 @@ Bir proje dosyası ya da yalnızca görüntü/belge/arşiv dosyaları seçin.</t
     <message>
         <source>Maximum Font Size:</source>
         <translation>Maksimum Yazı Tipi Boyutu:</translation>
+    </message>
+    <message>
+        <source>Auto Maximum Font Size</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Automatically expands the maximum font size inside detected speech bubbles when the fitted text is too small.</source>
+        <translation type="unfinished"></translation>
     </message>
     <message>
         <source>Font:</source>

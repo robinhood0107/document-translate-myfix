@@ -2490,6 +2490,14 @@ These values are copied into new series projects and can be adjusted per series.
         <translation type="unfinished">Canalización</translation>
     </message>
     <message>
+        <source>Auto Maximum Font Size</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Automatically expands the maximum font size inside detected speech bubbles when the fitted text is too small.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
         <source>Use Selected Color</source>
         <translation type="unfinished">Usar el color seleccionado</translation>
     </message>
@@ -3301,6 +3309,14 @@ Elija un archivo de proyecto o solo archivos de imagen/documento/archivo comprim
     <message>
         <source>Maximum Font Size:</source>
         <translation>Tamaño Máximo de Fuente:</translation>
+    </message>
+    <message>
+        <source>Auto Maximum Font Size</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Automatically expands the maximum font size inside detected speech bubbles when the fitted text is too small.</source>
+        <translation type="unfinished"></translation>
     </message>
     <message>
         <source>Font:</source>

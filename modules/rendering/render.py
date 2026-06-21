@@ -42,6 +42,7 @@ class TextRenderingSettings:
     font_family: str
     min_font_size: int
     max_font_size: int
+    auto_max_font_size: bool
     color: str
     force_font_color: bool
     smart_global_apply_all: bool
@@ -1056,7 +1057,17 @@ def refit_detected_bubble_text_if_underfilled(
     current_font_size: int | float,
     current_rendered_width: float,
     current_rendered_height: float,
+    *,
+    auto_max_font_size: bool = True,
 ) -> tuple[str, int | float, float, float]:
+    if not auto_max_font_size:
+        return (
+            current_wrapped_text,
+            current_font_size,
+            current_rendered_width,
+            current_rendered_height,
+        )
+
     dynamic_cap = get_dynamic_bubble_font_cap(
         blk,
         configured_max_font_size,

@@ -2489,6 +2489,14 @@ These values are copied into new series projects and can be adjusted per series.
         <translation type="unfinished">流水线</translation>
     </message>
     <message>
+        <source>Auto Maximum Font Size</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Automatically expands the maximum font size inside detected speech bubbles when the fitted text is too small.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
         <source>Use Selected Color</source>
         <translation type="unfinished">使用所选颜色</translation>
     </message>
@@ -3300,6 +3308,14 @@ Choose either a project file or image/document/archive files.</source>
     <message>
         <source>Maximum Font Size:</source>
         <translation>最大字体大小：</translation>
+    </message>
+    <message>
+        <source>Auto Maximum Font Size</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Automatically expands the maximum font size inside detected speech bubbles when the fitted text is too small.</source>
+        <translation type="unfinished"></translation>
     </message>
     <message>
         <source>Font:</source>

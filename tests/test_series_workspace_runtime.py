@@ -276,6 +276,7 @@ class SeriesWorkspaceRuntimeTests(unittest.TestCase):
         self.assertEqual(global_settings["translator"], "Custom Local Server(Gemma)")
         self.assertEqual(global_settings["render_settings"]["font_family"], "Ownglyph gumama3")
         self.assertEqual(global_settings["render_settings"]["max_font_size"], 42)
+        self.assertTrue(global_settings["render_settings"]["auto_max_font_size"])
         self.assertEqual(global_settings["render_settings"]["color"], "#123456")
         self.assertTrue(global_settings["render_settings"]["force_font_color"])
         self.assertEqual(global_settings["render_settings"]["alignment_id"], 2)

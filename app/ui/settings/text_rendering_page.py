@@ -27,6 +27,12 @@ class TextRenderingPage(QtWidgets.QWidget):
         self.max_font_spinbox.setMaximum(100)
         self.max_font_spinbox.setValue(40)
 
+        self.auto_max_font_checkbox = MCheckBox(self.tr("Auto Maximum Font Size"))
+        self.auto_max_font_checkbox.setChecked(True)
+        self.auto_max_font_checkbox.setToolTip(
+            self.tr("Automatically expands the maximum font size inside detected speech bubbles when the fitted text is too small.")
+        )
+
         min_font_layout.addWidget(min_font_label)
         min_font_layout.addWidget(self.min_font_spinbox)
         min_font_layout.addStretch()
@@ -51,6 +57,7 @@ class TextRenderingPage(QtWidgets.QWidget):
         font_layout.addLayout(font_browser_layout)
         font_layout.addLayout(min_font_layout)
         font_layout.addLayout(max_font_layout)
+        font_layout.addWidget(self.auto_max_font_checkbox)
 
         # Uppercase
         self.uppercase_checkbox = MCheckBox(self.tr("Render Text in UpperCase"))
