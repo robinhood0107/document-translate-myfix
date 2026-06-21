@@ -103,6 +103,40 @@ class RenderBubbleFitTests(unittest.TestCase):
         self.assertEqual(mismatch._render_area_source, "text_bbox")
         self.assertEqual(mismatch.xyxy.tolist(), [400, 400, 450, 450])
 
+    def test_overlapping_detected_bubble_areas_keep_original_bboxes(self) -> None:
+        image = np.zeros((500, 500, 3), dtype=np.uint8)
+        top = _block(
+            xyxy=[140, 120, 220, 165],
+            bubble_xyxy=[80, 80, 320, 260],
+        )
+        bottom = _block(
+            xyxy=[150, 180, 230, 225],
+            bubble_xyxy=[80, 80, 320, 260],
+        )
+
+        get_best_render_area([top, bottom], image)
+
+        self.assertEqual(top._render_area_source, "text_bbox")
+        self.assertEqual(bottom._render_area_source, "text_bbox")
+        self.assertEqual(top.xyxy.tolist(), [140, 120, 220, 165])
+        self.assertEqual(bottom.xyxy.tolist(), [150, 180, 230, 225])
+
+    def test_non_overlapping_detected_bubbles_can_expand_independently(self) -> None:
+        image = np.zeros((500, 500, 3), dtype=np.uint8)
+        left = _block(
+            xyxy=[90, 100, 150, 145],
+            bubble_xyxy=[40, 60, 210, 210],
+        )
+        right = _block(
+            xyxy=[320, 100, 380, 145],
+            bubble_xyxy=[270, 60, 460, 210],
+        )
+
+        get_best_render_area([left, right], image)
+
+        self.assertEqual(left._render_area_source, "detected_bubble")
+        self.assertEqual(right._render_area_source, "detected_bubble")
+
     def test_korean_wrap_uses_qt_metrics_and_respects_max_cap(self) -> None:
         text = (
             "세상에... 나, 난 정말 이렇게 빨리 마주칠 줄 몰랐어! "
