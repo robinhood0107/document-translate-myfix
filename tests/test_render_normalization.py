@@ -90,6 +90,23 @@ class RenderNormalizationTests(unittest.TestCase):
         self.assertIn("decorative-noise", result.reasons)
         self.assertNotIn("quote-to-ascii", result.reasons)
 
+    def test_unsafe_control_chars_are_removed_before_rendering(self) -> None:
+        with mock.patch(
+            "modules.rendering.render.resolve_render_symbol_fallback_font_family",
+            return_value="FallbackFont",
+        ), mock.patch(
+            "modules.rendering.render._render_font_supports",
+            return_value=True,
+        ):
+            result = describe_render_text_sanitization(
+                "안\u200b녕\u2066�\ufffc\ue000\t끝",
+                "StubFont",
+            )
+
+        self.assertEqual(result.text, "안녕 끝")
+        self.assertTrue(result.normalization_applied)
+        self.assertIn("unsafe-control", result.reasons)
+
     def test_severe_repetition_is_collapsed_before_rendering(self) -> None:
         with mock.patch(
             "modules.rendering.render.resolve_render_symbol_fallback_font_family",

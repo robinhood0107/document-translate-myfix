@@ -22,6 +22,7 @@ from modules.utils.text_normalization import (
     OCR_DECORATIVE_NOISE_GLYPHS,
     RENDER_NORMALIZABLE_GLYPHS,
     canonicalize_ellipsis_runs,
+    strip_unsafe_text_control_chars,
 )
 from modules.utils.repetition_guard import guard_severe_repetition
 from modules.utils.render_style_policy import (
@@ -95,6 +96,7 @@ DETECTED_BUBBLE_MIN_FIT_DIMENSION_PX = 16.0
 DETECTED_BUBBLE_DYNAMIC_FONT_HEIGHT_RATIO = 0.45
 DETECTED_BUBBLE_DYNAMIC_FONT_WIDTH_RATIO = 0.32
 DETECTED_BUBBLE_DYNAMIC_FONT_CAP = 160
+DETECTED_BUBBLE_MAX_RENDER_AREA_OVERLAP_RATIO = 0.12
 
 _CJK_RE = re.compile(r"[\uac00-\ud7a3\u3040-\u30ff\u4e00-\u9fff]")
 _BREAK_BEFORE_FORBIDDEN = set(".,!?;:)]}，。！？、；：）」』】》〉…")
@@ -174,10 +176,23 @@ def describe_render_text_sanitization(
         return RenderSanitizationResult("", "", False, [], [])
 
     raw_text = str(text or "")
-    sanitized = canonicalize_ellipsis_runs(_canonicalize_render_symbol_variants(raw_text))
     cleaned_parts: list[str] = []
     replacements: list[dict] = []
     reasons: list[str] = []
+    sanitized = canonicalize_ellipsis_runs(_canonicalize_render_symbol_variants(raw_text))
+    unsafe_sanitized = strip_unsafe_text_control_chars(sanitized)
+    unsafe_controls_removed = unsafe_sanitized != sanitized
+    if unsafe_controls_removed:
+        reasons.append("unsafe-control")
+        replacements.append(
+            {
+                "index": 0,
+                "char": sanitized,
+                "replacement": unsafe_sanitized,
+                "reason": "unsafe-control",
+            }
+        )
+        sanitized = unsafe_sanitized
     repetition_guard = guard_severe_repetition(sanitized)
     if repetition_guard.changed:
         analysis = repetition_guard.analysis
@@ -453,11 +468,21 @@ def draw_text(image: np.ndarray, blk_list: List[TextBlock], font_pth: str, colou
 
 def get_best_render_area(blk_list: List[TextBlock], img, inpainted_img=None):
     """Select safe text render areas without losing the original OCR anchor."""
-    for blk in blk_list:
+    candidates: list[tuple[int, tuple[int, int, int, int]]] = []
+    for block_index, blk in enumerate(blk_list):
         _reset_render_area_metadata(blk)
         text_draw_bounds = _detected_bubble_render_bounds(blk, img)
         if text_draw_bounds is None:
             continue
+        candidates.append((block_index, text_draw_bounds))
+
+    conflict_candidate_indexes = _find_overlapping_detected_bubble_candidate_indexes(
+        [bounds for _index, bounds in candidates]
+    )
+    for candidate_index, (block_index, text_draw_bounds) in enumerate(candidates):
+        if candidate_index in conflict_candidate_indexes:
+            continue
+        blk = blk_list[block_index]
         bdx1, bdy1, bdx2, bdy2 = text_draw_bounds
         blk.xyxy[:] = [bdx1, bdy1, bdx2, bdy2]
         blk._render_area_source = "detected_bubble"
@@ -467,6 +492,28 @@ def get_best_render_area(blk_list: List[TextBlock], img, inpainted_img=None):
         adjust_blks_size(blk_list, img, -5, -5)
 
     return blk_list
+
+
+def _find_overlapping_detected_bubble_candidate_indexes(
+    candidates: list[tuple[int, int, int, int]]
+) -> set[int]:
+    conflicts: set[int] = set()
+    for i, first in enumerate(candidates):
+        first_area = _bbox_area(first)
+        if first_area <= 0.0:
+            continue
+        for j in range(i + 1, len(candidates)):
+            second = candidates[j]
+            second_area = _bbox_area(second)
+            if second_area <= 0.0:
+                continue
+            overlap = _intersection_area(first, second)
+            if overlap <= 0.0:
+                continue
+            overlap_ratio = overlap / max(1.0, min(first_area, second_area))
+            if overlap_ratio > DETECTED_BUBBLE_MAX_RENDER_AREA_OVERLAP_RATIO:
+                conflicts.update({i, j})
+    return conflicts
 
 
 def build_render_rects_for_block(blk: TextBlock) -> tuple[tuple[float, float, float, float], tuple[float, float, float, float]]:
