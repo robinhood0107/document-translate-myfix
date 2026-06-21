@@ -272,6 +272,25 @@ class RenderBubbleFitTests(unittest.TestCase):
         self.assertGreaterEqual(cap, 110)
         self.assertLessEqual(cap, DETECTED_BUBBLE_DYNAMIC_FONT_CAP)
 
+    def test_auto_max_detected_bubble_still_expands_when_initial_text_is_not_underfill(self) -> None:
+        block = _block(
+            xyxy=[260, 150, 340, 210],
+            bubble_xyxy=[50, 100, 650, 380],
+        )
+        block._render_area_source = "detected_bubble"
+        block._render_area_xyxy = [50, 100, 650, 380]
+
+        cap = get_dynamic_bubble_font_cap(
+            block,
+            configured_max_font_size=40,
+            rendered_width=260,
+            rendered_height=160,
+            vertical=False,
+            final_font_size=40,
+        )
+
+        self.assertGreater(cap, 40)
+
     def test_dynamic_bubble_font_cap_does_not_change_text_free_or_vertical_blocks(self) -> None:
         free = _block(
             xyxy=[100, 100, 180, 160],
