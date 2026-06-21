@@ -92,8 +92,6 @@ MIN_BUBBLE_RENDER_AREA_GAIN = 0.90
 DETECTED_BUBBLE_FIT_CLEARANCE_PX = 8.0
 DETECTED_BUBBLE_OUTLINE_CLEARANCE_MULTIPLIER = 2.0
 DETECTED_BUBBLE_MIN_FIT_DIMENSION_PX = 16.0
-DETECTED_BUBBLE_UNDERFILL_AREA_RATIO = 0.32
-DETECTED_BUBBLE_UNDERFILL_HEIGHT_RATIO = 0.55
 DETECTED_BUBBLE_DYNAMIC_FONT_HEIGHT_RATIO = 0.45
 DETECTED_BUBBLE_DYNAMIC_FONT_WIDTH_RATIO = 0.32
 DETECTED_BUBBLE_DYNAMIC_FONT_CAP = 160
@@ -552,16 +550,6 @@ def get_dynamic_bubble_font_cap(
     source_width = float(source_xyxy[2] - source_xyxy[0])
     source_height = float(source_xyxy[3] - source_xyxy[1])
     if source_width <= 0.0 or source_height <= 0.0:
-        return base_max
-
-    area_ratio = (max(0.0, float(rendered_width)) * max(0.0, float(rendered_height))) / (
-        source_width * source_height
-    )
-    height_ratio = max(0.0, float(rendered_height)) / source_height
-    if (
-        area_ratio >= DETECTED_BUBBLE_UNDERFILL_AREA_RATIO
-        or height_ratio >= DETECTED_BUBBLE_UNDERFILL_HEIGHT_RATIO
-    ):
         return base_max
 
     height_cap = int(source_height * DETECTED_BUBBLE_DYNAMIC_FONT_HEIGHT_RATIO)
