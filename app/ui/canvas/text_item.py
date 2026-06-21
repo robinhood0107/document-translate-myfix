@@ -303,6 +303,7 @@ class TextBlockItem(QGraphicsTextItem):
             self.set_outline(self.outline_color, self.outline_width)
             self.apply_vertical_alignment()
         else:
+            self.setTextWidth(width)
             self.set_plain_text(text)
 
     def set_plain_text(self, text):

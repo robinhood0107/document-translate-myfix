@@ -1016,6 +1016,9 @@ class StageBatchedProcessor(BatchProcessor):
             vertical = is_vertical_block(blk, trg_lng_cd)
             text_to_wrap = translation
             alignment = self.main_page.button_to_alignment[render_settings.alignment_id]
+            source_rect, block_anchor = build_render_rects_for_block(blk)
+            block_width = int(source_rect[2])
+            block_height = int(source_rect[3])
             fit_clearance = get_render_fit_clearance_for_block(
                 blk,
                 render_settings.outline_width,
@@ -1108,7 +1111,6 @@ class StageBatchedProcessor(BatchProcessor):
             blk._render_normalization_replacements = list(
                 render_normalization.replacements
             ) + list(render_markup.replacements)
-            source_rect, block_anchor = build_render_rects_for_block(blk)
             vertical_alignment = self.main_page.button_to_vertical_alignment.get(
                 render_settings.vertical_alignment_id,
                 VERTICAL_ALIGNMENT_TOP,

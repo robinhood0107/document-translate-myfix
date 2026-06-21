@@ -206,6 +206,7 @@ class SettingsPage(QtWidgets.QWidget):
             self.ui.use_gpu_checkbox,
             self.ui.image_checkbox,
             self.ui.uppercase_checkbox,
+            self.ui.auto_max_font_checkbox,
             self.ui.save_keys_checkbox,
             self.ui.paddleocr_vl_prettify_checkbox,
             self.ui.paddleocr_vl_visualize_checkbox,
@@ -635,6 +636,28 @@ class SettingsPage(QtWidgets.QWidget):
 
         return settings
 
+    @staticmethod
+    def _selected_color_name(widget, fallback: str) -> str:
+        value = widget.property("selected_color") if widget is not None else None
+        value = str(value or "").strip()
+        return value or fallback
+
+    def get_text_rendering_settings(self) -> dict[str, object]:
+        return {
+            "min_font_size": int(self.ui.min_font_spinbox.value()),
+            "max_font_size": int(self.ui.max_font_spinbox.value()),
+            "auto_max_font_size": bool(self.ui.auto_max_font_checkbox.isChecked()),
+            "upper_case": bool(self.ui.uppercase_checkbox.isChecked()),
+            "color": self._selected_color_name(
+                getattr(self.ui, "color_button", None),
+                "#000000",
+            ),
+            "outline_color": self._selected_color_name(
+                getattr(self.ui, "outline_color_button", None),
+                "#ffffff",
+            ),
+        }
+
     def get_all_settings(self):
         return {
             "language": self.get_language(),
@@ -655,6 +678,7 @@ class SettingsPage(QtWidgets.QWidget):
             "mangalmm_ocr": self.get_mangalmm_ocr_settings(),
             "gemma_local_server": self.get_gemma_local_server_settings(),
             "llm": self.get_llm_settings(),
+            "text_rendering": self.get_text_rendering_settings(),
             "export": self.get_export_settings(),
             "series": self.get_series_settings(),
             "notifications": self.get_notification_settings(),
@@ -1025,6 +1049,21 @@ class SettingsPage(QtWidgets.QWidget):
         settings.beginGroup("llm")
         self.ui.extra_context.setPlainText(settings.value("extra_context", ""))
         self.ui.image_checkbox.setChecked(settings.value("image_input_enabled", False, type=bool))
+        settings.endGroup()
+
+        settings.beginGroup("text_rendering")
+        self.ui.min_font_spinbox.setValue(
+            settings.value("min_font_size", self.ui.min_font_spinbox.value(), type=int)
+        )
+        self.ui.max_font_spinbox.setValue(
+            settings.value("max_font_size", self.ui.max_font_spinbox.value(), type=int)
+        )
+        self.ui.auto_max_font_checkbox.setChecked(
+            settings.value("auto_max_font_size", True, type=bool)
+        )
+        self.ui.uppercase_checkbox.setChecked(
+            settings.value("upper_case", False, type=bool)
+        )
         settings.endGroup()
 
         settings.beginGroup("export")

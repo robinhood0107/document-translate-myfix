@@ -179,6 +179,9 @@ class RenderMixin:
 
             vertical = is_vertical_block(block, target_lang_code)
             text_to_wrap = translation
+            source_rect, block_anchor = build_render_rects_for_block(block)
+            width = int(source_rect[2])
+            height = int(source_rect[3])
             fit_clearance = get_render_fit_clearance_for_block(
                 block,
                 outline_width,
@@ -286,7 +289,6 @@ class RenderMixin:
                 render_normalization.replacements
             ) + list(render_markup.replacements)
 
-            source_rect, block_anchor = build_render_rects_for_block(block)
             position, item_width, item_height = build_text_item_layout_geometry(
                 source_rect,
                 rendered_height,

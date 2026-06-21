@@ -1892,6 +1892,9 @@ class BatchProcessor:
                 vertical = is_vertical_block(blk, trg_lng_cd)
 
                 text_to_wrap = translation
+                source_rect, block_anchor = build_render_rects_for_block(blk)
+                block_width = int(source_rect[2])
+                block_height = int(source_rect[3])
                 fit_clearance = get_render_fit_clearance_for_block(
                     blk,
                     outline_width,
@@ -1996,7 +1999,6 @@ class BatchProcessor:
                 if image_path == file_on_display:
                     self.main_page.blk_rendered.emit(translation, font_size, blk, image_path)
 
-                source_rect, block_anchor = build_render_rects_for_block(blk)
                 position, item_width, item_height = build_text_item_layout_geometry(
                     source_rect,
                     rendered_height,

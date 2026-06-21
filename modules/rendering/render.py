@@ -95,7 +95,8 @@ DETECTED_BUBBLE_MIN_FIT_DIMENSION_PX = 16.0
 DETECTED_BUBBLE_UNDERFILL_AREA_RATIO = 0.32
 DETECTED_BUBBLE_UNDERFILL_HEIGHT_RATIO = 0.55
 DETECTED_BUBBLE_DYNAMIC_FONT_HEIGHT_RATIO = 0.45
-DETECTED_BUBBLE_DYNAMIC_FONT_CAP = 96
+DETECTED_BUBBLE_DYNAMIC_FONT_WIDTH_RATIO = 0.32
+DETECTED_BUBBLE_DYNAMIC_FONT_CAP = 160
 
 _CJK_RE = re.compile(r"[\uac00-\ud7a3\u3040-\u30ff\u4e00-\u9fff]")
 _BREAK_BEFORE_FORBIDDEN = set(".,!?;:)]}，。！？、；：）」』】》〉…")
@@ -472,8 +473,11 @@ def get_best_render_area(blk_list: List[TextBlock], img, inpainted_img=None):
 
 def build_render_rects_for_block(blk: TextBlock) -> tuple[tuple[float, float, float, float], tuple[float, float, float, float]]:
     """Return layout source_rect and original OCR block_anchor for a render block."""
-    source_rect = _xyxy_to_rect_tuple(getattr(blk, "xyxy", None))
-    anchor_xyxy = _current_anchor_xyxy(blk)
+    render_area = None
+    if getattr(blk, "_render_area_source", "") == "detected_bubble":
+        render_area = _normalize_xyxy(getattr(blk, "_render_area_xyxy", None))
+    source_rect = _xyxy_to_rect_tuple(render_area or getattr(blk, "xyxy", None))
+    anchor_xyxy = _normalize_xyxy(getattr(blk, "_render_original_xyxy", None)) or _current_anchor_xyxy(blk)
     block_anchor = _xyxy_to_rect_tuple(anchor_xyxy)
     return source_rect, block_anchor
 
@@ -560,8 +564,10 @@ def get_dynamic_bubble_font_cap(
     ):
         return base_max
 
-    dynamic_cap = int(source_height * DETECTED_BUBBLE_DYNAMIC_FONT_HEIGHT_RATIO)
-    return int(min(DETECTED_BUBBLE_DYNAMIC_FONT_CAP, max(base_max, dynamic_cap)))
+    height_cap = int(source_height * DETECTED_BUBBLE_DYNAMIC_FONT_HEIGHT_RATIO)
+    width_cap = int(source_width * DETECTED_BUBBLE_DYNAMIC_FONT_WIDTH_RATIO)
+    dynamic_cap = max(base_max, height_cap, width_cap)
+    return int(min(DETECTED_BUBBLE_DYNAMIC_FONT_CAP, dynamic_cap))
 
 
 def _reset_render_area_metadata(blk: TextBlock) -> None:
