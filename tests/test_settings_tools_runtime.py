@@ -247,6 +247,31 @@ class SettingsToolsRuntimeTests(unittest.TestCase):
         self.assertFalse(settings.value("series/resume_from_first_incomplete", True, type=bool))
         self.assertTrue(settings.value("series/return_to_series_after_completion", False, type=bool))
 
+    def test_all_settings_includes_text_rendering_auto_max_font(self) -> None:
+        page = self._make_page()
+        page.load_settings()
+
+        page.ui.min_font_spinbox.setValue(7)
+        page.ui.max_font_spinbox.setValue(54)
+        page.ui.auto_max_font_checkbox.setChecked(False)
+
+        all_settings = page.get_all_settings()
+
+        self.assertIn("text_rendering", all_settings)
+        self.assertEqual(all_settings["text_rendering"]["min_font_size"], 7)
+        self.assertEqual(all_settings["text_rendering"]["max_font_size"], 54)
+        self.assertFalse(all_settings["text_rendering"]["auto_max_font_size"])
+
+        page.save_settings()
+        page.deleteLater()
+
+        reloaded = self._make_page()
+        reloaded.load_settings()
+
+        self.assertEqual(reloaded.ui.min_font_spinbox.value(), 7)
+        self.assertEqual(reloaded.ui.max_font_spinbox.value(), 54)
+        self.assertFalse(reloaded.ui.auto_max_font_checkbox.isChecked())
+
 
 if __name__ == "__main__":
     unittest.main()

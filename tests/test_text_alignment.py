@@ -55,6 +55,21 @@ class TextAlignmentTests(unittest.TestCase):
             QtCore.Qt.AlignmentFlag.AlignRight,
         )
 
+    def test_plain_text_keeps_requested_layout_width_for_centering(self) -> None:
+        item = TextBlockItem(
+            "아!",
+            alignment=QtCore.Qt.AlignmentFlag.AlignCenter,
+            source_rect=(10, 20, 260, 160),
+        )
+
+        item.set_text("아!", 260)
+
+        self.assertGreaterEqual(item.textWidth(), 260)
+        self.assertEqual(
+            item.document().firstBlock().blockFormat().alignment(),
+            QtCore.Qt.AlignmentFlag.AlignCenter,
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

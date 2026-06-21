@@ -7,6 +7,7 @@ import numpy as np
 from PySide6 import QtCore, QtWidgets
 
 from modules.rendering.render import (
+    DETECTED_BUBBLE_DYNAMIC_FONT_CAP,
     build_render_rects_for_block,
     build_text_item_layout_geometry,
     get_dynamic_bubble_font_cap,
@@ -67,6 +68,21 @@ class RenderBubbleFitTests(unittest.TestCase):
         self.assertEqual(first_anchor, (1037.0, 80.0, 520.0, 228.0))
         self.assertEqual(second_anchor, first_anchor)
         self.assertEqual(second_source, first_source)
+
+    def test_render_rect_prefers_detected_bubble_area_after_later_bbox_adjustment(self) -> None:
+        block = _block(
+            xyxy=[1037, 80, 1557, 308],
+            bubble_xyxy=[919, 17, 1693, 366],
+        )
+        block._render_original_xyxy = [1037, 80, 1557, 308]
+        block._render_area_source = "detected_bubble"
+        block._render_area_xyxy = [980, 70, 1620, 340]
+        block.xyxy[:] = [1042, 85, 1552, 303]
+
+        source_rect, block_anchor = build_render_rects_for_block(block)
+
+        self.assertEqual(source_rect, (980.0, 70.0, 640.0, 270.0))
+        self.assertEqual(block_anchor, (1037.0, 80.0, 520.0, 228.0))
 
     def test_free_text_and_invalid_bubbles_keep_original_bbox(self) -> None:
         image = np.zeros((500, 500, 3), dtype=np.uint8)
@@ -234,7 +250,27 @@ class RenderBubbleFitTests(unittest.TestCase):
         )
 
         self.assertGreater(cap, 60)
-        self.assertLessEqual(cap, 96)
+        self.assertLessEqual(cap, DETECTED_BUBBLE_DYNAMIC_FONT_CAP)
+
+    def test_dynamic_bubble_font_cap_uses_wide_bubble_for_short_underfilled_text(self) -> None:
+        block = _block(
+            xyxy=[260, 150, 340, 210],
+            bubble_xyxy=[50, 100, 750, 280],
+        )
+        block._render_area_source = "detected_bubble"
+        block._render_area_xyxy = [50, 100, 750, 280]
+
+        cap = get_dynamic_bubble_font_cap(
+            block,
+            configured_max_font_size=40,
+            rendered_width=60,
+            rendered_height=50,
+            vertical=False,
+            final_font_size=40,
+        )
+
+        self.assertGreaterEqual(cap, 110)
+        self.assertLessEqual(cap, DETECTED_BUBBLE_DYNAMIC_FONT_CAP)
 
     def test_dynamic_bubble_font_cap_does_not_change_text_free_or_vertical_blocks(self) -> None:
         free = _block(

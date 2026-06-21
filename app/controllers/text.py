@@ -27,6 +27,7 @@ from modules.rendering.render import (
     manual_wrap,
     is_vertical_block,
     pyside_word_wrap,
+    refit_detected_bubble_text_if_underfilled,
 )
 from modules.utils.pipeline_config import font_selected
 from modules.utils.language_utils import get_language_code, get_layout_direction, is_no_space_lang
@@ -365,6 +366,13 @@ class TextController:
                 continue
 
             vertical = is_vertical_block(render_blk, trg_lng_cd)
+            source_rect, block_anchor = self._get_render_rects_for_block(render_blk)
+            block_width = int(source_rect[2])
+            block_height = int(source_rect[3])
+            fit_clearance = get_render_fit_clearance_for_block(
+                render_blk,
+                render_settings.outline_width,
+            )
             wrapped, font_size, rendered_width, rendered_height = pyside_word_wrap(
                 translation,
                 render_settings.font_family,
@@ -380,11 +388,33 @@ class TextController:
                 render_settings.max_font_size,
                 render_settings.min_font_size,
                 vertical,
-                fit_clearance=get_render_fit_clearance_for_block(
-                    render_blk,
-                    render_settings.outline_width,
-                ),
+                fit_clearance=fit_clearance,
                 return_metrics=True,
+            )
+            wrapped, font_size, rendered_width, rendered_height = (
+                refit_detected_bubble_text_if_underfilled(
+                    render_blk,
+                    translation,
+                    render_settings.font_family,
+                    block_width,
+                    block_height,
+                    float(render_settings.line_spacing),
+                    float(render_settings.outline_width),
+                    render_settings.bold,
+                    render_settings.italic,
+                    render_settings.underline,
+                    self.main.button_to_alignment[render_settings.alignment_id],
+                    render_settings.direction,
+                    render_settings.max_font_size,
+                    render_settings.min_font_size,
+                    vertical,
+                    fit_clearance,
+                    wrapped,
+                    font_size,
+                    rendered_width,
+                    rendered_height,
+                    auto_max_font_size=getattr(render_settings, "auto_max_font_size", True),
+                )
             )
 
             if is_no_space_lang(trg_lng_cd):
@@ -420,7 +450,6 @@ class TextController:
                 render_normalization.replacements
             ) + list(render_markup.replacements)
 
-            source_rect, block_anchor = self._get_render_rects_for_block(render_blk)
             text_props = self._build_text_item_properties(
                 original_blk,
                 original_blk._render_html,
@@ -1321,6 +1350,13 @@ class TextController:
                             continue
 
                         vertical = is_vertical_block(blk, trg_lng_cd)
+                        source_rect, block_anchor = self._get_render_rects_for_block(blk)
+                        block_width = int(source_rect[2])
+                        block_height = int(source_rect[3])
+                        fit_clearance = get_render_fit_clearance_for_block(
+                            blk,
+                            outline_width,
+                        )
                         wrapped, font_size, rendered_width, rendered_height = pyside_word_wrap(
                             translation,
                             font_family,
@@ -1336,11 +1372,33 @@ class TextController:
                             max_font_size,
                             min_font_size,
                             vertical,
-                            fit_clearance=get_render_fit_clearance_for_block(
-                                blk,
-                                outline_width,
-                            ),
+                            fit_clearance=fit_clearance,
                             return_metrics=True,
+                        )
+                        wrapped, font_size, rendered_width, rendered_height = (
+                            refit_detected_bubble_text_if_underfilled(
+                                blk,
+                                translation,
+                                font_family,
+                                block_width,
+                                block_height,
+                                line_spacing,
+                                outline_width,
+                                bold,
+                                italic,
+                                underline,
+                                alignment,
+                                direction,
+                                max_font_size,
+                                min_font_size,
+                                vertical,
+                                fit_clearance,
+                                wrapped,
+                                font_size,
+                                rendered_width,
+                                rendered_height,
+                                auto_max_font_size=getattr(render_settings, "auto_max_font_size", True),
+                            )
                         )
                         if is_no_space_lang(trg_lng_cd):
                             wrapped = wrapped.replace(" ", "")
@@ -1375,7 +1433,6 @@ class TextController:
                             render_normalization.replacements
                         ) + list(render_markup.replacements)
 
-                        source_rect, block_anchor = self._get_render_rects_for_block(blk)
                         text_props = self._build_text_item_properties(
                             blk,
                             blk._render_html,
