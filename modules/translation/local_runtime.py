@@ -423,7 +423,14 @@ class LocalGemmaRuntimeManager:
                 model_id = str(entry.get("id", "")).strip()
                 if model_id:
                     model_ids.append(model_id)
-        if model_ids and expected_model and expected_model not in model_ids:
+        expected_model_name = Path(str(expected_model or "")).name
+        loaded_model_names = {Path(model_id).name for model_id in model_ids}
+        if (
+            model_ids
+            and expected_model
+            and expected_model not in model_ids
+            and expected_model_name not in loaded_model_names
+        ):
             raise LocalServiceResponseError(
                 (
                     "Gemma server is reachable but loaded models do not match the configured model.\n"
