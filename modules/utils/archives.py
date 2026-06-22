@@ -128,7 +128,7 @@ def _get_cached_pdf(file_path: str):
 
 
 def _is_cbz_native_archive(file_lower: str) -> bool:
-    return file_lower.endswith((".cbz", ".cbr"))
+    return file_lower.endswith((".cbr",))
 
 
 def _load_comic_archive(file_path: str):
@@ -167,6 +167,27 @@ def _comic_entry_name(page_index: int, page_name: str, ext: str) -> str:
     if not safe_name:
         safe_name = f"page{page_index + 1:04d}{ext}"
     return f"{page_index + 1:06d}_{safe_name}"
+
+
+def _archive_member_name(entry: dict) -> str:
+    return str(entry.get("archive_member_name") or entry.get("entry_name") or "")
+
+
+def _list_cbz_zip_entries(file_path: str) -> list[dict]:
+    with zipfile.ZipFile(file_path, 'r') as archive:
+        names = [name for name in archive.namelist() if is_image_file(name)]
+
+    entries: list[dict] = []
+    for page_index, name in enumerate(sorted(names, key=natural_sort_key)):
+        ext = _safe_ext(name)
+        entries.append({
+            "kind": "archive_entry",
+            "entry_name": _comic_entry_name(page_index, name, ext),
+            "archive_member_name": name,
+            "ext": ext,
+            "page_index": page_index,
+        })
+    return entries
 
 
 def _list_cbz_native_entries(file_path: str) -> list[dict]:
@@ -213,7 +234,10 @@ def list_archive_image_entries(file_path: str) -> list[dict]:
     file_lower = file_path.lower()
     entries: list[dict] = []
 
-    if _is_cbz_native_archive(file_lower):
+    if file_lower.endswith('.cbz'):
+        entries = _list_cbz_zip_entries(file_path)
+
+    elif _is_cbz_native_archive(file_lower):
         entries = _list_cbz_native_entries(file_path)
 
     elif file_lower.endswith(('.zip', '.epub')):
@@ -284,7 +308,7 @@ def materialize_archive_entry(file_path: str, entry: dict, output_path: str) -> 
     if kind != "archive_entry":
         return False
 
-    entry_name = str(entry.get("entry_name", ""))
+    entry_name = _archive_member_name(entry)
     if not entry_name:
         return False
 
@@ -293,14 +317,14 @@ def materialize_archive_entry(file_path: str, entry: dict, output_path: str) -> 
     if out_dir:
         os.makedirs(out_dir, exist_ok=True)
 
-    if _is_cbz_native_archive(file_lower):
-        return _materialize_cbz_native_entry(file_path, entry, output_path)
-
-    if file_lower.endswith(('.zip', '.epub')):
+    if file_lower.endswith(('.zip', '.epub', '.cbz')):
         with zipfile.ZipFile(file_path, 'r') as archive:
             with archive.open(entry_name) as src, open(output_path, "wb") as dst:
                 shutil.copyfileobj(src, dst)
         return True
+
+    if _is_cbz_native_archive(file_lower):
+        return _materialize_cbz_native_entry(file_path, entry, output_path)
 
     if file_lower.endswith(('.rar',)):
         import rarfile
@@ -351,16 +375,10 @@ def materialize_archive_entries(file_path: str, items: list[tuple[dict, str]]) -
                     completed += 1
         return completed
 
-    if _is_cbz_native_archive(file_lower):
-        for entry, output_path in items:
-            if _materialize_cbz_native_entry(file_path, entry, output_path):
-                completed += 1
-        return completed
-
-    if file_lower.endswith(('.zip', '.epub')):
+    if file_lower.endswith(('.zip', '.epub', '.cbz')):
         with zipfile.ZipFile(file_path, 'r') as archive:
             for entry, output_path in items:
-                entry_name = str(entry.get("entry_name", ""))
+                entry_name = _archive_member_name(entry)
                 if not entry_name:
                     continue
                 out_dir = os.path.dirname(output_path)
@@ -372,6 +390,12 @@ def materialize_archive_entries(file_path: str, items: list[tuple[dict, str]]) -
                     completed += 1
                 except Exception:
                     continue
+        return completed
+
+    if _is_cbz_native_archive(file_lower):
+        for entry, output_path in items:
+            if _materialize_cbz_native_entry(file_path, entry, output_path):
+                completed += 1
         return completed
 
     if file_lower.endswith(('.rar',)):

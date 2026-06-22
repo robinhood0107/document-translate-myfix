@@ -77,6 +77,27 @@ class ArchiveCbzIntegrationTests(unittest.TestCase):
             with Image.open(out) as image:
                 self.assertEqual(image.size, (12, 12))
 
+    def test_cbz_entries_include_jpeg2000_pages(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            src = root / "001.jp2"
+            bytes_src = self._make_jp2(src, (12, 34, 56))
+
+            archive_path = root / "sample.cbz"
+            with zipfile.ZipFile(archive_path, "w") as archive:
+                archive.write(src, arcname="001.jp2")
+
+            entries = list_archive_image_entries(str(archive_path))
+            self.assertEqual(len(entries), 1)
+            self.assertEqual(entries[0]["ext"], ".jp2")
+            self.assertEqual(entries[0]["page_index"], 0)
+
+            out = root / "out.jp2"
+            self.assertTrue(materialize_archive_entry(str(archive_path), entries[0], str(out)))
+            self.assertEqual(out.read_bytes(), bytes_src)
+            with Image.open(out) as image:
+                self.assertEqual(image.size, (12, 12))
+
     def test_file_handler_keeps_lazy_contract_for_cbz(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
