@@ -142,7 +142,11 @@ class RenderMixin:
             if float(block.xyxy[1]) >= 0 and float(block.xyxy[3]) <= float(image_shape[0])
         ]
         if in_bounds_blocks:
-            get_best_render_area(in_bounds_blocks, virtual_img)
+            get_best_render_area(
+                in_bounds_blocks,
+                virtual_img,
+                auto_max_font_profile=getattr(render_settings, "auto_max_font_profile", "current"),
+            )
 
         should_emit_live = False
         webtoon_manager = getattr(self.main_page.image_viewer, "webtoon_manager", None)
@@ -185,6 +189,7 @@ class RenderMixin:
             fit_clearance = get_render_fit_clearance_for_block(
                 block,
                 outline_width,
+                auto_max_font_profile=getattr(render_settings, "auto_max_font_profile", "current"),
             )
             (
                 wrapped_translation,
@@ -236,6 +241,7 @@ class RenderMixin:
                 rendered_width,
                 rendered_height,
                 auto_max_font_size=getattr(render_settings, "auto_max_font_size", True),
+                auto_max_font_profile=getattr(render_settings, "auto_max_font_profile", "current"),
             )
             block._text_fit_status = (
                 "needs_review"

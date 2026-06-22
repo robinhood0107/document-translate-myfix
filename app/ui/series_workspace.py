@@ -1063,6 +1063,13 @@ class SeriesSettingsDialog(QtWidgets.QDialog):
         self.auto_max_font_checkbox.setToolTip(
             self.tr("Automatically expands the maximum font size inside detected speech bubbles when the fitted text is too small.")
         )
+        self.auto_max_font_profile_combo = QtWidgets.QComboBox(tab)
+        self.auto_max_font_profile_combo.addItem(self.tr("Current"), "current")
+        self.auto_max_font_profile_combo.addItem(self.tr("Strong"), "strong")
+        self.auto_max_font_profile_combo.setToolTip(
+            self.tr("Choose how aggressively automatic bubble font fitting expands detected speech bubbles.")
+        )
+        self.auto_max_font_checkbox.toggled.connect(self.auto_max_font_profile_combo.setEnabled)
         self.line_spacing_combo = QtWidgets.QComboBox(tab)
         self.line_spacing_combo.setEditable(True)
         self.line_spacing_combo.addItems(["1.0", "1.1", "1.2", "1.3", "1.4", "1.5"])
@@ -1110,11 +1117,18 @@ class SeriesSettingsDialog(QtWidgets.QDialog):
         outline_layout.addWidget(self.outline_width_combo)
         outline_layout.addStretch(1)
 
+        auto_font_row = QtWidgets.QWidget(tab)
+        auto_font_layout = QtWidgets.QHBoxLayout(auto_font_row)
+        auto_font_layout.setContentsMargins(0, 0, 0, 0)
+        auto_font_layout.addWidget(self.auto_max_font_checkbox)
+        auto_font_layout.addWidget(self.auto_max_font_profile_combo)
+        auto_font_layout.addStretch(1)
+
         typography_form = self._make_rows_layout(
             self._make_field_row(self.tr("Font:"), self.font_combo),
             self._make_field_row(self.tr("Min font size:"), self.min_font_spin),
             self._make_field_row(self.tr("Max font size:"), self.max_font_spin),
-            self._make_check_row(self.auto_max_font_checkbox),
+            self._make_field_row(self.tr("Auto maximum font:"), auto_font_row),
             self._make_field_row(self.tr("Line spacing:"), self.line_spacing_combo),
         )
         self.render_typography_group = self._make_section(
@@ -1562,6 +1576,11 @@ class SeriesSettingsDialog(QtWidgets.QDialog):
         self.min_font_spin.setValue(max(1, int(values.get("min_font_size", 5) or 5)))
         self.max_font_spin.setValue(max(1, int(values.get("max_font_size", 40) or 40)))
         self.auto_max_font_checkbox.setChecked(bool(values.get("auto_max_font_size", True)))
+        self._set_combo_value(
+            self.auto_max_font_profile_combo,
+            str(values.get("auto_max_font_profile") or "current"),
+        )
+        self.auto_max_font_profile_combo.setEnabled(self.auto_max_font_checkbox.isChecked())
         self.line_spacing_combo.setCurrentText(str(values.get("line_spacing") or "1.0"))
         self._set_button_color(self.text_color_button, str(values.get("color") or "#000000"))
         self.force_color_checkbox.setChecked(bool(values.get("force_font_color", False)))
@@ -1583,6 +1602,7 @@ class SeriesSettingsDialog(QtWidgets.QDialog):
             "min_font_size": int(self.min_font_spin.value()),
             "max_font_size": int(self.max_font_spin.value()),
             "auto_max_font_size": self.auto_max_font_checkbox.isChecked(),
+            "auto_max_font_profile": str(self.auto_max_font_profile_combo.currentData() or "current"),
             "color": str(self.text_color_button.property("selected_color") or "#000000"),
             "force_font_color": self.force_color_checkbox.isChecked(),
             "upper_case": self.uppercase_checkbox.isChecked(),

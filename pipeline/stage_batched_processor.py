@@ -1022,6 +1022,7 @@ class StageBatchedProcessor(BatchProcessor):
             fit_clearance = get_render_fit_clearance_for_block(
                 blk,
                 render_settings.outline_width,
+                auto_max_font_profile=getattr(render_settings, "auto_max_font_profile", "current"),
             )
             translation, font_size, rendered_width, rendered_height = pyside_word_wrap(
                 text_to_wrap,
@@ -1064,6 +1065,7 @@ class StageBatchedProcessor(BatchProcessor):
                     rendered_width,
                     rendered_height,
                     auto_max_font_size=getattr(render_settings, "auto_max_font_size", True),
+                    auto_max_font_profile=getattr(render_settings, "auto_max_font_profile", "current"),
                 )
             )
             blk._text_fit_status = (
@@ -1236,7 +1238,12 @@ class StageBatchedProcessor(BatchProcessor):
                 if not ctx.no_text_detected:
                     format_translations(ctx.blk_list, trg_lng_cd, upper_case=render_settings.upper_case)
                     self._raise_if_cancelled()
-                    get_best_render_area(ctx.blk_list, ctx.image, ctx.inpaint_input_img)
+                    get_best_render_area(
+                        ctx.blk_list,
+                        ctx.image,
+                        ctx.inpaint_input_img,
+                        auto_max_font_profile=getattr(render_settings, "auto_max_font_profile", "current"),
+                    )
                 self._render_page_text_items(ctx, render_settings=render_settings, trg_lng_cd=trg_lng_cd)
                 self._raise_if_cancelled()
                 page_state = self._ensure_page_state(ctx.image_path)

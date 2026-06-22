@@ -39,6 +39,7 @@ class SeriesWorkspaceRuntimeTests(unittest.TestCase):
                     "font_family": "Ownglyph gumama3",
                     "max_font_size": 40,
                     "line_spacing": "1.0",
+                    "auto_max_font_profile": "strong",
                     "alignment_id": 1,
                     "outline": True,
                     "outline_width": "3.0",
@@ -230,6 +231,7 @@ class SeriesWorkspaceRuntimeTests(unittest.TestCase):
                     "min_font_size": 5,
                     "max_font_size": 42,
                     "line_spacing": "1.2",
+                    "auto_max_font_profile": "strong",
                     "color": "#123456",
                     "force_font_color": True,
                     "alignment_id": 2,
@@ -277,6 +279,7 @@ class SeriesWorkspaceRuntimeTests(unittest.TestCase):
         self.assertEqual(global_settings["render_settings"]["font_family"], "Ownglyph gumama3")
         self.assertEqual(global_settings["render_settings"]["max_font_size"], 42)
         self.assertTrue(global_settings["render_settings"]["auto_max_font_size"])
+        self.assertEqual(global_settings["render_settings"]["auto_max_font_profile"], "strong")
         self.assertEqual(global_settings["render_settings"]["color"], "#123456")
         self.assertTrue(global_settings["render_settings"]["force_font_color"])
         self.assertEqual(global_settings["render_settings"]["alignment_id"], 2)

@@ -2554,6 +2554,18 @@ These values are copied into new series projects and can be adjusted per series.
         <translation>감지된 말풍선 안에서 맞춤 텍스트가 너무 작으면 최대 글꼴 크기를 자동으로 확장합니다.</translation>
     </message>
     <message>
+        <source>Current</source>
+        <translation>현재</translation>
+    </message>
+    <message>
+        <source>Strong</source>
+        <translation>강하게</translation>
+    </message>
+    <message>
+        <source>Choose how aggressively automatic bubble font fitting expands detected speech bubbles.</source>
+        <translation>자동 말풍선 글꼴 맞춤이 감지된 말풍선을 얼마나 적극적으로 확장할지 선택합니다.</translation>
+    </message>
+    <message>
         <source>Use Selected Color</source>
         <translation>선택한 색상 사용</translation>
     </message>
@@ -2608,6 +2620,10 @@ These values are copied into new series projects and can be adjusted per series.
     <message>
         <source>Max font size:</source>
         <translation>최대 글꼴 크기:</translation>
+    </message>
+    <message>
+        <source>Auto maximum font:</source>
+        <translation>최대 글꼴 자동:</translation>
     </message>
     <message>
         <source>Line spacing:</source>
@@ -3371,6 +3387,18 @@ Choose either a project file or image/document/archive files.</source>
     <message>
         <source>Automatically expands the maximum font size inside detected speech bubbles when the fitted text is too small.</source>
         <translation>감지된 말풍선 안에서 맞춤 텍스트가 너무 작으면 최대 글꼴 크기를 자동으로 확장합니다.</translation>
+    </message>
+    <message>
+        <source>Current</source>
+        <translation>현재</translation>
+    </message>
+    <message>
+        <source>Strong</source>
+        <translation>강하게</translation>
+    </message>
+    <message>
+        <source>Choose how aggressively automatic bubble font fitting expands detected speech bubbles.</source>
+        <translation>자동 말풍선 글꼴 맞춤이 감지된 말풍선을 얼마나 적극적으로 확장할지 선택합니다.</translation>
     </message>
     <message>
         <source>Font:</source>

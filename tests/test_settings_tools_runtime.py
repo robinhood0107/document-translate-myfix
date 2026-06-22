@@ -254,6 +254,9 @@ class SettingsToolsRuntimeTests(unittest.TestCase):
         page.ui.min_font_spinbox.setValue(7)
         page.ui.max_font_spinbox.setValue(54)
         page.ui.auto_max_font_checkbox.setChecked(False)
+        page.ui.auto_max_font_profile_combo.setCurrentIndex(
+            page.ui.auto_max_font_profile_combo.findData("strong")
+        )
 
         all_settings = page.get_all_settings()
 
@@ -261,6 +264,7 @@ class SettingsToolsRuntimeTests(unittest.TestCase):
         self.assertEqual(all_settings["text_rendering"]["min_font_size"], 7)
         self.assertEqual(all_settings["text_rendering"]["max_font_size"], 54)
         self.assertFalse(all_settings["text_rendering"]["auto_max_font_size"])
+        self.assertEqual(all_settings["text_rendering"]["auto_max_font_profile"], "strong")
 
         page.save_settings()
         page.deleteLater()
@@ -271,6 +275,7 @@ class SettingsToolsRuntimeTests(unittest.TestCase):
         self.assertEqual(reloaded.ui.min_font_spinbox.value(), 7)
         self.assertEqual(reloaded.ui.max_font_spinbox.value(), 54)
         self.assertFalse(reloaded.ui.auto_max_font_checkbox.isChecked())
+        self.assertEqual(reloaded.ui.auto_max_font_profile_combo.currentData(), "strong")
 
 
 if __name__ == "__main__":

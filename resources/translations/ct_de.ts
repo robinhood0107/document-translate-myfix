@@ -2498,6 +2498,18 @@ These values are copied into new series projects and can be adjusted per series.
         <translation type="unfinished"></translation>
     </message>
     <message>
+        <source>Current</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Strong</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Choose how aggressively automatic bubble font fitting expands detected speech bubbles.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
         <source>Use Selected Color</source>
         <translation type="unfinished">Ausgewählte Farbe verwenden</translation>
     </message>
@@ -2551,6 +2563,10 @@ These values are copied into new series projects and can be adjusted per series.
     </message>
     <message>
         <source>Max font size:</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Auto maximum font:</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
@@ -3316,6 +3332,18 @@ Wählen Sie entweder nur eine Projektdatei oder nur Bild-/Dokument-/Archivdateie
     </message>
     <message>
         <source>Automatically expands the maximum font size inside detected speech bubbles when the fitted text is too small.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Current</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Strong</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Choose how aggressively automatic bubble font fitting expands detected speech bubbles.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
