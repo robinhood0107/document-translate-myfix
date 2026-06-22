@@ -15,7 +15,19 @@ from .dayu_widgets.tool_button import MToolButton
 from .settings.series_page import SeriesPage
 
 
-_DIRECT_PREVIEW_EXTS = {".png", ".jpg", ".jpeg", ".webp", ".bmp", ".psd"}
+_DIRECT_PREVIEW_EXTS = {
+    ".png",
+    ".jpg",
+    ".jpeg",
+    ".webp",
+    ".bmp",
+    ".jp2",
+    ".j2k",
+    ".jpf",
+    ".jpx",
+    ".j2c",
+    ".psd",
+}
 _ARCHIVE_PREVIEW_EXTS = {".pdf", ".epub", ".zip", ".rar", ".7z", ".tar", ".cbz", ".cbr", ".cb7", ".cbt"}
 
 

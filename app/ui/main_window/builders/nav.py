@@ -34,7 +34,20 @@ class NavRailMixin:
         self.tool_browser.clicked.connect(self.show_tool_menu)
 
         self.image_browser_button = MClickBrowserFileToolButton(multiple=True)
-        self.image_browser_button.set_dayu_filters([".png", ".jpg", ".jpeg", ".webp", ".bmp"])
+        self.image_browser_button.set_dayu_filters(
+            [
+                ".png",
+                ".jpg",
+                ".jpeg",
+                ".webp",
+                ".bmp",
+                ".jp2",
+                ".j2k",
+                ".jpf",
+                ".jpx",
+                ".j2c",
+            ]
+        )
 
         self.document_browser_button = MClickBrowserFileToolButton(multiple=True)
         self.document_browser_button.set_dayu_filters([".pdf", ".epub"])
@@ -170,6 +183,11 @@ class NavRailMixin:
                 ".jpeg",
                 ".webp",
                 ".bmp",
+                ".jp2",
+                ".j2k",
+                ".jpf",
+                ".jpx",
+                ".j2c",
                 ".zip",
                 ".cbz",
                 ".cbr",

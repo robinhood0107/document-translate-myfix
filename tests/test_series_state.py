@@ -38,6 +38,7 @@ class SeriesStateTests(unittest.TestCase):
             keep_paths = [
                 os.path.join(temp_dir, "001.png"),
                 os.path.join(nested, "002.jpg"),
+                os.path.join(nested, "003.jp2"),
                 os.path.join(nested, "existing.ctpr"),
             ]
             skip_paths = [
@@ -158,11 +159,11 @@ class SeriesStateTests(unittest.TestCase):
     def test_filter_series_candidate_paths_blocks_existing_and_duplicate_inputs(self) -> None:
         filtered = filter_series_candidate_paths(
             existing_source_paths=["/tmp/a.png"],
-            candidate_paths=["/tmp/a.png", "/tmp/b.png", "/tmp/b.png", "/tmp/c.ctpr"],
+            candidate_paths=["/tmp/a.png", "/tmp/b.jp2", "/tmp/b.jp2", "/tmp/c.ctpr"],
         )
-        self.assertEqual(filtered["accepted"], [os.path.abspath("/tmp/b.png"), os.path.abspath("/tmp/c.ctpr")])
+        self.assertEqual(filtered["accepted"], [os.path.abspath("/tmp/b.jp2"), os.path.abspath("/tmp/c.ctpr")])
         self.assertEqual(filtered["skipped_existing"], [os.path.abspath("/tmp/a.png")])
-        self.assertEqual(filtered["skipped_duplicates"], [os.path.abspath("/tmp/b.png")])
+        self.assertEqual(filtered["skipped_duplicates"], [os.path.abspath("/tmp/b.jp2")])
 
     def test_normalize_series_recovery_state_converts_running_to_paused(self) -> None:
         manifest = {

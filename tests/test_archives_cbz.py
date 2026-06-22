@@ -25,6 +25,10 @@ class ArchiveCbzIntegrationTests(unittest.TestCase):
         Image.new("RGB", (12, 12), color=color).save(path)
         return path.read_bytes()
 
+    def _make_jp2(self, path: Path, color: tuple[int, int, int]) -> bytes:
+        Image.new("RGB", (12, 12), color=color).save(path, format="JPEG2000")
+        return path.read_bytes()
+
     def test_cbz_entries_are_unique_and_materialize_by_page_index(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
@@ -52,6 +56,26 @@ class ArchiveCbzIntegrationTests(unittest.TestCase):
             self.assertTrue(materialize_archive_entry(str(archive_path), entries[1], str(out_b)))
             self.assertEqual(out_a.read_bytes(), bytes_a)
             self.assertEqual(out_b.read_bytes(), bytes_b)
+
+    def test_zip_entries_include_jpeg2000_pages(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            src = root / "001.jp2"
+            bytes_src = self._make_jp2(src, (12, 34, 56))
+
+            archive_path = root / "sample.zip"
+            with zipfile.ZipFile(archive_path, "w") as archive:
+                archive.write(src, arcname="001.jp2")
+
+            entries = list_archive_image_entries(str(archive_path))
+            self.assertEqual(len(entries), 1)
+            self.assertEqual(entries[0]["ext"], ".jp2")
+
+            out = root / "out.jp2"
+            self.assertTrue(materialize_archive_entry(str(archive_path), entries[0], str(out)))
+            self.assertEqual(out.read_bytes(), bytes_src)
+            with Image.open(out) as image:
+                self.assertEqual(image.size, (12, 12))
 
     def test_file_handler_keeps_lazy_contract_for_cbz(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
