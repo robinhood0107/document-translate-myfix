@@ -198,6 +198,7 @@ class SettingsPage(QtWidgets.QWidget):
             self.ui.inpainter_size_combo,
             self.ui.inpainter_device_combo,
             self.ui.inpainter_precision_combo,
+            self.ui.auto_max_font_profile_combo,
         ]
         for widget in combo_widgets:
             widget.currentTextChanged.connect(self._save_settings_if_not_loading)
@@ -647,6 +648,9 @@ class SettingsPage(QtWidgets.QWidget):
             "min_font_size": int(self.ui.min_font_spinbox.value()),
             "max_font_size": int(self.ui.max_font_spinbox.value()),
             "auto_max_font_size": bool(self.ui.auto_max_font_checkbox.isChecked()),
+            "auto_max_font_profile": str(
+                self.ui.auto_max_font_profile_combo.currentData() or "current"
+            ),
             "upper_case": bool(self.ui.uppercase_checkbox.isChecked()),
             "color": self._selected_color_name(
                 getattr(self.ui, "color_button", None),
@@ -1060,6 +1064,15 @@ class SettingsPage(QtWidgets.QWidget):
         )
         self.ui.auto_max_font_checkbox.setChecked(
             settings.value("auto_max_font_size", True, type=bool)
+        )
+        profile_index = self.ui.auto_max_font_profile_combo.findData(
+            settings.value("auto_max_font_profile", "current", type=str)
+        )
+        self.ui.auto_max_font_profile_combo.setCurrentIndex(
+            profile_index if profile_index >= 0 else 0
+        )
+        self.ui.auto_max_font_profile_combo.setEnabled(
+            self.ui.auto_max_font_checkbox.isChecked()
         )
         self.ui.uppercase_checkbox.setChecked(
             settings.value("upper_case", False, type=bool)

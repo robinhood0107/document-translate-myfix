@@ -336,7 +336,11 @@ class TextController:
             trg_lng_cd,
             upper_case=render_settings.upper_case,
         )
-        get_best_render_area(render_blocks, None)
+        get_best_render_area(
+            render_blocks,
+            None,
+            auto_max_font_profile=getattr(render_settings, "auto_max_font_profile", "current"),
+        )
 
         text_items_state: list[dict] = []
         for original_blk, render_blk in zip(blk_list, render_blocks):
@@ -372,6 +376,7 @@ class TextController:
             fit_clearance = get_render_fit_clearance_for_block(
                 render_blk,
                 render_settings.outline_width,
+                auto_max_font_profile=getattr(render_settings, "auto_max_font_profile", "current"),
             )
             wrapped, font_size, rendered_width, rendered_height = pyside_word_wrap(
                 translation,
@@ -414,6 +419,7 @@ class TextController:
                     rendered_width,
                     rendered_height,
                     auto_max_font_size=getattr(render_settings, "auto_max_font_size", True),
+                    auto_max_font_profile=getattr(render_settings, "auto_max_font_profile", "current"),
                 )
             )
 
@@ -1312,7 +1318,11 @@ class TextController:
                         )
                         for item in existing_text_items
                     }
-                    get_best_render_area(blk_list, None)
+                    get_best_render_area(
+                        blk_list,
+                        None,
+                        auto_max_font_profile=getattr(render_settings, "auto_max_font_profile", "current"),
+                    )
 
                     new_text_items_state = []
                     for blk in blk_list:
@@ -1356,6 +1366,7 @@ class TextController:
                         fit_clearance = get_render_fit_clearance_for_block(
                             blk,
                             outline_width,
+                            auto_max_font_profile=getattr(render_settings, "auto_max_font_profile", "current"),
                         )
                         wrapped, font_size, rendered_width, rendered_height = pyside_word_wrap(
                             translation,
@@ -1398,6 +1409,7 @@ class TextController:
                                 rendered_width,
                                 rendered_height,
                                 auto_max_font_size=getattr(render_settings, "auto_max_font_size", True),
+                                auto_max_font_profile=getattr(render_settings, "auto_max_font_profile", "current"),
                             )
                         )
                         if is_no_space_lang(trg_lng_cd):
@@ -1633,6 +1645,10 @@ class TextController:
             min_font_size = int(self.main.settings_page.ui.min_font_spinbox.value()),
             max_font_size = int(self.main.settings_page.ui.max_font_spinbox.value()),
             auto_max_font_size = self.main.settings_page.ui.auto_max_font_checkbox.isChecked(),
+            auto_max_font_profile = str(
+                self.main.settings_page.ui.auto_max_font_profile_combo.currentData()
+                or "current"
+            ),
             color = self.main.block_font_color_button.property('selected_color'),
             force_font_color = self.main.force_font_color_checkbox.isChecked(),
             smart_global_apply_all = False,

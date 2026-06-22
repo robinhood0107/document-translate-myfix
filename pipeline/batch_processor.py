@@ -1840,7 +1840,12 @@ class BatchProcessor:
             upper_case = render_settings.upper_case
             outline = render_settings.outline
             format_translations(blk_list, trg_lng_cd, upper_case=upper_case)
-            get_best_render_area(blk_list, image, inpaint_input_img)
+            get_best_render_area(
+                blk_list,
+                image,
+                inpaint_input_img,
+                auto_max_font_profile=getattr(render_settings, "auto_max_font_profile", "current"),
+            )
 
             font = render_settings.font_family
             setting_font_color = QColor(render_settings.color)
@@ -1898,6 +1903,7 @@ class BatchProcessor:
                 fit_clearance = get_render_fit_clearance_for_block(
                     blk,
                     outline_width,
+                    auto_max_font_profile=getattr(render_settings, "auto_max_font_profile", "current"),
                 )
                 translation, font_size, rendered_width, rendered_height = pyside_word_wrap(
                     text_to_wrap,
@@ -1940,6 +1946,7 @@ class BatchProcessor:
                         rendered_width,
                         rendered_height,
                         auto_max_font_size=getattr(render_settings, "auto_max_font_size", True),
+                        auto_max_font_profile=getattr(render_settings, "auto_max_font_profile", "current"),
                     )
                 )
                 blk._text_fit_status = (

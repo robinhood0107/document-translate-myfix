@@ -302,6 +302,7 @@ class SettingsPageUI(QtWidgets.QWidget):
         self.min_font_spinbox = self.text_rendering_page.min_font_spinbox
         self.max_font_spinbox = self.text_rendering_page.max_font_spinbox
         self.auto_max_font_checkbox = self.text_rendering_page.auto_max_font_checkbox
+        self.auto_max_font_profile_combo = self.text_rendering_page.auto_max_font_profile_combo
         self.font_browser = self.text_rendering_page.font_browser
         self.uppercase_checkbox = self.text_rendering_page.uppercase_checkbox
         self.ocr_dictionary_table = self.user_dictionaries_page.ocr_dictionary_table

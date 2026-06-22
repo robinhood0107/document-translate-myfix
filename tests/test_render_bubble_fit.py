@@ -7,6 +7,8 @@ import numpy as np
 from PySide6 import QtCore, QtWidgets
 
 from modules.rendering.render import (
+    AUTO_MAX_FONT_PROFILE_CURRENT,
+    AUTO_MAX_FONT_PROFILE_STRONG,
     DETECTED_BUBBLE_DYNAMIC_FONT_CAP,
     build_render_rects_for_block,
     build_text_item_layout_geometry,
@@ -285,6 +287,58 @@ class RenderBubbleFitTests(unittest.TestCase):
 
         self.assertEqual(get_render_fit_clearance_for_block(free, 3.0), 0.0)
 
+    def test_detected_bubble_fit_profile_changes_clearance(self) -> None:
+        image = np.zeros((800, 800, 3), dtype=np.uint8)
+        block = _block(
+            xyxy=[260, 250, 340, 300],
+            bubble_xyxy=[120, 100, 520, 460],
+        )
+        get_best_render_area([block], image)
+
+        self.assertEqual(
+            get_render_fit_clearance_for_block(
+                block,
+                0.0,
+                auto_max_font_profile=AUTO_MAX_FONT_PROFILE_CURRENT,
+            ),
+            8.0,
+        )
+        self.assertEqual(
+            get_render_fit_clearance_for_block(
+                block,
+                0.0,
+                auto_max_font_profile=AUTO_MAX_FONT_PROFILE_STRONG,
+            ),
+            7.0,
+        )
+
+    def test_strong_profile_expands_bubble_area_more_than_current(self) -> None:
+        image = np.zeros((800, 800, 3), dtype=np.uint8)
+        current = _block(
+            xyxy=[260, 250, 340, 300],
+            bubble_xyxy=[120, 100, 520, 460],
+        )
+        strong = _block(
+            xyxy=[260, 250, 340, 300],
+            bubble_xyxy=[120, 100, 520, 460],
+        )
+
+        get_best_render_area(
+            [current],
+            image,
+            auto_max_font_profile=AUTO_MAX_FONT_PROFILE_CURRENT,
+        )
+        get_best_render_area(
+            [strong],
+            image,
+            auto_max_font_profile=AUTO_MAX_FONT_PROFILE_STRONG,
+        )
+        current_rect, _ = build_render_rects_for_block(current)
+        strong_rect, _ = build_render_rects_for_block(strong)
+
+        self.assertGreater(strong_rect[2], current_rect[2])
+        self.assertGreater(strong_rect[3], current_rect[3])
+
     def test_dynamic_bubble_font_cap_expands_underfilled_detected_bubble(self) -> None:
         image = np.zeros((800, 800, 3), dtype=np.uint8)
         block = _block(
@@ -323,6 +377,37 @@ class RenderBubbleFitTests(unittest.TestCase):
 
         self.assertGreaterEqual(cap, 110)
         self.assertLessEqual(cap, DETECTED_BUBBLE_DYNAMIC_FONT_CAP)
+
+    def test_strong_profile_uses_larger_dynamic_font_cap(self) -> None:
+        block = _block(
+            xyxy=[260, 150, 340, 210],
+            bubble_xyxy=[50, 100, 750, 280],
+        )
+        block._render_area_source = "detected_bubble"
+        block._render_area_xyxy = [50, 100, 750, 280]
+
+        current_cap = get_dynamic_bubble_font_cap(
+            block,
+            configured_max_font_size=40,
+            rendered_width=60,
+            rendered_height=50,
+            vertical=False,
+            final_font_size=40,
+            auto_max_font_profile=AUTO_MAX_FONT_PROFILE_CURRENT,
+        )
+        strong_cap = get_dynamic_bubble_font_cap(
+            block,
+            configured_max_font_size=40,
+            rendered_width=60,
+            rendered_height=50,
+            vertical=False,
+            final_font_size=40,
+            auto_max_font_profile=AUTO_MAX_FONT_PROFILE_STRONG,
+        )
+
+        self.assertEqual(current_cap, 160)
+        self.assertEqual(strong_cap, 190)
+        self.assertGreater(strong_cap, current_cap)
 
     def test_auto_max_detected_bubble_still_expands_when_initial_text_is_not_underfill(self) -> None:
         block = _block(
