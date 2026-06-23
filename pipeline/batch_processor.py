@@ -61,6 +61,7 @@ from modules.rendering.render import (
     get_render_fit_clearance_for_block,
     is_vertical_block,
     pyside_word_wrap,
+    refit_detected_bubble_text_if_underfilled,
 )
 from modules.utils.device import resolve_device
 from app.path_materialization import ensure_path_materialized
@@ -1839,7 +1840,12 @@ class BatchProcessor:
             upper_case = render_settings.upper_case
             outline = render_settings.outline
             format_translations(blk_list, trg_lng_cd, upper_case=upper_case)
-            get_best_render_area(blk_list, image, inpaint_input_img)
+            get_best_render_area(
+                blk_list,
+                image,
+                inpaint_input_img,
+                auto_max_font_profile=getattr(render_settings, "auto_max_font_profile", "current"),
+            )
 
             font = render_settings.font_family
             setting_font_color = QColor(render_settings.color)
@@ -1890,8 +1896,17 @@ class BatchProcessor:
                 # Determine if this block should use vertical rendering
                 vertical = is_vertical_block(blk, trg_lng_cd)
 
+                text_to_wrap = translation
+                source_rect, block_anchor = build_render_rects_for_block(blk)
+                block_width = int(source_rect[2])
+                block_height = int(source_rect[3])
+                fit_clearance = get_render_fit_clearance_for_block(
+                    blk,
+                    outline_width,
+                    auto_max_font_profile=getattr(render_settings, "auto_max_font_profile", "current"),
+                )
                 translation, font_size, rendered_width, rendered_height = pyside_word_wrap(
-                    translation, 
+                    text_to_wrap,
                     font, 
                     block_width, 
                     block_height,
@@ -1905,11 +1920,34 @@ class BatchProcessor:
                     max_font_size, 
                     min_font_size,
                     vertical,
-                    fit_clearance=get_render_fit_clearance_for_block(
-                        blk,
-                        outline_width,
-                    ),
+                    fit_clearance=fit_clearance,
                     return_metrics=True
+                )
+                translation, font_size, rendered_width, rendered_height = (
+                    refit_detected_bubble_text_if_underfilled(
+                        blk,
+                        text_to_wrap,
+                        font,
+                        block_width,
+                        block_height,
+                        line_spacing,
+                        outline_width,
+                        bold,
+                        italic,
+                        underline,
+                        alignment,
+                        direction,
+                        max_font_size,
+                        min_font_size,
+                        vertical,
+                        fit_clearance,
+                        translation,
+                        font_size,
+                        rendered_width,
+                        rendered_height,
+                        auto_max_font_size=getattr(render_settings, "auto_max_font_size", True),
+                        auto_max_font_profile=getattr(render_settings, "auto_max_font_profile", "current"),
+                    )
                 )
                 blk._text_fit_status = (
                     "needs_review"
@@ -1968,7 +2006,6 @@ class BatchProcessor:
                 if image_path == file_on_display:
                     self.main_page.blk_rendered.emit(translation, font_size, blk, image_path)
 
-                source_rect, block_anchor = build_render_rects_for_block(blk)
                 position, item_width, item_height = build_text_item_layout_geometry(
                     source_rect,
                     rendered_height,
