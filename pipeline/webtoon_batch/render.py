@@ -21,6 +21,7 @@ from modules.rendering.render import (
     get_render_fit_clearance_for_block,
     is_vertical_block,
     pyside_word_wrap,
+    refit_detected_bubble_text_if_underfilled,
 )
 from modules.utils.export_paths import export_run_root, reserve_export_run_token, resolve_export_directory
 from modules.utils.automatic_output import (
@@ -141,7 +142,11 @@ class RenderMixin:
             if float(block.xyxy[1]) >= 0 and float(block.xyxy[3]) <= float(image_shape[0])
         ]
         if in_bounds_blocks:
-            get_best_render_area(in_bounds_blocks, virtual_img)
+            get_best_render_area(
+                in_bounds_blocks,
+                virtual_img,
+                auto_max_font_profile=getattr(render_settings, "auto_max_font_profile", "current"),
+            )
 
         should_emit_live = False
         webtoon_manager = getattr(self.main_page.image_viewer, "webtoon_manager", None)
@@ -177,13 +182,22 @@ class RenderMixin:
                 continue
 
             vertical = is_vertical_block(block, target_lang_code)
+            text_to_wrap = translation
+            source_rect, block_anchor = build_render_rects_for_block(block)
+            width = int(source_rect[2])
+            height = int(source_rect[3])
+            fit_clearance = get_render_fit_clearance_for_block(
+                block,
+                outline_width,
+                auto_max_font_profile=getattr(render_settings, "auto_max_font_profile", "current"),
+            )
             (
                 wrapped_translation,
                 font_size,
                 rendered_width,
                 rendered_height,
             ) = pyside_word_wrap(
-                translation,
+                text_to_wrap,
                 font,
                 width,
                 height,
@@ -197,11 +211,37 @@ class RenderMixin:
                 max_font_size,
                 min_font_size,
                 vertical,
-                fit_clearance=get_render_fit_clearance_for_block(
-                    block,
-                    outline_width,
-                ),
+                fit_clearance=fit_clearance,
                 return_metrics=True,
+            )
+            (
+                wrapped_translation,
+                font_size,
+                rendered_width,
+                rendered_height,
+            ) = refit_detected_bubble_text_if_underfilled(
+                block,
+                text_to_wrap,
+                font,
+                width,
+                height,
+                line_spacing,
+                outline_width,
+                bold,
+                italic,
+                underline,
+                alignment,
+                direction,
+                max_font_size,
+                min_font_size,
+                vertical,
+                fit_clearance,
+                wrapped_translation,
+                font_size,
+                rendered_width,
+                rendered_height,
+                auto_max_font_size=getattr(render_settings, "auto_max_font_size", True),
+                auto_max_font_profile=getattr(render_settings, "auto_max_font_profile", "current"),
             )
             block._text_fit_status = (
                 "needs_review"
@@ -255,7 +295,6 @@ class RenderMixin:
                 render_normalization.replacements
             ) + list(render_markup.replacements)
 
-            source_rect, block_anchor = build_render_rects_for_block(block)
             position, item_width, item_height = build_text_item_layout_geometry(
                 source_rect,
                 rendered_height,

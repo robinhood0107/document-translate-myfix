@@ -25,7 +25,9 @@ except Exception:  # pragma: no cover - optional dependency
     send2trash = None
 
 IMPORT_EXTS = {
-    ".png", ".jpg", ".jpeg", ".webp", ".bmp", ".psd",
+    ".png", ".jpg", ".jpeg", ".webp", ".bmp",
+    ".jp2", ".j2k", ".jpf", ".jpx", ".j2c",
+    ".psd",
     ".pdf", ".epub",
     ".zip", ".rar", ".7z", ".tar",
     ".cbz", ".cbr", ".cb7", ".cbt",

@@ -3,6 +3,7 @@ from ..dayu_widgets.label import MLabel
 from ..dayu_widgets.spin_box import MSpinBox
 from ..dayu_widgets.browser import MClickBrowserFileToolButton
 from ..dayu_widgets.check_box import MCheckBox
+from ..dayu_widgets.combo_box import MComboBox
 
 class TextRenderingPage(QtWidgets.QWidget):
     def __init__(self, parent=None):
@@ -27,6 +28,19 @@ class TextRenderingPage(QtWidgets.QWidget):
         self.max_font_spinbox.setMaximum(100)
         self.max_font_spinbox.setValue(40)
 
+        self.auto_max_font_checkbox = MCheckBox(self.tr("Auto Maximum Font Size"))
+        self.auto_max_font_checkbox.setChecked(True)
+        self.auto_max_font_checkbox.setToolTip(
+            self.tr("Automatically expands the maximum font size inside detected speech bubbles when the fitted text is too small.")
+        )
+        self.auto_max_font_profile_combo = MComboBox().small()
+        self.auto_max_font_profile_combo.addItem(self.tr("Current"), "current")
+        self.auto_max_font_profile_combo.addItem(self.tr("Strong"), "strong")
+        self.auto_max_font_profile_combo.setToolTip(
+            self.tr("Choose how aggressively automatic bubble font fitting expands detected speech bubbles.")
+        )
+        self.auto_max_font_checkbox.toggled.connect(self.auto_max_font_profile_combo.setEnabled)
+
         min_font_layout.addWidget(min_font_label)
         min_font_layout.addWidget(self.min_font_spinbox)
         min_font_layout.addStretch()
@@ -34,6 +48,11 @@ class TextRenderingPage(QtWidgets.QWidget):
         max_font_layout.addWidget(max_font_label)
         max_font_layout.addWidget(self.max_font_spinbox)
         max_font_layout.addStretch()
+
+        auto_max_font_layout = QtWidgets.QHBoxLayout()
+        auto_max_font_layout.addWidget(self.auto_max_font_checkbox)
+        auto_max_font_layout.addWidget(self.auto_max_font_profile_combo)
+        auto_max_font_layout.addStretch()
 
         font_label = MLabel(self.tr("Font:")).h4()
 
@@ -51,6 +70,7 @@ class TextRenderingPage(QtWidgets.QWidget):
         font_layout.addLayout(font_browser_layout)
         font_layout.addLayout(min_font_layout)
         font_layout.addLayout(max_font_layout)
+        font_layout.addLayout(auto_max_font_layout)
 
         # Uppercase
         self.uppercase_checkbox = MCheckBox(self.tr("Render Text in UpperCase"))

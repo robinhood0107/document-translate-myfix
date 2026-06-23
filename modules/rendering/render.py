@@ -22,6 +22,7 @@ from modules.utils.text_normalization import (
     OCR_DECORATIVE_NOISE_GLYPHS,
     RENDER_NORMALIZABLE_GLYPHS,
     canonicalize_ellipsis_runs,
+    strip_unsafe_text_control_chars,
 )
 from modules.utils.repetition_guard import guard_severe_repetition
 from modules.utils.render_style_policy import (
@@ -42,6 +43,8 @@ class TextRenderingSettings:
     font_family: str
     min_font_size: int
     max_font_size: int
+    auto_max_font_size: bool
+    auto_max_font_profile: str
     color: str
     force_font_color: bool
     smart_global_apply_all: bool
@@ -75,6 +78,16 @@ class RenderMarkupResult:
     replacements: list[dict]
 
 
+@dataclass(frozen=True)
+class AutoMaxFontProfile:
+    horizontal_shrink_percent: float
+    vertical_shrink_percent: float
+    fit_clearance_px: float
+    height_ratio: float
+    width_ratio: float
+    font_cap: int
+
+
 RENDER_SYMBOL_FALLBACK_FONT_CANDIDATES = (
     "Malgun Gothic",
     "Yu Gothic UI",
@@ -84,17 +97,55 @@ RENDER_SYMBOL_FALLBACK_FONT_CANDIDATES = (
     "Segoe UI Emoji",
 )
 
-HORIZONTAL_BUBBLE_SHRINK_PERCENT = 0.18
-VERTICAL_BUBBLE_SHRINK_PERCENT = 0.30
+AUTO_MAX_FONT_PROFILE_CURRENT = "current"
+AUTO_MAX_FONT_PROFILE_STRONG = "strong"
+DEFAULT_AUTO_MAX_FONT_PROFILE = AUTO_MAX_FONT_PROFILE_CURRENT
+
+AUTO_MAX_FONT_PROFILES = {
+    AUTO_MAX_FONT_PROFILE_CURRENT: AutoMaxFontProfile(
+        horizontal_shrink_percent=0.18,
+        vertical_shrink_percent=0.30,
+        fit_clearance_px=8.0,
+        height_ratio=0.45,
+        width_ratio=0.32,
+        font_cap=160,
+    ),
+    AUTO_MAX_FONT_PROFILE_STRONG: AutoMaxFontProfile(
+        horizontal_shrink_percent=0.14,
+        vertical_shrink_percent=0.26,
+        fit_clearance_px=7.0,
+        height_ratio=0.58,
+        width_ratio=0.42,
+        font_cap=190,
+    ),
+}
+
+HORIZONTAL_BUBBLE_SHRINK_PERCENT = AUTO_MAX_FONT_PROFILES[AUTO_MAX_FONT_PROFILE_CURRENT].horizontal_shrink_percent
+VERTICAL_BUBBLE_SHRINK_PERCENT = AUTO_MAX_FONT_PROFILES[AUTO_MAX_FONT_PROFILE_CURRENT].vertical_shrink_percent
 MIN_BUBBLE_TEXT_CONTAINMENT = 0.60
 MIN_BUBBLE_RENDER_AREA_GAIN = 0.90
-DETECTED_BUBBLE_FIT_CLEARANCE_PX = 8.0
+DETECTED_BUBBLE_FIT_CLEARANCE_PX = AUTO_MAX_FONT_PROFILES[AUTO_MAX_FONT_PROFILE_CURRENT].fit_clearance_px
 DETECTED_BUBBLE_OUTLINE_CLEARANCE_MULTIPLIER = 2.0
 DETECTED_BUBBLE_MIN_FIT_DIMENSION_PX = 16.0
+DETECTED_BUBBLE_DYNAMIC_FONT_HEIGHT_RATIO = AUTO_MAX_FONT_PROFILES[AUTO_MAX_FONT_PROFILE_CURRENT].height_ratio
+DETECTED_BUBBLE_DYNAMIC_FONT_WIDTH_RATIO = AUTO_MAX_FONT_PROFILES[AUTO_MAX_FONT_PROFILE_CURRENT].width_ratio
+DETECTED_BUBBLE_DYNAMIC_FONT_CAP = AUTO_MAX_FONT_PROFILES[AUTO_MAX_FONT_PROFILE_CURRENT].font_cap
+DETECTED_BUBBLE_MAX_RENDER_AREA_OVERLAP_RATIO = 0.12
 
 _CJK_RE = re.compile(r"[\uac00-\ud7a3\u3040-\u30ff\u4e00-\u9fff]")
 _BREAK_BEFORE_FORBIDDEN = set(".,!?;:)]}，。！？、；：）」』】》〉…")
 _BREAK_AFTER_FORBIDDEN = set("([{（「『【《〈")
+
+
+def normalize_auto_max_font_profile(value: object) -> str:
+    profile = str(value or "").strip().casefold()
+    if profile in AUTO_MAX_FONT_PROFILES:
+        return profile
+    return DEFAULT_AUTO_MAX_FONT_PROFILE
+
+
+def get_auto_max_font_profile(value: object = DEFAULT_AUTO_MAX_FONT_PROFILE) -> AutoMaxFontProfile:
+    return AUTO_MAX_FONT_PROFILES[normalize_auto_max_font_profile(value)]
 
 def array_to_pil(rgb_image: np.ndarray):
     # Image is already in RGB format, just convert to PIL
@@ -170,10 +221,23 @@ def describe_render_text_sanitization(
         return RenderSanitizationResult("", "", False, [], [])
 
     raw_text = str(text or "")
-    sanitized = canonicalize_ellipsis_runs(_canonicalize_render_symbol_variants(raw_text))
     cleaned_parts: list[str] = []
     replacements: list[dict] = []
     reasons: list[str] = []
+    sanitized = canonicalize_ellipsis_runs(_canonicalize_render_symbol_variants(raw_text))
+    unsafe_sanitized = strip_unsafe_text_control_chars(sanitized)
+    unsafe_controls_removed = unsafe_sanitized != sanitized
+    if unsafe_controls_removed:
+        reasons.append("unsafe-control")
+        replacements.append(
+            {
+                "index": 0,
+                "char": sanitized,
+                "replacement": unsafe_sanitized,
+                "reason": "unsafe-control",
+            }
+        )
+        sanitized = unsafe_sanitized
     repetition_guard = guard_severe_repetition(sanitized)
     if repetition_guard.changed:
         analysis = repetition_guard.analysis
@@ -447,13 +511,33 @@ def draw_text(image: np.ndarray, blk_list: List[TextBlock], font_pth: str, colou
     image = pil_to_array(image)  # Already in RGB format
     return image
 
-def get_best_render_area(blk_list: List[TextBlock], img, inpainted_img=None):
+def get_best_render_area(
+    blk_list: List[TextBlock],
+    img,
+    inpainted_img=None,
+    *,
+    auto_max_font_profile: object = DEFAULT_AUTO_MAX_FONT_PROFILE,
+):
     """Select safe text render areas without losing the original OCR anchor."""
-    for blk in blk_list:
+    font_profile = get_auto_max_font_profile(auto_max_font_profile)
+    candidates: list[tuple[int, tuple[int, int, int, int]]] = []
+    for block_index, blk in enumerate(blk_list):
         _reset_render_area_metadata(blk)
-        text_draw_bounds = _detected_bubble_render_bounds(blk, img)
+        text_draw_bounds = _detected_bubble_render_bounds(blk, img, font_profile)
         if text_draw_bounds is None:
             continue
+        candidates.append((block_index, text_draw_bounds))
+
+    conflict_candidate_indexes = _find_overlapping_detected_bubble_candidate_indexes(
+        [bounds for _index, bounds in candidates]
+    )
+    conflict_candidate_indexes.update(
+        _find_detected_bubble_candidates_covering_other_text_indexes(candidates, blk_list)
+    )
+    for candidate_index, (block_index, text_draw_bounds) in enumerate(candidates):
+        if candidate_index in conflict_candidate_indexes:
+            continue
+        blk = blk_list[block_index]
         bdx1, bdy1, bdx2, bdy2 = text_draw_bounds
         blk.xyxy[:] = [bdx1, bdy1, bdx2, bdy2]
         blk._render_area_source = "detected_bubble"
@@ -465,10 +549,64 @@ def get_best_render_area(blk_list: List[TextBlock], img, inpainted_img=None):
     return blk_list
 
 
+def _find_overlapping_detected_bubble_candidate_indexes(
+    candidates: list[tuple[int, int, int, int]]
+) -> set[int]:
+    conflicts: set[int] = set()
+    for i, first in enumerate(candidates):
+        first_area = _bbox_area(first)
+        if first_area <= 0.0:
+            continue
+        for j in range(i + 1, len(candidates)):
+            second = candidates[j]
+            second_area = _bbox_area(second)
+            if second_area <= 0.0:
+                continue
+            overlap = _intersection_area(first, second)
+            if overlap <= 0.0:
+                continue
+            overlap_ratio = overlap / max(1.0, min(first_area, second_area))
+            if overlap_ratio > DETECTED_BUBBLE_MAX_RENDER_AREA_OVERLAP_RATIO:
+                conflicts.update({i, j})
+    return conflicts
+
+
+def _find_detected_bubble_candidates_covering_other_text_indexes(
+    candidates: list[tuple[int, tuple[int, int, int, int]]],
+    blk_list: List[TextBlock],
+) -> set[int]:
+    conflicts: set[int] = set()
+    original_boxes = [
+        _normalize_xyxy(getattr(blk, "_render_original_xyxy", None)) or _current_anchor_xyxy(blk)
+        for blk in blk_list
+    ]
+    for candidate_index, (block_index, candidate_box) in enumerate(candidates):
+        candidate_area = _bbox_area(candidate_box)
+        if candidate_area <= 0.0:
+            continue
+        for other_index, other_box in enumerate(original_boxes):
+            if other_index == block_index or other_box is None:
+                continue
+            other_area = _bbox_area(other_box)
+            if other_area <= 0.0:
+                continue
+            overlap = _intersection_area(candidate_box, other_box)
+            if overlap <= 0.0:
+                continue
+            overlap_ratio = overlap / max(1.0, min(candidate_area, other_area))
+            if overlap_ratio > DETECTED_BUBBLE_MAX_RENDER_AREA_OVERLAP_RATIO:
+                conflicts.add(candidate_index)
+                break
+    return conflicts
+
+
 def build_render_rects_for_block(blk: TextBlock) -> tuple[tuple[float, float, float, float], tuple[float, float, float, float]]:
     """Return layout source_rect and original OCR block_anchor for a render block."""
-    source_rect = _xyxy_to_rect_tuple(getattr(blk, "xyxy", None))
-    anchor_xyxy = _current_anchor_xyxy(blk)
+    render_area = None
+    if getattr(blk, "_render_area_source", "") == "detected_bubble":
+        render_area = _normalize_xyxy(getattr(blk, "_render_area_xyxy", None))
+    source_rect = _xyxy_to_rect_tuple(render_area or getattr(blk, "xyxy", None))
+    anchor_xyxy = _normalize_xyxy(getattr(blk, "_render_original_xyxy", None)) or _current_anchor_xyxy(blk)
     block_anchor = _xyxy_to_rect_tuple(anchor_xyxy)
     return source_rect, block_anchor
 
@@ -494,19 +632,67 @@ def build_text_item_layout_geometry(
 def get_render_fit_clearance_for_block(
     blk: TextBlock,
     outline_width: float | int | str = 0.0,
+    *,
+    auto_max_font_profile: object = DEFAULT_AUTO_MAX_FONT_PROFILE,
 ) -> float:
     """Return extra inner fit clearance for text rendered inside detected bubbles."""
     if getattr(blk, "_render_area_source", "") != "detected_bubble":
         return 0.0
+    font_profile = get_auto_max_font_profile(auto_max_font_profile)
     try:
         outline = max(0.0, float(outline_width))
     except (TypeError, ValueError):
         outline = 0.0
     return max(
-        DETECTED_BUBBLE_FIT_CLEARANCE_PX,
+        font_profile.fit_clearance_px,
         (outline * DETECTED_BUBBLE_OUTLINE_CLEARANCE_MULTIPLIER)
-        + DETECTED_BUBBLE_FIT_CLEARANCE_PX,
+        + font_profile.fit_clearance_px,
     )
+
+
+def get_dynamic_bubble_font_cap(
+    blk: TextBlock,
+    configured_max_font_size: int | float,
+    rendered_width: float,
+    rendered_height: float,
+    vertical: bool,
+    final_font_size: int | float | None = None,
+    *,
+    auto_max_font_profile: object = DEFAULT_AUTO_MAX_FONT_PROFILE,
+) -> int:
+    """Return a larger cap only for underfilled detected text bubbles."""
+    try:
+        base_max = int(round(float(configured_max_font_size)))
+    except (TypeError, ValueError):
+        return 0
+    if base_max <= 0:
+        return base_max
+    if vertical or getattr(blk, "direction", "") == "vertical":
+        return base_max
+    if getattr(blk, "text_class", "") != "text_bubble":
+        return base_max
+    if getattr(blk, "_render_area_source", "") != "detected_bubble":
+        return base_max
+    if final_font_size is not None:
+        try:
+            if float(final_font_size) < float(base_max):
+                return base_max
+        except (TypeError, ValueError):
+            return base_max
+
+    source_xyxy = _normalize_xyxy(getattr(blk, "_render_area_xyxy", None))
+    if source_xyxy is None or not _bbox_has_area(source_xyxy):
+        return base_max
+    source_width = float(source_xyxy[2] - source_xyxy[0])
+    source_height = float(source_xyxy[3] - source_xyxy[1])
+    if source_width <= 0.0 or source_height <= 0.0:
+        return base_max
+
+    font_profile = get_auto_max_font_profile(auto_max_font_profile)
+    height_cap = int(source_height * font_profile.height_ratio)
+    width_cap = int(source_width * font_profile.width_ratio)
+    dynamic_cap = max(base_max, height_cap, width_cap)
+    return int(min(font_profile.font_cap, dynamic_cap))
 
 
 def _reset_render_area_metadata(blk: TextBlock) -> None:
@@ -518,7 +704,11 @@ def _reset_render_area_metadata(blk: TextBlock) -> None:
     blk._render_area_xyxy = list(original) if original is not None else None
 
 
-def _detected_bubble_render_bounds(blk: TextBlock, img) -> tuple[int, int, int, int] | None:
+def _detected_bubble_render_bounds(
+    blk: TextBlock,
+    img,
+    font_profile: AutoMaxFontProfile | None = None,
+) -> tuple[int, int, int, int] | None:
     if getattr(blk, "text_class", "") != "text_bubble":
         return None
     text_xyxy = _current_anchor_xyxy(blk)
@@ -530,10 +720,11 @@ def _detected_bubble_render_bounds(blk: TextBlock, img) -> tuple[int, int, int, 
     if not _text_bbox_belongs_to_bubble(text_xyxy, bubble_xyxy):
         return None
 
+    font_profile = font_profile or get_auto_max_font_profile()
     shrink_percent = (
-        VERTICAL_BUBBLE_SHRINK_PERCENT
+        font_profile.vertical_shrink_percent
         if getattr(blk, "source_lang_direction", "") == "vertical"
-        else HORIZONTAL_BUBBLE_SHRINK_PERCENT
+        else font_profile.horizontal_shrink_percent
     )
     candidate = _clamp_xyxy_to_image(shrink_bbox(bubble_xyxy, shrink_percent), img)
     if candidate is None or not _bbox_has_area(candidate):
@@ -980,6 +1171,96 @@ def pyside_word_wrap(
 
     # return mutable_message, font_size
 
+
+def refit_detected_bubble_text_if_underfilled(
+    blk: TextBlock,
+    text: str,
+    font_input: str,
+    roi_width: int | float,
+    roi_height: int | float,
+    line_spacing: float,
+    outline_width: float,
+    bold: bool,
+    italic: bool,
+    underline: bool,
+    alignment: Qt.AlignmentFlag,
+    direction: Qt.LayoutDirection,
+    configured_max_font_size: int | float,
+    min_font_size: int | float,
+    vertical: bool,
+    fit_clearance: float,
+    current_wrapped_text: str,
+    current_font_size: int | float,
+    current_rendered_width: float,
+    current_rendered_height: float,
+    *,
+    auto_max_font_size: bool = True,
+    auto_max_font_profile: object = DEFAULT_AUTO_MAX_FONT_PROFILE,
+) -> tuple[str, int | float, float, float]:
+    if not auto_max_font_size:
+        return (
+            current_wrapped_text,
+            current_font_size,
+            current_rendered_width,
+            current_rendered_height,
+        )
+
+    dynamic_cap = get_dynamic_bubble_font_cap(
+        blk,
+        configured_max_font_size,
+        current_rendered_width,
+        current_rendered_height,
+        vertical,
+        final_font_size=current_font_size,
+        auto_max_font_profile=auto_max_font_profile,
+    )
+    try:
+        if dynamic_cap <= int(round(float(configured_max_font_size))):
+            return (
+                current_wrapped_text,
+                current_font_size,
+                current_rendered_width,
+                current_rendered_height,
+            )
+    except (TypeError, ValueError):
+        return (
+            current_wrapped_text,
+            current_font_size,
+            current_rendered_width,
+            current_rendered_height,
+        )
+
+    candidate_text, candidate_size, candidate_width, candidate_height = pyside_word_wrap(
+        text,
+        font_input,
+        int(roi_width),
+        int(roi_height),
+        line_spacing,
+        outline_width,
+        bold,
+        italic,
+        underline,
+        alignment,
+        direction,
+        dynamic_cap,
+        int(min_font_size),
+        vertical,
+        fit_clearance=fit_clearance,
+        return_metrics=True,
+    )
+    if (
+        candidate_width <= float(roi_width)
+        and candidate_height <= float(roi_height)
+        and float(candidate_size) >= float(current_font_size)
+    ):
+        return candidate_text, candidate_size, candidate_width, candidate_height
+    return (
+        current_wrapped_text,
+        current_font_size,
+        current_rendered_width,
+        current_rendered_height,
+    )
+
 def manual_wrap(
     main_page, 
     blk_list: List[TextBlock], 
@@ -998,7 +1279,16 @@ def manual_wrap(
     
     target_lang = main_page.lang_mapping.get(main_page.t_combo.currentText(), None)
     trg_lng_cd = get_language_code(target_lang)
-    get_best_render_area(blk_list, getattr(main_page, "image", None))
+    try:
+        render_settings = main_page.render_settings()
+    except Exception:
+        render_settings = None
+    auto_max_font_profile = getattr(render_settings, "auto_max_font_profile", "current")
+    get_best_render_area(
+        blk_list,
+        getattr(main_page, "image", None),
+        auto_max_font_profile=auto_max_font_profile,
+    )
 
     for block_index, blk in enumerate(blk_list):
         x1, y1, width, height = blk.xywh
@@ -1029,7 +1319,11 @@ def manual_wrap(
             init_font_size, 
             min_font_size,
             vertical,
-            fit_clearance=get_render_fit_clearance_for_block(blk, outline_width),
+            fit_clearance=get_render_fit_clearance_for_block(
+                blk,
+                outline_width,
+                auto_max_font_profile=auto_max_font_profile,
+            ),
         )
         render_markup = describe_render_text_markup(
             translation,

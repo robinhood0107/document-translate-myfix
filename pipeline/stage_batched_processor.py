@@ -34,6 +34,7 @@ from modules.rendering.render import (
     get_render_fit_clearance_for_block,
     is_vertical_block,
     pyside_word_wrap,
+    refit_detected_bubble_text_if_underfilled,
 )
 from modules.translation.local_runtime import LocalGemmaRuntimeManager
 from modules.translation.processor import Translator
@@ -1013,8 +1014,18 @@ class StageBatchedProcessor(BatchProcessor):
             if not translation or len(translation) == 1:
                 continue
             vertical = is_vertical_block(blk, trg_lng_cd)
+            text_to_wrap = translation
+            alignment = self.main_page.button_to_alignment[render_settings.alignment_id]
+            source_rect, block_anchor = build_render_rects_for_block(blk)
+            block_width = int(source_rect[2])
+            block_height = int(source_rect[3])
+            fit_clearance = get_render_fit_clearance_for_block(
+                blk,
+                render_settings.outline_width,
+                auto_max_font_profile=getattr(render_settings, "auto_max_font_profile", "current"),
+            )
             translation, font_size, rendered_width, rendered_height = pyside_word_wrap(
-                translation,
+                text_to_wrap,
                 font,
                 block_width,
                 block_height,
@@ -1023,16 +1034,39 @@ class StageBatchedProcessor(BatchProcessor):
                 render_settings.bold,
                 render_settings.italic,
                 render_settings.underline,
-                self.main_page.button_to_alignment[render_settings.alignment_id],
+                alignment,
                 render_settings.direction,
                 render_settings.max_font_size,
                 render_settings.min_font_size,
                 vertical,
-                fit_clearance=get_render_fit_clearance_for_block(
-                    blk,
-                    render_settings.outline_width,
-                ),
+                fit_clearance=fit_clearance,
                 return_metrics=True,
+            )
+            translation, font_size, rendered_width, rendered_height = (
+                refit_detected_bubble_text_if_underfilled(
+                    blk,
+                    text_to_wrap,
+                    font,
+                    block_width,
+                    block_height,
+                    float(render_settings.line_spacing),
+                    float(render_settings.outline_width),
+                    render_settings.bold,
+                    render_settings.italic,
+                    render_settings.underline,
+                    alignment,
+                    render_settings.direction,
+                    render_settings.max_font_size,
+                    render_settings.min_font_size,
+                    vertical,
+                    fit_clearance,
+                    translation,
+                    font_size,
+                    rendered_width,
+                    rendered_height,
+                    auto_max_font_size=getattr(render_settings, "auto_max_font_size", True),
+                    auto_max_font_profile=getattr(render_settings, "auto_max_font_profile", "current"),
+                )
             )
             blk._text_fit_status = (
                 "needs_review"
@@ -1054,7 +1088,6 @@ class StageBatchedProcessor(BatchProcessor):
                 render_settings.force_font_color,
                 render_settings.smart_global_apply_all,
             )
-            alignment = self.main_page.button_to_alignment[render_settings.alignment_id]
             render_markup = describe_render_text_markup(
                 translation,
                 font_family=font,
@@ -1080,7 +1113,6 @@ class StageBatchedProcessor(BatchProcessor):
             blk._render_normalization_replacements = list(
                 render_normalization.replacements
             ) + list(render_markup.replacements)
-            source_rect, block_anchor = build_render_rects_for_block(blk)
             vertical_alignment = self.main_page.button_to_vertical_alignment.get(
                 render_settings.vertical_alignment_id,
                 VERTICAL_ALIGNMENT_TOP,
@@ -1206,7 +1238,12 @@ class StageBatchedProcessor(BatchProcessor):
                 if not ctx.no_text_detected:
                     format_translations(ctx.blk_list, trg_lng_cd, upper_case=render_settings.upper_case)
                     self._raise_if_cancelled()
-                    get_best_render_area(ctx.blk_list, ctx.image, ctx.inpaint_input_img)
+                    get_best_render_area(
+                        ctx.blk_list,
+                        ctx.image,
+                        ctx.inpaint_input_img,
+                        auto_max_font_profile=getattr(render_settings, "auto_max_font_profile", "current"),
+                    )
                 self._render_page_text_items(ctx, render_settings=render_settings, trg_lng_cd=trg_lng_cd)
                 self._raise_if_cancelled()
                 page_state = self._ensure_page_state(ctx.image_path)
