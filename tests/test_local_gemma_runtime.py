@@ -28,6 +28,22 @@ class _DummyGemmaSettingsPage:
 
 
 class LocalGemmaRuntimeManagerTests(unittest.TestCase):
+    def test_validate_loaded_model_accepts_model_id_basename_match(self) -> None:
+        manager = LocalGemmaRuntimeManager()
+        payload = {
+            "data": [
+                {"id": "/models/gemma-test.gguf"},
+            ]
+        }
+        response = mock.MagicMock()
+        response.__enter__.return_value.read.return_value = json.dumps(payload).encode("utf-8")
+
+        with mock.patch("modules.translation.local_runtime.urlopen", return_value=response):
+            manager._validate_loaded_model(
+                "http://127.0.0.1:18080/v1",
+                "gemma-test.gguf",
+            )
+
     def test_ensure_server_reuses_readiness_cache_for_same_endpoint_model(self) -> None:
         manager = LocalGemmaRuntimeManager()
         settings_page = _DummyGemmaSettingsPage()
