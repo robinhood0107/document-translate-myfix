@@ -44,6 +44,11 @@ SUPPORTED_SERIES_SOURCE_EXTS = {
     ".jpeg",
     ".webp",
     ".bmp",
+    ".jp2",
+    ".j2k",
+    ".jpf",
+    ".jpx",
+    ".j2c",
     ".psd",
     ".pdf",
     ".epub",
@@ -1068,6 +1073,104 @@ def update_series_item_status(
         raise KeyError(series_item_id)
     save_series_manifest(file_name, manifest=state["manifest"], items=items)
     return items
+
+
+def update_series_item_manual_status(
+    file_name: str,
+    *,
+    series_item_id: str,
+    status: str,
+) -> dict[str, object]:
+    target_status = str(status or "").strip().lower()
+    if target_status not in {SERIES_QUEUE_STATUS_PENDING, SERIES_QUEUE_STATUS_DONE}:
+        raise ValueError(f"Unsupported manual series status: {status}")
+
+    state = load_series_project(file_name)
+    manifest = dict(state["manifest"])
+    items = [dict(item) for item in state["items"]]
+    target_id = str(series_item_id or "").strip()
+    if not target_id:
+        raise KeyError(series_item_id)
+
+    target_item = None
+    for item in items:
+        if str(item.get("series_item_id") or "") == target_id:
+            target_item = item
+            break
+    if target_item is None:
+        raise KeyError(series_item_id)
+
+    target_item["status"] = target_status
+    target_item["updated_at"] = _now_iso()
+
+    ordered_items = _ordered_items(items)
+    pending_ids = [
+        str(item.get("series_item_id") or "")
+        for item in ordered_items
+        if str(item.get("series_item_id") or "").strip()
+        and str(item.get("status") or "").strip().lower() == SERIES_QUEUE_STATUS_PENDING
+    ]
+    completed_ids = [
+        str(item.get("series_item_id") or "")
+        for item in ordered_items
+        if str(item.get("series_item_id") or "").strip()
+        and str(item.get("status") or "").strip().lower() == SERIES_QUEUE_STATUS_DONE
+    ]
+
+    item_ids = {
+        str(item.get("series_item_id") or "")
+        for item in ordered_items
+        if str(item.get("series_item_id") or "").strip()
+    }
+    queue_runtime = normalize_series_queue_runtime(manifest.get("series_queue_runtime"))
+    failed_ids = [
+        str(item_id)
+        for item_id in list(queue_runtime.get("failed_item_ids") or [])
+        if str(item_id) in item_ids and str(item_id) != target_id
+    ]
+    skipped_ids = [
+        str(item_id)
+        for item_id in list(queue_runtime.get("skipped_item_ids") or [])
+        if str(item_id) in item_ids and str(item_id) != target_id
+    ]
+    retry_remaining = {
+        str(item_id): int(remaining)
+        for item_id, remaining in dict(queue_runtime.get("retry_remaining_by_item") or {}).items()
+        if str(item_id) in item_ids and str(item_id) != target_id
+    }
+    active_item_id = str(queue_runtime.get("active_item_id") or "").strip() or None
+    failed_item_id = str(queue_runtime.get("failed_item_id") or "").strip() or None
+    if active_item_id == target_id:
+        active_item_id = None
+    if failed_item_id == target_id:
+        failed_item_id = None
+
+    queue_state = str(queue_runtime.get("queue_state") or SERIES_QUEUE_STATE_IDLE)
+    if queue_state == SERIES_QUEUE_STATE_PAUSED and not pending_ids:
+        queue_state = SERIES_QUEUE_STATE_IDLE
+    elif queue_state == SERIES_QUEUE_STATE_RUNNING and active_item_id is None:
+        queue_state = SERIES_QUEUE_STATE_PAUSED if pending_ids else SERIES_QUEUE_STATE_IDLE
+
+    queue_runtime.update(
+        {
+            "queue_state": queue_state,
+            "pause_requested": False,
+            "pending_item_ids": pending_ids,
+            "active_item_id": active_item_id,
+            "completed_item_ids": completed_ids,
+            "failed_item_ids": failed_ids,
+            "skipped_item_ids": skipped_ids,
+            "failed_item_id": failed_item_id,
+            "retry_remaining_by_item": retry_remaining,
+        }
+    )
+    manifest["series_queue_runtime"] = normalize_series_queue_runtime(queue_runtime)
+    manifest["updated_at"] = _now_iso()
+    save_series_manifest(file_name, manifest=manifest, items=items)
+    return {
+        "manifest": manifest,
+        "items": items,
+    }
 
 
 def update_series_items_order(

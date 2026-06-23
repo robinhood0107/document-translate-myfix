@@ -61,6 +61,7 @@ from modules.rendering.render import (
     get_render_fit_clearance_for_block,
     is_vertical_block,
     pyside_word_wrap,
+    refit_detected_bubble_text_if_underfilled,
 )
 from modules.utils.device import resolve_device
 from app.path_materialization import ensure_path_materialized
@@ -280,6 +281,12 @@ class BatchProcessor:
         return
 
     def _is_cancelled(self) -> bool:
+        checker = getattr(self.main_page, "is_current_task_cancelled", None)
+        if callable(checker):
+            try:
+                return bool(checker())
+            except Exception:
+                pass
         worker = getattr(self.main_page, "current_worker", None)
         return bool(worker and worker.is_cancelled)
 
@@ -562,7 +569,7 @@ class BatchProcessor:
                 export_settings,
             ),
         )
-        write_output_image(
+        output_path = write_output_image(
             output_path,
             cleaned_image,
             source_path=image_path,
@@ -668,7 +675,7 @@ class BatchProcessor:
         total_pages: int,
     ) -> tuple[str, str]:
         page_base_name = os.path.splitext(os.path.basename(image_path))[0]
-        series_dir = self.main_page.get_automatic_output_series_dir(
+        series_dir = self.main_page.get_reserved_automatic_output_series_dir(
             directory,
             anchor_path=self.main_page.image_files[0] if self.main_page.image_files else image_path,
         )
@@ -710,7 +717,7 @@ class BatchProcessor:
                 export_settings,
             ),
         )
-        write_output_image(
+        output_path = write_output_image(
             output_path,
             final_rgb,
             source_path=image_path,
@@ -858,6 +865,9 @@ class BatchProcessor:
     def batch_process(self, selected_paths: List[str] = None):
         timestamp = build_export_timestamp()
         self._export_run_tokens = {}
+        reset_output_reservations = getattr(self.main_page, "reset_automatic_output_reservations", None)
+        if callable(reset_output_reservations):
+            reset_output_reservations()
         self._run_started_at = time.monotonic()
         self._page_started_at = None
         self._progress_image_path = None
@@ -1070,7 +1080,7 @@ class BatchProcessor:
                     quality = summarize_ocr_quality(blk_list)
                     self._log_ocr_quality(image_path, quality, attempt_count)
 
-                    if quality.get("low_quality", False):
+                    if quality.get("low_quality", False) and int(quality.get("non_empty", 0) or 0) > 0:
                         attempt_count += 1
                         logger.info(
                             "ocr quality gate triggered retry for %s: %s",
@@ -1130,7 +1140,7 @@ class BatchProcessor:
                             dropped_block_count=len(schema_only_blocks),
                             remaining_block_count=len(blk_list or []),
                         )
-                        if quality.get("low_quality", False):
+                        if quality.get("low_quality", False) and int(quality.get("non_empty", 0) or 0) > 0:
                             err_msg = quality.get("reason") or "No OCR text remains after dropping schema-only blocks."
                             self.main_page.image_ctrl.update_processing_summary(
                                 image_path,
@@ -1146,6 +1156,102 @@ class BatchProcessor:
                                 reason=err_msg,
                             )
                             raise RuntimeError(err_msg)
+
+                    if not blk_list or int(quality.get("non_empty", 0) or 0) <= 0:
+                        blk_list = []
+                        page_state = self._ensure_page_state(image_path)
+                        page_state["blk_list"] = []
+                        page_state.setdefault("viewer_state", {})["rectangles"] = []
+                        self.main_page.image_ctrl.mark_processing_stage(
+                            image_path,
+                            "ocr",
+                            "completed",
+                            reason="no_text_detected",
+                            quality=quality,
+                            cache_status=cache_status,
+                            attempt_count=attempt_count,
+                        )
+                        page_ocr_metrics = self._ocr_quality_metrics(quality)
+                        self._emit_benchmark_event(
+                            "ocr_end",
+                            image_path=image_path,
+                            image_index=index,
+                            total_images=total_images,
+                            block_count=0,
+                            ocr_model=ocr_model,
+                            ocr_engine=self.ocr_handler.ocr.last_engine_name or "",
+                            cache_status=cache_status,
+                            attempt_count=attempt_count,
+                            skip_reason="no_text_detected",
+                            **page_ocr_metrics,
+                        )
+                        self.main_page.image_ctrl.mark_processing_stage(
+                            image_path,
+                            "inpaint",
+                            "skipped",
+                            reason="no_text_detected",
+                        )
+                        self.main_page.image_ctrl.mark_processing_stage(
+                            image_path,
+                            "translation",
+                            "skipped",
+                            reason="no_text_detected",
+                        )
+                        self.main_page.image_ctrl.mark_processing_stage(
+                            image_path,
+                            "render",
+                            "completed",
+                            text_item_count=0,
+                            reason="no_text_detected",
+                        )
+                        page_state.setdefault("viewer_state", {}).update(
+                            {"text_items_state": [], "push_to_stack": True}
+                        )
+                        self.main_page.image_ctrl.mark_processing_stage(
+                            image_path,
+                            "pipeline",
+                            "completed",
+                            reason="no_text_detected",
+                        )
+                        self.main_page.render_state_ready.emit(image_path)
+                        final_output_path, final_output_root = self._write_final_render_export(
+                            directory,
+                            export_token,
+                            image_path,
+                            image,
+                            [],
+                            page_state.get("viewer_state", {}),
+                            export_settings,
+                            page_index=index,
+                            total_pages=total_images,
+                        )
+                        self.main_page.image_ctrl.update_processing_summary(
+                            image_path,
+                            {
+                                "translated_image_path": final_output_path,
+                                "translated_page_image_path": final_output_path,
+                                "export_root": final_output_root,
+                                "skip_reason": "no_text_detected",
+                            },
+                        )
+                        self._emit_benchmark_event(
+                            "page_done",
+                            image_path=image_path,
+                            image_index=index,
+                            total_images=total_images,
+                            block_count=0,
+                            patch_count=0,
+                            skip_reason="no_text_detected",
+                            **page_ocr_metrics,
+                        )
+                        self._log_page_done(
+                            index,
+                            total_images,
+                            image_path,
+                            preview_path=final_output_path,
+                        )
+                        self.emit_progress(index, total_images, 10, 10, False)
+                        continue
 
                     self._persist_ocr_state(
                         image_path,
@@ -1246,8 +1352,9 @@ class BatchProcessor:
                 self.main_page.image_ctrl.mark_processing_stage(
                     image_path,
                     "detect",
-                    "failed",
+                    "completed",
                     reason="No text blocks detected.",
+                    block_count=0,
                 )
                 self._write_inpaint_debug_exports(
                     export_root=export_root,
@@ -1270,18 +1377,79 @@ class BatchProcessor:
                     },
                     inpainter_backend=get_inpainter_runtime(settings_page)["backend"],
                 )
-                self.skip_save(directory, export_token, base_name, extension, archive_bname, image)
-                self.main_page.image_skipped.emit(image_path, "Text Blocks", "")
-                self.log_skipped_image(directory, export_token, image_path, "No text blocks detected")
+                self.main_page.image_ctrl.mark_processing_stage(
+                    image_path,
+                    "ocr",
+                    "skipped",
+                    reason="no_text_detected",
+                )
+                self.main_page.image_ctrl.mark_processing_stage(
+                    image_path,
+                    "inpaint",
+                    "skipped",
+                    reason="no_text_detected",
+                )
+                self.main_page.image_ctrl.mark_processing_stage(
+                    image_path,
+                    "translation",
+                    "skipped",
+                    reason="no_text_detected",
+                )
+                self.main_page.image_ctrl.mark_processing_stage(
+                    image_path,
+                    "render",
+                    "completed",
+                    text_item_count=0,
+                    reason="no_text_detected",
+                )
+                page_state.setdefault("viewer_state", {}).update(
+                    {"text_items_state": [], "push_to_stack": True}
+                )
+                page_state["blk_list"] = []
+                self.main_page.image_ctrl.mark_processing_stage(
+                    image_path,
+                    "pipeline",
+                    "completed",
+                    reason="no_text_detected",
+                )
+                self.main_page.render_state_ready.emit(image_path)
+                final_output_path, final_output_root = self._write_final_render_export(
+                    directory,
+                    export_token,
+                    image_path,
+                    image,
+                    [],
+                    page_state.get("viewer_state", {}),
+                    export_settings,
+                    page_index=index,
+                    total_pages=total_images,
+                )
+                self.main_page.image_ctrl.update_processing_summary(
+                    image_path,
+                    {
+                        "translated_image_path": final_output_path,
+                        "translated_page_image_path": final_output_path,
+                        "export_root": final_output_root,
+                        "skip_reason": "no_text_detected",
+                    },
+                )
                 self._emit_benchmark_event(
-                    "page_failed",
+                    "page_done",
                     image_path=image_path,
                     image_index=index,
                     total_images=total_images,
-                    failed_stage="detect",
-                    reason="No text blocks detected.",
+                    block_count=0,
+                    patch_count=0,
+                    skip_reason="no_text_detected",
                     **page_ocr_metrics,
                 )
+                self._log_page_done(
+                    index,
+                    total_images,
+                    image_path,
+                    preview_path=final_output_path,
+                )
+                self.emit_progress(index, total_images, 10, 10, False)
                 continue
 
             self.emit_progress(index, total_images, 3, 10, False)
@@ -1672,7 +1840,12 @@ class BatchProcessor:
             upper_case = render_settings.upper_case
             outline = render_settings.outline
             format_translations(blk_list, trg_lng_cd, upper_case=upper_case)
-            get_best_render_area(blk_list, image, inpaint_input_img)
+            get_best_render_area(
+                blk_list,
+                image,
+                inpaint_input_img,
+                auto_max_font_profile=getattr(render_settings, "auto_max_font_profile", "current"),
+            )
 
             font = render_settings.font_family
             setting_font_color = QColor(render_settings.color)
@@ -1723,8 +1896,17 @@ class BatchProcessor:
                 # Determine if this block should use vertical rendering
                 vertical = is_vertical_block(blk, trg_lng_cd)
 
+                text_to_wrap = translation
+                source_rect, block_anchor = build_render_rects_for_block(blk)
+                block_width = int(source_rect[2])
+                block_height = int(source_rect[3])
+                fit_clearance = get_render_fit_clearance_for_block(
+                    blk,
+                    outline_width,
+                    auto_max_font_profile=getattr(render_settings, "auto_max_font_profile", "current"),
+                )
                 translation, font_size, rendered_width, rendered_height = pyside_word_wrap(
-                    translation, 
+                    text_to_wrap,
                     font, 
                     block_width, 
                     block_height,
@@ -1738,11 +1920,34 @@ class BatchProcessor:
                     max_font_size, 
                     min_font_size,
                     vertical,
-                    fit_clearance=get_render_fit_clearance_for_block(
-                        blk,
-                        outline_width,
-                    ),
+                    fit_clearance=fit_clearance,
                     return_metrics=True
+                )
+                translation, font_size, rendered_width, rendered_height = (
+                    refit_detected_bubble_text_if_underfilled(
+                        blk,
+                        text_to_wrap,
+                        font,
+                        block_width,
+                        block_height,
+                        line_spacing,
+                        outline_width,
+                        bold,
+                        italic,
+                        underline,
+                        alignment,
+                        direction,
+                        max_font_size,
+                        min_font_size,
+                        vertical,
+                        fit_clearance,
+                        translation,
+                        font_size,
+                        rendered_width,
+                        rendered_height,
+                        auto_max_font_size=getattr(render_settings, "auto_max_font_size", True),
+                        auto_max_font_profile=getattr(render_settings, "auto_max_font_profile", "current"),
+                    )
                 )
                 blk._text_fit_status = (
                     "needs_review"
@@ -1801,7 +2006,6 @@ class BatchProcessor:
                 if image_path == file_on_display:
                     self.main_page.blk_rendered.emit(translation, font_size, blk, image_path)
 
-                source_rect, block_anchor = build_render_rects_for_block(blk)
                 position, item_width, item_height = build_text_item_layout_geometry(
                     source_rect,
                     rendered_height,
@@ -1927,6 +2131,7 @@ class BatchProcessor:
                 image_path,
                 {
                     "translated_image_path": final_output_path,
+                    "translated_page_image_path": final_output_path,
                     "export_root": final_output_root,
                 },
             )

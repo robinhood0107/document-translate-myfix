@@ -10,6 +10,7 @@ from PySide6 import QtWidgets
 from shiboken6 import isValid
 
 from app.ui.series_workspace import SeriesSettingsDialog, SeriesWorkspace
+from modules.utils.automatic_output import OUTPUT_TARGET_ARCHIVE, OUTPUT_TARGET_IMAGES
 
 
 class SeriesWorkspaceRuntimeTests(unittest.TestCase):
@@ -38,6 +39,7 @@ class SeriesWorkspaceRuntimeTests(unittest.TestCase):
                     "font_family": "Ownglyph gumama3",
                     "max_font_size": 40,
                     "line_spacing": "1.0",
+                    "auto_max_font_profile": "strong",
                     "alignment_id": 1,
                     "outline": True,
                     "outline_width": "3.0",
@@ -110,6 +112,13 @@ class SeriesWorkspaceRuntimeTests(unittest.TestCase):
         self.assertFalse(self.widget.add_folder_button.isEnabled())
         self.assertFalse(self.widget.quick_settings.source_lang_combo.isEnabled())
         self.assertFalse(self.widget.quick_settings.series_settings_button.isEnabled())
+        self.assertFalse(self.widget.status_button.isEnabled())
+        self.assertFalse(self.widget.mark_done_action.isEnabled())
+        self.assertFalse(self.widget.reset_pending_action.isEnabled())
+        locked_menu = self.widget.queue_table.build_status_change_menu(self._items()[1])
+        self.addCleanup(locked_menu.deleteLater)
+        self.assertFalse(locked_menu.actions()[0].isEnabled())
+        self.assertFalse(locked_menu.actions()[1].isEnabled())
         self.assertFalse(self.widget.back_button.isEnabled())
         self.assertFalse(self.widget.forward_button.isEnabled())
         self.assertFalse(self.widget.tree_button.isEnabled())
@@ -167,8 +176,10 @@ class SeriesWorkspaceRuntimeTests(unittest.TestCase):
         self.assertTrue(self.widget.quick_settings.auto_translate_button.isEnabled())
         self.assertTrue(self.widget.queue_notice.isHidden())
         self.assertEqual(self.widget.status_panel.state_value.text(), "Idle")
+        self.assertFalse(self.widget.status_button.isEnabled())
         self.assertIn("Ownglyph gumama3", self.widget.quick_settings.render_summary_label.text())
         self.assertIn("max 40", self.widget.quick_settings.render_summary_label.text())
+        self.assertIn("Individual images", self.widget.quick_settings.export_summary_label.text())
         self.assertIn("debug 1 enabled", self.widget.quick_settings.export_summary_label.text())
         self.assertTrue(self.widget.status_panel.pause_button.isHidden())
         self.assertTrue(self.widget.status_panel.resume_button.isHidden())
@@ -220,6 +231,7 @@ class SeriesWorkspaceRuntimeTests(unittest.TestCase):
                     "min_font_size": 5,
                     "max_font_size": 42,
                     "line_spacing": "1.2",
+                    "auto_max_font_profile": "strong",
                     "color": "#123456",
                     "force_font_color": True,
                     "alignment_id": 2,
@@ -266,6 +278,8 @@ class SeriesWorkspaceRuntimeTests(unittest.TestCase):
         self.assertEqual(global_settings["translator"], "Custom Local Server(Gemma)")
         self.assertEqual(global_settings["render_settings"]["font_family"], "Ownglyph gumama3")
         self.assertEqual(global_settings["render_settings"]["max_font_size"], 42)
+        self.assertTrue(global_settings["render_settings"]["auto_max_font_size"])
+        self.assertEqual(global_settings["render_settings"]["auto_max_font_profile"], "strong")
         self.assertEqual(global_settings["render_settings"]["color"], "#123456")
         self.assertTrue(global_settings["render_settings"]["force_font_color"])
         self.assertEqual(global_settings["render_settings"]["alignment_id"], 2)
@@ -284,6 +298,68 @@ class SeriesWorkspaceRuntimeTests(unittest.TestCase):
         self.assertTrue(global_settings["export_settings"]["export_mask_overlay"])
         self.assertTrue(global_settings["export_settings"]["export_cleanup_mask_delta"])
         self.assertTrue(global_settings["export_settings"]["export_debug_metadata"])
+
+    def test_series_settings_dialog_can_select_individual_image_output(self) -> None:
+        dialog = SeriesSettingsDialog()
+        self.addCleanup(dialog.deleteLater)
+        dialog.configure_options(
+            languages=[("Japanese", "Japanese"), ("Korean", "Korean")],
+            ocr_modes=[("best_local", "Optimal")],
+            translators=[("gemma_local", "Custom Local Server(Gemma)")],
+            workflow_modes=[("stage_batched_pipeline", "Stage-Batched")],
+            fonts=["Arial"],
+            output_options={
+                "automatic_output_target": [
+                    (OUTPUT_TARGET_IMAGES, "Individual images"),
+                    (OUTPUT_TARGET_ARCHIVE, "Single archive"),
+                ],
+                "automatic_output_image_format": [("same_as_source", "Same as source")],
+                "automatic_output_archive_format": [("zip", "ZIP"), ("cbz", "CBZ")],
+                "automatic_output_archive_image_format": [("png", "PNG")],
+            },
+        )
+        dialog.set_payload(
+            {},
+            {
+                "source_language": "Japanese",
+                "target_language": "Korean",
+                "ocr": "best_local",
+                "translator": "gemma_local",
+                "workflow_mode": "stage_batched_pipeline",
+                "use_gpu": True,
+                "export_settings": {
+                    "automatic_output_target": OUTPUT_TARGET_ARCHIVE,
+                    "automatic_output_image_format": "same_as_source",
+                    "automatic_output_archive_format": "zip",
+                    "automatic_output_archive_image_format": "png",
+                    "automatic_output_archive_compression_level": 6,
+                },
+            },
+        )
+
+        self.assertGreaterEqual(dialog.output_target_combo.findData(OUTPUT_TARGET_IMAGES), 0)
+        self.assertGreaterEqual(dialog.output_target_combo.findData(OUTPUT_TARGET_ARCHIVE), 0)
+        self.assertEqual(dialog.output_target_combo.currentData(), OUTPUT_TARGET_ARCHIVE)
+        self.assertTrue(dialog.output_image_format_row.isHidden())
+        self.assertFalse(dialog.output_archive_format_row.isHidden())
+        self.assertFalse(dialog.output_archive_image_format_row.isHidden())
+        self.assertFalse(dialog.output_archive_level_row.isHidden())
+        self.assertIn("ZIP/CBZ", dialog.output_mode_note_label.text())
+
+        dialog.output_target_combo.setCurrentIndex(
+            dialog.output_target_combo.findData(OUTPUT_TARGET_IMAGES)
+        )
+        _series_settings, global_settings = dialog.payload()
+
+        self.assertEqual(
+            global_settings["export_settings"]["automatic_output_target"],
+            OUTPUT_TARGET_IMAGES,
+        )
+        self.assertFalse(dialog.output_image_format_row.isHidden())
+        self.assertTrue(dialog.output_archive_format_row.isHidden())
+        self.assertTrue(dialog.output_archive_image_format_row.isHidden())
+        self.assertTrue(dialog.output_archive_level_row.isHidden())
+        self.assertIn("skips final ZIP/CBZ", dialog.output_mode_note_label.text())
 
     def test_paused_queue_shows_resume_and_unlocks_reorder(self) -> None:
         self.widget.set_navigation_state(can_back=False, can_forward=False)
@@ -315,6 +391,62 @@ class SeriesWorkspaceRuntimeTests(unittest.TestCase):
         self.assertTrue(self.widget.status_panel.open_failed_button.isEnabled())
         self.assertFalse(self.widget.recovery_badge.isHidden())
         self.assertFalse(self.widget.unsynced_badge.isHidden())
+        self.widget.queue_table.selectRow(1)
+        QtWidgets.QApplication.processEvents()
+        self.assertTrue(self.widget.status_button.isEnabled())
+        self.assertTrue(self.widget.mark_done_action.isEnabled())
+        self.assertTrue(self.widget.reset_pending_action.isEnabled())
+
+    def test_status_change_button_emits_only_pending_or_done_targets(self) -> None:
+        self.widget.set_series_state(
+            series_file="demo.seriesctpr",
+            items=self._items(),
+            queue_running=False,
+            active_item_id="",
+            queue_runtime={"queue_state": "idle", "last_run_summary": {}},
+        )
+        captured: list[tuple[str, str]] = []
+        self.widget.status_change_requested.connect(lambda item_id, status: captured.append((item_id, status)))
+
+        self.widget.queue_table.selectRow(0)
+        QtWidgets.QApplication.processEvents()
+
+        self.assertTrue(self.widget.status_button.isEnabled())
+        self.assertTrue(self.widget.mark_done_action.isEnabled())
+        self.assertFalse(self.widget.reset_pending_action.isEnabled())
+        self.widget.mark_done_action.trigger()
+
+        self.widget.queue_table.selectRow(1)
+        QtWidgets.QApplication.processEvents()
+
+        self.assertTrue(self.widget.status_button.isEnabled())
+        self.assertTrue(self.widget.mark_done_action.isEnabled())
+        self.assertTrue(self.widget.reset_pending_action.isEnabled())
+        self.widget.reset_pending_action.trigger()
+
+        self.assertEqual(captured, [("item-1", "done"), ("item-2", "pending")])
+
+    def test_status_change_context_menu_matches_selected_row_state(self) -> None:
+        self.widget.set_series_state(
+            series_file="demo.seriesctpr",
+            items=self._items(),
+            queue_running=False,
+            active_item_id="",
+            queue_runtime={"queue_state": "idle", "last_run_summary": {}},
+        )
+
+        pending_menu = self.widget.queue_table.build_status_change_menu(self._items()[0])
+        running_menu = self.widget.queue_table.build_status_change_menu(self._items()[1])
+        self.addCleanup(pending_menu.deleteLater)
+        self.addCleanup(running_menu.deleteLater)
+
+        pending_actions = pending_menu.actions()
+        running_actions = running_menu.actions()
+        self.assertEqual([action.text() for action in pending_actions], ["Mark as Done", "Reset to Pending"])
+        self.assertTrue(pending_actions[0].isEnabled())
+        self.assertFalse(pending_actions[1].isEnabled())
+        self.assertTrue(running_actions[0].isEnabled())
+        self.assertTrue(running_actions[1].isEnabled())
 
     def test_sort_combo_emits_reorder_and_resets_to_manual(self) -> None:
         self.widget.set_series_state(

@@ -82,6 +82,75 @@ class PipelineStatusPanelTests(unittest.TestCase):
         self.assertTrue(self.panel.mode_button.isEnabled())
         self.assertTrue(self.panel.logs_button.isEnabled())
 
+    def test_action_buttons_wrap_and_keep_text_width(self) -> None:
+        self.panel.show()
+        self.panel.setGeometry(0, 0, 680, 520)
+        self.panel.set_series_queue_pause_visible(True, pause_requested=False)
+        self.panel.update_event(
+            {
+                "phase": "pipeline",
+                "status": "running",
+                "service": "batch",
+                "message": "running",
+            }
+        )
+        QtWidgets.QApplication.processEvents()
+
+        rows = []
+        for index in range(self.panel.action_layout.count()):
+            row, _column, _row_span, _column_span = self.panel.action_layout.getItemPosition(index)
+            rows.append(row)
+        self.assertGreater(max(rows), 0)
+
+        for button in self.panel._action_buttons + [self.panel.mode_button, self.panel.logs_button]:
+            text_width = button.fontMetrics().horizontalAdvance(button.text())
+            self.assertGreaterEqual(button.minimumWidth(), text_width + 20)
+
+    def test_pause_click_shows_feedback_before_signal(self) -> None:
+        emitted: list[bool] = []
+        self.panel.pause_requested.connect(lambda: emitted.append(True))
+        self.panel.set_series_queue_pause_visible(True, pause_requested=False)
+        self.panel.update_event(
+            {
+                "phase": "pipeline",
+                "status": "running",
+                "service": "batch",
+                "message": "running",
+            }
+        )
+        QtWidgets.QApplication.processEvents()
+
+        QtTest.QTest.mouseClick(self.panel.pause_button, QtCore.Qt.MouseButton.LeftButton)
+
+        self.assertEqual(self.panel.pause_button.text(), "Pause Requested")
+        self.assertFalse(self.panel.pause_button.isEnabled())
+        self.assertIn("Pause requested", self.panel.message_value.text())
+        QtTest.QTest.qWait(10)
+        QtWidgets.QApplication.processEvents()
+        self.assertEqual(emitted, [True])
+
+    def test_cancel_click_shows_feedback_before_signal(self) -> None:
+        emitted: list[bool] = []
+        self.panel.cancel_requested.connect(lambda: emitted.append(True))
+        self.panel.update_event(
+            {
+                "phase": "pipeline",
+                "status": "running",
+                "service": "batch",
+                "message": "running",
+            }
+        )
+        QtWidgets.QApplication.processEvents()
+
+        QtTest.QTest.mouseClick(self.panel.cancel_button, QtCore.Qt.MouseButton.LeftButton)
+
+        self.assertEqual(self.panel.cancel_button.text(), "Cancelling...")
+        self.assertFalse(self.panel.cancel_button.isEnabled())
+        self.assertEqual(self.panel.message_value.text(), "취소 중...")
+        QtTest.QTest.qWait(10)
+        QtWidgets.QApplication.processEvents()
+        self.assertEqual(emitted, [True])
+
     def test_done_event_updates_preview_and_auto_hides(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             image_path = os.path.join(temp_dir, "preview.png")

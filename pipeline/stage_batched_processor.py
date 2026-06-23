@@ -34,6 +34,7 @@ from modules.rendering.render import (
     get_render_fit_clearance_for_block,
     is_vertical_block,
     pyside_word_wrap,
+    refit_detected_bubble_text_if_underfilled,
 )
 from modules.translation.local_runtime import LocalGemmaRuntimeManager
 from modules.translation.processor import Translator
@@ -96,6 +97,7 @@ class StagePageContext:
     cleanup_stats: dict[str, Any] = field(
         default_factory=lambda: {"applied": False, "component_count": 0, "block_count": 0}
     )
+    no_text_detected: bool = False
     failed_stage: str = ""
     failed_reason: str = ""
 
@@ -440,6 +442,14 @@ class StageBatchedProcessor(BatchProcessor):
             state = self._ensure_page_state(ctx.image_path)
             state["blk_list"] = []
             state.setdefault("viewer_state", {})["rectangles"] = []
+            ctx.no_text_detected = True
+            self.main_page.image_ctrl.mark_processing_stage(
+                ctx.image_path,
+                "detect",
+                "completed",
+                reason="no_text_detected",
+                block_count=0,
+            )
             self._write_inpaint_debug_exports(
                 export_root=ctx.export_root,
                 archive_bname=ctx.archive_bname,
@@ -461,13 +471,17 @@ class StageBatchedProcessor(BatchProcessor):
                 },
                 inpainter_backend=get_inpainter_runtime(settings_page)["backend"],
             )
-            self._mark_page_failed(
-                ctx,
-                index=index,
+            ctx.page_ocr_metrics = self._ocr_quality_metrics(None)
+            self._emit_benchmark_event(
+                "detect_end",
+                image_path=ctx.image_path,
+                image_index=index,
                 total_images=total_images,
-                stage="detect",
-                reason="No text blocks detected.",
-                extra=self._ocr_quality_metrics(None),
+                block_count=0,
+                detector_key=ctx.detector_key,
+                detector_engine=ctx.detector_engine,
+                skip_reason="no_text_detected",
+                **ctx.page_ocr_metrics,
             )
             self._raise_if_cancelled()
 
@@ -559,6 +573,23 @@ class StageBatchedProcessor(BatchProcessor):
                 continue
             self._set_current_image(ctx.image_path)
             self.emit_progress(index, total_images, 2, 10, False)
+            if ctx.no_text_detected:
+                self.main_page.image_ctrl.mark_processing_stage(
+                    ctx.image_path,
+                    "ocr",
+                    "skipped",
+                    reason="no_text_detected",
+                )
+                self._emit_benchmark_event(
+                    "ocr_end",
+                    image_path=ctx.image_path,
+                    image_index=index,
+                    total_images=total_images,
+                    block_count=0,
+                    skip_reason="no_text_detected",
+                    **ctx.page_ocr_metrics,
+                )
+                continue
             self._emit_benchmark_event(
                 "ocr_start",
                 image_path=ctx.image_path,
@@ -571,6 +602,37 @@ class StageBatchedProcessor(BatchProcessor):
                 self._raise_if_cancelled()
                 quality = result["quality"]
                 self._log_ocr_quality(ctx.image_path, quality, int(result["attempt_count"]))
+                if not ctx.blk_list or int(quality.get("non_empty", 0) or 0) <= 0:
+                    ctx.blk_list = []
+                    ctx.no_text_detected = True
+                    state = self._ensure_page_state(ctx.image_path)
+                    state["blk_list"] = []
+                    state.setdefault("viewer_state", {})["rectangles"] = []
+                    self.main_page.image_ctrl.mark_processing_stage(
+                        ctx.image_path,
+                        "ocr",
+                        "completed",
+                        reason="no_text_detected",
+                        cache_status=result["cache_status"],
+                        attempt_count=int(result["attempt_count"]),
+                        quality=quality,
+                    )
+                    ctx.page_ocr_metrics = dict(result["metrics"] or {})
+                    self._emit_benchmark_event(
+                        "ocr_end",
+                        image_path=ctx.image_path,
+                        image_index=index,
+                        total_images=total_images,
+                        block_count=0,
+                        ocr_model=str(policy["primary_ocr_engine"]),
+                        ocr_engine=result["engine_name"],
+                        cache_status=result["cache_status"],
+                        attempt_count=int(result["attempt_count"]),
+                        ocr_page_profile=result["page_profile"],
+                        skip_reason="no_text_detected",
+                        **ctx.page_ocr_metrics,
+                    )
+                    continue
                 if quality.get("low_quality", False):
                     raise RuntimeError(quality.get("reason") or "OCR quality too low after retry.")
                 device = resolve_device(settings_page.is_gpu_enabled())
@@ -641,9 +703,11 @@ class StageBatchedProcessor(BatchProcessor):
             hd_strategy_settings.get("strategy", ""),
             hd_strategy_settings.get("strategy", ""),
         )
-        runtime = self._ensure_inpainter()
+        active_pages = [ctx for ctx in pages if not ctx.failed_stage and not ctx.no_text_detected]
+        runtime = self._ensure_inpainter() if active_pages else {"key": "", "backend": ""}
         config = get_config(settings_page)
-        self._start_gemma_prewarm()
+        if active_pages:
+            self._start_gemma_prewarm()
 
         for index, ctx in enumerate(pages):
             self._raise_if_cancelled()
@@ -651,6 +715,26 @@ class StageBatchedProcessor(BatchProcessor):
                 continue
             self._set_current_image(ctx.image_path)
             self.emit_progress(index, total_images, 3, 10, False)
+            if ctx.no_text_detected:
+                ctx.inpaint_input_img = ctx.image
+                ctx.patches = []
+                self.main_page.image_ctrl.mark_processing_stage(
+                    ctx.image_path,
+                    "inpaint",
+                    "skipped",
+                    reason="no_text_detected",
+                    patch_count=0,
+                )
+                self._emit_benchmark_event(
+                    "inpaint_end",
+                    image_path=ctx.image_path,
+                    image_index=index,
+                    total_images=total_images,
+                    block_count=0,
+                    patch_count=0,
+                    skip_reason="no_text_detected",
+                )
+                continue
             self._emit_benchmark_event(
                 "inpaint_start",
                 image_path=ctx.image_path,
@@ -794,7 +878,8 @@ class StageBatchedProcessor(BatchProcessor):
         extra_context = settings_page.get_llm_settings()["extra_context"]
         translator_key = settings_page.get_tool_selection("translator")
         runtime_manager = getattr(self.main_page, "local_translation_runtime_manager", None)
-        self._await_gemma_runtime()
+        if any(not ctx.failed_stage and not ctx.no_text_detected for ctx in pages):
+            self._await_gemma_runtime()
 
         for index, ctx in enumerate(pages):
             self._raise_if_cancelled()
@@ -802,6 +887,23 @@ class StageBatchedProcessor(BatchProcessor):
                 continue
             self._set_current_image(ctx.image_path)
             self.emit_progress(index, total_images, 7, 10, False)
+            if ctx.no_text_detected:
+                self.main_page.image_ctrl.mark_processing_stage(
+                    ctx.image_path,
+                    "translation",
+                    "skipped",
+                    reason="no_text_detected",
+                )
+                self._emit_benchmark_event(
+                    "translate_end",
+                    image_path=ctx.image_path,
+                    image_index=index,
+                    total_images=total_images,
+                    block_count=0,
+                    translator_key=translator_key,
+                    skip_reason="no_text_detected",
+                )
+                continue
             self._report_runtime_progress(
                 phase="pipeline",
                 service="gemma",
@@ -912,8 +1014,18 @@ class StageBatchedProcessor(BatchProcessor):
             if not translation or len(translation) == 1:
                 continue
             vertical = is_vertical_block(blk, trg_lng_cd)
+            text_to_wrap = translation
+            alignment = self.main_page.button_to_alignment[render_settings.alignment_id]
+            source_rect, block_anchor = build_render_rects_for_block(blk)
+            block_width = int(source_rect[2])
+            block_height = int(source_rect[3])
+            fit_clearance = get_render_fit_clearance_for_block(
+                blk,
+                render_settings.outline_width,
+                auto_max_font_profile=getattr(render_settings, "auto_max_font_profile", "current"),
+            )
             translation, font_size, rendered_width, rendered_height = pyside_word_wrap(
-                translation,
+                text_to_wrap,
                 font,
                 block_width,
                 block_height,
@@ -922,16 +1034,39 @@ class StageBatchedProcessor(BatchProcessor):
                 render_settings.bold,
                 render_settings.italic,
                 render_settings.underline,
-                self.main_page.button_to_alignment[render_settings.alignment_id],
+                alignment,
                 render_settings.direction,
                 render_settings.max_font_size,
                 render_settings.min_font_size,
                 vertical,
-                fit_clearance=get_render_fit_clearance_for_block(
-                    blk,
-                    render_settings.outline_width,
-                ),
+                fit_clearance=fit_clearance,
                 return_metrics=True,
+            )
+            translation, font_size, rendered_width, rendered_height = (
+                refit_detected_bubble_text_if_underfilled(
+                    blk,
+                    text_to_wrap,
+                    font,
+                    block_width,
+                    block_height,
+                    float(render_settings.line_spacing),
+                    float(render_settings.outline_width),
+                    render_settings.bold,
+                    render_settings.italic,
+                    render_settings.underline,
+                    alignment,
+                    render_settings.direction,
+                    render_settings.max_font_size,
+                    render_settings.min_font_size,
+                    vertical,
+                    fit_clearance,
+                    translation,
+                    font_size,
+                    rendered_width,
+                    rendered_height,
+                    auto_max_font_size=getattr(render_settings, "auto_max_font_size", True),
+                    auto_max_font_profile=getattr(render_settings, "auto_max_font_profile", "current"),
+                )
             )
             blk._text_fit_status = (
                 "needs_review"
@@ -953,7 +1088,6 @@ class StageBatchedProcessor(BatchProcessor):
                 render_settings.force_font_color,
                 render_settings.smart_global_apply_all,
             )
-            alignment = self.main_page.button_to_alignment[render_settings.alignment_id]
             render_markup = describe_render_text_markup(
                 translation,
                 font_family=font,
@@ -979,7 +1113,6 @@ class StageBatchedProcessor(BatchProcessor):
             blk._render_normalization_replacements = list(
                 render_normalization.replacements
             ) + list(render_markup.replacements)
-            source_rect, block_anchor = build_render_rects_for_block(blk)
             vertical_alignment = self.main_page.button_to_vertical_alignment.get(
                 render_settings.vertical_alignment_id,
                 VERTICAL_ALIGNMENT_TOP,
@@ -1102,9 +1235,15 @@ class StageBatchedProcessor(BatchProcessor):
                 block_count=len(ctx.blk_list or []),
             )
             try:
-                format_translations(ctx.blk_list, trg_lng_cd, upper_case=render_settings.upper_case)
-                self._raise_if_cancelled()
-                get_best_render_area(ctx.blk_list, ctx.image, ctx.inpaint_input_img)
+                if not ctx.no_text_detected:
+                    format_translations(ctx.blk_list, trg_lng_cd, upper_case=render_settings.upper_case)
+                    self._raise_if_cancelled()
+                    get_best_render_area(
+                        ctx.blk_list,
+                        ctx.image,
+                        ctx.inpaint_input_img,
+                        auto_max_font_profile=getattr(render_settings, "auto_max_font_profile", "current"),
+                    )
                 self._render_page_text_items(ctx, render_settings=render_settings, trg_lng_cd=trg_lng_cd)
                 self._raise_if_cancelled()
                 page_state = self._ensure_page_state(ctx.image_path)
@@ -1123,7 +1262,9 @@ class StageBatchedProcessor(BatchProcessor):
                     ctx.image_path,
                     {
                         "translated_image_path": final_output_path,
+                        "translated_page_image_path": final_output_path,
                         "export_root": final_output_root,
+                        **({"skip_reason": "no_text_detected"} if ctx.no_text_detected else {}),
                     },
                 )
                 self._emit_benchmark_event(
@@ -1141,6 +1282,7 @@ class StageBatchedProcessor(BatchProcessor):
                     total_images=total_images,
                     block_count=len(ctx.blk_list or []),
                     patch_count=len(ctx.patches or []),
+                    **({"skip_reason": "no_text_detected"} if ctx.no_text_detected else {}),
                 )
                 self._log_page_done(index, total_images, ctx.image_path, preview_path=final_output_path)
                 self._raise_if_cancelled()
@@ -1159,6 +1301,9 @@ class StageBatchedProcessor(BatchProcessor):
     def batch_process(self, selected_paths: list[str] | None = None):
         image_list = selected_paths if selected_paths is not None else self.main_page.image_files
         total_images = len(image_list)
+        reset_output_reservations = getattr(self.main_page, "reset_automatic_output_reservations", None)
+        if callable(reset_output_reservations):
+            reset_output_reservations()
         self._run_started_at = time.monotonic()
         self._page_started_at = None
         self._progress_image_path = None

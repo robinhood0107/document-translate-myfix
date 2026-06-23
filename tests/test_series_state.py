@@ -25,6 +25,8 @@ from app.projects.series_state_v1 import (
     normalize_series_settings,
     relative_series_source_path,
     scan_series_source_files,
+    update_series_item_manual_status,
+    update_series_queue_runtime,
 )
 
 
@@ -36,6 +38,7 @@ class SeriesStateTests(unittest.TestCase):
             keep_paths = [
                 os.path.join(temp_dir, "001.png"),
                 os.path.join(nested, "002.jpg"),
+                os.path.join(nested, "003.jp2"),
                 os.path.join(nested, "existing.ctpr"),
             ]
             skip_paths = [
@@ -156,11 +159,11 @@ class SeriesStateTests(unittest.TestCase):
     def test_filter_series_candidate_paths_blocks_existing_and_duplicate_inputs(self) -> None:
         filtered = filter_series_candidate_paths(
             existing_source_paths=["/tmp/a.png"],
-            candidate_paths=["/tmp/a.png", "/tmp/b.png", "/tmp/b.png", "/tmp/c.ctpr"],
+            candidate_paths=["/tmp/a.png", "/tmp/b.jp2", "/tmp/b.jp2", "/tmp/c.ctpr"],
         )
-        self.assertEqual(filtered["accepted"], [os.path.abspath("/tmp/b.png"), os.path.abspath("/tmp/c.ctpr")])
+        self.assertEqual(filtered["accepted"], [os.path.abspath("/tmp/b.jp2"), os.path.abspath("/tmp/c.ctpr")])
         self.assertEqual(filtered["skipped_existing"], [os.path.abspath("/tmp/a.png")])
-        self.assertEqual(filtered["skipped_duplicates"], [os.path.abspath("/tmp/b.png")])
+        self.assertEqual(filtered["skipped_duplicates"], [os.path.abspath("/tmp/b.jp2")])
 
     def test_normalize_series_recovery_state_converts_running_to_paused(self) -> None:
         manifest = {
@@ -185,6 +188,98 @@ class SeriesStateTests(unittest.TestCase):
             [item["status"] for item in next_items],
             ["done", "pending", "pending"],
         )
+
+    def _manual_status_series(self, temp_dir: str, initial_status: str) -> str:
+        series_path = os.path.join(temp_dir, f"manual-{initial_status}.seriesctpr")
+        blob_hash = f"hash-{initial_status}"
+        item = {
+            "series_item_id": "item-1",
+            "queue_index": 1,
+            "display_name": "example_child.ctpr",
+            "source_kind": "ctpr_import",
+            "source_origin_path": os.path.join(temp_dir, "example_child.ctpr"),
+            "source_origin_relpath": "example_child.ctpr",
+            "imported_at": "2026-01-01T00:00:00",
+            "updated_at": "2026-01-01T00:00:00",
+            "status": initial_status,
+            "embedded_project_blob_hash": blob_hash,
+            "child_page_count": None,
+        }
+        create_series_project(
+            series_path,
+            root_dir=temp_dir,
+            items=[item],
+            embedded_projects=[
+                {
+                    "project_hash": blob_hash,
+                    "display_name": "example_child.ctpr",
+                    "project_size": 7,
+                    "project_blob": b"project",
+                }
+            ],
+        )
+        update_series_queue_runtime(
+            series_path,
+            queue_state="running" if initial_status == "running" else "paused",
+            pause_requested=True,
+            pending_item_ids=["item-1"] if initial_status == "pending" else [],
+            active_item_id="item-1" if initial_status == "running" else None,
+            completed_item_ids=["item-1"] if initial_status == "done" else [],
+            failed_item_ids=["item-1"] if initial_status == "failed" else [],
+            skipped_item_ids=["item-1"] if initial_status == "skipped" else [],
+            failed_item_id="item-1" if initial_status == "failed" else None,
+            retry_remaining_by_item={"item-1": 2},
+        )
+        return series_path
+
+    def test_manual_status_change_rebuilds_runtime_for_supported_source_statuses(self) -> None:
+        source_statuses = ["pending", "done", "running", "failed", "skipped"]
+        target_statuses = ["pending", "done"]
+        for initial_status in source_statuses:
+            for target_status in target_statuses:
+                with self.subTest(initial_status=initial_status, target_status=target_status):
+                    with tempfile.TemporaryDirectory() as temp_dir:
+                        series_path = self._manual_status_series(temp_dir, initial_status)
+
+                        update_series_item_manual_status(
+                            series_path,
+                            series_item_id="item-1",
+                            status=target_status,
+                        )
+
+                        loaded = load_series_project(series_path)
+                        item = loaded["items"][0]
+                        runtime = loaded["manifest"]["series_queue_runtime"]
+                        self.assertEqual(item["status"], target_status)
+                        self.assertEqual(
+                            runtime["pending_item_ids"],
+                            ["item-1"] if target_status == "pending" else [],
+                        )
+                        self.assertEqual(
+                            runtime["completed_item_ids"],
+                            ["item-1"] if target_status == "done" else [],
+                        )
+                        self.assertEqual(runtime["failed_item_ids"], [])
+                        self.assertEqual(runtime["skipped_item_ids"], [])
+                        self.assertIsNone(runtime["failed_item_id"])
+                        self.assertIsNone(runtime["active_item_id"])
+                        self.assertEqual(runtime["retry_remaining_by_item"], {})
+                        self.assertFalse(runtime["pause_requested"])
+                        self.assertEqual(
+                            runtime["queue_state"],
+                            "paused" if target_status == "pending" else "idle",
+                        )
+
+    def test_manual_status_change_rejects_runtime_only_status_targets(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            series_path = self._manual_status_series(temp_dir, "pending")
+
+            with self.assertRaises(ValueError):
+                update_series_item_manual_status(
+                    series_path,
+                    series_item_id="item-1",
+                    status="running",
+                )
 
     def test_project_type_helpers_cover_series_extension(self) -> None:
         self.assertTrue(has_project_file_extension("test.ctpr"))

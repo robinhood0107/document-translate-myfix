@@ -15,7 +15,19 @@ import numpy as np
 import pillow_jxl
 from natsort import natsorted
 
-IMG_EXT = ['.bmp', '.jpg', '.png', '.jpeg', '.webp', '.jxl']
+IMG_EXT = [
+    '.bmp',
+    '.jpg',
+    '.png',
+    '.jpeg',
+    '.webp',
+    '.jp2',
+    '.j2k',
+    '.jpf',
+    '.jpx',
+    '.j2c',
+    '.jxl',
+]
 
 NP_INT_TYPES = (np.int_, np.int8, np.int16, np.int32, np.int64, np.uint, np.uint8, np.uint16, np.uint32, np.uint64)
 if int(np.version.full_version.split('.')[0]) == 1:
