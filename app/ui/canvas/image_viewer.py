@@ -588,22 +588,55 @@ class ImageViewer(QGraphicsView):
             'text_items_state': text_items_state
         }
 
-    def load_state(self, state: Dict):
-        self.setTransform(QtGui.QTransform(*state['transform']))
-        self.centerOn(QPointF(*state['center']))
-        self.setSceneRect(QRectF(*state['scene_rect']))
+    @staticmethod
+    def _state_tuple(value, length: int):
+        if not isinstance(value, (list, tuple)) or len(value) != length:
+            return None
+        try:
+            return tuple(float(item) for item in value)
+        except (TypeError, ValueError):
+            return None
 
-        for data in state['rectangles']:
-            x, y, w, h = data['rect']
-            origin = QPointF(*data.get('transform_origin', (0,0))) if 'transform_origin' in data else None
+    def load_state(self, state: Dict):
+        state = state if isinstance(state, dict) else {}
+
+        transform = self._state_tuple(state.get('transform'), 9)
+        if transform is not None:
+            self.setTransform(QtGui.QTransform(*transform))
+
+        center = self._state_tuple(state.get('center'), 2)
+        if center is not None:
+            self.centerOn(QPointF(*center))
+
+        scene_rect = self._state_tuple(state.get('scene_rect'), 4)
+        if scene_rect is not None:
+            self.setSceneRect(QRectF(*scene_rect))
+
+        rectangles = state.get('rectangles', [])
+        if not isinstance(rectangles, list):
+            rectangles = []
+        for data in rectangles:
+            if not isinstance(data, dict):
+                continue
+            rect = self._state_tuple(data.get('rect'), 4)
+            if rect is None:
+                continue
+            x, y, w, h = rect
+            origin_values = self._state_tuple(data.get('transform_origin'), 2)
+            origin = QPointF(*origin_values) if origin_values is not None else None
             self.add_rectangle(
-                QRectF(0,0,w,h),
-                QPointF(x,y),
+                QRectF(0, 0, w, h),
+                QPointF(x, y),
                 data.get('rotation', 0),
                 origin,
                 data.get('block_id', ''),
             )
 
-        for data in state.get('text_items_state', []):
+        text_items_state = state.get('text_items_state', [])
+        if not isinstance(text_items_state, list):
+            text_items_state = []
+        for data in text_items_state:
+            if not isinstance(data, dict):
+                continue
             # Use the new add_text_item function for consistency
             self.add_text_item(data)

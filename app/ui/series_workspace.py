@@ -8,13 +8,26 @@ import tempfile
 from PySide6 import QtCore, QtGui, QtWidgets
 
 from modules.utils.archives import list_archive_image_entries, materialize_archive_entry
+from modules.utils.automatic_output import OUTPUT_TARGET_ARCHIVE, OUTPUT_TARGET_IMAGES
 
 from .dayu_widgets import dayu_theme
 from .dayu_widgets.tool_button import MToolButton
 from .settings.series_page import SeriesPage
 
 
-_DIRECT_PREVIEW_EXTS = {".png", ".jpg", ".jpeg", ".webp", ".bmp", ".psd"}
+_DIRECT_PREVIEW_EXTS = {
+    ".png",
+    ".jpg",
+    ".jpeg",
+    ".webp",
+    ".bmp",
+    ".jp2",
+    ".j2k",
+    ".jpf",
+    ".jpx",
+    ".j2c",
+    ".psd",
+}
 _ARCHIVE_PREVIEW_EXTS = {".pdf", ".epub", ".zip", ".rar", ".7z", ".tar", ".cbz", ".cbr", ".cb7", ".cbt"}
 
 
@@ -293,6 +306,7 @@ class _SeriesQueueTable(QtWidgets.QTableWidget):
     open_requested = QtCore.Signal(str)
     remove_requested = QtCore.Signal(str)
     queue_index_requested = QtCore.Signal(str, int)
+    status_change_requested = QtCore.Signal(str, str)
     hover_preview_requested = QtCore.Signal(dict, QtCore.QPoint)
     hover_preview_hidden = QtCore.Signal()
 
@@ -584,6 +598,63 @@ class _SeriesQueueTable(QtWidgets.QTableWidget):
             return ""
         return str(item.data(QtCore.Qt.ItemDataRole.UserRole) or "")
 
+    def selected_payload(self) -> dict[str, object]:
+        row = self.currentRow()
+        if row < 0:
+            return {}
+        return self._row_payload(row)
+
+    def selected_status(self) -> str:
+        return str(self.selected_payload().get("status") or "pending").strip().lower()
+
+    def _can_change_status(self, payload: dict[str, object], target_status: str) -> bool:
+        item_id = str(payload.get("series_item_id") or "").strip()
+        current_status = str(payload.get("status") or "pending").strip().lower()
+        target = str(target_status or "").strip().lower()
+        return bool(
+            item_id
+            and not self._queue_running
+            and target in {"pending", "done"}
+            and current_status != target
+        )
+
+    def can_change_selected_status_to(self, target_status: str) -> bool:
+        return self._can_change_status(self.selected_payload(), target_status)
+
+    def _emit_status_change(self, payload: dict[str, object], target_status: str) -> None:
+        if not self._can_change_status(payload, target_status):
+            return
+        item_id = str(payload.get("series_item_id") or "").strip()
+        self.status_change_requested.emit(item_id, str(target_status).strip().lower())
+
+    def build_status_change_menu(self, payload: dict[str, object] | None = None) -> QtWidgets.QMenu:
+        target_payload = self.selected_payload() if payload is None else dict(payload or {})
+        menu = QtWidgets.QMenu(self)
+        mark_done_action = menu.addAction(self.tr("Mark as Done"))
+        reset_pending_action = menu.addAction(self.tr("Reset to Pending"))
+        mark_done_action.setEnabled(self._can_change_status(target_payload, "done"))
+        reset_pending_action.setEnabled(self._can_change_status(target_payload, "pending"))
+        if self._queue_running:
+            locked_reason = self._lock_reason or self.tr(
+                "Status cannot be changed while automatic translation is running. "
+                "Pause first, then change it."
+            )
+            mark_done_action.setToolTip(locked_reason)
+            reset_pending_action.setToolTip(locked_reason)
+        mark_done_action.triggered.connect(lambda _=False: self._emit_status_change(target_payload, "done"))
+        reset_pending_action.triggered.connect(lambda _=False: self._emit_status_change(target_payload, "pending"))
+        return menu
+
+    def contextMenuEvent(self, event):  # type: ignore[override]
+        row = self.rowAt(event.pos().y())
+        payload = {}
+        if row >= 0:
+            self.selectRow(row)
+            payload = self._row_payload(row)
+        menu = self.build_status_change_menu(payload)
+        if menu.actions():
+            menu.exec(event.globalPos())
+
     def dropEvent(self, event):  # type: ignore[override]
         if self._queue_running:
             event.ignore()
@@ -869,6 +940,20 @@ class _SeriesQuickSettings(QtWidgets.QWidget):
         export = values.get("export_settings")
         export = export if isinstance(export, dict) else {}
         target = str(export.get("automatic_output_target") or "--")
+        if target == OUTPUT_TARGET_ARCHIVE:
+            archive_format = str(export.get("automatic_output_archive_format") or "--").upper()
+            target_label = self.tr("Single archive ({format})").format(format=archive_format)
+        elif target == OUTPUT_TARGET_IMAGES:
+            image_format = str(export.get("automatic_output_image_format") or "")
+            if image_format == "same_as_source":
+                image_format_label = self.tr("same as source")
+            elif image_format:
+                image_format_label = image_format.upper()
+            else:
+                image_format_label = "--"
+            target_label = self.tr("Individual images ({format})").format(format=image_format_label)
+        else:
+            target_label = target
         debug_keys = (
             "export_inpainted_image",
             "export_detector_overlay",
@@ -880,7 +965,7 @@ class _SeriesQuickSettings(QtWidgets.QWidget):
         debug_count = sum(1 for key in debug_keys if bool(export.get(key, False)))
         self.export_summary_label.setText(
             self.tr("Export: {target} / debug {count} enabled").format(
-                target=target,
+                target=target_label,
                 count=debug_count,
             )
         )
@@ -985,6 +1070,18 @@ class SeriesSettingsDialog(QtWidgets.QDialog):
         self.min_font_spin.setRange(1, 300)
         self.max_font_spin = QtWidgets.QSpinBox(tab)
         self.max_font_spin.setRange(1, 300)
+        self.auto_max_font_checkbox = QtWidgets.QCheckBox(self.tr("Auto Maximum Font Size"), tab)
+        self.auto_max_font_checkbox.setChecked(True)
+        self.auto_max_font_checkbox.setToolTip(
+            self.tr("Automatically expands the maximum font size inside detected speech bubbles when the fitted text is too small.")
+        )
+        self.auto_max_font_profile_combo = QtWidgets.QComboBox(tab)
+        self.auto_max_font_profile_combo.addItem(self.tr("Current"), "current")
+        self.auto_max_font_profile_combo.addItem(self.tr("Strong"), "strong")
+        self.auto_max_font_profile_combo.setToolTip(
+            self.tr("Choose how aggressively automatic bubble font fitting expands detected speech bubbles.")
+        )
+        self.auto_max_font_checkbox.toggled.connect(self.auto_max_font_profile_combo.setEnabled)
         self.line_spacing_combo = QtWidgets.QComboBox(tab)
         self.line_spacing_combo.setEditable(True)
         self.line_spacing_combo.addItems(["1.0", "1.1", "1.2", "1.3", "1.4", "1.5"])
@@ -1032,10 +1129,18 @@ class SeriesSettingsDialog(QtWidgets.QDialog):
         outline_layout.addWidget(self.outline_width_combo)
         outline_layout.addStretch(1)
 
+        auto_font_row = QtWidgets.QWidget(tab)
+        auto_font_layout = QtWidgets.QHBoxLayout(auto_font_row)
+        auto_font_layout.setContentsMargins(0, 0, 0, 0)
+        auto_font_layout.addWidget(self.auto_max_font_checkbox)
+        auto_font_layout.addWidget(self.auto_max_font_profile_combo)
+        auto_font_layout.addStretch(1)
+
         typography_form = self._make_rows_layout(
             self._make_field_row(self.tr("Font:"), self.font_combo),
             self._make_field_row(self.tr("Min font size:"), self.min_font_spin),
             self._make_field_row(self.tr("Max font size:"), self.max_font_spin),
+            self._make_field_row(self.tr("Auto maximum font:"), auto_font_row),
             self._make_field_row(self.tr("Line spacing:"), self.line_spacing_combo),
         )
         self.render_typography_group = self._make_section(
@@ -1088,12 +1193,21 @@ class SeriesSettingsDialog(QtWidgets.QDialog):
         self.output_archive_image_format_combo = QtWidgets.QComboBox(tab)
         self.output_archive_level_spin = QtWidgets.QSpinBox(tab)
         self.output_archive_level_spin.setRange(0, 9)
+        self.output_mode_note_label = QtWidgets.QLabel(tab)
+        self.output_mode_note_label.setObjectName("seriesSettingsSectionNote")
+        self.output_mode_note_label.setWordWrap(True)
+        self.output_target_row = self._make_field_row(self.tr("Output target:"), self.output_target_combo)
+        self.output_image_format_row = self._make_field_row(self.tr("Image format:"), self.output_image_format_combo)
+        self.output_archive_format_row = self._make_field_row(self.tr("Archive format:"), self.output_archive_format_combo)
+        self.output_archive_image_format_row = self._make_field_row(self.tr("Archive image format:"), self.output_archive_image_format_combo)
+        self.output_archive_level_row = self._make_field_row(self.tr("Archive compression:"), self.output_archive_level_spin)
         form = self._make_rows_layout(
-            self._make_field_row(self.tr("Output target:"), self.output_target_combo),
-            self._make_field_row(self.tr("Image format:"), self.output_image_format_combo),
-            self._make_field_row(self.tr("Archive format:"), self.output_archive_format_combo),
-            self._make_field_row(self.tr("Archive image format:"), self.output_archive_image_format_combo),
-            self._make_field_row(self.tr("Archive compression:"), self.output_archive_level_spin),
+            self.output_target_row,
+            self.output_mode_note_label,
+            self.output_image_format_row,
+            self.output_archive_format_row,
+            self.output_archive_image_format_row,
+            self.output_archive_level_row,
         )
         self.export_output_group = self._make_section(
             self.tr("Final Output"),
@@ -1143,6 +1257,7 @@ class SeriesSettingsDialog(QtWidgets.QDialog):
         layout.addWidget(self.export_debug_group)
         layout.addStretch(1)
         self.tabs.addTab(tab, self.tr("Export / Debug"))
+        self.output_target_combo.currentIndexChanged.connect(self._refresh_export_mode_visibility)
 
     def _make_scroll_tab(self) -> tuple[QtWidgets.QScrollArea, QtWidgets.QVBoxLayout]:
         content = QtWidgets.QWidget(self)
@@ -1439,6 +1554,7 @@ class SeriesSettingsDialog(QtWidgets.QDialog):
         self._populate_combo(self.output_image_format_combo, self._output_options.get("automatic_output_image_format", []))
         self._populate_combo(self.output_archive_format_combo, self._output_options.get("automatic_output_archive_format", []))
         self._populate_combo(self.output_archive_image_format_combo, self._output_options.get("automatic_output_archive_image_format", []))
+        self._refresh_export_mode_visibility()
 
     def set_payload(self, series_settings: dict[str, object], global_settings: dict[str, object]) -> None:
         self.queue_page.set_settings(series_settings)
@@ -1471,6 +1587,12 @@ class SeriesSettingsDialog(QtWidgets.QDialog):
             self.font_combo.setCurrentText(font)
         self.min_font_spin.setValue(max(1, int(values.get("min_font_size", 5) or 5)))
         self.max_font_spin.setValue(max(1, int(values.get("max_font_size", 40) or 40)))
+        self.auto_max_font_checkbox.setChecked(bool(values.get("auto_max_font_size", True)))
+        self._set_combo_value(
+            self.auto_max_font_profile_combo,
+            str(values.get("auto_max_font_profile") or "current"),
+        )
+        self.auto_max_font_profile_combo.setEnabled(self.auto_max_font_checkbox.isChecked())
         self.line_spacing_combo.setCurrentText(str(values.get("line_spacing") or "1.0"))
         self._set_button_color(self.text_color_button, str(values.get("color") or "#000000"))
         self.force_color_checkbox.setChecked(bool(values.get("force_font_color", False)))
@@ -1491,6 +1613,8 @@ class SeriesSettingsDialog(QtWidgets.QDialog):
             "font_family": str(self.font_combo.currentText() or ""),
             "min_font_size": int(self.min_font_spin.value()),
             "max_font_size": int(self.max_font_spin.value()),
+            "auto_max_font_size": self.auto_max_font_checkbox.isChecked(),
+            "auto_max_font_profile": str(self.auto_max_font_profile_combo.currentData() or "current"),
             "color": str(self.text_color_button.property("selected_color") or "#000000"),
             "force_font_color": self.force_color_checkbox.isChecked(),
             "upper_case": self.uppercase_checkbox.isChecked(),
@@ -1517,6 +1641,24 @@ class SeriesSettingsDialog(QtWidgets.QDialog):
         self._set_combo_value(self.output_archive_format_combo, str(values.get("automatic_output_archive_format") or ""))
         self._set_combo_value(self.output_archive_image_format_combo, str(values.get("automatic_output_archive_image_format") or ""))
         self.output_archive_level_spin.setValue(max(0, min(9, int(values.get("automatic_output_archive_compression_level", 6) or 6))))
+        self._refresh_export_mode_visibility()
+
+    def _refresh_export_mode_visibility(self) -> None:
+        target = str(self.output_target_combo.currentData() or "")
+        archive_mode = target == OUTPUT_TARGET_ARCHIVE
+        image_mode = not archive_mode
+        self.output_image_format_row.setVisible(image_mode)
+        self.output_archive_format_row.setVisible(archive_mode)
+        self.output_archive_image_format_row.setVisible(archive_mode)
+        self.output_archive_level_row.setVisible(archive_mode)
+        if archive_mode:
+            self.output_mode_note_label.setText(
+                self.tr("Creates one ZIP/CBZ after the queue finishes. Use this when you want a single translated archive.")
+            )
+        else:
+            self.output_mode_note_label.setText(
+                self.tr("Saves translated pages as individual image files and skips final ZIP/CBZ creation, so the series can move to the next item faster.")
+            )
 
     def _export_values(self) -> dict[str, object]:
         return {
@@ -1854,6 +1996,7 @@ class SeriesWorkspace(QtWidgets.QWidget):
     remove_item_requested = QtCore.Signal(str)
     reorder_requested = QtCore.Signal(list)
     queue_index_requested = QtCore.Signal(str, int)
+    status_change_requested = QtCore.Signal(str, str)
     add_files_requested = QtCore.Signal()
     add_folder_requested = QtCore.Signal()
     back_requested = QtCore.Signal()
@@ -1923,9 +2066,17 @@ class SeriesWorkspace(QtWidgets.QWidget):
 
         action_row = QtWidgets.QHBoxLayout()
         self.open_button = QtWidgets.QPushButton(self.tr("Open Selected"))
+        self.status_button = QtWidgets.QToolButton(self)
+        self.status_button.setText(self.tr("Change Status"))
+        self.status_button.setPopupMode(QtWidgets.QToolButton.ToolButtonPopupMode.InstantPopup)
+        self.status_menu = QtWidgets.QMenu(self.status_button)
+        self.mark_done_action = self.status_menu.addAction(self.tr("Mark as Done"))
+        self.reset_pending_action = self.status_menu.addAction(self.tr("Reset to Pending"))
+        self.status_button.setMenu(self.status_menu)
         self.add_files_button = QtWidgets.QPushButton(self.tr("Add Files"))
         self.add_folder_button = QtWidgets.QPushButton(self.tr("Add Folder"))
         action_row.addWidget(self.open_button)
+        action_row.addWidget(self.status_button)
         action_row.addWidget(self.add_files_button)
         action_row.addWidget(self.add_folder_button)
         action_row.addStretch(1)
@@ -1985,8 +2136,13 @@ class SeriesWorkspace(QtWidgets.QWidget):
         self.queue_table.remove_requested.connect(self.remove_item_requested)
         self.queue_table.order_changed.connect(self.reorder_requested)
         self.queue_table.queue_index_requested.connect(self.queue_index_requested)
+        self.queue_table.status_change_requested.connect(self.status_change_requested.emit)
+        self.queue_table.itemSelectionChanged.connect(self._update_status_actions)
         self.queue_table.hover_preview_requested.connect(self._queue_hover_requested)
         self.queue_table.hover_preview_hidden.connect(self._hide_hover_preview)
+        self.mark_done_action.triggered.connect(lambda _=False: self._emit_selected_status_change("done"))
+        self.reset_pending_action.triggered.connect(lambda _=False: self._emit_selected_status_change("pending"))
+        self.status_menu.aboutToShow.connect(self._update_status_actions)
         self.quick_settings.auto_translate_requested.connect(self.auto_translate_requested)
         self.status_panel.pause_requested.connect(self.pause_requested)
         self.status_panel.resume_requested.connect(self.resume_requested)
@@ -2222,6 +2378,7 @@ class SeriesWorkspace(QtWidgets.QWidget):
         self.open_button.setToolTip(lock_reason if controls_locked else self.tr("Open the selected child project."))
         self.add_files_button.setToolTip(lock_reason if controls_locked else self.tr("Add supported files to this series."))
         self.add_folder_button.setToolTip(lock_reason if controls_locked else self.tr("Scan and add a folder to this series."))
+        self._update_status_actions()
         self.quick_settings.set_locked(controls_locked, lock_reason)
         self.quick_settings.auto_translate_button.setEnabled(
             bool(items) and not queue_running and queue_state != "paused"
@@ -2254,6 +2411,39 @@ class SeriesWorkspace(QtWidgets.QWidget):
         item_id = self.queue_table.selected_item_id()
         if item_id:
             self.open_item_requested.emit(item_id)
+
+    def _status_change_lock_reason(self) -> str:
+        return self.tr(
+            "Status cannot be changed while automatic translation is running. "
+            "Pause first, then change it."
+        )
+
+    def _emit_selected_status_change(self, target_status: str) -> None:
+        if not self.queue_table.can_change_selected_status_to(target_status):
+            return
+        item_id = self.queue_table.selected_item_id()
+        if item_id:
+            self.status_change_requested.emit(item_id, str(target_status).strip().lower())
+
+    def _update_status_actions(self) -> None:
+        selected = bool(self.queue_table.selected_item_id())
+        controls_locked = bool(self._queue_running)
+        can_mark_done = self.queue_table.can_change_selected_status_to("done")
+        can_reset_pending = self.queue_table.can_change_selected_status_to("pending")
+        self.mark_done_action.setEnabled(can_mark_done)
+        self.reset_pending_action.setEnabled(can_reset_pending)
+        self.status_button.setEnabled(
+            selected and not controls_locked and (can_mark_done or can_reset_pending)
+        )
+        if controls_locked:
+            tooltip = self._status_change_lock_reason()
+        elif not selected:
+            tooltip = self.tr("Select a series item to change its status.")
+        else:
+            tooltip = self.tr("Mark the selected item as done or return it to pending.")
+        self.status_button.setToolTip(tooltip)
+        self.mark_done_action.setToolTip(tooltip if controls_locked else "")
+        self.reset_pending_action.setToolTip(tooltip if controls_locked else "")
 
     def _on_sort_changed(self) -> None:
         mode = str(self.sort_combo.currentData() or "manual")

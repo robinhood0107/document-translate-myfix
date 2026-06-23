@@ -14,6 +14,8 @@ from typing import TYPE_CHECKING
 from dataclasses import asdict, is_dataclass
 
 import msgpack
+import numpy as np
+from PIL import Image as PILImage
 
 from PySide6 import QtWidgets, QtCore, QtGui
 from PySide6.QtCore import QSettings, QPointF
@@ -40,13 +42,15 @@ from app.projects.project_types import (
     project_file_filter_for_kind,
 )
 from app.projects.parsers import ProjectEncoder
-from modules.utils.archives import make
+from app.ui.messages import Messages
+from modules.utils.archives import is_image_file, make
 from modules.utils.automatic_output import (
-    build_archive_file_name,
     build_archive_page_file_name,
     build_archive_staging_dir,
     build_output_file_name,
     is_single_archive_mode,
+    reserve_unique_path,
+    resolve_forced_archive_output_path,
     write_archive_image,
     write_output_image,
 )
@@ -600,6 +604,12 @@ class ProjectController:
             self.main.series_ctrl.thread_load_series_project(recovery_file, recovery_loaded=True)
             return
 
+        busy_dialog = Messages.show_busy(
+            self.main,
+            self.main.tr("Restoring project file..."),
+            title=self.main.tr("Project File"),
+            minimum_visible_ms=300,
+        )
         self.main.image_ctrl.clear_state()
         self.main.setWindowTitle(f"{self._recovered_project_display_name(PROJECT_KIND_SINGLE)}[*]")
 
@@ -607,9 +617,11 @@ class ProjectController:
 
         def on_error(error_tuple):
             load_failed["value"] = True
+            Messages.close_busy(busy_dialog, force=True)
             self.main.default_error_handler(error_tuple)
 
         def on_finished():
+            Messages.close_busy(busy_dialog)
             if load_failed["value"]:
                 return
             self.update_ui_from_project()
@@ -630,11 +642,26 @@ class ProjectController:
 
     def save_and_make(self, output_path: str):
         self.main.loading.setVisible(True)
+        busy_dialog = Messages.show_busy(
+            self.main,
+            self.main.tr("Exporting image..."),
+            title=self.main.tr("Export"),
+            minimum_visible_ms=300,
+        )
+
+        def on_error(error_tuple):
+            Messages.close_busy(busy_dialog, force=True)
+            self.main.default_error_handler(error_tuple)
+
+        def on_finished():
+            Messages.close_busy(busy_dialog)
+            self.main.loading.setVisible(False)
+
         self.main.run_threaded(
             self.save_and_make_worker,
             None,
-            self.main.default_error_handler,
-            lambda: self.main.loading.setVisible(False),
+            on_error,
+            on_finished,
             output_path,
         )
 
@@ -688,11 +715,26 @@ class ProjectController:
         all_pages_current_state = self._build_all_pages_current_state()
         bundle_name = self._get_export_bundle_name()
         self.main.loading.setVisible(True)
+        busy_dialog = Messages.show_busy(
+            self.main,
+            self.main.tr("Exporting PSD..."),
+            title=self.main.tr("Export"),
+            minimum_visible_ms=300,
+        )
+
+        def on_error(error_tuple):
+            Messages.close_busy(busy_dialog, force=True)
+            self.main.default_error_handler(error_tuple)
+
+        def on_finished():
+            Messages.close_busy(busy_dialog)
+            self.main.loading.setVisible(False)
+
         self.main.run_threaded(
             self._write_psd_worker,
             None,
-            self.main.default_error_handler,
-            lambda: self.main.loading.setVisible(False),
+            on_error,
+            on_finished,
             output_folder,
             all_pages_current_state,
             bundle_name,
@@ -706,11 +748,26 @@ class ProjectController:
         all_pages_current_state = self._build_all_pages_current_state()
         bundle_name = self._get_export_bundle_name()
         self.main.loading.setVisible(True)
+        busy_dialog = Messages.show_busy(
+            self.main,
+            self.main.tr("Exporting PSD..."),
+            title=self.main.tr("Export"),
+            minimum_visible_ms=300,
+        )
+
+        def on_error(error_tuple):
+            Messages.close_busy(busy_dialog, force=True)
+            self.main.default_error_handler(error_tuple)
+
+        def on_finished():
+            Messages.close_busy(busy_dialog)
+            self.main.loading.setVisible(False)
+
         self.main.run_threaded(
             self._write_psd_plan_worker,
             None,
-            self.main.default_error_handler,
-            lambda: self.main.loading.setVisible(False),
+            on_error,
+            on_finished,
             export_plan,
             all_pages_current_state,
             bundle_name,
@@ -909,7 +966,7 @@ class ProjectController:
                 renderer.save_image(sv_pth)
 
             # Call make function
-            make(temp_dir, output_path)
+            make(temp_dir, reserve_unique_path(output_path))
         finally:
             # Clean up temp directory
             shutil.rmtree(temp_dir)
@@ -998,7 +1055,7 @@ class ProjectController:
                 export_settings,
             ),
         )
-        write_output_image(
+        output_path = write_output_image(
             output_path,
             final_rgb,
             source_path=file_path,
@@ -1026,6 +1083,138 @@ class ProjectController:
             ),
         )
 
+    def _forced_archive_output_path(
+        self,
+        fallback_dir: str,
+        archive_format: str | None = None,
+    ) -> tuple[str, str]:
+        return resolve_forced_archive_output_path(
+            self.main.image_files,
+            fallback_dir=fallback_dir,
+            fallback_bundle_name=self._get_export_bundle_name(),
+            archive_format=archive_format,
+            archive_info=getattr(getattr(self.main, "file_handler", None), "archive_info", None),
+            source_records=getattr(self.main, "export_source_by_path", {}),
+            project_file=getattr(self.main, "project_file", None),
+            temp_dir=getattr(self.main, "temp_dir", None),
+        )
+
+    def _page_image_source_for_archive(
+        self,
+        *,
+        file_path: str,
+        page_index: int,
+        total_pages: int,
+        export_settings: dict[str, object],
+        staging_dir: str,
+        output_by_path: dict[str, str],
+    ) -> str:
+        candidates: list[str] = []
+        rendered_output = output_by_path.get(file_path, "")
+        if rendered_output:
+            candidates.append(rendered_output)
+        if staging_dir:
+            candidates.append(
+                self._archive_stage_path_for_page(
+                    file_path=file_path,
+                    page_index=page_index,
+                    total_pages=total_pages,
+                    export_settings=export_settings,
+                    staging_dir=staging_dir,
+                )
+            )
+        state = self.main.image_ctrl.ensure_page_state(file_path)
+        summary = state.get("processing_summary", {})
+        if isinstance(summary, dict):
+            candidates.extend(
+                [
+                    str(summary.get("translated_page_image_path", "") or ""),
+                    str(summary.get("translated_image_path", "") or ""),
+                    str(state.get("last_render_output_path", "") or ""),
+                ]
+            )
+        candidates.append(file_path)
+        for candidate in candidates:
+            candidate = str(candidate or "").strip()
+            if candidate and os.path.isfile(candidate) and is_image_file(candidate):
+                return candidate
+        return ""
+
+    def _write_archive_stage_page_from_path(
+        self,
+        *,
+        source_path: str,
+        output_path: str,
+        export_settings: dict[str, object],
+    ) -> None:
+        with PILImage.open(source_path) as image:
+            write_archive_image(
+                output_path,
+                np.asarray(image.convert("RGB")),
+                resolved_settings=export_settings,
+            )
+
+    def _build_forced_archive_from_page_sources(
+        self,
+        *,
+        output_by_path: dict[str, str],
+        export_settings: dict[str, object],
+        fallback_dir: str,
+        staging_dir: str = "",
+    ) -> tuple[str, str]:
+        archive_format = str(
+            export_settings.get("resolved_automatic_output_archive_format", "cbz") or "cbz"
+        )
+        archive_path, archive_root = self._forced_archive_output_path(fallback_dir, archive_format)
+        archive_path = reserve_unique_path(archive_path)
+        os.makedirs(archive_root, exist_ok=True)
+        archive_image_format = str(
+            export_settings.get("resolved_automatic_output_archive_image_format", "png") or "png"
+        )
+        compression_level = int(
+            export_settings.get("resolved_automatic_output_archive_compression_level", 6) or 6
+        )
+        final_staging_dir = tempfile.mkdtemp(
+            prefix="ct_archive_finalize_",
+            dir=getattr(self.main, "temp_dir", None) or None,
+        )
+        try:
+            total_pages = len(self.main.image_files)
+            for page_index, file_path in enumerate(self.main.image_files):
+                source_path = self._page_image_source_for_archive(
+                    file_path=file_path,
+                    page_index=page_index,
+                    total_pages=total_pages,
+                    export_settings=export_settings,
+                    staging_dir=staging_dir,
+                    output_by_path=output_by_path,
+                )
+                if not source_path:
+                    continue
+                page_base_name = os.path.splitext(os.path.basename(file_path))[0]
+                output_path = os.path.join(
+                    final_staging_dir,
+                    build_archive_page_file_name(
+                        page_index,
+                        total_pages,
+                        page_base_name,
+                        archive_image_format,
+                    ),
+                )
+                self._write_archive_stage_page_from_path(
+                    source_path=source_path,
+                    output_path=output_path,
+                    export_settings=export_settings,
+                )
+            make(
+                final_staging_dir,
+                output_path=archive_path,
+                compresslevel=compression_level,
+            )
+        finally:
+            shutil.rmtree(final_staging_dir, ignore_errors=True)
+        return archive_path, archive_root
+
     def _rerender_output_worker(
         self,
         requested_paths: list[str],
@@ -1035,8 +1224,10 @@ class ProjectController:
     ) -> dict[str, object]:
         base_dir = self._get_default_export_dir()
         anchor = self.main.image_files[0] if self.main.image_files else ""
-        series_dir = self.main.get_automatic_output_series_dir(base_dir, anchor_path=anchor)
-        os.makedirs(series_dir, exist_ok=True)
+        reset_output_reservations = getattr(self.main, "reset_automatic_output_reservations", None)
+        if callable(reset_output_reservations):
+            reset_output_reservations()
+        series_dir = self.main.get_reserved_automatic_output_series_dir(base_dir, anchor_path=anchor)
 
         total_pages = len(self.main.image_files)
         archive_mode = is_single_archive_mode(export_settings)
@@ -1047,11 +1238,6 @@ class ProjectController:
 
         if archive_mode:
             staging_dir = build_archive_staging_dir(series_dir, "manual_rerender")
-            archive_format = str(export_settings.get("resolved_automatic_output_archive_format", "cbz") or "cbz")
-            archive_path = os.path.join(
-                series_dir,
-                build_archive_file_name(self._get_export_bundle_name(), archive_format),
-            )
             if scope != "all":
                 missing_stage = []
                 for page_index, file_path in enumerate(self.main.image_files):
@@ -1108,6 +1294,7 @@ class ProjectController:
                 file_path,
                 {
                     "translated_image_path": output_path,
+                    "translated_page_image_path": output_path,
                     "export_root": series_dir,
                     "render_trigger": scope,
                 },
@@ -1115,27 +1302,31 @@ class ProjectController:
             rendered_paths.append(file_path)
             output_by_path[file_path] = output_path
 
-        if archive_mode:
-            archive_format = str(export_settings.get("resolved_automatic_output_archive_format", "cbz") or "cbz")
-            compression_level = int(
-                export_settings.get("resolved_automatic_output_archive_compression_level", 6) or 6
-            )
-            make(
-                staging_dir,
-                output_path=archive_path,
-                compresslevel=compression_level,
-            )
-            for file_path in self.main.image_files:
-                state = self.main.image_ctrl.ensure_page_state(file_path)
-                state["last_render_output_path"] = archive_path
-                summary = state.get("processing_summary", {})
-                if isinstance(summary, dict):
-                    summary["translated_image_path"] = archive_path
-                    summary["export_root"] = series_dir
-                    state["processing_summary"] = summary
-            output_root = archive_path
-        else:
-            output_root = series_dir
+        archive_path, archive_root = self._build_forced_archive_from_page_sources(
+            output_by_path=output_by_path,
+            export_settings=export_settings,
+            fallback_dir=series_dir,
+            staging_dir=staging_dir,
+        )
+        for file_path in self.main.image_files:
+            state = self.main.image_ctrl.ensure_page_state(file_path)
+            previous_page_output = ""
+            summary = state.get("processing_summary", {})
+            if isinstance(summary, dict):
+                previous_page_output = str(
+                    summary.get("translated_page_image_path")
+                    or summary.get("translated_image_path")
+                    or state.get("last_render_output_path")
+                    or ""
+                ).strip()
+                if previous_page_output and not is_image_file(previous_page_output):
+                    previous_page_output = ""
+                summary["translated_image_path"] = archive_path
+                summary["translated_page_image_path"] = previous_page_output
+                summary["export_root"] = archive_root
+                state["processing_summary"] = summary
+            state["last_render_output_path"] = archive_path
+        output_root = archive_path
 
         return {
             "rendered_paths": rendered_paths,
@@ -1195,15 +1386,23 @@ class ProjectController:
         failed = {"value": False}
         self.main.loading.setVisible(True)
         self.main.disable_hbutton_group()
+        busy_dialog = Messages.show_busy(
+            self.main,
+            self.main.tr("Rendering output..."),
+            title=self.main.tr("Rerender Output"),
+            minimum_visible_ms=300,
+        )
 
         def on_result(result: dict[str, object]) -> None:
             result_holder.update(result or {})
 
         def on_error(error_tuple) -> None:
             failed["value"] = True
+            Messages.close_busy(busy_dialog, force=True)
             self.main.default_error_handler(error_tuple)
 
         def on_finished() -> None:
+            Messages.close_busy(busy_dialog)
             self.main.on_manual_finished()
             self.main.refresh_render_dirty_ui()
             if not failed["value"] and not quiet:
@@ -1300,18 +1499,15 @@ class ProjectController:
     def open_output_folder(self) -> None:
         if not self.main.image_files:
             return
-        export_settings = self.main.get_resolved_export_settings()
         base_dir = self._get_default_export_dir()
         anchor = self.main.image_files[0]
         series_dir = self.main.get_automatic_output_series_dir(base_dir, anchor_path=anchor)
-        target = series_dir
-        if is_single_archive_mode(export_settings):
-            archive_format = str(export_settings.get("resolved_automatic_output_archive_format", "cbz") or "cbz")
-            archive_path = os.path.join(
-                series_dir,
-                build_archive_file_name(self._get_export_bundle_name(), archive_format),
-            )
-            target = archive_path if os.path.isfile(archive_path) else series_dir
+        export_settings = self.main.get_resolved_export_settings()
+        archive_format = str(
+            export_settings.get("resolved_automatic_output_archive_format", "cbz") or "cbz"
+        )
+        archive_path, archive_root = self._forced_archive_output_path(series_dir, archive_format)
+        target = archive_path if os.path.isfile(archive_path) else archive_root
         if not os.path.exists(target):
             os.makedirs(series_dir, exist_ok=True)
             target = series_dir
@@ -1482,6 +1678,11 @@ class ProjectController:
         self.main.project_file = file_name
         self.main.setWindowTitle(f"{os.path.basename(file_name)}[*]")
         self.main.loading.setVisible(True)
+        busy_dialog = Messages.show_busy(
+            self.main,
+            self.main.tr("Creating project file..."),
+            title=self.main.tr("Project File"),
+        )
         self.main.disable_hbutton_group()
         save_failed = {'value': False}
         save_start_revision = self.main._dirty_revision
@@ -1490,9 +1691,11 @@ class ProjectController:
             save_failed['value'] = True
             self.main.project_file = prev_project_file
             self.main.setWindowTitle(prev_window_title)
+            Messages.close_busy(busy_dialog, force=True)
             self.main.default_error_handler(error_tuple)
 
         def on_finished():
+            Messages.close_busy(busy_dialog)
             self.main.on_manual_finished()
             if not save_failed['value']:
                 # Close the old project's DB connection only after the save
@@ -1766,16 +1969,24 @@ class ProjectController:
             close_state_store(prev_project_file)
         if clear_recovery:
             self.clear_recovery_checkpoint()
+        busy_dialog = Messages.show_busy(
+            self.main,
+            self.main.tr("Loading project file..."),
+            title=self.main.tr("Project File"),
+            minimum_visible_ms=300,
+        )
         self.main.image_ctrl.clear_state()
         self.main.project_kind = PROJECT_KIND_SINGLE
         self.main.setWindowTitle(f"{os.path.basename(normalized_path)}[*]")
 
         def _on_load_finished():
+            Messages.close_busy(busy_dialog)
             self.add_recent_project(normalized_path)
             self._refresh_home_screen()
             self.update_ui_from_project()
 
         def _on_load_error(error_tuple):
+            Messages.close_busy(busy_dialog, force=True)
             self.main.default_error_handler(error_tuple)
             exctype, value, _ = error_tuple
             self.main.project_file = None
@@ -1881,6 +2092,16 @@ class ProjectController:
         max_font_size = settings.value('max_font_size', 40) # Default value is 40
         self.main.settings_page.ui.min_font_spinbox.setValue(int(min_font_size))
         self.main.settings_page.ui.max_font_spinbox.setValue(int(max_font_size))
+        self.main.settings_page.ui.auto_max_font_checkbox.setChecked(
+            settings.value('auto_max_font_size', True, type=bool)
+        )
+        profile_combo = getattr(self.main.settings_page.ui, "auto_max_font_profile_combo", None)
+        if profile_combo is not None:
+            profile_index = profile_combo.findData(
+                settings.value('auto_max_font_profile', 'current', type=str)
+            )
+            profile_combo.setCurrentIndex(profile_index if profile_index >= 0 else 0)
+            profile_combo.setEnabled(self.main.settings_page.ui.auto_max_font_checkbox.isChecked())
 
         color = settings.value('color', '#000000')
         self.main.block_font_color_button.setStyleSheet(f"background-color: {color}; border: none; border-radius: 5px;")

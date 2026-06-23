@@ -47,6 +47,12 @@ class ChunkMixin:
         ]
 
     def _is_cancelled(self: WebtoonBatchProcessor) -> bool:
+        checker = getattr(self.main_page, "is_current_task_cancelled", None)
+        if callable(checker):
+            try:
+                return bool(checker())
+            except Exception:
+                pass
         worker = getattr(self.main_page, "current_worker", None)
         return bool(worker and worker.is_cancelled)
 

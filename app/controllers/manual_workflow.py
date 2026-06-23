@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING, Any, Sequence
+from typing import TYPE_CHECKING, Any, Callable, Sequence
 
 from PySide6 import QtCore
 
+from app.ui.messages import Messages
 from modules.detection.processor import TextBlockDetector
 from modules.detection.utils.content import get_inpaint_bboxes
 from modules.ocr.processor import OCRProcessor
@@ -35,6 +36,23 @@ logger = logging.getLogger(__name__)
 class ManualWorkflowController:
     def __init__(self, main: ComicTranslate) -> None:
         self.main = main
+
+    def _show_manual_busy(self, text: str):
+        return Messages.show_busy(
+            self.main,
+            text,
+            title=self.main.tr("Processing"),
+            minimum_visible_ms=300,
+        )
+
+    def _handle_busy_error(self, busy_dialog, error_tuple: tuple) -> None:
+        Messages.close_busy(busy_dialog, force=True)
+        self.main.default_error_handler(error_tuple)
+
+    def _finish_busy(self, busy_dialog, callback: Callable[[], None] | None = None) -> None:
+        Messages.close_busy(busy_dialog)
+        if callback is not None:
+            callback()
 
     def _current_file_path(self) -> str | None:
         if 0 <= self.main.curr_img_idx < len(self.main.image_files):
@@ -122,6 +140,7 @@ class ManualWorkflowController:
         if len(selected_paths) > 1:
             self.main.loading.setVisible(True)
             self.main.disable_hbutton_group()
+            busy_dialog = self._show_manual_busy(self.main.tr("Preparing text detection..."))
             context = self._prepare_multi_page_context(selected_paths)
             source_lang_fallback = self.main.s_combo.currentText()
 
@@ -195,18 +214,19 @@ class ManualWorkflowController:
             self.main.run_threaded(
                 detect_selected_pages,
                 on_detect_ready,
-                self.main.default_error_handler,
-                self.main.on_manual_finished,
+                lambda error_tuple: self._handle_busy_error(busy_dialog, error_tuple),
+                lambda: self._finish_busy(busy_dialog, self.main.on_manual_finished),
             )
             return
 
         self.main.loading.setVisible(True)
         self.main.disable_hbutton_group()
+        busy_dialog = self._show_manual_busy(self.main.tr("Preparing text detection..."))
         self.main.run_threaded(
             self.main.pipeline.detect_blocks,
             self.main.pipeline.on_blk_detect_complete,
-            self.main.default_error_handler,
-            self.main.on_manual_finished,
+            lambda error_tuple: self._handle_busy_error(busy_dialog, error_tuple),
+            lambda: self._finish_busy(busy_dialog, self.main.on_manual_finished),
             load_rects,
         )
 
@@ -235,6 +255,7 @@ class ManualWorkflowController:
         if len(selected_paths) > 1 and not single_block:
             self.main.loading.setVisible(True)
             self.main.disable_hbutton_group()
+            busy_dialog = self._show_manual_busy(self.main.tr("Preparing OCR..."))
             context = self._prepare_multi_page_context(selected_paths)
             source_lang_fallback = self.main.s_combo.currentText()
 
@@ -329,27 +350,37 @@ class ManualWorkflowController:
             self.main.run_threaded(
                 ocr_selected_pages,
                 on_ocr_ready,
-                self.main.default_error_handler,
-                lambda: self.finish_ocr_translate(single_block),
+                lambda error_tuple: self._handle_busy_error(busy_dialog, error_tuple),
+                lambda: self._finish_busy(
+                    busy_dialog,
+                    lambda: self.finish_ocr_translate(single_block),
+                ),
             )
             return
 
         self.main.loading.setVisible(True)
         self.main.disable_hbutton_group()
+        busy_dialog = self._show_manual_busy(self.main.tr("Preparing OCR..."))
 
         if self.main.webtoon_mode:
             self.main.run_threaded(
                 lambda: self.main.pipeline.OCR_webtoon_visible_area(single_block),
                 None,
-                self.main.default_error_handler,
-                lambda: self.finish_ocr_translate(single_block),
+                lambda error_tuple: self._handle_busy_error(busy_dialog, error_tuple),
+                lambda: self._finish_busy(
+                    busy_dialog,
+                    lambda: self.finish_ocr_translate(single_block),
+                ),
             )
         else:
             self.main.run_threaded(
                 lambda: self.main.pipeline.OCR_image(single_block),
                 None,
-                self.main.default_error_handler,
-                lambda: self.finish_ocr_translate(single_block),
+                lambda error_tuple: self._handle_busy_error(busy_dialog, error_tuple),
+                lambda: self._finish_busy(
+                    busy_dialog,
+                    lambda: self.finish_ocr_translate(single_block),
+                ),
             )
 
     def translate_image(self, single_block: bool = False) -> None:
@@ -372,6 +403,7 @@ class ManualWorkflowController:
 
             self.main.loading.setVisible(True)
             self.main.disable_hbutton_group()
+            busy_dialog = self._show_manual_busy(self.main.tr("Preparing translation..."))
             context = self._prepare_multi_page_context(selected_paths)
             source_lang_fallback = self.main.s_combo.currentText()
             target_lang_fallback = self.main.t_combo.currentText()
@@ -458,8 +490,8 @@ class ManualWorkflowController:
             self.main.run_threaded(
                 translate_selected_pages,
                 on_translation_ready,
-                self.main.default_error_handler,
-                lambda: self.update_translated_text_items(single_block),
+                lambda error_tuple: self._handle_busy_error(busy_dialog, error_tuple),
+                lambda: self.update_translated_text_items(single_block, busy_dialog),
             )
             return
 
@@ -470,20 +502,21 @@ class ManualWorkflowController:
             return
         self.main.loading.setVisible(True)
         self.main.disable_hbutton_group()
+        busy_dialog = self._show_manual_busy(self.main.tr("Preparing translation..."))
 
         if self.main.webtoon_mode:
             self.main.run_threaded(
                 lambda: self.main.pipeline.translate_webtoon_visible_area(single_block),
                 None,
-                self.main.default_error_handler,
-                lambda: self.update_translated_text_items(single_block),
+                lambda error_tuple: self._handle_busy_error(busy_dialog, error_tuple),
+                lambda: self.update_translated_text_items(single_block, busy_dialog),
             )
         else:
             self.main.run_threaded(
                 lambda: self.main.pipeline.translate_image(single_block),
                 None,
-                self.main.default_error_handler,
-                lambda: self.update_translated_text_items(single_block),
+                lambda error_tuple: self._handle_busy_error(busy_dialog, error_tuple),
+                lambda: self.update_translated_text_items(single_block, busy_dialog),
             )
 
     def _get_visible_text_items(self) -> list[TextBlockItem]:
@@ -493,7 +526,7 @@ class ManualWorkflowController:
             self.main.image_viewer.text_items, self.main.image_viewer.webtoon_manager
         )
 
-    def update_translated_text_items(self, single_blk: bool) -> None:
+    def update_translated_text_items(self, single_blk: bool, busy_dialog=None) -> None:
         
         def set_new_text(
             text_item: TextBlockItem, 
@@ -520,6 +553,7 @@ class ManualWorkflowController:
 
         text_items_to_process = self._get_visible_text_items()
         if not text_items_to_process:
+            Messages.close_busy(busy_dialog)
             self.finish_ocr_translate(single_blk)
             return
 
@@ -559,17 +593,22 @@ class ManualWorkflowController:
                     lambda wrap_res, ti=text_item, current_blk=blk: set_new_text(
                         ti, current_blk, wrap_res
                     ),
-                    self.main.default_error_handler,
+                    lambda error_tuple: self._handle_busy_error(busy_dialog, error_tuple),
                     None,
                     *wrap_args,
                 )
 
-            self.main.run_finish_only(finished_callback=self.main.on_manual_finished)
+            self.main.run_finish_only(
+                finished_callback=lambda: self._finish_busy(
+                    busy_dialog,
+                    self.main.on_manual_finished,
+                )
+            )
 
         self.main.run_threaded(
             lambda: format_translations(self.main.blk_list, trg_lng_cd, upper_case=upper),
             None,
-            self.main.default_error_handler,
+            lambda error_tuple: self._handle_busy_error(busy_dialog, error_tuple),
             on_format_finished,
         )
 
@@ -582,6 +621,7 @@ class ManualWorkflowController:
             self.main.text_ctrl.clear_text_edits()
             self.main.loading.setVisible(True)
             self.main.disable_hbutton_group()
+            busy_dialog = self._show_manual_busy(self.main.tr("Preparing inpainting..."))
             context = self._prepare_multi_page_context(selected_paths)
 
             def inpaint_selected_pages() -> dict[str, list[dict]]:
@@ -651,8 +691,8 @@ class ManualWorkflowController:
             self.main.run_threaded(
                 inpaint_selected_pages,
                 on_selected_inpaint_ready,
-                self.main.default_error_handler,
-                self.main.on_manual_finished,
+                lambda error_tuple: self._handle_busy_error(busy_dialog, error_tuple),
+                lambda: self._finish_busy(busy_dialog, self.main.on_manual_finished),
             )
             return
 
@@ -660,12 +700,13 @@ class ManualWorkflowController:
             self.main.text_ctrl.clear_text_edits()
             self.main.loading.setVisible(True)
             self.main.disable_hbutton_group()
+            busy_dialog = self._show_manual_busy(self.main.tr("Preparing inpainting..."))
             self.main.undo_group.activeStack().beginMacro("inpaint")
             self.main.run_threaded(
                 self.main.pipeline.inpaint,
                 self.main.pipeline.inpaint_complete,
-                self.main.default_error_handler,
-                self.main.on_manual_finished,
+                lambda error_tuple: self._handle_busy_error(busy_dialog, error_tuple),
+                lambda: self._finish_busy(busy_dialog, self.main.on_manual_finished),
             )
 
     def blk_detect_segment(
@@ -695,6 +736,7 @@ class ManualWorkflowController:
 
             self.main.loading.setVisible(True)
             self.main.disable_hbutton_group()
+            busy_dialog = self._show_manual_busy(self.main.tr("Preparing segmentation..."))
 
             selected_paths = self._selected_page_paths()
             if len(selected_paths) > 1:
@@ -751,6 +793,7 @@ class ManualWorkflowController:
                     self.main.undo_group.activeStack().endMacro()
 
                 def on_selected_bboxes_error(error_tuple: tuple) -> None:
+                    Messages.close_busy(busy_dialog, force=True)
                     try:
                         self.main.undo_group.activeStack().endMacro()
                     except Exception:
@@ -761,7 +804,7 @@ class ManualWorkflowController:
                     compute_selected_bboxes,
                     on_selected_bboxes_ready,
                     on_selected_bboxes_error,
-                    self.main.on_manual_finished,
+                    lambda: self._finish_busy(busy_dialog, self.main.on_manual_finished),
                 )
                 return
 
@@ -772,8 +815,8 @@ class ManualWorkflowController:
                     self.main.run_threaded(
                         lambda: self.main.pipeline.segment_webtoon_visible_area(),
                         self._on_segmentation_bboxes_ready,
-                        self.main.default_error_handler,
-                        self.main.on_manual_finished,
+                        lambda error_tuple: self._handle_busy_error(busy_dialog, error_tuple),
+                        lambda: self._finish_busy(busy_dialog, self.main.on_manual_finished),
                     )
                 else:
 
@@ -792,16 +835,16 @@ class ManualWorkflowController:
                     self.main.run_threaded(
                         compute_all_bboxes,
                         self._on_segmentation_bboxes_ready,
-                        self.main.default_error_handler,
-                        self.main.on_manual_finished,
+                        lambda error_tuple: self._handle_busy_error(busy_dialog, error_tuple),
+                        lambda: self._finish_busy(busy_dialog, self.main.on_manual_finished),
                     )
 
             else:
                 self.main.run_threaded(
                     self.main.pipeline.detect_blocks,
                     self.blk_detect_segment,
-                    self.main.default_error_handler,
-                    self.main.on_manual_finished,
+                    lambda error_tuple: self._handle_busy_error(busy_dialog, error_tuple),
+                    lambda: self._finish_busy(busy_dialog, self.main.on_manual_finished),
                 )
 
     def _on_segmentation_bboxes_ready(

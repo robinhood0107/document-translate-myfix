@@ -10,7 +10,7 @@ from typing import Iterable, Mapping
 import numpy as np
 from PIL import Image
 
-from .export_paths import resolve_export_source_identity
+from .export_paths import resolve_export_source_identity, sanitize_export_path_component
 
 
 OUTPUT_TARGET_IMAGES = "individual_images"
@@ -293,6 +293,38 @@ def build_output_file_name(
     return f"{page_base_name}_{variant}{ext}"
 
 
+def reserve_unique_path(path: str) -> str:
+    """Return a path that does not currently exist, preserving the extension."""
+    candidate = os.path.abspath(str(path or ""))
+    if not candidate:
+        raise ValueError("Cannot reserve an empty output path")
+    if not os.path.exists(candidate):
+        return candidate
+
+    root, ext = os.path.splitext(candidate)
+    for index in range(1, 10000):
+        next_candidate = f"{root}_{index:03d}{ext}"
+        if not os.path.exists(next_candidate):
+            return next_candidate
+    raise FileExistsError(f"No available output path for {candidate!r}")
+
+
+def reserve_unique_dir(path: str) -> str:
+    """Create and return a directory path without reusing an existing directory."""
+    candidate = os.path.abspath(str(path or ""))
+    if not candidate:
+        raise ValueError("Cannot reserve an empty output directory")
+
+    for index in range(0, 10000):
+        next_candidate = candidate if index == 0 else f"{candidate}_{index:03d}"
+        try:
+            os.makedirs(next_candidate, exist_ok=False)
+            return next_candidate
+        except FileExistsError:
+            continue
+    raise FileExistsError(f"No available output directory for {candidate!r}")
+
+
 def build_archive_page_file_name(
     page_index: int,
     total_pages: int,
@@ -309,6 +341,75 @@ def build_archive_file_name(bundle_name: str, archive_format: str) -> str:
     ext = f".{normalize_archive_format(archive_format)}"
     stem = sanitize_series_folder_name(bundle_name, max_length=180)
     return f"{stem}_translated{ext}"
+
+
+def build_translated_archive_file_name(source_stem: str, archive_format: str | None) -> str:
+    ext = f".{normalize_archive_format(archive_format)}"
+    stem = sanitize_export_path_component(source_stem, fallback="comic_translate_output")
+    return f"{stem}_translated{ext}"
+
+
+def _identity_key(identity: Mapping[str, str]) -> tuple[str, str, str]:
+    return (
+        str(identity.get("kind", "") or ""),
+        os.path.normcase(os.path.abspath(str(identity.get("directory", "") or ""))),
+        str(identity.get("source_name", "") or ""),
+    )
+
+
+def resolve_forced_archive_output_path(
+    page_paths: Iterable[str],
+    *,
+    fallback_dir: str,
+    fallback_bundle_name: str,
+    archive_format: str | None = None,
+    source_records: Mapping[str, Mapping[str, object]] | None = None,
+    archive_info: list[dict] | None = None,
+    project_file: str | None = None,
+    temp_dir: str | None = None,
+) -> tuple[str, str]:
+    paths = [str(path or "").strip() for path in page_paths or [] if str(path or "").strip()]
+    fallback_root = os.path.abspath(str(fallback_dir or "") or os.getcwd())
+    fallback_path = os.path.join(
+        fallback_root,
+        build_translated_archive_file_name(fallback_bundle_name, archive_format),
+    )
+    if not paths:
+        return fallback_path, fallback_root
+
+    identities = [
+        resolve_export_source_identity(
+            path,
+            archive_info=archive_info,
+            source_records=source_records,
+            project_file=project_file,
+            temp_dir=temp_dir,
+        )
+        for path in paths
+    ]
+    first = identities[0]
+    same_source = all(_identity_key(identity) == _identity_key(first) for identity in identities)
+    if same_source and first.get("kind") == "archive":
+        output_root = str(first.get("directory", "") or fallback_root)
+        return (
+            os.path.join(
+                output_root,
+                build_translated_archive_file_name(first.get("source_name", ""), archive_format),
+            ),
+            output_root,
+        )
+
+    if len(paths) == 1 and first.get("kind") == "file":
+        output_root = str(first.get("directory", "") or fallback_root)
+        return (
+            os.path.join(
+                output_root,
+                build_translated_archive_file_name(first.get("source_name", ""), archive_format),
+            ),
+            output_root,
+        )
+
+    return fallback_path, fallback_root
 
 
 def build_archive_staging_dir(series_dir: str, export_token: str) -> str:
@@ -361,6 +462,7 @@ def write_output_image(
     source_path: str | None,
     resolved_settings: Mapping[str, object] | None,
 ) -> str:
+    output_path = reserve_unique_path(output_path)
     requested = str(
         (resolved_settings or {}).get("resolved_automatic_output_image_format", DEFAULT_OUTPUT_IMAGE_FORMAT)
     )
@@ -430,11 +532,11 @@ def resolve_series_folder_name(
         project_file=project_file,
         temp_dir=temp_dir,
     )
-    return sanitize_series_folder_name(identity.get("source_name", ""))
+    return sanitize_export_path_component(identity.get("source_name", ""))
 
 
 def build_series_output_dir(base_dir: str, series_folder_name: str) -> str:
-    folder_name = sanitize_series_folder_name(series_folder_name)
+    folder_name = sanitize_export_path_component(series_folder_name)
     if not folder_name.lower().startswith("result_"):
         folder_name = f"result_{folder_name}"
     return os.path.join(base_dir, folder_name)

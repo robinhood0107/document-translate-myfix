@@ -16,6 +16,7 @@ from modules.utils.automatic_output import (
     OUTPUT_TARGET_ARCHIVE,
     build_archive_file_name,
     build_archive_page_file_name,
+    build_translated_archive_file_name,
     build_series_output_dir,
     build_output_file_name,
     default_global_output_settings,
@@ -24,11 +25,15 @@ from modules.utils.automatic_output import (
     format_estimate_seconds_text,
     format_estimate_size_text,
     resolve_automatic_output_settings,
+    resolve_forced_archive_output_path,
+    reserve_unique_dir,
+    reserve_unique_path,
     resolve_series_folder_name,
     sanitize_series_folder_name,
     write_archive_image,
     write_output_image,
 )
+from modules.utils.archives import make as make_archive
 
 
 class AutomaticOutputTests(unittest.TestCase):
@@ -37,25 +42,46 @@ class AutomaticOutputTests(unittest.TestCase):
         self.assertEqual(sanitize_series_folder_name("Title[v2] c001"), "Title[v2]")
 
     def test_series_output_dir_uses_result_prefix(self) -> None:
-        output_dir = build_series_output_dir("/tmp/project", "False_Honour_8_Part_3_English")
+        output_dir = build_series_output_dir("/tmp/project", "example_source_chapter")
 
         self.assertEqual(
             os.path.basename(output_dir),
-            "result_False_Honour_8_Part_3_English",
+            "result_example_source_chapter",
+        )
+
+    def test_series_output_dir_preserves_chapter_suffix(self) -> None:
+        output_dir = build_series_output_dir("/tmp/project", "source chapter v01 c14")
+
+        self.assertEqual(
+            os.path.basename(output_dir),
+            "result_source chapter v01 c14",
         )
 
     def test_series_folder_name_resolves_source_for_temp_page(self) -> None:
         folder_name = resolve_series_folder_name(
-            "/mnt/c/Users/pjjpj/project/tmpabc/001.png",
+            "/mnt/c/ExampleWorkspace/project/tmpabc/001.png",
             source_records={
-                r"C:\Users\pjjpj\project\tmpabc\001.png": {
+                r"C:\ExampleWorkspace\project\tmpabc\001.png": {
                     "kind": "archive",
-                    "source_path": r"C:\Users\pjjpj\project\False_Honour_8_Part_3_English.pdf",
+                    "source_path": r"C:\ExampleWorkspace\project\example_source_chapter.pdf",
                 }
             },
         )
 
-        self.assertEqual(folder_name, "False_Honour_8_Part_3_English")
+        self.assertEqual(folder_name, "example_source_chapter")
+
+    def test_series_folder_name_preserves_source_chapter_suffix(self) -> None:
+        folder_name = resolve_series_folder_name(
+            "/mnt/c/ExampleWorkspace/project/tmpabc/001.png",
+            source_records={
+                r"C:\ExampleWorkspace\project\tmpabc\001.png": {
+                    "kind": "archive",
+                    "source_path": r"C:\ExampleWorkspace\project\source chapter v01 c14.cbz",
+                }
+            },
+        )
+
+        self.assertEqual(folder_name, "source chapter v01 c14")
 
     def test_resolved_settings_apply_project_override(self) -> None:
         settings = resolve_automatic_output_settings(
@@ -108,6 +134,70 @@ class AutomaticOutputTests(unittest.TestCase):
             )
             self.assertTrue(os.path.isfile(output_path))
 
+    def test_reserve_unique_dir_uses_suffix_when_directory_exists(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            output_dir = os.path.join(temp_dir, "result_source chapter v01 c14")
+            os.makedirs(output_dir)
+
+            reserved = reserve_unique_dir(output_dir)
+
+            self.assertEqual(os.path.basename(reserved), "result_source chapter v01 c14_001")
+            self.assertTrue(os.path.isdir(reserved))
+
+    def test_write_output_image_never_overwrites_existing_file(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            output_path = os.path.join(temp_dir, "001_translated.png")
+            with open(output_path, "wb") as handle:
+                handle.write(b"keep-me")
+            image = np.zeros((20, 10, 3), dtype=np.uint8)
+
+            actual_path = write_output_image(
+                output_path,
+                image,
+                source_path="/tmp/source.png",
+                resolved_settings={
+                    "resolved_automatic_output_image_format": OUTPUT_IMAGE_FORMAT_PNG,
+                },
+            )
+
+            self.assertEqual(os.path.basename(actual_path), "001_translated_001.png")
+            with open(output_path, "rb") as handle:
+                self.assertEqual(handle.read(), b"keep-me")
+            self.assertTrue(os.path.isfile(actual_path))
+
+    def test_reserve_unique_path_preserves_extension(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            output_path = os.path.join(temp_dir, "chapter_translated.cbz")
+            with open(output_path, "wb") as handle:
+                handle.write(b"old")
+
+            reserved = reserve_unique_path(output_path)
+
+            self.assertEqual(os.path.basename(reserved), "chapter_translated_001.cbz")
+
+    def test_make_archive_refuses_to_overwrite_existing_output(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            source_dir = os.path.join(temp_dir, "pages")
+            os.makedirs(source_dir)
+            image = np.zeros((20, 10, 3), dtype=np.uint8)
+            write_archive_image(
+                os.path.join(source_dir, "001.png"),
+                image,
+                resolved_settings={
+                    "resolved_automatic_output_archive_image_format": OUTPUT_IMAGE_FORMAT_PNG,
+                },
+            )
+            archive_path = os.path.join(temp_dir, "chapter_translated.cbz")
+            with open(archive_path, "wb") as handle:
+                handle.write(b"old")
+
+            with self.assertRaises(FileExistsError):
+                make_archive(source_dir, output_path=archive_path)
+
+            reserved = reserve_unique_path(archive_path)
+            make_archive(source_dir, output_path=reserved)
+            self.assertTrue(os.path.isfile(reserved))
+
     def test_write_archive_image_creates_requested_file(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             output_path = os.path.join(temp_dir, "result.webp")
@@ -146,6 +236,66 @@ class AutomaticOutputTests(unittest.TestCase):
             build_archive_file_name("Series c01 v02", OUTPUT_ARCHIVE_FORMAT_CBZ),
             "Series_translated.cbz",
         )
+
+    def test_translated_archive_file_name_preserves_source_version_suffix_and_format(self) -> None:
+        self.assertEqual(
+            build_translated_archive_file_name(
+                "example source chapter v01 c01 (E)",
+                OUTPUT_ARCHIVE_FORMAT_ZIP,
+            ),
+            "example source chapter v01 c01 (E)_translated.zip",
+        )
+        self.assertEqual(
+            build_translated_archive_file_name(
+                "example source chapter v01 c01 (E)",
+                OUTPUT_ARCHIVE_FORMAT_CBZ,
+            ),
+            "example source chapter v01 c01 (E)_translated.cbz",
+        )
+
+    def test_forced_archive_output_path_uses_archive_parent_for_single_source(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            page_a = os.path.join(temp_dir, "extract", "001.png")
+            page_b = os.path.join(temp_dir, "extract", "002.png")
+            archive_path = os.path.join(temp_dir, "chapter v01 c01 (E).cbz")
+            output_path, output_root = resolve_forced_archive_output_path(
+                [page_a, page_b],
+                fallback_dir=os.path.join(temp_dir, "fallback"),
+                fallback_bundle_name="fallback",
+                archive_format=OUTPUT_ARCHIVE_FORMAT_CBZ,
+                source_records={
+                    page_a: {"kind": "archive", "source_path": archive_path},
+                    page_b: {"kind": "archive", "source_path": archive_path},
+                },
+            )
+            self.assertEqual(output_root, temp_dir)
+            self.assertEqual(
+                output_path,
+                os.path.join(temp_dir, "chapter v01 c01 (E)_translated.cbz"),
+            )
+
+    def test_forced_archive_output_path_uses_single_loose_image_parent(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            page = os.path.join(temp_dir, "page 001.png")
+            output_path, output_root = resolve_forced_archive_output_path(
+                [page],
+                fallback_dir=os.path.join(temp_dir, "fallback"),
+                fallback_bundle_name="fallback",
+                archive_format=OUTPUT_ARCHIVE_FORMAT_ZIP,
+            )
+            self.assertEqual(output_root, temp_dir)
+            self.assertEqual(output_path, os.path.join(temp_dir, "page 001_translated.zip"))
+
+    def test_forced_archive_output_path_falls_back_for_mixed_sources(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            output_path, output_root = resolve_forced_archive_output_path(
+                [os.path.join(temp_dir, "a.png"), os.path.join(temp_dir, "b.png")],
+                fallback_dir=os.path.join(temp_dir, "result_demo"),
+                fallback_bundle_name="demo",
+                archive_format=OUTPUT_ARCHIVE_FORMAT_CBZ,
+            )
+            self.assertEqual(output_root, os.path.join(temp_dir, "result_demo"))
+            self.assertEqual(output_path, os.path.join(temp_dir, "result_demo", "demo_translated.cbz"))
 
 
 if __name__ == "__main__":

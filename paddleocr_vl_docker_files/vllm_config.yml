@@ -1,4 +1,4 @@
-model: "/home/paddleocr/.paddlex/official_models/PaddleOCR-VL-1.5"
+model: "/home/paddleocr/.paddlex/official_models/PaddleOCR-VL-1.6"
 host: "0.0.0.0"
 port: 18000
 

@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Any, Callable
 from urllib.error import URLError
 from urllib.parse import urlparse
-from urllib.request import urlopen
+from urllib.request import Request, urlopen
 
 from modules.translation.llm.custom_local_gemma import (
     DEFAULT_GEMMA_LOCAL_ENDPOINT,
@@ -177,6 +177,7 @@ class LocalGemmaRuntimeManager:
                 message="Gemma 상태를 확인하는 중...",
                 detail=f"Endpoint: {_RUNTIME_CONFIG['managed_url']}",
             )
+            started_or_recreated = False
             if self._wait_for_any_probe(
                 [_RUNTIME_CONFIG["health_url"], _RUNTIME_CONFIG["models_url"]],
                 timeout_sec=2,
@@ -192,24 +193,48 @@ class LocalGemmaRuntimeManager:
                     step_key="health_probe",
                     message="이미 실행 중인 Gemma 런타임을 재사용합니다.",
                 )
-                self._validate_model_with_progress(api_base_url, model_name, progress_callback)
-                self._log_runtime_metadata()
-                return
+                try:
+                    self._validate_model_with_progress(api_base_url, model_name, progress_callback)
+                except LocalServiceResponseError as exc:
+                    self._emit_progress(
+                        progress_callback,
+                        status="starting",
+                        step_key="compose_recreate",
+                        message="Gemma 모델이 설정과 달라 컨테이너를 다시 시작하는 중...",
+                        detail=str(exc),
+                    )
+                    self._run_compose("up", "-d", "--force-recreate", step_name="recreate", model_name=model_name)
+                    started_or_recreated = True
+                    self._emit_progress(
+                        progress_callback,
+                        status="completed",
+                        step_key="compose_recreate",
+                        message="Gemma 컨테이너 재시작 명령을 보냈습니다.",
+                    )
+                else:
+                    self._prewarm_chat_completion_with_progress(
+                        api_base_url,
+                        model_name,
+                        progress_callback,
+                    )
+                    self._log_runtime_metadata()
+                    return
 
-            self._emit_progress(
-                progress_callback,
-                status="starting",
-                step_key="compose_up",
-                message="Gemma 컨테이너를 시작하는 중...",
-                detail="docker compose up -d",
-            )
-            self._run_compose("up", "-d", step_name="up", model_name=model_name)
-            self._emit_progress(
-                progress_callback,
-                status="completed",
-                step_key="compose_up",
-                message="Gemma 컨테이너 시작 명령을 보냈습니다.",
-            )
+            if not started_or_recreated:
+                self._emit_progress(
+                    progress_callback,
+                    status="starting",
+                    step_key="compose_up",
+                    message="Gemma 컨테이너를 시작하는 중...",
+                    detail="docker compose up -d",
+                )
+                self._run_compose("up", "-d", step_name="up", model_name=model_name)
+                self._emit_progress(
+                    progress_callback,
+                    status="completed",
+                    step_key="compose_up",
+                    message="Gemma 컨테이너 시작 명령을 보냈습니다.",
+                )
             if not self._wait_for_any_probe(
                 [_RUNTIME_CONFIG["health_url"], _RUNTIME_CONFIG["models_url"]],
                 timeout_sec=timeout_sec,
@@ -232,6 +257,11 @@ class LocalGemmaRuntimeManager:
                 message="Gemma health 확인이 완료되었습니다.",
             )
             self._validate_model_with_progress(api_base_url, model_name, progress_callback)
+            self._prewarm_chat_completion_with_progress(
+                api_base_url,
+                model_name,
+                progress_callback,
+            )
             self._log_runtime_metadata()
             return
 
@@ -259,6 +289,11 @@ class LocalGemmaRuntimeManager:
             message="Gemma endpoint 연결이 확인되었습니다.",
         )
         self._validate_model_with_progress(api_base_url, model_name, progress_callback)
+        self._prewarm_chat_completion_with_progress(
+            api_base_url,
+            model_name,
+            progress_callback,
+        )
 
     def shutdown(self) -> None:
         with self._lock:
@@ -403,7 +438,14 @@ class LocalGemmaRuntimeManager:
                 model_id = str(entry.get("id", "")).strip()
                 if model_id:
                     model_ids.append(model_id)
-        if model_ids and expected_model and expected_model not in model_ids:
+        expected_model_name = Path(str(expected_model or "")).name
+        loaded_model_names = {Path(model_id).name for model_id in model_ids}
+        if (
+            model_ids
+            and expected_model
+            and expected_model not in model_ids
+            and expected_model_name not in loaded_model_names
+        ):
             raise LocalServiceResponseError(
                 (
                     "Gemma server is reachable but loaded models do not match the configured model.\n"
@@ -412,6 +454,65 @@ class LocalGemmaRuntimeManager:
                 service_name="Gemma",
                 settings_page_name=_RUNTIME_CONFIG["settings_page_name"],
             )
+
+    def _prewarm_chat_completion_with_progress(
+        self,
+        api_base_url: str,
+        model_name: str,
+        progress_callback: Callable[[dict[str, Any]], None] | None = None,
+    ) -> None:
+        self._emit_progress(
+            progress_callback,
+            status="starting",
+            step_key="chat_prewarm",
+            message="Gemma 첫 번역 요청을 예열하는 중...",
+        )
+        self._prewarm_chat_completion(api_base_url, model_name)
+        self._emit_progress(
+            progress_callback,
+            status="completed",
+            step_key="chat_prewarm",
+            message="Gemma 첫 번역 요청 예열이 완료되었습니다.",
+        )
+
+    def _prewarm_chat_completion(
+        self,
+        api_base_url: str,
+        model_name: str,
+        *,
+        timeout_sec: int = 90,
+    ) -> None:
+        base = _normalize_url(api_base_url)
+        chat_url = f"{base}/chat/completions" if base.endswith("/v1") else f"{base}/v1/chat/completions"
+        payload = {
+            "model": model_name,
+            "messages": [
+                {
+                    "role": "system",
+                    "content": [{"type": "text", "text": "Return exactly one JSON object."}],
+                },
+                {
+                    "role": "user",
+                    "content": [{"type": "text", "text": "{\"translation\":\"ok\"}"}],
+                },
+            ],
+            "temperature": 0.0,
+            "max_completion_tokens": 32,
+            "response_format": {"type": "json_object"},
+        }
+        request = Request(
+            chat_url,
+            data=json.dumps(payload).encode("utf-8"),
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        try:
+            with urlopen(request, timeout=timeout_sec) as response:
+                response.read()
+        except Exception as exc:
+            raise self._build_connection_error(
+                f"Gemma chat prewarm failed at {chat_url}: {exc}"
+            ) from exc
 
     def _log_runtime_metadata(self) -> None:
         try:

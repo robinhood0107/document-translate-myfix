@@ -1,6 +1,7 @@
 services:
   paddleocr-vllm:
     image: ccr-2vdh3abv-pub.cnc.bj.baidubce.com/paddlepaddle/paddleocr-genai-vllm-server:latest-nvidia-gpu-offline
+    pull_policy: always
     container_name: paddleocr-vllm
     restart: unless-stopped
     volumes:
@@ -19,7 +20,7 @@ services:
     command: >
       bash -lc "set -euo pipefail &&
       paddleocr genai_server
-      --model_name PaddleOCR-VL-1.5-0.9B
+      --model_name PaddleOCR-VL-1.6-0.9B
       --backend vllm
       --backend_config /tmp/vllm_config.yml
       --host 0.0.0.0
@@ -27,6 +28,7 @@ services:
 
   paddleocr-layout:
     image: ccr-2vdh3abv-pub.cnc.bj.baidubce.com/paddlepaddle/paddleocr-genai-vllm-server:latest-nvidia-gpu-offline
+    pull_policy: always
     container_name: paddleocr-server
     tty: true
     stdin_open: true
