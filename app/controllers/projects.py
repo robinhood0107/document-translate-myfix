@@ -2092,6 +2092,16 @@ class ProjectController:
         max_font_size = settings.value('max_font_size', 40) # Default value is 40
         self.main.settings_page.ui.min_font_spinbox.setValue(int(min_font_size))
         self.main.settings_page.ui.max_font_spinbox.setValue(int(max_font_size))
+        self.main.settings_page.ui.auto_max_font_checkbox.setChecked(
+            settings.value('auto_max_font_size', True, type=bool)
+        )
+        profile_combo = getattr(self.main.settings_page.ui, "auto_max_font_profile_combo", None)
+        if profile_combo is not None:
+            profile_index = profile_combo.findData(
+                settings.value('auto_max_font_profile', 'current', type=str)
+            )
+            profile_combo.setCurrentIndex(profile_index if profile_index >= 0 else 0)
+            profile_combo.setEnabled(self.main.settings_page.ui.auto_max_font_checkbox.isChecked())
 
         color = settings.value('color', '#000000')
         self.main.block_font_color_button.setStyleSheet(f"background-color: {color}; border: none; border-radius: 5px;")
