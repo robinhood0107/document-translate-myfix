@@ -83,6 +83,9 @@ class OCRProcessor:
             self.ocr_key,
             selected_ocr_mode=self.ocr_mode,
         )
+        setter = getattr(engine, "set_cancel_checker", None)
+        if callable(setter):
+            setter(getattr(self.main_page, "is_current_task_cancelled", None))
         self.last_engine_name = engine.__class__.__name__
         logger.info(
             "ocr self-check: selected_mode=%s resolved_key=%s resolved_engine=%s source_lang=%s device=%s blocks=%d",
