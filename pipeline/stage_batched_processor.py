@@ -26,15 +26,26 @@ from modules.ocr.selection import (
     resolve_stage_batched_ocr_policy,
 )
 from modules.rendering.render import (
+    apply_strict_render_viewer_state_guard,
+    build_duplicate_bubble_render_key,
     build_render_rects_for_block,
     build_text_item_layout_geometry,
+    describe_auto_render_review_status_gate,
     describe_render_text_markup,
     describe_render_text_sanitization,
+    describe_text_free_large_mask_gate,
+    describe_text_free_render_mask_gate,
+    describe_text_free_render_translation_gate,
+    describe_text_free_underfill_gate,
     get_best_render_area,
     get_render_fit_clearance_for_block,
     is_vertical_block,
+    block_needs_original_restore_after_render,
     pyside_word_wrap,
     refit_detected_bubble_text_if_underfilled,
+    resolve_text_free_manga_layout,
+    should_skip_short_render_translation,
+    should_use_strict_render_symbols,
 )
 from modules.translation.local_runtime import LocalGemmaRuntimeManager
 from modules.translation.processor import Translator
@@ -49,14 +60,21 @@ from modules.utils.export_paths import (
     resolve_export_directory,
 )
 from modules.utils.exceptions import OperationCancelledError
-from modules.utils.image_utils import generate_mask
-from modules.utils.inpaint_cleanup import refine_bubble_residue_inpaint
+from modules.utils.image_utils import generate_mask, restore_original_for_block_masks
+from modules.utils.inpaint_cleanup import apply_duplicate_bubble_inner_fill, refine_bubble_residue_inpaint
 from modules.utils.language_utils import get_language_code, is_no_space_lang, language_codes
-from modules.utils.ocr_debug import drop_layout_schema_only_ocr_blocks
+from modules.utils.ocr_debug import (
+    all_empty_blocks_are_rejected,
+    drop_embedded_ui_ocr_blocks,
+    drop_rejected_empty_ocr_blocks,
+    is_block_ocr_empty,
+    is_embedded_ui_panel_layout_review_candidate,
+    split_inpaint_protected_ocr_blocks,
+)
 from modules.utils.ocr_quality import summarize_ocr_quality
 from modules.utils.pipeline_config import get_config, get_inpainter_runtime, inpaint_map
 from modules.utils.render_style_policy import (
-    VERTICAL_ALIGNMENT_TOP,
+    VERTICAL_ALIGNMENT_CENTER,
     resolve_render_text_color,
 )
 from modules.utils.textblock import sort_blk_list
@@ -499,6 +517,11 @@ class StageBatchedProcessor(BatchProcessor):
         page_profile: dict[str, Any] = {}
         engine_name = engine_key
 
+        def attach_cancel_checker(engine) -> None:
+            setter = getattr(engine, "set_cancel_checker", None)
+            if callable(setter):
+                setter(getattr(self.main_page, "is_current_task_cancelled", None))
+
         if self.cache_manager._can_serve_all_blocks_from_ocr_cache(cache_key, ctx.blk_list):
             self.cache_manager._apply_cached_ocr_to_blocks(cache_key, ctx.blk_list)
             apply_ocr_result_dictionary(ctx.blk_list, settings_page.get_ocr_result_dictionary_rules())
@@ -511,6 +534,7 @@ class StageBatchedProcessor(BatchProcessor):
                 engine_key,
                 selected_ocr_mode=policy["normalized_ocr_mode"],
             )
+            attach_cancel_checker(engine)
             engine.process_image(ctx.image, ctx.blk_list)
             page_profile = dict(getattr(engine, "last_page_profile", {}) or {})
             apply_ocr_result_dictionary(ctx.blk_list, settings_page.get_ocr_result_dictionary_rules())
@@ -520,7 +544,7 @@ class StageBatchedProcessor(BatchProcessor):
             engine_name = engine.__class__.__name__
 
         quality = summarize_ocr_quality(ctx.blk_list)
-        if quality.get("low_quality", False):
+        if quality.get("low_quality", False) and not all_empty_blocks_are_rejected(ctx.blk_list):
             attempt_count += 1
             for blk in ctx.blk_list:
                 blk.text = ""
@@ -532,6 +556,7 @@ class StageBatchedProcessor(BatchProcessor):
                 engine_key,
                 selected_ocr_mode=policy["normalized_ocr_mode"],
             )
+            attach_cancel_checker(engine)
             engine.process_image(ctx.image, ctx.blk_list)
             page_profile = dict(getattr(engine, "last_page_profile", {}) or {})
             apply_ocr_result_dictionary(ctx.blk_list, settings_page.get_ocr_result_dictionary_rules())
@@ -540,16 +565,27 @@ class StageBatchedProcessor(BatchProcessor):
             quality = summarize_ocr_quality(ctx.blk_list)
             engine_name = engine.__class__.__name__
 
-        ctx.blk_list, schema_only_blocks = drop_layout_schema_only_ocr_blocks(ctx.blk_list)
-        if schema_only_blocks:
+        ctx.blk_list, rejected_empty_blocks = drop_rejected_empty_ocr_blocks(ctx.blk_list)
+        if rejected_empty_blocks:
             logger.info(
-                "Dropped %d PaddleOCR VL schema-only OCR block(s) before stage-batched inpaint for %s.",
-                len(schema_only_blocks),
+                "Dropped %d rejected empty OCR block(s) before stage-batched inpaint for %s.",
+                len(rejected_empty_blocks),
                 ctx.image_name,
             )
             quality = summarize_ocr_quality(ctx.blk_list)
             page_profile = dict(page_profile or {})
-            page_profile["schema_only_dropped_block_count"] = len(schema_only_blocks)
+            page_profile["rejected_empty_dropped_block_count"] = len(rejected_empty_blocks)
+
+        ctx.blk_list, embedded_ui_blocks = drop_embedded_ui_ocr_blocks(ctx.blk_list, ctx.image.shape)
+        if embedded_ui_blocks:
+            logger.info(
+                "Dropped %d embedded UI OCR block(s) before stage-batched inpaint for %s.",
+                len(embedded_ui_blocks),
+                ctx.image_name,
+            )
+            quality = summarize_ocr_quality(ctx.blk_list)
+            page_profile = dict(page_profile or {})
+            page_profile["embedded_ui_dropped_block_count"] = len(embedded_ui_blocks)
 
         metrics = self._ocr_quality_metrics(quality)
         return {
@@ -743,17 +779,24 @@ class StageBatchedProcessor(BatchProcessor):
                 block_count=len(ctx.blk_list or []),
             )
             try:
+                inpaint_blocks, protected_inpaint_blocks = split_inpaint_protected_ocr_blocks(ctx.blk_list)
                 ctx.mask_details = generate_mask(
                     ctx.image,
-                    ctx.blk_list,
+                    inpaint_blocks,
                     settings=settings_page.get_mask_refiner_settings(),
                     return_details=True,
                     precomputed_mask_details=ctx.precomputed_mask_details,
                 )
+                if protected_inpaint_blocks:
+                    ctx.mask_details["inpaint_protected_block_count"] = len(protected_inpaint_blocks)
+                    ctx.mask_details["inpaint_protected_reasons"] = [
+                        getattr(block, "_inpaint_protected_reason", "")
+                        for block in protected_inpaint_blocks
+                    ]
                 ctx.mask = ctx.mask_details["final_mask"]
                 ctx.raw_mask = ctx.mask_details["raw_mask"]
                 self._raise_if_cancelled()
-                ctx.inpaint_input_img = self.inpainting.inpaint_with_blocks(ctx.image, ctx.mask, ctx.blk_list, config=config)
+                ctx.inpaint_input_img = self.inpainting.inpaint_with_blocks(ctx.image, ctx.mask, inpaint_blocks, config=config)
                 self._raise_if_cancelled()
                 ctx.inpaint_input_img = imk.convert_scale_abs(ctx.inpaint_input_img)
                 inpaint_edit_mask = getattr(self.inpainting, "last_inpaint_edit_mask", None)
@@ -762,9 +805,15 @@ class StageBatchedProcessor(BatchProcessor):
                 ctx.inpaint_input_img, ctx.mask, ctx.cleanup_stats = refine_bubble_residue_inpaint(
                     ctx.inpaint_input_img,
                     ctx.mask,
-                    ctx.blk_list,
+                    inpaint_blocks,
                     self.inpainting.inpainter_cache,
                     config,
+                )
+                ctx.inpaint_input_img, ctx.mask, ctx.cleanup_stats = apply_duplicate_bubble_inner_fill(
+                    ctx.inpaint_input_img,
+                    ctx.mask,
+                    ctx.mask_details,
+                    ctx.cleanup_stats,
                 )
                 self._raise_if_cancelled()
                 ctx.patches = self.inpainting.get_inpainted_patches(ctx.mask, ctx.inpaint_input_img)
@@ -999,26 +1048,97 @@ class StageBatchedProcessor(BatchProcessor):
             file_on_display = self.main_page.image_files[self.main_page.curr_img_idx]
 
         text_items_state: list[dict[str, Any]] = []
+        alignment = self.main_page.button_to_alignment.get(
+            1,
+            self.main_page.button_to_alignment[render_settings.alignment_id],
+        )
+        vertical_alignment = self.main_page.button_to_vertical_alignment.get(
+            1,
+            VERTICAL_ALIGNMENT_CENTER,
+        )
+        strict_render_symbols = should_use_strict_render_symbols(trg_lng_cd)
+        seen_bubble_render_keys: set[tuple[tuple[int, int, int, int], str]] = set()
         for blk in ctx.blk_list:
+            if is_block_ocr_empty(blk):
+                continue
             x1, y1, block_width, block_height = blk.xywh
             translation_raw = blk.translation
-            if not translation_raw or len(translation_raw) == 1:
+            if should_skip_short_render_translation(blk, translation_raw):
                 continue
             render_normalization = describe_render_text_sanitization(
                 translation_raw,
                 font,
                 block_index=getattr(blk, "_debug_block_index", None),
                 image_path=ctx.image_path,
+                strict_symbols=strict_render_symbols,
             )
             translation = render_normalization.text
-            if not translation or len(translation) == 1:
+            blk._render_translation_raw = str(translation_raw or "")
+            blk._render_text = str(translation or "")
+            blk._render_normalization_applied = bool(
+                render_normalization.normalization_applied
+            )
+            blk._render_normalization_reasons = list(render_normalization.reasons)
+            blk._render_normalization_replacements = list(
+                render_normalization.replacements
+            )
+            if should_skip_short_render_translation(blk, translation):
                 continue
+            gate_decision = describe_text_free_render_translation_gate(
+                blk,
+                translation,
+                target_lang_code=trg_lng_cd,
+            )
+            if not gate_decision.render:
+                blk._text_fit_status = gate_decision.status
+                blk._render_skip_reason = gate_decision.status
+                blk._render_normalization_reasons = sorted(
+                    set(getattr(blk, "_render_normalization_reasons", []) or [])
+                    .union(gate_decision.reasons)
+                )
+                continue
+            mask_gate_decision = describe_text_free_render_mask_gate(
+                blk,
+                target_lang_code=trg_lng_cd,
+            )
+            if not mask_gate_decision.render:
+                blk._text_fit_status = mask_gate_decision.status
+                blk._render_skip_reason = mask_gate_decision.status
+                blk.mask_decision = "review"
+                blk.mask_reject_reason = mask_gate_decision.status
+                blk._render_normalization_reasons = sorted(
+                    set(getattr(blk, "_render_normalization_reasons", []) or [])
+                    .union(mask_gate_decision.reasons)
+                )
+                continue
+            duplicate_key = build_duplicate_bubble_render_key(blk)
+            if duplicate_key is not None:
+                if duplicate_key in seen_bubble_render_keys:
+                    blk._text_fit_status = "skipped_duplicate_bubble_text"
+                    blk._render_skip_reason = "skipped_duplicate_bubble_text"
+                    blk._render_normalization_reasons = sorted(
+                        set(getattr(blk, "_render_normalization_reasons", []) or [])
+                        .union({"skipped_duplicate_bubble_text"})
+                    )
+                    continue
+                seen_bubble_render_keys.add(duplicate_key)
             vertical = is_vertical_block(blk, trg_lng_cd)
             text_to_wrap = translation
-            alignment = self.main_page.button_to_alignment[render_settings.alignment_id]
             source_rect, block_anchor = build_render_rects_for_block(blk)
             block_width = int(source_rect[2])
             block_height = int(source_rect[3])
+            block_alignment = alignment
+            block_vertical_alignment = vertical_alignment
+            layout_policy = resolve_text_free_manga_layout(
+                blk,
+                source_rect,
+                target_lang_code=trg_lng_cd,
+            )
+            wrap_width = block_width
+            if layout_policy.enabled:
+                block_alignment = layout_policy.alignment
+                block_vertical_alignment = layout_policy.vertical_alignment
+                wrap_width = min(block_width, int(layout_policy.wrap_width))
             fit_clearance = get_render_fit_clearance_for_block(
                 blk,
                 render_settings.outline_width,
@@ -1027,14 +1147,14 @@ class StageBatchedProcessor(BatchProcessor):
             translation, font_size, rendered_width, rendered_height = pyside_word_wrap(
                 text_to_wrap,
                 font,
-                block_width,
+                wrap_width,
                 block_height,
                 float(render_settings.line_spacing),
                 float(render_settings.outline_width),
                 render_settings.bold,
                 render_settings.italic,
                 render_settings.underline,
-                alignment,
+                block_alignment,
                 render_settings.direction,
                 render_settings.max_font_size,
                 render_settings.min_font_size,
@@ -1047,14 +1167,14 @@ class StageBatchedProcessor(BatchProcessor):
                     blk,
                     text_to_wrap,
                     font,
-                    block_width,
+                    wrap_width,
                     block_height,
                     float(render_settings.line_spacing),
                     float(render_settings.outline_width),
                     render_settings.bold,
                     render_settings.italic,
                     render_settings.underline,
-                    alignment,
+                    block_alignment,
                     render_settings.direction,
                     render_settings.max_font_size,
                     render_settings.min_font_size,
@@ -1070,14 +1190,59 @@ class StageBatchedProcessor(BatchProcessor):
             )
             blk._text_fit_status = (
                 "needs_review"
-                if rendered_width > block_width or rendered_height > block_height
+                if rendered_width > wrap_width or rendered_height > block_height
                 else "fit"
             )
+            if layout_policy.enabled and blk._text_fit_status != "fit":
+                blk._text_fit_status = "needs_review_text_free_layout"
+            underfill_gate = describe_text_free_underfill_gate(
+                blk,
+                source_rect=source_rect,
+                rendered_width=rendered_width,
+                rendered_height=rendered_height,
+                target_lang_code=trg_lng_cd,
+            )
+            if blk._text_fit_status == "fit" and not underfill_gate.render:
+                blk._text_fit_status = underfill_gate.status
+                blk._render_normalization_reasons = sorted(
+                    set(getattr(blk, "_render_normalization_reasons", []) or [])
+                    .union(underfill_gate.reasons)
+                )
+            large_mask_gate = describe_text_free_large_mask_gate(
+                blk,
+                source_rect=source_rect,
+                target_lang_code=trg_lng_cd,
+            )
+            if blk._text_fit_status == "fit" and not large_mask_gate.render:
+                blk._text_fit_status = large_mask_gate.status
+                blk.mask_decision = "review"
+                blk.mask_reject_reason = large_mask_gate.status
+                blk._render_normalization_reasons = sorted(
+                    set(getattr(blk, "_render_normalization_reasons", []) or [])
+                    .union(large_mask_gate.reasons)
+                )
+            if is_embedded_ui_panel_layout_review_candidate(blk):
+                blk._text_fit_status = "needs_review_embedded_ui_panel_layout"
+                blk._render_normalization_reasons = sorted(
+                    set(getattr(blk, "_render_normalization_reasons", []) or [])
+                    .union({"needs_review_embedded_ui_panel_layout"})
+                )
+            review_status_gate = describe_auto_render_review_status_gate(
+                getattr(blk, "_text_fit_status", "fit")
+            )
+            if not review_status_gate.render:
+                blk._render_skip_reason = review_status_gate.status
+                blk._render_normalization_reasons = sorted(
+                    set(getattr(blk, "_render_normalization_reasons", []) or [])
+                    .union(review_status_gate.reasons)
+                )
+                continue
             blk._text_fit_metrics = {
                 "rendered_width": float(rendered_width),
                 "rendered_height": float(rendered_height),
-                "box_width": float(block_width),
+                "box_width": float(wrap_width),
                 "box_height": float(block_height),
+                "item_width": float(block_width),
                 "font_size": float(font_size),
             }
             if is_no_space_lang(trg_lng_cd):
@@ -1093,12 +1258,13 @@ class StageBatchedProcessor(BatchProcessor):
                 font_family=font,
                 font_size=font_size,
                 text_color=font_color,
-                alignment=alignment,
+                alignment=block_alignment,
                 line_spacing=float(render_settings.line_spacing),
                 bold=render_settings.bold,
                 italic=render_settings.italic,
                 underline=render_settings.underline,
                 direction=render_settings.direction,
+                strict_symbols=strict_render_symbols,
             )
             blk._render_text = str(translation or "")
             blk._render_html = str(render_markup.html_text if render_markup.html_applied else translation)
@@ -1108,19 +1274,19 @@ class StageBatchedProcessor(BatchProcessor):
                 render_normalization.normalization_applied or render_markup.html_applied
             )
             blk._render_normalization_reasons = sorted(
-                set(render_normalization.reasons).union(render_markup.reasons)
+                set(render_normalization.reasons)
+                .union(render_markup.reasons)
+                .union(layout_policy.reasons)
             )
             blk._render_normalization_replacements = list(
                 render_normalization.replacements
             ) + list(render_markup.replacements)
-            vertical_alignment = self.main_page.button_to_vertical_alignment.get(
-                render_settings.vertical_alignment_id,
-                VERTICAL_ALIGNMENT_TOP,
-            )
+            blk._render_centered_layout = bool(layout_policy.enabled)
+            blk._render_layout_reasons = list(layout_policy.reasons)
             position, item_width, item_height = build_text_item_layout_geometry(
                 source_rect,
                 rendered_height,
-                vertical_alignment,
+                block_vertical_alignment,
             )
             outline_color = QColor(render_settings.outline_color) if render_settings.outline else None
             text_props = TextItemProperties(
@@ -1128,7 +1294,7 @@ class StageBatchedProcessor(BatchProcessor):
                 font_family=font,
                 font_size=font_size,
                 text_color=font_color,
-                alignment=alignment,
+                alignment=block_alignment,
                 line_spacing=float(render_settings.line_spacing),
                 outline_color=outline_color,
                 outline_width=float(render_settings.outline_width),
@@ -1143,7 +1309,7 @@ class StageBatchedProcessor(BatchProcessor):
                 height=item_height,
                 direction=render_settings.direction,
                 vertical=vertical,
-                vertical_alignment=vertical_alignment,
+                vertical_alignment=block_vertical_alignment,
                 source_rect=source_rect,
                 block_anchor=block_anchor,
                 selection_outlines=[
@@ -1181,6 +1347,8 @@ class StageBatchedProcessor(BatchProcessor):
             text_item_state["render_normalization_reasons"] = list(
                 blk._render_normalization_reasons
             )
+            text_item_state["render_centered_layout"] = bool(layout_policy.enabled)
+            text_item_state["render_layout_reasons"] = list(layout_policy.reasons)
             text_item_state["text_fit_status"] = str(
                 getattr(blk, "_text_fit_status", "fit") or "fit"
             )
@@ -1245,6 +1413,29 @@ class StageBatchedProcessor(BatchProcessor):
                         auto_max_font_profile=getattr(render_settings, "auto_max_font_profile", "current"),
                     )
                 self._render_page_text_items(ctx, render_settings=render_settings, trg_lng_cd=trg_lng_cd)
+                restore_blocks = [
+                    block for block in (ctx.blk_list or [])
+                    if block_needs_original_restore_after_render(block)
+                ]
+                if restore_blocks and ctx.inpaint_input_img is not None and ctx.mask is not None:
+                    ctx.inpaint_input_img, ctx.mask, restore_stats = restore_original_for_block_masks(
+                        ctx.image,
+                        ctx.inpaint_input_img,
+                        ctx.mask,
+                        restore_blocks,
+                    )
+                    if restore_stats.get("applied"):
+                        ctx.cleanup_stats = dict(ctx.cleanup_stats or {})
+                        ctx.cleanup_stats["render_restore"] = restore_stats
+                        ctx.patches = self.inpainting.get_inpainted_patches(ctx.mask, ctx.inpaint_input_img)
+                        self.main_page.patches_processed.emit(ctx.patches, ctx.image_path)
+                        self.main_page.image_ctrl.update_processing_summary(
+                            ctx.image_path,
+                            {
+                                "render_restore_block_count": int(restore_stats.get("block_count", 0) or 0),
+                                "render_restore_pixel_count": int(restore_stats.get("pixel_count", 0) or 0),
+                            },
+                        )
                 self._raise_if_cancelled()
                 page_state = self._ensure_page_state(ctx.image_path)
                 final_output_path, final_output_root = self._write_final_render_export(
@@ -1257,6 +1448,7 @@ class StageBatchedProcessor(BatchProcessor):
                     export_settings,
                     page_index=index,
                     total_pages=total_images,
+                    strict_render_symbols=should_use_strict_render_symbols(trg_lng_cd),
                 )
                 self.main_page.image_ctrl.update_processing_summary(
                     ctx.image_path,
