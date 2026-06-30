@@ -22,6 +22,7 @@ from modules.rendering.render import (
     describe_text_free_large_mask_gate,
     describe_text_free_render_mask_gate,
     describe_text_free_underfill_gate,
+    select_blocks_for_original_restore_after_render,
     should_skip_short_render_translation,
 )
 from modules.utils.textblock import TextBlock
@@ -315,6 +316,40 @@ class RenderNormalizationTests(unittest.TestCase):
         block._render_text = ""
 
         self.assertTrue(block_needs_original_restore_after_render(block))
+
+    def test_bubble_panel_empty_fragment_does_not_restore_group_with_rendered_member(self) -> None:
+        empty_fragment = TextBlock(
+            text_bbox=QtCore.QRect(10, 10, 120, 180).getCoords(),
+            text_class="text_bubble",
+            text="broken",
+            translation="",
+        )
+        rendered_fragment = TextBlock(
+            text_bbox=QtCore.QRect(10, 10, 120, 180).getCoords(),
+            text_class="text_bubble",
+            text="broken duplicate",
+            translation="번역 있음",
+        )
+        for block in (empty_fragment, rendered_fragment):
+            block.block_final_mask_pixel_count = 120
+            block.bubble_panel_text_candidate = True
+            block.bubble_panel_group_id = "bubble_panel_1"
+            block.mask_reject_reason = "bubble_panel_text_candidate"
+        empty_fragment._render_translation_raw = ""
+        empty_fragment._render_text = ""
+        rendered_fragment._render_translation_raw = "번역 있음"
+        rendered_fragment._render_text = "번역 있음"
+        rendered_fragment._text_fit_status = "fit"
+
+        restore_blocks = select_blocks_for_original_restore_after_render(
+            [empty_fragment, rendered_fragment]
+        )
+
+        self.assertEqual(restore_blocks, [])
+        self.assertEqual(
+            empty_fragment._render_restore_suppressed_reason,
+            "bubble_panel_group_rendered",
+        )
 
     def test_unsafe_control_chars_are_removed_before_rendering(self) -> None:
         with mock.patch(

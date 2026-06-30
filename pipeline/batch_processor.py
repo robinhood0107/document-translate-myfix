@@ -31,6 +31,7 @@ from modules.utils.ocr_debug import (
     drop_rejected_empty_ocr_blocks,
     export_ocr_debug_artifacts,
     is_block_ocr_empty,
+    is_bubble_panel_text_candidate,
     is_embedded_ui_panel_layout_review_candidate,
     split_inpaint_protected_ocr_blocks,
 )
@@ -75,10 +76,11 @@ from modules.rendering.render import (
     get_best_render_area,
     get_render_fit_clearance_for_block,
     is_vertical_block,
-    block_needs_original_restore_after_render,
     pyside_word_wrap,
     refit_detected_bubble_text_if_underfilled,
+    register_duplicate_bubble_render_key,
     resolve_text_free_manga_layout,
+    select_blocks_for_original_restore_after_render,
     should_skip_short_render_translation,
     should_use_strict_render_symbols,
 )
@@ -2017,16 +2019,24 @@ class BatchProcessor:
                     )
                     continue
                 duplicate_key = build_duplicate_bubble_render_key(blk)
-                if duplicate_key is not None:
-                    if duplicate_key in seen_bubble_render_keys:
-                        blk._text_fit_status = "skipped_duplicate_bubble_text"
-                        blk._render_skip_reason = "skipped_duplicate_bubble_text"
-                        blk._render_normalization_reasons = sorted(
-                            set(getattr(blk, "_render_normalization_reasons", []) or [])
-                            .union({"skipped_duplicate_bubble_text"})
-                        )
-                        continue
-                    seen_bubble_render_keys.add(duplicate_key)
+                duplicate_gate = register_duplicate_bubble_render_key(
+                    blk,
+                    duplicate_key,
+                    seen_bubble_render_keys,
+                )
+                if not duplicate_gate.render:
+                    blk._text_fit_status = duplicate_gate.status
+                    blk._render_skip_reason = duplicate_gate.status
+                    blk._render_normalization_reasons = sorted(
+                        set(getattr(blk, "_render_normalization_reasons", []) or [])
+                        .union(duplicate_gate.reasons)
+                    )
+                    continue
+                if duplicate_gate.reasons:
+                    blk._render_normalization_reasons = sorted(
+                        set(getattr(blk, "_render_normalization_reasons", []) or [])
+                        .union(duplicate_gate.reasons)
+                    )
                 
                 # Determine if this block should use vertical rendering
                 vertical = is_vertical_block(blk, trg_lng_cd)
@@ -2129,7 +2139,7 @@ class BatchProcessor:
                         set(getattr(blk, "_render_normalization_reasons", []) or [])
                         .union(large_mask_gate.reasons)
                     )
-                if is_embedded_ui_panel_layout_review_candidate(blk):
+                if is_embedded_ui_panel_layout_review_candidate(blk) and not is_bubble_panel_text_candidate(blk):
                     blk._text_fit_status = "needs_review_embedded_ui_panel_layout"
                     blk._render_normalization_reasons = sorted(
                         set(getattr(blk, "_render_normalization_reasons", []) or [])
@@ -2284,10 +2294,7 @@ class BatchProcessor:
             page_state['viewer_state'].update({
                 'push_to_stack': True
             })
-            restore_blocks = [
-                block for block in (blk_list or [])
-                if block_needs_original_restore_after_render(block)
-            ]
+            restore_blocks = select_blocks_for_original_restore_after_render(blk_list)
             if restore_blocks and inpaint_input_img is not None and mask is not None:
                 inpaint_input_img, mask, restore_stats = restore_original_for_block_masks(
                     image,

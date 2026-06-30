@@ -199,6 +199,30 @@ def describe_auto_render_review_status_gate(status: object) -> RenderBlockGateDe
     return RenderBlockGateDecision(True, "ok")
 
 
+def register_duplicate_bubble_render_key(
+    blk: TextBlock,
+    duplicate_key: tuple[tuple[int, int, int, int], str] | None,
+    seen_bubble_render_keys: set[tuple[tuple[int, int, int, int], str]],
+) -> RenderBlockGateDecision:
+    if duplicate_key is None:
+        return RenderBlockGateDecision(True, "ok")
+    if duplicate_key in seen_bubble_render_keys:
+        return RenderBlockGateDecision(
+            False,
+            "skipped_duplicate_bubble_text",
+            ("skipped_duplicate_bubble_text",),
+        )
+    seen_bubble_render_keys.add(duplicate_key)
+    if str(getattr(blk, "bubble_panel_merge_decision", "") or "") == "duplicate_member":
+        blk.bubble_panel_merge_decision = "render_primary"
+        return RenderBlockGateDecision(
+            True,
+            "ok",
+            ("bubble_panel_group_render_primary",),
+        )
+    return RenderBlockGateDecision(True, "ok")
+
+
 def should_skip_short_render_translation(blk: TextBlock, translation: object) -> bool:
     text = str(translation or "")
     if not text.strip():
@@ -355,6 +379,36 @@ def block_needs_original_restore_after_render(blk: TextBlock) -> bool:
     if not render_text.strip() or _meaningful_render_char_count(render_text) <= 0:
         return True
     return False
+
+
+def select_blocks_for_original_restore_after_render(blocks) -> list[TextBlock]:
+    block_list = list(blocks or [])
+    rendered_bubble_panel_groups: set[str] = set()
+    for block in block_list:
+        group_id = str(getattr(block, "bubble_panel_group_id", "") or "")
+        if not group_id or not bool(getattr(block, "bubble_panel_text_candidate", False)):
+            continue
+        status = str(getattr(block, "_render_skip_reason", "") or getattr(block, "_text_fit_status", "") or "")
+        render_text = str(getattr(block, "_render_text", "") or "")
+        if status in AUTO_RENDER_SKIP_REVIEW_STATUSES:
+            continue
+        if render_text.strip() and _meaningful_render_char_count(render_text) > 0:
+            rendered_bubble_panel_groups.add(group_id)
+
+    restore_blocks: list[TextBlock] = []
+    for block in block_list:
+        if not block_needs_original_restore_after_render(block):
+            continue
+        group_id = str(getattr(block, "bubble_panel_group_id", "") or "")
+        if (
+            group_id
+            and bool(getattr(block, "bubble_panel_text_candidate", False))
+            and group_id in rendered_bubble_panel_groups
+        ):
+            block._render_restore_suppressed_reason = "bubble_panel_group_rendered"
+            continue
+        restore_blocks.append(block)
+    return restore_blocks
 
 
 def build_duplicate_bubble_render_key(blk: TextBlock) -> tuple[tuple[int, int, int, int], str] | None:
@@ -1197,6 +1251,8 @@ def build_render_rects_for_block(blk: TextBlock) -> tuple[tuple[float, float, fl
     render_area = None
     if getattr(blk, "_render_area_source", "") == "detected_bubble":
         render_area = _normalize_xyxy(getattr(blk, "_render_area_xyxy", None))
+    if getattr(blk, "bubble_panel_text_candidate", False):
+        render_area = _normalize_xyxy(getattr(blk, "bubble_panel_render_xyxy", None)) or render_area
     source_rect = _xyxy_to_rect_tuple(render_area or getattr(blk, "xyxy", None))
     anchor_xyxy = _normalize_xyxy(getattr(blk, "_render_original_xyxy", None)) or _current_anchor_xyxy(blk)
     block_anchor = _xyxy_to_rect_tuple(anchor_xyxy)

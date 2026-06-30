@@ -353,6 +353,10 @@ def _block_reasons(
         reasons.append(f"mask_{final_mask_decision}")
     if final_mask_reject:
         reasons.append(f"mask_{final_mask_reject}")
+    if bool(block.get("bubble_panel_text_candidate")):
+        reasons.append("bubble_panel_text_candidate")
+    if bool(block.get("bubble_merge_reocr_needed")):
+        reasons.append("bubble_merge_reocr_needed")
     if debug_block:
         if debug_block.get("ui_panel_mode") and "ui_panel_mode" not in reasons:
             reasons.append("ui_panel_mode")
@@ -362,6 +366,10 @@ def _block_reasons(
         mask_reject = str(debug_block.get("mask_reject_reason") or "")
         if mask_reject and f"mask_{mask_reject}" not in reasons:
             reasons.append(f"mask_{mask_reject}")
+        if debug_block.get("bubble_panel_text_candidate"):
+            reasons.append("bubble_panel_text_candidate")
+        if debug_block.get("bubble_merge_reocr_needed"):
+            reasons.append("bubble_merge_reocr_needed")
         skipped = str(debug_block.get("erase_skipped_reason") or "")
         if skipped and skipped not in {"line_art_intrusion", "empty_seed"}:
             reasons.append(f"erase_{skipped}")
@@ -402,6 +410,8 @@ def _decision_for_reasons(reasons: list[str], *, render_text: str = "") -> tuple
         "needs_review_text_free_layout",
         "text_free_layout",
         "ui_panel_mode",
+        "bubble_panel_text_candidate",
+        "bubble_merge_reocr_needed",
         "outline_damage_score",
         "low_iou",
         "no_snapshot_translation_match",
@@ -480,6 +490,18 @@ def _make_item(
     codex_decision, confidence, user_required = _decision_for_reasons(reasons, render_text=render_text)
     item_id = f"{_page_id(image_name)}__page" if block is None else f"{_page_id(image_name)}__b{block_index:03d}"
     block_mask_bbox = (block or {}).get("block_mask_bbox")
+    block_data = block or {}
+    debug_data = debug_block or {}
+
+    def _merged_value(key: str, default: Any = "") -> Any:
+        value = block_data.get(key)
+        if value not in (None, "", [], {}):
+            return value
+        debug_value = debug_data.get(key)
+        if debug_value not in (None, "", [], {}):
+            return debug_value
+        return default
+
     return {
         "id": item_id,
         "kind": kind,
@@ -504,6 +526,13 @@ def _make_item(
         "ui_panel_preview_path": str((block or {}).get("ui_panel_preview_path") or ""),
         "mask_decision": str((block or {}).get("mask_decision") or ""),
         "mask_reject_reason": str((block or {}).get("mask_reject_reason") or ""),
+        "bubble_panel_text_candidate": bool(_merged_value("bubble_panel_text_candidate", False)),
+        "bubble_panel_group_id": str(_merged_value("bubble_panel_group_id", "")),
+        "bubble_panel_member_indices": _merged_value("bubble_panel_member_indices", []),
+        "bubble_panel_mask_pixel_count": int(_merged_value("bubble_panel_mask_pixel_count", 0) or 0),
+        "bubble_panel_mask_source": str(_merged_value("bubble_panel_mask_source", "")),
+        "bubble_panel_merge_decision": str(_merged_value("bubble_panel_merge_decision", "")),
+        "bubble_merge_reocr_needed": bool(_merged_value("bubble_merge_reocr_needed", False)),
         "review_reasons": reasons,
         "codex_decision": codex_decision,
         "codex_confidence": confidence,

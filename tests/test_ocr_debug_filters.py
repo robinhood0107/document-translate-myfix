@@ -5,6 +5,8 @@ from types import SimpleNamespace
 import modules.utils.ocr_debug as ocr_debug_module
 from modules.utils.ocr_debug import (
     drop_embedded_ui_ocr_blocks,
+    group_bubble_panel_text_candidates,
+    is_bubble_panel_text_candidate,
     is_embedded_ui_panel_layout_review_candidate,
 )
 
@@ -112,7 +114,7 @@ def test_bubble_protected_embedded_ui_panel_is_layout_review_candidate() -> None
     assert is_embedded_ui_panel_layout_review_candidate(block)
 
 
-def test_bubble_protected_embedded_ui_panel_is_excluded_from_lama_mask_only() -> None:
+def test_bubble_protected_embedded_ui_panel_becomes_bubble_panel_text_candidate() -> None:
     panel = _block(
         "の愛アなりすまし用記憶アクセスオプションってのン自然憶レ自記よ",
         (1640, 2571, 1906, 2901),
@@ -131,12 +133,16 @@ def test_bubble_protected_embedded_ui_panel_is_excluded_from_lama_mask_only() ->
         [panel, dialogue]
     )
 
-    assert inpaint_blocks == [dialogue]
-    assert protected_blocks == [panel]
-    assert panel._inpaint_protected_reason == "embedded_ui_panel_layout_review"
+    assert inpaint_blocks == [panel, dialogue]
+    assert protected_blocks == []
+    assert is_bubble_panel_text_candidate(panel)
+    assert panel.bubble_panel_text_candidate is True
+    assert panel.ui_panel_mode == "bubble_panel_text_candidate"
+    assert panel.mask_decision == "review"
+    assert panel.mask_reject_reason == "bubble_panel_text_candidate"
 
 
-def test_bubble_protected_embedded_ui_panel_gets_preserve_and_preview_review_metadata() -> None:
+def test_bubble_panel_candidate_gets_debug_metadata_without_preserve_original() -> None:
     panel = _block(
         "の愛アなりすまし用記憶アクセスオプションってのン自然憶レ自記よ",
         (1640, 2571, 1906, 2901),
@@ -146,18 +152,66 @@ def test_bubble_protected_embedded_ui_panel_gets_preserve_and_preview_review_met
 
     _, protected_blocks = ocr_debug_module.split_inpaint_protected_ocr_blocks([panel])
 
-    assert protected_blocks == [panel]
-    assert panel.ui_panel_mode == "preserve_original"
+    assert protected_blocks == []
+    assert panel.ui_panel_mode == "bubble_panel_text_candidate"
     assert panel.ui_panel_preview_path == ""
     assert panel.mask_decision == "review"
-    assert panel.mask_reject_reason == "embedded_ui_panel_layout_review"
+    assert panel.mask_reject_reason == "bubble_panel_text_candidate"
 
     payload = ocr_debug_module.build_ocr_debug_payload("p_016", "PaddleOCR-VL", "ja", [panel])
     block_payload = payload["blocks"][0]
-    assert block_payload["ui_panel_mode"] == "preserve_original"
+    assert block_payload["ui_panel_mode"] == "bubble_panel_text_candidate"
     assert block_payload["ui_panel_preview_path"] == ""
     assert block_payload["mask_decision"] == "review"
-    assert block_payload["mask_reject_reason"] == "embedded_ui_panel_layout_review"
+    assert block_payload["mask_reject_reason"] == "bubble_panel_text_candidate"
+    assert block_payload["bubble_panel_text_candidate"] is True
+
+
+def test_bubble_panel_candidate_never_applies_to_text_free_or_bubble_outside_ui() -> None:
+    free_ui = _block(
+        "記憶アクセスオプション",
+        (100, 100, 300, 160),
+        "text_free",
+    )
+    outside_bubble = _block(
+        "の愛アなりすまし用記憶アクセスオプションってのン自然憶レ自記よ",
+        (100, 100, 340, 420),
+        "text_bubble",
+        bubble_xyxy=(400, 400, 600, 650),
+    )
+
+    assert not is_bubble_panel_text_candidate(free_ui)
+    assert not is_bubble_panel_text_candidate(outside_bubble)
+
+
+def test_same_bubble_panel_candidates_share_group_metadata() -> None:
+    first = _block(
+        "の愛アなりすまし用記憶アクセスオプションってのン自然憶レ自記よ",
+        (1605, 2543, 1682, 2731),
+        "text_bubble",
+        bubble_xyxy=(1604, 2525, 1943, 2948),
+    )
+    second = _block(
+        "の愛アなりすまし用記憶アクセスオプションってのン自然憶レ自記よ",
+        (1692, 2543, 1921, 2926),
+        "text_bubble",
+        bubble_xyxy=(1604, 2525, 1943, 2948),
+    )
+    normal = _block(
+        "中身は男なのになぁ",
+        (207, 767, 373, 1059),
+        "text_bubble",
+        bubble_xyxy=(185, 727, 396, 1100),
+    )
+
+    groups = group_bubble_panel_text_candidates([first, second, normal])
+
+    assert len(groups) == 1
+    assert groups[0]["member_indices"] == [0, 1]
+    assert first.bubble_panel_group_id == second.bubble_panel_group_id
+    assert first.bubble_panel_member_indices == [0, 1]
+    assert second.bubble_panel_merge_decision == "duplicate_member"
+    assert normal not in groups[0]["members"]
 
 
 def test_normal_dialogue_bubble_is_not_embedded_ui_panel_review_candidate() -> None:

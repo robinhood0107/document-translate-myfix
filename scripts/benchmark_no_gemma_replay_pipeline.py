@@ -533,6 +533,18 @@ def _build_preset(base_preset: dict[str, Any], *, use_gpu: bool) -> dict[str, An
     return preset
 
 
+def _resolve_snapshot_path(previous_run_root: Path, spec: DatasetSpec) -> Path:
+    candidates = [
+        previous_run_root / spec.snapshot_dir_name / "page_snapshots.json",
+        previous_run_root / spec.key / "page_snapshots.json",
+        previous_run_root / "page_snapshots.json",
+    ]
+    for candidate in candidates:
+        if candidate.is_file():
+            return candidate
+    return candidates[0]
+
+
 def _run_dataset(
     *,
     app: QApplication,
@@ -546,7 +558,7 @@ def _run_dataset(
 ) -> dict[str, Any]:
     dataset_run_dir = output_root / spec.key
     dataset_run_dir.mkdir(parents=True, exist_ok=True)
-    snapshot_path = previous_run_root / spec.snapshot_dir_name / "page_snapshots.json"
+    snapshot_path = _resolve_snapshot_path(previous_run_root, spec)
     snapshot_pages = _load_snapshot_pages(snapshot_path)
     staged_paths = _stage_sources(
         spec=spec,

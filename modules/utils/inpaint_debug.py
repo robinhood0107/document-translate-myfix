@@ -211,6 +211,13 @@ def serialize_inpaint_block(block, index: int) -> dict:
         "ui_panel_preview_path": str(getattr(block, "ui_panel_preview_path", "") or ""),
         "mask_decision": str(getattr(block, "mask_decision", "") or ""),
         "mask_reject_reason": str(getattr(block, "mask_reject_reason", "") or ""),
+        "bubble_panel_text_candidate": bool(getattr(block, "bubble_panel_text_candidate", False)),
+        "bubble_panel_group_id": str(getattr(block, "bubble_panel_group_id", "") or ""),
+        "bubble_panel_member_indices": list(getattr(block, "bubble_panel_member_indices", []) or []),
+        "bubble_panel_mask_pixel_count": int(getattr(block, "bubble_panel_mask_pixel_count", 0) or 0),
+        "bubble_panel_mask_source": str(getattr(block, "bubble_panel_mask_source", "") or ""),
+        "bubble_panel_merge_decision": str(getattr(block, "bubble_panel_merge_decision", "") or ""),
+        "bubble_merge_reocr_needed": bool(getattr(block, "bubble_merge_reocr_needed", False)),
     }
 
 
