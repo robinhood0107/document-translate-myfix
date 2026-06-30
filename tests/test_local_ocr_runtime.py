@@ -101,6 +101,33 @@ class LocalOCRRuntimeManagerTests(unittest.TestCase):
         wait_for_health.assert_called_once()
         run_compose.assert_not_called()
 
+    def test_ensure_engine_starts_existing_managed_containers_before_compose_up(self) -> None:
+        manager = LocalOCRRuntimeManager()
+        settings_page = _DummySettingsPage()
+        events: list[dict] = []
+
+        with mock.patch.object(manager, "validate_engine", return_value=None), \
+             mock.patch.object(manager, "_probe_health_state", return_value="unavailable"), \
+             mock.patch.object(
+                 manager,
+                 "_existing_managed_container_names",
+                 return_value=["paddleocr-vllm", "paddleocr-server"],
+                 create=True,
+             ) as existing_containers, \
+             mock.patch.object(manager, "_start_existing_managed_containers", create=True) as start_existing, \
+             mock.patch.object(manager, "_wait_for_health", return_value=True) as wait_for_health, \
+             mock.patch.object(
+                 manager,
+                 "_run_compose",
+                 side_effect=AssertionError("existing managed containers should be started before compose up"),
+             ):
+            manager.ensure_engine("PaddleOCR VL", settings_page, progress_callback=events.append)
+
+        existing_containers.assert_called_once_with("PaddleOCR VL")
+        start_existing.assert_called_once_with("PaddleOCR VL", ["paddleocr-vllm", "paddleocr-server"])
+        wait_for_health.assert_called_once()
+        self.assertTrue(any(event.get("step_key") == "container_start" for event in events))
+
     def test_ensure_engine_reuses_readiness_cache_for_same_engine_url(self) -> None:
         manager = LocalOCRRuntimeManager()
         settings_page = _DummySettingsPage()

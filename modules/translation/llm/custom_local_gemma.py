@@ -6,6 +6,7 @@ import json
 import logging
 import os
 import re
+import time
 
 import numpy as np
 import requests
@@ -32,6 +33,8 @@ DEFAULT_GEMMA_RESPONSE_SCHEMA_MODE = "blocks"
 DEFAULT_GEMMA_THINK_BRIEFLY_PROMPT = False
 DEFAULT_GEMMA_PROMPT_PROFILE = "gemma4_balanced"
 DEFAULT_GEMMA_CONTEXTUAL_MERGE_INPUT = True
+DEFAULT_GEMMA_REQUEST_RETRY_TOTAL_ATTEMPTS = 3
+DEFAULT_GEMMA_REQUEST_RETRY_BACKOFF_SECONDS = (1.0, 2.0)
 STRICT_GEMMA_PROMPT_PROFILE = "gemma4_strict_json"
 GEMMA_PROMPT_PROFILES = {
     "legacy": "legacy",
@@ -41,6 +44,7 @@ GEMMA_PROMPT_PROFILES = {
 GEMMA_RESPONSE_FORMAT_MODES = {"json_object", "json_schema"}
 GEMMA_RESPONSE_SCHEMA_MODES = {"blocks"}
 GEMMA_CHANNEL_TOKEN_RE = re.compile(r"<\|channel\>[^\r\n<]*|<channel\|>")
+GEMMA_TRANSIENT_HTTP_STATUS_CODES = frozenset({500, 502, 503, 504})
 
 
 class GemmaLocalServerResponseError(RuntimeError):
@@ -72,6 +76,8 @@ class CustomLocalGemmaTranslation(BaseLLMTranslation):
         self.think_briefly_prompt = DEFAULT_GEMMA_THINK_BRIEFLY_PROMPT
         self.prompt_profile = DEFAULT_GEMMA_PROMPT_PROFILE
         self.contextual_merge_input = DEFAULT_GEMMA_CONTEXTUAL_MERGE_INPUT
+        self.request_retry_total_attempts = DEFAULT_GEMMA_REQUEST_RETRY_TOTAL_ATTEMPTS
+        self.request_retry_backoff_seconds = DEFAULT_GEMMA_REQUEST_RETRY_BACKOFF_SECONDS
         self.last_benchmark_stats = self._new_benchmark_stats()
         self._current_benchmark_stats = self._new_benchmark_stats()
 
@@ -82,6 +88,7 @@ class CustomLocalGemmaTranslation(BaseLLMTranslation):
             "gemma_chunk_retry_events": 0,
             "gemma_truncated_count": 0,
             "gemma_empty_content_count": 0,
+            "gemma_request_retry_count": 0,
             "gemma_missing_key_count": 0,
             "gemma_reasoning_without_final_count": 0,
             "gemma_schema_validation_fail_count": 0,
@@ -182,6 +189,12 @@ class CustomLocalGemmaTranslation(BaseLLMTranslation):
             )
         )
         self.raw_response_logging = bool(gemma_settings.get("raw_response_logging", False))
+        self.request_retry_total_attempts = self._env_or_config_int(
+            gemma_settings,
+            "request_retry_total_attempts",
+            "CT_GEMMA_REQUEST_RETRY_TOTAL_ATTEMPTS",
+            DEFAULT_GEMMA_REQUEST_RETRY_TOTAL_ATTEMPTS,
+        )
         self.temperature = self._env_or_config_float(
             gemma_settings,
             "temperature",
@@ -656,26 +669,32 @@ class CustomLocalGemmaTranslation(BaseLLMTranslation):
         }
         headers = {"Content-Type": "application/json"}
 
-        try:
-            response = requests.post(
-                f"{self.api_base_url}/chat/completions",
-                headers=headers,
-                json=payload,
-                timeout=self.timeout,
-            )
-            response.raise_for_status()
-        except requests.exceptions.RequestException as exc:
-            error_msg = f"API request failed: {exc}"
-            if getattr(exc, "response", None) is not None:
-                try:
-                    error_msg += f" - {json.dumps(exc.response.json(), ensure_ascii=False)}"
-                except Exception:
-                    error_msg += f" - Status code: {exc.response.status_code}"
-            raise LocalServiceConnectionError(
-                error_msg,
-                service_name="Gemma",
-                settings_page_name="Gemma Local Server Settings",
-            ) from exc
+        for attempt_index in range(max(1, int(self.request_retry_total_attempts))):
+            try:
+                response = requests.post(
+                    f"{self.api_base_url}/chat/completions",
+                    headers=headers,
+                    json=payload,
+                    timeout=self.timeout,
+                )
+                response.raise_for_status()
+                break
+            except requests.exceptions.RequestException as exc:
+                if self._is_transient_request_error(exc) and self._should_retry_request(attempt_index):
+                    self._current_benchmark_stats["gemma_request_retry_count"] += 1
+                    self._sleep_before_request_retry(attempt_index, exc)
+                    continue
+                error_msg = f"API request failed: {exc}"
+                if getattr(exc, "response", None) is not None:
+                    try:
+                        error_msg += f" - {json.dumps(exc.response.json(), ensure_ascii=False)}"
+                    except Exception:
+                        error_msg += f" - Status code: {exc.response.status_code}"
+                raise LocalServiceConnectionError(
+                    error_msg,
+                    service_name="Gemma",
+                    settings_page_name="Gemma Local Server Settings",
+                ) from exc
 
         try:
             response_data = response.json()
@@ -692,6 +711,30 @@ class CustomLocalGemmaTranslation(BaseLLMTranslation):
                 json.dumps(response_data, ensure_ascii=False),
             )
         return response_data
+
+    def _should_retry_request(self, attempt_index: int) -> bool:
+        return attempt_index < max(1, int(self.request_retry_total_attempts)) - 1
+
+    def _is_transient_request_error(self, exc: requests.exceptions.RequestException) -> bool:
+        if isinstance(exc, (requests.exceptions.Timeout, requests.exceptions.ConnectionError)):
+            return True
+        response = getattr(exc, "response", None)
+        status_code = getattr(response, "status_code", None)
+        try:
+            return int(status_code) in GEMMA_TRANSIENT_HTTP_STATUS_CODES
+        except (TypeError, ValueError):
+            return False
+
+    def _sleep_before_request_retry(self, attempt_index: int, exc: Exception) -> None:
+        delay = self.request_retry_backoff_seconds[
+            min(attempt_index, len(self.request_retry_backoff_seconds) - 1)
+        ]
+        logger.warning(
+            "gemma local request failed transiently; retrying in %.1fs: %s",
+            delay,
+            exc,
+        )
+        time.sleep(max(0.0, float(delay)))
 
     def _build_response_format(
         self,

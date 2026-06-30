@@ -18,6 +18,7 @@ import imkit as imk
 import numpy as np
 
 from modules.detection.processor import TextBlockDetector
+from modules.inpainting.source_lama_blockwise import source_lama_blockwise_inpaint
 from modules.utils.device import resolve_device
 from modules.utils.image_utils import generate_mask
 from modules.utils.inpaint_cleanup import refine_bubble_residue_inpaint
@@ -239,6 +240,36 @@ def _process_image(
         hard_box_rescue_mask=mask_details.get("hard_box_rescue_mask"),
         hard_box_applied_count=int(mask_details.get("hard_box_applied_count", 0) or 0),
         hard_box_reason_totals=dict(mask_details.get("hard_box_reason_totals", {}) or {}),
+        mask_quality_policy=str(mask_details.get("mask_quality_policy", "") or ""),
+        mask_policy_bubble_clamp_applied_count=int(
+            mask_details.get("mask_policy_bubble_clamp_applied_count", 0) or 0
+        ),
+        mask_policy_text_free_glyph_applied_count=int(
+            mask_details.get("mask_policy_text_free_glyph_applied_count", 0) or 0
+        ),
+        mask_policy_removed_pixel_count=int(mask_details.get("mask_policy_removed_pixel_count", 0) or 0),
+        mask_policy_outside_bubble_removed_pixel_count=int(
+            mask_details.get("mask_policy_outside_bubble_removed_pixel_count", 0) or 0
+        ),
+        ctd_legacy_rectangle_rescue_disabled=bool(
+            mask_details.get("ctd_legacy_rectangle_rescue_disabled", False)
+        ),
+        text_free_image_glyph_rescue_count=int(
+            mask_details.get("text_free_image_glyph_rescue_count", 0) or 0
+        ),
+        text_free_image_glyph_rescue_mask_pixel_count=int(
+            mask_details.get("text_free_image_glyph_rescue_mask_pixel_count", 0) or 0
+        ),
+        mask_policy_version=str(mask_details.get("mask_policy_version", "") or ""),
+        mask_candidate_source=str(mask_details.get("mask_candidate_source", "") or ""),
+        mask_decision=str(mask_details.get("mask_decision", "") or ""),
+        mask_reject_reason=str(mask_details.get("mask_reject_reason", "") or ""),
+        mask_score_outside_change=float(mask_details.get("mask_score_outside_change", 0.0) or 0.0),
+        mask_score_outline_damage=float(mask_details.get("mask_score_outline_damage", 0.0) or 0.0),
+        mask_score_residue=float(mask_details.get("mask_score_residue", 0.0) or 0.0),
+        mask_score_color_delta=float(mask_details.get("mask_score_color_delta", 0.0) or 0.0),
+        ui_panel_mode=str(mask_details.get("ui_panel_mode", "") or ""),
+        ui_panel_preview_path=str(mask_details.get("ui_panel_preview_path", "") or ""),
     )
     metadata.update(_build_changed_pixel_stats(image, cleaned, final_mask))
     export_inpaint_debug_artifacts(

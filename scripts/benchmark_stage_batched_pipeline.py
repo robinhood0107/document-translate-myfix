@@ -45,8 +45,10 @@ from benchmark_common import (
     collect_managed_llama_cpp_runtimes,
     ensure_compose_groups_health_first,
     load_preset,
+    product_benchmark_failure_contract,
     remove_containers,
     render_summary_markdown,
+    resolve_product_benchmark_contract,
     repo_relative_str,
     resolve_docker_compose_command,
     resolve_corpus,
@@ -61,12 +63,14 @@ from benchmark_common import (
 from benchmark_pipeline import (
     _apply_gemma_env,
     _configure_window,
+    _ensure_managed_runtime,
     _load_images,
     _log,
     _restore_env,
     _restore_settings,
     _settings_snapshot,
     _stage_selected_images,
+    _write_container_logs,
     _write_page_snapshots,
 )
 from modules.rendering.render import (
@@ -75,6 +79,7 @@ from modules.rendering.render import (
     get_best_render_area,
     is_vertical_block,
     pyside_word_wrap,
+    should_skip_short_render_translation,
 )
 from modules.translation.processor import Translator
 from modules.ocr.factory import OCRFactory
@@ -702,8 +707,89 @@ class StageBatchedRunner:
             self.window.close()
             self.app.processEvents()
         finally:
-            _restore_settings(self._settings_backup)
-            _restore_env(self._gemma_env_snapshot)
+            settings_backup = getattr(self, "_settings_backup", None)
+            gemma_env_snapshot = getattr(self, "_gemma_env_snapshot", None)
+            if isinstance(settings_backup, dict):
+                _restore_settings(settings_backup)
+            if isinstance(gemma_env_snapshot, dict):
+                _restore_env(gemma_env_snapshot)
+
+    def _product_benchmark_contract(self) -> dict[str, Any]:
+        return resolve_product_benchmark_contract(self.preset)
+
+    def _run_product_pipeline_entrypoint(self) -> dict[str, Any]:
+        product_contract = self._product_benchmark_contract()
+        container_names = _ensure_managed_runtime(self.run_dir, self.preset, "full")
+        self._set_active_container_names(container_names)
+        write_snapshot_json(
+            self.run_dir / "docker_snapshot.json",
+            collect_gpu_runtime_snapshot(container_names),
+        )
+        write_json(
+            self.run_dir / "llama_cpp_runtime.json",
+            collect_managed_llama_cpp_runtimes(self.preset, "full"),
+        )
+        _write_container_logs(self.run_dir, container_names)
+
+        self._load_window()
+        assert self.batch is not None and self.window is not None
+        if os.environ.get("CT_BENCH_CLEAR_APP_CACHES", "").strip() == "1":
+            self.window.pipeline.cache_manager.clear_ocr_cache()
+            self.window.pipeline.cache_manager.clear_translation_cache()
+            _log("앱 OCR/번역 캐시 초기화 완료")
+        total_images = len(self.loaded_paths)
+        workflow_mode = str(self.window.settings_page.get_workflow_mode() or "")
+        try:
+            self.ocr_stage_policy = self._resolve_stage_policy()
+        except Exception:
+            self.ocr_stage_policy = {}
+
+        started = time.perf_counter()
+        self.window._current_batch_run_type = "batch"
+        self.window.emit_memlog(
+            "benchmark_run_start",
+            benchmark_mode=f"stage_batched_{self.resident_ocr_mode}",
+            total_images=total_images,
+            **product_contract,
+        )
+        self.batch._emit_benchmark_event(
+            "stage_batched_product_entrypoint_start",
+            total_images=total_images,
+            workflow_mode=workflow_mode,
+            resident_ocr_mode=self.resident_ocr_mode,
+            **product_contract,
+        )
+        try:
+            self.window.pipeline.batch_process(self.loaded_paths)
+        finally:
+            elapsed = time.perf_counter() - started
+            self.window.emit_memlog(
+                "benchmark_run_finished",
+                benchmark_mode=f"stage_batched_{self.resident_ocr_mode}",
+                elapsed_sec=round(elapsed, 3),
+                **product_contract,
+            )
+
+        page_snapshots_path = _write_page_snapshots(self.window, self.run_dir, self.loaded_paths)
+        _log(f"페이지 스냅샷 저장 완료: {page_snapshots_path}")
+        summary = summarize_metrics(self.run_dir / "metrics.jsonl")
+        summary.update(
+            {
+                "mode": f"stage-batched-{self.resident_ocr_mode}",
+                "image_count": total_images,
+                "image_paths": [repo_relative_str(path) for path in self.loaded_paths],
+                "workflow_mode": workflow_mode,
+                "resident_ocr_mode": self.resident_ocr_mode,
+                "ocr_stage_policy": self.ocr_stage_policy,
+                "alignment_id": 1,
+                "vertical_alignment_id": 1,
+                "legacy_custom_stage_runner": False,
+                **product_contract,
+            }
+        )
+        write_json(self.run_dir / "summary.json", summary)
+        (self.run_dir / "summary.md").write_text(render_summary_markdown(summary), encoding="utf-8")
+        return summary
 
     def _detect_all(self) -> None:
         assert self.batch is not None and self.window is not None
@@ -1505,7 +1591,7 @@ class StageBatchedRunner:
         for blk in ctx.blk_list:
             x1, y1, block_width, block_height = blk.xywh
             translation_raw = blk.translation
-            if not translation_raw or len(translation_raw) == 1:
+            if should_skip_short_render_translation(blk, translation_raw):
                 continue
 
             render_normalization = describe_render_text_sanitization(
@@ -1515,7 +1601,7 @@ class StageBatchedRunner:
                 image_path=ctx.image_path,
             )
             translation = render_normalization.text
-            if not translation or len(translation) == 1:
+            if should_skip_short_render_translation(blk, translation):
                 continue
 
             vertical = is_vertical_block(blk, trg_lng_cd)
@@ -1624,6 +1710,12 @@ class StageBatchedRunner:
         return str(exc)
 
     def run(self) -> dict[str, Any]:
+        if os.environ.get("CT_BENCH_STAGE_BATCHED_LEGACY_CUSTOM_RUNNER", "").strip() != "1":
+            try:
+                return self._run_product_pipeline_entrypoint()
+            finally:
+                self._close_window()
+
         self._load_window()
         assert self.batch is not None and self.window is not None
         total_images = len(self.pages)
@@ -1724,6 +1816,26 @@ def main() -> int:
     run_dir = Path(args.output_dir)
     run_dir.mkdir(parents=True, exist_ok=True)
     staged_paths = _stage_selected_images(run_dir, selected_paths)
+    try:
+        product_contract = resolve_product_benchmark_contract(preset)
+    except Exception as exc:
+        _log(f"stage-batched product benchmark preflight 실패: {exc}")
+        write_json(run_dir / "preset_resolved.json", preset)
+        write_json(
+            run_dir / "summary.json",
+            {
+                "mode": f"stage-batched-{args.resident_ocr_mode}",
+                "failed": True,
+                "reason": str(exc),
+                "product_pipeline_entrypoint": True,
+                "workflow_mode": STAGE_BATCHED_WORKFLOW_MODE,
+                "runner_render_mode": "product",
+                "alignment_id": 1,
+                "vertical_alignment_id": 1,
+                **product_benchmark_failure_contract(exc),
+            },
+        )
+        return 1
 
     write_json(
         run_dir / "benchmark_request.json",
@@ -1732,12 +1844,21 @@ def main() -> int:
             "preset_path": str(preset_path),
             "mode": f"stage-batched-{args.resident_ocr_mode}",
             "runtime_mode": "managed",
-            "runtime_services": "stage-batched",
+            "runtime_services": "full",
+            "product_pipeline_entrypoint": True,
+            "workflow_mode": STAGE_BATCHED_WORKFLOW_MODE,
+            "runner_render_mode": "product",
+            "alignment_id": 1,
+            "vertical_alignment_id": 1,
+            "legacy_custom_stage_runner": (
+                os.environ.get("CT_BENCH_STAGE_BATCHED_LEGACY_CUSTOM_RUNNER", "").strip() == "1"
+            ),
             "source_lang": args.source_lang,
             "target_lang": args.target_lang,
             "selected_ocr_mode": str((preset.get("app", {}) or {}).get("ocr", "")),
             "selected_paths": [str(path) for path in selected_paths],
             "staged_paths": [str(path) for path in staged_paths],
+            **product_contract,
         },
     )
     write_json(run_dir / "preset_resolved.json", preset)
@@ -1764,6 +1885,20 @@ def main() -> int:
     except Exception as exc:
         _log(f"stage-batched 실행 실패: {exc}")
         traceback.print_exc()
+        write_json(
+            run_dir / "summary.json",
+            {
+                "mode": f"stage-batched-{args.resident_ocr_mode}",
+                "failed": True,
+                "reason": str(exc),
+                "product_pipeline_entrypoint": True,
+                "workflow_mode": STAGE_BATCHED_WORKFLOW_MODE,
+                "runner_render_mode": "product",
+                "alignment_id": 1,
+                "vertical_alignment_id": 1,
+                **product_benchmark_failure_contract(exc),
+            },
+        )
         return 1
 
 

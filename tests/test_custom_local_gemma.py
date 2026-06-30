@@ -5,6 +5,7 @@ import unittest
 from unittest import mock
 
 import numpy as np
+import requests
 
 from modules.translation.llm.custom_local_gemma import (
     DEFAULT_GEMMA_PROMPT_PROFILE,
@@ -35,6 +36,21 @@ def _raw_response(content: str) -> dict:
         ],
         "usage": {},
     }
+
+
+class _FakeGemmaHTTPResponse:
+    def __init__(self, payload: dict, status_code: int = 200) -> None:
+        self._payload = payload
+        self.status_code = status_code
+
+    def raise_for_status(self) -> None:
+        if self.status_code >= 400:
+            response_error = requests.exceptions.HTTPError(f"{self.status_code} error")
+            response_error.response = self
+            raise response_error
+
+    def json(self) -> dict:
+        return self._payload
 
 
 class CustomLocalGemmaRepetitionGuardTests(unittest.TestCase):
@@ -166,6 +182,19 @@ class CustomLocalGemmaRepetitionGuardTests(unittest.TestCase):
         self.assertNotIn("merged_context", prompts[2])
         self.assertEqual(blocks[0].translation, "하지만 자지가 나를 정복했어.")
         self.assertEqual(engine.last_benchmark_stats["gemma_contextual_merge_fallback_count"], 1)
+
+    def test_request_translation_retries_transient_read_timeout(self) -> None:
+        engine = self._engine()
+        engine.request_retry_backoff_seconds = (0.0, 0.0)
+        timeout = requests.exceptions.ReadTimeout("read timed out")
+        success = _FakeGemmaHTTPResponse(_response({"translation": "성공"}))
+
+        with mock.patch("modules.translation.llm.custom_local_gemma.requests.post", side_effect=[timeout, success]) as post:
+            response = engine._request_translation("system", "user", expected_keys=["translation"])
+
+        self.assertEqual(response["choices"][0]["finish_reason"], "stop")
+        self.assertEqual(post.call_count, 2)
+        self.assertEqual(engine._current_benchmark_stats["gemma_request_retry_count"], 1)
 
 
 if __name__ == "__main__":

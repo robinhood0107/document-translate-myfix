@@ -32,6 +32,7 @@ _ENGINE_CONFIG = {
         "health_url": "http://127.0.0.1:28080/health",
         "settings_page_name": "HunyuanOCR Settings",
         "container_name": "hunyuanocr-local-server",
+        "container_names": ["hunyuanocr-local-server"],
         "uses_llama_cpp": True,
     },
     "MangaLMM": {
@@ -40,6 +41,7 @@ _ENGINE_CONFIG = {
         "health_url": "http://127.0.0.1:28081/health",
         "settings_page_name": "MangaLMM Settings",
         "container_name": "mangalmm-local-server",
+        "container_names": ["mangalmm-local-server"],
         "uses_llama_cpp": True,
     },
     "PaddleOCR VL": {
@@ -48,6 +50,7 @@ _ENGINE_CONFIG = {
         "health_url": "http://127.0.0.1:28118/docs",
         "settings_page_name": "PaddleOCR VL Settings",
         "container_name": "paddleocr-server",
+        "container_names": ["paddleocr-vllm", "paddleocr-server"],
         "uses_llama_cpp": False,
     },
 }
@@ -208,6 +211,52 @@ class LocalOCRRuntimeManager:
                     message=f"기존 {engine_key} 런타임을 재사용합니다.",
                 )
                 return
+
+        existing_containers = self._existing_managed_container_names(engine_key)
+        if existing_containers:
+            self._emit_progress(
+                progress_callback,
+                engine_key,
+                status="starting",
+                step_key="container_start",
+                message=f"기존 {engine_key} 컨테이너를 다시 시작하는 중...",
+                detail="docker start " + " ".join(existing_containers),
+            )
+            self._start_existing_managed_containers(engine_key, existing_containers)
+            self._emit_progress(
+                progress_callback,
+                engine_key,
+                status="completed",
+                step_key="container_start",
+                message=f"기존 {engine_key} 컨테이너 시작 명령을 보냈습니다.",
+            )
+            if self._wait_for_health(
+                config["health_url"],
+                timeout_sec=timeout_sec,
+                progress_callback=progress_callback,
+                cancel_checker=cancel_checker,
+                engine_key=engine_key,
+                step_key="health_wait",
+                message=f"{engine_key} health 기다리는 중...",
+            ):
+                self._active_engine = engine_key
+                self._emit_progress(
+                    progress_callback,
+                    engine_key,
+                    status="completed",
+                    step_key="health_wait",
+                    message=f"{engine_key} health 확인이 완료되었습니다.",
+                    existing_container_reused=True,
+                )
+                self._log_runtime_metadata(engine_key)
+                return
+            raise self._build_setup_error(
+                engine_key,
+                (
+                    f"Existing managed containers did not become healthy after docker start: {existing_containers}. "
+                    "Stop/remove the stale containers or check Docker logs before retrying."
+                ),
+            )
 
         self._emit_progress(
             progress_callback,
@@ -371,6 +420,41 @@ class LocalOCRRuntimeManager:
             runtime.get("llama_cpp_digest", ""),
             runtime.get("llama_cpp_version", ""),
         )
+
+    def _managed_container_names(self, engine_key: str) -> list[str]:
+        config = self._config_for(engine_key)
+        names = config.get("container_names") or [config.get("container_name")]
+        return [str(name).strip() for name in names if str(name or "").strip()]
+
+    def _existing_managed_container_names(self, engine_key: str) -> list[str]:
+        names = self._managed_container_names(engine_key)
+        existing: list[str] = []
+        for name in names:
+            try:
+                from modules.utils.llama_cpp_runtime import run_docker_command
+
+                completed = run_docker_command(
+                    ["docker", "inspect", "--format", "{{.Name}}", name],
+                    check=False,
+                )
+            except Exception:
+                continue
+            if getattr(completed, "returncode", 1) == 0:
+                existing.append(name)
+        return existing if len(existing) == len(names) else []
+
+    def _start_existing_managed_containers(self, engine_key: str, container_names: list[str]) -> None:
+        if not container_names:
+            return
+        try:
+            from modules.utils.llama_cpp_runtime import run_docker_command
+
+            run_docker_command(["docker", "start", *container_names])
+        except RuntimeError as exc:
+            raise self._build_setup_error(
+                engine_key,
+                f"Failed to start existing managed containers {container_names}.\n{str(exc).strip()}",
+            ) from exc
 
     def _build_setup_error(self, engine_key: str, detail: str) -> LocalServiceSetupError:
         config = _ENGINE_CONFIG.get(engine_key, {})

@@ -211,6 +211,12 @@ def _configure_window(window, preset: dict[str, object], source_lang: str, targe
         window.settings_page._benchmark_ocr_generic_settings = {}
 
     ui.use_gpu_checkbox.setChecked(bool(app_config.get("use_gpu", True)))
+    benchmark_contract = preset.get("benchmark_contract", {})
+    workflow_mode = app_config.get("workflow_mode")
+    if workflow_mode is None and isinstance(benchmark_contract, dict):
+        workflow_mode = benchmark_contract.get("workflow_mode")
+    if workflow_mode and hasattr(window.settings_page, "_set_workflow_mode"):
+        window.settings_page._set_workflow_mode(str(workflow_mode))
     _set_combo_text(ui.translator_combo, app_config.get("translator", "Custom Local Server(Gemma)"))
     window.settings_page._set_ocr_mode(str(app_config.get("ocr", "PaddleOCR VL")))
     _set_combo_text(ui.detector_combo, app_config.get("detector", "RT-DETR-v2"))
@@ -389,6 +395,10 @@ def _serialize_page_snapshot_block(blk) -> dict[str, object]:
     bubble_xyxy = getattr(blk, "bubble_xyxy", None)
     text_class = getattr(blk, "text_class", None)
     translation = str(getattr(blk, "translation", "") or "")
+    render_area_xyxy = getattr(blk, "_render_area_xyxy", None)
+    render_anchor_xyxy = getattr(blk, "_render_original_xyxy", None)
+    render_bubble_xyxy = getattr(blk, "_render_bubble_xyxy", None)
+    block_mask_bbox = getattr(blk, "block_mask_bbox", None)
     return {
         "xyxy": [float(value) for value in getattr(blk, "xyxy", [])],
         "bubble_xyxy": [float(value) for value in bubble_xyxy] if bubble_xyxy is not None else None,
@@ -398,6 +408,29 @@ def _serialize_page_snapshot_block(blk) -> dict[str, object]:
         "normalized_text": _normalize_ocr_text(getattr(blk, "text", "") or ""),
         "translation": translation,
         "normalized_translation": _normalize_ocr_text(translation),
+        "render_text": str(getattr(blk, "_render_text", "") or ""),
+        "render_area_source": str(getattr(blk, "_render_area_source", "") or ""),
+        "render_source_xyxy": [float(value) for value in render_area_xyxy] if render_area_xyxy else [],
+        "render_anchor_xyxy": [float(value) for value in render_anchor_xyxy] if render_anchor_xyxy else [],
+        "render_bubble_xyxy": [float(value) for value in render_bubble_xyxy] if render_bubble_xyxy else [],
+        "render_normalization_applied": bool(getattr(blk, "_render_normalization_applied", False)),
+        "render_normalization_reasons": list(getattr(blk, "_render_normalization_reasons", []) or []),
+        "render_normalization_replacements": list(getattr(blk, "_render_normalization_replacements", []) or []),
+        "render_centered_layout": bool(getattr(blk, "_render_centered_layout", False)),
+        "render_layout_reasons": list(getattr(blk, "_render_layout_reasons", []) or []),
+        "text_fit_status": str(getattr(blk, "_text_fit_status", "") or ""),
+        "text_fit_metrics": dict(getattr(blk, "_text_fit_metrics", {}) or {}),
+        "block_final_mask_pixel_count": int(getattr(blk, "block_final_mask_pixel_count", 0) or 0),
+        "block_mask_iou": float(getattr(blk, "block_mask_iou", 0.0) or 0.0),
+        "block_mask_span_coverage": float(getattr(blk, "block_mask_span_coverage", 0.0) or 0.0),
+        "block_mask_bbox": [float(value) for value in block_mask_bbox] if block_mask_bbox is not None else None,
+        "block_mask_source": str(getattr(blk, "block_mask_source", "") or ""),
+        "block_mask_decision": str(getattr(blk, "block_mask_decision", "") or ""),
+        "render_restore_applied": bool(getattr(blk, "_render_restore_applied", False)),
+        "ui_panel_mode": str(getattr(blk, "ui_panel_mode", "") or ""),
+        "ui_panel_preview_path": str(getattr(blk, "ui_panel_preview_path", "") or ""),
+        "mask_decision": str(getattr(blk, "mask_decision", "") or ""),
+        "mask_reject_reason": str(getattr(blk, "mask_reject_reason", "") or ""),
     }
 
 
@@ -592,6 +625,15 @@ def _run_single_mode(
             "mode": mode,
             "image_count": len(image_paths) if mode != "one-page" else 1,
             "image_paths": [repo_relative_str(path) for path in image_paths],
+            "product_pipeline_entrypoint": True,
+            "workflow_mode": str(
+                ((preset.get("app", {}) or {}).get("workflow_mode"))
+                or ((preset.get("benchmark_contract", {}) or {}).get("workflow_mode"))
+                or ""
+            ),
+            "alignment_id": 1,
+            "vertical_alignment_id": 1,
+            "runner_render_mode": "product",
         }
     )
     write_json(run_dir / "summary.json", summary)
@@ -719,6 +761,15 @@ def main() -> int:
                     "runtime_mode": args.runtime_mode,
                     "runtime_services": args.runtime_services,
                     "stage_ceiling": args.stage_ceiling,
+                    "product_pipeline_entrypoint": True,
+                    "workflow_mode": str(
+                        ((preset.get("app", {}) or {}).get("workflow_mode"))
+                        or ((preset.get("benchmark_contract", {}) or {}).get("workflow_mode"))
+                        or ""
+                    ),
+                    "alignment_id": 1,
+                    "vertical_alignment_id": 1,
+                    "runner_render_mode": "product",
                     "source_lang": args.source_lang,
                     "target_lang": args.target_lang,
                     "selected_paths": [str(path) for path in selected_paths],
