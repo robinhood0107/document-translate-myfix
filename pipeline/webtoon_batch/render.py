@@ -17,11 +17,13 @@ from modules.rendering.render import (
     build_text_item_layout_geometry,
     describe_render_text_markup,
     describe_render_text_sanitization,
+    describe_text_free_render_translation_gate,
     get_best_render_area,
     get_render_fit_clearance_for_block,
     is_vertical_block,
     pyside_word_wrap,
     refit_detected_bubble_text_if_underfilled,
+    should_skip_short_render_translation,
 )
 from modules.utils.export_paths import export_run_root, reserve_export_run_token, resolve_export_directory
 from modules.utils.automatic_output import (
@@ -33,7 +35,7 @@ from modules.utils.automatic_output import (
     write_output_image,
 )
 from modules.utils.language_utils import get_language_code, is_no_space_lang
-from modules.utils.ocr_debug import export_ocr_debug_artifacts
+from modules.utils.ocr_debug import export_ocr_debug_artifacts, is_block_ocr_empty
 from modules.utils.inpaint_debug import (
     build_inpaint_debug_metadata,
     export_inpaint_debug_artifacts,
@@ -155,12 +157,14 @@ class RenderMixin:
         page_scene_offset = self._get_page_scene_offset(page_index)
 
         for block in blocks:
+            if is_block_ocr_empty(block):
+                continue
             x1, y1, x2, y2 = [float(v) for v in block.xyxy]
             width = max(1.0, x2 - x1)
             height = max(1.0, y2 - y1)
 
             translation_raw = block.translation
-            if not translation_raw:
+            if should_skip_short_render_translation(block, translation_raw):
                 continue
             render_normalization = describe_render_text_sanitization(
                 translation_raw,
@@ -178,7 +182,20 @@ class RenderMixin:
             block._render_normalization_replacements = list(
                 render_normalization.replacements
             )
-            if not translation:
+            if should_skip_short_render_translation(block, translation):
+                continue
+            gate_decision = describe_text_free_render_translation_gate(
+                block,
+                translation,
+                target_lang_code=target_lang_code,
+            )
+            if not gate_decision.render:
+                block._text_fit_status = gate_decision.status
+                block._render_skip_reason = gate_decision.status
+                block._render_normalization_reasons = sorted(
+                    set(getattr(block, "_render_normalization_reasons", []) or [])
+                    .union(gate_decision.reasons)
+                )
                 continue
 
             vertical = is_vertical_block(block, target_lang_code)
@@ -294,6 +311,8 @@ class RenderMixin:
             block._render_normalization_replacements = list(
                 render_normalization.replacements
             ) + list(render_markup.replacements)
+            block._render_centered_layout = False
+            block._render_layout_reasons = []
 
             position, item_width, item_height = build_text_item_layout_geometry(
                 source_rect,
@@ -562,6 +581,36 @@ class RenderMixin:
             hard_box_rescue_mask=mask_details.get("hard_box_rescue_mask"),
             hard_box_applied_count=int(mask_details.get("hard_box_applied_count", 0) or 0),
             hard_box_reason_totals=dict(mask_details.get("hard_box_reason_totals", {}) or {}),
+            mask_quality_policy=str(mask_details.get("mask_quality_policy", "") or ""),
+            mask_policy_bubble_clamp_applied_count=int(
+                mask_details.get("mask_policy_bubble_clamp_applied_count", 0) or 0
+            ),
+            mask_policy_text_free_glyph_applied_count=int(
+                mask_details.get("mask_policy_text_free_glyph_applied_count", 0) or 0
+            ),
+            mask_policy_removed_pixel_count=int(mask_details.get("mask_policy_removed_pixel_count", 0) or 0),
+            mask_policy_outside_bubble_removed_pixel_count=int(
+                mask_details.get("mask_policy_outside_bubble_removed_pixel_count", 0) or 0
+            ),
+            ctd_legacy_rectangle_rescue_disabled=bool(
+                mask_details.get("ctd_legacy_rectangle_rescue_disabled", False)
+            ),
+            text_free_image_glyph_rescue_count=int(
+                mask_details.get("text_free_image_glyph_rescue_count", 0) or 0
+            ),
+            text_free_image_glyph_rescue_mask_pixel_count=int(
+                mask_details.get("text_free_image_glyph_rescue_mask_pixel_count", 0) or 0
+            ),
+            mask_policy_version=str(mask_details.get("mask_policy_version", "") or ""),
+            mask_candidate_source=str(mask_details.get("mask_candidate_source", "") or ""),
+            mask_decision=str(mask_details.get("mask_decision", "") or ""),
+            mask_reject_reason=str(mask_details.get("mask_reject_reason", "") or ""),
+            mask_score_outside_change=float(mask_details.get("mask_score_outside_change", 0.0) or 0.0),
+            mask_score_outline_damage=float(mask_details.get("mask_score_outline_damage", 0.0) or 0.0),
+            mask_score_residue=float(mask_details.get("mask_score_residue", 0.0) or 0.0),
+            mask_score_color_delta=float(mask_details.get("mask_score_color_delta", 0.0) or 0.0),
+            ui_panel_mode=str(mask_details.get("ui_panel_mode", "") or ""),
+            ui_panel_preview_path=str(mask_details.get("ui_panel_preview_path", "") or ""),
         )
         export_inpaint_debug_artifacts(
             export_root=export_root,
