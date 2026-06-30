@@ -17,7 +17,7 @@ from modules.utils.correction_dictionary import (
 )
 from modules.utils.device import resolve_device
 from modules.utils.image_utils import generate_mask
-from modules.utils.ocr_debug import drop_layout_schema_only_ocr_blocks
+from modules.utils.ocr_debug import drop_rejected_empty_ocr_blocks
 from modules.utils.pipeline_config import get_config, get_inpainter_runtime, inpaint_map
 from modules.utils.textblock import TextBlock, sort_blk_list
 
@@ -148,11 +148,11 @@ class ChunkMixin:
                 blocks,
                 self.main_page.settings_page.get_ocr_result_dictionary_rules(),
             )
-            blocks, schema_only_blocks = drop_layout_schema_only_ocr_blocks(blocks)
-            if schema_only_blocks:
+            blocks, rejected_empty_blocks = drop_rejected_empty_ocr_blocks(blocks)
+            if rejected_empty_blocks:
                 logger.info(
-                    "Dropped %d PaddleOCR VL schema-only OCR block(s) before webtoon inpaint (%s).",
-                    len(schema_only_blocks),
+                    "Dropped %d rejected empty OCR block(s) before webtoon inpaint (%s).",
+                    len(rejected_empty_blocks),
                     reason,
                 )
             if sort_after:

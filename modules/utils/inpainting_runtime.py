@@ -40,12 +40,30 @@ INPAINTER_DEPRECATION_MAP = {
     "LaMa": "lama_large_512px",
 }
 
+LAMA_FAMILY_INPAINTER_KEYS = frozenset(
+    {
+        "lama_large_512px",
+        "lama_mpe",
+    }
+)
+
 
 def normalize_inpainter_key(value: str | None) -> str:
     raw = str(value or "").strip()
     if not raw:
         return "AOT"
     return INPAINTER_DEPRECATION_MAP.get(raw, raw)
+
+
+def resolved_inpainter_family(value: str | None) -> str:
+    normalized = normalize_inpainter_key(value)
+    if normalized in LAMA_FAMILY_INPAINTER_KEYS:
+        return "lama"
+    return ""
+
+
+def is_lama_family_inpainter(value: str | None) -> bool:
+    return resolved_inpainter_family(value) == "lama"
 
 
 def inpainter_backend_for(key: str | None) -> str:
