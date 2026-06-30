@@ -16,6 +16,7 @@ from modules.rendering.render import (
     get_render_fit_clearance_for_block,
     resolve_text_free_manga_layout,
     pyside_word_wrap,
+    register_duplicate_bubble_render_key,
 )
 from modules.utils.textblock import TextBlock
 
@@ -284,6 +285,52 @@ class RenderBubbleFitTests(unittest.TestCase):
 
         self.assertIsNone(build_duplicate_bubble_render_key(free))
 
+    def test_duplicate_bubble_member_can_be_render_primary_when_first_renderable(self) -> None:
+        block = _block(
+            xyxy=[1640, 2571, 1906, 2901],
+            bubble_xyxy=[1604, 2525, 1943, 2948],
+            text_class="text_bubble",
+        )
+        block.bubble_panel_merge_decision = "duplicate_member"
+        seen: set[tuple[tuple[int, int, int, int], str]] = set()
+        duplicate_key = build_duplicate_bubble_render_key(block)
+
+        decision = register_duplicate_bubble_render_key(block, duplicate_key, seen)
+
+        self.assertTrue(decision.render)
+        self.assertEqual(decision.status, "ok")
+        self.assertIn("bubble_panel_group_render_primary", decision.reasons)
+        self.assertEqual(block.bubble_panel_merge_decision, "render_primary")
+        self.assertIn(duplicate_key, seen)
+
+    def test_duplicate_bubble_member_skips_after_group_already_rendered(self) -> None:
+        rendered = _block(
+            xyxy=[1640, 2571, 1906, 2901],
+            bubble_xyxy=[1604, 2525, 1943, 2948],
+            text_class="text_bubble",
+        )
+        duplicate = _block(
+            xyxy=[1640, 2571, 1906, 2901],
+            bubble_xyxy=[1604, 2525, 1943, 2948],
+            text_class="text_bubble",
+        )
+        duplicate.bubble_panel_merge_decision = "duplicate_member"
+        seen: set[tuple[tuple[int, int, int, int], str]] = set()
+        register_duplicate_bubble_render_key(
+            rendered,
+            build_duplicate_bubble_render_key(rendered),
+            seen,
+        )
+
+        decision = register_duplicate_bubble_render_key(
+            duplicate,
+            build_duplicate_bubble_render_key(duplicate),
+            seen,
+        )
+
+        self.assertFalse(decision.render)
+        self.assertEqual(decision.status, "skipped_duplicate_bubble_text")
+
     def test_duplicate_same_bubble_source_does_not_block_detected_bubble_area(self) -> None:
         image = np.zeros((3035, 2150, 3), dtype=np.uint8)
         first = _block(
@@ -306,6 +353,19 @@ class RenderBubbleFitTests(unittest.TestCase):
         self.assertEqual(block_anchor, (1606.0, 2547.0, 75.0, 180.0))
         self.assertGreater(source_rect[2], 75.0)
         self.assertGreater(source_rect[3], 180.0)
+
+    def test_bubble_panel_candidate_uses_group_render_rect(self) -> None:
+        block = _block(
+            xyxy=[1605, 2543, 1682, 2731],
+            bubble_xyxy=[1604, 2525, 1943, 2948],
+        )
+        block.bubble_panel_text_candidate = True
+        block.bubble_panel_render_xyxy = [1631, 2559, 1916, 2914]
+
+        source_rect, block_anchor = build_render_rects_for_block(block)
+
+        self.assertEqual(block_anchor, (1605.0, 2543.0, 77.0, 188.0))
+        self.assertEqual(source_rect, (1631.0, 2559.0, 285.0, 355.0))
 
     def test_detected_bubble_fit_clearance_reduces_border_touch_risk(self) -> None:
         image = np.zeros((2400, 1700, 3), dtype=np.uint8)

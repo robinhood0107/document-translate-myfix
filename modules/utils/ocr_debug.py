@@ -23,8 +23,10 @@ OCR_EMPTY_REASON_EMBEDDED_UI_CLUSTER = (
 )
 UI_PANEL_MODE_PRESERVE_ORIGINAL = "preserve_original"
 UI_PANEL_MODE_PREVIEW = "ui_panel_mode_preview"
+UI_PANEL_MODE_BUBBLE_PANEL_TEXT = "bubble_panel_text_candidate"
 UI_PANEL_REVIEW_REASON_LAYOUT = "embedded_ui_panel_layout_review"
 UI_PANEL_REVIEW_REASON_CLUSTER = "embedded_device_ui_cluster"
+BUBBLE_PANEL_REVIEW_REASON = "bubble_panel_text_candidate"
 DEFAULT_RETRY_CROP_X_RATIO = 0.06
 DEFAULT_RETRY_CROP_Y_RATIO = 0.10
 
@@ -454,6 +456,115 @@ def is_embedded_ui_panel_layout_review_candidate(block) -> bool:
     return contained_ratio >= 0.70 and bubble_area >= text_area * 1.05
 
 
+def is_bubble_panel_text_candidate(block) -> bool:
+    if _block_text_class(block) != "text_bubble":
+        return False
+    text = _block_text(block)
+    compact_text = re.sub(r"\s+", "", text)
+    if len(compact_text) < 18 or not _EMBEDDED_UI_PANEL_TOKEN_RE.search(compact_text):
+        return False
+
+    text_box = _block_xyxy(block)
+    bubble_box = _block_bubble_xyxy(block)
+    if text_box is None or bubble_box is None:
+        return False
+    text_area = _bbox_area(text_box)
+    bubble_area = _bbox_area(bubble_box)
+    if text_area <= 0.0 or bubble_area <= 0.0:
+        return False
+
+    intersection = (
+        max(text_box[0], bubble_box[0]),
+        max(text_box[1], bubble_box[1]),
+        min(text_box[2], bubble_box[2]),
+        min(text_box[3], bubble_box[3]),
+    )
+    contained_ratio = _bbox_area(intersection) / max(1.0, text_area)
+    center_inside = _point_inside_expanded_bbox(_bbox_center(text_box), bubble_box, padding=1.0)
+    return center_inside and contained_ratio >= 0.80 and bubble_area >= text_area * 1.05
+
+
+def mark_bubble_panel_text_candidate(block, *, group_id: str = "", member_indices: list[int] | None = None) -> None:
+    block.bubble_panel_text_candidate = True
+    block.ui_panel_mode = UI_PANEL_MODE_BUBBLE_PANEL_TEXT
+    block.ui_panel_preview_path = str(getattr(block, "ui_panel_preview_path", "") or "")
+    block.mask_decision = "review"
+    block.mask_reject_reason = BUBBLE_PANEL_REVIEW_REASON
+    block.bubble_panel_group_id = str(group_id or getattr(block, "bubble_panel_group_id", "") or "")
+    block.bubble_panel_member_indices = list(member_indices or getattr(block, "bubble_panel_member_indices", []) or [])
+    block.bubble_panel_merge_decision = str(getattr(block, "bubble_panel_merge_decision", "") or "candidate")
+    block.bubble_merge_reocr_needed = bool(getattr(block, "bubble_merge_reocr_needed", False))
+
+
+def _bubble_panel_group_key(block) -> tuple[int, int, int, int] | None:
+    bubble = _block_bubble_xyxy(block)
+    if bubble is None:
+        return None
+    return tuple(int(round(v / 8.0)) for v in bubble)
+
+
+def _shrink_box(box: tuple[float, float, float, float], percent: float) -> tuple[float, float, float, float]:
+    x1, y1, x2, y2 = box
+    width = max(1.0, x2 - x1)
+    height = max(1.0, y2 - y1)
+    dx = width * percent
+    dy = height * percent
+    return x1 + dx, y1 + dy, x2 - dx, y2 - dy
+
+
+def group_bubble_panel_text_candidates(blocks) -> list[dict]:
+    block_list = list(blocks or [])
+    grouped: dict[tuple[int, int, int, int], list[tuple[int, object]]] = {}
+    for idx, block in enumerate(block_list):
+        if not is_bubble_panel_text_candidate(block):
+            continue
+        key = _bubble_panel_group_key(block)
+        if key is None:
+            continue
+        grouped.setdefault(key, []).append((idx, block))
+
+    groups: list[dict] = []
+    for key, members in grouped.items():
+        if not members:
+            continue
+        member_indices = [idx for idx, _ in members]
+        bubble = _block_bubble_xyxy(members[0][1])
+        if bubble is None:
+            continue
+        text_boxes = [_block_xyxy(block) for _, block in members]
+        text_boxes = [box for box in text_boxes if box is not None]
+        group_box = _bbox_union(text_boxes) if text_boxes else bubble
+        safe_box = _shrink_box(bubble, 0.08)
+        render_box = (
+            max(safe_box[0], min(group_box[0], safe_box[2])),
+            max(safe_box[1], min(group_box[1], safe_box[3])),
+            min(safe_box[2], max(group_box[2], safe_box[0])),
+            min(safe_box[3], max(group_box[3], safe_box[1])),
+        )
+        if _bbox_area(render_box) <= 0.0:
+            render_box = safe_box
+        group_id = "bubble_panel_" + "_".join(str(v) for v in key)
+        for member_offset, (idx, block) in enumerate(members):
+            mark_bubble_panel_text_candidate(block, group_id=group_id, member_indices=member_indices)
+            block.bubble_panel_group_id = group_id
+            block.bubble_panel_member_indices = member_indices
+            block.bubble_panel_merge_decision = "group_primary" if member_offset == 0 else "duplicate_member"
+            block.bubble_merge_reocr_needed = len(members) > 1
+            block.bubble_panel_group_xyxy = [int(round(v)) for v in group_box]
+            block.bubble_panel_render_xyxy = [int(round(v)) for v in render_box]
+        groups.append(
+            {
+                "group_id": group_id,
+                "member_indices": member_indices,
+                "members": [block for _, block in members],
+                "bubble_xyxy": [int(round(v)) for v in bubble],
+                "group_xyxy": [int(round(v)) for v in group_box],
+                "render_xyxy": [int(round(v)) for v in render_box],
+            }
+        )
+    return groups
+
+
 def mark_ui_panel_review_candidate(block, *, reason: str, preview_path: str = "") -> None:
     block.ui_panel_mode = UI_PANEL_MODE_PRESERVE_ORIGINAL
     block.ui_panel_preview_path = str(preview_path or "")
@@ -465,7 +576,13 @@ def split_inpaint_protected_ocr_blocks(blocks) -> tuple[list, list]:
     """Keep review-worthy embedded UI panels out of LaMa masks without dropping them."""
     inpaint_blocks: list = []
     protected_blocks: list = []
-    for block in list(blocks or []):
+    block_list = list(blocks or [])
+    group_bubble_panel_text_candidates(block_list)
+    for block in block_list:
+        if is_bubble_panel_text_candidate(block):
+            mark_bubble_panel_text_candidate(block)
+            inpaint_blocks.append(block)
+            continue
         if is_embedded_ui_panel_layout_review_candidate(block):
             block._inpaint_protected_reason = UI_PANEL_REVIEW_REASON_LAYOUT
             mark_ui_panel_review_candidate(block, reason=UI_PANEL_REVIEW_REASON_LAYOUT)
@@ -672,6 +789,13 @@ def build_ocr_debug_payload(
                 "ui_panel_preview_path": getattr(blk, "ui_panel_preview_path", "") or "",
                 "mask_decision": getattr(blk, "mask_decision", "") or "",
                 "mask_reject_reason": getattr(blk, "mask_reject_reason", "") or "",
+                "bubble_panel_text_candidate": bool(getattr(blk, "bubble_panel_text_candidate", False)),
+                "bubble_panel_group_id": getattr(blk, "bubble_panel_group_id", "") or "",
+                "bubble_panel_member_indices": getattr(blk, "bubble_panel_member_indices", []) or [],
+                "bubble_panel_mask_pixel_count": int(getattr(blk, "bubble_panel_mask_pixel_count", 0) or 0),
+                "bubble_panel_mask_source": getattr(blk, "bubble_panel_mask_source", "") or "",
+                "bubble_panel_merge_decision": getattr(blk, "bubble_panel_merge_decision", "") or "",
+                "bubble_merge_reocr_needed": bool(getattr(blk, "bubble_merge_reocr_needed", False)),
             }
         )
     return payload

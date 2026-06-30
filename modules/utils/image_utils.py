@@ -222,6 +222,13 @@ def annotate_block_mask_attribution(
         if count > 0:
             setattr(block, "block_mask_source", candidate_source or MASK_CANDIDATE_SOURCE_CTD_REFINED)
             setattr(block, "block_mask_decision", MASK_DECISION_ACCEPTED)
+        if bool(getattr(block, "bubble_panel_text_candidate", False)):
+            setattr(block, "bubble_panel_mask_pixel_count", count)
+            setattr(
+                block,
+                "bubble_panel_mask_source",
+                candidate_source or (MASK_CANDIDATE_SOURCE_CTD_REFINED if count > 0 else MASK_CANDIDATE_SOURCE_NONE),
+            )
         source_box = _normalize_xyxy_for_shape(getattr(block, "xyxy", None), image_shape)
         if bbox is not None and source_box is not None:
             source_w = max(1, source_box[2] - source_box[0])
