@@ -31,8 +31,10 @@ from benchmark_common import (
     GEMMA_CONTAINER_NAMES,
     create_run_dir,
     load_preset,
+    product_benchmark_failure_contract,
     remove_containers,
     render_summary_markdown,
+    resolve_product_benchmark_contract,
     repo_relative_str,
     run_command,
     summarize_metrics,
@@ -634,6 +636,39 @@ class ArchiveStageBatchedRunner(StageBatchedRunner):
         stop_gemma_for_stage_isolation()
         return super().run()
 
+    def _run_product_pipeline_entrypoint(self) -> dict[str, Any]:
+        summary = super()._run_product_pipeline_entrypoint()
+        self._sync_product_pipeline_page_outputs()
+        self._write_render_fit_summary()
+        self._finalize_archive_output()
+        return summary
+
+    def _sync_product_pipeline_page_outputs(self) -> None:
+        assert self.window is not None
+        for ctx in self.pages:
+            state = self.window.image_ctrl.ensure_page_state(ctx.image_path)
+            processing_summary = state.get("processing_summary", {})
+            if not isinstance(processing_summary, dict):
+                continue
+            translated_path = str(
+                processing_summary.get("translated_page_image_path")
+                or processing_summary.get("translated_image_path")
+                or ""
+            )
+            if translated_path and Path(translated_path).is_file():
+                ctx.final_output_path = translated_path
+
+            stage_status = processing_summary.get("stage_status", {})
+            if not isinstance(stage_status, dict):
+                continue
+            for stage_name, payload in stage_status.items():
+                if not isinstance(payload, dict):
+                    continue
+                if str(payload.get("status", "") or "") == "failed":
+                    ctx.failed_stage = str(stage_name)
+                    ctx.failed_reason = str(payload.get("reason", "") or "")
+                    break
+
     def _no_text_contexts(self) -> list[Any]:
         return [ctx for ctx in self.pages if bool(getattr(ctx, "no_text_detected", False))]
 
@@ -1088,6 +1123,26 @@ def main() -> int:
         root=Path(args.output_root).resolve() if args.output_root else None,
     )
     run_dir.mkdir(parents=True, exist_ok=True)
+    try:
+        product_contract = resolve_product_benchmark_contract(preset)
+    except Exception as exc:
+        _log(f"full-book archive product benchmark preflight 실패: {exc}")
+        write_json(run_dir / "preset_resolved.json", preset)
+        write_json(
+            run_dir / "summary.json",
+            {
+                "mode": "stage-batched-archive-full-book",
+                "failed": True,
+                "reason": str(exc),
+                "product_pipeline_entrypoint": True,
+                "workflow_mode": "stage_batched_pipeline",
+                "runner_render_mode": "product",
+                "alignment_id": 1,
+                "vertical_alignment_id": 1,
+                **product_benchmark_failure_contract(exc),
+            },
+        )
+        return 1
 
     write_json(
         run_dir / "benchmark_request.json",
@@ -1095,6 +1150,11 @@ def main() -> int:
             "preset_name": preset.get("name", preset_name),
             "preset_path": str(preset_path),
             "mode": "stage-batched-archive-full-book",
+            "product_pipeline_entrypoint": True,
+            "workflow_mode": "stage_batched_pipeline",
+            "runner_render_mode": "product",
+            "alignment_id": 1,
+            "vertical_alignment_id": 1,
             "ocr_mode_requested": args.ocr_mode,
             "ocr_mode_value": resolve_ocr_mode_value(args.ocr_mode),
             "source_lang": args.source_lang,
@@ -1109,6 +1169,7 @@ def main() -> int:
             "write_next_to_source": bool(args.write_next_to_source),
             "disable_line_protect": bool(args.disable_line_protect),
             "ctd_mask_dilate_size": args.ctd_mask_dilate_size,
+            **product_contract,
         },
     )
     write_json(run_dir / "preset_resolved.json", preset)
@@ -1145,6 +1206,20 @@ def main() -> int:
         return 0
     except Exception as exc:
         _log(f"full-book archive 실행 실패: {exc}")
+        write_json(
+            run_dir / "summary.json",
+            {
+                "mode": "stage-batched-archive-full-book",
+                "failed": True,
+                "reason": str(exc),
+                "product_pipeline_entrypoint": True,
+                "workflow_mode": "stage_batched_pipeline",
+                "runner_render_mode": "product",
+                "alignment_id": 1,
+                "vertical_alignment_id": 1,
+                **product_benchmark_failure_contract(exc),
+            },
+        )
         raise
 
 

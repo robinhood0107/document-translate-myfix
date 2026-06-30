@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+import unicodedata
 from typing import Iterable
 
 
@@ -25,6 +26,29 @@ def remove_invisible_format_chars(text: str) -> str:
     if not text:
         return ""
     return text.translate(_INVISIBLE_CHAR_TRANSLATION)
+
+
+def strip_unsafe_text_control_chars(text: str) -> str:
+    if not text:
+        return ""
+    cleaned = remove_invisible_format_chars(str(text or ""))
+    parts: list[str] = []
+    for ch in cleaned:
+        if ch == "\r":
+            parts.append("\n")
+            continue
+        if ch == "\n":
+            parts.append(ch)
+            continue
+        if ch == "\t":
+            parts.append(" ")
+            continue
+        if ch in {"\ufffc", "\ufffd"}:
+            continue
+        if unicodedata.category(ch).startswith("C"):
+            continue
+        parts.append(ch)
+    return "".join(parts)
 
 
 def canonicalize_ellipsis_runs(text: str) -> str:

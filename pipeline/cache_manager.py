@@ -7,6 +7,8 @@ logger = logging.getLogger(__name__)
 
 class CacheManager:
     """Manages OCR and translation caching for the pipeline."""
+
+    PADDLEOCR_VL_CACHE_VERSION = "paddleocr_vl_text_guard_v1"
     
     def __init__(self):
         self.ocr_cache = {}  # OCR results cache: {(image_hash, model_key, source_lang): {block_id: text}}
@@ -40,7 +42,17 @@ class CacheManager:
         image_hash = self._generate_image_hash(image)
         if device is None:
             device = "unknown"
+        cache_version = self._default_ocr_cache_version(ocr_model)
+        if cache_version:
+            return (image_hash, ocr_model, source_lang, device, cache_version)
         return (image_hash, ocr_model, source_lang, device)
+
+    @classmethod
+    def _default_ocr_cache_version(cls, ocr_model) -> str:
+        model_key = str(ocr_model or "").strip().lower().replace("-", "").replace("_", "").replace(" ", "")
+        if "paddleocr" in model_key and "vl" in model_key:
+            return cls.PADDLEOCR_VL_CACHE_VERSION
+        return ""
 
     def _get_block_id(self, block):
         """Generate a unique identifier for a text block based on its position"""

@@ -23,6 +23,11 @@ from modules.utils.llama_cpp_runtime import (
     normalize_llama_cpp_pull_policy,
     resolve_docker_compose_command,
 )
+from modules.utils.inpainting_runtime import (
+    is_lama_family_inpainter,
+    normalize_inpainter_key,
+    normalized_mask_refiner_settings,
+)
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -38,6 +43,50 @@ SUPPORTED_IMAGE_EXTENSIONS = {
     ".tif",
     ".tiff",
 }
+
+
+class NonLaMaInpainterError(ValueError):
+    def __init__(self, requested: object, resolved: str) -> None:
+        self.reason = "non_lama_inpainter"
+        self.requested = requested
+        self.resolved = resolved
+        super().__init__(
+            "non_lama_inpainter: product benchmark requires a LaMa family inpainter "
+            f"(requested={requested!r}, resolved={resolved!r})"
+        )
+
+
+def resolve_product_benchmark_contract(preset: dict[str, Any]) -> dict[str, Any]:
+    app = preset.get("app", {})
+    app_config = app if isinstance(app, dict) else {}
+    requested_inpainter = app_config.get("inpainter")
+    resolved_inpainter = normalize_inpainter_key(requested_inpainter)
+    if not is_lama_family_inpainter(resolved_inpainter):
+        raise NonLaMaInpainterError(requested_inpainter, resolved_inpainter)
+
+    raw_mask_settings = preset.get("mask_refiner_settings", {})
+    mask_settings = raw_mask_settings if isinstance(raw_mask_settings, dict) else {}
+    normalized_mask_settings = normalized_mask_refiner_settings(mask_settings)
+    return {
+        "product_pipeline_entrypoint": True,
+        "runner_render_mode": "product",
+        "inpainter_family": "lama",
+        "inpainter": resolved_inpainter,
+        "requested_inpainter": str(requested_inpainter or ""),
+        "mask_refiner": str(normalized_mask_settings.get("mask_refiner", "ctd") or "ctd"),
+    }
+
+
+def product_benchmark_failure_contract(exc: BaseException) -> dict[str, Any]:
+    return {
+        "reason_code": str(getattr(exc, "reason", "") or ""),
+        "inpainter_family": "",
+        "inpainter": str(getattr(exc, "resolved", "") or ""),
+        "requested_inpainter": str(getattr(exc, "requested", "") or ""),
+        "mask_refiner": "",
+    }
+
+
 EXCLUDED_SAMPLE_PARENT_NAMES = {
     "translated_images",
     "translated_texts",
@@ -1100,6 +1149,7 @@ def summarize_metrics(metrics_path: str | Path) -> dict[str, Any]:
         "gemma_chunk_retry_events": 0,
         "gemma_truncated_count": 0,
         "gemma_empty_content_count": 0,
+        "gemma_request_retry_count": 0,
         "gemma_missing_key_count": 0,
         "gemma_reasoning_without_final_count": 0,
         "gemma_schema_validation_fail_count": 0,
@@ -1201,6 +1251,7 @@ def summarize_metrics(metrics_path: str | Path) -> dict[str, Any]:
         "gemma_chunk_retry_events": counters["gemma_chunk_retry_events"],
         "gemma_truncated_count": counters["gemma_truncated_count"],
         "gemma_empty_content_count": counters["gemma_empty_content_count"],
+        "gemma_request_retry_count": counters["gemma_request_retry_count"],
         "gemma_missing_key_count": counters["gemma_missing_key_count"],
         "gemma_reasoning_without_final_count": counters["gemma_reasoning_without_final_count"],
         "gemma_schema_validation_fail_count": counters["gemma_schema_validation_fail_count"],
@@ -1239,6 +1290,7 @@ def render_summary_markdown(summary: dict[str, Any]) -> str:
         f"- gemma_chunk_retry_events: `{summary.get('gemma_chunk_retry_events')}`",
         f"- gemma_truncated_count: `{summary.get('gemma_truncated_count')}`",
         f"- gemma_empty_content_count: `{summary.get('gemma_empty_content_count')}`",
+        f"- gemma_request_retry_count: `{summary.get('gemma_request_retry_count')}`",
         f"- gemma_missing_key_count: `{summary.get('gemma_missing_key_count')}`",
         f"- gemma_reasoning_without_final_count: `{summary.get('gemma_reasoning_without_final_count')}`",
         f"- gemma_schema_validation_fail_count: `{summary.get('gemma_schema_validation_fail_count')}`",

@@ -6,7 +6,7 @@ from unittest import mock
 
 import numpy as np
 
-from modules.utils.image_utils import generate_mask
+from modules.utils.image_utils import generate_mask, restore_original_for_block_masks
 from modules.utils.textblock import TextBlock
 
 
@@ -78,7 +78,7 @@ class ImageUtilsMaskingTests(unittest.TestCase):
         self.assertGreater(int(np.count_nonzero(details["protect_mask"])), 0)
         self.assertEqual(int(np.count_nonzero(details["final_mask"])), int(np.count_nonzero(base_mask)) - 4)
 
-    def test_generate_mask_ctd_path_unions_bubble_hard_box_rescue_without_protected_pixels(self) -> None:
+    def test_generate_mask_ctd_path_keeps_legacy_hard_box_as_window_only(self) -> None:
         image = np.zeros((16, 16, 3), dtype=np.uint8)
         block = TextBlock(
             text_bbox=np.array([2, 2, 10, 10]),
@@ -124,11 +124,165 @@ class ImageUtilsMaskingTests(unittest.TestCase):
             )
 
         final_mask = details["final_mask"]
-        self.assertTrue(details["hard_box_rescue_used"])
-        self.assertIn("hard_box_rescue", details["refiner_backend"])
+        self.assertFalse(details["hard_box_rescue_used"])
+        self.assertNotIn("hard_box_rescue", details["refiner_backend"])
+        self.assertEqual(details["legacy_bbox_role"], "window_only")
+        self.assertTrue(details["legacy_bbox_direct_erase_disabled"])
+        self.assertEqual(details["mask_candidate_source"], "ctd_raw_refined_final_or")
+        self.assertEqual(details["mask_decision"], "accepted")
         self.assertEqual(int(final_mask[5, 5]), 0)
-        self.assertEqual(int(final_mask[6, 6]), 255)
+        self.assertEqual(int(final_mask[6, 6]), 0)
         self.assertEqual(int(final_mask[2, 2]), 255)
+
+    def test_generate_mask_ctd_empty_does_not_promote_legacy_bbox_fallback_to_erase_mask(self) -> None:
+        image = np.zeros((16, 16, 3), dtype=np.uint8)
+        block = TextBlock(
+            text_bbox=np.array([2, 2, 10, 10]),
+            bubble_bbox=np.array([1, 1, 12, 12]),
+            text_class="text_bubble",
+        )
+        empty_mask = np.zeros((16, 16), dtype=np.uint8)
+        legacy_mask = np.zeros((16, 16), dtype=np.uint8)
+        legacy_mask[2:10, 2:10] = 255
+        legacy_details = {
+            "raw_mask": empty_mask.copy(),
+            "refined_mask": empty_mask.copy(),
+            "protect_mask": empty_mask.copy(),
+            "final_mask_pre_expand": legacy_mask.copy(),
+            "final_mask_post_expand": legacy_mask.copy(),
+            "final_mask": legacy_mask.copy(),
+            "legacy_base_mask": legacy_mask.copy(),
+            "hard_box_rescue_mask": legacy_mask.copy(),
+            "hard_box_applied_count": 1,
+            "hard_box_reason_totals": {"legacy_window": 1},
+            "legacy_base_mask_pixel_count": int(np.count_nonzero(legacy_mask)),
+            "hard_box_rescue_mask_pixel_count": int(np.count_nonzero(legacy_mask)),
+            "final_mask_pixel_count": int(np.count_nonzero(legacy_mask)),
+        }
+
+        with (
+            mock.patch("modules.utils.image_utils.CTDRefiner") as refiner_cls,
+            mock.patch("modules.utils.image_utils.build_protect_mask", return_value=empty_mask.copy()),
+            mock.patch(
+                "modules.utils.image_utils.build_legacy_bbox_mask_details",
+                return_value=legacy_details,
+            ),
+        ):
+            refiner_cls.return_value.refine.return_value = SimpleNamespace(
+                raw_mask=empty_mask.copy(),
+                refined_mask=empty_mask.copy(),
+                final_mask=empty_mask.copy(),
+                backend="torch",
+                device="cuda",
+                fallback_used=False,
+            )
+            details = generate_mask(
+                image,
+                [block],
+                settings={"mask_refiner": "ctd", "keep_existing_lines": True, "final_mask_dilate_size": 0},
+                return_details=True,
+            )
+
+        self.assertEqual(int(np.count_nonzero(details["final_mask"])), 0)
+        self.assertEqual(details["legacy_bbox_role"], "window_only")
+        self.assertTrue(details["legacy_bbox_direct_erase_disabled"])
+        self.assertEqual(details["mask_candidate_source"], "none")
+        self.assertEqual(details["mask_decision"], "review")
+        self.assertEqual(details["mask_reject_reason"], "legacy_bbox_window_only_no_ctd_mask")
+        self.assertNotIn("legacy_bbox_fallback", details["refiner_backend"])
+
+    def test_generate_mask_ctd_exception_keeps_legacy_bbox_as_window_only(self) -> None:
+        image = np.zeros((16, 16, 3), dtype=np.uint8)
+        block = TextBlock(
+            text_bbox=np.array([2, 2, 10, 10]),
+            bubble_bbox=np.array([1, 1, 12, 12]),
+            text_class="text_bubble",
+        )
+        legacy_mask = np.zeros((16, 16), dtype=np.uint8)
+        legacy_mask[2:10, 2:10] = 255
+        legacy_details = {
+            "raw_mask": np.zeros((16, 16), dtype=np.uint8),
+            "refined_mask": np.zeros((16, 16), dtype=np.uint8),
+            "protect_mask": np.zeros((16, 16), dtype=np.uint8),
+            "final_mask_pre_expand": legacy_mask.copy(),
+            "final_mask_post_expand": legacy_mask.copy(),
+            "final_mask": legacy_mask.copy(),
+            "legacy_base_mask": legacy_mask.copy(),
+            "hard_box_rescue_mask": legacy_mask.copy(),
+            "hard_box_applied_count": 1,
+            "hard_box_reason_totals": {"legacy_window": 1},
+            "legacy_base_mask_pixel_count": int(np.count_nonzero(legacy_mask)),
+            "hard_box_rescue_mask_pixel_count": int(np.count_nonzero(legacy_mask)),
+            "final_mask_pixel_count": int(np.count_nonzero(legacy_mask)),
+        }
+
+        with (
+            mock.patch("modules.utils.image_utils.CTDRefiner") as refiner_cls,
+            mock.patch(
+                "modules.utils.image_utils.build_legacy_bbox_mask_details",
+                return_value=legacy_details,
+            ),
+        ):
+            refiner_cls.side_effect = RuntimeError("ctd unavailable")
+            details = generate_mask(
+                image,
+                [block],
+                settings={"mask_refiner": "ctd", "keep_existing_lines": True, "final_mask_dilate_size": 0},
+                return_details=True,
+            )
+
+        self.assertEqual(int(np.count_nonzero(details["final_mask"])), 0)
+        self.assertEqual(details["legacy_bbox_role"], "window_only")
+        self.assertTrue(details["legacy_bbox_direct_erase_disabled"])
+        self.assertEqual(details["mask_candidate_source"], "none")
+        self.assertEqual(details["mask_decision"], "review")
+        self.assertEqual(details["mask_reject_reason"], "ctd_exception_legacy_bbox_window_only")
+        self.assertEqual(details["refiner_backend"], "ctd+legacy_bbox_exception_window_only")
+
+    def test_generate_mask_clamps_dilated_ctd_mask_to_candidate_windows(self) -> None:
+        image = np.zeros((32, 32, 3), dtype=np.uint8)
+        block = TextBlock(
+            text_bbox=np.array([10, 10, 14, 14]),
+            bubble_bbox=np.array([8, 8, 24, 24]),
+            text_class="text_bubble",
+        )
+        ctd_mask = np.zeros((32, 32), dtype=np.uint8)
+        ctd_mask[8, 8] = 255
+
+        with (
+            mock.patch("modules.utils.image_utils.CTDRefiner") as refiner_cls,
+            mock.patch("modules.utils.image_utils.build_protect_mask", return_value=np.zeros((32, 32), dtype=np.uint8)),
+            mock.patch("modules.utils.image_utils.build_legacy_bbox_mask_details") as legacy_builder,
+        ):
+            legacy_builder.return_value = {
+                "legacy_base_mask": np.zeros((32, 32), dtype=np.uint8),
+                "hard_box_rescue_mask": np.zeros((32, 32), dtype=np.uint8),
+                "hard_box_applied_count": 0,
+                "hard_box_reason_totals": {},
+                "legacy_base_mask_pixel_count": 0,
+                "hard_box_rescue_mask_pixel_count": 0,
+            }
+            refiner_cls.return_value.refine.return_value = SimpleNamespace(
+                raw_mask=ctd_mask.copy(),
+                refined_mask=ctd_mask.copy(),
+                final_mask=ctd_mask.copy(),
+                backend="torch",
+                device="cuda",
+                fallback_used=False,
+            )
+            details = generate_mask(
+                image,
+                [block],
+                settings={"mask_refiner": "ctd", "keep_existing_lines": True, "final_mask_dilate_size": 4},
+                return_details=True,
+            )
+
+        final_mask = details["final_mask"]
+        self.assertEqual(int(final_mask[8, 8]), 255)
+        self.assertEqual(int(final_mask[7, 8]), 0)
+        self.assertEqual(int(final_mask[8, 7]), 0)
+        self.assertGreater(details["mask_policy_outside_bubble_removed_pixel_count"], 0)
+        self.assertEqual(details["mask_policy_bubble_clamp_applied_count"], 1)
 
     def test_generate_mask_ctd_path_does_not_union_text_free_hard_box_rescue(self) -> None:
         image = np.zeros((16, 16, 3), dtype=np.uint8)
@@ -179,6 +333,109 @@ class ImageUtilsMaskingTests(unittest.TestCase):
         self.assertEqual(int(np.count_nonzero(final_mask)), int(np.count_nonzero(ctd_mask)))
         self.assertEqual(int(final_mask[6, 6]), 0)
         self.assertEqual(int(final_mask[2, 2]), 255)
+
+    def test_generate_mask_text_free_uses_thin_dilation_instead_of_global_d8(self) -> None:
+        image = np.zeros((32, 32, 3), dtype=np.uint8)
+        block = TextBlock(
+            text_bbox=np.array([12, 12, 20, 20]),
+            text_class="text_free",
+        )
+        ctd_mask = np.zeros((32, 32), dtype=np.uint8)
+        ctd_mask[16, 16] = 255
+
+        with (
+            mock.patch("modules.utils.image_utils.CTDRefiner") as refiner_cls,
+            mock.patch("modules.utils.image_utils.build_protect_mask", return_value=np.zeros((32, 32), dtype=np.uint8)),
+        ):
+            refiner_cls.return_value.refine.return_value = SimpleNamespace(
+                raw_mask=ctd_mask.copy(),
+                refined_mask=ctd_mask.copy(),
+                final_mask=ctd_mask.copy(),
+                backend="torch",
+                device="cuda",
+                fallback_used=False,
+            )
+            details = generate_mask(
+                image,
+                [block],
+                settings={
+                    "mask_refiner": "ctd",
+                    "keep_existing_lines": False,
+                    "final_mask_dilate_size": 8,
+                    "text_free_final_mask_dilate_size": 1,
+                },
+                return_details=True,
+            )
+
+        final_mask = details["final_mask"]
+        self.assertEqual(int(final_mask[16, 16]), 255)
+        self.assertEqual(int(final_mask[16, 17]), 255)
+        self.assertEqual(int(final_mask[16, 24]), 0)
+        self.assertEqual(details["mask_policy_text_free_glyph_applied_count"], 1)
+        self.assertGreater(block.block_final_mask_pixel_count, 0)
+        self.assertEqual(block.block_mask_source, "ctd_raw_refined_final_or")
+        self.assertEqual(block.block_mask_decision, "accepted")
+
+    def test_generate_mask_ctd_or_rescues_raw_mask_when_final_is_empty(self) -> None:
+        image = np.zeros((32, 32, 3), dtype=np.uint8)
+        block = TextBlock(
+            text_bbox=np.array([10, 8, 18, 24]),
+            text_class="text_free",
+        )
+        raw_mask = np.zeros((32, 32), dtype=np.uint8)
+        raw_mask[9:23, 11:17] = 255
+        empty_mask = np.zeros((32, 32), dtype=np.uint8)
+
+        with (
+            mock.patch("modules.utils.image_utils.CTDRefiner") as refiner_cls,
+            mock.patch("modules.utils.image_utils.build_protect_mask", return_value=empty_mask.copy()),
+        ):
+            refiner_cls.return_value.refine.return_value = SimpleNamespace(
+                raw_mask=raw_mask.copy(),
+                refined_mask=empty_mask.copy(),
+                final_mask=empty_mask.copy(),
+                backend="torch",
+                device="cuda",
+                fallback_used=False,
+            )
+            details = generate_mask(
+                image,
+                [block],
+                settings={"mask_refiner": "ctd", "keep_existing_lines": False, "final_mask_dilate_size": 0},
+                return_details=True,
+            )
+
+        self.assertEqual(int(np.count_nonzero(details["final_mask"])), int(np.count_nonzero(raw_mask)))
+        self.assertEqual(details["mask_candidate_source"], "ctd_raw_refined_final_or")
+        self.assertEqual(block.block_mask_source, "ctd_raw_refined_final_or")
+        self.assertGreater(block.block_final_mask_pixel_count, 0)
+        self.assertEqual(block.block_mask_decision, "accepted")
+
+    def test_restore_original_for_block_masks_restores_skipped_mask_pixels(self) -> None:
+        original = np.full((12, 12, 3), 240, dtype=np.uint8)
+        original[4:8, 4:8] = [32, 64, 96]
+        cleaned = original.copy()
+        cleaned[4:8, 4:8] = [250, 250, 250]
+        mask = np.zeros((12, 12), dtype=np.uint8)
+        mask[4:8, 4:8] = 255
+        block = TextBlock(
+            text_bbox=np.array([4, 4, 8, 8]),
+            text_class="text_free",
+        )
+
+        restored, updated_mask, stats = restore_original_for_block_masks(
+            original,
+            cleaned,
+            mask,
+            [block],
+        )
+
+        self.assertTrue(stats["applied"])
+        self.assertEqual(stats["block_count"], 1)
+        self.assertEqual(stats["pixel_count"], 16)
+        self.assertTrue(np.array_equal(restored[4:8, 4:8], original[4:8, 4:8]))
+        self.assertEqual(int(np.count_nonzero(updated_mask)), 0)
+        self.assertTrue(block._render_restore_applied)
 
     def test_generate_mask_legacy_mode_still_uses_legacy_builder(self) -> None:
         image = np.zeros((8, 8, 3), dtype=np.uint8)

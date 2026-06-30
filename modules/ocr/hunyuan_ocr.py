@@ -4,7 +4,8 @@ import base64
 import logging
 import re
 import time
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
+from typing import Callable
 
 import cv2
 import numpy as np
@@ -13,6 +14,7 @@ import requests
 from modules.utils.exceptions import (
     LocalServiceConnectionError,
     LocalServiceResponseError,
+    OperationCancelledError,
 )
 from modules.utils.ocr_debug import (
     OCR_STATUS_EMPTY_INITIAL,
@@ -145,6 +147,20 @@ class HunyuanOCREngine(OCREngine):
         self.parallel_workers = DEFAULT_HUNYUAN_PARALLEL_WORKERS
         self.request_timeout_sec = DEFAULT_HUNYUAN_REQUEST_TIMEOUT_SEC
         self.raw_response_logging = False
+        self.cancel_checker: Callable[[], bool] | None = None
+
+    def set_cancel_checker(self, cancel_checker: Callable[[], bool] | None) -> None:
+        self.cancel_checker = cancel_checker
+
+    def _is_cancelled(self) -> bool:
+        try:
+            return bool(self.cancel_checker and self.cancel_checker())
+        except Exception:
+            return False
+
+    def _raise_if_cancelled(self) -> None:
+        if self._is_cancelled():
+            raise OperationCancelledError(f"Cancelled while running {SERVICE_NAME}.")
 
     def initialize(self, settings, **kwargs) -> None:
         config = settings.get_hunyuan_ocr_settings()
@@ -172,6 +188,7 @@ class HunyuanOCREngine(OCREngine):
     def process_image(self, img: np.ndarray, blk_list: list[TextBlock]) -> list[TextBlock]:
         jobs: list[tuple[TextBlock, tuple[int, int, int, int]]] = []
         for blk in blk_list or []:
+            self._raise_if_cancelled()
             bbox = self._resolve_bbox(blk, img)
             if bbox is None:
                 self._mark_empty(blk, "Invalid OCR crop bounds.")
@@ -191,22 +208,27 @@ class HunyuanOCREngine(OCREngine):
         )
 
         started_at = time.perf_counter()
-        if worker_count <= 1:
+        executor = ThreadPoolExecutor(max_workers=worker_count)
+        future_map = {}
+        try:
             for blk, bbox in jobs:
-                self._process_block(img, blk, bbox)
+                self._raise_if_cancelled()
+                future_map[executor.submit(self._process_block, img, blk, bbox)] = (blk, bbox)
+
+            pending = set(future_map)
+            while pending:
+                self._raise_if_cancelled()
+                done, pending = wait(pending, timeout=0.2, return_when=FIRST_COMPLETED)
+                for future in done:
+                    future.result()
+            self._raise_if_cancelled()
+        except Exception:
+            for future in future_map:
+                future.cancel()
+            executor.shutdown(wait=False, cancel_futures=True)
+            raise
         else:
-            with ThreadPoolExecutor(max_workers=worker_count) as executor:
-                future_map = {
-                    executor.submit(self._process_block, img, blk, bbox): (blk, bbox)
-                    for blk, bbox in jobs
-                }
-                try:
-                    for future in as_completed(future_map):
-                        future.result()
-                except Exception:
-                    for future in future_map:
-                        future.cancel()
-                    raise
+            executor.shutdown(wait=True)
 
         logger.info(
             "hunyuan_ocr complete: blocks=%d elapsed_ms=%.1f",
@@ -216,12 +238,14 @@ class HunyuanOCREngine(OCREngine):
         return blk_list
 
     def _process_block(self, img: np.ndarray, blk: TextBlock, bbox: tuple[int, int, int, int]) -> None:
+        self._raise_if_cancelled()
         crop = self._crop_image(img, bbox)
         if crop is None:
             self._mark_empty(blk, "Invalid OCR crop bounds.")
             return
 
         text, descriptive_filtered, request_attempt_count = self._request_ocr_text(crop)
+        self._raise_if_cancelled()
         cleaned = text
         if cleaned:
             set_block_ocr_diagnostics(
@@ -253,6 +277,7 @@ class HunyuanOCREngine(OCREngine):
             return first_candidate, False, 1
 
         logger.warning("hunyuan_ocr non-ocr response detected; retrying with alternate OCR prompt")
+        self._raise_if_cancelled()
 
         retry_text = self._request_ocr_text_for_prompt(image, self.RETRY_PROMPT)
         retry_candidate = self._extract_direct_candidate(retry_text, self.RETRY_PROMPT)
