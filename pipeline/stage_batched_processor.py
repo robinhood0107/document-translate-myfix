@@ -213,6 +213,31 @@ class StageBatchedProcessor(BatchProcessor):
         if executor is not None:
             executor.shutdown(wait=False, cancel_futures=True)
 
+    def _shutdown_managed_runtimes(self) -> None:
+        runtime_managers = (
+            (
+                "OCR",
+                getattr(self.main_page, "local_ocr_runtime_manager", None),
+                LocalOCRRuntimeManager,
+            ),
+            (
+                "Gemma",
+                getattr(self.main_page, "local_translation_runtime_manager", None),
+                LocalGemmaRuntimeManager,
+            ),
+        )
+        for label, runtime_manager, manager_type in runtime_managers:
+            if not isinstance(runtime_manager, manager_type):
+                continue
+            try:
+                runtime_manager.shutdown()
+            except Exception:
+                logger.warning(
+                    "Failed to stop managed %s runtime during batch cleanup.",
+                    label,
+                    exc_info=True,
+                )
+
     def _start_ocr_prewarm(self, policy: dict[str, Any]) -> None:
         runtime_manager = getattr(self.main_page, "local_ocr_runtime_manager", None)
         if not isinstance(runtime_manager, LocalOCRRuntimeManager):
@@ -1535,4 +1560,5 @@ class StageBatchedProcessor(BatchProcessor):
             return
         finally:
             self._shutdown_prewarm_executor()
+            self._shutdown_managed_runtimes()
             self._progress_image_path = None

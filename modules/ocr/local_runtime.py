@@ -14,6 +14,7 @@ from modules.ocr.selection import is_local_ocr_engine
 from modules.utils.exceptions import LocalServiceSetupError, OperationCancelledError
 from modules.utils.llama_cpp_runtime import (
     DEFAULT_LLAMA_CPP_IMAGE,
+    DEFAULT_MANAGED_RUNTIME_STOP_TIMEOUT_SEC,
     inspect_llama_cpp_runtime,
     resolve_docker_compose_command,
 )
@@ -185,6 +186,7 @@ class LocalOCRRuntimeManager:
             )
             return
         if initial_state == "loading":
+            self._active_engine = engine_key
             self._emit_progress(
                 progress_callback,
                 engine_key,
@@ -223,6 +225,7 @@ class LocalOCRRuntimeManager:
                 detail="docker start " + " ".join(existing_containers),
             )
             self._start_existing_managed_containers(engine_key, existing_containers)
+            self._active_engine = engine_key
             self._emit_progress(
                 progress_callback,
                 engine_key,
@@ -267,6 +270,7 @@ class LocalOCRRuntimeManager:
             detail="docker compose up -d",
         )
         self._run_compose(engine_key, "up", "-d", step_name="up")
+        self._active_engine = engine_key
         self._emit_progress(
             progress_callback,
             engine_key,
@@ -316,7 +320,13 @@ class LocalOCRRuntimeManager:
 
     def _stop_engine(self, engine_key: str) -> None:
         try:
-            self._run_compose(engine_key, "down", step_name="down")
+            self._run_compose(
+                engine_key,
+                "stop",
+                "--timeout",
+                str(DEFAULT_MANAGED_RUNTIME_STOP_TIMEOUT_SEC),
+                step_name="stop",
+            )
         except LocalServiceSetupError:
             logger.warning("Failed to stop managed OCR runtime for %s.", engine_key, exc_info=True)
 
