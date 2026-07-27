@@ -16,6 +16,7 @@ from ...utils.textblock import TextBlock
 from ...utils.translator_utils import extract_json_object
 from ...utils.exceptions import LocalServiceConnectionError, LocalServiceResponseError
 from ...utils.repetition_guard import guard_severe_repetition
+from ...utils.text_normalization import strip_unsafe_text_control_chars
 
 logger = logging.getLogger(__name__)
 
@@ -511,6 +512,13 @@ class CustomLocalGemmaTranslation(BaseLLMTranslation):
         translated = value if isinstance(value, str) or value is None else str(value)
         if isinstance(translated, str):
             translated = self._strip_channel_tokens(translated)
+            translated = strip_unsafe_text_control_chars(translated)
+        source_text = str(getattr(blk, "text", "") or "").strip()
+        if source_text and not str(translated or "").strip():
+            raise GemmaLocalServerResponseError(
+                f"Gemma local server returned an empty translation for non-empty block_{index}.",
+                strict_retryable=True,
+            )
         if translated:
             repetition_guard = guard_severe_repetition(translated)
             if repetition_guard.changed:

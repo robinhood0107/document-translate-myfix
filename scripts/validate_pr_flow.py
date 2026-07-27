@@ -8,6 +8,7 @@ import sys
 FEATURE_BRANCH_RE = re.compile(r"^feature/[a-z0-9][a-z0-9._-]*$")
 FIX_BRANCH_RE = re.compile(r"^fix/[a-z0-9][a-z0-9._-]*$")
 CHORE_BRANCH_RE = re.compile(r"^chore/[a-z0-9][a-z0-9._-]*$")
+MAIN_PROMOTION_BRANCH_RE = re.compile(r"^chore/main-promotion-[a-z0-9][a-z0-9._-]*$")
 HOTFIX_BRANCH_RE = re.compile(r"^hotfix/[a-z0-9][a-z0-9._-]*$")
 BENCHMARK_BRANCH_RE = re.compile(r"^benchmarking/lab$")
 
@@ -33,6 +34,11 @@ def validate_pr_flow(head: str, base: str) -> list[str]:
         errors.append(
             "Do not open PRs from develop directly. Promote selected work branches into develop, and only back-merge main into develop."
         )
+        return errors
+
+    if MAIN_PROMOTION_BRANCH_RE.match(head):
+        if base != "main":
+            errors.append(f"{head} must target main, not {base}.")
         return errors
 
     if FEATURE_BRANCH_RE.match(head) or FIX_BRANCH_RE.match(head) or CHORE_BRANCH_RE.match(head):
