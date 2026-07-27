@@ -2,7 +2,7 @@
 
 ## Metadata
 
-- latest suite dir: `./banchmark_result_log/ocr_simpletest_mangalmm_vs_paddle/20260414_152650_ocr_simpletest_mangalmm_vs_paddle_suite`
+- latest suite dir: `./banchmark_result_log/ocr_simpletest_mangalmm_vs_paddle/<run-id>_152650_ocr_simpletest_mangalmm_vs_paddle_suite`
 - latest assets dir: `./docs/assets/benchmarking/ocr-simpletest-mangalmm-vs-paddle/latest`
 - baseline gemma report: `./docs/banchmark_report/gemma-iq4nl-japan-report-ko.md`
 
@@ -33,14 +33,14 @@
 
 ### paddleocr_vl
 
-- selected warm run dir: `./banchmark_result_log/ocr_simpletest_mangalmm_vs_paddle/20260414_152650_ocr_simpletest_mangalmm_vs_paddle_suite/paddleocr_vl/warm2`
-- selected export root: `./banchmark_result_log/ocr_simpletest_mangalmm_vs_paddle/20260414_152650_ocr_simpletest_mangalmm_vs_paddle_suite/paddleocr_vl/warm2/corpus/comic_translate_Apr-14-2026_03-32-38PM`
+- selected warm run dir: `./banchmark_result_log/ocr_simpletest_mangalmm_vs_paddle/<run-id>_152650_ocr_simpletest_mangalmm_vs_paddle_suite/paddleocr_vl/warm2`
+- selected export root: `./banchmark_result_log/ocr_simpletest_mangalmm_vs_paddle/<run-id>_152650_ocr_simpletest_mangalmm_vs_paddle_suite/paddleocr_vl/warm2/corpus/comic_translate_Apr-14-2026_03-32-38PM`
 - copied translated images: `local-only`
 
 ### mangalmm
 
-- selected warm run dir: `./banchmark_result_log/ocr_simpletest_mangalmm_vs_paddle/20260414_152650_ocr_simpletest_mangalmm_vs_paddle_suite/mangalmm/warm2`
-- selected export root: `./banchmark_result_log/ocr_simpletest_mangalmm_vs_paddle/20260414_152650_ocr_simpletest_mangalmm_vs_paddle_suite/mangalmm/warm2/corpus/comic_translate_Apr-14-2026_03-39-17PM`
+- selected warm run dir: `./banchmark_result_log/ocr_simpletest_mangalmm_vs_paddle/<run-id>_152650_ocr_simpletest_mangalmm_vs_paddle_suite/mangalmm/warm2`
+- selected export root: `./banchmark_result_log/ocr_simpletest_mangalmm_vs_paddle/<run-id>_152650_ocr_simpletest_mangalmm_vs_paddle_suite/mangalmm/warm2/corpus/comic_translate_Apr-14-2026_03-39-17PM`
 - copied translated images: `none`
 
 ## Gemma Recommendation

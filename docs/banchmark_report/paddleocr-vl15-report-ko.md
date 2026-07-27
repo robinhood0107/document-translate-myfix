@@ -13,7 +13,7 @@
 - `official_score_scope`: `detect+ocr-only`
 - runtime_services: `ocr-only`
 - results root: `./banchmark_result_log/paddleocr_vl15`
-- active run: `./banchmark_result_log/paddleocr_vl15/20260407_052946_paddleocr-vl15-runtime_suite`
+- active run: `./banchmark_result_log/paddleocr_vl15/<run-id>_052946_paddleocr-vl15-runtime_suite`
 
 ## 라운드 결론
 
@@ -60,6 +60,6 @@
 
 ## 산출물
 
-- active run root: `./banchmark_result_log/paddleocr_vl15/20260407_052946_paddleocr-vl15-runtime_suite`
+- active run root: `./banchmark_result_log/paddleocr_vl15/<run-id>_052946_paddleocr-vl15-runtime_suite`
 - latest 자산은 이 종료 상태를 반영한 문서 기준으로 해석해야 함
 - 이전 smoke 기반 차트/CSV는 참고용이며, 이번 실패 종료 라운드의 최종 승격 판단 근거는 아님

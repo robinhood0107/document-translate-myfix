@@ -10,12 +10,12 @@
 
 ## Latest Output
 
-- latest suite root: `./banchmark_result_log/paddleocr_vl_parallel/20260415_031602_paddleocr-vl-parallel-smoke`
+- latest suite root: `./banchmark_result_log/paddleocr_vl_parallel/<run-id>_031602_paddleocr-vl-parallel-smoke`
 - quality_gate_winner: `fixed_area_desc_w8`
 - scheduler_mode: `fixed_area_desc`
 - ocr_total_sec_median: `292.526`
 - final_promotion_status: `approved_fixed_area_desc_w8`
 - approved_promotion_candidate: `fixed_area_desc_w8`
 - review_candidate_keys: `['fixed_area_desc_w8', 'auto_v1_cap4']`
-- baseline gold: `./banchmark_result_log/paddleocr_vl_parallel/20260415_031602_paddleocr-vl-parallel-smoke/baseline_gold.json`
-- detector manifest: `./banchmark_result_log/paddleocr_vl_parallel/20260415_031602_paddleocr-vl-parallel-smoke/detector_manifest.json`
+- baseline gold: `./banchmark_result_log/paddleocr_vl_parallel/<run-id>_031602_paddleocr-vl-parallel-smoke/baseline_gold.json`
+- detector manifest: `./banchmark_result_log/paddleocr_vl_parallel/<run-id>_031602_paddleocr-vl-parallel-smoke/detector_manifest.json`

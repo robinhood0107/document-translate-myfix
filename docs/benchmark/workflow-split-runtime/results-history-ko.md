@@ -35,9 +35,9 @@
 
 | scenario | status | report | timing | quality |
 | --- | --- | --- | --- | --- |
-| baseline_legacy | completed | `./banchmark_result_log/workflow-split-runtime/20260415_055838_baseline_legacy/report.md` | `./banchmark_result_log/workflow-split-runtime/20260415_055838_baseline_legacy/timing_summary.json` | `./banchmark_result_log/workflow-split-runtime/20260415_055838_baseline_legacy/quality_summary.json` |
-| candidate_stage_batched_single_ocr | completed | `./banchmark_result_log/workflow-split-runtime/20260415_090653_candidate_stage_batched_single_ocr/report.md` | `./banchmark_result_log/workflow-split-runtime/20260415_090653_candidate_stage_batched_single_ocr/timing_summary.json` | `./banchmark_result_log/workflow-split-runtime/20260415_090653_candidate_stage_batched_single_ocr/quality_summary.json` |
-| candidate_stage_batched_dual_resident | completed | `./banchmark_result_log/workflow-split-runtime/20260415_091848_candidate_stage_batched_dual_resident/report.md` | `./banchmark_result_log/workflow-split-runtime/20260415_091848_candidate_stage_batched_dual_resident/timing_summary.json` | `./banchmark_result_log/workflow-split-runtime/20260415_091848_candidate_stage_batched_dual_resident/quality_summary.json` |
+| baseline_legacy | completed | `./banchmark_result_log/workflow-split-runtime/<run-id>_055838_baseline_legacy/report.md` | `./banchmark_result_log/workflow-split-runtime/<run-id>_055838_baseline_legacy/timing_summary.json` | `./banchmark_result_log/workflow-split-runtime/<run-id>_055838_baseline_legacy/quality_summary.json` |
+| candidate_stage_batched_single_ocr | completed | `./banchmark_result_log/workflow-split-runtime/<run-id>_090653_candidate_stage_batched_single_ocr/report.md` | `./banchmark_result_log/workflow-split-runtime/<run-id>_090653_candidate_stage_batched_single_ocr/timing_summary.json` | `./banchmark_result_log/workflow-split-runtime/<run-id>_090653_candidate_stage_batched_single_ocr/quality_summary.json` |
+| candidate_stage_batched_dual_resident | completed | `./banchmark_result_log/workflow-split-runtime/<run-id>_091848_candidate_stage_batched_dual_resident/report.md` | `./banchmark_result_log/workflow-split-runtime/<run-id>_091848_candidate_stage_batched_dual_resident/timing_summary.json` | `./banchmark_result_log/workflow-split-runtime/<run-id>_091848_candidate_stage_batched_dual_resident/quality_summary.json` |
 
 ## Required Tables
 

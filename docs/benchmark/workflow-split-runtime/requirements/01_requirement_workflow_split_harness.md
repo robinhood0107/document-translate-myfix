@@ -14,7 +14,7 @@ description: 13장을 기준으로 전체 파이프라인을 텍스트 감지 ->
 1. 저장소 범위의 코드 변경 전에 반드시 `rules.md`를 읽고 지켜라.
 2. `main`, `develop`은 보호 브랜치로 취급하고 직접 작업하지 마라.
 3. `main`, `develop`, `benchmarking/lab`은 장기 유지 브랜치이며 삭제 대상으로 다루지 마라.
-4. 이 저장소에서는 Git worktree를 만들지 말고 항상 `C:\Users\pjjpj\Desktop\openai_manga_translater\comic-translate` 안에서 브랜치만 전환하라.
+4. 이 저장소에서는 Git worktree를 만들지 말고 항상 `<repo-root>` 안에서 브랜치만 전환하라.
 5. 로컬 환경은 `.venv-win`, `.venv-win-cuda13`만 공식 환경으로 사용하라.
 6. 기존 파이프라인과 기존 플로우는 절대로 제거하거나 깨뜨리지 마라. 이번 작업은 "대체"가 아니라 "병행 가능한 신규 워크플로우 추가"다.
 7. 신규 워크플로우는 전체 설정창에서 기존 방식과 새 방식을 선택할 수 있어야 한다.
@@ -25,7 +25,7 @@ description: 13장을 기준으로 전체 파이프라인을 텍스트 감지 ->
 
 ## 이 작업에서 절대로 빼먹으면 안 되는 사용자 요구사항 해석
 
-1. 기준 데이터셋은 C:\Users\pjjpj\Desktop\openai_manga_translater\comic-translate\Sample\japan_vllm_parallel_subset의 "13장"이다.
+1. 기준 데이터셋은 <repo-root>\Sample\japan_vllm_parallel_subset의 "13장"이다.
 2. 이 작업 전용 지시문을 `skill.md` 같은 하네스 형식으로 정확하게 만들어야 한다.
 3. 과정 전체에서 중간중간마다 "문제 해결 명세서"를 남겨야 한다.
 4. 모든 문제 해결 명세서에는 이 발상이 "사용자가 착안해 낸 것"임을 명시해야 한다.

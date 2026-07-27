@@ -57,7 +57,7 @@ locked gold가 있으면 같은 명령이 정식 benchmark mode로 동작합니�
 
 ## 보고서
 
-- latest report: [ocr-combo-report-ko.md](/mnt/c/Users/pjjpj/Desktop/openai_manga_translater/comic-translate/docs/banchmark_report/ocr-combo-report-ko.md)
+- latest report: [ocr-combo-report-ko.md](<repo-root>/docs/banchmark_report/ocr-combo-report-ko.md)
 - latest assets: `docs/assets/benchmarking/ocr-combo/latest`
 - history assets: `docs/assets/benchmarking/ocr-combo/history/<snapshot-id>`
-- gold review guide: [gold-review-ko.md](/mnt/c/Users/pjjpj/Desktop/openai_manga_translater/comic-translate/docs/benchmark/ocr-combo/gold-review-ko.md)
+- gold review guide: [gold-review-ko.md](<repo-root>/docs/benchmark/ocr-combo/gold-review-ko.md)

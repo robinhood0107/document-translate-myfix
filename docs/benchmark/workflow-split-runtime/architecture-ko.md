@@ -16,7 +16,7 @@
 
 ### 2. benchmark orchestration 계층
 
-- family runner: [workflow_split_runtime_benchmark.py](/mnt/c/Users/pjjpj/Desktop/openai_manga_translater/comic-translate/scripts/workflow_split_runtime_benchmark.py)
+- family runner: [workflow_split_runtime_benchmark.py](<repo-root>/scripts/workflow_split_runtime_benchmark.py)
 - preset / runtime mode 조합기
 - curated 13-page corpus stager
 - contract artifact normalizer
@@ -31,11 +31,11 @@
 
 ## 현재 구조에서 확인된 핵심 경계
 
-1. [batch_processor.py](/mnt/c/Users/pjjpj/Desktop/openai_manga_translater/comic-translate/pipeline/batch_processor.py:730)는 페이지 단위로 단계를 한 번에 처리한다.
-2. [modules/ocr/processor.py](/mnt/c/Users/pjjpj/Desktop/openai_manga_translater/comic-translate/modules/ocr/processor.py:36)는 OCR 시작 직전에 runtime manager를 호출한다.
-3. [modules/translation/processor.py](/mnt/c/Users/pjjpj/Desktop/openai_manga_translater/comic-translate/modules/translation/processor.py:38)는 translator 생성 시 Gemma runtime manager를 호출한다.
-4. [controller.py](/mnt/c/Users/pjjpj/Desktop/openai_manga_translater/comic-translate/controller.py:1098)는 runtime progress를 UI에 반영하고, 이번 단계부터 `metrics.jsonl`에도 남긴다.
-5. [settings_page.py](/mnt/c/Users/pjjpj/Desktop/openai_manga_translater/comic-translate/app/ui/settings/settings_page.py:580)는 도구 설정 저장의 중심 지점이다.
+1. [batch_processor.py](<repo-root>/pipeline/batch_processor.py:730)는 페이지 단위로 단계를 한 번에 처리한다.
+2. [modules/ocr/processor.py](<repo-root>/modules/ocr/processor.py:36)는 OCR 시작 직전에 runtime manager를 호출한다.
+3. [modules/translation/processor.py](<repo-root>/modules/translation/processor.py:38)는 translator 생성 시 Gemma runtime manager를 호출한다.
+4. [controller.py](<repo-root>/controller.py:1098)는 runtime progress를 UI에 반영하고, 이번 단계부터 `metrics.jsonl`에도 남긴다.
+5. [settings_page.py](<repo-root>/app/ui/settings/settings_page.py:580)는 도구 설정 저장의 중심 지점이다.
 
 ## Requirement 1 목표 아키텍처
 

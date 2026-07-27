@@ -247,7 +247,7 @@ def _render_bootstrap_markdown(
         if review_rows
         else "_none_",
         "",
-        "검수는 [gold-review-ko.md](/mnt/c/Users/pjjpj/Desktop/openai_manga_translater/comic-translate/docs/benchmark/ocr-combo/gold-review-ko.md)의 절차를 따릅니다.",
+        "검수는 [gold-review-ko.md](../benchmark/ocr-combo/gold-review-ko.md)의 절차를 따릅니다.",
         "",
         "## Artifacts",
         "",

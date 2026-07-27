@@ -14,19 +14,19 @@
 
 ### 1. 핵심 요약표
 
-- `banchmark_result_log/workflow-split-runtime/20260415_091848_candidate_stage_batched_dual_resident/sidecar_review_pack.md`
+- `banchmark_result_log/workflow-split-runtime/<run-id>_091848_candidate_stage_batched_dual_resident/sidecar_review_pack.md`
 
 이 파일은 GitHub에서 바로 읽기 좋은 표 형식이다.
 
 ### 2. raw 데이터
 
-- `banchmark_result_log/workflow-split-runtime/20260415_091848_candidate_stage_batched_dual_resident/sidecar_review_pack.json`
+- `banchmark_result_log/workflow-split-runtime/<run-id>_091848_candidate_stage_batched_dual_resident/sidecar_review_pack.json`
 
 이 파일은 수치를 더 자세히 확인할 때 쓴다.
 
 ### 3. 채점용 시트
 
-- `banchmark_result_log/workflow-split-runtime/20260415_091848_candidate_stage_batched_dual_resident/review_decision_sheet-ko.md`
+- `banchmark_result_log/workflow-split-runtime/<run-id>_091848_candidate_stage_batched_dual_resident/review_decision_sheet-ko.md`
 
 이 파일에 각 페이지별 `O / X`를 적으면 된다.
 

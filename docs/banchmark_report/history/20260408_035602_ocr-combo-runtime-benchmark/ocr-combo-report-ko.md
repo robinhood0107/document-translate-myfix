@@ -35,10 +35,10 @@
 
 | corpus | gold_review_status | gold_path | gold_review_packet_dir | gold_generated_from_run_dir | gold_page_count | example_page |
 | --- | --- | --- | --- | --- | --- | --- |
-| china | draft | ./benchmarks/ocr_combo/gold/china/gold.json | ./banchmark_result_log/ocr_combo/20260407_211341_ocr-combo-runtime_suite/gold-review/china | ./banchmark_result_log/ocr_combo/20260407_211341_ocr-combo-runtime_suite/reference-seed/china | 8 | 0006_0005 |
-| japan | draft | ./benchmarks/ocr_combo/gold/japan/gold.json | ./banchmark_result_log/ocr_combo/20260407_211341_ocr-combo-runtime_suite/gold-review/japan | ./banchmark_result_log/ocr_combo/20260407_211341_ocr-combo-runtime_suite/reference-seed/japan | 22 | 094 |
+| china | draft | ./benchmarks/ocr_combo/gold/china/gold.json | ./banchmark_result_log/ocr_combo/<run-id>_211341_ocr-combo-runtime_suite/gold-review/china | ./banchmark_result_log/ocr_combo/<run-id>_211341_ocr-combo-runtime_suite/reference-seed/china | 8 | 0006_0005 |
+| japan | draft | ./benchmarks/ocr_combo/gold/japan/gold.json | ./banchmark_result_log/ocr_combo/<run-id>_211341_ocr-combo-runtime_suite/gold-review/japan | ./banchmark_result_log/ocr_combo/<run-id>_211341_ocr-combo-runtime_suite/reference-seed/japan | 22 | 094 |
 
-검수는 [gold-review-ko.md](/mnt/c/Users/pjjpj/Desktop/openai_manga_translater/comic-translate/docs/benchmark/ocr-combo/gold-review-ko.md)의 절차를 따릅니다.
+검수는 [gold-review-ko.md](<repo-root>/docs/benchmark/ocr-combo/gold-review-ko.md)의 절차를 따릅니다.
 
 ## Artifacts
 

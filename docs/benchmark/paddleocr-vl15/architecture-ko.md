@@ -48,8 +48,8 @@
 ## 결과 루트
 
 - raw 결과: `./banchmark_result_log/paddleocr_vl15/`
-- 최신 보고서: [paddleocr-vl15-report-ko.md](/mnt/c/Users/pjjpj/Desktop/openai_manga_translater/comic-translate/docs/banchmark_report/paddleocr-vl15-report-ko.md)
-- 최신 자산: [latest](/mnt/c/Users/pjjpj/Desktop/openai_manga_translater/comic-translate/docs/assets/benchmarking/paddleocr-vl15/latest)
+- 최신 보고서: [paddleocr-vl15-report-ko.md](<repo-root>/docs/banchmark_report/paddleocr-vl15-report-ko.md)
+- 최신 자산: [latest](<repo-root>/docs/assets/benchmarking/paddleocr-vl15/latest)
 
 ## 브랜치 정책
 

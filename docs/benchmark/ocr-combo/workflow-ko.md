@@ -2,7 +2,7 @@
 
 ## 1. launcher
 
-공식 launcher는 [benchmark_suite_cuda13.bat](/mnt/c/Users/pjjpj/Desktop/openai_manga_translater/comic-translate/scripts/benchmark_suite_cuda13.bat)이며, `ocr-combo-runtime` profile로 실행합니다.
+공식 launcher는 [benchmark_suite_cuda13.bat](<repo-root>/scripts/benchmark_suite_cuda13.bat)이며, `ocr-combo-runtime` profile로 실행합니다.
 
 ## 2. bootstrap mode
 
@@ -22,7 +22,7 @@ locked gold가 없으면 suite는 benchmark를 끝까지 돌리지 않고 아래
 - geometry가 unusable한 페이지는 `status=excluded`로 표시합니다.
 - 검수가 끝나면 `review_status=locked`로 저장합니다.
 
-세부 절차는 [gold-review-ko.md](/mnt/c/Users/pjjpj/Desktop/openai_manga_translater/comic-translate/docs/benchmark/ocr-combo/gold-review-ko.md)를 따릅니다.
+세부 절차는 [gold-review-ko.md](<repo-root>/docs/benchmark/ocr-combo/gold-review-ko.md)를 따릅니다.
 
 ## 4. benchmark mode
 

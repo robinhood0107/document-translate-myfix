@@ -3,7 +3,7 @@
 ## 현재 상태
 
 - 업데이트 시각: `2026-04-12 19:59:59 KST`
-- 공식 suite: `./banchmark_result_log/gemma_iq4nl_japan/20260411_171639_gemma_iq4nl_japan_fullgpu_suite`
+- 공식 suite: `./banchmark_result_log/gemma_iq4nl_japan/<run-id>_171639_gemma_iq4nl_japan_fullgpu_suite`
 - suite 상태: `completed`
 - 현재 stage: `confirm`
 - 현재 candidate: `max512`

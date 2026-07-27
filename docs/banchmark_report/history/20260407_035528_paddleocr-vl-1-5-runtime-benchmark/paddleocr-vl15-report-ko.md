@@ -11,7 +11,7 @@
 - baseline SHA: `smoke`
 - develop ref SHA: `smoke`
 - results root: `./banchmark_result_log/paddleocr_vl15`
-- gold path: `./banchmark_result_log/paddleocr_vl15/gold/20260407_034713_paddleocr-vl15-baseline_one-page_r1_baseline_gold.json`
+- gold path: `./banchmark_result_log/paddleocr_vl15/gold/<run-id>_034713_paddleocr-vl15-baseline_one-page_r1_baseline_gold.json`
 
 ## 라운드 결론
 
@@ -27,8 +27,8 @@
 
 | run | detect_total_sec | ocr_total_sec | detect_ocr_total_sec | ocr_page_p95_sec | detection_pass | ocr_pass | run_dir |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| cold | 3.354 | 42.676 | 46.030 | 42.676 | True | True | ./banchmark_result_log/paddleocr_vl15/20260407_034713_paddleocr-vl15-baseline_one-page_r1 |
-| warm1 | 3.354 | 42.676 | 46.030 | 42.676 | True | True | ./banchmark_result_log/paddleocr_vl15/20260407_034713_paddleocr-vl15-baseline_one-page_r1 |
+| cold | 3.354 | 42.676 | 46.030 | 42.676 | True | True | ./banchmark_result_log/paddleocr_vl15/<run-id>_034713_paddleocr-vl15-baseline_one-page_r1 |
+| warm1 | 3.354 | 42.676 | 46.030 | 42.676 | True | True | ./banchmark_result_log/paddleocr_vl15/<run-id>_034713_paddleocr-vl15-baseline_one-page_r1 |
 
 ## Candidate 결과
 
@@ -36,9 +36,9 @@
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | phase-0-baseline | paddleocr-vl15-baseline | 46.030 | 42.676 | True | True | True |  |
 
-![candidate-official-score](../../../assets/benchmarking/paddleocr-vl15/history/20260407_035528_paddleocr-vl-1-5-runtime-benchmark/paddleocr_vl15_candidate_official_score.png)
+![candidate-official-score](../../../assets/benchmarking/paddleocr-vl15/history/<run-id>_035528_paddleocr-vl-1-5-runtime-benchmark/paddleocr_vl15_candidate_official_score.png)
 
-![candidate-p95](../../../assets/benchmarking/paddleocr-vl15/history/20260407_035528_paddleocr-vl-1-5-runtime-benchmark/paddleocr_vl15_candidate_p95.png)
+![candidate-p95](../../../assets/benchmarking/paddleocr-vl15/history/<run-id>_035528_paddleocr-vl-1-5-runtime-benchmark/paddleocr_vl15_candidate_p95.png)
 
 ## Phase Best
 
@@ -46,7 +46,7 @@
 | --- | --- | --- | --- | --- | --- |
 | phase-0-baseline | paddleocr-vl15-baseline | 46.030 | 42.676 | True |  |
 
-![phase-best](../../../assets/benchmarking/paddleocr-vl15/history/20260407_035528_paddleocr-vl-1-5-runtime-benchmark/paddleocr_vl15_phase_best_official_score.png)
+![phase-best](../../../assets/benchmarking/paddleocr-vl15/history/<run-id>_035528_paddleocr-vl-1-5-runtime-benchmark/paddleocr_vl15_phase_best_official_score.png)
 
 ## 산출물
 

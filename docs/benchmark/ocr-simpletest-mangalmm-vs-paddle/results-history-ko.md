@@ -8,7 +8,7 @@
 
 ## Latest Output
 
-- latest suite root: `./banchmark_result_log/ocr_simpletest_mangalmm_vs_paddle/20260414_152650_ocr_simpletest_mangalmm_vs_paddle_suite`
+- latest suite root: `./banchmark_result_log/ocr_simpletest_mangalmm_vs_paddle/<run-id>_152650_ocr_simpletest_mangalmm_vs_paddle_suite`
 - winner: `paddleocr_vl`
 - warm_median_elapsed_sec: `153.018`
 - warm_total_page_failed_count: `0`
@@ -22,5 +22,5 @@
 ## History
 
 - 공식 latest/history는 완료된 CUDA13 suite만 기준으로 갱신한다.
-- current suite archive: `./docs/assets/benchmarking/ocr-simpletest-mangalmm-vs-paddle/history/20260414_152650_ocr_simpletest_mangalmm_vs_paddle_suite`
+- current suite archive: `./docs/assets/benchmarking/ocr-simpletest-mangalmm-vs-paddle/history/<run-id>_152650_ocr_simpletest_mangalmm_vs_paddle_suite`
 

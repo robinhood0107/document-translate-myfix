@@ -2,13 +2,13 @@
 
 ## Metadata
 
-- latest suite dir: `./banchmark_result_log/paddleocr_vl_parallel/20260415_031602_paddleocr-vl-parallel-smoke`
+- latest suite dir: `./banchmark_result_log/paddleocr_vl_parallel/<run-id>_031602_paddleocr-vl-parallel-smoke`
 - latest assets dir: `./docs/assets/benchmarking/paddleocr-vl-parallel/latest`
 - runtime_contract: `paddleocr-vl-single-tenant-ocr-only`
 - runtime_services: `ocr-only`
 - stage_ceiling: `ocr`
-- baseline gold: `./banchmark_result_log/paddleocr_vl_parallel/20260415_031602_paddleocr-vl-parallel-smoke/baseline_gold.json`
-- detector manifest: `./banchmark_result_log/paddleocr_vl_parallel/20260415_031602_paddleocr-vl-parallel-smoke/detector_manifest.json`
+- baseline gold: `./banchmark_result_log/paddleocr_vl_parallel/<run-id>_031602_paddleocr-vl-parallel-smoke/baseline_gold.json`
+- detector manifest: `./banchmark_result_log/paddleocr_vl_parallel/<run-id>_031602_paddleocr-vl-parallel-smoke/detector_manifest.json`
 - runtime container names: `['paddleocr-server', 'paddleocr-vllm']`
 - gemma-local-server booted: `False`
 
@@ -46,8 +46,8 @@
 - OCR page p95 chart: `./docs/assets/benchmarking/paddleocr-vl-parallel/latest/ocr_page_p95_sec_median.svg`
 - Mean CER chart: `./docs/assets/benchmarking/paddleocr-vl-parallel/latest/quality_mean_cer.svg`
 - Candidate table: `./docs/assets/benchmarking/paddleocr-vl-parallel/latest/candidate_table.md`
-- top1 diff review: `./banchmark_result_log/paddleocr_vl_parallel/20260415_031602_paddleocr-vl-parallel-smoke/review/top1_diff_review.md`
-- top2 diff review: `./banchmark_result_log/paddleocr_vl_parallel/20260415_031602_paddleocr-vl-parallel-smoke/review/top2_diff_review.md`
+- top1 diff review: `./banchmark_result_log/paddleocr_vl_parallel/<run-id>_031602_paddleocr-vl-parallel-smoke/review/top1_diff_review.md`
+- top2 diff review: `./banchmark_result_log/paddleocr_vl_parallel/<run-id>_031602_paddleocr-vl-parallel-smoke/review/top2_diff_review.md`
 
 ## Portfolio Notes
 
