@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import json
+import tempfile
 import unittest
+from pathlib import Path
 from unittest import mock
 
 import numpy as np
@@ -11,12 +13,15 @@ from modules.translation.llm.custom_local_gemma import (
     DEFAULT_GEMMA_PROMPT_PROFILE,
     GEMMA_REQUEST_MODE_CONTEXTUAL_GROUPED,
     GEMMA_REQUEST_MODE_CONTEXTUAL_SINGLE,
+    STRICT_GEMMA_PROMPT_PROFILE,
     CustomLocalGemmaTranslation,
     GemmaLocalServerContextCapacityError,
     GemmaLocalServerResponseError,
 )
 from modules.utils.exceptions import LocalServiceConnectionError
 from modules.utils.textblock import TextBlock
+from modules.utils.correction_dictionary import apply_translation_result_dictionary
+from modules.translation.translation_memory import TranslationMemoryStore
 
 
 def _response(payload: dict[str, str]) -> dict:
@@ -757,6 +762,675 @@ class CustomLocalGemmaRepetitionGuardTests(unittest.TestCase):
             overridden.request_mode,
             GEMMA_REQUEST_MODE_CONTEXTUAL_SINGLE,
         )
+
+    @staticmethod
+    def _runtime_identity(fingerprint: str = "runtime-a") -> dict:
+        return {
+            "model_sha256": "a" * 64,
+            "runtime_fingerprint": fingerprint,
+            "runtime_image_id": "sha256:" + ("b" * 64),
+            "runtime_command_sha256": "c" * 64,
+            "runtime_preparation_version": 1,
+        }
+
+    def test_persistent_all_hit_skips_runtime_and_http(self) -> None:
+        with (
+            tempfile.TemporaryDirectory() as temp_dir,
+            TranslationMemoryStore(Path(temp_dir) / "tm.sqlite3") as store,
+        ):
+            first = self._engine()
+            first.request_mode = GEMMA_REQUEST_MODE_CONTEXTUAL_GROUPED
+            first.configure_translation_memory(
+                store,
+                {
+                    "persistent_cache_enabled": True,
+                    "exact_tm_enabled": True,
+                },
+            )
+            first_ensure = mock.Mock()
+            first.configure_runtime_hooks(
+                ensure_runtime=first_ensure,
+                runtime_identity_provider=self._runtime_identity,
+            )
+            first_blocks = self._blocks("first", "second")
+            with mock.patch.object(
+                first,
+                "_request_translation",
+                return_value=_response(
+                    {"block_0": "첫째", "block_1": "둘째"}
+                ),
+            ):
+                first.translate(
+                    first_blocks,
+                    np.zeros((1, 1, 3), dtype=np.uint8),
+                    "same context",
+                )
+            first_ensure.assert_called_once_with()
+
+            second = self._engine()
+            second.request_mode = GEMMA_REQUEST_MODE_CONTEXTUAL_GROUPED
+            second.configure_translation_memory(
+                store,
+                {
+                    "persistent_cache_enabled": True,
+                    "exact_tm_enabled": True,
+                },
+            )
+            second_ensure = mock.Mock()
+            second.configure_runtime_hooks(
+                ensure_runtime=second_ensure,
+                runtime_identity_provider=self._runtime_identity,
+            )
+            second_blocks = self._blocks("first", "second")
+            with mock.patch.object(second, "_request_translation") as request:
+                runtime_required = second.prepare_translation(
+                    second_blocks,
+                    "same context",
+                )
+                second.translate(
+                    second_blocks,
+                    np.zeros((1, 1, 3), dtype=np.uint8),
+                    "same context",
+                )
+
+            self.assertFalse(runtime_required)
+            second_ensure.assert_not_called()
+            request.assert_not_called()
+            self.assertEqual(
+                [block.translation for block in second_blocks],
+                ["첫째", "둘째"],
+            )
+            self.assertEqual(
+                second.last_benchmark_stats["gemma_tm_result_cache_hit_count"],
+                2,
+            )
+            self.assertEqual(
+                second.last_benchmark_stats["gemma_tm_runtime_skipped_count"],
+                1,
+            )
+
+    def test_mixed_exact_tm_hit_requests_only_missing_key_with_full_context(self) -> None:
+        with (
+            tempfile.TemporaryDirectory() as temp_dir,
+            TranslationMemoryStore(Path(temp_dir) / "tm.sqlite3") as store,
+        ):
+            store.record_tm_candidate("first", "승인됨", "Japanese", "Korean")
+            entry_id = store.list_tm_entries()[0]["id"]
+            store.set_approved([entry_id], True)
+
+            engine = self._engine()
+            engine.chunk_size = 2
+            engine.request_mode = GEMMA_REQUEST_MODE_CONTEXTUAL_GROUPED
+            engine.configure_translation_memory(
+                store,
+                {
+                    "persistent_cache_enabled": False,
+                    "exact_tm_enabled": True,
+                },
+            )
+            ensure_runtime = mock.Mock()
+            engine.configure_runtime_hooks(
+                ensure_runtime=ensure_runtime,
+                runtime_identity_provider=self._runtime_identity,
+            )
+            blocks = self._blocks("first", "second")
+            captured: list[dict] = []
+
+            def fake_request(
+                _system_prompt: str,
+                user_prompt: str,
+                *,
+                expected_keys=None,
+                request_mode="",
+            ) -> dict:
+                captured.append(
+                    {
+                        "payload": json.loads(user_prompt),
+                        "expected_keys": expected_keys,
+                        "request_mode": request_mode,
+                    }
+                )
+                return _response({"block_1": "새 번역"})
+
+            with mock.patch.object(
+                engine,
+                "_request_translation",
+                side_effect=fake_request,
+            ):
+                engine.translate(
+                    blocks,
+                    np.zeros((1, 1, 3), dtype=np.uint8),
+                    "context",
+                )
+
+            ensure_runtime.assert_called_once_with()
+            self.assertEqual(
+                [block.translation for block in blocks],
+                ["승인됨", "새 번역"],
+            )
+            self.assertEqual(len(captured), 1)
+            self.assertEqual(captured[0]["expected_keys"], ["block_1"])
+            self.assertEqual(
+                captured[0]["payload"]["requested_blocks"],
+                ["block_1"],
+            )
+            self.assertIn("[[block_0]] first", captured[0]["payload"]["merged_context"])
+            self.assertIn("[[block_1]] second", captured[0]["payload"]["merged_context"])
+            self.assertEqual(
+                engine.last_benchmark_stats["gemma_tm_exact_hit_count"],
+                1,
+            )
+
+    def test_partial_result_cache_population_requests_only_remaining_key(self) -> None:
+        with (
+            tempfile.TemporaryDirectory() as temp_dir,
+            TranslationMemoryStore(Path(temp_dir) / "tm.sqlite3") as store,
+        ):
+            first = self._engine()
+            first.chunk_size = 2
+            first.request_mode = GEMMA_REQUEST_MODE_CONTEXTUAL_GROUPED
+            first.configure_translation_memory(
+                store,
+                {
+                    "persistent_cache_enabled": True,
+                    "exact_tm_enabled": False,
+                },
+            )
+            first.configure_runtime_hooks(
+                ensure_runtime=mock.Mock(),
+                runtime_identity_provider=self._runtime_identity,
+            )
+            first_blocks = self._blocks("first", "second")
+            with mock.patch.object(
+                first,
+                "_request_translation",
+                return_value=_response({"block_0": "첫째"}),
+            ):
+                first.translate(
+                    first_blocks,
+                    np.zeros((1, 1, 3), dtype=np.uint8),
+                    "context",
+                    requested_indices=[0],
+                )
+
+            second = self._engine()
+            second.chunk_size = 2
+            second.request_mode = GEMMA_REQUEST_MODE_CONTEXTUAL_GROUPED
+            second.configure_translation_memory(
+                store,
+                {
+                    "persistent_cache_enabled": True,
+                    "exact_tm_enabled": False,
+                },
+            )
+            second.configure_runtime_hooks(
+                ensure_runtime=mock.Mock(),
+                runtime_identity_provider=self._runtime_identity,
+            )
+            second_blocks = self._blocks("first", "second")
+            captured: list[dict] = []
+
+            def fake_request(
+                _system_prompt: str,
+                user_prompt: str,
+                *,
+                expected_keys=None,
+                request_mode="",
+            ) -> dict:
+                captured.append(
+                    {
+                        "payload": json.loads(user_prompt),
+                        "expected_keys": expected_keys,
+                        "request_mode": request_mode,
+                    }
+                )
+                return _response({"block_1": "둘째"})
+
+            with mock.patch.object(
+                second,
+                "_request_translation",
+                side_effect=fake_request,
+            ):
+                second.translate(
+                    second_blocks,
+                    np.zeros((1, 1, 3), dtype=np.uint8),
+                    "context",
+                )
+
+            self.assertEqual(
+                [block.translation for block in second_blocks],
+                ["첫째", "둘째"],
+            )
+            self.assertEqual(
+                second.last_benchmark_stats["gemma_tm_result_cache_hit_count"],
+                1,
+            )
+            self.assertEqual(
+                second.last_benchmark_stats["gemma_tm_result_cache_miss_count"],
+                1,
+            )
+            self.assertEqual(captured[0]["expected_keys"], ["block_1"])
+            self.assertEqual(
+                captured[0]["payload"]["requested_blocks"],
+                ["block_1"],
+            )
+            self.assertIn("[[block_0]] first", captured[0]["payload"]["merged_context"])
+            self.assertIn("[[block_1]] second", captured[0]["payload"]["merged_context"])
+            self.assertEqual(store.stats()["result_cache_entries"], 2)
+
+    def test_changed_runtime_identity_rejects_stale_result(self) -> None:
+        with (
+            tempfile.TemporaryDirectory() as temp_dir,
+            TranslationMemoryStore(Path(temp_dir) / "tm.sqlite3") as store,
+        ):
+            first = self._engine()
+            first.configure_translation_memory(
+                store,
+                {
+                    "persistent_cache_enabled": True,
+                    "exact_tm_enabled": False,
+                },
+            )
+            first.configure_runtime_hooks(
+                ensure_runtime=mock.Mock(),
+                runtime_identity_provider=lambda: self._runtime_identity("runtime-a"),
+            )
+            with mock.patch.object(
+                first,
+                "_request_translation",
+                return_value=_response({"translation": "old"}),
+            ):
+                first.translate(
+                    self._blocks("source"),
+                    np.zeros((1, 1, 3), dtype=np.uint8),
+                    "",
+                )
+
+            second = self._engine()
+            second.configure_translation_memory(
+                store,
+                {
+                    "persistent_cache_enabled": True,
+                    "exact_tm_enabled": False,
+                },
+            )
+            second.configure_runtime_hooks(
+                ensure_runtime=mock.Mock(),
+                runtime_identity_provider=lambda: self._runtime_identity("runtime-b"),
+            )
+            blocks = self._blocks("source")
+            with mock.patch.object(
+                second,
+                "_request_translation",
+                return_value=_response({"translation": "new"}),
+            ) as request:
+                second.translate(
+                    blocks,
+                    np.zeros((1, 1, 3), dtype=np.uint8),
+                    "",
+                )
+
+            request.assert_called_once()
+            self.assertEqual(blocks[0].translation, "new")
+            self.assertEqual(
+                second.last_benchmark_stats["gemma_tm_stale_reject_count"],
+                1,
+            )
+
+    def test_result_cache_rejects_prompt_model_sampler_context_and_tm_changes(
+        self,
+    ) -> None:
+        variants = {
+            "prompt": lambda engine, _store: setattr(
+                engine,
+                "prompt_profile",
+                STRICT_GEMMA_PROMPT_PROFILE,
+            ),
+            "model": lambda engine, _store: setattr(
+                engine,
+                "model",
+                "different-model.gguf",
+            ),
+            "sampler": lambda engine, _store: setattr(
+                engine,
+                "temperature",
+                0.2,
+            ),
+            "context": lambda _engine, _store: None,
+            "tm_revision": lambda _engine, store: (
+                store.record_tm_candidate(
+                    "unrelated",
+                    "entry",
+                    "Japanese",
+                    "Korean",
+                ),
+                store.set_approved(
+                    [store.list_tm_entries()[0]["id"]],
+                    True,
+                ),
+            ),
+        }
+
+        for variant, mutate in variants.items():
+            with self.subTest(variant=variant), tempfile.TemporaryDirectory() as temp_dir:
+                with TranslationMemoryStore(Path(temp_dir) / "tm.sqlite3") as store:
+                    first = self._engine()
+                    first.configure_translation_memory(
+                        store,
+                        {
+                            "persistent_cache_enabled": True,
+                            "exact_tm_enabled": False,
+                        },
+                    )
+                    first.configure_runtime_hooks(
+                        ensure_runtime=mock.Mock(),
+                        runtime_identity_provider=self._runtime_identity,
+                    )
+                    with mock.patch.object(
+                        first,
+                        "_request_translation",
+                        return_value=_response({"translation": "old"}),
+                    ):
+                        first.translate(
+                            self._blocks("source"),
+                            np.zeros((1, 1, 3), dtype=np.uint8),
+                            "base context",
+                        )
+
+                    second = self._engine()
+                    second.configure_translation_memory(
+                        store,
+                        {
+                            "persistent_cache_enabled": True,
+                            "exact_tm_enabled": False,
+                        },
+                    )
+                    second.configure_runtime_hooks(
+                        ensure_runtime=mock.Mock(),
+                        runtime_identity_provider=self._runtime_identity,
+                    )
+                    mutate(second, store)
+                    second_context = (
+                        "changed context"
+                        if variant == "context"
+                        else "base context"
+                    )
+                    blocks = self._blocks("source")
+                    with mock.patch.object(
+                        second,
+                        "_request_translation",
+                        return_value=_response({"translation": "new"}),
+                    ) as request:
+                        second.translate(
+                            blocks,
+                            np.zeros((1, 1, 3), dtype=np.uint8),
+                            second_context,
+                        )
+
+                    request.assert_called_once()
+                    self.assertEqual(blocks[0].translation, "new")
+
+    def test_result_dictionary_is_applied_once_after_miss_and_hit(self) -> None:
+        rules = [
+            {
+                "keyword": "cat",
+                "sub": "cat!",
+                "use_reg": False,
+                "case_sens": True,
+            }
+        ]
+        with (
+            tempfile.TemporaryDirectory() as temp_dir,
+            TranslationMemoryStore(Path(temp_dir) / "tm.sqlite3") as store,
+        ):
+            first = self._engine()
+            first.configure_translation_memory(
+                store,
+                {
+                    "persistent_cache_enabled": True,
+                    "exact_tm_enabled": False,
+                },
+            )
+            first.configure_runtime_hooks(
+                ensure_runtime=mock.Mock(),
+                runtime_identity_provider=self._runtime_identity,
+            )
+            first_blocks = self._blocks("source")
+            with mock.patch.object(
+                first,
+                "_request_translation",
+                return_value=_response({"translation": "cat"}),
+            ):
+                first.translate(
+                    first_blocks,
+                    np.zeros((1, 1, 3), dtype=np.uint8),
+                    "",
+                )
+            apply_translation_result_dictionary(first_blocks, rules)
+            self.assertEqual(first_blocks[0].translation, "cat!")
+
+            second = self._engine()
+            second.configure_translation_memory(
+                store,
+                {
+                    "persistent_cache_enabled": True,
+                    "exact_tm_enabled": False,
+                },
+            )
+            second.configure_runtime_hooks(
+                ensure_runtime=mock.Mock(),
+                runtime_identity_provider=self._runtime_identity,
+            )
+            second_blocks = self._blocks("source")
+            with mock.patch.object(second, "_request_translation") as request:
+                second.translate(
+                    second_blocks,
+                    np.zeros((1, 1, 3), dtype=np.uint8),
+                    "",
+                )
+            apply_translation_result_dictionary(second_blocks, rules)
+
+            request.assert_not_called()
+            self.assertEqual(second_blocks[0].translation, "cat!")
+
+    def test_enabling_exact_tm_collects_candidates_from_result_cache_hits(self) -> None:
+        with (
+            tempfile.TemporaryDirectory() as temp_dir,
+            TranslationMemoryStore(Path(temp_dir) / "tm.sqlite3") as store,
+        ):
+            first = self._engine()
+            first.configure_translation_memory(
+                store,
+                {
+                    "persistent_cache_enabled": True,
+                    "exact_tm_enabled": False,
+                },
+            )
+            first.configure_runtime_hooks(
+                ensure_runtime=mock.Mock(),
+                runtime_identity_provider=self._runtime_identity,
+            )
+            with mock.patch.object(
+                first,
+                "_request_translation",
+                return_value=_response({"translation": "cached raw"}),
+            ):
+                first.translate(
+                    self._blocks("source"),
+                    np.zeros((1, 1, 3), dtype=np.uint8),
+                    "",
+                )
+            self.assertEqual(store.stats()["candidate_tm_entries"], 0)
+
+            second = self._engine()
+            second.configure_translation_memory(
+                store,
+                {
+                    "persistent_cache_enabled": True,
+                    "exact_tm_enabled": True,
+                },
+            )
+            second.configure_runtime_hooks(
+                ensure_runtime=mock.Mock(),
+                runtime_identity_provider=self._runtime_identity,
+            )
+            with mock.patch.object(second, "_request_translation") as request:
+                second.translate(
+                    self._blocks("source"),
+                    np.zeros((1, 1, 3), dtype=np.uint8),
+                    "",
+                )
+
+            request.assert_not_called()
+            self.assertEqual(store.stats()["candidate_tm_entries"], 1)
+
+    def test_result_cache_identity_contains_every_output_affecting_contract(self) -> None:
+        with (
+            tempfile.TemporaryDirectory() as temp_dir,
+            TranslationMemoryStore(Path(temp_dir) / "tm.sqlite3") as store,
+        ):
+            engine = self._engine()
+            engine.settings = mock.Mock(
+                get_translation_result_dictionary_rules=mock.Mock(
+                    return_value=[
+                        {
+                            "keyword": "old",
+                            "sub": "new",
+                            "use_reg": False,
+                            "case_sens": True,
+                        }
+                    ]
+                )
+            )
+            engine.request_mode = GEMMA_REQUEST_MODE_CONTEXTUAL_GROUPED
+            engine.chunk_size = 2
+            engine.temperature = 0.7
+            engine.top_k = 64
+            engine.top_p = 0.95
+            engine.min_p = 0.0
+            engine.max_tokens = 512
+            engine.configure_translation_memory(
+                store,
+                {
+                    "persistent_cache_enabled": True,
+                    "exact_tm_enabled": False,
+                },
+            )
+            engine.configure_runtime_hooks(
+                ensure_runtime=mock.Mock(),
+                runtime_identity_provider=self._runtime_identity,
+            )
+            blocks = self._blocks("first", "second")
+
+            self.assertTrue(engine.prepare_translation(blocks, "extra context"))
+            plan = engine._pending_translation_plan
+            self.assertIsNotNone(plan)
+            identity = json.loads(plan.targets[1].identity_json)
+
+            self.assertEqual(identity["ordered_raw_group_context"], ["first", "second"])
+            self.assertEqual(identity["ordered_full_group_context"], ["first", "second"])
+            self.assertEqual(identity["target_index"], 1)
+            self.assertEqual(identity["target_key"], "block_1")
+            self.assertEqual(identity["source_lang"], "Japanese")
+            self.assertEqual(identity["target_lang"], "Korean")
+            self.assertEqual(identity["extra_context"], "extra context")
+            self.assertEqual(identity["configured_group_size"], 2)
+            self.assertEqual(identity["request_mode"], GEMMA_REQUEST_MODE_CONTEXTUAL_GROUPED)
+            self.assertEqual(
+                identity["sampler"],
+                {
+                    "temperature": 0.7,
+                    "top_k": 64,
+                    "top_p": 0.95,
+                    "min_p": 0.0,
+                    "max_completion_tokens": 512,
+                },
+            )
+            self.assertEqual(identity["runtime"]["model_sha256"], "a" * 64)
+            self.assertEqual(identity["runtime"]["runtime_fingerprint"], "runtime-a")
+            self.assertEqual(identity["tm_revision"], 0)
+            self.assertTrue(identity["dictionary_version"])
+            self.assertGreaterEqual(identity["prompt_contract_version"], 1)
+            self.assertGreaterEqual(identity["translation_input_normalizer_version"], 1)
+            self.assertGreaterEqual(identity["output_sanitizer_version"], 1)
+            self.assertGreaterEqual(identity["repetition_guard_version"], 1)
+
+    def test_corrupt_cache_fails_open_and_translates_normally(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            db_path = Path(temp_dir) / "tm.sqlite3"
+            db_path.write_bytes(b"not sqlite")
+            with TranslationMemoryStore(db_path) as store:
+                engine = self._engine()
+                engine.configure_translation_memory(
+                    store,
+                    {
+                        "persistent_cache_enabled": True,
+                        "exact_tm_enabled": True,
+                    },
+                )
+                ensure_runtime = mock.Mock()
+                engine.configure_runtime_hooks(
+                    ensure_runtime=ensure_runtime,
+                    runtime_identity_provider=self._runtime_identity,
+                )
+                blocks = self._blocks("source")
+
+                with mock.patch.object(
+                    engine,
+                    "_request_translation",
+                    return_value=_response({"translation": "translated"}),
+                ) as request:
+                    engine.translate(
+                        blocks,
+                        np.zeros((1, 1, 3), dtype=np.uint8),
+                        "",
+                    )
+
+                ensure_runtime.assert_called_once_with()
+                request.assert_called_once()
+                self.assertEqual(blocks[0].translation, "translated")
+                self.assertEqual(
+                    engine.last_benchmark_stats["gemma_tm_cache_disabled_count"],
+                    1,
+                )
+
+    def test_disabled_cache_features_do_not_open_a_corrupt_database(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            db_path = Path(temp_dir) / "tm.sqlite3"
+            original_bytes = b"not sqlite"
+            db_path.write_bytes(original_bytes)
+            with TranslationMemoryStore(db_path) as store:
+                engine = self._engine()
+                engine.configure_translation_memory(
+                    store,
+                    {
+                        "persistent_cache_enabled": False,
+                        "exact_tm_enabled": False,
+                    },
+                )
+                engine.configure_runtime_hooks(
+                    ensure_runtime=mock.Mock(),
+                    runtime_identity_provider=self._runtime_identity,
+                )
+                blocks = self._blocks("source")
+
+                with mock.patch.object(
+                    engine,
+                    "_request_translation",
+                    return_value=_response({"translation": "translated"}),
+                ):
+                    engine.translate(
+                        blocks,
+                        np.zeros((1, 1, 3), dtype=np.uint8),
+                        "",
+                    )
+
+                self.assertTrue(store.enabled)
+                self.assertEqual(db_path.read_bytes(), original_bytes)
+                self.assertEqual(
+                    engine.last_benchmark_stats["gemma_tm_cache_disabled_count"],
+                    0,
+                )
 
 
 if __name__ == "__main__":

@@ -3537,6 +3537,170 @@ sonra yeniden boyutlandırılmış görselde boyama işlemi yapın.</translation
     </message>
 </context>
 <context>
+    <name>TranslationMemoryPanel</name>
+    <message>
+        <source>Exact Translation Memory</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Persistent result-cache text and translation-memory entries are sensitive local user data. Only explicitly approved exact source-to-translation pairs can bypass Gemma across contexts.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Enable persistent block result cache</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Enable exact translation memory and collect unapproved candidates</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Result cache retention</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Unapproved candidate retention</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Source text</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Translation</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Source language</source>
+        <translation type="unfinished">
+        Kaynak dil</translation>
+    </message>
+    <message>
+        <source>Target language</source>
+        <translation type="unfinished">
+        Hedef dil</translation>
+    </message>
+    <message>
+        <source>Approved</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Refresh</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Approve Selected</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Unapprove Selected</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Delete Selected</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Import</source>
+        <translation type="unfinished">İçe aktar</translation>
+    </message>
+    <message>
+        <source>Export</source>
+        <translation type="unfinished">Dışa aktar</translation>
+    </message>
+    <message>
+        <source>Clear Result Cache</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Yes</source>
+        <translation type="unfinished">Evet</translation>
+    </message>
+    <message>
+        <source>No</source>
+        <translation type="unfinished">Hayır</translation>
+    </message>
+    <message>
+        <source>Translation memory is unavailable for this run. The database was left unchanged. Reason: {0}</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Result cache: {0} entries · Approved TM: {1} · Candidates: {2} · Showing latest {3}</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Delete Translation Memory Entries</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Delete the selected translation-memory entries?</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Import Exact Translation Memory</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>JSON files (*.json)</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Approved entries in this file will be trusted and may bypass Gemma. Import this translation-memory file?</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Import Failed</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Import Complete</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Imported {0} translation-memory entries.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Export Exact Translation Memory</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Export Failed</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Export Complete</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Exported {0} translation-memory entries.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Clear all persistent block-result cache entries? Approved and candidate translation-memory entries will be kept.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Result Cache Cleared</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Removed {0} result-cache entries.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Translation Memory Operation Failed</source>
+        <translation type="unfinished"></translation>
+    </message>
+</context>
+<context>
+    <name>Translator</name>
+    <message>
+        <source>Persistent translation cache is unavailable, so caching is disabled for this task while normal translation continues.</source>
+        <translation type="unfinished"></translation>
+    </message>
+</context>
+<context>
     <name>UserDictionariesPage</name>
     <message>
         <source>Correction dictionaries rewrite OCR and translation results before they are saved to the project.</source>
