@@ -161,8 +161,8 @@ stage-batched 시나리오의 분해표는 아래와 같다.
   - `094.png`
   - `p_016.jpg`
 - representative metadata:
-  - `banchmark_result_log/inpaint_debug/20260418_150438_sample-debug-export/japan/debug_metadata/094_debug.json`
-  - `banchmark_result_log/inpaint_debug/20260418_150441_sample-debug-export/japan/debug_metadata/p_016_debug.json`
+  - `banchmark_result_log/inpaint_debug/<run-id>_150438_sample-debug-export/japan/debug_metadata/094_debug.json`
+  - `banchmark_result_log/inpaint_debug/<run-id>_150441_sample-debug-export/japan/debug_metadata/p_016_debug.json`
 
 두 output 모두 아래를 만족한다.
 

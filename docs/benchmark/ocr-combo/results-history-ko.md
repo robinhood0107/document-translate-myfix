@@ -4,8 +4,8 @@
 
 ## latest
 
-- report: [ocr-combo-report-ko.md](/mnt/c/Users/pjjpj/Desktop/openai_manga_translater/comic-translate/docs/banchmark_report/ocr-combo-report-ko.md)
-- raw run: `./banchmark_result_log/ocr_combo/20260408_005922_ocr-combo-runtime_suite`
+- report: [ocr-combo-report-ko.md](<repo-root>/docs/banchmark_report/ocr-combo-report-ko.md)
+- raw run: `./banchmark_result_log/ocr_combo/<run-id>_005922_ocr-combo-runtime_suite`
 - official entrypoint: `scripts\benchmark_suite_cuda13.bat --suite-profile ocr-combo-runtime`
 - status: `benchmark_complete`
 - execution_scope: `full-pipeline`

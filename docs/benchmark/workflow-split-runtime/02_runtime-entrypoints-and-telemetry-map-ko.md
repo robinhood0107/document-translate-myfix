@@ -10,7 +10,7 @@
 
 ### 1. 배치 전체 실행 중심
 
-- [batch_processor.py](/mnt/c/Users/pjjpj/Desktop/openai_manga_translater/comic-translate/pipeline/batch_processor.py:730)
+- [batch_processor.py](<repo-root>/pipeline/batch_processor.py:730)
   - `detect_start`
   - `ocr_start`
   - `inpaint_start`
@@ -21,25 +21,25 @@
 
 ### 2. OCR 런타임 진입점
 
-- [modules/ocr/processor.py](/mnt/c/Users/pjjpj/Desktop/openai_manga_translater/comic-translate/modules/ocr/processor.py:36)
+- [modules/ocr/processor.py](<repo-root>/modules/ocr/processor.py:36)
   - `OCRProcessor.initialize()`에서 runtime manager 호출
-- [modules/ocr/local_runtime.py](/mnt/c/Users/pjjpj/Desktop/openai_manga_translater/comic-translate/modules/ocr/local_runtime.py:96)
+- [modules/ocr/local_runtime.py](<repo-root>/modules/ocr/local_runtime.py:96)
   - `ensure_engine()`에서 compose up / health wait / reuse / shutdown 처리
 
 ### 3. Gemma 런타임 진입점
 
-- [modules/translation/processor.py](/mnt/c/Users/pjjpj/Desktop/openai_manga_translater/comic-translate/modules/translation/processor.py:38)
+- [modules/translation/processor.py](<repo-root>/modules/translation/processor.py:38)
   - `Translator.__init__()`에서 runtime manager 호출
-- [modules/translation/local_runtime.py](/mnt/c/Users/pjjpj/Desktop/openai_manga_translater/comic-translate/modules/translation/local_runtime.py:107)
+- [modules/translation/local_runtime.py](<repo-root>/modules/translation/local_runtime.py:107)
   - `ensure_server()`에서 compose up / health wait / reuse 처리
 
 ### 4. 설정 저장 진입점
 
-- [settings_page.py](/mnt/c/Users/pjjpj/Desktop/openai_manga_translater/comic-translate/app/ui/settings/settings_page.py:580)
+- [settings_page.py](<repo-root>/app/ui/settings/settings_page.py:580)
   - `get_all_settings()`
-- [settings_page.py](/mnt/c/Users/pjjpj/Desktop/openai_manga_translater/comic-translate/app/ui/settings/settings_page.py:658)
+- [settings_page.py](<repo-root>/app/ui/settings/settings_page.py:658)
   - `save_settings()`
-- [settings_page.py](/mnt/c/Users/pjjpj/Desktop/openai_manga_translater/comic-translate/app/ui/settings/settings_page.py:728)
+- [settings_page.py](<repo-root>/app/ui/settings/settings_page.py:728)
   - `load_settings()`
 
 ## Requirement 1 계측 체크포인트

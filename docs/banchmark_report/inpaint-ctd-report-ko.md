@@ -4,7 +4,7 @@
 
 - generated_at: `2026-04-10 10:39:51 대한민국 표준시`
 - git_sha: `3529961881b3055d9c7a37f2b3fe3fbfdfc9587a`
-- suite_dir: `./banchmark_result_log/inpaint_ctd/20260410_091232_inpaint_ctd_suite`
+- suite_dir: `./banchmark_result_log/inpaint_ctd/<run-id>_091232_inpaint_ctd_suite`
 - results_root: `./banchmark_result_log/inpaint_ctd`
 - execution_scope: `full-pipeline`
 - speed_score_scope: `full-pipeline elapsed`
@@ -23,8 +23,8 @@
 ## Previous Latest Archive
 
 - snapshot_id: `20260410_103951_inpaint-ctd`
-- report: `./docs/banchmark_report/history/20260410_103951_inpaint-ctd/inpaint-ctd-report-ko.md`
-- assets: `./docs/assets/benchmarking/inpaint-ctd/history/20260410_103951_inpaint-ctd`
+- report: `./docs/banchmark_report/history/<run-id>_103951_inpaint-ctd/inpaint-ctd-report-ko.md`
+- assets: `./docs/assets/benchmarking/inpaint-ctd/history/<run-id>_103951_inpaint-ctd`
 
 ## China Spotlight 5-way
 

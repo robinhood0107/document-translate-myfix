@@ -1,6 +1,6 @@
 # OCR Combo 벤치 아키텍처
 
-`ocr-combo` family는 기존 [benchmark_suite_cuda13.bat](/mnt/c/Users/pjjpj/Desktop/openai_manga_translater/comic-translate/scripts/benchmark_suite_cuda13.bat)을 공식 진입점으로 재사용하는 full-pipeline OCR 비교 harness입니다.
+`ocr-combo` family는 기존 [benchmark_suite_cuda13.bat](<repo-root>/scripts/benchmark_suite_cuda13.bat)을 공식 진입점으로 재사용하는 full-pipeline OCR 비교 harness입니다.
 
 ## 목적
 
@@ -99,4 +99,4 @@ translation similarity는 hard gate가 아니라 soft metric으로만 남깁니�
 
 - raw 결과: `./banchmark_result_log/ocr_combo/`
 - locked gold: `benchmarks/ocr_combo/gold/<corpus>/gold.json`
-- latest report: [ocr-combo-report-ko.md](/mnt/c/Users/pjjpj/Desktop/openai_manga_translater/comic-translate/docs/banchmark_report/ocr-combo-report-ko.md)
+- latest report: [ocr-combo-report-ko.md](<repo-root>/docs/banchmark_report/ocr-combo-report-ko.md)

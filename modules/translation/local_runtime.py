@@ -82,23 +82,6 @@ def _derive_probe_urls(api_base_url: str) -> list[str]:
     return normalized
 
 
-def _normalize_model_id_for_compare(model_id: str) -> str:
-    normalized = str(model_id or "").strip().replace("\\", "/")
-    if not normalized:
-        return ""
-    return Path(normalized).name
-
-
-def _model_ids_match(expected_model: str, loaded_model: str) -> bool:
-    expected = str(expected_model or "").strip()
-    loaded = str(loaded_model or "").strip()
-    if not expected or not loaded:
-        return False
-    if expected == loaded:
-        return True
-    return _normalize_model_id_for_compare(expected) == _normalize_model_id_for_compare(loaded)
-
-
 class LocalGemmaRuntimeManager:
     def __init__(self) -> None:
         self._lock = threading.RLock()

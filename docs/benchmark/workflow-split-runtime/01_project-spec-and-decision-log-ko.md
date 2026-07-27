@@ -66,28 +66,28 @@
 
 ### 1. 현재 제품 배치 파이프라인
 
-- [batch_processor.py](/mnt/c/Users/pjjpj/Desktop/openai_manga_translater/comic-translate/pipeline/batch_processor.py:730) 기준 실제 순서는 페이지 단위 `detect -> ocr -> inpaint -> translate -> render`다.
+- [batch_processor.py](<repo-root>/pipeline/batch_processor.py:730) 기준 실제 순서는 페이지 단위 `detect -> ocr -> inpaint -> translate -> render`다.
 - 즉 사용자가 원하는 전체 단계형(`detect all -> ocr all -> inpaint all -> translate all -> render/export all`) 구조는 아직 제품에 없다.
 
 ### 2. OCR runtime 정책
 
-- [modules/ocr/local_runtime.py](/mnt/c/Users/pjjpj/Desktop/openai_manga_translater/comic-translate/modules/ocr/local_runtime.py:61)의 `LocalOCRRuntimeManager`는 한 번에 하나의 OCR 엔진만 활성화하는 모델이다.
+- [modules/ocr/local_runtime.py](<repo-root>/modules/ocr/local_runtime.py:61)의 `LocalOCRRuntimeManager`는 한 번에 하나의 OCR 엔진만 활성화하는 모델이다.
 - 활성 엔진이 바뀌면 이전 OCR 엔진을 `docker compose down`으로 내리는 구조다.
 - Requirement 2는 이 정책을 "동시 상주 가능하지만 동시 작업은 하지 않는" 모델로 확장해야 한다.
 
 ### 3. Gemma runtime 정책
 
-- [modules/translation/local_runtime.py](/mnt/c/Users/pjjpj/Desktop/openai_manga_translater/comic-translate/modules/translation/local_runtime.py:84)의 `LocalGemmaRuntimeManager`는 Gemma 런타임을 별도 관리한다.
+- [modules/translation/local_runtime.py](<repo-root>/modules/translation/local_runtime.py:84)의 `LocalGemmaRuntimeManager`는 Gemma 런타임을 별도 관리한다.
 - 현재 OCR 런타임과 Gemma 런타임의 수명주기는 제품 단계 기준으로 분리된 오케스트레이션이 없다.
 
 ### 4. 설정 UI 상태
 
-- [settings_ui.py](/mnt/c/Users/pjjpj/Desktop/openai_manga_translater/comic-translate/app/ui/settings/settings_ui.py:52)와 [settings_page.py](/mnt/c/Users/pjjpj/Desktop/openai_manga_translater/comic-translate/app/ui/settings/settings_page.py:580)에는 OCR/translator 선택은 있지만 workflow mode는 없다.
+- [settings_ui.py](<repo-root>/app/ui/settings/settings_ui.py:52)와 [settings_page.py](<repo-root>/app/ui/settings/settings_page.py:580)에는 OCR/translator 선택은 있지만 workflow mode는 없다.
 - Requirement 1 제품 승격 시 설정창에 legacy / stage-batched workflow 선택지를 추가해야 한다.
 
 ### 5. benchmark 정책
 
-- [docs/repo/benchmark-branch-policy-ko.md](/mnt/c/Users/pjjpj/Desktop/openai_manga_translater/comic-translate/docs/repo/benchmark-branch-policy-ko.md:1)에 따라 `develop`에는 benchmark raw docs와 generated assets를 넣지 않는다.
+- [docs/repo/benchmark-branch-policy-ko.md](<repo-root>/docs/repo/benchmark-branch-policy-ko.md:1)에 따라 `develop`에는 benchmark raw docs와 generated assets를 넣지 않는다.
 - 따라서 사용자 요청인 "develop에도 저장"은 `docs/portfolio/...`의 요약형 문서로 해석해 잠갔다.
 
 ## 이번 단계에서 실제 구현한 것
@@ -130,8 +130,8 @@
   - `page_done_count=13`
   - `page_failed_count=0`
   - sidecar review pack:
-    - `banchmark_result_log/workflow-split-runtime/20260415_091848_candidate_stage_batched_dual_resident/sidecar_review_pack.json`
-    - `banchmark_result_log/workflow-split-runtime/20260415_091848_candidate_stage_batched_dual_resident/sidecar_review_pack.md`
+    - `banchmark_result_log/workflow-split-runtime/<run-id>_091848_candidate_stage_batched_dual_resident/sidecar_review_pack.json`
+    - `banchmark_result_log/workflow-split-runtime/<run-id>_091848_candidate_stage_batched_dual_resident/sidecar_review_pack.md`
 
 ### 1-1. flow 비교 최종 판정
 
@@ -198,12 +198,12 @@
 
 대표 smoke 근거:
 
-- `banchmark_result_log/inpaint_debug/20260418_150438_sample-debug-export/japan/debug_metadata/094_debug.json`
+- `banchmark_result_log/inpaint_debug/<run-id>_150438_sample-debug-export/japan/debug_metadata/094_debug.json`
   - `mask_refiner=ctd`
   - `protect_mask_applied=true`
   - `final_mask_pixel_count=223571`
   - `cleanup_applied=true`
-- `banchmark_result_log/inpaint_debug/20260418_150441_sample-debug-export/japan/debug_metadata/p_016_debug.json`
+- `banchmark_result_log/inpaint_debug/<run-id>_150441_sample-debug-export/japan/debug_metadata/p_016_debug.json`
   - `mask_refiner=ctd`
   - `protect_mask_applied=true`
   - `final_mask_pixel_count=214767`

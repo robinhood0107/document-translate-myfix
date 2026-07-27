@@ -2,10 +2,10 @@
 
 ## 런처
 
-- CUDA12 pipeline: [paddleocr_vl15_benchmark_pipeline.bat](/mnt/c/Users/pjjpj/Desktop/openai_manga_translater/comic-translate/scripts/paddleocr_vl15_benchmark_pipeline.bat)
-- CUDA13 pipeline: [paddleocr_vl15_benchmark_pipeline_cuda13.bat](/mnt/c/Users/pjjpj/Desktop/openai_manga_translater/comic-translate/scripts/paddleocr_vl15_benchmark_pipeline_cuda13.bat)
-- CUDA12 suite: [paddleocr_vl15_benchmark_suite.bat](/mnt/c/Users/pjjpj/Desktop/openai_manga_translater/comic-translate/scripts/paddleocr_vl15_benchmark_suite.bat)
-- CUDA13 suite: [paddleocr_vl15_benchmark_suite_cuda13.bat](/mnt/c/Users/pjjpj/Desktop/openai_manga_translater/comic-translate/scripts/paddleocr_vl15_benchmark_suite_cuda13.bat)
+- CUDA12 pipeline: [paddleocr_vl15_benchmark_pipeline.bat](<repo-root>/scripts/paddleocr_vl15_benchmark_pipeline.bat)
+- CUDA13 pipeline: [paddleocr_vl15_benchmark_pipeline_cuda13.bat](<repo-root>/scripts/paddleocr_vl15_benchmark_pipeline_cuda13.bat)
+- CUDA12 suite: [paddleocr_vl15_benchmark_suite.bat](<repo-root>/scripts/paddleocr_vl15_benchmark_suite.bat)
+- CUDA13 suite: [paddleocr_vl15_benchmark_suite_cuda13.bat](<repo-root>/scripts/paddleocr_vl15_benchmark_suite_cuda13.bat)
 
 ## 기본 전제
 
@@ -44,4 +44,4 @@ scripts\paddleocr_vl15_benchmark_suite_cuda13.bat
 scripts\paddleocr_vl15_benchmark_pipeline_cuda13.bat summary --manifest <suite-manifest>
 ```
 
-최신 보고서는 [paddleocr-vl15-report-ko.md](/mnt/c/Users/pjjpj/Desktop/openai_manga_translater/comic-translate/docs/banchmark_report/paddleocr-vl15-report-ko.md)에, 이전 보고서는 `history/` 아래에 보존됩니다.
+최신 보고서는 [paddleocr-vl15-report-ko.md](<repo-root>/docs/banchmark_report/paddleocr-vl15-report-ko.md)에, 이전 보고서는 `history/` 아래에 보존됩니다.

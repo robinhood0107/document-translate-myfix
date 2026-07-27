@@ -6,18 +6,20 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-DEFAULT_SUITE_DIR = Path(
-    "/mnt/c/Users/pjjpj/Desktop/openai_manga_translater/comic-translate/"
-    "banchmark_result_log/gemma_iq4nl_japan/"
-    "20260411_171639_gemma_iq4nl_japan_fullgpu_suite"
-)
-DEFAULT_OUTPUT = Path(
-    "/mnt/c/Users/pjjpj/Desktop/openai_manga_translater/comic-translate/"
-    "docs/benchmark/gemma-iq4nl-japan/live-progress-ko.md"
-)
-REPO_ROOT = Path(
-    "/mnt/c/Users/pjjpj/Desktop/openai_manga_translater/comic-translate"
-)
+REPO_ROOT = Path(__file__).resolve().parents[1]
+DEFAULT_SUITE_ROOT = REPO_ROOT / "banchmark_result_log" / "gemma_iq4nl_japan"
+DEFAULT_OUTPUT = REPO_ROOT / "docs/benchmark/gemma-iq4nl-japan/live-progress-ko.md"
+
+
+def latest_suite_dir(suite_root: Path = DEFAULT_SUITE_ROOT) -> Path:
+    candidates = sorted(
+        path
+        for path in suite_root.iterdir()
+        if path.is_dir() and (path / "suite_state.json").is_file()
+    )
+    if not candidates:
+        raise FileNotFoundError(f"no suite_state.json found under {suite_root}")
+    return candidates[-1]
 
 
 def load_json(path: Path) -> dict[str, Any] | None:
@@ -267,20 +269,21 @@ def build_markdown(
 
 def main() -> None:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--suite-dir", type=Path, default=DEFAULT_SUITE_DIR)
+    parser.add_argument("--suite-dir", type=Path)
     parser.add_argument("--output", type=Path, default=DEFAULT_OUTPUT)
     args = parser.parse_args()
 
-    state = load_json(args.suite_dir / "suite_state.json")
+    suite_dir = args.suite_dir or latest_suite_dir()
+    state = load_json(suite_dir / "suite_state.json")
     if state is None:
-        raise FileNotFoundError(f"missing suite_state.json under {args.suite_dir}")
+        raise FileNotFoundError(f"missing suite_state.json under {suite_dir}")
 
     active_attempt_dir: Path | None = None
     active_attempt_summary: dict[str, Any] | None = None
     stage = state.get("current_stage")
     candidate = state.get("current_candidate")
     if stage and candidate:
-        candidate_dir = args.suite_dir / stage / candidate
+        candidate_dir = suite_dir / stage / candidate
         attempts = (
             sorted(p for p in candidate_dir.iterdir() if p.is_dir())
             if candidate_dir.exists()
@@ -290,9 +293,9 @@ def main() -> None:
             active_attempt_dir = attempts[-1]
             active_attempt_summary = summarize_attempt(active_attempt_dir)
 
-    completed_stage1 = collect_completed_stage1(args.suite_dir / "stage1")
+    completed_stage1 = collect_completed_stage1(suite_dir / "stage1")
     markdown = build_markdown(
-        suite_dir=args.suite_dir,
+        suite_dir=suite_dir,
         state=state,
         active_attempt_dir=active_attempt_dir,
         active_attempt_summary=active_attempt_summary,

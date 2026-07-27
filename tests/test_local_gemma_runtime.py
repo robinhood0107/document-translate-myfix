@@ -4,11 +4,7 @@ import json
 import unittest
 from unittest import mock
 
-from modules.translation.local_runtime import (
-    LocalGemmaRuntimeManager,
-    _model_ids_match,
-    _normalize_model_id_for_compare,
-)
+from modules.translation.local_runtime import LocalGemmaRuntimeManager
 from modules.utils.exceptions import (
     LocalServiceConnectionError,
     LocalServiceResponseError,

@@ -4,7 +4,7 @@
 
 ## Metadata
 
-- run_dir: `./banchmark_result_log/ocr_combo/20260407_161019_ocr-combo-runtime_suite`
+- run_dir: `./banchmark_result_log/ocr_combo/<run-id>_161019_ocr-combo-runtime_suite`
 - status: `early stop after convergence`
 - execution_scope: `full-pipeline`
 - official_score_scope: `full-pipeline elapsed_sec + geometry/quality/translation hard gate`

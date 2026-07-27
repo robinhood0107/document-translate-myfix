@@ -3,7 +3,7 @@
 ## Metadata
 
 - generated_at: `2026-04-12 19:58:42 대한민국 표준시`
-- suite_dir: `./banchmark_result_log/gemma_iq4nl_japan/20260411_171639_gemma_iq4nl_japan_fullgpu_suite`
+- suite_dir: `./banchmark_result_log/gemma_iq4nl_japan/<run-id>_171639_gemma_iq4nl_japan_fullgpu_suite`
 - git_sha: `43c165a07cd0441e22163db484fc31b3da5d9af6`
 - sample_dir: `./Sample/japan`
 - sample_count: `22`
@@ -29,7 +29,7 @@
 
 ## Stage 0 Smoke
 
-- run_dir: `./banchmark_result_log/gemma_iq4nl_japan/20260411_171639_gemma_iq4nl_japan_fullgpu_suite/smoke/baseline-ov072-ngl18/attempt01_t07_infra01`
+- run_dir: `./banchmark_result_log/gemma_iq4nl_japan/<run-id>_171639_gemma_iq4nl_japan_fullgpu_suite/smoke/baseline-ov072-ngl18/attempt01_t07_infra01`
 - detector_backend: `RTDetrV2ONNXDetection`
 - detector_device: `cuda`
 - ocr_front_device: `cuda`
