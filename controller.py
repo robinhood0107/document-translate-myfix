@@ -2854,3 +2854,13 @@ class ComicTranslate(ComicTranslateUI):
             self.local_translation_runtime_manager.shutdown()
         except Exception:
             pass
+        try:
+            translation_memory_store = getattr(
+                self,
+                "translation_memory_store",
+                None,
+            )
+            if translation_memory_store is not None:
+                translation_memory_store.close()
+        except Exception:
+            pass
