@@ -9,6 +9,7 @@ This guide is the shortest path from a fresh checkout to a working local setup.
 - Git
 - Docker Desktop with GPU support enabled
 - NVIDIA driver / CUDA-compatible GPU if you want local Gemma, HunyuanOCR, or PaddleOCR VL acceleration
+- At least 60 GiB free on `C:` for the initial Gemma volume preparation check
 
 ## 2. Clone and launch
 
@@ -46,18 +47,20 @@ py -3.12 -m venv .venv-win-cuda13
 ### Gemma local translation runtime
 
 - Compose file: `/docker-compose.yaml`
-- Docker image: `ghcr.io/ggml-org/llama.cpp:server-cuda`
+- Docker image: `ghcr.io/ggml-org/llama.cpp@sha256:22e0e3bfe967af4fd1df6a918022abbfd4e72e4d40a4769e616a4176790acbcb`
 - Runtime reference: [llama.cpp](https://github.com/ggml-org/llama.cpp)
 - Model reference: [Gemma](https://ai.google.dev/gemma)
 
-Start it:
+Prepare the versioned external model volume once from Windows PowerShell:
 
-```bash
-docker compose pull --policy always
-docker compose up -d --force-recreate
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass `
+  -File .\scripts\prepare_gemma_runtime.ps1 -Mode Prepare `
+  -CandidateModelPath 'C:\ExampleWorkspace\models\Gemma4-26B-A4B-Uncensored-HauhauCS-Balanced-IQ4_XS.gguf' `
+  -LegacyModelPath 'C:\ExampleWorkspace\models\gemma-4-26B-IQ4_NL.gguf'
 ```
 
-Then choose `Custom Local Server(Gemma)` in the app.
+Then choose `Custom Local Server(Gemma)` in the app. The managed runtime mounts the prepared volume read-only and starts the exact prepared container automatically.
 
 ### HunyuanOCR local runtime
 
@@ -100,7 +103,7 @@ For bundle details, see [/paddleocr_vl_docker_files/README.md](/paddleocr_vl_doc
 
 - Workflow mode: `Stage-Batched Pipeline (Recommended)`
 - OCR: `Optimal (HunyuanOCR / PaddleOCR VL)`
-- Translator: `Custom Local Server(Gemma)` if your local Gemma runtime is running
+- Translator: `Custom Local Server(Gemma)` after the Gemma volume is prepared
 
 Routing summary:
 

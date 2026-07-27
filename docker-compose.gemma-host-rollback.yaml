@@ -1,0 +1,12 @@
+services:
+  gemma-local-server:
+    pull_policy: missing
+    labels:
+      comic-translate.runtime-fingerprint: legacy-host-bind-manual
+      comic-translate.model-volume: host-model-directory
+      comic-translate.ready-manifest-sha256: unchecked
+      comic-translate.model-sha256: unchecked
+      comic-translate.preparation-version: "0"
+      comic-translate.runtime-profile: legacy-host-bind
+    volumes:
+      - ${GEMMA_HOST_MODEL_DIR:?Set GEMMA_HOST_MODEL_DIR to a host model directory}:/models:ro

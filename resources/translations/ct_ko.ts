@@ -775,16 +775,16 @@ Project-specific quick settings can override them for the current project.</sour
     </message>
     <message>
         <source>Comic Translate can reuse your local Gemma Docker server for translation.
-1. Keep the existing Gemma container running if it is already healthy.
+1. Prepare the versioned Gemma model volume once with `scripts/prepare_gemma_runtime.ps1`.
 2. In Settings &gt; Credentials, use Endpoint URL `http://127.0.0.1:18080/v1`.
-3. Set Model to the exact GGUF filename in `testmodel/` (recommended: `gemma-4-26B-IQ4_NL.gguf`).
-Automatic translation reuses an existing Gemma runtime first and only runs `docker compose up -d` when needed.
+3. Set Model to an exact prepared GGUF filename (default: `gemma-4-26B-IQ4_NL.gguf`).
+Automatic translation starts an exact stopped container directly and recreates it only when the runtime fingerprint differs.
 If responses are truncated, lower Chunk Size or Max Completion Tokens before recreating the container.</source>
         <translation>Comic Translate는 번역에 로컬 Gemma Docker 서버를 재사용할 수 있습니다.
-1. 기존 Gemma 컨테이너가 이미 정상 상태라면 그대로 실행된 상태를 유지하세요.
+1. `scripts/prepare_gemma_runtime.ps1`로 버전이 지정된 Gemma 모델 volume을 한 번 준비하세요.
 2. 설정 &gt; 인증 정보에서 엔드포인트 URL을 `http://127.0.0.1:18080/v1`로 설정하세요.
-3. 모델은 `testmodel/` 안의 정확한 GGUF 파일명으로 지정하세요. (권장: `gemma-4-26B-IQ4_NL.gguf`)
-자동 번역은 기존 Gemma 런타임을 먼저 재사용하고, 필요할 때만 `docker compose up -d`를 실행합니다.
+3. 준비된 정확한 GGUF 파일명을 모델로 지정하세요. (기본값: `gemma-4-26B-IQ4_NL.gguf`)
+자동 번역은 fingerprint가 정확히 같은 중지 컨테이너를 바로 시작하고, runtime fingerprint가 다를 때만 컨테이너를 다시 만듭니다.
 응답이 잘리면 컨테이너를 다시 만들기 전에 청크 크기나 최대 완료 토큰 수를 낮추세요.</translation>
     </message>
     <message>

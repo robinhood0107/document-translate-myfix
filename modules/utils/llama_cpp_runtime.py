@@ -16,6 +16,8 @@ def normalize_llama_cpp_image(image_ref: Any = None) -> str:
     text = str(image_ref or "").strip()
     if not text:
         return DEFAULT_LLAMA_CPP_IMAGE
+    if "@sha256:" in text:
+        return text
     if "ggml-org/llama.cpp" in text or "local/llama.cpp" in text:
         return DEFAULT_LLAMA_CPP_IMAGE
     return text
