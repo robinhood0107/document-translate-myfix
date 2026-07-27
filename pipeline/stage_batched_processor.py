@@ -833,7 +833,10 @@ class StageBatchedProcessor(BatchProcessor):
                         exc_info=True,
                     )
             raise
-        self._release_inpainter_before_gemma(pages)
+        self._release_inpainter_before_gemma(
+            pages,
+            start_gemma=False,
+        )
 
     def _inpaint_pages(self, pages: list[StagePageContext]) -> None:
         total_images = len(pages)
@@ -1033,6 +1036,7 @@ class StageBatchedProcessor(BatchProcessor):
     ) -> None:
         report = self.inpainting.release_inpainter_resources()
         gate = dict(report.get("vram_release_gate") or {})
+        self._inpainter_release_gate = gate
         self._emit_benchmark_event(
             "inpainter_release",
             handoff_policy="after-release",
@@ -1062,9 +1066,42 @@ class StageBatchedProcessor(BatchProcessor):
         settings_page = self.main_page.settings_page
         extra_context = settings_page.get_llm_settings()["extra_context"]
         translator_key = settings_page.get_tool_selection("translator")
-        runtime_manager = getattr(self.main_page, "local_translation_runtime_manager", None)
-        if any(not ctx.failed_stage and not ctx.no_text_detected for ctx in pages):
+        runtime_manager = getattr(
+            self.main_page,
+            "local_translation_runtime_manager",
+            None,
+        )
+
+        prepared_translators: dict[int, Translator] = {}
+        gemma_runtime_required = False
+        for ctx in pages:
+            if ctx.failed_stage or ctx.no_text_detected:
+                continue
+            translator = Translator(
+                self.main_page,
+                ctx.source_lang,
+                ctx.target_lang,
+            )
+            prepared_translators[id(ctx)] = translator
+            if translator.uses_persistent_translation_memory:
+                gemma_runtime_required = (
+                    translator.prepare_translation(ctx.blk_list, extra_context)
+                    or gemma_runtime_required
+                )
+
+        gemma_runtime_started = False
+        if gemma_runtime_required:
+            gate = dict(getattr(self, "_inpainter_release_gate", {}) or {})
+            if gate.get("required") and not gate.get("observed"):
+                raise RuntimeError(
+                    QCoreApplication.translate(
+                        "StageBatchedProcessor",
+                        "Gemma could not start because inpainter VRAM release was not confirmed."
+                    )
+                )
+            self._start_gemma_prewarm()
             self._await_gemma_runtime()
+            gemma_runtime_started = True
 
         for index, ctx in enumerate(pages):
             self._raise_if_cancelled()
@@ -1108,28 +1145,39 @@ class StageBatchedProcessor(BatchProcessor):
                 block_count=len(ctx.blk_list or []),
                 translator_key=translator_key,
             )
-            translation_cache_key = self.cache_manager._get_translation_cache_key(
-                ctx.image, ctx.source_lang, ctx.target_lang, translator_key, extra_context
-            )
+            translator = prepared_translators[id(ctx)]
+            if translator.uses_persistent_translation_memory:
+                # The factory may share one engine across page translators, and
+                # the SQLite/runtime identity can change after folder preflight.
+                # Refresh this page's plan immediately before use.
+                runtime_required_now = translator.prepare_translation(
+                    ctx.blk_list,
+                    extra_context,
+                )
+                if runtime_required_now and not gemma_runtime_started:
+                    gate = dict(getattr(self, "_inpainter_release_gate", {}) or {})
+                    if gate.get("required") and not gate.get("observed"):
+                        raise RuntimeError(
+                            QCoreApplication.translate(
+                                "StageBatchedProcessor",
+                                "Gemma could not start because inpainter VRAM release was not confirmed."
+                            )
+                        )
+                    self._start_gemma_prewarm()
+                    self._await_gemma_runtime()
+                    gemma_runtime_started = True
             try:
-                translator = Translator(self.main_page, ctx.source_lang, ctx.target_lang)
-                translation_cache_status = "miss"
-                if self.cache_manager._can_serve_all_blocks_from_translation_cache(translation_cache_key, ctx.blk_list):
-                    self.cache_manager._apply_cached_translations_to_blocks(translation_cache_key, ctx.blk_list)
-                    apply_translation_result_dictionary(
-                        ctx.blk_list,
-                        settings_page.get_translation_result_dictionary_rules(),
-                    )
-                    translation_cache_status = "hit"
-                else:
-                    translator.translate(ctx.blk_list, ctx.image, extra_context)
-                    self._raise_if_cancelled()
-                    apply_translation_result_dictionary(
-                        ctx.blk_list,
-                        settings_page.get_translation_result_dictionary_rules(),
-                    )
-                    self.cache_manager._cache_translation_results(translation_cache_key, ctx.blk_list)
-                    translation_cache_status = "refreshed"
+                _, translation_cache_status = translator.translate_with_cache_manager(
+                    ctx.blk_list,
+                    ctx.image,
+                    extra_context,
+                    self.cache_manager,
+                )
+                self._raise_if_cancelled()
+                apply_translation_result_dictionary(
+                    ctx.blk_list,
+                    settings_page.get_translation_result_dictionary_rules(),
+                )
                 ctx.page_translation_metrics = self._translation_benchmark_metrics(translator)
                 self._persist_translation_state(
                     ctx.image_path,
