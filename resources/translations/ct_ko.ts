@@ -3312,6 +3312,13 @@ Restart now?</source>
     </message>
 </context>
 <context>
+    <name>StageBatchedProcessor</name>
+    <message>
+        <source>Gemma could not start because inpainter VRAM release was not confirmed.</source>
+        <translation>인페인터 VRAM 해제가 확인되지 않아 Gemma를 시작하지 못했습니다.</translation>
+    </message>
+</context>
+<context>
     <name>StartupHomeScreen</name>
     <message>
         <source>New</source>

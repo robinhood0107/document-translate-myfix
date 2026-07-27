@@ -11,6 +11,75 @@ from modules.utils.gpu_metrics import query_cuda_handoff_metrics
 DEFAULT_VRAM_RELEASE_TIMEOUT_SEC = 5.0
 DEFAULT_VRAM_RELEASE_POLL_SEC = 0.1
 DEFAULT_VRAM_RELEASE_MIN_DROP_MB = 16.0
+DEFAULT_VRAM_RELEASE_EXPECTED_RATIO = 0.9
+DEFAULT_VRAM_BASELINE_TOLERANCE_MB = 16.0
+
+
+def estimate_torch_cuda_storage_mb(resource: Any) -> dict[str, Any]:
+    """Estimate unique CUDA parameter/buffer storage retained by a torch model."""
+
+    if resource is None:
+        return {
+            "available": False,
+            "storage_count": 0,
+            "total_mb": 0.0,
+        }
+    tensors: list[Any] = []
+    recognized = False
+    pending = [resource]
+    visited: set[int] = set()
+    while pending:
+        current = pending.pop()
+        object_id = id(current)
+        if object_id in visited:
+            continue
+        visited.add(object_id)
+        has_tensor_accessor = False
+        for accessor_name in ("parameters", "buffers"):
+            accessor = getattr(current, accessor_name, None)
+            if not callable(accessor):
+                continue
+            has_tensor_accessor = True
+            recognized = True
+            try:
+                tensors.extend(list(accessor()))
+            except Exception:
+                continue
+        if has_tensor_accessor:
+            continue
+        try:
+            child_values = vars(current).values()
+        except TypeError:
+            continue
+        for child in child_values:
+            if callable(getattr(child, "parameters", None)) or callable(
+                getattr(child, "buffers", None)
+            ):
+                pending.append(child)
+
+    storages: dict[tuple[str, int], int] = {}
+    for tensor in tensors:
+        device = str(getattr(tensor, "device", "") or "").lower()
+        if not device.startswith("cuda"):
+            continue
+        try:
+            storage = tensor.untyped_storage()
+            storage_ptr = int(storage.data_ptr())
+            storage_bytes = int(storage.nbytes())
+        except Exception:
+            try:
+                storage_ptr = int(tensor.data_ptr())
+                storage_bytes = int(tensor.numel()) * int(tensor.element_size())
+            except Exception:
+                continue
+        key = (device, storage_ptr)
+        storages[key] = max(storages.get(key, 0), storage_bytes)
+
+    return {
+        "available": recognized,
+        "storage_count": len(storages),
+        "total_mb": float(sum(storages.values())) / 1024.0 / 1024.0,
+    }
 
 
 def cleanup_python_cuda_memory(
@@ -81,26 +150,54 @@ def _metric_value(payload: dict[str, Any], *path: str) -> float | None:
     return float(current)
 
 
-def _driver_used_mb(payload: dict[str, Any]) -> float | None:
-    primary = payload.get("driver", {}).get("primary")
-    if not isinstance(primary, dict):
+def _driver_process_uuid(payload: dict[str, Any]) -> str:
+    selected = payload.get("driver_process", {}).get("selected")
+    if not isinstance(selected, dict):
+        return ""
+    return str(selected.get("gpu_uuid") or "").strip()
+
+
+def _driver_process_used_mb(
+    payload: dict[str, Any],
+    *,
+    gpu_uuid: str,
+) -> float | None:
+    driver_process = payload.get("driver_process")
+    if not isinstance(driver_process, dict) or not driver_process.get("query_available"):
         return None
-    value = primary.get("memory_used_mb")
-    if isinstance(value, bool) or not isinstance(value, (int, float)):
+    target_uuid = str(gpu_uuid or "").strip()
+    if not target_uuid:
         return None
-    return float(value)
+    rows = driver_process.get("rows")
+    if not isinstance(rows, list):
+        return None
+    total = 0.0
+    matched = False
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        if str(row.get("gpu_uuid") or "").strip() != target_uuid:
+            continue
+        value = row.get("memory_used_mb")
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            continue
+        total += float(value)
+        matched = True
+    return total if matched else 0.0
 
 
 def _release_deltas(
     before: dict[str, Any],
     after: dict[str, Any],
+    *,
+    driver_gpu_uuid: str = "",
 ) -> dict[str, float | None]:
     before_allocated = _metric_value(before, "process", "allocated_mb")
     after_allocated = _metric_value(after, "process", "allocated_mb")
     before_reserved = _metric_value(before, "process", "reserved_mb")
     after_reserved = _metric_value(after, "process", "reserved_mb")
-    before_driver = _driver_used_mb(before)
-    after_driver = _driver_used_mb(after)
+    before_driver = _driver_process_used_mb(before, gpu_uuid=driver_gpu_uuid)
+    after_driver = _driver_process_used_mb(after, gpu_uuid=driver_gpu_uuid)
     return {
         "process_allocated_drop_mb": (
             before_allocated - after_allocated
@@ -112,7 +209,7 @@ def _release_deltas(
             if before_reserved is not None and after_reserved is not None
             else None
         ),
-        "driver_used_drop_mb": (
+        "process_driver_used_drop_mb": (
             before_driver - after_driver
             if before_driver is not None and after_driver is not None
             else None
@@ -124,19 +221,49 @@ def wait_for_vram_release(
     before: dict[str, Any],
     *,
     gpu_release_expected: bool,
+    expected_process_drop_mb: float = 0.0,
+    untracked_gpu_resource_count: int = 0,
+    driver_baseline: dict[str, Any] | None = None,
     timeout_sec: float = DEFAULT_VRAM_RELEASE_TIMEOUT_SEC,
     poll_interval_sec: float = DEFAULT_VRAM_RELEASE_POLL_SEC,
     min_drop_mb: float = DEFAULT_VRAM_RELEASE_MIN_DROP_MB,
+    expected_drop_ratio: float = DEFAULT_VRAM_RELEASE_EXPECTED_RATIO,
+    baseline_tolerance_mb: float = DEFAULT_VRAM_BASELINE_TOLERANCE_MB,
     sampler: Callable[[], dict[str, Any]] = query_cuda_handoff_metrics,
 ) -> dict[str, Any]:
-    """Wait until process or driver metrics prove that VRAM was returned."""
+    """Wait until target-sized allocator or PID/device baseline evidence proves release."""
 
     started = time.monotonic()
-    threshold = max(0.0, float(min_drop_mb))
+    minimum_drop = max(0.0, float(min_drop_mb))
+    expected_process_drop = max(0.0, float(expected_process_drop_mb))
+    process_threshold = (
+        max(
+            minimum_drop,
+            expected_process_drop * max(0.0, min(1.0, float(expected_drop_ratio))),
+        )
+        if expected_process_drop > 0.0
+        else 0.0
+    )
+    untracked_count = max(0, int(untracked_gpu_resource_count))
     process_available = bool((before.get("process") or {}).get("available"))
-    driver_available = bool((before.get("driver") or {}).get("available"))
-    measurement_available = process_available or driver_available
-    required = bool(gpu_release_expected and measurement_available)
+    process_evidence_required = expected_process_drop > 0.0
+    driver_evidence_required = untracked_count > 0
+    driver_gpu_uuid = _driver_process_uuid(before)
+    driver_before = _driver_process_used_mb(before, gpu_uuid=driver_gpu_uuid)
+    driver_baseline_used = _driver_process_used_mb(
+        driver_baseline or {},
+        gpu_uuid=driver_gpu_uuid,
+    )
+    driver_evidence_available = bool(
+        driver_gpu_uuid
+        and driver_before is not None
+        and driver_baseline_used is not None
+    )
+    measurement_available = bool(
+        (process_evidence_required and process_available)
+        or (driver_evidence_required and driver_evidence_available)
+    )
+    required = bool(gpu_release_expected)
 
     if not gpu_release_expected:
         after = sampler()
@@ -145,39 +272,83 @@ def wait_for_vram_release(
             "measurement_available": measurement_available,
             "observed": True,
             "status": "not-required",
-            "threshold_mb": threshold,
+            "evidence_source": "not-required",
+            "process_threshold_mb": process_threshold,
+            "driver_gpu_uuid": driver_gpu_uuid,
+            "driver_baseline_mb": driver_baseline_used,
             "elapsed_sec": time.monotonic() - started,
             "before": before,
             "after": after,
-            "deltas": _release_deltas(before, after),
+            "deltas": _release_deltas(
+                before,
+                after,
+                driver_gpu_uuid=driver_gpu_uuid,
+            ),
         }
-    if not measurement_available:
+    if (
+        (process_evidence_required and not process_available)
+        or (driver_evidence_required and not driver_evidence_available)
+        or (not process_evidence_required and not driver_evidence_required)
+    ):
         after = sampler()
         return {
-            "required": False,
+            "required": True,
             "measurement_available": False,
-            "observed": None,
+            "observed": False,
             "status": "unavailable",
-            "threshold_mb": threshold,
+            "evidence_source": "unavailable",
+            "process_threshold_mb": process_threshold,
+            "driver_gpu_uuid": driver_gpu_uuid,
+            "driver_baseline_mb": driver_baseline_used,
             "elapsed_sec": time.monotonic() - started,
             "before": before,
             "after": after,
-            "deltas": _release_deltas(before, after),
+            "deltas": _release_deltas(
+                before,
+                after,
+                driver_gpu_uuid=driver_gpu_uuid,
+            ),
         }
 
     deadline = started + max(0.0, float(timeout_sec))
     last_after: dict[str, Any] = {}
     last_deltas: dict[str, float | None] = {}
     observed = False
+    evidence_parts: list[str] = []
+    if process_evidence_required:
+        evidence_parts.append("process-allocated")
+    if driver_evidence_required:
+        evidence_parts.append("pid-device-driver-baseline")
+    evidence_source = "+".join(evidence_parts)
     while True:
         last_after = sampler()
-        last_deltas = _release_deltas(before, last_after)
-        positive_drops = [
-            value
-            for value in last_deltas.values()
-            if isinstance(value, (int, float))
-        ]
-        if any(value >= threshold for value in positive_drops):
+        last_deltas = _release_deltas(
+            before,
+            last_after,
+            driver_gpu_uuid=driver_gpu_uuid,
+        )
+        process_observed = True
+        if process_evidence_required:
+            observed_drop = last_deltas.get("process_allocated_drop_mb")
+            process_observed = bool(
+                isinstance(observed_drop, (int, float))
+                and observed_drop >= process_threshold
+            )
+        driver_observed = True
+        if driver_evidence_required:
+            after_driver = _driver_process_used_mb(
+                last_after,
+                gpu_uuid=driver_gpu_uuid,
+            )
+            driver_drop = last_deltas.get("process_driver_used_drop_mb")
+            driver_observed = bool(
+                isinstance(after_driver, (int, float))
+                and isinstance(driver_drop, (int, float))
+                and driver_drop >= minimum_drop
+                and after_driver
+                <= float(driver_baseline_used) + max(0.0, float(baseline_tolerance_mb))
+            )
+        if process_observed and driver_observed:
             observed = True
             break
         if time.monotonic() >= deadline:
@@ -189,7 +360,10 @@ def wait_for_vram_release(
         "measurement_available": measurement_available,
         "observed": observed,
         "status": "observed" if observed else "timeout",
-        "threshold_mb": threshold,
+        "evidence_source": evidence_source,
+        "process_threshold_mb": process_threshold,
+        "driver_gpu_uuid": driver_gpu_uuid,
+        "driver_baseline_mb": driver_baseline_used,
         "elapsed_sec": time.monotonic() - started,
         "before": before,
         "after": last_after,

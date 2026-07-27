@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import subprocess
 import unittest
 from unittest import mock
 
@@ -38,7 +39,12 @@ class LocalOCRRuntimeManagerTests(unittest.TestCase):
             ("PaddleOCR VL", "http://127.0.0.1:28118/layout-parsing", "managed")
         )
 
-        with mock.patch.object(manager, "_run_compose") as run_compose:
+        with mock.patch.object(manager, "_run_compose") as run_compose, \
+             mock.patch.object(
+                 manager,
+                 "_running_managed_container_names",
+                 return_value=[],
+             ):
             manager.shutdown()
 
         run_compose.assert_called_once_with(
@@ -51,7 +57,7 @@ class LocalOCRRuntimeManagerTests(unittest.TestCase):
         self.assertIsNone(manager._active_engine)
         self.assertFalse(manager._readiness_cache)
 
-    def test_shutdown_clears_active_engine_when_stop_fails(self) -> None:
+    def test_shutdown_preserves_active_engine_until_stop_retry_succeeds(self) -> None:
         manager = LocalOCRRuntimeManager()
         manager._active_engine = "HunyuanOCR"
         manager._readiness_cache.add(
@@ -63,12 +69,23 @@ class LocalOCRRuntimeManagerTests(unittest.TestCase):
             settings_page_name="HunyuanOCR Settings",
         )
 
-        with mock.patch.object(manager, "_run_compose", side_effect=failure), \
-             self.assertLogs("modules.ocr.local_runtime", level="WARNING"):
+        with mock.patch.object(
+            manager,
+            "_run_compose",
+            side_effect=[failure, None],
+        ) as run_compose, mock.patch.object(
+            manager,
+            "_running_managed_container_names",
+            return_value=[],
+        ):
+            with self.assertRaises(LocalServiceSetupError):
+                manager.shutdown()
+            self.assertEqual(manager._active_engine, "HunyuanOCR")
             manager.shutdown()
 
         self.assertIsNone(manager._active_engine)
         self.assertFalse(manager._readiness_cache)
+        self.assertEqual(run_compose.call_count, 2)
 
     def test_cancelled_startup_can_stop_containers_started_by_compose(self) -> None:
         manager = LocalOCRRuntimeManager()
@@ -79,7 +96,12 @@ class LocalOCRRuntimeManagerTests(unittest.TestCase):
              mock.patch.object(manager, "_probe_health_state", return_value="unavailable"), \
              mock.patch.object(manager, "_existing_managed_container_names", return_value=[]), \
              mock.patch.object(manager, "_wait_for_health", side_effect=cancelled), \
-             mock.patch.object(manager, "_run_compose") as run_compose:
+             mock.patch.object(manager, "_run_compose") as run_compose, \
+             mock.patch.object(
+                 manager,
+                 "_running_managed_container_names",
+                 return_value=[],
+             ):
             with self.assertRaises(OperationCancelledError):
                 manager.ensure_engine("PaddleOCR VL", settings_page)
             manager.shutdown()
@@ -97,6 +119,82 @@ class LocalOCRRuntimeManagerTests(unittest.TestCase):
                 ),
             ],
         )
+
+    def test_cancelled_startup_cleanup_catches_late_ocr_container_start(self) -> None:
+        manager = LocalOCRRuntimeManager()
+        manager._managed_start_attempted_engine = "PaddleOCR VL"
+        manager._active_engine = None
+
+        with mock.patch.object(
+            manager,
+            "_run_compose",
+        ) as run_compose, mock.patch.object(
+            manager,
+            "_running_managed_container_names",
+            side_effect=[[], ["paddleocr-server"], []],
+        ), mock.patch(
+            "modules.ocr.local_runtime.time.monotonic",
+            side_effect=[0.0, 0.5, 3.1],
+        ), mock.patch(
+            "modules.ocr.local_runtime.time.sleep",
+        ):
+            manager._stop_engine("PaddleOCR VL")
+
+        self.assertEqual(run_compose.call_count, 2)
+
+    def test_running_container_check_treats_missing_container_as_stopped(self) -> None:
+        manager = LocalOCRRuntimeManager()
+        missing = subprocess.CompletedProcess(
+            args=[],
+            returncode=1,
+            stdout="",
+            stderr="Error: No such object: paddleocr-server",
+        )
+
+        with mock.patch(
+            "modules.utils.llama_cpp_runtime.run_docker_command",
+            return_value=missing,
+        ):
+            self.assertEqual(
+                manager._running_managed_container_names("PaddleOCR VL"),
+                [],
+            )
+
+    def test_running_container_check_rejects_docker_inspect_failure(self) -> None:
+        manager = LocalOCRRuntimeManager()
+        unavailable = subprocess.CompletedProcess(
+            args=[],
+            returncode=1,
+            stdout="",
+            stderr="Cannot connect to the Docker daemon",
+        )
+
+        with mock.patch(
+            "modules.utils.llama_cpp_runtime.run_docker_command",
+            return_value=unavailable,
+        ), self.assertRaisesRegex(
+            LocalServiceSetupError,
+            "could not verify",
+        ):
+            manager._running_managed_container_names("PaddleOCR VL")
+
+    def test_running_container_check_rejects_invalid_inspect_state(self) -> None:
+        manager = LocalOCRRuntimeManager()
+        invalid = subprocess.CompletedProcess(
+            args=[],
+            returncode=0,
+            stdout="unknown\n",
+            stderr="",
+        )
+
+        with mock.patch(
+            "modules.utils.llama_cpp_runtime.run_docker_command",
+            return_value=invalid,
+        ), self.assertRaisesRegex(
+            LocalServiceSetupError,
+            "Unexpected docker inspect state",
+        ):
+            manager._running_managed_container_names("PaddleOCR VL")
 
     def test_default_urls_are_managed(self) -> None:
         manager = LocalOCRRuntimeManager()

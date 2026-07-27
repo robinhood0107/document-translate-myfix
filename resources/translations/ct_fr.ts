@@ -3258,6 +3258,13 @@ Redémarrer maintenant ?</translation>
     </message>
 </context>
 <context>
+    <name>StageBatchedProcessor</name>
+    <message>
+        <source>Gemma could not start because inpainter VRAM release was not confirmed.</source>
+        <translation>Gemma n’a pas pu démarrer, car la libération de la VRAM du module d’inpainting n’a pas été confirmée.</translation>
+    </message>
+</context>
+<context>
     <name>StartupHomeScreen</name>
     <message>
         <source>New</source>

@@ -5,6 +5,7 @@ import binascii
 import json
 import logging
 import os
+import queue
 import threading
 import time
 from pathlib import Path
@@ -49,6 +50,8 @@ DEFAULT_GEMMA_HEALTH_URL = "http://127.0.0.1:18080/health"
 DEFAULT_GEMMA_MODELS_URL = "http://127.0.0.1:18080/v1/models"
 DEFAULT_GEMMA_SETTINGS_PAGE = "Gemma Local Server Settings"
 DEFAULT_GEMMA_STARTUP_TIMEOUT_SEC = 420
+LATE_START_STOP_GRACE_SEC = 3.0
+LATE_START_STOP_POLL_SEC = 0.25
 
 _RUNTIME_CONFIG = {
     "compose_file": ROOT_DIR / "docker-compose.yaml",
@@ -100,8 +103,10 @@ class LocalGemmaRuntimeManager:
         self._lock = threading.RLock()
         self._compose_command: tuple[str, ...] | None = None
         self._managed_active = False
+        self._managed_start_attempted = False
         self._active_contract: GemmaRuntimeContract | None = None
         self._readiness_cache: set[tuple[str, str, str, str]] = set()
+        self._startup_cancel_checker: Callable[[], bool] | None = None
 
     def validate_server(self, settings_page: Any) -> None:
         api_base_url, _ = self._resolve_credentials(settings_page)
@@ -129,6 +134,7 @@ class LocalGemmaRuntimeManager:
         cancel_checker: Callable[[], bool] | None = None,
     ) -> None:
         with self._lock:
+            self._startup_cancel_checker = cancel_checker
             api_base_url, model_name = self._resolve_credentials(settings_page)
             if not api_base_url:
                 raise self._build_setup_error("Endpoint URL is empty.")
@@ -169,6 +175,7 @@ class LocalGemmaRuntimeManager:
                     ):
                         self._active_contract = runtime_contract
                         self._managed_active = True
+                        self._managed_start_attempted = True
                         self._emit_readiness_cache_hit(
                             progress_callback,
                             managed=True,
@@ -233,6 +240,7 @@ class LocalGemmaRuntimeManager:
             container_state = self._inspect_managed_container_state(runtime_contract)
             if container_state["exists"] and container_state["matches"] and container_state["running"]:
                 self._managed_active = True
+                self._managed_start_attempted = True
                 self._emit_progress(
                     progress_callback,
                     status="completed",
@@ -240,6 +248,7 @@ class LocalGemmaRuntimeManager:
                     message="이미 실행 중인 Gemma 런타임을 재사용합니다.",
                 )
             elif container_state["exists"] and container_state["matches"]:
+                self._managed_start_attempted = True
                 self._emit_progress(
                     progress_callback,
                     status="starting",
@@ -256,6 +265,7 @@ class LocalGemmaRuntimeManager:
                     message="준비된 Gemma 컨테이너 시작 명령을 보냈습니다.",
                 )
             else:
+                self._managed_start_attempted = True
                 recreate = bool(container_state["exists"])
                 compose_args = ["up", "-d"]
                 step_key = "compose_up"
@@ -311,6 +321,7 @@ class LocalGemmaRuntimeManager:
                 api_base_url,
                 model_name,
                 progress_callback,
+                cancel_checker=cancel_checker,
             )
             self._log_runtime_metadata()
             return
@@ -343,21 +354,19 @@ class LocalGemmaRuntimeManager:
             api_base_url,
             model_name,
             progress_callback,
+            cancel_checker=cancel_checker,
         )
 
     def shutdown(self) -> None:
         with self._lock:
             self._readiness_cache.clear()
-            if not self._managed_active:
+            if not (self._managed_active or self._managed_start_attempted):
                 self._active_contract = None
                 return
-            try:
-                self._stop_managed_container()
-            except LocalServiceSetupError:
-                logger.warning("Failed to stop managed Gemma runtime.", exc_info=True)
-            finally:
-                self._managed_active = False
-                self._active_contract = None
+            self._stop_managed_container()
+            self._managed_active = False
+            self._managed_start_attempted = False
+            self._active_contract = None
 
     def _resolve_credentials(self, settings_page: Any) -> tuple[str, str]:
         creds = settings_page.get_credentials("Custom Local Server(Gemma)")
@@ -400,7 +409,9 @@ class LocalGemmaRuntimeManager:
         if self._compose_command is not None:
             return self._compose_command
         try:
-            self._compose_command = resolve_docker_compose_command()
+            self._compose_command = resolve_docker_compose_command(
+                cancel_checker=self._startup_cancel_checker,
+            )
             return self._compose_command
         except RuntimeError as exc:
             raise self._build_setup_error(
@@ -434,7 +445,12 @@ class LocalGemmaRuntimeManager:
         env = self._build_env(model_name, runtime_contract)
         command = [*self._resolve_compose_command(), "-f", str(compose_file), *compose_args]
         try:
-            run_docker_command(command, cwd=compose_file.parent, env=env)
+            run_docker_command(
+                command,
+                cwd=compose_file.parent,
+                env=env,
+                cancel_checker=self._startup_cancel_checker,
+            )
             return
         except RuntimeError as exc:
             detail = str(exc).strip()
@@ -493,14 +509,24 @@ class LocalGemmaRuntimeManager:
             "{{.Id}}",
             image_ref,
         ]
-        completed = run_docker_command(inspect_command, check=False)
+        completed = run_docker_command(
+            inspect_command,
+            check=False,
+            cancel_checker=self._startup_cancel_checker,
+        )
         image_id = (completed.stdout or "").strip()
         if completed.returncode == 0 and image_id:
             return image_id
 
         try:
-            run_docker_command(["docker", "pull", image_ref])
-            completed = run_docker_command(inspect_command)
+            run_docker_command(
+                ["docker", "pull", image_ref],
+                cancel_checker=self._startup_cancel_checker,
+            )
+            completed = run_docker_command(
+                inspect_command,
+                cancel_checker=self._startup_cancel_checker,
+            )
         except RuntimeError as exc:
             raise self._build_setup_error(
                 f"Unable to load the pinned Gemma runtime image: {image_ref}\n{exc}"
@@ -529,6 +555,7 @@ class LocalGemmaRuntimeManager:
                 volume_name,
             ],
             check=False,
+            cancel_checker=self._startup_cancel_checker,
         )
         if volume_inspection.returncode != 0:
             raise self._build_setup_error(
@@ -594,7 +621,11 @@ printf '\nmodel_bytes=%s\n' "$(stat -c %s "$model_path")"
             "-ec",
             shell_script,
         ]
-        completed = run_docker_command(command, check=False)
+        completed = run_docker_command(
+            command,
+            check=False,
+            cancel_checker=self._startup_cancel_checker,
+        )
         if completed.returncode != 0:
             detail = ((completed.stderr or "") + "\n" + (completed.stdout or "")).strip()
             raise self._build_setup_error(
@@ -627,6 +658,7 @@ printf '\nmodel_bytes=%s\n' "$(stat -c %s "$model_path")"
         completed = run_docker_command(
             ["docker", "inspect", str(_RUNTIME_CONFIG["container_name"])],
             check=False,
+            cancel_checker=self._startup_cancel_checker,
         )
         if completed.returncode != 0:
             return {
@@ -672,7 +704,8 @@ printf '\nmodel_bytes=%s\n' "$(stat -c %s "$model_path")"
     def _start_managed_container(self) -> None:
         try:
             run_docker_command(
-                ["docker", "start", str(_RUNTIME_CONFIG["container_name"])]
+                ["docker", "start", str(_RUNTIME_CONFIG["container_name"])],
+                cancel_checker=self._startup_cancel_checker,
             )
         except RuntimeError as exc:
             raise self._build_setup_error(
@@ -680,6 +713,9 @@ printf '\nmodel_bytes=%s\n' "$(stat -c %s "$model_path")"
             ) from exc
 
     def _stop_managed_container(self) -> None:
+        watch_for_late_start = bool(
+            self._managed_start_attempted and not self._managed_active
+        )
         try:
             run_docker_command(
                 [
@@ -688,12 +724,82 @@ printf '\nmodel_bytes=%s\n' "$(stat -c %s "$model_path")"
                     "--timeout",
                     str(DEFAULT_MANAGED_RUNTIME_STOP_TIMEOUT_SEC),
                     str(_RUNTIME_CONFIG["container_name"]),
-                ]
+                ],
+                check=False,
+                timeout_sec=DEFAULT_MANAGED_RUNTIME_STOP_TIMEOUT_SEC + 15.0,
             )
         except RuntimeError as exc:
             raise self._build_setup_error(
                 f"Failed to stop the managed Gemma container.\n{exc}"
             ) from exc
+
+        deadline = time.monotonic() + (
+            LATE_START_STOP_GRACE_SEC if watch_for_late_start else 0.0
+        )
+        while True:
+            running = self._inspect_managed_container_running()
+            if running:
+                try:
+                    run_docker_command(
+                        [
+                            "docker",
+                            "stop",
+                            "--timeout",
+                            str(DEFAULT_MANAGED_RUNTIME_STOP_TIMEOUT_SEC),
+                            str(_RUNTIME_CONFIG["container_name"]),
+                        ],
+                        timeout_sec=DEFAULT_MANAGED_RUNTIME_STOP_TIMEOUT_SEC + 15.0,
+                    )
+                except RuntimeError as exc:
+                    raise self._build_setup_error(
+                        f"Failed to stop the managed Gemma container.\n{exc}"
+                    ) from exc
+                running = self._inspect_managed_container_running()
+            if time.monotonic() >= deadline:
+                if running:
+                    raise self._build_setup_error(
+                        "Docker reported that the managed Gemma container is still running after stop."
+                    )
+                return
+            time.sleep(LATE_START_STOP_POLL_SEC)
+
+    def _inspect_managed_container_running(self) -> bool:
+        try:
+            inspection = run_docker_command(
+                [
+                    "docker",
+                    "inspect",
+                    "--format",
+                    "{{.State.Running}}",
+                    str(_RUNTIME_CONFIG["container_name"]),
+                ],
+                check=False,
+                timeout_sec=15.0,
+            )
+        except RuntimeError as exc:
+            raise self._build_setup_error(
+                f"Failed to verify the managed Gemma container state.\n{exc}"
+            ) from exc
+        state = (inspection.stdout or "").strip().lower()
+        if inspection.returncode == 0 and state == "true":
+            return True
+        if inspection.returncode == 0 and state == "false":
+            return False
+        detail = (
+            (inspection.stderr or "") + "\n" + (inspection.stdout or "")
+        ).strip()
+        normalized_detail = detail.lower()
+        if inspection.returncode != 0 and (
+            "no such object" in normalized_detail
+            or "no such container" in normalized_detail
+        ):
+            return False
+        if inspection.returncode == 0:
+            detail = f"Unexpected docker inspect state: {state or '<empty>'}"
+        raise self._build_setup_error(
+            "Docker could not verify whether the managed Gemma container stopped."
+            + (f"\n{detail}" if detail else "")
+        )
 
     def _wait_for_any_probe(
         self,
@@ -789,6 +895,8 @@ printf '\nmodel_bytes=%s\n' "$(stat -c %s "$model_path")"
         api_base_url: str,
         model_name: str,
         progress_callback: Callable[[dict[str, Any]], None] | None = None,
+        *,
+        cancel_checker: Callable[[], bool] | None = None,
     ) -> None:
         self._emit_progress(
             progress_callback,
@@ -796,7 +904,11 @@ printf '\nmodel_bytes=%s\n' "$(stat -c %s "$model_path")"
             step_key="chat_prewarm",
             message="Gemma 첫 번역 요청을 예열하는 중...",
         )
-        self._prewarm_chat_completion(api_base_url, model_name)
+        self._prewarm_chat_completion(
+            api_base_url,
+            model_name,
+            cancel_checker=cancel_checker,
+        )
         self._emit_progress(
             progress_callback,
             status="completed",
@@ -810,6 +922,7 @@ printf '\nmodel_bytes=%s\n' "$(stat -c %s "$model_path")"
         model_name: str,
         *,
         timeout_sec: int = 90,
+        cancel_checker: Callable[[], bool] | None = None,
     ) -> None:
         base = _normalize_url(api_base_url)
         chat_url = f"{base}/chat/completions" if base.endswith("/v1") else f"{base}/v1/chat/completions"
@@ -835,9 +948,19 @@ printf '\nmodel_bytes=%s\n' "$(stat -c %s "$model_path")"
             headers={"Content-Type": "application/json"},
             method="POST",
         )
-        try:
+        def request_chat_completion() -> None:
             with urlopen(request, timeout=timeout_sec) as response:
                 response.read()
+
+        try:
+            self._run_interruptible_io(
+                request_chat_completion,
+                timeout_sec=timeout_sec,
+                cancel_checker=cancel_checker,
+                cancel_message="Cancelled while prewarming Gemma chat completion.",
+            )
+        except OperationCancelledError:
+            raise
         except Exception as exc:
             raise self._build_connection_error(
                 f"Gemma chat prewarm failed at {chat_url}: {exc}"
@@ -853,7 +976,10 @@ printf '\nmodel_bytes=%s\n' "$(stat -c %s "$model_path")"
             runtime = inspect_llama_cpp_runtime(
                 image_ref=image_ref,
                 container_name=str(_RUNTIME_CONFIG["container_name"]),
+                cancel_checker=self._startup_cancel_checker,
             )
+        except OperationCancelledError:
+            raise
         except Exception:
             logger.warning("Failed to inspect llama.cpp runtime metadata for Gemma.", exc_info=True)
             return
@@ -863,6 +989,47 @@ printf '\nmodel_bytes=%s\n' "$(stat -c %s "$model_path")"
             runtime.get("llama_cpp_digest", ""),
             runtime.get("llama_cpp_version", ""),
         )
+
+    @staticmethod
+    def _run_interruptible_io(
+        operation: Callable[[], None],
+        *,
+        timeout_sec: float,
+        cancel_checker: Callable[[], bool] | None,
+        cancel_message: str,
+    ) -> None:
+        results: queue.Queue[BaseException | None] = queue.Queue(maxsize=1)
+
+        def runner() -> None:
+            try:
+                operation()
+            except BaseException as exc:
+                results.put(exc)
+            else:
+                results.put(None)
+
+        worker = threading.Thread(
+            target=runner,
+            name="ct-gemma-prewarm-io",
+            daemon=True,
+        )
+        worker.start()
+        deadline = time.monotonic() + max(0.1, float(timeout_sec))
+        while True:
+            if LocalGemmaRuntimeManager._is_cancelled(cancel_checker):
+                raise OperationCancelledError(cancel_message)
+            remaining = deadline - time.monotonic()
+            if remaining <= 0.0:
+                raise TimeoutError(
+                    f"Gemma prewarm timed out after {float(timeout_sec):.1f}s."
+                )
+            try:
+                result = results.get(timeout=min(0.1, remaining))
+            except queue.Empty:
+                continue
+            if result is not None:
+                raise result
+            return
 
     def _emit_progress(self, progress_callback: Callable[[dict[str, Any]], None] | None, **payload: Any) -> None:
         if progress_callback is None:

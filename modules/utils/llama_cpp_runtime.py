@@ -1,15 +1,22 @@
 from __future__ import annotations
 
 import json
+import os
 import shutil
+import signal
 import subprocess
+import time
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
+
+from modules.utils.exceptions import OperationCancelledError
 
 
 DEFAULT_LLAMA_CPP_IMAGE = "ghcr.io/ggml-org/llama.cpp:server-cuda"
 DEFAULT_LLAMA_CPP_PULL_POLICY = "always"
 DEFAULT_MANAGED_RUNTIME_STOP_TIMEOUT_SEC = 10
+DEFAULT_DOCKER_COMMAND_TIMEOUT_SEC = 600.0
+DOCKER_COMMAND_POLL_INTERVAL_SEC = 0.1
 
 
 def normalize_llama_cpp_image(image_ref: Any = None) -> str:
@@ -43,17 +50,52 @@ def run_docker_command(
     cwd: str | Path | None = None,
     env: dict[str, str] | None = None,
     check: bool = True,
+    timeout_sec: float = DEFAULT_DOCKER_COMMAND_TIMEOUT_SEC,
+    cancel_checker: Callable[[], bool] | None = None,
 ) -> subprocess.CompletedProcess[str]:
     resolved_cmd = list(cmd)
     if resolved_cmd and resolved_cmd[0] == "docker":
         resolved_cmd[0] = resolve_docker_executable()
-    completed = subprocess.run(
+    if cancel_checker is not None and cancel_checker():
+        raise OperationCancelledError("Cancelled before Docker command startup.")
+    process = subprocess.Popen(
         resolved_cmd,
         cwd=str(cwd) if cwd is not None else None,
         env=env,
-        check=False,
-        capture_output=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
         text=True,
+        **_process_group_popen_kwargs(),
+    )
+    deadline = time.monotonic() + max(0.1, float(timeout_sec))
+    stdout = ""
+    stderr = ""
+    while True:
+        if cancel_checker is not None and cancel_checker():
+            _terminate_process(process)
+            raise OperationCancelledError(
+                f"Cancelled Docker command: {' '.join(resolved_cmd)}"
+            )
+        remaining = deadline - time.monotonic()
+        if remaining <= 0.0:
+            _terminate_process(process)
+            raise RuntimeError(
+                f"Docker command timed out after {float(timeout_sec):.1f}s: "
+                f"{' '.join(resolved_cmd)}"
+            )
+        try:
+            stdout, stderr = process.communicate(
+                timeout=min(DOCKER_COMMAND_POLL_INTERVAL_SEC, remaining)
+            )
+            break
+        except subprocess.TimeoutExpired:
+            continue
+
+    completed = subprocess.CompletedProcess(
+        resolved_cmd,
+        int(process.returncode or 0),
+        stdout or "",
+        stderr or "",
     )
     if check and completed.returncode != 0:
         detail = (
@@ -66,7 +108,83 @@ def run_docker_command(
     return completed
 
 
-def resolve_docker_compose_command() -> tuple[str, ...]:
+def _process_group_popen_kwargs() -> dict[str, Any]:
+    if os.name == "nt":
+        return {
+            "creationflags": getattr(
+                subprocess,
+                "CREATE_NEW_PROCESS_GROUP",
+                0x00000200,
+            )
+        }
+    return {"start_new_session": True}
+
+
+def _terminate_process(process: subprocess.Popen[str]) -> None:
+    if process.poll() is not None:
+        return
+    if os.name == "nt":
+        _terminate_windows_process_tree(process)
+    else:
+        _terminate_posix_process_group(process)
+
+
+def _terminate_windows_process_tree(process: subprocess.Popen[str]) -> None:
+    pid = getattr(process, "pid", None)
+    if pid is not None:
+        try:
+            subprocess.run(
+                ["taskkill", "/PID", str(pid), "/T", "/F"],
+                check=False,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                timeout=5.0,
+            )
+        except Exception:
+            pass
+    _wait_then_force_kill(process)
+
+
+def _terminate_posix_process_group(process: subprocess.Popen[str]) -> None:
+    pid = getattr(process, "pid", None)
+    if pid is not None:
+        try:
+            os.killpg(os.getpgid(pid), signal.SIGTERM)
+        except Exception:
+            pass
+    try:
+        process.communicate(timeout=2.0)
+        return
+    except Exception:
+        pass
+    if pid is not None:
+        try:
+            os.killpg(os.getpgid(pid), signal.SIGKILL)
+        except Exception:
+            pass
+    _wait_then_force_kill(process)
+
+
+def _wait_then_force_kill(process: subprocess.Popen[str]) -> None:
+    try:
+        process.communicate(timeout=2.0)
+        return
+    except Exception:
+        pass
+    if process.poll() is not None:
+        return
+    try:
+        process.kill()
+        process.communicate(timeout=2.0)
+    except Exception:
+        pass
+
+
+def resolve_docker_compose_command(
+    *,
+    cancel_checker: Callable[[], bool] | None = None,
+) -> tuple[str, ...]:
     candidates: list[tuple[str, ...]] = []
     if shutil.which("docker") or shutil.which("docker.exe"):
         candidates.append(("docker", "compose"))
@@ -74,7 +192,11 @@ def resolve_docker_compose_command() -> tuple[str, ...]:
         candidates.append(("docker-compose",))
 
     for candidate in candidates:
-        probe = run_docker_command([*candidate, "version"], check=False)
+        probe = run_docker_command(
+            [*candidate, "version"],
+            check=False,
+            cancel_checker=cancel_checker,
+        )
         if probe.returncode == 0:
             if candidate[0] == "docker":
                 return (resolve_docker_executable(), *candidate[1:])
@@ -118,11 +240,16 @@ def docker_compose_pull_and_up(
     docker_compose_up_force_recreate(compose_file, cwd=cwd, env=env)
 
 
-def inspect_llama_cpp_image_digest(image_ref: str) -> str:
+def inspect_llama_cpp_image_digest(
+    image_ref: str,
+    *,
+    cancel_checker: Callable[[], bool] | None = None,
+) -> str:
     normalized = normalize_llama_cpp_image(image_ref)
     completed = run_docker_command(
         ["docker", "image", "inspect", "--format", "{{json .RepoDigests}}", normalized],
         check=False,
+        cancel_checker=cancel_checker,
     )
     if completed.returncode != 0:
         return ""
@@ -155,20 +282,30 @@ def _extract_llama_cpp_version(output: str) -> str:
     return lines[0] if lines else ""
 
 
-def inspect_llama_cpp_version_from_container(container_name: str) -> str:
+def inspect_llama_cpp_version_from_container(
+    container_name: str,
+    *,
+    cancel_checker: Callable[[], bool] | None = None,
+) -> str:
     completed = run_docker_command(
         ["docker", "exec", container_name, "/app/llama-server", "--version"],
         check=False,
+        cancel_checker=cancel_checker,
     )
     output = ((completed.stdout or "") + (completed.stderr or "")).strip()
     return _extract_llama_cpp_version(output)
 
 
-def inspect_llama_cpp_version_from_image(image_ref: str) -> str:
+def inspect_llama_cpp_version_from_image(
+    image_ref: str,
+    *,
+    cancel_checker: Callable[[], bool] | None = None,
+) -> str:
     normalized = normalize_llama_cpp_image(image_ref)
     completed = run_docker_command(
         ["docker", "run", "--rm", "--entrypoint", "/app/llama-server", normalized, "--version"],
         check=False,
+        cancel_checker=cancel_checker,
     )
     output = ((completed.stdout or "") + (completed.stderr or "")).strip()
     return _extract_llama_cpp_version(output)
@@ -178,22 +315,33 @@ def inspect_llama_cpp_runtime(
     *,
     image_ref: str | None = None,
     container_name: str | None = None,
+    cancel_checker: Callable[[], bool] | None = None,
 ) -> dict[str, str]:
     image = normalize_llama_cpp_image(image_ref)
     if container_name:
         completed = run_docker_command(
             ["docker", "inspect", "--format", "{{.Config.Image}}", container_name],
             check=False,
+            cancel_checker=cancel_checker,
         )
         runtime_image = (completed.stdout or "").strip()
         if runtime_image:
             image = runtime_image
     return {
         "llama_cpp_image": image,
-        "llama_cpp_digest": inspect_llama_cpp_image_digest(image),
+        "llama_cpp_digest": inspect_llama_cpp_image_digest(
+            image,
+            cancel_checker=cancel_checker,
+        ),
         "llama_cpp_version": (
-            inspect_llama_cpp_version_from_container(container_name)
+            inspect_llama_cpp_version_from_container(
+                container_name,
+                cancel_checker=cancel_checker,
+            )
             if container_name
-            else inspect_llama_cpp_version_from_image(image)
+            else inspect_llama_cpp_version_from_image(
+                image,
+                cancel_checker=cancel_checker,
+            )
         ),
     }

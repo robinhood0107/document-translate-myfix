@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import copy
 import json
+import os
 import subprocess
 import sys
 import threading
@@ -20,7 +21,11 @@ _GPU_METRICS_CACHE_VALUE: dict[str, Any] | None = None
 _GPU_METRICS_CACHE_EXPIRES_AT = 0.0
 
 
-def _run_capture(cmd: list[str], *, timeout_sec: float = 5.0) -> str:
+def _run_capture_status(
+    cmd: list[str],
+    *,
+    timeout_sec: float = 5.0,
+) -> tuple[bool, str]:
     try:
         completed = subprocess.run(
             cmd,
@@ -30,15 +35,20 @@ def _run_capture(cmd: list[str], *, timeout_sec: float = 5.0) -> str:
             timeout=max(0.1, float(timeout_sec)),
         )
     except Exception:
-        return ""
-    return (completed.stdout or "").strip()
+        return False, ""
+    return True, (completed.stdout or "").strip()
+
+
+def _run_capture(cmd: list[str], *, timeout_sec: float = 5.0) -> str:
+    _succeeded, output = _run_capture_status(cmd, timeout_sec=timeout_sec)
+    return output
 
 
 def _query_gpu_rows() -> list[dict[str, Any]]:
     output = _run_capture(
         [
             "nvidia-smi",
-            "--query-gpu=index,name,memory.total,memory.used,memory.free,utilization.gpu,utilization.memory",
+            "--query-gpu=index,uuid,name,memory.total,memory.used,memory.free,utilization.gpu,utilization.memory",
             "--format=csv,noheader,nounits",
         ]
     )
@@ -51,18 +61,19 @@ def _query_gpu_rows() -> list[dict[str, Any]]:
         if not line:
             continue
         parts = [part.strip() for part in line.split(",")]
-        if len(parts) < 6:
+        if len(parts) < 7:
             continue
         try:
             rows.append(
                 {
                     "index": int(parts[0]),
-                    "name": parts[1],
-                    "memory_total_mb": int(parts[2]),
-                    "memory_used_mb": int(parts[3]),
-                    "memory_free_mb": int(parts[4]),
-                    "gpu_util_percent": int(parts[5]),
-                    "memory_util_percent": int(parts[6]) if len(parts) > 6 else None,
+                    "uuid": parts[1],
+                    "name": parts[2],
+                    "memory_total_mb": int(parts[3]),
+                    "memory_used_mb": int(parts[4]),
+                    "memory_free_mb": int(parts[5]),
+                    "gpu_util_percent": int(parts[6]),
+                    "memory_util_percent": int(parts[7]) if len(parts) > 7 else None,
                 }
             )
         except ValueError:
@@ -79,6 +90,81 @@ def query_gpu_metrics() -> dict[str, Any]:
         "gpus": rows,
         "primary": primary,
         "sampled_at": time.time(),
+    }
+
+
+def query_process_driver_gpu_metrics(
+    *,
+    pid: int | None = None,
+    preferred_gpu_uuid: str | None = None,
+) -> dict[str, Any]:
+    """Return driver memory attributed to this PID and an exact GPU UUID."""
+
+    requested_pid = int(pid if pid is not None else os.getpid())
+    query_succeeded, output = _run_capture_status(
+        [
+            "nvidia-smi",
+            "--query-compute-apps=pid,gpu_uuid,used_gpu_memory",
+            "--format=csv,noheader,nounits",
+        ]
+    )
+    rows: list[dict[str, Any]] = []
+    if query_succeeded:
+        for raw_line in output.splitlines():
+            parts = [part.strip() for part in raw_line.split(",")]
+            if len(parts) < 3:
+                continue
+            try:
+                row_pid = int(parts[0])
+                used_mb = float(parts[2])
+            except ValueError:
+                continue
+            if row_pid != requested_pid:
+                continue
+            rows.append(
+                {
+                    "pid": row_pid,
+                    "gpu_uuid": parts[1],
+                    "memory_used_mb": used_mb,
+                }
+            )
+
+    preferred = str(preferred_gpu_uuid or "").strip()
+    candidate_uuids = {str(row["gpu_uuid"]) for row in rows}
+    selected_uuid = ""
+    if preferred and preferred in candidate_uuids:
+        selected_uuid = preferred
+    elif not preferred and len(candidate_uuids) == 1:
+        selected_uuid = next(iter(candidate_uuids))
+    selected_rows = [
+        row for row in rows if selected_uuid and row["gpu_uuid"] == selected_uuid
+    ]
+    selected = (
+        {
+            "pid": requested_pid,
+            "gpu_uuid": selected_uuid,
+            "memory_used_mb": sum(float(row["memory_used_mb"]) for row in selected_rows),
+        }
+        if selected_rows
+        else None
+    )
+    reason = ""
+    if not query_succeeded:
+        reason = "nvidia-smi-query-failed"
+    elif preferred and preferred not in candidate_uuids:
+        reason = "preferred-gpu-process-not-found"
+    elif len(candidate_uuids) > 1 and not preferred:
+        reason = "ambiguous-process-gpu"
+    elif not rows:
+        reason = "process-gpu-memory-not-reported"
+    return {
+        "query_available": query_succeeded,
+        "available": selected is not None,
+        "pid": requested_pid,
+        "preferred_gpu_uuid": preferred,
+        "rows": rows,
+        "selected": selected,
+        "reason": reason,
     }
 
 
@@ -103,9 +189,15 @@ def query_process_cuda_metrics() -> dict[str, Any]:
                 "reason": "cuda-unavailable",
             }
         device_index = int(cuda.current_device())
+        try:
+            properties = cuda.get_device_properties(device_index)
+            device_uuid = str(getattr(properties, "uuid", "") or "").strip()
+        except Exception:
+            device_uuid = ""
         return {
             "available": True,
             "device_index": device_index,
+            "device_uuid": device_uuid,
             "allocated_mb": float(cuda.memory_allocated(device_index)) / 1024.0 / 1024.0,
             "reserved_mb": float(cuda.memory_reserved(device_index)) / 1024.0 / 1024.0,
             "max_allocated_mb": float(cuda.max_memory_allocated(device_index)) / 1024.0 / 1024.0,
@@ -121,10 +213,14 @@ def query_process_cuda_metrics() -> dict[str, Any]:
 def query_cuda_handoff_metrics() -> dict[str, Any]:
     """Collect process allocator and driver-visible GPU memory for a handoff."""
 
+    process = query_process_cuda_metrics()
     return {
         "sampled_at": time.time(),
-        "process": query_process_cuda_metrics(),
+        "process": process,
         "driver": query_gpu_metrics(),
+        "driver_process": query_process_driver_gpu_metrics(
+            preferred_gpu_uuid=str(process.get("device_uuid") or ""),
+        ),
     }
 
 
