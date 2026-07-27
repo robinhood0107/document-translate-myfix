@@ -57,7 +57,10 @@ def _runtime_contract(fingerprint: str = "fingerprint-a") -> SimpleNamespace:
         model_sha256="b" * 64,
         ready_manifest_sha256="a" * 64,
         preparation_version=1,
+        command_sha256="c" * 64,
+        compose_file_sha256="d" * 64,
         command=("-m", "/models/gemma-test.gguf"),
+        runtime_options={"LLAMA_CTX_SIZE": "4096"},
         compose_environment=lambda: dict(compose_environment),
     )
 
@@ -523,6 +526,40 @@ class LocalGemmaRuntimeManagerTests(unittest.TestCase):
         self.assertEqual(env["LLAMA_CPP_PULL_POLICY"], "missing")
         self.assertEqual(env["GEMMA_MODEL_VOLUME"], DEFAULT_GEMMA_MODEL_VOLUME)
         self.assertEqual(env["GEMMA_RUNTIME_FINGERPRINT"], "fingerprint-a")
+
+    def test_translation_cache_identity_resolves_without_starting_container(self) -> None:
+        manager = LocalGemmaRuntimeManager()
+        settings = _DummyGemmaSettingsPage(
+            api_url="http://127.0.0.1:18080/v1",
+        )
+        contract = _runtime_contract()
+
+        with mock.patch.object(
+            manager,
+            "_load_runtime_contract",
+            return_value=contract,
+        ) as load_contract, mock.patch.object(
+            manager,
+            "_ensure_server_uncached",
+        ) as ensure_uncached:
+            identity = manager.get_translation_cache_identity(settings)
+
+        load_contract.assert_called_once_with("gemma-test.gguf")
+        ensure_uncached.assert_not_called()
+        self.assertEqual(identity["model_sha256"], "b" * 64)
+        self.assertEqual(identity["runtime_fingerprint"], "fingerprint-a")
+        self.assertEqual(identity["runtime_command_sha256"], "c" * 64)
+        self.assertEqual(identity["runtime_options"], {"LLAMA_CTX_SIZE": "4096"})
+
+    def test_unmanaged_endpoint_has_no_unverifiable_result_cache_identity(self) -> None:
+        manager = LocalGemmaRuntimeManager()
+        settings = _DummyGemmaSettingsPage()
+
+        with mock.patch.object(manager, "_load_runtime_contract") as load_contract:
+            identity = manager.get_translation_cache_identity(settings)
+
+        self.assertIsNone(identity)
+        load_contract.assert_not_called()
 
     def test_load_contract_rejects_model_paths_before_docker_probe(self) -> None:
         manager = LocalGemmaRuntimeManager()

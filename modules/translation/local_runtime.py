@@ -125,6 +125,32 @@ class LocalGemmaRuntimeManager:
         api_base_url, _ = self._resolve_credentials(settings_page)
         return _normalize_url(api_base_url) == _normalize_url(_RUNTIME_CONFIG["managed_url"])
 
+    def get_translation_cache_identity(
+        self,
+        settings_page: Any,
+    ) -> dict[str, Any] | None:
+        """Resolve the managed runtime identity without starting its container."""
+
+        with self._lock:
+            api_base_url, model_name = self._resolve_credentials(settings_page)
+            if not api_base_url or not self.should_manage_server(settings_page):
+                return None
+            contract = self._load_runtime_contract(model_name)
+            return {
+                "managed": True,
+                "api_base_url": _normalize_url(api_base_url),
+                "model_name": contract.model_name,
+                "model_sha256": contract.model_sha256,
+                "runtime_fingerprint": contract.fingerprint,
+                "runtime_image_ref": contract.image_ref,
+                "runtime_image_id": contract.image_id,
+                "runtime_command_sha256": contract.command_sha256,
+                "runtime_compose_sha256": contract.compose_file_sha256,
+                "runtime_manifest_sha256": contract.ready_manifest_sha256,
+                "runtime_preparation_version": contract.preparation_version,
+                "runtime_options": dict(contract.runtime_options),
+            }
+
     def ensure_server(
         self,
         settings_page: Any,

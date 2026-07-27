@@ -54,6 +54,21 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\prepare_gemma_runt
 
 정상 종료는 컨테이너와 volume을 보존하는 `docker stop`만 사용합니다. 초기화나 삭제가 필요한 별도 작업에서만 `down`을 사용합니다.
 
+## 결과 캐시와 Exact Translation Memory
+
+`사용자 사전` 설정에는 Gemma용 두 로컬 fast path가 있습니다.
+
+- `영구 블록 결과 캐시`: 전체 정렬 문맥, 대상 index, 언어, prompt/schema/sampler, 모델 SHA-256, runtime fingerprint 등이 모두 같은 결과만 재사용합니다.
+- `정확 일치 번역 메모리`: 사용자가 승인한 원문→번역 쌍만 Gemma를 우회합니다. 승인하지 않은 항목은 후보로만 저장됩니다.
+
+번역 전에 cache/TM hit를 먼저 판정합니다. 전체 hit이면 중지된 Gemma 컨테이너를 시작하지 않습니다. 부분 hit이면 모든 원문 marker를 문맥으로 유지하면서 누락된 `requested_blocks`만 요청합니다. 결과 사전 치환은 hit와 miss 모두에서 정확히 한 번 적용합니다.
+
+이 기능은 앱 user-data 디렉터리의 SQLite DB에 원문과 번역문을 저장하므로 민감한 로컬 데이터로 취급해야 합니다. DB 잠금이나 손상을 감지하면 해당 실행의 cache/TM만 끄고 정상 번역을 계속하며, DB를 자동 삭제하거나 덮어쓰지 않습니다.
+
+승인, 승인 해제, 삭제, result-cache 비우기, Exact TM JSON 가져오기·내보내기는 `사용자 사전` 화면에서 수행합니다. 가져온 승인 항목은 Gemma를 우회할 수 있으므로 신뢰하는 파일만 확인 후 가져옵니다.
+
+세부 identity, 보존 한도, 정규화, 장애 동작은 [번역 메모리 가이드](translation-memory-ko.md)를 참고하세요.
+
 ## 명시적 host-bind rollback
 
 versioned volume을 사용하지 않고 별도 host model directory로 수동 rollback해야 할 때만 override compose를 함께 지정합니다.
@@ -95,6 +110,8 @@ docker compose `
 - reasoning disabled
 
 환경변수로 허용하는 runtime 후보는 위 범위로 제한됩니다.
+
+현재 pinned llama.cpp에서는 `cache-ram=0`의 prompt cache 동작이 256 MiB보다 빠른 실측값을 보였으므로 `0`을 유지합니다. 이 server-side prompt reuse는 출력 token을 다시 생성하는 기능이며, SQLite 번역 결과 캐시와는 별개입니다.
 
 ## 고정 runtime image
 

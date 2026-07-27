@@ -1,11 +1,18 @@
 import logging
 import numpy as np
+from typing import Iterable
+from PySide6.QtCore import QCoreApplication
 
 from ..utils.textblock import TextBlock
 from ..utils.device import resolve_device
 from .local_runtime import LocalGemmaRuntimeManager
 from .base import LLMTranslation
 from .factory import TranslationFactory
+from .translation_memory import (
+    DEFAULT_RESULT_CACHE_LIMIT,
+    DEFAULT_TM_CANDIDATE_LIMIT,
+    TranslationMemoryStore,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -38,16 +45,13 @@ class Translator:
         self.target_lang = target_lang
         self.target_lang_en = self._get_english_lang(main_page, self.target_lang)
 
+        self._local_gemma_runtime_manager: LocalGemmaRuntimeManager | None = None
         if self.translator_key == "Custom Local Server(Gemma)":
             runtime_manager = getattr(main_page, "local_translation_runtime_manager", None)
             if not isinstance(runtime_manager, LocalGemmaRuntimeManager):
                 runtime_manager = LocalGemmaRuntimeManager()
                 main_page.local_translation_runtime_manager = runtime_manager
-            runtime_manager.ensure_server(
-                self.settings,
-                progress_callback=getattr(main_page, "report_runtime_progress", None),
-                cancel_checker=getattr(main_page, "is_current_task_cancelled", None),
-            )
+            self._local_gemma_runtime_manager = runtime_manager
         
         # Create appropriate engine using factory
         self.engine = TranslationFactory.create_engine(
@@ -59,6 +63,69 @@ class Translator:
         
         # Track engine type for method dispatching
         self.is_llm_engine = isinstance(self.engine, LLMTranslation)
+        self._configure_local_gemma_engine()
+
+    def _translation_memory_settings(self) -> dict:
+        getter = getattr(self.settings, "get_translation_memory_settings", None)
+        if callable(getter):
+            try:
+                values = dict(getter() or {})
+            except Exception:
+                logger.warning(
+                    "Unable to read translation-memory settings; using safe defaults.",
+                    exc_info=True,
+                )
+                values = {}
+        else:
+            values = {}
+        values.setdefault("persistent_cache_enabled", True)
+        values.setdefault("exact_tm_enabled", True)
+        values.setdefault("result_cache_limit", DEFAULT_RESULT_CACHE_LIMIT)
+        values.setdefault("candidate_limit", DEFAULT_TM_CANDIDATE_LIMIT)
+        return values
+
+    def _configure_local_gemma_engine(self) -> None:
+        runtime_manager = self._local_gemma_runtime_manager
+        if runtime_manager is None:
+            return
+        configure_runtime = getattr(self.engine, "configure_runtime_hooks", None)
+        configure_memory = getattr(self.engine, "configure_translation_memory", None)
+        if not callable(configure_runtime) or not callable(configure_memory):
+            return
+
+        memory_settings = self._translation_memory_settings()
+        store = getattr(self.main_page, "translation_memory_store", None)
+        if not isinstance(store, TranslationMemoryStore):
+            store = TranslationMemoryStore(
+                result_cache_limit=int(memory_settings["result_cache_limit"]),
+                candidate_limit=int(memory_settings["candidate_limit"]),
+            )
+            self.main_page.translation_memory_store = store
+        else:
+            store.configure_limits(
+                result_cache_limit=int(memory_settings["result_cache_limit"]),
+                candidate_limit=int(memory_settings["candidate_limit"]),
+            )
+
+        configure_memory(store, memory_settings)
+        configure_runtime(
+            ensure_runtime=lambda: runtime_manager.ensure_server(
+                self.settings,
+                progress_callback=getattr(
+                    self.main_page,
+                    "report_runtime_progress",
+                    None,
+                ),
+                cancel_checker=getattr(
+                    self.main_page,
+                    "is_current_task_cancelled",
+                    None,
+                ),
+            ),
+            runtime_identity_provider=lambda: runtime_manager.get_translation_cache_identity(
+                self.settings
+            ),
+        )
     
     def _get_translator_key(self, localized_translator: str) -> str:
         """
@@ -100,7 +167,123 @@ class Translator:
         """
         return main_page.lang_mapping.get(translated_lang, translated_lang)
     
-    def translate(self, blk_list: list[TextBlock], image: np.ndarray = None, extra_context: str = "") -> list[TextBlock]:
+    def prepare_translation(
+        self,
+        blk_list: list[TextBlock],
+        extra_context: str = "",
+        *,
+        requested_indices: Iterable[int] | None = None,
+    ) -> bool:
+        """Resolve persistent hits and report whether local Gemma is still needed."""
+
+        prepare = getattr(self.engine, "prepare_translation", None)
+        if self._local_gemma_runtime_manager is None or not callable(prepare):
+            return False
+        return bool(
+            prepare(
+                blk_list,
+                extra_context,
+                requested_indices=requested_indices,
+            )
+        )
+
+    @property
+    def translation_cache_status(self) -> str:
+        return str(
+            getattr(self.engine, "translation_cache_status", "refreshed")
+            or "refreshed"
+        )
+
+    @property
+    def uses_persistent_translation_memory(self) -> bool:
+        return self._local_gemma_runtime_manager is not None
+
+    def translate_with_cache_manager(
+        self,
+        blk_list: list[TextBlock],
+        image: np.ndarray,
+        extra_context: str,
+        cache_manager,
+    ) -> tuple[list[TextBlock], str]:
+        """Translate a full block list while preserving the legacy non-Gemma cache."""
+
+        if self.uses_persistent_translation_memory or cache_manager is None:
+            translated = self.translate(blk_list, image, extra_context)
+            return translated, self.translation_cache_status
+
+        cache_key = cache_manager._get_translation_cache_key(
+            image,
+            self.source_lang,
+            self.target_lang,
+            self.translator_key,
+            extra_context,
+        )
+        if cache_manager._can_serve_all_blocks_from_translation_cache(
+            cache_key,
+            blk_list,
+        ):
+            cache_manager._apply_cached_translations_to_blocks(cache_key, blk_list)
+            return blk_list, "hit"
+
+        translated = self.translate(blk_list, image, extra_context)
+        # Keep the legacy cache useful for remote/traditional translators, but
+        # store the raw translation before user dictionary substitution so both
+        # hit and miss paths apply current rules exactly once.
+        cache_manager._cache_translation_results(cache_key, blk_list)
+        return translated, "refreshed"
+
+    def _report_translation_memory_warning(self) -> None:
+        store = getattr(self.main_page, "translation_memory_store", None)
+        reason = (
+            store.disabled_reason
+            if isinstance(store, TranslationMemoryStore)
+            else ""
+        )
+        if not reason:
+            return
+        warned_reasons = getattr(
+            self.main_page,
+            "_translation_memory_warned_reasons",
+            None,
+        )
+        if not isinstance(warned_reasons, set):
+            warned_reasons = set()
+            self.main_page._translation_memory_warned_reasons = warned_reasons
+        if reason in warned_reasons:
+            return
+        warned_reasons.add(reason)
+        callback = getattr(self.main_page, "report_runtime_progress", None)
+        if callable(callback):
+            try:
+                callback(
+                    {
+                        "phase": "translation",
+                        "service": "gemma",
+                        "status": "warning",
+                        "step_key": "translation_memory",
+                        "stage_name": "translation",
+                        "message": QCoreApplication.translate(
+                            "Translator",
+                            "Persistent translation cache is unavailable, so caching is disabled for this task while normal translation continues.",
+                        ),
+                        "detail": reason,
+                        "translation_memory_disabled": True,
+                    }
+                )
+            except Exception:
+                logger.warning(
+                    "Unable to report the translation-memory fail-open warning.",
+                    exc_info=True,
+                )
+
+    def translate(
+        self,
+        blk_list: list[TextBlock],
+        image: np.ndarray = None,
+        extra_context: str = "",
+        *,
+        requested_indices: Iterable[int] | None = None,
+    ) -> list[TextBlock]:
         """
         Translate text in text blocks using the configured translation engine.
         
@@ -128,6 +311,16 @@ class Translator:
 
         if self.is_llm_engine:
             # LLM translators need image and extra context
+            if self._local_gemma_runtime_manager is not None:
+                try:
+                    return self.engine.translate(
+                        blk_list,
+                        image,
+                        extra_context,
+                        requested_indices=requested_indices,
+                    )
+                finally:
+                    self._report_translation_memory_warning()
             return self.engine.translate(blk_list, image, extra_context)
         else:
             # Text-based translators only need the text blocks
