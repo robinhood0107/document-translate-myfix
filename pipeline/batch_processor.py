@@ -333,16 +333,22 @@ class BatchProcessor:
             "ocr_low_quality_block_count": int(quality.get("single_char_like", 0) or 0),
         }
 
-    def _translation_benchmark_metrics(self, translator) -> dict[str, int]:
+    def _translation_benchmark_metrics(self, translator) -> dict[str, int | float]:
         engine = getattr(translator, "engine", None)
         stats = getattr(engine, "last_benchmark_stats", {}) if engine is not None else {}
-        return {
+        metrics: dict[str, int | float] = {
             "gemma_json_retry_count": int(stats.get("gemma_json_retry_count", 0) or 0),
             "gemma_chunk_retry_events": int(stats.get("gemma_chunk_retry_events", 0) or 0),
             "gemma_truncated_count": int(stats.get("gemma_truncated_count", 0) or 0),
             "gemma_empty_content_count": int(stats.get("gemma_empty_content_count", 0) or 0),
             "gemma_request_retry_count": int(stats.get("gemma_request_retry_count", 0) or 0),
         }
+        for key, value in stats.items():
+            if not str(key).startswith("gemma_") or isinstance(value, bool):
+                continue
+            if isinstance(value, (int, float)):
+                metrics[str(key)] = value
+        return metrics
 
     def _handle_legacy_inpaint_failure(
         self,

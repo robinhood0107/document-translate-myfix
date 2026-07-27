@@ -108,7 +108,7 @@ class StagePageContext:
     detector_engine: str = ""
     detector_device: str = ""
     page_ocr_metrics: dict[str, int] = field(default_factory=dict)
-    page_translation_metrics: dict[str, int] = field(default_factory=dict)
+    page_translation_metrics: dict[str, int | float] = field(default_factory=dict)
     raw_mask: Any | None = None
     mask: Any | None = None
     mask_details: dict[str, Any] = field(default_factory=dict)
