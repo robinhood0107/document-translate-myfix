@@ -15,6 +15,7 @@
 ## 중요 기능
 
 - 데스크톱 중심 번역 워크플로를 위한 로컬 Gemma 번역 런타임.
+- 전체 identity 기반 Gemma 결과 캐시와 사용자 승인형 정확 일치 번역 메모리.
 - `HunyuanOCR`와 `PaddleOCR VL`을 상황에 맞게 고르는 로컬 OCR 최적 라우팅.
 - 저장/불러오기까지 유지되는 인페인팅 Add / Exclude / Restore 도구.
 - OCR/번역 교정 사전이 포함된 TXT/MD 원문 export 및 번역 import.
@@ -134,6 +135,8 @@ OCR:
 - custom translator 모드를 분리하고 keyless local endpoint 지원을 보강했습니다.
 - Gemma 입력 정규화와 문제 glyph 정리를 추가했습니다.
 - 로컬 sampler/runtime 기본값을 benchmark 결과에 맞춰 조정했습니다.
+- 전체 hit에서 Gemma 시작을 생략하는 SQLite 결과 캐시 fast path를 추가했습니다.
+- 보수적 일치와 명시적 승인·가져오기·내보내기를 사용하는 Exact Translation Memory를 별도로 추가했습니다.
 
 ### 벤치마크와 브랜치 분리
 
@@ -216,6 +219,8 @@ powershell -NoProfile -ExecutionPolicy Bypass `
 ```
 
 앱에서는 `Custom Local Server(Gemma)`를 선택합니다. 관리 런타임은 ready manifest와 모델 크기를 확인하고 준비된 volume을 read-only로 마운트한 뒤, 필요할 때만 컨테이너를 시작하거나 재생성합니다. 두 모델의 SHA-256을 명시적으로 다시 계산하려면 같은 스크립트를 `-Mode Verify`로 실행합니다.
+
+**사용자 사전** 설정에서는 영구 블록 결과 캐시와 정확 일치 번역 메모리도 관리합니다. 결과 캐시는 번역과 runtime의 전체 identity가 같은 경우에만 재사용합니다. 원문→번역 쌍은 사용자가 명시적으로 승인해야 Gemma를 우회하며, 승인 항목이 포함된 파일을 가져올 때도 확인을 요구합니다. DB에는 민감한 로컬 텍스트가 저장되며 앱 user-data 디렉터리에만 남습니다. 잠금·손상 오류가 나도 자동 삭제하지 않습니다. 자세한 내용은 [번역 메모리 가이드](docs/gemma/translation-memory-ko.md)를 참고하세요.
 
 ### 3. 로컬 OCR 서버 사용
 

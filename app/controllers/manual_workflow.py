@@ -413,7 +413,6 @@ class ManualWorkflowController:
             upper_case = settings_page.ui.uppercase_checkbox.isChecked()
 
             def translate_selected_pages() -> dict[str, tuple[list[TextBlock], str, str]]:
-                cache_manager = self.main.pipeline.cache_manager
                 results: dict[str, tuple[list[TextBlock], str, str]] = {}
                 for file_path in selected_paths:
                     state = self.main.image_states.get(file_path, {})
@@ -426,28 +425,16 @@ class ManualWorkflowController:
                     source_lang = state.get("source_lang", source_lang_fallback)
                     target_lang = state.get("target_lang", target_lang_fallback)
                     translator = Translator(self.main, source_lang, target_lang)
-                    cache_key = cache_manager._get_translation_cache_key(
+                    _, cache_status = translator.translate_with_cache_manager(
+                        blk_list,
                         image,
-                        source_lang,
-                        target_lang,
-                        translator_key,
                         extra_context,
+                        self.main.pipeline.cache_manager,
                     )
-                    if cache_manager._can_serve_all_blocks_from_translation_cache(cache_key, blk_list):
-                        cache_manager._apply_cached_translations_to_blocks(cache_key, blk_list)
-                        apply_translation_result_dictionary(
-                            blk_list,
-                            self.main.settings_page.get_translation_result_dictionary_rules(),
-                        )
-                        cache_status = "hit"
-                    else:
-                        translator.translate(blk_list, image, extra_context)
-                        apply_translation_result_dictionary(
-                            blk_list,
-                            self.main.settings_page.get_translation_result_dictionary_rules(),
-                        )
-                        cache_manager._cache_translation_results(cache_key, blk_list)
-                        cache_status = "refreshed"
+                    apply_translation_result_dictionary(
+                        blk_list,
+                        self.main.settings_page.get_translation_result_dictionary_rules(),
+                    )
                     set_upper_case(blk_list, upper_case)
                     results[file_path] = (
                         blk_list,
