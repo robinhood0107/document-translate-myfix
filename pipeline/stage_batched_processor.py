@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import threading
 import time
 import traceback
 from concurrent.futures import Future, ThreadPoolExecutor
@@ -128,6 +129,7 @@ class StageBatchedProcessor(BatchProcessor):
         self._timestamp: str = ""
         self._prewarm_executor: ThreadPoolExecutor | None = None
         self._prewarm_jobs: dict[str, Future] = {}
+        self._prewarm_cancel_event = threading.Event()
 
     def _stage_tr(self, text: str) -> str:
         return QCoreApplication.translate("StageBatchedProcessor", text)
@@ -153,6 +155,23 @@ class StageBatchedProcessor(BatchProcessor):
             self._prewarm_executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="ct-stage-prewarm")
         return self._prewarm_executor
 
+    def _prewarm_cancel_checker(self) -> bool:
+        cancel_event = getattr(self, "_prewarm_cancel_event", None)
+        if cancel_event is not None and cancel_event.is_set():
+            return True
+        checker = getattr(self.main_page, "is_current_task_cancelled", None)
+        try:
+            return bool(checker()) if callable(checker) else bool(self._is_cancelled())
+        except Exception:
+            return bool(self._is_cancelled())
+
+    def _reset_prewarm_lifecycle(self) -> None:
+        cancel_event = getattr(self, "_prewarm_cancel_event", None)
+        if cancel_event is None:
+            self._prewarm_cancel_event = threading.Event()
+        else:
+            cancel_event.clear()
+
     def _start_prewarm(self, key: str, label: str, service: str, fn: Callable[[], None]) -> None:
         if key in self._prewarm_jobs:
             return
@@ -165,7 +184,11 @@ class StageBatchedProcessor(BatchProcessor):
         )
 
         def runner() -> None:
+            if self._prewarm_cancel_checker():
+                raise OperationCancelledError(f"{label} prewarm was cancelled before startup.")
             fn()
+            if self._prewarm_cancel_checker():
+                raise OperationCancelledError(f"{label} prewarm was cancelled after startup.")
             self._prewarm_progress(
                 service=service,
                 status="ready",
@@ -209,9 +232,15 @@ class StageBatchedProcessor(BatchProcessor):
     def _shutdown_prewarm_executor(self) -> None:
         executor = self._prewarm_executor
         self._prewarm_executor = None
-        self._prewarm_jobs.clear()
+        cancel_event = getattr(self, "_prewarm_cancel_event", None)
+        if cancel_event is not None:
+            cancel_event.set()
+        jobs = list(self._prewarm_jobs.values())
+        for job in jobs:
+            job.cancel()
         if executor is not None:
-            executor.shutdown(wait=False, cancel_futures=True)
+            executor.shutdown(wait=True, cancel_futures=True)
+        self._prewarm_jobs.clear()
 
     def _shutdown_managed_runtimes(self) -> None:
         runtime_managers = (
@@ -253,7 +282,7 @@ class StageBatchedProcessor(BatchProcessor):
                 engine_key,
                 settings_page,
                 progress_callback=getattr(self.main_page, "report_runtime_progress", None),
-                cancel_checker=getattr(self.main_page, "is_current_task_cancelled", None),
+                cancel_checker=self._prewarm_cancel_checker,
             ),
         )
 
@@ -272,7 +301,7 @@ class StageBatchedProcessor(BatchProcessor):
                 engine_key,
                 settings_page,
                 progress_callback=getattr(self.main_page, "report_runtime_progress", None),
-                cancel_checker=getattr(self.main_page, "is_current_task_cancelled", None),
+                cancel_checker=self._prewarm_cancel_checker,
             ),
         )
 
@@ -288,7 +317,7 @@ class StageBatchedProcessor(BatchProcessor):
             lambda: runtime_manager.ensure_server(
                 settings_page,
                 progress_callback=getattr(self.main_page, "report_runtime_progress", None),
-                cancel_checker=getattr(self.main_page, "is_current_task_cancelled", None),
+                cancel_checker=self._prewarm_cancel_checker,
             ),
         )
 
@@ -304,7 +333,7 @@ class StageBatchedProcessor(BatchProcessor):
             lambda: runtime_manager.ensure_server(
                 settings_page,
                 progress_callback=getattr(self.main_page, "report_runtime_progress", None),
-                cancel_checker=getattr(self.main_page, "is_current_task_cancelled", None),
+                cancel_checker=self._prewarm_cancel_checker,
             ),
         )
 
@@ -769,8 +798,6 @@ class StageBatchedProcessor(BatchProcessor):
         active_pages = [ctx for ctx in pages if not ctx.failed_stage and not ctx.no_text_detected]
         runtime = self._ensure_inpainter() if active_pages else {"key": "", "backend": ""}
         config = get_config(settings_page)
-        if active_pages:
-            self._start_gemma_prewarm()
 
         for index, ctx in enumerate(pages):
             self._raise_if_cancelled()
@@ -947,6 +974,29 @@ class StageBatchedProcessor(BatchProcessor):
                     detail=detail,
                     extra={**ctx.page_ocr_metrics, **ctx.page_translation_metrics},
                 )
+
+        self._release_inpainter_before_gemma(pages)
+
+    def _release_inpainter_before_gemma(self, pages: list[StagePageContext]) -> None:
+        report = self.inpainting.release_inpainter_resources()
+        gate = dict(report.get("vram_release_gate") or {})
+        self._emit_benchmark_event(
+            "inpainter_release",
+            handoff_policy="after-release",
+            inpainter_release=report,
+            inpainter_gpu_release_expected=bool(report.get("gpu_release_expected")),
+            inpainter_vram_release_required=bool(gate.get("required")),
+            inpainter_vram_release_observed=gate.get("observed"),
+            inpainter_vram_release_status=str(gate.get("status") or ""),
+            inpainter_vram_release_elapsed_sec=float(gate.get("elapsed_sec", 0.0) or 0.0),
+        )
+        if gate.get("required") and not gate.get("observed"):
+            raise RuntimeError(
+                "Gemma startup was blocked because inpainter VRAM release was not observed."
+            )
+        self._raise_if_cancelled()
+        if any(not ctx.failed_stage and not ctx.no_text_detected for ctx in pages):
+            self._start_gemma_prewarm()
 
     def _translate_all(self, pages: list[StagePageContext]) -> None:
         total_images = len(pages)
@@ -1533,6 +1583,7 @@ class StageBatchedProcessor(BatchProcessor):
         self._progress_image_path = None
         self._recent_page_durations.clear()
         self._emit_benchmark_event("batch_run_start", total_images=total_images)
+        self._reset_prewarm_lifecycle()
         try:
             if self.main_page.file_handler.should_pre_materialize(image_list):
                 self.main_page.file_handler.pre_materialize(image_list)
@@ -1559,6 +1610,8 @@ class StageBatchedProcessor(BatchProcessor):
             self._emit_benchmark_event("batch_run_cancelled", total_images=total_images)
             return
         finally:
-            self._shutdown_prewarm_executor()
-            self._shutdown_managed_runtimes()
+            try:
+                self._shutdown_prewarm_executor()
+            finally:
+                self._shutdown_managed_runtimes()
             self._progress_image_path = None

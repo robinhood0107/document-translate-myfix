@@ -256,6 +256,28 @@ class SourceLaMaLarge:
 _INPAINTER_CACHE: dict[SourceLaMaKey, SourceLaMaLarge] = {}
 
 
+def release_source_lama_cache() -> dict[str, int | bool]:
+    """Release only Source LaMa model objects retained by this module."""
+
+    cached_inpainters = list(_INPAINTER_CACHE.values())
+    _INPAINTER_CACHE.clear()
+    loaded_model_count = 0
+    gpu_loaded_model_count = 0
+    for inpainter in cached_inpainters:
+        model = getattr(inpainter, "model", None)
+        if model is not None:
+            loaded_model_count += 1
+            if str(getattr(inpainter, "device", "") or "").lower().startswith("cuda"):
+                gpu_loaded_model_count += 1
+        inpainter.model = None
+    return {
+        "cache_entry_count": len(cached_inpainters),
+        "loaded_model_count": loaded_model_count,
+        "gpu_loaded_model_count": gpu_loaded_model_count,
+        "gpu_release_expected": gpu_loaded_model_count > 0,
+    }
+
+
 def get_source_lama_large(device: str = "cuda", precision: str = "bf16", inpaint_size: int = 1536) -> SourceLaMaLarge:
     key = SourceLaMaKey(device=str(device or "cuda"), precision=str(precision or "bf16"), inpaint_size=int(inpaint_size or 1536))
     cached = _INPAINTER_CACHE.get(key)
