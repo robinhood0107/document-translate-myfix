@@ -75,9 +75,8 @@ class LlamaCppRuntimePolicyTests(unittest.TestCase):
         run.assert_called_once_with(
             ["taskkill", "/PID", "4242", "/T", "/F"],
             check=False,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
             timeout=5.0,
         )
 
