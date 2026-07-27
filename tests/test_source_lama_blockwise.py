@@ -6,7 +6,10 @@ import numpy as np
 
 from modules.inpainting.source_lama_blockwise import (
     SourceLaMaLarge,
+    SourceLaMaKey,
+    _INPAINTER_CACHE,
     _clip_half_open_bbox,
+    release_source_lama_cache,
     source_lama_blockwise_inpaint,
 )
 from modules.utils.textblock import TextBlock
@@ -87,6 +90,29 @@ def test_blockwise_inpaint_uses_clipped_bbox_for_partial_negative_block() -> Non
     assert seen_shapes[0][0][1] > 0
     assert np.count_nonzero(result[:, :5]) > 0
     assert np.count_nonzero(result[:, -1]) == 0
+
+
+def test_release_source_lama_cache_drops_only_cached_model_references() -> None:
+    release_source_lama_cache()
+    inpainter = object.__new__(SourceLaMaLarge)
+    inpainter.device = "cuda"
+    inpainter.precision = "bf16"
+    inpainter.inpaint_size = 1536
+    native_model = object()
+    inpainter.model = native_model
+    key = SourceLaMaKey("cuda", "bf16", 1536)
+    _INPAINTER_CACHE[key] = inpainter
+
+    report = release_source_lama_cache()
+
+    assert report == {
+        "cache_entry_count": 1,
+        "loaded_model_count": 1,
+        "gpu_loaded_model_count": 1,
+        "gpu_release_expected": True,
+    }
+    assert _INPAINTER_CACHE == {}
+    assert inpainter.model is None
 
 
 def test_source_lama_blockwise_routes_bubbles_without_calling_lama_fallback() -> None:
