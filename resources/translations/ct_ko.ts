@@ -3591,6 +3591,168 @@ then do inpainting on the resized image.</source>
     </message>
 </context>
 <context>
+    <name>TranslationMemoryPanel</name>
+    <message>
+        <source>Exact Translation Memory</source>
+        <translation>정확 일치 번역 메모리</translation>
+    </message>
+    <message>
+        <source>Persistent result-cache text and translation-memory entries are sensitive local user data. Only explicitly approved exact source-to-translation pairs can bypass Gemma across contexts.</source>
+        <translation>영구 결과 캐시의 텍스트와 번역 메모리 항목은 민감한 로컬 사용자 데이터입니다. 사용자가 명시적으로 승인한 정확한 원문-번역 쌍만 문맥이 달라도 Gemma를 건너뛸 수 있습니다.</translation>
+    </message>
+    <message>
+        <source>Enable persistent block result cache</source>
+        <translation>영구 블록 결과 캐시 사용</translation>
+    </message>
+    <message>
+        <source>Enable exact translation memory and collect unapproved candidates</source>
+        <translation>정확 일치 번역 메모리 사용 및 미승인 후보 수집</translation>
+    </message>
+    <message>
+        <source>Result cache retention</source>
+        <translation>결과 캐시 보존 한도</translation>
+    </message>
+    <message>
+        <source>Unapproved candidate retention</source>
+        <translation>미승인 후보 보존 한도</translation>
+    </message>
+    <message>
+        <source>Source text</source>
+        <translation>원문</translation>
+    </message>
+    <message>
+        <source>Translation</source>
+        <translation>번역</translation>
+    </message>
+    <message>
+        <source>Source language</source>
+        <translation>원문 언어</translation>
+    </message>
+    <message>
+        <source>Target language</source>
+        <translation>번역 언어</translation>
+    </message>
+    <message>
+        <source>Approved</source>
+        <translation>승인됨</translation>
+    </message>
+    <message>
+        <source>Refresh</source>
+        <translation>새로 고침</translation>
+    </message>
+    <message>
+        <source>Approve Selected</source>
+        <translation>선택 항목 승인</translation>
+    </message>
+    <message>
+        <source>Unapprove Selected</source>
+        <translation>선택 항목 승인 해제</translation>
+    </message>
+    <message>
+        <source>Delete Selected</source>
+        <translation>선택 항목 삭제</translation>
+    </message>
+    <message>
+        <source>Import</source>
+        <translation>가져오기</translation>
+    </message>
+    <message>
+        <source>Export</source>
+        <translation>내보내기</translation>
+    </message>
+    <message>
+        <source>Clear Result Cache</source>
+        <translation>결과 캐시 비우기</translation>
+    </message>
+    <message>
+        <source>Yes</source>
+        <translation>예</translation>
+    </message>
+    <message>
+        <source>No</source>
+        <translation>아니요</translation>
+    </message>
+    <message>
+        <source>Translation memory is unavailable for this run. The database was left unchanged. Reason: {0}</source>
+        <translation>이번 실행에서는 번역 메모리를 사용할 수 없습니다. 데이터베이스는 변경하지 않았습니다. 원인: {0}</translation>
+    </message>
+    <message>
+        <source>Result cache: {0} entries · Approved TM: {1} · Candidates: {2} · Showing latest {3}</source>
+        <translation>결과 캐시: {0}개 · 승인된 TM: {1}개 · 후보: {2}개 · 최근 {3}개 표시 중</translation>
+    </message>
+    <message>
+        <source>Delete Translation Memory Entries</source>
+        <translation>번역 메모리 항목 삭제</translation>
+    </message>
+    <message>
+        <source>Delete the selected translation-memory entries?</source>
+        <translation>선택한 번역 메모리 항목을 삭제하시겠습니까?</translation>
+    </message>
+    <message>
+        <source>Import Exact Translation Memory</source>
+        <translation>정확 일치 번역 메모리 가져오기</translation>
+    </message>
+    <message>
+        <source>JSON files (*.json)</source>
+        <translation>JSON 파일 (*.json)</translation>
+    </message>
+    <message>
+        <source>Approved entries in this file will be trusted and may bypass Gemma. Import this translation-memory file?</source>
+        <translation>이 파일에서 승인된 항목은 신뢰되며 Gemma를 건너뛸 수 있습니다. 이 번역 메모리 파일을 가져오시겠습니까?</translation>
+    </message>
+    <message>
+        <source>Import Failed</source>
+        <translation>가져오기 실패</translation>
+    </message>
+    <message>
+        <source>Import Complete</source>
+        <translation>가져오기 완료</translation>
+    </message>
+    <message>
+        <source>Imported {0} translation-memory entries.</source>
+        <translation>번역 메모리 항목 {0}개를 가져왔습니다.</translation>
+    </message>
+    <message>
+        <source>Export Exact Translation Memory</source>
+        <translation>정확 일치 번역 메모리 내보내기</translation>
+    </message>
+    <message>
+        <source>Export Failed</source>
+        <translation>내보내기 실패</translation>
+    </message>
+    <message>
+        <source>Export Complete</source>
+        <translation>내보내기 완료</translation>
+    </message>
+    <message>
+        <source>Exported {0} translation-memory entries.</source>
+        <translation>번역 메모리 항목 {0}개를 내보냈습니다.</translation>
+    </message>
+    <message>
+        <source>Clear all persistent block-result cache entries? Approved and candidate translation-memory entries will be kept.</source>
+        <translation>영구 블록 결과 캐시 항목을 모두 비우시겠습니까? 승인된 항목과 번역 메모리 후보는 유지됩니다.</translation>
+    </message>
+    <message>
+        <source>Result Cache Cleared</source>
+        <translation>결과 캐시 비우기 완료</translation>
+    </message>
+    <message>
+        <source>Removed {0} result-cache entries.</source>
+        <translation>결과 캐시 항목 {0}개를 삭제했습니다.</translation>
+    </message>
+    <message>
+        <source>Translation Memory Operation Failed</source>
+        <translation>번역 메모리 작업 실패</translation>
+    </message>
+</context>
+<context>
+    <name>Translator</name>
+    <message>
+        <source>Persistent translation cache is unavailable, so caching is disabled for this task while normal translation continues.</source>
+        <translation>영구 번역 캐시를 사용할 수 없어 이번 작업에서는 캐시를 끄고 정상 번역을 계속합니다.</translation>
+    </message>
+</context>
+<context>
     <name>UserDictionariesPage</name>
     <message>
         <source>Correction dictionaries rewrite OCR and translation results before they are saved to the project.</source>

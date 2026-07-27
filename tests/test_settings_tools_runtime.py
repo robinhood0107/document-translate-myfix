@@ -12,6 +12,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 from PySide6 import QtCore, QtWidgets
 
 from app.ui.settings.settings_page import SettingsPage
+from modules.translation.translation_memory import TranslationMemoryStore
 
 
 class _Signal:
@@ -35,6 +36,7 @@ class SettingsToolsRuntimeTests(unittest.TestCase):
 
     def setUp(self) -> None:
         self._temp_dir = tempfile.TemporaryDirectory()
+        self._translation_memory_stores: list[TranslationMemoryStore] = []
         QtCore.QSettings.setDefaultFormat(QtCore.QSettings.Format.IniFormat)
         QtCore.QSettings.setPath(
             QtCore.QSettings.Format.IniFormat,
@@ -49,13 +51,26 @@ class SettingsToolsRuntimeTests(unittest.TestCase):
         settings = QtCore.QSettings("ComicLabs", "ComicTranslate")
         settings.clear()
         settings.sync()
+        for store in self._translation_memory_stores:
+            store.close()
         self._temp_dir.cleanup()
+
+    def _make_translation_memory_store(self) -> TranslationMemoryStore:
+        store = TranslationMemoryStore(
+            Path(self._temp_dir.name) / "translation-memory.sqlite3"
+        )
+        self._translation_memory_stores.append(store)
+        return store
 
     def _make_page(self) -> SettingsPage:
         patchers = [
             mock.patch("app.ui.settings.settings_page.UpdateChecker", _FakeUpdateChecker),
             mock.patch("app.ui.settings.notifications_page.get_music_dir", return_value=Path(self._temp_dir.name)),
             mock.patch("app.ui.settings.notifications_page.list_music_wav_files", return_value=["notify.wav"]),
+            mock.patch(
+                "app.ui.settings.user_dictionaries_page.TranslationMemoryStore",
+                side_effect=self._make_translation_memory_store,
+            ),
         ]
         stack = ExitStack()
         for patcher in patchers:
@@ -276,6 +291,38 @@ class SettingsToolsRuntimeTests(unittest.TestCase):
         self.assertEqual(reloaded.ui.max_font_spinbox.value(), 54)
         self.assertFalse(reloaded.ui.auto_max_font_checkbox.isChecked())
         self.assertEqual(reloaded.ui.auto_max_font_profile_combo.currentData(), "strong")
+
+    def test_translation_memory_settings_are_saved_and_reloaded(self) -> None:
+        page = self._make_page()
+        page.load_settings()
+        panel = page.ui.user_dictionaries_page.translation_memory_panel
+        panel.persistent_cache_checkbox.setChecked(False)
+        panel.exact_tm_checkbox.setChecked(True)
+        panel.result_cache_limit_spinbox.setValue(72_000)
+        panel.candidate_limit_spinbox.setValue(7_200)
+
+        self.assertEqual(
+            page.get_translation_memory_settings(),
+            {
+                "persistent_cache_enabled": False,
+                "exact_tm_enabled": True,
+                "result_cache_limit": 72_000,
+                "candidate_limit": 7_200,
+            },
+        )
+        page.save_settings()
+
+        reloaded = self._make_page()
+        reloaded.load_settings()
+        self.assertEqual(
+            reloaded.get_translation_memory_settings(),
+            {
+                "persistent_cache_enabled": False,
+                "exact_tm_enabled": True,
+                "result_cache_limit": 72_000,
+                "candidate_limit": 7_200,
+            },
+        )
 
 
 if __name__ == "__main__":
