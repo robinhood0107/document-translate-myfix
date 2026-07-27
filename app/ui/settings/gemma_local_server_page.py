@@ -8,6 +8,7 @@ from modules.translation.llm.custom_local_gemma import (
     DEFAULT_GEMMA_LOCAL_ENDPOINT,
     DEFAULT_GEMMA_LOCAL_MODEL,
     DEFAULT_GEMMA_MAX_COMPLETION_TOKENS,
+    DEFAULT_GEMMA_REQUEST_MODE,
     DEFAULT_GEMMA_REQUEST_TIMEOUT_SEC,
     DEFAULT_GEMMA_TRANSLATION_MIN_P,
     DEFAULT_GEMMA_TRANSLATION_TEMPERATURE,
@@ -21,6 +22,7 @@ class GemmaLocalServerPage(QtWidgets.QWidget):
     DEFAULT_MODEL = DEFAULT_GEMMA_LOCAL_MODEL
     DEFAULT_CHUNK_SIZE = DEFAULT_GEMMA_CHUNK_SIZE
     DEFAULT_MAX_COMPLETION_TOKENS = DEFAULT_GEMMA_MAX_COMPLETION_TOKENS
+    DEFAULT_REQUEST_MODE = DEFAULT_GEMMA_REQUEST_MODE
     DEFAULT_REQUEST_TIMEOUT_SEC = DEFAULT_GEMMA_REQUEST_TIMEOUT_SEC
     DEFAULT_TEMPERATURE = DEFAULT_GEMMA_TRANSLATION_TEMPERATURE
     DEFAULT_TOP_K = DEFAULT_GEMMA_TRANSLATION_TOP_K
@@ -57,7 +59,7 @@ class GemmaLocalServerPage(QtWidgets.QWidget):
         chunk_layout = QtWidgets.QHBoxLayout()
         chunk_label = MLabel(self.tr("Chunk Size"))
         self.chunk_size_spinbox = MSpinBox().small()
-        self.chunk_size_spinbox.setRange(1, 8)
+        self.chunk_size_spinbox.setRange(1, 12)
         self.chunk_size_spinbox.setValue(self.DEFAULT_CHUNK_SIZE)
         self.chunk_size_spinbox.setFixedWidth(90)
         chunk_layout.addWidget(chunk_label)
