@@ -847,6 +847,15 @@ class TranslationMemoryStore:
             or schema_version != TRANSLATION_MEMORY_SCHEMA_VERSION
         ):
             raise ValueError("Unsupported exact translation memory schema version.")
+        normalization_version = payload.get("normalization_version")
+        if (
+            not isinstance(normalization_version, int)
+            or isinstance(normalization_version, bool)
+            or normalization_version != EXACT_TM_NORMALIZATION_VERSION
+        ):
+            raise ValueError(
+                "Unsupported exact translation memory normalization version."
+            )
         entries = payload.get("entries")
         if not isinstance(entries, list):
             raise ValueError("Exact translation memory entries must be a list.")
