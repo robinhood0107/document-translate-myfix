@@ -84,7 +84,7 @@ Automatically downloaded by the app when missing:
 - OCR checkpoints such as `MangaOCR`, `Pororo OCR`, and `PPOCRv5`
 
 Provided separately by the user or local runtime bundle:
-- Gemma GGUF files mounted into the local translation runtime
+- Gemma GGUF files imported once into the versioned external model volume
 - HunyuanOCR GGUF and mmproj files
 - PaddleOCR VL Docker/runtime bundle files
 
@@ -207,13 +207,16 @@ run_comic_cuda13.bat
 
 ### 2. Optional local translation runtime
 
-Start the local Gemma server from the repository root:
+Prepare the versioned Gemma model volume once from Windows PowerShell:
 
-```bash
-docker compose up -d
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass `
+  -File .\scripts\prepare_gemma_runtime.ps1 -Mode Prepare `
+  -CandidateModelPath 'C:\ExampleWorkspace\models\Gemma4-26B-A4B-Uncensored-HauhauCS-Balanced-IQ4_XS.gguf' `
+  -LegacyModelPath 'C:\ExampleWorkspace\models\gemma-4-26B-IQ4_NL.gguf'
 ```
 
-Then use `Custom Local Server(Gemma)` in the app.
+Then use `Custom Local Server(Gemma)` in the app. The managed runtime validates the ready manifest and model size, mounts the prepared volume read-only, and starts or recreates the container only when needed. To explicitly recompute both model hashes, run the same script with `-Mode Verify`.
 
 ### 3. Optional local OCR runtimes
 
@@ -253,7 +256,7 @@ Official ntfy docs:
 
 Tracked compose/runtime images used by the repo:
 
-- Gemma local server: `ghcr.io/ggml-org/llama.cpp:server-cuda`
+- Gemma local server: `ghcr.io/ggml-org/llama.cpp@sha256:22e0e3bfe967af4fd1df6a918022abbfd4e72e4d40a4769e616a4176790acbcb`
 - HunyuanOCR local server: `ghcr.io/ggml-org/llama.cpp:server-cuda`
 - PaddleOCR VL runtime: `ccr-2vdh3abv-pub.cnc.bj.baidubce.com/paddlepaddle/paddleocr-genai-vllm-server:latest-nvidia-gpu-offline`
 
