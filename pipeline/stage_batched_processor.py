@@ -1687,6 +1687,7 @@ class StageBatchedProcessor(BatchProcessor):
     def batch_process(self, selected_paths: list[str] | None = None):
         image_list = selected_paths if selected_paths is not None else self.main_page.image_files
         total_images = len(image_list)
+        benchmark_stage_ceiling = self._benchmark_stage_ceiling()
         reset_output_reservations = getattr(self.main_page, "reset_automatic_output_reservations", None)
         if callable(reset_output_reservations):
             reset_output_reservations()
@@ -1717,6 +1718,14 @@ class StageBatchedProcessor(BatchProcessor):
             self._raise_if_cancelled()
             self._ocr_all(pages, policy)
             self._raise_if_cancelled()
+            if benchmark_stage_ceiling == "ocr":
+                self._complete_ocr_stage_ceiling(pages)
+                self._emit_benchmark_event(
+                    "batch_run_done",
+                    total_images=total_images,
+                    stage_ceiling="ocr",
+                )
+                return
             self._inpaint_all(pages)
             self._raise_if_cancelled()
             self._translate_all(pages)
@@ -1732,3 +1741,25 @@ class StageBatchedProcessor(BatchProcessor):
             finally:
                 self._shutdown_managed_runtimes()
             self._progress_image_path = None
+
+    def _complete_ocr_stage_ceiling(self, pages: list[StagePageContext]) -> None:
+        total_images = len(pages)
+        for index, ctx in enumerate(pages):
+            if ctx.failed_stage:
+                continue
+            self.main_page.image_ctrl.update_processing_summary(
+                ctx.image_path,
+                {"benchmark_stage_ceiling": "ocr"},
+            )
+            self._emit_benchmark_event(
+                "page_done",
+                image_path=ctx.image_path,
+                image_index=index,
+                total_images=total_images,
+                block_count=len(ctx.blk_list or []),
+                patch_count=0,
+                stage_ceiling="ocr",
+                **ctx.page_ocr_metrics,
+            )
+            self._log_page_done(index, total_images, ctx.image_path)
+            self.emit_progress(index, total_images, 10, 10, False)

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import threading
 import time
 import unittest
@@ -113,6 +114,91 @@ class StageBatchedCancellationTests(unittest.TestCase):
 
         self.assertEqual(shutdown_ocr.call_count, 2)
         shutdown_gemma.assert_called_once_with()
+
+    def test_batch_ocr_stage_ceiling_skips_later_stages(self) -> None:
+        processor = self._processor(cancelled=False)
+        processor.main_page.image_files = ["page.png"]
+        processor.main_page.file_handler = SimpleNamespace(
+            should_pre_materialize=lambda _paths: False,
+        )
+        processor.main_page.reset_automatic_output_reservations = mock.Mock()
+        processor._recent_page_durations = []
+        pages = [object()]
+        processor._emit_benchmark_event = mock.Mock()
+        processor._reset_prewarm_lifecycle = mock.Mock()
+        processor._load_page_contexts = mock.Mock(return_value=pages)
+        processor._ensure_stage_policy = mock.Mock(return_value={"primary_ocr_engine": "PaddleOCR VL"})
+        processor._raise_if_cancelled = mock.Mock()
+        processor._shutdown_managed_runtimes = mock.Mock()
+        processor._start_ocr_prewarm = mock.Mock()
+        processor._detect_all = mock.Mock()
+        processor._ocr_all = mock.Mock()
+        processor._complete_ocr_stage_ceiling = mock.Mock()
+        processor._inpaint_all = mock.Mock()
+        processor._translate_all = mock.Mock()
+        processor._render_all = mock.Mock()
+        processor._shutdown_prewarm_executor = mock.Mock()
+
+        with mock.patch.dict(os.environ, {"CT_BENCH_STAGE_CEILING": "ocr"}):
+            processor.batch_process()
+
+        processor._detect_all.assert_called_once_with(pages)
+        processor._ocr_all.assert_called_once_with(
+            pages,
+            {"primary_ocr_engine": "PaddleOCR VL"},
+        )
+        processor._complete_ocr_stage_ceiling.assert_called_once_with(pages)
+        processor._inpaint_all.assert_not_called()
+        processor._translate_all.assert_not_called()
+        processor._render_all.assert_not_called()
+        processor._emit_benchmark_event.assert_any_call(
+            "batch_run_done",
+            total_images=1,
+            stage_ceiling="ocr",
+        )
+
+    def test_complete_ocr_stage_ceiling_marks_only_successful_pages_done(self) -> None:
+        processor = self._processor(cancelled=False)
+        processor.main_page.image_ctrl = SimpleNamespace(
+            update_processing_summary=mock.Mock(),
+        )
+        processor._emit_benchmark_event = mock.Mock()
+        processor._log_page_done = mock.Mock()
+        processor.emit_progress = mock.Mock()
+        successful = StagePageContext(
+            image_path="success.png",
+            image_name="success.png",
+            source_lang="Japanese",
+            target_lang="Korean",
+            blk_list=[object()],
+            page_ocr_metrics={"ocr_non_empty_block_count": 1},
+        )
+        failed = StagePageContext(
+            image_path="failed.png",
+            image_name="failed.png",
+            source_lang="Japanese",
+            target_lang="Korean",
+            failed_stage="ocr",
+        )
+
+        processor._complete_ocr_stage_ceiling([successful, failed])
+
+        processor.main_page.image_ctrl.update_processing_summary.assert_called_once_with(
+            "success.png",
+            {"benchmark_stage_ceiling": "ocr"},
+        )
+        processor._emit_benchmark_event.assert_called_once_with(
+            "page_done",
+            image_path="success.png",
+            image_index=0,
+            total_images=2,
+            block_count=1,
+            patch_count=0,
+            stage_ceiling="ocr",
+            ocr_non_empty_block_count=1,
+        )
+        processor._log_page_done.assert_called_once_with(0, 2, "success.png")
+        processor.emit_progress.assert_called_once_with(0, 2, 10, 10, False)
 
     def test_stage_transition_continues_after_verified_stop_retry(self) -> None:
         processor = self._processor(cancelled=False)
