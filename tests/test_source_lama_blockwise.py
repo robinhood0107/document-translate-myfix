@@ -109,6 +109,8 @@ def test_release_source_lama_cache_drops_only_cached_model_references() -> None:
         "cache_entry_count": 1,
         "loaded_model_count": 1,
         "gpu_loaded_model_count": 1,
+        "expected_process_reclaim_mb": 0.0,
+        "untracked_gpu_resource_count": 1,
         "gpu_release_expected": True,
     }
     assert _INPAINTER_CACHE == {}

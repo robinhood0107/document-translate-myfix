@@ -76,12 +76,90 @@ class StageBatchedCancellationTests(unittest.TestCase):
         processor.main_page.local_ocr_runtime_manager = ocr_manager
         processor.main_page.local_translation_runtime_manager = gemma_manager
 
-        with mock.patch.object(ocr_manager, "shutdown", side_effect=RuntimeError("stop failed")), \
+        with mock.patch.object(
+            ocr_manager,
+            "shutdown",
+            side_effect=RuntimeError("stop failed"),
+        ) as shutdown_ocr, \
              mock.patch.object(gemma_manager, "shutdown") as shutdown_gemma, \
              self.assertLogs("pipeline.stage_batched_processor", level="WARNING"):
             processor._shutdown_managed_runtimes()
 
+        self.assertEqual(shutdown_ocr.call_count, 2)
         shutdown_gemma.assert_called_once_with()
+
+    def test_batch_startup_preflight_stops_both_runtimes_then_fails_closed(self) -> None:
+        processor = self._processor(cancelled=False)
+        ocr_manager = LocalOCRRuntimeManager()
+        gemma_manager = LocalGemmaRuntimeManager()
+        processor.main_page.local_ocr_runtime_manager = ocr_manager
+        processor.main_page.local_translation_runtime_manager = gemma_manager
+
+        with mock.patch.object(
+            ocr_manager,
+            "shutdown",
+            side_effect=RuntimeError("retained OCR runtime"),
+        ) as shutdown_ocr, mock.patch.object(
+            gemma_manager,
+            "shutdown",
+        ) as shutdown_gemma, self.assertLogs(
+            "pipeline.stage_batched_processor",
+            level="WARNING",
+        ), self.assertRaisesRegex(RuntimeError, "retained OCR runtime"):
+            processor._shutdown_managed_runtimes(
+                context="batch startup preflight",
+                raise_on_failure=True,
+            )
+
+        self.assertEqual(shutdown_ocr.call_count, 2)
+        shutdown_gemma.assert_called_once_with()
+
+    def test_stage_transition_continues_after_verified_stop_retry(self) -> None:
+        processor = self._processor(cancelled=False)
+        for label, manager, next_stage in (
+            ("OCR", LocalOCRRuntimeManager(), "inpaint"),
+            ("Gemma", LocalGemmaRuntimeManager(), "render"),
+        ):
+            reached: list[str] = []
+            with self.subTest(label=label), mock.patch.object(
+                manager,
+                "shutdown",
+                side_effect=[RuntimeError("first stop failed"), None],
+            ) as shutdown, self.assertLogs(
+                "pipeline.stage_batched_processor",
+                level="WARNING",
+            ):
+                processor._shutdown_runtime_with_retry(
+                    label,
+                    manager,
+                    context=f"before {next_stage}",
+                    raise_on_failure=True,
+                )
+                reached.append(next_stage)
+
+            self.assertEqual(shutdown.call_count, 2)
+            self.assertEqual(reached, [next_stage])
+
+    def test_stage_transition_fails_closed_after_two_stop_failures(self) -> None:
+        processor = self._processor(cancelled=False)
+        manager = LocalGemmaRuntimeManager()
+
+        with mock.patch.object(
+            manager,
+            "shutdown",
+            side_effect=RuntimeError("stop failed"),
+        ) as shutdown, self.assertLogs(
+            "pipeline.stage_batched_processor",
+            level="WARNING",
+        ), self.assertRaisesRegex(RuntimeError, "stop failed"):
+            processor._shutdown_runtime_with_retry(
+                "Gemma",
+                manager,
+                context="translation-to-render handoff",
+                raise_on_failure=True,
+            )
+
+        self.assertEqual(shutdown.call_count, 2)
 
     def test_prewarm_shutdown_waits_and_cancels_queued_late_start(self) -> None:
         processor = self._processor(cancelled=False)
