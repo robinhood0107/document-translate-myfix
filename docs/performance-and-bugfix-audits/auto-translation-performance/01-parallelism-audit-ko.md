@@ -326,7 +326,7 @@ speedup = 1.75x
 | 시나리오 | 구성 | 예상 전체 시간 | 예상 speedup |
 | --- | --- | ---: | ---: |
 | Micro | Gemma/OCR readiness cache, Translator reuse | 3730~3765s | 1.00~1.01x |
-| Safe Scheduling | Micro + GPU 포화 시 prewarm overlap 회피 + stage gap 계측 | 3700~3765s | 1.00~1.02x |
+| Safe Scheduling | Micro + 산출물 확정 + 인페인터 전용 해제 + VRAM 반환 확인 | 3700~3765s | 1.00~1.02x |
 | I/O Evidence Only | 동기 I/O 병목이 10% 이상으로 확인된 뒤 별도 검토 | 미정 | 미정 |
 
 현재 목표는 동시성으로 큰 speedup을 노리는 것이 아니라, GPU 포화 환경에서 자원 경합을 줄이고 반복 probe를 제거해 안정성을 높이는 것이다.
@@ -350,9 +350,14 @@ speedup = 1.75x
 
 ### PR 3: GPU-safe prewarm scheduling
 
-- GPU util/VRAM headroom을 기준으로 Gemma prewarm overlap을 제한한다.
-- Gemma가 이미 GPU를 거의 점유하는 환경에서는 inpaint/OCR 중 추가 runtime prewarm을 피한다.
-- prewarm wait, skipped prewarm reason, GPU snapshot을 benchmark event에 남긴다.
+- 모든 페이지의 inpaint image, mask, patch, debug 산출물을 먼저 확정한다.
+- 전체 model cache가 아니라 인페인터가 보유한 model/session 참조만 해제한다.
+- 추적 가능한 CUDA tensor는 해제 대상 저장공간의 90% 이상에 해당하는 현재
+  프로세스 allocator 감소를 요구한다. 네이티브 할당은 현재 PID와 정확한 GPU
+  UUID의 사용량이 인페인터 로드 전 기준선으로 돌아왔을 때만 통과한다.
+- 측정할 수 없거나 제한 시간 안에 반환을 확인하지 못하면 Gemma 시작을 차단한다.
+- inpaint 중에는 Gemma prewarm을 겹치지 않으며, release 측정과 prewarm wait를
+  benchmark event에 남긴다.
 - 결과물은 바꾸지 않는다.
 
 ### PR 4: performance telemetry cleanup

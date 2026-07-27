@@ -45,9 +45,9 @@ AST callsite 기준 성능 관련 주요 호출 수:
 
 ### P1. Runtime readiness probe 반복
 
-현재 경로:
+2026-05-29 조사 당시 변경 전 경로:
 
-1. `StageBatchedProcessor._start_gemma_prewarm()`이 inpaint stage 시작 때 Gemma prewarm을 시작한다.
+1. `StageBatchedProcessor._start_gemma_prewarm()`이 inpaint stage 시작 때 Gemma prewarm을 시작했다.
 2. `StageBatchedProcessor._translate_all()`이 translation stage 시작 때 `_await_gemma_runtime()`으로 prewarm 결과를 기다린다.
 3. 같은 함수의 page loop 안에서 매번 `Translator(self.main_page, ...)`를 생성한다.
 4. `Translator.__init__()`은 Gemma translator일 때 다시 `runtime_manager.ensure_server(...)`를 호출한다.
@@ -105,13 +105,17 @@ PaddleOCR VL 기본 `parallel_workers`는 최대 8이고, Hunyuan OCR도 block-l
 
 ### P6. GPU-safe prewarm scheduling이 필요함
 
-현재 stage-batched는 inpaint stage 시작 시 Gemma prewarm을 시작한다. GPU가 여유 있으면 startup wait를 숨기는 좋은 전략이지만, Gemma가 GPU를 거의 점유하는 환경에서는 prewarm이 inpaint/OCR과 자원 경합을 일으킬 수 있다.
+변경 전 stage-batched는 inpaint stage 시작 시 Gemma prewarm을 시작했다. 실제 단일 GPU 후보 비교에서는 startup wait 일부를 숨길 수 있어도 GPU 여유, shared GPU memory, WSL swap, 인페인트 p95가 함께 악화될 수 있음이 확인됐다.
 
 개선 원칙:
 
-- prewarm 시작 전에 GPU util, VRAM 여유, 현재 stage를 확인한다.
-- GPU util 85% 이상 또는 VRAM 여유 2~3GB 미만이면 GPU runtime prewarm overlap을 피한다.
-- prewarm을 생략하거나 stage 끝으로 미루는 경우 benchmark event에 이유를 남긴다.
+- 모든 페이지의 inpaint image, mask, patch, debug write를 먼저 완료한다.
+- 전체 모델 cache를 지우지 않고 인페인터 handler와 Source LaMa가 보유한 model/session 참조만 해제한다.
+- 해제 대상 CUDA tensor 저장공간을 계산하고 그 90% 이상에 해당하는 현재 프로세스 allocator 감소를 관측한 뒤 Gemma prewarm을 시작한다.
+- PyTorch가 추적하지 않는 GPU 자원은 현재 PID와 정확한 GPU UUID의 driver memory가 인페인터 로드 전 기준선으로 복귀했을 때만 통과한다.
+- GPU 해제가 예상되는데 측정할 수 없거나 제한 시간 내 감소가 관측되지 않으면 Gemma 시작을 차단한다.
+- cancel/shutdown은 inpaint 중간 종료에서도 인페인터를 먼저 해제하고, queued prewarm future를 취소하고 running future 종료까지 기다린 뒤 managed runtime을 정리한다.
+- Docker 시작과 HTTP 예열은 cancel-aware bounded I/O로 실행한다. 취소·시간초과 시 Windows는 Docker CLI process tree를, POSIX는 전용 process group을 종료하고, stop 이후 known container 상태를 exact `true`/`false`로 다시 확인한다. stop 실패 시 활성 상태를 지우지 않고 stage transition에서 즉시 한 번, final batch cleanup에서도 한 번 재시도하며, 다음 batch는 잔존 OCR/Gemma cleanup preflight를 통과하기 전 OCR prewarm을 시작하지 않는다.
 - 결과물, OCR/번역 텍스트, 모델 설정은 바꾸지 않는다.
 
 ## 구현 PR 계획
@@ -187,36 +191,61 @@ Branch: `chore/stage-batched-translator-reuse`
 - `tests/test_batch_report_runtime.py`
 - validation/translation check
 
-### PR 3: GPU-safe prewarm scheduling
+### PR 3: GPU runtime handoff
 
-Branch: `chore/gpu-safe-prewarm-scheduling`
+Branch: `chore/gpu-runtime-handoff`
 
 수정 대상:
 
 - `pipeline/stage_batched_processor.py`
+- `pipeline/inpainting.py`
+- `modules/inpainting/source_lama_blockwise.py`
+- `modules/utils/gpu_handoff.py`
 - `modules/utils/gpu_metrics.py`
-- 필요 시 benchmark event payload만 최소 추가
 
 명세:
 
-- Gemma prewarm 시작 전에 GPU snapshot을 읽는다.
-- GPU util 85% 이상 또는 VRAM free 3072MB 미만이면 inpaint/OCR stage 중 Gemma prewarm overlap을 피한다.
-- prewarm을 미룬 경우 `_await_gemma_runtime()`에서 동기 준비하되, wait duration과 reason을 event로 남긴다.
-- GPU metrics unavailable이면 현행 prewarm 정책을 유지하되 `gpu_metrics_unavailable` reason을 남긴다.
+- `_inpaint_all()`은 각 page의 image, mask, patch, debug export를 모두 확정한 뒤 handoff를 실행한다.
+- `InpaintingHandler.release_inpainter_resources()`는 handler의 model/session과 Source LaMa cache만 해제하고 materialized 결과와 `last_inpaint_edit_mask`는 유지한다.
+- Python `gc`, CUDA synchronize, allocator cache 반환, IPC collect는 GPU 인페인터 resource가 실제 존재할 때만 실행한다.
+- release gate는 해제 대상 CUDA tensor 저장공간의 90% 이상에 해당하는 process allocated 감소를 요구한다.
+- PyTorch가 추적하지 않는 GPU backend는 현재 PID와 정확한 GPU UUID의 사용량이 인페인터 로드 전 기준선으로 돌아와야 한다.
+- release가 예상되는데 measurement unavailable 또는 timeout이면 Gemma를 시작하지 않는다.
+- `inpainter_release` event에는 before/after, delta, evidence source, status, elapsed를 남긴다.
+- inpaint 중 취소·예외에서도 targeted release를 실행하되 Gemma는 시작하지 않는다.
+- shutdown은 내부 cancel event, queued future cancel, `executor.shutdown(wait=True, cancel_futures=True)` 순서를 지킨다. Docker/HTTP startup은 취소 가능하고 bounded이며, Docker process tree 종료와 exact container inspect로 stop 성공을 확인한다.
 - 결과물과 모델 설정은 바꾸지 않는다.
 
 테스트:
 
-- GPU snapshot이 saturated이면 `_start_gemma_prewarm()`이 executor submit을 하지 않는지 확인한다.
-- GPU snapshot이 여유 있으면 기존 prewarm을 유지하는지 확인한다.
-- metrics unavailable에서는 기존 동작과 호환되는지 확인한다.
-- cancel 상태에서는 prewarm scheduling이 fallback 작업을 시작하지 않는지 확인한다.
+- process allocator 감소가 release gate를 통과하는지 확인한다.
+- 작은 우연한 allocator 감소가 모델 크기 gate를 통과하지 않는지 확인한다.
+- 다른 프로세스나 다른 GPU의 driver 감소가 통과하지 않는지 확인한다.
+- non-PyTorch GPU allocation에서는 PID·GPU UUID별 load-before baseline 복귀를 증거로 사용하는지 확인한다.
+- measurement unavailable과 timeout에서 Gemma 시작을 차단하는지 확인한다.
+- release 후 page image, mask, patch, edit mask, debug PNG, 최종 고정 번역 PNG의 SHA-256이 그대로인지 확인한다.
+- inpaint 중 취소에서도 targeted release가 실행되고 Gemma는 시작하지 않는지 확인한다.
+- blocked Docker/HTTP startup이 취소에 bounded하게 응답하고 Docker 자식 process 및 queued prewarm이 종료 후 시작되지 않는지 확인한다.
+- stop 실패 뒤 상태를 보존하고 stage transition 및 final cleanup 재시도가 성공하며, 잔존 runtime이 있으면 다음 batch startup preflight가 fail-closed하는지 확인한다.
 
 검증:
 
+- `tests/test_gpu_handoff.py`
+- `tests/test_gpu_metrics.py`
+- `tests/test_inpainter_release.py`
+- `tests/test_llama_cpp_runtime_policy.py`
+- `tests/test_local_gemma_runtime.py`
+- `tests/test_local_ocr_runtime.py`
+- `tests/test_source_lama_blockwise.py`
 - `tests/test_stage_batched_cancel.py`
-- 신규 `tests/test_stage_batched_prewarm_scheduling.py`
 - validation/translation check
+
+실제 후보 판정:
+
+- `after-release`: 제품 기본 정책으로 유지
+- `inpaint-75`: 속도는 약 5% 개선됐지만 GPU 여유, shared GPU memory, WSL swap 게이트 위반으로 탈락
+- `inpaint-0`: 전체시간과 인페인트 p95가 악화되어 탈락
+- 원시 로그와 후보 주입 코드는 repo 밖과 `benchmarking/lab` disposable 통합 브랜치에서만 사용한다.
 
 ### PR 4: performance telemetry cleanup
 
@@ -265,5 +294,5 @@ Branch: `benchmarking/lab` 전용 실험 또는 별도 benchmark branch 후 `ben
 - Micro PR 후 반복 Gemma/OCR runtime progress 로그가 같은 batch/config 안에서 사라진다.
 - repeated ensure 테스트가 실제 probe 호출 횟수를 검증한다.
 - stage-batched Translator reuse 후 기존 batch report와 page summaries가 동일하게 남는다.
-- GPU 포화 상태에서는 Gemma prewarm이 inpaint/OCR과 불필요하게 겹치지 않는다.
+- GPU 인페인터 release와 VRAM 감소가 확인된 뒤에만 Gemma prewarm이 시작된다.
 - telemetry PR 후 다음 성능 PR의 before/after 비교가 가능하다.
