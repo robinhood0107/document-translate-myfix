@@ -6,6 +6,8 @@
 
 Windows PowerShell에서 저장소 루트를 연 뒤 실행합니다.
 
+기본 `Prepare` 실행은 `C:` 여유 공간이 60 GiB 이상인지 확인합니다. `gemma-local-server` 컨테이너가 실행 중이면 앱을 정상 종료해 컨테이너를 중지한 뒤 다시 실행합니다.
+
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass `
   -File .\scripts\prepare_gemma_runtime.ps1 -Mode Prepare `
@@ -30,6 +32,16 @@ powershell -NoProfile -ExecutionPolicy Bypass `
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\prepare_gemma_runtime.ps1 -Mode Verify
 ```
+
+준비 스크립트의 공개 옵션은 아래와 같습니다.
+
+- `-Mode`: `Prepare` 또는 `Verify`이며 기본값은 `Prepare`입니다.
+- `-CandidateModelPath`, `-LegacyModelPath`: `Prepare`에서만 필요한 두 원본 GGUF 경로입니다.
+- `-VolumeName`: 기본값은 `comic-translate-gemma-models-v1`입니다. 다른 이름을 쓰면 앱 실행 전 `GEMMA_MODEL_VOLUME`에도 같은 값을 설정해야 합니다.
+- `-SmokePort`: 실제 GPU smoke 서버의 로컬 포트이며 기본값은 `18082`입니다.
+- `-SmokeTimeoutSec`: smoke 준비 제한 시간이며 `30`~`900`초, 기본값은 `420`초입니다.
+- `-MinimumFreeBytes`: `C:` 최소 여유 공간이며 기본값은 `64424509440` bytes(60 GiB)입니다.
+- `-SkipFreeSpaceCheck`: 공간을 별도로 확인한 경우에만 `C:` 여유 공간 검사를 건너뜁니다.
 
 ## 앱 설정
 
@@ -69,18 +81,20 @@ docker compose `
 
 ## 현재 compose 기준값
 
-- `ctx-size=4096`
-- `n_parallel=1`
-- `n_gpu_layers=23`
-- `threads=10`
-- KV cache: `F16/F16`
-- speculative decoding: `none`
+- `LLAMA_CTX_SIZE=4096` (`1024`~`32768`)
+- `LLAMA_N_PARALLEL=1` (`1`~`4`)
+- `LLAMA_N_GPU_LAYERS=23` (`0`~`99`)
+- `LLAMA_THREADS=10` (`1`~`64`)
+- `LLAMA_CACHE_TYPE_K=f16`, `LLAMA_CACHE_TYPE_V=f16` (`f16` 또는 `q8_0`)
+- `LLAMA_CACHE_RAM_MIB=0` (`0` 또는 `256`)
+- `LLAMA_SPEC_TYPE=none` (`none` 또는 `ngram-mod`)
+- `LLAMA_SPEC_DRAFT_N_MAX=8` (`2`, `4`, `8`)
 - `--fit off`
 - flash attention enabled
 - `--swa-full`
 - reasoning disabled
 
-환경변수로 허용하는 runtime 후보는 검증된 범위로 제한됩니다. KV cache는 `f16` 또는 `q8_0`, speculative decoding은 `none` 또는 `ngram-mod`, cache RAM은 `0` 또는 `256 MiB`만 허용합니다.
+환경변수로 허용하는 runtime 후보는 위 범위로 제한됩니다.
 
 ## 고정 runtime image
 
