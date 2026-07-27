@@ -9,6 +9,7 @@
 - Git
 - GPU 지원이 켜진 Docker Desktop
 - 로컬 Gemma / HunyuanOCR / PaddleOCR VL 가속을 쓰려면 NVIDIA 드라이버와 CUDA 호환 GPU
+- 최초 Gemma volume 준비 검사에 필요한 `C:` 여유 공간 60 GiB 이상
 
 ## 2. 저장소 실행
 
@@ -48,19 +49,21 @@ py -3.12 -m venv .venv-win-cuda13
 ### Gemma 로컬 번역 런타임
 
 - compose 파일: `/docker-compose.yaml`
-- Docker 이미지: `ghcr.io/ggml-org/llama.cpp:server-cuda`
+- Docker 이미지: `ghcr.io/ggml-org/llama.cpp@sha256:22e0e3bfe967af4fd1df6a918022abbfd4e72e4d40a4769e616a4176790acbcb`
 - 참고 링크:
   - [llama.cpp](https://github.com/ggml-org/llama.cpp)
   - [Gemma](https://ai.google.dev/gemma)
 
-실행:
+Windows PowerShell에서 버전이 지정된 external model volume을 한 번 준비합니다.
 
-```bash
-docker compose pull --policy always
-docker compose up -d --force-recreate
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass `
+  -File .\scripts\prepare_gemma_runtime.ps1 -Mode Prepare `
+  -CandidateModelPath 'C:\ExampleWorkspace\models\Gemma4-26B-A4B-Uncensored-HauhauCS-Balanced-IQ4_XS.gguf' `
+  -LegacyModelPath 'C:\ExampleWorkspace\models\gemma-4-26B-IQ4_NL.gguf'
 ```
 
-앱에서는 `Custom Local Server(Gemma)`를 선택합니다.
+앱에서는 `Custom Local Server(Gemma)`를 선택합니다. 관리 런타임이 준비된 volume을 read-only로 마운트하고 정확히 준비된 컨테이너를 자동으로 시작합니다.
 
 ### HunyuanOCR 로컬 런타임
 
@@ -103,7 +106,7 @@ bundle 파일 설명은 [/paddleocr_vl_docker_files/README.md](/paddleocr_vl_doc
 
 - 워크플로 모드: `Stage-Batched Pipeline (Recommended)`
 - OCR: `Optimal (HunyuanOCR / PaddleOCR VL)`
-- 번역기: 로컬 Gemma 런타임을 켰다면 `Custom Local Server(Gemma)`
+- 번역기: Gemma volume 준비 후 `Custom Local Server(Gemma)`
 
 기본 OCR 라우팅:
 

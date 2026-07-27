@@ -84,7 +84,7 @@ OCR:
 - `MangaOCR`, `Pororo OCR`, `PPOCRv5` 같은 OCR 체크포인트
 
 사용자가 별도로 준비하거나 로컬 런타임 번들이 제공하는 자산:
-- 로컬 Gemma 번역 런타임에 마운트하는 Gemma GGUF 파일
+- 버전이 지정된 external model volume에 한 번 가져오는 Gemma GGUF 파일
 - HunyuanOCR GGUF 및 mmproj 파일
 - PaddleOCR VL Docker/runtime bundle 파일
 
@@ -206,13 +206,16 @@ run_comic_cuda13.bat
 
 ### 2. 로컬 번역 서버 사용
 
-저장소 루트에서 Gemma 서버 실행:
+Windows PowerShell에서 버전이 지정된 Gemma model volume을 한 번 준비합니다.
 
-```bash
-docker compose up -d
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass `
+  -File .\scripts\prepare_gemma_runtime.ps1 -Mode Prepare `
+  -CandidateModelPath 'C:\ExampleWorkspace\models\Gemma4-26B-A4B-Uncensored-HauhauCS-Balanced-IQ4_XS.gguf' `
+  -LegacyModelPath 'C:\ExampleWorkspace\models\gemma-4-26B-IQ4_NL.gguf'
 ```
 
-앱에서는 `Custom Local Server(Gemma)`를 선택합니다.
+앱에서는 `Custom Local Server(Gemma)`를 선택합니다. 관리 런타임은 ready manifest와 모델 크기를 확인하고 준비된 volume을 read-only로 마운트한 뒤, 필요할 때만 컨테이너를 시작하거나 재생성합니다. 두 모델의 SHA-256을 명시적으로 다시 계산하려면 같은 스크립트를 `-Mode Verify`로 실행합니다.
 
 ### 3. 로컬 OCR 서버 사용
 
@@ -252,7 +255,7 @@ Settings에서 아래 중 하나를 선택합니다.
 
 현재 추적 중인 compose/runtime 이미지:
 
-- Gemma 로컬 서버: `ghcr.io/ggml-org/llama.cpp:server-cuda`
+- Gemma 로컬 서버: `ghcr.io/ggml-org/llama.cpp@sha256:22e0e3bfe967af4fd1df6a918022abbfd4e72e4d40a4769e616a4176790acbcb`
 - HunyuanOCR 로컬 서버: `ghcr.io/ggml-org/llama.cpp:server-cuda`
 - PaddleOCR VL 런타임: `ccr-2vdh3abv-pub.cnc.bj.baidubce.com/paddlepaddle/paddleocr-genai-vllm-server:latest-nvidia-gpu-offline`
 
