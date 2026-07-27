@@ -3,6 +3,7 @@ from __future__ import annotations
 import subprocess
 import unittest
 from unittest import mock
+from urllib.error import HTTPError
 
 from modules.ocr.local_runtime import LocalOCRRuntimeManager
 from modules.utils.exceptions import LocalServiceSetupError, OperationCancelledError
@@ -240,6 +241,13 @@ class LocalOCRRuntimeManagerTests(unittest.TestCase):
 
         self.assertEqual(result, "healthy")
         wait_for_health.assert_called_once()
+        self.assertEqual(
+            wait_for_health.call_args.args[0],
+            (
+                "http://127.0.0.1:28118/docs",
+                "http://127.0.0.1:18000/v1/models",
+            ),
+        )
         run_compose.assert_not_called()
 
     def test_probe_managed_engine_returns_unavailable_without_compose_side_effects(self) -> None:
@@ -252,6 +260,110 @@ class LocalOCRRuntimeManagerTests(unittest.TestCase):
         self.assertEqual(result, "unavailable")
         wait_for_health.assert_called_once()
         run_compose.assert_not_called()
+
+    def test_paddle_health_is_loading_when_layout_is_ready_but_vllm_is_not(self) -> None:
+        manager = LocalOCRRuntimeManager()
+        layout_response = mock.MagicMock()
+        layout_response.__enter__.return_value.status = 200
+
+        with mock.patch(
+            "modules.ocr.local_runtime.urlopen",
+            side_effect=[layout_response, OSError("connection refused")],
+        ):
+            state = manager._probe_health_state(
+                (
+                    "http://127.0.0.1:28118/docs",
+                    "http://127.0.0.1:18000/v1/models",
+                )
+            )
+
+        self.assertEqual(state, "loading")
+
+    def test_paddle_health_is_healthy_only_when_layout_and_vllm_are_ready(self) -> None:
+        manager = LocalOCRRuntimeManager()
+        layout_response = mock.MagicMock()
+        layout_response.__enter__.return_value.status = 200
+        vllm_response = mock.MagicMock()
+        vllm_response.__enter__.return_value.status = 200
+
+        with mock.patch(
+            "modules.ocr.local_runtime.urlopen",
+            side_effect=[layout_response, vllm_response],
+        ):
+            state = manager._probe_health_state(
+                (
+                    "http://127.0.0.1:28118/docs",
+                    "http://127.0.0.1:18000/v1/models",
+                )
+            )
+
+        self.assertEqual(state, "healthy")
+
+    def test_health_probe_treats_http_404_as_unavailable(self) -> None:
+        manager = LocalOCRRuntimeManager()
+        error = HTTPError(
+            "http://127.0.0.1:28118/docs",
+            404,
+            "Not Found",
+            hdrs=None,
+            fp=None,
+        )
+
+        with mock.patch(
+            "modules.ocr.local_runtime.urlopen",
+            side_effect=error,
+        ):
+            state = manager._probe_single_health_state(
+                "http://127.0.0.1:28118/docs"
+            )
+
+        self.assertEqual(state, "unavailable")
+
+    def test_health_probe_treats_http_503_as_loading(self) -> None:
+        manager = LocalOCRRuntimeManager()
+        error = HTTPError(
+            "http://127.0.0.1:18000/v1/models",
+            503,
+            "Service Unavailable",
+            hdrs=None,
+            fp=None,
+        )
+
+        with mock.patch(
+            "modules.ocr.local_runtime.urlopen",
+            side_effect=error,
+        ):
+            state = manager._probe_single_health_state(
+                "http://127.0.0.1:18000/v1/models"
+            )
+
+        self.assertEqual(state, "loading")
+
+    def test_wait_for_health_waits_until_every_configured_endpoint_is_ready(self) -> None:
+        manager = LocalOCRRuntimeManager()
+        health_urls = (
+            "http://127.0.0.1:28118/docs",
+            "http://127.0.0.1:18000/v1/models",
+        )
+
+        with mock.patch.object(
+            manager,
+            "_probe_health_state",
+            side_effect=["loading", "healthy"],
+        ) as probe_health, mock.patch("modules.ocr.local_runtime.time.sleep"):
+            ready = manager._wait_for_health(
+                health_urls,
+                timeout_sec=2,
+                engine_key="PaddleOCR VL",
+                step_key="health_wait",
+                message="waiting",
+            )
+
+        self.assertTrue(ready)
+        self.assertEqual(
+            probe_health.call_args_list,
+            [mock.call(health_urls), mock.call(health_urls)],
+        )
 
     def test_ensure_engine_waits_for_loading_runtime_before_compose_restart(self) -> None:
         manager = LocalOCRRuntimeManager()
