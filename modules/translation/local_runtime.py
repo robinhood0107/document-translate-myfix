@@ -23,6 +23,7 @@ from modules.utils.exceptions import (
 )
 from modules.utils.llama_cpp_runtime import (
     DEFAULT_LLAMA_CPP_IMAGE,
+    DEFAULT_MANAGED_RUNTIME_STOP_TIMEOUT_SEC,
     inspect_llama_cpp_runtime,
     resolve_docker_compose_command,
     run_docker_command,
@@ -229,6 +230,7 @@ class LocalGemmaRuntimeManager:
                     detail="docker compose up -d",
                 )
                 self._run_compose("up", "-d", step_name="up", model_name=model_name)
+                self._managed_active = True
                 self._emit_progress(
                     progress_callback,
                     status="completed",
@@ -301,7 +303,12 @@ class LocalGemmaRuntimeManager:
             if not self._managed_active:
                 return
             try:
-                self._run_compose("down", step_name="down")
+                self._run_compose(
+                    "stop",
+                    "--timeout",
+                    str(DEFAULT_MANAGED_RUNTIME_STOP_TIMEOUT_SEC),
+                    step_name="stop",
+                )
             except LocalServiceSetupError:
                 logger.warning("Failed to stop managed Gemma runtime.", exc_info=True)
             finally:

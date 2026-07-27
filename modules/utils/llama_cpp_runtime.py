@@ -9,6 +9,7 @@ from typing import Any
 
 DEFAULT_LLAMA_CPP_IMAGE = "ghcr.io/ggml-org/llama.cpp:server-cuda"
 DEFAULT_LLAMA_CPP_PULL_POLICY = "always"
+DEFAULT_MANAGED_RUNTIME_STOP_TIMEOUT_SEC = 10
 
 
 def normalize_llama_cpp_image(image_ref: Any = None) -> str:

@@ -31,6 +31,73 @@ class _DummySettingsPage:
 
 
 class LocalOCRRuntimeManagerTests(unittest.TestCase):
+    def test_shutdown_stops_and_preserves_active_engine_containers(self) -> None:
+        manager = LocalOCRRuntimeManager()
+        manager._active_engine = "PaddleOCR VL"
+        manager._readiness_cache.add(
+            ("PaddleOCR VL", "http://127.0.0.1:28118/layout-parsing", "managed")
+        )
+
+        with mock.patch.object(manager, "_run_compose") as run_compose:
+            manager.shutdown()
+
+        run_compose.assert_called_once_with(
+            "PaddleOCR VL",
+            "stop",
+            "--timeout",
+            "10",
+            step_name="stop",
+        )
+        self.assertIsNone(manager._active_engine)
+        self.assertFalse(manager._readiness_cache)
+
+    def test_shutdown_clears_active_engine_when_stop_fails(self) -> None:
+        manager = LocalOCRRuntimeManager()
+        manager._active_engine = "HunyuanOCR"
+        manager._readiness_cache.add(
+            ("HunyuanOCR", "http://127.0.0.1:28080/v1", "managed")
+        )
+        failure = LocalServiceSetupError(
+            "stop failed",
+            service_name="HunyuanOCR",
+            settings_page_name="HunyuanOCR Settings",
+        )
+
+        with mock.patch.object(manager, "_run_compose", side_effect=failure), \
+             self.assertLogs("modules.ocr.local_runtime", level="WARNING"):
+            manager.shutdown()
+
+        self.assertIsNone(manager._active_engine)
+        self.assertFalse(manager._readiness_cache)
+
+    def test_cancelled_startup_can_stop_containers_started_by_compose(self) -> None:
+        manager = LocalOCRRuntimeManager()
+        settings_page = _DummySettingsPage()
+        cancelled = OperationCancelledError("cancelled during health wait")
+
+        with mock.patch.object(manager, "validate_engine"), \
+             mock.patch.object(manager, "_probe_health_state", return_value="unavailable"), \
+             mock.patch.object(manager, "_existing_managed_container_names", return_value=[]), \
+             mock.patch.object(manager, "_wait_for_health", side_effect=cancelled), \
+             mock.patch.object(manager, "_run_compose") as run_compose:
+            with self.assertRaises(OperationCancelledError):
+                manager.ensure_engine("PaddleOCR VL", settings_page)
+            manager.shutdown()
+
+        self.assertEqual(
+            run_compose.call_args_list,
+            [
+                mock.call("PaddleOCR VL", "up", "-d", step_name="up"),
+                mock.call(
+                    "PaddleOCR VL",
+                    "stop",
+                    "--timeout",
+                    "10",
+                    step_name="stop",
+                ),
+            ],
+        )
+
     def test_default_urls_are_managed(self) -> None:
         manager = LocalOCRRuntimeManager()
         settings_page = _DummySettingsPage()
