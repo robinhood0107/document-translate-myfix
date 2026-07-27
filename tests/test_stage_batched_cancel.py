@@ -2,7 +2,10 @@ from __future__ import annotations
 
 import unittest
 from types import SimpleNamespace
+from unittest import mock
 
+from modules.ocr.local_runtime import LocalOCRRuntimeManager
+from modules.translation.local_runtime import LocalGemmaRuntimeManager
 from pipeline.stage_batched_processor import StageBatchedProcessor, StagePageContext
 from modules.utils.exceptions import OperationCancelledError
 
@@ -48,6 +51,34 @@ class StageBatchedCancellationTests(unittest.TestCase):
             processor._await_prewarm_or_run("ocr", "OCR", "hunyuanocr", fallback)
 
         self.assertFalse(called)
+
+    def test_batch_cleanup_stops_both_managed_runtimes_after_cancel(self) -> None:
+        processor = self._processor(cancelled=True)
+        ocr_manager = LocalOCRRuntimeManager()
+        gemma_manager = LocalGemmaRuntimeManager()
+        processor.main_page.local_ocr_runtime_manager = ocr_manager
+        processor.main_page.local_translation_runtime_manager = gemma_manager
+
+        with mock.patch.object(ocr_manager, "shutdown") as shutdown_ocr, \
+             mock.patch.object(gemma_manager, "shutdown") as shutdown_gemma:
+            processor._shutdown_managed_runtimes()
+
+        shutdown_ocr.assert_called_once_with()
+        shutdown_gemma.assert_called_once_with()
+
+    def test_batch_cleanup_still_stops_gemma_when_ocr_shutdown_fails(self) -> None:
+        processor = self._processor(cancelled=True)
+        ocr_manager = LocalOCRRuntimeManager()
+        gemma_manager = LocalGemmaRuntimeManager()
+        processor.main_page.local_ocr_runtime_manager = ocr_manager
+        processor.main_page.local_translation_runtime_manager = gemma_manager
+
+        with mock.patch.object(ocr_manager, "shutdown", side_effect=RuntimeError("stop failed")), \
+             mock.patch.object(gemma_manager, "shutdown") as shutdown_gemma, \
+             self.assertLogs("pipeline.stage_batched_processor", level="WARNING"):
+            processor._shutdown_managed_runtimes()
+
+        shutdown_gemma.assert_called_once_with()
 
 
 if __name__ == "__main__":
