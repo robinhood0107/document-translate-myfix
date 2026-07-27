@@ -42,10 +42,10 @@ class GemmaLocalServerPage(QtWidgets.QWidget):
         note = MLabel(
             self.tr(
                 "Comic Translate can reuse your local Gemma Docker server for translation.\n"
-                "1. Keep the existing Gemma container running if it is already healthy.\n"
+                "1. Prepare the versioned Gemma model volume once with `scripts/prepare_gemma_runtime.ps1`.\n"
                 "2. In Settings > Credentials, use Endpoint URL `http://127.0.0.1:18080/v1`.\n"
-                "3. Set Model to the exact GGUF filename in `testmodel/` (recommended: `gemma-4-26B-IQ4_NL.gguf`).\n"
-                "Automatic translation reuses an existing Gemma runtime first and only runs `docker compose up -d` when needed.\n"
+                "3. Set Model to an exact prepared GGUF filename (default: `gemma-4-26B-IQ4_NL.gguf`).\n"
+                "Automatic translation starts an exact stopped container directly and recreates it only when the runtime fingerprint differs.\n"
                 "If responses are truncated, lower Chunk Size or Max Completion Tokens before recreating the container."
             )
         ).secondary()

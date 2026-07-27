@@ -2,10 +2,17 @@ services:
   # Gemma 4 로컬 번역 서버 기본 설정입니다.
   # 응답이 잘리면 LLAMA_CTX_SIZE를 올리거나 앱의 Chunk Size를 낮추세요.
   gemma-local-server:
-    image: ${LLAMA_CPP_IMAGE:-ghcr.io/ggml-org/llama.cpp:server-cuda}
-    pull_policy: always
+    image: ${LLAMA_CPP_IMAGE:-ghcr.io/ggml-org/llama.cpp@sha256:22e0e3bfe967af4fd1df6a918022abbfd4e72e4d40a4769e616a4176790acbcb}
+    pull_policy: ${LLAMA_CPP_PULL_POLICY:-missing}
     container_name: gemma-local-server
     restart: unless-stopped
+    labels:
+      comic-translate.runtime: gemma
+      comic-translate.runtime-fingerprint: ${GEMMA_RUNTIME_FINGERPRINT:-unprepared}
+      comic-translate.model-volume: ${GEMMA_MODEL_VOLUME:-comic-translate-gemma-models-v1}
+      comic-translate.ready-manifest-sha256: ${GEMMA_READY_MANIFEST_SHA256:-unprepared}
+      comic-translate.model-sha256: ${GEMMA_MODEL_SHA256:-unprepared}
+      comic-translate.preparation-version: ${GEMMA_PREPARATION_VERSION:-0}
     ports:
       - "18080:8080"
     gpus: all
@@ -14,7 +21,7 @@ services:
       NVIDIA_DRIVER_CAPABILITIES: compute,utility
       LLAMA_MODEL_FILE: ${LLAMA_MODEL_FILE:-gemma-4-26B-IQ4_NL.gguf}
     volumes:
-      - ./testmodel:/models:ro
+      - gemma-models:/models:ro
     healthcheck:
       test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:8080/health >/dev/null || exit 1"]
       interval: 10s
@@ -36,10 +43,33 @@ services:
       - "${LLAMA_THREADS:-10}"
       - --n-gpu-layers
       - "${LLAMA_N_GPU_LAYERS:-23}"
+      - --fit
+      - "off"
+      - -fa
+      - "on"
+      - -ctk
+      - "${LLAMA_CACHE_TYPE_K:-f16}"
+      - -ctv
+      - "${LLAMA_CACHE_TYPE_V:-f16}"
+      - --kv-offload
       - --swa-full
+      - --jinja
       - --reasoning
       - "off"
       - --reasoning-budget
       - "0"
       - --reasoning-format
       - "none"
+      - --metrics
+      - --perf
+      - --cache-ram
+      - "${LLAMA_CACHE_RAM_MIB:-0}"
+      - --spec-type
+      - "${LLAMA_SPEC_TYPE:-none}"
+      - --spec-draft-n-max
+      - "${LLAMA_SPEC_DRAFT_N_MAX:-8}"
+
+volumes:
+  gemma-models:
+    external: true
+    name: ${GEMMA_MODEL_VOLUME:-comic-translate-gemma-models-v1}
