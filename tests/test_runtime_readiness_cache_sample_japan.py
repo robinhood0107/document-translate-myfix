@@ -82,6 +82,7 @@ def test_sample_japan_three_translator_initializations_probe_gemma_once() -> Non
         return_value=True,
     ) as wait_for_probe, \
          mock.patch.object(main_page.local_translation_runtime_manager, "_validate_model_with_progress"), \
+         mock.patch.object(main_page.local_translation_runtime_manager, "_prewarm_chat_completion_with_progress"), \
          mock.patch("modules.translation.processor.TranslationFactory.create_engine", return_value=object()):
         for _path in SAMPLE_JAPAN_PAGES:
             Translator(main_page, "Japanese", "Korean")

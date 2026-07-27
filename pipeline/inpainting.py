@@ -1,10 +1,20 @@
 import numpy as np
 import logging
 import imkit as imk
+from typing import Any
 
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QColor, QImage, QPainter, QPen, QBrush
 
+from modules.utils.gpu_handoff import (
+    DEFAULT_VRAM_RELEASE_MIN_DROP_MB,
+    DEFAULT_VRAM_RELEASE_POLL_SEC,
+    DEFAULT_VRAM_RELEASE_TIMEOUT_SEC,
+    cleanup_python_cuda_memory,
+    estimate_torch_cuda_storage_mb,
+    wait_for_vram_release,
+)
+from modules.utils.gpu_metrics import query_cuda_handoff_metrics
 from modules.utils.device import resolve_device
 from modules.utils.inpaint_strokes import (
     PATCH_KIND_INPAINT,
@@ -15,7 +25,10 @@ from modules.utils.inpaint_strokes import (
     STROKE_ROLE_GENERATED,
 )
 from modules.utils.pipeline_config import inpaint_map, get_config, get_inpainter_runtime
-from modules.inpainting.source_lama_blockwise import source_lama_blockwise_inpaint
+from modules.inpainting.source_lama_blockwise import (
+    release_source_lama_cache,
+    source_lama_blockwise_inpaint,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -27,6 +40,7 @@ class InpaintingHandler:
         self.main_page = main_page
         self.inpainter_cache = None
         self.cached_inpainter_key = None
+        self.inpainter_driver_baseline = None
         self.last_inpaint_edit_mask = None
 
     def _ensure_inpainter(self):
@@ -34,6 +48,7 @@ class InpaintingHandler:
         runtime = get_inpainter_runtime(settings_page)
         inpainter_key = runtime['key']
         if self.inpainter_cache is None or self.cached_inpainter_key != inpainter_key:
+            self.inpainter_driver_baseline = query_cuda_handoff_metrics()
             backend = runtime['backend']
             device = resolve_device(settings_page.is_gpu_enabled(), backend)
             InpainterClass = inpaint_map[inpainter_key]
@@ -46,6 +61,112 @@ class InpaintingHandler:
             )
             self.cached_inpainter_key = inpainter_key
         return self.inpainter_cache
+
+    @staticmethod
+    def _detach_inpainter_native_resources(inpainter: Any) -> dict[str, Any]:
+        if inpainter is None:
+            return {
+                "cached": False,
+                "loaded_native_resource_count": 0,
+                "expected_process_reclaim_mb": 0.0,
+                "untracked_gpu_resource_count": 0,
+                "gpu_release_expected": False,
+            }
+        device = str(
+            getattr(
+                inpainter,
+                "runtime_device",
+                getattr(inpainter, "device", ""),
+            )
+            or ""
+        )
+        loaded_native_resource_count = 0
+        expected_process_reclaim_mb = 0.0
+        untracked_gpu_resource_count = 0
+        for attribute in ("model", "session"):
+            if not hasattr(inpainter, attribute):
+                continue
+            resource = getattr(inpainter, attribute, None)
+            if resource is not None:
+                loaded_native_resource_count += 1
+                if device.lower().startswith("cuda"):
+                    estimate = estimate_torch_cuda_storage_mb(resource)
+                    tracked_mb = float(estimate.get("total_mb", 0.0) or 0.0)
+                    if tracked_mb > 0.0:
+                        expected_process_reclaim_mb += tracked_mb
+                    else:
+                        untracked_gpu_resource_count += 1
+            setattr(inpainter, attribute, None)
+        return {
+            "cached": True,
+            "device": device,
+            "loaded_native_resource_count": loaded_native_resource_count,
+            "expected_process_reclaim_mb": expected_process_reclaim_mb,
+            "untracked_gpu_resource_count": untracked_gpu_resource_count,
+            "gpu_release_expected": (
+                loaded_native_resource_count > 0
+                and device.lower().startswith("cuda")
+            ),
+        }
+
+    def release_inpainter_resources(
+        self,
+        *,
+        vram_timeout_sec: float = DEFAULT_VRAM_RELEASE_TIMEOUT_SEC,
+        vram_poll_interval_sec: float = DEFAULT_VRAM_RELEASE_POLL_SEC,
+        vram_min_drop_mb: float = DEFAULT_VRAM_RELEASE_MIN_DROP_MB,
+    ) -> dict[str, Any]:
+        """Drop only inpainter model/session caches and verify CUDA handoff."""
+
+        before = query_cuda_handoff_metrics()
+        cached_key = self.cached_inpainter_key
+        cached_inpainter = self.inpainter_cache
+        driver_baseline = self.inpainter_driver_baseline
+        self.inpainter_cache = None
+        self.cached_inpainter_key = None
+        self.inpainter_driver_baseline = None
+
+        handler_release = self._detach_inpainter_native_resources(cached_inpainter)
+        source_release = release_source_lama_cache()
+        gpu_release_expected = bool(
+            handler_release["gpu_release_expected"]
+            or source_release["gpu_release_expected"]
+        )
+        expected_process_reclaim_mb = float(
+            handler_release.get("expected_process_reclaim_mb", 0.0) or 0.0
+        ) + float(
+            source_release.get("expected_process_reclaim_mb", 0.0) or 0.0
+        )
+        untracked_gpu_resource_count = int(
+            handler_release.get("untracked_gpu_resource_count", 0) or 0
+        ) + int(
+            source_release.get("untracked_gpu_resource_count", 0) or 0
+        )
+        del cached_inpainter
+
+        cleanup = cleanup_python_cuda_memory(
+            release_cuda_allocator=gpu_release_expected,
+        )
+        vram_release_gate = wait_for_vram_release(
+            before,
+            gpu_release_expected=gpu_release_expected,
+            expected_process_drop_mb=expected_process_reclaim_mb,
+            untracked_gpu_resource_count=untracked_gpu_resource_count,
+            driver_baseline=driver_baseline,
+            timeout_sec=vram_timeout_sec,
+            poll_interval_sec=vram_poll_interval_sec,
+            min_drop_mb=vram_min_drop_mb,
+        )
+        return {
+            "cached_inpainter_key": str(cached_key or ""),
+            "handler_release": handler_release,
+            "source_lama_release": source_release,
+            "python_native_cleanup": cleanup,
+            "gpu_release_expected": gpu_release_expected,
+            "expected_process_reclaim_mb": expected_process_reclaim_mb,
+            "untracked_gpu_resource_count": untracked_gpu_resource_count,
+            "vram_release_gate": vram_release_gate,
+        }
 
     def manual_inpaint(self):
         image_viewer = self.main_page.image_viewer
