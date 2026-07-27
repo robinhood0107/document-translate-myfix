@@ -145,6 +145,25 @@ class CustomLocalGemmaRepetitionGuardTests(unittest.TestCase):
         self.assertEqual(engine.last_benchmark_stats["gemma_repetition_guard_count"], 0)
         self.assertFalse(hasattr(blocks[0], "_translation_repetition_guard"))
 
+    def test_safe_retranslation_clears_stale_repetition_guard_metadata(self) -> None:
+        engine = self._engine()
+        blocks = self._blocks("もう一度")
+        setattr(
+            blocks[0],
+            "_translation_repetition_guard",
+            {"changed": True, "reason": "stale"},
+        )
+
+        with mock.patch.object(
+            engine,
+            "_request_translation",
+            return_value=_response({"translation": "다시 한번"}),
+        ):
+            engine.translate(blocks, np.zeros((1, 1, 3), dtype=np.uint8), "")
+
+        self.assertEqual(blocks[0].translation, "다시 한번")
+        self.assertFalse(hasattr(blocks[0], "_translation_repetition_guard"))
+
     def test_contextual_merge_prompt_wraps_chunk_but_applies_block_response(self) -> None:
         engine = self._engine()
         engine.source_lang = "English"
@@ -822,6 +841,11 @@ class CustomLocalGemmaRepetitionGuardTests(unittest.TestCase):
                 runtime_identity_provider=self._runtime_identity,
             )
             second_blocks = self._blocks("first", "second")
+            setattr(
+                second_blocks[0],
+                "_translation_repetition_guard",
+                {"changed": True, "reason": "stale"},
+            )
             with mock.patch.object(second, "_request_translation") as request:
                 runtime_required = second.prepare_translation(
                     second_blocks,
@@ -839,6 +863,9 @@ class CustomLocalGemmaRepetitionGuardTests(unittest.TestCase):
             self.assertEqual(
                 [block.translation for block in second_blocks],
                 ["첫째", "둘째"],
+            )
+            self.assertFalse(
+                hasattr(second_blocks[0], "_translation_repetition_guard")
             )
             self.assertEqual(
                 second.last_benchmark_stats["gemma_tm_result_cache_hit_count"],
