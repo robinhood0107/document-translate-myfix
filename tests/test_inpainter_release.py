@@ -1,0 +1,316 @@
+from __future__ import annotations
+
+import hashlib
+import os
+import tempfile
+import unittest
+from pathlib import Path
+from types import SimpleNamespace
+from unittest import mock
+
+os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+
+import imkit as imk
+import numpy as np
+from PySide6.QtWidgets import QApplication
+
+from app.ui.canvas.save_renderer import ImageSaveRenderer
+from pipeline.inpainting import InpaintingHandler
+from pipeline.stage_batched_processor import StageBatchedProcessor, StagePageContext
+
+
+class InpainterReleaseTests(unittest.TestCase):
+    def test_targeted_release_preserves_materialized_edit_mask(self) -> None:
+        handler = InpaintingHandler(SimpleNamespace())
+        cached_model = SimpleNamespace()
+        handler.inpainter_cache = SimpleNamespace(
+            runtime_device="cuda",
+            model=cached_model,
+            session=None,
+        )
+        handler.cached_inpainter_key = "lama_large_512px"
+        edit_mask = np.array([[0, 255], [255, 0]], dtype=np.uint8)
+        handler.last_inpaint_edit_mask = edit_mask
+        before = {
+            "process": {
+                "available": True,
+                "allocated_mb": 1024.0,
+                "reserved_mb": 1280.0,
+            },
+            "driver": {"available": False, "primary": None},
+        }
+        gate = {
+            "required": True,
+            "measurement_available": True,
+            "observed": True,
+            "status": "observed",
+        }
+
+        with mock.patch(
+            "pipeline.inpainting.query_cuda_handoff_metrics",
+            return_value=before,
+        ), mock.patch(
+            "pipeline.inpainting.release_source_lama_cache",
+            return_value={
+                "cache_entry_count": 1,
+                "loaded_model_count": 1,
+                "gpu_loaded_model_count": 1,
+                "gpu_release_expected": True,
+            },
+        ), mock.patch(
+            "pipeline.inpainting.cleanup_python_cuda_memory",
+            return_value={"gc_collected": 1, "errors": []},
+        ), mock.patch(
+            "pipeline.inpainting.wait_for_vram_release",
+            return_value=gate,
+        ) as wait_for_release:
+            report = handler.release_inpainter_resources()
+
+        self.assertIsNone(handler.inpainter_cache)
+        self.assertIsNone(handler.cached_inpainter_key)
+        self.assertIs(handler.last_inpaint_edit_mask, edit_mask)
+        np.testing.assert_array_equal(handler.last_inpaint_edit_mask, edit_mask)
+        self.assertTrue(report["gpu_release_expected"])
+        self.assertEqual(report["vram_release_gate"], gate)
+        self.assertEqual(
+            report["python_native_cleanup"],
+            {"gc_collected": 1, "errors": []},
+        )
+        wait_for_release.assert_called_once_with(
+            before,
+            gpu_release_expected=True,
+            expected_process_drop_mb=0.0,
+            untracked_gpu_resource_count=1,
+            driver_baseline=None,
+            timeout_sec=5.0,
+            poll_interval_sec=0.1,
+            min_drop_mb=16.0,
+        )
+
+    def test_stage_handoff_preserves_page_outputs_before_starting_gemma(self) -> None:
+        processor = object.__new__(StageBatchedProcessor)
+        events: list[str] = []
+        release_report = {
+            "gpu_release_expected": True,
+            "vram_release_gate": {
+                "required": True,
+                "observed": True,
+                "status": "observed",
+                "elapsed_sec": 0.2,
+            },
+        }
+        processor.inpainting = SimpleNamespace(
+            release_inpainter_resources=lambda: (
+                events.append("release") or release_report
+            )
+        )
+        processor._emit_benchmark_event = lambda *_args, **_kwargs: events.append("telemetry")
+        processor._raise_if_cancelled = lambda: events.append("cancel-check")
+        processor._start_gemma_prewarm = lambda: events.append("gemma-start")
+
+        image = np.arange(12, dtype=np.uint8).reshape(2, 2, 3)
+        mask = np.array([[0, 255], [255, 0]], dtype=np.uint8)
+        patch_image = image[:1, :1].copy()
+        viewer_state = {"text_items_state": []}
+        page = StagePageContext(
+            image_path="example.png",
+            image_name="example.png",
+            source_lang="Japanese",
+            target_lang="Korean",
+            image=image.copy(),
+            inpaint_input_img=image,
+            mask=mask,
+            patches=[{"bbox": [0, 0, 1, 1], "image": patch_image, "order": 1}],
+        )
+        image_before = image.copy()
+        mask_before = mask.copy()
+        patch_before = patch_image.copy()
+        viewer_state_before = dict(viewer_state)
+
+        app = QApplication.instance() or QApplication([])
+
+        def render_page() -> bytes:
+            renderer = ImageSaveRenderer(page.image.copy())
+            renderer.apply_patches(page.patches)
+            renderer.add_state_to_image(viewer_state)
+            return renderer.render_to_image().tobytes()
+
+        rendered_before = render_page()
+        processor._release_inpainter_before_gemma([page])
+        rendered_after = render_page()
+
+        self.assertEqual(
+            events,
+            ["release", "telemetry", "cancel-check", "gemma-start"],
+        )
+        self.assertIsNotNone(app)
+        np.testing.assert_array_equal(page.inpaint_input_img, image_before)
+        np.testing.assert_array_equal(page.mask, mask_before)
+        np.testing.assert_array_equal(page.patches[0]["image"], patch_before)
+        self.assertEqual(viewer_state, viewer_state_before)
+        self.assertEqual(rendered_after, rendered_before)
+
+    def test_failed_vram_gate_blocks_gemma_start(self) -> None:
+        processor = object.__new__(StageBatchedProcessor)
+        started = False
+        processor.inpainting = SimpleNamespace(
+            release_inpainter_resources=lambda: {
+                "gpu_release_expected": True,
+                "vram_release_gate": {
+                    "required": True,
+                    "observed": False,
+                    "status": "timeout",
+                    "elapsed_sec": 5.0,
+                },
+            }
+        )
+        processor._emit_benchmark_event = lambda *_args, **_kwargs: None
+
+        def start_gemma() -> None:
+            nonlocal started
+            started = True
+
+        processor._start_gemma_prewarm = start_gemma
+        page = StagePageContext(
+            image_path="example.png",
+            image_name="example.png",
+            source_lang="Japanese",
+            target_lang="Korean",
+        )
+
+        with self.assertRaisesRegex(RuntimeError, "VRAM release was not confirmed"):
+            processor._release_inpainter_before_gemma([page])
+
+        self.assertFalse(started)
+
+    def test_aborted_inpaint_releases_resources_without_starting_gemma(self) -> None:
+        processor = object.__new__(StageBatchedProcessor)
+        events: list[str] = []
+        processor._inpaint_pages = lambda _pages: (_ for _ in ()).throw(
+            RuntimeError("inpaint aborted")
+        )
+        processor._release_inpainter_before_gemma = (
+            lambda _pages, **kwargs: events.append(
+                f"release:{kwargs['handoff_outcome']}:{kwargs['start_gemma']}"
+            )
+        )
+        page = StagePageContext(
+            image_path="example.png",
+            image_name="example.png",
+            source_lang="Japanese",
+            target_lang="Korean",
+        )
+
+        with self.assertRaisesRegex(RuntimeError, "inpaint aborted"):
+            processor._inpaint_all([page])
+
+        self.assertEqual(events, ["release:aborted:False"])
+
+    def test_handoff_preserves_debug_patch_mask_and_final_png_hashes(self) -> None:
+        processor = object.__new__(StageBatchedProcessor)
+        release_report = {
+            "gpu_release_expected": True,
+            "vram_release_gate": {
+                "required": True,
+                "observed": True,
+                "status": "observed",
+            },
+        }
+        processor._emit_benchmark_event = lambda *_args, **_kwargs: None
+        processor._raise_if_cancelled = lambda: None
+        processor._start_gemma_prewarm = lambda: None
+
+        image = np.full((64, 64, 3), 240, dtype=np.uint8)
+        inpainted = image.copy()
+        inpainted[8:24, 8:24] = [210, 220, 230]
+        raw_mask = np.zeros((64, 64), dtype=np.uint8)
+        raw_mask[8:24, 8:24] = 255
+        final_mask = raw_mask.copy()
+        edit_mask = raw_mask.copy()
+        patch_image = inpainted[8:24, 8:24].copy()
+        viewer_state = {
+            "text_items_state": [
+                {
+                    "block_id": "fixed-translation",
+                    "text": "고정 번역",
+                    "font_family": "Arial",
+                    "font_size": 10,
+                    "text_color": "#111111",
+                    "position": (28, 20),
+                    "width": 30,
+                    "height": 18,
+                    "source_rect": (28, 20, 30, 18),
+                    "block_anchor": (28, 20, 30, 18),
+                }
+            ]
+        }
+        page = StagePageContext(
+            image_path="example.png",
+            image_name="example.png",
+            source_lang="Japanese",
+            target_lang="Korean",
+            image=image,
+            inpaint_input_img=inpainted,
+            raw_mask=raw_mask,
+            mask=final_mask,
+            patches=[
+                {
+                    "bbox": [8, 8, 16, 16],
+                    "image": patch_image,
+                    "order": 1,
+                }
+            ],
+        )
+        handler = InpaintingHandler(SimpleNamespace())
+        handler.last_inpaint_edit_mask = edit_mask
+        before_paths: list[Path] = []
+
+        def release_resources():
+            self.assertTrue(before_paths)
+            self.assertTrue(all(path.is_file() for path in before_paths))
+            return release_report
+
+        processor.inpainting = SimpleNamespace(
+            release_inpainter_resources=release_resources
+        )
+        _app = QApplication.instance() or QApplication([])
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+
+            def materialize(prefix: str) -> dict[str, str]:
+                arrays = {
+                    "inpainted": page.inpaint_input_img,
+                    "raw_mask": page.raw_mask,
+                    "final_mask": page.mask,
+                    "edit_mask": handler.last_inpaint_edit_mask,
+                    "patch_0": page.patches[0]["image"],
+                    "debug_overlay": np.repeat(page.mask[:, :, None], 3, axis=2),
+                }
+                paths: dict[str, Path] = {}
+                for name, array in arrays.items():
+                    path = root / f"{prefix}-{name}.png"
+                    imk.write_image(str(path), array)
+                    paths[name] = path
+                renderer = ImageSaveRenderer(page.image.copy())
+                renderer.apply_patches(page.patches)
+                renderer.add_state_to_image(viewer_state)
+                final_path = root / f"{prefix}-final.png"
+                imk.write_image(str(final_path), renderer.render_to_image())
+                paths["final"] = final_path
+                if prefix == "before":
+                    before_paths.extend(paths.values())
+                return {
+                    name: hashlib.sha256(path.read_bytes()).hexdigest()
+                    for name, path in paths.items()
+                }
+
+            before_hashes = materialize("before")
+            processor._release_inpainter_before_gemma([page])
+            after_hashes = materialize("after")
+
+        self.assertEqual(after_hashes, before_hashes)
+
+
+if __name__ == "__main__":
+    unittest.main()

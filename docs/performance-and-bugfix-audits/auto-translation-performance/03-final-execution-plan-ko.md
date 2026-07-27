@@ -7,13 +7,15 @@
 - 이번 제품 성능개선에서 page concurrency는 도입하지 않는다.
 - 사용자 환경에서는 Gemma 실행 중 GPU util 85% 이상 또는 VRAM 여유 2~3GB 미만 조건에 거의 항상 도달한다.
 - 이 조건에서 Gemma/OCR/inpaint page concurrency는 속도 개선보다 latency 증가, OOM, timeout, retry 증가, 결과물 누락 위험이 더 크다.
-- 따라서 성능개선은 반복 readiness probe 제거, 객체 재사용, GPU-safe prewarm, 계측 보강만 먼저 진행한다.
+- 따라서 성능개선은 반복 readiness probe 제거, 객체 재사용, 인페인터 해제 후 GPU handoff, 계측 보강만 먼저 진행한다.
+- Gemma prewarm은 모든 인페인트 결과를 확정하고 인페인터 VRAM 감소를 확인한 뒤 시작한다.
 
 ## 목표
 
 - 같은 batch/config 안에서 Gemma/OCR runtime readiness 확인을 반복하지 않는다.
 - stage-batched translation에서 page마다 `Translator`를 새로 만들지 않는다.
-- GPU가 바쁠 때 Gemma prewarm이 OCR/inpaint와 불필요하게 겹치지 않도록 한다.
+- 인페인터 모델을 결과물과 분리해 해제하고 실제 VRAM 반환을 확인한 뒤 Gemma를 시작한다.
+- 취소 또는 종료 뒤 queued/running prewarm이 늦게 runtime을 시작하거나 ready를 보고하지 못하게 한다.
 - 다음 성능개선 판단을 위해 runtime probe, model check, prewarm wait, stage gap, page duration을 일관되게 기록한다.
 
 ## 비목표와 금지선
@@ -123,45 +125,65 @@
 - 결과 이미지가 바뀌는 PR이 아니므로 사용자 이미지 검토는 필요 없다.
 - 실제 run 로그에서 페이지별 Gemma readiness 반복 문구가 사라졌는지 보고한다.
 
-## PR 3. GPU-Safe Prewarm Scheduling
+## PR 3. GPU Runtime Handoff
 
-- Branch: `chore/gpu-safe-prewarm-scheduling`
+- Branch: `chore/gpu-runtime-handoff`
 - Base: `develop`
-- Issue title: `Avoid Gemma prewarm overlap when GPU is already saturated`
-- 목적: GPU가 포화 상태일 때 Gemma prewarm이 OCR/inpaint 작업과 싸우지 않도록 한다.
+- Issue title: `Release inpainter GPU resources before starting Gemma`
+- 목적: 인페인트 결과를 모두 보존한 상태에서 인페인터 VRAM을 실제 반환한 뒤 Gemma를 시작한다.
 
 수정 후보:
 
 - `pipeline/stage_batched_processor.py`
+- `pipeline/inpainting.py`
+- `modules/inpainting/source_lama_blockwise.py`
+- `modules/utils/gpu_handoff.py`
 - `modules/utils/gpu_metrics.py`
-- 필요 시 runtime event payload
 
 구현 원칙:
 
-- Gemma prewarm 시작 전에 GPU snapshot을 읽는다.
-- GPU util 85% 이상 또는 VRAM free 3072MB 미만이면 OCR/inpaint 중 prewarm overlap을 피한다.
-- prewarm을 생략하거나 미룬 경우 reason, GPU snapshot, wait duration을 event에 남긴다.
-- GPU metrics를 얻을 수 없으면 현행 prewarm 정책을 유지하고 `gpu_metrics_unavailable` reason을 남긴다.
-- cancellation 중에는 새 prewarm 작업을 시작하지 않는다.
+- 모든 페이지의 inpaint image, mask, patch, debug 산출물을 먼저 저장한다.
+- 전체 model cache가 아니라 인페인터 handler와 Source LaMa의 model/session 참조만 해제한다.
+- 해제 대상 CUDA tensor 저장공간을 계산하고 그 90% 이상에 해당하는 process allocated 감소를 확인한다.
+- PyTorch가 추적하지 않는 GPU backend는 현재 PID와 정확한 GPU UUID의 사용량이 인페인터 로드 전 기준선으로 돌아왔는지 확인한다.
+- 해제가 예상되는데 측정 불가 또는 timeout이면 Gemma 시작을 차단한다.
+- inpaint 중 취소·예외에서도 targeted release를 실행하되 Gemma는 시작하지 않는다.
+- cancellation/shutdown은 내부 cancel event를 세우고 queued future를 취소한 뒤 running future 종료를 기다린다.
+- Docker 시작과 HTTP 예열은 cancel-aware bounded I/O로 실행한다. 취소·시간초과 시 Windows Docker CLI process tree 또는 POSIX process group을 종료하고, stop 성공은 exact container inspect로 확인한다. stop 실패 시 활성 상태를 보존해 stage transition에서 즉시 한 번, final batch cleanup에서도 한 번 재시도하며, 다음 batch의 OCR prewarm 전에 잔존 OCR/Gemma cleanup preflight를 강제한다.
+- `inpainter_release` telemetry에 측정 전후, 감소량, evidence source, gate status, elapsed를 남긴다.
 - 결과 이미지, OCR 텍스트, 번역 텍스트는 바뀌면 안 된다.
 
 테스트:
 
-- saturated snapshot이면 prewarm executor submit이 발생하지 않는 테스트
-- 충분한 GPU headroom이면 기존 prewarm submit이 유지되는 테스트
-- GPU metrics unavailable이면 기존 동작 유지 테스트
-- cancellation 상태에서 prewarm scheduling이 시작되지 않는 테스트
+- model-sized process allocator release 관측, 작은 우연한 감소, timeout 테스트
+- 다른 프로세스와 다른 GPU의 driver 감소가 gate를 통과하지 않는 테스트
+- non-PyTorch GPU allocation의 PID·GPU UUID 기준선 복귀 테스트
+- measurement unavailable이면 Gemma 시작을 차단하는 테스트
+- materialized image, mask, patch, edit mask, debug PNG, 최종 고정 번역 PNG의 SHA-256 보존 테스트
+- inpaint 중 취소의 targeted release 테스트
+- blocked Docker/HTTP 취소, Docker process tree 종료, queued future cancel, running future 종료 동기화 테스트
+- stop 실패 상태 보존, exact inspect 확인, stage transition 및 final cleanup 재시도, 다음 batch startup cleanup gate 테스트
 
 검증:
 
-- `.venv-win/Scripts/python.exe -m pytest <new-prewarm-tests> tests/test_stage_batched_cancel.py`
+- `.venv-win/Scripts/python.exe -m pytest tests/test_gpu_handoff.py tests/test_gpu_metrics.py tests/test_inpainter_release.py tests/test_source_lama_blockwise.py tests/test_llama_cpp_runtime_policy.py tests/test_local_gemma_runtime.py tests/test_local_ocr_runtime.py tests/test_stage_batched_cancel.py`
 - `.venv-win/Scripts/python.exe scripts/validate_changed_python.py --all`
 - `.venv-win/Scripts/python.exe scripts/compile_translations.py --check`
 
 사용자 검토:
 
 - 결과 이미지가 바뀌는 PR이 아니므로 사용자 이미지 검토는 필요 없다.
-- 실제 GPU 포화 로그에서 prewarm skip/defer reason이 기록되는지 보고한다.
+- repo 밖 실제 4페이지 후보 로그에서 `after-release`, 75%, 0% 후보의 시간, VRAM, shared GPU memory, WSL swap, 인페인트 p95를 보고한다.
+
+실제 후보 결과:
+
+| 후보 | 결과 |
+| --- | --- |
+| `after-release` | 제품 정책 유지. 최종 CUDA13 smoke에서 대상 storage 389.537MiB, gate 350.583MiB, process allocated 392.196MiB 감소를 0.062초에 관측 |
+| 75% 시작 | 약 5% 속도 개선은 재현됐지만 GPU 여유가 절반 이하로 줄고 shared GPU memory와 WSL swap 압력이 증가해 탈락 |
+| 0% 시작 | 기준선보다 느리고 인페인트 p95가 크게 악화되어 탈락 |
+
+검증 로그는 `<validation-log-root>\gpu-runtime-handoff\decision-20260728.md`에 남긴다.
 
 ## PR 4. Performance Telemetry Cleanup
 

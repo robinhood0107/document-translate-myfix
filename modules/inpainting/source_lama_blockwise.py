@@ -13,6 +13,7 @@ from modules.source_parity_vendor.utils.textblock import TextBlock as SourceLaMa
 from modules.source_parity_vendor.utils.textblock_mask import extract_ballon_mask
 from modules.utils.bubble_erase import ERASE_MODE_BUBBLE_LAMA_FALLBACK, erase_text_bubble_regions
 from modules.utils.download import ModelDownloader, ModelID
+from modules.utils.gpu_handoff import estimate_torch_cuda_storage_mb
 from modules.utils.inpaint_composite import composite_with_edit_mask, normalize_edit_mask
 from modules.utils.mask_roi import normalize_xyxy
 from modules.utils.textblock import TextBlock
@@ -254,6 +255,38 @@ class SourceLaMaLarge:
 
 
 _INPAINTER_CACHE: dict[SourceLaMaKey, SourceLaMaLarge] = {}
+
+
+def release_source_lama_cache() -> dict[str, int | float | bool]:
+    """Release only Source LaMa model objects retained by this module."""
+
+    cached_inpainters = list(_INPAINTER_CACHE.values())
+    _INPAINTER_CACHE.clear()
+    loaded_model_count = 0
+    gpu_loaded_model_count = 0
+    expected_process_reclaim_mb = 0.0
+    untracked_gpu_resource_count = 0
+    for inpainter in cached_inpainters:
+        model = getattr(inpainter, "model", None)
+        if model is not None:
+            loaded_model_count += 1
+            if str(getattr(inpainter, "device", "") or "").lower().startswith("cuda"):
+                gpu_loaded_model_count += 1
+                estimate = estimate_torch_cuda_storage_mb(model)
+                tracked_mb = float(estimate.get("total_mb", 0.0) or 0.0)
+                if tracked_mb > 0.0:
+                    expected_process_reclaim_mb += tracked_mb
+                else:
+                    untracked_gpu_resource_count += 1
+        inpainter.model = None
+    return {
+        "cache_entry_count": len(cached_inpainters),
+        "loaded_model_count": loaded_model_count,
+        "gpu_loaded_model_count": gpu_loaded_model_count,
+        "expected_process_reclaim_mb": expected_process_reclaim_mb,
+        "untracked_gpu_resource_count": untracked_gpu_resource_count,
+        "gpu_release_expected": gpu_loaded_model_count > 0,
+    }
 
 
 def get_source_lama_large(device: str = "cuda", precision: str = "bf16", inpaint_size: int = 1536) -> SourceLaMaLarge:

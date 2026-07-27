@@ -23,6 +23,8 @@ logger = logging.getLogger(__name__)
 
 ROOT_DIR = Path(__file__).resolve().parents[2]
 DEFAULT_HUNYUAN_N_GPU_LAYERS = "80"
+LATE_START_STOP_GRACE_SEC = 3.0
+LATE_START_STOP_POLL_SEC = 0.25
 OCRPreflightProbeResult = Literal["healthy", "unavailable", "not_managed"]
 OCRHealthState = Literal["healthy", "loading", "unavailable"]
 
@@ -70,7 +72,9 @@ class LocalOCRRuntimeManager:
         self._lock = threading.RLock()
         self._compose_command: tuple[str, ...] | None = None
         self._active_engine: str | None = None
+        self._managed_start_attempted_engine: str | None = None
         self._readiness_cache: set[tuple[str, str, str]] = set()
+        self._startup_cancel_checker: Callable[[], bool] | None = None
 
     def validate_engine(self, engine_key: str, settings_page: Any) -> None:
         if not is_local_ocr_engine(engine_key):
@@ -132,6 +136,7 @@ class LocalOCRRuntimeManager:
         cancel_checker: Callable[[], bool] | None = None,
     ) -> None:
         with self._lock:
+            self._startup_cancel_checker = cancel_checker
             if not is_local_ocr_engine(engine_key) or not self.should_manage_engine(engine_key, settings_page):
                 self._deactivate_active_engine()
                 return
@@ -143,9 +148,11 @@ class LocalOCRRuntimeManager:
             if self._active_engine and self._active_engine != engine_key:
                 self._stop_engine(self._active_engine)
                 self._active_engine = None
+                self._managed_start_attempted_engine = None
                 self._readiness_cache.clear()
             if cache_key in self._readiness_cache:
                 self._active_engine = engine_key
+                self._managed_start_attempted_engine = engine_key
                 self._emit_readiness_cache_hit(progress_callback, engine_key)
                 return
 
@@ -177,6 +184,7 @@ class LocalOCRRuntimeManager:
         initial_state = self._probe_health_state(config["health_url"])
         if initial_state == "healthy":
             self._active_engine = engine_key
+            self._managed_start_attempted_engine = engine_key
             self._emit_progress(
                 progress_callback,
                 engine_key,
@@ -187,6 +195,7 @@ class LocalOCRRuntimeManager:
             return
         if initial_state == "loading":
             self._active_engine = engine_key
+            self._managed_start_attempted_engine = engine_key
             self._emit_progress(
                 progress_callback,
                 engine_key,
@@ -216,6 +225,7 @@ class LocalOCRRuntimeManager:
 
         existing_containers = self._existing_managed_container_names(engine_key)
         if existing_containers:
+            self._managed_start_attempted_engine = engine_key
             self._emit_progress(
                 progress_callback,
                 engine_key,
@@ -269,6 +279,7 @@ class LocalOCRRuntimeManager:
             message=f"{engine_key} 컨테이너를 시작하는 중...",
             detail="docker compose up -d",
         )
+        self._managed_start_attempted_engine = engine_key
         self._run_compose(engine_key, "up", "-d", step_name="up")
         self._active_engine = engine_key
         self._emit_progress(
@@ -311,24 +322,47 @@ class LocalOCRRuntimeManager:
 
     def _deactivate_active_engine(self) -> None:
         self._readiness_cache.clear()
-        if not self._active_engine:
+        engine_key = self._active_engine or self._managed_start_attempted_engine
+        if not engine_key:
             return
-        try:
-            self._stop_engine(self._active_engine)
-        finally:
-            self._active_engine = None
+        self._stop_engine(engine_key)
+        self._active_engine = None
+        self._managed_start_attempted_engine = None
 
     def _stop_engine(self, engine_key: str) -> None:
-        try:
-            self._run_compose(
-                engine_key,
-                "stop",
-                "--timeout",
-                str(DEFAULT_MANAGED_RUNTIME_STOP_TIMEOUT_SEC),
-                step_name="stop",
-            )
-        except LocalServiceSetupError:
-            logger.warning("Failed to stop managed OCR runtime for %s.", engine_key, exc_info=True)
+        watch_for_late_start = bool(
+            self._managed_start_attempted_engine == engine_key
+            and self._active_engine != engine_key
+        )
+        self._run_compose(
+            engine_key,
+            "stop",
+            "--timeout",
+            str(DEFAULT_MANAGED_RUNTIME_STOP_TIMEOUT_SEC),
+            step_name="stop",
+        )
+        deadline = time.monotonic() + (
+            LATE_START_STOP_GRACE_SEC if watch_for_late_start else 0.0
+        )
+        while True:
+            running = self._running_managed_container_names(engine_key)
+            if running and watch_for_late_start:
+                self._run_compose(
+                    engine_key,
+                    "stop",
+                    "--timeout",
+                    str(DEFAULT_MANAGED_RUNTIME_STOP_TIMEOUT_SEC),
+                    step_name="stop",
+                )
+                running = self._running_managed_container_names(engine_key)
+            if time.monotonic() >= deadline:
+                if running:
+                    raise self._build_setup_error(
+                        engine_key,
+                        f"Managed OCR containers are still running after stop: {running}",
+                    )
+                return
+            time.sleep(LATE_START_STOP_POLL_SEC)
 
     def _run_compose(self, engine_key: str, *compose_args: str, step_name: str) -> None:
         config = self._config_for(engine_key)
@@ -343,7 +377,19 @@ class LocalOCRRuntimeManager:
         try:
             from modules.utils.llama_cpp_runtime import run_docker_command
 
-            run_docker_command(command, cwd=compose_file.parent, env=env)
+            run_docker_command(
+                command,
+                cwd=compose_file.parent,
+                env=env,
+                timeout_sec=(
+                    DEFAULT_MANAGED_RUNTIME_STOP_TIMEOUT_SEC + 15.0
+                    if step_name == "stop"
+                    else 600.0
+                ),
+                cancel_checker=(
+                    None if step_name == "stop" else self._startup_cancel_checker
+                ),
+            )
             return
         except RuntimeError as exc:
             detail = str(exc).strip()
@@ -357,7 +403,9 @@ class LocalOCRRuntimeManager:
         if self._compose_command is not None:
             return self._compose_command
         try:
-            self._compose_command = resolve_docker_compose_command()
+            self._compose_command = resolve_docker_compose_command(
+                cancel_checker=self._startup_cancel_checker,
+            )
             return self._compose_command
         except RuntimeError as exc:
             raise self._build_setup_error(
@@ -419,7 +467,10 @@ class LocalOCRRuntimeManager:
             runtime = inspect_llama_cpp_runtime(
                 image_ref=self._build_env(engine_key).get("LLAMA_CPP_IMAGE"),
                 container_name=str(config.get("container_name") or ""),
+                cancel_checker=self._startup_cancel_checker,
             )
+        except OperationCancelledError:
+            raise
         except Exception:
             logger.warning("Failed to inspect llama.cpp runtime metadata for %s.", engine_key, exc_info=True)
             return
@@ -446,7 +497,10 @@ class LocalOCRRuntimeManager:
                 completed = run_docker_command(
                     ["docker", "inspect", "--format", "{{.Name}}", name],
                     check=False,
+                    cancel_checker=self._startup_cancel_checker,
                 )
+            except OperationCancelledError:
+                raise
             except Exception:
                 continue
             if getattr(completed, "returncode", 1) == 0:
@@ -459,12 +513,63 @@ class LocalOCRRuntimeManager:
         try:
             from modules.utils.llama_cpp_runtime import run_docker_command
 
-            run_docker_command(["docker", "start", *container_names])
+            run_docker_command(
+                ["docker", "start", *container_names],
+                cancel_checker=self._startup_cancel_checker,
+            )
         except RuntimeError as exc:
             raise self._build_setup_error(
                 engine_key,
                 f"Failed to start existing managed containers {container_names}.\n{str(exc).strip()}",
             ) from exc
+
+    def _running_managed_container_names(self, engine_key: str) -> list[str]:
+        running: list[str] = []
+        for name in self._managed_container_names(engine_key):
+            try:
+                from modules.utils.llama_cpp_runtime import run_docker_command
+
+                completed = run_docker_command(
+                    [
+                        "docker",
+                        "inspect",
+                        "--format",
+                        "{{.State.Running}}",
+                        name,
+                    ],
+                    check=False,
+                    timeout_sec=15.0,
+                )
+            except Exception as exc:
+                raise self._build_setup_error(
+                    engine_key,
+                    f"Failed to verify stopped OCR container {name}: {exc}",
+                ) from exc
+            state = (completed.stdout or "").strip().lower()
+            if completed.returncode == 0 and state == "true":
+                running.append(name)
+                continue
+            if completed.returncode == 0 and state == "false":
+                continue
+            detail = (
+                (completed.stderr or "") + "\n" + (completed.stdout or "")
+            ).strip()
+            normalized_detail = detail.lower()
+            if completed.returncode != 0 and (
+                "no such object" in normalized_detail
+                or "no such container" in normalized_detail
+            ):
+                continue
+            if completed.returncode == 0:
+                detail = f"Unexpected docker inspect state: {state or '<empty>'}"
+            raise self._build_setup_error(
+                engine_key,
+                (
+                    f"Docker could not verify whether OCR container {name} stopped."
+                    + (f"\n{detail}" if detail else "")
+                ),
+            )
+        return running
 
     def _build_setup_error(self, engine_key: str, detail: str) -> LocalServiceSetupError:
         config = _ENGINE_CONFIG.get(engine_key, {})
