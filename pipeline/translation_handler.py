@@ -79,29 +79,35 @@ class TranslationHandler:
             upper_case = settings_page.ui.uppercase_checkbox.isChecked()
 
             translator = Translator(self.main_page, source_lang, target_lang)
-            
-            # Get translation cache key
-            translation_cache_key = self.cache_manager._get_translation_cache_key(
-                image, source_lang, target_lang, translator_key, extra_context
-            )
-            
+
             if single_block:
                 blk = self.pipeline.get_selected_block()
                 if blk is None:
                     return
-                
-                # Check if block already has translation to avoid redundant processing
-                if hasattr(blk, 'translation') and blk.translation and blk.translation.strip():
+
+                if getattr(blk, "translation", "") and blk.translation.strip():
                     return
-                
-                # Check if we have cached translation results for this image/translator/language combination
-                if self.cache_manager._is_translation_cached(translation_cache_key):
-                    # Check if block exists in cache and source text matches
-                    cached_translation = self.cache_manager._get_cached_translation_for_block(translation_cache_key, blk)
-                    if cached_translation is not None:  # Block was processed and source text matches
+
+                legacy_cache_key = None
+                if not translator.uses_persistent_translation_memory:
+                    legacy_cache_key = self.cache_manager._get_translation_cache_key(
+                        image,
+                        source_lang,
+                        target_lang,
+                        translator_key,
+                        extra_context,
+                    )
+                    cached_translation = (
+                        self.cache_manager._get_cached_translation_for_block(
+                            legacy_cache_key,
+                            blk,
+                        )
+                        if self.cache_manager._is_translation_cached(legacy_cache_key)
+                        else None
+                    )
+                    if cached_translation is not None:
                         blk.translation = cached_translation
                         self._apply_translation_corrections([blk])
-                        logger.info(f"Using cached translation result for block: '{cached_translation}'")
                         set_upper_case([blk], upper_case)
                         self._persist_current_page_translation_state(
                             self.main_page.blk_list,
@@ -110,67 +116,72 @@ class TranslationHandler:
                             "hit",
                         )
                         return
-                    else:
-                        logger.info("Block not found in cache or source text changed, processing single block...")
-                    
-                    # If we reach here, need to process the block
-                    single_block_list = [blk]
-                    translator.translate(single_block_list, image, extra_context)
-                    self._apply_translation_corrections(single_block_list)
-                    
-                    # Update the cache with this new result using the cache manager's method
-                    self.cache_manager.update_translation_cache_for_block(translation_cache_key, blk)
-                    
-                    logger.info(f"Processed single block and updated cache: '{blk.translation}'")
-                    set_upper_case([blk], upper_case)
-                    self._persist_current_page_translation_state(
-                        self.main_page.blk_list,
-                        translator_key,
-                        translator.engine.__class__.__name__,
-                        "refreshed",
-                    )
+
+                selected_index = next(
+                    (
+                        index
+                        for index, current in enumerate(self.main_page.blk_list)
+                        if current is blk
+                    ),
+                    None,
+                )
+                if selected_index is None:
+                    working_blocks = [blk.deep_copy()]
+                    selected_index = 0
                 else:
-                    # Run translation on all blocks and cache the results
-                    logger.info("No cached translation results found, running translation on entire page...")
-                    # Create a mapping between original blocks and their copies
-                    all_blocks_copy = []
-                    
-                    for original_blk in self.main_page.blk_list:
-                        copy_blk = original_blk.deep_copy()
-                        all_blocks_copy.append(copy_blk)
-                    
-                    if all_blocks_copy:  
-                        translator.translate(all_blocks_copy, image, extra_context)
-                        self._apply_translation_corrections(all_blocks_copy)
-                        # Cache using the original blocks to maintain consistent IDs
-                        self.cache_manager._cache_translation_results(translation_cache_key, self.main_page.blk_list, all_blocks_copy)
-                        cached_translation = self.cache_manager._get_cached_translation_for_block(translation_cache_key, blk)
-                        blk.translation = cached_translation
-                        logger.info(f"Cached translation results and extracted translation for block: {cached_translation}")
-                    
-                    set_upper_case([blk], upper_case)
-                    self._persist_current_page_translation_state(
-                        self.main_page.blk_list,
-                        translator_key,
-                        translator.engine.__class__.__name__,
-                        "refreshed",
+                    working_blocks = [
+                        current.deep_copy()
+                        for current in self.main_page.blk_list
+                    ]
+
+                translator.translate(
+                    working_blocks,
+                    image,
+                    extra_context,
+                    requested_indices=[selected_index],
+                )
+                if legacy_cache_key is not None:
+                    original_blocks = (
+                        self.main_page.blk_list
+                        if len(working_blocks) == len(self.main_page.blk_list)
+                        else [blk]
                     )
+                    self.cache_manager._cache_translation_results(
+                        legacy_cache_key,
+                        original_blocks,
+                        working_blocks,
+                    )
+                translated = working_blocks[selected_index]
+                blk.translation = translated.translation
+                guard_metadata = getattr(
+                    translated,
+                    "_translation_repetition_guard",
+                    None,
+                )
+                if guard_metadata is not None:
+                    setattr(blk, "_translation_repetition_guard", guard_metadata)
+                elif hasattr(blk, "_translation_repetition_guard"):
+                    delattr(blk, "_translation_repetition_guard")
+                self._apply_translation_corrections([blk])
+                set_upper_case([blk], upper_case)
+                self._persist_current_page_translation_state(
+                    self.main_page.blk_list,
+                    translator_key,
+                    translator.engine.__class__.__name__,
+                    (
+                        translator.translation_cache_status
+                        if translator.uses_persistent_translation_memory
+                        else "refreshed"
+                    ),
+                )
             else:
-                # For full page translation, check if we can use cached results
-                if self.cache_manager._can_serve_all_blocks_from_translation_cache(translation_cache_key, self.main_page.blk_list):
-                    # All blocks can be served from cache with matching source text
-                    self.cache_manager._apply_cached_translations_to_blocks(translation_cache_key, self.main_page.blk_list)
-                    self._apply_translation_corrections(self.main_page.blk_list)
-                    logger.info(f"Using cached translation results for all {len(self.main_page.blk_list)} blocks")
-                    cache_status = "hit"
-                else:
-                    # Need to run translation and cache results
-                    translator.translate(self.main_page.blk_list, image, extra_context)
-                    self._apply_translation_corrections(self.main_page.blk_list)
-                    self.cache_manager._cache_translation_results(translation_cache_key, self.main_page.blk_list)
-                    logger.info("Translation completed and cached for %d blocks", len(self.main_page.blk_list))
-                    cache_status = "refreshed"
-                
+                _, cache_status = translator.translate_with_cache_manager(
+                    self.main_page.blk_list,
+                    image,
+                    extra_context,
+                    self.cache_manager,
+                )
+                self._apply_translation_corrections(self.main_page.blk_list)
                 set_upper_case(self.main_page.blk_list, upper_case)
                 self._persist_current_page_translation_state(
                     self.main_page.blk_list,

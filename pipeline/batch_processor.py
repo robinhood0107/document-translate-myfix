@@ -1762,31 +1762,22 @@ class BatchProcessor:
                 translator_key=translator_key,
             )
             
-            # Get translation cache key for batch processing
-            translation_cache_key = self.cache_manager._get_translation_cache_key(
-                image, source_lang, target_lang, translator_key, extra_context
-            )
-            
             try:
-                translation_cache_status = "miss"
-                if self.cache_manager._can_serve_all_blocks_from_translation_cache(translation_cache_key, blk_list):
-                    self.cache_manager._apply_cached_translations_to_blocks(translation_cache_key, blk_list)
-                    apply_translation_result_dictionary(
-                        blk_list,
-                        settings_page.get_translation_result_dictionary_rules(),
-                    )
-                    translation_cache_status = "hit"
-                    logger.info("Using cached translation results for all %d blocks", len(blk_list))
-                else:
-                    translator.translate(blk_list, image, extra_context)
-                    apply_translation_result_dictionary(
-                        blk_list,
-                        settings_page.get_translation_result_dictionary_rules(),
-                    )
-                    # Cache the translation results for potential future use
-                    self.cache_manager._cache_translation_results(translation_cache_key, blk_list)
-                    translation_cache_status = "refreshed"
-                    logger.info("Translation completed and cached for %d blocks", len(blk_list))
+                _, translation_cache_status = translator.translate_with_cache_manager(
+                    blk_list,
+                    image,
+                    extra_context,
+                    self.cache_manager,
+                )
+                apply_translation_result_dictionary(
+                    blk_list,
+                    settings_page.get_translation_result_dictionary_rules(),
+                )
+                logger.info(
+                    "Translation completed for %d blocks: cache_status=%s",
+                    len(blk_list),
+                    translation_cache_status,
+                )
                 page_translation_metrics = self._translation_benchmark_metrics(translator)
                 self._persist_translation_state(
                     image_path,

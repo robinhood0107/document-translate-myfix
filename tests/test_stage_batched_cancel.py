@@ -236,6 +236,124 @@ class StageBatchedCancellationTests(unittest.TestCase):
         self.assertFalse(shutdown_thread.is_alive())
         self.assertEqual(progress_statuses, ["starting"])
 
+    def test_all_hit_folder_skips_gemma_prewarm_and_readiness_wait(self) -> None:
+        processor = self._processor(cancelled=False)
+        processor.main_page.settings_page = SimpleNamespace(
+            get_llm_settings=lambda: {"extra_context": "context"},
+            get_tool_selection=lambda _tool: "Custom Local Server(Gemma)",
+            get_translation_result_dictionary_rules=lambda: [],
+        )
+        processor._inpainter_release_gate = {
+            "required": True,
+            "observed": False,
+        }
+        processor._start_gemma_prewarm = mock.Mock()
+        processor._await_gemma_runtime = mock.Mock()
+        processor._set_current_image = mock.Mock()
+        processor.emit_progress = mock.Mock()
+        processor._report_runtime_progress = mock.Mock()
+        processor._emit_benchmark_event = mock.Mock()
+        processor._persist_translation_state = mock.Mock()
+        pages = [
+            StagePageContext(
+                image_path=f"page-{index}.png",
+                image_name=f"page-{index}.png",
+                source_lang="Japanese",
+                target_lang="Korean",
+                image=object(),
+                blk_list=[SimpleNamespace(text=f"source-{index}", translation="")],
+            )
+            for index in range(2)
+        ]
+
+        class _AllHitTranslator:
+            def __init__(self, *_args, **_kwargs) -> None:
+                self.engine = SimpleNamespace(last_benchmark_stats={})
+                self.translation_cache_status = "persistent-hit"
+                self.uses_persistent_translation_memory = True
+
+            @staticmethod
+            def prepare_translation(_blocks, _extra_context) -> bool:
+                return False
+
+            @staticmethod
+            def translate_with_cache_manager(
+                blocks,
+                _image,
+                _extra_context,
+                _cache_manager,
+            ):
+                for block in blocks:
+                    block.translation = "cached"
+                return blocks, "persistent-hit"
+
+        processor.cache_manager = object()
+        with mock.patch(
+            "pipeline.stage_batched_processor.Translator",
+            _AllHitTranslator,
+        ), mock.patch(
+            "pipeline.stage_batched_processor.apply_translation_result_dictionary",
+        ):
+            processor._translate_all(pages)
+
+        processor._start_gemma_prewarm.assert_not_called()
+        processor._await_gemma_runtime.assert_not_called()
+        self.assertEqual(
+            [page.blk_list[0].translation for page in pages],
+            ["cached", "cached"],
+        )
+
+    def test_cache_state_change_cannot_bypass_unobserved_vram_release_gate(self) -> None:
+        processor = self._processor(cancelled=False)
+        processor.main_page.settings_page = SimpleNamespace(
+            get_llm_settings=lambda: {"extra_context": "context"},
+            get_tool_selection=lambda _tool: "Custom Local Server(Gemma)",
+            get_translation_result_dictionary_rules=lambda: [],
+        )
+        processor._inpainter_release_gate = {
+            "required": True,
+            "observed": False,
+        }
+        processor.cache_manager = object()
+        processor._start_gemma_prewarm = mock.Mock()
+        processor._await_gemma_runtime = mock.Mock()
+        processor._set_current_image = mock.Mock()
+        processor.emit_progress = mock.Mock()
+        processor._report_runtime_progress = mock.Mock()
+        processor._emit_benchmark_event = mock.Mock()
+        processor._persist_translation_state = mock.Mock()
+        page = StagePageContext(
+            image_path="page.png",
+            image_name="page.png",
+            source_lang="Japanese",
+            target_lang="Korean",
+            image=object(),
+            blk_list=[SimpleNamespace(text="source", translation="")],
+        )
+
+        class _ChangingCacheTranslator:
+            uses_persistent_translation_memory = True
+
+            def __init__(self, *_args, **_kwargs) -> None:
+                self.engine = SimpleNamespace(last_benchmark_stats={})
+                self._prepare_results = iter((False, True))
+
+            def prepare_translation(self, _blocks, _extra_context) -> bool:
+                return next(self._prepare_results)
+
+            @staticmethod
+            def translate_with_cache_manager(*_args, **_kwargs):
+                raise AssertionError("translation must not start before the VRAM gate")
+
+        with mock.patch(
+            "pipeline.stage_batched_processor.Translator",
+            _ChangingCacheTranslator,
+        ), self.assertRaisesRegex(RuntimeError, "VRAM release"):
+            processor._translate_all([page])
+
+        processor._start_gemma_prewarm.assert_not_called()
+        processor._await_gemma_runtime.assert_not_called()
+
 
 if __name__ == "__main__":
     unittest.main()
