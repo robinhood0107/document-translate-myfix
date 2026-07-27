@@ -1724,6 +1724,8 @@ class CustomLocalGemmaTranslation(BaseLLMTranslation):
                 f"Gemma local server returned a non-string translation for block_{index}.",
                 strict_retryable=True,
             )
+        if hasattr(blk, "_translation_repetition_guard"):
+            delattr(blk, "_translation_repetition_guard")
         translated = value
         if isinstance(translated, str):
             stripped = self._strip_channel_tokens(translated)

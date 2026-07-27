@@ -261,6 +261,26 @@ class TranslationMemoryStoreTests(unittest.TestCase):
 
         self.assertEqual(store.list_tm_entries(), [])
 
+    def test_import_rejects_unsupported_normalization_version(self) -> None:
+        import_path = Path(self.temp_dir.name) / "invalid-normalization.json"
+        import_path.write_text(
+            json.dumps(
+                {
+                    "format": "comic-translate-exact-tm",
+                    "schema_version": 1,
+                    "normalization_version": 2,
+                    "entries": [],
+                }
+            ),
+            encoding="utf-8",
+        )
+        store = self._store()
+
+        with self.assertRaisesRegex(ValueError, "normalization version"):
+            store.import_tm(import_path)
+
+        self.assertEqual(store.list_tm_entries(), [])
+
     def test_import_rejects_non_string_text_fields(self) -> None:
         store = self._store()
         for field in (
