@@ -379,6 +379,7 @@ class SettingsPage(QtWidgets.QWidget):
         }
 
     def get_gemma_local_server_settings(self):
+        persisted_settings = QSettings("ComicLabs", "ComicTranslate")
         return {
             "chunk_size": int(self.ui.gemma_chunk_size_spinbox.value()),
             "max_completion_tokens": int(self.ui.gemma_max_completion_tokens_spinbox.value()),
@@ -388,6 +389,11 @@ class SettingsPage(QtWidgets.QWidget):
             "top_p": float(self.ui.gemma_top_p_spinbox.value()),
             "min_p": float(self.ui.gemma_min_p_spinbox.value()),
             "raw_response_logging": self.ui.gemma_raw_response_logging_checkbox.isChecked(),
+            "request_mode": persisted_settings.value(
+                "gemma_local_server/request_mode",
+                GemmaLocalServerPage.DEFAULT_REQUEST_MODE,
+                type=str,
+            ),
         }
 
     def get_hunyuan_ocr_settings(self):
