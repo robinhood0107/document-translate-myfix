@@ -17,6 +17,8 @@
 - 폰트 바이너리(`*.ttf`, `*.otf`, `*.woff`, `*.woff2`, `*.ttc`, `*.fon`)와 루트 `fonts/` 디렉터리는 Git에 올리지 않는다.
 - 테스트 원본, 실제 작품명, 사용자 로컬 절대경로, OCR/번역/인페인트/렌더 결과물, benchmark raw output은 파일 경로와 문서/테스트 내용 양쪽 모두에서 Git에 올리지 않는다.
 - 로컬 작업용 가상환경은 `.venv-win`, `.venv-win-cuda13`만 공식 사용한다. `.venv`는 repo workflow 기준 환경으로 사용하지 않는다.
+- 현재 공식 Windows 개발 PC에서는 공통 Python 검사와 빠른 단위 테스트를 가능한 한 `.venv-win`, `.venv-win-cuda13` 양쪽에서 실행한다. CUDA 버전에 종속된 실행·패키징 검사는 해당 환경에서 따로 수행하고 결과를 구분해 기록한다.
+- 같은 checkout에서 두 Windows 환경의 Python 검사를 동시에 실행하지 않는다. `__pycache__` 파일 잠금 충돌을 피하도록 `.venv-win` 검사 후 `.venv-win-cuda13` 검사를 순차 실행하고, 필요하면 Python `-B` 옵션을 사용한다.
 
 ## 2. 브랜치 모델
 
