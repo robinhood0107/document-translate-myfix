@@ -9,6 +9,7 @@ This guide is the shortest path from a fresh checkout to a working local setup.
 - Git
 - Docker Desktop with GPU support enabled
 - NVIDIA driver / CUDA-compatible GPU if you want local Gemma, HunyuanOCR, or PaddleOCR VL acceleration
+- At least 60 GiB free on `C:` for the initial Gemma volume preparation check
 
 ## 2. Clone and launch
 
