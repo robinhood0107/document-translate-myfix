@@ -3,6 +3,7 @@ from __future__ import annotations
 import copy
 import json
 import subprocess
+import sys
 import threading
 import time
 from pathlib import Path
@@ -19,13 +20,14 @@ _GPU_METRICS_CACHE_VALUE: dict[str, Any] | None = None
 _GPU_METRICS_CACHE_EXPIRES_AT = 0.0
 
 
-def _run_capture(cmd: list[str]) -> str:
+def _run_capture(cmd: list[str], *, timeout_sec: float = 5.0) -> str:
     try:
         completed = subprocess.run(
             cmd,
             check=True,
             capture_output=True,
             text=True,
+            timeout=max(0.1, float(timeout_sec)),
         )
     except Exception:
         return ""
@@ -77,6 +79,52 @@ def query_gpu_metrics() -> dict[str, Any]:
         "gpus": rows,
         "primary": primary,
         "sampled_at": time.time(),
+    }
+
+
+def query_process_cuda_metrics() -> dict[str, Any]:
+    """Return CUDA allocator state for this Python process without importing torch.
+
+    Inference code imports torch before this is useful. Avoiding a new import here
+    keeps diagnostics from loading the CUDA runtime in CPU-only workflows.
+    """
+
+    torch = sys.modules.get("torch")
+    if torch is None:
+        return {
+            "available": False,
+            "reason": "torch-not-loaded",
+        }
+    try:
+        cuda = torch.cuda
+        if not bool(cuda.is_available()):
+            return {
+                "available": False,
+                "reason": "cuda-unavailable",
+            }
+        device_index = int(cuda.current_device())
+        return {
+            "available": True,
+            "device_index": device_index,
+            "allocated_mb": float(cuda.memory_allocated(device_index)) / 1024.0 / 1024.0,
+            "reserved_mb": float(cuda.memory_reserved(device_index)) / 1024.0 / 1024.0,
+            "max_allocated_mb": float(cuda.max_memory_allocated(device_index)) / 1024.0 / 1024.0,
+            "max_reserved_mb": float(cuda.max_memory_reserved(device_index)) / 1024.0 / 1024.0,
+        }
+    except Exception as exc:
+        return {
+            "available": False,
+            "reason": f"{type(exc).__name__}: {exc}",
+        }
+
+
+def query_cuda_handoff_metrics() -> dict[str, Any]:
+    """Collect process allocator and driver-visible GPU memory for a handoff."""
+
+    return {
+        "sampled_at": time.time(),
+        "process": query_process_cuda_metrics(),
+        "driver": query_gpu_metrics(),
     }
 
 
