@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import threading
 import time
 import traceback
 from concurrent.futures import Future, ThreadPoolExecutor
@@ -128,6 +129,7 @@ class StageBatchedProcessor(BatchProcessor):
         self._timestamp: str = ""
         self._prewarm_executor: ThreadPoolExecutor | None = None
         self._prewarm_jobs: dict[str, Future] = {}
+        self._prewarm_cancel_event = threading.Event()
 
     def _stage_tr(self, text: str) -> str:
         return QCoreApplication.translate("StageBatchedProcessor", text)
@@ -153,6 +155,23 @@ class StageBatchedProcessor(BatchProcessor):
             self._prewarm_executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="ct-stage-prewarm")
         return self._prewarm_executor
 
+    def _prewarm_cancel_checker(self) -> bool:
+        cancel_event = getattr(self, "_prewarm_cancel_event", None)
+        if cancel_event is not None and cancel_event.is_set():
+            return True
+        checker = getattr(self.main_page, "is_current_task_cancelled", None)
+        try:
+            return bool(checker()) if callable(checker) else bool(self._is_cancelled())
+        except Exception:
+            return bool(self._is_cancelled())
+
+    def _reset_prewarm_lifecycle(self) -> None:
+        cancel_event = getattr(self, "_prewarm_cancel_event", None)
+        if cancel_event is None:
+            self._prewarm_cancel_event = threading.Event()
+        else:
+            cancel_event.clear()
+
     def _start_prewarm(self, key: str, label: str, service: str, fn: Callable[[], None]) -> None:
         if key in self._prewarm_jobs:
             return
@@ -165,7 +184,11 @@ class StageBatchedProcessor(BatchProcessor):
         )
 
         def runner() -> None:
+            if self._prewarm_cancel_checker():
+                raise OperationCancelledError(f"{label} prewarm was cancelled before startup.")
             fn()
+            if self._prewarm_cancel_checker():
+                raise OperationCancelledError(f"{label} prewarm was cancelled after startup.")
             self._prewarm_progress(
                 service=service,
                 status="ready",
@@ -209,11 +232,22 @@ class StageBatchedProcessor(BatchProcessor):
     def _shutdown_prewarm_executor(self) -> None:
         executor = self._prewarm_executor
         self._prewarm_executor = None
-        self._prewarm_jobs.clear()
+        cancel_event = getattr(self, "_prewarm_cancel_event", None)
+        if cancel_event is not None:
+            cancel_event.set()
+        jobs = list(self._prewarm_jobs.values())
+        for job in jobs:
+            job.cancel()
         if executor is not None:
-            executor.shutdown(wait=False, cancel_futures=True)
+            executor.shutdown(wait=True, cancel_futures=True)
+        self._prewarm_jobs.clear()
 
-    def _shutdown_managed_runtimes(self) -> None:
+    def _shutdown_managed_runtimes(
+        self,
+        *,
+        context: str = "batch cleanup",
+        raise_on_failure: bool = False,
+    ) -> None:
         runtime_managers = (
             (
                 "OCR",
@@ -226,17 +260,46 @@ class StageBatchedProcessor(BatchProcessor):
                 LocalGemmaRuntimeManager,
             ),
         )
+        failures: list[Exception] = []
         for label, runtime_manager, manager_type in runtime_managers:
             if not isinstance(runtime_manager, manager_type):
                 continue
             try:
-                runtime_manager.shutdown()
-            except Exception:
-                logger.warning(
-                    "Failed to stop managed %s runtime during batch cleanup.",
+                self._shutdown_runtime_with_retry(
                     label,
+                    runtime_manager,
+                    context=context,
+                    raise_on_failure=True,
+                )
+            except Exception as exc:
+                failures.append(exc)
+        if raise_on_failure and failures:
+            raise failures[0]
+
+    @staticmethod
+    def _shutdown_runtime_with_retry(
+        label: str,
+        runtime_manager: Any,
+        *,
+        context: str,
+        raise_on_failure: bool,
+    ) -> None:
+        last_error: Exception | None = None
+        for attempt in range(2):
+            try:
+                runtime_manager.shutdown()
+                return
+            except Exception as exc:
+                last_error = exc
+                logger.warning(
+                    "Failed to stop managed %s runtime during %s%s.",
+                    label,
+                    context,
+                    "; retrying once" if attempt == 0 else "",
                     exc_info=True,
                 )
+        if raise_on_failure and last_error is not None:
+            raise last_error
 
     def _start_ocr_prewarm(self, policy: dict[str, Any]) -> None:
         runtime_manager = getattr(self.main_page, "local_ocr_runtime_manager", None)
@@ -253,7 +316,7 @@ class StageBatchedProcessor(BatchProcessor):
                 engine_key,
                 settings_page,
                 progress_callback=getattr(self.main_page, "report_runtime_progress", None),
-                cancel_checker=getattr(self.main_page, "is_current_task_cancelled", None),
+                cancel_checker=self._prewarm_cancel_checker,
             ),
         )
 
@@ -272,7 +335,7 @@ class StageBatchedProcessor(BatchProcessor):
                 engine_key,
                 settings_page,
                 progress_callback=getattr(self.main_page, "report_runtime_progress", None),
-                cancel_checker=getattr(self.main_page, "is_current_task_cancelled", None),
+                cancel_checker=self._prewarm_cancel_checker,
             ),
         )
 
@@ -288,7 +351,7 @@ class StageBatchedProcessor(BatchProcessor):
             lambda: runtime_manager.ensure_server(
                 settings_page,
                 progress_callback=getattr(self.main_page, "report_runtime_progress", None),
-                cancel_checker=getattr(self.main_page, "is_current_task_cancelled", None),
+                cancel_checker=self._prewarm_cancel_checker,
             ),
         )
 
@@ -304,7 +367,7 @@ class StageBatchedProcessor(BatchProcessor):
             lambda: runtime_manager.ensure_server(
                 settings_page,
                 progress_callback=getattr(self.main_page, "report_runtime_progress", None),
-                cancel_checker=getattr(self.main_page, "is_current_task_cancelled", None),
+                cancel_checker=self._prewarm_cancel_checker,
             ),
         )
 
@@ -736,28 +799,43 @@ class StageBatchedProcessor(BatchProcessor):
                 )
 
         if isinstance(runtime_manager, LocalOCRRuntimeManager):
-            runtime_manager.shutdown()
+            self._shutdown_runtime_with_retry(
+                "OCR",
+                runtime_manager,
+                context="OCR-to-inpaint handoff",
+                raise_on_failure=True,
+            )
         self._raise_if_cancelled()
 
     def _ensure_inpainter(self):
         settings_page = self.main_page.settings_page
         runtime = get_inpainter_runtime(settings_page)
-        inpainter_key = runtime["key"]
-        inpainter_backend = runtime["backend"]
-        if self.inpainting.inpainter_cache is None or self.inpainting.cached_inpainter_key != inpainter_key:
-            device = resolve_device(settings_page.is_gpu_enabled(), backend=inpainter_backend)
-            inpainter_class = inpaint_map[inpainter_key]
-            self.inpainting.inpainter_cache = inpainter_class(
-                device,
-                backend=inpainter_backend,
-                runtime_device=runtime.get("device", device),
-                inpaint_size=runtime.get("inpaint_size"),
-                precision=runtime.get("precision"),
-            )
-            self.inpainting.cached_inpainter_key = inpainter_key
+        self.inpainting._ensure_inpainter()
         return runtime
 
     def _inpaint_all(self, pages: list[StagePageContext]) -> None:
+        active_pages = [
+            ctx for ctx in pages if not ctx.failed_stage and not ctx.no_text_detected
+        ]
+        try:
+            self._inpaint_pages(pages)
+        except BaseException:
+            if active_pages:
+                try:
+                    self._release_inpainter_before_gemma(
+                        pages,
+                        start_gemma=False,
+                        handoff_outcome="aborted",
+                    )
+                except Exception:
+                    logger.warning(
+                        "Failed to release inpainter resources after an aborted inpaint stage.",
+                        exc_info=True,
+                    )
+            raise
+        self._release_inpainter_before_gemma(pages)
+
+    def _inpaint_pages(self, pages: list[StagePageContext]) -> None:
         total_images = len(pages)
         settings_page = self.main_page.settings_page
         export_settings = self._effective_export_settings(settings_page)
@@ -769,8 +847,6 @@ class StageBatchedProcessor(BatchProcessor):
         active_pages = [ctx for ctx in pages if not ctx.failed_stage and not ctx.no_text_detected]
         runtime = self._ensure_inpainter() if active_pages else {"key": "", "backend": ""}
         config = get_config(settings_page)
-        if active_pages:
-            self._start_gemma_prewarm()
 
         for index, ctx in enumerate(pages):
             self._raise_if_cancelled()
@@ -948,6 +1024,39 @@ class StageBatchedProcessor(BatchProcessor):
                     extra={**ctx.page_ocr_metrics, **ctx.page_translation_metrics},
                 )
 
+    def _release_inpainter_before_gemma(
+        self,
+        pages: list[StagePageContext],
+        *,
+        start_gemma: bool = True,
+        handoff_outcome: str = "completed",
+    ) -> None:
+        report = self.inpainting.release_inpainter_resources()
+        gate = dict(report.get("vram_release_gate") or {})
+        self._emit_benchmark_event(
+            "inpainter_release",
+            handoff_policy="after-release",
+            handoff_outcome=handoff_outcome,
+            inpainter_release=report,
+            inpainter_gpu_release_expected=bool(report.get("gpu_release_expected")),
+            inpainter_vram_release_required=bool(gate.get("required")),
+            inpainter_vram_release_observed=gate.get("observed"),
+            inpainter_vram_release_status=str(gate.get("status") or ""),
+            inpainter_vram_release_elapsed_sec=float(gate.get("elapsed_sec", 0.0) or 0.0),
+        )
+        if start_gemma and gate.get("required") and not gate.get("observed"):
+            raise RuntimeError(
+                QCoreApplication.translate(
+                    "StageBatchedProcessor",
+                    "Gemma could not start because inpainter VRAM release was not confirmed."
+                )
+            )
+        if not start_gemma:
+            return
+        self._raise_if_cancelled()
+        if any(not ctx.failed_stage and not ctx.no_text_detected for ctx in pages):
+            self._start_gemma_prewarm()
+
     def _translate_all(self, pages: list[StagePageContext]) -> None:
         total_images = len(pages)
         settings_page = self.main_page.settings_page
@@ -1058,7 +1167,12 @@ class StageBatchedProcessor(BatchProcessor):
                 )
 
         if isinstance(runtime_manager, LocalGemmaRuntimeManager):
-            runtime_manager.shutdown()
+            self._shutdown_runtime_with_retry(
+                "Gemma",
+                runtime_manager,
+                context="translation-to-render handoff",
+                raise_on_failure=True,
+            )
         self._raise_if_cancelled()
 
     def _render_page_text_items(
@@ -1533,6 +1647,7 @@ class StageBatchedProcessor(BatchProcessor):
         self._progress_image_path = None
         self._recent_page_durations.clear()
         self._emit_benchmark_event("batch_run_start", total_images=total_images)
+        self._reset_prewarm_lifecycle()
         try:
             if self.main_page.file_handler.should_pre_materialize(image_list):
                 self.main_page.file_handler.pre_materialize(image_list)
@@ -1542,6 +1657,11 @@ class StageBatchedProcessor(BatchProcessor):
         pages = self._load_page_contexts(image_list)
         policy = self._ensure_stage_policy(pages)
         try:
+            self._raise_if_cancelled()
+            self._shutdown_managed_runtimes(
+                context="batch startup preflight",
+                raise_on_failure=True,
+            )
             self._raise_if_cancelled()
             self._start_ocr_prewarm(policy)
             self._raise_if_cancelled()
@@ -1559,6 +1679,8 @@ class StageBatchedProcessor(BatchProcessor):
             self._emit_benchmark_event("batch_run_cancelled", total_images=total_images)
             return
         finally:
-            self._shutdown_prewarm_executor()
-            self._shutdown_managed_runtimes()
+            try:
+                self._shutdown_prewarm_executor()
+            finally:
+                self._shutdown_managed_runtimes()
             self._progress_image_path = None
