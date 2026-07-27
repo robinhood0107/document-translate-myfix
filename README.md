@@ -15,6 +15,7 @@ The fork is maintained around a practical desktop workflow:
 ## Important Features
 
 - Local Gemma translation runtime for desktop-first translation workflows.
+- Persistent full-identity Gemma result caching plus user-approved exact translation memory.
 - Local OCR runtimes with optimal routing between `HunyuanOCR` and `PaddleOCR VL`.
 - Inpainting add, exclude, and restore tools with saved mask and patch state.
 - TXT/MD source export and translation import with OCR and translation correction dictionaries.
@@ -135,6 +136,8 @@ Local product work since the `v2.6.7` base has focused on a few technical areas.
 - split custom translator modes and improved keyless local endpoint support
 - normalized Gemma input and sanitized problematic glyphs
 - aligned local sampler/runtime defaults with measured benchmark presets
+- added a SQLite result-cache fast path that can skip Gemma startup on complete hits
+- added separately approved exact translation memory with conservative matching and explicit import/export controls
 
 ### Benchmarking and branch separation
 
@@ -217,6 +220,8 @@ powershell -NoProfile -ExecutionPolicy Bypass `
 ```
 
 Then use `Custom Local Server(Gemma)` in the app. The managed runtime validates the ready manifest and model size, mounts the prepared volume read-only, and starts or recreates the container only when needed. To explicitly recompute both model hashes, run the same script with `-Mode Verify`.
+
+The **User Dictionaries** settings page also controls the persistent block-result cache and exact translation memory. Result-cache entries use the complete translation/runtime identity. Exact source-to-translation pairs bypass Gemma only after explicit approval; imported approved entries require confirmation. These databases contain sensitive local text, remain in the app user-data directory, and are never silently deleted after a lock or corruption error. See [the translation-memory guide](docs/gemma/translation-memory.md).
 
 ### 3. Optional local OCR runtimes
 

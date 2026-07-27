@@ -568,6 +568,9 @@ class SettingsPage(QtWidgets.QWidget):
     def get_translation_result_dictionary_rules(self) -> list[dict]:
         return self.get_dictionary_settings()["translation_substitutions"]
 
+    def get_translation_memory_settings(self) -> dict[str, object]:
+        return self.ui.user_dictionaries_page.get_translation_memory_settings()
+
     def _normalize_service_name(self, raw_service: str) -> str:
         normalized = self.ui.value_mappings.get(raw_service, raw_service)
         return self.TOOL_CREDENTIAL_SERVICE_MAP.get(normalized, normalized)
@@ -687,6 +690,7 @@ class SettingsPage(QtWidgets.QWidget):
             "hunyuan_ocr": self.get_hunyuan_ocr_settings(),
             "mangalmm_ocr": self.get_mangalmm_ocr_settings(),
             "gemma_local_server": self.get_gemma_local_server_settings(),
+            "translation_memory": self.get_translation_memory_settings(),
             "llm": self.get_llm_settings(),
             "text_rendering": self.get_text_rendering_settings(),
             "export": self.get_export_settings(),
@@ -1211,6 +1215,33 @@ class SettingsPage(QtWidgets.QWidget):
         except Exception:
             translation_rules = []
         self.ui.user_dictionaries_page.load_rules(ocr_rules, translation_rules)
+        settings.endGroup()
+
+        settings.beginGroup("translation_memory")
+        self.ui.user_dictionaries_page.load_translation_memory_settings(
+            {
+                "persistent_cache_enabled": settings.value(
+                    "persistent_cache_enabled",
+                    True,
+                    type=bool,
+                ),
+                "exact_tm_enabled": settings.value(
+                    "exact_tm_enabled",
+                    True,
+                    type=bool,
+                ),
+                "result_cache_limit": settings.value(
+                    "result_cache_limit",
+                    50_000,
+                    type=int,
+                ),
+                "candidate_limit": settings.value(
+                    "candidate_limit",
+                    5_000,
+                    type=int,
+                ),
+            }
+        )
         settings.endGroup()
 
         settings.beginGroup("notifications")
