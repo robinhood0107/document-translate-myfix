@@ -10,6 +10,7 @@ import requests
 from modules.translation.llm.custom_local_gemma import (
     DEFAULT_GEMMA_PROMPT_PROFILE,
     CustomLocalGemmaTranslation,
+    GemmaLocalServerResponseError,
 )
 from modules.utils.textblock import TextBlock
 
@@ -158,6 +159,31 @@ class CustomLocalGemmaRepetitionGuardTests(unittest.TestCase):
             engine.translate(blocks, np.zeros((1, 1, 3), dtype=np.uint8), "")
 
         self.assertEqual(blocks[0].translation, "안녕.")
+
+    def test_unsafe_control_chars_are_removed_before_translation_assignment(self) -> None:
+        engine = self._engine()
+        blocks = [
+            TextBlock(text_bbox=np.array([0, 0, 100, 100]), text="Hello."),
+        ]
+
+        with mock.patch.object(
+            engine,
+            "_request_translation",
+            return_value=_response({"translation": "안\u200b녕\u2066�\ufffc\ue000\t끝"}),
+        ):
+            engine.translate(blocks, np.zeros((1, 1, 3), dtype=np.uint8), "")
+
+        self.assertEqual(blocks[0].translation, "안녕 끝")
+
+    def test_empty_translation_for_nonempty_source_is_rejected(self) -> None:
+        engine = self._engine()
+        blocks = [
+            TextBlock(text_bbox=np.array([0, 0, 100, 100]), text="Hello."),
+        ]
+
+        with mock.patch.object(engine, "_request_translation", return_value=_response({"translation": ""})):
+            with self.assertRaises(GemmaLocalServerResponseError):
+                engine.translate(blocks, np.zeros((1, 1, 3), dtype=np.uint8), "")
 
     def test_contextual_merge_failure_falls_back_to_per_block_json(self) -> None:
         engine = self._engine()

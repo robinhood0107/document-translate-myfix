@@ -1183,10 +1183,17 @@ def _blocks_are_duplicate_bubble_text(
     blk_list: List[TextBlock],
 ) -> bool:
     try:
-        first_key = build_duplicate_bubble_render_key(blk_list[first_index])
-        second_key = build_duplicate_bubble_render_key(blk_list[second_index])
+        first_block = blk_list[first_index]
+        second_block = blk_list[second_index]
     except (IndexError, TypeError):
         return False
+    if not (
+        bool(getattr(first_block, "bubble_panel_text_candidate", False))
+        and bool(getattr(second_block, "bubble_panel_text_candidate", False))
+    ):
+        return False
+    first_key = build_duplicate_bubble_render_key(first_block)
+    second_key = build_duplicate_bubble_render_key(second_block)
     return first_key is not None and first_key == second_key
 
 

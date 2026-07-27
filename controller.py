@@ -2850,3 +2850,7 @@ class ComicTranslate(ComicTranslateUI):
             self.local_ocr_runtime_manager.shutdown()
         except Exception:
             pass
+        try:
+            self.local_translation_runtime_manager.shutdown()
+        except Exception:
+            pass

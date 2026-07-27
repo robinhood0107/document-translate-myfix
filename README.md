@@ -24,6 +24,7 @@ The fork is maintained around a practical desktop workflow:
 ## Supporting Features
 
 - Reuse-only OCR preflight checks avoid restarting already running local OCR containers.
+- Managed local Docker runtimes stop without deleting their containers so later runs can reuse them.
 - Automatic runs update the latest completed translated image preview page by page.
 - Completion sounds support the system alert or repo-provided `music/*.wav` files.
 - Windows launchers bootstrap `.venv-win` and `.venv-win-cuda13` automatically.
@@ -223,6 +224,8 @@ docker compose -f hunyuanocr_docker_files/docker-compose.yaml up -d
 ```
 
 PaddleOCR VL uses the tracked bundle under [paddleocr_vl_docker_files/README.md](paddleocr_vl_docker_files/README.md).
+
+Managed containers are stopped and preserved after stage completion, cancellation, or app shutdown. Use `docker compose down` only when you explicitly want to reset or remove a runtime.
 
 ### 4. Recommended OCR setting
 

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import unittest
 from unittest import mock
 
@@ -11,6 +12,7 @@ from modules.translation.local_runtime import (
 from modules.utils.exceptions import (
     LocalServiceConnectionError,
     LocalServiceResponseError,
+    LocalServiceSetupError,
     OperationCancelledError,
 )
 
@@ -31,24 +33,90 @@ class _DummyGemmaSettingsPage:
 
 
 class LocalGemmaRuntimeManagerTests(unittest.TestCase):
-    def test_model_id_compare_accepts_container_model_paths(self) -> None:
+    def test_shutdown_stops_and_preserves_managed_container(self) -> None:
+        manager = LocalGemmaRuntimeManager()
+        manager._managed_active = True
+        manager._readiness_cache.add(("http://127.0.0.1:18080/v1", "gemma-test.gguf", "managed"))
+
+        with mock.patch.object(manager, "_run_compose") as run_compose:
+            manager.shutdown()
+
+        run_compose.assert_called_once_with(
+            "stop",
+            "--timeout",
+            "10",
+            step_name="stop",
+        )
+        self.assertFalse(manager._managed_active)
+        self.assertFalse(manager._readiness_cache)
+
+    def test_shutdown_clears_managed_state_when_stop_fails(self) -> None:
+        manager = LocalGemmaRuntimeManager()
+        manager._managed_active = True
+        manager._readiness_cache.add(("http://127.0.0.1:18080/v1", "gemma-test.gguf", "managed"))
+        failure = LocalServiceSetupError(
+            "stop failed",
+            service_name="Gemma",
+            settings_page_name="Gemma Local Server Settings",
+        )
+
+        with mock.patch.object(manager, "_run_compose", side_effect=failure), \
+             self.assertLogs("modules.translation.local_runtime", level="WARNING"):
+            manager.shutdown()
+
+        self.assertFalse(manager._managed_active)
+        self.assertFalse(manager._readiness_cache)
+
+    def test_cancelled_startup_can_stop_container_started_by_compose(self) -> None:
+        manager = LocalGemmaRuntimeManager()
+        settings_page = _DummyGemmaSettingsPage(api_url="http://127.0.0.1:18080/v1")
+        cancelled = OperationCancelledError("cancelled during health wait")
+
+        with mock.patch.object(manager, "validate_server"), \
+             mock.patch("modules.translation.local_runtime.Path.is_file", return_value=True), \
+             mock.patch.object(
+                 manager,
+                 "_wait_for_any_probe",
+                 side_effect=[False, cancelled],
+             ), \
+             mock.patch.object(manager, "_run_compose") as run_compose:
+            with self.assertRaises(OperationCancelledError):
+                manager.ensure_server(settings_page)
+            manager.shutdown()
+
         self.assertEqual(
-            _normalize_model_id_for_compare("/models/gemma-4-26B-IQ4_NL.gguf"),
-            "gemma-4-26B-IQ4_NL.gguf",
+            run_compose.call_args_list,
+            [
+                mock.call(
+                    "up",
+                    "-d",
+                    step_name="up",
+                    model_name="gemma-test.gguf",
+                ),
+                mock.call(
+                    "stop",
+                    "--timeout",
+                    "10",
+                    step_name="stop",
+                ),
+            ],
         )
-        self.assertTrue(
-            _model_ids_match(
-                "gemma-4-26B-IQ4_NL.gguf",
-                "/models/gemma-4-26B-IQ4_NL.gguf",
+
+    def test_validate_loaded_model_accepts_model_id_basename_match(self) -> None:
+        manager = LocalGemmaRuntimeManager()
+        payload = {
+            "data": [
+                {"id": "/models/gemma-test.gguf"},
+            ]
+        }
+        response = mock.MagicMock()
+        response.__enter__.return_value.read.return_value = json.dumps(payload).encode("utf-8")
+
+        with mock.patch("modules.translation.local_runtime.urlopen", return_value=response):
+            manager._validate_loaded_model(
+                "http://127.0.0.1:18080/v1",
+                "gemma-test.gguf",
             )
-        )
-        self.assertTrue(
-            _model_ids_match(
-                "/models/gemma-4-26B-IQ4_NL.gguf",
-                "gemma-4-26B-IQ4_NL.gguf",
-            )
-        )
-        self.assertFalse(_model_ids_match("gemma-a.gguf", "/models/gemma-b.gguf"))
 
     def test_ensure_server_reuses_readiness_cache_for_same_endpoint_model(self) -> None:
         manager = LocalGemmaRuntimeManager()
@@ -56,12 +124,14 @@ class LocalGemmaRuntimeManagerTests(unittest.TestCase):
         events: list[dict] = []
 
         with mock.patch.object(manager, "_wait_for_any_probe", return_value=True) as wait_for_probe, \
-             mock.patch.object(manager, "_validate_model_with_progress") as validate_model:
+             mock.patch.object(manager, "_validate_model_with_progress") as validate_model, \
+             mock.patch.object(manager, "_prewarm_chat_completion_with_progress") as prewarm:
             manager.ensure_server(settings_page, progress_callback=events.append)
             manager.ensure_server(settings_page, progress_callback=events.append)
 
         self.assertEqual(wait_for_probe.call_count, 1)
         self.assertEqual(validate_model.call_count, 1)
+        self.assertEqual(prewarm.call_count, 1)
         self.assertTrue(any(event.get("readiness_cache_hit") for event in events))
 
     def test_managed_model_mismatch_recreates_container_and_seeds_readiness_cache(self) -> None:
@@ -72,6 +142,7 @@ class LocalGemmaRuntimeManagerTests(unittest.TestCase):
         with mock.patch("modules.translation.local_runtime.Path.is_file", return_value=True), \
              mock.patch.object(manager, "_wait_for_any_probe", side_effect=[True, True]) as wait_for_probe, \
              mock.patch.object(manager, "_run_compose") as run_compose, \
+             mock.patch.object(manager, "_prewarm_chat_completion_with_progress") as prewarm, \
              mock.patch.object(
                  manager,
                  "_validate_model_with_progress",
@@ -88,6 +159,7 @@ class LocalGemmaRuntimeManagerTests(unittest.TestCase):
             manager.ensure_server(settings_page, progress_callback=events.append)
 
         self.assertEqual(wait_for_probe.call_count, 2)
+        self.assertEqual(prewarm.call_count, 1)
         run_compose.assert_called_once_with(
             "up",
             "-d",
@@ -103,7 +175,8 @@ class LocalGemmaRuntimeManagerTests(unittest.TestCase):
         settings_page = _DummyGemmaSettingsPage()
 
         with mock.patch.object(manager, "_wait_for_any_probe", side_effect=[False, True]) as wait_for_probe, \
-             mock.patch.object(manager, "_validate_model_with_progress"):
+             mock.patch.object(manager, "_validate_model_with_progress"), \
+             mock.patch.object(manager, "_prewarm_chat_completion_with_progress"):
             with self.assertRaises(LocalServiceConnectionError):
                 manager.ensure_server(settings_page)
             manager.ensure_server(settings_page)
@@ -116,12 +189,51 @@ class LocalGemmaRuntimeManagerTests(unittest.TestCase):
         cancel = mock.Mock(side_effect=[True, False])
 
         with mock.patch.object(manager, "_wait_for_any_probe", return_value=True) as wait_for_probe, \
-             mock.patch.object(manager, "_validate_model_with_progress"):
+             mock.patch.object(manager, "_validate_model_with_progress"), \
+             mock.patch.object(manager, "_prewarm_chat_completion_with_progress"):
             with self.assertRaises(OperationCancelledError):
                 manager.ensure_server(settings_page, cancel_checker=cancel)
             manager.ensure_server(settings_page, cancel_checker=cancel)
 
         self.assertEqual(wait_for_probe.call_count, 1)
+
+    def test_validate_loaded_model_accepts_model_id_basename_match(self) -> None:
+        manager = LocalGemmaRuntimeManager()
+
+        class _Response:
+            status = 200
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *_args):
+                return False
+
+            def read(self):
+                return json.dumps(
+                    {"data": [{"id": "/models/gemma-4-26B-IQ4_NL.gguf"}]}
+                ).encode("utf-8")
+
+        with mock.patch("modules.translation.local_runtime.urlopen", return_value=_Response()):
+            manager._validate_loaded_model(
+                "http://127.0.0.1:18080/v1",
+                "gemma-4-26B-IQ4_NL.gguf",
+            )
+
+    def test_managed_runtime_prewarms_chat_completion_after_model_validation(self) -> None:
+        manager = LocalGemmaRuntimeManager()
+        settings_page = _DummyGemmaSettingsPage(api_url="http://127.0.0.1:18080/v1")
+        events: list[dict] = []
+
+        with mock.patch("modules.translation.local_runtime.Path.is_file", return_value=True), \
+             mock.patch.object(manager, "_wait_for_any_probe", return_value=True), \
+             mock.patch.object(manager, "_run_compose"), \
+             mock.patch.object(manager, "_validate_model_with_progress"), \
+             mock.patch.object(manager, "_prewarm_chat_completion") as prewarm:
+            manager.ensure_server(settings_page, progress_callback=events.append)
+
+        prewarm.assert_called_once()
+        self.assertTrue(any(event.get("step_key") == "chat_prewarm" for event in events))
 
 
 if __name__ == "__main__":
