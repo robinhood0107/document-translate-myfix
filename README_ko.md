@@ -24,6 +24,7 @@
 ## 서브 기능
 
 - 이미 실행 중인 로컬 OCR 컨테이너를 재기동하지 않는 reuse-only preflight 검사.
+- 다음 실행에서 재사용할 수 있도록 로컬 Docker 런타임을 삭제하지 않고 중지하는 생명주기.
 - 자동 실행 중 페이지가 끝날 때마다 최신 번역 완료 이미지를 바로 갱신하는 미리보기.
 - 시스템 알림음 또는 저장소 `music/*.wav`를 쓰는 완료 알림음.
 - `.venv-win`, `.venv-win-cuda13`을 자동 bootstrap하는 Windows 런처.
@@ -222,6 +223,8 @@ docker compose -f hunyuanocr_docker_files/docker-compose.yaml up -d
 ```
 
 PaddleOCR VL 런타임 기준 파일은 [paddleocr_vl_docker_files/README.md](paddleocr_vl_docker_files/README.md)에 정리돼 있습니다.
+
+관리 대상 컨테이너는 단계 완료, 취소, 앱 종료 때 삭제되지 않고 중지 상태로 보존됩니다. 런타임을 명시적으로 초기화하거나 제거할 때만 `docker compose down`을 사용합니다.
 
 ### 4. 권장 OCR 설정
 

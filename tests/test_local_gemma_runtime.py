@@ -8,6 +8,7 @@ from modules.translation.local_runtime import LocalGemmaRuntimeManager
 from modules.utils.exceptions import (
     LocalServiceConnectionError,
     LocalServiceResponseError,
+    LocalServiceSetupError,
     OperationCancelledError,
 )
 
@@ -28,6 +29,75 @@ class _DummyGemmaSettingsPage:
 
 
 class LocalGemmaRuntimeManagerTests(unittest.TestCase):
+    def test_shutdown_stops_and_preserves_managed_container(self) -> None:
+        manager = LocalGemmaRuntimeManager()
+        manager._managed_active = True
+        manager._readiness_cache.add(("http://127.0.0.1:18080/v1", "gemma-test.gguf", "managed"))
+
+        with mock.patch.object(manager, "_run_compose") as run_compose:
+            manager.shutdown()
+
+        run_compose.assert_called_once_with(
+            "stop",
+            "--timeout",
+            "10",
+            step_name="stop",
+        )
+        self.assertFalse(manager._managed_active)
+        self.assertFalse(manager._readiness_cache)
+
+    def test_shutdown_clears_managed_state_when_stop_fails(self) -> None:
+        manager = LocalGemmaRuntimeManager()
+        manager._managed_active = True
+        manager._readiness_cache.add(("http://127.0.0.1:18080/v1", "gemma-test.gguf", "managed"))
+        failure = LocalServiceSetupError(
+            "stop failed",
+            service_name="Gemma",
+            settings_page_name="Gemma Local Server Settings",
+        )
+
+        with mock.patch.object(manager, "_run_compose", side_effect=failure), \
+             self.assertLogs("modules.translation.local_runtime", level="WARNING"):
+            manager.shutdown()
+
+        self.assertFalse(manager._managed_active)
+        self.assertFalse(manager._readiness_cache)
+
+    def test_cancelled_startup_can_stop_container_started_by_compose(self) -> None:
+        manager = LocalGemmaRuntimeManager()
+        settings_page = _DummyGemmaSettingsPage(api_url="http://127.0.0.1:18080/v1")
+        cancelled = OperationCancelledError("cancelled during health wait")
+
+        with mock.patch.object(manager, "validate_server"), \
+             mock.patch("modules.translation.local_runtime.Path.is_file", return_value=True), \
+             mock.patch.object(
+                 manager,
+                 "_wait_for_any_probe",
+                 side_effect=[False, cancelled],
+             ), \
+             mock.patch.object(manager, "_run_compose") as run_compose:
+            with self.assertRaises(OperationCancelledError):
+                manager.ensure_server(settings_page)
+            manager.shutdown()
+
+        self.assertEqual(
+            run_compose.call_args_list,
+            [
+                mock.call(
+                    "up",
+                    "-d",
+                    step_name="up",
+                    model_name="gemma-test.gguf",
+                ),
+                mock.call(
+                    "stop",
+                    "--timeout",
+                    "10",
+                    step_name="stop",
+                ),
+            ],
+        )
+
     def test_validate_loaded_model_accepts_model_id_basename_match(self) -> None:
         manager = LocalGemmaRuntimeManager()
         payload = {
