@@ -242,7 +242,12 @@ class StageBatchedProcessor(BatchProcessor):
             executor.shutdown(wait=True, cancel_futures=True)
         self._prewarm_jobs.clear()
 
-    def _shutdown_managed_runtimes(self) -> None:
+    def _shutdown_managed_runtimes(
+        self,
+        *,
+        context: str = "batch cleanup",
+        raise_on_failure: bool = False,
+    ) -> None:
         runtime_managers = (
             (
                 "OCR",
@@ -255,17 +260,46 @@ class StageBatchedProcessor(BatchProcessor):
                 LocalGemmaRuntimeManager,
             ),
         )
+        failures: list[Exception] = []
         for label, runtime_manager, manager_type in runtime_managers:
             if not isinstance(runtime_manager, manager_type):
                 continue
             try:
-                runtime_manager.shutdown()
-            except Exception:
-                logger.warning(
-                    "Failed to stop managed %s runtime during batch cleanup.",
+                self._shutdown_runtime_with_retry(
                     label,
+                    runtime_manager,
+                    context=context,
+                    raise_on_failure=True,
+                )
+            except Exception as exc:
+                failures.append(exc)
+        if raise_on_failure and failures:
+            raise failures[0]
+
+    @staticmethod
+    def _shutdown_runtime_with_retry(
+        label: str,
+        runtime_manager: Any,
+        *,
+        context: str,
+        raise_on_failure: bool,
+    ) -> None:
+        last_error: Exception | None = None
+        for attempt in range(2):
+            try:
+                runtime_manager.shutdown()
+                return
+            except Exception as exc:
+                last_error = exc
+                logger.warning(
+                    "Failed to stop managed %s runtime during %s%s.",
+                    label,
+                    context,
+                    "; retrying once" if attempt == 0 else "",
                     exc_info=True,
                 )
+        if raise_on_failure and last_error is not None:
+            raise last_error
 
     def _start_ocr_prewarm(self, policy: dict[str, Any]) -> None:
         runtime_manager = getattr(self.main_page, "local_ocr_runtime_manager", None)
@@ -765,28 +799,43 @@ class StageBatchedProcessor(BatchProcessor):
                 )
 
         if isinstance(runtime_manager, LocalOCRRuntimeManager):
-            runtime_manager.shutdown()
+            self._shutdown_runtime_with_retry(
+                "OCR",
+                runtime_manager,
+                context="OCR-to-inpaint handoff",
+                raise_on_failure=True,
+            )
         self._raise_if_cancelled()
 
     def _ensure_inpainter(self):
         settings_page = self.main_page.settings_page
         runtime = get_inpainter_runtime(settings_page)
-        inpainter_key = runtime["key"]
-        inpainter_backend = runtime["backend"]
-        if self.inpainting.inpainter_cache is None or self.inpainting.cached_inpainter_key != inpainter_key:
-            device = resolve_device(settings_page.is_gpu_enabled(), backend=inpainter_backend)
-            inpainter_class = inpaint_map[inpainter_key]
-            self.inpainting.inpainter_cache = inpainter_class(
-                device,
-                backend=inpainter_backend,
-                runtime_device=runtime.get("device", device),
-                inpaint_size=runtime.get("inpaint_size"),
-                precision=runtime.get("precision"),
-            )
-            self.inpainting.cached_inpainter_key = inpainter_key
+        self.inpainting._ensure_inpainter()
         return runtime
 
     def _inpaint_all(self, pages: list[StagePageContext]) -> None:
+        active_pages = [
+            ctx for ctx in pages if not ctx.failed_stage and not ctx.no_text_detected
+        ]
+        try:
+            self._inpaint_pages(pages)
+        except BaseException:
+            if active_pages:
+                try:
+                    self._release_inpainter_before_gemma(
+                        pages,
+                        start_gemma=False,
+                        handoff_outcome="aborted",
+                    )
+                except Exception:
+                    logger.warning(
+                        "Failed to release inpainter resources after an aborted inpaint stage.",
+                        exc_info=True,
+                    )
+            raise
+        self._release_inpainter_before_gemma(pages)
+
+    def _inpaint_pages(self, pages: list[StagePageContext]) -> None:
         total_images = len(pages)
         settings_page = self.main_page.settings_page
         export_settings = self._effective_export_settings(settings_page)
@@ -975,14 +1024,19 @@ class StageBatchedProcessor(BatchProcessor):
                     extra={**ctx.page_ocr_metrics, **ctx.page_translation_metrics},
                 )
 
-        self._release_inpainter_before_gemma(pages)
-
-    def _release_inpainter_before_gemma(self, pages: list[StagePageContext]) -> None:
+    def _release_inpainter_before_gemma(
+        self,
+        pages: list[StagePageContext],
+        *,
+        start_gemma: bool = True,
+        handoff_outcome: str = "completed",
+    ) -> None:
         report = self.inpainting.release_inpainter_resources()
         gate = dict(report.get("vram_release_gate") or {})
         self._emit_benchmark_event(
             "inpainter_release",
             handoff_policy="after-release",
+            handoff_outcome=handoff_outcome,
             inpainter_release=report,
             inpainter_gpu_release_expected=bool(report.get("gpu_release_expected")),
             inpainter_vram_release_required=bool(gate.get("required")),
@@ -990,10 +1044,15 @@ class StageBatchedProcessor(BatchProcessor):
             inpainter_vram_release_status=str(gate.get("status") or ""),
             inpainter_vram_release_elapsed_sec=float(gate.get("elapsed_sec", 0.0) or 0.0),
         )
-        if gate.get("required") and not gate.get("observed"):
+        if start_gemma and gate.get("required") and not gate.get("observed"):
             raise RuntimeError(
-                "Gemma startup was blocked because inpainter VRAM release was not observed."
+                QCoreApplication.translate(
+                    "StageBatchedProcessor",
+                    "Gemma could not start because inpainter VRAM release was not confirmed."
+                )
             )
+        if not start_gemma:
+            return
         self._raise_if_cancelled()
         if any(not ctx.failed_stage and not ctx.no_text_detected for ctx in pages):
             self._start_gemma_prewarm()
@@ -1108,7 +1167,12 @@ class StageBatchedProcessor(BatchProcessor):
                 )
 
         if isinstance(runtime_manager, LocalGemmaRuntimeManager):
-            runtime_manager.shutdown()
+            self._shutdown_runtime_with_retry(
+                "Gemma",
+                runtime_manager,
+                context="translation-to-render handoff",
+                raise_on_failure=True,
+            )
         self._raise_if_cancelled()
 
     def _render_page_text_items(
@@ -1593,6 +1657,11 @@ class StageBatchedProcessor(BatchProcessor):
         pages = self._load_page_contexts(image_list)
         policy = self._ensure_stage_policy(pages)
         try:
+            self._raise_if_cancelled()
+            self._shutdown_managed_runtimes(
+                context="batch startup preflight",
+                raise_on_failure=True,
+            )
             self._raise_if_cancelled()
             self._start_ocr_prewarm(policy)
             self._raise_if_cancelled()
