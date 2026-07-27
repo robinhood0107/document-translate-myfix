@@ -80,6 +80,86 @@ class LlamaCppRuntimePolicyTests(unittest.TestCase):
             timeout=5.0,
         )
 
+    def test_docker_command_initial_cancellation_does_not_spawn_client(self) -> None:
+        with mock.patch(
+            "modules.utils.llama_cpp_runtime.subprocess.Popen",
+        ) as popen, self.assertRaises(OperationCancelledError):
+            run_docker_command(
+                ["docker", "version"],
+                cancel_checker=lambda: True,
+            )
+
+        popen.assert_not_called()
+
+    def test_docker_command_timeout_terminates_blocked_client(self) -> None:
+        process = _BlockingProcess()
+
+        with mock.patch(
+            "modules.utils.llama_cpp_runtime.subprocess.Popen",
+            return_value=process,
+        ), mock.patch(
+            "modules.utils.llama_cpp_runtime.os.name",
+            "nt",
+        ), mock.patch(
+            "modules.utils.llama_cpp_runtime.time.monotonic",
+            side_effect=[0.0, 1.0],
+        ), mock.patch(
+            "modules.utils.llama_cpp_runtime.subprocess.run",
+            return_value=subprocess.CompletedProcess([], 0, "", ""),
+        ) as run, self.assertRaisesRegex(
+            RuntimeError,
+            "Docker command timed out",
+        ):
+            run_docker_command(
+                ["docker", "version"],
+                timeout_sec=0.1,
+            )
+
+        self.assertTrue(process.terminated)
+        run.assert_called_once_with(
+            ["taskkill", "/PID", "4242", "/T", "/F"],
+            check=False,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            timeout=5.0,
+        )
+
+    def test_docker_command_check_false_returns_nonzero_result(self) -> None:
+        process = mock.MagicMock()
+        process.returncode = 7
+        process.communicate.return_value = ("docker output", "docker error")
+
+        with mock.patch(
+            "modules.utils.llama_cpp_runtime.subprocess.Popen",
+            return_value=process,
+        ):
+            completed = run_docker_command(
+                ["docker", "version"],
+                check=False,
+            )
+
+        self.assertEqual(completed.returncode, 7)
+        self.assertEqual(completed.stdout, "docker output")
+        self.assertEqual(completed.stderr, "docker error")
+
+    def test_docker_command_check_true_reports_nonzero_result(self) -> None:
+        process = mock.MagicMock()
+        process.returncode = 7
+        process.communicate.return_value = ("docker output", "docker error")
+
+        with mock.patch(
+            "modules.utils.llama_cpp_runtime.subprocess.Popen",
+            return_value=process,
+        ), self.assertRaisesRegex(
+            RuntimeError,
+            "exit=7",
+        ) as raised:
+            run_docker_command(["docker", "version"])
+
+        detail = str(raised.exception)
+        self.assertIn("docker output", detail)
+        self.assertIn("docker error", detail)
+
 
 if __name__ == "__main__":
     unittest.main()
