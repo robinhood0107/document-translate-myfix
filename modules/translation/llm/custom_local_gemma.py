@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import Any
 from textwrap import dedent
 import json
@@ -14,7 +15,7 @@ import requests
 from .base import BaseLLMTranslation
 from ...utils.textblock import TextBlock
 from ...utils.translator_utils import extract_json_object
-from ...utils.exceptions import LocalServiceConnectionError, LocalServiceResponseError
+from ...utils.exceptions import LocalServiceConnectionError
 from ...utils.repetition_guard import guard_severe_repetition
 from ...utils.text_normalization import strip_unsafe_text_control_chars
 
@@ -34,6 +35,9 @@ DEFAULT_GEMMA_RESPONSE_SCHEMA_MODE = "blocks"
 DEFAULT_GEMMA_THINK_BRIEFLY_PROMPT = False
 DEFAULT_GEMMA_PROMPT_PROFILE = "gemma4_balanced"
 DEFAULT_GEMMA_CONTEXTUAL_MERGE_INPUT = True
+GEMMA_REQUEST_MODE_CONTEXTUAL_SINGLE = "contextual-single"
+GEMMA_REQUEST_MODE_CONTEXTUAL_GROUPED = "contextual-grouped"
+DEFAULT_GEMMA_REQUEST_MODE = GEMMA_REQUEST_MODE_CONTEXTUAL_SINGLE
 DEFAULT_GEMMA_REQUEST_RETRY_TOTAL_ATTEMPTS = 3
 DEFAULT_GEMMA_REQUEST_RETRY_BACKOFF_SECONDS = (1.0, 2.0)
 STRICT_GEMMA_PROMPT_PROFILE = "gemma4_strict_json"
@@ -44,20 +48,77 @@ GEMMA_PROMPT_PROFILES = {
 }
 GEMMA_RESPONSE_FORMAT_MODES = {"json_object", "json_schema"}
 GEMMA_RESPONSE_SCHEMA_MODES = {"blocks"}
+GEMMA_REQUEST_MODES = {
+    GEMMA_REQUEST_MODE_CONTEXTUAL_SINGLE,
+    GEMMA_REQUEST_MODE_CONTEXTUAL_GROUPED,
+}
 GEMMA_CHANNEL_TOKEN_RE = re.compile(r"<\|channel\>[^\r\n<]*|<channel\|>")
 GEMMA_TRANSIENT_HTTP_STATUS_CODES = frozenset({500, 502, 503, 504})
+GEMMA_CONTEXT_CAPACITY_RE = re.compile(
+    r"(?:context|prompt|input).{0,80}(?:overflow|exceed|too (?:large|long)|limit|capacity)"
+    r"|(?:too many|maximum).{0,40}tokens"
+    r"|\bn_ctx\b|\bkv cache\b",
+    re.IGNORECASE | re.DOTALL,
+)
+GEMMA_STRUCTURAL_ONLY_RE = re.compile(r"^[\s{}\[\]:,\"']+$")
+
+
+@dataclass(frozen=True)
+class GemmaRequestContext:
+    """Stable source context used across grouped and per-block fallbacks."""
+
+    blocks: tuple[TextBlock, ...]
+    expected_keys: tuple[str, ...]
+    source_values: tuple[str, ...]
+    merged_context: str
+
+
+@dataclass(frozen=True)
+class GemmaParsedResponse:
+    """Validated values plus only the keys that require a focused retry."""
+
+    valid_values: dict[str, str | None]
+    unresolved_keys: tuple[str, ...]
+    unexpected_keys: tuple[str, ...]
+
+
+class _GemmaTrackedDict(dict):
+    """JSON object that preserves duplicate-key evidence from decoding."""
+
+    def __init__(self, pairs: list[tuple[str, Any]]):
+        super().__init__()
+        duplicate_keys: list[str] = []
+        for key, value in pairs:
+            if key in self:
+                duplicate_keys.append(str(key))
+            self[key] = value
+        self.duplicate_keys = tuple(duplicate_keys)
 
 
 class GemmaLocalServerResponseError(RuntimeError):
     """Raised when the local Gemma server returns an unusable translation."""
 
-    def __init__(self, message: str, *, strict_retryable: bool = False):
+    def __init__(
+        self,
+        message: str,
+        *,
+        strict_retryable: bool = False,
+        split_retryable: bool = True,
+    ):
         super().__init__(message)
         self.strict_retryable = strict_retryable
+        self.split_retryable = split_retryable
 
 
 class GemmaLocalServerTruncatedError(GemmaLocalServerResponseError):
     """Raised when the local Gemma server runs out of output budget."""
+
+
+class GemmaLocalServerContextCapacityError(GemmaLocalServerResponseError):
+    """Raised when llama.cpp rejects a request that exceeds its context capacity."""
+
+    def __init__(self, message: str):
+        super().__init__(message, strict_retryable=False, split_retryable=True)
 
 
 class CustomLocalGemmaTranslation(BaseLLMTranslation):
@@ -77,14 +138,16 @@ class CustomLocalGemmaTranslation(BaseLLMTranslation):
         self.think_briefly_prompt = DEFAULT_GEMMA_THINK_BRIEFLY_PROMPT
         self.prompt_profile = DEFAULT_GEMMA_PROMPT_PROFILE
         self.contextual_merge_input = DEFAULT_GEMMA_CONTEXTUAL_MERGE_INPUT
+        self.request_mode = DEFAULT_GEMMA_REQUEST_MODE
         self.request_retry_total_attempts = DEFAULT_GEMMA_REQUEST_RETRY_TOTAL_ATTEMPTS
         self.request_retry_backoff_seconds = DEFAULT_GEMMA_REQUEST_RETRY_BACKOFF_SECONDS
         self.last_benchmark_stats = self._new_benchmark_stats()
         self._current_benchmark_stats = self._new_benchmark_stats()
 
     @staticmethod
-    def _new_benchmark_stats() -> dict[str, int]:
+    def _new_benchmark_stats() -> dict[str, int | float]:
         return {
+            "gemma_telemetry_schema_version": 1,
             "gemma_json_retry_count": 0,
             "gemma_chunk_retry_events": 0,
             "gemma_truncated_count": 0,
@@ -95,6 +158,41 @@ class CustomLocalGemmaTranslation(BaseLLMTranslation):
             "gemma_schema_validation_fail_count": 0,
             "gemma_repetition_guard_count": 0,
             "gemma_contextual_merge_fallback_count": 0,
+            "gemma_configured_group_size": 0,
+            "gemma_max_requested_group_size": 0,
+            "gemma_logical_request_count": 0,
+            "gemma_http_attempt_count": 0,
+            "gemma_http_retry_count": 0,
+            "gemma_request_wall_ms": 0.0,
+            "gemma_prompt_tokens": 0,
+            "gemma_completion_tokens": 0,
+            "gemma_total_tokens": 0,
+            "gemma_cached_prompt_tokens": 0,
+            "gemma_prompt_eval_ms": 0.0,
+            "gemma_decode_ms": 0.0,
+            "gemma_contextual_grouped_request_count": 0,
+            "gemma_contextual_grouped_wall_ms": 0.0,
+            "gemma_contextual_single_request_count": 0,
+            "gemma_contextual_single_wall_ms": 0.0,
+            "gemma_isolated_single_request_count": 0,
+            "gemma_isolated_single_wall_ms": 0.0,
+            "gemma_direct_grouped_request_count": 0,
+            "gemma_direct_grouped_wall_ms": 0.0,
+            "gemma_strict_grouped_retry_count": 0,
+            "gemma_strict_single_retry_count": 0,
+            "gemma_partial_response_count": 0,
+            "gemma_partial_fallback_block_count": 0,
+            "gemma_split_count": 0,
+            "gemma_context_capacity_split_count": 0,
+            "gemma_parser_error_count": 0,
+            "gemma_duplicate_key_count": 0,
+            "gemma_trailing_content_count": 0,
+            "gemma_top_level_type_error_count": 0,
+            "gemma_nested_value_count": 0,
+            "gemma_invalid_value_count": 0,
+            "gemma_unexpected_key_count": 0,
+            "gemma_channel_token_sanitized_count": 0,
+            "gemma_unsafe_control_sanitized_count": 0,
         }
 
     @staticmethod
@@ -160,6 +258,13 @@ class CustomLocalGemmaTranslation(BaseLLMTranslation):
         if normalized in GEMMA_RESPONSE_SCHEMA_MODES:
             return normalized
         return DEFAULT_GEMMA_RESPONSE_SCHEMA_MODE
+
+    @staticmethod
+    def _normalize_request_mode(raw_value: str) -> str:
+        normalized = (raw_value or "").strip().lower()
+        if normalized in GEMMA_REQUEST_MODES:
+            return normalized
+        return DEFAULT_GEMMA_REQUEST_MODE
 
     def initialize(
         self,
@@ -250,6 +355,14 @@ class CustomLocalGemmaTranslation(BaseLLMTranslation):
             "CT_GEMMA_THINK_BRIEFLY_PROMPT",
             DEFAULT_GEMMA_THINK_BRIEFLY_PROMPT,
         )
+        self.request_mode = self._normalize_request_mode(
+            self._env_or_config_str(
+                gemma_settings,
+                "request_mode",
+                "CT_GEMMA_REQUEST_MODE",
+                DEFAULT_GEMMA_REQUEST_MODE,
+            )
+        )
         self.contextual_merge_input = DEFAULT_GEMMA_CONTEXTUAL_MERGE_INPUT
         self.img_as_llm_input = False
         self.last_benchmark_stats = self._new_benchmark_stats()
@@ -266,6 +379,9 @@ class CustomLocalGemmaTranslation(BaseLLMTranslation):
 
         working_blocks = [blk.deep_copy() for blk in blk_list]
         self._current_benchmark_stats = self._new_benchmark_stats()
+        self._current_benchmark_stats["gemma_configured_group_size"] = int(
+            self.chunk_size
+        )
 
         try:
             for start in range(0, len(working_blocks), self.chunk_size):
@@ -295,6 +411,14 @@ class CustomLocalGemmaTranslation(BaseLLMTranslation):
         blk_list: list[TextBlock],
         extra_context: str,
     ) -> int:
+        if self.request_mode == GEMMA_REQUEST_MODE_CONTEXTUAL_GROUPED:
+            request_context = self._create_request_context(blk_list)
+            return self._translate_contextual_grouped_context(
+                request_context,
+                extra_context,
+                prompt_profile=self.prompt_profile,
+            )
+
         def _translate_with_profile(prompt_profile: str) -> int:
             if self.contextual_merge_input:
                 return self._translate_contextual_single_blocks(
@@ -356,6 +480,253 @@ class CustomLocalGemmaTranslation(BaseLLMTranslation):
             right = self._translate_chunk_with_retry(blk_list[split_point:], extra_context)
             return left + right
 
+    def _create_request_context(self, blk_list: list[TextBlock]) -> GemmaRequestContext:
+        expected_keys = tuple(self._expected_block_keys(blk_list))
+        _, normalized_json = self._build_translation_input_payloads(blk_list)
+        normalized_payload = extract_json_object(normalized_json)
+        source_values = tuple(str(normalized_payload.get(key, "") or "") for key in expected_keys)
+        merged_context = "\n".join(
+            f"[[{key}]] {source_value}"
+            for key, source_value in zip(expected_keys, source_values)
+        )
+        return GemmaRequestContext(
+            blocks=tuple(blk_list),
+            expected_keys=expected_keys,
+            source_values=source_values,
+            merged_context=merged_context,
+        )
+
+    def _translate_contextual_grouped_context(
+        self,
+        request_context: GemmaRequestContext,
+        extra_context: str,
+        *,
+        prompt_profile: str,
+    ) -> int:
+        try:
+            parsed = self._request_contextual_grouped(
+                request_context,
+                extra_context,
+                prompt_profile=prompt_profile,
+            )
+        except GemmaLocalServerContextCapacityError as exc:
+            self._current_benchmark_stats["gemma_context_capacity_split_count"] += 1
+            return self._split_grouped_context(
+                request_context,
+                extra_context,
+                reason=exc,
+            )
+        except GemmaLocalServerResponseError as exc:
+            if exc.strict_retryable and prompt_profile != STRICT_GEMMA_PROMPT_PROFILE:
+                self._current_benchmark_stats["gemma_strict_grouped_retry_count"] += 1
+                logger.warning(
+                    "gemma contextual grouped response failed for %d block(s); "
+                    "retrying once with prompt_profile=%s. reason=%s",
+                    len(request_context.blocks),
+                    STRICT_GEMMA_PROMPT_PROFILE,
+                    exc,
+                )
+                try:
+                    parsed = self._request_contextual_grouped(
+                        request_context,
+                        extra_context,
+                        prompt_profile=STRICT_GEMMA_PROMPT_PROFILE,
+                    )
+                except GemmaLocalServerContextCapacityError as strict_exc:
+                    self._current_benchmark_stats["gemma_context_capacity_split_count"] += 1
+                    return self._split_grouped_context(
+                        request_context,
+                        extra_context,
+                        reason=strict_exc,
+                    )
+                except GemmaLocalServerResponseError as strict_exc:
+                    exc = strict_exc
+                else:
+                    return self._apply_grouped_result_with_partial_fallback(
+                        request_context,
+                        parsed,
+                        extra_context,
+                        prompt_profile=prompt_profile,
+                    )
+
+            if not exc.split_retryable:
+                raise
+            return self._split_grouped_context(
+                request_context,
+                extra_context,
+                reason=exc,
+            )
+
+        return self._apply_grouped_result_with_partial_fallback(
+            request_context,
+            parsed,
+            extra_context,
+            prompt_profile=prompt_profile,
+        )
+
+    def _request_contextual_grouped(
+        self,
+        request_context: GemmaRequestContext,
+        extra_context: str,
+        *,
+        prompt_profile: str,
+    ) -> GemmaParsedResponse:
+        self._current_benchmark_stats["gemma_max_requested_group_size"] = max(
+            int(self._current_benchmark_stats["gemma_max_requested_group_size"]),
+            len(request_context.blocks),
+        )
+        system_prompt = self._build_system_prompt(extra_context, prompt_profile=prompt_profile)
+        user_prompt = json.dumps(
+            {"merged_context": request_context.merged_context},
+            ensure_ascii=False,
+            indent=4,
+        )
+        expected_keys = list(request_context.expected_keys)
+        response_data = self._request_translation(
+            system_prompt,
+            user_prompt,
+            expected_keys=expected_keys,
+            request_mode=GEMMA_REQUEST_MODE_CONTEXTUAL_GROUPED,
+        )
+        return self._extract_partial_translation_result(
+            response_data,
+            expected_keys=expected_keys,
+            source_values=dict(zip(request_context.expected_keys, request_context.source_values)),
+            block_count=len(request_context.blocks),
+            prompt_profile=prompt_profile,
+        )
+
+    def _apply_grouped_result_with_partial_fallback(
+        self,
+        request_context: GemmaRequestContext,
+        parsed: GemmaParsedResponse,
+        extra_context: str,
+        *,
+        prompt_profile: str,
+    ) -> int:
+        key_to_index = {
+            key: index
+            for index, key in enumerate(request_context.expected_keys)
+        }
+        for key, translated in parsed.valid_values.items():
+            index = key_to_index[key]
+            self._apply_translation_value(request_context.blocks[index], index, translated)
+
+        if parsed.unresolved_keys:
+            self._current_benchmark_stats["gemma_partial_response_count"] += 1
+            self._current_benchmark_stats["gemma_partial_fallback_block_count"] += len(
+                parsed.unresolved_keys
+            )
+            logger.warning(
+                "gemma contextual grouped response requires contextual-single fallback: "
+                "blocks=%d unresolved=%s",
+                len(request_context.blocks),
+                ", ".join(parsed.unresolved_keys),
+            )
+            for key in parsed.unresolved_keys:
+                self._translate_contextual_single_target(
+                    request_context,
+                    key_to_index[key],
+                    extra_context,
+                    prompt_profile=prompt_profile,
+                )
+
+        return len(request_context.blocks)
+
+    def _translate_contextual_single_target(
+        self,
+        request_context: GemmaRequestContext,
+        target_index: int,
+        extra_context: str,
+        *,
+        prompt_profile: str,
+    ) -> None:
+        profiles = [prompt_profile]
+        if prompt_profile != STRICT_GEMMA_PROMPT_PROFILE:
+            profiles.append(STRICT_GEMMA_PROMPT_PROFILE)
+
+        last_error: GemmaLocalServerResponseError | None = None
+        for profile_index, profile in enumerate(profiles):
+            if profile_index:
+                self._current_benchmark_stats["gemma_strict_single_retry_count"] += 1
+            system_prompt = self._build_system_prompt(extra_context, prompt_profile=profile)
+            user_prompt = self._build_contextual_single_request_prompt(
+                request_context,
+                target_index,
+            )
+            try:
+                response_data = self._request_translation(
+                    system_prompt,
+                    user_prompt,
+                    expected_keys=["translation"],
+                    request_mode=GEMMA_REQUEST_MODE_CONTEXTUAL_SINGLE,
+                )
+                translation_dict = self._extract_translation_dict(
+                    response_data,
+                    expected_keys=["translation"],
+                    source_values={
+                        "translation": request_context.source_values[target_index],
+                    },
+                    block_count=1,
+                    prompt_profile=profile,
+                )
+                self._apply_translation_value(
+                    request_context.blocks[target_index],
+                    target_index,
+                    translation_dict["translation"],
+                )
+                return
+            except GemmaLocalServerResponseError as exc:
+                last_error = exc
+                if not exc.strict_retryable or profile == STRICT_GEMMA_PROMPT_PROFILE:
+                    break
+
+        if last_error is not None:
+            raise last_error
+        raise GemmaLocalServerResponseError(
+            f"Gemma contextual-single fallback failed for block_{target_index}.",
+            strict_retryable=False,
+        )
+
+    def _split_grouped_context(
+        self,
+        request_context: GemmaRequestContext,
+        extra_context: str,
+        *,
+        reason: Exception,
+    ) -> int:
+        if len(request_context.blocks) <= 1:
+            raise reason
+
+        split_point = max(1, len(request_context.blocks) // 2)
+        self._current_benchmark_stats["gemma_chunk_retry_events"] += 1
+        self._current_benchmark_stats["gemma_split_count"] += 1
+        logger.warning(
+            "gemma contextual grouped request failed for %d block(s); splitting into "
+            "%d and %d block(s). reason=%s",
+            len(request_context.blocks),
+            split_point,
+            len(request_context.blocks) - split_point,
+            reason,
+        )
+        left_context = self._create_request_context(
+            list(request_context.blocks[:split_point])
+        )
+        right_context = self._create_request_context(
+            list(request_context.blocks[split_point:])
+        )
+        left = self._translate_contextual_grouped_context(
+            left_context,
+            extra_context,
+            prompt_profile=self.prompt_profile,
+        )
+        right = self._translate_contextual_grouped_context(
+            right_context,
+            extra_context,
+            prompt_profile=self.prompt_profile,
+        )
+        return left + right
+
     def _translate_contextual_single_blocks(
         self,
         blk_list: list[TextBlock],
@@ -363,18 +734,28 @@ class CustomLocalGemmaTranslation(BaseLLMTranslation):
         *,
         prompt_profile: str,
     ) -> int:
+        request_context = self._create_request_context(blk_list)
         system_prompt = self._build_system_prompt(extra_context, prompt_profile=prompt_profile)
         updated_count = 0
         for index, blk in enumerate(blk_list):
-            user_prompt = self._build_contextual_single_block_user_prompt(blk_list, index)
+            user_prompt = self._build_contextual_single_request_prompt(
+                request_context,
+                index,
+            )
+            if prompt_profile == STRICT_GEMMA_PROMPT_PROFILE:
+                self._current_benchmark_stats["gemma_strict_single_retry_count"] += 1
             response_data = self._request_translation(
                 system_prompt,
                 user_prompt,
                 expected_keys=["translation"],
+                request_mode=GEMMA_REQUEST_MODE_CONTEXTUAL_SINGLE,
             )
             translation_dict = self._extract_translation_dict(
                 response_data,
                 expected_keys=["translation"],
+                source_values={
+                    "translation": request_context.source_values[index],
+                },
                 block_count=1,
                 prompt_profile=prompt_profile,
             )
@@ -410,13 +791,33 @@ class CustomLocalGemmaTranslation(BaseLLMTranslation):
         system_prompt = self._build_system_prompt(extra_context, prompt_profile=prompt_profile)
         expected_keys = self._expected_block_keys(blk_list)
         if use_contextual_merge:
-            user_prompt = self._build_contextual_merged_user_prompt(blk_list, expected_keys)
+            request_context = self._create_request_context(blk_list)
+            user_prompt = json.dumps(
+                {"merged_context": request_context.merged_context},
+                ensure_ascii=False,
+                indent=4,
+            )
+            request_mode = GEMMA_REQUEST_MODE_CONTEXTUAL_GROUPED
+            source_payload = dict(
+                zip(expected_keys, request_context.source_values)
+            )
         else:
             _, user_prompt = self._build_translation_input_payloads(blk_list)
-        response_data = self._request_translation(system_prompt, user_prompt, expected_keys=expected_keys)
+            request_mode = "isolated-single" if len(blk_list) == 1 else "direct-grouped"
+            source_payload = extract_json_object(user_prompt)
+        response_data = self._request_translation(
+            system_prompt,
+            user_prompt,
+            expected_keys=expected_keys,
+            request_mode=request_mode,
+        )
         translation_dict = self._extract_translation_dict(
             response_data,
             expected_keys=expected_keys,
+            source_values={
+                key: str(source_payload.get(key, "") or "")
+                for key in expected_keys
+            },
             block_count=len(blk_list),
             prompt_profile=prompt_profile,
         )
@@ -431,14 +832,47 @@ class CustomLocalGemmaTranslation(BaseLLMTranslation):
         response_data: dict,
         *,
         expected_keys: list[str],
+        source_values: dict[str, str] | None = None,
         block_count: int,
         prompt_profile: str,
     ) -> dict[str, Any]:
-        choice = (response_data.get("choices") or [{}])[0]
-        message = choice.get("message") or {}
-        finish_reason = choice.get("finish_reason")
-        content = message.get("content") or ""
-        reasoning_content = message.get("reasoning_content") or ""
+        parsed = self._extract_partial_translation_result(
+            response_data,
+            expected_keys=expected_keys,
+            source_values=source_values or {},
+            block_count=block_count,
+            prompt_profile=prompt_profile,
+        )
+        if parsed.unresolved_keys or parsed.unexpected_keys:
+            reasons: list[str] = []
+            if parsed.unresolved_keys:
+                reasons.append(
+                    "unresolved expected block keys: "
+                    + ", ".join(parsed.unresolved_keys)
+                )
+            if parsed.unexpected_keys:
+                reasons.append(
+                    "unexpected block keys: "
+                    + ", ".join(parsed.unexpected_keys)
+                )
+            raise GemmaLocalServerResponseError(
+                "Gemma local server JSON response was invalid: " + "; ".join(reasons),
+                strict_retryable=True,
+            )
+        return dict(parsed.valid_values)
+
+    def _extract_partial_translation_result(
+        self,
+        response_data: dict,
+        *,
+        expected_keys: list[str],
+        source_values: dict[str, str],
+        block_count: int,
+        prompt_profile: str,
+    ) -> GemmaParsedResponse:
+        finish_reason, content, reasoning_content = self._extract_response_content(
+            response_data
+        )
 
         usage = response_data.get("usage") or {}
         logger.info(
@@ -479,40 +913,184 @@ class CustomLocalGemmaTranslation(BaseLLMTranslation):
                 strict_retryable=True,
             )
 
-        try:
-            translation_dict = extract_json_object(self._strip_channel_tokens(content))
-        except Exception as exc:
+        translation_dict = self._decode_exact_json_object(content)
+        duplicate_keys = set(translation_dict.duplicate_keys)
+        if duplicate_keys:
+            self._current_benchmark_stats["gemma_duplicate_key_count"] += len(duplicate_keys)
+
+        missing_keys = [key for key in expected_keys if key not in translation_dict]
+        unexpected_keys = [str(key) for key in translation_dict if key not in expected_keys]
+        unresolved_keys: list[str] = []
+        valid_values: dict[str, str | None] = {}
+
+        for key in expected_keys:
+            if key in duplicate_keys or key not in translation_dict:
+                unresolved_keys.append(key)
+                continue
+            valid, translated = self._validate_translation_candidate(
+                translation_dict[key],
+                source_values.get(key, ""),
+            )
+            if valid:
+                valid_values[key] = translated
+            else:
+                unresolved_keys.append(key)
+
+        if missing_keys:
+            self._current_benchmark_stats["gemma_missing_key_count"] += len(missing_keys)
+        if unexpected_keys:
+            self._current_benchmark_stats["gemma_unexpected_key_count"] += len(
+                unexpected_keys
+            )
+        if unresolved_keys or unexpected_keys or duplicate_keys:
             self._current_benchmark_stats["gemma_json_retry_count"] += 1
+            if self.response_format_mode == "json_schema":
+                self._current_benchmark_stats["gemma_schema_validation_fail_count"] += 1
+
+        return GemmaParsedResponse(
+            valid_values=valid_values,
+            unresolved_keys=tuple(unresolved_keys),
+            unexpected_keys=tuple(unexpected_keys),
+        )
+
+    def _extract_response_content(
+        self,
+        response_data: dict[str, Any],
+    ) -> tuple[Any, str, str]:
+        choices = response_data.get("choices")
+        if not isinstance(choices, list) or not choices or not isinstance(choices[0], dict):
+            self._current_benchmark_stats["gemma_parser_error_count"] += 1
             raise GemmaLocalServerResponseError(
-                "Gemma local server did not return a valid JSON object in message.content.",
+                "Gemma local server response did not contain a valid choices array.",
+                strict_retryable=True,
+            )
+        choice = choices[0]
+        message = choice.get("message")
+        if not isinstance(message, dict):
+            self._current_benchmark_stats["gemma_parser_error_count"] += 1
+            raise GemmaLocalServerResponseError(
+                "Gemma local server response did not contain a valid message object.",
+                strict_retryable=True,
+            )
+        content = message.get("content")
+        reasoning_content = message.get("reasoning_content")
+        if content is not None and not isinstance(content, str):
+            self._current_benchmark_stats["gemma_parser_error_count"] += 1
+            raise GemmaLocalServerResponseError(
+                "Gemma local server message.content must be a string.",
+                strict_retryable=True,
+            )
+        if reasoning_content is not None and not isinstance(reasoning_content, str):
+            reasoning_content = str(reasoning_content)
+        return (
+            choice.get("finish_reason"),
+            content or "",
+            reasoning_content or "",
+        )
+
+    def _decode_exact_json_object(self, content: str) -> _GemmaTrackedDict:
+        cleaned_content = self._strip_channel_tokens(content)
+        if cleaned_content != str(content or "").strip():
+            self._current_benchmark_stats["gemma_channel_token_sanitized_count"] += 1
+
+        decoder = json.JSONDecoder(object_pairs_hook=_GemmaTrackedDict)
+        try:
+            decoded, end_index = decoder.raw_decode(cleaned_content)
+        except (TypeError, ValueError, json.JSONDecodeError) as exc:
+            self._current_benchmark_stats["gemma_json_retry_count"] += 1
+            self._current_benchmark_stats["gemma_parser_error_count"] += 1
+            raise GemmaLocalServerResponseError(
+                "Gemma local server did not return one valid JSON object in message.content.",
                 strict_retryable=True,
             ) from exc
 
-        missing_keys = [key for key in expected_keys if key not in translation_dict]
-        unexpected_keys = [key for key in translation_dict if key not in expected_keys]
-        if missing_keys or unexpected_keys:
+        if cleaned_content[end_index:].strip():
             self._current_benchmark_stats["gemma_json_retry_count"] += 1
-            if missing_keys:
-                self._current_benchmark_stats["gemma_missing_key_count"] += len(missing_keys)
-            if self.response_format_mode == "json_schema":
-                self._current_benchmark_stats["gemma_schema_validation_fail_count"] += 1
-            reasons: list[str] = []
-            if missing_keys:
-                reasons.append("missing expected block keys: " + ", ".join(missing_keys))
-            if unexpected_keys:
-                reasons.append("unexpected block keys: " + ", ".join(unexpected_keys))
+            self._current_benchmark_stats["gemma_parser_error_count"] += 1
+            self._current_benchmark_stats["gemma_trailing_content_count"] += 1
             raise GemmaLocalServerResponseError(
-                "Gemma local server JSON response was invalid: " + "; ".join(reasons),
+                "Gemma local server returned trailing content after the JSON object.",
                 strict_retryable=True,
             )
 
-        return translation_dict
+        if not isinstance(decoded, _GemmaTrackedDict):
+            self._current_benchmark_stats["gemma_json_retry_count"] += 1
+            self._current_benchmark_stats["gemma_parser_error_count"] += 1
+            self._current_benchmark_stats["gemma_top_level_type_error_count"] += 1
+            raise GemmaLocalServerResponseError(
+                "Gemma local server response must be one top-level JSON object.",
+                strict_retryable=True,
+            )
+        return decoded
+
+    def _validate_translation_candidate(
+        self,
+        value: Any,
+        source_text: str,
+    ) -> tuple[bool, str | None]:
+        if value is None:
+            if str(source_text or "").strip():
+                self._current_benchmark_stats["gemma_invalid_value_count"] += 1
+                return False, None
+            return True, None
+        if not isinstance(value, str):
+            if isinstance(value, (dict, list)):
+                self._current_benchmark_stats["gemma_nested_value_count"] += 1
+            else:
+                self._current_benchmark_stats["gemma_invalid_value_count"] += 1
+            return False, None
+
+        translated = self._strip_channel_tokens(value)
+        if translated != value.strip():
+            self._current_benchmark_stats["gemma_channel_token_sanitized_count"] += 1
+        safe_translated = strip_unsafe_text_control_chars(translated)
+        if safe_translated != translated:
+            self._current_benchmark_stats["gemma_unsafe_control_sanitized_count"] += 1
+        translated = safe_translated
+
+        source_clean = str(source_text or "").strip()
+        translated_clean = translated.strip()
+        if source_clean and not translated_clean:
+            self._current_benchmark_stats["gemma_invalid_value_count"] += 1
+            return False, None
+        if self._is_unexpected_nested_json(translated_clean, source_clean):
+            self._current_benchmark_stats["gemma_nested_value_count"] += 1
+            return False, None
+        if (
+            translated_clean
+            and GEMMA_STRUCTURAL_ONLY_RE.fullmatch(translated_clean)
+            and translated_clean != source_clean
+        ):
+            self._current_benchmark_stats["gemma_invalid_value_count"] += 1
+            return False, None
+        return True, translated
+
+    @staticmethod
+    def _is_unexpected_nested_json(translated: str, source_text: str) -> bool:
+        if not translated or translated == source_text:
+            return False
+        if translated[0] not in "[{":
+            return False
+        try:
+            decoded = json.loads(translated)
+        except (TypeError, ValueError, json.JSONDecodeError):
+            return False
+        return isinstance(decoded, (dict, list))
 
     def _apply_translation_value(self, blk: TextBlock, index: int, value: Any) -> None:
-        translated = value if isinstance(value, str) or value is None else str(value)
+        if not isinstance(value, str) and value is not None:
+            raise GemmaLocalServerResponseError(
+                f"Gemma local server returned a non-string translation for block_{index}.",
+                strict_retryable=True,
+            )
+        translated = value
         if isinstance(translated, str):
-            translated = self._strip_channel_tokens(translated)
-            translated = strip_unsafe_text_control_chars(translated)
+            stripped = self._strip_channel_tokens(translated)
+            if stripped != translated.strip():
+                self._current_benchmark_stats["gemma_channel_token_sanitized_count"] += 1
+            translated = strip_unsafe_text_control_chars(stripped)
+            if translated != stripped:
+                self._current_benchmark_stats["gemma_unsafe_control_sanitized_count"] += 1
         source_text = str(getattr(blk, "text", "") or "").strip()
         if source_text and not str(translated or "").strip():
             raise GemmaLocalServerResponseError(
@@ -548,14 +1126,9 @@ class CustomLocalGemmaTranslation(BaseLLMTranslation):
         blk_list: list[TextBlock],
         expected_keys: list[str],
     ) -> str:
-        _, normalized_json = self._build_translation_input_payloads(blk_list)
-        normalized_payload = extract_json_object(normalized_json)
-        merged_lines = [
-            f"[[{key}]] {normalized_payload.get(key, '')}"
-            for key in expected_keys
-        ]
+        request_context = self._create_request_context(blk_list)
         return json.dumps(
-            {"merged_context": "\n".join(merged_lines)},
+            {"merged_context": request_context.merged_context},
             ensure_ascii=False,
             indent=4,
         )
@@ -565,19 +1138,23 @@ class CustomLocalGemmaTranslation(BaseLLMTranslation):
         blk_list: list[TextBlock],
         target_index: int,
     ) -> str:
-        expected_keys = self._expected_block_keys(blk_list)
-        _, normalized_json = self._build_translation_input_payloads(blk_list)
-        normalized_payload = extract_json_object(normalized_json)
-        merged_lines = [
-            f"[[{key}]] {normalized_payload.get(key, '')}"
-            for key in expected_keys
-        ]
-        target_key = f"block_{target_index}"
+        request_context = self._create_request_context(blk_list)
+        return self._build_contextual_single_request_prompt(
+            request_context,
+            target_index,
+        )
+
+    @staticmethod
+    def _build_contextual_single_request_prompt(
+        request_context: GemmaRequestContext,
+        target_index: int,
+    ) -> str:
+        target_key = request_context.expected_keys[target_index]
         return json.dumps(
             {
-                "merged_context": "\n".join(merged_lines),
+                "merged_context": request_context.merged_context,
                 "target_block": target_key,
-                "target_text": normalized_payload.get(target_key, ""),
+                "target_text": request_context.source_values[target_index],
             },
             ensure_ascii=False,
             indent=4,
@@ -655,6 +1232,7 @@ class CustomLocalGemmaTranslation(BaseLLMTranslation):
         user_prompt: str,
         *,
         expected_keys: list[str] | None = None,
+        request_mode: str = "",
     ) -> dict:
         payload = {
             "model": self.model,
@@ -676,49 +1254,141 @@ class CustomLocalGemmaTranslation(BaseLLMTranslation):
             "response_format": self._build_response_format(user_prompt, expected_keys=expected_keys),
         }
         headers = {"Content-Type": "application/json"}
-
-        for attempt_index in range(max(1, int(self.request_retry_total_attempts))):
-            try:
-                response = requests.post(
-                    f"{self.api_base_url}/chat/completions",
-                    headers=headers,
-                    json=payload,
-                    timeout=self.timeout,
-                )
-                response.raise_for_status()
-                break
-            except requests.exceptions.RequestException as exc:
-                if self._is_transient_request_error(exc) and self._should_retry_request(attempt_index):
-                    self._current_benchmark_stats["gemma_request_retry_count"] += 1
-                    self._sleep_before_request_retry(attempt_index, exc)
-                    continue
-                error_msg = f"API request failed: {exc}"
-                if getattr(exc, "response", None) is not None:
-                    try:
-                        error_msg += f" - {json.dumps(exc.response.json(), ensure_ascii=False)}"
-                    except Exception:
-                        error_msg += f" - Status code: {exc.response.status_code}"
-                raise LocalServiceConnectionError(
-                    error_msg,
-                    service_name="Gemma",
-                    settings_page_name="Gemma Local Server Settings",
-                ) from exc
+        mode_stat_prefix = self._request_mode_stat_prefix(request_mode)
+        self._current_benchmark_stats["gemma_logical_request_count"] += 1
+        if mode_stat_prefix:
+            self._current_benchmark_stats[f"{mode_stat_prefix}_request_count"] += 1
+        logical_started = time.perf_counter()
 
         try:
-            response_data = response.json()
-        except ValueError as exc:
-            raise LocalServiceResponseError(
-                "Gemma local server returned invalid JSON.",
-                service_name="Gemma",
-                settings_page_name="Gemma Local Server Settings",
-            ) from exc
-        if self.raw_response_logging:
-            logger.info(
-                "translation raw response json (%s): %s",
-                self.translation_mode_label,
-                json.dumps(response_data, ensure_ascii=False),
+            for attempt_index in range(max(1, int(self.request_retry_total_attempts))):
+                self._current_benchmark_stats["gemma_http_attempt_count"] += 1
+                try:
+                    response = requests.post(
+                        f"{self.api_base_url}/chat/completions",
+                        headers=headers,
+                        json=payload,
+                        timeout=self.timeout,
+                    )
+                    if self._is_context_capacity_response(response):
+                        raise GemmaLocalServerContextCapacityError(
+                            "Gemma local server rejected the request because it exceeded "
+                            "the available context capacity."
+                        )
+                    response.raise_for_status()
+                except GemmaLocalServerContextCapacityError:
+                    raise
+                except requests.exceptions.RequestException as exc:
+                    if self._is_transient_request_error(exc) and self._should_retry_request(
+                        attempt_index
+                    ):
+                        self._current_benchmark_stats["gemma_request_retry_count"] += 1
+                        self._current_benchmark_stats["gemma_http_retry_count"] += 1
+                        self._sleep_before_request_retry(attempt_index, exc)
+                        continue
+                    error_msg = f"API request failed: {exc}"
+                    if getattr(exc, "response", None) is not None:
+                        try:
+                            error_msg += (
+                                " - "
+                                + json.dumps(exc.response.json(), ensure_ascii=False)
+                            )
+                        except Exception:
+                            error_msg += f" - Status code: {exc.response.status_code}"
+                    raise LocalServiceConnectionError(
+                        error_msg,
+                        service_name="Gemma",
+                        settings_page_name="Gemma Local Server Settings",
+                    ) from exc
+
+                try:
+                    response_data = response.json()
+                except ValueError as exc:
+                    raise GemmaLocalServerResponseError(
+                        "Gemma local server returned an invalid HTTP response JSON envelope.",
+                        strict_retryable=True,
+                    ) from exc
+                if not isinstance(response_data, dict):
+                    raise GemmaLocalServerResponseError(
+                        "Gemma local server returned a non-object HTTP response JSON envelope.",
+                        strict_retryable=True,
+                    )
+                self._record_response_telemetry(response_data)
+                if self.raw_response_logging:
+                    logger.info(
+                        "translation raw response json (%s): %s",
+                        self.translation_mode_label,
+                        json.dumps(response_data, ensure_ascii=False),
+                    )
+                return response_data
+
+            raise AssertionError("Gemma request retry loop ended without a response.")
+        finally:
+            elapsed_ms = (time.perf_counter() - logical_started) * 1000.0
+            self._current_benchmark_stats["gemma_request_wall_ms"] += elapsed_ms
+            if mode_stat_prefix:
+                self._current_benchmark_stats[f"{mode_stat_prefix}_wall_ms"] += elapsed_ms
+
+    @staticmethod
+    def _request_mode_stat_prefix(request_mode: str) -> str:
+        return {
+            GEMMA_REQUEST_MODE_CONTEXTUAL_GROUPED: "gemma_contextual_grouped",
+            GEMMA_REQUEST_MODE_CONTEXTUAL_SINGLE: "gemma_contextual_single",
+            "isolated-single": "gemma_isolated_single",
+            "direct-grouped": "gemma_direct_grouped",
+        }.get(str(request_mode or "").strip().lower(), "")
+
+    def _record_response_telemetry(self, response_data: dict[str, Any]) -> None:
+        usage = response_data.get("usage")
+        if not isinstance(usage, dict):
+            usage = {}
+        self._add_numeric_stat("gemma_prompt_tokens", usage.get("prompt_tokens"))
+        self._add_numeric_stat(
+            "gemma_completion_tokens",
+            usage.get("completion_tokens"),
+        )
+        self._add_numeric_stat("gemma_total_tokens", usage.get("total_tokens"))
+
+        prompt_details = usage.get("prompt_tokens_details")
+        if isinstance(prompt_details, dict):
+            self._add_numeric_stat(
+                "gemma_cached_prompt_tokens",
+                prompt_details.get("cached_tokens"),
             )
-        return response_data
+
+        timings = response_data.get("timings")
+        if isinstance(timings, dict):
+            self._add_numeric_stat("gemma_prompt_eval_ms", timings.get("prompt_ms"))
+            self._add_numeric_stat("gemma_decode_ms", timings.get("predicted_ms"))
+
+    def _add_numeric_stat(self, key: str, value: Any) -> None:
+        if isinstance(value, bool) or value is None:
+            return
+        try:
+            numeric_value = float(value)
+        except (TypeError, ValueError):
+            return
+        if isinstance(self._current_benchmark_stats.get(key), int) and numeric_value.is_integer():
+            self._current_benchmark_stats[key] += int(numeric_value)
+        else:
+            self._current_benchmark_stats[key] += numeric_value
+
+    def _is_context_capacity_response(self, response: Any) -> bool:
+        try:
+            if int(getattr(response, "status_code", 0)) != 400:
+                return False
+        except (TypeError, ValueError):
+            return False
+
+        body_parts: list[str] = []
+        try:
+            body_parts.append(json.dumps(response.json(), ensure_ascii=False))
+        except Exception:
+            pass
+        response_text = getattr(response, "text", "")
+        if response_text:
+            body_parts.append(str(response_text))
+        return bool(GEMMA_CONTEXT_CAPACITY_RE.search("\n".join(body_parts)))
 
     def _should_retry_request(self, attempt_index: int) -> bool:
         return attempt_index < max(1, int(self.request_retry_total_attempts)) - 1
