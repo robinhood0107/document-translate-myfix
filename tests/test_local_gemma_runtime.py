@@ -3,6 +3,8 @@ from __future__ import annotations
 import base64
 import json
 import subprocess
+import threading
+import time
 import unittest
 from types import SimpleNamespace
 from unittest import mock
@@ -96,7 +98,7 @@ class LocalGemmaRuntimeManagerTests(unittest.TestCase):
         self.assertIsNone(manager._active_contract)
         self.assertFalse(manager._readiness_cache)
 
-    def test_shutdown_clears_managed_state_when_stop_fails(self) -> None:
+    def test_shutdown_preserves_state_until_failed_stop_can_be_retried(self) -> None:
         manager = LocalGemmaRuntimeManager()
         manager._managed_active = True
         manager._active_contract = _runtime_contract()
@@ -109,16 +111,18 @@ class LocalGemmaRuntimeManagerTests(unittest.TestCase):
         with mock.patch.object(
             manager,
             "_stop_managed_container",
-            side_effect=failure,
-        ), self.assertLogs(
-            "modules.translation.local_runtime",
-            level="WARNING",
-        ):
+            side_effect=[failure, None],
+        ) as stop:
+            with self.assertRaises(LocalServiceSetupError):
+                manager.shutdown()
+            self.assertTrue(manager._managed_active)
+            self.assertIsNotNone(manager._active_contract)
             manager.shutdown()
 
         self.assertFalse(manager._managed_active)
         self.assertIsNone(manager._active_contract)
         self.assertFalse(manager._readiness_cache)
+        self.assertEqual(stop.call_count, 2)
 
     def test_cancelled_startup_can_stop_container_started_by_compose(self) -> None:
         manager = LocalGemmaRuntimeManager()
@@ -154,6 +158,52 @@ class LocalGemmaRuntimeManagerTests(unittest.TestCase):
             runtime_contract=contract,
         )
         stop.assert_called_once_with()
+
+    def test_cancelled_startup_cleanup_catches_late_container_start(self) -> None:
+        manager = LocalGemmaRuntimeManager()
+        manager._managed_start_attempted = True
+        manager._managed_active = False
+        stopped = subprocess.CompletedProcess(
+            args=[],
+            returncode=0,
+            stdout="",
+            stderr="",
+        )
+
+        with mock.patch(
+            "modules.translation.local_runtime.run_docker_command",
+            return_value=stopped,
+        ) as run, mock.patch.object(
+            manager,
+            "_inspect_managed_container_running",
+            side_effect=[False, True, False],
+        ), mock.patch(
+            "modules.translation.local_runtime.time.monotonic",
+            side_effect=[0.0, 0.5, 3.1],
+        ), mock.patch(
+            "modules.translation.local_runtime.time.sleep",
+        ):
+            manager._stop_managed_container()
+
+        self.assertEqual(run.call_count, 2)
+
+    def test_running_container_check_rejects_invalid_inspect_state(self) -> None:
+        manager = LocalGemmaRuntimeManager()
+        invalid = subprocess.CompletedProcess(
+            args=[],
+            returncode=0,
+            stdout="unknown\n",
+            stderr="",
+        )
+
+        with mock.patch(
+            "modules.translation.local_runtime.run_docker_command",
+            return_value=invalid,
+        ), self.assertRaisesRegex(
+            LocalServiceSetupError,
+            "Unexpected docker inspect state",
+        ):
+            manager._inspect_managed_container_running()
 
     def test_validate_loaded_model_accepts_model_id_basename_match(self) -> None:
         manager = LocalGemmaRuntimeManager()
@@ -437,6 +487,32 @@ class LocalGemmaRuntimeManagerTests(unittest.TestCase):
         self.assertTrue(
             any(event.get("step_key") == "chat_prewarm" for event in events)
         )
+
+    def test_chat_prewarm_cancellation_returns_without_waiting_for_blocked_io(self) -> None:
+        manager = LocalGemmaRuntimeManager()
+        request_started = threading.Event()
+        release_request = threading.Event()
+
+        def blocked_urlopen(*_args, **_kwargs):
+            request_started.set()
+            release_request.wait(timeout=5.0)
+            return mock.MagicMock()
+
+        started_at = time.monotonic()
+        try:
+            with mock.patch(
+                "modules.translation.local_runtime.urlopen",
+                side_effect=blocked_urlopen,
+            ), self.assertRaises(OperationCancelledError):
+                manager._prewarm_chat_completion(
+                    "http://127.0.0.1:18080/v1",
+                    "gemma-test.gguf",
+                    cancel_checker=request_started.is_set,
+                )
+        finally:
+            release_request.set()
+
+        self.assertLess(time.monotonic() - started_at, 1.0)
 
     def test_build_env_uses_exact_runtime_contract(self) -> None:
         manager = LocalGemmaRuntimeManager()

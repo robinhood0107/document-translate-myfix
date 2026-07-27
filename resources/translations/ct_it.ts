@@ -3258,6 +3258,13 @@ Riavviare ora?</translation>
     </message>
 </context>
 <context>
+    <name>StageBatchedProcessor</name>
+    <message>
+        <source>Gemma could not start because inpainter VRAM release was not confirmed.</source>
+        <translation>Impossibile avviare Gemma perché il rilascio della VRAM del modello di inpainting non è stato confermato.</translation>
+    </message>
+</context>
+<context>
     <name>StartupHomeScreen</name>
     <message>
         <source>New</source>
