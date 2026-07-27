@@ -9,6 +9,7 @@
 - Git
 - GPU 지원이 켜진 Docker Desktop
 - 로컬 Gemma / HunyuanOCR / PaddleOCR VL 가속을 쓰려면 NVIDIA 드라이버와 CUDA 호환 GPU
+- 최초 Gemma volume 준비 검사에 필요한 `C:` 여유 공간 60 GiB 이상
 
 ## 2. 저장소 실행
 
