@@ -113,6 +113,11 @@ bundle 파일 설명은 [/paddleocr_vl_docker_files/README.md](/paddleocr_vl_doc
 - OCR: `Optimal (HunyuanOCR / PaddleOCR VL)`
 - 번역기: Gemma volume 준비 후 `Custom Local Server(Gemma)`
 
+프로젝트 stage checkpoint는 `Settings > Project`에서 기본값이 꺼진 미리보기
+기능으로 제공됩니다. cache 관리 기능을 사용하기 전에 `.ctpr`를 먼저
+저장해야 합니다. 옆의 `.ctpr.cache` 폴더는 재계산 가능한 데이터이며 프로젝트를
+여는 데 필수적이지 않습니다.
+
 기본 OCR 라우팅:
 
 - 중국어 -> `HunyuanOCR`
