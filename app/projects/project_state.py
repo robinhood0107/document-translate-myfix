@@ -10,6 +10,11 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 import imkit as imk
 
 from modules.utils.archives import close_comic_cache, close_pdf_cache
+from .checkpoint_store import (
+    PROJECT_CHECKPOINT_REFERENCE_KEY,
+    ProjectCheckpointReference,
+    load_checkpoint_reference_into_project,
+)
 from .parsers import ProjectEncoder, ProjectDecoder, ensure_string_keys
 from .project_state_v2 import (
     close_cached_connection as close_state_v2_cached_connection,
@@ -41,9 +46,20 @@ def _join_from_archive_relpath(base_dir: str, rel_path: str) -> str:
     parts = [p for p in posix.split("/") if p]
     return os.path.join(base_dir, *parts)
 
-def save_state_to_proj_file(comic_translate: ComicTranslate, file_name: str):
+def save_state_to_proj_file(
+    comic_translate: ComicTranslate,
+    file_name: str,
+    *,
+    checkpoint_reference: dict | ProjectCheckpointReference | None = None,
+    update_project_reference: bool = True,
+):
     # Default writer: v2 SQLite container (incremental-friendly, portable).
-    return save_state_to_proj_file_v2(comic_translate, file_name)
+    return save_state_to_proj_file_v2(
+        comic_translate,
+        file_name,
+        checkpoint_reference=checkpoint_reference,
+        update_project_reference=update_project_reference,
+    )
 
 
 def close_state_store(file_name: str | None = None) -> None:
@@ -264,5 +280,10 @@ def load_state_from_proj_file(comic_translate: ComicTranslate, file_name: str):
         }
 
     # restore LLM extra context
+    load_checkpoint_reference_into_project(
+        comic_translate,
+        file_name,
+        state.get(PROJECT_CHECKPOINT_REFERENCE_KEY),
+    )
     saved_ctx = state.get('llm_extra_context', '')
     return saved_ctx
