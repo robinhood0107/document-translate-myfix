@@ -184,11 +184,20 @@ OCR:
 
 - 릴리스 트리거: Git 태그 push
 - 허용 태그 형식: `vX.Y.Z`
-- 빌드 대상: `Nuitka` 기반 Windows exe/portable 패키지
-- 릴리스 순서: Windows 로컬 Nuitka 빌드 검증, `main` 승격, Windows CI preflight, 태그 기반 release CI
-- 포함 범위: 앱 본체, Python 런타임, PySide6, torch/onnxruntime 런타임, 번역/resources
-- 미포함 범위: 모델, 체크포인트, Docker 런타임, NVIDIA 드라이버
+- 공식 자산:
+  `comic-translate-vX.Y.Z-windows-launcher-source.zip`과
+  `SHA256SUMS.txt`
+- 릴리스 순서: Windows 로컬 deterministic bundle·추출 launcher 검증,
+  `main` 승격, Windows CI preflight, 태그 기반 release CI
+- 포함 범위: allowlist 제품 source, launcher, CUDA12/CUDA13 requirements,
+  Docker Compose/config, Gemma 준비 도구, 번역/resources, README, LICENSE
+- 미포함 범위: venv, 모델, 체크포인트, 캐시, benchmark 도구/raw 결과,
+  Python/CUDA runtime, NVIDIA 드라이버, 로컬 경로, secret
 
-릴리스 후보를 `main`으로 승격하기 전에는 Windows PowerShell에서 필요한 Nuitka 빌드 스크립트를 직접 실행하고, 성공한 명령과 `build/nuitka-*` 산출물 경로를 PR에 기록합니다. WSL 전용 확인은 Windows 로컬 빌드 검증을 대체하지 않습니다.
+릴리스 후보를 `main`으로 승격하기 전에는 `HEAD`에서 ZIP을 생성하고
+manifest와 SHA-256을 검증합니다. 새 폴더에 압축을 푼 뒤
+`COMIC_VERIFY_ONLY=1`로 두 launcher를 실행하고, Windows 명령·ZIP hash·
+두 결과를 PR에 기록합니다.
 
-릴리스 패키지만으로 전체 로컬 런타임이 완성되지는 않으므로, 내려받은 뒤 이 가이드의 런타임 설정 단계를 이어서 진행하면 됩니다.
+일반 첫 실행에서는 launcher가 고정 환경을 bootstrap합니다. 기존
+Nuitka 스크립트는 비공식 수동 도구이며 공식 릴리스 gate가 아닙니다.

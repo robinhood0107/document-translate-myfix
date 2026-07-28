@@ -14,6 +14,7 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
+Write-Warning "Unofficial manual Nuitka tool: this output is not an official Comic Translate release asset."
 
 $extraNuitkaArgs = @()
 if (-not $Fast) {
