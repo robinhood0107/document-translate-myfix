@@ -113,8 +113,12 @@ class GemmaRuntimeContractTests(unittest.TestCase):
         self.assertEqual(contract.ready_manifest_name, DEFAULT_GEMMA_READY_MANIFEST)
         self.assertIn("-ctk", contract.command)
         self.assertIn("--spec-type", contract.command)
+        self.assertIn("-b", contract.command)
+        self.assertIn("-ub", contract.command)
 
         compose_environment = contract.compose_environment()
+        self.assertEqual(compose_environment["LLAMA_BATCH_SIZE"], "2048")
+        self.assertEqual(compose_environment["LLAMA_UBATCH_SIZE"], "512")
         self.assertEqual(compose_environment["LLAMA_CPP_PULL_POLICY"], "missing")
         self.assertEqual(
             compose_environment["GEMMA_RUNTIME_FINGERPRINT"],
@@ -124,6 +128,14 @@ class GemmaRuntimeContractTests(unittest.TestCase):
             compose_environment["GEMMA_READY_MANIFEST_SHA256"],
             contract.ready_manifest_sha256,
         )
+
+    def test_product_compose_exposes_validated_batch_defaults(self) -> None:
+        compose_text = (
+            Path(__file__).resolve().parents[1] / "docker-compose.yaml"
+        ).read_text(encoding="utf-8")
+
+        self.assertIn('"${LLAMA_BATCH_SIZE:-2048}"', compose_text)
+        self.assertIn('"${LLAMA_UBATCH_SIZE:-512}"', compose_text)
 
     def test_contract_rejects_manifest_sha_mismatch(self) -> None:
         manifest_bytes = _manifest_bytes()
@@ -192,6 +204,8 @@ class GemmaRuntimeContractTests(unittest.TestCase):
                 "LLAMA_SPEC_TYPE": "NGRAM-MOD",
                 "LLAMA_SPEC_DRAFT_N_MAX": "4",
                 "LLAMA_N_GPU_LAYERS": 0,
+                "LLAMA_BATCH_SIZE": "1024",
+                "LLAMA_UBATCH_SIZE": "256",
             }
         )
         self.assertEqual(options["LLAMA_CACHE_TYPE_K"], "q8_0")
@@ -199,9 +213,13 @@ class GemmaRuntimeContractTests(unittest.TestCase):
         self.assertEqual(options["LLAMA_SPEC_TYPE"], "ngram-mod")
         self.assertEqual(options["LLAMA_SPEC_DRAFT_N_MAX"], "4")
         self.assertEqual(options["LLAMA_N_GPU_LAYERS"], "0")
+        self.assertEqual(options["LLAMA_BATCH_SIZE"], "1024")
+        self.assertEqual(options["LLAMA_UBATCH_SIZE"], "256")
 
         invalid_values = {
             "LLAMA_CTX_SIZE": "512",
+            "LLAMA_BATCH_SIZE": "64",
+            "LLAMA_UBATCH_SIZE": "4096",
             "LLAMA_CACHE_TYPE_K": "q4_0",
             "LLAMA_CACHE_RAM_MIB": "512",
             "LLAMA_SPEC_TYPE": "draft-model",
@@ -211,6 +229,17 @@ class GemmaRuntimeContractTests(unittest.TestCase):
             with self.subTest(key=key):
                 with self.assertRaises(GemmaRuntimeContractError):
                     resolve_gemma_runtime_options({key: value})
+
+        with self.assertRaisesRegex(
+            GemmaRuntimeContractError,
+            "may not exceed",
+        ):
+            resolve_gemma_runtime_options(
+                {
+                    "LLAMA_BATCH_SIZE": "512",
+                    "LLAMA_UBATCH_SIZE": "1024",
+                }
+            )
 
     def test_fingerprint_changes_with_compose_or_runtime_configuration(self) -> None:
         baseline = self._build_contract()

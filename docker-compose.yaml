@@ -41,6 +41,10 @@ services:
       - "${LLAMA_N_PARALLEL:-1}"
       - -t
       - "${LLAMA_THREADS:-10}"
+      - -b
+      - "${LLAMA_BATCH_SIZE:-2048}"
+      - -ub
+      - "${LLAMA_UBATCH_SIZE:-512}"
       - --n-gpu-layers
       - "${LLAMA_N_GPU_LAYERS:-23}"
       - --fit
