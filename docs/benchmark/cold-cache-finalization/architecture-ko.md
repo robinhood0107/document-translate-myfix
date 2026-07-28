@@ -58,14 +58,20 @@ page/block 또는 language/index 순서로 모읍니다.
 
 ## cache 검증 모델
 
-global OCR cache는 cache-disabled cold와 enabled-empty cold를 각각 3회
-교차 실행합니다. miss overhead 중앙값은 3% 이하여야 합니다. all-hit는
+global OCR cache는 격리된 cache-disabled와 enabled-empty를 한 번씩
+비채점 안정화 실행한 뒤, 두 cold 경로를 각각 3회 교차 실행합니다.
+안정화 실행도 stopped container에서 시작하고 결과에 남지만, 최초
+Docker·GPU driver·filesystem 준비 편차가 SQLite miss overhead로
+오인되지 않도록 overhead와 variance 계산에서는 제외합니다. 측정 3회는
+매번 새 user-data/DB와 stopped container에서 시작합니다. miss overhead
+중앙값은 3% 이하여야 합니다. all-hit는
 Paddle runtime start와 OCR HTTP가 모두 0이어야 하며 raw OCR 계약이
 cold와 완전히 같아야 합니다. runtime은 사전 부팅하지 않으므로 이 0은
 제품 경로가 실제로 시작을 생략했다는 뜻입니다.
 
-project checkpoint도 disabled cold와 enabled-empty cold를 각각 3회
-비교합니다. 이후 아래를 실제 프로젝트로 확인합니다.
+project checkpoint도 같은 비채점 안정화 한 쌍 뒤 disabled cold와
+enabled-empty cold를 각각 3회 비교합니다. 안정화와 측정의 DB·프로젝트
+sidecar는 서로 격리합니다. 이후 아래를 실제 프로젝트로 확인합니다.
 
 1. 기존 render output이 있는 all-hit
 2. output만 삭제한 뒤 render artifact materialization

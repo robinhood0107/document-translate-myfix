@@ -28,6 +28,10 @@ class ColdCacheFinalizationTests(unittest.TestCase):
         self.assertEqual(protocol["limits"]["pipeline_max_blocks"], 54)
         self.assertEqual(protocol["limits"]["completion_tokens"], 512)
         self.assertEqual(
+            protocol["limits"]["cache_stabilization_pairs"],
+            1,
+        )
+        self.assertEqual(
             baseline["gemma"]["model"],
             "gemma-4-26B-IQ4_NL.gguf",
         )
@@ -449,31 +453,47 @@ class ColdCacheFinalizationTests(unittest.TestCase):
             "page_contract": {"ocr_sha256": "a" * 64},
         }
 
+        results = {
+            "stabilization": [
+                {**cold, "candidate": "enabled_empty_cold"},
+                {**cold, "candidate": "disabled_cold"},
+            ],
+            "disabled_cold": [
+                {**cold, "round": round_index}
+                for round_index in range(1, 4)
+            ],
+            "enabled_empty_cold": [
+                {
+                    **cold,
+                    "round": round_index,
+                    "performance_stats": {
+                        "stages": {"ocr": {"wall_ms": 10_200}},
+                    },
+                }
+                for round_index in range(1, 4)
+            ],
+            "all_hit": hit,
+        }
         analysis = finalization.analyze_cache_results(
             protocol=protocol,
             scenario="global-ocr",
-            results={
-                "disabled_cold": [
-                    {**cold, "round": round_index}
-                    for round_index in range(1, 4)
-                ],
-                "enabled_empty_cold": [
-                    {
-                        **cold,
-                        "round": round_index,
-                        "performance_stats": {
-                            "stages": {"ocr": {"wall_ms": 10_200}},
-                        },
-                    }
-                    for round_index in range(1, 4)
-                ],
-                "all_hit": hit,
-            },
+            results=results,
         )
 
         self.assertTrue(analysis["passed"])
         self.assertEqual(analysis["all_hit_reduction_percent"], 90.0)
         self.assertEqual(analysis["cache_miss_overhead_percent"], 2.0)
+        without_stabilization = dict(results)
+        without_stabilization.pop("stabilization")
+        incomplete = finalization.analyze_cache_results(
+            protocol=protocol,
+            scenario="global-ocr",
+            results=without_stabilization,
+        )
+        self.assertFalse(incomplete["passed"])
+        self.assertFalse(
+            incomplete["checks"]["stabilization_runs_complete"]
+        )
 
     def test_project_cache_accepts_changed_invalidated_page_only(
         self,
@@ -589,6 +609,10 @@ class ColdCacheFinalizationTests(unittest.TestCase):
             protocol=protocol,
             scenario="project",
             results={
+                "stabilization": [
+                    {**cold, "candidate": "enabled_empty_cold"},
+                    {**cold, "candidate": "disabled_cold"},
+                ],
                 "disabled_cold": [
                     {**cold, "round": round_index}
                     for round_index in range(1, 4)
