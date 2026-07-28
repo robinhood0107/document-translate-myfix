@@ -6,7 +6,7 @@ import threading
 import time
 from pathlib import Path
 from typing import Any, Callable, Literal
-from urllib.error import URLError
+from urllib.error import HTTPError, URLError
 from urllib.parse import urlparse
 from urllib.request import urlopen
 
@@ -51,6 +51,10 @@ _ENGINE_CONFIG = {
         "compose_file": ROOT_DIR / "paddleocr_vl_docker_files" / "docker-compose.yaml",
         "managed_url": "http://127.0.0.1:28118/layout-parsing",
         "health_url": "http://127.0.0.1:28118/docs",
+        "health_urls": [
+            "http://127.0.0.1:28118/docs",
+            "http://127.0.0.1:18000/v1/models",
+        ],
         "settings_page_name": "PaddleOCR VL Settings",
         "container_name": "paddleocr-server",
         "container_names": ["paddleocr-vllm", "paddleocr-server"],
@@ -114,8 +118,9 @@ class LocalOCRRuntimeManager:
         if not self.should_manage_engine(engine_key, settings_page):
             return "not_managed"
         config = self._config_for(engine_key)
+        health_urls = self._config_health_urls(config)
         if self._wait_for_health(
-            config["health_url"],
+            health_urls,
             timeout_sec=timeout_sec,
             progress_callback=None,
             cancel_checker=None,
@@ -181,7 +186,8 @@ class LocalOCRRuntimeManager:
     ) -> None:
         self.validate_engine(engine_key, settings_page)
         config = self._config_for(engine_key)
-        initial_state = self._probe_health_state(config["health_url"])
+        health_urls = self._config_health_urls(config)
+        initial_state = self._probe_health_state(health_urls)
         if initial_state == "healthy":
             self._active_engine = engine_key
             self._managed_start_attempted_engine = engine_key
@@ -202,10 +208,10 @@ class LocalOCRRuntimeManager:
                 status="waiting_health",
                 step_key="health_probe",
                 message=f"{engine_key} 모델 로딩이 끝날 때까지 기다리는 중...",
-                detail=f"Waiting for {config['health_url']}",
+                detail=f"Waiting for {', '.join(health_urls)}",
             )
             if self._wait_for_health(
-                config["health_url"],
+                health_urls,
                 timeout_sec=min(timeout_sec, 300),
                 progress_callback=progress_callback,
                 cancel_checker=cancel_checker,
@@ -244,7 +250,7 @@ class LocalOCRRuntimeManager:
                 message=f"기존 {engine_key} 컨테이너 시작 명령을 보냈습니다.",
             )
             if self._wait_for_health(
-                config["health_url"],
+                health_urls,
                 timeout_sec=timeout_sec,
                 progress_callback=progress_callback,
                 cancel_checker=cancel_checker,
@@ -290,7 +296,7 @@ class LocalOCRRuntimeManager:
             message=f"{engine_key} 컨테이너 시작 명령을 보냈습니다.",
         )
         if not self._wait_for_health(
-            config["health_url"],
+            health_urls,
             timeout_sec=timeout_sec,
             progress_callback=progress_callback,
             cancel_checker=cancel_checker,
@@ -301,7 +307,7 @@ class LocalOCRRuntimeManager:
             raise self._build_setup_error(
                 engine_key,
                 (
-                    f"Timed out while waiting for {engine_key} at {config['health_url']} "
+                    f"Timed out while waiting for {engine_key} at {', '.join(health_urls)} "
                     f"after docker compose up -d of {config['compose_file'].name}."
                 ),
             )
@@ -589,7 +595,7 @@ class LocalOCRRuntimeManager:
 
     def _wait_for_health(
         self,
-        url: str,
+        urls: str | list[str] | tuple[str, ...],
         *,
         timeout_sec: int,
         progress_callback: Callable[[dict[str, Any]], None] | None = None,
@@ -598,18 +604,16 @@ class LocalOCRRuntimeManager:
         step_key: str,
         message: str,
     ) -> bool:
+        health_urls = self._normalize_health_urls(urls)
+        if not health_urls:
+            return False
         deadline = time.monotonic() + max(timeout_sec, 1)
         started = time.monotonic()
         while time.monotonic() < deadline:
             if self._is_cancelled(cancel_checker):
                 raise OperationCancelledError(f"Cancelled while waiting for {engine_key} runtime.")
-            try:
-                with urlopen(url, timeout=2) as response:
-                    status = int(getattr(response, "status", 200))
-                    if status != 503 and status < 500:
-                        return True
-            except (URLError, OSError, ValueError):
-                pass
+            if self._probe_health_state(health_urls) == "healthy":
+                return True
             self._emit_progress(
                 progress_callback,
                 engine_key,
@@ -617,22 +621,61 @@ class LocalOCRRuntimeManager:
                 step_key=step_key,
                 message=message,
                 elapsed_sec=time.monotonic() - started,
-                detail=f"Waiting for {url}",
+                detail=f"Waiting for {', '.join(health_urls)}",
             )
             time.sleep(1)
         return False
 
     @staticmethod
-    def _probe_health_state(url: str) -> OCRHealthState:
+    def _normalize_health_urls(
+        urls: str | list[str] | tuple[str, ...],
+    ) -> tuple[str, ...]:
+        candidates = [urls] if isinstance(urls, str) else list(urls)
+        return tuple(
+            dict.fromkeys(
+                str(url).strip()
+                for url in candidates
+                if str(url).strip()
+            )
+        )
+
+    @classmethod
+    def _config_health_urls(cls, config: dict[str, Any]) -> tuple[str, ...]:
+        configured = config.get("health_urls")
+        if configured is None:
+            configured = str(config.get("health_url") or "")
+        return cls._normalize_health_urls(configured)
+
+    @staticmethod
+    def _probe_single_health_state(url: str) -> OCRHealthState:
         try:
             with urlopen(url, timeout=2) as response:
                 status = int(getattr(response, "status", 200))
+        except HTTPError as exc:
+            if int(exc.code) == 503:
+                return "loading"
+            return "unavailable"
         except (URLError, OSError, ValueError):
             return "unavailable"
         if status == 503:
             return "loading"
-        if status < 500:
+        if 200 <= status < 400:
             return "healthy"
+        return "unavailable"
+
+    @classmethod
+    def _probe_health_state(
+        cls,
+        urls: str | list[str] | tuple[str, ...],
+    ) -> OCRHealthState:
+        health_urls = cls._normalize_health_urls(urls)
+        if not health_urls:
+            return "unavailable"
+        states = [cls._probe_single_health_state(url) for url in health_urls]
+        if all(state == "healthy" for state in states):
+            return "healthy"
+        if any(state in {"healthy", "loading"} for state in states):
+            return "loading"
         return "unavailable"
 
     def _emit_progress(
