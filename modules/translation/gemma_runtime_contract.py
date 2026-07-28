@@ -29,6 +29,8 @@ DEFAULT_GEMMA_RUNTIME_OPTIONS: dict[str, str] = {
     "LLAMA_CTX_SIZE": "4096",
     "LLAMA_N_PARALLEL": "1",
     "LLAMA_THREADS": "10",
+    "LLAMA_BATCH_SIZE": "2048",
+    "LLAMA_UBATCH_SIZE": "512",
     "LLAMA_N_GPU_LAYERS": "23",
     "LLAMA_CACHE_TYPE_K": "f16",
     "LLAMA_CACHE_TYPE_V": "f16",
@@ -154,6 +156,8 @@ def resolve_gemma_runtime_options(
         "LLAMA_CTX_SIZE": (1024, 32768),
         "LLAMA_N_PARALLEL": (1, 4),
         "LLAMA_THREADS": (1, 64),
+        "LLAMA_BATCH_SIZE": (128, 4096),
+        "LLAMA_UBATCH_SIZE": (64, 2048),
         "LLAMA_N_GPU_LAYERS": (0, 99),
     }
     for key, (minimum, maximum) in numeric_ranges.items():
@@ -166,6 +170,11 @@ def resolve_gemma_runtime_options(
                 f"{key} must be between {minimum} and {maximum}: {parsed}"
             )
         values[key] = str(parsed)
+
+    if int(values["LLAMA_UBATCH_SIZE"]) > int(values["LLAMA_BATCH_SIZE"]):
+        raise GemmaRuntimeContractError(
+            "LLAMA_UBATCH_SIZE may not exceed LLAMA_BATCH_SIZE."
+        )
 
     for key in ("LLAMA_CACHE_TYPE_K", "LLAMA_CACHE_TYPE_V"):
         normalized = values[key].lower()
@@ -224,6 +233,10 @@ def build_gemma_server_command(
         runtime_options["LLAMA_N_PARALLEL"],
         "-t",
         runtime_options["LLAMA_THREADS"],
+        "-b",
+        runtime_options["LLAMA_BATCH_SIZE"],
+        "-ub",
+        runtime_options["LLAMA_UBATCH_SIZE"],
         "--n-gpu-layers",
         runtime_options["LLAMA_N_GPU_LAYERS"],
         "--fit",
