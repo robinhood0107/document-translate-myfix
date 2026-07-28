@@ -27,14 +27,14 @@ PROJECT_CHECKPOINT_OBJECT_ROOT = ("objects", "sha256")
 _SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 _SAFE_ROLE_RE = re.compile(r"^[a-zA-Z][a-zA-Z0-9_.-]{0,127}$")
 
-# The graph intentionally does not force translation and inpainting into a
-# serial relationship. Both consume upstream page state, while render consumes
-# both branches.
+# Translation and inpainting are parallel after OCR. Inpainting consumes the
+# OCR-filtered/protected ordered block list in addition to detection geometry,
+# while render consumes both branches.
 PROJECT_STAGE_DEPENDENCIES: dict[str, tuple[str, ...]] = {
     "detection": (),
     "ocr": ("detection",),
     "translation": ("ocr",),
-    "inpaint": ("detection",),
+    "inpaint": ("detection", "ocr"),
     "render": ("translation", "inpaint"),
 }
 
@@ -234,6 +234,7 @@ def load_checkpoint_reference_into_project(
     project_file: str | os.PathLike[str],
     value: Mapping[str, Any] | None,
 ) -> ProjectCheckpointReference:
+    reference_was_persisted = isinstance(value, Mapping)
     try:
         reference = normalize_checkpoint_reference(
             value,
@@ -253,6 +254,7 @@ def load_checkpoint_reference_into_project(
         )
         assert reference is not None
         warning = str(exc)
+        reference_was_persisted = False
         logger.warning(
             "Project checkpoint reference ignored; stages will be recomputed. "
             "project=%s reason=%s",
@@ -260,6 +262,9 @@ def load_checkpoint_reference_into_project(
             warning,
         )
     project.project_checkpoint_reference = reference.to_dict()
+    project.project_checkpoint_reference_persisted = bool(
+        reference_was_persisted
+    )
     project.project_checkpoint_warning = warning
     return reference
 
@@ -983,6 +988,52 @@ class ProjectCheckpointStore:
         except (OSError, ValueError, sqlite3.Error, ProjectCheckpointError) as exc:
             self._disable(exc)
             return ProjectCheckpointStats(0, 0, 0, 0)
+
+    def has_stage_records(self, stage: str) -> bool:
+        if not self.available:
+            return False
+        try:
+            normalized_stage = _validate_stage(stage)
+            connection = self._connect(create=False)
+            try:
+                row = connection.execute(
+                    "SELECT 1 FROM stage_records WHERE stage = ? LIMIT 1",
+                    (normalized_stage,),
+                ).fetchone()
+                return row is not None
+            finally:
+                connection.close()
+        except FileNotFoundError:
+            return False
+        except (OSError, ValueError, sqlite3.Error, ProjectCheckpointError) as exc:
+            self._disable(exc)
+            return False
+
+    def has_stage_record(self, page_key: str, stage: str) -> bool:
+        if not self.available:
+            return False
+        try:
+            normalized_page = _validate_page_key(page_key)
+            normalized_stage = _validate_stage(stage)
+            connection = self._connect(create=False)
+            try:
+                row = connection.execute(
+                    """
+                    SELECT 1
+                    FROM stage_records
+                    WHERE page_key = ? AND stage = ?
+                    LIMIT 1
+                    """,
+                    (normalized_page, normalized_stage),
+                ).fetchone()
+                return row is not None
+            finally:
+                connection.close()
+        except FileNotFoundError:
+            return False
+        except (OSError, ValueError, sqlite3.Error, ProjectCheckpointError) as exc:
+            self._disable(exc)
+            return False
 
 
 def _sha256_file(path: Path) -> str:
