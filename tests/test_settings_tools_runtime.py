@@ -324,6 +324,23 @@ class SettingsToolsRuntimeTests(unittest.TestCase):
             },
         )
 
+    def test_paddleocr_persistent_cache_settings_are_saved_and_reloaded(self) -> None:
+        page = self._make_page()
+        page.load_settings()
+        page.ui.paddleocr_vl_persistent_cache_checkbox.setChecked(False)
+        page.ui.paddleocr_vl_persistent_cache_limit_spinbox.setValue(72_000)
+
+        settings = page.get_paddleocr_vl_settings()
+        self.assertFalse(settings["persistent_cache_enabled"])
+        self.assertEqual(settings["persistent_cache_limit"], 72_000)
+        page.save_settings()
+
+        reloaded = self._make_page()
+        reloaded.load_settings()
+        reloaded_settings = reloaded.get_paddleocr_vl_settings()
+        self.assertFalse(reloaded_settings["persistent_cache_enabled"])
+        self.assertEqual(reloaded_settings["persistent_cache_limit"], 72_000)
+
 
 if __name__ == "__main__":
     unittest.main()

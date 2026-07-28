@@ -242,6 +242,11 @@ In Settings, choose:
 - `Default (existing auto: MangaOCR / PPOCR / Pororo...)` to keep legacy OCR routing
 - `Optimal (HunyuanOCR / PaddleOCR VL)` to route Chinese to `HunyuanOCR` and Japanese/other languages to `PaddleOCR VL`
 
+For the stage-batched folder workflow, `Settings > PaddleOCR VL Settings`
+also provides a managed exact persistent OCR cache. It stores raw OCR results
+and diagnostics, never crop images, and is disabled automatically for custom
+endpoints.
+
 ### 5. Optional ntfy notifications
 
 Open `Settings > Notifications` to configure:
@@ -263,7 +268,7 @@ Tracked compose/runtime images used by the repo:
 
 - Gemma local server: `ghcr.io/ggml-org/llama.cpp@sha256:22e0e3bfe967af4fd1df6a918022abbfd4e72e4d40a4769e616a4176790acbcb`
 - HunyuanOCR local server: `ghcr.io/ggml-org/llama.cpp:server-cuda`
-- PaddleOCR VL runtime: `ccr-2vdh3abv-pub.cnc.bj.baidubce.com/paddlepaddle/paddleocr-genai-vllm-server:latest-nvidia-gpu-offline`
+- PaddleOCR VL runtime: `ccr-2vdh3abv-pub.cnc.bj.baidubce.com/paddlepaddle/paddleocr-genai-vllm-server@sha256:d0d32c04a2119613d25a0a4c292e165ccc107954b74580613cf59e378037f8f5`
 
 ## Reference Setup Docs
 

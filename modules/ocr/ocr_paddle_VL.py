@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import base64
+import copy
+import hashlib
 import logging
 import os
 import re
@@ -8,6 +10,7 @@ import threading
 import time
 import unicodedata
 from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
+from dataclasses import dataclass, field
 from typing import Any, Callable
 from urllib.parse import urlparse
 
@@ -38,9 +41,45 @@ from modules.utils.text_normalization import (
 from modules.utils.textblock import TextBlock
 
 from .base import OCREngine
+from .persistent_cache import (
+    OCRPersistentResultCache,
+    OCRResultCacheRecord,
+    apply_raw_ocr_result,
+    canonical_json,
+    canonical_sha256,
+    snapshot_raw_ocr_result,
+)
 
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass
+class PaddleOCRPersistentCachePlan:
+    blocks: list[TextBlock]
+    jobs: list[dict[str, Any]]
+    page_profile: dict[str, Any]
+    cache_enabled: bool
+    deferred_outcomes: list[tuple[TextBlock, dict[str, Any]]] = field(
+        default_factory=list
+    )
+    lookup_disabled: bool = False
+    hit_count: int = 0
+    miss_count: int = 0
+    runtime_jobs: list[dict[str, Any]] = field(default_factory=list)
+
+    @property
+    def requires_runtime(self) -> bool:
+        return bool(self.runtime_jobs)
+
+    @property
+    def all_hit(self) -> bool:
+        return (
+            self.cache_enabled
+            and not self.lookup_disabled
+            and self.hit_count > 0
+            and self.miss_count == 0
+        )
 
 
 class PaddleOCRVLEngine(OCREngine):
@@ -60,6 +99,12 @@ class PaddleOCRVLEngine(OCREngine):
     MEDIUM_CROP_RATIO_THRESHOLD = 0.008
     ALLOWED_SCHEDULER_MODES = frozenset({"fixed", "fixed_area_desc", "auto_v1"})
     OCR_CACHE_VERSION = "paddleocr_vl_text_guard_v2"
+    PERSISTENT_CACHE_KEY_SCHEMA_VERSION = 1
+    CROP_SCHEMA_VERSION = "paddle_crop_xyxy_v1"
+    ENCODER_SCHEMA_VERSION = "opencv_jpeg_default_v1"
+    PARSER_SCHEMA_VERSION = "paddle_layout_response_v1"
+    SANITIZER_SCHEMA_VERSION = "paddle_text_normalizer_v2"
+    GUARD_SCHEMA_VERSION = OCR_CACHE_VERSION
     LAYOUT_SCHEMA_TOKENS = frozenset(
         {
             "number",
@@ -266,6 +311,423 @@ class PaddleOCRVLEngine(OCREngine):
             self.scheduler_mode,
         )
         return blk_list
+
+    def prepare_persistent_cache(
+        self,
+        img: np.ndarray,
+        blk_list: list[TextBlock],
+        store: OCRPersistentResultCache,
+        runtime_identity: dict[str, Any],
+        *,
+        lookup: bool = True,
+    ) -> PaddleOCRPersistentCachePlan:
+        """Prepare exact crop identities and restore hits before runtime startup."""
+
+        jobs: list[dict[str, Any]] = []
+        deferred_outcomes: list[tuple[TextBlock, dict[str, Any]]] = []
+        page_height = int(img.shape[0]) if img is not None and len(img.shape) >= 2 else 0
+        page_width = int(img.shape[1]) if img is not None and len(img.shape) >= 2 else 0
+        page_area = max(page_height * page_width, 1)
+        for job_index, blk in enumerate(blk_list or []):
+            self._raise_if_cancelled()
+            bbox = self._resolve_bbox(blk, img)
+            if bbox is None:
+                outcome_block = copy.copy(blk)
+                self._mark_empty(outcome_block, "Invalid OCR crop bounds.")
+                deferred_outcomes.append(
+                    (blk, snapshot_raw_ocr_result(outcome_block))
+                )
+                continue
+            x1, y1, x2, y2 = bbox
+            crop_area_px = max(0, (x2 - x1) * (y2 - y1))
+            crop_area_ratio = crop_area_px / float(page_area)
+            record = {
+                "job_index": int(job_index),
+                "bbox": [int(x1), int(y1), int(x2), int(y2)],
+                "crop_area_px": int(crop_area_px),
+                "crop_area_ratio": round(float(crop_area_ratio), 6),
+                "enqueue_ts": None,
+                "start_ts": None,
+                "end_ts": None,
+                "elapsed_ms": None,
+                "queue_wait_ms": 0.0,
+                "crop_ms": 0.0,
+                "text_guard_ms": 0.0,
+                "encode_ms": 0.0,
+                "base64_ms": 0.0,
+                "payload_build_ms": 0.0,
+                "logical_request_count": 0,
+                "http_attempt_count": 0,
+                "http_retry_count": 0,
+                "compatibility_retry_count": 0,
+                "retry_backoff_ms": 0.0,
+                "request_wall_ms": 0.0,
+                "response_decode_ms": 0.0,
+                "parse_sanitize_ms": 0.0,
+                "request_bytes": 0,
+                "base64_chars": 0,
+                "cache_lookup": "pending",
+                "status": "pending",
+            }
+            job = {
+                "job_index": int(job_index),
+                "block": blk,
+                "bbox": bbox,
+                "crop_area_px": int(crop_area_px),
+                "crop_area_ratio": float(crop_area_ratio),
+                "request_record": record,
+            }
+            crop_started_at = time.perf_counter()
+            crop = self._crop_image(img, bbox)
+            record["crop_ms"] = round(
+                (time.perf_counter() - crop_started_at) * 1000.0,
+                3,
+            )
+            if crop is None:
+                outcome_block = copy.copy(blk)
+                self._mark_empty(outcome_block, "Invalid OCR crop bounds.")
+                job["prepared_outcome"] = snapshot_raw_ocr_result(outcome_block)
+                record["status"] = "crop_invalid"
+                jobs.append(job)
+                continue
+
+            guard_started_at = time.perf_counter()
+            should_skip, evidence = self._should_skip_text_free_crop(blk, crop)
+            record["text_guard_ms"] = round(
+                (time.perf_counter() - guard_started_at) * 1000.0,
+                3,
+            )
+            encode_started_at = time.perf_counter()
+            image_bytes = self._encode_image(crop)
+            record["encode_ms"] = round(
+                (time.perf_counter() - encode_started_at) * 1000.0,
+                3,
+            )
+            contiguous_crop = np.ascontiguousarray(crop)
+            block_xyxy = [
+                int(float(value))
+                for value in getattr(blk, "xyxy", bbox)
+            ]
+            bubble_xyxy = getattr(blk, "bubble_xyxy", None)
+            cache_identity = {
+                "cache_key_schema_version": self.PERSISTENT_CACHE_KEY_SCHEMA_VERSION,
+                "runtime": dict(runtime_identity),
+                "raw_crop_pixel_sha256": hashlib.sha256(
+                    contiguous_crop.tobytes(order="C")
+                ).hexdigest(),
+                "request_jpeg_sha256": hashlib.sha256(image_bytes).hexdigest(),
+                "crop_shape": [int(value) for value in contiguous_crop.shape],
+                "crop_dtype": str(contiguous_crop.dtype),
+                "block_xyxy": block_xyxy,
+                "text_class": str(getattr(blk, "text_class", "") or ""),
+                "bubble_present": bubble_xyxy is not None,
+                "bubble_xyxy": (
+                    [int(float(value)) for value in bubble_xyxy]
+                    if bubble_xyxy is not None
+                    else None
+                ),
+                "text_free_without_bubble": self._is_text_free_without_bubble(blk),
+                "text_guard_evidence": evidence,
+                "source_language": str(getattr(blk, "source_lang", "") or ""),
+                "max_new_tokens": int(self.max_new_tokens),
+                "prettify_markdown": bool(self.prettify_markdown),
+                "visualize": bool(self.visualize),
+                "crop_schema_version": self.CROP_SCHEMA_VERSION,
+                "encoder_schema_version": self.ENCODER_SCHEMA_VERSION,
+                "parser_schema_version": self.PARSER_SCHEMA_VERSION,
+                "sanitizer_schema_version": self.SANITIZER_SCHEMA_VERSION,
+                "guard_schema_version": self.GUARD_SCHEMA_VERSION,
+            }
+            job.update(
+                {
+                    "prepared_crop": crop,
+                    "prepared_image_bytes": image_bytes,
+                    "guard_should_skip": bool(should_skip),
+                    "guard_evidence": evidence,
+                    "cache_identity": cache_identity,
+                    "cache_identity_json": canonical_json(cache_identity),
+                    "cache_key": canonical_sha256(cache_identity),
+                }
+            )
+            jobs.append(job)
+
+        job_stats = self._summarize_jobs(jobs)
+        gpu_metrics = self._resolve_gpu_metrics_for_scheduler()
+        ordered_jobs = self._order_jobs(jobs)
+        worker_count = self._resolve_worker_count(ordered_jobs, job_stats, gpu_metrics)
+        profile = self._build_page_profile(
+            ordered_jobs,
+            page_width=page_width,
+            page_height=page_height,
+            job_stats=job_stats,
+            worker_count=worker_count,
+            gpu_metrics=gpu_metrics,
+        )
+        plan = PaddleOCRPersistentCachePlan(
+            blocks=blk_list,
+            jobs=ordered_jobs,
+            page_profile=profile,
+            cache_enabled=True,
+            deferred_outcomes=deferred_outcomes,
+        )
+        keyed_jobs = [job for job in ordered_jobs if job.get("cache_key")]
+        lookups = (
+            store.lookup_many(job["cache_key"] for job in keyed_jobs)
+            if lookup
+            else {}
+        )
+        for job in keyed_jobs:
+            self._raise_if_cancelled()
+            record = job["request_record"]
+            result = lookups.get(job["cache_key"]) if lookup else None
+            if result is not None and result.disabled:
+                plan.lookup_disabled = True
+            if result is not None and result.hit:
+                job["prepared_outcome"] = dict(result.result or {})
+                record["cache_lookup"] = "hit"
+                record["status"] = "cache_hit"
+                plan.hit_count += 1
+                job.pop("prepared_crop", None)
+                job.pop("prepared_image_bytes", None)
+                continue
+
+            record["cache_lookup"] = "disabled" if plan.lookup_disabled else "miss"
+            plan.miss_count += 1
+            job["cache_lookup_miss"] = True
+            if bool(job.get("guard_should_skip")):
+                evidence = dict(job.get("guard_evidence") or {})
+                outcome_block = copy.copy(job["block"])
+                self._mark_empty(
+                    outcome_block,
+                    self.TEXT_FREE_NO_VISUAL_EVIDENCE_REASON,
+                )
+                reject_reason = str(
+                    evidence.get("reject_reason") or "no_visual_text_evidence"
+                )
+                outcome_block.ocr_reject_reason = reject_reason
+                job["prepared_outcome"] = snapshot_raw_ocr_result(outcome_block)
+                record["status"] = "rejected_no_text_evidence"
+                record["text_evidence"] = evidence
+                record["non_text_reason"] = reject_reason
+                job.pop("prepared_crop", None)
+                job.pop("prepared_image_bytes", None)
+                continue
+            plan.runtime_jobs.append(job)
+
+        plan.page_profile["persistent_cache"] = {
+            "enabled": True,
+            "lookup_disabled": bool(plan.lookup_disabled),
+            "hit_count": int(plan.hit_count),
+            "miss_count": int(plan.miss_count),
+            "runtime_miss_count": len(plan.runtime_jobs),
+        }
+        return plan
+
+    def process_persistent_cache_plan(
+        self,
+        plan: PaddleOCRPersistentCachePlan,
+    ) -> list[TextBlock]:
+        """Execute only exact-cache misses from a prepared page plan."""
+
+        self.last_page_profile = plan.page_profile
+        if not plan.runtime_jobs:
+            self._raise_if_cancelled()
+            self._commit_persistent_plan_outcomes(plan, {})
+            self.last_page_profile["page_status"] = "ok"
+            self.last_page_profile["elapsed_ms"] = 0.0
+            self.last_page_profile["completed_at"] = time.time()
+            self._finalize_performance_profile()
+            return plan.blocks
+
+        worker_count = max(
+            1,
+            min(
+                int(self.last_page_profile.get("chosen_workers", self.parallel_workers)),
+                len(plan.runtime_jobs),
+            ),
+        )
+        logger.info(
+            "paddleocr_vl persistent-cache misses: blocks=%d hits=%d workers=%d",
+            len(plan.runtime_jobs),
+            plan.hit_count,
+            worker_count,
+        )
+        started_at = time.perf_counter()
+        self.last_page_profile["started_at"] = time.time()
+        try:
+            executor = ThreadPoolExecutor(max_workers=worker_count)
+            future_map = {}
+            try:
+                for job in plan.runtime_jobs:
+                    self._raise_if_cancelled()
+                    job["request_record"]["enqueue_ts"] = time.time()
+                    job["enqueue_perf"] = time.perf_counter()
+                    future = executor.submit(self._process_prepared_job, job)
+                    future_map[future] = job
+                pending = set(future_map)
+                outcomes: dict[int, dict[str, Any]] = {}
+                while pending:
+                    self._raise_if_cancelled()
+                    done, pending = wait(
+                        pending,
+                        timeout=0.2,
+                        return_when=FIRST_COMPLETED,
+                    )
+                    for future in done:
+                        job = future_map[future]
+                        outcomes[int(job["job_index"])] = future.result()
+                self._raise_if_cancelled()
+                self._commit_persistent_plan_outcomes(plan, outcomes)
+            except Exception:
+                for future in future_map:
+                    future.cancel()
+                executor.shutdown(wait=False, cancel_futures=True)
+                raise
+            else:
+                executor.shutdown(wait=True)
+            self.last_page_profile["page_status"] = "ok"
+        except Exception as exc:
+            self.last_page_profile["page_status"] = "error"
+            self.last_page_profile["error"] = f"{type(exc).__name__}: {exc}"
+            raise
+        finally:
+            elapsed_ms = (time.perf_counter() - started_at) * 1000.0
+            self.last_page_profile["elapsed_ms"] = round(elapsed_ms, 3)
+            self.last_page_profile["completed_at"] = time.time()
+            self._finalize_performance_profile()
+        return plan.blocks
+
+    @staticmethod
+    def _commit_persistent_plan_outcomes(
+        plan: PaddleOCRPersistentCachePlan,
+        runtime_outcomes: dict[int, dict[str, Any]],
+    ) -> None:
+        for block, outcome in plan.deferred_outcomes:
+            apply_raw_ocr_result(block, outcome)
+        for job in plan.jobs:
+            job_index = int(job["job_index"])
+            outcome = runtime_outcomes.get(job_index)
+            if outcome is None:
+                prepared = job.get("prepared_outcome")
+                if isinstance(prepared, dict):
+                    outcome = prepared
+            if outcome is not None:
+                apply_raw_ocr_result(job["block"], outcome)
+
+    def build_persistent_cache_records(
+        self,
+        plan: PaddleOCRPersistentCachePlan,
+    ) -> list[OCRResultCacheRecord]:
+        if str(plan.page_profile.get("page_status", "") or "") != "ok":
+            return []
+        records: list[OCRResultCacheRecord] = []
+        for job in plan.jobs:
+            if not job.get("cache_lookup_miss") or not job.get("cache_key"):
+                continue
+            status = str(job.get("request_record", {}).get("status", "") or "")
+            if not status or status == "pending" or status.startswith("error:"):
+                continue
+            records.append(
+                OCRResultCacheRecord(
+                    cache_key=str(job["cache_key"]),
+                    identity_json=str(job["cache_identity_json"]),
+                    result_json=canonical_json(
+                        snapshot_raw_ocr_result(job["block"])
+                    ),
+                )
+            )
+        return records
+
+    def _process_prepared_job(self, job: dict[str, Any]) -> dict[str, Any]:
+        record = job["request_record"]
+        started_at_perf = time.perf_counter()
+        enqueue_perf = job.get("enqueue_perf")
+        if isinstance(enqueue_perf, (int, float)):
+            record["queue_wait_ms"] = round(
+                max(0.0, started_at_perf - float(enqueue_perf)) * 1000.0,
+                3,
+        )
+        record["start_ts"] = time.time()
+        blk = job["block"]
+        outcome_block = copy.copy(blk)
+        crop = job.get("prepared_crop")
+        image_bytes = job.get("prepared_image_bytes")
+        try:
+            self._raise_if_cancelled()
+            if not isinstance(crop, np.ndarray) or not isinstance(
+                image_bytes, (bytes, bytearray)
+            ):
+                raise LocalServiceResponseError(
+                    "Prepared PaddleOCR-VL cache miss has no request crop.",
+                    service_name="PaddleOCR VL",
+                    settings_page_name="PaddleOCR VL Settings",
+                )
+            self._request_telemetry_context.record = record
+            try:
+                raw_text = self._request_ocr_text_from_encoded(bytes(image_bytes))
+            finally:
+                self._request_telemetry_context.record = None
+            self._raise_if_cancelled()
+            parse_started_at = time.perf_counter()
+            cleaned = self._normalize_output_text(raw_text)
+            non_text_reason = (
+                self._classify_non_text_response(blk, cleaned, crop)
+                if cleaned
+                else ""
+            )
+            self._add_request_metric(
+                record,
+                "parse_sanitize_ms",
+                (time.perf_counter() - parse_started_at) * 1000.0,
+            )
+            if cleaned and self._is_layout_schema_only_text(cleaned):
+                self._mark_empty(
+                    outcome_block,
+                    self.LAYOUT_SCHEMA_EMPTY_REASON,
+                    raw_text=raw_text,
+                )
+                record["status"] = "schema_only"
+            elif cleaned and non_text_reason:
+                self._mark_empty(
+                    outcome_block,
+                    self.NON_TEXT_RESPONSE_REASON,
+                    raw_text=raw_text,
+                )
+                outcome_block.ocr_reject_reason = non_text_reason
+                record["status"] = "rejected_non_text_response"
+                record["non_text_reason"] = non_text_reason
+            elif cleaned:
+                set_block_ocr_diagnostics(
+                    outcome_block,
+                    text=cleaned,
+                    confidence=0.0,
+                    status=OCR_STATUS_OK,
+                    empty_reason="",
+                    attempt_count=1,
+                    raw_text=raw_text,
+                    sanitized_text=cleaned,
+                )
+                record["status"] = "ok"
+            else:
+                self._mark_empty(
+                    outcome_block,
+                    "PaddleOCR VL returned no usable text.",
+                    raw_text=raw_text,
+                )
+                record["status"] = "empty"
+            return snapshot_raw_ocr_result(outcome_block)
+        except Exception as exc:
+            record["status"] = f"error:{type(exc).__name__}"
+            record["error"] = str(exc)
+            raise
+        finally:
+            job.pop("prepared_crop", None)
+            job.pop("prepared_image_bytes", None)
+            record["end_ts"] = time.time()
+            record["elapsed_ms"] = round(
+                (time.perf_counter() - started_at_perf) * 1000.0,
+                3,
+            )
 
     def _process_job(self, img: np.ndarray, job: dict[str, Any]) -> None:
         record = job["request_record"]
@@ -523,6 +985,20 @@ class PaddleOCRVLEngine(OCREngine):
                 if field_name in integer_fields
                 else round(total, 3)
             )
+        persistent_cache = self.last_page_profile.get("persistent_cache")
+        if isinstance(persistent_cache, dict):
+            performance["persistent_cache_hit_count"] = int(
+                persistent_cache.get("hit_count", 0) or 0
+            )
+            performance["persistent_cache_miss_count"] = int(
+                persistent_cache.get("miss_count", 0) or 0
+            )
+            performance["persistent_cache_runtime_miss_count"] = int(
+                persistent_cache.get("runtime_miss_count", 0) or 0
+            )
+            performance["persistent_cache_disabled_count"] = int(
+                bool(persistent_cache.get("lookup_disabled", False))
+            )
         self.last_page_profile["performance"] = performance
 
     @staticmethod
@@ -587,7 +1063,6 @@ class PaddleOCRVLEngine(OCREngine):
 
     def _request_ocr_text(self, image: np.ndarray) -> str:
         record = self._current_request_record()
-        self._add_request_metric(record, "logical_request_count", 1)
         started_at = time.perf_counter()
         image_bytes = self._encode_image(image)
         self._add_request_metric(
@@ -595,6 +1070,11 @@ class PaddleOCRVLEngine(OCREngine):
             "encode_ms",
             (time.perf_counter() - started_at) * 1000.0,
         )
+        return self._request_ocr_text_from_encoded(image_bytes)
+
+    def _request_ocr_text_from_encoded(self, image_bytes: bytes) -> str:
+        record = self._current_request_record()
+        self._add_request_metric(record, "logical_request_count", 1)
         self._add_request_metric(record, "request_bytes", len(image_bytes))
         started_at = time.perf_counter()
         image_b64 = base64.b64encode(image_bytes).decode("ascii")

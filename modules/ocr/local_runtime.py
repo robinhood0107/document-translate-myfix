@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import hashlib
+import json
 import logging
 import os
 import threading
@@ -25,6 +27,17 @@ ROOT_DIR = Path(__file__).resolve().parents[2]
 DEFAULT_HUNYUAN_N_GPU_LAYERS = "80"
 LATE_START_STOP_GRACE_SEC = 3.0
 LATE_START_STOP_POLL_SEC = 0.25
+PADDLEOCR_IMAGE_REPOSITORY = (
+    "ccr-2vdh3abv-pub.cnc.bj.baidubce.com/"
+    "paddlepaddle/paddleocr-genai-vllm-server"
+)
+PADDLEOCR_IMAGE_DIGEST = (
+    "sha256:d0d32c04a2119613d25a0a4c292e165ccc107954b74580613cf59e378037f8f5"
+)
+PADDLEOCR_IMAGE_REF = f"{PADDLEOCR_IMAGE_REPOSITORY}@{PADDLEOCR_IMAGE_DIGEST}"
+PADDLEOCR_RUNTIME_FINGERPRINT_LABEL = (
+    "com.comictranslate.paddleocr-runtime-fingerprint"
+)
 OCRPreflightProbeResult = Literal["healthy", "unavailable", "not_managed"]
 OCRHealthState = Literal["healthy", "loading", "unavailable"]
 
@@ -108,6 +121,60 @@ class LocalOCRRuntimeManager:
             return None
         return f"{engine_key}|{_normalize_url(self._resolve_server_url(engine_key, settings_page))}"
 
+    def get_ocr_cache_identity(
+        self,
+        engine_key: str,
+        settings_page: Any,
+    ) -> dict[str, Any] | None:
+        """Return a trustworthy identity without starting the managed runtime."""
+
+        if engine_key != "PaddleOCR VL":
+            return None
+        if not self.should_manage_engine(engine_key, settings_page):
+            return None
+        try:
+            expected_names = self._managed_container_names(engine_key)
+            present_names = self._present_managed_container_names(engine_key)
+            if (
+                len(present_names) != len(expected_names)
+                or not self._paddle_containers_match_contract(present_names)
+            ):
+                return None
+            contract = self._paddle_runtime_contract()
+            image_id = self._inspect_docker_image_id(PADDLEOCR_IMAGE_REF)
+        except OperationCancelledError:
+            raise
+        except Exception:
+            logger.warning(
+                "Persistent PaddleOCR-VL cache is disabled for this run because "
+                "the managed runtime identity could not be resolved.",
+                exc_info=True,
+            )
+            return None
+        if not image_id:
+            logger.info(
+                "Persistent PaddleOCR-VL cache is disabled until the pinned "
+                "managed image is installed locally."
+            )
+            return None
+        return {
+            "identity_schema_version": 1,
+            "managed": True,
+            "engine": engine_key,
+            "endpoint": _normalize_url(
+                self._resolve_server_url(engine_key, settings_page)
+            ),
+            "model_name": "PaddleOCR-VL-1.6-0.9B",
+            "image_ref": PADDLEOCR_IMAGE_REF,
+            "image_digest": PADDLEOCR_IMAGE_DIGEST,
+            "image_id": image_id,
+            "compose_sha256": contract["compose_sha256"],
+            "command_sha256": contract["command_sha256"],
+            "vllm_config_sha256": contract["vllm_config_sha256"],
+            "pipeline_config_sha256": contract["pipeline_config_sha256"],
+            "runtime_fingerprint": contract["runtime_fingerprint"],
+        }
+
     def probe_managed_engine(
         self,
         engine_key: str,
@@ -187,6 +254,60 @@ class LocalOCRRuntimeManager:
         self.validate_engine(engine_key, settings_page)
         config = self._config_for(engine_key)
         health_urls = self._config_health_urls(config)
+        present_containers = (
+            self._present_managed_container_names(engine_key)
+            if engine_key == "PaddleOCR VL"
+            else []
+        )
+        if (
+            engine_key == "PaddleOCR VL"
+            and present_containers
+            and (
+                len(present_containers)
+                != len(self._managed_container_names(engine_key))
+                or not self._paddle_containers_match_contract(present_containers)
+            )
+        ):
+            self._managed_start_attempted_engine = engine_key
+            self._emit_progress(
+                progress_callback,
+                engine_key,
+                status="starting",
+                step_key="container_recreate",
+                message=f"{engine_key} 런타임 구성이 변경되어 컨테이너를 다시 만드는 중...",
+                detail="docker compose up -d --force-recreate",
+            )
+            self._run_compose(
+                engine_key,
+                "up",
+                "-d",
+                "--force-recreate",
+                step_name="force-recreate",
+            )
+            self._active_engine = engine_key
+            if not self._wait_for_health(
+                health_urls,
+                timeout_sec=timeout_sec,
+                progress_callback=progress_callback,
+                cancel_checker=cancel_checker,
+                engine_key=engine_key,
+                step_key="health_wait",
+                message=f"{engine_key} health 기다리는 중...",
+            ):
+                raise self._build_setup_error(
+                    engine_key,
+                    "Recreated managed containers did not become healthy.",
+                )
+            self._emit_progress(
+                progress_callback,
+                engine_key,
+                status="completed",
+                step_key="container_recreate",
+                message=f"{engine_key} 컨테이너 재생성이 완료되었습니다.",
+            )
+            return
+
+        existing_containers = list(present_containers)
         initial_state = self._probe_health_state(health_urls)
         if initial_state == "healthy":
             self._active_engine = engine_key
@@ -229,7 +350,8 @@ class LocalOCRRuntimeManager:
                 )
                 return
 
-        existing_containers = self._existing_managed_container_names(engine_key)
+        if not existing_containers:
+            existing_containers = self._existing_managed_container_names(engine_key)
         if existing_containers:
             self._managed_start_attempted_engine = engine_key
             self._emit_progress(
@@ -424,6 +546,10 @@ class LocalOCRRuntimeManager:
         env.setdefault("LLAMA_CPP_IMAGE", DEFAULT_LLAMA_CPP_IMAGE)
         if engine_key == "HunyuanOCR":
             env.setdefault("LLAMA_N_GPU_LAYERS", DEFAULT_HUNYUAN_N_GPU_LAYERS)
+        if engine_key == "PaddleOCR VL":
+            env["PADDLEOCR_RUNTIME_FINGERPRINT"] = str(
+                self._paddle_runtime_contract()["runtime_fingerprint"]
+            )
         return env
 
     def _resolve_server_url(self, engine_key: str, settings_page: Any) -> str:
@@ -493,7 +619,140 @@ class LocalOCRRuntimeManager:
         names = config.get("container_names") or [config.get("container_name")]
         return [str(name).strip() for name in names if str(name or "").strip()]
 
+    @staticmethod
+    def _sha256_file(path: Path) -> str:
+        digest = hashlib.sha256()
+        with path.open("rb") as handle:
+            for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+                digest.update(chunk)
+        return digest.hexdigest()
+
+    def _paddle_runtime_contract(self) -> dict[str, str]:
+        compose_file = Path(self._config_for("PaddleOCR VL")["compose_file"])
+        vllm_config = compose_file.parent / "vllm_config.yml"
+        pipeline_config = compose_file.parent / "pipeline_conf.yaml"
+        for path in (compose_file, vllm_config, pipeline_config):
+            if not path.is_file():
+                raise FileNotFoundError(path)
+
+        try:
+            import yaml
+
+            compose_payload = yaml.safe_load(
+                compose_file.read_text(encoding="utf-8")
+            )
+        except Exception as exc:
+            raise RuntimeError(
+                f"Failed to parse PaddleOCR-VL compose contract: {compose_file}"
+            ) from exc
+        services = (
+            compose_payload.get("services", {})
+            if isinstance(compose_payload, dict)
+            else {}
+        )
+        commands = {
+            str(name): str(config.get("command", "") or "")
+            for name, config in sorted(services.items())
+            if isinstance(config, dict)
+        }
+        command_sha256 = hashlib.sha256(
+            json.dumps(
+                commands,
+                ensure_ascii=False,
+                sort_keys=True,
+                separators=(",", ":"),
+            ).encode("utf-8")
+        ).hexdigest()
+        contract = {
+            "compose_sha256": self._sha256_file(compose_file),
+            "command_sha256": command_sha256,
+            "vllm_config_sha256": self._sha256_file(vllm_config),
+            "pipeline_config_sha256": self._sha256_file(pipeline_config),
+        }
+        contract["runtime_fingerprint"] = hashlib.sha256(
+            json.dumps(
+                {
+                    **contract,
+                    "image_ref": PADDLEOCR_IMAGE_REF,
+                    "model_name": "PaddleOCR-VL-1.6-0.9B",
+                },
+                sort_keys=True,
+                separators=(",", ":"),
+            ).encode("utf-8")
+        ).hexdigest()
+        return contract
+
+    def _inspect_docker_image_id(self, image_ref: str) -> str:
+        from modules.utils.llama_cpp_runtime import run_docker_command
+
+        completed = run_docker_command(
+            ["docker", "image", "inspect", image_ref, "--format", "{{.Id}}"],
+            check=False,
+            timeout_sec=15.0,
+            cancel_checker=self._startup_cancel_checker,
+        )
+        if getattr(completed, "returncode", 1) != 0:
+            return ""
+        return str(getattr(completed, "stdout", "") or "").strip()
+
+    def _paddle_containers_match_contract(
+        self,
+        container_names: list[str],
+    ) -> bool:
+        try:
+            contract = self._paddle_runtime_contract()
+            expected_image_id = self._inspect_docker_image_id(PADDLEOCR_IMAGE_REF)
+        except OperationCancelledError:
+            raise
+        except Exception:
+            logger.warning(
+                "Failed to resolve the PaddleOCR-VL runtime contract; stale "
+                "containers will be recreated.",
+                exc_info=True,
+            )
+            return False
+        if not expected_image_id:
+            return False
+
+        from modules.utils.llama_cpp_runtime import run_docker_command
+
+        expected_fingerprint = str(contract["runtime_fingerprint"])
+        for name in container_names:
+            completed = run_docker_command(
+                [
+                    "docker",
+                    "inspect",
+                    "--format",
+                    (
+                        "{{index .Config.Labels "
+                        f"\"{PADDLEOCR_RUNTIME_FINGERPRINT_LABEL}\""
+                        "}}|{{.Image}}"
+                    ),
+                    name,
+                ],
+                check=False,
+                timeout_sec=15.0,
+                cancel_checker=self._startup_cancel_checker,
+            )
+            if getattr(completed, "returncode", 1) != 0:
+                return False
+            fingerprint, separator, image_id = str(
+                getattr(completed, "stdout", "") or ""
+            ).strip().partition("|")
+            if (
+                not separator
+                or fingerprint != expected_fingerprint
+                or image_id != expected_image_id
+            ):
+                return False
+        return True
+
     def _existing_managed_container_names(self, engine_key: str) -> list[str]:
+        names = self._managed_container_names(engine_key)
+        existing = self._present_managed_container_names(engine_key)
+        return existing if len(existing) == len(names) else []
+
+    def _present_managed_container_names(self, engine_key: str) -> list[str]:
         names = self._managed_container_names(engine_key)
         existing: list[str] = []
         for name in names:
@@ -511,7 +770,7 @@ class LocalOCRRuntimeManager:
                 continue
             if getattr(completed, "returncode", 1) == 0:
                 existing.append(name)
-        return existing if len(existing) == len(names) else []
+        return existing
 
     def _start_existing_managed_containers(self, engine_key: str, container_names: list[str]) -> None:
         if not container_names:
