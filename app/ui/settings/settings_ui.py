@@ -268,6 +268,8 @@ class SettingsPageUI(QtWidgets.QWidget):
         self.paddleocr_vl_visualize_checkbox = self.paddleocr_vl_page.visualize_checkbox
         self.paddleocr_vl_max_new_tokens_spinbox = self.paddleocr_vl_page.max_new_tokens_spinbox
         self.paddleocr_vl_parallel_workers_spinbox = self.paddleocr_vl_page.parallel_workers_spinbox
+        self.paddleocr_vl_persistent_cache_checkbox = self.paddleocr_vl_page.persistent_cache_checkbox
+        self.paddleocr_vl_persistent_cache_limit_spinbox = self.paddleocr_vl_page.persistent_cache_limit_spinbox
         self.hunyuan_ocr_server_url_input = self.hunyuan_ocr_page.server_url_input
         self.hunyuan_ocr_max_completion_tokens_spinbox = self.hunyuan_ocr_page.max_completion_tokens_spinbox
         self.hunyuan_ocr_parallel_workers_spinbox = self.hunyuan_ocr_page.parallel_workers_spinbox
