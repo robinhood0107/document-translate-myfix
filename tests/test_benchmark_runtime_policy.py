@@ -168,6 +168,10 @@ class BenchmarkRuntimePolicyTests(unittest.TestCase):
             "services": {
                 "gemma-local-server": {
                     "command": [
+                        "-ctk",
+                        "${LLAMA_CACHE_TYPE_K:-f16}",
+                        "-ctv",
+                        "${LLAMA_CACHE_TYPE_V:-f16}",
                         "--spec-type",
                         "${LLAMA_SPEC_TYPE:-ngram-mod}",
                         "--spec-draft-n-max",
@@ -192,6 +196,8 @@ class BenchmarkRuntimePolicyTests(unittest.TestCase):
             benchmark_common._stage_gemma_runtime(
                 {
                     "gemma": {
+                        "cache_type_k": "f16",
+                        "cache_type_v": "f16",
                         "spec_type": "none",
                         "spec_draft_n_max": 8,
                     }
@@ -202,6 +208,10 @@ class BenchmarkRuntimePolicyTests(unittest.TestCase):
         staged = yaml_dump.call_args.args[1]
         self.assertEqual(staged["name"], "comic-translate")
         command = staged["services"]["gemma-local-server"]["command"]
+        self.assertEqual(command[command.index("-ctk") + 1], "f16")
+        self.assertEqual(command[command.index("-ctv") + 1], "f16")
+        self.assertNotIn("--cache-type-k", command)
+        self.assertNotIn("--cache-type-v", command)
         self.assertEqual(
             command[command.index("--spec-type") + 1],
             "none",

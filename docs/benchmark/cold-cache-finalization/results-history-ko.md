@@ -18,6 +18,10 @@
   실패 0, Paddle runtime 시작 1회, OCR HTTP 20회로 완료됐습니다.
   runtime 시작은 82.276초, 전체 pipeline wall time은 105.318초였으며
   종료 뒤에도 제품 Compose project identity가 유지됐습니다.
+- 첫 project checkpoint cold control에서는 staged Gemma command에
+  `-ctk/-ctv`와 같은 의미의 긴 옵션이 중복돼 제품 runtime의 명령 완전
+  일치 계약이 실패했습니다. staging이 기존 `-ctk/-ctv` 값을 직접
+  교체하도록 수정하고 중복 옵션 금지 회귀 검사를 추가했습니다.
 - staged Gemma command에 no-spec/F16 계약을 직접 고정했습니다.
 - full baseline의 실제 stage share를 검증해 stage 5% 또는 예상 전체 1%
   게이트를 판정할 수 있게 했습니다.

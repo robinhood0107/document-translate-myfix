@@ -865,9 +865,9 @@ def _stage_gemma_runtime(preset: dict[str, Any], runtime_dir: Path) -> dict[str,
     if gemma.get("ubatch_size") is not None:
         _update_command_option(command, "-ub", [str(gemma["ubatch_size"])])
     if gemma.get("cache_type_k") is not None:
-        _update_command_option(command, "--cache-type-k", [str(gemma["cache_type_k"])])
+        _update_command_option(command, "-ctk", [str(gemma["cache_type_k"])])
     if gemma.get("cache_type_v") is not None:
-        _update_command_option(command, "--cache-type-v", [str(gemma["cache_type_v"])])
+        _update_command_option(command, "-ctv", [str(gemma["cache_type_v"])])
     if gemma.get("spec_type") is not None:
         _update_command_option(command, "--spec-type", [str(gemma["spec_type"])])
     if gemma.get("spec_draft_n_max") is not None:

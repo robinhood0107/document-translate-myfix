@@ -50,14 +50,16 @@ class BenchmarkGemmaRuntimeStagingTests(unittest.TestCase):
             "1024",
             "-ub",
             "512",
-            "--cache-type-k",
+            "-ctk",
             "q8_0",
-            "--cache-type-v",
+            "-ctv",
             "q8_0",
             "--flash-attn",
             "--no-warmup",
         ):
             self.assertIn(expected, command)
+        self.assertNotIn("--cache-type-k", command)
+        self.assertNotIn("--cache-type-v", command)
 
 
 if __name__ == "__main__":
