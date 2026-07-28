@@ -1235,7 +1235,7 @@ class CustomLocalGemmaRepetitionGuardTests(unittest.TestCase):
                     self.assertEqual(blocks[0].translation, "new")
 
     def test_result_dictionary_is_applied_once_after_miss_and_hit(self) -> None:
-        rules = [
+        first_rules = [
             {
                 "keyword": "cat",
                 "sub": "cat!",
@@ -1248,6 +1248,11 @@ class CustomLocalGemmaRepetitionGuardTests(unittest.TestCase):
             TranslationMemoryStore(Path(temp_dir) / "tm.sqlite3") as store,
         ):
             first = self._engine()
+            first.settings = mock.Mock(
+                get_translation_result_dictionary_rules=mock.Mock(
+                    return_value=first_rules
+                )
+            )
             first.configure_translation_memory(
                 store,
                 {
@@ -1270,10 +1275,23 @@ class CustomLocalGemmaRepetitionGuardTests(unittest.TestCase):
                     np.zeros((1, 1, 3), dtype=np.uint8),
                     "",
                 )
-            apply_translation_result_dictionary(first_blocks, rules)
+            apply_translation_result_dictionary(first_blocks, first_rules)
             self.assertEqual(first_blocks[0].translation, "cat!")
 
             second = self._engine()
+            second_rules = [
+                {
+                    "keyword": "cat",
+                    "sub": "cat?",
+                    "use_reg": False,
+                    "case_sens": True,
+                }
+            ]
+            second.settings = mock.Mock(
+                get_translation_result_dictionary_rules=mock.Mock(
+                    return_value=second_rules
+                )
+            )
             second.configure_translation_memory(
                 store,
                 {
@@ -1292,10 +1310,10 @@ class CustomLocalGemmaRepetitionGuardTests(unittest.TestCase):
                     np.zeros((1, 1, 3), dtype=np.uint8),
                     "",
                 )
-            apply_translation_result_dictionary(second_blocks, rules)
+            apply_translation_result_dictionary(second_blocks, second_rules)
 
             request.assert_not_called()
-            self.assertEqual(second_blocks[0].translation, "cat!")
+            self.assertEqual(second_blocks[0].translation, "cat?")
 
     def test_enabling_exact_tm_collects_candidates_from_result_cache_hits(self) -> None:
         with (
@@ -1418,7 +1436,7 @@ class CustomLocalGemmaRepetitionGuardTests(unittest.TestCase):
             self.assertEqual(identity["runtime"]["model_sha256"], "a" * 64)
             self.assertEqual(identity["runtime"]["runtime_fingerprint"], "runtime-a")
             self.assertEqual(identity["tm_revision"], 0)
-            self.assertTrue(identity["dictionary_version"])
+            self.assertNotIn("dictionary_version", identity)
             self.assertGreaterEqual(identity["prompt_contract_version"], 1)
             self.assertGreaterEqual(identity["translation_input_normalizer_version"], 1)
             self.assertGreaterEqual(identity["output_sanitizer_version"], 1)
