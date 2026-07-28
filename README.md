@@ -248,9 +248,14 @@ and diagnostics, never crop images, and is disabled automatically for custom
 endpoints.
 
 `Settings > Project` also contains a preview, default-off project checkpoint
-store. Detection geometry and raw PaddleOCR-VL results can be restored before
-runtime startup; current OCR dictionary rules are still applied exactly once.
-Reusable manifests and content-addressed artifacts live in a
+store. Detection geometry, raw PaddleOCR-VL results, lossless cleaned images,
+final masks, and encoded render outputs can be restored before their runtimes
+start. Translation text remains owned by the `.ctpr`; the sidecar stores only
+its validated stage signature, so a full project hit skips detector, Paddle,
+Gemma, inpainter, and renderer inference. Current OCR and translation
+dictionary rules are still applied exactly once, and changing a dictionary
+invalidates only its consumed result and downstream stages. Reusable manifests
+and content-addressed artifacts live in a
 `<project>.ctpr.cache` folder beside the `.ctpr` file. Missing, locked, or
 damaged checkpoint data never prevents the project from opening or processing;
 the affected stages are recalculated.
