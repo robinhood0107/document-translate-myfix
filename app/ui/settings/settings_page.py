@@ -438,6 +438,13 @@ class SettingsPage(QtWidgets.QWidget):
             ),
         }
 
+    def get_project_checkpoint_settings(self):
+        return {
+            "enabled": bool(
+                self.ui.project_checkpoint_enabled_checkbox.isChecked()
+            ),
+        }
+
     def get_gemma_local_server_settings(self):
         persisted_settings = QSettings("ComicLabs", "ComicTranslate")
         migrate_retired_gemma_request_mode(persisted_settings)
@@ -757,12 +764,11 @@ class SettingsPage(QtWidgets.QWidget):
             "mangalmm_ocr": self.get_mangalmm_ocr_settings(),
             "gemma_local_server": self.get_gemma_local_server_settings(),
             "translation_memory": self.get_translation_memory_settings(),
-            "project_checkpoint": {
-                "enabled": bool(
-                    checkpoint_checkbox
-                    and checkpoint_checkbox.isChecked()
-                ),
-            },
+            "project_checkpoint": (
+                self.get_project_checkpoint_settings()
+                if checkpoint_checkbox is not None
+                else {"enabled": False}
+            ),
             "llm": self.get_llm_settings(),
             "text_rendering": self.get_text_rendering_settings(),
             "export": self.get_export_settings(),

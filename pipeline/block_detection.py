@@ -2,6 +2,9 @@ import logging
 from typing import List
 from PySide6 import QtCore
 
+from app.projects.stage_checkpoints import (
+    invalidate_project_page_checkpoints,
+)
 from modules.detection.processor import TextBlockDetector
 from modules.utils.textblock import TextBlock, ensure_text_block_id, sort_blk_list
 from modules.rendering.render import get_best_render_area
@@ -200,6 +203,11 @@ class BlockDetectionHandler:
                 "detect",
                 "completed",
                 block_count=len(self.main_page.blk_list),
+            )
+            invalidate_project_page_checkpoints(
+                self.main_page,
+                current_file,
+                stage="ocr",
             )
         
         if load_rects:
