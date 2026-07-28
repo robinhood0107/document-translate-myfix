@@ -59,14 +59,14 @@ upstream fingerprint가 바뀌면 해당 stage의 downstream record만 무효화
 
 강제 재계산은 원본 페이지와 사용자 편집을 삭제하지 않는다. 무효화 뒤 남은 object는 별도 정리 작업에서만 제거한다.
 
-## 후속 연결
+## Stage 연결 상태
 
-1. detection과 OCR checkpoint를 연결한다.
-2. project checkpoint miss일 때만 global exact OCR cache를 조회한다.
-3. translation은 기존 SQLite result cache를 중복 저장하지 않고 fingerprint 유효성만 기록한다.
-4. inpaint는 final mask와 lossless cleaned artifact를 함께 저장한다.
-5. render는 output SHA가 일치하면 생략하고, output이 없으면 render만 실행한다.
-6. 통합 검증을 통과한 뒤에만 one-time migration으로 기본값을 켠다.
+1. detection과 OCR checkpoint 연결 완료
+2. project checkpoint miss일 때만 global exact OCR cache를 조회
+3. translation은 기존 SQLite result cache를 중복 저장하지 않고 `.ctpr` 번역 상태의 fingerprint 유효성만 기록
+4. inpaint는 final mask와 lossless cleaned artifact를 content-addressed object로 저장
+5. render는 output SHA가 일치하면 생략하고, output이 없으면 검증된 encoded object만 원래 안전한 경로에 materialize
+6. 통합 cold/all-hit 검증 전까지 설정 기본값은 계속 꺼짐
 
 ## 검증 게이트
 
