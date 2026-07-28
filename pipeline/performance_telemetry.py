@@ -365,6 +365,29 @@ class PipelinePerformanceTelemetry:
         profile = payload.get("ocr_page_profile")
         if not isinstance(profile, Mapping):
             return
+        project_checkpoint = profile.get("project_checkpoint")
+        inference_count = (
+            project_checkpoint.get("inference_count")
+            if isinstance(project_checkpoint, Mapping)
+            else None
+        )
+        http_request_count = (
+            project_checkpoint.get("http_request_count")
+            if isinstance(project_checkpoint, Mapping)
+            else None
+        )
+        if (
+            isinstance(project_checkpoint, Mapping)
+            and str(project_checkpoint.get("status") or "").strip().lower()
+            == "hit"
+            and isinstance(inference_count, (int, float))
+            and not isinstance(inference_count, bool)
+            and float(inference_count) == 0.0
+            and isinstance(http_request_count, (int, float))
+            and not isinstance(http_request_count, bool)
+            and float(http_request_count) == 0.0
+        ):
+            return
         performance = profile.get("performance")
         if not isinstance(performance, Mapping):
             return
