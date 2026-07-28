@@ -265,6 +265,7 @@ class SettingsPage(QtWidgets.QWidget):
             self.ui.paddleocr_vl_prettify_checkbox,
             self.ui.paddleocr_vl_visualize_checkbox,
             self.ui.paddleocr_vl_persistent_cache_checkbox,
+            self.ui.project_checkpoint_enabled_checkbox,
             self.ui.hunyuan_ocr_raw_response_logging_checkbox,
             self.ui.mangalmm_ocr_raw_response_logging_checkbox,
             self.ui.mangalmm_ocr_safe_resize_checkbox,
@@ -732,6 +733,11 @@ class SettingsPage(QtWidgets.QWidget):
         }
 
     def get_all_settings(self):
+        checkpoint_checkbox = getattr(
+            self.ui,
+            "project_checkpoint_enabled_checkbox",
+            None,
+        )
         return {
             "language": self.get_language(),
             "theme": self.get_theme(),
@@ -751,6 +757,12 @@ class SettingsPage(QtWidgets.QWidget):
             "mangalmm_ocr": self.get_mangalmm_ocr_settings(),
             "gemma_local_server": self.get_gemma_local_server_settings(),
             "translation_memory": self.get_translation_memory_settings(),
+            "project_checkpoint": {
+                "enabled": bool(
+                    checkpoint_checkbox
+                    and checkpoint_checkbox.isChecked()
+                ),
+            },
             "llm": self.get_llm_settings(),
             "text_rendering": self.get_text_rendering_settings(),
             "export": self.get_export_settings(),
@@ -1261,6 +1273,12 @@ class SettingsPage(QtWidgets.QWidget):
             owner.auto_export_translation_txt_checkbox.setChecked(bool(auto_export_translation_txt))
         if getattr(owner, "auto_export_translation_md_checkbox", None) is not None:
             owner.auto_export_translation_md_checkbox.setChecked(bool(auto_export_translation_md))
+        settings.endGroup()
+
+        settings.beginGroup("project_checkpoint")
+        self.ui.project_checkpoint_enabled_checkbox.setChecked(
+            settings.value("enabled", False, type=bool)
+        )
         settings.endGroup()
 
         settings.beginGroup("series")

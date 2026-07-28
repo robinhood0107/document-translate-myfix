@@ -265,6 +265,15 @@ class ComicTranslate(ComicTranslateUI):
         self.save_all_browser.sig_file_changed.connect(self.project_ctrl.save_and_make)
         self.save_project_button.clicked.connect(self.project_ctrl.thread_save_project)
         self.save_as_project_button.clicked.connect(self.project_ctrl.thread_save_as_project)
+        self.settings_page.ui.project_page.open_checkpoint_folder_requested.connect(
+            self.project_ctrl.open_project_checkpoint_folder
+        )
+        self.settings_page.ui.project_page.clean_checkpoint_cache_requested.connect(
+            self.project_ctrl.clean_project_checkpoint_cache
+        )
+        self.settings_page.ui.project_page.force_checkpoint_recompute_requested.connect(
+            self.project_ctrl.force_recompute_project_checkpoints
+        )
         self.drag_browser.sig_files_changed.connect(self._guarded_thread_load_images)
        
         self.manual_radio.clicked.connect(self.manual_mode_selected)

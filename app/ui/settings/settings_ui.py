@@ -336,6 +336,9 @@ class SettingsPageUI(QtWidgets.QWidget):
         self.automatic_output_estimate_summary_label = self.export_page.automatic_output_estimate_summary_label
         self.project_autosave_interval_spinbox = self.project_page.project_autosave_interval_spinbox
         self.project_autosave_folder_input = self.project_page.project_autosave_folder_input
+        self.project_checkpoint_enabled_checkbox = (
+            self.project_page.project_checkpoint_enabled_checkbox
+        )
         self.series_failure_policy_combo = self.series_page.failure_policy_combo
         self.series_retry_count_spinbox = self.series_page.retry_count_spinbox
         self.series_retry_delay_spinbox = self.series_page.retry_delay_spinbox

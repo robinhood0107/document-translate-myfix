@@ -110,6 +110,11 @@ For bundle details, see [/paddleocr_vl_docker_files/README.md](/paddleocr_vl_doc
 - OCR: `Optimal (HunyuanOCR / PaddleOCR VL)`
 - Translator: `Custom Local Server(Gemma)` after the Gemma volume is prepared
 
+Project stage checkpoints are available as a default-off preview under
+`Settings > Project`. Save the `.ctpr` file before using its cache management
+actions. The adjacent `.ctpr.cache` folder is disposable and is never required
+to open the project.
+
 Routing summary:
 
 - Chinese -> `HunyuanOCR`
