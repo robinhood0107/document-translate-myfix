@@ -248,7 +248,9 @@ and diagnostics, never crop images, and is disabled automatically for custom
 endpoints.
 
 `Settings > Project` also contains a preview, default-off project checkpoint
-store. It keeps reusable stage manifests and content-addressed artifacts in a
+store. Detection geometry and raw PaddleOCR-VL results can be restored before
+runtime startup; current OCR dictionary rules are still applied exactly once.
+Reusable manifests and content-addressed artifacts live in a
 `<project>.ctpr.cache` folder beside the `.ctpr` file. Missing, locked, or
 damaged checkpoint data never prevents the project from opening or processing;
 the affected stages are recalculated.

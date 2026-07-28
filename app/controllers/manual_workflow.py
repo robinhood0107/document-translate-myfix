@@ -5,6 +5,9 @@ from typing import TYPE_CHECKING, Any, Callable, Sequence
 
 from PySide6 import QtCore
 
+from app.projects.stage_checkpoints import (
+    invalidate_project_page_checkpoints,
+)
 from app.ui.messages import Messages
 from modules.detection.processor import TextBlockDetector
 from modules.detection.utils.content import get_inpaint_bboxes
@@ -197,6 +200,11 @@ class ManualWorkflowController:
                         "completed",
                         block_count=len(blk_list or []),
                     )
+                    invalidate_project_page_checkpoints(
+                        self.main,
+                        file_path,
+                        stage="ocr",
+                    )
                     if file_path == current_file:
                         current_blocks = blk_list
 
@@ -337,6 +345,11 @@ class ManualWorkflowController:
                         "completed",
                         cache_status=cache_status,
                         quality=quality,
+                    )
+                    invalidate_project_page_checkpoints(
+                        self.main,
+                        file_path,
+                        stage="ocr",
                     )
                     if file_path == current_file:
                         self.main.blk_list = blk_list.copy()
