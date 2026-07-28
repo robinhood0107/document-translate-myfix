@@ -16,6 +16,33 @@ import benchmark_translation_memory_fast_path as benchmark  # noqa: E402
 
 
 class TranslationMemoryFastPathBenchmarkTests(unittest.TestCase):
+    def test_new_engine_uses_retired_grouped_replacement_mode(self) -> None:
+        class StubRuntime:
+            def __init__(self) -> None:
+                self.settings = benchmark.RuntimeSettings(
+                    model="example.gguf",
+                )
+
+            @staticmethod
+            def ensure() -> None:
+                return None
+
+            @staticmethod
+            def identity() -> dict[str, str]:
+                return {}
+
+        engine = benchmark.new_engine(
+            language="Japanese",
+            store=None,
+            runtime=StubRuntime(),
+            persistent_cache_enabled=False,
+            exact_tm_enabled=False,
+            group_size=6,
+            max_completion_tokens=512,
+        )
+
+        self.assertEqual(engine.request_mode, "contextual-single")
+
     def test_load_multilingual_corpora_requires_exact_language_counts(self) -> None:
         translations = []
         for language in ("japanese", "chinese", "english"):
