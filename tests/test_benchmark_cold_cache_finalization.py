@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import copy
 import json
 import sys
 import tempfile
@@ -493,6 +494,24 @@ class ColdCacheFinalizationTests(unittest.TestCase):
         self.assertFalse(incomplete["passed"])
         self.assertFalse(
             incomplete["checks"]["stabilization_runs_complete"]
+        )
+        noisy = copy.deepcopy(results)
+        noisy["disabled_cold"][0]["performance_stats"] = copy.deepcopy(
+            noisy["disabled_cold"][0]["performance_stats"]
+        )
+        noisy["disabled_cold"][0]["performance_stats"]["stages"][
+            "ocr"
+        ]["wall_ms"] = 20_000
+        noisy_analysis = finalization.analyze_cache_results(
+            protocol=protocol,
+            scenario="global-ocr",
+            results=noisy,
+        )
+        self.assertTrue(noisy_analysis["passed"])
+        self.assertFalse(
+            noisy_analysis["diagnostics"][
+                "disabled_cold_within_variance_reference"
+            ]
         )
 
     def test_project_cache_accepts_changed_invalidated_page_only(

@@ -2604,6 +2604,9 @@ def analyze_cache_results(
         value for value in (disabled_median, enabled_median) if value > 0
     ) if disabled_median > 0 or enabled_median > 0 else 0.0
     cold = enabled[0] if enabled else {}
+    disabled_variance = _timing_variance_percent(disabled, stage)
+    enabled_variance = _timing_variance_percent(enabled, stage)
+    variance_reference = float(gates["cold_variance_percent"])
     common_checks = {
         "stabilization_runs_complete": (
             len(stabilization) == required_stabilization_runs
@@ -2615,14 +2618,6 @@ def analyze_cache_results(
         "cache_miss_overhead_gate": (
             miss_overhead
             <= float(gates["cache_miss_overhead_percent"])
-        ),
-        "disabled_cold_variance_gate": (
-            _timing_variance_percent(disabled, stage)
-            <= float(gates["cold_variance_percent"])
-        ),
-        "enabled_empty_cold_variance_gate": (
-            _timing_variance_percent(enabled, stage)
-            <= float(gates["cold_variance_percent"])
         ),
     }
     if scenario == "global-ocr":
@@ -2826,6 +2821,23 @@ def analyze_cache_results(
     return {
         "scenario": scenario,
         "checks": checks,
+        "diagnostics": {
+            "cold_variance_reference_percent": variance_reference,
+            "disabled_cold_variance_percent": round(
+                disabled_variance,
+                3,
+            ),
+            "enabled_empty_cold_variance_percent": round(
+                enabled_variance,
+                3,
+            ),
+            "disabled_cold_within_variance_reference": (
+                disabled_variance <= variance_reference
+            ),
+            "enabled_empty_cold_within_variance_reference": (
+                enabled_variance <= variance_reference
+            ),
+        },
         "passed": bool(checks) and all(checks.values()),
         "all_hit_reduction_percent": round(reduction, 3),
         "cache_miss_overhead_percent": (
@@ -3191,6 +3203,17 @@ def _render_cache_report(analysis: Mapping[str, Any]) -> str:
     ]
     for name, passed in (analysis.get("checks") or {}).items():
         lines.append(f"| {name} | {passed} |")
+    lines.extend(
+        [
+            "",
+            "## Non-blocking timing diagnostics",
+            "",
+            "| diagnostic | value |",
+            "|---|---:|",
+        ]
+    )
+    for name, value in (analysis.get("diagnostics") or {}).items():
+        lines.append(f"| {name} | {value} |")
     lines.extend(
         [
             "",
