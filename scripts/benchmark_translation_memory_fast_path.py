@@ -36,7 +36,7 @@ from modules.translation.llm.custom_local_gemma import (  # noqa: E402
     DEFAULT_GEMMA_TRANSLATION_TEMPERATURE,
     DEFAULT_GEMMA_TRANSLATION_TOP_K,
     DEFAULT_GEMMA_TRANSLATION_TOP_P,
-    GEMMA_REQUEST_MODE_CONTEXTUAL_GROUPED,
+    GEMMA_REQUEST_MODE_CONTEXTUAL_SINGLE,
     CustomLocalGemmaTranslation,
 )
 from modules.translation.local_runtime import (  # noqa: E402
@@ -308,7 +308,7 @@ def new_engine(
     engine.chunk_size = int(group_size)
     engine.max_tokens = int(max_completion_tokens)
     engine.timeout = 240
-    engine.request_mode = GEMMA_REQUEST_MODE_CONTEXTUAL_GROUPED
+    engine.request_mode = GEMMA_REQUEST_MODE_CONTEXTUAL_SINGLE
     engine.raw_response_logging = False
     engine.prompt_profile = DEFAULT_GEMMA_PROMPT_PROFILE
     engine.response_format_mode = DEFAULT_GEMMA_RESPONSE_FORMAT_MODE

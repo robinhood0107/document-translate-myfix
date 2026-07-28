@@ -8,7 +8,7 @@ multilingual summary (54 blocks)
         v
 benchmark_translation_memory_fast_path.py
         |
-        +--> CustomLocalGemmaTranslation (real grouped product path)
+        +--> CustomLocalGemmaTranslation (contextual-single product path)
         |       |
         |       +--> TranslationMemoryStore (scenario-local SQLite)
         |       +--> LocalGemmaRuntimeManager (prepared runtime identity)
@@ -20,7 +20,7 @@ benchmark_translation_memory_fast_path.py
 
 ## Cache 계획
 
-각 블록의 result-cache key는 전체 정렬 문맥, target index/key, 언어, extra context, group mode/size, prompt/profile/schema, sampler, 모델 SHA-256, runtime fingerprint, sanitizer·guard·TM revision을 포함하는 제품 코드에서 생성됩니다.
+각 블록의 result-cache key는 전체 정렬 문맥, target index/key, 언어, extra context, request mode/context chunk size, prompt/profile/schema, sampler, 모델 SHA-256, runtime fingerprint, sanitizer·guard·TM revision을 포함하는 제품 코드에서 생성됩니다.
 
 mixed 시나리오는 cold 기준선의 짝수 index 결과 27개를 제품 cache plan의 실제 key로 seed합니다. 이후 54블록을 요청하면 seed된 27개는 SQLite hit로 복원하고 홀수 index 27개만 `requested_blocks`로 Gemma에 전송합니다. seed 과정은 성능 측정에서 제외하며, 실제 조회·부분 요청·결과 병합·저장은 제품 경로를 그대로 사용합니다.
 
