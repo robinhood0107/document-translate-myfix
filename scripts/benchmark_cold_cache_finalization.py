@@ -1349,6 +1349,32 @@ def _input_contract(input_dir: Path, sample_count: int) -> dict[str, Any]:
     }
 
 
+def _cache_protocol_state(
+    protocol: Mapping[str, Any],
+    *,
+    scenario: str,
+    input_dir: Path,
+    sample_count: int,
+    source_language: str,
+    stabilization_orders: list[list[str]],
+    cold_orders: list[list[str]],
+) -> dict[str, Any]:
+    input_contract = _input_contract(input_dir, sample_count)
+    state = _protocol_state(protocol)
+    state.update(
+        {
+            "command": "run-cache",
+            "scenario": scenario,
+            "sample_count": sample_count,
+            "source_language": source_language,
+            "input_contract_sha256": input_contract["sha256"],
+            "cache_stabilization_orders": stabilization_orders,
+            "cold_execution_orders": cold_orders,
+        }
+    )
+    return state
+
+
 def _load_full_reference(
     path: Path,
     *,
@@ -2903,16 +2929,14 @@ def run_cache_scenario(args: argparse.Namespace) -> int:
         ("disabled_cold", "enabled_empty_cold"),
         int(protocol["limits"]["cache_stabilization_pairs"]) + 1,
     )[1:]
-    protocol_state = _protocol_state(protocol)
-    protocol_state.update(
-        {
-            "command": "run-cache",
-            "scenario": args.scenario,
-            "sample_count": sample_count,
-            "source_language": args.source_lang,
-            "cache_stabilization_orders": stabilization_orders,
-            "cold_execution_orders": cold_orders,
-        }
+    protocol_state = _cache_protocol_state(
+        protocol,
+        scenario=args.scenario,
+        input_dir=input_dir,
+        sample_count=sample_count,
+        source_language=args.source_lang,
+        stabilization_orders=stabilization_orders,
+        cold_orders=cold_orders,
     )
     _write_json(output_dir / PROTOCOL_STATE_NAME, protocol_state)
     state: dict[str, Any] = {

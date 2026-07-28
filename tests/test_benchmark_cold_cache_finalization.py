@@ -102,6 +102,40 @@ class ColdCacheFinalizationTests(unittest.TestCase):
             [["a", "b"], ["b", "a"], ["a", "b"]],
         )
 
+    def test_cache_protocol_state_records_input_content_contract(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            input_dir = Path(tmp)
+            (input_dir / "page.png").write_bytes(b"cache-input")
+            with mock.patch.object(
+                finalization,
+                "_protocol_state",
+                return_value={"commit": "abc123"},
+            ):
+                state = finalization._cache_protocol_state(
+                    {},
+                    scenario="global-ocr",
+                    input_dir=input_dir,
+                    sample_count=1,
+                    source_language="Japanese",
+                    stabilization_orders=[
+                        ["enabled_empty_cold", "disabled_cold"]
+                    ],
+                    cold_orders=[
+                        ["disabled_cold", "enabled_empty_cold"],
+                        ["enabled_empty_cold", "disabled_cold"],
+                        ["disabled_cold", "enabled_empty_cold"],
+                    ],
+                )
+
+            expected = finalization._input_contract(input_dir, 1)
+            self.assertEqual(
+                state["input_contract_sha256"],
+                expected["sha256"],
+            )
+            self.assertEqual(state["sample_count"], 1)
+            self.assertEqual(state["source_language"], "Japanese")
+            self.assertEqual(state["scenario"], "global-ocr")
+
     def test_deep_merge_preserves_unmodified_runtime_contract(self) -> None:
         merged = finalization._deep_merge(
             {
