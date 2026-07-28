@@ -278,6 +278,30 @@
           "concurrency": 2
         }
       ]
+    },
+    {
+      "id": "gemma-batch",
+      "stage": "translation",
+      "execution": "generated-translation",
+      "quality_gate": "one-finalist-292-row-blind",
+      "baseline_values": {
+        "batch_size": 2048,
+        "ubatch_size": 512
+      },
+      "axes": {
+        "batch_size": [
+          512,
+          1024,
+          2048,
+          4096
+        ],
+        "ubatch_size": [
+          128,
+          256,
+          512,
+          1024
+        ]
+      }
     }
   ],
   "conditional_spikes": [

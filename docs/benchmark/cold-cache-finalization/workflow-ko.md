@@ -39,6 +39,11 @@ IQ4_NL/IQ4_XS, single chunk, `np=2`를 각각 한 변수씩 비교합니다.
 `private/translation-review.json`에 합쳐져 선별 검수를 먼저 할 수
 있지만, 이 파일이 최종 292행 blind 검수를 대체하지는 않습니다.
 
+prefill이 실측 병목이면 `gemma-batch`의 `batch_size` 축을 먼저
+실행합니다. 그 축에서 통과 후보가 있을 때만 해당 값을
+`--base-batch-size`로 넘겨 `ubatch_size` 축을 실행합니다. 첫 축이
+게이트를 통과하지 못하면 ubatch 축은 실행하지 않는 것이 정상 종료입니다.
+
 ## 4. cache 통합 검증
 
 `run-cache --scenario global-ocr`은 cache-disabled/empty-cache 비채점
