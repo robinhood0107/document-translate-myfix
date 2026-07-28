@@ -73,3 +73,24 @@ source state가 결과 SHA-256을 함께 바꾸더라도 코드에 고정된 dig
 source 변조, 누락, 순서 오류, Q8 혼입, 계약 drift는 산출물 생성 전에
 실패한다. review 오류는 mapping을 공개하지 않고 validation 오류만
 기록한다. 기존 source suite와 사용자가 작성한 CSV를 수정하지 않는다.
+
+## 역사적 재현 기준점
+
+`contextual-grouped` 제품 경로는 품질 탈락 뒤 퇴역했으므로 현재 제품
+HEAD에서 재현하지 않는다. 역사적 실험을 감사하거나 재현할 때는 다음
+커밋과 PR을 기준으로 삼는다.
+
+- grouped 제품 구현: PR #141
+  - head: `2ca36452af875b2c014a752f9ff8d3c2726b5796`
+  - `develop` merge: `fbc131c73eb260abc9be6aec1334dba6a7da738c`
+- protocol v4 검수 도구와 탈락 증거: PR #148
+  - `benchmarking/lab` merge:
+    `034a6e85172d438e9e1fe5d29560a105493b6f6b`
+- grouped 제품 경로 퇴역: PR #149
+  - `develop` merge: `24a7fb8ae194e5d1510ee6e0a288ec636cdba2b9`
+
+실제 grouped 제품 코드를 재현해야 할 때는 PR #141의 `develop` merge
+커밋을 사용하고, 최종 품질 판정은 PR #148의 protocol v4 산출물로
+검증한다. 원시 번역, blind key, 완료 검수 CSV와 unblind 결과는 계속
+Git 밖에 둔다. 22페이지 전체 파이프라인 실행은 품질 gate가 먼저
+실패했으므로 재현 대상이 아니라 정상 실행 취소 상태다.
