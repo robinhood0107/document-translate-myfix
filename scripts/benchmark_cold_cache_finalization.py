@@ -156,6 +156,10 @@ def load_protocol() -> dict[str, Any]:
         raise ValueError("Protocol may not select more than 54 screening blocks.")
     if int(limits.get("completion_tokens", 0) or 0) != 512:
         raise ValueError("Translation completion-token limit must remain 512.")
+    if int(limits.get("cache_stabilization_pairs", 0) or 0) != 1:
+        raise ValueError(
+            "Cache verification must use one unscored stabilization pair."
+        )
     models = protocol.get("models")
     if not isinstance(models, Mapping) or not models:
         raise ValueError("Protocol model contracts are missing.")
@@ -2584,6 +2588,10 @@ def analyze_cache_results(
     disabled = _passed_results(results.get("disabled_cold", []))
     enabled = _passed_results(results.get("enabled_empty_cold", []))
     required_rounds = int(protocol["limits"]["rounds"])
+    required_stabilization_runs = (
+        int(protocol["limits"]["cache_stabilization_pairs"]) * 2
+    )
+    stabilization = _passed_results(results.get("stabilization", []))
     stage = "ocr" if scenario == "global-ocr" else "full"
     disabled_median = _median_stage(disabled, stage)
     enabled_median = _median_stage(enabled, stage)
@@ -2597,6 +2605,9 @@ def analyze_cache_results(
     ) if disabled_median > 0 or enabled_median > 0 else 0.0
     cold = enabled[0] if enabled else {}
     common_checks = {
+        "stabilization_runs_complete": (
+            len(stabilization) == required_stabilization_runs
+        ),
         "disabled_cold_rounds_complete": len(disabled) == required_rounds,
         "enabled_empty_cold_rounds_complete": (
             len(enabled) == required_rounds
@@ -2876,6 +2887,10 @@ def run_cache_scenario(args: argparse.Namespace) -> int:
         ("disabled_cold", "enabled_empty_cold"),
         int(protocol["limits"]["rounds"]),
     )
+    stabilization_orders = balanced_orders(
+        ("disabled_cold", "enabled_empty_cold"),
+        int(protocol["limits"]["cache_stabilization_pairs"]) + 1,
+    )[1:]
     protocol_state = _protocol_state(protocol)
     protocol_state.update(
         {
@@ -2883,6 +2898,7 @@ def run_cache_scenario(args: argparse.Namespace) -> int:
             "scenario": args.scenario,
             "sample_count": sample_count,
             "source_language": args.source_lang,
+            "cache_stabilization_orders": stabilization_orders,
             "cold_execution_orders": cold_orders,
         }
     )
@@ -2891,6 +2907,7 @@ def run_cache_scenario(args: argparse.Namespace) -> int:
         "status": "running",
         "protocol": protocol_state,
         "results": {
+            "stabilization": [],
             "disabled_cold": [],
             "enabled_empty_cold": [],
         },
@@ -2900,59 +2917,124 @@ def run_cache_scenario(args: argparse.Namespace) -> int:
         seed_user_data_root: Path | None = None
         seed_project_file: Path | None = None
         stage = "ocr" if is_global else "full"
-        for round_index, order in enumerate(cold_orders, start=1):
-            for order_index, candidate_id in enumerate(order, start=1):
-                enabled = candidate_id == "enabled_empty_cold"
-                preset_path = (
-                    enabled_preset_path
-                    if enabled
-                    else disabled_preset_path
+
+        def run_cold_control(
+            *,
+            candidate_id: str,
+            phase: str,
+            round_index: int,
+            order_index: int,
+        ) -> tuple[dict[str, Any], Path, Path | None]:
+            enabled = candidate_id == "enabled_empty_cold"
+            preset_path = (
+                enabled_preset_path
+                if enabled
+                else disabled_preset_path
+            )
+            if phase == "stabilization":
+                scope = f"pair-{round_index:02d}"
+                run_dir = (
+                    private_dir
+                    / "runs"
+                    / "stabilization"
+                    / scope
+                    / candidate_id
                 )
+                user_data_root = (
+                    private_dir
+                    / "isolated-user-data"
+                    / "stabilization"
+                    / scope
+                    / candidate_id
+                )
+            else:
+                scope = f"round-{round_index:02d}"
                 run_dir = (
                     private_dir
                     / "runs"
                     / candidate_id
-                    / f"round-{round_index:02d}"
+                    / scope
                 )
                 user_data_root = (
                     private_dir
                     / "isolated-user-data"
                     / candidate_id
-                    / f"round-{round_index:02d}"
+                    / scope
                 )
-                project_file = None
-                project_action = "none"
-                save_project = False
-                if enabled and not is_global:
+            project_file = None
+            project_action = "none"
+            save_project = False
+            if enabled and not is_global:
+                if phase == "stabilization":
                     project_file = (
                         private_dir
                         / "projects"
-                        / f"round-{round_index:02d}"
+                        / "stabilization"
+                        / scope
                         / "screening.ctpr"
                     )
-                    project_action = "create"
-                    save_project = True
-                result = _run_cache_pipeline(
-                    preset_path=preset_path,
-                    input_dir=input_dir,
-                    sample_count=sample_count,
-                    run_dir=run_dir,
-                    shared_corpus_dir=shared_corpus_dir,
-                    user_data_root=user_data_root,
-                    stage=stage,
-                    source_lang=args.source_lang,
-                    project_file=project_file,
-                    project_action=project_action,
-                    save_project_after_run=save_project,
+                else:
+                    project_file = (
+                        private_dir
+                        / "projects"
+                        / scope
+                        / "screening.ctpr"
+                    )
+                project_action = "create"
+                save_project = True
+            result = _run_cache_pipeline(
+                preset_path=preset_path,
+                input_dir=input_dir,
+                sample_count=sample_count,
+                run_dir=run_dir,
+                shared_corpus_dir=shared_corpus_dir,
+                user_data_root=user_data_root,
+                stage=stage,
+                source_lang=args.source_lang,
+                project_file=project_file,
+                project_action=project_action,
+                save_project_after_run=save_project,
+            )
+            result.update(
+                {
+                    "candidate": candidate_id,
+                    "phase": phase,
+                    "round": round_index,
+                    "order": order_index,
+                }
+            )
+            return result, user_data_root, project_file
+
+        for pair_index, order in enumerate(
+            stabilization_orders,
+            start=1,
+        ):
+            for order_index, candidate_id in enumerate(order, start=1):
+                result, _user_data_root, _project_file = run_cold_control(
+                    candidate_id=candidate_id,
+                    phase="stabilization",
+                    round_index=pair_index,
+                    order_index=order_index,
                 )
-                result.update(
-                    {
-                        "candidate": candidate_id,
-                        "round": round_index,
-                        "order": order_index,
-                    }
+                state["results"]["stabilization"].append(result)
+                _write_json(output_dir / SUITE_STATE_NAME, state)
+                if result["status"] != "passed":
+                    raise RuntimeError(
+                        "Cache stabilization failed; stopping without "
+                        f"automatic repetition: {candidate_id} "
+                        f"pair={pair_index}"
+                    )
+
+        for round_index, order in enumerate(cold_orders, start=1):
+            for order_index, candidate_id in enumerate(order, start=1):
+                result, user_data_root, project_file = run_cold_control(
+                    candidate_id=candidate_id,
+                    phase="measured",
+                    round_index=round_index,
+                    order_index=order_index,
                 )
                 state["results"][candidate_id].append(result)
+                enabled = candidate_id == "enabled_empty_cold"
                 if enabled and seed_user_data_root is None:
                     seed_user_data_root = user_data_root
                     seed_project_file = project_file

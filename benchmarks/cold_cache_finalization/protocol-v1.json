@@ -11,6 +11,7 @@
       "Chinese",
       "English"
     ],
+    "cache_stabilization_pairs": 1,
     "rounds": 3,
     "completion_tokens": 512
   },

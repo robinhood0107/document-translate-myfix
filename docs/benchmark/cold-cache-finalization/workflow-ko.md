@@ -41,12 +41,12 @@ IQ4_NL/IQ4_XS, single chunk, `np=2`를 각각 한 변수씩 비교합니다.
 
 ## 4. cache 통합 검증
 
-`run-cache --scenario global-ocr`은 cache-disabled/empty-cache 3회와
-all-hit를 실행합니다.
+`run-cache --scenario global-ocr`은 cache-disabled/empty-cache 비채점
+안정화 한 쌍, 측정 3회, all-hit를 실행합니다.
 
-`run-cache --scenario project`는 disabled/enabled cold 3회, 기존 output
-all-hit, output materialization, 한 페이지 OCR downstream 재계산을
-실행합니다.
+`run-cache --scenario project`는 disabled/enabled 비채점 안정화 한 쌍,
+측정 cold 3회, 기존 output all-hit, output materialization, 한 페이지
+OCR downstream 재계산을 실행합니다.
 
 두 cache 시나리오는 다음을 모두 만족해야 합니다.
 

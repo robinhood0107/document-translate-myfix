@@ -27,6 +27,19 @@
   게이트를 판정할 수 있게 했습니다.
 - 의미 검수 대상은 모든 라운드를 외부 private review JSON으로 묶습니다.
 - raw 결과는 Git 밖에만 기록합니다.
+- provisional global OCR cache 1페이지 검증은 miss overhead 0.036%,
+  all-hit 99.413% 단축, runtime 시작 0, HTTP 0, raw OCR 완전 동일로
+  통과했습니다.
+- provisional project checkpoint 1페이지 검증은 all-stage hit,
+  runtime 시작 0, Gemma HTTP 0, render-only 복원, 페이지 단위 재계산,
+  all-hit 91.406% 단축을 확인했습니다. 다만 checkpoint에서 복원한
+  과거 OCR profile을 현재 telemetry가 다시 합산해 Paddle HTTP 30회로
+  보이던 오류와 최초 runtime 준비 편차 때문에 정식 판정은 보류했습니다.
+- 과거 OCR telemetry 재합산은 제품 PR #156에서 수정했습니다.
+- cache runner는 cache-disabled/enabled-empty를 각각 한 번 비채점
+  안정화한 뒤 격리된 측정 3회를 실행하도록 보강했습니다. 안정화 결과도
+  보존하고 실패 시 즉시 중단하지만 miss overhead와 variance에는 넣지
+  않습니다.
 
 이 문서는 도구 구현 이력입니다. GPU 실측 우승 결과는 외부 suite가
 완료된 뒤 검증된 수치만 추가합니다. 현재 문서만으로 제품 기본값을
