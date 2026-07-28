@@ -4,6 +4,7 @@ import base64
 import logging
 import os
 import re
+import threading
 import time
 import unicodedata
 from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
@@ -43,6 +44,7 @@ logger = logging.getLogger(__name__)
 
 
 class PaddleOCRVLEngine(OCREngine):
+    PERFORMANCE_TELEMETRY_SCHEMA_VERSION = 1
     DEFAULT_SERVER_URL = "http://127.0.0.1:28118/layout-parsing"
     DEFAULT_MAX_NEW_TOKENS = 1024
     DEFAULT_PARALLEL_WORKERS = 8
@@ -108,6 +110,7 @@ class PaddleOCRVLEngine(OCREngine):
         self.last_page_profile: dict[str, Any] = {}
         self._supports_max_new_tokens = True
         self.cancel_checker: Callable[[], bool] | None = None
+        self._request_telemetry_context = threading.local()
 
     def set_cancel_checker(self, cancel_checker: Callable[[], bool] | None) -> None:
         self.cancel_checker = cancel_checker
@@ -164,6 +167,22 @@ class PaddleOCRVLEngine(OCREngine):
                 "start_ts": None,
                 "end_ts": None,
                 "elapsed_ms": None,
+                "queue_wait_ms": 0.0,
+                "crop_ms": 0.0,
+                "text_guard_ms": 0.0,
+                "encode_ms": 0.0,
+                "base64_ms": 0.0,
+                "payload_build_ms": 0.0,
+                "logical_request_count": 0,
+                "http_attempt_count": 0,
+                "http_retry_count": 0,
+                "compatibility_retry_count": 0,
+                "retry_backoff_ms": 0.0,
+                "request_wall_ms": 0.0,
+                "response_decode_ms": 0.0,
+                "parse_sanitize_ms": 0.0,
+                "request_bytes": 0,
+                "base64_chars": 0,
                 "status": "pending",
             }
             jobs.append(
@@ -190,6 +209,7 @@ class PaddleOCRVLEngine(OCREngine):
             gpu_metrics=gpu_metrics,
         )
         if not jobs:
+            self._finalize_performance_profile()
             return blk_list
 
         logger.info(
@@ -210,6 +230,7 @@ class PaddleOCRVLEngine(OCREngine):
                 for job in ordered_jobs:
                     self._raise_if_cancelled()
                     job["request_record"]["enqueue_ts"] = time.time()
+                    job["enqueue_perf"] = time.perf_counter()
                     future = executor.submit(self._process_job, img, job)
                     future_map[future] = job
 
@@ -236,6 +257,7 @@ class PaddleOCRVLEngine(OCREngine):
             elapsed_ms = (time.perf_counter() - started_at) * 1000.0
             self.last_page_profile["elapsed_ms"] = round(elapsed_ms, 3)
             self.last_page_profile["completed_at"] = time.time()
+            self._finalize_performance_profile()
 
         logger.info(
             "paddleocr_vl complete: blocks=%d elapsed_ms=%.1f scheduler=%s",
@@ -248,18 +270,34 @@ class PaddleOCRVLEngine(OCREngine):
     def _process_job(self, img: np.ndarray, job: dict[str, Any]) -> None:
         record = job["request_record"]
         started_at_perf = time.perf_counter()
+        enqueue_perf = job.get("enqueue_perf")
+        if isinstance(enqueue_perf, (int, float)):
+            record["queue_wait_ms"] = round(
+                max(0.0, started_at_perf - float(enqueue_perf)) * 1000.0,
+                3,
+            )
         record["start_ts"] = time.time()
         bbox = job["bbox"]
         blk = job["block"]
         try:
             self._raise_if_cancelled()
+            crop_started_at = time.perf_counter()
             crop = self._crop_image(img, bbox)
+            record["crop_ms"] = round(
+                (time.perf_counter() - crop_started_at) * 1000.0,
+                3,
+            )
             if crop is None:
                 self._mark_empty(blk, "Invalid OCR crop bounds.")
                 record["status"] = "crop_invalid"
                 return
 
+            guard_started_at = time.perf_counter()
             should_skip, evidence = self._should_skip_text_free_crop(blk, crop)
+            record["text_guard_ms"] = round(
+                (time.perf_counter() - guard_started_at) * 1000.0,
+                3,
+            )
             if should_skip:
                 self._mark_empty(blk, self.TEXT_FREE_NO_VISUAL_EVIDENCE_REASON)
                 reject_reason = str(evidence.get("reject_reason") or "no_visual_text_evidence")
@@ -269,10 +307,20 @@ class PaddleOCRVLEngine(OCREngine):
                 record["non_text_reason"] = reject_reason
                 return
 
-            raw_text = self._request_ocr_text(crop)
+            self._request_telemetry_context.record = record
+            try:
+                raw_text = self._request_ocr_text(crop)
+            finally:
+                self._request_telemetry_context.record = None
             self._raise_if_cancelled()
+            parse_started_at = time.perf_counter()
             cleaned = self._normalize_output_text(raw_text)
             non_text_reason = self._classify_non_text_response(blk, cleaned, crop) if cleaned else ""
+            self._add_request_metric(
+                record,
+                "parse_sanitize_ms",
+                (time.perf_counter() - parse_started_at) * 1000.0,
+            )
             if cleaned and self._is_layout_schema_only_text(cleaned):
                 self._mark_empty(blk, self.LAYOUT_SCHEMA_EMPTY_REASON, raw_text=raw_text)
                 record["status"] = "schema_only"
@@ -428,6 +476,72 @@ class PaddleOCRVLEngine(OCREngine):
             "request_records": request_records,
         }
 
+    def _finalize_performance_profile(self) -> None:
+        records = self.last_page_profile.get("request_records")
+        request_records = records if isinstance(records, list) else []
+        additive_fields = (
+            "queue_wait_ms",
+            "crop_ms",
+            "text_guard_ms",
+            "encode_ms",
+            "base64_ms",
+            "payload_build_ms",
+            "logical_request_count",
+            "http_attempt_count",
+            "http_retry_count",
+            "compatibility_retry_count",
+            "retry_backoff_ms",
+            "request_wall_ms",
+            "response_decode_ms",
+            "parse_sanitize_ms",
+            "request_bytes",
+            "base64_chars",
+        )
+        performance: dict[str, int | float] = {
+            "schema_version": self.PERFORMANCE_TELEMETRY_SCHEMA_VERSION,
+            "job_count": len(request_records),
+        }
+        integer_fields = {
+            "logical_request_count",
+            "http_attempt_count",
+            "http_retry_count",
+            "compatibility_retry_count",
+            "request_bytes",
+            "base64_chars",
+        }
+        for field_name in additive_fields:
+            total = 0.0
+            for record in request_records:
+                if not isinstance(record, dict):
+                    continue
+                value = record.get(field_name, 0)
+                if isinstance(value, bool) or not isinstance(value, (int, float)):
+                    continue
+                total += float(value)
+            performance[field_name] = (
+                int(round(total))
+                if field_name in integer_fields
+                else round(total, 3)
+            )
+        self.last_page_profile["performance"] = performance
+
+    @staticmethod
+    def _add_request_metric(
+        record: dict[str, Any] | None,
+        key: str,
+        value: int | float,
+    ) -> None:
+        if not isinstance(record, dict):
+            return
+        current = record.get(key, 0)
+        if isinstance(current, bool) or not isinstance(current, (int, float)):
+            current = 0
+        record[key] = current + value
+
+    def _current_request_record(self) -> dict[str, Any] | None:
+        record = getattr(self._request_telemetry_context, "record", None)
+        return record if isinstance(record, dict) else None
+
     def _serialize_gpu_metrics(self, gpu_metrics: dict[str, Any]) -> dict[str, Any]:
         if not isinstance(gpu_metrics, dict):
             return {}
@@ -472,8 +586,25 @@ class PaddleOCRVLEngine(OCREngine):
             return default
 
     def _request_ocr_text(self, image: np.ndarray) -> str:
+        record = self._current_request_record()
+        self._add_request_metric(record, "logical_request_count", 1)
+        started_at = time.perf_counter()
         image_bytes = self._encode_image(image)
+        self._add_request_metric(
+            record,
+            "encode_ms",
+            (time.perf_counter() - started_at) * 1000.0,
+        )
+        self._add_request_metric(record, "request_bytes", len(image_bytes))
+        started_at = time.perf_counter()
         image_b64 = base64.b64encode(image_bytes).decode("ascii")
+        self._add_request_metric(
+            record,
+            "base64_ms",
+            (time.perf_counter() - started_at) * 1000.0,
+        )
+        self._add_request_metric(record, "base64_chars", len(image_b64))
+        started_at = time.perf_counter()
         payload = {
             "file": image_b64,
             "fileType": 1,
@@ -482,13 +613,19 @@ class PaddleOCRVLEngine(OCREngine):
         }
         if self._supports_max_new_tokens:
             payload["maxNewTokens"] = self.max_new_tokens
+        self._add_request_metric(
+            record,
+            "payload_build_ms",
+            (time.perf_counter() - started_at) * 1000.0,
+        )
 
-        data = self._send_request(payload)
+        data = self._send_request(payload, telemetry_record=record)
         if self._supports_max_new_tokens and self._response_rejected_max_new_tokens(data):
             self._raise_if_cancelled()
             self._supports_max_new_tokens = False
             payload.pop("maxNewTokens", None)
-            data = self._send_request(payload)
+            self._add_request_metric(record, "compatibility_retry_count", 1)
+            data = self._send_request(payload, telemetry_record=record)
 
         error_code = data.get("errorCode")
         if error_code not in (None, 0):
@@ -499,11 +636,26 @@ class PaddleOCRVLEngine(OCREngine):
                 settings_page_name="PaddleOCR VL Settings",
             )
 
-        return self._extract_text_from_response(data)
+        started_at = time.perf_counter()
+        text = self._extract_text_from_response(data)
+        self._add_request_metric(
+            record,
+            "parse_sanitize_ms",
+            (time.perf_counter() - started_at) * 1000.0,
+        )
+        return text
 
-    def _send_request(self, payload: dict) -> dict:
+    def _send_request(
+        self,
+        payload: dict,
+        *,
+        telemetry_record: dict[str, Any] | None = None,
+    ) -> dict:
+        record = telemetry_record or self._current_request_record()
         last_response = None
         for attempt_index in range(self.REQUEST_RETRY_TOTAL_ATTEMPTS):
+            request_started_at = time.perf_counter()
+            self._add_request_metric(record, "http_attempt_count", 1)
             try:
                 response = requests.post(
                     self.server_url,
@@ -511,23 +663,46 @@ class PaddleOCRVLEngine(OCREngine):
                     timeout=self.REQUEST_TIMEOUT_SECONDS,
                 )
             except requests.exceptions.RequestException as exc:
+                self._add_request_metric(
+                    record,
+                    "request_wall_ms",
+                    (time.perf_counter() - request_started_at) * 1000.0,
+                )
                 if self._should_retry_request(attempt_index):
+                    self._add_request_metric(record, "http_retry_count", 1)
+                    backoff_started_at = time.perf_counter()
                     self._sleep_before_retry(attempt_index, exc)
+                    self._add_request_metric(
+                        record,
+                        "retry_backoff_ms",
+                        (time.perf_counter() - backoff_started_at) * 1000.0,
+                    )
                     continue
                 raise LocalServiceConnectionError(
                     "Unable to reach the local PaddleOCR VL service.",
                     service_name="PaddleOCR VL",
                     settings_page_name="PaddleOCR VL Settings",
                 ) from exc
+            self._add_request_metric(
+                record,
+                "request_wall_ms",
+                (time.perf_counter() - request_started_at) * 1000.0,
+            )
 
             if response.status_code == 200:
-                return self._decode_response_json(response)
+                return self._decode_response_json(
+                    response,
+                    telemetry_record=record,
+                )
 
             last_response = response
             if payload.get("maxNewTokens") is not None:
                 self._raise_if_cancelled()
                 legacy_payload = dict(payload)
                 legacy_payload.pop("maxNewTokens", None)
+                self._add_request_metric(record, "compatibility_retry_count", 1)
+                request_started_at = time.perf_counter()
+                self._add_request_metric(record, "http_attempt_count", 1)
                 try:
                     legacy_response = requests.post(
                         self.server_url,
@@ -535,17 +710,37 @@ class PaddleOCRVLEngine(OCREngine):
                         timeout=self.REQUEST_TIMEOUT_SECONDS,
                     )
                 except requests.exceptions.RequestException as exc:
+                    self._add_request_metric(
+                        record,
+                        "request_wall_ms",
+                        (time.perf_counter() - request_started_at) * 1000.0,
+                    )
                     if self._should_retry_request(attempt_index):
+                        self._add_request_metric(record, "http_retry_count", 1)
+                        backoff_started_at = time.perf_counter()
                         self._sleep_before_retry(attempt_index, exc)
+                        self._add_request_metric(
+                            record,
+                            "retry_backoff_ms",
+                            (time.perf_counter() - backoff_started_at) * 1000.0,
+                        )
                         continue
                     raise LocalServiceConnectionError(
                         "Unable to reach the local PaddleOCR VL service.",
                         service_name="PaddleOCR VL",
                         settings_page_name="PaddleOCR VL Settings",
                     ) from exc
+                self._add_request_metric(
+                    record,
+                    "request_wall_ms",
+                    (time.perf_counter() - request_started_at) * 1000.0,
+                )
                 if legacy_response.status_code == 200:
                     self._supports_max_new_tokens = False
-                    return self._decode_response_json(legacy_response)
+                    return self._decode_response_json(
+                        legacy_response,
+                        telemetry_record=record,
+                    )
                 if response.status_code not in self.TRANSIENT_HTTP_STATUS_CODES:
                     last_response = legacy_response
 
@@ -554,7 +749,14 @@ class PaddleOCRVLEngine(OCREngine):
                 and last_response.status_code in self.TRANSIENT_HTTP_STATUS_CODES
                 and self._should_retry_request(attempt_index)
             ):
+                self._add_request_metric(record, "http_retry_count", 1)
+                backoff_started_at = time.perf_counter()
                 self._sleep_before_retry(attempt_index, last_response)
+                self._add_request_metric(
+                    record,
+                    "retry_backoff_ms",
+                    (time.perf_counter() - backoff_started_at) * 1000.0,
+                )
                 continue
             break
 
@@ -586,7 +788,13 @@ class PaddleOCRVLEngine(OCREngine):
                 return
             time.sleep(min(0.2, remaining))
 
-    def _decode_response_json(self, response) -> dict:
+    def _decode_response_json(
+        self,
+        response,
+        *,
+        telemetry_record: dict[str, Any] | None = None,
+    ) -> dict:
+        started_at = time.perf_counter()
         try:
             return response.json()
         except ValueError as exc:
@@ -595,6 +803,12 @@ class PaddleOCRVLEngine(OCREngine):
                 service_name="PaddleOCR VL",
                 settings_page_name="PaddleOCR VL Settings",
             ) from exc
+        finally:
+            self._add_request_metric(
+                telemetry_record or self._current_request_record(),
+                "response_decode_ms",
+                (time.perf_counter() - started_at) * 1000.0,
+            )
 
     def _extract_text_from_response(self, data: dict) -> str:
         result = data.get("result", data)

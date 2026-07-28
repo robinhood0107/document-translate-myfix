@@ -244,6 +244,106 @@ def query_gpu_metrics_cached(ttl_sec: float = 1.0) -> dict[str, Any]:
     return copy.deepcopy(fresh)
 
 
+def _parse_linux_swap_meminfo(
+    text: str,
+    *,
+    source: str,
+) -> dict[str, Any]:
+    values_kb: dict[str, int] = {}
+    for raw_line in str(text or "").splitlines():
+        if ":" not in raw_line:
+            continue
+        key, raw_value = raw_line.split(":", 1)
+        normalized_key = key.strip()
+        if normalized_key not in {"SwapTotal", "SwapFree", "SwapCached"}:
+            continue
+        token = raw_value.strip().split()[0] if raw_value.strip() else ""
+        try:
+            values_kb[normalized_key] = max(0, int(token))
+        except (TypeError, ValueError):
+            continue
+    if "SwapTotal" not in values_kb or "SwapFree" not in values_kb:
+        return {
+            "available": False,
+            "source": source,
+            "reason": "swap-meminfo-unavailable",
+        }
+    total_mb = float(values_kb["SwapTotal"]) / 1024.0
+    free_mb = float(values_kb["SwapFree"]) / 1024.0
+    cached_mb = float(values_kb.get("SwapCached", 0)) / 1024.0
+    return {
+        "available": True,
+        "source": source,
+        "swap_total_mb": round(total_mb, 3),
+        "swap_free_mb": round(free_mb, 3),
+        "swap_cached_mb": round(cached_mb, 3),
+        "swap_used_mb": round(max(0.0, total_mb - free_mb), 3),
+        "sampled_at": time.time(),
+    }
+
+
+def _current_process_is_wsl() -> bool:
+    if os.environ.get("WSL_DISTRO_NAME") or os.environ.get("WSL_INTEROP"):
+        return True
+    if not sys.platform.startswith("linux"):
+        return False
+    try:
+        osrelease = Path("/proc/sys/kernel/osrelease").read_text(
+            encoding="utf-8",
+            errors="ignore",
+        )
+    except Exception:
+        return False
+    return "microsoft" in osrelease.lower()
+
+
+def query_wsl_swap_metrics(*, timeout_sec: float = 2.0) -> dict[str, Any]:
+    """Return WSL swap usage without changing WSL or Docker state."""
+
+    if _current_process_is_wsl():
+        try:
+            meminfo = Path("/proc/meminfo").read_text(
+                encoding="utf-8",
+                errors="ignore",
+            )
+        except Exception:
+            return {
+                "available": False,
+                "source": "current-wsl",
+                "reason": "meminfo-read-failed",
+            }
+        return _parse_linux_swap_meminfo(meminfo, source="current-wsl")
+
+    if os.name != "nt":
+        return {
+            "available": False,
+            "source": "none",
+            "reason": "not-wsl-or-windows",
+        }
+
+    succeeded, meminfo = _run_capture_status(
+        [
+            "wsl.exe",
+            "-d",
+            "docker-desktop",
+            "--",
+            "cat",
+            "/proc/meminfo",
+        ],
+        timeout_sec=max(0.1, float(timeout_sec)),
+    )
+    if not succeeded or not meminfo:
+        return {
+            "available": False,
+            "source": "docker-desktop-wsl",
+            "reason": "docker-desktop-wsl-query-failed",
+        }
+    return _parse_linux_swap_meminfo(
+        meminfo,
+        source="docker-desktop-wsl",
+    )
+
+
 def _docker_ps_rows(container_names: Iterable[str] | None = None) -> list[dict[str, Any]]:
     requested = {name for name in (container_names or []) if name}
     output = _run_capture(["docker", "ps", "--format", "{{json .}}"])
