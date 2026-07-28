@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING
 from .chunk import ChunkMixin
 from .flow import FlowMixin
 from .render import RenderMixin
+from ..performance_telemetry import PipelinePerformanceTelemetry
 
 if TYPE_CHECKING:
     from controller import ComicTranslate
@@ -53,6 +54,8 @@ class WebtoonBatchProcessor(FlowMixin, ChunkMixin, RenderMixin):
         self.edge_threshold = 50
         self.seam_crop_pad_x = 48
         self.seam_crop_pad_y = 48
+        self.performance_telemetry = PipelinePerformanceTelemetry()
+        self.last_performance_stats: dict = {}
 
     def _emit_benchmark_event(self, tag: str, image_path: str | None = None, **extra) -> None:
         payload = {
@@ -63,10 +66,29 @@ class WebtoonBatchProcessor(FlowMixin, ChunkMixin, RenderMixin):
             payload["image_path"] = image_path
             payload["image_name"] = os.path.basename(image_path)
         payload.update(extra)
+        telemetry = self._performance_telemetry()
+        payload.update(
+            telemetry.observe_event(
+                tag,
+                image_path=image_path,
+                payload=payload,
+            )
+        )
+        if "performance_stats" in payload:
+            self.last_performance_stats = dict(payload["performance_stats"])
         try:
             self.main_page.emit_memlog(tag, **payload)
         except Exception:
             pass
+
+    def _performance_telemetry(self) -> PipelinePerformanceTelemetry:
+        telemetry = getattr(self, "performance_telemetry", None)
+        if not isinstance(telemetry, PipelinePerformanceTelemetry):
+            telemetry = PipelinePerformanceTelemetry()
+            self.performance_telemetry = telemetry
+        if not hasattr(self, "last_performance_stats"):
+            self.last_performance_stats = {}
+        return telemetry
 
     def skip_save(
         self: WebtoonBatchProcessor,

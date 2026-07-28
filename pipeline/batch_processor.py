@@ -94,6 +94,7 @@ from .cache_manager import CacheManager
 from .block_detection import BlockDetectionHandler
 from .inpainting import InpaintingHandler
 from .ocr_handler import OCRHandler
+from .performance_telemetry import PipelinePerformanceTelemetry
 
 if TYPE_CHECKING:
     from controller import ComicTranslate
@@ -123,6 +124,8 @@ class BatchProcessor:
         self._page_started_at: float | None = None
         self._progress_image_path: str | None = None
         self._recent_page_durations = deque(maxlen=5)
+        self.performance_telemetry = PipelinePerformanceTelemetry()
+        self.last_performance_stats: dict = {}
 
     def _emit_benchmark_event(self, tag: str, image_path: str | None = None, **extra) -> None:
         workflow_mode = ""
@@ -143,10 +146,49 @@ class BatchProcessor:
             payload["image_path"] = image_path
             payload["image_name"] = os.path.basename(image_path)
         payload.update(extra)
+        telemetry = self._performance_telemetry()
+        payload.update(
+            telemetry.observe_event(
+                tag,
+                image_path=image_path,
+                payload=payload,
+            )
+        )
+        if "performance_stats" in payload:
+            self.last_performance_stats = dict(payload["performance_stats"])
         try:
             self.main_page.emit_memlog(tag, **payload)
         except Exception:
             pass
+
+    def _performance_telemetry(self) -> PipelinePerformanceTelemetry:
+        telemetry = getattr(self, "performance_telemetry", None)
+        if not isinstance(telemetry, PipelinePerformanceTelemetry):
+            telemetry = PipelinePerformanceTelemetry()
+            self.performance_telemetry = telemetry
+        if not hasattr(self, "last_performance_stats"):
+            self.last_performance_stats = {}
+        return telemetry
+
+    def _record_runtime_performance(
+        self,
+        *,
+        service: str,
+        operation: str,
+        elapsed_ms: float,
+        outcome: str = "completed",
+    ) -> None:
+        self._performance_telemetry().record_runtime_duration(
+            service=service,
+            operation=operation,
+            elapsed_ms=elapsed_ms,
+            outcome=outcome,
+        )
+
+    def _sample_performance_resources(self, label: str) -> None:
+        telemetry = self._performance_telemetry()
+        if telemetry.resource_sampling_enabled:
+            telemetry.sample_resources(label)
 
     @staticmethod
     def _benchmark_stage_ceiling() -> str:

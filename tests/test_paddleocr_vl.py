@@ -244,7 +244,14 @@ class PaddleOCRVLEngineTests(unittest.TestCase):
         self.assertIsNotNone(record["start_ts"])
         self.assertIsNotNone(record["end_ts"])
         self.assertIsNotNone(record["elapsed_ms"])
+        self.assertGreaterEqual(record["queue_wait_ms"], 0.0)
+        self.assertGreaterEqual(record["crop_ms"], 0.0)
+        self.assertGreaterEqual(record["text_guard_ms"], 0.0)
         self.assertEqual(record["status"], "ok")
+        performance = engine.last_page_profile["performance"]
+        self.assertEqual(performance["schema_version"], 1)
+        self.assertEqual(performance["job_count"], 1)
+        self.assertGreaterEqual(performance["queue_wait_ms"], 0.0)
 
     def test_schema_only_layout_labels_are_marked_empty(self) -> None:
         engine = PaddleOCRVLEngine()
@@ -743,6 +750,39 @@ class PaddleOCRVLEngineTests(unittest.TestCase):
 
         self.assertEqual(data["errorCode"], 0)
         self.assertEqual(post.call_count, 2)
+
+    def test_request_telemetry_separates_logical_http_and_retry_counts(self) -> None:
+        engine = PaddleOCRVLEngine()
+        engine.initialize(_FakeSettings(scheduler_mode="fixed", parallel_workers=1))
+        engine.REQUEST_RETRY_BACKOFF_SECONDS = (0.0, 0.0)
+        engine._supports_max_new_tokens = False
+        img = np.zeros((300, 300, 3), dtype=np.uint8)
+        blocks = [_make_block(10, 10, 110, 110)]
+        responses = [
+            _FakeHTTPResponse(500),
+            _FakeHTTPResponse(
+                200,
+                {
+                    "errorCode": 0,
+                    "result": {"markdown": {"text": "テスト"}},
+                },
+            ),
+        ]
+
+        with mock.patch(
+            "modules.ocr.ocr_paddle_VL.requests.post",
+            side_effect=responses,
+        ):
+            engine.process_image(img, blocks)
+
+        performance = engine.last_page_profile["performance"]
+        self.assertEqual(performance["logical_request_count"], 1)
+        self.assertEqual(performance["http_attempt_count"], 2)
+        self.assertEqual(performance["http_retry_count"], 1)
+        self.assertGreater(performance["request_bytes"], 0)
+        self.assertGreater(performance["base64_chars"], 0)
+        self.assertGreaterEqual(performance["encode_ms"], 0.0)
+        self.assertGreaterEqual(performance["base64_ms"], 0.0)
 
 
 if __name__ == "__main__":

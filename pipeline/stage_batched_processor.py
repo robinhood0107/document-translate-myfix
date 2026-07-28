@@ -186,7 +186,23 @@ class StageBatchedProcessor(BatchProcessor):
         def runner() -> None:
             if self._prewarm_cancel_checker():
                 raise OperationCancelledError(f"{label} prewarm was cancelled before startup.")
-            fn()
+            started_at = time.perf_counter()
+            outcome = "completed"
+            try:
+                fn()
+            except OperationCancelledError:
+                outcome = "cancelled"
+                raise
+            except Exception:
+                outcome = "failed"
+                raise
+            finally:
+                self._record_runtime_performance(
+                    service=service,
+                    operation="start",
+                    elapsed_ms=(time.perf_counter() - started_at) * 1000.0,
+                    outcome=outcome,
+                )
             if self._prewarm_cancel_checker():
                 raise OperationCancelledError(f"{label} prewarm was cancelled after startup.")
             self._prewarm_progress(
@@ -198,6 +214,30 @@ class StageBatchedProcessor(BatchProcessor):
 
         self._prewarm_jobs[key] = self._ensure_prewarm_executor().submit(runner)
 
+    def _run_runtime_fallback(
+        self,
+        *,
+        service: str,
+        fallback: Callable[[], None],
+    ) -> None:
+        started_at = time.perf_counter()
+        outcome = "completed"
+        try:
+            fallback()
+        except OperationCancelledError:
+            outcome = "cancelled"
+            raise
+        except Exception:
+            outcome = "failed"
+            raise
+        finally:
+            self._record_runtime_performance(
+                service=service,
+                operation="start",
+                elapsed_ms=(time.perf_counter() - started_at) * 1000.0,
+                outcome=outcome,
+            )
+
     def _await_prewarm_or_run(
         self,
         key: str,
@@ -208,25 +248,51 @@ class StageBatchedProcessor(BatchProcessor):
         self._raise_if_cancelled()
         job = self._prewarm_jobs.pop(key, None)
         if job is None:
-            fallback()
+            self._run_runtime_fallback(
+                service=service,
+                fallback=fallback,
+            )
             self._raise_if_cancelled()
             return
+        wait_started_at = time.perf_counter()
+        wait_outcome = "completed"
+        prewarm_error: Exception | None = None
         try:
             job.result()
         except OperationCancelledError:
+            wait_outcome = "cancelled"
             raise
         except Exception as exc:
+            wait_outcome = "failed"
+            prewarm_error = exc
+        finally:
+            self._record_runtime_performance(
+                service=service,
+                operation="wait",
+                elapsed_ms=(time.perf_counter() - wait_started_at) * 1000.0,
+                outcome=wait_outcome,
+            )
+        if prewarm_error is not None:
             self._raise_if_cancelled()
-            logger.warning("%s prewarm failed; falling back to synchronous startup: %s", label, exc)
+            logger.warning(
+                "%s prewarm failed; falling back to synchronous startup: %s",
+                label,
+                prewarm_error,
+            )
             self._prewarm_progress(
                 service=service,
                 status="running",
                 runtime_prewarm_status="failed",
                 step_key=f"{key}_prewarm_failed",
-                message=self._stage_tr("{label} 예열 실패. 해당 단계에서 다시 준비합니다.").format(label=label),
-                detail=str(exc),
+                message=self._stage_tr(
+                    "{label} 예열 실패. 해당 단계에서 다시 준비합니다."
+                ).format(label=label),
+                detail=str(prewarm_error),
             )
-            fallback()
+            self._run_runtime_fallback(
+                service=service,
+                fallback=fallback,
+            )
         self._raise_if_cancelled()
 
     def _shutdown_prewarm_executor(self) -> None:
@@ -1715,8 +1781,10 @@ class StageBatchedProcessor(BatchProcessor):
             self._start_ocr_prewarm(policy)
             self._raise_if_cancelled()
             self._detect_all(pages)
+            self._sample_performance_resources("detect_stage_end")
             self._raise_if_cancelled()
             self._ocr_all(pages, policy)
+            self._sample_performance_resources("ocr_stage_end")
             self._raise_if_cancelled()
             if benchmark_stage_ceiling == "ocr":
                 self._complete_ocr_stage_ceiling(pages)
@@ -1727,14 +1795,24 @@ class StageBatchedProcessor(BatchProcessor):
                 )
                 return
             self._inpaint_all(pages)
+            self._sample_performance_resources("inpaint_stage_end")
             self._raise_if_cancelled()
             self._translate_all(pages)
+            self._sample_performance_resources("translate_stage_end")
             self._raise_if_cancelled()
             self._render_all(pages)
+            self._sample_performance_resources("render_stage_end")
             self._emit_benchmark_event("batch_run_done", total_images=total_images)
         except OperationCancelledError:
             self._emit_benchmark_event("batch_run_cancelled", total_images=total_images)
             return
+        except Exception as exc:
+            self._emit_benchmark_event(
+                "batch_run_failed",
+                total_images=total_images,
+                reason=f"{type(exc).__name__}: {exc}",
+            )
+            raise
         finally:
             try:
                 self._shutdown_prewarm_executor()
