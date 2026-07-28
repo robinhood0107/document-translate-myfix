@@ -168,6 +168,70 @@ class PipelinePerformanceTelemetryTests(unittest.TestCase):
         failed = telemetry.observe_event("batch_run_failed")
         self.assertEqual(failed["performance_stats"]["status"], "failed")
 
+    def test_project_ocr_hit_does_not_replay_historical_request_metrics(
+        self,
+    ) -> None:
+        telemetry = PipelinePerformanceTelemetry(
+            resource_sampling_enabled=False,
+        )
+        telemetry.observe_event("batch_run_start")
+        telemetry.observe_event("ocr_start", image_path="page.png")
+        telemetry.observe_event(
+            "ocr_end",
+            image_path="page.png",
+            payload={
+                "cache_status": "hit",
+                "ocr_page_profile": {
+                    "performance": {
+                        "logical_request_count": 30,
+                        "http_attempt_count": 30,
+                        "request_wall_ms": 123_456.0,
+                    },
+                    "project_checkpoint": {
+                        "status": "hit",
+                        "inference_count": 0,
+                        "http_request_count": 0,
+                    },
+                },
+            },
+        )
+        done = telemetry.observe_event("batch_run_done")
+
+        stats = done["performance_stats"]
+        self.assertEqual(stats["cache"]["ocr_hit_count"], 1)
+        self.assertEqual(stats["paddleocr_vl"], {})
+
+    def test_invalid_project_ocr_marker_falls_back_without_crashing(
+        self,
+    ) -> None:
+        telemetry = PipelinePerformanceTelemetry(
+            resource_sampling_enabled=False,
+        )
+        telemetry.observe_event("batch_run_start")
+        telemetry.observe_event(
+            "ocr_end",
+            image_path="page.png",
+            payload={
+                "cache_status": "hit",
+                "ocr_page_profile": {
+                    "performance": {"http_attempt_count": 2},
+                    "project_checkpoint": {
+                        "status": "hit",
+                        "inference_count": "unknown",
+                        "http_request_count": "unknown",
+                    },
+                },
+            },
+        )
+        done = telemetry.observe_event("batch_run_done")
+
+        self.assertEqual(
+            done["performance_stats"]["paddleocr_vl"][
+                "http_attempt_count"
+            ],
+            2,
+        )
+
     def test_batch_processor_enriches_existing_memlog_contract(self) -> None:
         events: list[tuple[str, dict]] = []
         processor = object.__new__(BatchProcessor)
