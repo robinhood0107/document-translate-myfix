@@ -24,6 +24,8 @@
 - PaddleOCR-VL 관리형 폴더 처리에는 exact 영구 결과 캐시를 둔다. 캐시는 crop 이미지를 저장하지 않고 사전 적용 전 raw OCR 결과와 진단만 저장한다.
 - 영구 OCR 캐시는 공식 digest로 고정된 관리형 PaddleOCR-VL 런타임에서만 사용한다. 사용자 지정 endpoint는 신뢰 가능한 runtime identity가 없으므로 캐시 없이 정상 처리한다.
 - exact OCR 캐시의 all-hit 경로는 Paddle runtime 시작과 OCR HTTP 요청을 모두 생략한다. sampled-image 또는 fuzzy-coordinate 캐시는 PaddleOCR-VL 자동 폴더 처리에 사용하지 않는다.
+- 프로젝트 stage checkpoint 기반은 `.ctpr` 옆 `.ctpr.cache/` sidecar, SQLite manifest, immutable SHA-256 object store로 구성한다. old v1/v2 프로젝트와 sidecar 누락·손상은 정상 계산으로 fail-open한다.
+- checkpoint stage DAG는 `detection -> ocr -> translation`, `detection -> inpaint`, `translation + inpaint -> render`다. 기반 PR에서는 설정 기본값을 끄고 stage 연결과 통합 검증 뒤에만 기본 활성화를 검토한다.
 
 ## 불변 조건
 
@@ -84,3 +86,4 @@
 - `02-implementation-spec-ko.md`: AST 기반 코드 검토와 구현 명세
 - `03-final-execution-plan-ko.md`: 동시성 제외 후 최종 실행 순서와 PR별 준비 명세
 - `04-paddleocr-persistent-result-cache-ko.md`: 관리형 PaddleOCR-VL exact 영구 결과 캐시 계약
+- `05-project-checkpoint-foundation-ko.md`: 프로젝트 sidecar, CAS, stage DAG와 수명주기 계약
