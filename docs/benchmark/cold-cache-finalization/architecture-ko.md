@@ -32,6 +32,9 @@ runtime helper·protocol을 묶은 code-contract SHA-256도 기록합니다.
 - 컨테이너는 실행 사이 `docker stop`만 사용합니다.
 - 후보별 Compose/config는 외부 run 폴더에 staging하지만 Docker 시작은
   벤치 wrapper가 아니라 제품 runtime manager가 결정합니다.
+- staged Compose의 project 이름은 제품과 같은 `comic-translate`,
+  `paddleocr_vl_docker_files`로 고정해 외부 run 경로가 달라도 기존
+  stopped 컨테이너를 정확히 인수합니다.
 - stopped 컨테이너는 제품 fingerprint가 같을 때만 `start`, 다르면
   `--force-recreate`됩니다.
 - `docker down`, 광범위 삭제, worktree는 사용하지 않습니다.

@@ -34,6 +34,8 @@ ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_SAMPLE_DIR = ROOT / "Sample"
 DEFAULT_SAMPLE_COUNT = 30
 DEFAULT_SMOKE_COUNT = 5
+GEMMA_COMPOSE_PROJECT_NAME = "comic-translate"
+PADDLEOCR_COMPOSE_PROJECT_NAME = "paddleocr_vl_docker_files"
 SUPPORTED_IMAGE_EXTENSIONS = {
     ".png",
     ".jpg",
@@ -815,6 +817,7 @@ def _set_command_flag(command: list[Any], flag: str, enabled: bool) -> None:
 def _stage_gemma_runtime(preset: dict[str, Any], runtime_dir: Path) -> dict[str, Any]:
     runtime_dir.mkdir(parents=True, exist_ok=True)
     compose = _python3_yaml_load(ROOT_GEMMA_COMPOSE)
+    compose["name"] = GEMMA_COMPOSE_PROJECT_NAME
     service = compose["services"]["gemma-local-server"]
     command = list(service.get("command") or [])
     volumes = list(service.get("volumes") or [])
@@ -890,6 +893,7 @@ def _stage_gemma_runtime(preset: dict[str, Any], runtime_dir: Path) -> dict[str,
 def _stage_ocr_runtime(preset: dict[str, Any], runtime_dir: Path) -> dict[str, Any]:
     runtime_dir.mkdir(parents=True, exist_ok=True)
     compose = _python3_yaml_load(OCR_BUNDLE_DIR / "docker-compose.yaml")
+    compose["name"] = PADDLEOCR_COMPOSE_PROJECT_NAME
     ocr_runtime = preset.get("ocr_runtime", {})
     front_device = str(ocr_runtime.get("front_device", "gpu:0") or "gpu:0")
     use_hpip = bool(ocr_runtime.get("use_hpip", False))
