@@ -19,3 +19,10 @@
 - 성능 gate: F16 통과, Q8 탈락
 - 사용자 blind review: 미생성
 - full pipeline: 사용자 승인 전 금지
+
+## 후속 검수
+
+Q8을 탈락으로 고정하고 baseline/F16의 저장된 clean 2라운드만 가져오는
+protocol v4 report-only A/B 검수가
+[별도 family](../../gemma-final-ab/generated/latest-report-ko.md)에서
+진행 중이다. 이 source v3 결과와 중단 판정은 변경하지 않는다.

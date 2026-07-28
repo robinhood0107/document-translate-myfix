@@ -21,3 +21,13 @@
 
 실측 뒤에는 raw 번역을 복사하지 않고 median, 편차, 구조 gate, VRAM 차이,
 사용자 판정만 이 문서에 추가한다.
+
+### 후속 protocol v4
+
+Q8을 후보에서 제외한 뒤 저장된 baseline/F16 clean 결과만 가져오는
+report-only A/B 검수 도구를 별도 family로 추가했다. v3 source suite는
+수정하지 않으며, 새 모델 요청 없이 두 후보의 두 라운드를 모두 사용자
+검수 대상으로 제공한다.
+
+- [workflow](../gemma-final-ab/workflow-ko.md)
+- [latest report](../gemma-final-ab/generated/latest-report-ko.md)
