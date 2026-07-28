@@ -66,5 +66,7 @@ cache cold 3회의 5% variance는 보고서에 diagnostic으로 남기되 이 �
 얻습니다. 22페이지 cold 비교는 baseline과 winner를 AB/BA 순서로
 실행하고 전체 중앙값 10% 이상일 때만 제품 기본값을 바꿉니다.
 
-캐시는 cold 후보와 독립적으로 승격할 수 있습니다. project checkpoint는
-통합 검증 전까지 제품 기본 OFF를 유지합니다.
+캐시는 cold 후보와 독립적으로 승격할 수 있습니다. global OCR exact
+cache는 최종 gate를 통과했습니다. project checkpoint는 기능 계약은
+통과했지만 miss overhead 3% gate를 통과하지 못했으므로 제품 기본 OFF를
+유지합니다.

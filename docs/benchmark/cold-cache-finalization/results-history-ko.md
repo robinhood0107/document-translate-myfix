@@ -52,7 +52,7 @@
   drain하도록 수정한 뒤 동일 partial smoke와 정식 재계산이 통과했습니다.
 - commit `47b6480`의 clean checkout에서 protocol v1
   (`7dfc2baa57ebdafc0e9ca2944e20397ccc9cd008d92f366f2a046dbffd3af04f`)
-  최종 cache suite를 다시 실행했습니다.
+  cache suite를 다시 실행했습니다.
 - global OCR exact cache는 disabled cold 중앙값 20.101초,
   enabled-empty 중앙값 19.999초로 miss overhead -0.510%였고,
   all-hit는 0.120초로 99.401% 단축됐습니다. raw OCR은 완전히 같았고
@@ -66,6 +66,26 @@
 - 최종 cold variance는 global OCR disabled/enabled 0.885%/0.494%,
   project disabled/enabled 1.587%/2.971%로 diagnostic 기준 5% 안에
   들어왔습니다.
+- pre-landing review에서 cache protocol state가 입력 content SHA를
+  기록하지 않던 재현성 누락을 찾았습니다. 입력 SHA 계약과 standalone
+  Windows runner import bootstrap을 추가하고 commit `cbeac5d`의 clean
+  checkout에서 최종 suite를 새 출력 디렉터리로 다시 실행했습니다.
+- 최종 입력 계약 SHA-256은
+  `9d85fe106bf54a658b517ad9d5c5eba145d010a0a0cadef2a26d9bb614f06ea1`입니다.
+- global OCR exact cache 최종 결과는 disabled cold 중앙값 19.873초,
+  enabled-empty 중앙값 19.763초, miss overhead -0.554%였습니다.
+  all-hit는 0.110초로 99.445% 단축됐고 raw OCR exact, Paddle runtime
+  시작 0, 논리/HTTP 요청 0을 모두 통과했습니다. cold variance도
+  disabled/enabled 2.561%/2.253%였습니다.
+- project checkpoint 최종 결과는 exact output, 모든 stage hit,
+  inference/runtime/HTTP 0, render-only 복원, 단일 페이지 downstream
+  재계산과 all-hit 92.106% 단축을 모두 통과했습니다. 그러나 disabled
+  cold 중앙값 122.272초 대비 enabled-empty 128.974초로 miss overhead가
+  5.481%여서 3% 승격 gate를 통과하지 못했습니다. enabled cold variance
+  7.941%와 runtime wait·번역·인페인트 변동이 관찰됐지만 정식 결과를
+  자동 재실행으로 덮지 않습니다.
+- 따라서 global OCR exact cache는 승격 근거를 확보했고, project
+  checkpoint 기능은 보존하되 기본 OFF를 유지합니다.
 
 이 문서는 도구 구현 이력과 검증된 cache gate 결과입니다. raw 입력,
 OCR/번역 결과, DB와 sidecar는 Git 밖에만 보존합니다. cold 후보의 제품
