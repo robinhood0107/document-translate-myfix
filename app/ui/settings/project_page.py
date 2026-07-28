@@ -6,6 +6,10 @@ from modules.utils.paths import get_default_project_autosave_dir
 
 
 class ProjectPage(QtWidgets.QWidget):
+    open_checkpoint_folder_requested = QtCore.Signal()
+    clean_checkpoint_cache_requested = QtCore.Signal()
+    force_checkpoint_recompute_requested = QtCore.Signal()
+
     def __init__(self, parent=None):
         super().__init__(parent)
 
@@ -61,6 +65,45 @@ class ProjectPage(QtWidgets.QWidget):
         autosave_folder_layout.addWidget(reset_button)
         autosave_folder_layout.addStretch(1)
 
+        checkpoint_label = MLabel(self.tr("Project Stage Checkpoints")).h4()
+        checkpoint_note = MLabel(
+            self.tr(
+                "Preview: save reusable stage manifests and large artifacts beside "
+                "each .ctpr project. Missing or damaged cache data is ignored and "
+                "recalculated."
+            )
+        ).secondary()
+        checkpoint_note.setTextFormat(QtCore.Qt.PlainText)
+        checkpoint_note.setWordWrap(True)
+        self.project_checkpoint_enabled_checkbox = QtWidgets.QCheckBox(
+            self.tr("Enable project stage checkpoints")
+        )
+        self.project_checkpoint_enabled_checkbox.setChecked(False)
+
+        checkpoint_actions = QtWidgets.QHBoxLayout()
+        self.open_checkpoint_folder_button = QtWidgets.QPushButton(
+            self.tr("Open Cache Folder")
+        )
+        self.clean_checkpoint_cache_button = QtWidgets.QPushButton(
+            self.tr("Clean Unused Cache")
+        )
+        self.force_checkpoint_recompute_button = QtWidgets.QPushButton(
+            self.tr("Force Stage Recalculation")
+        )
+        self.open_checkpoint_folder_button.clicked.connect(
+            self.open_checkpoint_folder_requested.emit
+        )
+        self.clean_checkpoint_cache_button.clicked.connect(
+            self.clean_checkpoint_cache_requested.emit
+        )
+        self.force_checkpoint_recompute_button.clicked.connect(
+            self.force_checkpoint_recompute_requested.emit
+        )
+        checkpoint_actions.addWidget(self.open_checkpoint_folder_button)
+        checkpoint_actions.addWidget(self.clean_checkpoint_cache_button)
+        checkpoint_actions.addWidget(self.force_checkpoint_recompute_button)
+        checkpoint_actions.addStretch(1)
+
         layout.addWidget(autosave_label)
         layout.addWidget(autosave_note)
         layout.addLayout(autosave_folder_layout)
@@ -68,6 +111,11 @@ class ProjectPage(QtWidgets.QWidget):
         layout.addWidget(auto_recover_label)
         layout.addWidget(auto_recover_note)
         layout.addLayout(interval_layout)
+        layout.addSpacing(12)
+        layout.addWidget(checkpoint_label)
+        layout.addWidget(checkpoint_note)
+        layout.addWidget(self.project_checkpoint_enabled_checkbox)
+        layout.addLayout(checkpoint_actions)
         layout.addStretch(1)
 
     def _choose_autosave_folder(self):
