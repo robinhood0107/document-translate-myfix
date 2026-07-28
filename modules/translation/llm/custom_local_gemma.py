@@ -702,7 +702,6 @@ class CustomLocalGemmaTranslation(BaseLLMTranslation):
         if store is not None and not store.enabled:
             store_available = False
             lookup_stats["gemma_tm_cache_disabled_count"] = 1
-        dictionary_version = self._translation_dictionary_version()
         targets: list[GemmaCacheTarget] = []
 
         for start in range(0, len(blk_list), self.chunk_size):
@@ -724,7 +723,6 @@ class CustomLocalGemmaTranslation(BaseLLMTranslation):
                 raw_sources=raw_sources,
                 extra_context=extra_context,
                 runtime_identity=runtime_identity,
-                dictionary_version=dictionary_version,
                 tm_revision=tm_revision,
             )
             for global_index in chunk_requested:
@@ -850,7 +848,6 @@ class CustomLocalGemmaTranslation(BaseLLMTranslation):
         raw_sources: tuple[str, ...],
         extra_context: str,
         runtime_identity: Mapping[str, Any] | None,
-        dictionary_version: str,
         tm_revision: int,
     ) -> dict[str, Any]:
         return {
@@ -889,25 +886,9 @@ class CustomLocalGemmaTranslation(BaseLLMTranslation):
             },
             "model": self.model,
             "runtime": dict(runtime_identity or {}),
-            "dictionary_version": dictionary_version,
             "glossary_version": 0,
             "tm_revision": int(tm_revision),
         }
-
-    def _translation_dictionary_version(self) -> str:
-        rules: Any = []
-        settings = self.settings
-        getter = getattr(settings, "get_translation_result_dictionary_rules", None)
-        if callable(getter):
-            try:
-                rules = getter()
-            except Exception:
-                logger.warning(
-                    "Unable to read translation-result dictionary rules for cache identity.",
-                    exc_info=True,
-                )
-                rules = []
-        return canonical_sha256(rules or [])
 
     @staticmethod
     def _restore_cached_translation_metadata(

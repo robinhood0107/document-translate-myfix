@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import os
 import unittest
+from types import SimpleNamespace
+from unittest import mock
 
 import numpy as np
 from PySide6 import QtWidgets
@@ -12,6 +14,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 from app.ui.canvas.text.text_item_properties import TextItemProperties
 from app.ui.canvas.text_item import TextBlockItem, TextBlockState
 from app.ui.commands.box import DeleteTextBoxCommand, TextBoxChangeCommand
+from app.controllers.text import TextController
 from modules.utils.textblock import TextBlock
 
 
@@ -166,6 +169,36 @@ class TextBoxCommandTests(unittest.TestCase):
         self.assertEqual(len(restored_items), 1)
         self.assertEqual(restored_items[0].block_id, "manual-delete")
         self.assertIn(restored_items[0], main.image_viewer.text_items)
+
+    def test_debounced_text_commit_invalidates_translation_once(self) -> None:
+        stack = SimpleNamespace(push=mock.Mock())
+        main = SimpleNamespace(
+            undo_group=SimpleNamespace(activeStack=lambda: stack),
+            mark_project_dirty=mock.Mock(),
+        )
+        controller = TextController.__new__(TextController)
+        controller.main = main
+        controller._text_change_timer = mock.Mock()
+        controller._pending_text_command = {
+            "item": object(),
+            "old_text": "old",
+            "new_text": "new",
+            "old_html": "",
+            "new_html": "",
+            "blk": object(),
+        }
+
+        with mock.patch(
+            "app.controllers.text.TextEditCommand",
+            return_value=object(),
+        ), mock.patch(
+            "app.controllers.text."
+            "invalidate_current_project_page_checkpoints"
+        ) as invalidate:
+            controller._commit_pending_text_command()
+
+        invalidate.assert_called_once_with(main, stage="translation")
+        stack.push.assert_called_once()
 
 
 if __name__ == "__main__":

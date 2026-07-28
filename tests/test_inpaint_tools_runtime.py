@@ -3,6 +3,8 @@ from __future__ import annotations
 import os
 import tempfile
 import unittest
+from types import SimpleNamespace
+from unittest import mock
 
 import imkit as imk
 import numpy as np
@@ -16,6 +18,8 @@ from app.projects.project_state_v2 import (
     load_state_from_proj_file_v2,
     save_state_to_proj_file_v2,
 )
+from app.ui.commands.brush import BrushStrokeCommand, EraseUndoCommand
+from app.ui.commands.inpaint import PatchInsertCommand
 from modules.utils.inpaint_strokes import (
     PATCH_KIND_RESTORE,
     STROKE_ROLE_ADD,
@@ -117,6 +121,116 @@ class InpaintToolsRuntimeTests(unittest.TestCase):
         self.assertIsNotNone(mask)
         self.assertEqual(int(mask[50, 20]), 255)
         self.assertEqual(int(mask[50, 50]), 0)
+
+    def test_saved_exclude_stroke_updates_generated_base_mask(self) -> None:
+        image = np.zeros((100, 100, 3), dtype=np.uint8)
+        base_mask = np.zeros((100, 100), dtype=np.uint8)
+        base_mask[35:66, 10:91] = 255
+        exclude_path = QtGui.QPainterPath()
+        exclude_path.moveTo(35, 50)
+        exclude_path.lineTo(65, 50)
+
+        handler = InpaintingHandler.__new__(InpaintingHandler)
+        mask = handler._generate_mask_from_saved_strokes(
+            [
+                {
+                    "path": exclude_path,
+                    "width": 12,
+                    "role": STROKE_ROLE_EXCLUDE,
+                }
+            ],
+            image,
+            base_mask=base_mask,
+        )
+
+        self.assertIsNotNone(mask)
+        self.assertEqual(int(mask[50, 20]), 255)
+        self.assertEqual(int(mask[50, 50]), 0)
+
+    def test_initial_erase_command_invalidates_inpaint_checkpoint(self) -> None:
+        owner = object()
+        viewer = SimpleNamespace(
+            _scene=object(),
+            window=lambda: owner,
+        )
+        command = EraseUndoCommand(viewer, [], [])
+
+        with mock.patch(
+            "app.ui.commands.brush."
+            "invalidate_current_project_page_checkpoints"
+        ) as invalidate:
+            command.redo()
+
+        invalidate.assert_called_once_with(owner, stage="inpaint")
+
+    def test_initial_brush_command_invalidates_existing_scene_stroke(
+        self,
+    ) -> None:
+        owner = object()
+        scene = SimpleNamespace(
+            addItem=mock.Mock(),
+            update=mock.Mock(),
+        )
+        viewer = SimpleNamespace(
+            _scene=scene,
+            window=lambda: owner,
+        )
+
+        with mock.patch.object(
+            BrushStrokeCommand,
+            "save_path_properties",
+            return_value={"path": "saved"},
+        ), mock.patch.object(
+            BrushStrokeCommand,
+            "find_matching_item",
+            return_value=object(),
+        ), mock.patch(
+            "app.ui.commands.brush."
+            "invalidate_current_project_page_checkpoints"
+        ) as invalidate:
+            command = BrushStrokeCommand(viewer, object())
+            command.redo()
+
+        invalidate.assert_called_once_with(owner, stage="inpaint")
+        scene.addItem.assert_not_called()
+
+    def test_restore_patch_redo_invalidates_render_checkpoint(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            ct = SimpleNamespace(
+                image_viewer=SimpleNamespace(_scene=object()),
+                image_patches={"page.png": []},
+                in_memory_patches={"page.png": []},
+                temp_dir=tmp,
+            )
+            patch = {
+                "bbox": [0, 0, 2, 2],
+                "image": np.zeros((2, 2, 3), dtype=np.uint8),
+                "kind": PATCH_KIND_RESTORE,
+            }
+            command = PatchInsertCommand(
+                ct,
+                [patch],
+                "page.png",
+                display=False,
+            )
+
+            with mock.patch.object(
+                command,
+                "_register_patches",
+            ), mock.patch.object(
+                command,
+                "_draw_pixmaps",
+            ), mock.patch(
+                "app.ui.commands.inpaint."
+                "invalidate_project_page_checkpoints"
+            ) as invalidate:
+                command.redo()
+
+            invalidate.assert_called_once_with(
+                ct,
+                "page.png",
+                stage="render",
+            )
 
     def test_project_state_v2_roundtrips_patch_kind_and_order(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
