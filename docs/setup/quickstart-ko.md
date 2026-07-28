@@ -116,7 +116,9 @@ bundle 파일 설명은 [/paddleocr_vl_docker_files/README.md](/paddleocr_vl_doc
 프로젝트 stage checkpoint는 `Settings > Project`에서 기본값이 꺼진 미리보기
 기능으로 제공됩니다. cache 관리 기능을 사용하기 전에 `.ctpr`를 먼저
 저장해야 합니다. 옆의 `.ctpr.cache` 폴더는 재계산 가능한 데이터이며 프로젝트를
-여는 데 필수적이지 않습니다.
+여는 데 필수적이지 않습니다. 유효할 때는 감지, 사전 적용 전 OCR, 인페인트
+mask·cleaned artifact, 렌더 출력을 복원합니다. 번역 내용은 프로젝트 파일에만
+남고 sidecar 서명이 정확히 일치할 때만 재사용합니다.
 
 기본 OCR 라우팅:
 
