@@ -1893,6 +1893,82 @@ Approximate GPU usage:
         <source>Parallel Workers</source>
         <translation>병렬 작업 수</translation>
     </message>
+    <message>
+        <source>Persistent OCR Result Cache</source>
+        <translation>영구 OCR 결과 캐시</translation>
+    </message>
+    <message>
+        <source>Reuses exact PaddleOCR VL crop results across runs. Images are not stored. The cache is available only for the bundled managed Docker endpoint; custom endpoints continue normally without persistent caching.</source>
+        <translation>실행 간에 완전히 동일한 PaddleOCR VL crop 결과를 재사용합니다. 이미지는 저장하지 않습니다. 캐시는 번들로 제공되는 관리형 Docker endpoint에서만 사용할 수 있으며, 사용자 지정 endpoint는 영구 캐시 없이 정상적으로 계속 처리합니다.</translation>
+    </message>
+    <message>
+        <source>Enable persistent OCR result cache</source>
+        <translation>영구 OCR 결과 캐시 사용</translation>
+    </message>
+    <message>
+        <source>Maximum cached crops</source>
+        <translation>최대 캐시 crop 수</translation>
+    </message>
+    <message>
+        <source>Hits: — · Misses: — · Items: —</source>
+        <translation>적중: — · 미적중: — · 항목: —</translation>
+    </message>
+    <message>
+        <source>Refresh statistics</source>
+        <translation>통계 새로 고침</translation>
+    </message>
+    <message>
+        <source>Export JSONL</source>
+        <translation>JSONL 내보내기</translation>
+    </message>
+    <message>
+        <source>Clear cache</source>
+        <translation>캐시 지우기</translation>
+    </message>
+    <message>
+        <source>Cache unavailable: {reason}</source>
+        <translation>캐시를 사용할 수 없음: {reason}</translation>
+    </message>
+    <message>
+        <source>Hits: {hits} · Misses: {misses} · Items: {items}</source>
+        <translation>적중: {hits} · 미적중: {misses} · 항목: {items}</translation>
+    </message>
+    <message>
+        <source>Export PaddleOCR VL Cache</source>
+        <translation>PaddleOCR VL 캐시 내보내기</translation>
+    </message>
+    <message>
+        <source>JSON Lines (*.jsonl)</source>
+        <translation>JSON Lines (*.jsonl)</translation>
+    </message>
+    <message>
+        <source>PaddleOCR VL Cache</source>
+        <translation>PaddleOCR VL 캐시</translation>
+    </message>
+    <message>
+        <source>Cache export failed. The database was left unchanged.
+{error}</source>
+        <translation>캐시 내보내기에 실패했습니다. 데이터베이스는 변경하지 않았습니다.
+{error}</translation>
+    </message>
+    <message>
+        <source>Exported {count} cached OCR results.</source>
+        <translation>캐시된 OCR 결과 {count}개를 내보냈습니다.</translation>
+    </message>
+    <message>
+        <source>Clear PaddleOCR VL Cache</source>
+        <translation>PaddleOCR VL 캐시 지우기</translation>
+    </message>
+    <message>
+        <source>Clear all persistent PaddleOCR VL result-cache entries? No source images will be deleted.</source>
+        <translation>영구 PaddleOCR VL 결과 캐시 항목을 모두 지우시겠습니까? 원본 이미지는 삭제하지 않습니다.</translation>
+    </message>
+    <message>
+        <source>Cache clear failed. The database was left unchanged.
+{error}</source>
+        <translation>캐시 지우기에 실패했습니다. 데이터베이스는 변경하지 않았습니다.
+{error}</translation>
+    </message>
 </context>
 <context>
     <name>PageListView</name>

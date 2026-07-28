@@ -5,7 +5,11 @@ import unittest
 from unittest import mock
 from urllib.error import HTTPError
 
-from modules.ocr.local_runtime import LocalOCRRuntimeManager
+from modules.ocr.local_runtime import (
+    PADDLEOCR_IMAGE_DIGEST,
+    PADDLEOCR_IMAGE_REF,
+    LocalOCRRuntimeManager,
+)
 from modules.utils.exceptions import LocalServiceSetupError, OperationCancelledError
 from modules.utils.llama_cpp_runtime import DEFAULT_LLAMA_CPP_IMAGE
 
@@ -33,6 +37,112 @@ class _DummySettingsPage:
 
 
 class LocalOCRRuntimeManagerTests(unittest.TestCase):
+    def test_paddle_cache_identity_is_managed_only(self) -> None:
+        manager = LocalOCRRuntimeManager()
+        unmanaged = _DummySettingsPage(
+            paddle_url="http://192.168.0.20:28118/layout-parsing"
+        )
+
+        with mock.patch.object(
+            manager,
+            "_inspect_docker_image_id",
+        ) as inspect_image:
+            self.assertIsNone(
+                manager.get_ocr_cache_identity("PaddleOCR VL", unmanaged)
+            )
+
+        inspect_image.assert_not_called()
+
+    def test_paddle_cache_identity_includes_runtime_contract(self) -> None:
+        manager = LocalOCRRuntimeManager()
+        settings_page = _DummySettingsPage()
+        contract = {
+            "compose_sha256": "compose",
+            "command_sha256": "command",
+            "vllm_config_sha256": "vllm",
+            "pipeline_config_sha256": "pipeline",
+            "runtime_fingerprint": "runtime",
+        }
+
+        with mock.patch.object(
+            manager,
+            "_present_managed_container_names",
+            return_value=["paddleocr-vllm", "paddleocr-server"],
+        ), mock.patch.object(
+            manager,
+            "_paddle_containers_match_contract",
+            return_value=True,
+        ), mock.patch.object(
+            manager,
+            "_paddle_runtime_contract",
+            return_value=contract,
+        ), mock.patch.object(
+            manager,
+            "_inspect_docker_image_id",
+            return_value="sha256:image-id",
+        ):
+            identity = manager.get_ocr_cache_identity(
+                "PaddleOCR VL",
+                settings_page,
+            )
+
+        self.assertEqual(identity["image_ref"], PADDLEOCR_IMAGE_REF)
+        self.assertEqual(identity["image_digest"], PADDLEOCR_IMAGE_DIGEST)
+        self.assertEqual(identity["image_id"], "sha256:image-id")
+        self.assertEqual(identity["runtime_fingerprint"], "runtime")
+        self.assertEqual(identity["command_sha256"], "command")
+
+    def test_paddle_cache_identity_requires_exact_managed_containers(self) -> None:
+        manager = LocalOCRRuntimeManager()
+        settings_page = _DummySettingsPage()
+
+        with mock.patch.object(
+            manager,
+            "_present_managed_container_names",
+            return_value=[],
+        ), mock.patch.object(
+            manager,
+            "_inspect_docker_image_id",
+        ) as inspect_image:
+            identity = manager.get_ocr_cache_identity(
+                "PaddleOCR VL",
+                settings_page,
+            )
+
+        self.assertIsNone(identity)
+        inspect_image.assert_not_called()
+
+    def test_stale_paddle_containers_are_force_recreated(self) -> None:
+        manager = LocalOCRRuntimeManager()
+        settings_page = _DummySettingsPage()
+
+        with mock.patch.object(manager, "validate_engine"), mock.patch.object(
+            manager,
+            "_present_managed_container_names",
+            return_value=["paddleocr-vllm", "paddleocr-server"],
+        ), mock.patch.object(
+            manager,
+            "_paddle_containers_match_contract",
+            return_value=False,
+        ), mock.patch.object(
+            manager,
+            "_wait_for_health",
+            return_value=True,
+        ), mock.patch.object(
+            manager,
+            "_run_compose",
+        ) as run_compose:
+            manager.ensure_engine("PaddleOCR VL", settings_page)
+
+        run_compose.assert_called_once_with(
+            "PaddleOCR VL",
+            "up",
+            "-d",
+            "--force-recreate",
+            step_name="force-recreate",
+        )
+        self.assertEqual(manager._active_engine, "PaddleOCR VL")
+
     def test_shutdown_stops_and_preserves_active_engine_containers(self) -> None:
         manager = LocalOCRRuntimeManager()
         manager._active_engine = "PaddleOCR VL"
@@ -95,7 +205,7 @@ class LocalOCRRuntimeManagerTests(unittest.TestCase):
 
         with mock.patch.object(manager, "validate_engine"), \
              mock.patch.object(manager, "_probe_health_state", return_value="unavailable"), \
-             mock.patch.object(manager, "_existing_managed_container_names", return_value=[]), \
+             mock.patch.object(manager, "_present_managed_container_names", return_value=[]), \
              mock.patch.object(manager, "_wait_for_health", side_effect=cancelled), \
              mock.patch.object(manager, "_run_compose") as run_compose, \
              mock.patch.object(
@@ -387,10 +497,15 @@ class LocalOCRRuntimeManagerTests(unittest.TestCase):
              mock.patch.object(manager, "_probe_health_state", return_value="unavailable"), \
              mock.patch.object(
                  manager,
-                 "_existing_managed_container_names",
+                 "_present_managed_container_names",
                  return_value=["paddleocr-vllm", "paddleocr-server"],
                  create=True,
              ) as existing_containers, \
+             mock.patch.object(
+                 manager,
+                 "_paddle_containers_match_contract",
+                 return_value=True,
+             ), \
              mock.patch.object(manager, "_start_existing_managed_containers", create=True) as start_existing, \
              mock.patch.object(manager, "_wait_for_health", return_value=True) as wait_for_health, \
              mock.patch.object(

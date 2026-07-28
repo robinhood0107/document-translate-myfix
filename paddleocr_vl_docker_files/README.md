@@ -20,12 +20,15 @@
 
 ## 현재 기준 요약
 
+- 공식 이미지는
+  `ccr-2vdh3abv-pub.cnc.bj.baidubce.com/paddlepaddle/paddleocr-genai-vllm-server@sha256:d0d32c04a2119613d25a0a4c292e165ccc107954b74580613cf59e378037f8f5`
+  로 고정합니다.
 - `paddleocr-server`
   - `/layout-parsing` 프런트 서비스
-  - 현재 compose 기준 `--device gpu:0`
+  - 현재 compose 기준 `--device cpu`
 - `paddleocr-vllm`
   - 실제 VL 모델 추론 백엔드
-  - `gpu_memory_utilization: 0.84`
+  - `gpu_memory_utilization: 0.80`
   - `max_model_len: 4096`
   - `max_num_seqs: 32`
   - `max_num_batched_tokens: 98304`

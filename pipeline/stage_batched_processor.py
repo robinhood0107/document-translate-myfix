@@ -22,6 +22,8 @@ from app.ui.messages import Messages
 from modules.detection.processor import TextBlockDetector
 from modules.ocr.factory import OCRFactory
 from modules.ocr.local_runtime import LocalOCRRuntimeManager
+from modules.ocr.ocr_paddle_VL import PaddleOCRVLEngine
+from modules.ocr.persistent_cache import OCRPersistentResultCache
 from modules.ocr.selection import (
     STAGE_BATCHED_WORKFLOW_MODE,
     resolve_stage_batched_ocr_policy,
@@ -110,6 +112,8 @@ class StagePageContext:
     detector_device: str = ""
     page_ocr_metrics: dict[str, int] = field(default_factory=dict)
     page_translation_metrics: dict[str, int | float] = field(default_factory=dict)
+    paddleocr_cache_plan: Any | None = None
+    paddleocr_cache_engine: Any | None = None
     raw_mask: Any | None = None
     mask: Any | None = None
     mask_details: dict[str, Any] = field(default_factory=dict)
@@ -130,6 +134,8 @@ class StageBatchedProcessor(BatchProcessor):
         self._prewarm_executor: ThreadPoolExecutor | None = None
         self._prewarm_jobs: dict[str, Future] = {}
         self._prewarm_cancel_event = threading.Event()
+        self._paddleocr_cache_store: OCRPersistentResultCache | None = None
+        self._paddleocr_cache_identity: dict[str, Any] | None = None
 
     def _stage_tr(self, text: str) -> str:
         return QCoreApplication.translate("StageBatchedProcessor", text)
@@ -373,6 +379,21 @@ class StageBatchedProcessor(BatchProcessor):
             return
         settings_page = self.main_page.settings_page
         engine_key = str(policy["primary_ocr_engine"])
+        if (
+            engine_key == "PaddleOCR VL"
+            and bool(
+                settings_page.get_paddleocr_vl_settings().get(
+                    "persistent_cache_enabled",
+                    True,
+                )
+            )
+        ):
+            store = self._get_paddleocr_cache_store()
+            stats = store.stats()
+            if bool(stats.get("enabled", False)) and int(
+                stats.get("item_count", 0) or 0
+            ) > 0:
+                return
         service = "paddleocr_vl" if "paddle" in engine_key.lower() else "hunyuanocr" if "hunyuan" in engine_key.lower() else engine_key.lower()
         self._start_prewarm(
             "ocr",
@@ -667,18 +688,58 @@ class StageBatchedProcessor(BatchProcessor):
             blk.source_lang = source_lang_code
         device = resolve_device(settings_page.is_gpu_enabled())
         engine_key = str(policy["primary_ocr_engine"])
-        cache_key = self.cache_manager._get_ocr_cache_key(ctx.image, ctx.source_lang, engine_key, device)
+        cache_key = (
+            self.cache_manager._get_ocr_cache_key(
+                ctx.image,
+                ctx.source_lang,
+                engine_key,
+                device,
+            )
+            if engine_key != "PaddleOCR VL"
+            else None
+        )
         cache_status = "miss"
         attempt_count = 0
         page_profile: dict[str, Any] = {}
         engine_name = engine_key
+        records = []
 
         def attach_cancel_checker(engine) -> None:
             setter = getattr(engine, "set_cancel_checker", None)
             if callable(setter):
                 setter(getattr(self.main_page, "is_current_task_cancelled", None))
 
-        if self.cache_manager._can_serve_all_blocks_from_ocr_cache(cache_key, ctx.blk_list):
+        paddle_plan = ctx.paddleocr_cache_plan
+        paddle_engine = ctx.paddleocr_cache_engine
+        if (
+            isinstance(paddle_engine, PaddleOCRVLEngine)
+            and paddle_plan is not None
+        ):
+            attach_cancel_checker(paddle_engine)
+            paddle_engine.process_persistent_cache_plan(paddle_plan)
+            records = paddle_engine.build_persistent_cache_records(paddle_plan)
+            page_profile = dict(paddle_engine.last_page_profile or {})
+            apply_ocr_result_dictionary(
+                ctx.blk_list,
+                settings_page.get_ocr_result_dictionary_rules(),
+            )
+            attempt_count = 1
+            engine_name = paddle_engine.__class__.__name__
+            if paddle_plan.lookup_disabled:
+                cache_status = "disabled"
+            elif paddle_plan.all_hit:
+                cache_status = "hit"
+            elif paddle_plan.hit_count:
+                cache_status = "partial"
+            else:
+                cache_status = "refreshed"
+        elif (
+            engine_key != "PaddleOCR VL"
+            and self.cache_manager._can_serve_all_blocks_from_ocr_cache(
+                cache_key,
+                ctx.blk_list,
+            )
+        ):
             self.cache_manager._apply_cached_ocr_to_blocks(cache_key, ctx.blk_list)
             apply_ocr_result_dictionary(ctx.blk_list, settings_page.get_ocr_result_dictionary_rules())
             cache_status = "hit"
@@ -694,10 +755,12 @@ class StageBatchedProcessor(BatchProcessor):
             engine.process_image(ctx.image, ctx.blk_list)
             page_profile = dict(getattr(engine, "last_page_profile", {}) or {})
             apply_ocr_result_dictionary(ctx.blk_list, settings_page.get_ocr_result_dictionary_rules())
-            self.cache_manager._cache_ocr_results(cache_key, ctx.blk_list)
+            if engine_key != "PaddleOCR VL":
+                self.cache_manager._cache_ocr_results(cache_key, ctx.blk_list)
             cache_status = "refreshed"
             attempt_count = 1
             engine_name = engine.__class__.__name__
+            records = []
 
         quality = summarize_ocr_quality(ctx.blk_list)
         if quality.get("low_quality", False) and not all_empty_blocks_are_rejected(ctx.blk_list):
@@ -706,20 +769,44 @@ class StageBatchedProcessor(BatchProcessor):
                 blk.text = ""
                 blk.texts = []
                 blk.ocr_regions = []
-            engine = OCRFactory.create_engine(
-                settings_page,
-                source_lang_english,
-                engine_key,
-                selected_ocr_mode=policy["normalized_ocr_mode"],
-            )
-            attach_cancel_checker(engine)
-            engine.process_image(ctx.image, ctx.blk_list)
-            page_profile = dict(getattr(engine, "last_page_profile", {}) or {})
+            if (
+                isinstance(paddle_engine, PaddleOCRVLEngine)
+                and self._paddleocr_cache_identity is not None
+                and self._paddleocr_cache_store is not None
+            ):
+                if paddle_plan is not None and not paddle_plan.requires_runtime:
+                    self._await_ocr_runtime(policy)
+                retry_plan = paddle_engine.prepare_persistent_cache(
+                    ctx.image,
+                    ctx.blk_list,
+                    self._paddleocr_cache_store,
+                    self._paddleocr_cache_identity,
+                    lookup=False,
+                )
+                paddle_engine.process_persistent_cache_plan(retry_plan)
+                records = paddle_engine.build_persistent_cache_records(retry_plan)
+                ctx.paddleocr_cache_plan = retry_plan
+                page_profile = dict(paddle_engine.last_page_profile or {})
+                engine = paddle_engine
+            else:
+                engine = OCRFactory.create_engine(
+                    settings_page,
+                    source_lang_english,
+                    engine_key,
+                    selected_ocr_mode=policy["normalized_ocr_mode"],
+                )
+                attach_cancel_checker(engine)
+                engine.process_image(ctx.image, ctx.blk_list)
+                page_profile = dict(getattr(engine, "last_page_profile", {}) or {})
             apply_ocr_result_dictionary(ctx.blk_list, settings_page.get_ocr_result_dictionary_rules())
-            self.cache_manager._cache_ocr_results(cache_key, ctx.blk_list)
+            if engine_key != "PaddleOCR VL":
+                self.cache_manager._cache_ocr_results(cache_key, ctx.blk_list)
             cache_status = "refreshed"
             quality = summarize_ocr_quality(ctx.blk_list)
             engine_name = engine.__class__.__name__
+
+        if records and self._paddleocr_cache_store is not None:
+            self._paddleocr_cache_store.store_records(records)
 
         ctx.blk_list, rejected_empty_blocks = drop_rejected_empty_ocr_blocks(ctx.blk_list)
         if rejected_empty_blocks:
@@ -757,7 +844,55 @@ class StageBatchedProcessor(BatchProcessor):
         total_images = len(pages)
         settings_page = self.main_page.settings_page
         runtime_manager = getattr(self.main_page, "local_ocr_runtime_manager", None)
-        self._await_ocr_runtime(policy)
+        self._paddleocr_cache_store = None
+        self._paddleocr_cache_identity = None
+        engine_key = str(policy["primary_ocr_engine"])
+        persistent_cache_requested = (
+            engine_key == "PaddleOCR VL"
+            and bool(
+                settings_page.get_paddleocr_vl_settings().get(
+                    "persistent_cache_enabled",
+                    True,
+                )
+            )
+        )
+        prepared = False
+        requires_runtime = any(
+            not ctx.failed_stage and not ctx.no_text_detected and bool(ctx.blk_list)
+            for ctx in pages
+        )
+        if (
+            persistent_cache_requested
+            and isinstance(runtime_manager, LocalOCRRuntimeManager)
+        ):
+            runtime_identity = runtime_manager.get_ocr_cache_identity(
+                engine_key,
+                settings_page,
+            )
+            if runtime_identity is not None:
+                requires_runtime = self._prepare_paddleocr_cache_plans(
+                    pages,
+                    policy,
+                    runtime_identity,
+                )
+                prepared = True
+        if requires_runtime:
+            self._await_ocr_runtime(policy)
+        if (
+            persistent_cache_requested
+            and not prepared
+            and isinstance(runtime_manager, LocalOCRRuntimeManager)
+        ):
+            runtime_identity = runtime_manager.get_ocr_cache_identity(
+                engine_key,
+                settings_page,
+            )
+            if runtime_identity is not None:
+                self._prepare_paddleocr_cache_plans(
+                    pages,
+                    policy,
+                    runtime_identity,
+                )
 
         for index, ctx in enumerate(pages):
             self._raise_if_cancelled()
@@ -872,6 +1007,85 @@ class StageBatchedProcessor(BatchProcessor):
                 raise_on_failure=True,
             )
         self._raise_if_cancelled()
+
+    def _prepare_paddleocr_cache_plans(
+        self,
+        pages: list[StagePageContext],
+        policy: dict[str, Any],
+        runtime_identity: dict[str, Any],
+    ) -> bool:
+        settings_page = self.main_page.settings_page
+        store = self._get_paddleocr_cache_store()
+        self._paddleocr_cache_store = store
+        self._paddleocr_cache_identity = dict(runtime_identity)
+
+        requires_runtime = False
+        total_images = len(pages)
+        for index, ctx in enumerate(pages):
+            self._raise_if_cancelled()
+            if ctx.failed_stage or ctx.no_text_detected:
+                continue
+            try:
+                source_lang_english = self._source_lang_english(ctx.source_lang)
+                source_lang_code = language_codes.get(source_lang_english, "en")
+                for blk in ctx.blk_list:
+                    blk.source_lang = source_lang_code
+                engine = OCRFactory.create_engine(
+                    settings_page,
+                    source_lang_english,
+                    "PaddleOCR VL",
+                    selected_ocr_mode=policy["normalized_ocr_mode"],
+                )
+                if not isinstance(engine, PaddleOCRVLEngine):
+                    raise RuntimeError(
+                        "PaddleOCR-VL persistent cache resolved an unexpected OCR engine."
+                    )
+                setter = getattr(engine, "set_cancel_checker", None)
+                if callable(setter):
+                    setter(
+                        getattr(
+                            self.main_page,
+                            "is_current_task_cancelled",
+                            None,
+                        )
+                    )
+                plan = engine.prepare_persistent_cache(
+                    ctx.image,
+                    ctx.blk_list,
+                    store,
+                    runtime_identity,
+                )
+                ctx.paddleocr_cache_engine = engine
+                ctx.paddleocr_cache_plan = plan
+                requires_runtime = requires_runtime or plan.requires_runtime
+            except OperationCancelledError:
+                raise
+            except Exception as exc:
+                self._mark_page_failed(
+                    ctx,
+                    index=index,
+                    total_images=total_images,
+                    stage="ocr",
+                    reason=str(exc),
+                    extra=dict(ctx.page_ocr_metrics or {}),
+                )
+        return requires_runtime
+
+    def _get_paddleocr_cache_store(self) -> OCRPersistentResultCache:
+        settings_page = self.main_page.settings_page
+        cache_settings = settings_page.get_paddleocr_vl_settings()
+        cache_limit = int(cache_settings.get("persistent_cache_limit", 50_000))
+        store = getattr(
+            self.main_page,
+            "paddleocr_persistent_result_cache",
+            None,
+        )
+        if not isinstance(store, OCRPersistentResultCache):
+            store = OCRPersistentResultCache(result_cache_limit=cache_limit)
+            self.main_page.paddleocr_persistent_result_cache = store
+        else:
+            store.configure_limit(cache_limit)
+        return store
 
     def _ensure_inpainter(self):
         settings_page = self.main_page.settings_page
