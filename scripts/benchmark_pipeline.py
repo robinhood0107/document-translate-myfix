@@ -688,6 +688,37 @@ def _load_or_create_project(
     raise ValueError(f"Unsupported project benchmark action: {project_action}")
 
 
+def _wait_for_project_ui_idle(
+    app: QApplication,
+    window,
+    *,
+    timeout_sec: float = 30.0,
+) -> None:
+    runner = getattr(window, "task_runner_ctrl", None)
+    if runner is None:
+        return
+    deadline = time.monotonic() + max(0.1, float(timeout_sec))
+    idle_cycles = 0
+    while time.monotonic() < deadline:
+        app.processEvents()
+        worker_active = getattr(window, "current_worker", None) is not None
+        queue_active = bool(
+            getattr(runner, "is_processing_queue", False)
+        )
+        pending = bool(getattr(runner, "operation_queue", ()))
+        if not worker_active and not queue_active and not pending:
+            idle_cycles += 1
+            if idle_cycles >= 3:
+                return
+        else:
+            idle_cycles = 0
+        time.sleep(0.01)
+    raise TimeoutError(
+        "Project UI restoration did not become idle before the benchmark "
+        "pipeline started."
+    )
+
+
 def _invalidate_project_checkpoint_for_benchmark(
     window,
     loaded_paths: list[str],
@@ -955,6 +986,12 @@ def _run_single_mode(
                     source_lang=source_lang,
                     target_lang=target_lang,
                 )
+                if project_action == "resume":
+                    _wait_for_project_ui_idle(app, window)
+                    _log(
+                        "프로젝트 복원 UI 작업 완료: "
+                        "pending worker/operation=0"
+                    )
                 invalidated_checkpoint_count = (
                     _invalidate_project_checkpoint_for_benchmark(
                         window,
