@@ -2,13 +2,17 @@
 from __future__ import annotations
 
 import argparse
+from contextlib import contextmanager, nullcontext
+import hashlib
 import json
 import os
 import shutil
 import sys
+import threading
 import time
 from pathlib import Path
 import traceback
+from typing import Any, Iterator
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 os.environ.setdefault("CT_DISABLE_UPDATE_CHECK", "1")
@@ -34,6 +38,7 @@ from benchmark_common import (
     collect_managed_llama_cpp_runtimes,
     ensure_managed_runtime_health_first,
     summarize_metrics,
+    stage_runtime_files,
     write_json,
 )
 from modules.utils.ocr_quality import summarize_ocr_quality
@@ -47,6 +52,15 @@ LANGUAGE_FONT_FALLBACKS = {
     "Brazilian Portuguese": ["Brazilian Portuguese", "Portuguese"],
 }
 GEMMA_ENV_OVERRIDES = {
+    "context_size": "LLAMA_CTX_SIZE",
+    "n_parallel": "LLAMA_N_PARALLEL",
+    "threads": "LLAMA_THREADS",
+    "n_gpu_layers": "LLAMA_N_GPU_LAYERS",
+    "cache_type_k": "LLAMA_CACHE_TYPE_K",
+    "cache_type_v": "LLAMA_CACHE_TYPE_V",
+    "cache_ram_mib": "LLAMA_CACHE_RAM_MIB",
+    "spec_type": "LLAMA_SPEC_TYPE",
+    "spec_draft_n_max": "LLAMA_SPEC_DRAFT_N_MAX",
     "temperature": "CT_GEMMA_TEMPERATURE",
     "top_k": "CT_GEMMA_TOP_K",
     "top_p": "CT_GEMMA_TOP_P",
@@ -159,6 +173,170 @@ def _restore_env(snapshot: dict[str, str | None]) -> None:
             os.environ.pop(key, None)
         else:
             os.environ[key] = value
+
+
+@contextmanager
+def _benchmark_runtime_files(
+    preset: dict[str, object],
+    run_dir: Path,
+) -> Iterator[dict[str, Any]]:
+    from modules.ocr import local_runtime as ocr_runtime_module
+    from modules.translation import local_runtime as gemma_runtime_module
+
+    staged = stage_runtime_files(preset, run_dir / "runtime")
+    original_gemma_compose = gemma_runtime_module._RUNTIME_CONFIG[
+        "compose_file"
+    ]
+    original_ocr_compose: dict[str, Any] = {}
+    selected_ocr = str(
+        ((preset.get("app", {}) or {}).get("ocr", "")) or ""
+    )
+    staged_ocr = staged.get("ocr")
+    try:
+        gemma_runtime_module._RUNTIME_CONFIG["compose_file"] = Path(
+            staged["gemma"]["compose_path"]
+        )
+        if (
+            selected_ocr in ocr_runtime_module._ENGINE_CONFIG
+            and isinstance(staged_ocr, dict)
+            and staged_ocr.get("compose_path")
+        ):
+            original_ocr_compose[selected_ocr] = (
+                ocr_runtime_module._ENGINE_CONFIG[selected_ocr][
+                    "compose_file"
+                ]
+            )
+            ocr_runtime_module._ENGINE_CONFIG[selected_ocr][
+                "compose_file"
+            ] = Path(str(staged_ocr["compose_path"]))
+        write_json(
+            run_dir / "runtime" / "product_runtime_override.json",
+            {
+                "gemma_compose_path": str(
+                    gemma_runtime_module._RUNTIME_CONFIG["compose_file"]
+                ),
+                "ocr_engine": selected_ocr,
+                "ocr_compose_path": str(
+                    (
+                        ocr_runtime_module._ENGINE_CONFIG.get(
+                            selected_ocr,
+                            {},
+                        )
+                        or {}
+                    ).get("compose_file", "")
+                ),
+            },
+        )
+        yield staged
+    finally:
+        gemma_runtime_module._RUNTIME_CONFIG[
+            "compose_file"
+        ] = original_gemma_compose
+        for engine_key, compose_file in original_ocr_compose.items():
+            ocr_runtime_module._ENGINE_CONFIG[engine_key][
+                "compose_file"
+            ] = compose_file
+
+
+class _RequestsProxy:
+    def __init__(self, requests_module, post) -> None:
+        self.exceptions = requests_module.exceptions
+        self.post = post
+
+
+class _ThreadLocalSessions:
+    def __init__(self, requests_module, *, pool_connections: int, pool_maxsize: int) -> None:
+        self._requests = requests_module
+        self._pool_connections = max(1, int(pool_connections))
+        self._pool_maxsize = max(1, int(pool_maxsize))
+        self._local = threading.local()
+        self._sessions: list[Any] = []
+        self._lock = threading.Lock()
+
+    def post(self, *args, **kwargs):
+        session = getattr(self._local, "session", None)
+        if session is None:
+            session = self._requests.Session()
+            adapter = self._requests.adapters.HTTPAdapter(
+                pool_connections=self._pool_connections,
+                pool_maxsize=self._pool_maxsize,
+            )
+            session.mount("http://", adapter)
+            session.mount("https://", adapter)
+            self._local.session = session
+            with self._lock:
+                self._sessions.append(session)
+        return session.post(*args, **kwargs)
+
+    def close(self) -> None:
+        with self._lock:
+            sessions = list(self._sessions)
+            self._sessions.clear()
+        for session in sessions:
+            session.close()
+
+
+@contextmanager
+def _benchmark_http_clients(config: object) -> Iterator[None]:
+    values = config if isinstance(config, dict) else {}
+    gemma_session_enabled = bool(values.get("gemma_session", False))
+    paddle_thread_local_enabled = bool(
+        values.get("paddle_thread_local_session", False)
+    )
+    if not gemma_session_enabled and not paddle_thread_local_enabled:
+        yield
+        return
+
+    import requests as requests_module
+    from modules.ocr import ocr_paddle_VL as paddle_module
+    from modules.translation.llm import custom_local_gemma as gemma_module
+
+    pool_connections = max(1, int(values.get("pool_connections", 8)))
+    pool_maxsize = max(1, int(values.get("pool_maxsize", 8)))
+    gemma_session = None
+    paddle_sessions = None
+    original_gemma_requests = gemma_module.requests
+    original_paddle_requests = paddle_module.requests
+    try:
+        if gemma_session_enabled:
+            gemma_session = requests_module.Session()
+            adapter = requests_module.adapters.HTTPAdapter(
+                pool_connections=pool_connections,
+                pool_maxsize=pool_maxsize,
+            )
+            gemma_session.mount("http://", adapter)
+            gemma_session.mount("https://", adapter)
+            gemma_module.requests = _RequestsProxy(
+                requests_module,
+                gemma_session.post,
+            )
+        if paddle_thread_local_enabled:
+            paddle_sessions = _ThreadLocalSessions(
+                requests_module,
+                pool_connections=pool_connections,
+                pool_maxsize=pool_maxsize,
+            )
+            paddle_module.requests = _RequestsProxy(
+                requests_module,
+                paddle_sessions.post,
+            )
+        _log(
+            "HTTP 실험 적용: gemma_session={gemma} paddle_thread_local={paddle} "
+            "pool_connections={connections} pool_maxsize={maxsize}".format(
+                gemma=gemma_session_enabled,
+                paddle=paddle_thread_local_enabled,
+                connections=pool_connections,
+                maxsize=pool_maxsize,
+            )
+        )
+        yield
+    finally:
+        gemma_module.requests = original_gemma_requests
+        paddle_module.requests = original_paddle_requests
+        if gemma_session is not None:
+            gemma_session.close()
+        if paddle_sessions is not None:
+            paddle_sessions.close()
 
 
 def _ensure_managed_runtime(
@@ -356,6 +534,46 @@ def _configure_window(window, preset: dict[str, object], source_lang: str, targe
     window.s_combo.setCurrentText(source_lang)
     window.t_combo.setCurrentText(target_lang)
     _apply_benchmark_font(window, target_lang)
+    _apply_benchmark_cache_policy(window, preset)
+
+
+def _apply_benchmark_cache_policy(window, preset: dict[str, object]) -> None:
+    policy = preset.get("benchmark_cache_policy", {})
+    if not isinstance(policy, dict):
+        return
+    ui = window.settings_page.ui
+    if "paddleocr_persistent" in policy:
+        ui.paddleocr_vl_persistent_cache_checkbox.setChecked(
+            bool(policy["paddleocr_persistent"])
+        )
+    if "project_checkpoint" in policy:
+        ui.project_checkpoint_enabled_checkbox.setChecked(
+            bool(policy["project_checkpoint"])
+        )
+    translation_values = {
+        "persistent_cache_enabled": bool(
+            policy.get("translation_persistent", False)
+        ),
+        "exact_tm_enabled": bool(policy.get("exact_tm", False)),
+        "result_cache_limit": int(
+            policy.get("translation_result_cache_limit", 50_000)
+        ),
+        "candidate_limit": int(
+            policy.get("translation_candidate_limit", 5_000)
+        ),
+    }
+    ui.user_dictionaries_page.load_translation_memory_settings(
+        translation_values
+    )
+    _log(
+        "벤치 캐시 정책 적용: paddle={paddle} translation={translation} "
+        "exact_tm={exact_tm} project={project}".format(
+            paddle=ui.paddleocr_vl_persistent_cache_checkbox.isChecked(),
+            translation=translation_values["persistent_cache_enabled"],
+            exact_tm=translation_values["exact_tm_enabled"],
+            project=ui.project_checkpoint_enabled_checkbox.isChecked(),
+        )
+    )
 
 
 def _load_images(window, image_paths: list[Path], source_lang: str, target_lang: str) -> list[str]:
@@ -368,14 +586,39 @@ def _load_images(window, image_paths: list[Path], source_lang: str, target_lang:
     return list(window.image_files)
 
 
-def _stage_selected_images(run_dir: Path, image_paths: list[Path]) -> list[Path]:
-    corpus_dir = run_dir / "corpus"
+def _sha256_file(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _stage_selected_images(
+    run_dir: Path,
+    image_paths: list[Path],
+    *,
+    shared_corpus_dir: Path | None = None,
+) -> list[Path]:
+    corpus_dir = shared_corpus_dir or (run_dir / "corpus")
     corpus_dir.mkdir(parents=True, exist_ok=True)
 
     staged_paths: list[Path] = []
     for path in image_paths:
         target_path = corpus_dir / path.name
-        shutil.copy2(path, target_path)
+        if path.resolve() != target_path.resolve():
+            if target_path.exists():
+                if (
+                    not target_path.is_file()
+                    or target_path.stat().st_size != path.stat().st_size
+                    or _sha256_file(target_path) != _sha256_file(path)
+                ):
+                    raise RuntimeError(
+                        "Shared benchmark corpus contains a different file: "
+                        f"{target_path}"
+                    )
+            else:
+                shutil.copy2(path, target_path)
         staged_paths.append(target_path)
 
     _log(
@@ -385,6 +628,132 @@ def _stage_selected_images(run_dir: Path, image_paths: list[Path]) -> list[Path]
         )
     )
     return staged_paths
+
+
+def _load_or_create_project(
+    window,
+    *,
+    project_file: Path | None,
+    project_action: str,
+    image_paths: list[Path],
+    source_lang: str,
+    target_lang: str,
+) -> list[str]:
+    if project_action == "none":
+        return _load_images(window, image_paths, source_lang, target_lang)
+    if project_file is None:
+        raise ValueError("A project file is required for project benchmark actions.")
+
+    from app.projects.project_types import PROJECT_KIND_SINGLE
+
+    if project_action == "create":
+        if project_file.exists():
+            raise FileExistsError(
+                f"Fresh project benchmark target already exists: {project_file}"
+            )
+        project_file.parent.mkdir(parents=True, exist_ok=True)
+        loaded_paths = _load_images(
+            window,
+            image_paths,
+            source_lang,
+            target_lang,
+        )
+        window.project_file = str(project_file)
+        window.project_kind = PROJECT_KIND_SINGLE
+        window.project_ctrl.save_project(
+            str(project_file),
+            checkpoint_operation="same",
+        )
+        _log(f"새 벤치 프로젝트 저장 완료: {project_file}")
+        return loaded_paths
+
+    if project_action == "resume":
+        if not project_file.is_file():
+            raise FileNotFoundError(
+                f"Project benchmark source was not found: {project_file}"
+            )
+        saved_context = window.project_ctrl.load_project(str(project_file))
+        window.project_ctrl.load_state_to_ui(saved_context)
+        window.project_ctrl.update_ui_from_project()
+        loaded_paths = list(window.image_files)
+        for image_path in loaded_paths:
+            state = window.image_ctrl.ensure_page_state(image_path)
+            state["source_lang"] = source_lang
+            state["target_lang"] = target_lang
+        _log(
+            f"벤치 프로젝트 복원 완료: {project_file} pages={len(loaded_paths)}"
+        )
+        return loaded_paths
+
+    raise ValueError(f"Unsupported project benchmark action: {project_action}")
+
+
+def _wait_for_project_ui_idle(
+    app: QApplication,
+    window,
+    *,
+    timeout_sec: float = 30.0,
+) -> None:
+    runner = getattr(window, "task_runner_ctrl", None)
+    if runner is None:
+        return
+    deadline = time.monotonic() + max(0.1, float(timeout_sec))
+    idle_cycles = 0
+    while time.monotonic() < deadline:
+        app.processEvents()
+        worker_active = getattr(window, "current_worker", None) is not None
+        queue_active = bool(
+            getattr(runner, "is_processing_queue", False)
+        )
+        pending = bool(getattr(runner, "operation_queue", ()))
+        if not worker_active and not queue_active and not pending:
+            idle_cycles += 1
+            if idle_cycles >= 3:
+                return
+        else:
+            idle_cycles = 0
+        time.sleep(0.01)
+    raise TimeoutError(
+        "Project UI restoration did not become idle before the benchmark "
+        "pipeline started."
+    )
+
+
+def _invalidate_project_checkpoint_for_benchmark(
+    window,
+    loaded_paths: list[str],
+    *,
+    project_action: str,
+    page_index: int,
+    stage: str,
+) -> int:
+    if page_index < 0:
+        return 0
+    if project_action != "resume":
+        raise ValueError(
+            "Project checkpoint invalidation requires "
+            "--project-action resume."
+        )
+    if page_index >= len(loaded_paths):
+        raise IndexError(
+            "Project checkpoint invalidation page index is outside the "
+            "loaded project."
+        )
+    from app.projects.stage_checkpoints import (
+        invalidate_project_page_checkpoints,
+    )
+
+    removed = invalidate_project_page_checkpoints(
+        window,
+        loaded_paths[page_index],
+        stage=stage,
+    )
+    if removed <= 0:
+        raise RuntimeError(
+            "The benchmark requested project checkpoint invalidation, but "
+            "no checkpoint rows were removed."
+        )
+    return int(removed)
 
 
 def _normalize_ocr_text(text: object) -> str:
@@ -406,6 +775,16 @@ def _serialize_page_snapshot_block(blk) -> dict[str, object]:
         "text_class": text_class if isinstance(text_class, (str, int, float, bool)) or text_class is None else str(text_class),
         "text": str(getattr(blk, "text", "") or ""),
         "normalized_text": _normalize_ocr_text(getattr(blk, "text", "") or ""),
+        "ocr_status": str(getattr(blk, "ocr_status", "") or ""),
+        "ocr_empty_reason": str(getattr(blk, "ocr_empty_reason", "") or ""),
+        "ocr_attempt_count": int(getattr(blk, "ocr_attempt_count", 0) or 0),
+        "ocr_raw_text": str(getattr(blk, "ocr_raw_text", "") or ""),
+        "ocr_sanitized_text": str(
+            getattr(blk, "ocr_sanitized_text", "") or ""
+        ),
+        "ocr_reject_reason": str(
+            getattr(blk, "ocr_reject_reason", "") or ""
+        ),
         "translation": translation,
         "normalized_translation": _normalize_ocr_text(translation),
         "render_text": str(getattr(blk, "_render_text", "") or ""),
@@ -486,6 +865,16 @@ def _write_page_snapshots(window, run_dir: Path, loaded_paths: list[str]) -> Pat
         processing_summary = state.get("processing_summary", {})
         quality = summarize_ocr_quality(blk_list)
         stage_status = processing_summary.get("stage_status", {}) if isinstance(processing_summary, dict) else {}
+        translated_image_path = str(
+            processing_summary.get("translated_image_path", "")
+            if isinstance(processing_summary, dict)
+            else ""
+        )
+        translated_image = (
+            Path(translated_image_path)
+            if translated_image_path
+            else None
+        )
         snapshots.append(
             {
                 "image_path": str(image_path),
@@ -503,6 +892,15 @@ def _write_page_snapshots(window, run_dir: Path, loaded_paths: list[str]) -> Pat
                 },
                 "runtime": _runtime_snapshot_from_summary(processing_summary),
                 "stage_status": stage_status if isinstance(stage_status, dict) else {},
+                "translated_image_path": translated_image_path,
+                "translated_image_exists": bool(
+                    translated_image is not None and translated_image.is_file()
+                ),
+                "translated_image_sha256": (
+                    _sha256_file(translated_image)
+                    if translated_image is not None and translated_image.is_file()
+                    else ""
+                ),
                 "blocks": [_serialize_page_snapshot_block(block) for block in blk_list],
             }
         )
@@ -527,6 +925,12 @@ def _run_single_mode(
     target_lang: str,
     image_paths: list[Path],
     stage_ceiling: str,
+    project_file: Path | None,
+    project_action: str,
+    save_project_after_run: bool,
+    project_invalidate_page_index: int,
+    project_invalidate_stage: str,
+    product_managed_runtime: bool,
 ) -> dict[str, object]:
     os.environ["CT_BENCH_OUTPUT_DIR"] = str(run_dir)
     gemma_env_snapshot = _apply_gemma_env(preset.get("gemma", {}))
@@ -536,6 +940,8 @@ def _run_single_mode(
     }
     os.environ["CT_BENCH_STAGE_CEILING"] = stage_ceiling
     os.environ["CT_BENCH_EXECUTION_SCOPE"] = "detect-ocr-only" if stage_ceiling == "ocr" else "full-pipeline"
+    performance_stats: dict[str, object] = {}
+    loaded_paths: list[str] = []
     try:
         _log(
             "실행 시작: mode={mode} output={run_dir} images={count} source={source} target={target}".format(
@@ -556,58 +962,119 @@ def _run_single_mode(
             ) from exc
 
         settings_backup = _settings_snapshot()
-        window = ComicTranslate()
-        try:
-            if os.environ.get("CT_BENCH_CLEAR_APP_CACHES", "").strip() == "1":
-                window.pipeline.cache_manager.clear_ocr_cache()
-                window.pipeline.cache_manager.clear_translation_cache()
-                _log("앱 OCR/번역 캐시 초기화 완료")
-            _configure_window(window, preset, source_lang, target_lang)
-            _log("앱 설정 적용 완료")
-            loaded_paths = _load_images(window, image_paths, source_lang, target_lang)
-            _log(f"이미지 로드 완료: {len(loaded_paths)}장")
-            window.curr_img_idx = 0
-            window._current_batch_run_type = "one_page_auto" if mode == "one-page" else "batch"
-            window.emit_memlog(
-                "benchmark_run_start",
-                benchmark_mode=mode,
-                total_images=len(loaded_paths),
-            )
-
-            started = time.perf_counter()
-            if mode == "one-page":
-                _log("one-page 벤치 실행 중...")
-                window.pipeline.batch_process([loaded_paths[0]])
-            elif mode == "batch":
-                _log("batch 벤치 실행 중...")
-                window.pipeline.batch_process(loaded_paths)
-            elif mode == "webtoon":
-                _log("webtoon 벤치 실행 중...")
-                window.pipeline.webtoon_batch_process(loaded_paths)
-            else:
-                raise ValueError(f"Unsupported benchmark mode: {mode}")
-            elapsed = time.perf_counter() - started
-            _log(f"파이프라인 실행 완료: elapsed={elapsed:.3f}s")
-
-            snapshot_path: Path | None = None
-            if os.environ.get("CT_BENCH_EXPORT_PAGE_SNAPSHOTS", "").strip() == "1":
-                snapshot_path = _write_page_snapshots(window, run_dir, loaded_paths)
-                _log(f"페이지 스냅샷 저장 완료: {snapshot_path}")
-
-            window.pipeline.release_model_caches()
-            window.emit_memlog(
-                "benchmark_run_finished",
-                benchmark_mode=mode,
-                elapsed_sec=round(elapsed, 3),
-            )
-            app.processEvents()
-        finally:
+        runtime_context = (
+            _benchmark_runtime_files(preset, run_dir)
+            if product_managed_runtime
+            else nullcontext({})
+        )
+        with runtime_context, _benchmark_http_clients(
+            preset.get("benchmark_http", {})
+        ):
+            window = ComicTranslate()
             try:
-                window._skip_close_prompt = True
-                window.close()
+                if os.environ.get("CT_BENCH_CLEAR_APP_CACHES", "").strip() == "1":
+                    window.pipeline.cache_manager.clear_ocr_cache()
+                    window.pipeline.cache_manager.clear_translation_cache()
+                    _log("앱 OCR/번역 캐시 초기화 완료")
+                _configure_window(window, preset, source_lang, target_lang)
+                _log("앱 설정 적용 완료")
+                loaded_paths = _load_or_create_project(
+                    window,
+                    project_file=project_file,
+                    project_action=project_action,
+                    image_paths=image_paths,
+                    source_lang=source_lang,
+                    target_lang=target_lang,
+                )
+                if project_action == "resume":
+                    _wait_for_project_ui_idle(app, window)
+                    _log(
+                        "프로젝트 복원 UI 작업 완료: "
+                        "pending worker/operation=0"
+                    )
+                invalidated_checkpoint_count = (
+                    _invalidate_project_checkpoint_for_benchmark(
+                        window,
+                        loaded_paths,
+                        project_action=project_action,
+                        page_index=project_invalidate_page_index,
+                        stage=project_invalidate_stage,
+                    )
+                )
+                if invalidated_checkpoint_count:
+                    _log(
+                        "프로젝트 체크포인트 부분 무효화 완료: "
+                        f"page_index={project_invalidate_page_index} "
+                        f"stage={project_invalidate_stage} "
+                        f"rows={invalidated_checkpoint_count}"
+                    )
+                _log(f"이미지 로드 완료: {len(loaded_paths)}장")
+                window.curr_img_idx = 0
+                window._current_batch_run_type = "one_page_auto" if mode == "one-page" else "batch"
+                window.emit_memlog(
+                    "benchmark_run_start",
+                    benchmark_mode=mode,
+                    total_images=len(loaded_paths),
+                )
+
+                started = time.perf_counter()
+                if mode == "one-page":
+                    _log("one-page 벤치 실행 중...")
+                    window.pipeline.batch_process([loaded_paths[0]])
+                elif mode == "batch":
+                    _log("batch 벤치 실행 중...")
+                    window.pipeline.batch_process(loaded_paths)
+                elif mode == "webtoon":
+                    _log("webtoon 벤치 실행 중...")
+                    window.pipeline.webtoon_batch_process(loaded_paths)
+                else:
+                    raise ValueError(f"Unsupported benchmark mode: {mode}")
+                elapsed = time.perf_counter() - started
+                _log(f"파이프라인 실행 완료: elapsed={elapsed:.3f}s")
+
+                if project_file is not None and save_project_after_run:
+                    window.project_ctrl.save_project(
+                        str(project_file),
+                        checkpoint_operation="same",
+                    )
+                    _log(f"처리 후 벤치 프로젝트 저장 완료: {project_file}")
+
+                snapshot_path: Path | None = None
+                if os.environ.get("CT_BENCH_EXPORT_PAGE_SNAPSHOTS", "").strip() == "1":
+                    snapshot_path = _write_page_snapshots(window, run_dir, loaded_paths)
+                    _log(f"페이지 스냅샷 저장 완료: {snapshot_path}")
+
+                workflow_mode = window.settings_page.get_workflow_mode()
+                if workflow_mode == "stage_batched_pipeline":
+                    performance_stats = dict(
+                        window.pipeline.stage_batched_processor.last_performance_stats
+                        or {}
+                    )
+                elif mode == "webtoon":
+                    performance_stats = dict(
+                        window.pipeline.webtoon_batch_processor.last_performance_stats
+                        or {}
+                    )
+                else:
+                    performance_stats = dict(
+                        window.pipeline.batch_processor.last_performance_stats
+                        or {}
+                    )
+
+                window.pipeline.release_model_caches()
+                window.emit_memlog(
+                    "benchmark_run_finished",
+                    benchmark_mode=mode,
+                    elapsed_sec=round(elapsed, 3),
+                )
                 app.processEvents()
             finally:
-                _restore_settings(settings_backup)
+                try:
+                    window._skip_close_prompt = True
+                    window.close()
+                    app.processEvents()
+                finally:
+                    _restore_settings(settings_backup)
     finally:
         _restore_env(gemma_env_snapshot)
         _restore_env(benchmark_env_snapshot)
@@ -634,6 +1101,25 @@ def _run_single_mode(
             "alignment_id": 1,
             "vertical_alignment_id": 1,
             "runner_render_mode": "product",
+            "performance_stats": performance_stats,
+            "project_action": project_action,
+            "project_invalidate_page_index": (
+                int(project_invalidate_page_index)
+            ),
+            "project_invalidate_stage": project_invalidate_stage,
+            "project_invalidated_checkpoint_count": int(
+                invalidated_checkpoint_count
+            ),
+            "project_checkpoint_enabled": bool(
+                (
+                    preset.get("benchmark_cache_policy", {})
+                    if isinstance(
+                        preset.get("benchmark_cache_policy", {}),
+                        dict,
+                    )
+                    else {}
+                ).get("project_checkpoint", False)
+            ),
         }
     )
     write_json(run_dir / "summary.json", summary)
@@ -697,7 +1183,69 @@ def main() -> int:
         choices=("full", "ocr-only"),
         help="Select which managed Docker services to boot for this run.",
     )
+    parser.add_argument(
+        "--product-managed-runtime",
+        action="store_true",
+        help=(
+            "Stage candidate runtime files but delegate Docker start/skip to "
+            "the product runtime managers. Intended for cold/cache lab runs."
+        ),
+    )
+    parser.add_argument(
+        "--shared-corpus-dir",
+        default="",
+        help=(
+            "Optional stable staging directory reused across benchmark rounds. "
+            "Existing files must have identical content."
+        ),
+    )
+    parser.add_argument(
+        "--project-file",
+        default="",
+        help="Optional isolated .ctpr path for project-checkpoint benchmarks.",
+    )
+    parser.add_argument(
+        "--project-action",
+        default="none",
+        choices=("none", "create", "resume"),
+        help="Create or resume the isolated benchmark project.",
+    )
+    parser.add_argument(
+        "--save-project-after-run",
+        action="store_true",
+        help="Persist processed project state after the pipeline finishes.",
+    )
+    parser.add_argument(
+        "--project-invalidate-page-index",
+        type=int,
+        default=-1,
+        help=(
+            "After resuming a benchmark project, invalidate this zero-based "
+            "page from --project-invalidate-stage downstream."
+        ),
+    )
+    parser.add_argument(
+        "--project-invalidate-stage",
+        default="ocr",
+        choices=("detection", "ocr", "translation", "inpaint", "render"),
+        help="Project checkpoint stage used by the controlled invalidation hook.",
+    )
     args = parser.parse_args()
+    if args.project_action != "none" and not args.project_file:
+        parser.error("--project-file is required when --project-action is not none")
+    if args.save_project_after_run and not args.project_file:
+        parser.error("--save-project-after-run requires --project-file")
+    if args.project_invalidate_page_index >= 0 and (
+        not args.project_file or args.project_action != "resume"
+    ):
+        parser.error(
+            "--project-invalidate-page-index requires --project-file and "
+            "--project-action resume"
+        )
+    if args.product_managed_runtime and args.runtime_mode != "attach-running":
+        parser.error(
+            "--product-managed-runtime requires --runtime-mode attach-running"
+        )
 
     preset, preset_path = load_preset(args.preset)
     corpus = resolve_corpus(args.sample_dir, sample_count=args.sample_count)
@@ -749,7 +1297,15 @@ def main() -> int:
             if mode == "one-page":
                 selected_paths = selected_paths[:1]
             _log(f"선택 이미지 수: {len(selected_paths)}")
-            staged_paths = _stage_selected_images(run_dir, selected_paths)
+            staged_paths = _stage_selected_images(
+                run_dir,
+                selected_paths,
+                shared_corpus_dir=(
+                    Path(args.shared_corpus_dir).expanduser().resolve()
+                    if args.shared_corpus_dir
+                    else None
+                ),
+            )
 
             write_json(
                 run_dir / "benchmark_request.json",
@@ -760,6 +1316,9 @@ def main() -> int:
                     "repeat_index": repeat_index,
                     "runtime_mode": args.runtime_mode,
                     "runtime_services": args.runtime_services,
+                    "product_managed_runtime": bool(
+                        args.product_managed_runtime
+                    ),
                     "stage_ceiling": args.stage_ceiling,
                     "product_pipeline_entrypoint": True,
                     "workflow_mode": str(
@@ -770,6 +1329,21 @@ def main() -> int:
                     "alignment_id": 1,
                     "vertical_alignment_id": 1,
                     "runner_render_mode": "product",
+                    "project_action": args.project_action,
+                    "project_file": str(
+                        Path(args.project_file).expanduser().resolve()
+                    )
+                    if args.project_file
+                    else "",
+                    "save_project_after_run": bool(
+                        args.save_project_after_run
+                    ),
+                    "project_invalidate_page_index": int(
+                        args.project_invalidate_page_index
+                    ),
+                    "project_invalidate_stage": (
+                        args.project_invalidate_stage
+                    ),
                     "source_lang": args.source_lang,
                     "target_lang": args.target_lang,
                     "selected_paths": [str(path) for path in selected_paths],
@@ -817,6 +1391,24 @@ def main() -> int:
                     target_lang=args.target_lang,
                     image_paths=staged_paths,
                     stage_ceiling=args.stage_ceiling,
+                    project_file=(
+                        Path(args.project_file).expanduser().resolve()
+                        if args.project_file
+                        else None
+                    ),
+                    project_action=args.project_action,
+                    save_project_after_run=bool(
+                        args.save_project_after_run
+                    ),
+                    project_invalidate_page_index=int(
+                        args.project_invalidate_page_index
+                    ),
+                    project_invalidate_stage=(
+                        args.project_invalidate_stage
+                    ),
+                    product_managed_runtime=bool(
+                        args.product_managed_runtime
+                    ),
                 )
             except RuntimeError as exc:
                 print(str(exc), file=sys.stderr)

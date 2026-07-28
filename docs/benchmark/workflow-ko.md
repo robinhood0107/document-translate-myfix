@@ -128,6 +128,7 @@ scripts\benchmark_pipeline_cuda13.bat summary
 
 ## 관련 문서
 
+- [cold/cache 최종화 워크플로우](./cold-cache-finalization/workflow-ko.md)
 - [usage-ko.md](./usage-ko.md)
 - [checklist-ko.md](./checklist-ko.md)
 - [architecture-ko.md](./architecture-ko.md)

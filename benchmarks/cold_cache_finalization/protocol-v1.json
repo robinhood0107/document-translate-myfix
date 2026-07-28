@@ -1,0 +1,326 @@
+{
+  "protocol_version": 1,
+  "name": "comic-translate-cold-cache-finalization",
+  "baseline_preset": "benchmarks/cold_cache_finalization/presets/product-v1.1.0-baseline.json",
+  "limits": {
+    "pipeline_max_pages": 6,
+    "pipeline_max_blocks": 54,
+    "translation_blocks_per_language": 18,
+    "translation_languages": [
+      "Japanese",
+      "Chinese",
+      "English"
+    ],
+    "cache_stabilization_pairs": 1,
+    "rounds": 3,
+    "completion_tokens": 512
+  },
+  "gates": {
+    "stage_improvement_percent": 5.0,
+    "expected_full_improvement_percent": 1.0,
+    "cumulative_full_improvement_percent": 3.0,
+    "final_full_improvement_percent": 10.0,
+    "cold_variance_percent": 5.0,
+    "cache_miss_overhead_percent": 3.0,
+    "cache_all_hit_improvement_percent": 50.0
+  },
+  "models": {
+    "iq4_nl": {
+      "name": "gemma-4-26B-IQ4_NL.gguf",
+      "bytes": 14585439872,
+      "sha256": "768a89b94209243b333b2e074b928fe51ea208ebdad6424a510bd73e5cb4d0b8"
+    },
+    "iq4_xs": {
+      "name": "Gemma4-26B-A4B-Uncensored-HauhauCS-Balanced-IQ4_XS.gguf",
+      "bytes": 13917726048,
+      "sha256": "61b277f4dde555fc6c04c9024a9580ef8c83f2f19504f3989a15f95684257426"
+    }
+  },
+  "families": [
+    {
+      "id": "http",
+      "stage": "full",
+      "execution": "pipeline",
+      "quality_gate": "structure-and-private-meaning-review",
+      "baseline_candidate": "baseline",
+      "candidates": [
+        {
+          "id": "baseline",
+          "patch": {}
+        },
+        {
+          "id": "gemma-session",
+          "patch": {
+            "benchmark_http": {
+              "gemma_session": true
+            }
+          }
+        },
+        {
+          "id": "paddle-thread-local-session",
+          "patch": {
+            "benchmark_http": {
+              "paddle_thread_local_session": true
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "paddle-workers",
+      "stage": "ocr",
+      "execution": "pipeline",
+      "quality_gate": "exact-raw-ocr",
+      "baseline_candidate": "workers-8",
+      "candidates": [
+        {
+          "id": "workers-4",
+          "patch": {
+            "ocr_client": {
+              "parallel_workers": 4
+            }
+          }
+        },
+        {
+          "id": "workers-6",
+          "patch": {
+            "ocr_client": {
+              "parallel_workers": 6
+            }
+          }
+        },
+        {
+          "id": "workers-8",
+          "patch": {
+            "ocr_client": {
+              "parallel_workers": 8
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "paddle-token",
+      "stage": "ocr",
+      "execution": "pipeline",
+      "quality_gate": "exact-raw-ocr",
+      "baseline_candidate": "tokens-1024",
+      "candidates": [
+        {
+          "id": "tokens-256",
+          "patch": {
+            "ocr_client": {
+              "max_new_tokens": 256
+            }
+          }
+        },
+        {
+          "id": "tokens-512",
+          "patch": {
+            "ocr_client": {
+              "max_new_tokens": 512
+            }
+          }
+        },
+        {
+          "id": "tokens-768",
+          "patch": {
+            "ocr_client": {
+              "max_new_tokens": 768
+            }
+          }
+        },
+        {
+          "id": "tokens-1024",
+          "patch": {
+            "ocr_client": {
+              "max_new_tokens": 1024
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "vllm-cache",
+      "stage": "ocr",
+      "execution": "pipeline",
+      "quality_gate": "exact-raw-ocr",
+      "baseline_candidate": "prefix-on-mm-default",
+      "candidates": [
+        {
+          "id": "prefix-on-mm-default",
+          "patch": {
+            "ocr_runtime": {
+              "enable_prefix_caching": true
+            }
+          }
+        },
+        {
+          "id": "prefix-on-mm-zero",
+          "patch": {
+            "ocr_runtime": {
+              "enable_prefix_caching": true,
+              "mm_processor_cache_gb": 0
+            }
+          }
+        },
+        {
+          "id": "prefix-off-mm-default",
+          "patch": {
+            "ocr_runtime": {
+              "enable_prefix_caching": false
+            }
+          }
+        },
+        {
+          "id": "prefix-off-mm-zero",
+          "patch": {
+            "ocr_runtime": {
+              "enable_prefix_caching": false,
+              "mm_processor_cache_gb": 0
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "paddle-runtime",
+      "stage": "ocr",
+      "execution": "generated-sequential",
+      "quality_gate": "exact-raw-ocr",
+      "baseline_values": {
+        "parallel_workers": 8,
+        "max_num_seqs": 32,
+        "max_num_batched_tokens": 98304
+      },
+      "axes": {
+        "parallel_workers": [
+          4,
+          6,
+          8
+        ],
+        "max_num_seqs": [
+          16,
+          32,
+          48
+        ],
+        "max_num_batched_tokens": [
+          49152,
+          98304,
+          131072
+        ]
+      }
+    },
+    {
+      "id": "gemma-model",
+      "stage": "translation",
+      "execution": "translation",
+      "quality_gate": "292-row-candidate-only-blind",
+      "baseline_candidate": "iq4-nl",
+      "candidates": [
+        {
+          "id": "iq4-nl",
+          "model": "iq4_nl",
+          "chunk_size": 6,
+          "n_parallel": 1,
+          "concurrency": 1
+        },
+        {
+          "id": "iq4-xs",
+          "model": "iq4_xs",
+          "chunk_size": 6,
+          "n_parallel": 1,
+          "concurrency": 1
+        }
+      ]
+    },
+    {
+      "id": "gemma-chunk",
+      "stage": "translation",
+      "execution": "generated-translation",
+      "quality_gate": "one-finalist-292-row-blind",
+      "baseline_values": {
+        "chunk_size": 6
+      },
+      "axes": {
+        "chunk_size": [
+          2,
+          3,
+          4,
+          5,
+          6,
+          7,
+          8,
+          9,
+          10,
+          11,
+          12
+        ]
+      }
+    },
+    {
+      "id": "gemma-parallel",
+      "stage": "translation",
+      "execution": "translation",
+      "quality_gate": "292-row-candidate-only-blind",
+      "baseline_candidate": "np1-sequential",
+      "candidates": [
+        {
+          "id": "np1-sequential",
+          "context_size": 4096,
+          "n_parallel": 1,
+          "concurrency": 1
+        },
+        {
+          "id": "np2-concurrent",
+          "context_size": 8192,
+          "n_parallel": 2,
+          "concurrency": 2
+        }
+      ]
+    }
+  ],
+  "conditional_spikes": [
+    {
+      "id": "io-dedup",
+      "condition": "decode/hash/encode telemetry is at least 5 percent of the affected stage"
+    },
+    {
+      "id": "paddle-direct-vllm",
+      "condition": "wrapper overhead is at least 10 percent of OCR wall time"
+    },
+    {
+      "id": "jpeg-quality",
+      "condition": "encode plus transfer is at least 5 percent of OCR wall time"
+    },
+    {
+      "id": "gemma-offload",
+      "condition": "IQ4_XS wins and GPU headroom remains"
+    },
+    {
+      "id": "llama-batch-ubatch",
+      "condition": "Gemma prefill is a measured bottleneck"
+    },
+    {
+      "id": "detection-microbatch",
+      "condition": "detection stage telemetry qualifies for a product spike"
+    },
+    {
+      "id": "inpaint-runtime",
+      "condition": "inpaint stage telemetry qualifies for a product spike"
+    }
+  ],
+  "excluded": [
+    "contextual-grouped",
+    "Q8 KV",
+    "QAT model",
+    "speculative decoding",
+    "PP-OCRv6",
+    "Paddle custom derived image",
+    "legacy folder queue",
+    "GPU overlap",
+    "prompt changes",
+    "sampler changes",
+    "JSON Schema changes"
+  ]
+}
