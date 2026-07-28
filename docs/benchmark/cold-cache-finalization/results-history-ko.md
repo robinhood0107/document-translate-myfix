@@ -90,7 +90,20 @@
   conditional spike 조건을 충족했습니다. 제품 runtime의 명시적
   batch/ubatch identity hook을 사용해 logical batch를 먼저 선별하고,
   통과한 경우에만 physical ubatch를 이어서 비교하는 제한 matrix를
-  추가했습니다. 실행 결과는 Git 밖에 보존하고 별도 판정으로 기록합니다.
+  추가했습니다.
+- clean commit `956dc64`에서 IQ4_NL·single·chunk6·no-spec·F16을
+  고정하고 logical batch `512/1024/2048/4096`를 54블록·3회 교차
+  실행했습니다. 모든 후보가 54/54 구조, runtime identity, severe
+  telemetry 0 계약을 통과했습니다.
+- `batch=1024`가 60.573초로 `batch=2048` 기준 63.674초보다 가장
+  빨랐지만 개선율은 4.871%로 고정된 5% gate에 0.129%p 못 미쳤습니다.
+  `batch=4096`은 3.057%, `batch=512`는 0.826% 개선에 그쳤습니다.
+  기준선 분산도 13.439%였으므로 결과를 상향 해석하거나 자동
+  재실행하지 않았습니다.
+- 따라서 batch 후보는 전부 탈락했고 제품 기본 2048/512를 유지합니다.
+  통과한 batch 값을 누적해야만 실행할 수 있는 ubatch 축과 54블록 의미
+  검수, 292행 blind 검수는 정상 gate 종료로 취소했습니다. raw 결과와
+  판정문은 Git 밖 validation log에만 보존합니다.
 
 이 문서는 도구 구현 이력과 검증된 cache gate 결과입니다. raw 입력,
 OCR/번역 결과, DB와 sidecar는 Git 밖에만 보존합니다. cold 후보의 제품
