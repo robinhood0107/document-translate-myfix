@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import copy
 import json
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -135,6 +136,37 @@ class ColdCacheFinalizationTests(unittest.TestCase):
             self.assertEqual(state["sample_count"], 1)
             self.assertEqual(state["source_language"], "Japanese")
             self.assertEqual(state["scenario"], "global-ocr")
+
+    def test_standalone_runner_bootstraps_repo_root_for_input_contract(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            input_dir = Path(tmp)
+            (input_dir / "page.png").write_bytes(b"standalone-input")
+            runner = ROOT / "scripts" / "benchmark_cold_cache_finalization.py"
+            probe = (
+                "import runpy,sys;"
+                "from pathlib import Path;"
+                f"sys.path.insert(0, {str(runner.parent)!r});"
+                f"namespace=runpy.run_path({str(runner)!r}, "
+                "run_name='cold_cache_probe');"
+                "print(namespace['_input_contract']("
+                f"Path({str(input_dir)!r}), 1)['sample_count'])"
+            )
+            completed = subprocess.run(
+                [sys.executable, "-I", "-c", probe],
+                cwd=tmp,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+
+        self.assertEqual(
+            completed.returncode,
+            0,
+            msg=completed.stderr,
+        )
+        self.assertEqual(completed.stdout.strip(), "1")
 
     def test_deep_merge_preserves_unmodified_runtime_contract(self) -> None:
         merged = finalization._deep_merge(
