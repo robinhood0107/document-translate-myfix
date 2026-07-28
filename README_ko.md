@@ -241,6 +241,11 @@ Settings에서 아래 중 하나를 선택합니다.
 - `Default (existing auto: MangaOCR / PPOCR / Pororo...)`: 기존 자동 OCR 경로 유지
 - `Optimal (HunyuanOCR / PaddleOCR VL)`: 중국어는 `HunyuanOCR`, 일본어/기타 언어는 `PaddleOCR VL`로 라우팅
 
+Stage-Batched 폴더 처리에서는 `Settings > PaddleOCR VL Settings`의 관리형
+exact 영구 OCR 캐시도 사용할 수 있습니다. crop 이미지는 저장하지 않고 사전
+적용 전 OCR 결과와 진단만 저장하며, 사용자 지정 endpoint에서는 자동으로
+비활성화됩니다.
+
 ### 5. 선택 알림 설정 (ntfy)
 
 `Settings > Notifications`에서 아래를 설정할 수 있습니다.
@@ -262,7 +267,7 @@ Settings에서 아래 중 하나를 선택합니다.
 
 - Gemma 로컬 서버: `ghcr.io/ggml-org/llama.cpp@sha256:22e0e3bfe967af4fd1df6a918022abbfd4e72e4d40a4769e616a4176790acbcb`
 - HunyuanOCR 로컬 서버: `ghcr.io/ggml-org/llama.cpp:server-cuda`
-- PaddleOCR VL 런타임: `ccr-2vdh3abv-pub.cnc.bj.baidubce.com/paddlepaddle/paddleocr-genai-vllm-server:latest-nvidia-gpu-offline`
+- PaddleOCR VL 런타임: `ccr-2vdh3abv-pub.cnc.bj.baidubce.com/paddlepaddle/paddleocr-genai-vllm-server@sha256:d0d32c04a2119613d25a0a4c292e165ccc107954b74580613cf59e378037f8f5`
 
 ## 참고 설치 문서
 

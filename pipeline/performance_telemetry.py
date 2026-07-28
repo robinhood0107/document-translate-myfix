@@ -65,6 +65,10 @@ _ADDITIVE_PADDLE_METRICS = frozenset(
         "parse_sanitize_ms",
         "request_bytes",
         "base64_chars",
+        "persistent_cache_hit_count",
+        "persistent_cache_miss_count",
+        "persistent_cache_runtime_miss_count",
+        "persistent_cache_disabled_count",
     }
 )
 
