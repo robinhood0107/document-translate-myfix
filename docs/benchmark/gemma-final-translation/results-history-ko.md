@@ -27,7 +27,10 @@
 Q8을 후보에서 제외한 뒤 저장된 baseline/F16 clean 결과만 가져오는
 report-only A/B 검수 도구를 별도 family로 추가했다. v3 source suite는
 수정하지 않으며, 새 모델 요청 없이 두 후보의 두 라운드를 모두 사용자
-검수 대상으로 제공한다.
+검수 대상으로 제공했다. 사용자 요청에 따른 Codex 292행 blind 전수
+검수 결과 current contextual-single은 14행 18출력, grouped F16은 21행
+36출력에서 의미 회귀가 확인됐다. grouped는 절대 품질 gate를 통과하지
+못해 기본값 승격과 전체 파이프라인 비교를 중단했다.
 
 - [workflow](../gemma-final-ab/workflow-ko.md)
 - [latest report](../gemma-final-ab/generated/latest-report-ko.md)

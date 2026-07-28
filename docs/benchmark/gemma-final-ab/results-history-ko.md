@@ -16,6 +16,13 @@
 - Windows CUDA12·CUDA13 환경의 단위 테스트, headless smoke, 번역 asset,
   launcher/runtime contract 검사 통과
 - CUDA13 환경에서 실제 source import와 report 생성 통과
-- 사용자 품질 검수: 대기
-- 제품 기본값 승격: 시작하지 않음
-- 전체 파이프라인 비교: 시작하지 않음
+- 사용자 요청에 따른 Codex blind 전수 검수 292/292 완료
+- protocol v4 review validator와 명시적 확인문 통과 뒤 unblind
+- A=`current-contextual-single`: 14행, 18출력 회귀
+- B=`grouped-f16`: 21행, 36출력 회귀
+- grouped 회귀 출력: round 1은 19개, round 2는 17개
+- grouped 회귀 행 중 15개는 두 라운드에서 반복
+- 상대 품질 우위: `current-contextual-single`
+- 최종 상태: `quality_rejected`
+- grouped 제품 기본값 승격: 금지
+- 전체 파이프라인 비교: 품질 gate 실패로 실행하지 않음
