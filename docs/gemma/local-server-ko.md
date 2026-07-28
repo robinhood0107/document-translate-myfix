@@ -100,6 +100,8 @@ docker compose `
 - `LLAMA_N_PARALLEL=1` (`1`~`4`)
 - `LLAMA_N_GPU_LAYERS=23` (`0`~`99`)
 - `LLAMA_THREADS=10` (`1`~`64`)
+- `LLAMA_BATCH_SIZE=2048` (`128`~`4096`)
+- `LLAMA_UBATCH_SIZE=512` (`64`~`2048`, batch size 이하)
 - `LLAMA_CACHE_TYPE_K=f16`, `LLAMA_CACHE_TYPE_V=f16` (`f16` 또는 `q8_0`)
 - `LLAMA_CACHE_RAM_MIB=0` (`0` 또는 `256`)
 - `LLAMA_SPEC_TYPE=none` (`none` 또는 `ngram-mod`)
@@ -110,6 +112,10 @@ docker compose `
 - reasoning disabled
 
 환경변수로 허용하는 runtime 후보는 위 범위로 제한됩니다.
+batch/ubatch 기본값은 pinned llama.cpp의 기존 암시적 기본값과 같으며,
+환경변수로 값을 바꾸면 runtime fingerprint와 command identity도 달라집니다.
+이 명시적 command 계약이 처음 적용될 때 기존 번역 result-cache 항목은
+삭제되지 않지만 이전 runtime fingerprint라서 재사용되지 않습니다.
 
 현재 pinned llama.cpp에서는 `cache-ram=0`의 prompt cache 동작이 256 MiB보다 빠른 실측값을 보였으므로 `0`을 유지합니다. 이 server-side prompt reuse는 출력 token을 다시 생성하는 기능이며, SQLite 번역 결과 캐시와는 별개입니다.
 
