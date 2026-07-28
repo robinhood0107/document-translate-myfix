@@ -6,6 +6,9 @@ from PySide6.QtCore import QRectF, QPointF
 
 from app.ui.canvas.rectangle import MoveableRectItem
 from app.ui.commands.box import AddRectangleCommand, BoxesChangeCommand
+from app.projects.stage_checkpoints import (
+    invalidate_current_project_page_checkpoints,
+)
 
 from modules.detection.utils.geometry import do_rectangles_overlap
 from modules.utils.textblock import TextBlock, ensure_text_block_id
@@ -83,6 +86,7 @@ class RectItemController:
         rect_coords = rect.getCoords()
         current_text_block = self.find_corresponding_text_block(rect_coords, 0.5)
         self.main.blk_list.remove(current_text_block)
+        invalidate_current_project_page_checkpoints(self.main, stage="ocr")
 
     def handle_rectangle_change(
             self, 
@@ -109,7 +113,7 @@ class RectItemController:
                 break
 
     def rect_change_undo(self, old_state, new_state):
-        command = BoxesChangeCommand(self.main.image_viewer, old_state,
+        command = BoxesChangeCommand(self.main, old_state,
                                          new_state, self.main.blk_list)
         self.main.undo_group.activeStack().push(command)
         self.handle_rectangle_change(

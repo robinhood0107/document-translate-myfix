@@ -1,5 +1,8 @@
 import logging
 import os
+from app.projects.stage_checkpoints import (
+    invalidate_current_project_page_checkpoints,
+)
 from modules.ocr.processor import OCRProcessor
 from modules.utils.correction_dictionary import apply_ocr_result_dictionary
 from modules.utils.device import resolve_device
@@ -63,6 +66,10 @@ class OCRHandler:
             "completed",
             cache_status=cache_status,
             quality=quality,
+        )
+        invalidate_current_project_page_checkpoints(
+            self.main_page,
+            stage="ocr",
         )
 
     def _apply_ocr_corrections(self, blocks) -> None:
@@ -186,5 +193,9 @@ class OCRHandler:
         
         # The OCR text is already set on the blocks, just restore coordinates
         restore_original_block_coordinates(visible_blocks)
+        invalidate_current_project_page_checkpoints(
+            self.main_page,
+            stage="ocr",
+        )
         
         logger.info(f"OCR completed for {len(visible_blocks)} blocks in visible area")

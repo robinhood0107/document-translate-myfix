@@ -11,6 +11,9 @@ from PySide6.QtGui import QColor, QTextCursor
 from app.ui.messages import Messages
 from app.ui.commands.textformat import TextFormatCommand
 from app.ui.commands.box import AddTextBoxCommand, AddTextItemCommand, ResizeBlocksCommand, TextBoxChangeCommand
+from app.projects.stage_checkpoints import (
+    invalidate_current_project_page_checkpoints,
+)
 from app.ui.commands.text_edit import TextEditCommand
 from app.ui.canvas.text_item import TextBlockItem
 from app.ui.canvas.text.text_item_properties import TextItemProperties
@@ -688,8 +691,14 @@ class TextController:
 
     def update_text_block(self):
         if self.main.curr_tblock:
+            old_source = str(self.main.curr_tblock.text or "")
             self.main.curr_tblock.text = self.main.s_text_edit.toPlainText()
             self.main.curr_tblock.translation = self.main.t_text_edit.toPlainText()
+            if old_source != str(self.main.curr_tblock.text or ""):
+                invalidate_current_project_page_checkpoints(
+                    self.main,
+                    stage="ocr",
+                )
             self.main.mark_project_dirty()
 
     def update_text_block_from_edit(self):

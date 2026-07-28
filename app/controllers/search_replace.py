@@ -10,6 +10,9 @@ from PySide6.QtGui import QTextCursor
 
 from modules.utils.common_utils import is_close
 from modules.rendering.rich_text import repair_text_item_html, should_use_rich_text
+from app.projects.stage_checkpoints import (
+    invalidate_project_page_checkpoints,
+)
 from app.ui.commands.search_replace import ReplaceBlocksCommand, ReplaceChange
 
 if TYPE_CHECKING:
@@ -987,6 +990,13 @@ class SearchReplaceController(QtCore.QObject):
                                 pass
                         else:
                             ti["text"] = new_text
+
+        if not opts.in_target:
+            invalidate_project_page_checkpoints(
+                self.main,
+                key.file_path,
+                stage="ocr",
+            )
 
         # If currently displayed, update canvas + edits as well.
         blk = self._find_block_in_current_image(key)
