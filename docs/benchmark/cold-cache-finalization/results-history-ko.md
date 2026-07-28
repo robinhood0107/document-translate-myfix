@@ -86,6 +86,11 @@
   자동 재실행으로 덮지 않습니다.
 - 따라서 global OCR exact cache는 승격 근거를 확보했고, project
   checkpoint 기능은 보존하되 기본 OFF를 유지합니다.
+- Gemma telemetry에서 prefill이 번역 요청 시간의 약 30%를 차지해
+  conditional spike 조건을 충족했습니다. 제품 runtime의 명시적
+  batch/ubatch identity hook을 사용해 logical batch를 먼저 선별하고,
+  통과한 경우에만 physical ubatch를 이어서 비교하는 제한 matrix를
+  추가했습니다. 실행 결과는 Git 밖에 보존하고 별도 판정으로 기록합니다.
 
 이 문서는 도구 구현 이력과 검증된 cache gate 결과입니다. raw 입력,
 OCR/번역 결과, DB와 sidecar는 Git 밖에만 보존합니다. cold 후보의 제품
