@@ -218,8 +218,14 @@ class InpaintingHandler:
         arr = np.array(ptr).reshape(qimg.height(), qimg.bytesPerLine())
         return arr[:, :qimg.width()]
 
-    def _generate_mask_from_saved_strokes(self, strokes: list[dict], image: np.ndarray):
-        if image is None or not strokes:
+    def _generate_mask_from_saved_strokes(
+        self,
+        strokes: list[dict],
+        image: np.ndarray,
+        *,
+        base_mask: np.ndarray | None = None,
+    ):
+        if image is None or (not strokes and base_mask is None):
             return None
         height, width = image.shape[:2]
         if width <= 0 or height <= 0:
@@ -275,7 +281,21 @@ class InpaintingHandler:
         add_mask = imk.dilate(add_mask, kernel, iterations=2)
         gen_mask = imk.dilate(gen_mask, kernel, iterations=3)
         exclude_mask = imk.dilate(exclude_mask, kernel, iterations=2)
-        include_mask = np.where((add_mask > 0) | (gen_mask > 0), 255, 0).astype(np.uint8)
+        if base_mask is None:
+            base = np.zeros((height, width), dtype=np.uint8)
+        else:
+            base = np.asarray(base_mask)
+            if base.ndim == 3:
+                base = base[:, :, 0]
+            if base.shape != (height, width):
+                raise ValueError(
+                    "Saved-stroke base mask does not match the image."
+                )
+        include_mask = np.where(
+            (base > 0) | (add_mask > 0) | (gen_mask > 0),
+            255,
+            0,
+        ).astype(np.uint8)
         if np.count_nonzero(include_mask) == 0:
             return None
         final_mask = np.where((include_mask > 0) & ~(exclude_mask > 0), 255, 0).astype(np.uint8)
