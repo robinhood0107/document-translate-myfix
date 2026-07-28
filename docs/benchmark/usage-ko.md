@@ -91,6 +91,7 @@
 
 ## 관련 문서
 
+- [cold/cache 최종화 사용법](./cold-cache-finalization/usage-ko.md)
 - [workflow-ko.md](./workflow-ko.md)
 - [results-history-ko.md](./results-history-ko.md)
 - [resource-strategy-ko.md](./resource-strategy-ko.md)
