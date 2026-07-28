@@ -254,6 +254,52 @@ class BenchmarkPipelineFinalizationHookTests(unittest.TestCase):
                 stage="ocr",
             )
 
+    def test_project_ui_restore_is_drained_before_pipeline(self) -> None:
+        runner = SimpleNamespace(
+            is_processing_queue=True,
+            operation_queue=[object()],
+        )
+        window = SimpleNamespace(
+            current_worker=object(),
+            task_runner_ctrl=runner,
+        )
+        calls = 0
+
+        def process_events() -> None:
+            nonlocal calls
+            calls += 1
+            if calls == 2:
+                window.current_worker = None
+                runner.is_processing_queue = False
+                runner.operation_queue.clear()
+
+        app = SimpleNamespace(processEvents=process_events)
+        benchmark_pipeline._wait_for_project_ui_idle(
+            app,
+            window,
+            timeout_sec=0.5,
+        )
+
+        self.assertGreaterEqual(calls, 4)
+
+    def test_project_ui_restore_timeout_is_explicit(self) -> None:
+        runner = SimpleNamespace(
+            is_processing_queue=True,
+            operation_queue=[],
+        )
+        window = SimpleNamespace(
+            current_worker=object(),
+            task_runner_ctrl=runner,
+        )
+        app = SimpleNamespace(processEvents=lambda: None)
+
+        with self.assertRaises(TimeoutError):
+            benchmark_pipeline._wait_for_project_ui_idle(
+                app,
+                window,
+                timeout_sec=0.02,
+            )
+
 
 if __name__ == "__main__":
     unittest.main()
