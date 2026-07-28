@@ -2,11 +2,18 @@
 
 ## 2026-07-28
 
-- 상태: runner 구현 및 pre-landing review 수정 검증
+- 상태: 조건부 3 round에서 Q8 hard gate 실패로 중단
 - 고정 비교: current contextual-single, grouped F16, grouped Q8
 - 고정 구조: 22페이지, 292블록, grouped size 7, completion token 512
-- 실측 결과: 실행 전
-- 사용자 품질 판정: 대기
+- 기본 2 round 실측:
+  - current contextual-single median 173.665초
+  - grouped F16 median 104.100초, 기준선 대비 40.057% 단축
+  - grouped Q8 median 109.025초, F16보다 4.730% 느림
+- 조건부 3 round: F16/Q8 차이가 5% 미만이어서 실행
+- 중단 사유: Q8이 partial response 1건을 contextual-single 1회로
+  fallback하여 logical/HTTP 요청 계약과 clean-run gate를 위반
+- 출력 보존: 22페이지, 292블록, 순서, 빈 값, 구조 출력은 정상
+- 사용자 품질 판정: blind 산출물을 만들지 않고 중단
 - 22페이지 전체 파이프라인: 실행 금지 상태
 - review 보강: 알려진 corpus digest, 번역 동작·resume contract, loopback
   container, pinned container ID, result hash/path, 정상 request 수, Latin-square
