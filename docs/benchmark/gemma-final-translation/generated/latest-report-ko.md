@@ -25,4 +25,7 @@
 Q8을 탈락으로 고정하고 baseline/F16의 저장된 clean 2라운드만 가져오는
 protocol v4 report-only A/B 검수가
 [별도 family](../../gemma-final-ab/generated/latest-report-ko.md)에서
-진행 중이다. 이 source v3 결과와 중단 판정은 변경하지 않는다.
+완료됐다. 292행 blind 전수 검수에서 grouped F16은 21행 36출력의 의미
+회귀가 확인되어 `quality_rejected`로 종료됐다. 상대적으로는
+current contextual-single이 나았으나 이 source v3 결과와 Q8 중단 판정은
+변경하지 않는다.
