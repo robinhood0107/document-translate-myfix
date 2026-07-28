@@ -1,0 +1,111 @@
+{
+  "name": "cold-cache-finalization-product-baseline",
+  "description": "Frozen v1.1.0 comparison baseline: IQ4_NL contextual-single chunk 6, no speculative decoding, F16 KV, PaddleOCR-VL 1.6, and stage-batched product pipeline.",
+  "benchmark_contract": {
+    "protocol_version": 1,
+    "workflow_mode": "stage_batched_pipeline",
+    "request_mode": "contextual-single",
+    "cache_mode": "cold-disabled",
+    "prompt_schema_sampler_unchanged": true
+  },
+  "benchmark_cache_policy": {
+    "paddleocr_persistent": false,
+    "translation_persistent": false,
+    "exact_tm": false,
+    "project_checkpoint": false,
+    "translation_result_cache_limit": 50000,
+    "translation_candidate_limit": 5000
+  },
+  "benchmark_http": {
+    "gemma_session": false,
+    "paddle_thread_local_session": false,
+    "pool_connections": 8,
+    "pool_maxsize": 8
+  },
+  "app": {
+    "workflow_mode": "stage_batched_pipeline",
+    "translator": "Custom Local Server(Gemma)",
+    "ocr": "PaddleOCR VL",
+    "detector": "RT-DETR-v2",
+    "inpainter": "lama_large_512px",
+    "use_gpu": true,
+    "extra_context": "",
+    "hd_strategy": {
+      "strategy": "Resize",
+      "resize_limit": 960
+    }
+  },
+  "gemma": {
+    "image": "ghcr.io/ggml-org/llama.cpp@sha256:22e0e3bfe967af4fd1df6a918022abbfd4e72e4d40a4769e616a4176790acbcb",
+    "pull_policy": "missing",
+    "endpoint_url": "http://127.0.0.1:18080/v1",
+    "model": "gemma-4-26B-IQ4_NL.gguf",
+    "model_path": "/models/gemma-4-26B-IQ4_NL.gguf",
+    "model_sha256": "768a89b94209243b333b2e074b928fe51ea208ebdad6424a510bd73e5cb4d0b8",
+    "context_size": 4096,
+    "n_parallel": 1,
+    "threads": 10,
+    "n_gpu_layers": 23,
+    "chunk_size": 6,
+    "temperature": 0.7,
+    "top_k": 64,
+    "top_p": 0.95,
+    "min_p": 0.0,
+    "max_completion_tokens": 512,
+    "request_timeout_sec": 180,
+    "raw_response_logging": false,
+    "reasoning": "off",
+    "reasoning_budget": 0,
+    "reasoning_format": "none",
+    "response_format_mode": "json_schema",
+    "response_schema_mode": "blocks",
+    "cache_type_k": "f16",
+    "cache_type_v": "f16",
+    "spec_type": "none",
+    "spec_draft_n_max": 8
+  },
+  "ocr_client": {
+    "server_url": "http://127.0.0.1:28118/layout-parsing",
+    "parallel_workers": 8,
+    "max_new_tokens": 1024,
+    "prettify_markdown": false,
+    "visualize": false
+  },
+  "ocr_runtime": {
+    "kind": "paddleocr_vl",
+    "image": "ccr-2vdh3abv-pub.cnc.bj.baidubce.com/paddlepaddle/paddleocr-genai-vllm-server@sha256:d0d32c04a2119613d25a0a4c292e165ccc107954b74580613cf59e378037f8f5",
+    "front_device": "cpu",
+    "gpu_memory_utilization": 0.8,
+    "max_model_len": 4096,
+    "max_num_seqs": 32,
+    "max_num_batched_tokens": 98304,
+    "dtype": "bfloat16",
+    "enable_prefix_caching": true
+  },
+  "mask_refiner_settings": {
+    "mask_refiner": "ctd",
+    "keep_existing_lines": true,
+    "ctd_detect_size": 1280,
+    "ctd_det_rearrange_max_batches": 4,
+    "ctd_device": "cuda",
+    "ctd_font_size_multiplier": 1.0,
+    "ctd_font_size_max": -1,
+    "ctd_font_size_min": -1,
+    "ctd_mask_dilate_size": 2
+  },
+  "inpainter_runtime": {
+    "device": "cuda",
+    "inpaint_size": 1536,
+    "precision": "bf16"
+  },
+  "export": {
+    "export_raw_text": false,
+    "export_translated_text": true,
+    "export_inpainted_image": false,
+    "export_detector_overlay": false,
+    "export_raw_mask": false,
+    "export_mask_overlay": false,
+    "export_cleanup_mask_delta": false,
+    "export_debug_metadata": false
+  }
+}
