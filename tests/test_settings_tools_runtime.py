@@ -99,6 +99,30 @@ class SettingsToolsRuntimeTests(unittest.TestCase):
         self.assertFalse(hasattr(page.ui, "ctd_settings_widget"))
         self.assertEqual(page.get_mask_refiner_settings()["mask_refiner"], "ctd")
         self.assertTrue(page.get_mask_refiner_settings()["keep_existing_lines"])
+        self.assertFalse(
+            page.ui.project_checkpoint_enabled_checkbox.isChecked()
+        )
+
+    def test_project_checkpoint_preview_setting_round_trip(self) -> None:
+        settings = QtCore.QSettings("ComicLabs", "ComicTranslate")
+        settings.setValue("project_checkpoint/enabled", True)
+        settings.sync()
+        page = self._make_page()
+
+        page.load_settings()
+        self.assertTrue(
+            page.ui.project_checkpoint_enabled_checkbox.isChecked()
+        )
+        page.ui.project_checkpoint_enabled_checkbox.setChecked(False)
+        page.save_settings()
+
+        self.assertFalse(
+            settings.value(
+                "project_checkpoint/enabled",
+                True,
+                type=bool,
+            )
+        )
 
     def test_translator_selection_returns_canonical_item_data_for_localized_labels(self) -> None:
         page = self._make_page()
@@ -323,6 +347,23 @@ class SettingsToolsRuntimeTests(unittest.TestCase):
                 "candidate_limit": 7_200,
             },
         )
+
+    def test_paddleocr_persistent_cache_settings_are_saved_and_reloaded(self) -> None:
+        page = self._make_page()
+        page.load_settings()
+        page.ui.paddleocr_vl_persistent_cache_checkbox.setChecked(False)
+        page.ui.paddleocr_vl_persistent_cache_limit_spinbox.setValue(72_000)
+
+        settings = page.get_paddleocr_vl_settings()
+        self.assertFalse(settings["persistent_cache_enabled"])
+        self.assertEqual(settings["persistent_cache_limit"], 72_000)
+        page.save_settings()
+
+        reloaded = self._make_page()
+        reloaded.load_settings()
+        reloaded_settings = reloaded.get_paddleocr_vl_settings()
+        self.assertFalse(reloaded_settings["persistent_cache_enabled"])
+        self.assertEqual(reloaded_settings["persistent_cache_limit"], 72_000)
 
 
 if __name__ == "__main__":

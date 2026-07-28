@@ -85,7 +85,7 @@ docker compose -f hunyuanocr_docker_files/docker-compose.yaml up -d --force-recr
 ### PaddleOCR VL local runtime
 
 - Compose file: `/paddleocr_vl_docker_files/docker-compose.yaml`
-- Docker image: `ccr-2vdh3abv-pub.cnc.bj.baidubce.com/paddlepaddle/paddleocr-genai-vllm-server:latest-nvidia-gpu-offline`
+- Docker image: `ccr-2vdh3abv-pub.cnc.bj.baidubce.com/paddlepaddle/paddleocr-genai-vllm-server@sha256:d0d32c04a2119613d25a0a4c292e165ccc107954b74580613cf59e378037f8f5`
 - Runtime/model references:
   - [PaddleOCR](https://github.com/PaddlePaddle/PaddleOCR)
   - [PaddleOCR-VL](https://huggingface.co/PaddlePaddle/PaddleOCR-VL)
@@ -93,9 +93,14 @@ docker compose -f hunyuanocr_docker_files/docker-compose.yaml up -d --force-recr
 Start it:
 
 ```bash
-docker compose -f paddleocr_vl_docker_files/docker-compose.yaml pull --policy always
+docker compose -f paddleocr_vl_docker_files/docker-compose.yaml pull
 docker compose -f paddleocr_vl_docker_files/docker-compose.yaml up -d --force-recreate
 ```
+
+The first command is a one-time preparation step for the pinned image. Normal
+app starts reuse the exact stopped containers and do not pull again. The
+stage-batched folder workflow can also reuse exact crop results from the
+persistent OCR cache configured under `Settings > PaddleOCR VL Settings`.
 
 For bundle details, see [/paddleocr_vl_docker_files/README.md](/paddleocr_vl_docker_files/README.md).
 
@@ -104,6 +109,13 @@ For bundle details, see [/paddleocr_vl_docker_files/README.md](/paddleocr_vl_doc
 - Workflow mode: `Stage-Batched Pipeline (Recommended)`
 - OCR: `Optimal (HunyuanOCR / PaddleOCR VL)`
 - Translator: `Custom Local Server(Gemma)` after the Gemma volume is prepared
+
+Project stage checkpoints are available as a default-off preview under
+`Settings > Project`. Save the `.ctpr` file before using its cache management
+actions. The adjacent `.ctpr.cache` folder is disposable and is never required
+to open the project. When valid, it restores detection, raw OCR, inpaint masks
+and cleaned artifacts, and render outputs. Translation content stays in the
+project file and is accepted only when its sidecar signature matches.
 
 Routing summary:
 

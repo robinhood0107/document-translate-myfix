@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import os
+import tempfile
 import threading
 import time
 import unittest
+from pathlib import Path
 from unittest import mock
 
 import cv2
@@ -14,6 +16,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 from app.ui.settings.settings_page import SettingsPage
 from modules.ocr.factory import OCRFactory
 from modules.ocr.ocr_paddle_VL import PaddleOCRVLEngine
+from modules.ocr.persistent_cache import OCRPersistentResultCache
 from modules.utils.exceptions import OperationCancelledError
 from modules.utils.ocr_debug import (
     OCR_EMPTY_REASON_NON_TEXT_RESPONSE,
@@ -122,6 +125,233 @@ class PaddleOCRVLEngineTests(unittest.TestCase):
         self.assertEqual(merged["paddleocr_vl_scheduler_mode"], "auto_v1")
         self.assertEqual(merged["crop_padding_ratio"], 0.11)
         self.assertEqual(merged["manga_expansion_percentage"], 7)
+
+    def test_persistent_cache_exact_hit_skips_http_request(self) -> None:
+        engine = PaddleOCRVLEngine()
+        engine.initialize(
+            _FakeSettings(scheduler_mode="fixed", parallel_workers=1)
+        )
+        img = np.full((240, 320, 3), 220, dtype=np.uint8)
+        runtime_identity = {
+            "managed": True,
+            "model_name": "PaddleOCR-VL-1.6-0.9B",
+            "image_digest": "sha256:test",
+            "runtime_fingerprint": "runtime-test",
+        }
+        with tempfile.TemporaryDirectory() as temp_dir:
+            with OCRPersistentResultCache(
+                Path(temp_dir) / "ocr.sqlite3"
+            ) as store:
+                first_block = _make_block(40, 50, 220, 95)
+                first_plan = engine.prepare_persistent_cache(
+                    img,
+                    [first_block],
+                    store,
+                    runtime_identity,
+                )
+                self.assertTrue(first_plan.requires_runtime)
+                with mock.patch.object(
+                    engine,
+                    "_request_ocr_text_from_encoded",
+                    return_value="テスト",
+                ) as request:
+                    engine.process_persistent_cache_plan(first_plan)
+                request.assert_called_once()
+                self.assertTrue(
+                    store.store_records(
+                        engine.build_persistent_cache_records(first_plan)
+                    )
+                )
+
+                second_block = _make_block(40, 50, 220, 95)
+                second_plan = engine.prepare_persistent_cache(
+                    img.copy(),
+                    [second_block],
+                    store,
+                    runtime_identity,
+                )
+                self.assertTrue(second_plan.all_hit)
+                self.assertFalse(second_plan.requires_runtime)
+                with mock.patch.object(
+                    engine,
+                    "_request_ocr_text_from_encoded",
+                ) as request:
+                    engine.process_persistent_cache_plan(second_plan)
+                request.assert_not_called()
+                self.assertEqual(second_block.text, "テスト")
+                self.assertEqual(second_block.ocr_raw_text, "テスト")
+                self.assertEqual(
+                    engine.last_page_profile["performance"]["http_attempt_count"],
+                    0,
+                )
+                self.assertEqual(
+                    engine.last_page_profile["performance"]["request_bytes"],
+                    0,
+                )
+
+    def test_persistent_cache_key_changes_with_exact_crop_pixels(self) -> None:
+        engine = PaddleOCRVLEngine()
+        engine.initialize(
+            _FakeSettings(scheduler_mode="fixed", parallel_workers=1)
+        )
+        identity = {
+            "managed": True,
+            "model_name": "PaddleOCR-VL-1.6-0.9B",
+            "image_digest": "sha256:test",
+            "runtime_fingerprint": "runtime-test",
+        }
+        with tempfile.TemporaryDirectory() as temp_dir:
+            with OCRPersistentResultCache(
+                Path(temp_dir) / "ocr.sqlite3"
+            ) as store:
+                first_img = np.zeros((200, 200, 3), dtype=np.uint8)
+                second_img = first_img.copy()
+                second_img[50, 50, 0] = 1
+                first_plan = engine.prepare_persistent_cache(
+                    first_img,
+                    [_make_block(40, 40, 100, 100)],
+                    store,
+                    identity,
+                    lookup=False,
+                )
+                second_plan = engine.prepare_persistent_cache(
+                    second_img,
+                    [_make_block(40, 40, 100, 100)],
+                    store,
+                    identity,
+                    lookup=False,
+                )
+
+                self.assertNotEqual(
+                    first_plan.jobs[0]["cache_key"],
+                    second_plan.jobs[0]["cache_key"],
+                )
+                cache_identity = first_plan.jobs[0]["cache_identity"]
+                self.assertEqual(
+                    len(cache_identity["raw_crop_pixel_sha256"]),
+                    64,
+                )
+                self.assertEqual(
+                    len(cache_identity["request_jpeg_sha256"]),
+                    64,
+                )
+
+    def test_prepared_worker_returns_outcome_without_mutating_block(self) -> None:
+        engine = PaddleOCRVLEngine()
+        engine.initialize(
+            _FakeSettings(scheduler_mode="fixed", parallel_workers=1)
+        )
+        img = np.full((240, 320, 3), 220, dtype=np.uint8)
+        block = _make_block(40, 50, 220, 95)
+        with tempfile.TemporaryDirectory() as temp_dir:
+            with OCRPersistentResultCache(
+                Path(temp_dir) / "ocr.sqlite3"
+            ) as store:
+                plan = engine.prepare_persistent_cache(
+                    img,
+                    [block],
+                    store,
+                    {"runtime_fingerprint": "runtime-test"},
+                    lookup=False,
+                )
+
+                with mock.patch.object(
+                    engine,
+                    "_request_ocr_text_from_encoded",
+                    return_value="テスト",
+                ):
+                    outcome = engine._process_prepared_job(plan.runtime_jobs[0])
+
+        self.assertEqual(block.text, "")
+        self.assertEqual(outcome["text"], "テスト")
+        self.assertEqual(outcome["raw_text"], "テスト")
+
+    def test_prepared_page_results_commit_only_after_all_workers_succeed(self) -> None:
+        engine = PaddleOCRVLEngine()
+        engine.initialize(
+            _FakeSettings(scheduler_mode="fixed", parallel_workers=1)
+        )
+        img = np.full((240, 320, 3), 220, dtype=np.uint8)
+        blocks = [
+            _make_block(20, 30, 120, 80),
+            _make_block(160, 120, 280, 180),
+        ]
+        with tempfile.TemporaryDirectory() as temp_dir:
+            with OCRPersistentResultCache(
+                Path(temp_dir) / "ocr.sqlite3"
+            ) as store:
+                plan = engine.prepare_persistent_cache(
+                    img,
+                    blocks,
+                    store,
+                    {"runtime_fingerprint": "runtime-test"},
+                    lookup=False,
+                )
+
+                with mock.patch.object(
+                    engine,
+                    "_request_ocr_text_from_encoded",
+                    side_effect=["first", RuntimeError("second failed")],
+                ), self.assertRaises(RuntimeError):
+                    engine.process_persistent_cache_plan(plan)
+
+        self.assertEqual([block.text for block in blocks], ["", ""])
+        self.assertEqual(
+            engine.build_persistent_cache_records(plan),
+            [],
+        )
+
+    def test_partial_cache_hit_is_not_committed_when_page_miss_fails(self) -> None:
+        engine = PaddleOCRVLEngine()
+        engine.initialize(
+            _FakeSettings(scheduler_mode="fixed", parallel_workers=1)
+        )
+        img = np.full((240, 320, 3), 220, dtype=np.uint8)
+        first_block = _make_block(20, 30, 120, 80)
+        second_block = _make_block(160, 120, 280, 180)
+        runtime_identity = {"runtime_fingerprint": "runtime-test"}
+        with tempfile.TemporaryDirectory() as temp_dir:
+            with OCRPersistentResultCache(
+                Path(temp_dir) / "ocr.sqlite3"
+            ) as store:
+                cached_plan = engine.prepare_persistent_cache(
+                    img,
+                    [first_block],
+                    store,
+                    runtime_identity,
+                    lookup=False,
+                )
+                with mock.patch.object(
+                    engine,
+                    "_request_ocr_text_from_encoded",
+                    return_value="cached",
+                ):
+                    engine.process_persistent_cache_plan(cached_plan)
+                self.assertTrue(
+                    store.store_records(
+                        engine.build_persistent_cache_records(cached_plan)
+                    )
+                )
+                hit_block = _make_block(20, 30, 120, 80)
+                partial_plan = engine.prepare_persistent_cache(
+                    img,
+                    [hit_block, second_block],
+                    store,
+                    runtime_identity,
+                )
+
+                self.assertEqual(hit_block.text, "")
+                self.assertEqual(partial_plan.hit_count, 1)
+                self.assertEqual(partial_plan.miss_count, 1)
+                with mock.patch.object(
+                    engine,
+                    "_request_ocr_text_from_encoded",
+                    side_effect=RuntimeError("miss failed"),
+                ), self.assertRaises(RuntimeError):
+                    engine.process_persistent_cache_plan(partial_plan)
+
+        self.assertEqual(hit_block.text, "")
+        self.assertEqual(second_block.text, "")
 
     def test_default_scheduler_mode_is_fixed_area_desc_without_override(self) -> None:
         engine = PaddleOCRVLEngine()
@@ -244,7 +474,14 @@ class PaddleOCRVLEngineTests(unittest.TestCase):
         self.assertIsNotNone(record["start_ts"])
         self.assertIsNotNone(record["end_ts"])
         self.assertIsNotNone(record["elapsed_ms"])
+        self.assertGreaterEqual(record["queue_wait_ms"], 0.0)
+        self.assertGreaterEqual(record["crop_ms"], 0.0)
+        self.assertGreaterEqual(record["text_guard_ms"], 0.0)
         self.assertEqual(record["status"], "ok")
+        performance = engine.last_page_profile["performance"]
+        self.assertEqual(performance["schema_version"], 1)
+        self.assertEqual(performance["job_count"], 1)
+        self.assertGreaterEqual(performance["queue_wait_ms"], 0.0)
 
     def test_schema_only_layout_labels_are_marked_empty(self) -> None:
         engine = PaddleOCRVLEngine()
@@ -743,6 +980,39 @@ class PaddleOCRVLEngineTests(unittest.TestCase):
 
         self.assertEqual(data["errorCode"], 0)
         self.assertEqual(post.call_count, 2)
+
+    def test_request_telemetry_separates_logical_http_and_retry_counts(self) -> None:
+        engine = PaddleOCRVLEngine()
+        engine.initialize(_FakeSettings(scheduler_mode="fixed", parallel_workers=1))
+        engine.REQUEST_RETRY_BACKOFF_SECONDS = (0.0, 0.0)
+        engine._supports_max_new_tokens = False
+        img = np.zeros((300, 300, 3), dtype=np.uint8)
+        blocks = [_make_block(10, 10, 110, 110)]
+        responses = [
+            _FakeHTTPResponse(500),
+            _FakeHTTPResponse(
+                200,
+                {
+                    "errorCode": 0,
+                    "result": {"markdown": {"text": "テスト"}},
+                },
+            ),
+        ]
+
+        with mock.patch(
+            "modules.ocr.ocr_paddle_VL.requests.post",
+            side_effect=responses,
+        ):
+            engine.process_image(img, blocks)
+
+        performance = engine.last_page_profile["performance"]
+        self.assertEqual(performance["logical_request_count"], 1)
+        self.assertEqual(performance["http_attempt_count"], 2)
+        self.assertEqual(performance["http_retry_count"], 1)
+        self.assertGreater(performance["request_bytes"], 0)
+        self.assertGreater(performance["base64_chars"], 0)
+        self.assertGreaterEqual(performance["encode_ms"], 0.0)
+        self.assertGreaterEqual(performance["base64_ms"], 0.0)
 
 
 if __name__ == "__main__":

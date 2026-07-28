@@ -88,7 +88,7 @@ docker compose -f hunyuanocr_docker_files/docker-compose.yaml up -d --force-recr
 ### PaddleOCR VL 로컬 런타임
 
 - compose 파일: `/paddleocr_vl_docker_files/docker-compose.yaml`
-- Docker 이미지: `ccr-2vdh3abv-pub.cnc.bj.baidubce.com/paddlepaddle/paddleocr-genai-vllm-server:latest-nvidia-gpu-offline`
+- Docker 이미지: `ccr-2vdh3abv-pub.cnc.bj.baidubce.com/paddlepaddle/paddleocr-genai-vllm-server@sha256:d0d32c04a2119613d25a0a4c292e165ccc107954b74580613cf59e378037f8f5`
 - 참고 링크:
   - [PaddleOCR](https://github.com/PaddlePaddle/PaddleOCR)
   - [PaddleOCR-VL](https://huggingface.co/PaddlePaddle/PaddleOCR-VL)
@@ -96,9 +96,14 @@ docker compose -f hunyuanocr_docker_files/docker-compose.yaml up -d --force-recr
 실행:
 
 ```bash
-docker compose -f paddleocr_vl_docker_files/docker-compose.yaml pull --policy always
+docker compose -f paddleocr_vl_docker_files/docker-compose.yaml pull
 docker compose -f paddleocr_vl_docker_files/docker-compose.yaml up -d --force-recreate
 ```
+
+첫 번째 명령은 고정된 이미지를 준비할 때 한 번만 실행합니다. 평상시 앱
+시작은 구성이 정확히 같은 중지 컨테이너를 재사용하며 이미지를 다시 pull하지
+않습니다. Stage-Batched 폴더 처리는 `Settings > PaddleOCR VL Settings`에서
+관리하는 exact 영구 OCR 결과 캐시도 사용할 수 있습니다.
 
 bundle 파일 설명은 [/paddleocr_vl_docker_files/README.md](/paddleocr_vl_docker_files/README.md)를 참고하세요.
 
@@ -107,6 +112,13 @@ bundle 파일 설명은 [/paddleocr_vl_docker_files/README.md](/paddleocr_vl_doc
 - 워크플로 모드: `Stage-Batched Pipeline (Recommended)`
 - OCR: `Optimal (HunyuanOCR / PaddleOCR VL)`
 - 번역기: Gemma volume 준비 후 `Custom Local Server(Gemma)`
+
+프로젝트 stage checkpoint는 `Settings > Project`에서 기본값이 꺼진 미리보기
+기능으로 제공됩니다. cache 관리 기능을 사용하기 전에 `.ctpr`를 먼저
+저장해야 합니다. 옆의 `.ctpr.cache` 폴더는 재계산 가능한 데이터이며 프로젝트를
+여는 데 필수적이지 않습니다. 유효할 때는 감지, 사전 적용 전 OCR, 인페인트
+mask·cleaned artifact, 렌더 출력을 복원합니다. 번역 내용은 프로젝트 파일에만
+남고 sidecar 서명이 정확히 일치할 때만 재사용합니다.
 
 기본 OCR 라우팅:
 

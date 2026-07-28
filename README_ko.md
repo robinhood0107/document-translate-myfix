@@ -241,6 +241,22 @@ Settings에서 아래 중 하나를 선택합니다.
 - `Default (existing auto: MangaOCR / PPOCR / Pororo...)`: 기존 자동 OCR 경로 유지
 - `Optimal (HunyuanOCR / PaddleOCR VL)`: 중국어는 `HunyuanOCR`, 일본어/기타 언어는 `PaddleOCR VL`로 라우팅
 
+Stage-Batched 폴더 처리에서는 `Settings > PaddleOCR VL Settings`의 관리형
+exact 영구 OCR 캐시도 사용할 수 있습니다. crop 이미지는 저장하지 않고 사전
+적용 전 OCR 결과와 진단만 저장하며, 사용자 지정 endpoint에서는 자동으로
+비활성화됩니다.
+
+`Settings > Project`에는 기본값이 꺼진 미리보기 단계의 프로젝트 checkpoint
+기능도 있습니다. 감지 좌표, 사전 적용 전 PaddleOCR-VL 결과, lossless
+인페인트 결과·final mask, 인코딩된 렌더 출력을 각 runtime 시작 전에 복원할
+수 있습니다. 번역문은 `.ctpr`에만 두고 sidecar에는 검증용 stage 서명만
+기록하므로 project all-hit에서는 detector, Paddle, Gemma, inpainter, renderer
+추론을 모두 건너뜁니다. 현재 OCR·번역 사전은 hit와 miss 모두 정확히 한 번
+적용하고, 사전 변경 시 소비 결과와 downstream stage만 무효화합니다. 재사용
+가능한 stage manifest와 content-addressed artifact는
+`.ctpr` 옆 `<project>.ctpr.cache` 폴더에 저장합니다. cache가 없거나 잠겼거나
+손상돼도 프로젝트 열기와 처리는 계속되며 해당 stage를 다시 계산합니다.
+
 ### 5. 선택 알림 설정 (ntfy)
 
 `Settings > Notifications`에서 아래를 설정할 수 있습니다.
@@ -262,7 +278,7 @@ Settings에서 아래 중 하나를 선택합니다.
 
 - Gemma 로컬 서버: `ghcr.io/ggml-org/llama.cpp@sha256:22e0e3bfe967af4fd1df6a918022abbfd4e72e4d40a4769e616a4176790acbcb`
 - HunyuanOCR 로컬 서버: `ghcr.io/ggml-org/llama.cpp:server-cuda`
-- PaddleOCR VL 런타임: `ccr-2vdh3abv-pub.cnc.bj.baidubce.com/paddlepaddle/paddleocr-genai-vllm-server:latest-nvidia-gpu-offline`
+- PaddleOCR VL 런타임: `ccr-2vdh3abv-pub.cnc.bj.baidubce.com/paddlepaddle/paddleocr-genai-vllm-server@sha256:d0d32c04a2119613d25a0a4c292e165ccc107954b74580613cf59e378037f8f5`
 
 ## 참고 설치 문서
 

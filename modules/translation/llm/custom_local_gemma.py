@@ -46,7 +46,7 @@ DEFAULT_GEMMA_THINK_BRIEFLY_PROMPT = False
 DEFAULT_GEMMA_PROMPT_PROFILE = "gemma4_balanced"
 DEFAULT_GEMMA_CONTEXTUAL_MERGE_INPUT = True
 GEMMA_REQUEST_MODE_CONTEXTUAL_SINGLE = "contextual-single"
-GEMMA_REQUEST_MODE_CONTEXTUAL_GROUPED = "contextual-grouped"
+RETIRED_GEMMA_REQUEST_MODE_CONTEXTUAL_GROUPED = "contextual-grouped"
 DEFAULT_GEMMA_REQUEST_MODE = GEMMA_REQUEST_MODE_CONTEXTUAL_SINGLE
 DEFAULT_GEMMA_REQUEST_RETRY_TOTAL_ATTEMPTS = 3
 DEFAULT_GEMMA_REQUEST_RETRY_BACKOFF_SECONDS = (1.0, 2.0)
@@ -58,10 +58,6 @@ GEMMA_PROMPT_PROFILES = {
 }
 GEMMA_RESPONSE_FORMAT_MODES = {"json_object", "json_schema"}
 GEMMA_RESPONSE_SCHEMA_MODES = {"blocks"}
-GEMMA_REQUEST_MODES = {
-    GEMMA_REQUEST_MODE_CONTEXTUAL_SINGLE,
-    GEMMA_REQUEST_MODE_CONTEXTUAL_GROUPED,
-}
 GEMMA_CHANNEL_TOKEN_RE = re.compile(r"<\|channel\>[^\r\n<]*|<channel\|>")
 GEMMA_TRANSIENT_HTTP_STATUS_CODES = frozenset({500, 502, 503, 504})
 GEMMA_CONTEXT_CAPACITY_RE = re.compile(
@@ -80,7 +76,7 @@ GEMMA_RUNTIME_IDENTITY_SNAPSHOT_TTL_SEC = 2.0
 
 @dataclass(frozen=True)
 class GemmaRequestContext:
-    """Stable source context used across grouped and per-block fallbacks."""
+    """Stable source context shared by contextual-single requests and fallbacks."""
 
     blocks: tuple[TextBlock, ...]
     expected_keys: tuple[str, ...]
@@ -90,7 +86,7 @@ class GemmaRequestContext:
 
 @dataclass(frozen=True)
 class GemmaParsedResponse:
-    """Validated values plus only the keys that require a focused retry."""
+    """Validated values plus unresolved and unexpected key evidence."""
 
     valid_values: dict[str, str | None]
     unresolved_keys: tuple[str, ...]
@@ -354,9 +350,13 @@ class CustomLocalGemmaTranslation(BaseLLMTranslation):
     @staticmethod
     def _normalize_request_mode(raw_value: str) -> str:
         normalized = (raw_value or "").strip().lower()
-        if normalized in GEMMA_REQUEST_MODES:
-            return normalized
-        return DEFAULT_GEMMA_REQUEST_MODE
+        if normalized and normalized != GEMMA_REQUEST_MODE_CONTEXTUAL_SINGLE:
+            logger.warning(
+                "Gemma request mode %r is retired or unsupported; "
+                "using contextual-single.",
+                raw_value,
+            )
+        return GEMMA_REQUEST_MODE_CONTEXTUAL_SINGLE
 
     def initialize(
         self,
@@ -447,12 +447,19 @@ class CustomLocalGemmaTranslation(BaseLLMTranslation):
             "CT_GEMMA_THINK_BRIEFLY_PROMPT",
             DEFAULT_GEMMA_THINK_BRIEFLY_PROMPT,
         )
+        request_mode_override = os.environ.get("CT_GEMMA_REQUEST_MODE")
+        if request_mode_override is not None:
+            logger.warning(
+                "CT_GEMMA_REQUEST_MODE is retired and ignored; "
+                "using contextual-single."
+            )
         self.request_mode = self._normalize_request_mode(
-            self._env_or_config_str(
-                gemma_settings,
-                "request_mode",
-                "CT_GEMMA_REQUEST_MODE",
-                DEFAULT_GEMMA_REQUEST_MODE,
+            str(
+                gemma_settings.get(
+                    "request_mode",
+                    DEFAULT_GEMMA_REQUEST_MODE,
+                )
+                or DEFAULT_GEMMA_REQUEST_MODE
             )
         )
         self.contextual_merge_input = DEFAULT_GEMMA_CONTEXTUAL_MERGE_INPUT
@@ -535,13 +542,6 @@ class CustomLocalGemmaTranslation(BaseLLMTranslation):
                     and len(chunk_targets) == len(chunk)
                 ):
                     self._translate_chunk_with_retry(chunk, extra_context)
-                elif self.request_mode == GEMMA_REQUEST_MODE_CONTEXTUAL_GROUPED:
-                    self._translate_contextual_grouped_context(
-                        request_context,
-                        extra_context,
-                        prompt_profile=self.prompt_profile,
-                        requested_indices=tuple(unresolved_indices),
-                    )
                 else:
                     for target_index in unresolved_indices:
                         self._translate_contextual_single_target(
@@ -631,7 +631,7 @@ class CustomLocalGemmaTranslation(BaseLLMTranslation):
                 "source_lang": self.source_lang,
                 "target_lang": self.target_lang,
                 "chunk_size": self.chunk_size,
-                "request_mode": self.request_mode,
+                "request_mode": GEMMA_REQUEST_MODE_CONTEXTUAL_SINGLE,
                 "prompt_profile": self.prompt_profile,
             }
         )
@@ -702,7 +702,6 @@ class CustomLocalGemmaTranslation(BaseLLMTranslation):
         if store is not None and not store.enabled:
             store_available = False
             lookup_stats["gemma_tm_cache_disabled_count"] = 1
-        dictionary_version = self._translation_dictionary_version()
         targets: list[GemmaCacheTarget] = []
 
         for start in range(0, len(blk_list), self.chunk_size):
@@ -724,7 +723,6 @@ class CustomLocalGemmaTranslation(BaseLLMTranslation):
                 raw_sources=raw_sources,
                 extra_context=extra_context,
                 runtime_identity=runtime_identity,
-                dictionary_version=dictionary_version,
                 tm_revision=tm_revision,
             )
             for global_index in chunk_requested:
@@ -850,7 +848,6 @@ class CustomLocalGemmaTranslation(BaseLLMTranslation):
         raw_sources: tuple[str, ...],
         extra_context: str,
         runtime_identity: Mapping[str, Any] | None,
-        dictionary_version: str,
         tm_revision: int,
     ) -> dict[str, Any]:
         return {
@@ -868,7 +865,7 @@ class CustomLocalGemmaTranslation(BaseLLMTranslation):
             "ordered_raw_group_context": raw_sources,
             "configured_group_size": self.chunk_size,
             "actual_group_size": len(request_context.blocks),
-            "request_mode": self.request_mode,
+            "request_mode": GEMMA_REQUEST_MODE_CONTEXTUAL_SINGLE,
             "prompt_profile": self.prompt_profile,
             "system_prompt_sha256": canonical_sha256(
                 self._build_system_prompt(
@@ -889,25 +886,9 @@ class CustomLocalGemmaTranslation(BaseLLMTranslation):
             },
             "model": self.model,
             "runtime": dict(runtime_identity or {}),
-            "dictionary_version": dictionary_version,
             "glossary_version": 0,
             "tm_revision": int(tm_revision),
         }
-
-    def _translation_dictionary_version(self) -> str:
-        rules: Any = []
-        settings = self.settings
-        getter = getattr(settings, "get_translation_result_dictionary_rules", None)
-        if callable(getter):
-            try:
-                rules = getter()
-            except Exception:
-                logger.warning(
-                    "Unable to read translation-result dictionary rules for cache identity.",
-                    exc_info=True,
-                )
-                rules = []
-        return canonical_sha256(rules or [])
 
     @staticmethod
     def _restore_cached_translation_metadata(
@@ -1003,14 +984,6 @@ class CustomLocalGemmaTranslation(BaseLLMTranslation):
         blk_list: list[TextBlock],
         extra_context: str,
     ) -> int:
-        if self.request_mode == GEMMA_REQUEST_MODE_CONTEXTUAL_GROUPED:
-            request_context = self._create_request_context(blk_list)
-            return self._translate_contextual_grouped_context(
-                request_context,
-                extra_context,
-                prompt_profile=self.prompt_profile,
-            )
-
         def _translate_with_profile(prompt_profile: str) -> int:
             if self.contextual_merge_input:
                 return self._translate_contextual_single_blocks(
@@ -1022,7 +995,6 @@ class CustomLocalGemmaTranslation(BaseLLMTranslation):
                 blk_list,
                 extra_context,
                 prompt_profile=prompt_profile,
-                use_contextual_merge=False,
             )
 
         try:
@@ -1088,170 +1060,6 @@ class CustomLocalGemmaTranslation(BaseLLMTranslation):
             merged_context=merged_context,
         )
 
-    def _translate_contextual_grouped_context(
-        self,
-        request_context: GemmaRequestContext,
-        extra_context: str,
-        *,
-        prompt_profile: str,
-        requested_indices: tuple[int, ...] | None = None,
-    ) -> int:
-        requested = (
-            tuple(range(len(request_context.blocks)))
-            if requested_indices is None
-            else tuple(requested_indices)
-        )
-        try:
-            parsed = self._request_contextual_grouped(
-                request_context,
-                extra_context,
-                prompt_profile=prompt_profile,
-                requested_indices=requested,
-            )
-        except GemmaLocalServerContextCapacityError as exc:
-            self._current_benchmark_stats["gemma_context_capacity_split_count"] += 1
-            return self._split_grouped_context(
-                request_context,
-                extra_context,
-                reason=exc,
-                requested_indices=requested,
-            )
-        except GemmaLocalServerResponseError as exc:
-            if exc.strict_retryable and prompt_profile != STRICT_GEMMA_PROMPT_PROFILE:
-                self._current_benchmark_stats["gemma_strict_grouped_retry_count"] += 1
-                logger.warning(
-                    "gemma contextual grouped response failed for %d block(s); "
-                    "retrying once with prompt_profile=%s. reason=%s",
-                    len(request_context.blocks),
-                    STRICT_GEMMA_PROMPT_PROFILE,
-                    exc,
-                )
-                try:
-                    parsed = self._request_contextual_grouped(
-                        request_context,
-                        extra_context,
-                        prompt_profile=STRICT_GEMMA_PROMPT_PROFILE,
-                        requested_indices=requested,
-                    )
-                except GemmaLocalServerContextCapacityError as strict_exc:
-                    self._current_benchmark_stats["gemma_context_capacity_split_count"] += 1
-                    return self._split_grouped_context(
-                        request_context,
-                        extra_context,
-                        reason=strict_exc,
-                        requested_indices=requested,
-                    )
-                except GemmaLocalServerResponseError as strict_exc:
-                    exc = strict_exc
-                else:
-                    return self._apply_grouped_result_with_partial_fallback(
-                        request_context,
-                        parsed,
-                        extra_context,
-                        prompt_profile=prompt_profile,
-                    )
-
-            if not exc.split_retryable:
-                raise
-            return self._split_grouped_context(
-                request_context,
-                extra_context,
-                reason=exc,
-                requested_indices=requested,
-            )
-
-        return self._apply_grouped_result_with_partial_fallback(
-            request_context,
-            parsed,
-            extra_context,
-            prompt_profile=prompt_profile,
-        )
-
-    def _request_contextual_grouped(
-        self,
-        request_context: GemmaRequestContext,
-        extra_context: str,
-        *,
-        prompt_profile: str,
-        requested_indices: tuple[int, ...] | None = None,
-    ) -> GemmaParsedResponse:
-        requested = (
-            tuple(range(len(request_context.blocks)))
-            if requested_indices is None
-            else tuple(requested_indices)
-        )
-        self._current_benchmark_stats["gemma_max_requested_group_size"] = max(
-            int(self._current_benchmark_stats["gemma_max_requested_group_size"]),
-            len(requested),
-        )
-        system_prompt = self._build_system_prompt(extra_context, prompt_profile=prompt_profile)
-        user_payload: dict[str, Any] = {
-            "merged_context": request_context.merged_context,
-        }
-        if len(requested) != len(request_context.blocks):
-            user_payload["requested_blocks"] = [
-                request_context.expected_keys[index]
-                for index in requested
-            ]
-        user_prompt = json.dumps(user_payload, ensure_ascii=False, indent=4)
-        expected_keys = [
-            request_context.expected_keys[index]
-            for index in requested
-        ]
-        response_data = self._request_translation(
-            system_prompt,
-            user_prompt,
-            expected_keys=expected_keys,
-            request_mode=GEMMA_REQUEST_MODE_CONTEXTUAL_GROUPED,
-        )
-        return self._extract_partial_translation_result(
-            response_data,
-            expected_keys=expected_keys,
-            source_values={
-                request_context.expected_keys[index]: request_context.source_values[index]
-                for index in requested
-            },
-            block_count=len(requested),
-            prompt_profile=prompt_profile,
-        )
-
-    def _apply_grouped_result_with_partial_fallback(
-        self,
-        request_context: GemmaRequestContext,
-        parsed: GemmaParsedResponse,
-        extra_context: str,
-        *,
-        prompt_profile: str,
-    ) -> int:
-        key_to_index = {
-            key: index
-            for index, key in enumerate(request_context.expected_keys)
-        }
-        for key, translated in parsed.valid_values.items():
-            index = key_to_index[key]
-            self._apply_translation_value(request_context.blocks[index], index, translated)
-
-        if parsed.unresolved_keys:
-            self._current_benchmark_stats["gemma_partial_response_count"] += 1
-            self._current_benchmark_stats["gemma_partial_fallback_block_count"] += len(
-                parsed.unresolved_keys
-            )
-            logger.warning(
-                "gemma contextual grouped response requires contextual-single fallback: "
-                "blocks=%d unresolved=%s",
-                len(request_context.blocks),
-                ", ".join(parsed.unresolved_keys),
-            )
-            for key in parsed.unresolved_keys:
-                self._translate_contextual_single_target(
-                    request_context,
-                    key_to_index[key],
-                    extra_context,
-                    prompt_profile=prompt_profile,
-                )
-
-        return len(parsed.valid_values) + len(parsed.unresolved_keys)
-
     def _translate_contextual_single_target(
         self,
         request_context: GemmaRequestContext,
@@ -1307,67 +1115,6 @@ class CustomLocalGemmaTranslation(BaseLLMTranslation):
             strict_retryable=False,
         )
 
-    def _split_grouped_context(
-        self,
-        request_context: GemmaRequestContext,
-        extra_context: str,
-        *,
-        reason: Exception,
-        requested_indices: tuple[int, ...] | None = None,
-    ) -> int:
-        if len(request_context.blocks) <= 1:
-            raise reason
-
-        requested = (
-            tuple(range(len(request_context.blocks)))
-            if requested_indices is None
-            else tuple(requested_indices)
-        )
-        split_point = max(1, len(request_context.blocks) // 2)
-        self._current_benchmark_stats["gemma_chunk_retry_events"] += 1
-        self._current_benchmark_stats["gemma_split_count"] += 1
-        logger.warning(
-            "gemma contextual grouped request failed for %d block(s); splitting into "
-            "%d and %d block(s). reason=%s",
-            len(request_context.blocks),
-            split_point,
-            len(request_context.blocks) - split_point,
-            reason,
-        )
-        left_context = self._create_request_context(
-            list(request_context.blocks[:split_point])
-        )
-        right_context = self._create_request_context(
-            list(request_context.blocks[split_point:])
-        )
-        left_requested = tuple(index for index in requested if index < split_point)
-        right_requested = tuple(
-            index - split_point
-            for index in requested
-            if index >= split_point
-        )
-        left = (
-            self._translate_contextual_grouped_context(
-                left_context,
-                extra_context,
-                prompt_profile=self.prompt_profile,
-                requested_indices=left_requested,
-            )
-            if left_requested
-            else 0
-        )
-        right = (
-            self._translate_contextual_grouped_context(
-                right_context,
-                extra_context,
-                prompt_profile=self.prompt_profile,
-                requested_indices=right_requested,
-            )
-            if right_requested
-            else 0
-        )
-        return left + right
-
     def _translate_contextual_single_blocks(
         self,
         blk_list: list[TextBlock],
@@ -1417,7 +1164,6 @@ class CustomLocalGemmaTranslation(BaseLLMTranslation):
                 [blk],
                 extra_context,
                 prompt_profile=prompt_profile,
-                use_contextual_merge=False,
             )
         return updated_count
 
@@ -1427,25 +1173,12 @@ class CustomLocalGemmaTranslation(BaseLLMTranslation):
         extra_context: str,
         *,
         prompt_profile: str,
-        use_contextual_merge: bool,
     ) -> int:
         system_prompt = self._build_system_prompt(extra_context, prompt_profile=prompt_profile)
         expected_keys = self._expected_block_keys(blk_list)
-        if use_contextual_merge:
-            request_context = self._create_request_context(blk_list)
-            user_prompt = json.dumps(
-                {"merged_context": request_context.merged_context},
-                ensure_ascii=False,
-                indent=4,
-            )
-            request_mode = GEMMA_REQUEST_MODE_CONTEXTUAL_GROUPED
-            source_payload = dict(
-                zip(expected_keys, request_context.source_values)
-            )
-        else:
-            _, user_prompt = self._build_translation_input_payloads(blk_list)
-            request_mode = "isolated-single" if len(blk_list) == 1 else "direct-grouped"
-            source_payload = extract_json_object(user_prompt)
+        _, user_prompt = self._build_translation_input_payloads(blk_list)
+        request_mode = "isolated-single" if len(blk_list) == 1 else "direct-grouped"
+        source_payload = extract_json_object(user_prompt)
         response_data = self._request_translation(
             system_prompt,
             user_prompt,
@@ -1976,10 +1709,8 @@ class CustomLocalGemmaTranslation(BaseLLMTranslation):
     @staticmethod
     def _request_mode_stat_prefix(request_mode: str) -> str:
         return {
-            GEMMA_REQUEST_MODE_CONTEXTUAL_GROUPED: "gemma_contextual_grouped",
             GEMMA_REQUEST_MODE_CONTEXTUAL_SINGLE: "gemma_contextual_single",
             "isolated-single": "gemma_isolated_single",
-            "direct-grouped": "gemma_direct_grouped",
         }.get(str(request_mode or "").strip().lower(), "")
 
     def _record_response_telemetry(self, response_data: dict[str, Any]) -> None:
