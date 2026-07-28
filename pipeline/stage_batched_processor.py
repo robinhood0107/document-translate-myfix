@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import copy
 import json
 import logging
 import os
@@ -16,6 +17,20 @@ from PySide6.QtCore import QCoreApplication
 from PySide6.QtGui import QColor
 
 from app.path_materialization import ensure_path_materialized
+from app.projects.stage_checkpoints import (
+    build_detection_fingerprint,
+    build_detection_identity,
+    build_project_ocr_fingerprint,
+    build_project_ocr_identity,
+    decoded_image_sha256,
+    detection_structure_signature,
+    lookup_detection_checkpoint,
+    lookup_ocr_checkpoint,
+    open_project_stage_checkpoint_store,
+    project_checkpoint_page_key,
+    record_detection_checkpoint,
+    record_ocr_checkpoint,
+)
 from app.ui.canvas.text.text_item_properties import TextItemProperties
 from app.ui.canvas.text_item import OutlineInfo, OutlineType
 from app.ui.messages import Messages
@@ -23,7 +38,10 @@ from modules.detection.processor import TextBlockDetector
 from modules.ocr.factory import OCRFactory
 from modules.ocr.local_runtime import LocalOCRRuntimeManager
 from modules.ocr.ocr_paddle_VL import PaddleOCRVLEngine
-from modules.ocr.persistent_cache import OCRPersistentResultCache
+from modules.ocr.persistent_cache import (
+    OCRPersistentResultCache,
+    snapshot_raw_ocr_result,
+)
 from modules.ocr.selection import (
     STAGE_BATCHED_WORKFLOW_MODE,
     resolve_stage_batched_ocr_policy,
@@ -82,7 +100,7 @@ from modules.utils.render_style_policy import (
     VERTICAL_ALIGNMENT_CENTER,
     resolve_render_text_color,
 )
-from modules.utils.textblock import sort_blk_list
+from modules.utils.textblock import ensure_text_block_id, sort_blk_list
 from modules.utils.translator_utils import (
     format_translations,
     get_raw_text,
@@ -110,6 +128,15 @@ class StagePageContext:
     detector_key: str = ""
     detector_engine: str = ""
     detector_device: str = ""
+    source_decoded_sha256: str = ""
+    project_checkpoint_page_key: str = ""
+    detection_fingerprint: str = ""
+    detection_structure_signature: str = ""
+    detection_checkpoint_status: str = "disabled"
+    project_ocr_fingerprint: str = ""
+    project_ocr_identity: dict[str, Any] = field(default_factory=dict)
+    project_ocr_hit: Any | None = None
+    project_ocr_checkpoint_status: str = "disabled"
     page_ocr_metrics: dict[str, int] = field(default_factory=dict)
     page_translation_metrics: dict[str, int | float] = field(default_factory=dict)
     paddleocr_cache_plan: Any | None = None
@@ -136,6 +163,8 @@ class StageBatchedProcessor(BatchProcessor):
         self._prewarm_cancel_event = threading.Event()
         self._paddleocr_cache_store: OCRPersistentResultCache | None = None
         self._paddleocr_cache_identity: dict[str, Any] | None = None
+        self._project_checkpoint_store = None
+        self._project_checkpoint_page_keys: list[str] = []
 
     def _stage_tr(self, text: str) -> str:
         return QCoreApplication.translate("StageBatchedProcessor", text)
@@ -377,6 +406,33 @@ class StageBatchedProcessor(BatchProcessor):
         runtime_manager = getattr(self.main_page, "local_ocr_runtime_manager", None)
         if not isinstance(runtime_manager, LocalOCRRuntimeManager):
             return
+        # A non-empty project cache may contain a page-local OCR hit that can be
+        # known only after detection restores the exact ordered blocks. Defer in
+        # that case to preserve the all-hit zero-runtime contract. A brand-new,
+        # empty sidecar cannot contain a hit, so keep the cold-path overlap.
+        project_store = getattr(self, "_project_checkpoint_store", None)
+        if project_store is not None:
+            try:
+                page_keys = list(
+                    getattr(self, "_project_checkpoint_page_keys", []) or []
+                )
+                if (
+                    page_keys
+                    and all(
+                        project_store.has_stage_record(page_key, "ocr")
+                        for page_key in page_keys
+                    )
+                ):
+                    return
+                if not page_keys and project_store.has_stage_records("ocr"):
+                    return
+            except Exception:
+                logger.warning(
+                    "Project checkpoint prewarm probe failed open; OCR startup "
+                    "will be resolved after cache lookup.",
+                    exc_info=True,
+                )
+                return
         settings_page = self.main_page.settings_page
         engine_key = str(policy["primary_ocr_engine"])
         if (
@@ -553,9 +609,7 @@ class StageBatchedProcessor(BatchProcessor):
         total_images = len(pages)
         settings_page = self.main_page.settings_page
         detector = self.block_detection.block_detector_cache
-        if detector is None:
-            detector = TextBlockDetector(settings_page)
-            self.block_detection.block_detector_cache = detector
+        checkpoint_store = getattr(self, "_project_checkpoint_store", None)
 
         for index, ctx in enumerate(pages):
             self._raise_if_cancelled()
@@ -587,17 +641,109 @@ class StageBatchedProcessor(BatchProcessor):
                 ensure_path_materialized(ctx.image_path)
                 ctx.image = imk.read_image(ctx.image_path)
 
-            blk_list = detector.detect(ctx.image)
-            self._raise_if_cancelled()
-            ctx.precomputed_mask_details = detector.last_mask_details
-            ctx.detector_key = detector.detector or settings_page.get_tool_selection("detector") or "RT-DETR-v2"
-            ctx.detector_engine = detector.last_engine_name or ""
-            ctx.detector_device = detector.last_device or resolve_device(settings_page.is_gpu_enabled(), backend="onnx")
-            rtl = self._source_lang_english(ctx.source_lang) == "Japanese"
+            source_lang_english = self._source_lang_english(ctx.source_lang)
+            detection_hit = None
+            detection_identity = None
+            if checkpoint_store is not None:
+                ctx.source_decoded_sha256 = decoded_image_sha256(ctx.image)
+                ctx.project_checkpoint_page_key = project_checkpoint_page_key(
+                    self.main_page,
+                    ctx.image_path,
+                )
+                try:
+                    detection_identity = build_detection_identity(
+                        settings_page,
+                        source_lang_english=source_lang_english,
+                    )
+                    if detection_identity is not None:
+                        ctx.detection_fingerprint = build_detection_fingerprint(
+                            source_sha256=ctx.source_decoded_sha256,
+                            identity=detection_identity,
+                        )
+                        detection_hit = lookup_detection_checkpoint(
+                            checkpoint_store,
+                            page_key=ctx.project_checkpoint_page_key,
+                            fingerprint=ctx.detection_fingerprint,
+                            source_sha256=ctx.source_decoded_sha256,
+                            identity=detection_identity,
+                        )
+                except Exception:
+                    logger.warning(
+                        "Detection checkpoint lookup failed open for %s.",
+                        ctx.image_name,
+                        exc_info=True,
+                    )
+                    detection_identity = None
 
-            if blk_list:
-                get_best_render_area(blk_list, ctx.image)
-                ctx.blk_list = sort_blk_list(blk_list, rtl)
+            if detection_hit is not None:
+                ctx.blk_list = detection_hit.blocks
+                ctx.precomputed_mask_details = (
+                    detection_hit.precomputed_mask_details
+                )
+                ctx.detector_key = str(detection_identity.get("detector", ""))
+                ctx.detector_engine = str(
+                    detection_identity.get("engine", "")
+                )
+                ctx.detector_device = str(
+                    detection_identity.get("device", "")
+                )
+                ctx.detection_checkpoint_status = "hit"
+            else:
+                if detector is None:
+                    detector = TextBlockDetector(settings_page)
+                    self.block_detection.block_detector_cache = detector
+                blk_list = detector.detect(ctx.image)
+                self._raise_if_cancelled()
+                ctx.precomputed_mask_details = detector.last_mask_details
+                ctx.detector_key = (
+                    detector.detector
+                    or settings_page.get_tool_selection("detector")
+                    or "RT-DETR-v2"
+                )
+                ctx.detector_engine = detector.last_engine_name or ""
+                ctx.detector_device = (
+                    detector.last_device
+                    or resolve_device(
+                        settings_page.is_gpu_enabled(),
+                        backend="onnx",
+                    )
+                )
+                rtl = source_lang_english == "Japanese"
+                if blk_list:
+                    get_best_render_area(blk_list, ctx.image)
+                    ctx.blk_list = sort_blk_list(blk_list, rtl)
+                else:
+                    ctx.blk_list = []
+                ctx.detection_checkpoint_status = (
+                    "miss"
+                    if checkpoint_store is not None
+                    and detection_identity is not None
+                    else "disabled"
+                )
+                if checkpoint_store is not None and detection_identity is not None:
+                    try:
+                        record_detection_checkpoint(
+                            checkpoint_store,
+                            page_key=ctx.project_checkpoint_page_key,
+                            fingerprint=ctx.detection_fingerprint,
+                            source_sha256=ctx.source_decoded_sha256,
+                            identity=detection_identity,
+                            blocks=ctx.blk_list,
+                            precomputed_mask_details=ctx.precomputed_mask_details,
+                        )
+                    except Exception:
+                        logger.warning(
+                            "Detection checkpoint write failed open for %s.",
+                            ctx.image_name,
+                            exc_info=True,
+                        )
+
+            if checkpoint_store is not None:
+                ctx.detection_structure_signature = (
+                    detection_structure_signature(ctx.blk_list)
+                )
+
+            if ctx.blk_list:
                 self._persist_detect_state(
                     ctx.image_path,
                     ctx.blk_list,
@@ -613,6 +759,8 @@ class StageBatchedProcessor(BatchProcessor):
                     block_count=len(ctx.blk_list or []),
                     detector_key=ctx.detector_key,
                     detector_engine=ctx.detector_engine,
+                    cache_status=ctx.detection_checkpoint_status,
+                    project_checkpoint_status=ctx.detection_checkpoint_status,
                 )
                 export_settings = self._effective_export_settings(settings_page)
                 detector_overlay_path = self._write_detector_overlay_debug_image(
@@ -675,6 +823,8 @@ class StageBatchedProcessor(BatchProcessor):
                 block_count=0,
                 detector_key=ctx.detector_key,
                 detector_engine=ctx.detector_engine,
+                cache_status=ctx.detection_checkpoint_status,
+                project_checkpoint_status=ctx.detection_checkpoint_status,
                 skip_reason="no_text_detected",
                 **ctx.page_ocr_metrics,
             )
@@ -703,6 +853,15 @@ class StageBatchedProcessor(BatchProcessor):
         page_profile: dict[str, Any] = {}
         engine_name = engine_key
         records = []
+        raw_results: dict[str, dict[str, Any]] = {}
+        project_checkpoint_hit = ctx.project_ocr_hit
+
+        def snapshot_raw_results() -> None:
+            nonlocal raw_results
+            raw_results = {
+                ensure_text_block_id(block): snapshot_raw_ocr_result(block)
+                for block in ctx.blk_list
+            }
 
         def attach_cancel_checker(engine) -> None:
             setter = getattr(engine, "set_cancel_checker", None)
@@ -711,7 +870,25 @@ class StageBatchedProcessor(BatchProcessor):
 
         paddle_plan = ctx.paddleocr_cache_plan
         paddle_engine = ctx.paddleocr_cache_engine
-        if (
+        if project_checkpoint_hit is not None:
+            raw_results = copy.deepcopy(project_checkpoint_hit.raw_results)
+            page_profile = dict(project_checkpoint_hit.page_profile or {})
+            page_profile["project_checkpoint"] = {
+                "status": "hit",
+                "inference_count": 0,
+                "http_request_count": 0,
+            }
+            apply_ocr_result_dictionary(
+                ctx.blk_list,
+                settings_page.get_ocr_result_dictionary_rules(),
+            )
+            attempt_count = max(1, int(project_checkpoint_hit.attempt_count))
+            engine_name = (
+                project_checkpoint_hit.engine_name
+                or "PaddleOCRVLEngine"
+            )
+            cache_status = "hit"
+        elif (
             isinstance(paddle_engine, PaddleOCRVLEngine)
             and paddle_plan is not None
         ):
@@ -719,6 +896,7 @@ class StageBatchedProcessor(BatchProcessor):
             paddle_engine.process_persistent_cache_plan(paddle_plan)
             records = paddle_engine.build_persistent_cache_records(paddle_plan)
             page_profile = dict(paddle_engine.last_page_profile or {})
+            snapshot_raw_results()
             apply_ocr_result_dictionary(
                 ctx.blk_list,
                 settings_page.get_ocr_result_dictionary_rules(),
@@ -741,6 +919,7 @@ class StageBatchedProcessor(BatchProcessor):
             )
         ):
             self.cache_manager._apply_cached_ocr_to_blocks(cache_key, ctx.blk_list)
+            snapshot_raw_results()
             apply_ocr_result_dictionary(ctx.blk_list, settings_page.get_ocr_result_dictionary_rules())
             cache_status = "hit"
             attempt_count = 1
@@ -754,6 +933,7 @@ class StageBatchedProcessor(BatchProcessor):
             attach_cancel_checker(engine)
             engine.process_image(ctx.image, ctx.blk_list)
             page_profile = dict(getattr(engine, "last_page_profile", {}) or {})
+            snapshot_raw_results()
             apply_ocr_result_dictionary(ctx.blk_list, settings_page.get_ocr_result_dictionary_rules())
             if engine_key != "PaddleOCR VL":
                 self.cache_manager._cache_ocr_results(cache_key, ctx.blk_list)
@@ -763,7 +943,11 @@ class StageBatchedProcessor(BatchProcessor):
             records = []
 
         quality = summarize_ocr_quality(ctx.blk_list)
-        if quality.get("low_quality", False) and not all_empty_blocks_are_rejected(ctx.blk_list):
+        if (
+            project_checkpoint_hit is None
+            and quality.get("low_quality", False)
+            and not all_empty_blocks_are_rejected(ctx.blk_list)
+        ):
             attempt_count += 1
             for blk in ctx.blk_list:
                 blk.text = ""
@@ -798,6 +982,7 @@ class StageBatchedProcessor(BatchProcessor):
                 attach_cancel_checker(engine)
                 engine.process_image(ctx.image, ctx.blk_list)
                 page_profile = dict(getattr(engine, "last_page_profile", {}) or {})
+            snapshot_raw_results()
             apply_ocr_result_dictionary(ctx.blk_list, settings_page.get_ocr_result_dictionary_rules())
             if engine_key != "PaddleOCR VL":
                 self.cache_manager._cache_ocr_results(cache_key, ctx.blk_list)
@@ -831,6 +1016,15 @@ class StageBatchedProcessor(BatchProcessor):
             page_profile["embedded_ui_dropped_block_count"] = len(embedded_ui_blocks)
 
         metrics = self._ocr_quality_metrics(quality)
+        retained_ids = {
+            str(getattr(block, "block_id", "") or "")
+            for block in ctx.blk_list
+        }
+        raw_results = {
+            block_id: payload
+            for block_id, payload in raw_results.items()
+            if block_id in retained_ids
+        }
         return {
             "quality": quality,
             "metrics": metrics,
@@ -838,7 +1032,94 @@ class StageBatchedProcessor(BatchProcessor):
             "attempt_count": attempt_count,
             "page_profile": page_profile,
             "engine_name": engine_name,
+            "raw_results": raw_results,
         }
+
+    def _prepare_project_ocr_hits(
+        self,
+        pages: list[StagePageContext],
+        policy: dict[str, Any],
+        runtime_identity: dict[str, Any],
+    ) -> None:
+        store = getattr(self, "_project_checkpoint_store", None)
+        if store is None or str(policy.get("primary_ocr_engine", "")) != "PaddleOCR VL":
+            return
+        paddle_settings = (
+            self.main_page.settings_page.get_paddleocr_vl_settings()
+        )
+        for ctx in pages:
+            if (
+                ctx.failed_stage
+                or ctx.no_text_detected
+                or not ctx.detection_fingerprint
+            ):
+                continue
+            try:
+                identity = build_project_ocr_identity(
+                    detection_fingerprint=ctx.detection_fingerprint,
+                    runtime_identity=runtime_identity,
+                    policy=policy,
+                    paddle_settings=paddle_settings,
+                    source_lang_english=self._source_lang_english(ctx.source_lang),
+                )
+                fingerprint = build_project_ocr_fingerprint(identity)
+                ctx.project_ocr_identity = identity
+                ctx.project_ocr_fingerprint = fingerprint
+                hit = lookup_ocr_checkpoint(
+                    store,
+                    page_key=ctx.project_checkpoint_page_key,
+                    fingerprint=fingerprint,
+                    identity=identity,
+                    detection_blocks=ctx.blk_list,
+                )
+            except Exception:
+                logger.warning(
+                    "OCR project checkpoint lookup failed open for %s.",
+                    ctx.image_name,
+                    exc_info=True,
+                )
+                ctx.project_ocr_checkpoint_status = "disabled"
+                continue
+            if hit is None:
+                ctx.project_ocr_checkpoint_status = "miss"
+                continue
+            ctx.project_ocr_hit = hit
+            ctx.project_ocr_checkpoint_status = "hit"
+            ctx.blk_list = hit.blocks
+
+    def _record_project_ocr_result(
+        self,
+        ctx: StagePageContext,
+        result: dict[str, Any],
+    ) -> None:
+        if (
+            ctx.project_ocr_checkpoint_status == "hit"
+            or not ctx.project_ocr_fingerprint
+            or not ctx.project_ocr_identity
+        ):
+            return
+        try:
+            recorded = record_ocr_checkpoint(
+                getattr(self, "_project_checkpoint_store", None),
+                page_key=ctx.project_checkpoint_page_key,
+                fingerprint=ctx.project_ocr_fingerprint,
+                identity=ctx.project_ocr_identity,
+                blocks=ctx.blk_list,
+                raw_results=result.get("raw_results") or {},
+                attempt_count=int(result.get("attempt_count", 0) or 0),
+                engine_name=str(result.get("engine_name", "") or ""),
+                page_profile=result.get("page_profile") or {},
+            )
+        except Exception:
+            logger.warning(
+                "OCR project checkpoint write failed open for %s.",
+                ctx.image_name,
+                exc_info=True,
+            )
+            ctx.project_ocr_checkpoint_status = "disabled"
+            return
+        if recorded:
+            ctx.project_ocr_checkpoint_status = "stored"
 
     def _ocr_all(self, pages: list[StagePageContext], policy: dict[str, Any]) -> None:
         total_images = len(pages)
@@ -847,22 +1128,24 @@ class StageBatchedProcessor(BatchProcessor):
         self._paddleocr_cache_store = None
         self._paddleocr_cache_identity = None
         engine_key = str(policy["primary_ocr_engine"])
+        paddle_settings = settings_page.get_paddleocr_vl_settings()
         persistent_cache_requested = (
             engine_key == "PaddleOCR VL"
             and bool(
-                settings_page.get_paddleocr_vl_settings().get(
+                paddle_settings.get(
                     "persistent_cache_enabled",
                     True,
                 )
             )
         )
-        prepared = False
-        requires_runtime = any(
-            not ctx.failed_stage and not ctx.no_text_detected and bool(ctx.blk_list)
-            for ctx in pages
-        )
-        if (
+        cache_identity_required = bool(
             persistent_cache_requested
+            or getattr(self, "_project_checkpoint_store", None) is not None
+        )
+        runtime_identity = None
+        if (
+            cache_identity_required
+            and engine_key == "PaddleOCR VL"
             and isinstance(runtime_manager, LocalOCRRuntimeManager)
         ):
             runtime_identity = runtime_manager.get_ocr_cache_identity(
@@ -870,29 +1153,56 @@ class StageBatchedProcessor(BatchProcessor):
                 settings_page,
             )
             if runtime_identity is not None:
-                requires_runtime = self._prepare_paddleocr_cache_plans(
+                self._prepare_project_ocr_hits(
                     pages,
                     policy,
                     runtime_identity,
                 )
-                prepared = True
+        def has_project_miss() -> bool:
+            return any(
+                not ctx.failed_stage
+                and not ctx.no_text_detected
+                and ctx.project_ocr_hit is None
+                and bool(ctx.blk_list)
+                for ctx in pages
+            )
+
+        requires_runtime = has_project_miss()
+        if (
+            persistent_cache_requested
+            and runtime_identity is not None
+            and requires_runtime
+        ):
+            requires_runtime = self._prepare_paddleocr_cache_plans(
+                pages,
+                policy,
+                runtime_identity,
+            )
         if requires_runtime:
             self._await_ocr_runtime(policy)
         if (
-            persistent_cache_requested
-            and not prepared
+            cache_identity_required
+            and engine_key == "PaddleOCR VL"
+            and runtime_identity is None
             and isinstance(runtime_manager, LocalOCRRuntimeManager)
+            and has_project_miss()
         ):
             runtime_identity = runtime_manager.get_ocr_cache_identity(
                 engine_key,
                 settings_page,
             )
             if runtime_identity is not None:
-                self._prepare_paddleocr_cache_plans(
+                self._prepare_project_ocr_hits(
                     pages,
                     policy,
                     runtime_identity,
                 )
+                if persistent_cache_requested and has_project_miss():
+                    self._prepare_paddleocr_cache_plans(
+                        pages,
+                        policy,
+                        runtime_identity,
+                    )
 
         for index, ctx in enumerate(pages):
             self._raise_if_cancelled()
@@ -913,6 +1223,9 @@ class StageBatchedProcessor(BatchProcessor):
                     image_index=index,
                     total_images=total_images,
                     block_count=0,
+                    project_checkpoint_status=(
+                        ctx.project_ocr_checkpoint_status
+                    ),
                     skip_reason="no_text_detected",
                     **ctx.page_ocr_metrics,
                 )
@@ -931,6 +1244,7 @@ class StageBatchedProcessor(BatchProcessor):
                 self._log_ocr_quality(ctx.image_path, quality, int(result["attempt_count"]))
                 if not ctx.blk_list or int(quality.get("non_empty", 0) or 0) <= 0:
                     ctx.blk_list = []
+                    self._record_project_ocr_result(ctx, result)
                     ctx.no_text_detected = True
                     state = self._ensure_page_state(ctx.image_path)
                     state["blk_list"] = []
@@ -956,12 +1270,16 @@ class StageBatchedProcessor(BatchProcessor):
                         cache_status=result["cache_status"],
                         attempt_count=int(result["attempt_count"]),
                         ocr_page_profile=result["page_profile"],
+                        project_checkpoint_status=(
+                            ctx.project_ocr_checkpoint_status
+                        ),
                         skip_reason="no_text_detected",
                         **ctx.page_ocr_metrics,
                     )
                     continue
                 if quality.get("low_quality", False):
                     raise RuntimeError(quality.get("reason") or "OCR quality too low after retry.")
+                self._record_project_ocr_result(ctx, result)
                 device = resolve_device(settings_page.is_gpu_enabled())
                 self._persist_ocr_state(
                     ctx.image_path,
@@ -985,6 +1303,9 @@ class StageBatchedProcessor(BatchProcessor):
                     cache_status=result["cache_status"],
                     attempt_count=int(result["attempt_count"]),
                     ocr_page_profile=result["page_profile"],
+                    project_checkpoint_status=(
+                        ctx.project_ocr_checkpoint_status
+                    ),
                     **ctx.page_ocr_metrics,
                 )
             except OperationCancelledError:
@@ -1023,7 +1344,11 @@ class StageBatchedProcessor(BatchProcessor):
         total_images = len(pages)
         for index, ctx in enumerate(pages):
             self._raise_if_cancelled()
-            if ctx.failed_stage or ctx.no_text_detected:
+            if (
+                ctx.failed_stage
+                or ctx.no_text_detected
+                or ctx.project_ocr_hit is not None
+            ):
                 continue
             try:
                 source_lang_english = self._source_lang_english(ctx.source_lang)
@@ -1985,6 +2310,18 @@ class StageBatchedProcessor(BatchProcessor):
 
         pages = self._load_page_contexts(image_list)
         policy = self._ensure_stage_policy(pages)
+        self._project_checkpoint_store = open_project_stage_checkpoint_store(
+            self.main_page,
+            initialize=True,
+        )
+        self._project_checkpoint_page_keys = (
+            [
+                project_checkpoint_page_key(self.main_page, image_path)
+                for image_path in image_list
+            ]
+            if self._project_checkpoint_store is not None
+            else []
+        )
         try:
             self._raise_if_cancelled()
             self._shutdown_managed_runtimes(
