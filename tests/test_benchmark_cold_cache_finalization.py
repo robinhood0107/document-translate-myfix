@@ -357,6 +357,9 @@ class ColdCacheFinalizationTests(unittest.TestCase):
                         "page_contract": {
                             "page_count": 6,
                             "block_count": 54,
+                            # OCR-only runs intentionally stop before
+                            # translation, so every translation is empty.
+                            "empty_translation_count": 54,
                             "detection_sha256": "d" * 64,
                             "ocr_sha256": "o" * 64,
                         },
@@ -377,6 +380,8 @@ class ColdCacheFinalizationTests(unittest.TestCase):
 
         self.assertTrue(analysis["baseline_exact_output_stable"])
         self.assertTrue(candidate["exact_quality_passed"])
+        self.assertTrue(candidate["structural_quality_passed"])
+        self.assertIsNone(candidate["translation_structure_passed"])
         self.assertTrue(candidate["speed_gate_passed"])
         self.assertTrue(candidate["automated_gate_passed"])
 
