@@ -2,7 +2,20 @@ from typing import List, Iterable
 from PySide6.QtGui import QUndoCommand
 from PySide6.QtWidgets import QGraphicsPathItem
 from .base import PathCommandBase, PathProperties
+from app.projects.stage_checkpoints import (
+    invalidate_current_project_page_checkpoints,
+)
 from modules.utils.inpaint_strokes import normalize_stroke_role
+
+
+def _invalidate_inpaint_checkpoint(viewer) -> None:
+    owner = viewer.window() if viewer is not None else None
+    if owner is not None:
+        invalidate_current_project_page_checkpoints(
+            owner,
+            stage="inpaint",
+        )
+
 
 class BrushStrokeCommand(QUndoCommand, PathCommandBase):
     def __init__(self, viewer, path_item: QGraphicsPathItem):
@@ -17,12 +30,14 @@ class BrushStrokeCommand(QUndoCommand, PathCommandBase):
             path_item = self.create_path_item(self.properties)
             self.scene.addItem(path_item)
             self.scene.update()
+        _invalidate_inpaint_checkpoint(self.viewer)
 
     def undo(self):
         matching_item = self.find_matching_item(self.scene, self.properties)
         if matching_item:
             self.scene.removeItem(matching_item)
             self.scene.update()
+            _invalidate_inpaint_checkpoint(self.viewer)
 
 class SegmentBoxesCommand(QUndoCommand, PathCommandBase):
     def __init__(self, viewer, path_items: List[QGraphicsPathItem]):
@@ -37,6 +52,8 @@ class SegmentBoxesCommand(QUndoCommand, PathCommandBase):
                 path_item = self.create_path_item(properties)
                 self.scene.addItem(path_item)
         self.scene.update()
+        if self.properties_list:
+            _invalidate_inpaint_checkpoint(self.viewer)
 
     def undo(self):
         for properties in self.properties_list:
@@ -44,6 +61,8 @@ class SegmentBoxesCommand(QUndoCommand, PathCommandBase):
             if item:
                 self.scene.removeItem(item)
         self.scene.update()
+        if self.properties_list:
+            _invalidate_inpaint_checkpoint(self.viewer)
 
 class ClearBrushStrokesCommand(QUndoCommand, PathCommandBase):
     def __init__(self, viewer, roles: Iterable[str] | None = None):
@@ -64,12 +83,16 @@ class ClearBrushStrokesCommand(QUndoCommand, PathCommandBase):
                 self.properties_list.append(props)
                 self.scene.removeItem(item)
         self.scene.update()
+        if self.properties_list:
+            _invalidate_inpaint_checkpoint(self.viewer)
         
     def undo(self):
         for properties in self.properties_list:
             path_item = self.create_path_item(properties)
             self.scene.addItem(path_item)
         self.scene.update()
+        if self.properties_list:
+            _invalidate_inpaint_checkpoint(self.viewer)
         
 class EraseUndoCommand(QUndoCommand, PathCommandBase):
     def __init__(self, viewer, before_erase: PathProperties, after_erase: PathProperties):
@@ -83,11 +106,14 @@ class EraseUndoCommand(QUndoCommand, PathCommandBase):
     def redo(self):
         if self.first:
             self.first = False
+            _invalidate_inpaint_checkpoint(self.viewer)
             return
         self.restore_scene_state(self.after_erase)
+        _invalidate_inpaint_checkpoint(self.viewer)
 
     def undo(self):
         self.restore_scene_state(self.before_erase)
+        _invalidate_inpaint_checkpoint(self.viewer)
 
     def restore_scene_state(self, target_properties_list):
         """Restore the scene to match the target state by comparing with current state."""

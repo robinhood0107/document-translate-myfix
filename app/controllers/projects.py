@@ -6,6 +6,7 @@ import logging
 import os
 import re
 import shutil
+import sqlite3
 import tempfile
 import time
 from collections import OrderedDict
@@ -31,6 +32,13 @@ from app.projects.project_state import (
     close_state_store,
     load_state_from_proj_file,
     save_state_to_proj_file,
+)
+from app.projects.checkpoint_store import (
+    ProjectCheckpointError,
+    ProjectCheckpointStore,
+    checkpoint_reference_for_save,
+    finalize_checkpoint_sidecar_move,
+    prepare_checkpoint_sidecar,
 )
 from app.projects.project_types import (
     PROJECT_FILE_EXT,
@@ -106,6 +114,13 @@ class ProjectController:
         settings.setValue("project_autosave_enabled", bool(enabled))
         settings.endGroup()
         settings.sync()
+
+    def _project_checkpoint_enabled(self) -> bool:
+        settings = QSettings("ComicLabs", "ComicTranslate")
+        settings.beginGroup("project_checkpoint")
+        enabled = settings.value("enabled", False, type=bool)
+        settings.endGroup()
+        return bool(enabled)
 
     def add_recent_project(self, path: str) -> None:
         """Push *path* to the front of the recent list; cap at MAX_RECENT."""
@@ -1672,7 +1687,13 @@ class ProjectController:
 
         return file_name
 
-    def run_save_proj(self, file_name, post_save_callback=None):
+    def run_save_proj(
+        self,
+        file_name,
+        post_save_callback=None,
+        *,
+        checkpoint_operation: str = "same",
+    ):
         prev_project_file = self.main.project_file
         prev_window_title = self.main.windowTitle()
         self.main.project_file = file_name
@@ -1710,7 +1731,15 @@ class ProjectController:
                 if post_save_callback:
                     post_save_callback()
 
-        self.main.run_threaded(self.save_project, None, on_error, on_finished, file_name)
+        self.main.run_threaded(
+            self.save_project,
+            None,
+            on_error,
+            on_finished,
+            file_name,
+            checkpoint_operation,
+            prev_project_file,
+        )
         
     def save_current_state(self):
         if self.main.webtoon_mode:
@@ -1734,6 +1763,7 @@ class ProjectController:
             self.run_save_proj(
                 file_name,
                 lambda: self._after_manual_project_save(post_save_callback),
+                checkpoint_operation="same",
             )
             return True
         return False
@@ -1750,6 +1780,7 @@ class ProjectController:
             self.run_save_proj(
                 file_name,
                 lambda: self._after_manual_project_save(post_save_callback),
+                checkpoint_operation="clone",
             )
             return True
         return False
@@ -1819,6 +1850,11 @@ class ProjectController:
             if self.main.project_file
             else None
         )
+        source_checkpoint_reference = getattr(
+            self.main,
+            "project_checkpoint_reference",
+            None,
+        )
 
         target_dir = os.path.dirname(target_path)
         if not target_dir:
@@ -1860,10 +1896,12 @@ class ProjectController:
         self.save_current_state()
 
         def _post_save() -> None:
+            old_project_removed = False
             if current_path and current_path != target_path:
                 if os.path.isfile(current_path):
                     try:
                         os.remove(current_path)
+                        old_project_removed = True
                     except OSError as exc:
                         QtWidgets.QMessageBox.warning(
                             self.main,
@@ -1871,6 +1909,36 @@ class ProjectController:
                             self.main.tr(
                                 "The project was saved to the new location, but the old file could not be removed.\n\n{path}\n\n{error}"
                             ).format(path=current_path, error=str(exc)),
+                        )
+                else:
+                    old_project_removed = True
+                if old_project_removed and source_checkpoint_reference is not None:
+                    try:
+                        removed = finalize_checkpoint_sidecar_move(
+                            current_path,
+                            source_checkpoint_reference,
+                            target_path,
+                            getattr(
+                                self.main,
+                                "project_checkpoint_reference",
+                                None,
+                            ),
+                        )
+                    except (OSError, sqlite3.Error, ProjectCheckpointError) as exc:
+                        removed = False
+                        logger.warning(
+                            "Old project checkpoint sidecar was preserved after "
+                            "project move: %s",
+                            exc,
+                        )
+                    if not removed:
+                        QtWidgets.QMessageBox.warning(
+                            self.main,
+                            self.main.tr("Old Project Cache Kept"),
+                            self.main.tr(
+                                "The project file was moved, but its old cache folder "
+                                "could not be removed safely.\n\n{path}"
+                            ).format(path=f"{current_path}.cache"),
                         )
                 self.remove_recent_project(current_path)
 
@@ -1890,13 +1958,288 @@ class ProjectController:
                 action_text,
             )
 
-        self.run_save_proj(target_path, post_save_callback=_post_save)
+        self.run_save_proj(
+            target_path,
+            post_save_callback=_post_save,
+            checkpoint_operation="move",
+        )
         return True
 
-    def save_project(self, file_name):
+    def save_project(
+        self,
+        file_name,
+        checkpoint_operation: str = "snapshot",
+        source_project_file: str | None = None,
+    ):
         if self._current_project_kind() == PROJECT_KIND_SERIES:
             raise RuntimeError("Series projects must be saved through SeriesController.")
-        save_state_to_proj_file(self.main, file_name)
+        operation = str(checkpoint_operation or "snapshot").strip().lower()
+        if operation not in {"snapshot", "same", "clone", "move"}:
+            raise ValueError(f"Unsupported project checkpoint save operation: {operation}")
+
+        original_reference = getattr(
+            self.main,
+            "project_checkpoint_reference",
+            None,
+        )
+        target_reference = checkpoint_reference_for_save(
+            original_reference,
+            file_name,
+            clone_identity=operation == "clone",
+        )
+        prepared_sidecar = None
+        if (
+            operation in {"clone", "move"}
+            and source_project_file
+            and os.path.normcase(os.path.abspath(source_project_file))
+            != os.path.normcase(os.path.abspath(file_name))
+        ):
+            try:
+                prepared_sidecar = prepare_checkpoint_sidecar(
+                    source_project_file,
+                    original_reference,
+                    file_name,
+                    target_reference,
+                )
+            except (
+                OSError,
+                sqlite3.Error,
+                ProjectCheckpointError,
+            ) as exc:
+                # Cache relocation is deliberately fail-open. The new project
+                # remains valid and will recompute stages if its sidecar cannot
+                # be prepared.
+                logger.warning(
+                    "Project checkpoint sidecar could not be prepared for %s; "
+                    "saving the project without reusable stage data. reason=%s",
+                    operation,
+                    exc,
+                )
+
+        session_project_file = getattr(self.main, "project_file", None)
+        update_session_reference = operation != "snapshot" or (
+            session_project_file
+            and os.path.normcase(os.path.abspath(session_project_file))
+            == os.path.normcase(os.path.abspath(file_name))
+        )
+        try:
+            save_state_to_proj_file(
+                self.main,
+                file_name,
+                checkpoint_reference=target_reference,
+                update_project_reference=update_session_reference,
+            )
+        except BaseException:
+            if prepared_sidecar is not None:
+                try:
+                    prepared_sidecar.rollback()
+                except Exception:
+                    logger.warning(
+                        "Failed to roll back target project checkpoint sidecar.",
+                        exc_info=True,
+                    )
+            if original_reference is None:
+                try:
+                    delattr(self.main, "project_checkpoint_reference")
+                except AttributeError:
+                    pass
+            else:
+                self.main.project_checkpoint_reference = original_reference
+            raise
+
+        if self._project_checkpoint_enabled() and update_session_reference:
+            try:
+                store = ProjectCheckpointStore(
+                    file_name,
+                    target_reference,
+                    enabled=True,
+                )
+                existed_before_initialize = store.sidecar_path.exists()
+                if store.ensure_initialized():
+                    if (
+                        prepared_sidecar is not None
+                        and not existed_before_initialize
+                        and store.sidecar_path.exists()
+                    ):
+                        prepared_sidecar.installed = True
+                else:
+                    logger.warning(
+                        "Project saved, but its checkpoint sidecar is "
+                        "unavailable: %s",
+                        store.disabled_reason,
+                    )
+            except (OSError, ProjectCheckpointError) as exc:
+                logger.warning(
+                    "Project saved, but its checkpoint sidecar is unavailable: %s",
+                    exc,
+                )
+
+        if prepared_sidecar is not None:
+            try:
+                prepared_sidecar.commit()
+            except Exception:
+                # The target project and target sidecar are already complete.
+                # Preserve any backup rather than turning cleanup into a save
+                # failure.
+                logger.warning(
+                    "Project checkpoint target backup cleanup failed.",
+                    exc_info=True,
+                )
+
+        if not update_session_reference:
+            if original_reference is None:
+                try:
+                    delattr(self.main, "project_checkpoint_reference")
+                except AttributeError:
+                    pass
+            else:
+                self.main.project_checkpoint_reference = original_reference
+
+    def _checkpoint_store_for_current_project(
+        self,
+        *,
+        initialize: bool,
+    ) -> ProjectCheckpointStore | None:
+        project_file = getattr(self.main, "project_file", None)
+        if (
+            not project_file
+            or self._current_project_kind() != PROJECT_KIND_SINGLE
+        ):
+            QtWidgets.QMessageBox.information(
+                self.main,
+                self.main.tr("Project Checkpoints"),
+                self.main.tr(
+                    "Save or open a single .ctpr project before managing its cache."
+                ),
+            )
+            return None
+        try:
+            reference = checkpoint_reference_for_save(
+                getattr(self.main, "project_checkpoint_reference", None),
+                project_file,
+            )
+            self.main.project_checkpoint_reference = reference.to_dict()
+            store = ProjectCheckpointStore(
+                project_file,
+                reference,
+                enabled=True,
+            )
+        except (OSError, ProjectCheckpointError) as exc:
+            QtWidgets.QMessageBox.warning(
+                self.main,
+                self.main.tr("Project Checkpoints"),
+                self.main.tr(
+                    "The project cache is unavailable. Processing can continue "
+                    "without it.\n\n{reason}"
+                ).format(reason=str(exc)),
+            )
+            return None
+        if initialize and not store.ensure_initialized():
+            QtWidgets.QMessageBox.warning(
+                self.main,
+                self.main.tr("Project Checkpoints"),
+                self.main.tr(
+                    "The project cache is unavailable. Processing can continue "
+                    "without it.\n\n{reason}"
+                ).format(reason=store.disabled_reason),
+            )
+            return None
+        return store
+
+    def open_project_checkpoint_folder(self) -> None:
+        store = self._checkpoint_store_for_current_project(initialize=False)
+        if store is None:
+            return
+        if not store.sidecar_path.is_dir():
+            QtWidgets.QMessageBox.information(
+                self.main,
+                self.main.tr("Project Checkpoints"),
+                self.main.tr(
+                    "This project does not have a checkpoint cache folder yet."
+                ),
+            )
+            return
+        QtGui.QDesktopServices.openUrl(
+            QtCore.QUrl.fromLocalFile(str(store.sidecar_path))
+        )
+
+    def clean_project_checkpoint_cache(self) -> None:
+        store = self._checkpoint_store_for_current_project(initialize=False)
+        if store is None:
+            return
+        if not store.db_path.is_file():
+            QtWidgets.QMessageBox.information(
+                self.main,
+                self.main.tr("Project Checkpoints"),
+                self.main.tr(
+                    "This project does not have checkpoint data to clean."
+                ),
+            )
+            return
+        result = store.clean_unused_objects()
+        if store.disabled_reason:
+            QtWidgets.QMessageBox.warning(
+                self.main,
+                self.main.tr("Project Checkpoints"),
+                self.main.tr(
+                    "The project cache could not be cleaned safely. Existing "
+                    "files were preserved.\n\n{reason}"
+                ).format(reason=store.disabled_reason),
+            )
+            return
+        QtWidgets.QMessageBox.information(
+            self.main,
+            self.main.tr("Project Checkpoints"),
+            self.main.tr(
+                "Removed {count} unused checkpoint object(s)."
+            ).format(count=result["removed_files"]),
+        )
+
+    def force_recompute_project_checkpoints(self) -> None:
+        store = self._checkpoint_store_for_current_project(initialize=False)
+        if store is None:
+            return
+        if not store.db_path.is_file():
+            QtWidgets.QMessageBox.information(
+                self.main,
+                self.main.tr("Project Checkpoints"),
+                self.main.tr(
+                    "This project does not have checkpoint data to invalidate."
+                ),
+            )
+            return
+        answer = QtWidgets.QMessageBox.question(
+            self.main,
+            self.main.tr("Force Stage Recalculation"),
+            self.main.tr(
+                "Invalidate all saved stage checkpoints for this project?\n\n"
+                "The next run will recompute every stage. Source pages and project "
+                "edits are not deleted."
+            ),
+            QtWidgets.QMessageBox.StandardButton.Yes
+            | QtWidgets.QMessageBox.StandardButton.No,
+            QtWidgets.QMessageBox.StandardButton.No,
+        )
+        if answer != QtWidgets.QMessageBox.StandardButton.Yes:
+            return
+        removed = store.invalidate()
+        if store.disabled_reason:
+            QtWidgets.QMessageBox.warning(
+                self.main,
+                self.main.tr("Project Checkpoints"),
+                self.main.tr(
+                    "The saved checkpoints could not be invalidated safely. "
+                    "Existing files were preserved.\n\n{reason}"
+                ).format(reason=store.disabled_reason),
+            )
+            return
+        QtWidgets.QMessageBox.information(
+            self.main,
+            self.main.tr("Project Checkpoints"),
+            self.main.tr(
+                "Invalidated {count} stage checkpoint(s)."
+            ).format(count=removed),
+        )
 
     def update_ui_from_project(self):
         if not self.main.image_files:

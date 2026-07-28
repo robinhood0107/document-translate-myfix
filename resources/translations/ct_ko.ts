@@ -1893,6 +1893,82 @@ Approximate GPU usage:
         <source>Parallel Workers</source>
         <translation>병렬 작업 수</translation>
     </message>
+    <message>
+        <source>Persistent OCR Result Cache</source>
+        <translation>영구 OCR 결과 캐시</translation>
+    </message>
+    <message>
+        <source>Reuses exact PaddleOCR VL crop results across runs. Images are not stored. The cache is available only for the bundled managed Docker endpoint; custom endpoints continue normally without persistent caching.</source>
+        <translation>실행 간에 완전히 동일한 PaddleOCR VL crop 결과를 재사용합니다. 이미지는 저장하지 않습니다. 캐시는 번들로 제공되는 관리형 Docker endpoint에서만 사용할 수 있으며, 사용자 지정 endpoint는 영구 캐시 없이 정상적으로 계속 처리합니다.</translation>
+    </message>
+    <message>
+        <source>Enable persistent OCR result cache</source>
+        <translation>영구 OCR 결과 캐시 사용</translation>
+    </message>
+    <message>
+        <source>Maximum cached crops</source>
+        <translation>최대 캐시 crop 수</translation>
+    </message>
+    <message>
+        <source>Hits: — · Misses: — · Items: —</source>
+        <translation>적중: — · 미적중: — · 항목: —</translation>
+    </message>
+    <message>
+        <source>Refresh statistics</source>
+        <translation>통계 새로 고침</translation>
+    </message>
+    <message>
+        <source>Export JSONL</source>
+        <translation>JSONL 내보내기</translation>
+    </message>
+    <message>
+        <source>Clear cache</source>
+        <translation>캐시 지우기</translation>
+    </message>
+    <message>
+        <source>Cache unavailable: {reason}</source>
+        <translation>캐시를 사용할 수 없음: {reason}</translation>
+    </message>
+    <message>
+        <source>Hits: {hits} · Misses: {misses} · Items: {items}</source>
+        <translation>적중: {hits} · 미적중: {misses} · 항목: {items}</translation>
+    </message>
+    <message>
+        <source>Export PaddleOCR VL Cache</source>
+        <translation>PaddleOCR VL 캐시 내보내기</translation>
+    </message>
+    <message>
+        <source>JSON Lines (*.jsonl)</source>
+        <translation>JSON Lines (*.jsonl)</translation>
+    </message>
+    <message>
+        <source>PaddleOCR VL Cache</source>
+        <translation>PaddleOCR VL 캐시</translation>
+    </message>
+    <message>
+        <source>Cache export failed. The database was left unchanged.
+{error}</source>
+        <translation>캐시 내보내기에 실패했습니다. 데이터베이스는 변경하지 않았습니다.
+{error}</translation>
+    </message>
+    <message>
+        <source>Exported {count} cached OCR results.</source>
+        <translation>캐시된 OCR 결과 {count}개를 내보냈습니다.</translation>
+    </message>
+    <message>
+        <source>Clear PaddleOCR VL Cache</source>
+        <translation>PaddleOCR VL 캐시 지우기</translation>
+    </message>
+    <message>
+        <source>Clear all persistent PaddleOCR VL result-cache entries? No source images will be deleted.</source>
+        <translation>영구 PaddleOCR VL 결과 캐시 항목을 모두 지우시겠습니까? 원본 이미지는 삭제하지 않습니다.</translation>
+    </message>
+    <message>
+        <source>Cache clear failed. The database was left unchanged.
+{error}</source>
+        <translation>캐시 지우기에 실패했습니다. 데이터베이스는 변경하지 않았습니다.
+{error}</translation>
+    </message>
 </context>
 <context>
     <name>PageListView</name>
@@ -2216,6 +2292,30 @@ This folder is separate from Auto-Recover snapshots.</source>
     <message>
         <source>Reset</source>
         <translation>초기화</translation>
+    </message>
+    <message>
+        <source>Project Stage Checkpoints</source>
+        <translation>프로젝트 단계 체크포인트</translation>
+    </message>
+    <message>
+        <source>Preview: save reusable stage manifests and large artifacts beside each .ctpr project. Missing or damaged cache data is ignored and recalculated.</source>
+        <translation>미리보기: 재사용 가능한 단계 매니페스트와 대용량 산출물을 각 .ctpr 프로젝트 옆에 저장합니다. 캐시 데이터가 없거나 손상되면 무시하고 다시 계산합니다.</translation>
+    </message>
+    <message>
+        <source>Enable project stage checkpoints</source>
+        <translation>프로젝트 단계 체크포인트 사용</translation>
+    </message>
+    <message>
+        <source>Open Cache Folder</source>
+        <translation>캐시 폴더 열기</translation>
+    </message>
+    <message>
+        <source>Clean Unused Cache</source>
+        <translation>사용하지 않는 캐시 정리</translation>
+    </message>
+    <message>
+        <source>Force Stage Recalculation</source>
+        <translation>단계 강제 재계산</translation>
     </message>
     <message>
         <source>Choose Auto-Save Folder</source>
@@ -4796,6 +4896,82 @@ Overwrite it?</source>
     <message>
         <source>Project file moved.</source>
         <translation>프로젝트 파일을 이동했습니다.</translation>
+    </message>
+    <message>
+        <source>Old Project Cache Kept</source>
+        <translation>기존 프로젝트 캐시를 유지함</translation>
+    </message>
+    <message>
+        <source>The project file was moved, but its old cache folder could not be removed safely.
+
+{path}</source>
+        <translation>프로젝트 파일은 이동했지만 기존 캐시 폴더를 안전하게 제거하지 못했습니다.
+
+{path}</translation>
+    </message>
+    <message>
+        <source>Project Checkpoints</source>
+        <translation>프로젝트 체크포인트</translation>
+    </message>
+    <message>
+        <source>Save or open a single .ctpr project before managing its cache.</source>
+        <translation>캐시를 관리하기 전에 단일 .ctpr 프로젝트를 저장하거나 여세요.</translation>
+    </message>
+    <message>
+        <source>The project cache is unavailable. Processing can continue without it.
+
+{reason}</source>
+        <translation>프로젝트 캐시를 사용할 수 없습니다. 캐시 없이 처리를 계속할 수 있습니다.
+
+{reason}</translation>
+    </message>
+    <message>
+        <source>This project does not have a checkpoint cache folder yet.</source>
+        <translation>이 프로젝트에는 아직 체크포인트 캐시 폴더가 없습니다.</translation>
+    </message>
+    <message>
+        <source>This project does not have checkpoint data to clean.</source>
+        <translation>이 프로젝트에는 정리할 체크포인트 데이터가 없습니다.</translation>
+    </message>
+    <message>
+        <source>The project cache could not be cleaned safely. Existing files were preserved.
+
+{reason}</source>
+        <translation>프로젝트 캐시를 안전하게 정리하지 못했습니다. 기존 파일은 그대로 유지했습니다.
+
+{reason}</translation>
+    </message>
+    <message>
+        <source>Removed {count} unused checkpoint object(s).</source>
+        <translation>사용하지 않는 체크포인트 객체 {count}개를 제거했습니다.</translation>
+    </message>
+    <message>
+        <source>This project does not have checkpoint data to invalidate.</source>
+        <translation>이 프로젝트에는 무효화할 체크포인트 데이터가 없습니다.</translation>
+    </message>
+    <message>
+        <source>Force Stage Recalculation</source>
+        <translation>단계 강제 재계산</translation>
+    </message>
+    <message>
+        <source>Invalidate all saved stage checkpoints for this project?
+
+The next run will recompute every stage. Source pages and project edits are not deleted.</source>
+        <translation>이 프로젝트에 저장된 모든 단계 체크포인트를 무효화하시겠습니까?
+
+다음 실행에서 모든 단계를 다시 계산합니다. 원본 페이지와 프로젝트 편집 내용은 삭제하지 않습니다.</translation>
+    </message>
+    <message>
+        <source>The saved checkpoints could not be invalidated safely. Existing files were preserved.
+
+{reason}</source>
+        <translation>저장된 체크포인트를 안전하게 무효화하지 못했습니다. 기존 파일은 그대로 유지했습니다.
+
+{reason}</translation>
+    </message>
+    <message>
+        <source>Invalidated {count} stage checkpoint(s).</source>
+        <translation>단계 체크포인트 {count}개를 무효화했습니다.</translation>
     </message>
     <message>
         <source>Project Not Found</source>

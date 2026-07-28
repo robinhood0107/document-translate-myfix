@@ -1838,6 +1838,80 @@ Approximate GPU usage:
         <source>Parallel Workers</source>
         <translation type="unfinished"></translation>
     </message>
+    <message>
+        <source>Persistent OCR Result Cache</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Reuses exact PaddleOCR VL crop results across runs. Images are not stored. The cache is available only for the bundled managed Docker endpoint; custom endpoints continue normally without persistent caching.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Enable persistent OCR result cache</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Maximum cached crops</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Hits: — · Misses: — · Items: —</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Refresh statistics</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Export JSONL</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Clear cache</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Cache unavailable: {reason}</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Hits: {hits} · Misses: {misses} · Items: {items}</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Export PaddleOCR VL Cache</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>JSON Lines (*.jsonl)</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>PaddleOCR VL Cache</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Cache export failed. The database was left unchanged.
+{error}</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Exported {count} cached OCR results.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Clear PaddleOCR VL Cache</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Clear all persistent PaddleOCR VL result-cache entries? No source images will be deleted.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Cache clear failed. The database was left unchanged.
+{error}</source>
+        <translation type="unfinished"></translation>
+    </message>
 </context>
 <context>
     <name>PageListView</name>
@@ -2160,6 +2234,30 @@ This folder is separate from Auto-Recover snapshots.</source>
     <message>
         <source>Reset</source>
         <translation>重置</translation>
+    </message>
+    <message>
+        <source>Project Stage Checkpoints</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Preview: save reusable stage manifests and large artifacts beside each .ctpr project. Missing or damaged cache data is ignored and recalculated.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Enable project stage checkpoints</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Open Cache Folder</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Clean Unused Cache</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Force Stage Recalculation</source>
+        <translation type="unfinished"></translation>
     </message>
     <message>
         <source>Choose Auto-Save Folder</source>
@@ -4726,6 +4824,72 @@ Overwrite it?</source>
     </message>
     <message>
         <source>Project file moved.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Old Project Cache Kept</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>The project file was moved, but its old cache folder could not be removed safely.
+
+{path}</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Project Checkpoints</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Save or open a single .ctpr project before managing its cache.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>The project cache is unavailable. Processing can continue without it.
+
+{reason}</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>This project does not have a checkpoint cache folder yet.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>This project does not have checkpoint data to clean.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>The project cache could not be cleaned safely. Existing files were preserved.
+
+{reason}</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Removed {count} unused checkpoint object(s).</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>This project does not have checkpoint data to invalidate.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Force Stage Recalculation</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Invalidate all saved stage checkpoints for this project?
+
+The next run will recompute every stage. Source pages and project edits are not deleted.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>The saved checkpoints could not be invalidated safely. Existing files were preserved.
+
+{reason}</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Invalidated {count} stage checkpoint(s).</source>
         <translation type="unfinished"></translation>
     </message>
     <message>

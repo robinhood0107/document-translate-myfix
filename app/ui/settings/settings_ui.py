@@ -268,6 +268,8 @@ class SettingsPageUI(QtWidgets.QWidget):
         self.paddleocr_vl_visualize_checkbox = self.paddleocr_vl_page.visualize_checkbox
         self.paddleocr_vl_max_new_tokens_spinbox = self.paddleocr_vl_page.max_new_tokens_spinbox
         self.paddleocr_vl_parallel_workers_spinbox = self.paddleocr_vl_page.parallel_workers_spinbox
+        self.paddleocr_vl_persistent_cache_checkbox = self.paddleocr_vl_page.persistent_cache_checkbox
+        self.paddleocr_vl_persistent_cache_limit_spinbox = self.paddleocr_vl_page.persistent_cache_limit_spinbox
         self.hunyuan_ocr_server_url_input = self.hunyuan_ocr_page.server_url_input
         self.hunyuan_ocr_max_completion_tokens_spinbox = self.hunyuan_ocr_page.max_completion_tokens_spinbox
         self.hunyuan_ocr_parallel_workers_spinbox = self.hunyuan_ocr_page.parallel_workers_spinbox
@@ -334,6 +336,9 @@ class SettingsPageUI(QtWidgets.QWidget):
         self.automatic_output_estimate_summary_label = self.export_page.automatic_output_estimate_summary_label
         self.project_autosave_interval_spinbox = self.project_page.project_autosave_interval_spinbox
         self.project_autosave_folder_input = self.project_page.project_autosave_folder_input
+        self.project_checkpoint_enabled_checkbox = (
+            self.project_page.project_checkpoint_enabled_checkbox
+        )
         self.series_failure_policy_combo = self.series_page.failure_policy_combo
         self.series_retry_count_spinbox = self.series_page.retry_count_spinbox
         self.series_retry_delay_spinbox = self.series_page.retry_delay_spinbox

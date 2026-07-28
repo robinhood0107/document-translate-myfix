@@ -269,9 +269,13 @@ class MemLogger:
 
         if self._gpu_bench_enabled:
             try:
-                from modules.utils.gpu_metrics import query_gpu_metrics
+                from modules.utils.gpu_metrics import (
+                    query_gpu_metrics,
+                    query_wsl_swap_metrics,
+                )
 
                 snap["gpu"] = query_gpu_metrics()
+                snap["wsl_swap"] = query_wsl_swap_metrics()
             except Exception:
                 pass
 

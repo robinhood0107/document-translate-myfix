@@ -9,6 +9,12 @@ from typing import TYPE_CHECKING
 
 import msgpack
 
+from .checkpoint_store import (
+    PROJECT_CHECKPOINT_REFERENCE_KEY,
+    ProjectCheckpointReference,
+    checkpoint_reference_for_save,
+    load_checkpoint_reference_into_project,
+)
 from .parsers import ProjectDecoder, ProjectEncoder, ensure_string_keys
 from modules.utils.automatic_output import (
     default_project_output_preferences,
@@ -207,8 +213,20 @@ def ensure_lazy_blob_materialized(path: str) -> bool:
     return True
 
 
-def save_state_to_proj_file_v2(comic_translate: "ComicTranslate", file_name: str) -> None:
+def save_state_to_proj_file_v2(
+    comic_translate: "ComicTranslate",
+    file_name: str,
+    *,
+    checkpoint_reference: dict | ProjectCheckpointReference | None = None,
+    update_project_reference: bool = True,
+) -> None:
     encoder = ProjectEncoder()
+    saved_checkpoint_reference = checkpoint_reference_for_save(
+        checkpoint_reference
+        if checkpoint_reference is not None
+        else getattr(comic_translate, "project_checkpoint_reference", None),
+        file_name,
+    )
 
     target_dir = os.path.dirname(os.path.abspath(file_name))
     if target_dir:
@@ -403,6 +421,7 @@ def save_state_to_proj_file_v2(comic_translate: "ComicTranslate", file_name: str
         "webtoon_mode": comic_translate.webtoon_mode,
         "webtoon_view_state": comic_translate.image_viewer.webtoon_view_state,
         "latest_automatic_report": comic_translate.batch_report_ctrl.export_latest_report_for_project(),
+        PROJECT_CHECKPOINT_REFERENCE_KEY: saved_checkpoint_reference.to_dict(),
         **normalize_project_output_preferences(
             getattr(comic_translate, "project_output_preferences", default_project_output_preferences())
         ),
@@ -460,6 +479,12 @@ def save_state_to_proj_file_v2(comic_translate: "ComicTranslate", file_name: str
     try:
         close_cached_connection(file_name)
         os.replace(temp_db_path, file_name)
+        if update_project_reference:
+            comic_translate.project_checkpoint_reference = (
+                saved_checkpoint_reference.to_dict()
+            )
+            comic_translate.project_checkpoint_reference_persisted = True
+            comic_translate.project_checkpoint_warning = ""
     except Exception:
         if os.path.exists(temp_db_path):
             try:
@@ -475,6 +500,11 @@ def _materialize_from_manifest_and_pages(
     manifest: dict,
     page_rows: dict[str, dict],
 ):
+    load_checkpoint_reference_into_project(
+        comic_translate,
+        project_file,
+        manifest.get(PROJECT_CHECKPOINT_REFERENCE_KEY),
+    )
     if not hasattr(comic_translate, "temp_dir"):
         comic_translate.temp_dir = make_project_load_temp_dir(project_file)
 
@@ -720,6 +750,9 @@ def _load_from_legacy_state_blob(
         "webtoon_mode": state.get("webtoon_mode", False),
         "webtoon_view_state": state.get("webtoon_view_state", {}),
         "latest_automatic_report": state.get("latest_automatic_report"),
+        PROJECT_CHECKPOINT_REFERENCE_KEY: state.get(
+            PROJECT_CHECKPOINT_REFERENCE_KEY
+        ),
         "output_use_global": state.get("output_use_global"),
         "output_target": state.get("output_target"),
         "output_image_format": state.get("output_image_format"),
