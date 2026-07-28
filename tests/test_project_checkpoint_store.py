@@ -121,10 +121,10 @@ class ProjectCheckpointReferenceTests(unittest.TestCase):
             "chapter01.ctpr.cache",
         )
 
-    def test_stage_dag_has_independent_inpaint_and_translation_branches(self) -> None:
+    def test_stage_dag_fans_out_to_inpaint_and_translation_after_ocr(self) -> None:
         self.assertEqual(
             stage_downstream("ocr"),
-            ("ocr", "translation", "render"),
+            ("ocr", "translation", "inpaint", "render"),
         )
         self.assertEqual(
             stage_downstream("inpaint"),
@@ -165,6 +165,28 @@ class ProjectCheckpointStoreTests(unittest.TestCase):
         finally:
             connection.close()
         self.assertEqual(journal_mode, "wal")
+
+    def test_has_stage_records_is_stage_specific(self) -> None:
+        self.assertFalse(self.store.has_stage_records("ocr"))
+        self.assertFalse(self.store.has_stage_record("page-1", "ocr"))
+        self.assertTrue(
+            self.store.record_stage(
+                "page-1",
+                "detection",
+                _sha("detection"),
+            )
+        )
+        self.assertFalse(self.store.has_stage_records("ocr"))
+        self.assertTrue(
+            self.store.record_stage(
+                "page-1",
+                "ocr",
+                _sha("ocr"),
+            )
+        )
+        self.assertTrue(self.store.has_stage_records("ocr"))
+        self.assertTrue(self.store.has_stage_record("page-1", "ocr"))
+        self.assertFalse(self.store.has_stage_record("page-2", "ocr"))
 
     def test_record_lookup_and_object_integrity_round_trip(self) -> None:
         object_hash = self.store.put_object(b"lossless artifact")
@@ -226,7 +248,7 @@ class ProjectCheckpointStoreTests(unittest.TestCase):
                 fingerprints["detection"],
             )
         )
-        self.assertIsNotNone(
+        self.assertIsNone(
             self.store.lookup_stage("page-1", "inpaint", fingerprints["inpaint"])
         )
         self.assertIsNone(
