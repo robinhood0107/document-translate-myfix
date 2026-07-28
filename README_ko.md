@@ -247,9 +247,13 @@ exact 영구 OCR 캐시도 사용할 수 있습니다. crop 이미지는 저장�
 비활성화됩니다.
 
 `Settings > Project`에는 기본값이 꺼진 미리보기 단계의 프로젝트 checkpoint
-기능도 있습니다. 감지 좌표와 사전 적용 전 PaddleOCR-VL 결과를 runtime 시작
-전에 복원할 수 있으며, 현재 OCR 사전은 hit와 miss 모두 정확히 한 번
-적용합니다. 재사용 가능한 stage manifest와 content-addressed artifact는
+기능도 있습니다. 감지 좌표, 사전 적용 전 PaddleOCR-VL 결과, lossless
+인페인트 결과·final mask, 인코딩된 렌더 출력을 각 runtime 시작 전에 복원할
+수 있습니다. 번역문은 `.ctpr`에만 두고 sidecar에는 검증용 stage 서명만
+기록하므로 project all-hit에서는 detector, Paddle, Gemma, inpainter, renderer
+추론을 모두 건너뜁니다. 현재 OCR·번역 사전은 hit와 miss 모두 정확히 한 번
+적용하고, 사전 변경 시 소비 결과와 downstream stage만 무효화합니다. 재사용
+가능한 stage manifest와 content-addressed artifact는
 `.ctpr` 옆 `<project>.ctpr.cache` 폴더에 저장합니다. cache가 없거나 잠겼거나
 손상돼도 프로젝트 열기와 처리는 계속되며 해당 stage를 다시 계산합니다.
 

@@ -688,16 +688,30 @@ class TextController:
         finally:
             if len(commands) > 1:
                 stack.endMacro()
+        invalidate_current_project_page_checkpoints(
+            self.main,
+            stage="render",
+        )
 
     def update_text_block(self):
         if self.main.curr_tblock:
             old_source = str(self.main.curr_tblock.text or "")
+            old_translation = str(
+                self.main.curr_tblock.translation or ""
+            )
             self.main.curr_tblock.text = self.main.s_text_edit.toPlainText()
             self.main.curr_tblock.translation = self.main.t_text_edit.toPlainText()
             if old_source != str(self.main.curr_tblock.text or ""):
                 invalidate_current_project_page_checkpoints(
                     self.main,
                     stage="ocr",
+                )
+            elif old_translation != str(
+                self.main.curr_tblock.translation or ""
+            ):
+                invalidate_current_project_page_checkpoints(
+                    self.main,
+                    stage="translation",
                 )
             self.main.mark_project_dirty()
 
@@ -726,6 +740,11 @@ class TextController:
                 return
         finally:
             self._is_updating_from_edit = False
+        if old_item_text is None or old_item_text == new_text:
+            invalidate_current_project_page_checkpoints(
+                self.main,
+                stage="translation",
+            )
 
     def update_text_block_from_item(self, text_item: TextBlockItem, new_text: str):
         if self._suspend_text_command:
@@ -907,9 +926,23 @@ class TextController:
         else:
             command.redo()
             self.main.mark_project_dirty()
+        invalidate_current_project_page_checkpoints(
+            self.main,
+            stage="translation" if pending["blk"] is not None else "render",
+        )
 
     def apply_text_from_command(self, text_item: TextBlockItem, text: str,
                                 html: str | None = None, blk: TextBlock | None = None):
+        old_item_text = (
+            text_item.toPlainText()
+            if text_item is not None
+            else None
+        )
+        old_translation = (
+            str(getattr(blk, "translation", "") or "")
+            if blk is not None
+            else None
+        )
         self._suspend_text_command = True
         try:
             if text_item and text_item in self.main.image_viewer._scene.items():
@@ -920,6 +953,10 @@ class TextController:
                     text_item.set_plain_text(text)
             if blk is None:
                 blk = self._find_text_block_for_item(text_item)
+                if blk is not None and old_translation is None:
+                    old_translation = str(
+                        getattr(blk, "translation", "") or ""
+                    )
             if blk:
                 blk.translation = text
             if self.main.curr_tblock_item == text_item:
@@ -934,6 +971,20 @@ class TextController:
         if text_item:
             self._last_item_text[text_item] = text
             self._last_item_html[text_item] = text_item.document().toHtml()
+        if old_translation is not None and old_translation != text:
+            invalidate_current_project_page_checkpoints(
+                self.main,
+                stage="translation",
+            )
+        elif (
+            blk is None
+            and old_item_text is not None
+            and old_item_text != text
+        ):
+            invalidate_current_project_page_checkpoints(
+                self.main,
+                stage="render",
+            )
 
     # Formatting actions
     def on_font_dropdown_change(self, font_family: str):

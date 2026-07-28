@@ -113,7 +113,9 @@ For bundle details, see [/paddleocr_vl_docker_files/README.md](/paddleocr_vl_doc
 Project stage checkpoints are available as a default-off preview under
 `Settings > Project`. Save the `.ctpr` file before using its cache management
 actions. The adjacent `.ctpr.cache` folder is disposable and is never required
-to open the project.
+to open the project. When valid, it restores detection, raw OCR, inpaint masks
+and cleaned artifacts, and render outputs. Translation content stays in the
+project file and is accepted only when its sidecar signature matches.
 
 Routing summary:
 
