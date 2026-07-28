@@ -7,17 +7,36 @@ on:
     paths:
       - ".github/workflows/release-preflight.yml"
       - ".github/workflows/release.yml"
-      - "scripts/build_windows_gpu_portable.ps1"
-      - "scripts/build_windows_gpu_onefile.ps1"
-      - "app/version.py"
+      - "scripts/build_windows_launcher_source_bundle.py"
+      - "scripts/prepare_gemma_runtime.ps1"
+      - "app/**"
+      - "imkit/**"
+      - "modules/**"
+      - "pipeline/**"
+      - "resources/**"
       - "comic.py"
+      - "controller.py"
+      - "run_comic.bat"
+      - "run_comic_cuda13.bat"
+      - "README.md"
+      - "README_ko.md"
+      - "LICENSE"
+      - "requirements-base.txt"
+      - "requirements-cuda12.txt"
+      - "requirements-cuda13.txt"
+      - "requirements.txt"
+      - "docker-compose.yaml"
+      - "docker-compose.gemma-host-rollback.yaml"
+      - "hunyuanocr_docker_files/**"
+      - "mangalmm_docker_files/**"
+      - "paddleocr_vl_docker_files/**"
   workflow_dispatch:
 
 permissions:
   contents: read
 
 jobs:
-  build-windows-gpu-portable-preflight:
+  build-windows-launcher-source-preflight:
     if: github.ref_name == 'main'
     runs-on: windows-latest
     steps:
@@ -39,84 +58,47 @@ jobs:
           }
           "APP_VERSION=$version" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
 
-      - name: Install GPU build dependencies
+      - name: Build deterministic launcher-source bundle
         shell: pwsh
         run: |
-          python -m pip install --upgrade pip wheel setuptools
-          python -m pip install -r requirements-cuda13.txt
-          python -m pip install "nuitka==4.0.8" "ordered-set>=4.1.0" "zstandard>=0.23.0"
+          python scripts/build_windows_launcher_source_bundle.py build `
+            --version "$env:APP_VERSION" `
+            --commit "$env:GITHUB_SHA" `
+            --output-dir build/release
 
-      - name: Validate translations
+      - name: Verify bundle manifest and checksum
         shell: pwsh
         run: |
-          python scripts/compile_translations.py --check
+          python scripts/build_windows_launcher_source_bundle.py verify `
+            --archive "build/release/comic-translate-v$env:APP_VERSION-windows-launcher-source.zip" `
+            --checksums "build/release/SHA256SUMS.txt" `
+            --expected-version "$env:APP_VERSION" `
+            --expected-commit "$env:GITHUB_SHA"
 
-      - name: Build Windows GPU portable package with Nuitka
+      - name: Verify extracted launchers without installing
         shell: pwsh
         run: |
-          ./scripts/build_windows_gpu_portable.ps1 -AppVersion "$env:APP_VERSION"
-
-      - name: Build Windows GPU onefile executable with Nuitka
-        shell: pwsh
-        run: |
-          ./scripts/build_windows_gpu_onefile.ps1 -AppVersion "$env:APP_VERSION" -OutputName "comic-translate-gpu-cuda13" -NoCompression
-
-      - name: Upload preflight GPU portable bundle
-        uses: actions/upload-artifact@v4
-        with:
-          name: comic-translate-preflight-${{ github.run_number }}-windows-x64-gpu-portable
-          path: build/nuitka-gpu/comic.dist
-          if-no-files-found: error
-
-      - name: Upload preflight GPU onefile executable
-        uses: actions/upload-artifact@v4
-        with:
-          name: comic-translate-preflight-${{ github.run_number }}-windows-x64-gpu-cuda13-exe
-          path: build/nuitka-gpu-onefile/comic-translate-gpu-cuda13.exe
-          if-no-files-found: error
-
-  build-windows-gpu-cuda12-onefile-preflight:
-    if: github.ref_name == 'main'
-    runs-on: windows-latest
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-
-      - name: Read app version
-        shell: pwsh
-        run: |
-          $version = python -c "from pathlib import Path; ns = {}; exec(Path('app/version.py').read_text(encoding='utf-8'), ns); print(ns['__version__'])"
-          $version = $version.Trim()
-          if ($version -notmatch '^\d+\.\d+\.\d+$') {
-            throw 'app/version.py must contain a semantic version.'
+          $extractDir = "build/release/extracted"
+          Expand-Archive `
+            -Path "build/release/comic-translate-v$env:APP_VERSION-windows-launcher-source.zip" `
+            -DestinationPath $extractDir
+          $bundleRoot = Join-Path $extractDir "comic-translate-v$env:APP_VERSION-windows-launcher-source"
+          $env:COMIC_VERIFY_ONLY = "1"
+          Push-Location $bundleRoot
+          try {
+            & cmd.exe /d /c "call run_comic.bat"
+            if ($LASTEXITCODE -ne 0) { throw "CUDA 12 launcher-source contract failed." }
+            & cmd.exe /d /c "call run_comic_cuda13.bat"
+            if ($LASTEXITCODE -ne 0) { throw "CUDA 13 launcher-source contract failed." }
+          } finally {
+            Pop-Location
           }
-          "APP_VERSION=$version" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
 
-      - name: Install CUDA 12 GPU build dependencies
-        shell: pwsh
-        run: |
-          python -m pip install --upgrade pip wheel setuptools
-          python -m pip install -r requirements-cuda12.txt
-          python -m pip install "nuitka==4.0.8" "ordered-set>=4.1.0" "zstandard>=0.23.0"
-
-      - name: Validate translations
-        shell: pwsh
-        run: |
-          python scripts/compile_translations.py --check
-
-      - name: Build Windows GPU CUDA 12 onefile executable with Nuitka
-        shell: pwsh
-        run: |
-          ./scripts/build_windows_gpu_onefile.ps1 -AppVersion "$env:APP_VERSION" -OutputName "comic-translate-gpu-cuda12" -NoCompression
-
-      - name: Upload preflight GPU CUDA 12 onefile executable
+      - name: Upload preflight launcher-source assets
         uses: actions/upload-artifact@v4
         with:
-          name: comic-translate-preflight-${{ github.run_number }}-windows-x64-gpu-cuda12-exe
-          path: build/nuitka-gpu-onefile/comic-translate-gpu-cuda12.exe
+          name: comic-translate-preflight-${{ github.run_number }}-windows-launcher-source
+          path: |
+            build/release/comic-translate-v*-windows-launcher-source.zip
+            build/release/SHA256SUMS.txt
           if-no-files-found: error

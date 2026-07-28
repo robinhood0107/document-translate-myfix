@@ -3102,20 +3102,8 @@ Restart now?</source>
         <translation>업데이트 오류</translation>
     </message>
     <message>
-        <source>Developer Update Available</source>
-        <translation>개발자 업데이트 사용 가능</translation>
-    </message>
-    <message>
-        <source>A developer fork update {version} is available.</source>
-        <translation>개발자 포크 업데이트 {version}을 사용할 수 있습니다.</translation>
-    </message>
-    <message>
-        <source>Developer Update Error</source>
-        <translation>개발자 업데이트 오류</translation>
-    </message>
-    <message>
-        <source>Fork update check failed: {message}</source>
-        <translation>포크 업데이트 확인 실패: {message}</translation>
+        <source>Release package downloaded to {path}. Open it now?</source>
+        <translation>릴리스 패키지를 {path}에 다운로드했습니다. 지금 여시겠습니까?</translation>
     </message>
     <message>
         <source>Downloading update...</source>
@@ -3124,10 +3112,6 @@ Restart now?</source>
     <message>
         <source>Download Complete</source>
         <translation>다운로드 완료</translation>
-    </message>
-    <message>
-        <source>Installer downloaded to {path}. Run it now?</source>
-        <translation>설치 관리자가 {path}(으)로 다운로드되었습니다. 지금 실행하시겠습니까?</translation>
     </message>
 </context>
 <context>

@@ -181,11 +181,21 @@ Official Windows release packages are published only from `vX.Y.Z` tags that poi
 
 - release trigger: Git tag push
 - accepted tag shape: `vX.Y.Z`
-- build target: Windows executable/portable packages built with `Nuitka`
-- release order: local Windows Nuitka build verification, then `main` promotion, then Windows CI preflight, then tag release CI
-- bundled scope: app, Python runtime, PySide6, torch/onnxruntime runtime, translations/resources
-- not bundled: models, checkpoints, Docker runtimes, NVIDIA driver
+- official assets:
+  `comic-translate-vX.Y.Z-windows-launcher-source.zip` and
+  `SHA256SUMS.txt`
+- release order: local deterministic bundle and extracted-launcher
+  verification, `main` promotion, Windows CI preflight, then tag release CI
+- bundled scope: allowlisted product source, launchers, CUDA12/CUDA13
+  requirements, Docker Compose/config, Gemma preparation tooling,
+  translations/resources, README, and LICENSE
+- not bundled: venvs, models, checkpoints, caches, benchmark tools/results,
+  Python/CUDA runtimes, NVIDIA driver, local paths, or secrets
 
-Before promoting a release candidate to `main`, run the relevant Nuitka build scripts from Windows PowerShell and record the successful commands and `build/nuitka-*` outputs in the PR. WSL-only checks are not a substitute for this local Windows build verification.
+Before promoting a release candidate to `main`, build the ZIP from `HEAD`,
+verify its manifest and SHA-256, extract it into a new folder, and run both
+launchers with `COMIC_VERIFY_ONLY=1`. Record the Windows commands, ZIP hash,
+and both launcher results in the PR.
 
-If you need the full local runtime stack, follow the runtime setup steps in this quickstart after downloading the release package.
+The launchers bootstrap their pinned environment on first normal run. The
+retained Nuitka scripts are unofficial manual tools and are not release gates.
