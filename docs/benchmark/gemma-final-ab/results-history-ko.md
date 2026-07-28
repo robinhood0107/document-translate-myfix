@@ -34,3 +34,9 @@
 - 이 결과만으로 grouping 하나를 모든 회귀의 원인으로 단정하지 않음
 - 실제 제품 기본 프로필: 변경하지 않음
 - 전체 파이프라인 비교: 품질 gate 실패에 따른 정상 실행 취소
+- grouped 제품 코드 재현 기준: PR #141 `develop` merge
+  `fbc131c73eb260abc9be6aec1334dba6a7da738c`
+- 최종 검수 증거 기준: PR #148 `benchmarking/lab` merge
+  `034a6e85172d438e9e1fe5d29560a105493b6f6b`
+- 제품 퇴역 기준: PR #149 `develop` merge
+  `24a7fb8ae194e5d1510ee6e0a288ec636cdba2b9`
