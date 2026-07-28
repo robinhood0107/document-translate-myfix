@@ -1175,7 +1175,13 @@ def analyze_pipeline_results(
                     quality_exact if exact_quality_required else None
                 ),
                 "structural_quality_passed": (
-                    quality_exact and translation_structure_passed
+                    quality_exact
+                    and (
+                        translation_structure_passed
+                        if quality_gate
+                        == "structure-and-private-meaning-review"
+                        else True
+                    )
                     if structural_quality_required
                     else None
                 ),
