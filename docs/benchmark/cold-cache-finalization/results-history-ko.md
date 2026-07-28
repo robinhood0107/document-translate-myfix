@@ -50,7 +50,24 @@
 - 첫 partial 재계산은 프로젝트 복원 UI callback이 창 종료 뒤 실행되는
   benchmark race로 실패했습니다. 프로젝트 UI 작업을 pipeline 시작 전에
   drain하도록 수정한 뒤 동일 partial smoke와 정식 재계산이 통과했습니다.
+- commit `47b6480`의 clean checkout에서 protocol v1
+  (`7dfc2baa57ebdafc0e9ca2944e20397ccc9cd008d92f366f2a046dbffd3af04f`)
+  최종 cache suite를 다시 실행했습니다.
+- global OCR exact cache는 disabled cold 중앙값 20.101초,
+  enabled-empty 중앙값 19.999초로 miss overhead -0.510%였고,
+  all-hit는 0.120초로 99.401% 단축됐습니다. raw OCR은 완전히 같았고
+  Paddle runtime 시작, 논리 요청, HTTP 요청은 모두 0이었습니다.
+- project checkpoint는 disabled cold 중앙값 129.793초,
+  enabled-empty 중앙값 129.657초로 miss overhead -0.105%였고,
+  all-hit는 9.551초로 92.633% 단축됐습니다. 모든 project stage hit,
+  detector/Paddle/Gemma/inpainter inference 0, Paddle/Gemma runtime 시작
+  및 HTTP 0, missing-output render-only 복원, 단일 페이지 OCR downstream
+  재계산, exact output과 비영향 페이지 보존을 모두 통과했습니다.
+- 최종 cold variance는 global OCR disabled/enabled 0.885%/0.494%,
+  project disabled/enabled 1.587%/2.971%로 diagnostic 기준 5% 안에
+  들어왔습니다.
 
-이 문서는 도구 구현 이력입니다. GPU 실측 우승 결과는 외부 suite가
-완료된 뒤 검증된 수치만 추가합니다. 현재 문서만으로 제품 기본값을
-변경하지 않습니다.
+이 문서는 도구 구현 이력과 검증된 cache gate 결과입니다. raw 입력,
+OCR/번역 결과, DB와 sidecar는 Git 밖에만 보존합니다. cold 후보의 제품
+기본값은 별도 family 선별과 품질 게이트를 통과하기 전에는 변경하지
+않습니다.
