@@ -20,9 +20,17 @@
 - protocol v4 review validator와 명시적 확인문 통과 뒤 unblind
 - A=`current-contextual-single`: 14행, 18출력 회귀
 - B=`grouped-f16`: 21행, 36출력 회귀
+- A 전체 프로필:
+  `IQ4_XS + contextual-single + chunk 6 + ngram draft8 + F16`
+- B 전체 프로필:
+  `IQ4_XS + contextual-grouped + chunk 7 + no-spec + F16`
+- 실제 제품 기본 프로필:
+  `IQ4_NL + contextual-single + chunk 6 + no-spec + F16`
 - grouped 회귀 출력: round 1은 19개, round 2는 17개
 - grouped 회귀 행 중 15개는 두 라운드에서 반복
 - 상대 품질 우위: `current-contextual-single`
 - 최종 상태: `quality_rejected`
-- grouped 제품 기본값 승격: 금지
-- 전체 파이프라인 비교: 품질 gate 실패로 실행하지 않음
+- B 조합 전체의 제품 기본값 승격: 금지
+- 이 결과만으로 grouping 하나를 모든 회귀의 원인으로 단정하지 않음
+- 실제 제품 기본 프로필: 변경하지 않음
+- 전체 파이프라인 비교: 품질 gate 실패에 따른 정상 실행 취소
