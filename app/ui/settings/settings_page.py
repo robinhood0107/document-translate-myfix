@@ -25,6 +25,10 @@ from modules.ocr.selection import (
     normalize_workflow_mode,
     STAGE_BATCHED_WORKFLOW_MODE,
 )
+from modules.translation.llm.custom_local_gemma import (
+    GEMMA_REQUEST_MODE_CONTEXTUAL_SINGLE,
+    RETIRED_GEMMA_REQUEST_MODE_CONTEXTUAL_GROUPED,
+)
 from .settings_ui import SettingsPageUI
 from .gemma_local_server_page import GemmaLocalServerPage
 from .hunyuan_ocr_page import HunyuanOCRPage
@@ -61,6 +65,55 @@ from modules.utils.automatic_output import (
 
 
 logger = logging.getLogger(__name__)
+
+GEMMA_GROUPED_RETIREMENT_VERSION = 1
+GEMMA_GROUPED_RETIREMENT_VERSION_KEY = (
+    "gemma_local_server/grouped_retirement_version"
+)
+GEMMA_REQUEST_MODE_KEY = "gemma_local_server/request_mode"
+
+
+def migrate_retired_gemma_request_mode(settings: QSettings) -> bool:
+    """Migrate the retired grouped mode once without touching other settings."""
+
+    try:
+        current_version = int(
+            settings.value(
+                GEMMA_GROUPED_RETIREMENT_VERSION_KEY,
+                0,
+                type=int,
+            )
+            or 0
+        )
+    except (TypeError, ValueError):
+        current_version = 0
+    if current_version >= GEMMA_GROUPED_RETIREMENT_VERSION:
+        return False
+
+    configured_mode = settings.value(
+        GEMMA_REQUEST_MODE_KEY,
+        GEMMA_REQUEST_MODE_CONTEXTUAL_SINGLE,
+        type=str,
+    )
+    changed = (
+        str(configured_mode or "").strip().lower()
+        == RETIRED_GEMMA_REQUEST_MODE_CONTEXTUAL_GROUPED
+    )
+    if changed:
+        settings.setValue(
+            GEMMA_REQUEST_MODE_KEY,
+            GEMMA_REQUEST_MODE_CONTEXTUAL_SINGLE,
+        )
+        logger.warning(
+            "Migrated retired Gemma contextual-grouped setting to "
+            "contextual-single."
+        )
+
+    settings.setValue(
+        GEMMA_GROUPED_RETIREMENT_VERSION_KEY,
+        GEMMA_GROUPED_RETIREMENT_VERSION,
+    )
+    return changed
 
 
 class SettingsPage(QtWidgets.QWidget):
@@ -380,6 +433,7 @@ class SettingsPage(QtWidgets.QWidget):
 
     def get_gemma_local_server_settings(self):
         persisted_settings = QSettings("ComicLabs", "ComicTranslate")
+        migrate_retired_gemma_request_mode(persisted_settings)
         return {
             "chunk_size": int(self.ui.gemma_chunk_size_spinbox.value()),
             "max_completion_tokens": int(self.ui.gemma_max_completion_tokens_spinbox.value()),
@@ -390,7 +444,7 @@ class SettingsPage(QtWidgets.QWidget):
             "min_p": float(self.ui.gemma_min_p_spinbox.value()),
             "raw_response_logging": self.ui.gemma_raw_response_logging_checkbox.isChecked(),
             "request_mode": persisted_settings.value(
-                "gemma_local_server/request_mode",
+                GEMMA_REQUEST_MODE_KEY,
                 GemmaLocalServerPage.DEFAULT_REQUEST_MODE,
                 type=str,
             ),
@@ -821,6 +875,7 @@ class SettingsPage(QtWidgets.QWidget):
     def load_settings(self):
         self._loading_settings = True
         settings = QSettings("ComicLabs", "ComicTranslate")
+        migrate_retired_gemma_request_mode(settings)
 
         language = settings.value("language", "English")
         translated_language = self.ui.reverse_mappings.get(language, language)
