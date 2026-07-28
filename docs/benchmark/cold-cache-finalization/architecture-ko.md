@@ -73,6 +73,13 @@ project checkpoint도 같은 비채점 안정화 한 쌍 뒤 disabled cold와
 enabled-empty cold를 각각 3회 비교합니다. 안정화와 측정의 DB·프로젝트
 sidecar는 서로 격리합니다. 이후 아래를 실제 프로젝트로 확인합니다.
 
+cache 검증의 5% cold variance는 비차단 diagnostic으로 함께 기록합니다.
+cache 승격의 miss 비용 계약은 승인된 대로 세 측정의 중앙값 overhead
+3% 이하로 판정합니다. 전체 wall 분산에는 checkpoint와 무관한 Docker
+runtime, inpainter 초기화, 비결정적 번역 decode가 함께 섞이기 때문입니다.
+반면 cold-path 후보 선별과 최종 제품 비교의 5% variance hard gate는
+그대로 유지합니다.
+
 1. 기존 render output이 있는 all-hit
 2. output만 삭제한 뒤 render artifact materialization
 3. 한 페이지의 OCR checkpoint와 downstream만 무효화

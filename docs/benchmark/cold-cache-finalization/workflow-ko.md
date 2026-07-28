@@ -56,6 +56,10 @@ OCR downstream 재계산을 실행합니다.
 - inference/runtime/HTTP zero 계약
 - 페이지 단위 downstream 무효화
 
+cache cold 3회의 5% variance는 보고서에 diagnostic으로 남기되 이 목록의
+승격 gate에는 포함하지 않습니다. cold 후보와 최종 22페이지 비교에서는
+기존 5% variance gate를 계속 적용합니다.
+
 ## 5. 승격
 
 짧은 후보를 누적했을 때 예상 전체 3% 이상인 조합만 22페이지 검증 자격을

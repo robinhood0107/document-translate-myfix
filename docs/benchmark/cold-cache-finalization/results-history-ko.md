@@ -40,6 +40,16 @@
   안정화한 뒤 격리된 측정 3회를 실행하도록 보강했습니다. 안정화 결과도
   보존하고 실패 시 즉시 중단하지만 miss overhead와 variance에는 넣지
   않습니다.
+- 새 project 검증에서 cold median miss overhead -4.375%, all-hit
+  92.230% 단축, 모든 stage hit, runtime/HTTP 0, render-only 복원,
+  한 페이지 OCR downstream 재계산이 통과했습니다.
+- cold wall variance는 disabled 8.676%, enabled-empty 15.284%였습니다.
+  outlier는 각각 inpainter 시간 증가와 Paddle/Gemma runtime wait 증가로,
+  cache I/O와 무관했습니다. cache 보고서에는 이를 비차단 diagnostic으로
+  유지하고 승인된 median miss overhead 3% gate와 분리합니다.
+- 첫 partial 재계산은 프로젝트 복원 UI callback이 창 종료 뒤 실행되는
+  benchmark race로 실패했습니다. 프로젝트 UI 작업을 pipeline 시작 전에
+  drain하도록 수정한 뒤 동일 partial smoke와 정식 재계산이 통과했습니다.
 
 이 문서는 도구 구현 이력입니다. GPU 실측 우승 결과는 외부 suite가
 완료된 뒤 검증된 수치만 추가합니다. 현재 문서만으로 제품 기본값을
