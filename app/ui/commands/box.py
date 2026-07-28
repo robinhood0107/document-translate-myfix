@@ -5,6 +5,9 @@ from PySide6.QtCore import QRectF, QPointF
 from .base import RectCommandBase
 from ..canvas.rectangle import MoveableRectItem
 from ..canvas.text_item import TextBlockItem
+from app.projects.stage_checkpoints import (
+    invalidate_current_project_page_checkpoints,
+)
 from pipeline.webtoon_utils import get_first_visible_block
 from modules.utils.textblock import ensure_text_block_id
 
@@ -12,6 +15,7 @@ from modules.utils.textblock import ensure_text_block_id
 class AddRectangleCommand(QUndoCommand, RectCommandBase):
     def __init__(self, main_page, rect_item, blk, blk_list):
         super().__init__()
+        self.main = main_page
         self.viewer = main_page.image_viewer
         self.scene = self.viewer._scene
         self.blk_list = blk_list
@@ -25,6 +29,7 @@ class AddRectangleCommand(QUndoCommand, RectCommandBase):
         if not self.find_matching_blk(self.blk_list, self.blk_properties):
             blk = self.create_new_blk(self.blk_properties)
             self.blk_list.append(blk)
+        invalidate_current_project_page_checkpoints(self.main, stage="ocr")
 
     def undo(self):
         matching_item = self.find_matching_rect(self.scene, self.rect_properties)
@@ -36,11 +41,13 @@ class AddRectangleCommand(QUndoCommand, RectCommandBase):
 
         if matching_blk:
             self.blk_list.remove(matching_blk)
+        invalidate_current_project_page_checkpoints(self.main, stage="ocr")
 
 class BoxesChangeCommand(QUndoCommand, RectCommandBase):
-    def __init__(self, viewer, old_state, new_state, blk_list):
+    def __init__(self, main_page, old_state, new_state, blk_list):
         super().__init__()
-        self.viewer = viewer
+        self.main = main_page
+        self.viewer = main_page.image_viewer
         self.scene = self.viewer._scene
         self.blk_list = blk_list
         
@@ -67,6 +74,11 @@ class BoxesChangeCommand(QUndoCommand, RectCommandBase):
                 self.find_and_update_item(self.scene, self.old_xyxy, self.old_angle, 
                                                 self.new_xyxy, self.new_angle, self.new_tr_origin, self.block_id)
                 self.scene.update()
+                invalidate_current_project_page_checkpoints(
+                    self.main,
+                    stage="ocr",
+                )
+                break
 
     def undo(self):
         for blk in self.blk_list:
@@ -82,6 +94,11 @@ class BoxesChangeCommand(QUndoCommand, RectCommandBase):
                 self.find_and_update_item(self.scene, self.new_xyxy, self.new_angle, 
                                         self.old_xyxy, self.old_angle, self.old_tr_origin, self.block_id)
                 self.scene.update()
+                invalidate_current_project_page_checkpoints(
+                    self.main,
+                    stage="ocr",
+                )
+                break
 
     @staticmethod
     def find_and_update_item(scene, old_xyxy, old_angle, new_xyxy, new_angle, new_tr_origin, block_id=""):
@@ -172,6 +189,7 @@ class ResizeBlocksCommand(QUndoCommand):
             if blk in self.blk_list:
                 blk.xyxy[:] = xyxy
         self._refresh_rectangles()
+        invalidate_current_project_page_checkpoints(self.main, stage="ocr")
 
     def redo(self):
         self._apply(self.new_xyxy)
@@ -231,6 +249,7 @@ class DeleteBoxesCommand(QUndoCommand, RectCommandBase):
             self.viewer.text_items.remove(matching_txt_item)
             self.ct.curr_tblock_item = None
             self.scene.update()
+        invalidate_current_project_page_checkpoints(self.ct, stage="ocr")
 
     def undo(self):
         if self.rect_properties and not self.find_matching_rect(self.scene, self.rect_properties):
@@ -243,6 +262,7 @@ class DeleteBoxesCommand(QUndoCommand, RectCommandBase):
 
         if self.txt_item_prp and not self.find_matching_txt_item(self.scene, self.txt_item_prp):
             text_item = self.create_new_txt_item(self.txt_item_prp, self.viewer)
+        invalidate_current_project_page_checkpoints(self.ct, stage="ocr")
 
 class TextBoxChangeCommand(QUndoCommand, RectCommandBase):
     def __init__(self, main_page, old_state, new_state):
@@ -413,4 +433,3 @@ class AddTextBoxCommand(QUndoCommand, RectCommandBase):
                 self.ct.curr_tblock = None
             self.blk_list.remove(matching_blk)
  
-

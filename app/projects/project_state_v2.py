@@ -483,6 +483,7 @@ def save_state_to_proj_file_v2(
             comic_translate.project_checkpoint_reference = (
                 saved_checkpoint_reference.to_dict()
             )
+            comic_translate.project_checkpoint_reference_persisted = True
             comic_translate.project_checkpoint_warning = ""
     except Exception:
         if os.path.exists(temp_db_path):
