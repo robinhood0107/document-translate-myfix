@@ -1,9 +1,10 @@
 services:
   paddleocr-vllm:
-    image: ccr-2vdh3abv-pub.cnc.bj.baidubce.com/paddlepaddle/paddleocr-genai-vllm-server:latest-nvidia-gpu-offline
-    pull_policy: always
+    image: ccr-2vdh3abv-pub.cnc.bj.baidubce.com/paddlepaddle/paddleocr-genai-vllm-server@sha256:d0d32c04a2119613d25a0a4c292e165ccc107954b74580613cf59e378037f8f5
     container_name: paddleocr-vllm
     restart: unless-stopped
+    labels:
+      com.comictranslate.paddleocr-runtime-fingerprint: "${PADDLEOCR_RUNTIME_FINGERPRINT}"
     volumes:
       - ./vllm_config.yml:/tmp/vllm_config.yml:ro
     environment:
@@ -27,12 +28,13 @@ services:
       --port 18000"
 
   paddleocr-layout:
-    image: ccr-2vdh3abv-pub.cnc.bj.baidubce.com/paddlepaddle/paddleocr-genai-vllm-server:latest-nvidia-gpu-offline
-    pull_policy: always
+    image: ccr-2vdh3abv-pub.cnc.bj.baidubce.com/paddlepaddle/paddleocr-genai-vllm-server@sha256:d0d32c04a2119613d25a0a4c292e165ccc107954b74580613cf59e378037f8f5
     container_name: paddleocr-server
     tty: true
     stdin_open: true
     restart: unless-stopped
+    labels:
+      com.comictranslate.paddleocr-runtime-fingerprint: "${PADDLEOCR_RUNTIME_FINGERPRINT}"
     depends_on:
       paddleocr-vllm:
         condition: service_healthy

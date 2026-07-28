@@ -88,7 +88,7 @@ docker compose -f hunyuanocr_docker_files/docker-compose.yaml up -d --force-recr
 ### PaddleOCR VL 로컬 런타임
 
 - compose 파일: `/paddleocr_vl_docker_files/docker-compose.yaml`
-- Docker 이미지: `ccr-2vdh3abv-pub.cnc.bj.baidubce.com/paddlepaddle/paddleocr-genai-vllm-server:latest-nvidia-gpu-offline`
+- Docker 이미지: `ccr-2vdh3abv-pub.cnc.bj.baidubce.com/paddlepaddle/paddleocr-genai-vllm-server@sha256:d0d32c04a2119613d25a0a4c292e165ccc107954b74580613cf59e378037f8f5`
 - 참고 링크:
   - [PaddleOCR](https://github.com/PaddlePaddle/PaddleOCR)
   - [PaddleOCR-VL](https://huggingface.co/PaddlePaddle/PaddleOCR-VL)
@@ -96,9 +96,14 @@ docker compose -f hunyuanocr_docker_files/docker-compose.yaml up -d --force-recr
 실행:
 
 ```bash
-docker compose -f paddleocr_vl_docker_files/docker-compose.yaml pull --policy always
+docker compose -f paddleocr_vl_docker_files/docker-compose.yaml pull
 docker compose -f paddleocr_vl_docker_files/docker-compose.yaml up -d --force-recreate
 ```
+
+첫 번째 명령은 고정된 이미지를 준비할 때 한 번만 실행합니다. 평상시 앱
+시작은 구성이 정확히 같은 중지 컨테이너를 재사용하며 이미지를 다시 pull하지
+않습니다. Stage-Batched 폴더 처리는 `Settings > PaddleOCR VL Settings`에서
+관리하는 exact 영구 OCR 결과 캐시도 사용할 수 있습니다.
 
 bundle 파일 설명은 [/paddleocr_vl_docker_files/README.md](/paddleocr_vl_docker_files/README.md)를 참고하세요.
 

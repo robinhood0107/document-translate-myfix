@@ -1838,6 +1838,80 @@ Approximate GPU usage:
         <source>Parallel Workers</source>
         <translation type="unfinished"></translation>
     </message>
+    <message>
+        <source>Persistent OCR Result Cache</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Reuses exact PaddleOCR VL crop results across runs. Images are not stored. The cache is available only for the bundled managed Docker endpoint; custom endpoints continue normally without persistent caching.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Enable persistent OCR result cache</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Maximum cached crops</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Hits: — · Misses: — · Items: —</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Refresh statistics</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Export JSONL</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Clear cache</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Cache unavailable: {reason}</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Hits: {hits} · Misses: {misses} · Items: {items}</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Export PaddleOCR VL Cache</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>JSON Lines (*.jsonl)</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>PaddleOCR VL Cache</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Cache export failed. The database was left unchanged.
+{error}</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Exported {count} cached OCR results.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Clear PaddleOCR VL Cache</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Clear all persistent PaddleOCR VL result-cache entries? No source images will be deleted.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Cache clear failed. The database was left unchanged.
+{error}</source>
+        <translation type="unfinished"></translation>
+    </message>
 </context>
 <context>
     <name>PageListView</name>

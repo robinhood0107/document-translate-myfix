@@ -18,12 +18,19 @@
 - GPU 해제가 예상되면 해제 대상 CUDA tensor 저장공간의 90% 이상에 해당하는 현재 프로세스 allocator 감소를 요구한다. PyTorch가 추적하지 않는 GPU 할당은 같은 PID와 정확한 GPU UUID가 인페인터 로드 전 기준선으로 돌아왔을 때만 통과한다.
 - 측정 불가, 해제 대상 크기 미상, 다른 프로세스 또는 다른 GPU의 감소, 제한 시간 내 감소 미관측 상태에서는 Gemma 시작을 차단한다.
 - prewarm 종료 시 내부 cancel event를 먼저 세우고 queued future를 취소한 뒤 running future 종료를 기다린다. Docker 명령과 HTTP 예열도 취소 가능하고 시간 제한이 있으며, stop 실패 시 활성 상태를 보존해 재시도한다.
+- `IQ4_XS + contextual-grouped + chunk 7 + no-spec + F16` 후보는 번역 속도 게이트를 통과했지만 292행 blind 의미 품질 게이트에서 탈락했다. 제품 기본 프로필은 `IQ4_NL + contextual-single + chunk 6 + no-spec + F16`으로 유지한다.
+- `contextual-grouped` 제품 경로는 퇴역했다. strict JSON decoder, 불변 request context, HTTP 오류 분류, contextual-single 재시도, 논리 요청/HTTP telemetry와 번역 캐시는 유지한다.
+- grouped 전체 22페이지 파이프라인 비교는 미완료가 아니라 선행 품질 게이트에 따른 정상 실행 취소다.
+- PaddleOCR-VL 관리형 폴더 처리에는 exact 영구 결과 캐시를 둔다. 캐시는 crop 이미지를 저장하지 않고 사전 적용 전 raw OCR 결과와 진단만 저장한다.
+- 영구 OCR 캐시는 공식 digest로 고정된 관리형 PaddleOCR-VL 런타임에서만 사용한다. 사용자 지정 endpoint는 신뢰 가능한 runtime identity가 없으므로 캐시 없이 정상 처리한다.
+- exact OCR 캐시의 all-hit 경로는 Paddle runtime 시작과 OCR HTTP 요청을 모두 생략한다. sampled-image 또는 fuzzy-coordinate 캐시는 PaddleOCR-VL 자동 폴더 처리에 사용하지 않는다.
 
 ## 불변 조건
 
 - 결과 이미지, OCR 텍스트, 번역 텍스트, inpaint patch, project save/load 상태가 바뀌는 성능개선은 반드시 회귀 테스트와 샘플 산출물을 남긴다.
 - 사용자에게 보이는 이미지/결과물 품질이 바뀌면 병합 전 사용자 검토를 요청한다.
-- 기본값은 보수적으로 둔다. 새 병렬화 옵션은 먼저 feature flag 또는 설정값 default-off로 실험한다.
+- 기본값은 보수적으로 둔다. 새 병렬화 또는 출력 변경 옵션은 먼저 feature flag 또는 설정값 default-off로 실험한다.
+- exact content hash와 완전한 runtime identity로 출력 동일성이 증명된 결과 캐시는 fail-open, 명시적 clear/export, 보존 한도를 갖춘 경우에만 기본 활성화할 수 있다.
 - cancellation은 실패나 skip으로 기록하지 않는다.
 - external runtime startup/probe cache는 연결 오류, HTTP 오류, 모델 불일치, 설정 변경 시 invalidate할 수 있어야 한다.
 - Qt render/layout 객체를 임의 worker thread로 옮기지 않는다.
@@ -47,6 +54,10 @@
 4. 성능 계측 보강
    - runtime probe 시간, model check 시간, stage gap, prewarm wait, per-stage duration을 남긴다.
    - 동시성 없이도 개선 전후를 비교할 수 있게 한다.
+5. Exact 반복 실행 캐시
+   - 번역은 SQLite result cache와 승인형 Exact TM을 유지한다.
+   - OCR은 관리형 PaddleOCR-VL exact crop result cache를 사용한다.
+   - 후속 프로젝트 checkpoint는 detection, OCR, inpaint, render를 stage fingerprint와 content-addressed object로 복원하되 손상·누락 시 정상 계산으로 fail-open한다.
 
 ## 활성 계획에서 제외한 항목
 
@@ -72,3 +83,4 @@
 - `01-parallelism-audit-ko.md`: 현재 병목과 speedup 계산
 - `02-implementation-spec-ko.md`: AST 기반 코드 검토와 구현 명세
 - `03-final-execution-plan-ko.md`: 동시성 제외 후 최종 실행 순서와 PR별 준비 명세
+- `04-paddleocr-persistent-result-cache-ko.md`: 관리형 PaddleOCR-VL exact 영구 결과 캐시 계약
