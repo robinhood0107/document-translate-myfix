@@ -86,6 +86,10 @@ class PipelinePerformanceTelemetryTests(unittest.TestCase):
                         "logical_request_count": 2,
                         "http_attempt_count": 3,
                         "http_retry_count": 1,
+                        "persistent_cache_hit_count": 2,
+                        "persistent_cache_miss_count": 1,
+                        "persistent_cache_runtime_miss_count": 1,
+                        "persistent_cache_disabled_count": 0,
                     }
                 },
             },
@@ -131,6 +135,14 @@ class PipelinePerformanceTelemetryTests(unittest.TestCase):
         self.assertEqual(stats["cache"]["translate_partial_count"], 1)
         self.assertEqual(stats["paddleocr_vl"]["logical_request_count"], 2)
         self.assertEqual(stats["paddleocr_vl"]["http_attempt_count"], 3)
+        self.assertEqual(
+            stats["paddleocr_vl"]["persistent_cache_hit_count"],
+            2,
+        )
+        self.assertEqual(
+            stats["paddleocr_vl"]["persistent_cache_miss_count"],
+            1,
+        )
         self.assertEqual(stats["gemma"]["gemma_http_attempt_count"], 3)
         self.assertEqual(stats["runtime"]["gemma"]["start_wall_ms"], 800.0)
         self.assertEqual(stats["runtime"]["gemma"]["wait_wall_ms"], 25.0)

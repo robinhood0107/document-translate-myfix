@@ -264,6 +264,7 @@ class SettingsPage(QtWidgets.QWidget):
             self.ui.save_keys_checkbox,
             self.ui.paddleocr_vl_prettify_checkbox,
             self.ui.paddleocr_vl_visualize_checkbox,
+            self.ui.paddleocr_vl_persistent_cache_checkbox,
             self.ui.hunyuan_ocr_raw_response_logging_checkbox,
             self.ui.mangalmm_ocr_raw_response_logging_checkbox,
             self.ui.mangalmm_ocr_safe_resize_checkbox,
@@ -281,6 +282,7 @@ class SettingsPage(QtWidgets.QWidget):
             self.ui.project_autosave_interval_spinbox,
             self.ui.paddleocr_vl_max_new_tokens_spinbox,
             self.ui.paddleocr_vl_parallel_workers_spinbox,
+            self.ui.paddleocr_vl_persistent_cache_limit_spinbox,
             self.ui.hunyuan_ocr_max_completion_tokens_spinbox,
             self.ui.hunyuan_ocr_parallel_workers_spinbox,
             self.ui.hunyuan_ocr_request_timeout_spinbox,
@@ -429,6 +431,10 @@ class SettingsPage(QtWidgets.QWidget):
             "visualize": self.ui.paddleocr_vl_visualize_checkbox.isChecked(),
             "max_new_tokens": int(self.ui.paddleocr_vl_max_new_tokens_spinbox.value()),
             "parallel_workers": int(self.ui.paddleocr_vl_parallel_workers_spinbox.value()),
+            "persistent_cache_enabled": self.ui.paddleocr_vl_persistent_cache_checkbox.isChecked(),
+            "persistent_cache_limit": int(
+                self.ui.paddleocr_vl_persistent_cache_limit_spinbox.value()
+            ),
         }
 
     def get_gemma_local_server_settings(self):
@@ -982,6 +988,20 @@ class SettingsPage(QtWidgets.QWidget):
             settings.value(
                 "parallel_workers",
                 self.ui.paddleocr_vl_page.DEFAULT_PARALLEL_WORKERS,
+                type=int,
+            )
+        )
+        self.ui.paddleocr_vl_persistent_cache_checkbox.setChecked(
+            settings.value(
+                "persistent_cache_enabled",
+                self.ui.paddleocr_vl_page.DEFAULT_PERSISTENT_CACHE_ENABLED,
+                type=bool,
+            )
+        )
+        self.ui.paddleocr_vl_persistent_cache_limit_spinbox.setValue(
+            settings.value(
+                "persistent_cache_limit",
+                self.ui.paddleocr_vl_page.DEFAULT_PERSISTENT_CACHE_LIMIT,
                 type=int,
             )
         )
