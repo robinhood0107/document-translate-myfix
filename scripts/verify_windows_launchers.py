@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -46,6 +47,7 @@ def run_checked(
     timeout: int = 900,
     shell: bool = False,
     label: str,
+    env: dict[str, str] | None = None,
 ) -> subprocess.CompletedProcess[str]:
     print(f"\n=== {label} ===")
     print(" ".join(cmd) if not shell else cmd[0])
@@ -56,6 +58,7 @@ def run_checked(
         capture_output=True,
         timeout=timeout,
         shell=shell,
+        env=env,
     )
     if result.stdout:
         print(result.stdout.rstrip())
@@ -113,6 +116,16 @@ def verify_bootstrap(cfg: dict) -> None:
     )
 
 
+def verify_source_contract(cfg: dict) -> None:
+    env = os.environ.copy()
+    env["COMIC_VERIFY_ONLY"] = "1"
+    run_checked(
+        ["cmd.exe", "/d", "/c", f"call {cfg['bat']}"],
+        label=f"{cfg['label']} launcher-source contract",
+        env=env,
+    )
+
+
 def verify_smoke(cfg: dict) -> None:
     command = (
         "set CT_DISABLE_UPDATE_CHECK=1 && "
@@ -134,9 +147,17 @@ def main() -> int:
         action="store_true",
         help="Verify venvs and bootstrap launchers only.",
     )
+    parser.add_argument(
+        "--source-contract-only",
+        action="store_true",
+        help="Verify release source files without probing or installing a venv.",
+    )
     args = parser.parse_args()
 
     for cfg in LAUNCHERS:
+        verify_source_contract(cfg)
+        if args.source_contract_only:
+            continue
         verify_runtime(cfg)
         verify_bootstrap(cfg)
         if not args.skip_smoke:
