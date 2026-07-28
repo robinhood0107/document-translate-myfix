@@ -192,6 +192,8 @@ def _validate_baseline_contract(preset: Mapping[str, Any]) -> None:
         "chunk_size": 6,
         "context_size": 4096,
         "n_parallel": 1,
+        "batch_size": 2048,
+        "ubatch_size": 512,
         "cache_type_k": "f16",
         "cache_type_v": "f16",
         "spec_type": "none",
@@ -1655,8 +1657,16 @@ def _translation_candidate_profiles(
     *,
     axis: str,
     model_key: str,
+    base_batch_size: int | None = None,
 ) -> tuple[list[dict[str, Any]], str]:
     execution = str(family.get("execution", ""))
+    if base_batch_size is not None and not (
+        execution == "generated-translation"
+        and axis == "ubatch_size"
+    ):
+        raise ValueError(
+            "--base-batch-size is only valid for a generated ubatch_size axis."
+        )
     models = protocol.get("models")
     if not isinstance(models, Mapping):
         raise ValueError("Protocol model contracts are missing.")
@@ -1677,6 +1687,8 @@ def _translation_candidate_profiles(
             candidate.setdefault("context_size", 4096)
             candidate.setdefault("n_parallel", 1)
             candidate.setdefault("concurrency", 1)
+            candidate.setdefault("batch_size", 2048)
+            candidate.setdefault("ubatch_size", 512)
             if int(candidate["context_size"]) // int(
                 candidate["n_parallel"]
             ) < 4096:
@@ -1690,6 +1702,10 @@ def _translation_candidate_profiles(
                 raise ValueError(
                     "Translation concurrency may not exceed llama.cpp slots."
                 )
+            if int(candidate["ubatch_size"]) > int(candidate["batch_size"]):
+                raise ValueError(
+                    "Translation ubatch_size may not exceed batch_size."
+                )
         baseline_id = str(family.get("baseline_candidate", ""))
     elif execution == "generated-translation":
         axes = family.get("axes")
@@ -1697,25 +1713,79 @@ def _translation_candidate_profiles(
             raise ValueError(
                 f"--axis must select one of: {', '.join(sorted(axes or {}))}"
             )
-        if axis != "chunk_size":
-            raise ValueError("Only chunk_size is a generated translation axis.")
+        if axis not in {"chunk_size", "batch_size", "ubatch_size"}:
+            raise ValueError(f"Unsupported generated translation axis: {axis}")
         if model_key not in models:
             raise ValueError(f"Unknown translation model key: {model_key}")
+        baseline_values = family.get("baseline_values")
+        if not isinstance(baseline_values, Mapping):
+            raise ValueError(
+                "Generated translation family has no baseline_values contract."
+            )
+        batch_size = int(baseline_values.get("batch_size", 2048))
+        ubatch_size = int(baseline_values.get("ubatch_size", 512))
+        if base_batch_size is not None:
+            if axis != "ubatch_size":
+                raise ValueError(
+                    "--base-batch-size is only valid for the ubatch_size axis."
+                )
+            batch_axis = axes.get("batch_size")
+            if (
+                not isinstance(batch_axis, list)
+                or int(base_batch_size) not in {
+                    int(value) for value in batch_axis
+                }
+            ):
+                raise ValueError(
+                    "The cumulative base batch size must be a protocol "
+                    "batch_size candidate."
+                )
+            batch_size = int(base_batch_size)
         candidates = [
             {
-                "id": f"chunk-{value}",
+                "id": (
+                    f"chunk-{value}"
+                    if axis == "chunk_size"
+                    else f"{axis}-{value}"
+                ),
                 "model_key": model_key,
                 "model_name": str(models[model_key]["name"]),
                 "model_sha256": str(models[model_key]["sha256"]),
-                "chunk_size": int(value),
+                "chunk_size": (
+                    int(value)
+                    if axis == "chunk_size"
+                    else int(baseline_values.get("chunk_size", 6))
+                ),
                 "context_size": 4096,
                 "n_parallel": 1,
                 "concurrency": 1,
+                "batch_size": (
+                    int(value) if axis == "batch_size" else batch_size
+                ),
+                "ubatch_size": (
+                    int(value) if axis == "ubatch_size" else ubatch_size
+                ),
             }
             for value in axes[axis]
         ]
+        candidates = [
+            candidate
+            for candidate in candidates
+            if int(candidate["ubatch_size"]) <= int(candidate["batch_size"])
+        ]
+        if not candidates:
+            raise ValueError(
+                "Generated translation matrix has no valid batch/ubatch pair."
+            )
+        baseline_value = baseline_values.get(axis)
+        if baseline_value is None:
+            raise ValueError(
+                f"Generated translation baseline is missing axis {axis}."
+            )
         baseline_id = (
-            f"chunk-{family['baseline_values']['chunk_size']}"
+            f"chunk-{baseline_value}"
+            if axis == "chunk_size"
+            else f"{axis}-{baseline_value}"
         )
     else:
         raise ValueError("Selected family is not a translation benchmark.")
@@ -1754,6 +1824,10 @@ def _translation_profile_command(
         str(int(candidate.get("n_parallel", 1))),
         "--concurrency",
         str(int(candidate.get("concurrency", 1))),
+        "--batch-size",
+        str(int(candidate.get("batch_size", 2048))),
+        "--ubatch-size",
+        str(int(candidate.get("ubatch_size", 512))),
         "--language-order",
         *list(language_order),
     ]
@@ -1768,6 +1842,7 @@ def run_translation_family(args: argparse.Namespace) -> int:
         family,
         axis=args.axis,
         model_key=args.model_key,
+        base_batch_size=args.base_batch_size,
     )
     output_dir = ensure_external_output(
         Path(args.output_dir),
@@ -1790,6 +1865,7 @@ def run_translation_family(args: argparse.Namespace) -> int:
             "command": "run-translation",
             "family": args.family,
             "axis": args.axis,
+            "base_batch_size": args.base_batch_size,
             "baseline_candidate": baseline_id,
             "source_summary_sha256": _sha256_file(source_summary),
         }
@@ -1834,6 +1910,12 @@ def run_translation_family(args: argparse.Namespace) -> int:
                         ),
                         "LLAMA_CTX_SIZE": str(
                             int(candidate.get("context_size", 4096))
+                        ),
+                        "LLAMA_BATCH_SIZE": str(
+                            int(candidate.get("batch_size", 2048))
+                        ),
+                        "LLAMA_UBATCH_SIZE": str(
+                            int(candidate.get("ubatch_size", 512))
                         ),
                         "LLAMA_SPEC_TYPE": "none",
                         "LLAMA_CACHE_TYPE_K": "f16",
@@ -2050,6 +2132,10 @@ def _translation_profile(args: argparse.Namespace) -> int:
             == str(int(args.n_parallel))
             and str(runtime_options.get("LLAMA_CTX_SIZE", ""))
             == str(int(args.context_size))
+            and str(runtime_options.get("LLAMA_BATCH_SIZE", ""))
+            == str(int(args.batch_size))
+            and str(runtime_options.get("LLAMA_UBATCH_SIZE", ""))
+            == str(int(args.ubatch_size))
             and str(runtime_options.get("LLAMA_CACHE_TYPE_K", "")).lower()
             == "f16"
             and str(runtime_options.get("LLAMA_CACHE_TYPE_V", "")).lower()
@@ -2091,6 +2177,8 @@ def _translation_profile(args: argparse.Namespace) -> int:
             "context_size": int(args.context_size),
             "n_parallel": int(args.n_parallel),
             "concurrency": concurrency,
+            "batch_size": int(args.batch_size),
+            "ubatch_size": int(args.ubatch_size),
             "language_order": language_order,
             "elapsed_sec": round(elapsed, 6),
             "output_count": len(outputs),
@@ -3340,6 +3428,15 @@ def _build_parser() -> argparse.ArgumentParser:
     translation.add_argument("--family", required=True)
     translation.add_argument("--axis", default="")
     translation.add_argument("--model-key", default="iq4_nl")
+    translation.add_argument(
+        "--base-batch-size",
+        type=int,
+        default=None,
+        help=(
+            "Protocol batch_size winner to carry into the sequential "
+            "ubatch_size axis."
+        ),
+    )
     translation.add_argument("--source-summary", required=True)
     translation.add_argument("--output-dir", required=True)
     translation.set_defaults(handler=run_translation_family)
@@ -3369,6 +3466,8 @@ def _build_parser() -> argparse.ArgumentParser:
     hidden.add_argument("--context-size", type=int, required=True)
     hidden.add_argument("--n-parallel", type=int, required=True)
     hidden.add_argument("--concurrency", type=int, required=True)
+    hidden.add_argument("--batch-size", type=int, required=True)
+    hidden.add_argument("--ubatch-size", type=int, required=True)
     hidden.add_argument(
         "--language-order",
         nargs=3,

@@ -103,3 +103,10 @@ exact-output 후보만 속도 게이트를 통과할 수 있습니다. 번역 �
 `np=2` 후보는 총 context를 8192로 고정해 slot당 4096을 보장합니다.
 concurrency가 slot 수를 넘거나 slot당 context가 4096 미만인 protocol은
 실행 전에 거부합니다.
+
+Gemma prefill 병목이 확인된 경우에만 `gemma-batch` family를 엽니다.
+먼저 logical batch를 `512/1024/2048/4096`에서 비교하고, 5% 속도 및
+5% 분산 gate를 통과한 값이 있을 때만 그 값을 고정해 physical ubatch
+`128/256/512/1024`를 비교합니다. 모든 실행은 runtime identity의
+`LLAMA_BATCH_SIZE`와 `LLAMA_UBATCH_SIZE`가 후보 계약과 정확히 같은지
+확인하며 `ubatch > batch` 조합은 실행 전에 거부합니다.

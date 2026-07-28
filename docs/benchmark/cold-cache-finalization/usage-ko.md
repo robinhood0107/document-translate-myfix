@@ -46,6 +46,28 @@ scripts\cold_cache_finalization_suite_cuda13.bat run-translation ^
   --output-dir C:\comic-translate-validation\cold-cache\gemma-model
 ```
 
+prefill 병목용 제한 matrix는 batch 축부터 실행합니다.
+
+```bat
+scripts\cold_cache_finalization_suite_cuda13.bat run-translation ^
+  --family gemma-batch ^
+  --axis batch_size ^
+  --source-summary C:\comic-translate-validation\source-summary.json ^
+  --output-dir C:\comic-translate-validation\cold-cache\gemma-batch
+```
+
+batch 후보가 게이트를 통과했을 때만 우승값을 고정해 ubatch 축을
+실행합니다.
+
+```bat
+scripts\cold_cache_finalization_suite_cuda13.bat run-translation ^
+  --family gemma-batch ^
+  --axis ubatch_size ^
+  --base-batch-size 1024 ^
+  --source-summary C:\comic-translate-validation\source-summary.json ^
+  --output-dir C:\comic-translate-validation\cold-cache\gemma-ubatch
+```
+
 ## persistent cache
 
 ```bat

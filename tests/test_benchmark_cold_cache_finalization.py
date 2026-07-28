@@ -38,6 +38,8 @@ class ColdCacheFinalizationTests(unittest.TestCase):
             "gemma-4-26B-IQ4_NL.gguf",
         )
         self.assertEqual(baseline["gemma"]["chunk_size"], 6)
+        self.assertEqual(baseline["gemma"]["batch_size"], 2048)
+        self.assertEqual(baseline["gemma"]["ubatch_size"], 512)
         self.assertEqual(
             baseline["benchmark_contract"]["request_mode"],
             "contextual-single",
@@ -247,6 +249,110 @@ class ColdCacheFinalizationTests(unittest.TestCase):
         self.assertGreaterEqual(
             np2["context_size"] // np2["n_parallel"],
             4096,
+        )
+        self.assertEqual(np2["batch_size"], 2048)
+        self.assertEqual(np2["ubatch_size"], 512)
+
+    def test_generated_gemma_batch_axes_change_one_runtime_setting(
+        self,
+    ) -> None:
+        protocol = finalization.load_protocol()
+        family = finalization._family(protocol, "gemma-batch")
+
+        batch_candidates, batch_baseline = (
+            finalization._translation_candidate_profiles(
+                protocol,
+                family,
+                axis="batch_size",
+                model_key="iq4_nl",
+            )
+        )
+        self.assertEqual(batch_baseline, "batch_size-2048")
+        self.assertEqual(
+            [candidate["batch_size"] for candidate in batch_candidates],
+            [512, 1024, 2048, 4096],
+        )
+        self.assertEqual(
+            {candidate["ubatch_size"] for candidate in batch_candidates},
+            {512},
+        )
+
+        ubatch_candidates, ubatch_baseline = (
+            finalization._translation_candidate_profiles(
+                protocol,
+                family,
+                axis="ubatch_size",
+                model_key="iq4_nl",
+                base_batch_size=1024,
+            )
+        )
+        self.assertEqual(ubatch_baseline, "ubatch_size-512")
+        self.assertEqual(
+            {candidate["batch_size"] for candidate in ubatch_candidates},
+            {1024},
+        )
+        self.assertEqual(
+            [candidate["ubatch_size"] for candidate in ubatch_candidates],
+            [128, 256, 512, 1024],
+        )
+        self.assertTrue(
+            all(
+                candidate["ubatch_size"] <= candidate["batch_size"]
+                for candidate in ubatch_candidates
+            )
+        )
+        constrained, _ = finalization._translation_candidate_profiles(
+            protocol,
+            family,
+            axis="ubatch_size",
+            model_key="iq4_nl",
+            base_batch_size=512,
+        )
+        self.assertEqual(
+            [candidate["ubatch_size"] for candidate in constrained],
+            [128, 256, 512],
+        )
+
+    def test_generated_gemma_ubatch_rejects_unapproved_base_batch(
+        self,
+    ) -> None:
+        protocol = finalization.load_protocol()
+        family = finalization._family(protocol, "gemma-batch")
+
+        with self.assertRaises(ValueError):
+            finalization._translation_candidate_profiles(
+                protocol,
+                family,
+                axis="ubatch_size",
+                model_key="iq4_nl",
+                base_batch_size=1536,
+            )
+
+    def test_translation_profile_command_carries_batch_contract(self) -> None:
+        command = finalization._translation_profile_command(
+            source_summary=Path("summary.json"),
+            output_path=Path("output.json"),
+            candidate={
+                "id": "batch_size-1024",
+                "model_name": "example.gguf",
+                "model_sha256": "a" * 64,
+                "chunk_size": 6,
+                "context_size": 4096,
+                "n_parallel": 1,
+                "concurrency": 1,
+                "batch_size": 1024,
+                "ubatch_size": 256,
+            },
+            language_order=("Japanese", "Chinese", "English"),
+        )
+
+        self.assertEqual(
+            command[command.index("--batch-size") + 1],
+            "1024",
+        )
+        self.assertEqual(
+            command[command.index("--ubatch-size") + 1],
+            "256",
         )
 
     def test_candidate_base_rejects_cache_or_grouped_drift(self) -> None:
