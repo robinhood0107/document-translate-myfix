@@ -11,6 +11,36 @@ from modules.utils.gpu_handoff import cleanup_python_cuda_memory
 
 
 class GPUMetricsTests(unittest.TestCase):
+    def test_parse_linux_swap_meminfo_reports_used_swap(self) -> None:
+        report = gpu_metrics._parse_linux_swap_meminfo(
+            "SwapTotal:       2097152 kB\n"
+            "SwapFree:        1572864 kB\n"
+            "SwapCached:       131072 kB\n",
+            source="test-wsl",
+        )
+
+        self.assertTrue(report["available"])
+        self.assertEqual(report["source"], "test-wsl")
+        self.assertEqual(report["swap_total_mb"], 2048.0)
+        self.assertEqual(report["swap_free_mb"], 1536.0)
+        self.assertEqual(report["swap_used_mb"], 512.0)
+
+    def test_windows_wsl_swap_query_is_fail_open(self) -> None:
+        with mock.patch(
+            "modules.utils.gpu_metrics._current_process_is_wsl",
+            return_value=False,
+        ), mock.patch(
+            "modules.utils.gpu_metrics.os.name",
+            "nt",
+        ), mock.patch(
+            "modules.utils.gpu_metrics._run_capture_status",
+            return_value=(False, ""),
+        ):
+            report = gpu_metrics.query_wsl_swap_metrics()
+
+        self.assertFalse(report["available"])
+        self.assertEqual(report["reason"], "docker-desktop-wsl-query-failed")
+
     def test_process_driver_metrics_select_current_pid_and_exact_uuid(self) -> None:
         output = "\n".join(
             [
