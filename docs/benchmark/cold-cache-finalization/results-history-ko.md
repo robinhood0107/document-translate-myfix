@@ -104,6 +104,41 @@
   통과한 batch 값을 누적해야만 실행할 수 있는 ubatch 축과 54블록 의미
   검수, 292행 blind 검수는 정상 gate 종료로 취소했습니다. raw 결과와
   판정문은 Git 밖 validation log에만 보존합니다.
+- RT-DETR-v2 ONNX page microbatch 2/4를 실제 제품 640 preprocess,
+  threshold, block 생성, render-area 계산, 일본어 RTL 정렬까지 포함해
+  6페이지·3회 순서 교차로 비교했습니다. batch2는 감지 중앙값이
+  1.807% 개선돼 5% gate에 미달했고 canonical boxes·class·order가
+  1/6페이지에서 달라졌습니다. batch4는 5.047% 느렸고 2/6페이지가
+  달라졌습니다. 두 후보 모두 탈락하고 단건 ONNX 감지를 유지합니다.
+- LaMa Large 512px·CUDA13·bf16 인페인트 조건부 spike에서는
+  channels-last가 2.232% 개선에 그쳤고 SSIM 0.999744로 품질 gate
+  0.9999를 통과하지 못했습니다. 기본 `torch.compile`은 working
+  Triton 부재와 complex FFT 비지원으로 실패했고, cudagraphs는 고정
+  shape에서는 빨랐지만 실제 가변 crop shape 전환에서 실패했습니다.
+- 같은 448×448 입력의 microbatch 2/4는 각각 40.157%/44.051%
+  빨랐지만 최소 SSIM이 0.999596/0.999565로 필수 품질 gate를
+  위반했습니다. 실제 blockwise 경로는 앞 블록 결과가 뒤의 겹치는
+  블록 입력에 반영되는 순차 의미도 있으므로 제품 scheduler를 구현하지
+  않고 현행 sequential eager NCHW 경로를 유지합니다.
+- crop 준비·JPEG encode·base64·응답 parse·guard가 OCR stage에서
+  차지한 비중은 약 0.25%로, 중복 page I/O/hash/encode 제거 후보를
+  여는 조건에 미달했습니다. Paddle wrapper overhead도 OCR의 10%에
+  미달해 direct vLLM endpoint를 검토하지 않았고, encode/base64는
+  약 0.05%로 JPEG quality 95/90/85 비교 조건 5%에 미달했습니다.
+- HTTP Session, Paddle workers·max-num-seqs·batched-tokens·completion
+  tokens·vLLM cache, IQ4_XS, single chunk 2~12, `np=2`, Gemma
+  batch, detection microbatch, 인페인트 후보까지 모든 cold-path
+  후보가 사전 속도·구조·품질·호환성 gate 중 하나에서 탈락했습니다.
+  누적 예상 전체 3% 자격 후보가 없으므로 최종 Gemma 292행 blind와
+  22페이지 cold AB/BA는 실행하지 않습니다. 이는 미완료가 아니라
+  사전 계약에 따른 정상 gate 종료입니다.
+- 제품 cold 기준선은 `IQ4_NL + contextual-single + chunk 6 +
+  no-spec + F16`, Gemma batch/ubatch `2048/512`, Paddle workers 8,
+  max-num-seqs 32, max-num-batched-tokens 98,304, OCR completion
+  tokens 1024, prefix cache ON, multimodal cache default로 유지합니다.
+  이번 최적화에서 기본 승격하는 성능 경로는 검증을 통과한 global
+  exact OCR result cache뿐이며 project checkpoint는 기능을 보존하되
+  miss-overhead gate 실패로 기본 OFF를 유지합니다.
 
 이 문서는 도구 구현 이력과 검증된 cache gate 결과입니다. raw 입력,
 OCR/번역 결과, DB와 sidecar는 Git 밖에만 보존합니다. cold 후보의 제품
