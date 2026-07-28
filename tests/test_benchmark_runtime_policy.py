@@ -200,6 +200,7 @@ class BenchmarkRuntimePolicyTests(unittest.TestCase):
             )
 
         staged = yaml_dump.call_args.args[1]
+        self.assertEqual(staged["name"], "comic-translate")
         command = staged["services"]["gemma-local-server"]["command"]
         self.assertEqual(
             command[command.index("--spec-type") + 1],
@@ -208,6 +209,41 @@ class BenchmarkRuntimePolicyTests(unittest.TestCase):
         self.assertEqual(
             command[command.index("--spec-draft-n-max") + 1],
             "8",
+        )
+
+    def test_staged_paddle_runtime_keeps_product_compose_project(
+        self,
+    ) -> None:
+        compose = {
+            "services": {
+                "paddleocr-layout": {
+                    "command": "--device cpu",
+                    "depends_on": {},
+                },
+                "paddleocr-vllm": {},
+            }
+        }
+        pipeline = {
+            "SubModules": {
+                "VLRecognition": {"genai_config": {}}
+            }
+        }
+        vllm = {}
+        loaded = [compose, pipeline, vllm]
+        with tempfile.TemporaryDirectory() as tmp, mock.patch.object(
+            benchmark_common,
+            "_python3_yaml_load",
+            side_effect=loaded,
+        ), mock.patch.object(
+            benchmark_common,
+            "_python3_yaml_dump",
+        ) as yaml_dump:
+            benchmark_common._stage_ocr_runtime({}, Path(tmp))
+
+        staged_compose = yaml_dump.call_args_list[0].args[1]
+        self.assertEqual(
+            staged_compose["name"],
+            "paddleocr_vl_docker_files",
         )
 
 
