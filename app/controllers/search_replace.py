@@ -991,12 +991,11 @@ class SearchReplaceController(QtCore.QObject):
                         else:
                             ti["text"] = new_text
 
-        if not opts.in_target:
-            invalidate_project_page_checkpoints(
-                self.main,
-                key.file_path,
-                stage="ocr",
-            )
+        invalidate_project_page_checkpoints(
+            self.main,
+            key.file_path,
+            stage="translation" if opts.in_target else "ocr",
+        )
 
         # If currently displayed, update canvas + edits as well.
         blk = self._find_block_in_current_image(key)

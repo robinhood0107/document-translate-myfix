@@ -10,7 +10,12 @@ from unittest import mock
 
 import numpy as np
 
-from app.projects.stage_checkpoints import DetectionCheckpointResult
+from app.projects.stage_checkpoints import (
+    DetectionCheckpointResult,
+    InpaintCheckpointResult,
+    RenderCheckpointResult,
+    TranslationCheckpointResult,
+)
 from modules.ocr.factory import OCRFactory
 from modules.ocr.local_runtime import LocalOCRRuntimeManager
 from modules.ocr.ocr_paddle_VL import PaddleOCRVLEngine
@@ -122,6 +127,30 @@ class StageBatchedCancellationTests(unittest.TestCase):
         processor._project_checkpoint_store = SimpleNamespace(
             has_stage_record=lambda page_key, stage: (
                 page_key == "page:00000000" and stage == "ocr"
+            ),
+        )
+        processor._start_prewarm = mock.Mock()
+
+        processor._start_ocr_prewarm(
+            {"primary_ocr_engine": "PaddleOCR VL"}
+        )
+
+        processor._start_prewarm.assert_not_called()
+
+    def test_detection_checkpoint_defers_ocr_prewarm_for_no_text_hit(
+        self,
+    ) -> None:
+        processor = self._processor(cancelled=False)
+        processor.main_page.local_ocr_runtime_manager = LocalOCRRuntimeManager()
+        processor.main_page.settings_page = SimpleNamespace(
+            get_paddleocr_vl_settings=lambda: {
+                "persistent_cache_enabled": False,
+            }
+        )
+        processor._project_checkpoint_page_keys = ["page:00000000"]
+        processor._project_checkpoint_store = SimpleNamespace(
+            has_stage_record=lambda page_key, stage: (
+                page_key == "page:00000000" and stage == "detection"
             ),
         )
         processor._start_prewarm = mock.Mock()
@@ -889,6 +918,7 @@ class StageBatchedCancellationTests(unittest.TestCase):
         processor.main_page.image_ctrl = SimpleNamespace(
             update_processing_summary=mock.Mock(),
         )
+        processor._ensure_page_state = mock.Mock(return_value={})
         processor._emit_benchmark_event = mock.Mock()
         processor._log_page_done = mock.Mock()
         processor.emit_progress = mock.Mock()
@@ -1115,6 +1145,377 @@ class StageBatchedCancellationTests(unittest.TestCase):
             [page.blk_list[0].translation for page in pages],
             ["cached", "cached"],
         )
+
+    def test_project_inpaint_all_hit_never_loads_or_releases_model(
+        self,
+    ) -> None:
+        processor = self._processor(cancelled=False)
+        processor._project_checkpoint_store = object()
+        processor.main_page.settings_page = SimpleNamespace(
+            get_hd_strategy_settings=lambda: {"strategy": "Original"},
+            get_tool_selection=lambda _tool: "AOT",
+            get_mask_refiner_settings=lambda: {"mask_refiner": "ctd"},
+            get_inpainter_runtime_settings=lambda _key=None: {
+                "backend": "torch",
+                "device": "cpu",
+                "inpaint_size": 2048,
+                "precision": "fp32",
+            },
+            is_gpu_enabled=lambda: False,
+            ui=SimpleNamespace(
+                value_mappings={},
+                tr=lambda value: value,
+            ),
+        )
+        processor.main_page.image_ctrl = SimpleNamespace(
+            mark_processing_stage=mock.Mock(),
+        )
+        processor._effective_export_settings = mock.Mock(return_value={})
+        processor._ensure_page_state = mock.Mock(
+            return_value={"brush_strokes": []}
+        )
+        processor._set_current_image = mock.Mock()
+        processor.emit_progress = mock.Mock()
+        processor._emit_benchmark_event = mock.Mock()
+        processor._finish_inpaint_page = mock.Mock()
+        processor._ensure_inpainter = mock.Mock()
+        processor.inpainting = SimpleNamespace(
+            inpainter_cache=None,
+            release_inpainter_resources=mock.Mock(),
+        )
+        block = TextBlock(
+            text_bbox=np.array([1, 1, 8, 8], dtype=np.int32),
+            text="OCR",
+            block_id="stable",
+        )
+        image = np.zeros((10, 10, 3), dtype=np.uint8)
+        mask = np.zeros((10, 10), dtype=np.uint8)
+        mask[1:4, 1:4] = 255
+        page = StagePageContext(
+            image_path="page.png",
+            image_name="page.png",
+            source_lang="Japanese",
+            target_lang="Korean",
+            image=image,
+            blk_list=[block],
+            source_decoded_sha256="1" * 64,
+            project_checkpoint_page_key="page:00000000",
+            detection_fingerprint="2" * 64,
+            project_ocr_fingerprint="3" * 64,
+        )
+        hit = InpaintCheckpointResult(
+            cleaned_image=image.copy(),
+            raw_mask=mask.copy(),
+            final_mask=mask.copy(),
+            cleanup_stats={
+                "applied": False,
+                "component_count": 0,
+                "block_count": 0,
+            },
+            cleaned_object_sha256="4" * 64,
+        )
+
+        with mock.patch(
+            "pipeline.stage_batched_processor.generate_mask",
+            return_value={
+                "raw_mask": mask.copy(),
+                "final_mask": mask.copy(),
+            },
+        ), mock.patch(
+            "pipeline.stage_batched_processor.lookup_inpaint_checkpoint",
+            return_value=hit,
+        ):
+            processor._inpaint_all([page])
+
+        processor._ensure_inpainter.assert_not_called()
+        processor.inpainting.release_inpainter_resources.assert_not_called()
+        self.assertEqual(page.project_inpaint_checkpoint_status, "hit")
+        self.assertEqual(
+            processor._inpainter_release_gate["status"],
+            "not-loaded",
+        )
+
+    def test_no_text_page_gets_renderable_skipped_stage_fingerprints(
+        self,
+    ) -> None:
+        processor = self._processor(cancelled=False)
+        processor._project_checkpoint_store = object()
+        processor.main_page.settings_page = SimpleNamespace(
+            get_hd_strategy_settings=lambda: {"strategy": "Original"},
+            get_tool_selection=lambda _tool: "AOT",
+            get_mask_refiner_settings=lambda: {"mask_refiner": "ctd"},
+            get_inpainter_runtime_settings=lambda _key=None: {
+                "backend": "torch",
+                "device": "cpu",
+                "inpaint_size": 2048,
+                "precision": "fp32",
+            },
+            is_gpu_enabled=lambda: False,
+            ui=SimpleNamespace(
+                value_mappings={},
+                tr=lambda value: value,
+            ),
+        )
+        processor.main_page.image_ctrl = SimpleNamespace(
+            mark_processing_stage=mock.Mock(),
+        )
+        processor._effective_export_settings = mock.Mock(return_value={})
+        processor._set_current_image = mock.Mock()
+        processor.emit_progress = mock.Mock()
+        processor._emit_benchmark_event = mock.Mock()
+        processor._ensure_inpainter = mock.Mock()
+        processor.inpainting = SimpleNamespace(
+            inpainter_cache=None,
+            release_inpainter_resources=mock.Mock(),
+        )
+        image = np.zeros((10, 10, 3), dtype=np.uint8)
+        page = StagePageContext(
+            image_path="page.png",
+            image_name="page.png",
+            source_lang="Japanese",
+            target_lang="Korean",
+            image=image,
+            blk_list=[],
+            source_decoded_sha256="1" * 64,
+            project_checkpoint_page_key="page:00000000",
+            detection_fingerprint="2" * 64,
+            no_text_detected=True,
+        )
+
+        processor._inpaint_all([page])
+
+        processor._ensure_inpainter.assert_not_called()
+        self.assertEqual(page.project_inpaint_checkpoint_status, "skipped")
+        self.assertEqual(
+            page.project_translation_checkpoint_status,
+            "skipped",
+        )
+        self.assertEqual(len(page.project_translation_fingerprint), 64)
+        self.assertEqual(len(page.project_inpaint_fingerprint), 64)
+        self.assertEqual(len(page.project_inpaint_artifact_sha256), 64)
+
+    def test_project_translation_all_hit_skips_gemma_and_http(self) -> None:
+        processor = self._processor(cancelled=False)
+        runtime_manager = LocalGemmaRuntimeManager()
+        processor.main_page.local_translation_runtime_manager = (
+            runtime_manager
+        )
+        processor.main_page.settings_page = SimpleNamespace(
+            get_llm_settings=lambda: {"extra_context": "context"},
+            get_tool_selection=lambda _tool: (
+                "Custom Local Server(Gemma)"
+            ),
+            get_translation_result_dictionary_rules=lambda: [],
+        )
+        processor._project_checkpoint_store = object()
+        processor._inpainter_release_gate = {
+            "required": False,
+            "observed": True,
+        }
+        processor._start_gemma_prewarm = mock.Mock()
+        processor._await_gemma_runtime = mock.Mock()
+        processor._shutdown_runtime_with_retry = mock.Mock()
+        processor._set_current_image = mock.Mock()
+        processor.emit_progress = mock.Mock()
+        processor._report_runtime_progress = mock.Mock()
+        processor._emit_benchmark_event = mock.Mock()
+        processor._persist_translation_state = mock.Mock()
+        processor.cache_manager = object()
+        block = TextBlock(
+            text_bbox=np.array([1, 1, 8, 8], dtype=np.int32),
+            text="source",
+            translation="",
+            block_id="stable",
+        )
+        page = StagePageContext(
+            image_path="page.png",
+            image_name="page.png",
+            source_lang="Japanese",
+            target_lang="Korean",
+            image=np.zeros((10, 10, 3), dtype=np.uint8),
+            blk_list=[block],
+            project_checkpoint_page_key="page:00000000",
+            project_ocr_fingerprint="3" * 64,
+            project_translation_snapshot=[
+                {
+                    "block_id": "stable",
+                    "source_text": "source",
+                    "translation": "캐시 번역",
+                    "rich_text": "",
+                    "source_lang": "Japanese",
+                    "target_lang": "Korean",
+                    "repetition_guard": None,
+                }
+            ],
+        )
+        translate_call = mock.Mock(
+            side_effect=AssertionError("HTTP translation must be skipped")
+        )
+
+        class _ProjectHitTranslator:
+            uses_persistent_translation_memory = True
+            translator_key = "Custom Local Server(Gemma)"
+
+            def __init__(self, *_args, **_kwargs) -> None:
+                self.engine = SimpleNamespace(last_benchmark_stats={})
+                self.translate_with_cache_manager = translate_call
+
+            @staticmethod
+            def prepare_translation(*_args, **_kwargs) -> bool:
+                raise AssertionError(
+                    "global translation cache lookup must be skipped"
+                )
+
+        result = TranslationCheckpointResult(
+            translations={
+                "stable": {
+                    "translation": "캐시 번역",
+                    "rich_text": "",
+                    "source_lang": "Japanese",
+                    "target_lang": "Korean",
+                    "repetition_guard": None,
+                }
+            }
+        )
+        with mock.patch(
+            "pipeline.stage_batched_processor.Translator",
+            _ProjectHitTranslator,
+        ), mock.patch.object(
+            processor,
+            "_build_project_translation_identity",
+            return_value={"identity": "stable"},
+        ), mock.patch(
+            "pipeline.stage_batched_processor.lookup_translation_checkpoint",
+            return_value=result,
+        ):
+            processor._translate_all([page])
+
+        processor._start_gemma_prewarm.assert_not_called()
+        processor._await_gemma_runtime.assert_not_called()
+        processor._shutdown_runtime_with_retry.assert_not_called()
+        translate_call.assert_not_called()
+        self.assertEqual(block.translation, "캐시 번역")
+        self.assertEqual(
+            page.project_translation_checkpoint_status,
+            "hit",
+        )
+
+    def test_project_render_all_hit_skips_renderer_and_output_encode(
+        self,
+    ) -> None:
+        processor = self._processor(cancelled=False)
+        processor.main_page.lang_mapping = {"Korean": "Korean"}
+        processor.main_page.render_settings = mock.Mock(
+            return_value=SimpleNamespace(upper_case=False)
+        )
+        processor.main_page.image_ctrl = SimpleNamespace(
+            update_processing_summary=mock.Mock(),
+        )
+        processor._ensure_page_state = mock.Mock(return_value={})
+        processor._effective_export_settings = mock.Mock(return_value={})
+        processor._set_current_image = mock.Mock()
+        processor.emit_progress = mock.Mock()
+        processor._write_json_exports = mock.Mock()
+        processor._emit_benchmark_event = mock.Mock()
+        processor._restore_render_project_state = mock.Mock()
+        processor._render_page_text_items = mock.Mock()
+        processor._write_final_render_export = mock.Mock()
+        processor._log_page_done = mock.Mock()
+        page = StagePageContext(
+            image_path="page.png",
+            image_name="page.png",
+            source_lang="Japanese",
+            target_lang="Korean",
+            directory=".",
+            image=np.zeros((10, 10, 3), dtype=np.uint8),
+            blk_list=[
+                TextBlock(
+                    text_bbox=np.array([1, 1, 8, 8], dtype=np.int32),
+                    text="source",
+                    translation="번역",
+                    block_id="stable",
+                )
+            ],
+            inpaint_input_img=np.zeros((10, 10, 3), dtype=np.uint8),
+            mask=np.zeros((10, 10), dtype=np.uint8),
+        )
+        result = RenderCheckpointResult(
+            output_path="cached.png",
+            output_root=".",
+            output_sha256="5" * 64,
+            output_bytes=None,
+            output_exists=True,
+        )
+        with mock.patch.object(
+            processor,
+            "_prepare_render_checkpoint",
+            return_value=(result, "."),
+        ), mock.patch(
+            "pipeline.stage_batched_processor.materialize_render_checkpoint_output",
+            return_value="cached.png",
+        ) as materialize:
+            processor._render_all([page])
+
+        materialize.assert_called_once_with(result)
+        processor._restore_render_project_state.assert_called_once_with(page)
+        processor._render_page_text_items.assert_not_called()
+        processor._write_final_render_export.assert_not_called()
+
+    def test_render_materialization_error_falls_back_to_renderer(self) -> None:
+        processor = self._processor(cancelled=False)
+        processor.main_page.lang_mapping = {"Korean": "Korean"}
+        processor.main_page.render_settings = mock.Mock(
+            return_value=SimpleNamespace(upper_case=False)
+        )
+        processor.main_page.image_ctrl = SimpleNamespace(
+            update_processing_summary=mock.Mock(),
+        )
+        page_state = {"viewer_state": {}}
+        processor._ensure_page_state = mock.Mock(return_value=page_state)
+        processor._effective_export_settings = mock.Mock(return_value={})
+        processor._set_current_image = mock.Mock()
+        processor.emit_progress = mock.Mock()
+        processor._write_json_exports = mock.Mock()
+        processor._emit_benchmark_event = mock.Mock()
+        processor._restore_render_project_state = mock.Mock()
+        processor._render_page_text_items = mock.Mock()
+        processor._write_final_render_export = mock.Mock(
+            return_value=("fresh.png", ".")
+        )
+        processor._log_page_done = mock.Mock()
+        page = StagePageContext(
+            image_path="page.png",
+            image_name="page.png",
+            source_lang="Japanese",
+            target_lang="Korean",
+            directory=".",
+            image=np.zeros((10, 10, 3), dtype=np.uint8),
+            blk_list=[],
+            inpaint_input_img=np.zeros((10, 10, 3), dtype=np.uint8),
+            mask=np.zeros((10, 10), dtype=np.uint8),
+            no_text_detected=True,
+        )
+        result = RenderCheckpointResult(
+            output_path="cached.png",
+            output_root=".",
+            output_sha256="5" * 64,
+            output_bytes=b"invalid",
+            output_exists=False,
+        )
+
+        with mock.patch.object(
+            processor,
+            "_prepare_render_checkpoint",
+            return_value=(result, "."),
+        ), mock.patch(
+            "pipeline.stage_batched_processor.materialize_render_checkpoint_output",
+            side_effect=ValueError("invalid cached output"),
+        ):
+            processor._render_all([page])
+
+        processor._restore_render_project_state.assert_not_called()
+        processor._render_page_text_items.assert_called_once()
+        processor._write_final_render_export.assert_called_once()
 
     def test_cache_state_change_cannot_bypass_unobserved_vram_release_gate(self) -> None:
         processor = self._processor(cancelled=False)

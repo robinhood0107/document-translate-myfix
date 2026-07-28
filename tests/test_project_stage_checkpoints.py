@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 from types import SimpleNamespace
+import hashlib
 import tempfile
 import unittest
 from unittest import mock
@@ -13,21 +14,41 @@ from app.projects.checkpoint_store import (
     checkpoint_reference_for_save,
 )
 from app.projects.stage_checkpoints import (
+    RenderCheckpointResult,
+    apply_translation_checkpoint,
     build_detection_fingerprint,
     build_detection_identity,
+    build_inpaint_fingerprint,
+    build_inpaint_identity,
     build_project_ocr_fingerprint,
     build_project_ocr_identity,
+    build_render_fingerprint,
+    build_render_identity,
+    build_skipped_stage_fingerprint,
+    build_translation_fingerprint,
+    build_translation_identity,
     decoded_image_sha256,
     detection_structure_signature,
     invalidate_project_page_checkpoints,
+    lookup_inpaint_checkpoint,
     lookup_detection_checkpoint,
     lookup_ocr_checkpoint,
+    lookup_render_checkpoint,
+    lookup_translation_checkpoint,
+    materialize_render_checkpoint_output,
     open_project_stage_checkpoint_store,
     project_checkpoint_page_key,
+    record_inpaint_checkpoint,
     record_detection_checkpoint,
     record_ocr_checkpoint,
+    record_render_checkpoint,
+    record_translation_checkpoint,
+    registered_inpainter_model_identity,
+    snapshot_project_render_blocks,
+    snapshot_project_translations,
 )
 from modules.ocr.persistent_cache import snapshot_raw_ocr_result
+from modules.utils.download import ModelDownloader, ModelID, ModelSpec
 from modules.utils.textblock import TextBlock
 
 
@@ -256,6 +277,334 @@ class ProjectStageCheckpointTests(unittest.TestCase):
 
         self.assertEqual(first, second)
         self.assertNotIn("dictionary", first)
+
+    def test_translation_checkpoint_uses_ctpr_state_without_sidecar_copy(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            _project, _reference, store = self._store(tmp)
+            blocks = self._blocks()
+            blocks[0].text = "first"
+            blocks[0].translation = "첫 번째"
+            blocks[1].text = "second"
+            blocks[1].translation = "두 번째"
+            snapshot = snapshot_project_translations(blocks)
+            identity = build_translation_identity(
+                ocr_fingerprint="a" * 64,
+                source_lang="Japanese",
+                target_lang="Korean",
+                extra_context="",
+                translator_key="Custom Local Server(Gemma)",
+                translator_engine="CustomLocalGemmaTranslation",
+                translator_settings={"chunk_size": 6},
+                runtime_identity={
+                    "model_sha256": "b" * 64,
+                    "runtime_fingerprint": "runtime",
+                },
+                dictionary_fingerprint="c" * 64,
+            )
+            fingerprint = build_translation_fingerprint(identity)
+
+            self.assertTrue(
+                record_translation_checkpoint(
+                    store,
+                    page_key="page:00000000",
+                    fingerprint=fingerprint,
+                    identity=identity,
+                    blocks=blocks,
+                )
+            )
+            manifest = store.lookup_stage(
+                "page:00000000",
+                "translation",
+                fingerprint,
+            )
+            self.assertIsNotNone(manifest)
+            assert manifest is not None
+            self.assertEqual(manifest.objects, {})
+
+            current = self._blocks()
+            current[0].text = "first"
+            current[1].text = "second"
+            hit = lookup_translation_checkpoint(
+                store,
+                page_key="page:00000000",
+                fingerprint=fingerprint,
+                identity=identity,
+                current_blocks=current,
+                project_snapshot=snapshot,
+            )
+            self.assertIsNotNone(hit)
+            assert hit is not None
+            apply_translation_checkpoint(current, hit)
+            self.assertEqual(
+                [block.translation for block in current],
+                ["첫 번째", "두 번째"],
+            )
+
+            changed = [dict(item) for item in snapshot]
+            changed[0]["translation"] = "변경됨"
+            self.assertIsNone(
+                lookup_translation_checkpoint(
+                    store,
+                    page_key="page:00000000",
+                    fingerprint=fingerprint,
+                    identity=identity,
+                    current_blocks=current,
+                    project_snapshot=changed,
+                )
+            )
+
+    def test_inpaint_checkpoint_restores_lossless_image_and_final_mask(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            _project, _reference, store = self._store(tmp)
+            blocks = self._blocks()
+            blocks[0].text = "OCR"
+            image = np.arange(12 * 10 * 3, dtype=np.uint8).reshape(
+                12,
+                10,
+                3,
+            )
+            raw_mask = np.zeros((12, 10), dtype=np.uint8)
+            raw_mask[2:5, 3:8] = 255
+            generated_mask = raw_mask.copy()
+            final_mask = raw_mask.copy()
+            final_mask[5:7, 4:6] = 255
+            identity = build_inpaint_identity(
+                source_sha256="d" * 64,
+                detection_fingerprint="e" * 64,
+                ocr_fingerprint="f" * 64,
+                blocks=blocks,
+                raw_mask=raw_mask,
+                generated_mask=generated_mask,
+                brush_strokes=[],
+                runtime={
+                    "key": "AOT",
+                    "backend": "torch",
+                    "precision": "fp32",
+                },
+                model_identity={
+                    "id": "aot",
+                    "declared_digests": ["1" * 64],
+                },
+                hd_strategy={"strategy": "Original"},
+                mask_settings={"mask_refiner": "ctd"},
+            )
+            fingerprint = build_inpaint_fingerprint(identity)
+
+            self.assertTrue(
+                record_inpaint_checkpoint(
+                    store,
+                    page_key="page:00000000",
+                    fingerprint=fingerprint,
+                    identity=identity,
+                    cleaned_image=image,
+                    raw_mask=raw_mask,
+                    final_mask=final_mask,
+                    cleanup_stats={
+                        "applied": True,
+                        "component_count": 2,
+                        "block_count": 1,
+                    },
+                )
+            )
+            hit = lookup_inpaint_checkpoint(
+                store,
+                page_key="page:00000000",
+                fingerprint=fingerprint,
+                identity=identity,
+                source_shape=image.shape,
+            )
+
+            self.assertIsNotNone(hit)
+            assert hit is not None
+            np.testing.assert_array_equal(hit.cleaned_image, image)
+            np.testing.assert_array_equal(hit.raw_mask, raw_mask)
+            np.testing.assert_array_equal(hit.final_mask, final_mask)
+            self.assertTrue(hit.cleanup_stats["applied"])
+
+    def test_inpainter_identity_hashes_model_without_declared_sha256(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            model_path = Path(tmp) / "model.bin"
+            model_path.write_bytes(b"local-model")
+            spec = ModelSpec(
+                id=ModelID.AOT_TORCH,
+                url="",
+                files=["model.bin"],
+                sha256=[None],
+                save_dir=tmp,
+            )
+
+            with mock.patch.dict(
+                ModelDownloader.registry,
+                {ModelID.AOT_TORCH: spec},
+            ):
+                identity = registered_inpainter_model_identity(
+                    "AOT",
+                    "torch",
+                )
+
+            self.assertEqual(
+                identity["file_identities"][0]["sha256"],
+                hashlib.sha256(b"local-model").hexdigest(),
+            )
+
+    def test_render_checkpoint_skips_existing_output_and_materializes_missing(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            _project, _reference, store = self._store(tmp)
+            output_base = Path(tmp) / "translated"
+            output_root = Path(tmp) / "translated_001"
+            output_root.mkdir()
+            output_path = output_root / "page_translated.png"
+            expected = b"lossless-render-output"
+            output_path.write_bytes(expected)
+            blocks = self._blocks()
+            blocks[0].text = "first"
+            blocks[0].translation = "첫 번째"
+            viewer_state = {
+                "text_items_state": [
+                    {"block_id": "block-a", "text": "첫 번째"}
+                ]
+            }
+            identity = build_render_identity(
+                source_sha256="2" * 64,
+                translation_fingerprint="3" * 64,
+                inpaint_fingerprint="4" * 64,
+                inpaint_artifact_sha256="5" * 64,
+                blocks=blocks,
+                render_settings={"font_family": "Arial"},
+                export_settings={
+                    "resolved_automatic_output_target": (
+                        "individual_images"
+                    )
+                },
+                font_identity={
+                    "family": "Arial",
+                    "file_sha256": "6" * 64,
+                },
+                target_language_code="ko",
+                output_base_root=str(output_base),
+            )
+            fingerprint = build_render_fingerprint(identity)
+
+            self.assertTrue(
+                record_render_checkpoint(
+                    store,
+                    page_key="page:00000000",
+                    fingerprint=fingerprint,
+                    identity=identity,
+                    blocks=blocks,
+                    viewer_state=viewer_state,
+                    output_path=str(output_path),
+                    output_root=str(output_root),
+                )
+            )
+            project_blocks = snapshot_project_render_blocks(blocks)
+            with mock.patch.object(
+                store,
+                "read_object",
+                side_effect=AssertionError(
+                    "Existing verified output must not read the CAS object."
+                ),
+            ):
+                existing = lookup_render_checkpoint(
+                    store,
+                    page_key="page:00000000",
+                    fingerprint=fingerprint,
+                    identity=identity,
+                    project_blocks=project_blocks,
+                    project_viewer_state=viewer_state,
+                    current_output_base_root=str(output_base),
+                )
+            self.assertIsNotNone(existing)
+            assert existing is not None
+            self.assertTrue(existing.output_exists)
+            self.assertIsNone(existing.output_bytes)
+
+            output_path.unlink()
+            missing = lookup_render_checkpoint(
+                store,
+                page_key="page:00000000",
+                fingerprint=fingerprint,
+                identity=identity,
+                project_blocks=project_blocks,
+                project_viewer_state=viewer_state,
+                current_output_base_root=str(output_base),
+            )
+            self.assertIsNotNone(missing)
+            assert missing is not None
+            self.assertFalse(missing.output_exists)
+            self.assertEqual(
+                Path(materialize_render_checkpoint_output(missing)).read_bytes(),
+                expected,
+            )
+
+    def test_render_materialization_rejects_tampered_bytes_before_writing(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            output_root = Path(tmp) / "translated"
+            output_path = output_root / "page.png"
+            result = RenderCheckpointResult(
+                output_path=str(output_path),
+                output_root=str(output_root),
+                output_sha256=hashlib.sha256(b"expected").hexdigest(),
+                output_bytes=b"tampered",
+                output_exists=False,
+            )
+
+            with self.assertRaises(ValueError):
+                materialize_render_checkpoint_output(result)
+
+            self.assertFalse(output_root.exists())
+            self.assertFalse(output_path.exists())
+
+    def test_skipped_stage_fingerprint_is_stage_specific(self) -> None:
+        common = {
+            "source_sha256": "1" * 64,
+            "detection_fingerprint": "2" * 64,
+            "reason": "no_text_detected",
+        }
+        translation = build_skipped_stage_fingerprint(
+            stage="translation",
+            **common,
+        )
+        inpaint = build_skipped_stage_fingerprint(
+            stage="inpaint",
+            **common,
+        )
+
+        self.assertNotEqual(translation, inpaint)
+        self.assertEqual(len(translation), 64)
+        with self.assertRaises(ValueError):
+            build_skipped_stage_fingerprint(stage="render", **common)
+
+    def test_render_checkpoint_rejects_output_outside_owned_root(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            _project, _reference, store = self._store(tmp)
+            output_root = Path(tmp) / "owned"
+            output_root.mkdir()
+            outside = Path(tmp) / "outside.png"
+            outside.write_bytes(b"outside")
+
+            self.assertFalse(
+                record_render_checkpoint(
+                    store,
+                    page_key="page:00000000",
+                    fingerprint="7" * 64,
+                    identity={"render": "identity"},
+                    blocks=self._blocks(),
+                    viewer_state={"text_items_state": []},
+                    output_path=str(outside),
+                    output_root=str(output_root),
+                )
+            )
 
     def test_manual_page_invalidation_removes_only_ocr_and_downstream(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

@@ -2,12 +2,14 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 import copy
 import hashlib
 import json
 import logging
 import os
+import re
 
 import msgpack
 import numpy as np
@@ -36,6 +38,9 @@ logger = logging.getLogger(__name__)
 
 PROJECT_DETECTION_CHECKPOINT_SCHEMA_VERSION = 1
 PROJECT_OCR_CHECKPOINT_SCHEMA_VERSION = 1
+PROJECT_TRANSLATION_CHECKPOINT_SCHEMA_VERSION = 1
+PROJECT_INPAINT_CHECKPOINT_SCHEMA_VERSION = 1
+PROJECT_RENDER_CHECKPOINT_SCHEMA_VERSION = 1
 DETECTION_PREPROCESS_SCHEMA_VERSION = "rtdetr-v2-rgb-640-f32-v1"
 DETECTION_POSTPROCESS_SCHEMA_VERSION = "comic-text-bubble-blocks-v1"
 DETECTION_SORT_SCHEMA_VERSION = "sort-blk-list-v1"
@@ -43,9 +48,21 @@ DETECTION_MASK_SCHEMA_VERSION = "precomputed-mask-details-v1"
 DETECTION_RENDER_AREA_SCHEMA_VERSION = "detected-bubble-render-area-v1"
 DETECTION_FONT_SCHEMA_VERSION = "font-onnx-512-cv-color-v1"
 OCR_POSTPROCESS_SCHEMA_VERSION = "quality-retry-drop-guards-v1"
+TRANSLATION_STATE_SCHEMA_VERSION = "ctpr-block-translation-state-v1"
+INPAINT_INPUT_SCHEMA_VERSION = "ordered-ocr-mask-brush-v1"
+INPAINT_CLEANUP_SCHEMA_VERSION = "bubble-residue-duplicate-fill-v1"
+INPAINT_ARTIFACT_SCHEMA_VERSION = "lossless-cleaned-mask-v1"
+RENDER_INPUT_SCHEMA_VERSION = "translation-inpaint-style-layout-v1"
+RENDER_SANITIZER_SCHEMA_VERSION = "strict-symbol-rich-text-v1"
+RENDER_OUTPUT_SCHEMA_VERSION = "encoded-output-object-v1"
 
 _DETECTION_OBJECT_ROLE = "detection-result"
 _OCR_OBJECT_ROLE = "ocr-raw-result"
+_INPAINT_CLEANED_OBJECT_ROLE = "inpaint-cleaned-image"
+_INPAINT_RAW_MASK_OBJECT_ROLE = "inpaint-raw-mask"
+_INPAINT_FINAL_MASK_OBJECT_ROLE = "inpaint-final-mask"
+_RENDER_OUTPUT_OBJECT_ROLE = "render-output"
+_FILE_SHA256_CACHE: dict[tuple[str, int, int, int], str] = {}
 
 _DETECTION_BLOCK_FIELDS = (
     "block_id",
@@ -86,6 +103,29 @@ class OCRCheckpointResult:
     engine_name: str
     page_profile: dict[str, Any]
     raw_results: dict[str, dict[str, Any]]
+
+
+@dataclass(frozen=True)
+class TranslationCheckpointResult:
+    translations: dict[str, dict[str, Any]]
+
+
+@dataclass(frozen=True)
+class InpaintCheckpointResult:
+    cleaned_image: np.ndarray
+    raw_mask: np.ndarray
+    final_mask: np.ndarray
+    cleanup_stats: dict[str, Any]
+    cleaned_object_sha256: str
+
+
+@dataclass(frozen=True)
+class RenderCheckpointResult:
+    output_path: str
+    output_root: str
+    output_sha256: str
+    output_bytes: bytes | None
+    output_exists: bool
 
 
 def _json_safe(value: Any) -> Any:
@@ -728,3 +768,1054 @@ def lookup_ocr_checkpoint(
             exc_info=True,
         )
         return None
+
+
+def _packed_sha256(value: Any) -> str:
+    return hashlib.sha256(_pack(value)).hexdigest()
+
+
+def _sha256_file(path: str | os.PathLike[str]) -> str:
+    digest = hashlib.sha256()
+    with open(path, "rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _cached_sha256_file(path: str | os.PathLike[str]) -> str:
+    normalized = os.path.abspath(os.fspath(path))
+    stat_result = os.stat(normalized)
+    cache_key = (
+        normalized,
+        int(stat_result.st_size),
+        int(stat_result.st_mtime_ns),
+        int(stat_result.st_ctime_ns),
+    )
+    cached = _FILE_SHA256_CACHE.get(cache_key)
+    if cached is not None:
+        return cached
+    digest = _sha256_file(normalized)
+    stale_keys = [
+        key for key in _FILE_SHA256_CACHE if key[0] == normalized
+    ]
+    for key in stale_keys:
+        _FILE_SHA256_CACHE.pop(key, None)
+    _FILE_SHA256_CACHE[cache_key] = digest
+    return digest
+
+
+def _translation_snapshot(blocks: list[TextBlock]) -> list[dict[str, Any]]:
+    snapshot: list[dict[str, Any]] = []
+    for block in blocks:
+        block_id = str(getattr(block, "block_id", "") or "")
+        snapshot.append(
+            {
+                "block_id": block_id,
+                "source_text": str(getattr(block, "text", "") or ""),
+                "translation": copy.deepcopy(
+                    getattr(block, "translation", "")
+                ),
+                "rich_text": copy.deepcopy(getattr(block, "rich_text", "")),
+                "source_lang": str(
+                    getattr(block, "source_lang", "") or ""
+                ),
+                "target_lang": str(
+                    getattr(block, "target_lang", "") or ""
+                ),
+                "repetition_guard": copy.deepcopy(
+                    getattr(block, "_translation_repetition_guard", None)
+                ),
+            }
+        )
+    return snapshot
+
+
+def snapshot_project_translations(
+    blocks: list[TextBlock] | None,
+) -> list[dict[str, Any]]:
+    """Capture .ctpr-owned translation state without writing it to sidecar."""
+
+    return _translation_snapshot(list(blocks or []))
+
+
+def translation_state_signature(
+    snapshot_or_blocks: list[dict[str, Any]] | list[TextBlock],
+) -> str:
+    values = list(snapshot_or_blocks or [])
+    if values and isinstance(values[0], TextBlock):
+        values = _translation_snapshot(values)  # type: ignore[arg-type]
+    return _packed_sha256(
+        {
+            "schema": TRANSLATION_STATE_SCHEMA_VERSION,
+            "blocks": values,
+        }
+    )
+
+
+def build_translation_identity(
+    *,
+    ocr_fingerprint: str,
+    source_lang: str,
+    target_lang: str,
+    extra_context: str,
+    translator_key: str,
+    translator_engine: str,
+    translator_settings: Mapping[str, Any],
+    runtime_identity: Mapping[str, Any],
+    dictionary_fingerprint: str,
+) -> dict[str, Any]:
+    return {
+        "schema_version": PROJECT_TRANSLATION_CHECKPOINT_SCHEMA_VERSION,
+        "ocr_fingerprint": str(ocr_fingerprint or ""),
+        "source_lang": str(source_lang or ""),
+        "target_lang": str(target_lang or ""),
+        "extra_context": str(extra_context or ""),
+        "translator_key": str(translator_key or ""),
+        "translator_engine": str(translator_engine or ""),
+        "translator_settings": _json_safe(dict(translator_settings)),
+        "runtime": _json_safe(dict(runtime_identity)),
+        "dictionary_fingerprint": str(dictionary_fingerprint or ""),
+        "state_schema": TRANSLATION_STATE_SCHEMA_VERSION,
+    }
+
+
+def build_translation_fingerprint(identity: Mapping[str, Any]) -> str:
+    return canonical_sha256(
+        {
+            "stage": "translation",
+            "identity": dict(identity),
+        }
+    )
+
+
+def record_translation_checkpoint(
+    store: ProjectCheckpointStore | None,
+    *,
+    page_key: str,
+    fingerprint: str,
+    identity: Mapping[str, Any],
+    blocks: list[TextBlock],
+) -> bool:
+    if store is None or not store.available:
+        return False
+    snapshot = _translation_snapshot(blocks)
+    block_ids = [str(item.get("block_id", "") or "") for item in snapshot]
+    translations = [item.get("translation") for item in snapshot]
+    if (
+        not snapshot
+        or any(not block_id for block_id in block_ids)
+        or len(set(block_ids)) != len(block_ids)
+        or any(
+            not isinstance(translation, str) or not translation.strip()
+            for translation in translations
+        )
+    ):
+        return False
+    return store.record_stage(
+        page_key,
+        "translation",
+        fingerprint,
+        payload={
+            "schema_version": PROJECT_TRANSLATION_CHECKPOINT_SCHEMA_VERSION,
+            "identity_sha256": canonical_sha256(dict(identity)),
+            "block_ids": block_ids,
+            "translation_state_signature": translation_state_signature(
+                snapshot
+            ),
+        },
+        objects={},
+    )
+
+
+def lookup_translation_checkpoint(
+    store: ProjectCheckpointStore | None,
+    *,
+    page_key: str,
+    fingerprint: str,
+    identity: Mapping[str, Any],
+    current_blocks: list[TextBlock],
+    project_snapshot: list[dict[str, Any]] | None,
+) -> TranslationCheckpointResult | None:
+    if store is None or not project_snapshot:
+        return None
+    hit = store.lookup_stage(page_key, "translation", fingerprint)
+    if hit is None:
+        return None
+    try:
+        payload = dict(hit.payload)
+        if (
+            int(payload.get("schema_version", 0))
+            != PROJECT_TRANSLATION_CHECKPOINT_SCHEMA_VERSION
+            or payload.get("identity_sha256")
+            != canonical_sha256(dict(identity))
+            or hit.objects
+        ):
+            return None
+        current_ids = [
+            str(getattr(block, "block_id", "") or "")
+            for block in current_blocks
+        ]
+        snapshot_ids = [
+            str(item.get("block_id", "") or "")
+            for item in project_snapshot
+            if isinstance(item, Mapping)
+        ]
+        if (
+            not current_ids
+            or payload.get("block_ids") != current_ids
+            or snapshot_ids != current_ids
+            or len(set(current_ids)) != len(current_ids)
+            or payload.get("translation_state_signature")
+            != translation_state_signature(project_snapshot)
+        ):
+            return None
+
+        restored: dict[str, dict[str, Any]] = {}
+        for block, snapshot in zip(current_blocks, project_snapshot):
+            if not isinstance(snapshot, Mapping):
+                return None
+            if str(snapshot.get("source_text", "") or "") != str(
+                getattr(block, "text", "") or ""
+            ):
+                return None
+            translation = snapshot.get("translation")
+            if not isinstance(translation, str) or not translation.strip():
+                return None
+            restored[str(getattr(block, "block_id", "") or "")] = {
+                "translation": translation,
+                "rich_text": copy.deepcopy(snapshot.get("rich_text", "")),
+                "source_lang": str(snapshot.get("source_lang", "") or ""),
+                "target_lang": str(snapshot.get("target_lang", "") or ""),
+                "repetition_guard": copy.deepcopy(
+                    snapshot.get("repetition_guard")
+                ),
+            }
+        return TranslationCheckpointResult(translations=restored)
+    except (KeyError, TypeError, ValueError):
+        logger.warning(
+            "Invalid translation checkpoint ignored for %s; translation will "
+            "be recomputed.",
+            page_key,
+            exc_info=True,
+        )
+        return None
+
+
+def apply_translation_checkpoint(
+    blocks: list[TextBlock],
+    result: TranslationCheckpointResult,
+) -> None:
+    for block in blocks:
+        block_id = str(getattr(block, "block_id", "") or "")
+        state = result.translations.get(block_id)
+        if state is None:
+            raise ValueError("Translation checkpoint block is missing.")
+        block.translation = str(state.get("translation", "") or "")
+        block.rich_text = copy.deepcopy(state.get("rich_text", ""))
+        block.source_lang = str(state.get("source_lang", "") or "")
+        block.target_lang = str(state.get("target_lang", "") or "")
+        guard = state.get("repetition_guard")
+        if isinstance(guard, Mapping):
+            setattr(block, "_translation_repetition_guard", dict(guard))
+        elif hasattr(block, "_translation_repetition_guard"):
+            delattr(block, "_translation_repetition_guard")
+
+
+def registered_inpainter_model_identity(
+    inpainter_key: str,
+    backend: str,
+) -> dict[str, Any]:
+    key = str(inpainter_key or "")
+    backend_name = str(backend or "")
+    model_id: ModelID | None = None
+    if key == "AOT":
+        model_id = (
+            ModelID.AOT_ONNX
+            if backend_name.lower() == "onnx"
+            else ModelID.AOT_TORCH
+        )
+    elif key == "lama_large_512px":
+        model_id = ModelID.LAMA_LARGE_512PX
+    elif key == "lama_mpe":
+        model_id = ModelID.LAMA_MPE
+    elif key == "MI-GAN":
+        model_id = (
+            ModelID.MIGAN_PIPELINE_ONNX
+            if backend_name.lower() == "onnx"
+            else ModelID.MIGAN_JIT
+        )
+    if model_id is None:
+        return {
+            "id": "",
+            "files": [],
+            "declared_digests": [],
+            "file_identities": [],
+        }
+    spec = ModelDownloader.registry.get(model_id)
+    if spec is None:
+        return {
+            "id": model_id.value,
+            "files": [],
+            "declared_digests": [],
+            "file_identities": [],
+        }
+    file_identities: list[dict[str, str]] = []
+    for index, remote_name in enumerate(spec.files or []):
+        local_name = (
+            spec.save_as.get(remote_name, remote_name)
+            if spec.save_as
+            else remote_name
+        )
+        declared = (
+            str(spec.sha256[index] or "").strip().lower()
+            if index < len(spec.sha256 or [])
+            else ""
+        )
+        actual_sha256 = (
+            declared
+            if re.fullmatch(r"[0-9a-f]{64}", declared)
+            else ""
+        )
+        if not actual_sha256:
+            local_path = os.path.join(spec.save_dir, local_name)
+            try:
+                if os.path.isfile(local_path):
+                    actual_sha256 = _cached_sha256_file(local_path)
+            except OSError:
+                actual_sha256 = ""
+        file_identities.append(
+            {
+                "name": str(local_name),
+                "declared_digest": declared,
+                "sha256": actual_sha256,
+            }
+        )
+    return {
+        "id": model_id.value,
+        "files": list(spec.files or []),
+        "declared_digests": [
+            str(value or "").lower() for value in (spec.sha256 or [])
+        ],
+        "file_identities": file_identities,
+    }
+
+
+def _block_inpaint_record(block: TextBlock) -> dict[str, Any]:
+    return {
+        **detection_block_record(block),
+        "text": str(getattr(block, "text", "") or ""),
+        "ocr_status": str(getattr(block, "ocr_status", "") or ""),
+        "ocr_empty_reason": str(
+            getattr(block, "ocr_empty_reason", "") or ""
+        ),
+    }
+
+
+def _brush_stroke_signature(strokes: list[dict[str, Any]] | None) -> str:
+    return _packed_sha256(
+        {
+            "schema": "project-brush-strokes-v1",
+            "strokes": copy.deepcopy(list(strokes or [])),
+        }
+    )
+
+
+def build_inpaint_identity(
+    *,
+    source_sha256: str,
+    detection_fingerprint: str,
+    ocr_fingerprint: str,
+    blocks: list[TextBlock],
+    raw_mask: np.ndarray,
+    generated_mask: np.ndarray,
+    brush_strokes: list[dict[str, Any]] | None,
+    runtime: Mapping[str, Any],
+    model_identity: Mapping[str, Any],
+    hd_strategy: Mapping[str, Any],
+    mask_settings: Mapping[str, Any],
+) -> dict[str, Any]:
+    return {
+        "schema_version": PROJECT_INPAINT_CHECKPOINT_SCHEMA_VERSION,
+        "source_decoded_content_sha256": str(source_sha256 or ""),
+        "detection_fingerprint": str(detection_fingerprint or ""),
+        "ocr_fingerprint": str(ocr_fingerprint or ""),
+        "ordered_blocks_sha256": canonical_sha256(
+            [_block_inpaint_record(block) for block in blocks]
+        ),
+        "raw_mask_sha256": decoded_image_sha256(raw_mask),
+        "generated_mask_sha256": decoded_image_sha256(generated_mask),
+        "brush_strokes_sha256": _brush_stroke_signature(brush_strokes),
+        "runtime": _json_safe(dict(runtime)),
+        "model": _json_safe(dict(model_identity)),
+        "hd_strategy": _json_safe(dict(hd_strategy)),
+        "mask_settings": _json_safe(dict(mask_settings)),
+        "input_schema": INPAINT_INPUT_SCHEMA_VERSION,
+        "cleanup_schema": INPAINT_CLEANUP_SCHEMA_VERSION,
+        "artifact_schema": INPAINT_ARTIFACT_SCHEMA_VERSION,
+    }
+
+
+def build_inpaint_fingerprint(identity: Mapping[str, Any]) -> str:
+    return canonical_sha256(
+        {
+            "stage": "inpaint",
+            "identity": dict(identity),
+        }
+    )
+
+
+def build_skipped_stage_fingerprint(
+    *,
+    stage: str,
+    source_sha256: str,
+    detection_fingerprint: str,
+    reason: str,
+) -> str:
+    """Identify a deterministic no-op stage without storing a fake artifact."""
+
+    normalized_stage = str(stage or "").strip()
+    if normalized_stage not in {"translation", "inpaint"}:
+        raise ValueError("Only translation and inpaint stages may be skipped.")
+    schema_version = (
+        PROJECT_TRANSLATION_CHECKPOINT_SCHEMA_VERSION
+        if normalized_stage == "translation"
+        else PROJECT_INPAINT_CHECKPOINT_SCHEMA_VERSION
+    )
+    return canonical_sha256(
+        {
+            "stage": normalized_stage,
+            "schema_version": schema_version,
+            "outcome": "skipped",
+            "reason": str(reason or ""),
+            "source_decoded_content_sha256": str(source_sha256 or ""),
+            "detection_fingerprint": str(detection_fingerprint or ""),
+        }
+    )
+
+
+def _pack_array_artifact(kind: str, value: np.ndarray) -> bytes:
+    return _pack(
+        {
+            "schema_version": PROJECT_INPAINT_CHECKPOINT_SCHEMA_VERSION,
+            "artifact_schema": INPAINT_ARTIFACT_SCHEMA_VERSION,
+            "kind": kind,
+            "array": np.ascontiguousarray(value),
+        }
+    )
+
+
+def _unpack_array_artifact(
+    payload: bytes,
+    *,
+    kind: str,
+    expected_shape: tuple[int, ...],
+    mask: bool,
+) -> np.ndarray:
+    decoded = _unpack(payload)
+    if not isinstance(decoded, Mapping):
+        raise ValueError("Inpaint checkpoint artifact must be an object.")
+    if (
+        int(decoded.get("schema_version", 0))
+        != PROJECT_INPAINT_CHECKPOINT_SCHEMA_VERSION
+        or decoded.get("artifact_schema") != INPAINT_ARTIFACT_SCHEMA_VERSION
+        or decoded.get("kind") != kind
+    ):
+        raise ValueError("Inpaint checkpoint artifact schema does not match.")
+    value = decoded.get("array")
+    if not isinstance(value, np.ndarray):
+        raise ValueError("Inpaint checkpoint artifact array is missing.")
+    if tuple(int(item) for item in value.shape) != expected_shape:
+        raise ValueError("Inpaint checkpoint artifact shape does not match.")
+    if value.dtype != np.uint8:
+        raise ValueError("Inpaint checkpoint artifact dtype must be uint8.")
+    if mask and value.ndim != 2:
+        raise ValueError("Inpaint checkpoint mask must be two-dimensional.")
+    if not mask and (value.ndim != 3 or value.shape[2] not in (3, 4)):
+        raise ValueError("Inpaint checkpoint image must be RGB or RGBA.")
+    return np.ascontiguousarray(value)
+
+
+def _compact_cleanup_stats(
+    value: Mapping[str, Any] | None,
+) -> dict[str, Any]:
+    stats = dict(value or {})
+    return {
+        "applied": bool(stats.get("applied", False)),
+        "component_count": max(
+            0, int(stats.get("component_count", 0) or 0)
+        ),
+        "block_count": max(0, int(stats.get("block_count", 0) or 0)),
+        "duplicate_bubble_inner_fill_applied": bool(
+            stats.get("duplicate_bubble_inner_fill_applied", False)
+        ),
+        "duplicate_bubble_inner_fill_pixel_count": max(
+            0,
+            int(
+                stats.get(
+                    "duplicate_bubble_inner_fill_pixel_count",
+                    0,
+                )
+                or 0
+            ),
+        ),
+    }
+
+
+def record_inpaint_checkpoint(
+    store: ProjectCheckpointStore | None,
+    *,
+    page_key: str,
+    fingerprint: str,
+    identity: Mapping[str, Any],
+    cleaned_image: np.ndarray,
+    raw_mask: np.ndarray,
+    final_mask: np.ndarray,
+    cleanup_stats: Mapping[str, Any] | None,
+) -> bool:
+    if store is None or not store.available:
+        return False
+    cleaned = np.ascontiguousarray(cleaned_image)
+    raw = np.ascontiguousarray(raw_mask)
+    final = np.ascontiguousarray(final_mask)
+    if (
+        cleaned.dtype != np.uint8
+        or cleaned.ndim != 3
+        or cleaned.shape[2] not in (3, 4)
+        or raw.dtype != np.uint8
+        or final.dtype != np.uint8
+        or raw.shape != cleaned.shape[:2]
+        or final.shape != cleaned.shape[:2]
+    ):
+        return False
+    objects: dict[str, str] = {}
+    for role, kind, value in (
+        (_INPAINT_CLEANED_OBJECT_ROLE, "cleaned-image", cleaned),
+        (_INPAINT_RAW_MASK_OBJECT_ROLE, "raw-mask", raw),
+        (_INPAINT_FINAL_MASK_OBJECT_ROLE, "final-mask", final),
+    ):
+        object_hash = store.put_object(_pack_array_artifact(kind, value))
+        if object_hash is None:
+            return False
+        objects[role] = object_hash
+    compact_stats = _compact_cleanup_stats(cleanup_stats)
+    return store.record_stage(
+        page_key,
+        "inpaint",
+        fingerprint,
+        payload={
+            "schema_version": PROJECT_INPAINT_CHECKPOINT_SCHEMA_VERSION,
+            "identity_sha256": canonical_sha256(dict(identity)),
+            "cleaned_shape": [int(item) for item in cleaned.shape],
+            "mask_shape": [int(item) for item in final.shape],
+            "cleaned_sha256": decoded_image_sha256(cleaned),
+            "raw_mask_sha256": decoded_image_sha256(raw),
+            "final_mask_sha256": decoded_image_sha256(final),
+            "cleanup_stats": compact_stats,
+        },
+        objects=objects,
+    )
+
+
+def lookup_inpaint_checkpoint(
+    store: ProjectCheckpointStore | None,
+    *,
+    page_key: str,
+    fingerprint: str,
+    identity: Mapping[str, Any],
+    source_shape: tuple[int, ...],
+) -> InpaintCheckpointResult | None:
+    if store is None:
+        return None
+    hit = store.lookup_stage(page_key, "inpaint", fingerprint)
+    if hit is None:
+        return None
+    try:
+        payload = dict(hit.payload)
+        if (
+            int(payload.get("schema_version", 0))
+            != PROJECT_INPAINT_CHECKPOINT_SCHEMA_VERSION
+            or payload.get("identity_sha256")
+            != canonical_sha256(dict(identity))
+        ):
+            return None
+        cleaned_shape = tuple(
+            int(item) for item in payload.get("cleaned_shape", [])
+        )
+        mask_shape = tuple(
+            int(item) for item in payload.get("mask_shape", [])
+        )
+        if (
+            cleaned_shape != tuple(int(item) for item in source_shape)
+            or mask_shape != cleaned_shape[:2]
+        ):
+            return None
+
+        def read(role: str, kind: str, shape: tuple[int, ...], mask: bool):
+            object_hash = hit.objects.get(role, "")
+            raw = store.read_object(object_hash) if object_hash else None
+            if raw is None:
+                raise ValueError("Inpaint checkpoint object is missing.")
+            return (
+                _unpack_array_artifact(
+                    raw,
+                    kind=kind,
+                    expected_shape=shape,
+                    mask=mask,
+                ),
+                object_hash,
+            )
+
+        cleaned, cleaned_hash = read(
+            _INPAINT_CLEANED_OBJECT_ROLE,
+            "cleaned-image",
+            cleaned_shape,
+            False,
+        )
+        raw_mask, _ = read(
+            _INPAINT_RAW_MASK_OBJECT_ROLE,
+            "raw-mask",
+            mask_shape,
+            True,
+        )
+        final_mask, _ = read(
+            _INPAINT_FINAL_MASK_OBJECT_ROLE,
+            "final-mask",
+            mask_shape,
+            True,
+        )
+        if (
+            payload.get("cleaned_sha256") != decoded_image_sha256(cleaned)
+            or payload.get("raw_mask_sha256")
+            != decoded_image_sha256(raw_mask)
+            or payload.get("final_mask_sha256")
+            != decoded_image_sha256(final_mask)
+        ):
+            raise ValueError("Inpaint checkpoint artifact digest does not match.")
+        cleanup_stats = payload.get("cleanup_stats")
+        if not isinstance(cleanup_stats, Mapping):
+            cleanup_stats = {}
+        return InpaintCheckpointResult(
+            cleaned_image=cleaned,
+            raw_mask=raw_mask,
+            final_mask=final_mask,
+            cleanup_stats=_compact_cleanup_stats(cleanup_stats),
+            cleaned_object_sha256=cleaned_hash,
+        )
+    except (
+        KeyError,
+        TypeError,
+        ValueError,
+        msgpack.ExtraData,
+        msgpack.FormatError,
+        msgpack.StackError,
+    ):
+        logger.warning(
+            "Invalid inpaint checkpoint ignored for %s; inpainting will be "
+            "recomputed.",
+            page_key,
+            exc_info=True,
+        )
+        return None
+
+
+def viewer_render_state_signature(viewer_state: Mapping[str, Any] | None) -> str:
+    value = dict(viewer_state or {})
+    return _packed_sha256(
+        {
+            "schema": "viewer-text-items-state-v1",
+            "text_items_state": copy.deepcopy(
+                value.get("text_items_state", [])
+            ),
+        }
+    )
+
+
+def snapshot_project_render_blocks(
+    blocks: list[TextBlock] | None,
+) -> list[TextBlock]:
+    return [block.deep_copy() for block in list(blocks or [])]
+
+
+def render_block_state_signature(blocks: list[TextBlock] | None) -> str:
+    return _packed_sha256(
+        {
+            "schema": "render-block-state-v1",
+            "blocks": [
+                copy.deepcopy(getattr(block, "__dict__", {}))
+                for block in list(blocks or [])
+            ],
+        }
+    )
+
+
+def resolve_font_identity(
+    main_page: Any,
+    font_family: str,
+) -> dict[str, Any]:
+    family = str(font_family or "").strip()
+    candidates: list[str] = []
+    if os.path.isfile(family):
+        candidates.append(os.path.abspath(family))
+    path_map = getattr(main_page, "_custom_font_path_to_family", {})
+    if isinstance(path_map, Mapping):
+        for path, mapped_family in path_map.items():
+            if str(mapped_family or "").casefold() == family.casefold():
+                candidates.append(os.path.abspath(str(path)))
+    for candidate in candidates:
+        try:
+            if os.path.isfile(candidate):
+                return {
+                    "family": family,
+                    "file_name": os.path.basename(candidate),
+                    "file_sha256": _sha256_file(candidate),
+                    "program_sha256": "",
+                }
+        except OSError:
+            continue
+
+    program_digest = hashlib.sha256()
+    try:
+        from PySide6.QtGui import QFont, QRawFont
+
+        raw_font = QRawFont.fromFont(QFont(family, 32))
+        program_digest.update(family.encode("utf-8"))
+        for tag in (
+            "head",
+            "name",
+            "cmap",
+            "glyf",
+            "CFF ",
+            "CFF2",
+            "GSUB",
+            "GPOS",
+            "OS/2",
+            "post",
+            "hhea",
+            "maxp",
+        ):
+            table = bytes(raw_font.fontTable(tag))
+            if table:
+                program_digest.update(tag.encode("ascii"))
+                program_digest.update(table)
+    except Exception:
+        logger.debug(
+            "Unable to fingerprint the selected font program.",
+            exc_info=True,
+        )
+    return {
+        "family": family,
+        "file_name": "",
+        "file_sha256": "",
+        "program_sha256": (
+            program_digest.hexdigest()
+            if program_digest.digest() != hashlib.sha256().digest()
+            else ""
+        ),
+    }
+
+
+def build_render_identity(
+    *,
+    source_sha256: str,
+    translation_fingerprint: str,
+    inpaint_fingerprint: str,
+    inpaint_artifact_sha256: str,
+    blocks: list[TextBlock],
+    render_settings: Mapping[str, Any],
+    export_settings: Mapping[str, Any],
+    font_identity: Mapping[str, Any],
+    target_language_code: str,
+    output_base_root: str,
+) -> dict[str, Any]:
+    return {
+        "schema_version": PROJECT_RENDER_CHECKPOINT_SCHEMA_VERSION,
+        "source_decoded_content_sha256": str(source_sha256 or ""),
+        "translation_fingerprint": str(translation_fingerprint or ""),
+        "inpaint_fingerprint": str(inpaint_fingerprint or ""),
+        "inpaint_artifact_sha256": str(
+            inpaint_artifact_sha256 or ""
+        ),
+        "ordered_translation_sha256": canonical_sha256(
+            [
+                {
+                    "block_id": str(getattr(block, "block_id", "") or ""),
+                    "source_text": str(getattr(block, "text", "") or ""),
+                    "translation": str(
+                        getattr(block, "translation", "") or ""
+                    ),
+                    "rich_text": copy.deepcopy(
+                        getattr(block, "rich_text", "")
+                    ),
+                }
+                for block in blocks
+            ]
+        ),
+        "render_settings": _json_safe(dict(render_settings)),
+        "export_settings": _json_safe(dict(export_settings)),
+        "font": _json_safe(dict(font_identity)),
+        "target_language_code": str(target_language_code or ""),
+        "output_base_root": os.path.normcase(
+            os.path.abspath(str(output_base_root or ""))
+        ),
+        "input_schema": RENDER_INPUT_SCHEMA_VERSION,
+        "sanitizer_schema": RENDER_SANITIZER_SCHEMA_VERSION,
+        "output_schema": RENDER_OUTPUT_SCHEMA_VERSION,
+    }
+
+
+def build_render_fingerprint(identity: Mapping[str, Any]) -> str:
+    return canonical_sha256(
+        {
+            "stage": "render",
+            "identity": dict(identity),
+        }
+    )
+
+
+def _reserved_output_root_matches(
+    recorded_root: str,
+    current_base_root: str,
+) -> bool:
+    recorded = Path(os.path.abspath(recorded_root))
+    current = Path(os.path.abspath(current_base_root))
+    if os.path.normcase(str(recorded.parent)) != os.path.normcase(
+        str(current.parent)
+    ):
+        return False
+    recorded_name = os.path.normcase(recorded.name)
+    current_name = os.path.normcase(current.name)
+    return bool(
+        recorded_name == current_name
+        or re.fullmatch(
+            rf"{re.escape(current_name)}_[0-9]{{3}}",
+            recorded_name,
+        )
+    )
+
+
+def _path_within(path: str, root: str) -> bool:
+    try:
+        lexical_match = os.path.commonpath(
+            [os.path.abspath(path), os.path.abspath(root)]
+        ) == os.path.abspath(root)
+        real_match = os.path.commonpath(
+            [os.path.realpath(path), os.path.realpath(root)]
+        ) == os.path.realpath(root)
+        return lexical_match and real_match
+    except (OSError, ValueError):
+        return False
+
+
+def _path_has_symlink_component(path: str, root: str) -> bool:
+    try:
+        root_path = Path(os.path.abspath(root))
+        path_value = Path(os.path.abspath(path))
+        relative = path_value.relative_to(root_path)
+        cursor = root_path
+        if cursor.exists() and cursor.is_symlink():
+            return True
+        for part in relative.parts:
+            cursor = cursor / part
+            if cursor.exists() and cursor.is_symlink():
+                return True
+        return False
+    except (OSError, ValueError):
+        return True
+
+
+def record_render_checkpoint(
+    store: ProjectCheckpointStore | None,
+    *,
+    page_key: str,
+    fingerprint: str,
+    identity: Mapping[str, Any],
+    blocks: list[TextBlock],
+    viewer_state: Mapping[str, Any],
+    output_path: str,
+    output_root: str,
+) -> bool:
+    if store is None or not store.available:
+        return False
+    normalized_path = os.path.abspath(str(output_path or ""))
+    normalized_root = os.path.abspath(str(output_root or ""))
+    if (
+        not normalized_path
+        or not normalized_root
+        or not _path_within(normalized_path, normalized_root)
+        or _path_has_symlink_component(normalized_path, normalized_root)
+        or not os.path.isfile(normalized_path)
+    ):
+        return False
+    try:
+        output_bytes = Path(normalized_path).read_bytes()
+        block_state_signature = render_block_state_signature(blocks)
+    except OSError:
+        return False
+    except (TypeError, ValueError, msgpack.PackException):
+        logger.warning(
+            "Render checkpoint block state could not be serialized; the "
+            "render output remains valid but will not be cached.",
+            exc_info=True,
+        )
+        return False
+    object_hash = store.put_object(output_bytes)
+    if object_hash is None:
+        return False
+    return store.record_stage(
+        page_key,
+        "render",
+        fingerprint,
+        payload={
+            "schema_version": PROJECT_RENDER_CHECKPOINT_SCHEMA_VERSION,
+            "identity_sha256": canonical_sha256(dict(identity)),
+            "viewer_state_signature": viewer_render_state_signature(
+                viewer_state
+            ),
+            "block_ids": [
+                str(getattr(block, "block_id", "") or "")
+                for block in blocks
+            ],
+            "render_block_state_signature": block_state_signature,
+            "output_path": normalized_path,
+            "output_root": normalized_root,
+            "output_sha256": object_hash,
+            "output_size": len(output_bytes),
+        },
+        objects={_RENDER_OUTPUT_OBJECT_ROLE: object_hash},
+    )
+
+
+def lookup_render_checkpoint(
+    store: ProjectCheckpointStore | None,
+    *,
+    page_key: str,
+    fingerprint: str,
+    identity: Mapping[str, Any],
+    project_blocks: list[TextBlock] | None,
+    project_viewer_state: Mapping[str, Any] | None,
+    current_output_base_root: str,
+) -> RenderCheckpointResult | None:
+    if store is None or project_viewer_state is None:
+        return None
+    hit = store.lookup_stage(page_key, "render", fingerprint)
+    if hit is None:
+        return None
+    try:
+        payload = dict(hit.payload)
+        output_path = os.path.abspath(
+            str(payload.get("output_path", "") or "")
+        )
+        output_root = os.path.abspath(
+            str(payload.get("output_root", "") or "")
+        )
+        object_hash = str(
+            hit.objects.get(_RENDER_OUTPUT_OBJECT_ROLE, "") or ""
+        )
+        if (
+            int(payload.get("schema_version", 0))
+            != PROJECT_RENDER_CHECKPOINT_SCHEMA_VERSION
+            or payload.get("identity_sha256")
+            != canonical_sha256(dict(identity))
+            or payload.get("viewer_state_signature")
+            != viewer_render_state_signature(project_viewer_state)
+            or payload.get("block_ids")
+            != [
+                str(getattr(block, "block_id", "") or "")
+                for block in list(project_blocks or [])
+            ]
+            or payload.get("render_block_state_signature")
+            != render_block_state_signature(project_blocks)
+            or payload.get("output_sha256") != object_hash
+            or not _reserved_output_root_matches(
+                output_root,
+                current_output_base_root,
+            )
+            or not _path_within(output_path, output_root)
+            or _path_has_symlink_component(output_path, output_root)
+        ):
+            return None
+        if os.path.exists(output_path):
+            if (
+                not os.path.isfile(output_path)
+                or _sha256_file(output_path) != object_hash
+            ):
+                # Never overwrite an existing mismatched user file.
+                return None
+            return RenderCheckpointResult(
+                output_path=output_path,
+                output_root=output_root,
+                output_sha256=object_hash,
+                output_bytes=None,
+                output_exists=True,
+            )
+        object_bytes = store.read_object(object_hash)
+        if (
+            object_bytes is None
+            or len(object_bytes) != int(payload.get("output_size", -1))
+            or hashlib.sha256(object_bytes).hexdigest() != object_hash
+        ):
+            return None
+        return RenderCheckpointResult(
+            output_path=output_path,
+            output_root=output_root,
+            output_sha256=object_hash,
+            output_bytes=object_bytes,
+            output_exists=False,
+        )
+    except (KeyError, OSError, TypeError, ValueError):
+        logger.warning(
+            "Invalid render checkpoint ignored for %s; rendering will be "
+            "recomputed.",
+            page_key,
+            exc_info=True,
+        )
+        return None
+
+
+def materialize_render_checkpoint_output(
+    result: RenderCheckpointResult,
+) -> str:
+    if result.output_exists:
+        return result.output_path
+    if result.output_bytes is None:
+        raise ValueError("Render checkpoint output bytes are missing.")
+    if (
+        hashlib.sha256(result.output_bytes).hexdigest()
+        != result.output_sha256
+    ):
+        raise ValueError("Render checkpoint output digest does not match.")
+    path = Path(result.output_path)
+    if _path_has_symlink_component(
+        result.output_path,
+        result.output_root,
+    ):
+        raise OSError(
+            "Render checkpoint output path contains a symbolic link."
+        )
+    path.parent.mkdir(parents=True, exist_ok=True)
+    if _path_has_symlink_component(
+        result.output_path,
+        result.output_root,
+    ):
+        raise OSError(
+            "Render checkpoint output path contains a symbolic link."
+        )
+    if path.exists():
+        raise FileExistsError(
+            "Render checkpoint refuses to overwrite an existing output."
+        )
+    temporary = path.with_name(f".{path.name}.partial-{os.getpid()}")
+    try:
+        with open(temporary, "xb") as handle:
+            handle.write(result.output_bytes)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temporary, path)
+    finally:
+        try:
+            temporary.unlink()
+        except FileNotFoundError:
+            pass
+    if _sha256_file(path) != result.output_sha256:
+        raise OSError("Materialized render checkpoint failed verification.")
+    return str(path)
