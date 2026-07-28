@@ -4,6 +4,10 @@
 
 이 저장소는 upstream `comic-translate` `v2.6.7` 코드베이스에서 시작한 뒤, 로컬 런타임/OCR/워크플로/Windows 환경 쪽으로 제품화 수정을 누적한 local-first 포크입니다.
 
+현재 포크의 제품 릴리스 버전은 `1.1.0`입니다. upstream `2.7.1`은
+마지막 selective backport 계보로 별도 기록하며, 이 포크의 제품 버전과
+같은 의미로 사용하지 않습니다.
+
 이 포크는 아래 워크플로를 중심으로 유지됩니다.
 
 - 로컬 Gemma 번역 런타임
@@ -96,8 +100,17 @@ OCR:
 - `develop`: 다음 제품 작업을 통합하는 브랜치
 - `main`: 실제 출하 기준선
 - 공식 릴리스: `main`에 포함된 커밋에만 `vX.Y.Z` 버전 태그를 달아 GitHub Release 생성
-- Windows 릴리스 자산: 해당 태그에서 `Nuitka`로 exe 패키징 후 업로드
-- 모델, 체크포인트, Docker 런타임은 exe에 포함하지 않고 별도 준비 대상으로 유지
+- 공식 Windows 자산:
+  `comic-translate-vX.Y.Z-windows-launcher-source.zip`과
+  `SHA256SUMS.txt`
+- ZIP 포함 범위: allowlist에 든 제품 source, CUDA12/CUDA13 첫 실행
+  launcher·requirements, Docker Compose/config, Gemma 준비 스크립트,
+  번역/resources, README, LICENSE
+- ZIP 제외 범위: venv, 모델, 캐시, benchmark runner/raw 결과,
+  로컬 절대경로, secret
+- launcher는 첫 실행 때 지원 환경을 설치하며, 릴리스 후보는 추출 후
+  `COMIC_VERIFY_ONLY=1`로 두 launcher의 무설치 계약을 확인
+- 기존 Nuitka PowerShell 스크립트는 비공식 수동 도구로만 유지
 - `release/*` 브랜치는 사용하지 않음
 
 저장소 운영 기준 문서는 [rules.md](rules.md)입니다.
@@ -176,7 +189,7 @@ OCR:
 - 비동기 UI 콜백의 main-thread-safe `QTimer.singleShot(...)` 정리
 - 리스트 썸네일 로더를 worker `QImage` + main-thread `QPixmap` 구조로 안정화
 - import 메뉴에서 `Project File` 옆 `PSD` 정리
-- 앱 버전 `2.7.1` 반영
+- upstream selective-backport 계보를 `2.7.1`로 기록
 
 검수 문서:
 
