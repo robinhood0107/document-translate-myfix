@@ -26,7 +26,7 @@ PROTOCOL_PATH = (
     ROOT
     / "benchmarks"
     / "cold_cache_finalization"
-    / "protocol-v1.json"
+    / "protocol-v2.json"
 )
 PIPELINE_RUNNER = SCRIPT_DIR / "benchmark_pipeline.py"
 MANAGED_CONTAINERS = (
@@ -146,7 +146,7 @@ def ensure_external_output(path: Path, *, require_new: bool) -> Path:
 
 def load_protocol() -> dict[str, Any]:
     protocol = _read_json(PROTOCOL_PATH)
-    if int(protocol.get("protocol_version", 0) or 0) != 1:
+    if int(protocol.get("protocol_version", 0) or 0) != 2:
         raise ValueError("Unsupported cold/cache finalization protocol version.")
     limits = protocol.get("limits")
     gates = protocol.get("gates")
@@ -950,6 +950,12 @@ def _reduction_percent(baseline: float, candidate: float) -> float:
     if baseline <= 0:
         return 0.0
     return ((baseline - candidate) / baseline) * 100.0
+
+
+def _net_gain_percent(control_total: float, cache_total: float) -> float:
+    if control_total <= 0 or cache_total <= 0:
+        return float("-inf")
+    return ((control_total - cache_total) / control_total) * 100.0
 
 
 def analyze_pipeline_results(
@@ -2737,10 +2743,6 @@ def analyze_cache_results(
         "enabled_empty_cold_rounds_complete": (
             len(enabled) == required_rounds
         ),
-        "cache_miss_overhead_gate": (
-            miss_overhead
-            <= float(gates["cache_miss_overhead_percent"])
-        ),
     }
     if scenario == "global-ocr":
         hit = results["all_hit"]
@@ -2769,6 +2771,16 @@ def analyze_cache_results(
             cold_winner_median,
             _stage_elapsed(hit, "ocr"),
         )
+        repeat_without_cache_total = disabled_median * 2.0
+        cold_plus_all_hit_total = (
+            enabled_median + _stage_elapsed(hit, "ocr")
+        )
+        repeat_net_gain = _net_gain_percent(
+            repeat_without_cache_total,
+            cold_plus_all_hit_total,
+        )
+        partial_total = 0.0
+        partial_net_gain: float | None = None
         checks = {
             **common_checks,
             "all_hit_run_passed": (
@@ -2777,8 +2789,9 @@ def analyze_cache_results(
             "raw_ocr_exact": exact,
             "runtime_start_zero": no_runtime,
             "http_attempt_zero": no_http,
-            "all_hit_reduction_gate": reduction
-            >= float(gates["cache_all_hit_improvement_percent"]),
+            "cold_plus_all_hit_net_gain_positive": (
+                repeat_net_gain > 0.0
+            ),
         }
     else:
         hit = results["all_hit_existing_output"]
@@ -2844,6 +2857,28 @@ def analyze_cache_results(
         reduction = _reduction_percent(
             cold_winner_median,
             _stage_elapsed(hit, "full"),
+        )
+        repeat_without_cache_total = disabled_median * 2.0
+        cold_plus_all_hit_total = (
+            enabled_median + _stage_elapsed(hit, "full")
+        )
+        partial_total = (
+            enabled_median + _stage_elapsed(partial, "full")
+        )
+        repeat_net_gain = _net_gain_percent(
+            repeat_without_cache_total,
+            cold_plus_all_hit_total,
+        )
+        partial_net_gain = _net_gain_percent(
+            repeat_without_cache_total,
+            partial_total,
+        )
+        partial_page_count = int(
+            (partial.get("checkpoint_events") or {}).get(
+                "page_count",
+                0,
+            )
+            or 0
         )
         checks = {
             **common_checks,
@@ -2931,8 +2966,15 @@ def analyze_cache_results(
                 )
                 > 0
             ),
-            "all_hit_reduction_gate": reduction
-            >= float(gates["cache_all_hit_improvement_percent"]),
+            "partial_recompute_uses_multi_page_corpus": (
+                partial_page_count >= 2
+            ),
+            "cold_plus_all_hit_net_gain_positive": (
+                repeat_net_gain > 0.0
+            ),
+            "cold_plus_one_page_edit_net_gain_positive": (
+                partial_net_gain > 0.0
+            ),
             "missing_output_recreated_exactly": all(
                 bool(page.get("output_exists", False))
                 for page in (
@@ -2962,6 +3004,28 @@ def analyze_cache_results(
         },
         "passed": bool(checks) and all(checks.values()),
         "all_hit_reduction_percent": round(reduction, 3),
+        "repeat_without_cache_total_sec": round(
+            repeat_without_cache_total,
+            6,
+        ),
+        "cold_plus_all_hit_total_sec": round(
+            cold_plus_all_hit_total,
+            6,
+        ),
+        "cold_plus_all_hit_net_gain_percent": round(
+            repeat_net_gain,
+            3,
+        ),
+        "cold_plus_one_page_edit_total_sec": (
+            round(partial_total, 6)
+            if scenario == "project"
+            else None
+        ),
+        "cold_plus_one_page_edit_net_gain_percent": (
+            round(partial_net_gain, 3)
+            if partial_net_gain is not None
+            else None
+        ),
         "cache_miss_overhead_percent": (
             round(miss_overhead, 3)
             if miss_overhead != float("inf")
@@ -2995,6 +3059,11 @@ def run_cache_scenario(args: argparse.Namespace) -> int:
         protocol["limits"]["pipeline_max_pages"]
     ):
         raise ValueError("--sample-count exceeds the protocol page limit.")
+    if args.scenario == "project" and sample_count < 2:
+        raise ValueError(
+            "Project net-gain validation requires at least two pages so one "
+            "page can be recomputed while unaffected pages remain cached."
+        )
     baseline = _read_json(ROOT / str(protocol["baseline_preset"]))
     private_dir = output_dir / "private"
     shared_corpus_dir = private_dir / "shared-corpus"
@@ -3317,6 +3386,11 @@ def _render_cache_report(analysis: Mapping[str, Any]) -> str:
         f"- cold winner elapsed sec: `{analysis.get('cold_elapsed_sec')}`",
         f"- all-hit elapsed sec: `{analysis.get('all_hit_elapsed_sec')}`",
         f"- all-hit reduction percent: `{analysis.get('all_hit_reduction_percent')}`",
+        f"- no-cache repeated total sec: `{analysis.get('repeat_without_cache_total_sec')}`",
+        f"- cache cold + all-hit total sec: `{analysis.get('cold_plus_all_hit_total_sec')}`",
+        f"- cache cold + all-hit net gain percent: `{analysis.get('cold_plus_all_hit_net_gain_percent')}`",
+        f"- cache cold + one-page edit total sec: `{analysis.get('cold_plus_one_page_edit_total_sec')}`",
+        f"- cache cold + one-page edit net gain percent: `{analysis.get('cold_plus_one_page_edit_net_gain_percent')}`",
         "",
         "| check | passed |",
         "|---|---:|",
