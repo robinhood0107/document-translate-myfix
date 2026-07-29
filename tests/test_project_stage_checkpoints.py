@@ -44,6 +44,7 @@ from app.projects.stage_checkpoints import (
     record_render_checkpoint,
     record_translation_checkpoint,
     registered_inpainter_model_identity,
+    resolve_font_identity,
     restore_inpaint_block_state,
     snapshot_project_render_blocks,
     snapshot_project_translations,
@@ -54,6 +55,62 @@ from modules.utils.textblock import TextBlock
 
 
 class ProjectStageCheckpointTests(unittest.TestCase):
+    def test_font_identity_uses_exact_custom_file_sha(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            font_path = Path(temporary) / "custom-font.ttf"
+            font_path.write_bytes(b"stable-custom-font")
+            main_page = SimpleNamespace(
+                _custom_font_path_to_family={
+                    str(font_path): "Custom Family"
+                }
+            )
+            with mock.patch(
+                "app.projects.stage_checkpoints."
+                "_stable_system_font_identity",
+                side_effect=AssertionError(
+                    "An exact custom font must not use system fallback."
+                ),
+            ):
+                identity = resolve_font_identity(
+                    main_page,
+                    "Custom Family",
+                )
+            self.assertEqual(identity["family"], "Custom Family")
+            self.assertEqual(identity["file_name"], font_path.name)
+            self.assertEqual(
+                identity["file_sha256"],
+                hashlib.sha256(b"stable-custom-font").hexdigest(),
+            )
+
+    def test_system_font_identity_returns_a_defensive_copy(self) -> None:
+        stable = {
+            "family": "Sans Serif",
+            "resolved_family": "Stable Sans",
+            "fallback_family": "Stable Fallback",
+            "file_name": "",
+            "file_sha256": "",
+            "program_sha256": "1" * 64,
+            "fallback_program_sha256": "2" * 64,
+            "font_catalog_sha256": "3" * 64,
+            "qt_version": "6.test",
+            "platform": {"system": "test"},
+        }
+        with mock.patch(
+            "app.projects.stage_checkpoints."
+            "_stable_system_font_identity",
+            return_value=stable,
+        ):
+            first = resolve_font_identity(
+                SimpleNamespace(_custom_font_path_to_family={}),
+                "Sans Serif",
+            )
+            first["platform"]["system"] = "mutated"
+            second = resolve_font_identity(
+                SimpleNamespace(_custom_font_path_to_family={}),
+                "Sans Serif",
+            )
+        self.assertEqual(second, stable)
+
     def _store(
         self,
         root: str,
