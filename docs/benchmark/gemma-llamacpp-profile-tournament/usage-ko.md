@@ -79,6 +79,11 @@ MTP full draft GPU가 전부 실패하면 runner가 draft NGL 0을 별도로
 검사한다. 각 결과의 `screen_comparison_target_ngls`에 안전 최대값과
 바로 아래 값이 기록된다.
 
+컨테이너 cgroup swap은 NGL에 따라 비단조적으로 변할 수 있다. 따라서
+상향 탐색 중 swap 한도만 넘긴 지점은 첫 실패에서 중단하지 않고
+`max-ngl`까지 계속 확인한다. 최대 NGL에서 swap-only 실패로 시작했는데
+상향 후보가 없으면 하향 탐색으로 안전 지점을 찾는다.
+
 ngram 2·4·8은 pinned llama.cpp의
 `--spec-ngram-mod-n-min/--spec-ngram-mod-n-max`에 각각 같은 값을
 전달한다. MTP 2·4·8만 `--spec-draft-n-max`를 사용한다.
