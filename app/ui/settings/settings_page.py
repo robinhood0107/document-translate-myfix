@@ -222,6 +222,7 @@ class SettingsPage(QtWidgets.QWidget):
         self.ui.raw_text_checkbox.stateChanged.connect(self._save_settings_if_not_loading)
         self.ui.translated_text_checkbox.stateChanged.connect(self._save_settings_if_not_loading)
         self.ui.inpainted_image_checkbox.stateChanged.connect(self._save_settings_if_not_loading)
+        self.ui.ocr_debug_checkbox.stateChanged.connect(self._save_settings_if_not_loading)
         self.ui.detector_overlay_checkbox.stateChanged.connect(self._save_settings_if_not_loading)
         self.ui.raw_mask_checkbox.stateChanged.connect(self._save_settings_if_not_loading)
         self.ui.mask_overlay_checkbox.stateChanged.connect(self._save_settings_if_not_loading)
@@ -603,6 +604,7 @@ class SettingsPage(QtWidgets.QWidget):
             "export_raw_text": self.ui.raw_text_checkbox.isChecked(),
             "export_translated_text": self.ui.translated_text_checkbox.isChecked(),
             "export_inpainted_image": self.ui.inpainted_image_checkbox.isChecked(),
+            "export_ocr_debug": self.ui.ocr_debug_checkbox.isChecked(),
             "export_detector_overlay": self.ui.detector_overlay_checkbox.isChecked(),
             "export_raw_mask": self.ui.raw_mask_checkbox.isChecked(),
             "export_mask_overlay": self.ui.mask_overlay_checkbox.isChecked(),
@@ -1212,6 +1214,9 @@ class SettingsPage(QtWidgets.QWidget):
         )
         self.ui.inpainted_image_checkbox.setChecked(
             settings.value("export_inpainted_image", False, type=bool)
+        )
+        self.ui.ocr_debug_checkbox.setChecked(
+            settings.value("export_ocr_debug", False, type=bool)
         )
         self.ui.detector_overlay_checkbox.setChecked(
             settings.value("export_detector_overlay", False, type=bool)

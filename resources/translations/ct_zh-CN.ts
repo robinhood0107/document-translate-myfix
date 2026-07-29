@@ -674,8 +674,8 @@ Use Custom Local Server(Gemma) with the included Gemma Docker setup.</source>
         <translation>自动模式</translation>
     </message>
     <message>
-        <source>Selected automatic-mode export artifacts are saved to log_&lt;source&gt;_&lt;timestamp&gt; in the same directory as the input file/archive.</source>
-        <translation>所选自动模式导出产物会保存到与输入文件/归档相同文件夹中的 log_&lt;source&gt;_&lt;timestamp&gt;。</translation>
+        <source>Text and inpainted-image exports stay in log_&lt;source&gt;_&lt;timestamp&gt;. Checked debug artifacts are stored under the project, folder, or archive cache sidecar.</source>
+        <translation type="unfinished"></translation>
     </message>
     <message>
         <source>Export Raw Text</source>
@@ -688,6 +688,10 @@ Use Custom Local Server(Gemma) with the included Gemma Docker setup.</source>
     <message>
         <source>Export Inpainted Image</source>
         <translation>导出修复后的图片</translation>
+    </message>
+    <message>
+        <source>Export OCR Diagnostics (Debug)</source>
+        <translation type="unfinished"></translation>
     </message>
     <message>
         <source>Export Detector Overlay (Debug)</source>
@@ -815,7 +819,11 @@ If responses are truncated, lower Chunk Size or Max Completion Tokens before rec
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>Raw Response Log</source>
+        <source>Save Raw Responses (Sensitive)</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>During automatic runs, save raw responses only in the active project, folder, or archive cache sidecar.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
@@ -863,7 +871,11 @@ Start the server with both the HunyuanOCR GGUF model and the matching mmproj fil
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>Raw Response Log</source>
+        <source>Save Raw Responses (Sensitive)</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>During automatic runs, save raw responses only in the active project, folder, or archive cache sidecar.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
@@ -1073,7 +1085,11 @@ Keep the default localhost URL if you want Comic Translate to reuse the bundled 
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>Raw Response Log</source>
+        <source>Save Raw Responses (Sensitive)</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>During automatic runs, save raw responses only in the active project, folder, or archive cache sidecar.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
@@ -2763,15 +2779,23 @@ These values are copied into new series projects and can be adjusted per series.
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>Text Exports</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Write OCR and translation text files next to the queue output.</source>
+        <source>Only checked debug artifacts are created in the project, folder, or archive cache sidecar. When unchecked, the status panel logs that preview generation is disabled.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
         <source>Inpainted image</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Additional Exports</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Write OCR text, translation text, and inpainted images next to the queue output.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>OCR diagnostics</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
@@ -2796,10 +2820,6 @@ These values are copied into new series projects and can be adjusted per series.
     </message>
     <message>
         <source>Debug Artifacts</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Only checked debug artifacts are created. When unchecked, the status panel logs that preview generation is disabled.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>

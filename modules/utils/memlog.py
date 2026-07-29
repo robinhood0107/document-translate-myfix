@@ -3,10 +3,13 @@ from __future__ import annotations
 import json
 import os
 import sys
+import threading
 import time
 from datetime import datetime
 from dataclasses import dataclass
 from typing import Any
+
+from modules.utils.debug_artifacts import append_debug_jsonl
 
 
 def _env_enabled(name: str) -> bool:
@@ -158,10 +161,45 @@ class MemLogger:
     def __post_init__(self) -> None:
         self._timer = None
         self._path = None
+        self._gpu_path = None
+        self._debug_runtime_dir = None
         self._run_id = None
         self._deep_emitted: set[str] = set()
+        self._write_lock = threading.RLock()
         self._bench_output_dir = str(os.environ.get("CT_BENCH_OUTPUT_DIR", "") or "").strip()
         self._gpu_bench_enabled = _env_enabled("CT_ENABLE_GPU_BENCH")
+
+    def bind_debug_run(self, runtime_dir: str) -> None:
+        """Route batch-scoped diagnostics into the active cache sidecar."""
+
+        raw_target = str(runtime_dir or "").strip()
+        if not raw_target:
+            return
+        target = os.path.abspath(raw_target)
+        with self._write_lock:
+            if os.path.exists(target) and os.path.islink(target):
+                raise OSError("Symbolic-link diagnostic runtime folders are not supported.")
+            os.makedirs(target, exist_ok=True)
+            if os.path.islink(target):
+                raise OSError("Symbolic-link diagnostic runtime folders are not supported.")
+            self._path = os.path.join(target, "memlog.jsonl")
+            self._debug_runtime_dir = target
+            self._gpu_path = (
+                os.path.join(target, "gpu-bench.jsonl")
+                if self._gpu_bench_enabled
+                else None
+            )
+            self._deep_emitted.clear()
+
+    def unbind_debug_run(self) -> None:
+        """Return later background samples to the normal user-data log."""
+
+        with self._write_lock:
+            self._path = None
+            self._gpu_path = None
+            self._debug_runtime_dir = None
+            self._run_id = None
+            self._deep_emitted.clear()
 
     def _resolve_log_path(self) -> str:
         if self._bench_output_dir:
@@ -181,7 +219,7 @@ class MemLogger:
         return os.path.join(base, f"memlog_{self._run_id}.jsonl")
 
     def _rotate_if_needed(self) -> None:
-        if not self._path:
+        if not self._path or self._debug_runtime_dir:
             return
         try:
             if os.path.isfile(self._path) and os.path.getsize(self._path) > int(self.max_file_bytes):
@@ -285,16 +323,12 @@ class MemLogger:
         return snap
 
     def emit(self, tag: str, extra: dict[str, Any] | None = None) -> None:
-        if self._path is None:
-            self._path = self._resolve_log_path()
-        self._rotate_if_needed()
-        payload = self._snapshot(tag, extra=extra)
-        try:
-            with open(self._path, "a", encoding="utf-8") as fh:
-                fh.write(json.dumps(payload, ensure_ascii=True) + "\n")
-        except Exception:
-            # Never let diagnostics break the app.
-            pass
+        with self._write_lock:
+            if self._path is None:
+                self._path = self._resolve_log_path()
+            self._rotate_if_needed()
+            payload = self._snapshot(tag, extra=extra)
+            self._append_payload(payload)
 
     def emit_deep(
         self,
@@ -304,24 +338,70 @@ class MemLogger:
         extra: dict[str, Any] | None = None,
     ) -> None:
         """Emit a deep snapshot (includes top memory-mapped modules)."""
-        # De-dupe per tag so accidental repeated calls don't spam logs.
-        if tag in self._deep_emitted:
-            return
-        self._deep_emitted.add(tag)
+        with self._write_lock:
+            # De-dupe per tag so accidental repeated calls don't spam logs.
+            if tag in self._deep_emitted:
+                return
+            self._deep_emitted.add(tag)
+            if self._path is None:
+                self._path = self._resolve_log_path()
+            self._rotate_if_needed()
 
-        if self._path is None:
-            self._path = self._resolve_log_path()
-        self._rotate_if_needed()
+            payload = self._snapshot(tag, extra=extra)
+            try:
+                payload["maps_top"] = _memory_maps_top(top_n=top_n)
+            except Exception:
+                pass
+            self._append_payload(payload)
 
-        payload = self._snapshot(tag, extra=extra)
+    def _append_payload(self, payload: dict[str, Any]) -> None:
         try:
-            payload["maps_top"] = _memory_maps_top(top_n=top_n)
+            if self._debug_runtime_dir:
+                append_debug_jsonl(
+                    self._debug_runtime_dir,
+                    "memlog.jsonl",
+                    payload,
+                    ensure_ascii=True,
+                )
+            else:
+                with open(
+                    self._path,
+                    "a",
+                    encoding="utf-8",
+                    newline="\n",
+                ) as fh:
+                    fh.write(json.dumps(payload, ensure_ascii=True) + "\n")
         except Exception:
-            pass
-
+            # Never let diagnostics break the app.
+            return
+        if not self._gpu_path or (
+            "gpu" not in payload and "wsl_swap" not in payload
+        ):
+            return
+        gpu_payload = {
+            "ts": payload.get("ts"),
+            "tag": payload.get("tag"),
+            "gpu": payload.get("gpu"),
+            "wsl_swap": payload.get("wsl_swap"),
+        }
         try:
-            with open(self._path, "a", encoding="utf-8") as fh:
-                fh.write(json.dumps(payload, ensure_ascii=True) + "\n")
+            if self._debug_runtime_dir:
+                append_debug_jsonl(
+                    self._debug_runtime_dir,
+                    "gpu-bench.jsonl",
+                    gpu_payload,
+                    ensure_ascii=True,
+                )
+            else:
+                with open(
+                    self._gpu_path,
+                    "a",
+                    encoding="utf-8",
+                    newline="\n",
+                ) as fh:
+                    fh.write(
+                        json.dumps(gpu_payload, ensure_ascii=True) + "\n"
+                    )
         except Exception:
             pass
 

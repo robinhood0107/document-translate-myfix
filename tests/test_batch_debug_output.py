@@ -6,6 +6,7 @@ import tempfile
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
+from unittest import mock
 
 import numpy as np
 
@@ -17,7 +18,10 @@ SCRIPTS_DIR = ROOT / "scripts"
 if str(SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPTS_DIR))
 
-import benchmark_pipeline  # noqa: E402
+try:
+    import benchmark_pipeline  # noqa: E402
+except ModuleNotFoundError:
+    benchmark_pipeline = None
 
 
 class _PreviewMain:
@@ -65,6 +69,43 @@ class BatchDebugOutputTests(unittest.TestCase):
             self.assertIn(os.path.join("comic_translate_run", "inpainted_images"), output_path)
             self.assertTrue(output_path.endswith("92_cleaned.png"))
             self.assertFalse(os.path.exists(os.path.join(temp_dir, "92_cleaned.png")))
+
+    def test_raw_text_export_does_not_implicitly_create_ocr_diagnostics(
+        self,
+    ) -> None:
+        processor = object.__new__(BatchProcessor)
+        processor.main_page = _PreviewMain()
+        with tempfile.TemporaryDirectory() as temp_dir:
+            image_path = os.path.join(temp_dir, "92.png")
+            processor._write_json_exports(
+                temp_dir,
+                "run-token",
+                "",
+                image_path,
+                np.zeros((8, 8, 3), dtype=np.uint8),
+                [],
+                {"processing_summary": {"ocr_engine": "PaddleOCR VL"}},
+                "Japanese",
+                {
+                    "export_raw_text": True,
+                    "export_translated_text": False,
+                    "export_ocr_debug": False,
+                },
+            )
+
+            raw_path = os.path.join(
+                temp_dir,
+                "comic_translate_run-token",
+                "raw_texts",
+                "92_raw.json",
+            )
+            self.assertTrue(os.path.isfile(raw_path))
+            self.assertFalse(
+                any(
+                    "ocr-debug" in path.name
+                    for path in Path(temp_dir).rglob("*")
+                )
+            )
 
     def test_preview_is_not_generated_when_debug_checkbox_is_off(self) -> None:
         processor = object.__new__(BatchProcessor)
@@ -118,6 +159,29 @@ class BatchDebugOutputTests(unittest.TestCase):
             self.assertEqual(event["preview_path"], preview_path)
             self.assertFalse(event["temporary_preview"])
 
+    def test_detector_debug_write_failure_is_fail_open(self) -> None:
+        processor = object.__new__(BatchProcessor)
+        processor.main_page = _PreviewMain()
+        with tempfile.TemporaryDirectory() as temp_dir, mock.patch(
+            "pipeline.batch_processor.active_debug_page_directory",
+            return_value=temp_dir,
+        ), mock.patch(
+            "pipeline.batch_processor.atomic_debug_image",
+            side_effect=OSError("blocked"),
+        ), mock.patch(
+            "pipeline.batch_processor.logger.warning",
+        ):
+            output = processor._write_detector_overlay_debug_image(
+                export_root=temp_dir,
+                archive_bname="",
+                image_path=os.path.join(temp_dir, "page.png"),
+                image=np.zeros((8, 8, 3), dtype=np.uint8),
+                blk_list=[],
+                export_settings={"export_detector_overlay": True},
+            )
+
+        self.assertEqual(output, "")
+
     def test_benchmark_events_expose_product_pipeline_entrypoint_contract(self) -> None:
         processor = object.__new__(BatchProcessor)
         processor.main_page = _BenchmarkMain()
@@ -132,6 +196,10 @@ class BatchDebugOutputTests(unittest.TestCase):
         self.assertEqual(event["vertical_alignment_id"], 1)
         self.assertEqual(event["runner_render_mode"], "product")
 
+    @unittest.skipIf(
+        benchmark_pipeline is None,
+        "benchmark runner is available only on benchmarking/lab",
+    )
     def test_page_snapshot_block_includes_mask_and_review_diagnostics(self) -> None:
         block = SimpleNamespace(
             xyxy=[1, 2, 11, 22],
