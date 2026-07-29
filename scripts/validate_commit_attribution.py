@@ -3,43 +3,54 @@ from __future__ import annotations
 
 import argparse
 from collections.abc import Iterable
+from email.utils import parseaddr
 from pathlib import Path
 import re
 import subprocess
 import sys
+import unicodedata
 
 ZERO_SHA_RE = re.compile(r"^0+$")
 CONVENTIONAL_BRANCH_RE = re.compile(r"^(feature|fix|chore)/")
 
-EXACT_AI_NAMES = {
-    "anthropic claude",
-    "chatgpt",
-    "claude",
-    "claude ai",
-    "claude code",
-    "copilot",
-    "gemini",
-    "gemini ai",
-    "github copilot",
-    "google gemini",
-    "openai codex",
-}
-AI_MARKERS = (
+AI_NAME_PATTERNS = (
     re.compile(
-        r"(?<![a-z0-9])codex(?:codex)?(?![a-z0-9])",
+        r"(?:openai\s+)?codex(?:codex)?",
         re.IGNORECASE,
     ),
-    re.compile(r"(?<![a-z0-9])chatgpt(?![a-z0-9])", re.IGNORECASE),
-    re.compile(r"github[\s._-]*copilot", re.IGNORECASE),
+    re.compile(r"(?:openai\s+)?chatgpt(?:\s+(?:assistant|bot))?", re.I),
+    re.compile(r"(?:github\s+)?copilot(?:\s+(?:assistant|bot))?", re.I),
+    re.compile(
+        r"(?:anthropic\s+)?claude(?:\s+(?:ai|code|assistant|bot))?",
+        re.I,
+    ),
+    re.compile(
+        r"(?:google\s+)?gemini(?:\s+(?:ai|cli|code|assistant|bot))?",
+        re.I,
+    ),
 )
-CONTRIBUTOR_TRAILER_KEY_RE = re.compile(
-    r"(?:"
-    r"author|co-authored|committer|contribut|signed-off|reviewed|"
-    r"acked|tested|reported|helped|suggested|mentored|assisted|"
-    r"generated"
-    r")",
-    re.IGNORECASE,
-)
+EXACT_AI_EMAIL_LOCAL_PARTS = {
+    "anthropic-claude",
+    "chatgpt",
+    "chatgpt-assistant",
+    "chatgpt-bot",
+    "claude",
+    "claude-ai",
+    "claude-assistant",
+    "claude-bot",
+    "claude-code",
+    "copilot",
+    "copilot-assistant",
+    "copilot-bot",
+    "gemini",
+    "gemini-ai",
+    "gemini-assistant",
+    "gemini-bot",
+    "gemini-cli",
+    "gemini-code",
+    "github-copilot",
+    "google-gemini",
+}
 
 
 def run_git(*args: str, input_text: str | None = None) -> str:
@@ -53,42 +64,37 @@ def run_git(*args: str, input_text: str | None = None) -> str:
     return completed.stdout
 
 
-def normalize_identity_name(value: str) -> str:
-    name = value.split("<", 1)[0]
-    return " ".join(name.strip().casefold().split())
+def normalize_identity_text(value: str) -> str:
+    normalized = unicodedata.normalize("NFKC", value)
+    without_format_chars = "".join(
+        char for char in normalized if unicodedata.category(char) != "Cf"
+    )
+    return " ".join(without_format_chars.strip().casefold().split())
 
 
-def identity_email(value: str) -> str:
-    match = re.search(r"<([^>]*)>", value)
-    return match.group(1).strip().casefold() if match else ""
+def parsed_identity(value: str) -> tuple[str, str]:
+    compact = " ".join(value.strip().split())
+    parsed_name, parsed_email = parseaddr(compact)
+    if parsed_email and "@" in parsed_email:
+        return (
+            normalize_identity_text(parsed_name),
+            normalize_identity_text(parsed_email),
+        )
+    return normalize_identity_text(value.split("<", 1)[0]), ""
 
 
 def forbidden_ai_identity(value: str) -> bool:
-    compact = " ".join(value.strip().split())
-    if any(pattern.search(compact) for pattern in AI_MARKERS):
+    name, email = parsed_identity(value)
+    if any(pattern.fullmatch(name) for pattern in AI_NAME_PATTERNS):
         return True
 
-    name = normalize_identity_name(compact)
-    if name in EXACT_AI_NAMES:
-        return True
-
-    email = identity_email(compact)
     if not email:
         return False
     local_part = email.split("@", 1)[0]
-    return (
-        "codex" in local_part
-        or "chatgpt" in local_part
-        or local_part
-        in {
-            "anthropic-claude",
-            "claude",
-            "claude-code",
-            "copilot",
-            "gemini",
-            "github-copilot",
-            "google-gemini",
-        }
+    local_tokens = set(filter(None, re.split(r"[^a-z0-9]+", local_part)))
+    return bool(
+        {"codex", "codexcodex", "chatgpt"} & local_tokens
+        or local_part in EXACT_AI_EMAIL_LOCAL_PARTS
     )
 
 
@@ -109,11 +115,9 @@ def validate_message_trailers(
 ) -> list[str]:
     errors: list[str] = []
     for key, value in parsed_trailers(message):
-        if not CONTRIBUTOR_TRAILER_KEY_RE.search(key):
-            continue
         if forbidden_ai_identity(value):
             errors.append(
-                f"{source}: forbidden AI contributor identity in "
+                f"{source}: forbidden AI identity in "
                 f"{key} trailer: {value}"
             )
     return errors

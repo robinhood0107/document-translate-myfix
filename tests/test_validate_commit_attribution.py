@@ -59,6 +59,9 @@ def commit_file(
         "GitHub Copilot <copilot@example.com>",
         "Anthropic Claude <claude@example.com>",
         "Google Gemini <gemini@example.com>",
+        "Gemini CLI <assistant@example.com>",
+        "Claude Bot <assistant@example.com>",
+        "Co\u200bdex <assistant@example.com>",
     ],
 )
 def test_forbidden_ai_identity_variants(identity: str) -> None:
@@ -71,6 +74,9 @@ def test_human_name_containing_claude_is_allowed() -> None:
     )
     assert not forbidden_ai_identity(
         "Cody Codexample <cody@codexample.com>"
+    )
+    assert not forbidden_ai_identity(
+        "Example Human <human@codex.example>"
     )
 
 
@@ -110,6 +116,16 @@ def test_custom_ai_contributor_trailer_is_rejected() -> None:
     )
     assert len(errors) == 1
     assert "AI-Assisted-By" in errors[0]
+
+
+def test_every_trailer_is_inspected_for_ai_identity() -> None:
+    errors = validate_message_trailers(
+        "fix(repo): enforce attribution\n\n"
+        "Pair-programmed-by: Gemini CLI <assistant@example.com>\n",
+        source="test",
+    )
+    assert len(errors) == 1
+    assert "Pair-programmed-by" in errors[0]
 
 
 def test_prospective_commit_rejects_ai_author(
