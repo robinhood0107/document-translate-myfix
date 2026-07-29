@@ -144,6 +144,10 @@ class WindowsLauncherSourceReleaseTests(unittest.TestCase):
                 )
                 self.assertEqual(len(pinned), 35)
                 self.assertEqual(pinned["torch"][1], expected_cuda)
+                self.assertEqual(pinned["pillow"][1], "12.3.0")
+                self.assertEqual(pinned["setuptools"][1], "80.9.0")
+                self.assertEqual(pinned["msgpack"][1], "1.2.1")
+                self.assertEqual(pinned["py7zr"][1], "1.1.3")
                 self.assertEqual(pinned["pyside6"][1], "6.11.0")
                 self.assertEqual(pinned["send2trash"][1], "2.1.0")
 
