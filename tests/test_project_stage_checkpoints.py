@@ -44,6 +44,7 @@ from app.projects.stage_checkpoints import (
     record_render_checkpoint,
     record_translation_checkpoint,
     registered_inpainter_model_identity,
+    restore_inpaint_block_state,
     snapshot_project_render_blocks,
     snapshot_project_translations,
 )
@@ -371,6 +372,10 @@ class ProjectStageCheckpointTests(unittest.TestCase):
             raw_mask[2:5, 3:8] = 255
             final_mask = raw_mask.copy()
             final_mask[5:7, 4:6] = 255
+            blocks[0].block_final_mask_pixel_count = 15
+            blocks[0].block_mask_bbox = [3, 2, 8, 7]
+            blocks[0].block_mask_source = "ctd-refined"
+            blocks[0].block_mask_decision = "accepted"
             identity = build_inpaint_identity(
                 source_sha256="d" * 64,
                 detection_fingerprint="e" * 64,
@@ -397,6 +402,7 @@ class ProjectStageCheckpointTests(unittest.TestCase):
                     page_key="page:00000000",
                     fingerprint=fingerprint,
                     identity=identity,
+                    blocks=blocks,
                     cleaned_image=image,
                     raw_mask=raw_mask,
                     final_mask=final_mask,
@@ -413,6 +419,7 @@ class ProjectStageCheckpointTests(unittest.TestCase):
                 fingerprint=fingerprint,
                 identity=identity,
                 source_shape=image.shape,
+                current_blocks=blocks,
             )
 
             self.assertIsNotNone(hit)
@@ -424,6 +431,31 @@ class ProjectStageCheckpointTests(unittest.TestCase):
             self.assertEqual(
                 hit.cleaned_decoded_sha256,
                 decoded_image_sha256(image),
+            )
+            restored_blocks = [block.deep_copy() for block in blocks]
+            restored_blocks[0].block_final_mask_pixel_count = 0
+            restored_blocks[0].block_mask_bbox = None
+            restored_blocks[0].block_mask_source = ""
+            restored_blocks[0].block_mask_decision = ""
+            restore_inpaint_block_state(
+                restored_blocks,
+                hit.block_states,
+            )
+            self.assertEqual(
+                restored_blocks[0].block_final_mask_pixel_count,
+                15,
+            )
+            self.assertEqual(
+                restored_blocks[0].block_mask_bbox,
+                [3, 2, 8, 7],
+            )
+            self.assertEqual(
+                restored_blocks[0].block_mask_source,
+                "ctd-refined",
+            )
+            self.assertEqual(
+                restored_blocks[0].block_mask_decision,
+                "accepted",
             )
 
     def test_inpaint_checkpoint_compresses_lossless_array_artifacts(
@@ -464,6 +496,7 @@ class ProjectStageCheckpointTests(unittest.TestCase):
                     page_key="page:00000000",
                     fingerprint=fingerprint,
                     identity=identity,
+                    blocks=blocks,
                     cleaned_image=image,
                     raw_mask=raw_mask,
                     final_mask=final_mask,
