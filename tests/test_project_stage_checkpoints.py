@@ -369,7 +369,6 @@ class ProjectStageCheckpointTests(unittest.TestCase):
             )
             raw_mask = np.zeros((12, 10), dtype=np.uint8)
             raw_mask[2:5, 3:8] = 255
-            generated_mask = raw_mask.copy()
             final_mask = raw_mask.copy()
             final_mask[5:7, 4:6] = 255
             identity = build_inpaint_identity(
@@ -377,8 +376,6 @@ class ProjectStageCheckpointTests(unittest.TestCase):
                 detection_fingerprint="e" * 64,
                 ocr_fingerprint="f" * 64,
                 blocks=blocks,
-                raw_mask=raw_mask,
-                generated_mask=generated_mask,
                 brush_strokes=[],
                 runtime={
                     "key": "AOT",
@@ -424,6 +421,73 @@ class ProjectStageCheckpointTests(unittest.TestCase):
             np.testing.assert_array_equal(hit.raw_mask, raw_mask)
             np.testing.assert_array_equal(hit.final_mask, final_mask)
             self.assertTrue(hit.cleanup_stats["applied"])
+            self.assertEqual(
+                hit.cleaned_decoded_sha256,
+                decoded_image_sha256(image),
+            )
+
+    def test_inpaint_checkpoint_compresses_lossless_array_artifacts(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            _project, _reference, store = self._store(tmp)
+            blocks = self._blocks()
+            blocks[0].text = "OCR"
+            image = np.zeros((128, 128, 3), dtype=np.uint8)
+            raw_mask = np.zeros((128, 128), dtype=np.uint8)
+            raw_mask[16:96, 20:104] = 255
+            final_mask = raw_mask.copy()
+            final_mask[8:12, 8:12] = 255
+            identity = build_inpaint_identity(
+                source_sha256="a" * 64,
+                detection_fingerprint="b" * 64,
+                ocr_fingerprint="c" * 64,
+                blocks=blocks,
+                brush_strokes=[],
+                runtime={
+                    "key": "AOT",
+                    "backend": "torch",
+                    "precision": "fp32",
+                },
+                model_identity={
+                    "id": "aot",
+                    "declared_digests": ["1" * 64],
+                },
+                hd_strategy={"strategy": "Original"},
+                mask_settings={"mask_refiner": "ctd"},
+            )
+            fingerprint = build_inpaint_fingerprint(identity)
+
+            self.assertTrue(
+                record_inpaint_checkpoint(
+                    store,
+                    page_key="page:00000000",
+                    fingerprint=fingerprint,
+                    identity=identity,
+                    cleaned_image=image,
+                    raw_mask=raw_mask,
+                    final_mask=final_mask,
+                    cleanup_stats=None,
+                )
+            )
+            stage = store.lookup_stage(
+                "page:00000000",
+                "inpaint",
+                fingerprint,
+            )
+
+            self.assertIsNotNone(stage)
+            assert stage is not None
+            stored_bytes = sum(
+                (
+                    store.object_root
+                    / object_hash[:2]
+                    / object_hash
+                ).stat().st_size
+                for object_hash in stage.objects.values()
+            )
+            raw_bytes = image.nbytes + raw_mask.nbytes + final_mask.nbytes
+            self.assertLess(stored_bytes, raw_bytes // 4)
 
     def test_inpainter_identity_hashes_model_without_declared_sha256(
         self,
