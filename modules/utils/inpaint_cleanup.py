@@ -9,7 +9,7 @@ import numpy as np
 
 from modules.detection.utils.content import detect_content_in_bbox
 from modules.utils.bubble_erase import fill_bubble_edit_mask
-from modules.utils.inpaint_composite import composite_with_edit_mask
+from modules.utils.inpaint_composite import composite_with_edit_mask, normalize_edit_mask
 from modules.utils.mask_roi import build_text_prior_mask, normalize_xyxy, resolve_block_residue_roi
 from modules.utils.textblock import TextBlock
 
@@ -34,6 +34,60 @@ def _empty_pass2_stats(mask_shape: tuple[int, int]) -> dict:
         "residue_mask_cap_dilate_px": RESIDUE_SOURCE_MASK_DILATE_PX,
         "pass2_backend": "",
     }
+
+
+def _empty_duplicate_bubble_inner_fill_stats(mask_shape: tuple[int, int]) -> dict:
+    return {
+        "applied": False,
+        "pass_name": "duplicate_bubble_inner_fill",
+        "duplicate_bubble_inner_fill_mask": np.zeros(mask_shape, dtype=np.uint8),
+        "duplicate_bubble_inner_fill_pixel_count": 0,
+        "duplicate_bubble_inner_fill_backend": "",
+    }
+
+
+def fill_duplicate_bubble_inner_regions(
+    inpainted_image: np.ndarray,
+    duplicate_bubble_inner_mask: np.ndarray | None,
+) -> tuple[np.ndarray, dict]:
+    if inpainted_image is None:
+        shape = duplicate_bubble_inner_mask.shape if duplicate_bubble_inner_mask is not None else (0, 0)
+        return inpainted_image, _empty_duplicate_bubble_inner_fill_stats(shape)
+
+    edit_mask = normalize_edit_mask(duplicate_bubble_inner_mask, inpainted_image.shape)
+    if edit_mask.size == 0 or not np.any(edit_mask):
+        return inpainted_image, _empty_duplicate_bubble_inner_fill_stats(inpainted_image.shape[:2])
+
+    filled_image, backend = fill_bubble_edit_mask(inpainted_image, edit_mask)
+    filled_image = imk.convert_scale_abs(filled_image)
+    filled_image = composite_with_edit_mask(inpainted_image, filled_image, edit_mask)
+
+    return filled_image, {
+        "applied": True,
+        "pass_name": "duplicate_bubble_inner_fill",
+        "duplicate_bubble_inner_fill_mask": edit_mask,
+        "duplicate_bubble_inner_fill_pixel_count": int(np.count_nonzero(edit_mask)),
+        "duplicate_bubble_inner_fill_backend": backend,
+    }
+
+
+def apply_duplicate_bubble_inner_fill(
+    inpainted_image: np.ndarray,
+    mask: np.ndarray,
+    mask_details: dict | None,
+    cleanup_stats: dict | None,
+) -> tuple[np.ndarray, np.ndarray, dict]:
+    merged_stats = dict(cleanup_stats or {})
+    duplicate_mask = (mask_details or {}).get("duplicate_bubble_inner_mask")
+    filled_image, fill_stats = fill_duplicate_bubble_inner_regions(inpainted_image, duplicate_mask)
+    merged_stats["duplicate_bubble_inner_fill"] = fill_stats
+    if not fill_stats.get("applied"):
+        return inpainted_image, mask, merged_stats
+
+    fill_mask = fill_stats.get("duplicate_bubble_inner_fill_mask")
+    fill_mask = normalize_edit_mask(fill_mask, filled_image.shape)
+    merged_mask = np.where((normalize_edit_mask(mask, filled_image.shape) > 0) | (fill_mask > 0), 255, 0).astype(np.uint8)
+    return filled_image, merged_mask, merged_stats
 
 
 def _dedupe_boxes(boxes: list[tuple[int, int, int, int]]) -> list[tuple[int, int, int, int]]:

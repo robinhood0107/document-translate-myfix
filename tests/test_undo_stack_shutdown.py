@@ -91,6 +91,41 @@ class UndoStackShutdownTests(unittest.TestCase):
 
         controller.image_ctrl.ensure_page_state.assert_not_called()
 
+    def test_shutdown_stops_both_local_runtime_managers(self) -> None:
+        controller = self._controller()
+        controller.batch_report_ctrl = SimpleNamespace(shutdown=mock.Mock())
+        controller.cancel_current_task = mock.Mock()
+        controller.threadpool = SimpleNamespace(clear=mock.Mock(), waitForDone=mock.Mock())
+        controller.clear_undo_stacks = mock.Mock()
+        controller.settings_page = SimpleNamespace(shutdown=mock.Mock())
+        controller.pipeline_status_panel = SimpleNamespace(hide=mock.Mock())
+        controller.set_pipeline_overlay_active = mock.Mock()
+        controller.local_ocr_runtime_manager = SimpleNamespace(shutdown=mock.Mock())
+        controller.local_translation_runtime_manager = SimpleNamespace(shutdown=mock.Mock())
+
+        ComicTranslate.shutdown(controller)
+
+        controller.local_ocr_runtime_manager.shutdown.assert_called_once_with()
+        controller.local_translation_runtime_manager.shutdown.assert_called_once_with()
+
+    def test_shutdown_still_stops_gemma_when_ocr_shutdown_fails(self) -> None:
+        controller = self._controller()
+        controller.batch_report_ctrl = SimpleNamespace(shutdown=mock.Mock())
+        controller.cancel_current_task = mock.Mock()
+        controller.threadpool = SimpleNamespace(clear=mock.Mock(), waitForDone=mock.Mock())
+        controller.clear_undo_stacks = mock.Mock()
+        controller.settings_page = SimpleNamespace(shutdown=mock.Mock())
+        controller.pipeline_status_panel = SimpleNamespace(hide=mock.Mock())
+        controller.set_pipeline_overlay_active = mock.Mock()
+        controller.local_ocr_runtime_manager = SimpleNamespace(
+            shutdown=mock.Mock(side_effect=RuntimeError("stop failed"))
+        )
+        controller.local_translation_runtime_manager = SimpleNamespace(shutdown=mock.Mock())
+
+        ComicTranslate.shutdown(controller)
+
+        controller.local_translation_runtime_manager.shutdown.assert_called_once_with()
+
 
 if __name__ == "__main__":
     unittest.main()

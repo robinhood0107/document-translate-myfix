@@ -1,12 +1,23 @@
 from __future__ import annotations
 
 import os
+import sys
 import tempfile
 import unittest
+from pathlib import Path
+from types import SimpleNamespace
 
 import numpy as np
 
 from pipeline.batch_processor import BatchProcessor
+from modules.ocr.selection import STAGE_BATCHED_WORKFLOW_MODE
+
+ROOT = Path(__file__).resolve().parents[1]
+SCRIPTS_DIR = ROOT / "scripts"
+if str(SCRIPTS_DIR) not in sys.path:
+    sys.path.insert(0, str(SCRIPTS_DIR))
+
+import benchmark_pipeline  # noqa: E402
 
 
 class _PreviewMain:
@@ -16,6 +27,18 @@ class _PreviewMain:
 
     def report_runtime_progress(self, payload):
         self.events.append(dict(payload))
+
+
+class _BenchmarkMain:
+    def __init__(self) -> None:
+        self.events = []
+        self._current_batch_run_type = "batch"
+        self.settings_page = SimpleNamespace(
+            get_workflow_mode=lambda: STAGE_BATCHED_WORKFLOW_MODE,
+        )
+
+    def emit_memlog(self, tag, **payload):
+        self.events.append((tag, dict(payload)))
 
 
 class BatchDebugOutputTests(unittest.TestCase):
@@ -94,6 +117,53 @@ class BatchDebugOutputTests(unittest.TestCase):
             event = processor.main_page.events[0]
             self.assertEqual(event["preview_path"], preview_path)
             self.assertFalse(event["temporary_preview"])
+
+    def test_benchmark_events_expose_product_pipeline_entrypoint_contract(self) -> None:
+        processor = object.__new__(BatchProcessor)
+        processor.main_page = _BenchmarkMain()
+
+        processor._emit_benchmark_event("batch_run_start", total_images=3)
+
+        tag, event = processor.main_page.events[0]
+        self.assertEqual(tag, "batch_run_start")
+        self.assertTrue(event["product_pipeline_entrypoint"])
+        self.assertEqual(event["workflow_mode"], STAGE_BATCHED_WORKFLOW_MODE)
+        self.assertEqual(event["alignment_id"], 1)
+        self.assertEqual(event["vertical_alignment_id"], 1)
+        self.assertEqual(event["runner_render_mode"], "product")
+
+    def test_page_snapshot_block_includes_mask_and_review_diagnostics(self) -> None:
+        block = SimpleNamespace(
+            xyxy=[1, 2, 11, 22],
+            bubble_xyxy=None,
+            angle=0,
+            text_class="text_free",
+            text="フーー",
+            translation="후우",
+            _render_text="",
+            _text_fit_status="needs_review_text_free_mask",
+            _render_normalization_reasons=["render_without_erase_mask"],
+            block_final_mask_pixel_count=0,
+            block_mask_iou=0.0,
+            block_mask_span_coverage=0.0,
+            block_mask_bbox=None,
+            block_mask_source="none",
+            block_mask_decision="review",
+            _render_restore_applied=True,
+            ui_panel_mode="preserve_original",
+            ui_panel_preview_path="",
+            mask_decision="review",
+            mask_reject_reason="render_without_erase_mask",
+        )
+
+        payload = benchmark_pipeline._serialize_page_snapshot_block(block)
+
+        self.assertEqual(payload["block_final_mask_pixel_count"], 0)
+        self.assertEqual(payload["block_mask_source"], "none")
+        self.assertEqual(payload["block_mask_decision"], "review")
+        self.assertTrue(payload["render_restore_applied"])
+        self.assertEqual(payload["ui_panel_mode"], "preserve_original")
+        self.assertEqual(payload["mask_reject_reason"], "render_without_erase_mask")
 
 
 if __name__ == "__main__":

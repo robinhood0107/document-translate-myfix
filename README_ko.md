@@ -4,6 +4,10 @@
 
 이 저장소는 upstream `comic-translate` `v2.6.7` 코드베이스에서 시작한 뒤, 로컬 런타임/OCR/워크플로/Windows 환경 쪽으로 제품화 수정을 누적한 local-first 포크입니다.
 
+현재 포크의 제품 릴리스 버전은 `1.1.0`입니다. upstream `2.7.1`은
+마지막 selective backport 계보로 별도 기록하며, 이 포크의 제품 버전과
+같은 의미로 사용하지 않습니다.
+
 이 포크는 아래 워크플로를 중심으로 유지됩니다.
 
 - 로컬 Gemma 번역 런타임
@@ -15,6 +19,7 @@
 ## 중요 기능
 
 - 데스크톱 중심 번역 워크플로를 위한 로컬 Gemma 번역 런타임.
+- 전체 identity 기반 Gemma 결과 캐시와 사용자 승인형 정확 일치 번역 메모리.
 - `HunyuanOCR`와 `PaddleOCR VL`을 상황에 맞게 고르는 로컬 OCR 최적 라우팅.
 - 저장/불러오기까지 유지되는 인페인팅 Add / Exclude / Restore 도구.
 - OCR/번역 교정 사전이 포함된 TXT/MD 원문 export 및 번역 import.
@@ -24,6 +29,7 @@
 ## 서브 기능
 
 - 이미 실행 중인 로컬 OCR 컨테이너를 재기동하지 않는 reuse-only preflight 검사.
+- 다음 실행에서 재사용할 수 있도록 로컬 Docker 런타임을 삭제하지 않고 중지하는 생명주기.
 - 자동 실행 중 페이지가 끝날 때마다 최신 번역 완료 이미지를 바로 갱신하는 미리보기.
 - 시스템 알림음 또는 저장소 `music/*.wav`를 쓰는 완료 알림음.
 - `.venv-win`, `.venv-win-cuda13`을 자동 bootstrap하는 Windows 런처.
@@ -83,7 +89,7 @@ OCR:
 - `MangaOCR`, `Pororo OCR`, `PPOCRv5` 같은 OCR 체크포인트
 
 사용자가 별도로 준비하거나 로컬 런타임 번들이 제공하는 자산:
-- 로컬 Gemma 번역 런타임에 마운트하는 Gemma GGUF 파일
+- 버전이 지정된 external model volume에 한 번 가져오는 Gemma GGUF 파일
 - HunyuanOCR GGUF 및 mmproj 파일
 - PaddleOCR VL Docker/runtime bundle 파일
 
@@ -94,8 +100,17 @@ OCR:
 - `develop`: 다음 제품 작업을 통합하는 브랜치
 - `main`: 실제 출하 기준선
 - 공식 릴리스: `main`에 포함된 커밋에만 `vX.Y.Z` 버전 태그를 달아 GitHub Release 생성
-- Windows 릴리스 자산: 해당 태그에서 `Nuitka`로 exe 패키징 후 업로드
-- 모델, 체크포인트, Docker 런타임은 exe에 포함하지 않고 별도 준비 대상으로 유지
+- 공식 Windows 자산:
+  `comic-translate-vX.Y.Z-windows-launcher-source.zip`과
+  `SHA256SUMS.txt`
+- ZIP 포함 범위: allowlist에 든 제품 source, CUDA12/CUDA13 첫 실행
+  launcher·requirements, Docker Compose/config, Gemma 준비 스크립트,
+  번역/resources, README, LICENSE
+- ZIP 제외 범위: venv, 모델, 캐시, benchmark runner/raw 결과,
+  로컬 절대경로, secret
+- launcher는 첫 실행 때 지원 환경을 설치하며, 릴리스 후보는 추출 후
+  `COMIC_VERIFY_ONLY=1`로 두 launcher의 무설치 계약을 확인
+- 기존 Nuitka PowerShell 스크립트는 비공식 수동 도구로만 유지
 - `release/*` 브랜치는 사용하지 않음
 
 저장소 운영 기준 문서는 [rules.md](rules.md)입니다.
@@ -133,6 +148,8 @@ OCR:
 - custom translator 모드를 분리하고 keyless local endpoint 지원을 보강했습니다.
 - Gemma 입력 정규화와 문제 glyph 정리를 추가했습니다.
 - 로컬 sampler/runtime 기본값을 benchmark 결과에 맞춰 조정했습니다.
+- 전체 hit에서 Gemma 시작을 생략하는 SQLite 결과 캐시 fast path를 추가했습니다.
+- 보수적 일치와 명시적 승인·가져오기·내보내기를 사용하는 Exact Translation Memory를 별도로 추가했습니다.
 
 ### 벤치마크와 브랜치 분리
 
@@ -159,11 +176,6 @@ OCR:
 - target language 확장과 RTL 개선
 - webtoon/list-view 관련 선택 이식 수정
 
-검수 문서:
-
-- [docs/history/v267-to-v270-backport-audit.md](docs/history/v267-to-v270-backport-audit.md)
-- [docs/history/v267-to-v270-backport-audit-ko.md](docs/history/v267-to-v270-backport-audit-ko.md)
-
 ### `v2.7.0 -> v2.7.1`
 
 `v2.7.1` 라운드에서는 이 포크에 의미 있는 upstream 수정만 선택 적용합니다.
@@ -172,12 +184,7 @@ OCR:
 - 비동기 UI 콜백의 main-thread-safe `QTimer.singleShot(...)` 정리
 - 리스트 썸네일 로더를 worker `QImage` + main-thread `QPixmap` 구조로 안정화
 - import 메뉴에서 `Project File` 옆 `PSD` 정리
-- 앱 버전 `2.7.1` 반영
-
-검수 문서:
-
-- [docs/history/v270-to-v271-backport-audit.md](docs/history/v270-to-v271-backport-audit.md)
-- [docs/history/v270-to-v271-backport-audit-ko.md](docs/history/v270-to-v271-backport-audit-ko.md)
+- upstream selective-backport 계보를 `2.7.1`로 기록
 
 ## 빠른 사용법
 
@@ -205,13 +212,18 @@ run_comic_cuda13.bat
 
 ### 2. 로컬 번역 서버 사용
 
-저장소 루트에서 Gemma 서버 실행:
+Windows PowerShell에서 버전이 지정된 Gemma model volume을 한 번 준비합니다.
 
-```bash
-docker compose up -d
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass `
+  -File .\scripts\prepare_gemma_runtime.ps1 -Mode Prepare `
+  -CandidateModelPath 'C:\ExampleWorkspace\models\Gemma4-26B-A4B-Uncensored-HauhauCS-Balanced-IQ4_XS.gguf' `
+  -LegacyModelPath 'C:\ExampleWorkspace\models\gemma-4-26B-IQ4_NL.gguf'
 ```
 
-앱에서는 `Custom Local Server(Gemma)`를 선택합니다.
+앱에서는 `Custom Local Server(Gemma)`를 선택합니다. 관리 런타임은 ready manifest와 모델 크기를 확인하고 준비된 volume을 read-only로 마운트한 뒤, 필요할 때만 컨테이너를 시작하거나 재생성합니다. 두 모델의 SHA-256을 명시적으로 다시 계산하려면 같은 스크립트를 `-Mode Verify`로 실행합니다.
+
+**사용자 사전** 설정에서는 영구 블록 결과 캐시와 정확 일치 번역 메모리도 관리합니다. 결과 캐시는 번역과 runtime의 전체 identity가 같은 경우에만 재사용합니다. 원문→번역 쌍은 사용자가 명시적으로 승인해야 Gemma를 우회하며, 승인 항목이 포함된 파일을 가져올 때도 확인을 요구합니다. DB에는 민감한 로컬 텍스트가 저장되며 앱 user-data 디렉터리에만 남습니다. 잠금·손상 오류가 나도 자동 삭제하지 않습니다. 자세한 내용은 [번역 메모리 가이드](docs/gemma/translation-memory-ko.md)를 참고하세요.
 
 ### 3. 로컬 OCR 서버 사용
 
@@ -223,12 +235,30 @@ docker compose -f hunyuanocr_docker_files/docker-compose.yaml up -d
 
 PaddleOCR VL 런타임 기준 파일은 [paddleocr_vl_docker_files/README.md](paddleocr_vl_docker_files/README.md)에 정리돼 있습니다.
 
+관리 대상 컨테이너는 단계 완료, 취소, 앱 종료 때 삭제되지 않고 중지 상태로 보존됩니다. 런타임을 명시적으로 초기화하거나 제거할 때만 `docker compose down`을 사용합니다.
+
 ### 4. 권장 OCR 설정
 
 Settings에서 아래 중 하나를 선택합니다.
 
 - `Default (existing auto: MangaOCR / PPOCR / Pororo...)`: 기존 자동 OCR 경로 유지
 - `Optimal (HunyuanOCR / PaddleOCR VL)`: 중국어는 `HunyuanOCR`, 일본어/기타 언어는 `PaddleOCR VL`로 라우팅
+
+Stage-Batched 폴더 처리에서는 `Settings > PaddleOCR VL Settings`의 관리형
+exact 영구 OCR 캐시도 사용할 수 있습니다. crop 이미지는 저장하지 않고 사전
+적용 전 OCR 결과와 진단만 저장하며, 사용자 지정 endpoint에서는 자동으로
+비활성화됩니다.
+
+`Settings > Project`에는 기본값이 꺼진 미리보기 단계의 프로젝트 checkpoint
+기능도 있습니다. 감지 좌표, 사전 적용 전 PaddleOCR-VL 결과, lossless
+인페인트 결과·final mask, 인코딩된 렌더 출력을 각 runtime 시작 전에 복원할
+수 있습니다. 번역문은 `.ctpr`에만 두고 sidecar에는 검증용 stage 서명만
+기록하므로 project all-hit에서는 detector, Paddle, Gemma, inpainter, renderer
+추론을 모두 건너뜁니다. 현재 OCR·번역 사전은 hit와 miss 모두 정확히 한 번
+적용하고, 사전 변경 시 소비 결과와 downstream stage만 무효화합니다. 재사용
+가능한 stage manifest와 content-addressed artifact는
+`.ctpr` 옆 `<project>.ctpr.cache` 폴더에 저장합니다. cache가 없거나 잠겼거나
+손상돼도 프로젝트 열기와 처리는 계속되며 해당 stage를 다시 계산합니다.
 
 ### 5. 선택 알림 설정 (ntfy)
 
@@ -249,9 +279,9 @@ Settings에서 아래 중 하나를 선택합니다.
 
 현재 추적 중인 compose/runtime 이미지:
 
-- Gemma 로컬 서버: `ghcr.io/ggml-org/llama.cpp:server-cuda`
+- Gemma 로컬 서버: `ghcr.io/ggml-org/llama.cpp@sha256:22e0e3bfe967af4fd1df6a918022abbfd4e72e4d40a4769e616a4176790acbcb`
 - HunyuanOCR 로컬 서버: `ghcr.io/ggml-org/llama.cpp:server-cuda`
-- PaddleOCR VL 런타임: `ccr-2vdh3abv-pub.cnc.bj.baidubce.com/paddlepaddle/paddleocr-genai-vllm-server:latest-nvidia-gpu-offline`
+- PaddleOCR VL 런타임: `ccr-2vdh3abv-pub.cnc.bj.baidubce.com/paddlepaddle/paddleocr-genai-vllm-server@sha256:d0d32c04a2119613d25a0a4c292e165ccc107954b74580613cf59e378037f8f5`
 
 ## 참고 설치 문서
 
@@ -264,8 +294,6 @@ Settings에서 아래 중 하나를 선택합니다.
 ## 저장소 문서
 
 - [rules.md](rules.md)
-- [docs/history/change-log.md](docs/history/change-log.md)
-- [docs/history/change-log-ko.md](docs/history/change-log-ko.md)
 - [docs/gemma/local-server-ko.md](docs/gemma/local-server-ko.md)
 - [docs/hunyuan/local-server-ko.md](docs/hunyuan/local-server-ko.md)
 - [docs/repo/github-rulesets-public-free-ko.md](docs/repo/github-rulesets-public-free-ko.md)

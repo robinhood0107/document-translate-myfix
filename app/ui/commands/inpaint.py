@@ -3,8 +3,15 @@ import hashlib
 import uuid
 from PySide6.QtGui import QUndoCommand
 from .base import PatchCommandBase
+from app.projects.stage_checkpoints import (
+    invalidate_project_page_checkpoints,
+)
 import imkit as imk
-from modules.utils.inpaint_strokes import PATCH_KIND_INPAINT, normalize_patch_kind
+from modules.utils.inpaint_strokes import (
+    PATCH_KIND_INPAINT,
+    PATCH_KIND_RESTORE,
+    normalize_patch_kind,
+)
 
 class PatchInsertCommand(QUndoCommand, PatchCommandBase):
     """
@@ -59,8 +66,19 @@ class PatchInsertCommand(QUndoCommand, PatchCommandBase):
                 prop['scene_pos'] = patch['scene_pos']
             if 'page_index' in patch:
                 prop['page_index'] = patch['page_index']
-                
+
             self.properties_list.append(prop)
+
+    def _invalidate_render_checkpoint_for_restore(self) -> None:
+        if any(
+            normalize_patch_kind(prop.get("kind")) == PATCH_KIND_RESTORE
+            for prop in self.properties_list
+        ):
+            invalidate_project_page_checkpoints(
+                self.ct,
+                self.file_path,
+                stage="render",
+            )
 
     def _register_patches(self):
         # Ensure top-level storage exists
@@ -133,8 +151,9 @@ class PatchInsertCommand(QUndoCommand, PatchCommandBase):
         self._register_patches()
         self._draw_pixmaps()
         self.display = True
+        self._invalidate_render_checkpoint_for_restore()
 
     def undo(self):
         self._remove_pixmaps()
         self._unregister_patches()
-
+        self._invalidate_render_checkpoint_for_restore()

@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import importlib.util
+import sys
 import tempfile
 import unittest
 from dataclasses import dataclass, field
@@ -39,9 +41,24 @@ class _Block:
     _erase_edit_pixel_count: int = 0
     _erase_protect_pixel_count: int = 0
     _erase_skipped_reason: str = ""
+    ui_panel_mode: str = ""
+    ui_panel_preview_path: str = ""
+    mask_decision: str = ""
+    mask_reject_reason: str = ""
 
 
 class InpaintDebugTests(unittest.TestCase):
+    def test_export_inpaint_debug_script_imports_blockwise_lama_runner(self) -> None:
+        script_path = Path(__file__).resolve().parents[1] / "scripts" / "export_inpaint_debug.py"
+        spec = importlib.util.spec_from_file_location("export_inpaint_debug_for_test", script_path)
+        self.assertIsNotNone(spec)
+        module = importlib.util.module_from_spec(spec)
+        assert spec.loader is not None
+        sys.modules[spec.name] = module
+        spec.loader.exec_module(module)
+
+        self.assertTrue(callable(getattr(module, "source_lama_blockwise_inpaint", None)))
+
     def test_build_metadata_counts_masks_and_blocks(self) -> None:
         raw_mask = np.zeros((8, 8), dtype=np.uint8)
         raw_mask[1:3, 1:3] = 255
@@ -69,6 +86,10 @@ class InpaintDebugTests(unittest.TestCase):
             _erase_mode="bubble_flat_fill",
             _erase_edit_pixel_count=12,
             _erase_protect_pixel_count=3,
+            ui_panel_mode="preserve_original",
+            ui_panel_preview_path="previews/page_block_0.png",
+            mask_decision="review",
+            mask_reject_reason="embedded_ui_panel_layout_review",
         )
 
         metadata = build_inpaint_debug_metadata(
@@ -82,7 +103,34 @@ class InpaintDebugTests(unittest.TestCase):
             blocks=[block],
             raw_mask=raw_mask,
             cleanup_delta=cleanup_delta,
-            cleanup_stats={"applied": True, "component_count": 2, "block_count": 1},
+            mask_quality_policy="lama_safe_bubble_and_text_free",
+            mask_policy_bubble_clamp_applied_count=2,
+            mask_policy_text_free_glyph_applied_count=1,
+            mask_policy_removed_pixel_count=17,
+            mask_policy_outside_bubble_removed_pixel_count=5,
+            ctd_legacy_rectangle_rescue_disabled=True,
+            text_free_image_glyph_rescue_count=3,
+            text_free_image_glyph_rescue_mask_pixel_count=41,
+            mask_policy_version="ctd_lama_mask_policy_v2",
+            mask_candidate_source="ctd_refined",
+            mask_decision="review",
+            mask_reject_reason="ambiguous_candidate_scores",
+            mask_score_outside_change=0.01,
+            mask_score_outline_damage=0.02,
+            mask_score_residue=0.03,
+            mask_score_color_delta=0.04,
+            ui_panel_mode="preserve_original",
+            ui_panel_preview_path="previews/page.png",
+            cleanup_stats={
+                "applied": True,
+                "component_count": 2,
+                "block_count": 1,
+                "duplicate_bubble_inner_fill": {
+                    "applied": True,
+                    "duplicate_bubble_inner_fill_pixel_count": 25,
+                    "duplicate_bubble_inner_fill_backend": "bubble_flat_fill",
+                },
+            },
         )
 
         self.assertEqual(metadata["block_count"], 1)
@@ -115,6 +163,31 @@ class InpaintDebugTests(unittest.TestCase):
         self.assertEqual(metadata["blocks"][0]["erase_mode"], "bubble_flat_fill")
         self.assertEqual(metadata["blocks"][0]["erase_edit_pixel_count"], 12)
         self.assertEqual(metadata["blocks"][0]["erase_protect_pixel_count"], 3)
+        self.assertTrue(metadata["duplicate_bubble_inner_fill_applied"])
+        self.assertEqual(metadata["duplicate_bubble_inner_fill_pixel_count"], 25)
+        self.assertEqual(metadata["duplicate_bubble_inner_fill_backend"], "bubble_flat_fill")
+        self.assertEqual(metadata["mask_quality_policy"], "lama_safe_bubble_and_text_free")
+        self.assertEqual(metadata["mask_policy_bubble_clamp_applied_count"], 2)
+        self.assertEqual(metadata["mask_policy_text_free_glyph_applied_count"], 1)
+        self.assertEqual(metadata["mask_policy_removed_pixel_count"], 17)
+        self.assertEqual(metadata["mask_policy_outside_bubble_removed_pixel_count"], 5)
+        self.assertTrue(metadata["ctd_legacy_rectangle_rescue_disabled"])
+        self.assertEqual(metadata["text_free_image_glyph_rescue_count"], 3)
+        self.assertEqual(metadata["text_free_image_glyph_rescue_mask_pixel_count"], 41)
+        self.assertEqual(metadata["mask_policy_version"], "ctd_lama_mask_policy_v2")
+        self.assertEqual(metadata["mask_candidate_source"], "ctd_refined")
+        self.assertEqual(metadata["mask_decision"], "review")
+        self.assertEqual(metadata["mask_reject_reason"], "ambiguous_candidate_scores")
+        self.assertEqual(metadata["mask_score_outside_change"], 0.01)
+        self.assertEqual(metadata["mask_score_outline_damage"], 0.02)
+        self.assertEqual(metadata["mask_score_residue"], 0.03)
+        self.assertEqual(metadata["mask_score_color_delta"], 0.04)
+        self.assertEqual(metadata["ui_panel_mode"], "preserve_original")
+        self.assertEqual(metadata["ui_panel_preview_path"], "previews/page.png")
+        self.assertEqual(metadata["blocks"][0]["ui_panel_mode"], "preserve_original")
+        self.assertEqual(metadata["blocks"][0]["ui_panel_preview_path"], "previews/page_block_0.png")
+        self.assertEqual(metadata["blocks"][0]["mask_decision"], "review")
+        self.assertEqual(metadata["blocks"][0]["mask_reject_reason"], "embedded_ui_panel_layout_review")
 
     def test_export_artifacts_only_writes_selected_debug_outputs(self) -> None:
         image = np.full((10, 12, 3), 255, dtype=np.uint8)
