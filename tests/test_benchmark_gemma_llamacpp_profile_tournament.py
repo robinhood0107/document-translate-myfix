@@ -1004,6 +1004,117 @@ class GemmaLlamaCppProfileTournamentTests(unittest.TestCase):
         self.assertEqual(tournament.parse_memory_mib("1.5GiB"), 1536)
         self.assertIsNone(tournament.parse_memory_mib("not-memory"))
 
+    def test_container_swap_stats_reads_cgroup_v2_bytes(self) -> None:
+        completed = mock.Mock(
+            returncode=0,
+            stdout=(
+                "memory.swap.current=1048576\n"
+                "memory.swap.peak=268435456\n"
+            ),
+            stderr="",
+        )
+        with (
+            mock.patch.object(
+                tournament,
+                "docker_executable",
+                return_value="docker",
+            ),
+            mock.patch.object(
+                tournament,
+                "run_process",
+                return_value=completed,
+            ) as run_process,
+        ):
+            stats = tournament.query_container_swap_stats("neutral-container")
+
+        self.assertTrue(stats["available"])
+        self.assertEqual(stats["current_mb"], 1)
+        self.assertEqual(stats["peak_mb"], 256)
+        command = run_process.call_args.args[0]
+        self.assertEqual(command[:3], ["docker", "exec", "neutral-container"])
+        self.assertIn("memory.swap.peak", command[-1])
+
+    def test_container_swap_stats_fail_open_for_unavailable_cgroup(
+        self,
+    ) -> None:
+        cases = (
+            (
+                mock.Mock(returncode=66, stdout="", stderr="not supported"),
+                "not supported",
+            ),
+            (
+                mock.Mock(
+                    returncode=0,
+                    stdout="memory.swap.current=0\n",
+                    stderr="",
+                ),
+                "incomplete",
+            ),
+            (
+                mock.Mock(
+                    returncode=0,
+                    stdout=(
+                        "memory.swap.current=-1\n"
+                        "memory.swap.peak=0\n"
+                    ),
+                    stderr="",
+                ),
+                "negative",
+            ),
+            (
+                mock.Mock(
+                    returncode=0,
+                    stdout=(
+                        "memory.swap.current=invalid\n"
+                        "memory.swap.peak=0\n"
+                    ),
+                    stderr="",
+                ),
+                "invalid",
+            ),
+        )
+        for completed, expected_reason in cases:
+            with (
+                self.subTest(expected_reason=expected_reason),
+                mock.patch.object(
+                    tournament,
+                    "docker_executable",
+                    return_value="docker",
+                ),
+                mock.patch.object(
+                    tournament,
+                    "run_process",
+                    return_value=completed,
+                ),
+            ):
+                stats = tournament.query_container_swap_stats(
+                    "neutral-container"
+                )
+
+            self.assertFalse(stats["available"])
+            self.assertIn(expected_reason, stats["reason"])
+
+    def test_container_swap_stats_fail_open_on_timeout(self) -> None:
+        with (
+            mock.patch.object(
+                tournament,
+                "docker_executable",
+                return_value="docker",
+            ),
+            mock.patch.object(
+                tournament,
+                "run_process",
+                side_effect=tournament.subprocess.TimeoutExpired(
+                    cmd=["docker", "exec"],
+                    timeout=15,
+                ),
+            ),
+        ):
+            stats = tournament.query_container_swap_stats("neutral-container")
+
+        self.assertFalse(stats["available"])
+        self.assertIn("timed out", stats["reason"])
+
     def _comparison_result(
         self,
         *,
@@ -1116,6 +1227,39 @@ class GemmaLlamaCppProfileTournamentTests(unittest.TestCase):
         self.assertFalse(gates["hard_gate_passed"])
         self.assertEqual(gates["unresolved_fallback_count"], 1)
         self.assertFalse(gates["swap_growth_ok"])
+        self.assertEqual(gates["swap_gate_source"], "global-wsl-fallback")
+        self.assertEqual(gates["global_wsl_swap_growth_mb"], 256)
+
+    def test_result_gate_prefers_container_swap_over_global_wsl_noise(
+        self,
+    ) -> None:
+        gates = tournament._result_gates(
+            result={
+                "outputs": [
+                    {"item_id": "item-1", "empty": False},
+                ],
+                "stats": {},
+                "container_swap": {
+                    "available": True,
+                    "current_mb": 0,
+                    "peak_mb": 0,
+                },
+            },
+            expected_item_ids=["item-1"],
+            resource_summary={
+                "wsl_swap_growth_mb": 256,
+                "shared_gpu_growth_mb": 0,
+            },
+            max_swap_growth_mb=128,
+            max_shared_gpu_growth_mb=512,
+        )
+
+        self.assertTrue(gates["hard_gate_passed"])
+        self.assertTrue(gates["swap_growth_ok"])
+        self.assertEqual(gates["swap_gate_source"], "container-cgroup")
+        self.assertEqual(gates["swap_growth_mb"], 0)
+        self.assertEqual(gates["container_swap_peak_mb"], 0)
+        self.assertEqual(gates["global_wsl_swap_growth_mb"], 256)
 
 
 if __name__ == "__main__":

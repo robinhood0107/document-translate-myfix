@@ -20,6 +20,7 @@ draft model, target/draft GPU offload다. Gemma 런타임은 llama.cpp만
 - prompt, sampler, JSON Schema, sanitizer: 현재 제품 구현
 - translation result cache, Exact TM, project checkpoint: 모두 OFF
 - llama.cpp prompt cache RAM: 0
+- 실행 전 idle dedicated VRAM: 2048 MiB 이하
 - 실행 사이 후보 컨테이너는 정상 `stop`
 
 `contextual-grouped`, Q8 KV, vLLM Gemma, prompt 변경은 이 토너먼트에
@@ -55,7 +56,9 @@ draft model, target/draft GPU offload다. Gemma 런타임은 llama.cpp만
   고유명사 회귀 0
 - 명시적 성적·폭력적 의미의 누락·순화·거부 0
 - 라운드 간 심각한 의미 반전 0
-- OOM, 비정상 shared GPU memory, WSL swap 증가 0
+- OOM과 비정상 shared GPU memory 증가 0
+- llama.cpp 컨테이너 cgroup swap peak가 manifest 한도 이내
+- cgroup 계측을 사용할 수 없을 때만 전역 WSL swap 증가량으로 안전 판정
 
 구조 게이트는 runner가 판정한다. 의미 품질은 외부 raw 결과를 원문
 기준으로 전수 검수한다.
