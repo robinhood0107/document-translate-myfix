@@ -177,6 +177,8 @@ class BenchmarkManifest:
     max_idle_gpu_used_mb: int
     max_swap_growth_mb: int
     max_shared_gpu_growth_mb: int
+    container_memory_limit_mib: int
+    container_swap_disabled: bool
 
     @property
     def baseline(self) -> TargetSpec:
@@ -464,6 +466,22 @@ def load_manifest(path: Path) -> BenchmarkManifest:
     preflight = payload.get("preflight") or {}
     if not isinstance(preflight, Mapping):
         raise ProtocolError("preflight must be an object")
+    container_memory_limit_mib = int(
+        preflight.get("container_memory_limit_mib", 0)
+    )
+    container_swap_disabled = preflight.get(
+        "container_swap_disabled",
+        False,
+    )
+    if not isinstance(container_swap_disabled, bool):
+        raise ProtocolError("container_swap_disabled must be a boolean")
+    if container_memory_limit_mib < 0:
+        raise ProtocolError("container_memory_limit_mib must be non-negative")
+    if container_swap_disabled and container_memory_limit_mib <= 0:
+        raise ProtocolError(
+            "container_swap_disabled requires a positive "
+            "container_memory_limit_mib"
+        )
     return BenchmarkManifest(
         path=manifest_path,
         image=image,
@@ -484,6 +502,8 @@ def load_manifest(path: Path) -> BenchmarkManifest:
                 DEFAULT_MAX_SHARED_GPU_GROWTH_MB,
             )
         ),
+        container_memory_limit_mib=container_memory_limit_mib,
+        container_swap_disabled=container_swap_disabled,
     )
 
 
@@ -1003,6 +1023,7 @@ def runtime_fingerprint(
             "sha256": inventory["artifacts"][target.id]["sha256"],
         },
         "command": build_server_command(manifest, inventory, profile),
+        "container_resources": _container_resource_contract(manifest),
         "volumes": {
             volume_id: manifest.volumes[volume_id].name
             for volume_id in sorted(
@@ -1024,6 +1045,22 @@ def runtime_fingerprint(
             "sha256": inventory["artifacts"][profile.draft_id]["sha256"],
         }
     return _canonical_sha256(payload)
+
+
+def _container_resource_contract(
+    manifest: BenchmarkManifest,
+) -> dict[str, Any]:
+    memory_limit_mib = int(manifest.container_memory_limit_mib)
+    arguments: list[str] = []
+    if memory_limit_mib > 0:
+        arguments.extend(["--memory", f"{memory_limit_mib}m"])
+        if manifest.container_swap_disabled:
+            arguments.extend(["--memory-swap", f"{memory_limit_mib}m"])
+    return {
+        "memory_limit_mib": memory_limit_mib,
+        "swap_disabled": bool(manifest.container_swap_disabled),
+        "arguments": arguments,
+    }
 
 
 def _mount_arguments(
@@ -1061,11 +1098,14 @@ def _container_contract(
 ) -> dict[str, Any]:
     fingerprint = runtime_fingerprint(manifest, inventory, profile)
     name = expected_container_name(profile, fingerprint)
+    resources = _container_resource_contract(manifest)
     return {
         "name": name,
         "fingerprint": fingerprint,
         "command": build_server_command(manifest, inventory, profile),
         "mount_args": _mount_arguments(manifest, profile),
+        "resource_contract": resources,
+        "resource_args": resources["arguments"],
     }
 
 
@@ -1122,6 +1162,22 @@ def container_contract_errors(
         errors.append("GPU device request")
     if str(host_config.get("NetworkMode") or "") not in {"default", "bridge"}:
         errors.append("network mode")
+    resource_contract = contract["resource_contract"]
+    expected_memory_bytes = (
+        int(resource_contract["memory_limit_mib"]) * 1024 * 1024
+    )
+    expected_memory_swap_bytes = (
+        expected_memory_bytes
+        if resource_contract["swap_disabled"]
+        else 0
+    )
+    if int(host_config.get("Memory", 0) or 0) != expected_memory_bytes:
+        errors.append("memory limit")
+    if (
+        int(host_config.get("MemorySwap", 0) or 0)
+        != expected_memory_swap_bytes
+    ):
+        errors.append("swap limit")
     port_bindings = host_config.get("PortBindings") or {}
     bindings = port_bindings.get("8080/tcp") or []
     normalized_bindings = [
@@ -1197,6 +1253,7 @@ def ensure_stopped_container(
         f"comic-translate.profile={profile.id}",
         "--gpus",
         "all",
+        *contract["resource_args"],
         "-e",
         "NVIDIA_VISIBLE_DEVICES=all",
         "-e",
@@ -2485,6 +2542,7 @@ def run_profile_stage(
             "name": container["name"],
             "id": container["container_id"],
             "reused": container["reused"],
+            "resource_contract": container["resource_contract"],
         }
         result["gpu_before_start"] = query_gpu_snapshot()
         with ResourceSampler() as sampler:
@@ -3091,6 +3149,7 @@ def probe_profile_load(
             "name": container["name"],
             "id": container["container_id"],
             "reused": container["reused"],
+            "resource_contract": container["resource_contract"],
         }
         with ResourceSampler() as sampler:
             runtime_started = time.perf_counter()
@@ -3378,6 +3437,7 @@ def _manifest_summary(manifest: BenchmarkManifest) -> dict[str, Any]:
         "target_ids": sorted(manifest.targets),
         "draft_ids": sorted(manifest.drafts),
         "profile_ids": [profile.id for profile in enumerate_profiles(manifest)],
+        "container_resources": _container_resource_contract(manifest),
         "volumes": {
             volume.id: {
                 "name": volume.name,

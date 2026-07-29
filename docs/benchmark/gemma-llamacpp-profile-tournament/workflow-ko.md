@@ -61,6 +61,8 @@ draft model, target/draft GPU offload다. Gemma 런타임은 llama.cpp만
 - OOM과 비정상 shared GPU memory 증가 0
 - llama.cpp 컨테이너 cgroup swap peak가 manifest 한도 이내
 - cgroup 계측을 사용할 수 없을 때만 전역 WSL swap 증가량으로 안전 판정
+- 컨테이너 swap 금지 계약에서는 cgroup `memory.swap.max=0`을 사용하고
+  RAM 부족을 OOM/health 실패로 명확히 구분
 
 구조 게이트는 runner가 판정한다. 의미 품질은 외부 raw 결과를 원문
 기준으로 전수 검수한다.
