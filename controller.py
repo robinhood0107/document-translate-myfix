@@ -84,6 +84,10 @@ from modules.utils.exceptions import (
     LocalServiceSetupError,
     OperationCancelledError,
 )
+from modules.utils.debug_artifacts import (
+    finish_debug_artifact_run,
+    prepare_debug_artifact_run,
+)
 
 
 logger = logging.getLogger(__name__)
@@ -2275,6 +2279,11 @@ class ComicTranslate(ComicTranslateUI):
         self._start_batch_report(selected_paths, run_type=run_type)
         self.selected_batch = selected_paths
         self._current_batch_run_type = run_type
+        prepare_debug_artifact_run(
+            self,
+            selected_paths,
+            run_type=run_type,
+        )
 
         if self.manual_radio.isChecked():
             self.automatic_radio.setChecked(True)
@@ -2515,6 +2524,18 @@ class ComicTranslate(ComicTranslateUI):
         except Exception:
             pass
         self.batch_report_ctrl.refresh_action_buttons()
+        finish_debug_artifact_run(
+            self,
+            status=(
+                "cancelled"
+                if was_cancelled
+                else "paused"
+                if was_paused
+                else "failed"
+                if failed
+                else "completed"
+            ),
+        )
         try:
             self.series_ctrl.on_batch_process_finished(
                 was_cancelled=was_cancelled,
@@ -2623,6 +2644,7 @@ class ComicTranslate(ComicTranslateUI):
         self._batch_failed = False
         self._current_batch_run_type = None
         if getattr(self, "_is_shutting_down", False):
+            finish_debug_artifact_run(self, status="interrupted")
             self.selected_batch = []
             return
         report = self._finalize_batch_report(was_cancelled)
