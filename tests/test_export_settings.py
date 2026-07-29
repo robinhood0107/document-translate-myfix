@@ -65,6 +65,7 @@ class _FakePage:
             raw_text_checkbox=_Check(True),
             translated_text_checkbox=_Check(False),
             inpainted_image_checkbox=_Check(True),
+            ocr_debug_checkbox=_Check(True),
             detector_overlay_checkbox=_Check(True),
             raw_mask_checkbox=_Check(True),
             mask_overlay_checkbox=_Check(False),
@@ -103,6 +104,7 @@ class ExportSettingsTests(unittest.TestCase):
 
         self.assertTrue(settings["export_raw_text"])
         self.assertTrue(settings["export_inpainted_image"])
+        self.assertTrue(settings["export_ocr_debug"])
         self.assertTrue(settings["export_detector_overlay"])
         self.assertTrue(settings["export_raw_mask"])
         self.assertFalse(settings["export_mask_overlay"])

@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import tempfile
 import unittest
+from pathlib import Path
 from unittest import mock
 
 import numpy as np
@@ -484,6 +486,79 @@ class MangaLMMOCRTests(unittest.TestCase):
         self.assertEqual(payload["repeat_penalty"], 1.05)
         self.assertEqual(payload["repeat_last_n"], 0)
         self.assertEqual(post.call_args.kwargs["timeout"], 60.0)
+
+    def test_engine_debug_env_is_routed_to_active_sidecar_runtime(self) -> None:
+        engine = MangaLMMOCREngine()
+        plan = _make_resize_plan(
+            profile="standard",
+            request_shape=(32, 32),
+            original_shape=(32, 32),
+        )
+        image = np.zeros((32, 32, 3), dtype=np.uint8)
+        with tempfile.TemporaryDirectory() as temporary:
+            legacy_root = Path(temporary) / "legacy"
+            legacy_root.mkdir()
+            active_root = Path(temporary) / "runtime" / "mangalmm-engine"
+            active_root.mkdir(parents=True)
+            engine.debug_root = legacy_root
+            engine._debug_root_from_env = True
+            with mock.patch(
+                "modules.ocr.mangalmm_ocr."
+                "active_debug_runtime_directory",
+                return_value=str(active_root),
+            ):
+                engine._export_debug_artifact(
+                    blk=None,
+                    failure_reason="test",
+                    response_kind="../unsafe",
+                    raw_text="raw",
+                    crop_bbox=(0, 0, 32, 32),
+                    crop_source="page",
+                    resize_plan=plan,
+                    crop_image=image,
+                    request_image=image,
+                    analysis={"status": "test"},
+                )
+
+            artifacts = list(active_root.iterdir())
+            self.assertEqual(len(artifacts), 1)
+            self.assertNotIn("..", artifacts[0].name)
+            self.assertTrue((artifacts[0] / "meta.json").is_file())
+            self.assertTrue((artifacts[0] / "crop.png").is_file())
+            self.assertTrue((artifacts[0] / "request.png").is_file())
+            self.assertEqual(list(legacy_root.iterdir()), [])
+
+    def test_engine_debug_env_does_not_fall_back_outside_sidecar(self) -> None:
+        engine = MangaLMMOCREngine()
+        plan = _make_resize_plan(
+            profile="standard",
+            request_shape=(32, 32),
+            original_shape=(32, 32),
+        )
+        image = np.zeros((32, 32, 3), dtype=np.uint8)
+        with tempfile.TemporaryDirectory() as temporary:
+            legacy_root = Path(temporary) / "legacy"
+            engine.debug_root = legacy_root
+            engine._debug_root_from_env = True
+            with mock.patch(
+                "modules.ocr.mangalmm_ocr."
+                "active_debug_runtime_directory",
+                return_value="",
+            ):
+                engine._export_debug_artifact(
+                    blk=None,
+                    failure_reason="test",
+                    response_kind="missing-sidecar",
+                    raw_text="raw",
+                    crop_bbox=(0, 0, 32, 32),
+                    crop_source="page",
+                    resize_plan=plan,
+                    crop_image=image,
+                    request_image=image,
+                    analysis={"status": "test"},
+                )
+
+            self.assertFalse(legacy_root.exists())
 
     def test_process_image_single_attempt_text_only_is_failure(self) -> None:
         engine = MangaLMMOCREngine()
