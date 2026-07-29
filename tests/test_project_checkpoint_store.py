@@ -447,6 +447,23 @@ class ProjectCheckpointStoreTests(unittest.TestCase):
         self.assertIsNotNone(self.store.read_object(used_hash))
         self.assertIsNone(self.store.read_object(unused_hash))
 
+    def test_cleanup_never_removes_debug_run_folders(self) -> None:
+        debug_run = self.store.sidecar_path / "debug" / "run-test"
+        debug_run.mkdir(parents=True)
+        manifest = debug_run / "manifest.json"
+        manifest.write_text('{"status":"completed"}', encoding="utf-8")
+        unused_hash = self.store.put_object(b"unused")
+        assert unused_hash is not None
+
+        result = self.store.clean_unused_objects()
+
+        self.assertEqual(result["removed_files"], 1)
+        self.assertTrue(manifest.is_file())
+        self.assertEqual(
+            manifest.read_text(encoding="utf-8"),
+            '{"status":"completed"}',
+        )
+
     def test_cleanup_cannot_race_manifest_into_dangling_object(self) -> None:
         object_hash = self.store.put_object(b"concurrent")
         assert object_hash is not None

@@ -26,6 +26,7 @@ from modules.rendering.render import (
     should_skip_short_render_translation,
 )
 from modules.utils.export_paths import export_run_root, reserve_export_run_token, resolve_export_directory
+from modules.utils.debug_artifacts import active_debug_page_directory
 from modules.utils.automatic_output import (
     build_archive_page_file_name,
     build_archive_staging_dir,
@@ -39,6 +40,7 @@ from modules.utils.ocr_debug import export_ocr_debug_artifacts, is_block_ocr_emp
 from modules.utils.inpaint_debug import (
     build_inpaint_debug_metadata,
     export_inpaint_debug_artifacts,
+    has_debug_exports,
 )
 from modules.utils.render_style_policy import (
     VERTICAL_ALIGNMENT_TOP,
@@ -441,6 +443,7 @@ class RenderMixin:
                     "export_raw_text": bool(export_settings.get("export_raw_text", False)),
                     "export_translated_text": bool(export_settings.get("export_translated_text", False)),
                     "export_inpainted_image": bool(export_settings.get("export_inpainted_image", False)),
+                    "export_ocr_debug": bool(export_settings.get("export_ocr_debug", False)),
                     "export_detector_overlay": bool(export_settings.get("export_detector_overlay", False)),
                     "export_raw_mask": bool(export_settings.get("export_raw_mask", False)),
                     "export_mask_overlay": bool(export_settings.get("export_mask_overlay", False)),
@@ -515,21 +518,32 @@ class RenderMixin:
             ) as f:
                 f.write(translated_text)
 
-        if (export_settings["export_raw_text"] or export_settings["export_translated_text"]) and blk_list:
+        if export_settings.get("export_ocr_debug", False) and blk_list:
             summary = self.main_page.image_states[image_path].get("processing_summary", {})
-            path = os.path.join(
-                export_root,
-                "ocr_debugs",
-                archive_bname,
+            path = active_debug_page_directory(
+                self.main_page,
+                image_path,
             )
-            export_ocr_debug_artifacts(
-                path,
-                base_name,
-                image,
-                blk_list,
-                summary.get("ocr_engine", ""),
-                self.main_page.image_states[image_path].get("source_lang", ""),
-            )
+            if path:
+                try:
+                    export_ocr_debug_artifacts(
+                        path,
+                        base_name,
+                        image,
+                        blk_list,
+                        summary.get("ocr_engine", ""),
+                        self.main_page.image_states[image_path].get(
+                            "source_lang",
+                            "",
+                        ),
+                        flat_names=True,
+                    )
+                except Exception:
+                    logger.warning(
+                        "OCR diagnostic export failed open for %s.",
+                        os.path.basename(image_path),
+                        exc_info=True,
+                    )
 
         summary = self.main_page.image_states[image_path].get("processing_summary", {})
         debug_state = self.main_page.image_states[image_path].get("inpaint_debug_state") or {}
@@ -612,18 +626,35 @@ class RenderMixin:
             ui_panel_mode=str(mask_details.get("ui_panel_mode", "") or ""),
             ui_panel_preview_path=str(mask_details.get("ui_panel_preview_path", "") or ""),
         )
-        export_inpaint_debug_artifacts(
-            export_root=export_root,
-            archive_bname=archive_bname,
-            page_base_name=base_name,
-            image=image,
-            blocks=debug_state.get("mask_blocks") or blk_list,
-            export_settings=export_settings,
-            raw_mask=raw_mask,
-            mask_overlay_mask=mask_details.get("final_mask", final_mask),
-            cleanup_delta=cleanup_delta,
-            metadata=debug_metadata,
-        )
+        if has_debug_exports(export_settings):
+            page_output_dir = active_debug_page_directory(
+                self.main_page,
+                image_path,
+            )
+            if page_output_dir:
+                try:
+                    export_inpaint_debug_artifacts(
+                        export_root=export_root,
+                        archive_bname=archive_bname,
+                        page_base_name=base_name,
+                        image=image,
+                        blocks=debug_state.get("mask_blocks") or blk_list,
+                        export_settings=export_settings,
+                        raw_mask=raw_mask,
+                        mask_overlay_mask=mask_details.get(
+                            "final_mask",
+                            final_mask,
+                        ),
+                        cleanup_delta=cleanup_delta,
+                        metadata=debug_metadata,
+                        page_output_dir=page_output_dir,
+                    )
+                except Exception:
+                    logger.warning(
+                        "Inpaint diagnostic export failed open for %s.",
+                        os.path.basename(image_path),
+                        exc_info=True,
+                    )
 
         renderer = ImageSaveRenderer(image)
         patches = self.final_patches_for_save.get(image_path, [])
