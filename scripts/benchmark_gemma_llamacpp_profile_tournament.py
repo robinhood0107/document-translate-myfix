@@ -122,6 +122,13 @@ PROMETHEUS_INTEREST_RE = re.compile(
     r"(?:draft|accept|prompt|predict|token|request|kv|cache)",
     re.IGNORECASE,
 )
+DRAFT_ACCEPTANCE_RE = re.compile(
+    r"draft acceptance\s*=\s*[0-9]+(?:\.[0-9]+)?\s*"
+    r"\(\s*(?P<accepted>[0-9]+)\s+accepted\s*/\s*"
+    r"(?P<generated>[0-9]+)\s+generated\),\s*"
+    r"mean len\s*=\s*(?P<mean_length>[0-9]+(?:\.[0-9]+)?)",
+    re.IGNORECASE,
+)
 
 
 class ProtocolError(ValueError):
@@ -1339,17 +1346,20 @@ def query_wsl_swap_used_mb() -> float | None:
         executable = shutil.which("wsl.exe") or shutil.which("wsl")
         if not executable:
             return None
-        completed = run_process(
-            [
-                executable,
-                "-e",
-                "sh",
-                "-lc",
-                "awk '/SwapTotal:/{t=$2}/SwapFree:/{f=$2}END{print (t-f)/1024}' /proc/meminfo",
-            ],
-            timeout_sec=15,
-            allow_failure=True,
-        )
+        try:
+            completed = run_process(
+                [
+                    executable,
+                    "-e",
+                    "sh",
+                    "-lc",
+                    "awk '/SwapTotal:/{t=$2}/SwapFree:/{f=$2}END{print (t-f)/1024}' /proc/meminfo",
+                ],
+                timeout_sec=15,
+                allow_failure=True,
+            )
+        except subprocess.TimeoutExpired:
+            return None
         raw = completed.stdout.strip()
     else:
         meminfo = Path("/proc/meminfo")
@@ -1878,9 +1888,54 @@ def metric_delta(
     }
 
 
+def fetch_container_logs(container_name: str) -> str:
+    completed = run_process(
+        [docker_executable(), "logs", container_name],
+        timeout_sec=30,
+        allow_failure=True,
+    )
+    return completed.stdout + completed.stderr
+
+
+def classify_profile_failure(exc: BaseException, logs: str) -> str:
+    combined = f"{type(exc).__name__}: {exc}\n{logs}".casefold()
+    if "failed to load draft model" in combined:
+        return "draft_model_load"
+    if "out of memory" in combined or "cuda error" in combined:
+        return "oom_or_cuda"
+    if isinstance(exc, (TimeoutError, subprocess.TimeoutExpired)):
+        return "timeout"
+    return "runtime"
+
+
+def parse_draft_acceptance_logs(text: str) -> dict[str, Any]:
+    accepted = 0
+    generated = 0
+    weighted_mean_length = 0.0
+    line_count = 0
+    for match in DRAFT_ACCEPTANCE_RE.finditer(text):
+        line_accepted = int(match.group("accepted"))
+        line_generated = int(match.group("generated"))
+        mean_length = float(match.group("mean_length"))
+        accepted += line_accepted
+        generated += line_generated
+        weighted_mean_length += mean_length * line_generated
+        line_count += 1
+    return {
+        "line_count": line_count,
+        "draft_tokens": generated,
+        "accepted_tokens": accepted,
+        "acceptance_rate": accepted / generated if generated > 0 else None,
+        "mean_accepted_length": (
+            weighted_mean_length / generated if generated > 0 else None
+        ),
+    }
+
+
 def summarize_speculation_metrics(
     delta: Mapping[str, float],
     stats: Mapping[str, Any],
+    log_telemetry: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     def sum_matching(
         *,
@@ -1901,6 +1956,11 @@ def summarize_speculation_metrics(
     accepted = sum_matching(required=("accept", "token", "total"))
     if accepted == 0:
         accepted = sum_matching(required=("accept", "draft", "total"))
+    telemetry_source = "prometheus"
+    if drafted <= 0 and log_telemetry:
+        drafted = float(log_telemetry.get("draft_tokens", 0) or 0)
+        accepted = float(log_telemetry.get("accepted_tokens", 0) or 0)
+        telemetry_source = "llama-log"
     completion_tokens = int(stats.get("gemma_completion_tokens", 0) or 0)
     decode_ms = float(stats.get("gemma_decode_ms", 0.0) or 0.0)
     http_attempts = int(stats.get("gemma_http_attempt_count", 0) or 0)
@@ -1908,6 +1968,8 @@ def summarize_speculation_metrics(
         "draft_tokens": drafted,
         "accepted_tokens": accepted,
         "acceptance_rate": accepted / drafted if drafted > 0 else None,
+        "telemetry_source": telemetry_source if drafted > 0 else "none",
+        "log_telemetry": dict(log_telemetry or {}),
         "accepted_tokens_per_http_attempt": (
             accepted / http_attempts if http_attempts > 0 else None
         ),
@@ -2338,6 +2400,7 @@ def run_profile_stage(
                 timeout_sec=request_timeout_sec,
             )
             metrics_before_stage = fetch_metrics()
+            logs_before_stage = fetch_container_logs(container["name"])
             stage_started = time.perf_counter()
             translation = _run_translation_groups(
                 model_filename=target.volume_filename,
@@ -2348,6 +2411,13 @@ def run_profile_stage(
                 time.perf_counter() - stage_started
             )
             metrics_after_stage = fetch_metrics()
+            logs_after_stage = fetch_container_logs(container["name"])
+            stage_logs = (
+                logs_after_stage[len(logs_before_stage) :]
+                if logs_after_stage.startswith(logs_before_stage)
+                else logs_after_stage
+            )
+            log_speculation = parse_draft_acceptance_logs(stage_logs)
             result["container_stats_after_stage"] = query_container_stats(
                 container["name"]
             )
@@ -2374,6 +2444,7 @@ def run_profile_stage(
             result["speculation_telemetry"] = summarize_speculation_metrics(
                 stage_metric_delta,
                 translation["stats"],
+                log_speculation,
             )
         result["resources"] = sampler.summary()
         result["gpu_before_stop"] = query_gpu_snapshot()
@@ -2396,14 +2467,11 @@ def run_profile_stage(
         result["status"] = "failed"
         result["failure_reason"] = f"{type(exc).__name__}: {exc}"
         if container is not None:
-            logs = run_process(
-                [docker_executable(), "logs", container["name"]],
-                timeout_sec=30,
-                allow_failure=True,
-            )
-            result["container_log_tail"] = (
-                logs.stderr[-12_000:] or logs.stdout[-12_000:]
-            )
+            logs = fetch_container_logs(container["name"])
+            result["container_log_tail"] = logs[-12_000:]
+            result["failure_kind"] = classify_profile_failure(exc, logs)
+        else:
+            result["failure_kind"] = classify_profile_failure(exc, "")
     finally:
         if started and container is not None:
             stopped = run_process(
@@ -2969,14 +3037,11 @@ def probe_profile_load(
         result["status"] = "failed"
         result["failure_reason"] = f"{type(exc).__name__}: {exc}"
         if container is not None:
-            logs = run_process(
-                [docker_executable(), "logs", container["name"]],
-                timeout_sec=30,
-                allow_failure=True,
-            )
-            result["container_log_tail"] = (
-                logs.stderr[-12_000:] or logs.stdout[-12_000:]
-            )
+            logs = fetch_container_logs(container["name"])
+            result["container_log_tail"] = logs[-12_000:]
+            result["failure_kind"] = classify_profile_failure(exc, logs)
+        else:
+            result["failure_kind"] = classify_profile_failure(exc, "")
     finally:
         if started and container is not None:
             stopped = run_process(
@@ -3067,6 +3132,11 @@ def tune_profile_ngl(
     for draft_mode in draft_modes:
         initial = attempt(profile.target_ngl, draft_mode)
         initial_passed = initial["status"] == "passed"
+        if (
+            initial.get("failure_kind") == "draft_model_load"
+            and draft_mode != "0"
+        ):
+            continue
         initial_resource_gates = initial.get("resource_gates") or {}
         initial_swap_only_failure = bool(
             not initial_passed

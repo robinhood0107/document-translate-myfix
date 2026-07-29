@@ -831,6 +831,87 @@ class GemmaLlamaCppProfileTournamentTests(unittest.TestCase):
         self.assertEqual(result["effective_max_target_ngl"], 31)
         self.assertEqual(result["safe_max_target_ngl"], 31)
 
+    def test_mtp_tuning_skips_ngl_sweep_after_draft_load_failure(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            manifest = self._load_manifest(root)
+            inventory = self._fake_inventory(manifest)
+            profile = tournament.find_profile(manifest, "baseline__mtp-4")
+            attempts: list[tuple[int, str]] = []
+
+            def fake_probe(**kwargs: object) -> dict[str, object]:
+                candidate = kwargs["profile"]
+                attempts.append(  # type: ignore[union-attr]
+                    (
+                        candidate.target_ngl,  # type: ignore[union-attr]
+                        candidate.draft_ngl,  # type: ignore[union-attr]
+                    )
+                )
+                if candidate.draft_ngl != "0":  # type: ignore[union-attr]
+                    return {
+                        "status": "failed",
+                        "failure_kind": "draft_model_load",
+                    }
+                return {
+                    "status": "passed",
+                    "resource_gates": {
+                        "swap_growth_ok": True,
+                        "shared_gpu_growth_ok": True,
+                    },
+                }
+
+            with mock.patch.object(
+                tournament,
+                "probe_profile_load",
+                side_effect=fake_probe,
+            ):
+                result = tournament.tune_profile_ngl(
+                    manifest=manifest,
+                    inventory=inventory,
+                    profile=profile,
+                    max_ngl=23,
+                    output_path=root / "mtp-fallback-tuning.json",
+                    start_timeout_sec=1,
+                    request_timeout_sec=1,
+                )
+
+        self.assertEqual(attempts, [(23, "all"), (23, "0")])
+        self.assertEqual(result["selected_draft_ngl"], "0")
+        self.assertEqual(result["safe_max_target_ngl"], 23)
+
+    def test_draft_acceptance_log_fallback_is_aggregated(self) -> None:
+        parsed = tournament.parse_draft_acceptance_logs(
+            "\n".join(
+                [
+                    "draft acceptance = 0.30000 ( 12 accepted / 40 generated), mean len = 2.20",
+                    "draft acceptance = 0.09848 ( 13 accepted / 132 generated), mean len = 1.39",
+                ]
+            )
+        )
+        summary = tournament.summarize_speculation_metrics(
+            {},
+            {
+                "gemma_completion_tokens": 50,
+                "gemma_decode_ms": 1000.0,
+                "gemma_http_attempt_count": 2,
+            },
+            parsed,
+        )
+
+        self.assertEqual(parsed["line_count"], 2)
+        self.assertEqual(summary["draft_tokens"], 172)
+        self.assertEqual(summary["accepted_tokens"], 25)
+        self.assertAlmostEqual(summary["acceptance_rate"], 25 / 172)
+        self.assertEqual(summary["telemetry_source"], "llama-log")
+
+    def test_draft_load_failure_is_classified(self) -> None:
+        result = tournament.classify_profile_failure(
+            RuntimeError("server exited"),
+            "failed to load draft model, '/models/mtp.gguf'",
+        )
+
+        self.assertEqual(result, "draft_model_load")
+
     def test_prometheus_parser_keeps_speculation_and_timing_metrics(self) -> None:
         parsed = tournament.parse_prometheus_metrics(
             "\n".join(
