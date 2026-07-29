@@ -788,6 +788,94 @@ class GemmaLlamaCppProfileTournamentTests(unittest.TestCase):
         self.assertEqual(result["first_failed_target_ngl"], 26)
         self.assertEqual(result["screen_comparison_target_ngls"], [25])
 
+    def test_ngl_tuning_continues_after_nonmonotonic_swap_failure(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            manifest = self._load_manifest(root)
+            inventory = self._fake_inventory(manifest)
+            profile = tournament.find_profile(manifest, "baseline__none")
+            attempted_ngls: list[int] = []
+
+            def fake_probe(**kwargs: object) -> dict[str, object]:
+                candidate = kwargs["profile"]
+                ngl = candidate.target_ngl  # type: ignore[union-attr]
+                attempted_ngls.append(ngl)
+                passed = ngl in {23, 25}
+                return {
+                    "status": "passed" if passed else "failed",
+                    "resource_gates": {
+                        "swap_growth_ok": passed,
+                        "shared_gpu_growth_ok": True,
+                    },
+                }
+
+            with mock.patch.object(
+                tournament,
+                "probe_profile_load",
+                side_effect=fake_probe,
+            ):
+                result = tournament.tune_profile_ngl(
+                    manifest=manifest,
+                    inventory=inventory,
+                    profile=profile,
+                    max_ngl=26,
+                    output_path=root / "nonmonotonic-tuning.json",
+                    start_timeout_sec=1,
+                    request_timeout_sec=1,
+                )
+
+        self.assertEqual(attempted_ngls, [23, 24, 25, 26])
+        self.assertEqual(result["safe_target_ngls"], [23, 25])
+        self.assertEqual(result["safe_max_target_ngl"], 25)
+        self.assertEqual(result["first_failed_target_ngl"], 26)
+        self.assertEqual(result["screen_comparison_target_ngls"], [23, 25])
+
+    def test_ngl_tuning_searches_down_from_max_swap_failure(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            manifest = self._load_manifest(root)
+            inventory = self._fake_inventory(manifest)
+            profile = tournament.find_profile(
+                manifest,
+                "baseline__none",
+                target_ngl=26,
+            )
+            attempted_ngls: list[int] = []
+
+            def fake_probe(**kwargs: object) -> dict[str, object]:
+                candidate = kwargs["profile"]
+                ngl = candidate.target_ngl  # type: ignore[union-attr]
+                attempted_ngls.append(ngl)
+                passed = ngl in {24, 25}
+                return {
+                    "status": "passed" if passed else "failed",
+                    "resource_gates": {
+                        "swap_growth_ok": passed,
+                        "shared_gpu_growth_ok": True,
+                    },
+                }
+
+            with mock.patch.object(
+                tournament,
+                "probe_profile_load",
+                side_effect=fake_probe,
+            ):
+                result = tournament.tune_profile_ngl(
+                    manifest=manifest,
+                    inventory=inventory,
+                    profile=profile,
+                    max_ngl=26,
+                    output_path=root / "max-swap-tuning.json",
+                    start_timeout_sec=1,
+                    request_timeout_sec=1,
+                )
+
+        self.assertEqual(attempted_ngls, [26, 25, 24])
+        self.assertEqual(result["safe_target_ngls"], [24, 25])
+        self.assertEqual(result["safe_max_target_ngl"], 25)
+        self.assertEqual(result["first_failed_target_ngl"], 26)
+        self.assertEqual(result["screen_comparison_target_ngls"], [24, 25])
+
     def test_ngl_tuning_caps_search_at_model_output_layer(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

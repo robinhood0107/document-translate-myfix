@@ -35,6 +35,8 @@ draft model, target/draft GPU offload다. Gemma 런타임은 llama.cpp만
    SHA-256을 확인한 뒤 atomic rename한다. 제품 volume은 변경하지 않는다.
 4. 외부 GPU 컨테이너, 높은 idle VRAM, 포트 충돌이 있으면 중단한다.
 5. target NGL 23과 draft full GPU에서 시작해 안전 경계를 찾는다.
+   cgroup swap-only 실패는 비단조적일 수 있으므로 상향 범위를 끝까지
+   확인하고, 최대 NGL에서 시작한 실패는 하향 안전점도 확인한다.
 6. 모든 프로필을 smoke와 sensitive-15에 통과시킨다.
 7. 18블록을 정방향·역방향으로 실행한다. 확실히 느리거나 품질에 실패한
    후보만 탈락시킨다.
