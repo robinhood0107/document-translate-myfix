@@ -11,7 +11,12 @@ from modules.masking.ctd_refiner import (
     _text_bubble_polarity_glyph_mask,
     _text_free_glyph_color_mask,
 )
-from modules.utils.inpaint_cleanup import _cap_residue_mask_to_source_mask, refine_bubble_residue_inpaint
+from modules.utils.inpaint_cleanup import (
+    _cap_residue_mask_to_source_mask,
+    apply_duplicate_bubble_inner_fill,
+    fill_duplicate_bubble_inner_regions,
+    refine_bubble_residue_inpaint,
+)
 from modules.utils.mask_roi import resolve_block_ctd_roi
 from modules.utils.textblock import TextBlock
 
@@ -173,6 +178,45 @@ class TextFreeStrictMaskingTests(unittest.TestCase):
 
         self.assertEqual(int(np.count_nonzero(capped[0:5, 0:5])), 0)
         self.assertEqual(int(np.count_nonzero(capped[9:12, 9:12])), 9)
+
+    def test_duplicate_bubble_inner_fill_only_changes_duplicate_mask(self) -> None:
+        image = np.full((72, 72, 3), 224, dtype=np.uint8)
+        image[24:48, 24:28] = 20
+        image[24:48, 34:38] = 20
+        image[24:48, 44:48] = 20
+        duplicate_mask = np.zeros((72, 72), dtype=np.uint8)
+        duplicate_mask[20:52, 20:52] = 255
+
+        filled, stats = fill_duplicate_bubble_inner_regions(image, duplicate_mask)
+
+        self.assertTrue(stats["applied"])
+        self.assertEqual(stats["pass_name"], "duplicate_bubble_inner_fill")
+        self.assertGreater(stats["duplicate_bubble_inner_fill_pixel_count"], 0)
+        self.assertFalse(np.array_equal(filled[24:48, 24:48], image[24:48, 24:48]))
+        self.assertEqual(int(np.count_nonzero(filled[duplicate_mask == 0] != image[duplicate_mask == 0])), 0)
+        self.assertGreater(float(np.mean(filled[24:48, 24:48])), 180.0)
+
+    def test_duplicate_bubble_inner_fill_merges_mask_and_cleanup_stats(self) -> None:
+        image = np.full((48, 48, 3), 230, dtype=np.uint8)
+        image[18:30, 20:28] = 15
+        base_mask = np.zeros((48, 48), dtype=np.uint8)
+        base_mask[4:8, 4:8] = 255
+        duplicate_mask = np.zeros((48, 48), dtype=np.uint8)
+        duplicate_mask[16:32, 16:32] = 255
+        cleanup_stats = {"applied": False, "component_count": 0, "block_count": 0}
+
+        filled, merged_mask, merged_stats = apply_duplicate_bubble_inner_fill(
+            image,
+            base_mask,
+            {"duplicate_bubble_inner_mask": duplicate_mask},
+            cleanup_stats,
+        )
+
+        self.assertTrue(merged_stats["duplicate_bubble_inner_fill"]["applied"])
+        self.assertEqual(int(np.count_nonzero(merged_mask[4:8, 4:8])), 16)
+        self.assertEqual(int(np.count_nonzero(merged_mask[16:32, 16:32])), 256)
+        self.assertEqual(int(np.count_nonzero(filled[duplicate_mask == 0] != image[duplicate_mask == 0])), 0)
+        self.assertIsNot(merged_stats, cleanup_stats)
 
     def test_residue_cleanup_skips_text_free_blocks(self) -> None:
         image = np.zeros((24, 24, 3), dtype=np.uint8)

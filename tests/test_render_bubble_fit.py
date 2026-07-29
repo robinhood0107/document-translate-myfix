@@ -6,6 +6,7 @@ import unittest
 import numpy as np
 from PySide6 import QtCore, QtWidgets
 
+import modules.rendering.render as render_module
 from modules.rendering.render import (
     AUTO_MAX_FONT_PROFILE_CURRENT,
     AUTO_MAX_FONT_PROFILE_STRONG,
@@ -13,10 +14,14 @@ from modules.rendering.render import (
     build_render_rects_for_block,
     build_text_item_layout_geometry,
     get_dynamic_bubble_font_cap,
+    build_duplicate_bubble_render_key,
+    describe_text_free_render_translation_gate,
     get_best_render_area,
     get_render_fit_clearance_for_block,
+    resolve_text_free_manga_layout,
     pyside_word_wrap,
     refit_detected_bubble_text_if_underfilled,
+    register_duplicate_bubble_render_key,
 )
 from modules.utils.textblock import TextBlock
 
@@ -219,6 +224,222 @@ class RenderBubbleFitTests(unittest.TestCase):
         self.assertEqual(position, (100.0, 110.0))
         self.assertEqual(width, 600.0)
         self.assertEqual(height, 180)
+
+    def test_vertical_japanese_text_free_uses_centered_manga_paragraph_width(self) -> None:
+        block = TextBlock(
+            text_bbox=np.asarray([100, 100, 700, 420], dtype=np.int32),
+            text_class="text_free",
+            text="demo",
+            translation="한국어 문장이 너무 길게 한 줄로 뭉치면 안 된다",
+            source_lang="ja",
+            direction="vertical",
+        )
+
+        policy = resolve_text_free_manga_layout(
+            block,
+            (100.0, 100.0, 600.0, 320.0),
+            target_lang_code="ko",
+        )
+
+        self.assertTrue(policy.enabled)
+        self.assertEqual(policy.vertical_alignment, "center")
+        self.assertEqual(policy.alignment, QtCore.Qt.AlignmentFlag.AlignCenter)
+        self.assertLess(policy.wrap_width, 600)
+        self.assertGreaterEqual(policy.item_width, 600)
+        self.assertIn("render_centered_layout", policy.reasons)
+
+    def test_short_text_free_overexpanded_translation_is_reviewed_not_rendered(self) -> None:
+        block = TextBlock(
+            text_bbox=np.asarray([4, 2133, 81, 2847], dtype=np.int32),
+            text_class="text_free",
+            text="卷之十",
+            translation=(
+                "흠정사고전서 권12, 8, 9, 10, 11, 12, 13, 14, 15, "
+                "16, 17, 18, 19, 20, 22, 23, 24"
+            ),
+            source_lang="ja",
+            direction="vertical",
+        )
+
+        decision = describe_text_free_render_translation_gate(
+            block,
+            block.translation,
+            target_lang_code="ko",
+        )
+
+        self.assertFalse(decision.render)
+        self.assertEqual(decision.status, "needs_review_text_free_translation")
+        self.assertIn("text_free_translation_overexpanded", decision.reasons)
+
+    def test_normal_text_free_translation_still_renders(self) -> None:
+        block = TextBlock(
+            text_bbox=np.asarray([121, 99, 210, 517], dtype=np.int32),
+            text_class="text_free",
+            text="イきかけなんだろ！？",
+            translation="가기 직전이었잖아!?",
+            source_lang="ja",
+            direction="vertical",
+        )
+
+        decision = describe_text_free_render_translation_gate(
+            block,
+            block.translation,
+            target_lang_code="ko",
+        )
+
+        self.assertTrue(decision.render)
+        self.assertEqual(decision.status, "ok")
+
+    def test_text_free_marker_only_translation_is_skipped_not_rendered(self) -> None:
+        block = TextBlock(
+            text_bbox=np.asarray([441, 268, 535, 319], dtype=np.int32),
+            text_class="text_free",
+            text="ーーー",
+            translation="ーー",
+            source_lang="ja",
+            direction="horizontal",
+        )
+
+        decision = describe_text_free_render_translation_gate(
+            block,
+            block.translation,
+            target_lang_code="ko",
+        )
+
+        self.assertFalse(decision.render)
+        self.assertEqual(decision.status, "skipped_text_free_marker_only")
+        self.assertIn("text_free_marker_only", decision.reasons)
+
+    def test_embedded_ui_panel_review_status_is_not_auto_rendered(self) -> None:
+        self.assertTrue(hasattr(render_module, "describe_auto_render_review_status_gate"))
+        decision = render_module.describe_auto_render_review_status_gate(
+            "needs_review_embedded_ui_panel_layout"
+        )
+
+        self.assertFalse(decision.render)
+        self.assertEqual(decision.status, "needs_review_embedded_ui_panel_layout")
+        self.assertIn("render_skipped_review_gate", decision.reasons)
+
+    def test_text_free_layout_review_status_is_diagnostic_not_auto_skip(self) -> None:
+        self.assertTrue(hasattr(render_module, "describe_auto_render_review_status_gate"))
+        decision = render_module.describe_auto_render_review_status_gate(
+            "needs_review_text_free_layout"
+        )
+
+        self.assertTrue(decision.render)
+        self.assertEqual(decision.status, "ok")
+
+    def test_duplicate_bubble_render_key_matches_same_bubble_same_source(self) -> None:
+        first = _block(
+            xyxy=[1630, 2570, 1900, 2760],
+            bubble_xyxy=[1604, 2525, 1943, 2948],
+            text_class="text_bubble",
+        )
+        second = _block(
+            xyxy=[1618, 2582, 1910, 2775],
+            bubble_xyxy=[1607, 2528, 1945, 2949],
+            text_class="text_bubble",
+        )
+        first.text = "の愛アなりすまし用記憶アクセスオプションってのン自然憶レ自記よ"
+        second.text = " の愛ア なりすまし用記憶アクセスオプションってのン自然憶レ自記よ "
+
+        self.assertEqual(
+            build_duplicate_bubble_render_key(first),
+            build_duplicate_bubble_render_key(second),
+        )
+
+    def test_duplicate_bubble_render_key_ignores_text_free(self) -> None:
+        free = _block(
+            xyxy=[100, 100, 180, 160],
+            bubble_xyxy=[50, 50, 250, 220],
+            text_class="text_free",
+        )
+
+        self.assertIsNone(build_duplicate_bubble_render_key(free))
+
+    def test_duplicate_bubble_member_can_be_render_primary_when_first_renderable(self) -> None:
+        block = _block(
+            xyxy=[1640, 2571, 1906, 2901],
+            bubble_xyxy=[1604, 2525, 1943, 2948],
+            text_class="text_bubble",
+        )
+        block.bubble_panel_merge_decision = "duplicate_member"
+        seen: set[tuple[tuple[int, int, int, int], str]] = set()
+        duplicate_key = build_duplicate_bubble_render_key(block)
+
+        decision = register_duplicate_bubble_render_key(block, duplicate_key, seen)
+
+        self.assertTrue(decision.render)
+        self.assertEqual(decision.status, "ok")
+        self.assertIn("bubble_panel_group_render_primary", decision.reasons)
+        self.assertEqual(block.bubble_panel_merge_decision, "render_primary")
+        self.assertIn(duplicate_key, seen)
+
+    def test_duplicate_bubble_member_skips_after_group_already_rendered(self) -> None:
+        rendered = _block(
+            xyxy=[1640, 2571, 1906, 2901],
+            bubble_xyxy=[1604, 2525, 1943, 2948],
+            text_class="text_bubble",
+        )
+        duplicate = _block(
+            xyxy=[1640, 2571, 1906, 2901],
+            bubble_xyxy=[1604, 2525, 1943, 2948],
+            text_class="text_bubble",
+        )
+        duplicate.bubble_panel_merge_decision = "duplicate_member"
+        seen: set[tuple[tuple[int, int, int, int], str]] = set()
+        register_duplicate_bubble_render_key(
+            rendered,
+            build_duplicate_bubble_render_key(rendered),
+            seen,
+        )
+
+        decision = register_duplicate_bubble_render_key(
+            duplicate,
+            build_duplicate_bubble_render_key(duplicate),
+            seen,
+        )
+
+        self.assertFalse(decision.render)
+        self.assertEqual(decision.status, "skipped_duplicate_bubble_text")
+
+    def test_duplicate_same_bubble_source_does_not_block_detected_bubble_area(self) -> None:
+        image = np.zeros((3035, 2150, 3), dtype=np.uint8)
+        first = _block(
+            xyxy=[1606, 2547, 1681, 2727],
+            bubble_xyxy=[1604, 2525, 1943, 2948],
+            text_class="text_bubble",
+        )
+        second = _block(
+            xyxy=[1697, 2552, 1916, 2917],
+            bubble_xyxy=[1604, 2525, 1943, 2948],
+            text_class="text_bubble",
+        )
+        first.text = "の愛アなりすまし用記憶アクセスオプションってのン自然憶レ自記よ"
+        second.text = first.text
+        first.bubble_panel_text_candidate = True
+        second.bubble_panel_text_candidate = True
+
+        get_best_render_area([first, second], image)
+
+        self.assertEqual(first._render_area_source, "detected_bubble")
+        source_rect, block_anchor = build_render_rects_for_block(first)
+        self.assertEqual(block_anchor, (1606.0, 2547.0, 75.0, 180.0))
+        self.assertGreater(source_rect[2], 75.0)
+        self.assertGreater(source_rect[3], 180.0)
+
+    def test_bubble_panel_candidate_uses_group_render_rect(self) -> None:
+        block = _block(
+            xyxy=[1605, 2543, 1682, 2731],
+            bubble_xyxy=[1604, 2525, 1943, 2948],
+        )
+        block.bubble_panel_text_candidate = True
+        block.bubble_panel_render_xyxy = [1631, 2559, 1916, 2914]
+
+        source_rect, block_anchor = build_render_rects_for_block(block)
+
+        self.assertEqual(block_anchor, (1605.0, 2543.0, 77.0, 188.0))
+        self.assertEqual(source_rect, (1631.0, 2559.0, 285.0, 355.0))
 
     def test_detected_bubble_fit_clearance_reduces_border_touch_risk(self) -> None:
         image = np.zeros((2400, 1700, 3), dtype=np.uint8)

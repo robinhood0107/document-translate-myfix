@@ -6,7 +6,10 @@ import numpy as np
 
 from modules.inpainting.source_lama_blockwise import (
     SourceLaMaLarge,
+    SourceLaMaKey,
+    _INPAINTER_CACHE,
     _clip_half_open_bbox,
+    release_source_lama_cache,
     source_lama_blockwise_inpaint,
 )
 from modules.utils.textblock import TextBlock
@@ -87,6 +90,31 @@ def test_blockwise_inpaint_uses_clipped_bbox_for_partial_negative_block() -> Non
     assert seen_shapes[0][0][1] > 0
     assert np.count_nonzero(result[:, :5]) > 0
     assert np.count_nonzero(result[:, -1]) == 0
+
+
+def test_release_source_lama_cache_drops_only_cached_model_references() -> None:
+    release_source_lama_cache()
+    inpainter = object.__new__(SourceLaMaLarge)
+    inpainter.device = "cuda"
+    inpainter.precision = "bf16"
+    inpainter.inpaint_size = 1536
+    native_model = object()
+    inpainter.model = native_model
+    key = SourceLaMaKey("cuda", "bf16", 1536)
+    _INPAINTER_CACHE[key] = inpainter
+
+    report = release_source_lama_cache()
+
+    assert report == {
+        "cache_entry_count": 1,
+        "loaded_model_count": 1,
+        "gpu_loaded_model_count": 1,
+        "expected_process_reclaim_mb": 0.0,
+        "untracked_gpu_resource_count": 1,
+        "gpu_release_expected": True,
+    }
+    assert _INPAINTER_CACHE == {}
+    assert inpainter.model is None
 
 
 def test_source_lama_blockwise_routes_bubbles_without_calling_lama_fallback() -> None:
@@ -207,5 +235,52 @@ def test_source_lama_blockwise_routes_line_art_bubbles_to_lama_fallback(monkeypa
     assert np.count_nonzero(seen["mask"][46:49, 60:88]) == 0
     assert np.all(result[46:49, 8:24] == image[46:49, 8:24])
     assert np.all(result[46:49, 60:88] == image[46:49, 60:88])
+    changed = np.any(result != image, axis=2)
+    assert np.count_nonzero(changed & (edit_mask <= 0)) == 0
+
+
+def test_source_lama_blockwise_preserves_bubble_outline_while_clearing_interior(monkeypatch) -> None:
+    image = np.full((120, 140, 3), 180, dtype=np.uint8)
+    yy, xx = np.ogrid[:120, :140]
+    oval = (((xx - 70) / 48.0) ** 2 + ((yy - 60) / 36.0) ** 2) <= 1.0
+    inner = (((xx - 70) / 44.0) ** 2 + ((yy - 60) / 32.0) ** 2) <= 1.0
+    outline = oval & ~inner
+    image[oval] = 245
+    image[outline] = 20
+    image[44:78, 54:62] = 12
+    image[44:52, 54:86] = 12
+    image[58:66, 54:82] = 248
+    mask = np.zeros((120, 140), dtype=np.uint8)
+    mask[40:84, 50:90] = 255
+    block = _text_block(xyxy=[48, 36, 94, 88], bubble_xyxy=[20, 20, 120, 100], text_class="text_bubble")
+    seen: dict[str, np.ndarray] = {}
+
+    class _FakeSourceLaMa:
+        def inpaint(self, source_image, source_mask, source_blocks, check_need_inpaint=True):
+            seen["mask"] = source_mask.copy()
+            seen["block_count"] = np.asarray([len(source_blocks)], dtype=np.int32)
+            output = source_image.copy()
+            output[source_mask > 0] = 245
+            return output
+
+    monkeypatch.setattr(
+        "modules.inpainting.source_lama_blockwise.get_source_lama_large",
+        lambda **_kwargs: _FakeSourceLaMa(),
+    )
+
+    result, edit_mask = source_lama_blockwise_inpaint(
+        image,
+        mask,
+        [block],
+        _CallableInpainter(),
+        config=None,
+        return_edit_mask=True,
+    )
+
+    assert block._erase_mode == "bubble_lama_fallback"
+    assert int(seen["block_count"][0]) == 1
+    assert np.count_nonzero(seen["mask"][outline]) == 0
+    assert np.array_equal(result[outline], image[outline])
+    assert np.mean(result[44:78, 54:86]) > np.mean(image[44:78, 54:86])
     changed = np.any(result != image, axis=2)
     assert np.count_nonzero(changed & (edit_mask <= 0)) == 0

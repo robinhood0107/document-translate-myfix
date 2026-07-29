@@ -9,6 +9,7 @@ This guide is the shortest path from a fresh checkout to a working local setup.
 - Git
 - Docker Desktop with GPU support enabled
 - NVIDIA driver / CUDA-compatible GPU if you want local Gemma, HunyuanOCR, or PaddleOCR VL acceleration
+- At least 60 GiB free on `C:` for the initial Gemma volume preparation check
 
 ## 2. Clone and launch
 
@@ -46,18 +47,20 @@ py -3.12 -m venv .venv-win-cuda13
 ### Gemma local translation runtime
 
 - Compose file: `/docker-compose.yaml`
-- Docker image: `ghcr.io/ggml-org/llama.cpp:server-cuda`
+- Docker image: `ghcr.io/ggml-org/llama.cpp@sha256:22e0e3bfe967af4fd1df6a918022abbfd4e72e4d40a4769e616a4176790acbcb`
 - Runtime reference: [llama.cpp](https://github.com/ggml-org/llama.cpp)
 - Model reference: [Gemma](https://ai.google.dev/gemma)
 
-Start it:
+Prepare the versioned external model volume once from Windows PowerShell:
 
-```bash
-docker compose pull --policy always
-docker compose up -d --force-recreate
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass `
+  -File .\scripts\prepare_gemma_runtime.ps1 -Mode Prepare `
+  -CandidateModelPath 'C:\ExampleWorkspace\models\Gemma4-26B-A4B-Uncensored-HauhauCS-Balanced-IQ4_XS.gguf' `
+  -LegacyModelPath 'C:\ExampleWorkspace\models\gemma-4-26B-IQ4_NL.gguf'
 ```
 
-Then choose `Custom Local Server(Gemma)` in the app.
+Then choose `Custom Local Server(Gemma)` in the app. The managed runtime mounts the prepared volume read-only and starts the exact prepared container automatically.
 
 ### HunyuanOCR local runtime
 
@@ -82,7 +85,7 @@ docker compose -f hunyuanocr_docker_files/docker-compose.yaml up -d --force-recr
 ### PaddleOCR VL local runtime
 
 - Compose file: `/paddleocr_vl_docker_files/docker-compose.yaml`
-- Docker image: `ccr-2vdh3abv-pub.cnc.bj.baidubce.com/paddlepaddle/paddleocr-genai-vllm-server:latest-nvidia-gpu-offline`
+- Docker image: `ccr-2vdh3abv-pub.cnc.bj.baidubce.com/paddlepaddle/paddleocr-genai-vllm-server@sha256:d0d32c04a2119613d25a0a4c292e165ccc107954b74580613cf59e378037f8f5`
 - Runtime/model references:
   - [PaddleOCR](https://github.com/PaddlePaddle/PaddleOCR)
   - [PaddleOCR-VL](https://huggingface.co/PaddlePaddle/PaddleOCR-VL)
@@ -90,9 +93,14 @@ docker compose -f hunyuanocr_docker_files/docker-compose.yaml up -d --force-recr
 Start it:
 
 ```bash
-docker compose -f paddleocr_vl_docker_files/docker-compose.yaml pull --policy always
+docker compose -f paddleocr_vl_docker_files/docker-compose.yaml pull
 docker compose -f paddleocr_vl_docker_files/docker-compose.yaml up -d --force-recreate
 ```
+
+The first command is a one-time preparation step for the pinned image. Normal
+app starts reuse the exact stopped containers and do not pull again. The
+stage-batched folder workflow can also reuse exact crop results from the
+persistent OCR cache configured under `Settings > PaddleOCR VL Settings`.
 
 For bundle details, see [/paddleocr_vl_docker_files/README.md](/paddleocr_vl_docker_files/README.md).
 
@@ -100,7 +108,14 @@ For bundle details, see [/paddleocr_vl_docker_files/README.md](/paddleocr_vl_doc
 
 - Workflow mode: `Stage-Batched Pipeline (Recommended)`
 - OCR: `Optimal (HunyuanOCR / PaddleOCR VL)`
-- Translator: `Custom Local Server(Gemma)` if your local Gemma runtime is running
+- Translator: `Custom Local Server(Gemma)` after the Gemma volume is prepared
+
+Project stage checkpoints are available as a default-off preview under
+`Settings > Project`. Save the `.ctpr` file before using its cache management
+actions. The adjacent `.ctpr.cache` folder is disposable and is never required
+to open the project. When valid, it restores detection, raw OCR, inpaint masks
+and cleaned artifacts, and render outputs. Translation content stays in the
+project file and is accepted only when its sidecar signature matches.
 
 Routing summary:
 
@@ -166,11 +181,21 @@ Official Windows release packages are published only from `vX.Y.Z` tags that poi
 
 - release trigger: Git tag push
 - accepted tag shape: `vX.Y.Z`
-- build target: Windows executable/portable packages built with `Nuitka`
-- release order: local Windows Nuitka build verification, then `main` promotion, then Windows CI preflight, then tag release CI
-- bundled scope: app, Python runtime, PySide6, torch/onnxruntime runtime, translations/resources
-- not bundled: models, checkpoints, Docker runtimes, NVIDIA driver
+- official assets:
+  `comic-translate-vX.Y.Z-windows-launcher-source.zip` and
+  `SHA256SUMS.txt`
+- release order: local deterministic bundle and extracted-launcher
+  verification, `main` promotion, Windows CI preflight, then tag release CI
+- bundled scope: allowlisted product source, launchers, CUDA12/CUDA13
+  requirements, Docker Compose/config, Gemma preparation tooling,
+  translations/resources, README, and LICENSE
+- not bundled: venvs, models, checkpoints, caches, benchmark tools/results,
+  Python/CUDA runtimes, NVIDIA driver, local paths, or secrets
 
-Before promoting a release candidate to `main`, run the relevant Nuitka build scripts from Windows PowerShell and record the successful commands and `build/nuitka-*` outputs in the PR. WSL-only checks are not a substitute for this local Windows build verification.
+Before promoting a release candidate to `main`, build the ZIP from `HEAD`,
+verify its manifest and SHA-256, extract it into a new folder, and run both
+launchers with `COMIC_VERIFY_ONLY=1`. Record the Windows commands, ZIP hash,
+and both launcher results in the PR.
 
-If you need the full local runtime stack, follow the runtime setup steps in this quickstart after downloading the release package.
+The launchers bootstrap their pinned environment on first normal run. The
+retained Nuitka scripts are unofficial manual tools and are not release gates.

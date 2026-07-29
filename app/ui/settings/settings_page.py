@@ -25,6 +25,10 @@ from modules.ocr.selection import (
     normalize_workflow_mode,
     STAGE_BATCHED_WORKFLOW_MODE,
 )
+from modules.translation.llm.custom_local_gemma import (
+    GEMMA_REQUEST_MODE_CONTEXTUAL_SINGLE,
+    RETIRED_GEMMA_REQUEST_MODE_CONTEXTUAL_GROUPED,
+)
 from .settings_ui import SettingsPageUI
 from .gemma_local_server_page import GemmaLocalServerPage
 from .hunyuan_ocr_page import HunyuanOCRPage
@@ -61,6 +65,55 @@ from modules.utils.automatic_output import (
 
 
 logger = logging.getLogger(__name__)
+
+GEMMA_GROUPED_RETIREMENT_VERSION = 1
+GEMMA_GROUPED_RETIREMENT_VERSION_KEY = (
+    "gemma_local_server/grouped_retirement_version"
+)
+GEMMA_REQUEST_MODE_KEY = "gemma_local_server/request_mode"
+
+
+def migrate_retired_gemma_request_mode(settings: QSettings) -> bool:
+    """Migrate the retired grouped mode once without touching other settings."""
+
+    try:
+        current_version = int(
+            settings.value(
+                GEMMA_GROUPED_RETIREMENT_VERSION_KEY,
+                0,
+                type=int,
+            )
+            or 0
+        )
+    except (TypeError, ValueError):
+        current_version = 0
+    if current_version >= GEMMA_GROUPED_RETIREMENT_VERSION:
+        return False
+
+    configured_mode = settings.value(
+        GEMMA_REQUEST_MODE_KEY,
+        GEMMA_REQUEST_MODE_CONTEXTUAL_SINGLE,
+        type=str,
+    )
+    changed = (
+        str(configured_mode or "").strip().lower()
+        == RETIRED_GEMMA_REQUEST_MODE_CONTEXTUAL_GROUPED
+    )
+    if changed:
+        settings.setValue(
+            GEMMA_REQUEST_MODE_KEY,
+            GEMMA_REQUEST_MODE_CONTEXTUAL_SINGLE,
+        )
+        logger.warning(
+            "Migrated retired Gemma contextual-grouped setting to "
+            "contextual-single."
+        )
+
+    settings.setValue(
+        GEMMA_GROUPED_RETIREMENT_VERSION_KEY,
+        GEMMA_GROUPED_RETIREMENT_VERSION,
+    )
+    return changed
 
 
 class SettingsPage(QtWidgets.QWidget):
@@ -119,14 +172,6 @@ class SettingsPage(QtWidgets.QWidget):
         self.update_checker.error_occurred.connect(self.on_update_error)
         self.update_checker.download_progress.connect(self.on_download_progress)
         self.update_checker.download_finished.connect(self.on_download_finished)
-        self.fork_update_checker = UpdateChecker(
-            "robinhood0107",
-            "document-translate-myfix",
-            allow_release_link_without_installer=True,
-        )
-        self.fork_update_checker.update_available.connect(self.on_fork_update_available)
-        self.fork_update_checker.up_to_date.connect(self.on_fork_up_to_date)
-        self.fork_update_checker.error_occurred.connect(self.on_fork_update_error)
         self.update_dialog = None
 
         self._setup_connections()
@@ -211,6 +256,8 @@ class SettingsPage(QtWidgets.QWidget):
             self.ui.save_keys_checkbox,
             self.ui.paddleocr_vl_prettify_checkbox,
             self.ui.paddleocr_vl_visualize_checkbox,
+            self.ui.paddleocr_vl_persistent_cache_checkbox,
+            self.ui.project_checkpoint_enabled_checkbox,
             self.ui.hunyuan_ocr_raw_response_logging_checkbox,
             self.ui.mangalmm_ocr_raw_response_logging_checkbox,
             self.ui.mangalmm_ocr_safe_resize_checkbox,
@@ -228,6 +275,7 @@ class SettingsPage(QtWidgets.QWidget):
             self.ui.project_autosave_interval_spinbox,
             self.ui.paddleocr_vl_max_new_tokens_spinbox,
             self.ui.paddleocr_vl_parallel_workers_spinbox,
+            self.ui.paddleocr_vl_persistent_cache_limit_spinbox,
             self.ui.hunyuan_ocr_max_completion_tokens_spinbox,
             self.ui.hunyuan_ocr_parallel_workers_spinbox,
             self.ui.hunyuan_ocr_request_timeout_spinbox,
@@ -376,9 +424,22 @@ class SettingsPage(QtWidgets.QWidget):
             "visualize": self.ui.paddleocr_vl_visualize_checkbox.isChecked(),
             "max_new_tokens": int(self.ui.paddleocr_vl_max_new_tokens_spinbox.value()),
             "parallel_workers": int(self.ui.paddleocr_vl_parallel_workers_spinbox.value()),
+            "persistent_cache_enabled": self.ui.paddleocr_vl_persistent_cache_checkbox.isChecked(),
+            "persistent_cache_limit": int(
+                self.ui.paddleocr_vl_persistent_cache_limit_spinbox.value()
+            ),
+        }
+
+    def get_project_checkpoint_settings(self):
+        return {
+            "enabled": bool(
+                self.ui.project_checkpoint_enabled_checkbox.isChecked()
+            ),
         }
 
     def get_gemma_local_server_settings(self):
+        persisted_settings = QSettings("ComicLabs", "ComicTranslate")
+        migrate_retired_gemma_request_mode(persisted_settings)
         return {
             "chunk_size": int(self.ui.gemma_chunk_size_spinbox.value()),
             "max_completion_tokens": int(self.ui.gemma_max_completion_tokens_spinbox.value()),
@@ -388,6 +449,11 @@ class SettingsPage(QtWidgets.QWidget):
             "top_p": float(self.ui.gemma_top_p_spinbox.value()),
             "min_p": float(self.ui.gemma_min_p_spinbox.value()),
             "raw_response_logging": self.ui.gemma_raw_response_logging_checkbox.isChecked(),
+            "request_mode": persisted_settings.value(
+                GEMMA_REQUEST_MODE_KEY,
+                GemmaLocalServerPage.DEFAULT_REQUEST_MODE,
+                type=str,
+            ),
         }
 
     def get_hunyuan_ocr_settings(self):
@@ -562,6 +628,9 @@ class SettingsPage(QtWidgets.QWidget):
     def get_translation_result_dictionary_rules(self) -> list[dict]:
         return self.get_dictionary_settings()["translation_substitutions"]
 
+    def get_translation_memory_settings(self) -> dict[str, object]:
+        return self.ui.user_dictionaries_page.get_translation_memory_settings()
+
     def _normalize_service_name(self, raw_service: str) -> str:
         normalized = self.ui.value_mappings.get(raw_service, raw_service)
         return self.TOOL_CREDENTIAL_SERVICE_MAP.get(normalized, normalized)
@@ -663,6 +732,11 @@ class SettingsPage(QtWidgets.QWidget):
         }
 
     def get_all_settings(self):
+        checkpoint_checkbox = getattr(
+            self.ui,
+            "project_checkpoint_enabled_checkbox",
+            None,
+        )
         return {
             "language": self.get_language(),
             "theme": self.get_theme(),
@@ -681,6 +755,12 @@ class SettingsPage(QtWidgets.QWidget):
             "hunyuan_ocr": self.get_hunyuan_ocr_settings(),
             "mangalmm_ocr": self.get_mangalmm_ocr_settings(),
             "gemma_local_server": self.get_gemma_local_server_settings(),
+            "translation_memory": self.get_translation_memory_settings(),
+            "project_checkpoint": (
+                self.get_project_checkpoint_settings()
+                if checkpoint_checkbox is not None
+                else {"enabled": False}
+            ),
             "llm": self.get_llm_settings(),
             "text_rendering": self.get_text_rendering_settings(),
             "export": self.get_export_settings(),
@@ -811,6 +891,7 @@ class SettingsPage(QtWidgets.QWidget):
     def load_settings(self):
         self._loading_settings = True
         settings = QSettings("ComicLabs", "ComicTranslate")
+        migrate_retired_gemma_request_mode(settings)
 
         language = settings.value("language", "English")
         translated_language = self.ui.reverse_mappings.get(language, language)
@@ -917,6 +998,20 @@ class SettingsPage(QtWidgets.QWidget):
             settings.value(
                 "parallel_workers",
                 self.ui.paddleocr_vl_page.DEFAULT_PARALLEL_WORKERS,
+                type=int,
+            )
+        )
+        self.ui.paddleocr_vl_persistent_cache_checkbox.setChecked(
+            settings.value(
+                "persistent_cache_enabled",
+                self.ui.paddleocr_vl_page.DEFAULT_PERSISTENT_CACHE_ENABLED,
+                type=bool,
+            )
+        )
+        self.ui.paddleocr_vl_persistent_cache_limit_spinbox.setValue(
+            settings.value(
+                "persistent_cache_limit",
+                self.ui.paddleocr_vl_page.DEFAULT_PERSISTENT_CACHE_LIMIT,
                 type=int,
             )
         )
@@ -1178,6 +1273,12 @@ class SettingsPage(QtWidgets.QWidget):
             owner.auto_export_translation_md_checkbox.setChecked(bool(auto_export_translation_md))
         settings.endGroup()
 
+        settings.beginGroup("project_checkpoint")
+        self.ui.project_checkpoint_enabled_checkbox.setChecked(
+            settings.value("enabled", False, type=bool)
+        )
+        settings.endGroup()
+
         settings.beginGroup("series")
         self.ui.series_page.set_settings(
             normalize_series_settings(
@@ -1205,6 +1306,33 @@ class SettingsPage(QtWidgets.QWidget):
         except Exception:
             translation_rules = []
         self.ui.user_dictionaries_page.load_rules(ocr_rules, translation_rules)
+        settings.endGroup()
+
+        settings.beginGroup("translation_memory")
+        self.ui.user_dictionaries_page.load_translation_memory_settings(
+            {
+                "persistent_cache_enabled": settings.value(
+                    "persistent_cache_enabled",
+                    True,
+                    type=bool,
+                ),
+                "exact_tm_enabled": settings.value(
+                    "exact_tm_enabled",
+                    True,
+                    type=bool,
+                ),
+                "result_cache_limit": settings.value(
+                    "result_cache_limit",
+                    50_000,
+                    type=int,
+                ),
+                "candidate_limit": settings.value(
+                    "candidate_limit",
+                    5_000,
+                    type=int,
+                ),
+            }
+        )
         settings.endGroup()
 
         settings.beginGroup("notifications")
@@ -1368,8 +1496,6 @@ class SettingsPage(QtWidgets.QWidget):
             self.ui.check_update_button.setEnabled(False)
             self.ui.check_update_button.setText(self.tr("Checking..."))
         self.update_checker.check_for_updates()
-        if bool(self.ui.developer_mode_checkbox.isChecked()):
-            self.fork_update_checker.check_for_updates()
 
     def on_update_available(self, version, release_url, download_url):
         if not self._is_background_check:
@@ -1436,45 +1562,6 @@ class SettingsPage(QtWidgets.QWidget):
             message,
         )
 
-    def on_fork_update_available(self, version, release_url, download_url):
-        settings = QSettings("ComicLabs", "ComicTranslate")
-        ignored_version = settings.value("updates/fork_ignored_version", "")
-        if self._is_background_check and version == ignored_version:
-            return
-
-        msg_box = QtWidgets.QMessageBox(self)
-        msg_box.setWindowTitle(self.tr("Developer Update Available"))
-        msg_box.setTextFormat(Qt.RichText)
-        msg_box.setTextInteractionFlags(Qt.TextBrowserInteraction)
-        msg_box.setText(
-            self.tr("A developer fork update {version} is available.").format(version=version)
-        )
-        link_text = self.tr("Release Notes")
-        msg_box.setInformativeText(f'<a href="{release_url}" style="color: #4da6ff;">{link_text}</a>')
-        msg_box.addButton(self.tr("OK"), QtWidgets.QMessageBox.ButtonRole.AcceptRole)
-        skip_btn = None
-        if self._is_background_check:
-            skip_btn = msg_box.addButton(
-                self.tr("Skip This Version"),
-                QtWidgets.QMessageBox.ButtonRole.ApplyRole,
-            )
-        msg_box.exec()
-        if skip_btn and msg_box.clickedButton() == skip_btn:
-            settings.setValue("updates/fork_ignored_version", version)
-
-    def on_fork_up_to_date(self):
-        logger.info("Developer fork update check: up to date.")
-
-    def on_fork_update_error(self, message):
-        if self._is_background_check:
-            logger.error(f"Background developer fork update check failed: {message}")
-            return
-        self._show_message_box(
-            QtWidgets.QMessageBox.Icon.Warning,
-            self.tr("Developer Update Error"),
-            self.tr("Fork update check failed: {message}").format(message=message),
-        )
-
     def start_download(self, url):
         self.update_dialog = QtWidgets.QProgressDialog(
             self.tr("Downloading update..."),
@@ -1499,7 +1586,7 @@ class SettingsPage(QtWidgets.QWidget):
 
         if self._ask_yes_no(
             self.tr("Download Complete"),
-            self.tr("Installer downloaded to {path}. Run it now?").format(path=file_path),
+            self.tr("Release package downloaded to {path}. Open it now?").format(path=file_path),
             default_yes=True,
         ):
             self.update_checker.run_installer(file_path)
@@ -1511,10 +1598,6 @@ class SettingsPage(QtWidgets.QWidget):
 
         try:
             self.update_checker.shutdown()
-        except Exception:
-            pass
-        try:
-            self.fork_update_checker.shutdown()
         except Exception:
             pass
 
