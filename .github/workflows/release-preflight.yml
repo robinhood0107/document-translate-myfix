@@ -9,6 +9,7 @@ on:
       - ".github/workflows/release.yml"
       - "scripts/build_windows_launcher_source_bundle.py"
       - "scripts/prepare_gemma_runtime.ps1"
+      - "scripts/verify_windows_runtime.py"
       - "app/**"
       - "imkit/**"
       - "modules/**"
@@ -40,11 +41,11 @@ jobs:
     if: github.ref_name == 'main'
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           fetch-depth: 0
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
         with:
           python-version: "3.12"
 
@@ -84,18 +85,31 @@ jobs:
             -DestinationPath $extractDir
           $bundleRoot = Join-Path $extractDir "comic-translate-v$env:APP_VERSION-windows-launcher-source"
           $env:COMIC_VERIFY_ONLY = "1"
-          Push-Location $bundleRoot
-          try {
-            & cmd.exe /d /c "call run_comic.bat"
-            if ($LASTEXITCODE -ne 0) { throw "CUDA 12 launcher-source contract failed." }
-            & cmd.exe /d /c "call run_comic_cuda13.bat"
-            if ($LASTEXITCODE -ne 0) { throw "CUDA 13 launcher-source contract failed." }
-          } finally {
-            Pop-Location
+          foreach ($venvName in @(".venv-win", ".venv-win-cuda13")) {
+            if (Test-Path (Join-Path $bundleRoot $venvName)) {
+              throw "Extracted bundle unexpectedly contains $venvName."
+            }
+          }
+          $cuda12 = Start-Process -FilePath $env:COMSPEC `
+            -ArgumentList @("/d", "/c", "call run_comic.bat") `
+            -WorkingDirectory $bundleRoot -Wait -NoNewWindow -PassThru
+          if ($cuda12.ExitCode -ne 0) {
+            throw "CUDA 12 launcher-source contract failed: $($cuda12.ExitCode)"
+          }
+          $cuda13 = Start-Process -FilePath $env:COMSPEC `
+            -ArgumentList @("/d", "/c", "call run_comic_cuda13.bat") `
+            -WorkingDirectory $bundleRoot -Wait -NoNewWindow -PassThru
+          if ($cuda13.ExitCode -ne 0) {
+            throw "CUDA 13 launcher-source contract failed: $($cuda13.ExitCode)"
+          }
+          foreach ($venvName in @(".venv-win", ".venv-win-cuda13")) {
+            if (Test-Path (Join-Path $bundleRoot $venvName)) {
+              throw "Verification unexpectedly created $venvName."
+            }
           }
 
       - name: Upload preflight launcher-source assets
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: comic-translate-preflight-${{ github.run_number }}-windows-launcher-source
           path: |
