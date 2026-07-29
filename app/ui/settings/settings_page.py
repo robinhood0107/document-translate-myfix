@@ -71,6 +71,11 @@ GEMMA_GROUPED_RETIREMENT_VERSION_KEY = (
     "gemma_local_server/grouped_retirement_version"
 )
 GEMMA_REQUEST_MODE_KEY = "gemma_local_server/request_mode"
+PROJECT_CHECKPOINT_DEFAULT_VERSION = 1
+PROJECT_CHECKPOINT_DEFAULT_VERSION_KEY = (
+    "project_checkpoint/default_version"
+)
+PROJECT_CHECKPOINT_ENABLED_KEY = "project_checkpoint/enabled"
 
 
 def migrate_retired_gemma_request_mode(settings: QSettings) -> bool:
@@ -114,6 +119,31 @@ def migrate_retired_gemma_request_mode(settings: QSettings) -> bool:
         GEMMA_GROUPED_RETIREMENT_VERSION,
     )
     return changed
+
+
+def migrate_project_checkpoint_default(settings: QSettings) -> bool:
+    """Enable validated project checkpoints once, then preserve user choice."""
+
+    try:
+        current_version = int(
+            settings.value(
+                PROJECT_CHECKPOINT_DEFAULT_VERSION_KEY,
+                0,
+                type=int,
+            )
+            or 0
+        )
+    except (TypeError, ValueError):
+        current_version = 0
+    if current_version >= PROJECT_CHECKPOINT_DEFAULT_VERSION:
+        return False
+    settings.setValue(PROJECT_CHECKPOINT_ENABLED_KEY, True)
+    settings.setValue(
+        PROJECT_CHECKPOINT_DEFAULT_VERSION_KEY,
+        PROJECT_CHECKPOINT_DEFAULT_VERSION,
+    )
+    settings.sync()
+    return True
 
 
 class SettingsPage(QtWidgets.QWidget):
@@ -892,6 +922,7 @@ class SettingsPage(QtWidgets.QWidget):
         self._loading_settings = True
         settings = QSettings("ComicLabs", "ComicTranslate")
         migrate_retired_gemma_request_mode(settings)
+        migrate_project_checkpoint_default(settings)
 
         language = settings.value("language", "English")
         translated_language = self.ui.reverse_mappings.get(language, language)
@@ -1275,7 +1306,7 @@ class SettingsPage(QtWidgets.QWidget):
 
         settings.beginGroup("project_checkpoint")
         self.ui.project_checkpoint_enabled_checkbox.setChecked(
-            settings.value("enabled", False, type=bool)
+            settings.value("enabled", True, type=bool)
         )
         settings.endGroup()
 
