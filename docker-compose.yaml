@@ -14,7 +14,7 @@ services:
       comic-translate.model-sha256: ${GEMMA_MODEL_SHA256:-unprepared}
       comic-translate.preparation-version: ${GEMMA_PREPARATION_VERSION:-0}
     ports:
-      - "18080:8080"
+      - "127.0.0.1:18080:8080"
     gpus: all
     environment:
       NVIDIA_VISIBLE_DEVICES: all

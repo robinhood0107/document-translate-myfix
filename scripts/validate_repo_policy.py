@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+import os
 from pathlib import Path
 import re
 import subprocess
@@ -116,14 +117,17 @@ FORBIDDEN_CONTENT_PATTERNS = (
 )
 
 
-def git_lines(args: list[str]) -> list[str]:
+def tracked_paths() -> list[str]:
     result = subprocess.run(
-        ["git", *args],
+        ["git", "ls-files", "-z"],
         check=True,
         capture_output=True,
-        text=True,
     )
-    return [line.strip() for line in result.stdout.splitlines() if line.strip()]
+    return [
+        os.fsdecode(raw_path)
+        for raw_path in result.stdout.split(b"\0")
+        if raw_path
+    ]
 
 
 def current_branch() -> str:
@@ -165,7 +169,7 @@ def validate_branch(branch: str, mode: str) -> list[str]:
 
 def validate_tracked_paths() -> list[str]:
     errors: list[str] = []
-    for path in git_lines(["ls-files"]):
+    for path in tracked_paths():
         normalized = path.replace("\\", "/")
         errors.extend(validate_tracked_path_name(normalized))
     return errors
@@ -209,7 +213,7 @@ def scan_sensitive_content(path: str, text: str) -> list[str]:
 
 def validate_sensitive_content() -> list[str]:
     errors: list[str] = []
-    for path in git_lines(["ls-files"]):
+    for path in tracked_paths():
         normalized = path.replace("\\", "/")
         if not is_text_candidate(normalized):
             continue
@@ -231,43 +235,6 @@ def validate_sensitive_content() -> list[str]:
     return errors
 
 
-def is_benchmark_chart_media(normalized: str) -> bool:
-    if not normalized.startswith("docs/assets/benchmarking/"):
-        return False
-    filename = PurePosixPath(normalized).name
-    return any(pattern.match(filename) for pattern in CHART_IMAGE_PATTERNS)
-
-
-def is_forbidden_experimental_media(normalized: str) -> bool:
-    path_obj = PurePosixPath(normalized)
-    suffix = path_obj.suffix.lower()
-
-    if normalized.startswith("Sample/"):
-        return True
-
-    if normalized.startswith("banchmark_result_log/") and suffix in IMAGE_EXTENSIONS:
-        return True
-
-    if not normalized.startswith("docs/assets/benchmarking/"):
-        return False
-
-    if suffix == ".svg":
-        return False
-    if suffix not in IMAGE_EXTENSIONS:
-        return False
-    if is_benchmark_chart_media(normalized):
-        return False
-
-    if any(part in FORBIDDEN_BENCHMARK_MEDIA_DIR_PARTS for part in path_obj.parts):
-        return True
-
-    filename = path_obj.name
-    if any(pattern.match(filename) for pattern in FORBIDDEN_BENCHMARK_MEDIA_NAME_PATTERNS):
-        return True
-
-    return True
-
-
 def benchmark_assets_allowed(branch: str, base_branch: str = "") -> bool:
     normalized_base = str(base_branch or "").strip()
     if BENCHMARK_BRANCH_RE.match(branch):
@@ -284,7 +251,7 @@ def validate_benchmark_asset_placement(branch: str, base_branch: str = "") -> li
         return []
 
     errors: list[str] = []
-    for path in git_lines(["ls-files"]):
+    for path in tracked_paths():
         normalized = path.replace("\\", "/")
         if any(normalized.startswith(prefix) for prefix in BENCHMARK_ONLY_PREFIXES):
             errors.append(
@@ -310,7 +277,7 @@ def main() -> int:
     errors.extend(validate_branch(branch, args.mode))
     errors.extend(validate_tracked_paths())
     errors.extend(validate_sensitive_content())
-    errors.extend(validate_benchmark_asset_placement(branch))
+    errors.extend(validate_benchmark_asset_placement(branch, args.base_branch))
 
     if errors:
         for error in errors:

@@ -3043,20 +3043,8 @@ Restart now?</source>
         <translation>Güncelleme Hatası</translation>
     </message>
     <message>
-        <source>Developer Update Available</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>A developer fork update {version} is available.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Developer Update Error</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Fork update check failed: {message}</source>
-        <translation type="unfinished"></translation>
+        <source>Release package downloaded to {path}. Open it now?</source>
+        <translation>Sürüm paketi {path} konumuna indirildi. Şimdi açılsın mı?</translation>
     </message>
     <message>
         <source>Downloading update...</source>
@@ -3065,10 +3053,6 @@ Restart now?</source>
     <message>
         <source>Download Complete</source>
         <translation>İndirme Tamamlandı</translation>
-    </message>
-    <message>
-        <source>Installer downloaded to {path}. Run it now?</source>
-        <translation>Yükleyici {path} konumuna indirildi. Şimdi çalıştırılsın mı?</translation>
     </message>
 </context>
 <context>

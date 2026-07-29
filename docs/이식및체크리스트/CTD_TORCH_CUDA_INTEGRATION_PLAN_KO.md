@@ -165,7 +165,7 @@
 
 ## benchmark/lab 확장 상태
 - `benchmarking/lab`에 `inpaint-ctd` family를 추가했다.
-- 최신 full suite 스냅샷은 `banchmark_result_log/inpaint_ctd/20260410_091232_inpaint_ctd_suite`이다.
+- 최신 full suite 스냅샷은 `<benchmark-log-root>/inpaint_ctd/<run-id>`에 보존한다.
 - 검수용 최신 리포트는 `docs/banchmark_report/inpaint-ctd-report-ko.md`이고, spotlight 링크 자산은 `docs/assets/benchmarking/inpaint-ctd/latest/`에 정리했다.
 - China corpus는 OCR invariance `PASS`, japan corpus는 OCR invariance `FAIL`이다. 현재 japan 쪽 FAIL은 블록 수 붕괴가 아니라 일부 OCR 텍스트가 마스크/인페인트 결과에 민감하게 바뀌는 현상으로 확인됐다.
 - benchmark family는 안정성을 위해 detector를 CPU로 고정하고, CTD/AOT/LaMa만 Torch CUDA로 측정했다.
