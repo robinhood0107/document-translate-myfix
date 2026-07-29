@@ -16,6 +16,7 @@ from .base import BaseLLMTranslation
 from ...utils.textblock import TextBlock
 from ...utils.translator_utils import extract_json_object
 from ...utils.exceptions import LocalServiceConnectionError
+from ...utils.debug_artifacts import append_active_raw_response
 from ...utils.repetition_guard import guard_severe_repetition
 from ...utils.text_normalization import strip_unsafe_text_control_chars
 from ..translation_memory import (
@@ -1261,13 +1262,6 @@ class CustomLocalGemmaTranslation(BaseLLMTranslation):
             bool(reasoning_content.strip()),
         )
 
-        if self.raw_response_logging and content:
-            logger.info(
-                "translation raw content (%s): %s",
-                self.translation_mode_label,
-                content,
-            )
-
         if finish_reason == "length":
             self._current_benchmark_stats["gemma_truncated_count"] += 1
             raise GemmaLocalServerTruncatedError(
@@ -1692,10 +1686,10 @@ class CustomLocalGemmaTranslation(BaseLLMTranslation):
                     )
                 self._record_response_telemetry(response_data)
                 if self.raw_response_logging:
-                    logger.info(
-                        "translation raw response json (%s): %s",
-                        self.translation_mode_label,
-                        json.dumps(response_data, ensure_ascii=False),
+                    append_active_raw_response(
+                        "gemma",
+                        response_data,
+                        kind="response_json",
                     )
                 return response_data
 

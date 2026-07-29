@@ -20,6 +20,13 @@ from modules.utils.exceptions import (
     LocalServiceConnectionError,
     LocalServiceResponseError,
 )
+from modules.utils.debug_artifacts import (
+    active_debug_runtime_directory,
+    append_active_raw_response,
+    atomic_debug_file,
+    atomic_debug_json,
+    sanitize_debug_component,
+)
 from modules.utils.language_utils import is_no_space_lang
 from modules.utils.ocr_debug import (
     OCR_STATUS_EMPTY_INITIAL,
@@ -154,6 +161,7 @@ class MangaLMMOCREngine(OCREngine):
         self.source_lang_english = ""
         self.contract_mode = "direct_manual"
         self.debug_root: Path | None = None
+        self._debug_root_from_env = False
         self.debug_export_limit = DEFAULT_MANGALMM_DEBUG_EXPORT_LIMIT
         self._debug_export_counter = count(1)
         self._debug_export_lock = Lock()
@@ -264,9 +272,8 @@ class MangaLMMOCREngine(OCREngine):
             maximum=2.0,
         )
         debug_root_raw = os.getenv("CT_MANGALMM_DEBUG_ROOT", "").strip()
+        self._debug_root_from_env = bool(debug_root_raw)
         self.debug_root = Path(debug_root_raw) if debug_root_raw else None
-        if self.debug_root is not None:
-            self.debug_root.mkdir(parents=True, exist_ok=True)
         self.debug_export_limit = self._read_env_int(
             "CT_MANGALMM_DEBUG_EXPORT_LIMIT",
             DEFAULT_MANGALMM_DEBUG_EXPORT_LIMIT,
@@ -1162,8 +1169,6 @@ class MangaLMMOCREngine(OCREngine):
         }
         data = self._send_request(payload)
         response_text = self._extract_text_from_response(data)
-        if self.raw_response_logging:
-            logger.info("mangalmm_full_page_ocr raw response text: %s", response_text)
         return response_text
 
     def _send_request(self, payload: dict) -> dict:
@@ -1209,7 +1214,11 @@ class MangaLMMOCREngine(OCREngine):
             ) from exc
 
         if self.raw_response_logging:
-            logger.info("mangalmm_full_page_ocr raw response json: %s", data)
+            append_active_raw_response(
+                "mangalmm",
+                data,
+                kind="response_json",
+            )
         return data
 
     def _requests_timeout(self):
@@ -1633,15 +1642,24 @@ class MangaLMMOCREngine(OCREngine):
         unit_bbox=None,
         unit_kind: str = "",
     ) -> None:
-        if self.debug_root is None:
+        debug_root = self.debug_root
+        if self._debug_root_from_env:
+            active_root = active_debug_runtime_directory(
+                "mangalmm-engine"
+            )
+            debug_root = Path(active_root) if active_root else None
+        if debug_root is None:
             return
         with self._debug_export_lock:
             export_index = next(self._debug_export_counter)
         if export_index > self.debug_export_limit:
             return
 
-        artifact_dir = self.debug_root / f"{export_index:04d}_{response_kind}"
-        artifact_dir.mkdir(parents=True, exist_ok=True)
+        safe_kind = sanitize_debug_component(
+            response_kind,
+            fallback="response",
+        )
+        artifact_dir = debug_root / f"{export_index:04d}_{safe_kind}"
         metadata = {
             "failure_reason": failure_reason,
             "response_kind": response_kind,
@@ -1668,14 +1686,30 @@ class MangaLMMOCREngine(OCREngine):
             "unit_kind": unit_kind,
             "analysis": analysis,
         }
-        (artifact_dir / "meta.json").write_text(
-            json.dumps(metadata, ensure_ascii=False, indent=2) + "\n",
-            encoding="utf-8",
-        )
-        if crop_image is not None and crop_image.size > 0:
-            cv2.imwrite(str(artifact_dir / "crop.png"), crop_image)
-        if request_image is not None and request_image.size > 0:
-            cv2.imwrite(str(artifact_dir / "request.png"), request_image)
+        try:
+            artifact_dir.mkdir(parents=True, exist_ok=True)
+            atomic_debug_json(
+                artifact_dir,
+                "meta.json",
+                metadata,
+            )
+            if crop_image is not None and crop_image.size > 0:
+                atomic_debug_file(
+                    artifact_dir,
+                    "crop.png",
+                    lambda path: cv2.imwrite(path, crop_image),
+                )
+            if request_image is not None and request_image.size > 0:
+                atomic_debug_file(
+                    artifact_dir,
+                    "request.png",
+                    lambda path: cv2.imwrite(path, request_image),
+                )
+        except Exception:
+            logger.warning(
+                "MangaLMM diagnostic artifact export failed open.",
+                exc_info=True,
+            )
 
     @staticmethod
     def _coords_or_none(value) -> list[int] | None:
