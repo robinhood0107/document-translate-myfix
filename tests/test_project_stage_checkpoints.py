@@ -624,6 +624,35 @@ class ProjectStageCheckpointTests(unittest.TestCase):
             self.assertTrue(existing.output_exists)
             self.assertIsNone(existing.output_bytes)
 
+            project_blocks[0]._debug_image_shape = [999, 999]
+            volatile_metadata = lookup_render_checkpoint(
+                store,
+                page_key="page:00000000",
+                fingerprint=fingerprint,
+                identity=identity,
+                project_blocks=project_blocks,
+                project_viewer_state=viewer_state,
+                current_output_base_root=str(output_base),
+            )
+            self.assertIsNotNone(volatile_metadata)
+
+            changed_viewer_state = {
+                "text_items_state": [
+                    {"block_id": "block-a", "text": "사용자 수정"}
+                ]
+            }
+            self.assertIsNone(
+                lookup_render_checkpoint(
+                    store,
+                    page_key="page:00000000",
+                    fingerprint=fingerprint,
+                    identity=identity,
+                    project_blocks=project_blocks,
+                    project_viewer_state=changed_viewer_state,
+                    current_output_base_root=str(output_base),
+                )
+            )
+
             output_path.unlink()
             missing = lookup_render_checkpoint(
                 store,
