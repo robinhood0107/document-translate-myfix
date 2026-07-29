@@ -955,7 +955,7 @@ class _SeriesQuickSettings(QtWidgets.QWidget):
         else:
             target_label = target
         debug_keys = (
-            "export_inpainted_image",
+            "export_ocr_debug",
             "export_detector_overlay",
             "export_raw_mask",
             "export_mask_overlay",
@@ -1217,17 +1217,22 @@ class SeriesSettingsDialog(QtWidgets.QDialog):
 
         self.export_raw_text_checkbox = QtWidgets.QCheckBox(self.tr("Raw source text"), tab)
         self.export_translated_text_checkbox = QtWidgets.QCheckBox(self.tr("Translated text"), tab)
+        self.export_inpainted_image_checkbox = QtWidgets.QCheckBox(self.tr("Inpainted image"), tab)
         text_exports_layout = self._make_rows_layout(
             self._make_check_row(self.export_raw_text_checkbox),
             self._make_check_row(self.export_translated_text_checkbox),
+            self._make_check_row(self.export_inpainted_image_checkbox),
         )
         self.export_text_group = self._make_section(
-            self.tr("Text Exports"),
-            self.tr("Write OCR and translation text files next to the queue output."),
+            self.tr("Additional Exports"),
+            self.tr(
+                "Write OCR text, translation text, and inpainted images next "
+                "to the queue output."
+            ),
             text_exports_layout,
         )
 
-        self.export_inpainted_image_checkbox = QtWidgets.QCheckBox(self.tr("Inpainted image"), tab)
+        self.export_ocr_debug_checkbox = QtWidgets.QCheckBox(self.tr("OCR diagnostics"), tab)
         self.export_detector_overlay_checkbox = QtWidgets.QCheckBox(self.tr("Detector overlay"), tab)
         self.export_raw_mask_checkbox = QtWidgets.QCheckBox(self.tr("Raw inpaint mask"), tab)
         self.export_mask_overlay_checkbox = QtWidgets.QCheckBox(self.tr("Mask overlay"), tab)
@@ -1237,7 +1242,7 @@ class SeriesSettingsDialog(QtWidgets.QDialog):
         debug_layout.setContentsMargins(0, 0, 0, 0)
         debug_layout.setSpacing(8)
         for checkbox in (
-            self.export_inpainted_image_checkbox,
+            self.export_ocr_debug_checkbox,
             self.export_detector_overlay_checkbox,
             self.export_raw_mask_checkbox,
             self.export_mask_overlay_checkbox,
@@ -1248,7 +1253,9 @@ class SeriesSettingsDialog(QtWidgets.QDialog):
         self.export_debug_group = self._make_section(
             self.tr("Debug Artifacts"),
             self.tr(
-                "Only checked debug artifacts are created. When unchecked, the status panel logs that preview generation is disabled."
+                "Only checked debug artifacts are created in the project, "
+                "folder, or archive cache sidecar. When unchecked, the status "
+                "panel logs that preview generation is disabled."
             ),
             debug_layout,
         )
@@ -1631,6 +1638,7 @@ class SeriesSettingsDialog(QtWidgets.QDialog):
         self.export_raw_text_checkbox.setChecked(bool(values.get("export_raw_text", False)))
         self.export_translated_text_checkbox.setChecked(bool(values.get("export_translated_text", False)))
         self.export_inpainted_image_checkbox.setChecked(bool(values.get("export_inpainted_image", False)))
+        self.export_ocr_debug_checkbox.setChecked(bool(values.get("export_ocr_debug", False)))
         self.export_detector_overlay_checkbox.setChecked(bool(values.get("export_detector_overlay", False)))
         self.export_raw_mask_checkbox.setChecked(bool(values.get("export_raw_mask", False)))
         self.export_mask_overlay_checkbox.setChecked(bool(values.get("export_mask_overlay", False)))
@@ -1665,6 +1673,7 @@ class SeriesSettingsDialog(QtWidgets.QDialog):
             "export_raw_text": self.export_raw_text_checkbox.isChecked(),
             "export_translated_text": self.export_translated_text_checkbox.isChecked(),
             "export_inpainted_image": self.export_inpainted_image_checkbox.isChecked(),
+            "export_ocr_debug": self.export_ocr_debug_checkbox.isChecked(),
             "export_detector_overlay": self.export_detector_overlay_checkbox.isChecked(),
             "export_raw_mask": self.export_raw_mask_checkbox.isChecked(),
             "export_mask_overlay": self.export_mask_overlay_checkbox.isChecked(),
