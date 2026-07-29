@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+from contextlib import contextmanager
 import os
 from pathlib import Path
 import subprocess
-
-import pytest
+import tempfile
+import unittest
+from unittest import mock
 
 from scripts.validate_commit_attribution import (
     commit_errors,
@@ -49,300 +51,302 @@ def commit_file(
     return git(repo, "rev-parse", "HEAD")
 
 
-@pytest.mark.parametrize(
-    "identity",
-    [
-        "Codex <codex@example.com>",
-        "OpenAI Codex <assistant@example.com>",
-        "codexCodex <assistant@example.com>",
-        "ChatGPT <chatgpt@example.com>",
-        "GitHub Copilot <copilot@example.com>",
-        "Anthropic Claude <claude@example.com>",
-        "Google Gemini <gemini@example.com>",
-        "Gemini CLI <assistant@example.com>",
-        "Claude Bot <assistant@example.com>",
-        "Co\u200bdex <assistant@example.com>",
-    ],
-)
-def test_forbidden_ai_identity_variants(identity: str) -> None:
-    assert forbidden_ai_identity(identity)
+@contextmanager
+def working_directory(path: Path):
+    previous = Path.cwd()
+    os.chdir(path)
+    try:
+        yield
+    finally:
+        os.chdir(previous)
 
 
-def test_human_name_containing_claude_is_allowed() -> None:
-    assert not forbidden_ai_identity(
-        "Claude Monet <claude.monet@example.com>"
-    )
-    assert not forbidden_ai_identity(
-        "Cody Codexample <cody@codexample.com>"
-    )
-    assert not forbidden_ai_identity(
-        "Example Human <human@codex.example>"
-    )
+class CommitAttributionValidationTests(unittest.TestCase):
+    def test_forbidden_ai_identity_variants(self) -> None:
+        identities = [
+            "Codex <codex@example.com>",
+            "OpenAI Codex <assistant@example.com>",
+            "codexCodex <assistant@example.com>",
+            "ChatGPT <chatgpt@example.com>",
+            "GitHub Copilot <copilot@example.com>",
+            "Anthropic Claude <claude@example.com>",
+            "Google Gemini <gemini@example.com>",
+            "Gemini CLI <assistant@example.com>",
+            "Claude Bot <assistant@example.com>",
+            "Co\u200bdex <assistant@example.com>",
+        ]
+        for identity in identities:
+            with self.subTest(identity=identity):
+                self.assertTrue(forbidden_ai_identity(identity))
+
+    def test_human_name_containing_claude_is_allowed(self) -> None:
+        self.assertFalse(
+            forbidden_ai_identity(
+                "Claude Monet <claude.monet@example.com>"
+            )
+        )
+        self.assertFalse(
+            forbidden_ai_identity(
+                "Cody Codexample <cody@codexample.com>"
+            )
+        )
+        self.assertFalse(
+            forbidden_ai_identity(
+                "Example Human <human@codex.example>"
+            )
+        )
+
+    def test_plain_commit_body_can_mention_codex(self) -> None:
+        errors = validate_message_trailers(
+            "docs(repo): explain attribution policy\n\n"
+            "The policy documents the Codex restriction.\n",
+            source="test",
+        )
+        self.assertEqual(errors, [])
+
+    def test_non_contributor_trailer_can_document_codex(self) -> None:
+        errors = validate_message_trailers(
+            "docs(repo): explain attribution policy\n\n"
+            "Policy: Codex identities are forbidden.\n",
+            source="test",
+        )
+        self.assertEqual(errors, [])
+
+    def test_ai_contributor_trailer_is_rejected(self) -> None:
+        errors = validate_message_trailers(
+            "fix(repo): enforce attribution\n\n"
+            "Co-authored-by: codexCodex <assistant@example.com>\n",
+            source="test",
+        )
+        self.assertEqual(len(errors), 1)
+        self.assertIn("Co-authored-by", errors[0])
+
+    def test_custom_ai_contributor_trailer_is_rejected(self) -> None:
+        errors = validate_message_trailers(
+            "fix(repo): enforce attribution\n\n"
+            "AI-Assisted-By: Google Gemini <assistant@example.com>\n",
+            source="test",
+        )
+        self.assertEqual(len(errors), 1)
+        self.assertIn("AI-Assisted-By", errors[0])
+
+    def test_every_trailer_is_inspected_for_ai_identity(self) -> None:
+        errors = validate_message_trailers(
+            "fix(repo): enforce attribution\n\n"
+            "Pair-programmed-by: Gemini CLI <assistant@example.com>\n",
+            source="test",
+        )
+        self.assertEqual(len(errors), 1)
+        self.assertIn("Pair-programmed-by", errors[0])
+
+    def test_prospective_commit_rejects_ai_author(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            message_path = Path(temporary) / "COMMIT_EDITMSG"
+            message_path.write_text(
+                "fix(repo): reject AI author\n",
+                encoding="utf-8",
+            )
+            with mock.patch.dict(
+                os.environ,
+                {
+                    "GIT_AUTHOR_NAME": "Codex",
+                    "GIT_AUTHOR_EMAIL": "assistant@example.com",
+                },
+            ):
+                errors = prospective_commit_errors(message_path)
+        self.assertTrue(any("author" in error for error in errors))
+
+    def test_prospective_commit_rejects_ai_committer(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            message_path = Path(temporary) / "COMMIT_EDITMSG"
+            message_path.write_text(
+                "fix(repo): reject AI committer\n",
+                encoding="utf-8",
+            )
+            with mock.patch.dict(
+                os.environ,
+                {
+                    "GIT_COMMITTER_NAME": "Claude Code",
+                    "GIT_COMMITTER_EMAIL": "assistant@example.com",
+                },
+            ):
+                errors = prospective_commit_errors(message_path)
+        self.assertTrue(any("committer" in error for error in errors))
+
+    def test_commit_range_does_not_rescan_historical_base(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            repo = Path(temporary)
+            init_repo(repo)
+            historical = commit_file(
+                repo,
+                message=(
+                    "chore(repo): historical commit\n\n"
+                    "Co-authored-by: Codex <codex@example.com>"
+                ),
+                content="historical",
+            )
+            current = commit_file(
+                repo,
+                message="fix(repo): current human commit",
+                content="current",
+            )
+            with working_directory(repo):
+                commits = commits_in_range(
+                    f"{historical}..{current}"
+                )
+                errors = commit_errors(current)
+        self.assertEqual(commits, [current])
+        self.assertEqual(errors, [])
+
+    def test_new_branch_push_excludes_existing_remote_history(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            repo = Path(temporary)
+            init_repo(repo)
+            historical = commit_file(
+                repo,
+                message=(
+                    "chore(repo): historical commit\n\n"
+                    "Co-authored-by: Codex <codex@example.com>"
+                ),
+                content="historical",
+            )
+            git(
+                repo,
+                "update-ref",
+                "refs/remotes/origin/develop",
+                historical,
+            )
+            current = commit_file(
+                repo,
+                message="fix(repo): current human commit",
+                content="current",
+            )
+            with working_directory(repo):
+                commits = push_commits(
+                    "0" * 40,
+                    current,
+                    branch="fix/example",
+                    remote="origin",
+                )
+        self.assertEqual(commits, [current])
+
+    def test_lab_based_work_branch_excludes_existing_lab_history(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            repo = Path(temporary)
+            init_repo(repo)
+            product_base = commit_file(
+                repo,
+                message="chore(repo): product base",
+                content="product",
+            )
+            git(
+                repo,
+                "update-ref",
+                "refs/remotes/origin/develop",
+                product_base,
+            )
+            lab_base = commit_file(
+                repo,
+                message="chore(benchmark): existing lab history",
+                content="lab",
+            )
+            git(
+                repo,
+                "update-ref",
+                "refs/remotes/origin/benchmarking/lab",
+                lab_base,
+            )
+            current = commit_file(
+                repo,
+                message="chore(benchmark): sync current policy",
+                content="current",
+            )
+            with working_directory(repo):
+                commits = push_commits(
+                    "0" * 40,
+                    current,
+                    branch="chore/benchmark-lab-sync-policy",
+                    remote="origin",
+                )
+        self.assertEqual(commits, [current])
+
+    def test_existing_branch_push_checks_only_new_commits(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            repo = Path(temporary)
+            init_repo(repo)
+            before = commit_file(
+                repo,
+                message="chore(repo): base commit",
+                content="base",
+            )
+            after = commit_file(
+                repo,
+                message="fix(repo): current human commit",
+                content="current",
+            )
+            with working_directory(repo):
+                commits = push_commits(
+                    before,
+                    after,
+                    branch="fix/example",
+                    remote="origin",
+                )
+        self.assertEqual(commits, [after])
+
+    def test_deleted_ref_has_no_commits(self) -> None:
+        commits = push_commits(
+            "a" * 40,
+            "0" * 40,
+            branch="fix/example",
+            remote="origin",
+        )
+        self.assertEqual(commits, [])
+
+    def test_existing_commit_with_ai_trailer_is_rejected(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            repo = Path(temporary)
+            init_repo(repo)
+            commit_sha = commit_file(
+                repo,
+                message=(
+                    "fix(repo): reject contributor\n\n"
+                    "Signed-off-by: OpenAI Codex "
+                    "<assistant@example.com>"
+                ),
+                content="bad",
+            )
+            with working_directory(repo):
+                errors = commit_errors(commit_sha)
+        self.assertEqual(len(errors), 1)
+        self.assertIn("Signed-off-by", errors[0])
+
+    def test_existing_commit_with_ai_author_is_rejected(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            repo = Path(temporary)
+            init_repo(repo)
+            (repo / "tracked.txt").write_text(
+                "bad",
+                encoding="utf-8",
+            )
+            git(repo, "add", "tracked.txt")
+            git(
+                repo,
+                "commit",
+                "-m",
+                "fix(repo): reject author",
+                env={
+                    "GIT_AUTHOR_NAME": "GitHub Copilot",
+                    "GIT_AUTHOR_EMAIL": "assistant@example.com",
+                },
+            )
+            commit_sha = git(repo, "rev-parse", "HEAD")
+            with working_directory(repo):
+                errors = commit_errors(commit_sha)
+        self.assertEqual(len(errors), 1)
+        self.assertIn("author", errors[0])
 
 
-def test_plain_commit_body_can_mention_codex() -> None:
-    errors = validate_message_trailers(
-        "docs(repo): explain attribution policy\n\n"
-        "The policy documents the Codex restriction.\n",
-        source="test",
-    )
-    assert errors == []
-
-
-def test_non_contributor_trailer_can_document_codex() -> None:
-    errors = validate_message_trailers(
-        "docs(repo): explain attribution policy\n\n"
-        "Policy: Codex identities are forbidden.\n",
-        source="test",
-    )
-    assert errors == []
-
-
-def test_ai_contributor_trailer_is_rejected() -> None:
-    errors = validate_message_trailers(
-        "fix(repo): enforce attribution\n\n"
-        "Co-authored-by: codexCodex <assistant@example.com>\n",
-        source="test",
-    )
-    assert len(errors) == 1
-    assert "Co-authored-by" in errors[0]
-
-
-def test_custom_ai_contributor_trailer_is_rejected() -> None:
-    errors = validate_message_trailers(
-        "fix(repo): enforce attribution\n\n"
-        "AI-Assisted-By: Google Gemini <assistant@example.com>\n",
-        source="test",
-    )
-    assert len(errors) == 1
-    assert "AI-Assisted-By" in errors[0]
-
-
-def test_every_trailer_is_inspected_for_ai_identity() -> None:
-    errors = validate_message_trailers(
-        "fix(repo): enforce attribution\n\n"
-        "Pair-programmed-by: Gemini CLI <assistant@example.com>\n",
-        source="test",
-    )
-    assert len(errors) == 1
-    assert "Pair-programmed-by" in errors[0]
-
-
-def test_prospective_commit_rejects_ai_author(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    message_path = tmp_path / "COMMIT_EDITMSG"
-    message_path.write_text(
-        "fix(repo): reject AI author\n",
-        encoding="utf-8",
-    )
-    monkeypatch.setenv("GIT_AUTHOR_NAME", "Codex")
-    monkeypatch.setenv("GIT_AUTHOR_EMAIL", "assistant@example.com")
-
-    errors = prospective_commit_errors(message_path)
-
-    assert any("author" in error for error in errors)
-
-
-def test_prospective_commit_rejects_ai_committer(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    message_path = tmp_path / "COMMIT_EDITMSG"
-    message_path.write_text(
-        "fix(repo): reject AI committer\n",
-        encoding="utf-8",
-    )
-    monkeypatch.setenv("GIT_COMMITTER_NAME", "Claude Code")
-    monkeypatch.setenv("GIT_COMMITTER_EMAIL", "assistant@example.com")
-
-    errors = prospective_commit_errors(message_path)
-
-    assert any("committer" in error for error in errors)
-
-
-def test_commit_range_does_not_rescan_historical_base(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    init_repo(tmp_path)
-    historical = commit_file(
-        tmp_path,
-        message=(
-            "chore(repo): historical commit\n\n"
-            "Co-authored-by: Codex <codex@example.com>"
-        ),
-        content="historical",
-    )
-    current = commit_file(
-        tmp_path,
-        message="fix(repo): current human commit",
-        content="current",
-    )
-    monkeypatch.chdir(tmp_path)
-
-    commits = commits_in_range(f"{historical}..{current}")
-
-    assert commits == [current]
-    assert commit_errors(current) == []
-
-
-def test_new_branch_push_excludes_existing_remote_history(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    init_repo(tmp_path)
-    historical = commit_file(
-        tmp_path,
-        message=(
-            "chore(repo): historical commit\n\n"
-            "Co-authored-by: Codex <codex@example.com>"
-        ),
-        content="historical",
-    )
-    git(tmp_path, "update-ref", "refs/remotes/origin/develop", historical)
-    current = commit_file(
-        tmp_path,
-        message="fix(repo): current human commit",
-        content="current",
-    )
-    monkeypatch.chdir(tmp_path)
-
-    commits = push_commits(
-        "0" * 40,
-        current,
-        branch="fix/example",
-        remote="origin",
-    )
-
-    assert commits == [current]
-
-
-def test_lab_based_work_branch_excludes_existing_lab_history(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    init_repo(tmp_path)
-    product_base = commit_file(
-        tmp_path,
-        message="chore(repo): product base",
-        content="product",
-    )
-    git(
-        tmp_path,
-        "update-ref",
-        "refs/remotes/origin/develop",
-        product_base,
-    )
-    lab_base = commit_file(
-        tmp_path,
-        message="chore(benchmark): existing lab history",
-        content="lab",
-    )
-    git(
-        tmp_path,
-        "update-ref",
-        "refs/remotes/origin/benchmarking/lab",
-        lab_base,
-    )
-    current = commit_file(
-        tmp_path,
-        message="chore(benchmark): sync current policy",
-        content="current",
-    )
-    monkeypatch.chdir(tmp_path)
-
-    commits = push_commits(
-        "0" * 40,
-        current,
-        branch="chore/benchmark-lab-sync-policy",
-        remote="origin",
-    )
-
-    assert commits == [current]
-
-
-def test_existing_branch_push_checks_only_new_commits(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    init_repo(tmp_path)
-    before = commit_file(
-        tmp_path,
-        message="chore(repo): base commit",
-        content="base",
-    )
-    after = commit_file(
-        tmp_path,
-        message="fix(repo): current human commit",
-        content="current",
-    )
-    monkeypatch.chdir(tmp_path)
-
-    commits = push_commits(
-        before,
-        after,
-        branch="fix/example",
-        remote="origin",
-    )
-
-    assert commits == [after]
-
-
-def test_deleted_ref_has_no_commits() -> None:
-    commits = push_commits(
-        "a" * 40,
-        "0" * 40,
-        branch="fix/example",
-        remote="origin",
-    )
-
-    assert commits == []
-
-
-def test_existing_commit_with_ai_trailer_is_rejected(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    init_repo(tmp_path)
-    commit_sha = commit_file(
-        tmp_path,
-        message=(
-            "fix(repo): reject contributor\n\n"
-            "Signed-off-by: OpenAI Codex <assistant@example.com>"
-        ),
-        content="bad",
-    )
-    monkeypatch.chdir(tmp_path)
-
-    errors = commit_errors(commit_sha)
-
-    assert len(errors) == 1
-    assert "Signed-off-by" in errors[0]
-
-
-def test_existing_commit_with_ai_author_is_rejected(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    init_repo(tmp_path)
-    (tmp_path / "tracked.txt").write_text("bad", encoding="utf-8")
-    git(tmp_path, "add", "tracked.txt")
-    git(
-        tmp_path,
-        "commit",
-        "-m",
-        "fix(repo): reject author",
-        env={
-            "GIT_AUTHOR_NAME": "GitHub Copilot",
-            "GIT_AUTHOR_EMAIL": "assistant@example.com",
-        },
-    )
-    commit_sha = git(tmp_path, "rev-parse", "HEAD")
-    monkeypatch.chdir(tmp_path)
-
-    errors = commit_errors(commit_sha)
-
-    assert len(errors) == 1
-    assert "author" in errors[0]
+if __name__ == "__main__":
+    unittest.main()
