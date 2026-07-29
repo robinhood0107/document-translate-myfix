@@ -1,11 +1,13 @@
 from __future__ import annotations
 
-from typing import Any
+from dataclasses import dataclass
+from typing import Any, Callable, Iterable, Mapping
 from textwrap import dedent
 import json
 import logging
 import os
 import re
+import time
 
 import numpy as np
 import requests
@@ -13,9 +15,19 @@ import requests
 from .base import BaseLLMTranslation
 from ...utils.textblock import TextBlock
 from ...utils.translator_utils import extract_json_object
-from ...utils.exceptions import LocalServiceConnectionError, LocalServiceResponseError
+from ...utils.exceptions import LocalServiceConnectionError
 from ...utils.repetition_guard import guard_severe_repetition
 from ...utils.text_normalization import strip_unsafe_text_control_chars
+from ..translation_memory import (
+    EXACT_TM_NORMALIZATION_VERSION,
+    TRANSLATION_MEMORY_SCHEMA_VERSION,
+    TRANSLATION_RESULT_CACHE_VERSION,
+    ExactTMCandidate,
+    ResultCacheRecord,
+    TranslationMemoryStore,
+    canonical_json,
+    canonical_sha256,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -33,6 +45,11 @@ DEFAULT_GEMMA_RESPONSE_SCHEMA_MODE = "blocks"
 DEFAULT_GEMMA_THINK_BRIEFLY_PROMPT = False
 DEFAULT_GEMMA_PROMPT_PROFILE = "gemma4_balanced"
 DEFAULT_GEMMA_CONTEXTUAL_MERGE_INPUT = True
+GEMMA_REQUEST_MODE_CONTEXTUAL_SINGLE = "contextual-single"
+RETIRED_GEMMA_REQUEST_MODE_CONTEXTUAL_GROUPED = "contextual-grouped"
+DEFAULT_GEMMA_REQUEST_MODE = GEMMA_REQUEST_MODE_CONTEXTUAL_SINGLE
+DEFAULT_GEMMA_REQUEST_RETRY_TOTAL_ATTEMPTS = 3
+DEFAULT_GEMMA_REQUEST_RETRY_BACKOFF_SECONDS = (1.0, 2.0)
 STRICT_GEMMA_PROMPT_PROFILE = "gemma4_strict_json"
 GEMMA_PROMPT_PROFILES = {
     "legacy": "legacy",
@@ -42,18 +59,104 @@ GEMMA_PROMPT_PROFILES = {
 GEMMA_RESPONSE_FORMAT_MODES = {"json_object", "json_schema"}
 GEMMA_RESPONSE_SCHEMA_MODES = {"blocks"}
 GEMMA_CHANNEL_TOKEN_RE = re.compile(r"<\|channel\>[^\r\n<]*|<channel\|>")
+GEMMA_TRANSIENT_HTTP_STATUS_CODES = frozenset({500, 502, 503, 504})
+GEMMA_CONTEXT_CAPACITY_RE = re.compile(
+    r"(?:context|prompt|input).{0,80}(?:overflow|exceed|too (?:large|long)|limit|capacity)"
+    r"|(?:too many|maximum).{0,40}tokens"
+    r"|\bn_ctx\b|\bkv cache\b",
+    re.IGNORECASE | re.DOTALL,
+)
+GEMMA_STRUCTURAL_ONLY_RE = re.compile(r"^[\s{}\[\]:,\"']+$")
+GEMMA_PROMPT_CONTRACT_VERSION = 1
+GEMMA_TRANSLATION_INPUT_NORMALIZER_VERSION = 1
+GEMMA_OUTPUT_SANITIZER_VERSION = 1
+GEMMA_REPETITION_GUARD_VERSION = 1
+GEMMA_RUNTIME_IDENTITY_SNAPSHOT_TTL_SEC = 2.0
+
+
+@dataclass(frozen=True)
+class GemmaRequestContext:
+    """Stable source context shared by contextual-single requests and fallbacks."""
+
+    blocks: tuple[TextBlock, ...]
+    expected_keys: tuple[str, ...]
+    source_values: tuple[str, ...]
+    merged_context: str
+
+
+@dataclass(frozen=True)
+class GemmaParsedResponse:
+    """Validated values plus unresolved and unexpected key evidence."""
+
+    valid_values: dict[str, str | None]
+    unresolved_keys: tuple[str, ...]
+    unexpected_keys: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class GemmaCacheTarget:
+    global_index: int
+    chunk_start: int
+    target_index: int
+    source_text: str
+    cache_key: str = ""
+    scope_key: str = ""
+    identity_json: str = ""
+    translation: str | None = None
+    metadata: Mapping[str, Any] | None = None
+    hit_kind: str = ""
+    exact_tm_entry_ids: tuple[int, ...] = ()
+
+    @property
+    def hit(self) -> bool:
+        return self.translation is not None
+
+
+@dataclass(frozen=True)
+class GemmaTranslationPlan:
+    signature: str
+    targets: tuple[GemmaCacheTarget, ...]
+    runtime_required: bool
+    lookup_stats: Mapping[str, int]
+
+
+class _GemmaTrackedDict(dict):
+    """JSON object that preserves duplicate-key evidence from decoding."""
+
+    def __init__(self, pairs: list[tuple[str, Any]]):
+        super().__init__()
+        duplicate_keys: list[str] = []
+        for key, value in pairs:
+            if key in self:
+                duplicate_keys.append(str(key))
+            self[key] = value
+        self.duplicate_keys = tuple(duplicate_keys)
 
 
 class GemmaLocalServerResponseError(RuntimeError):
     """Raised when the local Gemma server returns an unusable translation."""
 
-    def __init__(self, message: str, *, strict_retryable: bool = False):
+    def __init__(
+        self,
+        message: str,
+        *,
+        strict_retryable: bool = False,
+        split_retryable: bool = True,
+    ):
         super().__init__(message)
         self.strict_retryable = strict_retryable
+        self.split_retryable = split_retryable
 
 
 class GemmaLocalServerTruncatedError(GemmaLocalServerResponseError):
     """Raised when the local Gemma server runs out of output budget."""
+
+
+class GemmaLocalServerContextCapacityError(GemmaLocalServerResponseError):
+    """Raised when llama.cpp rejects a request that exceeds its context capacity."""
+
+    def __init__(self, message: str):
+        super().__init__(message, strict_retryable=False, split_retryable=True)
 
 
 class CustomLocalGemmaTranslation(BaseLLMTranslation):
@@ -73,22 +176,112 @@ class CustomLocalGemmaTranslation(BaseLLMTranslation):
         self.think_briefly_prompt = DEFAULT_GEMMA_THINK_BRIEFLY_PROMPT
         self.prompt_profile = DEFAULT_GEMMA_PROMPT_PROFILE
         self.contextual_merge_input = DEFAULT_GEMMA_CONTEXTUAL_MERGE_INPUT
+        self.request_mode = DEFAULT_GEMMA_REQUEST_MODE
+        self.request_retry_total_attempts = DEFAULT_GEMMA_REQUEST_RETRY_TOTAL_ATTEMPTS
+        self.request_retry_backoff_seconds = DEFAULT_GEMMA_REQUEST_RETRY_BACKOFF_SECONDS
+        self._runtime_ensure_callback: Callable[[], None] | None = None
+        self._runtime_identity_provider: Callable[[], dict[str, Any] | None] | None = None
+        self._runtime_identity_snapshot: dict[str, Any] | None = None
+        self._runtime_identity_snapshot_at = 0.0
+        self._translation_memory_store: TranslationMemoryStore | None = None
+        self._translation_memory_settings: dict[str, Any] = {}
+        self._pending_translation_plan: GemmaTranslationPlan | None = None
         self.last_benchmark_stats = self._new_benchmark_stats()
         self._current_benchmark_stats = self._new_benchmark_stats()
 
     @staticmethod
-    def _new_benchmark_stats() -> dict[str, int]:
+    def _new_benchmark_stats() -> dict[str, int | float]:
         return {
+            "gemma_telemetry_schema_version": 1,
             "gemma_json_retry_count": 0,
             "gemma_chunk_retry_events": 0,
             "gemma_truncated_count": 0,
             "gemma_empty_content_count": 0,
+            "gemma_request_retry_count": 0,
             "gemma_missing_key_count": 0,
             "gemma_reasoning_without_final_count": 0,
             "gemma_schema_validation_fail_count": 0,
             "gemma_repetition_guard_count": 0,
             "gemma_contextual_merge_fallback_count": 0,
+            "gemma_configured_group_size": 0,
+            "gemma_max_requested_group_size": 0,
+            "gemma_logical_request_count": 0,
+            "gemma_http_attempt_count": 0,
+            "gemma_http_retry_count": 0,
+            "gemma_request_wall_ms": 0.0,
+            "gemma_prompt_tokens": 0,
+            "gemma_completion_tokens": 0,
+            "gemma_total_tokens": 0,
+            "gemma_cached_prompt_tokens": 0,
+            "gemma_prompt_eval_ms": 0.0,
+            "gemma_decode_ms": 0.0,
+            "gemma_contextual_grouped_request_count": 0,
+            "gemma_contextual_grouped_wall_ms": 0.0,
+            "gemma_contextual_single_request_count": 0,
+            "gemma_contextual_single_wall_ms": 0.0,
+            "gemma_isolated_single_request_count": 0,
+            "gemma_isolated_single_wall_ms": 0.0,
+            "gemma_direct_grouped_request_count": 0,
+            "gemma_direct_grouped_wall_ms": 0.0,
+            "gemma_strict_grouped_retry_count": 0,
+            "gemma_strict_single_retry_count": 0,
+            "gemma_partial_response_count": 0,
+            "gemma_partial_fallback_block_count": 0,
+            "gemma_split_count": 0,
+            "gemma_context_capacity_split_count": 0,
+            "gemma_parser_error_count": 0,
+            "gemma_duplicate_key_count": 0,
+            "gemma_trailing_content_count": 0,
+            "gemma_top_level_type_error_count": 0,
+            "gemma_nested_value_count": 0,
+            "gemma_invalid_value_count": 0,
+            "gemma_unexpected_key_count": 0,
+            "gemma_channel_token_sanitized_count": 0,
+            "gemma_unsafe_control_sanitized_count": 0,
+            "gemma_tm_result_cache_hit_count": 0,
+            "gemma_tm_result_cache_miss_count": 0,
+            "gemma_tm_stale_reject_count": 0,
+            "gemma_tm_exact_hit_count": 0,
+            "gemma_tm_exact_ambiguous_count": 0,
+            "gemma_tm_candidate_count": 0,
+            "gemma_tm_cache_write_count": 0,
+            "gemma_tm_cache_disabled_count": 0,
+            "gemma_tm_runtime_skipped_count": 0,
+            "gemma_tm_requested_block_count": 0,
         }
+
+    def configure_runtime_hooks(
+        self,
+        *,
+        ensure_runtime: Callable[[], None] | None,
+        runtime_identity_provider: Callable[[], dict[str, Any] | None] | None,
+    ) -> None:
+        self._runtime_ensure_callback = ensure_runtime
+        self._runtime_identity_provider = runtime_identity_provider
+
+    def configure_translation_memory(
+        self,
+        store: TranslationMemoryStore | None,
+        settings: Mapping[str, Any] | None,
+    ) -> None:
+        self._translation_memory_store = store
+        self._translation_memory_settings = dict(settings or {})
+        self._pending_translation_plan = None
+
+    @property
+    def translation_cache_status(self) -> str:
+        stats = self.last_benchmark_stats
+        requested = int(stats.get("gemma_tm_requested_block_count", 0) or 0)
+        cache_hits = int(stats.get("gemma_tm_result_cache_hit_count", 0) or 0)
+        tm_hits = int(stats.get("gemma_tm_exact_hit_count", 0) or 0)
+        hits = cache_hits + tm_hits
+        if requested and hits >= requested:
+            return "persistent-hit"
+        if hits:
+            return "persistent-partial"
+        if int(stats.get("gemma_tm_cache_disabled_count", 0) or 0):
+            return "persistent-disabled"
+        return "persistent-refreshed"
 
     @staticmethod
     def _env_or_config_float(config: dict[str, Any], key: str, env_name: str, default: float) -> float:
@@ -154,6 +347,17 @@ class CustomLocalGemmaTranslation(BaseLLMTranslation):
             return normalized
         return DEFAULT_GEMMA_RESPONSE_SCHEMA_MODE
 
+    @staticmethod
+    def _normalize_request_mode(raw_value: str) -> str:
+        normalized = (raw_value or "").strip().lower()
+        if normalized and normalized != GEMMA_REQUEST_MODE_CONTEXTUAL_SINGLE:
+            logger.warning(
+                "Gemma request mode %r is retired or unsupported; "
+                "using contextual-single.",
+                raw_value,
+            )
+        return GEMMA_REQUEST_MODE_CONTEXTUAL_SINGLE
+
     def initialize(
         self,
         settings: Any,
@@ -183,6 +387,12 @@ class CustomLocalGemmaTranslation(BaseLLMTranslation):
             )
         )
         self.raw_response_logging = bool(gemma_settings.get("raw_response_logging", False))
+        self.request_retry_total_attempts = self._env_or_config_int(
+            gemma_settings,
+            "request_retry_total_attempts",
+            "CT_GEMMA_REQUEST_RETRY_TOTAL_ATTEMPTS",
+            DEFAULT_GEMMA_REQUEST_RETRY_TOTAL_ATTEMPTS,
+        )
         self.temperature = self._env_or_config_float(
             gemma_settings,
             "temperature",
@@ -237,8 +447,24 @@ class CustomLocalGemmaTranslation(BaseLLMTranslation):
             "CT_GEMMA_THINK_BRIEFLY_PROMPT",
             DEFAULT_GEMMA_THINK_BRIEFLY_PROMPT,
         )
+        request_mode_override = os.environ.get("CT_GEMMA_REQUEST_MODE")
+        if request_mode_override is not None:
+            logger.warning(
+                "CT_GEMMA_REQUEST_MODE is retired and ignored; "
+                "using contextual-single."
+            )
+        self.request_mode = self._normalize_request_mode(
+            str(
+                gemma_settings.get(
+                    "request_mode",
+                    DEFAULT_GEMMA_REQUEST_MODE,
+                )
+                or DEFAULT_GEMMA_REQUEST_MODE
+            )
+        )
         self.contextual_merge_input = DEFAULT_GEMMA_CONTEXTUAL_MERGE_INPUT
         self.img_as_llm_input = False
+        self._pending_translation_plan = None
         self.last_benchmark_stats = self._new_benchmark_stats()
 
     def translate(
@@ -246,20 +472,88 @@ class CustomLocalGemmaTranslation(BaseLLMTranslation):
         blk_list: list[TextBlock],
         image: np.ndarray,
         extra_context: str,
+        *,
+        requested_indices: Iterable[int] | None = None,
     ) -> list[TextBlock]:
-        updated_blocks = 0
         if not blk_list:
             return blk_list
 
+        requested = self._normalize_requested_indices(
+            len(blk_list),
+            requested_indices,
+        )
+        signature = self._translation_plan_signature(
+            blk_list,
+            extra_context,
+            requested,
+        )
+        plan = self._pending_translation_plan
+        if plan is None or plan.signature != signature:
+            plan = self._prepare_translation_plan(
+                blk_list,
+                extra_context,
+                requested,
+            )
+
         working_blocks = [blk.deep_copy() for blk in blk_list]
         self._current_benchmark_stats = self._new_benchmark_stats()
+        self._current_benchmark_stats["gemma_configured_group_size"] = int(
+            self.chunk_size
+        )
+        for key, value in plan.lookup_stats.items():
+            if key in self._current_benchmark_stats:
+                self._current_benchmark_stats[key] += int(value)
+        self._current_benchmark_stats["gemma_tm_requested_block_count"] = len(
+            requested
+        )
 
         try:
-            for start in range(0, len(working_blocks), self.chunk_size):
-                chunk = working_blocks[start : start + self.chunk_size]
-                updated_blocks += self._translate_chunk_with_retry(chunk, extra_context)
+            if plan.runtime_required and self._runtime_ensure_callback is not None:
+                self._runtime_ensure_callback()
+            elif requested and not plan.runtime_required:
+                self._current_benchmark_stats["gemma_tm_runtime_skipped_count"] += 1
 
-            for original_blk, translated_blk in zip(blk_list, working_blocks):
+            targets_by_chunk: dict[int, list[GemmaCacheTarget]] = {}
+            for target in plan.targets:
+                targets_by_chunk.setdefault(target.chunk_start, []).append(target)
+
+            for start, chunk_targets in sorted(targets_by_chunk.items()):
+                chunk = working_blocks[start : start + self.chunk_size]
+                request_context = self._create_request_context(chunk)
+                unresolved_indices: list[int] = []
+                for target in chunk_targets:
+                    if target.hit:
+                        self._apply_translation_value(
+                            chunk[target.target_index],
+                            target.target_index,
+                            target.translation,
+                        )
+                        self._restore_cached_translation_metadata(
+                            chunk[target.target_index],
+                            target.metadata,
+                        )
+                    else:
+                        unresolved_indices.append(target.target_index)
+
+                if not unresolved_indices:
+                    continue
+                if (
+                    len(unresolved_indices) == len(chunk)
+                    and len(chunk_targets) == len(chunk)
+                ):
+                    self._translate_chunk_with_retry(chunk, extra_context)
+                else:
+                    for target_index in unresolved_indices:
+                        self._translate_contextual_single_target(
+                            request_context,
+                            target_index,
+                            extra_context,
+                            prompt_profile=self.prompt_profile,
+                        )
+
+            for index in requested:
+                original_blk = blk_list[index]
+                translated_blk = working_blocks[index]
                 original_blk.translation = translated_blk.translation
                 guard_metadata = getattr(translated_blk, "_translation_repetition_guard", None)
                 if guard_metadata is not None:
@@ -267,15 +561,423 @@ class CustomLocalGemmaTranslation(BaseLLMTranslation):
                 elif hasattr(original_blk, "_translation_repetition_guard"):
                     delattr(original_blk, "_translation_repetition_guard")
 
+            self._persist_translation_plan_results(
+                plan,
+                working_blocks,
+            )
             logger.info(
                 "translation parsed successfully (%s): updated_blocks=%d total_blocks=%d",
                 self.translation_mode_label,
-                updated_blocks,
+                len(requested),
                 len(blk_list),
             )
             return blk_list
         finally:
+            store = self._translation_memory_store
+            if (
+                store is not None
+                and not store.enabled
+                and not self._current_benchmark_stats["gemma_tm_cache_disabled_count"]
+            ):
+                self._current_benchmark_stats["gemma_tm_cache_disabled_count"] = 1
             self.last_benchmark_stats = dict(self._current_benchmark_stats)
+            self._pending_translation_plan = None
+
+    def prepare_translation(
+        self,
+        blk_list: list[TextBlock],
+        extra_context: str,
+        *,
+        requested_indices: Iterable[int] | None = None,
+    ) -> bool:
+        requested = self._normalize_requested_indices(
+            len(blk_list),
+            requested_indices,
+        )
+        plan = self._prepare_translation_plan(
+            blk_list,
+            extra_context,
+            requested,
+        )
+        self._pending_translation_plan = plan
+        return plan.runtime_required
+
+    @staticmethod
+    def _normalize_requested_indices(
+        block_count: int,
+        requested_indices: Iterable[int] | None,
+    ) -> tuple[int, ...]:
+        if requested_indices is None:
+            return tuple(range(block_count))
+        normalized = tuple(sorted({int(index) for index in requested_indices}))
+        invalid = [index for index in normalized if index < 0 or index >= block_count]
+        if invalid:
+            raise IndexError(
+                f"Requested translation block indices are out of range: {invalid}"
+            )
+        return normalized
+
+    def _translation_plan_signature(
+        self,
+        blk_list: list[TextBlock],
+        extra_context: str,
+        requested: tuple[int, ...],
+    ) -> str:
+        return canonical_sha256(
+            {
+                "blocks": [str(getattr(blk, "text", "") or "") for blk in blk_list],
+                "extra_context": str(extra_context or ""),
+                "requested_indices": requested,
+                "source_lang": self.source_lang,
+                "target_lang": self.target_lang,
+                "chunk_size": self.chunk_size,
+                "request_mode": GEMMA_REQUEST_MODE_CONTEXTUAL_SINGLE,
+                "prompt_profile": self.prompt_profile,
+            }
+        )
+
+    def _prepare_translation_plan(
+        self,
+        blk_list: list[TextBlock],
+        extra_context: str,
+        requested: tuple[int, ...],
+    ) -> GemmaTranslationPlan:
+        signature = self._translation_plan_signature(
+            blk_list,
+            extra_context,
+            requested,
+        )
+        lookup_stats = {
+            "gemma_tm_result_cache_hit_count": 0,
+            "gemma_tm_result_cache_miss_count": 0,
+            "gemma_tm_stale_reject_count": 0,
+            "gemma_tm_exact_hit_count": 0,
+            "gemma_tm_exact_ambiguous_count": 0,
+            "gemma_tm_cache_disabled_count": 0,
+        }
+        if not requested:
+            return GemmaTranslationPlan(
+                signature=signature,
+                targets=(),
+                runtime_required=False,
+                lookup_stats=lookup_stats,
+            )
+
+        settings = self._translation_memory_settings
+        store = self._translation_memory_store
+        persistent_enabled = bool(settings.get("persistent_cache_enabled", True))
+        exact_tm_enabled = bool(settings.get("exact_tm_enabled", True))
+        memory_enabled = persistent_enabled or exact_tm_enabled
+        store_available = memory_enabled and store is not None and store.enabled
+        if memory_enabled and not store_available:
+            lookup_stats["gemma_tm_cache_disabled_count"] = 1
+
+        runtime_identity: dict[str, Any] | None = None
+        if persistent_enabled and store_available and self._runtime_identity_provider is not None:
+            try:
+                runtime_identity = self._resolve_runtime_identity_snapshot()
+            except Exception:
+                logger.warning(
+                    "Unable to resolve the Gemma runtime identity before translation; "
+                    "persistent result-cache lookup is disabled for this call.",
+                    exc_info=True,
+                )
+                lookup_stats["gemma_tm_cache_disabled_count"] = 1
+        if runtime_identity is not None and (
+            not str(runtime_identity.get("model_sha256", "")).strip()
+            or not str(runtime_identity.get("runtime_fingerprint", "")).strip()
+        ):
+            logger.warning(
+                "Gemma runtime identity is missing model SHA-256 or runtime fingerprint; "
+                "persistent result-cache lookup is disabled for this call."
+            )
+            runtime_identity = None
+            lookup_stats["gemma_tm_cache_disabled_count"] = 1
+
+        tm_revision = (
+            store.get_tm_revision()
+            if persistent_enabled and store_available and store is not None
+            else 0
+        )
+        if store is not None and not store.enabled:
+            store_available = False
+            lookup_stats["gemma_tm_cache_disabled_count"] = 1
+        targets: list[GemmaCacheTarget] = []
+
+        for start in range(0, len(blk_list), self.chunk_size):
+            chunk = blk_list[start : start + self.chunk_size]
+            chunk_requested = [
+                global_index
+                for global_index in requested
+                if start <= global_index < start + len(chunk)
+            ]
+            if not chunk_requested:
+                continue
+            request_context = self._create_request_context(chunk)
+            raw_sources = tuple(
+                str(getattr(block, "text", "") or "")
+                for block in chunk
+            )
+            common_identity = self._translation_cache_common_identity(
+                request_context,
+                raw_sources=raw_sources,
+                extra_context=extra_context,
+                runtime_identity=runtime_identity,
+                tm_revision=tm_revision,
+            )
+            for global_index in chunk_requested:
+                target_index = global_index - start
+                source_text = raw_sources[target_index]
+                cache_key = ""
+                scope_key = ""
+                identity_json = ""
+                translation: str | None = None
+                metadata: Mapping[str, Any] | None = None
+                hit_kind = ""
+                exact_tm_entry_ids: tuple[int, ...] = ()
+
+                if (
+                    persistent_enabled
+                    and store_available
+                    and store is not None
+                    and runtime_identity is not None
+                ):
+                    scope_payload = {
+                        "source_lang": self.source_lang,
+                        "target_lang": self.target_lang,
+                        "extra_context": str(extra_context or ""),
+                        "ordered_full_group_context": request_context.source_values,
+                        "ordered_raw_group_context": raw_sources,
+                        "target_index": target_index,
+                    }
+                    identity_payload = {
+                        **common_identity,
+                        "target_index": target_index,
+                        "target_key": request_context.expected_keys[target_index],
+                    }
+                    scope_key = canonical_sha256(scope_payload)
+                    identity_json = canonical_json(identity_payload)
+                    cache_key = canonical_sha256(identity_payload)
+                    cache_lookup = store.lookup_result(cache_key, scope_key)
+                    if cache_lookup.hit:
+                        translation = cache_lookup.translation
+                        metadata = cache_lookup.metadata
+                        hit_kind = "result-cache"
+                        lookup_stats["gemma_tm_result_cache_hit_count"] += 1
+                    else:
+                        lookup_stats["gemma_tm_result_cache_miss_count"] += 1
+                        if cache_lookup.stale_reject:
+                            lookup_stats["gemma_tm_stale_reject_count"] += 1
+                        if cache_lookup.disabled:
+                            store_available = False
+                            lookup_stats["gemma_tm_cache_disabled_count"] = 1
+
+                if (
+                    translation is None
+                    and exact_tm_enabled
+                    and store_available
+                    and store is not None
+                ):
+                    tm_lookup = store.lookup_exact_tm(
+                        source_text,
+                        str(self.source_lang or ""),
+                        str(self.target_lang or ""),
+                    )
+                    if tm_lookup.hit:
+                        translation = tm_lookup.translation
+                        hit_kind = "exact-tm"
+                        exact_tm_entry_ids = tm_lookup.entry_ids
+                        lookup_stats["gemma_tm_exact_hit_count"] += 1
+                    elif tm_lookup.ambiguous:
+                        lookup_stats["gemma_tm_exact_ambiguous_count"] += 1
+                    if tm_lookup.disabled:
+                        store_available = False
+                        lookup_stats["gemma_tm_cache_disabled_count"] = 1
+
+                targets.append(
+                    GemmaCacheTarget(
+                        global_index=global_index,
+                        chunk_start=start,
+                        target_index=target_index,
+                        source_text=source_text,
+                        cache_key=cache_key,
+                        scope_key=scope_key,
+                        identity_json=identity_json,
+                        translation=translation,
+                        metadata=metadata,
+                        hit_kind=hit_kind,
+                        exact_tm_entry_ids=exact_tm_entry_ids,
+                    )
+                )
+
+        runtime_required = any(not target.hit for target in targets)
+        return GemmaTranslationPlan(
+            signature=signature,
+            targets=tuple(targets),
+            runtime_required=runtime_required,
+            lookup_stats=lookup_stats,
+        )
+
+    def _resolve_runtime_identity_snapshot(self) -> dict[str, Any] | None:
+        if self._runtime_identity_provider is None:
+            return None
+        now = time.monotonic()
+        if (
+            self._runtime_identity_snapshot is not None
+            and now - self._runtime_identity_snapshot_at
+            <= GEMMA_RUNTIME_IDENTITY_SNAPSHOT_TTL_SEC
+        ):
+            return dict(self._runtime_identity_snapshot)
+        resolved = self._runtime_identity_provider()
+        self._runtime_identity_snapshot = (
+            dict(resolved)
+            if isinstance(resolved, Mapping)
+            else None
+        )
+        self._runtime_identity_snapshot_at = now
+        return (
+            dict(self._runtime_identity_snapshot)
+            if self._runtime_identity_snapshot is not None
+            else None
+        )
+
+    def _translation_cache_common_identity(
+        self,
+        request_context: GemmaRequestContext,
+        *,
+        raw_sources: tuple[str, ...],
+        extra_context: str,
+        runtime_identity: Mapping[str, Any] | None,
+        tm_revision: int,
+    ) -> dict[str, Any]:
+        return {
+            "result_cache_version": TRANSLATION_RESULT_CACHE_VERSION,
+            "translation_memory_schema_version": TRANSLATION_MEMORY_SCHEMA_VERSION,
+            "exact_tm_normalization_version": EXACT_TM_NORMALIZATION_VERSION,
+            "prompt_contract_version": GEMMA_PROMPT_CONTRACT_VERSION,
+            "translation_input_normalizer_version": GEMMA_TRANSLATION_INPUT_NORMALIZER_VERSION,
+            "output_sanitizer_version": GEMMA_OUTPUT_SANITIZER_VERSION,
+            "repetition_guard_version": GEMMA_REPETITION_GUARD_VERSION,
+            "source_lang": self.source_lang,
+            "target_lang": self.target_lang,
+            "extra_context": str(extra_context or ""),
+            "ordered_full_group_context": request_context.source_values,
+            "ordered_raw_group_context": raw_sources,
+            "configured_group_size": self.chunk_size,
+            "actual_group_size": len(request_context.blocks),
+            "request_mode": GEMMA_REQUEST_MODE_CONTEXTUAL_SINGLE,
+            "prompt_profile": self.prompt_profile,
+            "system_prompt_sha256": canonical_sha256(
+                self._build_system_prompt(
+                    extra_context,
+                    prompt_profile=self.prompt_profile,
+                )
+            ),
+            "response_format_mode": self.response_format_mode,
+            "response_schema_mode": self.response_schema_mode,
+            "think_briefly_prompt": self.think_briefly_prompt,
+            "contextual_merge_input": self.contextual_merge_input,
+            "sampler": {
+                "temperature": self.temperature,
+                "top_k": self.top_k,
+                "top_p": self.top_p,
+                "min_p": self.min_p,
+                "max_completion_tokens": self.max_tokens,
+            },
+            "model": self.model,
+            "runtime": dict(runtime_identity or {}),
+            "glossary_version": 0,
+            "tm_revision": int(tm_revision),
+        }
+
+    @staticmethod
+    def _restore_cached_translation_metadata(
+        block: TextBlock,
+        metadata: Mapping[str, Any] | None,
+    ) -> None:
+        guard = (metadata or {}).get("translation_repetition_guard")
+        if isinstance(guard, Mapping):
+            setattr(block, "_translation_repetition_guard", dict(guard))
+
+    def _persist_translation_plan_results(
+        self,
+        plan: GemmaTranslationPlan,
+        working_blocks: list[TextBlock],
+    ) -> None:
+        store = self._translation_memory_store
+        if store is None or not store.enabled:
+            return
+        persistent_enabled = bool(
+            self._translation_memory_settings.get("persistent_cache_enabled", True)
+        )
+        exact_tm_enabled = bool(
+            self._translation_memory_settings.get("exact_tm_enabled", True)
+        )
+        records: list[ResultCacheRecord] = []
+        touched_cache_keys: list[str] = []
+        touched_tm_entry_ids: list[int] = []
+        candidates: list[GemmaCacheTarget] = []
+        for target in plan.targets:
+            block = working_blocks[target.global_index]
+            translation = str(getattr(block, "translation", "") or "")
+            if not translation.strip() and target.source_text.strip():
+                continue
+            guard = getattr(block, "_translation_repetition_guard", None)
+            metadata_json = canonical_json(
+                {"translation_repetition_guard": guard}
+                if isinstance(guard, Mapping)
+                else {}
+            )
+            if (
+                persistent_enabled
+                and target.cache_key
+                and target.scope_key
+                and target.identity_json
+                and target.hit_kind != "result-cache"
+            ):
+                records.append(
+                    ResultCacheRecord(
+                        cache_key=target.cache_key,
+                        scope_key=target.scope_key,
+                        identity_json=target.identity_json,
+                        source_text=target.source_text,
+                        translation=translation,
+                        metadata_json=metadata_json,
+                    )
+                )
+            elif target.hit_kind == "result-cache" and target.cache_key:
+                touched_cache_keys.append(target.cache_key)
+            if target.hit_kind == "exact-tm":
+                touched_tm_entry_ids.extend(target.exact_tm_entry_ids)
+            if (
+                exact_tm_enabled
+                and target.hit_kind != "exact-tm"
+                and translation.strip()
+            ):
+                candidates.append(target)
+
+        stored = store.store_results(
+            records,
+            touched_cache_keys=touched_cache_keys,
+            touched_tm_entry_ids=touched_tm_entry_ids,
+        )
+        if records and stored:
+            self._current_benchmark_stats["gemma_tm_cache_write_count"] += len(records)
+        candidate_count = store.record_tm_candidates(
+            [
+                ExactTMCandidate(
+                    source_text=target.source_text,
+                    translation=str(
+                        getattr(working_blocks[target.global_index], "translation", "")
+                        or ""
+                    ),
+                    source_lang=str(self.source_lang or ""),
+                    target_lang=str(self.target_lang or ""),
+                )
+                for target in candidates
+            ]
+        )
+        self._current_benchmark_stats["gemma_tm_candidate_count"] += candidate_count
 
     def _translate_chunk_with_retry(
         self,
@@ -293,7 +995,6 @@ class CustomLocalGemmaTranslation(BaseLLMTranslation):
                 blk_list,
                 extra_context,
                 prompt_profile=prompt_profile,
-                use_contextual_merge=False,
             )
 
         try:
@@ -343,6 +1044,77 @@ class CustomLocalGemmaTranslation(BaseLLMTranslation):
             right = self._translate_chunk_with_retry(blk_list[split_point:], extra_context)
             return left + right
 
+    def _create_request_context(self, blk_list: list[TextBlock]) -> GemmaRequestContext:
+        expected_keys = tuple(self._expected_block_keys(blk_list))
+        _, normalized_json = self._build_translation_input_payloads(blk_list)
+        normalized_payload = extract_json_object(normalized_json)
+        source_values = tuple(str(normalized_payload.get(key, "") or "") for key in expected_keys)
+        merged_context = "\n".join(
+            f"[[{key}]] {source_value}"
+            for key, source_value in zip(expected_keys, source_values)
+        )
+        return GemmaRequestContext(
+            blocks=tuple(blk_list),
+            expected_keys=expected_keys,
+            source_values=source_values,
+            merged_context=merged_context,
+        )
+
+    def _translate_contextual_single_target(
+        self,
+        request_context: GemmaRequestContext,
+        target_index: int,
+        extra_context: str,
+        *,
+        prompt_profile: str,
+    ) -> None:
+        profiles = [prompt_profile]
+        if prompt_profile != STRICT_GEMMA_PROMPT_PROFILE:
+            profiles.append(STRICT_GEMMA_PROMPT_PROFILE)
+
+        last_error: GemmaLocalServerResponseError | None = None
+        for profile_index, profile in enumerate(profiles):
+            if profile_index:
+                self._current_benchmark_stats["gemma_strict_single_retry_count"] += 1
+            system_prompt = self._build_system_prompt(extra_context, prompt_profile=profile)
+            user_prompt = self._build_contextual_single_request_prompt(
+                request_context,
+                target_index,
+            )
+            try:
+                response_data = self._request_translation(
+                    system_prompt,
+                    user_prompt,
+                    expected_keys=["translation"],
+                    request_mode=GEMMA_REQUEST_MODE_CONTEXTUAL_SINGLE,
+                )
+                translation_dict = self._extract_translation_dict(
+                    response_data,
+                    expected_keys=["translation"],
+                    source_values={
+                        "translation": request_context.source_values[target_index],
+                    },
+                    block_count=1,
+                    prompt_profile=profile,
+                )
+                self._apply_translation_value(
+                    request_context.blocks[target_index],
+                    target_index,
+                    translation_dict["translation"],
+                )
+                return
+            except GemmaLocalServerResponseError as exc:
+                last_error = exc
+                if not exc.strict_retryable or profile == STRICT_GEMMA_PROMPT_PROFILE:
+                    break
+
+        if last_error is not None:
+            raise last_error
+        raise GemmaLocalServerResponseError(
+            f"Gemma contextual-single fallback failed for block_{target_index}.",
+            strict_retryable=False,
+        )
+
     def _translate_contextual_single_blocks(
         self,
         blk_list: list[TextBlock],
@@ -350,18 +1122,28 @@ class CustomLocalGemmaTranslation(BaseLLMTranslation):
         *,
         prompt_profile: str,
     ) -> int:
+        request_context = self._create_request_context(blk_list)
         system_prompt = self._build_system_prompt(extra_context, prompt_profile=prompt_profile)
         updated_count = 0
         for index, blk in enumerate(blk_list):
-            user_prompt = self._build_contextual_single_block_user_prompt(blk_list, index)
+            user_prompt = self._build_contextual_single_request_prompt(
+                request_context,
+                index,
+            )
+            if prompt_profile == STRICT_GEMMA_PROMPT_PROFILE:
+                self._current_benchmark_stats["gemma_strict_single_retry_count"] += 1
             response_data = self._request_translation(
                 system_prompt,
                 user_prompt,
                 expected_keys=["translation"],
+                request_mode=GEMMA_REQUEST_MODE_CONTEXTUAL_SINGLE,
             )
             translation_dict = self._extract_translation_dict(
                 response_data,
                 expected_keys=["translation"],
+                source_values={
+                    "translation": request_context.source_values[index],
+                },
                 block_count=1,
                 prompt_profile=prompt_profile,
             )
@@ -382,7 +1164,6 @@ class CustomLocalGemmaTranslation(BaseLLMTranslation):
                 [blk],
                 extra_context,
                 prompt_profile=prompt_profile,
-                use_contextual_merge=False,
             )
         return updated_count
 
@@ -392,18 +1173,25 @@ class CustomLocalGemmaTranslation(BaseLLMTranslation):
         extra_context: str,
         *,
         prompt_profile: str,
-        use_contextual_merge: bool,
     ) -> int:
         system_prompt = self._build_system_prompt(extra_context, prompt_profile=prompt_profile)
         expected_keys = self._expected_block_keys(blk_list)
-        if use_contextual_merge:
-            user_prompt = self._build_contextual_merged_user_prompt(blk_list, expected_keys)
-        else:
-            _, user_prompt = self._build_translation_input_payloads(blk_list)
-        response_data = self._request_translation(system_prompt, user_prompt, expected_keys=expected_keys)
+        _, user_prompt = self._build_translation_input_payloads(blk_list)
+        request_mode = "isolated-single" if len(blk_list) == 1 else "direct-grouped"
+        source_payload = extract_json_object(user_prompt)
+        response_data = self._request_translation(
+            system_prompt,
+            user_prompt,
+            expected_keys=expected_keys,
+            request_mode=request_mode,
+        )
         translation_dict = self._extract_translation_dict(
             response_data,
             expected_keys=expected_keys,
+            source_values={
+                key: str(source_payload.get(key, "") or "")
+                for key in expected_keys
+            },
             block_count=len(blk_list),
             prompt_profile=prompt_profile,
         )
@@ -418,14 +1206,47 @@ class CustomLocalGemmaTranslation(BaseLLMTranslation):
         response_data: dict,
         *,
         expected_keys: list[str],
+        source_values: dict[str, str] | None = None,
         block_count: int,
         prompt_profile: str,
     ) -> dict[str, Any]:
-        choice = (response_data.get("choices") or [{}])[0]
-        message = choice.get("message") or {}
-        finish_reason = choice.get("finish_reason")
-        content = message.get("content") or ""
-        reasoning_content = message.get("reasoning_content") or ""
+        parsed = self._extract_partial_translation_result(
+            response_data,
+            expected_keys=expected_keys,
+            source_values=source_values or {},
+            block_count=block_count,
+            prompt_profile=prompt_profile,
+        )
+        if parsed.unresolved_keys or parsed.unexpected_keys:
+            reasons: list[str] = []
+            if parsed.unresolved_keys:
+                reasons.append(
+                    "unresolved expected block keys: "
+                    + ", ".join(parsed.unresolved_keys)
+                )
+            if parsed.unexpected_keys:
+                reasons.append(
+                    "unexpected block keys: "
+                    + ", ".join(parsed.unexpected_keys)
+                )
+            raise GemmaLocalServerResponseError(
+                "Gemma local server JSON response was invalid: " + "; ".join(reasons),
+                strict_retryable=True,
+            )
+        return dict(parsed.valid_values)
+
+    def _extract_partial_translation_result(
+        self,
+        response_data: dict,
+        *,
+        expected_keys: list[str],
+        source_values: dict[str, str],
+        block_count: int,
+        prompt_profile: str,
+    ) -> GemmaParsedResponse:
+        finish_reason, content, reasoning_content = self._extract_response_content(
+            response_data
+        )
 
         usage = response_data.get("usage") or {}
         logger.info(
@@ -466,40 +1287,186 @@ class CustomLocalGemmaTranslation(BaseLLMTranslation):
                 strict_retryable=True,
             )
 
-        try:
-            translation_dict = extract_json_object(self._strip_channel_tokens(content))
-        except Exception as exc:
+        translation_dict = self._decode_exact_json_object(content)
+        duplicate_keys = set(translation_dict.duplicate_keys)
+        if duplicate_keys:
+            self._current_benchmark_stats["gemma_duplicate_key_count"] += len(duplicate_keys)
+
+        missing_keys = [key for key in expected_keys if key not in translation_dict]
+        unexpected_keys = [str(key) for key in translation_dict if key not in expected_keys]
+        unresolved_keys: list[str] = []
+        valid_values: dict[str, str | None] = {}
+
+        for key in expected_keys:
+            if key in duplicate_keys or key not in translation_dict:
+                unresolved_keys.append(key)
+                continue
+            valid, translated = self._validate_translation_candidate(
+                translation_dict[key],
+                source_values.get(key, ""),
+            )
+            if valid:
+                valid_values[key] = translated
+            else:
+                unresolved_keys.append(key)
+
+        if missing_keys:
+            self._current_benchmark_stats["gemma_missing_key_count"] += len(missing_keys)
+        if unexpected_keys:
+            self._current_benchmark_stats["gemma_unexpected_key_count"] += len(
+                unexpected_keys
+            )
+        if unresolved_keys or unexpected_keys or duplicate_keys:
             self._current_benchmark_stats["gemma_json_retry_count"] += 1
+            if self.response_format_mode == "json_schema":
+                self._current_benchmark_stats["gemma_schema_validation_fail_count"] += 1
+
+        return GemmaParsedResponse(
+            valid_values=valid_values,
+            unresolved_keys=tuple(unresolved_keys),
+            unexpected_keys=tuple(unexpected_keys),
+        )
+
+    def _extract_response_content(
+        self,
+        response_data: dict[str, Any],
+    ) -> tuple[Any, str, str]:
+        choices = response_data.get("choices")
+        if not isinstance(choices, list) or not choices or not isinstance(choices[0], dict):
+            self._current_benchmark_stats["gemma_parser_error_count"] += 1
             raise GemmaLocalServerResponseError(
-                "Gemma local server did not return a valid JSON object in message.content.",
+                "Gemma local server response did not contain a valid choices array.",
+                strict_retryable=True,
+            )
+        choice = choices[0]
+        message = choice.get("message")
+        if not isinstance(message, dict):
+            self._current_benchmark_stats["gemma_parser_error_count"] += 1
+            raise GemmaLocalServerResponseError(
+                "Gemma local server response did not contain a valid message object.",
+                strict_retryable=True,
+            )
+        content = message.get("content")
+        reasoning_content = message.get("reasoning_content")
+        if content is not None and not isinstance(content, str):
+            self._current_benchmark_stats["gemma_parser_error_count"] += 1
+            raise GemmaLocalServerResponseError(
+                "Gemma local server message.content must be a string.",
+                strict_retryable=True,
+            )
+        if reasoning_content is not None and not isinstance(reasoning_content, str):
+            reasoning_content = str(reasoning_content)
+        return (
+            choice.get("finish_reason"),
+            content or "",
+            reasoning_content or "",
+        )
+
+    def _decode_exact_json_object(self, content: str) -> _GemmaTrackedDict:
+        cleaned_content = self._strip_channel_tokens(content)
+        if cleaned_content != str(content or "").strip():
+            self._current_benchmark_stats["gemma_channel_token_sanitized_count"] += 1
+
+        decoder = json.JSONDecoder(object_pairs_hook=_GemmaTrackedDict)
+        try:
+            decoded, end_index = decoder.raw_decode(cleaned_content)
+        except (TypeError, ValueError, json.JSONDecodeError) as exc:
+            self._current_benchmark_stats["gemma_json_retry_count"] += 1
+            self._current_benchmark_stats["gemma_parser_error_count"] += 1
+            raise GemmaLocalServerResponseError(
+                "Gemma local server did not return one valid JSON object in message.content.",
                 strict_retryable=True,
             ) from exc
 
-        missing_keys = [key for key in expected_keys if key not in translation_dict]
-        unexpected_keys = [key for key in translation_dict if key not in expected_keys]
-        if missing_keys or unexpected_keys:
+        if cleaned_content[end_index:].strip():
             self._current_benchmark_stats["gemma_json_retry_count"] += 1
-            if missing_keys:
-                self._current_benchmark_stats["gemma_missing_key_count"] += len(missing_keys)
-            if self.response_format_mode == "json_schema":
-                self._current_benchmark_stats["gemma_schema_validation_fail_count"] += 1
-            reasons: list[str] = []
-            if missing_keys:
-                reasons.append("missing expected block keys: " + ", ".join(missing_keys))
-            if unexpected_keys:
-                reasons.append("unexpected block keys: " + ", ".join(unexpected_keys))
+            self._current_benchmark_stats["gemma_parser_error_count"] += 1
+            self._current_benchmark_stats["gemma_trailing_content_count"] += 1
             raise GemmaLocalServerResponseError(
-                "Gemma local server JSON response was invalid: " + "; ".join(reasons),
+                "Gemma local server returned trailing content after the JSON object.",
                 strict_retryable=True,
             )
 
-        return translation_dict
+        if not isinstance(decoded, _GemmaTrackedDict):
+            self._current_benchmark_stats["gemma_json_retry_count"] += 1
+            self._current_benchmark_stats["gemma_parser_error_count"] += 1
+            self._current_benchmark_stats["gemma_top_level_type_error_count"] += 1
+            raise GemmaLocalServerResponseError(
+                "Gemma local server response must be one top-level JSON object.",
+                strict_retryable=True,
+            )
+        return decoded
+
+    def _validate_translation_candidate(
+        self,
+        value: Any,
+        source_text: str,
+    ) -> tuple[bool, str | None]:
+        if value is None:
+            if str(source_text or "").strip():
+                self._current_benchmark_stats["gemma_invalid_value_count"] += 1
+                return False, None
+            return True, None
+        if not isinstance(value, str):
+            if isinstance(value, (dict, list)):
+                self._current_benchmark_stats["gemma_nested_value_count"] += 1
+            else:
+                self._current_benchmark_stats["gemma_invalid_value_count"] += 1
+            return False, None
+
+        translated = self._strip_channel_tokens(value)
+        if translated != value.strip():
+            self._current_benchmark_stats["gemma_channel_token_sanitized_count"] += 1
+        safe_translated = strip_unsafe_text_control_chars(translated)
+        if safe_translated != translated:
+            self._current_benchmark_stats["gemma_unsafe_control_sanitized_count"] += 1
+        translated = safe_translated
+
+        source_clean = str(source_text or "").strip()
+        translated_clean = translated.strip()
+        if source_clean and not translated_clean:
+            self._current_benchmark_stats["gemma_invalid_value_count"] += 1
+            return False, None
+        if self._is_unexpected_nested_json(translated_clean, source_clean):
+            self._current_benchmark_stats["gemma_nested_value_count"] += 1
+            return False, None
+        if (
+            translated_clean
+            and GEMMA_STRUCTURAL_ONLY_RE.fullmatch(translated_clean)
+            and translated_clean != source_clean
+        ):
+            self._current_benchmark_stats["gemma_invalid_value_count"] += 1
+            return False, None
+        return True, translated
+
+    @staticmethod
+    def _is_unexpected_nested_json(translated: str, source_text: str) -> bool:
+        if not translated or translated == source_text:
+            return False
+        if translated[0] not in "[{":
+            return False
+        try:
+            decoded = json.loads(translated)
+        except (TypeError, ValueError, json.JSONDecodeError):
+            return False
+        return isinstance(decoded, (dict, list))
 
     def _apply_translation_value(self, blk: TextBlock, index: int, value: Any) -> None:
-        translated = value if isinstance(value, str) or value is None else str(value)
+        if not isinstance(value, str) and value is not None:
+            raise GemmaLocalServerResponseError(
+                f"Gemma local server returned a non-string translation for block_{index}.",
+                strict_retryable=True,
+            )
+        if hasattr(blk, "_translation_repetition_guard"):
+            delattr(blk, "_translation_repetition_guard")
+        translated = value
         if isinstance(translated, str):
-            translated = self._strip_channel_tokens(translated)
-            translated = strip_unsafe_text_control_chars(translated)
+            stripped = self._strip_channel_tokens(translated)
+            if stripped != translated.strip():
+                self._current_benchmark_stats["gemma_channel_token_sanitized_count"] += 1
+            translated = strip_unsafe_text_control_chars(stripped)
+            if translated != stripped:
+                self._current_benchmark_stats["gemma_unsafe_control_sanitized_count"] += 1
         source_text = str(getattr(blk, "text", "") or "").strip()
         if source_text and not str(translated or "").strip():
             raise GemmaLocalServerResponseError(
@@ -535,14 +1502,9 @@ class CustomLocalGemmaTranslation(BaseLLMTranslation):
         blk_list: list[TextBlock],
         expected_keys: list[str],
     ) -> str:
-        _, normalized_json = self._build_translation_input_payloads(blk_list)
-        normalized_payload = extract_json_object(normalized_json)
-        merged_lines = [
-            f"[[{key}]] {normalized_payload.get(key, '')}"
-            for key in expected_keys
-        ]
+        request_context = self._create_request_context(blk_list)
         return json.dumps(
-            {"merged_context": "\n".join(merged_lines)},
+            {"merged_context": request_context.merged_context},
             ensure_ascii=False,
             indent=4,
         )
@@ -552,19 +1514,23 @@ class CustomLocalGemmaTranslation(BaseLLMTranslation):
         blk_list: list[TextBlock],
         target_index: int,
     ) -> str:
-        expected_keys = self._expected_block_keys(blk_list)
-        _, normalized_json = self._build_translation_input_payloads(blk_list)
-        normalized_payload = extract_json_object(normalized_json)
-        merged_lines = [
-            f"[[{key}]] {normalized_payload.get(key, '')}"
-            for key in expected_keys
-        ]
-        target_key = f"block_{target_index}"
+        request_context = self._create_request_context(blk_list)
+        return self._build_contextual_single_request_prompt(
+            request_context,
+            target_index,
+        )
+
+    @staticmethod
+    def _build_contextual_single_request_prompt(
+        request_context: GemmaRequestContext,
+        target_index: int,
+    ) -> str:
+        target_key = request_context.expected_keys[target_index]
         return json.dumps(
             {
-                "merged_context": "\n".join(merged_lines),
+                "merged_context": request_context.merged_context,
                 "target_block": target_key,
-                "target_text": normalized_payload.get(target_key, ""),
+                "target_text": request_context.source_values[target_index],
             },
             ensure_ascii=False,
             indent=4,
@@ -619,6 +1585,7 @@ class CustomLocalGemmaTranslation(BaseLLMTranslation):
             If the user JSON contains a merged_context field, it contains OCR blocks marked like [[block_0]], [[block_1]], and so on.
             First understand all marked text as one continuous comic passage, using the surrounding marked lines for context.
             If the user JSON also contains target_block and target_text, translate only target_text for that target_block and return exactly {"translation": "..."}.
+            If the user JSON contains requested_blocks, use every marked line as context but return exactly the requested block keys and no others.
             Otherwise, return exactly one JSON object whose keys are the marked block names: block_0, block_1, etc.
             Do not return merged_context. Do not include marker text in values. Do not output channel tokens such as <|channel>thought or <channel|>.
             """
@@ -642,6 +1609,7 @@ class CustomLocalGemmaTranslation(BaseLLMTranslation):
         user_prompt: str,
         *,
         expected_keys: list[str] | None = None,
+        request_mode: str = "",
     ) -> dict:
         payload = {
             "model": self.model,
@@ -663,43 +1631,163 @@ class CustomLocalGemmaTranslation(BaseLLMTranslation):
             "response_format": self._build_response_format(user_prompt, expected_keys=expected_keys),
         }
         headers = {"Content-Type": "application/json"}
+        mode_stat_prefix = self._request_mode_stat_prefix(request_mode)
+        self._current_benchmark_stats["gemma_logical_request_count"] += 1
+        if mode_stat_prefix:
+            self._current_benchmark_stats[f"{mode_stat_prefix}_request_count"] += 1
+        logical_started = time.perf_counter()
 
         try:
-            response = requests.post(
-                f"{self.api_base_url}/chat/completions",
-                headers=headers,
-                json=payload,
-                timeout=self.timeout,
-            )
-            response.raise_for_status()
-        except requests.exceptions.RequestException as exc:
-            error_msg = f"API request failed: {exc}"
-            if getattr(exc, "response", None) is not None:
+            for attempt_index in range(max(1, int(self.request_retry_total_attempts))):
+                self._current_benchmark_stats["gemma_http_attempt_count"] += 1
                 try:
-                    error_msg += f" - {json.dumps(exc.response.json(), ensure_ascii=False)}"
-                except Exception:
-                    error_msg += f" - Status code: {exc.response.status_code}"
-            raise LocalServiceConnectionError(
-                error_msg,
-                service_name="Gemma",
-                settings_page_name="Gemma Local Server Settings",
-            ) from exc
+                    response = requests.post(
+                        f"{self.api_base_url}/chat/completions",
+                        headers=headers,
+                        json=payload,
+                        timeout=self.timeout,
+                    )
+                    if self._is_context_capacity_response(response):
+                        raise GemmaLocalServerContextCapacityError(
+                            "Gemma local server rejected the request because it exceeded "
+                            "the available context capacity."
+                        )
+                    response.raise_for_status()
+                except GemmaLocalServerContextCapacityError:
+                    raise
+                except requests.exceptions.RequestException as exc:
+                    if self._is_transient_request_error(exc) and self._should_retry_request(
+                        attempt_index
+                    ):
+                        self._current_benchmark_stats["gemma_request_retry_count"] += 1
+                        self._current_benchmark_stats["gemma_http_retry_count"] += 1
+                        self._sleep_before_request_retry(attempt_index, exc)
+                        continue
+                    error_msg = f"API request failed: {exc}"
+                    if getattr(exc, "response", None) is not None:
+                        try:
+                            error_msg += (
+                                " - "
+                                + json.dumps(exc.response.json(), ensure_ascii=False)
+                            )
+                        except Exception:
+                            error_msg += f" - Status code: {exc.response.status_code}"
+                    raise LocalServiceConnectionError(
+                        error_msg,
+                        service_name="Gemma",
+                        settings_page_name="Gemma Local Server Settings",
+                    ) from exc
 
-        try:
-            response_data = response.json()
-        except ValueError as exc:
-            raise LocalServiceResponseError(
-                "Gemma local server returned invalid JSON.",
-                service_name="Gemma",
-                settings_page_name="Gemma Local Server Settings",
-            ) from exc
-        if self.raw_response_logging:
-            logger.info(
-                "translation raw response json (%s): %s",
-                self.translation_mode_label,
-                json.dumps(response_data, ensure_ascii=False),
+                try:
+                    response_data = response.json()
+                except ValueError as exc:
+                    raise GemmaLocalServerResponseError(
+                        "Gemma local server returned an invalid HTTP response JSON envelope.",
+                        strict_retryable=True,
+                    ) from exc
+                if not isinstance(response_data, dict):
+                    raise GemmaLocalServerResponseError(
+                        "Gemma local server returned a non-object HTTP response JSON envelope.",
+                        strict_retryable=True,
+                    )
+                self._record_response_telemetry(response_data)
+                if self.raw_response_logging:
+                    logger.info(
+                        "translation raw response json (%s): %s",
+                        self.translation_mode_label,
+                        json.dumps(response_data, ensure_ascii=False),
+                    )
+                return response_data
+
+            raise AssertionError("Gemma request retry loop ended without a response.")
+        finally:
+            elapsed_ms = (time.perf_counter() - logical_started) * 1000.0
+            self._current_benchmark_stats["gemma_request_wall_ms"] += elapsed_ms
+            if mode_stat_prefix:
+                self._current_benchmark_stats[f"{mode_stat_prefix}_wall_ms"] += elapsed_ms
+
+    @staticmethod
+    def _request_mode_stat_prefix(request_mode: str) -> str:
+        return {
+            GEMMA_REQUEST_MODE_CONTEXTUAL_SINGLE: "gemma_contextual_single",
+            "isolated-single": "gemma_isolated_single",
+        }.get(str(request_mode or "").strip().lower(), "")
+
+    def _record_response_telemetry(self, response_data: dict[str, Any]) -> None:
+        usage = response_data.get("usage")
+        if not isinstance(usage, dict):
+            usage = {}
+        self._add_numeric_stat("gemma_prompt_tokens", usage.get("prompt_tokens"))
+        self._add_numeric_stat(
+            "gemma_completion_tokens",
+            usage.get("completion_tokens"),
+        )
+        self._add_numeric_stat("gemma_total_tokens", usage.get("total_tokens"))
+
+        prompt_details = usage.get("prompt_tokens_details")
+        if isinstance(prompt_details, dict):
+            self._add_numeric_stat(
+                "gemma_cached_prompt_tokens",
+                prompt_details.get("cached_tokens"),
             )
-        return response_data
+
+        timings = response_data.get("timings")
+        if isinstance(timings, dict):
+            self._add_numeric_stat("gemma_prompt_eval_ms", timings.get("prompt_ms"))
+            self._add_numeric_stat("gemma_decode_ms", timings.get("predicted_ms"))
+
+    def _add_numeric_stat(self, key: str, value: Any) -> None:
+        if isinstance(value, bool) or value is None:
+            return
+        try:
+            numeric_value = float(value)
+        except (TypeError, ValueError):
+            return
+        if isinstance(self._current_benchmark_stats.get(key), int) and numeric_value.is_integer():
+            self._current_benchmark_stats[key] += int(numeric_value)
+        else:
+            self._current_benchmark_stats[key] += numeric_value
+
+    def _is_context_capacity_response(self, response: Any) -> bool:
+        try:
+            if int(getattr(response, "status_code", 0)) != 400:
+                return False
+        except (TypeError, ValueError):
+            return False
+
+        body_parts: list[str] = []
+        try:
+            body_parts.append(json.dumps(response.json(), ensure_ascii=False))
+        except Exception:
+            pass
+        response_text = getattr(response, "text", "")
+        if response_text:
+            body_parts.append(str(response_text))
+        return bool(GEMMA_CONTEXT_CAPACITY_RE.search("\n".join(body_parts)))
+
+    def _should_retry_request(self, attempt_index: int) -> bool:
+        return attempt_index < max(1, int(self.request_retry_total_attempts)) - 1
+
+    def _is_transient_request_error(self, exc: requests.exceptions.RequestException) -> bool:
+        if isinstance(exc, (requests.exceptions.Timeout, requests.exceptions.ConnectionError)):
+            return True
+        response = getattr(exc, "response", None)
+        status_code = getattr(response, "status_code", None)
+        try:
+            return int(status_code) in GEMMA_TRANSIENT_HTTP_STATUS_CODES
+        except (TypeError, ValueError):
+            return False
+
+    def _sleep_before_request_retry(self, attempt_index: int, exc: Exception) -> None:
+        delay = self.request_retry_backoff_seconds[
+            min(attempt_index, len(self.request_retry_backoff_seconds) - 1)
+        ]
+        logger.warning(
+            "gemma local request failed transiently; retrying in %.1fs: %s",
+            delay,
+            exc,
+        )
+        time.sleep(max(0.0, float(delay)))
 
     def _build_response_format(
         self,

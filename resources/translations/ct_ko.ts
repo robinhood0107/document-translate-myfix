@@ -775,16 +775,16 @@ Project-specific quick settings can override them for the current project.</sour
     </message>
     <message>
         <source>Comic Translate can reuse your local Gemma Docker server for translation.
-1. Keep the existing Gemma container running if it is already healthy.
+1. Prepare the versioned Gemma model volume once with `scripts/prepare_gemma_runtime.ps1`.
 2. In Settings &gt; Credentials, use Endpoint URL `http://127.0.0.1:18080/v1`.
-3. Set Model to the exact GGUF filename in `testmodel/` (recommended: `gemma-4-26B-IQ4_NL.gguf`).
-Automatic translation reuses an existing Gemma runtime first and only runs `docker compose up -d` when needed.
+3. Set Model to an exact prepared GGUF filename (default: `gemma-4-26B-IQ4_NL.gguf`).
+Automatic translation starts an exact stopped container directly and recreates it only when the runtime fingerprint differs.
 If responses are truncated, lower Chunk Size or Max Completion Tokens before recreating the container.</source>
         <translation>Comic Translate는 번역에 로컬 Gemma Docker 서버를 재사용할 수 있습니다.
-1. 기존 Gemma 컨테이너가 이미 정상 상태라면 그대로 실행된 상태를 유지하세요.
+1. `scripts/prepare_gemma_runtime.ps1`로 버전이 지정된 Gemma 모델 volume을 한 번 준비하세요.
 2. 설정 &gt; 인증 정보에서 엔드포인트 URL을 `http://127.0.0.1:18080/v1`로 설정하세요.
-3. 모델은 `testmodel/` 안의 정확한 GGUF 파일명으로 지정하세요. (권장: `gemma-4-26B-IQ4_NL.gguf`)
-자동 번역은 기존 Gemma 런타임을 먼저 재사용하고, 필요할 때만 `docker compose up -d`를 실행합니다.
+3. 준비된 정확한 GGUF 파일명을 모델로 지정하세요. (기본값: `gemma-4-26B-IQ4_NL.gguf`)
+자동 번역은 fingerprint가 정확히 같은 중지 컨테이너를 바로 시작하고, runtime fingerprint가 다를 때만 컨테이너를 다시 만듭니다.
 응답이 잘리면 컨테이너를 다시 만들기 전에 청크 크기나 최대 완료 토큰 수를 낮추세요.</translation>
     </message>
     <message>
@@ -1893,6 +1893,82 @@ Approximate GPU usage:
         <source>Parallel Workers</source>
         <translation>병렬 작업 수</translation>
     </message>
+    <message>
+        <source>Persistent OCR Result Cache</source>
+        <translation>영구 OCR 결과 캐시</translation>
+    </message>
+    <message>
+        <source>Reuses exact PaddleOCR VL crop results across runs. Images are not stored. The cache is available only for the bundled managed Docker endpoint; custom endpoints continue normally without persistent caching.</source>
+        <translation>실행 간에 완전히 동일한 PaddleOCR VL crop 결과를 재사용합니다. 이미지는 저장하지 않습니다. 캐시는 번들로 제공되는 관리형 Docker endpoint에서만 사용할 수 있으며, 사용자 지정 endpoint는 영구 캐시 없이 정상적으로 계속 처리합니다.</translation>
+    </message>
+    <message>
+        <source>Enable persistent OCR result cache</source>
+        <translation>영구 OCR 결과 캐시 사용</translation>
+    </message>
+    <message>
+        <source>Maximum cached crops</source>
+        <translation>최대 캐시 crop 수</translation>
+    </message>
+    <message>
+        <source>Hits: — · Misses: — · Items: —</source>
+        <translation>적중: — · 미적중: — · 항목: —</translation>
+    </message>
+    <message>
+        <source>Refresh statistics</source>
+        <translation>통계 새로 고침</translation>
+    </message>
+    <message>
+        <source>Export JSONL</source>
+        <translation>JSONL 내보내기</translation>
+    </message>
+    <message>
+        <source>Clear cache</source>
+        <translation>캐시 지우기</translation>
+    </message>
+    <message>
+        <source>Cache unavailable: {reason}</source>
+        <translation>캐시를 사용할 수 없음: {reason}</translation>
+    </message>
+    <message>
+        <source>Hits: {hits} · Misses: {misses} · Items: {items}</source>
+        <translation>적중: {hits} · 미적중: {misses} · 항목: {items}</translation>
+    </message>
+    <message>
+        <source>Export PaddleOCR VL Cache</source>
+        <translation>PaddleOCR VL 캐시 내보내기</translation>
+    </message>
+    <message>
+        <source>JSON Lines (*.jsonl)</source>
+        <translation>JSON Lines (*.jsonl)</translation>
+    </message>
+    <message>
+        <source>PaddleOCR VL Cache</source>
+        <translation>PaddleOCR VL 캐시</translation>
+    </message>
+    <message>
+        <source>Cache export failed. The database was left unchanged.
+{error}</source>
+        <translation>캐시 내보내기에 실패했습니다. 데이터베이스는 변경하지 않았습니다.
+{error}</translation>
+    </message>
+    <message>
+        <source>Exported {count} cached OCR results.</source>
+        <translation>캐시된 OCR 결과 {count}개를 내보냈습니다.</translation>
+    </message>
+    <message>
+        <source>Clear PaddleOCR VL Cache</source>
+        <translation>PaddleOCR VL 캐시 지우기</translation>
+    </message>
+    <message>
+        <source>Clear all persistent PaddleOCR VL result-cache entries? No source images will be deleted.</source>
+        <translation>영구 PaddleOCR VL 결과 캐시 항목을 모두 지우시겠습니까? 원본 이미지는 삭제하지 않습니다.</translation>
+    </message>
+    <message>
+        <source>Cache clear failed. The database was left unchanged.
+{error}</source>
+        <translation>캐시 지우기에 실패했습니다. 데이터베이스는 변경하지 않았습니다.
+{error}</translation>
+    </message>
 </context>
 <context>
     <name>PageListView</name>
@@ -2216,6 +2292,30 @@ This folder is separate from Auto-Recover snapshots.</source>
     <message>
         <source>Reset</source>
         <translation>초기화</translation>
+    </message>
+    <message>
+        <source>Project Stage Checkpoints</source>
+        <translation>프로젝트 단계 체크포인트</translation>
+    </message>
+    <message>
+        <source>Preview: save reusable stage manifests and large artifacts beside each .ctpr project. Missing or damaged cache data is ignored and recalculated.</source>
+        <translation>미리보기: 재사용 가능한 단계 매니페스트와 대용량 산출물을 각 .ctpr 프로젝트 옆에 저장합니다. 캐시 데이터가 없거나 손상되면 무시하고 다시 계산합니다.</translation>
+    </message>
+    <message>
+        <source>Enable project stage checkpoints</source>
+        <translation>프로젝트 단계 체크포인트 사용</translation>
+    </message>
+    <message>
+        <source>Open Cache Folder</source>
+        <translation>캐시 폴더 열기</translation>
+    </message>
+    <message>
+        <source>Clean Unused Cache</source>
+        <translation>사용하지 않는 캐시 정리</translation>
+    </message>
+    <message>
+        <source>Force Stage Recalculation</source>
+        <translation>단계 강제 재계산</translation>
     </message>
     <message>
         <source>Choose Auto-Save Folder</source>
@@ -3002,20 +3102,8 @@ Restart now?</source>
         <translation>업데이트 오류</translation>
     </message>
     <message>
-        <source>Developer Update Available</source>
-        <translation>개발자 업데이트 사용 가능</translation>
-    </message>
-    <message>
-        <source>A developer fork update {version} is available.</source>
-        <translation>개발자 포크 업데이트 {version}을 사용할 수 있습니다.</translation>
-    </message>
-    <message>
-        <source>Developer Update Error</source>
-        <translation>개발자 업데이트 오류</translation>
-    </message>
-    <message>
-        <source>Fork update check failed: {message}</source>
-        <translation>포크 업데이트 확인 실패: {message}</translation>
+        <source>Release package downloaded to {path}. Open it now?</source>
+        <translation>릴리스 패키지를 {path}에 다운로드했습니다. 지금 여시겠습니까?</translation>
     </message>
     <message>
         <source>Downloading update...</source>
@@ -3024,10 +3112,6 @@ Restart now?</source>
     <message>
         <source>Download Complete</source>
         <translation>다운로드 완료</translation>
-    </message>
-    <message>
-        <source>Installer downloaded to {path}. Run it now?</source>
-        <translation>설치 관리자가 {path}(으)로 다운로드되었습니다. 지금 실행하시겠습니까?</translation>
     </message>
 </context>
 <context>
@@ -3312,6 +3396,13 @@ Restart now?</source>
     </message>
 </context>
 <context>
+    <name>StageBatchedProcessor</name>
+    <message>
+        <source>Gemma could not start because inpainter VRAM release was not confirmed.</source>
+        <translation>인페인터 VRAM 해제가 확인되지 않아 Gemma를 시작하지 못했습니다.</translation>
+    </message>
+</context>
+<context>
     <name>StartupHomeScreen</name>
     <message>
         <source>New</source>
@@ -3581,6 +3672,168 @@ then do inpainting on the resized image.</source>
     <message>
         <source>Original</source>
         <translation>원본</translation>
+    </message>
+</context>
+<context>
+    <name>TranslationMemoryPanel</name>
+    <message>
+        <source>Exact Translation Memory</source>
+        <translation>정확 일치 번역 메모리</translation>
+    </message>
+    <message>
+        <source>Persistent result-cache text and translation-memory entries are sensitive local user data. Only explicitly approved exact source-to-translation pairs can bypass Gemma across contexts.</source>
+        <translation>영구 결과 캐시의 텍스트와 번역 메모리 항목은 민감한 로컬 사용자 데이터입니다. 사용자가 명시적으로 승인한 정확한 원문-번역 쌍만 문맥이 달라도 Gemma를 건너뛸 수 있습니다.</translation>
+    </message>
+    <message>
+        <source>Enable persistent block result cache</source>
+        <translation>영구 블록 결과 캐시 사용</translation>
+    </message>
+    <message>
+        <source>Enable exact translation memory and collect unapproved candidates</source>
+        <translation>정확 일치 번역 메모리 사용 및 미승인 후보 수집</translation>
+    </message>
+    <message>
+        <source>Result cache retention</source>
+        <translation>결과 캐시 보존 한도</translation>
+    </message>
+    <message>
+        <source>Unapproved candidate retention</source>
+        <translation>미승인 후보 보존 한도</translation>
+    </message>
+    <message>
+        <source>Source text</source>
+        <translation>원문</translation>
+    </message>
+    <message>
+        <source>Translation</source>
+        <translation>번역</translation>
+    </message>
+    <message>
+        <source>Source language</source>
+        <translation>원문 언어</translation>
+    </message>
+    <message>
+        <source>Target language</source>
+        <translation>번역 언어</translation>
+    </message>
+    <message>
+        <source>Approved</source>
+        <translation>승인됨</translation>
+    </message>
+    <message>
+        <source>Refresh</source>
+        <translation>새로 고침</translation>
+    </message>
+    <message>
+        <source>Approve Selected</source>
+        <translation>선택 항목 승인</translation>
+    </message>
+    <message>
+        <source>Unapprove Selected</source>
+        <translation>선택 항목 승인 해제</translation>
+    </message>
+    <message>
+        <source>Delete Selected</source>
+        <translation>선택 항목 삭제</translation>
+    </message>
+    <message>
+        <source>Import</source>
+        <translation>가져오기</translation>
+    </message>
+    <message>
+        <source>Export</source>
+        <translation>내보내기</translation>
+    </message>
+    <message>
+        <source>Clear Result Cache</source>
+        <translation>결과 캐시 비우기</translation>
+    </message>
+    <message>
+        <source>Yes</source>
+        <translation>예</translation>
+    </message>
+    <message>
+        <source>No</source>
+        <translation>아니요</translation>
+    </message>
+    <message>
+        <source>Translation memory is unavailable for this run. The database was left unchanged. Reason: {0}</source>
+        <translation>이번 실행에서는 번역 메모리를 사용할 수 없습니다. 데이터베이스는 변경하지 않았습니다. 원인: {0}</translation>
+    </message>
+    <message>
+        <source>Result cache: {0} entries · Approved TM: {1} · Candidates: {2} · Showing latest {3}</source>
+        <translation>결과 캐시: {0}개 · 승인된 TM: {1}개 · 후보: {2}개 · 최근 {3}개 표시 중</translation>
+    </message>
+    <message>
+        <source>Delete Translation Memory Entries</source>
+        <translation>번역 메모리 항목 삭제</translation>
+    </message>
+    <message>
+        <source>Delete the selected translation-memory entries?</source>
+        <translation>선택한 번역 메모리 항목을 삭제하시겠습니까?</translation>
+    </message>
+    <message>
+        <source>Import Exact Translation Memory</source>
+        <translation>정확 일치 번역 메모리 가져오기</translation>
+    </message>
+    <message>
+        <source>JSON files (*.json)</source>
+        <translation>JSON 파일 (*.json)</translation>
+    </message>
+    <message>
+        <source>Approved entries in this file will be trusted and may bypass Gemma. Import this translation-memory file?</source>
+        <translation>이 파일에서 승인된 항목은 신뢰되며 Gemma를 건너뛸 수 있습니다. 이 번역 메모리 파일을 가져오시겠습니까?</translation>
+    </message>
+    <message>
+        <source>Import Failed</source>
+        <translation>가져오기 실패</translation>
+    </message>
+    <message>
+        <source>Import Complete</source>
+        <translation>가져오기 완료</translation>
+    </message>
+    <message>
+        <source>Imported {0} translation-memory entries.</source>
+        <translation>번역 메모리 항목 {0}개를 가져왔습니다.</translation>
+    </message>
+    <message>
+        <source>Export Exact Translation Memory</source>
+        <translation>정확 일치 번역 메모리 내보내기</translation>
+    </message>
+    <message>
+        <source>Export Failed</source>
+        <translation>내보내기 실패</translation>
+    </message>
+    <message>
+        <source>Export Complete</source>
+        <translation>내보내기 완료</translation>
+    </message>
+    <message>
+        <source>Exported {0} translation-memory entries.</source>
+        <translation>번역 메모리 항목 {0}개를 내보냈습니다.</translation>
+    </message>
+    <message>
+        <source>Clear all persistent block-result cache entries? Approved and candidate translation-memory entries will be kept.</source>
+        <translation>영구 블록 결과 캐시 항목을 모두 비우시겠습니까? 승인된 항목과 번역 메모리 후보는 유지됩니다.</translation>
+    </message>
+    <message>
+        <source>Result Cache Cleared</source>
+        <translation>결과 캐시 비우기 완료</translation>
+    </message>
+    <message>
+        <source>Removed {0} result-cache entries.</source>
+        <translation>결과 캐시 항목 {0}개를 삭제했습니다.</translation>
+    </message>
+    <message>
+        <source>Translation Memory Operation Failed</source>
+        <translation>번역 메모리 작업 실패</translation>
+    </message>
+</context>
+<context>
+    <name>Translator</name>
+    <message>
+        <source>Persistent translation cache is unavailable, so caching is disabled for this task while normal translation continues.</source>
+        <translation>영구 번역 캐시를 사용할 수 없어 이번 작업에서는 캐시를 끄고 정상 번역을 계속합니다.</translation>
     </message>
 </context>
 <context>
@@ -4627,6 +4880,82 @@ Overwrite it?</source>
     <message>
         <source>Project file moved.</source>
         <translation>프로젝트 파일을 이동했습니다.</translation>
+    </message>
+    <message>
+        <source>Old Project Cache Kept</source>
+        <translation>기존 프로젝트 캐시를 유지함</translation>
+    </message>
+    <message>
+        <source>The project file was moved, but its old cache folder could not be removed safely.
+
+{path}</source>
+        <translation>프로젝트 파일은 이동했지만 기존 캐시 폴더를 안전하게 제거하지 못했습니다.
+
+{path}</translation>
+    </message>
+    <message>
+        <source>Project Checkpoints</source>
+        <translation>프로젝트 체크포인트</translation>
+    </message>
+    <message>
+        <source>Save or open a single .ctpr project before managing its cache.</source>
+        <translation>캐시를 관리하기 전에 단일 .ctpr 프로젝트를 저장하거나 여세요.</translation>
+    </message>
+    <message>
+        <source>The project cache is unavailable. Processing can continue without it.
+
+{reason}</source>
+        <translation>프로젝트 캐시를 사용할 수 없습니다. 캐시 없이 처리를 계속할 수 있습니다.
+
+{reason}</translation>
+    </message>
+    <message>
+        <source>This project does not have a checkpoint cache folder yet.</source>
+        <translation>이 프로젝트에는 아직 체크포인트 캐시 폴더가 없습니다.</translation>
+    </message>
+    <message>
+        <source>This project does not have checkpoint data to clean.</source>
+        <translation>이 프로젝트에는 정리할 체크포인트 데이터가 없습니다.</translation>
+    </message>
+    <message>
+        <source>The project cache could not be cleaned safely. Existing files were preserved.
+
+{reason}</source>
+        <translation>프로젝트 캐시를 안전하게 정리하지 못했습니다. 기존 파일은 그대로 유지했습니다.
+
+{reason}</translation>
+    </message>
+    <message>
+        <source>Removed {count} unused checkpoint object(s).</source>
+        <translation>사용하지 않는 체크포인트 객체 {count}개를 제거했습니다.</translation>
+    </message>
+    <message>
+        <source>This project does not have checkpoint data to invalidate.</source>
+        <translation>이 프로젝트에는 무효화할 체크포인트 데이터가 없습니다.</translation>
+    </message>
+    <message>
+        <source>Force Stage Recalculation</source>
+        <translation>단계 강제 재계산</translation>
+    </message>
+    <message>
+        <source>Invalidate all saved stage checkpoints for this project?
+
+The next run will recompute every stage. Source pages and project edits are not deleted.</source>
+        <translation>이 프로젝트에 저장된 모든 단계 체크포인트를 무효화하시겠습니까?
+
+다음 실행에서 모든 단계를 다시 계산합니다. 원본 페이지와 프로젝트 편집 내용은 삭제하지 않습니다.</translation>
+    </message>
+    <message>
+        <source>The saved checkpoints could not be invalidated safely. Existing files were preserved.
+
+{reason}</source>
+        <translation>저장된 체크포인트를 안전하게 무효화하지 못했습니다. 기존 파일은 그대로 유지했습니다.
+
+{reason}</translation>
+    </message>
+    <message>
+        <source>Invalidated {count} stage checkpoint(s).</source>
+        <translation>단계 체크포인트 {count}개를 무효화했습니다.</translation>
     </message>
     <message>
         <source>Project Not Found</source>

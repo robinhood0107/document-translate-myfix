@@ -40,7 +40,7 @@ def looks_like_render_html_fragment(text: str | None) -> bool:
     sample = value[:2000].lower()
     if "<span" not in sample or "font-family" not in sample:
         return False
-    return any(ch in value for ch in RENDER_NORMALIZABLE_GLYPHS)
+    return True
 
 
 def should_use_rich_text(text: str | None) -> bool:
@@ -66,9 +66,11 @@ def build_styled_render_html(
     underline: bool = False,
     direction: Qt.LayoutDirection = Qt.LayoutDirection.LeftToRight,
     fallback_font_family: str = "",
+    fallback_chars: set[str] | None = None,
 ) -> StyledRenderHtmlResult:
     raw_text = str(text or "")
-    body = _render_text_to_html(raw_text, fallback_font_family)
+    fallback_char_set = set(fallback_chars or set())
+    body = _render_text_to_html(raw_text, fallback_font_family, fallback_chars=fallback_char_set)
     html_text = _wrap_body_content(
         body,
         font_family=font_family,
@@ -90,6 +92,15 @@ def build_styled_render_html(
         }
         for index, ch in enumerate(raw_text)
         if ch in RENDER_NORMALIZABLE_GLYPHS and fallback_font_family
+    ] + [
+        {
+            "index": int(index),
+            "char": ch,
+            "replacement": ch,
+            "reason": "glyph-fallback-font",
+        }
+        for index, ch in enumerate(raw_text)
+        if ch in fallback_char_set and ch not in RENDER_NORMALIZABLE_GLYPHS and fallback_font_family
     ]
     return StyledRenderHtmlResult(
         text=raw_text,
@@ -213,15 +224,21 @@ def _normalize_qt_plain_text(value: str) -> str:
     )
 
 
-def _render_text_to_html(text: str, fallback_font_family: str) -> str:
+def _render_text_to_html(
+    text: str,
+    fallback_font_family: str,
+    *,
+    fallback_chars: set[str] | None = None,
+) -> str:
     parts: list[str] = []
     fallback_family = html.escape(str(fallback_font_family or ""), quote=True)
+    fallback_char_set = set(fallback_chars or set())
     for ch in str(text or ""):
         if ch == "\n":
             parts.append("<br />")
             continue
         escaped = html.escape(ch, quote=False)
-        if fallback_family and ch in RENDER_NORMALIZABLE_GLYPHS:
+        if fallback_family and (ch in RENDER_NORMALIZABLE_GLYPHS or ch in fallback_char_set):
             parts.append(f'<span style="font-family:\'{fallback_family}\';">{escaped}</span>')
         else:
             parts.append(escaped)

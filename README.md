@@ -4,6 +4,10 @@
 
 This repository is a local-first fork of upstream `comic-translate` that started from the upstream `v2.6.7` codebase and then diverged with product-specific runtime, OCR, workflow, and Windows setup changes.
 
+The fork's product release version is `1.1.0`. Upstream `2.7.1` is recorded
+separately as the latest selective-backport lineage and is not this fork's
+product version.
+
 The fork is maintained around a practical desktop workflow:
 
 - local Gemma translation runtime support
@@ -15,6 +19,7 @@ The fork is maintained around a practical desktop workflow:
 ## Important Features
 
 - Local Gemma translation runtime for desktop-first translation workflows.
+- Persistent full-identity Gemma result caching plus user-approved exact translation memory.
 - Local OCR runtimes with optimal routing between `HunyuanOCR` and `PaddleOCR VL`.
 - Inpainting add, exclude, and restore tools with saved mask and patch state.
 - TXT/MD source export and translation import with OCR and translation correction dictionaries.
@@ -24,6 +29,7 @@ The fork is maintained around a practical desktop workflow:
 ## Supporting Features
 
 - Reuse-only OCR preflight checks avoid restarting already running local OCR containers.
+- Managed local Docker runtimes stop without deleting their containers so later runs can reuse them.
 - Automatic runs update the latest completed translated image preview page by page.
 - Completion sounds support the system alert or repo-provided `music/*.wav` files.
 - Windows launchers bootstrap `.venv-win` and `.venv-win-cuda13` automatically.
@@ -83,7 +89,7 @@ Automatically downloaded by the app when missing:
 - OCR checkpoints such as `MangaOCR`, `Pororo OCR`, and `PPOCRv5`
 
 Provided separately by the user or local runtime bundle:
-- Gemma GGUF files mounted into the local translation runtime
+- Gemma GGUF files imported once into the versioned external model volume
 - HunyuanOCR GGUF and mmproj files
 - PaddleOCR VL Docker/runtime bundle files
 
@@ -94,9 +100,20 @@ This repository now uses a strict `main + develop + tag` model.
 - `develop` is the integration branch for upcoming product work.
 - `main` is the shipping baseline.
 - Official releases are created only from `vX.Y.Z` version tags that point to commits already contained in `main`.
-- The Windows release asset is built with `Nuitka` and published as a GitHub Release artifact from that tag.
-- Release candidates that touch Nuitka packaging, release assets, Windows runtime pins, or `main` promotion must first pass a local Windows PowerShell Nuitka build before CI/release workflows are used as the second verification layer.
-- Models, checkpoints, and Docker runtimes are not bundled into the release executable and remain separately provisioned.
+- The official Windows asset is a deterministic
+  `comic-translate-vX.Y.Z-windows-launcher-source.zip` plus
+  `SHA256SUMS.txt`.
+- The ZIP contains allowlisted product source, both first-run Windows
+  launchers, pinned CUDA12/CUDA13 requirements, runtime Compose/config files,
+  the Gemma preparation script, translations/resources, README files, and the
+  license.
+- Virtual environments, models, caches, benchmark runners/results, local
+  paths, and secrets are not bundled. The launchers install their supported
+  environment on first run.
+- Release candidates must reproduce the ZIP and pass both extracted
+  launchers with `COMIC_VERIFY_ONLY=1` before `main` promotion.
+- The retained Nuitka PowerShell scripts are unofficial manual tools and do
+  not produce official release assets.
 - `release/*` branches are not used.
 
 The authoritative repository policy lives in [rules.md](rules.md).
@@ -134,6 +151,8 @@ Local product work since the `v2.6.7` base has focused on a few technical areas.
 - split custom translator modes and improved keyless local endpoint support
 - normalized Gemma input and sanitized problematic glyphs
 - aligned local sampler/runtime defaults with measured benchmark presets
+- added a SQLite result-cache fast path that can skip Gemma startup on complete hits
+- added separately approved exact translation memory with conservative matching and explicit import/export controls
 
 ### Benchmarking and branch separation
 
@@ -160,11 +179,6 @@ The `v2.7.0` backport brought in selected user-facing features such as:
 - new target languages and improved RTL handling
 - selected webtoon/list-view behavior fixes
 
-Audit document:
-
-- [docs/history/v267-to-v270-backport-audit.md](docs/history/v267-to-v270-backport-audit.md)
-- [docs/history/v267-to-v270-backport-audit-ko.md](docs/history/v267-to-v270-backport-audit-ko.md)
-
 ### `v2.7.0 -> v2.7.1`
 
 The `v2.7.1` round selectively applies the upstream fixes that matter to this fork:
@@ -173,12 +187,7 @@ The `v2.7.1` round selectively applies the upstream fixes that matter to this fo
 - main-thread-safe `QTimer.singleShot(...)` dispatch for async UI callbacks
 - list thumbnail loading reworked around `QImage` in the worker thread and `QPixmap` conversion on the main thread
 - import menu cleanup so `PSD` appears next to `Project File`
-- app version bump to `2.7.1`
-
-Audit document:
-
-- [docs/history/v270-to-v271-backport-audit.md](docs/history/v270-to-v271-backport-audit.md)
-- [docs/history/v270-to-v271-backport-audit-ko.md](docs/history/v270-to-v271-backport-audit-ko.md)
+- upstream selective-backport lineage recorded as `2.7.1`
 
 ## Quick Start
 
@@ -206,13 +215,18 @@ run_comic_cuda13.bat
 
 ### 2. Optional local translation runtime
 
-Start the local Gemma server from the repository root:
+Prepare the versioned Gemma model volume once from Windows PowerShell:
 
-```bash
-docker compose up -d
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass `
+  -File .\scripts\prepare_gemma_runtime.ps1 -Mode Prepare `
+  -CandidateModelPath 'C:\ExampleWorkspace\models\Gemma4-26B-A4B-Uncensored-HauhauCS-Balanced-IQ4_XS.gguf' `
+  -LegacyModelPath 'C:\ExampleWorkspace\models\gemma-4-26B-IQ4_NL.gguf'
 ```
 
-Then use `Custom Local Server(Gemma)` in the app.
+Then use `Custom Local Server(Gemma)` in the app. The managed runtime validates the ready manifest and model size, mounts the prepared volume read-only, and starts or recreates the container only when needed. To explicitly recompute both model hashes, run the same script with `-Mode Verify`.
+
+The **User Dictionaries** settings page also controls the persistent block-result cache and exact translation memory. Result-cache entries use the complete translation/runtime identity. Exact source-to-translation pairs bypass Gemma only after explicit approval; imported approved entries require confirmation. These databases contain sensitive local text, remain in the app user-data directory, and are never silently deleted after a lock or corruption error. See [the translation-memory guide](docs/gemma/translation-memory.md).
 
 ### 3. Optional local OCR runtimes
 
@@ -224,12 +238,32 @@ docker compose -f hunyuanocr_docker_files/docker-compose.yaml up -d
 
 PaddleOCR VL uses the tracked bundle under [paddleocr_vl_docker_files/README.md](paddleocr_vl_docker_files/README.md).
 
+Managed containers are stopped and preserved after stage completion, cancellation, or app shutdown. Use `docker compose down` only when you explicitly want to reset or remove a runtime.
+
 ### 4. Recommended OCR setting
 
 In Settings, choose:
 
 - `Default (existing auto: MangaOCR / PPOCR / Pororo...)` to keep legacy OCR routing
 - `Optimal (HunyuanOCR / PaddleOCR VL)` to route Chinese to `HunyuanOCR` and Japanese/other languages to `PaddleOCR VL`
+
+For the stage-batched folder workflow, `Settings > PaddleOCR VL Settings`
+also provides a managed exact persistent OCR cache. It stores raw OCR results
+and diagnostics, never crop images, and is disabled automatically for custom
+endpoints.
+
+`Settings > Project` also contains a preview, default-off project checkpoint
+store. Detection geometry, raw PaddleOCR-VL results, lossless cleaned images,
+final masks, and encoded render outputs can be restored before their runtimes
+start. Translation text remains owned by the `.ctpr`; the sidecar stores only
+its validated stage signature, so a full project hit skips detector, Paddle,
+Gemma, inpainter, and renderer inference. Current OCR and translation
+dictionary rules are still applied exactly once, and changing a dictionary
+invalidates only its consumed result and downstream stages. Reusable manifests
+and content-addressed artifacts live in a
+`<project>.ctpr.cache` folder beside the `.ctpr` file. Missing, locked, or
+damaged checkpoint data never prevents the project from opening or processing;
+the affected stages are recalculated.
 
 ### 5. Optional ntfy notifications
 
@@ -250,9 +284,9 @@ Official ntfy docs:
 
 Tracked compose/runtime images used by the repo:
 
-- Gemma local server: `ghcr.io/ggml-org/llama.cpp:server-cuda`
+- Gemma local server: `ghcr.io/ggml-org/llama.cpp@sha256:22e0e3bfe967af4fd1df6a918022abbfd4e72e4d40a4769e616a4176790acbcb`
 - HunyuanOCR local server: `ghcr.io/ggml-org/llama.cpp:server-cuda`
-- PaddleOCR VL runtime: `ccr-2vdh3abv-pub.cnc.bj.baidubce.com/paddlepaddle/paddleocr-genai-vllm-server:latest-nvidia-gpu-offline`
+- PaddleOCR VL runtime: `ccr-2vdh3abv-pub.cnc.bj.baidubce.com/paddlepaddle/paddleocr-genai-vllm-server@sha256:d0d32c04a2119613d25a0a4c292e165ccc107954b74580613cf59e378037f8f5`
 
 ## Reference Setup Docs
 
@@ -265,8 +299,6 @@ Tracked compose/runtime images used by the repo:
 ## Repository Documents
 
 - [rules.md](rules.md)
-- [docs/history/change-log.md](docs/history/change-log.md)
-- [docs/history/change-log-ko.md](docs/history/change-log-ko.md)
 - [docs/gemma/local-server-ko.md](docs/gemma/local-server-ko.md)
 - [docs/hunyuan/local-server-ko.md](docs/hunyuan/local-server-ko.md)
 - [docs/repo/github-rulesets-public-free-ko.md](docs/repo/github-rulesets-public-free-ko.md)

@@ -18,20 +18,29 @@ from modules.detection.processor import TextBlockDetector
 from modules.translation.processor import Translator
 from modules.utils.textblock import sort_blk_list
 from modules.utils.pipeline_config import inpaint_map, get_config, get_inpainter_runtime
-from modules.utils.image_utils import generate_mask
+from modules.utils.image_utils import generate_mask, restore_original_for_block_masks
 from modules.utils.language_utils import get_language_code, is_no_space_lang
 from modules.utils.ocr_quality import summarize_ocr_quality
 from modules.utils.correction_dictionary import (
     apply_ocr_result_dictionary,
     apply_translation_result_dictionary,
 )
-from modules.utils.ocr_debug import drop_layout_schema_only_ocr_blocks, export_ocr_debug_artifacts
+from modules.utils.ocr_debug import (
+    all_empty_blocks_are_rejected,
+    drop_embedded_ui_ocr_blocks,
+    drop_rejected_empty_ocr_blocks,
+    export_ocr_debug_artifacts,
+    is_block_ocr_empty,
+    is_bubble_panel_text_candidate,
+    is_embedded_ui_panel_layout_review_candidate,
+    split_inpaint_protected_ocr_blocks,
+)
 from modules.utils.inpaint_debug import (
     build_detector_overlay,
     build_inpaint_debug_metadata,
     export_inpaint_debug_artifacts,
 )
-from modules.utils.inpaint_cleanup import refine_bubble_residue_inpaint
+from modules.utils.inpaint_cleanup import apply_duplicate_bubble_inner_fill, refine_bubble_residue_inpaint
 from modules.utils.export_paths import (
     build_export_timestamp,
     export_run_root,
@@ -47,21 +56,33 @@ from modules.utils.automatic_output import (
     write_output_image,
 )
 from modules.utils.render_style_policy import (
-    VERTICAL_ALIGNMENT_TOP,
+    VERTICAL_ALIGNMENT_CENTER,
     resolve_render_text_color,
 )
 from modules.utils.exceptions import OperationCancelledError
 from modules.utils.translator_utils import get_raw_translation, get_raw_text, format_translations
 from modules.rendering.render import (
+    apply_strict_render_viewer_state_guard,
+    build_duplicate_bubble_render_key,
     build_render_rects_for_block,
     build_text_item_layout_geometry,
+    describe_auto_render_review_status_gate,
     describe_render_text_sanitization,
     describe_render_text_markup,
+    describe_text_free_large_mask_gate,
+    describe_text_free_render_mask_gate,
+    describe_text_free_render_translation_gate,
+    describe_text_free_underfill_gate,
     get_best_render_area,
     get_render_fit_clearance_for_block,
     is_vertical_block,
     pyside_word_wrap,
     refit_detected_bubble_text_if_underfilled,
+    register_duplicate_bubble_render_key,
+    resolve_text_free_manga_layout,
+    select_blocks_for_original_restore_after_render,
+    should_skip_short_render_translation,
+    should_use_strict_render_symbols,
 )
 from modules.utils.device import resolve_device
 from app.path_materialization import ensure_path_materialized
@@ -73,6 +94,7 @@ from .cache_manager import CacheManager
 from .block_detection import BlockDetectionHandler
 from .inpainting import InpaintingHandler
 from .ocr_handler import OCRHandler
+from .performance_telemetry import PipelinePerformanceTelemetry
 
 if TYPE_CHECKING:
     from controller import ComicTranslate
@@ -102,20 +124,71 @@ class BatchProcessor:
         self._page_started_at: float | None = None
         self._progress_image_path: str | None = None
         self._recent_page_durations = deque(maxlen=5)
+        self.performance_telemetry = PipelinePerformanceTelemetry()
+        self.last_performance_stats: dict = {}
 
     def _emit_benchmark_event(self, tag: str, image_path: str | None = None, **extra) -> None:
+        workflow_mode = ""
+        try:
+            workflow_mode = str(self.main_page.settings_page.get_workflow_mode() or "")
+        except Exception:
+            workflow_mode = ""
         payload = {
             "pipeline_mode": "batch",
             "run_type": self._current_run_type(),
+            "product_pipeline_entrypoint": True,
+            "workflow_mode": workflow_mode,
+            "alignment_id": 1,
+            "vertical_alignment_id": 1,
+            "runner_render_mode": "product",
         }
         if image_path:
             payload["image_path"] = image_path
             payload["image_name"] = os.path.basename(image_path)
         payload.update(extra)
+        telemetry = self._performance_telemetry()
+        payload.update(
+            telemetry.observe_event(
+                tag,
+                image_path=image_path,
+                payload=payload,
+            )
+        )
+        if "performance_stats" in payload:
+            self.last_performance_stats = dict(payload["performance_stats"])
         try:
             self.main_page.emit_memlog(tag, **payload)
         except Exception:
             pass
+
+    def _performance_telemetry(self) -> PipelinePerformanceTelemetry:
+        telemetry = getattr(self, "performance_telemetry", None)
+        if not isinstance(telemetry, PipelinePerformanceTelemetry):
+            telemetry = PipelinePerformanceTelemetry()
+            self.performance_telemetry = telemetry
+        if not hasattr(self, "last_performance_stats"):
+            self.last_performance_stats = {}
+        return telemetry
+
+    def _record_runtime_performance(
+        self,
+        *,
+        service: str,
+        operation: str,
+        elapsed_ms: float,
+        outcome: str = "completed",
+    ) -> None:
+        self._performance_telemetry().record_runtime_duration(
+            service=service,
+            operation=operation,
+            elapsed_ms=elapsed_ms,
+            outcome=outcome,
+        )
+
+    def _sample_performance_resources(self, label: str) -> None:
+        telemetry = self._performance_telemetry()
+        if telemetry.resource_sampling_enabled:
+            telemetry.sample_resources(label)
 
     @staticmethod
     def _benchmark_stage_ceiling() -> str:
@@ -302,15 +375,22 @@ class BatchProcessor:
             "ocr_low_quality_block_count": int(quality.get("single_char_like", 0) or 0),
         }
 
-    def _translation_benchmark_metrics(self, translator) -> dict[str, int]:
+    def _translation_benchmark_metrics(self, translator) -> dict[str, int | float]:
         engine = getattr(translator, "engine", None)
         stats = getattr(engine, "last_benchmark_stats", {}) if engine is not None else {}
-        return {
+        metrics: dict[str, int | float] = {
             "gemma_json_retry_count": int(stats.get("gemma_json_retry_count", 0) or 0),
             "gemma_chunk_retry_events": int(stats.get("gemma_chunk_retry_events", 0) or 0),
             "gemma_truncated_count": int(stats.get("gemma_truncated_count", 0) or 0),
             "gemma_empty_content_count": int(stats.get("gemma_empty_content_count", 0) or 0),
+            "gemma_request_retry_count": int(stats.get("gemma_request_retry_count", 0) or 0),
         }
+        for key, value in stats.items():
+            if not str(key).startswith("gemma_") or isinstance(value, bool):
+                continue
+            if isinstance(value, (int, float)):
+                metrics[str(key)] = value
+        return metrics
 
     def _handle_legacy_inpaint_failure(
         self,
@@ -647,6 +727,36 @@ class BatchProcessor:
             hard_box_rescue_mask=mask_details.get("hard_box_rescue_mask"),
             hard_box_applied_count=int(mask_details.get("hard_box_applied_count", 0) or 0),
             hard_box_reason_totals=dict(mask_details.get("hard_box_reason_totals", {}) or {}),
+            mask_quality_policy=str(mask_details.get("mask_quality_policy", "") or ""),
+            mask_policy_bubble_clamp_applied_count=int(
+                mask_details.get("mask_policy_bubble_clamp_applied_count", 0) or 0
+            ),
+            mask_policy_text_free_glyph_applied_count=int(
+                mask_details.get("mask_policy_text_free_glyph_applied_count", 0) or 0
+            ),
+            mask_policy_removed_pixel_count=int(mask_details.get("mask_policy_removed_pixel_count", 0) or 0),
+            mask_policy_outside_bubble_removed_pixel_count=int(
+                mask_details.get("mask_policy_outside_bubble_removed_pixel_count", 0) or 0
+            ),
+            ctd_legacy_rectangle_rescue_disabled=bool(
+                mask_details.get("ctd_legacy_rectangle_rescue_disabled", False)
+            ),
+            text_free_image_glyph_rescue_count=int(
+                mask_details.get("text_free_image_glyph_rescue_count", 0) or 0
+            ),
+            text_free_image_glyph_rescue_mask_pixel_count=int(
+                mask_details.get("text_free_image_glyph_rescue_mask_pixel_count", 0) or 0
+            ),
+            mask_policy_version=str(mask_details.get("mask_policy_version", "") or ""),
+            mask_candidate_source=str(mask_details.get("mask_candidate_source", "") or ""),
+            mask_decision=str(mask_details.get("mask_decision", "") or ""),
+            mask_reject_reason=str(mask_details.get("mask_reject_reason", "") or ""),
+            mask_score_outside_change=float(mask_details.get("mask_score_outside_change", 0.0) or 0.0),
+            mask_score_outline_damage=float(mask_details.get("mask_score_outline_damage", 0.0) or 0.0),
+            mask_score_residue=float(mask_details.get("mask_score_residue", 0.0) or 0.0),
+            mask_score_color_delta=float(mask_details.get("mask_score_color_delta", 0.0) or 0.0),
+            ui_panel_mode=str(mask_details.get("ui_panel_mode", "") or ""),
+            ui_panel_preview_path=str(mask_details.get("ui_panel_preview_path", "") or ""),
         )
         return export_inpaint_debug_artifacts(
             export_root=export_root,
@@ -673,12 +783,18 @@ class BatchProcessor:
         *,
         page_index: int,
         total_pages: int,
+        strict_render_symbols: bool = False,
     ) -> tuple[str, str]:
         page_base_name = os.path.splitext(os.path.basename(image_path))[0]
         series_dir = self.main_page.get_reserved_automatic_output_series_dir(
             directory,
             anchor_path=self.main_page.image_files[0] if self.main_page.image_files else image_path,
         )
+        if strict_render_symbols:
+            apply_strict_render_viewer_state_guard(
+                viewer_state or {},
+                image_path=image_path,
+            )
         renderer = ImageSaveRenderer(image)
         renderer.apply_patches(patches or [])
         renderer.add_state_to_image(viewer_state or {})
@@ -1080,7 +1196,11 @@ class BatchProcessor:
                     quality = summarize_ocr_quality(blk_list)
                     self._log_ocr_quality(image_path, quality, attempt_count)
 
-                    if quality.get("low_quality", False) and int(quality.get("non_empty", 0) or 0) > 0:
+                    if (
+                        quality.get("low_quality", False)
+                        and int(quality.get("non_empty", 0) or 0) > 0
+                        and not all_empty_blocks_are_rejected(blk_list)
+                    ):
                         attempt_count += 1
                         logger.info(
                             "ocr quality gate triggered retry for %s: %s",
@@ -1100,62 +1220,39 @@ class BatchProcessor:
                         self._log_ocr_quality(image_path, quality, attempt_count)
                         cache_status = "refreshed"
 
-                    if quality.get("low_quality", False):
-                        err_msg = quality.get("reason") or self.main_page.tr("OCR quality too low after retry.")
-                        self.main_page.image_ctrl.update_processing_summary(
-                            image_path,
-                            {
-                                "ocr_quality_counts": {
-                                    "non_empty": quality.get("non_empty", 0),
-                                    "empty": quality.get("empty", 0),
-                                    "single_char_like": quality.get("single_char_like", 0),
-                                },
-                                "last_failure_reason": err_msg,
-                            },
-                        )
-                        self.main_page.image_ctrl.mark_processing_stage(
-                            image_path,
-                            "ocr",
-                            "failed",
-                            reason=err_msg,
-                            quality=quality,
-                            cache_status=cache_status,
-                            attempt_count=attempt_count,
-                        )
-                        raise RuntimeError(err_msg)
-
-                    blk_list, schema_only_blocks = drop_layout_schema_only_ocr_blocks(blk_list)
-                    if schema_only_blocks:
+                    blk_list, rejected_empty_blocks = drop_rejected_empty_ocr_blocks(blk_list)
+                    if rejected_empty_blocks:
                         logger.info(
-                            "Dropped %d PaddleOCR VL schema-only OCR block(s) before inpaint for %s.",
-                            len(schema_only_blocks),
+                            "Dropped %d rejected empty OCR block(s) before inpaint for %s.",
+                            len(rejected_empty_blocks),
                             os.path.basename(image_path),
                         )
                         quality = summarize_ocr_quality(blk_list)
                         self._emit_benchmark_event(
-                            "ocr_schema_only_blocks_dropped",
+                            "ocr_rejected_empty_blocks_dropped",
                             image_path=image_path,
                             image_index=index,
                             total_images=total_images,
-                            dropped_block_count=len(schema_only_blocks),
+                            dropped_block_count=len(rejected_empty_blocks),
                             remaining_block_count=len(blk_list or []),
                         )
-                        if quality.get("low_quality", False) and int(quality.get("non_empty", 0) or 0) > 0:
-                            err_msg = quality.get("reason") or "No OCR text remains after dropping schema-only blocks."
-                            self.main_page.image_ctrl.update_processing_summary(
-                                image_path,
-                                {
-                                    "last_failure_reason": err_msg,
-                                    "ocr_schema_only_dropped_block_count": len(schema_only_blocks),
-                                },
-                            )
-                            self.main_page.image_ctrl.mark_processing_stage(
-                                image_path,
-                                "ocr",
-                                "failed",
-                                reason=err_msg,
-                            )
-                            raise RuntimeError(err_msg)
+
+                    blk_list, embedded_ui_blocks = drop_embedded_ui_ocr_blocks(blk_list, image.shape)
+                    if embedded_ui_blocks:
+                        logger.info(
+                            "Dropped %d embedded UI OCR block(s) before inpaint for %s.",
+                            len(embedded_ui_blocks),
+                            os.path.basename(image_path),
+                        )
+                        quality = summarize_ocr_quality(blk_list)
+                        self._emit_benchmark_event(
+                            "ocr_embedded_ui_blocks_dropped",
+                            image_path=image_path,
+                            image_index=index,
+                            total_images=total_images,
+                            dropped_block_count=len(embedded_ui_blocks),
+                            remaining_block_count=len(blk_list or []),
+                        )
 
                     if not blk_list or int(quality.get("non_empty", 0) or 0) <= 0:
                         blk_list = []
@@ -1224,6 +1321,7 @@ class BatchProcessor:
                             export_settings,
                             page_index=index,
                             total_pages=total_images,
+                            strict_render_symbols=should_use_strict_render_symbols(trg_lng_cd),
                         )
                         self.main_page.image_ctrl.update_processing_summary(
                             image_path,
@@ -1252,6 +1350,30 @@ class BatchProcessor:
                         )
                         self.emit_progress(index, total_images, 10, 10, False)
                         continue
+
+                    if quality.get("low_quality", False):
+                        err_msg = quality.get("reason") or self.main_page.tr("OCR quality too low after retry.")
+                        self.main_page.image_ctrl.update_processing_summary(
+                            image_path,
+                            {
+                                "ocr_quality_counts": {
+                                    "non_empty": quality.get("non_empty", 0),
+                                    "empty": quality.get("empty", 0),
+                                    "single_char_like": quality.get("single_char_like", 0),
+                                },
+                                "last_failure_reason": err_msg,
+                            },
+                        )
+                        self.main_page.image_ctrl.mark_processing_stage(
+                            image_path,
+                            "ocr",
+                            "failed",
+                            reason=err_msg,
+                            quality=quality,
+                            cache_status=cache_status,
+                            attempt_count=attempt_count,
+                        )
+                        raise RuntimeError(err_msg)
 
                     self._persist_ocr_state(
                         image_path,
@@ -1423,6 +1545,7 @@ class BatchProcessor:
                     export_settings,
                     page_index=index,
                     total_pages=total_images,
+                    strict_render_symbols=should_use_strict_render_symbols(trg_lng_cd),
                 )
                 self.main_page.image_ctrl.update_processing_summary(
                     image_path,
@@ -1491,16 +1614,27 @@ class BatchProcessor:
                     logger.info("pre-inpaint: inpainter initialized in %.2fs", t1 - t0)
 
                 config = get_config(settings_page)
-                logger.info("pre-inpaint: generating mask (blk_list=%d blocks)", len(blk_list))
+                inpaint_blocks, protected_inpaint_blocks = split_inpaint_protected_ocr_blocks(blk_list)
+                logger.info(
+                    "pre-inpaint: generating mask (blk_list=%d blocks, protected=%d)",
+                    len(inpaint_blocks),
+                    len(protected_inpaint_blocks),
+                )
                 t0 = time.time()
                 mask_settings = settings_page.get_mask_refiner_settings()
                 mask_details = generate_mask(
                     image,
-                    blk_list,
+                    inpaint_blocks,
                     settings=mask_settings,
                     return_details=True,
                     precomputed_mask_details=precomputed_mask_details,
                 )
+                if protected_inpaint_blocks:
+                    mask_details["inpaint_protected_block_count"] = len(protected_inpaint_blocks)
+                    mask_details["inpaint_protected_reasons"] = [
+                        getattr(block, "_inpaint_protected_reason", "")
+                        for block in protected_inpaint_blocks
+                    ]
                 mask = mask_details["final_mask"]
                 raw_mask = mask_details["raw_mask"]
                 t1 = time.time()
@@ -1510,7 +1644,7 @@ class BatchProcessor:
                 if self._is_cancelled():
                     return
 
-                inpaint_input_img = self.inpainting.inpaint_with_blocks(image, mask, blk_list, config=config)
+                inpaint_input_img = self.inpainting.inpaint_with_blocks(image, mask, inpaint_blocks, config=config)
                 inpaint_input_img = imk.convert_scale_abs(inpaint_input_img)
                 inpaint_edit_mask = getattr(self.inpainting, "last_inpaint_edit_mask", None)
                 if inpaint_edit_mask is not None:
@@ -1518,9 +1652,15 @@ class BatchProcessor:
                 inpaint_input_img, mask, cleanup_stats = refine_bubble_residue_inpaint(
                     inpaint_input_img,
                     mask,
-                    blk_list,
+                    inpaint_blocks,
                     self.inpainting.inpainter_cache,
                     config,
+                )
+                inpaint_input_img, mask, cleanup_stats = apply_duplicate_bubble_inner_fill(
+                    inpaint_input_img,
+                    mask,
+                    mask_details,
+                    cleanup_stats,
                 )
 
                 patches = self.inpainting.get_inpainted_patches(mask, inpaint_input_img)
@@ -1664,31 +1804,22 @@ class BatchProcessor:
                 translator_key=translator_key,
             )
             
-            # Get translation cache key for batch processing
-            translation_cache_key = self.cache_manager._get_translation_cache_key(
-                image, source_lang, target_lang, translator_key, extra_context
-            )
-            
             try:
-                translation_cache_status = "miss"
-                if self.cache_manager._can_serve_all_blocks_from_translation_cache(translation_cache_key, blk_list):
-                    self.cache_manager._apply_cached_translations_to_blocks(translation_cache_key, blk_list)
-                    apply_translation_result_dictionary(
-                        blk_list,
-                        settings_page.get_translation_result_dictionary_rules(),
-                    )
-                    translation_cache_status = "hit"
-                    logger.info("Using cached translation results for all %d blocks", len(blk_list))
-                else:
-                    translator.translate(blk_list, image, extra_context)
-                    apply_translation_result_dictionary(
-                        blk_list,
-                        settings_page.get_translation_result_dictionary_rules(),
-                    )
-                    # Cache the translation results for potential future use
-                    self.cache_manager._cache_translation_results(translation_cache_key, blk_list)
-                    translation_cache_status = "refreshed"
-                    logger.info("Translation completed and cached for %d blocks", len(blk_list))
+                _, translation_cache_status = translator.translate_with_cache_manager(
+                    blk_list,
+                    image,
+                    extra_context,
+                    self.cache_manager,
+                )
+                apply_translation_result_dictionary(
+                    blk_list,
+                    settings_page.get_translation_result_dictionary_rules(),
+                )
+                logger.info(
+                    "Translation completed for %d blocks: cache_status=%s",
+                    len(blk_list),
+                    translation_cache_status,
+                )
                 page_translation_metrics = self._translation_benchmark_metrics(translator)
                 self._persist_translation_state(
                     image_path,
@@ -1858,20 +1989,26 @@ class BatchProcessor:
             bold = render_settings.bold
             italic = render_settings.italic
             underline = render_settings.underline
-            alignment_id = render_settings.alignment_id
-            alignment = self.main_page.button_to_alignment[alignment_id]
+            alignment = self.main_page.button_to_alignment.get(
+                1,
+                self.main_page.button_to_alignment[render_settings.alignment_id],
+            )
             vertical_alignment = self.main_page.button_to_vertical_alignment.get(
-                render_settings.vertical_alignment_id,
-                VERTICAL_ALIGNMENT_TOP,
+                1,
+                VERTICAL_ALIGNMENT_CENTER,
             )
             direction = render_settings.direction
+            strict_render_symbols = should_use_strict_render_symbols(trg_lng_cd)
                 
             text_items_state = []
+            seen_bubble_render_keys: set[tuple[tuple[int, int, int, int], str]] = set()
             for blk in blk_list:
+                if is_block_ocr_empty(blk):
+                    continue
                 x1, y1, block_width, block_height = blk.xywh
 
                 translation_raw = blk.translation
-                if not translation_raw or len(translation_raw) == 1:
+                if should_skip_short_render_translation(blk, translation_raw):
                     continue
 
                 render_normalization = describe_render_text_sanitization(
@@ -1879,6 +2016,7 @@ class BatchProcessor:
                     font,
                     block_index=getattr(blk, "_debug_block_index", None),
                     image_path=image_path,
+                    strict_symbols=strict_render_symbols,
                 )
                 translation = render_normalization.text
                 blk._render_translation_raw = str(translation_raw or "")
@@ -1890,8 +2028,54 @@ class BatchProcessor:
                 blk._render_normalization_replacements = list(
                     render_normalization.replacements
                 )
-                if not translation or len(translation) == 1:
+                if should_skip_short_render_translation(blk, translation):
                     continue
+                gate_decision = describe_text_free_render_translation_gate(
+                    blk,
+                    translation,
+                    target_lang_code=trg_lng_cd,
+                )
+                if not gate_decision.render:
+                    blk._text_fit_status = gate_decision.status
+                    blk._render_skip_reason = gate_decision.status
+                    blk._render_normalization_reasons = sorted(
+                        set(getattr(blk, "_render_normalization_reasons", []) or [])
+                        .union(gate_decision.reasons)
+                    )
+                    continue
+                mask_gate_decision = describe_text_free_render_mask_gate(
+                    blk,
+                    target_lang_code=trg_lng_cd,
+                )
+                if not mask_gate_decision.render:
+                    blk._text_fit_status = mask_gate_decision.status
+                    blk._render_skip_reason = mask_gate_decision.status
+                    blk.mask_decision = "review"
+                    blk.mask_reject_reason = mask_gate_decision.status
+                    blk._render_normalization_reasons = sorted(
+                        set(getattr(blk, "_render_normalization_reasons", []) or [])
+                        .union(mask_gate_decision.reasons)
+                    )
+                    continue
+                duplicate_key = build_duplicate_bubble_render_key(blk)
+                duplicate_gate = register_duplicate_bubble_render_key(
+                    blk,
+                    duplicate_key,
+                    seen_bubble_render_keys,
+                )
+                if not duplicate_gate.render:
+                    blk._text_fit_status = duplicate_gate.status
+                    blk._render_skip_reason = duplicate_gate.status
+                    blk._render_normalization_reasons = sorted(
+                        set(getattr(blk, "_render_normalization_reasons", []) or [])
+                        .union(duplicate_gate.reasons)
+                    )
+                    continue
+                if duplicate_gate.reasons:
+                    blk._render_normalization_reasons = sorted(
+                        set(getattr(blk, "_render_normalization_reasons", []) or [])
+                        .union(duplicate_gate.reasons)
+                    )
                 
                 # Determine if this block should use vertical rendering
                 vertical = is_vertical_block(blk, trg_lng_cd)
@@ -1900,6 +2084,18 @@ class BatchProcessor:
                 source_rect, block_anchor = build_render_rects_for_block(blk)
                 block_width = int(source_rect[2])
                 block_height = int(source_rect[3])
+                block_alignment = alignment
+                block_vertical_alignment = vertical_alignment
+                layout_policy = resolve_text_free_manga_layout(
+                    blk,
+                    source_rect,
+                    target_lang_code=trg_lng_cd,
+                )
+                wrap_width = block_width
+                if layout_policy.enabled:
+                    block_alignment = layout_policy.alignment
+                    block_vertical_alignment = layout_policy.vertical_alignment
+                    wrap_width = min(block_width, int(layout_policy.wrap_width))
                 fit_clearance = get_render_fit_clearance_for_block(
                     blk,
                     outline_width,
@@ -1908,14 +2104,14 @@ class BatchProcessor:
                 translation, font_size, rendered_width, rendered_height = pyside_word_wrap(
                     text_to_wrap,
                     font, 
-                    block_width, 
+                    wrap_width,
                     block_height,
                     line_spacing, 
                     outline_width, 
                     bold, 
                     italic, 
                     underline,
-                    alignment, 
+                    block_alignment,
                     direction, 
                     max_font_size, 
                     min_font_size,
@@ -1928,14 +2124,14 @@ class BatchProcessor:
                         blk,
                         text_to_wrap,
                         font,
-                        block_width,
+                        wrap_width,
                         block_height,
                         line_spacing,
                         outline_width,
                         bold,
                         italic,
                         underline,
-                        alignment,
+                        block_alignment,
                         direction,
                         max_font_size,
                         min_font_size,
@@ -1951,14 +2147,59 @@ class BatchProcessor:
                 )
                 blk._text_fit_status = (
                     "needs_review"
-                    if rendered_width > block_width or rendered_height > block_height
+                    if rendered_width > wrap_width or rendered_height > block_height
                     else "fit"
                 )
+                if layout_policy.enabled and blk._text_fit_status != "fit":
+                    blk._text_fit_status = "needs_review_text_free_layout"
+                underfill_gate = describe_text_free_underfill_gate(
+                    blk,
+                    source_rect=source_rect,
+                    rendered_width=rendered_width,
+                    rendered_height=rendered_height,
+                    target_lang_code=trg_lng_cd,
+                )
+                if blk._text_fit_status == "fit" and not underfill_gate.render:
+                    blk._text_fit_status = underfill_gate.status
+                    blk._render_normalization_reasons = sorted(
+                        set(getattr(blk, "_render_normalization_reasons", []) or [])
+                        .union(underfill_gate.reasons)
+                    )
+                large_mask_gate = describe_text_free_large_mask_gate(
+                    blk,
+                    source_rect=source_rect,
+                    target_lang_code=trg_lng_cd,
+                )
+                if blk._text_fit_status == "fit" and not large_mask_gate.render:
+                    blk._text_fit_status = large_mask_gate.status
+                    blk.mask_decision = "review"
+                    blk.mask_reject_reason = large_mask_gate.status
+                    blk._render_normalization_reasons = sorted(
+                        set(getattr(blk, "_render_normalization_reasons", []) or [])
+                        .union(large_mask_gate.reasons)
+                    )
+                if is_embedded_ui_panel_layout_review_candidate(blk) and not is_bubble_panel_text_candidate(blk):
+                    blk._text_fit_status = "needs_review_embedded_ui_panel_layout"
+                    blk._render_normalization_reasons = sorted(
+                        set(getattr(blk, "_render_normalization_reasons", []) or [])
+                        .union({"needs_review_embedded_ui_panel_layout"})
+                    )
+                review_status_gate = describe_auto_render_review_status_gate(
+                    getattr(blk, "_text_fit_status", "fit")
+                )
+                if not review_status_gate.render:
+                    blk._render_skip_reason = review_status_gate.status
+                    blk._render_normalization_reasons = sorted(
+                        set(getattr(blk, "_render_normalization_reasons", []) or [])
+                        .union(review_status_gate.reasons)
+                    )
+                    continue
                 blk._text_fit_metrics = {
                     "rendered_width": float(rendered_width),
                     "rendered_height": float(rendered_height),
-                    "box_width": float(block_width),
+                    "box_width": float(wrap_width),
                     "box_height": float(block_height),
+                    "item_width": float(block_width),
                     "font_size": float(font_size),
                 }
                 
@@ -1976,12 +2217,13 @@ class BatchProcessor:
                     font_family=font,
                     font_size=font_size,
                     text_color=font_color,
-                    alignment=alignment,
+                    alignment=block_alignment,
                     line_spacing=line_spacing,
                     bold=bold,
                     italic=italic,
                     underline=underline,
                     direction=direction,
+                    strict_symbols=strict_render_symbols,
                 )
                 blk._render_text = str(translation or "")
                 blk._render_html = str(
@@ -1996,11 +2238,15 @@ class BatchProcessor:
                     or render_markup.html_applied
                 )
                 blk._render_normalization_reasons = sorted(
-                    set(render_normalization.reasons).union(render_markup.reasons)
+                    set(render_normalization.reasons)
+                    .union(render_markup.reasons)
+                    .union(layout_policy.reasons)
                 )
                 blk._render_normalization_replacements = list(
                     render_normalization.replacements
                 ) + list(render_markup.replacements)
+                blk._render_centered_layout = bool(layout_policy.enabled)
+                blk._render_layout_reasons = list(layout_policy.reasons)
 
                 # Display text if on current page
                 if image_path == file_on_display:
@@ -2009,7 +2255,7 @@ class BatchProcessor:
                 position, item_width, item_height = build_text_item_layout_geometry(
                     source_rect,
                     rendered_height,
-                    vertical_alignment,
+                    block_vertical_alignment,
                 )
 
                 # Use TextItemProperties for consistent text item creation
@@ -2018,7 +2264,7 @@ class BatchProcessor:
                     font_family=font,
                     font_size=font_size,
                     text_color=font_color,
-                    alignment=alignment,
+                    alignment=block_alignment,
                     line_spacing=line_spacing,
                     outline_color=outline_color,
                     outline_width=outline_width,
@@ -2033,7 +2279,7 @@ class BatchProcessor:
                     height=item_height,
                     direction=direction,
                     vertical=vertical,
-                    vertical_alignment=vertical_alignment,
+                    vertical_alignment=block_vertical_alignment,
                     source_rect=source_rect,
                     block_anchor=block_anchor,
                     selection_outlines=[
@@ -2070,6 +2316,8 @@ class BatchProcessor:
                 text_item_state["render_normalization_reasons"] = list(
                     blk._render_normalization_reasons
                 )
+                text_item_state["render_centered_layout"] = bool(layout_policy.enabled)
+                text_item_state["render_layout_reasons"] = list(layout_policy.reasons)
                 text_item_state["text_fit_status"] = str(
                     getattr(blk, "_text_fit_status", "fit") or "fit"
                 )
@@ -2085,6 +2333,26 @@ class BatchProcessor:
             page_state['viewer_state'].update({
                 'push_to_stack': True
             })
+            restore_blocks = select_blocks_for_original_restore_after_render(blk_list)
+            if restore_blocks and inpaint_input_img is not None and mask is not None:
+                inpaint_input_img, mask, restore_stats = restore_original_for_block_masks(
+                    image,
+                    inpaint_input_img,
+                    mask,
+                    restore_blocks,
+                )
+                if restore_stats.get("applied"):
+                    cleanup_stats = dict(cleanup_stats or {})
+                    cleanup_stats["render_restore"] = restore_stats
+                    patches = self.inpainting.get_inpainted_patches(mask, inpaint_input_img)
+                    self.main_page.patches_processed.emit(patches, image_path)
+                    self.main_page.image_ctrl.update_processing_summary(
+                        image_path,
+                        {
+                            "render_restore_block_count": int(restore_stats.get("block_count", 0) or 0),
+                            "render_restore_pixel_count": int(restore_stats.get("pixel_count", 0) or 0),
+                        },
+                    )
             self.main_page.image_ctrl.mark_processing_stage(
                 image_path,
                 "render",
@@ -2125,6 +2393,7 @@ class BatchProcessor:
                 export_settings,
                 page_index=index,
                 total_pages=total_images,
+                strict_render_symbols=should_use_strict_render_symbols(trg_lng_cd),
             )
             logger.info("Saved final translated image to %s", final_output_path)
             self.main_page.image_ctrl.update_processing_summary(
