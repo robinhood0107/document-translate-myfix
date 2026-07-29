@@ -179,11 +179,6 @@ The `v2.7.0` backport brought in selected user-facing features such as:
 - new target languages and improved RTL handling
 - selected webtoon/list-view behavior fixes
 
-Audit document:
-
-- [docs/history/v267-to-v270-backport-audit.md](docs/history/v267-to-v270-backport-audit.md)
-- [docs/history/v267-to-v270-backport-audit-ko.md](docs/history/v267-to-v270-backport-audit-ko.md)
-
 ### `v2.7.0 -> v2.7.1`
 
 The `v2.7.1` round selectively applies the upstream fixes that matter to this fork:
@@ -193,11 +188,6 @@ The `v2.7.1` round selectively applies the upstream fixes that matter to this fo
 - list thumbnail loading reworked around `QImage` in the worker thread and `QPixmap` conversion on the main thread
 - import menu cleanup so `PSD` appears next to `Project File`
 - upstream selective-backport lineage recorded as `2.7.1`
-
-Audit document:
-
-- [docs/history/v270-to-v271-backport-audit.md](docs/history/v270-to-v271-backport-audit.md)
-- [docs/history/v270-to-v271-backport-audit-ko.md](docs/history/v270-to-v271-backport-audit-ko.md)
 
 ## Quick Start
 
@@ -309,8 +299,6 @@ Tracked compose/runtime images used by the repo:
 ## Repository Documents
 
 - [rules.md](rules.md)
-- [docs/history/change-log.md](docs/history/change-log.md)
-- [docs/history/change-log-ko.md](docs/history/change-log-ko.md)
 - [docs/gemma/local-server-ko.md](docs/gemma/local-server-ko.md)
 - [docs/hunyuan/local-server-ko.md](docs/hunyuan/local-server-ko.md)
 - [docs/repo/github-rulesets-public-free-ko.md](docs/repo/github-rulesets-public-free-ko.md)
