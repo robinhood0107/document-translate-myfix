@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import dataclass
+from functools import lru_cache
 from pathlib import Path
 from typing import Any
 import copy
@@ -9,6 +10,7 @@ import hashlib
 import json
 import logging
 import os
+import platform
 import re
 import zlib
 
@@ -41,7 +43,7 @@ PROJECT_DETECTION_CHECKPOINT_SCHEMA_VERSION = 1
 PROJECT_OCR_CHECKPOINT_SCHEMA_VERSION = 1
 PROJECT_TRANSLATION_CHECKPOINT_SCHEMA_VERSION = 1
 PROJECT_INPAINT_CHECKPOINT_SCHEMA_VERSION = 2
-PROJECT_RENDER_CHECKPOINT_SCHEMA_VERSION = 1
+PROJECT_RENDER_CHECKPOINT_SCHEMA_VERSION = 2
 DETECTION_PREPROCESS_SCHEMA_VERSION = "rtdetr-v2-rgb-640-f32-v1"
 DETECTION_POSTPROCESS_SCHEMA_VERSION = "comic-text-bubble-blocks-v1"
 DETECTION_SORT_SCHEMA_VERSION = "sort-blk-list-v1"
@@ -1649,6 +1651,206 @@ def render_block_state_signature(blocks: list[TextBlock] | None) -> str:
     )
 
 
+_WINDOWS_LOCALIZED_FONT_ALIASES = {
+    "맑은 고딕": ("malgun gothic",),
+    "굴림": ("gulim",),
+    "굴림체": ("gulimche",),
+    "돋움": ("dotum",),
+    "돋움체": ("dotumche",),
+    "바탕": ("batang",),
+    "바탕체": ("batangche",),
+}
+
+
+@lru_cache(maxsize=1)
+def _windows_font_catalog() -> tuple[tuple[str, str, str, int, int], ...]:
+    if platform.system() != "Windows":
+        return ()
+    try:
+        import winreg
+
+        fonts_root = Path(
+            os.environ.get("WINDIR", r"C:\Windows")
+        ) / "Fonts"
+        key = winreg.OpenKey(
+            winreg.HKEY_LOCAL_MACHINE,
+            r"SOFTWARE\Microsoft\Windows NT\CurrentVersion\Fonts",
+        )
+        records: list[tuple[str, str, str, int, int]] = []
+        try:
+            value_count = int(winreg.QueryInfoKey(key)[1])
+            for index in range(value_count):
+                display_name, raw_path, _value_type = winreg.EnumValue(
+                    key,
+                    index,
+                )
+                candidate = Path(str(raw_path or ""))
+                if not candidate.is_absolute():
+                    candidate = fonts_root / candidate
+                try:
+                    stat_result = candidate.stat()
+                except OSError:
+                    continue
+                records.append(
+                    (
+                        str(display_name or ""),
+                        candidate.name,
+                        str(candidate),
+                        int(stat_result.st_size),
+                        int(stat_result.st_mtime_ns),
+                    )
+                )
+        finally:
+            winreg.CloseKey(key)
+        records.sort(
+            key=lambda item: (
+                item[0].casefold(),
+                item[1].casefold(),
+            )
+        )
+        return tuple(records)
+    except Exception:
+        logger.debug(
+            "Unable to read the Windows font catalog.",
+            exc_info=True,
+        )
+        return ()
+
+
+def _windows_font_program_sha256(family: str) -> str:
+    normalized = str(family or "").strip().casefold()
+    if not normalized:
+        return ""
+    aliases = {
+        normalized,
+        *(
+            value.casefold()
+            for value in _WINDOWS_LOCALIZED_FONT_ALIASES.get(
+                normalized,
+                (),
+            )
+        ),
+    }
+    matches: list[dict[str, str]] = []
+    for display_name, file_name, file_path, _size, _mtime_ns in (
+        _windows_font_catalog()
+    ):
+        display_key = display_name.casefold()
+        if not any(alias in display_key for alias in aliases):
+            continue
+        try:
+            matches.append(
+                {
+                    "file_name": file_name,
+                    "sha256": _sha256_file(file_path),
+                }
+            )
+        except OSError:
+            continue
+    matches.sort(key=lambda item: item["file_name"].casefold())
+    return canonical_sha256(matches) if matches else ""
+
+
+@lru_cache(maxsize=64)
+def _stable_system_font_identity(family: str) -> dict[str, Any]:
+    requested_family = str(family or "").strip()
+    try:
+        from PySide6.QtCore import qVersion
+        from PySide6.QtGui import QFont, QFontDatabase, QFontInfo
+
+        available_families = sorted(
+            {
+                str(value or "").strip()
+                for value in QFontDatabase.families()
+                if str(value or "").strip()
+            },
+            key=str.casefold,
+        )
+        canonical_by_name = {
+            value.casefold(): value for value in available_families
+        }
+        resolved_family = canonical_by_name.get(
+            requested_family.casefold(),
+            "",
+        )
+        if not resolved_family:
+            resolved_family = str(
+                QFontInfo(QFont(requested_family, 32)).family() or ""
+            ).strip()
+        fallback_family = str(
+            QFontDatabase.systemFont(
+                QFontDatabase.SystemFont.GeneralFont
+            ).family()
+            or ""
+        ).strip()
+        if not resolved_family:
+            resolved_family = fallback_family or requested_family
+
+        windows_catalog = _windows_font_catalog()
+        catalog_contract = [
+            {
+                "display_name": display_name,
+                "file_name": file_name,
+                "size": size,
+                "mtime_ns": mtime_ns,
+            }
+            for (
+                display_name,
+                file_name,
+                _file_path,
+                size,
+                mtime_ns,
+            ) in windows_catalog
+        ]
+        return {
+            "family": requested_family,
+            "resolved_family": resolved_family,
+            "fallback_family": fallback_family,
+            "file_name": "",
+            "file_sha256": "",
+            "program_sha256": _windows_font_program_sha256(
+                resolved_family
+            ),
+            "fallback_program_sha256": (
+                _windows_font_program_sha256(fallback_family)
+                if fallback_family
+                else ""
+            ),
+            "font_catalog_sha256": canonical_sha256(
+                catalog_contract or available_families
+            ),
+            "qt_version": str(qVersion() or ""),
+            "platform": {
+                "system": platform.system(),
+                "release": platform.release(),
+                "version": platform.version(),
+                "machine": platform.machine(),
+            },
+        }
+    except Exception:
+        logger.debug(
+            "Unable to fingerprint the selected system font contract.",
+            exc_info=True,
+        )
+        return {
+            "family": requested_family,
+            "resolved_family": "",
+            "fallback_family": "",
+            "file_name": "",
+            "file_sha256": "",
+            "program_sha256": "",
+            "fallback_program_sha256": "",
+            "font_catalog_sha256": "",
+            "qt_version": "",
+            "platform": {
+                "system": platform.system(),
+                "release": platform.release(),
+                "version": platform.version(),
+                "machine": platform.machine(),
+            },
+        }
+
+
 def resolve_font_identity(
     main_page: Any,
     font_family: str,
@@ -1673,46 +1875,7 @@ def resolve_font_identity(
                 }
         except OSError:
             continue
-
-    program_digest = hashlib.sha256()
-    try:
-        from PySide6.QtGui import QFont, QRawFont
-
-        raw_font = QRawFont.fromFont(QFont(family, 32))
-        program_digest.update(family.encode("utf-8"))
-        for tag in (
-            "head",
-            "name",
-            "cmap",
-            "glyf",
-            "CFF ",
-            "CFF2",
-            "GSUB",
-            "GPOS",
-            "OS/2",
-            "post",
-            "hhea",
-            "maxp",
-        ):
-            table = bytes(raw_font.fontTable(tag))
-            if table:
-                program_digest.update(tag.encode("ascii"))
-                program_digest.update(table)
-    except Exception:
-        logger.debug(
-            "Unable to fingerprint the selected font program.",
-            exc_info=True,
-        )
-    return {
-        "family": family,
-        "file_name": "",
-        "file_sha256": "",
-        "program_sha256": (
-            program_digest.hexdigest()
-            if program_digest.digest() != hashlib.sha256().digest()
-            else ""
-        ),
-    }
+    return copy.deepcopy(_stable_system_font_identity(family))
 
 
 def build_render_identity(
