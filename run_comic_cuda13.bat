@@ -16,6 +16,29 @@ set "CUDA_NVRTC_BIN=%VENV_DIR%\Lib\site-packages\nvidia\cuda_nvrtc\bin"
 set "NVJITLINK_BIN=%VENV_DIR%\Lib\site-packages\nvidia\nvjitlink\bin"
 set "BOOTSTRAP_CMD="
 
+if /I "%COMIC_VERIFY_ONLY%"=="1" (
+    for %%F in (
+        "comic.py"
+        "controller.py"
+        "app\version.py"
+        "requirements-base.txt"
+        "requirements-cuda13.txt"
+        "docker-compose.yaml"
+        "paddleocr_vl_docker_files\docker-compose.yaml"
+        "resources\translations\compiled\ct_ko.qm"
+        "scripts\prepare_gemma_runtime.ps1"
+    ) do (
+        if not exist "%SCRIPT_DIR%%%~F" (
+            echo [verify] Missing launcher-source file: %%~F
+            popd >nul
+            exit /b 1
+        )
+    )
+    echo [verify] CUDA 13 launcher-source contract is valid.
+    popd >nul
+    exit /b 0
+)
+
 py -3.12 -c "import sys; raise SystemExit(0 if sys.version_info >= (3, 12) else 1)" >nul 2>&1 && set "BOOTSTRAP_CMD=py -3.12"
 if not defined BOOTSTRAP_CMD python -c "import sys; raise SystemExit(0 if sys.version_info >= (3, 12) else 1)" >nul 2>&1 && set "BOOTSTRAP_CMD=python"
 if not defined BOOTSTRAP_CMD python3 -c "import sys; raise SystemExit(0 if sys.version_info >= (3, 12) else 1)" >nul 2>&1 && set "BOOTSTRAP_CMD=python3"

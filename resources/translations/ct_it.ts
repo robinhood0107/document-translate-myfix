@@ -3043,20 +3043,8 @@ Riavviare ora?</translation>
         <translation>Errore di aggiornamento</translation>
     </message>
     <message>
-        <source>Developer Update Available</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>A developer fork update {version} is available.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Developer Update Error</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Fork update check failed: {message}</source>
-        <translation type="unfinished"></translation>
+        <source>Release package downloaded to {path}. Open it now?</source>
+        <translation>Il pacchetto della versione è stato scaricato in {path}. Aprirlo ora?</translation>
     </message>
     <message>
         <source>Downloading update...</source>
@@ -3065,10 +3053,6 @@ Riavviare ora?</translation>
     <message>
         <source>Download Complete</source>
         <translation>Download completato</translation>
-    </message>
-    <message>
-        <source>Installer downloaded to {path}. Run it now?</source>
-        <translation>Installer scaricato in {path}. Avviarlo ora?</translation>
     </message>
 </context>
 <context>
