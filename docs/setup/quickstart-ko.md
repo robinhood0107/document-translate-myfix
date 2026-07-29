@@ -9,6 +9,7 @@
 - Git
 - GPU 지원이 켜진 Docker Desktop
 - 로컬 Gemma / HunyuanOCR / PaddleOCR VL 가속을 쓰려면 NVIDIA 드라이버와 CUDA 호환 GPU
+- 최초 Gemma volume 준비 검사에 필요한 `C:` 여유 공간 60 GiB 이상
 
 ## 2. 저장소 실행
 
@@ -48,19 +49,21 @@ py -3.12 -m venv .venv-win-cuda13
 ### Gemma 로컬 번역 런타임
 
 - compose 파일: `/docker-compose.yaml`
-- Docker 이미지: `ghcr.io/ggml-org/llama.cpp:server-cuda`
+- Docker 이미지: `ghcr.io/ggml-org/llama.cpp@sha256:22e0e3bfe967af4fd1df6a918022abbfd4e72e4d40a4769e616a4176790acbcb`
 - 참고 링크:
   - [llama.cpp](https://github.com/ggml-org/llama.cpp)
   - [Gemma](https://ai.google.dev/gemma)
 
-실행:
+Windows PowerShell에서 버전이 지정된 external model volume을 한 번 준비합니다.
 
-```bash
-docker compose pull --policy always
-docker compose up -d --force-recreate
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass `
+  -File .\scripts\prepare_gemma_runtime.ps1 -Mode Prepare `
+  -CandidateModelPath 'C:\ExampleWorkspace\models\Gemma4-26B-A4B-Uncensored-HauhauCS-Balanced-IQ4_XS.gguf' `
+  -LegacyModelPath 'C:\ExampleWorkspace\models\gemma-4-26B-IQ4_NL.gguf'
 ```
 
-앱에서는 `Custom Local Server(Gemma)`를 선택합니다.
+앱에서는 `Custom Local Server(Gemma)`를 선택합니다. 관리 런타임이 준비된 volume을 read-only로 마운트하고 정확히 준비된 컨테이너를 자동으로 시작합니다.
 
 ### HunyuanOCR 로컬 런타임
 
@@ -85,7 +88,7 @@ docker compose -f hunyuanocr_docker_files/docker-compose.yaml up -d --force-recr
 ### PaddleOCR VL 로컬 런타임
 
 - compose 파일: `/paddleocr_vl_docker_files/docker-compose.yaml`
-- Docker 이미지: `ccr-2vdh3abv-pub.cnc.bj.baidubce.com/paddlepaddle/paddleocr-genai-vllm-server:latest-nvidia-gpu-offline`
+- Docker 이미지: `ccr-2vdh3abv-pub.cnc.bj.baidubce.com/paddlepaddle/paddleocr-genai-vllm-server@sha256:d0d32c04a2119613d25a0a4c292e165ccc107954b74580613cf59e378037f8f5`
 - 참고 링크:
   - [PaddleOCR](https://github.com/PaddlePaddle/PaddleOCR)
   - [PaddleOCR-VL](https://huggingface.co/PaddlePaddle/PaddleOCR-VL)
@@ -93,9 +96,14 @@ docker compose -f hunyuanocr_docker_files/docker-compose.yaml up -d --force-recr
 실행:
 
 ```bash
-docker compose -f paddleocr_vl_docker_files/docker-compose.yaml pull --policy always
+docker compose -f paddleocr_vl_docker_files/docker-compose.yaml pull
 docker compose -f paddleocr_vl_docker_files/docker-compose.yaml up -d --force-recreate
 ```
+
+첫 번째 명령은 고정된 이미지를 준비할 때 한 번만 실행합니다. 평상시 앱
+시작은 구성이 정확히 같은 중지 컨테이너를 재사용하며 이미지를 다시 pull하지
+않습니다. Stage-Batched 폴더 처리는 `Settings > PaddleOCR VL Settings`에서
+관리하는 exact 영구 OCR 결과 캐시도 사용할 수 있습니다.
 
 bundle 파일 설명은 [/paddleocr_vl_docker_files/README.md](/paddleocr_vl_docker_files/README.md)를 참고하세요.
 
@@ -103,7 +111,14 @@ bundle 파일 설명은 [/paddleocr_vl_docker_files/README.md](/paddleocr_vl_doc
 
 - 워크플로 모드: `Stage-Batched Pipeline (Recommended)`
 - OCR: `Optimal (HunyuanOCR / PaddleOCR VL)`
-- 번역기: 로컬 Gemma 런타임을 켰다면 `Custom Local Server(Gemma)`
+- 번역기: Gemma volume 준비 후 `Custom Local Server(Gemma)`
+
+프로젝트 stage checkpoint는 `Settings > Project`에서 기본값이 꺼진 미리보기
+기능으로 제공됩니다. cache 관리 기능을 사용하기 전에 `.ctpr`를 먼저
+저장해야 합니다. 옆의 `.ctpr.cache` 폴더는 재계산 가능한 데이터이며 프로젝트를
+여는 데 필수적이지 않습니다. 유효할 때는 감지, 사전 적용 전 OCR, 인페인트
+mask·cleaned artifact, 렌더 출력을 복원합니다. 번역 내용은 프로젝트 파일에만
+남고 sidecar 서명이 정확히 일치할 때만 재사용합니다.
 
 기본 OCR 라우팅:
 
@@ -169,11 +184,20 @@ OCR:
 
 - 릴리스 트리거: Git 태그 push
 - 허용 태그 형식: `vX.Y.Z`
-- 빌드 대상: `Nuitka` 기반 Windows exe/portable 패키지
-- 릴리스 순서: Windows 로컬 Nuitka 빌드 검증, `main` 승격, Windows CI preflight, 태그 기반 release CI
-- 포함 범위: 앱 본체, Python 런타임, PySide6, torch/onnxruntime 런타임, 번역/resources
-- 미포함 범위: 모델, 체크포인트, Docker 런타임, NVIDIA 드라이버
+- 공식 자산:
+  `comic-translate-vX.Y.Z-windows-launcher-source.zip`과
+  `SHA256SUMS.txt`
+- 릴리스 순서: Windows 로컬 deterministic bundle·추출 launcher 검증,
+  `main` 승격, Windows CI preflight, 태그 기반 release CI
+- 포함 범위: allowlist 제품 source, launcher, CUDA12/CUDA13 requirements,
+  Docker Compose/config, Gemma 준비 도구, 번역/resources, README, LICENSE
+- 미포함 범위: venv, 모델, 체크포인트, 캐시, benchmark 도구/raw 결과,
+  Python/CUDA runtime, NVIDIA 드라이버, 로컬 경로, secret
 
-릴리스 후보를 `main`으로 승격하기 전에는 Windows PowerShell에서 필요한 Nuitka 빌드 스크립트를 직접 실행하고, 성공한 명령과 `build/nuitka-*` 산출물 경로를 PR에 기록합니다. WSL 전용 확인은 Windows 로컬 빌드 검증을 대체하지 않습니다.
+릴리스 후보를 `main`으로 승격하기 전에는 `HEAD`에서 ZIP을 생성하고
+manifest와 SHA-256을 검증합니다. 새 폴더에 압축을 푼 뒤
+`COMIC_VERIFY_ONLY=1`로 두 launcher를 실행하고, Windows 명령·ZIP hash·
+두 결과를 PR에 기록합니다.
 
-릴리스 패키지만으로 전체 로컬 런타임이 완성되지는 않으므로, 내려받은 뒤 이 가이드의 런타임 설정 단계를 이어서 진행하면 됩니다.
+일반 첫 실행에서는 launcher가 고정 환경을 bootstrap합니다. 기존
+Nuitka 스크립트는 비공식 수동 도구이며 공식 릴리스 gate가 아닙니다.

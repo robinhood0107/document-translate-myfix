@@ -190,11 +190,34 @@ def serialize_inpaint_block(block, index: int) -> dict:
         "legacy_mask_pixel_count": int(getattr(block, "_legacy_mask_pixel_count", 0) or 0),
         "rescue_mask_pixel_count": int(getattr(block, "_rescue_mask_pixel_count", 0) or 0),
         "final_mask_pixel_count": int(getattr(block, "_final_mask_pixel_count", 0) or 0),
+        "block_final_mask_pixel_count": int(getattr(block, "block_final_mask_pixel_count", 0) or 0),
+        "block_mask_iou": float(getattr(block, "block_mask_iou", 0.0) or 0.0),
+        "block_mask_span_coverage": float(getattr(block, "block_mask_span_coverage", 0.0) or 0.0),
+        "block_mask_bbox": (
+            [int(float(v)) for v in getattr(block, "block_mask_bbox", ())[:4]]
+            if getattr(block, "block_mask_bbox", None) is not None
+            else None
+        ),
+        "block_mask_source": str(getattr(block, "block_mask_source", "") or ""),
+        "block_mask_decision": str(getattr(block, "block_mask_decision", "") or ""),
         "hard_box_metrics": dict(getattr(block, "_hard_box_metrics", {}) or {}),
         "erase_mode": str(getattr(block, "_erase_mode", "") or ""),
         "erase_edit_pixel_count": int(getattr(block, "_erase_edit_pixel_count", 0) or 0),
         "erase_protect_pixel_count": int(getattr(block, "_erase_protect_pixel_count", 0) or 0),
         "erase_skipped_reason": str(getattr(block, "_erase_skipped_reason", "") or ""),
+        "mask_policy": str(getattr(block, "_mask_policy", "") or ""),
+        "render_restore_applied": bool(getattr(block, "_render_restore_applied", False)),
+        "ui_panel_mode": str(getattr(block, "ui_panel_mode", "") or ""),
+        "ui_panel_preview_path": str(getattr(block, "ui_panel_preview_path", "") or ""),
+        "mask_decision": str(getattr(block, "mask_decision", "") or ""),
+        "mask_reject_reason": str(getattr(block, "mask_reject_reason", "") or ""),
+        "bubble_panel_text_candidate": bool(getattr(block, "bubble_panel_text_candidate", False)),
+        "bubble_panel_group_id": str(getattr(block, "bubble_panel_group_id", "") or ""),
+        "bubble_panel_member_indices": list(getattr(block, "bubble_panel_member_indices", []) or []),
+        "bubble_panel_mask_pixel_count": int(getattr(block, "bubble_panel_mask_pixel_count", 0) or 0),
+        "bubble_panel_mask_source": str(getattr(block, "bubble_panel_mask_source", "") or ""),
+        "bubble_panel_merge_decision": str(getattr(block, "bubble_panel_merge_decision", "") or ""),
+        "bubble_merge_reocr_needed": bool(getattr(block, "bubble_merge_reocr_needed", False)),
     }
 
 
@@ -225,6 +248,24 @@ def build_inpaint_debug_metadata(
     hard_box_rescue_mask: np.ndarray | None = None,
     hard_box_applied_count: int | None = None,
     hard_box_reason_totals: dict | None = None,
+    mask_quality_policy: str = "",
+    mask_policy_bubble_clamp_applied_count: int = 0,
+    mask_policy_text_free_glyph_applied_count: int = 0,
+    mask_policy_removed_pixel_count: int = 0,
+    mask_policy_outside_bubble_removed_pixel_count: int = 0,
+    ctd_legacy_rectangle_rescue_disabled: bool = False,
+    text_free_image_glyph_rescue_count: int = 0,
+    text_free_image_glyph_rescue_mask_pixel_count: int = 0,
+    mask_policy_version: str = "",
+    mask_candidate_source: str = "",
+    mask_decision: str = "",
+    mask_reject_reason: str = "",
+    mask_score_outside_change: float = 0.0,
+    mask_score_outline_damage: float = 0.0,
+    mask_score_residue: float = 0.0,
+    mask_score_color_delta: float = 0.0,
+    ui_panel_mode: str = "",
+    ui_panel_preview_path: str = "",
 ) -> dict:
     block_list = list(blocks or [])
     if final_mask is not None:
@@ -248,6 +289,7 @@ def build_inpaint_debug_metadata(
             for code in list(getattr(block, "_hard_box_reason_codes", []) or []):
                 reason_totals[code] = reason_totals.get(code, 0) + 1
         hard_box_reason_totals = reason_totals
+    duplicate_bubble_inner_fill = cleanup_stats.get("duplicate_bubble_inner_fill") or {}
     return {
         "image_path": image_path,
         "run_type": run_type,
@@ -273,6 +315,24 @@ def build_inpaint_debug_metadata(
         "cleanup_delta_pixel_count": cleanup_delta_pixels,
         "hard_box_applied_count": int(hard_box_applied_count or 0),
         "hard_box_reason_totals": dict(hard_box_reason_totals or {}),
+        "mask_quality_policy": str(mask_quality_policy or ""),
+        "mask_policy_bubble_clamp_applied_count": int(mask_policy_bubble_clamp_applied_count or 0),
+        "mask_policy_text_free_glyph_applied_count": int(mask_policy_text_free_glyph_applied_count or 0),
+        "mask_policy_removed_pixel_count": int(mask_policy_removed_pixel_count or 0),
+        "mask_policy_outside_bubble_removed_pixel_count": int(mask_policy_outside_bubble_removed_pixel_count or 0),
+        "ctd_legacy_rectangle_rescue_disabled": bool(ctd_legacy_rectangle_rescue_disabled),
+        "text_free_image_glyph_rescue_count": int(text_free_image_glyph_rescue_count or 0),
+        "text_free_image_glyph_rescue_mask_pixel_count": int(text_free_image_glyph_rescue_mask_pixel_count or 0),
+        "mask_policy_version": str(mask_policy_version or ""),
+        "mask_candidate_source": str(mask_candidate_source or ""),
+        "mask_decision": str(mask_decision or ""),
+        "mask_reject_reason": str(mask_reject_reason or ""),
+        "mask_score_outside_change": float(mask_score_outside_change or 0.0),
+        "mask_score_outline_damage": float(mask_score_outline_damage or 0.0),
+        "mask_score_residue": float(mask_score_residue or 0.0),
+        "mask_score_color_delta": float(mask_score_color_delta or 0.0),
+        "ui_panel_mode": str(ui_panel_mode or ""),
+        "ui_panel_preview_path": str(ui_panel_preview_path or ""),
         "cleanup_applied": bool(cleanup_stats.get("applied", False)),
         "cleanup_component_count": int(cleanup_stats.get("component_count", 0) or 0),
         "cleanup_block_count": int(cleanup_stats.get("block_count", 0) or 0),
@@ -288,6 +348,13 @@ def build_inpaint_debug_metadata(
         "pass2_residue_mask_cap_dilate_px": int(cleanup_stats.get("residue_mask_cap_dilate_px", 0) or 0),
         "pass2_backend": str(cleanup_stats.get("pass2_backend", "") or ""),
         "pass2_name": str(cleanup_stats.get("pass_name", "") or ""),
+        "duplicate_bubble_inner_fill_applied": bool(duplicate_bubble_inner_fill.get("applied", False)),
+        "duplicate_bubble_inner_fill_pixel_count": int(
+            duplicate_bubble_inner_fill.get("duplicate_bubble_inner_fill_pixel_count", 0) or 0
+        ),
+        "duplicate_bubble_inner_fill_backend": str(
+            duplicate_bubble_inner_fill.get("duplicate_bubble_inner_fill_backend", "") or ""
+        ),
         "blocks": [serialize_inpaint_block(block, idx) for idx, block in enumerate(block_list)],
     }
 

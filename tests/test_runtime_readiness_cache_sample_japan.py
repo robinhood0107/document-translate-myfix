@@ -70,7 +70,7 @@ class _DummyMainPage:
         return False
 
 
-def test_sample_japan_three_translator_initializations_probe_gemma_once() -> None:
+def test_sample_japan_three_translator_initializations_do_not_start_gemma() -> None:
     for path in SAMPLE_JAPAN_PAGES:
         assert path.is_file()
 
@@ -82,12 +82,13 @@ def test_sample_japan_three_translator_initializations_probe_gemma_once() -> Non
         return_value=True,
     ) as wait_for_probe, \
          mock.patch.object(main_page.local_translation_runtime_manager, "_validate_model_with_progress"), \
+         mock.patch.object(main_page.local_translation_runtime_manager, "_prewarm_chat_completion_with_progress"), \
          mock.patch("modules.translation.processor.TranslationFactory.create_engine", return_value=object()):
         for _path in SAMPLE_JAPAN_PAGES:
             Translator(main_page, "Japanese", "Korean")
 
-    assert wait_for_probe.call_count == 1
-    assert sum(1 for event in main_page.runtime_events if event.get("readiness_cache_hit")) == 2
+    assert wait_for_probe.call_count == 0
+    assert not main_page.runtime_events
 
 
 def test_sample_japan_three_ocr_initializations_probe_ocr_once() -> None:

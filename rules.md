@@ -17,6 +17,8 @@
 - 폰트 바이너리(`*.ttf`, `*.otf`, `*.woff`, `*.woff2`, `*.ttc`, `*.fon`)와 루트 `fonts/` 디렉터리는 Git에 올리지 않는다.
 - 테스트 원본, 실제 작품명, 사용자 로컬 절대경로, OCR/번역/인페인트/렌더 결과물, benchmark raw output은 파일 경로와 문서/테스트 내용 양쪽 모두에서 Git에 올리지 않는다.
 - 로컬 작업용 가상환경은 `.venv-win`, `.venv-win-cuda13`만 공식 사용한다. `.venv`는 repo workflow 기준 환경으로 사용하지 않는다.
+- 현재 공식 Windows 개발 PC에서는 공통 Python 검사와 빠른 단위 테스트를 가능한 한 `.venv-win`, `.venv-win-cuda13` 양쪽에서 실행한다. CUDA 버전에 종속된 실행·패키징 검사는 해당 환경에서 따로 수행하고 결과를 구분해 기록한다.
+- 같은 checkout에서 두 Windows 환경의 Python 검사를 동시에 실행하지 않는다. `__pycache__` 파일 잠금 충돌을 피하도록 `.venv-win` 검사 후 `.venv-win-cuda13` 검사를 순차 실행하고, 필요하면 Python `-B` 옵션을 사용한다.
 
 ## 2. 브랜치 모델
 
@@ -130,17 +132,29 @@ Windows launcher/runtime 변경이 포함되면 아래 검증도 추가한다.
 python scripts/verify_windows_launchers.py
 ```
 
-Nuitka 패키징, 릴리스 workflow, release asset 경로, pinned Windows 런타임, 또는 `main` 승격 릴리스 후보를 다루는 변경은 CI 전에 Windows 로컬에서 실제 빌드 가능성을 먼저 확인한다.
+공식 Windows 릴리스는 EXE가 아니라 첫 실행 때 지원 환경을 설치하는
+deterministic launcher-source ZIP이다. 릴리스 workflow, release asset,
+pinned Windows 런타임, launcher 또는 `main` 승격 후보를 다루는 변경은
+CI 전에 Windows 로컬에서 아래 계약을 확인한다.
 
-- Windows PowerShell에서 repo 루트 기준으로 실행한다. WSL 검증은 대체로 인정하지 않는다.
-- 최소 확인:
-  - `python scripts/compile_translations.py --check`
-  - `./scripts/build_windows_gpu_portable.ps1 -AppVersion "<version>"`
-  - `./scripts/build_windows_gpu_onefile.ps1 -AppVersion "<version>" -OutputName "comic-translate-gpu-cuda13" -NoCompression`
-- CUDA12 release asset, CUDA12 runtime, 또는 CUDA12 packaging을 건드렸다면 아래도 추가한다.
-  - `./scripts/build_windows_gpu_onefile.ps1 -AppVersion "<version>" -OutputName "comic-translate-gpu-cuda12" -NoCompression`
-- PR 본문에는 실행한 Windows 명령, 성공 여부, 생성된 `build/nuitka-*` 산출물 경로를 적는다.
-- 이 로컬 Windows Nuitka 확인 뒤에 main 승격 PR, main preflight CI, 태그 기반 release CI 순서로 진행한다.
+- `python scripts/compile_translations.py --check`
+- `python scripts/build_windows_launcher_source_bundle.py build --version "<version>" --commit HEAD --output-dir build/release`
+- builder가 생성한 ZIP과 `SHA256SUMS.txt`를 `verify` subcommand로 재검증
+- ZIP을 새 폴더에 추출한 뒤 `COMIC_VERIFY_ONLY=1`로 `run_comic.bat`와
+  `run_comic_cuda13.bat`를 모두 실행
+- `python scripts/verify_windows_launchers.py`로 기존 설치 환경의
+  CUDA12/CUDA13 launcher/runtime 계약 확인
+
+공식 asset은
+`comic-translate-v<version>-windows-launcher-source.zip`과
+`SHA256SUMS.txt`뿐이다. venv, 모델, 캐시, benchmark runner/raw 결과,
+사용자 로컬 절대경로, secret을 포함하지 않는다. PR 본문에는 실제
+Windows 명령, ZIP SHA-256, launcher-source 무설치 검사 결과를 적는다.
+
+`scripts/build_windows_gpu_portable.ps1`과
+`scripts/build_windows_gpu_onefile.ps1`은 비공식 수동 Nuitka 도구로만
+남긴다. 성공 여부와 무관하게 공식 릴리스 gate나 GitHub Release asset을
+구성하지 않는다.
 
 ## 4. 커밋 규칙
 
@@ -271,10 +285,12 @@ public/free 저장소의 ruleset은 보호 브랜치, PR 강제, 상태 체크, 
 CD는 `main`에 포함된 `vX.Y.Z` 태그 기반 릴리스만 공식 경로로 인정한다.
 
 - `develop`에서 충분히 검증된 변경만 `main`으로 승격
-- Nuitka/release 후보는 `main` 승격 전에 Windows 로컬에서 실제 Nuitka 빌드 성공을 먼저 확인
+- release 후보는 `main` 승격 전에 Windows 로컬에서 deterministic
+  launcher-source bundle과 두 launcher의 `COMIC_VERIFY_ONLY=1` 계약 확인
 - `main`에 포함된 커밋에만 버전 태그(`vX.Y.Z`) 생성
-- `main` 반영 후 Windows release-preflight CI로 Nuitka 빌드를 다시 확인
-- 해당 태그에서 Windows `Nuitka` 빌드 + GitHub Release 자산 생성
+- `main` 반영 후 Windows release-preflight CI로 같은 source bundle을 재현
+- 해당 태그에서 launcher-source ZIP과 `SHA256SUMS.txt`를 GitHub Release
+  자산으로 생성
 - `develop`이나 feature 브랜치에 달린 태그는 공식 릴리스로 취급하지 않음
 - 필요 시 `pre-release` 표기
 - `hotfix/*`는 `main` 기준으로 처리 후 `develop`에 백머지
@@ -318,7 +334,8 @@ GitHub 저장소 설정에서 아래를 권장한다.
 - 첫 push면 `git push -u origin <branch>`를 했는가
 - 이후 push가 최신 상태인가
 - Windows launcher/runtime 관련 변경이면 `python scripts/verify_windows_launchers.py`를 돌렸는가
-- Nuitka/release/main 승격 후보이면 Windows 로컬 PowerShell에서 Nuitka portable/onefile 빌드를 먼저 성공시켰는가
+- release/main 승격 후보이면 Windows 로컬에서 deterministic
+  launcher-source ZIP·SHA·추출 후 두 launcher 무설치 검사를 통과했는가
 - PR이 열려 있거나 최신 커밋이 반영되었는가
 
 사용자가 명시적으로 `로컬만` 원한 경우에만 push 요구를 예외로 둔다.
