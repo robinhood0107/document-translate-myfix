@@ -188,7 +188,7 @@ def test_commit_range_does_not_rescan_historical_base(
     assert commit_errors(current) == []
 
 
-def test_new_branch_push_uses_develop_as_history_boundary(
+def test_new_branch_push_excludes_existing_remote_history(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -213,6 +213,50 @@ def test_new_branch_push_uses_develop_as_history_boundary(
         "0" * 40,
         current,
         branch="fix/example",
+        remote="origin",
+    )
+
+    assert commits == [current]
+
+
+def test_lab_based_work_branch_excludes_existing_lab_history(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    init_repo(tmp_path)
+    product_base = commit_file(
+        tmp_path,
+        message="chore(repo): product base",
+        content="product",
+    )
+    git(
+        tmp_path,
+        "update-ref",
+        "refs/remotes/origin/develop",
+        product_base,
+    )
+    lab_base = commit_file(
+        tmp_path,
+        message="chore(benchmark): existing lab history",
+        content="lab",
+    )
+    git(
+        tmp_path,
+        "update-ref",
+        "refs/remotes/origin/benchmarking/lab",
+        lab_base,
+    )
+    current = commit_file(
+        tmp_path,
+        message="chore(benchmark): sync current policy",
+        content="current",
+    )
+    monkeypatch.chdir(tmp_path)
+
+    commits = push_commits(
+        "0" * 40,
+        current,
+        branch="chore/benchmark-lab-sync-policy",
         remote="origin",
     )
 
