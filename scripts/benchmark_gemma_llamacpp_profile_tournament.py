@@ -2041,6 +2041,81 @@ def query_container_stats(container_name: str) -> dict[str, Any]:
     }
 
 
+def query_container_swap_stats(container_name: str) -> dict[str, Any]:
+    """Read swap usage from the running container's cgroup v2 files."""
+
+    command = (
+        "for f in memory.swap.current memory.swap.peak; do "
+        'test -r "/sys/fs/cgroup/$f" || exit 66; '
+        'printf "%s=" "$f"; '
+        'cat "/sys/fs/cgroup/$f"; '
+        "done"
+    )
+    try:
+        completed = run_process(
+            [
+                docker_executable(),
+                "exec",
+                container_name,
+                "sh",
+                "-ceu",
+                command,
+            ],
+            timeout_sec=15,
+            allow_failure=True,
+        )
+    except subprocess.TimeoutExpired:
+        return {
+            "available": False,
+            "reason": "container cgroup swap query timed out",
+        }
+    if completed.returncode != 0:
+        return {
+            "available": False,
+            "reason": (
+                completed.stderr.strip()
+                or "container cgroup swap query failed"
+            ),
+        }
+
+    values: dict[str, int] = {}
+    for line in completed.stdout.splitlines():
+        key, separator, raw_value = line.partition("=")
+        if not separator or key not in {
+            "memory.swap.current",
+            "memory.swap.peak",
+        }:
+            continue
+        try:
+            value = int(raw_value.strip())
+        except ValueError:
+            return {
+                "available": False,
+                "reason": "invalid container cgroup swap value",
+            }
+        if value < 0:
+            return {
+                "available": False,
+                "reason": "negative container cgroup swap value",
+            }
+        values[key] = value
+
+    if set(values) != {"memory.swap.current", "memory.swap.peak"}:
+        return {
+            "available": False,
+            "reason": "incomplete container cgroup swap output",
+        }
+
+    bytes_per_mib = 1024 * 1024
+    return {
+        "available": True,
+        "current_bytes": values["memory.swap.current"],
+        "peak_bytes": values["memory.swap.peak"],
+        "current_mb": values["memory.swap.current"] / bytes_per_mib,
+        "peak_mb": values["memory.swap.peak"] / bytes_per_mib,
+    }
+
+
 def _warm_runtime(model_filename: str, *, timeout_sec: int) -> dict[str, Any]:
     engine = _build_engine(
         model_name=model_filename,
@@ -2243,6 +2318,35 @@ def _streaming_ttft_probe(
     }
 
 
+def _select_swap_gate_value(
+    *,
+    result: Mapping[str, Any],
+    resource_summary: Mapping[str, Any],
+) -> dict[str, Any]:
+    global_wsl_growth = float(
+        resource_summary.get("wsl_swap_growth_mb") or 0.0
+    )
+    container_swap = result.get("container_swap")
+    if isinstance(container_swap, Mapping) and container_swap.get("available"):
+        try:
+            container_peak = float(container_swap["peak_mb"])
+        except (KeyError, TypeError, ValueError):
+            container_peak = math.nan
+        if math.isfinite(container_peak) and container_peak >= 0:
+            return {
+                "swap_gate_source": "container-cgroup",
+                "swap_growth_mb": container_peak,
+                "container_swap_peak_mb": container_peak,
+                "global_wsl_swap_growth_mb": global_wsl_growth,
+            }
+    return {
+        "swap_gate_source": "global-wsl-fallback",
+        "swap_growth_mb": global_wsl_growth,
+        "container_swap_peak_mb": None,
+        "global_wsl_swap_growth_mb": global_wsl_growth,
+    }
+
+
 def _result_gates(
     *,
     result: Mapping[str, Any],
@@ -2260,7 +2364,11 @@ def _result_gates(
         for key in STRUCTURAL_STATS
         if int(stats.get(key, 0) or 0)
     }
-    swap_growth = float(resource_summary.get("wsl_swap_growth_mb") or 0.0)
+    swap_gate = _select_swap_gate_value(
+        result=result,
+        resource_summary=resource_summary,
+    )
+    swap_growth = float(swap_gate["swap_growth_mb"])
     shared_gpu_growth = float(
         resource_summary.get("shared_gpu_growth_mb") or 0.0
     )
@@ -2277,7 +2385,12 @@ def _result_gates(
         "finish_reason_length_count": int(
             stats.get("gemma_truncated_count", 0) or 0
         ),
+        "swap_gate_source": swap_gate["swap_gate_source"],
         "swap_growth_mb": swap_growth,
+        "container_swap_peak_mb": swap_gate["container_swap_peak_mb"],
+        "global_wsl_swap_growth_mb": swap_gate[
+            "global_wsl_swap_growth_mb"
+        ],
         "swap_growth_ok": swap_growth <= max_swap_growth_mb,
         "shared_gpu_growth_mb": shared_gpu_growth,
         "shared_gpu_growth_ok": (
@@ -2445,6 +2558,9 @@ def run_profile_stage(
                 stage_metric_delta,
                 translation["stats"],
                 log_speculation,
+            )
+            result["container_swap"] = query_container_swap_stats(
+                container["name"]
             )
         result["resources"] = sampler.summary()
         result["gpu_before_stop"] = query_gpu_snapshot()
@@ -3003,15 +3119,27 @@ def probe_profile_load(
             result["container_stats_after_probe"] = query_container_stats(
                 container["name"]
             )
+            result["container_swap"] = query_container_swap_stats(
+                container["name"]
+            )
         result["resources"] = sampler.summary()
-        swap_growth = float(
-            result["resources"].get("wsl_swap_growth_mb") or 0.0
+        swap_gate = _select_swap_gate_value(
+            result=result,
+            resource_summary=result["resources"],
         )
+        swap_growth = float(swap_gate["swap_growth_mb"])
         shared_gpu_growth = float(
             result["resources"].get("shared_gpu_growth_mb") or 0.0
         )
         result["resource_gates"] = {
+            "swap_gate_source": swap_gate["swap_gate_source"],
             "swap_growth_mb": swap_growth,
+            "container_swap_peak_mb": swap_gate[
+                "container_swap_peak_mb"
+            ],
+            "global_wsl_swap_growth_mb": swap_gate[
+                "global_wsl_swap_growth_mb"
+            ],
             "swap_growth_ok": swap_growth <= manifest.max_swap_growth_mb,
             "shared_gpu_growth_mb": shared_gpu_growth,
             "shared_gpu_growth_ok": (
@@ -3028,7 +3156,8 @@ def probe_profile_load(
         )
         if result["status"] == "failed":
             result["failure_reason"] = (
-                f"WSL swap growth {swap_growth:.1f} MiB exceeds "
+                f"Swap gate value ({swap_gate['swap_gate_source']}) "
+                f"{swap_growth:.1f} MiB exceeds "
                 f"{manifest.max_swap_growth_mb} MiB or shared GPU growth "
                 f"{shared_gpu_growth:.1f} MiB exceeds "
                 f"{manifest.max_shared_gpu_growth_mb} MiB"
