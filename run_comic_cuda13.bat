@@ -27,6 +27,7 @@ if /I "%COMIC_VERIFY_ONLY%"=="1" (
         "paddleocr_vl_docker_files\docker-compose.yaml"
         "resources\translations\compiled\ct_ko.qm"
         "scripts\prepare_gemma_runtime.ps1"
+        "scripts\verify_windows_runtime.py"
     ) do (
         if not exist "%SCRIPT_DIR%%%~F" (
             echo [verify] Missing launcher-source file: %%~F
@@ -60,10 +61,10 @@ if not exist "%PYTHON_EXE%" (
 )
 
 echo [bootstrap] Checking .venv-win-cuda13 (CUDA 13.x)...
-"%PYTHON_EXE%" -c "import importlib.metadata as md, sys, torch; required={'torch':'2.11.0+cu130','torchvision':'0.26.0+cu130','onnxruntime-gpu':'1.26.0.dev20260408003','setuptools':'80.9.0','einops':'0.8.2'}; required_any=('PySide6',); ok=all(md.version(k)==v for k,v in required.items()) and all(md.version(k) for k in required_any) and getattr(torch.version,'cuda',None)=='13.0'; raise SystemExit(0 if ok else 1)" >nul 2>&1
+"%PYTHON_EXE%" -B -s scripts\verify_windows_runtime.py --requirements requirements-cuda13.txt --expected-cuda 13.0 >nul 2>&1
 if errorlevel 1 (
     echo [bootstrap] Installing pinned runtime for .venv-win-cuda13...
-    "%PYTHON_EXE%" -m pip install --upgrade pip wheel setuptools==80.9.0
+    "%PYTHON_EXE%" -m pip install --upgrade pip==26.0.1 wheel==0.46.3 setuptools==80.9.0
     if errorlevel 1 (
         popd >nul
         exit /b 1
@@ -75,7 +76,7 @@ if errorlevel 1 (
     )
 )
 
-"%PYTHON_EXE%" -c "import importlib.metadata as md, sys, torch; required={'torch':'2.11.0+cu130','torchvision':'0.26.0+cu130','onnxruntime-gpu':'1.26.0.dev20260408003','setuptools':'80.9.0','einops':'0.8.2'}; required_any=('PySide6',); ok=all(md.version(k)==v for k,v in required.items()) and all(md.version(k) for k in required_any) and getattr(torch.version,'cuda',None)=='13.0'; raise SystemExit(0 if ok else 1)"
+"%PYTHON_EXE%" -B -s scripts\verify_windows_runtime.py --requirements requirements-cuda13.txt --expected-cuda 13.0
 if errorlevel 1 (
     echo [bootstrap] .venv-win-cuda13 verification failed.
     popd >nul
