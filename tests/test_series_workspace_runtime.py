@@ -253,6 +253,7 @@ class SeriesWorkspaceRuntimeTests(unittest.TestCase):
                     "export_raw_text": True,
                     "export_translated_text": True,
                     "export_inpainted_image": True,
+                    "export_ocr_debug": True,
                     "export_detector_overlay": True,
                     "export_raw_mask": True,
                     "export_mask_overlay": True,
@@ -268,7 +269,7 @@ class SeriesWorkspaceRuntimeTests(unittest.TestCase):
         self.assertEqual(dialog.render_typography_group.property("section_title"), "Typography")
         self.assertEqual(dialog.render_alignment_group.property("section_title"), "Alignment")
         self.assertEqual(dialog.export_output_group.property("section_title"), "Final Output")
-        self.assertEqual(dialog.export_text_group.property("section_title"), "Text Exports")
+        self.assertEqual(dialog.export_text_group.property("section_title"), "Additional Exports")
         self.assertEqual(dialog.export_debug_group.property("section_title"), "Debug Artifacts")
         self.assertGreaterEqual(len(dialog.findChildren(QtWidgets.QLabel, "seriesSettingsSectionTitle")), 8)
         self.assertGreaterEqual(len(dialog.findChildren(QtWidgets.QFrame, "seriesSettingsFieldRow")), 10)
@@ -293,6 +294,7 @@ class SeriesWorkspaceRuntimeTests(unittest.TestCase):
         self.assertTrue(global_settings["export_settings"]["export_raw_text"])
         self.assertTrue(global_settings["export_settings"]["export_translated_text"])
         self.assertTrue(global_settings["export_settings"]["export_inpainted_image"])
+        self.assertTrue(global_settings["export_settings"]["export_ocr_debug"])
         self.assertTrue(global_settings["export_settings"]["export_detector_overlay"])
         self.assertTrue(global_settings["export_settings"]["export_raw_mask"])
         self.assertTrue(global_settings["export_settings"]["export_mask_overlay"])

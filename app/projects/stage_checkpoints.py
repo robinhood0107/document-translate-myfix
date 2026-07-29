@@ -43,7 +43,7 @@ PROJECT_DETECTION_CHECKPOINT_SCHEMA_VERSION = 1
 PROJECT_OCR_CHECKPOINT_SCHEMA_VERSION = 1
 PROJECT_TRANSLATION_CHECKPOINT_SCHEMA_VERSION = 1
 PROJECT_INPAINT_CHECKPOINT_SCHEMA_VERSION = 2
-PROJECT_RENDER_CHECKPOINT_SCHEMA_VERSION = 2
+PROJECT_RENDER_CHECKPOINT_SCHEMA_VERSION = 3
 DETECTION_PREPROCESS_SCHEMA_VERSION = "rtdetr-v2-rgb-640-f32-v1"
 DETECTION_POSTPROCESS_SCHEMA_VERSION = "comic-text-bubble-blocks-v1"
 DETECTION_SORT_SCHEMA_VERSION = "sort-blk-list-v1"
@@ -59,6 +59,15 @@ INPAINT_BLOCK_STATE_SCHEMA_VERSION = "inpaint-block-state-v1"
 RENDER_INPUT_SCHEMA_VERSION = "translation-inpaint-style-layout-v1"
 RENDER_SANITIZER_SCHEMA_VERSION = "strict-symbol-rich-text-v1"
 RENDER_OUTPUT_SCHEMA_VERSION = "encoded-output-object-v1"
+_RENDER_EXPORT_IDENTITY_KEYS = frozenset(
+    {
+        "resolved_automatic_output_target",
+        "resolved_automatic_output_image_format",
+        "resolved_automatic_output_archive_format",
+        "resolved_automatic_output_archive_image_format",
+        "resolved_automatic_output_archive_compression_level",
+    }
+)
 
 _DETECTION_OBJECT_ROLE = "detection-result"
 _OCR_OBJECT_ROLE = "ocr-raw-result"
@@ -1915,7 +1924,13 @@ def build_render_identity(
             ]
         ),
         "render_settings": _json_safe(dict(render_settings)),
-        "export_settings": _json_safe(dict(export_settings)),
+        "export_settings": _json_safe(
+            {
+                key: export_settings[key]
+                for key in sorted(_RENDER_EXPORT_IDENTITY_KEYS)
+                if key in export_settings
+            }
+        ),
         "font": _json_safe(dict(font_identity)),
         "target_language_code": str(target_language_code or ""),
         "output_base_root": os.path.normcase(
