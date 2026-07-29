@@ -736,6 +736,7 @@ class SeriesController(QtCore.QObject):
             "export_raw_text": ui.raw_text_checkbox,
             "export_translated_text": ui.translated_text_checkbox,
             "export_inpainted_image": ui.inpainted_image_checkbox,
+            "export_ocr_debug": ui.ocr_debug_checkbox,
             "export_detector_overlay": ui.detector_overlay_checkbox,
             "export_raw_mask": ui.raw_mask_checkbox,
             "export_mask_overlay": ui.mask_overlay_checkbox,
