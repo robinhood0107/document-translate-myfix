@@ -67,7 +67,7 @@ DEFAULT_BOOTSTRAP_SEED = 20260729
 DEFAULT_START_TIMEOUT_SEC = 600
 DEFAULT_REQUEST_TIMEOUT_SEC = 240
 DEFAULT_STOP_TIMEOUT_SEC = 60
-DEFAULT_MAX_IDLE_GPU_USED_MB = 1024
+DEFAULT_MAX_IDLE_GPU_USED_MB = 2048
 DEFAULT_MAX_SWAP_GROWTH_MB = 128
 DEFAULT_MAX_SHARED_GPU_GROWTH_MB = 512
 SAFE_IDENTIFIER_RE = re.compile(r"^[a-z0-9][a-z0-9._-]{0,95}$")
@@ -103,6 +103,10 @@ TOKENIZER_METADATA_KEYS = (
     "tokenizer.ggml.add_eos_token",
     "tokenizer.chat_template",
 )
+GGUF_CONTRACT_METADATA_KEYS = (
+    *TOKENIZER_METADATA_KEYS,
+    "gemma4.block_count",
+)
 VOCABULARY_METADATA_KEYS = tuple(
     key
     for key in TOKENIZER_METADATA_KEYS
@@ -116,6 +120,13 @@ MTP_CORE_VOCABULARY_KEYS = (
 )
 PROMETHEUS_INTEREST_RE = re.compile(
     r"(?:draft|accept|prompt|predict|token|request|kv|cache)",
+    re.IGNORECASE,
+)
+DRAFT_ACCEPTANCE_RE = re.compile(
+    r"draft acceptance\s*=\s*[0-9]+(?:\.[0-9]+)?\s*"
+    r"\(\s*(?P<accepted>[0-9]+)\s+accepted\s*/\s*"
+    r"(?P<generated>[0-9]+)\s+generated\),\s*"
+    r"mean len\s*=\s*(?P<mean_length>[0-9]+(?:\.[0-9]+)?)",
     re.IGNORECASE,
 )
 
@@ -166,6 +177,8 @@ class BenchmarkManifest:
     max_idle_gpu_used_mb: int
     max_swap_growth_mb: int
     max_shared_gpu_growth_mb: int
+    container_memory_limit_mib: int
+    container_swap_disabled: bool
 
     @property
     def baseline(self) -> TargetSpec:
@@ -453,6 +466,22 @@ def load_manifest(path: Path) -> BenchmarkManifest:
     preflight = payload.get("preflight") or {}
     if not isinstance(preflight, Mapping):
         raise ProtocolError("preflight must be an object")
+    container_memory_limit_mib = int(
+        preflight.get("container_memory_limit_mib", 0)
+    )
+    container_swap_disabled = preflight.get(
+        "container_swap_disabled",
+        False,
+    )
+    if not isinstance(container_swap_disabled, bool):
+        raise ProtocolError("container_swap_disabled must be a boolean")
+    if container_memory_limit_mib < 0:
+        raise ProtocolError("container_memory_limit_mib must be non-negative")
+    if container_swap_disabled and container_memory_limit_mib <= 0:
+        raise ProtocolError(
+            "container_swap_disabled requires a positive "
+            "container_memory_limit_mib"
+        )
     return BenchmarkManifest(
         path=manifest_path,
         image=image,
@@ -473,6 +502,8 @@ def load_manifest(path: Path) -> BenchmarkManifest:
                 DEFAULT_MAX_SHARED_GPU_GROWTH_MB,
             )
         ),
+        container_memory_limit_mib=container_memory_limit_mib,
+        container_swap_disabled=container_swap_disabled,
     )
 
 
@@ -630,7 +661,7 @@ def gguf_metadata_contract(path: Path) -> dict[str, Any]:
         for _ in range(int(metadata_count)):
             key = _read_gguf_string(stream).decode("utf-8", errors="replace")
             value_type = _read_u32(stream)
-            capture = key in TOKENIZER_METADATA_KEYS
+            capture = key in GGUF_CONTRACT_METADATA_KEYS
             digest = hashlib.sha256() if capture else None
             value = _consume_gguf_value(stream, value_type, digest=digest)
             if capture:
@@ -992,6 +1023,7 @@ def runtime_fingerprint(
             "sha256": inventory["artifacts"][target.id]["sha256"],
         },
         "command": build_server_command(manifest, inventory, profile),
+        "container_resources": _container_resource_contract(manifest),
         "volumes": {
             volume_id: manifest.volumes[volume_id].name
             for volume_id in sorted(
@@ -1013,6 +1045,22 @@ def runtime_fingerprint(
             "sha256": inventory["artifacts"][profile.draft_id]["sha256"],
         }
     return _canonical_sha256(payload)
+
+
+def _container_resource_contract(
+    manifest: BenchmarkManifest,
+) -> dict[str, Any]:
+    memory_limit_mib = int(manifest.container_memory_limit_mib)
+    arguments: list[str] = []
+    if memory_limit_mib > 0:
+        arguments.extend(["--memory", f"{memory_limit_mib}m"])
+        if manifest.container_swap_disabled:
+            arguments.extend(["--memory-swap", f"{memory_limit_mib}m"])
+    return {
+        "memory_limit_mib": memory_limit_mib,
+        "swap_disabled": bool(manifest.container_swap_disabled),
+        "arguments": arguments,
+    }
 
 
 def _mount_arguments(
@@ -1050,11 +1098,14 @@ def _container_contract(
 ) -> dict[str, Any]:
     fingerprint = runtime_fingerprint(manifest, inventory, profile)
     name = expected_container_name(profile, fingerprint)
+    resources = _container_resource_contract(manifest)
     return {
         "name": name,
         "fingerprint": fingerprint,
         "command": build_server_command(manifest, inventory, profile),
         "mount_args": _mount_arguments(manifest, profile),
+        "resource_contract": resources,
+        "resource_args": resources["arguments"],
     }
 
 
@@ -1111,6 +1162,22 @@ def container_contract_errors(
         errors.append("GPU device request")
     if str(host_config.get("NetworkMode") or "") not in {"default", "bridge"}:
         errors.append("network mode")
+    resource_contract = contract["resource_contract"]
+    expected_memory_bytes = (
+        int(resource_contract["memory_limit_mib"]) * 1024 * 1024
+    )
+    expected_memory_swap_bytes = (
+        expected_memory_bytes
+        if resource_contract["swap_disabled"]
+        else 0
+    )
+    if int(host_config.get("Memory", 0) or 0) != expected_memory_bytes:
+        errors.append("memory limit")
+    if (
+        int(host_config.get("MemorySwap", 0) or 0)
+        != expected_memory_swap_bytes
+    ):
+        errors.append("swap limit")
     port_bindings = host_config.get("PortBindings") or {}
     bindings = port_bindings.get("8080/tcp") or []
     normalized_bindings = [
@@ -1186,6 +1253,7 @@ def ensure_stopped_container(
         f"comic-translate.profile={profile.id}",
         "--gpus",
         "all",
+        *contract["resource_args"],
         "-e",
         "NVIDIA_VISIBLE_DEVICES=all",
         "-e",
@@ -1335,17 +1403,20 @@ def query_wsl_swap_used_mb() -> float | None:
         executable = shutil.which("wsl.exe") or shutil.which("wsl")
         if not executable:
             return None
-        completed = run_process(
-            [
-                executable,
-                "-e",
-                "sh",
-                "-lc",
-                "awk '/SwapTotal:/{t=$2}/SwapFree:/{f=$2}END{print (t-f)/1024}' /proc/meminfo",
-            ],
-            timeout_sec=15,
-            allow_failure=True,
-        )
+        try:
+            completed = run_process(
+                [
+                    executable,
+                    "-e",
+                    "sh",
+                    "-lc",
+                    "awk '/SwapTotal:/{t=$2}/SwapFree:/{f=$2}END{print (t-f)/1024}' /proc/meminfo",
+                ],
+                timeout_sec=15,
+                allow_failure=True,
+            )
+        except subprocess.TimeoutExpired:
+            return None
         raw = completed.stdout.strip()
     else:
         meminfo = Path("/proc/meminfo")
@@ -1874,9 +1945,54 @@ def metric_delta(
     }
 
 
+def fetch_container_logs(container_name: str) -> str:
+    completed = run_process(
+        [docker_executable(), "logs", container_name],
+        timeout_sec=30,
+        allow_failure=True,
+    )
+    return completed.stdout + completed.stderr
+
+
+def classify_profile_failure(exc: BaseException, logs: str) -> str:
+    combined = f"{type(exc).__name__}: {exc}\n{logs}".casefold()
+    if "failed to load draft model" in combined:
+        return "draft_model_load"
+    if "out of memory" in combined or "cuda error" in combined:
+        return "oom_or_cuda"
+    if isinstance(exc, (TimeoutError, subprocess.TimeoutExpired)):
+        return "timeout"
+    return "runtime"
+
+
+def parse_draft_acceptance_logs(text: str) -> dict[str, Any]:
+    accepted = 0
+    generated = 0
+    weighted_mean_length = 0.0
+    line_count = 0
+    for match in DRAFT_ACCEPTANCE_RE.finditer(text):
+        line_accepted = int(match.group("accepted"))
+        line_generated = int(match.group("generated"))
+        mean_length = float(match.group("mean_length"))
+        accepted += line_accepted
+        generated += line_generated
+        weighted_mean_length += mean_length * line_generated
+        line_count += 1
+    return {
+        "line_count": line_count,
+        "draft_tokens": generated,
+        "accepted_tokens": accepted,
+        "acceptance_rate": accepted / generated if generated > 0 else None,
+        "mean_accepted_length": (
+            weighted_mean_length / generated if generated > 0 else None
+        ),
+    }
+
+
 def summarize_speculation_metrics(
     delta: Mapping[str, float],
     stats: Mapping[str, Any],
+    log_telemetry: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     def sum_matching(
         *,
@@ -1897,6 +2013,11 @@ def summarize_speculation_metrics(
     accepted = sum_matching(required=("accept", "token", "total"))
     if accepted == 0:
         accepted = sum_matching(required=("accept", "draft", "total"))
+    telemetry_source = "prometheus"
+    if drafted <= 0 and log_telemetry:
+        drafted = float(log_telemetry.get("draft_tokens", 0) or 0)
+        accepted = float(log_telemetry.get("accepted_tokens", 0) or 0)
+        telemetry_source = "llama-log"
     completion_tokens = int(stats.get("gemma_completion_tokens", 0) or 0)
     decode_ms = float(stats.get("gemma_decode_ms", 0.0) or 0.0)
     http_attempts = int(stats.get("gemma_http_attempt_count", 0) or 0)
@@ -1904,6 +2025,8 @@ def summarize_speculation_metrics(
         "draft_tokens": drafted,
         "accepted_tokens": accepted,
         "acceptance_rate": accepted / drafted if drafted > 0 else None,
+        "telemetry_source": telemetry_source if drafted > 0 else "none",
+        "log_telemetry": dict(log_telemetry or {}),
         "accepted_tokens_per_http_attempt": (
             accepted / http_attempts if http_attempts > 0 else None
         ),
@@ -1972,6 +2095,81 @@ def query_container_stats(container_name: str) -> dict[str, Any]:
         "memory_percent": str(payload.get("MemPerc") or ""),
         "cpu_percent": str(payload.get("CPUPerc") or ""),
         "pids": str(payload.get("PIDs") or ""),
+    }
+
+
+def query_container_swap_stats(container_name: str) -> dict[str, Any]:
+    """Read swap usage from the running container's cgroup v2 files."""
+
+    command = (
+        "for f in memory.swap.current memory.swap.peak; do "
+        'test -r "/sys/fs/cgroup/$f" || exit 66; '
+        'printf "%s=" "$f"; '
+        'cat "/sys/fs/cgroup/$f"; '
+        "done"
+    )
+    try:
+        completed = run_process(
+            [
+                docker_executable(),
+                "exec",
+                container_name,
+                "sh",
+                "-ceu",
+                command,
+            ],
+            timeout_sec=15,
+            allow_failure=True,
+        )
+    except subprocess.TimeoutExpired:
+        return {
+            "available": False,
+            "reason": "container cgroup swap query timed out",
+        }
+    if completed.returncode != 0:
+        return {
+            "available": False,
+            "reason": (
+                completed.stderr.strip()
+                or "container cgroup swap query failed"
+            ),
+        }
+
+    values: dict[str, int] = {}
+    for line in completed.stdout.splitlines():
+        key, separator, raw_value = line.partition("=")
+        if not separator or key not in {
+            "memory.swap.current",
+            "memory.swap.peak",
+        }:
+            continue
+        try:
+            value = int(raw_value.strip())
+        except ValueError:
+            return {
+                "available": False,
+                "reason": "invalid container cgroup swap value",
+            }
+        if value < 0:
+            return {
+                "available": False,
+                "reason": "negative container cgroup swap value",
+            }
+        values[key] = value
+
+    if set(values) != {"memory.swap.current", "memory.swap.peak"}:
+        return {
+            "available": False,
+            "reason": "incomplete container cgroup swap output",
+        }
+
+    bytes_per_mib = 1024 * 1024
+    return {
+        "available": True,
+        "current_bytes": values["memory.swap.current"],
+        "peak_bytes": values["memory.swap.peak"],
+        "current_mb": values["memory.swap.current"] / bytes_per_mib,
+        "peak_mb": values["memory.swap.peak"] / bytes_per_mib,
     }
 
 
@@ -2177,6 +2375,35 @@ def _streaming_ttft_probe(
     }
 
 
+def _select_swap_gate_value(
+    *,
+    result: Mapping[str, Any],
+    resource_summary: Mapping[str, Any],
+) -> dict[str, Any]:
+    global_wsl_growth = float(
+        resource_summary.get("wsl_swap_growth_mb") or 0.0
+    )
+    container_swap = result.get("container_swap")
+    if isinstance(container_swap, Mapping) and container_swap.get("available"):
+        try:
+            container_peak = float(container_swap["peak_mb"])
+        except (KeyError, TypeError, ValueError):
+            container_peak = math.nan
+        if math.isfinite(container_peak) and container_peak >= 0:
+            return {
+                "swap_gate_source": "container-cgroup",
+                "swap_growth_mb": container_peak,
+                "container_swap_peak_mb": container_peak,
+                "global_wsl_swap_growth_mb": global_wsl_growth,
+            }
+    return {
+        "swap_gate_source": "global-wsl-fallback",
+        "swap_growth_mb": global_wsl_growth,
+        "container_swap_peak_mb": None,
+        "global_wsl_swap_growth_mb": global_wsl_growth,
+    }
+
+
 def _result_gates(
     *,
     result: Mapping[str, Any],
@@ -2194,7 +2421,11 @@ def _result_gates(
         for key in STRUCTURAL_STATS
         if int(stats.get(key, 0) or 0)
     }
-    swap_growth = float(resource_summary.get("wsl_swap_growth_mb") or 0.0)
+    swap_gate = _select_swap_gate_value(
+        result=result,
+        resource_summary=resource_summary,
+    )
+    swap_growth = float(swap_gate["swap_growth_mb"])
     shared_gpu_growth = float(
         resource_summary.get("shared_gpu_growth_mb") or 0.0
     )
@@ -2211,7 +2442,12 @@ def _result_gates(
         "finish_reason_length_count": int(
             stats.get("gemma_truncated_count", 0) or 0
         ),
+        "swap_gate_source": swap_gate["swap_gate_source"],
         "swap_growth_mb": swap_growth,
+        "container_swap_peak_mb": swap_gate["container_swap_peak_mb"],
+        "global_wsl_swap_growth_mb": swap_gate[
+            "global_wsl_swap_growth_mb"
+        ],
         "swap_growth_ok": swap_growth <= max_swap_growth_mb,
         "shared_gpu_growth_mb": shared_gpu_growth,
         "shared_gpu_growth_ok": (
@@ -2306,6 +2542,7 @@ def run_profile_stage(
             "name": container["name"],
             "id": container["container_id"],
             "reused": container["reused"],
+            "resource_contract": container["resource_contract"],
         }
         result["gpu_before_start"] = query_gpu_snapshot()
         with ResourceSampler() as sampler:
@@ -2334,6 +2571,7 @@ def run_profile_stage(
                 timeout_sec=request_timeout_sec,
             )
             metrics_before_stage = fetch_metrics()
+            logs_before_stage = fetch_container_logs(container["name"])
             stage_started = time.perf_counter()
             translation = _run_translation_groups(
                 model_filename=target.volume_filename,
@@ -2344,6 +2582,13 @@ def run_profile_stage(
                 time.perf_counter() - stage_started
             )
             metrics_after_stage = fetch_metrics()
+            logs_after_stage = fetch_container_logs(container["name"])
+            stage_logs = (
+                logs_after_stage[len(logs_before_stage) :]
+                if logs_after_stage.startswith(logs_before_stage)
+                else logs_after_stage
+            )
+            log_speculation = parse_draft_acceptance_logs(stage_logs)
             result["container_stats_after_stage"] = query_container_stats(
                 container["name"]
             )
@@ -2370,6 +2615,10 @@ def run_profile_stage(
             result["speculation_telemetry"] = summarize_speculation_metrics(
                 stage_metric_delta,
                 translation["stats"],
+                log_speculation,
+            )
+            result["container_swap"] = query_container_swap_stats(
+                container["name"]
             )
         result["resources"] = sampler.summary()
         result["gpu_before_stop"] = query_gpu_snapshot()
@@ -2392,14 +2641,11 @@ def run_profile_stage(
         result["status"] = "failed"
         result["failure_reason"] = f"{type(exc).__name__}: {exc}"
         if container is not None:
-            logs = run_process(
-                [docker_executable(), "logs", container["name"]],
-                timeout_sec=30,
-                allow_failure=True,
-            )
-            result["container_log_tail"] = (
-                logs.stderr[-12_000:] or logs.stdout[-12_000:]
-            )
+            logs = fetch_container_logs(container["name"])
+            result["container_log_tail"] = logs[-12_000:]
+            result["failure_kind"] = classify_profile_failure(exc, logs)
+        else:
+            result["failure_kind"] = classify_profile_failure(exc, "")
     finally:
         if started and container is not None:
             stopped = run_process(
@@ -2903,6 +3149,7 @@ def probe_profile_load(
             "name": container["name"],
             "id": container["container_id"],
             "reused": container["reused"],
+            "resource_contract": container["resource_contract"],
         }
         with ResourceSampler() as sampler:
             runtime_started = time.perf_counter()
@@ -2931,24 +3178,45 @@ def probe_profile_load(
             result["container_stats_after_probe"] = query_container_stats(
                 container["name"]
             )
+            result["container_swap"] = query_container_swap_stats(
+                container["name"]
+            )
         result["resources"] = sampler.summary()
-        swap_growth = float(
-            result["resources"].get("wsl_swap_growth_mb") or 0.0
+        swap_gate = _select_swap_gate_value(
+            result=result,
+            resource_summary=result["resources"],
         )
+        swap_growth = float(swap_gate["swap_growth_mb"])
         shared_gpu_growth = float(
             result["resources"].get("shared_gpu_growth_mb") or 0.0
         )
+        result["resource_gates"] = {
+            "swap_gate_source": swap_gate["swap_gate_source"],
+            "swap_growth_mb": swap_growth,
+            "container_swap_peak_mb": swap_gate[
+                "container_swap_peak_mb"
+            ],
+            "global_wsl_swap_growth_mb": swap_gate[
+                "global_wsl_swap_growth_mb"
+            ],
+            "swap_growth_ok": swap_growth <= manifest.max_swap_growth_mb,
+            "shared_gpu_growth_mb": shared_gpu_growth,
+            "shared_gpu_growth_ok": (
+                shared_gpu_growth <= manifest.max_shared_gpu_growth_mb
+            ),
+        }
         result["status"] = (
             "passed"
             if (
-                swap_growth <= manifest.max_swap_growth_mb
-                and shared_gpu_growth <= manifest.max_shared_gpu_growth_mb
+                result["resource_gates"]["swap_growth_ok"]
+                and result["resource_gates"]["shared_gpu_growth_ok"]
             )
             else "failed"
         )
         if result["status"] == "failed":
             result["failure_reason"] = (
-                f"WSL swap growth {swap_growth:.1f} MiB exceeds "
+                f"Swap gate value ({swap_gate['swap_gate_source']}) "
+                f"{swap_growth:.1f} MiB exceeds "
                 f"{manifest.max_swap_growth_mb} MiB or shared GPU growth "
                 f"{shared_gpu_growth:.1f} MiB exceeds "
                 f"{manifest.max_shared_gpu_growth_mb} MiB"
@@ -2957,14 +3225,11 @@ def probe_profile_load(
         result["status"] = "failed"
         result["failure_reason"] = f"{type(exc).__name__}: {exc}"
         if container is not None:
-            logs = run_process(
-                [docker_executable(), "logs", container["name"]],
-                timeout_sec=30,
-                allow_failure=True,
-            )
-            result["container_log_tail"] = (
-                logs.stderr[-12_000:] or logs.stdout[-12_000:]
-            )
+            logs = fetch_container_logs(container["name"])
+            result["container_log_tail"] = logs[-12_000:]
+            result["failure_kind"] = classify_profile_failure(exc, logs)
+        else:
+            result["failure_kind"] = classify_profile_failure(exc, "")
     finally:
         if started and container is not None:
             stopped = run_process(
@@ -2991,12 +3256,23 @@ def next_ngl_probe_values(
     initial_ngl: int,
     max_ngl: int,
     initial_passed: bool,
+    initial_swap_only_failure: bool = False,
 ) -> list[int]:
     if initial_ngl < 0 or max_ngl < initial_ngl:
         raise ProtocolError("Invalid NGL probe bounds")
-    if initial_passed:
+    if initial_passed or initial_swap_only_failure:
         return list(range(initial_ngl + 1, max_ngl + 1))
     return list(range(initial_ngl - 1, -1, -1))
+
+
+def _is_swap_only_resource_failure(result: Mapping[str, Any]) -> bool:
+    gates = result.get("resource_gates") or {}
+    return bool(
+        result.get("status") != "passed"
+        and gates
+        and not gates.get("swap_growth_ok", True)
+        and gates.get("shared_gpu_growth_ok", False)
+    )
 
 
 def tune_profile_ngl(
@@ -3014,7 +3290,16 @@ def tune_profile_ngl(
     output = _require_external_path(output_path, label="NGL tuning output")
     if output.exists():
         raise FileExistsError(f"NGL tuning output already exists: {output}")
-    if max_ngl < profile.target_ngl:
+    target_inventory = inventory["artifacts"][profile.target_id]
+    target_selected_metadata = (
+        (target_inventory.get("gguf") or {}).get("selected") or {}
+    )
+    block_count = int(
+        target_selected_metadata.get("gemma4.block_count", 0) or 0
+    )
+    meaningful_max_ngl = block_count + 1 if block_count > 0 else max_ngl
+    effective_max_ngl = min(max_ngl, meaningful_max_ngl)
+    if effective_max_ngl < profile.target_ngl:
         raise ProtocolError("max_ngl must be at least the initial target NGL")
 
     attempts: list[dict[str, Any]] = []
@@ -3032,6 +3317,7 @@ def tune_profile_ngl(
             start_timeout_sec=start_timeout_sec,
             request_timeout_sec=request_timeout_sec,
         )
+        result.setdefault("profile", asdict(candidate))
         attempts.append(result)
         return result
 
@@ -3041,41 +3327,94 @@ def tune_profile_ngl(
 
     selected_draft_ngl = ""
     safe_ngls: list[int] = []
-    first_failed_ngl: int | None = None
     for draft_mode in draft_modes:
         initial = attempt(profile.target_ngl, draft_mode)
         initial_passed = initial["status"] == "passed"
+        if (
+            initial.get("failure_kind") == "draft_model_load"
+            and draft_mode != "0"
+        ):
+            continue
+        initial_swap_only_failure = _is_swap_only_resource_failure(initial)
+        search_upward = initial_passed or initial_swap_only_failure
         if initial_passed:
             safe_ngls.append(profile.target_ngl)
         probe_values = next_ngl_probe_values(
             initial_ngl=profile.target_ngl,
-            max_ngl=max_ngl,
+            max_ngl=effective_max_ngl,
             initial_passed=initial_passed,
+            initial_swap_only_failure=initial_swap_only_failure,
         )
         for ngl in probe_values:
             probed = attempt(ngl, draft_mode)
             if probed["status"] == "passed":
                 safe_ngls.append(ngl)
-                if not initial_passed:
+                if not search_upward:
                     break
-            elif initial_passed:
-                first_failed_ngl = ngl
+            elif search_upward and not _is_swap_only_resource_failure(probed):
                 break
+        if initial_swap_only_failure and not safe_ngls:
+            attempted_ngls = {
+                int(item["profile"]["target_ngl"])
+                for item in attempts
+                if str(item["profile"].get("draft_ngl") or "")
+                == draft_mode
+            }
+            for ngl in range(profile.target_ngl - 1, -1, -1):
+                if ngl in attempted_ngls:
+                    continue
+                probed = attempt(ngl, draft_mode)
+                if probed["status"] == "passed":
+                    safe_ngls.append(ngl)
+                    break
         if safe_ngls:
             selected_draft_ngl = draft_mode
             break
 
     safe_ngls = sorted(set(safe_ngls))
     safe_max = max(safe_ngls) if safe_ngls else None
-    comparison_ngls = (
-        sorted({safe_max, max(0, safe_max - 1)})
-        if safe_max is not None
-        else []
+    if safe_max is not None and safe_max > 0:
+        lower_neighbor = safe_max - 1
+        attempted_selected_ngls = {
+            int(item["profile"]["target_ngl"])
+            for item in attempts
+            if str(item["profile"].get("draft_ngl") or "")
+            == selected_draft_ngl
+        }
+        if lower_neighbor not in attempted_selected_ngls:
+            lower_probe = attempt(lower_neighbor, selected_draft_ngl)
+            if lower_probe["status"] == "passed":
+                safe_ngls.append(lower_neighbor)
+                safe_ngls = sorted(set(safe_ngls))
+    failed_selected_ngls = sorted(
+        {
+            int(item["profile"]["target_ngl"])
+            for item in attempts
+            if str(item["profile"].get("draft_ngl") or "")
+            == selected_draft_ngl
+            and item.get("status") != "passed"
+        }
     )
+    first_failed_ngl = (
+        next(
+            (
+                ngl
+                for ngl in failed_selected_ngls
+                if safe_max is not None and ngl > safe_max
+            ),
+            None,
+        )
+        if safe_max is not None
+        else None
+    )
+    comparison_ngls = safe_ngls[-2:]
     payload = {
         "protocol_version": PROTOCOL_VERSION,
         "profile_id": profile.id,
         "initial_target_ngl": profile.target_ngl,
+        "requested_max_target_ngl": max_ngl,
+        "model_block_count": block_count or None,
+        "effective_max_target_ngl": effective_max_ngl,
         "selected_draft_ngl": selected_draft_ngl,
         "safe_target_ngls": safe_ngls,
         "safe_max_target_ngl": safe_max,
@@ -3098,6 +3437,7 @@ def _manifest_summary(manifest: BenchmarkManifest) -> dict[str, Any]:
         "target_ids": sorted(manifest.targets),
         "draft_ids": sorted(manifest.drafts),
         "profile_ids": [profile.id for profile in enumerate_profiles(manifest)],
+        "container_resources": _container_resource_contract(manifest),
         "volumes": {
             volume.id: {
                 "name": volume.name,

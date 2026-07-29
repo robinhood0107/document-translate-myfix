@@ -7,7 +7,9 @@ import struct
 import sys
 import tempfile
 import unittest
+from dataclasses import replace
 from pathlib import Path
+from unittest import mock
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -97,7 +99,7 @@ class GemmaLlamaCppProfileTournamentTests(unittest.TestCase):
                 "llama_prompt_cache_ram_mib": 0,
             },
             "preflight": {
-                "max_idle_gpu_used_mb": 1024,
+                "max_idle_gpu_used_mb": 2048,
                 "max_swap_growth_mb": 128,
             },
         }
@@ -181,6 +183,50 @@ class GemmaLlamaCppProfileTournamentTests(unittest.TestCase):
                 and profile.speculation == "mtp"
             )
         )
+
+    def test_manifest_requires_memory_limit_when_container_swap_is_disabled(
+        self,
+    ) -> None:
+        def valid(payload: dict[str, object]) -> None:
+            preflight = payload["preflight"]
+            assert isinstance(preflight, dict)
+            preflight["container_memory_limit_mib"] = 12288
+            preflight["container_swap_disabled"] = True
+
+        with tempfile.TemporaryDirectory() as tmp:
+            manifest = self._load_manifest(Path(tmp), valid)
+
+        self.assertEqual(manifest.container_memory_limit_mib, 12288)
+        self.assertTrue(manifest.container_swap_disabled)
+
+        def missing_limit(payload: dict[str, object]) -> None:
+            preflight = payload["preflight"]
+            assert isinstance(preflight, dict)
+            preflight["container_swap_disabled"] = True
+
+        with (
+            tempfile.TemporaryDirectory() as tmp,
+            self.assertRaisesRegex(
+                tournament.ProtocolError,
+                "requires a positive container_memory_limit_mib",
+            ),
+        ):
+            self._load_manifest(Path(tmp), missing_limit)
+
+        def non_boolean(payload: dict[str, object]) -> None:
+            preflight = payload["preflight"]
+            assert isinstance(preflight, dict)
+            preflight["container_memory_limit_mib"] = 12288
+            preflight["container_swap_disabled"] = "true"
+
+        with (
+            tempfile.TemporaryDirectory() as tmp,
+            self.assertRaisesRegex(
+                tournament.ProtocolError,
+                "must be a boolean",
+            ),
+        ):
+            self._load_manifest(Path(tmp), non_boolean)
 
     def test_manifest_rejects_cross_directory_mtp_pairing(self) -> None:
         def mutate(payload: dict[str, object]) -> None:
@@ -359,6 +405,31 @@ class GemmaLlamaCppProfileTournamentTests(unittest.TestCase):
         self.assertNotEqual(original_fingerprint, changed_fingerprint)
         self.assertNotEqual(original_fingerprint, draft_fingerprint)
 
+        constrained_manifest = replace(
+            manifest,
+            container_memory_limit_mib=12288,
+            container_swap_disabled=True,
+        )
+        constrained_fingerprint = tournament.runtime_fingerprint(
+            constrained_manifest,
+            inventory,
+            original,
+        )
+        self.assertNotEqual(original_fingerprint, constrained_fingerprint)
+        self.assertEqual(
+            tournament._container_resource_contract(constrained_manifest),
+            {
+                "memory_limit_mib": 12288,
+                "swap_disabled": True,
+                "arguments": [
+                    "--memory",
+                    "12288m",
+                    "--memory-swap",
+                    "12288m",
+                ],
+            },
+        )
+
     def test_volume_verification_rejects_unknown_artifact_before_docker(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             manifest = self._load_manifest(Path(tmp))
@@ -403,6 +474,8 @@ class GemmaLlamaCppProfileTournamentTests(unittest.TestCase):
                 "RestartPolicy": {"Name": "no"},
                 "DeviceRequests": [{"Driver": ""}],
                 "NetworkMode": "default",
+                "Memory": 0,
+                "MemorySwap": 0,
                 "PortBindings": {
                     "8080/tcp": [
                         {
@@ -443,6 +516,79 @@ class GemmaLlamaCppProfileTournamentTests(unittest.TestCase):
         )
         self.assertIn("loopback port binding", errors)
         self.assertIn("read-only volume mount /volumes/lab", errors)
+
+    def test_container_contract_checks_memory_and_swap_limits(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            manifest = replace(
+                self._load_manifest(Path(tmp)),
+                container_memory_limit_mib=12288,
+                container_swap_disabled=True,
+            )
+            inventory = self._fake_inventory(manifest)
+        profile = tournament.find_profile(manifest, "candidate__none")
+        contract = tournament._container_contract(
+            manifest,
+            inventory,
+            profile,
+        )
+        inspected = {
+            "Image": manifest.expected_image_id,
+            "Config": {
+                "Cmd": contract["command"],
+                "Entrypoint": ["/app/llama-server"],
+                "Labels": {
+                    "comic-translate.runtime": "gemma-profile-tournament",
+                    "comic-translate.config-fingerprint": contract[
+                        "fingerprint"
+                    ],
+                },
+            },
+            "HostConfig": {
+                "Privileged": False,
+                "AutoRemove": False,
+                "RestartPolicy": {"Name": "no"},
+                "DeviceRequests": [{"Driver": ""}],
+                "NetworkMode": "default",
+                "Memory": 12288 * 1024 * 1024,
+                "MemorySwap": 12288 * 1024 * 1024,
+                "PortBindings": {
+                    "8080/tcp": [
+                        {
+                            "HostIp": "127.0.0.1",
+                            "HostPort": "18080",
+                        }
+                    ]
+                },
+            },
+            "Mounts": [
+                {
+                    "Destination": "/volumes/lab",
+                    "Name": "neutral-lab-models",
+                    "Type": "volume",
+                    "RW": False,
+                }
+            ],
+        }
+
+        self.assertEqual(
+            tournament.container_contract_errors(
+                inspected=inspected,
+                manifest=manifest,
+                profile=profile,
+                contract=contract,
+            ),
+            [],
+        )
+        inspected["HostConfig"]["MemorySwap"] = 0  # type: ignore[index]
+        self.assertIn(
+            "swap limit",
+            tournament.container_contract_errors(
+                inspected=inspected,
+                manifest=manifest,
+                profile=profile,
+                contract=contract,
+            ),
+        )
 
     def test_mtp_command_rejects_tokenizer_mismatch(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -735,6 +881,319 @@ class GemmaLlamaCppProfileTournamentTests(unittest.TestCase):
             )[:3],
             [22, 21, 20],
         )
+        self.assertEqual(
+            tournament.next_ngl_probe_values(
+                initial_ngl=23,
+                max_ngl=26,
+                initial_passed=False,
+                initial_swap_only_failure=True,
+            ),
+            [24, 25, 26],
+        )
+
+    def test_ngl_tuning_searches_up_after_swap_only_failure(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            manifest = self._load_manifest(root)
+            inventory = self._fake_inventory(manifest)
+            profile = tournament.find_profile(manifest, "baseline__none")
+            attempted_ngls: list[int] = []
+
+            def fake_probe(**kwargs: object) -> dict[str, object]:
+                candidate = kwargs["profile"]
+                ngl = candidate.target_ngl  # type: ignore[union-attr]
+                attempted_ngls.append(ngl)
+                passed = ngl == 25
+                return {
+                    "status": "passed" if passed else "failed",
+                    "resource_gates": {
+                        "swap_growth_ok": passed,
+                        "shared_gpu_growth_ok": True,
+                    },
+                }
+
+            with mock.patch.object(
+                tournament,
+                "probe_profile_load",
+                side_effect=fake_probe,
+            ):
+                result = tournament.tune_profile_ngl(
+                    manifest=manifest,
+                    inventory=inventory,
+                    profile=profile,
+                    max_ngl=26,
+                    output_path=root / "tuning.json",
+                    start_timeout_sec=1,
+                    request_timeout_sec=1,
+                )
+
+        self.assertEqual(attempted_ngls, [23, 24, 25, 26])
+        self.assertEqual(result["safe_target_ngls"], [25])
+        self.assertEqual(result["safe_max_target_ngl"], 25)
+        self.assertEqual(result["first_failed_target_ngl"], 26)
+        self.assertEqual(result["screen_comparison_target_ngls"], [25])
+
+    def test_ngl_tuning_continues_after_nonmonotonic_swap_failure(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            manifest = self._load_manifest(root)
+            inventory = self._fake_inventory(manifest)
+            profile = tournament.find_profile(manifest, "baseline__none")
+            attempted_ngls: list[int] = []
+
+            def fake_probe(**kwargs: object) -> dict[str, object]:
+                candidate = kwargs["profile"]
+                ngl = candidate.target_ngl  # type: ignore[union-attr]
+                attempted_ngls.append(ngl)
+                passed = ngl in {23, 25}
+                return {
+                    "status": "passed" if passed else "failed",
+                    "resource_gates": {
+                        "swap_growth_ok": passed,
+                        "shared_gpu_growth_ok": True,
+                    },
+                }
+
+            with mock.patch.object(
+                tournament,
+                "probe_profile_load",
+                side_effect=fake_probe,
+            ):
+                result = tournament.tune_profile_ngl(
+                    manifest=manifest,
+                    inventory=inventory,
+                    profile=profile,
+                    max_ngl=26,
+                    output_path=root / "nonmonotonic-tuning.json",
+                    start_timeout_sec=1,
+                    request_timeout_sec=1,
+                )
+
+        self.assertEqual(attempted_ngls, [23, 24, 25, 26])
+        self.assertEqual(result["safe_target_ngls"], [23, 25])
+        self.assertEqual(result["safe_max_target_ngl"], 25)
+        self.assertEqual(result["first_failed_target_ngl"], 26)
+        self.assertEqual(result["screen_comparison_target_ngls"], [23, 25])
+
+    def test_ngl_tuning_searches_down_from_max_swap_failure(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            manifest = self._load_manifest(root)
+            inventory = self._fake_inventory(manifest)
+            profile = tournament.find_profile(
+                manifest,
+                "baseline__none",
+                target_ngl=26,
+            )
+            attempted_ngls: list[int] = []
+
+            def fake_probe(**kwargs: object) -> dict[str, object]:
+                candidate = kwargs["profile"]
+                ngl = candidate.target_ngl  # type: ignore[union-attr]
+                attempted_ngls.append(ngl)
+                passed = ngl in {24, 25}
+                return {
+                    "status": "passed" if passed else "failed",
+                    "resource_gates": {
+                        "swap_growth_ok": passed,
+                        "shared_gpu_growth_ok": True,
+                    },
+                }
+
+            with mock.patch.object(
+                tournament,
+                "probe_profile_load",
+                side_effect=fake_probe,
+            ):
+                result = tournament.tune_profile_ngl(
+                    manifest=manifest,
+                    inventory=inventory,
+                    profile=profile,
+                    max_ngl=26,
+                    output_path=root / "max-swap-tuning.json",
+                    start_timeout_sec=1,
+                    request_timeout_sec=1,
+                )
+
+        self.assertEqual(attempted_ngls, [26, 25, 24])
+        self.assertEqual(result["safe_target_ngls"], [24, 25])
+        self.assertEqual(result["safe_max_target_ngl"], 25)
+        self.assertEqual(result["first_failed_target_ngl"], 26)
+        self.assertEqual(result["screen_comparison_target_ngls"], [24, 25])
+
+    def test_ngl_tuning_caps_search_at_model_output_layer(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            manifest = self._load_manifest(root)
+            inventory = self._fake_inventory(manifest)
+            inventory["artifacts"]["baseline"]["gguf"]["selected"] = {  # type: ignore[index]
+                "gemma4.block_count": 30,
+            }
+            profile = tournament.find_profile(manifest, "baseline__none")
+            attempted_ngls: list[int] = []
+
+            def fake_probe(**kwargs: object) -> dict[str, object]:
+                candidate = kwargs["profile"]
+                attempted_ngls.append(  # type: ignore[union-attr]
+                    candidate.target_ngl  # type: ignore[union-attr]
+                )
+                return {
+                    "status": "passed",
+                    "resource_gates": {
+                        "swap_growth_ok": True,
+                        "shared_gpu_growth_ok": True,
+                    },
+                }
+
+            with mock.patch.object(
+                tournament,
+                "probe_profile_load",
+                side_effect=fake_probe,
+            ):
+                result = tournament.tune_profile_ngl(
+                    manifest=manifest,
+                    inventory=inventory,
+                    profile=profile,
+                    max_ngl=40,
+                    output_path=root / "capped-tuning.json",
+                    start_timeout_sec=1,
+                    request_timeout_sec=1,
+                )
+
+        self.assertEqual(attempted_ngls, list(range(23, 32)))
+        self.assertEqual(result["model_block_count"], 30)
+        self.assertEqual(result["effective_max_target_ngl"], 31)
+        self.assertEqual(result["safe_max_target_ngl"], 31)
+        self.assertEqual(result["screen_comparison_target_ngls"], [30, 31])
+
+    def test_ngl_tuning_probes_unseen_lower_comparison_neighbor(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            manifest = self._load_manifest(root)
+            inventory = self._fake_inventory(manifest)
+            profile = tournament.find_profile(
+                manifest,
+                "baseline__none",
+                target_ngl=25,
+            )
+            attempted_ngls: list[int] = []
+
+            def fake_probe(**kwargs: object) -> dict[str, object]:
+                candidate = kwargs["profile"]
+                ngl = candidate.target_ngl  # type: ignore[union-attr]
+                attempted_ngls.append(ngl)
+                passed = ngl in {24, 25}
+                return {
+                    "status": "passed" if passed else "failed",
+                    "resource_gates": {
+                        "swap_growth_ok": passed,
+                        "shared_gpu_growth_ok": True,
+                    },
+                }
+
+            with mock.patch.object(
+                tournament,
+                "probe_profile_load",
+                side_effect=fake_probe,
+            ):
+                result = tournament.tune_profile_ngl(
+                    manifest=manifest,
+                    inventory=inventory,
+                    profile=profile,
+                    max_ngl=26,
+                    output_path=root / "lower-neighbor-tuning.json",
+                    start_timeout_sec=1,
+                    request_timeout_sec=1,
+                )
+
+        self.assertEqual(attempted_ngls, [25, 26, 24])
+        self.assertEqual(result["safe_target_ngls"], [24, 25])
+        self.assertEqual(result["screen_comparison_target_ngls"], [24, 25])
+
+    def test_mtp_tuning_skips_ngl_sweep_after_draft_load_failure(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            manifest = self._load_manifest(root)
+            inventory = self._fake_inventory(manifest)
+            profile = tournament.find_profile(manifest, "baseline__mtp-4")
+            attempts: list[tuple[int, str]] = []
+
+            def fake_probe(**kwargs: object) -> dict[str, object]:
+                candidate = kwargs["profile"]
+                attempts.append(  # type: ignore[union-attr]
+                    (
+                        candidate.target_ngl,  # type: ignore[union-attr]
+                        candidate.draft_ngl,  # type: ignore[union-attr]
+                    )
+                )
+                if candidate.draft_ngl != "0":  # type: ignore[union-attr]
+                    return {
+                        "status": "failed",
+                        "failure_kind": "draft_model_load",
+                    }
+                return {
+                    "status": "passed",
+                    "resource_gates": {
+                        "swap_growth_ok": True,
+                        "shared_gpu_growth_ok": True,
+                    },
+                }
+
+            with mock.patch.object(
+                tournament,
+                "probe_profile_load",
+                side_effect=fake_probe,
+            ):
+                result = tournament.tune_profile_ngl(
+                    manifest=manifest,
+                    inventory=inventory,
+                    profile=profile,
+                    max_ngl=23,
+                    output_path=root / "mtp-fallback-tuning.json",
+                    start_timeout_sec=1,
+                    request_timeout_sec=1,
+                )
+
+        self.assertEqual(
+            attempts,
+            [(23, "all"), (23, "0"), (22, "0")],
+        )
+        self.assertEqual(result["selected_draft_ngl"], "0")
+        self.assertEqual(result["safe_max_target_ngl"], 23)
+        self.assertEqual(result["screen_comparison_target_ngls"], [22, 23])
+
+    def test_draft_acceptance_log_fallback_is_aggregated(self) -> None:
+        parsed = tournament.parse_draft_acceptance_logs(
+            "\n".join(
+                [
+                    "draft acceptance = 0.30000 ( 12 accepted / 40 generated), mean len = 2.20",
+                    "draft acceptance = 0.09848 ( 13 accepted / 132 generated), mean len = 1.39",
+                ]
+            )
+        )
+        summary = tournament.summarize_speculation_metrics(
+            {},
+            {
+                "gemma_completion_tokens": 50,
+                "gemma_decode_ms": 1000.0,
+                "gemma_http_attempt_count": 2,
+            },
+            parsed,
+        )
+
+        self.assertEqual(parsed["line_count"], 2)
+        self.assertEqual(summary["draft_tokens"], 172)
+        self.assertEqual(summary["accepted_tokens"], 25)
+        self.assertAlmostEqual(summary["acceptance_rate"], 25 / 172)
+        self.assertEqual(summary["telemetry_source"], "llama-log")
+
+    def test_draft_load_failure_is_classified(self) -> None:
+        result = tournament.classify_profile_failure(
+            RuntimeError("server exited"),
+            "failed to load draft model, '/models/mtp.gguf'",
+        )
+
+        self.assertEqual(result, "draft_model_load")
 
     def test_prometheus_parser_keeps_speculation_and_timing_metrics(self) -> None:
         parsed = tournament.parse_prometheus_metrics(
@@ -777,6 +1236,117 @@ class GemmaLlamaCppProfileTournamentTests(unittest.TestCase):
         self.assertEqual(tournament.parse_memory_mib("512MiB"), 512)
         self.assertEqual(tournament.parse_memory_mib("1.5GiB"), 1536)
         self.assertIsNone(tournament.parse_memory_mib("not-memory"))
+
+    def test_container_swap_stats_reads_cgroup_v2_bytes(self) -> None:
+        completed = mock.Mock(
+            returncode=0,
+            stdout=(
+                "memory.swap.current=1048576\n"
+                "memory.swap.peak=268435456\n"
+            ),
+            stderr="",
+        )
+        with (
+            mock.patch.object(
+                tournament,
+                "docker_executable",
+                return_value="docker",
+            ),
+            mock.patch.object(
+                tournament,
+                "run_process",
+                return_value=completed,
+            ) as run_process,
+        ):
+            stats = tournament.query_container_swap_stats("neutral-container")
+
+        self.assertTrue(stats["available"])
+        self.assertEqual(stats["current_mb"], 1)
+        self.assertEqual(stats["peak_mb"], 256)
+        command = run_process.call_args.args[0]
+        self.assertEqual(command[:3], ["docker", "exec", "neutral-container"])
+        self.assertIn("memory.swap.peak", command[-1])
+
+    def test_container_swap_stats_fail_open_for_unavailable_cgroup(
+        self,
+    ) -> None:
+        cases = (
+            (
+                mock.Mock(returncode=66, stdout="", stderr="not supported"),
+                "not supported",
+            ),
+            (
+                mock.Mock(
+                    returncode=0,
+                    stdout="memory.swap.current=0\n",
+                    stderr="",
+                ),
+                "incomplete",
+            ),
+            (
+                mock.Mock(
+                    returncode=0,
+                    stdout=(
+                        "memory.swap.current=-1\n"
+                        "memory.swap.peak=0\n"
+                    ),
+                    stderr="",
+                ),
+                "negative",
+            ),
+            (
+                mock.Mock(
+                    returncode=0,
+                    stdout=(
+                        "memory.swap.current=invalid\n"
+                        "memory.swap.peak=0\n"
+                    ),
+                    stderr="",
+                ),
+                "invalid",
+            ),
+        )
+        for completed, expected_reason in cases:
+            with (
+                self.subTest(expected_reason=expected_reason),
+                mock.patch.object(
+                    tournament,
+                    "docker_executable",
+                    return_value="docker",
+                ),
+                mock.patch.object(
+                    tournament,
+                    "run_process",
+                    return_value=completed,
+                ),
+            ):
+                stats = tournament.query_container_swap_stats(
+                    "neutral-container"
+                )
+
+            self.assertFalse(stats["available"])
+            self.assertIn(expected_reason, stats["reason"])
+
+    def test_container_swap_stats_fail_open_on_timeout(self) -> None:
+        with (
+            mock.patch.object(
+                tournament,
+                "docker_executable",
+                return_value="docker",
+            ),
+            mock.patch.object(
+                tournament,
+                "run_process",
+                side_effect=tournament.subprocess.TimeoutExpired(
+                    cmd=["docker", "exec"],
+                    timeout=15,
+                ),
+            ),
+        ):
+            stats = tournament.query_container_swap_stats("neutral-container")
+
+        self.assertFalse(stats["available"])
+        self.assertIn("timed out", stats["reason"])
 
     def _comparison_result(
         self,
@@ -890,6 +1460,39 @@ class GemmaLlamaCppProfileTournamentTests(unittest.TestCase):
         self.assertFalse(gates["hard_gate_passed"])
         self.assertEqual(gates["unresolved_fallback_count"], 1)
         self.assertFalse(gates["swap_growth_ok"])
+        self.assertEqual(gates["swap_gate_source"], "global-wsl-fallback")
+        self.assertEqual(gates["global_wsl_swap_growth_mb"], 256)
+
+    def test_result_gate_prefers_container_swap_over_global_wsl_noise(
+        self,
+    ) -> None:
+        gates = tournament._result_gates(
+            result={
+                "outputs": [
+                    {"item_id": "item-1", "empty": False},
+                ],
+                "stats": {},
+                "container_swap": {
+                    "available": True,
+                    "current_mb": 0,
+                    "peak_mb": 0,
+                },
+            },
+            expected_item_ids=["item-1"],
+            resource_summary={
+                "wsl_swap_growth_mb": 256,
+                "shared_gpu_growth_mb": 0,
+            },
+            max_swap_growth_mb=128,
+            max_shared_gpu_growth_mb=512,
+        )
+
+        self.assertTrue(gates["hard_gate_passed"])
+        self.assertTrue(gates["swap_growth_ok"])
+        self.assertEqual(gates["swap_gate_source"], "container-cgroup")
+        self.assertEqual(gates["swap_growth_mb"], 0)
+        self.assertEqual(gates["container_swap_peak_mb"], 0)
+        self.assertEqual(gates["global_wsl_swap_growth_mb"], 256)
 
 
 if __name__ == "__main__":

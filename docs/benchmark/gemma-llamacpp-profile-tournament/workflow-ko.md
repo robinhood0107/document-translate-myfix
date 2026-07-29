@@ -20,6 +20,7 @@ draft model, target/draft GPU offload다. Gemma 런타임은 llama.cpp만
 - prompt, sampler, JSON Schema, sanitizer: 현재 제품 구현
 - translation result cache, Exact TM, project checkpoint: 모두 OFF
 - llama.cpp prompt cache RAM: 0
+- 실행 전 idle dedicated VRAM: 2048 MiB 이하
 - 실행 사이 후보 컨테이너는 정상 `stop`
 
 `contextual-grouped`, Q8 KV, vLLM Gemma, prompt 변경은 이 토너먼트에
@@ -34,6 +35,8 @@ draft model, target/draft GPU offload다. Gemma 런타임은 llama.cpp만
    SHA-256을 확인한 뒤 atomic rename한다. 제품 volume은 변경하지 않는다.
 4. 외부 GPU 컨테이너, 높은 idle VRAM, 포트 충돌이 있으면 중단한다.
 5. target NGL 23과 draft full GPU에서 시작해 안전 경계를 찾는다.
+   cgroup swap-only 실패는 비단조적일 수 있으므로 상향 범위를 끝까지
+   확인하고, 최대 NGL에서 시작한 실패는 하향 안전점도 확인한다.
 6. 모든 프로필을 smoke와 sensitive-15에 통과시킨다.
 7. 18블록을 정방향·역방향으로 실행한다. 확실히 느리거나 품질에 실패한
    후보만 탈락시킨다.
@@ -55,7 +58,11 @@ draft model, target/draft GPU offload다. Gemma 런타임은 llama.cpp만
   고유명사 회귀 0
 - 명시적 성적·폭력적 의미의 누락·순화·거부 0
 - 라운드 간 심각한 의미 반전 0
-- OOM, 비정상 shared GPU memory, WSL swap 증가 0
+- OOM과 비정상 shared GPU memory 증가 0
+- llama.cpp 컨테이너 cgroup swap peak가 manifest 한도 이내
+- cgroup 계측을 사용할 수 없을 때만 전역 WSL swap 증가량으로 안전 판정
+- 컨테이너 swap 금지 계약에서는 cgroup `memory.swap.max=0`을 사용하고
+  RAM 부족을 OOM/health 실패로 명확히 구분
 
 구조 게이트는 runner가 판정한다. 의미 품질은 외부 raw 결과를 원문
 기준으로 전수 검수한다.
