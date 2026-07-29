@@ -10,6 +10,7 @@ Mandatory requirements:
 - Do not create Git worktrees for this repository. Always work inside `C:\path\to\comic-translate` and switch branches in place.
 - Treat `.venv-win` and `.venv-win-cuda13` as the supported local environments for repo workflows. Do not rely on `.venv`.
 - Do not consider a feature complete until it is committed and pushed, unless the user explicitly requests local-only work.
+- Do not add AI assistants as commit authors, committers, co-authors, sign-offs, or other contributor trailers. This includes `Codex`, `OpenAI Codex`, and `codexCodex`; commits must retain only the intended human contributor identity.
 - When adding or changing user-visible UI text, update the Qt translation files and compiled `.qm` assets.
 - Keep benchmark policy, preset selection, ranking, and report generation outside core business code. Only generic stage hooks and telemetry/stat surfaces may remain in the pipeline/runtime layers.
 - Treat `benchmarking/lab` as the dedicated long-lived benchmark branch. Benchmark-specific runners, presets, reports, and chart assets belong there, not on `main` or `develop`.
