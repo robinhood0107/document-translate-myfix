@@ -1213,14 +1213,14 @@ class StageBatchedCancellationTests(unittest.TestCase):
                 "block_count": 0,
             },
             cleaned_object_sha256="4" * 64,
+            cleaned_decoded_sha256="5" * 64,
         )
 
         with mock.patch(
             "pipeline.stage_batched_processor.generate_mask",
-            return_value={
-                "raw_mask": mask.copy(),
-                "final_mask": mask.copy(),
-            },
+            side_effect=AssertionError(
+                "mask generation must be skipped for a checkpoint hit"
+            ),
         ), mock.patch(
             "pipeline.stage_batched_processor.lookup_inpaint_checkpoint",
             return_value=hit,
@@ -1233,6 +1233,10 @@ class StageBatchedCancellationTests(unittest.TestCase):
         self.assertEqual(
             processor._inpainter_release_gate["status"],
             "not-loaded",
+        )
+        self.assertEqual(
+            page.project_inpaint_artifact_sha256,
+            "5" * 64,
         )
 
     def test_no_text_page_gets_renderable_skipped_stage_fingerprints(

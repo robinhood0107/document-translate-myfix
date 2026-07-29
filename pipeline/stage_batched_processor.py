@@ -1716,48 +1716,10 @@ class StageBatchedProcessor(BatchProcessor):
                 inpaint_blocks, protected_blocks = (
                     split_inpaint_protected_ocr_blocks(ctx.blk_list)
                 )
-                ctx.mask_details = generate_mask(
-                    ctx.image,
-                    inpaint_blocks,
-                    settings=mask_settings,
-                    return_details=True,
-                    precomputed_mask_details=ctx.precomputed_mask_details,
-                )
-                if protected_blocks:
-                    ctx.mask_details["inpaint_protected_block_count"] = len(
-                        protected_blocks
-                    )
-                    ctx.mask_details["inpaint_protected_reasons"] = [
-                        getattr(block, "_inpaint_protected_reason", "")
-                        for block in protected_blocks
-                    ]
-                ctx.mask = np.ascontiguousarray(
-                    ctx.mask_details["final_mask"]
-                )
-                ctx.raw_mask = np.ascontiguousarray(
-                    ctx.mask_details["raw_mask"]
-                )
                 page_state = self._ensure_page_state(ctx.image_path)
                 brush_strokes = list(
                     page_state.get("brush_strokes", []) or []
                 )
-                if brush_strokes:
-                    merged_mask = (
-                        self.inpainting._generate_mask_from_saved_strokes(
-                            brush_strokes,
-                            ctx.image,
-                            base_mask=ctx.mask,
-                        )
-                    )
-                    if merged_mask is not None:
-                        ctx.mask = np.ascontiguousarray(
-                            merged_mask,
-                            dtype=np.uint8,
-                        )
-                        ctx.mask_details["final_mask"] = ctx.mask
-                        ctx.mask_details[
-                            "project_brush_strokes_applied"
-                        ] = True
 
                 project_hit = None
                 if (
@@ -1773,8 +1735,6 @@ class StageBatchedProcessor(BatchProcessor):
                             detection_fingerprint=ctx.detection_fingerprint,
                             ocr_fingerprint=ctx.project_ocr_fingerprint,
                             blocks=inpaint_blocks,
-                            raw_mask=ctx.raw_mask,
-                            generated_mask=ctx.mask,
                             brush_strokes=brush_strokes,
                             runtime=runtime,
                             model_identity=model_identity,
@@ -1808,9 +1768,28 @@ class StageBatchedProcessor(BatchProcessor):
                     ctx.inpaint_input_img = project_hit.cleaned_image
                     ctx.raw_mask = project_hit.raw_mask
                     ctx.mask = project_hit.final_mask
+                    ctx.mask_details = {
+                        "raw_mask": ctx.raw_mask,
+                        "final_mask": ctx.mask,
+                        "project_checkpoint_restored": True,
+                    }
+                    if protected_blocks:
+                        ctx.mask_details[
+                            "inpaint_protected_block_count"
+                        ] = len(protected_blocks)
+                        ctx.mask_details[
+                            "inpaint_protected_reasons"
+                        ] = [
+                            getattr(
+                                block,
+                                "_inpaint_protected_reason",
+                                "",
+                            )
+                            for block in protected_blocks
+                        ]
                     ctx.cleanup_stats = project_hit.cleanup_stats
                     ctx.project_inpaint_artifact_sha256 = (
-                        decoded_image_sha256(ctx.inpaint_input_img)
+                        project_hit.cleaned_decoded_sha256
                     )
                     ctx.project_inpaint_checkpoint_status = "hit"
                     self._finish_inpaint_page(
@@ -1822,6 +1801,45 @@ class StageBatchedProcessor(BatchProcessor):
                         export_settings=export_settings,
                     )
                     continue
+
+                ctx.mask_details = generate_mask(
+                    ctx.image,
+                    inpaint_blocks,
+                    settings=mask_settings,
+                    return_details=True,
+                    precomputed_mask_details=ctx.precomputed_mask_details,
+                )
+                if protected_blocks:
+                    ctx.mask_details["inpaint_protected_block_count"] = len(
+                        protected_blocks
+                    )
+                    ctx.mask_details["inpaint_protected_reasons"] = [
+                        getattr(block, "_inpaint_protected_reason", "")
+                        for block in protected_blocks
+                    ]
+                ctx.mask = np.ascontiguousarray(
+                    ctx.mask_details["final_mask"]
+                )
+                ctx.raw_mask = np.ascontiguousarray(
+                    ctx.mask_details["raw_mask"]
+                )
+                if brush_strokes:
+                    merged_mask = (
+                        self.inpainting._generate_mask_from_saved_strokes(
+                            brush_strokes,
+                            ctx.image,
+                            base_mask=ctx.mask,
+                        )
+                    )
+                    if merged_mask is not None:
+                        ctx.mask = np.ascontiguousarray(
+                            merged_mask,
+                            dtype=np.uint8,
+                        )
+                        ctx.mask_details["final_mask"] = ctx.mask
+                        ctx.mask_details[
+                            "project_brush_strokes_applied"
+                        ] = True
 
                 ctx.project_inpaint_checkpoint_status = (
                     "miss" if checkpoint_store is not None else "disabled"
@@ -1867,8 +1885,6 @@ class StageBatchedProcessor(BatchProcessor):
                         detection_fingerprint=ctx.detection_fingerprint,
                         ocr_fingerprint=ctx.project_ocr_fingerprint,
                         blocks=inpaint_blocks,
-                        raw_mask=ctx.raw_mask,
-                        generated_mask=ctx.mask,
                         brush_strokes=list(
                             page_state.get("brush_strokes", []) or []
                         ),
@@ -1950,6 +1966,9 @@ class StageBatchedProcessor(BatchProcessor):
                             raw_mask=ctx.raw_mask,
                             final_mask=ctx.mask,
                             cleanup_stats=ctx.cleanup_stats,
+                            cleaned_decoded_sha256=(
+                                ctx.project_inpaint_artifact_sha256
+                            ),
                         )
                     except Exception:
                         logger.warning(
