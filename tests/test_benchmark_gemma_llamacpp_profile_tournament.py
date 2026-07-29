@@ -1034,6 +1034,87 @@ class GemmaLlamaCppProfileTournamentTests(unittest.TestCase):
         self.assertEqual(command[:3], ["docker", "exec", "neutral-container"])
         self.assertIn("memory.swap.peak", command[-1])
 
+    def test_container_swap_stats_fail_open_for_unavailable_cgroup(
+        self,
+    ) -> None:
+        cases = (
+            (
+                mock.Mock(returncode=66, stdout="", stderr="not supported"),
+                "not supported",
+            ),
+            (
+                mock.Mock(
+                    returncode=0,
+                    stdout="memory.swap.current=0\n",
+                    stderr="",
+                ),
+                "incomplete",
+            ),
+            (
+                mock.Mock(
+                    returncode=0,
+                    stdout=(
+                        "memory.swap.current=-1\n"
+                        "memory.swap.peak=0\n"
+                    ),
+                    stderr="",
+                ),
+                "negative",
+            ),
+            (
+                mock.Mock(
+                    returncode=0,
+                    stdout=(
+                        "memory.swap.current=invalid\n"
+                        "memory.swap.peak=0\n"
+                    ),
+                    stderr="",
+                ),
+                "invalid",
+            ),
+        )
+        for completed, expected_reason in cases:
+            with (
+                self.subTest(expected_reason=expected_reason),
+                mock.patch.object(
+                    tournament,
+                    "docker_executable",
+                    return_value="docker",
+                ),
+                mock.patch.object(
+                    tournament,
+                    "run_process",
+                    return_value=completed,
+                ),
+            ):
+                stats = tournament.query_container_swap_stats(
+                    "neutral-container"
+                )
+
+            self.assertFalse(stats["available"])
+            self.assertIn(expected_reason, stats["reason"])
+
+    def test_container_swap_stats_fail_open_on_timeout(self) -> None:
+        with (
+            mock.patch.object(
+                tournament,
+                "docker_executable",
+                return_value="docker",
+            ),
+            mock.patch.object(
+                tournament,
+                "run_process",
+                side_effect=tournament.subprocess.TimeoutExpired(
+                    cmd=["docker", "exec"],
+                    timeout=15,
+                ),
+            ),
+        ):
+            stats = tournament.query_container_swap_stats("neutral-container")
+
+        self.assertFalse(stats["available"])
+        self.assertIn("timed out", stats["reason"])
+
     def _comparison_result(
         self,
         *,
