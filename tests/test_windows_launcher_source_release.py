@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import importlib.metadata
 import importlib.util
 import hashlib
 import re
@@ -10,6 +11,8 @@ import zipfile
 from pathlib import Path
 from unittest import mock
 
+import yaml
+
 
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPT_PATH = ROOT / "scripts" / "build_windows_launcher_source_bundle.py"
@@ -18,6 +21,16 @@ assert SPEC is not None and SPEC.loader is not None
 release = importlib.util.module_from_spec(SPEC)
 sys.modules[SPEC.name] = release
 SPEC.loader.exec_module(release)
+
+RUNTIME_SCRIPT_PATH = ROOT / "scripts" / "verify_windows_runtime.py"
+RUNTIME_SPEC = importlib.util.spec_from_file_location(
+    "windows_runtime_verifier",
+    RUNTIME_SCRIPT_PATH,
+)
+assert RUNTIME_SPEC is not None and RUNTIME_SPEC.loader is not None
+runtime_verifier = importlib.util.module_from_spec(RUNTIME_SPEC)
+sys.modules[RUNTIME_SPEC.name] = runtime_verifier
+RUNTIME_SPEC.loader.exec_module(runtime_verifier)
 
 
 class WindowsLauncherSourceReleaseTests(unittest.TestCase):
@@ -29,6 +42,7 @@ class WindowsLauncherSourceReleaseTests(unittest.TestCase):
         self.assertIn("app/ui/main_window/window.py", paths)
         self.assertIn("modules/ocr/local_runtime.py", paths)
         self.assertIn("pipeline/main_pipeline.py", paths)
+        self.assertIn("scripts/verify_windows_runtime.py", paths)
         self.assertNotIn("scripts/benchmark_cold_cache_finalization.py", paths)
         self.assertNotIn("scripts/build_windows_gpu_onefile.ps1", paths)
         self.assertFalse(any(path.startswith("tests/") for path in paths))
@@ -60,6 +74,15 @@ class WindowsLauncherSourceReleaseTests(unittest.TestCase):
                 "README.md",
                 b"-----BEGIN PRIVATE KEY-----",
             )
+        for secret in (
+            b"AK" + b"IA1234567890ABCDEF",
+            b"github_" + b"pat_1234567890abcdefghijklmnopqrstuvwxyz_ABCD",
+            b"sk-" + b"proj-1234567890abcdefghijklmnopqrstuvwxyz",
+            b"xox" + b"b-1234567890-abcdefghijklmnop",
+        ):
+            with self.subTest(secret_prefix=secret[:12]):
+                with self.assertRaises(RuntimeError):
+                    release._scan_release_bytes("README.md", secret)
 
     def test_release_build_is_deterministic_and_self_verifying(self) -> None:
         head_version_raw = release._run_git(
@@ -105,7 +128,92 @@ class WindowsLauncherSourceReleaseTests(unittest.TestCase):
             text = (ROOT / launcher).read_text(encoding="utf-8")
             self.assertIn('if /I "%COMIC_VERIFY_ONLY%"=="1"', text)
             self.assertIn("scripts\\prepare_gemma_runtime.ps1", text)
+            self.assertIn("scripts\\verify_windows_runtime.py", text)
             self.assertIn("resources\\translations\\compiled\\ct_ko.qm", text)
+            self.assertIn("pip==26.0.1", text)
+            self.assertIn("wheel==0.46.3", text)
+
+    def test_runtime_requirements_are_exact_and_complete(self) -> None:
+        for requirements_name, expected_cuda in (
+            ("requirements-cuda12.txt", "2.11.0+cu128"),
+            ("requirements-cuda13.txt", "2.11.0+cu130"),
+        ):
+            with self.subTest(requirements_name=requirements_name):
+                pinned = runtime_verifier.load_pinned_requirements(
+                    [ROOT / requirements_name]
+                )
+                self.assertEqual(len(pinned), 35)
+                self.assertEqual(pinned["torch"][1], expected_cuda)
+                self.assertEqual(pinned["pyside6"][1], "6.11.0")
+                self.assertEqual(pinned["send2trash"][1], "2.1.0")
+
+    def test_runtime_requirement_parser_rejects_floating_versions(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            requirements_path = Path(temp_dir) / "requirements.txt"
+            requirements_path.write_text("example>=1.0\n", encoding="utf-8")
+            with self.assertRaisesRegex(ValueError, "exact NAME==VERSION pin"):
+                runtime_verifier.load_pinned_requirements([requirements_path])
+
+    def test_runtime_verifier_reports_missing_and_mismatched_packages(self) -> None:
+        pinned = {
+            "alpha": ("alpha", "1.0"),
+            "beta": ("beta", "2.0"),
+            "gamma": ("gamma", "3.0"),
+        }
+
+        def fake_version(name: str) -> str:
+            if name == "alpha":
+                return "1.0"
+            if name == "beta":
+                return "9.0"
+            raise importlib.metadata.PackageNotFoundError(name)
+
+        with mock.patch.object(
+            runtime_verifier.importlib.metadata,
+            "version",
+            side_effect=fake_version,
+        ):
+            errors = runtime_verifier.verify_installed_requirements(pinned)
+
+        self.assertEqual(
+            errors,
+            [
+                "beta expected 2.0, found 9.0",
+                "gamma is not installed",
+            ],
+        )
+
+    def test_managed_docker_ports_are_loopback_only(self) -> None:
+        compose_paths = (
+            ROOT / "docker-compose.yaml",
+            ROOT / "hunyuanocr_docker_files" / "docker-compose.yaml",
+            ROOT / "mangalmm_docker_files" / "docker-compose.yaml",
+            ROOT / "paddleocr_vl_docker_files" / "docker-compose.yaml",
+        )
+        published_ports: list[str] = []
+        for compose_path in compose_paths:
+            payload = yaml.safe_load(compose_path.read_text(encoding="utf-8"))
+            for service in payload.get("services", {}).values():
+                published_ports.extend(str(item) for item in service.get("ports", []))
+
+        self.assertEqual(len(published_ports), 5)
+        self.assertTrue(
+            all(port.startswith("127.0.0.1:") for port in published_ports),
+            published_ports,
+        )
+
+    def test_workflow_actions_are_pinned_to_commit_shas(self) -> None:
+        for workflow_path in (ROOT / ".github" / "workflows").glob("*.yml"):
+            text = workflow_path.read_text(encoding="utf-8")
+            for line in text.splitlines():
+                match = re.search(r"\buses:\s*[^@\s]+@([^#\s]+)", line)
+                if match is None:
+                    continue
+                self.assertRegex(
+                    match.group(1),
+                    r"^[0-9a-f]{40}$",
+                    f"{workflow_path.name}: {line.strip()}",
+                )
 
     def test_product_updater_prefers_launcher_source_zip(self) -> None:
         from app.update_checker import (
@@ -133,6 +241,20 @@ class WindowsLauncherSourceReleaseTests(unittest.TestCase):
         self.assertEqual(
             select_release_asset_url(data, "Windows", "1.1.0"),
             "https://example.invalid/source.zip",
+        )
+        self.assertIsNone(
+            select_release_asset_url(
+                {
+                    "assets": [
+                        {
+                            "name": "legacy-installer.exe",
+                            "browser_download_url": "https://example.invalid/legacy.exe",
+                        }
+                    ]
+                },
+                "Windows",
+                "1.1.0",
+            )
         )
         filename = "comic-translate-v1.1.0-windows-launcher-source.zip"
         digest = "a" * 64

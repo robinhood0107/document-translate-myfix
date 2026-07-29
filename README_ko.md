@@ -176,11 +176,6 @@ OCR:
 - target language 확장과 RTL 개선
 - webtoon/list-view 관련 선택 이식 수정
 
-검수 문서:
-
-- [docs/history/v267-to-v270-backport-audit.md](docs/history/v267-to-v270-backport-audit.md)
-- [docs/history/v267-to-v270-backport-audit-ko.md](docs/history/v267-to-v270-backport-audit-ko.md)
-
 ### `v2.7.0 -> v2.7.1`
 
 `v2.7.1` 라운드에서는 이 포크에 의미 있는 upstream 수정만 선택 적용합니다.
@@ -190,11 +185,6 @@ OCR:
 - 리스트 썸네일 로더를 worker `QImage` + main-thread `QPixmap` 구조로 안정화
 - import 메뉴에서 `Project File` 옆 `PSD` 정리
 - upstream selective-backport 계보를 `2.7.1`로 기록
-
-검수 문서:
-
-- [docs/history/v270-to-v271-backport-audit.md](docs/history/v270-to-v271-backport-audit.md)
-- [docs/history/v270-to-v271-backport-audit-ko.md](docs/history/v270-to-v271-backport-audit-ko.md)
 
 ## 빠른 사용법
 
@@ -304,8 +294,6 @@ exact 영구 OCR 캐시도 사용할 수 있습니다. crop 이미지는 저장�
 ## 저장소 문서
 
 - [rules.md](rules.md)
-- [docs/history/change-log.md](docs/history/change-log.md)
-- [docs/history/change-log-ko.md](docs/history/change-log-ko.md)
 - [docs/gemma/local-server-ko.md](docs/gemma/local-server-ko.md)
 - [docs/hunyuan/local-server-ko.md](docs/hunyuan/local-server-ko.md)
 - [docs/repo/github-rulesets-public-free-ko.md](docs/repo/github-rulesets-public-free-ko.md)
