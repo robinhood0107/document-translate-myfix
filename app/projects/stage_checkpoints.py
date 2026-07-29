@@ -1924,8 +1924,6 @@ def lookup_render_checkpoint(
                 str(getattr(block, "block_id", "") or "")
                 for block in list(project_blocks or [])
             ]
-            or payload.get("render_block_state_signature")
-            != render_block_state_signature(project_blocks)
             or payload.get("output_sha256") != object_hash
             or not _reserved_output_root_matches(
                 output_root,
@@ -1935,6 +1933,12 @@ def lookup_render_checkpoint(
             or _path_has_symlink_component(output_path, output_root)
         ):
             return None
+        # The full TextBlock __dict__ contains post-inpaint and render
+        # diagnostics that are not render inputs and may be populated at
+        # different points during project save/load. The stable render
+        # identity, ordered block IDs, and persisted viewer state above are
+        # the cache guards. Keep the full signature in the record for
+        # diagnostics, but do not turn volatile metadata into a false miss.
         if os.path.exists(output_path):
             if (
                 not os.path.isfile(output_path)
