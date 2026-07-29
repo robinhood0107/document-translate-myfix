@@ -8,6 +8,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -735,6 +736,56 @@ class GemmaLlamaCppProfileTournamentTests(unittest.TestCase):
             )[:3],
             [22, 21, 20],
         )
+        self.assertEqual(
+            tournament.next_ngl_probe_values(
+                initial_ngl=23,
+                max_ngl=26,
+                initial_passed=False,
+                initial_swap_only_failure=True,
+            ),
+            [24, 25, 26],
+        )
+
+    def test_ngl_tuning_searches_up_after_swap_only_failure(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            manifest = self._load_manifest(root)
+            inventory = self._fake_inventory(manifest)
+            profile = tournament.find_profile(manifest, "baseline__none")
+            attempted_ngls: list[int] = []
+
+            def fake_probe(**kwargs: object) -> dict[str, object]:
+                candidate = kwargs["profile"]
+                ngl = candidate.target_ngl  # type: ignore[union-attr]
+                attempted_ngls.append(ngl)
+                passed = ngl == 25
+                return {
+                    "status": "passed" if passed else "failed",
+                    "resource_gates": {
+                        "swap_growth_ok": passed,
+                        "shared_gpu_growth_ok": True,
+                    },
+                }
+
+            with mock.patch.object(
+                tournament,
+                "probe_profile_load",
+                side_effect=fake_probe,
+            ):
+                result = tournament.tune_profile_ngl(
+                    manifest=manifest,
+                    inventory=inventory,
+                    profile=profile,
+                    max_ngl=26,
+                    output_path=root / "tuning.json",
+                    start_timeout_sec=1,
+                    request_timeout_sec=1,
+                )
+
+        self.assertEqual(attempted_ngls, [23, 24, 25, 26])
+        self.assertEqual(result["safe_target_ngls"], [25])
+        self.assertEqual(result["safe_max_target_ngl"], 25)
+        self.assertEqual(result["first_failed_target_ngl"], 26)
 
     def test_prometheus_parser_keeps_speculation_and_timing_metrics(self) -> None:
         parsed = tournament.parse_prometheus_metrics(
