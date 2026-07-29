@@ -1214,6 +1214,17 @@ class StageBatchedCancellationTests(unittest.TestCase):
             },
             cleaned_object_sha256="4" * 64,
             cleaned_decoded_sha256="5" * 64,
+            block_states=[
+                {
+                    "block_id": "stable",
+                    "attributes": {
+                        "block_final_mask_pixel_count": 9,
+                        "block_mask_bbox": [1, 1, 4, 4],
+                        "block_mask_source": "ctd-refined",
+                        "block_mask_decision": "accepted",
+                    },
+                }
+            ],
         )
 
         with mock.patch(
@@ -1238,6 +1249,8 @@ class StageBatchedCancellationTests(unittest.TestCase):
             page.project_inpaint_artifact_sha256,
             "5" * 64,
         )
+        self.assertEqual(block.block_final_mask_pixel_count, 9)
+        self.assertEqual(block.block_mask_decision, "accepted")
 
     def test_no_text_page_gets_renderable_skipped_stage_fingerprints(
         self,
