@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+import os
 from pathlib import Path
 import re
 import subprocess
@@ -115,14 +116,17 @@ FORBIDDEN_CONTENT_PATTERNS = (
 )
 
 
-def git_lines(args: list[str]) -> list[str]:
+def tracked_paths() -> list[str]:
     result = subprocess.run(
-        ["git", *args],
+        ["git", "ls-files", "-z"],
         check=True,
         capture_output=True,
-        text=True,
     )
-    return [line.strip() for line in result.stdout.splitlines() if line.strip()]
+    return [
+        os.fsdecode(raw_path)
+        for raw_path in result.stdout.split(b"\0")
+        if raw_path
+    ]
 
 
 def current_branch() -> str:
@@ -164,7 +168,7 @@ def validate_branch(branch: str, mode: str) -> list[str]:
 
 def validate_tracked_paths() -> list[str]:
     errors: list[str] = []
-    for path in git_lines(["ls-files"]):
+    for path in tracked_paths():
         normalized = path.replace("\\", "/")
         errors.extend(validate_tracked_path_name(normalized))
     return errors
@@ -208,7 +212,7 @@ def scan_sensitive_content(path: str, text: str) -> list[str]:
 
 def validate_sensitive_content() -> list[str]:
     errors: list[str] = []
-    for path in git_lines(["ls-files"]):
+    for path in tracked_paths():
         normalized = path.replace("\\", "/")
         if not is_text_candidate(normalized):
             continue
@@ -235,7 +239,7 @@ def validate_benchmark_asset_placement(branch: str) -> list[str]:
         return []
 
     errors: list[str] = []
-    for path in git_lines(["ls-files"]):
+    for path in tracked_paths():
         normalized = path.replace("\\", "/")
         if any(normalized.startswith(prefix) for prefix in BENCHMARK_ONLY_PREFIXES):
             errors.append(
