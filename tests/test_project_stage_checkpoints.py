@@ -44,6 +44,8 @@ from app.projects.stage_checkpoints import (
     record_render_checkpoint,
     record_translation_checkpoint,
     registered_inpainter_model_identity,
+    resolve_font_identity,
+    restore_inpaint_block_state,
     snapshot_project_render_blocks,
     snapshot_project_translations,
 )
@@ -53,6 +55,62 @@ from modules.utils.textblock import TextBlock
 
 
 class ProjectStageCheckpointTests(unittest.TestCase):
+    def test_font_identity_uses_exact_custom_file_sha(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            font_path = Path(temporary) / "custom-font.ttf"
+            font_path.write_bytes(b"stable-custom-font")
+            main_page = SimpleNamespace(
+                _custom_font_path_to_family={
+                    str(font_path): "Custom Family"
+                }
+            )
+            with mock.patch(
+                "app.projects.stage_checkpoints."
+                "_stable_system_font_identity",
+                side_effect=AssertionError(
+                    "An exact custom font must not use system fallback."
+                ),
+            ):
+                identity = resolve_font_identity(
+                    main_page,
+                    "Custom Family",
+                )
+            self.assertEqual(identity["family"], "Custom Family")
+            self.assertEqual(identity["file_name"], font_path.name)
+            self.assertEqual(
+                identity["file_sha256"],
+                hashlib.sha256(b"stable-custom-font").hexdigest(),
+            )
+
+    def test_system_font_identity_returns_a_defensive_copy(self) -> None:
+        stable = {
+            "family": "Sans Serif",
+            "resolved_family": "Stable Sans",
+            "fallback_family": "Stable Fallback",
+            "file_name": "",
+            "file_sha256": "",
+            "program_sha256": "1" * 64,
+            "fallback_program_sha256": "2" * 64,
+            "font_catalog_sha256": "3" * 64,
+            "qt_version": "6.test",
+            "platform": {"system": "test"},
+        }
+        with mock.patch(
+            "app.projects.stage_checkpoints."
+            "_stable_system_font_identity",
+            return_value=stable,
+        ):
+            first = resolve_font_identity(
+                SimpleNamespace(_custom_font_path_to_family={}),
+                "Sans Serif",
+            )
+            first["platform"]["system"] = "mutated"
+            second = resolve_font_identity(
+                SimpleNamespace(_custom_font_path_to_family={}),
+                "Sans Serif",
+            )
+        self.assertEqual(second, stable)
+
     def _store(
         self,
         root: str,
@@ -369,16 +427,17 @@ class ProjectStageCheckpointTests(unittest.TestCase):
             )
             raw_mask = np.zeros((12, 10), dtype=np.uint8)
             raw_mask[2:5, 3:8] = 255
-            generated_mask = raw_mask.copy()
             final_mask = raw_mask.copy()
             final_mask[5:7, 4:6] = 255
+            blocks[0].block_final_mask_pixel_count = 15
+            blocks[0].block_mask_bbox = [3, 2, 8, 7]
+            blocks[0].block_mask_source = "ctd-refined"
+            blocks[0].block_mask_decision = "accepted"
             identity = build_inpaint_identity(
                 source_sha256="d" * 64,
                 detection_fingerprint="e" * 64,
                 ocr_fingerprint="f" * 64,
                 blocks=blocks,
-                raw_mask=raw_mask,
-                generated_mask=generated_mask,
                 brush_strokes=[],
                 runtime={
                     "key": "AOT",
@@ -400,6 +459,7 @@ class ProjectStageCheckpointTests(unittest.TestCase):
                     page_key="page:00000000",
                     fingerprint=fingerprint,
                     identity=identity,
+                    blocks=blocks,
                     cleaned_image=image,
                     raw_mask=raw_mask,
                     final_mask=final_mask,
@@ -416,6 +476,7 @@ class ProjectStageCheckpointTests(unittest.TestCase):
                 fingerprint=fingerprint,
                 identity=identity,
                 source_shape=image.shape,
+                current_blocks=blocks,
             )
 
             self.assertIsNotNone(hit)
@@ -424,6 +485,99 @@ class ProjectStageCheckpointTests(unittest.TestCase):
             np.testing.assert_array_equal(hit.raw_mask, raw_mask)
             np.testing.assert_array_equal(hit.final_mask, final_mask)
             self.assertTrue(hit.cleanup_stats["applied"])
+            self.assertEqual(
+                hit.cleaned_decoded_sha256,
+                decoded_image_sha256(image),
+            )
+            restored_blocks = [block.deep_copy() for block in blocks]
+            restored_blocks[0].block_final_mask_pixel_count = 0
+            restored_blocks[0].block_mask_bbox = None
+            restored_blocks[0].block_mask_source = ""
+            restored_blocks[0].block_mask_decision = ""
+            restore_inpaint_block_state(
+                restored_blocks,
+                hit.block_states,
+            )
+            self.assertEqual(
+                restored_blocks[0].block_final_mask_pixel_count,
+                15,
+            )
+            self.assertEqual(
+                restored_blocks[0].block_mask_bbox,
+                [3, 2, 8, 7],
+            )
+            self.assertEqual(
+                restored_blocks[0].block_mask_source,
+                "ctd-refined",
+            )
+            self.assertEqual(
+                restored_blocks[0].block_mask_decision,
+                "accepted",
+            )
+
+    def test_inpaint_checkpoint_compresses_lossless_array_artifacts(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            _project, _reference, store = self._store(tmp)
+            blocks = self._blocks()
+            blocks[0].text = "OCR"
+            image = np.zeros((128, 128, 3), dtype=np.uint8)
+            raw_mask = np.zeros((128, 128), dtype=np.uint8)
+            raw_mask[16:96, 20:104] = 255
+            final_mask = raw_mask.copy()
+            final_mask[8:12, 8:12] = 255
+            identity = build_inpaint_identity(
+                source_sha256="a" * 64,
+                detection_fingerprint="b" * 64,
+                ocr_fingerprint="c" * 64,
+                blocks=blocks,
+                brush_strokes=[],
+                runtime={
+                    "key": "AOT",
+                    "backend": "torch",
+                    "precision": "fp32",
+                },
+                model_identity={
+                    "id": "aot",
+                    "declared_digests": ["1" * 64],
+                },
+                hd_strategy={"strategy": "Original"},
+                mask_settings={"mask_refiner": "ctd"},
+            )
+            fingerprint = build_inpaint_fingerprint(identity)
+
+            self.assertTrue(
+                record_inpaint_checkpoint(
+                    store,
+                    page_key="page:00000000",
+                    fingerprint=fingerprint,
+                    identity=identity,
+                    blocks=blocks,
+                    cleaned_image=image,
+                    raw_mask=raw_mask,
+                    final_mask=final_mask,
+                    cleanup_stats=None,
+                )
+            )
+            stage = store.lookup_stage(
+                "page:00000000",
+                "inpaint",
+                fingerprint,
+            )
+
+            self.assertIsNotNone(stage)
+            assert stage is not None
+            stored_bytes = sum(
+                (
+                    store.object_root
+                    / object_hash[:2]
+                    / object_hash
+                ).stat().st_size
+                for object_hash in stage.objects.values()
+            )
+            raw_bytes = image.nbytes + raw_mask.nbytes + final_mask.nbytes
+            self.assertLess(stored_bytes, raw_bytes // 4)
 
     def test_inpainter_identity_hashes_model_without_declared_sha256(
         self,
@@ -526,6 +680,35 @@ class ProjectStageCheckpointTests(unittest.TestCase):
             assert existing is not None
             self.assertTrue(existing.output_exists)
             self.assertIsNone(existing.output_bytes)
+
+            project_blocks[0]._debug_image_shape = [999, 999]
+            volatile_metadata = lookup_render_checkpoint(
+                store,
+                page_key="page:00000000",
+                fingerprint=fingerprint,
+                identity=identity,
+                project_blocks=project_blocks,
+                project_viewer_state=viewer_state,
+                current_output_base_root=str(output_base),
+            )
+            self.assertIsNotNone(volatile_metadata)
+
+            changed_viewer_state = {
+                "text_items_state": [
+                    {"block_id": "block-a", "text": "사용자 수정"}
+                ]
+            }
+            self.assertIsNone(
+                lookup_render_checkpoint(
+                    store,
+                    page_key="page:00000000",
+                    fingerprint=fingerprint,
+                    identity=identity,
+                    project_blocks=project_blocks,
+                    project_viewer_state=changed_viewer_state,
+                    current_output_base_root=str(output_base),
+                )
+            )
 
             output_path.unlink()
             missing = lookup_render_checkpoint(
