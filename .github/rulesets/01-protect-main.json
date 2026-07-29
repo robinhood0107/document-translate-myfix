@@ -40,6 +40,9 @@
             "context": "validate-pr-flow"
           },
           {
+            "context": "validate-commit-attribution"
+          },
+          {
             "context": "validate-main-docs"
           },
           {

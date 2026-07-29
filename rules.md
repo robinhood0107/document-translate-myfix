@@ -250,9 +250,11 @@ python scripts/compile_translations.py --check
   - staged/unstaged 혼합 커밋 차단
 - `commit-msg`
   - 커밋 제목 형식 검사
+  - author, committer, contributor trailer의 AI 기여자 표기 차단
 - `pre-push`
   - 브랜치 이름 검사
   - 잘못된 원격/업스트림 검사
+  - 새로 push되는 커밋 범위의 AI 기여자 표기 차단
   - 빠른 검증 실행
 
 초기 설정:
@@ -271,6 +273,7 @@ CI는 필수다. 다음 항목이 통과해야 병합 가능하다.
 
 - 브랜치 이름 규칙 검사
 - PR 대상 브랜치 흐름 검사
+- PR/push에서 새로 추가되는 커밋의 AI 기여자 표기 검사
 - `main` 문서 승격 allowlist 검사
 - 저장소 위생 검사
 - Python 구문/컴파일 검사
