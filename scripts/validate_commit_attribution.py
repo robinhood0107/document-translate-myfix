@@ -11,7 +11,6 @@ import sys
 import unicodedata
 
 ZERO_SHA_RE = re.compile(r"^0+$")
-CONVENTIONAL_BRANCH_RE = re.compile(r"^(feature|fix|chore)/")
 
 AI_NAME_PATTERNS = (
     re.compile(
@@ -204,35 +203,12 @@ def commits_in_range(revision_range: str) -> list[str]:
     ]
 
 
-def ref_exists(ref_name: str) -> bool:
-    completed = subprocess.run(
-        ["git", "rev-parse", "--verify", "--quiet", ref_name],
-        check=False,
-        capture_output=True,
-        text=True,
-    )
-    return completed.returncode == 0
-
-
 def new_ref_commits(
     after_sha: str,
     *,
     branch: str,
     remote: str,
 ) -> list[str]:
-    if CONVENTIONAL_BRANCH_RE.match(branch):
-        base_ref = f"{remote}/develop"
-    elif branch.startswith("hotfix/"):
-        base_ref = f"{remote}/main"
-    elif branch == "benchmarking/lab":
-        base_ref = f"{remote}/develop"
-    else:
-        base_ref = ""
-
-    if base_ref and ref_exists(base_ref):
-        merge_base = run_git("merge-base", base_ref, after_sha).strip()
-        return commits_in_range(f"{merge_base}..{after_sha}")
-
     args = ["rev-list", "--reverse", after_sha]
     remote_refs = run_git(
         "for-each-ref",
