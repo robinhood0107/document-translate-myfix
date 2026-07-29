@@ -144,3 +144,16 @@
 OCR/번역 결과, DB와 sidecar는 Git 밖에만 보존합니다. cold 후보의 제품
 기본값은 별도 family 선별과 품질 게이트를 통과하기 전에는 변경하지
 않습니다.
+
+## protocol v2 순이득 재검증
+
+- 역사적 `miss overhead 3% 이하`와 `all-hit 50% 이상` 하드 게이트를
+  제거했습니다. 기존 결과와 판정 기록은 그대로 보존합니다.
+- 새 판정은 cache-disabled 두 번과 `cache cold + all-hit`의 누적시간을
+  비교합니다.
+- project checkpoint는 `cache cold + 한 페이지 수정` 누적시간도
+  cache-disabled 두 번보다 빨라야 합니다.
+- 최소 개선율은 없고, exact output·runtime/HTTP zero·페이지 단위
+  downstream 무효화 계약은 그대로 유지합니다.
+- 한 페이지 수정의 순이득을 측정할 수 있도록 project 검증은 최소
+  2페이지를 요구합니다.
