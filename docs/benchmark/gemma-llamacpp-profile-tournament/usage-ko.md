@@ -19,6 +19,10 @@ Docker volume, 고정 image ID, cache OFF 계약을 넣는다. 서로 다른
 디렉터리의 draft를 임의 연결하면 검증 단계에서 거부된다. 서로 내용은
 다르지만 로컬 파일명이 같은 GGUF는 `volume_filename`을 고유하게
 지정해야 하며, 동일 볼륨의 목적지 이름 중복도 검증 단계에서 거부된다.
+WSL의 기존 swap 점유가 프로필 순서에 섞이지 않게 하려면 preflight에
+`container_memory_limit_mib`와 `container_swap_disabled: true`를 함께
+지정한다. swap을 끄면서 양수 memory limit을 생략하면 manifest가
+거부된다.
 
 ## 검증·잠금·준비
 
@@ -54,6 +58,12 @@ Docker volume, 고정 image ID, cache OFF 계약을 넣는다. 서로 다른
 외부 GPU 컨테이너, idle GPU memory 초과, 포트 충돌, 모델 volume 누락이
 있으면 실행하지 않는다. runner에는 이를 무시하는 formal benchmark
 옵션이 없다.
+
+`container_swap_disabled`가 켜진 실행은 Docker에 memory limit과 같은
+`--memory-swap` 값을 전달한다. cgroup v2의 `memory.swap.max=0`이 되어
+해당 llama.cpp 컨테이너는 호스트의 기존 WSL swap을 사용할 수 없다.
+물리 RAM 한도를 넘으면 swap으로 느려지는 대신 명시적 OOM/health
+실패로 기록된다.
 
 ## NGL 경계
 

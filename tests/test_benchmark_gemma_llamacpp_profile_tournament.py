@@ -7,6 +7,7 @@ import struct
 import sys
 import tempfile
 import unittest
+from dataclasses import replace
 from pathlib import Path
 from unittest import mock
 
@@ -182,6 +183,50 @@ class GemmaLlamaCppProfileTournamentTests(unittest.TestCase):
                 and profile.speculation == "mtp"
             )
         )
+
+    def test_manifest_requires_memory_limit_when_container_swap_is_disabled(
+        self,
+    ) -> None:
+        def valid(payload: dict[str, object]) -> None:
+            preflight = payload["preflight"]
+            assert isinstance(preflight, dict)
+            preflight["container_memory_limit_mib"] = 12288
+            preflight["container_swap_disabled"] = True
+
+        with tempfile.TemporaryDirectory() as tmp:
+            manifest = self._load_manifest(Path(tmp), valid)
+
+        self.assertEqual(manifest.container_memory_limit_mib, 12288)
+        self.assertTrue(manifest.container_swap_disabled)
+
+        def missing_limit(payload: dict[str, object]) -> None:
+            preflight = payload["preflight"]
+            assert isinstance(preflight, dict)
+            preflight["container_swap_disabled"] = True
+
+        with (
+            tempfile.TemporaryDirectory() as tmp,
+            self.assertRaisesRegex(
+                tournament.ProtocolError,
+                "requires a positive container_memory_limit_mib",
+            ),
+        ):
+            self._load_manifest(Path(tmp), missing_limit)
+
+        def non_boolean(payload: dict[str, object]) -> None:
+            preflight = payload["preflight"]
+            assert isinstance(preflight, dict)
+            preflight["container_memory_limit_mib"] = 12288
+            preflight["container_swap_disabled"] = "true"
+
+        with (
+            tempfile.TemporaryDirectory() as tmp,
+            self.assertRaisesRegex(
+                tournament.ProtocolError,
+                "must be a boolean",
+            ),
+        ):
+            self._load_manifest(Path(tmp), non_boolean)
 
     def test_manifest_rejects_cross_directory_mtp_pairing(self) -> None:
         def mutate(payload: dict[str, object]) -> None:
@@ -360,6 +405,31 @@ class GemmaLlamaCppProfileTournamentTests(unittest.TestCase):
         self.assertNotEqual(original_fingerprint, changed_fingerprint)
         self.assertNotEqual(original_fingerprint, draft_fingerprint)
 
+        constrained_manifest = replace(
+            manifest,
+            container_memory_limit_mib=12288,
+            container_swap_disabled=True,
+        )
+        constrained_fingerprint = tournament.runtime_fingerprint(
+            constrained_manifest,
+            inventory,
+            original,
+        )
+        self.assertNotEqual(original_fingerprint, constrained_fingerprint)
+        self.assertEqual(
+            tournament._container_resource_contract(constrained_manifest),
+            {
+                "memory_limit_mib": 12288,
+                "swap_disabled": True,
+                "arguments": [
+                    "--memory",
+                    "12288m",
+                    "--memory-swap",
+                    "12288m",
+                ],
+            },
+        )
+
     def test_volume_verification_rejects_unknown_artifact_before_docker(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             manifest = self._load_manifest(Path(tmp))
@@ -404,6 +474,8 @@ class GemmaLlamaCppProfileTournamentTests(unittest.TestCase):
                 "RestartPolicy": {"Name": "no"},
                 "DeviceRequests": [{"Driver": ""}],
                 "NetworkMode": "default",
+                "Memory": 0,
+                "MemorySwap": 0,
                 "PortBindings": {
                     "8080/tcp": [
                         {
@@ -444,6 +516,79 @@ class GemmaLlamaCppProfileTournamentTests(unittest.TestCase):
         )
         self.assertIn("loopback port binding", errors)
         self.assertIn("read-only volume mount /volumes/lab", errors)
+
+    def test_container_contract_checks_memory_and_swap_limits(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            manifest = replace(
+                self._load_manifest(Path(tmp)),
+                container_memory_limit_mib=12288,
+                container_swap_disabled=True,
+            )
+            inventory = self._fake_inventory(manifest)
+        profile = tournament.find_profile(manifest, "candidate__none")
+        contract = tournament._container_contract(
+            manifest,
+            inventory,
+            profile,
+        )
+        inspected = {
+            "Image": manifest.expected_image_id,
+            "Config": {
+                "Cmd": contract["command"],
+                "Entrypoint": ["/app/llama-server"],
+                "Labels": {
+                    "comic-translate.runtime": "gemma-profile-tournament",
+                    "comic-translate.config-fingerprint": contract[
+                        "fingerprint"
+                    ],
+                },
+            },
+            "HostConfig": {
+                "Privileged": False,
+                "AutoRemove": False,
+                "RestartPolicy": {"Name": "no"},
+                "DeviceRequests": [{"Driver": ""}],
+                "NetworkMode": "default",
+                "Memory": 12288 * 1024 * 1024,
+                "MemorySwap": 12288 * 1024 * 1024,
+                "PortBindings": {
+                    "8080/tcp": [
+                        {
+                            "HostIp": "127.0.0.1",
+                            "HostPort": "18080",
+                        }
+                    ]
+                },
+            },
+            "Mounts": [
+                {
+                    "Destination": "/volumes/lab",
+                    "Name": "neutral-lab-models",
+                    "Type": "volume",
+                    "RW": False,
+                }
+            ],
+        }
+
+        self.assertEqual(
+            tournament.container_contract_errors(
+                inspected=inspected,
+                manifest=manifest,
+                profile=profile,
+                contract=contract,
+            ),
+            [],
+        )
+        inspected["HostConfig"]["MemorySwap"] = 0  # type: ignore[index]
+        self.assertIn(
+            "swap limit",
+            tournament.container_contract_errors(
+                inspected=inspected,
+                manifest=manifest,
+                profile=profile,
+                contract=contract,
+            ),
+        )
 
     def test_mtp_command_rejects_tokenizer_mismatch(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
