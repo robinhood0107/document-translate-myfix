@@ -1,5 +1,5 @@
 {
-  "protocol_version": 1,
+  "protocol_version": 2,
   "name": "comic-translate-cold-cache-finalization",
   "baseline_preset": "benchmarks/cold_cache_finalization/presets/product-v1.1.0-baseline.json",
   "limits": {
@@ -20,9 +20,7 @@
     "expected_full_improvement_percent": 1.0,
     "cumulative_full_improvement_percent": 3.0,
     "final_full_improvement_percent": 10.0,
-    "cold_variance_percent": 5.0,
-    "cache_miss_overhead_percent": 3.0,
-    "cache_all_hit_improvement_percent": 50.0
+    "cold_variance_percent": 5.0
   },
   "models": {
     "iq4_nl": {

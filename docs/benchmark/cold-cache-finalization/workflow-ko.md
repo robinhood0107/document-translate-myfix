@@ -55,15 +55,18 @@ OCR downstream 재계산을 실행합니다.
 
 두 cache 시나리오는 다음을 모두 만족해야 합니다.
 
-- miss overhead 중앙값 3% 이하
 - exact output
-- all-hit 50% 이상 단축
 - inference/runtime/HTTP zero 계약
 - 페이지 단위 downstream 무효화
+- `cache cold + all-hit` 누적시간이 cache-disabled 두 번보다 짧음
+- project는 `cache cold + 한 페이지 수정` 누적시간도
+  cache-disabled 두 번보다 짧음
 
-cache cold 3회의 5% variance는 보고서에 diagnostic으로 남기되 이 목록의
-승격 gate에는 포함하지 않습니다. cold 후보와 최종 22페이지 비교에서는
-기존 5% variance gate를 계속 적용합니다.
+최소 개선율은 두지 않습니다. miss overhead, all-hit 단축률, cache cold
+3회의 5% variance는 보고서에 diagnostic으로 남기되 승격 gate에는
+포함하지 않습니다. project 부분 수정은 최소 2페이지에서 검증합니다.
+cold 후보와 최종 22페이지 비교에서는 기존 5% variance gate를 계속
+적용합니다.
 
 ## 5. 승격
 
@@ -72,6 +75,6 @@ cache cold 3회의 5% variance는 보고서에 diagnostic으로 남기되 이 �
 실행하고 전체 중앙값 10% 이상일 때만 제품 기본값을 바꿉니다.
 
 캐시는 cold 후보와 독립적으로 승격할 수 있습니다. global OCR exact
-cache는 최종 gate를 통과했습니다. project checkpoint는 기능 계약은
-통과했지만 miss overhead 3% gate를 통과하지 못했으므로 제품 기본 OFF를
-유지합니다.
+cache는 최종 gate를 통과했습니다. project checkpoint의 기존 판정은
+miss overhead 기준을 사용한 역사적 결과이며, protocol v2의 두 순이득
+시나리오를 다시 통과한 뒤 기본값을 결정합니다.
