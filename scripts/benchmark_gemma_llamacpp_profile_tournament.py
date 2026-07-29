@@ -103,6 +103,10 @@ TOKENIZER_METADATA_KEYS = (
     "tokenizer.ggml.add_eos_token",
     "tokenizer.chat_template",
 )
+GGUF_CONTRACT_METADATA_KEYS = (
+    *TOKENIZER_METADATA_KEYS,
+    "gemma4.block_count",
+)
 VOCABULARY_METADATA_KEYS = tuple(
     key
     for key in TOKENIZER_METADATA_KEYS
@@ -630,7 +634,7 @@ def gguf_metadata_contract(path: Path) -> dict[str, Any]:
         for _ in range(int(metadata_count)):
             key = _read_gguf_string(stream).decode("utf-8", errors="replace")
             value_type = _read_u32(stream)
-            capture = key in TOKENIZER_METADATA_KEYS
+            capture = key in GGUF_CONTRACT_METADATA_KEYS
             digest = hashlib.sha256() if capture else None
             value = _consume_gguf_value(stream, value_type, digest=digest)
             if capture:
@@ -3023,7 +3027,16 @@ def tune_profile_ngl(
     output = _require_external_path(output_path, label="NGL tuning output")
     if output.exists():
         raise FileExistsError(f"NGL tuning output already exists: {output}")
-    if max_ngl < profile.target_ngl:
+    target_inventory = inventory["artifacts"][profile.target_id]
+    target_selected_metadata = (
+        (target_inventory.get("gguf") or {}).get("selected") or {}
+    )
+    block_count = int(
+        target_selected_metadata.get("gemma4.block_count", 0) or 0
+    )
+    meaningful_max_ngl = block_count + 1 if block_count > 0 else max_ngl
+    effective_max_ngl = min(max_ngl, meaningful_max_ngl)
+    if effective_max_ngl < profile.target_ngl:
         raise ProtocolError("max_ngl must be at least the initial target NGL")
 
     attempts: list[dict[str, Any]] = []
@@ -3066,7 +3079,7 @@ def tune_profile_ngl(
             safe_ngls.append(profile.target_ngl)
         probe_values = next_ngl_probe_values(
             initial_ngl=profile.target_ngl,
-            max_ngl=max_ngl,
+            max_ngl=effective_max_ngl,
             initial_passed=initial_passed,
             initial_swap_only_failure=initial_swap_only_failure,
         )
@@ -3094,6 +3107,9 @@ def tune_profile_ngl(
         "protocol_version": PROTOCOL_VERSION,
         "profile_id": profile.id,
         "initial_target_ngl": profile.target_ngl,
+        "requested_max_target_ngl": max_ngl,
+        "model_block_count": block_count or None,
+        "effective_max_target_ngl": effective_max_ngl,
         "selected_draft_ngl": selected_draft_ngl,
         "safe_target_ngls": safe_ngls,
         "safe_max_target_ngl": safe_max,

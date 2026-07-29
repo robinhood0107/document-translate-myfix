@@ -787,6 +787,50 @@ class GemmaLlamaCppProfileTournamentTests(unittest.TestCase):
         self.assertEqual(result["safe_max_target_ngl"], 25)
         self.assertEqual(result["first_failed_target_ngl"], 26)
 
+    def test_ngl_tuning_caps_search_at_model_output_layer(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            manifest = self._load_manifest(root)
+            inventory = self._fake_inventory(manifest)
+            inventory["artifacts"]["baseline"]["gguf"]["selected"] = {  # type: ignore[index]
+                "gemma4.block_count": 30,
+            }
+            profile = tournament.find_profile(manifest, "baseline__none")
+            attempted_ngls: list[int] = []
+
+            def fake_probe(**kwargs: object) -> dict[str, object]:
+                candidate = kwargs["profile"]
+                attempted_ngls.append(  # type: ignore[union-attr]
+                    candidate.target_ngl  # type: ignore[union-attr]
+                )
+                return {
+                    "status": "passed",
+                    "resource_gates": {
+                        "swap_growth_ok": True,
+                        "shared_gpu_growth_ok": True,
+                    },
+                }
+
+            with mock.patch.object(
+                tournament,
+                "probe_profile_load",
+                side_effect=fake_probe,
+            ):
+                result = tournament.tune_profile_ngl(
+                    manifest=manifest,
+                    inventory=inventory,
+                    profile=profile,
+                    max_ngl=40,
+                    output_path=root / "capped-tuning.json",
+                    start_timeout_sec=1,
+                    request_timeout_sec=1,
+                )
+
+        self.assertEqual(attempted_ngls, list(range(23, 32)))
+        self.assertEqual(result["model_block_count"], 30)
+        self.assertEqual(result["effective_max_target_ngl"], 31)
+        self.assertEqual(result["safe_max_target_ngl"], 31)
+
     def test_prometheus_parser_keeps_speculation_and_timing_metrics(self) -> None:
         parsed = tournament.parse_prometheus_metrics(
             "\n".join(
