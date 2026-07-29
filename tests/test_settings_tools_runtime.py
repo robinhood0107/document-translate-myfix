@@ -99,13 +99,22 @@ class SettingsToolsRuntimeTests(unittest.TestCase):
         self.assertFalse(hasattr(page.ui, "ctd_settings_widget"))
         self.assertEqual(page.get_mask_refiner_settings()["mask_refiner"], "ctd")
         self.assertTrue(page.get_mask_refiner_settings()["keep_existing_lines"])
-        self.assertFalse(
+        self.assertTrue(
             page.ui.project_checkpoint_enabled_checkbox.isChecked()
+        )
+        settings = QtCore.QSettings("ComicLabs", "ComicTranslate")
+        self.assertEqual(
+            settings.value(
+                "project_checkpoint/default_version",
+                0,
+                type=int,
+            ),
+            1,
         )
 
     def test_project_checkpoint_preview_setting_round_trip(self) -> None:
         settings = QtCore.QSettings("ComicLabs", "ComicTranslate")
-        settings.setValue("project_checkpoint/enabled", True)
+        settings.setValue("project_checkpoint/enabled", False)
         settings.sync()
         page = self._make_page()
 
@@ -122,6 +131,19 @@ class SettingsToolsRuntimeTests(unittest.TestCase):
                 True,
                 type=bool,
             )
+        )
+        second_page = self._make_page()
+        second_page.load_settings()
+        self.assertFalse(
+            second_page.ui.project_checkpoint_enabled_checkbox.isChecked()
+        )
+        self.assertEqual(
+            settings.value(
+                "project_checkpoint/default_version",
+                0,
+                type=int,
+            ),
+            1,
         )
 
     def test_translator_selection_returns_canonical_item_data_for_localized_labels(self) -> None:
