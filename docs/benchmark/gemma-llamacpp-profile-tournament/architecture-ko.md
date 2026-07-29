@@ -72,6 +72,9 @@ assistant draft에서 달라질 수 있는 token type·BOS/EOS flag는 증거로
 swap hard gate는 실행 중인 llama.cpp 컨테이너의 cgroup peak를 우선한다.
 이 값은 해당 프로필의 실제 swap만 포함한다. cgroup 파일을 읽을 수 없는
 환경에서만 전역 WSL swap 증가량으로 fail-safe 판정한다.
+manifest가 컨테이너 swap 금지를 요구하면 Docker memory limit과
+memory-swap limit을 같은 값으로 고정한다. 이 host resource contract도
+runtime fingerprint와 stopped-container 재사용 검사에 포함한다.
 
 랭킹은 실제 제품 번역 요청 시간을 paired 비교한다. startup 회귀와
 메모리 안정성은 별도 hard gate다.
