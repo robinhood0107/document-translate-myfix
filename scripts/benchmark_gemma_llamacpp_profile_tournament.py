@@ -2938,11 +2938,19 @@ def probe_profile_load(
         shared_gpu_growth = float(
             result["resources"].get("shared_gpu_growth_mb") or 0.0
         )
+        result["resource_gates"] = {
+            "swap_growth_mb": swap_growth,
+            "swap_growth_ok": swap_growth <= manifest.max_swap_growth_mb,
+            "shared_gpu_growth_mb": shared_gpu_growth,
+            "shared_gpu_growth_ok": (
+                shared_gpu_growth <= manifest.max_shared_gpu_growth_mb
+            ),
+        }
         result["status"] = (
             "passed"
             if (
-                swap_growth <= manifest.max_swap_growth_mb
-                and shared_gpu_growth <= manifest.max_shared_gpu_growth_mb
+                result["resource_gates"]["swap_growth_ok"]
+                and result["resource_gates"]["shared_gpu_growth_ok"]
             )
             else "failed"
         )
@@ -2991,10 +2999,11 @@ def next_ngl_probe_values(
     initial_ngl: int,
     max_ngl: int,
     initial_passed: bool,
+    initial_swap_only_failure: bool = False,
 ) -> list[int]:
     if initial_ngl < 0 or max_ngl < initial_ngl:
         raise ProtocolError("Invalid NGL probe bounds")
-    if initial_passed:
+    if initial_passed or initial_swap_only_failure:
         return list(range(initial_ngl + 1, max_ngl + 1))
     return list(range(initial_ngl - 1, -1, -1))
 
@@ -3045,20 +3054,29 @@ def tune_profile_ngl(
     for draft_mode in draft_modes:
         initial = attempt(profile.target_ngl, draft_mode)
         initial_passed = initial["status"] == "passed"
+        initial_resource_gates = initial.get("resource_gates") or {}
+        initial_swap_only_failure = bool(
+            not initial_passed
+            and initial_resource_gates
+            and not initial_resource_gates.get("swap_growth_ok", True)
+            and initial_resource_gates.get("shared_gpu_growth_ok", False)
+        )
+        search_upward = initial_passed or initial_swap_only_failure
         if initial_passed:
             safe_ngls.append(profile.target_ngl)
         probe_values = next_ngl_probe_values(
             initial_ngl=profile.target_ngl,
             max_ngl=max_ngl,
             initial_passed=initial_passed,
+            initial_swap_only_failure=initial_swap_only_failure,
         )
         for ngl in probe_values:
             probed = attempt(ngl, draft_mode)
             if probed["status"] == "passed":
                 safe_ngls.append(ngl)
-                if not initial_passed:
+                if not search_upward:
                     break
-            elif initial_passed:
+            elif search_upward and safe_ngls:
                 first_failed_ngl = ngl
                 break
         if safe_ngls:
