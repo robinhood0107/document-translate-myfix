@@ -10,6 +10,7 @@ import json
 import logging
 import os
 import re
+import zlib
 
 import msgpack
 import numpy as np
@@ -49,9 +50,9 @@ DETECTION_RENDER_AREA_SCHEMA_VERSION = "detected-bubble-render-area-v1"
 DETECTION_FONT_SCHEMA_VERSION = "font-onnx-512-cv-color-v1"
 OCR_POSTPROCESS_SCHEMA_VERSION = "quality-retry-drop-guards-v1"
 TRANSLATION_STATE_SCHEMA_VERSION = "ctpr-block-translation-state-v1"
-INPAINT_INPUT_SCHEMA_VERSION = "ordered-ocr-mask-brush-v1"
+INPAINT_INPUT_SCHEMA_VERSION = "deterministic-ordered-input-brush-v2"
 INPAINT_CLEANUP_SCHEMA_VERSION = "bubble-residue-duplicate-fill-v1"
-INPAINT_ARTIFACT_SCHEMA_VERSION = "lossless-cleaned-mask-v1"
+INPAINT_ARTIFACT_SCHEMA_VERSION = "lossless-zlib-array-v2"
 RENDER_INPUT_SCHEMA_VERSION = "translation-inpaint-style-layout-v1"
 RENDER_SANITIZER_SCHEMA_VERSION = "strict-symbol-rich-text-v1"
 RENDER_OUTPUT_SCHEMA_VERSION = "encoded-output-object-v1"
@@ -117,6 +118,7 @@ class InpaintCheckpointResult:
     final_mask: np.ndarray
     cleanup_stats: dict[str, Any]
     cleaned_object_sha256: str
+    cleaned_decoded_sha256: str
 
 
 @dataclass(frozen=True)
@@ -1126,8 +1128,6 @@ def build_inpaint_identity(
     detection_fingerprint: str,
     ocr_fingerprint: str,
     blocks: list[TextBlock],
-    raw_mask: np.ndarray,
-    generated_mask: np.ndarray,
     brush_strokes: list[dict[str, Any]] | None,
     runtime: Mapping[str, Any],
     model_identity: Mapping[str, Any],
@@ -1142,8 +1142,6 @@ def build_inpaint_identity(
         "ordered_blocks_sha256": canonical_sha256(
             [_block_inpaint_record(block) for block in blocks]
         ),
-        "raw_mask_sha256": decoded_image_sha256(raw_mask),
-        "generated_mask_sha256": decoded_image_sha256(generated_mask),
         "brush_strokes_sha256": _brush_stroke_signature(brush_strokes),
         "runtime": _json_safe(dict(runtime)),
         "model": _json_safe(dict(model_identity)),
@@ -1194,12 +1192,17 @@ def build_skipped_stage_fingerprint(
 
 
 def _pack_array_artifact(kind: str, value: np.ndarray) -> bytes:
+    contiguous = np.ascontiguousarray(value)
+    raw = contiguous.tobytes(order="C")
     return _pack(
         {
             "schema_version": PROJECT_INPAINT_CHECKPOINT_SCHEMA_VERSION,
             "artifact_schema": INPAINT_ARTIFACT_SCHEMA_VERSION,
             "kind": kind,
-            "array": np.ascontiguousarray(value),
+            "dtype": str(contiguous.dtype),
+            "shape": [int(item) for item in contiguous.shape],
+            "compression": "zlib",
+            "data": zlib.compress(raw, level=3),
         }
     )
 
@@ -1221,18 +1224,32 @@ def _unpack_array_artifact(
         or decoded.get("kind") != kind
     ):
         raise ValueError("Inpaint checkpoint artifact schema does not match.")
-    value = decoded.get("array")
-    if not isinstance(value, np.ndarray):
-        raise ValueError("Inpaint checkpoint artifact array is missing.")
-    if tuple(int(item) for item in value.shape) != expected_shape:
+    shape = tuple(int(item) for item in decoded.get("shape", []))
+    if shape != expected_shape:
         raise ValueError("Inpaint checkpoint artifact shape does not match.")
-    if value.dtype != np.uint8:
+    if decoded.get("dtype") != "uint8":
         raise ValueError("Inpaint checkpoint artifact dtype must be uint8.")
+    if decoded.get("compression") != "zlib":
+        raise ValueError("Inpaint checkpoint artifact compression does not match.")
+    compressed = decoded.get("data")
+    if not isinstance(compressed, bytes):
+        raise ValueError("Inpaint checkpoint artifact data is missing.")
+    expected_bytes = int(np.prod(expected_shape, dtype=np.int64))
+    decompressor = zlib.decompressobj()
+    raw = decompressor.decompress(compressed, expected_bytes + 1)
+    if (
+        len(raw) != expected_bytes
+        or not decompressor.eof
+        or decompressor.unconsumed_tail
+        or decompressor.unused_data
+    ):
+        raise ValueError("Inpaint checkpoint artifact compressed size is invalid.")
+    value = np.frombuffer(raw, dtype=np.uint8).reshape(expected_shape).copy()
     if mask and value.ndim != 2:
         raise ValueError("Inpaint checkpoint mask must be two-dimensional.")
     if not mask and (value.ndim != 3 or value.shape[2] not in (3, 4)):
         raise ValueError("Inpaint checkpoint image must be RGB or RGBA.")
-    return np.ascontiguousarray(value)
+    return value
 
 
 def _compact_cleanup_stats(
@@ -1271,6 +1288,7 @@ def record_inpaint_checkpoint(
     raw_mask: np.ndarray,
     final_mask: np.ndarray,
     cleanup_stats: Mapping[str, Any] | None,
+    cleaned_decoded_sha256: str | None = None,
 ) -> bool:
     if store is None or not store.available:
         return False
@@ -1297,6 +1315,9 @@ def record_inpaint_checkpoint(
         if object_hash is None:
             return False
         objects[role] = object_hash
+    cleaned_sha256 = str(cleaned_decoded_sha256 or "").strip().lower()
+    if not re.fullmatch(r"[0-9a-f]{64}", cleaned_sha256):
+        cleaned_sha256 = decoded_image_sha256(cleaned)
     compact_stats = _compact_cleanup_stats(cleanup_stats)
     return store.record_stage(
         page_key,
@@ -1307,7 +1328,7 @@ def record_inpaint_checkpoint(
             "identity_sha256": canonical_sha256(dict(identity)),
             "cleaned_shape": [int(item) for item in cleaned.shape],
             "mask_shape": [int(item) for item in final.shape],
-            "cleaned_sha256": decoded_image_sha256(cleaned),
+            "cleaned_sha256": cleaned_sha256,
             "raw_mask_sha256": decoded_image_sha256(raw),
             "final_mask_sha256": decoded_image_sha256(final),
             "cleanup_stats": compact_stats,
@@ -1400,6 +1421,7 @@ def lookup_inpaint_checkpoint(
             final_mask=final_mask,
             cleanup_stats=_compact_cleanup_stats(cleanup_stats),
             cleaned_object_sha256=cleaned_hash,
+            cleaned_decoded_sha256=str(payload["cleaned_sha256"]),
         )
     except (
         KeyError,
@@ -1408,6 +1430,7 @@ def lookup_inpaint_checkpoint(
         msgpack.ExtraData,
         msgpack.FormatError,
         msgpack.StackError,
+        zlib.error,
     ):
         logger.warning(
             "Invalid inpaint checkpoint ignored for %s; inpainting will be "
