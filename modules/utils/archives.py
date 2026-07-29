@@ -169,8 +169,24 @@ def _comic_entry_name(page_index: int, page_name: str, ext: str) -> str:
     return f"{page_index + 1:06d}_{safe_name}"
 
 
+def _is_safe_archive_member_name(name: str) -> bool:
+    normalized = str(name or "").replace("\\", "/")
+    if (
+        not normalized
+        or normalized.startswith("/")
+        or re.match(r"^[A-Za-z]:", normalized)
+        or any(ord(character) < 32 for character in normalized)
+    ):
+        return False
+    parts = normalized.split("/")
+    return all(part not in {"", ".", ".."} for part in parts)
+
+
 def _archive_member_name(entry: dict) -> str:
-    return str(entry.get("archive_member_name") or entry.get("entry_name") or "")
+    candidate = str(
+        entry.get("archive_member_name") or entry.get("entry_name") or ""
+    )
+    return candidate if _is_safe_archive_member_name(candidate) else ""
 
 
 def _list_cbz_zip_entries(file_path: str) -> list[dict]:
@@ -298,7 +314,11 @@ def list_archive_image_entries(file_path: str) -> list[dict]:
 
     if entries and entries[0]["kind"] == "pdf_page":
         return entries
-    return sorted(entries, key=lambda e: natural_sort_key(e.get("entry_name", "")))
+    safe_entries = [entry for entry in entries if _archive_member_name(entry)]
+    return sorted(
+        safe_entries,
+        key=lambda entry: natural_sort_key(entry.get("entry_name", "")),
+    )
 
 
 def materialize_archive_entry(file_path: str, entry: dict, output_path: str) -> bool:
@@ -402,7 +422,7 @@ def materialize_archive_entries(file_path: str, items: list[tuple[dict, str]]) -
         import rarfile
         with rarfile.RarFile(file_path, 'r') as archive:
             for entry, output_path in items:
-                entry_name = str(entry.get("entry_name", ""))
+                entry_name = _archive_member_name(entry)
                 if not entry_name:
                     continue
                 out_dir = os.path.dirname(output_path)
@@ -419,7 +439,7 @@ def materialize_archive_entries(file_path: str, items: list[tuple[dict, str]]) -
     if file_lower.endswith(('.cbt', '.tar')):
         with tarfile.open(file_path, 'r') as archive:
             for entry, output_path in items:
-                entry_name = str(entry.get("entry_name", ""))
+                entry_name = _archive_member_name(entry)
                 if not entry_name:
                     continue
                 out_dir = os.path.dirname(output_path)
@@ -442,7 +462,7 @@ def materialize_archive_entries(file_path: str, items: list[tuple[dict, str]]) -
         targets = []
         name_to_output: dict[str, str] = {}
         for entry, output_path in items:
-            entry_name = str(entry.get("entry_name", ""))
+            entry_name = _archive_member_name(entry)
             if not entry_name:
                 continue
             targets.append(entry_name)
