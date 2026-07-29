@@ -210,6 +210,24 @@ class ControllerBatchPreflightTests(unittest.TestCase):
         self.assertFalse(controller._batch_cancel_requested)
         self.assertFalse(controller._batch_pause_requested)
 
+    def test_shutdown_marks_active_debug_run_interrupted(self) -> None:
+        controller = self._build_batch_finished_controller(
+            OUTPUT_TARGET_IMAGES
+        )
+        controller._is_shutting_down = True
+
+        with mock.patch(
+            "controller.finish_debug_artifact_run"
+        ) as finish_debug:
+            ComicTranslate.on_batch_process_finished(controller)
+
+        finish_debug.assert_called_once_with(
+            controller,
+            status="interrupted",
+        )
+        controller._finish_batch_process_ui.assert_not_called()
+        self.assertEqual(controller.selected_batch, [])
+
     def test_finalize_single_archive_output_builds_cbz_from_staging_dir(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             series_dir = os.path.join(temp_dir, "series")

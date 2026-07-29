@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+import json
+import tempfile
 import unittest
 from concurrent.futures import Future
+from pathlib import Path
 from types import SimpleNamespace
 from unittest import mock
 
@@ -316,6 +319,46 @@ class PipelinePerformanceTelemetryTests(unittest.TestCase):
 
         self.assertEqual(snapshot["gpu"], {"available": True})
         self.assertEqual(snapshot["wsl_swap"]["swap_used_mb"], 64.0)
+
+    def test_memlog_can_bind_to_debug_runtime_sidecar(self) -> None:
+        logger = MemLogger(SimpleNamespace())
+        logger._gpu_bench_enabled = True
+        with tempfile.TemporaryDirectory() as temporary:
+            runtime = Path(temporary) / "runtime"
+            logger.bind_debug_run(str(runtime))
+            logger._append_payload(
+                {
+                    "ts": 1.0,
+                    "tag": "tick",
+                    "gpu": {"available": True},
+                    "wsl_swap": {"swap_used_mb": 32.0},
+                }
+            )
+
+            memlog = [
+                json.loads(line)
+                for line in (runtime / "memlog.jsonl")
+                .read_text(encoding="utf-8")
+                .splitlines()
+            ]
+            gpu_log = [
+                json.loads(line)
+                for line in (runtime / "gpu-bench.jsonl")
+                .read_text(encoding="utf-8")
+                .splitlines()
+            ]
+            self.assertEqual(memlog[0]["tag"], "tick")
+            self.assertEqual(gpu_log[0]["gpu"], {"available": True})
+            logger.unbind_debug_run()
+            self.assertIsNone(logger._debug_runtime_dir)
+
+    def test_memlog_ignores_empty_debug_runtime_path(self) -> None:
+        logger = MemLogger(SimpleNamespace())
+
+        logger.bind_debug_run("")
+
+        self.assertIsNone(logger._debug_runtime_dir)
+        self.assertIsNone(logger._path)
 
 
 if __name__ == "__main__":
