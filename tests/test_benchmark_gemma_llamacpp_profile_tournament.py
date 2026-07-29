@@ -97,7 +97,7 @@ class GemmaLlamaCppProfileTournamentTests(unittest.TestCase):
                 "llama_prompt_cache_ram_mib": 0,
             },
             "preflight": {
-                "max_idle_gpu_used_mb": 1024,
+                "max_idle_gpu_used_mb": 2048,
                 "max_swap_growth_mb": 128,
             },
         }
