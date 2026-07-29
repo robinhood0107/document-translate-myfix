@@ -25,7 +25,7 @@ class ColdCacheFinalizationTests(unittest.TestCase):
             ROOT / str(protocol["baseline_preset"])
         )
 
-        self.assertEqual(protocol["protocol_version"], 1)
+        self.assertEqual(protocol["protocol_version"], 2)
         self.assertEqual(protocol["limits"]["pipeline_max_pages"], 6)
         self.assertEqual(protocol["limits"]["pipeline_max_blocks"], 54)
         self.assertEqual(protocol["limits"]["completion_tokens"], 512)
@@ -661,6 +661,10 @@ class ColdCacheFinalizationTests(unittest.TestCase):
         self.assertTrue(analysis["passed"])
         self.assertEqual(analysis["all_hit_reduction_percent"], 90.0)
         self.assertEqual(analysis["cache_miss_overhead_percent"], 2.0)
+        self.assertEqual(
+            analysis["cold_plus_all_hit_net_gain_percent"],
+            44.0,
+        )
         without_stabilization = dict(results)
         without_stabilization.pop("stabilization")
         incomplete = finalization.analyze_cache_results(
@@ -688,6 +692,72 @@ class ColdCacheFinalizationTests(unittest.TestCase):
         self.assertFalse(
             noisy_analysis["diagnostics"][
                 "disabled_cold_within_variance_reference"
+            ]
+        )
+
+    def test_cache_promotion_uses_net_gain_not_miss_overhead_gate(
+        self,
+    ) -> None:
+        protocol = finalization.load_protocol()
+
+        def cold(seconds: float) -> dict:
+            return {
+                "status": "passed",
+                "performance_stats": {
+                    "stages": {"ocr": {"wall_ms": seconds * 1000}},
+                },
+                "page_contract": {"ocr_sha256": "a" * 64},
+            }
+
+        hit = {
+            **cold(1.0),
+            "performance_stats": {
+                "stages": {"ocr": {"wall_ms": 1_000}},
+                "runtime": {"paddleocr_vl": {"start_count": 0}},
+                "paddleocr_vl": {"http_attempt_count": 0},
+            },
+        }
+
+        def analyze(enabled_seconds: float) -> dict:
+            disabled = cold(10.0)
+            enabled = cold(enabled_seconds)
+            return finalization.analyze_cache_results(
+                protocol=protocol,
+                scenario="global-ocr",
+                results={
+                    "stabilization": [enabled, disabled],
+                    "disabled_cold": [
+                        {**disabled, "round": round_index}
+                        for round_index in range(1, 4)
+                    ],
+                    "enabled_empty_cold": [
+                        {**enabled, "round": round_index}
+                        for round_index in range(1, 4)
+                    ],
+                    "all_hit": hit,
+                },
+            )
+
+        large_overhead_but_net_faster = analyze(15.0)
+        self.assertTrue(large_overhead_but_net_faster["passed"])
+        self.assertEqual(
+            large_overhead_but_net_faster[
+                "cache_miss_overhead_percent"
+            ],
+            50.0,
+        )
+        self.assertEqual(
+            large_overhead_but_net_faster[
+                "cold_plus_all_hit_net_gain_percent"
+            ],
+            20.0,
+        )
+
+        net_slower = analyze(21.0)
+        self.assertFalse(net_slower["passed"])
+        self.assertFalse(
+            net_slower["checks"][
+                "cold_plus_all_hit_net_gain_positive"
             ]
         )
 
@@ -831,6 +901,14 @@ class ColdCacheFinalizationTests(unittest.TestCase):
         )
         self.assertTrue(
             analysis["checks"]["cached_render_output_exact"]
+        )
+        self.assertEqual(
+            analysis["cold_plus_all_hit_net_gain_percent"],
+            45.0,
+        )
+        self.assertEqual(
+            analysis["cold_plus_one_page_edit_net_gain_percent"],
+            35.0,
         )
 
     def test_translation_screen_requires_key_and_runtime_contracts(

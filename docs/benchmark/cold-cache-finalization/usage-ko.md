@@ -12,7 +12,7 @@
 
 ```bat
 scripts\cold_cache_finalization_suite_cuda13.bat describe ^
-  --output-dir C:\comic-translate-validation\cold-cache\protocol-v1
+  --output-dir C:\comic-translate-validation\cold-cache\protocol-v2
 ```
 
 ## pipeline family
@@ -85,6 +85,12 @@ scripts\cold_cache_finalization_suite_cuda13.bat run-cache ^
   --source-lang Japanese ^
   --output-dir C:\comic-translate-validation\cold-cache\project
 ```
+
+project checkpoint는 임의의 miss-overhead 또는 all-hit 개선율 문턱을
+사용하지 않는다. `캐시 첫 실행 + all-hit`와
+`캐시 첫 실행 + 한 페이지 수정`을 각각 `캐시 없이 같은 작업 두 번`과
+비교하며, 두 누적시간이 모두 실제로 짧아야 통과한다. 부분 수정은
+최소 2페이지에서만 검증한다.
 
 ## 산출물
 

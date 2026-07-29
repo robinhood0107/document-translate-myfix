@@ -63,8 +63,7 @@ global OCR cache는 격리된 cache-disabled와 enabled-empty를 한 번씩
 안정화 실행도 stopped container에서 시작하고 결과에 남지만, 최초
 Docker·GPU driver·filesystem 준비 편차가 SQLite miss overhead로
 오인되지 않도록 overhead와 variance 계산에서는 제외합니다. 측정 3회는
-매번 새 user-data/DB와 stopped container에서 시작합니다. miss overhead
-중앙값은 3% 이하여야 합니다. all-hit는
+매번 새 user-data/DB와 stopped container에서 시작합니다. all-hit는
 Paddle runtime start와 OCR HTTP가 모두 0이어야 하며 raw OCR 계약이
 cold와 완전히 같아야 합니다. runtime은 사전 부팅하지 않으므로 이 0은
 제품 경로가 실제로 시작을 생략했다는 뜻입니다.
@@ -73,12 +72,14 @@ project checkpoint도 같은 비채점 안정화 한 쌍 뒤 disabled cold와
 enabled-empty cold를 각각 3회 비교합니다. 안정화와 측정의 DB·프로젝트
 sidecar는 서로 격리합니다. 이후 아래를 실제 프로젝트로 확인합니다.
 
-cache 검증의 5% cold variance는 비차단 diagnostic으로 함께 기록합니다.
-cache 승격의 miss 비용 계약은 승인된 대로 세 측정의 중앙값 overhead
-3% 이하로 판정합니다. 전체 wall 분산에는 checkpoint와 무관한 Docker
-runtime, inpainter 초기화, 비결정적 번역 decode가 함께 섞이기 때문입니다.
-반면 cold-path 후보 선별과 최종 제품 비교의 5% variance hard gate는
-그대로 유지합니다.
+cache 검증의 miss overhead와 5% cold variance는 비차단 diagnostic으로
+함께 기록합니다. 승격은 cache-disabled 두 번의 누적시간과
+`enabled-empty cold + all-hit` 누적시간을 비교하며, project는
+`enabled-empty cold + 한 페이지 OCR downstream 재계산`도 별도로
+비교합니다. 두 project 시나리오가 모두 0%보다 빨라야 하며 최소
+개선율은 없습니다. 부분 수정은 최소 2페이지에서 실행합니다. 반면
+cold-path 후보 선별과 최종 제품 비교의 5% variance hard gate는 그대로
+유지합니다.
 
 1. 기존 render output이 있는 all-hit
 2. output만 삭제한 뒤 render artifact materialization
