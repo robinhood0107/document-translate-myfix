@@ -47,6 +47,7 @@ from app.projects.stage_checkpoints import (
     record_translation_checkpoint,
     registered_inpainter_model_identity,
     resolve_font_identity,
+    restore_inpaint_block_state,
     snapshot_project_render_blocks,
     snapshot_project_translations,
 )
@@ -1754,6 +1755,7 @@ class StageBatchedProcessor(BatchProcessor):
                             source_shape=tuple(
                                 int(item) for item in ctx.image.shape
                             ),
+                            current_blocks=ctx.blk_list,
                         )
                     except Exception:
                         logger.warning(
@@ -1765,6 +1767,10 @@ class StageBatchedProcessor(BatchProcessor):
                         ctx.project_inpaint_fingerprint = ""
                         project_hit = None
                 if project_hit is not None:
+                    restore_inpaint_block_state(
+                        ctx.blk_list,
+                        project_hit.block_states,
+                    )
                     ctx.inpaint_input_img = project_hit.cleaned_image
                     ctx.raw_mask = project_hit.raw_mask
                     ctx.mask = project_hit.final_mask
@@ -1962,6 +1968,7 @@ class StageBatchedProcessor(BatchProcessor):
                             page_key=ctx.project_checkpoint_page_key,
                             fingerprint=ctx.project_inpaint_fingerprint,
                             identity=ctx.project_inpaint_identity,
+                            blocks=ctx.blk_list,
                             cleaned_image=ctx.inpaint_input_img,
                             raw_mask=ctx.raw_mask,
                             final_mask=ctx.mask,
