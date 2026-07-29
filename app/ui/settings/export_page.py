@@ -25,7 +25,9 @@ class ExportPage(QtWidgets.QWidget):
         batch_label = MLabel(self.tr("Automatic Mode")).h4()
         batch_note = MLabel(
             self.tr(
-                "Selected automatic-mode export artifacts are saved to log_<source>_<timestamp> in the same directory as the input file/archive."
+                "Text and inpainted-image exports stay in log_<source>_<timestamp>. "
+                "Checked debug artifacts are stored under the project, folder, "
+                "or archive cache sidecar."
             )
         ).secondary()
         batch_note.setWordWrap(True)
@@ -33,6 +35,7 @@ class ExportPage(QtWidgets.QWidget):
         self.raw_text_checkbox = MCheckBox(self.tr("Export Raw Text"))
         self.translated_text_checkbox = MCheckBox(self.tr("Export Translated text"))
         self.inpainted_image_checkbox = MCheckBox(self.tr("Export Inpainted Image"))
+        self.ocr_debug_checkbox = MCheckBox(self.tr("Export OCR Diagnostics (Debug)"))
         self.detector_overlay_checkbox = MCheckBox(self.tr("Export Detector Overlay (Debug)"))
         self.raw_mask_checkbox = MCheckBox(self.tr("Export Raw Inpaint Mask (Debug)"))
         self.mask_overlay_checkbox = MCheckBox(self.tr("Export Mask Overlay (Debug)"))
@@ -44,6 +47,7 @@ class ExportPage(QtWidgets.QWidget):
         layout.addWidget(self.raw_text_checkbox)
         layout.addWidget(self.translated_text_checkbox)
         layout.addWidget(self.inpainted_image_checkbox)
+        layout.addWidget(self.ocr_debug_checkbox)
         layout.addWidget(self.detector_overlay_checkbox)
         layout.addWidget(self.raw_mask_checkbox)
         layout.addWidget(self.mask_overlay_checkbox)

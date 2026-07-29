@@ -8,6 +8,11 @@ import imkit as imk
 import numpy as np
 from PIL import Image, ImageOps
 
+from modules.utils.debug_artifacts import (
+    atomic_debug_image,
+    atomic_debug_json,
+)
+
 
 OCR_STATUS_OK = "ok"
 OCR_STATUS_EMPTY_INITIAL = "empty_initial"
@@ -808,13 +813,28 @@ def export_ocr_debug_artifacts(
     blk_list,
     ocr_engine: str,
     source_lang: str,
-) -> None:
+    *,
+    flat_names: bool = False,
+) -> dict[str, str]:
     os.makedirs(output_dir, exist_ok=True)
     payload = build_ocr_debug_payload(page_base_name, ocr_engine, source_lang, blk_list)
-    debug_path = os.path.join(output_dir, f"{page_base_name}_ocr_debug.json")
-    with open(debug_path, "w", encoding="utf-8") as fh:
-        json.dump(payload, fh, ensure_ascii=False, indent=4)
+    debug_path = os.path.join(
+        output_dir,
+        "ocr-debug.json"
+        if flat_names
+        else f"{page_base_name}_ocr_debug.json",
+    )
+    if flat_names:
+        debug_path = atomic_debug_json(
+            output_dir,
+            "ocr-debug.json",
+            payload,
+        )
+    else:
+        with open(debug_path, "w", encoding="utf-8") as fh:
+            json.dump(payload, fh, ensure_ascii=False, indent=4)
 
+    written = {"ocr_debug": debug_path}
     for idx, blk in enumerate(blk_list or []):
         if getattr(blk, "ocr_status", "") != OCR_STATUS_EMPTY_AFTER_RETRY:
             continue
@@ -822,5 +842,19 @@ def export_ocr_debug_artifacts(
         retry_crop = build_retry_crop_from_bbox(image, retry_bbox)
         if retry_crop is None or retry_crop.size == 0:
             continue
-        retry_path = os.path.join(output_dir, f"{page_base_name}_block_{idx}_retry.png")
-        imk.write_image(retry_path, retry_crop)
+        retry_path = os.path.join(
+            output_dir,
+            f"ocr-retry-block-{idx:04d}.png"
+            if flat_names
+            else f"{page_base_name}_block_{idx}_retry.png",
+        )
+        if flat_names:
+            retry_path = atomic_debug_image(
+                output_dir,
+                os.path.basename(retry_path),
+                retry_crop,
+            )
+        else:
+            imk.write_image(retry_path, retry_crop)
+        written[f"retry_crop_{idx}"] = retry_path
+    return written
