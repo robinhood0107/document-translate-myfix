@@ -11,6 +11,7 @@
 - 트래킹되는 코드 변경 전에 먼저 브랜치를 만든다.
 - 이 저장소에서는 Git worktree를 새로 만들지 않는다. 항상 `C:\path\to\comic-translate` 폴더 안에서 브랜치만 전환하며 작업한다.
 - 기능 단위 작업은 `커밋`과 `push`까지 끝나야 완료로 본다.
+- 커밋 author, committer, `Co-authored-by`, `Signed-off-by` 및 기타 contributor trailer에 Codex를 포함한 AI 도구를 기록하지 않는다. 커밋에는 의도한 사람 기여자 신원만 남긴다.
 - 사용자에게 보이는 UI를 바꾸면 문서, 번역, 필요 시 변경 이력까지 함께 갱신한다.
 - 애매한 점이 있거나 트레이드오프가 발생하면, 추천안과 근거를 함께 사용자에게 질문하고 결정한 뒤 진행한다.
 - 가상환경, 캐시, 임시 산출물은 Git에 올리지 않는다.
@@ -310,7 +311,7 @@ GitHub 저장소 설정에서 아래를 권장한다.
 ## 10-1. Main 문서 승격 정책
 
 - `main`에는 운영 필수 문서만 허용한다.
-  - 루트: `README.md`, `README_ko.md`, `rules.md`
+  - 루트: `AGENTS.md`, `README.md`, `README_ko.md`, `rules.md`
   - GitHub 운영: `.github/PULL_REQUEST_TEMPLATE.md`
   - 설치/운영: `docs/setup/quickstart*.md`
   - 운영 문서: `docs/gemma/*.md`, `docs/hunyuan/*.md`, `docs/repo/github-rulesets-public-free-ko.md`, `hunyuanocr_docker_files/README.md`, `paddleocr_vl_docker_files/README.md`
