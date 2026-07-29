@@ -3206,6 +3206,16 @@ def next_ngl_probe_values(
     return list(range(initial_ngl - 1, -1, -1))
 
 
+def _is_swap_only_resource_failure(result: Mapping[str, Any]) -> bool:
+    gates = result.get("resource_gates") or {}
+    return bool(
+        result.get("status") != "passed"
+        and gates
+        and not gates.get("swap_growth_ok", True)
+        and gates.get("shared_gpu_growth_ok", False)
+    )
+
+
 def tune_profile_ngl(
     *,
     manifest: BenchmarkManifest,
@@ -3258,7 +3268,6 @@ def tune_profile_ngl(
 
     selected_draft_ngl = ""
     safe_ngls: list[int] = []
-    first_failed_ngl: int | None = None
     for draft_mode in draft_modes:
         initial = attempt(profile.target_ngl, draft_mode)
         initial_passed = initial["status"] == "passed"
@@ -3267,13 +3276,7 @@ def tune_profile_ngl(
             and draft_mode != "0"
         ):
             continue
-        initial_resource_gates = initial.get("resource_gates") or {}
-        initial_swap_only_failure = bool(
-            not initial_passed
-            and initial_resource_gates
-            and not initial_resource_gates.get("swap_growth_ok", True)
-            and initial_resource_gates.get("shared_gpu_growth_ok", False)
-        )
+        initial_swap_only_failure = _is_swap_only_resource_failure(initial)
         search_upward = initial_passed or initial_swap_only_failure
         if initial_passed:
             safe_ngls.append(profile.target_ngl)
@@ -3289,9 +3292,22 @@ def tune_profile_ngl(
                 safe_ngls.append(ngl)
                 if not search_upward:
                     break
-            elif search_upward and safe_ngls:
-                first_failed_ngl = ngl
+            elif search_upward and not _is_swap_only_resource_failure(probed):
                 break
+        if initial_swap_only_failure and not safe_ngls:
+            attempted_ngls = {
+                int(item["profile"]["target_ngl"])
+                for item in attempts
+                if str(item["profile"].get("draft_ngl") or "")
+                == draft_mode
+            }
+            for ngl in range(profile.target_ngl - 1, -1, -1):
+                if ngl in attempted_ngls:
+                    continue
+                probed = attempt(ngl, draft_mode)
+                if probed["status"] == "passed":
+                    safe_ngls.append(ngl)
+                    break
         if safe_ngls:
             selected_draft_ngl = draft_mode
             break
@@ -3311,6 +3327,27 @@ def tune_profile_ngl(
             if lower_probe["status"] == "passed":
                 safe_ngls.append(lower_neighbor)
                 safe_ngls = sorted(set(safe_ngls))
+    failed_selected_ngls = sorted(
+        {
+            int(item["profile"]["target_ngl"])
+            for item in attempts
+            if str(item["profile"].get("draft_ngl") or "")
+            == selected_draft_ngl
+            and item.get("status") != "passed"
+        }
+    )
+    first_failed_ngl = (
+        next(
+            (
+                ngl
+                for ngl in failed_selected_ngls
+                if safe_max is not None and ngl > safe_max
+            ),
+            None,
+        )
+        if safe_max is not None
+        else None
+    )
     comparison_ngls = safe_ngls[-2:]
     payload = {
         "protocol_version": PROTOCOL_VERSION,
