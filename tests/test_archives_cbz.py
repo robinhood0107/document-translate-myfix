@@ -7,11 +7,13 @@ import zipfile
 from pathlib import Path
 from unittest import mock
 
+import py7zr
 from PIL import Image
 
 from modules.utils.archives import (
     close_comic_cache,
     list_archive_image_entries,
+    materialize_archive_entries,
     materialize_archive_entry,
 )
 from modules.utils.file_handler import FileHandler, ensure_prepared_path_materialized
@@ -118,6 +120,81 @@ class ArchiveCbzIntegrationTests(unittest.TestCase):
             self.assertFalse(os.path.exists(paths[1]))
             self.assertTrue(ensure_prepared_path_materialized(paths[1]))
             self.assertTrue(os.path.isfile(paths[1]))
+
+    def test_cb7_entries_roundtrip_with_patched_py7zr(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            source_path = root / "001.png"
+            source_bytes = self._make_png(source_path, (12, 34, 56))
+            archive_path = root / "sample.cb7"
+            with py7zr.SevenZipFile(archive_path, "w") as archive:
+                archive.write(source_path, arcname="chapter/001.png")
+
+            entries = list_archive_image_entries(str(archive_path))
+            self.assertEqual(
+                [entry["entry_name"] for entry in entries],
+                ["chapter/001.png"],
+            )
+
+            output_path = root / "materialized.png"
+            self.assertTrue(
+                materialize_archive_entry(
+                    str(archive_path),
+                    entries[0],
+                    str(output_path),
+                )
+            )
+            self.assertEqual(output_path.read_bytes(), source_bytes)
+
+    def test_archive_member_traversal_is_rejected_before_extraction(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            archive_path = root / "sample.cb7"
+            with py7zr.SevenZipFile(archive_path, "w"):
+                pass
+            output_path = root / "materialized.png"
+
+            for member_name in (
+                "../outside.png",
+                "chapter/../../outside.png",
+                "/absolute.png",
+                r"C:\outside.png",
+                "chapter//page.png",
+                "chapter/\x00page.png",
+            ):
+                with self.subTest(member_name=member_name):
+                    self.assertFalse(
+                        materialize_archive_entry(
+                            str(archive_path),
+                            {
+                                "kind": "archive_entry",
+                                "entry_name": member_name,
+                            },
+                            str(output_path),
+                        )
+                    )
+                    self.assertFalse(output_path.exists())
+
+            with mock.patch.object(
+                py7zr.SevenZipFile,
+                "extract",
+                side_effect=AssertionError("unsafe member reached py7zr"),
+            ):
+                self.assertEqual(
+                    materialize_archive_entries(
+                        str(archive_path),
+                        [
+                            (
+                                {
+                                    "kind": "archive_entry",
+                                    "entry_name": "../outside.png",
+                                },
+                                str(output_path),
+                            )
+                        ],
+                    ),
+                    0,
+                )
 
     def test_cbr_dispatch_uses_cbz_native_loader_contract(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
