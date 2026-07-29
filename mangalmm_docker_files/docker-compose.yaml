@@ -5,7 +5,7 @@ services:
     container_name: mangalmm-local-server
     restart: unless-stopped
     ports:
-      - "28081:8080"
+      - "127.0.0.1:28081:8080"
     gpus: all
     environment:
       NVIDIA_VISIBLE_DEVICES: all

@@ -4,6 +4,10 @@
 
 This repository is a local-first fork of upstream `comic-translate` that started from the upstream `v2.6.7` codebase and then diverged with product-specific runtime, OCR, workflow, and Windows setup changes.
 
+The fork's product release version is `1.1.1`. Upstream `2.7.1` is recorded
+separately as the latest selective-backport lineage and is not this fork's
+product version.
+
 The fork is maintained around a practical desktop workflow:
 
 - local Gemma translation runtime support
@@ -96,9 +100,20 @@ This repository now uses a strict `main + develop + tag` model.
 - `develop` is the integration branch for upcoming product work.
 - `main` is the shipping baseline.
 - Official releases are created only from `vX.Y.Z` version tags that point to commits already contained in `main`.
-- The Windows release asset is built with `Nuitka` and published as a GitHub Release artifact from that tag.
-- Release candidates that touch Nuitka packaging, release assets, Windows runtime pins, or `main` promotion must first pass a local Windows PowerShell Nuitka build before CI/release workflows are used as the second verification layer.
-- Models, checkpoints, and Docker runtimes are not bundled into the release executable and remain separately provisioned.
+- The official Windows asset is a deterministic
+  `comic-translate-vX.Y.Z-windows-launcher-source.zip` plus
+  `SHA256SUMS.txt`.
+- The ZIP contains allowlisted product source, both first-run Windows
+  launchers, pinned CUDA12/CUDA13 requirements, runtime Compose/config files,
+  the Gemma preparation script, translations/resources, README files, and the
+  license.
+- Virtual environments, models, caches, benchmark runners/results, local
+  paths, and secrets are not bundled. The launchers install their supported
+  environment on first run.
+- Release candidates must reproduce the ZIP and pass both extracted
+  launchers with `COMIC_VERIFY_ONLY=1` before `main` promotion.
+- The retained Nuitka PowerShell scripts are unofficial manual tools and do
+  not produce official release assets.
 - `release/*` branches are not used.
 
 The authoritative repository policy lives in [rules.md](rules.md).
@@ -164,11 +179,6 @@ The `v2.7.0` backport brought in selected user-facing features such as:
 - new target languages and improved RTL handling
 - selected webtoon/list-view behavior fixes
 
-Audit document:
-
-- [docs/history/v267-to-v270-backport-audit.md](docs/history/v267-to-v270-backport-audit.md)
-- [docs/history/v267-to-v270-backport-audit-ko.md](docs/history/v267-to-v270-backport-audit-ko.md)
-
 ### `v2.7.0 -> v2.7.1`
 
 The `v2.7.1` round selectively applies the upstream fixes that matter to this fork:
@@ -177,12 +187,7 @@ The `v2.7.1` round selectively applies the upstream fixes that matter to this fo
 - main-thread-safe `QTimer.singleShot(...)` dispatch for async UI callbacks
 - list thumbnail loading reworked around `QImage` in the worker thread and `QPixmap` conversion on the main thread
 - import menu cleanup so `PSD` appears next to `Project File`
-- app version bump to `2.7.1`
-
-Audit document:
-
-- [docs/history/v270-to-v271-backport-audit.md](docs/history/v270-to-v271-backport-audit.md)
-- [docs/history/v270-to-v271-backport-audit-ko.md](docs/history/v270-to-v271-backport-audit-ko.md)
+- upstream selective-backport lineage recorded as `2.7.1`
 
 ## Quick Start
 
@@ -294,8 +299,6 @@ Tracked compose/runtime images used by the repo:
 ## Repository Documents
 
 - [rules.md](rules.md)
-- [docs/history/change-log.md](docs/history/change-log.md)
-- [docs/history/change-log-ko.md](docs/history/change-log-ko.md)
 - [docs/gemma/local-server-ko.md](docs/gemma/local-server-ko.md)
 - [docs/hunyuan/local-server-ko.md](docs/hunyuan/local-server-ko.md)
 - [docs/repo/github-rulesets-public-free-ko.md](docs/repo/github-rulesets-public-free-ko.md)
