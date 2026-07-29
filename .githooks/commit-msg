@@ -1,10 +1,39 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-MSG_FILE="${1:?commit message file is required}"
+MSG_FILE="$(realpath "${1:?commit message file is required}")"
 SUBJECT="$(sed -n '1p' "$MSG_FILE" | tr -d '\r')"
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
 REGEX='^(feat|fix|docs|chore|refactor|test|ci|build|perf|revert)(\([a-z0-9._/-]+\))?!?: .{3,72}$'
+
+resolve_python() {
+  if [[ -x "$ROOT_DIR/.venv-win/Scripts/python.exe" ]]; then
+    echo "$ROOT_DIR/.venv-win/Scripts/python.exe"
+    return
+  fi
+  if [[ -x "$ROOT_DIR/.venv-win-cuda13/Scripts/python.exe" ]]; then
+    echo "$ROOT_DIR/.venv-win-cuda13/Scripts/python.exe"
+    return
+  fi
+  if command -v python >/dev/null 2>&1; then
+    command -v python
+    return
+  fi
+  if command -v python3 >/dev/null 2>&1; then
+    command -v python3
+    return
+  fi
+  echo "Python interpreter not found." >&2
+  exit 1
+}
+
+PYTHON_BIN="$(resolve_python)"
+MSG_FILE_REL="$(realpath --relative-to="$ROOT_DIR" "$MSG_FILE")"
+
+cd "$ROOT_DIR"
+"$PYTHON_BIN" scripts/validate_commit_attribution.py \
+  --message-file "$MSG_FILE_REL"
 
 if [[ "$SUBJECT" =~ ^(Merge|Revert|fixup!|squash!) ]]; then
   exit 0
