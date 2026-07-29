@@ -40,7 +40,7 @@ logger = logging.getLogger(__name__)
 PROJECT_DETECTION_CHECKPOINT_SCHEMA_VERSION = 1
 PROJECT_OCR_CHECKPOINT_SCHEMA_VERSION = 1
 PROJECT_TRANSLATION_CHECKPOINT_SCHEMA_VERSION = 1
-PROJECT_INPAINT_CHECKPOINT_SCHEMA_VERSION = 1
+PROJECT_INPAINT_CHECKPOINT_SCHEMA_VERSION = 2
 PROJECT_RENDER_CHECKPOINT_SCHEMA_VERSION = 1
 DETECTION_PREPROCESS_SCHEMA_VERSION = "rtdetr-v2-rgb-640-f32-v1"
 DETECTION_POSTPROCESS_SCHEMA_VERSION = "comic-text-bubble-blocks-v1"
@@ -53,6 +53,7 @@ TRANSLATION_STATE_SCHEMA_VERSION = "ctpr-block-translation-state-v1"
 INPAINT_INPUT_SCHEMA_VERSION = "deterministic-ordered-input-brush-v2"
 INPAINT_CLEANUP_SCHEMA_VERSION = "bubble-residue-duplicate-fill-v1"
 INPAINT_ARTIFACT_SCHEMA_VERSION = "lossless-zlib-array-v2"
+INPAINT_BLOCK_STATE_SCHEMA_VERSION = "inpaint-block-state-v1"
 RENDER_INPUT_SCHEMA_VERSION = "translation-inpaint-style-layout-v1"
 RENDER_SANITIZER_SCHEMA_VERSION = "strict-symbol-rich-text-v1"
 RENDER_OUTPUT_SCHEMA_VERSION = "encoded-output-object-v1"
@@ -62,8 +63,37 @@ _OCR_OBJECT_ROLE = "ocr-raw-result"
 _INPAINT_CLEANED_OBJECT_ROLE = "inpaint-cleaned-image"
 _INPAINT_RAW_MASK_OBJECT_ROLE = "inpaint-raw-mask"
 _INPAINT_FINAL_MASK_OBJECT_ROLE = "inpaint-final-mask"
+_INPAINT_BLOCK_STATE_OBJECT_ROLE = "inpaint-block-state"
 _RENDER_OUTPUT_OBJECT_ROLE = "render-output"
 _FILE_SHA256_CACHE: dict[tuple[str, int, int, int], str] = {}
+
+_INPAINT_BLOCK_STATE_FIELDS = (
+    "_hard_box_applied",
+    "_hard_box_reason_codes",
+    "_legacy_fill_ratio",
+    "_rescue_fill_ratio",
+    "_hard_box_rescue_roi_xyxy",
+    "_hard_box_index",
+    "_hard_box_metrics",
+    "_legacy_mask_pixel_count",
+    "_rescue_mask_pixel_count",
+    "_final_mask_pixel_count",
+    "block_final_mask_pixel_count",
+    "block_mask_iou",
+    "block_mask_span_coverage",
+    "block_mask_bbox",
+    "block_mask_source",
+    "block_mask_decision",
+    "bubble_panel_mask_pixel_count",
+    "bubble_panel_mask_source",
+    "_erase_mode",
+    "_erase_edit_pixel_count",
+    "_erase_protect_pixel_count",
+    "_erase_skipped_reason",
+    "_mask_policy",
+    "mask_decision",
+    "mask_reject_reason",
+)
 
 _DETECTION_BLOCK_FIELDS = (
     "block_id",
@@ -119,6 +149,7 @@ class InpaintCheckpointResult:
     cleanup_stats: dict[str, Any]
     cleaned_object_sha256: str
     cleaned_decoded_sha256: str
+    block_states: list[dict[str, Any]]
 
 
 @dataclass(frozen=True)
@@ -1113,6 +1144,76 @@ def _block_inpaint_record(block: TextBlock) -> dict[str, Any]:
     }
 
 
+def snapshot_inpaint_block_state(
+    blocks: list[TextBlock] | None,
+) -> list[dict[str, Any]]:
+    """Capture only mask/inpaint-owned block fields.
+
+    Translation and user-authored render state are deliberately excluded so an
+    inpaint hit cannot revive stale text or formatting.
+    """
+
+    records: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for block in list(blocks or []):
+        block_id = str(getattr(block, "block_id", "") or "")
+        if not block_id or block_id in seen:
+            raise ValueError(
+                "Inpaint checkpoint block identities must be non-empty and "
+                "unique."
+            )
+        seen.add(block_id)
+        records.append(
+            {
+                "block_id": block_id,
+                "attributes": {
+                    field_name: copy.deepcopy(getattr(block, field_name))
+                    for field_name in _INPAINT_BLOCK_STATE_FIELDS
+                    if hasattr(block, field_name)
+                },
+            }
+        )
+    return records
+
+
+def restore_inpaint_block_state(
+    blocks: list[TextBlock],
+    block_states: list[dict[str, Any]],
+) -> None:
+    """Restore validated mask/inpaint metadata without touching user text."""
+
+    current = list(blocks or [])
+    staged: list[tuple[TextBlock, dict[str, Any]]] = []
+    if len(current) != len(block_states):
+        raise ValueError("Inpaint checkpoint block state count does not match.")
+    allowed = set(_INPAINT_BLOCK_STATE_FIELDS)
+    for block, record in zip(current, block_states):
+        if not isinstance(record, Mapping):
+            raise ValueError("Inpaint checkpoint block state must be an object.")
+        block_id = str(record.get("block_id", "") or "")
+        if block_id != str(getattr(block, "block_id", "") or ""):
+            raise ValueError("Inpaint checkpoint block order does not match.")
+        attributes = record.get("attributes")
+        if not isinstance(attributes, Mapping):
+            raise ValueError(
+                "Inpaint checkpoint block attributes must be an object."
+            )
+        unexpected = set(attributes) - allowed
+        if unexpected:
+            raise ValueError(
+                "Inpaint checkpoint block attributes contain unexpected "
+                "fields."
+            )
+        staged.append((block, copy.deepcopy(dict(attributes))))
+
+    for block, attributes in staged:
+        for field_name in _INPAINT_BLOCK_STATE_FIELDS:
+            if field_name in attributes:
+                setattr(block, field_name, attributes[field_name])
+            elif hasattr(block, field_name):
+                delattr(block, field_name)
+
+
 def _brush_stroke_signature(strokes: list[dict[str, Any]] | None) -> str:
     return _packed_sha256(
         {
@@ -1284,6 +1385,7 @@ def record_inpaint_checkpoint(
     page_key: str,
     fingerprint: str,
     identity: Mapping[str, Any],
+    blocks: list[TextBlock],
     cleaned_image: np.ndarray,
     raw_mask: np.ndarray,
     final_mask: np.ndarray,
@@ -1305,6 +1407,12 @@ def record_inpaint_checkpoint(
         or final.shape != cleaned.shape[:2]
     ):
         return False
+    try:
+        block_states = snapshot_inpaint_block_state(blocks)
+    except (TypeError, ValueError):
+        return False
+    if not block_states:
+        return False
     objects: dict[str, str] = {}
     for role, kind, value in (
         (_INPAINT_CLEANED_OBJECT_ROLE, "cleaned-image", cleaned),
@@ -1315,6 +1423,17 @@ def record_inpaint_checkpoint(
         if object_hash is None:
             return False
         objects[role] = object_hash
+    block_state_blob = _pack(
+        {
+            "schema_version": PROJECT_INPAINT_CHECKPOINT_SCHEMA_VERSION,
+            "state_schema": INPAINT_BLOCK_STATE_SCHEMA_VERSION,
+            "blocks": block_states,
+        }
+    )
+    block_state_hash = store.put_object(block_state_blob)
+    if block_state_hash is None:
+        return False
+    objects[_INPAINT_BLOCK_STATE_OBJECT_ROLE] = block_state_hash
     cleaned_sha256 = str(cleaned_decoded_sha256 or "").strip().lower()
     if not re.fullmatch(r"[0-9a-f]{64}", cleaned_sha256):
         cleaned_sha256 = decoded_image_sha256(cleaned)
@@ -1332,6 +1451,11 @@ def record_inpaint_checkpoint(
             "raw_mask_sha256": decoded_image_sha256(raw),
             "final_mask_sha256": decoded_image_sha256(final),
             "cleanup_stats": compact_stats,
+            "block_ids": [
+                str(item.get("block_id", "") or "")
+                for item in block_states
+            ],
+            "block_state_sha256": block_state_hash,
         },
         objects=objects,
     )
@@ -1344,6 +1468,7 @@ def lookup_inpaint_checkpoint(
     fingerprint: str,
     identity: Mapping[str, Any],
     source_shape: tuple[int, ...],
+    current_blocks: list[TextBlock],
 ) -> InpaintCheckpointResult | None:
     if store is None:
         return None
@@ -1404,6 +1529,58 @@ def lookup_inpaint_checkpoint(
             mask_shape,
             True,
         )
+        block_state_hash = str(
+            hit.objects.get(_INPAINT_BLOCK_STATE_OBJECT_ROLE, "") or ""
+        )
+        block_state_raw = (
+            store.read_object(block_state_hash)
+            if block_state_hash
+            else None
+        )
+        if (
+            block_state_raw is None
+            or payload.get("block_state_sha256") != block_state_hash
+        ):
+            raise ValueError("Inpaint checkpoint block state is missing.")
+        block_state_payload = _unpack(block_state_raw)
+        if (
+            not isinstance(block_state_payload, Mapping)
+            or int(block_state_payload.get("schema_version", 0))
+            != PROJECT_INPAINT_CHECKPOINT_SCHEMA_VERSION
+            or block_state_payload.get("state_schema")
+            != INPAINT_BLOCK_STATE_SCHEMA_VERSION
+        ):
+            raise ValueError(
+                "Inpaint checkpoint block state schema does not match."
+            )
+        block_states = block_state_payload.get("blocks")
+        if not isinstance(block_states, list):
+            raise ValueError("Inpaint checkpoint block states are missing.")
+        expected_block_ids = [
+            str(getattr(block, "block_id", "") or "")
+            for block in current_blocks
+        ]
+        restored_block_ids = [
+            str(item.get("block_id", "") or "")
+            if isinstance(item, Mapping)
+            else ""
+            for item in block_states
+        ]
+        if (
+            not expected_block_ids
+            or len(set(expected_block_ids)) != len(expected_block_ids)
+            or payload.get("block_ids") != restored_block_ids
+            or restored_block_ids != expected_block_ids
+        ):
+            raise ValueError(
+                "Inpaint checkpoint block state identities do not match."
+            )
+        # Validate the complete state before returning a hit. Applying it to
+        # disposable copies keeps lookup side-effect free.
+        restore_inpaint_block_state(
+            [block.deep_copy() for block in current_blocks],
+            block_states,
+        )
         if (
             payload.get("cleaned_sha256") != decoded_image_sha256(cleaned)
             or payload.get("raw_mask_sha256")
@@ -1422,6 +1599,7 @@ def lookup_inpaint_checkpoint(
             cleanup_stats=_compact_cleanup_stats(cleanup_stats),
             cleaned_object_sha256=cleaned_hash,
             cleaned_decoded_sha256=str(payload["cleaned_sha256"]),
+            block_states=copy.deepcopy(block_states),
         )
     except (
         KeyError,
