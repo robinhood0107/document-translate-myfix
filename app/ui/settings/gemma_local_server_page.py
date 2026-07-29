@@ -114,7 +114,15 @@ class GemmaLocalServerPage(QtWidgets.QWidget):
             row.addStretch(1)
             layout.addLayout(row)
 
-        self.raw_response_logging_checkbox = MCheckBox(self.tr("Raw Response Log"))
+        self.raw_response_logging_checkbox = MCheckBox(
+            self.tr("Save Raw Responses (Sensitive)")
+        )
+        self.raw_response_logging_checkbox.setToolTip(
+            self.tr(
+                "During automatic runs, save raw responses only in the active "
+                "project, folder, or archive cache sidecar."
+            )
+        )
         layout.addWidget(self.raw_response_logging_checkbox)
 
         tip = MLabel(

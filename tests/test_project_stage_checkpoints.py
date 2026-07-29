@@ -728,6 +728,63 @@ class ProjectStageCheckpointTests(unittest.TestCase):
                 expected,
             )
 
+    def test_debug_exports_do_not_change_render_checkpoint_identity(
+        self,
+    ) -> None:
+        common = {
+            "source_sha256": "2" * 64,
+            "translation_fingerprint": "3" * 64,
+            "inpaint_fingerprint": "4" * 64,
+            "inpaint_artifact_sha256": "5" * 64,
+            "blocks": self._blocks(),
+            "render_settings": {"font_family": "Arial"},
+            "font_identity": {
+                "family": "Arial",
+                "file_sha256": "6" * 64,
+            },
+            "target_language_code": "ko",
+            "output_base_root": "C:/output",
+        }
+        baseline = build_render_identity(
+            **common,
+            export_settings={
+                "resolved_automatic_output_target": "individual_images",
+                "resolved_automatic_output_image_format": "png",
+                "export_raw_text": False,
+                "export_inpainted_image": False,
+                "export_ocr_debug": False,
+                "export_raw_mask": False,
+            },
+        )
+        diagnostics_enabled = build_render_identity(
+            **common,
+            export_settings={
+                "resolved_automatic_output_target": "individual_images",
+                "resolved_automatic_output_image_format": "png",
+                "export_raw_text": True,
+                "export_inpainted_image": True,
+                "export_ocr_debug": True,
+                "export_raw_mask": True,
+            },
+        )
+        changed_output = build_render_identity(
+            **common,
+            export_settings={
+                "resolved_automatic_output_target": "individual_images",
+                "resolved_automatic_output_image_format": "webp",
+                "export_ocr_debug": True,
+            },
+        )
+
+        self.assertEqual(
+            build_render_fingerprint(baseline),
+            build_render_fingerprint(diagnostics_enabled),
+        )
+        self.assertNotEqual(
+            build_render_fingerprint(baseline),
+            build_render_fingerprint(changed_output),
+        )
+
     def test_render_materialization_rejects_tampered_bytes_before_writing(
         self,
     ) -> None:

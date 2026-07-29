@@ -10,6 +10,7 @@ from pathlib import Path
 
 import numpy as np
 
+from modules.utils.debug_artifacts import DebugArtifactError
 from modules.utils.inpaint_debug import (
     build_inpaint_debug_metadata,
     export_inpaint_debug_artifacts,
@@ -237,6 +238,62 @@ class InpaintDebugTests(unittest.TestCase):
         expected = np.zeros((5, 5), dtype=np.uint8)
         expected[3:5, 2:4] = 255
         np.testing.assert_array_equal(cleanup_delta, expected)
+
+    def test_sidecar_mode_uses_fixed_names_and_rejects_symlink_targets(
+        self,
+    ) -> None:
+        image = np.full((8, 8, 3), 255, dtype=np.uint8)
+        mask = np.zeros((8, 8), dtype=np.uint8)
+        block = _Block(xyxy=[1, 1, 6, 6], bubble_xyxy=[0, 0, 7, 7])
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            page_dir = Path(tmp_dir) / "page-0001_test"
+            page_dir.mkdir()
+            written = export_inpaint_debug_artifacts(
+                export_root=tmp_dir,
+                archive_bname="",
+                page_base_name="ignored",
+                image=image,
+                blocks=[block],
+                export_settings={
+                    "export_raw_mask": True,
+                    "export_debug_metadata": True,
+                },
+                raw_mask=mask,
+                metadata={"safe": True},
+                page_output_dir=str(page_dir),
+            )
+            self.assertEqual(
+                Path(written["raw_mask"]).name,
+                "inpaint-raw-mask.png",
+            )
+            self.assertEqual(
+                Path(written["debug_metadata"]).name,
+                "debug-metadata.json",
+            )
+
+            outside = Path(tmp_dir) / "outside.json"
+            outside.write_text("unchanged", encoding="utf-8")
+            target = page_dir / "debug-metadata.json"
+            target.unlink()
+            try:
+                target.symlink_to(outside)
+            except OSError:
+                self.skipTest("symlink creation is unavailable")
+            with self.assertRaises(DebugArtifactError):
+                export_inpaint_debug_artifacts(
+                    export_root=tmp_dir,
+                    archive_bname="",
+                    page_base_name="ignored",
+                    image=image,
+                    blocks=[block],
+                    export_settings={"export_debug_metadata": True},
+                    metadata={"safe": False},
+                    page_output_dir=str(page_dir),
+                )
+            self.assertEqual(
+                outside.read_text(encoding="utf-8"),
+                "unchanged",
+            )
 
 
 if __name__ == "__main__":
