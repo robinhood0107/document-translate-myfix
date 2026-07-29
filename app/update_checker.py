@@ -1,6 +1,10 @@
 import os
 import platform
 import logging
+import hashlib
+import ntpath
+import posixpath
+import re
 import requests
 import subprocess
 import tempfile
@@ -9,10 +13,67 @@ from PySide6.QtCore import QObject, Signal, QThread, QStandardPaths
 from app.version import __version__
 
 logger = logging.getLogger(__name__)
+LAUNCHER_SOURCE_SUFFIX = "-windows-launcher-source.zip"
+SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
+MAX_RELEASE_DOWNLOAD_BYTES = 1_000_000_000
+
+
+def select_release_asset_url(data: dict, system: str, latest_tag: str) -> str | None:
+    assets = data.get("assets", []) or []
+    if system == "Windows":
+        expected_source_zip = (
+            f"comic-translate-v{latest_tag}-windows-launcher-source.zip"
+        ).lower()
+        for asset in assets:
+            if str(asset.get("name", "")).lower() == expected_source_zip:
+                url = str(asset.get("browser_download_url", "") or "")
+                if url:
+                    return url
+    elif system == "Darwin":
+        for asset in assets:
+            name = str(asset.get("name", "")).lower()
+            if name.endswith(".dmg") or name.endswith(".pkg"):
+                url = str(asset.get("browser_download_url", "") or "")
+                if url:
+                    return url
+    return None
+
+
+def parse_release_checksum(payload: str, filename: str) -> str:
+    for raw_line in payload.splitlines():
+        parts = raw_line.strip().split(maxsplit=1)
+        if len(parts) != 2:
+            continue
+        digest, listed_name = parts
+        listed_name = listed_name.lstrip("*").strip()
+        if listed_name == filename and SHA256_RE.fullmatch(digest.lower()):
+            return digest.lower()
+    raise ValueError(f"SHA256SUMS.txt does not contain {filename}")
+
+
+def checksum_url_for_release_asset(url: str) -> str:
+    base, separator, _filename = url.rpartition("/")
+    if not separator or not base:
+        raise ValueError("Release asset URL has no parent path")
+    return f"{base}/SHA256SUMS.txt"
+
+
+def validate_download_filename(filename: str) -> str:
+    if (
+        not filename
+        or filename != ntpath.basename(filename)
+        or filename != posixpath.basename(filename)
+        or filename in {".", ".."}
+        or filename != filename.rstrip(". ")
+        or any(ord(character) < 32 or character in '<>:"/\\|?*' for character in filename)
+    ):
+        raise ValueError("Unsafe release asset filename")
+    return filename
+
 
 class UpdateChecker(QObject):
     """
-    Checks for updates on GitHub and handles downloading/running installers.
+    Checks for product updates and handles downloaded release packages.
     """
     update_available = Signal(str, str, str)  # version, release_notes, download_url
     up_to_date = Signal()
@@ -20,8 +81,8 @@ class UpdateChecker(QObject):
     download_progress = Signal(int)
     download_finished = Signal(str) # file_path
 
-    REPO_OWNER = "ogkalu2"
-    REPO_NAME = "comic-translate"
+    REPO_OWNER = "robinhood0107"
+    REPO_NAME = "document-translate-myfix"
 
     def __init__(
         self,
@@ -93,17 +154,18 @@ class UpdateChecker(QObject):
         self._worker_thread.start()
 
     def run_installer(self, file_path):
-        """Executes the installer based on the platform."""
+        """Opens the downloaded installer or launcher-source package."""
         try:
             system = platform.system()
             if system == "Windows":
-                # Use os.startfile; Windows will parse the installer manifest
-                # and trigger UAC only if the installer requires it.
+                # EXE/MSI packages launch normally. ZIP packages open in the
+                # registered archive viewer so users can extract the source
+                # bundle before running its first-run launcher.
                 os.startfile(file_path)
             elif system == "Darwin": # macOS
                 subprocess.Popen(["open", file_path])
         except Exception as e:
-            self.error_occurred.emit(f"Failed to launch installer: {e}")
+            self.error_occurred.emit(f"Failed to open release package: {e}")
 
     def shutdown(self):
         """Stops any active worker thread (best-effort)."""
@@ -174,18 +236,8 @@ class UpdateWorker(QObject):
 
             if version.parse(latest_tag) > version.parse(self.current_version):
                 # Find appropriate asset
-                asset_url = None
                 system = platform.system()
-                if system == "Windows":
-                    for asset in data.get("assets", []):
-                        if asset["name"].endswith(".exe") or asset["name"].endswith(".msi"):
-                            asset_url = asset["browser_download_url"]
-                            break
-                elif system == "Darwin":
-                    for asset in data.get("assets", []):
-                        if asset["name"].endswith(".dmg") or asset["name"].endswith(".pkg"):
-                            asset_url = asset["browser_download_url"]
-                            break
+                asset_url = select_release_asset_url(data, system, latest_tag)
                 
                 if asset_url or self.allow_release_link_without_installer:
                     self.update_available.emit(latest_tag, data.get("html_url", ""), asset_url)
@@ -212,6 +264,7 @@ class DownloadWorker(QObject):
         self.filename = filename
 
     def run(self):
+        partial_path = ""
         try:
             # Download to Downloads directory
             download_dir = QStandardPaths.writableLocation(QStandardPaths.DownloadLocation)
@@ -222,26 +275,56 @@ class DownloadWorker(QObject):
             if not os.path.exists(download_dir):
                 download_dir = tempfile.gettempdir()
 
-            save_path = os.path.join(download_dir, self.filename)
-            
+            filename = validate_download_filename(self.filename)
+            save_path = os.path.join(download_dir, filename)
+            partial_path = f"{save_path}.partial"
+            expected_sha256 = ""
+            if filename.lower().endswith(LAUNCHER_SOURCE_SUFFIX):
+                checksum_response = requests.get(
+                    checksum_url_for_release_asset(self.url),
+                    timeout=30,
+                )
+                checksum_response.raise_for_status()
+                expected_sha256 = parse_release_checksum(
+                    checksum_response.text,
+                    filename,
+                )
+
             response = requests.get(self.url, stream=True, timeout=30)
             response.raise_for_status()
             
             total_size = int(response.headers.get('content-length', 0))
+            if total_size < 0 or total_size > MAX_RELEASE_DOWNLOAD_BYTES:
+                raise ValueError("Release package exceeds the download size limit")
             downloaded_size = 0
-            
-            with open(save_path, 'wb') as f:
+            digest = hashlib.sha256()
+
+            with open(partial_path, 'wb') as f:
                 for chunk in response.iter_content(chunk_size=8192):
                     if chunk:
                         f.write(chunk)
+                        digest.update(chunk)
                         downloaded_size += len(chunk)
+                        if downloaded_size > MAX_RELEASE_DOWNLOAD_BYTES:
+                            raise ValueError("Release package exceeds the download size limit")
                         if total_size > 0:
                             percent = int((downloaded_size / total_size) * 100)
                             self.progress.emit(percent)
-            
+
+            if expected_sha256 and digest.hexdigest().lower() != expected_sha256:
+                raise ValueError("Downloaded release package SHA-256 does not match")
+            os.replace(partial_path, save_path)
+            partial_path = ""
             self.finished_path.emit(save_path)
             
         except Exception as e:
             self.error.emit(str(e))
         finally:
+            if partial_path:
+                try:
+                    os.remove(partial_path)
+                except FileNotFoundError:
+                    pass
+                except OSError:
+                    logger.warning("Unable to remove partial update download: %s", partial_path)
             self.finished.emit()

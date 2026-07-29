@@ -3043,20 +3043,8 @@ Restart now?</source>
         <translation>更新エラー</translation>
     </message>
     <message>
-        <source>Developer Update Available</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>A developer fork update {version} is available.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Developer Update Error</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Fork update check failed: {message}</source>
-        <translation type="unfinished"></translation>
+        <source>Release package downloaded to {path}. Open it now?</source>
+        <translation>リリースパッケージを {path} にダウンロードしました。今すぐ開きますか？</translation>
     </message>
     <message>
         <source>Downloading update...</source>
@@ -3065,10 +3053,6 @@ Restart now?</source>
     <message>
         <source>Download Complete</source>
         <translation>ダウンロード完了</translation>
-    </message>
-    <message>
-        <source>Installer downloaded to {path}. Run it now?</source>
-        <translation>インストーラーは {path} にダウンロードされました。今すぐ実行しますか?</translation>
     </message>
 </context>
 <context>
