@@ -3119,6 +3119,7 @@ def tune_profile_ngl(
             start_timeout_sec=start_timeout_sec,
             request_timeout_sec=request_timeout_sec,
         )
+        result.setdefault("profile", asdict(candidate))
         attempts.append(result)
         return result
 
@@ -3168,11 +3169,20 @@ def tune_profile_ngl(
 
     safe_ngls = sorted(set(safe_ngls))
     safe_max = max(safe_ngls) if safe_ngls else None
-    comparison_ngls = (
-        sorted({safe_max, max(0, safe_max - 1)})
-        if safe_max is not None
-        else []
-    )
+    if safe_max is not None and safe_max > 0:
+        lower_neighbor = safe_max - 1
+        attempted_selected_ngls = {
+            int(item["profile"]["target_ngl"])
+            for item in attempts
+            if str(item["profile"].get("draft_ngl") or "")
+            == selected_draft_ngl
+        }
+        if lower_neighbor not in attempted_selected_ngls:
+            lower_probe = attempt(lower_neighbor, selected_draft_ngl)
+            if lower_probe["status"] == "passed":
+                safe_ngls.append(lower_neighbor)
+                safe_ngls = sorted(set(safe_ngls))
+    comparison_ngls = safe_ngls[-2:]
     payload = {
         "protocol_version": PROTOCOL_VERSION,
         "profile_id": profile.id,

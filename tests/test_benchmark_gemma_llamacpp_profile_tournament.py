@@ -786,6 +786,7 @@ class GemmaLlamaCppProfileTournamentTests(unittest.TestCase):
         self.assertEqual(result["safe_target_ngls"], [25])
         self.assertEqual(result["safe_max_target_ngl"], 25)
         self.assertEqual(result["first_failed_target_ngl"], 26)
+        self.assertEqual(result["screen_comparison_target_ngls"], [25])
 
     def test_ngl_tuning_caps_search_at_model_output_layer(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -830,6 +831,51 @@ class GemmaLlamaCppProfileTournamentTests(unittest.TestCase):
         self.assertEqual(result["model_block_count"], 30)
         self.assertEqual(result["effective_max_target_ngl"], 31)
         self.assertEqual(result["safe_max_target_ngl"], 31)
+        self.assertEqual(result["screen_comparison_target_ngls"], [30, 31])
+
+    def test_ngl_tuning_probes_unseen_lower_comparison_neighbor(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            manifest = self._load_manifest(root)
+            inventory = self._fake_inventory(manifest)
+            profile = tournament.find_profile(
+                manifest,
+                "baseline__none",
+                target_ngl=25,
+            )
+            attempted_ngls: list[int] = []
+
+            def fake_probe(**kwargs: object) -> dict[str, object]:
+                candidate = kwargs["profile"]
+                ngl = candidate.target_ngl  # type: ignore[union-attr]
+                attempted_ngls.append(ngl)
+                passed = ngl in {24, 25}
+                return {
+                    "status": "passed" if passed else "failed",
+                    "resource_gates": {
+                        "swap_growth_ok": passed,
+                        "shared_gpu_growth_ok": True,
+                    },
+                }
+
+            with mock.patch.object(
+                tournament,
+                "probe_profile_load",
+                side_effect=fake_probe,
+            ):
+                result = tournament.tune_profile_ngl(
+                    manifest=manifest,
+                    inventory=inventory,
+                    profile=profile,
+                    max_ngl=26,
+                    output_path=root / "lower-neighbor-tuning.json",
+                    start_timeout_sec=1,
+                    request_timeout_sec=1,
+                )
+
+        self.assertEqual(attempted_ngls, [25, 26, 24])
+        self.assertEqual(result["safe_target_ngls"], [24, 25])
+        self.assertEqual(result["screen_comparison_target_ngls"], [24, 25])
 
     def test_mtp_tuning_skips_ngl_sweep_after_draft_load_failure(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -875,9 +921,13 @@ class GemmaLlamaCppProfileTournamentTests(unittest.TestCase):
                     request_timeout_sec=1,
                 )
 
-        self.assertEqual(attempts, [(23, "all"), (23, "0")])
+        self.assertEqual(
+            attempts,
+            [(23, "all"), (23, "0"), (22, "0")],
+        )
         self.assertEqual(result["selected_draft_ngl"], "0")
         self.assertEqual(result["safe_max_target_ngl"], 23)
+        self.assertEqual(result["screen_comparison_target_ngls"], [22, 23])
 
     def test_draft_acceptance_log_fallback_is_aggregated(self) -> None:
         parsed = tournament.parse_draft_acceptance_logs(
