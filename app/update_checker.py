@@ -29,12 +29,6 @@ def select_release_asset_url(data: dict, system: str, latest_tag: str) -> str | 
                 url = str(asset.get("browser_download_url", "") or "")
                 if url:
                     return url
-        for asset in assets:
-            name = str(asset.get("name", "")).lower()
-            if name.endswith(".exe") or name.endswith(".msi"):
-                url = str(asset.get("browser_download_url", "") or "")
-                if url:
-                    return url
     elif system == "Darwin":
         for asset in assets:
             name = str(asset.get("name", "")).lower()
