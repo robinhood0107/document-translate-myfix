@@ -100,6 +100,8 @@ class CandidateProfile:
     mask_mode: str
     dilation: int | None
     structure_protect: bool
+    bold_anchor_distance: float | None = None
+    residual_mode: str = "none"
     baseline: bool = False
     promotable: bool = True
     feasibility_only: bool = False
@@ -132,6 +134,60 @@ MASK_SCREEN_PROFILES: tuple[CandidateProfile, ...] = tuple(
         structure_protect=True,
     )
     for dilation in (1, 2, 4)
+)
+
+MASK_RESIDUAL_SCREEN_PROFILES: tuple[CandidateProfile, ...] = (
+    CandidateProfile(
+        slug="mask-product-lama-large-fp32-2048",
+        label="product mask + LaMa Large FP32 2048",
+        phase="mask-residual",
+        inpainter_key="lama_large_512px",
+        precision="fp32",
+        inpaint_size=2048,
+        mask_mode="product",
+        dilation=None,
+        structure_protect=False,
+    ),
+    *(
+        CandidateProfile(
+            slug=(
+                f"mask-bold-outline-anchor-2-dilate-{dilation}"
+                "-lama-large-fp32-2048"
+            ),
+            label=(
+                "bold-outline anchor 2 "
+                f"dilation {dilation} + LaMa Large FP32 2048"
+            ),
+            phase="mask-residual",
+            inpainter_key="lama_large_512px",
+            precision="fp32",
+            inpaint_size=2048,
+            mask_mode="bold_outline",
+            dilation=dilation,
+            structure_protect=False,
+            bold_anchor_distance=2.0,
+        )
+        for dilation in (2, 4, 6)
+    ),
+    CandidateProfile(
+        slug=(
+            "mask-bold-outline-anchor-2-dilate-4-product-residual"
+            "-lama-large-fp32-2048"
+        ),
+        label=(
+            "bold-outline anchor 2 dilation 4 + product-uncovered "
+            "GPU residual pass + LaMa Large FP32 2048"
+        ),
+        phase="mask-residual",
+        inpainter_key="lama_large_512px",
+        precision="fp32",
+        inpaint_size=2048,
+        mask_mode="bold_outline",
+        dilation=4,
+        structure_protect=False,
+        bold_anchor_distance=2.0,
+        residual_mode="product_uncovered",
+    ),
 )
 
 MODEL_SCREEN_TEMPLATES: tuple[CandidateProfile, ...] = (
@@ -942,20 +998,68 @@ def _profiles_for_phase(
     phase: str,
     *,
     selected_dilation: int | None,
+    selected_mask_profile: str | None = None,
     include_feasibility: bool,
 ) -> list[CandidateProfile]:
+    if phase != "model" and (
+        selected_dilation is not None or selected_mask_profile
+    ):
+        raise ProtocolError(
+            "mask phases do not accept model mask selectors"
+        )
+    if (
+        phase == "model"
+        and selected_dilation is not None
+        and selected_mask_profile
+    ):
+        raise ProtocolError(
+            "model phase accepts exactly one mask selector"
+        )
     profiles = [BASELINE]
     if phase == "mask":
         profiles.extend(MASK_SCREEN_PROFILES)
+    elif phase == "mask-residual":
+        profiles.extend(MASK_RESIDUAL_SCREEN_PROFILES)
     elif phase == "model":
-        if selected_dilation not in {1, 2, 4}:
+        selected: CandidateProfile | None = None
+        if selected_mask_profile:
+            selected = next(
+                (
+                    profile
+                    for profile in MASK_RESIDUAL_SCREEN_PROFILES
+                    if profile.slug == selected_mask_profile
+                ),
+                None,
+            )
+            if selected is None:
+                raise ProtocolError(
+                    "model phase --selected-mask-profile is unknown"
+                )
+        elif selected_dilation in {1, 2, 4}:
+            selected = replace(
+                MASK_SCREEN_PROFILES[
+                    {1: 0, 2: 1, 4: 2}[int(selected_dilation)]
+                ],
+                phase="model-mask-contract",
+            )
+        else:
             raise ProtocolError(
-                "model phase requires --selected-dilation 1, 2, or 4"
+                "model phase requires --selected-mask-profile or "
+                "--selected-dilation 1, 2, or 4"
             )
         for template in MODEL_SCREEN_TEMPLATES:
             if template.feasibility_only and not include_feasibility:
                 continue
-            profiles.append(replace(template, dilation=selected_dilation))
+            profiles.append(
+                replace(
+                    template,
+                    mask_mode=selected.mask_mode,
+                    dilation=selected.dilation,
+                    structure_protect=selected.structure_protect,
+                    bold_anchor_distance=selected.bold_anchor_distance,
+                    residual_mode=selected.residual_mode,
+                )
+            )
     else:
         raise ProtocolError(f"unsupported screen phase: {phase}")
     for profile in profiles:
@@ -993,6 +1097,271 @@ def _load_mask(path: Path):
     return (mask > 0).astype(np.uint8) * 255
 
 
+def _clamp_box(
+    box: Sequence[int | float],
+    image_shape: Sequence[int],
+) -> tuple[int, int, int, int]:
+    height, width = [int(value) for value in image_shape[:2]]
+    if len(box) < 4:
+        return 0, 0, 0, 0
+    x1, y1, x2, y2 = [int(round(float(value))) for value in box[:4]]
+    return (
+        max(0, min(width, x1)),
+        max(0, min(height, y1)),
+        max(0, min(width, x2)),
+        max(0, min(height, y2)),
+    )
+
+
+def _long_rule_mask(dark: Any):
+    """Find long continuous UI/panel rules without treating text rows as lines."""
+
+    import cv2
+    import numpy as np
+
+    binary = (np.asarray(dark) > 0).astype(np.uint8) * 255
+    height, width = binary.shape[:2]
+    horizontal_length = max(24, int(round(width * 0.50)))
+    vertical_length = max(24, int(round(height * 0.50)))
+    horizontal = cv2.morphologyEx(
+        binary,
+        cv2.MORPH_OPEN,
+        cv2.getStructuringElement(
+            cv2.MORPH_RECT,
+            (min(width, horizontal_length), 1),
+        ),
+    )
+    vertical = cv2.morphologyEx(
+        binary,
+        cv2.MORPH_OPEN,
+        cv2.getStructuringElement(
+            cv2.MORPH_RECT,
+            (1, min(height, vertical_length)),
+        ),
+    )
+    return cv2.bitwise_or(horizontal, vertical)
+
+
+def _keep_bold_components(
+    candidate: Any,
+    anchor: Any,
+    long_rules: Any,
+):
+    import cv2
+    import numpy as np
+
+    source = (np.asarray(candidate) > 0).astype(np.uint8)
+    anchors = np.asarray(anchor) > 0
+    rules = np.asarray(long_rules) > 0
+    count, labels, stats, _centroids = cv2.connectedComponentsWithStats(
+        source,
+        8,
+        cv2.CV_32S,
+    )
+    output = np.zeros(source.shape, dtype=np.uint8)
+    for label in range(1, count):
+        x, y, width, height, area = [
+            int(value) for value in stats[label]
+        ]
+        if area < 3 or width <= 0 or height <= 0:
+            continue
+        component = labels[y : y + height, x : x + width] == label
+        if not np.any(anchors[y : y + height, x : x + width][component]):
+            continue
+        long_side = max(width, height)
+        short_side = min(width, height)
+        aspect = float(long_side) / float(max(1, short_side))
+        rule_overlap = int(
+            np.count_nonzero(
+                rules[y : y + height, x : x + width] & component
+            )
+        )
+        rule_ratio = float(rule_overlap) / float(max(1, area))
+        is_long_rule = (
+            long_side >= 24
+            and aspect >= 6.0
+            and rule_ratio >= 0.35
+        )
+        if is_long_rule or (short_side <= 2 and long_side >= 28):
+            continue
+        output[y : y + height, x : x + width][component] = 255
+    return output
+
+
+def _bold_outline_base_mask(
+    image: Any,
+    blocks: Sequence[Mapping[str, Any]],
+    *,
+    anchor_distance: float,
+):
+    """Locate thick dark glyphs and their bright outline inside text boxes."""
+
+    import cv2
+    import numpy as np
+
+    source = np.asarray(image)
+    output = np.zeros(source.shape[:2], dtype=np.uint8)
+    gray_image = cv2.cvtColor(source, cv2.COLOR_RGB2GRAY)
+    for block in blocks:
+        if str(block.get("processing_action") or "") != "translate_inpaint":
+            continue
+        box = block.get("xyxy")
+        if not isinstance(box, Sequence):
+            continue
+        x1, y1, x2, y2 = _clamp_box(box, source.shape)
+        if x2 <= x1 or y2 <= y1:
+            continue
+        pad = max(3, int(round(min(x2 - x1, y2 - y1) * 0.08)))
+        x1, y1, x2, y2 = _clamp_box(
+            [x1 - pad, y1 - pad, x2 + pad, y2 + pad],
+            source.shape,
+        )
+        bubble = block.get("bubble_xyxy")
+        if isinstance(bubble, Sequence) and len(bubble) >= 4:
+            bx1, by1, bx2, by2 = _clamp_box(bubble, source.shape)
+            x1, y1 = max(x1, bx1), max(y1, by1)
+            x2, y2 = min(x2, bx2), min(y2, by2)
+        if x2 <= x1 or y2 <= y1:
+            continue
+
+        gray = gray_image[y1:y2, x1:x2]
+        dark = np.where(gray <= 105, 255, 0).astype(np.uint8)
+        distance = cv2.distanceTransform(
+            (dark > 0).astype(np.uint8),
+            cv2.DIST_L2,
+            5,
+        )
+        anchor = np.where(
+            distance >= float(anchor_distance),
+            255,
+            0,
+        ).astype(np.uint8)
+        anchor = cv2.dilate(
+            anchor,
+            cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5)),
+            iterations=1,
+        )
+        dark_glyph = _keep_bold_components(
+            dark,
+            anchor,
+            _long_rule_mask(dark),
+        )
+        if not np.any(dark_glyph):
+            continue
+        outline_zone = cv2.dilate(
+            dark_glyph,
+            cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (9, 9)),
+            iterations=1,
+        )
+        bright_outline = np.where(
+            (gray >= 215) & (outline_zone > 0),
+            255,
+            0,
+        ).astype(np.uint8)
+        glyph = np.where(
+            (dark_glyph > 0) | (bright_outline > 0),
+            255,
+            0,
+        ).astype(np.uint8)
+        output[y1:y2, x1:x2] = np.where(
+            (output[y1:y2, x1:x2] > 0) | (glyph > 0),
+            255,
+            0,
+        ).astype(np.uint8)
+    return output
+
+
+def _product_uncovered_residual_mask(
+    *,
+    product_mask: Any,
+    primary_mask: Any,
+    allowed_window_mask: Any,
+):
+    import numpy as np
+
+    covered = _dilate_mask(primary_mask, 1) > 0
+    return np.where(
+        (np.asarray(product_mask) > 0)
+        & (~covered)
+        & (np.asarray(allowed_window_mask) > 0),
+        255,
+        0,
+    ).astype(np.uint8)
+
+
+def build_candidate_masks(
+    *,
+    profile: CandidateProfile,
+    image: Any,
+    blocks: Sequence[Mapping[str, Any]],
+    product_mask: Any,
+    glyph_base_mask: Any,
+    bubble_protect_mask: Any,
+    structure_protect_mask: Any,
+    allowed_window_mask: Any,
+) -> dict[str, Any]:
+    import numpy as np
+
+    allowed = np.asarray(allowed_window_mask) > 0
+    if profile.mask_mode == "product":
+        raw = (np.asarray(product_mask) > 0).astype(np.uint8) * 255
+        primary = np.where((raw > 0) & allowed, 255, 0).astype(np.uint8)
+    elif profile.mask_mode == "glyph" and profile.dilation is not None:
+        raw = (np.asarray(glyph_base_mask) > 0).astype(np.uint8) * 255
+        candidate = _dilate_mask(raw, profile.dilation)
+        protect = np.asarray(bubble_protect_mask) > 0
+        if profile.structure_protect:
+            protect = protect | (np.asarray(structure_protect_mask) > 0)
+        primary = np.where(
+            (candidate > 0) & (~protect) & allowed,
+            255,
+            0,
+        ).astype(np.uint8)
+    elif (
+        profile.mask_mode == "bold_outline"
+        and profile.dilation is not None
+        and profile.bold_anchor_distance is not None
+    ):
+        raw = _bold_outline_base_mask(
+            image,
+            blocks,
+            anchor_distance=profile.bold_anchor_distance,
+        )
+        primary = np.where(
+            (_dilate_mask(raw, profile.dilation) > 0) & allowed,
+            255,
+            0,
+        ).astype(np.uint8)
+    else:
+        raise ProtocolError(
+            f"candidate has no usable mask contract: {profile.slug}"
+        )
+
+    if profile.residual_mode == "none":
+        residual = np.zeros(primary.shape, dtype=np.uint8)
+    elif profile.residual_mode == "product_uncovered":
+        residual = _product_uncovered_residual_mask(
+            product_mask=product_mask,
+            primary_mask=primary,
+            allowed_window_mask=allowed_window_mask,
+        )
+    else:
+        raise ProtocolError(
+            f"candidate has unknown residual mode: {profile.slug}"
+        )
+    final = np.where(
+        (primary > 0) | (residual > 0),
+        255,
+        0,
+    ).astype(np.uint8)
+    return {
+        "raw_mask": raw,
+        "primary_mask": primary,
+        "residual_mask": residual,
+        "final_mask": final,
+    }
+
+
 def build_candidate_mask(
     *,
     profile: CandidateProfile,
@@ -1001,24 +1370,26 @@ def build_candidate_mask(
     bubble_protect_mask: Any,
     structure_protect_mask: Any,
     allowed_window_mask: Any,
+    image: Any | None = None,
+    blocks: Sequence[Mapping[str, Any]] = (),
 ):
-    import numpy as np
+    if image is None:
+        import numpy as np
 
-    if profile.mask_mode == "product":
-        return (np.asarray(product_mask) > 0).astype(np.uint8) * 255
-    if profile.mask_mode != "glyph" or profile.dilation is None:
-        raise ProtocolError(f"candidate has no usable mask contract: {profile.slug}")
-    candidate = _dilate_mask(glyph_base_mask, profile.dilation)
-    protect = np.asarray(bubble_protect_mask) > 0
-    if profile.structure_protect:
-        protect = protect | (np.asarray(structure_protect_mask) > 0)
-    return np.where(
-        (candidate > 0)
-        & (~protect)
-        & (np.asarray(allowed_window_mask) > 0),
-        255,
-        0,
-    ).astype(np.uint8)
+        image = np.zeros(
+            (*np.asarray(product_mask).shape[:2], 3),
+            dtype=np.uint8,
+        )
+    return build_candidate_masks(
+        profile=profile,
+        image=image,
+        blocks=blocks,
+        product_mask=product_mask,
+        glyph_base_mask=glyph_base_mask,
+        bubble_protect_mask=bubble_protect_mask,
+        structure_protect_mask=structure_protect_mask,
+        allowed_window_mask=allowed_window_mask,
+    )["final_mask"]
 
 
 def _mask_bbox(mask: Any) -> list[int] | None:
@@ -1323,12 +1694,81 @@ def _artifact_record(path: Path, root: Path) -> dict[str, Any]:
     }
 
 
+def _run_candidate_passes(
+    *,
+    inpainter: Any,
+    image: Any,
+    primary_mask: Any,
+    residual_mask: Any,
+    review_roi: Sequence[int],
+) -> tuple[Any, float, dict[str, Any]]:
+    import numpy as np
+
+    cleaned = np.asarray(image).copy()
+    inference_seconds = 0.0
+    pass_diagnostics: list[dict[str, Any]] = []
+    if bool((primary_mask > 0).any()):
+        cleaned, first_seconds, first_diagnostics = _run_direct_roi(
+            inpainter=inpainter,
+            image=image,
+            mask=primary_mask,
+            roi=_context_roi(
+                primary_mask,
+                image.shape,
+                requested_roi=review_roi,
+            ),
+        )
+        inference_seconds += first_seconds
+        pass_diagnostics.append(first_diagnostics)
+    if bool((residual_mask > 0).any()):
+        cleaned, residual_seconds, residual_diagnostics = _run_direct_roi(
+            inpainter=inpainter,
+            image=cleaned,
+            mask=residual_mask,
+            roi=_context_roi(
+                residual_mask,
+                image.shape,
+                requested_roi=review_roi,
+            ),
+        )
+        inference_seconds += residual_seconds
+        pass_diagnostics.append(residual_diagnostics)
+    if not pass_diagnostics:
+        raise ProtocolError("candidate pass bundle has no active edit mask")
+    diagnostics = {
+        "status": (
+            "completed_after_roi_retry"
+            if any(
+                int(item.get("oom_retry_count", 0) or 0)
+                for item in pass_diagnostics
+            )
+            else "completed"
+        ),
+        "pass_count": len(pass_diagnostics),
+        "passes": pass_diagnostics,
+        "oom_retry_count": sum(
+            int(item.get("oom_retry_count", 0) or 0)
+            for item in pass_diagnostics
+        ),
+        "oom_retry_roi": next(
+            (
+                item.get("oom_retry_roi")
+                for item in reversed(pass_diagnostics)
+                if item.get("oom_retry_roi") is not None
+            ),
+            None,
+        ),
+    }
+    return cleaned, inference_seconds, diagnostics
+
+
 def run_screen(
     frozen_root: Path,
     output_dir: Path,
     *,
     phase: str,
     selected_dilation: int | None,
+    selected_mask_profile: str | None = None,
     include_feasibility: bool,
 ) -> dict[str, Any]:
     frozen_root = frozen_root.expanduser().resolve()
@@ -1337,6 +1777,7 @@ def run_screen(
     profiles = _profiles_for_phase(
         phase,
         selected_dilation=selected_dilation,
+        selected_mask_profile=selected_mask_profile,
         include_feasibility=include_feasibility,
     )
     results: list[dict[str, Any]] = []
@@ -1393,14 +1834,19 @@ def run_screen(
                         label=f"{case_id} allowed window mask",
                     )
                 )
-                mask = build_candidate_mask(
+                mask_bundle = build_candidate_masks(
                     profile=profile,
+                    image=image,
+                    blocks=list(case["blocks"]),
                     product_mask=product_mask,
                     glyph_base_mask=glyph_base,
                     bubble_protect_mask=bubble_protect,
                     structure_protect_mask=structure_protect,
                     allowed_window_mask=allowed,
                 )
+                primary_mask = mask_bundle["primary_mask"]
+                residual_mask = mask_bundle["residual_mask"]
+                mask = mask_bundle["final_mask"]
                 roi = _context_roi(
                     mask,
                     image.shape,
@@ -1439,11 +1885,12 @@ def run_screen(
                             cleaned,
                             inference_seconds,
                             run_diagnostics,
-                        ) = _run_direct_roi(
+                        ) = _run_candidate_passes(
                             inpainter=inpainter,
                             image=image,
-                            mask=mask,
-                            roi=roi,
+                            primary_mask=primary_mask,
+                            residual_mask=residual_mask,
+                            review_roi=case["review_roi"],
                         )
                     except CandidateRunError as exc:
                         cleaned = image.copy()
@@ -1470,7 +1917,18 @@ def run_screen(
                     status = "failed_outside_mask_change"
                 output_images = {
                     "original": _crop(image, case["review_roi"]),
-                    "raw_mask": _crop(glyph_base, case["review_roi"]),
+                    "raw_mask": _crop(
+                        mask_bundle["raw_mask"],
+                        case["review_roi"],
+                    ),
+                    "primary_mask": _crop(
+                        primary_mask,
+                        case["review_roi"],
+                    ),
+                    "residual_mask": _crop(
+                        residual_mask,
+                        case["review_roi"],
+                    ),
                     "final_mask": _crop(mask, case["review_roi"]),
                     "mask_overlay": _crop(
                         _mask_overlay(image, mask),
@@ -1511,6 +1969,12 @@ def run_screen(
                     "failure": failure,
                     "review_roi": list(case["review_roi"]),
                     "model_roi": roi,
+                    "primary_mask_pixel_count": int(
+                        (primary_mask > 0).sum()
+                    ),
+                    "residual_mask_pixel_count": int(
+                        (residual_mask > 0).sum()
+                    ),
                     "mask_pixel_count": int((mask > 0).sum()),
                     "inference_seconds": round(float(inference_seconds), 6),
                     "run_diagnostics": run_diagnostics,
@@ -1555,6 +2019,7 @@ def run_screen(
         "kind": "inpaint-quality-screen-results",
         "phase": phase,
         "selected_dilation": selected_dilation,
+        "selected_mask_profile": selected_mask_profile,
         "frozen_contract_sha256": str(frozen["contract_sha256"]),
         "case_order": list(frozen["case_order"]),
         "candidate_order": [
@@ -1743,14 +2208,19 @@ def validate_results(root: Path) -> dict[str, Any]:
             artifacts = case.get("artifacts")
             if not isinstance(artifacts, Mapping):
                 raise ProtocolError("case result artifacts are missing")
-            for name in (
+            required_artifacts = [
                 "original",
                 "raw_mask",
                 "final_mask",
                 "mask_overlay",
                 "cleaned",
                 "diff",
-            ):
+            ]
+            if "residual_mode" in profile:
+                required_artifacts.extend(
+                    ("primary_mask", "residual_mask")
+                )
+            for name in required_artifacts:
                 record = artifacts.get(name)
                 if not isinstance(record, Mapping):
                     raise ProtocolError(f"result artifact is missing: {name}")
@@ -1866,6 +2336,8 @@ def build_blind_review(
             for artifact_name in (
                 "original",
                 "raw_mask",
+                "primary_mask",
+                "residual_mask",
                 "final_mask",
                 "mask_overlay",
                 "cleaned",
@@ -1944,6 +2416,7 @@ def build_blind_review(
                 "precision": str(
                     by_slug[slug]["profile"]["precision"] or ""
                 ),
+                "phase": str(by_slug[slug]["profile"]["phase"] or ""),
             }
             for slug in selected
         },
@@ -2014,7 +2487,9 @@ def _render_review_html(
             images = []
             for artifact_name, label in (
                 ("original", "원본"),
-                ("raw_mask", "glyph base"),
+                ("raw_mask", "mask source"),
+                ("primary_mask", "1차 mask"),
+                ("residual_mask", "2차 residual mask"),
                 ("final_mask", "최종 mask"),
                 ("mask_overlay", "mask overlay"),
                 ("cleaned", "cleaned"),
@@ -2269,6 +2744,9 @@ def unblind_review(
     candidate_ranks: dict[str, list[int]] = {
         str(candidate): [] for candidate in label_to_candidate.values()
     }
+    candidate_failed_fields: dict[str, set[str]] = {
+        str(candidate): set() for candidate in label_to_candidate.values()
+    }
     for row in rows:
         label = str(row["candidate"])
         candidate = str(label_to_candidate[label])
@@ -2278,6 +2756,7 @@ def unblind_review(
             if str(row[field]).lower() == "fail"
         ]
         if failed_fields:
+            candidate_failed_fields[candidate].update(failed_fields)
             candidate_failures[candidate].append(
                 {
                     "case_number": int(row["case_number"]),
@@ -2302,6 +2781,40 @@ def unblind_review(
             )
         )
     ]
+    coverage_eligible_candidates = [
+        candidate
+        for candidate, failed_fields in candidate_failed_fields.items()
+        if (
+            not (failed_fields & {"residue", "outside_preservation"})
+            and isinstance(candidate_contracts.get(candidate), Mapping)
+            and bool(candidate_contracts[candidate].get("promotable"))
+            and bool(candidate_contracts[candidate].get("hard_gate_passed"))
+            and str(candidate_contracts[candidate].get("precision") or "")
+            == "fp32"
+            and not bool(candidate_contracts[candidate].get("baseline"))
+            and not bool(
+                candidate_contracts[candidate].get("feasibility_only")
+            )
+        )
+    ]
+    model_screen_eligible_candidates = [
+        candidate
+        for candidate, failed_fields in candidate_failed_fields.items()
+        if (
+            "outside_preservation" not in failed_fields
+            and isinstance(candidate_contracts.get(candidate), Mapping)
+            and bool(candidate_contracts[candidate].get("promotable"))
+            and bool(candidate_contracts[candidate].get("hard_gate_passed"))
+            and str(candidate_contracts[candidate].get("precision") or "")
+            == "fp32"
+            and str(candidate_contracts[candidate].get("phase") or "")
+            in {"mask", "mask-residual"}
+            and not bool(candidate_contracts[candidate].get("baseline"))
+            and not bool(
+                candidate_contracts[candidate].get("feasibility_only")
+            )
+        )
+    ]
     summary = {
         "protocol_version": PROTOCOL_VERSION,
         "status": "unblinded",
@@ -2314,6 +2827,8 @@ def unblind_review(
             )
             for candidate, ranks in candidate_ranks.items()
         },
+        "coverage_eligible_candidates": coverage_eligible_candidates,
+        "model_screen_eligible_candidates": model_screen_eligible_candidates,
         "screen_eligible_candidates": screen_eligible_candidates,
         "promotion_eligible_candidates": (
             screen_eligible_candidates
@@ -2340,6 +2855,9 @@ def _print_profiles() -> None:
     payload = {
         "baseline": asdict(BASELINE),
         "mask_screen": [asdict(profile) for profile in MASK_SCREEN_PROFILES],
+        "mask_residual_screen": [
+            asdict(profile) for profile in MASK_RESIDUAL_SCREEN_PROFILES
+        ],
         "model_screen": [
             asdict(profile) for profile in MODEL_SCREEN_TEMPLATES
         ],
@@ -2360,8 +2878,13 @@ def build_parser() -> argparse.ArgumentParser:
     run = subparsers.add_parser("run")
     run.add_argument("--frozen", required=True)
     run.add_argument("--output", required=True)
-    run.add_argument("--phase", required=True, choices=("mask", "model"))
+    run.add_argument(
+        "--phase",
+        required=True,
+        choices=("mask", "mask-residual", "model"),
+    )
     run.add_argument("--selected-dilation", type=int)
+    run.add_argument("--selected-mask-profile")
     run.add_argument("--include-feasibility", action="store_true")
 
     attach = subparsers.add_parser("attach-renders")
@@ -2431,6 +2954,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             Path(args.output),
             phase=args.phase,
             selected_dilation=args.selected_dilation,
+            selected_mask_profile=args.selected_mask_profile,
             include_feasibility=bool(args.include_feasibility),
         )
         print(json.dumps(
