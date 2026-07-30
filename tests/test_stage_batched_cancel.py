@@ -1281,6 +1281,103 @@ class StageBatchedCancellationTests(unittest.TestCase):
         self.assertEqual(block.block_final_mask_pixel_count, 9)
         self.assertEqual(block.block_mask_decision, "accepted")
 
+    def test_preserve_only_page_skips_inpainter_and_keeps_pixels_exact(
+        self,
+    ) -> None:
+        processor = self._processor(cancelled=False)
+        processor._project_checkpoint_store = object()
+        processor.main_page.settings_page = SimpleNamespace(
+            get_hd_strategy_settings=lambda: {"strategy": "Original"},
+            get_tool_selection=lambda _tool: "AOT",
+            get_mask_refiner_settings=lambda: {"mask_refiner": "ctd"},
+            get_inpainter_runtime_settings=lambda _key=None: {
+                "backend": "torch",
+                "device": "cuda",
+                "inpaint_size": 2048,
+                "precision": "fp32",
+            },
+            is_gpu_enabled=lambda: True,
+            ui=SimpleNamespace(
+                value_mappings={},
+                tr=lambda value: value,
+            ),
+        )
+        processor.main_page.image_ctrl = SimpleNamespace(
+            mark_processing_stage=mock.Mock(),
+        )
+        processor._effective_export_settings = mock.Mock(return_value={})
+        processor._ensure_page_state = mock.Mock(
+            return_value={"brush_strokes": []}
+        )
+        processor._set_current_image = mock.Mock()
+        processor.emit_progress = mock.Mock()
+        processor._emit_benchmark_event = mock.Mock()
+        processor._finish_inpaint_page = mock.Mock()
+        processor._ensure_inpainter = mock.Mock()
+        processor.inpainting = SimpleNamespace(
+            inpainter_cache=None,
+            release_inpainter_resources=mock.Mock(),
+        )
+        block = TextBlock(
+            text_bbox=np.array([1, 1, 8, 8], dtype=np.int32),
+            text="ドン",
+            text_class="sfx",
+            block_id="sfx-stable",
+        )
+        image = np.arange(10 * 10 * 3, dtype=np.uint8).reshape(
+            10,
+            10,
+            3,
+        )
+        page = StagePageContext(
+            image_path="page.png",
+            image_name="page.png",
+            source_lang="Japanese",
+            target_lang="Korean",
+            image=image,
+            blk_list=[block],
+            source_decoded_sha256="1" * 64,
+            project_checkpoint_page_key="page:00000000",
+            detection_fingerprint="2" * 64,
+            project_ocr_fingerprint="3" * 64,
+        )
+
+        with mock.patch(
+            "pipeline.stage_batched_processor.generate_mask",
+            side_effect=AssertionError(
+                "mask generation must be skipped for preserve-only pages"
+            ),
+        ), mock.patch(
+            "pipeline.stage_batched_processor.lookup_inpaint_checkpoint",
+            side_effect=AssertionError(
+                "checkpoint lookup must be skipped for preserve-only pages"
+            ),
+        ):
+            processor._inpaint_all([page])
+
+        processor._ensure_inpainter.assert_not_called()
+        processor.inpainting.release_inpainter_resources.assert_not_called()
+        processor._finish_inpaint_page.assert_called_once()
+        np.testing.assert_array_equal(page.inpaint_input_img, image)
+        self.assertEqual(int(np.count_nonzero(page.raw_mask)), 0)
+        self.assertEqual(int(np.count_nonzero(page.mask)), 0)
+        self.assertEqual(
+            page.project_inpaint_checkpoint_status,
+            "skipped",
+        )
+        self.assertEqual(
+            page.inpaint_diagnostics["status"],
+            "processing_action_skipped",
+        )
+        self.assertEqual(
+            page.inpaint_diagnostics["inference_call_count"],
+            0,
+        )
+        self.assertEqual(
+            processor._inpainter_release_gate["status"],
+            "not-loaded",
+        )
+
     def test_no_text_page_gets_renderable_skipped_stage_fingerprints(
         self,
     ) -> None:
@@ -1444,6 +1541,137 @@ class StageBatchedCancellationTests(unittest.TestCase):
         self.assertEqual(
             page.project_translation_checkpoint_status,
             "hit",
+        )
+
+    def test_preserve_only_page_skips_translator_and_gemma(self) -> None:
+        processor = self._processor(cancelled=False)
+        processor.main_page.settings_page = SimpleNamespace(
+            get_llm_settings=lambda: {"extra_context": "context"},
+            get_tool_selection=lambda _tool: (
+                "Custom Local Server(Gemma)"
+            ),
+            get_translation_result_dictionary_rules=lambda: [],
+        )
+        processor.main_page.image_ctrl = SimpleNamespace(
+            mark_processing_stage=mock.Mock(),
+        )
+        processor._project_checkpoint_store = object()
+        processor._inpainter_release_gate = {
+            "required": False,
+            "observed": True,
+        }
+        processor._start_gemma_prewarm = mock.Mock()
+        processor._await_gemma_runtime = mock.Mock()
+        processor._shutdown_runtime_with_retry = mock.Mock()
+        processor._set_current_image = mock.Mock()
+        processor.emit_progress = mock.Mock()
+        processor._report_runtime_progress = mock.Mock()
+        processor._emit_benchmark_event = mock.Mock()
+        processor._persist_translation_state = mock.Mock()
+        processor.cache_manager = object()
+        block = TextBlock(
+            text_bbox=np.array([1, 1, 8, 8], dtype=np.int32),
+            text="ドン",
+            text_class="sfx",
+            block_id="sfx-stable",
+        )
+        page = StagePageContext(
+            image_path="page.png",
+            image_name="page.png",
+            source_lang="Japanese",
+            target_lang="Korean",
+            image=np.zeros((10, 10, 3), dtype=np.uint8),
+            blk_list=[block],
+            source_decoded_sha256="1" * 64,
+            detection_fingerprint="2" * 64,
+            project_ocr_fingerprint="3" * 64,
+        )
+
+        with mock.patch(
+            "pipeline.stage_batched_processor.Translator",
+            side_effect=AssertionError(
+                "translator must not be constructed for preserve-only pages"
+            ),
+        ):
+            processor._translate_all([page])
+
+        processor._start_gemma_prewarm.assert_not_called()
+        processor._await_gemma_runtime.assert_not_called()
+        processor._shutdown_runtime_with_retry.assert_not_called()
+        self.assertEqual(
+            page.project_translation_checkpoint_status,
+            "skipped",
+        )
+        processor.main_page.image_ctrl.mark_processing_stage.assert_called_once_with(
+            "page.png",
+            "translation",
+            "skipped",
+            reason="no_translate_inpaint_blocks",
+        )
+
+    def test_preserve_block_never_creates_render_item(self) -> None:
+        processor = self._processor(cancelled=False)
+        processor.main_page.curr_img_idx = -1
+        processor.main_page.image_files = []
+        processor.main_page.button_to_alignment = {1: 1}
+        processor.main_page.button_to_vertical_alignment = {1: 1}
+        processor.main_page.image_ctrl = SimpleNamespace(
+            mark_processing_stage=mock.Mock(),
+        )
+        processor.main_page.render_state_ready = SimpleNamespace(
+            emit=mock.Mock(),
+        )
+        page_state = {"viewer_state": {}}
+        processor._ensure_page_state = mock.Mock(return_value=page_state)
+        block = TextBlock(
+            text_bbox=np.array([1, 1, 8, 8], dtype=np.int32),
+            text="ドン",
+            translation="쾅",
+            text_class="sfx",
+            block_id="sfx-stable",
+        )
+        page = StagePageContext(
+            image_path="page.png",
+            image_name="page.png",
+            source_lang="Japanese",
+            target_lang="Korean",
+            image=np.zeros((10, 10, 3), dtype=np.uint8),
+            blk_list=[block],
+        )
+        render_settings = SimpleNamespace(
+            font_family="Arial",
+            color="#000000",
+            alignment_id=1,
+        )
+
+        with mock.patch(
+            "pipeline.stage_batched_processor.pyside_word_wrap",
+            side_effect=AssertionError(
+                "preserved text must not reach render layout"
+            ),
+        ):
+            processor._render_page_text_items(
+                page,
+                render_settings=render_settings,
+                trg_lng_cd="Korean",
+            )
+
+        self.assertEqual(
+            page_state["viewer_state"]["text_items_state"],
+            [],
+        )
+        self.assertEqual(
+            block._render_skip_reason,
+            "processing_action_preserve",
+        )
+        processor.main_page.image_ctrl.mark_processing_stage.assert_any_call(
+            "page.png",
+            "render",
+            "completed",
+            text_item_count=0,
+        )
+        processor.main_page.render_state_ready.emit.assert_called_once_with(
+            "page.png"
         )
 
     def test_project_render_all_hit_skips_renderer_and_output_encode(

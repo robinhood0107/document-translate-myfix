@@ -53,6 +53,23 @@ class TextBlock(object):
                  ocr_regions: List[dict] | None = None,
                  ocr_crop_bbox = None,
                  ocr_resize_scale: float = 1.0,
+                 ocr_strategy: str = "",
+                 ocr_model_identity: str = "",
+                 ocr_runtime_identity: str = "",
+                 ocr_geometry_provenance: dict | None = None,
+                 semantic_role: str = "",
+                 processing_action: str = "",
+                 processing_decision_source: str = "",
+                 processing_decision_reasons: List[str] | None = None,
+                 processing_contract_diagnostics: dict | None = None,
+                 canonical_block_id: str = "",
+                 duplicate_alias_block_ids: List[str] | None = None,
+                 duplicate_alias_count: int = 0,
+                 merge_split_diagnostics: dict | None = None,
+                 mask_strategy: str = "",
+                 mask_strategy_reason: str = "",
+                 mask_actual_bbox = None,
+                 mask_actual_pixel_count: int = 0,
                  min_font_size: int = 0,
                  max_font_size: int = 0,
                  font_color: tuple = (),
@@ -93,6 +110,42 @@ class TextBlock(object):
         self.ocr_regions = copy.deepcopy(ocr_regions) if ocr_regions is not None else []
         self.ocr_crop_bbox = copy.deepcopy(ocr_crop_bbox)
         self.ocr_resize_scale = float(ocr_resize_scale or 1.0)
+        self.ocr_strategy = str(ocr_strategy or "")
+        self.ocr_model_identity = str(ocr_model_identity or "")
+        self.ocr_runtime_identity = str(ocr_runtime_identity or "")
+        self.ocr_geometry_provenance = copy.deepcopy(
+            ocr_geometry_provenance or {}
+        )
+        self.semantic_role = str(semantic_role or "")
+        self.processing_action = str(processing_action or "")
+        self.processing_decision_source = str(
+            processing_decision_source or ""
+        )
+        self.processing_decision_reasons = list(
+            processing_decision_reasons or []
+        )
+        self.processing_contract_diagnostics = copy.deepcopy(
+            processing_contract_diagnostics or {}
+        )
+        self.canonical_block_id = str(
+            canonical_block_id or self.block_id
+        )
+        self.duplicate_alias_block_ids = list(
+            duplicate_alias_block_ids or []
+        )
+        self.duplicate_alias_count = int(
+            duplicate_alias_count
+            or len(self.duplicate_alias_block_ids)
+        )
+        self.merge_split_diagnostics = copy.deepcopy(
+            merge_split_diagnostics or {}
+        )
+        self.mask_strategy = str(mask_strategy or "")
+        self.mask_strategy_reason = str(mask_strategy_reason or "")
+        self.mask_actual_bbox = copy.deepcopy(mask_actual_bbox)
+        self.mask_actual_pixel_count = int(
+            mask_actual_pixel_count or 0
+        )
 
         self.min_font_size = min_font_size
         self.max_font_size = max_font_size
