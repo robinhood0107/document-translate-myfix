@@ -76,6 +76,14 @@ PROJECT_CHECKPOINT_DEFAULT_VERSION_KEY = (
     "project_checkpoint/default_version"
 )
 PROJECT_CHECKPOINT_ENABLED_KEY = "project_checkpoint/enabled"
+MANGALMM_FULL_PAGE_CONTRACT_VERSION = 1
+MANGALMM_FULL_PAGE_CONTRACT_VERSION_KEY = (
+    "mangalmm_ocr/full_page_contract_version"
+)
+MANGALMM_MAX_COMPLETION_TOKENS_KEY = (
+    "mangalmm_ocr/max_completion_tokens"
+)
+MANGALMM_LEGACY_DEFAULT_MAX_COMPLETION_TOKENS = 256
 
 
 def migrate_retired_gemma_request_mode(settings: QSettings) -> bool:
@@ -144,6 +152,55 @@ def migrate_project_checkpoint_default(settings: QSettings) -> bool:
     )
     settings.sync()
     return True
+
+
+def migrate_mangalmm_full_page_contract(settings: QSettings) -> bool:
+    """Raise only the retired MangaLMM token default and preserve custom values."""
+
+    try:
+        current_version = int(
+            settings.value(
+                MANGALMM_FULL_PAGE_CONTRACT_VERSION_KEY,
+                0,
+                type=int,
+            )
+            or 0
+        )
+    except (TypeError, ValueError):
+        current_version = 0
+    if current_version >= MANGALMM_FULL_PAGE_CONTRACT_VERSION:
+        return False
+
+    try:
+        configured_tokens = int(
+            settings.value(
+                MANGALMM_MAX_COMPLETION_TOKENS_KEY,
+                MangaLMMOCRPage.DEFAULT_MAX_COMPLETION_TOKENS,
+                type=int,
+            )
+        )
+    except (TypeError, ValueError):
+        configured_tokens = None
+    changed = (
+        configured_tokens
+        == MANGALMM_LEGACY_DEFAULT_MAX_COMPLETION_TOKENS
+    )
+    if changed:
+        settings.setValue(
+            MANGALMM_MAX_COMPLETION_TOKENS_KEY,
+            MangaLMMOCRPage.DEFAULT_MAX_COMPLETION_TOKENS,
+        )
+        logger.warning(
+            "Migrated the retired MangaLMM 256-token default to the "
+            "4096-token full-page contract."
+        )
+
+    settings.setValue(
+        MANGALMM_FULL_PAGE_CONTRACT_VERSION_KEY,
+        MANGALMM_FULL_PAGE_CONTRACT_VERSION,
+    )
+    settings.sync()
+    return changed
 
 
 class SettingsPage(QtWidgets.QWidget):
@@ -925,6 +982,7 @@ class SettingsPage(QtWidgets.QWidget):
         settings = QSettings("ComicLabs", "ComicTranslate")
         migrate_retired_gemma_request_mode(settings)
         migrate_project_checkpoint_default(settings)
+        migrate_mangalmm_full_page_contract(settings)
 
         language = settings.value("language", "English")
         translated_language = self.ui.reverse_mappings.get(language, language)
