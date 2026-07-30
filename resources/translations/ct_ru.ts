@@ -887,6 +887,29 @@ Start the server with both the HunyuanOCR GGUF model and the matching mmproj fil
     </message>
 </context>
 <context>
+    <name>InpaintingRuntime</name>
+    <message>
+        <source>Learned inpainting requires CUDA; CPU fallback is disabled.</source>
+        <translation>Для обучаемого инпейнтинга требуется CUDA; переход на CPU отключён.</translation>
+    </message>
+    <message>
+        <source>CUDA inpainting ran out of memory after the single bounded ROI retry.</source>
+        <translation>Для CUDA-инпейнтинга не хватило памяти после единственной повторной попытки с ограниченной ROI.</translation>
+    </message>
+    <message>
+        <source>Inpaint output changed pixels outside the final edit mask.</source>
+        <translation>Результат инпейнтинга изменил пиксели за пределами итоговой маски редактирования.</translation>
+    </message>
+    <message>
+        <source>The previous inpainter VRAM release was not confirmed.</source>
+        <translation>Не удалось подтвердить освобождение VRAM предыдущего инпейнтера.</translation>
+    </message>
+    <message>
+        <source>CUDA FFT execution failed; CPU fallback is disabled.</source>
+        <translation>Не удалось выполнить CUDA FFT; переход на CPU отключён.</translation>
+    </message>
+</context>
+<context>
     <name>LlmsPage</name>
     <message>
         <source>Provide Image as Input to AI</source>

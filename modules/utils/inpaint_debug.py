@@ -270,6 +270,7 @@ def build_inpaint_debug_metadata(
     mask_score_color_delta: float = 0.0,
     ui_panel_mode: str = "",
     ui_panel_preview_path: str = "",
+    inpaint_runtime_diagnostics: dict | None = None,
 ) -> dict:
     block_list = list(blocks or [])
     if final_mask is not None:
@@ -337,6 +338,9 @@ def build_inpaint_debug_metadata(
         "mask_score_color_delta": float(mask_score_color_delta or 0.0),
         "ui_panel_mode": str(ui_panel_mode or ""),
         "ui_panel_preview_path": str(ui_panel_preview_path or ""),
+        "inpaint_runtime_diagnostics": dict(
+            inpaint_runtime_diagnostics or {}
+        ),
         "cleanup_applied": bool(cleanup_stats.get("applied", False)),
         "cleanup_component_count": int(cleanup_stats.get("component_count", 0) or 0),
         "cleanup_block_count": int(cleanup_stats.get("block_count", 0) or 0),
