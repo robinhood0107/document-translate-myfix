@@ -1,9 +1,16 @@
 services:
   mangalmm-local-server:
-    image: ${LLAMA_CPP_IMAGE:-ghcr.io/ggml-org/llama.cpp:server-cuda}
-    pull_policy: always
+    image: ${MANGALMM_LLAMA_CPP_IMAGE:-ghcr.io/ggml-org/llama.cpp@sha256:22e0e3bfe967af4fd1df6a918022abbfd4e72e4d40a4769e616a4176790acbcb}
+    pull_policy: missing
     container_name: mangalmm-local-server
     restart: unless-stopped
+    labels:
+      com.comictranslate.mangalmm-runtime-fingerprint: "${MANGALMM_RUNTIME_FINGERPRINT:-unprepared}"
+      com.comictranslate.mangalmm-model-volume: "${MANGALMM_MODEL_VOLUME:-comic-translate-mangalmm-models-v2}"
+      com.comictranslate.mangalmm-ready-manifest-sha256: "${MANGALMM_READY_MANIFEST_SHA256:-unprepared}"
+      com.comictranslate.mangalmm-model-sha256: "${MANGALMM_MODEL_SHA256:-unprepared}"
+      com.comictranslate.mangalmm-mmproj-sha256: "${MANGALMM_MMPROJ_SHA256:-unprepared}"
+      com.comictranslate.mangalmm-preparation-version: "${MANGALMM_PREPARATION_VERSION:-0}"
     ports:
       - "127.0.0.1:28081:8080"
     gpus: all
@@ -11,7 +18,7 @@ services:
       NVIDIA_VISIBLE_DEVICES: all
       NVIDIA_DRIVER_CAPABILITIES: compute,utility
     volumes:
-      - ../testmodel:/models:ro
+      - mangalmm-models:/models:ro
     healthcheck:
       test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:8080/health >/dev/null || exit 1"]
       interval: 10s
@@ -20,20 +27,38 @@ services:
       start_period: 20s
     command:
       - -m
-      - /models/MangaLMM.Q8_0.gguf
+      - /models/${MANGALMM_MODEL_FILE:-MangaLMM.Q8_0.gguf}
       - --mmproj
-      - /models/MangaLMM.mmproj-Q8_0.gguf
+      - /models/${MANGALMM_MMPROJ_FILE:-MangaLMM.mmproj-Q8_0.gguf}
+      - --alias
+      - ${MANGALMM_MODEL_ALIAS:-MangaLMM}
       - --host
       - 0.0.0.0
       - --port
       - "8080"
       - -c
-      - "${LLAMA_CTX_SIZE:-8192}"
+      - "${MANGALMM_LLAMA_CTX_SIZE:-8192}"
       - -np
-      - "1"
+      - "${MANGALMM_LLAMA_PARALLEL:-1}"
       - -t
-      - "12"
+      - "${MANGALMM_LLAMA_THREADS:-12}"
+      - -b
+      - "${MANGALMM_LLAMA_BATCH_SIZE:-2048}"
+      - -ub
+      - "${MANGALMM_LLAMA_UBATCH_SIZE:-512}"
+      - --n-gpu-layers
+      - "${MANGALMM_LLAMA_GPU_LAYERS:-all}"
+      - --fit
+      - "off"
+      - --flash-attn
+      - "on"
+      - --temp
+      - "0"
+      - --metrics
       - --cache-ram
       - "0"
-      - --n-gpu-layers
-      - "99"
+
+volumes:
+  mangalmm-models:
+    external: true
+    name: ${MANGALMM_MODEL_VOLUME:-comic-translate-mangalmm-models-v2}
