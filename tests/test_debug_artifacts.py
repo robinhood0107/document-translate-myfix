@@ -6,6 +6,7 @@ import json
 import os
 import tempfile
 import unittest
+from unittest.mock import patch
 
 from modules.utils.debug_artifacts import (
     DebugArtifactError,
@@ -306,13 +307,21 @@ class DebugArtifactRunTests(unittest.TestCase):
             image.write_bytes(b"image")
             main = _MainPage()
 
-            self.assertIsNone(
-                prepare_debug_artifact_run(
-                    main,
-                    [str(image)],
-                    run_type="batch",
+            with patch.dict(
+                os.environ,
+                {
+                    "CT_ENABLE_MEMLOG": "",
+                    "CT_ENABLE_GPU_BENCH": "",
+                    "CT_MANGALMM_DEBUG_ROOT": "",
+                },
+            ):
+                self.assertIsNone(
+                    prepare_debug_artifact_run(
+                        main,
+                        [str(image)],
+                        run_type="batch",
+                    )
                 )
-            )
             self.assertFalse((Path(tmp) / "pages.ctcache").exists())
 
     def test_malformed_source_metadata_fails_open(self) -> None:

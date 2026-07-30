@@ -6,11 +6,17 @@ from unittest import mock
 from urllib.error import HTTPError
 
 from modules.ocr.local_runtime import (
+    MANGALMM_LLAMA_CPP_IMAGE_REF,
     PADDLEOCR_LAYOUT_IMAGE_DIGEST,
     PADDLEOCR_LAYOUT_IMAGE_REF,
     PADDLEOCR_LLAMA_CPP_IMAGE_DIGEST,
     PADDLEOCR_LLAMA_CPP_IMAGE_REF,
     LocalOCRRuntimeManager,
+)
+from modules.ocr.mangalmm_llamacpp_runtime_contract import (
+    DEFAULT_MANGALMM_MODEL_VOLUME,
+    DEFAULT_MANGALMM_READY_MANIFEST,
+    MangaLMMRuntimeContract,
 )
 from modules.ocr.paddle_llamacpp_runtime_contract import (
     DEFAULT_PADDLE_LLAMA_MODEL_VOLUME,
@@ -62,6 +68,22 @@ def _paddle_contract() -> PaddleLlamaRuntimeContract:
         fingerprint="runtime",
         command=("--example",),
         runtime_options={"PADDLEOCR_LLAMA_SLEEP_IDLE_SECONDS": "5"},
+    )
+
+
+def _mangalmm_contract() -> MangaLMMRuntimeContract:
+    return MangaLMMRuntimeContract(
+        volume_name=DEFAULT_MANGALMM_MODEL_VOLUME,
+        ready_manifest_name=DEFAULT_MANGALMM_READY_MANIFEST,
+        ready_manifest_sha256="b" * 64,
+        preparation_version=2,
+        llama_image_ref=MANGALMM_LLAMA_CPP_IMAGE_REF,
+        llama_image_id="sha256:mangalmm-image-id",
+        compose_file_sha256="mangalmm-compose",
+        command_sha256="mangalmm-command",
+        fingerprint="mangalmm-runtime",
+        command=("--example",),
+        runtime_options={},
     )
 
 
@@ -117,6 +139,62 @@ class LocalOCRRuntimeManagerTests(unittest.TestCase):
             self.assertTrue(
                 manager._paddle_containers_match_contract(
                     ["paddleocr-llamacpp"]
+                )
+            )
+
+    def test_windows_rejects_mangalmm_container_created_by_wsl_compose(
+        self,
+    ) -> None:
+        manager = LocalOCRRuntimeManager()
+        inspected = subprocess.CompletedProcess(
+            args=[],
+            returncode=0,
+            stdout=(
+                "mangalmm-runtime|sha256:mangalmm-image-id|Ubuntu\n"
+            ),
+            stderr="",
+        )
+
+        with mock.patch.object(
+            manager,
+            "_mangalmm_runtime_contract",
+            return_value=_mangalmm_contract(),
+        ), mock.patch(
+            "modules.utils.llama_cpp_runtime.run_docker_command",
+            return_value=inspected,
+        ), mock.patch(
+            "modules.ocr.local_runtime.os.name",
+            "nt",
+        ):
+            self.assertFalse(
+                manager._mangalmm_containers_match_contract(
+                    ["mangalmm-local-server"]
+                )
+            )
+
+    def test_windows_accepts_exact_mangalmm_container(self) -> None:
+        manager = LocalOCRRuntimeManager()
+        inspected = subprocess.CompletedProcess(
+            args=[],
+            returncode=0,
+            stdout="mangalmm-runtime|sha256:mangalmm-image-id|\n",
+            stderr="",
+        )
+
+        with mock.patch.object(
+            manager,
+            "_mangalmm_runtime_contract",
+            return_value=_mangalmm_contract(),
+        ), mock.patch(
+            "modules.utils.llama_cpp_runtime.run_docker_command",
+            return_value=inspected,
+        ), mock.patch(
+            "modules.ocr.local_runtime.os.name",
+            "nt",
+        ):
+            self.assertTrue(
+                manager._mangalmm_containers_match_contract(
+                    ["mangalmm-local-server"]
                 )
             )
 
@@ -237,6 +315,98 @@ class LocalOCRRuntimeManagerTests(unittest.TestCase):
             step_name="force-recreate",
         )
         self.assertEqual(manager._active_engine, "PaddleOCR VL")
+
+    def test_stale_mangalmm_container_is_force_recreated(self) -> None:
+        manager = LocalOCRRuntimeManager()
+        settings_page = _DummySettingsPage()
+
+        with mock.patch.object(manager, "validate_engine"), mock.patch.object(
+            manager,
+            "_present_managed_container_names",
+            return_value=["mangalmm-local-server"],
+        ), mock.patch.object(
+            manager,
+            "_mangalmm_containers_match_contract",
+            return_value=False,
+        ), mock.patch.object(
+            manager,
+            "_wait_for_health",
+            return_value=True,
+        ), mock.patch.object(
+            manager,
+            "_run_compose",
+        ) as run_compose:
+            manager.ensure_engine("MangaLMM", settings_page)
+
+        run_compose.assert_called_once_with(
+            "MangaLMM",
+            "up",
+            "-d",
+            "--force-recreate",
+            step_name="force-recreate",
+        )
+        self.assertEqual(manager._active_engine, "MangaLMM")
+
+    def test_exact_stopped_mangalmm_container_is_started_without_compose_up(
+        self,
+    ) -> None:
+        manager = LocalOCRRuntimeManager()
+        settings_page = _DummySettingsPage()
+
+        with mock.patch.object(manager, "validate_engine"), mock.patch.object(
+            manager,
+            "_present_managed_container_names",
+            return_value=["mangalmm-local-server"],
+        ), mock.patch.object(
+            manager,
+            "_mangalmm_containers_match_contract",
+            return_value=True,
+        ), mock.patch.object(
+            manager,
+            "_probe_health_state",
+            return_value="unavailable",
+        ), mock.patch.object(
+            manager,
+            "_start_existing_managed_containers",
+        ) as start_existing, mock.patch.object(
+            manager,
+            "_wait_for_health",
+            return_value=True,
+        ), mock.patch.object(
+            manager,
+            "_run_compose",
+        ) as run_compose:
+            manager.ensure_engine("MangaLMM", settings_page)
+
+        start_existing.assert_called_once_with(
+            "MangaLMM",
+            ["mangalmm-local-server"],
+        )
+        run_compose.assert_not_called()
+        self.assertEqual(manager._active_engine, "MangaLMM")
+
+    def test_mangalmm_handoff_stops_runtime_before_next_gpu_stage(self) -> None:
+        manager = LocalOCRRuntimeManager()
+        manager._active_engine = "MangaLMM"
+
+        with mock.patch.object(
+            manager,
+            "_run_compose",
+        ) as run_compose, mock.patch.object(
+            manager,
+            "_running_managed_container_names",
+            return_value=[],
+        ):
+            manager.release_for_handoff()
+
+        run_compose.assert_called_once_with(
+            "MangaLMM",
+            "stop",
+            "--timeout",
+            "10",
+            step_name="stop",
+        )
+        self.assertIsNone(manager._active_engine)
 
     def test_shutdown_stops_and_preserves_active_engine_containers(self) -> None:
         manager = LocalOCRRuntimeManager()

@@ -30,6 +30,20 @@ from modules.ocr.paddle_llamacpp_runtime_contract import (
     build_paddle_llama_runtime_contract,
     validate_paddle_llama_volume_name,
 )
+from modules.ocr.mangalmm_llamacpp_runtime_contract import (
+    DEFAULT_MANGALMM_LLAMA_CPP_IMAGE,
+    DEFAULT_MANGALMM_MODEL_VOLUME,
+    DEFAULT_MANGALMM_READY_MANIFEST,
+    MANGALMM_MMPROJ_NAME,
+    MANGALMM_MODEL_NAME,
+    MANGALMM_MODEL_SPECS,
+    MANGALMM_RUNTIME_FINGERPRINT_LABEL,
+    MANGALMM_RUNTIME_PREPARATION_VERSION,
+    MangaLMMRuntimeContract,
+    MangaLMMRuntimeContractError,
+    build_mangalmm_runtime_contract,
+    validate_mangalmm_volume_name,
+)
 from modules.utils.exceptions import LocalServiceSetupError, OperationCancelledError
 from modules.utils.llama_cpp_runtime import (
     DEFAULT_LLAMA_CPP_IMAGE,
@@ -54,6 +68,10 @@ PADDLEOCR_LLAMA_CPP_IMAGE_DIGEST = PADDLEOCR_LLAMA_CPP_IMAGE_REF.rsplit("@", 1)[
 PADDLEOCR_IMAGE_REF = PADDLEOCR_LAYOUT_IMAGE_REF
 PADDLEOCR_IMAGE_DIGEST = PADDLEOCR_LAYOUT_IMAGE_DIGEST
 PADDLEOCR_RUNTIME_FINGERPRINT_LABEL = PADDLE_RUNTIME_FINGERPRINT_LABEL
+MANGALMM_LLAMA_CPP_IMAGE_REF = DEFAULT_MANGALMM_LLAMA_CPP_IMAGE
+MANGALMM_LLAMA_CPP_IMAGE_DIGEST = MANGALMM_LLAMA_CPP_IMAGE_REF.rsplit("@", 1)[
+    -1
+]
 OCRPreflightProbeResult = Literal["healthy", "unavailable", "not_managed"]
 OCRHealthState = Literal["healthy", "loading", "unavailable"]
 
@@ -109,6 +127,7 @@ class LocalOCRRuntimeManager:
         self._readiness_cache: set[tuple[str, str, str]] = set()
         self._startup_cancel_checker: Callable[[], bool] | None = None
         self._paddle_runtime_contract_cache: PaddleLlamaRuntimeContract | None = None
+        self._mangalmm_runtime_contract_cache: MangaLMMRuntimeContract | None = None
         self._paddle_idle_released = False
 
     def validate_engine(self, engine_key: str, settings_page: Any) -> None:
@@ -136,6 +155,19 @@ class LocalOCRRuntimeManager:
                     (
                         f"Prepared PaddleOCR llama.cpp runtime validation failed: {exc}\n"
                         "Run scripts/prepare_paddleocr_llamacpp_runtime.ps1 "
+                        "in Prepare or Verify mode."
+                    )
+                ) from exc
+        if engine_key == "MangaLMM":
+            try:
+                self._ensure_mangalmm_runtime_image()
+                self._mangalmm_runtime_contract(force_refresh=True)
+            except (MangaLMMRuntimeContractError, OSError) as exc:
+                raise self._build_setup_error(
+                    engine_key,
+                    (
+                        f"Prepared MangaLMM runtime validation failed: {exc}\n"
+                        "Run scripts/prepare_mangalmm_llamacpp_runtime.ps1 "
                         "in Prepare or Verify mode."
                     )
                 ) from exc
@@ -267,7 +299,7 @@ class LocalOCRRuntimeManager:
                 self._readiness_cache.clear()
             if cache_key in self._readiness_cache:
                 cache_is_healthy = (
-                    engine_key != "PaddleOCR VL"
+                    engine_key not in {"PaddleOCR VL", "MangaLMM"}
                     or self._probe_health_state(
                         self._config_health_urls(self._config_for(engine_key))
                     )
@@ -311,18 +343,22 @@ class LocalOCRRuntimeManager:
         self.validate_engine(engine_key, settings_page)
         config = self._config_for(engine_key)
         health_urls = self._config_health_urls(config)
+        contract_managed = engine_key in {"PaddleOCR VL", "MangaLMM"}
         present_containers = (
             self._present_managed_container_names(engine_key)
-            if engine_key == "PaddleOCR VL"
+            if contract_managed
             else []
         )
         if (
-            engine_key == "PaddleOCR VL"
+            contract_managed
             and present_containers
             and (
                 len(present_containers)
                 != len(self._managed_container_names(engine_key))
-                or not self._paddle_containers_match_contract(present_containers)
+                or not self._managed_containers_match_contract(
+                    engine_key,
+                    present_containers,
+                )
             )
         ):
             self._managed_start_attempted_engine = engine_key
@@ -674,14 +710,11 @@ class LocalOCRRuntimeManager:
             detail = str(exc).strip()
         requested_image = ""
         if config.get("uses_llama_cpp"):
-            requested_image = env.get(
-                (
-                    "PADDLEOCR_LLAMA_CPP_IMAGE"
-                    if engine_key == "PaddleOCR VL"
-                    else "LLAMA_CPP_IMAGE"
-                ),
-                "",
-            )
+            image_key = {
+                "PaddleOCR VL": "PADDLEOCR_LLAMA_CPP_IMAGE",
+                "MangaLMM": "MANGALMM_LLAMA_CPP_IMAGE",
+            }.get(engine_key, "LLAMA_CPP_IMAGE")
+            requested_image = env.get(image_key, "")
         extra = f"Docker compose {step_name} failed.\n{detail}"
         if requested_image:
             extra = f"{extra}\nRequested image: {requested_image}"
@@ -708,6 +741,8 @@ class LocalOCRRuntimeManager:
             env.setdefault("LLAMA_N_GPU_LAYERS", DEFAULT_HUNYUAN_N_GPU_LAYERS)
         if engine_key == "PaddleOCR VL":
             env.update(self._paddle_runtime_contract().compose_environment())
+        if engine_key == "MangaLMM":
+            env.update(self._mangalmm_runtime_contract().compose_environment())
         return env
 
     def _resolve_server_url(self, engine_key: str, settings_page: Any) -> str:
@@ -754,11 +789,10 @@ class LocalOCRRuntimeManager:
         if not config.get("uses_llama_cpp"):
             return
         try:
-            image_env_key = (
-                "PADDLEOCR_LLAMA_CPP_IMAGE"
-                if engine_key == "PaddleOCR VL"
-                else "LLAMA_CPP_IMAGE"
-            )
+            image_env_key = {
+                "PaddleOCR VL": "PADDLEOCR_LLAMA_CPP_IMAGE",
+                "MangaLMM": "MANGALMM_LLAMA_CPP_IMAGE",
+            }.get(engine_key, "LLAMA_CPP_IMAGE")
             runtime = inspect_llama_cpp_runtime(
                 image_ref=self._build_env(engine_key).get(image_env_key),
                 container_name=str(config.get("container_name") or ""),
@@ -859,6 +893,77 @@ class LocalOCRRuntimeManager:
                     "PaddleOCR VL",
                     f"Docker returned no image ID for the pinned PaddleOCR image: {image_ref}"
                 )
+
+    def _mangalmm_runtime_contract(
+        self,
+        *,
+        force_refresh: bool = False,
+    ) -> MangaLMMRuntimeContract:
+        if (
+            self._mangalmm_runtime_contract_cache is not None
+            and not force_refresh
+        ):
+            return self._mangalmm_runtime_contract_cache
+
+        compose_file = Path(self._config_for("MangaLMM")["compose_file"])
+        if not compose_file.is_file():
+            raise FileNotFoundError(compose_file)
+        volume_name = validate_mangalmm_volume_name(
+            os.environ.get(
+                "MANGALMM_MODEL_VOLUME",
+                DEFAULT_MANGALMM_MODEL_VOLUME,
+            )
+        )
+        (
+            manifest_bytes,
+            manifest_sha256,
+            observed_file_bytes,
+        ) = self._probe_mangalmm_model_volume(
+            volume_name=volume_name,
+            image_ref=MANGALMM_LLAMA_CPP_IMAGE_REF,
+        )
+        llama_image_id = self._inspect_docker_image_id(
+            MANGALMM_LLAMA_CPP_IMAGE_REF
+        )
+        if not llama_image_id:
+            raise MangaLMMRuntimeContractError(
+                "Pinned MangaLMM llama.cpp image is not installed."
+            )
+        contract = build_mangalmm_runtime_contract(
+            manifest_bytes=manifest_bytes,
+            manifest_sha256=manifest_sha256,
+            observed_file_bytes=observed_file_bytes,
+            volume_name=volume_name,
+            llama_image_ref=MANGALMM_LLAMA_CPP_IMAGE_REF,
+            llama_image_id=llama_image_id,
+            compose_file=compose_file,
+            environment=os.environ,
+        )
+        self._mangalmm_runtime_contract_cache = contract
+        return contract
+
+    def _ensure_mangalmm_runtime_image(self) -> None:
+        image_ref = MANGALMM_LLAMA_CPP_IMAGE_REF
+        if self._inspect_docker_image_id(image_ref):
+            return
+        from modules.utils.llama_cpp_runtime import run_docker_command
+
+        try:
+            run_docker_command(
+                ["docker", "pull", image_ref],
+                cancel_checker=self._startup_cancel_checker,
+            )
+        except RuntimeError as exc:
+            raise self._build_setup_error(
+                "MangaLMM",
+                f"Unable to load the pinned MangaLMM image: {image_ref}\n{exc}",
+            ) from exc
+        if not self._inspect_docker_image_id(image_ref):
+            raise self._build_setup_error(
+                "MangaLMM",
+                "Docker returned no image ID for the pinned MangaLMM image: "
+                f"{image_ref}",
+            )
 
     def _probe_paddle_model_volume(
         self,
@@ -994,6 +1099,140 @@ printf 'mmproj_bytes=%s\n' "$(stat -c %s "$mmproj_path")"
             ) from exc
         return manifest_bytes, manifest_sha256, observed_file_bytes
 
+    def _probe_mangalmm_model_volume(
+        self,
+        *,
+        volume_name: str,
+        image_ref: str,
+    ) -> tuple[bytes, str, dict[str, int]]:
+        from modules.utils.llama_cpp_runtime import run_docker_command
+
+        volume_inspection = run_docker_command(
+            [
+                "docker",
+                "volume",
+                "inspect",
+                "--format",
+                "{{json .Labels}}",
+                volume_name,
+            ],
+            check=False,
+            cancel_checker=self._startup_cancel_checker,
+        )
+        if volume_inspection.returncode != 0:
+            raise self._build_setup_error(
+                "MangaLMM",
+                (
+                    "Prepared MangaLMM model volume does not exist: "
+                    f"{volume_name}\n"
+                    "Run scripts/prepare_mangalmm_llamacpp_runtime.ps1 before "
+                    "starting the managed endpoint."
+                ),
+            )
+        try:
+            volume_labels = json.loads(
+                (volume_inspection.stdout or "").strip() or "{}"
+            )
+        except json.JSONDecodeError as exc:
+            raise self._build_setup_error(
+                "MangaLMM",
+                f"Unable to parse Docker labels for MangaLMM volume: {volume_name}",
+            ) from exc
+        expected_labels = {
+            "comic-translate.runtime": "MangaLMM-llama.cpp",
+            "comic-translate.preparation-version": str(
+                MANGALMM_RUNTIME_PREPARATION_VERSION
+            ),
+        }
+        if not isinstance(volume_labels, dict) or any(
+            str(volume_labels.get(key, "")) != expected
+            for key, expected in expected_labels.items()
+        ):
+            raise self._build_setup_error(
+                "MangaLMM",
+                (
+                    "MangaLMM volume labels do not match the preparation "
+                    f"contract: {volume_name}\n"
+                    f"Expected labels: {expected_labels}\n"
+                    f"Actual labels: {volume_labels}"
+                ),
+            )
+
+        shell_script = r'''
+set -eu
+manifest_path="/models/$READY_MANIFEST"
+model_path="/models/$MODEL_FILE"
+mmproj_path="/models/$MMPROJ_FILE"
+test -f "$manifest_path"
+test -f "$model_path"
+test -f "$mmproj_path"
+printf 'manifest_sha256=%s\n' "$(sha256sum "$manifest_path" | cut -d ' ' -f 1)"
+printf 'manifest_base64='
+base64 -w 0 "$manifest_path"
+printf '\nmodel_bytes=%s\n' "$(stat -c %s "$model_path")"
+printf 'mmproj_bytes=%s\n' "$(stat -c %s "$mmproj_path")"
+'''.strip()
+        completed = run_docker_command(
+            [
+                "docker",
+                "run",
+                "--rm",
+                "--pull",
+                "never",
+                "-e",
+                f"READY_MANIFEST={DEFAULT_MANGALMM_READY_MANIFEST}",
+                "-e",
+                f"MODEL_FILE={MANGALMM_MODEL_NAME}",
+                "-e",
+                f"MMPROJ_FILE={MANGALMM_MMPROJ_NAME}",
+                "--mount",
+                f"type=volume,source={volume_name},target=/models,readonly",
+                "--entrypoint",
+                "/bin/sh",
+                image_ref,
+                "-ec",
+                shell_script,
+            ],
+            check=False,
+            cancel_checker=self._startup_cancel_checker,
+        )
+        if completed.returncode != 0:
+            detail = (
+                (completed.stderr or "") + "\n" + (completed.stdout or "")
+            ).strip()
+            raise self._build_setup_error(
+                "MangaLMM",
+                (
+                    "Prepared MangaLMM model volume is incomplete: "
+                    f"{volume_name}\n{detail}\n"
+                    "Run scripts/prepare_mangalmm_llamacpp_runtime.ps1 in "
+                    "Prepare or Verify mode."
+                ),
+            )
+
+        values: dict[str, str] = {}
+        for line in (completed.stdout or "").splitlines():
+            key, separator, value = line.partition("=")
+            if separator:
+                values[key.strip()] = value.strip()
+        try:
+            manifest_bytes = base64.b64decode(
+                values["manifest_base64"],
+                validate=True,
+            )
+            manifest_sha256 = values["manifest_sha256"].lower()
+            observed_file_bytes = {
+                MANGALMM_MODEL_NAME: int(values["model_bytes"]),
+                MANGALMM_MMPROJ_NAME: int(values["mmproj_bytes"]),
+            }
+        except (KeyError, ValueError, binascii.Error) as exc:
+            raise self._build_setup_error(
+                "MangaLMM",
+                "Unable to parse the prepared MangaLMM volume probe output: "
+                f"{completed.stdout}",
+            ) from exc
+        return manifest_bytes, manifest_sha256, observed_file_bytes
+
     def _inspect_docker_image_id(self, image_ref: str) -> str:
         from modules.utils.llama_cpp_runtime import run_docker_command
 
@@ -1075,6 +1314,78 @@ printf 'mmproj_bytes=%s\n' "$(stat -c %s "$mmproj_path")"
                 )
                 return False
         return True
+
+    def _mangalmm_containers_match_contract(
+        self,
+        container_names: list[str],
+    ) -> bool:
+        try:
+            contract = self._mangalmm_runtime_contract()
+        except OperationCancelledError:
+            raise
+        except Exception:
+            logger.warning(
+                "Failed to resolve the MangaLMM runtime contract; stale "
+                "containers will be recreated.",
+                exc_info=True,
+            )
+            return False
+
+        from modules.utils.llama_cpp_runtime import run_docker_command
+
+        if container_names != ["mangalmm-local-server"]:
+            return False
+        completed = run_docker_command(
+            [
+                "docker",
+                "inspect",
+                "--format",
+                (
+                    "{{index .Config.Labels "
+                    f"\"{MANGALMM_RUNTIME_FINGERPRINT_LABEL}\""
+                    "}}|{{.Image}}|"
+                    "{{index .Config.Labels "
+                    "\"desktop.docker.io/wsl-distro\"}}"
+                ),
+                "mangalmm-local-server",
+            ],
+            check=False,
+            timeout_sec=15.0,
+            cancel_checker=self._startup_cancel_checker,
+        )
+        if getattr(completed, "returncode", 1) != 0:
+            return False
+        parts = str(
+            getattr(completed, "stdout", "") or ""
+        ).strip().split("|", 2)
+        if len(parts) != 3:
+            return False
+        fingerprint, image_id, wsl_distro = parts
+        if (
+            fingerprint != contract.fingerprint
+            or image_id != contract.llama_image_id
+        ):
+            return False
+        if os.name == "nt" and wsl_distro.strip():
+            logger.info(
+                "MangaLMM container was created by WSL Compose (%s); Windows "
+                "will recreate it so Docker Desktop can manage the Compose "
+                "application without invoking wsl.",
+                wsl_distro.strip(),
+            )
+            return False
+        return True
+
+    def _managed_containers_match_contract(
+        self,
+        engine_key: str,
+        container_names: list[str],
+    ) -> bool:
+        if engine_key == "PaddleOCR VL":
+            return self._paddle_containers_match_contract(container_names)
+        if engine_key == "MangaLMM":
+            return self._mangalmm_containers_match_contract(container_names)
+        return False
 
     def _existing_managed_container_names(self, engine_key: str) -> list[str]:
         names = self._managed_container_names(engine_key)
