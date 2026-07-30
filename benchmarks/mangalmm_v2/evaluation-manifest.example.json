@@ -1,0 +1,15 @@
+{
+  "protocol_version": "mangalmm-v2-evaluation-v1",
+  "corpus_id": "external-neutral-corpus",
+  "cases": [
+    {
+      "case_id": "translucent-screen-dev",
+      "split": "development",
+      "frozen_before_candidate_run": false,
+      "source_image": "C:/external-validation/mangalmm-v2/source/example.png",
+      "source_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+      "annotation": "C:/external-validation/mangalmm-v2/annotations/example.json",
+      "annotation_sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+    }
+  ]
+}
