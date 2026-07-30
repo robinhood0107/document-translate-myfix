@@ -48,6 +48,7 @@ from .mangalmm_response_contract import (
 from .persistent_cache import canonical_sha256
 from .result_contract import (
     OCR_STRATEGY_MANGALMM_FULL_PAGE,
+    finalize_ocr_processing_contracts,
     initialize_ocr_result_contract,
 )
 from .selection import normalize_ocr_mode
@@ -450,6 +451,9 @@ class MangaLMMOCREngine(OCREngine):
             self.last_request_metadata.get("final_status", "unknown"),
             quality.get("reason", "") or "ok",
             (time.perf_counter() - started_at) * 1000.0,
+        )
+        self.last_request_metadata["processing_contract"] = (
+            finalize_ocr_processing_contracts(blocks)
         )
         return blk_list
 

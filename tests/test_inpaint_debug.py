@@ -46,6 +46,18 @@ class _Block:
     ui_panel_preview_path: str = ""
     mask_decision: str = ""
     mask_reject_reason: str = ""
+    semantic_role: str = ""
+    processing_action: str = ""
+    processing_decision_source: str = ""
+    processing_decision_reasons: list[str] = field(default_factory=list)
+    canonical_block_id: str = ""
+    duplicate_alias_block_ids: list[str] = field(default_factory=list)
+    duplicate_alias_count: int = 0
+    merge_split_diagnostics: dict = field(default_factory=dict)
+    mask_strategy: str = ""
+    mask_strategy_reason: str = ""
+    mask_actual_bbox: list[int] | None = None
+    mask_actual_pixel_count: int = 0
 
 
 class InpaintDebugTests(unittest.TestCase):
@@ -91,6 +103,18 @@ class InpaintDebugTests(unittest.TestCase):
             ui_panel_preview_path="previews/page_block_0.png",
             mask_decision="review",
             mask_reject_reason="embedded_ui_panel_layout_review",
+            semantic_role="ui_or_sign",
+            processing_action="preserve",
+            processing_decision_source="embedded_ui_cluster",
+            processing_decision_reasons=["embedded_device_ui_cluster"],
+            canonical_block_id="canonical-1",
+            duplicate_alias_block_ids=["alias-1"],
+            duplicate_alias_count=1,
+            merge_split_diagnostics={"automatic_merge": False},
+            mask_strategy="preserve_original",
+            mask_strategy_reason="processing_action_preserve",
+            mask_actual_bbox=[1, 1, 4, 5],
+            mask_actual_pixel_count=12,
         )
 
         metadata = build_inpaint_debug_metadata(
@@ -189,6 +213,34 @@ class InpaintDebugTests(unittest.TestCase):
         self.assertEqual(metadata["blocks"][0]["ui_panel_preview_path"], "previews/page_block_0.png")
         self.assertEqual(metadata["blocks"][0]["mask_decision"], "review")
         self.assertEqual(metadata["blocks"][0]["mask_reject_reason"], "embedded_ui_panel_layout_review")
+        self.assertEqual(
+            metadata["blocks"][0]["semantic_role"],
+            "ui_or_sign",
+        )
+        self.assertEqual(
+            metadata["blocks"][0]["processing_action"],
+            "preserve",
+        )
+        self.assertEqual(
+            metadata["blocks"][0]["canonical_block_id"],
+            "canonical-1",
+        )
+        self.assertEqual(
+            metadata["blocks"][0]["duplicate_alias_block_ids"],
+            ["alias-1"],
+        )
+        self.assertEqual(
+            metadata["blocks"][0]["mask_strategy"],
+            "preserve_original",
+        )
+        self.assertEqual(
+            metadata["blocks"][0]["mask_actual_bbox"],
+            [1, 1, 4, 5],
+        )
+        self.assertEqual(
+            metadata["blocks"][0]["mask_actual_pixel_count"],
+            12,
+        )
 
     def test_export_artifacts_only_writes_selected_debug_outputs(self) -> None:
         image = np.full((10, 12, 3), 255, dtype=np.uint8)
