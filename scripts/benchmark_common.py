@@ -16,6 +16,12 @@ from typing import Any
 
 import yaml
 
+from modules.ocr.paddle_llamacpp_runtime_contract import (
+    DEFAULT_PADDLE_LAYOUT_IMAGE,
+    DEFAULT_PADDLE_LLAMA_CPP_IMAGE,
+    DEFAULT_PADDLE_LLAMA_MODEL_VOLUME,
+    validate_paddle_llama_volume_name,
+)
 from modules.utils.llama_cpp_runtime import (
     DEFAULT_LLAMA_CPP_IMAGE,
     inspect_llama_cpp_runtime,
@@ -114,8 +120,8 @@ GEMMA_CONTAINER_NAMES = [
     "gemma-local-server",
 ]
 PADDLEOCR_VL_CONTAINER_NAMES = [
+    "paddleocr-llamacpp",
     "paddleocr-server",
-    "paddleocr-vllm",
 ]
 HUNYUAN_OCR_CONTAINER_NAMES = [
     "hunyuanocr-local-server",
@@ -141,6 +147,7 @@ GEMMA_HEALTH_URLS = [
 ]
 PADDLEOCR_VL_HEALTH_URLS = [
     "http://127.0.0.1:28118/docs",
+    "http://127.0.0.1:18000/health",
 ]
 HUNYUAN_OCR_HEALTH_URLS = [
     "http://127.0.0.1:28080/health",
@@ -894,21 +901,85 @@ def _stage_ocr_runtime(preset: dict[str, Any], runtime_dir: Path) -> dict[str, A
     runtime_dir.mkdir(parents=True, exist_ok=True)
     compose = _python3_yaml_load(OCR_BUNDLE_DIR / "docker-compose.yaml")
     compose["name"] = PADDLEOCR_COMPOSE_PROJECT_NAME
-    ocr_runtime = preset.get("ocr_runtime", {})
+    raw_ocr_runtime = preset.get("ocr_runtime", {})
+    ocr_runtime = raw_ocr_runtime if isinstance(raw_ocr_runtime, dict) else {}
     front_device = str(ocr_runtime.get("front_device", "gpu:0") or "gpu:0")
     use_hpip = bool(ocr_runtime.get("use_hpip", False))
 
     layout_service = compose["services"]["paddleocr-layout"]
-    vllm_service = compose["services"]["paddleocr-vllm"]
-    if ocr_runtime.get("image"):
-        image_ref = str(ocr_runtime["image"])
-        layout_service["image"] = image_ref
-        vllm_service["image"] = image_ref
-    depends_on = layout_service.get("depends_on")
-    if isinstance(depends_on, dict) and isinstance(depends_on.get("paddleocr-vllm"), dict):
-        depends_on["paddleocr-vllm"]["condition"] = "service_started"
-    if ocr_runtime.get("layout_image"):
-        layout_service["image"] = str(ocr_runtime["layout_image"])
+    llama_service = compose["services"].get("paddleocr-llamacpp")
+    if not isinstance(llama_service, dict):
+        raise ValueError(
+            "Bundled PaddleOCR compose must define paddleocr-llamacpp."
+        )
+
+    llama_service["image"] = normalize_llama_cpp_image(
+        ocr_runtime.get("llama_cpp_image")
+        or DEFAULT_PADDLE_LLAMA_CPP_IMAGE
+    )
+    pull_policy = str(
+        ocr_runtime.get("pull_policy")
+        or llama_service.get("pull_policy")
+        or "missing"
+    ).strip().lower()
+    if pull_policy not in {"always", "missing", "never"}:
+        raise ValueError(
+            "PaddleOCR llama.cpp pull_policy must be always, missing, or never."
+        )
+    llama_service["pull_policy"] = pull_policy
+    layout_service["image"] = str(
+        ocr_runtime.get("layout_image")
+        or ocr_runtime.get("image")
+        or DEFAULT_PADDLE_LAYOUT_IMAGE
+    )
+
+    command = list(llama_service.get("command") or [])
+    option_values = (
+        ("-m", "model_path"),
+        ("--mmproj", "mmproj_path"),
+        ("--alias", "model_alias"),
+        ("-c", "context_size"),
+        ("-np", "parallel"),
+        ("-t", "threads"),
+        ("-b", "batch_size"),
+        ("-ub", "ubatch_size"),
+        ("--n-gpu-layers", "gpu_layers"),
+        ("--sleep-idle-seconds", "sleep_idle_seconds"),
+    )
+    for option, key in option_values:
+        if ocr_runtime.get(key) is not None:
+            _update_command_option(command, option, [str(ocr_runtime[key])])
+    if ocr_runtime.get("n_parallel") is not None:
+        _update_command_option(
+            command,
+            "-np",
+            [str(ocr_runtime["n_parallel"])],
+        )
+    if ocr_runtime.get("n_gpu_layers") is not None:
+        _update_command_option(
+            command,
+            "--n-gpu-layers",
+            [str(ocr_runtime["n_gpu_layers"])],
+        )
+    llama_service["command"] = command
+
+    model_volume = validate_paddle_llama_volume_name(
+        str(
+            ocr_runtime.get("model_volume")
+            or DEFAULT_PADDLE_LLAMA_MODEL_VOLUME
+        )
+    )
+    volume_config = compose.setdefault("volumes", {}).setdefault(
+        "paddleocr-llamacpp-models",
+        {"external": True},
+    )
+    if not isinstance(volume_config, dict):
+        raise ValueError(
+            "PaddleOCR llama.cpp model volume configuration must be an object."
+        )
+    volume_config["external"] = True
+    volume_config["name"] = model_volume
+
     layout_command = str(layout_service.get("command") or "")
     layout_command = re.sub(r"--device\s+cpu", f"--device {front_device}", layout_command)
     layout_command = re.sub(r"--device\s+gpu:0", f"--device {front_device}", layout_command)
@@ -937,27 +1008,13 @@ def _stage_ocr_runtime(preset: dict[str, Any], runtime_dir: Path) -> dict[str, A
     pipeline_path = runtime_dir / "pipeline_conf.yaml"
     _python3_yaml_dump(pipeline_path, pipeline_conf)
 
-    vllm_conf = _python3_yaml_load(OCR_BUNDLE_DIR / "vllm_config.yml")
-    for key in (
-        "gpu_memory_utilization",
-        "max_model_len",
-        "max_num_seqs",
-        "max_num_batched_tokens",
-        "dtype",
-        "enable_prefix_caching",
-        "mm_processor_cache_gb",
-    ):
-        if key in ocr_runtime:
-            vllm_conf[key] = ocr_runtime[key]
-    vllm_path = runtime_dir / "vllm_config.yml"
-    _python3_yaml_dump(vllm_path, vllm_conf)
-
     return {
         "kind": "paddleocr_vl",
+        "backend": "llama.cpp",
         "compose_path": str(compose_path.resolve()),
         "pipeline_conf_path": str(pipeline_path.resolve()),
-        "vllm_config_path": str(vllm_path.resolve()),
-        "service_names": ["paddleocr-server", "paddleocr-vllm"],
+        "model_volume": model_volume,
+        "service_names": ["paddleocr-llamacpp", "paddleocr-server"],
     }
 
 
