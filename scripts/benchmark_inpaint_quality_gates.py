@@ -102,6 +102,7 @@ class CandidateProfile:
     structure_protect: bool
     bold_anchor_distance: float | None = None
     residual_mode: str = "none"
+    pass_partition: str = "union"
     baseline: bool = False
     promotable: bool = True
     feasibility_only: bool = False
@@ -188,6 +189,44 @@ MASK_RESIDUAL_SCREEN_PROFILES: tuple[CandidateProfile, ...] = (
         bold_anchor_distance=2.0,
         residual_mode="product_uncovered",
     ),
+    CandidateProfile(
+        slug=(
+            "mask-bold-outline-anchor-2-dilate-6-components"
+            "-lama-large-fp32-2048"
+        ),
+        label=(
+            "bold-outline anchor 2 dilation 6 + connected-component "
+            "GPU passes + LaMa Large FP32 2048"
+        ),
+        phase="mask-residual",
+        inpainter_key="lama_large_512px",
+        precision="fp32",
+        inpaint_size=2048,
+        mask_mode="bold_outline",
+        dilation=6,
+        structure_protect=False,
+        bold_anchor_distance=2.0,
+        pass_partition="components",
+    ),
+    CandidateProfile(
+        slug=(
+            "mask-bold-outline-anchor-2-dilate-6-union-then-components"
+            "-lama-large-fp32-2048"
+        ),
+        label=(
+            "bold-outline anchor 2 dilation 6 + union cleanup followed by "
+            "connected-component GPU passes + LaMa Large FP32 2048"
+        ),
+        phase="mask-residual",
+        inpainter_key="lama_large_512px",
+        precision="fp32",
+        inpaint_size=2048,
+        mask_mode="bold_outline",
+        dilation=6,
+        structure_protect=False,
+        bold_anchor_distance=2.0,
+        pass_partition="union_then_components",
+    ),
 )
 
 MODEL_SCREEN_TEMPLATES: tuple[CandidateProfile, ...] = (
@@ -237,11 +276,11 @@ MODEL_SCREEN_TEMPLATES: tuple[CandidateProfile, ...] = (
     ),
     CandidateProfile(
         slug="model-zits-fp32-feasibility",
-        label="ZITS/ZITS++ GPU FP32 feasibility",
+        label="ZITS++ model_512 GPU FP32 feasibility",
         phase="model",
         inpainter_key="ZITS",
         precision="fp32",
-        inpaint_size=2048,
+        inpaint_size=512,
         mask_mode="glyph",
         dilation=None,
         structure_protect=True,
@@ -1058,6 +1097,7 @@ def _profiles_for_phase(
                     structure_protect=selected.structure_protect,
                     bold_anchor_distance=selected.bold_anchor_distance,
                     residual_mode=selected.residual_mode,
+                    pass_partition=selected.pass_partition,
                 )
             )
     else:
@@ -1444,11 +1484,12 @@ def _instantiate_inpainter(profile: CandidateProfile):
     from modules.utils.pipeline_config import inpaint_map
 
     if profile.feasibility_only:
-        return None, {
-            "status": "not_implemented",
-            "reason": "ZITS adapter is intentionally lab-only and not present",
-            "fp32_promotion_eligible": False,
-        }
+        from zitspp_feasibility_client import (
+            ZITSPlusPlusDockerInpainter,
+        )
+
+        inpainter = ZITSPlusPlusDockerInpainter.from_environment()
+        return inpainter, dict(inpainter.runtime)
     cls = inpaint_map.get(profile.inpainter_key)
     if cls is None:
         raise ProtocolError(f"unknown inpainter key: {profile.inpainter_key}")
@@ -1499,6 +1540,9 @@ def _load_profile_runtime(
 
 def _release_inpainter(inpainter: Any) -> None:
     if inpainter is not None:
+        close = getattr(inpainter, "close", None)
+        if callable(close):
+            close()
         for attribute in ("model", "session"):
             if hasattr(inpainter, attribute):
                 setattr(inpainter, attribute, None)
@@ -1701,38 +1745,76 @@ def _run_candidate_passes(
     primary_mask: Any,
     residual_mask: Any,
     review_roi: Sequence[int],
+    pass_partition: str = "union",
 ) -> tuple[Any, float, dict[str, Any]]:
+    import cv2
     import numpy as np
+
+    if pass_partition not in {
+        "union",
+        "components",
+        "union_then_components",
+    }:
+        raise ProtocolError(
+            f"candidate has unknown pass partition: {pass_partition}"
+        )
+
+    def partition(mask: Any) -> list[Any]:
+        binary = (np.asarray(mask) > 0).astype(np.uint8)
+        if not np.any(binary):
+            return []
+        if pass_partition == "union":
+            return [binary * 255]
+        count, labels, stats, _centroids = cv2.connectedComponentsWithStats(
+            binary,
+            connectivity=8,
+        )
+        groups: list[tuple[int, int, int, Any]] = []
+        for label in range(1, count):
+            x, y, _width, _height, area = [
+                int(value) for value in stats[label]
+            ]
+            if area <= 0:
+                continue
+            component = np.where(labels == label, 255, 0).astype(np.uint8)
+            groups.append((y, x, -area, component))
+        groups.sort(key=lambda item: (item[0], item[1], item[2]))
+        components = [item[3] for item in groups]
+        if pass_partition == "union_then_components":
+            return [binary * 255, *components]
+        return components
 
     cleaned = np.asarray(image).copy()
     inference_seconds = 0.0
     pass_diagnostics: list[dict[str, Any]] = []
-    if bool((primary_mask > 0).any()):
-        cleaned, first_seconds, first_diagnostics = _run_direct_roi(
-            inpainter=inpainter,
-            image=image,
-            mask=primary_mask,
-            roi=_context_roi(
-                primary_mask,
-                image.shape,
-                requested_roi=review_roi,
-            ),
-        )
-        inference_seconds += first_seconds
-        pass_diagnostics.append(first_diagnostics)
-    if bool((residual_mask > 0).any()):
-        cleaned, residual_seconds, residual_diagnostics = _run_direct_roi(
-            inpainter=inpainter,
-            image=cleaned,
-            mask=residual_mask,
-            roi=_context_roi(
-                residual_mask,
-                image.shape,
-                requested_roi=review_roi,
-            ),
-        )
-        inference_seconds += residual_seconds
-        pass_diagnostics.append(residual_diagnostics)
+    partition_counts = {"primary": 0, "residual": 0}
+    for phase_name, phase_mask in (
+        ("primary", primary_mask),
+        ("residual", residual_mask),
+    ):
+        components = partition(phase_mask)
+        partition_counts[phase_name] = len(components)
+        for component_index, component_mask in enumerate(components):
+            cleaned, component_seconds, component_diagnostics = (
+                _run_direct_roi(
+                    inpainter=inpainter,
+                    image=cleaned,
+                    mask=component_mask,
+                    roi=_context_roi(
+                        component_mask,
+                        image.shape,
+                        requested_roi=review_roi,
+                    ),
+                )
+            )
+            inference_seconds += component_seconds
+            pass_diagnostics.append(
+                {
+                    **component_diagnostics,
+                    "partition_phase": phase_name,
+                    "partition_index": component_index,
+                }
+            )
     if not pass_diagnostics:
         raise ProtocolError("candidate pass bundle has no active edit mask")
     diagnostics = {
@@ -1745,6 +1827,9 @@ def _run_candidate_passes(
             else "completed"
         ),
         "pass_count": len(pass_diagnostics),
+        "pass_partition": pass_partition,
+        "primary_partition_count": partition_counts["primary"],
+        "residual_partition_count": partition_counts["residual"],
         "passes": pass_diagnostics,
         "oom_retry_count": sum(
             int(item.get("oom_retry_count", 0) or 0)
@@ -1873,12 +1958,6 @@ def run_screen(
                     status = "model_load_failed"
                     failure = model_load_failure
                     run_diagnostics["status"] = "model_load_failed"
-                elif profile.feasibility_only:
-                    cleaned = image.copy()
-                    inference_seconds = 0.0
-                    status = "feasibility_not_implemented"
-                    failure = str(runtime.get("reason") or "")
-                    run_diagnostics["status"] = status
                 else:
                     try:
                         (
@@ -1891,6 +1970,7 @@ def run_screen(
                             primary_mask=primary_mask,
                             residual_mask=residual_mask,
                             review_roi=case["review_roi"],
+                            pass_partition=profile.pass_partition,
                         )
                     except CandidateRunError as exc:
                         cleaned = image.copy()
@@ -2006,7 +2086,6 @@ def run_screen(
                     == 0
                     for item in case_results
                 )
-                and (not profile.feasibility_only)
             ),
         }
         profile_result["profile_result_sha256"] = canonical_sha256(
@@ -2886,6 +2965,10 @@ def build_parser() -> argparse.ArgumentParser:
     run.add_argument("--selected-dilation", type=int)
     run.add_argument("--selected-mask-profile")
     run.add_argument("--include-feasibility", action="store_true")
+    run.add_argument("--zits-source-root")
+    run.add_argument("--zits-model-checkpoint")
+    run.add_argument("--zits-lsm-checkpoint")
+    run.add_argument("--zits-docker-image")
 
     attach = subparsers.add_parser("attach-renders")
     attach.add_argument("--results", required=True)
@@ -2949,6 +3032,15 @@ def main(argv: Sequence[str] | None = None) -> int:
         ))
         return 0
     if args.command == "run":
+        explicit_zits = {
+            "CT_ZITSPP_SOURCE_ROOT": args.zits_source_root,
+            "CT_ZITSPP_MODEL_CHECKPOINT": args.zits_model_checkpoint,
+            "CT_ZITSPP_LSM_CHECKPOINT": args.zits_lsm_checkpoint,
+            "CT_ZITSPP_DOCKER_IMAGE": args.zits_docker_image,
+        }
+        for name, value in explicit_zits.items():
+            if value:
+                os.environ[name] = str(value)
         result = run_screen(
             Path(args.frozen),
             Path(args.output),

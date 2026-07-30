@@ -412,6 +412,37 @@ def test_model_screen_requires_locked_dilation_and_fp32() -> None:
         if profile.promotable
     )
     assert any(profile.feasibility_only for profile in profiles)
+    zits = next(profile for profile in profiles if profile.feasibility_only)
+    assert not zits.promotable
+    assert zits.inpaint_size == 512
+    assert zits.precision == "fp32"
+
+
+def test_run_parser_accepts_explicit_zits_contract_paths() -> None:
+    args = gates.build_parser().parse_args(
+        [
+            "run",
+            "--frozen",
+            "frozen",
+            "--output",
+            "output",
+            "--phase",
+            "model",
+            "--selected-dilation",
+            "2",
+            "--include-feasibility",
+            "--zits-source-root",
+            "source",
+            "--zits-model-checkpoint",
+            "model.ckpt",
+            "--zits-lsm-checkpoint",
+            "lsm.pth",
+        ]
+    )
+
+    assert args.zits_source_root == "source"
+    assert args.zits_model_checkpoint == "model.ckpt"
+    assert args.zits_lsm_checkpoint == "lsm.pth"
 
 
 def test_bold_outline_mask_keeps_glyph_but_rejects_long_ui_rule() -> None:
@@ -530,6 +561,90 @@ def test_residual_candidate_runs_two_gpu_passes_inside_union_mask() -> None:
     assert changed["changed_outside_mask_pixel_count"] == 0
 
 
+def test_component_partition_runs_each_connected_edit_region_separately() -> None:
+    class FillInpainter:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        def __call__(self, image, mask, _config):
+            self.calls += 1
+            output = image.copy()
+            output[mask > 0] = 30 * self.calls
+            return output
+
+    image = np.full((80, 80, 3), 180, dtype=np.uint8)
+    primary = np.zeros((80, 80), dtype=np.uint8)
+    primary[12:24, 10:22] = 255
+    primary[42:58, 50:66] = 255
+    residual = np.zeros_like(primary)
+    inpainter = FillInpainter()
+
+    cleaned, _elapsed, diagnostics = gates._run_candidate_passes(
+        inpainter=inpainter,
+        image=image,
+        primary_mask=primary,
+        residual_mask=residual,
+        review_roi=[0, 0, 80, 80],
+        pass_partition="components",
+    )
+    changed = gates._changed_pixel_stats(image, cleaned, primary)
+
+    assert inpainter.calls == 2
+    assert diagnostics["pass_partition"] == "components"
+    assert diagnostics["primary_partition_count"] == 2
+    assert diagnostics["residual_partition_count"] == 0
+    assert diagnostics["pass_count"] == 2
+    assert changed["changed_outside_mask_pixel_count"] == 0
+
+
+def test_component_partition_rejects_unknown_mode() -> None:
+    image = np.full((24, 24, 3), 180, dtype=np.uint8)
+    mask = np.zeros((24, 24), dtype=np.uint8)
+    mask[8:16, 8:16] = 255
+
+    with pytest.raises(gates.ProtocolError, match="pass partition"):
+        gates._run_candidate_passes(
+            inpainter=object(),
+            image=image,
+            primary_mask=mask,
+            residual_mask=np.zeros_like(mask),
+            review_roi=[0, 0, 24, 24],
+            pass_partition="unknown",
+        )
+
+
+def test_union_then_components_cleans_context_before_component_passes() -> None:
+    class FillInpainter:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        def __call__(self, image, mask, _config):
+            self.calls += 1
+            output = image.copy()
+            output[mask > 0] = 20 * self.calls
+            return output
+
+    image = np.full((64, 64, 3), 180, dtype=np.uint8)
+    primary = np.zeros((64, 64), dtype=np.uint8)
+    primary[8:16, 8:16] = 255
+    primary[40:50, 42:54] = 255
+    inpainter = FillInpainter()
+
+    _cleaned, _elapsed, diagnostics = gates._run_candidate_passes(
+        inpainter=inpainter,
+        image=image,
+        primary_mask=primary,
+        residual_mask=np.zeros_like(primary),
+        review_roi=[0, 0, 64, 64],
+        pass_partition="union_then_components",
+    )
+
+    assert inpainter.calls == 3
+    assert diagnostics["pass_partition"] == "union_then_components"
+    assert diagnostics["primary_partition_count"] == 3
+    assert diagnostics["pass_count"] == 3
+
+
 def test_model_screen_can_lock_full_mask_profile_contract() -> None:
     selected = next(
         profile
@@ -549,6 +664,7 @@ def test_model_screen_can_lock_full_mask_profile_contract() -> None:
         and profile.dilation == selected.dilation
         and profile.bold_anchor_distance == selected.bold_anchor_distance
         and profile.residual_mode == selected.residual_mode
+        and profile.pass_partition == selected.pass_partition
         for profile in profiles[1:]
     )
     with pytest.raises(gates.ProtocolError, match="unknown"):

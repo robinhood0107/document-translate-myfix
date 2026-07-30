@@ -77,6 +77,39 @@ ZITS/ZITS++ feasibility result contract는
 케이스 모두 `feasibility_not_implemented`로 기록했고 blind 후보에
 넣지 않았다.
 
+## 2026-07-31: 공식 ZITS++ CUDA FP32 feasibility 완료·품질 탈락
+
+- 공식 소스: `ewrfcas/ZITS-PlusPlus`
+- source commit:
+  `de8dd48b17aedd15824842adb7bcca7535daba84`
+- model_512 checkpoint SHA-256:
+  `e30d2073ba63af42836ac611214ed984db7ec739a1eef019451df6a34f566f57`
+- LSM-HAWP checkpoint SHA-256:
+  `6f72a60ec895f11830763069a40cb548dfb0ba77aca5282ffeea8afc72dc1723`
+- model_512 config SHA-256:
+  `e46dd48b4715f0044debfa0faca1c5af0c149b1cb1dffa29afb042687f13e4f2`
+- license: Apache-2.0, file SHA-256
+  `c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4`
+- digest-pinned isolated image:
+  `sha256:d0d32c04a2119613d25a0a4c292e165ccc107954b74580613cf59e378037f8f5`
+- result contract:
+  `af05c5f8d64db20382e357ce843a94cc5327baaeefad182fcf6d5a83fce61aad`
+- 18행 blind review:
+  `43d25197c3a1ab08b0e489e758b01a91b30dacaf8166d7b1fa75a14472aa6bd2`
+
+ZITS++는 RTX 4070 SUPER에서 실제 CUDA FP32로 실행됐다. CPU fallback은
+0이고 세 case 모두 mask 밖 변경 픽셀 0이었다. adapter 내부 model load는
+8.214초였고 세 case 추론은 각각 1.448초, 0.413초, 0.404초였다.
+smoke에서 관측한 peak CUDA allocated memory는 약 1.01GB였다.
+
+그러나 blind 품질에서는 세 case 모두 원문 잔상, 구조·망점 훼손,
+보존 실패, 새 얼룩·패치가 발생했다. 평균 순위는 6.0으로 여섯 후보 중
+최하위였고 `coverage_eligible_candidates`,
+`screen_eligible_candidates`, `promotion_eligible_candidates`는 모두
+0이다. 따라서 ZITS++ 제품 도입은 탈락한다. 이전
+`feasibility_not_implemented`는 실행 인프라가 없던 역사적 결과이며,
+이번 결과가 실제 모델 실행에 기반한 최종 feasibility 판정이다.
+
 ## 상류 coverage 판정
 
 두 번째 개발 케이스의 의미 있는 free-text 영역 하나가 frozen detector
@@ -84,6 +117,43 @@ block에 존재하지 않았다. 모든 인페인트 후보가 동일하게 남�
 모델 상대평가의 residue로 중복 계산하지 않았지만, 전체 파이프라인
 품질 게이트에서는 명확한 상류 누락이다. MangaLMM full-page spotting과
 공통 semantic-role routing에서 별도 coverage 실패로 검증해야 한다.
+
+## 2026-07-31: 연결 성분·union 후 성분 보정
+
+- result contract:
+  `04ea76dd020d02a2e87ef31cbfa6f9a5b9c681a88a643724133b4c76c4abeeac`
+- 24행 blind review:
+  `09a9de65fdc1bff814c0290c05b295a9980293cdc298b54226e290796099f7f0`
+- blind payload:
+  `6428387993954d141c250b196d8f3ff3344f81aa9dc75c3da3f77f0a1e278fd9`
+
+bold-outline dilation 6의 최종 mask는 그대로 두고 GPU 호출만
+8-connectivity 성분별로 나눴다. 휴대폰 개발 영역에서 21개 성분의
+추론시간은 1.860초였고, 넓은 회색 덩어리를 줄였지만 글자형 조각과
+흰 패치가 남았다.
+
+먼저 mask 합집합 전체를 한 번 제거하고 같은 성분을 다시 보정한
+후보는 세 케이스 평균 blind 순위 1.0으로 상대적으로 가장 나았다.
+휴대폰 케이스는 22회 GPU pass와 3.044초가 걸렸다. 그러나 다음 이유로
+절대 품질 게이트는 통과하지 못했다.
+
+- 휴대폰 UI와 망점 위에 흰 패치와 짧은 선형 생성물이 남음
+- 방·창문 케이스의 상류 의미 텍스트 누락과 구조 단절
+- 피부·머리카락 케이스의 흰 조각과 선화 단절
+
+최종 결과:
+
+- `coverage_eligible_candidates`: 0
+- `screen_eligible_candidates`: 0
+- `promotion_eligible_candidates`: 0
+
+같은 union 후 성분 계약에서 LaMa Large FP32 1536/2048, LaMa MPE
+FP32 2048, AOT FP32 2048을 진단 실행한 result contract는
+`7073acf1c05a4321e219e194f008061297dd13e64028826ed1455e5ceac739ce`다.
+AOT는 가장 빨랐지만 휴대폰 망점과 UI를 더 크게 왜곡했고, 다른
+모델도 공통 mask coverage·구조 단절을 해결하지 못했다. 따라서 추가
+모델 교체가 아니라 block별 semantic role과 mask strategy를 완전하게
+고정한 새 frozen contract가 다음 단계다.
 
 ## 최종 결정
 
