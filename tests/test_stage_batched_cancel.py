@@ -826,6 +826,31 @@ class StageBatchedCancellationTests(unittest.TestCase):
         shutdown_ocr.assert_called_once_with()
         shutdown_gemma.assert_called_once_with()
 
+    def test_normal_cleanup_preserves_only_sleeping_paddle_runtime(self) -> None:
+        processor = self._processor(cancelled=False)
+        ocr_manager = LocalOCRRuntimeManager()
+        gemma_manager = LocalGemmaRuntimeManager()
+        processor.main_page.local_ocr_runtime_manager = ocr_manager
+        processor.main_page.local_translation_runtime_manager = gemma_manager
+
+        with mock.patch.object(
+            ocr_manager,
+            "release_for_handoff",
+        ) as release_ocr, mock.patch.object(
+            ocr_manager,
+            "shutdown",
+        ) as shutdown_ocr, mock.patch.object(
+            gemma_manager,
+            "shutdown",
+        ) as shutdown_gemma:
+            processor._shutdown_managed_runtimes(
+                preserve_sleeping_paddle=True,
+            )
+
+        release_ocr.assert_called_once_with()
+        shutdown_ocr.assert_not_called()
+        shutdown_gemma.assert_called_once_with()
+
     def test_batch_cleanup_still_stops_gemma_when_ocr_shutdown_fails(self) -> None:
         processor = self._processor(cancelled=True)
         ocr_manager = LocalOCRRuntimeManager()
@@ -964,11 +989,14 @@ class StageBatchedCancellationTests(unittest.TestCase):
             ("Gemma", LocalGemmaRuntimeManager(), "render"),
         ):
             reached: list[str] = []
+            release_method = (
+                "release_for_handoff" if label == "OCR" else "shutdown"
+            )
             with self.subTest(label=label), mock.patch.object(
                 manager,
-                "shutdown",
+                release_method,
                 side_effect=[RuntimeError("first stop failed"), None],
-            ) as shutdown, self.assertLogs(
+            ) as release, self.assertLogs(
                 "pipeline.stage_batched_processor",
                 level="WARNING",
             ):
@@ -977,10 +1005,11 @@ class StageBatchedCancellationTests(unittest.TestCase):
                     manager,
                     context=f"before {next_stage}",
                     raise_on_failure=True,
+                    release_for_handoff=(label == "OCR"),
                 )
                 reached.append(next_stage)
 
-            self.assertEqual(shutdown.call_count, 2)
+            self.assertEqual(release.call_count, 2)
             self.assertEqual(reached, [next_stage])
 
     def test_stage_transition_fails_closed_after_two_stop_failures(self) -> None:
