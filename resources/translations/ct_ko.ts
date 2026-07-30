@@ -677,8 +677,8 @@ Use Custom Local Server(Gemma) with the included Gemma Docker setup.</source>
         <translation>자동 모드</translation>
     </message>
     <message>
-        <source>Selected automatic-mode export artifacts are saved to log_&lt;source&gt;_&lt;timestamp&gt; in the same directory as the input file/archive.</source>
-        <translation>선택한 자동 모드 내보내기 산출물은 입력 파일/아카이브와 같은 폴더의 log_&lt;source&gt;_&lt;timestamp&gt;에 저장됩니다.</translation>
+        <source>Text and inpainted-image exports stay in log_&lt;source&gt;_&lt;timestamp&gt;. Checked debug artifacts are stored under the project, folder, or archive cache sidecar.</source>
+        <translation>텍스트 및 인페인트 이미지 내보내기는 log_&lt;source&gt;_&lt;timestamp&gt;에 유지됩니다. 선택한 디버그 산출물은 프로젝트, 폴더 또는 아카이브 캐시 사이드카에 저장됩니다.</translation>
     </message>
     <message>
         <source>Export Raw Text</source>
@@ -691,6 +691,10 @@ Use Custom Local Server(Gemma) with the included Gemma Docker setup.</source>
     <message>
         <source>Export Inpainted Image</source>
         <translation>인페인팅된 이미지 내보내기</translation>
+    </message>
+    <message>
+        <source>Export OCR Diagnostics (Debug)</source>
+        <translation>OCR 진단자료 내보내기 (디버그)</translation>
     </message>
     <message>
         <source>Export Detector Overlay (Debug)</source>
@@ -824,8 +828,12 @@ If responses are truncated, lower Chunk Size or Max Completion Tokens before rec
         <translation>Min P</translation>
     </message>
     <message>
-        <source>Raw Response Log</source>
-        <translation>원시 응답 로그</translation>
+        <source>Save Raw Responses (Sensitive)</source>
+        <translation>원시 응답 저장 (민감 정보)</translation>
+    </message>
+    <message>
+        <source>During automatic runs, save raw responses only in the active project, folder, or archive cache sidecar.</source>
+        <translation>자동 실행 중 원시 응답을 활성 프로젝트, 폴더 또는 아카이브 캐시 사이드카에만 저장합니다.</translation>
     </message>
     <message>
         <source>Promoted winner defaults for the bundled Gemma runtime:
@@ -880,8 +888,12 @@ Comic Translate가 필요할 때 기본 제공 Docker 런타임을 시작하게 
         <translation>요청 타임아웃(초)</translation>
     </message>
     <message>
-        <source>Raw Response Log</source>
-        <translation>원시 응답 로그</translation>
+        <source>Save Raw Responses (Sensitive)</source>
+        <translation>원시 응답 저장 (민감 정보)</translation>
+    </message>
+    <message>
+        <source>During automatic runs, save raw responses only in the active project, folder, or archive cache sidecar.</source>
+        <translation>자동 실행 중 원시 응답을 활성 프로젝트, 폴더 또는 아카이브 캐시 사이드카에만 저장합니다.</translation>
     </message>
     <message>
         <source>Recommended starting values for the included HunyuanOCR Docker setup:
@@ -1096,8 +1108,12 @@ Comic Translate가 기본 제공 Docker 런타임을 재사용하게 하려면 �
         <translation>요청 타임아웃(초)</translation>
     </message>
     <message>
-        <source>Raw Response Log</source>
-        <translation>원시 응답 로그</translation>
+        <source>Save Raw Responses (Sensitive)</source>
+        <translation>원시 응답 저장 (민감 정보)</translation>
+    </message>
+    <message>
+        <source>During automatic runs, save raw responses only in the active project, folder, or archive cache sidecar.</source>
+        <translation>자동 실행 중 원시 응답을 활성 프로젝트, 폴더 또는 아카이브 캐시 사이드카에만 저장합니다.</translation>
     </message>
     <message>
         <source>Safe Resize</source>
@@ -2822,16 +2838,24 @@ These values are copied into new series projects and can be adjusted per series.
         <translation>번역문 텍스트</translation>
     </message>
     <message>
-        <source>Text Exports</source>
-        <translation>텍스트 내보내기</translation>
-    </message>
-    <message>
-        <source>Write OCR and translation text files next to the queue output.</source>
-        <translation>OCR 결과와 번역문 텍스트 파일을 대기열 출력 위치에 함께 저장합니다.</translation>
+        <source>Only checked debug artifacts are created in the project, folder, or archive cache sidecar. When unchecked, the status panel logs that preview generation is disabled.</source>
+        <translation>선택한 디버그 산출물만 프로젝트, 폴더 또는 아카이브 캐시 사이드카에 생성됩니다. 선택하지 않으면 상태 패널에 미리보기 생성이 비활성화되었다고 기록됩니다.</translation>
     </message>
     <message>
         <source>Inpainted image</source>
         <translation>인페인팅된 이미지</translation>
+    </message>
+    <message>
+        <source>Additional Exports</source>
+        <translation>추가 내보내기</translation>
+    </message>
+    <message>
+        <source>Write OCR text, translation text, and inpainted images next to the queue output.</source>
+        <translation>OCR 텍스트, 번역 텍스트 및 인페인트 이미지를 대기열 출력 옆에 저장합니다.</translation>
+    </message>
+    <message>
+        <source>OCR diagnostics</source>
+        <translation>OCR 진단자료</translation>
     </message>
     <message>
         <source>Detector overlay</source>
@@ -2856,10 +2880,6 @@ These values are copied into new series projects and can be adjusted per series.
     <message>
         <source>Debug Artifacts</source>
         <translation>디버그 산출물</translation>
-    </message>
-    <message>
-        <source>Only checked debug artifacts are created. When unchecked, the status panel logs that preview generation is disabled.</source>
-        <translation>체크한 디버그 산출물만 생성합니다. 체크가 꺼져 있으면 상태 패널에 미리보기 생성이 비활성화되었다는 로그만 남깁니다.</translation>
     </message>
     <message>
         <source>Export / Debug</source>

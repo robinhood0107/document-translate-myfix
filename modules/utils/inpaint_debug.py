@@ -8,6 +8,10 @@ import imkit as imk
 import numpy as np
 from PIL import Image, ImageDraw
 
+from modules.utils.debug_artifacts import (
+    atomic_debug_image,
+    atomic_debug_json,
+)
 from modules.utils.mask_roi import get_mask_roi_type
 from modules.utils.inpaint_envelope import build_text_free_erase_envelope
 
@@ -388,6 +392,7 @@ def export_inpaint_debug_artifacts(
     mask_overlay_mask: np.ndarray | None = None,
     cleanup_delta: np.ndarray | None = None,
     metadata: dict | None = None,
+    page_output_dir: str = "",
 ) -> dict[str, str]:
     settings = export_settings or {}
     if not has_debug_exports(settings):
@@ -399,48 +404,77 @@ def export_inpaint_debug_artifacts(
     normalized_cleanup_delta = _normalize_mask(cleanup_delta, image_rgb.shape)
     written: dict[str, str] = {}
 
+    def write_image(
+        key: str,
+        folder: str,
+        legacy_name: str,
+        cache_name: str,
+        value: np.ndarray,
+    ) -> None:
+        if page_output_dir:
+            written[key] = atomic_debug_image(
+                page_output_dir,
+                cache_name,
+                value,
+            )
+        else:
+            written[key] = _write_image(
+                export_root,
+                folder,
+                archive_bname,
+                legacy_name,
+                value,
+            )
+
     if settings.get("export_detector_overlay", False):
-        written["detector_overlay"] = _write_image(
-            export_root,
+        write_image(
+            "detector_overlay",
             "detector_overlays",
-            archive_bname,
             f"{page_base_name}_detector_overlay.png",
+            "detector-overlay.png",
             build_detector_overlay(image_rgb, blocks),
         )
 
     if settings.get("export_raw_mask", False):
-        written["raw_mask"] = _write_image(
-            export_root,
+        write_image(
+            "raw_mask",
             "raw_masks",
-            archive_bname,
             f"{page_base_name}_raw_mask.png",
+            "inpaint-raw-mask.png",
             _mask_to_rgb(normalized_raw_mask),
         )
 
     if settings.get("export_mask_overlay", False):
-        written["mask_overlay"] = _write_image(
-            export_root,
+        write_image(
+            "mask_overlay",
             "mask_overlays",
-            archive_bname,
             f"{page_base_name}_mask_overlay.png",
+            "inpaint-mask-overlay.png",
             _build_mask_overlay(image_rgb, normalized_mask_overlay),
         )
 
     if settings.get("export_cleanup_mask_delta", False):
-        written["cleanup_delta"] = _write_image(
-            export_root,
+        write_image(
+            "cleanup_delta",
             "cleanup_mask_delta",
-            archive_bname,
             f"{page_base_name}_cleanup_delta.png",
+            "inpaint-cleanup-delta.png",
             _mask_to_rgb(normalized_cleanup_delta),
         )
 
     if settings.get("export_debug_metadata", False):
-        written["debug_metadata"] = _write_json(
-            export_root,
-            "debug_metadata",
-            archive_bname,
-            f"{page_base_name}_debug.json",
-            metadata or {},
-        )
+        if page_output_dir:
+            written["debug_metadata"] = atomic_debug_json(
+                page_output_dir,
+                "debug-metadata.json",
+                metadata or {},
+            )
+        else:
+            written["debug_metadata"] = _write_json(
+                export_root,
+                "debug_metadata",
+                archive_bname,
+                f"{page_base_name}_debug.json",
+                metadata or {},
+            )
     return written
