@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from contextlib import nullcontext
 from dataclasses import dataclass
 
 import cv2
@@ -17,6 +18,17 @@ from modules.utils.gpu_handoff import estimate_torch_cuda_storage_mb
 from modules.utils.inpaint_composite import composite_with_edit_mask, normalize_edit_mask
 from modules.utils.mask_roi import normalize_xyxy
 from modules.utils.textblock import TextBlock
+from modules.inpainting.runtime_contract import (
+    INPAINT_RETRY_POLICY_VERSION,
+    InpaintingCudaOOMError,
+    bounded_retry_roi,
+    inpaint_cuda_oom_message,
+    inspect_learned_inpainter_runtime,
+    is_cuda_device,
+    is_cuda_oom_error,
+    runtime_mask_diagnostics,
+    validate_learned_inpaint_runtime,
+)
 
 
 def _clip_half_open_bbox(xyxy, im_w: int, im_h: int) -> list[int] | None:
@@ -62,6 +74,12 @@ class SourceLaMaLarge:
         self.precision = str(precision or "bf16")
         self.inpaint_size = int(inpaint_size or 1536)
         self.model = None
+        self.run_diagnostics: list[dict] = []
+        validate_learned_inpaint_runtime(
+            inpainter_key="lama_large_512px",
+            device=self.device,
+            precision=self.precision,
+        )
 
     @property
     def key(self) -> SourceLaMaKey:
@@ -79,29 +97,93 @@ class SourceLaMaLarge:
 
     def moveToDevice(self, device: str, precision: str | None = None) -> None:
         self.ensure_loaded()
+        resolved_precision = (
+            str(precision)
+            if precision is not None
+            else str(self.precision)
+        )
+        validate_learned_inpaint_runtime(
+            inpainter_key="lama_large_512px",
+            device=str(device),
+            precision=resolved_precision,
+        )
         self.model.to(device)
         self.device = str(device)
-        if precision is not None:
-            self.precision = str(precision)
+        self.precision = resolved_precision
 
     def memory_safe_inpaint(self, img: np.ndarray, mask: np.ndarray, textblock_list=None) -> np.ndarray:
         self.ensure_loaded()
+        diagnostics = {
+            **inspect_learned_inpainter_runtime(
+                self,
+                inpainter_key="lama_large_512px",
+                requested_device=self.device,
+                requested_precision=self.precision,
+            ),
+            **runtime_mask_diagnostics(mask, img.shape),
+            "retry_policy": INPAINT_RETRY_POLICY_VERSION,
+            "oom_retry_count": 0,
+            "oom_retry_roi": None,
+            "status": "running",
+        }
         try:
-            return self._inpaint(img, mask, textblock_list)
+            result = self._inpaint(img, mask, textblock_list)
         except Exception as exc:
-            if self.device == "cuda" and isinstance(exc, torch.cuda.OutOfMemoryError):
+            if is_cuda_device(self.device) and is_cuda_oom_error(exc):
+                retry_roi = bounded_retry_roi(mask, img.shape)
+                diagnostics["oom_retry_count"] = 1
+                diagnostics["oom_retry_roi"] = (
+                    retry_roi.as_list() if retry_roi is not None else None
+                )
+                diagnostics["first_error"] = type(exc).__name__
+                if retry_roi is None:
+                    diagnostics["status"] = "failed_no_smaller_roi"
+                    self.run_diagnostics.append(diagnostics)
+                    raise InpaintingCudaOOMError(
+                        inpaint_cuda_oom_message(),
+                        diagnostics=diagnostics,
+                    ) from exc
                 torch.cuda.empty_cache()
+                x1, y1, x2, y2 = retry_roi.as_list()
+                retry_img = np.ascontiguousarray(img[y1:y2, x1:x2])
+                retry_mask = np.ascontiguousarray(mask[y1:y2, x1:x2])
                 try:
-                    return self._inpaint(img, mask, textblock_list)
+                    retry_result = self._inpaint(
+                        retry_img,
+                        retry_mask,
+                        None,
+                    )
                 except Exception as retry_exc:
-                    if isinstance(retry_exc, torch.cuda.OutOfMemoryError):
-                        previous_device = self.device
-                        previous_precision = self.precision
-                        self.moveToDevice("cpu", precision="fp32")
-                        inpainted = self._inpaint(img, mask, textblock_list)
-                        self.moveToDevice(previous_device, precision=previous_precision)
-                        return inpainted
-            raise
+                    if not is_cuda_oom_error(retry_exc):
+                        diagnostics["status"] = "failed_during_roi_retry"
+                        diagnostics["retry_error"] = type(
+                            retry_exc
+                        ).__name__
+                        self.run_diagnostics.append(diagnostics)
+                        raise
+                    diagnostics["status"] = "failed_after_roi_retry"
+                    diagnostics["retry_error"] = type(retry_exc).__name__
+                    self.run_diagnostics.append(diagnostics)
+                    raise InpaintingCudaOOMError(
+                        inpaint_cuda_oom_message(),
+                        diagnostics=diagnostics,
+                    ) from retry_exc
+                result = np.asarray(img).copy()
+                result[y1:y2, x1:x2] = composite_with_edit_mask(
+                    retry_img,
+                    retry_result,
+                    retry_mask,
+                )
+                diagnostics["status"] = "completed_after_roi_retry"
+            else:
+                diagnostics["status"] = "failed"
+                diagnostics["first_error"] = type(exc).__name__
+                self.run_diagnostics.append(diagnostics)
+                raise
+        else:
+            diagnostics["status"] = "completed"
+        self.run_diagnostics.append(diagnostics)
+        return result
 
     def inpaint_preprocess(self, img: np.ndarray, mask: np.ndarray):
         img_original = np.copy(img)
@@ -148,21 +230,26 @@ class SourceLaMaLarge:
         im_h, im_w = img.shape[:2]
         img_torch, mask_torch, rel_pos, direct, img_original, mask_original, pad_bottom, pad_right = self.inpaint_preprocess(img, mask)
 
-        precision_map = {
-            "bf16": torch.bfloat16,
-            "fp16": torch.float16,
-            "float16": torch.float16,
-            "fp32": torch.float32,
-        }
-        precision = precision_map.get(str(self.precision).lower(), torch.float32)
-        if self.device == "cuda":
-            try:
-                with torch.autocast(device_type=self.device, dtype=precision):
-                    img_inpainted_torch = self.model(img_torch, mask_torch, rel_pos, direct)
-            except Exception:
-                img_inpainted_torch = self.model(img_torch, mask_torch, rel_pos, direct)
+        precision_name = str(self.precision).lower()
+        if precision_name == "bf16":
+            precision_context = torch.autocast(
+                device_type="cuda",
+                dtype=torch.bfloat16,
+            )
+        elif precision_name in {"fp16", "float16"}:
+            precision_context = torch.autocast(
+                device_type="cuda",
+                dtype=torch.float16,
+            )
         else:
-            img_inpainted_torch = self.model(img_torch, mask_torch, rel_pos, direct)
+            precision_context = nullcontext()
+        with precision_context:
+            img_inpainted_torch = self.model(
+                img_torch,
+                mask_torch,
+                rel_pos,
+                direct,
+            )
 
         img_inpainted = (
             img_inpainted_torch.to(device="cpu", dtype=torch.float32)
@@ -356,20 +443,22 @@ def _run_lama_or_fallback(
     config,
     *,
     check_need_inpaint: bool,
-) -> np.ndarray:
+) -> tuple[np.ndarray, list[dict]]:
     if not np.any(mask):
-        return np.asarray(image).copy()
+        return np.asarray(image).copy(), []
 
     source_blocks = _resolve_source_blocks(blocks)
     if not source_blocks:
         result = inpainter(image, mask, config)
         converted = imk.convert_scale_abs(result)
-        return composite_with_edit_mask(image, converted, mask)
+        return composite_with_edit_mask(image, converted, mask), []
 
     device = str(getattr(inpainter, "runtime_device", getattr(inpainter, "device", "cuda")) or "cuda")
     precision = str(getattr(inpainter, "precision", "bf16") or "bf16")
     inpaint_size = int(getattr(inpainter, "inpaint_size", 1536) or 1536)
     source_inpainter = get_source_lama_large(device=device, precision=precision, inpaint_size=inpaint_size)
+    if hasattr(source_inpainter, "run_diagnostics"):
+        source_inpainter.run_diagnostics.clear()
     result = source_inpainter.inpaint(
         image,
         np.where(mask > 0, 255, 0).astype(np.uint8),
@@ -377,16 +466,36 @@ def _run_lama_or_fallback(
         check_need_inpaint=check_need_inpaint,
     )
     converted = imk.convert_scale_abs(result)
-    return composite_with_edit_mask(image, converted, mask)
+    diagnostics = list(
+        getattr(source_inpainter, "run_diagnostics", []) or []
+    )
+    if hasattr(source_inpainter, "run_diagnostics"):
+        source_inpainter.run_diagnostics.clear()
+    return (
+        composite_with_edit_mask(image, converted, mask),
+        diagnostics,
+    )
 
 
 def _maybe_return_edit_mask(
     result: np.ndarray,
     edit_mask: np.ndarray | None,
     return_edit_mask: bool,
-) -> np.ndarray | tuple[np.ndarray, np.ndarray | None]:
+    *,
+    diagnostics: list[dict],
+    return_diagnostics: bool,
+) -> (
+    np.ndarray
+    | tuple[np.ndarray, np.ndarray | None]
+    | tuple[np.ndarray, list[dict]]
+    | tuple[np.ndarray, np.ndarray | None, list[dict]]
+):
+    if return_edit_mask and return_diagnostics:
+        return result, edit_mask, diagnostics
     if return_edit_mask:
         return result, edit_mask
+    if return_diagnostics:
+        return result, diagnostics
     return result
 
 
@@ -399,18 +508,30 @@ def source_lama_blockwise_inpaint(
     *,
     check_need_inpaint: bool = True,
     return_edit_mask: bool = False,
-) -> np.ndarray | tuple[np.ndarray, np.ndarray | None]:
+    return_diagnostics: bool = False,
+) -> (
+    np.ndarray
+    | tuple[np.ndarray, np.ndarray | None]
+    | tuple[np.ndarray, list[dict]]
+    | tuple[np.ndarray, np.ndarray | None, list[dict]]
+):
     if image is None or mask is None or not np.any(mask) or not blocks:
         result = inpainter(image, mask, config)
         converted = imk.convert_scale_abs(result)
         cleaned = composite_with_edit_mask(image, converted, mask)
         edit_mask = normalize_edit_mask(mask, image.shape) if image is not None and mask is not None else mask
-        return _maybe_return_edit_mask(cleaned, edit_mask, return_edit_mask)
+        return _maybe_return_edit_mask(
+            cleaned,
+            edit_mask,
+            return_edit_mask,
+            diagnostics=[],
+            return_diagnostics=return_diagnostics,
+        )
 
     source_mask = normalize_edit_mask(mask, image.shape)
     bubble_mask, bubble_blocks, lama_blocks = _split_bubble_source_mask(source_mask, blocks, image.shape)
     if not bubble_blocks:
-        cleaned = _run_lama_or_fallback(
+        cleaned, diagnostics = _run_lama_or_fallback(
             image,
             source_mask,
             list(blocks or []),
@@ -418,10 +539,16 @@ def source_lama_blockwise_inpaint(
             config,
             check_need_inpaint=check_need_inpaint,
         )
-        return _maybe_return_edit_mask(cleaned, source_mask, return_edit_mask)
+        return _maybe_return_edit_mask(
+            cleaned,
+            source_mask,
+            return_edit_mask,
+            diagnostics=diagnostics,
+            return_diagnostics=return_diagnostics,
+        )
 
     lama_mask = np.where((source_mask > 0) & (bubble_mask <= 0), 255, 0).astype(np.uint8)
-    cleaned = _run_lama_or_fallback(
+    cleaned, diagnostics = _run_lama_or_fallback(
         image,
         lama_mask,
         lama_blocks,
@@ -438,7 +565,7 @@ def source_lama_blockwise_inpaint(
             for block in bubble_blocks
             if getattr(block, "_erase_mode", "") == ERASE_MODE_BUBBLE_LAMA_FALLBACK
         ]
-        fallback_result = _run_lama_or_fallback(
+        fallback_result, fallback_diagnostics = _run_lama_or_fallback(
             result_image,
             fallback_mask,
             fallback_blocks,
@@ -446,7 +573,14 @@ def source_lama_blockwise_inpaint(
             config,
             check_need_inpaint=False,
         )
+        diagnostics.extend(fallback_diagnostics)
         result_image = composite_with_edit_mask(result_image, fallback_result, fallback_mask)
     combined_mask = np.where((lama_mask > 0) | (bubble_result.edit_mask > 0) | (fallback_mask > 0), 255, 0).astype(np.uint8)
     result = composite_with_edit_mask(image, result_image, combined_mask)
-    return _maybe_return_edit_mask(result, combined_mask, return_edit_mask)
+    return _maybe_return_edit_mask(
+        result,
+        combined_mask,
+        return_edit_mask,
+        diagnostics=diagnostics,
+        return_diagnostics=return_diagnostics,
+    )
