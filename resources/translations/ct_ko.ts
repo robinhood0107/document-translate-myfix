@@ -1156,25 +1156,27 @@ Comic Translate가 기본 제공 Docker 런타임을 재사용하게 하려면 �
     </message>
     <message>
         <source>Recommended values for the bundled MangaLMM runtime:
-- ctx-size 4096: enough for full-page OCR while keeping VRAM safer
-- Max Completion Tokens: 256
+- ctx-size 8192: preserves the full-page prompt and grounded response
+- Max Completion Tokens: 4096
 - Parallel Workers: 1
 - Request Timeout: 60 seconds
 - Safe Resize: on
 - Max Pixels / Max Long Side: 2116800 / 1728
 Reasoning:
 - PNG + image-first ordering is the most reliable request format for MangaLMM.
+- The response must be one complete JSON array of grounded text regions.
 - Direct MangaLMM mode respects the values on this page.
 - Workers 1 is the safest default when MangaLMM is the active OCR runtime.</source>
         <translation>기본 제공 MangaLMM 런타임의 권장값:
-- ctx-size 4096: full-page OCR에는 충분하면서 VRAM 부담을 더 안전하게 유지
-- Max Completion Tokens: 256
+- ctx-size 8192: 전체 페이지 프롬프트와 좌표 응답을 보존
+- Max Completion Tokens: 4096
 - Parallel Workers: 1
 - Request Timeout: 60초
 - Safe Resize: 켜기
 - Max Pixels / Max Long Side: 2116800 / 1728
 이유:
-- PNG + image-first 순서가 MangaLMM에서 가장 안정적인 요청 형식입니다.
+- PNG + 이미지 우선 순서가 MangaLMM에서 가장 안정적인 요청 형식입니다.
+- 응답은 좌표가 포함된 텍스트 영역의 완전한 단일 JSON 배열이어야 합니다.
 - 직접 MangaLMM 모드는 이 페이지의 값을 그대로 따릅니다.
 - MangaLMM이 활성 OCR 런타임일 때 Workers 1이 가장 안전한 기본값입니다.</translation>
     </message>
