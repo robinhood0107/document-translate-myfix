@@ -91,7 +91,7 @@ def test_sample_japan_three_translator_initializations_do_not_start_gemma() -> N
     assert not main_page.runtime_events
 
 
-def test_sample_japan_three_ocr_initializations_probe_ocr_once() -> None:
+def test_sample_japan_three_ocr_initializations_recheck_managed_ocr_health() -> None:
     for path in SAMPLE_JAPAN_PAGES:
         assert path.is_file()
 
@@ -104,5 +104,9 @@ def test_sample_japan_three_ocr_initializations_probe_ocr_once() -> None:
             processor = OCRProcessor()
             processor.initialize(main_page, "Japanese")
 
-    assert probe_health.call_count == 1
+    # Managed llama.cpp endpoints are health-checked even on readiness-cache
+    # hits so an externally stopped container is restarted instead of being
+    # treated as ready. Contract/image validation and Compose startup remain
+    # cached, which is what the two readiness-cache events below verify.
+    assert probe_health.call_count == len(SAMPLE_JAPAN_PAGES)
     assert sum(1 for event in main_page.runtime_events if event.get("readiness_cache_hit")) == 2
