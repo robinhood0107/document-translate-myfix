@@ -16,6 +16,7 @@ from modules.utils.exceptions import (
     LocalServiceResponseError,
     OperationCancelledError,
 )
+from modules.utils.debug_artifacts import append_active_raw_response
 from modules.utils.ocr_debug import (
     OCR_STATUS_EMPTY_INITIAL,
     OCR_STATUS_EMPTY_AFTER_RETRY,
@@ -346,7 +347,11 @@ class HunyuanOCREngine(OCREngine):
             ) from exc
 
         if self.raw_response_logging:
-            logger.info("hunyuan_ocr raw response json: %s", data)
+            append_active_raw_response(
+                "hunyuanocr",
+                data,
+                kind="response_json",
+            )
         return data
 
     def _extract_text_from_response(self, data: dict) -> str:
@@ -370,9 +375,6 @@ class HunyuanOCREngine(OCREngine):
         choice = choices[0] or {}
         message = choice.get("message") or {}
         content_text = self._extract_content_text(message.get("content"))
-
-        if self.raw_response_logging and content_text:
-            logger.info("hunyuan_ocr raw content: %s", content_text)
 
         return content_text
 

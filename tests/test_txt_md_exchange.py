@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -14,8 +15,33 @@ from modules.utils.txt_md_exchange import (
 )
 
 
-ROOT = Path(__file__).resolve().parents[1]
-SAMPLES_DIR = ROOT / "이식2" / "format_samples"
+EXPECTED_SOURCE_EXCHANGE = """### page_001.png
+
+1. Hello there.
+
+2. This is the second balloon.
+
+
+### page_002.png
+
+1. A multiline source line
+that continues on the next line.
+
+2. Final source block."""
+
+PARTIAL_TRANSLATION_EXCHANGE = """### page_001.png
+
+1. 첫 번째 블록만 있습니다.
+
+
+### page_002.png
+
+1. 첫 번째 번역입니다.
+
+2. 두 번째 번역입니다.
+
+3. 가져온 추가 블록입니다.
+"""
 
 
 class TxtMdExchangeTests(unittest.TestCase):
@@ -40,19 +66,23 @@ class TxtMdExchangeTests(unittest.TestCase):
             },
         }
 
-    def test_source_export_matches_transplant_samples_for_txt_and_md(self) -> None:
+    def test_source_export_matches_txt_and_md_exchange_contract(self) -> None:
         states = self._build_states()
         ordered_paths = list(states.keys())
         payload = build_exchange_text(collect_page_entries(ordered_paths, states, "source"))
 
-        expected_txt = (SAMPLES_DIR / "sample_source.txt").read_text(encoding="utf-8")
-        expected_md = (SAMPLES_DIR / "sample_source.md").read_text(encoding="utf-8")
-
-        self.assertEqual(payload, expected_txt.rstrip("\n"))
-        self.assertEqual(payload, expected_md.rstrip("\n"))
+        self.assertEqual(payload, EXPECTED_SOURCE_EXCHANGE)
 
     def test_translation_parser_and_apply_support_partial_match_and_dictionary_rules(self) -> None:
-        parsed_pages = parse_translation_exchange_file(str(SAMPLES_DIR / "sample_partial_mismatch.txt"))
+        with tempfile.TemporaryDirectory() as temporary:
+            exchange_file = Path(temporary) / "partial.txt"
+            exchange_file.write_text(
+                PARTIAL_TRANSLATION_EXCHANGE,
+                encoding="utf-8",
+            )
+            parsed_pages = parse_translation_exchange_file(
+                str(exchange_file)
+            )
         page_blocks = {
             "page_001.png": [
                 TextBlock(text="src-1", translation="", rich_text="<b>old</b>"),
