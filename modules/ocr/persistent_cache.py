@@ -88,6 +88,9 @@ def validate_raw_ocr_result(payload: Mapping[str, Any]) -> None:
         "sanitized_text",
         "reject_reason",
         "ocr_crop_source",
+        "ocr_strategy",
+        "ocr_model_identity",
+        "ocr_runtime_identity",
     )
     for field_name in string_fields:
         if field_name in payload and not isinstance(payload[field_name], str):
@@ -95,6 +98,9 @@ def validate_raw_ocr_result(payload: Mapping[str, Any]) -> None:
     for field_name in ("texts", "ocr_regions"):
         if field_name in payload and not isinstance(payload[field_name], list):
             raise ValueError(f"{field_name} must be a list.")
+    for field_name in ("ocr_geometry_provenance",):
+        if field_name in payload and not isinstance(payload[field_name], dict):
+            raise ValueError(f"{field_name} must be an object.")
     for field_name in ("confidence", "ocr_resize_scale"):
         if field_name not in payload:
             continue
@@ -153,6 +159,18 @@ def snapshot_raw_ocr_result(block: Any) -> dict[str, Any]:
             copy.deepcopy(getattr(block, "ocr_retry_crop_xyxy", None))
         ),
         "ocr_crop_source": str(getattr(block, "ocr_crop_source", "") or ""),
+        "ocr_strategy": str(getattr(block, "ocr_strategy", "") or ""),
+        "ocr_model_identity": str(
+            getattr(block, "ocr_model_identity", "") or ""
+        ),
+        "ocr_runtime_identity": str(
+            getattr(block, "ocr_runtime_identity", "") or ""
+        ),
+        "ocr_geometry_provenance": _json_safe(
+            copy.deepcopy(
+                getattr(block, "ocr_geometry_provenance", {}) or {}
+            )
+        ),
     }
 
 
@@ -178,6 +196,19 @@ def apply_raw_ocr_result(block: Any, payload: Mapping[str, Any]) -> None:
     )
     block.ocr_retry_crop_xyxy = copy.deepcopy(payload.get("ocr_retry_crop_xyxy"))
     block.ocr_crop_source = str(payload.get("ocr_crop_source", "") or "")
+    block.ocr_strategy = str(payload.get("ocr_strategy", "") or "")
+    block.ocr_model_identity = str(
+        payload.get("ocr_model_identity", "") or ""
+    )
+    block.ocr_runtime_identity = str(
+        payload.get("ocr_runtime_identity", "") or ""
+    )
+    geometry_provenance = payload.get("ocr_geometry_provenance", {})
+    block.ocr_geometry_provenance = (
+        copy.deepcopy(geometry_provenance)
+        if isinstance(geometry_provenance, dict)
+        else {}
+    )
 
 
 @dataclass(frozen=True)
