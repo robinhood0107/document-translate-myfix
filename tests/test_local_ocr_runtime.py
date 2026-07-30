@@ -66,6 +66,60 @@ def _paddle_contract() -> PaddleLlamaRuntimeContract:
 
 
 class LocalOCRRuntimeManagerTests(unittest.TestCase):
+    def test_windows_rejects_paddle_container_created_by_wsl_compose(self) -> None:
+        manager = LocalOCRRuntimeManager()
+        contract = _paddle_contract()
+        inspected = subprocess.CompletedProcess(
+            args=[],
+            returncode=0,
+            stdout="runtime|sha256:llama-image-id|Ubuntu\n",
+            stderr="",
+        )
+
+        with mock.patch.object(
+            manager,
+            "_paddle_runtime_contract",
+            return_value=contract,
+        ), mock.patch(
+            "modules.utils.llama_cpp_runtime.run_docker_command",
+            return_value=inspected,
+        ), mock.patch(
+            "modules.ocr.local_runtime.os.name",
+            "nt",
+        ):
+            self.assertFalse(
+                manager._paddle_containers_match_contract(
+                    ["paddleocr-llamacpp"]
+                )
+            )
+
+    def test_windows_accepts_paddle_container_created_by_windows_compose(self) -> None:
+        manager = LocalOCRRuntimeManager()
+        contract = _paddle_contract()
+        inspected = subprocess.CompletedProcess(
+            args=[],
+            returncode=0,
+            stdout="runtime|sha256:llama-image-id|\n",
+            stderr="",
+        )
+
+        with mock.patch.object(
+            manager,
+            "_paddle_runtime_contract",
+            return_value=contract,
+        ), mock.patch(
+            "modules.utils.llama_cpp_runtime.run_docker_command",
+            return_value=inspected,
+        ), mock.patch(
+            "modules.ocr.local_runtime.os.name",
+            "nt",
+        ):
+            self.assertTrue(
+                manager._paddle_containers_match_contract(
+                    ["paddleocr-llamacpp"]
+                )
+            )
+
     def test_paddle_cache_identity_is_managed_only(self) -> None:
         manager = LocalOCRRuntimeManager()
         unmanaged = _DummySettingsPage(
