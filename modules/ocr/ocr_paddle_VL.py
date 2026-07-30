@@ -52,6 +52,7 @@ from .persistent_cache import (
 )
 from .result_contract import (
     OCR_STRATEGY_PADDLE_CROP,
+    finalize_ocr_processing_contracts,
     initialize_ocr_result_contract,
 )
 
@@ -263,6 +264,9 @@ class PaddleOCRVLEngine(OCREngine):
             gpu_metrics=gpu_metrics,
         )
         if not jobs:
+            self.last_page_profile["processing_contract"] = (
+                finalize_ocr_processing_contracts(blk_list)
+            )
             self._finalize_performance_profile()
             return blk_list
 
@@ -318,6 +322,9 @@ class PaddleOCRVLEngine(OCREngine):
             len(ordered_jobs),
             self.last_page_profile.get("elapsed_ms", 0.0),
             self.scheduler_mode,
+        )
+        self.last_page_profile["processing_contract"] = (
+            finalize_ocr_processing_contracts(blk_list)
         )
         return blk_list
 
@@ -557,6 +564,9 @@ class PaddleOCRVLEngine(OCREngine):
             self.last_page_profile["page_status"] = "ok"
             self.last_page_profile["elapsed_ms"] = 0.0
             self.last_page_profile["completed_at"] = time.time()
+            self.last_page_profile["processing_contract"] = (
+                finalize_ocr_processing_contracts(plan.blocks)
+            )
             self._finalize_performance_profile()
             return plan.blocks
 
@@ -615,6 +625,9 @@ class PaddleOCRVLEngine(OCREngine):
             elapsed_ms = (time.perf_counter() - started_at) * 1000.0
             self.last_page_profile["elapsed_ms"] = round(elapsed_ms, 3)
             self.last_page_profile["completed_at"] = time.time()
+            self.last_page_profile["processing_contract"] = (
+                finalize_ocr_processing_contracts(plan.blocks)
+            )
             self._finalize_performance_profile()
         return plan.blocks
 

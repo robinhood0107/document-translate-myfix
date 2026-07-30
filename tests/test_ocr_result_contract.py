@@ -5,7 +5,22 @@ import unittest
 import numpy as np
 
 from modules.ocr.result_contract import (
+    MASK_STRATEGY_BUBBLE_SAFE,
+    MASK_STRATEGY_GLYPH_ONLY,
+    MASK_STRATEGY_GLYPH_ONLY_STRUCTURE_PROTECT,
+    MASK_STRATEGY_PRESERVE_ORIGINAL,
+    PROCESSING_ACTION_PRESERVE,
+    PROCESSING_ACTION_REVIEW,
+    PROCESSING_ACTION_TRANSLATE_INPAINT,
+    SEMANTIC_ROLE_AMBIGUOUS,
+    SEMANTIC_ROLE_DIALOGUE_BUBBLE,
+    SEMANTIC_ROLE_DIALOGUE_FREE,
+    SEMANTIC_ROLE_SFX,
+    assign_ocr_processing_contract,
     canonicalize_exact_duplicate_blocks,
+    finalize_ocr_processing_contract,
+    finalize_ocr_processing_contracts,
+    select_translate_inpaint_blocks,
 )
 from modules.utils.textblock import TextBlock
 
@@ -34,6 +49,135 @@ def _block(
 
 
 class OCRResultContractTests(unittest.TestCase):
+    def test_bubble_defaults_to_translate_with_safe_bubble_mask(self) -> None:
+        block = _block(
+            [10, 20, 80, 140],
+            bubble_bbox=[5, 10, 90, 150],
+        )
+
+        finalize_ocr_processing_contract(block)
+
+        self.assertEqual(
+            block.semantic_role,
+            SEMANTIC_ROLE_DIALOGUE_BUBBLE,
+        )
+        self.assertEqual(
+            block.processing_action,
+            PROCESSING_ACTION_TRANSLATE_INPAINT,
+        )
+        self.assertEqual(block.mask_strategy, MASK_STRATEGY_BUBBLE_SAFE)
+
+    def test_text_free_defaults_to_translate_with_glyph_mask(self) -> None:
+        block = _block(
+            [10, 20, 80, 140],
+            bubble_bbox=None,
+            text_class="text_free",
+        )
+
+        finalize_ocr_processing_contract(block)
+
+        self.assertEqual(block.semantic_role, SEMANTIC_ROLE_DIALOGUE_FREE)
+        self.assertEqual(
+            block.processing_action,
+            PROCESSING_ACTION_TRANSLATE_INPAINT,
+        )
+        self.assertEqual(block.mask_strategy, MASK_STRATEGY_GLYPH_ONLY)
+
+    def test_explicit_sfx_is_preserved_without_destructive_mask(self) -> None:
+        block = _block(
+            [10, 20, 80, 140],
+            bubble_bbox=None,
+            text_class="sfx",
+        )
+
+        finalize_ocr_processing_contract(block)
+
+        self.assertEqual(block.semantic_role, SEMANTIC_ROLE_SFX)
+        self.assertEqual(
+            block.processing_action,
+            PROCESSING_ACTION_PRESERVE,
+        )
+        self.assertEqual(
+            block.mask_strategy,
+            MASK_STRATEGY_PRESERVE_ORIGINAL,
+        )
+        self.assertEqual(select_translate_inpaint_blocks([block]), [])
+
+    def test_invalid_explicit_contract_fails_closed_to_review(self) -> None:
+        block = _block(
+            [10, 20, 80, 140],
+            bubble_bbox=[5, 10, 90, 150],
+        )
+
+        assign_ocr_processing_contract(
+            block,
+            semantic_role="not-a-role",
+            processing_action="delete-everything",
+            decision_source="test",
+        )
+
+        self.assertEqual(block.semantic_role, SEMANTIC_ROLE_AMBIGUOUS)
+        self.assertEqual(block.processing_action, PROCESSING_ACTION_REVIEW)
+        self.assertEqual(
+            block.mask_strategy,
+            MASK_STRATEGY_PRESERVE_ORIGINAL,
+        )
+        self.assertIn(
+            "invalid_semantic_role",
+            block.processing_decision_reasons,
+        )
+        self.assertIn(
+            "invalid_processing_action",
+            block.processing_decision_reasons,
+        )
+
+    def test_structure_risk_selects_structure_protection_mask(self) -> None:
+        block = _block(
+            [10, 20, 80, 140],
+            bubble_bbox=[5, 10, 90, 150],
+        )
+        block.bubble_transparency_risk = True
+
+        finalize_ocr_processing_contract(block)
+
+        self.assertEqual(
+            block.mask_strategy,
+            MASK_STRATEGY_GLYPH_ONLY_STRUCTURE_PROTECT,
+        )
+
+    def test_summary_and_action_selection_preserve_original_order(self) -> None:
+        dialogue = _block(
+            [10, 20, 80, 140],
+            bubble_bbox=[5, 10, 90, 150],
+        )
+        sfx = _block(
+            [100, 120, 180, 240],
+            bubble_bbox=None,
+            text_class="sfx",
+        )
+        free = _block(
+            [200, 220, 280, 340],
+            bubble_bbox=None,
+            text_class="text_free",
+        )
+
+        summary = finalize_ocr_processing_contracts(
+            [dialogue, sfx, free]
+        )
+
+        self.assertEqual(summary["block_count"], 3)
+        self.assertEqual(
+            summary["processing_action_counts"],
+            {
+                PROCESSING_ACTION_TRANSLATE_INPAINT: 2,
+                PROCESSING_ACTION_PRESERVE: 1,
+            },
+        )
+        self.assertEqual(
+            select_translate_inpaint_blocks([dialogue, sfx, free]),
+            [dialogue, free],
+        )
+
     def test_exact_same_source_geometry_keeps_one_canonical_block(self) -> None:
         first = _block(
             [100, 120, 180, 260],
