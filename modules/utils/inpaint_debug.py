@@ -176,6 +176,47 @@ def serialize_inpaint_block(block, index: int) -> dict:
         ),
         "roi_type": get_mask_roi_type(block),
         "text_class": getattr(block, "text_class", "") or "",
+        "semantic_role": str(
+            getattr(block, "semantic_role", "") or ""
+        ),
+        "processing_action": str(
+            getattr(block, "processing_action", "") or ""
+        ),
+        "processing_decision_source": str(
+            getattr(block, "processing_decision_source", "") or ""
+        ),
+        "processing_decision_reasons": list(
+            getattr(block, "processing_decision_reasons", []) or []
+        ),
+        "canonical_block_id": str(
+            getattr(block, "canonical_block_id", "") or ""
+        ),
+        "duplicate_alias_block_ids": list(
+            getattr(block, "duplicate_alias_block_ids", []) or []
+        ),
+        "duplicate_alias_count": int(
+            getattr(block, "duplicate_alias_count", 0) or 0
+        ),
+        "merge_split_diagnostics": dict(
+            getattr(block, "merge_split_diagnostics", {}) or {}
+        ),
+        "mask_strategy": str(
+            getattr(block, "mask_strategy", "") or ""
+        ),
+        "mask_strategy_reason": str(
+            getattr(block, "mask_strategy_reason", "") or ""
+        ),
+        "mask_actual_bbox": (
+            [
+                int(float(value))
+                for value in getattr(block, "mask_actual_bbox", ())[:4]
+            ]
+            if getattr(block, "mask_actual_bbox", None) is not None
+            else None
+        ),
+        "mask_actual_pixel_count": int(
+            getattr(block, "mask_actual_pixel_count", 0) or 0
+        ),
         "inpaint_bboxes": inpaint_boxes,
         "text_free_erase_envelope_xyxy": (
             [int(v) for v in text_free_envelope]
