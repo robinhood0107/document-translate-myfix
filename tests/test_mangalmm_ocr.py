@@ -10,6 +10,7 @@ import numpy as np
 from modules.ocr.factory import OCRFactory
 from modules.ocr.mangalmm_ocr import MangaLMMOCREngine, OCRRegion, ResizePlan
 from modules.ocr.selection import OCR_MODE_BEST_LOCAL, OCR_MODE_MANGALMM
+from modules.utils.exceptions import LocalServiceResponseError
 from modules.utils.textblock import TextBlock
 
 
@@ -66,7 +67,7 @@ class _FakeSettings:
         self,
         *,
         selected_ocr_mode: str = OCR_MODE_MANGALMM,
-        max_completion_tokens: int = 256,
+        max_completion_tokens: int = 4096,
     ) -> None:
         self._selected_ocr_mode = selected_ocr_mode
         self._max_completion_tokens = max_completion_tokens
@@ -129,6 +130,37 @@ def _make_resize_plan(
     )
 
 
+def _make_region(
+    x1: int,
+    y1: int,
+    x2: int,
+    y2: int,
+    text: str,
+) -> OCRRegion:
+    return OCRRegion(
+        bbox_xyxy=[x1, y1, x2, y2],
+        bbox_xyxy_float=[
+            float(x1),
+            float(y1),
+            float(x2),
+            float(y2),
+        ],
+        text=text,
+        unit_bbox_xyxy=[0, 0, 200, 200],
+        unit_kind="page_full",
+        unit_resize_scale=1.0,
+        edge_distance=0.0,
+        normalized_text=text,
+        raw_text=text,
+        response_bbox_2d=[
+            float(x1),
+            float(y1),
+            float(x2),
+            float(y2),
+        ],
+    )
+
+
 class MangaLMMOCRTests(unittest.TestCase):
     def setUp(self) -> None:
         OCRFactory._engines.clear()
@@ -158,7 +190,7 @@ class MangaLMMOCRTests(unittest.TestCase):
 
         self.assertEqual(engine.contract_mode, "direct_manual")
 
-    def test_parse_region_payload_salvages_fenced_json(self) -> None:
+    def test_parse_region_payload_accepts_one_complete_fenced_array(self) -> None:
         engine = MangaLMMOCREngine()
         payload = """```json
         [{"bbox_2d":[10,20,30,40],"text_content":"テスト"}]
@@ -167,19 +199,66 @@ class MangaLMMOCRTests(unittest.TestCase):
         self.assertEqual(len(parsed), 1)
         self.assertEqual(parsed[0]["text_content"], "テスト")
 
-    def test_normalize_region_list_strips_decorative_noise_and_drops_empty_regions(self) -> None:
+    def test_parse_region_payload_preserves_decorative_text_for_role_routing(
+        self,
+    ) -> None:
         engine = MangaLMMOCREngine()
 
-        normalized = engine._normalize_region_list(
-            [
-                {"bbox_2d": [10, 20, 30, 40], "text_content": "⌒テ✺スト︸"},
-                {"bbox_2d": [40, 50, 60, 70], "text_content": "⌒✺︸"},
-            ]
+        parsed = engine._parse_region_payload(
+            '[{"bbox_2d":[10,20,30,40],'
+            '"text_content":"⌒テ✺スト︸"}]'
         )
 
-        self.assertEqual(len(normalized), 1)
-        self.assertEqual(normalized[0]["text_content"], "テスト")
-        self.assertEqual(normalized[0]["raw_text_content"], "⌒テ✺スト︸")
+        self.assertEqual(len(parsed), 1)
+        self.assertEqual(parsed[0]["text_content"], "⌒テ✺スト︸")
+        self.assertEqual(parsed[0]["raw_text_content"], "⌒テ✺スト︸")
+
+    def test_analyze_region_payload_reports_strict_parser_error(self) -> None:
+        engine = MangaLMMOCREngine()
+
+        analysis = engine._analyze_region_payload(
+            '[{"bbox_2d":[10,20,30,40],'
+            '"text_content":"テスト"}] trailing'
+        )
+
+        self.assertEqual(analysis["regions"], [])
+        self.assertEqual(
+            analysis["response_kind"],
+            "parser_error:invalid_json",
+        )
+        self.assertEqual(analysis["parser_error_code"], "invalid_json")
+        self.assertIn("complete JSON value", analysis["parser_error"])
+
+    def test_request_attempt_records_parser_diagnostics(self) -> None:
+        engine = MangaLMMOCREngine()
+        image = np.zeros((200, 200, 3), dtype=np.uint8)
+        block = _make_block(20, 20, 80, 80)
+        unit = engine._build_request_units(image.shape)[0]
+        attempt = engine._build_attempt_specs(image.shape, [block])[0]
+
+        with mock.patch.object(
+            engine,
+            "_request_response_text",
+            return_value=(
+                '{"regions":[{"bbox_2d":[10,20,30,40],'
+                '"text_content":"テスト"}]}'
+            ),
+        ):
+            result = engine._request_regions_for_attempt(
+                image,
+                unit,
+                attempt,
+            )
+
+        self.assertEqual(result["regions"], [])
+        self.assertEqual(
+            result["metadata"]["response_kind"],
+            "parser_error:top_level_not_array",
+        )
+        self.assertEqual(
+            result["metadata"]["parser_error_code"],
+            "top_level_not_array",
+        )
 
     def test_build_request_units_returns_single_full_page_unit(self) -> None:
         engine = MangaLMMOCREngine()
@@ -213,14 +292,14 @@ class MangaLMMOCRTests(unittest.TestCase):
         standard_plan = engine._plan_page_request((3036, 2150, 3), _make_blocks(15, width=200, height=300))
 
         self.assertEqual(dense_plan.profile, "dense")
-        self.assertEqual(dense_plan.request_shape, (1270, 900))
-        self.assertEqual(dense_plan.max_completion_tokens, 256)
-        self.assertAlmostEqual(dense_plan.scale_x, 900 / 2150.0)
-        self.assertAlmostEqual(dense_plan.scale_y, 1270 / 3035.0)
+        self.assertEqual(dense_plan.request_shape, (1728, 1224))
+        self.assertEqual(dense_plan.max_completion_tokens, 4096)
+        self.assertAlmostEqual(dense_plan.scale_x, 1224 / 2150.0)
+        self.assertAlmostEqual(dense_plan.scale_y, 1728 / 3035.0)
 
         self.assertEqual(standard_plan.profile, "standard")
         self.assertEqual(standard_plan.request_shape, (1728, 1224))
-        self.assertEqual(standard_plan.max_completion_tokens, 256)
+        self.assertEqual(standard_plan.max_completion_tokens, 4096)
         self.assertAlmostEqual(standard_plan.scale_x, 1224 / 2150.0)
         self.assertAlmostEqual(standard_plan.scale_y, 1728 / 3036.0)
 
@@ -350,85 +429,197 @@ class MangaLMMOCRTests(unittest.TestCase):
         self.assertAlmostEqual(region["scale_x"], resize_plan.scale_x)
         self.assertAlmostEqual(region["scale_y"], resize_plan.scale_y)
 
-    def test_dedupe_assigned_items_for_block_removes_only_near_exact_duplicates(self) -> None:
+    def test_one_region_covering_multiple_detector_blocks_is_shadow_only(
+        self,
+    ) -> None:
         engine = MangaLMMOCREngine()
-        region_a = OCRRegion(
-            bbox_xyxy=[20, 20, 60, 80],
-            bbox_xyxy_float=[20.0, 20.0, 60.0, 80.0],
-            text="うわ",
-            unit_bbox_xyxy=[0, 0, 200, 200],
-            unit_kind="page_full",
-            unit_resize_scale=1.0,
-            edge_distance=20.0,
-            normalized_text="うわ",
-            response_bbox_2d=[20.0, 20.0, 60.0, 80.0],
-        )
-        region_b = OCRRegion(
-            bbox_xyxy=[21, 21, 61, 81],
-            bbox_xyxy_float=[21.0, 21.0, 61.0, 81.0],
-            text="うわ",
-            unit_bbox_xyxy=[0, 0, 200, 200],
-            unit_kind="page_full",
-            unit_resize_scale=1.0,
-            edge_distance=21.0,
-            normalized_text="うわ",
-            response_bbox_2d=[21.0, 21.0, 61.0, 81.0],
-        )
-        region_c = OCRRegion(
-            bbox_xyxy=[90, 20, 130, 80],
-            bbox_xyxy_float=[90.0, 20.0, 130.0, 80.0],
-            text="別",
-            unit_bbox_xyxy=[0, 0, 200, 200],
-            unit_kind="page_full",
-            unit_resize_scale=1.0,
-            edge_distance=20.0,
-            normalized_text="別",
-            response_bbox_2d=[90.0, 20.0, 130.0, 80.0],
-        )
-        items = [
-            {
-                "region": region_a,
-                "metrics": {
-                    "ownership_cover": 0.8,
-                    "precision_cover": 0.8,
-                    "ownership_iou": 0.5,
-                    "center_in_ownership": True,
-                    "center_in_precision": True,
-                    "center_distance_norm": 0.1,
-                    "precision_area": 2400,
-                },
-            },
-            {
-                "region": region_b,
-                "metrics": {
-                    "ownership_cover": 0.9,
-                    "precision_cover": 0.9,
-                    "ownership_iou": 0.6,
-                    "center_in_ownership": True,
-                    "center_in_precision": True,
-                    "center_distance_norm": 0.05,
-                    "precision_area": 2400,
-                },
-            },
-            {
-                "region": region_c,
-                "metrics": {
-                    "ownership_cover": 0.9,
-                    "precision_cover": 0.9,
-                    "ownership_iou": 0.6,
-                    "center_in_ownership": True,
-                    "center_in_precision": True,
-                    "center_distance_norm": 0.05,
-                    "precision_area": 2400,
-                },
-            },
+        blocks = [
+            _make_block(10, 10, 50, 80, text_class="text_free"),
+            _make_block(40, 10, 80, 80, text_class="text_free"),
         ]
 
-        deduped = engine._dedupe_assigned_items_for_block(items)
+        assignments = engine._assign_regions_to_blocks(
+            [_make_region(30, 10, 60, 80, "joined")],
+            blocks,
+        )
 
-        self.assertEqual(len(deduped), 2)
-        texts = sorted(item["region"].text for item in deduped)
-        self.assertEqual(texts, ["うわ", "別"])
+        self.assertEqual(assignments, {0: [], 1: []})
+        self.assertEqual(len(engine.last_shadow_regions), 1)
+        self.assertEqual(
+            engine.last_shadow_regions[0]["reason"],
+            "one_region_multiple_blocks",
+        )
+        self.assertEqual(len(engine.last_merge_split_diagnostics), 1)
+        self.assertIn(
+            "mangalmm_one_region_multiple_blocks",
+            blocks[0].merge_split_diagnostics,
+        )
+        self.assertIn(
+            "mangalmm_one_region_multiple_blocks",
+            blocks[1].merge_split_diagnostics,
+        )
+
+    def test_multiple_regions_for_one_detector_block_are_not_concatenated(
+        self,
+    ) -> None:
+        engine = MangaLMMOCREngine()
+        block = _make_block(0, 0, 100, 100, text_class="text_free")
+
+        assignments = engine._assign_regions_to_blocks(
+            [
+                _make_region(10, 10, 30, 40, "first"),
+                _make_region(60, 50, 90, 90, "second"),
+            ],
+            [block],
+        )
+
+        self.assertEqual(assignments, {0: []})
+        self.assertEqual(len(engine.last_shadow_regions), 2)
+        self.assertEqual(
+            engine.last_merge_split_diagnostics[0]["kind"],
+            "multiple_regions_one_block",
+        )
+        self.assertIn(
+            "mangalmm_multiple_regions_one_block",
+            block.merge_split_diagnostics,
+        )
+
+    def test_exact_duplicate_regions_are_assigned_once(self) -> None:
+        engine = MangaLMMOCREngine()
+        block = _make_block(0, 0, 100, 100, text_class="text_free")
+        region = _make_region(10, 10, 30, 40, "same")
+
+        assignments = engine._assign_regions_to_blocks(
+            [region, region],
+            [block],
+        )
+
+        self.assertEqual(len(assignments[0]), 1)
+        self.assertEqual(engine.last_shadow_regions, [])
+        self.assertEqual(engine.last_merge_split_diagnostics, [])
+
+    def test_manga_only_region_stays_shadow_candidate(self) -> None:
+        engine = MangaLMMOCREngine()
+        block = _make_block(0, 0, 20, 20, text_class="text_free")
+
+        assignments = engine._assign_regions_to_blocks(
+            [_make_region(120, 120, 150, 160, "shadow")],
+            [block],
+        )
+
+        self.assertEqual(assignments, {0: []})
+        self.assertEqual(
+            engine.last_shadow_regions[0]["reason"],
+            "manga_only_unmatched",
+        )
+
+    def test_single_precision_candidate_wins_over_bubble_only_candidate(
+        self,
+    ) -> None:
+        engine = MangaLMMOCREngine()
+        broad_bubble = _make_block(
+            120,
+            120,
+            150,
+            150,
+            bubble_bbox=(0, 0, 180, 180),
+        )
+        precise_text = _make_block(20, 20, 60, 80)
+
+        assignments = engine._assign_regions_to_blocks(
+            [_make_region(22, 22, 58, 78, "precise")],
+            [broad_bubble, precise_text],
+        )
+
+        self.assertEqual(assignments[0], [])
+        self.assertEqual(len(assignments[1]), 1)
+        self.assertEqual(
+            assignments[1][0]["region"].text,
+            "precise",
+        )
+
+    def test_multiple_bubble_only_candidates_are_shadowed_as_ambiguous(
+        self,
+    ) -> None:
+        engine = MangaLMMOCREngine()
+        blocks = [
+            _make_block(
+                5,
+                5,
+                15,
+                15,
+                bubble_bbox=(0, 0, 100, 100),
+            ),
+            _make_block(
+                85,
+                85,
+                95,
+                95,
+                bubble_bbox=(0, 0, 100, 100),
+            ),
+        ]
+
+        assignments = engine._assign_regions_to_blocks(
+            [_make_region(30, 30, 70, 70, "ambiguous")],
+            blocks,
+        )
+
+        self.assertEqual(assignments, {0: [], 1: []})
+        self.assertEqual(len(engine.last_shadow_regions), 1)
+        self.assertEqual(
+            engine.last_shadow_regions[0]["reason"],
+            "one_region_multiple_blocks",
+        )
+        self.assertEqual(
+            len(
+                engine.last_shadow_regions[0][
+                    "candidate_block_ids"
+                ]
+            ),
+            2,
+        )
+
+    def test_zero_detector_blocks_still_records_manga_only_regions(
+        self,
+    ) -> None:
+        engine = MangaLMMOCREngine()
+        image = np.zeros((200, 200, 3), dtype=np.uint8)
+        region = _make_region(20, 20, 60, 80, "shadow")
+        attempt_payload = {
+            "regions": [region],
+            "analysis": {
+                "response_kind": "json_array",
+                "payload_type": "json_array",
+            },
+            "raw_text": (
+                '[{"bbox_2d":[20,20,60,80],'
+                '"text_content":"shadow"}]'
+            ),
+            "crop_image": image,
+            "request_image": image,
+            "parsed_region_count": 1,
+            "mapped_region_count": 1,
+            "metadata": {"response_kind": "json_array"},
+        }
+
+        with mock.patch.object(
+            engine,
+            "_request_regions_for_attempt",
+            return_value=attempt_payload,
+        ) as request_attempt:
+            result = engine.process_image(image, [])
+
+        self.assertEqual(result, [])
+        self.assertEqual(request_attempt.call_count, 1)
+        self.assertEqual(len(engine.last_shadow_regions), 1)
+        self.assertEqual(
+            engine.last_shadow_regions[0]["reason"],
+            "manga_only_unmatched",
+        )
+        self.assertEqual(
+            engine.last_request_metadata["failure_reason"],
+            "no_block_match",
+        )
 
     def test_prompt_for_resize_plan_uses_standard_and_dense_variants(self) -> None:
         engine = MangaLMMOCREngine()
@@ -486,6 +677,157 @@ class MangaLMMOCRTests(unittest.TestCase):
         self.assertEqual(payload["repeat_penalty"], 1.05)
         self.assertEqual(payload["repeat_last_n"], 0)
         self.assertEqual(post.call_args.kwargs["timeout"], 60.0)
+
+    def test_request_response_text_records_finish_reason_and_usage(
+        self,
+    ) -> None:
+        engine = MangaLMMOCREngine()
+        image = np.zeros((32, 32, 3), dtype=np.uint8)
+        response = mock.Mock()
+        response.status_code = 200
+        response.json.return_value = {
+            "choices": [
+                {
+                    "finish_reason": "stop",
+                    "message": {"content": "[]"},
+                }
+            ],
+            "usage": {
+                "prompt_tokens": 100,
+                "completion_tokens": 20,
+                "total_tokens": 120,
+            },
+        }
+
+        with mock.patch(
+            "modules.ocr.mangalmm_ocr.requests.post",
+            return_value=response,
+        ):
+            engine._request_response_text(
+                image,
+                max_completion_tokens=4096,
+                prompt_text=engine.STANDARD_PROMPT,
+            )
+
+        self.assertEqual(
+            engine.last_transport_metadata,
+            {
+                "finish_reason": "stop",
+                "prompt_tokens": 100,
+                "completion_tokens": 20,
+                "total_tokens": 120,
+            },
+        )
+
+    def test_request_response_text_rejects_non_object_response(
+        self,
+    ) -> None:
+        engine = MangaLMMOCREngine()
+        image = np.zeros((32, 32, 3), dtype=np.uint8)
+        response = mock.Mock()
+        response.status_code = 200
+        response.json.return_value = []
+
+        with mock.patch(
+            "modules.ocr.mangalmm_ocr.requests.post",
+            return_value=response,
+        ), self.assertRaises(LocalServiceResponseError):
+            engine._request_response_text(
+                image,
+                max_completion_tokens=4096,
+                prompt_text=engine.STANDARD_PROMPT,
+            )
+
+    def test_request_response_text_rejects_non_object_choice(
+        self,
+    ) -> None:
+        engine = MangaLMMOCREngine()
+        image = np.zeros((32, 32, 3), dtype=np.uint8)
+        response = mock.Mock()
+        response.status_code = 200
+        response.json.return_value = {"choices": ["invalid"]}
+
+        with mock.patch(
+            "modules.ocr.mangalmm_ocr.requests.post",
+            return_value=response,
+        ), self.assertRaises(LocalServiceResponseError):
+            engine._request_response_text(
+                image,
+                max_completion_tokens=4096,
+                prompt_text=engine.STANDARD_PROMPT,
+            )
+
+    def test_runtime_identity_is_hashed_without_exposing_endpoint(
+        self,
+    ) -> None:
+        engine = MangaLMMOCREngine()
+        credentials = ":".join(("user", "secret"))
+        engine.server_url = f"https://{credentials}@example.test/v1"
+        block = _make_block(20, 20, 80, 80)
+
+        with mock.patch.object(
+            engine,
+            "_request_regions_for_attempt",
+            return_value={
+                "regions": [],
+                "analysis": {
+                    "response_kind": "json_array",
+                    "payload_type": "json_array",
+                },
+                "raw_text": "[]",
+                "crop_image": np.zeros((16, 16, 3), dtype=np.uint8),
+                "request_image": np.zeros((16, 16, 3), dtype=np.uint8),
+                "parsed_region_count": 0,
+                "mapped_region_count": 0,
+                "metadata": {"response_kind": "json_array"},
+            },
+        ):
+            engine.process_image(
+                np.zeros((100, 100, 3), dtype=np.uint8),
+                [block],
+            )
+
+        self.assertEqual(len(block.ocr_runtime_identity), 64)
+        self.assertNotIn("secret", block.ocr_runtime_identity)
+        self.assertNotIn("example.test", block.ocr_runtime_identity)
+
+    def test_finish_reason_length_rejects_otherwise_valid_json(self) -> None:
+        engine = MangaLMMOCREngine()
+        image = np.zeros((200, 200, 3), dtype=np.uint8)
+        block = _make_block(20, 20, 80, 80)
+        unit = engine._build_request_units(image.shape)[0]
+        attempt = engine._build_attempt_specs(image.shape, [block])[0]
+
+        def truncated_response(*_args, **_kwargs):
+            engine.last_transport_metadata = {
+                "finish_reason": "length",
+                "prompt_tokens": 100,
+                "completion_tokens": 4096,
+                "total_tokens": 4196,
+            }
+            return (
+                '[{"bbox_2d":[20,20,80,80],'
+                '"text_content":"truncated"}]'
+            )
+
+        with mock.patch.object(
+            engine,
+            "_request_response_text",
+            side_effect=truncated_response,
+        ):
+            result = engine._request_regions_for_attempt(
+                image,
+                unit,
+                attempt,
+            )
+
+        self.assertEqual(result["regions"], [])
+        self.assertEqual(
+            result["metadata"]["parser_error_code"],
+            "finish_reason_length",
+        )
+        self.assertEqual(result["metadata"]["finish_reason"], "length")
+        self.assertEqual(result["metadata"]["completion_tokens"], 4096)
 
     def test_engine_debug_env_is_routed_to_active_sidecar_runtime(self) -> None:
         engine = MangaLMMOCREngine()
