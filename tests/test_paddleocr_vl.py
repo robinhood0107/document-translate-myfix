@@ -113,6 +113,76 @@ class PaddleOCRVLEngineTests(unittest.TestCase):
         gpu_metrics_module._GPU_METRICS_CACHE_VALUE = None
         gpu_metrics_module._GPU_METRICS_CACHE_EXPIRES_AT = 0.0
 
+    def test_bubble_ocr_uses_expanded_text_bbox_clamped_to_bubble(
+        self,
+    ) -> None:
+        engine = PaddleOCRVLEngine()
+        engine.initialize(
+            _FakeSettings(scheduler_mode="fixed", parallel_workers=1)
+        )
+        image = np.zeros((320, 320, 3), dtype=np.uint8)
+        block = TextBlock(
+            text_bbox=np.asarray([80, 100, 140, 180], dtype=np.int32),
+            bubble_bbox=np.asarray([80, 80, 180, 220], dtype=np.int32),
+            text_class="text_bubble",
+            source_lang="ja",
+            direction="vertical",
+        )
+
+        with mock.patch.object(
+            engine,
+            "_request_ocr_text",
+            return_value="テスト",
+        ):
+            engine.process_image(image, [block])
+
+        request_record = engine.last_page_profile["request_records"][0]
+        self.assertEqual(request_record["bbox"], [80, 97, 142, 183])
+        self.assertEqual(request_record["crop_source"], "xyxy")
+        self.assertEqual(
+            block.ocr_effective_crop_xyxy,
+            [80, 97, 142, 183],
+        )
+        self.assertEqual(block.ocr_strategy, "paddle_crop")
+        self.assertEqual(
+            block.ocr_geometry_provenance["strategy"],
+            "text_first_bubble_clamp",
+        )
+        self.assertNotEqual(
+            request_record["bbox"],
+            [80, 80, 180, 220],
+        )
+
+    def test_missing_text_bbox_uses_one_bubble_fallback_crop(self) -> None:
+        engine = PaddleOCRVLEngine()
+        engine.initialize(
+            _FakeSettings(scheduler_mode="fixed", parallel_workers=1)
+        )
+        image = np.zeros((260, 260, 3), dtype=np.uint8)
+        block = TextBlock(
+            text_bbox=None,
+            bubble_bbox=np.asarray([60, 70, 180, 210], dtype=np.int32),
+            text_class="text_bubble",
+            source_lang="ja",
+            direction="vertical",
+        )
+
+        with mock.patch.object(
+            engine,
+            "_request_ocr_text",
+            return_value="テスト",
+        ) as request:
+            engine.process_image(image, [block])
+
+        request.assert_called_once()
+        request_record = engine.last_page_profile["request_records"][0]
+        self.assertEqual(request_record["bbox"], [60, 70, 180, 210])
+        self.assertEqual(request_record["crop_source"], "bubble_fallback")
+        self.assertEqual(
+            block.ocr_geometry_provenance["crop_source"],
+            "bubble_fallback",
+        )
+
     def test_settings_page_generic_settings_overlays_benchmark_values(self) -> None:
         probe = _SettingsPageOverlayProbe()
         probe._benchmark_ocr_generic_settings = {
@@ -180,6 +250,12 @@ class PaddleOCRVLEngineTests(unittest.TestCase):
                 request.assert_not_called()
                 self.assertEqual(second_block.text, "テスト")
                 self.assertEqual(second_block.ocr_raw_text, "テスト")
+                self.assertEqual(second_block.ocr_strategy, "paddle_crop")
+                self.assertEqual(
+                    second_block.ocr_geometry_provenance["strategy"],
+                    "text_first_bubble_clamp",
+                )
+                self.assertTrue(second_block.ocr_runtime_identity)
                 self.assertEqual(
                     engine.last_page_profile["performance"]["http_attempt_count"],
                     0,
@@ -468,7 +544,7 @@ class PaddleOCRVLEngineTests(unittest.TestCase):
 
         record = engine.last_page_profile["request_records"][0]
         self.assertEqual(record["job_index"], 0)
-        self.assertEqual(record["bbox"], [5, 5, 115, 115])
+        self.assertEqual(record["bbox"], [7, 7, 113, 113])
         self.assertGreater(record["crop_area_px"], 0)
         self.assertIsNotNone(record["enqueue_ts"])
         self.assertIsNotNone(record["start_ts"])

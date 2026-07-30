@@ -63,6 +63,7 @@ from modules.ocr.persistent_cache import (
     canonical_sha256,
     snapshot_raw_ocr_result,
 )
+from modules.ocr.result_contract import canonicalize_exact_duplicate_blocks
 from modules.ocr.selection import (
     STAGE_BATCHED_WORKFLOW_MODE,
     resolve_stage_batched_ocr_policy,
@@ -174,6 +175,9 @@ class StagePageContext:
     project_render_fingerprint: str = ""
     project_render_checkpoint_status: str = "disabled"
     page_ocr_metrics: dict[str, int] = field(default_factory=dict)
+    ocr_canonicalization_summary: dict[str, Any] = field(
+        default_factory=dict
+    )
     page_translation_metrics: dict[str, int | float] = field(default_factory=dict)
     paddleocr_cache_plan: Any | None = None
     paddleocr_cache_engine: Any | None = None
@@ -1084,6 +1088,21 @@ class StageBatchedProcessor(BatchProcessor):
             page_profile = dict(page_profile or {})
             page_profile["embedded_ui_dropped_block_count"] = len(embedded_ui_blocks)
 
+        canonicalization = dict(ctx.ocr_canonicalization_summary or {})
+        if canonicalization:
+            page_profile = dict(page_profile or {})
+            page_profile["exact_duplicate_canonicalization"] = {
+                "input_block_count": int(
+                    canonicalization.get("input_block_count", 0) or 0
+                ),
+                "canonical_block_count": int(
+                    canonicalization.get("canonical_block_count", 0) or 0
+                ),
+                "duplicate_alias_count": int(
+                    canonicalization.get("duplicate_alias_count", 0) or 0
+                ),
+            }
+
         metrics = self._ocr_quality_metrics(quality)
         retained_ids = {
             str(getattr(block, "block_id", "") or "")
@@ -1190,6 +1209,28 @@ class StageBatchedProcessor(BatchProcessor):
         if recorded:
             ctx.project_ocr_checkpoint_status = "stored"
 
+    @staticmethod
+    def _canonicalize_ocr_inputs(pages: list[StagePageContext]) -> None:
+        for ctx in pages:
+            if ctx.failed_stage or ctx.no_text_detected or not ctx.blk_list:
+                continue
+            canonical_blocks, summary = canonicalize_exact_duplicate_blocks(
+                ctx.blk_list,
+                source_identity=(
+                    ctx.source_decoded_sha256
+                    or ctx.project_checkpoint_page_key
+                ),
+            )
+            ctx.blk_list = canonical_blocks
+            ctx.ocr_canonicalization_summary = summary
+            duplicate_count = int(summary.get("duplicate_alias_count", 0) or 0)
+            if duplicate_count:
+                logger.info(
+                    "Canonicalized %d exact detector duplicate(s) before OCR for %s.",
+                    duplicate_count,
+                    ctx.image_name,
+                )
+
     def _ocr_all(self, pages: list[StagePageContext], policy: dict[str, Any]) -> None:
         total_images = len(pages)
         settings_page = self.main_page.settings_page
@@ -1197,6 +1238,7 @@ class StageBatchedProcessor(BatchProcessor):
         self._paddleocr_cache_store = None
         self._paddleocr_cache_identity = None
         engine_key = str(policy["primary_ocr_engine"])
+        self._canonicalize_ocr_inputs(pages)
         paddle_settings = settings_page.get_paddleocr_vl_settings()
         persistent_cache_requested = (
             engine_key == "PaddleOCR VL"
