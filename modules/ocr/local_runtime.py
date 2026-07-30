@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-import hashlib
+import base64
+import binascii
 import json
 import logging
 import os
@@ -13,6 +14,22 @@ from urllib.parse import urlparse
 from urllib.request import urlopen
 
 from modules.ocr.selection import is_local_ocr_engine
+from modules.ocr.paddle_llamacpp_runtime_contract import (
+    DEFAULT_PADDLE_LAYOUT_IMAGE,
+    DEFAULT_PADDLE_LLAMA_CPP_IMAGE,
+    DEFAULT_PADDLE_LLAMA_MODEL_VOLUME,
+    DEFAULT_PADDLE_LLAMA_READY_MANIFEST,
+    PADDLE_LLAMA_MMPROJ_NAME,
+    PADDLE_LLAMA_MODEL_ALIAS,
+    PADDLE_LLAMA_MODEL_NAME,
+    PADDLE_LLAMA_MODEL_SPECS,
+    PADDLE_LLAMA_RUNTIME_PREPARATION_VERSION,
+    PADDLE_RUNTIME_FINGERPRINT_LABEL,
+    PaddleLlamaRuntimeContract,
+    PaddleLlamaRuntimeContractError,
+    build_paddle_llama_runtime_contract,
+    validate_paddle_llama_volume_name,
+)
 from modules.utils.exceptions import LocalServiceSetupError, OperationCancelledError
 from modules.utils.llama_cpp_runtime import (
     DEFAULT_LLAMA_CPP_IMAGE,
@@ -27,17 +44,16 @@ ROOT_DIR = Path(__file__).resolve().parents[2]
 DEFAULT_HUNYUAN_N_GPU_LAYERS = "80"
 LATE_START_STOP_GRACE_SEC = 3.0
 LATE_START_STOP_POLL_SEC = 0.25
-PADDLEOCR_IMAGE_REPOSITORY = (
-    "ccr-2vdh3abv-pub.cnc.bj.baidubce.com/"
-    "paddlepaddle/paddleocr-genai-vllm-server"
-)
-PADDLEOCR_IMAGE_DIGEST = (
-    "sha256:d0d32c04a2119613d25a0a4c292e165ccc107954b74580613cf59e378037f8f5"
-)
-PADDLEOCR_IMAGE_REF = f"{PADDLEOCR_IMAGE_REPOSITORY}@{PADDLEOCR_IMAGE_DIGEST}"
-PADDLEOCR_RUNTIME_FINGERPRINT_LABEL = (
-    "com.comictranslate.paddleocr-runtime-fingerprint"
-)
+PADDLEOCR_LAYOUT_IMAGE_REF = DEFAULT_PADDLE_LAYOUT_IMAGE
+PADDLEOCR_LAYOUT_IMAGE_DIGEST = PADDLEOCR_LAYOUT_IMAGE_REF.rsplit("@", 1)[-1]
+PADDLEOCR_LLAMA_CPP_IMAGE_REF = DEFAULT_PADDLE_LLAMA_CPP_IMAGE
+PADDLEOCR_LLAMA_CPP_IMAGE_DIGEST = PADDLEOCR_LLAMA_CPP_IMAGE_REF.rsplit("@", 1)[
+    -1
+]
+# Compatibility aliases used by existing cache/runtime callers.
+PADDLEOCR_IMAGE_REF = PADDLEOCR_LAYOUT_IMAGE_REF
+PADDLEOCR_IMAGE_DIGEST = PADDLEOCR_LAYOUT_IMAGE_DIGEST
+PADDLEOCR_RUNTIME_FINGERPRINT_LABEL = PADDLE_RUNTIME_FINGERPRINT_LABEL
 OCRPreflightProbeResult = Literal["healthy", "unavailable", "not_managed"]
 OCRHealthState = Literal["healthy", "loading", "unavailable"]
 
@@ -66,12 +82,12 @@ _ENGINE_CONFIG = {
         "health_url": "http://127.0.0.1:28118/docs",
         "health_urls": [
             "http://127.0.0.1:28118/docs",
-            "http://127.0.0.1:18000/v1/models",
+            "http://127.0.0.1:18000/health",
         ],
         "settings_page_name": "PaddleOCR VL Settings",
-        "container_name": "paddleocr-server",
-        "container_names": ["paddleocr-vllm", "paddleocr-server"],
-        "uses_llama_cpp": False,
+        "container_name": "paddleocr-llamacpp",
+        "container_names": ["paddleocr-llamacpp", "paddleocr-server"],
+        "uses_llama_cpp": True,
     },
 }
 
@@ -92,6 +108,8 @@ class LocalOCRRuntimeManager:
         self._managed_start_attempted_engine: str | None = None
         self._readiness_cache: set[tuple[str, str, str]] = set()
         self._startup_cancel_checker: Callable[[], bool] | None = None
+        self._paddle_runtime_contract_cache: PaddleLlamaRuntimeContract | None = None
+        self._paddle_idle_released = False
 
     def validate_engine(self, engine_key: str, settings_page: Any) -> None:
         if not is_local_ocr_engine(engine_key):
@@ -108,6 +126,19 @@ class LocalOCRRuntimeManager:
                 f"Bundled Docker compose file was not found: {compose_file}",
             )
         self._resolve_compose_command(engine_key)
+        if engine_key == "PaddleOCR VL":
+            try:
+                self._ensure_paddle_runtime_images()
+                self._paddle_runtime_contract(force_refresh=True)
+            except (PaddleLlamaRuntimeContractError, OSError) as exc:
+                raise self._build_setup_error(
+                    engine_key,
+                    (
+                        f"Prepared PaddleOCR llama.cpp runtime validation failed: {exc}\n"
+                        "Run scripts/prepare_paddleocr_llamacpp_runtime.ps1 "
+                        "in Prepare or Verify mode."
+                    )
+                ) from exc
 
     def should_manage_engine(self, engine_key: str, settings_page: Any) -> bool:
         if not is_local_ocr_engine(engine_key):
@@ -141,7 +172,6 @@ class LocalOCRRuntimeManager:
             ):
                 return None
             contract = self._paddle_runtime_contract()
-            image_id = self._inspect_docker_image_id(PADDLEOCR_IMAGE_REF)
         except OperationCancelledError:
             raise
         except Exception:
@@ -151,28 +181,41 @@ class LocalOCRRuntimeManager:
                 exc_info=True,
             )
             return None
-        if not image_id:
+        if not contract.llama_image_id or not contract.layout_image_id:
             logger.info(
                 "Persistent PaddleOCR-VL cache is disabled until the pinned "
-                "managed image is installed locally."
+                "managed images are installed locally."
             )
             return None
         return {
-            "identity_schema_version": 1,
+            "identity_schema_version": 2,
             "managed": True,
             "engine": engine_key,
+            "backend": "llama.cpp",
             "endpoint": _normalize_url(
                 self._resolve_server_url(engine_key, settings_page)
             ),
-            "model_name": "PaddleOCR-VL-1.6-0.9B",
-            "image_ref": PADDLEOCR_IMAGE_REF,
-            "image_digest": PADDLEOCR_IMAGE_DIGEST,
-            "image_id": image_id,
-            "compose_sha256": contract["compose_sha256"],
-            "command_sha256": contract["command_sha256"],
-            "vllm_config_sha256": contract["vllm_config_sha256"],
-            "pipeline_config_sha256": contract["pipeline_config_sha256"],
-            "runtime_fingerprint": contract["runtime_fingerprint"],
+            "model_name": PADDLE_LLAMA_MODEL_ALIAS,
+            "model_file": PADDLE_LLAMA_MODEL_NAME,
+            "model_sha256": str(
+                PADDLE_LLAMA_MODEL_SPECS[PADDLE_LLAMA_MODEL_NAME]["sha256"]
+            ),
+            "mmproj_file": PADDLE_LLAMA_MMPROJ_NAME,
+            "mmproj_sha256": str(
+                PADDLE_LLAMA_MODEL_SPECS[PADDLE_LLAMA_MMPROJ_NAME]["sha256"]
+            ),
+            "model_volume": contract.volume_name,
+            "ready_manifest_sha256": contract.ready_manifest_sha256,
+            "llama_image_ref": contract.llama_image_ref,
+            "llama_image_digest": PADDLEOCR_LLAMA_CPP_IMAGE_DIGEST,
+            "llama_image_id": contract.llama_image_id,
+            "layout_image_ref": contract.layout_image_ref,
+            "layout_image_digest": PADDLEOCR_LAYOUT_IMAGE_DIGEST,
+            "layout_image_id": contract.layout_image_id,
+            "compose_sha256": contract.compose_file_sha256,
+            "command_sha256": contract.command_sha256,
+            "pipeline_config_sha256": contract.pipeline_config_sha256,
+            "runtime_fingerprint": contract.fingerprint,
         }
 
     def probe_managed_engine(
@@ -223,10 +266,22 @@ class LocalOCRRuntimeManager:
                 self._managed_start_attempted_engine = None
                 self._readiness_cache.clear()
             if cache_key in self._readiness_cache:
-                self._active_engine = engine_key
-                self._managed_start_attempted_engine = engine_key
-                self._emit_readiness_cache_hit(progress_callback, engine_key)
-                return
+                cache_is_healthy = (
+                    engine_key != "PaddleOCR VL"
+                    or self._probe_health_state(
+                        self._config_health_urls(self._config_for(engine_key))
+                    )
+                    == "healthy"
+                )
+                if cache_is_healthy:
+                    self._active_engine = engine_key
+                    self._managed_start_attempted_engine = engine_key
+                    if engine_key == "PaddleOCR VL":
+                        self._paddle_idle_released = False
+                    self._emit_readiness_cache_hit(progress_callback, engine_key)
+                    return
+                self._readiness_cache.discard(cache_key)
+                self._paddle_idle_released = False
 
             try:
                 self._ensure_engine_uncached(
@@ -241,6 +296,8 @@ class LocalOCRRuntimeManager:
                 raise
             else:
                 self._readiness_cache.add(cache_key)
+                if engine_key == "PaddleOCR VL":
+                    self._paddle_idle_released = False
 
     def _ensure_engine_uncached(
         self,
@@ -447,6 +504,44 @@ class LocalOCRRuntimeManager:
         with self._lock:
             self._readiness_cache.clear()
             self._deactivate_active_engine()
+            self._paddle_idle_released = False
+
+    def release_for_handoff(self) -> None:
+        """Release OCR GPU residency while preserving a reusable llama server."""
+
+        with self._lock:
+            if self._active_engine not in (None, "PaddleOCR VL"):
+                self._deactivate_active_engine()
+                return
+            if self._active_engine is None:
+                running = self._running_managed_container_names("PaddleOCR VL")
+                if not running:
+                    return
+                expected = self._managed_container_names("PaddleOCR VL")
+                if (
+                    len(running) != len(expected)
+                    or not self._paddle_containers_match_contract(running)
+                ):
+                    self._managed_start_attempted_engine = "PaddleOCR VL"
+                    self._deactivate_active_engine()
+                    return
+                self._active_engine = "PaddleOCR VL"
+                self._managed_start_attempted_engine = "PaddleOCR VL"
+            if self._paddle_idle_released:
+                return
+            if self._wait_for_paddle_llama_sleep():
+                self._paddle_idle_released = True
+                logger.info(
+                    "PaddleOCR llama.cpp entered idle sleep; containers remain "
+                    "available for the next OCR stage."
+                )
+                return
+            logger.warning(
+                "PaddleOCR llama.cpp did not confirm idle sleep; falling back "
+                "to the normal managed stop before the next GPU stage."
+            )
+            self._deactivate_active_engine()
+            self._paddle_idle_released = False
 
     def _deactivate_active_engine(self) -> None:
         self._readiness_cache.clear()
@@ -456,6 +551,8 @@ class LocalOCRRuntimeManager:
         self._stop_engine(engine_key)
         self._active_engine = None
         self._managed_start_attempted_engine = None
+        if engine_key == "PaddleOCR VL":
+            self._paddle_idle_released = False
 
     def _stop_engine(self, engine_key: str) -> None:
         watch_for_late_start = bool(
@@ -492,6 +589,60 @@ class LocalOCRRuntimeManager:
                 return
             time.sleep(LATE_START_STOP_POLL_SEC)
 
+    def _wait_for_paddle_llama_sleep(self) -> bool:
+        try:
+            contract = self._paddle_runtime_contract()
+            idle_seconds = int(
+                contract.runtime_options[
+                    "PADDLEOCR_LLAMA_SLEEP_IDLE_SECONDS"
+                ]
+            )
+        except Exception:
+            logger.warning(
+                "Unable to resolve the PaddleOCR llama.cpp sleep contract.",
+                exc_info=True,
+            )
+            return False
+
+        from modules.utils.llama_cpp_runtime import run_docker_command
+
+        deadline = time.monotonic() + idle_seconds + 15.0
+        while time.monotonic() < deadline:
+            if self._is_cancelled(self._startup_cancel_checker):
+                raise OperationCancelledError(
+                    "Cancelled while waiting for PaddleOCR llama.cpp to sleep."
+                )
+            completed = run_docker_command(
+                [
+                    "docker",
+                    "logs",
+                    "--tail",
+                    "240",
+                    "paddleocr-llamacpp",
+                ],
+                check=False,
+                timeout_sec=10.0,
+                cancel_checker=self._startup_cancel_checker,
+            )
+            if completed.returncode != 0:
+                return False
+            log_text = (
+                (completed.stdout or "") + "\n" + (completed.stderr or "")
+            )
+            sleep_index = max(
+                log_text.rfind("entering sleeping state"),
+                log_text.rfind("server is entering sleeping state"),
+            )
+            activity_index = max(
+                log_text.rfind("exiting sleeping state"),
+                log_text.rfind("processing task"),
+                log_text.rfind("stop processing"),
+            )
+            if sleep_index >= 0 and sleep_index > activity_index:
+                return True
+            time.sleep(0.25)
+        return False
+
     def _run_compose(self, engine_key: str, *compose_args: str, step_name: str) -> None:
         config = self._config_for(engine_key)
         compose_file = config["compose_file"]
@@ -521,7 +672,16 @@ class LocalOCRRuntimeManager:
             return
         except RuntimeError as exc:
             detail = str(exc).strip()
-        requested_image = env.get("LLAMA_CPP_IMAGE", "") if config.get("uses_llama_cpp") else ""
+        requested_image = ""
+        if config.get("uses_llama_cpp"):
+            requested_image = env.get(
+                (
+                    "PADDLEOCR_LLAMA_CPP_IMAGE"
+                    if engine_key == "PaddleOCR VL"
+                    else "LLAMA_CPP_IMAGE"
+                ),
+                "",
+            )
         extra = f"Docker compose {step_name} failed.\n{detail}"
         if requested_image:
             extra = f"{extra}\nRequested image: {requested_image}"
@@ -547,9 +707,7 @@ class LocalOCRRuntimeManager:
         if engine_key == "HunyuanOCR":
             env.setdefault("LLAMA_N_GPU_LAYERS", DEFAULT_HUNYUAN_N_GPU_LAYERS)
         if engine_key == "PaddleOCR VL":
-            env["PADDLEOCR_RUNTIME_FINGERPRINT"] = str(
-                self._paddle_runtime_contract()["runtime_fingerprint"]
-            )
+            env.update(self._paddle_runtime_contract().compose_environment())
         return env
 
     def _resolve_server_url(self, engine_key: str, settings_page: Any) -> str:
@@ -596,8 +754,13 @@ class LocalOCRRuntimeManager:
         if not config.get("uses_llama_cpp"):
             return
         try:
+            image_env_key = (
+                "PADDLEOCR_LLAMA_CPP_IMAGE"
+                if engine_key == "PaddleOCR VL"
+                else "LLAMA_CPP_IMAGE"
+            )
             runtime = inspect_llama_cpp_runtime(
-                image_ref=self._build_env(engine_key).get("LLAMA_CPP_IMAGE"),
+                image_ref=self._build_env(engine_key).get(image_env_key),
                 container_name=str(config.get("container_name") or ""),
                 cancel_checker=self._startup_cancel_checker,
             )
@@ -619,68 +782,217 @@ class LocalOCRRuntimeManager:
         names = config.get("container_names") or [config.get("container_name")]
         return [str(name).strip() for name in names if str(name or "").strip()]
 
-    @staticmethod
-    def _sha256_file(path: Path) -> str:
-        digest = hashlib.sha256()
-        with path.open("rb") as handle:
-            for chunk in iter(lambda: handle.read(1024 * 1024), b""):
-                digest.update(chunk)
-        return digest.hexdigest()
+    def _paddle_runtime_contract(
+        self,
+        *,
+        force_refresh: bool = False,
+    ) -> PaddleLlamaRuntimeContract:
+        if self._paddle_runtime_contract_cache is not None and not force_refresh:
+            return self._paddle_runtime_contract_cache
 
-    def _paddle_runtime_contract(self) -> dict[str, str]:
         compose_file = Path(self._config_for("PaddleOCR VL")["compose_file"])
-        vllm_config = compose_file.parent / "vllm_config.yml"
         pipeline_config = compose_file.parent / "pipeline_conf.yaml"
-        for path in (compose_file, vllm_config, pipeline_config):
+        for path in (compose_file, pipeline_config):
             if not path.is_file():
                 raise FileNotFoundError(path)
-
-        try:
-            import yaml
-
-            compose_payload = yaml.safe_load(
-                compose_file.read_text(encoding="utf-8")
+        volume_name = validate_paddle_llama_volume_name(
+            os.environ.get(
+                "PADDLEOCR_LLAMA_MODEL_VOLUME",
+                DEFAULT_PADDLE_LLAMA_MODEL_VOLUME,
             )
-        except Exception as exc:
-            raise RuntimeError(
-                f"Failed to parse PaddleOCR-VL compose contract: {compose_file}"
-            ) from exc
-        services = (
-            compose_payload.get("services", {})
-            if isinstance(compose_payload, dict)
-            else {}
         )
-        commands = {
-            str(name): str(config.get("command", "") or "")
-            for name, config in sorted(services.items())
-            if isinstance(config, dict)
-        }
-        command_sha256 = hashlib.sha256(
-            json.dumps(
-                commands,
-                ensure_ascii=False,
-                sort_keys=True,
-                separators=(",", ":"),
-            ).encode("utf-8")
-        ).hexdigest()
-        contract = {
-            "compose_sha256": self._sha256_file(compose_file),
-            "command_sha256": command_sha256,
-            "vllm_config_sha256": self._sha256_file(vllm_config),
-            "pipeline_config_sha256": self._sha256_file(pipeline_config),
-        }
-        contract["runtime_fingerprint"] = hashlib.sha256(
-            json.dumps(
-                {
-                    **contract,
-                    "image_ref": PADDLEOCR_IMAGE_REF,
-                    "model_name": "PaddleOCR-VL-1.6-0.9B",
-                },
-                sort_keys=True,
-                separators=(",", ":"),
-            ).encode("utf-8")
-        ).hexdigest()
+        (
+            manifest_bytes,
+            manifest_sha256,
+            observed_file_bytes,
+        ) = self._probe_paddle_model_volume(
+            volume_name=volume_name,
+            image_ref=PADDLEOCR_LLAMA_CPP_IMAGE_REF,
+        )
+        llama_image_id = self._inspect_docker_image_id(
+            PADDLEOCR_LLAMA_CPP_IMAGE_REF
+        )
+        layout_image_id = self._inspect_docker_image_id(
+            PADDLEOCR_LAYOUT_IMAGE_REF
+        )
+        if not llama_image_id or not layout_image_id:
+            raise PaddleLlamaRuntimeContractError(
+                "Pinned PaddleOCR runtime images are not installed."
+            )
+        contract = build_paddle_llama_runtime_contract(
+            manifest_bytes=manifest_bytes,
+            manifest_sha256=manifest_sha256,
+            observed_file_bytes=observed_file_bytes,
+            volume_name=volume_name,
+            llama_image_ref=PADDLEOCR_LLAMA_CPP_IMAGE_REF,
+            llama_image_id=llama_image_id,
+            layout_image_ref=PADDLEOCR_LAYOUT_IMAGE_REF,
+            layout_image_id=layout_image_id,
+            compose_file=compose_file,
+            pipeline_config_file=pipeline_config,
+            environment=os.environ,
+        )
+        self._paddle_runtime_contract_cache = contract
         return contract
+
+    def _ensure_paddle_runtime_images(self) -> None:
+        for image_ref in (
+            PADDLEOCR_LLAMA_CPP_IMAGE_REF,
+            PADDLEOCR_LAYOUT_IMAGE_REF,
+        ):
+            if self._inspect_docker_image_id(image_ref):
+                continue
+            from modules.utils.llama_cpp_runtime import run_docker_command
+
+            try:
+                run_docker_command(
+                    ["docker", "pull", image_ref],
+                    cancel_checker=self._startup_cancel_checker,
+                )
+            except RuntimeError as exc:
+                raise self._build_setup_error(
+                    "PaddleOCR VL",
+                    f"Unable to load the pinned PaddleOCR image: {image_ref}\n{exc}"
+                ) from exc
+            if not self._inspect_docker_image_id(image_ref):
+                raise self._build_setup_error(
+                    "PaddleOCR VL",
+                    f"Docker returned no image ID for the pinned PaddleOCR image: {image_ref}"
+                )
+
+    def _probe_paddle_model_volume(
+        self,
+        *,
+        volume_name: str,
+        image_ref: str,
+    ) -> tuple[bytes, str, dict[str, int]]:
+        from modules.utils.llama_cpp_runtime import run_docker_command
+
+        volume_inspection = run_docker_command(
+            [
+                "docker",
+                "volume",
+                "inspect",
+                "--format",
+                "{{json .Labels}}",
+                volume_name,
+            ],
+            check=False,
+            cancel_checker=self._startup_cancel_checker,
+        )
+        if volume_inspection.returncode != 0:
+            raise self._build_setup_error(
+                "PaddleOCR VL",
+                (
+                    "Prepared PaddleOCR llama.cpp model volume does not exist: "
+                    f"{volume_name}\n"
+                    "Run scripts/prepare_paddleocr_llamacpp_runtime.ps1 before "
+                    "starting the managed endpoint."
+                )
+            )
+        try:
+            volume_labels = json.loads(
+                (volume_inspection.stdout or "").strip() or "{}"
+            )
+        except json.JSONDecodeError as exc:
+            raise self._build_setup_error(
+                "PaddleOCR VL",
+                f"Unable to parse Docker labels for PaddleOCR volume: {volume_name}"
+            ) from exc
+        expected_labels = {
+            "comic-translate.runtime": "PaddleOCR-VL-llama.cpp",
+            "comic-translate.preparation-version": str(
+                PADDLE_LLAMA_RUNTIME_PREPARATION_VERSION
+            ),
+        }
+        if not isinstance(volume_labels, dict) or any(
+            str(volume_labels.get(key, "")) != expected
+            for key, expected in expected_labels.items()
+        ):
+            raise self._build_setup_error(
+                "PaddleOCR VL",
+                (
+                    "PaddleOCR llama.cpp volume labels do not match the "
+                    f"preparation contract: {volume_name}\n"
+                    f"Expected labels: {expected_labels}\n"
+                    f"Actual labels: {volume_labels}"
+                )
+            )
+
+        shell_script = r'''
+set -eu
+manifest_path="/models/$READY_MANIFEST"
+model_path="/models/$MODEL_FILE"
+mmproj_path="/models/$MMPROJ_FILE"
+test -f "$manifest_path"
+test -f "$model_path"
+test -f "$mmproj_path"
+printf 'manifest_sha256=%s\n' "$(sha256sum "$manifest_path" | cut -d ' ' -f 1)"
+printf 'manifest_base64='
+base64 -w 0 "$manifest_path"
+printf '\nmodel_bytes=%s\n' "$(stat -c %s "$model_path")"
+printf 'mmproj_bytes=%s\n' "$(stat -c %s "$mmproj_path")"
+'''.strip()
+        completed = run_docker_command(
+            [
+                "docker",
+                "run",
+                "--rm",
+                "--pull",
+                "never",
+                "-e",
+                f"READY_MANIFEST={DEFAULT_PADDLE_LLAMA_READY_MANIFEST}",
+                "-e",
+                f"MODEL_FILE={PADDLE_LLAMA_MODEL_NAME}",
+                "-e",
+                f"MMPROJ_FILE={PADDLE_LLAMA_MMPROJ_NAME}",
+                "--mount",
+                f"type=volume,source={volume_name},target=/models,readonly",
+                "--entrypoint",
+                "/bin/sh",
+                image_ref,
+                "-ec",
+                shell_script,
+            ],
+            check=False,
+            cancel_checker=self._startup_cancel_checker,
+        )
+        if completed.returncode != 0:
+            detail = (
+                (completed.stderr or "") + "\n" + (completed.stdout or "")
+            ).strip()
+            raise self._build_setup_error(
+                "PaddleOCR VL",
+                (
+                    "Prepared PaddleOCR llama.cpp model volume is incomplete: "
+                    f"{volume_name}\n{detail}\n"
+                    "Run scripts/prepare_paddleocr_llamacpp_runtime.ps1 in "
+                    "Prepare or Verify mode."
+                )
+            )
+
+        values: dict[str, str] = {}
+        for line in (completed.stdout or "").splitlines():
+            key, separator, value = line.partition("=")
+            if separator:
+                values[key.strip()] = value.strip()
+        try:
+            manifest_bytes = base64.b64decode(
+                values["manifest_base64"],
+                validate=True,
+            )
+            manifest_sha256 = values["manifest_sha256"].lower()
+            observed_file_bytes = {
+                PADDLE_LLAMA_MODEL_NAME: int(values["model_bytes"]),
+                PADDLE_LLAMA_MMPROJ_NAME: int(values["mmproj_bytes"]),
+            }
+        except (KeyError, ValueError, binascii.Error) as exc:
+            raise self._build_setup_error(
+                "PaddleOCR VL",
+                "Unable to parse the prepared PaddleOCR llama.cpp volume "
+                f"probe output: {completed.stdout}"
+            ) from exc
+        return manifest_bytes, manifest_sha256, observed_file_bytes
 
     def _inspect_docker_image_id(self, image_ref: str) -> str:
         from modules.utils.llama_cpp_runtime import run_docker_command
@@ -701,7 +1013,6 @@ class LocalOCRRuntimeManager:
     ) -> bool:
         try:
             contract = self._paddle_runtime_contract()
-            expected_image_id = self._inspect_docker_image_id(PADDLEOCR_IMAGE_REF)
         except OperationCancelledError:
             raise
         except Exception:
@@ -711,13 +1022,18 @@ class LocalOCRRuntimeManager:
                 exc_info=True,
             )
             return False
-        if not expected_image_id:
-            return False
 
         from modules.utils.llama_cpp_runtime import run_docker_command
 
-        expected_fingerprint = str(contract["runtime_fingerprint"])
+        expected_fingerprint = contract.fingerprint
+        expected_image_ids = {
+            "paddleocr-llamacpp": contract.llama_image_id,
+            "paddleocr-server": contract.layout_image_id,
+        }
         for name in container_names:
+            expected_image_id = expected_image_ids.get(name)
+            if not expected_image_id:
+                return False
             completed = run_docker_command(
                 [
                     "docker",
@@ -726,7 +1042,9 @@ class LocalOCRRuntimeManager:
                     (
                         "{{index .Config.Labels "
                         f"\"{PADDLEOCR_RUNTIME_FINGERPRINT_LABEL}\""
-                        "}}|{{.Image}}"
+                        "}}|{{.Image}}|"
+                        "{{index .Config.Labels "
+                        "\"desktop.docker.io/wsl-distro\"}}"
                     ),
                     name,
                 ],
@@ -736,14 +1054,25 @@ class LocalOCRRuntimeManager:
             )
             if getattr(completed, "returncode", 1) != 0:
                 return False
-            fingerprint, separator, image_id = str(
+            parts = str(
                 getattr(completed, "stdout", "") or ""
-            ).strip().partition("|")
+            ).strip().split("|", 2)
+            if len(parts) != 3:
+                return False
+            fingerprint, image_id, wsl_distro = parts
             if (
-                not separator
-                or fingerprint != expected_fingerprint
+                fingerprint != expected_fingerprint
                 or image_id != expected_image_id
             ):
+                return False
+            if os.name == "nt" and wsl_distro.strip():
+                logger.info(
+                    "PaddleOCR container %s was created by WSL Compose (%s); "
+                    "Windows will recreate it so Docker Desktop can manage the "
+                    "Compose application without invoking wsl.",
+                    name,
+                    wsl_distro.strip(),
+                )
                 return False
         return True
 

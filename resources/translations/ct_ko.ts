@@ -907,6 +907,29 @@ Comic Translate가 필요할 때 기본 제공 Docker 런타임을 시작하게 
     </message>
 </context>
 <context>
+    <name>InpaintingRuntime</name>
+    <message>
+        <source>Learned inpainting requires CUDA; CPU fallback is disabled.</source>
+        <translation>학습형 인페인트에는 CUDA가 필요합니다. CPU 대체 실행은 비활성화되어 있습니다.</translation>
+    </message>
+    <message>
+        <source>CUDA inpainting ran out of memory after the single bounded ROI retry.</source>
+        <translation>CUDA 인페인트가 제한된 ROI에서 한 번 재시도한 후에도 메모리 부족으로 실패했습니다.</translation>
+    </message>
+    <message>
+        <source>Inpaint output changed pixels outside the final edit mask.</source>
+        <translation>인페인트 결과가 최종 편집 마스크 밖의 픽셀을 변경했습니다.</translation>
+    </message>
+    <message>
+        <source>The previous inpainter VRAM release was not confirmed.</source>
+        <translation>이전 인페인터의 VRAM 반환을 확인하지 못했습니다.</translation>
+    </message>
+    <message>
+        <source>CUDA FFT execution failed; CPU fallback is disabled.</source>
+        <translation>CUDA FFT 실행에 실패했습니다. CPU 대체 실행은 비활성화되어 있습니다.</translation>
+    </message>
+</context>
+<context>
     <name>LlmsPage</name>
     <message>
         <source>Provide Image as Input to AI</source>
