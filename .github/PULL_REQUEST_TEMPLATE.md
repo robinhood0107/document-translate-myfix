@@ -11,7 +11,8 @@
 - [ ] I considered docs / changelog impact.
 - [ ] I updated Qt translations and compiled `.qm` assets for user-visible UI text changes.
 - [ ] I verified no private source names, local user paths, sample media, logs, archives, or generated result artifacts are included in files or text content.
-- [ ] For Nuitka/release/main-promotion work, I ran the required local Windows PowerShell Nuitka build before relying on CI.
+- [ ] For release/main-promotion work, I built and verified the deterministic launcher-source ZIP, SHA-256 manifest, and both `COMIC_VERIFY_ONLY=1` launcher contracts before relying on CI.
+- [ ] Optional: I ran an unofficial manual Nuitka tool for a one-off binary artifact; this is not a release or merge gate.
 - [ ] Local validation passed.
 
 ## Notes
