@@ -106,6 +106,11 @@ from modules.utils.export_paths import (
 from modules.utils.exceptions import OperationCancelledError
 from modules.utils.image_utils import generate_mask, restore_original_for_block_masks
 from modules.utils.inpaint_cleanup import apply_duplicate_bubble_inner_fill, refine_bubble_residue_inpaint
+from modules.utils.inpaint_composite import (
+    composite_with_edit_mask,
+    count_changed_outside_edit_mask,
+)
+from modules.inpainting.runtime_contract import inpaint_outside_mask_message
 from modules.utils.language_utils import get_language_code, is_no_space_lang, language_codes
 from modules.utils.ocr_debug import (
     all_empty_blocks_are_rejected,
@@ -189,6 +194,7 @@ class StagePageContext:
     cleanup_stats: dict[str, Any] = field(
         default_factory=lambda: {"applied": False, "component_count": 0, "block_count": 0}
     )
+    inpaint_diagnostics: dict[str, Any] = field(default_factory=dict)
     no_text_detected: bool = False
     failed_stage: str = ""
     failed_reason: str = ""
@@ -1611,6 +1617,9 @@ class StageBatchedProcessor(BatchProcessor):
                 "inpaint_project_checkpoint_status": (
                     ctx.project_inpaint_checkpoint_status
                 ),
+                "inpaint_runtime_diagnostics": dict(
+                    ctx.inpaint_diagnostics or {}
+                ),
             },
         )
         cleaned_output_path = self._write_inpainted_debug_image(
@@ -1641,6 +1650,7 @@ class StageBatchedProcessor(BatchProcessor):
             cleanup_stats=ctx.cleanup_stats,
             mask_details=ctx.mask_details,
             inpainter_backend=str(runtime.get("backend", "") or ""),
+            inpaint_runtime_diagnostics=ctx.inpaint_diagnostics,
         )
         for stage_key, stage_label, preferred_path in (
             ("raw_mask", "원본 마스크", debug_paths.get("raw_mask", "")),
@@ -1684,6 +1694,9 @@ class StageBatchedProcessor(BatchProcessor):
             block_count=len(ctx.blk_list or []),
             patch_count=len(ctx.patches or []),
             project_checkpoint_status=ctx.project_inpaint_checkpoint_status,
+            inpaint_runtime_diagnostics=dict(
+                ctx.inpaint_diagnostics or {}
+            ),
         )
 
     def _inpaint_pages(self, pages: list[StagePageContext]) -> bool:
@@ -1846,6 +1859,11 @@ class StageBatchedProcessor(BatchProcessor):
                             for block in protected_blocks
                         ]
                     ctx.cleanup_stats = project_hit.cleanup_stats
+                    ctx.inpaint_diagnostics = {
+                        "status": "project_checkpoint_hit",
+                        "inference_call_count": 0,
+                        "cpu_fallback_used": False,
+                    }
                     ctx.project_inpaint_artifact_sha256 = (
                         project_hit.cleaned_decoded_sha256
                     )
@@ -1968,6 +1986,17 @@ class StageBatchedProcessor(BatchProcessor):
                     inpaint_blocks,
                     config=config,
                 )
+                ctx.inpaint_diagnostics = dict(
+                    getattr(
+                        self.inpainting,
+                        "last_inpaint_diagnostics",
+                        {},
+                    )
+                    or {}
+                )
+                ctx.inpaint_diagnostics["model_identity"] = copy.deepcopy(
+                    model_identity
+                )
                 self._raise_if_cancelled()
                 ctx.inpaint_input_img = imk.convert_scale_abs(
                     ctx.inpaint_input_img
@@ -2004,6 +2033,32 @@ class StageBatchedProcessor(BatchProcessor):
                     ctx.mask_details,
                     ctx.cleanup_stats,
                 )
+                outside_before_restore = count_changed_outside_edit_mask(
+                    ctx.image,
+                    ctx.inpaint_input_img,
+                    ctx.mask,
+                )
+                ctx.inpaint_input_img = composite_with_edit_mask(
+                    ctx.image,
+                    ctx.inpaint_input_img,
+                    ctx.mask,
+                )
+                outside_after_restore = count_changed_outside_edit_mask(
+                    ctx.image,
+                    ctx.inpaint_input_img,
+                    ctx.mask,
+                )
+                ctx.inpaint_diagnostics[
+                    "outside_mask_changed_before_restore"
+                ] = int(outside_before_restore)
+                ctx.inpaint_diagnostics[
+                    "outside_mask_changed_pixel_count"
+                ] = int(outside_after_restore)
+                if outside_after_restore:
+                    raise RuntimeError(inpaint_outside_mask_message())
+                ctx.mask_details[
+                    "inpaint_runtime_diagnostics"
+                ] = copy.deepcopy(ctx.inpaint_diagnostics)
                 self._raise_if_cancelled()
                 ctx.inpaint_input_img = np.ascontiguousarray(
                     ctx.inpaint_input_img,
