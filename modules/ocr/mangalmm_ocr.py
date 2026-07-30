@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import base64
-import json
 import logging
 import math
 import os
@@ -27,7 +26,6 @@ from modules.utils.debug_artifacts import (
     atomic_debug_json,
     sanitize_debug_component,
 )
-from modules.utils.language_utils import is_no_space_lang
 from modules.utils.ocr_debug import (
     OCR_STATUS_EMPTY_INITIAL,
     OCR_STATUS_EMPTY_AFTER_RETRY,
@@ -38,10 +36,20 @@ from modules.utils.ocr_debug import (
     set_block_ocr_diagnostics,
 )
 from modules.utils.ocr_quality import summarize_ocr_quality
-from modules.utils.text_normalization import normalize_decorative_ocr_text
-from modules.utils.textblock import TextBlock, sort_textblock_rectangles
+from modules.utils.textblock import TextBlock, ensure_text_block_id
 
 from .base import OCREngine
+from .mangalmm_llamacpp_runtime_contract import MANGALMM_MODEL_NAME
+from .mangalmm_response_contract import (
+    MANGALMM_RESPONSE_SCHEMA_VERSION,
+    MangaLMMResponseContractError,
+    parse_mangalmm_response,
+)
+from .persistent_cache import canonical_sha256
+from .result_contract import (
+    OCR_STRATEGY_MANGALMM_FULL_PAGE,
+    initialize_ocr_result_contract,
+)
 from .selection import normalize_ocr_mode
 
 
@@ -50,16 +58,13 @@ logger = logging.getLogger(__name__)
 SERVICE_NAME = "MangaLMM"
 SETTINGS_PAGE_NAME = "MangaLMM Settings"
 DEFAULT_MANGALMM_SERVER_URL = "http://127.0.0.1:28081/v1"
-DEFAULT_MANGALMM_MAX_COMPLETION_TOKENS = 256
+DEFAULT_MANGALMM_MAX_COMPLETION_TOKENS = 4096
 DEFAULT_MANGALMM_PARALLEL_WORKERS = 1
 DEFAULT_MANGALMM_REQUEST_TIMEOUT_SEC = 60
 DEFAULT_MANGALMM_SAFE_RESIZE = True
 DEFAULT_MANGALMM_MAX_PIXELS = 2_116_800
 DEFAULT_MANGALMM_MAX_LONG_SIDE = 1728
 DEFAULT_MANGALMM_STANDARD_SHORT_SIDE = 1224
-DEFAULT_MANGALMM_DENSE_MAX_PIXELS = 1_143_000
-DEFAULT_MANGALMM_DENSE_MAX_LONG_SIDE = 1270
-DEFAULT_MANGALMM_DENSE_SHORT_SIDE = 900
 DEFAULT_MANGALMM_DENSE_BLOCK_COUNT = 24
 DEFAULT_MANGALMM_DENSE_SMALL_BLOCK_RATIO = 0.55
 DEFAULT_MANGALMM_DENSE_TEXT_COVER_RATIO = 0.18
@@ -73,9 +78,6 @@ DEFAULT_MANGALMM_REPEAT_LAST_N = 0
 DEFAULT_MANGALMM_PRESENCE_PENALTY = 0.0
 DEFAULT_MANGALMM_FREQUENCY_PENALTY = 0.0
 DEFAULT_MANGALMM_PNG_COMPRESSION = 1
-DEFAULT_MANGALMM_STANDARD_PROFILE_TOKENS = 2048
-DEFAULT_MANGALMM_DENSE_PROFILE_TOKENS = 1024
-DEFAULT_MANGALMM_RESCUE_PROFILE_TOKENS = 4096
 DEFAULT_MANGALMM_DEBUG_EXPORT_LIMIT = 96
 
 
@@ -131,14 +133,12 @@ class MangaLMMOCREngine(OCREngine):
     PARALLEL_WORKERS_RANGE = (1, 8)
     REQUEST_ENDPOINT_SUFFIX = "/chat/completions"
     STANDARD_PROMPT = (
-        "Please perform OCR on this image and output the recognized Japanese text "
-        "along with its position (grounding)."
+        "Please perform OCR on this full manga page. Return one top-level JSON "
+        'array only. Every item must contain "bbox_2d" as [x1, y1, x2, y2] '
+        'and "text_content" as the exact recognized Japanese text. Do not '
+        "translate, summarize, merge neighboring regions, or add commentary."
     )
-    DENSE_PROMPT = (
-        "Please perform OCR on this image and output the recognized Japanese text along with its "
-        'position (grounding) as a JSON array. Each item must contain "bbox_2d" and '
-        '"text_content". Do not translate.'
-    )
+    DENSE_PROMPT = STANDARD_PROMPT
 
     def __init__(self) -> None:
         self.server_url = DEFAULT_MANGALMM_SERVER_URL
@@ -168,6 +168,9 @@ class MangaLMMOCREngine(OCREngine):
         self.last_request_metadata: dict[str, object] = {}
         self.last_page_regions: list[dict[str, object]] = []
         self.last_attempt_history: list[dict[str, object]] = []
+        self.last_shadow_regions: list[dict[str, object]] = []
+        self.last_merge_split_diagnostics: list[dict[str, object]] = []
+        self.last_transport_metadata: dict[str, object] = {}
 
     def initialize(self, settings, **kwargs) -> None:
         config = settings.get_mangalmm_ocr_settings()
@@ -285,10 +288,36 @@ class MangaLMMOCREngine(OCREngine):
         blocks = list(blk_list or [])
         self.last_page_regions = []
         self.last_attempt_history = []
-        if not blocks:
-            return blk_list
+        self.last_shadow_regions = []
+        self.last_merge_split_diagnostics = []
+        self.last_transport_metadata = {}
 
         image = ensure_three_channel(img)
+        for block in blocks:
+            initialize_ocr_result_contract(
+                block,
+                strategy=OCR_STRATEGY_MANGALMM_FULL_PAGE,
+                model_identity=MANGALMM_MODEL_NAME,
+                runtime_identity=self._runtime_identity_fingerprint(),
+            )
+            block.merge_split_diagnostics = {
+                key: value
+                for key, value in dict(block.merge_split_diagnostics).items()
+                if not str(key).startswith("mangalmm_")
+            }
+            block.ocr_geometry_provenance = {
+                **dict(block.ocr_geometry_provenance),
+                "contract_schema_version": MANGALMM_RESPONSE_SCHEMA_VERSION,
+                "ocr_strategy": OCR_STRATEGY_MANGALMM_FULL_PAGE,
+                "detector_geometry_authoritative": True,
+                "detector_text_bbox": self._coords_or_none(
+                    getattr(block, "xyxy", None)
+                ),
+                "detector_bubble_bbox": self._coords_or_none(
+                    getattr(block, "bubble_xyxy", None)
+                ),
+                "ocr_geometry_source": "mangalmm_bbox_2d_full_page",
+            }
         started_at = time.perf_counter()
         page_unit = self._build_request_units(image.shape)[0]
         attempt_specs = self._build_attempt_specs(image.shape, blocks)
@@ -384,6 +413,10 @@ class MangaLMMOCREngine(OCREngine):
                 "matched_region_count": 0,
                 "matched_block_count": 0,
                 "mapped_region_count": len(self.last_page_regions),
+                "shadow_region_count": len(self.last_shadow_regions),
+                "merge_split_diagnostic_count": len(
+                    self.last_merge_split_diagnostics
+                ),
                 "non_empty_block_count": int(quality.get("non_empty", 0) or 0),
                 "raw_response_length": len(str(self.last_request_metadata.get("raw_response", "") or "")),
             }
@@ -399,6 +432,10 @@ class MangaLMMOCREngine(OCREngine):
                 "matched_region_count": sum(len(items) for items in assignments.values()),
                 "matched_block_count": sum(1 for items in assignments.values() if items),
                 "mapped_region_count": len(self.last_page_regions),
+                "shadow_region_count": len(self.last_shadow_regions),
+                "merge_split_diagnostic_count": len(
+                    self.last_merge_split_diagnostics
+                ),
                 "non_empty_block_count": int(quality.get("non_empty", 0) or 0),
                 "raw_response_length": len(str(self.last_request_metadata.get("raw_response", "") or "")),
             }
@@ -444,14 +481,9 @@ class MangaLMMOCREngine(OCREngine):
         standard_short_side = DEFAULT_MANGALMM_STANDARD_SHORT_SIDE
         standard_pixel_cap = self.max_pixels
         standard_long_side = self.max_long_side
-        if profile == "dense":
-            short_side_cap = DEFAULT_MANGALMM_DENSE_SHORT_SIDE
-            long_side_cap = DEFAULT_MANGALMM_DENSE_MAX_LONG_SIDE
-            pixel_cap = DEFAULT_MANGALMM_DENSE_MAX_PIXELS
-        else:
-            short_side_cap = standard_short_side
-            long_side_cap = standard_long_side
-            pixel_cap = standard_pixel_cap
+        short_side_cap = standard_short_side
+        long_side_cap = standard_long_side
+        pixel_cap = standard_pixel_cap
 
         short_side = float(min(image_w, image_h))
         long_side = float(max(image_w, image_h))
@@ -595,13 +627,30 @@ class MangaLMMOCREngine(OCREngine):
         request_image = self._resize_for_request(crop, resize_plan)
         raw_text = ""
         analysis: dict[str, object]
+        self.last_transport_metadata = {}
         try:
             raw_text = self._request_response_text(
                 request_image,
                 max_completion_tokens=resize_plan.max_completion_tokens,
                 prompt_text=attempt_spec.prompt_text,
             )
-            analysis = self._analyze_region_payload(raw_text)
+            finish_reason = str(
+                self.last_transport_metadata.get("finish_reason", "") or ""
+            ).strip().lower()
+            if finish_reason == "length":
+                analysis = {
+                    "regions": [],
+                    "response_kind": "truncated:finish_reason_length",
+                    "payload_type": "invalid",
+                    "raw_length": len(raw_text),
+                    "parser_error_code": "finish_reason_length",
+                    "parser_error": (
+                        "MangaLMM response reached the completion-token "
+                        "limit and was rejected."
+                    ),
+                }
+            else:
+                analysis = self._analyze_region_payload(raw_text)
         except (LocalServiceConnectionError, LocalServiceResponseError) as exc:
             self.last_request_metadata = {
                 "original_shape": list(resize_plan.original_shape),
@@ -662,6 +711,23 @@ class MangaLMMOCREngine(OCREngine):
             "text_cover_ratio": resize_plan.text_cover_ratio,
             "response_kind": str(analysis.get("response_kind", "") or "unknown"),
             "payload_type": str(analysis.get("payload_type", "") or "unknown"),
+            "parser_error_code": str(
+                analysis.get("parser_error_code", "") or ""
+            ),
+            "parser_error": str(analysis.get("parser_error", "") or ""),
+            "finish_reason": str(
+                self.last_transport_metadata.get("finish_reason", "") or ""
+            ),
+            "prompt_tokens": int(
+                self.last_transport_metadata.get("prompt_tokens", 0) or 0
+            ),
+            "completion_tokens": int(
+                self.last_transport_metadata.get("completion_tokens", 0)
+                or 0
+            ),
+            "total_tokens": int(
+                self.last_transport_metadata.get("total_tokens", 0) or 0
+            ),
             "region_count": len(analysis.get("regions", []) or []),
             "raw_response": raw_text,
             "raw_response_length": len(raw_text),
@@ -796,19 +862,160 @@ class MangaLMMOCREngine(OCREngine):
         regions: list[OCRRegion],
         blk_list: list[TextBlock],
     ) -> dict[int, list[dict[str, object]]]:
-        assignments: dict[int, list[dict[str, object]]] = {index: [] for index in range(len(blk_list))}
+        self.last_shadow_regions = []
+        self.last_merge_split_diagnostics = []
+        assignments: dict[int, list[dict[str, object]]] = {
+            index: [] for index in range(len(blk_list))
+        }
+        tentative: dict[int, list[dict[str, object]]] = {
+            index: [] for index in range(len(blk_list))
+        }
+        for block in blk_list:
+            initialize_ocr_result_contract(
+                block,
+                strategy=OCR_STRATEGY_MANGALMM_FULL_PAGE,
+                model_identity=MANGALMM_MODEL_NAME,
+                runtime_identity=self._runtime_identity_fingerprint(),
+            )
         for region in regions:
-            best_match = self._select_best_block(region, blk_list)
-            if best_match is None:
+            candidates = self._candidate_block_matches(region, blk_list)
+            if not candidates:
+                self.last_shadow_regions.append(
+                    self._serialize_shadow_region(
+                        region,
+                        reason="manga_only_unmatched",
+                    )
+                )
                 continue
-            blk_index, match_metrics = best_match
-            assignments[blk_index].append(
+            precision_candidates = [
+                candidate
+                for candidate in candidates
+                if (
+                    bool(candidate[1]["center_in_precision"])
+                    or float(candidate[1]["precision_cover"]) >= 0.20
+                )
+            ]
+            ambiguous_candidates = (
+                precision_candidates
+                if len(precision_candidates) > 1
+                else (
+                    candidates
+                    if not precision_candidates and len(candidates) > 1
+                    else []
+                )
+            )
+            if ambiguous_candidates:
+                block_ids = [
+                    ensure_text_block_id(blk_list[index])
+                    for index, _metrics in ambiguous_candidates
+                ]
+                diagnostic = {
+                    "kind": "one_region_multiple_blocks",
+                    "region_bbox_xyxy": list(region.bbox_xyxy),
+                    "candidate_block_ids": block_ids,
+                }
+                self.last_merge_split_diagnostics.append(diagnostic)
+                self.last_shadow_regions.append(
+                    self._serialize_shadow_region(
+                        region,
+                        reason="one_region_multiple_blocks",
+                        candidate_block_ids=block_ids,
+                    )
+                )
+                for block_index, _metrics in ambiguous_candidates:
+                    block = blk_list[block_index]
+                    block.merge_split_diagnostics = {
+                        **dict(
+                            getattr(block, "merge_split_diagnostics", {}) or {}
+                        ),
+                        "mangalmm_one_region_multiple_blocks": diagnostic,
+                    }
+                continue
+
+            selected = (
+                precision_candidates[0]
+                if len(precision_candidates) == 1
+                else candidates[0]
+            )
+            blk_index, match_metrics = selected
+            tentative[blk_index].append(
                 {
                     "region": region,
                     "metrics": match_metrics,
                 }
             )
+
+        for blk_index, items in tentative.items():
+            if not items:
+                continue
+            unique_items = self._dedupe_exact_region_assignments(items)
+            if len(unique_items) == 1:
+                assignments[blk_index] = unique_items
+                continue
+
+            block = blk_list[blk_index]
+            block_id = ensure_text_block_id(block)
+            diagnostic = {
+                "kind": "multiple_regions_one_block",
+                "block_id": block_id,
+                "region_bboxes_xyxy": [
+                    list(item["region"].bbox_xyxy)
+                    for item in unique_items
+                ],
+                "region_count": len(unique_items),
+            }
+            self.last_merge_split_diagnostics.append(diagnostic)
+            block.merge_split_diagnostics = {
+                **dict(
+                    getattr(block, "merge_split_diagnostics", {}) or {}
+                ),
+                "mangalmm_multiple_regions_one_block": diagnostic,
+            }
+            for item in unique_items:
+                self.last_shadow_regions.append(
+                    self._serialize_shadow_region(
+                        item["region"],
+                        reason="multiple_regions_one_block",
+                        candidate_block_ids=[block_id],
+                    )
+                )
         return assignments
+
+    @staticmethod
+    def _dedupe_exact_region_assignments(
+        items: list[dict[str, object]],
+    ) -> list[dict[str, object]]:
+        unique: list[dict[str, object]] = []
+        seen: set[tuple[object, ...]] = set()
+        for item in items:
+            region: OCRRegion = item["region"]
+            key = (
+                tuple(float(value) for value in region.bbox_xyxy_float),
+                tuple(float(value) for value in region.response_bbox_2d or []),
+                str(region.raw_text or region.text),
+            )
+            if key in seen:
+                continue
+            seen.add(key)
+            unique.append(item)
+        return unique
+
+    @staticmethod
+    def _serialize_shadow_region(
+        region: OCRRegion,
+        *,
+        reason: str,
+        candidate_block_ids: list[str] | None = None,
+    ) -> dict[str, object]:
+        return {
+            "reason": str(reason),
+            "bbox_xyxy": list(region.bbox_xyxy),
+            "bbox_xyxy_float": list(region.bbox_xyxy_float),
+            "response_bbox_2d": list(region.response_bbox_2d or []),
+            "text": region.text,
+            "raw_text": region.raw_text,
+            "candidate_block_ids": list(candidate_block_ids or []),
+        }
 
     def _apply_assignments_to_blocks(
         self,
@@ -836,33 +1043,56 @@ class MangaLMMOCREngine(OCREngine):
                 )
                 continue
 
-            deduped_items = self._dedupe_assigned_items_for_block(items)
-            sorted_items = self._sort_assigned_items_for_block(deduped_items, blk)
-            texts = [
-                str(item["region"].text or "").strip()
-                for item in sorted_items
-                if str(item["region"].text or "").strip()
-            ]
-            raw_texts = [
-                str(item["region"].raw_text or item["region"].text or "").strip()
-                for item in sorted_items
-                if str(item["region"].text or "").strip()
-            ]
-            if is_no_space_lang(getattr(blk, "source_lang", "")):
-                final_text = "".join(texts)
-                final_raw_text = "".join(raw_texts)
-            else:
-                final_text = " ".join(texts)
-                final_raw_text = " ".join(raw_texts)
+            unique_items = self._dedupe_exact_region_assignments(items)
+            if len(unique_items) != 1:
+                block_id = ensure_text_block_id(blk)
+                diagnostic = {
+                    "kind": "multiple_regions_one_block",
+                    "block_id": block_id,
+                    "region_count": len(unique_items),
+                }
+                self.last_merge_split_diagnostics.append(diagnostic)
+                blk.merge_split_diagnostics = {
+                    **dict(
+                        getattr(blk, "merge_split_diagnostics", {}) or {}
+                    ),
+                    "mangalmm_multiple_regions_one_block": diagnostic,
+                }
+                self._mark_empty(
+                    blk,
+                    "MangaLMM returned multiple distinct OCR regions for one "
+                    "detector block; automatic text concatenation was refused.",
+                    attempt_count=attempt_count,
+                    status=empty_status,
+                    crop_bbox=page_bbox_list,
+                    crop_source="page_full",
+                    resize_scale=resize_plan.base_scale,
+                )
+                continue
 
-            best_item = max(sorted_items, key=self._region_rank_key)
-            source_region: OCRRegion = best_item["region"]
-            blk.texts = texts
+            source_item = unique_items[0]
+            source_region: OCRRegion = source_item["region"]
+            final_text = str(source_region.text or "").strip()
+            final_raw_text = str(
+                source_region.raw_text or source_region.text or ""
+            ).strip()
+            blk.texts = [final_text]
             blk.text = final_text
             blk.ocr_regions = [
                 self._serialize_region_assignment(item["region"], item["metrics"])
-                for item in sorted_items
+                for item in unique_items
             ]
+            blk.ocr_geometry_provenance = {
+                **dict(
+                    getattr(blk, "ocr_geometry_provenance", {}) or {}
+                ),
+                "matched_region_count": len(unique_items),
+                "matched_region_bboxes_xyxy": [
+                    list(item["region"].bbox_xyxy)
+                    for item in unique_items
+                ],
+                "detector_geometry_authoritative": True,
+            }
             blk.ocr_crop_bbox = list(source_region.unit_bbox_xyxy)
             blk.ocr_resize_scale = float(source_region.unit_resize_scale)
             set_block_ocr_crop_diagnostics(
@@ -882,71 +1112,6 @@ class MangaLMMOCREngine(OCREngine):
             )
 
         return summarize_ocr_quality(blk_list)
-
-    def _sort_assigned_items_for_block(
-        self,
-        items: list[dict[str, object]],
-        blk: TextBlock,
-    ) -> list[dict[str, object]]:
-        order_pairs = sort_textblock_rectangles(
-            [
-                (tuple(item["region"].bbox_xyxy), str(index))
-                for index, item in enumerate(items)
-                if str(item["region"].text or "").strip()
-            ],
-            blk.source_lang_direction,
-        )
-        if not order_pairs:
-            return list(items)
-        return [items[int(index_text)] for _bbox, index_text in order_pairs]
-
-    def _dedupe_assigned_items_for_block(self, items: list[dict[str, object]]) -> list[dict[str, object]]:
-        deduped: list[dict[str, object]] = []
-        for item in items:
-            replaced = False
-            for index, existing in enumerate(deduped):
-                if not self._is_block_local_duplicate(item["region"], existing["region"]):
-                    continue
-                if self._region_rank_key(item) > self._region_rank_key(existing):
-                    deduped[index] = item
-                replaced = True
-                break
-            if not replaced:
-                deduped.append(item)
-        return deduped
-
-    def _is_block_local_duplicate(self, candidate: OCRRegion, existing: OCRRegion) -> bool:
-        if candidate.normalized_text != existing.normalized_text:
-            return False
-        overlap = self._bbox_iou(tuple(candidate.bbox_xyxy), tuple(existing.bbox_xyxy))
-        if overlap < 0.75:
-            return False
-        if len(candidate.text) > 2 and len(existing.text) > 2:
-            return True
-        candidate_center = self._bbox_center(tuple(candidate.bbox_xyxy))
-        existing_center = self._bbox_center(tuple(existing.bbox_xyxy))
-        max_diag = max(
-            1.0,
-            self._bbox_diagonal(tuple(candidate.bbox_xyxy)),
-            self._bbox_diagonal(tuple(existing.bbox_xyxy)),
-        )
-        center_distance_norm = self._distance(candidate_center, existing_center) / max_diag
-        return center_distance_norm <= 0.10
-
-    @staticmethod
-    def _region_rank_key(item: dict[str, object]) -> tuple[float, int, float, float, float, float]:
-        region: OCRRegion = item["region"]
-        metrics = item["metrics"]
-        bbox = region.bbox_xyxy
-        area = int((bbox[2] - bbox[0]) * (bbox[3] - bbox[1]))
-        return (
-            float(area),
-            len(region.text or ""),
-            float(metrics["ownership_cover"]),
-            float(metrics["precision_cover"]),
-            float(metrics["ownership_iou"]),
-            -float(metrics["center_distance_norm"]),
-        )
 
     @staticmethod
     def _serialize_region_assignment(
@@ -984,6 +1149,14 @@ class MangaLMMOCREngine(OCREngine):
         region: OCRRegion,
         blk_list: list[TextBlock],
     ) -> tuple[int, dict[str, float | bool]] | None:
+        candidates = self._candidate_block_matches(region, blk_list)
+        return candidates[0] if candidates else None
+
+    def _candidate_block_matches(
+        self,
+        region: OCRRegion,
+        blk_list: list[TextBlock],
+    ) -> list[tuple[int, dict[str, float | bool]]]:
         region_box = tuple(region.bbox_xyxy)
         candidates: list[tuple[tuple[float, int, float, float, float, int], int, dict[str, float | bool]]] = []
         for index, blk in enumerate(blk_list):
@@ -1001,13 +1174,14 @@ class MangaLMMOCREngine(OCREngine):
             candidates.append((sort_key, index, metrics))
 
         if not candidates:
-            return None
+            return []
 
         candidates.sort(key=lambda item: item[0])
-        _sort_key, index, metrics = candidates[0]
-        if not self._accept_match(blk_list[index], metrics):
-            return None
-        return index, metrics
+        return [
+            (index, metrics)
+            for _sort_key, index, metrics in candidates
+            if self._accept_match(blk_list[index], metrics)
+        ]
 
     def _compute_match_metrics(
         self,
@@ -1168,8 +1342,39 @@ class MangaLMMOCREngine(OCREngine):
             "max_completion_tokens": int(max_completion_tokens),
         }
         data = self._send_request(payload)
+        self.last_transport_metadata = (
+            self._extract_transport_metadata(data)
+        )
         response_text = self._extract_text_from_response(data)
         return response_text
+
+    @staticmethod
+    def _extract_transport_metadata(data: dict) -> dict[str, object]:
+        choices = data.get("choices")
+        first_choice = (
+            choices[0]
+            if isinstance(choices, list)
+            and choices
+            and isinstance(choices[0], dict)
+            else {}
+        )
+        usage = data.get("usage")
+        usage = usage if isinstance(usage, dict) else {}
+
+        def token_count(key: str) -> int:
+            try:
+                return max(0, int(usage.get(key, 0) or 0))
+            except (TypeError, ValueError):
+                return 0
+
+        return {
+            "finish_reason": str(
+                first_choice.get("finish_reason", "") or ""
+            ),
+            "prompt_tokens": token_count("prompt_tokens"),
+            "completion_tokens": token_count("completion_tokens"),
+            "total_tokens": token_count("total_tokens"),
+        }
 
     def _send_request(self, payload: dict) -> dict:
         try:
@@ -1213,6 +1418,13 @@ class MangaLMMOCREngine(OCREngine):
                 settings_page_name=SETTINGS_PAGE_NAME,
             ) from exc
 
+        if not isinstance(data, dict):
+            raise LocalServiceResponseError(
+                f"{SERVICE_NAME} service response must be a JSON object.",
+                service_name=SERVICE_NAME,
+                settings_page_name=SETTINGS_PAGE_NAME,
+            )
+
         if self.raw_response_logging:
             append_active_raw_response(
                 "mangalmm",
@@ -1242,7 +1454,15 @@ class MangaLMMOCREngine(OCREngine):
                 settings_page_name=SETTINGS_PAGE_NAME,
             )
 
-        message = choices[0].get("message")
+        first_choice = choices[0]
+        if not isinstance(first_choice, dict):
+            raise LocalServiceResponseError(
+                f"{SERVICE_NAME} response choice must be a JSON object.",
+                service_name=SERVICE_NAME,
+                settings_page_name=SETTINGS_PAGE_NAME,
+            )
+
+        message = first_choice.get("message")
         if not isinstance(message, dict):
             raise LocalServiceResponseError(
                 f"{SERVICE_NAME} response did not include a message payload.",
@@ -1270,168 +1490,25 @@ class MangaLMMOCREngine(OCREngine):
 
     def _analyze_region_payload(self, text: str) -> dict[str, object]:
         raw = str(text or "").strip()
-        if not raw:
+        try:
+            parsed = parse_mangalmm_response(raw)
+        except MangaLMMResponseContractError as exc:
             return {
                 "regions": [],
-                "response_kind": "empty",
-                "payload_type": "empty",
-                "raw_length": 0,
+                "response_kind": f"parser_error:{exc.code}",
+                "payload_type": "invalid",
+                "raw_length": len(raw),
+                "parser_error_code": exc.code,
+                "parser_error": str(exc),
             }
-
-        candidates: list[tuple[str, str]] = [("raw", raw)]
-        unfenced = self._strip_code_fences(raw)
-        if unfenced and unfenced != raw:
-            candidates.append(("unfenced", unfenced))
-
-        for source, candidate in candidates:
-            decoded = self._extract_first_json_array(candidate)
-            normalized = self._normalize_region_list(decoded)
-            if normalized:
-                response_kind = self._classify_array_response_kind(raw, source, candidate)
-                return {
-                    "regions": normalized,
-                    "response_kind": response_kind,
-                    "payload_type": "json_array",
-                    "raw_length": len(raw),
-                }
-            if isinstance(decoded, list):
-                response_kind = self._classify_array_response_kind(raw, source, candidate)
-                return {
-                    "regions": [],
-                    "response_kind": f"{response_kind}_without_valid_regions",
-                    "payload_type": "json_array",
-                    "raw_length": len(raw),
-                }
-
-        for source, candidate in candidates:
-            decoded = self._extract_first_json_payload(candidate)
-            normalized, payload_type = self._extract_regions_from_payload(decoded)
-            if normalized:
-                response_kind = self._classify_payload_response_kind(source, payload_type)
-                return {
-                    "regions": normalized,
-                    "response_kind": response_kind,
-                    "payload_type": payload_type,
-                    "raw_length": len(raw),
-                }
-            if decoded is not None:
-                response_kind = self._classify_payload_response_kind(source, payload_type)
-                return {
-                    "regions": [],
-                    "response_kind": f"{response_kind}_without_regions",
-                    "payload_type": payload_type,
-                    "raw_length": len(raw),
-                }
         return {
-            "regions": [],
-            "response_kind": "plain_text_or_non_json",
-            "payload_type": "text",
+            "regions": [dict(region) for region in parsed.regions],
+            "response_kind": parsed.response_kind,
+            "payload_type": parsed.payload_type,
             "raw_length": len(raw),
+            "parser_error_code": "",
+            "parser_error": "",
         }
-
-    def _extract_first_json_array(self, text: str) -> object:
-        decoder = json.JSONDecoder()
-        start = text.find("[")
-        while start != -1:
-            try:
-                payload, _end = decoder.raw_decode(text[start:])
-            except json.JSONDecodeError:
-                start = text.find("[", start + 1)
-                continue
-            if isinstance(payload, list):
-                return payload
-            start = text.find("[", start + 1)
-        return None
-
-    def _extract_first_json_payload(self, text: str) -> object:
-        decoder = json.JSONDecoder()
-        starts = sorted(index for index in (text.find("{"), text.find("[")) if index != -1)
-        checked: set[int] = set()
-        for start in starts:
-            cursor = start
-            while cursor != -1 and cursor not in checked:
-                checked.add(cursor)
-                try:
-                    payload, _end = decoder.raw_decode(text[cursor:])
-                except json.JSONDecodeError:
-                    next_obj = text.find("{", cursor + 1)
-                    next_arr = text.find("[", cursor + 1)
-                    next_candidates = [index for index in (next_obj, next_arr) if index != -1]
-                    cursor = min(next_candidates) if next_candidates else -1
-                    continue
-                return payload
-        return None
-
-    def _extract_regions_from_payload(self, payload: object) -> tuple[list[dict[str, object]], str]:
-        normalized = self._normalize_region_list(payload)
-        if normalized:
-            return normalized, "json_array"
-        if isinstance(payload, dict):
-            if {"bbox_2d", "text_content"}.issubset(payload.keys()):
-                return self._normalize_region_list([payload]), "json_single_region_object"
-            for key in ("regions", "items", "data", "result", "results", "ocr", "text_regions"):
-                nested = payload.get(key)
-                normalized = self._normalize_region_list(nested)
-                if normalized:
-                    return normalized, f"json_object_wrapper:{key}"
-        return [], "json_object" if isinstance(payload, dict) else "unknown_payload"
-
-    def _normalize_region_list(self, payload: object) -> list[dict[str, object]]:
-        if not isinstance(payload, list):
-            return []
-
-        normalized: list[dict[str, object]] = []
-        for item in payload:
-            if not isinstance(item, dict):
-                continue
-            bbox = item.get("bbox_2d")
-            raw_text = str(item.get("text_content", "") or "").strip()
-            text = normalize_decorative_ocr_text(raw_text)
-            if not isinstance(bbox, list) or len(bbox) != 4 or not text:
-                continue
-            try:
-                coords = [float(value) for value in bbox]
-            except (TypeError, ValueError):
-                continue
-            normalized.append(
-                {
-                    "bbox_2d": coords,
-                    "text_content": text,
-                    "raw_text_content": raw_text,
-                }
-            )
-        return normalized
-
-    @staticmethod
-    def _classify_array_response_kind(raw: str, source: str, candidate: str) -> str:
-        raw_stripped = raw.lstrip()
-        candidate_stripped = candidate.lstrip()
-        if candidate_stripped.startswith("{"):
-            return "json_object_wrapper" if source == "raw" else "salvaged_json_object_wrapper"
-        if source == "unfenced" and raw_stripped.startswith("```"):
-            return "fenced_json_array"
-        if source == "raw" and candidate_stripped.startswith("["):
-            return "json_array"
-        return "wrapped_json_array"
-
-    @staticmethod
-    def _classify_payload_response_kind(source: str, payload_type: str) -> str:
-        if payload_type.startswith("json_object_wrapper"):
-            return "json_object_wrapper" if source == "raw" else "salvaged_json_object_wrapper"
-        if payload_type == "json_single_region_object":
-            return "json_single_region_object" if source == "raw" else "salvaged_json_single_region_object"
-        if payload_type == "json_object":
-            return "json_object" if source == "raw" else "salvaged_json_object"
-        return payload_type if source == "raw" else f"salvaged_{payload_type}"
-
-    @staticmethod
-    def _strip_code_fences(text: str) -> str:
-        stripped = str(text or "").strip()
-        if not stripped.startswith("```"):
-            return stripped
-        stripped = re.sub(r"^\s*```(?:json)?\s*", "", stripped, count=1, flags=re.IGNORECASE)
-        stripped = re.sub(r"\s*```\s*$", "", stripped, count=1)
-        return stripped.strip()
 
     def _crop_image(self, image: np.ndarray, bbox: tuple[int, int, int, int]) -> np.ndarray | None:
         x1, y1, x2, y2 = [int(v) for v in bbox]
@@ -1464,6 +1541,15 @@ class MangaLMMOCREngine(OCREngine):
         if base.endswith(self.REQUEST_ENDPOINT_SUFFIX):
             return base
         return f"{base}{self.REQUEST_ENDPOINT_SUFFIX}"
+
+    def _runtime_identity_fingerprint(self) -> str:
+        return canonical_sha256(
+            {
+                "contract_schema_version": MANGALMM_RESPONSE_SCHEMA_VERSION,
+                "endpoint": self._chat_completions_url(),
+                "model": MANGALMM_MODEL_NAME,
+            }
+        )
 
     def _mark_empty(
         self,

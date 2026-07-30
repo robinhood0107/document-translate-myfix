@@ -135,14 +135,15 @@ class MangaLMMOCRPage(QtWidgets.QWidget):
         tip = MLabel(
             self.tr(
                 "Recommended values for the bundled MangaLMM runtime:\n"
-                "- ctx-size 4096: enough for full-page OCR while keeping VRAM safer\n"
-                "- Max Completion Tokens: 256\n"
+                "- ctx-size 8192: preserves the full-page prompt and grounded response\n"
+                "- Max Completion Tokens: 4096\n"
                 "- Parallel Workers: 1\n"
                 "- Request Timeout: 60 seconds\n"
                 "- Safe Resize: on\n"
                 "- Max Pixels / Max Long Side: 2116800 / 1728\n"
                 "Reasoning:\n"
                 "- PNG + image-first ordering is the most reliable request format for MangaLMM.\n"
+                "- The response must be one complete JSON array of grounded text regions.\n"
                 "- Direct MangaLMM mode respects the values on this page.\n"
                 "- Workers 1 is the safest default when MangaLMM is the active OCR runtime."
             )

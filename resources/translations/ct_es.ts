@@ -1133,17 +1133,29 @@ Keep the default localhost URL if you want Comic Translate to reuse the bundled 
     </message>
     <message>
         <source>Recommended values for the bundled MangaLMM runtime:
-- ctx-size 4096: enough for full-page OCR while keeping VRAM safer
-- Max Completion Tokens: 256
+- ctx-size 8192: preserves the full-page prompt and grounded response
+- Max Completion Tokens: 4096
 - Parallel Workers: 1
 - Request Timeout: 60 seconds
 - Safe Resize: on
 - Max Pixels / Max Long Side: 2116800 / 1728
 Reasoning:
 - PNG + image-first ordering is the most reliable request format for MangaLMM.
+- The response must be one complete JSON array of grounded text regions.
 - Direct MangaLMM mode respects the values on this page.
 - Workers 1 is the safest default when MangaLMM is the active OCR runtime.</source>
-        <translation type="unfinished"></translation>
+        <translation>Valores recomendados para el entorno MangaLMM incluido:
+- ctx-size 8192: conserva el prompt de página completa y la respuesta con coordenadas
+- Max Completion Tokens: 4096
+- Parallel Workers: 1
+- Request Timeout: 60 segundos
+- Safe Resize: activado
+- Max Pixels / Max Long Side: 2116800 / 1728
+Motivo:
+- PNG y el orden de imagen primero son el formato de solicitud más fiable para MangaLMM.
+- La respuesta debe ser un único array JSON completo de regiones de texto con coordenadas.
+- El modo MangaLMM directo respeta los valores de esta página.
+- Workers 1 es el valor predeterminado más seguro cuando MangaLMM es el entorno OCR activo.</translation>
     </message>
 </context>
 <context>
