@@ -88,22 +88,37 @@ docker compose -f hunyuanocr_docker_files/docker-compose.yaml up -d --force-recr
 ### PaddleOCR VL 로컬 런타임
 
 - compose 파일: `/paddleocr_vl_docker_files/docker-compose.yaml`
-- Docker 이미지: `ccr-2vdh3abv-pub.cnc.bj.baidubce.com/paddlepaddle/paddleocr-genai-vllm-server@sha256:d0d32c04a2119613d25a0a4c292e165ccc107954b74580613cf59e378037f8f5`
+- 추론 backend: 공식 PaddleOCR-VL 1.6 GGUF와 multimodal projector를
+  사용하는 고정 llama.cpp
+- layout 프런트: 고정된 PaddleX/PaddleOCR 이미지
 - 참고 링크:
   - [PaddleOCR](https://github.com/PaddlePaddle/PaddleOCR)
   - [PaddleOCR-VL](https://huggingface.co/PaddlePaddle/PaddleOCR-VL)
 
-실행:
+아래 두 파일을 같은 모델 폴더에 둡니다.
 
-```bash
-docker compose -f paddleocr_vl_docker_files/docker-compose.yaml pull
-docker compose -f paddleocr_vl_docker_files/docker-compose.yaml up -d --force-recreate
+- `PaddleOCR-VL-1.6-GGUF.gguf`
+- `PaddleOCR-VL-1.6-GGUF-mmproj.gguf`
+
+Windows PowerShell에서 versioned external model volume을 한 번 준비하고
+검증합니다.
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass `
+  -File .\scripts\prepare_paddleocr_llamacpp_runtime.ps1 `
+  -Mode Prepare `
+  -ModelDirectory 'C:\ExampleWorkspace\models\PaddleOCR-VL-1.6-GGUF'
 ```
 
-첫 번째 명령은 고정된 이미지를 준비할 때 한 번만 실행합니다. 평상시 앱
-시작은 구성이 정확히 같은 중지 컨테이너를 재사용하며 이미지를 다시 pull하지
-않습니다. Stage-Batched 폴더 처리는 `Settings > PaddleOCR VL Settings`에서
-관리하는 exact 영구 OCR 결과 캐시도 사용할 수 있습니다.
+이후 앱이 PaddleOCR VL이 필요할 때 관리 런타임을 자동 시작합니다. 준비된
+model volume은 read-only로 마운트하며, fingerprint가 정확히 같은 stopped
+컨테이너만 재사용하고 오래된 컨테이너는 force-recreate합니다. OCR stage가
+끝나면 llama.cpp는 idle 5초 뒤 model을 unload하고 가벼운 컨테이너만
+유지합니다. unload를 확인하지 못하면 정상 `stop`으로 전환하며 자동 경로는
+`down`을 사용하지 않습니다.
+
+Stage-Batched 폴더 처리는 `Settings > PaddleOCR VL Settings`에서 관리하는
+exact 영구 OCR 결과 캐시도 사용할 수 있습니다.
 
 bundle 파일 설명은 [/paddleocr_vl_docker_files/README.md](/paddleocr_vl_docker_files/README.md)를 참고하세요.
 
@@ -190,7 +205,7 @@ OCR:
 - 릴리스 순서: Windows 로컬 deterministic bundle·추출 launcher 검증,
   `main` 승격, Windows CI preflight, 태그 기반 release CI
 - 포함 범위: allowlist 제품 source, launcher, CUDA12/CUDA13 requirements,
-  Docker Compose/config, Gemma 준비 도구, 번역/resources, README, LICENSE
+  Docker Compose/config, Gemma/PaddleOCR 준비 도구, 번역/resources, README, LICENSE
 - 미포함 범위: venv, 모델, 체크포인트, 캐시, benchmark 도구/raw 결과,
   Python/CUDA runtime, NVIDIA 드라이버, 로컬 경로, secret
 
