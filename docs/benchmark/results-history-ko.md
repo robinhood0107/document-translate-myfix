@@ -2,6 +2,18 @@
 
 이 문서는 `./banchmark_result_log`에 남겨둔 주요 run을 사람 읽기용으로 정리한 레지스트리입니다.
 
+## 2026-07-30 전체 감사 및 런타임 상주 후속 실측
+
+- [전체 실험 감사·품질 예시·후속 속도 계획](./20260730-full-experiment-audit-and-next-speed-plan-ko.md)
+- 후속 Gemma 실측 요약:
+  - 오래 멈춘 cold start-to-healthy: 66.811초
+  - 정상 `stop` 직후 재시작: 16.865초, 74.757% 단축
+  - 현재 stage-batched 1페이지의 Gemma runtime start/wait: 18.832초
+  - 모델을 VRAM에 둔 채 시작했을 때 GPU 최소 여유: 79MiB
+- 판정: OS 페이지 캐시 재사용은 보존하고, full-auto GPU 상주는 기본값으로
+  채택하지 않는다. 새 이미지 속도는 PaddleOCR runtime hot-window 실험을 먼저
+  검토한다.
+
 ## 현재 active preset
 
 - `translation-baseline`
