@@ -50,7 +50,9 @@ DETECTION_SORT_SCHEMA_VERSION = "sort-blk-list-v1"
 DETECTION_MASK_SCHEMA_VERSION = "precomputed-mask-details-v1"
 DETECTION_RENDER_AREA_SCHEMA_VERSION = "detected-bubble-render-area-v1"
 DETECTION_FONT_SCHEMA_VERSION = "font-onnx-512-cv-color-v1"
-OCR_POSTPROCESS_SCHEMA_VERSION = "quality-retry-drop-guards-v1"
+OCR_POSTPROCESS_SCHEMA_VERSION = (
+    "text-first-exact-canonical-quality-retry-drop-guards-v2"
+)
 TRANSLATION_STATE_SCHEMA_VERSION = "ctpr-block-translation-state-v1"
 INPAINT_INPUT_SCHEMA_VERSION = "deterministic-ordered-input-brush-v2"
 INPAINT_CLEANUP_SCHEMA_VERSION = "bubble-residue-duplicate-fill-v1"
