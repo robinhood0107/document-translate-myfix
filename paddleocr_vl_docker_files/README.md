@@ -68,6 +68,9 @@ PaddleX/PaddleOCR 3.6 계열의 `llama-cpp-server` client와 serving
 
 - fingerprint가 정확히 같은 stopped 컨테이너만 `docker start`로
   재사용합니다.
+- Windows 앱에서는 WSL Compose가 만든 컨테이너를 재사용하지 않습니다.
+  Docker Desktop이 Compose Stop에서 `wsl`을 다시 호출하지 않도록
+  Windows 경로·Windows Compose 메타데이터로 한 번 재생성합니다.
 - 이미지·command·pipeline·volume·manifest 중 하나라도 다르면
   `docker compose up -d --force-recreate`를 사용합니다.
 - OCR stage가 끝나면 llama.cpp의 `--sleep-idle-seconds 5`가 model과
