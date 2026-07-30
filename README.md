@@ -105,7 +105,7 @@ This repository now uses a strict `main + develop + tag` model.
   `SHA256SUMS.txt`.
 - The ZIP contains allowlisted product source, both first-run Windows
   launchers, pinned CUDA12/CUDA13 requirements, runtime Compose/config files,
-  the Gemma preparation script, translations/resources, README files, and the
+  the Gemma/PaddleOCR preparation scripts, translations/resources, README files, and the
   license.
 - Virtual environments, models, caches, benchmark runners/results, local
   paths, and secrets are not bundled. The launchers install their supported
@@ -286,7 +286,8 @@ Tracked compose/runtime images used by the repo:
 
 - Gemma local server: `ghcr.io/ggml-org/llama.cpp@sha256:22e0e3bfe967af4fd1df6a918022abbfd4e72e4d40a4769e616a4176790acbcb`
 - HunyuanOCR local server: `ghcr.io/ggml-org/llama.cpp:server-cuda`
-- PaddleOCR VL runtime: `ccr-2vdh3abv-pub.cnc.bj.baidubce.com/paddlepaddle/paddleocr-genai-vllm-server@sha256:d0d32c04a2119613d25a0a4c292e165ccc107954b74580613cf59e378037f8f5`
+- PaddleOCR VL inference: `ghcr.io/ggml-org/llama.cpp@sha256:22e0e3bfe967af4fd1df6a918022abbfd4e72e4d40a4769e616a4176790acbcb`
+- PaddleOCR VL layout frontend: `ccr-2vdh3abv-pub.cnc.bj.baidubce.com/paddlepaddle/paddleocr-genai-vllm-server@sha256:d0d32c04a2119613d25a0a4c292e165ccc107954b74580613cf59e378037f8f5`
 
 ## Reference Setup Docs
 
