@@ -104,7 +104,7 @@ OCR:
   `comic-translate-vX.Y.Z-windows-launcher-source.zip`과
   `SHA256SUMS.txt`
 - ZIP 포함 범위: allowlist에 든 제품 source, CUDA12/CUDA13 첫 실행
-  launcher·requirements, Docker Compose/config, Gemma 준비 스크립트,
+  launcher·requirements, Docker Compose/config, Gemma/PaddleOCR 준비 스크립트,
   번역/resources, README, LICENSE
 - ZIP 제외 범위: venv, 모델, 캐시, benchmark runner/raw 결과,
   로컬 절대경로, secret
@@ -281,7 +281,8 @@ exact 영구 OCR 캐시도 사용할 수 있습니다. crop 이미지는 저장�
 
 - Gemma 로컬 서버: `ghcr.io/ggml-org/llama.cpp@sha256:22e0e3bfe967af4fd1df6a918022abbfd4e72e4d40a4769e616a4176790acbcb`
 - HunyuanOCR 로컬 서버: `ghcr.io/ggml-org/llama.cpp:server-cuda`
-- PaddleOCR VL 런타임: `ccr-2vdh3abv-pub.cnc.bj.baidubce.com/paddlepaddle/paddleocr-genai-vllm-server@sha256:d0d32c04a2119613d25a0a4c292e165ccc107954b74580613cf59e378037f8f5`
+- PaddleOCR VL 추론: `ghcr.io/ggml-org/llama.cpp@sha256:22e0e3bfe967af4fd1df6a918022abbfd4e72e4d40a4769e616a4176790acbcb`
+- PaddleOCR VL layout 프런트: `ccr-2vdh3abv-pub.cnc.bj.baidubce.com/paddlepaddle/paddleocr-genai-vllm-server@sha256:d0d32c04a2119613d25a0a4c292e165ccc107954b74580613cf59e378037f8f5`
 
 ## 참고 설치 문서
 

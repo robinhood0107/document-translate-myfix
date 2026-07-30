@@ -85,21 +85,36 @@ docker compose -f hunyuanocr_docker_files/docker-compose.yaml up -d --force-recr
 ### PaddleOCR VL local runtime
 
 - Compose file: `/paddleocr_vl_docker_files/docker-compose.yaml`
-- Docker image: `ccr-2vdh3abv-pub.cnc.bj.baidubce.com/paddlepaddle/paddleocr-genai-vllm-server@sha256:d0d32c04a2119613d25a0a4c292e165ccc107954b74580613cf59e378037f8f5`
+- Inference backend: pinned llama.cpp with the official PaddleOCR-VL 1.6
+  GGUF and multimodal projector
+- Layout frontend: pinned PaddleX/PaddleOCR image
 - Runtime/model references:
   - [PaddleOCR](https://github.com/PaddlePaddle/PaddleOCR)
   - [PaddleOCR-VL](https://huggingface.co/PaddlePaddle/PaddleOCR-VL)
 
-Start it:
+Put these two files in one model directory:
 
-```bash
-docker compose -f paddleocr_vl_docker_files/docker-compose.yaml pull
-docker compose -f paddleocr_vl_docker_files/docker-compose.yaml up -d --force-recreate
+- `PaddleOCR-VL-1.6-GGUF.gguf`
+- `PaddleOCR-VL-1.6-GGUF-mmproj.gguf`
+
+Prepare and verify the versioned external model volume once from Windows
+PowerShell:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass `
+  -File .\scripts\prepare_paddleocr_llamacpp_runtime.ps1 `
+  -Mode Prepare `
+  -ModelDirectory 'C:\ExampleWorkspace\models\PaddleOCR-VL-1.6-GGUF'
 ```
 
-The first command is a one-time preparation step for the pinned image. Normal
-app starts reuse the exact stopped containers and do not pull again. The
-stage-batched folder workflow can also reuse exact crop results from the
+The app then starts the managed runtime automatically when PaddleOCR VL is
+needed. It mounts the prepared model volume read-only, reuses only exact
+stopped containers, and force-recreates stale containers. After an OCR stage,
+llama.cpp unloads the model after five idle seconds while the lightweight
+containers remain available; failure to confirm unload falls back to a normal
+`stop`. The automatic path never uses `down`.
+
+The stage-batched folder workflow can also reuse exact crop results from the
 persistent OCR cache configured under `Settings > PaddleOCR VL Settings`.
 
 For bundle details, see [/paddleocr_vl_docker_files/README.md](/paddleocr_vl_docker_files/README.md).
@@ -187,7 +202,7 @@ Official Windows release packages are published only from `vX.Y.Z` tags that poi
 - release order: local deterministic bundle and extracted-launcher
   verification, `main` promotion, Windows CI preflight, then tag release CI
 - bundled scope: allowlisted product source, launchers, CUDA12/CUDA13
-  requirements, Docker Compose/config, Gemma preparation tooling,
+  requirements, Docker Compose/config, Gemma/PaddleOCR preparation tooling,
   translations/resources, README, and LICENSE
 - not bundled: venvs, models, checkpoints, caches, benchmark tools/results,
   Python/CUDA runtimes, NVIDIA driver, local paths, or secrets
