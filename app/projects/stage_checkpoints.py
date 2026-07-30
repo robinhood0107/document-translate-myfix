@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import dataclass
+from functools import lru_cache
 from pathlib import Path
 from typing import Any
 import copy
@@ -9,7 +10,9 @@ import hashlib
 import json
 import logging
 import os
+import platform
 import re
+import zlib
 
 import msgpack
 import numpy as np
@@ -39,8 +42,8 @@ logger = logging.getLogger(__name__)
 PROJECT_DETECTION_CHECKPOINT_SCHEMA_VERSION = 1
 PROJECT_OCR_CHECKPOINT_SCHEMA_VERSION = 1
 PROJECT_TRANSLATION_CHECKPOINT_SCHEMA_VERSION = 1
-PROJECT_INPAINT_CHECKPOINT_SCHEMA_VERSION = 1
-PROJECT_RENDER_CHECKPOINT_SCHEMA_VERSION = 1
+PROJECT_INPAINT_CHECKPOINT_SCHEMA_VERSION = 2
+PROJECT_RENDER_CHECKPOINT_SCHEMA_VERSION = 3
 DETECTION_PREPROCESS_SCHEMA_VERSION = "rtdetr-v2-rgb-640-f32-v1"
 DETECTION_POSTPROCESS_SCHEMA_VERSION = "comic-text-bubble-blocks-v1"
 DETECTION_SORT_SCHEMA_VERSION = "sort-blk-list-v1"
@@ -49,20 +52,59 @@ DETECTION_RENDER_AREA_SCHEMA_VERSION = "detected-bubble-render-area-v1"
 DETECTION_FONT_SCHEMA_VERSION = "font-onnx-512-cv-color-v1"
 OCR_POSTPROCESS_SCHEMA_VERSION = "quality-retry-drop-guards-v1"
 TRANSLATION_STATE_SCHEMA_VERSION = "ctpr-block-translation-state-v1"
-INPAINT_INPUT_SCHEMA_VERSION = "ordered-ocr-mask-brush-v1"
+INPAINT_INPUT_SCHEMA_VERSION = "deterministic-ordered-input-brush-v2"
 INPAINT_CLEANUP_SCHEMA_VERSION = "bubble-residue-duplicate-fill-v1"
-INPAINT_ARTIFACT_SCHEMA_VERSION = "lossless-cleaned-mask-v1"
+INPAINT_ARTIFACT_SCHEMA_VERSION = "lossless-zlib-array-v2"
+INPAINT_BLOCK_STATE_SCHEMA_VERSION = "inpaint-block-state-v1"
 RENDER_INPUT_SCHEMA_VERSION = "translation-inpaint-style-layout-v1"
 RENDER_SANITIZER_SCHEMA_VERSION = "strict-symbol-rich-text-v1"
 RENDER_OUTPUT_SCHEMA_VERSION = "encoded-output-object-v1"
+_RENDER_EXPORT_IDENTITY_KEYS = frozenset(
+    {
+        "resolved_automatic_output_target",
+        "resolved_automatic_output_image_format",
+        "resolved_automatic_output_archive_format",
+        "resolved_automatic_output_archive_image_format",
+        "resolved_automatic_output_archive_compression_level",
+    }
+)
 
 _DETECTION_OBJECT_ROLE = "detection-result"
 _OCR_OBJECT_ROLE = "ocr-raw-result"
 _INPAINT_CLEANED_OBJECT_ROLE = "inpaint-cleaned-image"
 _INPAINT_RAW_MASK_OBJECT_ROLE = "inpaint-raw-mask"
 _INPAINT_FINAL_MASK_OBJECT_ROLE = "inpaint-final-mask"
+_INPAINT_BLOCK_STATE_OBJECT_ROLE = "inpaint-block-state"
 _RENDER_OUTPUT_OBJECT_ROLE = "render-output"
 _FILE_SHA256_CACHE: dict[tuple[str, int, int, int], str] = {}
+
+_INPAINT_BLOCK_STATE_FIELDS = (
+    "_hard_box_applied",
+    "_hard_box_reason_codes",
+    "_legacy_fill_ratio",
+    "_rescue_fill_ratio",
+    "_hard_box_rescue_roi_xyxy",
+    "_hard_box_index",
+    "_hard_box_metrics",
+    "_legacy_mask_pixel_count",
+    "_rescue_mask_pixel_count",
+    "_final_mask_pixel_count",
+    "block_final_mask_pixel_count",
+    "block_mask_iou",
+    "block_mask_span_coverage",
+    "block_mask_bbox",
+    "block_mask_source",
+    "block_mask_decision",
+    "bubble_panel_mask_pixel_count",
+    "bubble_panel_mask_source",
+    "_erase_mode",
+    "_erase_edit_pixel_count",
+    "_erase_protect_pixel_count",
+    "_erase_skipped_reason",
+    "_mask_policy",
+    "mask_decision",
+    "mask_reject_reason",
+)
 
 _DETECTION_BLOCK_FIELDS = (
     "block_id",
@@ -117,6 +159,8 @@ class InpaintCheckpointResult:
     final_mask: np.ndarray
     cleanup_stats: dict[str, Any]
     cleaned_object_sha256: str
+    cleaned_decoded_sha256: str
+    block_states: list[dict[str, Any]]
 
 
 @dataclass(frozen=True)
@@ -1111,6 +1155,76 @@ def _block_inpaint_record(block: TextBlock) -> dict[str, Any]:
     }
 
 
+def snapshot_inpaint_block_state(
+    blocks: list[TextBlock] | None,
+) -> list[dict[str, Any]]:
+    """Capture only mask/inpaint-owned block fields.
+
+    Translation and user-authored render state are deliberately excluded so an
+    inpaint hit cannot revive stale text or formatting.
+    """
+
+    records: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for block in list(blocks or []):
+        block_id = str(getattr(block, "block_id", "") or "")
+        if not block_id or block_id in seen:
+            raise ValueError(
+                "Inpaint checkpoint block identities must be non-empty and "
+                "unique."
+            )
+        seen.add(block_id)
+        records.append(
+            {
+                "block_id": block_id,
+                "attributes": {
+                    field_name: copy.deepcopy(getattr(block, field_name))
+                    for field_name in _INPAINT_BLOCK_STATE_FIELDS
+                    if hasattr(block, field_name)
+                },
+            }
+        )
+    return records
+
+
+def restore_inpaint_block_state(
+    blocks: list[TextBlock],
+    block_states: list[dict[str, Any]],
+) -> None:
+    """Restore validated mask/inpaint metadata without touching user text."""
+
+    current = list(blocks or [])
+    staged: list[tuple[TextBlock, dict[str, Any]]] = []
+    if len(current) != len(block_states):
+        raise ValueError("Inpaint checkpoint block state count does not match.")
+    allowed = set(_INPAINT_BLOCK_STATE_FIELDS)
+    for block, record in zip(current, block_states):
+        if not isinstance(record, Mapping):
+            raise ValueError("Inpaint checkpoint block state must be an object.")
+        block_id = str(record.get("block_id", "") or "")
+        if block_id != str(getattr(block, "block_id", "") or ""):
+            raise ValueError("Inpaint checkpoint block order does not match.")
+        attributes = record.get("attributes")
+        if not isinstance(attributes, Mapping):
+            raise ValueError(
+                "Inpaint checkpoint block attributes must be an object."
+            )
+        unexpected = set(attributes) - allowed
+        if unexpected:
+            raise ValueError(
+                "Inpaint checkpoint block attributes contain unexpected "
+                "fields."
+            )
+        staged.append((block, copy.deepcopy(dict(attributes))))
+
+    for block, attributes in staged:
+        for field_name in _INPAINT_BLOCK_STATE_FIELDS:
+            if field_name in attributes:
+                setattr(block, field_name, attributes[field_name])
+            elif hasattr(block, field_name):
+                delattr(block, field_name)
+
+
 def _brush_stroke_signature(strokes: list[dict[str, Any]] | None) -> str:
     return _packed_sha256(
         {
@@ -1126,8 +1240,6 @@ def build_inpaint_identity(
     detection_fingerprint: str,
     ocr_fingerprint: str,
     blocks: list[TextBlock],
-    raw_mask: np.ndarray,
-    generated_mask: np.ndarray,
     brush_strokes: list[dict[str, Any]] | None,
     runtime: Mapping[str, Any],
     model_identity: Mapping[str, Any],
@@ -1142,8 +1254,6 @@ def build_inpaint_identity(
         "ordered_blocks_sha256": canonical_sha256(
             [_block_inpaint_record(block) for block in blocks]
         ),
-        "raw_mask_sha256": decoded_image_sha256(raw_mask),
-        "generated_mask_sha256": decoded_image_sha256(generated_mask),
         "brush_strokes_sha256": _brush_stroke_signature(brush_strokes),
         "runtime": _json_safe(dict(runtime)),
         "model": _json_safe(dict(model_identity)),
@@ -1194,12 +1304,17 @@ def build_skipped_stage_fingerprint(
 
 
 def _pack_array_artifact(kind: str, value: np.ndarray) -> bytes:
+    contiguous = np.ascontiguousarray(value)
+    raw = contiguous.tobytes(order="C")
     return _pack(
         {
             "schema_version": PROJECT_INPAINT_CHECKPOINT_SCHEMA_VERSION,
             "artifact_schema": INPAINT_ARTIFACT_SCHEMA_VERSION,
             "kind": kind,
-            "array": np.ascontiguousarray(value),
+            "dtype": str(contiguous.dtype),
+            "shape": [int(item) for item in contiguous.shape],
+            "compression": "zlib",
+            "data": zlib.compress(raw, level=3),
         }
     )
 
@@ -1221,18 +1336,32 @@ def _unpack_array_artifact(
         or decoded.get("kind") != kind
     ):
         raise ValueError("Inpaint checkpoint artifact schema does not match.")
-    value = decoded.get("array")
-    if not isinstance(value, np.ndarray):
-        raise ValueError("Inpaint checkpoint artifact array is missing.")
-    if tuple(int(item) for item in value.shape) != expected_shape:
+    shape = tuple(int(item) for item in decoded.get("shape", []))
+    if shape != expected_shape:
         raise ValueError("Inpaint checkpoint artifact shape does not match.")
-    if value.dtype != np.uint8:
+    if decoded.get("dtype") != "uint8":
         raise ValueError("Inpaint checkpoint artifact dtype must be uint8.")
+    if decoded.get("compression") != "zlib":
+        raise ValueError("Inpaint checkpoint artifact compression does not match.")
+    compressed = decoded.get("data")
+    if not isinstance(compressed, bytes):
+        raise ValueError("Inpaint checkpoint artifact data is missing.")
+    expected_bytes = int(np.prod(expected_shape, dtype=np.int64))
+    decompressor = zlib.decompressobj()
+    raw = decompressor.decompress(compressed, expected_bytes + 1)
+    if (
+        len(raw) != expected_bytes
+        or not decompressor.eof
+        or decompressor.unconsumed_tail
+        or decompressor.unused_data
+    ):
+        raise ValueError("Inpaint checkpoint artifact compressed size is invalid.")
+    value = np.frombuffer(raw, dtype=np.uint8).reshape(expected_shape).copy()
     if mask and value.ndim != 2:
         raise ValueError("Inpaint checkpoint mask must be two-dimensional.")
     if not mask and (value.ndim != 3 or value.shape[2] not in (3, 4)):
         raise ValueError("Inpaint checkpoint image must be RGB or RGBA.")
-    return np.ascontiguousarray(value)
+    return value
 
 
 def _compact_cleanup_stats(
@@ -1267,10 +1396,12 @@ def record_inpaint_checkpoint(
     page_key: str,
     fingerprint: str,
     identity: Mapping[str, Any],
+    blocks: list[TextBlock],
     cleaned_image: np.ndarray,
     raw_mask: np.ndarray,
     final_mask: np.ndarray,
     cleanup_stats: Mapping[str, Any] | None,
+    cleaned_decoded_sha256: str | None = None,
 ) -> bool:
     if store is None or not store.available:
         return False
@@ -1287,6 +1418,12 @@ def record_inpaint_checkpoint(
         or final.shape != cleaned.shape[:2]
     ):
         return False
+    try:
+        block_states = snapshot_inpaint_block_state(blocks)
+    except (TypeError, ValueError):
+        return False
+    if not block_states:
+        return False
     objects: dict[str, str] = {}
     for role, kind, value in (
         (_INPAINT_CLEANED_OBJECT_ROLE, "cleaned-image", cleaned),
@@ -1297,6 +1434,20 @@ def record_inpaint_checkpoint(
         if object_hash is None:
             return False
         objects[role] = object_hash
+    block_state_blob = _pack(
+        {
+            "schema_version": PROJECT_INPAINT_CHECKPOINT_SCHEMA_VERSION,
+            "state_schema": INPAINT_BLOCK_STATE_SCHEMA_VERSION,
+            "blocks": block_states,
+        }
+    )
+    block_state_hash = store.put_object(block_state_blob)
+    if block_state_hash is None:
+        return False
+    objects[_INPAINT_BLOCK_STATE_OBJECT_ROLE] = block_state_hash
+    cleaned_sha256 = str(cleaned_decoded_sha256 or "").strip().lower()
+    if not re.fullmatch(r"[0-9a-f]{64}", cleaned_sha256):
+        cleaned_sha256 = decoded_image_sha256(cleaned)
     compact_stats = _compact_cleanup_stats(cleanup_stats)
     return store.record_stage(
         page_key,
@@ -1307,10 +1458,15 @@ def record_inpaint_checkpoint(
             "identity_sha256": canonical_sha256(dict(identity)),
             "cleaned_shape": [int(item) for item in cleaned.shape],
             "mask_shape": [int(item) for item in final.shape],
-            "cleaned_sha256": decoded_image_sha256(cleaned),
+            "cleaned_sha256": cleaned_sha256,
             "raw_mask_sha256": decoded_image_sha256(raw),
             "final_mask_sha256": decoded_image_sha256(final),
             "cleanup_stats": compact_stats,
+            "block_ids": [
+                str(item.get("block_id", "") or "")
+                for item in block_states
+            ],
+            "block_state_sha256": block_state_hash,
         },
         objects=objects,
     )
@@ -1323,6 +1479,7 @@ def lookup_inpaint_checkpoint(
     fingerprint: str,
     identity: Mapping[str, Any],
     source_shape: tuple[int, ...],
+    current_blocks: list[TextBlock],
 ) -> InpaintCheckpointResult | None:
     if store is None:
         return None
@@ -1383,6 +1540,58 @@ def lookup_inpaint_checkpoint(
             mask_shape,
             True,
         )
+        block_state_hash = str(
+            hit.objects.get(_INPAINT_BLOCK_STATE_OBJECT_ROLE, "") or ""
+        )
+        block_state_raw = (
+            store.read_object(block_state_hash)
+            if block_state_hash
+            else None
+        )
+        if (
+            block_state_raw is None
+            or payload.get("block_state_sha256") != block_state_hash
+        ):
+            raise ValueError("Inpaint checkpoint block state is missing.")
+        block_state_payload = _unpack(block_state_raw)
+        if (
+            not isinstance(block_state_payload, Mapping)
+            or int(block_state_payload.get("schema_version", 0))
+            != PROJECT_INPAINT_CHECKPOINT_SCHEMA_VERSION
+            or block_state_payload.get("state_schema")
+            != INPAINT_BLOCK_STATE_SCHEMA_VERSION
+        ):
+            raise ValueError(
+                "Inpaint checkpoint block state schema does not match."
+            )
+        block_states = block_state_payload.get("blocks")
+        if not isinstance(block_states, list):
+            raise ValueError("Inpaint checkpoint block states are missing.")
+        expected_block_ids = [
+            str(getattr(block, "block_id", "") or "")
+            for block in current_blocks
+        ]
+        restored_block_ids = [
+            str(item.get("block_id", "") or "")
+            if isinstance(item, Mapping)
+            else ""
+            for item in block_states
+        ]
+        if (
+            not expected_block_ids
+            or len(set(expected_block_ids)) != len(expected_block_ids)
+            or payload.get("block_ids") != restored_block_ids
+            or restored_block_ids != expected_block_ids
+        ):
+            raise ValueError(
+                "Inpaint checkpoint block state identities do not match."
+            )
+        # Validate the complete state before returning a hit. Applying it to
+        # disposable copies keeps lookup side-effect free.
+        restore_inpaint_block_state(
+            [block.deep_copy() for block in current_blocks],
+            block_states,
+        )
         if (
             payload.get("cleaned_sha256") != decoded_image_sha256(cleaned)
             or payload.get("raw_mask_sha256")
@@ -1400,6 +1609,8 @@ def lookup_inpaint_checkpoint(
             final_mask=final_mask,
             cleanup_stats=_compact_cleanup_stats(cleanup_stats),
             cleaned_object_sha256=cleaned_hash,
+            cleaned_decoded_sha256=str(payload["cleaned_sha256"]),
+            block_states=copy.deepcopy(block_states),
         )
     except (
         KeyError,
@@ -1408,6 +1619,7 @@ def lookup_inpaint_checkpoint(
         msgpack.ExtraData,
         msgpack.FormatError,
         msgpack.StackError,
+        zlib.error,
     ):
         logger.warning(
             "Invalid inpaint checkpoint ignored for %s; inpainting will be "
@@ -1448,6 +1660,206 @@ def render_block_state_signature(blocks: list[TextBlock] | None) -> str:
     )
 
 
+_WINDOWS_LOCALIZED_FONT_ALIASES = {
+    "맑은 고딕": ("malgun gothic",),
+    "굴림": ("gulim",),
+    "굴림체": ("gulimche",),
+    "돋움": ("dotum",),
+    "돋움체": ("dotumche",),
+    "바탕": ("batang",),
+    "바탕체": ("batangche",),
+}
+
+
+@lru_cache(maxsize=1)
+def _windows_font_catalog() -> tuple[tuple[str, str, str, int, int], ...]:
+    if platform.system() != "Windows":
+        return ()
+    try:
+        import winreg
+
+        fonts_root = Path(
+            os.environ.get("WINDIR", r"C:\Windows")
+        ) / "Fonts"
+        key = winreg.OpenKey(
+            winreg.HKEY_LOCAL_MACHINE,
+            r"SOFTWARE\Microsoft\Windows NT\CurrentVersion\Fonts",
+        )
+        records: list[tuple[str, str, str, int, int]] = []
+        try:
+            value_count = int(winreg.QueryInfoKey(key)[1])
+            for index in range(value_count):
+                display_name, raw_path, _value_type = winreg.EnumValue(
+                    key,
+                    index,
+                )
+                candidate = Path(str(raw_path or ""))
+                if not candidate.is_absolute():
+                    candidate = fonts_root / candidate
+                try:
+                    stat_result = candidate.stat()
+                except OSError:
+                    continue
+                records.append(
+                    (
+                        str(display_name or ""),
+                        candidate.name,
+                        str(candidate),
+                        int(stat_result.st_size),
+                        int(stat_result.st_mtime_ns),
+                    )
+                )
+        finally:
+            winreg.CloseKey(key)
+        records.sort(
+            key=lambda item: (
+                item[0].casefold(),
+                item[1].casefold(),
+            )
+        )
+        return tuple(records)
+    except Exception:
+        logger.debug(
+            "Unable to read the Windows font catalog.",
+            exc_info=True,
+        )
+        return ()
+
+
+def _windows_font_program_sha256(family: str) -> str:
+    normalized = str(family or "").strip().casefold()
+    if not normalized:
+        return ""
+    aliases = {
+        normalized,
+        *(
+            value.casefold()
+            for value in _WINDOWS_LOCALIZED_FONT_ALIASES.get(
+                normalized,
+                (),
+            )
+        ),
+    }
+    matches: list[dict[str, str]] = []
+    for display_name, file_name, file_path, _size, _mtime_ns in (
+        _windows_font_catalog()
+    ):
+        display_key = display_name.casefold()
+        if not any(alias in display_key for alias in aliases):
+            continue
+        try:
+            matches.append(
+                {
+                    "file_name": file_name,
+                    "sha256": _sha256_file(file_path),
+                }
+            )
+        except OSError:
+            continue
+    matches.sort(key=lambda item: item["file_name"].casefold())
+    return canonical_sha256(matches) if matches else ""
+
+
+@lru_cache(maxsize=64)
+def _stable_system_font_identity(family: str) -> dict[str, Any]:
+    requested_family = str(family or "").strip()
+    try:
+        from PySide6.QtCore import qVersion
+        from PySide6.QtGui import QFont, QFontDatabase, QFontInfo
+
+        available_families = sorted(
+            {
+                str(value or "").strip()
+                for value in QFontDatabase.families()
+                if str(value or "").strip()
+            },
+            key=str.casefold,
+        )
+        canonical_by_name = {
+            value.casefold(): value for value in available_families
+        }
+        resolved_family = canonical_by_name.get(
+            requested_family.casefold(),
+            "",
+        )
+        if not resolved_family:
+            resolved_family = str(
+                QFontInfo(QFont(requested_family, 32)).family() or ""
+            ).strip()
+        fallback_family = str(
+            QFontDatabase.systemFont(
+                QFontDatabase.SystemFont.GeneralFont
+            ).family()
+            or ""
+        ).strip()
+        if not resolved_family:
+            resolved_family = fallback_family or requested_family
+
+        windows_catalog = _windows_font_catalog()
+        catalog_contract = [
+            {
+                "display_name": display_name,
+                "file_name": file_name,
+                "size": size,
+                "mtime_ns": mtime_ns,
+            }
+            for (
+                display_name,
+                file_name,
+                _file_path,
+                size,
+                mtime_ns,
+            ) in windows_catalog
+        ]
+        return {
+            "family": requested_family,
+            "resolved_family": resolved_family,
+            "fallback_family": fallback_family,
+            "file_name": "",
+            "file_sha256": "",
+            "program_sha256": _windows_font_program_sha256(
+                resolved_family
+            ),
+            "fallback_program_sha256": (
+                _windows_font_program_sha256(fallback_family)
+                if fallback_family
+                else ""
+            ),
+            "font_catalog_sha256": canonical_sha256(
+                catalog_contract or available_families
+            ),
+            "qt_version": str(qVersion() or ""),
+            "platform": {
+                "system": platform.system(),
+                "release": platform.release(),
+                "version": platform.version(),
+                "machine": platform.machine(),
+            },
+        }
+    except Exception:
+        logger.debug(
+            "Unable to fingerprint the selected system font contract.",
+            exc_info=True,
+        )
+        return {
+            "family": requested_family,
+            "resolved_family": "",
+            "fallback_family": "",
+            "file_name": "",
+            "file_sha256": "",
+            "program_sha256": "",
+            "fallback_program_sha256": "",
+            "font_catalog_sha256": "",
+            "qt_version": "",
+            "platform": {
+                "system": platform.system(),
+                "release": platform.release(),
+                "version": platform.version(),
+                "machine": platform.machine(),
+            },
+        }
+
+
 def resolve_font_identity(
     main_page: Any,
     font_family: str,
@@ -1472,46 +1884,7 @@ def resolve_font_identity(
                 }
         except OSError:
             continue
-
-    program_digest = hashlib.sha256()
-    try:
-        from PySide6.QtGui import QFont, QRawFont
-
-        raw_font = QRawFont.fromFont(QFont(family, 32))
-        program_digest.update(family.encode("utf-8"))
-        for tag in (
-            "head",
-            "name",
-            "cmap",
-            "glyf",
-            "CFF ",
-            "CFF2",
-            "GSUB",
-            "GPOS",
-            "OS/2",
-            "post",
-            "hhea",
-            "maxp",
-        ):
-            table = bytes(raw_font.fontTable(tag))
-            if table:
-                program_digest.update(tag.encode("ascii"))
-                program_digest.update(table)
-    except Exception:
-        logger.debug(
-            "Unable to fingerprint the selected font program.",
-            exc_info=True,
-        )
-    return {
-        "family": family,
-        "file_name": "",
-        "file_sha256": "",
-        "program_sha256": (
-            program_digest.hexdigest()
-            if program_digest.digest() != hashlib.sha256().digest()
-            else ""
-        ),
-    }
+    return copy.deepcopy(_stable_system_font_identity(family))
 
 
 def build_render_identity(
@@ -1551,7 +1924,13 @@ def build_render_identity(
             ]
         ),
         "render_settings": _json_safe(dict(render_settings)),
-        "export_settings": _json_safe(dict(export_settings)),
+        "export_settings": _json_safe(
+            {
+                key: export_settings[key]
+                for key in sorted(_RENDER_EXPORT_IDENTITY_KEYS)
+                if key in export_settings
+            }
+        ),
         "font": _json_safe(dict(font_identity)),
         "target_language_code": str(target_language_code or ""),
         "output_base_root": os.path.normcase(
@@ -1723,8 +2102,6 @@ def lookup_render_checkpoint(
                 str(getattr(block, "block_id", "") or "")
                 for block in list(project_blocks or [])
             ]
-            or payload.get("render_block_state_signature")
-            != render_block_state_signature(project_blocks)
             or payload.get("output_sha256") != object_hash
             or not _reserved_output_root_matches(
                 output_root,
@@ -1734,6 +2111,12 @@ def lookup_render_checkpoint(
             or _path_has_symlink_component(output_path, output_root)
         ):
             return None
+        # The full TextBlock __dict__ contains post-inpaint and render
+        # diagnostics that are not render inputs and may be populated at
+        # different points during project save/load. The stable render
+        # identity, ordered block IDs, and persisted viewer state above are
+        # the cache guards. Keep the full signature in the record for
+        # diagnostics, but do not turn volatile metadata into a false miss.
         if os.path.exists(output_path):
             if (
                 not os.path.isfile(output_path)

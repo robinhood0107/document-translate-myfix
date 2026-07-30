@@ -25,6 +25,10 @@ from modules.utils.correction_dictionary import (
     apply_ocr_result_dictionary,
     apply_translation_result_dictionary,
 )
+from modules.utils.debug_artifacts import (
+    active_debug_page_directory,
+    atomic_debug_image,
+)
 from modules.utils.ocr_debug import (
     all_empty_blocks_are_rejected,
     drop_embedded_ui_ocr_blocks,
@@ -39,6 +43,7 @@ from modules.utils.inpaint_debug import (
     build_detector_overlay,
     build_inpaint_debug_metadata,
     export_inpaint_debug_artifacts,
+    has_debug_exports,
 )
 from modules.utils.inpaint_cleanup import apply_duplicate_bubble_inner_fill, refine_bubble_residue_inpaint
 from modules.utils.export_paths import (
@@ -594,21 +599,29 @@ class BatchProcessor:
             with open(os.path.join(path, f"{page_base_name}_translated.json"), "w", encoding="UTF-8") as file:
                 file.write(get_raw_translation(blocks))
 
-        if export_settings.get("export_raw_text", False) or export_settings.get("export_translated_text", False):
+        if export_settings.get("export_ocr_debug", False):
             ocr_summary = page_state.get("processing_summary", {})
-            debug_path = os.path.join(
-                export_root,
-                "ocr_debugs",
-                archive_bname,
+            debug_path = active_debug_page_directory(
+                self.main_page,
+                image_path,
             )
-            export_ocr_debug_artifacts(
-                debug_path,
-                page_base_name,
-                image,
-                blocks,
-                ocr_summary.get("ocr_engine", ""),
-                page_state.get("source_lang", source_lang),
-            )
+            if debug_path:
+                try:
+                    export_ocr_debug_artifacts(
+                        debug_path,
+                        page_base_name,
+                        image,
+                        blocks,
+                        ocr_summary.get("ocr_engine", ""),
+                        page_state.get("source_lang", source_lang),
+                        flat_names=True,
+                    )
+                except Exception:
+                    logger.warning(
+                        "OCR diagnostic export failed open for %s.",
+                        os.path.basename(image_path),
+                        exc_info=True,
+                    )
 
     def _build_cleanup_delta_mask(self, base_mask, final_mask):
         if base_mask is None and final_mask is None:
@@ -669,12 +682,25 @@ class BatchProcessor:
     ) -> str:
         if not export_settings.get("export_detector_overlay", False):
             return ""
-        page_base_name = os.path.splitext(os.path.basename(image_path))[0]
-        output_dir = os.path.join(export_root, "detector_overlays", archive_bname)
-        os.makedirs(output_dir, exist_ok=True)
-        output_path = os.path.join(output_dir, f"{page_base_name}_detector_overlay.png")
-        imk.write_image(output_path, build_detector_overlay(image, blk_list or []))
-        return output_path
+        output_dir = active_debug_page_directory(
+            self.main_page,
+            image_path,
+        )
+        if not output_dir:
+            return ""
+        try:
+            return atomic_debug_image(
+                output_dir,
+                "detector-overlay.png",
+                build_detector_overlay(image, blk_list or []),
+            )
+        except Exception:
+            logger.warning(
+                "Detector diagnostic export failed open for %s.",
+                os.path.basename(image_path),
+                exc_info=True,
+            )
+            return ""
 
     def _write_inpaint_debug_exports(
         self,
@@ -696,6 +722,14 @@ class BatchProcessor:
         mask_details: dict | None = None,
         inpainter_backend: str = "unknown",
     ) -> dict[str, str]:
+        if not has_debug_exports(export_settings):
+            return {}
+        page_output_dir = active_debug_page_directory(
+            self.main_page,
+            image_path,
+        )
+        if not page_output_dir:
+            return {}
         mask_details = mask_details or {}
         base_mask = mask_details.get("legacy_base_mask", raw_mask if raw_mask is not None else mask_details.get("final_mask", final_mask))
         cleanup_delta = self._build_cleanup_delta_mask(base_mask, final_mask)
@@ -758,18 +792,29 @@ class BatchProcessor:
             ui_panel_mode=str(mask_details.get("ui_panel_mode", "") or ""),
             ui_panel_preview_path=str(mask_details.get("ui_panel_preview_path", "") or ""),
         )
-        return export_inpaint_debug_artifacts(
-            export_root=export_root,
-            archive_bname=archive_bname,
-            page_base_name=os.path.splitext(os.path.basename(image_path))[0],
-            image=image,
-            blocks=blk_list or [],
-            export_settings=export_settings,
-            raw_mask=raw_mask,
-            mask_overlay_mask=mask_overlay_mask,
-            cleanup_delta=cleanup_delta,
-            metadata=metadata,
-        )
+        try:
+            return export_inpaint_debug_artifacts(
+                export_root=export_root,
+                archive_bname=archive_bname,
+                page_base_name=os.path.splitext(
+                    os.path.basename(image_path)
+                )[0],
+                image=image,
+                blocks=blk_list or [],
+                export_settings=export_settings,
+                raw_mask=raw_mask,
+                mask_overlay_mask=mask_overlay_mask,
+                cleanup_delta=cleanup_delta,
+                metadata=metadata,
+                page_output_dir=page_output_dir,
+            )
+        except Exception:
+            logger.warning(
+                "Inpaint diagnostic export failed open for %s.",
+                os.path.basename(image_path),
+                exc_info=True,
+            )
+            return {}
 
     def _write_final_render_export(
         self,
@@ -1056,6 +1101,7 @@ class BatchProcessor:
                         "export_raw_text": bool(export_settings.get("export_raw_text", False)),
                         "export_translated_text": bool(export_settings.get("export_translated_text", False)),
                         "export_inpainted_image": bool(export_settings.get("export_inpainted_image", False)),
+                        "export_ocr_debug": bool(export_settings.get("export_ocr_debug", False)),
                         "export_detector_overlay": bool(export_settings.get("export_detector_overlay", False)),
                         "export_raw_mask": bool(export_settings.get("export_raw_mask", False)),
                         "export_mask_overlay": bool(export_settings.get("export_mask_overlay", False)),
