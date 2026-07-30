@@ -384,6 +384,7 @@ class StageBatchedProcessor(BatchProcessor):
         *,
         context: str = "batch cleanup",
         raise_on_failure: bool = False,
+        preserve_sleeping_paddle: bool = False,
     ) -> None:
         runtime_managers = (
             (
@@ -407,6 +408,9 @@ class StageBatchedProcessor(BatchProcessor):
                     runtime_manager,
                     context=context,
                     raise_on_failure=True,
+                    release_for_handoff=(
+                        preserve_sleeping_paddle and label == "OCR"
+                    ),
                 )
             except Exception as exc:
                 failures.append(exc)
@@ -420,11 +424,16 @@ class StageBatchedProcessor(BatchProcessor):
         *,
         context: str,
         raise_on_failure: bool,
+        release_for_handoff: bool = False,
     ) -> None:
         last_error: Exception | None = None
         for attempt in range(2):
             try:
-                runtime_manager.shutdown()
+                release = getattr(runtime_manager, "release_for_handoff", None)
+                if release_for_handoff and label == "OCR" and callable(release):
+                    release()
+                else:
+                    runtime_manager.shutdown()
                 return
             except Exception as exc:
                 last_error = exc
@@ -1386,6 +1395,7 @@ class StageBatchedProcessor(BatchProcessor):
                 runtime_manager,
                 context="OCR-to-inpaint handoff",
                 raise_on_failure=True,
+                release_for_handoff=True,
             )
         self._raise_if_cancelled()
 
@@ -3168,11 +3178,13 @@ class StageBatchedProcessor(BatchProcessor):
             if self._project_checkpoint_store is not None
             else []
         )
+        batch_completed = False
         try:
             self._raise_if_cancelled()
             self._shutdown_managed_runtimes(
                 context="batch startup preflight",
                 raise_on_failure=True,
+                preserve_sleeping_paddle=True,
             )
             self._raise_if_cancelled()
             self._start_ocr_prewarm(policy)
@@ -3190,6 +3202,7 @@ class StageBatchedProcessor(BatchProcessor):
                     total_images=total_images,
                     stage_ceiling="ocr",
                 )
+                batch_completed = True
                 return
             self._inpaint_all(pages)
             self._sample_performance_resources("inpaint_stage_end")
@@ -3200,6 +3213,7 @@ class StageBatchedProcessor(BatchProcessor):
             self._render_all(pages)
             self._sample_performance_resources("render_stage_end")
             self._emit_benchmark_event("batch_run_done", total_images=total_images)
+            batch_completed = True
         except OperationCancelledError:
             self._emit_benchmark_event("batch_run_cancelled", total_images=total_images)
             return
@@ -3214,7 +3228,9 @@ class StageBatchedProcessor(BatchProcessor):
             try:
                 self._shutdown_prewarm_executor()
             finally:
-                self._shutdown_managed_runtimes()
+                self._shutdown_managed_runtimes(
+                    preserve_sleeping_paddle=batch_completed,
+                )
             self._progress_image_path = None
 
     def _complete_ocr_stage_ceiling(self, pages: list[StagePageContext]) -> None:

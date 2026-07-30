@@ -27,6 +27,7 @@ if /I "%COMIC_VERIFY_ONLY%"=="1" (
         "paddleocr_vl_docker_files\docker-compose.yaml"
         "resources\translations\compiled\ct_ko.qm"
         "scripts\prepare_gemma_runtime.ps1"
+        "scripts\prepare_paddleocr_llamacpp_runtime.ps1"
         "scripts\verify_windows_runtime.py"
     ) do (
         if not exist "%SCRIPT_DIR%%%~F" (
