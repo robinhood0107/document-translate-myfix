@@ -15,6 +15,12 @@ from PySide6.QtCore import QCoreApplication
 from PySide6.QtGui import QColor
 
 from modules.detection.processor import TextBlockDetector
+from modules.ocr.result_contract import (
+    PROCESSING_ACTION_TRANSLATE_INPAINT,
+    finalize_ocr_processing_contract,
+    finalize_ocr_processing_contracts,
+    select_translate_inpaint_blocks,
+)
 from modules.translation.processor import Translator
 from modules.utils.textblock import sort_blk_list
 from modules.utils.pipeline_config import inpaint_map, get_config, get_inpainter_runtime
@@ -1302,6 +1308,14 @@ class BatchProcessor:
                             remaining_block_count=len(blk_list or []),
                         )
 
+                    finalize_ocr_processing_contracts(
+                        [
+                            *blk_list,
+                            *rejected_empty_blocks,
+                            *embedded_ui_blocks,
+                        ]
+                    )
+
                     if not blk_list or int(quality.get("non_empty", 0) or 0) <= 0:
                         blk_list = []
                         page_state = self._ensure_page_state(image_path)
@@ -1638,11 +1652,18 @@ class BatchProcessor:
             try:
                 # Clean Image of text
 
-                # Use the shared inpainter from the handler
+                # Use the shared inpainter from the handler only when at least
+                # one block is explicitly routed to destructive processing.
                 runtime = get_inpainter_runtime(settings_page)
                 inpainter_key = runtime["key"]
                 inpainter_backend = runtime["backend"]
-                if self.inpainting.inpainter_cache is None or self.inpainting.cached_inpainter_key != inpainter_key:
+                inpaint_blocks, protected_inpaint_blocks = (
+                    split_inpaint_protected_ocr_blocks(blk_list)
+                )
+                if inpaint_blocks and (
+                    self.inpainting.inpainter_cache is None
+                    or self.inpainting.cached_inpainter_key != inpainter_key
+                ):
                     device = resolve_device(
                         settings_page.is_gpu_enabled(),
                         backend=inpainter_backend,
@@ -1661,55 +1682,125 @@ class BatchProcessor:
                     t1 = time.time()
                     logger.info("pre-inpaint: inpainter initialized in %.2fs", t1 - t0)
 
-                config = get_config(settings_page)
-                inpaint_blocks, protected_inpaint_blocks = split_inpaint_protected_ocr_blocks(blk_list)
-                logger.info(
-                    "pre-inpaint: generating mask (blk_list=%d blocks, protected=%d)",
-                    len(inpaint_blocks),
-                    len(protected_inpaint_blocks),
-                )
-                t0 = time.time()
-                mask_settings = settings_page.get_mask_refiner_settings()
-                mask_details = generate_mask(
-                    image,
-                    inpaint_blocks,
-                    settings=mask_settings,
-                    return_details=True,
-                    precomputed_mask_details=precomputed_mask_details,
-                )
-                if protected_inpaint_blocks:
-                    mask_details["inpaint_protected_block_count"] = len(protected_inpaint_blocks)
-                    mask_details["inpaint_protected_reasons"] = [
-                        getattr(block, "_inpaint_protected_reason", "")
-                        for block in protected_inpaint_blocks
-                    ]
-                mask = mask_details["final_mask"]
-                raw_mask = mask_details["raw_mask"]
-                t1 = time.time()
-                logger.info("pre-inpaint: mask generated in %.2fs (mask shape=%s, refiner=%s backend=%s)", t1 - t0, getattr(mask, 'shape', None), mask_details.get("mask_refiner"), mask_details.get("refiner_backend"))
+                if inpaint_blocks:
+                    config = get_config(settings_page)
+                    logger.info(
+                        "pre-inpaint: generating mask "
+                        "(blk_list=%d blocks, protected=%d)",
+                        len(inpaint_blocks),
+                        len(protected_inpaint_blocks),
+                    )
+                    t0 = time.time()
+                    mask_settings = settings_page.get_mask_refiner_settings()
+                    mask_details = generate_mask(
+                        image,
+                        inpaint_blocks,
+                        settings=mask_settings,
+                        return_details=True,
+                        precomputed_mask_details=precomputed_mask_details,
+                    )
+                    if protected_inpaint_blocks:
+                        mask_details[
+                            "inpaint_protected_block_count"
+                        ] = len(protected_inpaint_blocks)
+                        mask_details["inpaint_protected_reasons"] = [
+                            getattr(
+                                block,
+                                "_inpaint_protected_reason",
+                                "",
+                            )
+                            for block in protected_inpaint_blocks
+                        ]
+                    mask = mask_details["final_mask"]
+                    raw_mask = mask_details["raw_mask"]
+                    t1 = time.time()
+                    logger.info(
+                        "pre-inpaint: mask generated in %.2fs "
+                        "(mask shape=%s, refiner=%s backend=%s)",
+                        t1 - t0,
+                        getattr(mask, "shape", None),
+                        mask_details.get("mask_refiner"),
+                        mask_details.get("refiner_backend"),
+                    )
 
-                self.emit_progress(index, total_images, 4, 10, False)
-                if self._is_cancelled():
-                    return
+                    self.emit_progress(index, total_images, 4, 10, False)
+                    if self._is_cancelled():
+                        return
 
-                inpaint_input_img = self.inpainting.inpaint_with_blocks(image, mask, inpaint_blocks, config=config)
-                inpaint_input_img = imk.convert_scale_abs(inpaint_input_img)
-                inpaint_edit_mask = getattr(self.inpainting, "last_inpaint_edit_mask", None)
-                if inpaint_edit_mask is not None:
-                    mask = np.where((mask > 0) | (inpaint_edit_mask > 0), 255, 0).astype(np.uint8)
-                inpaint_input_img, mask, cleanup_stats = refine_bubble_residue_inpaint(
-                    inpaint_input_img,
-                    mask,
-                    inpaint_blocks,
-                    self.inpainting.inpainter_cache,
-                    config,
-                )
-                inpaint_input_img, mask, cleanup_stats = apply_duplicate_bubble_inner_fill(
-                    inpaint_input_img,
-                    mask,
-                    mask_details,
-                    cleanup_stats,
-                )
+                    inpaint_input_img = self.inpainting.inpaint_with_blocks(
+                        image,
+                        mask,
+                        inpaint_blocks,
+                        config=config,
+                    )
+                    inpaint_input_img = imk.convert_scale_abs(
+                        inpaint_input_img
+                    )
+                    inpaint_edit_mask = getattr(
+                        self.inpainting,
+                        "last_inpaint_edit_mask",
+                        None,
+                    )
+                    if inpaint_edit_mask is not None:
+                        mask = np.where(
+                            (mask > 0) | (inpaint_edit_mask > 0),
+                            255,
+                            0,
+                        ).astype(np.uint8)
+                    (
+                        inpaint_input_img,
+                        mask,
+                        cleanup_stats,
+                    ) = refine_bubble_residue_inpaint(
+                        inpaint_input_img,
+                        mask,
+                        inpaint_blocks,
+                        self.inpainting.inpainter_cache,
+                        config,
+                    )
+                    (
+                        inpaint_input_img,
+                        mask,
+                        cleanup_stats,
+                    ) = apply_duplicate_bubble_inner_fill(
+                        inpaint_input_img,
+                        mask,
+                        mask_details,
+                        cleanup_stats,
+                    )
+                else:
+                    raw_mask = np.zeros(
+                        image.shape[:2],
+                        dtype=np.uint8,
+                    )
+                    mask = raw_mask.copy()
+                    mask_details = {
+                        "raw_mask": raw_mask,
+                        "final_mask": mask,
+                        "processing_action_skipped": True,
+                        "inpaint_protected_block_count": len(
+                            protected_inpaint_blocks
+                        ),
+                        "inpaint_protected_reasons": [
+                            getattr(
+                                block,
+                                "_inpaint_protected_reason",
+                                "",
+                            )
+                            for block in protected_inpaint_blocks
+                        ],
+                    }
+                    cleanup_stats = {
+                        "applied": False,
+                        "component_count": 0,
+                        "block_count": 0,
+                        "reason": "no_translate_inpaint_blocks",
+                    }
+                    inpaint_input_img = np.ascontiguousarray(
+                        image.copy(),
+                        dtype=np.uint8,
+                    )
+                    self.emit_progress(index, total_images, 4, 10, False)
 
                 patches = self.inpainting.get_inpainted_patches(mask, inpaint_input_img)
                 self.main_page.patches_processed.emit(patches, image_path)
@@ -1831,7 +1922,9 @@ class BatchProcessor:
             # Get Translations/ Export if selected
             extra_context = settings_page.get_llm_settings()['extra_context']
             translator_key = settings_page.get_tool_selection('translator')
-            translator = Translator(self.main_page, source_lang, target_lang)
+            translation_blocks = select_translate_inpaint_blocks(blk_list)
+            translator = None
+            translator_engine = ""
             self._report_runtime_progress(
                 phase="pipeline",
                 service="gemma" if "gemma" in str(translator_key).lower() else "batch",
@@ -1848,42 +1941,71 @@ class BatchProcessor:
                 image_path=image_path,
                 image_index=index,
                 total_images=total_images,
-                block_count=len(blk_list or []),
+                block_count=len(translation_blocks),
+                preserved_or_review_block_count=(
+                    len(blk_list or []) - len(translation_blocks)
+                ),
                 translator_key=translator_key,
             )
             
             try:
-                _, translation_cache_status = translator.translate_with_cache_manager(
-                    blk_list,
-                    image,
-                    extra_context,
-                    self.cache_manager,
-                )
-                apply_translation_result_dictionary(
-                    blk_list,
-                    settings_page.get_translation_result_dictionary_rules(),
-                )
-                logger.info(
-                    "Translation completed for %d blocks: cache_status=%s",
-                    len(blk_list),
-                    translation_cache_status,
-                )
-                page_translation_metrics = self._translation_benchmark_metrics(translator)
-                self._persist_translation_state(
-                    image_path,
-                    blk_list,
-                    translator_key,
-                    translator.engine.__class__.__name__,
-                    translation_cache_status,
-                )
+                if translation_blocks:
+                    translator = Translator(
+                        self.main_page,
+                        source_lang,
+                        target_lang,
+                    )
+                    translator_engine = (
+                        translator.engine.__class__.__name__
+                    )
+                    _, translation_cache_status = (
+                        translator.translate_with_cache_manager(
+                            translation_blocks,
+                            image,
+                            extra_context,
+                            self.cache_manager,
+                        )
+                    )
+                    apply_translation_result_dictionary(
+                        translation_blocks,
+                        settings_page.get_translation_result_dictionary_rules(),
+                    )
+                    logger.info(
+                        "Translation completed for %d actionable blocks: "
+                        "cache_status=%s",
+                        len(translation_blocks),
+                        translation_cache_status,
+                    )
+                    page_translation_metrics = (
+                        self._translation_benchmark_metrics(translator)
+                    )
+                    self._persist_translation_state(
+                        image_path,
+                        blk_list,
+                        translator_key,
+                        translator_engine,
+                        translation_cache_status,
+                    )
+                else:
+                    translation_cache_status = "processing-action-skipped"
+                    page_translation_metrics = {}
+                    self.main_page.image_ctrl.mark_processing_stage(
+                        image_path,
+                        "translation",
+                        "skipped",
+                        reason="no_translate_inpaint_blocks",
+                    )
                 self._emit_benchmark_event(
                     "translate_end",
                     image_path=image_path,
                     image_index=index,
                     total_images=total_images,
-                    block_count=len(blk_list or []),
+                    block_count=len(translation_blocks),
+                    preserved_or_review_block_count=(
+                        len(blk_list or []) - len(translation_blocks)
+                    ),
                     translator_key=translator_key,
-                    translator_engine=translator.engine.__class__.__name__,
+                    translator_engine=translator_engine,
                     cache_status=translation_cache_status,
                     **page_translation_metrics,
                 )
@@ -1936,15 +2058,19 @@ class BatchProcessor:
                 self._emit_benchmark_event("batch_run_cancelled", image_path=image_path, image_index=index, total_images=total_images)
                 return
 
-            entire_raw_text = get_raw_text(blk_list)
-            entire_translated_text = get_raw_translation(blk_list)
+            entire_raw_text = get_raw_text(translation_blocks)
+            entire_translated_text = get_raw_translation(
+                translation_blocks
+            )
 
             # Parse JSON strings and check if they're empty objects or invalid
             try:
                 raw_text_obj = json.loads(entire_raw_text)
                 translated_text_obj = json.loads(entire_translated_text)
                 
-                if (not raw_text_obj) or (not translated_text_obj):
+                if translation_blocks and (
+                    (not raw_text_obj) or (not translated_text_obj)
+                ):
                     self._emit_benchmark_event(
                         "page_failed",
                         image_path=image_path,
@@ -2018,9 +2144,13 @@ class BatchProcessor:
             render_settings = self.main_page.render_settings()
             upper_case = render_settings.upper_case
             outline = render_settings.outline
-            format_translations(blk_list, trg_lng_cd, upper_case=upper_case)
+            format_translations(
+                translation_blocks,
+                trg_lng_cd,
+                upper_case=upper_case,
+            )
             get_best_render_area(
-                blk_list,
+                translation_blocks,
                 image,
                 inpaint_input_img,
                 auto_max_font_profile=getattr(render_settings, "auto_max_font_profile", "current"),
@@ -2052,6 +2182,19 @@ class BatchProcessor:
             seen_bubble_render_keys: set[tuple[tuple[int, int, int, int], str]] = set()
             for blk in blk_list:
                 if is_block_ocr_empty(blk):
+                    continue
+                finalize_ocr_processing_contract(blk)
+                if (
+                    getattr(blk, "processing_action", "")
+                    != PROCESSING_ACTION_TRANSLATE_INPAINT
+                ):
+                    blk._render_skip_reason = (
+                        "processing_action_"
+                        + str(
+                            getattr(blk, "processing_action", "")
+                            or "review"
+                        )
+                    )
                     continue
                 x1, y1, block_width, block_height = blk.xywh
 
