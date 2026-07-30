@@ -24,6 +24,23 @@ from modules.utils.inpaint_strokes import (
     STROKE_ROLE_EXCLUDE,
     STROKE_ROLE_GENERATED,
 )
+from modules.inpainting.runtime_contract import (
+    INPAINT_RETRY_POLICY_VERSION,
+    InpaintingCudaOOMError,
+    InpaintingRuntimeContractError,
+    bounded_retry_roi,
+    inpaint_cuda_oom_message,
+    inpaint_release_unconfirmed_message,
+    inspect_learned_inpainter_runtime,
+    is_cuda_oom_error,
+    runtime_mask_diagnostics,
+    validate_learned_inpaint_runtime,
+)
+from modules.utils.inpaint_composite import (
+    composite_with_edit_mask,
+    count_changed_outside_edit_mask,
+    normalize_edit_mask,
+)
 from modules.utils.pipeline_config import inpaint_map, get_config, get_inpainter_runtime
 from modules.inpainting.source_lama_blockwise import (
     release_source_lama_cache,
@@ -40,26 +57,85 @@ class InpaintingHandler:
         self.main_page = main_page
         self.inpainter_cache = None
         self.cached_inpainter_key = None
+        self.cached_inpainter_runtime_signature = None
         self.inpainter_driver_baseline = None
         self.last_inpaint_edit_mask = None
+        self.last_inpaint_diagnostics: dict[str, Any] = {}
+        self.inpainter_runtime_contract: dict[str, Any] = {}
+        self.last_profile_change_release: dict[str, Any] = {}
 
     def _ensure_inpainter(self):
         settings_page = self.main_page.settings_page
         runtime = get_inpainter_runtime(settings_page)
         inpainter_key = runtime['key']
-        if self.inpainter_cache is None or self.cached_inpainter_key != inpainter_key:
+        runtime_signature = (
+            str(inpainter_key),
+            str(runtime.get('backend', '') or ''),
+            str(runtime.get('device', '') or ''),
+            int(runtime.get('inpaint_size', 0) or 0),
+            str(runtime.get('precision', '') or ''),
+        )
+        validate_learned_inpaint_runtime(
+            inpainter_key=str(inpainter_key),
+            device=str(runtime.get('device', '') or ''),
+            precision=str(runtime.get('precision', '') or ''),
+        )
+        if (
+            self.inpainter_cache is None
+            or self.cached_inpainter_runtime_signature != runtime_signature
+        ):
+            if self.inpainter_cache is not None:
+                release_report = self.release_inpainter_resources()
+                self.last_profile_change_release = release_report
+                release_gate = dict(
+                    release_report.get("vram_release_gate") or {}
+                )
+                if (
+                    release_gate.get("required")
+                    and not release_gate.get("observed")
+                ):
+                    raise InpaintingRuntimeContractError(
+                        inpaint_release_unconfirmed_message()
+                    )
             self.inpainter_driver_baseline = query_cuda_handoff_metrics()
             backend = runtime['backend']
             device = resolve_device(settings_page.is_gpu_enabled(), backend)
+            validate_learned_inpaint_runtime(
+                inpainter_key=str(inpainter_key),
+                device=str(device),
+                precision=str(runtime.get('precision', '') or ''),
+            )
             InpainterClass = inpaint_map[inpainter_key]
-            self.inpainter_cache = InpainterClass(
+            candidate_inpainter = InpainterClass(
                 device,
                 backend=backend,
                 runtime_device=runtime.get('device', device),
                 inpaint_size=runtime.get('inpaint_size'),
                 precision=runtime.get('precision'),
             )
+            try:
+                runtime_contract = inspect_learned_inpainter_runtime(
+                    candidate_inpainter,
+                    inpainter_key=str(inpainter_key),
+                    requested_device=str(device),
+                    requested_precision=str(
+                        runtime.get('precision', '') or ''
+                    ),
+                )
+            except Exception:
+                release_report = self._detach_inpainter_native_resources(
+                    candidate_inpainter
+                )
+                cleanup_python_cuda_memory(
+                    release_cuda_allocator=bool(
+                        release_report.get("gpu_release_expected")
+                    ),
+                )
+                raise
+            self.inpainter_cache = candidate_inpainter
+            self.inpainter_runtime_contract = runtime_contract
             self.cached_inpainter_key = inpainter_key
+            self.cached_inpainter_runtime_signature = runtime_signature
         return self.inpainter_cache
 
     @staticmethod
@@ -124,7 +200,9 @@ class InpaintingHandler:
         driver_baseline = self.inpainter_driver_baseline
         self.inpainter_cache = None
         self.cached_inpainter_key = None
+        self.cached_inpainter_runtime_signature = None
         self.inpainter_driver_baseline = None
+        self.inpainter_runtime_contract = {}
 
         handler_release = self._detach_inpainter_native_resources(cached_inpainter)
         source_release = release_source_lama_cache()
@@ -193,22 +271,128 @@ class InpaintingHandler:
 
     def inpaint_with_blocks(self, image: np.ndarray, mask: np.ndarray, blk_list, config=None):
         self.last_inpaint_edit_mask = None
+        self.last_inpaint_diagnostics = {}
         if image is None or mask is None:
             return None
         self._ensure_inpainter()
         if config is None:
             config = get_config(self.main_page.settings_page)
         blocks = list(blk_list or [])
-        result, edit_mask = source_lama_blockwise_inpaint(
-            image,
-            mask,
-            blocks,
-            self.inpainter_cache,
-            config,
-            check_need_inpaint=True,
-            return_edit_mask=True,
+        device = str(
+            getattr(
+                self.inpainter_cache,
+                "runtime_device",
+                getattr(self.inpainter_cache, "device", ""),
+            )
+            or ""
+        )
+        precision = str(
+            getattr(self.inpainter_cache, "precision", "fp32") or "fp32"
+        )
+        diagnostics = {
+            **dict(self.inpainter_runtime_contract or {}),
+            **validate_learned_inpaint_runtime(
+                inpainter_key=str(self.cached_inpainter_key or ""),
+                device=device,
+                precision=precision,
+            ),
+            **runtime_mask_diagnostics(mask, image.shape),
+            "inpaint_size": int(
+                getattr(self.inpainter_cache, "inpaint_size", 0) or 0
+            ),
+            "retry_policy": INPAINT_RETRY_POLICY_VERSION,
+            "oom_retry_count": 0,
+            "oom_retry_roi": None,
+            "model_call_diagnostics": [],
+            "status": "running",
+        }
+        try:
+            result, edit_mask, model_diagnostics = (
+                source_lama_blockwise_inpaint(
+                    image,
+                    mask,
+                    blocks,
+                    self.inpainter_cache,
+                    config,
+                    check_need_inpaint=True,
+                    return_edit_mask=True,
+                    return_diagnostics=True,
+                )
+            )
+            diagnostics["model_call_diagnostics"] = model_diagnostics
+            diagnostics["oom_retry_count"] = sum(
+                int(item.get("oom_retry_count", 0) or 0)
+                for item in model_diagnostics
+            )
+        except InpaintingCudaOOMError as exc:
+            diagnostics["status"] = "failed_after_model_retry"
+            model_failure = dict(
+                getattr(exc, "diagnostics", {}) or {}
+            )
+            if model_failure:
+                diagnostics["model_call_diagnostics"] = [model_failure]
+                diagnostics["oom_retry_count"] = int(
+                    model_failure.get("oom_retry_count", 0) or 0
+                )
+            self.last_inpaint_diagnostics = diagnostics
+            raise
+        except Exception as exc:
+            if not is_cuda_oom_error(exc):
+                diagnostics["status"] = "failed"
+                diagnostics["error_type"] = type(exc).__name__
+                self.last_inpaint_diagnostics = diagnostics
+                raise
+            retry_roi = bounded_retry_roi(mask, image.shape)
+            diagnostics["oom_retry_count"] = 1
+            diagnostics["oom_retry_roi"] = (
+                retry_roi.as_list() if retry_roi is not None else None
+            )
+            diagnostics["error_type"] = type(exc).__name__
+            if retry_roi is None:
+                diagnostics["status"] = "failed_no_smaller_roi"
+                self.last_inpaint_diagnostics = diagnostics
+                raise InpaintingCudaOOMError(
+                    inpaint_cuda_oom_message(),
+                    diagnostics=diagnostics,
+                ) from exc
+            try:
+                import torch
+
+                torch.cuda.empty_cache()
+                x1, y1, x2, y2 = retry_roi.as_list()
+                retry_image = np.ascontiguousarray(
+                    image[y1:y2, x1:x2]
+                )
+                retry_mask = np.ascontiguousarray(mask[y1:y2, x1:x2])
+                retry_result = self.inpainter_cache(
+                    retry_image,
+                    retry_mask,
+                    config,
+                )
+            except Exception as retry_exc:
+                diagnostics["status"] = "failed_after_roi_retry"
+                diagnostics["retry_error_type"] = type(retry_exc).__name__
+                self.last_inpaint_diagnostics = diagnostics
+                raise InpaintingCudaOOMError(
+                    inpaint_cuda_oom_message(),
+                    diagnostics=diagnostics,
+                ) from retry_exc
+            result = np.asarray(image).copy()
+            result[y1:y2, x1:x2] = composite_with_edit_mask(
+                retry_image,
+                retry_result,
+                retry_mask,
+            )
+            edit_mask = normalize_edit_mask(mask, image.shape)
+            diagnostics["status"] = "completed_after_roi_retry"
+        else:
+            diagnostics["status"] = "completed"
+        result = composite_with_edit_mask(image, result, edit_mask)
+        diagnostics["outside_mask_changed_pixel_count"] = (
+            count_changed_outside_edit_mask(image, result, edit_mask)
         )
         self.last_inpaint_edit_mask = edit_mask
+        self.last_inpaint_diagnostics = diagnostics
         return result
 
     def _qimage_to_np(self, qimg: QImage):

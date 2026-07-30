@@ -34,6 +34,10 @@ from modules.ocr.persistent_cache import (
 from modules.utils.device import get_providers, resolve_device
 from modules.utils.download import ModelDownloader, ModelID
 from modules.utils.textblock import TextBlock
+from modules.inpainting.runtime_contract import (
+    INPAINT_RETRY_POLICY_VERSION,
+    INPAINT_RUNTIME_CONTRACT_VERSION,
+)
 
 
 logger = logging.getLogger(__name__)
@@ -42,7 +46,7 @@ logger = logging.getLogger(__name__)
 PROJECT_DETECTION_CHECKPOINT_SCHEMA_VERSION = 1
 PROJECT_OCR_CHECKPOINT_SCHEMA_VERSION = 1
 PROJECT_TRANSLATION_CHECKPOINT_SCHEMA_VERSION = 1
-PROJECT_INPAINT_CHECKPOINT_SCHEMA_VERSION = 2
+PROJECT_INPAINT_CHECKPOINT_SCHEMA_VERSION = 3
 PROJECT_RENDER_CHECKPOINT_SCHEMA_VERSION = 3
 DETECTION_PREPROCESS_SCHEMA_VERSION = "rtdetr-v2-rgb-640-f32-v1"
 DETECTION_POSTPROCESS_SCHEMA_VERSION = "comic-text-bubble-blocks-v1"
@@ -54,8 +58,8 @@ OCR_POSTPROCESS_SCHEMA_VERSION = (
     "text-first-exact-canonical-quality-retry-drop-guards-v2"
 )
 TRANSLATION_STATE_SCHEMA_VERSION = "ctpr-block-translation-state-v1"
-INPAINT_INPUT_SCHEMA_VERSION = "deterministic-ordered-input-brush-v2"
-INPAINT_CLEANUP_SCHEMA_VERSION = "bubble-residue-duplicate-fill-v1"
+INPAINT_INPUT_SCHEMA_VERSION = "deterministic-ordered-input-brush-v3"
+INPAINT_CLEANUP_SCHEMA_VERSION = "bubble-residue-duplicate-fill-cuda-v2"
 INPAINT_ARTIFACT_SCHEMA_VERSION = "lossless-zlib-array-v2"
 INPAINT_BLOCK_STATE_SCHEMA_VERSION = "inpaint-block-state-v1"
 RENDER_INPUT_SCHEMA_VERSION = "translation-inpaint-style-layout-v1"
@@ -1264,6 +1268,8 @@ def build_inpaint_identity(
         "input_schema": INPAINT_INPUT_SCHEMA_VERSION,
         "cleanup_schema": INPAINT_CLEANUP_SCHEMA_VERSION,
         "artifact_schema": INPAINT_ARTIFACT_SCHEMA_VERSION,
+        "runtime_contract": INPAINT_RUNTIME_CONTRACT_VERSION,
+        "retry_policy": INPAINT_RETRY_POLICY_VERSION,
     }
 
 

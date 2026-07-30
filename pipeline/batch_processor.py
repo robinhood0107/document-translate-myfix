@@ -721,6 +721,7 @@ class BatchProcessor:
         cleanup_stats: dict | None,
         mask_details: dict | None = None,
         inpainter_backend: str = "unknown",
+        inpaint_runtime_diagnostics: dict | None = None,
     ) -> dict[str, str]:
         if not has_debug_exports(export_settings):
             return {}
@@ -791,6 +792,7 @@ class BatchProcessor:
             mask_score_color_delta=float(mask_details.get("mask_score_color_delta", 0.0) or 0.0),
             ui_panel_mode=str(mask_details.get("ui_panel_mode", "") or ""),
             ui_panel_preview_path=str(mask_details.get("ui_panel_preview_path", "") or ""),
+            inpaint_runtime_diagnostics=inpaint_runtime_diagnostics,
         )
         try:
             return export_inpaint_debug_artifacts(
