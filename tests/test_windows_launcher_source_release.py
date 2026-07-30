@@ -46,6 +46,10 @@ class WindowsLauncherSourceReleaseTests(unittest.TestCase):
             "scripts/prepare_paddleocr_llamacpp_runtime.ps1",
             paths,
         )
+        self.assertIn(
+            "scripts/prepare_mangalmm_llamacpp_runtime.ps1",
+            paths,
+        )
         self.assertIn("scripts/verify_windows_runtime.py", paths)
         self.assertNotIn("scripts/benchmark_cold_cache_finalization.py", paths)
         self.assertNotIn("scripts/build_windows_gpu_onefile.ps1", paths)
@@ -134,6 +138,10 @@ class WindowsLauncherSourceReleaseTests(unittest.TestCase):
             self.assertIn("scripts\\prepare_gemma_runtime.ps1", text)
             self.assertIn(
                 "scripts\\prepare_paddleocr_llamacpp_runtime.ps1",
+                text,
+            )
+            self.assertIn(
+                "scripts\\prepare_mangalmm_llamacpp_runtime.ps1",
                 text,
             )
             self.assertIn("scripts\\verify_windows_runtime.py", text)

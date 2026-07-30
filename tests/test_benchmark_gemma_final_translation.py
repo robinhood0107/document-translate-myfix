@@ -167,6 +167,22 @@ class GemmaFinalTranslationBenchmarkTests(unittest.TestCase):
             group_seven["source_sha256"],
         )
 
+    def test_current_checkout_refuses_retired_grouped_replay(self) -> None:
+        with self.assertRaisesRegex(
+            RuntimeError,
+            benchmark.HISTORICAL_GROUPED_REPLAY_COMMIT,
+        ):
+            benchmark.require_historical_grouped_runtime()
+
+    def test_historical_grouped_replay_guard_accepts_live_contract(self) -> None:
+        with patch.object(
+            benchmark.gemma_runtime,
+            "GEMMA_REQUEST_MODE_CONTEXTUAL_GROUPED",
+            benchmark.GEMMA_REQUEST_MODE_CONTEXTUAL_GROUPED,
+            create=True,
+        ):
+            benchmark.require_historical_grouped_runtime()
+
     def test_api_base_url_is_loopback_only(self) -> None:
         self.assertEqual(
             benchmark.validate_api_base_url(
@@ -1586,6 +1602,10 @@ class GemmaFinalTranslationBenchmarkTests(unittest.TestCase):
                     benchmark,
                     "execute_benchmark_round",
                     execute_mock,
+                ),
+                patch.object(
+                    benchmark,
+                    "require_historical_grouped_runtime",
                 ),
             ):
                 exit_code = benchmark.main(

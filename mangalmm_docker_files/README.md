@@ -1,56 +1,41 @@
-# MangaLMM Docker Bundle
+# MangaLMM llama.cpp runtime
 
-이 폴더는 현재 프로젝트에서 사용하는 `MangaLMM` 로컬 OCR 런타임의 기준 번들입니다.
+이 번들은 MangaLMM의 관리형 full-page OCR 서버를 실행합니다.
 
-## 기준 파일
+## 모델 준비
 
-- `docker-compose.yaml`
+모델은 host bind mount가 아니라 versioned named volume에 보관합니다.
 
-이 파일은 `llama.cpp` 기반 `MangaLMM` 서버를 같은 방식으로 다시 올리기 위한 tracked 기준입니다.
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass `
+  -File .\scripts\prepare_mangalmm_llamacpp_runtime.ps1 `
+  -Mode Prepare `
+  -ModelDirectory 'C:\ExampleWorkspace\models\MangaLMM'
+```
 
-## 요구 모델 파일
+전체 SHA-256 재검증:
 
-아래 두 파일이 저장소 루트의 `testmodel/` 폴더에 있어야 합니다.
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass `
+  -File .\scripts\prepare_mangalmm_llamacpp_runtime.ps1 `
+  -Mode Verify
+```
 
-- `MangaLMM.Q8_0.gguf`
-- `MangaLMM.mmproj-Q8_0.gguf`
-
-현재 compose는 `../testmodel:/models:ro`를 마운트하고 아래 경로를 사용합니다.
+기본 volume은 `comic-translate-mangalmm-models-v2`이며 서비스에는 read-only로
+mount됩니다.
 
 - `/models/MangaLMM.Q8_0.gguf`
 - `/models/MangaLMM.mmproj-Q8_0.gguf`
 
-## 서버 실행
+## 런타임 계약
 
-저장소 루트에서 실행:
+- digest로 고정된 `ghcr.io/ggml-org/llama.cpp`
+- `pull_policy: missing`
+- image ID, compose command, volume, ready manifest, model/mmproj SHA를 포함한
+  runtime fingerprint
+- fingerprint가 정확히 같은 stopped container만 `docker start`로 재사용
+- 정상 종료는 `docker compose stop`
+- 페이지 전체 PNG spotting만 사용
+- block crop·page tile·숨은 Paddle fallback·Paddle 동시 상주 금지
 
-```bash
-docker compose -f mangalmm_docker_files/docker-compose.yaml pull --policy always
-docker compose -f mangalmm_docker_files/docker-compose.yaml up -d --force-recreate
-```
-
-앱 설정:
-
-- OCR: `MangaLMM`
-- Server URL: `http://127.0.0.1:28081/v1`
-
-## 기준 요약
-
-- image: `ghcr.io/ggml-org/llama.cpp:server-cuda`
-- pull policy: `always`
-- OpenAI-compatible endpoint: `/v1/chat/completions`
-- health endpoint: `/health`
-- OCR request defaults: `PNG data URL`, `image -> text`, `temperature=0.1`, `top_k=1`, `top_p=0.001`, `repeat_penalty=1.05`
-- prompt cache: disabled with `--cache-ram 0`
-- purpose: full-page single-shot OCR for the app's existing `TextBlock` pipeline
-
-## 참고
-
-- 이 런타임은 detector 이후 `페이지 전체 1장`을 한 번 보내는 full-page single-shot OCR 용도입니다.
-- 일본어 `Optimal+`는 이 런타임 위에서 내부 고정 계약을 사용합니다.
-  - `standard`: `1224 x 1728`, grounding prompt, `2048 tokens`
-  - `dense`: `900 x 1270`, hybrid JSON grounding prompt, `1024 tokens`
-  - rescue retry: `900 x 1270`, dense prompt, `4096 tokens`
-- 비율 유지 downscale만 적용하고, `bbox_2d`는 앱에서 `scale_x`, `scale_y`로 원본 좌표에 역매핑합니다.
-- `/health`가 `503 Loading model`인 동안에는 재기동보다 최대 300초 대기를 우선합니다.
-- 루트 `docker-compose.yaml`은 Gemma 번역 서버용으로 유지하고, MangaLMM는 이 별도 번들에서 관리합니다.
+앱의 관리형 endpoint는 `http://127.0.0.1:28081/v1`입니다.

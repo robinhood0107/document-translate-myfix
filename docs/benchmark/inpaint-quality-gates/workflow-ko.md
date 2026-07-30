@@ -6,7 +6,8 @@
 4. 역사적 mask screen은 dilation 1·2·4와 Hough 구조 보호 경로를
    재현하는 용도로만 유지한다.
 5. `mask-residual` screen에서는 product FP32 기준선, 굵은 외곽선
-   dilation 2·4·6, 제한된 2차 GPU residual 후보를 비교한다.
+   dilation 2·4·6, 제한된 2차 GPU residual 후보와 서로 연결되지 않은
+   전경 글자 성분을 별도 GPU pass로 처리하는 후보를 비교한다.
 6. 1차 mask, 2차 residual mask, 최종 합집합 mask를 각각 SHA-256
    산출물로 고정한다.
 7. `preserve` 영역을 훼손하지 않은 mask만 model screen에 들어갈 수
@@ -34,6 +35,32 @@
 통과한 상태다. render가 첨부된 최종 검수 전에는
 `promotion_eligible_candidates`가 비어 있어야 한다.
 
-ZITS/ZITS++는 adapter, 모델 SHA, 라이선스, CUDA FP32, 12GB VRAM 계약을
-확인하기 전까지 `feasibility_not_implemented`로 기록되며 승격 후보가
-아니다.
+ZITS++는 제품 인페인터가 아니라 격리된 lab feasibility adapter로만
+실행한다. 공식 소스 커밋, model_512·LSM-HAWP SHA-256, digest-pinned
+CUDA image를 모두 확인해야 한다. 어댑터는 한 프로필 동안 모델을 한
+번만 로드하고 JSONL로 frozen case를 순차 처리한다. 실제 device가
+CUDA가 아니거나 FP32가 아니거나 CPU fallback이 발생하면 실행을
+실패시킨다. feasibility 후보는 자동·blind 품질 게이트를 통과하더라도
+별도 제품화 승인 전에는 승격 후보가 아니다.
+
+연결 성분 후보는 edit mask를 넓히지 않는다. 동일한 최종 mask를
+8-connectivity 성분으로만 나누고 각 성분 주변의 고해상도 context를
+순차 처리한다. `union_then_components`는 먼저 전체 mask를 한 번
+정리해 인접 원문 글자가 문맥에 남지 않게 한 뒤 같은 성분 pass를
+수행한다. 모든 pass가 끝난 뒤 원래 mask 합집합으로 다시 lossless
+합성하므로 성분 밖 픽셀 변경은 허용되지 않는다. 이 후보들은 반투명
+대사의 여러 세로 열을 하나의 큰 구멍으로 생성할 때 생기는 회색
+얼룩과 글자형 재생성을 줄이는지 확인하기 위한 개발 실험이며, 실제
+전체 파이프라인 검수 전에는 제품 승격 근거가 아니다.
+
+필수 외부 계약은 `run`의 명시 인자 또는 같은 이름의 환경변수로
+전달한다.
+
+```text
+--zits-source-root          / CT_ZITSPP_SOURCE_ROOT
+--zits-model-checkpoint     / CT_ZITSPP_MODEL_CHECKPOINT
+--zits-lsm-checkpoint       / CT_ZITSPP_LSM_CHECKPOINT
+--zits-docker-image         / CT_ZITSPP_DOCKER_IMAGE
+```
+
+공식 원본·가중치·실행 결과는 Git 밖에 보존한다.
