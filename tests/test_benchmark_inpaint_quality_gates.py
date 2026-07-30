@@ -34,7 +34,7 @@ def _fake_result_root(root: Path) -> tuple[Path, list[str]]:
         gates.CandidateProfile(
             slug="candidate-fp32",
             label="Candidate FP32",
-            phase="model",
+            phase="mask-residual",
             inpainter_key="lama_large_512px",
             precision="fp32",
             inpaint_size=2048,
@@ -52,6 +52,8 @@ def _fake_result_root(root: Path) -> tuple[Path, list[str]]:
             for name in (
                 "original",
                 "raw_mask",
+                "primary_mask",
+                "residual_mask",
                 "final_mask",
                 "mask_overlay",
                 "cleaned",
@@ -412,6 +414,210 @@ def test_model_screen_requires_locked_dilation_and_fp32() -> None:
     assert any(profile.feasibility_only for profile in profiles)
 
 
+def test_bold_outline_mask_keeps_glyph_but_rejects_long_ui_rule() -> None:
+    image = np.full((80, 120, 3), 240, dtype=np.uint8)
+    image[12:16, 8:112] = 20
+    image[32:58, 42:50] = 20
+    image[40:49, 32:61] = 20
+    blocks = [
+        {
+            "xyxy": [5, 5, 115, 70],
+            "bubble_xyxy": None,
+            "processing_action": "translate_inpaint",
+        }
+    ]
+    empty = np.zeros(image.shape[:2], dtype=np.uint8)
+    full = np.full(image.shape[:2], 255, dtype=np.uint8)
+    profile = next(
+        profile
+        for profile in gates.MASK_RESIDUAL_SCREEN_PROFILES
+        if profile.mask_mode == "bold_outline"
+        and profile.dilation == 2
+        and profile.residual_mode == "none"
+    )
+
+    masks = gates.build_candidate_masks(
+        profile=profile,
+        image=image,
+        blocks=blocks,
+        product_mask=empty,
+        glyph_base_mask=empty,
+        bubble_protect_mask=empty,
+        structure_protect_mask=empty,
+        allowed_window_mask=full,
+    )
+
+    assert np.count_nonzero(masks["raw_mask"][12:16, 8:112]) == 0
+    assert np.count_nonzero(masks["raw_mask"][32:58, 32:61]) > 0
+    assert np.count_nonzero(masks["final_mask"][32:58, 32:61]) > 0
+
+
+def test_product_uncovered_residual_is_bounded_and_disjoint() -> None:
+    product = np.zeros((24, 24), dtype=np.uint8)
+    product[3:21, 3:21] = 255
+    primary = np.zeros_like(product)
+    primary[10:14, 10:14] = 255
+    allowed = np.zeros_like(product)
+    allowed[5:19, 5:19] = 255
+
+    residual = gates._product_uncovered_residual_mask(
+        product_mask=product,
+        primary_mask=primary,
+        allowed_window_mask=allowed,
+    )
+    covered = gates._dilate_mask(primary, 1) > 0
+
+    assert np.count_nonzero(residual) > 0
+    assert np.count_nonzero((residual > 0) & covered) == 0
+    assert np.count_nonzero((residual > 0) & (allowed == 0)) == 0
+
+
+def test_product_mask_is_clipped_to_allowed_window() -> None:
+    product = np.full((16, 16), 255, dtype=np.uint8)
+    allowed = np.zeros_like(product)
+    allowed[4:12, 5:11] = 255
+    empty = np.zeros_like(product)
+
+    masks = gates.build_candidate_masks(
+        profile=gates.MASK_RESIDUAL_SCREEN_PROFILES[0],
+        image=np.full((16, 16, 3), 180, dtype=np.uint8),
+        blocks=[],
+        product_mask=product,
+        glyph_base_mask=empty,
+        bubble_protect_mask=empty,
+        structure_protect_mask=empty,
+        allowed_window_mask=allowed,
+    )
+
+    assert np.array_equal(masks["primary_mask"], allowed)
+    assert np.array_equal(masks["final_mask"], allowed)
+    assert np.count_nonzero(masks["residual_mask"]) == 0
+
+
+def test_residual_candidate_runs_two_gpu_passes_inside_union_mask() -> None:
+    class FillInpainter:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        def __call__(self, image, mask, _config):
+            self.calls += 1
+            output = image.copy()
+            output[mask > 0] = 20 * self.calls
+            return output
+
+    image = np.full((64, 64, 3), 180, dtype=np.uint8)
+    primary = np.zeros((64, 64), dtype=np.uint8)
+    primary[20:28, 20:28] = 255
+    residual = np.zeros_like(primary)
+    residual[36:44, 36:44] = 255
+    inpainter = FillInpainter()
+
+    cleaned, _elapsed, diagnostics = gates._run_candidate_passes(
+        inpainter=inpainter,
+        image=image,
+        primary_mask=primary,
+        residual_mask=residual,
+        review_roi=[0, 0, 64, 64],
+    )
+    union = np.where((primary > 0) | (residual > 0), 255, 0).astype(
+        np.uint8
+    )
+    changed = gates._changed_pixel_stats(image, cleaned, union)
+
+    assert inpainter.calls == 2
+    assert diagnostics["pass_count"] == 2
+    assert len(diagnostics["passes"]) == 2
+    assert changed["changed_outside_mask_pixel_count"] == 0
+
+
+def test_model_screen_can_lock_full_mask_profile_contract() -> None:
+    selected = next(
+        profile
+        for profile in gates.MASK_RESIDUAL_SCREEN_PROFILES
+        if profile.residual_mode == "product_uncovered"
+    )
+    profiles = gates._profiles_for_phase(
+        "model",
+        selected_dilation=None,
+        selected_mask_profile=selected.slug,
+        include_feasibility=False,
+    )
+
+    assert profiles[0].baseline
+    assert all(
+        profile.mask_mode == selected.mask_mode
+        and profile.dilation == selected.dilation
+        and profile.bold_anchor_distance == selected.bold_anchor_distance
+        and profile.residual_mode == selected.residual_mode
+        for profile in profiles[1:]
+    )
+    with pytest.raises(gates.ProtocolError, match="unknown"):
+        gates._profiles_for_phase(
+            "model",
+            selected_dilation=None,
+            selected_mask_profile="not-a-profile",
+            include_feasibility=False,
+        )
+    with pytest.raises(gates.ProtocolError, match="exactly one"):
+        gates._profiles_for_phase(
+            "model",
+            selected_dilation=2,
+            selected_mask_profile=selected.slug,
+            include_feasibility=False,
+        )
+    with pytest.raises(gates.ProtocolError, match="do not accept"):
+        gates._profiles_for_phase(
+            "mask-residual",
+            selected_dilation=None,
+            selected_mask_profile=selected.slug,
+            include_feasibility=False,
+        )
+
+
+def test_residual_only_candidate_counts_one_actual_gpu_pass() -> None:
+    class FillInpainter:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        def __call__(self, image, mask, _config):
+            self.calls += 1
+            output = image.copy()
+            output[mask > 0] = 25
+            return output
+
+    image = np.full((48, 48, 3), 180, dtype=np.uint8)
+    primary = np.zeros((48, 48), dtype=np.uint8)
+    residual = np.zeros_like(primary)
+    residual[16:32, 16:32] = 255
+    inpainter = FillInpainter()
+
+    cleaned, _elapsed, diagnostics = gates._run_candidate_passes(
+        inpainter=inpainter,
+        image=image,
+        primary_mask=primary,
+        residual_mask=residual,
+        review_roi=[0, 0, 48, 48],
+    )
+
+    assert inpainter.calls == 1
+    assert diagnostics["pass_count"] == 1
+    assert np.count_nonzero(cleaned[residual > 0] == 25) > 0
+
+
+def test_candidate_pass_bundle_rejects_empty_masks() -> None:
+    image = np.full((24, 24, 3), 180, dtype=np.uint8)
+    empty = np.zeros((24, 24), dtype=np.uint8)
+
+    with pytest.raises(gates.ProtocolError, match="no active edit mask"):
+        gates._run_candidate_passes(
+            inpainter=object(),
+            image=image,
+            primary_mask=empty,
+            residual_mask=empty,
+            review_roi=[0, 0, 24, 24],
+        )
+
+
 def test_model_load_failure_is_isolated_as_profile_result(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -473,6 +679,41 @@ def test_result_artifact_tamper_is_rejected() -> None:
 
         with pytest.raises(gates.ProtocolError, match="SHA-256 differs"):
             gates.validate_results(result_root)
+
+
+def test_new_result_contract_requires_primary_and_residual_masks() -> None:
+    with tempfile.TemporaryDirectory() as temporary:
+        result_root, _candidates = _fake_result_root(Path(temporary))
+        payload = gates.read_json(result_root / gates.RESULT_FILENAME)
+        payload["results"][1]["case_results"][0]["artifacts"].pop(
+            "primary_mask"
+        )
+        gates._refresh_result_digests(payload)
+        _write_json(result_root / gates.RESULT_FILENAME, payload)
+
+        with pytest.raises(
+            gates.ProtocolError,
+            match="result artifact is missing: primary_mask",
+        ):
+            gates.validate_results(result_root)
+
+
+def test_historical_result_contract_without_residual_fields_stays_valid() -> None:
+    with tempfile.TemporaryDirectory() as temporary:
+        result_root, _candidates = _fake_result_root(Path(temporary))
+        payload = gates.read_json(result_root / gates.RESULT_FILENAME)
+        for result in payload["results"]:
+            result["profile"].pop("bold_anchor_distance")
+            result["profile"].pop("residual_mode")
+            for case in result["case_results"]:
+                case["artifacts"].pop("primary_mask")
+                case["artifacts"].pop("residual_mask")
+        gates._refresh_result_digests(payload)
+        _write_json(result_root / gates.RESULT_FILENAME, payload)
+
+        assert gates.validate_results(result_root)[
+            "result_contract_sha256"
+        ] == payload["result_contract_sha256"]
 
 
 def test_completed_result_cannot_hide_outside_mask_changes() -> None:
@@ -560,6 +801,35 @@ def test_preliminary_unblind_keeps_candidate_screen_only() -> None:
         assert summary["screen_eligible_candidates"] == [candidates[1]]
         assert summary["promotion_eligible_candidates"] == []
         assert (review_root / gates.UNBLIND_FILENAME).is_file()
+
+
+def test_mask_can_enter_model_screen_without_weakening_final_gate() -> None:
+    with tempfile.TemporaryDirectory() as temporary:
+        root = Path(temporary)
+        result_root, candidates = _fake_result_root(root)
+        review_root = root / "review"
+        gates.build_blind_review(
+            result_root,
+            review_root,
+            mapping={"A": candidates[0], "B": candidates[1]},
+        )
+        _complete_review(
+            review_root / gates.REVIEW_FILENAME,
+            fail_candidate="B",
+        )
+
+        summary = gates.unblind_review(
+            review_root,
+            review_root / gates.REVIEW_FILENAME,
+            confirmation="4-ROWS-REVIEWED",
+        )
+
+        assert summary["coverage_eligible_candidates"] == []
+        assert summary["screen_eligible_candidates"] == []
+        assert summary["promotion_eligible_candidates"] == []
+        assert summary["model_screen_eligible_candidates"] == [
+            candidates[1]
+        ]
 
 
 def test_duplicate_or_incomplete_ranks_block_unblind() -> None:
