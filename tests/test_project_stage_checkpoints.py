@@ -515,6 +515,57 @@ class ProjectStageCheckpointTests(unittest.TestCase):
                 "accepted",
             )
 
+    def test_inpaint_identity_changes_with_processing_action_and_mask(
+        self,
+    ) -> None:
+        blocks = self._blocks()
+        blocks[0].text = "OCR"
+        blocks[0].semantic_role = "dialogue_bubble"
+        blocks[0].processing_action = "translate_inpaint"
+        blocks[0].mask_strategy = "bubble_safe"
+        common = {
+            "source_sha256": "a" * 64,
+            "detection_fingerprint": "b" * 64,
+            "ocr_fingerprint": "c" * 64,
+            "brush_strokes": [],
+            "runtime": {
+                "key": "AOT",
+                "backend": "torch",
+                "precision": "fp32",
+            },
+            "model_identity": {
+                "id": "aot",
+                "declared_digests": ["1" * 64],
+            },
+            "hd_strategy": {"strategy": "Original"},
+            "mask_settings": {"mask_refiner": "ctd"},
+        }
+
+        translate_identity = build_inpaint_identity(
+            blocks=blocks,
+            **common,
+        )
+        blocks[0].semantic_role = "ui_or_sign"
+        blocks[0].processing_action = "preserve"
+        blocks[0].mask_strategy = "preserve_original"
+        preserve_identity = build_inpaint_identity(
+            blocks=blocks,
+            **common,
+        )
+
+        self.assertNotEqual(
+            translate_identity["ordered_blocks_sha256"],
+            preserve_identity["ordered_blocks_sha256"],
+        )
+        self.assertEqual(
+            translate_identity["ocr_processing_contract_schema"],
+            1,
+        )
+        self.assertNotEqual(
+            build_inpaint_fingerprint(translate_identity),
+            build_inpaint_fingerprint(preserve_identity),
+        )
+
     def test_inpaint_checkpoint_compresses_lossless_array_artifacts(
         self,
     ) -> None:
