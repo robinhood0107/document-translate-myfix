@@ -1042,7 +1042,9 @@ printf 'mmproj_bytes=%s\n' "$(stat -c %s "$mmproj_path")"
                     (
                         "{{index .Config.Labels "
                         f"\"{PADDLEOCR_RUNTIME_FINGERPRINT_LABEL}\""
-                        "}}|{{.Image}}"
+                        "}}|{{.Image}}|"
+                        "{{index .Config.Labels "
+                        "\"desktop.docker.io/wsl-distro\"}}"
                     ),
                     name,
                 ],
@@ -1052,14 +1054,25 @@ printf 'mmproj_bytes=%s\n' "$(stat -c %s "$mmproj_path")"
             )
             if getattr(completed, "returncode", 1) != 0:
                 return False
-            fingerprint, separator, image_id = str(
+            parts = str(
                 getattr(completed, "stdout", "") or ""
-            ).strip().partition("|")
+            ).strip().split("|", 2)
+            if len(parts) != 3:
+                return False
+            fingerprint, image_id, wsl_distro = parts
             if (
-                not separator
-                or fingerprint != expected_fingerprint
+                fingerprint != expected_fingerprint
                 or image_id != expected_image_id
             ):
+                return False
+            if os.name == "nt" and wsl_distro.strip():
+                logger.info(
+                    "PaddleOCR container %s was created by WSL Compose (%s); "
+                    "Windows will recreate it so Docker Desktop can manage the "
+                    "Compose application without invoking wsl.",
+                    name,
+                    wsl_distro.strip(),
+                )
                 return False
         return True
 
