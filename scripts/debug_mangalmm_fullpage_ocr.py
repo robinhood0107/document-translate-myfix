@@ -21,11 +21,13 @@ from PIL import Image, ImageDraw
 from modules.detection.processor import TextBlockDetector
 from modules.ocr.mangalmm_ocr import (
     DEFAULT_MANGALMM_DEBUG_EXPORT_LIMIT,
+    DEFAULT_MANGALMM_MAX_COMPLETION_TOKENS,
     DEFAULT_MANGALMM_SERVER_URL,
     DEFAULT_MANGALMM_TEMPERATURE,
     DEFAULT_MANGALMM_TOP_K,
     MangaLMMOCREngine,
 )
+from modules.ocr.selection import OCR_MODE_MANGALMM
 from modules.utils.ocr_debug import ensure_three_channel
 
 
@@ -61,7 +63,7 @@ class _SettingsStub:
         if tool_type == "detector":
             return "RT-DETR-v2"
         if tool_type == "ocr":
-            return "best_local_plus"
+            return OCR_MODE_MANGALMM
         raise KeyError(tool_type)
 
     def is_gpu_enabled(self) -> bool:
@@ -253,8 +255,11 @@ def main() -> int:
     parser.add_argument(
         "--max-completion-tokens",
         type=int,
-        default=256,
-        help="Base max completion tokens before profile floors are applied.",
+        default=DEFAULT_MANGALMM_MAX_COMPLETION_TOKENS,
+        help=(
+            "Maximum full-page OCR completion tokens. "
+            f"Default is {DEFAULT_MANGALMM_MAX_COMPLETION_TOKENS}."
+        ),
     )
     parser.add_argument(
         "--cpu",
@@ -283,7 +288,7 @@ def main() -> int:
     engine.initialize(
         settings,
         source_lang_english="Japanese",
-        selected_ocr_mode="best_local_plus",
+        selected_ocr_mode=OCR_MODE_MANGALMM,
     )
 
     images = _iter_images(input_dir)
