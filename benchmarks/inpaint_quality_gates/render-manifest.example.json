@@ -1,0 +1,19 @@
+{
+  "protocol_version": 1,
+  "kind": "inpaint-quality-render-attachments",
+  "result_contract_sha256": "replace-with-source-result-contract-sha256",
+  "renders": [
+    {
+      "candidate_slug": "baseline-lama-large-bf16-1536-product-mask",
+      "case_id": "opaque-case-001",
+      "render_image": "C:/external-validation/baseline-render.png",
+      "render_sha256": "replace-with-render-sha256"
+    },
+    {
+      "candidate_slug": "model-lama-large-fp32-2048",
+      "case_id": "opaque-case-001",
+      "render_image": "C:/external-validation/candidate-render.png",
+      "render_sha256": "replace-with-render-sha256"
+    }
+  ]
+}

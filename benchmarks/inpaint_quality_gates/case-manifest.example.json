@@ -1,0 +1,31 @@
+{
+  "protocol_version": 1,
+  "cases": [
+    {
+      "case_id": "opaque-case-001",
+      "source_image": "C:/external-validation/source-page.png",
+      "source_sha256": "replace-with-source-sha256",
+      "page_snapshot": "C:/external-validation/page_snapshots.json",
+      "page_name": "source-page.png",
+      "review_roi": [
+        0,
+        0,
+        1024,
+        1024
+      ],
+      "reference_render": "C:/external-validation/reference-render.png",
+      "annotations": [
+        {
+          "block_index": 0,
+          "semantic_role": "dialogue_bubble",
+          "processing_action": "translate_inpaint"
+        },
+        {
+          "block_index": 1,
+          "semantic_role": "ui_or_sign",
+          "processing_action": "preserve"
+        }
+      ]
+    }
+  ]
+}
