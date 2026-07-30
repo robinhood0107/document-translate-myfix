@@ -63,7 +63,13 @@ from modules.ocr.persistent_cache import (
     canonical_sha256,
     snapshot_raw_ocr_result,
 )
-from modules.ocr.result_contract import canonicalize_exact_duplicate_blocks
+from modules.ocr.result_contract import (
+    PROCESSING_ACTION_TRANSLATE_INPAINT,
+    canonicalize_exact_duplicate_blocks,
+    finalize_ocr_processing_contract,
+    finalize_ocr_processing_contracts,
+    select_translate_inpaint_blocks,
+)
 from modules.ocr.selection import (
     STAGE_BATCHED_WORKFLOW_MODE,
     resolve_stage_batched_ocr_policy,
@@ -183,6 +189,10 @@ class StagePageContext:
     ocr_canonicalization_summary: dict[str, Any] = field(
         default_factory=dict
     )
+    ocr_processing_summary: dict[str, Any] = field(
+        default_factory=dict
+    )
+    translation_blocks: list[Any] = field(default_factory=list)
     page_translation_metrics: dict[str, int | float] = field(default_factory=dict)
     paddleocr_cache_plan: Any | None = None
     paddleocr_cache_engine: Any | None = None
@@ -1094,6 +1104,19 @@ class StageBatchedProcessor(BatchProcessor):
             page_profile = dict(page_profile or {})
             page_profile["embedded_ui_dropped_block_count"] = len(embedded_ui_blocks)
 
+        routed_blocks = [
+            *ctx.blk_list,
+            *rejected_empty_blocks,
+            *embedded_ui_blocks,
+        ]
+        ctx.ocr_processing_summary = finalize_ocr_processing_contracts(
+            routed_blocks
+        )
+        page_profile = dict(page_profile or {})
+        page_profile["ocr_processing_contract"] = dict(
+            ctx.ocr_processing_summary
+        )
+
         canonicalization = dict(ctx.ocr_canonicalization_summary or {})
         if canonicalization:
             page_profile = dict(page_profile or {})
@@ -1679,12 +1702,21 @@ class StageBatchedProcessor(BatchProcessor):
                 export_settings=export_settings,
                 preferred_path=preferred_path,
             )
+        processing_action_skipped = (
+            str(ctx.inpaint_diagnostics.get("status", "") or "")
+            == "processing_action_skipped"
+        )
+        stage_kwargs: dict[str, Any] = {
+            "patch_count": len(ctx.patches or []),
+            "cache_status": ctx.project_inpaint_checkpoint_status,
+        }
+        if processing_action_skipped:
+            stage_kwargs["reason"] = "no_translate_inpaint_blocks"
         self.main_page.image_ctrl.mark_processing_stage(
             ctx.image_path,
             "inpaint",
-            "completed",
-            patch_count=len(ctx.patches or []),
-            cache_status=ctx.project_inpaint_checkpoint_status,
+            "skipped" if processing_action_skipped else "completed",
+            **stage_kwargs,
         )
         self._emit_benchmark_event(
             "inpaint_end",
@@ -1694,6 +1726,11 @@ class StageBatchedProcessor(BatchProcessor):
             block_count=len(ctx.blk_list or []),
             patch_count=len(ctx.patches or []),
             project_checkpoint_status=ctx.project_inpaint_checkpoint_status,
+            skip_reason=(
+                "no_translate_inpaint_blocks"
+                if processing_action_skipped
+                else ""
+            ),
             inpaint_runtime_diagnostics=dict(
                 ctx.inpaint_diagnostics or {}
             ),
@@ -1786,6 +1823,78 @@ class StageBatchedProcessor(BatchProcessor):
                 brush_strokes = list(
                     page_state.get("brush_strokes", []) or []
                 )
+
+                if not inpaint_blocks and not brush_strokes:
+                    zero_mask = np.zeros(
+                        ctx.image.shape[:2],
+                        dtype=np.uint8,
+                    )
+                    ctx.inpaint_input_img = np.ascontiguousarray(
+                        ctx.image.copy(),
+                        dtype=np.uint8,
+                    )
+                    ctx.raw_mask = zero_mask.copy()
+                    ctx.mask = zero_mask
+                    protected_reasons = [
+                        str(
+                            getattr(
+                                block,
+                                "_inpaint_protected_reason",
+                                "",
+                            )
+                            or ""
+                        )
+                        for block in protected_blocks
+                    ]
+                    ctx.mask_details = {
+                        "raw_mask": ctx.raw_mask,
+                        "final_mask": ctx.mask,
+                        "processing_action_skipped": True,
+                        "inpaint_protected_block_count": len(
+                            protected_blocks
+                        ),
+                        "inpaint_protected_reasons": protected_reasons,
+                    }
+                    ctx.cleanup_stats = {
+                        "applied": False,
+                        "component_count": 0,
+                        "block_count": 0,
+                        "reason": "no_translate_inpaint_blocks",
+                    }
+                    ctx.inpaint_diagnostics = {
+                        "status": "processing_action_skipped",
+                        "reason": "no_translate_inpaint_blocks",
+                        "inference_call_count": 0,
+                        "cpu_fallback_used": False,
+                    }
+                    ctx.project_inpaint_checkpoint_status = "skipped"
+                    if (
+                        checkpoint_store is not None
+                        and ctx.source_decoded_sha256
+                        and ctx.detection_fingerprint
+                    ):
+                        ctx.project_inpaint_fingerprint = (
+                            build_skipped_stage_fingerprint(
+                                stage="inpaint",
+                                source_sha256=ctx.source_decoded_sha256,
+                                detection_fingerprint=(
+                                    ctx.detection_fingerprint
+                                ),
+                                reason="no_translate_inpaint_blocks",
+                            )
+                        )
+                    ctx.project_inpaint_artifact_sha256 = (
+                        decoded_image_sha256(ctx.inpaint_input_img)
+                    )
+                    self._finish_inpaint_page(
+                        ctx,
+                        index=index,
+                        total_images=total_images,
+                        runtime=runtime,
+                        hd_strategy=hd_strategy,
+                        export_settings=export_settings,
+                    )
+                    continue
 
                 project_hit = None
                 if (
@@ -2155,7 +2264,14 @@ class StageBatchedProcessor(BatchProcessor):
         if not start_gemma:
             return
         self._raise_if_cancelled()
-        if any(not ctx.failed_stage and not ctx.no_text_detected for ctx in pages):
+        for ctx in pages:
+            if ctx.failed_stage or ctx.no_text_detected:
+                ctx.translation_blocks = []
+                continue
+            ctx.translation_blocks = select_translate_inpaint_blocks(
+                ctx.blk_list
+            )
+        if any(ctx.translation_blocks for ctx in pages):
             self._start_gemma_prewarm()
 
     def _build_project_translation_identity(
@@ -2237,6 +2353,26 @@ class StageBatchedProcessor(BatchProcessor):
                 ),
                 "tm_revision": tm_revision,
             }
+            engine_contract["ocr_processing_contract"] = {
+                "schema_version": int(
+                    ctx.ocr_processing_summary.get("schema_version", 0)
+                    or 0
+                ),
+                "selected_blocks": [
+                    {
+                        "block_id": str(
+                            getattr(block, "block_id", "") or ""
+                        ),
+                        "semantic_role": str(
+                            getattr(block, "semantic_role", "") or ""
+                        ),
+                        "processing_action": str(
+                            getattr(block, "processing_action", "") or ""
+                        ),
+                    }
+                    for block in ctx.translation_blocks
+                ],
+            }
             return build_translation_identity(
                 ocr_fingerprint=ctx.project_ocr_fingerprint,
                 source_lang=ctx.source_lang,
@@ -2260,6 +2396,26 @@ class StageBatchedProcessor(BatchProcessor):
             )
             return None
 
+    @staticmethod
+    def _translation_snapshot_for_blocks(
+        snapshot: list[dict[str, Any]] | None,
+        blocks: list[Any],
+    ) -> list[dict[str, Any]]:
+        by_id = {
+            str(item.get("block_id", "") or ""): item
+            for item in list(snapshot or [])
+            if isinstance(item, dict)
+            and str(item.get("block_id", "") or "")
+        }
+        selected: list[dict[str, Any]] = []
+        for block in blocks:
+            block_id = str(getattr(block, "block_id", "") or "")
+            item = by_id.get(block_id)
+            if item is None:
+                return []
+            selected.append(copy.deepcopy(item))
+        return selected
+
     def _translate_all(self, pages: list[StagePageContext]) -> None:
         total_images = len(pages)
         settings_page = self.main_page.settings_page
@@ -2276,6 +2432,20 @@ class StageBatchedProcessor(BatchProcessor):
         gemma_runtime_required = False
         for ctx in pages:
             if ctx.failed_stage or ctx.no_text_detected:
+                continue
+            ctx.translation_blocks = select_translate_inpaint_blocks(
+                ctx.blk_list
+            )
+            if not ctx.translation_blocks:
+                ctx.project_translation_checkpoint_status = "skipped"
+                ctx.project_translation_fingerprint = (
+                    build_skipped_stage_fingerprint(
+                        stage="translation",
+                        source_sha256=ctx.source_decoded_sha256,
+                        detection_fingerprint=ctx.detection_fingerprint,
+                        reason="no_translate_inpaint_blocks",
+                    )
+                )
                 continue
             translator = Translator(
                 self.main_page,
@@ -2300,8 +2470,13 @@ class StageBatchedProcessor(BatchProcessor):
                         page_key=ctx.project_checkpoint_page_key,
                         fingerprint=ctx.project_translation_fingerprint,
                         identity=identity,
-                        current_blocks=ctx.blk_list,
-                        project_snapshot=ctx.project_translation_snapshot,
+                        current_blocks=ctx.translation_blocks,
+                        project_snapshot=(
+                            self._translation_snapshot_for_blocks(
+                                ctx.project_translation_snapshot,
+                                ctx.translation_blocks,
+                            )
+                        ),
                     )
                 except Exception:
                     logger.warning(
@@ -2313,14 +2488,20 @@ class StageBatchedProcessor(BatchProcessor):
                     ctx.project_translation_fingerprint = ""
                     project_hit = None
                 if project_hit is not None:
-                    apply_translation_checkpoint(ctx.blk_list, project_hit)
+                    apply_translation_checkpoint(
+                        ctx.translation_blocks,
+                        project_hit,
+                    )
                     ctx.project_translation_checkpoint_status = "hit"
                     project_hits[id(ctx)] = project_hit
                     continue
                 ctx.project_translation_checkpoint_status = "miss"
             if translator.uses_persistent_translation_memory:
                 gemma_runtime_required = (
-                    translator.prepare_translation(ctx.blk_list, extra_context)
+                    translator.prepare_translation(
+                        ctx.translation_blocks,
+                        extra_context,
+                    )
                     or gemma_runtime_required
                 )
 
@@ -2361,6 +2542,27 @@ class StageBatchedProcessor(BatchProcessor):
                     skip_reason="no_text_detected",
                 )
                 continue
+            if not ctx.translation_blocks:
+                self.main_page.image_ctrl.mark_processing_stage(
+                    ctx.image_path,
+                    "translation",
+                    "skipped",
+                    reason="no_translate_inpaint_blocks",
+                )
+                self._emit_benchmark_event(
+                    "translate_end",
+                    image_path=ctx.image_path,
+                    image_index=index,
+                    total_images=total_images,
+                    block_count=0,
+                    preserved_or_review_block_count=len(
+                        ctx.blk_list or []
+                    ),
+                    translator_key=translator_key,
+                    skip_reason="no_translate_inpaint_blocks",
+                    project_checkpoint_status="skipped",
+                )
+                continue
             self._report_runtime_progress(
                 phase="pipeline",
                 service="gemma",
@@ -2377,7 +2579,10 @@ class StageBatchedProcessor(BatchProcessor):
                 image_path=ctx.image_path,
                 image_index=index,
                 total_images=total_images,
-                block_count=len(ctx.blk_list or []),
+                block_count=len(ctx.translation_blocks),
+                preserved_or_review_block_count=(
+                    len(ctx.blk_list or []) - len(ctx.translation_blocks)
+                ),
                 translator_key=translator_key,
             )
             translator = prepared_translators[id(ctx)]
@@ -2395,15 +2600,21 @@ class StageBatchedProcessor(BatchProcessor):
                         image_path=ctx.image_path,
                         image_index=index,
                         total_images=total_images,
-                        block_count=len(ctx.blk_list or []),
+                        block_count=len(ctx.translation_blocks),
+                        preserved_or_review_block_count=(
+                            len(ctx.blk_list or [])
+                            - len(ctx.translation_blocks)
+                        ),
                         translator_key=translator_key,
                         translator_engine=translator.engine.__class__.__name__,
                         cache_status="project-checkpoint",
                         project_checkpoint_status="hit",
                     )
-                    raw_text_obj = json.loads(get_raw_text(ctx.blk_list))
+                    raw_text_obj = json.loads(
+                        get_raw_text(ctx.translation_blocks)
+                    )
                     translated_text_obj = json.loads(
-                        get_raw_translation(ctx.blk_list)
+                        get_raw_translation(ctx.translation_blocks)
                     )
                     if not raw_text_obj or not translated_text_obj:
                         raise RuntimeError(
@@ -2428,7 +2639,7 @@ class StageBatchedProcessor(BatchProcessor):
                 # the SQLite/runtime identity can change after folder preflight.
                 # Refresh this page's plan immediately before use.
                 runtime_required_now = translator.prepare_translation(
-                    ctx.blk_list,
+                    ctx.translation_blocks,
                     extra_context,
                 )
                 if runtime_required_now and not gemma_runtime_started:
@@ -2445,14 +2656,14 @@ class StageBatchedProcessor(BatchProcessor):
                     gemma_runtime_started = True
             try:
                 _, translation_cache_status = translator.translate_with_cache_manager(
-                    ctx.blk_list,
+                    ctx.translation_blocks,
                     ctx.image,
                     extra_context,
                     self.cache_manager,
                 )
                 self._raise_if_cancelled()
                 apply_translation_result_dictionary(
-                    ctx.blk_list,
+                    ctx.translation_blocks,
                     settings_page.get_translation_result_dictionary_rules(),
                 )
                 ctx.page_translation_metrics = self._translation_benchmark_metrics(translator)
@@ -2476,7 +2687,7 @@ class StageBatchedProcessor(BatchProcessor):
                                 ctx.project_translation_fingerprint
                             ),
                             identity=ctx.project_translation_identity,
-                            blocks=ctx.blk_list,
+                            blocks=ctx.translation_blocks,
                         )
                     except Exception:
                         logger.warning(
@@ -2494,7 +2705,11 @@ class StageBatchedProcessor(BatchProcessor):
                     image_path=ctx.image_path,
                     image_index=index,
                     total_images=total_images,
-                    block_count=len(ctx.blk_list or []),
+                    block_count=len(ctx.translation_blocks),
+                    preserved_or_review_block_count=(
+                        len(ctx.blk_list or [])
+                        - len(ctx.translation_blocks)
+                    ),
                     translator_key=translator_key,
                     translator_engine=translator.engine.__class__.__name__,
                     cache_status=translation_cache_status,
@@ -2503,8 +2718,12 @@ class StageBatchedProcessor(BatchProcessor):
                     ),
                     **ctx.page_translation_metrics,
                 )
-                raw_text_obj = json.loads(get_raw_text(ctx.blk_list))
-                translated_text_obj = json.loads(get_raw_translation(ctx.blk_list))
+                raw_text_obj = json.loads(
+                    get_raw_text(ctx.translation_blocks)
+                )
+                translated_text_obj = json.loads(
+                    get_raw_translation(ctx.translation_blocks)
+                )
                 if (not raw_text_obj) or (not translated_text_obj):
                     raise RuntimeError("Translator returned empty JSON.")
                 self._raise_if_cancelled()
@@ -2558,6 +2777,19 @@ class StageBatchedProcessor(BatchProcessor):
         seen_bubble_render_keys: set[tuple[tuple[int, int, int, int], str]] = set()
         for blk in ctx.blk_list:
             if is_block_ocr_empty(blk):
+                continue
+            finalize_ocr_processing_contract(blk)
+            if (
+                getattr(blk, "processing_action", "")
+                != PROCESSING_ACTION_TRANSLATE_INPAINT
+            ):
+                blk._render_skip_reason = (
+                    "processing_action_"
+                    + str(
+                        getattr(blk, "processing_action", "")
+                        or "review"
+                    )
+                )
                 continue
             x1, y1, block_width, block_height = blk.xywh
             translation_raw = blk.translation
@@ -3099,13 +3331,13 @@ class StageBatchedProcessor(BatchProcessor):
                 if not ctx.no_text_detected:
                     try:
                         format_translations(
-                            ctx.blk_list,
+                            ctx.translation_blocks,
                             trg_lng_cd,
                             upper_case=render_settings.upper_case,
                         )
                         self._raise_if_cancelled()
                         get_best_render_area(
-                            ctx.blk_list,
+                            ctx.translation_blocks,
                             ctx.image,
                             ctx.inpaint_input_img,
                             auto_max_font_profile=getattr(

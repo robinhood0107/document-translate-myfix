@@ -205,6 +205,9 @@ def annotate_block_mask_attribution(
         setattr(block, "block_mask_bbox", None)
         setattr(block, "block_mask_source", MASK_CANDIDATE_SOURCE_NONE)
         setattr(block, "block_mask_decision", MASK_DECISION_REVIEW)
+        setattr(block, "mask_actual_pixel_count", 0)
+        setattr(block, "mask_actual_bbox", None)
+        setattr(block, "mask_strategy_reason", "no_final_mask_attribution")
         if roi is None:
             if str(getattr(block, "text_class", "") or "") == "text_free":
                 setattr(block, "mask_decision", MASK_DECISION_REVIEW)
@@ -219,9 +222,20 @@ def annotate_block_mask_attribution(
         setattr(block, "block_final_mask_pixel_count", count)
         setattr(block, "block_mask_iou", float(count) / float(roi_area))
         setattr(block, "block_mask_bbox", [int(v) for v in bbox] if bbox is not None else None)
+        setattr(block, "mask_actual_pixel_count", count)
+        setattr(
+            block,
+            "mask_actual_bbox",
+            [int(v) for v in bbox] if bbox is not None else None,
+        )
         if count > 0:
             setattr(block, "block_mask_source", candidate_source or MASK_CANDIDATE_SOURCE_CTD_REFINED)
             setattr(block, "block_mask_decision", MASK_DECISION_ACCEPTED)
+            setattr(
+                block,
+                "mask_strategy_reason",
+                candidate_source or MASK_CANDIDATE_SOURCE_CTD_REFINED,
+            )
         if bool(getattr(block, "bubble_panel_text_candidate", False)):
             setattr(block, "bubble_panel_mask_pixel_count", count)
             setattr(
