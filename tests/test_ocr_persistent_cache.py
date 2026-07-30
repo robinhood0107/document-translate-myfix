@@ -318,16 +318,32 @@ class OCRPersistentResultCacheTests(unittest.TestCase):
         source.ocr_reject_reason = ""
         source.ocr_regions = [{"text": "sanitized"}]
         payload = snapshot_raw_ocr_result(source)
+        self.assertNotIn("canonical_block_id", payload)
+        self.assertNotIn("semantic_role", payload)
+        self.assertNotIn("processing_action", payload)
 
         restored = TextBlock(
             text_bbox=np.array([1, 2, 10, 20], dtype=np.int32)
         )
+        restored.canonical_block_id = "current-block"
+        restored.duplicate_alias_block_ids = ["current-alias"]
+        restored.duplicate_alias_count = 1
+        restored.semantic_role = "dialogue_bubble"
+        restored.processing_action = "translate_inpaint"
         apply_raw_ocr_result(restored, payload)
 
         self.assertEqual(restored.text, "sanitized")
         self.assertEqual(restored.texts, ["sanitized"])
         self.assertEqual(restored.ocr_raw_text, " raw ")
         self.assertEqual(restored.ocr_regions, [{"text": "sanitized"}])
+        self.assertEqual(restored.canonical_block_id, "current-block")
+        self.assertEqual(
+            restored.duplicate_alias_block_ids,
+            ["current-alias"],
+        )
+        self.assertEqual(restored.duplicate_alias_count, 1)
+        self.assertEqual(restored.semantic_role, "dialogue_bubble")
+        self.assertEqual(restored.processing_action, "translate_inpaint")
 
 
 if __name__ == "__main__":
