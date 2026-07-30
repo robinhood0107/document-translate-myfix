@@ -63,6 +63,7 @@ from modules.ocr.persistent_cache import (
     canonical_sha256,
     snapshot_raw_ocr_result,
 )
+from modules.ocr.result_contract import canonicalize_exact_duplicate_blocks
 from modules.ocr.selection import (
     STAGE_BATCHED_WORKFLOW_MODE,
     resolve_stage_batched_ocr_policy,
@@ -105,6 +106,11 @@ from modules.utils.export_paths import (
 from modules.utils.exceptions import OperationCancelledError
 from modules.utils.image_utils import generate_mask, restore_original_for_block_masks
 from modules.utils.inpaint_cleanup import apply_duplicate_bubble_inner_fill, refine_bubble_residue_inpaint
+from modules.utils.inpaint_composite import (
+    composite_with_edit_mask,
+    count_changed_outside_edit_mask,
+)
+from modules.inpainting.runtime_contract import inpaint_outside_mask_message
 from modules.utils.language_utils import get_language_code, is_no_space_lang, language_codes
 from modules.utils.ocr_debug import (
     all_empty_blocks_are_rejected,
@@ -174,6 +180,9 @@ class StagePageContext:
     project_render_fingerprint: str = ""
     project_render_checkpoint_status: str = "disabled"
     page_ocr_metrics: dict[str, int] = field(default_factory=dict)
+    ocr_canonicalization_summary: dict[str, Any] = field(
+        default_factory=dict
+    )
     page_translation_metrics: dict[str, int | float] = field(default_factory=dict)
     paddleocr_cache_plan: Any | None = None
     paddleocr_cache_engine: Any | None = None
@@ -185,6 +194,7 @@ class StagePageContext:
     cleanup_stats: dict[str, Any] = field(
         default_factory=lambda: {"applied": False, "component_count": 0, "block_count": 0}
     )
+    inpaint_diagnostics: dict[str, Any] = field(default_factory=dict)
     no_text_detected: bool = False
     failed_stage: str = ""
     failed_reason: str = ""
@@ -384,6 +394,7 @@ class StageBatchedProcessor(BatchProcessor):
         *,
         context: str = "batch cleanup",
         raise_on_failure: bool = False,
+        preserve_sleeping_paddle: bool = False,
     ) -> None:
         runtime_managers = (
             (
@@ -407,6 +418,9 @@ class StageBatchedProcessor(BatchProcessor):
                     runtime_manager,
                     context=context,
                     raise_on_failure=True,
+                    release_for_handoff=(
+                        preserve_sleeping_paddle and label == "OCR"
+                    ),
                 )
             except Exception as exc:
                 failures.append(exc)
@@ -420,11 +434,16 @@ class StageBatchedProcessor(BatchProcessor):
         *,
         context: str,
         raise_on_failure: bool,
+        release_for_handoff: bool = False,
     ) -> None:
         last_error: Exception | None = None
         for attempt in range(2):
             try:
-                runtime_manager.shutdown()
+                release = getattr(runtime_manager, "release_for_handoff", None)
+                if release_for_handoff and label == "OCR" and callable(release):
+                    release()
+                else:
+                    runtime_manager.shutdown()
                 return
             except Exception as exc:
                 last_error = exc
@@ -1075,6 +1094,21 @@ class StageBatchedProcessor(BatchProcessor):
             page_profile = dict(page_profile or {})
             page_profile["embedded_ui_dropped_block_count"] = len(embedded_ui_blocks)
 
+        canonicalization = dict(ctx.ocr_canonicalization_summary or {})
+        if canonicalization:
+            page_profile = dict(page_profile or {})
+            page_profile["exact_duplicate_canonicalization"] = {
+                "input_block_count": int(
+                    canonicalization.get("input_block_count", 0) or 0
+                ),
+                "canonical_block_count": int(
+                    canonicalization.get("canonical_block_count", 0) or 0
+                ),
+                "duplicate_alias_count": int(
+                    canonicalization.get("duplicate_alias_count", 0) or 0
+                ),
+            }
+
         metrics = self._ocr_quality_metrics(quality)
         retained_ids = {
             str(getattr(block, "block_id", "") or "")
@@ -1181,6 +1215,28 @@ class StageBatchedProcessor(BatchProcessor):
         if recorded:
             ctx.project_ocr_checkpoint_status = "stored"
 
+    @staticmethod
+    def _canonicalize_ocr_inputs(pages: list[StagePageContext]) -> None:
+        for ctx in pages:
+            if ctx.failed_stage or ctx.no_text_detected or not ctx.blk_list:
+                continue
+            canonical_blocks, summary = canonicalize_exact_duplicate_blocks(
+                ctx.blk_list,
+                source_identity=(
+                    ctx.source_decoded_sha256
+                    or ctx.project_checkpoint_page_key
+                ),
+            )
+            ctx.blk_list = canonical_blocks
+            ctx.ocr_canonicalization_summary = summary
+            duplicate_count = int(summary.get("duplicate_alias_count", 0) or 0)
+            if duplicate_count:
+                logger.info(
+                    "Canonicalized %d exact detector duplicate(s) before OCR for %s.",
+                    duplicate_count,
+                    ctx.image_name,
+                )
+
     def _ocr_all(self, pages: list[StagePageContext], policy: dict[str, Any]) -> None:
         total_images = len(pages)
         settings_page = self.main_page.settings_page
@@ -1188,6 +1244,7 @@ class StageBatchedProcessor(BatchProcessor):
         self._paddleocr_cache_store = None
         self._paddleocr_cache_identity = None
         engine_key = str(policy["primary_ocr_engine"])
+        self._canonicalize_ocr_inputs(pages)
         paddle_settings = settings_page.get_paddleocr_vl_settings()
         persistent_cache_requested = (
             engine_key == "PaddleOCR VL"
@@ -1386,6 +1443,7 @@ class StageBatchedProcessor(BatchProcessor):
                 runtime_manager,
                 context="OCR-to-inpaint handoff",
                 raise_on_failure=True,
+                release_for_handoff=True,
             )
         self._raise_if_cancelled()
 
@@ -1559,6 +1617,9 @@ class StageBatchedProcessor(BatchProcessor):
                 "inpaint_project_checkpoint_status": (
                     ctx.project_inpaint_checkpoint_status
                 ),
+                "inpaint_runtime_diagnostics": dict(
+                    ctx.inpaint_diagnostics or {}
+                ),
             },
         )
         cleaned_output_path = self._write_inpainted_debug_image(
@@ -1589,6 +1650,7 @@ class StageBatchedProcessor(BatchProcessor):
             cleanup_stats=ctx.cleanup_stats,
             mask_details=ctx.mask_details,
             inpainter_backend=str(runtime.get("backend", "") or ""),
+            inpaint_runtime_diagnostics=ctx.inpaint_diagnostics,
         )
         for stage_key, stage_label, preferred_path in (
             ("raw_mask", "원본 마스크", debug_paths.get("raw_mask", "")),
@@ -1632,6 +1694,9 @@ class StageBatchedProcessor(BatchProcessor):
             block_count=len(ctx.blk_list or []),
             patch_count=len(ctx.patches or []),
             project_checkpoint_status=ctx.project_inpaint_checkpoint_status,
+            inpaint_runtime_diagnostics=dict(
+                ctx.inpaint_diagnostics or {}
+            ),
         )
 
     def _inpaint_pages(self, pages: list[StagePageContext]) -> bool:
@@ -1794,6 +1859,11 @@ class StageBatchedProcessor(BatchProcessor):
                             for block in protected_blocks
                         ]
                     ctx.cleanup_stats = project_hit.cleanup_stats
+                    ctx.inpaint_diagnostics = {
+                        "status": "project_checkpoint_hit",
+                        "inference_call_count": 0,
+                        "cpu_fallback_used": False,
+                    }
                     ctx.project_inpaint_artifact_sha256 = (
                         project_hit.cleaned_decoded_sha256
                     )
@@ -1916,6 +1986,17 @@ class StageBatchedProcessor(BatchProcessor):
                     inpaint_blocks,
                     config=config,
                 )
+                ctx.inpaint_diagnostics = dict(
+                    getattr(
+                        self.inpainting,
+                        "last_inpaint_diagnostics",
+                        {},
+                    )
+                    or {}
+                )
+                ctx.inpaint_diagnostics["model_identity"] = copy.deepcopy(
+                    model_identity
+                )
                 self._raise_if_cancelled()
                 ctx.inpaint_input_img = imk.convert_scale_abs(
                     ctx.inpaint_input_img
@@ -1952,6 +2033,32 @@ class StageBatchedProcessor(BatchProcessor):
                     ctx.mask_details,
                     ctx.cleanup_stats,
                 )
+                outside_before_restore = count_changed_outside_edit_mask(
+                    ctx.image,
+                    ctx.inpaint_input_img,
+                    ctx.mask,
+                )
+                ctx.inpaint_input_img = composite_with_edit_mask(
+                    ctx.image,
+                    ctx.inpaint_input_img,
+                    ctx.mask,
+                )
+                outside_after_restore = count_changed_outside_edit_mask(
+                    ctx.image,
+                    ctx.inpaint_input_img,
+                    ctx.mask,
+                )
+                ctx.inpaint_diagnostics[
+                    "outside_mask_changed_before_restore"
+                ] = int(outside_before_restore)
+                ctx.inpaint_diagnostics[
+                    "outside_mask_changed_pixel_count"
+                ] = int(outside_after_restore)
+                if outside_after_restore:
+                    raise RuntimeError(inpaint_outside_mask_message())
+                ctx.mask_details[
+                    "inpaint_runtime_diagnostics"
+                ] = copy.deepcopy(ctx.inpaint_diagnostics)
                 self._raise_if_cancelled()
                 ctx.inpaint_input_img = np.ascontiguousarray(
                     ctx.inpaint_input_img,
@@ -3168,11 +3275,13 @@ class StageBatchedProcessor(BatchProcessor):
             if self._project_checkpoint_store is not None
             else []
         )
+        batch_completed = False
         try:
             self._raise_if_cancelled()
             self._shutdown_managed_runtimes(
                 context="batch startup preflight",
                 raise_on_failure=True,
+                preserve_sleeping_paddle=True,
             )
             self._raise_if_cancelled()
             self._start_ocr_prewarm(policy)
@@ -3190,6 +3299,7 @@ class StageBatchedProcessor(BatchProcessor):
                     total_images=total_images,
                     stage_ceiling="ocr",
                 )
+                batch_completed = True
                 return
             self._inpaint_all(pages)
             self._sample_performance_resources("inpaint_stage_end")
@@ -3200,6 +3310,7 @@ class StageBatchedProcessor(BatchProcessor):
             self._render_all(pages)
             self._sample_performance_resources("render_stage_end")
             self._emit_benchmark_event("batch_run_done", total_images=total_images)
+            batch_completed = True
         except OperationCancelledError:
             self._emit_benchmark_event("batch_run_cancelled", total_images=total_images)
             return
@@ -3214,7 +3325,9 @@ class StageBatchedProcessor(BatchProcessor):
             try:
                 self._shutdown_prewarm_executor()
             finally:
-                self._shutdown_managed_runtimes()
+                self._shutdown_managed_runtimes(
+                    preserve_sleeping_paddle=batch_completed,
+                )
             self._progress_image_path = None
 
     def _complete_ocr_stage_ceiling(self, pages: list[StagePageContext]) -> None:
