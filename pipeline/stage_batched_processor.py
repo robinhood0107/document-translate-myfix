@@ -47,6 +47,7 @@ from app.projects.stage_checkpoints import (
     record_translation_checkpoint,
     registered_inpainter_model_identity,
     resolve_font_identity,
+    restore_inpaint_block_state,
     snapshot_project_render_blocks,
     snapshot_project_translations,
 )
@@ -1716,6 +1717,97 @@ class StageBatchedProcessor(BatchProcessor):
                 inpaint_blocks, protected_blocks = (
                     split_inpaint_protected_ocr_blocks(ctx.blk_list)
                 )
+                page_state = self._ensure_page_state(ctx.image_path)
+                brush_strokes = list(
+                    page_state.get("brush_strokes", []) or []
+                )
+
+                project_hit = None
+                if (
+                    checkpoint_store is not None
+                    and ctx.project_checkpoint_page_key
+                    and ctx.source_decoded_sha256
+                    and ctx.detection_fingerprint
+                    and ctx.project_ocr_fingerprint
+                ):
+                    try:
+                        ctx.project_inpaint_identity = build_inpaint_identity(
+                            source_sha256=ctx.source_decoded_sha256,
+                            detection_fingerprint=ctx.detection_fingerprint,
+                            ocr_fingerprint=ctx.project_ocr_fingerprint,
+                            blocks=inpaint_blocks,
+                            brush_strokes=brush_strokes,
+                            runtime=runtime,
+                            model_identity=model_identity,
+                            hd_strategy=hd_strategy_settings,
+                            mask_settings=mask_settings,
+                        )
+                        ctx.project_inpaint_fingerprint = (
+                            build_inpaint_fingerprint(
+                                ctx.project_inpaint_identity
+                            )
+                        )
+                        project_hit = lookup_inpaint_checkpoint(
+                            checkpoint_store,
+                            page_key=ctx.project_checkpoint_page_key,
+                            fingerprint=ctx.project_inpaint_fingerprint,
+                            identity=ctx.project_inpaint_identity,
+                            source_shape=tuple(
+                                int(item) for item in ctx.image.shape
+                            ),
+                            current_blocks=ctx.blk_list,
+                        )
+                    except Exception:
+                        logger.warning(
+                            "Inpaint checkpoint lookup failed open for %s.",
+                            ctx.image_name,
+                            exc_info=True,
+                        )
+                        ctx.project_inpaint_identity = {}
+                        ctx.project_inpaint_fingerprint = ""
+                        project_hit = None
+                if project_hit is not None:
+                    restore_inpaint_block_state(
+                        ctx.blk_list,
+                        project_hit.block_states,
+                    )
+                    ctx.inpaint_input_img = project_hit.cleaned_image
+                    ctx.raw_mask = project_hit.raw_mask
+                    ctx.mask = project_hit.final_mask
+                    ctx.mask_details = {
+                        "raw_mask": ctx.raw_mask,
+                        "final_mask": ctx.mask,
+                        "project_checkpoint_restored": True,
+                    }
+                    if protected_blocks:
+                        ctx.mask_details[
+                            "inpaint_protected_block_count"
+                        ] = len(protected_blocks)
+                        ctx.mask_details[
+                            "inpaint_protected_reasons"
+                        ] = [
+                            getattr(
+                                block,
+                                "_inpaint_protected_reason",
+                                "",
+                            )
+                            for block in protected_blocks
+                        ]
+                    ctx.cleanup_stats = project_hit.cleanup_stats
+                    ctx.project_inpaint_artifact_sha256 = (
+                        project_hit.cleaned_decoded_sha256
+                    )
+                    ctx.project_inpaint_checkpoint_status = "hit"
+                    self._finish_inpaint_page(
+                        ctx,
+                        index=index,
+                        total_images=total_images,
+                        runtime=runtime,
+                        hd_strategy=hd_strategy,
+                        export_settings=export_settings,
+                    )
+                    continue
+
                 ctx.mask_details = generate_mask(
                     ctx.image,
                     inpaint_blocks,
@@ -1737,10 +1829,6 @@ class StageBatchedProcessor(BatchProcessor):
                 ctx.raw_mask = np.ascontiguousarray(
                     ctx.mask_details["raw_mask"]
                 )
-                page_state = self._ensure_page_state(ctx.image_path)
-                brush_strokes = list(
-                    page_state.get("brush_strokes", []) or []
-                )
                 if brush_strokes:
                     merged_mask = (
                         self.inpainting._generate_mask_from_saved_strokes(
@@ -1758,70 +1846,6 @@ class StageBatchedProcessor(BatchProcessor):
                         ctx.mask_details[
                             "project_brush_strokes_applied"
                         ] = True
-
-                project_hit = None
-                if (
-                    checkpoint_store is not None
-                    and ctx.project_checkpoint_page_key
-                    and ctx.source_decoded_sha256
-                    and ctx.detection_fingerprint
-                    and ctx.project_ocr_fingerprint
-                ):
-                    try:
-                        ctx.project_inpaint_identity = build_inpaint_identity(
-                            source_sha256=ctx.source_decoded_sha256,
-                            detection_fingerprint=ctx.detection_fingerprint,
-                            ocr_fingerprint=ctx.project_ocr_fingerprint,
-                            blocks=inpaint_blocks,
-                            raw_mask=ctx.raw_mask,
-                            generated_mask=ctx.mask,
-                            brush_strokes=brush_strokes,
-                            runtime=runtime,
-                            model_identity=model_identity,
-                            hd_strategy=hd_strategy_settings,
-                            mask_settings=mask_settings,
-                        )
-                        ctx.project_inpaint_fingerprint = (
-                            build_inpaint_fingerprint(
-                                ctx.project_inpaint_identity
-                            )
-                        )
-                        project_hit = lookup_inpaint_checkpoint(
-                            checkpoint_store,
-                            page_key=ctx.project_checkpoint_page_key,
-                            fingerprint=ctx.project_inpaint_fingerprint,
-                            identity=ctx.project_inpaint_identity,
-                            source_shape=tuple(
-                                int(item) for item in ctx.image.shape
-                            ),
-                        )
-                    except Exception:
-                        logger.warning(
-                            "Inpaint checkpoint lookup failed open for %s.",
-                            ctx.image_name,
-                            exc_info=True,
-                        )
-                        ctx.project_inpaint_identity = {}
-                        ctx.project_inpaint_fingerprint = ""
-                        project_hit = None
-                if project_hit is not None:
-                    ctx.inpaint_input_img = project_hit.cleaned_image
-                    ctx.raw_mask = project_hit.raw_mask
-                    ctx.mask = project_hit.final_mask
-                    ctx.cleanup_stats = project_hit.cleanup_stats
-                    ctx.project_inpaint_artifact_sha256 = (
-                        decoded_image_sha256(ctx.inpaint_input_img)
-                    )
-                    ctx.project_inpaint_checkpoint_status = "hit"
-                    self._finish_inpaint_page(
-                        ctx,
-                        index=index,
-                        total_images=total_images,
-                        runtime=runtime,
-                        hd_strategy=hd_strategy,
-                        export_settings=export_settings,
-                    )
-                    continue
 
                 ctx.project_inpaint_checkpoint_status = (
                     "miss" if checkpoint_store is not None else "disabled"
@@ -1867,8 +1891,6 @@ class StageBatchedProcessor(BatchProcessor):
                         detection_fingerprint=ctx.detection_fingerprint,
                         ocr_fingerprint=ctx.project_ocr_fingerprint,
                         blocks=inpaint_blocks,
-                        raw_mask=ctx.raw_mask,
-                        generated_mask=ctx.mask,
                         brush_strokes=list(
                             page_state.get("brush_strokes", []) or []
                         ),
@@ -1946,10 +1968,14 @@ class StageBatchedProcessor(BatchProcessor):
                             page_key=ctx.project_checkpoint_page_key,
                             fingerprint=ctx.project_inpaint_fingerprint,
                             identity=ctx.project_inpaint_identity,
+                            blocks=ctx.blk_list,
                             cleaned_image=ctx.inpaint_input_img,
                             raw_mask=ctx.raw_mask,
                             final_mask=ctx.mask,
                             cleanup_stats=ctx.cleanup_stats,
+                            cleaned_decoded_sha256=(
+                                ctx.project_inpaint_artifact_sha256
+                            ),
                         )
                     except Exception:
                         logger.warning(
