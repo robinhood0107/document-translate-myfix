@@ -8,7 +8,7 @@ import imkit as imk
 import numpy as np
 from PIL import Image, ImageOps
 
-from modules.ocr.result_contract import (
+from modules.ocr.common.result_contract import (
     PROCESSING_ACTION_PRESERVE,
     PROCESSING_ACTION_REVIEW,
     PROCESSING_ACTION_TRANSLATE_INPAINT,

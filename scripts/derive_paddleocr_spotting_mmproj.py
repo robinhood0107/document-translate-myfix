@@ -11,7 +11,7 @@ ROOT_DIR = Path(__file__).resolve().parents[1]
 if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
 
-from modules.ocr.paddleocr_vl_spotting.gguf_metadata import (
+from modules.ocr.paddle_spotting.gguf_metadata import (
     GGUFMetadataError,
     find_metadata_entry,
     patch_uint32_metadata,

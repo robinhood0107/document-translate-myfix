@@ -8,9 +8,9 @@ from .microsoft_ocr import MicrosoftOCR
 from .google_ocr import GoogleOCR
 from .gpt_ocr import GPTOCR
 from .hunyuan_ocr import HunyuanOCREngine
-from .mangalmm_ocr import MangaLMMOCREngine
-from .ocr_paddle_VL import PaddleOCRVLEngine
-from .paddleocr_vl_spotting import PaddleOCRVLSpottingEngine
+from .mangalmm_full_page.engine import MangaLMMOCREngine
+from .paddle_crop.engine import PaddleOCRVLEngine
+from .paddle_spotting.engine import PaddleOCRVLSpottingEngine
 from .ppocr import PPOCRv5Engine
 from .manga_ocr.onnx_engine import MangaOCREngineONNX
 from .pororo.onnx_engine import PororoOCREngineONNX  
