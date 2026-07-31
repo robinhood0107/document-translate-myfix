@@ -33,3 +33,10 @@ geometry 동등성과 성능 손익분기점을 확인하는 용도이며 CPU가
 CUDA 통과 조건은 region 수 동일, greedy bbox match 최저 IoU 0.999 이상,
 좌표 최대 차이 0.1px 이하이다. 이 조건은 장치 수치 동등성이지 SFX 품질 승격 조건이
 아니다.
+
+## 제품 판정
+
+Japan 22페이지 locked truth에서 threshold와 overlap을 전 범위로 훑었지만 의미 대사
+오경고 없이 SFX 보호 이득을 내는 operating point가 없었다. 따라서 이 구조는
+benchmark 재현용으로 종료한다. 제품의 Paddle crop, Paddle Spotting, MangaLMM
+모듈은 COO를 import하거나 runtime·cache fingerprint에 포함하지 않는다.
