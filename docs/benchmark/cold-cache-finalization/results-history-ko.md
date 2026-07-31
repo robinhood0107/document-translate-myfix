@@ -157,3 +157,16 @@ OCR/번역 결과, DB와 sidecar는 Git 밖에만 보존합니다. cold 후보�
   downstream 무효화 계약은 그대로 유지합니다.
 - 한 페이지 수정의 순이득을 측정할 수 있도록 project 검증은 최소
   2페이지를 요구합니다.
+
+## 2026-08-01 Paddle llama.cpp completion 768 재검증
+
+- 일본어·중국어·영어 corpus를 각각 3회, 총 9회 paired CUDA 실행했습니다.
+- 모든 실행에서 페이지·블록·OCR quality·normalized raw OCR가 1024 기준선과 완전히 같았습니다.
+- 전체 elapsed 평균 개선은 +0.057%였지만 단측 95% bootstrap 하한은 -1.674%였습니다.
+- pipeline run wall 평균 개선은 +0.857%, 하한은 -0.150%였습니다.
+- OCR request 합계 평균 개선은 +0.499%, 하한은 -0.520%였습니다.
+- 과거 작은 표본의 +4.178%는 재현되지 않았습니다.
+- 최소 개선율 없이 판정했지만 실제 양수 이득을 입증하지 못해 `reject_no_proven_speed_gain`으로 확정했습니다.
+- 제품 기본값은 `max_new_tokens=1024`를 유지합니다.
+
+상세 근거: [PaddleOCR-VL llama.cpp completion token 최종 판정](./paddle-token-llamacpp-final-decision-ko.md)
