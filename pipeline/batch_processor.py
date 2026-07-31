@@ -15,7 +15,7 @@ from PySide6.QtCore import QCoreApplication
 from PySide6.QtGui import QColor
 
 from modules.detection.processor import TextBlockDetector
-from modules.ocr.result_contract import (
+from modules.ocr.common.result_contract import (
     PROCESSING_ACTION_TRANSLATE_INPAINT,
     finalize_ocr_processing_contract,
     finalize_ocr_processing_contracts,

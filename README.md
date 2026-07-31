@@ -304,6 +304,7 @@ Tracked compose/runtime images used by the repo:
 ## Repository Documents
 
 - [rules.md](rules.md)
+- [Codebase map and OCR strategy boundaries (Korean)](docs/architecture/codebase-map-ko.md)
 - [docs/gemma/local-server-ko.md](docs/gemma/local-server-ko.md)
 - [docs/hunyuan/local-server-ko.md](docs/hunyuan/local-server-ko.md)
 - [docs/repo/github-rulesets-public-free-ko.md](docs/repo/github-rulesets-public-free-ko.md)
