@@ -10,6 +10,7 @@ from .gpt_ocr import GPTOCR
 from .hunyuan_ocr import HunyuanOCREngine
 from .mangalmm_ocr import MangaLMMOCREngine
 from .ocr_paddle_VL import PaddleOCRVLEngine
+from .paddleocr_vl_spotting import PaddleOCRVLSpottingEngine
 from .ppocr import PPOCRv5Engine
 from .manga_ocr.onnx_engine import MangaOCREngineONNX
 from .pororo.onnx_engine import PororoOCREngineONNX  
@@ -111,6 +112,10 @@ class OCRFactory:
                 extras["ocr_generic"] = generic_settings
         if ocr_key == "PaddleOCR VL":
             extras["paddleocr_vl"] = settings.get_paddleocr_vl_settings()
+        if ocr_key == "PaddleOCR VL Spotting":
+            extras["paddleocr_vl_spotting"] = (
+                settings.get_paddleocr_vl_spotting_settings()
+            )
         if ocr_key == "HunyuanOCR":
             extras["hunyuan_ocr"] = settings.get_hunyuan_ocr_settings()
         if ocr_key == "MangaLMM":
@@ -160,6 +165,7 @@ class OCRFactory:
             'GPT-4.1-mini': lambda s: cls._create_gpt_ocr(s, ocr_model),
             'Gemini-2.0-Flash': lambda s: cls._create_gemini_ocr(s, ocr_model),
             'PaddleOCR VL': cls._create_paddleocr_vl,
+            'PaddleOCR VL Spotting': cls._create_paddleocr_vl_spotting,
             'HunyuanOCR': cls._create_hunyuan_ocr,
             'MangaLMM': lambda s: cls._create_mangalmm_ocr(
                 s,
@@ -270,6 +276,12 @@ class OCRFactory:
     @staticmethod
     def _create_paddleocr_vl(settings) -> OCREngine:
         engine = PaddleOCRVLEngine()
+        engine.initialize(settings)
+        return engine
+
+    @staticmethod
+    def _create_paddleocr_vl_spotting(settings) -> OCREngine:
+        engine = PaddleOCRVLSpottingEngine()
         engine.initialize(settings)
         return engine
 
