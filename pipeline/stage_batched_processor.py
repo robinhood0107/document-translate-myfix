@@ -467,16 +467,26 @@ class StageBatchedProcessor(BatchProcessor):
         if raise_on_failure and last_error is not None:
             raise last_error
 
-    def _start_ocr_prewarm(self, policy: dict[str, Any]) -> None:
+    def _start_ocr_prewarm(
+        self,
+        policy: dict[str, Any],
+        *,
+        cache_miss_confirmed: bool = False,
+    ) -> None:
         runtime_manager = getattr(self.main_page, "local_ocr_runtime_manager", None)
         if not isinstance(runtime_manager, LocalOCRRuntimeManager):
             return
+        engine_key = str(policy["primary_ocr_engine"])
         # A non-empty project cache may contain a page-local OCR hit that can be
         # known only after detection restores the exact ordered blocks. Defer in
         # that case to preserve the all-hit zero-runtime contract. A brand-new,
         # empty sidecar cannot contain a hit, so keep the cold-path overlap.
         project_store = getattr(self, "_project_checkpoint_store", None)
-        if project_store is not None:
+        if (
+            not cache_miss_confirmed
+            and engine_key in {"PaddleOCR VL", "PaddleOCR VL Spotting"}
+            and project_store is not None
+        ):
             try:
                 page_keys = list(
                     getattr(self, "_project_checkpoint_page_keys", []) or []
@@ -500,9 +510,9 @@ class StageBatchedProcessor(BatchProcessor):
                 )
                 return
         settings_page = self.main_page.settings_page
-        engine_key = str(policy["primary_ocr_engine"])
         if (
-            engine_key == "PaddleOCR VL"
+            not cache_miss_confirmed
+            and engine_key == "PaddleOCR VL"
             and bool(
                 settings_page.get_paddleocr_vl_settings().get(
                     "persistent_cache_enabled",
@@ -528,6 +538,141 @@ class StageBatchedProcessor(BatchProcessor):
                 cancel_checker=self._prewarm_cancel_checker,
             ),
         )
+
+    def _plan_detected_page_ocr_prewarm(
+        self,
+        ctx: StagePageContext,
+        policy: dict[str, Any],
+        *,
+        index: int,
+        total_images: int,
+    ) -> None:
+        """Start Paddle only after a detected page proves a cache miss.
+
+        Unrelated rows in the persistent OCR database do not prove that the
+        current folder is cached. Planning each page as detection completes
+        preserves all-hit zero-runtime behavior while overlapping the first
+        real miss with detection of the remaining pages.
+        """
+
+        if (
+            ctx.failed_stage
+            or ctx.no_text_detected
+            or not ctx.blk_list
+            or "ocr" in getattr(self, "_prewarm_jobs", {})
+        ):
+            return
+        engine_key = str(policy.get("primary_ocr_engine", ""))
+        if engine_key not in {"PaddleOCR VL", "PaddleOCR VL Spotting"}:
+            return
+        runtime_manager = getattr(
+            self.main_page,
+            "local_ocr_runtime_manager",
+            None,
+        )
+        if not isinstance(runtime_manager, LocalOCRRuntimeManager):
+            return
+
+        settings_page = self.main_page.settings_page
+        paddle_settings = (
+            settings_page.get_paddleocr_vl_settings()
+            if engine_key == "PaddleOCR VL"
+            else settings_page.get_paddleocr_vl_spotting_settings()
+        )
+        persistent_cache_requested = bool(
+            engine_key == "PaddleOCR VL"
+            and paddle_settings.get("persistent_cache_enabled", True)
+        )
+        project_cache_requested = (
+            getattr(self, "_project_checkpoint_store", None) is not None
+        )
+        if not persistent_cache_requested and not project_cache_requested:
+            self._start_ocr_prewarm(
+                policy,
+                cache_miss_confirmed=True,
+            )
+            return
+
+        self._canonicalize_ocr_inputs([ctx])
+        runtime_identity = dict(
+            getattr(self, "_paddleocr_cache_identity", None) or {}
+        ) or None
+        if runtime_identity is None:
+            runtime_identity = runtime_manager.get_ocr_cache_identity(
+                engine_key,
+                settings_page,
+            )
+        if runtime_identity is None:
+            self._emit_benchmark_event(
+                "ocr_prewarm_decision",
+                image_path=ctx.image_path,
+                image_index=index,
+                total_images=total_images,
+                decision="start",
+                reason="runtime_identity_unavailable",
+            )
+            self._start_ocr_prewarm(
+                policy,
+                cache_miss_confirmed=True,
+            )
+            return
+        self._paddleocr_cache_identity = dict(runtime_identity)
+
+        if project_cache_requested:
+            self._prepare_project_ocr_hits(
+                [ctx],
+                policy,
+                runtime_identity,
+            )
+            if ctx.project_ocr_hit is not None:
+                self._emit_benchmark_event(
+                    "ocr_prewarm_decision",
+                    image_path=ctx.image_path,
+                    image_index=index,
+                    total_images=total_images,
+                    decision="defer",
+                    reason="project_checkpoint_hit",
+                )
+                return
+
+        requires_runtime = True
+        if persistent_cache_requested:
+            requires_runtime = self._prepare_paddleocr_cache_plans(
+                [ctx],
+                policy,
+                runtime_identity,
+            )
+        if ctx.failed_stage:
+            self._emit_benchmark_event(
+                "ocr_prewarm_decision",
+                image_path=ctx.image_path,
+                image_index=index,
+                total_images=total_images,
+                decision="defer",
+                reason="cache_plan_failed",
+            )
+            return
+        self._emit_benchmark_event(
+            "ocr_prewarm_decision",
+            image_path=ctx.image_path,
+            image_index=index,
+            total_images=total_images,
+            decision="start" if requires_runtime else "defer",
+            reason=(
+                "persistent_cache_miss"
+                if requires_runtime and persistent_cache_requested
+                else (
+                    "project_checkpoint_miss"
+                    if requires_runtime
+                    else "persistent_cache_hit"
+                )
+            ),
+        )
+        if requires_runtime:
+            self._start_ocr_prewarm(
+                policy,
+                cache_miss_confirmed=True,
+            )
 
     def _await_ocr_runtime(self, policy: dict[str, Any]) -> None:
         runtime_manager = getattr(self.main_page, "local_ocr_runtime_manager", None)
@@ -703,7 +848,11 @@ class StageBatchedProcessor(BatchProcessor):
         )
         self.main_page.image_skipped.emit(ctx.image_path, stage, detail or reason)
 
-    def _detect_all(self, pages: list[StagePageContext]) -> None:
+    def _detect_all(
+        self,
+        pages: list[StagePageContext],
+        policy: dict[str, Any] | None = None,
+    ) -> None:
         total_images = len(pages)
         settings_page = self.main_page.settings_page
         detector = self.block_detection.block_detector_cache
@@ -878,6 +1027,13 @@ class StageBatchedProcessor(BatchProcessor):
                     export_settings=export_settings,
                     preferred_path=detector_overlay_path,
                 )
+                if policy is not None:
+                    self._plan_detected_page_ocr_prewarm(
+                        ctx,
+                        policy,
+                        index=index,
+                        total_images=total_images,
+                    )
                 continue
 
             state = self._ensure_page_state(ctx.image_path)
@@ -1197,6 +1353,10 @@ class StageBatchedProcessor(BatchProcessor):
                 ctx.failed_stage
                 or ctx.no_text_detected
                 or not ctx.detection_fingerprint
+                or (
+                    ctx.project_ocr_checkpoint_status in {"hit", "miss"}
+                    and bool(ctx.project_ocr_identity)
+                )
             ):
                 continue
             try:
@@ -1292,8 +1452,6 @@ class StageBatchedProcessor(BatchProcessor):
         total_images = len(pages)
         settings_page = self.main_page.settings_page
         runtime_manager = getattr(self.main_page, "local_ocr_runtime_manager", None)
-        self._paddleocr_cache_store = None
-        self._paddleocr_cache_identity = None
         engine_key = str(policy["primary_ocr_engine"])
         self._canonicalize_ocr_inputs(pages)
         paddle_settings = (
@@ -1318,7 +1476,9 @@ class StageBatchedProcessor(BatchProcessor):
             persistent_cache_requested
             or getattr(self, "_project_checkpoint_store", None) is not None
         )
-        runtime_identity = None
+        runtime_identity = dict(
+            getattr(self, "_paddleocr_cache_identity", None) or {}
+        ) or None
         if (
             cache_identity_required
             and engine_key
@@ -1528,6 +1688,14 @@ class StageBatchedProcessor(BatchProcessor):
                 or ctx.no_text_detected
                 or ctx.project_ocr_hit is not None
             ):
+                continue
+            if (
+                isinstance(ctx.paddleocr_cache_engine, PaddleOCRVLEngine)
+                and ctx.paddleocr_cache_plan is not None
+            ):
+                requires_runtime = requires_runtime or bool(
+                    ctx.paddleocr_cache_plan.requires_runtime
+                )
                 continue
             try:
                 source_lang_english = self._source_lang_english(ctx.source_lang)
@@ -3523,6 +3691,8 @@ class StageBatchedProcessor(BatchProcessor):
         self._page_started_at = None
         self._progress_image_path = None
         self._recent_page_durations.clear()
+        self._paddleocr_cache_store = None
+        self._paddleocr_cache_identity = None
         self._emit_benchmark_event("batch_run_start", total_images=total_images)
         self._reset_prewarm_lifecycle()
         try:
@@ -3556,7 +3726,7 @@ class StageBatchedProcessor(BatchProcessor):
             self._raise_if_cancelled()
             self._start_ocr_prewarm(policy)
             self._raise_if_cancelled()
-            self._detect_all(pages)
+            self._detect_all(pages, policy)
             self._sample_performance_resources("detect_stage_end")
             self._raise_if_cancelled()
             self._ocr_all(pages, policy)
