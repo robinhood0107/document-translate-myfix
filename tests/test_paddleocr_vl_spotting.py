@@ -17,7 +17,7 @@ def _native_line(
     text: str,
     coordinates: tuple[int, ...],
 ) -> str:
-    return "".join(f"<|LOC_{value}|>" for value in coordinates) + text
+    return text + "".join(f"<|LOC_{value}|>" for value in coordinates)
 
 
 def _response(content: str, *, finish_reason: str = "stop") -> dict:

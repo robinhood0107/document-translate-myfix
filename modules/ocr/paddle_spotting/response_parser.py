@@ -6,11 +6,11 @@ import re
 from dataclasses import dataclass
 
 
-PADDLE_SPOTTING_RESPONSE_SCHEMA_VERSION = 1
+PADDLE_SPOTTING_RESPONSE_SCHEMA_VERSION = 2
 PADDLE_SPOTTING_COORDINATE_SCALE = 1000
 _LOCATION_TOKEN = re.compile(r"<\|LOC_(\d{1,4})\|>")
 _NATIVE_LINE = re.compile(
-    r"^(?P<coordinates>(?:<\|LOC_\d{1,4}\|>){8})(?P<text>.+)$"
+    r"^(?P<text>.*?)(?P<coordinates>(?:<\|LOC_\d{1,4}\|>){8})$"
 )
 _SPECIAL_TOKEN_FRAGMENT = re.compile(r"<\|[^>]*\|>")
 _END_TOKEN = re.compile(r"</s>")
@@ -48,7 +48,7 @@ def _parse_line(line: str, line_number: int) -> PaddleSpottingRegion:
             "invalid_native_line",
             (
                 "PaddleOCR-VL Spotting line "
-                f"{line_number} must start with exactly eight LOC tokens."
+                f"{line_number} must end with exactly eight LOC tokens."
             ),
         )
     coordinate_text = native_line.group("coordinates")
