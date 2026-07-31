@@ -42,6 +42,14 @@ class WindowsLauncherSourceReleaseTests(unittest.TestCase):
         self.assertIn("app/ui/main_window/window.py", paths)
         self.assertIn("modules/ocr/local_runtime.py", paths)
         self.assertIn("pipeline/main_pipeline.py", paths)
+        self.assertIn(
+            "scripts/prepare_paddleocr_llamacpp_runtime.ps1",
+            paths,
+        )
+        self.assertIn(
+            "scripts/prepare_mangalmm_llamacpp_runtime.ps1",
+            paths,
+        )
         self.assertIn("scripts/verify_windows_runtime.py", paths)
         self.assertNotIn("scripts/benchmark_cold_cache_finalization.py", paths)
         self.assertNotIn("scripts/build_windows_gpu_onefile.ps1", paths)
@@ -128,6 +136,14 @@ class WindowsLauncherSourceReleaseTests(unittest.TestCase):
             text = (ROOT / launcher).read_text(encoding="utf-8")
             self.assertIn('if /I "%COMIC_VERIFY_ONLY%"=="1"', text)
             self.assertIn("scripts\\prepare_gemma_runtime.ps1", text)
+            self.assertIn(
+                "scripts\\prepare_paddleocr_llamacpp_runtime.ps1",
+                text,
+            )
+            self.assertIn(
+                "scripts\\prepare_mangalmm_llamacpp_runtime.ps1",
+                text,
+            )
             self.assertIn("scripts\\verify_windows_runtime.py", text)
             self.assertIn("resources\\translations\\compiled\\ct_ko.qm", text)
             self.assertIn("pip==26.0.1", text)

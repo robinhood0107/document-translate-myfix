@@ -210,7 +210,13 @@ def test_same_bubble_panel_candidates_share_group_metadata() -> None:
     assert groups[0]["member_indices"] == [0, 1]
     assert first.bubble_panel_group_id == second.bubble_panel_group_id
     assert first.bubble_panel_member_indices == [0, 1]
-    assert second.bubble_panel_merge_decision == "duplicate_member"
+    assert groups[0]["requires_review"] is True
+    assert first.bubble_panel_merge_decision == "merge_split_review"
+    assert second.bubble_panel_merge_decision == "merge_split_review"
+    assert first.processing_action == "review"
+    assert second.processing_action == "review"
+    assert first.merge_split_diagnostics["automatic_merge"] is False
+    assert second.merge_split_diagnostics["automatic_split"] is False
     assert normal not in groups[0]["members"]
 
 

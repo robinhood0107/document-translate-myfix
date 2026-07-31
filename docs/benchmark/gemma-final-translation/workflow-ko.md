@@ -1,8 +1,15 @@
 # Gemma 최종 번역 전용 비교 workflow
 
 이 family는 동결된 22개 입력과 페이지 순서를 보존한 292블록 OCR snapshot으로
-현재 요청 방식, grouped F16, grouped Q8 세 후보만 비교한다. OCR, 인페인트,
-렌더는 점수 범위에 포함하지 않는다.
+당시 요청 방식, grouped F16, grouped Q8 세 후보를 비교한 역사적 protocol v3다.
+OCR, 인페인트, 렌더는 점수 범위에 포함하지 않았다.
+
+제품의 `contextual-grouped` 실행 경로는 품질 탈락 뒤 퇴역했다. 현재
+checkout에서 이 runner를 실행하면 후보 이름과 실제 요청 방식이 달라질 수
+있으므로 preflight부터 명시적으로 차단한다. 원본 live suite 재현 대상은
+커밋 `76b81c7b903bd9569d116b5eabc966135a13a1f5`이며, 현재 보존 결과를
+검수할 때는 새 모델 요청을 만들지 않는 protocol v4 report-only 도구를
+사용한다.
 
 ## 순서
 

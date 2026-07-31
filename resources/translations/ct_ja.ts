@@ -887,6 +887,29 @@ Start the server with both the HunyuanOCR GGUF model and the matching mmproj fil
     </message>
 </context>
 <context>
+    <name>InpaintingRuntime</name>
+    <message>
+        <source>Learned inpainting requires CUDA; CPU fallback is disabled.</source>
+        <translation>学習ベースのインペイントには CUDA が必要です。CPU フォールバックは無効です。</translation>
+    </message>
+    <message>
+        <source>CUDA inpainting ran out of memory after the single bounded ROI retry.</source>
+        <translation>CUDA インペイントは、制限された ROI での 1 回の再試行後もメモリ不足になりました。</translation>
+    </message>
+    <message>
+        <source>Inpaint output changed pixels outside the final edit mask.</source>
+        <translation>インペイント結果が最終編集マスク外のピクセルを変更しました。</translation>
+    </message>
+    <message>
+        <source>The previous inpainter VRAM release was not confirmed.</source>
+        <translation>以前のインペインターの VRAM 解放を確認できませんでした。</translation>
+    </message>
+    <message>
+        <source>CUDA FFT execution failed; CPU fallback is disabled.</source>
+        <translation>CUDA FFT の実行に失敗しました。CPU フォールバックは無効です。</translation>
+    </message>
+</context>
+<context>
     <name>LlmsPage</name>
     <message>
         <source>Provide Image as Input to AI</source>
@@ -1110,17 +1133,29 @@ Keep the default localhost URL if you want Comic Translate to reuse the bundled 
     </message>
     <message>
         <source>Recommended values for the bundled MangaLMM runtime:
-- ctx-size 4096: enough for full-page OCR while keeping VRAM safer
-- Max Completion Tokens: 256
+- ctx-size 8192: preserves the full-page prompt and grounded response
+- Max Completion Tokens: 4096
 - Parallel Workers: 1
 - Request Timeout: 60 seconds
 - Safe Resize: on
 - Max Pixels / Max Long Side: 2116800 / 1728
 Reasoning:
 - PNG + image-first ordering is the most reliable request format for MangaLMM.
+- The response must be one complete JSON array of grounded text regions.
 - Direct MangaLMM mode respects the values on this page.
 - Workers 1 is the safest default when MangaLMM is the active OCR runtime.</source>
-        <translation type="unfinished"></translation>
+        <translation>同梱 MangaLMM ランタイムの推奨値:
+- ctx-size 8192: フルページプロンプトと座標付き応答を保持
+- Max Completion Tokens: 4096
+- Parallel Workers: 1
+- Request Timeout: 60 秒
+- Safe Resize: オン
+- Max Pixels / Max Long Side: 2116800 / 1728
+理由:
+- PNG と画像優先の順序が MangaLMM で最も安定したリクエスト形式です。
+- 応答は座標付きテキスト領域を含む、完全な単一の JSON 配列である必要があります。
+- Direct MangaLMM モードはこのページの値に従います。
+- MangaLMM が有効な OCR ランタイムの場合、Workers 1 が最も安全な既定値です。</translation>
     </message>
 </context>
 <context>

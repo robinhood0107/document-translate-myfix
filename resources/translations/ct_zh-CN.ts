@@ -887,6 +887,29 @@ Start the server with both the HunyuanOCR GGUF model and the matching mmproj fil
     </message>
 </context>
 <context>
+    <name>InpaintingRuntime</name>
+    <message>
+        <source>Learned inpainting requires CUDA; CPU fallback is disabled.</source>
+        <translation>学习型图像修复需要 CUDA；已禁用 CPU 回退。</translation>
+    </message>
+    <message>
+        <source>CUDA inpainting ran out of memory after the single bounded ROI retry.</source>
+        <translation>CUDA 图像修复在对受限 ROI 进行一次重试后仍然内存不足。</translation>
+    </message>
+    <message>
+        <source>Inpaint output changed pixels outside the final edit mask.</source>
+        <translation>图像修复结果修改了最终编辑蒙版之外的像素。</translation>
+    </message>
+    <message>
+        <source>The previous inpainter VRAM release was not confirmed.</source>
+        <translation>无法确认前一个图像修复模型已释放 VRAM。</translation>
+    </message>
+    <message>
+        <source>CUDA FFT execution failed; CPU fallback is disabled.</source>
+        <translation>CUDA FFT 执行失败；已禁用 CPU 回退。</translation>
+    </message>
+</context>
+<context>
     <name>LlmsPage</name>
     <message>
         <source>Provide Image as Input to AI</source>
@@ -1110,17 +1133,29 @@ Keep the default localhost URL if you want Comic Translate to reuse the bundled 
     </message>
     <message>
         <source>Recommended values for the bundled MangaLMM runtime:
-- ctx-size 4096: enough for full-page OCR while keeping VRAM safer
-- Max Completion Tokens: 256
+- ctx-size 8192: preserves the full-page prompt and grounded response
+- Max Completion Tokens: 4096
 - Parallel Workers: 1
 - Request Timeout: 60 seconds
 - Safe Resize: on
 - Max Pixels / Max Long Side: 2116800 / 1728
 Reasoning:
 - PNG + image-first ordering is the most reliable request format for MangaLMM.
+- The response must be one complete JSON array of grounded text regions.
 - Direct MangaLMM mode respects the values on this page.
 - Workers 1 is the safest default when MangaLMM is the active OCR runtime.</source>
-        <translation type="unfinished"></translation>
+        <translation>内置 MangaLMM 运行时的建议值：
+- ctx-size 8192：保留整页提示词和带坐标的响应
+- Max Completion Tokens：4096
+- Parallel Workers：1
+- Request Timeout：60 秒
+- Safe Resize：开启
+- Max Pixels / Max Long Side：2116800 / 1728
+原因：
+- PNG 加图像优先顺序是 MangaLMM 最可靠的请求格式。
+- 响应必须是一个完整的、包含文本区域坐标的 JSON 数组。
+- 直接 MangaLMM 模式遵循此页面中的设置值。
+- 当 MangaLMM 为当前 OCR 运行时时，Workers 1 是最安全的默认值。</translation>
     </message>
 </context>
 <context>

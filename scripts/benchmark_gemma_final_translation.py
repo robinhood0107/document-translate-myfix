@@ -31,6 +31,7 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
+from modules.translation.llm import custom_local_gemma as gemma_runtime  # noqa: E402
 from modules.translation.llm.custom_local_gemma import (  # noqa: E402
     DEFAULT_GEMMA_PROMPT_PROFILE,
     DEFAULT_GEMMA_RESPONSE_FORMAT_MODE,
@@ -40,7 +41,6 @@ from modules.translation.llm.custom_local_gemma import (  # noqa: E402
     DEFAULT_GEMMA_TRANSLATION_TEMPERATURE,
     DEFAULT_GEMMA_TRANSLATION_TOP_K,
     DEFAULT_GEMMA_TRANSLATION_TOP_P,
-    GEMMA_REQUEST_MODE_CONTEXTUAL_GROUPED,
     GEMMA_REQUEST_MODE_CONTEXTUAL_SINGLE,
     CustomLocalGemmaTranslation,
 )
@@ -54,6 +54,10 @@ EXPECTED_MAX_COMPLETION_TOKENS = 512
 DEFAULT_GROUP_SIZE = 7
 DEFAULT_BASELINE_GROUP_SIZE = 6
 BENCHMARK_PROTOCOL_VERSION = 3
+HISTORICAL_GROUPED_REPLAY_COMMIT = (
+    "76b81c7b903bd9569d116b5eabc966135a13a1f5"
+)
+GEMMA_REQUEST_MODE_CONTEXTUAL_GROUPED = "contextual-grouped"
 DEFAULT_IMAGE_ID = (
     "sha256:22e0e3bfe967af4fd1df6a918022abbfd4e72e4d40a4769e616a4176790acbcb"
 )
@@ -115,6 +119,25 @@ STRUCTURAL_STATS = (
     "gemma_repetition_guard_count",
     "gemma_nested_value_count",
 )
+
+
+def require_historical_grouped_runtime() -> None:
+    """Refuse a mislabeled replay after the product grouped path retired."""
+
+    live_mode = getattr(
+        gemma_runtime,
+        "GEMMA_REQUEST_MODE_CONTEXTUAL_GROUPED",
+        None,
+    )
+    if live_mode != GEMMA_REQUEST_MODE_CONTEXTUAL_GROUPED:
+        raise RuntimeError(
+            "Gemma final-translation protocol v3 requires the retired live "
+            "contextual-grouped product path. Do not run it from the current "
+            "checkout because grouped candidates would execute as "
+            "contextual-single. Reproduce the historical suite only from "
+            f"commit {HISTORICAL_GROUPED_REPLAY_COMMIT}; use protocol v4 "
+            "report-only tooling for the preserved results."
+        )
 CLEAN_RUN_STATS = (
     *STRUCTURAL_STATS,
     "gemma_json_retry_count",
@@ -3084,6 +3107,7 @@ def execute_benchmark_round(
 
 def _main_unlocked(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
+    require_historical_grouped_runtime()
     if args.group_size < 2 or args.group_size > 12:
         raise ValueError("--group-size must be between 2 and 12")
     if args.max_completion_tokens != EXPECTED_MAX_COMPLETION_TOKENS:
