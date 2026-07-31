@@ -112,6 +112,9 @@ class CandidateProfile:
     bold_anchor_distance: float | None = None
     residual_mode: str = "none"
     pass_partition: str = "union"
+    foreground_repair_method: str = "learned"
+    foreground_repair_radius: int = 0
+    reconnect_structure: bool = False
     baseline: bool = False
     promotable: bool = True
     feasibility_only: bool = False
@@ -320,6 +323,64 @@ MODEL_SCREEN_TEMPLATES: tuple[CandidateProfile, ...] = (
         structure_protect=True,
         promotable=False,
         feasibility_only=True,
+    ),
+)
+
+
+STRUCTURED_REPAIR_PROFILES: tuple[CandidateProfile, ...] = (
+    replace(
+        next(
+            profile
+            for profile in MASK_RESIDUAL_SCREEN_PROFILES
+            if (
+                profile.mask_mode == "strategy_routed"
+                and profile.dilation == 2
+                and not profile.structure_protect
+            )
+        ),
+        slug=(
+            "structured-foreground-learned"
+            "-dilate-2-lama-large-fp32-2048"
+        ),
+        label=(
+            "structured foreground learned comparator + glyph dilation 2 "
+            "+ LaMa Large FP32 2048"
+        ),
+        phase="structured-repair",
+    ),
+    *tuple(
+        CandidateProfile(
+            slug=(
+                f"structured-foreground-{method}"
+                f"-dilate-{dilation}-radius-{radius}"
+                f"-line-{int(reconnect_structure)}"
+                "-lama-large-fp32-2048"
+            ),
+            label=(
+                f"structured foreground {method} radius {radius} + "
+                f"glyph dilation {dilation} + line reconnect "
+                f"{'on' if reconnect_structure else 'off'} + "
+                "opaque bubble LaMa Large FP32 2048"
+            ),
+            phase="structured-repair",
+            inpainter_key="lama_large_512px",
+            precision="fp32",
+            inpaint_size=2048,
+            mask_mode="strategy_routed",
+            dilation=dilation,
+            structure_protect=False,
+            foreground_repair_method=method,
+            foreground_repair_radius=radius,
+            reconnect_structure=reconnect_structure,
+        )
+        for method in ("telea", "navier_stokes")
+        for dilation in (1, 2, 4)
+        for radius in (1, 2, 3)
+        for reconnect_structure in (
+            (False, True)
+            if dilation == 2 and radius == 2
+            else (False,)
+        )
     ),
 )
 
@@ -1835,6 +1896,13 @@ def _profiles_for_phase(
                 or profile.mask_mode != "strategy_routed"
             )
         )
+    elif phase == "structured-repair":
+        if not strategy_routed_available:
+            raise ProtocolError(
+                "structured repair requires complete strategy-routed "
+                "mask artifacts"
+            )
+        profiles.extend(STRUCTURED_REPAIR_PROFILES)
     elif phase == "model":
         selected: CandidateProfile | None = None
         if selected_mask_profile:
@@ -2129,6 +2197,10 @@ def build_candidate_masks(
     import numpy as np
 
     allowed = np.asarray(allowed_window_mask) > 0
+    foreground_repair = np.zeros(
+        np.asarray(allowed_window_mask).shape[:2],
+        dtype=np.uint8,
+    )
     if profile.mask_mode == "product":
         raw = (np.asarray(product_mask) > 0).astype(np.uint8) * 255
         primary = np.where((raw > 0) & allowed, 255, 0).astype(np.uint8)
@@ -2160,11 +2232,35 @@ def build_candidate_masks(
             255,
             0,
         ).astype(np.uint8)
-        primary = np.where(
-            (bubble_safe | foreground) & allowed,
-            255,
-            0,
-        ).astype(np.uint8)
+        if profile.foreground_repair_method == "learned":
+            primary = np.where(
+                (bubble_safe | foreground) & allowed,
+                255,
+                0,
+            ).astype(np.uint8)
+        elif profile.foreground_repair_method in {
+            "telea",
+            "navier_stokes",
+        }:
+            if profile.foreground_repair_radius not in {1, 2, 3}:
+                raise ProtocolError(
+                    "structured foreground repair radius must be 1, 2, or 3"
+                )
+            primary = np.where(
+                bubble_safe & allowed,
+                255,
+                0,
+            ).astype(np.uint8)
+            foreground_repair = np.where(
+                foreground & allowed,
+                255,
+                0,
+            ).astype(np.uint8)
+        else:
+            raise ProtocolError(
+                "candidate has unknown foreground repair method: "
+                f"{profile.foreground_repair_method}"
+            )
     elif profile.mask_mode == "glyph" and profile.dilation is not None:
         raw = (np.asarray(glyph_base_mask) > 0).astype(np.uint8) * 255
         candidate = _dilate_mask(raw, profile.dilation)
@@ -2209,7 +2305,7 @@ def build_candidate_masks(
             f"candidate has unknown residual mode: {profile.slug}"
         )
     final = np.where(
-        (primary > 0) | (residual > 0),
+        (primary > 0) | (residual > 0) | (foreground_repair > 0),
         255,
         0,
     ).astype(np.uint8)
@@ -2217,6 +2313,7 @@ def build_candidate_masks(
         "raw_mask": raw,
         "primary_mask": primary,
         "residual_mask": residual,
+        "foreground_repair_mask": foreground_repair,
         "final_mask": final,
     }
 
@@ -2563,6 +2660,194 @@ def _artifact_record(path: Path, root: Path) -> dict[str, Any]:
     }
 
 
+def _reconnect_masked_structure_lines(
+    source: Any,
+    cleaned: Any,
+    mask: Any,
+) -> tuple[Any, dict[str, int]]:
+    """Reconnect long visible lines only where a glyph mask interrupted them."""
+
+    import cv2
+    import numpy as np
+
+    source_array = np.asarray(source)
+    output = np.asarray(cleaned).copy()
+    edit = np.asarray(mask) > 0
+    if not np.any(edit):
+        return output, {
+            "line_candidate_count": 0,
+            "line_reconnected_count": 0,
+            "line_reconnected_pixel_count": 0,
+        }
+    gray = cv2.cvtColor(source_array, cv2.COLOR_RGB2GRAY)
+    visible = np.where(edit, 0, cv2.Canny(gray, 40, 120)).astype(np.uint8)
+    height, width = edit.shape[:2]
+    minimum = max(18, int(round(min(height, width) * 0.06)))
+    lines = cv2.HoughLinesP(
+        visible,
+        1,
+        np.pi / 180.0,
+        threshold=max(14, minimum // 2),
+        minLineLength=minimum,
+        maxLineGap=max(10, int(round(min(height, width) * 0.10))),
+    )
+    if lines is None:
+        return output, {
+            "line_candidate_count": 0,
+            "line_reconnected_count": 0,
+            "line_reconnected_pixel_count": 0,
+        }
+
+    changed = np.zeros(edit.shape, dtype=np.uint8)
+    reconnected = 0
+    for x1, y1, x2, y2 in lines[:, 0, :]:
+        length = float(np.hypot(int(x2) - int(x1), int(y2) - int(y1)))
+        if length < minimum:
+            continue
+        sample_count = max(2, int(round(length)) + 1)
+        xs = np.clip(
+            np.rint(np.linspace(x1, x2, sample_count)).astype(np.int32),
+            0,
+            width - 1,
+        )
+        ys = np.clip(
+            np.rint(np.linspace(y1, y2, sample_count)).astype(np.int32),
+            0,
+            height - 1,
+        )
+        masked_samples = edit[ys, xs]
+        positions = np.flatnonzero(masked_samples)
+        if positions.size == 0:
+            continue
+        first = int(positions[0])
+        last = int(positions[-1])
+        if first < 3 or last + 3 >= sample_count:
+            continue
+        left_positions = np.arange(max(0, first - 5), first)
+        right_positions = np.arange(last + 1, min(sample_count, last + 6))
+        left_positions = left_positions[
+            ~edit[ys[left_positions], xs[left_positions]]
+        ]
+        right_positions = right_positions[
+            ~edit[ys[right_positions], xs[right_positions]]
+        ]
+        if left_positions.size < 2 or right_positions.size < 2:
+            continue
+        endpoint_colors = np.concatenate(
+            (
+                source_array[ys[left_positions], xs[left_positions]],
+                source_array[ys[right_positions], xs[right_positions]],
+            ),
+            axis=0,
+        )
+        color = tuple(
+            int(value)
+            for value in np.median(endpoint_colors, axis=0).round()
+        )
+        candidate = np.zeros(edit.shape, dtype=np.uint8)
+        cv2.line(
+            candidate,
+            (int(x1), int(y1)),
+            (int(x2), int(y2)),
+            255,
+            thickness=1,
+            lineType=cv2.LINE_AA,
+        )
+        active = (candidate > 0) & edit
+        if not np.any(active):
+            continue
+        output[active] = color
+        changed[active] = 255
+        reconnected += 1
+    return output, {
+        "line_candidate_count": int(len(lines)),
+        "line_reconnected_count": int(reconnected),
+        "line_reconnected_pixel_count": int(np.count_nonzero(changed)),
+    }
+
+
+def _run_deterministic_foreground_repair(
+    *,
+    image: Any,
+    mask: Any,
+    review_roi: Sequence[int],
+    method: str,
+    radius: int,
+    reconnect_structure: bool,
+) -> tuple[Any, float, dict[str, Any]]:
+    """Run a bounded non-learned repair and composite only inside its mask."""
+
+    import cv2
+    import numpy as np
+
+    from modules.utils.inpaint_composite import composite_with_edit_mask
+
+    if method not in {"telea", "navier_stokes"}:
+        raise ProtocolError(
+            f"unsupported deterministic foreground repair: {method}"
+        )
+    if int(radius) not in {1, 2, 3}:
+        raise ProtocolError(
+            "deterministic foreground repair radius must be 1, 2, or 3"
+        )
+    source = np.asarray(image)
+    edit = (np.asarray(mask) > 0).astype(np.uint8) * 255
+    if not np.any(edit):
+        return source.copy(), 0.0, {
+            "status": "skipped_empty_foreground_mask",
+            "method": method,
+            "radius": int(radius),
+            "actual_device": "cpu_deterministic",
+            "learned_cpu_fallback_used": False,
+            "line_candidate_count": 0,
+            "line_reconnected_count": 0,
+            "line_reconnected_pixel_count": 0,
+        }
+    roi = _context_roi(
+        edit,
+        source.shape,
+        requested_roi=review_roi,
+    )
+    x1, y1, x2, y2 = roi
+    crop = np.ascontiguousarray(source[y1:y2, x1:x2])
+    mask_crop = np.ascontiguousarray(edit[y1:y2, x1:x2])
+    flag = (
+        cv2.INPAINT_TELEA
+        if method == "telea"
+        else cv2.INPAINT_NS
+    )
+    started = time.perf_counter()
+    repaired = cv2.inpaint(crop, mask_crop, float(radius), flag)
+    line_diagnostics = {
+        "line_candidate_count": 0,
+        "line_reconnected_count": 0,
+        "line_reconnected_pixel_count": 0,
+    }
+    if reconnect_structure:
+        repaired, line_diagnostics = _reconnect_masked_structure_lines(
+            crop,
+            repaired,
+            mask_crop,
+        )
+    cleaned = source.copy()
+    cleaned[y1:y2, x1:x2] = composite_with_edit_mask(
+        crop,
+        repaired,
+        mask_crop,
+    )
+    cleaned = composite_with_edit_mask(source, cleaned, edit)
+    elapsed = time.perf_counter() - started
+    return cleaned, elapsed, {
+        "status": "completed",
+        "method": method,
+        "radius": int(radius),
+        "roi": list(roi),
+        "actual_device": "cpu_deterministic",
+        "learned_cpu_fallback_used": False,
+        **line_diagnostics,
+    }
+
+
 def _run_candidate_passes(
     *,
     inpainter: Any,
@@ -2670,6 +2955,80 @@ def _run_candidate_passes(
         ),
     }
     return cleaned, inference_seconds, diagnostics
+
+
+def _run_profile_candidate(
+    *,
+    profile: CandidateProfile,
+    inpainter: Any,
+    image: Any,
+    primary_mask: Any,
+    residual_mask: Any,
+    foreground_repair_mask: Any,
+    review_roi: Sequence[int],
+) -> tuple[Any, float, dict[str, Any]]:
+    import numpy as np
+
+    if profile.foreground_repair_method == "learned":
+        return _run_candidate_passes(
+            inpainter=inpainter,
+            image=image,
+            primary_mask=primary_mask,
+            residual_mask=residual_mask,
+            review_roi=review_roi,
+            pass_partition=profile.pass_partition,
+        )
+
+    cleaned, deterministic_seconds, deterministic_diagnostics = (
+        _run_deterministic_foreground_repair(
+            image=image,
+            mask=foreground_repair_mask,
+            review_roi=review_roi,
+            method=profile.foreground_repair_method,
+            radius=profile.foreground_repair_radius,
+            reconnect_structure=profile.reconnect_structure,
+        )
+    )
+    learned_active = bool(
+        np.any(np.asarray(primary_mask) > 0)
+        or np.any(np.asarray(residual_mask) > 0)
+    )
+    learned_seconds = 0.0
+    learned_diagnostics: dict[str, Any] = {
+        "status": "skipped_empty_learned_mask",
+        "pass_count": 0,
+        "oom_retry_count": 0,
+        "oom_retry_roi": None,
+    }
+    if learned_active:
+        cleaned, learned_seconds, learned_diagnostics = (
+            _run_candidate_passes(
+                inpainter=inpainter,
+                image=cleaned,
+                primary_mask=primary_mask,
+                residual_mask=residual_mask,
+                review_roi=review_roi,
+                pass_partition=profile.pass_partition,
+            )
+        )
+    diagnostics = {
+        "status": (
+            "completed_after_roi_retry"
+            if int(learned_diagnostics.get("oom_retry_count", 0) or 0)
+            else "completed"
+        ),
+        "hybrid_foreground_repair": True,
+        "deterministic": deterministic_diagnostics,
+        "learned": learned_diagnostics,
+        "pass_count": int(
+            learned_diagnostics.get("pass_count", 0) or 0
+        ),
+        "oom_retry_count": int(
+            learned_diagnostics.get("oom_retry_count", 0) or 0
+        ),
+        "oom_retry_roi": learned_diagnostics.get("oom_retry_roi"),
+    }
+    return cleaned, deterministic_seconds + learned_seconds, diagnostics
 
 
 def run_screen(
@@ -2810,6 +3169,9 @@ def run_screen(
                 )
                 primary_mask = mask_bundle["primary_mask"]
                 residual_mask = mask_bundle["residual_mask"]
+                foreground_repair_mask = mask_bundle[
+                    "foreground_repair_mask"
+                ]
                 mask = mask_bundle["final_mask"]
                 roi = _context_roi(
                     mask,
@@ -2843,13 +3205,16 @@ def run_screen(
                             cleaned,
                             inference_seconds,
                             run_diagnostics,
-                        ) = _run_candidate_passes(
+                        ) = _run_profile_candidate(
+                            profile=profile,
                             inpainter=inpainter,
                             image=image,
                             primary_mask=primary_mask,
                             residual_mask=residual_mask,
+                            foreground_repair_mask=(
+                                foreground_repair_mask
+                            ),
                             review_roi=case["review_roi"],
-                            pass_partition=profile.pass_partition,
                         )
                     except CandidateRunError as exc:
                         cleaned = image.copy()
@@ -2886,6 +3251,10 @@ def run_screen(
                     ),
                     "residual_mask": _crop(
                         residual_mask,
+                        case["review_roi"],
+                    ),
+                    "foreground_repair_mask": _crop(
+                        foreground_repair_mask,
                         case["review_roi"],
                     ),
                     "final_mask": _crop(mask, case["review_roi"]),
@@ -2933,6 +3302,9 @@ def run_screen(
                     ),
                     "residual_mask_pixel_count": int(
                         (residual_mask > 0).sum()
+                    ),
+                    "foreground_repair_mask_pixel_count": int(
+                        (foreground_repair_mask > 0).sum()
                     ),
                     "mask_pixel_count": int((mask > 0).sum()),
                     "inference_seconds": round(float(inference_seconds), 6),
@@ -3178,6 +3550,8 @@ def validate_results(root: Path) -> dict[str, Any]:
                 required_artifacts.extend(
                     ("primary_mask", "residual_mask")
                 )
+            if "foreground_repair_method" in profile:
+                required_artifacts.append("foreground_repair_mask")
             for name in required_artifacts:
                 record = artifacts.get(name)
                 if not isinstance(record, Mapping):
@@ -3296,6 +3670,7 @@ def build_blind_review(
                 "raw_mask",
                 "primary_mask",
                 "residual_mask",
+                "foreground_repair_mask",
                 "final_mask",
                 "mask_overlay",
                 "cleaned",
@@ -3448,6 +3823,7 @@ def _render_review_html(
                 ("raw_mask", "mask source"),
                 ("primary_mask", "1차 mask"),
                 ("residual_mask", "2차 residual mask"),
+                ("foreground_repair_mask", "국소 복원 mask"),
                 ("final_mask", "최종 mask"),
                 ("mask_overlay", "mask overlay"),
                 ("cleaned", "cleaned"),
@@ -3816,6 +4192,9 @@ def _print_profiles() -> None:
         "mask_residual_screen": [
             asdict(profile) for profile in MASK_RESIDUAL_SCREEN_PROFILES
         ],
+        "structured_repair_screen": [
+            asdict(profile) for profile in STRUCTURED_REPAIR_PROFILES
+        ],
         "model_screen": [
             asdict(profile) for profile in MODEL_SCREEN_TEMPLATES
         ],
@@ -3850,7 +4229,12 @@ def build_parser() -> argparse.ArgumentParser:
     run.add_argument(
         "--phase",
         required=True,
-        choices=("mask", "mask-residual", "model"),
+        choices=(
+            "mask",
+            "mask-residual",
+            "structured-repair",
+            "model",
+        ),
     )
     run.add_argument("--selected-dilation", type=int)
     run.add_argument("--selected-mask-profile")
