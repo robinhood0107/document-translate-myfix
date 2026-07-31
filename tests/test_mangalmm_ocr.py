@@ -711,6 +711,94 @@ class MangaLMMOCRTests(unittest.TestCase):
             "review",
         )
 
+    def test_long_dominant_dialogue_recovers_with_far_weak_sfx(self) -> None:
+        engine = MangaLMMOCREngine()
+        block = _make_block(
+            10,
+            10,
+            60,
+            90,
+            text_class="text_bubble",
+            bubble_bbox=(0, 0, 100, 100),
+        )
+
+        assignments = engine._assign_regions_to_blocks(
+            [
+                _make_region(12, 12, 58, 88, "私もですか？"),
+                _make_region(80, 75, 95, 90, "ゼ"),
+            ],
+            [block],
+        )
+
+        self.assertEqual(len(assignments[0]), 1)
+        self.assertEqual(assignments[0][0]["region"].text, "私もですか？")
+        self.assertEqual(len(engine.last_shadow_regions), 1)
+        self.assertEqual(
+            engine.last_shadow_regions[0]["reason"],
+            "dominant_region_secondary_review",
+        )
+        self.assertEqual(
+            engine.last_merge_split_diagnostics[0]["kind"],
+            "dominant_region_one_block",
+        )
+        self.assertIn(
+            "mangalmm_dominant_region_one_block",
+            block.merge_split_diagnostics,
+        )
+        self.assertEqual(block.compound_group_id, "")
+
+    def test_short_region_cannot_trigger_dominant_recovery(self) -> None:
+        engine = MangaLMMOCREngine()
+        block = _make_block(
+            10,
+            10,
+            60,
+            90,
+            text_class="text_bubble",
+            bubble_bbox=(0, 0, 100, 100),
+        )
+
+        assignments = engine._assign_regions_to_blocks(
+            [
+                _make_region(12, 12, 58, 88, "うわっ"),
+                _make_region(80, 75, 95, 90, "グッ"),
+            ],
+            [block],
+        )
+
+        self.assertEqual(assignments, {0: []})
+        self.assertEqual(len(engine.last_shadow_regions), 2)
+        self.assertNotIn(
+            "mangalmm_dominant_region_one_block",
+            block.merge_split_diagnostics,
+        )
+
+    def test_two_strong_regions_cannot_trigger_dominant_recovery(self) -> None:
+        engine = MangaLMMOCREngine()
+        block = _make_block(
+            0,
+            0,
+            100,
+            100,
+            text_class="text_bubble",
+            bubble_bbox=(0, 0, 100, 100),
+        )
+
+        assignments = engine._assign_regions_to_blocks(
+            [
+                _make_region(20, 20, 65, 85, "first dialogue"),
+                _make_region(35, 15, 80, 80, "second dialogue"),
+            ],
+            [block],
+        )
+
+        self.assertEqual(assignments, {0: []})
+        self.assertEqual(len(engine.last_shadow_regions), 2)
+        self.assertNotIn(
+            "mangalmm_dominant_region_one_block",
+            block.merge_split_diagnostics,
+        )
+
     def test_near_duplicate_regions_are_collapsed_before_compounding(
         self,
     ) -> None:
@@ -1071,7 +1159,7 @@ class MangaLMMOCRTests(unittest.TestCase):
             block.ocr_geometry_provenance[
                 "reconciliation_schema_version"
             ],
-            2,
+            3,
         )
 
     def test_finish_reason_length_rejects_otherwise_valid_json(self) -> None:
