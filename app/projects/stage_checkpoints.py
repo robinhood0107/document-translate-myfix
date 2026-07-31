@@ -31,7 +31,7 @@ from modules.ocr.persistent_cache import (
     canonical_sha256,
     validate_raw_ocr_result,
 )
-from modules.ocr.result_contract import (
+from modules.ocr.common.result_contract import (
     OCR_PROCESSING_CONTRACT_SCHEMA_VERSION,
 )
 from modules.utils.device import get_providers, resolve_device
