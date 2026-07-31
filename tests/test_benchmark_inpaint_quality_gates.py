@@ -260,6 +260,211 @@ def test_exact_duplicate_annotations_must_agree() -> None:
         )
 
 
+def test_complete_annotations_require_every_block_and_source_digest() -> None:
+    page = {
+        "blocks": [
+            {
+                "xyxy": [10, 10, 30, 40],
+                "bubble_xyxy": [5, 5, 60, 70],
+                "text_class": "text_bubble",
+                "text": "first",
+                "translation": "첫째",
+            },
+            {
+                "xyxy": [40, 10, 60, 40],
+                "bubble_xyxy": None,
+                "text_class": "text_free",
+                "text": "second",
+                "translation": "둘째",
+            },
+        ]
+    }
+    incomplete_case = {
+        "annotation_contract": gates.COMPLETE_ANNOTATION_CONTRACT,
+        "annotations": [
+            {
+                "block_index": 0,
+                "source_block_sha256": "0" * 64,
+                "semantic_role": "dialogue_bubble",
+                "processing_action": "translate_inpaint",
+                "mask_strategy": "bubble_safe",
+            }
+        ],
+    }
+
+    with pytest.raises(
+        gates.ProtocolError,
+        match="exactly one annotation",
+    ):
+        gates._snapshot_block_records(
+            case_id="neutral-case",
+            page=page,
+            case=incomplete_case,
+            image_shape=(100, 100, 3),
+        )
+
+    stale_case = {
+        **incomplete_case,
+        "annotations": [
+            incomplete_case["annotations"][0],
+            {
+                "block_index": 1,
+                "source_block_sha256": "1" * 64,
+                "semantic_role": "dialogue_free",
+                "processing_action": "translate_inpaint",
+                "mask_strategy": "glyph_only",
+            },
+        ],
+    }
+    with pytest.raises(
+        gates.ProtocolError,
+        match="source block SHA-256 differs",
+    ):
+        gates._snapshot_block_records(
+            case_id="neutral-case",
+            page=page,
+            case=stale_case,
+            image_shape=(100, 100, 3),
+        )
+
+
+def test_annotation_action_and_mask_strategy_must_agree() -> None:
+    with pytest.raises(
+        gates.ProtocolError,
+        match="must use preserve_original",
+    ):
+        gates._case_annotations(
+            {
+                "annotation_contract": (
+                    gates.COMPLETE_ANNOTATION_CONTRACT
+                ),
+                "annotations": [
+                    {
+                        "block_index": 0,
+                        "source_block_sha256": "a" * 64,
+                        "semantic_role": "ui_or_sign",
+                        "processing_action": "preserve",
+                        "mask_strategy": "glyph_only",
+                    }
+                ],
+            },
+            1,
+        )
+
+
+def test_annotation_template_locks_every_snapshot_block(
+    tmp_path: Path,
+) -> None:
+    source = tmp_path / "source.png"
+    gates._write_image(
+        source,
+        np.full((40, 60, 3), 180, dtype=np.uint8),
+    )
+    snapshot = tmp_path / "page_snapshots.json"
+    _write_json(
+        snapshot,
+        {
+            "pages": [
+                {
+                    "image_name": "source.png",
+                    "blocks": [
+                        {
+                            "xyxy": [5, 5, 20, 25],
+                            "bubble_xyxy": [2, 2, 25, 30],
+                            "text_class": "text_bubble",
+                            "text": "one",
+                            "translation": "하나",
+                        },
+                        {
+                            "xyxy": [30, 8, 45, 28],
+                            "bubble_xyxy": None,
+                            "text_class": "text_free",
+                            "text": "two",
+                            "translation": "둘",
+                        },
+                    ],
+                }
+            ]
+        },
+    )
+    manifest = tmp_path / "cases.json"
+    _write_json(
+        manifest,
+        {
+            "protocol_version": gates.PROTOCOL_VERSION,
+            "cases": [
+                {
+                    "case_id": "neutral-case",
+                    "source_image": str(source),
+                    "source_sha256": gates.sha256_file(source),
+                    "page_snapshot": str(snapshot),
+                    "page_name": "source.png",
+                }
+            ],
+        },
+    )
+    output = tmp_path / "complete-annotations.json"
+
+    template = gates.build_complete_annotation_template(
+        manifest,
+        output,
+    )
+
+    annotations = template["cases"][0]["annotations"]
+    assert output.is_file()
+    assert template["annotation_contract"] == (
+        gates.COMPLETE_ANNOTATION_CONTRACT
+    )
+    assert len(annotations) == 2
+    assert [item["block_index"] for item in annotations] == [0, 1]
+    assert all(len(item["source_block_sha256"]) == 64 for item in annotations)
+    assert all(item["semantic_role"] == "" for item in annotations)
+
+    decisions = tmp_path / "decisions.json"
+    _write_json(
+        decisions,
+        {
+            "annotation_contract": (
+                gates.COMPLETE_ANNOTATION_CONTRACT
+            ),
+            "cases": [
+                {
+                    "case_id": "neutral-case",
+                    "decisions": [
+                        {
+                            "block_index": 0,
+                            "semantic_role": "dialogue_bubble",
+                            "processing_action": "translate_inpaint",
+                            "mask_strategy": "bubble_safe",
+                        },
+                        {
+                            "block_index": 1,
+                            "semantic_role": "ui_or_sign",
+                            "processing_action": "preserve",
+                            "mask_strategy": "preserve_original",
+                        },
+                    ],
+                }
+            ],
+        },
+    )
+    completed_path = tmp_path / "completed.json"
+    completed = gates.apply_complete_annotation_decisions(
+        output,
+        decisions,
+        completed_path,
+    )
+
+    assert completed_path.is_file()
+    assert completed["kind"] == "inpaint-complete-annotations"
+    assert completed["cases"][0]["annotations"][0][
+        "mask_strategy"
+    ] == "bubble_safe"
+    assert completed["cases"][0]["annotations"][1][
+        "processing_action"
+    ] == "preserve"
+
+
 def test_capture_freezes_source_snapshot_masks_and_rejects_tamper(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -327,11 +532,21 @@ def test_capture_freezes_source_snapshot_masks_and_rejects_tamper(
                 "structure_protect_mask": empty,
                 "allowed_window_mask": full,
                 "product_final_mask": mask,
+                "strategy_bubble_safe_mask": mask,
+                "strategy_foreground_glyph_base_mask": empty,
                 "refiner_backend": "test",
                 "refiner_device": "cuda",
                 "refiner_fallback_used": False,
                 "product_mask_pixel_count": 16,
                 "glyph_base_mask_pixel_count": 16,
+                "strategy_bubble_safe_mask_pixel_count": 16,
+                "strategy_foreground_glyph_base_pixel_count": 0,
+                "strategy_routing": {
+                    "strategy_counts": {"bubble_safe": 1},
+                    "block_diagnostics": [],
+                    "bubble_safe_mask_pixel_count": 16,
+                    "foreground_glyph_base_pixel_count": 0,
+                },
             }
 
         monkeypatch.setattr(gates, "_capture_masks", fake_masks)
@@ -510,7 +725,11 @@ def test_product_mask_is_clipped_to_allowed_window() -> None:
     empty = np.zeros_like(product)
 
     masks = gates.build_candidate_masks(
-        profile=gates.MASK_RESIDUAL_SCREEN_PROFILES[0],
+        profile=next(
+            profile
+            for profile in gates.MASK_RESIDUAL_SCREEN_PROFILES
+            if profile.mask_mode == "product"
+        ),
         image=np.full((16, 16, 3), 180, dtype=np.uint8),
         blocks=[],
         product_mask=product,
@@ -523,6 +742,123 @@ def test_product_mask_is_clipped_to_allowed_window() -> None:
     assert np.array_equal(masks["primary_mask"], allowed)
     assert np.array_equal(masks["final_mask"], allowed)
     assert np.count_nonzero(masks["residual_mask"]) == 0
+
+
+def test_strategy_routed_bases_respect_block_policy_and_preserve() -> None:
+    from modules.utils.textblock import TextBlock
+
+    def block(
+        x1: int,
+        x2: int,
+        *,
+        action: str,
+        strategy: str,
+    ) -> TextBlock:
+        value = TextBlock(
+            text_bbox=[x1, 4, x2, 28],
+            bubble_bbox=None,
+            text_class="text_free",
+            text="text",
+        )
+        value.processing_action = action
+        value.mask_strategy = strategy
+        return value
+
+    blocks = [
+        block(
+            0,
+            20,
+            action="translate_inpaint",
+            strategy="bubble_safe",
+        ),
+        block(
+            20,
+            40,
+            action="translate_inpaint",
+            strategy="glyph_only",
+        ),
+        block(
+            40,
+            60,
+            action="translate_inpaint",
+            strategy="glyph_only_structure_protect",
+        ),
+        block(
+            60,
+            80,
+            action="preserve",
+            strategy="preserve_original",
+        ),
+    ]
+    blocks[0].bubble_xyxy = [0, 4, 20, 28]
+    product = np.zeros((32, 80), dtype=np.uint8)
+    product[8:24, :] = 255
+    glyph = np.zeros_like(product)
+    glyph[12:16, 28:32] = 255
+    glyph[12:16, 48:52] = 255
+    glyph[12:16, 68:72] = 255
+    structure = np.zeros_like(product)
+    structure[:, 50] = 255
+
+    image = np.full((32, 80, 3), 180, dtype=np.uint8)
+    image[12:16, 48:52] = 20
+    bubble, foreground, diagnostics = gates._strategy_routed_bases(
+        image=image,
+        blocks=blocks,
+        product_base_mask=product,
+        glyph_base_mask=glyph,
+    )
+
+    assert np.count_nonzero(bubble[:, 0:20]) > 0
+    assert np.count_nonzero(bubble[:, 20:80]) == 0
+    assert 0 < np.count_nonzero(foreground[:, 20:40]) < (
+        np.count_nonzero(bubble[:, 0:20])
+    )
+    assert np.count_nonzero(foreground[:, 60:80]) == 0
+    assert diagnostics["strategy_counts"] == {
+        "bubble_safe": 1,
+        "glyph_only": 1,
+        "glyph_only_structure_protect": 1,
+    }
+
+    profile = next(
+        profile
+        for profile in gates.MASK_RESIDUAL_SCREEN_PROFILES
+        if (
+            profile.mask_mode == "strategy_routed"
+            and profile.dilation == 1
+            and profile.structure_protect
+        )
+    )
+    candidate = gates.build_candidate_masks(
+        profile=profile,
+        image=image,
+        blocks=[],
+        product_mask=np.zeros_like(product),
+        glyph_base_mask=np.zeros_like(product),
+        bubble_protect_mask=np.zeros_like(product),
+        structure_protect_mask=structure,
+        allowed_window_mask=np.full_like(product, 255),
+        strategy_bubble_safe_mask=bubble,
+        strategy_foreground_glyph_base_mask=foreground,
+    )
+
+    assert np.count_nonzero(candidate["final_mask"][:, 50]) == 0
+    assert np.count_nonzero(candidate["final_mask"][:, 60:80]) == 0
+
+
+def test_strategy_candidate_is_skipped_for_historical_frozen_contract() -> None:
+    profiles = gates._profiles_for_phase(
+        "mask-residual",
+        selected_dilation=None,
+        include_feasibility=False,
+        strategy_routed_available=False,
+    )
+
+    assert all(
+        profile.mask_mode != "strategy_routed"
+        for profile in profiles
+    )
 
 
 def test_residual_candidate_runs_two_gpu_passes_inside_union_mask() -> None:

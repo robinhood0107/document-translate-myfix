@@ -11,19 +11,24 @@
 3. `translate_inpaint` block만 사용해 CTD를 정확히 한 번 실행한다.
 4. CTD glyph base, 기존 product mask, bubble/structure protect mask와
    allowed window를 SHA-256 계약으로 고정한다.
-5. mask 단계는 같은 LaMa Large FP32/2048에서 dilation 1·2·4만 바꾼다.
-6. mask-residual 단계는 굵은 외곽선 기반 mask를 합집합 한 번으로
+5. 최종 개발 계약에서는 detector snapshot의 모든 block에
+   `semantic_role`, `processing_action`, `mask_strategy`를 정확히 한 번
+   기록하고 원문·좌표 기반 `source_block_sha256`으로 인덱스 drift를
+   거부한다. 일부 block만 주석한 과거 계약은 역사 재현에만 쓴다.
+6. mask 단계는 같은 LaMa Large FP32/2048에서 dilation 1·2·4만 바꾼다.
+7. mask-residual 단계는 완전 역할 주석에서 만든 strategy-routed mask,
+   굵은 외곽선 기반 mask를 합집합 한 번으로
    처리하는 경로와 연결 성분별 순차 GPU pass 경로를 구분해 기록한다.
-7. model 단계는 선택된 dilation·residual·pass partition 계약을 고정하고 LaMa Large FP32
+8. model 단계는 선택된 dilation·residual·pass partition 계약을 고정하고 LaMa Large FP32
    1536/2048, LaMa MPE FP32/2048, AOT FP32/2048을 비교한다.
-8. BF16/1536은 비승격 baseline이며 ZITS++는 격리된 CUDA FP32 lab
+9. BF16/1536은 비승격 baseline이며 ZITS++는 격리된 CUDA FP32 lab
    feasibility 항목이다. 제품 환경에 구형 학습 의존성을 설치하지
    않는다.
-9. 후보 하나의 모델 load/OOM이 실패해도 해당 후보만 실패로 기록하고
+10. 후보 하나의 모델 load/OOM이 실패해도 해당 후보만 실패로 기록하고
    나머지 프로필은 계속 실행한다.
-10. 후보 산출물을 무작위 A…N으로 바꿔 원본·mask·cleaned·diff·render를
+11. 후보 산출물을 무작위 A…N으로 바꿔 원본·mask·cleaned·diff·render를
    검수한다.
-11. 모든 필드와 케이스별 고유 순위가 작성되기 전에는 unblind할 수 없다.
+12. 모든 필드와 케이스별 고유 순위가 작성되기 전에는 unblind할 수 없다.
 
 후보 inference는 전체 페이지 축소가 아니라 실제 edit mask 주변의 자동
 고해상도 ROI에서 수행한다. `review_roi`는 검수 화면 범위일 뿐 모델 ROI를
