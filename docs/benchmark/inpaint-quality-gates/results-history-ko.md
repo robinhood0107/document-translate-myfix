@@ -201,6 +201,46 @@ mask 픽셀도 0이었다. 불투명 말풍선은 실제 `bubble_xyxy` 밖으로
 확대나 추가 모델 교체가 아니라 좁은 glyph 영역의 국소 texture 복원과
 가려진 선의 결정적 연결을 별도 feasibility로 검증해야 한다.
 
+## 2026-07-31: 구조 배경 국소 복원 feasibility
+
+- structured-repair result contract:
+  `7a5b06ec71f5ef4929ec73063d986749fde8be6a2ddc66a7c6e762ea6172a97e`
+- 66행 blind review:
+  `d53910c1b2b2f4027e337b679a4e478ef1ec2fdf15d51463d5d0989346fb9e58`
+- blind payload:
+  `8599d442187fecc7b70448101112702ec6a89a4c0c9a36d2953725563610450d`
+
+불투명 말풍선은 LaMa Large CUDA FP32/2048에 남기고, 반투명 화면·피부·
+망점 위 전경 글자만 Telea 또는 Navier–Stokes로 국소 복원하는 hybrid
+후보를 실행했다. foreground dilation 1·2·4, 복원 radius 1·2·3과
+제한된 구조선 재연결을 포함해 기준선과 비교 후보를 합친 22개 프로필을
+동일한 세 frozen ROI에 적용했다.
+
+모든 후보가 자동 실행 계약은 통과했다.
+
+- mask 밖 변경 픽셀: 전 후보 0
+- 학습형 인페인터 CPU fallback: 0
+- 일반 국소 복원 후보 총시간: 약 4.0~4.6초
+- 구조선 재연결 후보 총시간: 약 16초
+
+하지만 66행 blind 전수검수에서는 승격 후보가 없었다.
+
+- 휴대폰 화면 케이스는 22개 모두 읽을 수 있는 원문 잔상 또는 회색
+  얼룩·글자형 조각을 남김
+- 구조선 재연결은 가려진 UI 선을 복원하지 못하고 긴 대각선 생성물을
+  추가해 즉시 탈락
+- 방 배경과 피부 free-text에서는 일부 후보가 원문을 완전히 지웠지만
+  원형의 평탄한 패치와 망점 불연속이 육안으로 남음
+- 다른 두 케이스가 좋아져도 필수 휴대폰 케이스를 동시에 통과한
+  후보는 없음
+
+최종 결과는 `coverage_eligible_candidates`,
+`model_screen_eligible_candidates`, `screen_eligible_candidates`,
+`promotion_eligible_candidates`가 모두 0이다. 따라서 단순 dilation,
+Telea/Navier–Stokes, Hough 구조선 연결을 더 조정하는 실험은 종료한다.
+휴대폰과 피부의 원래 texture를 알 수 없는 큰 글자 영역에서는 현재
+입력만으로 절대 품질 목표를 자동 복원할 수 없다는 판정이다.
+
 ## 최종 결정
 
 이번 screen에서는 제품에 승격할 GPU FP32 인페인트 후보가 없다.
@@ -213,3 +253,4 @@ mask 픽셀도 0이었다. 불투명 말풍선은 실제 `bubble_xyxy` 밖으로
 - 제한된 2차 GPU pass의 품질 미달
 - 모델 교체만으로 해결되지 않는 잔상과 texture 불연속
 - detector에 없는 의미 free-text coverage gap
+- 결정론적 국소 복원의 회색 패치와 구조선 재연결 오생성
