@@ -1183,6 +1183,9 @@ def _block_inpaint_record(block: TextBlock) -> dict[str, Any]:
         "processing_action": str(
             getattr(block, "processing_action", "") or ""
         ),
+        "compound_group_id": str(
+            getattr(block, "compound_group_id", "") or ""
+        ),
         "mask_strategy": str(
             getattr(block, "mask_strategy", "") or ""
         ),

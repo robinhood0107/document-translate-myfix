@@ -197,6 +197,9 @@ def serialize_inpaint_block(block, index: int) -> dict:
         "duplicate_alias_count": int(
             getattr(block, "duplicate_alias_count", 0) or 0
         ),
+        "compound_group_id": str(
+            getattr(block, "compound_group_id", "") or ""
+        ),
         "merge_split_diagnostics": dict(
             getattr(block, "merge_split_diagnostics", {}) or {}
         ),
