@@ -56,6 +56,11 @@ inpainter와 Gemma를 순서대로 실행한다.
 | `geometry.py` | 명시적 image coordinate transform과 clipping |
 | `diagnostics.py` | versioned parser·length·retry·coverage 진단 표면 |
 
+관리형 backend 선택과 과거 vLLM 설정 차단은
+`modules/ocr/managed_backend_policy.py`가 담당한다. 자세한 운영 계약은
+[관리형 로컬 추론 llama.cpp 전용 정책](../runtime/managed-llamacpp-only-ko.md)에
+기록한다.
+
 prompt, response parser, retry, resize, detector reconciliation, runtime command는
 공유하지 않는다. 같은 모델 계열이어도 경로별 출력 단위와 pixel budget이 다르기
 때문이다.
