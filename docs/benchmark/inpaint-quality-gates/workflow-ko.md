@@ -29,6 +29,34 @@
 자동 hard gate에 실패한 후보는 blind 검수에 넣을 수 없다. blind bundle의
 복사 산출물과 비공개 key도 SHA-256 계약으로 검증한다.
 
+현재 detector/OCR snapshot을 새 품질 계약으로 사용할 때는 먼저 Git
+밖에서 완전 주석 template을 만든다.
+
+```powershell
+python scripts/benchmark_inpaint_quality_gates.py annotation-template `
+  --manifest C:\external\cases.json `
+  --output C:\external\cases-complete.json
+```
+
+사람이 원본을 보고 만든 별도 decisions JSON은
+`apply-annotations --template ... --decisions ... --output ...`으로
+결합한다. template과 판단 파일 SHA는 완료 manifest에 함께 고정된다.
+모든 block의 역할·동작·mask 전략이 채워진 뒤에만 `capture`한다.
+`complete-role-action-mask-v1` 계약은 빠진 block, 중복
+index, 잘못된 action/mask 조합, 원문·좌표 SHA drift를 모두 거부한다.
+`preserve`와 `review`는 항상 `preserve_original`이며,
+`translate_inpaint`만 `bubble_safe`, `glyph_only`,
+`glyph_only_structure_protect` 중 하나를 사용할 수 있다.
+
+완전 주석 capture는 기존 product mask와 별도로 일반 불투명 말풍선의
+`strategy_bubble_safe_mask`와 반투명·구조 배경용
+`strategy_foreground_glyph_base_mask`를 저장한다. 후자는 배경 UI glyph가
+아니라 굵은 전경 문자와 그 밝은 외곽선만 잡고 dilation 1·2·4 및
+구조 보호 ON/OFF를 replay에서 비교한다. 두 mask 모두 각 block ROI
+내부에서만 생성되며 보존 block은 0픽셀이어야 한다. 역사적 불완전
+frozen contract는 재현용으로 계속 읽을 수 있지만 strategy-routed
+후보에는 들어가지 않는다.
+
 마스크 단계의 `model_screen_eligible_candidates`는 외부 보존만 통과한
 중간 상태다. `coverage_eligible_candidates`는 잔상과 외부 보존을 함께
 통과한 상태이며, `screen_eligible_candidates`는 모든 시각 필드를

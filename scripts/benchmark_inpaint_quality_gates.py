@@ -40,6 +40,7 @@ if str(ROOT) not in sys.path:
 
 
 PROTOCOL_VERSION = 1
+COMPLETE_ANNOTATION_CONTRACT = "complete-role-action-mask-v1"
 CAPTURE_FILENAME = "frozen_inpaint_contract.json"
 RESULT_FILENAME = "inpaint_quality_results.json"
 STATE_FILENAME = "review_state.json"
@@ -63,6 +64,14 @@ VALID_ROLES = frozenset(
     }
 )
 VALID_ACTIONS = frozenset({"translate_inpaint", "preserve", "review"})
+VALID_MASK_STRATEGIES = frozenset(
+    {
+        "bubble_safe",
+        "glyph_only",
+        "glyph_only_structure_protect",
+        "preserve_original",
+    }
+)
 PROMOTION_REVIEW_FIELDS = (
     "residue",
     "structure",
@@ -138,6 +147,31 @@ MASK_SCREEN_PROFILES: tuple[CandidateProfile, ...] = tuple(
 )
 
 MASK_RESIDUAL_SCREEN_PROFILES: tuple[CandidateProfile, ...] = (
+    *tuple(
+        CandidateProfile(
+            slug=(
+                "mask-strategy-routed"
+                f"-dilate-{dilation}"
+                f"-structure-{int(structure_protect)}"
+                "-lama-large-fp32-2048"
+            ),
+            label=(
+                "complete semantic-role mask routing + foreground glyph "
+                f"dilation {dilation} + structure protect "
+                f"{'on' if structure_protect else 'off'} + "
+                "LaMa Large FP32 2048"
+            ),
+            phase="mask-residual",
+            inpainter_key="lama_large_512px",
+            precision="fp32",
+            inpaint_size=2048,
+            mask_mode="strategy_routed",
+            dilation=dilation,
+            structure_protect=structure_protect,
+        )
+        for dilation in (1, 2, 4)
+        for structure_protect in (False, True)
+    ),
     CandidateProfile(
         slug="mask-product-lama-large-fp32-2048",
         label="product mask + LaMa Large FP32 2048",
@@ -432,6 +466,292 @@ def _snapshot_page(
     )
 
 
+def build_complete_annotation_template(
+    manifest_path: Path,
+    output_path: Path,
+) -> dict[str, Any]:
+    """Create an external, drift-locked annotation worksheet."""
+
+    manifest_path = manifest_path.expanduser().resolve()
+    output_path = output_path.expanduser().resolve()
+    if output_path.exists():
+        raise FileExistsError(
+            f"Annotation template already exists: {output_path}"
+        )
+    try:
+        output_path.relative_to(ROOT.resolve())
+    except ValueError:
+        pass
+    else:
+        raise ProtocolError(
+            "Complete annotation templates must remain outside Git"
+        )
+
+    source_manifest = read_json(manifest_path)
+    if int(source_manifest.get("protocol_version", 0) or 0) != (
+        PROTOCOL_VERSION
+    ):
+        raise ProtocolError("case manifest protocol_version is unsupported")
+    raw_cases = source_manifest.get("cases")
+    if not isinstance(raw_cases, list) or not raw_cases:
+        raise ProtocolError(
+            "case manifest must contain at least one case"
+        )
+
+    output_cases: list[dict[str, Any]] = []
+    for raw_case in raw_cases:
+        if not isinstance(raw_case, Mapping):
+            raise ProtocolError("every case must be an object")
+        case_id = str(raw_case.get("case_id") or "").strip()
+        source_path = Path(
+            str(raw_case.get("source_image") or "")
+        ).expanduser().resolve()
+        snapshot_path = Path(
+            str(raw_case.get("page_snapshot") or "")
+        ).expanduser().resolve()
+        if not source_path.is_file() or not snapshot_path.is_file():
+            raise FileNotFoundError(
+                f"annotation source or snapshot is missing: {case_id}"
+            )
+        expected_source_sha = str(
+            raw_case.get("source_sha256") or ""
+        ).lower()
+        actual_source_sha = sha256_file(source_path)
+        if expected_source_sha and expected_source_sha != actual_source_sha:
+            raise ProtocolError(
+                f"source SHA-256 differs for case {case_id}"
+            )
+        image = _read_image(source_path)
+        page_name = str(raw_case.get("page_name") or source_path.name)
+        page = _snapshot_page(
+            read_json(snapshot_path),
+            page_name=page_name,
+        )
+        raw_blocks = page.get("blocks")
+        if not isinstance(raw_blocks, list):
+            raise ProtocolError(
+                f"snapshot blocks missing for case {case_id}"
+            )
+        annotations: list[dict[str, Any]] = []
+        for index, raw in enumerate(raw_blocks):
+            if not isinstance(raw, Mapping):
+                raise ProtocolError(
+                    f"case {case_id} block {index} is not an object"
+                )
+            xyxy = _normalize_box(
+                raw.get("xyxy"),
+                image.shape,
+                label=f"case {case_id} block {index} xyxy",
+            )
+            bubble_raw = raw.get("bubble_xyxy")
+            bubble_xyxy = (
+                _normalize_box(
+                    bubble_raw,
+                    image.shape,
+                    label=(
+                        f"case {case_id} block {index} bubble_xyxy"
+                    ),
+                )
+                if bubble_raw is not None
+                else None
+            )
+            text_class = str(raw.get("text_class") or "")
+            text = str(raw.get("text") or "")
+            translation = str(raw.get("translation") or "")
+            angle = float(raw.get("angle", 0.0) or 0.0)
+            direction = str(raw.get("direction") or "")
+            annotations.append(
+                {
+                    "block_index": index,
+                    "source_block_sha256": (
+                        _source_block_contract_sha256(
+                            case_id=case_id,
+                            index=index,
+                            xyxy=xyxy,
+                            bubble_xyxy=bubble_xyxy,
+                            text_class=text_class,
+                            text=text,
+                            translation=translation,
+                            angle=angle,
+                            direction=direction,
+                        )
+                    ),
+                    "source_xyxy": xyxy,
+                    "source_bubble_xyxy": bubble_xyxy,
+                    "source_text_class": text_class,
+                    "source_text": text,
+                    "semantic_role": "",
+                    "processing_action": "",
+                    "mask_strategy": "",
+                    "review_notes": "",
+                }
+            )
+        case_output = {
+            key: value
+            for key, value in raw_case.items()
+            if key not in {"annotations", "annotation_contract"}
+        }
+        case_output["annotation_contract"] = (
+            COMPLETE_ANNOTATION_CONTRACT
+        )
+        case_output["annotations"] = annotations
+        output_cases.append(case_output)
+
+    payload = {
+        "protocol_version": PROTOCOL_VERSION,
+        "kind": "inpaint-complete-annotation-template",
+        "annotation_contract": COMPLETE_ANNOTATION_CONTRACT,
+        "source_manifest_sha256": sha256_file(manifest_path),
+        "cases": output_cases,
+    }
+    atomic_write_json(output_path, payload)
+    return payload
+
+
+def apply_complete_annotation_decisions(
+    template_path: Path,
+    decisions_path: Path,
+    output_path: Path,
+) -> dict[str, Any]:
+    """Combine a generated template with independently reviewed decisions."""
+
+    template_path = template_path.expanduser().resolve()
+    decisions_path = decisions_path.expanduser().resolve()
+    output_path = output_path.expanduser().resolve()
+    if output_path.exists():
+        raise FileExistsError(
+            f"Completed annotation manifest already exists: {output_path}"
+        )
+    try:
+        output_path.relative_to(ROOT.resolve())
+    except ValueError:
+        pass
+    else:
+        raise ProtocolError(
+            "Completed annotation manifests must remain outside Git"
+        )
+
+    template = read_json(template_path)
+    decisions = read_json(decisions_path)
+    if str(template.get("annotation_contract") or "") != (
+        COMPLETE_ANNOTATION_CONTRACT
+    ):
+        raise ProtocolError("annotation template contract differs")
+    if str(decisions.get("annotation_contract") or "") != (
+        COMPLETE_ANNOTATION_CONTRACT
+    ):
+        raise ProtocolError("annotation decisions contract differs")
+    template_cases = template.get("cases")
+    decision_cases = decisions.get("cases")
+    if not isinstance(template_cases, list) or not isinstance(
+        decision_cases,
+        list,
+    ):
+        raise ProtocolError("annotation cases must be lists")
+    decision_by_case: dict[str, Mapping[str, Any]] = {}
+    for case in decision_cases:
+        if not isinstance(case, Mapping):
+            raise ProtocolError("annotation decision case is not an object")
+        case_id = str(case.get("case_id") or "")
+        if not case_id or case_id in decision_by_case:
+            raise ProtocolError(
+                "annotation decision case ID is empty or duplicated"
+            )
+        decision_by_case[case_id] = case
+    template_ids = [
+        str(case.get("case_id") or "")
+        for case in template_cases
+        if isinstance(case, Mapping)
+    ]
+    if template_ids != list(decision_by_case):
+        raise ProtocolError(
+            "annotation decision case order or identity differs"
+        )
+
+    completed_cases: list[dict[str, Any]] = []
+    for template_case in template_cases:
+        if not isinstance(template_case, Mapping):
+            raise ProtocolError("annotation template case is not an object")
+        case_id = str(template_case.get("case_id") or "")
+        annotations = template_case.get("annotations")
+        raw_decisions = decision_by_case[case_id].get("decisions")
+        if not isinstance(annotations, list) or not isinstance(
+            raw_decisions,
+            list,
+        ):
+            raise ProtocolError(
+                f"annotation rows are missing for case {case_id}"
+            )
+        decisions_by_index: dict[int, Mapping[str, Any]] = {}
+        for decision in raw_decisions:
+            if not isinstance(decision, Mapping):
+                raise ProtocolError(
+                    f"annotation decision is not an object: {case_id}"
+                )
+            index = int(decision.get("block_index", -1))
+            if index in decisions_by_index:
+                raise ProtocolError(
+                    f"duplicate annotation decision: {case_id} {index}"
+                )
+            decisions_by_index[index] = decision
+        if set(decisions_by_index) != set(range(len(annotations))):
+            raise ProtocolError(
+                "annotation decisions must cover every block exactly once "
+                f"for case {case_id}"
+            )
+
+        completed_annotations: list[dict[str, Any]] = []
+        for index, annotation in enumerate(annotations):
+            if not isinstance(annotation, Mapping):
+                raise ProtocolError(
+                    f"annotation template row is invalid: {case_id} {index}"
+                )
+            decision = decisions_by_index[index]
+            role = str(decision.get("semantic_role") or "")
+            action = str(decision.get("processing_action") or "")
+            mask_strategy = str(decision.get("mask_strategy") or "")
+            if role not in VALID_ROLES or action not in VALID_ACTIONS:
+                raise ProtocolError(
+                    f"annotation role/action is invalid: {case_id} {index}"
+                )
+            if mask_strategy not in VALID_MASK_STRATEGIES:
+                raise ProtocolError(
+                    f"annotation mask strategy is invalid: {case_id} {index}"
+                )
+            _validate_action_mask_strategy(
+                block_index=index,
+                processing_action=action,
+                mask_strategy=mask_strategy,
+            )
+            completed_annotations.append(
+                {
+                    **dict(annotation),
+                    "semantic_role": role,
+                    "processing_action": action,
+                    "mask_strategy": mask_strategy,
+                    "review_notes": str(
+                        decision.get("review_notes") or ""
+                    ),
+                }
+            )
+        completed_case = {
+            **dict(template_case),
+            "annotations": completed_annotations,
+        }
+        _case_annotations(completed_case, len(completed_annotations))
+        completed_cases.append(completed_case)
+
+    payload = {
+        **dict(template),
+        "kind": "inpaint-complete-annotations",
+        "template_sha256": sha256_file(template_path),
+        "decisions_sha256": sha256_file(decisions_path),
+        "cases": completed_cases,
+    }
+    atomic_write_json(output_path, payload)
+    return payload
+
+
 def _default_role(text_class: str) -> str:
     if text_class == "text_bubble":
         return "dialogue_bubble"
@@ -449,6 +769,70 @@ def _default_action(block: Mapping[str, Any]) -> str:
     return "review"
 
 
+def _default_mask_strategy(
+    *,
+    text_class: str,
+    semantic_role: str,
+    processing_action: str,
+) -> str:
+    if processing_action != "translate_inpaint":
+        return "preserve_original"
+    if semantic_role == "dialogue_free" or text_class == "text_free":
+        return "glyph_only"
+    return "bubble_safe"
+
+
+def _source_block_contract_sha256(
+    *,
+    case_id: str,
+    index: int,
+    xyxy: Sequence[int],
+    bubble_xyxy: Sequence[int] | None,
+    text_class: str,
+    text: str,
+    translation: str,
+    angle: float,
+    direction: str,
+) -> str:
+    return canonical_sha256(
+        {
+            "case_id": str(case_id),
+            "source_index": int(index),
+            "xyxy": [int(value) for value in xyxy],
+            "bubble_xyxy": (
+                [int(value) for value in bubble_xyxy]
+                if bubble_xyxy is not None
+                else None
+            ),
+            "text_class": str(text_class),
+            "text": str(text),
+            "translation": str(translation),
+            "angle": float(angle),
+            "direction": str(direction),
+        }
+    )
+
+
+def _validate_action_mask_strategy(
+    *,
+    block_index: int,
+    processing_action: str,
+    mask_strategy: str,
+) -> None:
+    if processing_action == "translate_inpaint":
+        if mask_strategy == "preserve_original":
+            raise ProtocolError(
+                "translate_inpaint annotation cannot preserve its mask for "
+                f"block {block_index}"
+            )
+        return
+    if mask_strategy != "preserve_original":
+        raise ProtocolError(
+            f"{processing_action} annotation must use preserve_original "
+            f"for block {block_index}"
+        )
+
+
 def _case_annotations(
     case: Mapping[str, Any],
     block_count: int,
@@ -457,6 +841,21 @@ def _case_annotations(
     raw = case.get("annotations") or []
     if not isinstance(raw, list):
         raise ProtocolError("case annotations must be a list")
+    annotation_contract = str(
+        case.get("annotation_contract") or ""
+    ).strip()
+    if annotation_contract not in {"", COMPLETE_ANNOTATION_CONTRACT}:
+        raise ProtocolError(
+            f"case annotation_contract is unsupported: {annotation_contract}"
+        )
+    if (
+        annotation_contract == COMPLETE_ANNOTATION_CONTRACT
+        and len(raw) != block_count
+    ):
+        raise ProtocolError(
+            "complete annotation contract requires exactly one annotation "
+            f"for every block: expected {block_count}, got {len(raw)}"
+        )
     for item in raw:
         if not isinstance(item, Mapping):
             raise ProtocolError("each case annotation must be an object")
@@ -467,16 +866,51 @@ def _case_annotations(
             raise ProtocolError(f"duplicate annotation for block_index={index}")
         role = str(item.get("semantic_role") or "")
         action = str(item.get("processing_action") or "")
+        mask_strategy = str(item.get("mask_strategy") or "")
         if role not in VALID_ROLES:
             raise ProtocolError(f"invalid semantic_role for block {index}: {role}")
         if action not in VALID_ACTIONS:
             raise ProtocolError(
                 f"invalid processing_action for block {index}: {action}"
             )
+        if (
+            mask_strategy
+            and mask_strategy not in VALID_MASK_STRATEGIES
+        ):
+            raise ProtocolError(
+                f"invalid mask_strategy for block {index}: {mask_strategy}"
+            )
+        if mask_strategy:
+            _validate_action_mask_strategy(
+                block_index=index,
+                processing_action=action,
+                mask_strategy=mask_strategy,
+            )
+        source_block_sha256 = str(
+            item.get("source_block_sha256") or ""
+        ).strip().lower()
+        if (
+            annotation_contract == COMPLETE_ANNOTATION_CONTRACT
+            and len(source_block_sha256) != 64
+        ):
+            raise ProtocolError(
+                "complete annotation is missing source_block_sha256 for "
+                f"block {index}"
+            )
         annotations[index] = {
             "semantic_role": role,
             "processing_action": action,
+            "mask_strategy": mask_strategy,
+            "source_block_sha256": source_block_sha256,
         }
+    if (
+        annotation_contract == COMPLETE_ANNOTATION_CONTRACT
+        and set(annotations) != set(range(block_count))
+    ):
+        raise ProtocolError(
+            "complete annotation block_index values must cover every block "
+            "exactly once"
+        )
     return annotations
 
 
@@ -494,6 +928,9 @@ def _snapshot_block_records(
     if not isinstance(raw_blocks, list):
         raise ProtocolError(f"snapshot blocks missing for case {case_id}")
     annotations = _case_annotations(case, len(raw_blocks))
+    annotation_contract = str(
+        case.get("annotation_contract") or ""
+    ).strip()
     blocks: list[TextBlock] = []
     original_records: list[dict[str, Any]] = []
     for index, raw in enumerate(raw_blocks):
@@ -515,20 +952,62 @@ def _snapshot_block_records(
             else None
         )
         text_class = str(raw.get("text_class") or "")
-        annotation = annotations.get(
-            index,
-            {
-                "semantic_role": _default_role(text_class),
-                "processing_action": _default_action(raw),
-            },
+        angle = float(raw.get("angle", 0.0) or 0.0)
+        direction = str(raw.get("direction") or "")
+        text = str(raw.get("text") or "")
+        translation = str(raw.get("translation") or "")
+        source_block_sha256 = _source_block_contract_sha256(
+            case_id=case_id,
+            index=index,
+            xyxy=xyxy,
+            bubble_xyxy=bubble_xyxy,
+            text_class=text_class,
+            text=text,
+            translation=translation,
+            angle=angle,
+            direction=direction,
         )
+        annotation = dict(
+            annotations.get(
+                index,
+                {
+                    "semantic_role": _default_role(text_class),
+                    "processing_action": _default_action(raw),
+                    "mask_strategy": "",
+                    "source_block_sha256": "",
+                },
+            )
+        )
+        if not annotation.get("mask_strategy"):
+            annotation["mask_strategy"] = _default_mask_strategy(
+                text_class=text_class,
+                semantic_role=str(annotation["semantic_role"]),
+                processing_action=str(annotation["processing_action"]),
+            )
+        _validate_action_mask_strategy(
+            block_index=index,
+            processing_action=str(annotation["processing_action"]),
+            mask_strategy=str(annotation["mask_strategy"]),
+        )
+        expected_source_block_sha256 = str(
+            annotation.get("source_block_sha256") or ""
+        )
+        if (
+            annotation_contract == COMPLETE_ANNOTATION_CONTRACT
+            and expected_source_block_sha256 != source_block_sha256
+        ):
+            raise ProtocolError(
+                "complete annotation source block SHA-256 differs for "
+                f"case {case_id} block {index}"
+            )
+        annotation["source_block_sha256"] = source_block_sha256
         block_id = canonical_sha256(
             {
                 "case_id": case_id,
                 "index": index,
                 "xyxy": xyxy,
                 "bubble_xyxy": bubble_xyxy,
-                "text": str(raw.get("text") or ""),
+                "text": text,
             }
         )[:32]
         block = TextBlock(
@@ -536,12 +1015,14 @@ def _snapshot_block_records(
             text_bbox=xyxy,
             bubble_bbox=bubble_xyxy,
             text_class=text_class,
-            angle=float(raw.get("angle", 0.0) or 0.0),
-            text=str(raw.get("text") or ""),
-            translation=str(raw.get("translation") or ""),
+            angle=angle,
+            text=text,
+            translation=translation,
         )
         block.semantic_role = annotation["semantic_role"]
         block.processing_action = annotation["processing_action"]
+        block.mask_strategy = annotation["mask_strategy"]
+        block.source_index = index
         blocks.append(block)
         original_records.append(
             {
@@ -565,6 +1046,10 @@ def _snapshot_block_records(
         canonical_annotation = (
             str(getattr(block, "semantic_role", "ambiguous") or "ambiguous"),
             str(getattr(block, "processing_action", "review") or "review"),
+            str(
+                getattr(block, "mask_strategy", "preserve_original")
+                or "preserve_original"
+            ),
         )
         for alias_id in list(
             getattr(block, "duplicate_alias_block_ids", []) or []
@@ -577,6 +1062,7 @@ def _snapshot_block_records(
             alias_annotation = (
                 str(alias_record["semantic_role"]),
                 str(alias_record["processing_action"]),
+                str(alias_record["mask_strategy"]),
             )
             if alias_annotation != canonical_annotation:
                 raise ProtocolError(
@@ -585,6 +1071,9 @@ def _snapshot_block_records(
                 )
         canonical_records.append(
             {
+                "source_index": int(
+                    getattr(block, "source_index", 0) or 0
+                ),
                 "block_id": str(block.block_id),
                 "canonical_block_id": str(
                     getattr(block, "canonical_block_id", block.block_id)
@@ -610,6 +1099,19 @@ def _snapshot_block_records(
                 "processing_action": str(
                     getattr(block, "processing_action", "review") or "review"
                 ),
+                "mask_strategy": str(
+                    getattr(
+                        block,
+                        "mask_strategy",
+                        "preserve_original",
+                    )
+                    or "preserve_original"
+                ),
+                "source_block_sha256": str(
+                    original_by_id[str(block.block_id)][
+                        "source_block_sha256"
+                    ]
+                ),
             }
         )
     return canonical_records, {
@@ -621,6 +1123,8 @@ def _snapshot_block_records(
         ),
         "canonicalization": summary,
         "original_records_sha256": canonical_sha256(original_records),
+        "annotation_contract": annotation_contract,
+        "annotation_count": len(annotations),
     }
 
 
@@ -628,11 +1132,27 @@ def _records_to_blocks(records: Iterable[Mapping[str, Any]]) -> list[Any]:
     from modules.utils.textblock import TextBlock
 
     blocks = []
-    for record in records:
+    for record_index, record in enumerate(records):
         action = str(record.get("processing_action") or "")
         role = str(record.get("semantic_role") or "")
+        mask_strategy = str(record.get("mask_strategy") or "")
+        if not mask_strategy:
+            mask_strategy = _default_mask_strategy(
+                text_class=str(record.get("text_class") or ""),
+                semantic_role=role,
+                processing_action=action,
+            )
         if action not in VALID_ACTIONS or role not in VALID_ROLES:
             raise ProtocolError("frozen block has an invalid role/action")
+        if mask_strategy not in VALID_MASK_STRATEGIES:
+            raise ProtocolError(
+                "frozen block has an invalid mask strategy"
+            )
+        _validate_action_mask_strategy(
+            block_index=len(blocks),
+            processing_action=action,
+            mask_strategy=mask_strategy,
+        )
         block = TextBlock(
             block_id=str(record.get("block_id") or ""),
             text_bbox=list(record.get("xyxy") or []),
@@ -656,6 +1176,10 @@ def _records_to_blocks(records: Iterable[Mapping[str, Any]]) -> list[Any]:
         )
         block.semantic_role = role
         block.processing_action = action
+        block.mask_strategy = mask_strategy
+        block.source_index = int(
+            record.get("source_index", record_index) or 0
+        )
         blocks.append(block)
     return blocks
 
@@ -731,6 +1255,143 @@ def _structure_protect_mask(image: Any, blocks: Sequence[Any]):
     return (output > 0).astype("uint8") * 255
 
 
+def _strategy_routed_bases(
+    *,
+    image: Any,
+    blocks: Sequence[Any],
+    product_base_mask: Any,
+    glyph_base_mask: Any,
+) -> tuple[Any, Any, dict[str, Any]]:
+    """Separate opaque-bubble masks from foreground-only glyph bases."""
+
+    import numpy as np
+
+    from modules.utils.mask_roi import resolve_block_ctd_roi
+
+    image_shape = np.asarray(image).shape
+    product_base = (
+        np.asarray(product_base_mask) > 0
+    ).astype(np.uint8) * 255
+    glyph_base = (
+        np.asarray(glyph_base_mask) > 0
+    ).astype(np.uint8) * 255
+    bubble_output = np.zeros(tuple(image_shape[:2]), dtype=np.uint8)
+    foreground_output = np.zeros(
+        tuple(image_shape[:2]),
+        dtype=np.uint8,
+    )
+    strategy_counts: dict[str, int] = {}
+    block_diagnostics: list[dict[str, Any]] = []
+    structure_records = [
+        {
+            "processing_action": "translate_inpaint",
+            "xyxy": [
+                int(value) for value in getattr(block, "xyxy", [])
+            ],
+            "bubble_xyxy": (
+                [
+                    int(value)
+                    for value in getattr(block, "bubble_xyxy", [])
+                ]
+                if getattr(block, "bubble_xyxy", None) is not None
+                else None
+            ),
+        }
+        for block in blocks
+        if (
+            str(getattr(block, "processing_action", "") or "")
+            == "translate_inpaint"
+            and str(getattr(block, "mask_strategy", "") or "")
+            == "glyph_only_structure_protect"
+        )
+    ]
+    bold_foreground = (
+        _bold_outline_base_mask(
+            image,
+            structure_records,
+            anchor_distance=2.0,
+        )
+        if structure_records
+        else np.zeros(tuple(image_shape[:2]), dtype=np.uint8)
+    )
+
+    for block_index, block in enumerate(blocks):
+        source_index = int(
+            getattr(block, "source_index", block_index) or 0
+        )
+        action = str(
+            getattr(block, "processing_action", "") or ""
+        )
+        strategy = str(getattr(block, "mask_strategy", "") or "")
+        if action != "translate_inpaint":
+            continue
+        if strategy not in VALID_MASK_STRATEGIES:
+            raise ProtocolError(
+                f"active block has invalid mask strategy: {strategy}"
+            )
+        _validate_action_mask_strategy(
+            block_index=source_index,
+            processing_action=action,
+            mask_strategy=strategy,
+        )
+        roi = resolve_block_ctd_roi(block, tuple(image_shape))
+        if strategy == "bubble_safe":
+            bubble_roi = _clamp_box(
+                getattr(block, "bubble_xyxy", []) or [],
+                image_shape,
+            )
+            if bubble_roi[2] > bubble_roi[0] and bubble_roi[3] > bubble_roi[1]:
+                roi = bubble_roi
+        if roi is None:
+            raise ProtocolError(
+                f"active block has no valid mask ROI: {block_index}"
+            )
+        x1, y1, x2, y2 = [int(value) for value in roi]
+        if strategy == "bubble_safe":
+            local = _dilate_mask(
+                product_base[y1:y2, x1:x2],
+                8,
+            )
+            target = bubble_output
+        elif strategy == "glyph_only":
+            local = glyph_base[y1:y2, x1:x2]
+            target = foreground_output
+        elif strategy == "glyph_only_structure_protect":
+            local = bold_foreground[y1:y2, x1:x2]
+            target = foreground_output
+        else:
+            raise ProtocolError(
+                "translate_inpaint block unexpectedly preserves original"
+            )
+        target[y1:y2, x1:x2] = np.where(
+            (target[y1:y2, x1:x2] > 0) | (local > 0),
+            255,
+            0,
+        ).astype(np.uint8)
+        pixel_count = int(np.count_nonzero(local))
+        strategy_counts[strategy] = strategy_counts.get(strategy, 0) + 1
+        block_diagnostics.append(
+            {
+                "block_index": source_index,
+                "block_id": str(getattr(block, "block_id", "") or ""),
+                "mask_strategy": strategy,
+                "roi": [x1, y1, x2, y2],
+                "mask_pixel_count": pixel_count,
+            }
+        )
+
+    return bubble_output, foreground_output, {
+        "strategy_counts": strategy_counts,
+        "block_diagnostics": block_diagnostics,
+        "bubble_safe_mask_pixel_count": int(
+            np.count_nonzero(bubble_output)
+        ),
+        "foreground_glyph_base_pixel_count": int(
+            np.count_nonzero(foreground_output)
+        ),
+    }
+
+
 def _capture_masks(image: Any, blocks: Sequence[Any]) -> dict[str, Any]:
     import numpy as np
 
@@ -791,6 +1452,16 @@ def _capture_masks(image: Any, blocks: Sequence[Any]) -> dict[str, Any]:
     ).astype(np.uint8)
     if not np.any(product_base) and np.any(ctd_or_mask):
         product_base = ctd_or_mask.copy()
+    (
+        strategy_bubble_safe,
+        strategy_foreground_glyph,
+        strategy_diagnostics,
+    ) = _strategy_routed_bases(
+        image=image,
+        blocks=active,
+        product_base_mask=product_base,
+        glyph_base_mask=glyph_base,
+    )
     product_mask, _text_free_dilate_count = (
         _dilate_ctd_final_mask_by_block_policy(
             product_base,
@@ -813,11 +1484,22 @@ def _capture_masks(image: Any, blocks: Sequence[Any]) -> dict[str, Any]:
         "structure_protect_mask": np.asarray(structure_protect),
         "allowed_window_mask": allowed,
         "product_final_mask": product_mask,
+        "strategy_bubble_safe_mask": strategy_bubble_safe,
+        "strategy_foreground_glyph_base_mask": (
+            strategy_foreground_glyph
+        ),
         "refiner_backend": str(refined.backend or ""),
         "refiner_device": str(refined.device or ""),
         "refiner_fallback_used": bool(refined.fallback_used),
         "product_mask_pixel_count": int(np.count_nonzero(product_mask)),
         "glyph_base_mask_pixel_count": int(np.count_nonzero(glyph_base)),
+        "strategy_bubble_safe_mask_pixel_count": int(
+            np.count_nonzero(strategy_bubble_safe)
+        ),
+        "strategy_foreground_glyph_base_pixel_count": int(
+            np.count_nonzero(strategy_foreground_glyph)
+        ),
+        "strategy_routing": strategy_diagnostics,
     }
 
 
@@ -878,6 +1560,8 @@ def capture_cases(manifest_path: Path, output_dir: Path) -> dict[str, Any]:
             "structure_protect_mask",
             "allowed_window_mask",
             "product_final_mask",
+            "strategy_bubble_safe_mask",
+            "strategy_foreground_glyph_base_mask",
         ):
             artifact_path = case_dir / f"{artifact_name}.png"
             _write_image(artifact_path, masks[artifact_name])
@@ -927,6 +1611,12 @@ def capture_cases(manifest_path: Path, output_dir: Path) -> dict[str, Any]:
             "blocks": block_records,
             "block_contract_sha256": canonical_sha256(block_records),
             "canonicalization": canonicalization,
+            "annotation_contract": str(
+                canonicalization.get("annotation_contract") or ""
+            ),
+            "annotation_count": int(
+                canonicalization.get("annotation_count", 0) or 0
+            ),
             "artifacts": artifacts,
             "reference_render": reference_record,
             "mask_capture": {
@@ -1008,6 +1698,58 @@ def validate_frozen_contract(root: Path) -> dict[str, Any]:
             raise ProtocolError("frozen case blocks are missing")
         if canonical_sha256(blocks) != str(case.get("block_contract_sha256") or ""):
             raise ProtocolError("frozen block contract digest differs")
+        annotation_contract = str(
+            case.get("annotation_contract") or ""
+        )
+        if annotation_contract not in {
+            "",
+            COMPLETE_ANNOTATION_CONTRACT,
+        }:
+            raise ProtocolError(
+                "frozen annotation contract is unsupported"
+            )
+        if annotation_contract == COMPLETE_ANNOTATION_CONTRACT:
+            canonicalization = case.get("canonicalization")
+            if not isinstance(canonicalization, Mapping):
+                raise ProtocolError(
+                    "complete frozen canonicalization is missing"
+                )
+            if int(case.get("annotation_count", -1)) != int(
+                canonicalization.get(
+                    "input_block_count",
+                    -2,
+                )
+            ):
+                raise ProtocolError(
+                    "complete frozen annotation count differs"
+                )
+            for block_index, block in enumerate(blocks):
+                if not isinstance(block, Mapping):
+                    raise ProtocolError(
+                        "complete frozen block is not an object"
+                    )
+                if str(block.get("mask_strategy") or "") not in (
+                    VALID_MASK_STRATEGIES
+                ):
+                    raise ProtocolError(
+                        "complete frozen block mask strategy is invalid"
+                    )
+                source_block_sha256 = str(
+                    block.get("source_block_sha256") or ""
+                )
+                if len(source_block_sha256) != 64:
+                    raise ProtocolError(
+                        "complete frozen source block SHA-256 is missing"
+                    )
+                _validate_action_mask_strategy(
+                    block_index=block_index,
+                    processing_action=str(
+                        block.get("processing_action") or ""
+                    ),
+                    mask_strategy=str(
+                        block.get("mask_strategy") or ""
+                    ),
+                )
         _artifact_path(frozen_root, case["source"], label="frozen source")
         artifacts = case.get("artifacts")
         if not isinstance(artifacts, Mapping):
@@ -1025,6 +1767,32 @@ def validate_frozen_contract(root: Path) -> dict[str, Any]:
             if not isinstance(record, Mapping):
                 raise ProtocolError(f"frozen artifact is missing: {name}")
             _artifact_path(frozen_root, record, label=f"frozen {name}")
+        strategy_records = {
+            name: artifacts.get(name)
+            for name in (
+                "strategy_bubble_safe_mask",
+                "strategy_foreground_glyph_base_mask",
+            )
+        }
+        if annotation_contract == COMPLETE_ANNOTATION_CONTRACT:
+            for name, strategy_record in strategy_records.items():
+                if not isinstance(strategy_record, Mapping):
+                    raise ProtocolError(
+                        f"complete frozen {name} is missing"
+                    )
+                _artifact_path(
+                    frozen_root,
+                    strategy_record,
+                    label=f"frozen {name}",
+                )
+        else:
+            for name, strategy_record in strategy_records.items():
+                if isinstance(strategy_record, Mapping):
+                    _artifact_path(
+                        frozen_root,
+                        strategy_record,
+                        label=f"frozen {name}",
+                    )
         reference = case.get("reference_render")
         if reference is not None:
             if not isinstance(reference, Mapping):
@@ -1039,6 +1807,7 @@ def _profiles_for_phase(
     selected_dilation: int | None,
     selected_mask_profile: str | None = None,
     include_feasibility: bool,
+    strategy_routed_available: bool = True,
 ) -> list[CandidateProfile]:
     if phase != "model" and (
         selected_dilation is not None or selected_mask_profile
@@ -1058,7 +1827,14 @@ def _profiles_for_phase(
     if phase == "mask":
         profiles.extend(MASK_SCREEN_PROFILES)
     elif phase == "mask-residual":
-        profiles.extend(MASK_RESIDUAL_SCREEN_PROFILES)
+        profiles.extend(
+            profile
+            for profile in MASK_RESIDUAL_SCREEN_PROFILES
+            if (
+                strategy_routed_available
+                or profile.mask_mode != "strategy_routed"
+            )
+        )
     elif phase == "model":
         selected: CandidateProfile | None = None
         if selected_mask_profile:
@@ -1073,6 +1849,14 @@ def _profiles_for_phase(
             if selected is None:
                 raise ProtocolError(
                     "model phase --selected-mask-profile is unknown"
+                )
+            if (
+                selected.mask_mode == "strategy_routed"
+                and not strategy_routed_available
+            ):
+                raise ProtocolError(
+                    "model phase strategy-routed mask is unavailable "
+                    "in the frozen contract"
                 )
         elif selected_dilation in {1, 2, 4}:
             selected = replace(
@@ -1339,6 +2123,8 @@ def build_candidate_masks(
     bubble_protect_mask: Any,
     structure_protect_mask: Any,
     allowed_window_mask: Any,
+    strategy_bubble_safe_mask: Any | None = None,
+    strategy_foreground_glyph_base_mask: Any | None = None,
 ) -> dict[str, Any]:
     import numpy as np
 
@@ -1346,6 +2132,39 @@ def build_candidate_masks(
     if profile.mask_mode == "product":
         raw = (np.asarray(product_mask) > 0).astype(np.uint8) * 255
         primary = np.where((raw > 0) & allowed, 255, 0).astype(np.uint8)
+    elif profile.mask_mode == "strategy_routed":
+        if (
+            strategy_bubble_safe_mask is None
+            or strategy_foreground_glyph_base_mask is None
+            or profile.dilation is None
+        ):
+            raise ProtocolError(
+                "candidate requires frozen strategy-routed mask bases"
+            )
+        bubble_safe = (
+            np.asarray(strategy_bubble_safe_mask) > 0
+        )
+        raw_foreground = (
+            np.asarray(strategy_foreground_glyph_base_mask) > 0
+        ).astype(np.uint8) * 255
+        foreground = _dilate_mask(
+            raw_foreground,
+            profile.dilation,
+        ) > 0
+        if profile.structure_protect:
+            foreground = foreground & (
+                np.asarray(structure_protect_mask) <= 0
+            )
+        raw = np.where(
+            bubble_safe | (raw_foreground > 0),
+            255,
+            0,
+        ).astype(np.uint8)
+        primary = np.where(
+            (bubble_safe | foreground) & allowed,
+            255,
+            0,
+        ).astype(np.uint8)
     elif profile.mask_mode == "glyph" and profile.dilation is not None:
         raw = (np.asarray(glyph_base_mask) > 0).astype(np.uint8) * 255
         candidate = _dilate_mask(raw, profile.dilation)
@@ -1410,6 +2229,8 @@ def build_candidate_mask(
     bubble_protect_mask: Any,
     structure_protect_mask: Any,
     allowed_window_mask: Any,
+    strategy_bubble_safe_mask: Any | None = None,
+    strategy_foreground_glyph_base_mask: Any | None = None,
     image: Any | None = None,
     blocks: Sequence[Mapping[str, Any]] = (),
 ):
@@ -1429,6 +2250,10 @@ def build_candidate_mask(
         bubble_protect_mask=bubble_protect_mask,
         structure_protect_mask=structure_protect_mask,
         allowed_window_mask=allowed_window_mask,
+        strategy_bubble_safe_mask=strategy_bubble_safe_mask,
+        strategy_foreground_glyph_base_mask=(
+            strategy_foreground_glyph_base_mask
+        ),
     )["final_mask"]
 
 
@@ -1859,11 +2684,25 @@ def run_screen(
     frozen_root = frozen_root.expanduser().resolve()
     frozen = validate_frozen_contract(frozen_root)
     output = _ensure_new_output_dir(output_dir)
+    strategy_routed_available = all(
+        all(
+            isinstance(
+                case.get("artifacts", {}).get(name),
+                Mapping,
+            )
+            for name in (
+                "strategy_bubble_safe_mask",
+                "strategy_foreground_glyph_base_mask",
+            )
+        )
+        for case in frozen["cases"]
+    )
     profiles = _profiles_for_phase(
         phase,
         selected_dilation=selected_dilation,
         selected_mask_profile=selected_mask_profile,
         include_feasibility=include_feasibility,
+        strategy_routed_available=strategy_routed_available,
     )
     results: list[dict[str, Any]] = []
 
@@ -1919,6 +2758,42 @@ def run_screen(
                         label=f"{case_id} allowed window mask",
                     )
                 )
+                strategy_bubble_record = artifacts.get(
+                    "strategy_bubble_safe_mask"
+                )
+                strategy_bubble = (
+                    _load_mask(
+                        _artifact_path(
+                            frozen_root,
+                            strategy_bubble_record,
+                            label=(
+                                f"{case_id} strategy bubble-safe mask"
+                            ),
+                        )
+                    )
+                    if isinstance(strategy_bubble_record, Mapping)
+                    else None
+                )
+                strategy_foreground_record = artifacts.get(
+                    "strategy_foreground_glyph_base_mask"
+                )
+                strategy_foreground = (
+                    _load_mask(
+                        _artifact_path(
+                            frozen_root,
+                            strategy_foreground_record,
+                            label=(
+                                f"{case_id} strategy foreground "
+                                "glyph base mask"
+                            ),
+                        )
+                    )
+                    if isinstance(
+                        strategy_foreground_record,
+                        Mapping,
+                    )
+                    else None
+                )
                 mask_bundle = build_candidate_masks(
                     profile=profile,
                     image=image,
@@ -1928,6 +2803,10 @@ def run_screen(
                     bubble_protect_mask=bubble_protect,
                     structure_protect_mask=structure_protect,
                     allowed_window_mask=allowed,
+                    strategy_bubble_safe_mask=strategy_bubble,
+                    strategy_foreground_glyph_base_mask=(
+                        strategy_foreground
+                    ),
                 )
                 primary_mask = mask_bundle["primary_mask"]
                 residual_mask = mask_bundle["residual_mask"]
@@ -2954,6 +3833,17 @@ def build_parser() -> argparse.ArgumentParser:
     capture.add_argument("--manifest", required=True)
     capture.add_argument("--output", required=True)
 
+    annotation_template = subparsers.add_parser(
+        "annotation-template"
+    )
+    annotation_template.add_argument("--manifest", required=True)
+    annotation_template.add_argument("--output", required=True)
+
+    apply_annotations = subparsers.add_parser("apply-annotations")
+    apply_annotations.add_argument("--template", required=True)
+    apply_annotations.add_argument("--decisions", required=True)
+    apply_annotations.add_argument("--output", required=True)
+
     run = subparsers.add_parser("run")
     run.add_argument("--frozen", required=True)
     run.add_argument("--output", required=True)
@@ -3000,6 +3890,60 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main(argv: Sequence[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
+    if args.command == "apply-annotations":
+        completed = apply_complete_annotation_decisions(
+            Path(args.template),
+            Path(args.decisions),
+            Path(args.output),
+        )
+        print(
+            json.dumps(
+                {
+                    "output": str(
+                        Path(args.output).expanduser().resolve()
+                    ),
+                    "case_count": len(completed["cases"]),
+                    "annotation_count": sum(
+                        len(case["annotations"])
+                        for case in completed["cases"]
+                    ),
+                    "template_sha256": completed[
+                        "template_sha256"
+                    ],
+                    "decisions_sha256": completed[
+                        "decisions_sha256"
+                    ],
+                },
+                ensure_ascii=False,
+                indent=2,
+            )
+        )
+        return 0
+    if args.command == "annotation-template":
+        template = build_complete_annotation_template(
+            Path(args.manifest),
+            Path(args.output),
+        )
+        print(
+            json.dumps(
+                {
+                    "output": str(
+                        Path(args.output).expanduser().resolve()
+                    ),
+                    "case_count": len(template["cases"]),
+                    "annotation_count": sum(
+                        len(case["annotations"])
+                        for case in template["cases"]
+                    ),
+                    "annotation_contract": (
+                        template["annotation_contract"]
+                    ),
+                },
+                ensure_ascii=False,
+                indent=2,
+            )
+        )
+        return 0
     if args.command == "capture":
         contract = capture_cases(Path(args.manifest), Path(args.output))
         print(json.dumps(

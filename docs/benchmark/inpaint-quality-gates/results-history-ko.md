@@ -155,6 +155,52 @@ AOT는 가장 빨랐지만 휴대폰 망점과 UI를 더 크게 왜곡했고, �
 모델 교체가 아니라 block별 semantic role과 mask strategy를 완전하게
 고정한 새 frozen contract가 다음 단계다.
 
+## 2026-07-31: 완전 역할 주석·전경 글자 라우팅
+
+- annotation template SHA-256:
+  `4a4f0b99bd1e2f1467cd1983ce1c9905d1c356c2b575434e7a78c8325f97b902`
+- annotation decisions SHA-256:
+  `e794ae374f01d1a3419b9bb6005a17694dc52baff942ff80ab4c676354f2a80b`
+- frozen contract:
+  `8f1f6bca5ef28dbeae1ff1741a0dfd2593357f2a6137d9189ddd178e724e0788`
+- mask-residual result contract:
+  `3db2645f7abb28042a0426edadf669279fa9151f25567d89dbc9ae52051a201d`
+- 42행 blind review:
+  `0c22e71d3cf0fa6d5f9810185928937422a46ab93975253ac7638d2904999216`
+- blind payload:
+  `5361ceaa77f6861be209540acf6674e142dbf7b543b9d21a3416eec08ea5bce2`
+
+현재 snapshot의 56개 block을 원본 기준으로 모두 판정했다. `preserve`
+block과 SFX는 edit mask에서 제외됐고, 휴대폰 micro-UI block의 전경
+mask 픽셀도 0이었다. 불투명 말풍선은 실제 `bubble_xyxy` 밖으로 mask가
+나가지 않도록 고정했다.
+
+완전 주석을 사용한 strategy-routed 후보는 foreground dilation
+1·2·4와 구조 보호 ON/OFF를 모두 CUDA FP32/2048로 실행했다. 모든
+후보의 CPU fallback과 mask 밖 변경 픽셀은 0이었다. 그러나 직접 blind
+검수에서는 다음 문제가 남았다.
+
+- 휴대폰 위 대사에서 모든 후보가 읽을 수 있는 일본어 잔상 또는
+  글자형 조각을 남김
+- 구조 보호 ON은 일본어 획까지 보호해 의미 대사를 대부분 유지함
+- 구조 보호 OFF는 작은 UI를 edit mask 밖에 보존했지만 망점에 회색
+  구멍·흰 조각·짧은 선형 생성물을 만듦
+- 그림 위 의미 있는 free-text를 제거한 후보는 피부에 큰 회색 타원과
+  글자형 잔상을 만듦
+- 방 배경에서는 일부 후보가 의미 텍스트를 깨끗하게 지웠지만,
+  다른 두 필수 케이스를 동시에 통과한 후보가 없음
+
+최종 결과:
+
+- `coverage_eligible_candidates`: 0
+- `screen_eligible_candidates`: 0
+- `promotion_eligible_candidates`: 0
+
+따라서 완전 역할 라우팅 자체는 보존 범위를 정확히 줄였지만, 현재
+학습형 모델과 mask 조합을 제품에 승격하지 않는다. 다음 실험은 dilation
+확대나 추가 모델 교체가 아니라 좁은 glyph 영역의 국소 texture 복원과
+가려진 선의 결정적 연결을 별도 feasibility로 검증해야 한다.
+
 ## 최종 결정
 
 이번 screen에서는 제품에 승격할 GPU FP32 인페인트 후보가 없다.
