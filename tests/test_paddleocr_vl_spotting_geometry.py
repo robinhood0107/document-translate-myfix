@@ -118,6 +118,26 @@ class PaddleSpottingGeometryTests(unittest.TestCase):
             result.ambiguous_regions[0]["candidate_block_ids"],
             ["top", "bottom"],
         )
+        self.assertEqual(
+            result.relation_components[0]["relation_type"],
+            "one_region_to_many_blocks",
+        )
+        self.assertEqual(
+            result.relation_components[0]["resolution"],
+            "review",
+        )
+        self.assertEqual(
+            result.relation_components[0]["assigned_edges"],
+            [],
+        )
+        self.assertEqual(
+            result.block_diagnostics[0]["deferred_region_indices"],
+            [0],
+        )
+        self.assertEqual(
+            result.block_diagnostics[1]["deferred_region_indices"],
+            [0],
+        )
 
     def test_ambiguous_region_invalidates_an_earlier_safe_assignment(
         self,
@@ -189,6 +209,18 @@ class PaddleSpottingGeometryTests(unittest.TestCase):
             [item.region.text for item in vertical_result.assignments[0]],
             ["top-right", "bottom-left"],
         )
+        self.assertEqual(
+            vertical_result.block_diagnostics[0]["status"],
+            "compound",
+        )
+        self.assertEqual(
+            vertical_result.relation_components[0]["relation_type"],
+            "many_lines_to_one_block",
+        )
+        self.assertEqual(
+            vertical_result.relation_components[0]["resolution"],
+            "assigned",
+        )
 
     def test_leaves_non_overlapping_native_spot_as_shadow_region(self) -> None:
         result = assign_spotting_regions(
@@ -208,6 +240,54 @@ class PaddleSpottingGeometryTests(unittest.TestCase):
             [region.text for region in result.unmatched_regions],
             ["outside"],
         )
+        self.assertEqual(
+            result.relation_components[0]["relation_type"],
+            "unmatched_region",
+        )
+        self.assertEqual(
+            result.relation_components[0]["resolution"],
+            "unmatched",
+        )
+
+    def test_global_components_keep_independent_safe_edges(self) -> None:
+        blocks = [
+            _block((100, 100, 300, 300), block_id="left"),
+            _block((320, 100, 520, 300), block_id="right"),
+        ]
+        result = assign_spotting_regions(
+            (
+                _region(
+                    "left-line",
+                    ((120, 140), (280, 140), (280, 200), (120, 200)),
+                    line=1,
+                ),
+                _region(
+                    "right-line",
+                    ((340, 140), (500, 140), (500, 200), (340, 200)),
+                    line=2,
+                ),
+            ),
+            blocks,
+            image_width=1000,
+            image_height=1000,
+        )
+
+        self.assertEqual(
+            [item.region.text for item in result.assignments[0]],
+            ["left-line"],
+        )
+        self.assertEqual(
+            [item.region.text for item in result.assignments[1]],
+            ["right-line"],
+        )
+        assigned_region_indices = {
+            edge[0]
+            for component in result.relation_components
+            for edge in component["assigned_edges"]
+        }
+        self.assertEqual(assigned_region_indices, {0, 1})
+        self.assertFalse(result.ambiguous_regions)
+        self.assertFalse(result.unmatched_regions)
 
 
 if __name__ == "__main__":
