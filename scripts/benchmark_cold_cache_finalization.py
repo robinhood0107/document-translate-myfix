@@ -1695,6 +1695,8 @@ def _translation_candidate_profiles(
             candidate.setdefault("concurrency", 1)
             candidate.setdefault("batch_size", 2048)
             candidate.setdefault("ubatch_size", 512)
+            candidate.setdefault("n_gpu_layers", 23)
+            candidate.setdefault("cache_ram_mib", 0)
             if int(candidate["context_size"]) // int(
                 candidate["n_parallel"]
             ) < 4096:
@@ -1771,6 +1773,8 @@ def _translation_candidate_profiles(
                 "ubatch_size": (
                     int(value) if axis == "ubatch_size" else ubatch_size
                 ),
+                "n_gpu_layers": 23,
+                "cache_ram_mib": 0,
             }
             for value in axes[axis]
         ]
@@ -1834,6 +1838,10 @@ def _translation_profile_command(
         str(int(candidate.get("batch_size", 2048))),
         "--ubatch-size",
         str(int(candidate.get("ubatch_size", 512))),
+        "--n-gpu-layers",
+        str(int(candidate.get("n_gpu_layers", 23))),
+        "--cache-ram-mib",
+        str(int(candidate.get("cache_ram_mib", 0))),
         "--language-order",
         *list(language_order),
     ]
@@ -1922,6 +1930,12 @@ def run_translation_family(args: argparse.Namespace) -> int:
                         ),
                         "LLAMA_UBATCH_SIZE": str(
                             int(candidate.get("ubatch_size", 512))
+                        ),
+                        "LLAMA_N_GPU_LAYERS": str(
+                            int(candidate.get("n_gpu_layers", 23))
+                        ),
+                        "LLAMA_CACHE_RAM_MIB": str(
+                            int(candidate.get("cache_ram_mib", 0))
                         ),
                         "LLAMA_SPEC_TYPE": "none",
                         "LLAMA_CACHE_TYPE_K": "f16",
@@ -2142,6 +2156,10 @@ def _translation_profile(args: argparse.Namespace) -> int:
             == str(int(args.batch_size))
             and str(runtime_options.get("LLAMA_UBATCH_SIZE", ""))
             == str(int(args.ubatch_size))
+            and str(runtime_options.get("LLAMA_N_GPU_LAYERS", ""))
+            == str(int(args.n_gpu_layers))
+            and str(runtime_options.get("LLAMA_CACHE_RAM_MIB", ""))
+            == str(int(args.cache_ram_mib))
             and str(runtime_options.get("LLAMA_CACHE_TYPE_K", "")).lower()
             == "f16"
             and str(runtime_options.get("LLAMA_CACHE_TYPE_V", "")).lower()
@@ -2185,6 +2203,8 @@ def _translation_profile(args: argparse.Namespace) -> int:
             "concurrency": concurrency,
             "batch_size": int(args.batch_size),
             "ubatch_size": int(args.ubatch_size),
+            "n_gpu_layers": int(args.n_gpu_layers),
+            "cache_ram_mib": int(args.cache_ram_mib),
             "language_order": language_order,
             "elapsed_sec": round(elapsed, 6),
             "output_count": len(outputs),
@@ -3542,6 +3562,8 @@ def _build_parser() -> argparse.ArgumentParser:
     hidden.add_argument("--concurrency", type=int, required=True)
     hidden.add_argument("--batch-size", type=int, required=True)
     hidden.add_argument("--ubatch-size", type=int, required=True)
+    hidden.add_argument("--n-gpu-layers", type=int, required=True)
+    hidden.add_argument("--cache-ram-mib", type=int, required=True)
     hidden.add_argument(
         "--language-order",
         nargs=3,

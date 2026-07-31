@@ -342,6 +342,8 @@ class ColdCacheFinalizationTests(unittest.TestCase):
                 "concurrency": 1,
                 "batch_size": 1024,
                 "ubatch_size": 256,
+                "n_gpu_layers": 30,
+                "cache_ram_mib": 256,
             },
             language_order=("Japanese", "Chinese", "English"),
         )
@@ -354,6 +356,37 @@ class ColdCacheFinalizationTests(unittest.TestCase):
             command[command.index("--ubatch-size") + 1],
             "256",
         )
+        self.assertEqual(
+            command[command.index("--n-gpu-layers") + 1],
+            "30",
+        )
+        self.assertEqual(
+            command[command.index("--cache-ram-mib") + 1],
+            "256",
+        )
+
+    def test_final_gemma_runtime_families_change_one_axis(self) -> None:
+        protocol = finalization.load_protocol()
+        expectations = {
+            "gemma-ngl-final": ("n_gpu_layers", [23, 30, 31]),
+            "gemma-ubatch-final": ("ubatch_size", [256, 384, 512, 768]),
+            "gemma-cache-ram-final": ("cache_ram_mib", [0, 256]),
+            "gemma-chunk-final": ("chunk_size", [6, 9, 12]),
+        }
+        for family_id, (field, values) in expectations.items():
+            with self.subTest(family=family_id):
+                family = finalization._family(protocol, family_id)
+                candidates, _baseline = finalization._translation_candidate_profiles(
+                    protocol,
+                    family,
+                    axis="",
+                    model_key="iq4_nl",
+                )
+                self.assertEqual([candidate[field] for candidate in candidates], values)
+                self.assertEqual(
+                    {candidate["model_key"] for candidate in candidates},
+                    {"iq4_nl"},
+                )
 
     def test_candidate_base_rejects_cache_or_grouped_drift(self) -> None:
         protocol = finalization.load_protocol()
