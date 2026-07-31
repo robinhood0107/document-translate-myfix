@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 from dataclasses import dataclass
@@ -9,6 +10,7 @@ from datetime import datetime
 from itertools import count
 from pathlib import Path
 import sys
+import time
 
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
@@ -129,8 +131,12 @@ def _draw_overlay(image: np.ndarray, blocks, page_regions: list[dict[str, object
 
 def _serialize_block(blk) -> dict[str, object]:
     return {
+        "block_id": str(getattr(blk, "block_id", "") or ""),
         "xyxy": _normalize_box(getattr(blk, "xyxy", None)),
         "bubble_xyxy": _normalize_box(getattr(blk, "bubble_xyxy", None)),
+        "text_class": str(getattr(blk, "text_class", "") or ""),
+        "source_lang": str(getattr(blk, "source_lang", "") or ""),
+        "direction": str(getattr(blk, "direction", "") or ""),
         "text": str(getattr(blk, "text", "") or ""),
         "texts": [str(item or "") for item in getattr(blk, "texts", []) or []],
         "ocr_status": str(getattr(blk, "ocr_status", "") or ""),
@@ -138,7 +144,38 @@ def _serialize_block(blk) -> dict[str, object]:
         "ocr_crop_bbox": _normalize_box(getattr(blk, "ocr_crop_bbox", None)),
         "ocr_resize_scale": float(getattr(blk, "ocr_resize_scale", 1.0) or 1.0),
         "ocr_regions": list(getattr(blk, "ocr_regions", []) or []),
+        "ocr_strategy": str(getattr(blk, "ocr_strategy", "") or ""),
+        "ocr_model_identity": str(
+            getattr(blk, "ocr_model_identity", "") or ""
+        ),
+        "ocr_runtime_identity": str(
+            getattr(blk, "ocr_runtime_identity", "") or ""
+        ),
+        "ocr_geometry_provenance": dict(
+            getattr(blk, "ocr_geometry_provenance", {}) or {}
+        ),
+        "semantic_role": str(getattr(blk, "semantic_role", "") or ""),
+        "processing_action": str(
+            getattr(blk, "processing_action", "") or ""
+        ),
+        "canonical_block_id": str(
+            getattr(blk, "canonical_block_id", "") or ""
+        ),
+        "compound_group_id": str(
+            getattr(blk, "compound_group_id", "") or ""
+        ),
+        "merge_split_diagnostics": dict(
+            getattr(blk, "merge_split_diagnostics", {}) or {}
+        ),
     }
+
+
+def _sha256_file(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as stream:
+        for chunk in iter(lambda: stream.read(8 * 1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
 
 
 def _write_json(path: Path, payload: dict | list) -> None:
@@ -182,15 +219,21 @@ def _process_image(
 
     blocks = detector.detect(image) or []
     failure = ""
+    started_at = time.perf_counter()
     try:
         engine.process_image(image, blocks)
     except Exception as exc:
         failure = str(exc)
+    elapsed_seconds = time.perf_counter() - started_at
 
     overlay = _draw_overlay(image, blocks, engine.last_page_regions)
     metadata = {
         "image": image_path.name,
         "source_path": str(image_path),
+        "source_sha256": _sha256_file(image_path),
+        "image_width": int(image.shape[1]),
+        "image_height": int(image.shape[0]),
+        "elapsed_seconds": float(elapsed_seconds),
         "block_count": len(blocks),
         "mapped_region_count": len(engine.last_page_regions),
         "non_empty_block_count": sum(1 for blk in blocks if str(getattr(blk, "text", "") or "").strip()),
@@ -198,6 +241,11 @@ def _process_image(
         "failure": failure,
         "request": dict(engine.last_request_metadata),
         "attempts": list(engine.last_attempt_history),
+        "regions": list(engine.last_page_regions),
+        "shadow_regions": list(engine.last_shadow_regions),
+        "merge_split_diagnostics": list(
+            engine.last_merge_split_diagnostics
+        ),
         "blocks": [_serialize_block(blk) for blk in blocks],
     }
 
@@ -212,6 +260,7 @@ def _process_image(
         "block_count": metadata["block_count"],
         "mapped_region_count": metadata["mapped_region_count"],
         "non_empty_block_count": metadata["non_empty_block_count"],
+        "elapsed_seconds": metadata["elapsed_seconds"],
         "resize_profile": metadata["request"].get("resize_profile", ""),
         "request_shape": metadata["request"].get("request_shape", []),
         "attempt_count": metadata["request"].get("attempt_count", 0),
