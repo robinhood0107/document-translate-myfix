@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import base64
 import copy
+import json
 import logging
 import math
 import os
@@ -64,6 +65,7 @@ from .image_policy import (
 from .reconciliation import (
     MANGALMM_RECONCILIATION_SCHEMA_VERSION,
     OCRRegion,
+    prepare_dominant_detector_region,
     prepare_safe_detector_compound,
 )
 from ..persistent_cache import canonical_sha256
@@ -101,6 +103,12 @@ DEFAULT_MANGALMM_FREQUENCY_PENALTY = 0.0
 DEFAULT_MANGALMM_SEED = 42
 MANGALMM_RECOVERY_REPEAT_PENALTY = 1.15
 MANGALMM_RECOVERY_REPEAT_LAST_N = 4096
+MANGALMM_REQUEST_PROFILE_VERSION = 2
+MANGALMM_PRIMARY_REPETITION_GUARD_COUNT = 4
+MANGALMM_REGION_OBJECT_PATTERN = re.compile(
+    r"\{\s*\"bbox_2d\"\s*:\s*\[[^\]]+\]\s*,\s*"
+    r"\"text_content\"\s*:\s*\"(?:\\.|[^\"\\])*\"\s*\}"
+)
 MANGALMM_RECOVERY_MIN_DETECTOR_COVERAGE = 0.50
 MANGALMM_SPARSE_RECOVERY_MAX_BLOCKS = 4
 DEFAULT_MANGALMM_PNG_COMPRESSION = 1
@@ -841,20 +849,37 @@ class MangaLMMOCREngine(OCREngine):
                 prompt_text=attempt_spec.prompt_text,
                 repeat_penalty_override=attempt_spec.repeat_penalty,
                 repeat_last_n_override=attempt_spec.repeat_last_n,
+                enable_repetition_guard=attempt_spec.index == 0,
             )
             finish_reason = str(
                 self.last_transport_metadata.get("finish_reason", "") or ""
             ).strip().lower()
-            if finish_reason == "length":
+            if finish_reason in {"length", "repetition_guard"}:
+                repetition_guard = finish_reason == "repetition_guard"
                 analysis = {
                     "regions": [],
-                    "response_kind": "truncated:finish_reason_length",
+                    "response_kind": (
+                        "truncated:repetition_guard"
+                        if repetition_guard
+                        else "truncated:finish_reason_length"
+                    ),
                     "payload_type": "invalid",
                     "raw_length": len(raw_text),
-                    "parser_error_code": "finish_reason_length",
+                    "parser_error_code": (
+                        "repetition_guard"
+                        if repetition_guard
+                        else "finish_reason_length"
+                    ),
                     "parser_error": (
-                        "MangaLMM response reached the completion-token "
-                        "limit and was rejected."
+                        (
+                            "MangaLMM response repeated an identical "
+                            "bbox/text region and was stopped early."
+                        )
+                        if repetition_guard
+                        else (
+                            "MangaLMM response reached the completion-token "
+                            "limit and was rejected."
+                        )
                     ),
                 }
             else:
@@ -945,6 +970,26 @@ class MangaLMMOCREngine(OCREngine):
             ),
             "total_tokens": int(
                 self.last_transport_metadata.get("total_tokens", 0) or 0
+            ),
+            "streaming": bool(
+                self.last_transport_metadata.get("streaming", False)
+            ),
+            "stream_event_count": int(
+                self.last_transport_metadata.get("stream_event_count", 0)
+                or 0
+            ),
+            "repetition_guard_triggered": bool(
+                self.last_transport_metadata.get(
+                    "repetition_guard_triggered",
+                    False,
+                )
+            ),
+            "repetition_consecutive_region_count": int(
+                self.last_transport_metadata.get(
+                    "repetition_consecutive_region_count",
+                    0,
+                )
+                or 0
             ),
             "region_count": len(analysis.get("regions", []) or []),
             "raw_response": raw_text,
@@ -1277,6 +1322,68 @@ class MangaLMMOCREngine(OCREngine):
                 block.compound_group_id = (
                     block_id if is_multi_region else ""
                 )
+                continue
+
+            dominant = prepare_dominant_detector_region(
+                unique_items,
+                text_class=str(getattr(block, "text_class", "") or ""),
+                has_bubble=(
+                    self._normalize_box(
+                        getattr(block, "bubble_xyxy", None)
+                    )
+                    is not None
+                ),
+            )
+            if dominant.accepted and dominant.selected_item is not None:
+                assignments[blk_index] = [dominant.selected_item]
+                selected_region = dominant.selected_item["region"]
+                diagnostic = {
+                    "kind": "dominant_region_one_block",
+                    "status": "matched",
+                    "block_id": block_id,
+                    "input_region_count": len(unique_items),
+                    "accepted_region_count": 1,
+                    "secondary_region_count": len(
+                        dominant.secondary_items
+                    ),
+                    "near_duplicate_count": len(
+                        dominant.duplicate_items
+                    ),
+                    "decision_reason": dominant.reason,
+                    "selected_bbox_xyxy": list(
+                        selected_region.bbox_xyxy
+                    ),
+                    "selected_text": str(selected_region.text or ""),
+                    "selected_match_metrics": dict(
+                        dominant.selected_item.get("metrics", {}) or {}
+                    ),
+                    "secondary_regions": [
+                        {
+                            "bbox_xyxy": list(item["region"].bbox_xyxy),
+                            "text": str(item["region"].text or ""),
+                            "match_metrics": dict(
+                                item.get("metrics", {}) or {}
+                            ),
+                        }
+                        for item in dominant.secondary_items
+                    ],
+                }
+                self.last_merge_split_diagnostics.append(diagnostic)
+                block.merge_split_diagnostics = {
+                    **dict(
+                        getattr(block, "merge_split_diagnostics", {}) or {}
+                    ),
+                    "mangalmm_dominant_region_one_block": diagnostic,
+                }
+                block.compound_group_id = ""
+                for item in dominant.secondary_items:
+                    self.last_shadow_regions.append(
+                        self._serialize_shadow_region(
+                            item["region"],
+                            reason="dominant_region_secondary_review",
+                            candidate_block_ids=[block_id],
+                        )
+                    )
                 continue
 
             shadow_reason = {
@@ -1713,6 +1820,7 @@ class MangaLMMOCREngine(OCREngine):
         prompt_text: str,
         repeat_penalty_override: float | None = None,
         repeat_last_n_override: int | None = None,
+        enable_repetition_guard: bool = False,
     ) -> str:
         data_url = self._image_data_url(image)
         payload = {
@@ -1744,12 +1852,199 @@ class MangaLMMOCREngine(OCREngine):
             "max_completion_tokens": int(max_completion_tokens),
             "seed": DEFAULT_MANGALMM_SEED,
         }
+        if enable_repetition_guard:
+            response_text, metadata = self._send_streaming_request(payload)
+            self.last_transport_metadata = metadata
+            return response_text
         data = self._send_request(payload)
         self.last_transport_metadata = (
             self._extract_transport_metadata(data)
         )
         response_text = self._extract_text_from_response(data)
         return response_text
+
+    @staticmethod
+    def _iter_complete_region_keys(
+        text: str,
+    ) -> list[tuple[int, tuple[object, ...]]]:
+        regions: list[tuple[int, tuple[object, ...]]] = []
+        for match in MANGALMM_REGION_OBJECT_PATTERN.finditer(text):
+            try:
+                payload = json.loads(match.group(0))
+            except (TypeError, ValueError):
+                continue
+            bbox = payload.get("bbox_2d")
+            content = payload.get("text_content")
+            if not isinstance(bbox, list) or len(bbox) != 4:
+                continue
+            if not isinstance(content, str):
+                continue
+            regions.append(
+                (
+                    int(match.end()),
+                    tuple(bbox) + (content,),
+                )
+            )
+        return regions
+
+    def _send_streaming_request(
+        self,
+        payload: dict,
+    ) -> tuple[str, dict[str, object]]:
+        stream_payload = {
+            **payload,
+            "stream": True,
+            "stream_options": {"include_usage": True},
+        }
+        try:
+            response = requests.post(
+                self._chat_completions_url(),
+                json=stream_payload,
+                headers={"Content-Type": "application/json"},
+                timeout=self._requests_timeout(),
+                stream=True,
+            )
+        except requests.exceptions.RequestException as exc:
+            raise LocalServiceConnectionError(
+                f"Unable to reach the local {SERVICE_NAME} service.",
+                service_name=SERVICE_NAME,
+                settings_page_name=SETTINGS_PAGE_NAME,
+            ) from exc
+
+        response_text = ""
+        finish_reason = ""
+        usage: dict[str, object] = {}
+        event_count = 0
+        last_region_end = 0
+        previous_region_key: tuple[object, ...] | None = None
+        consecutive_region_count = 0
+        repetition_guard_triggered = False
+        try:
+            self._raise_for_http_error(response)
+            response.encoding = "utf-8"
+            for raw_line in response.iter_lines(decode_unicode=True):
+                line = (
+                    raw_line.decode("utf-8", errors="replace")
+                    if isinstance(raw_line, bytes)
+                    else str(raw_line or "")
+                ).strip()
+                if not line or line.startswith(":"):
+                    continue
+                if not line.startswith("data:"):
+                    continue
+                data_text = line[5:].strip()
+                if not data_text or data_text == "[DONE]":
+                    continue
+                try:
+                    event = json.loads(data_text)
+                except ValueError as exc:
+                    raise LocalServiceResponseError(
+                        f"{SERVICE_NAME} service returned invalid SSE JSON.",
+                        service_name=SERVICE_NAME,
+                        settings_page_name=SETTINGS_PAGE_NAME,
+                    ) from exc
+                if not isinstance(event, dict):
+                    raise LocalServiceResponseError(
+                        f"{SERVICE_NAME} SSE event must be a JSON object.",
+                        service_name=SERVICE_NAME,
+                        settings_page_name=SETTINGS_PAGE_NAME,
+                    )
+                error = event.get("error")
+                if isinstance(error, dict):
+                    detail = str(error.get("message", "") or "").strip()
+                    raise LocalServiceResponseError(
+                        detail or f"Unknown {SERVICE_NAME} streaming error.",
+                        service_name=SERVICE_NAME,
+                        settings_page_name=SETTINGS_PAGE_NAME,
+                    )
+                event_count += 1
+                event_usage = event.get("usage")
+                if isinstance(event_usage, dict):
+                    usage = dict(event_usage)
+                choices = event.get("choices")
+                if not isinstance(choices, list) or not choices:
+                    continue
+                choice = choices[0]
+                if not isinstance(choice, dict):
+                    continue
+                current_finish_reason = str(
+                    choice.get("finish_reason", "") or ""
+                ).strip()
+                if current_finish_reason:
+                    finish_reason = current_finish_reason
+                delta = choice.get("delta")
+                if not isinstance(delta, dict):
+                    continue
+                content = delta.get("content")
+                if not isinstance(content, str) or not content:
+                    continue
+                response_text += content
+                for region_end, region_key in self._iter_complete_region_keys(
+                    response_text
+                ):
+                    if region_end <= last_region_end:
+                        continue
+                    last_region_end = region_end
+                    if region_key == previous_region_key:
+                        consecutive_region_count += 1
+                    else:
+                        previous_region_key = region_key
+                        consecutive_region_count = 1
+                    if (
+                        consecutive_region_count
+                        >= MANGALMM_PRIMARY_REPETITION_GUARD_COUNT
+                    ):
+                        repetition_guard_triggered = True
+                        finish_reason = "repetition_guard"
+                        break
+                if repetition_guard_triggered:
+                    break
+        except requests.exceptions.RequestException as exc:
+            raise LocalServiceConnectionError(
+                f"Connection to the local {SERVICE_NAME} stream was interrupted.",
+                service_name=SERVICE_NAME,
+                settings_page_name=SETTINGS_PAGE_NAME,
+            ) from exc
+        finally:
+            response.close()
+
+        if not finish_reason:
+            raise LocalServiceResponseError(
+                f"{SERVICE_NAME} streaming response ended without a finish reason.",
+                service_name=SERVICE_NAME,
+                settings_page_name=SETTINGS_PAGE_NAME,
+            )
+
+        def token_count(key: str) -> int:
+            try:
+                return max(0, int(usage.get(key, 0) or 0))
+            except (TypeError, ValueError):
+                return 0
+
+        metadata: dict[str, object] = {
+            "finish_reason": finish_reason,
+            "prompt_tokens": token_count("prompt_tokens"),
+            "completion_tokens": token_count("completion_tokens"),
+            "total_tokens": token_count("total_tokens"),
+            "streaming": True,
+            "stream_event_count": int(event_count),
+            "repetition_guard_triggered": bool(
+                repetition_guard_triggered
+            ),
+            "repetition_consecutive_region_count": int(
+                consecutive_region_count
+            ),
+        }
+        if self.raw_response_logging:
+            append_active_raw_response(
+                "mangalmm",
+                {
+                    "response_text": response_text,
+                    "transport_metadata": metadata,
+                },
+                kind="response_stream_summary",
+            )
+        return response_text, metadata
 
     @staticmethod
     def _extract_transport_metadata(data: dict) -> dict[str, object]:
@@ -1794,23 +2089,7 @@ class MangaLMMOCREngine(OCREngine):
                 settings_page_name=SETTINGS_PAGE_NAME,
             ) from exc
 
-        if response.status_code != 200:
-            message = f"{SERVICE_NAME} service returned HTTP {response.status_code}."
-            try:
-                payload_json = response.json()
-            except ValueError:
-                payload_json = None
-            if isinstance(payload_json, dict):
-                error = payload_json.get("error")
-                if isinstance(error, dict):
-                    detail = str(error.get("message", "") or "").strip()
-                    if detail:
-                        message = detail
-            raise LocalServiceResponseError(
-                message,
-                service_name=SERVICE_NAME,
-                settings_page_name=SETTINGS_PAGE_NAME,
-            )
+        self._raise_for_http_error(response)
 
         try:
             data = response.json()
@@ -1835,6 +2114,29 @@ class MangaLMMOCREngine(OCREngine):
                 kind="response_json",
             )
         return data
+
+    @staticmethod
+    def _raise_for_http_error(response) -> None:
+        if response.status_code == 200:
+            return
+        message = (
+            f"{SERVICE_NAME} service returned HTTP {response.status_code}."
+        )
+        try:
+            payload_json = response.json()
+        except ValueError:
+            payload_json = None
+        if isinstance(payload_json, dict):
+            error = payload_json.get("error")
+            if isinstance(error, dict):
+                detail = str(error.get("message", "") or "").strip()
+                if detail:
+                    message = detail
+        raise LocalServiceResponseError(
+            message,
+            service_name=SERVICE_NAME,
+            settings_page_name=SETTINGS_PAGE_NAME,
+        )
 
     def _requests_timeout(self):
         return float(self.request_timeout_sec)
@@ -1958,8 +2260,31 @@ class MangaLMMOCREngine(OCREngine):
                 "reconciliation_schema_version": (
                     MANGALMM_RECONCILIATION_SCHEMA_VERSION
                 ),
+                "request_profile_version": MANGALMM_REQUEST_PROFILE_VERSION,
+                "primary_streaming_repetition_guard_count": (
+                    MANGALMM_PRIMARY_REPETITION_GUARD_COUNT
+                ),
                 "endpoint": self._chat_completions_url(),
                 "model": MANGALMM_MODEL_NAME,
+                "max_completion_tokens": int(self.max_completion_tokens),
+                "safe_resize": bool(self.safe_resize),
+                "max_pixels": int(self.max_pixels),
+                "max_long_side": int(self.max_long_side),
+                "temperature": float(self.temperature),
+                "top_k": int(self.top_k),
+                "top_p": float(self.top_p),
+                "min_p": float(self.min_p),
+                "repeat_penalty": float(self.repeat_penalty),
+                "repeat_last_n": int(self.repeat_last_n),
+                "presence_penalty": float(self.presence_penalty),
+                "frequency_penalty": float(self.frequency_penalty),
+                "seed": DEFAULT_MANGALMM_SEED,
+                "standard_prompt_sha256": canonical_sha256(
+                    self.STANDARD_PROMPT
+                ),
+                "dense_prompt_sha256": canonical_sha256(
+                    self.DENSE_PROMPT
+                ),
             }
         )
 
