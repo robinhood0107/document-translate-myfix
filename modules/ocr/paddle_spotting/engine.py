@@ -82,7 +82,8 @@ class PaddleOCRVLSpottingEngine(OCREngine):
     RECOVERY_REPEAT_PENALTY = 1.15
     RECOVERY_REPEAT_LAST_N = 4096
     RESPONSE_SCHEMA_VERSION = PADDLE_SPOTTING_RESPONSE_SCHEMA_VERSION
-    CACHE_IDENTITY_VERSION = "paddle_spotting_full_page_v1"
+    CACHE_IDENTITY_VERSION = "paddle_spotting_full_page_v2"
+    RECONCILIATION_SCHEMA_VERSION = 2
 
     def __init__(self) -> None:
         self.server_url = self.DEFAULT_SERVER_URL
@@ -237,6 +238,8 @@ class PaddleOCRVLSpottingEngine(OCREngine):
                     list(point) for point in region.normalized_points
                 ],
                 "reason": "spotting_region_unmatched",
+                "semantic_role": SEMANTIC_ROLE_AMBIGUOUS,
+                "processing_action": PROCESSING_ACTION_REVIEW,
             }
             for region in geometry.unmatched_regions
         ]
@@ -246,8 +249,16 @@ class PaddleOCRVLSpottingEngine(OCREngine):
         mapped_block_count = sum(
             bool(items) for items in geometry.assignments.values()
         )
+        block_status_counts = Counter(
+            str(item.get("status", "missing") or "missing")
+            for item in geometry.block_diagnostics.values()
+        )
+        relation_type_counts = Counter(
+            str(item.get("relation_type", "unknown") or "unknown")
+            for item in geometry.relation_components
+        )
         self.last_page_profile = {
-            "schema_version": 1,
+            "schema_version": 2,
             "strategy": OCR_STRATEGY_PADDLE_SPOTTING,
             "official_contract": {
                 "prompt": self.OFFICIAL_PROMPT,
@@ -274,6 +285,24 @@ class PaddleOCRVLSpottingEngine(OCREngine):
             "unmapped_block_count": max(0, len(blk_list) - mapped_block_count),
             "unmatched_region_count": len(geometry.unmatched_regions),
             "ambiguous_region_count": len(geometry.ambiguous_regions),
+            "pure_spotting": {
+                "raw_region_count": len(parsed.regions),
+                "duplicate_region_count": parsed.duplicate_region_count,
+                "unmatched_region_count": len(geometry.unmatched_regions),
+            },
+            "detector_assisted_reconciliation": {
+                "schema_version": self.RECONCILIATION_SCHEMA_VERSION,
+                "block_status_counts": dict(sorted(block_status_counts.items())),
+                "relation_type_counts": dict(
+                    sorted(relation_type_counts.items())
+                ),
+                "ambiguous_block_count": len(
+                    geometry.ambiguous_block_indices
+                ),
+                "components": [
+                    dict(item) for item in geometry.relation_components
+                ],
+            },
             "quality": quality,
             "elapsed_ms": round(elapsed_ms, 3),
             "processing_contract": finalize_ocr_processing_contracts(
@@ -510,6 +539,17 @@ class PaddleOCRVLSpottingEngine(OCREngine):
         page_bbox = [0, 0, int(image_width), int(image_height)]
         for block_index, block in enumerate(blocks):
             items = geometry.assignments.get(block_index, ())
+            reconciliation = dict(
+                geometry.block_diagnostics.get(block_index, {})
+            )
+            reconciliation_status = str(
+                reconciliation.get("status", "missing") or "missing"
+            )
+            block.merge_split_diagnostics = {
+                "schema_version": self.RECONCILIATION_SCHEMA_VERSION,
+                "strategy": OCR_STRATEGY_PADDLE_SPOTTING,
+                **reconciliation,
+            }
             if not items:
                 block.text = ""
                 block.texts = []
@@ -520,8 +560,16 @@ class PaddleOCRVLSpottingEngine(OCREngine):
                     block,
                     semantic_role=SEMANTIC_ROLE_AMBIGUOUS,
                     processing_action=PROCESSING_ACTION_REVIEW,
-                    decision_source="paddle_spotting_unmatched",
-                    reasons=("spotting_region_unmatched",),
+                    decision_source=(
+                        "paddle_spotting_ambiguous"
+                        if reconciliation_status == "ambiguous"
+                        else "paddle_spotting_unmatched"
+                    ),
+                    reasons=(
+                        "spotting_relation_ambiguous"
+                        if reconciliation_status == "ambiguous"
+                        else "spotting_region_unmatched",
+                    ),
                 )
                 set_block_ocr_crop_diagnostics(
                     block,
@@ -571,6 +619,13 @@ class PaddleOCRVLSpottingEngine(OCREngine):
                 "detector_geometry_authoritative": True,
                 "matched_region_count": len(items),
                 "detector_block_id": ensure_text_block_id(block),
+                "reconciliation_schema_version": (
+                    self.RECONCILIATION_SCHEMA_VERSION
+                ),
+                "reconciliation_status": reconciliation_status,
+                "detector_coverage": float(
+                    reconciliation.get("detector_coverage", 0.0) or 0.0
+                ),
             }
             block.ocr_crop_bbox = list(page_bbox)
             block.ocr_resize_scale = 1.0
