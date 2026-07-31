@@ -170,3 +170,14 @@ OCR/번역 결과, DB와 sidecar는 Git 밖에만 보존합니다. cold 후보�
 - 제품 기본값은 `max_new_tokens=1024`를 유지합니다.
 
 상세 근거: [PaddleOCR-VL llama.cpp completion token 최종 판정](./paddle-token-llamacpp-final-decision-ko.md)
+
+## 2026-08-01 Paddle llama.cpp batch/ubatch 최종 재검증
+
+- 실제 CUDA Stage-Batched 일본어 3페이지·60 HTTP 요청으로 batch `512/1024/2048/4096`과 ubatch `256/384/512/768`을 검사했습니다.
+- `batch=512`, `ubatch=512`는 7회 AB/BA에서 출력 7/7 exact였지만 전체 elapsed 평균 -0.160%, OCR request 합계 평균 -0.081%로 기준선보다 오히려 느렸습니다.
+- 단측 95% bootstrap 하한은 전체 elapsed -4.900%, request 합계 -0.548%였고 라운드 승패도 계속 뒤집혔습니다.
+- `batch=1024/4096`과 `ubatch=256/384/768` 역시 스크리닝에서 request 시간을 줄이지 못했습니다.
+- 최소 개선율 없이도 실제 양수 이득이 없으므로 `reject_no_proven_speed_gain`으로 확정하고 제품 `2048/512`를 유지합니다.
+- WSL 환경변수 전달이 누락된 초기 후보 실행은 Docker 실제 명령이 기준선인 것을 발견해 판정에서 제외했습니다.
+
+상세 근거: [PaddleOCR-VL llama.cpp batch/ubatch 최종 판정](./paddle-llamacpp-runtime-matrix-final-decision-ko.md)
