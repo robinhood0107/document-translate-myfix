@@ -387,6 +387,35 @@ class MangaLMMOCRTests(unittest.TestCase):
         self.assertEqual(attempts[1].repeat_penalty, 1.15)
         self.assertEqual(attempts[1].repeat_last_n, 4096)
 
+    def test_sparse_recovery_keeps_official_prompt_without_recall_suffix(
+        self,
+    ) -> None:
+        engine = MangaLMMOCREngine()
+        settings = _FakeSettings(selected_ocr_mode=OCR_MODE_MANGALMM)
+        engine.initialize(
+            settings,
+            source_lang_english="Japanese",
+            selected_ocr_mode=OCR_MODE_MANGALMM,
+        )
+
+        attempts = engine._build_attempt_specs(
+            (2000, 1430, 3),
+            _make_blocks(2, width=120, height=300),
+        )
+
+        self.assertEqual(len(attempts), 2)
+        self.assertEqual(
+            attempts[1].attempt_kind,
+            "sparse_native_output_recovery",
+        )
+        self.assertEqual(attempts[1].prompt_text, attempts[0].prompt_text)
+        self.assertNotIn(
+            "Output every distinct physical text region",
+            attempts[1].prompt_text,
+        )
+        self.assertEqual(attempts[1].repeat_penalty, 1.15)
+        self.assertEqual(attempts[1].repeat_last_n, 4096)
+
     def test_build_attempt_specs_keeps_one_attempt_without_detector_blocks(
         self,
     ) -> None:
@@ -532,7 +561,94 @@ class MangaLMMOCRTests(unittest.TestCase):
             blocks[1].merge_split_diagnostics,
         )
 
-    def test_multiple_regions_for_one_detector_block_are_not_concatenated(
+    def test_long_region_covering_separated_blocks_is_explicit_review(
+        self,
+    ) -> None:
+        engine = MangaLMMOCREngine()
+        blocks = [
+            _make_block(50, 10, 90, 40, text_class="text_free"),
+            _make_block(40, 150, 100, 190, text_class="text_free"),
+        ]
+
+        assignments = engine._assign_regions_to_blocks(
+            [_make_region(40, 5, 100, 195, "merged page text")],
+            blocks,
+        )
+
+        self.assertEqual(assignments, {0: [], 1: []})
+        self.assertEqual(len(engine.last_shadow_regions), 1)
+        self.assertEqual(
+            engine.last_shadow_regions[0]["reason"],
+            "one_region_multiple_blocks_coverage",
+        )
+        diagnostic = engine.last_merge_split_diagnostics[0]
+        self.assertEqual(
+            diagnostic["kind"],
+            "one_region_multiple_blocks_coverage",
+        )
+        self.assertEqual(diagnostic["status"], "review")
+        self.assertEqual(len(diagnostic["candidate_block_ids"]), 2)
+        self.assertIn(
+            "mangalmm_one_region_multiple_blocks_coverage",
+            blocks[0].merge_split_diagnostics,
+        )
+
+    def test_safe_multiple_regions_form_one_ordered_detector_compound(
+        self,
+    ) -> None:
+        engine = MangaLMMOCREngine()
+        block = _make_block(
+            0,
+            0,
+            100,
+            100,
+            text_class="text_bubble",
+            bubble_bbox=(0, 0, 100, 100),
+        )
+        block.direction = "vertical"
+
+        assignments = engine._assign_regions_to_blocks(
+            [
+                _make_region(10, 50, 30, 90, "left"),
+                _make_region(60, 10, 90, 40, "right"),
+            ],
+            [block],
+        )
+
+        self.assertEqual(
+            [item["region"].text for item in assignments[0]],
+            ["right", "left"],
+        )
+        self.assertEqual(engine.last_shadow_regions, [])
+        self.assertEqual(
+            engine.last_merge_split_diagnostics[0]["kind"],
+            "multiple_regions_one_block_compound",
+        )
+        self.assertIn(
+            "mangalmm_multiple_regions_one_block_compound",
+            block.merge_split_diagnostics,
+        )
+
+        resize_plan = _make_resize_plan(
+            profile="standard",
+            request_shape=(100, 100),
+            original_shape=(100, 100),
+        )
+        engine._apply_assignments_to_blocks(
+            [block],
+            assignments,
+            attempt_count=1,
+            success_status="ok",
+            empty_status="empty_initial",
+            page_bbox=(0, 0, 100, 100),
+            resize_plan=resize_plan,
+        )
+        self.assertEqual(block.texts, ["right", "left"])
+        self.assertEqual(block.text, "right\nleft")
+        self.assertEqual(len(block.ocr_regions), 2)
+        self.assertEqual(block.compound_group_id, block.block_id)
+
+    def test_distinct_free_text_regions_without_bubble_fail_closed(
         self,
     ) -> None:
         engine = MangaLMMOCREngine()
@@ -540,21 +656,81 @@ class MangaLMMOCRTests(unittest.TestCase):
 
         assignments = engine._assign_regions_to_blocks(
             [
-                _make_region(10, 10, 30, 40, "first"),
-                _make_region(60, 50, 90, 90, "second"),
+                _make_region(10, 10, 30, 40, "パル"),
+                _make_region(60, 50, 90, 90, "パル"),
             ],
             [block],
         )
 
         self.assertEqual(assignments, {0: []})
         self.assertEqual(len(engine.last_shadow_regions), 2)
+        self.assertTrue(
+            all(
+                item["reason"]
+                == "multiple_regions_one_block_no_bubble"
+                for item in engine.last_shadow_regions
+            )
+        )
+        self.assertEqual(
+            engine.last_merge_split_diagnostics[0]["decision_reason"],
+            "missing_bubble_compound_boundary",
+        )
+
+    def test_overlapping_distinct_regions_for_one_block_fail_closed(
+        self,
+    ) -> None:
+        engine = MangaLMMOCREngine()
+        block = _make_block(
+            0,
+            0,
+            100,
+            100,
+            text_class="text_bubble",
+            bubble_bbox=(0, 0, 100, 100),
+        )
+
+        assignments = engine._assign_regions_to_blocks(
+            [
+                _make_region(10, 10, 80, 80, "first"),
+                _make_region(40, 30, 90, 90, "conflict"),
+            ],
+            [block],
+        )
+
+        self.assertEqual(assignments, {0: []})
+        self.assertEqual(len(engine.last_shadow_regions), 2)
+        self.assertTrue(
+            all(
+                item["reason"]
+                == "multiple_regions_one_block_overlap"
+                for item in engine.last_shadow_regions
+            )
+        )
+        self.assertEqual(
+            engine.last_merge_split_diagnostics[0]["status"],
+            "review",
+        )
+
+    def test_near_duplicate_regions_are_collapsed_before_compounding(
+        self,
+    ) -> None:
+        engine = MangaLMMOCREngine()
+        block = _make_block(0, 0, 100, 100, text_class="text_bubble")
+
+        assignments = engine._assign_regions_to_blocks(
+            [
+                _make_region(10, 10, 50, 80, "same"),
+                _make_region(12, 12, 49, 79, "same"),
+            ],
+            [block],
+        )
+
+        self.assertEqual(len(assignments[0]), 1)
+        self.assertEqual(assignments[0][0]["region"].text, "same")
+        self.assertEqual(engine.last_shadow_regions, [])
         self.assertEqual(
             engine.last_merge_split_diagnostics[0]["kind"],
-            "multiple_regions_one_block",
-        )
-        self.assertIn(
-            "mangalmm_multiple_regions_one_block",
-            block.merge_split_diagnostics,
+            "near_duplicate_regions_collapsed",
         )
 
     def test_exact_duplicate_regions_are_assigned_once(self) -> None:
@@ -891,6 +1067,12 @@ class MangaLMMOCRTests(unittest.TestCase):
         self.assertEqual(len(block.ocr_runtime_identity), 64)
         self.assertNotIn("secret", block.ocr_runtime_identity)
         self.assertNotIn("example.test", block.ocr_runtime_identity)
+        self.assertEqual(
+            block.ocr_geometry_provenance[
+                "reconciliation_schema_version"
+            ],
+            2,
+        )
 
     def test_finish_reason_length_rejects_otherwise_valid_json(self) -> None:
         engine = MangaLMMOCREngine()
@@ -1094,6 +1276,75 @@ class MangaLMMOCRTests(unittest.TestCase):
         self.assertEqual(engine.last_request_metadata["matched_block_count"], 2)
         self.assertEqual(engine.last_request_metadata["retry_count"], 1)
         self.assertEqual(engine.last_request_metadata["raw_response"], "recovery")
+        self.assertEqual(
+            engine.last_request_metadata["detector_delivery_status"],
+            "success",
+        )
+
+    def test_terminal_low_coverage_is_reported_as_partial_delivery(
+        self,
+    ) -> None:
+        engine = MangaLMMOCREngine()
+        blocks = [
+            _make_block(index * 20, 10, index * 20 + 10, 30)
+            for index in range(10)
+        ]
+        image = np.zeros((200, 240, 3), dtype=np.uint8)
+        empty_payload = {
+            "regions": [],
+            "analysis": {
+                "response_kind": "parser_error:empty_response",
+                "payload_type": "invalid",
+            },
+            "raw_text": "",
+            "crop_image": image,
+            "request_image": image,
+            "parsed_region_count": 0,
+            "mapped_region_count": 0,
+            "metadata": {
+                "response_kind": "parser_error:empty_response",
+                "finish_reason": "stop",
+            },
+        }
+        region = _make_region(0, 10, 10, 30, "one")
+        partial_payload = {
+            "regions": [region],
+            "analysis": {
+                "response_kind": "json_array",
+                "payload_type": "json_array",
+            },
+            "raw_text": "partial",
+            "crop_image": image,
+            "request_image": image,
+            "parsed_region_count": 1,
+            "mapped_region_count": 1,
+            "metadata": {
+                "response_kind": "json_array",
+                "finish_reason": "stop",
+                "raw_response": "partial",
+            },
+        }
+
+        with mock.patch.object(
+            engine,
+            "_request_regions_for_attempt",
+            side_effect=[empty_payload, partial_payload],
+        ):
+            engine.process_image(image, blocks)
+
+        self.assertEqual(
+            engine.last_attempt_history[-1]["detector_delivery_status"],
+            "partial",
+        )
+        self.assertEqual(
+            engine.last_attempt_history[-1]["failure_reason"],
+            "detector_coverage_gap",
+        )
+        self.assertEqual(
+            engine.last_request_metadata["detector_delivery_status"],
+            "partial",
+        )
+        self.assertEqual(engine.last_request_metadata["final_status"], "success")
 
     def test_process_image_does_not_retry_at_detector_coverage_threshold(
         self,
