@@ -1,16 +1,21 @@
 from __future__ import annotations
 
+import json
 import tempfile
 import unittest
 from pathlib import Path
 from unittest import mock
 
 import numpy as np
+import requests
 
 from modules.ocr.factory import OCRFactory
 from modules.ocr.mangalmm_ocr import MangaLMMOCREngine, OCRRegion, ResizePlan
 from modules.ocr.selection import OCR_MODE_BEST_LOCAL, OCR_MODE_MANGALMM
-from modules.utils.exceptions import LocalServiceResponseError
+from modules.utils.exceptions import (
+    LocalServiceConnectionError,
+    LocalServiceResponseError,
+)
 from modules.utils.textblock import TextBlock
 
 
@@ -711,6 +716,94 @@ class MangaLMMOCRTests(unittest.TestCase):
             "review",
         )
 
+    def test_long_dominant_dialogue_recovers_with_far_weak_sfx(self) -> None:
+        engine = MangaLMMOCREngine()
+        block = _make_block(
+            10,
+            10,
+            60,
+            90,
+            text_class="text_bubble",
+            bubble_bbox=(0, 0, 100, 100),
+        )
+
+        assignments = engine._assign_regions_to_blocks(
+            [
+                _make_region(12, 12, 58, 88, "私もですか？"),
+                _make_region(80, 75, 95, 90, "ゼ"),
+            ],
+            [block],
+        )
+
+        self.assertEqual(len(assignments[0]), 1)
+        self.assertEqual(assignments[0][0]["region"].text, "私もですか？")
+        self.assertEqual(len(engine.last_shadow_regions), 1)
+        self.assertEqual(
+            engine.last_shadow_regions[0]["reason"],
+            "dominant_region_secondary_review",
+        )
+        self.assertEqual(
+            engine.last_merge_split_diagnostics[0]["kind"],
+            "dominant_region_one_block",
+        )
+        self.assertIn(
+            "mangalmm_dominant_region_one_block",
+            block.merge_split_diagnostics,
+        )
+        self.assertEqual(block.compound_group_id, "")
+
+    def test_short_region_cannot_trigger_dominant_recovery(self) -> None:
+        engine = MangaLMMOCREngine()
+        block = _make_block(
+            10,
+            10,
+            60,
+            90,
+            text_class="text_bubble",
+            bubble_bbox=(0, 0, 100, 100),
+        )
+
+        assignments = engine._assign_regions_to_blocks(
+            [
+                _make_region(12, 12, 58, 88, "うわっ"),
+                _make_region(80, 75, 95, 90, "グッ"),
+            ],
+            [block],
+        )
+
+        self.assertEqual(assignments, {0: []})
+        self.assertEqual(len(engine.last_shadow_regions), 2)
+        self.assertNotIn(
+            "mangalmm_dominant_region_one_block",
+            block.merge_split_diagnostics,
+        )
+
+    def test_two_strong_regions_cannot_trigger_dominant_recovery(self) -> None:
+        engine = MangaLMMOCREngine()
+        block = _make_block(
+            0,
+            0,
+            100,
+            100,
+            text_class="text_bubble",
+            bubble_bbox=(0, 0, 100, 100),
+        )
+
+        assignments = engine._assign_regions_to_blocks(
+            [
+                _make_region(20, 20, 65, 85, "first dialogue"),
+                _make_region(35, 15, 80, 80, "second dialogue"),
+            ],
+            [block],
+        )
+
+        self.assertEqual(assignments, {0: []})
+        self.assertEqual(len(engine.last_shadow_regions), 2)
+        self.assertNotIn(
+            "mangalmm_dominant_region_one_block",
+            block.merge_split_diagnostics,
+        )
+
     def test_near_duplicate_regions_are_collapsed_before_compounding(
         self,
     ) -> None:
@@ -1071,8 +1164,138 @@ class MangaLMMOCRTests(unittest.TestCase):
             block.ocr_geometry_provenance[
                 "reconciliation_schema_version"
             ],
-            2,
+            3,
         )
+
+    def test_runtime_identity_changes_with_request_sampler(self) -> None:
+        engine = MangaLMMOCREngine()
+        baseline = engine._runtime_identity_fingerprint()
+
+        engine.repeat_penalty = 1.15
+        changed_penalty = engine._runtime_identity_fingerprint()
+        engine.repeat_penalty = 1.0
+        engine.repeat_last_n = 4096
+        changed_window = engine._runtime_identity_fingerprint()
+
+        self.assertNotEqual(changed_penalty, baseline)
+        self.assertNotEqual(changed_window, baseline)
+
+    def test_streaming_repetition_guard_stops_identical_regions(self) -> None:
+        engine = MangaLMMOCREngine()
+        repeated = (
+            '{"bbox_2d":[10,20,30,40],"text_content":"どん"}'
+        )
+        chunks = [
+            {
+                "choices": [
+                    {
+                        "finish_reason": None,
+                        "delta": {"content": "```json\n["},
+                    }
+                ]
+            }
+        ]
+        chunks.extend(
+            {
+                "choices": [
+                    {
+                        "finish_reason": None,
+                        "delta": {
+                            "content": (("," if index else "") + repeated)
+                        },
+                    }
+                ]
+            }
+            for index in range(8)
+        )
+        response = mock.Mock()
+        response.status_code = 200
+        response.iter_lines.return_value = [
+            f"data: {json.dumps(chunk, ensure_ascii=False)}"
+            for chunk in chunks
+        ]
+
+        with mock.patch(
+            "modules.ocr.mangalmm_ocr.requests.post",
+            return_value=response,
+        ) as post:
+            raw, metadata = engine._send_streaming_request(
+                {"messages": []}
+            )
+
+        self.assertEqual(raw.count(repeated), 4)
+        self.assertEqual(metadata["finish_reason"], "repetition_guard")
+        self.assertTrue(metadata["repetition_guard_triggered"])
+        self.assertEqual(
+            metadata["repetition_consecutive_region_count"],
+            4,
+        )
+        self.assertTrue(post.call_args.kwargs["stream"])
+        self.assertTrue(post.call_args.kwargs["json"]["stream"])
+        response.close.assert_called_once_with()
+
+    def test_streaming_request_preserves_finish_reason_and_usage(self) -> None:
+        engine = MangaLMMOCREngine()
+        events = [
+            {
+                "choices": [
+                    {
+                        "finish_reason": None,
+                        "delta": {"content": "[]"},
+                    }
+                ]
+            },
+            {
+                "choices": [
+                    {"finish_reason": "stop", "delta": {}}
+                ]
+            },
+            {
+                "choices": [],
+                "usage": {
+                    "prompt_tokens": 100,
+                    "completion_tokens": 20,
+                    "total_tokens": 120,
+                },
+            },
+        ]
+        response = mock.Mock()
+        response.status_code = 200
+        response.iter_lines.return_value = [
+            f"data: {json.dumps(event, ensure_ascii=False)}"
+            for event in events
+        ] + ["data: [DONE]"]
+
+        with mock.patch(
+            "modules.ocr.mangalmm_ocr.requests.post",
+            return_value=response,
+        ):
+            raw, metadata = engine._send_streaming_request(
+                {"messages": []}
+            )
+
+        self.assertEqual(raw, "[]")
+        self.assertEqual(metadata["finish_reason"], "stop")
+        self.assertEqual(metadata["prompt_tokens"], 100)
+        self.assertEqual(metadata["completion_tokens"], 20)
+        self.assertEqual(metadata["total_tokens"], 120)
+        self.assertFalse(metadata["repetition_guard_triggered"])
+
+    def test_streaming_request_maps_midstream_disconnect_and_closes(self) -> None:
+        engine = MangaLMMOCREngine()
+        response = mock.Mock()
+        response.status_code = 200
+        response.iter_lines.side_effect = requests.exceptions.ConnectionError(
+            "stream closed"
+        )
+
+        with mock.patch(
+            "modules.ocr.mangalmm_ocr.requests.post",
+            return_value=response,
+        ), self.assertRaises(LocalServiceConnectionError):
+            engine._send_streaming_request({"messages": []})
+
+        response.close.assert_called_once_with()
 
     def test_finish_reason_length_rejects_otherwise_valid_json(self) -> None:
         engine = MangaLMMOCREngine()
@@ -1111,6 +1334,53 @@ class MangaLMMOCRTests(unittest.TestCase):
         )
         self.assertEqual(result["metadata"]["finish_reason"], "length")
         self.assertEqual(result["metadata"]["completion_tokens"], 4096)
+
+    def test_repetition_guard_rejects_partial_json_for_recovery(self) -> None:
+        engine = MangaLMMOCREngine()
+        image = np.zeros((200, 200, 3), dtype=np.uint8)
+        block = _make_block(20, 20, 80, 80)
+        unit = engine._build_request_units(image.shape)[0]
+        attempt = engine._build_attempt_specs(image.shape, [block])[0]
+
+        def repeated_response(*_args, **_kwargs):
+            engine.last_transport_metadata = {
+                "finish_reason": "repetition_guard",
+                "prompt_tokens": 0,
+                "completion_tokens": 0,
+                "total_tokens": 0,
+                "streaming": True,
+                "stream_event_count": 64,
+                "repetition_guard_triggered": True,
+                "repetition_consecutive_region_count": 4,
+            }
+            return (
+                '[{"bbox_2d":[20,20,80,80],'
+                '"text_content":"partial"},'
+            )
+
+        with mock.patch.object(
+            engine,
+            "_request_response_text",
+            side_effect=repeated_response,
+        ):
+            result = engine._request_regions_for_attempt(
+                image,
+                unit,
+                attempt,
+            )
+
+        self.assertEqual(result["regions"], [])
+        self.assertEqual(
+            result["metadata"]["parser_error_code"],
+            "repetition_guard",
+        )
+        self.assertTrue(result["metadata"]["repetition_guard_triggered"])
+        self.assertEqual(result["metadata"]["stream_event_count"], 64)
+        self.assertEqual(
+            result["metadata"]["finish_reason"],
+            "repetition_guard",
+        )
+        self.assertEqual(result["metadata"]["completion_tokens"], 0)
 
     def test_engine_debug_env_is_routed_to_active_sidecar_runtime(self) -> None:
         engine = MangaLMMOCREngine()
