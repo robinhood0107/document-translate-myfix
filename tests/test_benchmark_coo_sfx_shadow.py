@@ -5,6 +5,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 from PIL import Image
 
@@ -293,6 +294,55 @@ class COOSFXShadowBenchmarkTests(unittest.TestCase):
             self.assertEqual(result["automatic_preserve_count"], 0)
             self.assertEqual(result["meaningful_text_auto_hidden_count"], 0)
             self.assertEqual(result["promotion_allowed"], False)
+
+    def test_shadow_scores_real_normalized_run_manifest_contract(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            fixture = self._fixture(root)
+            predictions = self._predictions(root, fixture, device="cuda")
+            truth = self._locked_truth(root, fixture)
+            run_path = root / "normalized-run.json"
+            run_path.touch()
+            normalized_run = {
+                "route_id": "paddle_crop",
+                "corpus_manifest_path": str(fixture["manifest"]),
+                "pages": [
+                    {
+                        "page_id": "neutral-page",
+                        "canonical_units": [
+                            {
+                                "detector_block_ids": ["block-sfx"],
+                                "processing_action": "translate_inpaint",
+                            },
+                            {
+                                "detector_block_ids": ["block-dialogue"],
+                                "processing_action": "translate_inpaint",
+                            },
+                        ],
+                    }
+                ],
+            }
+
+            with mock.patch.object(
+                three_way,
+                "validate_run",
+                return_value=normalized_run,
+            ):
+                result = benchmark.evaluate_shadow(
+                    predictions_path=predictions,
+                    corpus_manifest=fixture["manifest"],
+                    truth_dir=truth,
+                    output_dir=root / "evaluation",
+                    normalized_runs=[run_path],
+                )
+
+            route = result["route_metrics"]["paddle_crop"]
+            self.assertEqual(route["baseline_sfx_or_decorative_auto_edit_count"], 1)
+            self.assertEqual(
+                route["caught_by_review_only_nonbubble_signal_count"], 1
+            )
+            self.assertEqual(route["meaningful_text_sent_to_review_count"], 0)
+            self.assertEqual(route["meaningful_text_auto_hidden_count"], 0)
 
     def test_unlocked_truth_is_rejected(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
