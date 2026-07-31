@@ -588,6 +588,12 @@ class ProjectStageCheckpointTests(unittest.TestCase):
             blocks=blocks,
             **common,
         )
+        blocks[0].compound_group_id = blocks[0].block_id
+        compound_identity = build_inpaint_identity(
+            blocks=blocks,
+            **common,
+        )
+        blocks[0].compound_group_id = ""
         blocks[0].semantic_role = "ui_or_sign"
         blocks[0].processing_action = "preserve"
         blocks[0].mask_strategy = "preserve_original"
@@ -599,6 +605,10 @@ class ProjectStageCheckpointTests(unittest.TestCase):
         self.assertNotEqual(
             translate_identity["ordered_blocks_sha256"],
             preserve_identity["ordered_blocks_sha256"],
+        )
+        self.assertNotEqual(
+            translate_identity["ordered_blocks_sha256"],
+            compound_identity["ordered_blocks_sha256"],
         )
         self.assertEqual(
             translate_identity["ocr_processing_contract_schema"],
