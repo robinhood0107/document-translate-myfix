@@ -14,14 +14,18 @@
    있다. 이 상태는 최종 품질 통과나 제품 승격을 의미하지 않는다.
 8. model screen은 선택된 mask의 추출법·dilation·residual 계약 전체를
    잠그고 FP32 모델만 바꾼다.
-9. 원문 잔상, 선화·망점 연속성, 외부 보존, 새 왜곡, render 순서로
+9. `structured-repair` screen은 완전 역할 주석의 불투명 말풍선을
+   CUDA FP32 LaMa에 유지하고 구조 배경의 전경 글자만 결정론적 국소
+   복원으로 분리한다. 이 경로도 학습형 인페인터의 CPU fallback을
+   허용하지 않는다.
+10. 원문 잔상, 선화·망점 연속성, 외부 보존, 새 왜곡, render 순서로
    Codex가 전수 검수한다.
-10. 자동 hard gate와 blind 검수를 모두 통과한 후보만 사용자에게 제시한다.
-11. 사용자 승인 후보만 실제 offscreen 전체 파이프라인의 중립 개발
+11. 자동 hard gate와 blind 검수를 모두 통과한 후보만 사용자에게 제시한다.
+12. 사용자 승인 후보만 실제 offscreen 전체 파이프라인의 중립 개발
     케이스 두 종류에 반영한다.
-12. 실제 후보 render를 새 result 계약에 첨부한 뒤 render 필수 blind
+13. 실제 후보 render를 새 result 계약에 첨부한 뒤 render 필수 blind
     검수를 다시 통과시킨다.
-13. 규칙을 고정한 뒤 잠금 holdout은 정확히 한 번 실행한다.
+14. 규칙을 고정한 뒤 잠금 holdout은 정확히 한 번 실행한다.
 
 동일 geometry/source duplicate는 capture 전에 canonical block 하나로
 축약한다. 같은 bubble의 서로 다른 geometry 문장은 합치지 않는다.
@@ -92,3 +96,10 @@ CUDA가 아니거나 FP32가 아니거나 CPU fallback이 발생하면 실행을
 ```
 
 공식 원본·가중치·실행 결과는 Git 밖에 보존한다.
+
+구조 배경 국소 복원은 `foreground_repair_mask`를 CUDA FP32 말풍선
+mask와 분리해 기록한다. Telea/Navier–Stokes는 학습형 인페인터의 CPU
+fallback이 아니라 mask 내부의 결정론적 보정 단계다. 최종 합성은 두
+mask의 합집합 밖 픽셀을 변경할 수 없다. 구조선 재연결도 원본 mask
+안에서만 허용되지만, blind 검수에서 대각선 오생성이 확인됐으므로
+제품 경로로 승격하지 않는다.
