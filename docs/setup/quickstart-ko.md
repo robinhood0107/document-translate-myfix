@@ -122,6 +122,25 @@ exact 영구 OCR 결과 캐시도 사용할 수 있습니다.
 
 bundle 파일 설명은 [/paddleocr_vl_docker_files/README.md](/paddleocr_vl_docker_files/README.md)를 참고하세요.
 
+### 선택형 PaddleOCR-VL full-page Spotting 경로
+
+Full-page Spotting은 기본 detector + crop OCR과 분리된 OCR 선택지입니다.
+기존 crop projector를 바꾸지 않으며, 다음 명령으로 전용 named volume을
+준비합니다.
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass `
+  -File .\scripts\prepare_paddleocr_spotting_llamacpp_runtime.ps1 `
+  -Mode Prepare `
+  -ModelDirectory 'C:\ExampleWorkspace\models\PaddleOCR-VL-1.6-GGUF'
+```
+
+Spotting 경로는 공식 `Spotting:` prompt, `--special` 좌표 token 모드,
+`1,605,632` projector pixel budget을 고정합니다. crop 경로는 기존
+`1,003,520` projector를 그대로 유지합니다. 자세한 내용은
+[/paddleocr_vl_spotting_docker_files/README.md](/paddleocr_vl_spotting_docker_files/README.md)를
+참고하세요.
+
 ## 4. 권장 앱 설정
 
 - 워크플로 모드: `Stage-Batched Pipeline (Recommended)`

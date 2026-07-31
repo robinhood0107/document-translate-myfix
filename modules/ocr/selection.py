@@ -8,6 +8,7 @@ OCR_MODE_MICROSOFT = "microsoft_ocr"
 OCR_MODE_GOOGLE = "google_cloud_vision"
 OCR_MODE_GEMINI = "gemini_2_0_flash"
 OCR_MODE_PADDLE_VL = "paddleocr_vl"
+OCR_MODE_PADDLE_VL_SPOTTING = "paddleocr_vl_spotting"
 OCR_MODE_HUNYUAN = "hunyuanocr"
 OCR_MODE_MANGALMM = "mangalmm"
 
@@ -23,6 +24,10 @@ OCR_MODE_OPTIONS: tuple[tuple[str, str], ...] = (
     (OCR_MODE_GOOGLE, "Google Cloud Vision"),
     (OCR_MODE_GEMINI, "Gemini-2.0-Flash"),
     (OCR_MODE_PADDLE_VL, "PaddleOCR VL"),
+    (
+        OCR_MODE_PADDLE_VL_SPOTTING,
+        "PaddleOCR VL Spotting (Full Page)",
+    ),
     (OCR_MODE_HUNYUAN, "HunyuanOCR"),
     (OCR_MODE_MANGALMM, "MangaLMM"),
 )
@@ -33,11 +38,19 @@ OCR_MODE_TO_ENGINE: dict[str, str] = {
     OCR_MODE_GOOGLE: "Google Cloud Vision",
     OCR_MODE_GEMINI: "Gemini-2.0-Flash",
     OCR_MODE_PADDLE_VL: "PaddleOCR VL",
+    OCR_MODE_PADDLE_VL_SPOTTING: "PaddleOCR VL Spotting",
     OCR_MODE_HUNYUAN: "HunyuanOCR",
     OCR_MODE_MANGALMM: "MangaLMM",
 }
 
-LOCAL_OCR_ENGINES = frozenset({"PaddleOCR VL", "HunyuanOCR", "MangaLMM"})
+LOCAL_OCR_ENGINES = frozenset(
+    {
+        "PaddleOCR VL",
+        "PaddleOCR VL Spotting",
+        "HunyuanOCR",
+        "MangaLMM",
+    }
+)
 STAGE_BATCHED_WORKFLOW_MODE = "stage_batched_pipeline"
 LEGACY_PAGE_WORKFLOW_MODE = "legacy_page_pipeline"
 GEMMA_TRANSLATOR_KEY = "Custom Local Server(Gemma)"
@@ -71,6 +84,9 @@ _ALIASES: dict[str, str] = {
     "Gemini-2.0-Flash": OCR_MODE_GEMINI,
     OCR_MODE_PADDLE_VL: OCR_MODE_PADDLE_VL,
     "PaddleOCR VL": OCR_MODE_PADDLE_VL,
+    OCR_MODE_PADDLE_VL_SPOTTING: OCR_MODE_PADDLE_VL_SPOTTING,
+    "PaddleOCR VL Spotting": OCR_MODE_PADDLE_VL_SPOTTING,
+    "PaddleOCR VL Spotting (Full Page)": OCR_MODE_PADDLE_VL_SPOTTING,
     OCR_MODE_HUNYUAN: OCR_MODE_HUNYUAN,
     "HunyuanOCR": OCR_MODE_HUNYUAN,
     OCR_MODE_MANGALMM: OCR_MODE_MANGALMM,
@@ -208,6 +224,9 @@ def resolve_stage_batched_ocr_policy(
     if normalized_mode == OCR_MODE_PADDLE_VL:
         resident_engines = ("PaddleOCR VL",)
         primary_engine = "PaddleOCR VL"
+    elif normalized_mode == OCR_MODE_PADDLE_VL_SPOTTING:
+        resident_engines = ("PaddleOCR VL Spotting",)
+        primary_engine = "PaddleOCR VL Spotting"
     elif normalized_mode == OCR_MODE_HUNYUAN:
         resident_engines = ("HunyuanOCR",)
         primary_engine = "HunyuanOCR"

@@ -25,10 +25,13 @@ if /I "%COMIC_VERIFY_ONLY%"=="1" (
         "requirements-cuda12.txt"
         "docker-compose.yaml"
         "paddleocr_vl_docker_files\docker-compose.yaml"
+        "paddleocr_vl_spotting_docker_files\docker-compose.yaml"
         "resources\translations\compiled\ct_ko.qm"
         "scripts\prepare_gemma_runtime.ps1"
         "scripts\prepare_mangalmm_llamacpp_runtime.ps1"
         "scripts\prepare_paddleocr_llamacpp_runtime.ps1"
+        "scripts\derive_paddleocr_spotting_mmproj.py"
+        "scripts\prepare_paddleocr_spotting_llamacpp_runtime.ps1"
         "scripts\verify_windows_runtime.py"
     ) do (
         if not exist "%SCRIPT_DIR%%%~F" (
