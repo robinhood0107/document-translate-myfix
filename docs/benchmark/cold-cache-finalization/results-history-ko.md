@@ -181,3 +181,15 @@ OCR/번역 결과, DB와 sidecar는 Git 밖에만 보존합니다. cold 후보�
 - WSL 환경변수 전달이 누락된 초기 후보 실행은 Docker 실제 명령이 기준선인 것을 발견해 판정에서 제외했습니다.
 
 상세 근거: [PaddleOCR-VL llama.cpp batch/ubatch 최종 판정](./paddle-llamacpp-runtime-matrix-final-decision-ko.md)
+
+## 2026-08-01 현재-폴더 source-aware Paddle prewarm 승격
+
+- 기존 DB에 다른 입력의 cache row가 있더라도 현재 폴더의 첫 exact crop miss가 확인되면 detection 중 PaddleOCR llama.cpp prewarm을 시작하도록 변경했습니다.
+- 일본어 6페이지·73 OCR block의 실제 CUDA13 Stage-Batched AB/BA에서 후보가 4.003682%와 2.960766% 빨랐습니다.
+- 평균/중앙 이득은 3.482224%, 단측 95% bootstrap 하한은 2.960766%였고 두 라운드 모두 후보가 이겼습니다.
+- 기준선·후보의 normalized page snapshot은 전부 exact였고 HTTP 실패와 WSL swap 증가는 0이었습니다.
+- all-hit에서는 73 hits, Paddle runtime 시작 0, OCR HTTP 0을 유지했습니다.
+- 첫 페이지 20개 hit인 부분 cache에서는 첫 miss가 나온 두 번째 페이지에서 한 번만 시작했고 53개 miss만 요청했습니다.
+- 따라서 신규 이미지 cold 실행을 반복 측정상 단축하면서 all-hit zero-runtime 계약도 보존해 제품 승격으로 확정했습니다.
+
+상세 근거: [Paddle 현재-폴더 source-aware prewarm 최종 판정](./paddle-source-aware-prewarm-final-decision-ko.md)
