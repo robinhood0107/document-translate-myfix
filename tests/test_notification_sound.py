@@ -83,3 +83,19 @@ class NotificationSoundTests(unittest.TestCase):
         )
         self.assertEqual(message["priority"], "high")
 
+    def test_current_tool_summary_keeps_spotting_distinct(self) -> None:
+        settings = mock.Mock()
+        settings.value.side_effect = (
+            lambda key, default, **_kwargs: {
+                "tools/workflow_mode": "stage_batched_pipeline",
+                "tools/ocr": "paddleocr_vl_spotting",
+                "tools/translator": "Custom Local Server(Gemma)",
+            }.get(key, default)
+        )
+        with mock.patch(
+            "modules.utils.notification_sound.QtCore.QSettings",
+            return_value=settings,
+        ):
+            summary = notification_sound._current_tool_summary()
+
+        self.assertEqual(summary["ocr"], "PaddleOCR VL Spotting")

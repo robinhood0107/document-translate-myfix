@@ -4,7 +4,7 @@ from ..dayu_widgets.check_box import MCheckBox
 from ..dayu_widgets.label import MLabel
 from ..dayu_widgets.line_edit import MLineEdit
 from ..dayu_widgets.spin_box import MSpinBox
-from modules.ocr.mangalmm_ocr import (
+from modules.ocr.mangalmm_full_page.engine import (
     DEFAULT_MANGALMM_MAX_COMPLETION_TOKENS,
     DEFAULT_MANGALMM_MAX_LONG_SIDE,
     DEFAULT_MANGALMM_MAX_PIXELS,
@@ -113,7 +113,7 @@ class MangaLMMOCRPage(QtWidgets.QWidget):
         max_pixels_layout = QtWidgets.QHBoxLayout()
         max_pixels_layout.addWidget(MLabel(self.tr("Max Pixels")))
         self.max_pixels_spinbox = MSpinBox().small()
-        self.max_pixels_spinbox.setRange(100000, 4000000)
+        self.max_pixels_spinbox.setRange(100000, self.DEFAULT_MAX_PIXELS)
         self.max_pixels_spinbox.setSingleStep(100000)
         self.max_pixels_spinbox.setValue(self.DEFAULT_MAX_PIXELS)
         self.max_pixels_spinbox.setFixedWidth(110)

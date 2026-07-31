@@ -57,13 +57,13 @@ from app.ui.messages import Messages
 from modules.detection.processor import TextBlockDetector
 from modules.ocr.factory import OCRFactory
 from modules.ocr.local_runtime import LocalOCRRuntimeManager
-from modules.ocr.ocr_paddle_VL import PaddleOCRVLEngine
+from modules.ocr.paddle_crop.engine import PaddleOCRVLEngine
 from modules.ocr.persistent_cache import (
     OCRPersistentResultCache,
     canonical_sha256,
     snapshot_raw_ocr_result,
 )
-from modules.ocr.result_contract import (
+from modules.ocr.common.result_contract import (
     PROCESSING_ACTION_TRANSLATE_INPAINT,
     canonicalize_exact_duplicate_blocks,
     finalize_ocr_processing_contract,
@@ -516,7 +516,7 @@ class StageBatchedProcessor(BatchProcessor):
                 stats.get("item_count", 0) or 0
             ) > 0:
                 return
-        service = "paddleocr_vl" if "paddle" in engine_key.lower() else "hunyuanocr" if "hunyuan" in engine_key.lower() else engine_key.lower()
+        service = self._ocr_runtime_service_name(engine_key)
         self._start_prewarm(
             "ocr",
             "OCR",
@@ -535,7 +535,7 @@ class StageBatchedProcessor(BatchProcessor):
             return
         settings_page = self.main_page.settings_page
         engine_key = str(policy["primary_ocr_engine"])
-        service = "paddleocr_vl" if "paddle" in engine_key.lower() else "hunyuanocr" if "hunyuan" in engine_key.lower() else engine_key.lower()
+        service = self._ocr_runtime_service_name(engine_key)
         self._await_prewarm_or_run(
             "ocr",
             "OCR",
@@ -547,6 +547,15 @@ class StageBatchedProcessor(BatchProcessor):
                 cancel_checker=self._prewarm_cancel_checker,
             ),
         )
+
+    @staticmethod
+    def _ocr_runtime_service_name(engine_key: str) -> str:
+        return {
+            "PaddleOCR VL": "paddleocr_vl",
+            "PaddleOCR VL Spotting": "paddleocr_vl_spotting",
+            "HunyuanOCR": "hunyuanocr",
+            "MangaLMM": "mangalmm",
+        }.get(str(engine_key), str(engine_key).lower().replace(" ", "_"))
 
     def _start_gemma_prewarm(self) -> None:
         runtime_manager = getattr(self.main_page, "local_translation_runtime_manager", None)
@@ -934,7 +943,8 @@ class StageBatchedProcessor(BatchProcessor):
                 engine_key,
                 device,
             )
-            if engine_key != "PaddleOCR VL"
+            if engine_key
+            not in {"PaddleOCR VL", "PaddleOCR VL Spotting"}
             else None
         )
         cache_status = "miss"
@@ -1001,7 +1011,8 @@ class StageBatchedProcessor(BatchProcessor):
             else:
                 cache_status = "refreshed"
         elif (
-            engine_key != "PaddleOCR VL"
+            engine_key
+            not in {"PaddleOCR VL", "PaddleOCR VL Spotting"}
             and self.cache_manager._can_serve_all_blocks_from_ocr_cache(
                 cache_key,
                 ctx.blk_list,
@@ -1024,7 +1035,10 @@ class StageBatchedProcessor(BatchProcessor):
             page_profile = dict(getattr(engine, "last_page_profile", {}) or {})
             snapshot_raw_results()
             apply_ocr_result_dictionary(ctx.blk_list, settings_page.get_ocr_result_dictionary_rules())
-            if engine_key != "PaddleOCR VL":
+            if engine_key not in {
+                "PaddleOCR VL",
+                "PaddleOCR VL Spotting",
+            }:
                 self.cache_manager._cache_ocr_results(cache_key, ctx.blk_list)
             cache_status = "refreshed"
             attempt_count = 1
@@ -1034,6 +1048,7 @@ class StageBatchedProcessor(BatchProcessor):
         quality = summarize_ocr_quality(ctx.blk_list)
         if (
             project_checkpoint_hit is None
+            and engine_key != "PaddleOCR VL Spotting"
             and quality.get("low_quality", False)
             and not all_empty_blocks_are_rejected(ctx.blk_list)
         ):
@@ -1073,7 +1088,10 @@ class StageBatchedProcessor(BatchProcessor):
                 page_profile = dict(getattr(engine, "last_page_profile", {}) or {})
             snapshot_raw_results()
             apply_ocr_result_dictionary(ctx.blk_list, settings_page.get_ocr_result_dictionary_rules())
-            if engine_key != "PaddleOCR VL":
+            if engine_key not in {
+                "PaddleOCR VL",
+                "PaddleOCR VL Spotting",
+            }:
                 self.cache_manager._cache_ocr_results(cache_key, ctx.blk_list)
             cache_status = "refreshed"
             quality = summarize_ocr_quality(ctx.blk_list)
@@ -1159,11 +1177,21 @@ class StageBatchedProcessor(BatchProcessor):
         runtime_identity: dict[str, Any],
     ) -> None:
         store = getattr(self, "_project_checkpoint_store", None)
-        if store is None or str(policy.get("primary_ocr_engine", "")) != "PaddleOCR VL":
+        engine_key = str(policy.get("primary_ocr_engine", ""))
+        if store is None or engine_key not in {
+            "PaddleOCR VL",
+            "PaddleOCR VL Spotting",
+        }:
             return
-        paddle_settings = (
-            self.main_page.settings_page.get_paddleocr_vl_settings()
-        )
+        if engine_key == "PaddleOCR VL":
+            paddle_settings = (
+                self.main_page.settings_page.get_paddleocr_vl_settings()
+            )
+        else:
+            paddle_settings = (
+                self.main_page.settings_page
+                .get_paddleocr_vl_spotting_settings()
+            )
         for ctx in pages:
             if (
                 ctx.failed_stage
@@ -1268,7 +1296,15 @@ class StageBatchedProcessor(BatchProcessor):
         self._paddleocr_cache_identity = None
         engine_key = str(policy["primary_ocr_engine"])
         self._canonicalize_ocr_inputs(pages)
-        paddle_settings = settings_page.get_paddleocr_vl_settings()
+        paddle_settings = (
+            settings_page.get_paddleocr_vl_settings()
+            if engine_key == "PaddleOCR VL"
+            else (
+                settings_page.get_paddleocr_vl_spotting_settings()
+                if engine_key == "PaddleOCR VL Spotting"
+                else {}
+            )
+        )
         persistent_cache_requested = (
             engine_key == "PaddleOCR VL"
             and bool(
@@ -1285,7 +1321,8 @@ class StageBatchedProcessor(BatchProcessor):
         runtime_identity = None
         if (
             cache_identity_required
-            and engine_key == "PaddleOCR VL"
+            and engine_key
+            in {"PaddleOCR VL", "PaddleOCR VL Spotting"}
             and isinstance(runtime_manager, LocalOCRRuntimeManager)
         ):
             runtime_identity = runtime_manager.get_ocr_cache_identity(
@@ -1322,7 +1359,8 @@ class StageBatchedProcessor(BatchProcessor):
             self._await_ocr_runtime(policy)
         if (
             cache_identity_required
-            and engine_key == "PaddleOCR VL"
+            and engine_key
+            in {"PaddleOCR VL", "PaddleOCR VL Spotting"}
             and runtime_identity is None
             and isinstance(runtime_manager, LocalOCRRuntimeManager)
             and has_project_miss()
