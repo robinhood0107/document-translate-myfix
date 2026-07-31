@@ -86,7 +86,7 @@ GGUF load·GPU offload는 다시 수행합니다. named volume은 파일 영속�
 
 ## 참고용 스냅샷
 
-- `ocr_paddle_VL.py`
+- `modules/ocr/ocr_paddle_VL.py` (현재 `paddle_crop/engine.py`의 호환 alias)
 - `ocr_paddleocr_vl_15_hf_personal.py`
 - `ocr_paddleocr_vl_hf.py`
 

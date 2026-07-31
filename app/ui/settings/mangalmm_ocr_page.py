@@ -4,7 +4,7 @@ from ..dayu_widgets.check_box import MCheckBox
 from ..dayu_widgets.label import MLabel
 from ..dayu_widgets.line_edit import MLineEdit
 from ..dayu_widgets.spin_box import MSpinBox
-from modules.ocr.mangalmm_ocr import (
+from modules.ocr.mangalmm_full_page.engine import (
     DEFAULT_MANGALMM_MAX_COMPLETION_TOKENS,
     DEFAULT_MANGALMM_MAX_LONG_SIDE,
     DEFAULT_MANGALMM_MAX_PIXELS,
