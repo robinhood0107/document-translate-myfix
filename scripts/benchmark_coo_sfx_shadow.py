@@ -644,9 +644,12 @@ def evaluate_shadow(
     for run_path in normalized_runs:
         try:
             run = three_way.validate_run(run_path)
+            run_manifest = three_way.validate_corpus_manifest(
+                Path(str(run["corpus_manifest_path"]))
+            )
         except three_way.ContractError as exc:
             raise ContractError(str(exc)) from exc
-        if run["manifest_sha256"] != predictions["manifest_sha256"]:
+        if run_manifest["manifest_sha256"] != predictions["manifest_sha256"]:
             raise ContractError("Normalized OCR run uses a different corpus manifest.")
         route = str(run["route_id"])
         if route in run_metrics:
