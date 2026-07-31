@@ -5,6 +5,7 @@ import unittest
 from modules.ocr.selection import (
     OCR_MODE_BEST_LOCAL,
     OCR_MODE_DEFAULT,
+    OCR_MODE_PADDLE_VL_SPOTTING,
     OCR_OPTIMAL_LABEL,
     STAGE_BATCHED_WORKFLOW_MODE,
     normalize_ocr_mode,
@@ -64,6 +65,26 @@ class OCRSelectionTests(unittest.TestCase):
 
         self.assertTrue(policy.stage_batched_supported)
         self.assertEqual(policy.translator, "Custom Local Server(Gemma)")
+
+    def test_stage_batched_spotting_is_a_separate_single_resident_route(
+        self,
+    ) -> None:
+        policy = resolve_stage_batched_ocr_policy(
+            STAGE_BATCHED_WORKFLOW_MODE,
+            OCR_MODE_PADDLE_VL_SPOTTING,
+            "Japanese",
+            "gemma_local",
+        )
+
+        self.assertTrue(policy.stage_batched_supported)
+        self.assertEqual(
+            policy.primary_ocr_engine,
+            "PaddleOCR VL Spotting",
+        )
+        self.assertEqual(
+            policy.resident_ocr_engines,
+            ("PaddleOCR VL Spotting",),
+        )
 
 if __name__ == "__main__":
     unittest.main()

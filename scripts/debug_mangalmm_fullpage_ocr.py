@@ -19,7 +19,7 @@ import numpy as np
 from PIL import Image, ImageDraw
 
 from modules.detection.processor import TextBlockDetector
-from modules.ocr.mangalmm_ocr import (
+from modules.ocr.mangalmm_full_page.engine import (
     DEFAULT_MANGALMM_DEBUG_EXPORT_LIMIT,
     DEFAULT_MANGALMM_MAX_COMPLETION_TOKENS,
     DEFAULT_MANGALMM_SERVER_URL,

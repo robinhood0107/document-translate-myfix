@@ -62,6 +62,21 @@ class PipelineStatusPanelTests(unittest.TestCase):
         self.assertFalse(self.panel.report_button.isHidden())
         self.assertTrue(self.panel.retry_button.isHidden())
 
+    def test_spotting_event_uses_distinct_service_label(self) -> None:
+        self.panel.update_event(
+            {
+                "phase": "pipeline",
+                "status": "running",
+                "service": "paddleocr_vl_spotting",
+                "message": "spotting",
+            }
+        )
+
+        self.assertEqual(
+            self.panel.service_value.text(),
+            "PaddleOCR VL Spotting",
+        )
+
     def test_cancelling_event_keeps_status_controls_available(self) -> None:
         self.panel.update_event(
             {
