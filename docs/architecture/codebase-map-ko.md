@@ -93,7 +93,11 @@ prompt, response parser, retry, resize, detector reconciliation, runtime command
 | `gguf_metadata.py` | Spotting projector metadata 파생·검증 |
 
 Spotting의 raw line 좌표는 보존하지만 자동 삭제 좌표는 detector가 계속
-소유한다. N:1·1:N 관계가 모호하면 review로 남긴다.
+소유한다. reconciliation은 먼저 모든 region/block overlap을 전역 이분 그래프로
+만든다. 여러 line이 한 detector block 안에 안전하게 들어가는 N:1은 방향별 읽기
+순서로 결합하고, 한 region을 여러 block에 복제해야 하는 1:N과 many-to-many는
+`review`로 남긴다. page profile에는 pure Spotting region 통계와 detector-assisted
+block/관계 통계를 별도로 기록한다.
 
 ## OCR 전략 3: MangaLMM full-page spotting
 
@@ -109,7 +113,14 @@ Spotting의 raw line 좌표는 보존하지만 자동 삭제 좌표는 detector�
 
 block crop, tile, overlap, Paddle fallback, Paddle/Manga 동시 상주는 허용하지
 않는다. raw full-page output과 detector-assisted 결과를 서로 덮어쓰지 않고 모두
-진단에 남긴다.
+진단에 남긴다. 여러 Manga region이 detector block 하나에 들어오는 경우에는
+각 region의 text-box 근거가 강하고, 실제 bubble 경계가 있으며, 근사 중복을
+제거한 뒤 서로 충돌하지 않을 때만 방향별 읽기 순서의 compound로 결합한다.
+bubble이 없는 서로 다른 free-text 조각, 겹친 서로 다른 text, 약한
+말풍선-only 근거, 한 Manga region이 여러 detector block을 덮는 관계는 텍스트를
+복제하거나 추측 분할하지 않고 `review` 진단으로 남긴다. compound block에는
+`compound_group_id`와 원본 region 목록을 보존한다. bubble이 없는 근사 중복은
+같은 text와 겹치는 좌표가 확인되어 하나로 축약되는 경우에만 허용한다.
 
 ## 호환 import
 

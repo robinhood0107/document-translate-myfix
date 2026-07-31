@@ -13,7 +13,7 @@ def _line(
     coordinates: tuple[int, ...] = (100, 100, 300, 100, 300, 200, 100, 200),
 ) -> str:
     tokens = "".join(f"<|LOC_{value}|>" for value in coordinates)
-    return f"{tokens}{text}"
+    return f"{text}{tokens}"
 
 
 class PaddleSpottingResponseContractTests(unittest.TestCase):
@@ -64,7 +64,7 @@ class PaddleSpottingResponseContractTests(unittest.TestCase):
             (
                 "<|LOC_100|><|LOC_100|><|LOC_200|><|LOC_100|>"
                 "<|LOC_200|><|LOC_200|><|LOC_100|><|LOC_200|>",
-                "invalid_native_line",
+                "empty_text",
             ),
             (f"{_line()}\nnot-a-native-spotting-line", "invalid_native_line"),
             (
@@ -72,7 +72,10 @@ class PaddleSpottingResponseContractTests(unittest.TestCase):
                 "unexpected_special_token",
             ),
             (
-                f"prefix{_line()}",
+                (
+                    "<|LOC_100|><|LOC_100|><|LOC_300|><|LOC_100|>"
+                    "<|LOC_300|><|LOC_200|><|LOC_100|><|LOC_200|>テスト"
+                ),
                 "invalid_native_line",
             ),
         )
