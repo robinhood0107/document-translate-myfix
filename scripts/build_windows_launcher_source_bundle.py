@@ -37,6 +37,8 @@ ALLOWLIST_FILES = frozenset(
         "scripts/prepare_gemma_runtime.ps1",
         "scripts/prepare_mangalmm_llamacpp_runtime.ps1",
         "scripts/prepare_paddleocr_llamacpp_runtime.ps1",
+        "scripts/derive_paddleocr_spotting_mmproj.py",
+        "scripts/prepare_paddleocr_spotting_llamacpp_runtime.ps1",
         "scripts/verify_windows_runtime.py",
     }
 )
@@ -48,6 +50,7 @@ ALLOWLIST_PREFIXES = (
     "modules/",
     "music/",
     "paddleocr_vl_docker_files/",
+    "paddleocr_vl_spotting_docker_files/",
     "pipeline/",
     "resources/",
 )
@@ -63,6 +66,8 @@ REQUIRED_BUNDLE_FILES = frozenset(
         "mangalmm_docker_files/docker-compose.yaml",
         "paddleocr_vl_docker_files/docker-compose.yaml",
         "paddleocr_vl_docker_files/pipeline_conf.yaml",
+        "paddleocr_vl_spotting_docker_files/README.md",
+        "paddleocr_vl_spotting_docker_files/docker-compose.yaml",
         "requirements-base.txt",
         "requirements-cuda12.txt",
         "requirements-cuda13.txt",
@@ -71,6 +76,8 @@ REQUIRED_BUNDLE_FILES = frozenset(
         "scripts/prepare_gemma_runtime.ps1",
         "scripts/prepare_mangalmm_llamacpp_runtime.ps1",
         "scripts/prepare_paddleocr_llamacpp_runtime.ps1",
+        "scripts/derive_paddleocr_spotting_mmproj.py",
+        "scripts/prepare_paddleocr_spotting_llamacpp_runtime.ps1",
         "scripts/verify_windows_runtime.py",
     }
 )

@@ -652,7 +652,7 @@ def build_project_ocr_identity(
     paddle_settings: Mapping[str, Any],
     source_lang_english: str,
 ) -> dict[str, Any]:
-    return {
+    identity = {
         "schema_version": PROJECT_OCR_CHECKPOINT_SCHEMA_VERSION,
         "detection_fingerprint": detection_fingerprint,
         "runtime": dict(runtime_identity),
@@ -666,6 +666,16 @@ def build_project_ocr_identity(
         "visualize": bool(paddle_settings.get("visualize", False)),
         "postprocess_schema": OCR_POSTPROCESS_SCHEMA_VERSION,
     }
+    if str(policy.get("primary_ocr_engine", "")) == (
+        "PaddleOCR VL Spotting"
+    ):
+        identity["max_completion_tokens"] = int(
+            paddle_settings.get("max_completion_tokens", 0) or 0
+        )
+        identity["request_timeout_sec"] = int(
+            paddle_settings.get("request_timeout_sec", 0) or 0
+        )
+    return identity
 
 
 def build_project_ocr_fingerprint(identity: Mapping[str, Any]) -> str:

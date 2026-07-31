@@ -142,25 +142,43 @@ def validate_ocr(
         normalized_tool = policy.primary_ocr_engine if policy.stage_batched_supported else ""
     else:
         normalized_tool = resolve_ocr_engine(ocr_tool, source_lang_english)
-    if normalized_tool in {"PaddleOCR VL", "HunyuanOCR", "MangaLMM"}:
+    if normalized_tool in {
+        "PaddleOCR VL",
+        "PaddleOCR VL Spotting",
+        "HunyuanOCR",
+        "MangaLMM",
+    }:
         local_service_configs = {
             "PaddleOCR VL": (
                 "PaddleOCR VL",
                 settings_page.ui.tr("PaddleOCR VL Settings"),
-                settings_page.get_paddleocr_vl_settings(),
+                "get_paddleocr_vl_settings",
+            ),
+            "PaddleOCR VL Spotting": (
+                "PaddleOCR VL Spotting",
+                settings_page.ui.tr(
+                    "PaddleOCR VL Spotting Settings"
+                ),
+                "get_paddleocr_vl_spotting_settings",
             ),
             "HunyuanOCR": (
                 "HunyuanOCR",
                 settings_page.ui.tr("HunyuanOCR Settings"),
-                settings_page.get_hunyuan_ocr_settings(),
+                "get_hunyuan_ocr_settings",
             ),
             "MangaLMM": (
                 "MangaLMM",
                 settings_page.ui.tr("MangaLMM Settings"),
-                settings_page.get_mangalmm_ocr_settings(),
+                "get_mangalmm_ocr_settings",
             ),
         }
-        service_name, settings_page_name, service_settings = local_service_configs[normalized_tool]
+        service_name, settings_page_name, settings_getter_name = (
+            local_service_configs[normalized_tool]
+        )
+        service_settings = getattr(
+            settings_page,
+            settings_getter_name,
+        )()
         if not service_settings.get("server_url", "").strip():
             if hasattr(main, "batch_report_ctrl"):
                 main.batch_report_ctrl.register_preflight_error(
