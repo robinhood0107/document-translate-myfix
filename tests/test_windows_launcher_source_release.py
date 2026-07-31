@@ -50,6 +50,18 @@ class WindowsLauncherSourceReleaseTests(unittest.TestCase):
             "scripts/prepare_mangalmm_llamacpp_runtime.ps1",
             paths,
         )
+        self.assertIn(
+            "scripts/derive_paddleocr_spotting_mmproj.py",
+            paths,
+        )
+        self.assertIn(
+            "scripts/prepare_paddleocr_spotting_llamacpp_runtime.ps1",
+            paths,
+        )
+        self.assertIn(
+            "paddleocr_vl_spotting_docker_files/docker-compose.yaml",
+            paths,
+        )
         self.assertIn("scripts/verify_windows_runtime.py", paths)
         self.assertNotIn("scripts/benchmark_cold_cache_finalization.py", paths)
         self.assertNotIn("scripts/build_windows_gpu_onefile.ps1", paths)
@@ -144,6 +156,10 @@ class WindowsLauncherSourceReleaseTests(unittest.TestCase):
                 "scripts\\prepare_mangalmm_llamacpp_runtime.ps1",
                 text,
             )
+            self.assertIn(
+                "scripts\\prepare_paddleocr_spotting_llamacpp_runtime.ps1",
+                text,
+            )
             self.assertIn("scripts\\verify_windows_runtime.py", text)
             self.assertIn("resources\\translations\\compiled\\ct_ko.qm", text)
             self.assertIn("pip==26.0.1", text)
@@ -209,6 +225,11 @@ class WindowsLauncherSourceReleaseTests(unittest.TestCase):
             ROOT / "hunyuanocr_docker_files" / "docker-compose.yaml",
             ROOT / "mangalmm_docker_files" / "docker-compose.yaml",
             ROOT / "paddleocr_vl_docker_files" / "docker-compose.yaml",
+            (
+                ROOT
+                / "paddleocr_vl_spotting_docker_files"
+                / "docker-compose.yaml"
+            ),
         )
         published_ports: list[str] = []
         for compose_path in compose_paths:
@@ -216,7 +237,7 @@ class WindowsLauncherSourceReleaseTests(unittest.TestCase):
             for service in payload.get("services", {}).values():
                 published_ports.extend(str(item) for item in service.get("ports", []))
 
-        self.assertEqual(len(published_ports), 5)
+        self.assertEqual(len(published_ports), 6)
         self.assertTrue(
             all(port.startswith("127.0.0.1:") for port in published_ports),
             published_ports,

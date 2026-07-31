@@ -279,6 +279,25 @@ class SettingsToolsRuntimeTests(unittest.TestCase):
         page.save_settings()
         self.assertEqual(settings.value("tools/ocr", "", type=str), "best_local")
 
+    def test_runtime_settings_navigation_uses_titles_not_stale_indices(self) -> None:
+        page = self._make_page()
+
+        expected_titles = [
+            "PaddleOCR VL Settings",
+            "PaddleOCR VL Spotting Settings",
+            "HunyuanOCR Settings",
+            "MangaLMM Settings",
+            "Gemma Local Server Settings",
+        ]
+        expected_indices = [2, 3, 4, 5, 6]
+        self.assertEqual(
+            [
+                page.ui.nav_index_for_title(title)
+                for title in expected_titles
+            ],
+            expected_indices,
+        )
+
     def test_series_settings_round_trip(self) -> None:
         settings = QtCore.QSettings("ComicLabs", "ComicTranslate")
         settings.setValue("series/queue_failure_policy", "retry")
@@ -386,6 +405,46 @@ class SettingsToolsRuntimeTests(unittest.TestCase):
         reloaded_settings = reloaded.get_paddleocr_vl_settings()
         self.assertFalse(reloaded_settings["persistent_cache_enabled"])
         self.assertEqual(reloaded_settings["persistent_cache_limit"], 72_000)
+
+    def test_spotting_settings_are_separate_from_crop_ocr_settings(
+        self,
+    ) -> None:
+        page = self._make_page()
+        page.load_settings()
+        original_crop = page.get_paddleocr_vl_settings()
+        page.ui.paddleocr_vl_spotting_server_url_input.setText(
+            "http://127.0.0.1:19002/v1/chat/completions"
+        )
+        page.ui.paddleocr_vl_spotting_max_completion_tokens_spinbox.setValue(
+            3584
+        )
+        page.ui.paddleocr_vl_spotting_request_timeout_spinbox.setValue(420)
+
+        self.assertEqual(
+            page.get_paddleocr_vl_spotting_settings(),
+            {
+                "server_url": (
+                    "http://127.0.0.1:19002/v1/chat/completions"
+                ),
+                "max_completion_tokens": 3584,
+                "request_timeout_sec": 420,
+            },
+        )
+        self.assertEqual(page.get_paddleocr_vl_settings(), original_crop)
+        page.save_settings()
+
+        reloaded = self._make_page()
+        reloaded.load_settings()
+        self.assertEqual(
+            reloaded.get_paddleocr_vl_spotting_settings(),
+            {
+                "server_url": (
+                    "http://127.0.0.1:19002/v1/chat/completions"
+                ),
+                "max_completion_tokens": 3584,
+                "request_timeout_sec": 420,
+            },
+        )
 
 
 if __name__ == "__main__":

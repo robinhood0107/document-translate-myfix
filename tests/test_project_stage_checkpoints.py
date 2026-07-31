@@ -336,6 +336,49 @@ class ProjectStageCheckpointTests(unittest.TestCase):
         self.assertEqual(first, second)
         self.assertNotIn("dictionary", first)
 
+    def test_crop_ocr_identity_is_unchanged_by_spotting_only_settings(
+        self,
+    ) -> None:
+        identity = build_project_ocr_identity(
+            detection_fingerprint="6" * 64,
+            runtime_identity={"runtime_fingerprint": "crop-runtime"},
+            policy={
+                "primary_ocr_engine": "PaddleOCR VL",
+                "normalized_ocr_mode": "paddleocr_vl",
+            },
+            paddle_settings={
+                "max_new_tokens": 512,
+                "max_completion_tokens": 4096,
+                "request_timeout_sec": 600,
+                "prettify_markdown": False,
+                "visualize": False,
+            },
+            source_lang_english="Japanese",
+        )
+
+        self.assertNotIn("max_completion_tokens", identity)
+        self.assertNotIn("request_timeout_sec", identity)
+
+    def test_spotting_ocr_identity_includes_its_request_contract(
+        self,
+    ) -> None:
+        identity = build_project_ocr_identity(
+            detection_fingerprint="7" * 64,
+            runtime_identity={"runtime_fingerprint": "spotting-runtime"},
+            policy={
+                "primary_ocr_engine": "PaddleOCR VL Spotting",
+                "normalized_ocr_mode": "paddleocr_vl_spotting",
+            },
+            paddle_settings={
+                "max_completion_tokens": 3000,
+                "request_timeout_sec": 360,
+            },
+            source_lang_english="Japanese",
+        )
+
+        self.assertEqual(identity["max_completion_tokens"], 3000)
+        self.assertEqual(identity["request_timeout_sec"], 360)
+
     def test_translation_checkpoint_uses_ctpr_state_without_sidecar_copy(
         self,
     ) -> None:
