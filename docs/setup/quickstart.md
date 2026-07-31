@@ -119,6 +119,23 @@ persistent OCR cache configured under `Settings > PaddleOCR VL Settings`.
 
 For bundle details, see [/paddleocr_vl_docker_files/README.md](/paddleocr_vl_docker_files/README.md).
 
+### Optional PaddleOCR-VL full-page Spotting route
+
+Full-page Spotting is a separate OCR choice. It does not replace or modify the
+default detector + crop OCR projector. Prepare its dedicated named volume:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass `
+  -File .\scripts\prepare_paddleocr_spotting_llamacpp_runtime.ps1 `
+  -Mode Prepare `
+  -ModelDirectory 'C:\ExampleWorkspace\models\PaddleOCR-VL-1.6-GGUF'
+```
+
+This route fixes the official `Spotting:` prompt, `--special` location-token
+mode, and `1,605,632` projector pixel budget. The crop route keeps its original
+`1,003,520` projector. See
+[/paddleocr_vl_spotting_docker_files/README.md](/paddleocr_vl_spotting_docker_files/README.md).
+
 ## 4. Recommended app settings
 
 - Workflow mode: `Stage-Batched Pipeline (Recommended)`

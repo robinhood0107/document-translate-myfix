@@ -1,0 +1,17 @@
+{
+  "schema_version": 1,
+  "suite_id": "neutral-three-way-suite",
+  "groups": [
+    {
+      "source_dir": "C:\\external-validation\\source-pages",
+      "detector_results": "C:\\external-validation\\detector-snapshots",
+      "language": "ja",
+      "split": "development",
+      "page_id_prefix": "sample-",
+      "page_ids": [
+        "page-001",
+        "page-002"
+      ]
+    }
+  ]
+}

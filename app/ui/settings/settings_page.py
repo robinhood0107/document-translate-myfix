@@ -20,10 +20,18 @@ from modules.ocr.selection import (
     OCR_MODE_MANGALMM,
     OCR_MODE_MICROSOFT,
     OCR_MODE_PADDLE_VL,
+    OCR_MODE_PADDLE_VL_SPOTTING,
     OCR_OPTIMAL_LABEL,
     normalize_ocr_mode,
     normalize_workflow_mode,
     STAGE_BATCHED_WORKFLOW_MODE,
+)
+from modules.ocr.managed_backend_policy import (
+    LEGACY_VLLM_QSETTINGS_KEYS,
+    MANAGED_LLAMA_CPP_MIGRATION_VERSION,
+    MANAGED_LLAMA_CPP_MIGRATION_VERSION_KEY,
+    MANAGED_LOCAL_INFERENCE_BACKEND,
+    is_retired_vllm_backend,
 )
 from modules.translation.llm.custom_local_gemma import (
     GEMMA_REQUEST_MODE_CONTEXTUAL_SINGLE,
@@ -33,6 +41,7 @@ from .settings_ui import SettingsPageUI
 from .gemma_local_server_page import GemmaLocalServerPage
 from .hunyuan_ocr_page import HunyuanOCRPage
 from .mangalmm_ocr_page import MangaLMMOCRPage
+from .paddleocr_vl_spotting_page import PaddleOCRVLSpottingPage
 from app.ui.messages import Messages
 from app.update_checker import UpdateChecker
 from app.shortcuts import get_default_shortcuts
@@ -127,6 +136,44 @@ def migrate_retired_gemma_request_mode(settings: QSettings) -> bool:
         GEMMA_GROUPED_RETIREMENT_VERSION,
     )
     return changed
+
+
+def migrate_managed_runtime_to_llamacpp(settings: QSettings) -> bool:
+    """Migrate only explicit legacy vLLM backend values once."""
+
+    try:
+        current_version = int(
+            settings.value(
+                MANAGED_LLAMA_CPP_MIGRATION_VERSION_KEY,
+                0,
+                type=int,
+            )
+            or 0
+        )
+    except (TypeError, ValueError):
+        current_version = 0
+    if current_version >= MANAGED_LLAMA_CPP_MIGRATION_VERSION:
+        return False
+
+    changed_keys: list[str] = []
+    for key in LEGACY_VLLM_QSETTINGS_KEYS:
+        configured_backend = settings.value(key, None)
+        if not is_retired_vllm_backend(configured_backend):
+            continue
+        settings.setValue(key, MANAGED_LOCAL_INFERENCE_BACKEND)
+        changed_keys.append(key)
+
+    settings.setValue(
+        MANAGED_LLAMA_CPP_MIGRATION_VERSION_KEY,
+        MANAGED_LLAMA_CPP_MIGRATION_VERSION,
+    )
+    settings.sync()
+    if changed_keys:
+        logger.warning(
+            "Migrated retired managed vLLM settings to llama.cpp: %s",
+            ", ".join(changed_keys),
+        )
+    return bool(changed_keys)
 
 
 def migrate_project_checkpoint_default(settings: QSettings) -> bool:
@@ -312,6 +359,7 @@ class SettingsPage(QtWidgets.QWidget):
             self.ui.extra_context,
             self.ui.project_autosave_folder_input,
             self.ui.paddleocr_vl_server_url_input,
+            self.ui.paddleocr_vl_spotting_server_url_input,
             self.ui.hunyuan_ocr_server_url_input,
             self.ui.mangalmm_ocr_server_url_input,
         ]
@@ -364,6 +412,8 @@ class SettingsPage(QtWidgets.QWidget):
             self.ui.paddleocr_vl_max_new_tokens_spinbox,
             self.ui.paddleocr_vl_parallel_workers_spinbox,
             self.ui.paddleocr_vl_persistent_cache_limit_spinbox,
+            self.ui.paddleocr_vl_spotting_max_completion_tokens_spinbox,
+            self.ui.paddleocr_vl_spotting_request_timeout_spinbox,
             self.ui.hunyuan_ocr_max_completion_tokens_spinbox,
             self.ui.hunyuan_ocr_parallel_workers_spinbox,
             self.ui.hunyuan_ocr_request_timeout_spinbox,
@@ -471,6 +521,9 @@ class SettingsPage(QtWidgets.QWidget):
             self.ui.tr("Google Cloud Vision"): OCR_MODE_GOOGLE,
             self.ui.tr("Gemini-2.0-Flash"): OCR_MODE_GEMINI,
             self.ui.tr("PaddleOCR VL"): OCR_MODE_PADDLE_VL,
+            self.ui.tr("PaddleOCR VL Spotting (Full Page)"): (
+                OCR_MODE_PADDLE_VL_SPOTTING
+            ),
             self.ui.tr("HunyuanOCR"): OCR_MODE_HUNYUAN,
             self.ui.tr("MangaLMM"): OCR_MODE_MANGALMM,
         }
@@ -522,6 +575,26 @@ class SettingsPage(QtWidgets.QWidget):
         return {
             "enabled": bool(
                 self.ui.project_checkpoint_enabled_checkbox.isChecked()
+            ),
+        }
+
+    def get_paddleocr_vl_spotting_settings(self):
+        server_url = (
+            self.ui.paddleocr_vl_spotting_server_url_input.text().strip()
+        )
+        if not server_url:
+            server_url = PaddleOCRVLSpottingPage.DEFAULT_SERVER_URL
+        return {
+            "server_url": server_url,
+            "max_completion_tokens": int(
+                self.ui
+                .paddleocr_vl_spotting_max_completion_tokens_spinbox
+                .value()
+            ),
+            "request_timeout_sec": int(
+                self.ui
+                .paddleocr_vl_spotting_request_timeout_spinbox
+                .value()
             ),
         }
 
@@ -841,6 +914,9 @@ class SettingsPage(QtWidgets.QWidget):
                 "inpainter_runtime": self.get_inpainter_runtime_settings(),
             },
             "paddleocr_vl": self.get_paddleocr_vl_settings(),
+            "paddleocr_vl_spotting": (
+                self.get_paddleocr_vl_spotting_settings()
+            ),
             "hunyuan_ocr": self.get_hunyuan_ocr_settings(),
             "mangalmm_ocr": self.get_mangalmm_ocr_settings(),
             "gemma_local_server": self.get_gemma_local_server_settings(),
@@ -981,6 +1057,7 @@ class SettingsPage(QtWidgets.QWidget):
         self._loading_settings = True
         settings = QSettings("ComicLabs", "ComicTranslate")
         migrate_retired_gemma_request_mode(settings)
+        migrate_managed_runtime_to_llamacpp(settings)
         migrate_project_checkpoint_default(settings)
         migrate_mangalmm_full_page_contract(settings)
 
@@ -1103,6 +1180,30 @@ class SettingsPage(QtWidgets.QWidget):
             settings.value(
                 "persistent_cache_limit",
                 self.ui.paddleocr_vl_page.DEFAULT_PERSISTENT_CACHE_LIMIT,
+                type=int,
+            )
+        )
+        settings.endGroup()
+
+        settings.beginGroup("paddleocr_vl_spotting")
+        self.ui.paddleocr_vl_spotting_server_url_input.setText(
+            settings.value(
+                "server_url",
+                PaddleOCRVLSpottingPage.DEFAULT_SERVER_URL,
+                type=str,
+            )
+        )
+        self.ui.paddleocr_vl_spotting_max_completion_tokens_spinbox.setValue(
+            settings.value(
+                "max_completion_tokens",
+                PaddleOCRVLSpottingPage.DEFAULT_MAX_COMPLETION_TOKENS,
+                type=int,
+            )
+        )
+        self.ui.paddleocr_vl_spotting_request_timeout_spinbox.setValue(
+            settings.value(
+                "request_timeout_sec",
+                PaddleOCRVLSpottingPage.DEFAULT_REQUEST_TIMEOUT_SEC,
                 type=int,
             )
         )

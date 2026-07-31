@@ -14,7 +14,11 @@ from urllib.parse import urlparse
 from urllib.request import urlopen
 
 from modules.ocr.selection import is_local_ocr_engine
-from modules.ocr.paddle_llamacpp_runtime_contract import (
+from modules.ocr.managed_backend_policy import (
+    MANAGED_LOCAL_INFERENCE_BACKEND,
+    sanitize_managed_runtime_environment,
+)
+from modules.ocr.paddle_crop.runtime import (
     DEFAULT_PADDLE_LAYOUT_IMAGE,
     DEFAULT_PADDLE_LLAMA_CPP_IMAGE,
     DEFAULT_PADDLE_LLAMA_MODEL_VOLUME,
@@ -30,7 +34,7 @@ from modules.ocr.paddle_llamacpp_runtime_contract import (
     build_paddle_llama_runtime_contract,
     validate_paddle_llama_volume_name,
 )
-from modules.ocr.mangalmm_llamacpp_runtime_contract import (
+from modules.ocr.mangalmm_full_page.runtime import (
     DEFAULT_MANGALMM_LLAMA_CPP_IMAGE,
     DEFAULT_MANGALMM_MODEL_VOLUME,
     DEFAULT_MANGALMM_READY_MANIFEST,
@@ -43,6 +47,22 @@ from modules.ocr.mangalmm_llamacpp_runtime_contract import (
     MangaLMMRuntimeContractError,
     build_mangalmm_runtime_contract,
     validate_mangalmm_volume_name,
+)
+from modules.ocr.paddle_spotting.runtime import (
+    DEFAULT_PADDLE_SPOTTING_LLAMA_CPP_IMAGE,
+    DEFAULT_PADDLE_SPOTTING_MODEL_VOLUME,
+    DEFAULT_PADDLE_SPOTTING_READY_MANIFEST,
+    PADDLE_SPOTTING_IMAGE_MAX_PIXELS,
+    PADDLE_SPOTTING_MMPROJ_NAME,
+    PADDLE_SPOTTING_MODEL_ALIAS,
+    PADDLE_SPOTTING_MODEL_NAME,
+    PADDLE_SPOTTING_MODEL_SPECS,
+    PADDLE_SPOTTING_RUNTIME_FINGERPRINT_LABEL,
+    PADDLE_SPOTTING_RUNTIME_PREPARATION_VERSION,
+    PaddleSpottingRuntimeContract,
+    PaddleSpottingRuntimeContractError,
+    build_paddle_spotting_runtime_contract,
+    validate_paddle_spotting_volume_name,
 )
 from modules.utils.exceptions import LocalServiceSetupError, OperationCancelledError
 from modules.utils.llama_cpp_runtime import (
@@ -72,6 +92,12 @@ MANGALMM_LLAMA_CPP_IMAGE_REF = DEFAULT_MANGALMM_LLAMA_CPP_IMAGE
 MANGALMM_LLAMA_CPP_IMAGE_DIGEST = MANGALMM_LLAMA_CPP_IMAGE_REF.rsplit("@", 1)[
     -1
 ]
+PADDLEOCR_SPOTTING_LLAMA_CPP_IMAGE_REF = (
+    DEFAULT_PADDLE_SPOTTING_LLAMA_CPP_IMAGE
+)
+PADDLEOCR_SPOTTING_LLAMA_CPP_IMAGE_DIGEST = (
+    PADDLEOCR_SPOTTING_LLAMA_CPP_IMAGE_REF.rsplit("@", 1)[-1]
+)
 OCRPreflightProbeResult = Literal["healthy", "unavailable", "not_managed"]
 OCRHealthState = Literal["healthy", "loading", "unavailable"]
 
@@ -83,6 +109,7 @@ _ENGINE_CONFIG = {
         "settings_page_name": "HunyuanOCR Settings",
         "container_name": "hunyuanocr-local-server",
         "container_names": ["hunyuanocr-local-server"],
+        "managed_backend": MANAGED_LOCAL_INFERENCE_BACKEND,
         "uses_llama_cpp": True,
     },
     "MangaLMM": {
@@ -92,6 +119,7 @@ _ENGINE_CONFIG = {
         "settings_page_name": "MangaLMM Settings",
         "container_name": "mangalmm-local-server",
         "container_names": ["mangalmm-local-server"],
+        "managed_backend": MANAGED_LOCAL_INFERENCE_BACKEND,
         "uses_llama_cpp": True,
     },
     "PaddleOCR VL": {
@@ -105,6 +133,23 @@ _ENGINE_CONFIG = {
         "settings_page_name": "PaddleOCR VL Settings",
         "container_name": "paddleocr-llamacpp",
         "container_names": ["paddleocr-llamacpp", "paddleocr-server"],
+        "managed_backend": MANAGED_LOCAL_INFERENCE_BACKEND,
+        "uses_llama_cpp": True,
+    },
+    "PaddleOCR VL Spotting": {
+        "compose_file": (
+            ROOT_DIR
+            / "paddleocr_vl_spotting_docker_files"
+            / "docker-compose.yaml"
+        ),
+        "managed_url": (
+            "http://127.0.0.1:18002/v1/chat/completions"
+        ),
+        "health_url": "http://127.0.0.1:18002/health",
+        "settings_page_name": "PaddleOCR VL Spotting Settings",
+        "container_name": "paddleocr-spotting-llamacpp",
+        "container_names": ["paddleocr-spotting-llamacpp"],
+        "managed_backend": MANAGED_LOCAL_INFERENCE_BACKEND,
         "uses_llama_cpp": True,
     },
 }
@@ -127,8 +172,12 @@ class LocalOCRRuntimeManager:
         self._readiness_cache: set[tuple[str, str, str]] = set()
         self._startup_cancel_checker: Callable[[], bool] | None = None
         self._paddle_runtime_contract_cache: PaddleLlamaRuntimeContract | None = None
+        self._paddle_spotting_runtime_contract_cache: (
+            PaddleSpottingRuntimeContract | None
+        ) = None
         self._mangalmm_runtime_contract_cache: MangaLMMRuntimeContract | None = None
         self._paddle_idle_released = False
+        self._warned_legacy_backend_environment: tuple[str, ...] = ()
 
     def validate_engine(self, engine_key: str, settings_page: Any) -> None:
         if not is_local_ocr_engine(engine_key):
@@ -157,6 +206,26 @@ class LocalOCRRuntimeManager:
                         "Run scripts/prepare_paddleocr_llamacpp_runtime.ps1 "
                         "in Prepare or Verify mode."
                     )
+                ) from exc
+        if engine_key == "PaddleOCR VL Spotting":
+            try:
+                self._ensure_paddle_spotting_runtime_image()
+                self._paddle_spotting_runtime_contract(
+                    force_refresh=True
+                )
+            except (
+                PaddleSpottingRuntimeContractError,
+                OSError,
+            ) as exc:
+                raise self._build_setup_error(
+                    engine_key,
+                    (
+                        "Prepared PaddleOCR-VL Spotting runtime validation "
+                        f"failed: {exc}\n"
+                        "Run scripts/"
+                        "prepare_paddleocr_spotting_llamacpp_runtime.ps1 "
+                        "in Prepare or Verify mode."
+                    ),
                 ) from exc
         if engine_key == "MangaLMM":
             try:
@@ -191,7 +260,10 @@ class LocalOCRRuntimeManager:
     ) -> dict[str, Any] | None:
         """Return a trustworthy identity without starting the managed runtime."""
 
-        if engine_key != "PaddleOCR VL":
+        if engine_key not in {
+            "PaddleOCR VL",
+            "PaddleOCR VL Spotting",
+        }:
             return None
         if not self.should_manage_engine(engine_key, settings_page):
             return None
@@ -200,10 +272,17 @@ class LocalOCRRuntimeManager:
             present_names = self._present_managed_container_names(engine_key)
             if (
                 len(present_names) != len(expected_names)
-                or not self._paddle_containers_match_contract(present_names)
+                or not self._managed_containers_match_contract(
+                    engine_key,
+                    present_names,
+                )
             ):
                 return None
-            contract = self._paddle_runtime_contract()
+            contract = (
+                self._paddle_runtime_contract()
+                if engine_key == "PaddleOCR VL"
+                else self._paddle_spotting_runtime_contract()
+            )
         except OperationCancelledError:
             raise
         except Exception:
@@ -213,12 +292,56 @@ class LocalOCRRuntimeManager:
                 exc_info=True,
             )
             return None
-        if not contract.llama_image_id or not contract.layout_image_id:
+        if not contract.llama_image_id or (
+            engine_key == "PaddleOCR VL"
+            and not contract.layout_image_id
+        ):
             logger.info(
                 "Persistent PaddleOCR-VL cache is disabled until the pinned "
                 "managed images are installed locally."
             )
             return None
+        if engine_key == "PaddleOCR VL Spotting":
+            return {
+                "identity_schema_version": 1,
+                "managed": True,
+                "engine": engine_key,
+                "strategy": "paddle_spotting_full_page",
+                "backend": "llama.cpp",
+                "endpoint": _normalize_url(
+                    self._resolve_server_url(engine_key, settings_page)
+                ),
+                "model_name": PADDLE_SPOTTING_MODEL_ALIAS,
+                "model_file": PADDLE_SPOTTING_MODEL_NAME,
+                "model_sha256": str(
+                    PADDLE_SPOTTING_MODEL_SPECS[
+                        PADDLE_SPOTTING_MODEL_NAME
+                    ]["sha256"]
+                ),
+                "mmproj_file": PADDLE_SPOTTING_MMPROJ_NAME,
+                "mmproj_sha256": str(
+                    PADDLE_SPOTTING_MODEL_SPECS[
+                        PADDLE_SPOTTING_MMPROJ_NAME
+                    ]["sha256"]
+                ),
+                "model_volume": contract.volume_name,
+                "ready_manifest_sha256": (
+                    contract.ready_manifest_sha256
+                ),
+                "llama_image_ref": contract.llama_image_ref,
+                "llama_image_digest": (
+                    PADDLEOCR_SPOTTING_LLAMA_CPP_IMAGE_DIGEST
+                ),
+                "llama_image_id": contract.llama_image_id,
+                "compose_sha256": contract.compose_file_sha256,
+                "command_sha256": contract.command_sha256,
+                "runtime_fingerprint": contract.fingerprint,
+                "prompt": "Spotting:",
+                "special_tokens": True,
+                "clip.vision.image_max_pixels": (
+                    PADDLE_SPOTTING_IMAGE_MAX_PIXELS
+                ),
+            }
         return {
             "identity_schema_version": 2,
             "managed": True,
@@ -299,7 +422,12 @@ class LocalOCRRuntimeManager:
                 self._readiness_cache.clear()
             if cache_key in self._readiness_cache:
                 cache_is_healthy = (
-                    engine_key not in {"PaddleOCR VL", "MangaLMM"}
+                    engine_key
+                    not in {
+                        "PaddleOCR VL",
+                        "PaddleOCR VL Spotting",
+                        "MangaLMM",
+                    }
                     or self._probe_health_state(
                         self._config_health_urls(self._config_for(engine_key))
                     )
@@ -343,7 +471,11 @@ class LocalOCRRuntimeManager:
         self.validate_engine(engine_key, settings_page)
         config = self._config_for(engine_key)
         health_urls = self._config_health_urls(config)
-        contract_managed = engine_key in {"PaddleOCR VL", "MangaLMM"}
+        contract_managed = engine_key in {
+            "PaddleOCR VL",
+            "PaddleOCR VL Spotting",
+            "MangaLMM",
+        }
         present_containers = (
             self._present_managed_container_names(engine_key)
             if contract_managed
@@ -712,6 +844,9 @@ class LocalOCRRuntimeManager:
         if config.get("uses_llama_cpp"):
             image_key = {
                 "PaddleOCR VL": "PADDLEOCR_LLAMA_CPP_IMAGE",
+                "PaddleOCR VL Spotting": (
+                    "PADDLEOCR_SPOTTING_LLAMA_CPP_IMAGE"
+                ),
                 "MangaLMM": "MANGALMM_LLAMA_CPP_IMAGE",
             }.get(engine_key, "LLAMA_CPP_IMAGE")
             requested_image = env.get(image_key, "")
@@ -735,12 +870,28 @@ class LocalOCRRuntimeManager:
             ) from exc
 
     def _build_env(self, engine_key: str) -> dict[str, str]:
-        env = dict(os.environ)
+        env, ignored = sanitize_managed_runtime_environment(os.environ)
+        ignored_keys = tuple(sorted(ignored))
+        if (
+            ignored_keys
+            and ignored_keys != self._warned_legacy_backend_environment
+        ):
+            logger.warning(
+                "Ignoring retired managed vLLM environment controls and "
+                "using llama.cpp: %s",
+                ", ".join(ignored_keys),
+            )
+            self._warned_legacy_backend_environment = ignored_keys
         env.setdefault("LLAMA_CPP_IMAGE", DEFAULT_LLAMA_CPP_IMAGE)
         if engine_key == "HunyuanOCR":
             env.setdefault("LLAMA_N_GPU_LAYERS", DEFAULT_HUNYUAN_N_GPU_LAYERS)
         if engine_key == "PaddleOCR VL":
             env.update(self._paddle_runtime_contract().compose_environment())
+        if engine_key == "PaddleOCR VL Spotting":
+            env.update(
+                self._paddle_spotting_runtime_contract()
+                .compose_environment()
+            )
         if engine_key == "MangaLMM":
             env.update(self._mangalmm_runtime_contract().compose_environment())
         return env
@@ -752,6 +903,12 @@ class LocalOCRRuntimeManager:
             return str(settings_page.get_mangalmm_ocr_settings().get("server_url", "")).strip()
         if engine_key == "PaddleOCR VL":
             return str(settings_page.get_paddleocr_vl_settings().get("server_url", "")).strip()
+        if engine_key == "PaddleOCR VL Spotting":
+            return str(
+                settings_page
+                .get_paddleocr_vl_spotting_settings()
+                .get("server_url", "")
+            ).strip()
         return ""
 
     def _readiness_cache_key(
@@ -791,6 +948,9 @@ class LocalOCRRuntimeManager:
         try:
             image_env_key = {
                 "PaddleOCR VL": "PADDLEOCR_LLAMA_CPP_IMAGE",
+                "PaddleOCR VL Spotting": (
+                    "PADDLEOCR_SPOTTING_LLAMA_CPP_IMAGE"
+                ),
                 "MangaLMM": "MANGALMM_LLAMA_CPP_IMAGE",
             }.get(engine_key, "LLAMA_CPP_IMAGE")
             runtime = inspect_llama_cpp_runtime(
@@ -893,6 +1053,85 @@ class LocalOCRRuntimeManager:
                     "PaddleOCR VL",
                     f"Docker returned no image ID for the pinned PaddleOCR image: {image_ref}"
                 )
+
+    def _paddle_spotting_runtime_contract(
+        self,
+        *,
+        force_refresh: bool = False,
+    ) -> PaddleSpottingRuntimeContract:
+        if (
+            self._paddle_spotting_runtime_contract_cache is not None
+            and not force_refresh
+        ):
+            return self._paddle_spotting_runtime_contract_cache
+
+        compose_file = Path(
+            self._config_for("PaddleOCR VL Spotting")["compose_file"]
+        )
+        if not compose_file.is_file():
+            raise FileNotFoundError(compose_file)
+        volume_name = validate_paddle_spotting_volume_name(
+            os.environ.get(
+                "PADDLEOCR_SPOTTING_MODEL_VOLUME",
+                DEFAULT_PADDLE_SPOTTING_MODEL_VOLUME,
+            )
+        )
+        (
+            manifest_bytes,
+            manifest_sha256,
+            observed_file_bytes,
+        ) = self._probe_paddle_spotting_model_volume(
+            volume_name=volume_name,
+            image_ref=PADDLEOCR_SPOTTING_LLAMA_CPP_IMAGE_REF,
+        )
+        llama_image_id = self._inspect_docker_image_id(
+            PADDLEOCR_SPOTTING_LLAMA_CPP_IMAGE_REF
+        )
+        if not llama_image_id:
+            raise PaddleSpottingRuntimeContractError(
+                "Pinned PaddleOCR-VL Spotting llama.cpp image is not "
+                "installed."
+            )
+        contract = build_paddle_spotting_runtime_contract(
+            manifest_bytes=manifest_bytes,
+            manifest_sha256=manifest_sha256,
+            observed_file_bytes=observed_file_bytes,
+            volume_name=volume_name,
+            llama_image_ref=PADDLEOCR_SPOTTING_LLAMA_CPP_IMAGE_REF,
+            llama_image_id=llama_image_id,
+            compose_file=compose_file,
+            environment=os.environ,
+        )
+        self._paddle_spotting_runtime_contract_cache = contract
+        return contract
+
+    def _ensure_paddle_spotting_runtime_image(self) -> None:
+        image_ref = PADDLEOCR_SPOTTING_LLAMA_CPP_IMAGE_REF
+        if self._inspect_docker_image_id(image_ref):
+            return
+        from modules.utils.llama_cpp_runtime import run_docker_command
+
+        try:
+            run_docker_command(
+                ["docker", "pull", image_ref],
+                cancel_checker=self._startup_cancel_checker,
+            )
+        except RuntimeError as exc:
+            raise self._build_setup_error(
+                "PaddleOCR VL Spotting",
+                (
+                    "Unable to load the pinned PaddleOCR-VL Spotting "
+                    f"image: {image_ref}\n{exc}"
+                ),
+            ) from exc
+        if not self._inspect_docker_image_id(image_ref):
+            raise self._build_setup_error(
+                "PaddleOCR VL Spotting",
+                (
+                    "Docker returned no image ID for the pinned "
+                    f"PaddleOCR-VL Spotting image: {image_ref}"
+                ),
+            )
 
     def _mangalmm_runtime_contract(
         self,
@@ -1233,6 +1472,159 @@ printf 'mmproj_bytes=%s\n' "$(stat -c %s "$mmproj_path")"
             ) from exc
         return manifest_bytes, manifest_sha256, observed_file_bytes
 
+    def _probe_paddle_spotting_model_volume(
+        self,
+        *,
+        volume_name: str,
+        image_ref: str,
+    ) -> tuple[bytes, str, dict[str, int]]:
+        from modules.utils.llama_cpp_runtime import run_docker_command
+
+        volume_inspection = run_docker_command(
+            [
+                "docker",
+                "volume",
+                "inspect",
+                "--format",
+                "{{json .Labels}}",
+                volume_name,
+            ],
+            check=False,
+            cancel_checker=self._startup_cancel_checker,
+        )
+        if volume_inspection.returncode != 0:
+            raise self._build_setup_error(
+                "PaddleOCR VL Spotting",
+                (
+                    "Prepared PaddleOCR-VL Spotting model volume does "
+                    f"not exist: {volume_name}\n"
+                    "Run scripts/"
+                    "prepare_paddleocr_spotting_llamacpp_runtime.ps1 "
+                    "before starting the managed endpoint."
+                ),
+            )
+        try:
+            volume_labels = json.loads(
+                (volume_inspection.stdout or "").strip() or "{}"
+            )
+        except json.JSONDecodeError as exc:
+            raise self._build_setup_error(
+                "PaddleOCR VL Spotting",
+                (
+                    "Unable to parse Docker labels for PaddleOCR-VL "
+                    f"Spotting volume: {volume_name}"
+                ),
+            ) from exc
+        expected_labels = {
+            "comic-translate.runtime": (
+                "PaddleOCR-VL-Spotting-llama.cpp"
+            ),
+            "comic-translate.preparation-version": str(
+                PADDLE_SPOTTING_RUNTIME_PREPARATION_VERSION
+            ),
+        }
+        if not isinstance(volume_labels, dict) or any(
+            str(volume_labels.get(key, "")) != expected
+            for key, expected in expected_labels.items()
+        ):
+            raise self._build_setup_error(
+                "PaddleOCR VL Spotting",
+                (
+                    "PaddleOCR-VL Spotting volume labels do not match "
+                    f"the preparation contract: {volume_name}\n"
+                    f"Expected labels: {expected_labels}\n"
+                    f"Actual labels: {volume_labels}"
+                ),
+            )
+
+        shell_script = r'''
+set -eu
+manifest_path="/models/$READY_MANIFEST"
+model_path="/models/$MODEL_FILE"
+mmproj_path="/models/$MMPROJ_FILE"
+test -f "$manifest_path"
+test -f "$model_path"
+test -f "$mmproj_path"
+printf 'manifest_sha256=%s\n' "$(sha256sum "$manifest_path" | cut -d ' ' -f 1)"
+printf 'manifest_base64='
+base64 -w 0 "$manifest_path"
+printf '\nmodel_bytes=%s\n' "$(stat -c %s "$model_path")"
+printf 'mmproj_bytes=%s\n' "$(stat -c %s "$mmproj_path")"
+'''.strip()
+        completed = run_docker_command(
+            [
+                "docker",
+                "run",
+                "--rm",
+                "--pull",
+                "never",
+                "-e",
+                (
+                    "READY_MANIFEST="
+                    f"{DEFAULT_PADDLE_SPOTTING_READY_MANIFEST}"
+                ),
+                "-e",
+                f"MODEL_FILE={PADDLE_SPOTTING_MODEL_NAME}",
+                "-e",
+                f"MMPROJ_FILE={PADDLE_SPOTTING_MMPROJ_NAME}",
+                "--mount",
+                (
+                    f"type=volume,source={volume_name},"
+                    "target=/models,readonly"
+                ),
+                "--entrypoint",
+                "/bin/sh",
+                image_ref,
+                "-ec",
+                shell_script,
+            ],
+            check=False,
+            cancel_checker=self._startup_cancel_checker,
+        )
+        if completed.returncode != 0:
+            detail = (
+                (completed.stderr or "")
+                + "\n"
+                + (completed.stdout or "")
+            ).strip()
+            raise self._build_setup_error(
+                "PaddleOCR VL Spotting",
+                (
+                    "Prepared PaddleOCR-VL Spotting model volume is "
+                    f"incomplete: {volume_name}\n{detail}\n"
+                    "Run scripts/"
+                    "prepare_paddleocr_spotting_llamacpp_runtime.ps1 "
+                    "in Prepare or Verify mode."
+                ),
+            )
+
+        values: dict[str, str] = {}
+        for line in (completed.stdout or "").splitlines():
+            key, separator, value = line.partition("=")
+            if separator:
+                values[key.strip()] = value.strip()
+        try:
+            manifest_bytes = base64.b64decode(
+                values["manifest_base64"],
+                validate=True,
+            )
+            manifest_sha256 = values["manifest_sha256"].lower()
+            observed_file_bytes = {
+                PADDLE_SPOTTING_MODEL_NAME: int(values["model_bytes"]),
+                PADDLE_SPOTTING_MMPROJ_NAME: int(
+                    values["mmproj_bytes"]
+                ),
+            }
+        except (KeyError, ValueError, binascii.Error) as exc:
+            raise self._build_setup_error(
+                "PaddleOCR VL Spotting",
+                (
+                    "Unable to parse the prepared PaddleOCR-VL "
+                    f"Spotting volume probe output: {completed.stdout}"
+                ),
+            ) from exc
+        return manifest_bytes, manifest_sha256, observed_file_bytes
+
     def _inspect_docker_image_id(self, image_ref: str) -> str:
         from modules.utils.llama_cpp_runtime import run_docker_command
 
@@ -1376,6 +1768,68 @@ printf 'mmproj_bytes=%s\n' "$(stat -c %s "$mmproj_path")"
             return False
         return True
 
+    def _paddle_spotting_containers_match_contract(
+        self,
+        container_names: list[str],
+    ) -> bool:
+        try:
+            contract = self._paddle_spotting_runtime_contract()
+        except OperationCancelledError:
+            raise
+        except Exception:
+            logger.warning(
+                "Failed to resolve the PaddleOCR-VL Spotting runtime "
+                "contract; stale containers will be recreated.",
+                exc_info=True,
+            )
+            return False
+
+        from modules.utils.llama_cpp_runtime import run_docker_command
+
+        if container_names != ["paddleocr-spotting-llamacpp"]:
+            return False
+        completed = run_docker_command(
+            [
+                "docker",
+                "inspect",
+                "--format",
+                (
+                    "{{index .Config.Labels "
+                    f"\"{PADDLE_SPOTTING_RUNTIME_FINGERPRINT_LABEL}\""
+                    "}}|{{.Image}}|"
+                    "{{index .Config.Labels "
+                    "\"desktop.docker.io/wsl-distro\"}}"
+                ),
+                "paddleocr-spotting-llamacpp",
+            ],
+            check=False,
+            timeout_sec=15.0,
+            cancel_checker=self._startup_cancel_checker,
+        )
+        if getattr(completed, "returncode", 1) != 0:
+            return False
+        parts = str(
+            getattr(completed, "stdout", "") or ""
+        ).strip().split("|", 2)
+        if len(parts) != 3:
+            return False
+        fingerprint, image_id, wsl_distro = parts
+        if (
+            fingerprint != contract.fingerprint
+            or image_id != contract.llama_image_id
+        ):
+            return False
+        if os.name == "nt" and wsl_distro.strip():
+            logger.info(
+                "PaddleOCR-VL Spotting container was created by WSL "
+                "Compose (%s); Windows will recreate it so Docker "
+                "Desktop can manage the Compose application without "
+                "invoking wsl.",
+                wsl_distro.strip(),
+            )
+            return False
+        return True
+
     def _managed_containers_match_contract(
         self,
         engine_key: str,
@@ -1383,6 +1837,10 @@ printf 'mmproj_bytes=%s\n' "$(stat -c %s "$mmproj_path")"
     ) -> bool:
         if engine_key == "PaddleOCR VL":
             return self._paddle_containers_match_contract(container_names)
+        if engine_key == "PaddleOCR VL Spotting":
+            return self._paddle_spotting_containers_match_contract(
+                container_names
+            )
         if engine_key == "MangaLMM":
             return self._mangalmm_containers_match_contract(container_names)
         return False
@@ -1585,9 +2043,15 @@ printf 'mmproj_bytes=%s\n' "$(stat -c %s "$mmproj_path")"
     ) -> None:
         if progress_callback is None:
             return
+        service = {
+            "PaddleOCR VL": "paddleocr_vl",
+            "PaddleOCR VL Spotting": "paddleocr_vl_spotting",
+            "HunyuanOCR": "hunyuanocr",
+            "MangaLMM": "mangalmm",
+        }.get(engine_key, engine_key.lower().replace(" ", "_"))
         event = {
             "phase": "ocr_startup",
-            "service": "paddleocr_vl" if engine_key == "PaddleOCR VL" else engine_key.lower(),
+            "service": service,
             "status": payload.pop("status", "running"),
             "step_key": payload.pop("step_key", "health_wait"),
             "message": payload.pop("message", f"{engine_key} 준비 중..."),

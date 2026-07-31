@@ -235,6 +235,11 @@ docker compose -f hunyuanocr_docker_files/docker-compose.yaml up -d
 
 PaddleOCR VL 런타임 기준 파일은 [paddleocr_vl_docker_files/README.md](paddleocr_vl_docker_files/README.md)에 정리돼 있습니다.
 
+선택형 full-page `Spotting:` 경로는 projector·container·named volume·cache
+identity를 crop OCR과 분리합니다. 준비 방법은
+[paddleocr_vl_spotting_docker_files/README.md](paddleocr_vl_spotting_docker_files/README.md)에
+정리돼 있습니다.
+
 관리 대상 컨테이너는 단계 완료, 취소, 앱 종료 때 삭제되지 않고 중지 상태로 보존됩니다. 런타임을 명시적으로 초기화하거나 제거할 때만 `docker compose down`을 사용합니다.
 
 ### 4. 권장 OCR 설정
@@ -295,6 +300,8 @@ exact 영구 OCR 캐시도 사용할 수 있습니다. crop 이미지는 저장�
 ## 저장소 문서
 
 - [rules.md](rules.md)
+- [코드 구조와 OCR 전략 경계](docs/architecture/codebase-map-ko.md)
+- [관리형 llama.cpp 전용 런타임 정책](docs/runtime/managed-llamacpp-only-ko.md)
 - [docs/gemma/local-server-ko.md](docs/gemma/local-server-ko.md)
 - [docs/hunyuan/local-server-ko.md](docs/hunyuan/local-server-ko.md)
 - [docs/repo/github-rulesets-public-free-ko.md](docs/repo/github-rulesets-public-free-ko.md)
