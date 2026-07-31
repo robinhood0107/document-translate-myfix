@@ -26,6 +26,13 @@ from modules.ocr.selection import (
     normalize_workflow_mode,
     STAGE_BATCHED_WORKFLOW_MODE,
 )
+from modules.ocr.managed_backend_policy import (
+    LEGACY_VLLM_QSETTINGS_KEYS,
+    MANAGED_LLAMA_CPP_MIGRATION_VERSION,
+    MANAGED_LLAMA_CPP_MIGRATION_VERSION_KEY,
+    MANAGED_LOCAL_INFERENCE_BACKEND,
+    is_retired_vllm_backend,
+)
 from modules.translation.llm.custom_local_gemma import (
     GEMMA_REQUEST_MODE_CONTEXTUAL_SINGLE,
     RETIRED_GEMMA_REQUEST_MODE_CONTEXTUAL_GROUPED,
@@ -129,6 +136,44 @@ def migrate_retired_gemma_request_mode(settings: QSettings) -> bool:
         GEMMA_GROUPED_RETIREMENT_VERSION,
     )
     return changed
+
+
+def migrate_managed_runtime_to_llamacpp(settings: QSettings) -> bool:
+    """Migrate only explicit legacy vLLM backend values once."""
+
+    try:
+        current_version = int(
+            settings.value(
+                MANAGED_LLAMA_CPP_MIGRATION_VERSION_KEY,
+                0,
+                type=int,
+            )
+            or 0
+        )
+    except (TypeError, ValueError):
+        current_version = 0
+    if current_version >= MANAGED_LLAMA_CPP_MIGRATION_VERSION:
+        return False
+
+    changed_keys: list[str] = []
+    for key in LEGACY_VLLM_QSETTINGS_KEYS:
+        configured_backend = settings.value(key, None)
+        if not is_retired_vllm_backend(configured_backend):
+            continue
+        settings.setValue(key, MANAGED_LOCAL_INFERENCE_BACKEND)
+        changed_keys.append(key)
+
+    settings.setValue(
+        MANAGED_LLAMA_CPP_MIGRATION_VERSION_KEY,
+        MANAGED_LLAMA_CPP_MIGRATION_VERSION,
+    )
+    settings.sync()
+    if changed_keys:
+        logger.warning(
+            "Migrated retired managed vLLM settings to llama.cpp: %s",
+            ", ".join(changed_keys),
+        )
+    return bool(changed_keys)
 
 
 def migrate_project_checkpoint_default(settings: QSettings) -> bool:
@@ -1012,6 +1057,7 @@ class SettingsPage(QtWidgets.QWidget):
         self._loading_settings = True
         settings = QSettings("ComicLabs", "ComicTranslate")
         migrate_retired_gemma_request_mode(settings)
+        migrate_managed_runtime_to_llamacpp(settings)
         migrate_project_checkpoint_default(settings)
         migrate_mangalmm_full_page_contract(settings)
 
