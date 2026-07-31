@@ -14,7 +14,7 @@ from urllib.parse import urlparse
 from urllib.request import urlopen
 
 from modules.ocr.selection import is_local_ocr_engine
-from modules.ocr.paddle_llamacpp_runtime_contract import (
+from modules.ocr.paddle_crop.runtime import (
     DEFAULT_PADDLE_LAYOUT_IMAGE,
     DEFAULT_PADDLE_LLAMA_CPP_IMAGE,
     DEFAULT_PADDLE_LLAMA_MODEL_VOLUME,
@@ -30,7 +30,7 @@ from modules.ocr.paddle_llamacpp_runtime_contract import (
     build_paddle_llama_runtime_contract,
     validate_paddle_llama_volume_name,
 )
-from modules.ocr.mangalmm_llamacpp_runtime_contract import (
+from modules.ocr.mangalmm_full_page.runtime import (
     DEFAULT_MANGALMM_LLAMA_CPP_IMAGE,
     DEFAULT_MANGALMM_MODEL_VOLUME,
     DEFAULT_MANGALMM_READY_MANIFEST,
@@ -44,7 +44,7 @@ from modules.ocr.mangalmm_llamacpp_runtime_contract import (
     build_mangalmm_runtime_contract,
     validate_mangalmm_volume_name,
 )
-from modules.ocr.paddleocr_vl_spotting.runtime_contract import (
+from modules.ocr.paddle_spotting.runtime import (
     DEFAULT_PADDLE_SPOTTING_LLAMA_CPP_IMAGE,
     DEFAULT_PADDLE_SPOTTING_MODEL_VOLUME,
     DEFAULT_PADDLE_SPOTTING_READY_MANIFEST,

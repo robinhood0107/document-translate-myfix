@@ -57,13 +57,13 @@ from app.ui.messages import Messages
 from modules.detection.processor import TextBlockDetector
 from modules.ocr.factory import OCRFactory
 from modules.ocr.local_runtime import LocalOCRRuntimeManager
-from modules.ocr.ocr_paddle_VL import PaddleOCRVLEngine
+from modules.ocr.paddle_crop.engine import PaddleOCRVLEngine
 from modules.ocr.persistent_cache import (
     OCRPersistentResultCache,
     canonical_sha256,
     snapshot_raw_ocr_result,
 )
-from modules.ocr.result_contract import (
+from modules.ocr.common.result_contract import (
     PROCESSING_ACTION_TRANSLATE_INPAINT,
     canonicalize_exact_duplicate_blocks,
     finalize_ocr_processing_contract,
