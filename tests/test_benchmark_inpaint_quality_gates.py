@@ -54,6 +54,7 @@ def _fake_result_root(root: Path) -> tuple[Path, list[str]]:
                 "raw_mask",
                 "primary_mask",
                 "residual_mask",
+                "foreground_repair_mask",
                 "final_mask",
                 "mask_overlay",
                 "cleaned",
@@ -631,6 +632,106 @@ def test_model_screen_requires_locked_dilation_and_fp32() -> None:
     assert not zits.promotable
     assert zits.inpaint_size == 512
     assert zits.precision == "fp32"
+
+
+def test_structured_repair_profiles_keep_learned_runtime_cuda_fp32() -> None:
+    profiles = gates._profiles_for_phase(
+        "structured-repair",
+        selected_dilation=None,
+        include_feasibility=False,
+        strategy_routed_available=True,
+    )
+
+    assert profiles[0].baseline
+    assert len(profiles) == 22
+    candidates = profiles[1:]
+    assert all(profile.precision == "fp32" for profile in candidates)
+    assert all(profile.promotable for profile in candidates)
+    assert {
+        profile.foreground_repair_method for profile in candidates
+    } == {"learned", "telea", "navier_stokes"}
+    assert any(profile.reconnect_structure for profile in candidates)
+
+    with pytest.raises(
+        gates.ProtocolError,
+        match="strategy-routed",
+    ):
+        gates._profiles_for_phase(
+            "structured-repair",
+            selected_dilation=None,
+            include_feasibility=False,
+            strategy_routed_available=False,
+        )
+
+
+def test_structured_repair_splits_gpu_bubble_and_local_foreground_masks() -> None:
+    empty = np.zeros((32, 32), dtype=np.uint8)
+    allowed = np.full_like(empty, 255)
+    bubble = np.zeros_like(empty)
+    bubble[3:8, 3:8] = 255
+    foreground = np.zeros_like(empty)
+    foreground[20:23, 20:23] = 255
+    profile = next(
+        profile
+        for profile in gates.STRUCTURED_REPAIR_PROFILES
+        if (
+            profile.foreground_repair_method == "telea"
+            and profile.dilation == 2
+            and profile.foreground_repair_radius == 2
+            and not profile.reconnect_structure
+        )
+    )
+
+    masks = gates.build_candidate_masks(
+        profile=profile,
+        image=np.zeros((32, 32, 3), dtype=np.uint8),
+        blocks=[],
+        product_mask=empty,
+        glyph_base_mask=empty,
+        bubble_protect_mask=empty,
+        structure_protect_mask=empty,
+        allowed_window_mask=allowed,
+        strategy_bubble_safe_mask=bubble,
+        strategy_foreground_glyph_base_mask=foreground,
+    )
+
+    assert np.array_equal(masks["primary_mask"], bubble)
+    assert np.count_nonzero(masks["foreground_repair_mask"]) > int(
+        np.count_nonzero(foreground)
+    )
+    assert not np.any(
+        (masks["primary_mask"] > 0)
+        & (masks["foreground_repair_mask"] > 0)
+    )
+    assert np.array_equal(
+        masks["final_mask"] > 0,
+        (masks["primary_mask"] > 0)
+        | (masks["foreground_repair_mask"] > 0),
+    )
+
+
+def test_deterministic_foreground_repair_changes_only_mask() -> None:
+    image = np.full((40, 60, 3), 220, dtype=np.uint8)
+    image[:, 29:31] = 30
+    mask = np.zeros((40, 60), dtype=np.uint8)
+    mask[16:24, 26:34] = 255
+
+    cleaned, _elapsed, diagnostics = (
+        gates._run_deterministic_foreground_repair(
+            image=image,
+            mask=mask,
+            review_roi=[0, 0, 60, 40],
+            method="telea",
+            radius=2,
+            reconnect_structure=True,
+        )
+    )
+    changed = gates._changed_pixel_stats(image, cleaned, mask)
+
+    assert diagnostics["status"] == "completed"
+    assert diagnostics["learned_cpu_fallback_used"] is False
+    assert changed["changed_inside_mask_pixel_count"] > 0
+    assert changed["changed_outside_mask_pixel_count"] == 0
 
 
 def test_run_parser_accepts_explicit_zits_contract_paths() -> None:

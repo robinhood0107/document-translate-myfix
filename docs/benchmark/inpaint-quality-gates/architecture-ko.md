@@ -21,14 +21,17 @@
    처리하는 경로와 연결 성분별 순차 GPU pass 경로를 구분해 기록한다.
 8. model 단계는 선택된 dilation·residual·pass partition 계약을 고정하고 LaMa Large FP32
    1536/2048, LaMa MPE FP32/2048, AOT FP32/2048을 비교한다.
-9. BF16/1536은 비승격 baseline이며 ZITS++는 격리된 CUDA FP32 lab
+9. structured-repair 단계는 불투명 말풍선의 CUDA FP32 mask와 구조
+   배경의 결정론적 `foreground_repair_mask`를 분리한다. 최종 edit
+   mask와 변경 픽셀 계약은 두 경로의 합집합으로 검증한다.
+10. BF16/1536은 비승격 baseline이며 ZITS++는 격리된 CUDA FP32 lab
    feasibility 항목이다. 제품 환경에 구형 학습 의존성을 설치하지
    않는다.
-10. 후보 하나의 모델 load/OOM이 실패해도 해당 후보만 실패로 기록하고
+11. 후보 하나의 모델 load/OOM이 실패해도 해당 후보만 실패로 기록하고
    나머지 프로필은 계속 실행한다.
-11. 후보 산출물을 무작위 A…N으로 바꿔 원본·mask·cleaned·diff·render를
+12. 후보 산출물을 무작위 A…N으로 바꿔 원본·mask·cleaned·diff·render를
    검수한다.
-12. 모든 필드와 케이스별 고유 순위가 작성되기 전에는 unblind할 수 없다.
+13. 모든 필드와 케이스별 고유 순위가 작성되기 전에는 unblind할 수 없다.
 
 후보 inference는 전체 페이지 축소가 아니라 실제 edit mask 주변의 자동
 고해상도 ROI에서 수행한다. `review_roi`는 검수 화면 범위일 뿐 모델 ROI를
