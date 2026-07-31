@@ -140,6 +140,16 @@ def verify_smoke(cfg: dict) -> None:
     )
 
 
+def verify_managed_inference_contract() -> None:
+    run_checked(
+        [
+            sys.executable,
+            str(ROOT / "scripts" / "verify_managed_llamacpp_runtime.py"),
+        ],
+        label="managed llama.cpp-only inference contract",
+    )
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Verify Windows launchers and pinned runtimes.")
     parser.add_argument(
@@ -154,6 +164,7 @@ def main() -> int:
     )
     args = parser.parse_args()
 
+    verify_managed_inference_contract()
     for cfg in LAUNCHERS:
         verify_source_contract(cfg)
         if args.source_contract_only:

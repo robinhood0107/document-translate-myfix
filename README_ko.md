@@ -301,6 +301,7 @@ exact 영구 OCR 캐시도 사용할 수 있습니다. crop 이미지는 저장�
 
 - [rules.md](rules.md)
 - [코드 구조와 OCR 전략 경계](docs/architecture/codebase-map-ko.md)
+- [관리형 llama.cpp 전용 런타임 정책](docs/runtime/managed-llamacpp-only-ko.md)
 - [docs/gemma/local-server-ko.md](docs/gemma/local-server-ko.md)
 - [docs/hunyuan/local-server-ko.md](docs/hunyuan/local-server-ko.md)
 - [docs/repo/github-rulesets-public-free-ko.md](docs/repo/github-rulesets-public-free-ko.md)
