@@ -292,16 +292,63 @@ class MangaLMMOCRTests(unittest.TestCase):
         standard_plan = engine._plan_page_request((3036, 2150, 3), _make_blocks(15, width=200, height=300))
 
         self.assertEqual(dense_plan.profile, "dense")
-        self.assertEqual(dense_plan.request_shape, (1728, 1224))
+        self.assertEqual(dense_plan.request_shape, (1708, 1204))
         self.assertEqual(dense_plan.max_completion_tokens, 4096)
-        self.assertAlmostEqual(dense_plan.scale_x, 1224 / 2150.0)
-        self.assertAlmostEqual(dense_plan.scale_y, 1728 / 3035.0)
+        self.assertEqual(dense_plan.alignment_factor, 28)
+        self.assertLessEqual(
+            dense_plan.request_shape[0] * dense_plan.request_shape[1],
+            dense_plan.effective_max_pixels,
+        )
+        self.assertAlmostEqual(dense_plan.scale_x, 1204 / 2150.0)
+        self.assertAlmostEqual(dense_plan.scale_y, 1708 / 3035.0)
 
         self.assertEqual(standard_plan.profile, "standard")
-        self.assertEqual(standard_plan.request_shape, (1728, 1224))
+        self.assertEqual(standard_plan.request_shape, (1708, 1204))
         self.assertEqual(standard_plan.max_completion_tokens, 4096)
-        self.assertAlmostEqual(standard_plan.scale_x, 1224 / 2150.0)
-        self.assertAlmostEqual(standard_plan.scale_y, 1728 / 3036.0)
+        self.assertAlmostEqual(standard_plan.scale_x, 1204 / 2150.0)
+        self.assertAlmostEqual(standard_plan.scale_y, 1708 / 3036.0)
+
+    def test_official_smart_resize_matches_qwen_factor_and_pixel_contract(self) -> None:
+        engine = MangaLMMOCREngine()
+
+        self.assertEqual(
+            engine._official_smart_resize(
+                1920,
+                1360,
+                max_pixels=2_116_800,
+            ),
+            (1708, 1204),
+        )
+        self.assertEqual(
+            engine._official_smart_resize(
+                1600,
+                1200,
+                max_pixels=2_116_800,
+            ),
+            (1596, 1204),
+        )
+        tiny_shape = engine._official_smart_resize(
+            20,
+            20,
+            max_pixels=2_116_800,
+        )
+        self.assertEqual(tiny_shape, (56, 56))
+        for height, width in (
+            (1708, 1204),
+            (1596, 1204),
+            tiny_shape,
+        ):
+            self.assertEqual(height % 28, 0)
+            self.assertEqual(width % 28, 0)
+            self.assertLessEqual(height * width, 2_116_800)
+
+    def test_official_smart_resize_rejects_unsupported_extreme_aspect_ratio(self) -> None:
+        with self.assertRaisesRegex(ValueError, "aspect ratio"):
+            MangaLMMOCREngine._official_smart_resize(
+                20,
+                5000,
+                max_pixels=2_116_800,
+            )
 
     def test_plan_page_request_respects_manual_token_limit_in_direct_mode(self) -> None:
         engine = MangaLMMOCREngine()
@@ -316,7 +363,7 @@ class MangaLMMOCRTests(unittest.TestCase):
 
         self.assertEqual(standard_plan.max_completion_tokens, 320)
 
-    def test_build_attempt_specs_keeps_single_attempt_for_direct_mode(self) -> None:
+    def test_build_attempt_specs_adds_one_native_output_recovery(self) -> None:
         engine = MangaLMMOCREngine()
         settings = _FakeSettings(selected_ocr_mode=OCR_MODE_MANGALMM)
         engine.initialize(
@@ -326,6 +373,32 @@ class MangaLMMOCRTests(unittest.TestCase):
         )
 
         attempts = engine._build_attempt_specs((3036, 2150, 3), _make_blocks(15, width=200, height=300))
+
+        self.assertEqual(len(attempts), 2)
+        self.assertEqual(attempts[0].attempt_kind, "primary")
+        self.assertEqual(
+            attempts[1].attempt_kind,
+            "native_output_recovery",
+        )
+        self.assertIn(
+            "Do not return an empty response",
+            attempts[1].prompt_text,
+        )
+        self.assertEqual(attempts[1].repeat_penalty, 1.15)
+        self.assertEqual(attempts[1].repeat_last_n, 4096)
+
+    def test_build_attempt_specs_keeps_one_attempt_without_detector_blocks(
+        self,
+    ) -> None:
+        engine = MangaLMMOCREngine()
+        settings = _FakeSettings(selected_ocr_mode=OCR_MODE_MANGALMM)
+        engine.initialize(
+            settings,
+            source_lang_english="Japanese",
+            selected_ocr_mode=OCR_MODE_MANGALMM,
+        )
+
+        attempts = engine._build_attempt_specs((3036, 2150, 3), [])
 
         self.assertEqual(len(attempts), 1)
         self.assertEqual(attempts[0].attempt_kind, "primary")
@@ -670,13 +743,41 @@ class MangaLMMOCRTests(unittest.TestCase):
         self.assertTrue(content[0]["image_url"]["url"].startswith("data:image/png;base64,"))
         self.assertEqual(content[1], {"type": "text", "text": engine.DENSE_PROMPT})
         self.assertEqual(payload["max_completion_tokens"], 1024)
-        self.assertEqual(payload["temperature"], 0.1)
-        self.assertEqual(payload["top_k"], 1)
-        self.assertEqual(payload["top_p"], 0.001)
-        self.assertEqual(payload["min_p"], 0.0)
-        self.assertEqual(payload["repeat_penalty"], 1.05)
-        self.assertEqual(payload["repeat_last_n"], 0)
+        self.assertEqual(payload["temperature"], 0.0)
+        self.assertEqual(payload["top_k"], 40)
+        self.assertEqual(payload["top_p"], 0.95)
+        self.assertEqual(payload["min_p"], 0.05)
+        self.assertEqual(payload["repeat_penalty"], 1.0)
+        self.assertEqual(payload["repeat_last_n"], 64)
+        self.assertEqual(payload["seed"], 42)
         self.assertEqual(post.call_args.kwargs["timeout"], 60.0)
+
+    def test_request_response_text_applies_recovery_repeat_overrides(
+        self,
+    ) -> None:
+        engine = MangaLMMOCREngine()
+        image = np.zeros((32, 32, 3), dtype=np.uint8)
+        response = mock.Mock()
+        response.status_code = 200
+        response.json.return_value = {
+            "choices": [{"message": {"content": "[]"}}],
+        }
+
+        with mock.patch(
+            "modules.ocr.mangalmm_ocr.requests.post",
+            return_value=response,
+        ) as post:
+            engine._request_response_text(
+                image,
+                max_completion_tokens=4096,
+                prompt_text=engine.STANDARD_PROMPT,
+                repeat_penalty_override=1.05,
+                repeat_last_n_override=4096,
+            )
+
+        payload = post.call_args.kwargs["json"]
+        self.assertEqual(payload["repeat_penalty"], 1.05)
+        self.assertEqual(payload["repeat_last_n"], 4096)
 
     def test_request_response_text_records_finish_reason_and_usage(
         self,
@@ -902,7 +1003,7 @@ class MangaLMMOCRTests(unittest.TestCase):
 
             self.assertFalse(legacy_root.exists())
 
-    def test_process_image_single_attempt_text_only_is_failure(self) -> None:
+    def test_process_image_bounded_recovery_text_only_is_failure(self) -> None:
         engine = MangaLMMOCREngine()
         settings = _FakeSettings(selected_ocr_mode=OCR_MODE_MANGALMM)
         engine.initialize(
@@ -926,11 +1027,172 @@ class MangaLMMOCRTests(unittest.TestCase):
         with mock.patch.object(engine, "_request_regions_for_attempt", return_value=failure_payload) as request_attempt:
             engine.process_image(image, [blk])
 
-        self.assertEqual(request_attempt.call_count, 1)
+        self.assertEqual(request_attempt.call_count, 2)
         self.assertEqual(blk.text, "")
-        self.assertEqual(blk.ocr_status, "empty_initial")
+        self.assertEqual(blk.ocr_status, "empty_after_retry")
         self.assertEqual(engine.last_request_metadata["final_status"], "failure")
+        self.assertEqual(engine.last_request_metadata["retry_count"], 1)
+
+    def test_process_image_retries_clear_detector_coverage_gap_and_uses_better_result(
+        self,
+    ) -> None:
+        engine = MangaLMMOCREngine()
+        settings = _FakeSettings(selected_ocr_mode=OCR_MODE_MANGALMM)
+        engine.initialize(
+            settings,
+            source_lang_english="Japanese",
+            selected_ocr_mode=OCR_MODE_MANGALMM,
+        )
+        blocks = [
+            _make_block(10, 10, 40, 40),
+            _make_block(70, 10, 100, 40),
+            _make_block(130, 10, 160, 40),
+        ]
+        image = np.zeros((200, 200, 3), dtype=np.uint8)
+
+        def payload(regions: list[OCRRegion], label: str) -> dict:
+            return {
+                "regions": regions,
+                "analysis": {
+                    "response_kind": "json_array",
+                    "payload_type": "json_array",
+                },
+                "raw_text": label,
+                "crop_image": image,
+                "request_image": image,
+                "parsed_region_count": len(regions),
+                "mapped_region_count": len(regions),
+                "metadata": {
+                    "response_kind": "json_array",
+                    "raw_response": label,
+                },
+            }
+
+        first = [_make_region(10, 10, 40, 40, "first")]
+        recovered = [
+            _make_region(10, 10, 40, 40, "first"),
+            _make_region(70, 10, 100, 40, "second"),
+        ]
+        with mock.patch.object(
+            engine,
+            "_request_regions_for_attempt",
+            side_effect=[
+                payload(first, "primary"),
+                payload(recovered, "recovery"),
+            ],
+        ) as request_attempt:
+            engine.process_image(image, blocks)
+
+        self.assertEqual(request_attempt.call_count, 2)
+        self.assertEqual([block.text for block in blocks], ["first", "second", ""])
+        self.assertEqual(blocks[0].ocr_status, "ok_after_retry")
+        self.assertEqual(blocks[2].ocr_status, "empty_after_retry")
+        self.assertEqual(
+            engine.last_attempt_history[0]["failure_reason"],
+            "detector_coverage_gap",
+        )
+        self.assertEqual(engine.last_request_metadata["matched_block_count"], 2)
+        self.assertEqual(engine.last_request_metadata["retry_count"], 1)
+        self.assertEqual(engine.last_request_metadata["raw_response"], "recovery")
+
+    def test_process_image_does_not_retry_at_detector_coverage_threshold(
+        self,
+    ) -> None:
+        engine = MangaLMMOCREngine()
+        blocks = [
+            _make_block(10, 10, 40, 40),
+            _make_block(70, 10, 100, 40),
+            _make_block(10, 70, 40, 100),
+            _make_block(70, 70, 100, 100),
+        ]
+        image = np.zeros((200, 200, 3), dtype=np.uint8)
+        regions = [
+            _make_region(10, 10, 40, 40, "first"),
+            _make_region(70, 10, 100, 40, "second"),
+        ]
+        attempt_payload = {
+            "regions": regions,
+            "analysis": {
+                "response_kind": "json_array",
+                "payload_type": "json_array",
+            },
+            "raw_text": "primary",
+            "crop_image": image,
+            "request_image": image,
+            "parsed_region_count": len(regions),
+            "mapped_region_count": len(regions),
+            "metadata": {
+                "response_kind": "json_array",
+                "raw_response": "primary",
+            },
+        }
+
+        with mock.patch.object(
+            engine,
+            "_request_regions_for_attempt",
+            return_value=attempt_payload,
+        ) as request_attempt:
+            engine.process_image(image, blocks)
+
+        self.assertEqual(request_attempt.call_count, 1)
         self.assertEqual(engine.last_request_metadata["retry_count"], 0)
+        self.assertFalse(engine.last_attempt_history[0]["coverage_gap"])
+
+    def test_process_image_keeps_primary_when_coverage_recovery_is_worse(
+        self,
+    ) -> None:
+        engine = MangaLMMOCREngine()
+        blocks = [
+            _make_block(10, 10, 40, 40),
+            _make_block(70, 10, 100, 40),
+            _make_block(130, 10, 160, 40),
+        ]
+        image = np.zeros((200, 200, 3), dtype=np.uint8)
+        first_region = _make_region(10, 10, 40, 40, "primary text")
+        primary_payload = {
+            "regions": [first_region],
+            "analysis": {
+                "response_kind": "json_array",
+                "payload_type": "json_array",
+            },
+            "raw_text": "primary",
+            "crop_image": image,
+            "request_image": image,
+            "parsed_region_count": 1,
+            "mapped_region_count": 1,
+            "metadata": {
+                "response_kind": "json_array",
+                "raw_response": "primary",
+            },
+        }
+        failed_recovery = {
+            "regions": [],
+            "analysis": {
+                "response_kind": "parser_error:invalid_json",
+                "payload_type": "invalid",
+            },
+            "raw_text": "broken",
+            "crop_image": image,
+            "request_image": image,
+            "parsed_region_count": 0,
+            "mapped_region_count": 0,
+            "metadata": {
+                "response_kind": "parser_error:invalid_json",
+                "raw_response": "broken",
+            },
+        }
+
+        with mock.patch.object(
+            engine,
+            "_request_regions_for_attempt",
+            side_effect=[primary_payload, failed_recovery],
+        ):
+            engine.process_image(image, blocks)
+
+        self.assertEqual(blocks[0].text, "primary text")
+        self.assertEqual(blocks[0].ocr_status, "ok_after_retry")
+        self.assertEqual(engine.last_request_metadata["retry_count"], 1)
+        self.assertEqual(engine.last_request_metadata["raw_response"], "primary")
 
     def test_create_cache_key_normalizes_legacy_optimal_plus_value(self) -> None:
         settings = _FakeSettings()
