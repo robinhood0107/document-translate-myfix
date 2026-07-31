@@ -24,6 +24,9 @@ ALLOWLIST_FILES = frozenset(
         "LICENSE",
         "README.md",
         "README_ko.md",
+        "docs/architecture/codebase-map-ko.md",
+        "docs/runtime/managed-llamacpp-only-ko.md",
+        "docs/runtime/obsolete-vllm-runtime-manifest.json",
         "comic.py",
         "controller.py",
         "docker-compose.gemma-host-rollback.yaml",
@@ -39,6 +42,8 @@ ALLOWLIST_FILES = frozenset(
         "scripts/prepare_paddleocr_llamacpp_runtime.ps1",
         "scripts/derive_paddleocr_spotting_mmproj.py",
         "scripts/prepare_paddleocr_spotting_llamacpp_runtime.ps1",
+        "scripts/retire_legacy_vllm_runtime.py",
+        "scripts/verify_managed_llamacpp_runtime.py",
         "scripts/verify_windows_runtime.py",
     }
 )
