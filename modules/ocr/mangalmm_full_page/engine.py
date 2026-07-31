@@ -61,7 +61,11 @@ from .image_policy import (
     official_smart_resize,
     round_by_factor,
 )
-from .reconciliation import OCRRegion
+from .reconciliation import (
+    MANGALMM_RECONCILIATION_SCHEMA_VERSION,
+    OCRRegion,
+    prepare_safe_detector_compound,
+)
 from ..persistent_cache import canonical_sha256
 from ..common.result_contract import (
     OCR_STRATEGY_MANGALMM_FULL_PAGE,
@@ -98,6 +102,7 @@ DEFAULT_MANGALMM_SEED = 42
 MANGALMM_RECOVERY_REPEAT_PENALTY = 1.15
 MANGALMM_RECOVERY_REPEAT_LAST_N = 4096
 MANGALMM_RECOVERY_MIN_DETECTOR_COVERAGE = 0.50
+MANGALMM_SPARSE_RECOVERY_MAX_BLOCKS = 4
 DEFAULT_MANGALMM_PNG_COMPRESSION = 1
 DEFAULT_MANGALMM_DEBUG_EXPORT_LIMIT = 96
 
@@ -287,6 +292,9 @@ class MangaLMMOCREngine(OCREngine):
             block.ocr_geometry_provenance = {
                 **dict(block.ocr_geometry_provenance),
                 "contract_schema_version": MANGALMM_RESPONSE_SCHEMA_VERSION,
+                "reconciliation_schema_version": (
+                    MANGALMM_RECONCILIATION_SCHEMA_VERSION
+                ),
                 "ocr_strategy": OCR_STRATEGY_MANGALMM_FULL_PAGE,
                 "detector_geometry_authoritative": True,
                 "detector_text_bbox": self._coords_or_none(
@@ -316,12 +324,12 @@ class MangaLMMOCREngine(OCREngine):
                 else 0.0
             )
             has_next_attempt = attempt_spec.index + 1 < len(attempt_specs)
-            coverage_gap = (
+            delivery_coverage_gap = (
                 matched_block_count > 0
-                and has_next_attempt
                 and detector_coverage
                 < MANGALMM_RECOVERY_MIN_DETECTOR_COVERAGE
             )
+            coverage_gap = bool(delivery_coverage_gap and has_next_attempt)
             attempt_entry = {
                 **attempt_result["metadata"],
                 "attempt_index": int(attempt_spec.index),
@@ -334,6 +342,31 @@ class MangaLMMOCREngine(OCREngine):
                 "detector_coverage": float(detector_coverage),
                 "coverage_gap": bool(coverage_gap),
                 "raw_response_length": len(str(attempt_result["raw_text"] or "")),
+                "raw_structure_status": (
+                    "success"
+                    if (
+                        int(attempt_result["parsed_region_count"]) > 0
+                        and int(attempt_result["mapped_region_count"]) > 0
+                        and str(
+                            attempt_result["metadata"].get(
+                                "finish_reason",
+                                "",
+                            )
+                            or ""
+                        ).lower()
+                        != "length"
+                    )
+                    else "failure"
+                ),
+                "detector_delivery_status": (
+                    "review"
+                    if matched_block_count <= 0
+                    else (
+                        "partial"
+                        if delivery_coverage_gap
+                        else "success"
+                    )
+                ),
             }
             failure_reason = ""
             if int(attempt_result["parsed_region_count"]) <= 0:
@@ -342,12 +375,12 @@ class MangaLMMOCREngine(OCREngine):
                 failure_reason = "mapped_regions_out_of_bounds"
             elif matched_block_count <= 0:
                 failure_reason = "no_block_match"
-            elif coverage_gap:
+            elif delivery_coverage_gap:
                 failure_reason = "detector_coverage_gap"
             attempt_entry["failure_reason"] = failure_reason
             attempt_entry["final_status"] = (
                 "partial"
-                if coverage_gap
+                if delivery_coverage_gap
                 else ("success" if matched_block_count > 0 else "failure")
             )
             self.last_attempt_history.append(attempt_entry)
@@ -456,6 +489,20 @@ class MangaLMMOCREngine(OCREngine):
                 "contract_mode": self.contract_mode,
                 "final_status": "failure",
                 "failure_reason": str(self.last_attempt_history[-1].get("failure_reason", "") or "no_valid_regions"),
+                "raw_structure_status": str(
+                    self.last_attempt_history[-1].get(
+                        "raw_structure_status",
+                        "failure",
+                    )
+                    or "failure"
+                ),
+                "detector_delivery_status": str(
+                    self.last_attempt_history[-1].get(
+                        "detector_delivery_status",
+                        "review",
+                    )
+                    or "review"
+                ),
                 "matched_region_count": 0,
                 "matched_block_count": 0,
                 "mapped_region_count": len(self.last_page_regions),
@@ -468,6 +515,15 @@ class MangaLMMOCREngine(OCREngine):
             }
 
         if final_attempt is not None:
+            selected_attempt_entry = next(
+                (
+                    item
+                    for item in self.last_attempt_history
+                    if int(item.get("attempt_index", -1))
+                    == int(final_attempt.index)
+                ),
+                {},
+            )
             self.last_request_metadata = {
                 **self.last_request_metadata,
                 "attempts": list(self.last_attempt_history),
@@ -476,6 +532,20 @@ class MangaLMMOCREngine(OCREngine):
                 "contract_mode": self.contract_mode,
                 "final_status": "success",
                 "failure_reason": "",
+                "raw_structure_status": str(
+                    selected_attempt_entry.get(
+                        "raw_structure_status",
+                        "failure",
+                    )
+                    or "failure"
+                ),
+                "detector_delivery_status": str(
+                    selected_attempt_entry.get(
+                        "detector_delivery_status",
+                        "review",
+                    )
+                    or "review"
+                ),
                 "matched_region_count": sum(len(items) for items in assignments.values()),
                 "matched_block_count": sum(1 for items in assignments.values() if items),
                 "mapped_region_count": len(self.last_page_regions),
@@ -646,15 +716,28 @@ class MangaLMMOCREngine(OCREngine):
             )
         ]
         if blk_list:
+            sparse_recovery = (
+                initial_plan.block_count
+                <= MANGALMM_SPARSE_RECOVERY_MAX_BLOCKS
+            )
             attempts.append(
                 AttemptSpec(
                     index=1,
                     resize_plan=initial_plan,
                     prompt_mode=f"{initial_prompt_mode}_recovery",
                     prompt_text=(
-                        initial_prompt_text + self.RECOVERY_PROMPT_SUFFIX
+                        initial_prompt_text
+                        if sparse_recovery
+                        else (
+                            initial_prompt_text
+                            + self.RECOVERY_PROMPT_SUFFIX
+                        )
                     ),
-                    attempt_kind="native_output_recovery",
+                    attempt_kind=(
+                        "sparse_native_output_recovery"
+                        if sparse_recovery
+                        else "native_output_recovery"
+                    ),
                     repeat_penalty=MANGALMM_RECOVERY_REPEAT_PENALTY,
                     repeat_last_n=MANGALMM_RECOVERY_REPEAT_LAST_N,
                 )
@@ -1012,9 +1095,61 @@ class MangaLMMOCREngine(OCREngine):
                 model_identity=MANGALMM_MODEL_NAME,
                 runtime_identity=self._runtime_identity_fingerprint(),
             )
+            block.compound_group_id = ""
         for region in regions:
             candidates = self._candidate_block_matches(region, blk_list)
             if not candidates:
+                coverage_candidates = self._coverage_block_matches(
+                    region,
+                    blk_list,
+                )
+                if len(coverage_candidates) > 1:
+                    block_ids = [
+                        ensure_text_block_id(blk_list[index])
+                        for index, _metrics in coverage_candidates
+                    ]
+                    diagnostic = {
+                        "kind": "one_region_multiple_blocks_coverage",
+                        "status": "review",
+                        "region_bbox_xyxy": list(region.bbox_xyxy),
+                        "candidate_block_ids": block_ids,
+                        "candidate_metrics": [
+                            {
+                                "block_id": ensure_text_block_id(
+                                    blk_list[index]
+                                ),
+                                **dict(metrics),
+                            }
+                            for index, metrics in coverage_candidates
+                        ],
+                    }
+                    self.last_merge_split_diagnostics.append(diagnostic)
+                    self.last_shadow_regions.append(
+                        self._serialize_shadow_region(
+                            region,
+                            reason=(
+                                "one_region_multiple_blocks_coverage"
+                            ),
+                            candidate_block_ids=block_ids,
+                        )
+                    )
+                    for block_index, _metrics in coverage_candidates:
+                        block = blk_list[block_index]
+                        block.merge_split_diagnostics = {
+                            **dict(
+                                getattr(
+                                    block,
+                                    "merge_split_diagnostics",
+                                    {},
+                                )
+                                or {}
+                            ),
+                            (
+                                "mangalmm_one_region_multiple_blocks_"
+                                "coverage"
+                            ): diagnostic,
+                        }
+                    continue
                 self.last_shadow_regions.append(
                     self._serialize_shadow_region(
                         region,
@@ -1090,14 +1225,84 @@ class MangaLMMOCREngine(OCREngine):
 
             block = blk_list[blk_index]
             block_id = ensure_text_block_id(block)
+            compound = prepare_safe_detector_compound(
+                unique_items,
+                allow_multi_region=(
+                    str(getattr(block, "text_class", "") or "")
+                    == "text_bubble"
+                    and self._normalize_box(
+                        getattr(block, "bubble_xyxy", None)
+                    )
+                    is not None
+                ),
+                direction=str(getattr(block, "direction", "") or ""),
+            )
+            if compound.accepted:
+                assignments[blk_index] = list(compound.ordered_items)
+                is_multi_region = len(compound.ordered_items) > 1
+                diagnostic = {
+                    "kind": (
+                        "multiple_regions_one_block_compound"
+                        if is_multi_region
+                        else "near_duplicate_regions_collapsed"
+                    ),
+                    "status": "compound" if is_multi_region else "matched",
+                    "block_id": block_id,
+                    "compound_group_id": block_id if is_multi_region else "",
+                    "input_region_count": len(unique_items),
+                    "accepted_region_count": len(compound.ordered_items),
+                    "near_duplicate_count": len(compound.duplicate_items),
+                    "decision_reason": compound.reason,
+                    "region_bboxes_xyxy": [
+                        list(item["region"].bbox_xyxy)
+                        for item in compound.ordered_items
+                    ],
+                    "ordered_texts": [
+                        str(item["region"].text or "")
+                        for item in compound.ordered_items
+                    ],
+                }
+                self.last_merge_split_diagnostics.append(diagnostic)
+                diagnostic_key = (
+                    "mangalmm_multiple_regions_one_block_compound"
+                    if is_multi_region
+                    else "mangalmm_near_duplicate_regions_collapsed"
+                )
+                block.merge_split_diagnostics = {
+                    **dict(
+                        getattr(block, "merge_split_diagnostics", {}) or {}
+                    ),
+                    diagnostic_key: diagnostic,
+                }
+                block.compound_group_id = (
+                    block_id if is_multi_region else ""
+                )
+                continue
+
+            shadow_reason = {
+                "overlapping_distinct_regions": (
+                    "multiple_regions_one_block_overlap"
+                ),
+                "weak_precision_evidence": (
+                    "multiple_regions_one_block_weak_evidence"
+                ),
+                "missing_bubble_compound_boundary": (
+                    "multiple_regions_one_block_no_bubble"
+                ),
+            }.get(compound.reason, "multiple_regions_one_block")
             diagnostic = {
                 "kind": "multiple_regions_one_block",
+                "status": "review",
                 "block_id": block_id,
                 "region_bboxes_xyxy": [
                     list(item["region"].bbox_xyxy)
                     for item in unique_items
                 ],
                 "region_count": len(unique_items),
+                "decision_reason": compound.reason,
+                "overlap_conflicts": [
+                    dict(item) for item in compound.overlap_conflicts
+                ],
             }
             self.last_merge_split_diagnostics.append(diagnostic)
             block.merge_split_diagnostics = {
@@ -1110,7 +1315,7 @@ class MangaLMMOCREngine(OCREngine):
                 self.last_shadow_regions.append(
                     self._serialize_shadow_region(
                         item["region"],
-                        reason="multiple_regions_one_block",
+                        reason=shadow_reason,
                         candidate_block_ids=[block_id],
                     )
                 )
@@ -1179,39 +1384,29 @@ class MangaLMMOCREngine(OCREngine):
                 continue
 
             unique_items = self._dedupe_exact_region_assignments(items)
-            if len(unique_items) != 1:
-                block_id = ensure_text_block_id(blk)
-                diagnostic = {
-                    "kind": "multiple_regions_one_block",
-                    "block_id": block_id,
-                    "region_count": len(unique_items),
-                }
-                self.last_merge_split_diagnostics.append(diagnostic)
-                blk.merge_split_diagnostics = {
-                    **dict(
-                        getattr(blk, "merge_split_diagnostics", {}) or {}
-                    ),
-                    "mangalmm_multiple_regions_one_block": diagnostic,
-                }
-                self._mark_empty(
-                    blk,
-                    "MangaLMM returned multiple distinct OCR regions for one "
-                    "detector block; automatic text concatenation was refused.",
-                    attempt_count=attempt_count,
-                    status=empty_status,
-                    crop_bbox=page_bbox_list,
-                    crop_source="page_full",
-                    resize_scale=resize_plan.base_scale,
-                )
-                continue
-
             source_item = unique_items[0]
             source_region: OCRRegion = source_item["region"]
-            final_text = str(source_region.text or "").strip()
-            final_raw_text = str(
-                source_region.raw_text or source_region.text or ""
-            ).strip()
-            blk.texts = [final_text]
+            final_texts = [
+                str(item["region"].text or "").strip()
+                for item in unique_items
+                if str(item["region"].text or "").strip()
+            ]
+            final_raw_texts = [
+                str(
+                    item["region"].raw_text
+                    or item["region"].text
+                    or ""
+                ).strip()
+                for item in unique_items
+                if str(
+                    item["region"].raw_text
+                    or item["region"].text
+                    or ""
+                ).strip()
+            ]
+            final_text = "\n".join(final_texts)
+            final_raw_text = "\n".join(final_raw_texts)
+            blk.texts = final_texts
             blk.text = final_text
             blk.ocr_regions = [
                 self._serialize_region_assignment(item["region"], item["metrics"])
@@ -1222,6 +1417,9 @@ class MangaLMMOCREngine(OCREngine):
                     getattr(blk, "ocr_geometry_provenance", {}) or {}
                 ),
                 "matched_region_count": len(unique_items),
+                "compound_group_id": str(
+                    getattr(blk, "compound_group_id", "") or ""
+                ),
                 "matched_region_bboxes_xyxy": [
                     list(item["region"].bbox_xyxy)
                     for item in unique_items
@@ -1272,6 +1470,12 @@ class MangaLMMOCREngine(OCREngine):
                 "ownership_cover": float(metrics["ownership_cover"]),
                 "precision_cover": float(metrics["precision_cover"]),
                 "ownership_iou": float(metrics["ownership_iou"]),
+                "ownership_block_coverage": float(
+                    metrics.get("ownership_block_coverage", 0.0) or 0.0
+                ),
+                "precision_block_coverage": float(
+                    metrics.get("precision_block_coverage", 0.0) or 0.0
+                ),
                 "center_in_ownership": bool(metrics["center_in_ownership"]),
                 "center_in_precision": bool(metrics["center_in_precision"]),
                 "center_distance_norm": float(metrics["center_distance_norm"]),
@@ -1318,6 +1522,36 @@ class MangaLMMOCREngine(OCREngine):
             if self._accept_match(blk_list[index], metrics)
         ]
 
+    def _coverage_block_matches(
+        self,
+        region: OCRRegion,
+        blk_list: list[TextBlock],
+    ) -> list[tuple[int, dict[str, float | bool]]]:
+        candidates: list[tuple[int, dict[str, float | bool]]] = []
+        for index, block in enumerate(blk_list):
+            metrics = self._compute_match_metrics(
+                tuple(region.bbox_xyxy),
+                block,
+            )
+            if metrics is None:
+                continue
+            if max(
+                float(metrics["precision_block_coverage"]),
+                float(metrics["ownership_block_coverage"]),
+            ) < 0.50:
+                continue
+            candidates.append((index, metrics))
+        candidates.sort(
+            key=lambda item: (
+                -max(
+                    float(item[1]["precision_block_coverage"]),
+                    float(item[1]["ownership_block_coverage"]),
+                ),
+                int(item[0]),
+            )
+        )
+        return candidates
+
     def _compute_match_metrics(
         self,
         region_box: tuple[int, int, int, int],
@@ -1339,8 +1573,16 @@ class MangaLMMOCREngine(OCREngine):
         if not center_in_support and (support_intersection / float(region_area)) < 0.10:
             return None
 
-        ownership_cover = self._intersection_area(region_box, ownership_box) / float(region_area)
-        precision_cover = self._intersection_area(region_box, precision_box) / float(region_area)
+        ownership_intersection = self._intersection_area(
+            region_box,
+            ownership_box,
+        )
+        precision_intersection = self._intersection_area(
+            region_box,
+            precision_box,
+        )
+        ownership_cover = ownership_intersection / float(region_area)
+        precision_cover = precision_intersection / float(region_area)
         ownership_iou = self._bbox_iou(region_box, ownership_box)
         center_in_ownership = self._point_in_box(center, ownership_box)
         center_in_precision = self._point_in_box(center, precision_box)
@@ -1352,6 +1594,14 @@ class MangaLMMOCREngine(OCREngine):
             "ownership_cover": ownership_cover,
             "precision_cover": precision_cover,
             "ownership_iou": ownership_iou,
+            "ownership_block_coverage": (
+                ownership_intersection
+                / float(max(1, self._bbox_area(ownership_box)))
+            ),
+            "precision_block_coverage": (
+                precision_intersection
+                / float(max(1, self._bbox_area(precision_box)))
+            ),
             "center_in_ownership": center_in_ownership,
             "center_in_precision": center_in_precision,
             "center_distance_norm": center_distance_norm,
@@ -1705,6 +1955,9 @@ class MangaLMMOCREngine(OCREngine):
         return canonical_sha256(
             {
                 "contract_schema_version": MANGALMM_RESPONSE_SCHEMA_VERSION,
+                "reconciliation_schema_version": (
+                    MANGALMM_RECONCILIATION_SCHEMA_VERSION
+                ),
                 "endpoint": self._chat_completions_url(),
                 "model": MANGALMM_MODEL_NAME,
             }

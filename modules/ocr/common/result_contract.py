@@ -329,6 +329,8 @@ def initialize_ocr_result_contract(
     if not isinstance(getattr(block, "duplicate_alias_block_ids", None), list):
         block.duplicate_alias_block_ids = []
     block.duplicate_alias_count = len(block.duplicate_alias_block_ids)
+    if not hasattr(block, "compound_group_id"):
+        block.compound_group_id = ""
     if not isinstance(getattr(block, "merge_split_diagnostics", None), dict):
         block.merge_split_diagnostics = {}
 
