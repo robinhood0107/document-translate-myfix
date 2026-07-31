@@ -115,6 +115,215 @@ class StageBatchedCancellationTests(unittest.TestCase):
 
         processor._start_prewarm.assert_called_once()
 
+    def test_confirmed_paddle_cache_miss_bypasses_unrelated_rows(self) -> None:
+        processor = self._processor(cancelled=False)
+        processor.main_page.local_ocr_runtime_manager = LocalOCRRuntimeManager()
+        processor.main_page.settings_page = SimpleNamespace(
+            get_paddleocr_vl_settings=lambda: {
+                "persistent_cache_enabled": True,
+            }
+        )
+        processor._project_checkpoint_store = SimpleNamespace(
+            has_stage_record=lambda _page_key, _stage: True,
+        )
+        processor._project_checkpoint_page_keys = ["page:00000000"]
+        processor._get_paddleocr_cache_store = mock.Mock(
+            return_value=SimpleNamespace(
+                stats=lambda: {
+                    "enabled": True,
+                    "item_count": 42,
+                }
+            )
+        )
+        processor._start_prewarm = mock.Mock()
+
+        processor._start_ocr_prewarm(
+            {"primary_ocr_engine": "PaddleOCR VL"},
+            cache_miss_confirmed=True,
+        )
+
+        processor._start_prewarm.assert_called_once()
+
+    def test_detected_page_global_cache_hit_keeps_runtime_stopped(self) -> None:
+        processor = self._processor(cancelled=False)
+        runtime_manager = LocalOCRRuntimeManager()
+        runtime_manager.get_ocr_cache_identity = mock.Mock(
+            return_value={"runtime_fingerprint": "runtime"}
+        )
+        processor.main_page.local_ocr_runtime_manager = runtime_manager
+        processor.main_page.settings_page = SimpleNamespace(
+            get_paddleocr_vl_settings=lambda: {
+                "persistent_cache_enabled": True,
+            }
+        )
+        processor._project_checkpoint_store = None
+        processor._prewarm_jobs = {}
+        processor._paddleocr_cache_identity = None
+        processor._canonicalize_ocr_inputs = mock.Mock()
+        processor._prepare_paddleocr_cache_plans = mock.Mock(
+            return_value=False
+        )
+        processor._start_ocr_prewarm = mock.Mock()
+        processor._emit_benchmark_event = mock.Mock()
+        page = StagePageContext(
+            image_path="page.png",
+            image_name="page.png",
+            source_lang="Japanese",
+            target_lang="Korean",
+            image=np.zeros((20, 20, 3), dtype=np.uint8),
+            blk_list=[
+                TextBlock(
+                    text_bbox=np.array([1, 1, 10, 10], dtype=np.int32)
+                )
+            ],
+        )
+
+        processor._plan_detected_page_ocr_prewarm(
+            page,
+            {
+                "primary_ocr_engine": "PaddleOCR VL",
+                "normalized_ocr_mode": "best_local",
+            },
+            index=0,
+            total_images=1,
+        )
+
+        processor._prepare_paddleocr_cache_plans.assert_called_once()
+        processor._start_ocr_prewarm.assert_not_called()
+        processor._emit_benchmark_event.assert_called_once_with(
+            "ocr_prewarm_decision",
+            image_path="page.png",
+            image_index=0,
+            total_images=1,
+            decision="defer",
+            reason="persistent_cache_hit",
+        )
+
+    def test_detected_page_cache_miss_starts_overlap_despite_other_rows(
+        self,
+    ) -> None:
+        processor = self._processor(cancelled=False)
+        runtime_manager = LocalOCRRuntimeManager()
+        runtime_manager.get_ocr_cache_identity = mock.Mock(
+            return_value={"runtime_fingerprint": "runtime"}
+        )
+        processor.main_page.local_ocr_runtime_manager = runtime_manager
+        processor.main_page.settings_page = SimpleNamespace(
+            get_paddleocr_vl_settings=lambda: {
+                "persistent_cache_enabled": True,
+            }
+        )
+        processor._project_checkpoint_store = None
+        processor._prewarm_jobs = {}
+        processor._paddleocr_cache_identity = None
+        processor._canonicalize_ocr_inputs = mock.Mock()
+        processor._prepare_paddleocr_cache_plans = mock.Mock(
+            return_value=True
+        )
+        processor._start_ocr_prewarm = mock.Mock()
+        processor._emit_benchmark_event = mock.Mock()
+        page = StagePageContext(
+            image_path="new-page.png",
+            image_name="new-page.png",
+            source_lang="Japanese",
+            target_lang="Korean",
+            image=np.zeros((20, 20, 3), dtype=np.uint8),
+            blk_list=[
+                TextBlock(
+                    text_bbox=np.array([1, 1, 10, 10], dtype=np.int32)
+                )
+            ],
+        )
+
+        processor._plan_detected_page_ocr_prewarm(
+            page,
+            {
+                "primary_ocr_engine": "PaddleOCR VL",
+                "normalized_ocr_mode": "best_local",
+            },
+            index=0,
+            total_images=6,
+        )
+
+        processor._start_ocr_prewarm.assert_called_once_with(
+            {
+                "primary_ocr_engine": "PaddleOCR VL",
+                "normalized_ocr_mode": "best_local",
+            },
+            cache_miss_confirmed=True,
+        )
+        processor._emit_benchmark_event.assert_called_once_with(
+            "ocr_prewarm_decision",
+            image_path="new-page.png",
+            image_index=0,
+            total_images=6,
+            decision="start",
+            reason="persistent_cache_miss",
+        )
+
+    def test_detected_page_project_hit_skips_global_cache_and_runtime(
+        self,
+    ) -> None:
+        processor = self._processor(cancelled=False)
+        runtime_manager = LocalOCRRuntimeManager()
+        runtime_manager.get_ocr_cache_identity = mock.Mock(
+            return_value={"runtime_fingerprint": "runtime"}
+        )
+        processor.main_page.local_ocr_runtime_manager = runtime_manager
+        processor.main_page.settings_page = SimpleNamespace(
+            get_paddleocr_vl_settings=lambda: {
+                "persistent_cache_enabled": True,
+            }
+        )
+        processor._project_checkpoint_store = object()
+        processor._prewarm_jobs = {}
+        processor._paddleocr_cache_identity = None
+        processor._canonicalize_ocr_inputs = mock.Mock()
+        checkpoint_hit = object()
+
+        def prepare_project(pages, _policy, _identity) -> None:
+            pages[0].project_ocr_hit = checkpoint_hit
+
+        processor._prepare_project_ocr_hits = mock.Mock(
+            side_effect=prepare_project
+        )
+        processor._prepare_paddleocr_cache_plans = mock.Mock()
+        processor._start_ocr_prewarm = mock.Mock()
+        processor._emit_benchmark_event = mock.Mock()
+        page = StagePageContext(
+            image_path="page.png",
+            image_name="page.png",
+            source_lang="Japanese",
+            target_lang="Korean",
+            image=np.zeros((20, 20, 3), dtype=np.uint8),
+            blk_list=[
+                TextBlock(
+                    text_bbox=np.array([1, 1, 10, 10], dtype=np.int32)
+                )
+            ],
+        )
+
+        processor._plan_detected_page_ocr_prewarm(
+            page,
+            {
+                "primary_ocr_engine": "PaddleOCR VL",
+                "normalized_ocr_mode": "best_local",
+            },
+            index=0,
+            total_images=1,
+        )
+
+        processor._prepare_paddleocr_cache_plans.assert_not_called()
+        processor._start_ocr_prewarm.assert_not_called()
+        processor._emit_benchmark_event.assert_called_once_with(
+            "ocr_prewarm_decision",
+            image_path="page.png",
+            image_index=0,
+            total_images=1,
+            decision="defer",
+            reason="project_checkpoint_hit",
+        )
+
     def test_non_empty_project_cache_defers_ocr_prewarm(self) -> None:
         processor = self._processor(cancelled=False)
         processor.main_page.local_ocr_runtime_manager = LocalOCRRuntimeManager()
@@ -923,7 +1132,10 @@ class StageBatchedCancellationTests(unittest.TestCase):
         with mock.patch.dict(os.environ, {"CT_BENCH_STAGE_CEILING": "ocr"}):
             processor.batch_process()
 
-        processor._detect_all.assert_called_once_with(pages)
+        processor._detect_all.assert_called_once_with(
+            pages,
+            {"primary_ocr_engine": "PaddleOCR VL"},
+        )
         processor._ocr_all.assert_called_once_with(
             pages,
             {"primary_ocr_engine": "PaddleOCR VL"},
