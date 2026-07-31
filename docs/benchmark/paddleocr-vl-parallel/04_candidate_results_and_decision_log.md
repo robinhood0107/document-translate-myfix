@@ -111,6 +111,21 @@ suite가 완료되면 이 문서에는 다음을 추가한다.
 - 단독 상주 계약과 승격 근거는 benchmarking/lab 문서와 latest/history 자산에 계속 보존
 - 이후 2차에서만 `weighted concurrency`, `22장 full corpus`, `MangaLMM 동시 상주`를 다시 검토
 
+## 2026-08-01 folder-global queue 재검증
+
+과거 소규모 실행에서 출력 동일 조건으로 2.8904% 빨랐던 `folder-global queue + worker 4`를 현재 llama.cpp CUDA Stage-Batched 경로에서 다시 검증했다.
+
+- 7회 paired 실행에서 snapshot 7/7 완전 동일
+- 후보 중앙값 명목 개선 0.257%
+- 후보 승패 4승 3패
+- 단측 95% bootstrap 하한 -0.891%
+- 첫 cold outlier 제외 시 평균 0.521% 느림
+- 페이지 실패·HTTP retry·신규 WSL swap 증가 0
+
+최소 개선율은 적용하지 않았지만, 실제 양수 이득을 입증하지 못했으므로 `reject_no_proven_speed_gain`으로 확정했다. 제품은 페이지 단위 장벽과 worker 8을 유지한다.
+
+상세 근거: [folder-global queue CUDA 최종 판정](./folder-global-queue-final-decision-ko.md)
+
 ## 저자 및 기여
 
 - 핵심 문제 해결 방향은 사용자가 착안했다.
