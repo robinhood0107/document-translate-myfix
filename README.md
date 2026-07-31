@@ -238,6 +238,10 @@ docker compose -f hunyuanocr_docker_files/docker-compose.yaml up -d
 
 PaddleOCR VL uses the tracked bundle under [paddleocr_vl_docker_files/README.md](paddleocr_vl_docker_files/README.md).
 
+The optional full-page `Spotting:` route has an independent projector,
+container, named volume, and cache identity. Its setup is documented in
+[paddleocr_vl_spotting_docker_files/README.md](paddleocr_vl_spotting_docker_files/README.md).
+
 Managed containers are stopped and preserved after stage completion, cancellation, or app shutdown. Use `docker compose down` only when you explicitly want to reset or remove a runtime.
 
 ### 4. Recommended OCR setting
