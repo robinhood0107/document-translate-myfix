@@ -12,6 +12,7 @@ from ..dayu_widgets.qt import MPixmap
 from .personalization_page import PersonalizationPage
 from .tools_page import ToolsPage
 from .paddleocr_vl_page import PaddleOCRVLPage
+from .paddleocr_vl_spotting_page import PaddleOCRVLSpottingPage
 from .hunyuan_ocr_page import HunyuanOCRPage
 from .mangalmm_ocr_page import MangaLMMOCRPage
 from .gemma_local_server_page import GemmaLocalServerPage
@@ -105,7 +106,8 @@ class SettingsPageUI(QtWidgets.QWidget):
             'Italiano', 
         ]
         
-        self.nav_cards = []  
+        self.nav_cards = []
+        self.nav_index_by_title = {}
         self.current_highlighted_nav = None
 
         self.value_mappings = {
@@ -145,6 +147,9 @@ class SettingsPageUI(QtWidgets.QWidget):
             self.tr("Google Cloud Vision"): "google_cloud_vision",
             self.tr("Gemini-2.0-Flash"): "gemini_2_0_flash",
             self.tr("PaddleOCR VL"): "paddleocr_vl",
+            self.tr("PaddleOCR VL Spotting (Full Page)"): (
+                "paddleocr_vl_spotting"
+            ),
             self.tr("HunyuanOCR"): "hunyuanocr",
             self.tr("MangaLMM"): "mangalmm",
 
@@ -226,6 +231,9 @@ class SettingsPageUI(QtWidgets.QWidget):
         for index, key in enumerate(self.ocr_engine_keys):
             self.tools_page.ocr_combo.setItemData(index, key)
         self.paddleocr_vl_page = PaddleOCRVLPage(parent=self)
+        self.paddleocr_vl_spotting_page = PaddleOCRVLSpottingPage(
+            parent=self
+        )
         self.hunyuan_ocr_page = HunyuanOCRPage(parent=self)
         self.mangalmm_ocr_page = MangaLMMOCRPage(parent=self)
         self.gemma_local_server_page = GemmaLocalServerPage(parent=self)
@@ -270,6 +278,15 @@ class SettingsPageUI(QtWidgets.QWidget):
         self.paddleocr_vl_parallel_workers_spinbox = self.paddleocr_vl_page.parallel_workers_spinbox
         self.paddleocr_vl_persistent_cache_checkbox = self.paddleocr_vl_page.persistent_cache_checkbox
         self.paddleocr_vl_persistent_cache_limit_spinbox = self.paddleocr_vl_page.persistent_cache_limit_spinbox
+        self.paddleocr_vl_spotting_server_url_input = (
+            self.paddleocr_vl_spotting_page.server_url_input
+        )
+        self.paddleocr_vl_spotting_max_completion_tokens_spinbox = (
+            self.paddleocr_vl_spotting_page.max_completion_tokens_spinbox
+        )
+        self.paddleocr_vl_spotting_request_timeout_spinbox = (
+            self.paddleocr_vl_spotting_page.request_timeout_spinbox
+        )
         self.hunyuan_ocr_server_url_input = self.hunyuan_ocr_page.server_url_input
         self.hunyuan_ocr_max_completion_tokens_spinbox = self.hunyuan_ocr_page.max_completion_tokens_spinbox
         self.hunyuan_ocr_parallel_workers_spinbox = self.hunyuan_ocr_page.parallel_workers_spinbox
@@ -356,6 +373,7 @@ class SettingsPageUI(QtWidgets.QWidget):
         self.stacked_widget.addWidget(self.personalization_page)
         self.stacked_widget.addWidget(self.tools_page)
         self.stacked_widget.addWidget(self.paddleocr_vl_page)
+        self.stacked_widget.addWidget(self.paddleocr_vl_spotting_page)
         self.stacked_widget.addWidget(self.hunyuan_ocr_page)
         self.stacked_widget.addWidget(self.mangalmm_ocr_page)
         self.stacked_widget.addWidget(self.gemma_local_server_page)
@@ -417,6 +435,10 @@ class SettingsPageUI(QtWidgets.QWidget):
             {"title": self.tr("Personalization"), "avatar": MPixmap(".svg")},
             {"title": self.tr("Tools"), "avatar": MPixmap(".svg")},
             {"title": self.tr("PaddleOCR VL Settings"), "avatar": MPixmap(".svg")},
+            {
+                "title": self.tr("PaddleOCR VL Spotting Settings"),
+                "avatar": MPixmap(".svg"),
+            },
             {"title": self.tr("HunyuanOCR Settings"), "avatar": MPixmap(".svg")},
             {"title": self.tr("MangaLMM Settings"), "avatar": MPixmap(".svg")},
             {"title": self.tr("Gemma Local Server Settings"), "avatar": MPixmap(".svg")},
@@ -436,9 +458,13 @@ class SettingsPageUI(QtWidgets.QWidget):
             nav_card.clicked.connect(lambda i=index, c=nav_card: self.on_nav_clicked(i, c))
             navbar_layout.addWidget(nav_card)
             self.nav_cards.append(nav_card)
+            self.nav_index_by_title[str(setting["title"])] = index
 
         navbar_layout.addStretch(1)
         return navbar_widget
+
+    def nav_index_for_title(self, title: str, fallback: int = 0) -> int:
+        return int(self.nav_index_by_title.get(str(title or ""), fallback))
 
     def on_nav_clicked(self, index: int, clicked_nav: ClickMeta):
         # Remove highlight from the previously highlighted nav item

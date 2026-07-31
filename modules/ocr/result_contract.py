@@ -8,6 +8,7 @@ from modules.utils.textblock import ensure_text_block_id
 
 
 OCR_STRATEGY_PADDLE_CROP = "paddle_crop"
+OCR_STRATEGY_PADDLE_SPOTTING = "paddle_spotting_full_page"
 OCR_STRATEGY_MANGALMM_FULL_PAGE = "mangalmm_full_page"
 OCR_PROCESSING_CONTRACT_SCHEMA_VERSION = 1
 

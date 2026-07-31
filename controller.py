@@ -102,6 +102,22 @@ def _env_enabled(name: str) -> bool:
 ENABLE_MEMLOGGER = _env_enabled("CT_ENABLE_MEMLOG") or _env_enabled("CT_ENABLE_GPU_BENCH")
 DISABLE_BACKGROUND_UPDATE_CHECK = _env_enabled("CT_DISABLE_UPDATE_CHECK")
 
+
+def _runtime_service_event_key(service_name: str) -> str:
+    normalized = str(service_name or "").strip().lower()
+    if "paddle" in normalized and "spotting" in normalized:
+        return "paddleocr_vl_spotting"
+    if "gemma" in normalized:
+        return "gemma"
+    if "paddle" in normalized:
+        return "paddleocr_vl"
+    if "hunyuan" in normalized:
+        return "hunyuanocr"
+    if "manga" in normalized:
+        return "mangalmm"
+    return "batch"
+
+
 class ComicTranslate(ComicTranslateUI):
     image_processed = QtCore.Signal(int, object, str)
     patches_processed = QtCore.Signal(list, str)
@@ -1592,12 +1608,13 @@ class ComicTranslate(ComicTranslateUI):
         self.show_settings_page()
         try:
             ui = self.settings_page.ui
-            page_map = {
-                self.tr("PaddleOCR VL Settings"): 2,
-                self.tr("HunyuanOCR Settings"): 3,
-                self.tr("Gemma Local Server Settings"): 4,
-            }
-            target_index = page_map.get(self._automatic_progress_settings_target, 4)
+            target_index = ui.nav_index_for_title(
+                self._automatic_progress_settings_target,
+                fallback=ui.nav_index_for_title(
+                    self.tr("Gemma Local Server Settings"),
+                    fallback=0,
+                ),
+            )
             if len(ui.nav_cards) > target_index:
                 ui.on_nav_clicked(target_index, ui.nav_cards[target_index])
         except Exception:
@@ -1651,7 +1668,7 @@ class ComicTranslate(ComicTranslateUI):
             self._last_batch_failure_detail = str(value)
             service_name = getattr(value, "service_name", "Gemma") if isinstance(value, BaseException) else "Gemma"
             self._automatic_progress_settings_target = getattr(value, "settings_page_name", self.tr("Gemma Local Server Settings"))
-            service_key = "gemma" if "gemma" in service_name.lower() else ("paddleocr_vl" if "paddle" in service_name.lower() else "batch")
+            service_key = _runtime_service_event_key(service_name)
             self.on_runtime_progress_update({
                 "phase": "error",
                 "service": service_key,

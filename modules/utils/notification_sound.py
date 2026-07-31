@@ -258,6 +258,7 @@ def _current_tool_summary() -> dict[str, str]:
         "best_local": _tr(TR_OPTIMAL_OCR),
         "default": _tr("Default (existing auto: MangaOCR / PPOCR / Pororo...)"),
         "paddleocr_vl": "PaddleOCR VL",
+        "paddleocr_vl_spotting": "PaddleOCR VL Spotting",
         "hunyuanocr": "HunyuanOCR",
         "mangalmm": "MangaLMM",
     }.get(ocr, ocr or _tr(TR_OPTIMAL_OCR))

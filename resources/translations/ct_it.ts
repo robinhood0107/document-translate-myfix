@@ -178,10 +178,6 @@ Scegli un file di progetto oppure solo file immagine/documento/archivio.</transl
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>HunyuanOCR Settings</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
         <source>Gemma Local Server Settings</source>
         <translation type="unfinished"></translation>
     </message>
@@ -1966,6 +1962,37 @@ Approximate GPU usage:
     </message>
 </context>
 <context>
+    <name>PaddleOCRVLSpottingPage</name>
+    <message>
+        <source>PaddleOCR VL Spotting Settings</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>This is a separate full-page Spotting route, not the detector crop OCR route.
+It uses the official Spotting: prompt, special location tokens, a dedicated projector with 1,605,632 maximum image pixels, and a dedicated named volume.
+Detector geometry remains authoritative; ambiguous or unmatched native regions are left for review without a hidden crop fallback.
+Keep the default localhost URL to use the bundled managed llama.cpp runtime.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Server URL</source>
+        <translation type="unfinished">
+        URL del server</translation>
+    </message>
+    <message>
+        <source>Max Completion Tokens</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Request Timeout (sec)</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>The Spotting pixel budget and special-token mode are fixed by the official model contract and cannot be changed here. The existing crop OCR route keeps its original 1,003,520-pixel projector unchanged.</source>
+        <translation type="unfinished"></translation>
+    </message>
+</context>
+<context>
     <name>PageListView</name>
     <message>
         <source>Name</source>
@@ -3206,6 +3233,10 @@ Riavviare ora?</translation>
         Ottimale (HunyuanOCR / PaddleOCR VL)</translation>
     </message>
     <message>
+        <source>PaddleOCR VL Spotting (Full Page)</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
         <source>MangaLMM</source>
         <translation type="unfinished"></translation>
     </message>
@@ -3229,6 +3260,10 @@ Riavviare ora?</translation>
     </message>
     <message>
         <source>PaddleOCR VL Settings</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>PaddleOCR VL Spotting Settings</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
@@ -5231,6 +5266,10 @@ It may have been moved, renamed, or deleted.
         <translation type="unfinished"></translation>
     </message>
     <message>
+        <source>PaddleOCR VL Spotting (Full Page)</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
         <source>HunyuanOCR</source>
         <translation type="unfinished"></translation>
     </message>
@@ -5302,6 +5341,10 @@ It may have been moved, renamed, or deleted.
     </message>
     <message>
         <source>PaddleOCR VL Settings</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>PaddleOCR VL Spotting Settings</source>
         <translation type="unfinished"></translation>
     </message>
     <message>

@@ -178,10 +178,6 @@ Choose either a project file or image/document/archive files.</source>
         <translation>PaddleOCR VL 설정</translation>
     </message>
     <message>
-        <source>HunyuanOCR Settings</source>
-        <translation>HunyuanOCR 설정</translation>
-    </message>
-    <message>
         <source>Gemma Local Server Settings</source>
         <translation>Gemma 로컬 서버 설정</translation>
     </message>
@@ -2012,6 +2008,39 @@ Approximate GPU usage:
     </message>
 </context>
 <context>
+    <name>PaddleOCRVLSpottingPage</name>
+    <message>
+        <source>PaddleOCR VL Spotting Settings</source>
+        <translation>PaddleOCR VL Spotting 설정</translation>
+    </message>
+    <message>
+        <source>This is a separate full-page Spotting route, not the detector crop OCR route.
+It uses the official Spotting: prompt, special location tokens, a dedicated projector with 1,605,632 maximum image pixels, and a dedicated named volume.
+Detector geometry remains authoritative; ambiguous or unmatched native regions are left for review without a hidden crop fallback.
+Keep the default localhost URL to use the bundled managed llama.cpp runtime.</source>
+        <translation>detector crop OCR과 분리된 full-page Spotting 경로입니다.
+공식 Spotting: 프롬프트, 특수 위치 토큰, 최대 이미지 픽셀 1,605,632인 전용 projector와 전용 named volume을 사용합니다.
+detector geometry가 최종 기준이며, 모호하거나 매칭되지 않은 native 영역은 숨은 crop fallback 없이 검토 대상으로 남깁니다.
+기본 localhost URL을 유지하면 포함된 관리형 llama.cpp 런타임을 사용합니다.</translation>
+    </message>
+    <message>
+        <source>Server URL</source>
+        <translation>서버 URL</translation>
+    </message>
+    <message>
+        <source>Max Completion Tokens</source>
+        <translation>최대 완료 토큰</translation>
+    </message>
+    <message>
+        <source>Request Timeout (sec)</source>
+        <translation>요청 타임아웃(초)</translation>
+    </message>
+    <message>
+        <source>The Spotting pixel budget and special-token mode are fixed by the official model contract and cannot be changed here. The existing crop OCR route keeps its original 1,003,520-pixel projector unchanged.</source>
+        <translation>Spotting 픽셀 예산과 특수 토큰 모드는 공식 모델 계약으로 고정되어 여기에서 변경할 수 없습니다. 기존 crop OCR 경로는 원래의 1,003,520픽셀 projector를 변경 없이 유지합니다.</translation>
+    </message>
+</context>
+<context>
     <name>PageListView</name>
     <message>
         <source>Name</source>
@@ -3254,6 +3283,10 @@ Restart now?</source>
         <translation>최적값 (HunyuanOCR / PaddleOCR VL)</translation>
     </message>
     <message>
+        <source>PaddleOCR VL Spotting (Full Page)</source>
+        <translation>PaddleOCR VL Spotting(전체 페이지)</translation>
+    </message>
+    <message>
         <source>MangaLMM</source>
         <translation>MangaLMM</translation>
     </message>
@@ -3276,6 +3309,10 @@ Restart now?</source>
     <message>
         <source>PaddleOCR VL Settings</source>
         <translation>PaddleOCR VL 설정</translation>
+    </message>
+    <message>
+        <source>PaddleOCR VL Spotting Settings</source>
+        <translation>PaddleOCR VL Spotting 설정</translation>
     </message>
     <message>
         <source>HunyuanOCR Settings</source>
@@ -5303,6 +5340,10 @@ It may have been moved, renamed, or deleted.
         <translation>PaddleOCR VL</translation>
     </message>
     <message>
+        <source>PaddleOCR VL Spotting (Full Page)</source>
+        <translation>PaddleOCR VL Spotting(전체 페이지)</translation>
+    </message>
+    <message>
         <source>HunyuanOCR</source>
         <translation>HunyuanOCR</translation>
     </message>
@@ -5375,6 +5416,10 @@ It may have been moved, renamed, or deleted.
     <message>
         <source>PaddleOCR VL Settings</source>
         <translation>PaddleOCR VL 설정</translation>
+    </message>
+    <message>
+        <source>PaddleOCR VL Spotting Settings</source>
+        <translation>PaddleOCR VL Spotting 설정</translation>
     </message>
     <message>
         <source>HunyuanOCR Settings</source>

@@ -11,6 +11,8 @@ from modules.ocr.local_runtime import (
     PADDLEOCR_LAYOUT_IMAGE_REF,
     PADDLEOCR_LLAMA_CPP_IMAGE_DIGEST,
     PADDLEOCR_LLAMA_CPP_IMAGE_REF,
+    PADDLEOCR_SPOTTING_LLAMA_CPP_IMAGE_DIGEST,
+    PADDLEOCR_SPOTTING_LLAMA_CPP_IMAGE_REF,
     LocalOCRRuntimeManager,
 )
 from modules.ocr.mangalmm_llamacpp_runtime_contract import (
@@ -26,6 +28,15 @@ from modules.ocr.paddle_llamacpp_runtime_contract import (
     PADDLE_LLAMA_MODEL_SPECS,
     PaddleLlamaRuntimeContract,
 )
+from modules.ocr.paddleocr_vl_spotting.runtime_contract import (
+    DEFAULT_PADDLE_SPOTTING_MODEL_VOLUME,
+    DEFAULT_PADDLE_SPOTTING_READY_MANIFEST,
+    PADDLE_SPOTTING_IMAGE_MAX_PIXELS,
+    PADDLE_SPOTTING_MMPROJ_NAME,
+    PADDLE_SPOTTING_MODEL_NAME,
+    PADDLE_SPOTTING_MODEL_SPECS,
+    PaddleSpottingRuntimeContract,
+)
 from modules.utils.exceptions import LocalServiceSetupError, OperationCancelledError
 from modules.utils.llama_cpp_runtime import DEFAULT_LLAMA_CPP_IMAGE
 
@@ -37,10 +48,14 @@ class _DummySettingsPage:
         paddle_url: str = "http://127.0.0.1:28118/layout-parsing",
         hunyuan_url: str = "http://127.0.0.1:28080/v1",
         mangalmm_url: str = "http://127.0.0.1:28081/v1",
+        spotting_url: str = (
+            "http://127.0.0.1:18002/v1/chat/completions"
+        ),
     ) -> None:
         self._paddle_url = paddle_url
         self._hunyuan_url = hunyuan_url
         self._mangalmm_url = mangalmm_url
+        self._spotting_url = spotting_url
 
     def get_paddleocr_vl_settings(self) -> dict:
         return {"server_url": self._paddle_url}
@@ -50,6 +65,9 @@ class _DummySettingsPage:
 
     def get_mangalmm_ocr_settings(self) -> dict:
         return {"server_url": self._mangalmm_url}
+
+    def get_paddleocr_vl_spotting_settings(self) -> dict:
+        return {"server_url": self._spotting_url}
 
 
 def _paddle_contract() -> PaddleLlamaRuntimeContract:
@@ -87,7 +105,71 @@ def _mangalmm_contract() -> MangaLMMRuntimeContract:
     )
 
 
+def _paddle_spotting_contract() -> PaddleSpottingRuntimeContract:
+    return PaddleSpottingRuntimeContract(
+        volume_name=DEFAULT_PADDLE_SPOTTING_MODEL_VOLUME,
+        ready_manifest_name=DEFAULT_PADDLE_SPOTTING_READY_MANIFEST,
+        ready_manifest_sha256="c" * 64,
+        preparation_version=2,
+        llama_image_ref=PADDLEOCR_SPOTTING_LLAMA_CPP_IMAGE_REF,
+        llama_image_id="sha256:spotting-image-id",
+        compose_file_sha256="spotting-compose",
+        command_sha256="spotting-command",
+        fingerprint="spotting-runtime",
+        command=("--special",),
+        runtime_options={},
+    )
+
+
 class LocalOCRRuntimeManagerTests(unittest.TestCase):
+    def test_spotting_cache_identity_is_separate_from_crop_contract(
+        self,
+    ) -> None:
+        manager = LocalOCRRuntimeManager()
+        settings_page = _DummySettingsPage()
+        contract = _paddle_spotting_contract()
+
+        with mock.patch.object(
+            manager,
+            "_present_managed_container_names",
+            return_value=["paddleocr-spotting-llamacpp"],
+        ), mock.patch.object(
+            manager,
+            "_managed_containers_match_contract",
+            return_value=True,
+        ), mock.patch.object(
+            manager,
+            "_paddle_spotting_runtime_contract",
+            return_value=contract,
+        ):
+            identity = manager.get_ocr_cache_identity(
+                "PaddleOCR VL Spotting",
+                settings_page,
+            )
+
+        self.assertEqual(identity["strategy"], "paddle_spotting_full_page")
+        self.assertEqual(
+            identity["clip.vision.image_max_pixels"],
+            PADDLE_SPOTTING_IMAGE_MAX_PIXELS,
+        )
+        self.assertTrue(identity["special_tokens"])
+        self.assertEqual(identity["model_file"], PADDLE_SPOTTING_MODEL_NAME)
+        self.assertEqual(identity["mmproj_file"], PADDLE_SPOTTING_MMPROJ_NAME)
+        self.assertEqual(
+            identity["mmproj_sha256"],
+            PADDLE_SPOTTING_MODEL_SPECS[
+                PADDLE_SPOTTING_MMPROJ_NAME
+            ]["sha256"],
+        )
+        self.assertEqual(
+            identity["llama_image_digest"],
+            PADDLEOCR_SPOTTING_LLAMA_CPP_IMAGE_DIGEST,
+        )
+        self.assertNotEqual(
+            identity["model_volume"],
+            DEFAULT_PADDLE_LLAMA_MODEL_VOLUME,
+        )
+
     def test_windows_rejects_paddle_container_created_by_wsl_compose(self) -> None:
         manager = LocalOCRRuntimeManager()
         contract = _paddle_contract()
