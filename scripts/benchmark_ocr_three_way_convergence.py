@@ -501,6 +501,21 @@ def _evidence_signature(
     )
 
 
+def _candidate_extra_signature(
+    row: Mapping[str, str], label: str
+) -> tuple[str, ...]:
+    """Return stable visual evidence for an unmatched candidate region.
+
+    ``geometry_status`` is intentionally excluded.  The product reconciler may
+    rename an unmatched diagnostic (for example, ``full_page_only`` to
+    ``other``) without changing the source pixels, OCR text, or routing.  A
+    completed human decision remains reusable only when all of those material
+    fields still match exactly.
+    """
+
+    return _evidence_signature(row, label)[:-1]
+
+
 def _copy_decisions(
     *,
     source: Mapping[str, str],
@@ -569,7 +584,11 @@ def transfer_review_decisions(
             if not str(row.get(f"{label}_text", "") or "").strip():
                 continue
             source_extras[
-                (str(row["page_id"]), route, _evidence_signature(row, label))
+                (
+                    str(row["page_id"]),
+                    route,
+                    _candidate_extra_signature(row, label),
+                )
             ].append(row)
 
     copied_by_route = {route: 0 for route in three_way.ROUTES}
@@ -613,7 +632,7 @@ def transfer_review_decisions(
             key = (
                 str(row["page_id"]),
                 route,
-                _evidence_signature(row, target_label),
+                _candidate_extra_signature(row, target_label),
             )
             candidates = source_extras.get(key)
             if not candidates:
