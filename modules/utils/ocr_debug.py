@@ -915,6 +915,10 @@ def build_ocr_debug_payload(
                 "duplicate_alias_count": int(
                     getattr(blk, "duplicate_alias_count", 0) or 0
                 ),
+                "compound_group_id": getattr(
+                    blk, "compound_group_id", ""
+                )
+                or "",
                 "merge_split_diagnostics": getattr(
                     blk, "merge_split_diagnostics", {}
                 )
