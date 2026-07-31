@@ -20,6 +20,7 @@ from modules.ocr.selection import (
     OCR_MODE_MANGALMM,
     OCR_MODE_MICROSOFT,
     OCR_MODE_PADDLE_VL,
+    OCR_MODE_PADDLE_VL_SPOTTING,
     OCR_OPTIMAL_LABEL,
     normalize_ocr_mode,
     normalize_workflow_mode,
@@ -33,6 +34,7 @@ from .settings_ui import SettingsPageUI
 from .gemma_local_server_page import GemmaLocalServerPage
 from .hunyuan_ocr_page import HunyuanOCRPage
 from .mangalmm_ocr_page import MangaLMMOCRPage
+from .paddleocr_vl_spotting_page import PaddleOCRVLSpottingPage
 from app.ui.messages import Messages
 from app.update_checker import UpdateChecker
 from app.shortcuts import get_default_shortcuts
@@ -312,6 +314,7 @@ class SettingsPage(QtWidgets.QWidget):
             self.ui.extra_context,
             self.ui.project_autosave_folder_input,
             self.ui.paddleocr_vl_server_url_input,
+            self.ui.paddleocr_vl_spotting_server_url_input,
             self.ui.hunyuan_ocr_server_url_input,
             self.ui.mangalmm_ocr_server_url_input,
         ]
@@ -364,6 +367,8 @@ class SettingsPage(QtWidgets.QWidget):
             self.ui.paddleocr_vl_max_new_tokens_spinbox,
             self.ui.paddleocr_vl_parallel_workers_spinbox,
             self.ui.paddleocr_vl_persistent_cache_limit_spinbox,
+            self.ui.paddleocr_vl_spotting_max_completion_tokens_spinbox,
+            self.ui.paddleocr_vl_spotting_request_timeout_spinbox,
             self.ui.hunyuan_ocr_max_completion_tokens_spinbox,
             self.ui.hunyuan_ocr_parallel_workers_spinbox,
             self.ui.hunyuan_ocr_request_timeout_spinbox,
@@ -471,6 +476,9 @@ class SettingsPage(QtWidgets.QWidget):
             self.ui.tr("Google Cloud Vision"): OCR_MODE_GOOGLE,
             self.ui.tr("Gemini-2.0-Flash"): OCR_MODE_GEMINI,
             self.ui.tr("PaddleOCR VL"): OCR_MODE_PADDLE_VL,
+            self.ui.tr("PaddleOCR VL Spotting (Full Page)"): (
+                OCR_MODE_PADDLE_VL_SPOTTING
+            ),
             self.ui.tr("HunyuanOCR"): OCR_MODE_HUNYUAN,
             self.ui.tr("MangaLMM"): OCR_MODE_MANGALMM,
         }
@@ -522,6 +530,26 @@ class SettingsPage(QtWidgets.QWidget):
         return {
             "enabled": bool(
                 self.ui.project_checkpoint_enabled_checkbox.isChecked()
+            ),
+        }
+
+    def get_paddleocr_vl_spotting_settings(self):
+        server_url = (
+            self.ui.paddleocr_vl_spotting_server_url_input.text().strip()
+        )
+        if not server_url:
+            server_url = PaddleOCRVLSpottingPage.DEFAULT_SERVER_URL
+        return {
+            "server_url": server_url,
+            "max_completion_tokens": int(
+                self.ui
+                .paddleocr_vl_spotting_max_completion_tokens_spinbox
+                .value()
+            ),
+            "request_timeout_sec": int(
+                self.ui
+                .paddleocr_vl_spotting_request_timeout_spinbox
+                .value()
             ),
         }
 
@@ -841,6 +869,9 @@ class SettingsPage(QtWidgets.QWidget):
                 "inpainter_runtime": self.get_inpainter_runtime_settings(),
             },
             "paddleocr_vl": self.get_paddleocr_vl_settings(),
+            "paddleocr_vl_spotting": (
+                self.get_paddleocr_vl_spotting_settings()
+            ),
             "hunyuan_ocr": self.get_hunyuan_ocr_settings(),
             "mangalmm_ocr": self.get_mangalmm_ocr_settings(),
             "gemma_local_server": self.get_gemma_local_server_settings(),
@@ -1103,6 +1134,30 @@ class SettingsPage(QtWidgets.QWidget):
             settings.value(
                 "persistent_cache_limit",
                 self.ui.paddleocr_vl_page.DEFAULT_PERSISTENT_CACHE_LIMIT,
+                type=int,
+            )
+        )
+        settings.endGroup()
+
+        settings.beginGroup("paddleocr_vl_spotting")
+        self.ui.paddleocr_vl_spotting_server_url_input.setText(
+            settings.value(
+                "server_url",
+                PaddleOCRVLSpottingPage.DEFAULT_SERVER_URL,
+                type=str,
+            )
+        )
+        self.ui.paddleocr_vl_spotting_max_completion_tokens_spinbox.setValue(
+            settings.value(
+                "max_completion_tokens",
+                PaddleOCRVLSpottingPage.DEFAULT_MAX_COMPLETION_TOKENS,
+                type=int,
+            )
+        )
+        self.ui.paddleocr_vl_spotting_request_timeout_spinbox.setValue(
+            settings.value(
+                "request_timeout_sec",
+                PaddleOCRVLSpottingPage.DEFAULT_REQUEST_TIMEOUT_SEC,
                 type=int,
             )
         )

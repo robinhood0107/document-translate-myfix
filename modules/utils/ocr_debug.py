@@ -36,6 +36,9 @@ OCR_EMPTY_REASON_NON_TEXT_RESPONSE = "PaddleOCR VL returned a non-text response.
 OCR_EMPTY_REASON_EMBEDDED_UI_CLUSTER = (
     "OCR text is part of a dense embedded device/UI cluster and should be preserved."
 )
+OCR_EMPTY_REASON_SPOTTING_UNMATCHED = (
+    "PaddleOCR VL Spotting did not map a native region to this detector block."
+)
 UI_PANEL_MODE_PRESERVE_ORIGINAL = "preserve_original"
 UI_PANEL_MODE_PREVIEW = "ui_panel_mode_preview"
 UI_PANEL_MODE_BUBBLE_PANEL_TEXT = "bubble_panel_text_candidate"
@@ -51,6 +54,7 @@ OCR_REJECTED_EMPTY_REASONS = frozenset(
         OCR_EMPTY_REASON_TEXT_FREE_NO_VISUAL_EVIDENCE,
         OCR_EMPTY_REASON_NON_TEXT_RESPONSE,
         OCR_EMPTY_REASON_EMBEDDED_UI_CLUSTER,
+        OCR_EMPTY_REASON_SPOTTING_UNMATCHED,
     }
 )
 
