@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from typing import Any
 
 
-MANGALMM_RESPONSE_SCHEMA_VERSION = 1
+MANGALMM_RESPONSE_SCHEMA_VERSION = 2
 _COMPLETE_JSON_FENCE = re.compile(
     r"\A```(?:json)?[ \t]*\r?\n(?P<payload>[\s\S]*?)"
     r"\r?\n[ \t]*```[ \t]*\Z",
@@ -26,6 +26,8 @@ class MangaLMMParsedResponse:
     regions: tuple[dict[str, object], ...]
     response_kind: str
     payload_type: str = "json_array"
+    normalized_literal_control_count: int = 0
+    normalized_bbox_order_count: int = 0
 
 
 def _reject_duplicate_keys(
@@ -54,7 +56,58 @@ def _unwrap_complete_json_fence(raw: str) -> tuple[str, str]:
     return match.group("payload").strip(), "fenced_json_array"
 
 
-def _decode_json_array(payload_text: str) -> list[Any]:
+def _escape_literal_controls_in_strings(payload_text: str) -> tuple[str, int]:
+    """Normalize the pseudo-JSON emitted by the official MangaLMM corpus.
+
+    MangaOCR ground truth and the upstream evaluator allow literal line breaks
+    inside ``text_content`` strings.  They are invalid in RFC-compliant JSON,
+    but their meaning is unambiguous while scanning a quoted string.  Only
+    control characters inside strings are escaped; array structure, trailing
+    content, duplicate keys, and all other validation remain strict.
+    """
+
+    escaped: list[str] = []
+    in_string = False
+    previous_was_escape = False
+    normalized_count = 0
+    replacements = {
+        "\b": r"\b",
+        "\f": r"\f",
+        "\n": r"\n",
+        "\r": r"\r",
+        "\t": r"\t",
+    }
+    for character in payload_text:
+        if not in_string:
+            escaped.append(character)
+            if character == '"':
+                in_string = True
+                previous_was_escape = False
+            continue
+
+        if previous_was_escape:
+            escaped.append(character)
+            previous_was_escape = False
+            continue
+        if character == "\\":
+            escaped.append(character)
+            previous_was_escape = True
+            continue
+        if character == '"':
+            escaped.append(character)
+            in_string = False
+            continue
+        if ord(character) < 0x20:
+            escaped.append(
+                replacements.get(character, f"\\u{ord(character):04x}")
+            )
+            normalized_count += 1
+            continue
+        escaped.append(character)
+    return "".join(escaped), normalized_count
+
+
+def _load_json_array(payload_text: str) -> list[Any]:
     try:
         payload = json.loads(
             payload_text,
@@ -75,7 +128,25 @@ def _decode_json_array(payload_text: str) -> list[Any]:
     return payload
 
 
-def _normalize_region(item: Any, index: int) -> dict[str, object]:
+def _decode_json_array(payload_text: str) -> tuple[list[Any], int]:
+    try:
+        return _load_json_array(payload_text), 0
+    except MangaLMMResponseContractError as exc:
+        if exc.code != "invalid_json":
+            raise
+
+    normalized, normalized_count = _escape_literal_controls_in_strings(
+        payload_text
+    )
+    if normalized_count <= 0:
+        return _load_json_array(payload_text), 0
+    return _load_json_array(normalized), normalized_count
+
+
+def _normalize_region(
+    item: Any,
+    index: int,
+) -> tuple[dict[str, object], bool]:
     if not isinstance(item, dict):
         raise MangaLMMResponseContractError(
             "invalid_region_type",
@@ -107,11 +178,21 @@ def _normalize_region(item: Any, index: int) -> dict[str, object]:
                 f"MangaLMM region {index} bbox_2d contains a non-finite number.",
             )
         coords.append(parsed)
-    if coords[2] <= coords[0] or coords[3] <= coords[1]:
+    normalized_coords = [
+        min(coords[0], coords[2]),
+        min(coords[1], coords[3]),
+        max(coords[0], coords[2]),
+        max(coords[1], coords[3]),
+    ]
+    if (
+        normalized_coords[2] <= normalized_coords[0]
+        or normalized_coords[3] <= normalized_coords[1]
+    ):
         raise MangaLMMResponseContractError(
             "invalid_bbox_order",
             f"MangaLMM region {index} bbox_2d is empty or reversed.",
         )
+    bbox_order_normalized = normalized_coords != coords
 
     text_value = item["text_content"]
     if not isinstance(text_value, str):
@@ -125,11 +206,15 @@ def _normalize_region(item: Any, index: int) -> dict[str, object]:
             "empty_text",
             f"MangaLMM region {index} text_content is empty.",
         )
-    return {
-        "bbox_2d": coords,
+    region: dict[str, object] = {
+        "bbox_2d": normalized_coords,
         "text_content": text,
         "raw_text_content": text_value.strip(),
     }
+    if bbox_order_normalized:
+        region["raw_bbox_2d"] = coords
+        region["bbox_order_normalized"] = True
+    return region, bbox_order_normalized
 
 
 def parse_mangalmm_response(text: str) -> MangaLMMParsedResponse:
@@ -140,12 +225,24 @@ def parse_mangalmm_response(text: str) -> MangaLMMParsedResponse:
             "MangaLMM response is empty.",
         )
     payload_text, response_kind = _unwrap_complete_json_fence(raw)
-    payload = _decode_json_array(payload_text)
-    regions = tuple(
+    payload, normalized_literal_control_count = _decode_json_array(
+        payload_text
+    )
+    normalized_regions = [
         _normalize_region(item, index)
         for index, item in enumerate(payload)
+    ]
+    regions = tuple(region for region, _normalized in normalized_regions)
+    normalized_bbox_order_count = sum(
+        1 for _region, normalized in normalized_regions if normalized
     )
+    if normalized_literal_control_count:
+        response_kind = f"{response_kind}_literal_controls_normalized"
+    if normalized_bbox_order_count:
+        response_kind = f"{response_kind}_bbox_order_normalized"
     return MangaLMMParsedResponse(
         regions=regions,
         response_kind=response_kind,
+        normalized_literal_control_count=normalized_literal_control_count,
+        normalized_bbox_order_count=normalized_bbox_order_count,
     )
