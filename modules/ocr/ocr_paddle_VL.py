@@ -31,7 +31,8 @@ from modules.utils.ocr_debug import (
     OCR_STATUS_EMPTY_INITIAL,
     OCR_STATUS_OK,
     ensure_three_channel,
-    expand_bbox,
+    resolve_block_crop_bbox,
+    set_block_ocr_crop_diagnostics,
     set_block_ocr_diagnostics,
 )
 from modules.utils.text_normalization import (
@@ -48,6 +49,11 @@ from .persistent_cache import (
     canonical_json,
     canonical_sha256,
     snapshot_raw_ocr_result,
+)
+from .result_contract import (
+    OCR_STRATEGY_PADDLE_CROP,
+    finalize_ocr_processing_contracts,
+    initialize_ocr_result_contract,
 )
 
 
@@ -94,13 +100,14 @@ class PaddleOCRVLEngine(OCREngine):
     REQUEST_RETRY_TOTAL_ATTEMPTS = 3
     REQUEST_RETRY_BACKOFF_SECONDS = (0.5, 1.5)
     TRANSIENT_HTTP_STATUS_CODES = frozenset({500, 502, 503, 504})
-    TEXT_EXPANSION_RATIO = 0.05
+    TEXT_EXPANSION_RATIO = 0.03
     LARGE_CROP_RATIO_THRESHOLD = 0.02
     MEDIUM_CROP_RATIO_THRESHOLD = 0.008
     ALLOWED_SCHEDULER_MODES = frozenset({"fixed", "fixed_area_desc", "auto_v1"})
-    OCR_CACHE_VERSION = "paddleocr_vl_text_guard_v2"
-    PERSISTENT_CACHE_KEY_SCHEMA_VERSION = 1
-    CROP_SCHEMA_VERSION = "paddle_crop_xyxy_v1"
+    MODEL_IDENTITY = "PaddleOCR-VL-1.6-0.9B"
+    OCR_CACHE_VERSION = "paddleocr_vl_text_first_guard_v3"
+    PERSISTENT_CACHE_KEY_SCHEMA_VERSION = 2
+    CROP_SCHEMA_VERSION = "paddle_text_first_bubble_clamp_v2"
     ENCODER_SCHEMA_VERSION = "opencv_jpeg_default_v1"
     PARSER_SCHEMA_VERSION = "paddle_layout_response_v1"
     SANITIZER_SCHEMA_VERSION = "paddle_text_normalizer_v2"
@@ -206,6 +213,9 @@ class PaddleOCRVLEngine(OCREngine):
             request_record = {
                 "job_index": int(job_index),
                 "bbox": [int(x1), int(y1), int(x2), int(y2)],
+                "crop_source": str(
+                    getattr(blk, "ocr_crop_source", "") or ""
+                ),
                 "crop_area_px": int(crop_area_px),
                 "crop_area_ratio": round(float(crop_area_ratio), 6),
                 "enqueue_ts": None,
@@ -254,6 +264,9 @@ class PaddleOCRVLEngine(OCREngine):
             gpu_metrics=gpu_metrics,
         )
         if not jobs:
+            self.last_page_profile["processing_contract"] = (
+                finalize_ocr_processing_contracts(blk_list)
+            )
             self._finalize_performance_profile()
             return blk_list
 
@@ -310,6 +323,9 @@ class PaddleOCRVLEngine(OCREngine):
             self.last_page_profile.get("elapsed_ms", 0.0),
             self.scheduler_mode,
         )
+        self.last_page_profile["processing_contract"] = (
+            finalize_ocr_processing_contracts(blk_list)
+        )
         return blk_list
 
     def prepare_persistent_cache(
@@ -330,6 +346,15 @@ class PaddleOCRVLEngine(OCREngine):
         page_area = max(page_height * page_width, 1)
         for job_index, blk in enumerate(blk_list or []):
             self._raise_if_cancelled()
+            initialize_ocr_result_contract(
+                blk,
+                strategy=OCR_STRATEGY_PADDLE_CROP,
+                model_identity=str(
+                    runtime_identity.get("model_name")
+                    or self.MODEL_IDENTITY
+                ),
+                runtime_identity=canonical_sha256(runtime_identity),
+            )
             bbox = self._resolve_bbox(blk, img)
             if bbox is None:
                 outcome_block = copy.copy(blk)
@@ -344,6 +369,9 @@ class PaddleOCRVLEngine(OCREngine):
             record = {
                 "job_index": int(job_index),
                 "bbox": [int(x1), int(y1), int(x2), int(y2)],
+                "crop_source": str(
+                    getattr(blk, "ocr_crop_source", "") or ""
+                ),
                 "crop_area_px": int(crop_area_px),
                 "crop_area_ratio": round(float(crop_area_ratio), 6),
                 "enqueue_ts": None,
@@ -536,6 +564,9 @@ class PaddleOCRVLEngine(OCREngine):
             self.last_page_profile["page_status"] = "ok"
             self.last_page_profile["elapsed_ms"] = 0.0
             self.last_page_profile["completed_at"] = time.time()
+            self.last_page_profile["processing_contract"] = (
+                finalize_ocr_processing_contracts(plan.blocks)
+            )
             self._finalize_performance_profile()
             return plan.blocks
 
@@ -594,6 +625,9 @@ class PaddleOCRVLEngine(OCREngine):
             elapsed_ms = (time.perf_counter() - started_at) * 1000.0
             self.last_page_profile["elapsed_ms"] = round(elapsed_ms, 3)
             self.last_page_profile["completed_at"] = time.time()
+            self.last_page_profile["processing_contract"] = (
+                finalize_ocr_processing_contracts(plan.blocks)
+            )
             self._finalize_performance_profile()
         return plan.blocks
 
@@ -1363,24 +1397,52 @@ class PaddleOCRVLEngine(OCREngine):
         return texts
 
     def _resolve_bbox(self, blk: TextBlock, image: np.ndarray) -> tuple[int, int, int, int] | None:
-        source_bbox = getattr(blk, "bubble_xyxy", None)
-        if source_bbox is not None:
-            bbox = expand_bbox(source_bbox, image.shape)
-        else:
-            text_bbox = getattr(blk, "xyxy", None)
-            if text_bbox is None:
-                return None
-            bbox = expand_bbox(
-                text_bbox,
-                image.shape,
-                x_ratio=self.TEXT_EXPANSION_RATIO,
-                y_ratio=self.TEXT_EXPANSION_RATIO,
-            )
-
-        x1, y1, x2, y2 = bbox
-        if x2 <= x1 or y2 <= y1:
+        initialize_ocr_result_contract(
+            blk,
+            strategy=OCR_STRATEGY_PADDLE_CROP,
+            model_identity=str(
+                getattr(blk, "ocr_model_identity", "")
+                or self.MODEL_IDENTITY
+            ),
+        )
+        bbox, crop_source = resolve_block_crop_bbox(
+            blk,
+            image.shape,
+            x_ratio=self.TEXT_EXPANSION_RATIO,
+            y_ratio=self.TEXT_EXPANSION_RATIO,
+            bubble_as_clamp=True,
+            fallback_to_bubble=True,
+        )
+        set_block_ocr_crop_diagnostics(
+            blk,
+            effective_crop_xyxy=bbox,
+            crop_source=crop_source,
+        )
+        blk.ocr_geometry_provenance = {
+            "strategy": "text_first_bubble_clamp",
+            "crop_source": crop_source,
+            "text_bbox": self._coords_or_none(getattr(blk, "xyxy", None)),
+            "bubble_bbox": self._coords_or_none(
+                getattr(blk, "bubble_xyxy", None)
+            ),
+            "effective_crop_bbox": (
+                [int(value) for value in bbox] if bbox is not None else None
+            ),
+            "text_expansion_ratio": float(self.TEXT_EXPANSION_RATIO),
+        }
+        if bbox is None:
             return None
-        return x1, y1, x2, y2
+        return bbox
+
+    @staticmethod
+    def _coords_or_none(value) -> list[float] | None:
+        if value is None:
+            return None
+        try:
+            coords = [float(item) for item in value]
+        except (TypeError, ValueError):
+            return None
+        return coords if len(coords) == 4 else None
 
     def _crop_image(self, image: np.ndarray, bbox: tuple[int, int, int, int]) -> np.ndarray | None:
         x1, y1, x2, y2 = bbox

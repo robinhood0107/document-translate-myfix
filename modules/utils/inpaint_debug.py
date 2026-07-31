@@ -176,6 +176,47 @@ def serialize_inpaint_block(block, index: int) -> dict:
         ),
         "roi_type": get_mask_roi_type(block),
         "text_class": getattr(block, "text_class", "") or "",
+        "semantic_role": str(
+            getattr(block, "semantic_role", "") or ""
+        ),
+        "processing_action": str(
+            getattr(block, "processing_action", "") or ""
+        ),
+        "processing_decision_source": str(
+            getattr(block, "processing_decision_source", "") or ""
+        ),
+        "processing_decision_reasons": list(
+            getattr(block, "processing_decision_reasons", []) or []
+        ),
+        "canonical_block_id": str(
+            getattr(block, "canonical_block_id", "") or ""
+        ),
+        "duplicate_alias_block_ids": list(
+            getattr(block, "duplicate_alias_block_ids", []) or []
+        ),
+        "duplicate_alias_count": int(
+            getattr(block, "duplicate_alias_count", 0) or 0
+        ),
+        "merge_split_diagnostics": dict(
+            getattr(block, "merge_split_diagnostics", {}) or {}
+        ),
+        "mask_strategy": str(
+            getattr(block, "mask_strategy", "") or ""
+        ),
+        "mask_strategy_reason": str(
+            getattr(block, "mask_strategy_reason", "") or ""
+        ),
+        "mask_actual_bbox": (
+            [
+                int(float(value))
+                for value in getattr(block, "mask_actual_bbox", ())[:4]
+            ]
+            if getattr(block, "mask_actual_bbox", None) is not None
+            else None
+        ),
+        "mask_actual_pixel_count": int(
+            getattr(block, "mask_actual_pixel_count", 0) or 0
+        ),
         "inpaint_bboxes": inpaint_boxes,
         "text_free_erase_envelope_xyxy": (
             [int(v) for v in text_free_envelope]
@@ -270,6 +311,7 @@ def build_inpaint_debug_metadata(
     mask_score_color_delta: float = 0.0,
     ui_panel_mode: str = "",
     ui_panel_preview_path: str = "",
+    inpaint_runtime_diagnostics: dict | None = None,
 ) -> dict:
     block_list = list(blocks or [])
     if final_mask is not None:
@@ -337,6 +379,9 @@ def build_inpaint_debug_metadata(
         "mask_score_color_delta": float(mask_score_color_delta or 0.0),
         "ui_panel_mode": str(ui_panel_mode or ""),
         "ui_panel_preview_path": str(ui_panel_preview_path or ""),
+        "inpaint_runtime_diagnostics": dict(
+            inpaint_runtime_diagnostics or {}
+        ),
         "cleanup_applied": bool(cleanup_stats.get("applied", False)),
         "cleanup_component_count": int(cleanup_stats.get("component_count", 0) or 0),
         "cleanup_block_count": int(cleanup_stats.get("block_count", 0) or 0),

@@ -35,6 +35,8 @@ ALLOWLIST_FILES = frozenset(
         "run_comic.bat",
         "run_comic_cuda13.bat",
         "scripts/prepare_gemma_runtime.ps1",
+        "scripts/prepare_mangalmm_llamacpp_runtime.ps1",
+        "scripts/prepare_paddleocr_llamacpp_runtime.ps1",
         "scripts/verify_windows_runtime.py",
     }
 )
@@ -58,15 +60,17 @@ REQUIRED_BUNDLE_FILES = frozenset(
         "comic.py",
         "controller.py",
         "docker-compose.yaml",
+        "mangalmm_docker_files/docker-compose.yaml",
         "paddleocr_vl_docker_files/docker-compose.yaml",
         "paddleocr_vl_docker_files/pipeline_conf.yaml",
-        "paddleocr_vl_docker_files/vllm_config.yml",
         "requirements-base.txt",
         "requirements-cuda12.txt",
         "requirements-cuda13.txt",
         "run_comic.bat",
         "run_comic_cuda13.bat",
         "scripts/prepare_gemma_runtime.ps1",
+        "scripts/prepare_mangalmm_llamacpp_runtime.ps1",
+        "scripts/prepare_paddleocr_llamacpp_runtime.ps1",
         "scripts/verify_windows_runtime.py",
     }
 )
