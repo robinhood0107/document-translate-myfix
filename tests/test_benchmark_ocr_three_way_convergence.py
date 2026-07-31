@@ -267,6 +267,89 @@ class OCRThreeWayConvergenceTests(unittest.TestCase):
             self.assertEqual(rows[0]["A_notes"], "reviewed-paddle_crop")
             self.assertEqual(rows[0]["C_notes"], "reviewed-mangalmm_full_page")
 
+    def test_transfer_candidate_extra_ignores_diagnostic_status_rename(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            source = root / "source-review"
+            target = root / "target-review"
+            labels = {
+                "A": "mangalmm_full_page",
+                "B": "paddle_crop",
+                "C": "paddle_spotting_full_page",
+            }
+            for review in (source, target):
+                review.mkdir()
+                self._json(
+                    review / "private" / three_way.BLIND_KEY_FILENAME,
+                    {"label_to_route": labels},
+                )
+
+            source_row = {
+                column: "" for column in three_way._review_headers()
+            }
+            source_row.update(
+                {
+                    "row_number": "1",
+                    "row_id": "extra-page-0001",
+                    "row_kind": "candidate_extra",
+                    "page_id": "page",
+                    "language": "ja",
+                    "source_page": "source/page.png",
+                    "source_crop": "source/crop.png",
+                    "A_text": "ビクッ",
+                    "A_bbox_xyxy": "[10,20,30,40]",
+                    "A_raw_region_ids": '["raw-0"]',
+                    "A_geometry_status": "unmatched_extra",
+                    "A_assets_json": "{}",
+                    "A_role_action_correct": "no",
+                    "A_merge_split_error": "no",
+                    "A_destructive_edit": "not_applicable",
+                    "A_false_positive": "no",
+                    "A_notes": "source pixels contain a sound effect",
+                }
+            )
+            target_row = dict(source_row)
+            target_row["A_geometry_status"] = "other"
+            target_row["A_role_action_correct"] = ""
+            target_row["A_merge_split_error"] = ""
+            target_row["A_destructive_edit"] = ""
+            target_row["A_false_positive"] = ""
+            target_row["A_notes"] = ""
+
+            three_way._write_review_csv(
+                source / three_way.REVIEW_CSV_FILENAME, [source_row]
+            )
+            three_way._write_review_csv(
+                target / three_way.REVIEW_CSV_FILENAME, [target_row]
+            )
+            self._json(
+                source / three_way.FINAL_METRICS_FILENAME,
+                {
+                    "completed_review_csv_sha256": three_way.sha256_file(
+                        source / three_way.REVIEW_CSV_FILENAME
+                    )
+                },
+            )
+
+            result = convergence.transfer_review_decisions(
+                completed_review=source,
+                target_review=target,
+            )
+
+            self.assertEqual(result["pending_error_count"], 0)
+            self.assertEqual(
+                result["matched_candidate_extra_rows_by_route"]
+                ["mangalmm_full_page"],
+                1,
+            )
+            rows = three_way._read_review_rows(
+                target / three_way.REVIEW_CSV_FILENAME
+            )
+            self.assertEqual(rows[0]["A_false_positive"], "no")
+            self.assertEqual(
+                rows[0]["A_notes"], "source pixels contain a sound effect"
+            )
+
 
 if __name__ == "__main__":
     unittest.main()
