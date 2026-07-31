@@ -14,6 +14,10 @@ from urllib.parse import urlparse
 from urllib.request import urlopen
 
 from modules.ocr.selection import is_local_ocr_engine
+from modules.ocr.managed_backend_policy import (
+    MANAGED_LOCAL_INFERENCE_BACKEND,
+    sanitize_managed_runtime_environment,
+)
 from modules.ocr.paddle_crop.runtime import (
     DEFAULT_PADDLE_LAYOUT_IMAGE,
     DEFAULT_PADDLE_LLAMA_CPP_IMAGE,
@@ -105,6 +109,7 @@ _ENGINE_CONFIG = {
         "settings_page_name": "HunyuanOCR Settings",
         "container_name": "hunyuanocr-local-server",
         "container_names": ["hunyuanocr-local-server"],
+        "managed_backend": MANAGED_LOCAL_INFERENCE_BACKEND,
         "uses_llama_cpp": True,
     },
     "MangaLMM": {
@@ -114,6 +119,7 @@ _ENGINE_CONFIG = {
         "settings_page_name": "MangaLMM Settings",
         "container_name": "mangalmm-local-server",
         "container_names": ["mangalmm-local-server"],
+        "managed_backend": MANAGED_LOCAL_INFERENCE_BACKEND,
         "uses_llama_cpp": True,
     },
     "PaddleOCR VL": {
@@ -127,6 +133,7 @@ _ENGINE_CONFIG = {
         "settings_page_name": "PaddleOCR VL Settings",
         "container_name": "paddleocr-llamacpp",
         "container_names": ["paddleocr-llamacpp", "paddleocr-server"],
+        "managed_backend": MANAGED_LOCAL_INFERENCE_BACKEND,
         "uses_llama_cpp": True,
     },
     "PaddleOCR VL Spotting": {
@@ -142,6 +149,7 @@ _ENGINE_CONFIG = {
         "settings_page_name": "PaddleOCR VL Spotting Settings",
         "container_name": "paddleocr-spotting-llamacpp",
         "container_names": ["paddleocr-spotting-llamacpp"],
+        "managed_backend": MANAGED_LOCAL_INFERENCE_BACKEND,
         "uses_llama_cpp": True,
     },
 }
@@ -169,6 +177,7 @@ class LocalOCRRuntimeManager:
         ) = None
         self._mangalmm_runtime_contract_cache: MangaLMMRuntimeContract | None = None
         self._paddle_idle_released = False
+        self._warned_legacy_backend_environment: tuple[str, ...] = ()
 
     def validate_engine(self, engine_key: str, settings_page: Any) -> None:
         if not is_local_ocr_engine(engine_key):
@@ -861,7 +870,18 @@ class LocalOCRRuntimeManager:
             ) from exc
 
     def _build_env(self, engine_key: str) -> dict[str, str]:
-        env = dict(os.environ)
+        env, ignored = sanitize_managed_runtime_environment(os.environ)
+        ignored_keys = tuple(sorted(ignored))
+        if (
+            ignored_keys
+            and ignored_keys != self._warned_legacy_backend_environment
+        ):
+            logger.warning(
+                "Ignoring retired managed vLLM environment controls and "
+                "using llama.cpp: %s",
+                ", ".join(ignored_keys),
+            )
+            self._warned_legacy_backend_environment = ignored_keys
         env.setdefault("LLAMA_CPP_IMAGE", DEFAULT_LLAMA_CPP_IMAGE)
         if engine_key == "HunyuanOCR":
             env.setdefault("LLAMA_N_GPU_LAYERS", DEFAULT_HUNYUAN_N_GPU_LAYERS)
