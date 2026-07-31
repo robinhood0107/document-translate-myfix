@@ -69,7 +69,16 @@ class PaddleOCRVLSpottingEngineTests(unittest.TestCase):
         self.assertIs(result, blocks)
         self.assertEqual(blocks[0].text, "よし")
         self.assertEqual(blocks[0].ocr_strategy, OCR_STRATEGY_PADDLE_SPOTTING)
+        self.assertEqual(engine.last_page_profile["schema_version"], 2)
         self.assertEqual(engine.last_page_profile["attempt_count"], 1)
+        assisted = engine.last_page_profile[
+            "detector_assisted_reconciliation"
+        ]
+        self.assertEqual(assisted["schema_version"], 2)
+        self.assertEqual(assisted["block_status_counts"], {"matched": 1})
+        self.assertEqual(
+            assisted["relation_type_counts"], {"one_to_one": 1}
+        )
         payload = send_request.call_args.args[0]
         self.assertEqual(
             payload["messages"][0]["content"][0]["text"],
@@ -172,6 +181,60 @@ class PaddleOCRVLSpottingEngineTests(unittest.TestCase):
         )
         self.assertEqual(engine.last_page_profile["mapped_block_count"], 0)
         self.assertEqual(engine.last_page_profile["ambiguous_region_count"], 1)
+        self.assertEqual(
+            engine.last_page_profile["detector_assisted_reconciliation"][
+                "block_status_counts"
+            ],
+            {"ambiguous": 2},
+        )
+        self.assertTrue(
+            all(
+                block.merge_split_diagnostics["status"] == "ambiguous"
+                for block in blocks
+            )
+        )
+
+    def test_multiple_native_lines_form_one_ordered_detector_compound(
+        self,
+    ) -> None:
+        engine = PaddleOCRVLSpottingEngine()
+        image = np.zeros((1000, 1000, 3), dtype=np.uint8)
+        blocks = [_block((100, 100, 500, 500), "compound")]
+        content = "\n".join(
+            (
+                _native_line(
+                    "first",
+                    (120, 120, 480, 120, 480, 220, 120, 220),
+                ),
+                _native_line(
+                    "second",
+                    (120, 260, 480, 260, 480, 360, 120, 360),
+                ),
+            )
+        )
+
+        with mock.patch.object(
+            engine,
+            "_send_request",
+            return_value=_response(content),
+        ):
+            engine.process_image(image, blocks)
+
+        self.assertEqual(blocks[0].text, "first\nsecond")
+        self.assertEqual(
+            blocks[0].merge_split_diagnostics["status"], "compound"
+        )
+        self.assertGreater(
+            blocks[0].merge_split_diagnostics["detector_coverage"], 0.0
+        )
+        assisted = engine.last_page_profile[
+            "detector_assisted_reconciliation"
+        ]
+        self.assertEqual(assisted["block_status_counts"], {"compound": 1})
+        self.assertEqual(
+            assisted["relation_type_counts"],
+            {"many_lines_to_one_block": 1},
+        )
 
     def test_low_resolution_pages_double_without_changing_aspect_ratio(self) -> None:
         engine = PaddleOCRVLSpottingEngine()
