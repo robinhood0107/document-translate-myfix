@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import base64
+import copy
 import logging
 import math
 import os
@@ -63,21 +64,33 @@ DEFAULT_MANGALMM_MAX_COMPLETION_TOKENS = 4096
 DEFAULT_MANGALMM_PARALLEL_WORKERS = 1
 DEFAULT_MANGALMM_REQUEST_TIMEOUT_SEC = 60
 DEFAULT_MANGALMM_SAFE_RESIZE = True
-DEFAULT_MANGALMM_MAX_PIXELS = 2_116_800
+MANGALMM_VISION_PATCH_SIZE = 14
+MANGALMM_VISION_MERGE_SIZE = 2
+MANGALMM_VISION_ALIGNMENT_FACTOR = (
+    MANGALMM_VISION_PATCH_SIZE * MANGALMM_VISION_MERGE_SIZE
+)
+MANGALMM_OFFICIAL_MIN_PIXELS = 3_136
+MANGALMM_OFFICIAL_MAX_PIXELS = 2_116_800
+MANGALMM_MAX_ASPECT_RATIO = 200.0
+MANGALMM_RESIZE_SCHEMA_VERSION = 2
+DEFAULT_MANGALMM_MAX_PIXELS = MANGALMM_OFFICIAL_MAX_PIXELS
 DEFAULT_MANGALMM_MAX_LONG_SIDE = 1728
-DEFAULT_MANGALMM_STANDARD_SHORT_SIDE = 1224
 DEFAULT_MANGALMM_DENSE_BLOCK_COUNT = 24
 DEFAULT_MANGALMM_DENSE_SMALL_BLOCK_RATIO = 0.55
 DEFAULT_MANGALMM_DENSE_TEXT_COVER_RATIO = 0.18
 DEFAULT_MANGALMM_SMALL_BLOCK_AREA_RATIO = 0.008
-DEFAULT_MANGALMM_TEMPERATURE = 0.1
-DEFAULT_MANGALMM_TOP_K = 1
-DEFAULT_MANGALMM_TOP_P = 0.001
-DEFAULT_MANGALMM_MIN_P = 0.0
-DEFAULT_MANGALMM_REPEAT_PENALTY = 1.05
-DEFAULT_MANGALMM_REPEAT_LAST_N = 0
+DEFAULT_MANGALMM_TEMPERATURE = 0.0
+DEFAULT_MANGALMM_TOP_K = 40
+DEFAULT_MANGALMM_TOP_P = 0.95
+DEFAULT_MANGALMM_MIN_P = 0.05
+DEFAULT_MANGALMM_REPEAT_PENALTY = 1.0
+DEFAULT_MANGALMM_REPEAT_LAST_N = 64
 DEFAULT_MANGALMM_PRESENCE_PENALTY = 0.0
 DEFAULT_MANGALMM_FREQUENCY_PENALTY = 0.0
+DEFAULT_MANGALMM_SEED = 42
+MANGALMM_RECOVERY_REPEAT_PENALTY = 1.15
+MANGALMM_RECOVERY_REPEAT_LAST_N = 4096
+MANGALMM_RECOVERY_MIN_DETECTOR_COVERAGE = 0.50
 DEFAULT_MANGALMM_PNG_COMPRESSION = 1
 DEFAULT_MANGALMM_DEBUG_EXPORT_LIMIT = 96
 
@@ -100,6 +113,9 @@ class ResizePlan:
     block_count: int
     small_block_ratio: float
     text_cover_ratio: float
+    resize_schema_version: int = MANGALMM_RESIZE_SCHEMA_VERSION
+    alignment_factor: int = MANGALMM_VISION_ALIGNMENT_FACTOR
+    effective_max_pixels: int = MANGALMM_OFFICIAL_MAX_PIXELS
 
 
 @dataclass(slots=True)
@@ -109,6 +125,8 @@ class AttemptSpec:
     prompt_mode: str
     prompt_text: str
     attempt_kind: str
+    repeat_penalty: float | None = None
+    repeat_last_n: int | None = None
 
 
 @dataclass(slots=True)
@@ -134,12 +152,15 @@ class MangaLMMOCREngine(OCREngine):
     PARALLEL_WORKERS_RANGE = (1, 8)
     REQUEST_ENDPOINT_SUFFIX = "/chat/completions"
     STANDARD_PROMPT = (
-        "Please perform OCR on this full manga page. Return one top-level JSON "
-        'array only. Every item must contain "bbox_2d" as [x1, y1, x2, y2] '
-        'and "text_content" as the exact recognized Japanese text. Do not '
-        "translate, summarize, merge neighboring regions, or add commentary."
+        "Please perform OCR on this image and output the recognized Japanese "
+        "text along with its position (grounding)."
     )
     DENSE_PROMPT = STANDARD_PROMPT
+    RECOVERY_PROMPT_SUFFIX = (
+        " The page contains visible Japanese text. Output every distinct "
+        "physical text region exactly once. Do not return an empty response "
+        "or repeat an identical bbox/text pair."
+    )
 
     def __init__(self) -> None:
         self.server_url = DEFAULT_MANGALMM_SERVER_URL
@@ -205,12 +226,15 @@ class MangaLMMOCREngine(OCREngine):
         )
         self.raw_response_logging = bool(config.get("raw_response_logging", False))
         self.safe_resize = bool(config.get("safe_resize", DEFAULT_MANGALMM_SAFE_RESIZE))
-        self.max_pixels = max(
-            100_000,
-            self._clamp_int(
-                config.get("max_pixels", DEFAULT_MANGALMM_MAX_PIXELS),
-                DEFAULT_MANGALMM_MAX_PIXELS,
-                (100_000, 8_000_000),
+        self.max_pixels = min(
+            MANGALMM_OFFICIAL_MAX_PIXELS,
+            max(
+                100_000,
+                self._clamp_int(
+                    config.get("max_pixels", DEFAULT_MANGALMM_MAX_PIXELS),
+                    DEFAULT_MANGALMM_MAX_PIXELS,
+                    (100_000, MANGALMM_OFFICIAL_MAX_PIXELS),
+                ),
             ),
         )
         self.max_long_side = max(
@@ -324,6 +348,7 @@ class MangaLMMOCREngine(OCREngine):
         attempt_specs = self._build_attempt_specs(image.shape, blocks)
         assignments: dict[int, list[dict[str, object]]] = {index: [] for index in range(len(blocks))}
         final_attempt: AttemptSpec | None = None
+        best_candidate: dict[str, object] | None = None
         quality: dict[str, object] = {}
 
         for attempt_spec in attempt_specs:
@@ -331,6 +356,18 @@ class MangaLMMOCREngine(OCREngine):
             attempt_assignments = self._assign_regions_to_blocks(attempt_result["regions"], blocks)
             matched_region_count = sum(len(items) for items in attempt_assignments.values())
             matched_block_count = sum(1 for items in attempt_assignments.values() if items)
+            detector_coverage = (
+                matched_block_count / float(len(blocks))
+                if blocks
+                else 0.0
+            )
+            has_next_attempt = attempt_spec.index + 1 < len(attempt_specs)
+            coverage_gap = (
+                matched_block_count > 0
+                and has_next_attempt
+                and detector_coverage
+                < MANGALMM_RECOVERY_MIN_DETECTOR_COVERAGE
+            )
             attempt_entry = {
                 **attempt_result["metadata"],
                 "attempt_index": int(attempt_spec.index),
@@ -340,6 +377,8 @@ class MangaLMMOCREngine(OCREngine):
                 "mapped_region_count": int(attempt_result["mapped_region_count"]),
                 "matched_region_count": int(matched_region_count),
                 "matched_block_count": int(matched_block_count),
+                "detector_coverage": float(detector_coverage),
+                "coverage_gap": bool(coverage_gap),
                 "raw_response_length": len(str(attempt_result["raw_text"] or "")),
             }
             failure_reason = ""
@@ -349,25 +388,46 @@ class MangaLMMOCREngine(OCREngine):
                 failure_reason = "mapped_regions_out_of_bounds"
             elif matched_block_count <= 0:
                 failure_reason = "no_block_match"
+            elif coverage_gap:
+                failure_reason = "detector_coverage_gap"
             attempt_entry["failure_reason"] = failure_reason
-            attempt_entry["final_status"] = "success" if matched_block_count > 0 else "failure"
+            attempt_entry["final_status"] = (
+                "partial"
+                if coverage_gap
+                else ("success" if matched_block_count > 0 else "failure")
+            )
             self.last_attempt_history.append(attempt_entry)
 
             if matched_block_count > 0:
-                assignments = attempt_assignments
-                final_attempt = attempt_spec
-                success_status = OCR_STATUS_OK if attempt_spec.index == 0 else OCR_STATUS_OK_AFTER_RETRY
-                empty_status = OCR_STATUS_EMPTY_INITIAL if attempt_spec.index == 0 else OCR_STATUS_EMPTY_AFTER_RETRY
-                quality = self._apply_assignments_to_blocks(
-                    blocks,
-                    assignments,
-                    attempt_count=attempt_spec.index + 1,
-                    success_status=success_status,
-                    empty_status=empty_status,
-                    page_bbox=page_unit.bbox_xyxy,
-                    resize_plan=attempt_spec.resize_plan,
-                )
-                break
+                candidate = {
+                    "score": (
+                        int(matched_block_count),
+                        int(matched_region_count),
+                        -int(attempt_spec.index),
+                    ),
+                    "attempt_spec": attempt_spec,
+                    "assignments": {
+                        index: list(items)
+                        for index, items in attempt_assignments.items()
+                    },
+                    "request_metadata": copy.deepcopy(
+                        attempt_result["metadata"]
+                    ),
+                    "page_regions": copy.deepcopy(self.last_page_regions),
+                    "shadow_regions": copy.deepcopy(
+                        self.last_shadow_regions
+                    ),
+                    "merge_split_diagnostics": copy.deepcopy(
+                        self.last_merge_split_diagnostics
+                    ),
+                }
+                if (
+                    best_candidate is None
+                    or candidate["score"] > best_candidate["score"]
+                ):
+                    best_candidate = candidate
+                if not coverage_gap:
+                    break
 
             if failure_reason == "no_block_match":
                 self._export_debug_artifact(
@@ -392,14 +452,45 @@ class MangaLMMOCREngine(OCREngine):
                     unit_kind=page_unit.unit_kind,
                 )
 
-        if final_attempt is None:
+        if best_candidate is not None:
+            final_attempt = best_candidate["attempt_spec"]
+            assignments = best_candidate["assignments"]
+            self.last_request_metadata = best_candidate["request_metadata"]
+            self.last_page_regions = best_candidate["page_regions"]
+            self.last_shadow_regions = best_candidate["shadow_regions"]
+            self.last_merge_split_diagnostics = best_candidate[
+                "merge_split_diagnostics"
+            ]
+            retried = len(self.last_attempt_history) > 1
+            quality = self._apply_assignments_to_blocks(
+                blocks,
+                assignments,
+                attempt_count=len(self.last_attempt_history),
+                success_status=(
+                    OCR_STATUS_OK_AFTER_RETRY
+                    if retried
+                    else OCR_STATUS_OK
+                ),
+                empty_status=(
+                    OCR_STATUS_EMPTY_AFTER_RETRY
+                    if retried
+                    else OCR_STATUS_EMPTY_INITIAL
+                ),
+                page_bbox=page_unit.bbox_xyxy,
+                resize_plan=final_attempt.resize_plan,
+            )
+        else:
             terminal_attempt = attempt_specs[-1]
             quality = self._apply_assignments_to_blocks(
                 blocks,
                 assignments,
                 attempt_count=len(attempt_specs),
                 success_status=OCR_STATUS_OK_AFTER_RETRY if len(attempt_specs) > 1 else OCR_STATUS_OK,
-                empty_status=OCR_STATUS_EMPTY_INITIAL,
+                empty_status=(
+                    OCR_STATUS_EMPTY_AFTER_RETRY
+                    if len(attempt_specs) > 1
+                    else OCR_STATUS_EMPTY_INITIAL
+                ),
                 page_bbox=page_unit.bbox_xyxy,
                 resize_plan=terminal_attempt.resize_plan,
             )
@@ -421,7 +512,8 @@ class MangaLMMOCREngine(OCREngine):
                 "non_empty_block_count": int(quality.get("non_empty", 0) or 0),
                 "raw_response_length": len(str(self.last_request_metadata.get("raw_response", "") or "")),
             }
-        else:
+
+        if final_attempt is not None:
             self.last_request_metadata = {
                 **self.last_request_metadata,
                 "attempts": list(self.last_attempt_history),
@@ -482,28 +574,56 @@ class MangaLMMOCREngine(OCREngine):
         max_completion_tokens_override: int | None = None,
     ) -> ResizePlan:
         image_h, image_w = image_shape[:2]
-        standard_short_side = DEFAULT_MANGALMM_STANDARD_SHORT_SIDE
-        standard_pixel_cap = self.max_pixels
-        standard_long_side = self.max_long_side
-        short_side_cap = standard_short_side
-        long_side_cap = standard_long_side
-        pixel_cap = standard_pixel_cap
-
-        short_side = float(min(image_w, image_h))
-        long_side = float(max(image_w, image_h))
-        page_area = float(max(1, image_w * image_h))
+        page_area = int(max(1, image_w * image_h))
+        long_side = int(max(image_w, image_h))
         if self.safe_resize:
-            base_scale = min(
-                1.0,
-                float(short_side_cap) / short_side if short_side > 0 else 1.0,
-                float(long_side_cap) / long_side if long_side > 0 else 1.0,
-                math.sqrt(float(pixel_cap) / page_area),
+            if long_side > self.max_long_side:
+                long_side_scale = (
+                    float(self.max_long_side) / float(max(1, long_side))
+                )
+                long_side_pixel_cap = max(
+                    MANGALMM_OFFICIAL_MIN_PIXELS,
+                    int(
+                        math.floor(
+                            page_area
+                            * long_side_scale
+                            * long_side_scale
+                        )
+                    ),
+                )
+            else:
+                long_side_pixel_cap = MANGALMM_OFFICIAL_MAX_PIXELS
+            effective_max_pixels = min(
+                int(self.max_pixels),
+                int(long_side_pixel_cap),
+                MANGALMM_OFFICIAL_MAX_PIXELS,
             )
         else:
-            base_scale = 1.0
+            # Even the manual/no-cap path stays aligned to the Qwen2.5-VL
+            # 14px patch x 2 merge grid so model coordinates and app
+            # coordinates use the same image dimensions.
+            rounded_h = self._round_by_factor(
+                int(image_h),
+                MANGALMM_VISION_ALIGNMENT_FACTOR,
+            )
+            rounded_w = self._round_by_factor(
+                int(image_w),
+                MANGALMM_VISION_ALIGNMENT_FACTOR,
+            )
+            effective_max_pixels = max(
+                MANGALMM_OFFICIAL_MIN_PIXELS,
+                int(rounded_h * rounded_w),
+            )
 
-        request_w = max(1, int(round(image_w * base_scale)))
-        request_h = max(1, int(round(image_h * base_scale)))
+        request_h, request_w = self._official_smart_resize(
+            int(image_h),
+            int(image_w),
+            max_pixels=int(effective_max_pixels),
+        )
+        base_scale = min(
+            request_w / float(max(1, image_w)),
+            request_h / float(max(1, image_h)),
+        )
         scale_x = request_w / float(max(1, image_w))
         scale_y = request_h / float(max(1, image_h))
         request_tokens = (
@@ -522,7 +642,57 @@ class MangaLMMOCREngine(OCREngine):
             block_count=int(block_count),
             small_block_ratio=float(small_block_ratio),
             text_cover_ratio=float(text_cover_ratio),
+            effective_max_pixels=int(effective_max_pixels),
         )
+
+    @staticmethod
+    def _round_by_factor(number: int, factor: int) -> int:
+        return round(number / factor) * factor
+
+    @staticmethod
+    def _ceil_by_factor(number: float, factor: int) -> int:
+        return math.ceil(number / factor) * factor
+
+    @staticmethod
+    def _floor_by_factor(number: float, factor: int) -> int:
+        return math.floor(number / factor) * factor
+
+    @classmethod
+    def _official_smart_resize(
+        cls,
+        height: int,
+        width: int,
+        *,
+        max_pixels: int,
+        min_pixels: int = MANGALMM_OFFICIAL_MIN_PIXELS,
+        factor: int = MANGALMM_VISION_ALIGNMENT_FACTOR,
+    ) -> tuple[int, int]:
+        """Mirror the Qwen2.5-VL smart_resize contract used by MangaLMM."""
+        if height <= 0 or width <= 0:
+            raise ValueError("MangaLMM image dimensions must be positive.")
+        if max(height, width) / min(height, width) > MANGALMM_MAX_ASPECT_RATIO:
+            raise ValueError(
+                "MangaLMM image aspect ratio exceeds the official limit "
+                f"of {MANGALMM_MAX_ASPECT_RATIO:g}."
+            )
+        max_pixels = max(int(min_pixels), int(max_pixels))
+        resized_h = max(factor, cls._round_by_factor(height, factor))
+        resized_w = max(factor, cls._round_by_factor(width, factor))
+        if resized_h * resized_w > max_pixels:
+            beta = math.sqrt((height * width) / float(max_pixels))
+            resized_h = max(
+                factor,
+                cls._floor_by_factor(height / beta, factor),
+            )
+            resized_w = max(
+                factor,
+                cls._floor_by_factor(width / beta, factor),
+            )
+        elif resized_h * resized_w < min_pixels:
+            beta = math.sqrt(float(min_pixels) / float(height * width))
+            resized_h = cls._ceil_by_factor(height * beta, factor)
+            resized_w = cls._ceil_by_factor(width * beta, factor)
+        return int(resized_h), int(resized_w)
 
     def _build_attempt_specs(
         self,
@@ -540,6 +710,20 @@ class MangaLMMOCREngine(OCREngine):
                 attempt_kind="primary",
             )
         ]
+        if blk_list:
+            attempts.append(
+                AttemptSpec(
+                    index=1,
+                    resize_plan=initial_plan,
+                    prompt_mode=f"{initial_prompt_mode}_recovery",
+                    prompt_text=(
+                        initial_prompt_text + self.RECOVERY_PROMPT_SUFFIX
+                    ),
+                    attempt_kind="native_output_recovery",
+                    repeat_penalty=MANGALMM_RECOVERY_REPEAT_PENALTY,
+                    repeat_last_n=MANGALMM_RECOVERY_REPEAT_LAST_N,
+                )
+            )
         return attempts
 
     def _select_resize_profile(
@@ -637,6 +821,8 @@ class MangaLMMOCREngine(OCREngine):
                 request_image,
                 max_completion_tokens=resize_plan.max_completion_tokens,
                 prompt_text=attempt_spec.prompt_text,
+                repeat_penalty_override=attempt_spec.repeat_penalty,
+                repeat_last_n_override=attempt_spec.repeat_last_n,
             )
             finish_reason = str(
                 self.last_transport_metadata.get("finish_reason", "") or ""
@@ -710,6 +896,16 @@ class MangaLMMOCREngine(OCREngine):
             "scale_y": resize_plan.scale_y,
             "base_scale": resize_plan.base_scale,
             "max_completion_tokens": resize_plan.max_completion_tokens,
+            "repeat_penalty": (
+                float(attempt_spec.repeat_penalty)
+                if attempt_spec.repeat_penalty is not None
+                else float(self.repeat_penalty)
+            ),
+            "repeat_last_n": (
+                int(attempt_spec.repeat_last_n)
+                if attempt_spec.repeat_last_n is not None
+                else int(self.repeat_last_n)
+            ),
             "block_count": resize_plan.block_count,
             "small_block_ratio": resize_plan.small_block_ratio,
             "text_cover_ratio": resize_plan.text_cover_ratio,
@@ -1243,7 +1439,14 @@ class MangaLMMOCREngine(OCREngine):
         orig_h, orig_w = resize_plan.original_shape
         if request_h == orig_h and request_w == orig_w:
             return image
-        return cv2.resize(image, (request_w, request_h), interpolation=cv2.INTER_AREA)
+        # The official MangaLMM demo explicitly uses bicubic resampling before
+        # Qwen2.5-VL preprocessing. Pre-aligning here prevents llama.cpp from
+        # silently changing the model coordinate grid after metadata is made.
+        return cv2.resize(
+            image,
+            (request_w, request_h),
+            interpolation=cv2.INTER_CUBIC,
+        )
 
     def _map_regions_to_page_coords(
         self,
@@ -1323,6 +1526,8 @@ class MangaLMMOCREngine(OCREngine):
         *,
         max_completion_tokens: int,
         prompt_text: str,
+        repeat_penalty_override: float | None = None,
+        repeat_last_n_override: int | None = None,
     ) -> str:
         data_url = self._image_data_url(image)
         payload = {
@@ -1339,11 +1544,20 @@ class MangaLMMOCREngine(OCREngine):
             "top_k": self.top_k,
             "top_p": self.top_p,
             "min_p": self.min_p,
-            "repeat_penalty": self.repeat_penalty,
-            "repeat_last_n": self.repeat_last_n,
+            "repeat_penalty": (
+                self.repeat_penalty
+                if repeat_penalty_override is None
+                else float(repeat_penalty_override)
+            ),
+            "repeat_last_n": (
+                self.repeat_last_n
+                if repeat_last_n_override is None
+                else int(repeat_last_n_override)
+            ),
             "presence_penalty": self.presence_penalty,
             "frequency_penalty": self.frequency_penalty,
             "max_completion_tokens": int(max_completion_tokens),
+            "seed": DEFAULT_MANGALMM_SEED,
         }
         data = self._send_request(payload)
         self.last_transport_metadata = (
@@ -1510,6 +1724,12 @@ class MangaLMMOCREngine(OCREngine):
             "response_kind": parsed.response_kind,
             "payload_type": parsed.payload_type,
             "raw_length": len(raw),
+            "normalized_literal_control_count": int(
+                parsed.normalized_literal_control_count
+            ),
+            "normalized_bbox_order_count": int(
+                parsed.normalized_bbox_order_count
+            ),
             "parser_error_code": "",
             "parser_error": "",
         }
