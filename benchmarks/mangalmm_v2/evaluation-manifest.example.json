@@ -9,7 +9,9 @@
       "source_image": "C:/external-validation/mangalmm-v2/source/example.png",
       "source_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
       "annotation": "C:/external-validation/mangalmm-v2/annotations/example.json",
-      "annotation_sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+      "annotation_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+      "detector_snapshot": "C:/external-validation/mangalmm-v2/detector/example.json",
+      "detector_snapshot_sha256": "0000000000000000000000000000000000000000000000000000000000000000"
     }
   ]
 }
