@@ -65,6 +65,7 @@ class TextBlock(object):
                  canonical_block_id: str = "",
                  duplicate_alias_block_ids: List[str] | None = None,
                  duplicate_alias_count: int = 0,
+                 compound_group_id: str = "",
                  merge_split_diagnostics: dict | None = None,
                  mask_strategy: str = "",
                  mask_strategy_reason: str = "",
@@ -137,6 +138,7 @@ class TextBlock(object):
             duplicate_alias_count
             or len(self.duplicate_alias_block_ids)
         )
+        self.compound_group_id = str(compound_group_id or "")
         self.merge_split_diagnostics = copy.deepcopy(
             merge_split_diagnostics or {}
         )
