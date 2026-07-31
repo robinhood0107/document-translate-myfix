@@ -64,6 +64,7 @@ from .image_policy import (
 from .reconciliation import (
     MANGALMM_RECONCILIATION_SCHEMA_VERSION,
     OCRRegion,
+    prepare_dominant_detector_region,
     prepare_safe_detector_compound,
 )
 from ..persistent_cache import canonical_sha256
@@ -1277,6 +1278,68 @@ class MangaLMMOCREngine(OCREngine):
                 block.compound_group_id = (
                     block_id if is_multi_region else ""
                 )
+                continue
+
+            dominant = prepare_dominant_detector_region(
+                unique_items,
+                text_class=str(getattr(block, "text_class", "") or ""),
+                has_bubble=(
+                    self._normalize_box(
+                        getattr(block, "bubble_xyxy", None)
+                    )
+                    is not None
+                ),
+            )
+            if dominant.accepted and dominant.selected_item is not None:
+                assignments[blk_index] = [dominant.selected_item]
+                selected_region = dominant.selected_item["region"]
+                diagnostic = {
+                    "kind": "dominant_region_one_block",
+                    "status": "matched",
+                    "block_id": block_id,
+                    "input_region_count": len(unique_items),
+                    "accepted_region_count": 1,
+                    "secondary_region_count": len(
+                        dominant.secondary_items
+                    ),
+                    "near_duplicate_count": len(
+                        dominant.duplicate_items
+                    ),
+                    "decision_reason": dominant.reason,
+                    "selected_bbox_xyxy": list(
+                        selected_region.bbox_xyxy
+                    ),
+                    "selected_text": str(selected_region.text or ""),
+                    "selected_match_metrics": dict(
+                        dominant.selected_item.get("metrics", {}) or {}
+                    ),
+                    "secondary_regions": [
+                        {
+                            "bbox_xyxy": list(item["region"].bbox_xyxy),
+                            "text": str(item["region"].text or ""),
+                            "match_metrics": dict(
+                                item.get("metrics", {}) or {}
+                            ),
+                        }
+                        for item in dominant.secondary_items
+                    ],
+                }
+                self.last_merge_split_diagnostics.append(diagnostic)
+                block.merge_split_diagnostics = {
+                    **dict(
+                        getattr(block, "merge_split_diagnostics", {}) or {}
+                    ),
+                    "mangalmm_dominant_region_one_block": diagnostic,
+                }
+                block.compound_group_id = ""
+                for item in dominant.secondary_items:
+                    self.last_shadow_regions.append(
+                        self._serialize_shadow_region(
+                            item["region"],
+                            reason="dominant_region_secondary_review",
+                            candidate_block_ids=[block_id],
+                        )
+                    )
                 continue
 
             shadow_reason = {
