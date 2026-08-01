@@ -13,11 +13,16 @@ ALLOWED_DOC_PATTERNS = (
     re.compile(r"^README_ko\.md$"),
     re.compile(r"^rules\.md$"),
     re.compile(r"^docs/setup/quickstart(?:-ko)?\.md$"),
+    re.compile(r"^docs/architecture/codebase-map-ko\.md$"),
     re.compile(r"^docs/gemma/[^/]+\.md$"),
     re.compile(r"^docs/hunyuan/[^/]+\.md$"),
+    re.compile(r"^docs/runtime/managed-llamacpp-only-ko\.md$"),
+    re.compile(r"^docs/runtime/obsolete-vllm-runtime-manifest\.json$"),
     re.compile(r"^docs/repo/github-rulesets-public-free-ko\.md$"),
     re.compile(r"^hunyuanocr_docker_files/README\.md$"),
+    re.compile(r"^mangalmm_docker_files/README\.md$"),
     re.compile(r"^paddleocr_vl_docker_files/README\.md$"),
+    re.compile(r"^paddleocr_vl_spotting_docker_files/README\.md$"),
 )
 
 
