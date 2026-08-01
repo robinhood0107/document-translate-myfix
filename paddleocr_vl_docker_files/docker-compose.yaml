@@ -58,46 +58,6 @@ services:
       - --sleep-idle-seconds
       - "${PADDLEOCR_LLAMA_SLEEP_IDLE_SECONDS:-5}"
 
-  paddleocr-layout:
-    image: ${PADDLEOCR_LAYOUT_IMAGE:-ccr-2vdh3abv-pub.cnc.bj.baidubce.com/paddlepaddle/paddleocr-genai-vllm-server@sha256:d0d32c04a2119613d25a0a4c292e165ccc107954b74580613cf59e378037f8f5}
-    pull_policy: missing
-    container_name: paddleocr-server
-    tty: true
-    stdin_open: true
-    restart: unless-stopped
-    labels:
-      com.comictranslate.paddleocr-runtime-fingerprint: "${PADDLEOCR_RUNTIME_FINGERPRINT:-unprepared}"
-      com.comictranslate.paddleocr-model-volume: "${PADDLEOCR_LLAMA_MODEL_VOLUME:-comic-translate-paddleocr-vl-llamacpp-models-v1}"
-      com.comictranslate.paddleocr-ready-manifest-sha256: "${PADDLEOCR_READY_MANIFEST_SHA256:-unprepared}"
-      com.comictranslate.paddleocr-model-sha256: "${PADDLEOCR_MODEL_SHA256:-unprepared}"
-      com.comictranslate.paddleocr-mmproj-sha256: "${PADDLEOCR_MMPROJ_SHA256:-unprepared}"
-      com.comictranslate.paddleocr-preparation-version: "${PADDLEOCR_PREPARATION_VERSION:-0}"
-    depends_on:
-      paddleocr-llamacpp:
-        condition: service_healthy
-    volumes:
-      - ./pipeline_conf.yaml:/tmp/pipeline_conf.yaml:ro
-    environment:
-      PADDLE_PDX_DISABLE_MODEL_SOURCE_CHECK: "True"
-      PYTHONUNBUFFERED: "1"
-    ports:
-      - "127.0.0.1:28118:8118"
-    healthcheck:
-      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8118/docs', timeout=2)"]
-      interval: 10s
-      timeout: 5s
-      retries: 20
-      start_period: 60s
-    command: >
-      bash -lc "set -euo pipefail &&
-      paddlex --install serving &&
-      pip install --no-cache-dir 'paddlex[ocr]' &&
-      paddlex --serve
-      --pipeline /tmp/pipeline_conf.yaml
-      --host 0.0.0.0
-      --port 8118
-      --device cpu"
-
 volumes:
   paddleocr-llamacpp-models:
     external: true

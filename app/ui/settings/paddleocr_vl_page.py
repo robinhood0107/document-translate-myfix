@@ -4,6 +4,7 @@ from modules.ocr.persistent_cache import (
     DEFAULT_OCR_RESULT_CACHE_LIMIT,
     OCRPersistentResultCache,
 )
+from modules.ocr.paddle_crop.transport import DEFAULT_PADDLE_DIRECT_SERVER_URL
 
 from ..dayu_widgets.check_box import MCheckBox
 from ..dayu_widgets.label import MLabel
@@ -12,7 +13,7 @@ from ..dayu_widgets.spin_box import MSpinBox
 
 
 class PaddleOCRVLPage(QtWidgets.QWidget):
-    DEFAULT_SERVER_URL = "http://127.0.0.1:28118/layout-parsing"
+    DEFAULT_SERVER_URL = DEFAULT_PADDLE_DIRECT_SERVER_URL
     DEFAULT_MAX_NEW_TOKENS = 1024
     DEFAULT_PARALLEL_WORKERS = 8
     DEFAULT_PERSISTENT_CACHE_ENABLED = True
@@ -31,9 +32,9 @@ class PaddleOCRVLPage(QtWidgets.QWidget):
         note = MLabel(
             self.tr(
                 "Connect Comic Translate to your local PaddleOCR VL Docker service.\n"
-                "This OCR engine sends cropped text regions to the /layout-parsing endpoint.\n"
+                "The bundled runtime sends cropped text regions directly to llama.cpp with the official OCR: prompt.\n"
                 "Keep the default localhost URL if you want Comic Translate to start the bundled Docker runtime on demand.\n"
-                "Leave markdown or visualization options disabled unless you need debugging."
+                "Markdown and visualization options apply only to custom /layout-parsing endpoints."
             )
         ).secondary()
         note.setWordWrap(True)
@@ -64,16 +65,9 @@ class PaddleOCRVLPage(QtWidgets.QWidget):
 
         perf_note = MLabel(
             self.tr(
-                "Estimated VRAM usage depends on page size, image resolution, and the Docker service build.\n"
-                "Recommended starting points:\n"
-                "- Up to 8 GB VRAM: 128 to 256 tokens, 1 worker\n"
-                "- 10 to 12 GB VRAM: 256 tokens, 2 workers\n"
-                "- 16 GB VRAM: 256 to 512 tokens, 2 to 3 workers\n"
-                "- 24 GB or more: 512 tokens, 3 to 4 workers for dense pages\n"
-                "Approximate GPU usage:\n"
-                "- 256 tokens / 2 workers: about 5 to 7 GB\n"
-                "- 512 tokens / 2 workers: about 7 to 10 GB\n"
-                "- 1024 tokens / 2 workers: about 10 GB or more"
+                "The bundled llama.cpp runtime loads one managed model slot for the whole OCR stage.\n"
+                "Parallel workers control the client request queue and do not load extra model copies.\n"
+                "Keep 1024 tokens unless a validated corpus proves a lower limit never truncates text."
             )
         ).secondary()
         perf_note.setWordWrap(True)

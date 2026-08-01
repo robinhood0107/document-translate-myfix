@@ -1,17 +1,16 @@
 # PaddleOCR VL llama.cpp Docker Bundle
 
 이 폴더는 앱이 관리하는 PaddleOCR-VL 1.6 Docker 런타임의 기준
-번들입니다. 문서 분석 프런트는 PaddleX를 유지하고, 실제 VL 추론
-백엔드는 vLLM 대신 고정된 llama.cpp 서버를 사용합니다.
+번들입니다. 앱이 crop을 공식 `OCR:` 계약으로 고정된 llama.cpp 서버에
+직접 전송합니다. PaddleX 중계 프런트와 vLLM은 실행하지 않습니다.
 
 ## 기준 파일
 
 - `docker-compose.yaml`
-- `pipeline_conf.yaml`
 
-`paddleocr-layout`은 `/layout-parsing` API와 PaddleX 전처리·후처리를
-담당합니다. `paddleocr-llamacpp`은 OpenAI 호환 API로
-`PaddleOCR-VL-1.6-0.9B` GGUF와 vision projector를 실행합니다.
+`paddleocr-llamacpp`은 OpenAI 호환 API로
+`PaddleOCR-VL-1.6-0.9B` GGUF와 vision projector를 실행합니다. 관리형
+endpoint는 `http://127.0.0.1:18000/v1/chat/completions`입니다.
 
 ## 최초 모델 준비
 
@@ -44,25 +43,18 @@ powershell -NoProfile -ExecutionPolicy Bypass `
 ```
 
 정상 앱 시작은 큰 파일을 다시 해시하지 않습니다. read-only volume의
-ready manifest, 파일 크기, 이미지 ID, Compose·pipeline·command
+ready manifest, 파일 크기, 이미지 ID, Compose·command·direct transport
 fingerprint만 빠르게 검사합니다.
 
 ## 고정 런타임
 
 - llama.cpp:
   `ghcr.io/ggml-org/llama.cpp@sha256:22e0e3bfe967af4fd1df6a918022abbfd4e72e4d40a4769e616a4176790acbcb`
-- PaddleX layout:
-  `ccr-2vdh3abv-pub.cnc.bj.baidubce.com/paddlepaddle/paddleocr-genai-vllm-server@sha256:d0d32c04a2119613d25a0a4c292e165ccc107954b74580613cf59e378037f8f5`
-- llama.cpp backend: `llama-cpp-server`
+- direct API: llama.cpp `/v1/chat/completions`, image-first PNG + `OCR:`
 - context: 4096
 - parallel slots: 1
 - KV type: llama.cpp default F16
 - model volume: read-only external named volume
-
-PaddleX layout 이미지는 이름에 `vllm-server`가 남아 있지만, 이
-구성에서는 vLLM 프로세스를 시작하지 않습니다. 해당 고정 이미지에 포함된
-PaddleX/PaddleOCR 3.6 계열의 `llama-cpp-server` client와 serving
-프런트만 사용합니다.
 
 ## 시작·중지와 저VRAM 재사용
 
@@ -71,17 +63,17 @@ PaddleX/PaddleOCR 3.6 계열의 `llama-cpp-server` client와 serving
 - Windows 앱에서는 WSL Compose가 만든 컨테이너를 재사용하지 않습니다.
   Docker Desktop이 Compose Stop에서 `wsl`을 다시 호출하지 않도록
   Windows 경로·Windows Compose 메타데이터로 한 번 재생성합니다.
-- 이미지·command·pipeline·volume·manifest 중 하나라도 다르면
+- 이미지·command·transport·volume·manifest 중 하나라도 다르면
   `docker compose up -d --force-recreate`를 사용합니다.
 - OCR stage가 끝나면 llama.cpp의 `--sleep-idle-seconds 5`가 model과
   projector를 unload한 것을 확인한 뒤 컨테이너는 유지합니다.
-- unload 확인에 실패하면 다음 GPU stage 전에 두 컨테이너를 정상
+- unload 확인에 실패하면 다음 GPU stage 전에 컨테이너를 정상
   `docker compose stop`합니다.
 - 앱 종료 시에도 `stop`을 사용합니다. `down`은 자동 경로에서 사용하지
   않습니다.
 
-sleep 상태는 Docker 기동과 PaddleX 프런트를 보존하지만 model wake 시
-GGUF load·GPU offload는 다시 수행합니다. named volume은 파일 영속성과
+sleep 상태는 Docker 기동을 보존하지만 model wake 시 GGUF load·GPU
+offload는 다시 수행합니다. named volume은 파일 영속성과
 읽기 경로를 제공할 뿐 RAM/VRAM 상주를 뜻하지 않습니다.
 
 ## 참고용 스냅샷

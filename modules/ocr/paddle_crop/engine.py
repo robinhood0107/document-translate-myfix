@@ -57,6 +57,15 @@ from .response_parser import (
     markdown_to_text,
     normalize_output_text,
 )
+from .transport import (
+    DEFAULT_PADDLE_DIRECT_SERVER_URL,
+    PADDLE_DIRECT_PARSER_SCHEMA_VERSION,
+    build_direct_ocr_payload,
+    direct_transport_identity,
+    encoded_product_jpeg_to_png,
+    extract_direct_ocr_text,
+    is_direct_llama_cpp_endpoint,
+)
 
 
 logger = logging.getLogger(__name__)
@@ -92,7 +101,7 @@ class PaddleOCRPersistentCachePlan:
 
 class PaddleOCRVLEngine(OCREngine):
     PERFORMANCE_TELEMETRY_SCHEMA_VERSION = 1
-    DEFAULT_SERVER_URL = "http://127.0.0.1:28118/layout-parsing"
+    DEFAULT_SERVER_URL = DEFAULT_PADDLE_DIRECT_SERVER_URL
     DEFAULT_MAX_NEW_TOKENS = 1024
     DEFAULT_PARALLEL_WORKERS = 8
     DEFAULT_SCHEDULER_MODE = "fixed_area_desc"
@@ -464,7 +473,8 @@ class PaddleOCRVLEngine(OCREngine):
                 "visualize": bool(self.visualize),
                 "crop_schema_version": self.CROP_SCHEMA_VERSION,
                 "encoder_schema_version": self.ENCODER_SCHEMA_VERSION,
-                "parser_schema_version": self.PARSER_SCHEMA_VERSION,
+                "parser_schema_version": self._parser_schema_version(),
+                "transport": self._transport_identity(),
                 "sanitizer_schema_version": self.SANITIZER_SCHEMA_VERSION,
                 "guard_schema_version": self.GUARD_SCHEMA_VERSION,
             }
@@ -876,6 +886,20 @@ class PaddleOCRVLEngine(OCREngine):
         host = str(parsed.hostname or "").strip().lower()
         return host in {"127.0.0.1", "localhost", "::1"}
 
+    def _parser_schema_version(self) -> str:
+        if is_direct_llama_cpp_endpoint(self.server_url):
+            return PADDLE_DIRECT_PARSER_SCHEMA_VERSION
+        return self.PARSER_SCHEMA_VERSION
+
+    def _transport_identity(self) -> dict[str, Any]:
+        if is_direct_llama_cpp_endpoint(self.server_url):
+            return direct_transport_identity()
+        return {
+            "schema_version": 1,
+            "api_path": "/layout-parsing",
+            "response_schema": "paddlex_layout_parsing",
+        }
+
     def _order_jobs(self, jobs: list[dict[str, Any]]) -> list[dict[str, Any]]:
         if self.scheduler_mode == "fixed":
             return list(jobs)
@@ -1109,6 +1133,9 @@ class PaddleOCRVLEngine(OCREngine):
         return self._request_ocr_text_from_encoded(image_bytes)
 
     def _request_ocr_text_from_encoded(self, image_bytes: bytes) -> str:
+        if is_direct_llama_cpp_endpoint(self.server_url):
+            return self._request_direct_ocr_text_from_encoded(image_bytes)
+
         record = self._current_request_record()
         self._add_request_metric(record, "logical_request_count", 1)
         self._add_request_metric(record, "request_bytes", len(image_bytes))
@@ -1158,6 +1185,43 @@ class PaddleOCRVLEngine(OCREngine):
             record,
             "parse_sanitize_ms",
             (time.perf_counter() - started_at) * 1000.0,
+        )
+        return text
+
+    def _request_direct_ocr_text_from_encoded(self, image_bytes: bytes) -> str:
+        record = self._current_request_record()
+        self._add_request_metric(record, "logical_request_count", 1)
+        self._add_request_metric(record, "request_bytes", len(image_bytes))
+
+        encode_started_at = time.perf_counter()
+        image_png = encoded_product_jpeg_to_png(image_bytes)
+        payload, base64_chars = build_direct_ocr_payload(
+            image_png,
+            max_tokens=self.max_new_tokens,
+        )
+        encode_elapsed_ms = (
+            time.perf_counter() - encode_started_at
+        ) * 1000.0
+        self._add_request_metric(record, "base64_ms", encode_elapsed_ms)
+        self._add_request_metric(record, "base64_chars", base64_chars)
+
+        payload_started_at = time.perf_counter()
+        # Building is deterministic and already complete above.  Keep the
+        # existing telemetry field populated so relay/direct profiles share
+        # one stable schema.
+        self._add_request_metric(
+            record,
+            "payload_build_ms",
+            (time.perf_counter() - payload_started_at) * 1000.0,
+        )
+
+        data = self._send_request(payload, telemetry_record=record)
+        parse_started_at = time.perf_counter()
+        text = extract_direct_ocr_text(data)
+        self._add_request_metric(
+            record,
+            "parse_sanitize_ms",
+            (time.perf_counter() - parse_started_at) * 1000.0,
         )
         return text
 
