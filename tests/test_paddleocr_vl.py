@@ -60,7 +60,9 @@ class _FakeSettings:
         scheduler_mode: str | None = None,
         parallel_workers: int = 8,
         max_new_tokens: int = 1024,
-        server_url: str = "http://127.0.0.1:28118/layout-parsing",
+        server_url: str = (
+            "http://127.0.0.1:18000/v1/chat/completions"
+        ),
     ) -> None:
         self._scheduler_mode = scheduler_mode
         self._parallel_workers = parallel_workers
@@ -1069,8 +1071,12 @@ class PaddleOCRVLEngineTests(unittest.TestCase):
             _FakeHTTPResponse(
                 200,
                 {
-                    "errorCode": 0,
-                    "result": {"markdown": {"text": "テスト"}},
+                    "choices": [
+                        {
+                            "finish_reason": "stop",
+                            "message": {"content": "テスト"},
+                        }
+                    ],
                 },
             ),
         ]

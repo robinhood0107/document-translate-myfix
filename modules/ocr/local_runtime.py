@@ -19,7 +19,6 @@ from modules.ocr.managed_backend_policy import (
     sanitize_managed_runtime_environment,
 )
 from modules.ocr.paddle_crop.runtime import (
-    DEFAULT_PADDLE_LAYOUT_IMAGE,
     DEFAULT_PADDLE_LLAMA_CPP_IMAGE,
     DEFAULT_PADDLE_LLAMA_MODEL_VOLUME,
     DEFAULT_PADDLE_LLAMA_READY_MANIFEST,
@@ -33,6 +32,10 @@ from modules.ocr.paddle_crop.runtime import (
     PaddleLlamaRuntimeContractError,
     build_paddle_llama_runtime_contract,
     validate_paddle_llama_volume_name,
+)
+from modules.ocr.paddle_crop.transport import (
+    DEFAULT_PADDLE_DIRECT_SERVER_URL,
+    direct_transport_identity,
 )
 from modules.ocr.mangalmm_full_page.runtime import (
     DEFAULT_MANGALMM_LLAMA_CPP_IMAGE,
@@ -78,15 +81,14 @@ ROOT_DIR = Path(__file__).resolve().parents[2]
 DEFAULT_HUNYUAN_N_GPU_LAYERS = "80"
 LATE_START_STOP_GRACE_SEC = 3.0
 LATE_START_STOP_POLL_SEC = 0.25
-PADDLEOCR_LAYOUT_IMAGE_REF = DEFAULT_PADDLE_LAYOUT_IMAGE
-PADDLEOCR_LAYOUT_IMAGE_DIGEST = PADDLEOCR_LAYOUT_IMAGE_REF.rsplit("@", 1)[-1]
 PADDLEOCR_LLAMA_CPP_IMAGE_REF = DEFAULT_PADDLE_LLAMA_CPP_IMAGE
 PADDLEOCR_LLAMA_CPP_IMAGE_DIGEST = PADDLEOCR_LLAMA_CPP_IMAGE_REF.rsplit("@", 1)[
     -1
 ]
-# Compatibility aliases used by existing cache/runtime callers.
-PADDLEOCR_IMAGE_REF = PADDLEOCR_LAYOUT_IMAGE_REF
-PADDLEOCR_IMAGE_DIGEST = PADDLEOCR_LAYOUT_IMAGE_DIGEST
+# Compatibility aliases used by existing cache/runtime callers now identify
+# the only active managed Paddle crop image.
+PADDLEOCR_IMAGE_REF = PADDLEOCR_LLAMA_CPP_IMAGE_REF
+PADDLEOCR_IMAGE_DIGEST = PADDLEOCR_LLAMA_CPP_IMAGE_DIGEST
 PADDLEOCR_RUNTIME_FINGERPRINT_LABEL = PADDLE_RUNTIME_FINGERPRINT_LABEL
 MANGALMM_LLAMA_CPP_IMAGE_REF = DEFAULT_MANGALMM_LLAMA_CPP_IMAGE
 MANGALMM_LLAMA_CPP_IMAGE_DIGEST = MANGALMM_LLAMA_CPP_IMAGE_REF.rsplit("@", 1)[
@@ -124,15 +126,11 @@ _ENGINE_CONFIG = {
     },
     "PaddleOCR VL": {
         "compose_file": ROOT_DIR / "paddleocr_vl_docker_files" / "docker-compose.yaml",
-        "managed_url": "http://127.0.0.1:28118/layout-parsing",
-        "health_url": "http://127.0.0.1:28118/docs",
-        "health_urls": [
-            "http://127.0.0.1:28118/docs",
-            "http://127.0.0.1:18000/health",
-        ],
+        "managed_url": DEFAULT_PADDLE_DIRECT_SERVER_URL,
+        "health_url": "http://127.0.0.1:18000/health",
         "settings_page_name": "PaddleOCR VL Settings",
         "container_name": "paddleocr-llamacpp",
-        "container_names": ["paddleocr-llamacpp", "paddleocr-server"],
+        "container_names": ["paddleocr-llamacpp"],
         "managed_backend": MANAGED_LOCAL_INFERENCE_BACKEND,
         "uses_llama_cpp": True,
     },
@@ -292,10 +290,7 @@ class LocalOCRRuntimeManager:
                 exc_info=True,
             )
             return None
-        if not contract.llama_image_id or (
-            engine_key == "PaddleOCR VL"
-            and not contract.layout_image_id
-        ):
+        if not contract.llama_image_id:
             logger.info(
                 "Persistent PaddleOCR-VL cache is disabled until the pinned "
                 "managed images are installed locally."
@@ -343,7 +338,7 @@ class LocalOCRRuntimeManager:
                 ),
             }
         return {
-            "identity_schema_version": 2,
+            "identity_schema_version": 3,
             "managed": True,
             "engine": engine_key,
             "backend": "llama.cpp",
@@ -364,12 +359,9 @@ class LocalOCRRuntimeManager:
             "llama_image_ref": contract.llama_image_ref,
             "llama_image_digest": PADDLEOCR_LLAMA_CPP_IMAGE_DIGEST,
             "llama_image_id": contract.llama_image_id,
-            "layout_image_ref": contract.layout_image_ref,
-            "layout_image_digest": PADDLEOCR_LAYOUT_IMAGE_DIGEST,
-            "layout_image_id": contract.layout_image_id,
             "compose_sha256": contract.compose_file_sha256,
             "command_sha256": contract.command_sha256,
-            "pipeline_config_sha256": contract.pipeline_config_sha256,
+            "transport": direct_transport_identity(),
             "runtime_fingerprint": contract.fingerprint,
         }
 
@@ -985,10 +977,8 @@ class LocalOCRRuntimeManager:
             return self._paddle_runtime_contract_cache
 
         compose_file = Path(self._config_for("PaddleOCR VL")["compose_file"])
-        pipeline_config = compose_file.parent / "pipeline_conf.yaml"
-        for path in (compose_file, pipeline_config):
-            if not path.is_file():
-                raise FileNotFoundError(path)
+        if not compose_file.is_file():
+            raise FileNotFoundError(compose_file)
         volume_name = validate_paddle_llama_volume_name(
             os.environ.get(
                 "PADDLEOCR_LLAMA_MODEL_VOLUME",
@@ -1006,12 +996,9 @@ class LocalOCRRuntimeManager:
         llama_image_id = self._inspect_docker_image_id(
             PADDLEOCR_LLAMA_CPP_IMAGE_REF
         )
-        layout_image_id = self._inspect_docker_image_id(
-            PADDLEOCR_LAYOUT_IMAGE_REF
-        )
-        if not llama_image_id or not layout_image_id:
+        if not llama_image_id:
             raise PaddleLlamaRuntimeContractError(
-                "Pinned PaddleOCR runtime images are not installed."
+                "Pinned PaddleOCR llama.cpp image is not installed."
             )
         contract = build_paddle_llama_runtime_contract(
             manifest_bytes=manifest_bytes,
@@ -1020,20 +1007,14 @@ class LocalOCRRuntimeManager:
             volume_name=volume_name,
             llama_image_ref=PADDLEOCR_LLAMA_CPP_IMAGE_REF,
             llama_image_id=llama_image_id,
-            layout_image_ref=PADDLEOCR_LAYOUT_IMAGE_REF,
-            layout_image_id=layout_image_id,
             compose_file=compose_file,
-            pipeline_config_file=pipeline_config,
             environment=os.environ,
         )
         self._paddle_runtime_contract_cache = contract
         return contract
 
     def _ensure_paddle_runtime_images(self) -> None:
-        for image_ref in (
-            PADDLEOCR_LLAMA_CPP_IMAGE_REF,
-            PADDLEOCR_LAYOUT_IMAGE_REF,
-        ):
+        for image_ref in (PADDLEOCR_LLAMA_CPP_IMAGE_REF,):
             if self._inspect_docker_image_id(image_ref):
                 continue
             from modules.utils.llama_cpp_runtime import run_docker_command
@@ -1659,7 +1640,6 @@ printf 'mmproj_bytes=%s\n' "$(stat -c %s "$mmproj_path")"
         expected_fingerprint = contract.fingerprint
         expected_image_ids = {
             "paddleocr-llamacpp": contract.llama_image_id,
-            "paddleocr-server": contract.layout_image_id,
         }
         for name in container_names:
             expected_image_id = expected_image_ids.get(name)

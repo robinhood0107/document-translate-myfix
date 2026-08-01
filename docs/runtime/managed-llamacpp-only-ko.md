@@ -7,23 +7,21 @@ Comic Translate가 직접 시작하는 관리형 로컬 추론은 모두 llama.c
 | Gemma 번역 | llama.cpp |
 | HunyuanOCR | llama.cpp |
 | MangaLMM full-page | llama.cpp |
-| PaddleOCR-VL crop 인식 | llama.cpp + CPU-only PaddleX relay |
+| PaddleOCR-VL crop 인식 | llama.cpp direct `OCR:` |
 | PaddleOCR-VL full-page Spotting | llama.cpp |
 
 사용자가 URL을 직접 바꾼 custom/unmanaged endpoint는 이 정책의 대상이 아니다.
 앱은 해당 URL을 그대로 사용하며 Docker runtime을 시작하거나 backend를 추정하지
 않는다.
 
-## PaddleX relay 예외
+## Paddle crop direct 계약
 
-`paddleocr-layout`의 고정 vendor image 이름에는 역사적으로
-`paddleocr-genai-vllm-server`가 포함돼 있다. 현재 Compose는 이 이미지에서
-`paddlex --serve --device cpu`만 시작하며 vLLM process를 시작하지 않는다.
-실제 VLM 요청은 `pipeline_conf.yaml`의 `llama-cpp-server` backend를 통해
-`paddleocr-llamacpp`으로 전달된다.
-
-이 relay는 direct `OCR:` 경로와 동일 crop으로 품질·속도를 비교하기 전에는
-제거하지 않는다. 이미지 이름만 보고 활성 vLLM으로 오판해서도 안 된다.
+관리형 기본 endpoint는 `http://127.0.0.1:18000/v1/chat/completions`이다.
+제품 JPEG crop을 다시 PNG로 인코딩하고 image-first content 뒤에 공식 `OCR:`
+프롬프트를 보낸다. 이 계약은 과거 PaddleX relay와 일본어·영어·중국어
+362/362 block 결과가
+동일한 검증 결과를 기준으로 고정됐다. 사용자가 직접 지정한 과거
+`/layout-parsing` endpoint는 unmanaged 호환 경로로만 남는다.
 
 ## 강제 장치
 
@@ -33,9 +31,9 @@ Comic Translate가 직접 시작하는 관리형 로컬 추론은 모두 llama.c
 - 과거 vLLM 환경변수는 관리형 Compose에 전달하지 않고 key 이름만 warning으로
   기록한다.
 - `scripts/verify_managed_llamacpp_runtime.py`는 활성 Compose command와 Paddle
-  relay 설정을 검사한다. `--live`를 주면 현재 실행 중인 관리형 컨테이너의
+  direct port 설정을 검사한다. `--live`를 주면 현재 실행 중인 관리형 컨테이너의
   process tree도 검사한다.
-- 기존 `paddleocr-vllm` 컨테이너는 먼저 dry-run으로 소유권을 확인하고,
+- 기존 `paddleocr-vllm`·`paddleocr-server` 컨테이너는 먼저 dry-run으로 소유권을 확인하고,
   실제 immutable container ID와 label 값을 담은 resolved manifest를 만든다.
   실행 시 현재 ID·image·label이 resolved manifest와 모두 같을 때만 ID를
   대상으로 stop 후 제거한다.
@@ -63,4 +61,6 @@ Docker Desktop이 켜진 상태의 process tree 검사:
 .venv-win\Scripts\python.exe scripts\retire_legacy_vllm_runtime.py --manifest <validation-log-root>\resolved-vllm-retirement.json --execute
 ```
 
-삭제 도구는 현재 CPU relay도 공유하는 vendor image를 삭제하지 않는다.
+삭제 도구는 `paddleocr-vllm`과 `paddleocr-server`의 immutable ID와 제품
+label을 먼저 확인한다. 두 컨테이너가 제거되고 다른 컨테이너 참조가 없을
+때만 retired vendor image를 삭제하며 광범위 prune은 실행하지 않는다.

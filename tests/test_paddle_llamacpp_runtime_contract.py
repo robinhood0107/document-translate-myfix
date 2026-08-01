@@ -7,7 +7,6 @@ import unittest
 from pathlib import Path
 
 from modules.ocr.paddle_llamacpp_runtime_contract import (
-    DEFAULT_PADDLE_LAYOUT_IMAGE,
     DEFAULT_PADDLE_LLAMA_CPP_IMAGE,
     DEFAULT_PADDLE_LLAMA_MODEL_VOLUME,
     PADDLE_LLAMA_MMPROJ_NAME,
@@ -56,12 +55,7 @@ class PaddleLlamaRuntimeContractTests(unittest.TestCase):
         environment: dict | None = None,
     ):
         compose_file = root / "docker-compose.yaml"
-        pipeline_file = root / "pipeline_conf.yaml"
         compose_file.write_text("services: {}\n", encoding="utf-8")
-        pipeline_file.write_text(
-            "pipeline_name: PaddleOCR-VL-1.6\n",
-            encoding="utf-8",
-        )
         manifest_bytes = json.dumps(
             manifest or _manifest_payload(),
             sort_keys=True,
@@ -76,10 +70,7 @@ class PaddleLlamaRuntimeContractTests(unittest.TestCase):
             volume_name=DEFAULT_PADDLE_LLAMA_MODEL_VOLUME,
             llama_image_ref=DEFAULT_PADDLE_LLAMA_CPP_IMAGE,
             llama_image_id=DEFAULT_PADDLE_LLAMA_CPP_IMAGE.rsplit("@", 1)[-1],
-            layout_image_ref=DEFAULT_PADDLE_LAYOUT_IMAGE,
-            layout_image_id=DEFAULT_PADDLE_LAYOUT_IMAGE.rsplit("@", 1)[-1],
             compose_file=compose_file,
-            pipeline_config_file=pipeline_file,
             environment=environment,
         )
 

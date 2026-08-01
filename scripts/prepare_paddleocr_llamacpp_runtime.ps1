@@ -517,12 +517,74 @@ try {
             "actual=$($LoadedIds -join ', ')"
         )
     }
+
+    Add-Type -AssemblyName System.Drawing
+    $Bitmap = [System.Drawing.Bitmap]::new(256, 96)
+    $Graphics = [System.Drawing.Graphics]::FromImage($Bitmap)
+    $Font = [System.Drawing.Font]::new(
+        [System.Drawing.FontFamily]::GenericSansSerif,
+        40,
+        [System.Drawing.FontStyle]::Bold
+    )
+    $PngStream = [System.IO.MemoryStream]::new()
+    try {
+        $Graphics.Clear([System.Drawing.Color]::White)
+        $Graphics.DrawString(
+            'OCR',
+            $Font,
+            [System.Drawing.Brushes]::Black,
+            48,
+            18
+        )
+        $Bitmap.Save($PngStream, [System.Drawing.Imaging.ImageFormat]::Png)
+        $ImageBase64 = [Convert]::ToBase64String($PngStream.ToArray())
+    }
+    finally {
+        $PngStream.Dispose()
+        $Font.Dispose()
+        $Graphics.Dispose()
+        $Bitmap.Dispose()
+    }
+    $OcrPayload = [ordered]@{
+        model = $ModelAlias
+        messages = @(
+            [ordered]@{
+                role = 'user'
+                content = @(
+                    [ordered]@{
+                        type = 'image_url'
+                        image_url = [ordered]@{
+                            url = "data:image/png;base64,$ImageBase64"
+                        }
+                    }
+                    [ordered]@{ type = 'text'; text = 'OCR:' }
+                )
+            }
+        )
+        temperature = 0
+        max_tokens = 64
+        stream = $false
+    } | ConvertTo-Json -Depth 10 -Compress
+    $OcrResponse = Invoke-RestMethod `
+        -Method Post `
+        -Uri "http://127.0.0.1:${SmokePort}/v1/chat/completions" `
+        -ContentType 'application/json' `
+        -Body $OcrPayload `
+        -TimeoutSec 60
+    if (
+        @($OcrResponse.choices).Count -lt 1 -or
+        [string]$OcrResponse.choices[0].finish_reason -eq 'length'
+    ) {
+        throw 'PaddleOCR llama.cpp direct OCR smoke returned an invalid response.'
+    }
     $SmokeResult = [ordered]@{
         passed = $true
         device = $SmokeDevice
         health_status = 'ok'
         model_alias = $ModelAlias
         models_match = $true
+        direct_ocr_request = $true
+        direct_ocr_finish_reason = [string]$OcrResponse.choices[0].finish_reason
     }
 }
 finally {
