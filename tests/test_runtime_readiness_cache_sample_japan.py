@@ -41,7 +41,11 @@ class _DummySettingsPage:
         }
 
     def get_paddleocr_vl_settings(self) -> dict:
-        return {"server_url": "http://127.0.0.1:28118/layout-parsing"}
+        return {
+            "server_url": (
+                "http://127.0.0.1:18000/v1/chat/completions"
+            )
+        }
 
     def get_hunyuan_ocr_settings(self) -> dict:
         return {"server_url": "http://127.0.0.1:28080/v1"}
