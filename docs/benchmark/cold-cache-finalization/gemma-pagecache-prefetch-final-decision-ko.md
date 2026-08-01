@@ -65,4 +65,3 @@ page cache를 이미 활용합니다. 명시적 후보는 반복 측정상 0%보
 - translation all-hit에서는 Gemma 시작 0 유지
 
 원시 결과와 모델 residency 자료는 Git 밖 validation log에 보존합니다.
-
