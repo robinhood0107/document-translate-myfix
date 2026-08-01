@@ -9,7 +9,13 @@ from unittest import mock
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from app.ui.settings.settings_page import (  # noqa: E402
+    PADDLE_DIRECT_TRANSPORT_MIGRATION_VERSION,
+    PADDLE_DIRECT_TRANSPORT_MIGRATION_VERSION_KEY,
+    migrate_paddle_crop_direct_transport,
     migrate_managed_runtime_to_llamacpp,
+)
+from modules.ocr.paddle_crop.transport import (  # noqa: E402
+    DEFAULT_PADDLE_DIRECT_SERVER_URL,
 )
 from modules.ocr.local_runtime import LocalOCRRuntimeManager  # noqa: E402
 from modules.ocr.managed_backend_policy import (  # noqa: E402
@@ -51,6 +57,65 @@ class _FakeQSettings:
 
 
 class ManagedLlamaCppOnlyRuntimeTests(unittest.TestCase):
+    def test_retired_managed_relay_url_migrates_once(self) -> None:
+        settings = _FakeQSettings(
+            {
+                "paddleocr_vl/server_url": (
+                    "http://127.0.0.1:28118/layout-parsing"
+                ),
+                "paddleocr_vl/max_new_tokens": 768,
+            }
+        )
+
+        self.assertTrue(migrate_paddle_crop_direct_transport(settings))
+        self.assertEqual(
+            settings.values["paddleocr_vl/server_url"],
+            DEFAULT_PADDLE_DIRECT_SERVER_URL,
+        )
+        self.assertEqual(settings.values["paddleocr_vl/max_new_tokens"], 768)
+        self.assertEqual(
+            settings.values[PADDLE_DIRECT_TRANSPORT_MIGRATION_VERSION_KEY],
+            PADDLE_DIRECT_TRANSPORT_MIGRATION_VERSION,
+        )
+
+    def test_direct_transport_migration_preserves_custom_url(self) -> None:
+        settings = _FakeQSettings(
+            {"paddleocr_vl/server_url": "http://example.test/layout-parsing"}
+        )
+
+        self.assertFalse(migrate_paddle_crop_direct_transport(settings))
+        self.assertEqual(
+            settings.values["paddleocr_vl/server_url"],
+            "http://example.test/layout-parsing",
+        )
+
+    def test_direct_transport_migration_preserves_later_user_change(self) -> None:
+        settings = _FakeQSettings(
+            {
+                PADDLE_DIRECT_TRANSPORT_MIGRATION_VERSION_KEY: (
+                    PADDLE_DIRECT_TRANSPORT_MIGRATION_VERSION
+                ),
+                "paddleocr_vl/server_url": "http://example.test/custom",
+            }
+        )
+
+        self.assertFalse(migrate_paddle_crop_direct_transport(settings))
+        self.assertEqual(
+            settings.values["paddleocr_vl/server_url"],
+            "http://example.test/custom",
+        )
+        self.assertEqual(settings.writes, [])
+
+    def test_direct_transport_migration_fresh_install_uses_new_default(self) -> None:
+        settings = _FakeQSettings({})
+
+        self.assertFalse(migrate_paddle_crop_direct_transport(settings))
+        self.assertNotIn("paddleocr_vl/server_url", settings.values)
+        self.assertEqual(
+            settings.values[PADDLE_DIRECT_TRANSPORT_MIGRATION_VERSION_KEY],
+            PADDLE_DIRECT_TRANSPORT_MIGRATION_VERSION,
+        )
+
     def test_legacy_backend_migration_preserves_endpoint_and_other_values(
         self,
     ) -> None:
@@ -161,7 +226,7 @@ class ManagedLlamaCppOnlyRuntimeTests(unittest.TestCase):
     def test_all_active_compose_contracts_are_llamacpp_only(self) -> None:
         result = verify_static_contracts()
 
-        self.assertEqual(result["paddle_backend"], "llama-cpp-server")
+        self.assertEqual(result["paddle_backend"], "llama.cpp-direct")
         self.assertIn("paddleocr-llamacpp", result["services"])
         self.assertNotIn("paddleocr-vllm", result["services"])
 
@@ -181,7 +246,10 @@ class ManagedLlamaCppOnlyRuntimeTests(unittest.TestCase):
 
         with mock.patch(
             "scripts.retire_legacy_vllm_runtime._inspect_container",
-            return_value=inspected,
+            side_effect=[inspected, None],
+        ), mock.patch(
+            "scripts.retire_legacy_vllm_runtime._inspect_image",
+            return_value=None,
         ), mock.patch(
             "scripts.retire_legacy_vllm_runtime._docker"
         ) as docker:
@@ -194,7 +262,12 @@ class ManagedLlamaCppOnlyRuntimeTests(unittest.TestCase):
                     "container": "paddleocr-vllm",
                     "container_id": "sha256:legacy-container-id",
                     "status": "would-remove",
-                }
+                },
+                {"container": "paddleocr-server", "status": "absent"},
+                {
+                    "image": manifest["images"][0]["reference"],
+                    "status": "absent",
+                },
             ],
         )
         docker.assert_not_called()
@@ -250,7 +323,10 @@ class ManagedLlamaCppOnlyRuntimeTests(unittest.TestCase):
 
         with mock.patch(
             "scripts.retire_legacy_vllm_runtime._inspect_container",
-            return_value=inspected,
+            side_effect=[inspected, None],
+        ), mock.patch(
+            "scripts.retire_legacy_vllm_runtime._inspect_image",
+            return_value=None,
         ):
             resolved = resolve_manifest(DEFAULT_MANIFEST)
 
@@ -263,6 +339,30 @@ class ManagedLlamaCppOnlyRuntimeTests(unittest.TestCase):
             "legacy",
         )
         self.assertIn("source_manifest_sha256", resolved)
+
+    def test_retired_image_is_removed_only_when_unreferenced_and_resolved(
+        self,
+    ) -> None:
+        manifest = json.loads(DEFAULT_MANIFEST.read_text(encoding="utf-8"))
+        manifest["containers"] = []
+        manifest["images"][0]["image_id"] = "sha256:retired-image-id"
+        with mock.patch(
+            "scripts.retire_legacy_vllm_runtime._load_manifest",
+            return_value=manifest,
+        ), mock.patch(
+            "scripts.retire_legacy_vllm_runtime._inspect_image",
+            return_value={"Id": "sha256:retired-image-id"},
+        ), mock.patch(
+            "scripts.retire_legacy_vllm_runtime._containers_referencing_image",
+            return_value=[],
+        ), mock.patch(
+            "scripts.retire_legacy_vllm_runtime._docker",
+            return_value=mock.Mock(returncode=0, stderr=""),
+        ) as docker:
+            actions = retire_manifest(DEFAULT_MANIFEST, execute=True)
+
+        self.assertEqual(actions[0]["status"], "removed")
+        docker.assert_called_once_with("image", "rm", "sha256:retired-image-id")
 
 
 if __name__ == "__main__":

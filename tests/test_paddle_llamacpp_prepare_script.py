@@ -17,7 +17,6 @@ from modules.ocr.paddle_llamacpp_runtime_contract import (
 ROOT = Path(__file__).resolve().parents[1]
 PREPARE_SCRIPT = ROOT / "scripts" / "prepare_paddleocr_llamacpp_runtime.ps1"
 COMPOSE_FILE = ROOT / "paddleocr_vl_docker_files" / "docker-compose.yaml"
-PIPELINE_FILE = ROOT / "paddleocr_vl_docker_files" / "pipeline_conf.yaml"
 
 
 class PaddleLlamaPrepareScriptTests(unittest.TestCase):
@@ -64,10 +63,9 @@ class PaddleLlamaPrepareScriptTests(unittest.TestCase):
         services = compose["services"]
         self.assertEqual(
             set(services),
-            {"paddleocr-llamacpp", "paddleocr-layout"},
+            {"paddleocr-llamacpp"},
         )
         llama = services["paddleocr-llamacpp"]
-        layout = services["paddleocr-layout"]
         command = [str(value) for value in llama["command"]]
         self.assertIn(
             (
@@ -84,11 +82,6 @@ class PaddleLlamaPrepareScriptTests(unittest.TestCase):
             command,
         )
         self.assertIn("--sleep-idle-seconds", command)
-        self.assertEqual(
-            layout["depends_on"]["paddleocr-llamacpp"]["condition"],
-            "service_healthy",
-        )
-        self.assertNotIn("gpus", layout)
         volume = compose["volumes"]["paddleocr-llamacpp-models"]
         self.assertTrue(volume["external"])
         self.assertIn(DEFAULT_PADDLE_LLAMA_MODEL_VOLUME, volume["name"])
@@ -99,15 +92,11 @@ class PaddleLlamaPrepareScriptTests(unittest.TestCase):
             )
         )
 
-    def test_pipeline_routes_vl_requests_to_llama_cpp(self) -> None:
-        pipeline = yaml.safe_load(PIPELINE_FILE.read_text(encoding="utf-8"))
-        genai = pipeline["SubModules"]["VLRecognition"]["genai_config"]
+    def test_prepare_smoke_calls_direct_chat_completions(self) -> None:
+        script = PREPARE_SCRIPT.read_text(encoding="utf-8")
 
-        self.assertEqual(genai["backend"], "llama-cpp-server")
-        self.assertEqual(
-            genai["server_url"],
-            "http://paddleocr-llamacpp:8080/v1",
-        )
+        self.assertIn("/v1/chat/completions", script)
+        self.assertIn("OCR:", script)
 
 
 if __name__ == "__main__":
