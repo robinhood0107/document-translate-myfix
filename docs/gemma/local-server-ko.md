@@ -6,21 +6,20 @@
 
 Windows PowerShell에서 저장소 루트를 연 뒤 실행합니다.
 
-기본 `Prepare` 실행은 `C:` 여유 공간이 60 GiB 이상인지 확인합니다. `gemma-local-server` 컨테이너가 실행 중이면 앱을 정상 종료해 컨테이너를 중지한 뒤 다시 실행합니다.
+기본 `Prepare` 실행은 `C:` 여유 공간이 30 GiB 이상인지 확인합니다. `gemma-local-server` 컨테이너가 실행 중이면 앱을 정상 종료해 컨테이너를 중지한 뒤 다시 실행합니다.
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass `
   -File .\scripts\prepare_gemma_runtime.ps1 -Mode Prepare `
-  -CandidateModelPath 'C:\ExampleWorkspace\models\Gemma4-26B-A4B-Uncensored-HauhauCS-Balanced-IQ4_XS.gguf' `
-  -LegacyModelPath 'C:\ExampleWorkspace\models\gemma-4-26B-IQ4_NL.gguf'
+  -ModelPath 'C:\ExampleWorkspace\models\gemma-4-26B-IQ4_NL.gguf'
 ```
 
 준비 스크립트는 다음 순서를 지킵니다.
 
-- 두 source 경로는 `Prepare`에만 필요하며 준비가 끝난 뒤 앱 시작에는 필요하지 않습니다.
+- source 경로는 `Prepare`에만 필요하며 준비가 끝난 뒤 앱 시작에는 필요하지 않습니다.
 - 고정된 llama.cpp image digest를 확인하고, 로컬에 없을 때만 가져옵니다.
-- 후보 모델과 기존 rollback 모델의 원본 SHA-256과 크기를 확인합니다.
-- `comic-translate-gemma-models-v1` external volume에 각 파일을 `.partial`로 복사합니다.
+- 최종 제품 모델 IQ4_NL의 원본 SHA-256과 크기를 확인합니다.
+- `comic-translate-gemma-models-v2` external volume에 파일을 `.partial`로 복사합니다.
 - 복사본의 크기와 SHA-256을 확인한 뒤 같은 volume 안에서 원자적으로 이름을 바꿉니다.
 - GPU에서 실제 모델 load, `/health`, `/v1/models`, chat 요청을 통과시킵니다.
 - 모든 검증이 끝난 마지막 단계에서만 ready manifest를 기록합니다.
@@ -36,19 +35,18 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\prepare_gemma_runt
 준비 스크립트의 공개 옵션은 아래와 같습니다.
 
 - `-Mode`: `Prepare` 또는 `Verify`이며 기본값은 `Prepare`입니다.
-- `-CandidateModelPath`, `-LegacyModelPath`: `Prepare`에서만 필요한 두 원본 GGUF 경로입니다.
-- `-VolumeName`: 기본값은 `comic-translate-gemma-models-v1`입니다. 다른 이름을 쓰면 앱 실행 전 `GEMMA_MODEL_VOLUME`에도 같은 값을 설정해야 합니다.
+- `-ModelPath`: `Prepare`에서만 필요한 최종 IQ4_NL GGUF 경로입니다.
+- `-VolumeName`: 기본값은 `comic-translate-gemma-models-v2`입니다. 다른 이름을 쓰면 앱 실행 전 `GEMMA_MODEL_VOLUME`에도 같은 값을 설정해야 합니다.
 - `-SmokePort`: 실제 GPU smoke 서버의 로컬 포트이며 기본값은 `18082`입니다.
 - `-SmokeTimeoutSec`: smoke 준비 제한 시간이며 `30`~`900`초, 기본값은 `420`초입니다.
-- `-MinimumFreeBytes`: `C:` 최소 여유 공간이며 기본값은 `64424509440` bytes(60 GiB)입니다.
+- `-MinimumFreeBytes`: `C:` 최소 여유 공간이며 기본값은 `32212254720` bytes(30 GiB)입니다.
 - `-SkipFreeSpaceCheck`: 공간을 별도로 확인한 경우에만 `C:` 여유 공간 검사를 건너뜁니다.
 
 ## 앱 설정
 
 - Endpoint URL: `http://127.0.0.1:18080/v1`
 - Model: 준비된 volume 안의 정확한 GGUF 파일명
-- 기본 rollback 모델: `gemma-4-26B-IQ4_NL.gguf`
-- 품질 승인 전 후보 모델: `Gemma4-26B-A4B-Uncensored-HauhauCS-Balanced-IQ4_XS.gguf`
+- 제품 기본 모델: `gemma-4-26B-IQ4_NL.gguf`
 
 앱은 모델 volume을 read-only로 마운트합니다. image ID, compose/command hash, volume, manifest SHA-256, model SHA-256, 준비 버전을 합친 fingerprint가 정확히 같은 중지 컨테이너만 `docker start`로 재사용합니다. 하나라도 다르면 `docker compose up -d --force-recreate`로 재생성합니다.
 

@@ -81,6 +81,23 @@ GEMMA_GROUPED_RETIREMENT_VERSION_KEY = (
     "gemma_local_server/grouped_retirement_version"
 )
 GEMMA_REQUEST_MODE_KEY = "gemma_local_server/request_mode"
+GEMMA_MODEL_RETIREMENT_VERSION = 1
+GEMMA_MODEL_RETIREMENT_VERSION_KEY = (
+    "gemma_local_server/model_retirement_version"
+)
+GEMMA_RETIRED_IQ4_XS_MODEL = (
+    "Gemma4-26B-A4B-Uncensored-HauhauCS-Balanced-IQ4_XS.gguf"
+)
+GEMMA_CREDENTIAL_MODEL_KEYS = (
+    "credentials/Custom Local Server(Gemma)_model",
+    "credentials/Custom Local Server_model",
+    "credentials/Custom_model",
+)
+GEMMA_CREDENTIAL_ENDPOINT_KEYS = (
+    "credentials/Custom Local Server(Gemma)_api_url",
+    "credentials/Custom Local Server_api_url",
+    "credentials/Custom_api_url",
+)
 PROJECT_CHECKPOINT_DEFAULT_VERSION = 1
 PROJECT_CHECKPOINT_DEFAULT_VERSION_KEY = (
     "project_checkpoint/default_version"
@@ -144,6 +161,58 @@ def migrate_retired_gemma_request_mode(settings: QSettings) -> bool:
         GEMMA_GROUPED_RETIREMENT_VERSION_KEY,
         GEMMA_GROUPED_RETIREMENT_VERSION,
     )
+    return changed
+
+
+def migrate_retired_gemma_model(settings: QSettings) -> bool:
+    """Move the retired managed IQ4_XS candidate back to the product model once."""
+
+    try:
+        current_version = int(
+            settings.value(
+                GEMMA_MODEL_RETIREMENT_VERSION_KEY,
+                0,
+                type=int,
+            )
+            or 0
+        )
+    except (TypeError, ValueError):
+        current_version = 0
+    if current_version >= GEMMA_MODEL_RETIREMENT_VERSION:
+        return False
+
+    endpoint = ""
+    for key in GEMMA_CREDENTIAL_ENDPOINT_KEYS:
+        candidate = str(settings.value(key, "", type=str) or "").strip()
+        if candidate:
+            endpoint = candidate.rstrip("/")
+            break
+    managed_endpoint = endpoint in {
+        "",
+        GemmaLocalServerPage.DEFAULT_ENDPOINT_URL.rstrip("/"),
+    }
+
+    changed = False
+    if managed_endpoint:
+        for key in GEMMA_CREDENTIAL_MODEL_KEYS:
+            configured_model = str(
+                settings.value(key, "", type=str) or ""
+            ).strip()
+            if configured_model != GEMMA_RETIRED_IQ4_XS_MODEL:
+                continue
+            settings.setValue(key, GemmaLocalServerPage.DEFAULT_MODEL)
+            changed = True
+
+    settings.setValue(
+        GEMMA_MODEL_RETIREMENT_VERSION_KEY,
+        GEMMA_MODEL_RETIREMENT_VERSION,
+    )
+    settings.sync()
+    if changed:
+        logger.warning(
+            "Migrated retired managed Gemma IQ4_XS model to the IQ4_NL "
+            "product default."
+        )
     return changed
 
 
@@ -1109,6 +1178,7 @@ class SettingsPage(QtWidgets.QWidget):
         self._loading_settings = True
         settings = QSettings("ComicLabs", "ComicTranslate")
         migrate_retired_gemma_request_mode(settings)
+        migrate_retired_gemma_model(settings)
         migrate_managed_runtime_to_llamacpp(settings)
         migrate_project_checkpoint_default(settings)
         migrate_mangalmm_full_page_contract(settings)

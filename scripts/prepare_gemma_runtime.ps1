@@ -3,11 +3,9 @@ param(
     [ValidateSet('Prepare', 'Verify')]
     [string]$Mode = 'Prepare',
 
-    [string]$CandidateModelPath = '',
+    [string]$ModelPath = '',
 
-    [string]$LegacyModelPath = '',
-
-    [string]$VolumeName = 'comic-translate-gemma-models-v1',
+    [string]$VolumeName = 'comic-translate-gemma-models-v2',
 
     [ValidateRange(1024, 65535)]
     [int]$SmokePort = 18082,
@@ -15,7 +13,7 @@ param(
     [ValidateRange(30, 900)]
     [int]$SmokeTimeoutSec = 420,
 
-    [int64]$MinimumFreeBytes = 64424509440,
+    [int64]$MinimumFreeBytes = 32212254720,
 
     [switch]$SkipFreeSpaceCheck
 )
@@ -23,9 +21,9 @@ param(
 $ErrorActionPreference = 'Stop'
 [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false)
 
-$PreparationVersion = 1
-$ManifestSchemaVersion = 1
-$ReadyManifestName = '.comic-translate-gemma-ready-v1.json'
+$PreparationVersion = 2
+$ManifestSchemaVersion = 2
+$ReadyManifestName = '.comic-translate-gemma-ready-v2.json'
 $ImageRef = (
     'ghcr.io/ggml-org/llama.cpp@sha256:' +
     '22e0e3bfe967af4fd1df6a918022abbfd4e72e4d40a4769e616a4176790acbcb'
@@ -221,18 +219,11 @@ function Assert-GemmaVolumeLabels {
 
 $ModelSpecs = @(
     [pscustomobject][ordered]@{
-        Name = 'Gemma4-26B-A4B-Uncensored-HauhauCS-Balanced-IQ4_XS.gguf'
-        Bytes = [int64]13917726048
-        Sha256 = '61b277f4dde555fc6c04c9024a9580ef8c83f2f19504f3989a15f95684257426'
-        Role = 'product-candidate'
-        SourcePath = $CandidateModelPath
-    }
-    [pscustomobject][ordered]@{
         Name = 'gemma-4-26B-IQ4_NL.gguf'
         Bytes = [int64]14585439872
         Sha256 = '768a89b94209243b333b2e074b928fe51ea208ebdad6424a510bd73e5cb4d0b8'
-        Role = 'legacy-rollback'
-        SourcePath = $LegacyModelPath
+        Role = 'product-default'
+        SourcePath = $ModelPath
     }
 )
 
@@ -273,9 +264,7 @@ if ($Mode -eq 'Verify') {
         [string]$Manifest.default_model -ne 'gemma-4-26B-IQ4_NL.gguf' -or
         $Manifest.ready -ne $true -or
         $Manifest.smoke_test.passed -ne $true -or
-        [string]$Manifest.smoke_test.model -ne (
-            'Gemma4-26B-A4B-Uncensored-HauhauCS-Balanced-IQ4_XS.gguf'
-        ) -or
+        [string]$Manifest.smoke_test.model -ne 'gemma-4-26B-IQ4_NL.gguf' -or
         [int]$Manifest.runtime_configuration.context_size -ne 4096 -or
         [int]$Manifest.runtime_configuration.parallel -ne 1 -or
         [int]$Manifest.runtime_configuration.threads -ne 10 -or
@@ -335,12 +324,9 @@ if ($Mode -eq 'Verify') {
     return
 }
 
-if (
-    [string]::IsNullOrWhiteSpace($CandidateModelPath) -or
-    [string]::IsNullOrWhiteSpace($LegacyModelPath)
-) {
+if ([string]::IsNullOrWhiteSpace($ModelPath)) {
     throw (
-        'Prepare mode requires both -CandidateModelPath and -LegacyModelPath. ' +
+        'Prepare mode requires -ModelPath. ' +
         'Verify mode never requires the original host files.'
     )
 }
