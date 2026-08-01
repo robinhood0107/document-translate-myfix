@@ -300,6 +300,90 @@
           1024
         ]
       }
+    },
+    {
+      "id": "gemma-ngl-final",
+      "stage": "translation",
+      "execution": "translation",
+      "quality_gate": "candidate-only-semantic-review",
+      "baseline_candidate": "ngl-23",
+      "candidates": [
+        {
+          "id": "ngl-23",
+          "n_gpu_layers": 23
+        },
+        {
+          "id": "ngl-30",
+          "n_gpu_layers": 30
+        },
+        {
+          "id": "ngl-31",
+          "n_gpu_layers": 31
+        }
+      ]
+    },
+    {
+      "id": "gemma-ubatch-final",
+      "stage": "translation",
+      "execution": "translation",
+      "quality_gate": "candidate-only-semantic-review",
+      "baseline_candidate": "ubatch-512",
+      "candidates": [
+        {
+          "id": "ubatch-256",
+          "ubatch_size": 256
+        },
+        {
+          "id": "ubatch-384",
+          "ubatch_size": 384
+        },
+        {
+          "id": "ubatch-512",
+          "ubatch_size": 512
+        },
+        {
+          "id": "ubatch-768",
+          "ubatch_size": 768
+        }
+      ]
+    },
+    {
+      "id": "gemma-cache-ram-final",
+      "stage": "translation",
+      "execution": "translation",
+      "quality_gate": "candidate-only-semantic-review",
+      "baseline_candidate": "cache-ram-0",
+      "candidates": [
+        {
+          "id": "cache-ram-0",
+          "cache_ram_mib": 0
+        },
+        {
+          "id": "cache-ram-256",
+          "cache_ram_mib": 256
+        }
+      ]
+    },
+    {
+      "id": "gemma-chunk-final",
+      "stage": "translation",
+      "execution": "translation",
+      "quality_gate": "candidate-only-semantic-review",
+      "baseline_candidate": "chunk-6",
+      "candidates": [
+        {
+          "id": "chunk-6",
+          "chunk_size": 6
+        },
+        {
+          "id": "chunk-9",
+          "chunk_size": 9
+        },
+        {
+          "id": "chunk-12",
+          "chunk_size": 12
+        }
+      ]
     }
   ],
   "conditional_spikes": [
