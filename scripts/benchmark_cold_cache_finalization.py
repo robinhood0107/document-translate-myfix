@@ -6,6 +6,7 @@ import copy
 import hashlib
 import json
 import os
+import random
 import shutil
 import statistics
 import subprocess
@@ -2244,6 +2245,58 @@ def _analyze_translation_results(
     baseline_id: str,
     results: list[dict[str, Any]],
 ) -> dict[str, Any]:
+    def paired_speed_evidence(
+        baseline_values: list[float],
+        candidate_values: list[float],
+        *,
+        samples: int = 100_000,
+        seed: int = 20260801,
+    ) -> dict[str, Any]:
+        if (
+            not baseline_values
+            or len(baseline_values) != len(candidate_values)
+            or any(value <= 0.0 for value in baseline_values)
+        ):
+            return {
+                "pair_count": 0,
+                "mean_gain_percent": 0.0,
+                "one_sided_95_lower_percent": 0.0,
+                "one_sided_95_upper_percent": 0.0,
+                "proven_faster": False,
+                "proven_slower": False,
+                "uncertain": True,
+            }
+        gains = [
+            ((baseline - candidate) / baseline) * 100.0
+            for baseline, candidate in zip(
+                baseline_values,
+                candidate_values,
+                strict=True,
+            )
+        ]
+        rng = random.Random(seed)
+        estimates = sorted(
+            statistics.mean(
+                gains[rng.randrange(len(gains))]
+                for _ in range(len(gains))
+            )
+            for _ in range(samples)
+        )
+        lower_index = int((samples - 1) * 0.05)
+        upper_index = int((samples - 1) * 0.95)
+        lower = float(estimates[lower_index])
+        upper = float(estimates[upper_index])
+        return {
+            "pair_count": len(gains),
+            "mean_gain_percent": round(statistics.mean(gains), 6),
+            "median_gain_percent": round(statistics.median(gains), 6),
+            "one_sided_95_lower_percent": round(lower, 6),
+            "one_sided_95_upper_percent": round(upper, 6),
+            "proven_faster": lower > 0.0,
+            "proven_slower": upper < 0.0,
+            "uncertain": lower <= 0.0 <= upper,
+        }
+
     grouped: dict[str, list[dict[str, Any]]] = defaultdict(list)
     for result in results:
         grouped[str(result["candidate"])].append(result)
@@ -2264,6 +2317,7 @@ def _analyze_translation_results(
     )
     summaries: list[dict[str, Any]] = []
     for candidate_id, items in grouped.items():
+        items = sorted(items, key=lambda item: int(item.get("round", 0)))
         timings = [
             float(item.get("elapsed_sec", 0.0) or 0.0)
             for item in items
@@ -2277,6 +2331,39 @@ def _analyze_translation_results(
         improvement = _reduction_percent(
             baseline_median,
             median_elapsed,
+        )
+        baseline_by_round = {
+            int(item.get("round", 0)): item
+            for item in grouped[baseline_id]
+        }
+        paired_baseline = [
+            baseline_by_round[int(item.get("round", 0))]
+            for item in items
+            if int(item.get("round", 0)) in baseline_by_round
+        ]
+        paired_e2e = paired_speed_evidence(
+            [float(item.get("elapsed_sec", 0.0) or 0.0) for item in paired_baseline],
+            timings,
+        )
+        baseline_request = [
+            float(
+                (item.get("stats") or {}).get("gemma_request_wall_ms", 0.0)
+                or float(item.get("elapsed_sec", 0.0) or 0.0) * 1000.0
+            )
+            / 1000.0
+            for item in paired_baseline
+        ]
+        candidate_request = [
+            float(
+                (item.get("stats") or {}).get("gemma_request_wall_ms", 0.0)
+                or float(item.get("elapsed_sec", 0.0) or 0.0) * 1000.0
+            )
+            / 1000.0
+            for item in items
+        ]
+        paired_request = paired_speed_evidence(
+            baseline_request,
+            candidate_request,
         )
         structural_pass = (
             len(items) == int(protocol["limits"]["rounds"])
@@ -2301,13 +2388,22 @@ def _analyze_translation_results(
             variance_percent
             <= float(protocol["gates"]["cold_variance_percent"])
         )
-        speed_qualified = (
-            candidate_id == baseline_id
-            or improvement
-            >= float(
-                protocol["gates"]["stage_improvement_percent"]
-            )
+        speed_qualified = candidate_id == baseline_id or (
+            bool(paired_e2e["proven_faster"])
+            and bool(paired_request["proven_faster"])
         )
+        if candidate_id == baseline_id:
+            promotion_status = "baseline"
+        elif not structural_pass:
+            promotion_status = "rejected"
+        elif speed_qualified:
+            promotion_status = "requires_blind_quality_review"
+        elif bool(paired_e2e["proven_slower"]) or bool(
+            paired_request["proven_slower"]
+        ):
+            promotion_status = "rejected_speed"
+        else:
+            promotion_status = "inconclusive_keep_baseline"
         summaries.append(
             {
                 "candidate": candidate_id,
@@ -2320,19 +2416,9 @@ def _analyze_translation_results(
                 "structural_gate_passed": structural_pass,
                 "speed_qualified": speed_qualified,
                 "variance_gate_passed": variance_passed,
-                "promotion_status": (
-                    "baseline"
-                    if candidate_id == baseline_id
-                    else (
-                        "requires_blind_quality_review"
-                        if (
-                            structural_pass
-                            and speed_qualified
-                            and variance_passed
-                        )
-                        else "rejected"
-                    )
-                ),
+                "paired_e2e_speed": paired_e2e,
+                "paired_request_speed": paired_request,
+                "promotion_status": promotion_status,
             }
         )
     summaries.sort(
@@ -2350,8 +2436,9 @@ def _analyze_translation_results(
         "auto_promoted_candidate": "",
         "quality_gate": family.get("quality_gate"),
         "note": (
-            "No translation candidate is auto-promoted. A speed-qualified "
-            "candidate must pass the locked 292-row candidate-only blind gate."
+            "No minimum speed-improvement percentage is used. A candidate must "
+            "be proven faster than 0% for paired end-to-end and request-only "
+            "timings, then pass the candidate-only meaning-quality gate."
         ),
     }
 
@@ -2363,23 +2450,30 @@ def _render_translation_report(analysis: Mapping[str, Any]) -> str:
         f"- family: `{analysis.get('family')}`",
         f"- baseline: `{analysis.get('baseline_candidate')}`",
         "- automatic promotion: `disabled`",
+        "- minimum speed improvement: `none; paired one-sided 95% lower bound must be > 0%`",
         "",
-        "| candidate | median sec | variance % | improvement % | structural gate | variance gate | promotion status |",
+        "| candidate | median sec | median improvement % | paired E2E lower % | paired request lower % | structural gate | promotion status |",
         "|---|---:|---:|---:|---:|---:|---|",
     ]
     for item in analysis.get("candidates", []):
         lines.append(
-            "| {candidate} | {median} | {variance} | {improvement} | "
-            "{structural} | {variance_gate} | {status} |".format(
+            "| {candidate} | {median} | {improvement} | {e2e_lower} | "
+            "{request_lower} | {structural} | {status} |".format(
                 candidate=item.get("candidate", ""),
                 median=item.get("median_elapsed_sec", ""),
-                variance=item.get("variance_percent", ""),
                 improvement=item.get(
                     "improvement_vs_baseline_percent",
                     "",
                 ),
+                e2e_lower=(item.get("paired_e2e_speed") or {}).get(
+                    "one_sided_95_lower_percent",
+                    "",
+                ),
+                request_lower=(item.get("paired_request_speed") or {}).get(
+                    "one_sided_95_lower_percent",
+                    "",
+                ),
                 structural=item.get("structural_gate_passed", ""),
-                variance_gate=item.get("variance_gate_passed", ""),
                 status=item.get("promotion_status", ""),
             )
         )

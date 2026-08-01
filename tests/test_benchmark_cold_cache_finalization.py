@@ -982,6 +982,103 @@ class ColdCacheFinalizationTests(unittest.TestCase):
         self.assertFalse(candidate["structural_gate_passed"])
         self.assertEqual(candidate["promotion_status"], "rejected")
 
+    def test_translation_screen_has_no_minimum_speed_percentage(self) -> None:
+        protocol = finalization.load_protocol()
+        family = finalization._family(protocol, "gemma-model")
+        results = []
+        for round_index, baseline_elapsed in enumerate(
+            (100.0, 101.0, 99.0),
+            start=1,
+        ):
+            for candidate, elapsed in (
+                ("iq4-nl", baseline_elapsed),
+                ("iq4-xs", baseline_elapsed * 0.995),
+            ):
+                results.append(
+                    {
+                        "candidate": candidate,
+                        "round": round_index,
+                        "elapsed_sec": elapsed,
+                        "output_count": 54,
+                        "nonempty_count": 54,
+                        "severe_telemetry_count": 0,
+                        "output_key_sha256": "k" * 64,
+                        "model_contract_valid": True,
+                        "stats": {
+                            "gemma_request_wall_ms": elapsed * 900.0,
+                        },
+                    }
+                )
+
+        analysis = finalization._analyze_translation_results(
+            protocol=protocol,
+            family=family,
+            baseline_id="iq4-nl",
+            results=results,
+        )
+        candidate = next(
+            item
+            for item in analysis["candidates"]
+            if item["candidate"] == "iq4-xs"
+        )
+
+        self.assertTrue(candidate["speed_qualified"])
+        self.assertGreater(
+            candidate["paired_e2e_speed"]["one_sided_95_lower_percent"],
+            0.0,
+        )
+        self.assertEqual(
+            candidate["promotion_status"],
+            "requires_blind_quality_review",
+        )
+
+    def test_translation_screen_keeps_mixed_rounds_inconclusive(self) -> None:
+        protocol = finalization.load_protocol()
+        family = finalization._family(protocol, "gemma-model")
+        results = []
+        for round_index, (baseline_elapsed, candidate_elapsed) in enumerate(
+            ((100.0, 99.0), (100.0, 101.0), (100.0, 99.5)),
+            start=1,
+        ):
+            for candidate, elapsed in (
+                ("iq4-nl", baseline_elapsed),
+                ("iq4-xs", candidate_elapsed),
+            ):
+                results.append(
+                    {
+                        "candidate": candidate,
+                        "round": round_index,
+                        "elapsed_sec": elapsed,
+                        "output_count": 54,
+                        "nonempty_count": 54,
+                        "severe_telemetry_count": 0,
+                        "output_key_sha256": "k" * 64,
+                        "model_contract_valid": True,
+                        "stats": {
+                            "gemma_request_wall_ms": elapsed * 900.0,
+                        },
+                    }
+                )
+
+        analysis = finalization._analyze_translation_results(
+            protocol=protocol,
+            family=family,
+            baseline_id="iq4-nl",
+            results=results,
+        )
+        candidate = next(
+            item
+            for item in analysis["candidates"]
+            if item["candidate"] == "iq4-xs"
+        )
+
+        self.assertFalse(candidate["speed_qualified"])
+        self.assertTrue(candidate["paired_e2e_speed"]["uncertain"])
+        self.assertEqual(
+            candidate["promotion_status"],
+            "inconclusive_keep_baseline",
+        )
+
     def test_private_translation_review_requires_stable_54_row_contract(
         self,
     ) -> None:
