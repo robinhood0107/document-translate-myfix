@@ -6,7 +6,6 @@ import hashlib
 import json
 import os
 from dataclasses import dataclass
-from datetime import datetime
 from itertools import count
 from pathlib import Path
 import sys
@@ -31,6 +30,7 @@ from modules.ocr.mangalmm_full_page.engine import (
 )
 from modules.ocr.selection import OCR_MODE_MANGALMM
 from modules.utils.ocr_debug import ensure_three_channel
+from scripts.validation_artifact_harness import select_managed_output_directory
 
 
 IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".webp", ".bmp"}
@@ -193,11 +193,6 @@ def _write_image(path: Path, image: np.ndarray) -> None:
     imk.write_image(str(path), ensure_three_channel(image))
 
 
-def _default_output_root() -> Path:
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    return ROOT / "banchmark_result_log" / "mangalmm_fullpage_ocr_debug" / f"{timestamp}_mangalmm_fullpage_ocr_debug"
-
-
 def _process_image(
     *,
     image_path: Path,
@@ -282,7 +277,10 @@ def main() -> int:
         "--output-dir",
         type=Path,
         default=None,
-        help="Optional output directory. Defaults under banchmark_result_log/mangalmm_fullpage_ocr_debug/.",
+        help=(
+            "Optional output directory. Without it, a classified private validation "
+            "artifact run is created automatically."
+        ),
     )
     parser.add_argument(
         "--server-url",
@@ -321,58 +319,78 @@ def main() -> int:
     if not input_dir.exists():
         raise SystemExit(f"input directory not found: {input_dir}")
 
-    output_root = args.output_dir.resolve() if args.output_dir is not None else _default_output_root()
-    output_root.mkdir(parents=True, exist_ok=True)
-
-    settings = _SettingsStub(
-        use_gpu=not args.cpu,
-        server_url=args.server_url,
-        temperature=args.temperature,
-        top_k=args.top_k,
-        max_completion_tokens=args.max_completion_tokens,
-    )
-
-    detector = TextBlockDetector(settings)
-    engine = MangaLMMOCREngine()
-    engine.initialize(
-        settings,
-        source_lang_english="Japanese",
-        selected_ocr_mode=OCR_MODE_MANGALMM,
-    )
-
     images = _iter_images(input_dir)
     if not images:
         raise SystemExit(f"no images found under {input_dir}")
 
-    results: list[dict[str, object]] = []
-    for image_path in images:
-        result = _process_image(
-            image_path=image_path,
-            output_root=output_root,
-            detector=detector,
-            engine=engine,
+    output_root, artifact_run = select_managed_output_directory(
+        family="mangalmm-fullpage-debug",
+        category="30-mangalmm-coo",
+        explicit_output_directory=args.output_dir,
+    )
+    output_root.mkdir(parents=True, exist_ok=True)
+    try:
+        settings = _SettingsStub(
+            use_gpu=not args.cpu,
+            server_url=args.server_url,
+            temperature=args.temperature,
+            top_k=args.top_k,
+            max_completion_tokens=args.max_completion_tokens,
         )
-        results.append(result)
-        print(
-            f"{result['image']}: status={result['status']} "
-            f"profile={result['resize_profile']} request_shape={result['request_shape']} "
-            f"regions={result['mapped_region_count']} retries={result['retry_count']} "
-            f"output={result['output_dir']}"
-        )
-        if result["failure"]:
-            print(f"  failure={result['failure']}")
 
-    summary = {
-        "input_dir": str(input_dir),
-        "output_dir": str(output_root),
-        "server_url": args.server_url,
-        "temperature": float(args.temperature),
-        "top_k": int(args.top_k),
-        "results": results,
-    }
-    _write_json(output_root / "summary.json", summary)
-    print(f"summary={output_root / 'summary.json'}")
-    return 0
+        detector = TextBlockDetector(settings)
+        engine = MangaLMMOCREngine()
+        engine.initialize(
+            settings,
+            source_lang_english="Japanese",
+            selected_ocr_mode=OCR_MODE_MANGALMM,
+        )
+
+        results: list[dict[str, object]] = []
+        for image_path in images:
+            result = _process_image(
+                image_path=image_path,
+                output_root=output_root,
+                detector=detector,
+                engine=engine,
+            )
+            results.append(result)
+            print(
+                f"{result['image']}: status={result['status']} "
+                f"profile={result['resize_profile']} request_shape={result['request_shape']} "
+                f"regions={result['mapped_region_count']} retries={result['retry_count']} "
+                f"output={result['output_dir']}"
+            )
+            if result["failure"]:
+                print(f"  failure={result['failure']}")
+
+        summary = {
+            "input_dir": str(input_dir),
+            "output_dir": str(output_root),
+            "server_url": args.server_url,
+            "temperature": float(args.temperature),
+            "top_k": int(args.top_k),
+            "results": results,
+        }
+        _write_json(output_root / "summary.json", summary)
+        if artifact_run is not None:
+            artifact_run.complete(
+                metadata={
+                    "input_image_count": len(images),
+                    "success_count": sum(
+                        1 for result in results if result["status"] == "success"
+                    ),
+                    "failure_count": sum(
+                        1 for result in results if result["status"] != "success"
+                    ),
+                }
+            )
+        print(f"summary={output_root / 'summary.json'}")
+        return 0
+    except BaseException as exc:
+        if artifact_run is not None:
+            artifact_run.fail(exc)
+        raise
 
 
 if __name__ == "__main__":
