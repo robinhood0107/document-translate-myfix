@@ -17,6 +17,8 @@ def test_repo_policy_rejects_private_artifact_paths() -> None:
     assert validate_tracked_path_name("Sample/japan/001.png")
     assert validate_tracked_path_name("testmodel/model.gguf")
     assert validate_tracked_path_name("banchmark_result_log/run/report.json")
+    assert validate_tracked_path_name("benchmark_result_log/run/report.json")
+    assert validate_tracked_path_name(".gstack/security-reports/latest.json")
     assert validate_tracked_path_name("docs/assets/benchmarking/run/chart.png")
     assert validate_tracked_path_name("result_private_title/001.png")
     assert validate_tracked_path_name("log_private_title/output.log")
@@ -25,6 +27,12 @@ def test_repo_policy_rejects_private_artifact_paths() -> None:
 def test_repo_policy_allows_static_app_media() -> None:
     assert not validate_tracked_path_name("resources/static/icon-loading.gif")
     assert not validate_tracked_path_name("resources/icons/splash.png")
+
+
+def test_repo_policy_rejects_local_credentials_but_allows_sanitized_example() -> None:
+    assert validate_tracked_path_name(".env.local")
+    assert validate_tracked_path_name("runtime/private.pem")
+    assert not validate_tracked_path_name(".env.example")
 
 
 def test_repo_policy_rejects_private_content_strings() -> None:
