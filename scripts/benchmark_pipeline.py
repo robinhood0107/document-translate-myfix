@@ -555,10 +555,18 @@ class _ThreadLocalSessions:
 def _benchmark_http_clients(config: object) -> Iterator[None]:
     values = config if isinstance(config, dict) else {}
     gemma_session_enabled = bool(values.get("gemma_session", False))
+    gemma_seed_raw = values.get("gemma_seed")
+    gemma_seed = None if gemma_seed_raw is None else int(gemma_seed_raw)
+    if gemma_seed is not None and gemma_seed < 0:
+        raise ValueError("benchmark_http.gemma_seed must be non-negative")
     paddle_thread_local_enabled = bool(
         values.get("paddle_thread_local_session", False)
     )
-    if not gemma_session_enabled and not paddle_thread_local_enabled:
+    if (
+        not gemma_session_enabled
+        and not paddle_thread_local_enabled
+        and gemma_seed is None
+    ):
         yield
         return
 
@@ -581,9 +589,28 @@ def _benchmark_http_clients(config: object) -> Iterator[None]:
             )
             gemma_session.mount("http://", adapter)
             gemma_session.mount("https://", adapter)
+        gemma_post = (
+            gemma_session.post
+            if gemma_session is not None
+            else requests_module.post
+        )
+        if gemma_seed is not None:
+            unseeded_post = gemma_post
+
+            def seeded_post(*args, **kwargs):
+                payload = kwargs.get("json")
+                if isinstance(payload, dict):
+                    seeded_payload = dict(payload)
+                    seeded_payload["seed"] = gemma_seed
+                    kwargs = dict(kwargs)
+                    kwargs["json"] = seeded_payload
+                return unseeded_post(*args, **kwargs)
+
+            gemma_post = seeded_post
+        if gemma_session_enabled or gemma_seed is not None:
             gemma_module.requests = _RequestsProxy(
                 requests_module,
-                gemma_session.post,
+                gemma_post,
             )
         if paddle_thread_local_enabled:
             paddle_sessions = _ThreadLocalSessions(
@@ -597,9 +624,11 @@ def _benchmark_http_clients(config: object) -> Iterator[None]:
             )
         _log(
             "HTTP 실험 적용: gemma_session={gemma} paddle_thread_local={paddle} "
-            "pool_connections={connections} pool_maxsize={maxsize}".format(
+            "gemma_seed={seed} pool_connections={connections} "
+            "pool_maxsize={maxsize}".format(
                 gemma=gemma_session_enabled,
                 paddle=paddle_thread_local_enabled,
+                seed=gemma_seed,
                 connections=pool_connections,
                 maxsize=pool_maxsize,
             )
