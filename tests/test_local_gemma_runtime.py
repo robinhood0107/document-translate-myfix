@@ -12,6 +12,7 @@ from unittest import mock
 from modules.translation.gemma_runtime_contract import (
     DEFAULT_GEMMA_LLAMA_CPP_IMAGE,
     DEFAULT_GEMMA_MODEL_VOLUME,
+    GEMMA_RUNTIME_PREPARATION_VERSION,
 )
 from modules.translation.local_runtime import LocalGemmaRuntimeManager
 from modules.utils.exceptions import (
@@ -46,7 +47,7 @@ def _runtime_contract(fingerprint: str = "fingerprint-a") -> SimpleNamespace:
         "GEMMA_RUNTIME_FINGERPRINT": fingerprint,
         "GEMMA_READY_MANIFEST_SHA256": "a" * 64,
         "GEMMA_MODEL_SHA256": "b" * 64,
-        "GEMMA_PREPARATION_VERSION": "1",
+        "GEMMA_PREPARATION_VERSION": str(GEMMA_RUNTIME_PREPARATION_VERSION),
     }
     return SimpleNamespace(
         fingerprint=fingerprint,
@@ -56,7 +57,7 @@ def _runtime_contract(fingerprint: str = "fingerprint-a") -> SimpleNamespace:
         model_name="gemma-test.gguf",
         model_sha256="b" * 64,
         ready_manifest_sha256="a" * 64,
-        preparation_version=1,
+        preparation_version=GEMMA_RUNTIME_PREPARATION_VERSION,
         command_sha256="c" * 64,
         compose_file_sha256="d" * 64,
         command=("-m", "/models/gemma-test.gguf"),
@@ -671,7 +672,8 @@ class LocalGemmaRuntimeManagerTests(unittest.TestCase):
             returncode=0,
             stdout=(
                 '{"comic-translate.runtime":"Gemma",'
-                '"comic-translate.preparation-version":"1"}'
+                '"comic-translate.preparation-version":"'
+                f'{GEMMA_RUNTIME_PREPARATION_VERSION}"}}'
             ),
             stderr="",
         )
@@ -777,7 +779,8 @@ class LocalGemmaRuntimeManagerTests(unittest.TestCase):
             returncode=0,
             stdout=(
                 '{"comic-translate.runtime":"Gemma",'
-                '"comic-translate.preparation-version":"1"}'
+                '"comic-translate.preparation-version":"'
+                f'{GEMMA_RUNTIME_PREPARATION_VERSION}"}}'
             ),
             stderr="",
         )

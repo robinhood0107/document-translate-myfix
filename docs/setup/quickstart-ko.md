@@ -59,8 +59,7 @@ Windows PowerShell에서 버전이 지정된 external model volume을 한 번 �
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass `
   -File .\scripts\prepare_gemma_runtime.ps1 -Mode Prepare `
-  -CandidateModelPath 'C:\ExampleWorkspace\models\Gemma4-26B-A4B-Uncensored-HauhauCS-Balanced-IQ4_XS.gguf' `
-  -LegacyModelPath 'C:\ExampleWorkspace\models\gemma-4-26B-IQ4_NL.gguf'
+  -ModelPath 'C:\ExampleWorkspace\models\gemma-4-26B-IQ4_NL.gguf'
 ```
 
 앱에서는 `Custom Local Server(Gemma)`를 선택합니다. 관리 런타임이 준비된 volume을 read-only로 마운트하고 정확히 준비된 컨테이너를 자동으로 시작합니다.
