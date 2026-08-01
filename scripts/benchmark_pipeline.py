@@ -390,8 +390,8 @@ class _GemmaPagecachePrefetch:
         completed = self.completed
         if completed is None:
             raise RuntimeError("Gemma page-cache prefetch returned no result.")
-        allowed_cancel_codes = {0, 125, 137, 143}
-        if int(completed.returncode) not in allowed_cancel_codes:
+        allowed_codes = {0, 137, 143} if cancelled else {0}
+        if int(completed.returncode) not in allowed_codes:
             raise RuntimeError(
                 "Gemma page-cache prefetch failed: "
                 f"exit={completed.returncode} "

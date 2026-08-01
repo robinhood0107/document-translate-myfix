@@ -77,6 +77,24 @@ class BenchmarkPipelineFinalizationHookTests(unittest.TestCase):
                 action="drop-everything",
             )
 
+    def test_completed_prefetch_does_not_accept_container_failure(self) -> None:
+        prefetch = benchmark_pipeline._GemmaPagecachePrefetch(
+            SimpleNamespace(),
+            Path("unused"),
+        )
+        prefetch.started_at = 1.0
+        prefetch.completed = SimpleNamespace(
+            returncode=137,
+            stdout="",
+            stderr="unexpected exit",
+        )
+        thread = mock.Mock()
+        thread.is_alive.return_value = False
+        prefetch.thread = thread
+
+        with self.assertRaises(RuntimeError):
+            prefetch.finish()
+
     def test_cache_policy_controls_all_persistent_layers(self) -> None:
         dictionary_page = _TranslationMemoryPage()
         ui = SimpleNamespace(
