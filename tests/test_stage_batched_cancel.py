@@ -1245,6 +1245,30 @@ class StageBatchedCancellationTests(unittest.TestCase):
 
         self.assertEqual(shutdown.call_count, 2)
 
+    def test_handoff_without_release_api_records_stopped_state(self) -> None:
+        processor = self._processor(cancelled=False)
+        processor._record_runtime_transition = mock.Mock()
+        processor._record_runtime_performance = mock.Mock()
+        processor._sample_performance_resources = mock.Mock()
+        manager = SimpleNamespace(shutdown=mock.Mock())
+
+        processor._shutdown_runtime_with_retry(
+            "OCR",
+            manager,
+            context="test handoff",
+            raise_on_failure=True,
+            release_for_handoff=True,
+            service="paddleocr_vl",
+        )
+
+        manager.shutdown.assert_called_once_with()
+        self.assertEqual(
+            processor._record_runtime_transition.call_args_list[-1].kwargs[
+                "to_state"
+            ],
+            "stopped",
+        )
+
     def test_prewarm_shutdown_waits_and_cancels_queued_late_start(self) -> None:
         processor = self._processor(cancelled=False)
         processor._prewarm_cancel_event = threading.Event()
