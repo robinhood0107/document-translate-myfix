@@ -232,3 +232,21 @@ OCR/번역 결과, DB와 sidecar는 Git 밖에만 보존합니다. cold 후보�
   계속 사용합니다.
 
 상세 근거: [Gemma page-cache read-ahead 최종 판정](./gemma-pagecache-prefetch-final-decision-ko.md)
+
+## 2026-08-01 Paddle crop direct llama.cpp 승격 판정
+
+- PaddleX CPU relay가 실제로 수행하던 PNG 변환, image-first `OCR:` 요청,
+  문단 줄바꿈 정규화를 direct adapter에서 동일하게 재현했습니다.
+- Japan S6 73블록 AB/BA 두 라운드 모두 raw text와 전체 block 계약이
+  73/73 exact였고 runner wall 중앙값은 60.216087초에서 8.333160초로
+  86.161240% 단축됐습니다.
+- Japan 22페이지 311블록은 normalized output과 사람 정답 통계가 모두
+  같았고 candidate-only regression은 0이었습니다.
+- 영어 fireplace 음성 대조군 포함 10페이지는 10/10 exact, wall 83.943655%
+  단축이었고 중국어 6페이지는 41/41 exact, wall 82.442422% 단축이었습니다.
+- CUDA13과 고정 llama.cpp image digest, model/mmproj SHA, named volume을
+  사용했고 HTTP retry와 실행 종료 후 잔류 container는 0이었습니다.
+- 따라서 관리형 Paddle crop은 direct llama.cpp 제품 승격 대상으로 확정하고
+  COO는 사용하지 않습니다.
+
+상세 근거: [Paddle crop direct llama.cpp 최종 판정](./paddle-direct-crop-final-decision-ko.md)
