@@ -4,7 +4,7 @@
 
 이 저장소는 upstream `comic-translate` `v2.6.7` 코드베이스에서 시작한 뒤, 로컬 런타임/OCR/워크플로/Windows 환경 쪽으로 제품화 수정을 누적한 local-first 포크입니다.
 
-현재 포크의 제품 릴리스 버전은 `1.2.0`입니다. upstream `2.7.1`은
+현재 포크의 제품 릴리스 버전은 `1.3.0`입니다. upstream `2.7.1`은
 마지막 selective backport 계보로 별도 기록하며, 이 포크의 제품 버전과
 같은 의미로 사용하지 않습니다.
 
@@ -217,11 +217,10 @@ Windows PowerShell에서 버전이 지정된 Gemma model volume을 한 번 준�
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass `
   -File .\scripts\prepare_gemma_runtime.ps1 -Mode Prepare `
-  -CandidateModelPath 'C:\ExampleWorkspace\models\Gemma4-26B-A4B-Uncensored-HauhauCS-Balanced-IQ4_XS.gguf' `
-  -LegacyModelPath 'C:\ExampleWorkspace\models\gemma-4-26B-IQ4_NL.gguf'
+  -ModelPath 'C:\ExampleWorkspace\models\gemma-4-26B-IQ4_NL.gguf'
 ```
 
-앱에서는 `Custom Local Server(Gemma)`를 선택합니다. 관리 런타임은 ready manifest와 모델 크기를 확인하고 준비된 volume을 read-only로 마운트한 뒤, 필요할 때만 컨테이너를 시작하거나 재생성합니다. 두 모델의 SHA-256을 명시적으로 다시 계산하려면 같은 스크립트를 `-Mode Verify`로 실행합니다.
+앱에서는 `Custom Local Server(Gemma)`를 선택합니다. 관리 런타임은 ready manifest와 모델 크기를 확인하고 준비된 volume을 read-only로 마운트한 뒤, 필요할 때만 컨테이너를 시작하거나 재생성합니다. 모델의 SHA-256을 명시적으로 다시 계산하려면 같은 스크립트를 `-Mode Verify`로 실행합니다.
 
 **사용자 사전** 설정에서는 영구 블록 결과 캐시와 정확 일치 번역 메모리도 관리합니다. 결과 캐시는 번역과 runtime의 전체 identity가 같은 경우에만 재사용합니다. 원문→번역 쌍은 사용자가 명시적으로 승인해야 Gemma를 우회하며, 승인 항목이 포함된 파일을 가져올 때도 확인을 요구합니다. DB에는 민감한 로컬 텍스트가 저장되며 앱 user-data 디렉터리에만 남습니다. 잠금·손상 오류가 나도 자동 삭제하지 않습니다. 자세한 내용은 [번역 메모리 가이드](docs/gemma/translation-memory-ko.md)를 참고하세요.
 
