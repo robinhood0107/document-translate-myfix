@@ -122,6 +122,10 @@
         <translation type="unfinished"></translation>
     </message>
     <message>
+        <source>MangaLMM (Experimental, Slow)</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
         <source>자동번역 진행 중</source>
         <translation type="unfinished"></translation>
     </message>
@@ -1071,7 +1075,7 @@ Start the server with both the HunyuanOCR GGUF model and the matching mmproj fil
 <context>
     <name>MangaLMMOCRPage</name>
     <message>
-        <source>MangaLMM Settings</source>
+        <source>MangaLMM (Experimental, Slow) Settings</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
@@ -1656,6 +1660,10 @@ Install it to use PSD features.</source>
         Optimal (HunyuanOCR / PaddleOCR VL)</translation>
     </message>
     <message>
+        <source>MangaLMM (Experimental, Slow)</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
         <source>Comic Translate</source>
         <translation>
         Comic Translate</translation>
@@ -2196,6 +2204,10 @@ Keep the default localhost URL to use the bundled managed llama.cpp runtime.</so
     <message>
         <source>Automatic</source>
         <translation>Automatisch</translation>
+    </message>
+    <message>
+        <source>MangaLMM (Experimental, Slow)</source>
+        <translation type="unfinished"></translation>
     </message>
     <message>
         <source>Calculating</source>
@@ -3230,6 +3242,10 @@ Jetzt neu starten?</translation>
         <translation type="unfinished"></translation>
     </message>
     <message>
+        <source>MangaLMM (Experimental, Slow)</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
         <source>MangaLMM</source>
         <translation type="unfinished"></translation>
     </message>
@@ -3261,10 +3277,6 @@ Jetzt neu starten?</translation>
     </message>
     <message>
         <source>HunyuanOCR Settings</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>MangaLMM Settings</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
@@ -3350,6 +3362,10 @@ Jetzt neu starten?</translation>
     <message>
         <source>Tools</source>
         <translation>Werkzeuge</translation>
+    </message>
+    <message>
+        <source>MangaLMM (Experimental, Slow) Settings</source>
+        <translation type="unfinished"></translation>
     </message>
     <message>
         <source>Text Rendering</source>
@@ -5263,6 +5279,10 @@ It may have been moved, renamed, or deleted.
     </message>
     <message>
         <source>HunyuanOCR</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>MangaLMM (Experimental, Slow)</source>
         <translation type="unfinished"></translation>
     </message>
     <message>

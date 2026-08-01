@@ -644,6 +644,7 @@ class SettingsPage(QtWidgets.QWidget):
                 OCR_MODE_PADDLE_VL_SPOTTING
             ),
             self.ui.tr("HunyuanOCR"): OCR_MODE_HUNYUAN,
+            self.ui.tr("MangaLMM (Experimental, Slow)"): OCR_MODE_MANGALMM,
             self.ui.tr("MangaLMM"): OCR_MODE_MANGALMM,
         }
 
