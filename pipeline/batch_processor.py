@@ -196,6 +196,71 @@ class BatchProcessor:
             outcome=outcome,
         )
 
+    def _record_runtime_transition(
+        self,
+        *,
+        service: str,
+        to_state: str,
+        from_state: str | None = None,
+        elapsed_ms: float = 0.0,
+        outcome: str = "completed",
+    ) -> None:
+        self._performance_telemetry().record_runtime_transition(
+            service=service,
+            from_state=from_state,
+            to_state=to_state,
+            elapsed_ms=elapsed_ms,
+            outcome=outcome,
+        )
+
+    def _record_performance_workload(
+        self,
+        stage: str,
+        **features,
+    ) -> None:
+        self._performance_telemetry().record_workload_features(
+            stage,
+            features,
+        )
+
+    def _record_performance_detail(
+        self,
+        *,
+        stage: str,
+        operation: str,
+        elapsed_ms: float,
+        count: int = 1,
+        outcome: str = "completed",
+        workload: dict | None = None,
+    ) -> None:
+        self._performance_telemetry().record_stage_detail(
+            stage=stage,
+            operation=operation,
+            elapsed_ms=elapsed_ms,
+            count=count,
+            outcome=outcome,
+            workload=workload,
+        )
+
+    def _measure_performance(
+        self,
+        *,
+        stage: str,
+        operation: str,
+        workload: dict | None = None,
+        node_id: str = "",
+        dependencies: tuple[str, ...] = (),
+        service: str = "",
+    ):
+        return self._performance_telemetry().measure(
+            stage=stage,
+            operation=operation,
+            workload=workload,
+            node_id=node_id,
+            dependencies=dependencies,
+            service=service,
+        )
+
     def _sample_performance_resources(self, label: str) -> None:
         telemetry = self._performance_telemetry()
         if telemetry.resource_sampling_enabled:
