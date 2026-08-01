@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 """Compare Paddle crop OCR through PaddleX relay and direct llama.cpp.
 
-This benchmark-only runner reuses a locked source-first corpus and detector
-snapshots.  Both transports receive the exact same JPEG bytes produced by the
-product Paddle crop engine.  Results must be written outside Git.
+This benchmark-only runner reuses frozen detector snapshots.  Both transports
+receive the same product JPEG crop; the direct adapter reproduces PaddleX's
+official PNG conversion and image-first llama.cpp request.  Results must be
+written outside Git.
 """
 
 from __future__ import annotations
@@ -16,6 +17,7 @@ from datetime import datetime, timezone
 import json
 import os
 from pathlib import Path
+import re
 import subprocess
 import sys
 import time
@@ -36,6 +38,7 @@ if str(ROOT / "scripts") not in sys.path:
 
 import benchmark_ocr_three_way_human_truth as truth_tools
 from modules.ocr.paddle_crop.engine import PaddleOCRVLEngine
+from modules.ocr.paddle_crop.response_parser import normalize_output_text
 from modules.utils.exceptions import (
     LocalServiceConnectionError,
     LocalServiceResponseError,
@@ -51,6 +54,19 @@ RELAY_HEALTH_URL = "http://127.0.0.1:28118/docs"
 MODEL_ALIAS = "PaddleOCR-VL-1.6-0.9B"
 CONTAINERS = ("paddleocr-server", "paddleocr-llamacpp")
 TRANSPORTS = ("relay", "direct")
+EXPECTED_LLAMA_IMAGE_ID = (
+    "sha256:22e0e3bfe967af4fd1df6a918022abbfd4e72e4d40a4769e616a4176790acbcb"
+)
+EXPECTED_RELAY_IMAGE_ID = (
+    "sha256:d0d32c04a2119613d25a0a4c292e165ccc107954b74580613cf59e378037f8f5"
+)
+EXPECTED_MODEL_SHA256 = (
+    "f3ae46ec885050acf4b3d31944431e1fd90d50664fb09126af4a3c050ba14ee8"
+)
+EXPECTED_MMPROJ_SHA256 = (
+    "204d757d7610d9b3faab10d506d69e5b244e32bf765e2bab2d0167e65e0a058a"
+)
+EXPECTED_MODEL_VOLUME = "comic-translate-paddleocr-vl-llamacpp-models-v1"
 
 
 class TransportContractError(ValueError):
@@ -121,13 +137,13 @@ def _direct_payload(image_b64: str, *, max_tokens: int) -> dict[str, Any]:
             {
                 "role": "user",
                 "content": [
-                    {"type": "text", "text": "OCR:"},
                     {
                         "type": "image_url",
                         "image_url": {
-                            "url": "data:image/jpeg;base64," + image_b64
+                            "url": "data:image/png;base64," + image_b64
                         },
                     },
+                    {"type": "text", "text": "OCR:"},
                 ],
             }
         ],
@@ -135,6 +151,11 @@ def _direct_payload(image_b64: str, *, max_tokens: int) -> dict[str, Any]:
         "max_tokens": int(max_tokens),
         "stream": False,
     }
+
+
+def _relay_compatible_text(content: str) -> str:
+    paragraph_lines = re.sub(r"(?<!\n)\n(?!\n)", "\n\n", content)
+    return normalize_output_text(paragraph_lines)
 
 
 class DirectPaddleOCRVLEngine(PaddleOCRVLEngine):
@@ -149,7 +170,24 @@ class DirectPaddleOCRVLEngine(PaddleOCRVLEngine):
         self._add_request_metric(record, "logical_request_count", 1)
         self._add_request_metric(record, "request_bytes", len(image_bytes))
         started = time.perf_counter()
-        image_b64 = base64.b64encode(image_bytes).decode("ascii")
+        decoded = cv2.imdecode(
+            np.frombuffer(image_bytes, dtype=np.uint8),
+            cv2.IMREAD_COLOR,
+        )
+        if decoded is None:
+            raise LocalServiceResponseError(
+                "Unable to decode the product JPEG for direct Paddle OCR.",
+                service_name="PaddleOCR VL",
+                settings_page_name="PaddleOCR VL Settings",
+            )
+        encoded, png = cv2.imencode(".png", decoded)
+        if not encoded:
+            raise LocalServiceResponseError(
+                "Unable to encode the official direct Paddle PNG.",
+                service_name="PaddleOCR VL",
+                settings_page_name="PaddleOCR VL Settings",
+            )
+        image_b64 = base64.b64encode(png.tobytes()).decode("ascii")
         self._add_request_metric(
             record,
             "base64_ms",
@@ -184,7 +222,7 @@ class DirectPaddleOCRVLEngine(PaddleOCRVLEngine):
                 service_name="PaddleOCR VL",
                 settings_page_name="PaddleOCR VL Settings",
             )
-        return content
+        return _relay_compatible_text(content)
 
     def _send_direct_request(
         self,
@@ -344,6 +382,26 @@ def _text_blocks(
     return blocks
 
 
+def _select_manifest_pages(
+    pages: Sequence[Mapping[str, Any]],
+    page_ids: Sequence[str],
+) -> list[Mapping[str, Any]]:
+    selected = {str(value) for value in page_ids}
+    selected_pages = [
+        page
+        for page in pages
+        if not selected or str(page["page_id"]) in selected
+    ]
+    found = {str(page["page_id"]) for page in selected_pages}
+    if selected and selected != found:
+        raise TransportContractError(
+            f"Unknown page IDs: {sorted(selected - found)}"
+        )
+    if not selected_pages:
+        raise TransportContractError("Transport run selected no pages.")
+    return selected_pages
+
+
 def _serialize_block(block: TextBlock) -> dict[str, Any]:
     bubble = getattr(block, "bubble_xyxy", None)
     return {
@@ -474,6 +532,140 @@ def _start_runtime(transport: str, *, timeout_sec: int) -> float:
     )
 
 
+def _runtime_snapshot(transport: str) -> dict[str, Any]:
+    names = ["paddleocr-llamacpp"]
+    if transport == "relay":
+        names.append("paddleocr-server")
+    containers: list[dict[str, Any]] = []
+    for name in names:
+        inspected = _docker("inspect", name)
+        try:
+            decoded = json.loads(inspected.stdout)
+        except json.JSONDecodeError as exc:
+            raise TransportContractError(
+                f"docker inspect returned invalid JSON for {name}."
+            ) from exc
+        if not isinstance(decoded, list) or len(decoded) != 1:
+            raise TransportContractError(
+                f"Unexpected docker inspect result for {name}."
+            )
+        record = decoded[0]
+        config = record.get("Config") if isinstance(record, dict) else None
+        state = record.get("State") if isinstance(record, dict) else None
+        labels = config.get("Labels") if isinstance(config, dict) else None
+        mounts = record.get("Mounts") if isinstance(record, dict) else None
+        containers.append(
+            {
+                "name": name,
+                "container_id": str(record.get("Id", "") or ""),
+                "image_id": str(record.get("Image", "") or ""),
+                "configured_image": str(
+                    config.get("Image", "") if isinstance(config, dict) else ""
+                ),
+                "entrypoint": copy.deepcopy(
+                    config.get("Entrypoint") if isinstance(config, dict) else None
+                ),
+                "command": copy.deepcopy(
+                    config.get("Cmd") if isinstance(config, dict) else None
+                ),
+                "state": str(
+                    state.get("Status", "") if isinstance(state, dict) else ""
+                ),
+                "runtime_labels": {
+                    str(key): str(value)
+                    for key, value in (labels or {}).items()
+                    if str(key).startswith("com.comictranslate.")
+                },
+                "mounts": [
+                    {
+                        "type": str(mount.get("Type", "") or ""),
+                        "name": str(mount.get("Name", "") or ""),
+                        "destination": str(
+                            mount.get("Destination", "") or ""
+                        ),
+                        "mode": str(mount.get("Mode", "") or ""),
+                        "rw": bool(mount.get("RW", False)),
+                    }
+                    for mount in (mounts or [])
+                    if isinstance(mount, dict)
+                ],
+            }
+        )
+    return {"captured_at": utc_now(), "containers": containers}
+
+
+def _validate_runtime_snapshot(
+    snapshot: Mapping[str, Any],
+    *,
+    transport: str,
+) -> None:
+    raw_containers = snapshot.get("containers")
+    if not isinstance(raw_containers, list):
+        raise TransportContractError("Runtime snapshot has no containers.")
+    containers = {
+        str(record.get("name", "")): record
+        for record in raw_containers
+        if isinstance(record, dict)
+    }
+    expected_names = {"paddleocr-llamacpp"}
+    if transport == "relay":
+        expected_names.add("paddleocr-server")
+    if set(containers) != expected_names:
+        raise TransportContractError(
+            "Runtime container set does not match the transport contract."
+        )
+
+    llama = containers["paddleocr-llamacpp"]
+    if llama.get("image_id") != EXPECTED_LLAMA_IMAGE_ID:
+        raise TransportContractError("Paddle llama.cpp image digest changed.")
+    if llama.get("state") != "running":
+        raise TransportContractError("Paddle llama.cpp container is not running.")
+    labels = llama.get("runtime_labels")
+    expected_labels = {
+        "com.comictranslate.paddleocr-model-sha256": EXPECTED_MODEL_SHA256,
+        "com.comictranslate.paddleocr-mmproj-sha256": EXPECTED_MMPROJ_SHA256,
+        "com.comictranslate.paddleocr-model-volume": EXPECTED_MODEL_VOLUME,
+    }
+    if not isinstance(labels, dict) or any(
+        labels.get(key) != value for key, value in expected_labels.items()
+    ):
+        raise TransportContractError("Paddle model runtime labels changed.")
+    mounts = llama.get("mounts")
+    if not isinstance(mounts, list) or not any(
+        isinstance(mount, dict)
+        and mount.get("type") == "volume"
+        and mount.get("name") == EXPECTED_MODEL_VOLUME
+        and mount.get("destination") == "/models"
+        and mount.get("rw") is False
+        for mount in mounts
+    ):
+        raise TransportContractError("Paddle named-volume mount contract changed.")
+    command = llama.get("command")
+    required_command_tokens = {
+        "/models/PaddleOCR-VL-1.6-GGUF.gguf",
+        "/models/PaddleOCR-VL-1.6-GGUF-mmproj.gguf",
+        MODEL_ALIAS,
+        "--n-gpu-layers",
+        "all",
+    }
+    if not isinstance(command, list) or not required_command_tokens.issubset(
+        {str(value) for value in command}
+    ):
+        raise TransportContractError("Paddle llama.cpp command contract changed.")
+
+    if transport == "relay":
+        relay = containers["paddleocr-server"]
+        if relay.get("image_id") != EXPECTED_RELAY_IMAGE_ID:
+            raise TransportContractError("PaddleX relay image digest changed.")
+        relay_command = relay.get("command")
+        if (
+            relay.get("state") != "running"
+            or not isinstance(relay_command, list)
+            or not any("paddlex --serve" in str(value) for value in relay_command)
+        ):
+            raise TransportContractError("PaddleX relay command contract changed.")
+
+
 @dataclass(frozen=True)
 class RunConfig:
     transport: str
@@ -491,17 +683,7 @@ def run_transport(
 ) -> dict[str, Any]:
     manifest = truth_tools.validate_corpus_manifest(manifest_path)
     output = _external_empty_directory(output_dir, label="transport output")
-    selected = set(str(value) for value in page_ids)
-    pages = [
-        page
-        for page in manifest["pages"]
-        if not selected or str(page["page_id"]) in selected
-    ]
-    if selected != {str(page["page_id"]) for page in pages}:
-        missing = sorted(selected - {str(page["page_id"]) for page in pages})
-        raise TransportContractError(f"Unknown page IDs: {missing}")
-    if not pages:
-        raise TransportContractError("Transport run selected no pages.")
+    pages = _select_manifest_pages(manifest["pages"], page_ids)
 
     engine: PaddleOCRVLEngine
     endpoint = RELAY_ENDPOINT
@@ -526,10 +708,16 @@ def run_transport(
     startup_seconds = 0.0
     run_started = time.perf_counter()
     results: list[dict[str, Any]] = []
+    runtime_snapshot: dict[str, Any] = {}
     try:
         startup_seconds = _start_runtime(
             config.transport,
             timeout_sec=config.timeout_sec,
+        )
+        runtime_snapshot = _runtime_snapshot(config.transport)
+        _validate_runtime_snapshot(
+            runtime_snapshot,
+            transport=config.transport,
         )
         for page in pages:
             page_result = _run_page(engine=engine, page=page)
@@ -553,6 +741,8 @@ def run_transport(
         "model_alias": MODEL_ALIAS,
         "prompt": "OCR:",
         "special_tokens": False,
+        "llama_cpp_image_format": "PNG",
+        "message_content_order": ["image_url", "text"],
         "workers": config.workers,
         "max_tokens": config.max_tokens,
         "manifest_path": str(manifest_path),
@@ -584,6 +774,7 @@ def run_transport(
             )
             for page in results
         ),
+        "runtime_snapshot": runtime_snapshot,
     }
     _write_json(output / "summary.json", summary)
     return summary
@@ -613,9 +804,20 @@ def _selected_result_pages(root: Path) -> set[str] | None:
         return None
     summary = truth_tools.read_json(summary_path)
     page_ids = summary.get("page_ids")
+    if page_ids is None:
+        inferred = {
+            child.name
+            for child in root.iterdir()
+            if child.is_dir() and (child / "result.json").is_file()
+        }
+        if not inferred:
+            raise TransportContractError(
+                f"Legacy result root has no page results: {root}"
+            )
+        return inferred
     if not isinstance(page_ids, list) or not page_ids:
         raise TransportContractError(
-            f"Transport summary has no page IDs: {summary_path}"
+            f"Transport summary has invalid page IDs: {summary_path}"
         )
     normalized = {str(value) for value in page_ids}
     if len(normalized) != len(page_ids) or any(not value for value in normalized):
@@ -623,6 +825,246 @@ def _selected_result_pages(root: Path) -> set[str] | None:
             f"Transport summary has invalid page IDs: {summary_path}"
         )
     return normalized
+
+
+def build_manifest_from_snapshots(
+    *,
+    snapshots_path: Path,
+    output_dir: Path,
+    suite_id: str,
+    language: str,
+    split: str,
+) -> dict[str, Any]:
+    snapshots_file = truth_tools.require_external_path(
+        snapshots_path, label="page snapshots"
+    )
+    output = _external_empty_directory(
+        output_dir, label="snapshot manifest output"
+    )
+    if language not in truth_tools.ALLOWED_LANGUAGES:
+        raise TransportContractError(f"Unsupported language: {language}")
+    if split not in truth_tools.ALLOWED_SPLITS:
+        raise TransportContractError(f"Unsupported split: {split}")
+    safe_suite_id = truth_tools.require_safe_id(suite_id, label="suite ID")
+    payload = truth_tools.read_json(snapshots_file)
+    raw_pages = payload.get("pages")
+    if not isinstance(raw_pages, list) or not raw_pages:
+        raise TransportContractError("page_snapshots.json has no pages.")
+
+    manifest_pages: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for raw_page in raw_pages:
+        if not isinstance(raw_page, dict):
+            raise TransportContractError("Invalid page snapshot record.")
+        page_id = truth_tools.require_safe_id(
+            raw_page.get("image_stem"), label="snapshot page ID"
+        )
+        if page_id in seen:
+            raise TransportContractError(f"Duplicate snapshot page: {page_id}")
+        seen.add(page_id)
+        source = truth_tools.require_external_path(
+            Path(str(raw_page.get("image_path", ""))),
+            label=f"snapshot source {page_id}",
+        )
+        if not source.is_file():
+            raise TransportContractError(f"Missing snapshot source: {source}")
+        image = cv2.imread(str(source), cv2.IMREAD_COLOR)
+        if image is None:
+            raise TransportContractError(f"Unable to decode snapshot source: {source}")
+        height, width = [int(value) for value in image.shape[:2]]
+        source_sha = truth_tools.sha256_file(source)
+        raw_blocks = raw_page.get("blocks")
+        if not isinstance(raw_blocks, list) or not raw_blocks:
+            raise TransportContractError(
+                f"Snapshot page has no OCR blocks: {page_id}"
+            )
+        detector_blocks: list[dict[str, Any]] = []
+        for index, raw_block in enumerate(raw_blocks):
+            if not isinstance(raw_block, dict):
+                raise TransportContractError(
+                    f"Invalid snapshot block {page_id}:{index}."
+                )
+            detector_blocks.append(
+                {
+                    "block_id": f"detector-{index:04d}",
+                    "xyxy": truth_tools._bbox(
+                        raw_block.get("xyxy"),
+                        label=f"{page_id}:detector-{index:04d}",
+                        width=width,
+                        height=height,
+                    ),
+                    "bubble_xyxy": (
+                        truth_tools._bbox(
+                            raw_block.get("bubble_xyxy"),
+                            label=f"{page_id}:detector-{index:04d}:bubble",
+                            width=width,
+                            height=height,
+                        )
+                        if raw_block.get("bubble_xyxy")
+                        else None
+                    ),
+                    "text_class": str(raw_block.get("text_class", "") or ""),
+                    "direction": str(raw_block.get("direction", "") or ""),
+                }
+            )
+        detector_path = output / "detector" / page_id / "result.json"
+        _write_json(
+            detector_path,
+            {
+                "source_sha256": source_sha,
+                "shape_hw": [height, width],
+                "blocks": detector_blocks,
+            },
+        )
+        manifest_pages.append(
+            {
+                "page_id": page_id,
+                "source_page_id": page_id,
+                "split": split,
+                "language": language,
+                "source_image": {
+                    "path": str(source.resolve()),
+                    "sha256": source_sha,
+                    "width": width,
+                    "height": height,
+                },
+                "detector_snapshot": {
+                    "path": str(detector_path.resolve()),
+                    "sha256": truth_tools.sha256_file(detector_path),
+                },
+            }
+        )
+    manifest: dict[str, Any] = {
+        "schema_version": truth_tools.CORPUS_SCHEMA_VERSION,
+        "protocol_version": truth_tools.PROTOCOL_VERSION,
+        "suite_id": safe_suite_id,
+        "created_at": utc_now(),
+        "source_page_snapshots": str(snapshots_file.resolve()),
+        "source_page_snapshots_sha256": truth_tools.sha256_file(snapshots_file),
+        "pages": manifest_pages,
+    }
+    manifest["manifest_sha256"] = truth_tools.canonical_sha256(manifest)
+    manifest_path = output / "corpus-manifest.json"
+    _write_json(manifest_path, manifest)
+    truth_tools.validate_corpus_manifest(manifest_path)
+    return {
+        "manifest_path": str(manifest_path),
+        "manifest_sha256": truth_tools.sha256_file(manifest_path),
+        "page_count": len(manifest_pages),
+        "block_count": sum(
+            len(page.get("blocks", []))
+            for page in raw_pages
+            if isinstance(page, dict)
+        ),
+    }
+
+
+def _timing_summary(root: Path) -> dict[str, float]:
+    summary_path = root / "summary.json"
+    if not summary_path.is_file():
+        return {}
+    summary = truth_tools.read_json(summary_path)
+    result: dict[str, float] = {}
+    for key in ("startup_seconds", "request_seconds", "wall_seconds"):
+        value = summary.get(key)
+        if isinstance(value, (int, float)) and float(value) >= 0:
+            result[key] = float(value)
+    return result
+
+
+def _improvement_percent(baseline: float, candidate: float) -> float | None:
+    if baseline <= 0:
+        return None
+    return (baseline - candidate) / baseline * 100.0
+
+
+def compare_exact_transports(
+    *,
+    baseline_dir: Path,
+    candidate_dir: Path,
+    output_dir: Path,
+) -> dict[str, Any]:
+    baseline = truth_tools.require_external_path(
+        baseline_dir, label="baseline results"
+    )
+    candidate = truth_tools.require_external_path(
+        candidate_dir, label="candidate results"
+    )
+    baseline_pages = _selected_result_pages(baseline)
+    candidate_pages = _selected_result_pages(candidate)
+    if baseline_pages is None or candidate_pages is None:
+        raise TransportContractError(
+            "Exact transport comparison requires locked page IDs."
+        )
+    if baseline_pages != candidate_pages:
+        raise TransportContractError(
+            "Baseline and candidate result page sets differ."
+        )
+    output = _external_empty_directory(output_dir, label="exact comparison output")
+    rows: list[dict[str, Any]] = []
+    block_count = 0
+    normalized_changed = 0
+    raw_changed = 0
+    contract_changed = 0
+    for page_id in sorted(baseline_pages):
+        baseline_blocks = _result_blocks(baseline, page_id)
+        candidate_blocks = _result_blocks(candidate, page_id)
+        if set(baseline_blocks) != set(candidate_blocks):
+            raise TransportContractError(
+                f"Detector block set changed on {page_id}."
+            )
+        for block_id in sorted(baseline_blocks):
+            baseline_block = baseline_blocks[block_id]
+            candidate_block = candidate_blocks[block_id]
+            baseline_text = str(baseline_block.get("text", "") or "")
+            candidate_text = str(candidate_block.get("text", "") or "")
+            raw_differs = baseline_text != candidate_text
+            normalized_differs = (
+                truth_tools.normalize_text(baseline_text)
+                != truth_tools.normalize_text(candidate_text)
+            )
+            contract_differs = baseline_block != candidate_block
+            block_count += 1
+            raw_changed += int(raw_differs)
+            normalized_changed += int(normalized_differs)
+            contract_changed += int(contract_differs)
+            if contract_differs:
+                rows.append(
+                    {
+                        "page_id": page_id,
+                        "block_id": block_id,
+                        "baseline_text": baseline_text,
+                        "candidate_text": candidate_text,
+                        "raw_text_changed": raw_differs,
+                        "normalized_text_changed": normalized_differs,
+                        "baseline_block": baseline_block,
+                        "candidate_block": candidate_block,
+                    }
+                )
+    baseline_timing = _timing_summary(baseline)
+    candidate_timing = _timing_summary(candidate)
+    improvements = {
+        key: _improvement_percent(value, candidate_timing.get(key, 0.0))
+        for key, value in baseline_timing.items()
+        if key in candidate_timing
+    }
+    result = {
+        "schema_version": 1,
+        "protocol_version": PROTOCOL_VERSION,
+        "created_at": utc_now(),
+        "page_ids": sorted(baseline_pages),
+        "page_count": len(baseline_pages),
+        "block_count": block_count,
+        "raw_text_changed_count": raw_changed,
+        "normalized_text_changed_count": normalized_changed,
+        "block_contract_changed_count": contract_changed,
+        "baseline_timing": baseline_timing,
+        "candidate_timing": candidate_timing,
+        "improvement_percent": improvements,
+        "changed_rows": rows,
+    }
+    _write_json(output / "comparison.json", result)
+    return result
 
 
 def compare_transports(
@@ -641,11 +1083,15 @@ def compare_transports(
     )
     baseline_pages = _selected_result_pages(baseline)
     candidate_pages = _selected_result_pages(candidate)
-    if baseline_pages != candidate_pages:
+    if (
+        baseline_pages is not None
+        and candidate_pages is not None
+        and baseline_pages != candidate_pages
+    ):
         raise TransportContractError(
             "Baseline and candidate result page sets differ."
         )
-    selected_pages = baseline_pages
+    selected_pages = baseline_pages or candidate_pages
     output = _external_empty_directory(output_dir, label="comparison output")
     rows: list[dict[str, Any]] = []
     baseline_exact = 0
@@ -807,6 +1253,24 @@ def build_parser() -> argparse.ArgumentParser:
     compare_parser.add_argument("--baseline", type=Path, required=True)
     compare_parser.add_argument("--candidate", type=Path, required=True)
     compare_parser.add_argument("--output", type=Path, required=True)
+
+    exact_parser = subparsers.add_parser("compare-exact")
+    exact_parser.add_argument("--baseline", type=Path, required=True)
+    exact_parser.add_argument("--candidate", type=Path, required=True)
+    exact_parser.add_argument("--output", type=Path, required=True)
+
+    manifest_parser = subparsers.add_parser("build-manifest")
+    manifest_parser.add_argument("--snapshots", type=Path, required=True)
+    manifest_parser.add_argument("--output", type=Path, required=True)
+    manifest_parser.add_argument("--suite-id", required=True)
+    manifest_parser.add_argument(
+        "--language", choices=sorted(truth_tools.ALLOWED_LANGUAGES), required=True
+    )
+    manifest_parser.add_argument(
+        "--split",
+        choices=sorted(truth_tools.ALLOWED_SPLITS),
+        default="development",
+    )
     return parser
 
 
@@ -831,6 +1295,20 @@ def main(argv: Sequence[str] | None = None) -> int:
                 baseline_dir=args.baseline,
                 candidate_dir=args.candidate,
                 output_dir=args.output,
+            )
+        elif args.command == "compare-exact":
+            result = compare_exact_transports(
+                baseline_dir=args.baseline,
+                candidate_dir=args.candidate,
+                output_dir=args.output,
+            )
+        elif args.command == "build-manifest":
+            result = build_manifest_from_snapshots(
+                snapshots_path=args.snapshots,
+                output_dir=args.output,
+                suite_id=args.suite_id,
+                language=args.language,
+                split=args.split,
             )
         else:  # pragma: no cover
             raise TransportContractError(f"Unknown command: {args.command}")
