@@ -29,6 +29,7 @@ from modules.utils.inpaint_debug import (
 )
 from modules.utils.pipeline_config import get_config, get_inpainter_runtime, inpaint_map
 from modules.utils.inpainting_runtime import inpainter_default_settings, normalize_inpainter_key
+from scripts.validation_artifact_harness import select_managed_output_directory
 
 DEBUG_EXPORT_SETTINGS = {
     "export_detector_overlay": True,
@@ -340,76 +341,102 @@ def main() -> int:
     parser.add_argument("--glob", default="*", help="Glob pattern for sample filenames.")
     parser.add_argument("--inpainter", default="AOT", choices=["AOT", "lama_large_512px", "lama_mpe"])
     parser.add_argument("--use-gpu", action="store_true")
+    parser.add_argument(
+        "--output-dir",
+        type=Path,
+        default=None,
+        help=(
+            "Optional output directory. Without it, a classified private validation "
+            "artifact run is created automatically."
+        ),
+    )
     args = parser.parse_args()
 
-    settings = _SettingsStub(inpainter=args.inpainter, use_gpu=args.use_gpu)
-    detector = TextBlockDetector(settings)
-    runtime = get_inpainter_runtime(settings, args.inpainter)
-    inpainter_cls = inpaint_map[runtime["key"]]
-    device = resolve_device(args.use_gpu, backend=runtime["backend"])
-    inpainter = inpainter_cls(
-        device,
-        backend=runtime["backend"],
-        runtime_device=runtime.get("device", device),
-        inpaint_size=runtime.get("inpaint_size"),
-        precision=runtime.get("precision"),
+    root_output, artifact_run = select_managed_output_directory(
+        family="inpaint-debug-export",
+        category="40-inpaint-mask-render",
+        explicit_output_directory=args.output_dir,
     )
-
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    root_output = ROOT / "banchmark_result_log" / "inpaint_debug" / f"{timestamp}_sample-debug-export"
     root_output.mkdir(parents=True, exist_ok=True)
+    try:
+        settings = _SettingsStub(inpainter=args.inpainter, use_gpu=args.use_gpu)
+        detector = TextBlockDetector(settings)
+        runtime = get_inpainter_runtime(settings, args.inpainter)
+        inpainter_cls = inpaint_map[runtime["key"]]
+        device = resolve_device(args.use_gpu, backend=runtime["backend"])
+        inpainter = inpainter_cls(
+            device,
+            backend=runtime["backend"],
+            runtime_device=runtime.get("device", device),
+            inpaint_size=runtime.get("inpaint_size"),
+            precision=runtime.get("precision"),
+        )
 
-    records_by_corpus: dict[str, list[dict]] = {}
-    failures: list[dict] = []
-    total_images = 0
+        records_by_corpus: dict[str, list[dict]] = {}
+        failures: list[dict] = []
+        total_images = 0
 
-    for corpus_name in ("japan", "China"):
-        corpus_dir = ROOT / "Sample" / corpus_name
-        corpus_output = root_output / corpus_name.lower()
-        corpus_output.mkdir(parents=True, exist_ok=True)
-        records: list[dict] = []
-        for image_path in _iter_sample_images(corpus_dir, args.glob):
-            total_images += 1
-            try:
-                record = _process_image(image_path, corpus_output, detector, inpainter, settings)
-                records.append(record)
-            except Exception as exc:
-                failures.append(
-                    {
-                        "corpus": corpus_name,
-                        "image": image_path.name,
-                        "error": str(exc),
-                        "traceback": traceback.format_exc(),
-                    }
-                )
-        records_by_corpus[corpus_name.lower()] = records
+        for corpus_name in ("japan", "China"):
+            corpus_dir = ROOT / "Sample" / corpus_name
+            corpus_output = root_output / corpus_name.lower()
+            corpus_output.mkdir(parents=True, exist_ok=True)
+            records: list[dict] = []
+            for image_path in _iter_sample_images(corpus_dir, args.glob):
+                total_images += 1
+                try:
+                    record = _process_image(image_path, corpus_output, detector, inpainter, settings)
+                    records.append(record)
+                except Exception as exc:
+                    failures.append(
+                        {
+                            "corpus": corpus_name,
+                            "image": image_path.name,
+                            "error": str(exc),
+                            "traceback": traceback.format_exc(),
+                        }
+                    )
+            records_by_corpus[corpus_name.lower()] = records
 
-    summary = {
-        "generated_at": datetime.now().isoformat(timespec="seconds"),
-        "detector_key": settings.get_tool_selection("detector"),
-        "inpainter": args.inpainter,
-        "hd_strategy": "Resize",
-        "use_gpu": bool(args.use_gpu),
-        "glob": args.glob,
-        "total_images": total_images,
-        "success_count": sum(len(records) for records in records_by_corpus.values()),
-        "failure_count": len(failures),
-        "failures": failures,
-        "corpora": {
-            corpus: {
-                "image_count": len(records),
-                "cleanup_applied_count": sum(1 for record in records if record["cleanup_applied"]),
-                "total_blocks": sum(record["block_count"] for record in records),
-            }
-            for corpus, records in records_by_corpus.items()
-        },
-    }
-    metrics_dir = root_output / "metrics"
-    metrics_dir.mkdir(parents=True, exist_ok=True)
-    (metrics_dir / "summary.json").write_text(json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8")
-    _write_index(root_output, records_by_corpus, summary)
-    print(root_output)
-    return 0
+        summary = {
+            "generated_at": datetime.now().isoformat(timespec="seconds"),
+            "detector_key": settings.get_tool_selection("detector"),
+            "inpainter": args.inpainter,
+            "hd_strategy": "Resize",
+            "use_gpu": bool(args.use_gpu),
+            "glob": args.glob,
+            "total_images": total_images,
+            "success_count": sum(len(records) for records in records_by_corpus.values()),
+            "failure_count": len(failures),
+            "failures": failures,
+            "corpora": {
+                corpus: {
+                    "image_count": len(records),
+                    "cleanup_applied_count": sum(1 for record in records if record["cleanup_applied"]),
+                    "total_blocks": sum(record["block_count"] for record in records),
+                }
+                for corpus, records in records_by_corpus.items()
+            },
+        }
+        metrics_dir = root_output / "metrics"
+        metrics_dir.mkdir(parents=True, exist_ok=True)
+        (metrics_dir / "summary.json").write_text(json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8")
+        _write_index(root_output, records_by_corpus, summary)
+        if artifact_run is not None:
+            artifact_run.complete(
+                metadata={
+                    "input_image_count": total_images,
+                    "success_count": summary["success_count"],
+                    "failure_count": summary["failure_count"],
+                    "inpainter": args.inpainter,
+                    "use_gpu": bool(args.use_gpu),
+                }
+            )
+        print(root_output)
+        return 0
+    except BaseException as exc:
+        if artifact_run is not None:
+            artifact_run.fail(exc)
+        raise
 
 
 if __name__ == "__main__":
