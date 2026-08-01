@@ -8,10 +8,10 @@ from pathlib import Path
 from typing import Any, Mapping
 
 
-GEMMA_RUNTIME_MANIFEST_SCHEMA_VERSION = 1
-GEMMA_RUNTIME_PREPARATION_VERSION = 1
-DEFAULT_GEMMA_MODEL_VOLUME = "comic-translate-gemma-models-v1"
-DEFAULT_GEMMA_READY_MANIFEST = ".comic-translate-gemma-ready-v1.json"
+GEMMA_RUNTIME_MANIFEST_SCHEMA_VERSION = 2
+GEMMA_RUNTIME_PREPARATION_VERSION = 2
+DEFAULT_GEMMA_MODEL_VOLUME = "comic-translate-gemma-models-v2"
+DEFAULT_GEMMA_READY_MANIFEST = ".comic-translate-gemma-ready-v2.json"
 DEFAULT_GEMMA_LLAMA_CPP_IMAGE = (
     "ghcr.io/ggml-org/llama.cpp@sha256:"
     "22e0e3bfe967af4fd1df6a918022abbfd4e72e4d40a4769e616a4176790acbcb"
@@ -43,12 +43,7 @@ GEMMA_MODEL_SPECS: dict[str, dict[str, Any]] = {
     "gemma-4-26B-IQ4_NL.gguf": {
         "bytes": 14_585_439_872,
         "sha256": "768a89b94209243b333b2e074b928fe51ea208ebdad6424a510bd73e5cb4d0b8",
-        "role": "legacy-rollback",
-    },
-    "Gemma4-26B-A4B-Uncensored-HauhauCS-Balanced-IQ4_XS.gguf": {
-        "bytes": 13_917_726_048,
-        "sha256": "61b277f4dde555fc6c04c9024a9580ef8c83f2f19504f3989a15f95684257426",
-        "role": "product-candidate",
+        "role": "product-default",
     },
 }
 DEFAULT_GEMMA_PREPARATION_RUNTIME_CONFIGURATION: dict[str, Any] = {
@@ -63,9 +58,7 @@ DEFAULT_GEMMA_PREPARATION_RUNTIME_CONFIGURATION: dict[str, Any] = {
     "speculative_draft_max": 8,
 }
 DEFAULT_GEMMA_PREPARED_MODEL = "gemma-4-26B-IQ4_NL.gguf"
-DEFAULT_GEMMA_SMOKE_MODEL = (
-    "Gemma4-26B-A4B-Uncensored-HauhauCS-Balanced-IQ4_XS.gguf"
-)
+DEFAULT_GEMMA_SMOKE_MODEL = DEFAULT_GEMMA_PREPARED_MODEL
 
 _SAFE_DOCKER_NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]*$")
 _SAFE_MODEL_NAME = re.compile(r"^[^/\\\x00-\x1f]+\.gguf$", re.IGNORECASE)

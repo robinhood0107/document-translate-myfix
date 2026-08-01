@@ -9,7 +9,7 @@ services:
     labels:
       comic-translate.runtime: gemma
       comic-translate.runtime-fingerprint: ${GEMMA_RUNTIME_FINGERPRINT:-unprepared}
-      comic-translate.model-volume: ${GEMMA_MODEL_VOLUME:-comic-translate-gemma-models-v1}
+      comic-translate.model-volume: ${GEMMA_MODEL_VOLUME:-comic-translate-gemma-models-v2}
       comic-translate.ready-manifest-sha256: ${GEMMA_READY_MANIFEST_SHA256:-unprepared}
       comic-translate.model-sha256: ${GEMMA_MODEL_SHA256:-unprepared}
       comic-translate.preparation-version: ${GEMMA_PREPARATION_VERSION:-0}
@@ -76,4 +76,4 @@ services:
 volumes:
   gemma-models:
     external: true
-    name: ${GEMMA_MODEL_VOLUME:-comic-translate-gemma-models-v1}
+    name: ${GEMMA_MODEL_VOLUME:-comic-translate-gemma-models-v2}
