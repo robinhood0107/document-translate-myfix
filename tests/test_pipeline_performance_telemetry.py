@@ -1,7 +1,10 @@
 from __future__ import annotations
 
 import json
+import os
+import sys
 import tempfile
+import threading
 import unittest
 from concurrent.futures import Future
 from pathlib import Path
@@ -14,6 +17,7 @@ from pipeline.performance_telemetry import (
     PIPELINE_PERFORMANCE_TELEMETRY_SCHEMA_VERSION,
     PipelinePerformanceTelemetry,
 )
+from pipeline.performance_ranges import performance_range
 from pipeline.stage_batched_processor import StageBatchedProcessor
 
 
@@ -29,6 +33,60 @@ class _FakeClock:
 
 
 class PipelinePerformanceTelemetryTests(unittest.TestCase):
+    def test_nvtx_range_is_disabled_without_the_explicit_lab_toggle(self) -> None:
+        nvtx = SimpleNamespace(
+            range_push=mock.Mock(),
+            range_pop=mock.Mock(),
+        )
+        torch_module = SimpleNamespace(cuda=SimpleNamespace(nvtx=nvtx))
+
+        with mock.patch.dict(os.environ, {"CT_PERFORMANCE_NVTX": ""}), mock.patch.dict(
+            sys.modules,
+            {"torch": torch_module},
+        ):
+            with performance_range("ct:test:disabled"):
+                completed = True
+
+        self.assertTrue(completed)
+        nvtx.range_push.assert_not_called()
+        nvtx.range_pop.assert_not_called()
+
+    def test_nvtx_range_wraps_enabled_lab_work(self) -> None:
+        nvtx = SimpleNamespace(
+            range_push=mock.Mock(),
+            range_pop=mock.Mock(),
+        )
+        torch_module = SimpleNamespace(cuda=SimpleNamespace(nvtx=nvtx))
+
+        with mock.patch.dict(os.environ, {"CT_PERFORMANCE_NVTX": "1"}), mock.patch.dict(
+            sys.modules,
+            {"torch": torch_module},
+        ):
+            with performance_range("ct:test:enabled"):
+                completed = True
+
+        self.assertTrue(completed)
+        nvtx.range_push.assert_called_once_with("ct:test:enabled")
+        nvtx.range_pop.assert_called_once_with()
+
+    def test_nvtx_failure_never_changes_the_product_result(self) -> None:
+        nvtx = SimpleNamespace(
+            range_push=mock.Mock(side_effect=RuntimeError("nvtx unavailable")),
+            range_pop=mock.Mock(),
+        )
+        torch_module = SimpleNamespace(cuda=SimpleNamespace(nvtx=nvtx))
+
+        with mock.patch.dict(os.environ, {"CT_PERFORMANCE_NVTX": "true"}), mock.patch.dict(
+            sys.modules,
+            {"torch": torch_module},
+        ):
+            with performance_range("ct:test:failure"):
+                completed = True
+
+        self.assertTrue(completed)
+        nvtx.range_push.assert_called_once_with("ct:test:failure")
+        nvtx.range_pop.assert_not_called()
+
     def test_stage_runtime_request_cache_and_resource_stats_are_versioned(self) -> None:
         clock = _FakeClock()
         resource_samples = iter(
@@ -130,7 +188,7 @@ class PipelinePerformanceTelemetryTests(unittest.TestCase):
         )
         self.assertEqual(ocr_event["performance_stage_elapsed_ms"], 125.0)
         stats = done["performance_stats"]
-        self.assertEqual(stats["schema_version"], 1)
+        self.assertEqual(stats["schema_version"], 2)
         self.assertEqual(stats["status"], "completed")
         self.assertEqual(stats["stages"]["ocr"], {"wall_ms": 125.0, "count": 1})
         self.assertEqual(stats["stages"]["translate"], {"wall_ms": 250.0, "count": 1})
@@ -155,7 +213,18 @@ class PipelinePerformanceTelemetryTests(unittest.TestCase):
                 "gpu_memory_used_peak_mb": 4096.0,
                 "gpu_util_peak_percent": 80.0,
                 "wsl_swap_used_peak_mb": 512.0,
+                "wsl_swap_used_start_mb": 128.0,
+                "wsl_swap_used_end_mb": 512.0,
+                "wsl_swap_used_delta_mb": 384.0,
             },
+        )
+        self.assertEqual(
+            stats["stage_details"]["ocr"]["queue_wait"]["wall_ms"],
+            3.5,
+        )
+        self.assertEqual(
+            stats["stage_details"]["ocr"]["image_encode"]["wall_ms"],
+            4.5,
         )
 
     def test_resource_sampling_is_disabled_by_default_when_requested(self) -> None:
@@ -256,7 +325,7 @@ class PipelinePerformanceTelemetryTests(unittest.TestCase):
         self.assertTrue(start_payload["product_pipeline_entrypoint"])
         self.assertEqual(
             start_payload["performance_telemetry_schema_version"],
-            1,
+            2,
         )
         self.assertEqual(
             start_payload["performance_run_id"],
@@ -304,6 +373,170 @@ class PipelinePerformanceTelemetryTests(unittest.TestCase):
             1,
         )
         self.assertNotIn("start_count", stats["runtime"]["gemma"])
+
+    def test_runtime_progress_callback_records_process_model_and_failure_states(
+        self,
+    ) -> None:
+        forwarded: list[dict] = []
+        clock = _FakeClock()
+        processor = object.__new__(StageBatchedProcessor)
+        processor.main_page = SimpleNamespace(
+            report_runtime_progress=lambda payload: forwarded.append(dict(payload)),
+        )
+        processor.performance_telemetry = PipelinePerformanceTelemetry(
+            clock=clock,
+            resource_sampling_enabled=False,
+        )
+        processor.last_performance_stats = {}
+        processor._runtime_progress_lock = threading.RLock()
+        processor._runtime_progress_started = {}
+        observe = processor._runtime_progress_callback()
+
+        with mock.patch(
+            "pipeline.stage_batched_processor.time.perf_counter",
+            side_effect=clock,
+        ):
+            observe(
+                {
+                    "service": "paddleocr_vl",
+                    "step_key": "container_start",
+                    "status": "starting",
+                }
+            )
+            clock.advance(0.25)
+            observe(
+                {
+                    "service": "paddleocr_vl",
+                    "step_key": "container_start",
+                    "status": "completed",
+                }
+            )
+            observe(
+                {
+                    "service": "paddleocr_vl",
+                    "step_key": "health_wait",
+                    "status": "waiting_health",
+                }
+            )
+            clock.advance(0.5)
+            observe(
+                {
+                    "service": "paddleocr_vl",
+                    "step_key": "health_wait",
+                    "status": "failed",
+                }
+            )
+
+        stats = processor.performance_telemetry.snapshot()
+        self.assertEqual(len(forwarded), 4)
+        self.assertEqual(
+            stats["runtime"]["paddleocr_vl"]["container_start_wall_ms"],
+            250.0,
+        )
+        self.assertEqual(
+            stats["runtime"]["paddleocr_vl"]["health_wait_wall_ms"],
+            500.0,
+        )
+        self.assertEqual(
+            stats["runtime_state"]["current"]["paddleocr_vl"],
+            "stopped",
+        )
+        self.assertEqual(
+            [item["to"] for item in stats["runtime_state"]["transitions"]],
+            [
+                "process_starting",
+                "process_ready",
+                "model_loading",
+                "stopped",
+            ],
+        )
+
+    def test_v2_workload_graph_runtime_state_and_private_values_are_safe(self) -> None:
+        clock = _FakeClock()
+        telemetry = PipelinePerformanceTelemetry(
+            clock=clock,
+            resource_sampling_enabled=False,
+        )
+        telemetry.observe_event("batch_run_start")
+        telemetry.record_workload_features(
+            "ocr",
+            {
+                "page_count": 6,
+                "source_language": "ja",
+                "source_path": r"C:\private\chapter01.jpg",
+                "image_name": "private-page.jpg",
+                "raw_text": "secret",
+            },
+        )
+        telemetry.record_runtime_transition(
+            service="paddleocr_vl",
+            to_state="model_loading",
+        )
+        with telemetry.measure(
+            stage="ocr",
+            operation="stage_window",
+            workload={"crop_count": 73},
+            node_id="stage.ocr",
+            dependencies=("stage.detect",),
+            service="paddleocr_vl",
+        ):
+            clock.advance(0.75)
+        telemetry.record_runtime_transition(
+            service="paddleocr_vl",
+            to_state="model_ready",
+            elapsed_ms=750.0,
+        )
+
+        stats = telemetry.snapshot()
+        self.assertEqual(stats["workload"]["ocr"]["page_count"], 6)
+        self.assertEqual(stats["workload"]["ocr"]["source_language"], "ja")
+        self.assertNotIn("source_path", stats["workload"]["ocr"])
+        self.assertNotIn("image_name", stats["workload"]["ocr"])
+        self.assertNotIn("raw_text", stats["workload"]["ocr"])
+        self.assertEqual(
+            stats["stage_details"]["ocr"]["stage_window"]["wall_ms"],
+            750.0,
+        )
+        self.assertEqual(stats["work_graph"][0]["node_id"], "stage.ocr")
+        self.assertEqual(
+            stats["work_graph"][0]["dependencies"],
+            ["stage.detect"],
+        )
+        self.assertEqual(
+            stats["runtime_state"]["current"]["paddleocr_vl"],
+            "model_ready",
+        )
+
+    def test_measure_propagates_operation_errors_and_records_failure(self) -> None:
+        telemetry = PipelinePerformanceTelemetry(resource_sampling_enabled=False)
+
+        with self.assertRaisesRegex(RuntimeError, "boom"):
+            with telemetry.measure(stage="render", operation="commit"):
+                raise RuntimeError("boom")
+
+        detail = telemetry.snapshot()["stage_details"]["render"]["commit"]
+        self.assertEqual(detail["failed_count"], 1)
+
+    def test_measurement_recording_failure_does_not_change_product_outcome(self) -> None:
+        telemetry = PipelinePerformanceTelemetry(resource_sampling_enabled=False)
+
+        with mock.patch.object(
+            telemetry,
+            "record_stage_detail",
+            side_effect=RuntimeError("telemetry failed"),
+        ):
+            with telemetry.measure(stage="render", operation="commit"):
+                completed = True
+
+        self.assertTrue(completed)
+
+        with mock.patch.object(
+            telemetry,
+            "record_stage_detail",
+            side_effect=RuntimeError("telemetry failed"),
+        ), self.assertRaisesRegex(ValueError, "product failed"):
+            with telemetry.measure(stage="render", operation="commit"):
+                raise ValueError("product failed")
 
     def test_benchmark_memlog_tick_includes_gpu_and_wsl_swap(self) -> None:
         logger = MemLogger(SimpleNamespace())
