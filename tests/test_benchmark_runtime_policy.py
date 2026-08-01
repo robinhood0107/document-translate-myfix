@@ -47,11 +47,8 @@ class BenchmarkRuntimePolicyTests(unittest.TestCase):
             },
             {
                 "name": "ocr",
-                "container_names": ["paddleocr-llamacpp", "paddleocr-server"],
-                "health_urls": [
-                    "http://127.0.0.1:28118/docs",
-                    "http://127.0.0.1:18000/health",
-                ],
+                "container_names": ["paddleocr-llamacpp"],
+                "health_urls": ["http://127.0.0.1:18000/health"],
                 "compose_path": ROOT / "paddleocr_vl_docker_files" / "docker-compose.yaml",
                 "cwd": ROOT / "paddleocr_vl_docker_files",
             },
@@ -75,7 +72,7 @@ class BenchmarkRuntimePolicyTests(unittest.TestCase):
                  benchmark_common,
                  "wait_for_health_urls",
                  side_effect=[
-                     ["http://127.0.0.1:28118/docs"],
+                     ["http://127.0.0.1:18000/health"],
                      [],
                  ],
              ) as wait_for_health, \
@@ -122,8 +119,8 @@ class BenchmarkRuntimePolicyTests(unittest.TestCase):
         groups = [
             {
                 "name": "ocr",
-                "container_names": ["paddleocr-server"],
-                "health_urls": ["http://127.0.0.1:28118/docs"],
+                "container_names": ["paddleocr-llamacpp"],
+                "health_urls": ["http://127.0.0.1:18000/health"],
                 "compose_path": ROOT
                 / "paddleocr_vl_docker_files"
                 / "docker-compose.yaml",
@@ -138,7 +135,7 @@ class BenchmarkRuntimePolicyTests(unittest.TestCase):
         ), mock.patch.object(
             benchmark_common,
             "existing_container_names",
-            return_value=["paddleocr-server"],
+            return_value=["paddleocr-llamacpp"],
         ), mock.patch.object(
             benchmark_common,
             "running_container_names",
@@ -229,11 +226,6 @@ class BenchmarkRuntimePolicyTests(unittest.TestCase):
     ) -> None:
         compose = {
             "services": {
-                "paddleocr-layout": {
-                    "image": "legacy-layout-image",
-                    "command": "--device cpu",
-                    "depends_on": {},
-                },
                 "paddleocr-llamacpp": {
                     "image": "llama-image",
                     "pull_policy": "missing",
@@ -253,16 +245,10 @@ class BenchmarkRuntimePolicyTests(unittest.TestCase):
                 }
             },
         }
-        pipeline = {
-            "SubModules": {
-                "VLRecognition": {"genai_config": {}}
-            }
-        }
-        loaded = [compose, pipeline]
         with tempfile.TemporaryDirectory() as tmp, mock.patch.object(
             benchmark_common,
             "_python3_yaml_load",
-            side_effect=loaded,
+            return_value=compose,
         ), mock.patch.object(
             benchmark_common,
             "_python3_yaml_dump",
@@ -276,7 +262,7 @@ class BenchmarkRuntimePolicyTests(unittest.TestCase):
         )
         self.assertEqual(
             set(staged_compose["services"]),
-            {"paddleocr-layout", "paddleocr-llamacpp"},
+            {"paddleocr-llamacpp"},
         )
         self.assertEqual(
             staged_compose["services"]["paddleocr-llamacpp"]["pull_policy"],
@@ -288,11 +274,6 @@ class BenchmarkRuntimePolicyTests(unittest.TestCase):
     ) -> None:
         compose = {
             "services": {
-                "paddleocr-layout": {
-                    "image": "legacy-layout-image",
-                    "command": "--device cpu",
-                    "depends_on": {},
-                },
                 "paddleocr-llamacpp": {
                     "image": "llama-image",
                     "pull_policy": "missing",
@@ -318,16 +299,10 @@ class BenchmarkRuntimePolicyTests(unittest.TestCase):
                 }
             },
         }
-        pipeline = {
-            "SubModules": {
-                "VLRecognition": {"genai_config": {}}
-            }
-        }
-        loaded = [compose, pipeline]
         with tempfile.TemporaryDirectory() as tmp, mock.patch.object(
             benchmark_common,
             "_python3_yaml_load",
-            side_effect=loaded,
+            return_value=compose,
         ), mock.patch.object(
             benchmark_common,
             "_python3_yaml_dump",
@@ -335,7 +310,6 @@ class BenchmarkRuntimePolicyTests(unittest.TestCase):
             staged = benchmark_common._stage_ocr_runtime(
                 {
                     "ocr_runtime": {
-                        "image": "legacy-vllm-layout-image",
                         "llama_cpp_image": (
                             "ghcr.io/ggml-org/llama.cpp@sha256:"
                             + "1" * 64
@@ -361,10 +335,6 @@ class BenchmarkRuntimePolicyTests(unittest.TestCase):
             "ghcr.io/ggml-org/llama.cpp@sha256:" + "1" * 64,
         )
         self.assertEqual(llama_service["pull_policy"], "never")
-        self.assertEqual(
-            staged_compose["services"]["paddleocr-layout"]["image"],
-            "legacy-vllm-layout-image",
-        )
         self.assertEqual(command[command.index("-c") + 1], "8192")
         self.assertEqual(command[command.index("-np") + 1], "2")
         self.assertEqual(command[command.index("-b") + 1], "1024")
@@ -379,16 +349,38 @@ class BenchmarkRuntimePolicyTests(unittest.TestCase):
         )
         self.assertEqual(
             staged["service_names"],
-            ["paddleocr-llamacpp", "paddleocr-server"],
+            ["paddleocr-llamacpp"],
         )
+        self.assertEqual(staged["transport"], "direct-openai-chat-completions-v1")
+
+    def test_staged_paddle_runtime_rejects_retired_relay_options(self) -> None:
+        compose = {
+            "services": {
+                "paddleocr-llamacpp": {
+                    "pull_policy": "missing",
+                    "command": [],
+                },
+            },
+            "volumes": {
+                "paddleocr-llamacpp-models": {"external": True},
+            },
+        }
+        with tempfile.TemporaryDirectory() as tmp, mock.patch.object(
+            benchmark_common,
+            "_python3_yaml_load",
+            return_value=compose,
+        ), self.assertRaisesRegex(
+            ValueError,
+            "PaddleX relay benchmark options are retired",
+        ):
+            benchmark_common._stage_ocr_runtime(
+                {"ocr_runtime": {"front_device": "cpu"}},
+                Path(tmp),
+            )
 
     def test_staged_paddle_runtime_rejects_unsafe_named_volume(self) -> None:
         compose = {
             "services": {
-                "paddleocr-layout": {
-                    "command": "--device cpu",
-                    "depends_on": {},
-                },
                 "paddleocr-llamacpp": {
                     "pull_policy": "missing",
                     "command": [],
@@ -400,15 +392,10 @@ class BenchmarkRuntimePolicyTests(unittest.TestCase):
                 }
             },
         }
-        pipeline = {
-            "SubModules": {
-                "VLRecognition": {"genai_config": {}}
-            }
-        }
         with tempfile.TemporaryDirectory() as tmp, mock.patch.object(
             benchmark_common,
             "_python3_yaml_load",
-            side_effect=[compose, pipeline],
+            return_value=compose,
         ), self.assertRaisesRegex(
             ValueError,
             "Invalid PaddleOCR llama.cpp model volume name",
@@ -425,10 +412,6 @@ class BenchmarkRuntimePolicyTests(unittest.TestCase):
     def test_staged_paddle_runtime_rejects_invalid_pull_policy(self) -> None:
         compose = {
             "services": {
-                "paddleocr-layout": {
-                    "command": "--device cpu",
-                    "depends_on": {},
-                },
                 "paddleocr-llamacpp": {
                     "pull_policy": "missing",
                     "command": [],
@@ -440,15 +423,10 @@ class BenchmarkRuntimePolicyTests(unittest.TestCase):
                 }
             },
         }
-        pipeline = {
-            "SubModules": {
-                "VLRecognition": {"genai_config": {}}
-            }
-        }
         with tempfile.TemporaryDirectory() as tmp, mock.patch.object(
             benchmark_common,
             "_python3_yaml_load",
-            side_effect=[compose, pipeline],
+            return_value=compose,
         ), self.assertRaisesRegex(
             ValueError,
             "pull_policy must be always, missing, or never",

@@ -126,6 +126,21 @@ suite가 완료되면 이 문서에는 다음을 추가한다.
 
 상세 근거: [folder-global queue CUDA 최종 판정](./folder-global-queue-final-decision-ko.md)
 
+## 2026-08-01 direct llama.cpp transport 재검증
+
+CPU relay 제거 후 동일 후보를 새 direct crop 제품 경로에서 7회 다시 실행했다.
+
+- snapshot 7/7, 84/84 블록, normalized OCR 완전 동일
+- 실행당 direct OCR HTTP 60회, retry·page failure 0
+- 후보 중앙값 명목 개선 0.390529%
+- 후보 승패 4승 3패
+- 단측 95% bootstrap 하한 -0.276427%
+- 첫 cold 회차 제외 평균 개선 0.054711%
+- 신규 WSL swap 증가 0
+
+최소 개선율은 적용하지 않았으나 실제 양수 이득을 증명하지 못했다. 따라서
+`reject_no_proven_speed_gain`을 유지하고 제품 코드는 병합하지 않는다.
+
 ## 저자 및 기여
 
 - 핵심 문제 해결 방향은 사용자가 착안했다.
