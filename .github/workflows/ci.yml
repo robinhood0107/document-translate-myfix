@@ -57,6 +57,25 @@ jobs:
           BASE_REF: ${{ github.base_ref }}
         run: python scripts/validate_pr_flow.py --head "$HEAD_REF" --base "$BASE_REF"
 
+  validate-instruction-sync:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    needs: branch-name
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: "3.12"
+
+      - name: Validate instruction-harness synchronization
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: python scripts/validate_instruction_sync.py --base-sha "$BASE_SHA" --head-sha "$HEAD_SHA"
+
   validate-commit-attribution:
     runs-on: ubuntu-latest
     needs: branch-name

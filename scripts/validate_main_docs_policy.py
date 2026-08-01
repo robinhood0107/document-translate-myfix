@@ -9,6 +9,7 @@ import sys
 ALLOWED_DOC_PATTERNS = (
     re.compile(r"^\.github/PULL_REQUEST_TEMPLATE\.md$"),
     re.compile(r"^AGENTS\.md$"),
+    re.compile(r"^CLAUDE\.md$"),
     re.compile(r"^README\.md$"),
     re.compile(r"^README_ko\.md$"),
     re.compile(r"^rules\.md$"),
