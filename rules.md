@@ -317,7 +317,9 @@ GitHub 저장소 설정에서 아래를 권장한다.
   - 루트: `AGENTS.md`, `README.md`, `README_ko.md`, `rules.md`
   - GitHub 운영: `.github/PULL_REQUEST_TEMPLATE.md`
   - 설치/운영: `docs/setup/quickstart*.md`
-  - 운영 문서: `docs/gemma/*.md`, `docs/hunyuan/*.md`, `docs/repo/github-rulesets-public-free-ko.md`, `hunyuanocr_docker_files/README.md`, `paddleocr_vl_docker_files/README.md`
+  - 제품 구조: `docs/architecture/codebase-map-ko.md`
+  - 운영 문서: `docs/gemma/*.md`, `docs/hunyuan/*.md`, `docs/runtime/managed-llamacpp-only-ko.md`, `docs/runtime/obsolete-vllm-runtime-manifest.json`, `docs/repo/github-rulesets-public-free-ko.md`
+  - 관리형 runtime: `hunyuanocr_docker_files/README.md`, `mangalmm_docker_files/README.md`, `paddleocr_vl_docker_files/README.md`, `paddleocr_vl_spotting_docker_files/README.md`
 - `develop`에는 개발/감사/정책 문서를 허용한다.
 - `benchmarking/lab`에는 benchmark 전용 문서를 허용한다.
 - 아래 문서는 `main`에 올리지 않는다.
