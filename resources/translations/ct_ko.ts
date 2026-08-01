@@ -178,10 +178,6 @@ Choose either a project file or image/document/archive files.</source>
         <translation>PaddleOCR VL 설정</translation>
     </message>
     <message>
-        <source>HunyuanOCR Settings</source>
-        <translation>HunyuanOCR 설정</translation>
-    </message>
-    <message>
         <source>Gemma Local Server Settings</source>
         <translation>Gemma 로컬 서버 설정</translation>
     </message>
@@ -907,6 +903,29 @@ Comic Translate가 필요할 때 기본 제공 Docker 런타임을 시작하게 
     </message>
 </context>
 <context>
+    <name>InpaintingRuntime</name>
+    <message>
+        <source>Learned inpainting requires CUDA; CPU fallback is disabled.</source>
+        <translation>학습형 인페인트에는 CUDA가 필요합니다. CPU 대체 실행은 비활성화되어 있습니다.</translation>
+    </message>
+    <message>
+        <source>CUDA inpainting ran out of memory after the single bounded ROI retry.</source>
+        <translation>CUDA 인페인트가 제한된 ROI에서 한 번 재시도한 후에도 메모리 부족으로 실패했습니다.</translation>
+    </message>
+    <message>
+        <source>Inpaint output changed pixels outside the final edit mask.</source>
+        <translation>인페인트 결과가 최종 편집 마스크 밖의 픽셀을 변경했습니다.</translation>
+    </message>
+    <message>
+        <source>The previous inpainter VRAM release was not confirmed.</source>
+        <translation>이전 인페인터의 VRAM 반환을 확인하지 못했습니다.</translation>
+    </message>
+    <message>
+        <source>CUDA FFT execution failed; CPU fallback is disabled.</source>
+        <translation>CUDA FFT 실행에 실패했습니다. CPU 대체 실행은 비활성화되어 있습니다.</translation>
+    </message>
+</context>
+<context>
     <name>LlmsPage</name>
     <message>
         <source>Provide Image as Input to AI</source>
@@ -1133,25 +1152,27 @@ Comic Translate가 기본 제공 Docker 런타임을 재사용하게 하려면 �
     </message>
     <message>
         <source>Recommended values for the bundled MangaLMM runtime:
-- ctx-size 4096: enough for full-page OCR while keeping VRAM safer
-- Max Completion Tokens: 256
+- ctx-size 8192: preserves the full-page prompt and grounded response
+- Max Completion Tokens: 4096
 - Parallel Workers: 1
 - Request Timeout: 60 seconds
 - Safe Resize: on
 - Max Pixels / Max Long Side: 2116800 / 1728
 Reasoning:
 - PNG + image-first ordering is the most reliable request format for MangaLMM.
+- The response must be one complete JSON array of grounded text regions.
 - Direct MangaLMM mode respects the values on this page.
 - Workers 1 is the safest default when MangaLMM is the active OCR runtime.</source>
         <translation>기본 제공 MangaLMM 런타임의 권장값:
-- ctx-size 4096: full-page OCR에는 충분하면서 VRAM 부담을 더 안전하게 유지
-- Max Completion Tokens: 256
+- ctx-size 8192: 전체 페이지 프롬프트와 좌표 응답을 보존
+- Max Completion Tokens: 4096
 - Parallel Workers: 1
 - Request Timeout: 60초
 - Safe Resize: 켜기
 - Max Pixels / Max Long Side: 2116800 / 1728
 이유:
-- PNG + image-first 순서가 MangaLMM에서 가장 안정적인 요청 형식입니다.
+- PNG + 이미지 우선 순서가 MangaLMM에서 가장 안정적인 요청 형식입니다.
+- 응답은 좌표가 포함된 텍스트 영역의 완전한 단일 JSON 배열이어야 합니다.
 - 직접 MangaLMM 모드는 이 페이지의 값을 그대로 따릅니다.
 - MangaLMM이 활성 OCR 런타임일 때 Workers 1이 가장 안전한 기본값입니다.</translation>
     </message>
@@ -1850,16 +1871,6 @@ The app keeps messages below ntfy&apos;s default 4 KiB text limit and never send
         <translation>PaddleOCR VL 설정</translation>
     </message>
     <message>
-        <source>Connect Comic Translate to your local PaddleOCR VL Docker service.
-This OCR engine sends cropped text regions to the /layout-parsing endpoint.
-Keep the default localhost URL if you want Comic Translate to start the bundled Docker runtime on demand.
-Leave markdown or visualization options disabled unless you need debugging.</source>
-        <translation>Comic Translate를 로컬 PaddleOCR VL Docker 서비스에 연결합니다.
-이 OCR 엔진은 잘라낸 텍스트 영역을 /layout-parsing 엔드포인트로 보냅니다.
-Comic Translate가 필요할 때 기본 제공 Docker 런타임을 시작하게 하려면 기본 localhost URL을 유지하세요.
-디버깅이 필요하지 않다면 markdown 또는 시각화 옵션은 꺼 두세요.</translation>
-    </message>
-    <message>
         <source>Server URL</source>
         <translation>서버 URL</translation>
     </message>
@@ -1880,26 +1891,22 @@ Comic Translate가 필요할 때 기본 제공 Docker 런타임을 시작하게 
         <translation>성능</translation>
     </message>
     <message>
-        <source>Estimated VRAM usage depends on page size, image resolution, and the Docker service build.
-Recommended starting points:
-- Up to 8 GB VRAM: 128 to 256 tokens, 1 worker
-- 10 to 12 GB VRAM: 256 tokens, 2 workers
-- 16 GB VRAM: 256 to 512 tokens, 2 to 3 workers
-- 24 GB or more: 512 tokens, 3 to 4 workers for dense pages
-Approximate GPU usage:
-- 256 tokens / 2 workers: about 5 to 7 GB
-- 512 tokens / 2 workers: about 7 to 10 GB
-- 1024 tokens / 2 workers: about 10 GB or more</source>
-        <translation>예상 VRAM 사용량은 페이지 크기, 이미지 해상도, Docker 서비스 빌드에 따라 달라집니다.
-권장 시작값:
-- VRAM 8GB 이하: 토큰 128~256, 작업 수 1
-- VRAM 10~12GB: 토큰 256, 작업 수 2
-- VRAM 16GB: 토큰 256~512, 작업 수 2~3
-- VRAM 24GB 이상: 글자가 많은 페이지에서 토큰 512, 작업 수 3~4
-대략적인 GPU 사용량:
-- 토큰 256 / 작업 수 2: 약 5~7GB
-- 토큰 512 / 작업 수 2: 약 7~10GB
-- 토큰 1024 / 작업 수 2: 약 10GB 이상</translation>
+        <source>Connect Comic Translate to your local PaddleOCR VL Docker service.
+The bundled runtime sends cropped text regions directly to llama.cpp with the official OCR: prompt.
+Keep the default localhost URL if you want Comic Translate to start the bundled Docker runtime on demand.
+Markdown and visualization options apply only to custom /layout-parsing endpoints.</source>
+        <translation>Comic Translate를 로컬 PaddleOCR VL Docker 서비스에 연결합니다.
+기본 제공 런타임은 잘라낸 텍스트 영역을 공식 OCR: 프롬프트로 llama.cpp에 직접 보냅니다.
+Comic Translate가 필요할 때 기본 제공 Docker 런타임을 시작하게 하려면 기본 localhost URL을 유지하세요.
+Markdown 및 시각화 옵션은 사용자 지정 /layout-parsing 엔드포인트에만 적용됩니다.</translation>
+    </message>
+    <message>
+        <source>The bundled llama.cpp runtime loads one managed model slot for the whole OCR stage.
+Parallel workers control the client request queue and do not load extra model copies.
+Keep 1024 tokens unless a validated corpus proves a lower limit never truncates text.</source>
+        <translation>기본 제공 llama.cpp 런타임은 OCR 단계 전체에서 관리형 모델 슬롯 하나를 불러옵니다.
+병렬 작업 수는 클라이언트 요청 대기열을 제어하며 모델 복사본을 추가로 불러오지 않습니다.
+검증된 자료에서 더 낮은 한도로도 텍스트가 잘리지 않는다고 확인하기 전에는 토큰 1024를 유지하세요.</translation>
     </message>
     <message>
         <source>Max New Tokens</source>
@@ -1984,6 +1991,39 @@ Approximate GPU usage:
 {error}</source>
         <translation>캐시 지우기에 실패했습니다. 데이터베이스는 변경하지 않았습니다.
 {error}</translation>
+    </message>
+</context>
+<context>
+    <name>PaddleOCRVLSpottingPage</name>
+    <message>
+        <source>PaddleOCR VL Spotting Settings</source>
+        <translation>PaddleOCR VL Spotting 설정</translation>
+    </message>
+    <message>
+        <source>This is a separate full-page Spotting route, not the detector crop OCR route.
+It uses the official Spotting: prompt, special location tokens, a dedicated projector with 1,605,632 maximum image pixels, and a dedicated named volume.
+Detector geometry remains authoritative; ambiguous or unmatched native regions are left for review without a hidden crop fallback.
+Keep the default localhost URL to use the bundled managed llama.cpp runtime.</source>
+        <translation>detector crop OCR과 분리된 full-page Spotting 경로입니다.
+공식 Spotting: 프롬프트, 특수 위치 토큰, 최대 이미지 픽셀 1,605,632인 전용 projector와 전용 named volume을 사용합니다.
+detector geometry가 최종 기준이며, 모호하거나 매칭되지 않은 native 영역은 숨은 crop fallback 없이 검토 대상으로 남깁니다.
+기본 localhost URL을 유지하면 포함된 관리형 llama.cpp 런타임을 사용합니다.</translation>
+    </message>
+    <message>
+        <source>Server URL</source>
+        <translation>서버 URL</translation>
+    </message>
+    <message>
+        <source>Max Completion Tokens</source>
+        <translation>최대 완료 토큰</translation>
+    </message>
+    <message>
+        <source>Request Timeout (sec)</source>
+        <translation>요청 타임아웃(초)</translation>
+    </message>
+    <message>
+        <source>The Spotting pixel budget and special-token mode are fixed by the official model contract and cannot be changed here. The existing crop OCR route keeps its original 1,003,520-pixel projector unchanged.</source>
+        <translation>Spotting 픽셀 예산과 특수 토큰 모드는 공식 모델 계약으로 고정되어 여기에서 변경할 수 없습니다. 기존 crop OCR 경로는 원래의 1,003,520픽셀 projector를 변경 없이 유지합니다.</translation>
     </message>
 </context>
 <context>
@@ -3229,6 +3269,10 @@ Restart now?</source>
         <translation>최적값 (HunyuanOCR / PaddleOCR VL)</translation>
     </message>
     <message>
+        <source>PaddleOCR VL Spotting (Full Page)</source>
+        <translation>PaddleOCR VL Spotting(전체 페이지)</translation>
+    </message>
+    <message>
         <source>MangaLMM</source>
         <translation>MangaLMM</translation>
     </message>
@@ -3251,6 +3295,10 @@ Restart now?</source>
     <message>
         <source>PaddleOCR VL Settings</source>
         <translation>PaddleOCR VL 설정</translation>
+    </message>
+    <message>
+        <source>PaddleOCR VL Spotting Settings</source>
+        <translation>PaddleOCR VL Spotting 설정</translation>
     </message>
     <message>
         <source>HunyuanOCR Settings</source>
@@ -5278,6 +5326,10 @@ It may have been moved, renamed, or deleted.
         <translation>PaddleOCR VL</translation>
     </message>
     <message>
+        <source>PaddleOCR VL Spotting (Full Page)</source>
+        <translation>PaddleOCR VL Spotting(전체 페이지)</translation>
+    </message>
+    <message>
         <source>HunyuanOCR</source>
         <translation>HunyuanOCR</translation>
     </message>
@@ -5350,6 +5402,10 @@ It may have been moved, renamed, or deleted.
     <message>
         <source>PaddleOCR VL Settings</source>
         <translation>PaddleOCR VL 설정</translation>
+    </message>
+    <message>
+        <source>PaddleOCR VL Spotting Settings</source>
+        <translation>PaddleOCR VL Spotting 설정</translation>
     </message>
     <message>
         <source>HunyuanOCR Settings</source>

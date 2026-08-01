@@ -115,6 +115,215 @@ class StageBatchedCancellationTests(unittest.TestCase):
 
         processor._start_prewarm.assert_called_once()
 
+    def test_confirmed_paddle_cache_miss_bypasses_unrelated_rows(self) -> None:
+        processor = self._processor(cancelled=False)
+        processor.main_page.local_ocr_runtime_manager = LocalOCRRuntimeManager()
+        processor.main_page.settings_page = SimpleNamespace(
+            get_paddleocr_vl_settings=lambda: {
+                "persistent_cache_enabled": True,
+            }
+        )
+        processor._project_checkpoint_store = SimpleNamespace(
+            has_stage_record=lambda _page_key, _stage: True,
+        )
+        processor._project_checkpoint_page_keys = ["page:00000000"]
+        processor._get_paddleocr_cache_store = mock.Mock(
+            return_value=SimpleNamespace(
+                stats=lambda: {
+                    "enabled": True,
+                    "item_count": 42,
+                }
+            )
+        )
+        processor._start_prewarm = mock.Mock()
+
+        processor._start_ocr_prewarm(
+            {"primary_ocr_engine": "PaddleOCR VL"},
+            cache_miss_confirmed=True,
+        )
+
+        processor._start_prewarm.assert_called_once()
+
+    def test_detected_page_global_cache_hit_keeps_runtime_stopped(self) -> None:
+        processor = self._processor(cancelled=False)
+        runtime_manager = LocalOCRRuntimeManager()
+        runtime_manager.get_ocr_cache_identity = mock.Mock(
+            return_value={"runtime_fingerprint": "runtime"}
+        )
+        processor.main_page.local_ocr_runtime_manager = runtime_manager
+        processor.main_page.settings_page = SimpleNamespace(
+            get_paddleocr_vl_settings=lambda: {
+                "persistent_cache_enabled": True,
+            }
+        )
+        processor._project_checkpoint_store = None
+        processor._prewarm_jobs = {}
+        processor._paddleocr_cache_identity = None
+        processor._canonicalize_ocr_inputs = mock.Mock()
+        processor._prepare_paddleocr_cache_plans = mock.Mock(
+            return_value=False
+        )
+        processor._start_ocr_prewarm = mock.Mock()
+        processor._emit_benchmark_event = mock.Mock()
+        page = StagePageContext(
+            image_path="page.png",
+            image_name="page.png",
+            source_lang="Japanese",
+            target_lang="Korean",
+            image=np.zeros((20, 20, 3), dtype=np.uint8),
+            blk_list=[
+                TextBlock(
+                    text_bbox=np.array([1, 1, 10, 10], dtype=np.int32)
+                )
+            ],
+        )
+
+        processor._plan_detected_page_ocr_prewarm(
+            page,
+            {
+                "primary_ocr_engine": "PaddleOCR VL",
+                "normalized_ocr_mode": "best_local",
+            },
+            index=0,
+            total_images=1,
+        )
+
+        processor._prepare_paddleocr_cache_plans.assert_called_once()
+        processor._start_ocr_prewarm.assert_not_called()
+        processor._emit_benchmark_event.assert_called_once_with(
+            "ocr_prewarm_decision",
+            image_path="page.png",
+            image_index=0,
+            total_images=1,
+            decision="defer",
+            reason="persistent_cache_hit",
+        )
+
+    def test_detected_page_cache_miss_starts_overlap_despite_other_rows(
+        self,
+    ) -> None:
+        processor = self._processor(cancelled=False)
+        runtime_manager = LocalOCRRuntimeManager()
+        runtime_manager.get_ocr_cache_identity = mock.Mock(
+            return_value={"runtime_fingerprint": "runtime"}
+        )
+        processor.main_page.local_ocr_runtime_manager = runtime_manager
+        processor.main_page.settings_page = SimpleNamespace(
+            get_paddleocr_vl_settings=lambda: {
+                "persistent_cache_enabled": True,
+            }
+        )
+        processor._project_checkpoint_store = None
+        processor._prewarm_jobs = {}
+        processor._paddleocr_cache_identity = None
+        processor._canonicalize_ocr_inputs = mock.Mock()
+        processor._prepare_paddleocr_cache_plans = mock.Mock(
+            return_value=True
+        )
+        processor._start_ocr_prewarm = mock.Mock()
+        processor._emit_benchmark_event = mock.Mock()
+        page = StagePageContext(
+            image_path="new-page.png",
+            image_name="new-page.png",
+            source_lang="Japanese",
+            target_lang="Korean",
+            image=np.zeros((20, 20, 3), dtype=np.uint8),
+            blk_list=[
+                TextBlock(
+                    text_bbox=np.array([1, 1, 10, 10], dtype=np.int32)
+                )
+            ],
+        )
+
+        processor._plan_detected_page_ocr_prewarm(
+            page,
+            {
+                "primary_ocr_engine": "PaddleOCR VL",
+                "normalized_ocr_mode": "best_local",
+            },
+            index=0,
+            total_images=6,
+        )
+
+        processor._start_ocr_prewarm.assert_called_once_with(
+            {
+                "primary_ocr_engine": "PaddleOCR VL",
+                "normalized_ocr_mode": "best_local",
+            },
+            cache_miss_confirmed=True,
+        )
+        processor._emit_benchmark_event.assert_called_once_with(
+            "ocr_prewarm_decision",
+            image_path="new-page.png",
+            image_index=0,
+            total_images=6,
+            decision="start",
+            reason="persistent_cache_miss",
+        )
+
+    def test_detected_page_project_hit_skips_global_cache_and_runtime(
+        self,
+    ) -> None:
+        processor = self._processor(cancelled=False)
+        runtime_manager = LocalOCRRuntimeManager()
+        runtime_manager.get_ocr_cache_identity = mock.Mock(
+            return_value={"runtime_fingerprint": "runtime"}
+        )
+        processor.main_page.local_ocr_runtime_manager = runtime_manager
+        processor.main_page.settings_page = SimpleNamespace(
+            get_paddleocr_vl_settings=lambda: {
+                "persistent_cache_enabled": True,
+            }
+        )
+        processor._project_checkpoint_store = object()
+        processor._prewarm_jobs = {}
+        processor._paddleocr_cache_identity = None
+        processor._canonicalize_ocr_inputs = mock.Mock()
+        checkpoint_hit = object()
+
+        def prepare_project(pages, _policy, _identity) -> None:
+            pages[0].project_ocr_hit = checkpoint_hit
+
+        processor._prepare_project_ocr_hits = mock.Mock(
+            side_effect=prepare_project
+        )
+        processor._prepare_paddleocr_cache_plans = mock.Mock()
+        processor._start_ocr_prewarm = mock.Mock()
+        processor._emit_benchmark_event = mock.Mock()
+        page = StagePageContext(
+            image_path="page.png",
+            image_name="page.png",
+            source_lang="Japanese",
+            target_lang="Korean",
+            image=np.zeros((20, 20, 3), dtype=np.uint8),
+            blk_list=[
+                TextBlock(
+                    text_bbox=np.array([1, 1, 10, 10], dtype=np.int32)
+                )
+            ],
+        )
+
+        processor._plan_detected_page_ocr_prewarm(
+            page,
+            {
+                "primary_ocr_engine": "PaddleOCR VL",
+                "normalized_ocr_mode": "best_local",
+            },
+            index=0,
+            total_images=1,
+        )
+
+        processor._prepare_paddleocr_cache_plans.assert_not_called()
+        processor._start_ocr_prewarm.assert_not_called()
+        processor._emit_benchmark_event.assert_called_once_with(
+            "ocr_prewarm_decision",
+            image_path="page.png",
+            image_index=0,
+            total_images=1,
+            decision="defer",
+            reason="project_checkpoint_hit",
+        )
+
     def test_non_empty_project_cache_defers_ocr_prewarm(self) -> None:
         processor = self._processor(cancelled=False)
         processor.main_page.local_ocr_runtime_manager = LocalOCRRuntimeManager()
@@ -826,6 +1035,31 @@ class StageBatchedCancellationTests(unittest.TestCase):
         shutdown_ocr.assert_called_once_with()
         shutdown_gemma.assert_called_once_with()
 
+    def test_normal_cleanup_preserves_only_sleeping_paddle_runtime(self) -> None:
+        processor = self._processor(cancelled=False)
+        ocr_manager = LocalOCRRuntimeManager()
+        gemma_manager = LocalGemmaRuntimeManager()
+        processor.main_page.local_ocr_runtime_manager = ocr_manager
+        processor.main_page.local_translation_runtime_manager = gemma_manager
+
+        with mock.patch.object(
+            ocr_manager,
+            "release_for_handoff",
+        ) as release_ocr, mock.patch.object(
+            ocr_manager,
+            "shutdown",
+        ) as shutdown_ocr, mock.patch.object(
+            gemma_manager,
+            "shutdown",
+        ) as shutdown_gemma:
+            processor._shutdown_managed_runtimes(
+                preserve_sleeping_paddle=True,
+            )
+
+        release_ocr.assert_called_once_with()
+        shutdown_ocr.assert_not_called()
+        shutdown_gemma.assert_called_once_with()
+
     def test_batch_cleanup_still_stops_gemma_when_ocr_shutdown_fails(self) -> None:
         processor = self._processor(cancelled=True)
         ocr_manager = LocalOCRRuntimeManager()
@@ -898,7 +1132,10 @@ class StageBatchedCancellationTests(unittest.TestCase):
         with mock.patch.dict(os.environ, {"CT_BENCH_STAGE_CEILING": "ocr"}):
             processor.batch_process()
 
-        processor._detect_all.assert_called_once_with(pages)
+        processor._detect_all.assert_called_once_with(
+            pages,
+            {"primary_ocr_engine": "PaddleOCR VL"},
+        )
         processor._ocr_all.assert_called_once_with(
             pages,
             {"primary_ocr_engine": "PaddleOCR VL"},
@@ -964,11 +1201,14 @@ class StageBatchedCancellationTests(unittest.TestCase):
             ("Gemma", LocalGemmaRuntimeManager(), "render"),
         ):
             reached: list[str] = []
+            release_method = (
+                "release_for_handoff" if label == "OCR" else "shutdown"
+            )
             with self.subTest(label=label), mock.patch.object(
                 manager,
-                "shutdown",
+                release_method,
                 side_effect=[RuntimeError("first stop failed"), None],
-            ) as shutdown, self.assertLogs(
+            ) as release, self.assertLogs(
                 "pipeline.stage_batched_processor",
                 level="WARNING",
             ):
@@ -977,10 +1217,11 @@ class StageBatchedCancellationTests(unittest.TestCase):
                     manager,
                     context=f"before {next_stage}",
                     raise_on_failure=True,
+                    release_for_handoff=(label == "OCR"),
                 )
                 reached.append(next_stage)
 
-            self.assertEqual(shutdown.call_count, 2)
+            self.assertEqual(release.call_count, 2)
             self.assertEqual(reached, [next_stage])
 
     def test_stage_transition_fails_closed_after_two_stop_failures(self) -> None:
@@ -1252,6 +1493,103 @@ class StageBatchedCancellationTests(unittest.TestCase):
         self.assertEqual(block.block_final_mask_pixel_count, 9)
         self.assertEqual(block.block_mask_decision, "accepted")
 
+    def test_preserve_only_page_skips_inpainter_and_keeps_pixels_exact(
+        self,
+    ) -> None:
+        processor = self._processor(cancelled=False)
+        processor._project_checkpoint_store = object()
+        processor.main_page.settings_page = SimpleNamespace(
+            get_hd_strategy_settings=lambda: {"strategy": "Original"},
+            get_tool_selection=lambda _tool: "AOT",
+            get_mask_refiner_settings=lambda: {"mask_refiner": "ctd"},
+            get_inpainter_runtime_settings=lambda _key=None: {
+                "backend": "torch",
+                "device": "cuda",
+                "inpaint_size": 2048,
+                "precision": "fp32",
+            },
+            is_gpu_enabled=lambda: True,
+            ui=SimpleNamespace(
+                value_mappings={},
+                tr=lambda value: value,
+            ),
+        )
+        processor.main_page.image_ctrl = SimpleNamespace(
+            mark_processing_stage=mock.Mock(),
+        )
+        processor._effective_export_settings = mock.Mock(return_value={})
+        processor._ensure_page_state = mock.Mock(
+            return_value={"brush_strokes": []}
+        )
+        processor._set_current_image = mock.Mock()
+        processor.emit_progress = mock.Mock()
+        processor._emit_benchmark_event = mock.Mock()
+        processor._finish_inpaint_page = mock.Mock()
+        processor._ensure_inpainter = mock.Mock()
+        processor.inpainting = SimpleNamespace(
+            inpainter_cache=None,
+            release_inpainter_resources=mock.Mock(),
+        )
+        block = TextBlock(
+            text_bbox=np.array([1, 1, 8, 8], dtype=np.int32),
+            text="ドン",
+            text_class="sfx",
+            block_id="sfx-stable",
+        )
+        image = np.arange(10 * 10 * 3, dtype=np.uint8).reshape(
+            10,
+            10,
+            3,
+        )
+        page = StagePageContext(
+            image_path="page.png",
+            image_name="page.png",
+            source_lang="Japanese",
+            target_lang="Korean",
+            image=image,
+            blk_list=[block],
+            source_decoded_sha256="1" * 64,
+            project_checkpoint_page_key="page:00000000",
+            detection_fingerprint="2" * 64,
+            project_ocr_fingerprint="3" * 64,
+        )
+
+        with mock.patch(
+            "pipeline.stage_batched_processor.generate_mask",
+            side_effect=AssertionError(
+                "mask generation must be skipped for preserve-only pages"
+            ),
+        ), mock.patch(
+            "pipeline.stage_batched_processor.lookup_inpaint_checkpoint",
+            side_effect=AssertionError(
+                "checkpoint lookup must be skipped for preserve-only pages"
+            ),
+        ):
+            processor._inpaint_all([page])
+
+        processor._ensure_inpainter.assert_not_called()
+        processor.inpainting.release_inpainter_resources.assert_not_called()
+        processor._finish_inpaint_page.assert_called_once()
+        np.testing.assert_array_equal(page.inpaint_input_img, image)
+        self.assertEqual(int(np.count_nonzero(page.raw_mask)), 0)
+        self.assertEqual(int(np.count_nonzero(page.mask)), 0)
+        self.assertEqual(
+            page.project_inpaint_checkpoint_status,
+            "skipped",
+        )
+        self.assertEqual(
+            page.inpaint_diagnostics["status"],
+            "processing_action_skipped",
+        )
+        self.assertEqual(
+            page.inpaint_diagnostics["inference_call_count"],
+            0,
+        )
+        self.assertEqual(
+            processor._inpainter_release_gate["status"],
+            "not-loaded",
+        )
+
     def test_no_text_page_gets_renderable_skipped_stage_fingerprints(
         self,
     ) -> None:
@@ -1415,6 +1753,137 @@ class StageBatchedCancellationTests(unittest.TestCase):
         self.assertEqual(
             page.project_translation_checkpoint_status,
             "hit",
+        )
+
+    def test_preserve_only_page_skips_translator_and_gemma(self) -> None:
+        processor = self._processor(cancelled=False)
+        processor.main_page.settings_page = SimpleNamespace(
+            get_llm_settings=lambda: {"extra_context": "context"},
+            get_tool_selection=lambda _tool: (
+                "Custom Local Server(Gemma)"
+            ),
+            get_translation_result_dictionary_rules=lambda: [],
+        )
+        processor.main_page.image_ctrl = SimpleNamespace(
+            mark_processing_stage=mock.Mock(),
+        )
+        processor._project_checkpoint_store = object()
+        processor._inpainter_release_gate = {
+            "required": False,
+            "observed": True,
+        }
+        processor._start_gemma_prewarm = mock.Mock()
+        processor._await_gemma_runtime = mock.Mock()
+        processor._shutdown_runtime_with_retry = mock.Mock()
+        processor._set_current_image = mock.Mock()
+        processor.emit_progress = mock.Mock()
+        processor._report_runtime_progress = mock.Mock()
+        processor._emit_benchmark_event = mock.Mock()
+        processor._persist_translation_state = mock.Mock()
+        processor.cache_manager = object()
+        block = TextBlock(
+            text_bbox=np.array([1, 1, 8, 8], dtype=np.int32),
+            text="ドン",
+            text_class="sfx",
+            block_id="sfx-stable",
+        )
+        page = StagePageContext(
+            image_path="page.png",
+            image_name="page.png",
+            source_lang="Japanese",
+            target_lang="Korean",
+            image=np.zeros((10, 10, 3), dtype=np.uint8),
+            blk_list=[block],
+            source_decoded_sha256="1" * 64,
+            detection_fingerprint="2" * 64,
+            project_ocr_fingerprint="3" * 64,
+        )
+
+        with mock.patch(
+            "pipeline.stage_batched_processor.Translator",
+            side_effect=AssertionError(
+                "translator must not be constructed for preserve-only pages"
+            ),
+        ):
+            processor._translate_all([page])
+
+        processor._start_gemma_prewarm.assert_not_called()
+        processor._await_gemma_runtime.assert_not_called()
+        processor._shutdown_runtime_with_retry.assert_not_called()
+        self.assertEqual(
+            page.project_translation_checkpoint_status,
+            "skipped",
+        )
+        processor.main_page.image_ctrl.mark_processing_stage.assert_called_once_with(
+            "page.png",
+            "translation",
+            "skipped",
+            reason="no_translate_inpaint_blocks",
+        )
+
+    def test_preserve_block_never_creates_render_item(self) -> None:
+        processor = self._processor(cancelled=False)
+        processor.main_page.curr_img_idx = -1
+        processor.main_page.image_files = []
+        processor.main_page.button_to_alignment = {1: 1}
+        processor.main_page.button_to_vertical_alignment = {1: 1}
+        processor.main_page.image_ctrl = SimpleNamespace(
+            mark_processing_stage=mock.Mock(),
+        )
+        processor.main_page.render_state_ready = SimpleNamespace(
+            emit=mock.Mock(),
+        )
+        page_state = {"viewer_state": {}}
+        processor._ensure_page_state = mock.Mock(return_value=page_state)
+        block = TextBlock(
+            text_bbox=np.array([1, 1, 8, 8], dtype=np.int32),
+            text="ドン",
+            translation="쾅",
+            text_class="sfx",
+            block_id="sfx-stable",
+        )
+        page = StagePageContext(
+            image_path="page.png",
+            image_name="page.png",
+            source_lang="Japanese",
+            target_lang="Korean",
+            image=np.zeros((10, 10, 3), dtype=np.uint8),
+            blk_list=[block],
+        )
+        render_settings = SimpleNamespace(
+            font_family="Arial",
+            color="#000000",
+            alignment_id=1,
+        )
+
+        with mock.patch(
+            "pipeline.stage_batched_processor.pyside_word_wrap",
+            side_effect=AssertionError(
+                "preserved text must not reach render layout"
+            ),
+        ):
+            processor._render_page_text_items(
+                page,
+                render_settings=render_settings,
+                trg_lng_cd="Korean",
+            )
+
+        self.assertEqual(
+            page_state["viewer_state"]["text_items_state"],
+            [],
+        )
+        self.assertEqual(
+            block._render_skip_reason,
+            "processing_action_preserve",
+        )
+        processor.main_page.image_ctrl.mark_processing_stage.assert_any_call(
+            "page.png",
+            "render",
+            "completed",
+            text_item_count=0,
+        )
+        processor.main_page.render_state_ready.emit.assert_called_once_with(
+            "page.png"
         )
 
     def test_project_render_all_hit_skips_renderer_and_output_encode(

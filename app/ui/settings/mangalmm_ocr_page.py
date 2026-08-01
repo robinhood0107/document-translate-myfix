@@ -4,7 +4,7 @@ from ..dayu_widgets.check_box import MCheckBox
 from ..dayu_widgets.label import MLabel
 from ..dayu_widgets.line_edit import MLineEdit
 from ..dayu_widgets.spin_box import MSpinBox
-from modules.ocr.mangalmm_ocr import (
+from modules.ocr.mangalmm_full_page.engine import (
     DEFAULT_MANGALMM_MAX_COMPLETION_TOKENS,
     DEFAULT_MANGALMM_MAX_LONG_SIDE,
     DEFAULT_MANGALMM_MAX_PIXELS,
@@ -113,7 +113,7 @@ class MangaLMMOCRPage(QtWidgets.QWidget):
         max_pixels_layout = QtWidgets.QHBoxLayout()
         max_pixels_layout.addWidget(MLabel(self.tr("Max Pixels")))
         self.max_pixels_spinbox = MSpinBox().small()
-        self.max_pixels_spinbox.setRange(100000, 4000000)
+        self.max_pixels_spinbox.setRange(100000, self.DEFAULT_MAX_PIXELS)
         self.max_pixels_spinbox.setSingleStep(100000)
         self.max_pixels_spinbox.setValue(self.DEFAULT_MAX_PIXELS)
         self.max_pixels_spinbox.setFixedWidth(110)
@@ -135,14 +135,15 @@ class MangaLMMOCRPage(QtWidgets.QWidget):
         tip = MLabel(
             self.tr(
                 "Recommended values for the bundled MangaLMM runtime:\n"
-                "- ctx-size 4096: enough for full-page OCR while keeping VRAM safer\n"
-                "- Max Completion Tokens: 256\n"
+                "- ctx-size 8192: preserves the full-page prompt and grounded response\n"
+                "- Max Completion Tokens: 4096\n"
                 "- Parallel Workers: 1\n"
                 "- Request Timeout: 60 seconds\n"
                 "- Safe Resize: on\n"
                 "- Max Pixels / Max Long Side: 2116800 / 1728\n"
                 "Reasoning:\n"
                 "- PNG + image-first ordering is the most reliable request format for MangaLMM.\n"
+                "- The response must be one complete JSON array of grounded text regions.\n"
                 "- Direct MangaLMM mode respects the values on this page.\n"
                 "- Workers 1 is the safest default when MangaLMM is the active OCR runtime."
             )
