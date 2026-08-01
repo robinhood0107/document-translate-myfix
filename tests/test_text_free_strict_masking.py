@@ -17,7 +17,9 @@ from modules.utils.inpaint_cleanup import (
     fill_duplicate_bubble_inner_regions,
     refine_bubble_residue_inpaint,
 )
+from modules.utils.image_utils import generate_mask
 from modules.utils.mask_roi import resolve_block_ctd_roi
+from modules.inpainting.source_lama_blockwise import _split_bubble_source_mask
 from modules.utils.textblock import TextBlock
 
 
@@ -46,6 +48,198 @@ class TextFreeStrictMaskingTests(unittest.TestCase):
         roi = resolve_block_ctd_roi(block, (100, 100, 3))
 
         self.assertEqual(roi, (38, 13, 52, 77))
+
+    def test_structure_protect_bubble_uses_tight_text_roi(self) -> None:
+        block = _bubble_block(
+            xyxy=[40, 40, 55, 55],
+            bubble_xyxy=[10, 10, 90, 90],
+        )
+        block.mask_strategy = "glyph_only_structure_protect"
+
+        roi = resolve_block_ctd_roi(block, (100, 100, 3))
+
+        self.assertEqual(roi, (36, 36, 59, 59))
+
+    def test_regular_glyph_only_keeps_existing_text_free_envelope(self) -> None:
+        block = _block(xyxy=[40, 20, 50, 70])
+        block.mask_strategy = "glyph_only"
+
+        roi = resolve_block_ctd_roi(block, (100, 100, 3))
+
+        self.assertEqual(roi, (38, 13, 52, 77))
+
+    def test_structure_protect_bubble_uses_thin_final_dilation(self) -> None:
+        image = np.zeros((100, 100, 3), dtype=np.uint8)
+        block = _bubble_block(
+            xyxy=[40, 40, 55, 55],
+            bubble_xyxy=[10, 10, 90, 90],
+        )
+        block.mask_strategy = "glyph_only_structure_protect"
+        ctd_mask = np.zeros((100, 100), dtype=np.uint8)
+        ctd_mask[47, 47] = 255
+
+        with (
+            mock.patch("modules.utils.image_utils.CTDRefiner") as refiner_cls,
+            mock.patch(
+                "modules.utils.image_utils.build_protect_mask",
+                return_value=np.zeros((100, 100), dtype=np.uint8),
+            ),
+        ):
+            refiner_cls.return_value.refine.return_value = mock.Mock(
+                raw_mask=ctd_mask.copy(),
+                refined_mask=ctd_mask.copy(),
+                final_mask=ctd_mask.copy(),
+                backend="torch",
+                device="cuda",
+                fallback_used=False,
+            )
+            details = generate_mask(
+                image,
+                [block],
+                settings={
+                    "mask_refiner": "ctd",
+                    "keep_existing_lines": False,
+                    "final_mask_dilate_size": 8,
+                    "text_free_final_mask_dilate_size": 1,
+                },
+                return_details=True,
+            )
+
+        self.assertEqual(int(details["final_mask"][47, 48]), 255)
+        self.assertEqual(int(details["final_mask"][47, 55]), 0)
+
+    def test_protected_bubble_hard_excludes_neighboring_final_mask(self) -> None:
+        image = np.zeros((100, 100, 3), dtype=np.uint8)
+        inpaint_block = _bubble_block(
+            xyxy=[40, 40, 55, 55],
+            bubble_xyxy=[10, 10, 90, 90],
+        )
+        protected = _bubble_block(
+            xyxy=[42, 42, 58, 58],
+            bubble_xyxy=[10, 10, 90, 90],
+        )
+        protected.processing_action = "review"
+        protected.mask_strategy = "preserve_original"
+        protected._inpaint_protected_reason = "bubble_panel_text_candidate"
+        ctd_mask = np.zeros((100, 100), dtype=np.uint8)
+        ctd_mask[47, 47] = 255
+
+        with (
+            mock.patch("modules.utils.image_utils.CTDRefiner") as refiner_cls,
+            mock.patch(
+                "modules.utils.image_utils.build_protect_mask",
+                return_value=np.zeros((100, 100), dtype=np.uint8),
+            ),
+        ):
+            refiner_cls.return_value.refine.return_value = mock.Mock(
+                raw_mask=ctd_mask.copy(),
+                refined_mask=ctd_mask.copy(),
+                final_mask=ctd_mask.copy(),
+                backend="torch",
+                device="cuda",
+                fallback_used=False,
+            )
+            details = generate_mask(
+                image,
+                [inpaint_block],
+                settings={
+                    "mask_refiner": "ctd",
+                    "keep_existing_lines": False,
+                    "final_mask_dilate_size": 8,
+                    "text_free_final_mask_dilate_size": 1,
+                },
+                protected_blocks=[protected],
+                return_details=True,
+            )
+
+        self.assertEqual(int(np.count_nonzero(details["final_mask"])), 0)
+        self.assertEqual(
+            int(details["mask_policy_protected_region_block_count"]),
+            1,
+        )
+        self.assertGreater(
+            int(details["mask_policy_protected_region_removed_pixel_count"]),
+            0,
+        )
+
+    def test_residue_cleanup_skips_structure_protect_bubble(self) -> None:
+        image = np.zeros((32, 32, 3), dtype=np.uint8)
+        mask = np.zeros((32, 32), dtype=np.uint8)
+        mask[12:20, 12:20] = 255
+        block = _bubble_block(
+            xyxy=[12, 12, 20, 20],
+            bubble_xyxy=[4, 4, 28, 28],
+        )
+        block.mask_strategy = "glyph_only_structure_protect"
+
+        def fail_inpainter(_image, _mask, _config):
+            raise AssertionError("structure-protect cleanup must not invoke a broad pass2")
+
+        cleaned, merged_mask, stats = refine_bubble_residue_inpaint(
+            image,
+            mask,
+            [block],
+            fail_inpainter,
+            object(),
+        )
+
+        self.assertIs(cleaned, image)
+        self.assertIs(merged_mask, mask)
+        self.assertFalse(stats["applied"])
+        self.assertEqual(stats["pass2_glyph_only_skipped_count"], 1)
+
+    def test_structure_protect_bubble_bypasses_broad_bubble_erase_route(self) -> None:
+        image = np.zeros((32, 32, 3), dtype=np.uint8)
+        mask = np.zeros((32, 32), dtype=np.uint8)
+        mask[12:20, 12:20] = 255
+        protected = _bubble_block(
+            xyxy=[12, 12, 20, 20],
+            bubble_xyxy=[4, 4, 28, 28],
+        )
+        protected.mask_strategy = "glyph_only_structure_protect"
+        ordinary = _bubble_block(
+            xyxy=[12, 12, 20, 20],
+            bubble_xyxy=[4, 4, 28, 28],
+        )
+
+        protected_mask, protected_bubbles, protected_lama = (
+            _split_bubble_source_mask(mask, [protected], image.shape)
+        )
+        ordinary_mask, ordinary_bubbles, ordinary_lama = (
+            _split_bubble_source_mask(mask, [ordinary], image.shape)
+        )
+
+        self.assertEqual(int(np.count_nonzero(protected_mask)), 0)
+        self.assertEqual(protected_bubbles, [])
+        self.assertEqual(protected_lama, [protected])
+        self.assertGreater(int(np.count_nonzero(ordinary_mask)), 0)
+        self.assertEqual(ordinary_bubbles, [ordinary])
+        self.assertEqual(ordinary_lama, [])
+
+    def test_shared_bubble_with_structure_protect_bypasses_broad_erase_for_all_blocks(self) -> None:
+        image = np.zeros((40, 40, 3), dtype=np.uint8)
+        mask = np.zeros((40, 40), dtype=np.uint8)
+        mask[12:20, 12:20] = 255
+        mask[21:28, 12:20] = 255
+        protected = _bubble_block(
+            xyxy=[12, 12, 20, 20],
+            bubble_xyxy=[4, 4, 32, 32],
+        )
+        protected.mask_strategy = "glyph_only_structure_protect"
+        ordinary = _bubble_block(
+            xyxy=[12, 21, 20, 28],
+            bubble_xyxy=[4, 4, 32, 32],
+        )
+
+        bubble_mask, bubble_blocks, lama_blocks = _split_bubble_source_mask(
+            mask,
+            [protected, ordinary],
+            image.shape,
+        )
+
+        self.assertEqual(int(np.count_nonzero(bubble_mask)), 0)
+        self.assertEqual(bubble_blocks, [])
+        self.assertEqual(lama_blocks, [protected, ordinary])
 
     def test_text_free_filter_keeps_large_edge_touching_glyph_component(self) -> None:
         candidate = np.zeros((50, 50), dtype=np.uint8)

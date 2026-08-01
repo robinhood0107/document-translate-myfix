@@ -741,7 +741,11 @@ class BatchProcessor:
         base_mask = mask_details.get("legacy_base_mask", raw_mask if raw_mask is not None else mask_details.get("final_mask", final_mask))
         cleanup_delta = self._build_cleanup_delta_mask(base_mask, final_mask)
         residue_mask = (cleanup_stats or {}).get("residue_mask") if cleanup_stats else None
-        mask_overlay_mask = mask_details.get("final_mask", final_mask)
+        # ``final_mask`` is the authoritative post-cleanup/duplicate-fill mask
+        # passed by the stage.  ``mask_details`` only describes the pre-cleanup
+        # generation result and must not make a review artifact lie about what
+        # the inpaint stage could actually have changed.
+        mask_overlay_mask = final_mask
         metadata = build_inpaint_debug_metadata(
             image_path=image_path,
             run_type=self._current_run_type(),
@@ -774,6 +778,15 @@ class BatchProcessor:
             ),
             mask_policy_text_free_glyph_applied_count=int(
                 mask_details.get("mask_policy_text_free_glyph_applied_count", 0) or 0
+            ),
+            mask_policy_protected_region_block_count=int(
+                mask_details.get("mask_policy_protected_region_block_count", 0) or 0
+            ),
+            mask_policy_protected_region_pixel_count=int(
+                mask_details.get("mask_policy_protected_region_pixel_count", 0) or 0
+            ),
+            mask_policy_protected_region_removed_pixel_count=int(
+                mask_details.get("mask_policy_protected_region_removed_pixel_count", 0) or 0
             ),
             mask_policy_removed_pixel_count=int(mask_details.get("mask_policy_removed_pixel_count", 0) or 0),
             mask_policy_outside_bubble_removed_pixel_count=int(
@@ -1698,6 +1711,7 @@ class BatchProcessor:
                         settings=mask_settings,
                         return_details=True,
                         precomputed_mask_details=precomputed_mask_details,
+                        protected_blocks=protected_inpaint_blocks,
                     )
                     if protected_inpaint_blocks:
                         mask_details[

@@ -2199,6 +2199,7 @@ class StageBatchedProcessor(BatchProcessor):
                     settings=mask_settings,
                     return_details=True,
                     precomputed_mask_details=ctx.precomputed_mask_details,
+                    protected_blocks=protected_blocks,
                 )
                 if protected_blocks:
                     ctx.mask_details["inpaint_protected_block_count"] = len(

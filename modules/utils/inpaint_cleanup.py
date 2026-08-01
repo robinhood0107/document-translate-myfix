@@ -10,7 +10,12 @@ import numpy as np
 from modules.detection.utils.content import detect_content_in_bbox
 from modules.utils.bubble_erase import fill_bubble_edit_mask
 from modules.utils.inpaint_composite import composite_with_edit_mask, normalize_edit_mask
-from modules.utils.mask_roi import build_text_prior_mask, normalize_xyxy, resolve_block_residue_roi
+from modules.utils.mask_roi import (
+    build_text_prior_mask,
+    normalize_xyxy,
+    resolve_block_residue_roi,
+    uses_structure_protect_glyph_only_mask_strategy,
+)
 from modules.utils.textblock import TextBlock
 
 logger = logging.getLogger(__name__)
@@ -29,6 +34,7 @@ def _empty_pass2_stats(mask_shape: tuple[int, int]) -> dict:
         "pass2_bubble_kept_count": 0,
         "pass2_text_free_candidate_count": 0,
         "pass2_text_free_kept_count": 0,
+        "pass2_glyph_only_skipped_count": 0,
         "residue_mask_pre_cap_pixel_count": 0,
         "residue_mask_cap_pixel_count": 0,
         "residue_mask_cap_dilate_px": RESIDUE_SOURCE_MASK_DILATE_PX,
@@ -178,6 +184,7 @@ def refine_bubble_residue_inpaint(
     bubble_kept_count = 0
     text_free_candidate_count = 0
     text_free_kept_count = 0
+    glyph_only_skipped_count = 0
     page_cap_hit = False
     source_cap = _residue_source_cap(mask, dilate_px=RESIDUE_SOURCE_MASK_DILATE_PX)
 
@@ -187,6 +194,9 @@ def refine_bubble_residue_inpaint(
 
         text_class = getattr(blk, "text_class", "") or ""
         if text_class != "text_bubble":
+            continue
+        if uses_structure_protect_glyph_only_mask_strategy(blk):
+            glyph_only_skipped_count += 1
             continue
 
         residue_roi = normalize_xyxy(getattr(blk, "cleanup_roi_xyxy", None), inpainted_image.shape)
@@ -290,7 +300,9 @@ def refine_bubble_residue_inpaint(
             break
 
     if component_count <= 0 or not np.any(residue_mask):
-        return inpainted_image, mask, _empty_pass2_stats(mask.shape)
+        stats = _empty_pass2_stats(mask.shape)
+        stats["pass2_glyph_only_skipped_count"] = glyph_only_skipped_count
+        return inpainted_image, mask, stats
 
     residue_mask = imk.dilate(residue_mask, np.ones((3, 3), np.uint8), iterations=1)
     residue_mask = np.where((residue_mask > 0) & (residue_roi_union > 0), 255, 0).astype(np.uint8)
@@ -302,7 +314,9 @@ def refine_bubble_residue_inpaint(
     )
     residue_mask_cap_pixel_count = int(np.count_nonzero(residue_mask))
     if not np.any(residue_mask):
-        return inpainted_image, mask, _empty_pass2_stats(mask.shape)
+        stats = _empty_pass2_stats(mask.shape)
+        stats["pass2_glyph_only_skipped_count"] = glyph_only_skipped_count
+        return inpainted_image, mask, stats
 
     refined_image, pass2_backend = fill_bubble_edit_mask(inpainted_image, residue_mask)
     refined_image = imk.convert_scale_abs(refined_image)
@@ -327,6 +341,7 @@ def refine_bubble_residue_inpaint(
         "pass2_bubble_kept_count": bubble_kept_count,
         "pass2_text_free_candidate_count": text_free_candidate_count,
         "pass2_text_free_kept_count": text_free_kept_count,
+        "pass2_glyph_only_skipped_count": glyph_only_skipped_count,
         "residue_mask_pre_cap_pixel_count": residue_mask_pre_cap_pixel_count,
         "residue_mask_cap_pixel_count": residue_mask_cap_pixel_count,
         "residue_mask_cap_dilate_px": RESIDUE_SOURCE_MASK_DILATE_PX,

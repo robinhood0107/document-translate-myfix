@@ -9,6 +9,7 @@ from modules.utils.ocr_debug import (
     is_bubble_panel_text_candidate,
     is_embedded_ui_panel_layout_review_candidate,
 )
+from modules.ocr.common.result_contract import select_translate_inpaint_blocks
 
 
 def _block(
@@ -133,13 +134,16 @@ def test_bubble_protected_embedded_ui_panel_becomes_bubble_panel_text_candidate(
         [panel, dialogue]
     )
 
-    assert inpaint_blocks == [panel, dialogue]
-    assert protected_blocks == []
+    assert inpaint_blocks == [dialogue]
+    assert protected_blocks == [panel]
     assert is_bubble_panel_text_candidate(panel)
     assert panel.bubble_panel_text_candidate is True
     assert panel.ui_panel_mode == "bubble_panel_text_candidate"
     assert panel.mask_decision == "review"
     assert panel.mask_reject_reason == "bubble_panel_text_candidate"
+    assert panel.processing_action == "review"
+    assert panel._inpaint_protected_reason == "bubble_panel_text_candidate"
+    assert select_translate_inpaint_blocks([panel, dialogue]) == [dialogue]
 
 
 def test_bubble_panel_candidate_gets_debug_metadata_without_preserve_original() -> None:
@@ -152,7 +156,7 @@ def test_bubble_panel_candidate_gets_debug_metadata_without_preserve_original() 
 
     _, protected_blocks = ocr_debug_module.split_inpaint_protected_ocr_blocks([panel])
 
-    assert protected_blocks == []
+    assert protected_blocks == [panel]
     assert panel.ui_panel_mode == "bubble_panel_text_candidate"
     assert panel.ui_panel_preview_path == ""
     assert panel.mask_decision == "review"
@@ -182,6 +186,72 @@ def test_bubble_panel_candidate_never_applies_to_text_free_or_bubble_outside_ui(
 
     assert not is_bubble_panel_text_candidate(free_ui)
     assert not is_bubble_panel_text_candidate(outside_bubble)
+
+
+def test_risky_bubble_protects_partial_alias_before_inpaint_or_render() -> None:
+    panel = _block(
+        "の愛アなりすまし用記憶アクセスオプションってのン自然憶レ自記よ",
+        (1640, 2571, 1906, 2901),
+        "text_bubble",
+        bubble_xyxy=(1604, 2525, 1943, 2948),
+    )
+    partial_alias = _block(
+        "ン然憶記よ",
+        (1639, 2571, 1906, 2901),
+        "text_bubble",
+        bubble_xyxy=(1604, 2525, 1943, 2948),
+    )
+    dialogue = _block(
+        "中身は男なのになぁ",
+        (207, 767, 373, 1059),
+        "text_bubble",
+        bubble_xyxy=(185, 727, 396, 1100),
+    )
+
+    inpaint_blocks, protected_blocks = ocr_debug_module.split_inpaint_protected_ocr_blocks(
+        [panel, partial_alias, dialogue]
+    )
+
+    assert inpaint_blocks == [dialogue]
+    assert protected_blocks == [panel, partial_alias]
+    assert partial_alias.bubble_panel_text_candidate_alias is True
+    assert partial_alias.processing_action == "review"
+    assert partial_alias.mask_strategy == "preserve_original"
+    assert partial_alias.mask_reject_reason == "bubble_panel_text_candidate"
+    assert partial_alias._inpaint_protected_reason == "bubble_panel_text_candidate"
+    assert select_translate_inpaint_blocks([panel, partial_alias, dialogue]) == [dialogue]
+
+
+def test_risky_bubble_protects_an_overlapping_bubble_before_inpaint_or_render() -> None:
+    panel = _block(
+        "の愛アなりすまし用記憶アクセスオプションってのン自然憶レ自記よ",
+        (1640, 2571, 1906, 2901),
+        "text_bubble",
+        bubble_xyxy=(1604, 2525, 1943, 2948),
+    )
+    overlapping_bubble = _block(
+        "それにしても",
+        (1933, 2407, 2048, 2669),
+        "text_bubble",
+        bubble_xyxy=(1919, 2371, 2063, 2706),
+    )
+    dialogue = _block(
+        "中身は男なのになぁ",
+        (207, 767, 373, 1059),
+        "text_bubble",
+        bubble_xyxy=(185, 727, 396, 1100),
+    )
+
+    inpaint_blocks, protected_blocks = ocr_debug_module.split_inpaint_protected_ocr_blocks(
+        [panel, overlapping_bubble, dialogue]
+    )
+
+    assert inpaint_blocks == [dialogue]
+    assert protected_blocks == [panel, overlapping_bubble]
+    assert overlapping_bubble.bubble_panel_text_candidate_alias is True
+    assert overlapping_bubble.processing_action == "review"
+    assert "overlaps_risky_bubble" in overlapping_bubble.processing_decision_reasons
+    assert select_translate_inpaint_blocks([panel, overlapping_bubble, dialogue]) == [dialogue]
 
 
 def test_same_bubble_panel_candidates_share_group_metadata() -> None:

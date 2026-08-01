@@ -16,7 +16,11 @@ from modules.utils.bubble_erase import ERASE_MODE_BUBBLE_LAMA_FALLBACK, erase_te
 from modules.utils.download import ModelDownloader, ModelID
 from modules.utils.gpu_handoff import estimate_torch_cuda_storage_mb
 from modules.utils.inpaint_composite import composite_with_edit_mask, normalize_edit_mask
-from modules.utils.mask_roi import normalize_xyxy
+from modules.utils.mask_roi import (
+    normalize_xyxy,
+    resolve_block_ctd_roi,
+    uses_structure_protect_glyph_only_mask_strategy,
+)
 from modules.utils.textblock import TextBlock
 from modules.inpainting.runtime_contract import (
     INPAINT_RETRY_POLICY_VERSION,
@@ -420,8 +424,55 @@ def _split_bubble_source_mask(
     bubble_mask = np.zeros(image_shape[:2], dtype=np.uint8)
     bubble_blocks: list[TextBlock] = []
     lama_blocks: list[TextBlock] = []
+    glyph_only_blocks = [
+        block
+        for block in list(blocks or [])
+        if uses_structure_protect_glyph_only_mask_strategy(block)
+    ]
+
+    def _belongs_to_glyph_only_bubble(block: TextBlock) -> bool:
+        """Avoid broad bubble erase when a protected glyph shares its bubble.
+
+        A broad residual pass cannot distinguish the protected text from the
+        other text in the same speech bubble.  Routing that whole bubble
+        through the exact source mask is deliberately conservative: it may
+        leave a residue for review, but it never expands the edit into the
+        protected glyph's surrounding art.
+        """
+        bubble_roi = normalize_xyxy(
+            getattr(block, "bubble_xyxy", None), image_shape
+        )
+        if bubble_roi is None:
+            return False
+        bx1, by1, bx2, by2 = bubble_roi
+        for protected in glyph_only_blocks:
+            protected_bubble = normalize_xyxy(
+                getattr(protected, "bubble_xyxy", None), image_shape
+            )
+            if protected_bubble is not None:
+                px1, py1, px2, py2 = protected_bubble
+                same_bubble = (
+                    bx1 == px1
+                    and by1 == py1
+                    and bx2 == px2
+                    and by2 == py2
+                )
+                if same_bubble:
+                    return True
+            protected_roi = resolve_block_ctd_roi(protected, image_shape)
+            if protected_roi is None:
+                continue
+            px1, py1, px2, py2 = protected_roi
+            if bx1 <= px1 and by1 <= py1 and px2 <= bx2 and py2 <= by2:
+                return True
+        return False
+
     for block in list(blocks or []):
-        if getattr(block, "text_class", "") != "text_bubble":
+        if (
+            getattr(block, "text_class", "") != "text_bubble"
+            or uses_structure_protect_glyph_only_mask_strategy(block)
+            or _belongs_to_glyph_only_bubble(block)
+        ):
             lama_blocks.append(block)
             continue
         bubble_blocks.append(block)

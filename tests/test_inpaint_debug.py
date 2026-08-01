@@ -131,6 +131,9 @@ class InpaintDebugTests(unittest.TestCase):
             mask_quality_policy="lama_safe_bubble_and_text_free",
             mask_policy_bubble_clamp_applied_count=2,
             mask_policy_text_free_glyph_applied_count=1,
+            mask_policy_protected_region_block_count=3,
+            mask_policy_protected_region_pixel_count=42,
+            mask_policy_protected_region_removed_pixel_count=7,
             mask_policy_removed_pixel_count=17,
             mask_policy_outside_bubble_removed_pixel_count=5,
             ctd_legacy_rectangle_rescue_disabled=True,
@@ -161,6 +164,9 @@ class InpaintDebugTests(unittest.TestCase):
         self.assertEqual(metadata["block_count"], 1)
         self.assertEqual(metadata["raw_mask_pixel_count"], 4)
         self.assertEqual(metadata["cleanup_delta_pixel_count"], 2)
+        self.assertEqual(metadata["mask_policy_protected_region_block_count"], 3)
+        self.assertEqual(metadata["mask_policy_protected_region_pixel_count"], 42)
+        self.assertEqual(metadata["mask_policy_protected_region_removed_pixel_count"], 7)
         self.assertTrue(metadata["cleanup_applied"])
         self.assertEqual(metadata["hard_box_applied_count"], 1)
         self.assertEqual(metadata["blocks"][0]["text_class"], "text_bubble")

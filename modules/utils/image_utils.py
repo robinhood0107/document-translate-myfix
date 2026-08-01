@@ -20,9 +20,13 @@ from modules.utils.mask_inpaint_mode import (
     DEFAULT_MASK_INPAINT_MODE,
     normalize_mask_inpaint_mode,
 )
-from modules.utils.mask_roi import resolve_block_ctd_roi
+from modules.utils.mask_roi import (
+    normalize_xyxy,
+    resolve_block_ctd_roi,
+    uses_glyph_only_mask_strategy,
+)
 
-MASK_POLICY_VERSION = "ctd_lama_mask_policy_v2"
+MASK_POLICY_VERSION = "ctd_lama_mask_policy_v3"
 MASK_DECISION_ACCEPTED = "accepted"
 MASK_DECISION_REVIEW = "review"
 MASK_CANDIDATE_SOURCE_CTD_REFINED = "ctd_refined"
@@ -105,6 +109,92 @@ def _build_candidate_window_mask(
     return window_mask, bubble_window_count
 
 
+def _build_protected_region_mask(
+    image_shape: tuple[int, ...],
+    protected_blocks,
+) -> tuple[np.ndarray, int]:
+    """Build a hard exclusion mask for blocks routed away from auto-inpaint.
+
+    ``split_inpaint_protected_ocr_blocks`` removes risky blocks before CTD is
+    invoked.  This second, geometry-level exclusion is deliberate defence in
+    depth: a neighbouring block's final dilation must not cross into a review
+    or preserve region after the routing decision has been made.
+    """
+    protected_mask = np.zeros(image_shape[:2], dtype=np.uint8)
+    protected_count = 0
+    for block in list(protected_blocks or []):
+        action = str(getattr(block, "processing_action", "") or "").strip().lower()
+        reason = str(getattr(block, "_inpaint_protected_reason", "") or "").strip()
+        if action not in {"review", "preserve"} and not reason:
+            continue
+
+        # Bubble geometry is the potential destructive edit envelope for
+        # dialogue.  text-free/UI blocks use their bounded OCR geometry.
+        roi = normalize_xyxy(getattr(block, "bubble_xyxy", None), image_shape)
+        if roi is None:
+            roi = resolve_block_ctd_roi(block, image_shape)
+        if roi is None:
+            continue
+        x1, y1, x2, y2 = roi
+        protected_mask[y1:y2, x1:x2] = 255
+        protected_count += 1
+    return protected_mask, protected_count
+
+
+def _exclude_protected_regions(
+    details: dict[str, Any],
+    image_shape: tuple[int, ...],
+    protected_blocks,
+) -> None:
+    """Remove auto-inpaint pixels from explicitly protected geometry.
+
+    The masks in ``details`` are kept mutually consistent so downstream
+    cleanup, checkpoint identity, diagnostics, and debug exports all observe
+    the same safety boundary.
+    """
+    protected_mask, protected_count = _build_protected_region_mask(
+        image_shape,
+        protected_blocks,
+    )
+    details["mask_policy_protected_region_block_count"] = int(protected_count)
+    details["mask_policy_protected_region_pixel_count"] = int(
+        np.count_nonzero(protected_mask)
+    )
+    details["protected_region_mask"] = protected_mask
+    details["mask_policy_protected_region_removed_pixel_count"] = 0
+    if not np.any(protected_mask):
+        return
+
+    removed_final = 0
+    for key in (
+        "raw_mask",
+        "refined_mask",
+        "final_mask_pre_expand",
+        "final_mask_post_expand",
+        "final_mask",
+    ):
+        current = details.get(key)
+        if current is None:
+            continue
+        current_mask = np.where(np.asarray(current) > 0, 255, 0).astype(np.uint8)
+        if current_mask.shape[:2] != image_shape[:2]:
+            continue
+        if key == "final_mask":
+            removed_final = int(np.count_nonzero(current_mask & (protected_mask > 0)))
+        details[key] = np.where(
+            (current_mask > 0) & (protected_mask <= 0),
+            255,
+            0,
+        ).astype(np.uint8)
+
+    details["final_mask_pixel_count"] = int(
+        np.count_nonzero(details.get("final_mask"))
+    )
+    details["mask_policy_protected_region_removed_pixel_count"] = int(
+        removed_final
+    )
+
+
 def _dilate_final_mask(mask: np.ndarray, size: int) -> np.ndarray:
     mask_arr = np.where(np.asarray(mask) > 0, 255, 0).astype(np.uint8)
     if int(size) <= 0 or mask_arr.size == 0 or not np.any(mask_arr):
@@ -143,14 +233,17 @@ def _mask_bbox(mask: np.ndarray, *, offset_x: int = 0, offset_y: int = 0) -> tup
     return offset_x + int(x), offset_y + int(y), offset_x + int(x + w), offset_y + int(y + h)
 
 
-def _build_text_free_window_mask(
+def _build_glyph_only_window_mask(
     image_shape: tuple[int, ...],
     block_list,
-) -> tuple[np.ndarray, int]:
+) -> tuple[np.ndarray, int, int]:
     window_mask = np.zeros(image_shape[:2], dtype=np.uint8)
-    count = 0
+    text_free_count = 0
+    structure_protect_count = 0
     for block in list(block_list or []):
-        if str(getattr(block, "text_class", "") or "") != "text_free":
+        text_class = str(getattr(block, "text_class", "") or "")
+        glyph_only = uses_glyph_only_mask_strategy(block)
+        if text_class != "text_free" and not glyph_only:
             continue
         roi = resolve_block_ctd_roi(block, image_shape)
         if roi is None:
@@ -159,8 +252,14 @@ def _build_text_free_window_mask(
         if x2 <= x1 or y2 <= y1:
             continue
         window_mask[y1:y2, x1:x2] = 255
-        count += 1
-    return window_mask, count
+        if text_class == "text_free":
+            text_free_count += 1
+        if (
+            str(getattr(block, "mask_strategy", "") or "")
+            == "glyph_only_structure_protect"
+        ):
+            structure_protect_count += 1
+    return window_mask, text_free_count, structure_protect_count
 
 
 def _dilate_ctd_final_mask_by_block_policy(
@@ -170,20 +269,33 @@ def _dilate_ctd_final_mask_by_block_policy(
     *,
     final_dilate_size: int,
     text_free_dilate_size: int,
-) -> tuple[np.ndarray, int]:
+) -> tuple[np.ndarray, int, int]:
     mask_arr = np.where(np.asarray(mask) > 0, 255, 0).astype(np.uint8)
     if int(final_dilate_size) <= 0 or mask_arr.size == 0 or not np.any(mask_arr):
-        return mask_arr, 0
-    text_free_window, text_free_window_count = _build_text_free_window_mask(image_shape, block_list)
-    if not np.any(text_free_window):
-        return _dilate_final_mask(mask_arr, final_dilate_size), 0
+        return mask_arr, 0, 0
+    glyph_only_window, text_free_window_count, structure_protect_count = (
+        _build_glyph_only_window_mask(image_shape, block_list)
+    )
+    if not np.any(glyph_only_window):
+        return _dilate_final_mask(mask_arr, final_dilate_size), 0, 0
 
-    text_free_mask = np.where((mask_arr > 0) & (text_free_window > 0), 255, 0).astype(np.uint8)
-    other_mask = np.where((mask_arr > 0) & (text_free_window <= 0), 255, 0).astype(np.uint8)
+    glyph_only_mask = np.where(
+        (mask_arr > 0) & (glyph_only_window > 0), 255, 0
+    ).astype(np.uint8)
+    other_mask = np.where(
+        (mask_arr > 0) & (glyph_only_window <= 0), 255, 0
+    ).astype(np.uint8)
     dilated_other = _dilate_final_mask(other_mask, final_dilate_size)
-    dilated_text_free = _dilate_final_mask(text_free_mask, max(0, int(text_free_dilate_size)))
-    merged = np.where((dilated_other > 0) | (dilated_text_free > 0), 255, 0).astype(np.uint8)
-    return merged, text_free_window_count if np.any(text_free_mask) else 0
+    dilated_glyph_only = _dilate_final_mask(
+        glyph_only_mask,
+        max(0, int(text_free_dilate_size)),
+    )
+    merged = np.where(
+        (dilated_other > 0) | (dilated_glyph_only > 0), 255, 0
+    ).astype(np.uint8)
+    if not np.any(glyph_only_mask):
+        return merged, 0, 0
+    return merged, text_free_window_count, structure_protect_count
 
 
 def annotate_block_mask_attribution(
@@ -399,6 +511,7 @@ def _ctd_details(
         "mask_score_residue": 0.0,
         "mask_score_color_delta": 0.0,
         "mask_policy_bubble_clamp_applied_count": 0,
+        "mask_policy_structure_protect_glyph_applied_count": 0,
         "mask_policy_removed_pixel_count": 0,
         "mask_policy_outside_bubble_removed_pixel_count": 0,
         "legacy_bbox_role": "window_only",
@@ -423,6 +536,7 @@ def generate_mask(
     settings: dict[str, Any] | None = None,
     return_details: bool = False,
     precomputed_mask_details: dict[str, Any] | None = None,
+    protected_blocks=None,
 ):
     del precomputed_mask_details
 
@@ -479,6 +593,7 @@ def generate_mask(
         details["mask_score_residue"] = 0.0
         details["mask_score_color_delta"] = 0.0
         details["mask_policy_bubble_clamp_applied_count"] = 0
+        details["mask_policy_structure_protect_glyph_applied_count"] = 0
         details["mask_policy_removed_pixel_count"] = 0
         details["mask_policy_outside_bubble_removed_pixel_count"] = 0
         details["legacy_bbox_role"] = "window_only"
@@ -488,7 +603,11 @@ def generate_mask(
     final_dilate_size = int(cfg.get("final_mask_dilate_size", 8) or 0)
     if final_dilate_size > 0:
         if str(details.get("mask_refiner", "") or "") == "ctd":
-            final_mask, text_free_glyph_count = _dilate_ctd_final_mask_by_block_policy(
+            (
+                final_mask,
+                text_free_glyph_count,
+                structure_protect_glyph_count,
+            ) = _dilate_ctd_final_mask_by_block_policy(
                 details.get("final_mask"),
                 img.shape,
                 blk_list,
@@ -499,6 +618,16 @@ def generate_mask(
                 details["mask_policy_text_free_glyph_applied_count"] = int(
                     details.get("mask_policy_text_free_glyph_applied_count", 0) or 0
                 ) + int(text_free_glyph_count)
+            if structure_protect_glyph_count:
+                details[
+                    "mask_policy_structure_protect_glyph_applied_count"
+                ] = int(
+                    details.get(
+                        "mask_policy_structure_protect_glyph_applied_count",
+                        0,
+                    )
+                    or 0
+                ) + int(structure_protect_glyph_count)
         else:
             final_mask = _dilate_final_mask(details.get("final_mask"), final_dilate_size)
         details["final_mask_post_expand"] = final_mask.copy()
@@ -519,6 +648,11 @@ def generate_mask(
                     int(details.get("mask_policy_outside_bubble_removed_pixel_count", 0) or 0) + removed
                 )
         details["mask_policy_bubble_clamp_applied_count"] = int(bubble_window_count)
+    _exclude_protected_regions(
+        details,
+        img.shape,
+        protected_blocks,
+    )
     details["final_mask_dilate_size"] = final_dilate_size
     annotate_block_mask_attribution(
         blk_list,

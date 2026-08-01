@@ -299,6 +299,9 @@ def build_inpaint_debug_metadata(
     mask_quality_policy: str = "",
     mask_policy_bubble_clamp_applied_count: int = 0,
     mask_policy_text_free_glyph_applied_count: int = 0,
+    mask_policy_protected_region_block_count: int = 0,
+    mask_policy_protected_region_pixel_count: int = 0,
+    mask_policy_protected_region_removed_pixel_count: int = 0,
     mask_policy_removed_pixel_count: int = 0,
     mask_policy_outside_bubble_removed_pixel_count: int = 0,
     ctd_legacy_rectangle_rescue_disabled: bool = False,
@@ -367,6 +370,15 @@ def build_inpaint_debug_metadata(
         "mask_quality_policy": str(mask_quality_policy or ""),
         "mask_policy_bubble_clamp_applied_count": int(mask_policy_bubble_clamp_applied_count or 0),
         "mask_policy_text_free_glyph_applied_count": int(mask_policy_text_free_glyph_applied_count or 0),
+        "mask_policy_protected_region_block_count": int(
+            mask_policy_protected_region_block_count or 0
+        ),
+        "mask_policy_protected_region_pixel_count": int(
+            mask_policy_protected_region_pixel_count or 0
+        ),
+        "mask_policy_protected_region_removed_pixel_count": int(
+            mask_policy_protected_region_removed_pixel_count or 0
+        ),
         "mask_policy_removed_pixel_count": int(mask_policy_removed_pixel_count or 0),
         "mask_policy_outside_bubble_removed_pixel_count": int(mask_policy_outside_bubble_removed_pixel_count or 0),
         "ctd_legacy_rectangle_rescue_disabled": bool(ctd_legacy_rectangle_rescue_disabled),

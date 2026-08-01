@@ -407,6 +407,18 @@ def _bbox_area(box: tuple[float, float, float, float] | None) -> float:
     return max(0.0, box[2] - box[0]) * max(0.0, box[3] - box[1])
 
 
+def _boxes_overlap(
+    first: tuple[float, float, float, float] | None,
+    second: tuple[float, float, float, float] | None,
+) -> bool:
+    if first is None or second is None:
+        return False
+    return (
+        min(first[2], second[2]) > max(first[0], second[0])
+        and min(first[3], second[3]) > max(first[1], second[1])
+    )
+
+
 def _point_inside_expanded_bbox(
     point: tuple[float, float],
     box: tuple[float, float, float, float],
@@ -424,6 +436,12 @@ def _block_bubble_xyxy(block) -> tuple[float, float, float, float] | None:
     if x2 <= x1 or y2 <= y1:
         return None
     return x1, y1, x2, y2
+
+
+def _block_potential_edit_box(block) -> tuple[float, float, float, float] | None:
+    """Return the geometry a block's automatic cleanup may change."""
+    bubble = _block_bubble_xyxy(block)
+    return bubble if bubble is not None else _block_xyxy(block)
 
 
 def _is_bubble_protected_text_block(block) -> bool:
@@ -526,8 +544,8 @@ def mark_bubble_panel_text_candidate(block, *, group_id: str = "", member_indice
     assign_ocr_processing_contract(
         block,
         semantic_role=SEMANTIC_ROLE_DIALOGUE_BUBBLE,
-        processing_action=PROCESSING_ACTION_TRANSLATE_INPAINT,
-        decision_source="embedded_ui_bubble_dialogue",
+        processing_action=PROCESSING_ACTION_REVIEW,
+        decision_source="embedded_ui_bubble_requires_clean_patch",
         reasons=(BUBBLE_PANEL_REVIEW_REASON,),
     )
 
@@ -653,13 +671,53 @@ def mark_ui_panel_review_candidate(block, *, reason: str, preview_path: str = ""
 
 
 def split_inpaint_protected_ocr_blocks(blocks) -> tuple[list, list]:
-    """Keep review-worthy embedded UI panels out of LaMa masks without dropping them."""
+    """Keep risky embedded UI/bubble regions out of destructive processing."""
     inpaint_blocks: list = []
     protected_blocks: list = []
     block_list = list(blocks or [])
     group_bubble_panel_text_candidates(block_list)
+    risky_bubbles = {
+        key: bubble
+        for block in block_list
+        if is_bubble_panel_text_candidate(block)
+        for key, bubble in [(_bubble_panel_group_key(block), _block_bubble_xyxy(block))]
+        if key is not None and bubble is not None
+    }
     for block in block_list:
         finalize_ocr_processing_contract(block)
+        bubble_key = _bubble_panel_group_key(block)
+        overlapping_risky_bubble = any(
+            _boxes_overlap(_block_potential_edit_box(block), risky_bubble)
+            for risky_bubble in risky_bubbles.values()
+        )
+        if bubble_key in risky_bubbles or overlapping_risky_bubble:
+            # The original pixels below a transparent UI/bubble text region are
+            # not present in the source image.  Do not invent a background and
+            # then render Korean over an uncertain cleanup.  An external clean
+            # patch can explicitly re-enable this block in a future workflow.
+            if is_bubble_panel_text_candidate(block):
+                mark_bubble_panel_text_candidate(block)
+            else:
+                block.bubble_panel_text_candidate_alias = True
+                block.ui_panel_mode = UI_PANEL_MODE_BUBBLE_PANEL_TEXT
+                block.mask_decision = "review"
+                block.mask_reject_reason = BUBBLE_PANEL_REVIEW_REASON
+                assign_ocr_processing_contract(
+                    block,
+                    semantic_role=SEMANTIC_ROLE_DIALOGUE_BUBBLE,
+                    processing_action=PROCESSING_ACTION_REVIEW,
+                    decision_source="embedded_ui_bubble_alias_requires_clean_patch",
+                    reasons=(
+                        BUBBLE_PANEL_REVIEW_REASON,
+                        "shares_risky_bubble"
+                        if bubble_key in risky_bubbles
+                        else "overlaps_risky_bubble",
+                    ),
+                )
+            block._inpaint_protected_reason = BUBBLE_PANEL_REVIEW_REASON
+            block.mask_decision = "review"
+            protected_blocks.append(block)
+            continue
         if (
             getattr(block, "processing_action", "")
             != PROCESSING_ACTION_TRANSLATE_INPAINT
@@ -670,10 +728,6 @@ def split_inpaint_protected_ocr_blocks(blocks) -> tuple[list, list]:
             )
             block.mask_decision = "review"
             protected_blocks.append(block)
-            continue
-        if is_bubble_panel_text_candidate(block):
-            mark_bubble_panel_text_candidate(block)
-            inpaint_blocks.append(block)
             continue
         if is_embedded_ui_panel_layout_review_candidate(block):
             block._inpaint_protected_reason = UI_PANEL_REVIEW_REASON_LAYOUT

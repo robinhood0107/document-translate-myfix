@@ -9,6 +9,50 @@ from modules.detection.utils.content import get_inpaint_bboxes
 from modules.utils.inpaint_envelope import build_text_free_erase_envelope
 
 
+GLYPH_ONLY_MASK_STRATEGIES = frozenset(
+    {
+        "glyph_only",
+        "glyph_only_structure_protect",
+    }
+)
+STRUCTURE_PROTECT_GLYPH_ONLY_MASK_STRATEGIES = frozenset(
+    {
+        "glyph_only_structure_protect",
+    }
+)
+
+
+def uses_glyph_only_mask_strategy(block) -> bool:
+    """Return whether a block must never expand to its whole bubble."""
+    return (
+        str(getattr(block, "mask_strategy", "") or "").strip().lower()
+        in GLYPH_ONLY_MASK_STRATEGIES
+    )
+
+
+def uses_structure_protect_glyph_only_mask_strategy(block) -> bool:
+    """Return whether a block must use the narrow structural-risk policy."""
+    return (
+        str(getattr(block, "mask_strategy", "") or "").strip().lower()
+        in STRUCTURE_PROTECT_GLYPH_ONLY_MASK_STRATEGIES
+    )
+
+
+def _resolve_glyph_only_roi(
+    block,
+    image_shape: tuple[int, int] | tuple[int, int, int],
+) -> tuple[int, int, int, int] | None:
+    """Use a bounded text window for structure-sensitive erase policies."""
+    return _expand_bbox(
+        getattr(block, "xyxy", None),
+        image_shape,
+        width_ratio=0.04,
+        height_ratio=0.04,
+        min_pad=4,
+        max_pad=8,
+    )
+
+
 def normalize_xyxy(box, image_shape: tuple[int, int] | tuple[int, int, int]) -> tuple[int, int, int, int] | None:
     if box is None or len(box) < 4:
         return None
@@ -51,6 +95,9 @@ def _expand_bbox(
 
 
 def resolve_block_ctd_roi(block, image_shape: tuple[int, int] | tuple[int, int, int]) -> tuple[int, int, int, int] | None:
+    if uses_structure_protect_glyph_only_mask_strategy(block):
+        return _resolve_glyph_only_roi(block, image_shape)
+
     explicit = normalize_xyxy(getattr(block, 'ctd_roi_xyxy', None), image_shape)
     if explicit is not None:
         return explicit
@@ -80,6 +127,9 @@ def resolve_block_ctd_roi(block, image_shape: tuple[int, int] | tuple[int, int, 
 
 
 def resolve_block_cleanup_roi(block, image_shape: tuple[int, int] | tuple[int, int, int]) -> tuple[int, int, int, int] | None:
+    if uses_structure_protect_glyph_only_mask_strategy(block):
+        return _resolve_glyph_only_roi(block, image_shape)
+
     explicit = normalize_xyxy(getattr(block, 'cleanup_roi_xyxy', None), image_shape)
     if explicit is not None:
         return explicit
@@ -185,6 +235,8 @@ def build_text_prior_mask(
 
 
 def get_mask_roi_type(block) -> str:
+    if uses_structure_protect_glyph_only_mask_strategy(block):
+        return 'glyph_only'
     roi = getattr(block, 'ctd_roi_xyxy', None) or getattr(block, 'mask_roi_xyxy', None)
     if roi is None:
         return 'none'
