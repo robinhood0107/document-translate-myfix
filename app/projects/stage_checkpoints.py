@@ -31,9 +31,16 @@ from modules.ocr.persistent_cache import (
     canonical_sha256,
     validate_raw_ocr_result,
 )
+from modules.ocr.common.result_contract import (
+    OCR_PROCESSING_CONTRACT_SCHEMA_VERSION,
+)
 from modules.utils.device import get_providers, resolve_device
 from modules.utils.download import ModelDownloader, ModelID
 from modules.utils.textblock import TextBlock
+from modules.inpainting.runtime_contract import (
+    INPAINT_RETRY_POLICY_VERSION,
+    INPAINT_RUNTIME_CONTRACT_VERSION,
+)
 
 
 logger = logging.getLogger(__name__)
@@ -42,7 +49,7 @@ logger = logging.getLogger(__name__)
 PROJECT_DETECTION_CHECKPOINT_SCHEMA_VERSION = 1
 PROJECT_OCR_CHECKPOINT_SCHEMA_VERSION = 1
 PROJECT_TRANSLATION_CHECKPOINT_SCHEMA_VERSION = 1
-PROJECT_INPAINT_CHECKPOINT_SCHEMA_VERSION = 2
+PROJECT_INPAINT_CHECKPOINT_SCHEMA_VERSION = 4
 PROJECT_RENDER_CHECKPOINT_SCHEMA_VERSION = 3
 DETECTION_PREPROCESS_SCHEMA_VERSION = "rtdetr-v2-rgb-640-f32-v1"
 DETECTION_POSTPROCESS_SCHEMA_VERSION = "comic-text-bubble-blocks-v1"
@@ -50,10 +57,14 @@ DETECTION_SORT_SCHEMA_VERSION = "sort-blk-list-v1"
 DETECTION_MASK_SCHEMA_VERSION = "precomputed-mask-details-v1"
 DETECTION_RENDER_AREA_SCHEMA_VERSION = "detected-bubble-render-area-v1"
 DETECTION_FONT_SCHEMA_VERSION = "font-onnx-512-cv-color-v1"
-OCR_POSTPROCESS_SCHEMA_VERSION = "quality-retry-drop-guards-v1"
+OCR_POSTPROCESS_SCHEMA_VERSION = (
+    "text-first-exact-canonical-quality-retry-drop-guards-v2"
+)
 TRANSLATION_STATE_SCHEMA_VERSION = "ctpr-block-translation-state-v1"
-INPAINT_INPUT_SCHEMA_VERSION = "deterministic-ordered-input-brush-v2"
-INPAINT_CLEANUP_SCHEMA_VERSION = "bubble-residue-duplicate-fill-v1"
+INPAINT_INPUT_SCHEMA_VERSION = (
+    "semantic-action-mask-deterministic-ordered-input-brush-v4"
+)
+INPAINT_CLEANUP_SCHEMA_VERSION = "bubble-residue-duplicate-fill-cuda-v2"
 INPAINT_ARTIFACT_SCHEMA_VERSION = "lossless-zlib-array-v2"
 INPAINT_BLOCK_STATE_SCHEMA_VERSION = "inpaint-block-state-v1"
 RENDER_INPUT_SCHEMA_VERSION = "translation-inpaint-style-layout-v1"
@@ -104,6 +115,10 @@ _INPAINT_BLOCK_STATE_FIELDS = (
     "_mask_policy",
     "mask_decision",
     "mask_reject_reason",
+    "mask_strategy",
+    "mask_strategy_reason",
+    "mask_actual_bbox",
+    "mask_actual_pixel_count",
 )
 
 _DETECTION_BLOCK_FIELDS = (
@@ -637,7 +652,7 @@ def build_project_ocr_identity(
     paddle_settings: Mapping[str, Any],
     source_lang_english: str,
 ) -> dict[str, Any]:
-    return {
+    identity = {
         "schema_version": PROJECT_OCR_CHECKPOINT_SCHEMA_VERSION,
         "detection_fingerprint": detection_fingerprint,
         "runtime": dict(runtime_identity),
@@ -651,6 +666,16 @@ def build_project_ocr_identity(
         "visualize": bool(paddle_settings.get("visualize", False)),
         "postprocess_schema": OCR_POSTPROCESS_SCHEMA_VERSION,
     }
+    if str(policy.get("primary_ocr_engine", "")) == (
+        "PaddleOCR VL Spotting"
+    ):
+        identity["max_completion_tokens"] = int(
+            paddle_settings.get("max_completion_tokens", 0) or 0
+        )
+        identity["request_timeout_sec"] = int(
+            paddle_settings.get("request_timeout_sec", 0) or 0
+        )
+    return identity
 
 
 def build_project_ocr_fingerprint(identity: Mapping[str, Any]) -> str:
@@ -1152,6 +1177,18 @@ def _block_inpaint_record(block: TextBlock) -> dict[str, Any]:
         "ocr_empty_reason": str(
             getattr(block, "ocr_empty_reason", "") or ""
         ),
+        "semantic_role": str(
+            getattr(block, "semantic_role", "") or ""
+        ),
+        "processing_action": str(
+            getattr(block, "processing_action", "") or ""
+        ),
+        "compound_group_id": str(
+            getattr(block, "compound_group_id", "") or ""
+        ),
+        "mask_strategy": str(
+            getattr(block, "mask_strategy", "") or ""
+        ),
     }
 
 
@@ -1259,9 +1296,14 @@ def build_inpaint_identity(
         "model": _json_safe(dict(model_identity)),
         "hd_strategy": _json_safe(dict(hd_strategy)),
         "mask_settings": _json_safe(dict(mask_settings)),
+        "ocr_processing_contract_schema": (
+            OCR_PROCESSING_CONTRACT_SCHEMA_VERSION
+        ),
         "input_schema": INPAINT_INPUT_SCHEMA_VERSION,
         "cleanup_schema": INPAINT_CLEANUP_SCHEMA_VERSION,
         "artifact_schema": INPAINT_ARTIFACT_SCHEMA_VERSION,
+        "runtime_contract": INPAINT_RUNTIME_CONTRACT_VERSION,
+        "retry_policy": INPAINT_RETRY_POLICY_VERSION,
     }
 
 

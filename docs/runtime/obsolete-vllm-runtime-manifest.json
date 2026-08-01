@@ -1,0 +1,24 @@
+{
+  "schema_version": 1,
+  "retirement": "managed-local-vllm",
+  "containers": [
+    {
+      "name": "paddleocr-vllm",
+      "expected_image": "ccr-2vdh3abv-pub.cnc.bj.baidubce.com/paddlepaddle/paddleocr-genai-vllm-server@sha256:d0d32c04a2119613d25a0a4c292e165ccc107954b74580613cf59e378037f8f5",
+      "required_label": "com.comictranslate.paddleocr-runtime-fingerprint"
+    },
+    {
+      "name": "paddleocr-server",
+      "expected_image": "ccr-2vdh3abv-pub.cnc.bj.baidubce.com/paddlepaddle/paddleocr-genai-vllm-server@sha256:d0d32c04a2119613d25a0a4c292e165ccc107954b74580613cf59e378037f8f5",
+      "required_label": "com.comictranslate.paddleocr-runtime-fingerprint"
+    }
+  ],
+  "images": [
+    {
+      "reference": "ccr-2vdh3abv-pub.cnc.bj.baidubce.com/paddlepaddle/paddleocr-genai-vllm-server@sha256:d0d32c04a2119613d25a0a4c292e165ccc107954b74580613cf59e378037f8f5",
+      "action": "remove-if-unreferenced",
+      "reason": "The direct llama.cpp crop transport retired both the vLLM container and the CPU-only PaddleX relay."
+    }
+  ],
+  "volumes": []
+}

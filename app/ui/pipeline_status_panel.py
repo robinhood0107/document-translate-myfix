@@ -944,6 +944,8 @@ class PipelineStatusPanel(QtWidgets.QFrame):
             "gemma": "Gemma",
             "paddleocr_vl": "PaddleOCR VL",
             "paddleocr-vl": "PaddleOCR VL",
+            "paddleocr_vl_spotting": "PaddleOCR VL Spotting",
+            "paddleocr-vl-spotting": "PaddleOCR VL Spotting",
             "hunyuanocr": "HunyuanOCR",
             "mangalmm": "MangaLMM",
         }

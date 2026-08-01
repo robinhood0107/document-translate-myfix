@@ -121,6 +121,13 @@ class InpainterReleaseTests(unittest.TestCase):
             inpaint_input_img=image,
             mask=mask,
             patches=[{"bbox": [0, 0, 1, 1], "image": patch_image, "order": 1}],
+            blk_list=[
+                SimpleNamespace(
+                    text="source",
+                    translation="",
+                    text_class="text_bubble",
+                )
+            ],
         )
         image_before = image.copy()
         mask_before = mask.copy()
