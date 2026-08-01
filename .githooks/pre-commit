@@ -29,6 +29,9 @@ PYTHON_BIN="$(resolve_python)"
 BRANCH_NAME="$(git branch --show-current)"
 "$PYTHON_BIN" scripts/validate_repo_policy.py --mode commit --branch "$BRANCH_NAME"
 
+mapfile -t STAGED_FILES < <(git diff --cached --name-only --diff-filter=ACMRD)
+"$PYTHON_BIN" scripts/validate_instruction_sync.py --paths "${STAGED_FILES[@]}"
+
 mapfile -t STAGED_PY < <(git diff --cached --name-only --diff-filter=ACMRTUXB -- '*.py')
 if ((${#STAGED_PY[@]} > 0)); then
   mapfile -t UNSTAGED_PY < <(git diff --name-only -- '*.py')
