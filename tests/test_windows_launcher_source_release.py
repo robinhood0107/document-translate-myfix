@@ -237,7 +237,7 @@ class WindowsLauncherSourceReleaseTests(unittest.TestCase):
             for service in payload.get("services", {}).values():
                 published_ports.extend(str(item) for item in service.get("ports", []))
 
-        self.assertEqual(len(published_ports), 6)
+        self.assertEqual(len(published_ports), 5)
         self.assertTrue(
             all(port.startswith("127.0.0.1:") for port in published_ports),
             published_ports,

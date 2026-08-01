@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
-"""Remove only manifest-approved legacy vLLM containers.
+"""Remove only manifest-approved retired Paddle relay/vLLM Docker assets.
 
-The command is dry-run by default.  It never prunes images or volumes because
-the historical Paddle image remains the active CPU-only relay image.
+The command is dry-run by default and never performs a broad prune.  Image
+removal is allowed only after immutable-ID resolution and only when no Docker
+container still references that exact image.
 """
 
 from __future__ import annotations
@@ -66,6 +67,49 @@ def _inspect_container(name: str) -> dict[str, Any] | None:
             f"Unexpected Docker inspect payload for {name}."
         )
     return payload[0]
+
+
+def _inspect_image(reference: str) -> dict[str, Any] | None:
+    completed = _docker("image", "inspect", reference)
+    detail = ((completed.stdout or "") + (completed.stderr or "")).lower()
+    if completed.returncode != 0 and (
+        "no such object" in detail
+        or "no such image" in detail
+        or "not found" in detail
+    ):
+        return None
+    if completed.returncode != 0:
+        raise LegacyRuntimeRetirementError(
+            f"Unable to inspect image {reference}: {detail.strip()}"
+        )
+    payload = json.loads(completed.stdout)
+    if not isinstance(payload, list) or len(payload) != 1:
+        raise LegacyRuntimeRetirementError(
+            f"Unexpected Docker image inspect payload for {reference}."
+        )
+    return payload[0]
+
+
+def _containers_referencing_image(image_id: str) -> list[str]:
+    completed = _docker(
+        "ps",
+        "-a",
+        "--no-trunc",
+        "--filter",
+        f"ancestor={image_id}",
+        "--format",
+        "{{.ID}}|{{.Names}}",
+    )
+    if completed.returncode != 0:
+        raise LegacyRuntimeRetirementError(
+            "Unable to inspect containers that reference retired image "
+            f"{image_id}: {(completed.stderr or '').strip()}"
+        )
+    return [
+        line.strip()
+        for line in (completed.stdout or "").splitlines()
+        if line.strip()
+    ]
 
 
 def _validate_owned_container(
@@ -144,6 +188,34 @@ def resolve_manifest(path: Path) -> dict[str, Any]:
         specification["expected_label_value"] = label_value
         resolved_containers.append(specification)
     manifest["containers"] = resolved_containers
+    images = manifest.get("images", [])
+    if not isinstance(images, list):
+        raise LegacyRuntimeRetirementError(
+            "Retirement manifest images must be a list."
+        )
+    resolved_images: list[dict[str, Any]] = []
+    for raw_specification in images:
+        if not isinstance(raw_specification, dict):
+            raise LegacyRuntimeRetirementError(
+                "Retirement manifest image entries must be objects."
+            )
+        specification = dict(raw_specification)
+        reference = str(specification.get("reference") or "").strip()
+        if not reference:
+            raise LegacyRuntimeRetirementError(
+                "Retirement manifest contains an empty image reference."
+            )
+        inspected = _inspect_image(reference)
+        if inspected is None:
+            continue
+        image_id = str(inspected.get("Id") or "").strip()
+        if not image_id:
+            raise LegacyRuntimeRetirementError(
+                f"Docker inspect returned no immutable ID for {reference}."
+            )
+        specification["image_id"] = image_id
+        resolved_images.append(specification)
+    manifest["images"] = resolved_images
     manifest["resolved_at_utc"] = dt.datetime.now(dt.timezone.utc).isoformat()
     manifest["source_manifest_sha256"] = _manifest_sha256(path)
     return manifest
@@ -208,6 +280,79 @@ def retire_manifest(path: Path, *, execute: bool) -> list[dict[str, str]]:
             {
                 "container": name,
                 "container_id": container_id,
+                "status": "removed",
+            }
+        )
+    images = manifest.get("images", [])
+    if not isinstance(images, list):
+        raise LegacyRuntimeRetirementError(
+            "Retirement manifest images must be a list."
+        )
+    for raw_specification in images:
+        if not isinstance(raw_specification, dict):
+            raise LegacyRuntimeRetirementError(
+                "Retirement manifest image entries must be objects."
+            )
+        specification = dict(raw_specification)
+        reference = str(specification.get("reference") or "").strip()
+        action = str(specification.get("action") or "preserve").strip()
+        if not reference:
+            raise LegacyRuntimeRetirementError(
+                "Retirement manifest contains an empty image reference."
+            )
+        if action == "preserve":
+            actions.append({"image": reference, "status": "preserved"})
+            continue
+        if action != "remove-if-unreferenced":
+            raise LegacyRuntimeRetirementError(
+                f"Unsupported image retirement action: {action}"
+            )
+        inspected = _inspect_image(reference)
+        if inspected is None:
+            actions.append({"image": reference, "status": "absent"})
+            continue
+        image_id = str(inspected.get("Id") or "").strip()
+        expected_image_id = str(specification.get("image_id") or "").strip()
+        if execute and not expected_image_id:
+            raise LegacyRuntimeRetirementError(
+                "Execution requires a resolved manifest with an immutable "
+                f"image ID: {reference}"
+            )
+        if expected_image_id and image_id != expected_image_id:
+            raise LegacyRuntimeRetirementError(
+                "Refusing to remove a Docker image whose immutable ID changed "
+                f"after snapshot: {reference}"
+            )
+        references = _containers_referencing_image(image_id)
+        if references:
+            actions.append(
+                {
+                    "image": reference,
+                    "image_id": image_id,
+                    "status": "preserved-referenced",
+                    "references": ",".join(references),
+                }
+            )
+            continue
+        if not execute:
+            actions.append(
+                {
+                    "image": reference,
+                    "image_id": image_id,
+                    "status": "would-remove",
+                }
+            )
+            continue
+        removed = _docker("image", "rm", image_id)
+        if removed.returncode != 0:
+            raise LegacyRuntimeRetirementError(
+                f"Unable to remove image {reference}: "
+                f"{(removed.stderr or '').strip()}"
+            )
+        actions.append(
+            {
+                "image": reference,
+                "image_id": image_id,
                 "status": "removed",
             }
         )
