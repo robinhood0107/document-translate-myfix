@@ -38,6 +38,9 @@ source; Codex relies on this `AGENTS.md` entrypoint.
   rewrite them.
 - If an artifact might expose a source title, local path, raw response, image,
   credential, or user data, treat it as private by default.
+- New debug or benchmark scripts that create a default output directory must use
+  the managed private-artifact harness with an explicit category; its manifest
+  contract is covered by the repository's fast unit test.
 
 ## Instruction-harness synchronization
 

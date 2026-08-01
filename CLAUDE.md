@@ -38,6 +38,11 @@ including images and models, belongs only in the ignored
 the manifest, metadata-preserving move, and atomic-unit safeguards in
 `rules.md`; never discard large media during consolidation.
 
+Debug and benchmark scripts that create default private output must use the
+managed artifact harness with an explicit category. Its manifest behavior is a
+fast CI-tested contract; an explicit user-supplied output directory remains a
+deliberate local override.
+
 When changing repository workflow, artifact handling, validation, release, or
 agent policy, update `AGENTS.md`, `CLAUDE.md`, and `rules.md` together in one
 commit and one PR; local pre-commit and PR CI enforce the synchronization. Also
