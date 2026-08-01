@@ -148,3 +148,10 @@ launcher와 공개 import 사용 여부를 별도 릴리스에서 먼저 감사�
 4. raw OCR 사전 적용 전 값을 cache하고 hit/miss 모두 현재 사전을 정확히 한 번 적용한다.
 5. benchmark corpus, 후보 ranking, blind key와 raw 결과는 제품 브랜치에 커밋하지 않는다.
 6. UI 문구를 바꾸면 모든 `.ts`와 compiled `.qm`을 함께 갱신한다.
+
+## 현재 품질·성능 판정
+
+현재 제품 기본 OCR, full-page Experimental 경로, 번역·캐시·인페인트의 최종
+판정은 [Optimal++ v1.3.0 진실명세](../performance-and-bugfix-audits/optimal-plus-v1.3.0/00-truth-specification-ko.md)를
+기준으로 한다. 이 구조 문서는 코드 책임을 설명하며, benchmark 원문·이미지·수동
+검수표는 포함하지 않는다.

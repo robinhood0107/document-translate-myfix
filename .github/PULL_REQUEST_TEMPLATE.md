@@ -5,6 +5,7 @@
 ## Checks
 
 - [ ] I read `rules.md` before making repository-scoped changes.
+- [ ] For repository workflow, artifact handling, validation, branch, release, or agent-policy changes, I updated `AGENTS.md`, `CLAUDE.md`, and `rules.md` together in this commit and PR (or marked N/A with a reason below).
 - [ ] I worked on a valid non-protected branch.
 - [ ] I pushed the branch to `origin` before requesting review.
 - [ ] I targeted the correct base branch (`develop`, `main`, or a release flow branch).
