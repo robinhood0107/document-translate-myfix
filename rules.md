@@ -113,6 +113,11 @@ Claude-compatible tooling과 gstack을 위한 호환·routing 표면이다. 둘�
   `inpaint-mask-render`, `cache-checkpoint`, `runtime-release`,
   `project-output`, `pr-governance`, `cross-cutting`처럼 기능/PR 단위로
   크게 분류한다. 출처별 상대 경로도 보존하여 동명 실행 결과를 합치지 않는다.
+- 새 debug/benchmark script가 기본 private output을 만들 때는 managed
+  artifact harness를 사용하고, 분류 category를 명시한다. harness는
+  canonical ignored root 아래에서만 run manifest를 만들며, 이 manifest
+  contract는 빠른 unit test와 CI에서 검증한다. 사용자가 명시한 output
+  directory는 자동 archive 대상이 아닌 local override로 유지한다.
 - 민감 여부가 불명확하면 public `docs/`가 아니라 이 private archive에
   둔다. `.gitignore`는 편의 장치일 뿐 보안 경계가 아니므로, tracked-path
   validator와 PR redaction 검사를 계속 통과해야 한다.
