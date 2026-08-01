@@ -173,14 +173,12 @@ SUITE_PROFILES = {
 RUNTIME_SNAPSHOT_FILES = [
     Path("docker-compose.yaml"),
     Path("paddleocr_vl_docker_files/docker-compose.yaml"),
-    Path("paddleocr_vl_docker_files/pipeline_conf.yaml"),
-    Path("paddleocr_vl_docker_files/vllm_config.yml"),
 ]
 
 ATTACH_RUNNING_HEALTH_URLS = [
     "http://127.0.0.1:18080/health",
     "http://127.0.0.1:18080/v1/models",
-    "http://127.0.0.1:28118/docs",
+    "http://127.0.0.1:18000/health",
 ]
 GEMMA_VERIFICATION_DIR_NAME = "_server_verification"
 
@@ -405,9 +403,9 @@ def _restore_runtime(snapshot_dir: Path) -> None:
             },
             {
                 "name": "ocr",
-                "container_names": ["paddleocr-server", "paddleocr-vllm"],
+                "container_names": ["paddleocr-llamacpp"],
                 "health_urls": [
-                    "http://127.0.0.1:28118/docs",
+                    "http://127.0.0.1:18000/health",
                 ],
                 "compose_path": ocr_snapshot,
                 "cwd": ROOT / "paddleocr_vl_docker_files",
