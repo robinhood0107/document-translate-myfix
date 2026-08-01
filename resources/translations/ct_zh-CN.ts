@@ -178,10 +178,6 @@ Choose either a project file or image/document/archive files.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>HunyuanOCR Settings</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
         <source>Gemma Local Server Settings</source>
         <translation type="unfinished"></translation>
     </message>
@@ -887,6 +883,29 @@ Start the server with both the HunyuanOCR GGUF model and the matching mmproj fil
     </message>
 </context>
 <context>
+    <name>InpaintingRuntime</name>
+    <message>
+        <source>Learned inpainting requires CUDA; CPU fallback is disabled.</source>
+        <translation>学习型图像修复需要 CUDA；已禁用 CPU 回退。</translation>
+    </message>
+    <message>
+        <source>CUDA inpainting ran out of memory after the single bounded ROI retry.</source>
+        <translation>CUDA 图像修复在对受限 ROI 进行一次重试后仍然内存不足。</translation>
+    </message>
+    <message>
+        <source>Inpaint output changed pixels outside the final edit mask.</source>
+        <translation>图像修复结果修改了最终编辑蒙版之外的像素。</translation>
+    </message>
+    <message>
+        <source>The previous inpainter VRAM release was not confirmed.</source>
+        <translation>无法确认前一个图像修复模型已释放 VRAM。</translation>
+    </message>
+    <message>
+        <source>CUDA FFT execution failed; CPU fallback is disabled.</source>
+        <translation>CUDA FFT 执行失败；已禁用 CPU 回退。</translation>
+    </message>
+</context>
+<context>
     <name>LlmsPage</name>
     <message>
         <source>Provide Image as Input to AI</source>
@@ -1110,17 +1129,29 @@ Keep the default localhost URL if you want Comic Translate to reuse the bundled 
     </message>
     <message>
         <source>Recommended values for the bundled MangaLMM runtime:
-- ctx-size 4096: enough for full-page OCR while keeping VRAM safer
-- Max Completion Tokens: 256
+- ctx-size 8192: preserves the full-page prompt and grounded response
+- Max Completion Tokens: 4096
 - Parallel Workers: 1
 - Request Timeout: 60 seconds
 - Safe Resize: on
 - Max Pixels / Max Long Side: 2116800 / 1728
 Reasoning:
 - PNG + image-first ordering is the most reliable request format for MangaLMM.
+- The response must be one complete JSON array of grounded text regions.
 - Direct MangaLMM mode respects the values on this page.
 - Workers 1 is the safest default when MangaLMM is the active OCR runtime.</source>
-        <translation type="unfinished"></translation>
+        <translation>内置 MangaLMM 运行时的建议值：
+- ctx-size 8192：保留整页提示词和带坐标的响应
+- Max Completion Tokens：4096
+- Parallel Workers：1
+- Request Timeout：60 秒
+- Safe Resize：开启
+- Max Pixels / Max Long Side：2116800 / 1728
+原因：
+- PNG 加图像优先顺序是 MangaLMM 最可靠的请求格式。
+- 响应必须是一个完整的、包含文本区域坐标的 JSON 数组。
+- 直接 MangaLMM 模式遵循此页面中的设置值。
+- 当 MangaLMM 为当前 OCR 运行时时，Workers 1 是最安全的默认值。</translation>
     </message>
 </context>
 <context>
@@ -1806,13 +1837,6 @@ The app keeps messages below ntfy&apos;s default 4 KiB text limit and never send
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>Connect Comic Translate to your local PaddleOCR VL Docker service.
-This OCR engine sends cropped text regions to the /layout-parsing endpoint.
-Keep the default localhost URL if you want Comic Translate to start the bundled Docker runtime on demand.
-Leave markdown or visualization options disabled unless you need debugging.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
         <source>Server URL</source>
         <translation type="unfinished">
         服务器 URL</translation>
@@ -1834,16 +1858,16 @@ Leave markdown or visualization options disabled unless you need debugging.</sou
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>Estimated VRAM usage depends on page size, image resolution, and the Docker service build.
-Recommended starting points:
-- Up to 8 GB VRAM: 128 to 256 tokens, 1 worker
-- 10 to 12 GB VRAM: 256 tokens, 2 workers
-- 16 GB VRAM: 256 to 512 tokens, 2 to 3 workers
-- 24 GB or more: 512 tokens, 3 to 4 workers for dense pages
-Approximate GPU usage:
-- 256 tokens / 2 workers: about 5 to 7 GB
-- 512 tokens / 2 workers: about 7 to 10 GB
-- 1024 tokens / 2 workers: about 10 GB or more</source>
+        <source>Connect Comic Translate to your local PaddleOCR VL Docker service.
+The bundled runtime sends cropped text regions directly to llama.cpp with the official OCR: prompt.
+Keep the default localhost URL if you want Comic Translate to start the bundled Docker runtime on demand.
+Markdown and visualization options apply only to custom /layout-parsing endpoints.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>The bundled llama.cpp runtime loads one managed model slot for the whole OCR stage.
+Parallel workers control the client request queue and do not load extra model copies.
+Keep 1024 tokens unless a validated corpus proves a lower limit never truncates text.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
@@ -1926,6 +1950,37 @@ Approximate GPU usage:
     <message>
         <source>Cache clear failed. The database was left unchanged.
 {error}</source>
+        <translation type="unfinished"></translation>
+    </message>
+</context>
+<context>
+    <name>PaddleOCRVLSpottingPage</name>
+    <message>
+        <source>PaddleOCR VL Spotting Settings</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>This is a separate full-page Spotting route, not the detector crop OCR route.
+It uses the official Spotting: prompt, special location tokens, a dedicated projector with 1,605,632 maximum image pixels, and a dedicated named volume.
+Detector geometry remains authoritative; ambiguous or unmatched native regions are left for review without a hidden crop fallback.
+Keep the default localhost URL to use the bundled managed llama.cpp runtime.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Server URL</source>
+        <translation type="unfinished">
+        服务器 URL</translation>
+    </message>
+    <message>
+        <source>Max Completion Tokens</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Request Timeout (sec)</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>The Spotting pixel budget and special-token mode are fixed by the official model contract and cannot be changed here. The existing crop OCR route keeps its original 1,003,520-pixel projector unchanged.</source>
         <translation type="unfinished"></translation>
     </message>
 </context>
@@ -3210,6 +3265,10 @@ Restart now?</source>
         最佳（HunyuanOCR / PaddleOCR VL）</translation>
     </message>
     <message>
+        <source>PaddleOCR VL Spotting (Full Page)</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
         <source>MangaLMM</source>
         <translation type="unfinished"></translation>
     </message>
@@ -3241,6 +3300,10 @@ Restart now?</source>
     </message>
     <message>
         <source>PaddleOCR VL Settings</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>PaddleOCR VL Spotting Settings</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
@@ -5193,6 +5256,10 @@ It may have been moved, renamed, or deleted.
         <translation type="unfinished"></translation>
     </message>
     <message>
+        <source>PaddleOCR VL Spotting (Full Page)</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
         <source>HunyuanOCR</source>
         <translation type="unfinished"></translation>
     </message>
@@ -5264,6 +5331,10 @@ It may have been moved, renamed, or deleted.
     </message>
     <message>
         <source>PaddleOCR VL Settings</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>PaddleOCR VL Spotting Settings</source>
         <translation type="unfinished"></translation>
     </message>
     <message>

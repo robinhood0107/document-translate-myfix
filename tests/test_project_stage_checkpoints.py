@@ -336,6 +336,49 @@ class ProjectStageCheckpointTests(unittest.TestCase):
         self.assertEqual(first, second)
         self.assertNotIn("dictionary", first)
 
+    def test_crop_ocr_identity_is_unchanged_by_spotting_only_settings(
+        self,
+    ) -> None:
+        identity = build_project_ocr_identity(
+            detection_fingerprint="6" * 64,
+            runtime_identity={"runtime_fingerprint": "crop-runtime"},
+            policy={
+                "primary_ocr_engine": "PaddleOCR VL",
+                "normalized_ocr_mode": "paddleocr_vl",
+            },
+            paddle_settings={
+                "max_new_tokens": 512,
+                "max_completion_tokens": 4096,
+                "request_timeout_sec": 600,
+                "prettify_markdown": False,
+                "visualize": False,
+            },
+            source_lang_english="Japanese",
+        )
+
+        self.assertNotIn("max_completion_tokens", identity)
+        self.assertNotIn("request_timeout_sec", identity)
+
+    def test_spotting_ocr_identity_includes_its_request_contract(
+        self,
+    ) -> None:
+        identity = build_project_ocr_identity(
+            detection_fingerprint="7" * 64,
+            runtime_identity={"runtime_fingerprint": "spotting-runtime"},
+            policy={
+                "primary_ocr_engine": "PaddleOCR VL Spotting",
+                "normalized_ocr_mode": "paddleocr_vl_spotting",
+            },
+            paddle_settings={
+                "max_completion_tokens": 3000,
+                "request_timeout_sec": 360,
+            },
+            source_lang_english="Japanese",
+        )
+
+        self.assertEqual(identity["max_completion_tokens"], 3000)
+        self.assertEqual(identity["request_timeout_sec"], 360)
+
     def test_translation_checkpoint_uses_ctpr_state_without_sidecar_copy(
         self,
     ) -> None:
@@ -514,6 +557,67 @@ class ProjectStageCheckpointTests(unittest.TestCase):
                 restored_blocks[0].block_mask_decision,
                 "accepted",
             )
+
+    def test_inpaint_identity_changes_with_processing_action_and_mask(
+        self,
+    ) -> None:
+        blocks = self._blocks()
+        blocks[0].text = "OCR"
+        blocks[0].semantic_role = "dialogue_bubble"
+        blocks[0].processing_action = "translate_inpaint"
+        blocks[0].mask_strategy = "bubble_safe"
+        common = {
+            "source_sha256": "a" * 64,
+            "detection_fingerprint": "b" * 64,
+            "ocr_fingerprint": "c" * 64,
+            "brush_strokes": [],
+            "runtime": {
+                "key": "AOT",
+                "backend": "torch",
+                "precision": "fp32",
+            },
+            "model_identity": {
+                "id": "aot",
+                "declared_digests": ["1" * 64],
+            },
+            "hd_strategy": {"strategy": "Original"},
+            "mask_settings": {"mask_refiner": "ctd"},
+        }
+
+        translate_identity = build_inpaint_identity(
+            blocks=blocks,
+            **common,
+        )
+        blocks[0].compound_group_id = blocks[0].block_id
+        compound_identity = build_inpaint_identity(
+            blocks=blocks,
+            **common,
+        )
+        blocks[0].compound_group_id = ""
+        blocks[0].semantic_role = "ui_or_sign"
+        blocks[0].processing_action = "preserve"
+        blocks[0].mask_strategy = "preserve_original"
+        preserve_identity = build_inpaint_identity(
+            blocks=blocks,
+            **common,
+        )
+
+        self.assertNotEqual(
+            translate_identity["ordered_blocks_sha256"],
+            preserve_identity["ordered_blocks_sha256"],
+        )
+        self.assertNotEqual(
+            translate_identity["ordered_blocks_sha256"],
+            compound_identity["ordered_blocks_sha256"],
+        )
+        self.assertEqual(
+            translate_identity["ocr_processing_contract_schema"],
+            1,
+        )
+        self.assertNotEqual(
+            build_inpaint_fingerprint(translate_identity),
+            build_inpaint_fingerprint(preserve_identity),
+        )
 
     def test_inpaint_checkpoint_compresses_lossless_array_artifacts(
         self,

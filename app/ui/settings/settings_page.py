@@ -20,10 +20,18 @@ from modules.ocr.selection import (
     OCR_MODE_MANGALMM,
     OCR_MODE_MICROSOFT,
     OCR_MODE_PADDLE_VL,
+    OCR_MODE_PADDLE_VL_SPOTTING,
     OCR_OPTIMAL_LABEL,
     normalize_ocr_mode,
     normalize_workflow_mode,
     STAGE_BATCHED_WORKFLOW_MODE,
+)
+from modules.ocr.managed_backend_policy import (
+    LEGACY_VLLM_QSETTINGS_KEYS,
+    MANAGED_LLAMA_CPP_MIGRATION_VERSION,
+    MANAGED_LLAMA_CPP_MIGRATION_VERSION_KEY,
+    MANAGED_LOCAL_INFERENCE_BACKEND,
+    is_retired_vllm_backend,
 )
 from modules.translation.llm.custom_local_gemma import (
     GEMMA_REQUEST_MODE_CONTEXTUAL_SINGLE,
@@ -33,6 +41,8 @@ from .settings_ui import SettingsPageUI
 from .gemma_local_server_page import GemmaLocalServerPage
 from .hunyuan_ocr_page import HunyuanOCRPage
 from .mangalmm_ocr_page import MangaLMMOCRPage
+from .paddleocr_vl_page import PaddleOCRVLPage
+from .paddleocr_vl_spotting_page import PaddleOCRVLSpottingPage
 from app.ui.messages import Messages
 from app.update_checker import UpdateChecker
 from app.shortcuts import get_default_shortcuts
@@ -71,11 +81,44 @@ GEMMA_GROUPED_RETIREMENT_VERSION_KEY = (
     "gemma_local_server/grouped_retirement_version"
 )
 GEMMA_REQUEST_MODE_KEY = "gemma_local_server/request_mode"
+GEMMA_MODEL_RETIREMENT_VERSION = 1
+GEMMA_MODEL_RETIREMENT_VERSION_KEY = (
+    "gemma_local_server/model_retirement_version"
+)
+GEMMA_RETIRED_IQ4_XS_MODEL = (
+    "Gemma4-26B-A4B-Uncensored-HauhauCS-Balanced-IQ4_XS.gguf"
+)
+GEMMA_CREDENTIAL_MODEL_KEYS = (
+    "credentials/Custom Local Server(Gemma)_model",
+    "credentials/Custom Local Server_model",
+    "credentials/Custom_model",
+)
+GEMMA_CREDENTIAL_ENDPOINT_KEYS = (
+    "credentials/Custom Local Server(Gemma)_api_url",
+    "credentials/Custom Local Server_api_url",
+    "credentials/Custom_api_url",
+)
 PROJECT_CHECKPOINT_DEFAULT_VERSION = 1
 PROJECT_CHECKPOINT_DEFAULT_VERSION_KEY = (
     "project_checkpoint/default_version"
 )
 PROJECT_CHECKPOINT_ENABLED_KEY = "project_checkpoint/enabled"
+MANGALMM_FULL_PAGE_CONTRACT_VERSION = 1
+MANGALMM_FULL_PAGE_CONTRACT_VERSION_KEY = (
+    "mangalmm_ocr/full_page_contract_version"
+)
+MANGALMM_MAX_COMPLETION_TOKENS_KEY = (
+    "mangalmm_ocr/max_completion_tokens"
+)
+MANGALMM_LEGACY_DEFAULT_MAX_COMPLETION_TOKENS = 256
+PADDLE_DIRECT_TRANSPORT_MIGRATION_VERSION = 1
+PADDLE_DIRECT_TRANSPORT_MIGRATION_VERSION_KEY = (
+    "paddleocr_vl/direct_transport_migration_version"
+)
+PADDLE_SERVER_URL_KEY = "paddleocr_vl/server_url"
+PADDLE_LEGACY_RELAY_SERVER_URL = (
+    "http://127.0.0.1:28118/layout-parsing"
+)
 
 
 def migrate_retired_gemma_request_mode(settings: QSettings) -> bool:
@@ -121,6 +164,96 @@ def migrate_retired_gemma_request_mode(settings: QSettings) -> bool:
     return changed
 
 
+def migrate_retired_gemma_model(settings: QSettings) -> bool:
+    """Move the retired managed IQ4_XS candidate back to the product model once."""
+
+    try:
+        current_version = int(
+            settings.value(
+                GEMMA_MODEL_RETIREMENT_VERSION_KEY,
+                0,
+                type=int,
+            )
+            or 0
+        )
+    except (TypeError, ValueError):
+        current_version = 0
+    if current_version >= GEMMA_MODEL_RETIREMENT_VERSION:
+        return False
+
+    endpoint = ""
+    for key in GEMMA_CREDENTIAL_ENDPOINT_KEYS:
+        candidate = str(settings.value(key, "", type=str) or "").strip()
+        if candidate:
+            endpoint = candidate.rstrip("/")
+            break
+    managed_endpoint = endpoint in {
+        "",
+        GemmaLocalServerPage.DEFAULT_ENDPOINT_URL.rstrip("/"),
+    }
+
+    changed = False
+    if managed_endpoint:
+        for key in GEMMA_CREDENTIAL_MODEL_KEYS:
+            configured_model = str(
+                settings.value(key, "", type=str) or ""
+            ).strip()
+            if configured_model != GEMMA_RETIRED_IQ4_XS_MODEL:
+                continue
+            settings.setValue(key, GemmaLocalServerPage.DEFAULT_MODEL)
+            changed = True
+
+    settings.setValue(
+        GEMMA_MODEL_RETIREMENT_VERSION_KEY,
+        GEMMA_MODEL_RETIREMENT_VERSION,
+    )
+    settings.sync()
+    if changed:
+        logger.warning(
+            "Migrated retired managed Gemma IQ4_XS model to the IQ4_NL "
+            "product default."
+        )
+    return changed
+
+
+def migrate_managed_runtime_to_llamacpp(settings: QSettings) -> bool:
+    """Migrate only explicit legacy vLLM backend values once."""
+
+    try:
+        current_version = int(
+            settings.value(
+                MANAGED_LLAMA_CPP_MIGRATION_VERSION_KEY,
+                0,
+                type=int,
+            )
+            or 0
+        )
+    except (TypeError, ValueError):
+        current_version = 0
+    if current_version >= MANAGED_LLAMA_CPP_MIGRATION_VERSION:
+        return False
+
+    changed_keys: list[str] = []
+    for key in LEGACY_VLLM_QSETTINGS_KEYS:
+        configured_backend = settings.value(key, None)
+        if not is_retired_vllm_backend(configured_backend):
+            continue
+        settings.setValue(key, MANAGED_LOCAL_INFERENCE_BACKEND)
+        changed_keys.append(key)
+
+    settings.setValue(
+        MANAGED_LLAMA_CPP_MIGRATION_VERSION_KEY,
+        MANAGED_LLAMA_CPP_MIGRATION_VERSION,
+    )
+    settings.sync()
+    if changed_keys:
+        logger.warning(
+            "Migrated retired managed vLLM settings to llama.cpp: %s",
+            ", ".join(changed_keys),
+        )
+    return bool(changed_keys)
+
+
 def migrate_project_checkpoint_default(settings: QSettings) -> bool:
     """Enable validated project checkpoints once, then preserve user choice."""
 
@@ -144,6 +277,96 @@ def migrate_project_checkpoint_default(settings: QSettings) -> bool:
     )
     settings.sync()
     return True
+
+
+def migrate_mangalmm_full_page_contract(settings: QSettings) -> bool:
+    """Raise only the retired MangaLMM token default and preserve custom values."""
+
+    try:
+        current_version = int(
+            settings.value(
+                MANGALMM_FULL_PAGE_CONTRACT_VERSION_KEY,
+                0,
+                type=int,
+            )
+            or 0
+        )
+    except (TypeError, ValueError):
+        current_version = 0
+    if current_version >= MANGALMM_FULL_PAGE_CONTRACT_VERSION:
+        return False
+
+    try:
+        configured_tokens = int(
+            settings.value(
+                MANGALMM_MAX_COMPLETION_TOKENS_KEY,
+                MangaLMMOCRPage.DEFAULT_MAX_COMPLETION_TOKENS,
+                type=int,
+            )
+        )
+    except (TypeError, ValueError):
+        configured_tokens = None
+    changed = (
+        configured_tokens
+        == MANGALMM_LEGACY_DEFAULT_MAX_COMPLETION_TOKENS
+    )
+    if changed:
+        settings.setValue(
+            MANGALMM_MAX_COMPLETION_TOKENS_KEY,
+            MangaLMMOCRPage.DEFAULT_MAX_COMPLETION_TOKENS,
+        )
+        logger.warning(
+            "Migrated the retired MangaLMM 256-token default to the "
+            "4096-token full-page contract."
+        )
+
+    settings.setValue(
+        MANGALMM_FULL_PAGE_CONTRACT_VERSION_KEY,
+        MANGALMM_FULL_PAGE_CONTRACT_VERSION,
+    )
+    settings.sync()
+    return changed
+
+
+def migrate_paddle_crop_direct_transport(settings: QSettings) -> bool:
+    """Move only the retired managed relay URL to the direct endpoint once."""
+
+    try:
+        current_version = int(
+            settings.value(
+                PADDLE_DIRECT_TRANSPORT_MIGRATION_VERSION_KEY,
+                0,
+                type=int,
+            )
+            or 0
+        )
+    except (TypeError, ValueError):
+        current_version = 0
+    if current_version >= PADDLE_DIRECT_TRANSPORT_MIGRATION_VERSION:
+        return False
+
+    configured_url = settings.value(PADDLE_SERVER_URL_KEY, None)
+    changed = (
+        configured_url is not None
+        and str(configured_url).strip().rstrip("/")
+        == PADDLE_LEGACY_RELAY_SERVER_URL
+    )
+    if changed:
+        settings.setValue(
+            PADDLE_SERVER_URL_KEY,
+            PaddleOCRVLPage.DEFAULT_SERVER_URL,
+        )
+        logger.warning(
+            "Migrated the retired managed PaddleX crop relay URL to the "
+            "direct llama.cpp OCR endpoint."
+        )
+
+    settings.setValue(
+        PADDLE_DIRECT_TRANSPORT_MIGRATION_VERSION_KEY,
+        PADDLE_DIRECT_TRANSPORT_MIGRATION_VERSION,
+    )
+    settings.sync()
+    return changed
 
 
 class SettingsPage(QtWidgets.QWidget):
@@ -255,6 +478,7 @@ class SettingsPage(QtWidgets.QWidget):
             self.ui.extra_context,
             self.ui.project_autosave_folder_input,
             self.ui.paddleocr_vl_server_url_input,
+            self.ui.paddleocr_vl_spotting_server_url_input,
             self.ui.hunyuan_ocr_server_url_input,
             self.ui.mangalmm_ocr_server_url_input,
         ]
@@ -307,6 +531,8 @@ class SettingsPage(QtWidgets.QWidget):
             self.ui.paddleocr_vl_max_new_tokens_spinbox,
             self.ui.paddleocr_vl_parallel_workers_spinbox,
             self.ui.paddleocr_vl_persistent_cache_limit_spinbox,
+            self.ui.paddleocr_vl_spotting_max_completion_tokens_spinbox,
+            self.ui.paddleocr_vl_spotting_request_timeout_spinbox,
             self.ui.hunyuan_ocr_max_completion_tokens_spinbox,
             self.ui.hunyuan_ocr_parallel_workers_spinbox,
             self.ui.hunyuan_ocr_request_timeout_spinbox,
@@ -414,6 +640,9 @@ class SettingsPage(QtWidgets.QWidget):
             self.ui.tr("Google Cloud Vision"): OCR_MODE_GOOGLE,
             self.ui.tr("Gemini-2.0-Flash"): OCR_MODE_GEMINI,
             self.ui.tr("PaddleOCR VL"): OCR_MODE_PADDLE_VL,
+            self.ui.tr("PaddleOCR VL Spotting (Full Page)"): (
+                OCR_MODE_PADDLE_VL_SPOTTING
+            ),
             self.ui.tr("HunyuanOCR"): OCR_MODE_HUNYUAN,
             self.ui.tr("MangaLMM"): OCR_MODE_MANGALMM,
         }
@@ -445,6 +674,8 @@ class SettingsPage(QtWidgets.QWidget):
         }
 
     def get_paddleocr_vl_settings(self):
+        persisted_settings = QSettings("ComicLabs", "ComicTranslate")
+        migrate_paddle_crop_direct_transport(persisted_settings)
         server_url = self.ui.paddleocr_vl_server_url_input.text().strip()
         if not server_url:
             server_url = self.ui.paddleocr_vl_page.DEFAULT_SERVER_URL
@@ -465,6 +696,26 @@ class SettingsPage(QtWidgets.QWidget):
         return {
             "enabled": bool(
                 self.ui.project_checkpoint_enabled_checkbox.isChecked()
+            ),
+        }
+
+    def get_paddleocr_vl_spotting_settings(self):
+        server_url = (
+            self.ui.paddleocr_vl_spotting_server_url_input.text().strip()
+        )
+        if not server_url:
+            server_url = PaddleOCRVLSpottingPage.DEFAULT_SERVER_URL
+        return {
+            "server_url": server_url,
+            "max_completion_tokens": int(
+                self.ui
+                .paddleocr_vl_spotting_max_completion_tokens_spinbox
+                .value()
+            ),
+            "request_timeout_sec": int(
+                self.ui
+                .paddleocr_vl_spotting_request_timeout_spinbox
+                .value()
             ),
         }
 
@@ -784,6 +1035,9 @@ class SettingsPage(QtWidgets.QWidget):
                 "inpainter_runtime": self.get_inpainter_runtime_settings(),
             },
             "paddleocr_vl": self.get_paddleocr_vl_settings(),
+            "paddleocr_vl_spotting": (
+                self.get_paddleocr_vl_spotting_settings()
+            ),
             "hunyuan_ocr": self.get_hunyuan_ocr_settings(),
             "mangalmm_ocr": self.get_mangalmm_ocr_settings(),
             "gemma_local_server": self.get_gemma_local_server_settings(),
@@ -924,7 +1178,11 @@ class SettingsPage(QtWidgets.QWidget):
         self._loading_settings = True
         settings = QSettings("ComicLabs", "ComicTranslate")
         migrate_retired_gemma_request_mode(settings)
+        migrate_retired_gemma_model(settings)
+        migrate_managed_runtime_to_llamacpp(settings)
         migrate_project_checkpoint_default(settings)
+        migrate_mangalmm_full_page_contract(settings)
+        migrate_paddle_crop_direct_transport(settings)
 
         language = settings.value("language", "English")
         translated_language = self.ui.reverse_mappings.get(language, language)
@@ -1045,6 +1303,30 @@ class SettingsPage(QtWidgets.QWidget):
             settings.value(
                 "persistent_cache_limit",
                 self.ui.paddleocr_vl_page.DEFAULT_PERSISTENT_CACHE_LIMIT,
+                type=int,
+            )
+        )
+        settings.endGroup()
+
+        settings.beginGroup("paddleocr_vl_spotting")
+        self.ui.paddleocr_vl_spotting_server_url_input.setText(
+            settings.value(
+                "server_url",
+                PaddleOCRVLSpottingPage.DEFAULT_SERVER_URL,
+                type=str,
+            )
+        )
+        self.ui.paddleocr_vl_spotting_max_completion_tokens_spinbox.setValue(
+            settings.value(
+                "max_completion_tokens",
+                PaddleOCRVLSpottingPage.DEFAULT_MAX_COMPLETION_TOKENS,
+                type=int,
+            )
+        )
+        self.ui.paddleocr_vl_spotting_request_timeout_spinbox.setValue(
+            settings.value(
+                "request_timeout_sec",
+                PaddleOCRVLSpottingPage.DEFAULT_REQUEST_TIMEOUT_SEC,
                 type=int,
             )
         )

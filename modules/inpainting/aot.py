@@ -22,6 +22,7 @@ class AOT(InpaintModel):
         self.backend = str(kwargs.get("backend", "torch") or "torch")
         self.runtime_device = str(kwargs.get("runtime_device", device) or device)
         self.inpaint_size = int(kwargs.get("inpaint_size", 2048) or 2048)
+        self.precision = str(kwargs.get("precision", "fp32") or "fp32")
         self.device = self.runtime_device
         if self.backend == "onnx":
             ModelDownloader.get(ModelID.AOT_ONNX)
