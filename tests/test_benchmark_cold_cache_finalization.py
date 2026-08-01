@@ -524,7 +524,7 @@ class ColdCacheFinalizationTests(unittest.TestCase):
         self.assertTrue(candidate["speed_gate_passed"])
         self.assertTrue(candidate["automated_gate_passed"])
 
-    def test_ocr_candidate_needs_five_percent_and_stable_rounds(self) -> None:
+    def test_ocr_candidate_has_no_minimum_speed_percentage(self) -> None:
         protocol = finalization.load_protocol()
         family = finalization._family(protocol, "paddle-workers")
 
@@ -557,7 +557,7 @@ class ColdCacheFinalizationTests(unittest.TestCase):
             [
                 result("workers-4", 1, 8_000),
                 result("workers-4", 2, 8_000),
-                result("workers-4", 3, 10_000),
+                result("workers-4", 3, 12_000),
             ]
         )
 
@@ -571,9 +571,10 @@ class ColdCacheFinalizationTests(unittest.TestCase):
             item["candidate"]: item for item in analysis["candidates"]
         }
 
-        self.assertFalse(by_id["workers-6"]["speed_gate_passed"])
-        self.assertFalse(by_id["workers-6"]["automated_gate_passed"])
+        self.assertTrue(by_id["workers-6"]["speed_gate_passed"])
+        self.assertTrue(by_id["workers-6"]["automated_gate_passed"])
         self.assertFalse(by_id["workers-4"]["variance_gate_passed"])
+        self.assertFalse(by_id["workers-4"]["speed_gate_passed"])
         self.assertFalse(by_id["workers-4"]["automated_gate_passed"])
 
     def test_stage_candidate_can_qualify_via_expected_full_improvement(
@@ -582,9 +583,10 @@ class ColdCacheFinalizationTests(unittest.TestCase):
         protocol = finalization.load_protocol()
         family = finalization._family(protocol, "paddle-workers")
 
-        def result(candidate: str, wall_ms: int):
+        def result(candidate: str, round_index: int, wall_ms: int):
             return {
                 "candidate": candidate,
+                "round": round_index,
                 "status": "passed",
                 "performance_stats": {
                     "run_wall_ms": wall_ms,
@@ -598,17 +600,14 @@ class ColdCacheFinalizationTests(unittest.TestCase):
                 },
             }
 
-        results = [
-            result(candidate, wall_ms)
-            for candidate, wall_ms in (
-                ("workers-8", 10_000),
-                ("workers-8", 10_000),
-                ("workers-8", 10_000),
-                ("workers-6", 9_800),
-                ("workers-6", 9_800),
-                ("workers-6", 9_800),
+        results = []
+        for round_index in range(1, 4):
+            results.extend(
+                [
+                    result("workers-8", round_index, 10_000),
+                    result("workers-6", round_index, 9_800),
+                ]
             )
-        ]
         without_reference = finalization.analyze_pipeline_results(
             protocol=protocol,
             family=family,
@@ -637,7 +636,8 @@ class ColdCacheFinalizationTests(unittest.TestCase):
             if item["candidate"] == "workers-6"
         )
 
-        self.assertFalse(without_candidate["speed_gate_passed"])
+        self.assertTrue(without_candidate["speed_gate_passed"])
+        self.assertTrue(without_candidate["automated_gate_passed"])
         self.assertEqual(
             with_candidate["expected_full_improvement_percent"],
             2.0,
