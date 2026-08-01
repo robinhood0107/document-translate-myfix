@@ -193,3 +193,24 @@ OCR/번역 결과, DB와 sidecar는 Git 밖에만 보존합니다. cold 후보�
 - 따라서 신규 이미지 cold 실행을 반복 측정상 단축하면서 all-hit zero-runtime 계약도 보존해 제품 승격으로 확정했습니다.
 
 상세 근거: [Paddle 현재-폴더 source-aware prewarm 최종 판정](./paddle-source-aware-prewarm-final-decision-ko.md)
+
+## 2026-08-01 Gemma WSL 20GB 최종 런타임 선별
+
+- IQ4_NL/IQ4_XS, batch, ubatch, NGL, prompt cache RAM, chunk 축을
+  일본어·중국어·영어 54블록에서 각각 3회 순서 교차로 실행했습니다.
+- 고정 5% 향상 문턱을 폐기하고 paired end-to-end와 request-only 단측 95%
+  bootstrap 하한이 모두 0%보다 큰 작은 이득도 품질 검수로 보냈습니다.
+- `batch=4096`은 E2E 3.512%, request-only 2.589%의 확정 이득이 있었지만
+  관계·행동 의미 손실과 비정상 혼합 문자열 때문에 탈락했습니다.
+- `cache-ram=256`도 E2E 1.915%, request-only 2.105%의 확정 이득이 있었지만
+  중국어 짧은 원문을 신음으로 바꾸는 candidate-only 회귀가 있어 탈락했습니다.
+- IQ4_XS는 request-only 평균 1.527% 빨랐지만 하한 -2.026%로 우위가
+  불확실했고, 사물·접촉 대상·친족 관계 회귀가 있어 IQ4_NL을 유지합니다.
+- NGL 30/31, ubatch 256/384/768, chunk 9/12는 느리거나 라운드 승패가
+  뒤집혔습니다.
+- 최종 제품 프로필은 IQ4_NL, contextual-single, chunk 6, no-spec, F16,
+  batch/ubatch 2048/512, NGL 23, prompt cache RAM 0 MiB입니다.
+- 54블록 품질 게이트를 통과한 후보가 없어 292행 blind 검수는 정상
+  취소됐습니다.
+
+상세 근거: [Gemma WSL 20GB 런타임 최종 판정](./gemma-runtime-finalization-wsl20-final-decision-ko.md)
