@@ -38,5 +38,24 @@ UI 추가 검출은 자동 탈락시키지 않습니다. 최종 우선순위는 
 원문 정확도, merge/split 의미 손실, SFX/UI의 파괴적 편집, parser/length 실패,
 마지막으로 속도입니다.
 
-현재 단계에서는 세 경로 모두 결과를 보존하며 기본값은 Paddle crop입니다. 다음
-판정은 정답 lock과 세 route A/B/C 전수 검수가 끝난 뒤에만 갱신합니다.
+## 2026-08-01 source-first 전수 검수 완료
+
+Japan 22페이지의 원본과 확대 crop을 후보 출력보다 먼저 판독해 truth를 잠그고, 세
+경로의 A/B/C 결과를 전수 검수했습니다.
+
+| 경로 | transcription exact | normalized character accuracy | semantic recall | merge/split |
+|---|---:|---:|---:|---:|
+| Paddle crop | 188/317, 59.31% | 76.10% | 177/187, 94.65% | 2 |
+| Paddle Spotting | 140/317, 44.16% | 62.59% | 156/187, 83.42% | 10 |
+| MangaLMM | 124/317, 39.12% | 57.69% | 151/187, 80.75% | 30 |
+
+공백·줄바꿈·문장부호만 다른 Paddle crop 결과까지 포함한 reviewed transcription은
+211/317입니다. MangaLMM 반복 방지 경로의 CUDA Japan 실행은 22/22페이지,
+27 attempts, length 실패 0, 804.550초였고 ELVEN도 24/24페이지와 과거 실패 사례
+2/2를 복원했습니다. 구조 안정화가 사람 기준 의미 정확도 우위를 뜻하지는 않았습니다.
+
+세 경로 모두 파괴적 편집을 자동 허용하지 않았지만, full-page 두 경로는 detector
+block과 OCR line의 N:1·1:N 관계 때문에 의미 recall과 merge/split에서 기준선보다
+낮았습니다. Paddle crop을 추천·기본값으로 유지하고 다른 두 경로는 Experimental로
+보존합니다. COO shadow는 안전한 SFX/의미 대사 분리점이 없어 어느 경로에도
+적용하지 않습니다.
