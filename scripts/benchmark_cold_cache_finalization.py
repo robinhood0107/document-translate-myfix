@@ -953,6 +953,59 @@ def _reduction_percent(baseline: float, candidate: float) -> float:
     return ((baseline - candidate) / baseline) * 100.0
 
 
+def _paired_speed_evidence(
+    baseline_values: list[float],
+    candidate_values: list[float],
+    *,
+    samples: int = 100_000,
+    seed: int = 20260801,
+) -> dict[str, Any]:
+    if (
+        not baseline_values
+        or len(baseline_values) != len(candidate_values)
+        or any(value <= 0.0 for value in baseline_values)
+    ):
+        return {
+            "pair_count": 0,
+            "mean_gain_percent": 0.0,
+            "one_sided_95_lower_percent": 0.0,
+            "one_sided_95_upper_percent": 0.0,
+            "proven_faster": False,
+            "proven_slower": False,
+            "uncertain": True,
+        }
+    gains = [
+        ((baseline - candidate) / baseline) * 100.0
+        for baseline, candidate in zip(
+            baseline_values,
+            candidate_values,
+            strict=True,
+        )
+    ]
+    rng = random.Random(seed)
+    estimates = sorted(
+        statistics.mean(
+            gains[rng.randrange(len(gains))]
+            for _ in range(len(gains))
+        )
+        for _ in range(samples)
+    )
+    lower_index = int((samples - 1) * 0.05)
+    upper_index = int((samples - 1) * 0.95)
+    lower = float(estimates[lower_index])
+    upper = float(estimates[upper_index])
+    return {
+        "pair_count": len(gains),
+        "mean_gain_percent": round(statistics.mean(gains), 6),
+        "median_gain_percent": round(statistics.median(gains), 6),
+        "one_sided_95_lower_percent": round(lower, 6),
+        "one_sided_95_upper_percent": round(upper, 6),
+        "proven_faster": lower > 0.0,
+        "proven_slower": upper < 0.0,
+        "uncertain": lower <= 0.0 <= upper,
+    }
+
+
 def _net_gain_percent(control_total: float, cache_total: float) -> float:
     if control_total <= 0 or cache_total <= 0:
         return float("-inf")
@@ -1020,13 +1073,21 @@ def analyze_pipeline_results(
         and "" not in baseline_ocr_digests
         and "" not in baseline_detection_digests
     )
+    baseline_by_round = {
+        int(result.get("round", 0)): result
+        for result in grouped[baseline_id]
+        if str(result.get("status")) == "passed"
+    }
 
     for candidate_id, candidate_results in grouped.items():
-        passed_runs = [
+        passed_runs = sorted(
+            [
             result
             for result in candidate_results
             if str(result.get("status")) == "passed"
-        ]
+            ],
+            key=lambda result: int(result.get("round", 0)),
+        )
         timings = [
             _stage_elapsed(result, stage)
             for result in passed_runs
@@ -1121,18 +1182,37 @@ def analyze_pipeline_results(
                 else None
             )
         )
-        stage_speed_passed = (
-            improvement >= float(gates["stage_improvement_percent"])
+        paired_rounds = [
+            int(result.get("round", 0))
+            for result in passed_runs
+            if int(result.get("round", 0)) in baseline_by_round
+        ]
+        paired_stage_speed = _paired_speed_evidence(
+            [
+                _stage_elapsed(baseline_by_round[round_index], stage)
+                for round_index in paired_rounds
+            ],
+            [
+                _stage_elapsed(result, stage)
+                for result in passed_runs
+                if int(result.get("round", 0)) in baseline_by_round
+            ],
         )
-        expected_full_speed_passed = (
-            expected_full_improvement is not None
-            and expected_full_improvement
-            >= float(gates["expected_full_improvement_percent"])
+        paired_full_speed = _paired_speed_evidence(
+            [
+                _stage_elapsed(baseline_by_round[round_index], "full")
+                for round_index in paired_rounds
+            ],
+            [
+                _stage_elapsed(result, "full")
+                for result in passed_runs
+                if int(result.get("round", 0)) in baseline_by_round
+            ],
         )
         speed_passed = (
             candidate_id == baseline_id
-            or stage_speed_passed
-            or expected_full_speed_passed
+            or bool(paired_stage_speed["proven_faster"])
+            or bool(paired_full_speed["proven_faster"])
         )
         variance_passed = (
             variance_percent
@@ -1144,7 +1224,6 @@ def analyze_pipeline_results(
             len(passed_runs) == int(limits["rounds"])
             and page_limits_passed
             and speed_passed
-            and variance_passed
             and (
                 quality_exact if structural_quality_required else True
             )
@@ -1201,13 +1280,11 @@ def analyze_pipeline_results(
                     else None
                 ),
                 "speed_gate_passed": speed_passed,
+                "paired_stage_speed": paired_stage_speed,
+                "paired_full_speed": paired_full_speed,
                 "variance_gate_passed": variance_passed,
-                "stage_improvement_gate_percent": float(
-                    gates["stage_improvement_percent"]
-                ),
-                "expected_full_improvement_gate_percent": float(
-                    gates["expected_full_improvement_percent"]
-                ),
+                "stage_improvement_gate_percent": 0.0,
+                "expected_full_improvement_gate_percent": 0.0,
                 "automated_gate_passed": automated_passed,
                 "requires_private_meaning_review": (
                     quality_gate
@@ -1255,6 +1332,8 @@ def analyze_pipeline_results(
             "",
         ),
         "note": (
+            "No minimum speed percentage is used. Paired stage or full "
+            "timings must have a one-sided 95% lower bound above 0%. "
             "Meaning-changing candidates remain unpromotable until the "
             "separate private blind quality gate is complete."
         ),
@@ -1272,13 +1351,13 @@ def _render_pipeline_report(analysis: Mapping[str, Any]) -> str:
         f"- full reference: `{analysis.get('full_reference') or 'none'}`",
         f"- automated winner: `{analysis.get('winner') or 'none'}`",
         "",
-        "| candidate | runs | passed | stage sec | screening wall sec | stage improvement % | expected full % | stage variance % | wall variance % | structural quality | speed gate | variance gate | automated gate | meaning review |",
-        "|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|",
+        "| candidate | runs | passed | stage sec | screening wall sec | stage improvement % | paired stage lower % | paired full lower % | structural quality | speed gate | variance diagnostic | automated gate | meaning review |",
+        "|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|",
     ]
     for item in analysis.get("candidates", []):
         lines.append(
             "| {candidate} | {runs} | {passed} | {median} | {wall} | "
-            "{improvement} | {expected_full} | {variance} | {wall_variance} | "
+            "{improvement} | {stage_lower} | {full_lower} | "
             "{quality} | {speed} | {variance_gate} | "
             "{gate} | {review} |".format(
                 candidate=item.get("candidate", ""),
@@ -1286,17 +1365,16 @@ def _render_pipeline_report(analysis: Mapping[str, Any]) -> str:
                 passed=item.get("passed_run_count", 0),
                 median=item.get("median_stage_elapsed_sec", ""),
                 wall=item.get("median_screening_wall_sec", ""),
-                variance=item.get("variance_percent", ""),
-                wall_variance=item.get(
-                    "screening_wall_variance_percent",
+                stage_lower=(item.get("paired_stage_speed") or {}).get(
+                    "one_sided_95_lower_percent",
+                    "",
+                ),
+                full_lower=(item.get("paired_full_speed") or {}).get(
+                    "one_sided_95_lower_percent",
                     "",
                 ),
                 improvement=item.get(
                     "improvement_vs_baseline_percent",
-                    "",
-                ),
-                expected_full=item.get(
-                    "expected_full_improvement_percent",
                     "",
                 ),
                 quality=item.get("structural_quality_passed", ""),
@@ -2245,58 +2323,6 @@ def _analyze_translation_results(
     baseline_id: str,
     results: list[dict[str, Any]],
 ) -> dict[str, Any]:
-    def paired_speed_evidence(
-        baseline_values: list[float],
-        candidate_values: list[float],
-        *,
-        samples: int = 100_000,
-        seed: int = 20260801,
-    ) -> dict[str, Any]:
-        if (
-            not baseline_values
-            or len(baseline_values) != len(candidate_values)
-            or any(value <= 0.0 for value in baseline_values)
-        ):
-            return {
-                "pair_count": 0,
-                "mean_gain_percent": 0.0,
-                "one_sided_95_lower_percent": 0.0,
-                "one_sided_95_upper_percent": 0.0,
-                "proven_faster": False,
-                "proven_slower": False,
-                "uncertain": True,
-            }
-        gains = [
-            ((baseline - candidate) / baseline) * 100.0
-            for baseline, candidate in zip(
-                baseline_values,
-                candidate_values,
-                strict=True,
-            )
-        ]
-        rng = random.Random(seed)
-        estimates = sorted(
-            statistics.mean(
-                gains[rng.randrange(len(gains))]
-                for _ in range(len(gains))
-            )
-            for _ in range(samples)
-        )
-        lower_index = int((samples - 1) * 0.05)
-        upper_index = int((samples - 1) * 0.95)
-        lower = float(estimates[lower_index])
-        upper = float(estimates[upper_index])
-        return {
-            "pair_count": len(gains),
-            "mean_gain_percent": round(statistics.mean(gains), 6),
-            "median_gain_percent": round(statistics.median(gains), 6),
-            "one_sided_95_lower_percent": round(lower, 6),
-            "one_sided_95_upper_percent": round(upper, 6),
-            "proven_faster": lower > 0.0,
-            "proven_slower": upper < 0.0,
-            "uncertain": lower <= 0.0 <= upper,
-        }
-
     grouped: dict[str, list[dict[str, Any]]] = defaultdict(list)
     for result in results:
         grouped[str(result["candidate"])].append(result)
@@ -2341,7 +2367,7 @@ def _analyze_translation_results(
             for item in items
             if int(item.get("round", 0)) in baseline_by_round
         ]
-        paired_e2e = paired_speed_evidence(
+        paired_e2e = _paired_speed_evidence(
             [float(item.get("elapsed_sec", 0.0) or 0.0) for item in paired_baseline],
             timings,
         )
@@ -2361,7 +2387,7 @@ def _analyze_translation_results(
             / 1000.0
             for item in items
         ]
-        paired_request = paired_speed_evidence(
+        paired_request = _paired_speed_evidence(
             baseline_request,
             candidate_request,
         )

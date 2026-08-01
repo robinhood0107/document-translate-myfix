@@ -214,3 +214,21 @@ OCR/번역 결과, DB와 sidecar는 Git 밖에만 보존합니다. cold 후보�
   취소됐습니다.
 
 상세 근거: [Gemma WSL 20GB 런타임 최종 판정](./gemma-runtime-finalization-wsl20-final-decision-ko.md)
+
+## 2026-08-01 Gemma 명시적 page-cache read-ahead
+
+- Gemma 모델 파일 하나만 `POSIX_FADV_DONTNEED`와 `mincore`로 0 resident
+  page 상태로 만들고 실제 S1 Stage-Batched AB/BA를 3회 실행했습니다.
+- 첫 deep-cold에서는 전체 156.961초→97.554초, Gemma 시작
+  59.741초→16.022초로 크게 줄었습니다.
+- 그러나 Windows/VHD 하위 cache가 데워진 뒤 두 라운드에서는 후보가 각각
+  0.145%, 0.229% 느렸습니다.
+- paired median 개선은 -0.145%, 단측 95% bootstrap 하한은 -0.201%로
+  반복 이득을 입증하지 못했습니다.
+- 후보 세 실행의 WSL swap은 각각 0.121~0.164 MiB 증가해 strict delta 0
+  계약도 통과하지 못했습니다.
+- 따라서 명시적 read-ahead는 제품에 넣지 않고 S6 확대를 정상 취소했습니다.
+  versioned named volume과 정상 `stop`으로 자동 유지되는 자연 OS page cache만
+  계속 사용합니다.
+
+상세 근거: [Gemma page-cache read-ahead 최종 판정](./gemma-pagecache-prefetch-final-decision-ko.md)

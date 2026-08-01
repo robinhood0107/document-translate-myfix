@@ -69,6 +69,79 @@ GEMMA_ENV_OVERRIDES = {
     "response_schema_mode": "CT_GEMMA_RESPONSE_SCHEMA_MODE",
     "think_briefly_prompt": "CT_GEMMA_THINK_BRIEFLY_PROMPT",
 }
+GEMMA_PAGECACHE_SCRIPT = r"""
+import ctypes
+import json
+import os
+import time
+
+path = "/models/" + os.environ["MODEL_FILE"]
+action = os.environ["ACTION"]
+fd = os.open(path, os.O_RDONLY)
+size = os.fstat(fd).st_size
+started = time.monotonic()
+
+def residency():
+    page_size = os.sysconf("SC_PAGE_SIZE")
+    page_count = (size + page_size - 1) // page_size
+    libc = ctypes.CDLL(None, use_errno=True)
+    libc.mmap.argtypes = [
+        ctypes.c_void_p,
+        ctypes.c_size_t,
+        ctypes.c_int,
+        ctypes.c_int,
+        ctypes.c_int,
+        ctypes.c_longlong,
+    ]
+    libc.mmap.restype = ctypes.c_void_p
+    libc.mincore.argtypes = [
+        ctypes.c_void_p,
+        ctypes.c_size_t,
+        ctypes.POINTER(ctypes.c_ubyte),
+    ]
+    libc.mincore.restype = ctypes.c_int
+    libc.munmap.argtypes = [ctypes.c_void_p, ctypes.c_size_t]
+    libc.munmap.restype = ctypes.c_int
+    address = libc.mmap(None, size, 1, 1, fd, 0)
+    if address in (None, ctypes.c_void_p(-1).value):
+        raise OSError(ctypes.get_errno(), "mmap failed")
+    vector = (ctypes.c_ubyte * page_count)()
+    try:
+        if libc.mincore(ctypes.c_void_p(address), size, vector) != 0:
+            raise OSError(ctypes.get_errno(), "mincore failed")
+        resident_pages = sum(1 for value in vector if value & 1)
+    finally:
+        libc.munmap(ctypes.c_void_p(address), size)
+    return page_count, resident_pages
+
+try:
+    total = 0
+    if action == "evict":
+        os.posix_fadvise(fd, 0, 0, os.POSIX_FADV_DONTNEED)
+    elif action == "read":
+        os.posix_fadvise(fd, 0, 0, os.POSIX_FADV_SEQUENTIAL)
+        while True:
+            chunk = os.read(fd, 8 * 1024 * 1024)
+            if not chunk:
+                break
+            total += len(chunk)
+    elif action != "resident":
+        raise ValueError("unsupported action: " + action)
+    page_count, resident_pages = residency()
+    print(json.dumps({
+        "action": action,
+        "model_bytes": size,
+        "read_bytes": total,
+        "page_count": page_count,
+        "resident_pages": resident_pages,
+        "resident_percent": (
+            (resident_pages / page_count) * 100.0 if page_count else 0.0
+        ),
+        "elapsed_sec": time.monotonic() - started,
+    }, sort_keys=True))
+finally:
+    os.close(fd)
+""".strip()
 
 def _log(message: str) -> None:
     print(f"[benchmark] {message}", flush=True)
@@ -173,6 +246,207 @@ def _restore_env(snapshot: dict[str, str | None]) -> None:
             os.environ.pop(key, None)
         else:
             os.environ[key] = value
+
+
+def _gemma_pagecache_contract(window):
+    from modules.translation.local_runtime import LocalGemmaRuntimeManager
+
+    manager = getattr(window, "local_translation_runtime_manager", None)
+    if not isinstance(manager, LocalGemmaRuntimeManager):
+        raise RuntimeError(
+            "Gemma page-cache benchmark requires the managed local runtime."
+        )
+    settings_page = window.settings_page
+    _, model_name = manager._resolve_credentials(settings_page)
+    if not manager.should_manage_server(settings_page):
+        raise RuntimeError(
+            "Gemma page-cache benchmark cannot use an unmanaged endpoint."
+        )
+    return manager._load_runtime_contract(model_name)
+
+
+def _gemma_pagecache_command(
+    contract,
+    *,
+    action: str,
+    container_name: str = "",
+) -> list[str]:
+    if action not in {"evict", "read", "resident"}:
+        raise ValueError(f"Unsupported Gemma page-cache action: {action}")
+    command = [
+        "docker",
+        "run",
+        "--rm",
+        "--pull",
+        "never",
+        "--network",
+        "none",
+    ]
+    if container_name:
+        command.extend(["--name", container_name])
+    command.extend(
+        [
+            "-e",
+            f"MODEL_FILE={contract.model_name}",
+            "-e",
+            f"ACTION={action}",
+            "--mount",
+            (
+                "type=volume,source="
+                f"{contract.volume_name},target=/models,readonly"
+            ),
+            "--entrypoint",
+            "/usr/bin/ionice",
+            contract.image_ref,
+            "-c",
+            "3",
+            "/usr/bin/nice",
+            "-n",
+            "19",
+            "/usr/bin/python3",
+            "-c",
+            GEMMA_PAGECACHE_SCRIPT,
+        ]
+    )
+    return command
+
+
+def _run_gemma_pagecache_action(contract, action: str) -> dict[str, object]:
+    completed = run_command(
+        _gemma_pagecache_command(contract, action=action),
+        check=False,
+    )
+    if completed.returncode != 0:
+        raise RuntimeError(
+            "Gemma page-cache action failed: "
+            f"action={action} exit={completed.returncode} "
+            f"stderr={(completed.stderr or '').strip()}"
+        )
+    try:
+        payload = json.loads((completed.stdout or "").strip())
+    except json.JSONDecodeError as exc:
+        raise RuntimeError(
+            "Gemma page-cache action returned invalid JSON."
+        ) from exc
+    if not isinstance(payload, dict):
+        raise RuntimeError(
+            "Gemma page-cache action returned a non-object payload."
+        )
+    return payload
+
+
+class _GemmaPagecachePrefetch:
+    def __init__(self, contract, run_dir: Path) -> None:
+        self.contract = contract
+        self.run_dir = run_dir
+        self.container_name = (
+            f"ct-gemma-pagecache-prefetch-{os.getpid()}-{time.time_ns()}"
+        )
+        self.started_at = 0.0
+        self.result: dict[str, object] = {}
+        self.completed = None
+        self.thread: threading.Thread | None = None
+
+    def start(self) -> None:
+        self.started_at = time.perf_counter()
+
+        def worker() -> None:
+            self.completed = run_command(
+                _gemma_pagecache_command(
+                    self.contract,
+                    action="read",
+                    container_name=self.container_name,
+                ),
+                check=False,
+            )
+
+        self.thread = threading.Thread(
+            target=worker,
+            name="gemma-pagecache-prefetch",
+            daemon=False,
+        )
+        self.thread.start()
+
+    def finish(self) -> dict[str, object]:
+        thread = self.thread
+        if thread is None:
+            raise RuntimeError("Gemma page-cache prefetch was not started.")
+        cancelled = thread.is_alive()
+        stop_report: dict[str, object] = {}
+        if cancelled:
+            stopped = run_command(
+                ["docker", "stop", "--time", "1", self.container_name],
+                check=False,
+            )
+            stop_report = {
+                "returncode": int(stopped.returncode),
+                "stderr": (stopped.stderr or "").strip(),
+            }
+        thread.join(timeout=30.0)
+        if thread.is_alive():
+            raise RuntimeError(
+                "Gemma page-cache prefetch did not stop after inpaint."
+            )
+        completed = self.completed
+        if completed is None:
+            raise RuntimeError("Gemma page-cache prefetch returned no result.")
+        allowed_codes = {0, 137, 143} if cancelled else {0}
+        if int(completed.returncode) not in allowed_codes:
+            raise RuntimeError(
+                "Gemma page-cache prefetch failed: "
+                f"exit={completed.returncode} "
+                f"stderr={(completed.stderr or '').strip()}"
+            )
+        residency = _run_gemma_pagecache_action(
+            self.contract,
+            "resident",
+        )
+        payload = {
+            "schema_version": 1,
+            "mode": "read-ahead-during-inpaint",
+            "cancelled_after_inpaint": cancelled,
+            "helper_exit_code": int(completed.returncode),
+            "elapsed_sec": round(
+                time.perf_counter() - self.started_at,
+                6,
+            ),
+            "stop_report": stop_report,
+            "residency_after_inpaint": residency,
+        }
+        if completed.stdout:
+            try:
+                payload["completed_read"] = json.loads(
+                    completed.stdout.strip()
+                )
+            except json.JSONDecodeError:
+                payload["completed_read"] = {}
+        write_json(
+            self.run_dir / "gemma_pagecache_prefetch.json",
+            payload,
+        )
+        self.result = payload
+        return payload
+
+
+def _install_gemma_pagecache_prefetch(window, run_dir: Path):
+    processor = window.pipeline.stage_batched_processor
+    original = processor._inpaint_all
+    contract = _gemma_pagecache_contract(window)
+
+    def wrapped(pages):
+        prefetch = _GemmaPagecachePrefetch(contract, run_dir)
+        prefetch.start()
+        try:
+            return original(pages)
+        finally:
+            prefetch.finish()
+
+    processor._inpaint_all = wrapped
+
+    def restore() -> None:
+        processor._inpaint_all = original
+
+    return restore
 
 
 @contextmanager
@@ -942,6 +1216,7 @@ def _run_single_mode(
     os.environ["CT_BENCH_EXECUTION_SCOPE"] = "detect-ocr-only" if stage_ceiling == "ocr" else "full-pipeline"
     performance_stats: dict[str, object] = {}
     loaded_paths: list[str] = []
+    gemma_pagecache_reset: dict[str, object] = {}
     try:
         _log(
             "실행 시작: mode={mode} output={run_dir} images={count} source={source} target={target}".format(
@@ -1017,18 +1292,68 @@ def _run_single_mode(
                     total_images=len(loaded_paths),
                 )
 
+                pagecache_policy = preset.get(
+                    "benchmark_gemma_pagecache",
+                    {},
+                )
+                if not isinstance(pagecache_policy, dict):
+                    raise ValueError(
+                        "benchmark_gemma_pagecache must be an object."
+                    )
+                pagecache_mode = str(
+                    pagecache_policy.get("mode", "off") or "off"
+                )
+                if pagecache_mode not in {
+                    "off",
+                    "read-ahead-during-inpaint",
+                }:
+                    raise ValueError(
+                        "Unsupported benchmark Gemma page-cache mode: "
+                        f"{pagecache_mode}"
+                    )
+                if bool(pagecache_policy.get("reset_before_run", False)):
+                    contract = _gemma_pagecache_contract(window)
+                    gemma_pagecache_reset = _run_gemma_pagecache_action(
+                        contract,
+                        "evict",
+                    )
+                    if int(
+                        gemma_pagecache_reset.get("resident_pages", -1)
+                    ) != 0:
+                        raise RuntimeError(
+                            "Gemma model file did not become fully cold before "
+                            "the controlled benchmark run."
+                        )
+                    write_json(
+                        run_dir / "gemma_pagecache_reset.json",
+                        gemma_pagecache_reset,
+                    )
+                    _log("Gemma model page cache reset 완료: resident_pages=0")
+
+                restore_pagecache_hook = None
+                if pagecache_mode == "read-ahead-during-inpaint":
+                    restore_pagecache_hook = _install_gemma_pagecache_prefetch(
+                        window,
+                        run_dir,
+                    )
+                    _log("Gemma 저우선순위 read-ahead hook 설치 완료")
+
                 started = time.perf_counter()
-                if mode == "one-page":
-                    _log("one-page 벤치 실행 중...")
-                    window.pipeline.batch_process([loaded_paths[0]])
-                elif mode == "batch":
-                    _log("batch 벤치 실행 중...")
-                    window.pipeline.batch_process(loaded_paths)
-                elif mode == "webtoon":
-                    _log("webtoon 벤치 실행 중...")
-                    window.pipeline.webtoon_batch_process(loaded_paths)
-                else:
-                    raise ValueError(f"Unsupported benchmark mode: {mode}")
+                try:
+                    if mode == "one-page":
+                        _log("one-page 벤치 실행 중...")
+                        window.pipeline.batch_process([loaded_paths[0]])
+                    elif mode == "batch":
+                        _log("batch 벤치 실행 중...")
+                        window.pipeline.batch_process(loaded_paths)
+                    elif mode == "webtoon":
+                        _log("webtoon 벤치 실행 중...")
+                        window.pipeline.webtoon_batch_process(loaded_paths)
+                    else:
+                        raise ValueError(f"Unsupported benchmark mode: {mode}")
+                finally:
+                    if restore_pagecache_hook is not None:
+                        restore_pagecache_hook()
                 elapsed = time.perf_counter() - started
                 _log(f"파이프라인 실행 완료: elapsed={elapsed:.3f}s")
 
@@ -1120,8 +1445,27 @@ def _run_single_mode(
                     else {}
                 ).get("project_checkpoint", False)
             ),
+            "gemma_pagecache_policy": dict(
+                preset.get("benchmark_gemma_pagecache", {})
+                if isinstance(
+                    preset.get("benchmark_gemma_pagecache", {}),
+                    dict,
+                )
+                else {}
+            ),
+            "gemma_pagecache_reset": gemma_pagecache_reset,
         }
     )
+    prefetch_path = run_dir / "gemma_pagecache_prefetch.json"
+    if prefetch_path.is_file():
+        try:
+            summary["gemma_pagecache_prefetch"] = json.loads(
+                prefetch_path.read_text(encoding="utf-8")
+            )
+        except (OSError, json.JSONDecodeError):
+            summary["gemma_pagecache_prefetch"] = {
+                "status": "unreadable"
+            }
     write_json(run_dir / "summary.json", summary)
     (run_dir / "summary.md").write_text(render_summary_markdown(summary), encoding="utf-8")
     _log(
