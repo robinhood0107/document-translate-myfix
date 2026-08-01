@@ -9,9 +9,12 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Mapping
 
+from .transport import direct_transport_identity
+
 
 PADDLE_LLAMA_RUNTIME_MANIFEST_SCHEMA_VERSION = 1
 PADDLE_LLAMA_RUNTIME_PREPARATION_VERSION = 1
+PADDLE_LLAMA_RUNTIME_CONTRACT_SCHEMA_VERSION = 2
 DEFAULT_PADDLE_LLAMA_MODEL_VOLUME = (
     "comic-translate-paddleocr-vl-llamacpp-models-v1"
 )
@@ -22,7 +25,10 @@ DEFAULT_PADDLE_LLAMA_CPP_IMAGE = (
     "ghcr.io/ggml-org/llama.cpp@sha256:"
     "22e0e3bfe967af4fd1df6a918022abbfd4e72e4d40a4769e616a4176790acbcb"
 )
-DEFAULT_PADDLE_LAYOUT_IMAGE = (
+# Historical PaddleX relay image.  It is retained only so cleanup and audit
+# tooling can identify the exact retired asset; the active runtime never
+# starts or fingerprints this image.
+LEGACY_PADDLE_LAYOUT_IMAGE = (
     "ccr-2vdh3abv-pub.cnc.bj.baidubce.com/"
     "paddlepaddle/paddleocr-genai-vllm-server@sha256:"
     "d0d32c04a2119613d25a0a4c292e165ccc107954b74580613cf59e378037f8f5"
@@ -84,10 +90,7 @@ class PaddleLlamaRuntimeContract:
     preparation_version: int
     llama_image_ref: str
     llama_image_id: str
-    layout_image_ref: str
-    layout_image_id: str
     compose_file_sha256: str
-    pipeline_config_sha256: str
     command_sha256: str
     fingerprint: str
     command: tuple[str, ...]
@@ -98,7 +101,6 @@ class PaddleLlamaRuntimeContract:
         values.update(
             {
                 "PADDLEOCR_LLAMA_CPP_IMAGE": self.llama_image_ref,
-                "PADDLEOCR_LAYOUT_IMAGE": self.layout_image_ref,
                 "PADDLEOCR_LLAMA_MODEL_VOLUME": self.volume_name,
                 "PADDLEOCR_LLAMA_MODEL_FILE": PADDLE_LLAMA_MODEL_NAME,
                 "PADDLEOCR_LLAMA_MMPROJ_FILE": PADDLE_LLAMA_MMPROJ_NAME,
@@ -242,10 +244,7 @@ def build_paddle_llama_runtime_contract(
     volume_name: str,
     llama_image_ref: str,
     llama_image_id: str,
-    layout_image_ref: str,
-    layout_image_id: str,
     compose_file: Path,
-    pipeline_config_file: Path,
     environment: Mapping[str, Any] | None = None,
 ) -> PaddleLlamaRuntimeContract:
     safe_volume = validate_paddle_llama_volume_name(volume_name)
@@ -325,23 +324,20 @@ def build_paddle_llama_runtime_contract(
     runtime_options = resolve_paddle_llama_runtime_options(environment)
     command = build_paddle_llama_server_command(runtime_options)
     compose_sha256 = hashlib.sha256(compose_file.read_bytes()).hexdigest()
-    pipeline_sha256 = hashlib.sha256(
-        pipeline_config_file.read_bytes()
-    ).hexdigest()
     command_sha256 = _canonical_sha256(command)
     fingerprint = _canonical_sha256(
         {
-            "contract_schema_version": 1,
+            "contract_schema_version": (
+                PADDLE_LLAMA_RUNTIME_CONTRACT_SCHEMA_VERSION
+            ),
             "volume_name": safe_volume,
             "ready_manifest_name": DEFAULT_PADDLE_LLAMA_READY_MANIFEST,
             "ready_manifest_sha256": normalized_manifest_sha,
             "llama_image_ref": llama_image_ref,
             "llama_image_id": llama_image_id,
-            "layout_image_ref": layout_image_ref,
-            "layout_image_id": layout_image_id,
             "compose_file_sha256": compose_sha256,
-            "pipeline_config_sha256": pipeline_sha256,
             "command_sha256": command_sha256,
+            "transport": direct_transport_identity(),
             "files": PADDLE_LLAMA_MODEL_SPECS,
         }
     )
@@ -352,10 +348,7 @@ def build_paddle_llama_runtime_contract(
         preparation_version=PADDLE_LLAMA_RUNTIME_PREPARATION_VERSION,
         llama_image_ref=llama_image_ref,
         llama_image_id=llama_image_id,
-        layout_image_ref=layout_image_ref,
-        layout_image_id=layout_image_id,
         compose_file_sha256=compose_sha256,
-        pipeline_config_sha256=pipeline_sha256,
         command_sha256=command_sha256,
         fingerprint=fingerprint,
         command=command,
