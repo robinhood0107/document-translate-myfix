@@ -100,3 +100,12 @@ mount를 함께 저장해 결과가 다른 런타임과 섞이지 않게 했다.
 
 제품 승격 이후에도 full-page Spotting과 MangaLMM은 독립 전략으로 유지하며 이
 transport 변경과 섞지 않는다.
+
+## 후속 folder-global queue 판정
+
+direct 제품 경로에서 `page barrier w8`과 `folder-global queue w4`를 7회 paired
+CUDA로 다시 비교했다. 7/7 결과는 완전히 같았지만 후보 승패 4승 3패,
+pipeline 중앙값 명목 +0.390529%, 단측 95% bootstrap 하한 -0.276427%로 실제
+속도 우위를 입증하지 못했다. 따라서 direct transport는 유지하되 folder-global
+queue 제품 코드는 승격하지 않는다. 상세 근거는
+[folder-global queue 최종 판정](../paddleocr-vl-parallel/folder-global-queue-final-decision-ko.md)에 기록한다.
