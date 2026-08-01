@@ -56,8 +56,7 @@ Prepare the versioned external model volume once from Windows PowerShell:
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass `
   -File .\scripts\prepare_gemma_runtime.ps1 -Mode Prepare `
-  -CandidateModelPath 'C:\ExampleWorkspace\models\Gemma4-26B-A4B-Uncensored-HauhauCS-Balanced-IQ4_XS.gguf' `
-  -LegacyModelPath 'C:\ExampleWorkspace\models\gemma-4-26B-IQ4_NL.gguf'
+  -ModelPath 'C:\ExampleWorkspace\models\gemma-4-26B-IQ4_NL.gguf'
 ```
 
 Then choose `Custom Local Server(Gemma)` in the app. The managed runtime mounts the prepared volume read-only and starts the exact prepared container automatically.
@@ -85,24 +84,56 @@ docker compose -f hunyuanocr_docker_files/docker-compose.yaml up -d --force-recr
 ### PaddleOCR VL local runtime
 
 - Compose file: `/paddleocr_vl_docker_files/docker-compose.yaml`
-- Docker image: `ccr-2vdh3abv-pub.cnc.bj.baidubce.com/paddlepaddle/paddleocr-genai-vllm-server@sha256:d0d32c04a2119613d25a0a4c292e165ccc107954b74580613cf59e378037f8f5`
+- Inference backend: pinned llama.cpp with the official PaddleOCR-VL 1.6
+  GGUF and multimodal projector
+- Layout frontend: pinned PaddleX/PaddleOCR image
 - Runtime/model references:
   - [PaddleOCR](https://github.com/PaddlePaddle/PaddleOCR)
   - [PaddleOCR-VL](https://huggingface.co/PaddlePaddle/PaddleOCR-VL)
 
-Start it:
+Put these two files in one model directory:
 
-```bash
-docker compose -f paddleocr_vl_docker_files/docker-compose.yaml pull
-docker compose -f paddleocr_vl_docker_files/docker-compose.yaml up -d --force-recreate
+- `PaddleOCR-VL-1.6-GGUF.gguf`
+- `PaddleOCR-VL-1.6-GGUF-mmproj.gguf`
+
+Prepare and verify the versioned external model volume once from Windows
+PowerShell:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass `
+  -File .\scripts\prepare_paddleocr_llamacpp_runtime.ps1 `
+  -Mode Prepare `
+  -ModelDirectory 'C:\ExampleWorkspace\models\PaddleOCR-VL-1.6-GGUF'
 ```
 
-The first command is a one-time preparation step for the pinned image. Normal
-app starts reuse the exact stopped containers and do not pull again. The
-stage-batched folder workflow can also reuse exact crop results from the
+The app then starts the managed runtime automatically when PaddleOCR VL is
+needed. It mounts the prepared model volume read-only, reuses only exact
+stopped containers, and force-recreates stale containers. After an OCR stage,
+llama.cpp unloads the model after five idle seconds while the lightweight
+containers remain available; failure to confirm unload falls back to a normal
+`stop`. The automatic path never uses `down`.
+
+The stage-batched folder workflow can also reuse exact crop results from the
 persistent OCR cache configured under `Settings > PaddleOCR VL Settings`.
 
 For bundle details, see [/paddleocr_vl_docker_files/README.md](/paddleocr_vl_docker_files/README.md).
+
+### Optional PaddleOCR-VL full-page Spotting route
+
+Full-page Spotting is a separate OCR choice. It does not replace or modify the
+default detector + crop OCR projector. Prepare its dedicated named volume:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass `
+  -File .\scripts\prepare_paddleocr_spotting_llamacpp_runtime.ps1 `
+  -Mode Prepare `
+  -ModelDirectory 'C:\ExampleWorkspace\models\PaddleOCR-VL-1.6-GGUF'
+```
+
+This route fixes the official `Spotting:` prompt, `--special` location-token
+mode, and `1,605,632` projector pixel budget. The crop route keeps its original
+`1,003,520` projector. See
+[/paddleocr_vl_spotting_docker_files/README.md](/paddleocr_vl_spotting_docker_files/README.md).
 
 ## 4. Recommended app settings
 
@@ -187,7 +218,7 @@ Official Windows release packages are published only from `vX.Y.Z` tags that poi
 - release order: local deterministic bundle and extracted-launcher
   verification, `main` promotion, Windows CI preflight, then tag release CI
 - bundled scope: allowlisted product source, launchers, CUDA12/CUDA13
-  requirements, Docker Compose/config, Gemma preparation tooling,
+  requirements, Docker Compose/config, Gemma/PaddleOCR preparation tooling,
   translations/resources, README, and LICENSE
 - not bundled: venvs, models, checkpoints, caches, benchmark tools/results,
   Python/CUDA runtimes, NVIDIA driver, local paths, or secrets

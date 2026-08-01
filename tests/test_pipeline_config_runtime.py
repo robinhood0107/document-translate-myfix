@@ -22,7 +22,12 @@ class _FakeSettingsPage:
         def tr(value: str) -> str:
             return value
 
-    def __init__(self, server_url: str = "http://127.0.0.1:28118/layout-parsing") -> None:
+    def __init__(
+        self,
+        server_url: str = (
+            "http://127.0.0.1:18000/v1/chat/completions"
+        ),
+    ) -> None:
         self._server_url = server_url
         self._translator = "Custom Local Server(Gemma)"
         self._ocr = "Optimal (HunyuanOCR / PaddleOCR VL)"

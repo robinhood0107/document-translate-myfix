@@ -6,9 +6,34 @@ from unittest import mock
 from urllib.error import HTTPError
 
 from modules.ocr.local_runtime import (
-    PADDLEOCR_IMAGE_DIGEST,
-    PADDLEOCR_IMAGE_REF,
+    MANGALMM_LLAMA_CPP_IMAGE_REF,
+    PADDLEOCR_LLAMA_CPP_IMAGE_DIGEST,
+    PADDLEOCR_LLAMA_CPP_IMAGE_REF,
+    PADDLEOCR_SPOTTING_LLAMA_CPP_IMAGE_DIGEST,
+    PADDLEOCR_SPOTTING_LLAMA_CPP_IMAGE_REF,
     LocalOCRRuntimeManager,
+)
+from modules.ocr.mangalmm_llamacpp_runtime_contract import (
+    DEFAULT_MANGALMM_MODEL_VOLUME,
+    DEFAULT_MANGALMM_READY_MANIFEST,
+    MangaLMMRuntimeContract,
+)
+from modules.ocr.paddle_llamacpp_runtime_contract import (
+    DEFAULT_PADDLE_LLAMA_MODEL_VOLUME,
+    DEFAULT_PADDLE_LLAMA_READY_MANIFEST,
+    PADDLE_LLAMA_MMPROJ_NAME,
+    PADDLE_LLAMA_MODEL_NAME,
+    PADDLE_LLAMA_MODEL_SPECS,
+    PaddleLlamaRuntimeContract,
+)
+from modules.ocr.paddleocr_vl_spotting.runtime_contract import (
+    DEFAULT_PADDLE_SPOTTING_MODEL_VOLUME,
+    DEFAULT_PADDLE_SPOTTING_READY_MANIFEST,
+    PADDLE_SPOTTING_IMAGE_MAX_PIXELS,
+    PADDLE_SPOTTING_MMPROJ_NAME,
+    PADDLE_SPOTTING_MODEL_NAME,
+    PADDLE_SPOTTING_MODEL_SPECS,
+    PaddleSpottingRuntimeContract,
 )
 from modules.utils.exceptions import LocalServiceSetupError, OperationCancelledError
 from modules.utils.llama_cpp_runtime import DEFAULT_LLAMA_CPP_IMAGE
@@ -18,13 +43,19 @@ class _DummySettingsPage:
     def __init__(
         self,
         *,
-        paddle_url: str = "http://127.0.0.1:28118/layout-parsing",
+        paddle_url: str = (
+            "http://127.0.0.1:18000/v1/chat/completions"
+        ),
         hunyuan_url: str = "http://127.0.0.1:28080/v1",
         mangalmm_url: str = "http://127.0.0.1:28081/v1",
+        spotting_url: str = (
+            "http://127.0.0.1:18002/v1/chat/completions"
+        ),
     ) -> None:
         self._paddle_url = paddle_url
         self._hunyuan_url = hunyuan_url
         self._mangalmm_url = mangalmm_url
+        self._spotting_url = spotting_url
 
     def get_paddleocr_vl_settings(self) -> dict:
         return {"server_url": self._paddle_url}
@@ -35,8 +66,217 @@ class _DummySettingsPage:
     def get_mangalmm_ocr_settings(self) -> dict:
         return {"server_url": self._mangalmm_url}
 
+    def get_paddleocr_vl_spotting_settings(self) -> dict:
+        return {"server_url": self._spotting_url}
+
+
+def _paddle_contract() -> PaddleLlamaRuntimeContract:
+    return PaddleLlamaRuntimeContract(
+        volume_name=DEFAULT_PADDLE_LLAMA_MODEL_VOLUME,
+        ready_manifest_name=DEFAULT_PADDLE_LLAMA_READY_MANIFEST,
+        ready_manifest_sha256="a" * 64,
+        preparation_version=1,
+        llama_image_ref=PADDLEOCR_LLAMA_CPP_IMAGE_REF,
+        llama_image_id="sha256:llama-image-id",
+        compose_file_sha256="compose",
+        command_sha256="command",
+        fingerprint="runtime",
+        command=("--example",),
+        runtime_options={"PADDLEOCR_LLAMA_SLEEP_IDLE_SECONDS": "5"},
+    )
+
+
+def _mangalmm_contract() -> MangaLMMRuntimeContract:
+    return MangaLMMRuntimeContract(
+        volume_name=DEFAULT_MANGALMM_MODEL_VOLUME,
+        ready_manifest_name=DEFAULT_MANGALMM_READY_MANIFEST,
+        ready_manifest_sha256="b" * 64,
+        preparation_version=2,
+        llama_image_ref=MANGALMM_LLAMA_CPP_IMAGE_REF,
+        llama_image_id="sha256:mangalmm-image-id",
+        compose_file_sha256="mangalmm-compose",
+        command_sha256="mangalmm-command",
+        fingerprint="mangalmm-runtime",
+        command=("--example",),
+        runtime_options={},
+    )
+
+
+def _paddle_spotting_contract() -> PaddleSpottingRuntimeContract:
+    return PaddleSpottingRuntimeContract(
+        volume_name=DEFAULT_PADDLE_SPOTTING_MODEL_VOLUME,
+        ready_manifest_name=DEFAULT_PADDLE_SPOTTING_READY_MANIFEST,
+        ready_manifest_sha256="c" * 64,
+        preparation_version=2,
+        llama_image_ref=PADDLEOCR_SPOTTING_LLAMA_CPP_IMAGE_REF,
+        llama_image_id="sha256:spotting-image-id",
+        compose_file_sha256="spotting-compose",
+        command_sha256="spotting-command",
+        fingerprint="spotting-runtime",
+        command=("--special",),
+        runtime_options={},
+    )
+
 
 class LocalOCRRuntimeManagerTests(unittest.TestCase):
+    def test_spotting_cache_identity_is_separate_from_crop_contract(
+        self,
+    ) -> None:
+        manager = LocalOCRRuntimeManager()
+        settings_page = _DummySettingsPage()
+        contract = _paddle_spotting_contract()
+
+        with mock.patch.object(
+            manager,
+            "_present_managed_container_names",
+            return_value=["paddleocr-spotting-llamacpp"],
+        ), mock.patch.object(
+            manager,
+            "_managed_containers_match_contract",
+            return_value=True,
+        ), mock.patch.object(
+            manager,
+            "_paddle_spotting_runtime_contract",
+            return_value=contract,
+        ):
+            identity = manager.get_ocr_cache_identity(
+                "PaddleOCR VL Spotting",
+                settings_page,
+            )
+
+        self.assertEqual(identity["strategy"], "paddle_spotting_full_page")
+        self.assertEqual(
+            identity["clip.vision.image_max_pixels"],
+            PADDLE_SPOTTING_IMAGE_MAX_PIXELS,
+        )
+        self.assertTrue(identity["special_tokens"])
+        self.assertEqual(identity["model_file"], PADDLE_SPOTTING_MODEL_NAME)
+        self.assertEqual(identity["mmproj_file"], PADDLE_SPOTTING_MMPROJ_NAME)
+        self.assertEqual(
+            identity["mmproj_sha256"],
+            PADDLE_SPOTTING_MODEL_SPECS[
+                PADDLE_SPOTTING_MMPROJ_NAME
+            ]["sha256"],
+        )
+        self.assertEqual(
+            identity["llama_image_digest"],
+            PADDLEOCR_SPOTTING_LLAMA_CPP_IMAGE_DIGEST,
+        )
+        self.assertNotEqual(
+            identity["model_volume"],
+            DEFAULT_PADDLE_LLAMA_MODEL_VOLUME,
+        )
+
+    def test_windows_rejects_paddle_container_created_by_wsl_compose(self) -> None:
+        manager = LocalOCRRuntimeManager()
+        contract = _paddle_contract()
+        inspected = subprocess.CompletedProcess(
+            args=[],
+            returncode=0,
+            stdout="runtime|sha256:llama-image-id|Ubuntu\n",
+            stderr="",
+        )
+
+        with mock.patch.object(
+            manager,
+            "_paddle_runtime_contract",
+            return_value=contract,
+        ), mock.patch(
+            "modules.utils.llama_cpp_runtime.run_docker_command",
+            return_value=inspected,
+        ), mock.patch(
+            "modules.ocr.local_runtime.os.name",
+            "nt",
+        ):
+            self.assertFalse(
+                manager._paddle_containers_match_contract(
+                    ["paddleocr-llamacpp"]
+                )
+            )
+
+    def test_windows_accepts_paddle_container_created_by_windows_compose(self) -> None:
+        manager = LocalOCRRuntimeManager()
+        contract = _paddle_contract()
+        inspected = subprocess.CompletedProcess(
+            args=[],
+            returncode=0,
+            stdout="runtime|sha256:llama-image-id|\n",
+            stderr="",
+        )
+
+        with mock.patch.object(
+            manager,
+            "_paddle_runtime_contract",
+            return_value=contract,
+        ), mock.patch(
+            "modules.utils.llama_cpp_runtime.run_docker_command",
+            return_value=inspected,
+        ), mock.patch(
+            "modules.ocr.local_runtime.os.name",
+            "nt",
+        ):
+            self.assertTrue(
+                manager._paddle_containers_match_contract(
+                    ["paddleocr-llamacpp"]
+                )
+            )
+
+    def test_windows_rejects_mangalmm_container_created_by_wsl_compose(
+        self,
+    ) -> None:
+        manager = LocalOCRRuntimeManager()
+        inspected = subprocess.CompletedProcess(
+            args=[],
+            returncode=0,
+            stdout=(
+                "mangalmm-runtime|sha256:mangalmm-image-id|Ubuntu\n"
+            ),
+            stderr="",
+        )
+
+        with mock.patch.object(
+            manager,
+            "_mangalmm_runtime_contract",
+            return_value=_mangalmm_contract(),
+        ), mock.patch(
+            "modules.utils.llama_cpp_runtime.run_docker_command",
+            return_value=inspected,
+        ), mock.patch(
+            "modules.ocr.local_runtime.os.name",
+            "nt",
+        ):
+            self.assertFalse(
+                manager._mangalmm_containers_match_contract(
+                    ["mangalmm-local-server"]
+                )
+            )
+
+    def test_windows_accepts_exact_mangalmm_container(self) -> None:
+        manager = LocalOCRRuntimeManager()
+        inspected = subprocess.CompletedProcess(
+            args=[],
+            returncode=0,
+            stdout="mangalmm-runtime|sha256:mangalmm-image-id|\n",
+            stderr="",
+        )
+
+        with mock.patch.object(
+            manager,
+            "_mangalmm_runtime_contract",
+            return_value=_mangalmm_contract(),
+        ), mock.patch(
+            "modules.utils.llama_cpp_runtime.run_docker_command",
+            return_value=inspected,
+        ), mock.patch(
+            "modules.ocr.local_runtime.os.name",
+            "nt",
+        ):
+            self.assertTrue(
+                manager._mangalmm_containers_match_contract(
+                    ["mangalmm-local-server"]
+                )
+            )
+
     def test_paddle_cache_identity_is_managed_only(self) -> None:
         manager = LocalOCRRuntimeManager()
         unmanaged = _DummySettingsPage(
@@ -56,18 +296,12 @@ class LocalOCRRuntimeManagerTests(unittest.TestCase):
     def test_paddle_cache_identity_includes_runtime_contract(self) -> None:
         manager = LocalOCRRuntimeManager()
         settings_page = _DummySettingsPage()
-        contract = {
-            "compose_sha256": "compose",
-            "command_sha256": "command",
-            "vllm_config_sha256": "vllm",
-            "pipeline_config_sha256": "pipeline",
-            "runtime_fingerprint": "runtime",
-        }
+        contract = _paddle_contract()
 
         with mock.patch.object(
             manager,
             "_present_managed_container_names",
-            return_value=["paddleocr-vllm", "paddleocr-server"],
+            return_value=["paddleocr-llamacpp"],
         ), mock.patch.object(
             manager,
             "_paddle_containers_match_contract",
@@ -76,21 +310,31 @@ class LocalOCRRuntimeManagerTests(unittest.TestCase):
             manager,
             "_paddle_runtime_contract",
             return_value=contract,
-        ), mock.patch.object(
-            manager,
-            "_inspect_docker_image_id",
-            return_value="sha256:image-id",
         ):
             identity = manager.get_ocr_cache_identity(
                 "PaddleOCR VL",
                 settings_page,
             )
 
-        self.assertEqual(identity["image_ref"], PADDLEOCR_IMAGE_REF)
-        self.assertEqual(identity["image_digest"], PADDLEOCR_IMAGE_DIGEST)
-        self.assertEqual(identity["image_id"], "sha256:image-id")
+        self.assertEqual(identity["identity_schema_version"], 3)
+        self.assertEqual(
+            identity["llama_image_ref"],
+            PADDLEOCR_LLAMA_CPP_IMAGE_REF,
+        )
+        self.assertEqual(
+            identity["llama_image_digest"],
+            PADDLEOCR_LLAMA_CPP_IMAGE_DIGEST,
+        )
+        self.assertEqual(identity["llama_image_id"], "sha256:llama-image-id")
+        self.assertEqual(identity["model_file"], PADDLE_LLAMA_MODEL_NAME)
+        self.assertEqual(identity["mmproj_file"], PADDLE_LLAMA_MMPROJ_NAME)
+        self.assertEqual(
+            identity["model_sha256"],
+            PADDLE_LLAMA_MODEL_SPECS[PADDLE_LLAMA_MODEL_NAME]["sha256"],
+        )
         self.assertEqual(identity["runtime_fingerprint"], "runtime")
         self.assertEqual(identity["command_sha256"], "command")
+        self.assertEqual(identity["transport"]["prompt"], "OCR:")
 
     def test_paddle_cache_identity_requires_exact_managed_containers(self) -> None:
         manager = LocalOCRRuntimeManager()
@@ -119,7 +363,7 @@ class LocalOCRRuntimeManagerTests(unittest.TestCase):
         with mock.patch.object(manager, "validate_engine"), mock.patch.object(
             manager,
             "_present_managed_container_names",
-            return_value=["paddleocr-vllm", "paddleocr-server"],
+            return_value=["paddleocr-llamacpp"],
         ), mock.patch.object(
             manager,
             "_paddle_containers_match_contract",
@@ -143,11 +387,107 @@ class LocalOCRRuntimeManagerTests(unittest.TestCase):
         )
         self.assertEqual(manager._active_engine, "PaddleOCR VL")
 
+    def test_stale_mangalmm_container_is_force_recreated(self) -> None:
+        manager = LocalOCRRuntimeManager()
+        settings_page = _DummySettingsPage()
+
+        with mock.patch.object(manager, "validate_engine"), mock.patch.object(
+            manager,
+            "_present_managed_container_names",
+            return_value=["mangalmm-local-server"],
+        ), mock.patch.object(
+            manager,
+            "_mangalmm_containers_match_contract",
+            return_value=False,
+        ), mock.patch.object(
+            manager,
+            "_wait_for_health",
+            return_value=True,
+        ), mock.patch.object(
+            manager,
+            "_run_compose",
+        ) as run_compose:
+            manager.ensure_engine("MangaLMM", settings_page)
+
+        run_compose.assert_called_once_with(
+            "MangaLMM",
+            "up",
+            "-d",
+            "--force-recreate",
+            step_name="force-recreate",
+        )
+        self.assertEqual(manager._active_engine, "MangaLMM")
+
+    def test_exact_stopped_mangalmm_container_is_started_without_compose_up(
+        self,
+    ) -> None:
+        manager = LocalOCRRuntimeManager()
+        settings_page = _DummySettingsPage()
+
+        with mock.patch.object(manager, "validate_engine"), mock.patch.object(
+            manager,
+            "_present_managed_container_names",
+            return_value=["mangalmm-local-server"],
+        ), mock.patch.object(
+            manager,
+            "_mangalmm_containers_match_contract",
+            return_value=True,
+        ), mock.patch.object(
+            manager,
+            "_probe_health_state",
+            return_value="unavailable",
+        ), mock.patch.object(
+            manager,
+            "_start_existing_managed_containers",
+        ) as start_existing, mock.patch.object(
+            manager,
+            "_wait_for_health",
+            return_value=True,
+        ), mock.patch.object(
+            manager,
+            "_run_compose",
+        ) as run_compose:
+            manager.ensure_engine("MangaLMM", settings_page)
+
+        start_existing.assert_called_once_with(
+            "MangaLMM",
+            ["mangalmm-local-server"],
+        )
+        run_compose.assert_not_called()
+        self.assertEqual(manager._active_engine, "MangaLMM")
+
+    def test_mangalmm_handoff_stops_runtime_before_next_gpu_stage(self) -> None:
+        manager = LocalOCRRuntimeManager()
+        manager._active_engine = "MangaLMM"
+
+        with mock.patch.object(
+            manager,
+            "_run_compose",
+        ) as run_compose, mock.patch.object(
+            manager,
+            "_running_managed_container_names",
+            return_value=[],
+        ):
+            manager.release_for_handoff()
+
+        run_compose.assert_called_once_with(
+            "MangaLMM",
+            "stop",
+            "--timeout",
+            "10",
+            step_name="stop",
+        )
+        self.assertIsNone(manager._active_engine)
+
     def test_shutdown_stops_and_preserves_active_engine_containers(self) -> None:
         manager = LocalOCRRuntimeManager()
         manager._active_engine = "PaddleOCR VL"
         manager._readiness_cache.add(
-            ("PaddleOCR VL", "http://127.0.0.1:28118/layout-parsing", "managed")
+            (
+                "PaddleOCR VL",
+                "http://127.0.0.1:18000/v1/chat/completions",
+                "managed",
+            )
         )
 
         with mock.patch.object(manager, "_run_compose") as run_compose, \
@@ -167,6 +507,112 @@ class LocalOCRRuntimeManagerTests(unittest.TestCase):
         )
         self.assertIsNone(manager._active_engine)
         self.assertFalse(manager._readiness_cache)
+
+    def test_paddle_handoff_preserves_sleeping_containers(self) -> None:
+        manager = LocalOCRRuntimeManager()
+        manager._active_engine = "PaddleOCR VL"
+
+        with mock.patch.object(
+            manager,
+            "_wait_for_paddle_llama_sleep",
+            return_value=True,
+        ) as wait_for_sleep, mock.patch.object(
+            manager,
+            "_run_compose",
+        ) as run_compose:
+            manager.release_for_handoff()
+            manager.release_for_handoff()
+
+        wait_for_sleep.assert_called_once_with()
+        run_compose.assert_not_called()
+        self.assertEqual(manager._active_engine, "PaddleOCR VL")
+        self.assertTrue(manager._paddle_idle_released)
+
+    def test_paddle_handoff_stops_when_sleep_is_not_confirmed(self) -> None:
+        manager = LocalOCRRuntimeManager()
+        manager._active_engine = "PaddleOCR VL"
+
+        with mock.patch.object(
+            manager,
+            "_wait_for_paddle_llama_sleep",
+            return_value=False,
+        ), mock.patch.object(
+            manager,
+            "_run_compose",
+        ) as run_compose, mock.patch.object(
+            manager,
+            "_running_managed_container_names",
+            return_value=[],
+        ):
+            manager.release_for_handoff()
+
+        run_compose.assert_called_once_with(
+            "PaddleOCR VL",
+            "stop",
+            "--timeout",
+            "10",
+            step_name="stop",
+        )
+        self.assertIsNone(manager._active_engine)
+        self.assertFalse(manager._paddle_idle_released)
+
+    def test_paddle_handoff_adopts_exact_running_containers(self) -> None:
+        manager = LocalOCRRuntimeManager()
+
+        with mock.patch.object(
+            manager,
+            "_running_managed_container_names",
+            return_value=["paddleocr-llamacpp"],
+        ), mock.patch.object(
+            manager,
+            "_paddle_containers_match_contract",
+            return_value=True,
+        ), mock.patch.object(
+            manager,
+            "_wait_for_paddle_llama_sleep",
+            return_value=True,
+        ), mock.patch.object(
+            manager,
+            "_run_compose",
+        ) as run_compose:
+            manager.release_for_handoff()
+
+        run_compose.assert_not_called()
+        self.assertEqual(manager._active_engine, "PaddleOCR VL")
+        self.assertTrue(manager._paddle_idle_released)
+
+    def test_paddle_handoff_stops_stale_running_containers(self) -> None:
+        manager = LocalOCRRuntimeManager()
+
+        with mock.patch.object(
+            manager,
+            "_running_managed_container_names",
+            side_effect=[
+                ["paddleocr-llamacpp"],
+                [],
+            ],
+        ), mock.patch.object(
+            manager,
+            "_paddle_containers_match_contract",
+            return_value=False,
+        ), mock.patch.object(
+            manager,
+            "_run_compose",
+        ) as run_compose, mock.patch(
+            "modules.ocr.local_runtime.time.monotonic",
+            side_effect=[0.0, 3.1],
+        ):
+            manager.release_for_handoff()
+
+        run_compose.assert_called_once_with(
+            "PaddleOCR VL",
+            "stop",
+            "--timeout",
+            "10",
+            step_name="stop",
+        )
+        self.assertIsNone(manager._active_engine)
+        self.assertFalse(manager._paddle_idle_released)
 
     def test_shutdown_preserves_active_engine_until_stop_retry_succeeds(self) -> None:
         manager = LocalOCRRuntimeManager()
@@ -242,7 +688,7 @@ class LocalOCRRuntimeManagerTests(unittest.TestCase):
         ) as run_compose, mock.patch.object(
             manager,
             "_running_managed_container_names",
-            side_effect=[[], ["paddleocr-server"], []],
+            side_effect=[[], ["paddleocr-llamacpp"], []],
         ), mock.patch(
             "modules.ocr.local_runtime.time.monotonic",
             side_effect=[0.0, 0.5, 3.1],
@@ -353,10 +799,7 @@ class LocalOCRRuntimeManagerTests(unittest.TestCase):
         wait_for_health.assert_called_once()
         self.assertEqual(
             wait_for_health.call_args.args[0],
-            (
-                "http://127.0.0.1:28118/docs",
-                "http://127.0.0.1:18000/v1/models",
-            ),
+            ("http://127.0.0.1:18000/health",),
         )
         run_compose.assert_not_called()
 
@@ -371,40 +814,29 @@ class LocalOCRRuntimeManagerTests(unittest.TestCase):
         wait_for_health.assert_called_once()
         run_compose.assert_not_called()
 
-    def test_paddle_health_is_loading_when_layout_is_ready_but_vllm_is_not(self) -> None:
+    def test_paddle_health_is_unavailable_when_llama_is_not_ready(self) -> None:
         manager = LocalOCRRuntimeManager()
-        layout_response = mock.MagicMock()
-        layout_response.__enter__.return_value.status = 200
-
         with mock.patch(
             "modules.ocr.local_runtime.urlopen",
-            side_effect=[layout_response, OSError("connection refused")],
+            side_effect=OSError("connection refused"),
         ):
             state = manager._probe_health_state(
-                (
-                    "http://127.0.0.1:28118/docs",
-                    "http://127.0.0.1:18000/v1/models",
-                )
+                ("http://127.0.0.1:18000/health",)
             )
 
-        self.assertEqual(state, "loading")
+        self.assertEqual(state, "unavailable")
 
-    def test_paddle_health_is_healthy_only_when_layout_and_vllm_are_ready(self) -> None:
+    def test_paddle_health_is_healthy_when_llama_is_ready(self) -> None:
         manager = LocalOCRRuntimeManager()
-        layout_response = mock.MagicMock()
-        layout_response.__enter__.return_value.status = 200
-        vllm_response = mock.MagicMock()
-        vllm_response.__enter__.return_value.status = 200
+        llama_response = mock.MagicMock()
+        llama_response.__enter__.return_value.status = 200
 
         with mock.patch(
             "modules.ocr.local_runtime.urlopen",
-            side_effect=[layout_response, vllm_response],
+            return_value=llama_response,
         ):
             state = manager._probe_health_state(
-                (
-                    "http://127.0.0.1:28118/docs",
-                    "http://127.0.0.1:18000/v1/models",
-                )
+                ("http://127.0.0.1:18000/health",)
             )
 
         self.assertEqual(state, "healthy")
@@ -412,7 +844,7 @@ class LocalOCRRuntimeManagerTests(unittest.TestCase):
     def test_health_probe_treats_http_404_as_unavailable(self) -> None:
         manager = LocalOCRRuntimeManager()
         error = HTTPError(
-            "http://127.0.0.1:28118/docs",
+            "http://127.0.0.1:18000/health",
             404,
             "Not Found",
             hdrs=None,
@@ -424,7 +856,7 @@ class LocalOCRRuntimeManagerTests(unittest.TestCase):
             side_effect=error,
         ):
             state = manager._probe_single_health_state(
-                "http://127.0.0.1:28118/docs"
+                "http://127.0.0.1:18000/health"
             )
 
         self.assertEqual(state, "unavailable")
@@ -432,7 +864,7 @@ class LocalOCRRuntimeManagerTests(unittest.TestCase):
     def test_health_probe_treats_http_503_as_loading(self) -> None:
         manager = LocalOCRRuntimeManager()
         error = HTTPError(
-            "http://127.0.0.1:18000/v1/models",
+            "http://127.0.0.1:18000/health",
             503,
             "Service Unavailable",
             hdrs=None,
@@ -444,17 +876,14 @@ class LocalOCRRuntimeManagerTests(unittest.TestCase):
             side_effect=error,
         ):
             state = manager._probe_single_health_state(
-                "http://127.0.0.1:18000/v1/models"
+                "http://127.0.0.1:18000/health"
             )
 
         self.assertEqual(state, "loading")
 
     def test_wait_for_health_waits_until_every_configured_endpoint_is_ready(self) -> None:
         manager = LocalOCRRuntimeManager()
-        health_urls = (
-            "http://127.0.0.1:28118/docs",
-            "http://127.0.0.1:18000/v1/models",
-        )
+        health_urls = ("http://127.0.0.1:18000/health",)
 
         with mock.patch.object(
             manager,
@@ -498,7 +927,7 @@ class LocalOCRRuntimeManagerTests(unittest.TestCase):
              mock.patch.object(
                  manager,
                  "_present_managed_container_names",
-                 return_value=["paddleocr-vllm", "paddleocr-server"],
+                 return_value=["paddleocr-llamacpp"],
                  create=True,
              ) as existing_containers, \
              mock.patch.object(
@@ -516,7 +945,10 @@ class LocalOCRRuntimeManagerTests(unittest.TestCase):
             manager.ensure_engine("PaddleOCR VL", settings_page, progress_callback=events.append)
 
         existing_containers.assert_called_once_with("PaddleOCR VL")
-        start_existing.assert_called_once_with("PaddleOCR VL", ["paddleocr-vllm", "paddleocr-server"])
+        start_existing.assert_called_once_with(
+            "PaddleOCR VL",
+            ["paddleocr-llamacpp"],
+        )
         wait_for_health.assert_called_once()
         self.assertTrue(any(event.get("step_key") == "container_start" for event in events))
 
@@ -531,14 +963,18 @@ class LocalOCRRuntimeManagerTests(unittest.TestCase):
             manager.ensure_engine("PaddleOCR VL", settings_page, progress_callback=events.append)
             manager.ensure_engine("PaddleOCR VL", settings_page, progress_callback=events.append)
 
-        self.assertEqual(probe_health.call_count, 1)
+        self.assertEqual(probe_health.call_count, 2)
         run_compose.assert_not_called()
         self.assertTrue(any(event.get("readiness_cache_hit") for event in events))
 
     def test_ensure_engine_cache_misses_when_managed_url_changes(self) -> None:
         manager = LocalOCRRuntimeManager()
-        first_settings = _DummySettingsPage(paddle_url="http://127.0.0.1:28118/layout-parsing")
-        second_settings = _DummySettingsPage(paddle_url="http://127.0.0.1:28118/alternate")
+        first_settings = _DummySettingsPage(
+            paddle_url="http://127.0.0.1:18000/v1/chat/completions"
+        )
+        second_settings = _DummySettingsPage(
+            paddle_url="http://127.0.0.1:18000/v1/alternate"
+        )
 
         with mock.patch.object(manager, "should_manage_engine", return_value=True), \
              mock.patch.object(manager, "validate_engine", return_value=None), \

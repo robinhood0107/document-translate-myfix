@@ -4,7 +4,7 @@
 
 This repository is a local-first fork of upstream `comic-translate` that started from the upstream `v2.6.7` codebase and then diverged with product-specific runtime, OCR, workflow, and Windows setup changes.
 
-The fork's product release version is `1.2.0`. Upstream `2.7.1` is recorded
+The fork's product release version is `1.3.0`. Upstream `2.7.1` is recorded
 separately as the latest selective-backport lineage and is not this fork's
 product version.
 
@@ -105,7 +105,7 @@ This repository now uses a strict `main + develop + tag` model.
   `SHA256SUMS.txt`.
 - The ZIP contains allowlisted product source, both first-run Windows
   launchers, pinned CUDA12/CUDA13 requirements, runtime Compose/config files,
-  the Gemma preparation script, translations/resources, README files, and the
+  the Gemma/PaddleOCR preparation scripts, translations/resources, README files, and the
   license.
 - Virtual environments, models, caches, benchmark runners/results, local
   paths, and secrets are not bundled. The launchers install their supported
@@ -220,11 +220,10 @@ Prepare the versioned Gemma model volume once from Windows PowerShell:
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass `
   -File .\scripts\prepare_gemma_runtime.ps1 -Mode Prepare `
-  -CandidateModelPath 'C:\ExampleWorkspace\models\Gemma4-26B-A4B-Uncensored-HauhauCS-Balanced-IQ4_XS.gguf' `
-  -LegacyModelPath 'C:\ExampleWorkspace\models\gemma-4-26B-IQ4_NL.gguf'
+  -ModelPath 'C:\ExampleWorkspace\models\gemma-4-26B-IQ4_NL.gguf'
 ```
 
-Then use `Custom Local Server(Gemma)` in the app. The managed runtime validates the ready manifest and model size, mounts the prepared volume read-only, and starts or recreates the container only when needed. To explicitly recompute both model hashes, run the same script with `-Mode Verify`.
+Then use `Custom Local Server(Gemma)` in the app. The managed runtime validates the ready manifest and model size, mounts the prepared volume read-only, and starts or recreates the container only when needed. To explicitly recompute the model hash, run the same script with `-Mode Verify`.
 
 The **User Dictionaries** settings page also controls the persistent block-result cache and exact translation memory. Result-cache entries use the complete translation/runtime identity. Exact source-to-translation pairs bypass Gemma only after explicit approval; imported approved entries require confirmation. These databases contain sensitive local text, remain in the app user-data directory, and are never silently deleted after a lock or corruption error. See [the translation-memory guide](docs/gemma/translation-memory.md).
 
@@ -237,6 +236,10 @@ docker compose -f hunyuanocr_docker_files/docker-compose.yaml up -d
 ```
 
 PaddleOCR VL uses the tracked bundle under [paddleocr_vl_docker_files/README.md](paddleocr_vl_docker_files/README.md).
+
+The optional full-page `Spotting:` route has an independent projector,
+container, named volume, and cache identity. Its setup is documented in
+[paddleocr_vl_spotting_docker_files/README.md](paddleocr_vl_spotting_docker_files/README.md).
 
 Managed containers are stopped and preserved after stage completion, cancellation, or app shutdown. Use `docker compose down` only when you explicitly want to reset or remove a runtime.
 
@@ -286,7 +289,8 @@ Tracked compose/runtime images used by the repo:
 
 - Gemma local server: `ghcr.io/ggml-org/llama.cpp@sha256:22e0e3bfe967af4fd1df6a918022abbfd4e72e4d40a4769e616a4176790acbcb`
 - HunyuanOCR local server: `ghcr.io/ggml-org/llama.cpp:server-cuda`
-- PaddleOCR VL runtime: `ccr-2vdh3abv-pub.cnc.bj.baidubce.com/paddlepaddle/paddleocr-genai-vllm-server@sha256:d0d32c04a2119613d25a0a4c292e165ccc107954b74580613cf59e378037f8f5`
+- PaddleOCR VL inference: `ghcr.io/ggml-org/llama.cpp@sha256:22e0e3bfe967af4fd1df6a918022abbfd4e72e4d40a4769e616a4176790acbcb`
+- PaddleOCR VL layout frontend: `ccr-2vdh3abv-pub.cnc.bj.baidubce.com/paddlepaddle/paddleocr-genai-vllm-server@sha256:d0d32c04a2119613d25a0a4c292e165ccc107954b74580613cf59e378037f8f5`
 
 ## Reference Setup Docs
 
@@ -299,6 +303,8 @@ Tracked compose/runtime images used by the repo:
 ## Repository Documents
 
 - [rules.md](rules.md)
+- [Codebase map and OCR strategy boundaries (Korean)](docs/architecture/codebase-map-ko.md)
+- [Managed llama.cpp-only runtime policy (Korean)](docs/runtime/managed-llamacpp-only-ko.md)
 - [docs/gemma/local-server-ko.md](docs/gemma/local-server-ko.md)
 - [docs/hunyuan/local-server-ko.md](docs/hunyuan/local-server-ko.md)
 - [docs/repo/github-rulesets-public-free-ko.md](docs/repo/github-rulesets-public-free-ko.md)

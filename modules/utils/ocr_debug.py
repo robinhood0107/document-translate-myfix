@@ -8,6 +8,16 @@ import imkit as imk
 import numpy as np
 from PIL import Image, ImageOps
 
+from modules.ocr.common.result_contract import (
+    PROCESSING_ACTION_PRESERVE,
+    PROCESSING_ACTION_REVIEW,
+    PROCESSING_ACTION_TRANSLATE_INPAINT,
+    SEMANTIC_ROLE_AMBIGUOUS,
+    SEMANTIC_ROLE_DIALOGUE_BUBBLE,
+    SEMANTIC_ROLE_UI_OR_SIGN,
+    assign_ocr_processing_contract,
+    finalize_ocr_processing_contract,
+)
 from modules.utils.debug_artifacts import (
     atomic_debug_image,
     atomic_debug_json,
@@ -26,6 +36,9 @@ OCR_EMPTY_REASON_NON_TEXT_RESPONSE = "PaddleOCR VL returned a non-text response.
 OCR_EMPTY_REASON_EMBEDDED_UI_CLUSTER = (
     "OCR text is part of a dense embedded device/UI cluster and should be preserved."
 )
+OCR_EMPTY_REASON_SPOTTING_UNMATCHED = (
+    "PaddleOCR VL Spotting did not map a native region to this detector block."
+)
 UI_PANEL_MODE_PRESERVE_ORIGINAL = "preserve_original"
 UI_PANEL_MODE_PREVIEW = "ui_panel_mode_preview"
 UI_PANEL_MODE_BUBBLE_PANEL_TEXT = "bubble_panel_text_candidate"
@@ -41,6 +54,7 @@ OCR_REJECTED_EMPTY_REASONS = frozenset(
         OCR_EMPTY_REASON_TEXT_FREE_NO_VISUAL_EVIDENCE,
         OCR_EMPTY_REASON_NON_TEXT_RESPONSE,
         OCR_EMPTY_REASON_EMBEDDED_UI_CLUSTER,
+        OCR_EMPTY_REASON_SPOTTING_UNMATCHED,
     }
 )
 
@@ -336,6 +350,16 @@ def drop_rejected_empty_ocr_blocks(blocks) -> tuple[list, list]:
     dropped = []
     for block in list(blocks or []):
         if is_rejected_empty_ocr_block(block):
+            assign_ocr_processing_contract(
+                block,
+                semantic_role=SEMANTIC_ROLE_AMBIGUOUS,
+                processing_action=PROCESSING_ACTION_REVIEW,
+                decision_source="ocr_rejected_empty",
+                reasons=(
+                    str(getattr(block, "ocr_empty_reason", "") or ""),
+                    str(getattr(block, "ocr_reject_reason", "") or ""),
+                ),
+            )
             dropped.append(block)
         else:
             kept.append(block)
@@ -499,6 +523,13 @@ def mark_bubble_panel_text_candidate(block, *, group_id: str = "", member_indice
     block.bubble_panel_member_indices = list(member_indices or getattr(block, "bubble_panel_member_indices", []) or [])
     block.bubble_panel_merge_decision = str(getattr(block, "bubble_panel_merge_decision", "") or "candidate")
     block.bubble_merge_reocr_needed = bool(getattr(block, "bubble_merge_reocr_needed", False))
+    assign_ocr_processing_contract(
+        block,
+        semantic_role=SEMANTIC_ROLE_DIALOGUE_BUBBLE,
+        processing_action=PROCESSING_ACTION_TRANSLATE_INPAINT,
+        decision_source="embedded_ui_bubble_dialogue",
+        reasons=(BUBBLE_PANEL_REVIEW_REASON,),
+    )
 
 
 def _bubble_panel_group_key(block) -> tuple[int, int, int, int] | None:
@@ -549,14 +580,41 @@ def group_bubble_panel_text_candidates(blocks) -> list[dict]:
         if _bbox_area(render_box) <= 0.0:
             render_box = safe_box
         group_id = "bubble_panel_" + "_".join(str(v) for v in key)
-        for member_offset, (idx, block) in enumerate(members):
+        requires_review = len(members) > 1
+        for _member_offset, (idx, block) in enumerate(members):
             mark_bubble_panel_text_candidate(block, group_id=group_id, member_indices=member_indices)
             block.bubble_panel_group_id = group_id
             block.bubble_panel_member_indices = member_indices
-            block.bubble_panel_merge_decision = "group_primary" if member_offset == 0 else "duplicate_member"
-            block.bubble_merge_reocr_needed = len(members) > 1
+            block.bubble_panel_merge_decision = (
+                "merge_split_review"
+                if requires_review
+                else "group_primary"
+            )
+            block.bubble_merge_reocr_needed = requires_review
             block.bubble_panel_group_xyxy = [int(round(v)) for v in group_box]
             block.bubble_panel_render_xyxy = [int(round(v)) for v in render_box]
+            block.merge_split_diagnostics = {
+                **dict(
+                    getattr(block, "merge_split_diagnostics", {}) or {}
+                ),
+                "bubble_panel_group_id": group_id,
+                "member_indices": list(member_indices),
+                "relationship": (
+                    "n_to_1_review"
+                    if requires_review
+                    else "one_to_one"
+                ),
+                "automatic_merge": False,
+                "automatic_split": False,
+            }
+            if requires_review:
+                assign_ocr_processing_contract(
+                    block,
+                    semantic_role=SEMANTIC_ROLE_AMBIGUOUS,
+                    processing_action=PROCESSING_ACTION_REVIEW,
+                    decision_source="bubble_panel_merge_split_review",
+                    reasons=("multiple_regions_share_bubble",),
+                )
         groups.append(
             {
                 "group_id": group_id,
@@ -565,6 +623,7 @@ def group_bubble_panel_text_candidates(blocks) -> list[dict]:
                 "bubble_xyxy": [int(round(v)) for v in bubble],
                 "group_xyxy": [int(round(v)) for v in group_box],
                 "render_xyxy": [int(round(v)) for v in render_box],
+                "requires_review": requires_review,
             }
         )
     return groups
@@ -575,6 +634,22 @@ def mark_ui_panel_review_candidate(block, *, reason: str, preview_path: str = ""
     block.ui_panel_preview_path = str(preview_path or "")
     block.mask_decision = "review"
     block.mask_reject_reason = str(reason or UI_PANEL_REVIEW_REASON_LAYOUT)
+    if reason == UI_PANEL_REVIEW_REASON_CLUSTER:
+        assign_ocr_processing_contract(
+            block,
+            semantic_role=SEMANTIC_ROLE_UI_OR_SIGN,
+            processing_action=PROCESSING_ACTION_PRESERVE,
+            decision_source="embedded_ui_cluster",
+            reasons=(reason,),
+        )
+    else:
+        assign_ocr_processing_contract(
+            block,
+            semantic_role=SEMANTIC_ROLE_AMBIGUOUS,
+            processing_action=PROCESSING_ACTION_REVIEW,
+            decision_source="embedded_ui_layout_review",
+            reasons=(reason or UI_PANEL_REVIEW_REASON_LAYOUT,),
+        )
 
 
 def split_inpaint_protected_ocr_blocks(blocks) -> tuple[list, list]:
@@ -584,6 +659,18 @@ def split_inpaint_protected_ocr_blocks(blocks) -> tuple[list, list]:
     block_list = list(blocks or [])
     group_bubble_panel_text_candidates(block_list)
     for block in block_list:
+        finalize_ocr_processing_contract(block)
+        if (
+            getattr(block, "processing_action", "")
+            != PROCESSING_ACTION_TRANSLATE_INPAINT
+        ):
+            block._inpaint_protected_reason = (
+                "processing_action_"
+                + str(getattr(block, "processing_action", "") or "review")
+            )
+            block.mask_decision = "review"
+            protected_blocks.append(block)
+            continue
         if is_bubble_panel_text_candidate(block):
             mark_bubble_panel_text_candidate(block)
             inpaint_blocks.append(block)
@@ -787,6 +874,55 @@ def build_ocr_debug_payload(
                 "effective_crop_xyxy": getattr(blk, "ocr_effective_crop_xyxy", None),
                 "retry_crop_xyxy": getattr(blk, "ocr_retry_crop_xyxy", None),
                 "crop_source": getattr(blk, "ocr_crop_source", "") or "",
+                "ocr_strategy": getattr(blk, "ocr_strategy", "") or "",
+                "ocr_model_identity": getattr(
+                    blk, "ocr_model_identity", ""
+                )
+                or "",
+                "ocr_runtime_identity": getattr(
+                    blk, "ocr_runtime_identity", ""
+                )
+                or "",
+                "ocr_geometry_provenance": getattr(
+                    blk, "ocr_geometry_provenance", {}
+                )
+                or {},
+                "semantic_role": getattr(blk, "semantic_role", "") or "",
+                "processing_action": getattr(
+                    blk, "processing_action", ""
+                )
+                or "",
+                "processing_decision_source": getattr(
+                    blk, "processing_decision_source", ""
+                )
+                or "",
+                "processing_decision_reasons": getattr(
+                    blk, "processing_decision_reasons", []
+                )
+                or [],
+                "processing_contract_diagnostics": getattr(
+                    blk, "processing_contract_diagnostics", {}
+                )
+                or {},
+                "canonical_block_id": getattr(
+                    blk, "canonical_block_id", ""
+                )
+                or "",
+                "duplicate_alias_block_ids": getattr(
+                    blk, "duplicate_alias_block_ids", []
+                )
+                or [],
+                "duplicate_alias_count": int(
+                    getattr(blk, "duplicate_alias_count", 0) or 0
+                ),
+                "compound_group_id": getattr(
+                    blk, "compound_group_id", ""
+                )
+                or "",
+                "merge_split_diagnostics": getattr(
+                    blk, "merge_split_diagnostics", {}
+                )
+                or {},
                 "ocr_regions": getattr(blk, "ocr_regions", None),
                 "ocr_crop_bbox": getattr(blk, "ocr_crop_bbox", None),
                 "ocr_resize_scale": getattr(blk, "ocr_resize_scale", None),
@@ -794,6 +930,17 @@ def build_ocr_debug_payload(
                 "ui_panel_preview_path": getattr(blk, "ui_panel_preview_path", "") or "",
                 "mask_decision": getattr(blk, "mask_decision", "") or "",
                 "mask_reject_reason": getattr(blk, "mask_reject_reason", "") or "",
+                "mask_strategy": getattr(blk, "mask_strategy", "") or "",
+                "mask_strategy_reason": getattr(
+                    blk, "mask_strategy_reason", ""
+                )
+                or "",
+                "mask_actual_bbox": getattr(
+                    blk, "mask_actual_bbox", None
+                ),
+                "mask_actual_pixel_count": int(
+                    getattr(blk, "mask_actual_pixel_count", 0) or 0
+                ),
                 "bubble_panel_text_candidate": bool(getattr(blk, "bubble_panel_text_candidate", False)),
                 "bubble_panel_group_id": getattr(blk, "bubble_panel_group_id", "") or "",
                 "bubble_panel_member_indices": getattr(blk, "bubble_panel_member_indices", []) or [],

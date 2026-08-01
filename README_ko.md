@@ -4,7 +4,7 @@
 
 이 저장소는 upstream `comic-translate` `v2.6.7` 코드베이스에서 시작한 뒤, 로컬 런타임/OCR/워크플로/Windows 환경 쪽으로 제품화 수정을 누적한 local-first 포크입니다.
 
-현재 포크의 제품 릴리스 버전은 `1.2.0`입니다. upstream `2.7.1`은
+현재 포크의 제품 릴리스 버전은 `1.3.0`입니다. upstream `2.7.1`은
 마지막 selective backport 계보로 별도 기록하며, 이 포크의 제품 버전과
 같은 의미로 사용하지 않습니다.
 
@@ -104,7 +104,7 @@ OCR:
   `comic-translate-vX.Y.Z-windows-launcher-source.zip`과
   `SHA256SUMS.txt`
 - ZIP 포함 범위: allowlist에 든 제품 source, CUDA12/CUDA13 첫 실행
-  launcher·requirements, Docker Compose/config, Gemma 준비 스크립트,
+  launcher·requirements, Docker Compose/config, Gemma/PaddleOCR 준비 스크립트,
   번역/resources, README, LICENSE
 - ZIP 제외 범위: venv, 모델, 캐시, benchmark runner/raw 결과,
   로컬 절대경로, secret
@@ -217,11 +217,10 @@ Windows PowerShell에서 버전이 지정된 Gemma model volume을 한 번 준�
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass `
   -File .\scripts\prepare_gemma_runtime.ps1 -Mode Prepare `
-  -CandidateModelPath 'C:\ExampleWorkspace\models\Gemma4-26B-A4B-Uncensored-HauhauCS-Balanced-IQ4_XS.gguf' `
-  -LegacyModelPath 'C:\ExampleWorkspace\models\gemma-4-26B-IQ4_NL.gguf'
+  -ModelPath 'C:\ExampleWorkspace\models\gemma-4-26B-IQ4_NL.gguf'
 ```
 
-앱에서는 `Custom Local Server(Gemma)`를 선택합니다. 관리 런타임은 ready manifest와 모델 크기를 확인하고 준비된 volume을 read-only로 마운트한 뒤, 필요할 때만 컨테이너를 시작하거나 재생성합니다. 두 모델의 SHA-256을 명시적으로 다시 계산하려면 같은 스크립트를 `-Mode Verify`로 실행합니다.
+앱에서는 `Custom Local Server(Gemma)`를 선택합니다. 관리 런타임은 ready manifest와 모델 크기를 확인하고 준비된 volume을 read-only로 마운트한 뒤, 필요할 때만 컨테이너를 시작하거나 재생성합니다. 모델의 SHA-256을 명시적으로 다시 계산하려면 같은 스크립트를 `-Mode Verify`로 실행합니다.
 
 **사용자 사전** 설정에서는 영구 블록 결과 캐시와 정확 일치 번역 메모리도 관리합니다. 결과 캐시는 번역과 runtime의 전체 identity가 같은 경우에만 재사용합니다. 원문→번역 쌍은 사용자가 명시적으로 승인해야 Gemma를 우회하며, 승인 항목이 포함된 파일을 가져올 때도 확인을 요구합니다. DB에는 민감한 로컬 텍스트가 저장되며 앱 user-data 디렉터리에만 남습니다. 잠금·손상 오류가 나도 자동 삭제하지 않습니다. 자세한 내용은 [번역 메모리 가이드](docs/gemma/translation-memory-ko.md)를 참고하세요.
 
@@ -234,6 +233,11 @@ docker compose -f hunyuanocr_docker_files/docker-compose.yaml up -d
 ```
 
 PaddleOCR VL 런타임 기준 파일은 [paddleocr_vl_docker_files/README.md](paddleocr_vl_docker_files/README.md)에 정리돼 있습니다.
+
+선택형 full-page `Spotting:` 경로는 projector·container·named volume·cache
+identity를 crop OCR과 분리합니다. 준비 방법은
+[paddleocr_vl_spotting_docker_files/README.md](paddleocr_vl_spotting_docker_files/README.md)에
+정리돼 있습니다.
 
 관리 대상 컨테이너는 단계 완료, 취소, 앱 종료 때 삭제되지 않고 중지 상태로 보존됩니다. 런타임을 명시적으로 초기화하거나 제거할 때만 `docker compose down`을 사용합니다.
 
@@ -281,7 +285,8 @@ exact 영구 OCR 캐시도 사용할 수 있습니다. crop 이미지는 저장�
 
 - Gemma 로컬 서버: `ghcr.io/ggml-org/llama.cpp@sha256:22e0e3bfe967af4fd1df6a918022abbfd4e72e4d40a4769e616a4176790acbcb`
 - HunyuanOCR 로컬 서버: `ghcr.io/ggml-org/llama.cpp:server-cuda`
-- PaddleOCR VL 런타임: `ccr-2vdh3abv-pub.cnc.bj.baidubce.com/paddlepaddle/paddleocr-genai-vllm-server@sha256:d0d32c04a2119613d25a0a4c292e165ccc107954b74580613cf59e378037f8f5`
+- PaddleOCR VL 추론: `ghcr.io/ggml-org/llama.cpp@sha256:22e0e3bfe967af4fd1df6a918022abbfd4e72e4d40a4769e616a4176790acbcb`
+- PaddleOCR VL layout 프런트: `ccr-2vdh3abv-pub.cnc.bj.baidubce.com/paddlepaddle/paddleocr-genai-vllm-server@sha256:d0d32c04a2119613d25a0a4c292e165ccc107954b74580613cf59e378037f8f5`
 
 ## 참고 설치 문서
 
@@ -294,6 +299,8 @@ exact 영구 OCR 캐시도 사용할 수 있습니다. crop 이미지는 저장�
 ## 저장소 문서
 
 - [rules.md](rules.md)
+- [코드 구조와 OCR 전략 경계](docs/architecture/codebase-map-ko.md)
+- [관리형 llama.cpp 전용 런타임 정책](docs/runtime/managed-llamacpp-only-ko.md)
 - [docs/gemma/local-server-ko.md](docs/gemma/local-server-ko.md)
 - [docs/hunyuan/local-server-ko.md](docs/hunyuan/local-server-ko.md)
 - [docs/repo/github-rulesets-public-free-ko.md](docs/repo/github-rulesets-public-free-ko.md)

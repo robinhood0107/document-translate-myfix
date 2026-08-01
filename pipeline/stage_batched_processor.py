@@ -57,11 +57,18 @@ from app.ui.messages import Messages
 from modules.detection.processor import TextBlockDetector
 from modules.ocr.factory import OCRFactory
 from modules.ocr.local_runtime import LocalOCRRuntimeManager
-from modules.ocr.ocr_paddle_VL import PaddleOCRVLEngine
+from modules.ocr.paddle_crop.engine import PaddleOCRVLEngine
 from modules.ocr.persistent_cache import (
     OCRPersistentResultCache,
     canonical_sha256,
     snapshot_raw_ocr_result,
+)
+from modules.ocr.common.result_contract import (
+    PROCESSING_ACTION_TRANSLATE_INPAINT,
+    canonicalize_exact_duplicate_blocks,
+    finalize_ocr_processing_contract,
+    finalize_ocr_processing_contracts,
+    select_translate_inpaint_blocks,
 )
 from modules.ocr.selection import (
     STAGE_BATCHED_WORKFLOW_MODE,
@@ -105,6 +112,11 @@ from modules.utils.export_paths import (
 from modules.utils.exceptions import OperationCancelledError
 from modules.utils.image_utils import generate_mask, restore_original_for_block_masks
 from modules.utils.inpaint_cleanup import apply_duplicate_bubble_inner_fill, refine_bubble_residue_inpaint
+from modules.utils.inpaint_composite import (
+    composite_with_edit_mask,
+    count_changed_outside_edit_mask,
+)
+from modules.inpainting.runtime_contract import inpaint_outside_mask_message
 from modules.utils.language_utils import get_language_code, is_no_space_lang, language_codes
 from modules.utils.ocr_debug import (
     all_empty_blocks_are_rejected,
@@ -174,6 +186,13 @@ class StagePageContext:
     project_render_fingerprint: str = ""
     project_render_checkpoint_status: str = "disabled"
     page_ocr_metrics: dict[str, int] = field(default_factory=dict)
+    ocr_canonicalization_summary: dict[str, Any] = field(
+        default_factory=dict
+    )
+    ocr_processing_summary: dict[str, Any] = field(
+        default_factory=dict
+    )
+    translation_blocks: list[Any] = field(default_factory=list)
     page_translation_metrics: dict[str, int | float] = field(default_factory=dict)
     paddleocr_cache_plan: Any | None = None
     paddleocr_cache_engine: Any | None = None
@@ -185,6 +204,7 @@ class StagePageContext:
     cleanup_stats: dict[str, Any] = field(
         default_factory=lambda: {"applied": False, "component_count": 0, "block_count": 0}
     )
+    inpaint_diagnostics: dict[str, Any] = field(default_factory=dict)
     no_text_detected: bool = False
     failed_stage: str = ""
     failed_reason: str = ""
@@ -384,6 +404,7 @@ class StageBatchedProcessor(BatchProcessor):
         *,
         context: str = "batch cleanup",
         raise_on_failure: bool = False,
+        preserve_sleeping_paddle: bool = False,
     ) -> None:
         runtime_managers = (
             (
@@ -407,6 +428,9 @@ class StageBatchedProcessor(BatchProcessor):
                     runtime_manager,
                     context=context,
                     raise_on_failure=True,
+                    release_for_handoff=(
+                        preserve_sleeping_paddle and label == "OCR"
+                    ),
                 )
             except Exception as exc:
                 failures.append(exc)
@@ -420,11 +444,16 @@ class StageBatchedProcessor(BatchProcessor):
         *,
         context: str,
         raise_on_failure: bool,
+        release_for_handoff: bool = False,
     ) -> None:
         last_error: Exception | None = None
         for attempt in range(2):
             try:
-                runtime_manager.shutdown()
+                release = getattr(runtime_manager, "release_for_handoff", None)
+                if release_for_handoff and label == "OCR" and callable(release):
+                    release()
+                else:
+                    runtime_manager.shutdown()
                 return
             except Exception as exc:
                 last_error = exc
@@ -438,16 +467,26 @@ class StageBatchedProcessor(BatchProcessor):
         if raise_on_failure and last_error is not None:
             raise last_error
 
-    def _start_ocr_prewarm(self, policy: dict[str, Any]) -> None:
+    def _start_ocr_prewarm(
+        self,
+        policy: dict[str, Any],
+        *,
+        cache_miss_confirmed: bool = False,
+    ) -> None:
         runtime_manager = getattr(self.main_page, "local_ocr_runtime_manager", None)
         if not isinstance(runtime_manager, LocalOCRRuntimeManager):
             return
+        engine_key = str(policy["primary_ocr_engine"])
         # A non-empty project cache may contain a page-local OCR hit that can be
         # known only after detection restores the exact ordered blocks. Defer in
         # that case to preserve the all-hit zero-runtime contract. A brand-new,
         # empty sidecar cannot contain a hit, so keep the cold-path overlap.
         project_store = getattr(self, "_project_checkpoint_store", None)
-        if project_store is not None:
+        if (
+            not cache_miss_confirmed
+            and engine_key in {"PaddleOCR VL", "PaddleOCR VL Spotting"}
+            and project_store is not None
+        ):
             try:
                 page_keys = list(
                     getattr(self, "_project_checkpoint_page_keys", []) or []
@@ -471,9 +510,9 @@ class StageBatchedProcessor(BatchProcessor):
                 )
                 return
         settings_page = self.main_page.settings_page
-        engine_key = str(policy["primary_ocr_engine"])
         if (
-            engine_key == "PaddleOCR VL"
+            not cache_miss_confirmed
+            and engine_key == "PaddleOCR VL"
             and bool(
                 settings_page.get_paddleocr_vl_settings().get(
                     "persistent_cache_enabled",
@@ -487,7 +526,7 @@ class StageBatchedProcessor(BatchProcessor):
                 stats.get("item_count", 0) or 0
             ) > 0:
                 return
-        service = "paddleocr_vl" if "paddle" in engine_key.lower() else "hunyuanocr" if "hunyuan" in engine_key.lower() else engine_key.lower()
+        service = self._ocr_runtime_service_name(engine_key)
         self._start_prewarm(
             "ocr",
             "OCR",
@@ -500,13 +539,148 @@ class StageBatchedProcessor(BatchProcessor):
             ),
         )
 
+    def _plan_detected_page_ocr_prewarm(
+        self,
+        ctx: StagePageContext,
+        policy: dict[str, Any],
+        *,
+        index: int,
+        total_images: int,
+    ) -> None:
+        """Start Paddle only after a detected page proves a cache miss.
+
+        Unrelated rows in the persistent OCR database do not prove that the
+        current folder is cached. Planning each page as detection completes
+        preserves all-hit zero-runtime behavior while overlapping the first
+        real miss with detection of the remaining pages.
+        """
+
+        if (
+            ctx.failed_stage
+            or ctx.no_text_detected
+            or not ctx.blk_list
+            or "ocr" in getattr(self, "_prewarm_jobs", {})
+        ):
+            return
+        engine_key = str(policy.get("primary_ocr_engine", ""))
+        if engine_key not in {"PaddleOCR VL", "PaddleOCR VL Spotting"}:
+            return
+        runtime_manager = getattr(
+            self.main_page,
+            "local_ocr_runtime_manager",
+            None,
+        )
+        if not isinstance(runtime_manager, LocalOCRRuntimeManager):
+            return
+
+        settings_page = self.main_page.settings_page
+        paddle_settings = (
+            settings_page.get_paddleocr_vl_settings()
+            if engine_key == "PaddleOCR VL"
+            else settings_page.get_paddleocr_vl_spotting_settings()
+        )
+        persistent_cache_requested = bool(
+            engine_key == "PaddleOCR VL"
+            and paddle_settings.get("persistent_cache_enabled", True)
+        )
+        project_cache_requested = (
+            getattr(self, "_project_checkpoint_store", None) is not None
+        )
+        if not persistent_cache_requested and not project_cache_requested:
+            self._start_ocr_prewarm(
+                policy,
+                cache_miss_confirmed=True,
+            )
+            return
+
+        self._canonicalize_ocr_inputs([ctx])
+        runtime_identity = dict(
+            getattr(self, "_paddleocr_cache_identity", None) or {}
+        ) or None
+        if runtime_identity is None:
+            runtime_identity = runtime_manager.get_ocr_cache_identity(
+                engine_key,
+                settings_page,
+            )
+        if runtime_identity is None:
+            self._emit_benchmark_event(
+                "ocr_prewarm_decision",
+                image_path=ctx.image_path,
+                image_index=index,
+                total_images=total_images,
+                decision="start",
+                reason="runtime_identity_unavailable",
+            )
+            self._start_ocr_prewarm(
+                policy,
+                cache_miss_confirmed=True,
+            )
+            return
+        self._paddleocr_cache_identity = dict(runtime_identity)
+
+        if project_cache_requested:
+            self._prepare_project_ocr_hits(
+                [ctx],
+                policy,
+                runtime_identity,
+            )
+            if ctx.project_ocr_hit is not None:
+                self._emit_benchmark_event(
+                    "ocr_prewarm_decision",
+                    image_path=ctx.image_path,
+                    image_index=index,
+                    total_images=total_images,
+                    decision="defer",
+                    reason="project_checkpoint_hit",
+                )
+                return
+
+        requires_runtime = True
+        if persistent_cache_requested:
+            requires_runtime = self._prepare_paddleocr_cache_plans(
+                [ctx],
+                policy,
+                runtime_identity,
+            )
+        if ctx.failed_stage:
+            self._emit_benchmark_event(
+                "ocr_prewarm_decision",
+                image_path=ctx.image_path,
+                image_index=index,
+                total_images=total_images,
+                decision="defer",
+                reason="cache_plan_failed",
+            )
+            return
+        self._emit_benchmark_event(
+            "ocr_prewarm_decision",
+            image_path=ctx.image_path,
+            image_index=index,
+            total_images=total_images,
+            decision="start" if requires_runtime else "defer",
+            reason=(
+                "persistent_cache_miss"
+                if requires_runtime and persistent_cache_requested
+                else (
+                    "project_checkpoint_miss"
+                    if requires_runtime
+                    else "persistent_cache_hit"
+                )
+            ),
+        )
+        if requires_runtime:
+            self._start_ocr_prewarm(
+                policy,
+                cache_miss_confirmed=True,
+            )
+
     def _await_ocr_runtime(self, policy: dict[str, Any]) -> None:
         runtime_manager = getattr(self.main_page, "local_ocr_runtime_manager", None)
         if not isinstance(runtime_manager, LocalOCRRuntimeManager):
             return
         settings_page = self.main_page.settings_page
         engine_key = str(policy["primary_ocr_engine"])
-        service = "paddleocr_vl" if "paddle" in engine_key.lower() else "hunyuanocr" if "hunyuan" in engine_key.lower() else engine_key.lower()
+        service = self._ocr_runtime_service_name(engine_key)
         self._await_prewarm_or_run(
             "ocr",
             "OCR",
@@ -518,6 +692,15 @@ class StageBatchedProcessor(BatchProcessor):
                 cancel_checker=self._prewarm_cancel_checker,
             ),
         )
+
+    @staticmethod
+    def _ocr_runtime_service_name(engine_key: str) -> str:
+        return {
+            "PaddleOCR VL": "paddleocr_vl",
+            "PaddleOCR VL Spotting": "paddleocr_vl_spotting",
+            "HunyuanOCR": "hunyuanocr",
+            "MangaLMM": "mangalmm",
+        }.get(str(engine_key), str(engine_key).lower().replace(" ", "_"))
 
     def _start_gemma_prewarm(self) -> None:
         runtime_manager = getattr(self.main_page, "local_translation_runtime_manager", None)
@@ -665,7 +848,11 @@ class StageBatchedProcessor(BatchProcessor):
         )
         self.main_page.image_skipped.emit(ctx.image_path, stage, detail or reason)
 
-    def _detect_all(self, pages: list[StagePageContext]) -> None:
+    def _detect_all(
+        self,
+        pages: list[StagePageContext],
+        policy: dict[str, Any] | None = None,
+    ) -> None:
         total_images = len(pages)
         settings_page = self.main_page.settings_page
         detector = self.block_detection.block_detector_cache
@@ -840,6 +1027,13 @@ class StageBatchedProcessor(BatchProcessor):
                     export_settings=export_settings,
                     preferred_path=detector_overlay_path,
                 )
+                if policy is not None:
+                    self._plan_detected_page_ocr_prewarm(
+                        ctx,
+                        policy,
+                        index=index,
+                        total_images=total_images,
+                    )
                 continue
 
             state = self._ensure_page_state(ctx.image_path)
@@ -905,7 +1099,8 @@ class StageBatchedProcessor(BatchProcessor):
                 engine_key,
                 device,
             )
-            if engine_key != "PaddleOCR VL"
+            if engine_key
+            not in {"PaddleOCR VL", "PaddleOCR VL Spotting"}
             else None
         )
         cache_status = "miss"
@@ -972,7 +1167,8 @@ class StageBatchedProcessor(BatchProcessor):
             else:
                 cache_status = "refreshed"
         elif (
-            engine_key != "PaddleOCR VL"
+            engine_key
+            not in {"PaddleOCR VL", "PaddleOCR VL Spotting"}
             and self.cache_manager._can_serve_all_blocks_from_ocr_cache(
                 cache_key,
                 ctx.blk_list,
@@ -995,7 +1191,10 @@ class StageBatchedProcessor(BatchProcessor):
             page_profile = dict(getattr(engine, "last_page_profile", {}) or {})
             snapshot_raw_results()
             apply_ocr_result_dictionary(ctx.blk_list, settings_page.get_ocr_result_dictionary_rules())
-            if engine_key != "PaddleOCR VL":
+            if engine_key not in {
+                "PaddleOCR VL",
+                "PaddleOCR VL Spotting",
+            }:
                 self.cache_manager._cache_ocr_results(cache_key, ctx.blk_list)
             cache_status = "refreshed"
             attempt_count = 1
@@ -1005,6 +1204,7 @@ class StageBatchedProcessor(BatchProcessor):
         quality = summarize_ocr_quality(ctx.blk_list)
         if (
             project_checkpoint_hit is None
+            and engine_key != "PaddleOCR VL Spotting"
             and quality.get("low_quality", False)
             and not all_empty_blocks_are_rejected(ctx.blk_list)
         ):
@@ -1044,7 +1244,10 @@ class StageBatchedProcessor(BatchProcessor):
                 page_profile = dict(getattr(engine, "last_page_profile", {}) or {})
             snapshot_raw_results()
             apply_ocr_result_dictionary(ctx.blk_list, settings_page.get_ocr_result_dictionary_rules())
-            if engine_key != "PaddleOCR VL":
+            if engine_key not in {
+                "PaddleOCR VL",
+                "PaddleOCR VL Spotting",
+            }:
                 self.cache_manager._cache_ocr_results(cache_key, ctx.blk_list)
             cache_status = "refreshed"
             quality = summarize_ocr_quality(ctx.blk_list)
@@ -1075,6 +1278,34 @@ class StageBatchedProcessor(BatchProcessor):
             page_profile = dict(page_profile or {})
             page_profile["embedded_ui_dropped_block_count"] = len(embedded_ui_blocks)
 
+        routed_blocks = [
+            *ctx.blk_list,
+            *rejected_empty_blocks,
+            *embedded_ui_blocks,
+        ]
+        ctx.ocr_processing_summary = finalize_ocr_processing_contracts(
+            routed_blocks
+        )
+        page_profile = dict(page_profile or {})
+        page_profile["ocr_processing_contract"] = dict(
+            ctx.ocr_processing_summary
+        )
+
+        canonicalization = dict(ctx.ocr_canonicalization_summary or {})
+        if canonicalization:
+            page_profile = dict(page_profile or {})
+            page_profile["exact_duplicate_canonicalization"] = {
+                "input_block_count": int(
+                    canonicalization.get("input_block_count", 0) or 0
+                ),
+                "canonical_block_count": int(
+                    canonicalization.get("canonical_block_count", 0) or 0
+                ),
+                "duplicate_alias_count": int(
+                    canonicalization.get("duplicate_alias_count", 0) or 0
+                ),
+            }
+
         metrics = self._ocr_quality_metrics(quality)
         retained_ids = {
             str(getattr(block, "block_id", "") or "")
@@ -1102,16 +1333,30 @@ class StageBatchedProcessor(BatchProcessor):
         runtime_identity: dict[str, Any],
     ) -> None:
         store = getattr(self, "_project_checkpoint_store", None)
-        if store is None or str(policy.get("primary_ocr_engine", "")) != "PaddleOCR VL":
+        engine_key = str(policy.get("primary_ocr_engine", ""))
+        if store is None or engine_key not in {
+            "PaddleOCR VL",
+            "PaddleOCR VL Spotting",
+        }:
             return
-        paddle_settings = (
-            self.main_page.settings_page.get_paddleocr_vl_settings()
-        )
+        if engine_key == "PaddleOCR VL":
+            paddle_settings = (
+                self.main_page.settings_page.get_paddleocr_vl_settings()
+            )
+        else:
+            paddle_settings = (
+                self.main_page.settings_page
+                .get_paddleocr_vl_spotting_settings()
+            )
         for ctx in pages:
             if (
                 ctx.failed_stage
                 or ctx.no_text_detected
                 or not ctx.detection_fingerprint
+                or (
+                    ctx.project_ocr_checkpoint_status in {"hit", "miss"}
+                    and bool(ctx.project_ocr_identity)
+                )
             ):
                 continue
             try:
@@ -1181,14 +1426,43 @@ class StageBatchedProcessor(BatchProcessor):
         if recorded:
             ctx.project_ocr_checkpoint_status = "stored"
 
+    @staticmethod
+    def _canonicalize_ocr_inputs(pages: list[StagePageContext]) -> None:
+        for ctx in pages:
+            if ctx.failed_stage or ctx.no_text_detected or not ctx.blk_list:
+                continue
+            canonical_blocks, summary = canonicalize_exact_duplicate_blocks(
+                ctx.blk_list,
+                source_identity=(
+                    ctx.source_decoded_sha256
+                    or ctx.project_checkpoint_page_key
+                ),
+            )
+            ctx.blk_list = canonical_blocks
+            ctx.ocr_canonicalization_summary = summary
+            duplicate_count = int(summary.get("duplicate_alias_count", 0) or 0)
+            if duplicate_count:
+                logger.info(
+                    "Canonicalized %d exact detector duplicate(s) before OCR for %s.",
+                    duplicate_count,
+                    ctx.image_name,
+                )
+
     def _ocr_all(self, pages: list[StagePageContext], policy: dict[str, Any]) -> None:
         total_images = len(pages)
         settings_page = self.main_page.settings_page
         runtime_manager = getattr(self.main_page, "local_ocr_runtime_manager", None)
-        self._paddleocr_cache_store = None
-        self._paddleocr_cache_identity = None
         engine_key = str(policy["primary_ocr_engine"])
-        paddle_settings = settings_page.get_paddleocr_vl_settings()
+        self._canonicalize_ocr_inputs(pages)
+        paddle_settings = (
+            settings_page.get_paddleocr_vl_settings()
+            if engine_key == "PaddleOCR VL"
+            else (
+                settings_page.get_paddleocr_vl_spotting_settings()
+                if engine_key == "PaddleOCR VL Spotting"
+                else {}
+            )
+        )
         persistent_cache_requested = (
             engine_key == "PaddleOCR VL"
             and bool(
@@ -1202,10 +1476,13 @@ class StageBatchedProcessor(BatchProcessor):
             persistent_cache_requested
             or getattr(self, "_project_checkpoint_store", None) is not None
         )
-        runtime_identity = None
+        runtime_identity = dict(
+            getattr(self, "_paddleocr_cache_identity", None) or {}
+        ) or None
         if (
             cache_identity_required
-            and engine_key == "PaddleOCR VL"
+            and engine_key
+            in {"PaddleOCR VL", "PaddleOCR VL Spotting"}
             and isinstance(runtime_manager, LocalOCRRuntimeManager)
         ):
             runtime_identity = runtime_manager.get_ocr_cache_identity(
@@ -1242,7 +1519,8 @@ class StageBatchedProcessor(BatchProcessor):
             self._await_ocr_runtime(policy)
         if (
             cache_identity_required
-            and engine_key == "PaddleOCR VL"
+            and engine_key
+            in {"PaddleOCR VL", "PaddleOCR VL Spotting"}
             and runtime_identity is None
             and isinstance(runtime_manager, LocalOCRRuntimeManager)
             and has_project_miss()
@@ -1386,6 +1664,7 @@ class StageBatchedProcessor(BatchProcessor):
                 runtime_manager,
                 context="OCR-to-inpaint handoff",
                 raise_on_failure=True,
+                release_for_handoff=True,
             )
         self._raise_if_cancelled()
 
@@ -1409,6 +1688,14 @@ class StageBatchedProcessor(BatchProcessor):
                 or ctx.no_text_detected
                 or ctx.project_ocr_hit is not None
             ):
+                continue
+            if (
+                isinstance(ctx.paddleocr_cache_engine, PaddleOCRVLEngine)
+                and ctx.paddleocr_cache_plan is not None
+            ):
+                requires_runtime = requires_runtime or bool(
+                    ctx.paddleocr_cache_plan.requires_runtime
+                )
                 continue
             try:
                 source_lang_english = self._source_lang_english(ctx.source_lang)
@@ -1559,6 +1846,9 @@ class StageBatchedProcessor(BatchProcessor):
                 "inpaint_project_checkpoint_status": (
                     ctx.project_inpaint_checkpoint_status
                 ),
+                "inpaint_runtime_diagnostics": dict(
+                    ctx.inpaint_diagnostics or {}
+                ),
             },
         )
         cleaned_output_path = self._write_inpainted_debug_image(
@@ -1589,6 +1879,7 @@ class StageBatchedProcessor(BatchProcessor):
             cleanup_stats=ctx.cleanup_stats,
             mask_details=ctx.mask_details,
             inpainter_backend=str(runtime.get("backend", "") or ""),
+            inpaint_runtime_diagnostics=ctx.inpaint_diagnostics,
         )
         for stage_key, stage_label, preferred_path in (
             ("raw_mask", "원본 마스크", debug_paths.get("raw_mask", "")),
@@ -1617,12 +1908,21 @@ class StageBatchedProcessor(BatchProcessor):
                 export_settings=export_settings,
                 preferred_path=preferred_path,
             )
+        processing_action_skipped = (
+            str(ctx.inpaint_diagnostics.get("status", "") or "")
+            == "processing_action_skipped"
+        )
+        stage_kwargs: dict[str, Any] = {
+            "patch_count": len(ctx.patches or []),
+            "cache_status": ctx.project_inpaint_checkpoint_status,
+        }
+        if processing_action_skipped:
+            stage_kwargs["reason"] = "no_translate_inpaint_blocks"
         self.main_page.image_ctrl.mark_processing_stage(
             ctx.image_path,
             "inpaint",
-            "completed",
-            patch_count=len(ctx.patches or []),
-            cache_status=ctx.project_inpaint_checkpoint_status,
+            "skipped" if processing_action_skipped else "completed",
+            **stage_kwargs,
         )
         self._emit_benchmark_event(
             "inpaint_end",
@@ -1632,6 +1932,14 @@ class StageBatchedProcessor(BatchProcessor):
             block_count=len(ctx.blk_list or []),
             patch_count=len(ctx.patches or []),
             project_checkpoint_status=ctx.project_inpaint_checkpoint_status,
+            skip_reason=(
+                "no_translate_inpaint_blocks"
+                if processing_action_skipped
+                else ""
+            ),
+            inpaint_runtime_diagnostics=dict(
+                ctx.inpaint_diagnostics or {}
+            ),
         )
 
     def _inpaint_pages(self, pages: list[StagePageContext]) -> bool:
@@ -1722,6 +2030,78 @@ class StageBatchedProcessor(BatchProcessor):
                     page_state.get("brush_strokes", []) or []
                 )
 
+                if not inpaint_blocks and not brush_strokes:
+                    zero_mask = np.zeros(
+                        ctx.image.shape[:2],
+                        dtype=np.uint8,
+                    )
+                    ctx.inpaint_input_img = np.ascontiguousarray(
+                        ctx.image.copy(),
+                        dtype=np.uint8,
+                    )
+                    ctx.raw_mask = zero_mask.copy()
+                    ctx.mask = zero_mask
+                    protected_reasons = [
+                        str(
+                            getattr(
+                                block,
+                                "_inpaint_protected_reason",
+                                "",
+                            )
+                            or ""
+                        )
+                        for block in protected_blocks
+                    ]
+                    ctx.mask_details = {
+                        "raw_mask": ctx.raw_mask,
+                        "final_mask": ctx.mask,
+                        "processing_action_skipped": True,
+                        "inpaint_protected_block_count": len(
+                            protected_blocks
+                        ),
+                        "inpaint_protected_reasons": protected_reasons,
+                    }
+                    ctx.cleanup_stats = {
+                        "applied": False,
+                        "component_count": 0,
+                        "block_count": 0,
+                        "reason": "no_translate_inpaint_blocks",
+                    }
+                    ctx.inpaint_diagnostics = {
+                        "status": "processing_action_skipped",
+                        "reason": "no_translate_inpaint_blocks",
+                        "inference_call_count": 0,
+                        "cpu_fallback_used": False,
+                    }
+                    ctx.project_inpaint_checkpoint_status = "skipped"
+                    if (
+                        checkpoint_store is not None
+                        and ctx.source_decoded_sha256
+                        and ctx.detection_fingerprint
+                    ):
+                        ctx.project_inpaint_fingerprint = (
+                            build_skipped_stage_fingerprint(
+                                stage="inpaint",
+                                source_sha256=ctx.source_decoded_sha256,
+                                detection_fingerprint=(
+                                    ctx.detection_fingerprint
+                                ),
+                                reason="no_translate_inpaint_blocks",
+                            )
+                        )
+                    ctx.project_inpaint_artifact_sha256 = (
+                        decoded_image_sha256(ctx.inpaint_input_img)
+                    )
+                    self._finish_inpaint_page(
+                        ctx,
+                        index=index,
+                        total_images=total_images,
+                        runtime=runtime,
+                        hd_strategy=hd_strategy,
+                        export_settings=export_settings,
+                    )
+                    continue
+
                 project_hit = None
                 if (
                     checkpoint_store is not None
@@ -1794,6 +2174,11 @@ class StageBatchedProcessor(BatchProcessor):
                             for block in protected_blocks
                         ]
                     ctx.cleanup_stats = project_hit.cleanup_stats
+                    ctx.inpaint_diagnostics = {
+                        "status": "project_checkpoint_hit",
+                        "inference_call_count": 0,
+                        "cpu_fallback_used": False,
+                    }
                     ctx.project_inpaint_artifact_sha256 = (
                         project_hit.cleaned_decoded_sha256
                     )
@@ -1916,6 +2301,17 @@ class StageBatchedProcessor(BatchProcessor):
                     inpaint_blocks,
                     config=config,
                 )
+                ctx.inpaint_diagnostics = dict(
+                    getattr(
+                        self.inpainting,
+                        "last_inpaint_diagnostics",
+                        {},
+                    )
+                    or {}
+                )
+                ctx.inpaint_diagnostics["model_identity"] = copy.deepcopy(
+                    model_identity
+                )
                 self._raise_if_cancelled()
                 ctx.inpaint_input_img = imk.convert_scale_abs(
                     ctx.inpaint_input_img
@@ -1952,6 +2348,32 @@ class StageBatchedProcessor(BatchProcessor):
                     ctx.mask_details,
                     ctx.cleanup_stats,
                 )
+                outside_before_restore = count_changed_outside_edit_mask(
+                    ctx.image,
+                    ctx.inpaint_input_img,
+                    ctx.mask,
+                )
+                ctx.inpaint_input_img = composite_with_edit_mask(
+                    ctx.image,
+                    ctx.inpaint_input_img,
+                    ctx.mask,
+                )
+                outside_after_restore = count_changed_outside_edit_mask(
+                    ctx.image,
+                    ctx.inpaint_input_img,
+                    ctx.mask,
+                )
+                ctx.inpaint_diagnostics[
+                    "outside_mask_changed_before_restore"
+                ] = int(outside_before_restore)
+                ctx.inpaint_diagnostics[
+                    "outside_mask_changed_pixel_count"
+                ] = int(outside_after_restore)
+                if outside_after_restore:
+                    raise RuntimeError(inpaint_outside_mask_message())
+                ctx.mask_details[
+                    "inpaint_runtime_diagnostics"
+                ] = copy.deepcopy(ctx.inpaint_diagnostics)
                 self._raise_if_cancelled()
                 ctx.inpaint_input_img = np.ascontiguousarray(
                     ctx.inpaint_input_img,
@@ -2048,7 +2470,14 @@ class StageBatchedProcessor(BatchProcessor):
         if not start_gemma:
             return
         self._raise_if_cancelled()
-        if any(not ctx.failed_stage and not ctx.no_text_detected for ctx in pages):
+        for ctx in pages:
+            if ctx.failed_stage or ctx.no_text_detected:
+                ctx.translation_blocks = []
+                continue
+            ctx.translation_blocks = select_translate_inpaint_blocks(
+                ctx.blk_list
+            )
+        if any(ctx.translation_blocks for ctx in pages):
             self._start_gemma_prewarm()
 
     def _build_project_translation_identity(
@@ -2130,6 +2559,26 @@ class StageBatchedProcessor(BatchProcessor):
                 ),
                 "tm_revision": tm_revision,
             }
+            engine_contract["ocr_processing_contract"] = {
+                "schema_version": int(
+                    ctx.ocr_processing_summary.get("schema_version", 0)
+                    or 0
+                ),
+                "selected_blocks": [
+                    {
+                        "block_id": str(
+                            getattr(block, "block_id", "") or ""
+                        ),
+                        "semantic_role": str(
+                            getattr(block, "semantic_role", "") or ""
+                        ),
+                        "processing_action": str(
+                            getattr(block, "processing_action", "") or ""
+                        ),
+                    }
+                    for block in ctx.translation_blocks
+                ],
+            }
             return build_translation_identity(
                 ocr_fingerprint=ctx.project_ocr_fingerprint,
                 source_lang=ctx.source_lang,
@@ -2153,6 +2602,26 @@ class StageBatchedProcessor(BatchProcessor):
             )
             return None
 
+    @staticmethod
+    def _translation_snapshot_for_blocks(
+        snapshot: list[dict[str, Any]] | None,
+        blocks: list[Any],
+    ) -> list[dict[str, Any]]:
+        by_id = {
+            str(item.get("block_id", "") or ""): item
+            for item in list(snapshot or [])
+            if isinstance(item, dict)
+            and str(item.get("block_id", "") or "")
+        }
+        selected: list[dict[str, Any]] = []
+        for block in blocks:
+            block_id = str(getattr(block, "block_id", "") or "")
+            item = by_id.get(block_id)
+            if item is None:
+                return []
+            selected.append(copy.deepcopy(item))
+        return selected
+
     def _translate_all(self, pages: list[StagePageContext]) -> None:
         total_images = len(pages)
         settings_page = self.main_page.settings_page
@@ -2169,6 +2638,20 @@ class StageBatchedProcessor(BatchProcessor):
         gemma_runtime_required = False
         for ctx in pages:
             if ctx.failed_stage or ctx.no_text_detected:
+                continue
+            ctx.translation_blocks = select_translate_inpaint_blocks(
+                ctx.blk_list
+            )
+            if not ctx.translation_blocks:
+                ctx.project_translation_checkpoint_status = "skipped"
+                ctx.project_translation_fingerprint = (
+                    build_skipped_stage_fingerprint(
+                        stage="translation",
+                        source_sha256=ctx.source_decoded_sha256,
+                        detection_fingerprint=ctx.detection_fingerprint,
+                        reason="no_translate_inpaint_blocks",
+                    )
+                )
                 continue
             translator = Translator(
                 self.main_page,
@@ -2193,8 +2676,13 @@ class StageBatchedProcessor(BatchProcessor):
                         page_key=ctx.project_checkpoint_page_key,
                         fingerprint=ctx.project_translation_fingerprint,
                         identity=identity,
-                        current_blocks=ctx.blk_list,
-                        project_snapshot=ctx.project_translation_snapshot,
+                        current_blocks=ctx.translation_blocks,
+                        project_snapshot=(
+                            self._translation_snapshot_for_blocks(
+                                ctx.project_translation_snapshot,
+                                ctx.translation_blocks,
+                            )
+                        ),
                     )
                 except Exception:
                     logger.warning(
@@ -2206,14 +2694,20 @@ class StageBatchedProcessor(BatchProcessor):
                     ctx.project_translation_fingerprint = ""
                     project_hit = None
                 if project_hit is not None:
-                    apply_translation_checkpoint(ctx.blk_list, project_hit)
+                    apply_translation_checkpoint(
+                        ctx.translation_blocks,
+                        project_hit,
+                    )
                     ctx.project_translation_checkpoint_status = "hit"
                     project_hits[id(ctx)] = project_hit
                     continue
                 ctx.project_translation_checkpoint_status = "miss"
             if translator.uses_persistent_translation_memory:
                 gemma_runtime_required = (
-                    translator.prepare_translation(ctx.blk_list, extra_context)
+                    translator.prepare_translation(
+                        ctx.translation_blocks,
+                        extra_context,
+                    )
                     or gemma_runtime_required
                 )
 
@@ -2254,6 +2748,27 @@ class StageBatchedProcessor(BatchProcessor):
                     skip_reason="no_text_detected",
                 )
                 continue
+            if not ctx.translation_blocks:
+                self.main_page.image_ctrl.mark_processing_stage(
+                    ctx.image_path,
+                    "translation",
+                    "skipped",
+                    reason="no_translate_inpaint_blocks",
+                )
+                self._emit_benchmark_event(
+                    "translate_end",
+                    image_path=ctx.image_path,
+                    image_index=index,
+                    total_images=total_images,
+                    block_count=0,
+                    preserved_or_review_block_count=len(
+                        ctx.blk_list or []
+                    ),
+                    translator_key=translator_key,
+                    skip_reason="no_translate_inpaint_blocks",
+                    project_checkpoint_status="skipped",
+                )
+                continue
             self._report_runtime_progress(
                 phase="pipeline",
                 service="gemma",
@@ -2270,7 +2785,10 @@ class StageBatchedProcessor(BatchProcessor):
                 image_path=ctx.image_path,
                 image_index=index,
                 total_images=total_images,
-                block_count=len(ctx.blk_list or []),
+                block_count=len(ctx.translation_blocks),
+                preserved_or_review_block_count=(
+                    len(ctx.blk_list or []) - len(ctx.translation_blocks)
+                ),
                 translator_key=translator_key,
             )
             translator = prepared_translators[id(ctx)]
@@ -2288,15 +2806,21 @@ class StageBatchedProcessor(BatchProcessor):
                         image_path=ctx.image_path,
                         image_index=index,
                         total_images=total_images,
-                        block_count=len(ctx.blk_list or []),
+                        block_count=len(ctx.translation_blocks),
+                        preserved_or_review_block_count=(
+                            len(ctx.blk_list or [])
+                            - len(ctx.translation_blocks)
+                        ),
                         translator_key=translator_key,
                         translator_engine=translator.engine.__class__.__name__,
                         cache_status="project-checkpoint",
                         project_checkpoint_status="hit",
                     )
-                    raw_text_obj = json.loads(get_raw_text(ctx.blk_list))
+                    raw_text_obj = json.loads(
+                        get_raw_text(ctx.translation_blocks)
+                    )
                     translated_text_obj = json.loads(
-                        get_raw_translation(ctx.blk_list)
+                        get_raw_translation(ctx.translation_blocks)
                     )
                     if not raw_text_obj or not translated_text_obj:
                         raise RuntimeError(
@@ -2321,7 +2845,7 @@ class StageBatchedProcessor(BatchProcessor):
                 # the SQLite/runtime identity can change after folder preflight.
                 # Refresh this page's plan immediately before use.
                 runtime_required_now = translator.prepare_translation(
-                    ctx.blk_list,
+                    ctx.translation_blocks,
                     extra_context,
                 )
                 if runtime_required_now and not gemma_runtime_started:
@@ -2338,14 +2862,14 @@ class StageBatchedProcessor(BatchProcessor):
                     gemma_runtime_started = True
             try:
                 _, translation_cache_status = translator.translate_with_cache_manager(
-                    ctx.blk_list,
+                    ctx.translation_blocks,
                     ctx.image,
                     extra_context,
                     self.cache_manager,
                 )
                 self._raise_if_cancelled()
                 apply_translation_result_dictionary(
-                    ctx.blk_list,
+                    ctx.translation_blocks,
                     settings_page.get_translation_result_dictionary_rules(),
                 )
                 ctx.page_translation_metrics = self._translation_benchmark_metrics(translator)
@@ -2369,7 +2893,7 @@ class StageBatchedProcessor(BatchProcessor):
                                 ctx.project_translation_fingerprint
                             ),
                             identity=ctx.project_translation_identity,
-                            blocks=ctx.blk_list,
+                            blocks=ctx.translation_blocks,
                         )
                     except Exception:
                         logger.warning(
@@ -2387,7 +2911,11 @@ class StageBatchedProcessor(BatchProcessor):
                     image_path=ctx.image_path,
                     image_index=index,
                     total_images=total_images,
-                    block_count=len(ctx.blk_list or []),
+                    block_count=len(ctx.translation_blocks),
+                    preserved_or_review_block_count=(
+                        len(ctx.blk_list or [])
+                        - len(ctx.translation_blocks)
+                    ),
                     translator_key=translator_key,
                     translator_engine=translator.engine.__class__.__name__,
                     cache_status=translation_cache_status,
@@ -2396,8 +2924,12 @@ class StageBatchedProcessor(BatchProcessor):
                     ),
                     **ctx.page_translation_metrics,
                 )
-                raw_text_obj = json.loads(get_raw_text(ctx.blk_list))
-                translated_text_obj = json.loads(get_raw_translation(ctx.blk_list))
+                raw_text_obj = json.loads(
+                    get_raw_text(ctx.translation_blocks)
+                )
+                translated_text_obj = json.loads(
+                    get_raw_translation(ctx.translation_blocks)
+                )
                 if (not raw_text_obj) or (not translated_text_obj):
                     raise RuntimeError("Translator returned empty JSON.")
                 self._raise_if_cancelled()
@@ -2451,6 +2983,19 @@ class StageBatchedProcessor(BatchProcessor):
         seen_bubble_render_keys: set[tuple[tuple[int, int, int, int], str]] = set()
         for blk in ctx.blk_list:
             if is_block_ocr_empty(blk):
+                continue
+            finalize_ocr_processing_contract(blk)
+            if (
+                getattr(blk, "processing_action", "")
+                != PROCESSING_ACTION_TRANSLATE_INPAINT
+            ):
+                blk._render_skip_reason = (
+                    "processing_action_"
+                    + str(
+                        getattr(blk, "processing_action", "")
+                        or "review"
+                    )
+                )
                 continue
             x1, y1, block_width, block_height = blk.xywh
             translation_raw = blk.translation
@@ -2992,13 +3537,13 @@ class StageBatchedProcessor(BatchProcessor):
                 if not ctx.no_text_detected:
                     try:
                         format_translations(
-                            ctx.blk_list,
+                            ctx.translation_blocks,
                             trg_lng_cd,
                             upper_case=render_settings.upper_case,
                         )
                         self._raise_if_cancelled()
                         get_best_render_area(
-                            ctx.blk_list,
+                            ctx.translation_blocks,
                             ctx.image,
                             ctx.inpaint_input_img,
                             auto_max_font_profile=getattr(
@@ -3146,6 +3691,8 @@ class StageBatchedProcessor(BatchProcessor):
         self._page_started_at = None
         self._progress_image_path = None
         self._recent_page_durations.clear()
+        self._paddleocr_cache_store = None
+        self._paddleocr_cache_identity = None
         self._emit_benchmark_event("batch_run_start", total_images=total_images)
         self._reset_prewarm_lifecycle()
         try:
@@ -3168,16 +3715,18 @@ class StageBatchedProcessor(BatchProcessor):
             if self._project_checkpoint_store is not None
             else []
         )
+        batch_completed = False
         try:
             self._raise_if_cancelled()
             self._shutdown_managed_runtimes(
                 context="batch startup preflight",
                 raise_on_failure=True,
+                preserve_sleeping_paddle=True,
             )
             self._raise_if_cancelled()
             self._start_ocr_prewarm(policy)
             self._raise_if_cancelled()
-            self._detect_all(pages)
+            self._detect_all(pages, policy)
             self._sample_performance_resources("detect_stage_end")
             self._raise_if_cancelled()
             self._ocr_all(pages, policy)
@@ -3190,6 +3739,7 @@ class StageBatchedProcessor(BatchProcessor):
                     total_images=total_images,
                     stage_ceiling="ocr",
                 )
+                batch_completed = True
                 return
             self._inpaint_all(pages)
             self._sample_performance_resources("inpaint_stage_end")
@@ -3200,6 +3750,7 @@ class StageBatchedProcessor(BatchProcessor):
             self._render_all(pages)
             self._sample_performance_resources("render_stage_end")
             self._emit_benchmark_event("batch_run_done", total_images=total_images)
+            batch_completed = True
         except OperationCancelledError:
             self._emit_benchmark_event("batch_run_cancelled", total_images=total_images)
             return
@@ -3214,7 +3765,9 @@ class StageBatchedProcessor(BatchProcessor):
             try:
                 self._shutdown_prewarm_executor()
             finally:
-                self._shutdown_managed_runtimes()
+                self._shutdown_managed_runtimes(
+                    preserve_sleeping_paddle=batch_completed,
+                )
             self._progress_image_path = None
 
     def _complete_ocr_stage_ceiling(self, pages: list[StagePageContext]) -> None:
