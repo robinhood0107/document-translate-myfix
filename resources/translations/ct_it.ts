@@ -1838,13 +1838,6 @@ L’app mantiene i messaggi sotto il limite di testo predefinito di 4 KiB di ntf
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>Connect Comic Translate to your local PaddleOCR VL Docker service.
-This OCR engine sends cropped text regions to the /layout-parsing endpoint.
-Keep the default localhost URL if you want Comic Translate to start the bundled Docker runtime on demand.
-Leave markdown or visualization options disabled unless you need debugging.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
         <source>Server URL</source>
         <translation type="unfinished">
         URL del server</translation>
@@ -1866,16 +1859,16 @@ Leave markdown or visualization options disabled unless you need debugging.</sou
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>Estimated VRAM usage depends on page size, image resolution, and the Docker service build.
-Recommended starting points:
-- Up to 8 GB VRAM: 128 to 256 tokens, 1 worker
-- 10 to 12 GB VRAM: 256 tokens, 2 workers
-- 16 GB VRAM: 256 to 512 tokens, 2 to 3 workers
-- 24 GB or more: 512 tokens, 3 to 4 workers for dense pages
-Approximate GPU usage:
-- 256 tokens / 2 workers: about 5 to 7 GB
-- 512 tokens / 2 workers: about 7 to 10 GB
-- 1024 tokens / 2 workers: about 10 GB or more</source>
+        <source>Connect Comic Translate to your local PaddleOCR VL Docker service.
+The bundled runtime sends cropped text regions directly to llama.cpp with the official OCR: prompt.
+Keep the default localhost URL if you want Comic Translate to start the bundled Docker runtime on demand.
+Markdown and visualization options apply only to custom /layout-parsing endpoints.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>The bundled llama.cpp runtime loads one managed model slot for the whole OCR stage.
+Parallel workers control the client request queue and do not load extra model copies.
+Keep 1024 tokens unless a validated corpus proves a lower limit never truncates text.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>

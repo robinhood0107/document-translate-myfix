@@ -73,7 +73,8 @@ prompt, response parser, retry, resize, detector reconciliation, runtime command
 |---|---|
 | `engine.py` | detector block별 job, HTTP 요청, cache와 telemetry orchestration |
 | `crop_policy.py` | text-first·bubble-clamp 좌표와 crop provenance |
-| `response_parser.py` | PaddleX relay 응답에서 raw OCR을 추출·정규화 |
+| `transport.py` | 관리형 direct PNG/image-first/`OCR:` 요청과 chat 응답 계약 |
+| `response_parser.py` | unmanaged PaddleX relay 응답과 공통 OCR text 정규화 |
 | `runtime.py` | crop 전용 GGUF/mmproj named volume과 llama.cpp 계약 |
 
 공식 projector pixel budget은 1,003,520이다. detector geometry와 기존 mask가
