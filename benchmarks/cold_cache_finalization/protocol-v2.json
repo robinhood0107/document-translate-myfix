@@ -384,6 +384,33 @@
           "chunk_size": 12
         }
       ]
+    },
+    {
+      "id": "gemma-pagecache-prefetch",
+      "stage": "full",
+      "execution": "pipeline",
+      "quality_gate": "structure-and-private-meaning-review",
+      "baseline_candidate": "natural-cold",
+      "candidates": [
+        {
+          "id": "natural-cold",
+          "patch": {
+            "benchmark_gemma_pagecache": {
+              "mode": "off",
+              "reset_before_run": true
+            }
+          }
+        },
+        {
+          "id": "read-ahead-inpaint",
+          "patch": {
+            "benchmark_gemma_pagecache": {
+              "mode": "read-ahead-during-inpaint",
+              "reset_before_run": true
+            }
+          }
+        }
+      ]
     }
   ],
   "conditional_spikes": [

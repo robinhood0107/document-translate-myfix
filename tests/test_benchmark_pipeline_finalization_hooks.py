@@ -36,6 +36,47 @@ class _TranslationMemoryPage:
 
 
 class BenchmarkPipelineFinalizationHookTests(unittest.TestCase):
+    def test_pagecache_command_is_read_only_low_priority_and_cpu_only(
+        self,
+    ) -> None:
+        contract = SimpleNamespace(
+            model_name="model.gguf",
+            volume_name="comic-translate-gemma-models-v1",
+            image_ref="example.invalid/llama@sha256:" + "a" * 64,
+        )
+
+        command = benchmark_pipeline._gemma_pagecache_command(
+            contract,
+            action="read",
+            container_name="ct-prefetch-test",
+        )
+
+        self.assertEqual(command[:3], ["docker", "run", "--rm"])
+        self.assertIn("--network", command)
+        self.assertIn("none", command)
+        self.assertIn("ct-prefetch-test", command)
+        self.assertIn("ACTION=read", command)
+        self.assertIn(
+            "type=volume,source=comic-translate-gemma-models-v1,"
+            "target=/models,readonly",
+            command,
+        )
+        self.assertIn("/usr/bin/ionice", command)
+        self.assertNotIn("--gpus", command)
+        self.assertNotIn("down", command)
+
+    def test_pagecache_command_rejects_unknown_action(self) -> None:
+        contract = SimpleNamespace(
+            model_name="model.gguf",
+            volume_name="volume",
+            image_ref="image",
+        )
+        with self.assertRaises(ValueError):
+            benchmark_pipeline._gemma_pagecache_command(
+                contract,
+                action="drop-everything",
+            )
+
     def test_cache_policy_controls_all_persistent_layers(self) -> None:
         dictionary_page = _TranslationMemoryPage()
         ui = SimpleNamespace(
