@@ -40,7 +40,19 @@ testmodel
 /fonts/
 /Sample/
 /banchmark_result_log/
+/benchmark_result_log/
 /benchmarks/ocr_combo/
 /build/
 .gstack/
 /MODEL_new_test
+
+# Local credentials and certificates. Keep an explicitly sanitized example only.
+.env.local
+.env.*
+!.env.example
+*.key
+*.pem
+*.p12
+*.pfx
+*.crt
+*.cer

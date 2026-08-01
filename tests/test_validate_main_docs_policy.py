@@ -3,6 +3,7 @@ from scripts.validate_main_docs_policy import is_allowed
 
 def test_main_docs_policy_allows_agent_instructions() -> None:
     assert is_allowed("AGENTS.md")
+    assert is_allowed("CLAUDE.md")
 
 
 def test_main_docs_policy_allows_active_runtime_operations_docs() -> None:
