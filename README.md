@@ -220,11 +220,10 @@ Prepare the versioned Gemma model volume once from Windows PowerShell:
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass `
   -File .\scripts\prepare_gemma_runtime.ps1 -Mode Prepare `
-  -CandidateModelPath 'C:\ExampleWorkspace\models\Gemma4-26B-A4B-Uncensored-HauhauCS-Balanced-IQ4_XS.gguf' `
-  -LegacyModelPath 'C:\ExampleWorkspace\models\gemma-4-26B-IQ4_NL.gguf'
+  -ModelPath 'C:\ExampleWorkspace\models\gemma-4-26B-IQ4_NL.gguf'
 ```
 
-Then use `Custom Local Server(Gemma)` in the app. The managed runtime validates the ready manifest and model size, mounts the prepared volume read-only, and starts or recreates the container only when needed. To explicitly recompute both model hashes, run the same script with `-Mode Verify`.
+Then use `Custom Local Server(Gemma)` in the app. The managed runtime validates the ready manifest and model size, mounts the prepared volume read-only, and starts or recreates the container only when needed. To explicitly recompute the model hash, run the same script with `-Mode Verify`.
 
 The **User Dictionaries** settings page also controls the persistent block-result cache and exact translation memory. Result-cache entries use the complete translation/runtime identity. Exact source-to-translation pairs bypass Gemma only after explicit approval; imported approved entries require confirmation. These databases contain sensitive local text, remain in the app user-data directory, and are never silently deleted after a lock or corruption error. See [the translation-memory guide](docs/gemma/translation-memory.md).
 
