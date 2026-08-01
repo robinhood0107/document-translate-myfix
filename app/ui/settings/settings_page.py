@@ -41,6 +41,7 @@ from .settings_ui import SettingsPageUI
 from .gemma_local_server_page import GemmaLocalServerPage
 from .hunyuan_ocr_page import HunyuanOCRPage
 from .mangalmm_ocr_page import MangaLMMOCRPage
+from .paddleocr_vl_page import PaddleOCRVLPage
 from .paddleocr_vl_spotting_page import PaddleOCRVLSpottingPage
 from app.ui.messages import Messages
 from app.update_checker import UpdateChecker
@@ -93,6 +94,14 @@ MANGALMM_MAX_COMPLETION_TOKENS_KEY = (
     "mangalmm_ocr/max_completion_tokens"
 )
 MANGALMM_LEGACY_DEFAULT_MAX_COMPLETION_TOKENS = 256
+PADDLE_DIRECT_TRANSPORT_MIGRATION_VERSION = 1
+PADDLE_DIRECT_TRANSPORT_MIGRATION_VERSION_KEY = (
+    "paddleocr_vl/direct_transport_migration_version"
+)
+PADDLE_SERVER_URL_KEY = "paddleocr_vl/server_url"
+PADDLE_LEGACY_RELAY_SERVER_URL = (
+    "http://127.0.0.1:28118/layout-parsing"
+)
 
 
 def migrate_retired_gemma_request_mode(settings: QSettings) -> bool:
@@ -245,6 +254,47 @@ def migrate_mangalmm_full_page_contract(settings: QSettings) -> bool:
     settings.setValue(
         MANGALMM_FULL_PAGE_CONTRACT_VERSION_KEY,
         MANGALMM_FULL_PAGE_CONTRACT_VERSION,
+    )
+    settings.sync()
+    return changed
+
+
+def migrate_paddle_crop_direct_transport(settings: QSettings) -> bool:
+    """Move only the retired managed relay URL to the direct endpoint once."""
+
+    try:
+        current_version = int(
+            settings.value(
+                PADDLE_DIRECT_TRANSPORT_MIGRATION_VERSION_KEY,
+                0,
+                type=int,
+            )
+            or 0
+        )
+    except (TypeError, ValueError):
+        current_version = 0
+    if current_version >= PADDLE_DIRECT_TRANSPORT_MIGRATION_VERSION:
+        return False
+
+    configured_url = settings.value(PADDLE_SERVER_URL_KEY, None)
+    changed = (
+        configured_url is not None
+        and str(configured_url).strip().rstrip("/")
+        == PADDLE_LEGACY_RELAY_SERVER_URL
+    )
+    if changed:
+        settings.setValue(
+            PADDLE_SERVER_URL_KEY,
+            PaddleOCRVLPage.DEFAULT_SERVER_URL,
+        )
+        logger.warning(
+            "Migrated the retired managed PaddleX crop relay URL to the "
+            "direct llama.cpp OCR endpoint."
+        )
+
+    settings.setValue(
+        PADDLE_DIRECT_TRANSPORT_MIGRATION_VERSION_KEY,
+        PADDLE_DIRECT_TRANSPORT_MIGRATION_VERSION,
     )
     settings.sync()
     return changed
@@ -555,6 +605,8 @@ class SettingsPage(QtWidgets.QWidget):
         }
 
     def get_paddleocr_vl_settings(self):
+        persisted_settings = QSettings("ComicLabs", "ComicTranslate")
+        migrate_paddle_crop_direct_transport(persisted_settings)
         server_url = self.ui.paddleocr_vl_server_url_input.text().strip()
         if not server_url:
             server_url = self.ui.paddleocr_vl_page.DEFAULT_SERVER_URL
@@ -1060,6 +1112,7 @@ class SettingsPage(QtWidgets.QWidget):
         migrate_managed_runtime_to_llamacpp(settings)
         migrate_project_checkpoint_default(settings)
         migrate_mangalmm_full_page_contract(settings)
+        migrate_paddle_crop_direct_transport(settings)
 
         language = settings.value("language", "English")
         translated_language = self.ui.reverse_mappings.get(language, language)

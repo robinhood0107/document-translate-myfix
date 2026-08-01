@@ -70,7 +70,6 @@ REQUIRED_BUNDLE_FILES = frozenset(
         "docker-compose.yaml",
         "mangalmm_docker_files/docker-compose.yaml",
         "paddleocr_vl_docker_files/docker-compose.yaml",
-        "paddleocr_vl_docker_files/pipeline_conf.yaml",
         "paddleocr_vl_spotting_docker_files/README.md",
         "paddleocr_vl_spotting_docker_files/docker-compose.yaml",
         "requirements-base.txt",

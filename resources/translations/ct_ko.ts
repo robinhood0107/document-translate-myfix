@@ -1871,16 +1871,6 @@ The app keeps messages below ntfy&apos;s default 4 KiB text limit and never send
         <translation>PaddleOCR VL 설정</translation>
     </message>
     <message>
-        <source>Connect Comic Translate to your local PaddleOCR VL Docker service.
-This OCR engine sends cropped text regions to the /layout-parsing endpoint.
-Keep the default localhost URL if you want Comic Translate to start the bundled Docker runtime on demand.
-Leave markdown or visualization options disabled unless you need debugging.</source>
-        <translation>Comic Translate를 로컬 PaddleOCR VL Docker 서비스에 연결합니다.
-이 OCR 엔진은 잘라낸 텍스트 영역을 /layout-parsing 엔드포인트로 보냅니다.
-Comic Translate가 필요할 때 기본 제공 Docker 런타임을 시작하게 하려면 기본 localhost URL을 유지하세요.
-디버깅이 필요하지 않다면 markdown 또는 시각화 옵션은 꺼 두세요.</translation>
-    </message>
-    <message>
         <source>Server URL</source>
         <translation>서버 URL</translation>
     </message>
@@ -1901,26 +1891,22 @@ Comic Translate가 필요할 때 기본 제공 Docker 런타임을 시작하게 
         <translation>성능</translation>
     </message>
     <message>
-        <source>Estimated VRAM usage depends on page size, image resolution, and the Docker service build.
-Recommended starting points:
-- Up to 8 GB VRAM: 128 to 256 tokens, 1 worker
-- 10 to 12 GB VRAM: 256 tokens, 2 workers
-- 16 GB VRAM: 256 to 512 tokens, 2 to 3 workers
-- 24 GB or more: 512 tokens, 3 to 4 workers for dense pages
-Approximate GPU usage:
-- 256 tokens / 2 workers: about 5 to 7 GB
-- 512 tokens / 2 workers: about 7 to 10 GB
-- 1024 tokens / 2 workers: about 10 GB or more</source>
-        <translation>예상 VRAM 사용량은 페이지 크기, 이미지 해상도, Docker 서비스 빌드에 따라 달라집니다.
-권장 시작값:
-- VRAM 8GB 이하: 토큰 128~256, 작업 수 1
-- VRAM 10~12GB: 토큰 256, 작업 수 2
-- VRAM 16GB: 토큰 256~512, 작업 수 2~3
-- VRAM 24GB 이상: 글자가 많은 페이지에서 토큰 512, 작업 수 3~4
-대략적인 GPU 사용량:
-- 토큰 256 / 작업 수 2: 약 5~7GB
-- 토큰 512 / 작업 수 2: 약 7~10GB
-- 토큰 1024 / 작업 수 2: 약 10GB 이상</translation>
+        <source>Connect Comic Translate to your local PaddleOCR VL Docker service.
+The bundled runtime sends cropped text regions directly to llama.cpp with the official OCR: prompt.
+Keep the default localhost URL if you want Comic Translate to start the bundled Docker runtime on demand.
+Markdown and visualization options apply only to custom /layout-parsing endpoints.</source>
+        <translation>Comic Translate를 로컬 PaddleOCR VL Docker 서비스에 연결합니다.
+기본 제공 런타임은 잘라낸 텍스트 영역을 공식 OCR: 프롬프트로 llama.cpp에 직접 보냅니다.
+Comic Translate가 필요할 때 기본 제공 Docker 런타임을 시작하게 하려면 기본 localhost URL을 유지하세요.
+Markdown 및 시각화 옵션은 사용자 지정 /layout-parsing 엔드포인트에만 적용됩니다.</translation>
+    </message>
+    <message>
+        <source>The bundled llama.cpp runtime loads one managed model slot for the whole OCR stage.
+Parallel workers control the client request queue and do not load extra model copies.
+Keep 1024 tokens unless a validated corpus proves a lower limit never truncates text.</source>
+        <translation>기본 제공 llama.cpp 런타임은 OCR 단계 전체에서 관리형 모델 슬롯 하나를 불러옵니다.
+병렬 작업 수는 클라이언트 요청 대기열을 제어하며 모델 복사본을 추가로 불러오지 않습니다.
+검증된 자료에서 더 낮은 한도로도 텍스트가 잘리지 않는다고 확인하기 전에는 토큰 1024를 유지하세요.</translation>
     </message>
     <message>
         <source>Max New Tokens</source>

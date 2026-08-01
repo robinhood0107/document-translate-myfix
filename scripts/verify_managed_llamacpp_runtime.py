@@ -36,11 +36,7 @@ ACTIVE_CONTAINER_NAMES = (
     "hunyuanocr-local-server",
     "mangalmm-local-server",
     "paddleocr-llamacpp",
-    "paddleocr-server",
     "paddleocr-spotting-llamacpp",
-)
-PADDLE_PIPELINE_CONFIG = (
-    ROOT_DIR / "paddleocr_vl_docker_files" / "pipeline_conf.yaml"
 )
 
 
@@ -82,23 +78,28 @@ def verify_static_contracts() -> dict[str, Any]:
                 )
             checked_services.append(str(service_name))
 
-    pipeline = yaml.safe_load(
-        PADDLE_PIPELINE_CONFIG.read_text(encoding="utf-8")
+    paddle_compose = yaml.safe_load(
+        (
+            ROOT_DIR
+            / "paddleocr_vl_docker_files"
+            / "docker-compose.yaml"
+        ).read_text(encoding="utf-8")
     )
-    genai = pipeline["SubModules"]["VLRecognition"]["genai_config"]
-    if genai.get("backend") != "llama-cpp-server":
+    paddle_services = paddle_compose.get("services", {})
+    if set(paddle_services) != {"paddleocr-llamacpp"}:
         raise ManagedRuntimeVerificationError(
-            "Paddle crop relay is not pinned to llama-cpp-server."
+            "Managed Paddle crop runtime must contain only llama.cpp."
         )
-    if genai.get("server_url") != "http://paddleocr-llamacpp:8080/v1":
+    paddle_ports = paddle_services["paddleocr-llamacpp"].get("ports", [])
+    if "127.0.0.1:18000:8080" not in paddle_ports:
         raise ManagedRuntimeVerificationError(
-            "Paddle crop relay does not target the managed llama.cpp service."
+            "Managed Paddle crop llama.cpp port contract changed."
         )
     return {
         "mode": "static",
         "compose_count": len(ACTIVE_COMPOSE_FILES),
         "services": checked_services,
-        "paddle_backend": genai["backend"],
+        "paddle_backend": "llama.cpp-direct",
     }
 
 
