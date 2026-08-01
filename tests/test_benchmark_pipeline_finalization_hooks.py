@@ -156,6 +156,31 @@ class BenchmarkPipelineFinalizationHookTests(unittest.TestCase):
         self.assertIs(gemma_module.requests, original_gemma)
         self.assertIs(paddle_module.requests, original_paddle)
 
+    def test_http_experiment_injects_deterministic_gemma_seed_only_in_copy(
+        self,
+    ) -> None:
+        from modules.translation.llm import custom_local_gemma as gemma_module
+
+        original_gemma = gemma_module.requests
+        payload = {"model": "example", "temperature": 0.7}
+        with mock.patch.object(
+            original_gemma,
+            "post",
+            return_value=SimpleNamespace(status_code=200),
+        ) as post:
+            with benchmark_pipeline._benchmark_http_clients(
+                {"gemma_seed": 20260801}
+            ):
+                gemma_module.requests.post(
+                    "http://127.0.0.1:18080/v1/chat/completions",
+                    json=payload,
+                )
+            sent = post.call_args.kwargs["json"]
+
+        self.assertEqual(sent["seed"], 20260801)
+        self.assertNotIn("seed", payload)
+        self.assertIs(gemma_module.requests, original_gemma)
+
     def test_runtime_files_are_injected_only_inside_context(self) -> None:
         from modules.ocr import local_runtime as ocr_runtime_module
         from modules.translation import local_runtime as gemma_runtime_module
