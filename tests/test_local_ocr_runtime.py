@@ -7,8 +7,6 @@ from urllib.error import HTTPError
 
 from modules.ocr.local_runtime import (
     MANGALMM_LLAMA_CPP_IMAGE_REF,
-    PADDLEOCR_LAYOUT_IMAGE_DIGEST,
-    PADDLEOCR_LAYOUT_IMAGE_REF,
     PADDLEOCR_LLAMA_CPP_IMAGE_DIGEST,
     PADDLEOCR_LLAMA_CPP_IMAGE_REF,
     PADDLEOCR_SPOTTING_LLAMA_CPP_IMAGE_DIGEST,
@@ -45,7 +43,9 @@ class _DummySettingsPage:
     def __init__(
         self,
         *,
-        paddle_url: str = "http://127.0.0.1:28118/layout-parsing",
+        paddle_url: str = (
+            "http://127.0.0.1:18000/v1/chat/completions"
+        ),
         hunyuan_url: str = "http://127.0.0.1:28080/v1",
         mangalmm_url: str = "http://127.0.0.1:28081/v1",
         spotting_url: str = (
@@ -78,10 +78,7 @@ def _paddle_contract() -> PaddleLlamaRuntimeContract:
         preparation_version=1,
         llama_image_ref=PADDLEOCR_LLAMA_CPP_IMAGE_REF,
         llama_image_id="sha256:llama-image-id",
-        layout_image_ref=PADDLEOCR_LAYOUT_IMAGE_REF,
-        layout_image_id="sha256:layout-image-id",
         compose_file_sha256="compose",
-        pipeline_config_sha256="pipeline",
         command_sha256="command",
         fingerprint="runtime",
         command=("--example",),
@@ -304,7 +301,7 @@ class LocalOCRRuntimeManagerTests(unittest.TestCase):
         with mock.patch.object(
             manager,
             "_present_managed_container_names",
-            return_value=["paddleocr-llamacpp", "paddleocr-server"],
+            return_value=["paddleocr-llamacpp"],
         ), mock.patch.object(
             manager,
             "_paddle_containers_match_contract",
@@ -319,7 +316,7 @@ class LocalOCRRuntimeManagerTests(unittest.TestCase):
                 settings_page,
             )
 
-        self.assertEqual(identity["identity_schema_version"], 2)
+        self.assertEqual(identity["identity_schema_version"], 3)
         self.assertEqual(
             identity["llama_image_ref"],
             PADDLEOCR_LLAMA_CPP_IMAGE_REF,
@@ -328,16 +325,7 @@ class LocalOCRRuntimeManagerTests(unittest.TestCase):
             identity["llama_image_digest"],
             PADDLEOCR_LLAMA_CPP_IMAGE_DIGEST,
         )
-        self.assertEqual(
-            identity["layout_image_ref"],
-            PADDLEOCR_LAYOUT_IMAGE_REF,
-        )
-        self.assertEqual(
-            identity["layout_image_digest"],
-            PADDLEOCR_LAYOUT_IMAGE_DIGEST,
-        )
         self.assertEqual(identity["llama_image_id"], "sha256:llama-image-id")
-        self.assertEqual(identity["layout_image_id"], "sha256:layout-image-id")
         self.assertEqual(identity["model_file"], PADDLE_LLAMA_MODEL_NAME)
         self.assertEqual(identity["mmproj_file"], PADDLE_LLAMA_MMPROJ_NAME)
         self.assertEqual(
@@ -346,6 +334,7 @@ class LocalOCRRuntimeManagerTests(unittest.TestCase):
         )
         self.assertEqual(identity["runtime_fingerprint"], "runtime")
         self.assertEqual(identity["command_sha256"], "command")
+        self.assertEqual(identity["transport"]["prompt"], "OCR:")
 
     def test_paddle_cache_identity_requires_exact_managed_containers(self) -> None:
         manager = LocalOCRRuntimeManager()
@@ -374,7 +363,7 @@ class LocalOCRRuntimeManagerTests(unittest.TestCase):
         with mock.patch.object(manager, "validate_engine"), mock.patch.object(
             manager,
             "_present_managed_container_names",
-            return_value=["paddleocr-llamacpp", "paddleocr-server"],
+            return_value=["paddleocr-llamacpp"],
         ), mock.patch.object(
             manager,
             "_paddle_containers_match_contract",
@@ -494,7 +483,11 @@ class LocalOCRRuntimeManagerTests(unittest.TestCase):
         manager = LocalOCRRuntimeManager()
         manager._active_engine = "PaddleOCR VL"
         manager._readiness_cache.add(
-            ("PaddleOCR VL", "http://127.0.0.1:28118/layout-parsing", "managed")
+            (
+                "PaddleOCR VL",
+                "http://127.0.0.1:18000/v1/chat/completions",
+                "managed",
+            )
         )
 
         with mock.patch.object(manager, "_run_compose") as run_compose, \
@@ -569,7 +562,7 @@ class LocalOCRRuntimeManagerTests(unittest.TestCase):
         with mock.patch.object(
             manager,
             "_running_managed_container_names",
-            return_value=["paddleocr-llamacpp", "paddleocr-server"],
+            return_value=["paddleocr-llamacpp"],
         ), mock.patch.object(
             manager,
             "_paddle_containers_match_contract",
@@ -595,7 +588,7 @@ class LocalOCRRuntimeManagerTests(unittest.TestCase):
             manager,
             "_running_managed_container_names",
             side_effect=[
-                ["paddleocr-llamacpp", "paddleocr-server"],
+                ["paddleocr-llamacpp"],
                 [],
             ],
         ), mock.patch.object(
@@ -695,7 +688,7 @@ class LocalOCRRuntimeManagerTests(unittest.TestCase):
         ) as run_compose, mock.patch.object(
             manager,
             "_running_managed_container_names",
-            side_effect=[[], ["paddleocr-server"], []],
+            side_effect=[[], ["paddleocr-llamacpp"], []],
         ), mock.patch(
             "modules.ocr.local_runtime.time.monotonic",
             side_effect=[0.0, 0.5, 3.1],
@@ -806,10 +799,7 @@ class LocalOCRRuntimeManagerTests(unittest.TestCase):
         wait_for_health.assert_called_once()
         self.assertEqual(
             wait_for_health.call_args.args[0],
-            (
-                "http://127.0.0.1:28118/docs",
-                "http://127.0.0.1:18000/health",
-            ),
+            ("http://127.0.0.1:18000/health",),
         )
         run_compose.assert_not_called()
 
@@ -824,40 +814,29 @@ class LocalOCRRuntimeManagerTests(unittest.TestCase):
         wait_for_health.assert_called_once()
         run_compose.assert_not_called()
 
-    def test_paddle_health_is_loading_when_layout_is_ready_but_llama_is_not(self) -> None:
+    def test_paddle_health_is_unavailable_when_llama_is_not_ready(self) -> None:
         manager = LocalOCRRuntimeManager()
-        layout_response = mock.MagicMock()
-        layout_response.__enter__.return_value.status = 200
-
         with mock.patch(
             "modules.ocr.local_runtime.urlopen",
-            side_effect=[layout_response, OSError("connection refused")],
+            side_effect=OSError("connection refused"),
         ):
             state = manager._probe_health_state(
-                (
-                    "http://127.0.0.1:28118/docs",
-                    "http://127.0.0.1:18000/health",
-                )
+                ("http://127.0.0.1:18000/health",)
             )
 
-        self.assertEqual(state, "loading")
+        self.assertEqual(state, "unavailable")
 
-    def test_paddle_health_is_healthy_only_when_layout_and_llama_are_ready(self) -> None:
+    def test_paddle_health_is_healthy_when_llama_is_ready(self) -> None:
         manager = LocalOCRRuntimeManager()
-        layout_response = mock.MagicMock()
-        layout_response.__enter__.return_value.status = 200
         llama_response = mock.MagicMock()
         llama_response.__enter__.return_value.status = 200
 
         with mock.patch(
             "modules.ocr.local_runtime.urlopen",
-            side_effect=[layout_response, llama_response],
+            return_value=llama_response,
         ):
             state = manager._probe_health_state(
-                (
-                    "http://127.0.0.1:28118/docs",
-                    "http://127.0.0.1:18000/health",
-                )
+                ("http://127.0.0.1:18000/health",)
             )
 
         self.assertEqual(state, "healthy")
@@ -865,7 +844,7 @@ class LocalOCRRuntimeManagerTests(unittest.TestCase):
     def test_health_probe_treats_http_404_as_unavailable(self) -> None:
         manager = LocalOCRRuntimeManager()
         error = HTTPError(
-            "http://127.0.0.1:28118/docs",
+            "http://127.0.0.1:18000/health",
             404,
             "Not Found",
             hdrs=None,
@@ -877,7 +856,7 @@ class LocalOCRRuntimeManagerTests(unittest.TestCase):
             side_effect=error,
         ):
             state = manager._probe_single_health_state(
-                "http://127.0.0.1:28118/docs"
+                "http://127.0.0.1:18000/health"
             )
 
         self.assertEqual(state, "unavailable")
@@ -904,10 +883,7 @@ class LocalOCRRuntimeManagerTests(unittest.TestCase):
 
     def test_wait_for_health_waits_until_every_configured_endpoint_is_ready(self) -> None:
         manager = LocalOCRRuntimeManager()
-        health_urls = (
-            "http://127.0.0.1:28118/docs",
-            "http://127.0.0.1:18000/health",
-        )
+        health_urls = ("http://127.0.0.1:18000/health",)
 
         with mock.patch.object(
             manager,
@@ -951,7 +927,7 @@ class LocalOCRRuntimeManagerTests(unittest.TestCase):
              mock.patch.object(
                  manager,
                  "_present_managed_container_names",
-                 return_value=["paddleocr-llamacpp", "paddleocr-server"],
+                 return_value=["paddleocr-llamacpp"],
                  create=True,
              ) as existing_containers, \
              mock.patch.object(
@@ -971,7 +947,7 @@ class LocalOCRRuntimeManagerTests(unittest.TestCase):
         existing_containers.assert_called_once_with("PaddleOCR VL")
         start_existing.assert_called_once_with(
             "PaddleOCR VL",
-            ["paddleocr-llamacpp", "paddleocr-server"],
+            ["paddleocr-llamacpp"],
         )
         wait_for_health.assert_called_once()
         self.assertTrue(any(event.get("step_key") == "container_start" for event in events))
@@ -993,8 +969,12 @@ class LocalOCRRuntimeManagerTests(unittest.TestCase):
 
     def test_ensure_engine_cache_misses_when_managed_url_changes(self) -> None:
         manager = LocalOCRRuntimeManager()
-        first_settings = _DummySettingsPage(paddle_url="http://127.0.0.1:28118/layout-parsing")
-        second_settings = _DummySettingsPage(paddle_url="http://127.0.0.1:28118/alternate")
+        first_settings = _DummySettingsPage(
+            paddle_url="http://127.0.0.1:18000/v1/chat/completions"
+        )
+        second_settings = _DummySettingsPage(
+            paddle_url="http://127.0.0.1:18000/v1/alternate"
+        )
 
         with mock.patch.object(manager, "should_manage_engine", return_value=True), \
              mock.patch.object(manager, "validate_engine", return_value=None), \

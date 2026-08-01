@@ -13,7 +13,6 @@ from typing import Any, Iterable
 
 DEFAULT_CONTAINER_NAMES = (
     "gemma-local-server",
-    "paddleocr-server",
     "paddleocr-llamacpp",
 )
 _GPU_METRICS_CACHE_LOCK = threading.Lock()
