@@ -64,3 +64,9 @@ Docker Desktop이 켜진 상태의 process tree 검사:
 삭제 도구는 `paddleocr-vllm`과 `paddleocr-server`의 immutable ID와 제품
 label을 먼저 확인한다. 두 컨테이너가 제거되고 다른 컨테이너 참조가 없을
 때만 retired vendor image를 삭제하며 광범위 prune은 실행하지 않는다.
+
+## 최종 검증 기록
+
+관리형 runtime 전환의 현재 적용 범위, 측정 결과와 보존·퇴역 기준은
+[Optimal++ v1.3.0 런타임·자산 판정](../performance-and-bugfix-audits/optimal-plus-v1.3.0/06-runtime-assets-and-llamacpp-retirement-ko.md)에
+정리한다. raw container 정보와 실행 로그는 추적하지 않는다.
