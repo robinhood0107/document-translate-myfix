@@ -168,6 +168,9 @@ jobs:
       - name: Validate Python syntax
         run: python scripts/validate_changed_python.py --all
 
+      - name: Validate private artifact harness
+        run: python -m unittest -v tests.test_validation_artifact_harness
+
       - name: Headless smoke test
         run: python scripts/headless_smoke.py
 
