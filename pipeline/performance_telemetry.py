@@ -2,19 +2,33 @@ from __future__ import annotations
 
 import copy
 import os
+import re
+import threading
 import time
 import uuid
 from collections import defaultdict
+from contextlib import contextmanager
 from typing import Any, Callable, Mapping
 
 from modules.utils.gpu_metrics import (
     query_gpu_metrics_cached,
     query_wsl_swap_metrics,
 )
+from pipeline.performance_ranges import performance_range
 
 
-PIPELINE_PERFORMANCE_TELEMETRY_SCHEMA_VERSION = 1
+PIPELINE_PERFORMANCE_TELEMETRY_SCHEMA_VERSION = 2
 _STAGE_NAMES = frozenset({"detect", "ocr", "inpaint", "translate", "render"})
+_SAFE_LABEL_PATTERN = re.compile(r"^[A-Za-z0-9_.:+-]{1,96}$")
+_SAFE_CATEGORICAL_FEATURE_KEYS = frozenset(
+    {
+        "pipeline_mode",
+        "run_type",
+        "source_language",
+        "target_language",
+        "workflow_mode",
+    }
+)
 _TERMINAL_RUN_TAGS = frozenset(
     {
         "batch_run_done",
@@ -71,6 +85,23 @@ _ADDITIVE_PADDLE_METRICS = frozenset(
         "persistent_cache_disabled_count",
     }
 )
+_GEMMA_STAGE_DETAIL_METRICS = {
+    "gemma_request_wall_ms": "request_wall",
+    "gemma_prompt_eval_ms": "prefill",
+    "gemma_decode_ms": "decode",
+}
+_PADDLE_STAGE_DETAIL_METRICS = {
+    "queue_wait_ms": "queue_wait",
+    "crop_ms": "crop",
+    "text_guard_ms": "text_guard",
+    "encode_ms": "image_encode",
+    "base64_ms": "base64",
+    "payload_build_ms": "payload_build",
+    "retry_backoff_ms": "retry_backoff",
+    "request_wall_ms": "request_wall",
+    "response_decode_ms": "response_decode",
+    "parse_sanitize_ms": "parse_sanitize",
+}
 
 
 def _env_enabled(name: str) -> bool:
@@ -101,6 +132,7 @@ class PipelinePerformanceTelemetry:
         resource_sampler: Callable[[], Mapping[str, Any]] | None = None,
         resource_sampling_enabled: bool | None = None,
     ) -> None:
+        self._lock = threading.RLock()
         self._clock = clock
         self._wall_clock = wall_clock
         self._resource_sampler = resource_sampler or _default_resource_sampler
@@ -118,20 +150,29 @@ class PipelinePerformanceTelemetry:
         *,
         sample_resources: bool = True,
     ) -> None:
-        self.run_id = uuid.uuid4().hex
-        self._run_started_at = float(self._clock())
-        self._run_started_wall = float(self._wall_clock())
-        self._metadata = dict(metadata or {})
-        self._active_stages: dict[tuple[str, str], float] = {}
-        self._stage_wall_ms: defaultdict[str, float] = defaultdict(float)
-        self._stage_count: defaultdict[str, int] = defaultdict(int)
-        self._runtime: dict[str, defaultdict[str, float | int]] = {}
-        self._cache_counts: defaultdict[str, int] = defaultdict(int)
-        self._gemma_totals: defaultdict[str, float] = defaultdict(float)
-        self._paddle_totals: defaultdict[str, float] = defaultdict(float)
-        self._resource_samples: list[dict[str, Any]] = []
-        self._terminal_status = "running"
-        self._last_snapshot: dict[str, Any] = {}
+        with self._lock:
+            self.run_id = uuid.uuid4().hex
+            self._run_started_at = float(self._clock())
+            self._run_started_wall = float(self._wall_clock())
+            self._metadata = self._safe_mapping(metadata or {})
+            self._active_stages: dict[tuple[str, str], float] = {}
+            self._stage_wall_ms: defaultdict[str, float] = defaultdict(float)
+            self._stage_count: defaultdict[str, int] = defaultdict(int)
+            self._stage_details: dict[
+                str,
+                dict[str, defaultdict[str, float | int]],
+            ] = {}
+            self._runtime: dict[str, defaultdict[str, float | int]] = {}
+            self._runtime_states: dict[str, str] = {}
+            self._runtime_transitions: list[dict[str, Any]] = []
+            self._workload: dict[str, dict[str, Any]] = {}
+            self._work_graph: list[dict[str, Any]] = []
+            self._cache_counts: defaultdict[str, int] = defaultdict(int)
+            self._gemma_totals: defaultdict[str, float] = defaultdict(float)
+            self._paddle_totals: defaultdict[str, float] = defaultdict(float)
+            self._resource_samples: list[dict[str, Any]] = []
+            self._terminal_status = "running"
+            self._last_snapshot: dict[str, Any] = {}
         if self.resource_sampling_enabled and sample_resources:
             self.sample_resources("run_start")
 
@@ -142,68 +183,233 @@ class PipelinePerformanceTelemetry:
         image_path: str | None = None,
         payload: Mapping[str, Any] | None = None,
     ) -> dict[str, Any]:
-        event_payload = dict(payload or {})
-        normalized_tag = str(tag or "").strip().lower()
-        if normalized_tag in {"batch_run_start", "webtoon_run_start"}:
-            self.reset(
+        with self._lock:
+            event_payload = dict(payload or {})
+            normalized_tag = str(tag or "").strip().lower()
+            if normalized_tag in {"batch_run_start", "webtoon_run_start"}:
+                self.reset(
+                    {
+                        "pipeline_mode": event_payload.get("pipeline_mode", ""),
+                        "run_type": event_payload.get("run_type", ""),
+                        "workflow_mode": event_payload.get("workflow_mode", ""),
+                    }
+                )
+
+            now = float(self._clock())
+            stage_name, action = self._stage_action(normalized_tag)
+            scope = str(image_path or event_payload.get("image_path") or "__run__")
+            stage_elapsed_ms: float | None = None
+            if normalized_tag == "page_failed":
+                self._finish_stage("page", scope, now)
+                failed_stage = str(event_payload.get("failed_stage") or "").strip().lower()
+                if failed_stage in _STAGE_NAMES:
+                    stage_elapsed_ms = self._finish_stage(failed_stage, scope, now)
+                    stage_name = failed_stage
+            elif stage_name and action == "start":
+                self._active_stages[(stage_name, scope)] = now
+            elif stage_name and action == "end":
+                stage_elapsed_ms = self._finish_stage(stage_name, scope, now)
+
+            self._ingest_cache_status(stage_name, event_payload)
+            self._ingest_gemma_metrics(event_payload)
+            self._ingest_paddle_metrics(event_payload)
+
+            event: dict[str, Any] = {
+                "performance_telemetry_schema_version": (
+                    PIPELINE_PERFORMANCE_TELEMETRY_SCHEMA_VERSION
+                ),
+                "performance_run_id": self.run_id,
+                "performance_run_elapsed_ms": round(
+                    max(0.0, now - self._run_started_at) * 1000.0,
+                    3,
+                ),
+            }
+            if stage_name:
+                event["performance_stage_name"] = stage_name
+            if stage_elapsed_ms is not None:
+                event["performance_stage_elapsed_ms"] = round(stage_elapsed_ms, 3)
+                event["performance_stage_total_ms"] = round(
+                    self._stage_wall_ms[stage_name],
+                    3,
+                )
+                event["performance_stage_count"] = int(self._stage_count[stage_name])
+
+            if normalized_tag in _TERMINAL_RUN_TAGS:
+                if normalized_tag.endswith("_cancelled"):
+                    self._terminal_status = "cancelled"
+                elif normalized_tag.endswith("_failed"):
+                    self._terminal_status = "failed"
+                else:
+                    self._terminal_status = "completed"
+                if self.resource_sampling_enabled:
+                    self.sample_resources("run_end")
+                self._last_snapshot = self.snapshot(now=now)
+                event["performance_stats"] = copy.deepcopy(self._last_snapshot)
+            return event
+
+    @contextmanager
+    def measure(
+        self,
+        *,
+        stage: str,
+        operation: str,
+        outcome: str = "completed",
+        count: int = 1,
+        workload: Mapping[str, Any] | None = None,
+        node_id: str = "",
+        dependencies: tuple[str, ...] = (),
+        service: str = "",
+    ):
+        """Measure a report-agnostic operation and optional work-DAG node."""
+
+        started = float(self._clock())
+        resolved_outcome = str(outcome or "completed")
+        with performance_range(f"ct:{stage}:{operation}"):
+            try:
+                yield
+            except BaseException:
+                resolved_outcome = "failed"
+                raise
+            finally:
+                finished = float(self._clock())
+                elapsed_ms = max(0.0, finished - started) * 1000.0
+                try:
+                    self.record_stage_detail(
+                        stage=stage,
+                        operation=operation,
+                        elapsed_ms=elapsed_ms,
+                        count=count,
+                        outcome=resolved_outcome,
+                        workload=workload,
+                    )
+                    if node_id:
+                        self.record_work_node(
+                            node_id=node_id,
+                            stage=stage,
+                            operation=operation,
+                            started_ms=(
+                                max(0.0, started - self._run_started_at) * 1000.0
+                            ),
+                            elapsed_ms=elapsed_ms,
+                            dependencies=dependencies,
+                            service=service,
+                            outcome=resolved_outcome,
+                        )
+                except Exception:
+                    # Instrumentation must never replace a product result or
+                    # mask the exception raised by the measured operation.
+                    pass
+
+    def record_stage_detail(
+        self,
+        *,
+        stage: str,
+        operation: str,
+        elapsed_ms: float,
+        count: int = 1,
+        outcome: str = "completed",
+        workload: Mapping[str, Any] | None = None,
+    ) -> None:
+        normalized_stage = self._safe_label(stage, fallback="unknown")
+        normalized_operation = self._safe_label(operation, fallback="unknown")
+        normalized_outcome = self._safe_label(outcome, fallback="completed")
+        with self._lock:
+            operations = self._stage_details.setdefault(normalized_stage, {})
+            metrics = operations.setdefault(
+                normalized_operation,
+                defaultdict(float),
+            )
+            metrics["count"] = int(metrics.get("count", 0)) + max(0, int(count))
+            metrics["wall_ms"] = float(metrics.get("wall_ms", 0.0)) + max(
+                0.0,
+                float(elapsed_ms),
+            )
+            outcome_key = f"{normalized_outcome}_count"
+            metrics[outcome_key] = int(metrics.get(outcome_key, 0)) + 1
+            for key, value in self._safe_mapping(workload or {}).items():
+                if isinstance(value, bool):
+                    continue
+                if isinstance(value, (int, float)):
+                    metric_key = f"work_{key}"
+                    metrics[metric_key] = float(metrics.get(metric_key, 0.0)) + float(value)
+
+    def record_workload_features(
+        self,
+        stage: str,
+        features: Mapping[str, Any] | None = None,
+        **extra: Any,
+    ) -> None:
+        normalized_stage = self._safe_label(stage, fallback="pipeline")
+        combined = dict(features or {})
+        combined.update(extra)
+        safe = self._safe_mapping(combined)
+        with self._lock:
+            current = self._workload.setdefault(normalized_stage, {})
+            current.update(safe)
+
+    def record_work_node(
+        self,
+        *,
+        node_id: str,
+        stage: str,
+        operation: str,
+        started_ms: float,
+        elapsed_ms: float,
+        dependencies: tuple[str, ...] = (),
+        service: str = "",
+        outcome: str = "completed",
+    ) -> None:
+        safe_node_id = self._safe_label(node_id, fallback="")
+        if not safe_node_id:
+            return
+        with self._lock:
+            self._work_graph.append(
                 {
-                    "pipeline_mode": event_payload.get("pipeline_mode", ""),
-                    "run_type": event_payload.get("run_type", ""),
-                    "workflow_mode": event_payload.get("workflow_mode", ""),
+                    "node_id": safe_node_id,
+                    "stage": self._safe_label(stage, fallback="unknown"),
+                    "operation": self._safe_label(operation, fallback="unknown"),
+                    "service": self._safe_label(service, fallback=""),
+                    "dependencies": [
+                        safe
+                        for item in dependencies
+                        if (safe := self._safe_label(item, fallback=""))
+                    ],
+                    "started_ms": round(max(0.0, float(started_ms)), 3),
+                    "elapsed_ms": round(max(0.0, float(elapsed_ms)), 3),
+                    "outcome": self._safe_label(outcome, fallback="completed"),
                 }
             )
 
-        now = float(self._clock())
-        stage_name, action = self._stage_action(normalized_tag)
-        scope = str(image_path or event_payload.get("image_path") or "__run__")
-        stage_elapsed_ms: float | None = None
-        if normalized_tag == "page_failed":
-            self._finish_stage("page", scope, now)
-            failed_stage = str(event_payload.get("failed_stage") or "").strip().lower()
-            if failed_stage in _STAGE_NAMES:
-                stage_elapsed_ms = self._finish_stage(failed_stage, scope, now)
-                stage_name = failed_stage
-        elif stage_name and action == "start":
-            self._active_stages[(stage_name, scope)] = now
-        elif stage_name and action == "end":
-            stage_elapsed_ms = self._finish_stage(stage_name, scope, now)
-
-        self._ingest_cache_status(stage_name, event_payload)
-        self._ingest_gemma_metrics(event_payload)
-        self._ingest_paddle_metrics(event_payload)
-
-        event: dict[str, Any] = {
-            "performance_telemetry_schema_version": (
-                PIPELINE_PERFORMANCE_TELEMETRY_SCHEMA_VERSION
-            ),
-            "performance_run_id": self.run_id,
-            "performance_run_elapsed_ms": round(
-                max(0.0, now - self._run_started_at) * 1000.0,
-                3,
-            ),
-        }
-        if stage_name:
-            event["performance_stage_name"] = stage_name
-        if stage_elapsed_ms is not None:
-            event["performance_stage_elapsed_ms"] = round(stage_elapsed_ms, 3)
-            event["performance_stage_total_ms"] = round(
-                self._stage_wall_ms[stage_name],
-                3,
+    def record_runtime_transition(
+        self,
+        *,
+        service: str,
+        to_state: str,
+        from_state: str | None = None,
+        elapsed_ms: float = 0.0,
+        outcome: str = "completed",
+    ) -> None:
+        normalized_service = self._safe_label(service, fallback="unknown")
+        normalized_to = self._safe_label(to_state, fallback="unknown")
+        with self._lock:
+            normalized_from = self._safe_label(
+                from_state or self._runtime_states.get(normalized_service, "unknown"),
+                fallback="unknown",
             )
-            event["performance_stage_count"] = int(self._stage_count[stage_name])
-
-        if normalized_tag in _TERMINAL_RUN_TAGS:
-            if normalized_tag.endswith("_cancelled"):
-                self._terminal_status = "cancelled"
-            elif normalized_tag.endswith("_failed"):
-                self._terminal_status = "failed"
-            else:
-                self._terminal_status = "completed"
-            if self.resource_sampling_enabled:
-                self.sample_resources("run_end")
-            self._last_snapshot = self.snapshot(now=now)
-            event["performance_stats"] = copy.deepcopy(self._last_snapshot)
-        return event
+            self._runtime_states[normalized_service] = normalized_to
+            self._runtime_transitions.append(
+                {
+                    "service": normalized_service,
+                    "from": normalized_from,
+                    "to": normalized_to,
+                    "elapsed_ms": round(max(0.0, float(elapsed_ms)), 3),
+                    "outcome": self._safe_label(outcome, fallback="completed"),
+                    "run_elapsed_ms": round(
+                        max(0.0, float(self._clock()) - self._run_started_at) * 1000.0,
+                        3,
+                    ),
+                }
+            )
 
     def record_runtime_duration(
         self,
@@ -213,28 +419,30 @@ class PipelinePerformanceTelemetry:
         elapsed_ms: float,
         outcome: str = "completed",
     ) -> None:
-        normalized_service = str(service or "unknown").strip().lower() or "unknown"
-        normalized_operation = str(operation or "unknown").strip().lower() or "unknown"
-        normalized_outcome = str(outcome or "completed").strip().lower() or "completed"
-        metrics = self._runtime.setdefault(
-            normalized_service,
-            defaultdict(float),
-        )
-        metrics[f"{normalized_operation}_count"] = int(
-            metrics.get(f"{normalized_operation}_count", 0)
-        ) + 1
-        metrics[f"{normalized_operation}_wall_ms"] = float(
-            metrics.get(f"{normalized_operation}_wall_ms", 0.0)
-        ) + max(0.0, float(elapsed_ms))
-        metrics[f"{normalized_operation}_{normalized_outcome}_count"] = int(
-            metrics.get(f"{normalized_operation}_{normalized_outcome}_count", 0)
-        ) + 1
+        normalized_service = self._safe_label(service, fallback="unknown")
+        normalized_operation = self._safe_label(operation, fallback="unknown")
+        normalized_outcome = self._safe_label(outcome, fallback="completed")
+        with self._lock:
+            metrics = self._runtime.setdefault(
+                normalized_service,
+                defaultdict(float),
+            )
+            metrics[f"{normalized_operation}_count"] = int(
+                metrics.get(f"{normalized_operation}_count", 0)
+            ) + 1
+            metrics[f"{normalized_operation}_wall_ms"] = float(
+                metrics.get(f"{normalized_operation}_wall_ms", 0.0)
+            ) + max(0.0, float(elapsed_ms))
+            metrics[f"{normalized_operation}_{normalized_outcome}_count"] = int(
+                metrics.get(f"{normalized_operation}_{normalized_outcome}_count", 0)
+            ) + 1
 
     def increment_counter(self, name: str, amount: int = 1) -> None:
-        normalized = str(name or "").strip()
+        normalized = self._safe_label(name, fallback="")
         if not normalized:
             return
-        self._cache_counts[normalized] += int(amount)
+        with self._lock:
+            self._cache_counts[normalized] += int(amount)
 
     def sample_resources(self, label: str) -> dict[str, Any]:
         sample: dict[str, Any] = {
@@ -251,19 +459,21 @@ class PipelinePerformanceTelemetry:
         except Exception as exc:
             sample["available"] = False
             sample["reason"] = f"{type(exc).__name__}: {exc}"
-        self._resource_samples.append(sample)
+        with self._lock:
+            self._resource_samples.append(sample)
         return copy.deepcopy(sample)
 
     def snapshot(self, *, now: float | None = None) -> dict[str, Any]:
-        current = float(self._clock()) if now is None else float(now)
-        stages = {
+        with self._lock:
+            current = float(self._clock()) if now is None else float(now)
+            stages = {
             name: {
                 "wall_ms": round(float(self._stage_wall_ms[name]), 3),
                 "count": int(self._stage_count[name]),
             }
             for name in sorted(self._stage_wall_ms)
         }
-        runtime = {
+            runtime = {
             service: {
                 key: (
                     int(value)
@@ -274,7 +484,14 @@ class PipelinePerformanceTelemetry:
             }
             for service, metrics in sorted(self._runtime.items())
         }
-        return {
+            stage_details = {
+                stage: {
+                    operation: self._rounded_numeric_map(metrics)
+                    for operation, metrics in sorted(operations.items())
+                }
+                for stage, operations in sorted(self._stage_details.items())
+            }
+            return {
             "schema_version": PIPELINE_PERFORMANCE_TELEMETRY_SCHEMA_VERSION,
             "run_id": self.run_id,
             "status": self._terminal_status,
@@ -285,7 +502,14 @@ class PipelinePerformanceTelemetry:
             ),
             "metadata": copy.deepcopy(self._metadata),
             "stages": stages,
+            "stage_details": stage_details,
             "runtime": runtime,
+            "runtime_state": {
+                "current": copy.deepcopy(self._runtime_states),
+                "transitions": copy.deepcopy(self._runtime_transitions),
+            },
+            "workload": copy.deepcopy(self._workload),
+            "work_graph": copy.deepcopy(self._work_graph),
             "cache": {
                 key: int(value)
                 for key, value in sorted(self._cache_counts.items())
@@ -301,7 +525,35 @@ class PipelinePerformanceTelemetry:
 
     @property
     def last_snapshot(self) -> dict[str, Any]:
-        return copy.deepcopy(self._last_snapshot)
+        with self._lock:
+            return copy.deepcopy(self._last_snapshot)
+
+    @staticmethod
+    def _safe_label(value: Any, *, fallback: str) -> str:
+        candidate = str(value or "").strip().lower()
+        return candidate if _SAFE_LABEL_PATTERN.fullmatch(candidate) else fallback
+
+    @classmethod
+    def _safe_mapping(cls, values: Mapping[str, Any]) -> dict[str, Any]:
+        safe: dict[str, Any] = {}
+        for key, value in values.items():
+            safe_key = cls._safe_label(key, fallback="")
+            if not safe_key or isinstance(value, (bytes, bytearray)):
+                continue
+            if isinstance(value, bool):
+                safe[safe_key] = value
+            elif isinstance(value, int):
+                safe[safe_key] = int(value)
+            elif isinstance(value, float):
+                safe[safe_key] = round(float(value), 6)
+            elif (
+                isinstance(value, str)
+                and safe_key in _SAFE_CATEGORICAL_FEATURE_KEYS
+            ):
+                safe_value = cls._safe_label(value, fallback="")
+                if safe_value:
+                    safe[safe_key] = safe_value
+        return safe
 
     @staticmethod
     def _stage_action(tag: str) -> tuple[str, str]:
@@ -360,6 +612,14 @@ class PipelinePerformanceTelemetry:
             if isinstance(value, bool) or not isinstance(value, (int, float)):
                 continue
             self._gemma_totals[key] += float(value)
+            operation = _GEMMA_STAGE_DETAIL_METRICS.get(key)
+            if operation:
+                self.record_stage_detail(
+                    stage="translate",
+                    operation=operation,
+                    elapsed_ms=float(value),
+                    count=0,
+                )
 
     def _ingest_paddle_metrics(self, payload: Mapping[str, Any]) -> None:
         profile = payload.get("ocr_page_profile")
@@ -396,6 +656,14 @@ class PipelinePerformanceTelemetry:
             if isinstance(value, bool) or not isinstance(value, (int, float)):
                 continue
             self._paddle_totals[key] += float(value)
+            operation = _PADDLE_STAGE_DETAIL_METRICS.get(key)
+            if operation:
+                self.record_stage_detail(
+                    stage="ocr",
+                    operation=operation,
+                    elapsed_ms=float(value),
+                    count=0,
+                )
 
     @staticmethod
     def _rounded_numeric_map(
@@ -403,7 +671,9 @@ class PipelinePerformanceTelemetry:
     ) -> dict[str, int | float]:
         rounded: dict[str, int | float] = {}
         for key, value in sorted(values.items()):
-            if str(key).endswith(("_count", "_tokens", "_bytes", "_chars")):
+            if str(key) == "count" or str(key).endswith(
+                ("_count", "_tokens", "_bytes", "_chars")
+            ):
                 rounded[key] = int(round(float(value)))
             else:
                 rounded[key] = round(float(value), 3)
@@ -428,8 +698,17 @@ class PipelinePerformanceTelemetry:
                 used = wsl_swap.get("swap_used_mb")
                 if isinstance(used, (int, float)) and not isinstance(used, bool):
                     swap_used.append(float(used))
+        first_swap = swap_used[0] if swap_used else None
+        last_swap = swap_used[-1] if swap_used else None
         return {
             "gpu_memory_used_peak_mb": max(gpu_used) if gpu_used else None,
             "gpu_util_peak_percent": max(gpu_util) if gpu_util else None,
             "wsl_swap_used_peak_mb": max(swap_used) if swap_used else None,
+            "wsl_swap_used_start_mb": first_swap,
+            "wsl_swap_used_end_mb": last_swap,
+            "wsl_swap_used_delta_mb": (
+                round(last_swap - first_swap, 3)
+                if first_swap is not None and last_swap is not None
+                else None
+            ),
         }
