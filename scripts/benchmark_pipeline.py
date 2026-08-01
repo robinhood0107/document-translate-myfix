@@ -43,6 +43,7 @@ from benchmark_common import (
 )
 from modules.utils.ocr_quality import summarize_ocr_quality
 from modules.utils.gpu_metrics import collect_runtime_snapshot, write_snapshot_json
+from modules.ocr.paddle_crop.transport import DEFAULT_PADDLE_DIRECT_SERVER_URL
 
 BENCHMARK_FONT_ROOT = ROOT / "benchmarks-fonts"
 BENCHMARK_FONT_EXTENSIONS = {".ttf", ".ttc", ".otf", ".woff", ".woff2"}
@@ -748,7 +749,7 @@ def _configure_window(window, preset: dict[str, object], source_lang: str, targe
     )
 
     ui.paddleocr_vl_server_url_input.setText(
-        str(ocr_client.get("server_url", "http://127.0.0.1:28118/layout-parsing"))
+        str(ocr_client.get("server_url", DEFAULT_PADDLE_DIRECT_SERVER_URL))
     )
     ui.paddleocr_vl_max_new_tokens_spinbox.setValue(int(ocr_client.get("max_new_tokens", 1024)))
     ui.paddleocr_vl_parallel_workers_spinbox.setValue(int(ocr_client.get("parallel_workers", 8)))

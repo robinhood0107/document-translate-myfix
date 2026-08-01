@@ -17,7 +17,6 @@ from typing import Any
 import yaml
 
 from modules.ocr.paddle_llamacpp_runtime_contract import (
-    DEFAULT_PADDLE_LAYOUT_IMAGE,
     DEFAULT_PADDLE_LLAMA_CPP_IMAGE,
     DEFAULT_PADDLE_LLAMA_MODEL_VOLUME,
     validate_paddle_llama_volume_name,
@@ -121,7 +120,6 @@ GEMMA_CONTAINER_NAMES = [
 ]
 PADDLEOCR_VL_CONTAINER_NAMES = [
     "paddleocr-llamacpp",
-    "paddleocr-server",
 ]
 HUNYUAN_OCR_CONTAINER_NAMES = [
     "hunyuanocr-local-server",
@@ -146,7 +144,6 @@ GEMMA_HEALTH_URLS = [
     "http://127.0.0.1:18080/v1/models",
 ]
 PADDLEOCR_VL_HEALTH_URLS = [
-    "http://127.0.0.1:28118/docs",
     "http://127.0.0.1:18000/health",
 ]
 HUNYUAN_OCR_HEALTH_URLS = [
@@ -903,14 +900,27 @@ def _stage_ocr_runtime(preset: dict[str, Any], runtime_dir: Path) -> dict[str, A
     compose["name"] = PADDLEOCR_COMPOSE_PROJECT_NAME
     raw_ocr_runtime = preset.get("ocr_runtime", {})
     ocr_runtime = raw_ocr_runtime if isinstance(raw_ocr_runtime, dict) else {}
-    front_device = str(ocr_runtime.get("front_device", "gpu:0") or "gpu:0")
-    use_hpip = bool(ocr_runtime.get("use_hpip", False))
-
-    layout_service = compose["services"]["paddleocr-layout"]
     llama_service = compose["services"].get("paddleocr-llamacpp")
     if not isinstance(llama_service, dict):
         raise ValueError(
             "Bundled PaddleOCR compose must define paddleocr-llamacpp."
+        )
+
+    retired_relay_options = sorted(
+        key
+        for key in (
+            "front_device",
+            "use_hpip",
+            "layout_image",
+            "image",
+            "max_concurrency",
+        )
+        if key in ocr_runtime
+    )
+    if retired_relay_options:
+        raise ValueError(
+            "PaddleX relay benchmark options are retired for the direct "
+            "llama.cpp crop runtime: " + ", ".join(retired_relay_options)
         )
 
     llama_service["image"] = normalize_llama_cpp_image(
@@ -927,11 +937,6 @@ def _stage_ocr_runtime(preset: dict[str, Any], runtime_dir: Path) -> dict[str, A
             "PaddleOCR llama.cpp pull_policy must be always, missing, or never."
         )
     llama_service["pull_policy"] = pull_policy
-    layout_service["image"] = str(
-        ocr_runtime.get("layout_image")
-        or ocr_runtime.get("image")
-        or DEFAULT_PADDLE_LAYOUT_IMAGE
-    )
 
     command = list(llama_service.get("command") or [])
     option_values = (
@@ -980,41 +985,16 @@ def _stage_ocr_runtime(preset: dict[str, Any], runtime_dir: Path) -> dict[str, A
     volume_config["external"] = True
     volume_config["name"] = model_volume
 
-    layout_command = str(layout_service.get("command") or "")
-    layout_command = re.sub(r"--device\s+cpu", f"--device {front_device}", layout_command)
-    layout_command = re.sub(r"--device\s+gpu:0", f"--device {front_device}", layout_command)
-    if use_hpip:
-        if "--use_hpip" not in layout_command:
-            layout_command = layout_command.rstrip() + " --use_hpip"
-    else:
-        layout_command = layout_command.replace(" --use_hpip", "").replace("--use_hpip", "")
-    layout_service["command"] = layout_command
-    if front_device.lower() == "cpu":
-        layout_service.pop("gpus", None)
-    else:
-        layout_service["gpus"] = "all"
-
     compose_path = runtime_dir / "docker-compose.yaml"
     _python3_yaml_dump(compose_path, compose)
-
-    pipeline_conf = _python3_yaml_load(OCR_BUNDLE_DIR / "pipeline_conf.yaml")
-    vl_genai_config = (
-        pipeline_conf.setdefault("SubModules", {})
-        .setdefault("VLRecognition", {})
-        .setdefault("genai_config", {})
-    )
-    if "max_concurrency" in ocr_runtime:
-        vl_genai_config["max_concurrency"] = int(ocr_runtime["max_concurrency"])
-    pipeline_path = runtime_dir / "pipeline_conf.yaml"
-    _python3_yaml_dump(pipeline_path, pipeline_conf)
 
     return {
         "kind": "paddleocr_vl",
         "backend": "llama.cpp",
+        "transport": "direct-openai-chat-completions-v1",
         "compose_path": str(compose_path.resolve()),
-        "pipeline_conf_path": str(pipeline_path.resolve()),
         "model_volume": model_volume,
-        "service_names": ["paddleocr-llamacpp", "paddleocr-server"],
+        "service_names": ["paddleocr-llamacpp"],
     }
 
 
