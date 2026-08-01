@@ -12,6 +12,8 @@ from modules.translation.gemma_runtime_contract import (
     DEFAULT_GEMMA_PREPARATION_RUNTIME_CONFIGURATION,
     DEFAULT_GEMMA_READY_MANIFEST,
     GEMMA_MODEL_SPECS,
+    GEMMA_RUNTIME_MANIFEST_SCHEMA_VERSION,
+    GEMMA_RUNTIME_PREPARATION_VERSION,
     GEMMA_RUNTIME_FINGERPRINT_LABEL,
     GEMMA_RUNTIME_KIND_LABEL,
     GEMMA_RUNTIME_MANIFEST_SHA_LABEL,
@@ -29,20 +31,20 @@ from modules.translation.gemma_runtime_contract import (
 
 
 _IMAGE_ID = "sha256:22e0e3bfe967af4fd1df6a918022abbfd4e72e4d40a4769e616a4176790acbcb"
-_LEGACY_MODEL = "gemma-4-26B-IQ4_NL.gguf"
+_PRODUCT_MODEL = "gemma-4-26B-IQ4_NL.gguf"
 
 
 def _manifest_payload() -> dict:
     return {
-        "schema_version": 1,
+        "schema_version": GEMMA_RUNTIME_MANIFEST_SCHEMA_VERSION,
         "runtime": "Gemma",
-        "preparation_version": 1,
+        "preparation_version": GEMMA_RUNTIME_PREPARATION_VERSION,
         "volume_name": DEFAULT_GEMMA_MODEL_VOLUME,
         "ready": True,
         "source_image_ref": DEFAULT_GEMMA_LLAMA_CPP_IMAGE,
         "source_image_digest": _IMAGE_ID,
         "source_image_id": _IMAGE_ID,
-        "default_model": _LEGACY_MODEL,
+        "default_model": _PRODUCT_MODEL,
         "runtime_configuration": dict(
             DEFAULT_GEMMA_PREPARATION_RUNTIME_CONFIGURATION
         ),
@@ -57,9 +59,7 @@ def _manifest_payload() -> dict:
         ],
         "smoke_test": {
             "passed": True,
-            "model": (
-                "Gemma4-26B-A4B-Uncensored-HauhauCS-Balanced-IQ4_XS.gguf"
-            ),
+            "model": _PRODUCT_MODEL,
         },
     }
 
@@ -77,7 +77,7 @@ class GemmaRuntimeContractTests(unittest.TestCase):
         self,
         *,
         payload: dict | None = None,
-        model_name: str = _LEGACY_MODEL,
+        model_name: str = _PRODUCT_MODEL,
         environment: dict[str, str] | None = None,
         compose_text: str = "services: {}\n",
         observed_model_bytes: int | None = None,
@@ -106,7 +106,7 @@ class GemmaRuntimeContractTests(unittest.TestCase):
     def test_build_contract_contains_pinned_runtime_identity(self) -> None:
         contract = self._build_contract()
 
-        self.assertEqual(contract.model_name, _LEGACY_MODEL)
+        self.assertEqual(contract.model_name, _PRODUCT_MODEL)
         self.assertEqual(contract.image_ref, DEFAULT_GEMMA_LLAMA_CPP_IMAGE)
         self.assertEqual(contract.image_id, _IMAGE_ID)
         self.assertEqual(contract.volume_name, DEFAULT_GEMMA_MODEL_VOLUME)
@@ -149,9 +149,9 @@ class GemmaRuntimeContractTests(unittest.TestCase):
                 build_gemma_runtime_contract(
                     manifest_bytes=manifest_bytes,
                     manifest_sha256="0" * 64,
-                    observed_model_bytes=GEMMA_MODEL_SPECS[_LEGACY_MODEL]["bytes"],
+                    observed_model_bytes=GEMMA_MODEL_SPECS[_PRODUCT_MODEL]["bytes"],
                     volume_name=DEFAULT_GEMMA_MODEL_VOLUME,
-                    model_name=_LEGACY_MODEL,
+                    model_name=_PRODUCT_MODEL,
                     image_ref=DEFAULT_GEMMA_LLAMA_CPP_IMAGE,
                     image_id=_IMAGE_ID,
                     compose_file=compose_file,
@@ -180,7 +180,14 @@ class GemmaRuntimeContractTests(unittest.TestCase):
 
     def test_contract_rejects_incomplete_registry_or_runtime_configuration(self) -> None:
         payload = _manifest_payload()
-        payload["files"].pop()
+        payload["files"].append(
+            {
+                "name": "unexpected.gguf",
+                "bytes": 1,
+                "sha256": "0" * 64,
+                "role": "unexpected",
+            }
+        )
         with self.assertRaisesRegex(
             GemmaRuntimeContractError,
             "model registry",
@@ -281,8 +288,8 @@ class GemmaRuntimeContractTests(unittest.TestCase):
 
     def test_model_and_volume_names_reject_paths_or_shell_metacharacters(self) -> None:
         self.assertEqual(
-            validate_gemma_model_name(_LEGACY_MODEL),
-            _LEGACY_MODEL,
+            validate_gemma_model_name(_PRODUCT_MODEL),
+            _PRODUCT_MODEL,
         )
         self.assertEqual(
             validate_gemma_volume_name(DEFAULT_GEMMA_MODEL_VOLUME),
