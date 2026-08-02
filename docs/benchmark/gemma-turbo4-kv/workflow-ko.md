@@ -1,7 +1,10 @@
 # Gemma Turbo4 KV-V workflow
 
-이 lab은 동일 IQ4_NL 모델의 TurboQuant fork KV-V `turbo4`만 검증한다. 새 GGUF, QAT,
-MTP/draft, n-gram/speculative 후보는 포함하지 않는다.
+> Retired: TurboQuant/Turbo4는 최종 폐기됐으며 이 workflow는 과거 검증 문서다. 새 replay,
+> output-limit tuning, 제품 반영을 실행하지 않는다.
+
+이 lab은 동일 IQ4_NL 모델의 TurboQuant fork KV-V `turbo4`만 검증했다. 새 GGUF, QAT,
+MTP/draft, n-gram/speculative 후보는 포함하지 않았다.
 
 1. 독립 lab 컨테이너와 runtime identity를 준비한다. 실행 중인 product/lab GPU 컨테이너는
    격리 실패로 중단한다. GPU background·RAM·shared GPU·swap은 1초 샘플로 기록한다.

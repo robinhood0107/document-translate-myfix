@@ -1,6 +1,6 @@
 # Gemma Turbo4 KV-V latest report
 
-Status: **REJECT — hard contract (기존 73-request 자료 재검증, 새 GPU replay 없음)**
+Status: **REJECTED · RETIRED — hard contract (기존 73-request 자료 재검증, 새 GPU replay 없음)**
 
 - 번역 품질: semantic PASS/FAIL 판정 대상이 아님. Turbo4 14/73 응답이 `finish_reason=length`이고
   translation JSON이 완결되지 않아 필수 후보 텍스트가 없다. 이 조건은 의미 검수나 raw mismatch
@@ -16,5 +16,5 @@ Status: **REJECT — hard contract (기존 73-request 자료 재검증, 새 GPU 
 - OOM 0, orphan 0, 각 arm 종료 후 GPU 반환 확인. R3 추정은 13,677 MiB / 12,282 MiB = 111.36%로
   90% 초과이며 active Paddle+Gemma 동시 상주는 실행하지 않았다.
 
-이 결과 뒤에는 제품 반영이나 다음 성능 로드맵을 시작하지 않는다. 사용자 승인 전에는
-`feature/gemma-turbo4-kv`를 만들지 않는다.
+TurboQuant/Turbo4는 최종 폐기됐다. 73-request 재실험, 출력 한도 조정, 제품 반영은 모두 하지 않는다.
+이 문서는 과거 검증 자료만 보존한다.

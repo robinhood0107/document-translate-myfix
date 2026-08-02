@@ -19,6 +19,36 @@ import benchmark_pipeline  # noqa: E402
 
 
 class BenchmarkPipelineTurbo4LedgerTests(unittest.TestCase):
+    def test_private_ocr_contract_uses_block_order_not_generated_ids(self) -> None:
+        first_blocks = [
+            SimpleNamespace(block_id="first-a"),
+            SimpleNamespace(block_id="first-b"),
+        ]
+        second_blocks = [
+            SimpleNamespace(block_id="second-a"),
+            SimpleNamespace(block_id="second-b"),
+        ]
+        first = benchmark_pipeline._canonical_ocr_raw_results(
+            first_blocks,
+            {
+                "first-a": {"text": "alpha", "status": "ok"},
+                "first-b": {"text": "beta", "status": "ok"},
+            },
+        )
+        second = benchmark_pipeline._canonical_ocr_raw_results(
+            second_blocks,
+            {
+                "second-a": {"text": "alpha", "status": "ok"},
+                "second-b": {"text": "beta", "status": "ok"},
+            },
+        )
+
+        self.assertEqual(first, second)
+        self.assertEqual(
+            benchmark_pipeline._snapshot_contract_sha256(first),
+            benchmark_pipeline._snapshot_contract_sha256(second),
+        )
+
     def test_http_experiment_records_the_sent_seeded_payload(self) -> None:
         from modules.translation.llm import custom_local_gemma as gemma_module
 
