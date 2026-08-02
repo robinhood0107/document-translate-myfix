@@ -34,6 +34,10 @@ from modules.ocr.managed_backend_policy import (
     is_retired_vllm_backend,
 )
 from modules.translation.llm.custom_local_gemma import (
+    DEFAULT_GEMMA_TRANSLATION_MIN_P,
+    DEFAULT_GEMMA_TRANSLATION_TEMPERATURE,
+    DEFAULT_GEMMA_TRANSLATION_TOP_K,
+    DEFAULT_GEMMA_TRANSLATION_TOP_P,
     GEMMA_REQUEST_MODE_CONTEXTUAL_SINGLE,
     RETIRED_GEMMA_REQUEST_MODE_CONTEXTUAL_GROUPED,
 )
@@ -119,6 +123,51 @@ PADDLE_SERVER_URL_KEY = "paddleocr_vl/server_url"
 PADDLE_LEGACY_RELAY_SERVER_URL = (
     "http://127.0.0.1:28118/layout-parsing"
 )
+GEMMA_SAMPLER_STABILITY_MIGRATION_VERSION = 1
+GEMMA_SAMPLER_STABILITY_MIGRATION_VERSION_KEY = (
+    "gemma_local_server/sampler_stability_migration_version"
+)
+GEMMA_SAMPLER_STABILITY_VALUES = {
+    "temperature": DEFAULT_GEMMA_TRANSLATION_TEMPERATURE,
+    "top_p": DEFAULT_GEMMA_TRANSLATION_TOP_P,
+    "top_k": DEFAULT_GEMMA_TRANSLATION_TOP_K,
+    "min_p": DEFAULT_GEMMA_TRANSLATION_MIN_P,
+}
+
+
+def migrate_gemma_sampler_stability(settings: QSettings) -> bool:
+    """Apply the approved sampler tuple once, including over saved values."""
+
+    try:
+        current_version = int(
+            settings.value(
+                GEMMA_SAMPLER_STABILITY_MIGRATION_VERSION_KEY,
+                0,
+                type=int,
+            )
+            or 0
+        )
+    except (TypeError, ValueError):
+        current_version = 0
+    if current_version >= GEMMA_SAMPLER_STABILITY_MIGRATION_VERSION:
+        return False
+
+    for key, value in GEMMA_SAMPLER_STABILITY_VALUES.items():
+        settings.setValue(f"gemma_local_server/{key}", value)
+    settings.setValue(
+        GEMMA_SAMPLER_STABILITY_MIGRATION_VERSION_KEY,
+        GEMMA_SAMPLER_STABILITY_MIGRATION_VERSION,
+    )
+    settings.sync()
+    logger.warning(
+        "Applied the one-time Gemma sampler stability tuple: "
+        "temperature=%s top_p=%s top_k=%s min_p=%s.",
+        GEMMA_SAMPLER_STABILITY_VALUES["temperature"],
+        GEMMA_SAMPLER_STABILITY_VALUES["top_p"],
+        GEMMA_SAMPLER_STABILITY_VALUES["top_k"],
+        GEMMA_SAMPLER_STABILITY_VALUES["min_p"],
+    )
+    return True
 
 
 def migrate_retired_gemma_request_mode(settings: QSettings) -> bool:
@@ -721,6 +770,7 @@ class SettingsPage(QtWidgets.QWidget):
 
     def get_gemma_local_server_settings(self):
         persisted_settings = QSettings("ComicLabs", "ComicTranslate")
+        migrate_gemma_sampler_stability(persisted_settings)
         migrate_retired_gemma_request_mode(persisted_settings)
         return {
             "chunk_size": int(self.ui.gemma_chunk_size_spinbox.value()),
@@ -1177,6 +1227,7 @@ class SettingsPage(QtWidgets.QWidget):
     def load_settings(self):
         self._loading_settings = True
         settings = QSettings("ComicLabs", "ComicTranslate")
+        migrate_gemma_sampler_stability(settings)
         migrate_retired_gemma_request_mode(settings)
         migrate_retired_gemma_model(settings)
         migrate_managed_runtime_to_llamacpp(settings)
