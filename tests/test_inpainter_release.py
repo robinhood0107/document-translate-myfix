@@ -20,6 +20,99 @@ from pipeline.stage_batched_processor import StageBatchedProcessor, StagePageCon
 
 
 class InpainterReleaseTests(unittest.TestCase):
+    def test_cpu_inpainter_does_not_acquire_gpu_lease(self) -> None:
+        processor = object.__new__(StageBatchedProcessor)
+        processor.main_page = SimpleNamespace(settings_page=object())
+        processor.inpainting = SimpleNamespace(
+            _ensure_inpainter=mock.Mock(),
+        )
+
+        with mock.patch(
+            "pipeline.stage_batched_processor.get_inpainter_runtime",
+            return_value={"device": "cpu", "backend": "torch"},
+        ):
+            processor._ensure_inpainter()
+
+        snapshot = processor._runtime_resource_arbiter().snapshot()
+        self.assertIsNone(snapshot.active_model)
+        self.assertEqual(snapshot.states, {})
+
+    def test_cuda_inpainter_lease_is_held_until_verified_release(self) -> None:
+        processor = object.__new__(StageBatchedProcessor)
+        processor.main_page = SimpleNamespace(settings_page=object())
+        processor.inpainting = SimpleNamespace(
+            _ensure_inpainter=mock.Mock(),
+            release_inpainter_resources=mock.Mock(
+                return_value={
+                    "gpu_release_expected": True,
+                    "vram_release_gate": {
+                        "required": True,
+                        "observed": True,
+                        "status": "observed",
+                    },
+                }
+            ),
+        )
+        processor._emit_benchmark_event = mock.Mock()
+
+        with mock.patch(
+            "pipeline.stage_batched_processor.get_inpainter_runtime",
+            return_value={"device": "cuda", "backend": "torch"},
+        ):
+            processor._ensure_inpainter()
+
+        self.assertEqual(
+            processor._runtime_resource_arbiter().snapshot().active_model,
+            "inpainter",
+        )
+        self.assertEqual(
+            processor._runtime_resource_arbiter().snapshot().states[
+                "inpainter"
+            ],
+            "model_ready",
+        )
+        processor._release_inpainter_before_gemma([], start_gemma=False)
+        snapshot = processor._runtime_resource_arbiter().snapshot()
+        self.assertIsNone(snapshot.active_model)
+        self.assertEqual(snapshot.states["inpainter"], "stopped")
+
+    def test_failed_inpainter_vram_gate_preserves_failed_gpu_lease(self) -> None:
+        processor = object.__new__(StageBatchedProcessor)
+        processor.main_page = SimpleNamespace(settings_page=object())
+        processor.inpainting = SimpleNamespace(
+            _ensure_inpainter=mock.Mock(),
+            release_inpainter_resources=mock.Mock(
+                return_value={
+                    "gpu_release_expected": True,
+                    "vram_release_gate": {
+                        "required": True,
+                        "observed": False,
+                        "status": "timeout",
+                    },
+                }
+            ),
+        )
+        processor._emit_benchmark_event = mock.Mock()
+
+        with mock.patch(
+            "pipeline.stage_batched_processor.get_inpainter_runtime",
+            return_value={"device": "cuda", "backend": "torch"},
+        ):
+            processor._ensure_inpainter()
+
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "VRAM release was not confirmed",
+        ):
+            processor._release_inpainter_before_gemma(
+                [],
+                start_gemma=False,
+            )
+
+        snapshot = processor._runtime_resource_arbiter().snapshot()
+        self.assertEqual(snapshot.active_model, "inpainter")
+        self.assertEqual(snapshot.states["inpainter"], "release_failed")
+
     def test_targeted_release_preserves_materialized_edit_mask(self) -> None:
         handler = InpaintingHandler(SimpleNamespace())
         cached_model = SimpleNamespace()

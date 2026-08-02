@@ -520,13 +520,21 @@ class LocalOCRRuntimeManagerTests(unittest.TestCase):
             manager,
             "_run_compose",
         ) as run_compose:
-            manager.release_for_handoff()
-            manager.release_for_handoff()
+            first_report = manager.release_for_handoff()
+            second_report = manager.release_for_handoff()
 
         wait_for_sleep.assert_called_once_with()
         run_compose.assert_not_called()
         self.assertEqual(manager._active_engine, "PaddleOCR VL")
         self.assertTrue(manager._paddle_idle_released)
+        self.assertEqual(
+            first_report,
+            {"runtime_state": "sleeping", "gpu_release_expected": True},
+        )
+        self.assertEqual(
+            second_report,
+            {"runtime_state": "sleeping", "gpu_release_expected": False},
+        )
 
     def test_paddle_handoff_stops_when_sleep_is_not_confirmed(self) -> None:
         manager = LocalOCRRuntimeManager()
@@ -544,7 +552,7 @@ class LocalOCRRuntimeManagerTests(unittest.TestCase):
             "_running_managed_container_names",
             return_value=[],
         ):
-            manager.release_for_handoff()
+            report = manager.release_for_handoff()
 
         run_compose.assert_called_once_with(
             "PaddleOCR VL",
@@ -555,6 +563,10 @@ class LocalOCRRuntimeManagerTests(unittest.TestCase):
         )
         self.assertIsNone(manager._active_engine)
         self.assertFalse(manager._paddle_idle_released)
+        self.assertEqual(
+            report,
+            {"runtime_state": "stopped", "gpu_release_expected": True},
+        )
 
     def test_paddle_handoff_adopts_exact_running_containers(self) -> None:
         manager = LocalOCRRuntimeManager()
