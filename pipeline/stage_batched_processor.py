@@ -344,7 +344,14 @@ class StageBatchedProcessor(BatchProcessor):
         """Stop a cancelled model load without bypassing its VRAM gate."""
 
         before = query_cuda_handoff_metrics()
-        release_report = runtime_manager.shutdown()
+        if self._router_runtime_is_active(runtime_manager):
+            release_report = runtime_manager.shutdown(
+                resource_arbiter=self._runtime_resource_arbiter(),
+                runtime_service=service,
+                cancel_checker=self._prewarm_cancel_checker,
+            )
+        else:
+            release_report = runtime_manager.shutdown()
         gate = self._verify_managed_runtime_gpu_release(
             service,
             release_report,
@@ -357,6 +364,21 @@ class StageBatchedProcessor(BatchProcessor):
                     "Managed runtime GPU release was not confirmed.",
                 )
             )
+
+    @staticmethod
+    def _router_runtime_is_active(runtime_manager: Any) -> bool:
+        if not isinstance(
+            runtime_manager,
+            (LocalOCRRuntimeManager, LocalGemmaRuntimeManager),
+        ):
+            return False
+        checker = getattr(runtime_manager, "router_is_active", None)
+        if not callable(checker):
+            return False
+        try:
+            return bool(checker())
+        except Exception:
+            return False
 
     def _prewarm_cancel_checker(self) -> bool:
         cancel_event = getattr(self, "_prewarm_cancel_event", None)
@@ -733,13 +755,21 @@ class StageBatchedProcessor(BatchProcessor):
                 else RuntimeModelState.STOPPED
             )
             try:
+                router_active = self._router_runtime_is_active(runtime_manager)
                 with self._runtime_resource_arbiter().model_release(
                     service,
                     target_state=target_state,
                     allow_foreign_owner_teardown=allow_foreign_owner_teardown,
                 ) as release_context:
                     if used_handoff_release:
-                        release_report = release()
+                        if router_active:
+                            release_report = release(
+                                resource_arbiter=self._runtime_resource_arbiter(),
+                                runtime_service=service,
+                                cancel_checker=self._prewarm_cancel_checker,
+                            )
+                        else:
+                            release_report = release()
                         if (
                             isinstance(release_report, dict)
                             and str(release_report.get("runtime_state") or "")
@@ -749,7 +779,17 @@ class StageBatchedProcessor(BatchProcessor):
                                 RuntimeModelState.STOPPED
                             )
                     else:
-                        release_report = runtime_manager.shutdown()
+                        if router_active:
+                            release_report = runtime_manager.shutdown(
+                                resource_arbiter=self._runtime_resource_arbiter(),
+                                runtime_service=service,
+                                cancel_checker=self._prewarm_cancel_checker,
+                                allow_foreign_owner_teardown=(
+                                    allow_foreign_owner_teardown
+                                ),
+                            )
+                        else:
+                            release_report = runtime_manager.shutdown()
                     gate = self._verify_managed_runtime_gpu_release(
                         service,
                         release_report,
@@ -872,6 +912,8 @@ class StageBatchedProcessor(BatchProcessor):
                 settings_page,
                 progress_callback=self._runtime_progress_callback(),
                 cancel_checker=self._prewarm_cancel_checker,
+                resource_arbiter=self._runtime_resource_arbiter(),
+                runtime_service=service,
             ),
             stale_cleanup=lambda: self._managed_runtime_stale_cleanup(
                 service,
@@ -1030,6 +1072,8 @@ class StageBatchedProcessor(BatchProcessor):
                 settings_page,
                 progress_callback=self._runtime_progress_callback(),
                 cancel_checker=self._prewarm_cancel_checker,
+                resource_arbiter=self._runtime_resource_arbiter(),
+                runtime_service=service,
             ),
             stale_cleanup=lambda: self._managed_runtime_stale_cleanup(
                 service,
@@ -1060,6 +1104,8 @@ class StageBatchedProcessor(BatchProcessor):
                 settings_page,
                 progress_callback=self._runtime_progress_callback(),
                 cancel_checker=self._prewarm_cancel_checker,
+                resource_arbiter=self._runtime_resource_arbiter(),
+                runtime_service="gemma",
             ),
             stale_cleanup=lambda: self._managed_runtime_stale_cleanup(
                 "gemma",
@@ -1080,6 +1126,8 @@ class StageBatchedProcessor(BatchProcessor):
                 settings_page,
                 progress_callback=self._runtime_progress_callback(),
                 cancel_checker=self._prewarm_cancel_checker,
+                resource_arbiter=self._runtime_resource_arbiter(),
+                runtime_service="gemma",
             ),
             stale_cleanup=lambda: self._managed_runtime_stale_cleanup(
                 "gemma",
