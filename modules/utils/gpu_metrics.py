@@ -18,6 +18,8 @@ DEFAULT_CONTAINER_NAMES = (
 _GPU_METRICS_CACHE_LOCK = threading.Lock()
 _GPU_METRICS_CACHE_VALUE: dict[str, Any] | None = None
 _GPU_METRICS_CACHE_EXPIRES_AT = 0.0
+_ROUTER_NVIDIA_SMI_LOCK = threading.Lock()
+_ROUTER_NVIDIA_SMI_PREFIX: tuple[str, ...] | None = None
 
 
 def _run_capture_status(
@@ -43,14 +45,74 @@ def _run_capture(cmd: list[str], *, timeout_sec: float = 5.0) -> str:
     return output
 
 
-def _query_gpu_rows() -> list[dict[str, Any]]:
-    output = _run_capture(
-        [
-            "nvidia-smi",
-            "--query-gpu=index,uuid,name,memory.total,memory.used,memory.free,utilization.gpu,utilization.memory",
-            "--format=csv,noheader,nounits",
-        ]
-    )
+def _windows_wsl_distribution_names() -> tuple[str, ...]:
+    """Return usable user distributions when this module runs in Windows Python."""
+
+    try:
+        completed = subprocess.run(
+            ["wsl.exe", "--list", "--quiet"],
+            check=False,
+            capture_output=True,
+            timeout=5.0,
+        )
+    except Exception:
+        return ()
+    if completed.returncode != 0:
+        return ()
+    raw = completed.stdout or b""
+    try:
+        text = raw.decode("utf-16le") if b"\x00" in raw else raw.decode("utf-8")
+    except UnicodeDecodeError:
+        return ()
+    excluded = {"docker-desktop", "docker-desktop-data"}
+    names = [
+        value.strip()
+        for value in text.replace("\x00", "").splitlines()
+        if value.strip() and value.strip().lower() not in excluded
+    ]
+    return tuple(names)
+
+
+def _router_nvidia_smi_prefix() -> tuple[str, ...]:
+    """Choose the Linux driver view for Docker Router evidence when available.
+
+    ``.venv-win`` launches Windows Python even when the repository itself is
+    opened through WSL. Windows ``nvidia-smi.exe`` sees desktop processes and
+    represents Docker's CUDA client as an un-attributable System PID. The WSL
+    driver view instead reports the Router worker's container namespace PID,
+    which the adapter can prove belongs to the owned container.
+    """
+
+    global _ROUTER_NVIDIA_SMI_PREFIX
+    with _ROUTER_NVIDIA_SMI_LOCK:
+        if _ROUTER_NVIDIA_SMI_PREFIX is not None:
+            return _ROUTER_NVIDIA_SMI_PREFIX
+        if os.name == "nt":
+            distributions = _windows_wsl_distribution_names()
+            if distributions:
+                _ROUTER_NVIDIA_SMI_PREFIX = (
+                    "wsl.exe",
+                    "-d",
+                    distributions[0],
+                    "--exec",
+                    "/usr/lib/wsl/lib/nvidia-smi",
+                )
+                return _ROUTER_NVIDIA_SMI_PREFIX
+        # Do not switch to the Windows driver view after a WSL distribution
+        # has been selected. A transient WSL command failure must make the
+        # Router handoff unproven rather than mixing PID namespaces mid-gate.
+        # Native nvidia-smi is only the fallback for systems without WSL and
+        # for direct Linux execution, where it is already the correct view.
+        _ROUTER_NVIDIA_SMI_PREFIX = ("nvidia-smi",)
+        return _ROUTER_NVIDIA_SMI_PREFIX
+
+
+def _run_router_nvidia_smi(args: list[str]) -> tuple[bool, str]:
+    prefix = _router_nvidia_smi_prefix()
+    return _run_capture_status([*prefix, *args])
+
+
+def _parse_gpu_rows(output: str) -> list[dict[str, Any]]:
     if not output:
         return []
 
@@ -80,8 +142,44 @@ def _query_gpu_rows() -> list[dict[str, Any]]:
     return rows
 
 
+def _query_gpu_rows() -> list[dict[str, Any]]:
+    return _parse_gpu_rows(
+        _run_capture(
+            [
+                "nvidia-smi",
+                "--query-gpu=index,uuid,name,memory.total,memory.used,memory.free,utilization.gpu,utilization.memory",
+                "--format=csv,noheader,nounits",
+            ]
+        )
+    )
+
+
+def _query_router_gpu_rows() -> list[dict[str, Any]]:
+    _succeeded, output = _run_router_nvidia_smi(
+        [
+            "--query-gpu=index,uuid,name,memory.total,memory.used,memory.free,utilization.gpu,utilization.memory",
+            "--format=csv,noheader,nounits",
+        ]
+    )
+    return _parse_gpu_rows(output)
+
+
 def query_gpu_metrics() -> dict[str, Any]:
     rows = _query_gpu_rows()
+    primary = rows[0] if rows else None
+    return {
+        "available": bool(rows),
+        "gpu_count": len(rows),
+        "gpus": rows,
+        "primary": primary,
+        "sampled_at": time.time(),
+    }
+
+
+def query_router_gpu_metrics() -> dict[str, Any]:
+    """Return GPU totals from the same Linux view as a Docker Router."""
+
+    rows = _query_router_gpu_rows()
     primary = rows[0] if rows else None
     return {
         "available": bool(rows),
@@ -167,6 +265,84 @@ def query_process_driver_gpu_metrics(
     }
 
 
+def _parse_gpu_compute_processes(
+    query_succeeded: bool,
+    output: str,
+) -> dict[str, Any]:
+    """Parse a driver process listing, retaining PID-only WSL entries."""
+
+    rows: list[dict[str, Any]] = []
+    if query_succeeded:
+        for raw_line in output.splitlines():
+            parts = [part.strip() for part in raw_line.split(",")]
+            if len(parts) < 4:
+                continue
+            try:
+                pid = int(parts[0])
+            except ValueError:
+                continue
+            try:
+                used_mb: float | None = float(parts[-1])
+            except ValueError:
+                # Docker Desktop / WSL can expose a valid container-namespace
+                # PID while reporting ``[Not Found]`` and ``[N/A]`` for its
+                # process metadata. The memory value is unusable for an
+                # attribution total, but dropping this row would also lose the
+                # driver-visible process identity required by Router handoff.
+                used_mb = None
+            rows.append(
+                {
+                    "pid": pid,
+                    "gpu_uuid": parts[1],
+                    "process_name": ",".join(parts[2:-1]).strip(),
+                    "memory_used_mb": used_mb,
+                    "memory_reported": used_mb is not None,
+                }
+            )
+    return {
+        "query_available": query_succeeded,
+        "rows": rows,
+        "gpu_uuids": sorted(
+            {
+                str(row.get("gpu_uuid") or "").strip()
+                for row in rows
+                if str(row.get("gpu_uuid") or "").strip()
+            }
+        ),
+    }
+
+
+def query_gpu_compute_processes() -> dict[str, Any]:
+    """Return the driver-visible compute-process set for every GPU.
+
+    Router release checks need more than total memory: an unrelated process
+    entering or leaving the target GPU makes a global-memory delta ambiguous.
+    The result deliberately carries an explicit query status so callers can
+    fail closed rather than treating an unavailable process list as empty.
+    """
+
+    query_succeeded, output = _run_capture_status(
+        [
+            "nvidia-smi",
+            "--query-compute-apps=pid,gpu_uuid,process_name,used_gpu_memory",
+            "--format=csv,noheader,nounits",
+        ]
+    )
+    return _parse_gpu_compute_processes(query_succeeded, output)
+
+
+def query_router_gpu_compute_processes() -> dict[str, Any]:
+    """Return process identities from the same Linux view as a Docker Router."""
+
+    query_succeeded, output = _run_router_nvidia_smi(
+        [
+            "--query-compute-apps=pid,gpu_uuid,process_name,used_gpu_memory",
+            "--format=csv,noheader,nounits",
+        ]
+    )
+    return _parse_gpu_compute_processes(query_succeeded, output)
+
+
 def query_process_cuda_metrics() -> dict[str, Any]:
     """Return CUDA allocator state for this Python process without importing torch.
 
@@ -220,6 +396,34 @@ def query_cuda_handoff_metrics() -> dict[str, Any]:
         "driver_process": query_process_driver_gpu_metrics(
             preferred_gpu_uuid=str(process.get("device_uuid") or ""),
         ),
+        "driver_processes": query_gpu_compute_processes(),
+    }
+
+
+def query_router_cuda_handoff_metrics() -> dict[str, Any]:
+    """Collect Docker Router evidence without mixing Windows desktop PIDs.
+
+    The generic sampler is retained for native/in-process CUDA paths. Router
+    state transitions use this dedicated sampler so its GPU UUID, memory
+    totals, and process set all originate from the Docker-visible Linux driver
+    view.
+    """
+
+    process = query_process_cuda_metrics()
+    return {
+        "sampled_at": time.time(),
+        "process": process,
+        "driver": query_router_gpu_metrics(),
+        "driver_process": {
+            "query_available": False,
+            "available": False,
+            "pid": os.getpid(),
+            "preferred_gpu_uuid": str(process.get("device_uuid") or ""),
+            "rows": [],
+            "selected": None,
+            "reason": "router-uses-container-driver-view",
+        },
+        "driver_processes": query_router_gpu_compute_processes(),
     }
 
 
