@@ -8,6 +8,7 @@ import os
 import queue
 import threading
 import time
+from contextlib import nullcontext
 from pathlib import Path
 from typing import Any, Callable
 from urllib.error import URLError
@@ -35,6 +36,13 @@ from modules.utils.exceptions import (
     LocalServiceResponseError,
     LocalServiceSetupError,
     OperationCancelledError,
+)
+from modules.utils.local_llama_router import (
+    DEFAULT_GEMMA_ROUTER_MODEL,
+    LocalLlamaRouterCoordinator,
+    RouterModelMaterial,
+    RouterPair,
+    RouterRuntimeSpec,
 )
 from modules.utils.llama_cpp_runtime import (
     DEFAULT_MANAGED_RUNTIME_STOP_TIMEOUT_SEC,
@@ -99,7 +107,11 @@ def _derive_probe_urls(api_base_url: str) -> list[str]:
 
 
 class LocalGemmaRuntimeManager:
-    def __init__(self) -> None:
+    def __init__(
+        self,
+        *,
+        router_coordinator: LocalLlamaRouterCoordinator | None = None,
+    ) -> None:
         self._lock = threading.RLock()
         self._compose_command: tuple[str, ...] | None = None
         self._managed_active = False
@@ -107,6 +119,122 @@ class LocalGemmaRuntimeManager:
         self._active_contract: GemmaRuntimeContract | None = None
         self._readiness_cache: set[tuple[str, str, str, str]] = set()
         self._startup_cancel_checker: Callable[[], bool] | None = None
+        self._router_coordinator = router_coordinator
+        self._router_spec: RouterRuntimeSpec | None = None
+        self._router_pair: RouterPair | None = None
+
+    def set_router_spec(self, spec: RouterRuntimeSpec | None) -> None:
+        self._router_spec = spec
+        if spec is None:
+            self._router_pair = None
+
+    @staticmethod
+    def router_credentials(settings_page: Any) -> tuple[str, str]:
+        """Read the configured endpoint without legacy URL normalization."""
+
+        creds = settings_page.get_credentials("Custom Local Server(Gemma)")
+        api_base_url = str((creds or {}).get("api_url", "")).strip()
+        model_name = (
+            str((creds or {}).get("model", "")).strip()
+            or DEFAULT_GEMMA_LOCAL_MODEL
+        )
+        return api_base_url, model_name
+
+    def router_model_material(
+        self,
+        settings_page: Any,
+    ) -> tuple[RouterModelMaterial, str]:
+        """Return only prepared Gemma evidence; never start its old container."""
+
+        _endpoint, model_name = self.router_credentials(settings_page)
+        if model_name != DEFAULT_GEMMA_ROUTER_MODEL:
+            raise self._build_setup_error(
+                "Router requires the product-default Gemma model alias.",
+            )
+        contract = self._load_runtime_contract(model_name)
+        material = RouterModelMaterial(
+            alias=contract.model_name,
+            model_file=contract.model_name,
+            model_sha256=contract.model_sha256,
+            volume_name=contract.volume_name,
+            ready_manifest_sha256=contract.ready_manifest_sha256,
+            source_fingerprint=contract.fingerprint,
+            runtime_options=dict(contract.runtime_options),
+            preparation_version=contract.preparation_version,
+        )
+        return material, contract.image_ref
+
+    def _router_pair_for_server(self, settings_page: Any) -> RouterPair | None:
+        coordinator = self._router_coordinator
+        spec = self._router_spec
+        if coordinator is None or spec is None:
+            return None
+        endpoint, model = self.router_credentials(settings_page)
+        pair = coordinator.current_pair_for_gemma(endpoint, model)
+        return pair if pair == spec.pair else None
+
+    def router_is_active(self) -> bool:
+        pair = self._router_pair
+        coordinator = self._router_coordinator
+        return bool(
+            pair is not None
+            and coordinator is not None
+            and coordinator.snapshot().pair == pair.kind.value
+        )
+
+    def _finish_router_for_selection_change(
+        self,
+        *,
+        resource_arbiter: Any | None,
+        runtime_service: str,
+        cancel_checker: Callable[[], bool] | None,
+    ) -> None:
+        """Terminally release the owned Router before a custom route starts."""
+
+        coordinator = self._router_coordinator
+        pair = self._router_pair
+        if coordinator is None or pair is None:
+            return
+        snapshot = coordinator.snapshot()
+        if snapshot.pair == pair.kind.value:
+            service = runtime_service or "gemma"
+            if str(getattr(snapshot, "loaded_model", "") or "") == pair.ocr_alias:
+                service = (
+                    "paddleocr_vl"
+                    if pair.ocr_engine_key == "PaddleOCR VL"
+                    else "paddleocr_vl_spotting"
+                )
+            coordinator.finish(
+                arbiter=resource_arbiter,
+                service=service,
+                stop_container=True,
+                cancel_checker=cancel_checker,
+            )
+        self._router_pair = None
+        self._readiness_cache.clear()
+
+    def router_inference_lease(self, settings_page: Any) -> Any:
+        """Return the Gemma Router request lease without holding manager state.
+
+        Standalone Gemma and custom endpoints continue through their existing
+        separate-server paths.  Once the shared pair is selected, a missing
+        Gemma load is a setup failure rather than permission to issue an
+        unprotected HTTP request to the Router port.
+        """
+
+        with self._lock:
+            pair = self._router_pair_for_server(settings_page)
+            if pair is None:
+                return nullcontext()
+            coordinator = self._router_coordinator
+            if coordinator is None or self._router_pair != pair:
+                raise self._build_setup_error(
+                    "Router inference was requested before the matching Gemma model lease was loaded."
+                )
+            return coordinator.inference_lease(
+                pair=pair,
+                model_alias=DEFAULT_GEMMA_ROUTER_MODEL,
+            )
 
     def validate_server(self, settings_page: Any) -> None:
         api_base_url, _ = self._resolve_credentials(settings_page)
@@ -132,6 +260,19 @@ class LocalGemmaRuntimeManager:
         """Resolve the managed runtime identity without starting its container."""
 
         with self._lock:
+            router_pair = self._router_pair_for_server(settings_page)
+            if router_pair is not None and self._router_coordinator is not None:
+                snapshot = self._router_coordinator.snapshot()
+                if snapshot.fingerprint:
+                    return {
+                        "managed": True,
+                        "router": True,
+                        "router_pair": router_pair.kind.value,
+                        "router_fingerprint": snapshot.fingerprint,
+                        "router_model_generation": snapshot.model_generation,
+                        "api_base_url": self.router_credentials(settings_page)[0],
+                        "model_name": DEFAULT_GEMMA_ROUTER_MODEL,
+                    }
             api_base_url, model_name = self._resolve_credentials(settings_page)
             if not api_base_url or not self.should_manage_server(settings_page):
                 return None
@@ -158,9 +299,44 @@ class LocalGemmaRuntimeManager:
         timeout_sec: int = DEFAULT_GEMMA_STARTUP_TIMEOUT_SEC,
         progress_callback: Callable[[dict[str, Any]], None] | None = None,
         cancel_checker: Callable[[], bool] | None = None,
+        resource_arbiter: Any | None = None,
+        runtime_service: str = "",
     ) -> None:
         with self._lock:
             self._startup_cancel_checker = cancel_checker
+            router_pair = self._router_pair_for_server(settings_page)
+            if router_pair is not None:
+                coordinator = self._router_coordinator
+                spec = self._router_spec
+                if coordinator is None or spec is None:
+                    raise self._build_setup_error("Router state is unavailable for Gemma.")
+                try:
+                    coordinator.load(
+                        spec,
+                        DEFAULT_GEMMA_ROUTER_MODEL,
+                        arbiter=resource_arbiter,
+                        service=runtime_service or "gemma",
+                        cancel_checker=cancel_checker,
+                    )
+                except OperationCancelledError:
+                    # Do not translate a user cancellation into a Gemma setup
+                    # error after the coordinator has cleaned up its owned
+                    # Router container.
+                    raise
+                except Exception as exc:
+                    raise self._build_setup_error(str(exc)) from exc
+                self._router_pair = router_pair
+                self._readiness_cache.clear()
+                return
+            # Query strings, fragments, a different host/path/port, or a
+            # non-default model are all user-managed routes.  A Router that
+            # was active for the previous exact default route must be stopped
+            # before this manager can touch the separate-server path.
+            self._finish_router_for_selection_change(
+                resource_arbiter=resource_arbiter,
+                runtime_service=runtime_service or "gemma",
+                cancel_checker=cancel_checker,
+            )
             api_base_url, model_name = self._resolve_credentials(settings_page)
             if not api_base_url:
                 raise self._build_setup_error("Endpoint URL is empty.")
@@ -383,8 +559,34 @@ class LocalGemmaRuntimeManager:
             cancel_checker=cancel_checker,
         )
 
-    def shutdown(self) -> dict[str, str | bool]:
+    def shutdown(
+        self,
+        *,
+        resource_arbiter: Any | None = None,
+        runtime_service: str = "",
+        cancel_checker: Callable[[], bool] | None = None,
+        allow_foreign_owner_teardown: bool = False,
+    ) -> dict[str, Any]:
         with self._lock:
+            if self.router_is_active() and self._router_coordinator is not None:
+                evidence = self._router_coordinator.finish(
+                    arbiter=resource_arbiter,
+                    service=runtime_service or "gemma",
+                    stop_container=True,
+                    cancel_checker=cancel_checker,
+                    allow_foreign_owner_teardown=allow_foreign_owner_teardown,
+                )
+                snapshot = self._router_coordinator.snapshot()
+                self._router_pair = None
+                self._readiness_cache.clear()
+                return {
+                    "runtime_state": "stopped",
+                    "gpu_release_expected": False,
+                    "router_release_evidence": (
+                        evidence.vram if evidence is not None else {"required": False}
+                    ),
+                    "router_model_generation": snapshot.model_generation,
+                }
             self._readiness_cache.clear()
             gpu_release_expected = bool(
                 self._managed_active or self._managed_start_attempted
