@@ -36,11 +36,6 @@ from modules.utils.exceptions import (
     LocalServiceSetupError,
     OperationCancelledError,
 )
-from modules.utils.local_llama_router import (
-    LocalLlamaRouterCoordinator,
-    ROUTER_GEMMA_ALIAS,
-    RouterRuntimeError,
-)
 from modules.utils.llama_cpp_runtime import (
     DEFAULT_MANAGED_RUNTIME_STOP_TIMEOUT_SEC,
     inspect_llama_cpp_runtime,
@@ -104,21 +99,14 @@ def _derive_probe_urls(api_base_url: str) -> list[str]:
 
 
 class LocalGemmaRuntimeManager:
-    def __init__(
-        self,
-        coordinator: LocalLlamaRouterCoordinator | None = None,
-    ) -> None:
+    def __init__(self) -> None:
         self._lock = threading.RLock()
-        self._coordinator = coordinator
         self._compose_command: tuple[str, ...] | None = None
         self._managed_active = False
         self._managed_start_attempted = False
         self._active_contract: GemmaRuntimeContract | None = None
         self._readiness_cache: set[tuple[str, str, str, str]] = set()
         self._startup_cancel_checker: Callable[[], bool] | None = None
-        self._router_active_alias: str | None = None
-        if coordinator is not None:
-            coordinator.register_gemma_identity_provider(self.router_runtime_identity)
 
     def validate_server(self, settings_page: Any) -> None:
         api_base_url, _ = self._resolve_credentials(settings_page)
@@ -148,30 +136,6 @@ class LocalGemmaRuntimeManager:
             if not api_base_url or not self.should_manage_server(settings_page):
                 return None
             contract = self._load_runtime_contract(model_name)
-            router_identity = self.router_runtime_identity(
-                settings_page,
-                runtime_contract=contract,
-            )
-            if (
-                router_identity is not None
-                and self._coordinator is not None
-                and self._coordinator.is_router_gemma_candidate(settings_page)
-            ):
-                return {
-                    "managed": True,
-                    "router": True,
-                    "api_base_url": _normalize_url(api_base_url),
-                    "model_name": router_identity["model_name"],
-                    "model_sha256": router_identity["model_sha256"],
-                    "runtime_fingerprint": (
-                        f"{contract.fingerprint}|router-generation:"
-                        f"{self._coordinator.generation}"
-                    ),
-                    "runtime_image_ref": router_identity["image_ref"],
-                    "runtime_image_id": router_identity["image_id"],
-                    "runtime_manifest_sha256": router_identity["manifest_sha256"],
-                    "runtime_options": dict(router_identity["runtime_options"]),
-                }
             return {
                 "managed": True,
                 "api_base_url": _normalize_url(api_base_url),
@@ -202,17 +166,6 @@ class LocalGemmaRuntimeManager:
                 raise self._build_setup_error("Endpoint URL is empty.")
 
             managed = self.should_manage_server(settings_page)
-            router_candidate = bool(
-                self._coordinator is not None
-                and self._coordinator.is_router_gemma_candidate(settings_page)
-            )
-            if self._router_active_alias and self._coordinator is not None and not router_candidate:
-                self._coordinator.stop_pair()
-                self._router_active_alias = None
-                self._managed_active = False
-                self._managed_start_attempted = False
-                self._active_contract = None
-                self._readiness_cache.clear()
             if self._is_cancelled(cancel_checker):
                 raise OperationCancelledError(
                     "Cancelled while preparing Gemma runtime."
@@ -224,51 +177,18 @@ class LocalGemmaRuntimeManager:
                 if managed
                 else None
             )
-            router_identity = (
-                self.router_runtime_identity(
-                    settings_page,
-                    runtime_contract=runtime_contract,
-                )
-                if (
-                    self._coordinator is not None
-                    and router_candidate
-                )
-                else None
-            )
-            if router_identity is not None and self._managed_active and not self._router_active_alias:
-                self._stop_managed_container()
-                self._managed_active = False
-                self._managed_start_attempted = False
-                self._active_contract = None
             cache_key = self._readiness_cache_key(
                 api_base_url,
                 model_name,
                 managed,
                 runtime_contract,
-                router=router_identity is not None,
             )
             if self._is_cancelled(cancel_checker):
                 self._readiness_cache.discard(cache_key)
                 raise OperationCancelledError("Cancelled while preparing Gemma runtime.")
 
             if cache_key in self._readiness_cache:
-                if router_identity is not None and self._coordinator is not None:
-                    snapshot = self._coordinator.snapshot()
-                    if (
-                        snapshot.active_model == ROUTER_GEMMA_ALIAS
-                        and snapshot.loaded_count == 1
-                    ):
-                        self._active_contract = runtime_contract
-                        self._managed_active = True
-                        self._managed_start_attempted = True
-                        self._router_active_alias = ROUTER_GEMMA_ALIAS
-                        self._emit_readiness_cache_hit(
-                            progress_callback,
-                            managed=True,
-                        )
-                        return
-                    self._readiness_cache.discard(cache_key)
-                elif managed:
+                if managed:
                     assert runtime_contract is not None
                     container_state = self._inspect_managed_container_state(
                         runtime_contract
@@ -296,34 +216,6 @@ class LocalGemmaRuntimeManager:
                     return
 
             try:
-                if router_identity is not None and self._coordinator is not None:
-                    self._router_active_alias = ROUTER_GEMMA_ALIAS
-                    report = self._coordinator.ensure_gemma_model(
-                        settings_page,
-                        router_identity,
-                        cancel_checker=cancel_checker,
-                    )
-                    if report is None:
-                        raise RouterRuntimeError(
-                            "Gemma Router target disappeared before startup."
-                        )
-                    self._validate_model_with_progress(
-                        api_base_url,
-                        model_name,
-                        progress_callback,
-                    )
-                    self._prewarm_chat_completion_with_progress(
-                        api_base_url,
-                        model_name,
-                        progress_callback,
-                        cancel_checker=cancel_checker,
-                    )
-                    self._active_contract = runtime_contract
-                    self._managed_active = True
-                    self._managed_start_attempted = True
-                    self._router_active_alias = ROUTER_GEMMA_ALIAS
-                    self._readiness_cache.add(cache_key)
-                    return
                 self._ensure_server_uncached(
                     settings_page,
                     api_base_url=api_base_url,
@@ -342,37 +234,8 @@ class LocalGemmaRuntimeManager:
             ):
                 self._readiness_cache.discard(cache_key)
                 raise
-            except RouterRuntimeError as exc:
-                self._readiness_cache.discard(cache_key)
-                raise self._build_setup_error(str(exc)) from exc
             else:
                 self._readiness_cache.add(cache_key)
-
-    def router_runtime_identity(
-        self,
-        settings_page: Any,
-        *,
-        runtime_contract: GemmaRuntimeContract | None = None,
-    ) -> dict[str, Any] | None:
-        """Return the exact Gemma identity accepted by the product Router."""
-
-        api_base_url, model_name = self._resolve_credentials(settings_page)
-        if (
-            not api_base_url
-            or not self.should_manage_server(settings_page)
-            or model_name != ROUTER_GEMMA_ALIAS
-        ):
-            return None
-        contract = runtime_contract or self._load_runtime_contract(model_name)
-        return {
-            "model_name": contract.model_name,
-            "model_sha256": contract.model_sha256,
-            "manifest_sha256": contract.ready_manifest_sha256,
-            "volume": contract.volume_name,
-            "image_ref": contract.image_ref,
-            "image_id": contract.image_id,
-            "runtime_options": dict(contract.runtime_options),
-        }
 
     def _ensure_server_uncached(
         self,
@@ -523,16 +386,6 @@ class LocalGemmaRuntimeManager:
     def shutdown(self) -> dict[str, str | bool]:
         with self._lock:
             self._readiness_cache.clear()
-            if self._router_active_alias and self._coordinator is not None:
-                try:
-                    report = self._coordinator.unload_model(self._router_active_alias)
-                except RouterRuntimeError as exc:
-                    raise self._build_setup_error(str(exc)) from exc
-                self._router_active_alias = None
-                self._managed_active = False
-                self._managed_start_attempted = False
-                self._active_contract = None
-                return report
             gpu_release_expected = bool(
                 self._managed_active or self._managed_start_attempted
             )
@@ -557,20 +410,15 @@ class LocalGemmaRuntimeManager:
         model_name = str((creds or {}).get("model", "")).strip() or DEFAULT_GEMMA_LOCAL_MODEL
         return api_base_url, model_name
 
+    @staticmethod
     def _readiness_cache_key(
-        self,
         api_base_url: str,
         model_name: str,
         managed: bool,
         runtime_contract: GemmaRuntimeContract | None = None,
-        *,
-        router: bool = False,
     ) -> tuple[str, str, str, str]:
         mode = "managed" if managed else "unmanaged"
         fingerprint = runtime_contract.fingerprint if runtime_contract is not None else ""
-        if router and self._coordinator is not None:
-            mode = f"{mode}|router"
-            fingerprint = f"{fingerprint}|router-generation:{self._coordinator.generation}"
         return (
             _normalize_url(api_base_url),
             str(model_name or "").strip(),
