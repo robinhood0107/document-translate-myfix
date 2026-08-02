@@ -556,6 +556,7 @@ def _benchmark_http_clients(config: object) -> Iterator[None]:
     values = config if isinstance(config, dict) else {}
     gemma_session_enabled = bool(values.get("gemma_session", False))
     gemma_seed_raw = values.get("gemma_seed")
+    gemma_record_path_raw = str(values.get("gemma_request_record_path", "") or "").strip()
     gemma_seed = None if gemma_seed_raw is None else int(gemma_seed_raw)
     if gemma_seed is not None and gemma_seed < 0:
         raise ValueError("benchmark_http.gemma_seed must be non-negative")
@@ -566,6 +567,7 @@ def _benchmark_http_clients(config: object) -> Iterator[None]:
         not gemma_session_enabled
         and not paddle_thread_local_enabled
         and gemma_seed is None
+        and not gemma_record_path_raw
     ):
         yield
         return
@@ -578,9 +580,61 @@ def _benchmark_http_clients(config: object) -> Iterator[None]:
     pool_maxsize = max(1, int(values.get("pool_maxsize", 8)))
     gemma_session = None
     paddle_sessions = None
+    gemma_record_file = None
+    gemma_record_lock = threading.Lock()
+    gemma_record_index = 0
+    gemma_record_error = ""
     original_gemma_requests = gemma_module.requests
     original_paddle_requests = paddle_module.requests
     try:
+        if gemma_record_path_raw:
+            output_root_raw = os.environ.get("CT_BENCH_OUTPUT_DIR", "").strip()
+            if not output_root_raw:
+                raise ValueError(
+                    "gemma_request_record_path requires CT_BENCH_OUTPUT_DIR."
+                )
+            output_root = Path(output_root_raw).expanduser().resolve()
+            gemma_record_path = Path(gemma_record_path_raw).expanduser().resolve()
+            try:
+                gemma_record_path.relative_to(output_root)
+            except ValueError as exc:
+                raise ValueError(
+                    "gemma_request_record_path must stay inside the private benchmark output directory."
+                ) from exc
+            gemma_record_path.parent.mkdir(parents=True, exist_ok=True)
+            gemma_record_file = gemma_record_path.open("w", encoding="utf-8")
+
+        def record_gemma_http_attempt(
+            *,
+            request_payload: object,
+            response_payload: object = None,
+            status_code: object = None,
+            error: str = "",
+        ) -> None:
+            nonlocal gemma_record_index, gemma_record_error
+            if gemma_record_file is None:
+                return
+            with gemma_record_lock:
+                row = {
+                    "attempt_index": gemma_record_index,
+                    "request": request_payload,
+                    "response": response_payload,
+                    "status_code": status_code,
+                    "error": error,
+                }
+                gemma_record_index += 1
+                try:
+                    gemma_record_file.write(
+                        json.dumps(row, ensure_ascii=False, sort_keys=True) + "\n"
+                    )
+                    gemma_record_file.flush()
+                except Exception:
+                    # The benchmark must fail closed later if its ledger is
+                    # incomplete, but a recorder failure must not alter the
+                    # product HTTP response path itself.
+                    gemma_record_error = "write_failed"
+                    return
+
         if gemma_session_enabled:
             gemma_session = requests_module.Session()
             adapter = requests_module.adapters.HTTPAdapter(
@@ -607,7 +661,32 @@ def _benchmark_http_clients(config: object) -> Iterator[None]:
                 return unseeded_post(*args, **kwargs)
 
             gemma_post = seeded_post
-        if gemma_session_enabled or gemma_seed is not None:
+        if gemma_record_file is not None:
+            unrecorded_post = gemma_post
+
+            def recorded_post(*args, **kwargs):
+                request_payload = kwargs.get("json")
+                try:
+                    response = unrecorded_post(*args, **kwargs)
+                except BaseException as exc:
+                    record_gemma_http_attempt(
+                        request_payload=request_payload,
+                        error=f"{type(exc).__name__}: {exc}",
+                    )
+                    raise
+                try:
+                    response_payload = response.json()
+                except Exception:
+                    response_payload = {"unparseable_response_text": response.text}
+                record_gemma_http_attempt(
+                    request_payload=request_payload,
+                    response_payload=response_payload,
+                    status_code=getattr(response, "status_code", None),
+                )
+                return response
+
+            gemma_post = recorded_post
+        if gemma_session_enabled or gemma_seed is not None or gemma_record_file is not None:
             gemma_module.requests = _RequestsProxy(
                 requests_module,
                 gemma_post,
@@ -639,6 +718,30 @@ def _benchmark_http_clients(config: object) -> Iterator[None]:
         paddle_module.requests = original_paddle_requests
         if gemma_session is not None:
             gemma_session.close()
+        if gemma_record_file is not None:
+            with gemma_record_lock:
+                try:
+                    gemma_record_file.write(
+                        json.dumps(
+                            {
+                                "record_type": "summary",
+                                "attempt_count": gemma_record_index,
+                                "write_error": gemma_record_error,
+                            },
+                            ensure_ascii=False,
+                            sort_keys=True,
+                        )
+                        + "\n"
+                    )
+                    gemma_record_file.flush()
+                except Exception:
+                    # A missing summary is itself a fail-closed ledger error.
+                    pass
+                finally:
+                    try:
+                        gemma_record_file.close()
+                    except Exception:
+                        pass
         if paddle_sessions is not None:
             paddle_sessions.close()
 
@@ -1132,6 +1235,28 @@ def _page_failed_reason(summary: dict[str, object]) -> str:
     return ""
 
 
+def _decoded_pixel_sha256(path: Path) -> str:
+    """Hash normalized decoded pixels, not the encoder-dependent file bytes."""
+
+    try:
+        import cv2
+
+        image = cv2.imread(str(path), cv2.IMREAD_UNCHANGED)
+        if image is None:
+            return ""
+        header = json.dumps(
+            {"shape": list(image.shape), "dtype": str(image.dtype)},
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+        digest = hashlib.sha256()
+        digest.update(header)
+        digest.update(image.tobytes())
+        return digest.hexdigest()
+    except Exception:
+        return ""
+
+
 def _runtime_snapshot_from_summary(summary: dict[str, object]) -> dict[str, object]:
     if not isinstance(summary, dict):
         return {}
@@ -1202,6 +1327,11 @@ def _write_page_snapshots(window, run_dir: Path, loaded_paths: list[str]) -> Pat
                 ),
                 "translated_image_sha256": (
                     _sha256_file(translated_image)
+                    if translated_image is not None and translated_image.is_file()
+                    else ""
+                ),
+                "translated_image_decoded_pixel_sha256": (
+                    _decoded_pixel_sha256(translated_image)
                     if translated_image is not None and translated_image.is_file()
                     else ""
                 ),
@@ -1276,7 +1406,22 @@ def _run_single_mode(
             preset.get("benchmark_http", {})
         ):
             window = ComicTranslate()
+            turbo4_lab_runtime = None
             try:
+                turbo4_lab_config = preset.get("benchmark_turbo4_kv")
+                if isinstance(turbo4_lab_config, dict):
+                    # This is a benchmarking/lab-only adapter.  It replaces
+                    # the already-created product manager but deliberately
+                    # does not start a container here; StageBatchedProcessor
+                    # reaches it only after the inpainter release gate.
+                    from turbo4_lab_runtime import (
+                        install_turbo4_lab_runtime_adapter,
+                    )
+
+                    turbo4_lab_runtime = install_turbo4_lab_runtime_adapter(
+                        window,
+                        turbo4_lab_config,
+                    )
                 if os.environ.get("CT_BENCH_CLEAR_APP_CACHES", "").strip() == "1":
                     window.pipeline.cache_manager.clear_ocr_cache()
                     window.pipeline.cache_manager.clear_translation_cache()
@@ -1417,6 +1562,11 @@ def _run_single_mode(
                     )
 
                 window.pipeline.release_model_caches()
+                if turbo4_lab_runtime is not None:
+                    write_json(
+                        run_dir / "turbo4_lab_runtime.json",
+                        turbo4_lab_runtime.adapter.evidence(),
+                    )
                 window.emit_memlog(
                     "benchmark_run_finished",
                     benchmark_mode=mode,
@@ -1425,6 +1575,14 @@ def _run_single_mode(
                 app.processEvents()
             finally:
                 try:
+                    if turbo4_lab_runtime is not None:
+                        try:
+                            turbo4_lab_runtime.close()
+                        finally:
+                            write_json(
+                                run_dir / "turbo4_lab_runtime.json",
+                                turbo4_lab_runtime.adapter.evidence(),
+                            )
                     window._skip_close_prompt = True
                     window.close()
                     app.processEvents()

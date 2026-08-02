@@ -1,0 +1,61 @@
+# syntax=docker/dockerfile:1
+# Lab-only image.  The runner passes an immutable 40-character commit and
+# records the resulting local image ID/digest in its private manifest.
+FROM nvidia/cuda:13.0.0-devel-ubuntu22.04 AS build
+
+ARG TURBOQUANT_REPOSITORY
+ARG TURBOQUANT_COMMIT
+
+# The devel image intentionally has no host NVIDIA driver.  llama-server is
+# linked against libcuda through ggml-cuda, so make the CUDA driver stub
+# available to the *linker only*.  The runtime still resolves libcuda from the
+# NVIDIA container runtime; the stub is never copied into the lab image.
+ENV LIBRARY_PATH=/usr/local/cuda/lib64/stubs
+
+# The stub's ELF soname is libcuda.so.1 while CUDA distributes it under the
+# linker name libcuda.so.  The final llama-server link resolves the soname of
+# its already-linked ggml-cuda dependency, so provide the build-only soname
+# alias for -rpath-link.  It is not copied to the runtime stage.
+RUN ln -s libcuda.so /usr/local/cuda/lib64/stubs/libcuda.so.1
+
+RUN apt-get update \
+    && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+       ca-certificates cmake g++ git make \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN test -n "$TURBOQUANT_REPOSITORY" \
+    && test "${#TURBOQUANT_COMMIT}" = 40 \
+    && git clone --filter=blob:none "$TURBOQUANT_REPOSITORY" /src/llama.cpp \
+    && cd /src/llama.cpp \
+    && git checkout --detach "$TURBOQUANT_COMMIT" \
+    && test "$(git rev-parse HEAD)" = "$TURBOQUANT_COMMIT" \
+    && cmake -S . -B build \
+       -DGGML_CUDA=ON \
+       -DCMAKE_BUILD_TYPE=Release \
+       -DCMAKE_CUDA_ARCHITECTURES=89 \
+       -DCMAKE_EXE_LINKER_FLAGS="-Wl,-rpath-link,/usr/local/cuda/lib64/stubs" \
+    # CUDA translation units can consume enough host RAM to trigger WSL swap
+    # on this 12 GiB GPU workstation.  This affects build time only, never
+    # the compiled runtime candidate, and keeps the lab's no-swap contract
+    # observable rather than relying on an unbounded host parallelism default.
+    && cmake --build build --target llama-server --parallel 2
+
+FROM nvidia/cuda:13.0.0-runtime-ubuntu22.04
+
+ARG TURBOQUANT_COMMIT
+LABEL com.comictranslate.turbo4-fork-commit=$TURBOQUANT_COMMIT
+
+# llama.cpp's shared objects are intentionally copied together into /app.
+# Keep their lookup local to this lab image; CUDA/driver libraries still come
+# from the runtime image and NVIDIA container runtime.
+ENV LD_LIBRARY_PATH=/app
+
+RUN apt-get update \
+    && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+       ca-certificates curl libgomp1 \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY --from=build /src/llama.cpp/build/bin/ /app/
+RUN printf '%s\n' "$TURBOQUANT_COMMIT" > /app/TURBOQUANT_COMMIT
+
+ENTRYPOINT ["/app/llama-server"]

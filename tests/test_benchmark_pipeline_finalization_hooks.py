@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+import os
 import sys
 import tempfile
 import unittest
@@ -179,6 +181,52 @@ class BenchmarkPipelineFinalizationHookTests(unittest.TestCase):
 
         self.assertEqual(sent["seed"], 20260801)
         self.assertNotIn("seed", payload)
+        self.assertIs(gemma_module.requests, original_gemma)
+
+    def test_http_experiment_records_gemma_requests_without_seed_or_session(
+        self,
+    ) -> None:
+        from modules.translation.llm import custom_local_gemma as gemma_module
+
+        original_gemma = gemma_module.requests
+        response = SimpleNamespace(
+            status_code=200,
+            text="",
+            json=lambda: {"choices": [{"message": {"content": "ok"}}]},
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            output_dir = Path(tmp)
+            record_path = output_dir / "gemma-records.jsonl"
+            with mock.patch.object(
+                original_gemma,
+                "post",
+                return_value=response,
+            ) as post, mock.patch.dict(
+                os.environ,
+                {"CT_BENCH_OUTPUT_DIR": str(output_dir)},
+                clear=False,
+            ):
+                with benchmark_pipeline._benchmark_http_clients(
+                    {"gemma_request_record_path": str(record_path)}
+                ):
+                    gemma_module.requests.post(
+                        "http://127.0.0.1:18080/v1/chat/completions",
+                        json={"model": "test"},
+                    )
+
+            self.assertEqual(post.call_count, 1)
+            rows = [
+                json.loads(line)
+                for line in record_path.read_text(encoding="utf-8").splitlines()
+            ]
+
+        self.assertEqual(rows[0]["attempt_index"], 0)
+        self.assertEqual(rows[0]["request"], {"model": "test"})
+        self.assertEqual(rows[0]["status_code"], 200)
+        self.assertEqual(
+            rows[1],
+            {"attempt_count": 1, "record_type": "summary", "write_error": ""},
+        )
         self.assertIs(gemma_module.requests, original_gemma)
 
     def test_runtime_files_are_injected_only_inside_context(self) -> None:

@@ -1,0 +1,49 @@
+{
+  "protocol_version": "gemma-cpu-moe-offload-v1",
+  "candidate": "shipping b10133 F16/F16 with host KV and partial CPU-MoE only",
+  "shipping": {
+    "image": "ghcr.io/ggml-org/llama.cpp@sha256:22e0e3bfe967af4fd1df6a918022abbfd4e72e4d40a4769e616a4176790acbcb",
+    "commit": "ff067f76dd8e9e05f0528056f1274adf01a54d70",
+    "build": "b10133"
+  },
+  "model": {
+    "volume": "comic-translate-gemma-models-v2",
+    "name": "gemma-4-26B-IQ4_NL.gguf",
+    "sha256": "768a89b94209243b333b2e074b928fe51ea208ebdad6424a510bd73e5cb4d0b8"
+  },
+  "fixed_server": {
+    "context_size": 4096,
+    "n_gpu_layers": 23,
+    "n_parallel": 1,
+    "threads": 10,
+    "batch_size": 2048,
+    "ubatch_size": 512,
+    "cache_type_k": "f16",
+    "cache_type_v": "f16",
+    "seed": 20260801
+  },
+  "candidate_delta": [
+    "--no-kv-offload",
+    "--n-cpu-moe N"
+  ],
+  "residency_sentinel": {
+    "allowed_after_physical_fit": true,
+    "quality_or_speed_promotion": false
+  },
+  "telemetry_only": [
+    "windows_available_ram",
+    "wsl_swap",
+    "container_swap",
+    "shared_gpu"
+  ],
+  "forbidden": [
+    "turbo4",
+    "qat",
+    "mtp",
+    "draft",
+    "ngram",
+    "speculative",
+    "new_gguf",
+    "ssd_offload"
+  ]
+}

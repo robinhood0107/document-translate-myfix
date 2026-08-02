@@ -889,6 +889,9 @@ def canonical_full_snapshot(payload: Mapping[str, Any]) -> dict[str, Any]:
                 "translated_image_sha256": str(
                     page.get("translated_image_sha256", "") or ""
                 ),
+                "translated_image_decoded_pixel_sha256": str(
+                    page.get("translated_image_decoded_pixel_sha256", "") or ""
+                ),
                 "blocks": [
                     {key: block.get(key) for key in FULL_SNAPSHOT_BLOCK_KEYS}
                     for block in blocks
@@ -1034,6 +1037,7 @@ def _run(
         check=False,
         capture_output=True,
         text=True,
+        errors="replace",
         timeout=timeout,
     )
     if check and completed.returncode != 0:
