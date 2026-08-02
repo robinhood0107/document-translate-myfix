@@ -1,0 +1,62 @@
+{
+  "protocol_version": "gemma-turbo4-kv-v2",
+  "candidate": "TurboQuant KV-V turbo4 only",
+  "fork": {
+    "repository": "https://github.com/TheTom/llama-cpp-turboquant.git",
+    "ref": "feature/turboquant-kv-cache",
+    "commit": "8a891f4b566efdbd3cea92fafee3227a0a267683"
+  },
+  "shipping": {
+    "image": "ghcr.io/ggml-org/llama.cpp@sha256:22e0e3bfe967af4fd1df6a918022abbfd4e72e4d40a4769e616a4176790acbcb",
+    "commit": "ff067f76dd8e9e05f0528056f1274adf01a54d70",
+    "build": "b10133"
+  },
+  "model": {
+    "volume": "comic-translate-gemma-models-v2",
+    "name": "gemma-4-26B-IQ4_NL.gguf",
+    "sha256": "768a89b94209243b333b2e074b928fe51ea208ebdad6424a510bd73e5cb4d0b8"
+  },
+  "fixed_server": {
+    "context_size": 4096,
+    "n_gpu_layers": 23,
+    "n_parallel": 1,
+    "threads": 10,
+    "batch_size": 2048,
+    "ubatch_size": 512,
+    "cache_type_k": "f16",
+    "cache_type_v_baseline": "f16",
+    "cache_type_v_candidate": "turbo4",
+    "seed": 20260801
+  },
+  "translation_quality_gate": {
+    "semantic_review_schema_version": "gemma-translation-semantic-approval-v2",
+    "raw_response_ledger": "diagnostic",
+    "speed_entry": "raw_exact_or_private_semantic_approval",
+    "hard_contracts": [
+      "request_identity_order",
+      "response_json_schema_completion",
+      "model_runtime_identity",
+      "gpu_release_oom_orphan",
+      "full_auto_upstream_exact_and_render_completion"
+    ]
+  },
+  "safety": {
+    "r3_residency_threshold": 0.9,
+    "active_r3_execution": false
+  },
+  "telemetry_only": [
+    "gpu_background",
+    "windows_available_ram",
+    "wsl_swap",
+    "container_swap",
+    "shared_gpu"
+  ],
+  "forbidden": [
+    "qat",
+    "mtp",
+    "draft",
+    "ngram",
+    "speculative",
+    "new_gguf"
+  ]
+}

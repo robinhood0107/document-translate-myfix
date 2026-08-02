@@ -1,46 +1,54 @@
 # 번역 후보 품질 판정 규칙
 
-## 목적
+## 원칙
 
-LLM 번역의 raw 문자열 일치와 만화의 의미 품질은 서로 다른 결과다. 성능·상주
-lab은 아래 네 축을 항상 분리해 기록한다. 한 축의 실패가 다른 축의 실패나
-의미 회귀를 자동으로 뜻하지 않는다.
+raw 문자열 일치와 번역 품질은 다른 값이다. raw non-exact는 진단값으로 남기되,
+원문·전체 대사 맥락·인접 대사·기준/후보 번역을 대조해 의미가 같고 민감한 표현이
+보존되면 품질 PASS로 처리한다. 이 규칙은 번역 텍스트에만 적용하며 OCR, detection,
+inpaint의 기존 exact 계약은 바꾸지 않는다.
 
-| 축 | PASS의 뜻 | FAIL 또는 미검수의 뜻 |
-|---|---|---|
-| 물리 동시 상주 | 두 runtime이 함께 health이고 actual VRAM peak·OOM·orphan·반환 계약을 통과함 | 해당 조합을 안전하게 함께 올릴 수 없음 |
-| raw 응답 재현성 | 같은 fixed-seed 요청의 request/response ledger가 기준과 exact | 다른 계산 경로에서 문자열이 달라짐. 이것만으로 의미 회귀는 아님 |
-| 의미 품질 | 원문·인접 대사·페이지 상황 기준으로 candidate-only 의미 회귀가 없음 | `미검수`는 PASS도 FAIL도 아님 |
-| 속도 승격 | 적용된 재현성/품질 계약 뒤 AB/BA E2E 이득이 입증됨 | 제품 기본값으로 승격하지 않음 |
+## 의미 검수
 
-OCR raw 결과, detection geometry, inpaint/render decoded pixel은 기존 exact 계약을
-계속 사용한다. 이 문서는 **번역 텍스트**의 품질 판정에만 적용한다.
+검수는 private archive의 텍스트를 먼저 사용한다. 만화 전체를 읽지 않으며, 텍스트만으로
+판정할 수 없을 때에만 해당 페이지 한 장을 추가로 확인한다. 공개 artifact에는 원문,
+번역문, 페이지, local path를 넣지 않고 사용한 텍스트 범위·판정·분류와 hash/run identity만
+기록한다.
 
-## 의미 품질 기준
+다음 차이는 PASS가 될 수 있다.
 
-자연스러운 말투·어순·문장부호·호칭/register·의성어 표기 차이는 페이지의 관계와
-상황이 유지되면 허용한다. 원문을 먼저 읽고, 인접 대사와 실제 만화 장면에 어울리는지를
-함께 본다.
+- 같은 의미의 어순·어휘·문장부호·줄바꿈·말투 차이
+- 장면의 관계와 위계를 바꾸지 않는 호칭 또는 표기 차이
+- 의미가 보존된 이름 음역·등록 차이
 
-다음 중 하나가 candidate-only로 생기면 의미 회귀다.
+다음 중 하나라도 candidate-only로 발생하면 REJECT다.
 
-- 민감한 대사·성적/폭력적 행위·상황의 삭제, 순화, 검열 또는 반대 의미화
-- 화자, 관계·위계, 동의/강제, 부정, 행동·행위 방향, 대상, 숫자, 고유명사,
-  명시적 사실의 변경
-- 장면의 핵심 상황이나 만화 흐름을 다른 사건으로 보이게 만드는 번역
+- 삭제, 검열, 성적·폭력적·기타 민감 표현의 순화 또는 약화
+- 부정, 동의, 강제, 화자, 대상, 행동, 관계·위계, 숫자, 명시적 사실의 변화
+- 전체 또는 인접 대사 맥락에서 다른 사건·관계로 읽히는 변화
 
-원문 OCR이 조각나 있거나 상황을 확정할 수 없으면 번역 후보의 회귀로 단정하지 않고
-`REVIEW`와 별도 OCR/입력 이슈로 남긴다. 검수자는 전체 맥락이 유지되는 경우 직접
-`PASS`로 승인할 수 있다.
+끝까지 애매한 항목은 `REVIEW_REQUIRED`로 남기고 사용자 확인 전에는 속도 측정이나
+승격에 사용하지 않는다. 필수 원문·기준·후보 텍스트가 없거나 response JSON/schema/
+`finish_reason`가 불완전하면 의미 검수로 우회하지 않고 hard REJECT다.
 
-## 실행 규칙
+## 공통 hard gate
 
-1. 요청 identity·순서·model·prompt·schema·sampler와 JSON 완결성을 먼저 확인한다.
-   이 계약이 깨지면 hard reject다.
-2. raw 응답이 다르면 `raw 재현성 FAIL`로 기록하고, 원문·기준·후보를 private review에
-   나란히 두어 source-first 의미 검수를 한다.
-3. 의미 검수의 PASS/REVIEW/FAIL과 raw 재현성 결과를 독립적으로 보고한다.
-4. 해당 lab protocol이 raw exact를 속도 진입 조건으로 두었다면, 의미 PASS만으로 그
-   조건을 우회하지 않는다. 조건을 바꾸려면 protocol·runner·test를 함께 바꾼다.
+- model/runtime identity, prompt/schema/seed, 요청 순서·개수
+- JSON 완결성, `finish_reason=stop`, 누락·중복 요청 없음
+- OOM 없음, runtime/container 안정성, orphan 없음, GPU 반환 확인
 
-이 규칙은 기존 [Gemma blind 품질 검수](gemma-final-ab/workflow-ko.md)의 source-first 의미 기준을 재사용한다.
+raw exact 여부와 mismatch 수는 보고서에 남기지만, 위 hard gate가 통과한 뒤에는 단독
+승격/탈락 사유가 아니다.
+
+## Turbo4 E2E 규칙
+
+Turbo4에서 의미가 같은 다른 번역은 렌더된 최종 pixel을 바꿀 수 있다. 따라서 Turbo4
+E2E는 detection/OCR/mask/inpaint snapshot exact와 render 완료·오류 없음을 hard gate로
+쓴다. 후보 간 최종 decoded pixel SHA는 진단값일 뿐이다. 번역 입력이 고정되는 후속
+render/exact-GPU 최적화에서는 decoded pixel SHA exact를 계속 요구한다.
+
+GPU background, Windows available RAM, shared GPU memory, WSL/container swap은 모든 arm에서
+1초 단위로 기록·보고한다. 이 관측만으로 탈락시키지 않으며, 실제 E2E 속도 저하·OOM·불안정·
+orphan·GPU 반환 실패는 즉시 REJECT다.
+
+v1의 과거 결과는 당시 측정 기록으로만 보존한다. 새 의미 승인 기준의 근거로 자동
+재사용하지 않는다.

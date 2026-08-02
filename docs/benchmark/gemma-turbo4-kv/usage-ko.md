@@ -1,26 +1,28 @@
 # Gemma Turbo4 KV-V usage
 
-기본 계획과 자원 확인은 다음과 같다.
+계획과 독립 lab preflight는 다음 명령으로 확인한다.
 
 ```bash
 .venv-win/Scripts/python.exe -B scripts/benchmark_gemma_turbo4_kv.py --mode plan
 .venv-win/Scripts/python.exe -B scripts/benchmark_gemma_turbo4_kv.py --mode preflight
 ```
 
-실행 데이터는 private validation archive에만 둔다. fixed-seed 입력은 `requests` 배열을 가진 replay JSON 또는 검증된 page snapshot 중 하나를 사용한다. snapshot 입력은 현행 contextual-single 요청 순서를 재구성하고, IQ4_NL model id·seed `20260801`·prompt·schema를 고정한다.
+fixed-seed 입력은 private replay JSON 또는 검증된 page snapshot에서 재구성한다. IQ4_NL
+model id, seed `20260801`, prompt, schema, 요청 순서를 바꾸지 않는다. raw 응답, 텍스트,
+명령, 이미지, 자원 샘플은 managed private archive에만 쓴다.
 
-response ledger non-exact는 raw 재현성 결과로 기록한다. 번역 의미 품질은
-[공통 번역 후보 품질 판정 규칙](../translation-quality-evaluation-rule-ko.md)에 따라
-원문·인접 대사·페이지 맥락으로 별도 검수하며, 현 v1 protocol의 raw-exact 속도
-진입 조건은 protocol·runner 변경 전까지 유지한다.
+raw response non-exact는 진단으로 기록한다. 모든 hard contract가 통과했을 때만 private
+semantic approval이 text-only PASS를 주어 속도 진입을 허용한다. page는 애매한 항목에만
+선택적으로 사용한다. 누락 텍스트, `finish_reason` 불일치, JSON 불완전은 approval 대상이
+아니며 GPU replay 없이 REJECT로 종료한다.
 
 ```bash
 .venv-win/Scripts/python.exe -B scripts/benchmark_gemma_turbo4_kv.py \
   --mode structural \
   --reuse-image \
-  --page-snapshots <private validated snapshot>
+  --translation-replay <private fixed-seed replay>
 ```
 
-S1/S6는 passing structural gate를 `--structural-gate`로 명시해 재실행 없이 이어간다. S6는 passing S1 gate도 `--s1-gate`로 요구한다. true series 3+3은 series-queue adapter와 private series fixture가 준비되기 전에는 의도적으로 실행되지 않는다. flat six-page batch는 series 결과가 아니다.
-
-`--output-dir`을 생략하면 managed private artifact harness가 raw request/response, Docker command, 1초 자원 샘플, actual HTTP request ledger, runtime evidence를 기록한다. public Git에는 summary source와 protocol만 남긴다.
+S1/S6는 passing structural gate를 `--structural-gate`로 재사용한다. S6는 passing S1 gate도
+요구한다. true series 3+3은 별도 series queue adapter와 private fixture 없이는 실행하지
+않는다. `--output-dir`을 생략하면 private artifact harness가 run manifest와 증거를 관리한다.

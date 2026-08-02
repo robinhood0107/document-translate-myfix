@@ -37,25 +37,67 @@ def _candidate(key: str = "turbo4"):
 
 
 def _result(*, key: str, seconds: float, quality: str = "quality", ledger: str = "ledger"):
+    rows = [
+        {
+            "choices": [
+                {
+                    "index": 0,
+                    "content": json.dumps({"translation": quality}, ensure_ascii=False),
+                    "finish_reason": "stop",
+                }
+            ]
+        }
+    ]
     return {
         "candidate": {"key": key},
         "status": "passed",
         "request_wall_sec": seconds,
         "pipeline_wall_sec": seconds,
-        "response_ledger": {"sha256": quality},
+        "response_ledger": {"rows": rows, "sha256": matrix._canonical_sha256(rows)},
         "snapshot_sha256": quality,
+        "pre_translation_snapshot_sha256": quality,
+        "page_output_sha256": [quality],
         "request_ledger": {"sha256": ledger},
         "resource_gates": {"passed": True},
     }
+
+
+def _semantic_pass(approval: dict[str, object]) -> dict[str, object]:
+    approval["decision"] = "PASS"
+    for comparison in approval["comparisons"]:
+        comparison["reviewed_count"] = len(comparison["items"])
+        comparison["unresolved_count"] = 0
+        comparison["semantic_reject_count"] = 0
+        for item in comparison["items"]:
+            item.update(
+                {
+                    "decision": "PASS",
+                    "review_scope": matrix.semantic_review.TEXT_ONLY_SCOPE,
+                    "page_checked": False,
+                    "requires_user_confirmation": False,
+                    "classification": "style_or_register",
+                    "rejection_category": "",
+                    "attestations": {
+                        name: True
+                        for name in matrix.semantic_review._PASS_ATTESTATIONS
+                    },
+                }
+            )
+    return approval
 
 
 def test_protocol_pins_the_approved_fork_and_disables_active_r3() -> None:
     protocol = matrix.load_protocol()
 
     assert protocol["fork"]["commit"] == matrix.FORK_COMMIT
+    assert (
+        protocol["translation_quality_gate"]["semantic_review_schema_version"]
+        == matrix.semantic_review.SEMANTIC_REVIEW_SCHEMA_VERSION
+    )
     assert protocol["safety"]["r3_residency_threshold"] == pytest.approx(0.90)
     assert protocol["safety"]["active_r3_execution"] is False
     assert set(protocol["telemetry_only"]) == {
+        "gpu_background",
         "windows_available_ram",
         "wsl_swap",
         "container_swap",
@@ -488,7 +530,7 @@ def test_structural_gate_stops_before_next_candidate_on_oom(
         image_ids={key: "sha256:test" for key in catalog},
     )
 
-    assert calls == ["shipping-f16"]
+    assert calls == ["fork-f16"]
     assert result["decision"] == "REJECT"
     assert result["aborted_early"] is True
 
@@ -522,6 +564,33 @@ def test_preflight_keeps_low_ram_and_missing_shared_counter_as_observations(
     assert result["settle"]["host_memory_and_swap"] == "telemetry_only"
 
 
+def test_preflight_keeps_gpu_background_and_swap_metric_as_observations(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.setattr(
+        matrix,
+        "resource_preflight",
+        lambda: {
+            "gpu": {"available": True, "used_mib": 4096},
+            "windows_available_bytes": 8 * 1024**3,
+            "wsl_swap_used_bytes": None,
+            "failures": ["gpu_background_above_2gib", "wsl_swap_metrics_unavailable"],
+            "passed": False,
+        },
+    )
+    monkeypatch.setattr(matrix, "query_shared_gpu_used_mib", lambda: 0.0)
+    monkeypatch.setattr(matrix, "_running_container_names", lambda: [])
+
+    result = matrix.require_preflight(output_dir=tmp_path)
+
+    assert result["passed"] is True
+    assert set(result["observations"]) == {
+        "gpu_background_above_2gib",
+        "wsl_swap_metrics_unavailable",
+    }
+
+
 def test_structural_gate_does_not_abort_for_host_observations(monkeypatch, tmp_path: Path) -> None:
     catalog = matrix.candidate_catalog(
         turbo_image="comic-translate/turbo4-lab:test",
@@ -553,7 +622,7 @@ def test_structural_gate_does_not_abort_for_host_observations(monkeypatch, tmp_p
         image_ids={key: "sha256:test" for key in catalog},
     )
 
-    assert calls == ["shipping-f16", "fork-f16", "turbo4"]
+    assert calls == ["fork-f16", "turbo4", "shipping-f16"]
     assert result["decision"] == "PASS"
 
 
@@ -582,7 +651,7 @@ def test_pair_matrix_is_abba_and_stops_at_two_for_clear_win(tmp_path: Path) -> N
     assert result["decision"] == "PASS"
 
 
-def test_pair_matrix_collects_two_runs_then_rejects_quality_mismatch(tmp_path: Path) -> None:
+def test_pair_matrix_collects_two_runs_then_requires_review_for_raw_response_mismatch(tmp_path: Path) -> None:
     calls: list[str] = []
 
     def execute(candidate, _run_dir, round_index):
@@ -608,6 +677,117 @@ def test_pair_matrix_collects_two_runs_then_rejects_quality_mismatch(tmp_path: P
     assert len(calls) == 4
     assert result["round_count"] == 2
     assert result["quality_exact"] is False
+    assert result["raw_response_exact"] is False
+    assert result["semantic_review_status"] == "REVIEW_REQUIRED"
+    assert result["decision"] == "REVIEW_REQUIRED"
+
+
+def test_pair_matrix_allows_abba_speed_evidence_after_semantic_approval(tmp_path: Path) -> None:
+    calls: list[str] = []
+
+    def execute(candidate, _run_dir, _round):
+        calls.append(candidate.key)
+        quality = "baseline" if candidate.key == "shipping-f16" else "candidate"
+        return _result(
+            key=candidate.key,
+            seconds=10.0 if candidate.key == "shipping-f16" else 9.0,
+            quality=quality,
+            ledger="same",
+        )
+
+    result = matrix.execute_pair_matrix(
+        baseline=_candidate("shipping-f16"),
+        candidate=_candidate("turbo4"),
+        mode="replay",
+        output_dir=tmp_path,
+        execute=execute,
+        initial_rounds=2,
+        max_rounds=7,
+        semantic_approval_passed=True,
+    )
+
+    assert len(calls) >= 4
+    assert result["semantic_review_status"] == "PASS"
+    assert result["hard_contract_pass"] is True
+    assert result["decision"] == "PASS"
+
+
+def test_full_auto_allows_final_pixel_difference_after_upstream_parity(tmp_path: Path) -> None:
+    def execute(candidate, _run_dir, _round):
+        result = _result(
+            key=candidate.key,
+            seconds=10.0 if candidate.key == "shipping-f16" else 9.0,
+            quality="response",
+            ledger="same",
+        )
+        result["pre_translation_snapshot_sha256"] = "upstream-exact"
+        result["snapshot_sha256"] = (
+            "baseline-render" if candidate.key == "shipping-f16" else "candidate-render"
+        )
+        return result
+
+    result = matrix.execute_pair_matrix(
+        baseline=_candidate("shipping-f16"),
+        candidate=_candidate("turbo4"),
+        mode="full-auto",
+        output_dir=tmp_path,
+        execute=execute,
+        initial_rounds=2,
+        max_rounds=7,
+        semantic_approval_passed=True,
+    )
+
+    assert result["pre_translation_exact"] is True
+    assert result["final_output_exact"] is False
+    assert result["final_output_mismatches"]
+    assert result["hard_contract_pass"] is True
+    assert result["decision"] == "PASS"
+
+
+def test_full_auto_rejects_upstream_snapshot_difference(tmp_path: Path) -> None:
+    def execute(candidate, _run_dir, _round):
+        result = _result(key=candidate.key, seconds=9.0, quality="response", ledger="same")
+        result["pre_translation_snapshot_sha256"] = candidate.key
+        return result
+
+    result = matrix.execute_pair_matrix(
+        baseline=_candidate("shipping-f16"),
+        candidate=_candidate("turbo4"),
+        mode="full-auto",
+        output_dir=tmp_path,
+        execute=execute,
+        initial_rounds=2,
+        max_rounds=7,
+        semantic_approval_passed=True,
+    )
+
+    assert result["pre_translation_exact"] is False
+    assert result["hard_contract_pass"] is False
+    assert result["decision"] == "REJECT"
+
+
+def test_pair_matrix_keeps_request_ledger_difference_as_a_hard_reject(tmp_path: Path) -> None:
+    def execute(candidate, _run_dir, _round):
+        return _result(
+            key=candidate.key,
+            seconds=9.0,
+            quality="same",
+            ledger="baseline" if candidate.key == "shipping-f16" else "candidate",
+        )
+
+    result = matrix.execute_pair_matrix(
+        baseline=_candidate("shipping-f16"),
+        candidate=_candidate("turbo4"),
+        mode="replay",
+        output_dir=tmp_path,
+        execute=execute,
+        initial_rounds=2,
+        max_rounds=7,
+        semantic_approval_passed=True,
+    )
+
+    assert result["request_ledger_exact"] is False
+    assert result["hard_contract_pass"] is False
     assert result["decision"] == "REJECT"
 
 
@@ -691,7 +871,130 @@ def test_structural_gate_requires_shipping_and_fork_controls(monkeypatch, tmp_pa
     )
 
     assert result["decision"] == "PASS"
-    assert list(result["runs"]) == ["shipping-f16", "fork-f16", "turbo4"]
+    assert list(result["runs"]) == ["fork-f16", "turbo4", "shipping-f16"]
+
+
+def test_structural_gate_returns_review_required_for_content_only_differences(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    def fake_execute(candidate, **_kwargs):
+        quality = "shipping" if candidate.key == "shipping-f16" else candidate.key
+        return _result(key=candidate.key, seconds=1.0, quality=quality, ledger="same")
+
+    monkeypatch.setattr(matrix, "execute_replay_once", fake_execute)
+    catalog = matrix.candidate_catalog(
+        turbo_image="comic-translate/turbo4-lab:test",
+        fork_commit=matrix.FORK_COMMIT,
+    )
+    result = matrix.execute_structural_gate(
+        candidates=catalog,
+        payloads=[],
+        output_dir=tmp_path,
+        port=18081,
+        image_ids={key: "sha256:test" for key in catalog},
+    )
+
+    assert result["decision"] == "REVIEW_REQUIRED"
+    assert result["raw_reproducibility"]["status"] == "REVIEW_REQUIRED"
+    assert result["semantic_review"]["status"] == "REVIEW_REQUIRED"
+    assert (tmp_path / "semantic-review-template.json").is_file()
+
+
+def test_structural_gate_accepts_a_hash_bound_semantic_approval(monkeypatch, tmp_path: Path) -> None:
+    def fake_execute(candidate, **_kwargs):
+        quality = "shipping" if candidate.key == "shipping-f16" else candidate.key
+        return _result(key=candidate.key, seconds=1.0, quality=quality, ledger="same")
+
+    monkeypatch.setattr(matrix, "execute_replay_once", fake_execute)
+    catalog = matrix.candidate_catalog(
+        turbo_image="comic-translate/turbo4-lab:test",
+        fork_commit=matrix.FORK_COMMIT,
+    )
+    pending = matrix.execute_structural_gate(
+        candidates=catalog,
+        payloads=[],
+        output_dir=tmp_path / "pending",
+        port=18081,
+        image_ids={key: "sha256:test" for key in catalog},
+    )
+    approval = json.loads(
+        (tmp_path / "pending" / "semantic-review-template.json").read_text(encoding="utf-8")
+    )
+    approval = _semantic_pass(approval)
+
+    approved = matrix.execute_structural_gate(
+        candidates=catalog,
+        payloads=[],
+        output_dir=tmp_path / "approved",
+        port=18081,
+        image_ids={key: "sha256:test" for key in catalog},
+        semantic_approval=approval,
+    )
+
+    assert pending["decision"] == "REVIEW_REQUIRED"
+    assert approved["decision"] == "PASS"
+    assert approved["semantic_review"]["status"] == "PASS"
+
+
+def test_structural_resume_approves_stored_review_without_gpu_replay(monkeypatch, tmp_path: Path) -> None:
+    def fake_execute(candidate, **_kwargs):
+        quality = "shipping" if candidate.key == "shipping-f16" else candidate.key
+        return _result(key=candidate.key, seconds=1.0, quality=quality, ledger="same")
+
+    monkeypatch.setattr(matrix, "execute_replay_once", fake_execute)
+    catalog = matrix.candidate_catalog(
+        turbo_image="comic-translate/turbo4-lab:test",
+        fork_commit=matrix.FORK_COMMIT,
+    )
+    image_ids = {key: "sha256:test" for key in catalog}
+    matrix.execute_structural_gate(
+        candidates=catalog,
+        payloads=[],
+        output_dir=tmp_path,
+        port=18081,
+        image_ids=image_ids,
+    )
+    approval = json.loads(
+        (tmp_path / "semantic-review-template.json").read_text(encoding="utf-8")
+    )
+    approval = _semantic_pass(approval)
+
+    approved = matrix._load_or_approve_structural_gate(
+        tmp_path / "structural-summary.json",
+        image_ids=image_ids,
+        semantic_approval=approval,
+    )
+
+    assert approved["decision"] == "PASS"
+    assert approved["semantic_review"]["status"] == "PASS"
+
+
+def test_structural_gate_keeps_truncated_response_as_a_hard_reject(monkeypatch, tmp_path: Path) -> None:
+    def fake_execute(candidate, **_kwargs):
+        result = _result(key=candidate.key, seconds=1.0, quality="same", ledger="same")
+        if candidate.key == "turbo4":
+            result["response_ledger"]["rows"][0]["choices"][0]["finish_reason"] = "length"
+            result["response_ledger"]["sha256"] = matrix._canonical_sha256(
+                result["response_ledger"]["rows"]
+            )
+        return result
+
+    monkeypatch.setattr(matrix, "execute_replay_once", fake_execute)
+    catalog = matrix.candidate_catalog(
+        turbo_image="comic-translate/turbo4-lab:test",
+        fork_commit=matrix.FORK_COMMIT,
+    )
+    result = matrix.execute_structural_gate(
+        candidates=catalog,
+        payloads=[],
+        output_dir=tmp_path,
+        port=18081,
+        image_ids={key: "sha256:test" for key in catalog},
+    )
+
+    assert result["decision"] == "REJECT"
+    assert result["hard_contract_failures"]
 
 
 def test_r3_estimate_uses_90_percent_only_and_never_runs_it() -> None:
@@ -739,7 +1042,15 @@ def test_full_auto_request_ledger_hashes_actual_requests_not_cache_variant(tmp_p
             {
                 "attempt_index": 0,
                 "request": request,
-                "response": {"choices": [{"message": {"content": "{}"}}]},
+                "response": {
+                    "choices": [
+                        {
+                            "index": 0,
+                            "message": {"content": '{"translation":"fixture"}'},
+                            "finish_reason": "stop",
+                        }
+                    ]
+                },
                 "status_code": 200,
                 "error": "",
             }
@@ -834,6 +1145,48 @@ def test_full_auto_request_ledger_rejects_missing_attempt_indexes(tmp_path: Path
     assert "gemma_http_attempt_index_sequence_invalid" in ledger["record_failures"]
 
 
+def test_full_auto_request_ledger_rejects_nonstop_or_non_json_response(tmp_path: Path) -> None:
+    request = {
+        "model": matrix.MODEL_NAME,
+        "seed": matrix.DEFAULT_SEED,
+        "messages": [{"role": "user", "content": "fixture"}],
+        "response_format": {"type": "json_object"},
+    }
+    records = tmp_path / "gemma-http-records.jsonl"
+    records.write_text(
+        json.dumps(
+            {
+                "attempt_index": 0,
+                "request": request,
+                "response": {
+                    "choices": [
+                        {
+                            "index": 0,
+                            "message": {"content": "not-json"},
+                            "finish_reason": "length",
+                        }
+                    ]
+                },
+                "status_code": 200,
+                "error": "",
+            }
+        )
+        + "\n"
+        + json.dumps({"record_type": "summary", "attempt_count": 1, "write_error": ""})
+        + "\n",
+        encoding="utf-8",
+    )
+
+    ledger = matrix._pipeline_request_ledger(
+        preset={"gemma": {}, "benchmark_http": {"gemma_seed": matrix.DEFAULT_SEED}},
+        metrics_path=tmp_path / "absent-metrics.jsonl",
+        record_path=records,
+    )
+
+    assert ledger["record_complete"] is False
+    assert "gemma_http_response_contract_invalid_line_1" in ledger["record_failures"]
+
+
 def test_full_auto_quality_gate_requires_decoded_output_per_page() -> None:
     failures = matrix._full_auto_quality_failures(
         snapshot={
@@ -851,6 +1204,49 @@ def test_full_auto_quality_gate_requires_decoded_output_per_page() -> None:
     )
 
     assert failures == []
+
+
+def test_pre_translation_snapshot_hash_excludes_translation_and_render() -> None:
+    snapshot = {
+        "pages": [
+            {
+                "source_lang": "ja",
+                "target_lang": "ko",
+                "ocr_quality": {"block_count": 1},
+                "inpaint_decoded_pixel_sha256": "a" * 64,
+                "stage_status": {
+                    "detect": {"status": "completed", "updated_at": "dynamic"},
+                    "ocr": {"status": "completed", "cache_status": "warm"},
+                    "inpaint": {"status": "completed"},
+                    "translation": {"status": "completed"},
+                    "render": {"status": "completed"},
+                },
+                "blocks": [
+                    {
+                        "xyxy": [1, 2, 3, 4],
+                        "text": "原文",
+                        "block_final_mask_pixel_count": 12,
+                        "translation": "번역 A",
+                        "render_text": "번역 A",
+                    }
+                ],
+            }
+        ]
+    }
+    changed = json.loads(json.dumps(snapshot, ensure_ascii=False))
+    changed["pages"][0]["blocks"][0]["translation"] = "번역 B"
+    changed["pages"][0]["blocks"][0]["render_text"] = "번역 B"
+    changed["pages"][0]["stage_status"]["translation"] = {"status": "failed"}
+    changed["pages"][0]["stage_status"]["render"] = {"status": "failed"}
+
+    assert matrix.canonical_pre_translation_snapshot_sha256(snapshot) == (
+        matrix.canonical_pre_translation_snapshot_sha256(changed)
+    )
+
+    changed["pages"][0]["blocks"][0]["text"] = "別文"
+    assert matrix.canonical_pre_translation_snapshot_sha256(snapshot) != (
+        matrix.canonical_pre_translation_snapshot_sha256(changed)
+    )
 
 
 def test_installing_adapter_does_not_start_a_container() -> None:

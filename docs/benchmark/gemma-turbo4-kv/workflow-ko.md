@@ -1,15 +1,23 @@
 # Gemma Turbo4 KV-V workflow
 
-이 lab은 동일 IQ4_NL 모델에서 TurboQuant fork의 KV-V `turbo4`만 검증한다. 새 GGUF, QAT, MTP/draft, n-gram/speculative 후보는 이 workflow에 포함하지 않는다.
+이 lab은 동일 IQ4_NL 모델의 TurboQuant fork KV-V `turbo4`만 검증한다. 새 GGUF, QAT,
+MTP/draft, n-gram/speculative 후보는 포함하지 않는다.
 
-순서는 고정이다.
+1. 독립 lab 컨테이너와 runtime identity를 준비한다. 실행 중인 product/lab GPU 컨테이너는
+   격리 실패로 중단한다. GPU background·RAM·shared GPU·swap은 1초 샘플로 기록한다.
+2. fork F16/F16과 F16 K+Turbo4 V의 fixed-seed 구조 계약을 먼저 확인한다. 이어 shipping
+   b10133 F16 control과 비교한다. `finish_reason`, JSON, 요청 수/순서, model/runtime identity
+   중 하나라도 다르면 즉시 REJECT다.
+3. raw non-exact만 남으면 기존 private 73-request ledger를 text-first로 전수 검수한다.
+   삭제·검열·민감 표현 약화·부정/동의/강제/화자/대상/행동/관계/숫자 변화는 REJECT다.
+   애매한 행은 사용자 확인 전 `REVIEW_REQUIRED`다. 의미 검수용 GPU replay는 하지 않는다.
+4. 의미 PASS인 후보만 fork F16 ↔ Turbo4 ABBA를 한다. one-sided 95% 하한이 0 이하이거나
+   A/B와 B/A 승패가 갈리면 최대 7 pair-round까지 측정한다.
+5. 통과 후보만 shipping comparison, S1 ABBA, S6 ABBA, true series 3+3으로 진행한다.
+   Turbo4 E2E는 upstream exact와 render 완료를 확인하되 후보 간 final pixel SHA는 진단값이다.
+6. 결과 보고 후 반드시 멈춘다. 사용자 승인 전에는 제품 브랜치나 다음 성능 단계를 시작하지
+   않는다.
 
-1. GPU background와 실행 중인 product GPU container를 fail-closed로 검사한다. Windows RAM, WSL/container swap, shared GPU counter는 1초 샘플로 기록하지만 단독 탈락 조건은 아니다.
-2. 40자리 TurboQuant fork commit을 확인하고 SM89 CUDA image를 빌드한다.
-3. fork F16/F16, fork F16 K + Turbo4 V, shipping b10133 F16을 동일 fixed-seed replay로 비교한다. fork F16이 shipping output과 다르면 raw 재현성 gate에서 탈락하며, 이어 fork F16 대 Turbo4 ABBA가 출력 exact·속도 판정을 통과해야 한다. raw non-exact는 의미 회귀 그 자체가 아니며, 번역 품질은 [공통 번역 후보 품질 판정 규칙](../translation-quality-evaluation-rule-ko.md)으로 별도 검수한다.
-4. 통과 후보만 S1 ABBA, S6 ABBA, true series 3+3 순으로 실제 offscreen pipeline을 실행한다. 모든 arm은 product Gemma 컨테이너가 아닌 독립 lab container·loopback port·read-only model volume을 쓴다.
-5. 각 단계가 통과해야 다음 단계로 간다. 결과가 나온 뒤에는 제품 반영 전에 사용자 승인을 기다린다.
-
-실행 중 Paddle+Gemma active co-residency(R3)는 절대 시작하지 않는다. Turbo4 peak VRAM으로 R3 90% 계산만 다시 한다. host-memory·swap 관측치는 실제 E2E 시간과 함께 보고하며, OOM·GPU 반환 미확인·container orphan은 즉시 REJECT다.
-
-S1/S6/series E2E는 finalized Arbiter가 benchmark base에 동기화된 뒤에만 Arbiter 검증으로 기록한다. true series adapter 또는 fixture가 없을 때 flat batch를 series PASS로 바꾸지 않는다.
+R3 active Paddle+Gemma 동시 상주는 실행하지 않는다. Turbo4 peak로 90% 추정치만 갱신한다.
+속도 저하, OOM, container/runtime 불안정, orphan, GPU 반환 실패는 즉시 REJECT다. true series
+adapter 또는 fixture가 없을 때 flat batch를 series PASS로 바꾸지 않는다.

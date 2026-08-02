@@ -36,7 +36,6 @@ if str(SCRIPT_DIR) not in sys.path:
 
 from benchmark_serving_scheduler_matrix import (  # noqa: E402
     DEFAULT_MAX_ROUNDS,
-    GPU_BACKGROUND_LIMIT_MIB,
     PADDLE_MEASURED_PEAK_MIB,
     _gpu_snapshot,
     _windows_available_bytes,
@@ -59,12 +58,13 @@ from validation_artifact_harness import (  # noqa: E402
     ManagedArtifactRun,
     select_managed_output_directory,
 )
+import benchmark_translation_semantic_review as semantic_review  # noqa: E402
 
 
-PROTOCOL_VERSION = "gemma-turbo4-kv-v1"
+PROTOCOL_VERSION = "gemma-turbo4-kv-v2"
 FAMILY_NAME = "gemma-turbo4-kv"
 ARTIFACT_CATEGORY = "10-gemma-translation"
-PROTOCOL_PATH = ROOT / "benchmarks" / "gemma_turbo4_kv" / "protocol-v1.json"
+PROTOCOL_PATH = ROOT / "benchmarks" / "gemma_turbo4_kv" / "protocol-v2.json"
 DOCKERFILE_PATH = ROOT / "benchmarks" / "gemma_turbo4_kv" / "Dockerfile.turboquant"
 FORK_REPOSITORY = "https://github.com/TheTom/llama-cpp-turboquant.git"
 FORK_REF = "feature/turboquant-kv-cache"
@@ -91,6 +91,39 @@ _SAFE_KEY_RE = re.compile(r"^[a-z0-9][a-z0-9._-]{0,63}$")
 _FATAL_RESOURCE_FAILURES = frozenset(
     {"gpu_release_unconfirmed", "oom_detected", "container_orphan"}
 )
+_RESOURCE_OBSERVATION_FAILURES = frozenset(
+    {
+        "gpu_background_above_2gib",
+        "windows_available_ram_unavailable",
+        "windows_available_ram_below_6gib",
+        "wsl_swap_metrics_unavailable",
+    }
+)
+_PRE_TRANSLATION_STAGE_NAMES = ("detect", "ocr", "inpaint")
+_PRE_TRANSLATION_BLOCK_KEYS = (
+    "xyxy",
+    "bubble_xyxy",
+    "angle",
+    "text_class",
+    "text",
+    "normalized_text",
+    "ocr_status",
+    "ocr_empty_reason",
+    "ocr_attempt_count",
+    "ocr_raw_text",
+    "ocr_sanitized_text",
+    "ocr_reject_reason",
+    "ui_panel_mode",
+    "block_final_mask_pixel_count",
+    "block_mask_iou",
+    "block_mask_span_coverage",
+    "block_mask_bbox",
+    "block_mask_source",
+    "block_mask_decision",
+)
+_PRE_TRANSLATION_VOLATILE_STATUS_KEYS = frozenset(
+    {"updated_at", "started_at", "ended_at", "elapsed_sec", "cache_status"}
+)
 
 
 class Turbo4BenchmarkError(RuntimeError):
@@ -106,6 +139,54 @@ def _canonical_sha256(value: Any) -> str:
             separators=(",", ":"),
         ).encode("utf-8")
     ).hexdigest()
+
+
+def canonical_pre_translation_snapshot_sha256(payload: Mapping[str, Any]) -> str:
+    """Hash only detector/OCR/mask/inpaint evidence for the Turbo4 E2E gate.
+
+    This intentionally lives with the Turbo4 runner so the completed scheduler
+    matrix remains frozen.  Translation and render fields are omitted because
+    an accepted wording difference necessarily changes final pixels.
+    """
+
+    pages = payload.get("pages", [])
+    if not isinstance(pages, list):
+        raise Turbo4BenchmarkError("Page snapshot must contain a pages list.")
+    canonical_pages: list[dict[str, Any]] = []
+    for page in pages:
+        if not isinstance(page, Mapping):
+            raise Turbo4BenchmarkError("Page snapshot entry must be an object.")
+        blocks = page.get("blocks", [])
+        if not isinstance(blocks, list):
+            raise Turbo4BenchmarkError("Page snapshot blocks must be a list.")
+        stage_status = page.get("stage_status", {})
+        canonical_status: dict[str, dict[str, Any]] = {}
+        if isinstance(stage_status, Mapping):
+            for stage_name in _PRE_TRANSLATION_STAGE_NAMES:
+                stage = stage_status.get(stage_name)
+                if isinstance(stage, Mapping):
+                    canonical_status[stage_name] = {
+                        key: value
+                        for key, value in stage.items()
+                        if key not in _PRE_TRANSLATION_VOLATILE_STATUS_KEYS
+                    }
+        canonical_pages.append(
+            {
+                "source_lang": page.get("source_lang"),
+                "target_lang": page.get("target_lang"),
+                "ocr_quality": page.get("ocr_quality", {}),
+                "stage_status": canonical_status,
+                "inpaint_decoded_pixel_sha256": str(
+                    page.get("inpaint_decoded_pixel_sha256", "") or ""
+                ),
+                "blocks": [
+                    {key: block.get(key) for key in _PRE_TRANSLATION_BLOCK_KEYS}
+                    for block in blocks
+                    if isinstance(block, Mapping)
+                ],
+            }
+        )
+    return _canonical_sha256({"page_count": len(canonical_pages), "pages": canonical_pages})
 
 
 def _json_write(path: Path, payload: Mapping[str, Any]) -> None:
@@ -279,7 +360,11 @@ def load_protocol(path: Path = PROTOCOL_PATH) -> dict[str, Any]:
     model = payload.get("model")
     fixed = payload.get("fixed_server")
     safety = payload.get("safety")
-    if not all(isinstance(item, Mapping) for item in (fork, shipping, model, fixed, safety)):
+    quality_gate = payload.get("translation_quality_gate")
+    if not all(
+        isinstance(item, Mapping)
+        for item in (fork, shipping, model, fixed, safety, quality_gate)
+    ):
         raise Turbo4BenchmarkError("Turbo4 protocol is missing a required section.")
     if payload.get("protocol_version") != PROTOCOL_VERSION:
         raise Turbo4BenchmarkError("Unexpected Turbo4 protocol version.")
@@ -313,6 +398,13 @@ def load_protocol(path: Path = PROTOCOL_PATH) -> dict[str, Any]:
         raise Turbo4BenchmarkError("Turbo4 R3 threshold must be 90%.")
     if safety.get("active_r3_execution") is not False:
         raise Turbo4BenchmarkError("Turbo4 lab must never enable active R3 execution.")
+    if (
+        quality_gate.get("semantic_review_schema_version")
+        != semantic_review.SEMANTIC_REVIEW_SCHEMA_VERSION
+        or quality_gate.get("raw_response_ledger") != "diagnostic"
+        or quality_gate.get("speed_entry") != "raw_exact_or_private_semantic_approval"
+    ):
+        raise Turbo4BenchmarkError("Turbo4 translation quality gate contract mismatch.")
     forbidden = {str(value).lower() for value in payload.get("forbidden", [])}
     if not {"qat", "mtp", "draft", "ngram", "speculative", "new_gguf"} <= forbidden:
         raise Turbo4BenchmarkError("Turbo4 protocol must explicitly reject old candidates.")
@@ -533,26 +625,20 @@ def verify_model_volume(*, output_dir: Path) -> dict[str, Any]:
     return evidence
 
 
-_WINDOWS_RAM_OBSERVATIONS = {
-    "windows_available_ram_unavailable",
-    "windows_available_ram_below_6gib",
-}
-
-
 def _preflight() -> dict[str, Any]:
     base = resource_preflight()
-    # This isolated lab records host-memory and swap values, but does not treat
-    # them as candidate rejection conditions. It still fails closed for GPU
-    # background conflicts, OOM, and orphaned containers below.
+    # Resource pressure is recorded for every arm.  It is not itself a winner
+    # decision; identity, OOM, runtime instability, orphaning, and confirmed
+    # GPU return remain fail-closed elsewhere.
     failures = [
         failure
         for failure in (base.get("failures") or [])
-        if failure not in _WINDOWS_RAM_OBSERVATIONS
+        if failure not in _RESOURCE_OBSERVATION_FAILURES
     ]
     observations = [
         failure
         for failure in (base.get("failures") or [])
-        if failure in _WINDOWS_RAM_OBSERVATIONS
+        if failure in _RESOURCE_OBSERVATION_FAILURES
     ]
     shared = query_shared_gpu_used_mib()
     active = _running_container_names()
@@ -1231,6 +1317,18 @@ def _pipeline_request_ledger(
             except (TypeError, ValueError):
                 parse_failures.append(f"gemma_http_attempt_index_invalid_line_{line_number}")
                 attempt_index = len(attempts)
+            canonical_response = _canonical_response(
+                response if isinstance(response, Mapping) else {}
+            )
+            try:
+                semantic_review.validate_translation_response(
+                    canonical_response,
+                    index=attempt_index,
+                )
+            except semantic_review.SemanticReviewError:
+                parse_failures.append(
+                    f"gemma_http_response_contract_invalid_line_{line_number}"
+                )
             attempts.append(
                 {
                     "attempt_index": attempt_index,
@@ -1244,9 +1342,7 @@ def _pipeline_request_ledger(
             responses.append(
                 {
                     "attempt_index": attempt_index,
-                    "canonical_response": _canonical_response(
-                        response if isinstance(response, Mapping) else {}
-                    ),
+                    "canonical_response": canonical_response,
                 }
             )
     if not attempts:
@@ -1484,6 +1580,16 @@ def execute_full_auto_once(
     )
     if not request_ledger["record_complete"]:
         error = error or "gemma_request_ledger_incomplete"
+    pages = snapshot.get("pages") if isinstance(snapshot, Mapping) else None
+    page_output_sha256 = (
+        [
+            str(page.get("translated_image_decoded_pixel_sha256", "") or "")
+            for page in pages
+            if isinstance(page, Mapping)
+        ]
+        if isinstance(pages, list)
+        else []
+    )
     result = {
         "candidate": asdict(candidate),
         "status": "passed" if not error and bool(resources["passed"]) else "rejected",
@@ -1492,6 +1598,10 @@ def execute_full_auto_once(
         "process": process,
         "pipeline_wall_sec": process["wall_sec"],
         "snapshot_sha256": canonical_full_snapshot_sha256(snapshot) if snapshot else "",
+        "pre_translation_snapshot_sha256": (
+            canonical_pre_translation_snapshot_sha256(snapshot) if snapshot else ""
+        ),
+        "page_output_sha256": page_output_sha256,
         "quality_failures": quality_failures,
         "request_ledger": request_ledger,
         "resource_gates": resources,
@@ -1512,6 +1622,12 @@ def _quality_key(result: Mapping[str, Any], *, mode: str) -> str:
         if not isinstance(response, Mapping):
             return ""
         return str(response.get("sha256", "") or "")
+    return str(result.get("pre_translation_snapshot_sha256", "") or "")
+
+
+def _final_output_key(result: Mapping[str, Any]) -> str:
+    """Return final render evidence for diagnosis, never Turbo4 promotion gating."""
+
     return str(result.get("snapshot_sha256", "") or "")
 
 
@@ -1529,6 +1645,7 @@ def execute_pair_matrix(
     execute: Callable[[TurboCandidate, Path, int], dict[str, Any]],
     initial_rounds: int = DEFAULT_INITIAL_ROUNDS,
     max_rounds: int = DEFAULT_MAX_ROUNDS,
+    semantic_approval_passed: bool = False,
 ) -> dict[str, Any]:
     if baseline.key == candidate.key:
         raise Turbo4BenchmarkError("Baseline and candidate must differ.")
@@ -1537,11 +1654,15 @@ def execute_pair_matrix(
     max_rounds = max(2, min(DEFAULT_MAX_ROUNDS, int(max_rounds)))
     initial_rounds = max(2, min(max_rounds, int(initial_rounds)))
     pairs: list[dict[str, Any]] = []
-    mismatches: list[dict[str, Any]] = []
+    raw_response_mismatches: list[dict[str, Any]] = []
+    request_ledger_mismatches: list[dict[str, Any]] = []
+    upstream_mismatches: list[dict[str, Any]] = []
+    final_output_mismatches: list[dict[str, Any]] = []
     fatal_resource_failures: list[str] = []
     aborted_early = False
     reference_quality = ""
     reference_ledger = ""
+    reference_final_output = ""
     for round_index in range(1, max_rounds + 1):
         order = (baseline, candidate) if round_index % 2 else (candidate, baseline)
         results: dict[str, dict[str, Any]] = {}
@@ -1579,17 +1700,33 @@ def execute_pair_matrix(
             if not reference_quality and profile.key == baseline.key:
                 reference_quality = quality
                 reference_ledger = ledger
-            if not quality or quality != reference_quality or ledger != reference_ledger:
-                mismatches.append(
-                    {
-                        "round": round_index,
-                        "profile": profile.key,
-                        "expected_quality_sha256": reference_quality,
-                        "actual_quality_sha256": quality,
-                        "expected_request_ledger_sha256": reference_ledger,
-                        "actual_request_ledger_sha256": ledger,
-                    }
-                )
+                if mode == "full-auto":
+                    reference_final_output = _final_output_key(result)
+            mismatch = {
+                "round": round_index,
+                "profile": profile.key,
+                "expected_quality_sha256": reference_quality,
+                "actual_quality_sha256": quality,
+                "expected_request_ledger_sha256": reference_ledger,
+                "actual_request_ledger_sha256": ledger,
+            }
+            if not ledger or ledger != reference_ledger:
+                request_ledger_mismatches.append(mismatch)
+            if not quality or quality != reference_quality:
+                if mode == "replay":
+                    raw_response_mismatches.append(mismatch)
+                else:
+                    upstream_mismatches.append(mismatch)
+            if mode == "full-auto":
+                final_output = _final_output_key(result)
+                if not final_output or final_output != reference_final_output:
+                    final_output_mismatches.append(
+                        {
+                            **mismatch,
+                            "expected_final_output_sha256": reference_final_output,
+                            "actual_final_output_sha256": final_output,
+                        }
+                    )
         baseline_result = results[baseline.key]
         candidate_result = results[candidate.key]
         timing_key = "request_wall_sec" if mode == "replay" else "pipeline_wall_sec"
@@ -1622,16 +1759,21 @@ def execute_pair_matrix(
                 "candidate": asdict(candidate),
                 "rounds": pairs,
                 "statistics": stats,
-                "quality_mismatches": mismatches,
+                "raw_response_mismatches": raw_response_mismatches,
+                "request_ledger_mismatches": request_ledger_mismatches,
+                "upstream_mismatches": upstream_mismatches,
+                "final_output_mismatches": final_output_mismatches,
                 "fatal_resource_failures": sorted(set(fatal_resource_failures)),
                 "aborted_early": aborted_early,
             },
         )
         if aborted_early:
             break
+        if request_ledger_mismatches or upstream_mismatches:
+            break
         if round_index < initial_rounds:
             continue
-        if mismatches:
+        if raw_response_mismatches and not semantic_approval_passed:
             break
         if not stats or not should_continue_adaptive(stats, rounds=round_index):
             break
@@ -1655,7 +1797,29 @@ def execute_pair_matrix(
         for role in ("baseline", "candidate")
     )
     lower = float(stats.get("one_sided_95_bootstrap_lower_percent", 0.0) or 0.0)
-    promotion = bool(not mismatches and resources_ok and statuses_ok and lower > 0.0)
+    hard_contract_pass = bool(
+        not request_ledger_mismatches
+        and not upstream_mismatches
+        and resources_ok
+        and statuses_ok
+        and not aborted_early
+    )
+    semantic_review_status = (
+        "NOT_REQUIRED"
+        if not raw_response_mismatches
+        else "PASS" if semantic_approval_passed else "REVIEW_REQUIRED"
+    )
+    promotion = bool(
+        hard_contract_pass
+        and semantic_review_status != "REVIEW_REQUIRED"
+        and lower > 0.0
+    )
+    if not hard_contract_pass:
+        decision = "REJECT"
+    elif semantic_review_status == "REVIEW_REQUIRED":
+        decision = "REVIEW_REQUIRED"
+    else:
+        decision = "PASS" if promotion else "REJECT"
     return {
         "protocol_version": PROTOCOL_VERSION,
         "mode": mode,
@@ -1663,12 +1827,21 @@ def execute_pair_matrix(
         "candidate": asdict(candidate),
         "round_count": len(pairs),
         "statistics": stats,
-        "quality_exact": not mismatches,
-        "quality_mismatches": mismatches,
+        "quality_exact": not raw_response_mismatches and not upstream_mismatches,
+        "raw_response_exact": not raw_response_mismatches,
+        "pre_translation_exact": not upstream_mismatches,
+        "final_output_exact": not final_output_mismatches,
+        "request_ledger_exact": not request_ledger_mismatches,
+        "raw_response_mismatches": raw_response_mismatches,
+        "request_ledger_mismatches": request_ledger_mismatches,
+        "upstream_mismatches": upstream_mismatches,
+        "final_output_mismatches": final_output_mismatches,
+        "semantic_review_status": semantic_review_status,
         "resource_gate_pass": resources_ok,
         "status_gate_pass": statuses_ok,
+        "hard_contract_pass": hard_contract_pass,
         "promotion_eligible": promotion,
-        "decision": "PASS" if promotion else "REJECT",
+        "decision": decision,
         "fatal_resource_failures": sorted(set(fatal_resource_failures)),
         "aborted_early": aborted_early,
         "rounds": pairs,
@@ -1682,6 +1855,7 @@ def execute_structural_gate(
     output_dir: Path,
     port: int,
     image_ids: Mapping[str, str],
+    semantic_approval: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     runs: dict[str, dict[str, Any]] = {}
     fatal_resource_failures = {
@@ -1689,7 +1863,10 @@ def execute_structural_gate(
         "oom_detected",
         "container_orphan",
     }
-    for index, key in enumerate(("shipping-f16", "fork-f16", "turbo4"), start=1):
+    # The fork-only F16/Turbo4 contract is the first decision.  The shipping
+    # control is still recorded in this structural pass, but only after both
+    # fork arms have supplied their fixed-seed evidence.
+    for index, key in enumerate(("fork-f16", "turbo4", "shipping-f16"), start=1):
         run_dir = output_dir / key
         run_dir.mkdir(parents=True, exist_ok=False)
         candidate = candidates[key]
@@ -1718,18 +1895,80 @@ def execute_structural_gate(
             }
             _json_write(output_dir / "structural-summary.json", result)
             return result
-    reference = _quality_key(runs["shipping-f16"], mode="replay")
-    request_reference = _ledger_key(runs["shipping-f16"])
-    mismatches = {
+    reference = _quality_key(runs["fork-f16"], mode="replay")
+    request_reference = _ledger_key(runs["fork-f16"])
+    comparisons = {
         key: {
             "response_exact": _quality_key(result, mode="replay") == reference,
             "request_exact": _ledger_key(result) == request_reference,
         }
         for key, result in runs.items()
     }
-    resources_ok = all(bool((result.get("resource_gates") or {}).get("passed")) for result in runs.values())
+    resources_ok = all(
+        bool((result.get("resource_gates") or {}).get("passed"))
+        for result in runs.values()
+    )
     statuses_ok = all(result.get("status") == "passed" for result in runs.values())
-    passed = bool(resources_ok and statuses_ok and all(all(row.values()) for row in mismatches.values()))
+    request_contract_pass = bool(
+        resources_ok
+        and statuses_ok
+        and all(item["request_exact"] for item in comparisons.values())
+    )
+    hard_contract_failures: list[str] = []
+    review_result: dict[str, Any] = {
+        "status": "NOT_REQUIRED",
+        "mismatch_count": 0,
+        "comparison_count": 0,
+        "bindings": [],
+    }
+    if request_contract_pass:
+        try:
+            review_bindings = [
+                semantic_review.build_replay_comparison(
+                    baseline=runs["fork-f16"],
+                    candidate=runs["turbo4"],
+                ),
+                semantic_review.build_replay_comparison(
+                    baseline=runs["shipping-f16"],
+                    candidate=runs["fork-f16"],
+                )
+            ]
+            review_result = semantic_review.evaluate_semantic_review(
+                protocol_version=PROTOCOL_VERSION,
+                stage="fixed-seed-structural",
+                comparisons=review_bindings,
+                approval=semantic_approval,
+            )
+        except semantic_review.SemanticReviewError as exc:
+            hard_contract_failures.append(str(exc))
+            review_result = {
+                "status": "REJECT",
+                "mismatch_count": 0,
+                "comparison_count": 0,
+                "bindings": [],
+                "error": str(exc),
+            }
+    if review_result.get("template"):
+        _json_write(
+            output_dir / "semantic-review-template.json",
+            review_result["template"],
+        )
+    hard_contract_pass = bool(
+        resources_ok
+        and statuses_ok
+        and request_contract_pass
+        and not hard_contract_failures
+    )
+    if not hard_contract_pass:
+        decision = "REJECT"
+    elif review_result["status"] == "REVIEW_REQUIRED":
+        decision = "REVIEW_REQUIRED"
+    elif review_result["status"] == "PASS":
+        decision = "PASS"
+    elif review_result["status"] == "NOT_REQUIRED":
+        decision = "PASS"
+    else:
+        decision = "REJECT"
     result = {
         "protocol_version": PROTOCOL_VERSION,
         "stage": "fixed-seed-structural",
@@ -1737,10 +1976,19 @@ def execute_structural_gate(
         "runs": runs,
         "response_reference_sha256": reference,
         "request_reference_sha256": request_reference,
-        "comparisons": mismatches,
+        "comparisons": comparisons,
         "resource_gate_pass": resources_ok,
         "status_gate_pass": statuses_ok,
-        "decision": "PASS" if passed else "REJECT",
+        "request_contract_pass": request_contract_pass,
+        "hard_contract_failures": hard_contract_failures,
+        "raw_reproducibility": {
+            "status": "PASS"
+            if all(item["response_exact"] for item in comparisons.values())
+            else "REVIEW_REQUIRED",
+        },
+        "semantic_review": review_result,
+        "speed_entry": "PASS" if decision == "PASS" else decision,
+        "decision": decision,
     }
     _json_write(output_dir / "structural-summary.json", result)
     return result
@@ -1755,6 +2003,7 @@ def execute_fork_replay_abba(
     image_ids: Mapping[str, str],
     initial_rounds: int,
     max_rounds: int,
+    semantic_approval_passed: bool,
 ) -> dict[str, Any]:
     """Measure the only intended fork delta before E2E promotion gates."""
 
@@ -1783,6 +2032,7 @@ def execute_fork_replay_abba(
         execute=execute,
         initial_rounds=initial_rounds,
         max_rounds=max_rounds,
+        semantic_approval_passed=semantic_approval_passed,
     )
     result["stage"] = "fork-f16-vs-turbo4-replay"
     result["image_ids"] = dict(image_ids)
@@ -1866,6 +2116,57 @@ def _load_compatible_prior_gate(
     return payload
 
 
+def _load_or_approve_structural_gate(
+    path: Path,
+    *,
+    image_ids: Mapping[str, str],
+    semantic_approval: Mapping[str, Any] | None,
+) -> dict[str, Any]:
+    """Load a v2 structural result and apply a private semantic approval once.
+
+    The approval is bound to the stored structural hashes, so this path never
+    repeats GPU work merely to turn a review decision into a speed-entry gate.
+    """
+
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise Turbo4BenchmarkError("Prior structural gate is unreadable.") from exc
+    if not isinstance(payload, Mapping):
+        raise Turbo4BenchmarkError("Prior structural gate is invalid.")
+    gate_value = payload.get("structural") if isinstance(payload.get("structural"), Mapping) else payload
+    gate = dict(gate_value)
+    if gate.get("protocol_version") != PROTOCOL_VERSION:
+        raise Turbo4BenchmarkError("Prior structural gate protocol does not match this lab.")
+    if gate.get("stage") != "fixed-seed-structural":
+        raise Turbo4BenchmarkError("Prior gate is not the required fixed-seed structural stage.")
+    if dict(gate.get("image_ids") or {}) != dict(image_ids):
+        raise Turbo4BenchmarkError("Prior structural gate image identities differ from this run.")
+    if gate.get("decision") == "PASS":
+        return gate
+    if gate.get("decision") != "REVIEW_REQUIRED":
+        raise Turbo4BenchmarkError("Prior structural gate did not pass its hard contracts.")
+    review = gate.get("semantic_review")
+    if not isinstance(review, Mapping) or not isinstance(review.get("bindings"), list):
+        raise Turbo4BenchmarkError("Prior structural gate lacks semantic-review bindings.")
+    if semantic_approval is None:
+        raise Turbo4BenchmarkError("A private semantic approval is required for this structural gate.")
+    try:
+        approved_review = semantic_review.validate_semantic_approval(
+            semantic_approval,
+            protocol_version=PROTOCOL_VERSION,
+            stage="fixed-seed-structural",
+            comparisons=review["bindings"],
+        )
+    except semantic_review.SemanticReviewError as exc:
+        raise Turbo4BenchmarkError(f"Semantic approval is invalid: {exc}") from exc
+    gate["semantic_review"] = approved_review
+    review_status = str(approved_review.get("status", "REJECT") or "REJECT")
+    gate["speed_entry"] = "PASS" if review_status == "PASS" else review_status
+    gate["decision"] = "PASS" if review_status == "PASS" else review_status
+    return gate
+
+
 def _print_redacted(result: Mapping[str, Any]) -> None:
     """Print only the approved checkpoint fields, never raw prompts/responses."""
 
@@ -1884,6 +2185,14 @@ def _print_redacted(result: Mapping[str, Any]) -> None:
         "r3_estimate": r3,
     }
     print(json.dumps(payload, ensure_ascii=False, indent=2))
+
+
+def _decision_exit_code(decision: Any) -> int:
+    if decision == "PASS":
+        return 0
+    if decision == "REVIEW_REQUIRED":
+        return 3
+    return 2
 
 
 def _aggregate_resources(items: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
@@ -2053,6 +2362,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--s6-sample-dir", type=Path)
     parser.add_argument("--series-sample-dir", type=Path)
     parser.add_argument("--structural-gate", type=Path)
+    parser.add_argument(
+        "--semantic-approval",
+        type=Path,
+        help="Private hash-bound text-first semantic approval for a REVIEW_REQUIRED structural gate.",
+    )
     parser.add_argument("--s1-gate", type=Path)
     parser.add_argument("--s6-gate", type=Path)
     parser.add_argument("--sample-count-s1", type=int, default=1)
@@ -2143,7 +2457,14 @@ def main(argv: Sequence[str] | None = None) -> int:
                     "fork_commit": FORK_COMMIT,
                     "fixed": protocol["fixed_server"],
                     "r3": {"threshold": R3_RESIDENCY_THRESHOLD, "active_execution": False},
-                    "order": ["structural", "s1", "s6", "series"],
+                    "order": [
+                        "fixed-seed-fork-f16-vs-turbo4",
+                        "fixed-seed-shipping-f16-control",
+                        "fork-f16-vs-turbo4-abba",
+                        "s1",
+                        "s6",
+                        "series",
+                    ],
                 },
                 ensure_ascii=False,
                 indent=2,
@@ -2189,6 +2510,15 @@ def main(argv: Sequence[str] | None = None) -> int:
                 managed_run.complete(metadata={"protocol_version": PROTOCOL_VERSION, "mode": args.mode})
             return 0
 
+        semantic_approval: Mapping[str, Any] | None = None
+        if args.semantic_approval is not None:
+            try:
+                semantic_approval = semantic_review.load_semantic_approval(
+                    args.semantic_approval
+                )
+            except semantic_review.SemanticReviewError as exc:
+                raise Turbo4BenchmarkError(f"Semantic approval is invalid: {exc}") from exc
+
         structural_gate: Mapping[str, Any]
         if args.mode in {"structural", "all"}:
             if args.translation_replay is not None:
@@ -2199,20 +2529,28 @@ def main(argv: Sequence[str] | None = None) -> int:
                 raise Turbo4BenchmarkError(
                     "--translation-replay or --page-snapshots is required for the structural gate."
                 )
-            structural_dir = output_dir / "structural"
-            structural_dir.mkdir(parents=True, exist_ok=False)
-            structural = execute_structural_gate(
-                candidates=candidates,
-                payloads=payloads,
-                output_dir=structural_dir,
-                port=args.port,
-                image_ids=image_ids,
-            )
+            if args.structural_gate is not None:
+                structural = _load_or_approve_structural_gate(
+                    args.structural_gate,
+                    image_ids=image_ids,
+                    semantic_approval=semantic_approval,
+                )
+            else:
+                structural_dir = output_dir / "structural"
+                structural_dir.mkdir(parents=True, exist_ok=False)
+                structural = execute_structural_gate(
+                    candidates=candidates,
+                    payloads=payloads,
+                    output_dir=structural_dir,
+                    port=args.port,
+                    image_ids=image_ids,
+                    semantic_approval=semantic_approval,
+                )
             if structural["decision"] != "PASS":
                 result = {
                     "protocol_version": PROTOCOL_VERSION,
                     "image_ids": dict(image_ids),
-                    "decision": "REJECT",
+                    "decision": structural["decision"],
                     "stage": "fixed-seed-structural",
                     "structural": structural,
                     "resource_summary": _aggregate_resources(list(structural["runs"].values())),
@@ -2221,8 +2559,8 @@ def main(argv: Sequence[str] | None = None) -> int:
                 _json_write(output_dir / "final-summary.json", result)
                 _print_redacted(result)
                 if managed_run is not None:
-                    managed_run.complete(metadata={"protocol_version": PROTOCOL_VERSION, "mode": args.mode, "decision": "REJECT"})
-                return 2
+                    managed_run.complete(metadata={"protocol_version": PROTOCOL_VERSION, "mode": args.mode, "decision": result["decision"]})
+                return _decision_exit_code(result["decision"])
             fork_replay = execute_fork_replay_abba(
                 candidates=candidates,
                 payloads=payloads,
@@ -2231,12 +2569,16 @@ def main(argv: Sequence[str] | None = None) -> int:
                 image_ids=image_ids,
                 initial_rounds=args.initial_rounds,
                 max_rounds=args.max_rounds,
+                semantic_approval_passed=(
+                    (structural.get("semantic_review") or {}).get("status")
+                    in {"PASS", "NOT_REQUIRED"}
+                ),
             )
             if fork_replay["decision"] != "PASS":
                 result = {
                     "protocol_version": PROTOCOL_VERSION,
                     "image_ids": dict(image_ids),
-                    "decision": "REJECT",
+                    "decision": fork_replay["decision"],
                     "stage": "fork-f16-vs-turbo4-replay",
                     "structural": structural,
                     "fork_replay": fork_replay,
@@ -2246,8 +2588,8 @@ def main(argv: Sequence[str] | None = None) -> int:
                 _json_write(output_dir / "final-summary.json", result)
                 _print_redacted(result)
                 if managed_run is not None:
-                    managed_run.complete(metadata={"protocol_version": PROTOCOL_VERSION, "mode": args.mode, "decision": "REJECT"})
-                return 2
+                    managed_run.complete(metadata={"protocol_version": PROTOCOL_VERSION, "mode": args.mode, "decision": result["decision"]})
+                return _decision_exit_code(result["decision"])
             structural_gate = {
                 "protocol_version": PROTOCOL_VERSION,
                 "image_ids": dict(image_ids),
