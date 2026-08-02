@@ -9,6 +9,11 @@
 
 실행 데이터는 private validation archive에만 둔다. fixed-seed 입력은 `requests` 배열을 가진 replay JSON 또는 검증된 page snapshot 중 하나를 사용한다. snapshot 입력은 현행 contextual-single 요청 순서를 재구성하고, IQ4_NL model id·seed `20260801`·prompt·schema를 고정한다.
 
+response ledger non-exact는 raw 재현성 결과로 기록한다. 번역 의미 품질은
+[공통 번역 후보 품질 판정 규칙](../translation-quality-evaluation-rule-ko.md)에 따라
+원문·인접 대사·페이지 맥락으로 별도 검수하며, 현 v1 protocol의 raw-exact 속도
+진입 조건은 protocol·runner 변경 전까지 유지한다.
+
 ```bash
 .venv-win/Scripts/python.exe -B scripts/benchmark_gemma_turbo4_kv.py \
   --mode structural \

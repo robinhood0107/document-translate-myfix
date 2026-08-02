@@ -28,3 +28,7 @@ screen이 반환한 최소 physical-fit level은 별도 structural gate에서 �
 지정한 `N`을 fixed request로 다시 physical-fit 확인한 뒤 Gemma와 Paddle의 실제
 동시 load/health 및 cleanup만 확인하는 별도 관측이다. output parity가 맞지 않아도
 물리 상주 여부 질문에는 사용할 수 있지만, fit 재확인 실패 시 Paddle을 시작하지 않는다.
+
+여기서 output parity는 raw response ledger exact를 뜻한다. non-exact 자체는
+번역의 의미 회귀 판정이 아니며, 의미 품질은
+[공통 번역 후보 품질 판정 규칙](../translation-quality-evaluation-rule-ko.md)으로 별도 검수한다.

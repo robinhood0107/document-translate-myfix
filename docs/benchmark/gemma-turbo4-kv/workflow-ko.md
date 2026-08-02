@@ -6,7 +6,7 @@
 
 1. GPU background와 실행 중인 product GPU container를 fail-closed로 검사한다. Windows RAM, WSL/container swap, shared GPU counter는 1초 샘플로 기록하지만 단독 탈락 조건은 아니다.
 2. 40자리 TurboQuant fork commit을 확인하고 SM89 CUDA image를 빌드한다.
-3. fork F16/F16, fork F16 K + Turbo4 V, shipping b10133 F16을 동일 fixed-seed replay로 비교한다. fork F16이 shipping output과 다르면 즉시 탈락하며, 이어 fork F16 대 Turbo4 ABBA가 출력 exact·속도 판정을 통과해야 한다.
+3. fork F16/F16, fork F16 K + Turbo4 V, shipping b10133 F16을 동일 fixed-seed replay로 비교한다. fork F16이 shipping output과 다르면 raw 재현성 gate에서 탈락하며, 이어 fork F16 대 Turbo4 ABBA가 출력 exact·속도 판정을 통과해야 한다. raw non-exact는 의미 회귀 그 자체가 아니며, 번역 품질은 [공통 번역 후보 품질 판정 규칙](../translation-quality-evaluation-rule-ko.md)으로 별도 검수한다.
 4. 통과 후보만 S1 ABBA, S6 ABBA, true series 3+3 순으로 실제 offscreen pipeline을 실행한다. 모든 arm은 product Gemma 컨테이너가 아닌 독립 lab container·loopback port·read-only model volume을 쓴다.
 5. 각 단계가 통과해야 다음 단계로 간다. 결과가 나온 뒤에는 제품 반영 전에 사용자 승인을 기다린다.
 
