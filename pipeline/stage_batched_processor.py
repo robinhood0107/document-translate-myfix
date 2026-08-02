@@ -110,6 +110,13 @@ from modules.utils.export_paths import (
     resolve_export_directory,
 )
 from modules.utils.exceptions import OperationCancelledError
+from modules.utils.gpu_handoff import (
+    DEFAULT_MANAGED_SLEEPING_RELEASE_RATIO,
+    DEFAULT_MANAGED_SLEEPING_RESIDUAL_MB,
+    DEFAULT_VRAM_RELEASE_EXPECTED_RATIO,
+    wait_for_global_vram_release,
+)
+from modules.utils.gpu_metrics import query_cuda_handoff_metrics
 from modules.utils.image_utils import generate_mask, restore_original_for_block_masks
 from modules.utils.inpaint_cleanup import apply_duplicate_bubble_inner_fill, refine_bubble_residue_inpaint
 from modules.utils.inpaint_composite import (
@@ -141,6 +148,10 @@ from modules.utils.translator_utils import (
 )
 
 from .batch_processor import BatchProcessor
+from .runtime_resource_arbiter import (
+    RuntimeModelState,
+    RuntimeResourceArbiter,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -217,6 +228,10 @@ class StageBatchedProcessor(BatchProcessor):
         self._prewarm_executor: ThreadPoolExecutor | None = None
         self._prewarm_jobs: dict[str, Future] = {}
         self._prewarm_cancel_event = threading.Event()
+        self._runtime_resource_arbiter_instance = RuntimeResourceArbiter()
+        self._inpainter_runtime_lease_held = False
+        self._runtime_gpu_start_baselines: dict[str, dict[str, Any]] = {}
+        self._runtime_gpu_release_required: set[str] = set()
         self._runtime_progress_lock = threading.RLock()
         self._runtime_progress_started: dict[tuple[str, str], float] = {}
         self._paddleocr_cache_store: OCRPersistentResultCache | None = None
@@ -245,8 +260,103 @@ class StageBatchedProcessor(BatchProcessor):
 
     def _ensure_prewarm_executor(self) -> ThreadPoolExecutor:
         if self._prewarm_executor is None:
-            self._prewarm_executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="ct-stage-prewarm")
+            self._prewarm_executor = ThreadPoolExecutor(
+                max_workers=1,
+                thread_name_prefix="ct-runtime-command",
+            )
         return self._prewarm_executor
+
+    def _runtime_resource_arbiter(self) -> RuntimeResourceArbiter:
+        arbiter = getattr(
+            self,
+            "_runtime_resource_arbiter_instance",
+            None,
+        )
+        if not isinstance(arbiter, RuntimeResourceArbiter):
+            arbiter = RuntimeResourceArbiter()
+            self._runtime_resource_arbiter_instance = arbiter
+        return arbiter
+
+    def _runtime_gpu_baselines(self) -> dict[str, dict[str, Any]]:
+        baselines = getattr(self, "_runtime_gpu_start_baselines", None)
+        if not isinstance(baselines, dict):
+            baselines = {}
+            self._runtime_gpu_start_baselines = baselines
+        return baselines
+
+    def _runtime_gpu_release_services(self) -> set[str]:
+        required = getattr(self, "_runtime_gpu_release_required", None)
+        if not isinstance(required, set):
+            required = set()
+            self._runtime_gpu_release_required = required
+        return required
+
+    def _capture_runtime_gpu_start_baseline(self, service: str) -> None:
+        """Remember driver-total memory before a managed GPU model loads."""
+
+        self._runtime_gpu_baselines()[service] = query_cuda_handoff_metrics()
+
+    def _verify_managed_runtime_gpu_release(
+        self,
+        service: str,
+        release_report: Any,
+        *,
+        before: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Fail closed until a managed Docker model returns its GPU memory."""
+
+        report = release_report if isinstance(release_report, dict) else {}
+        release_required = self._runtime_gpu_release_services()
+        if bool(report.get("gpu_release_expected", False)):
+            release_required.add(service)
+        sleeping_runtime = str(report.get("runtime_state") or "") == "sleeping"
+        gate = wait_for_global_vram_release(
+            before,
+            gpu_release_expected=service in release_required,
+            driver_baseline=self._runtime_gpu_baselines().get(service),
+            expected_drop_ratio=(
+                DEFAULT_MANAGED_SLEEPING_RELEASE_RATIO
+                if sleeping_runtime
+                else DEFAULT_VRAM_RELEASE_EXPECTED_RATIO
+            ),
+            residual_allowance_mb=(
+                DEFAULT_MANAGED_SLEEPING_RESIDUAL_MB
+                if sleeping_runtime
+                else 0.0
+            ),
+        )
+        self._record_runtime_performance(
+            service=service,
+            operation="vram_release_gate",
+            elapsed_ms=float(gate.get("elapsed_sec", 0.0) or 0.0) * 1000.0,
+            outcome=str(gate.get("status") or "unknown"),
+        )
+        if bool(gate.get("observed", False)):
+            release_required.discard(service)
+            self._runtime_gpu_baselines().pop(service, None)
+        return gate
+
+    def _managed_runtime_stale_cleanup(
+        self,
+        service: str,
+        runtime_manager: Any,
+    ) -> None:
+        """Stop a cancelled model load without bypassing its VRAM gate."""
+
+        before = query_cuda_handoff_metrics()
+        release_report = runtime_manager.shutdown()
+        gate = self._verify_managed_runtime_gpu_release(
+            service,
+            release_report,
+            before=before,
+        )
+        if bool(gate.get("required")) and not bool(gate.get("observed")):
+            raise RuntimeError(
+                QCoreApplication.translate(
+                    "StageBatchedProcessor",
+                    "Managed runtime GPU release was not confirmed.",
+                )
+            )
 
     def _prewarm_cancel_checker(self) -> bool:
         cancel_event = getattr(self, "_prewarm_cancel_event", None)
@@ -264,6 +374,10 @@ class StageBatchedProcessor(BatchProcessor):
             self._prewarm_cancel_event = threading.Event()
         else:
             cancel_event.clear()
+        self._runtime_resource_arbiter().reset()
+        self._inpainter_runtime_lease_held = False
+        self._runtime_gpu_baselines().clear()
+        self._runtime_gpu_release_services().clear()
         with self._runtime_progress_lock:
             self._runtime_progress_started.clear()
 
@@ -364,7 +478,15 @@ class StageBatchedProcessor(BatchProcessor):
 
         return observe
 
-    def _start_prewarm(self, key: str, label: str, service: str, fn: Callable[[], None]) -> None:
+    def _start_prewarm(
+        self,
+        key: str,
+        label: str,
+        service: str,
+        fn: Callable[[], None],
+        *,
+        stale_cleanup: Callable[[], None] | None = None,
+    ) -> None:
         if key in self._prewarm_jobs:
             return
         self._raise_if_cancelled()
@@ -375,17 +497,29 @@ class StageBatchedProcessor(BatchProcessor):
             message=self._stage_tr("{label} Docker 예열을 시작합니다.").format(label=label),
         )
 
+        arbiter = self._runtime_resource_arbiter()
+        token = arbiter.token(service)
+
         def runner() -> None:
             if self._prewarm_cancel_checker():
                 raise OperationCancelledError(f"{label} prewarm was cancelled before startup.")
             started_at = time.perf_counter()
             outcome = "completed"
-            self._record_runtime_transition(
-                service=service,
-                to_state="model_loading",
-            )
             try:
-                fn()
+                with arbiter.model_start(
+                    token,
+                    cancel_checker=self._prewarm_cancel_checker,
+                    stale_cleanup=stale_cleanup,
+                ):
+                    self._capture_runtime_gpu_start_baseline(service)
+                    fn()
+                if self._prewarm_cancel_checker():
+                    with arbiter.model_release(service):
+                        if callable(stale_cleanup):
+                            stale_cleanup()
+                    raise OperationCancelledError(
+                        f"{label} prewarm was cancelled after startup."
+                    )
             except OperationCancelledError:
                 outcome = "cancelled"
                 raise
@@ -400,16 +534,6 @@ class StageBatchedProcessor(BatchProcessor):
                     elapsed_ms=elapsed_ms,
                     outcome=outcome,
                 )
-                self._record_runtime_transition(
-                    service=service,
-                    to_state=(
-                        "model_ready" if outcome == "completed" else "stopped"
-                    ),
-                    elapsed_ms=elapsed_ms,
-                    outcome=outcome,
-                )
-            if self._prewarm_cancel_checker():
-                raise OperationCancelledError(f"{label} prewarm was cancelled after startup.")
             self._prewarm_progress(
                 service=service,
                 status="ready",
@@ -424,15 +548,27 @@ class StageBatchedProcessor(BatchProcessor):
         *,
         service: str,
         fallback: Callable[[], None],
+        stale_cleanup: Callable[[], None] | None = None,
     ) -> None:
         started_at = time.perf_counter()
         outcome = "completed"
-        self._record_runtime_transition(
-            service=service,
-            to_state="model_loading",
-        )
+        arbiter = self._runtime_resource_arbiter()
+        token = arbiter.token(service)
         try:
-            fallback()
+            with arbiter.model_start(
+                token,
+                cancel_checker=self._prewarm_cancel_checker,
+                stale_cleanup=stale_cleanup,
+            ):
+                self._capture_runtime_gpu_start_baseline(service)
+                fallback()
+            if self._prewarm_cancel_checker():
+                with arbiter.model_release(service):
+                    if callable(stale_cleanup):
+                        stale_cleanup()
+                raise OperationCancelledError(
+                    f"{service} startup was cancelled after model load."
+                )
         except OperationCancelledError:
             outcome = "cancelled"
             raise
@@ -447,14 +583,6 @@ class StageBatchedProcessor(BatchProcessor):
                 elapsed_ms=elapsed_ms,
                 outcome=outcome,
             )
-            self._record_runtime_transition(
-                service=service,
-                to_state=(
-                    "model_ready" if outcome == "completed" else "stopped"
-                ),
-                elapsed_ms=elapsed_ms,
-                outcome=outcome,
-            )
 
     def _await_prewarm_or_run(
         self,
@@ -462,6 +590,8 @@ class StageBatchedProcessor(BatchProcessor):
         label: str,
         service: str,
         fallback: Callable[[], None],
+        *,
+        stale_cleanup: Callable[[], None] | None = None,
     ) -> None:
         self._raise_if_cancelled()
         job = self._prewarm_jobs.pop(key, None)
@@ -469,6 +599,7 @@ class StageBatchedProcessor(BatchProcessor):
             self._run_runtime_fallback(
                 service=service,
                 fallback=fallback,
+                stale_cleanup=stale_cleanup,
             )
             self._raise_if_cancelled()
             return
@@ -510,6 +641,7 @@ class StageBatchedProcessor(BatchProcessor):
             self._run_runtime_fallback(
                 service=service,
                 fallback=fallback,
+                stale_cleanup=stale_cleanup,
             )
         self._raise_if_cancelled()
 
@@ -519,6 +651,7 @@ class StageBatchedProcessor(BatchProcessor):
         cancel_event = getattr(self, "_prewarm_cancel_event", None)
         if cancel_event is not None:
             cancel_event.set()
+        self._runtime_resource_arbiter().cancel_generation()
         jobs = list(self._prewarm_jobs.values())
         for job in jobs:
             job.cancel()
@@ -532,6 +665,7 @@ class StageBatchedProcessor(BatchProcessor):
         context: str = "batch cleanup",
         raise_on_failure: bool = False,
         preserve_sleeping_paddle: bool = False,
+        ocr_service: str = "ocr",
     ) -> None:
         runtime_managers = (
             (
@@ -558,6 +692,8 @@ class StageBatchedProcessor(BatchProcessor):
                     release_for_handoff=(
                         preserve_sleeping_paddle and label == "OCR"
                     ),
+                    service=(ocr_service if label == "OCR" else "gemma"),
+                    allow_foreign_owner_teardown=bool(failures),
                 )
             except Exception as exc:
                 failures.append(exc)
@@ -573,6 +709,7 @@ class StageBatchedProcessor(BatchProcessor):
         raise_on_failure: bool,
         release_for_handoff: bool = False,
         service: str = "",
+        allow_foreign_owner_teardown: bool = False,
     ) -> None:
         service = str(service or label or "runtime").strip().lower() or "runtime"
         self._record_runtime_transition(
@@ -581,20 +718,54 @@ class StageBatchedProcessor(BatchProcessor):
         )
         self._sample_performance_resources(f"{service}_release_start")
         last_error: Exception | None = None
+        release_before = query_cuda_handoff_metrics()
         for attempt in range(2):
             started_at = time.perf_counter()
+            release = getattr(runtime_manager, "release_for_handoff", None)
+            used_handoff_release = (
+                release_for_handoff
+                and label == "OCR"
+                and callable(release)
+            )
+            target_state = (
+                RuntimeModelState.SLEEPING
+                if used_handoff_release
+                else RuntimeModelState.STOPPED
+            )
             try:
-                release = getattr(runtime_manager, "release_for_handoff", None)
-                used_handoff_release = (
-                    release_for_handoff
-                    and label == "OCR"
-                    and callable(release)
-                )
-                if used_handoff_release:
-                    release()
-                else:
-                    runtime_manager.shutdown()
+                with self._runtime_resource_arbiter().model_release(
+                    service,
+                    target_state=target_state,
+                    allow_foreign_owner_teardown=allow_foreign_owner_teardown,
+                ) as release_context:
+                    if used_handoff_release:
+                        release_report = release()
+                        if (
+                            isinstance(release_report, dict)
+                            and str(release_report.get("runtime_state") or "")
+                            == "stopped"
+                        ):
+                            release_context.target_state = (
+                                RuntimeModelState.STOPPED
+                            )
+                    else:
+                        release_report = runtime_manager.shutdown()
+                    gate = self._verify_managed_runtime_gpu_release(
+                        service,
+                        release_report,
+                        before=release_before,
+                    )
+                    if bool(gate.get("required")) and not bool(
+                        gate.get("observed")
+                    ):
+                        raise RuntimeError(
+                            QCoreApplication.translate(
+                                "StageBatchedProcessor",
+                                "Managed runtime GPU release was not confirmed.",
+                            )
+                        )
                 elapsed_ms = (time.perf_counter() - started_at) * 1000.0
+                completed_state = release_context.target_state.value
                 self._record_runtime_performance(
                     service=service,
                     operation="release",
@@ -602,7 +773,7 @@ class StageBatchedProcessor(BatchProcessor):
                 )
                 self._record_runtime_transition(
                     service=service,
-                    to_state=("sleeping" if used_handoff_release else "stopped"),
+                    to_state=completed_state,
                     elapsed_ms=elapsed_ms,
                 )
                 self._sample_performance_resources(
@@ -701,6 +872,10 @@ class StageBatchedProcessor(BatchProcessor):
                 settings_page,
                 progress_callback=self._runtime_progress_callback(),
                 cancel_checker=self._prewarm_cancel_checker,
+            ),
+            stale_cleanup=lambda: self._managed_runtime_stale_cleanup(
+                service,
+                runtime_manager,
             ),
         )
 
@@ -856,6 +1031,10 @@ class StageBatchedProcessor(BatchProcessor):
                 progress_callback=self._runtime_progress_callback(),
                 cancel_checker=self._prewarm_cancel_checker,
             ),
+            stale_cleanup=lambda: self._managed_runtime_stale_cleanup(
+                service,
+                runtime_manager,
+            ),
         )
         self._sample_performance_resources(f"{service}_model_ready")
 
@@ -882,6 +1061,10 @@ class StageBatchedProcessor(BatchProcessor):
                 progress_callback=self._runtime_progress_callback(),
                 cancel_checker=self._prewarm_cancel_checker,
             ),
+            stale_cleanup=lambda: self._managed_runtime_stale_cleanup(
+                "gemma",
+                runtime_manager,
+            ),
         )
 
     def _await_gemma_runtime(self) -> None:
@@ -897,6 +1080,10 @@ class StageBatchedProcessor(BatchProcessor):
                 settings_page,
                 progress_callback=self._runtime_progress_callback(),
                 cancel_checker=self._prewarm_cancel_checker,
+            ),
+            stale_cleanup=lambda: self._managed_runtime_stale_cleanup(
+                "gemma",
+                runtime_manager,
             ),
         )
         self._sample_performance_resources("gemma_model_ready")
@@ -1215,13 +1402,6 @@ class StageBatchedProcessor(BatchProcessor):
                     export_settings=export_settings,
                     preferred_path=detector_overlay_path,
                 )
-                if policy is not None:
-                    self._plan_detected_page_ocr_prewarm(
-                        ctx,
-                        policy,
-                        index=index,
-                        total_images=total_images,
-                    )
                 continue
 
             state = self._ensure_page_state(ctx.image_path)
@@ -1951,8 +2131,35 @@ class StageBatchedProcessor(BatchProcessor):
     def _ensure_inpainter(self):
         settings_page = self.main_page.settings_page
         runtime = get_inpainter_runtime(settings_page)
+        uses_cuda = str(runtime.get("device", "") or "").lower().startswith(
+            "cuda"
+        )
+        if uses_cuda and not bool(
+            getattr(self, "_inpainter_runtime_lease_held", False)
+        ):
+            self._runtime_resource_arbiter().acquire_external_model(
+                "inpainter"
+            )
+            self._inpainter_runtime_lease_held = True
         self.inpainting._ensure_inpainter()
+        if uses_cuda:
+            self._runtime_resource_arbiter().mark_external_model_ready(
+                "inpainter"
+            )
         return runtime
+
+    def _release_inpainter_runtime_lease(
+        self,
+        *,
+        release_succeeded: bool,
+    ) -> None:
+        if not bool(getattr(self, "_inpainter_runtime_lease_held", False)):
+            return
+        self._runtime_resource_arbiter().release_external_model(
+            "inpainter",
+            release_succeeded=release_succeeded,
+        )
+        self._inpainter_runtime_lease_held = False
 
     def _inpaint_all(self, pages: list[StagePageContext]) -> None:
         active_pages = [
@@ -2000,6 +2207,9 @@ class StageBatchedProcessor(BatchProcessor):
                 inpainter_vram_release_observed=True,
                 inpainter_vram_release_status="not-loaded",
                 inpainter_vram_release_elapsed_sec=0.0,
+            )
+            self._release_inpainter_runtime_lease(
+                release_succeeded=True,
             )
 
     def _finish_inpaint_page(
@@ -2669,7 +2879,13 @@ class StageBatchedProcessor(BatchProcessor):
         start_gemma: bool = True,
         handoff_outcome: str = "completed",
     ) -> None:
-        report = self.inpainting.release_inpainter_resources()
+        try:
+            report = self.inpainting.release_inpainter_resources()
+        except BaseException:
+            self._release_inpainter_runtime_lease(
+                release_succeeded=False,
+            )
+            raise
         gate = dict(report.get("vram_release_gate") or {})
         self._inpainter_release_gate = gate
         self._emit_benchmark_event(
@@ -2683,7 +2899,13 @@ class StageBatchedProcessor(BatchProcessor):
             inpainter_vram_release_status=str(gate.get("status") or ""),
             inpainter_vram_release_elapsed_sec=float(gate.get("elapsed_sec", 0.0) or 0.0),
         )
-        if start_gemma and gate.get("required") and not gate.get("observed"):
+        release_succeeded = not bool(
+            gate.get("required") and not gate.get("observed")
+        )
+        self._release_inpainter_runtime_lease(
+            release_succeeded=release_succeeded,
+        )
+        if not release_succeeded:
             raise RuntimeError(
                 QCoreApplication.translate(
                     "StageBatchedProcessor",
@@ -4002,9 +4224,10 @@ class StageBatchedProcessor(BatchProcessor):
                     context="batch startup preflight",
                     raise_on_failure=True,
                     preserve_sleeping_paddle=True,
+                    ocr_service=self._ocr_runtime_service_name(
+                        str(policy.get("primary_ocr_engine", ""))
+                    ),
                 )
-            self._raise_if_cancelled()
-            self._start_ocr_prewarm(policy)
             self._raise_if_cancelled()
             with self._measure_performance(
                 stage="detect",
@@ -4035,6 +4258,12 @@ class StageBatchedProcessor(BatchProcessor):
                 detected_block_count=detected_blocks,
             )
             self._sample_performance_resources("detect_stage_end")
+            self._raise_if_cancelled()
+            # GPU detection can keep an ONNX session resident.  Delay model
+            # prewarm until it completes so the model-start baseline and the
+            # exclusive runtime handoff are not contaminated by concurrent
+            # detector inference.
+            self._start_ocr_prewarm(policy)
             self._raise_if_cancelled()
             with self._measure_performance(
                 stage="ocr",
@@ -4188,6 +4417,9 @@ class StageBatchedProcessor(BatchProcessor):
             finally:
                 self._shutdown_managed_runtimes(
                     preserve_sleeping_paddle=batch_completed,
+                    ocr_service=self._ocr_runtime_service_name(
+                        str(policy.get("primary_ocr_engine", ""))
+                    ),
                 )
             self._progress_image_path = None
 

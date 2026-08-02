@@ -13,6 +13,11 @@ DEFAULT_VRAM_RELEASE_POLL_SEC = 0.1
 DEFAULT_VRAM_RELEASE_MIN_DROP_MB = 16.0
 DEFAULT_VRAM_RELEASE_EXPECTED_RATIO = 0.9
 DEFAULT_VRAM_BASELINE_TOLERANCE_MB = 16.0
+# A sleeping llama.cpp server keeps its process, CUDA context, and small
+# reusable buffers after unloading the model. This bounds that process-only
+# residue; it does not allow a model to remain resident.
+DEFAULT_MANAGED_SLEEPING_RESIDUAL_MB = 512.0
+DEFAULT_MANAGED_SLEEPING_RELEASE_RATIO = 0.85
 
 
 def estimate_torch_cuda_storage_mb(resource: Any) -> dict[str, Any]:
@@ -184,6 +189,46 @@ def _driver_process_used_mb(
         total += float(value)
         matched = True
     return total if matched else 0.0
+
+
+def _global_gpu_memory_used_mb(
+    payload: dict[str, Any],
+    *,
+    gpu_uuid: str = "",
+) -> tuple[str, float | None]:
+    """Return one GPU's driver-total usage without assuming a Python PID.
+
+    Docker CUDA processes are not necessarily attributed to the Python process
+    that owns the UI.  Managed llama.cpp runtime release therefore needs the
+    driver-wide reading for the same GPU, while native inpainter release can
+    continue to use the stronger per-process allocator evidence above.
+    """
+
+    driver = payload.get("driver")
+    if not isinstance(driver, dict) or not bool(driver.get("available")):
+        return "", None
+    target_uuid = str(gpu_uuid or "").strip()
+    rows = driver.get("gpus")
+    if isinstance(rows, list) and target_uuid:
+        for row in rows:
+            if not isinstance(row, dict):
+                continue
+            if str(row.get("uuid") or "").strip() != target_uuid:
+                continue
+            value = row.get("memory_used_mb")
+            if isinstance(value, bool) or not isinstance(value, (int, float)):
+                return target_uuid, None
+            return target_uuid, float(value)
+    primary = driver.get("primary")
+    if not isinstance(primary, dict):
+        return "", None
+    primary_uuid = str(primary.get("uuid") or "").strip()
+    if target_uuid and primary_uuid != target_uuid:
+        return target_uuid, None
+    value = primary.get("memory_used_mb")
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return primary_uuid, None
+    return primary_uuid, float(value)
 
 
 def _release_deltas(
@@ -368,4 +413,170 @@ def wait_for_vram_release(
         "before": before,
         "after": last_after,
         "deltas": last_deltas,
+    }
+
+
+def wait_for_global_vram_release(
+    before: dict[str, Any],
+    *,
+    gpu_release_expected: bool,
+    driver_baseline: dict[str, Any] | None = None,
+    timeout_sec: float = DEFAULT_VRAM_RELEASE_TIMEOUT_SEC,
+    poll_interval_sec: float = DEFAULT_VRAM_RELEASE_POLL_SEC,
+    min_drop_mb: float = DEFAULT_VRAM_RELEASE_MIN_DROP_MB,
+    expected_drop_ratio: float = DEFAULT_VRAM_RELEASE_EXPECTED_RATIO,
+    baseline_tolerance_mb: float = DEFAULT_VRAM_BASELINE_TOLERANCE_MB,
+    residual_allowance_mb: float = 0.0,
+    sampler: Callable[[], dict[str, Any]] = query_cuda_handoff_metrics,
+) -> dict[str, Any]:
+    """Verify managed-runtime VRAM release with driver-total GPU memory.
+
+    A managed Docker server has a different PID from the UI process, so a
+    process allocator reading cannot prove its release.  This gate requires a
+    model-sized drop from the pre-stop sample and, when a pre-load baseline
+    exists, a return close to that baseline. A sleeping llama.cpp process may
+    receive a small explicit CUDA-context allowance, but it must still release
+    the configured fraction of its model-load delta. Missing or ambiguous GPU
+    measurements fail closed when a release was expected.
+    """
+
+    started = time.monotonic()
+    minimum_drop = max(0.0, float(min_drop_mb))
+    tolerance = max(0.0, float(baseline_tolerance_mb))
+    residual_allowance = max(0.0, float(residual_allowance_mb))
+    drop_ratio = max(0.0, min(1.0, float(expected_drop_ratio)))
+    gpu_uuid, before_used = _global_gpu_memory_used_mb(before)
+    baseline_uuid, baseline_used = _global_gpu_memory_used_mb(
+        driver_baseline or {},
+        gpu_uuid=gpu_uuid,
+    )
+    if not gpu_uuid:
+        gpu_uuid = baseline_uuid
+        if gpu_uuid:
+            _baseline_uuid, before_used = _global_gpu_memory_used_mb(
+                before,
+                gpu_uuid=gpu_uuid,
+            )
+
+    if not gpu_release_expected:
+        after = sampler()
+        _after_uuid, after_used = _global_gpu_memory_used_mb(
+            after,
+            gpu_uuid=gpu_uuid,
+        )
+        return {
+            "required": False,
+            "measurement_available": before_used is not None,
+            "observed": True,
+            "status": "not-required",
+            "evidence_source": "not-required",
+            "gpu_uuid": gpu_uuid,
+            "before_used_mb": before_used,
+            "baseline_used_mb": baseline_used,
+            "after_used_mb": after_used,
+            "drop_mb": (
+                before_used - after_used
+                if before_used is not None and after_used is not None
+                else None
+            ),
+            "expected_drop_mb": 0.0,
+            "expected_drop_ratio": drop_ratio,
+            "residual_allowance_mb": residual_allowance,
+            "elapsed_sec": time.monotonic() - started,
+        }
+
+    if before_used is None or not gpu_uuid:
+        after = sampler()
+        _after_uuid, after_used = _global_gpu_memory_used_mb(
+            after,
+            gpu_uuid=gpu_uuid,
+        )
+        return {
+            "required": True,
+            "measurement_available": False,
+            "observed": False,
+            "status": "unavailable",
+            "evidence_source": "driver-global-memory",
+            "gpu_uuid": gpu_uuid,
+            "before_used_mb": before_used,
+            "baseline_used_mb": baseline_used,
+            "after_used_mb": after_used,
+            "drop_mb": (
+                before_used - after_used
+                if before_used is not None and after_used is not None
+                else None
+            ),
+            "expected_drop_mb": None,
+            "expected_drop_ratio": drop_ratio,
+            "residual_allowance_mb": residual_allowance,
+            "elapsed_sec": time.monotonic() - started,
+        }
+
+    model_load_delta = (
+        before_used - baseline_used
+        if baseline_used is not None
+        else None
+    )
+    expected_drop = max(
+        minimum_drop,
+        float(model_load_delta) * drop_ratio
+        if isinstance(model_load_delta, (int, float))
+        and model_load_delta > 0.0
+        else 0.0,
+    )
+    deadline = started + max(0.0, float(timeout_sec))
+    after: dict[str, Any] = {}
+    after_used: float | None = None
+    observed = False
+    while True:
+        after = sampler()
+        _after_uuid, after_used = _global_gpu_memory_used_mb(
+            after,
+            gpu_uuid=gpu_uuid,
+        )
+        drop_mb = (
+            before_used - after_used
+            if after_used is not None
+            else None
+        )
+        drop_observed = bool(
+            isinstance(drop_mb, (int, float)) and drop_mb >= expected_drop
+        )
+        baseline_observed = bool(
+            baseline_used is None
+            or (
+                isinstance(after_used, (int, float))
+                and after_used
+                <= baseline_used + tolerance + residual_allowance
+            )
+        )
+        if drop_observed and baseline_observed:
+            observed = True
+            break
+        if time.monotonic() >= deadline:
+            break
+        time.sleep(max(0.01, float(poll_interval_sec)))
+
+    drop_mb = (
+        before_used - after_used
+        if after_used is not None
+        else None
+    )
+    return {
+        "required": True,
+        "measurement_available": after_used is not None,
+        "observed": observed,
+        "status": "observed" if observed else "timeout",
+        "evidence_source": "driver-global-memory",
+        "gpu_uuid": gpu_uuid,
+        "before_used_mb": before_used,
+        "baseline_used_mb": baseline_used,
+        "after_used_mb": after_used,
+        "drop_mb": drop_mb,
+        "minimum_drop_mb": minimum_drop,
+        "expected_drop_mb": expected_drop,
+        "expected_drop_ratio": drop_ratio,
+        "baseline_tolerance_mb": tolerance,
+        "residual_allowance_mb": residual_allowance,
+        "elapsed_sec": time.monotonic() - started,
     }
