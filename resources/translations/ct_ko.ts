@@ -836,14 +836,14 @@ If responses are truncated, lower Chunk Size or Max Completion Tokens before rec
 - Chunk Size: 6
 - Max Completion Tokens: 512
 - Request Timeout: 180 seconds
-- Temperature: 0.7
-- Top K / Top P / Min P: 64 / 0.95 / 0.0</source>
+- Temperature: 0.0
+- Top K / Top P / Min P: 128 / 0.90 / 0.0</source>
         <translation>기본 제공 Gemma 런타임의 승격 기본값:
 - 청크 크기: 6
 - 최대 완료 토큰: 512
 - 요청 타임아웃: 180초
-- 온도: 0.7
-- Top K / Top P / Min P: 64 / 0.95 / 0.0</translation>
+- 온도: 0.0
+- Top K / Top P / Min P: 128 / 0.90 / 0.0</translation>
     </message>
 </context>
 <context>
