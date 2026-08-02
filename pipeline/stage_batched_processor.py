@@ -375,13 +375,6 @@ class StageBatchedProcessor(BatchProcessor):
         else:
             cancel_event.clear()
         self._runtime_resource_arbiter().reset()
-        coordinator = getattr(
-            self.main_page,
-            "local_llama_router_coordinator",
-            None,
-        )
-        if coordinator is not None:
-            coordinator.begin_generation()
         self._inpainter_runtime_lease_held = False
         self._runtime_gpu_baselines().clear()
         self._runtime_gpu_release_services().clear()
@@ -701,18 +694,6 @@ class StageBatchedProcessor(BatchProcessor):
                     ),
                     service=(ocr_service if label == "OCR" else "gemma"),
                     allow_foreign_owner_teardown=bool(failures),
-                )
-            except Exception as exc:
-                failures.append(exc)
-        coordinator = getattr(
-            self.main_page,
-            "local_llama_router_coordinator",
-            None,
-        )
-        if coordinator is not None and coordinator.has_active_pair():
-            try:
-                coordinator.finish_pair(
-                    keep_container=bool(preserve_sleeping_paddle and not failures)
                 )
             except Exception as exc:
                 failures.append(exc)
