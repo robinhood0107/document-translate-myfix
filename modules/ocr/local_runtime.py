@@ -68,6 +68,10 @@ from modules.ocr.paddle_spotting.runtime import (
     validate_paddle_spotting_volume_name,
 )
 from modules.utils.exceptions import LocalServiceSetupError, OperationCancelledError
+from modules.utils.local_llama_router import (
+    LocalLlamaRouterCoordinator,
+    RouterRuntimeError,
+)
 from modules.utils.llama_cpp_runtime import (
     DEFAULT_LLAMA_CPP_IMAGE,
     DEFAULT_MANAGED_RUNTIME_STOP_TIMEOUT_SEC,
@@ -162,8 +166,12 @@ def _normalize_url(url: str) -> str:
 
 
 class LocalOCRRuntimeManager:
-    def __init__(self) -> None:
+    def __init__(
+        self,
+        coordinator: LocalLlamaRouterCoordinator | None = None,
+    ) -> None:
         self._lock = threading.RLock()
+        self._coordinator = coordinator
         self._compose_command: tuple[str, ...] | None = None
         self._active_engine: str | None = None
         self._managed_start_attempted_engine: str | None = None
@@ -175,6 +183,7 @@ class LocalOCRRuntimeManager:
         ) = None
         self._mangalmm_runtime_contract_cache: MangaLMMRuntimeContract | None = None
         self._paddle_idle_released = False
+        self._router_active_alias: str | None = None
         self._warned_legacy_backend_environment: tuple[str, ...] = ()
 
     def validate_engine(self, engine_key: str, settings_page: Any) -> None:
@@ -257,6 +266,29 @@ class LocalOCRRuntimeManager:
         settings_page: Any,
     ) -> dict[str, Any] | None:
         """Return a trustworthy identity without starting the managed runtime."""
+
+        if (
+            self._coordinator is not None
+            and self._coordinator.is_router_ocr_candidate(engine_key, settings_page)
+        ):
+            try:
+                router_identity = self._router_runtime_identity(engine_key)
+                if router_identity is not None:
+                    identity = self._coordinator.cache_identity_for_ocr(
+                        engine_key,
+                        settings_page,
+                        router_identity,
+                    )
+                    if identity is not None:
+                        return identity
+            except (OperationCancelledError, RouterRuntimeError):
+                raise
+            except Exception:
+                logger.warning(
+                    "Router PaddleOCR cache identity could not be resolved; "
+                    "falling back to the managed runtime cache policy.",
+                    exc_info=True,
+                )
 
         if engine_key not in {
             "PaddleOCR VL",
@@ -374,6 +406,12 @@ class LocalOCRRuntimeManager:
     ) -> OCRPreflightProbeResult:
         if not self.should_manage_engine(engine_key, settings_page):
             return "not_managed"
+        if (
+            self._coordinator is not None
+            and self._coordinator.is_router_ocr_candidate(engine_key, settings_page)
+        ):
+            snapshot = self._coordinator.snapshot()
+            return "healthy" if snapshot.prepared and snapshot.container_running else "unavailable"
         config = self._config_for(engine_key)
         health_urls = self._config_health_urls(config)
         if self._wait_for_health(
@@ -399,6 +437,30 @@ class LocalOCRRuntimeManager:
     ) -> None:
         with self._lock:
             self._startup_cancel_checker = cancel_checker
+            router_candidate = bool(
+                self._coordinator is not None
+                and self._coordinator.is_router_ocr_candidate(
+                    engine_key,
+                    settings_page,
+                )
+            )
+            if router_candidate:
+                if self._active_engine and not self._router_active_alias:
+                    self._deactivate_active_engine()
+                self._ensure_router_engine(
+                    engine_key,
+                    settings_page,
+                    timeout_sec=timeout_sec,
+                    progress_callback=progress_callback,
+                    cancel_checker=cancel_checker,
+                )
+                return
+            if self._router_active_alias and self._coordinator is not None:
+                self._coordinator.stop_pair()
+                self._router_active_alias = None
+                self._active_engine = None
+                self._managed_start_attempted_engine = None
+                self._readiness_cache.clear()
             if not is_local_ocr_engine(engine_key) or not self.should_manage_engine(engine_key, settings_page):
                 self._deactivate_active_engine()
                 return
@@ -450,6 +512,105 @@ class LocalOCRRuntimeManager:
                 self._readiness_cache.add(cache_key)
                 if engine_key == "PaddleOCR VL":
                     self._paddle_idle_released = False
+
+    def _ensure_router_engine(
+        self,
+        engine_key: str,
+        settings_page: Any,
+        *,
+        timeout_sec: int,
+        progress_callback: Callable[[dict[str, Any]], None] | None,
+        cancel_checker: Callable[[], bool] | None,
+    ) -> None:
+        del timeout_sec
+        if self._coordinator is None:
+            raise self._build_setup_error(
+                engine_key,
+                "Router OCR startup was requested without a coordinator.",
+            )
+        if not is_local_ocr_engine(engine_key) or not self.should_manage_engine(
+            engine_key,
+            settings_page,
+        ):
+            self._deactivate_active_engine()
+            return
+        self.validate_engine(engine_key, settings_page)
+        router_identity = self._router_runtime_identity(engine_key)
+        if router_identity is None:
+            raise self._build_setup_error(
+                f"{engine_key} matched the Router endpoint but has no Router runtime identity."
+            )
+            return
+        cache_key = self._readiness_cache_key(engine_key, settings_page, managed=True)
+        if cache_key in self._readiness_cache:
+            snapshot = self._coordinator.snapshot()
+            if snapshot.active_model == router_identity["model_name"] and snapshot.loaded_count == 1:
+                self._active_engine = engine_key
+                self._managed_start_attempted_engine = engine_key
+                self._router_active_alias = str(router_identity["model_name"])
+                self._emit_readiness_cache_hit(progress_callback, engine_key)
+                return
+            self._readiness_cache.discard(cache_key)
+        self._router_active_alias = str(router_identity["model_name"])
+        try:
+            report = self._coordinator.ensure_ocr_model(
+                engine_key,
+                settings_page,
+                router_identity,
+                cancel_checker=cancel_checker,
+            )
+            if report is None:
+                raise RouterRuntimeError(
+                    "Router OCR target disappeared before startup."
+                )
+        except OperationCancelledError:
+            self._readiness_cache.discard(cache_key)
+            raise
+        except RouterRuntimeError as exc:
+            self._readiness_cache.discard(cache_key)
+            raise self._build_setup_error(engine_key, str(exc)) from exc
+        self._active_engine = engine_key
+        self._managed_start_attempted_engine = engine_key
+        self._router_active_alias = str(router_identity["model_name"])
+        self._readiness_cache.add(cache_key)
+        self._emit_progress(
+            progress_callback,
+            engine_key,
+            status="completed",
+            step_key="router_load",
+            message=f"{engine_key} Router 모델 로드가 완료되었습니다.",
+            router=True,
+        )
+
+    def _router_runtime_identity(self, engine_key: str) -> dict[str, Any] | None:
+        if engine_key == "PaddleOCR VL":
+            contract = self._paddle_runtime_contract()
+            model_name = PADDLE_LLAMA_MODEL_NAME
+            mmproj_name = PADDLE_LLAMA_MMPROJ_NAME
+            model_specs = PADDLE_LLAMA_MODEL_SPECS
+        elif engine_key == "PaddleOCR VL Spotting":
+            contract = self._paddle_spotting_runtime_contract()
+            model_name = PADDLE_SPOTTING_MODEL_NAME
+            mmproj_name = PADDLE_SPOTTING_MMPROJ_NAME
+            model_specs = PADDLE_SPOTTING_MODEL_SPECS
+        else:
+            return None
+        return {
+            "model_name": (
+                PADDLE_LLAMA_MODEL_ALIAS
+                if engine_key == "PaddleOCR VL"
+                else PADDLE_SPOTTING_MODEL_ALIAS
+            ),
+            "model_file": model_name,
+            "mmproj_file": mmproj_name,
+            "model_sha256": str(model_specs[model_name]["sha256"]),
+            "mmproj_sha256": str(model_specs[mmproj_name]["sha256"]),
+            "manifest_sha256": contract.ready_manifest_sha256,
+            "volume": contract.volume_name,
+            "image_ref": contract.llama_image_ref,
+            "image_id": contract.llama_image_id,
+            "runtime_options": dict(contract.runtime_options),
+        }
 
     def _ensure_engine_uncached(
         self,
@@ -662,6 +823,17 @@ class LocalOCRRuntimeManager:
 
     def shutdown(self) -> dict[str, str | bool]:
         with self._lock:
+            if self._router_active_alias and self._coordinator is not None:
+                try:
+                    report = self._coordinator.unload_model(self._router_active_alias)
+                except RouterRuntimeError as exc:
+                    raise self._build_setup_error("PaddleOCR Router", str(exc)) from exc
+                self._router_active_alias = None
+                self._active_engine = None
+                self._managed_start_attempted_engine = None
+                self._readiness_cache.clear()
+                self._paddle_idle_released = False
+                return report
             gpu_release_expected = bool(
                 self._active_engine is not None
                 and not self._paddle_idle_released
@@ -684,6 +856,20 @@ class LocalOCRRuntimeManager:
         """
 
         with self._lock:
+            if self._router_active_alias and self._coordinator is not None:
+                try:
+                    report = self._coordinator.unload_model(
+                        self._router_active_alias,
+                        cancel_checker=self._startup_cancel_checker,
+                    )
+                except RouterRuntimeError as exc:
+                    raise self._build_setup_error("PaddleOCR Router", str(exc)) from exc
+                self._router_active_alias = None
+                self._active_engine = None
+                self._managed_start_attempted_engine = None
+                self._readiness_cache.clear()
+                self._paddle_idle_released = True
+                return report
             if self._active_engine not in (None, "PaddleOCR VL"):
                 self._deactivate_active_engine()
                 return {
@@ -738,6 +924,12 @@ class LocalOCRRuntimeManager:
 
     def _deactivate_active_engine(self) -> None:
         self._readiness_cache.clear()
+        if self._router_active_alias and self._coordinator is not None:
+            self._coordinator.stop_pair()
+            self._router_active_alias = None
+            self._active_engine = None
+            self._managed_start_attempted_engine = None
+            return
         engine_key = self._active_engine or self._managed_start_attempted_engine
         if not engine_key:
             return
@@ -944,6 +1136,11 @@ class LocalOCRRuntimeManager:
         managed: bool,
     ) -> tuple[str, str, str]:
         mode = "managed" if managed else "unmanaged"
+        if (
+            self._coordinator is not None
+            and self._coordinator.is_router_ocr_candidate(engine_key, settings_page)
+        ):
+            mode = f"{mode}|router-generation:{self._coordinator.generation}"
         return (engine_key, _normalize_url(self._resolve_server_url(engine_key, settings_page)), mode)
 
     def _emit_readiness_cache_hit(

@@ -1,0 +1,66 @@
+services:
+  paddleocr-router:
+    image: ${ROUTER_LLAMA_CPP_IMAGE:-ghcr.io/ggml-org/llama.cpp@sha256:22e0e3bfe967af4fd1df6a918022abbfd4e72e4d40a4769e616a4176790acbcb}
+    pull_policy: missing
+    container_name: ${ROUTER_CONTAINER_NAME:-comic-translate-paddle-router}
+    restart: "no"
+    network_mode: bridge
+    labels:
+      comic-translate.router-protocol: ${ROUTER_PROTOCOL_VERSION:-llamacpp-router-product-v1}
+      comic-translate.router-pair: ${ROUTER_PAIR:-paddle-spotting}
+      comic-translate.router-fingerprint: ${ROUTER_PAIR_FINGERPRINT:-unprepared}
+      comic-translate.router-ocr-volume: ${ROUTER_OCR_MODEL_VOLUME:-unprepared}
+      comic-translate.router-gemma-volume: ${ROUTER_GEMMA_MODEL_VOLUME:-unprepared}
+      comic-translate.router-ocr-model-sha256: ${ROUTER_OCR_MODEL_SHA256:-unprepared}
+      comic-translate.router-ocr-mmproj-sha256: ${ROUTER_OCR_MMPROJ_SHA256:-unprepared}
+      comic-translate.router-ocr-manifest-sha256: ${ROUTER_OCR_MANIFEST_SHA256:-unprepared}
+      comic-translate.router-gemma-model-sha256: ${ROUTER_GEMMA_MODEL_SHA256:-unprepared}
+      comic-translate.router-gemma-manifest-sha256: ${ROUTER_GEMMA_MANIFEST_SHA256:-unprepared}
+      comic-translate.router-command-sha256: ${ROUTER_COMMAND_SHA256:-unprepared}
+    gpus: all
+    environment:
+      NVIDIA_VISIBLE_DEVICES: all
+      NVIDIA_DRIVER_CAPABILITIES: compute,utility
+    ports:
+      - "127.0.0.1:${ROUTER_OCR_HOST_PORT:-18002}:8080"
+      - "127.0.0.1:${ROUTER_GEMMA_HOST_PORT:-18080}:8080"
+    volumes:
+      - type: volume
+        source: paddleocr-ocr-models
+        target: /models/ocr
+        read_only: true
+      - type: volume
+        source: gemma-models
+        target: /models/gemma
+        read_only: true
+      - type: bind
+        source: ./models.ini
+        target: /config/models.ini
+        read_only: true
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:8080/health >/dev/null || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+      start_period: 20s
+    command:
+      - --host
+      - 0.0.0.0
+      - --port
+      - "8080"
+      - --models-preset
+      - /config/models.ini
+      - --models-max
+      - "1"
+      - --no-models-autoload
+      - --metrics
+      - --props
+      - --slots
+
+volumes:
+  paddleocr-ocr-models:
+    external: true
+    name: ${ROUTER_OCR_MODEL_VOLUME:-comic-translate-paddleocr-vl-spotting-llamacpp-models-v2}
+  gemma-models:
+    external: true
+    name: ${ROUTER_GEMMA_MODEL_VOLUME:-comic-translate-gemma-models-v2}
