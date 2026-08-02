@@ -3466,6 +3466,10 @@ Restart now?</source>
 <context>
     <name>StageBatchedProcessor</name>
     <message>
+        <source>Managed runtime GPU release was not confirmed.</source>
+        <translation>관리형 런타임의 GPU 메모리 해제가 확인되지 않았습니다.</translation>
+    </message>
+    <message>
         <source>Gemma could not start because inpainter VRAM release was not confirmed.</source>
         <translation>인페인터 VRAM 해제가 확인되지 않아 Gemma를 시작하지 못했습니다.</translation>
     </message>
