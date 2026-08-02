@@ -56,6 +56,8 @@ DirectIO, unified memory, Docker pause와 GPU 75% overlap은 다시 시험하지
 이미지·응답·hardware 결과는 Git에서 제외된 private validation archive에 둔다.
 telemetry v2의 공개 구현 계약은
 [01-performance-telemetry-v2-ko.md](./01-performance-telemetry-v2-ko.md)에
+기록한다. GPU runtime lease의 공개 구현 계약은
+[03-runtime-resource-arbiter-ko.md](./03-runtime-resource-arbiter-ko.md)에
 기록한다. 실제 실행 로그는 private archive의 `cold-pipeline-speed`와 향후
 managed performance run 아래에서 보존한다.
 
@@ -66,7 +68,13 @@ managed performance run 아래에서 보존한다.
 - 실행 시작 대비 새로운 WSL swap 증가 0
 - OOM과 shared GPU memory fallback 0
 - 실행 사이 정상 `stop`; `down`과 광범위 prune 금지
-- Paddle/Manga, inpainter, Gemma의 동시 GPU 상주 금지
+- inpainter와 OCR/Gemma의 동시 GPU 상주 금지
+- Paddle와 Gemma의 동시 활성 residency는 물리 VRAM 90% 이하, shared GPU
+  memory와 swap 증가 0을 모두 만족한 lab 후보만 허용
+
+현재 12GB GPU에서 active Paddle+Gemma 예상치는 114.3%, sleeping
+Paddle+Gemma 관측치는 95.4%다. 두 조합 모두 active-residency 사전검사에는
+통과하지 못한다. 따라서 현 제품은 GPU model exclusive lease를 유지한다.
 
 ## ETA 원칙
 
