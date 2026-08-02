@@ -177,6 +177,19 @@ class ValidationArtifactHarnessTests(unittest.TestCase):
         self.assertTrue((run_root / "logs" / "stdout.log").is_file())
         self.assertEqual(harness.verify_run(run_root), [])
 
+    def test_interrupted_running_run_can_resume_but_completed_run_cannot(self) -> None:
+        run = self.create_run(family="resume-test")
+        (run.artifact_root / "partial.json").write_text('{"state":"partial"}', encoding="utf-8")
+        run.checkpoint(metadata={"state": "resume-required"})
+
+        resumed = harness.ManagedArtifactRun.resume(run.run_root)
+        self.assertEqual(resumed.run_id, run.run_id)
+        self.assertEqual(resumed.artifact_root, run.artifact_root)
+        resumed.complete(metadata={"state": "completed"})
+
+        with self.assertRaises(harness.ArtifactHarnessError):
+            harness.ManagedArtifactRun.resume(run.run_root)
+
     def test_cli_separator_is_not_executed_as_the_child_command(self) -> None:
         result = harness.main(
             [

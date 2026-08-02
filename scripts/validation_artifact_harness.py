@@ -375,6 +375,60 @@ class ManagedArtifactRun:
         run._write_manifest(status="running", metadata={})
         return run
 
+    @classmethod
+    def resume(cls, run_root: Path) -> "ManagedArtifactRun":
+        """Reopen an interrupted managed run whose manifest is still running.
+
+        Long private benchmarks deliberately leave a ``running`` manifest on a
+        transient worker exit.  Reopening only that state preserves the
+        original provenance while refusing to append artifacts to a completed
+        or fatally failed evidence set.
+        """
+
+        archive_root = _assert_archive_root(default_archive_root())
+        resolved_run_root = run_root.resolve()
+        category, family, run_id = _assert_managed_run_root(resolved_run_root, archive_root)
+        manifest_path = resolved_run_root / MANIFEST_FILE_NAME
+        try:
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as exc:
+            raise ArtifactHarnessError("Managed validation run manifest is unreadable.") from exc
+        if str(manifest.get("status") or "") != "running":
+            raise ArtifactHarnessError(
+                "Only an interrupted managed validation run with status 'running' can resume."
+            )
+        archive = manifest.get("archive")
+        if not isinstance(archive, Mapping):
+            raise ArtifactHarnessError("Managed validation run manifest has no archive identity.")
+        if (
+            str(archive.get("category") or "") != category
+            or str(archive.get("family") or "") != family
+            or str(archive.get("run_id") or "") != run_id
+        ):
+            raise ArtifactHarnessError("Managed validation run manifest identity does not match its path.")
+        artifact_root = resolved_run_root / ARTIFACT_DIRECTORY_NAME
+        log_root = resolved_run_root / LOG_DIRECTORY_NAME
+        if not artifact_root.is_dir() or not log_root.is_dir():
+            raise ArtifactHarnessError("Managed validation run is missing its artifact or log directory.")
+        hash_limit = manifest.get("hash_limit_bytes", DEFAULT_HASH_LIMIT_BYTES)
+        if isinstance(hash_limit, bool) or not isinstance(hash_limit, int) or hash_limit < 0:
+            raise ArtifactHarnessError("Managed validation run has an invalid hash limit.")
+        created_utc = str(manifest.get("created_utc") or "").strip()
+        if not created_utc:
+            raise ArtifactHarnessError("Managed validation run is missing its creation timestamp.")
+        return cls(
+            archive_root=archive_root,
+            category=category,
+            family=family,
+            run_id=run_id,
+            run_root=resolved_run_root,
+            artifact_root=artifact_root,
+            log_root=log_root,
+            manifest_path=manifest_path,
+            created_utc=created_utc,
+            hash_limit_bytes=hash_limit,
+        )
+
     def _base_manifest(self, *, status: str, metadata: Mapping[str, Any]) -> dict[str, Any]:
         return {
             "schema_version": ARTIFACT_SCHEMA_VERSION,
@@ -411,6 +465,13 @@ class ManagedArtifactRun:
             return
         self._write_manifest(status="completed", metadata=metadata or {})
         self._closed = True
+
+    def checkpoint(self, *, metadata: Mapping[str, Any] | None = None) -> None:
+        """Refresh an interrupted run's running manifest without closing it."""
+
+        if self._closed:
+            raise ArtifactHarnessError("Cannot checkpoint a closed validation artifact run.")
+        self._write_manifest(status="running", metadata=metadata or {})
 
     def fail(
         self,
