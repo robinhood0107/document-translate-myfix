@@ -9,8 +9,6 @@
   범용 계측 schema와 첫 구현 검증 계약
 - [03-runtime-resource-arbiter-ko.md](./03-runtime-resource-arbiter-ko.md):
   GPU model exclusive lease, 취소 세대와 release 실패 안전 계약
-- [04-llamacpp-router-product-promotion-ko.md](./04-llamacpp-router-product-promotion-ko.md):
-  Paddle crop·Spotting Router의 제품 승격 계약과 비민감 검증 상태
 
 후속 PR은 같은 디렉터리에 번호 순서로 추가한다. 원시 이미지, local path,
 OCR·번역 응답, runtime log와 benchmark 순위는 이 디렉터리에 넣지 않는다.
