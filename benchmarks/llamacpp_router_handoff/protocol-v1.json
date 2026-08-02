@@ -1,0 +1,77 @@
+{
+  "protocol_version": "llamacpp-router-handoff-v1",
+  "family": "llamacpp-router-handoff",
+  "branch_scope": "benchmarking/lab",
+  "decision": {
+    "candidate": "one-router-container-per-managed-ocr-gemma-pair",
+    "baseline": "existing-separate-managed-ocr-and-gemma-containers",
+    "pair_order": [
+      "paddle-crop",
+      "paddle-spotting",
+      "hunyuanocr",
+      "mangalmm"
+    ],
+    "arm_order": ["baseline", "router", "router", "baseline"],
+    "max_abba_cycles_per_pair": 1,
+    "active_dual_residency": false,
+    "turboquant": "retired"
+  },
+  "router_contract": {
+    "models_max": 1,
+    "models_autoload": false,
+    "explicit_load_unload": true,
+    "container_ownership_labels": [
+      "protocol",
+      "pair",
+      "arm_owner_token"
+    ],
+    "required_cli_options": [
+      "--models-preset",
+      "--models-max",
+      "--no-models-autoload",
+      "--metrics",
+      "--props",
+      "--slots"
+    ],
+    "required_endpoints": [
+      "/health",
+      "/models",
+      "/models/load",
+      "/models/unload",
+      "/v1/models",
+      "/props",
+      "/slots",
+      "/metrics"
+    ]
+  },
+  "quality_contract": {
+    "hard": [
+      "runtime_model_identity",
+      "prompt_schema_seed_order_count",
+      "json_completeness",
+      "finish_reason",
+      "missing_or_duplicate_request"
+    ],
+    "translation_raw_difference": "diagnostic_then_text_semantic_review",
+    "ocr": "raw_result_diagnostics_block_mapping_exact",
+    "render": "baseline_pixel_exact_when_translation_exact"
+  },
+  "resource_contract": {
+    "measure_only": [
+      "gpu_background",
+      "peak_vram",
+      "windows_available_ram",
+      "windows_shared_gpu_memory",
+      "wsl_swap_delta"
+    ],
+    "fatal": [
+      "oom",
+      "hang",
+      "wrong_model_route",
+      "identity_mismatch",
+      "container_or_worker_orphan",
+      "cancellation_cleanup_failure",
+      "gpu_return_unconfirmed"
+    ]
+  }
+}
