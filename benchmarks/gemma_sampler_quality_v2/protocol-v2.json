@@ -1,0 +1,68 @@
+{
+  "protocol_version": "gemma-sampler-quality-v2",
+  "private_artifact_category": "10-gemma-translation",
+  "corpus": {
+    "occurrence_count": 758,
+    "case_count": 478,
+    "case_identity": "language+source_text+context_after_text",
+    "tuning_count": 382,
+    "holdout_count": 96,
+    "reference_state_required": "FROZEN_USER_APPROVED",
+    "reference_rules": {
+      "contextual_interpretation": "allowed_for_faithful_translation_only",
+      "new_facts": "forbidden",
+      "genre_term_pimon": {
+        "genre_default": "가죽물",
+        "literal_contextual_candidates": ["스킨슈트", "인간 가죽", "가죽옷"]
+      }
+    }
+  },
+  "runtime": {
+    "router_pair": "crop",
+    "model": "gemma-4-26B-IQ4_NL.gguf",
+    "llama_cpp_commit": "ff067f76dd8e9e05f0528056f1274adf01a54d70",
+    "llama_cpp_build": "b10133",
+    "image": "ghcr.io/ggml-org/llama.cpp@sha256:22e0e3bfe967af4fd1df6a918022abbfd4e72e4d40a4769e616a4176790acbcb",
+    "max_completion_tokens": 512,
+    "context_size": 4096,
+    "chunk_size": 6,
+    "reasoning_enabled": false
+  },
+  "matrix": {
+    "seeds": [20260802, 20260803],
+    "temperature": {
+      "values": [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0],
+      "top_p": 0.95,
+      "top_k": 64,
+      "min_p": 0.0,
+      "new_responses": 9560
+    },
+    "joint_top_p_top_k": {
+      "selected_temperature_count": 2,
+      "top_p": [0.85, 0.9, 0.95, 0.98, 1.0],
+      "top_k": [0, 32, 64, 128, 256, 512],
+      "reused": "top_p=0.95,top_k=64",
+      "new_responses": 55448
+    },
+    "min_p": {
+      "selected_tuple_count": 3,
+      "values": [0.0, 0.01, 0.03, 0.05, 0.1],
+      "reused": "min_p=0",
+      "new_responses": 11472
+    },
+    "total_new_responses": 76480
+  },
+  "ranking": [
+    "catastrophic_response_count",
+    "major_semantic_error_count",
+    "minor_error_count",
+    "unique_error_case_count",
+    "naturalness",
+    "latency_then_completion_tokens"
+  ],
+  "holdout": {
+    "sealed_until": "tuning_provisional_winner",
+    "comparators": ["provisional_winner", "existing_default_tuple"],
+    "product_promotion": "requires_explicit_user_approval"
+  }
+}
