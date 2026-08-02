@@ -24,6 +24,7 @@ from app.projects.project_types import (
 
 from modules.ocr.local_runtime import LocalOCRRuntimeManager
 from modules.translation.local_runtime import LocalGemmaRuntimeManager
+from modules.utils.local_llama_router import LocalLlamaRouterCoordinator
 from modules.ocr.selection import OCR_MODE_BEST_LOCAL, normalize_ocr_mode, resolve_ocr_engine
 from app.ui.canvas.text_item import TextBlockItem
 from app.ui.commands.box import DeleteBoxesCommand, DeleteTextBoxCommand
@@ -206,8 +207,16 @@ class ComicTranslate(ComicTranslateUI):
         self._last_batch_output_root = ""
         self._intermediate_preview_disabled_notices = set()
         self._automatic_progress_tracker = AutomaticProgressTracker()
-        self.local_ocr_runtime_manager = LocalOCRRuntimeManager()
-        self.local_translation_runtime_manager = LocalGemmaRuntimeManager()
+        self.local_llama_router_coordinator = LocalLlamaRouterCoordinator()
+        self.local_ocr_runtime_manager = LocalOCRRuntimeManager(
+            router_coordinator=self.local_llama_router_coordinator,
+        )
+        self.local_translation_runtime_manager = LocalGemmaRuntimeManager(
+            router_coordinator=self.local_llama_router_coordinator,
+        )
+        self.local_ocr_runtime_manager.set_router_gemma_manager(
+            self.local_translation_runtime_manager,
+        )
 
         self.image_ctrl = ImageStateController(self)
         self.rect_item_ctrl = RectItemController(self)
@@ -2894,14 +2903,37 @@ class ComicTranslate(ComicTranslateUI):
             self.set_pipeline_overlay_active(False)
         except Exception:
             pass
+        router_shutdown_error = None
+        router_coordinator = getattr(self, "local_llama_router_coordinator", None)
+        if isinstance(router_coordinator, LocalLlamaRouterCoordinator):
+            try:
+                router_coordinator.stop(
+                    service="app_shutdown",
+                    allow_foreign_owner_teardown=True,
+                )
+            except Exception as exc:
+                router_shutdown_error = exc
+                logger.exception("Router terminal cleanup failed during application shutdown.")
         try:
-            self.local_ocr_runtime_manager.shutdown()
+            ocr_runtime_manager = self.local_ocr_runtime_manager
+            if isinstance(ocr_runtime_manager, LocalOCRRuntimeManager):
+                ocr_runtime_manager.shutdown(allow_foreign_owner_teardown=True)
+            else:
+                ocr_runtime_manager.shutdown()
         except Exception:
-            pass
+            logger.exception("OCR runtime cleanup failed during application shutdown.")
         try:
-            self.local_translation_runtime_manager.shutdown()
+            translation_runtime_manager = self.local_translation_runtime_manager
+            if isinstance(translation_runtime_manager, LocalGemmaRuntimeManager):
+                translation_runtime_manager.shutdown(
+                    allow_foreign_owner_teardown=True,
+                )
+            else:
+                translation_runtime_manager.shutdown()
         except Exception:
-            pass
+            logger.exception("Gemma runtime cleanup failed during application shutdown.")
+        if router_shutdown_error is not None:
+            self._last_runtime_shutdown_error = str(router_shutdown_error)
         try:
             translation_memory_store = getattr(
                 self,

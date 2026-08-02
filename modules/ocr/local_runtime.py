@@ -7,6 +7,7 @@ import logging
 import os
 import threading
 import time
+from contextlib import nullcontext
 from pathlib import Path
 from typing import Any, Callable, Literal
 from urllib.error import HTTPError, URLError
@@ -68,6 +69,12 @@ from modules.ocr.paddle_spotting.runtime import (
     validate_paddle_spotting_volume_name,
 )
 from modules.utils.exceptions import LocalServiceSetupError, OperationCancelledError
+from modules.utils.local_llama_router import (
+    LocalLlamaRouterCoordinator,
+    RouterModelMaterial,
+    RouterPair,
+    RouterRuntimeSpec,
+)
 from modules.utils.llama_cpp_runtime import (
     DEFAULT_LLAMA_CPP_IMAGE,
     DEFAULT_MANAGED_RUNTIME_STOP_TIMEOUT_SEC,
@@ -162,7 +169,11 @@ def _normalize_url(url: str) -> str:
 
 
 class LocalOCRRuntimeManager:
-    def __init__(self) -> None:
+    def __init__(
+        self,
+        *,
+        router_coordinator: LocalLlamaRouterCoordinator | None = None,
+    ) -> None:
         self._lock = threading.RLock()
         self._compose_command: tuple[str, ...] | None = None
         self._active_engine: str | None = None
@@ -176,6 +187,167 @@ class LocalOCRRuntimeManager:
         self._mangalmm_runtime_contract_cache: MangaLMMRuntimeContract | None = None
         self._paddle_idle_released = False
         self._warned_legacy_backend_environment: tuple[str, ...] = ()
+        self._router_coordinator = router_coordinator
+        self._router_gemma_manager: Any | None = None
+        self._router_pair: RouterPair | None = None
+        self._router_spec: RouterRuntimeSpec | None = None
+
+    def set_router_gemma_manager(self, manager: Any | None) -> None:
+        """Inject the companion manager only for the controller-owned pair."""
+
+        self._router_gemma_manager = manager
+
+    def router_pair_for_engine(
+        self,
+        engine_key: str,
+        settings_page: Any,
+    ) -> RouterPair | None:
+        """Return a Router pair only for the full default Paddle + Gemma path."""
+
+        coordinator = self._router_coordinator
+        gemma_manager = self._router_gemma_manager
+        if coordinator is None or gemma_manager is None:
+            return None
+        if not self._is_gemma_translator_selected(settings_page):
+            return None
+        credentials = getattr(gemma_manager, "router_credentials", None)
+        if not callable(credentials):
+            return None
+        try:
+            gemma_endpoint, gemma_model = credentials(settings_page)
+        except Exception:
+            return None
+        return coordinator.classify_pair(
+            engine_key,
+            self._resolve_server_url(engine_key, settings_page),
+            gemma_endpoint,
+            gemma_model,
+        )
+
+    def router_is_active(self) -> bool:
+        pair = self._router_pair
+        coordinator = self._router_coordinator
+        if pair is None or coordinator is None:
+            return False
+        return coordinator.snapshot().pair == pair.kind.value
+
+    def router_inference_lease(
+        self,
+        engine_key: str,
+        settings_page: Any,
+    ) -> Any:
+        """Return an HTTP-only Router lease, or a no-op for non-Router paths.
+
+        A default Paddle + Gemma combination is never allowed to silently fall
+        through to a raw endpoint after the Router has been selected.  The
+        returned coordinator lease checks the loaded alias again immediately
+        before the request; it does not retain this manager lock during HTTP.
+        """
+
+        with self._lock:
+            pair = self.router_pair_for_engine(engine_key, settings_page)
+            if pair is None:
+                return nullcontext()
+            coordinator = self._router_coordinator
+            if coordinator is None or self._router_pair != pair:
+                raise self._build_setup_error(
+                    engine_key,
+                    "Router inference was requested before the matching OCR model lease was loaded.",
+                )
+            return coordinator.inference_lease(
+                pair=pair,
+                model_alias=pair.ocr_alias,
+            )
+
+    def _is_gemma_translator_selected(self, settings_page: Any) -> bool:
+        getter = getattr(settings_page, "get_tool_selection", None)
+        if not callable(getter):
+            return False
+        try:
+            selected = str(getter("translator") or "").strip()
+        except Exception:
+            return False
+        accepted = {"Custom Local Server(Gemma)", "Custom Local Server"}
+        ui = getattr(settings_page, "ui", None)
+        translator = getattr(ui, "tr", None)
+        if callable(translator):
+            for key in tuple(accepted):
+                try:
+                    accepted.add(str(translator(key)))
+                except Exception:
+                    continue
+        return selected in accepted
+
+    def _router_runtime_spec(
+        self,
+        engine_key: str,
+        settings_page: Any,
+        pair: RouterPair,
+    ) -> RouterRuntimeSpec:
+        gemma_manager = self._router_gemma_manager
+        material_getter = getattr(gemma_manager, "router_model_material", None)
+        if not callable(material_getter):
+            raise self._build_setup_error(
+                engine_key,
+                "Router Gemma runtime material is unavailable.",
+            )
+        if engine_key == "PaddleOCR VL":
+            self._ensure_paddle_runtime_images()
+            contract = self._paddle_runtime_contract(force_refresh=True)
+            material = RouterModelMaterial(
+                alias=PADDLE_LLAMA_MODEL_ALIAS,
+                model_file=PADDLE_LLAMA_MODEL_NAME,
+                model_sha256=str(
+                    PADDLE_LLAMA_MODEL_SPECS[PADDLE_LLAMA_MODEL_NAME]["sha256"]
+                ),
+                mmproj_file=PADDLE_LLAMA_MMPROJ_NAME,
+                mmproj_sha256=str(
+                    PADDLE_LLAMA_MODEL_SPECS[PADDLE_LLAMA_MMPROJ_NAME]["sha256"]
+                ),
+                volume_name=contract.volume_name,
+                ready_manifest_sha256=contract.ready_manifest_sha256,
+                source_fingerprint=contract.fingerprint,
+                runtime_options=dict(contract.runtime_options),
+                preparation_version=contract.preparation_version,
+            )
+        elif engine_key == "PaddleOCR VL Spotting":
+            self._ensure_paddle_spotting_runtime_image()
+            contract = self._paddle_spotting_runtime_contract(force_refresh=True)
+            material = RouterModelMaterial(
+                alias=PADDLE_SPOTTING_MODEL_ALIAS,
+                model_file=PADDLE_SPOTTING_MODEL_NAME,
+                model_sha256=str(
+                    PADDLE_SPOTTING_MODEL_SPECS[PADDLE_SPOTTING_MODEL_NAME]["sha256"]
+                ),
+                mmproj_file=PADDLE_SPOTTING_MMPROJ_NAME,
+                mmproj_sha256=str(
+                    PADDLE_SPOTTING_MODEL_SPECS[
+                        PADDLE_SPOTTING_MMPROJ_NAME
+                    ]["sha256"]
+                ),
+                volume_name=contract.volume_name,
+                ready_manifest_sha256=contract.ready_manifest_sha256,
+                source_fingerprint=contract.fingerprint,
+                runtime_options=dict(contract.runtime_options),
+                preparation_version=contract.preparation_version,
+            )
+        else:
+            raise self._build_setup_error(
+                engine_key,
+                "Router supports only the two PaddleOCR-VL product routes.",
+            )
+        gemma_material, gemma_image_ref = material_getter(settings_page)
+        if str(contract.llama_image_ref) != str(gemma_image_ref):
+            raise self._build_setup_error(
+                engine_key,
+                "Router requires one identical pinned llama.cpp image for OCR and Gemma.",
+            )
+        return RouterRuntimeSpec(
+            pair=pair,
+            ocr_model=material,
+            gemma_model=gemma_material,
+            image_ref=contract.llama_image_ref,
+        )
 
     def validate_engine(self, engine_key: str, settings_page: Any) -> None:
         if not is_local_ocr_engine(engine_key):
@@ -263,6 +435,29 @@ class LocalOCRRuntimeManager:
             "PaddleOCR VL Spotting",
         }:
             return None
+        router_pair = self.router_pair_for_engine(engine_key, settings_page)
+        if router_pair is not None and self._router_coordinator is not None:
+            router_snapshot = self._router_coordinator.snapshot()
+            if (
+                router_snapshot.pair != router_pair.kind.value
+                or not router_snapshot.fingerprint
+            ):
+                # Do not declare a cache identity before the owned Router
+                # contract has been independently built.  Starting a runtime
+                # is safer than reusing an identity whose model generation is
+                # unknown.
+                return None
+            return {
+                "identity_schema_version": 4,
+                "managed": True,
+                "router": True,
+                "router_pair": router_pair.kind.value,
+                "router_fingerprint": router_snapshot.fingerprint,
+                "router_model_generation": router_snapshot.model_generation,
+                "engine": engine_key,
+                "endpoint": self._resolve_server_url(engine_key, settings_page),
+                "model_name": router_pair.ocr_alias,
+            }
         if not self.should_manage_engine(engine_key, settings_page):
             return None
         try:
@@ -396,9 +591,35 @@ class LocalOCRRuntimeManager:
         timeout_sec: int = 300,
         progress_callback: Callable[[dict[str, Any]], None] | None = None,
         cancel_checker: Callable[[], bool] | None = None,
+        resource_arbiter: Any | None = None,
+        runtime_service: str = "",
     ) -> None:
         with self._lock:
             self._startup_cancel_checker = cancel_checker
+            router_pair = self.router_pair_for_engine(engine_key, settings_page)
+            if router_pair is not None:
+                self._ensure_router_engine(
+                    engine_key,
+                    settings_page,
+                    router_pair,
+                    resource_arbiter=resource_arbiter,
+                    runtime_service=runtime_service,
+                    cancel_checker=cancel_checker,
+                )
+                return
+            # The configured endpoint/model is no longer the exact product
+            # Router contract.  Do not let a stale owned Router keep the
+            # default ports occupied while the user moves to a custom or
+            # separate-server path.
+            if self._router_pair is not None:
+                self._router_finish(
+                    stop_container=True,
+                    resource_arbiter=resource_arbiter,
+                    runtime_service=self._router_owner_service(
+                        runtime_service or "ocr"
+                    ),
+                    cancel_checker=cancel_checker,
+                )
             if not is_local_ocr_engine(engine_key) or not self.should_manage_engine(engine_key, settings_page):
                 self._deactivate_active_engine()
                 return
@@ -450,6 +671,138 @@ class LocalOCRRuntimeManager:
                 self._readiness_cache.add(cache_key)
                 if engine_key == "PaddleOCR VL":
                     self._paddle_idle_released = False
+
+    def _ensure_router_engine(
+        self,
+        engine_key: str,
+        settings_page: Any,
+        pair: RouterPair,
+        *,
+        resource_arbiter: Any | None,
+        runtime_service: str,
+        cancel_checker: Callable[[], bool] | None,
+    ) -> None:
+        coordinator = self._router_coordinator
+        if coordinator is None:
+            raise self._build_setup_error(
+                engine_key,
+                "Router coordinator was not injected into the managed OCR runtime.",
+            )
+        if self._router_pair is not None and self._router_pair != pair:
+            # A Crop <-> Spotting change must terminally release the exact
+            # owned Router pair before the second pair can reserve 18080.
+            # `_router_finish` verifies ownership and never touches a foreign
+            # container or direct server.
+            self._router_finish(
+                stop_container=True,
+                resource_arbiter=resource_arbiter,
+                runtime_service=self._router_owner_service(
+                    runtime_service or "ocr"
+                ),
+                cancel_checker=cancel_checker,
+            )
+        elif self._active_engine is not None and self._active_engine != engine_key:
+            # This only stops a separate runtime the manager itself started.
+            # A foreign process at a default port remains the adapter's
+            # explicit ownership error and is never guessed/stopped here.
+            self._deactivate_active_engine()
+        spec = self._router_runtime_spec(engine_key, settings_page, pair)
+        service = runtime_service or (
+            "paddleocr_vl"
+            if engine_key == "PaddleOCR VL"
+            else "paddleocr_vl_spotting"
+        )
+        try:
+            coordinator.load(
+                spec,
+                pair.ocr_alias,
+                arbiter=resource_arbiter,
+                service=service,
+                cancel_checker=cancel_checker,
+            )
+        except OperationCancelledError:
+            # The coordinator already ran its owned-container cleanup through
+            # the Arbiter. Preserve cancellation so the stage does not record
+            # a user stop as an OCR setup failure.
+            raise
+        except Exception as exc:
+            raise self._build_setup_error(engine_key, str(exc)) from exc
+        self._router_pair = pair
+        self._router_spec = spec
+        setter = getattr(self._router_gemma_manager, "set_router_spec", None)
+        if callable(setter):
+            setter(spec)
+        self._active_engine = engine_key
+        self._managed_start_attempted_engine = engine_key
+        self._paddle_idle_released = False
+        self._readiness_cache.clear()
+
+    def _router_finish(
+        self,
+        *,
+        stop_container: bool,
+        resource_arbiter: Any | None,
+        runtime_service: str,
+        cancel_checker: Callable[[], bool] | None = None,
+        allow_foreign_owner_teardown: bool = False,
+    ) -> dict[str, Any]:
+        coordinator = self._router_coordinator
+        if coordinator is None or self._router_pair is None:
+            return {"runtime_state": "stopped", "gpu_release_expected": False}
+        evidence = coordinator.finish(
+            arbiter=resource_arbiter,
+            service=runtime_service or "ocr",
+            stop_container=stop_container,
+            cancel_checker=cancel_checker,
+            allow_foreign_owner_teardown=allow_foreign_owner_teardown,
+        )
+        snapshot = coordinator.snapshot()
+        if stop_container:
+            self._router_pair = None
+            self._router_spec = None
+            clear_spec = getattr(self._router_gemma_manager, "set_router_spec", None)
+            if callable(clear_spec):
+                clear_spec(None)
+        self._active_engine = None
+        self._managed_start_attempted_engine = None
+        self._readiness_cache.clear()
+        return {
+            "runtime_state": (
+                "stopped" if stop_container else "router_container_ready"
+            ),
+            # The coordinator already ran the stricter Router-specific 30 s
+            # gate.  The legacy stage gate must not replace it with its former
+            # sleep-residue heuristic.
+            "gpu_release_expected": False,
+            "router_release_evidence": (
+                evidence.vram if evidence is not None else {"required": False}
+            ),
+            "router_model_generation": snapshot.model_generation,
+        }
+
+    def _router_owner_service(self, fallback: str) -> str:
+        """Return the Arbiter service that owns the currently selected pair."""
+
+        coordinator = self._router_coordinator
+        spec = self._router_spec
+        if coordinator is not None and spec is not None:
+            loaded_model = str(
+                getattr(coordinator.snapshot(), "loaded_model", "") or ""
+            )
+            if loaded_model == spec.gemma_model.alias:
+                return "gemma"
+            if loaded_model == spec.ocr_model.alias:
+                return {
+                    "PaddleOCR VL": "paddleocr_vl",
+                    "PaddleOCR VL Spotting": "paddleocr_vl_spotting",
+                }.get(spec.pair.ocr_engine_key, str(fallback or "ocr"))
+        return {
+            "PaddleOCR VL": "paddleocr_vl",
+            "PaddleOCR VL Spotting": "paddleocr_vl_spotting",
+        }.get(
+            self._active_engine or "",
+            str(fallback or "ocr"),
+        )
 
     def _ensure_engine_uncached(
         self,
@@ -660,8 +1013,23 @@ class LocalOCRRuntimeManager:
         )
         self._log_runtime_metadata(engine_key)
 
-    def shutdown(self) -> dict[str, str | bool]:
+    def shutdown(
+        self,
+        *,
+        resource_arbiter: Any | None = None,
+        runtime_service: str = "",
+        cancel_checker: Callable[[], bool] | None = None,
+        allow_foreign_owner_teardown: bool = False,
+    ) -> dict[str, Any]:
         with self._lock:
+            if self.router_is_active():
+                return self._router_finish(
+                    stop_container=True,
+                    resource_arbiter=resource_arbiter,
+                    runtime_service=runtime_service or "ocr",
+                    cancel_checker=cancel_checker,
+                    allow_foreign_owner_teardown=allow_foreign_owner_teardown,
+                )
             gpu_release_expected = bool(
                 self._active_engine is not None
                 and not self._paddle_idle_released
@@ -674,7 +1042,13 @@ class LocalOCRRuntimeManager:
                 "gpu_release_expected": gpu_release_expected,
             }
 
-    def release_for_handoff(self) -> dict[str, str | bool]:
+    def release_for_handoff(
+        self,
+        *,
+        resource_arbiter: Any | None = None,
+        runtime_service: str = "",
+        cancel_checker: Callable[[], bool] | None = None,
+    ) -> dict[str, Any]:
         """Release OCR GPU residency while preserving a reusable llama server.
 
         The stage scheduler must distinguish a confirmed sleeping llama.cpp
@@ -684,6 +1058,13 @@ class LocalOCRRuntimeManager:
         """
 
         with self._lock:
+            if self.router_is_active():
+                return self._router_finish(
+                    stop_container=False,
+                    resource_arbiter=resource_arbiter,
+                    runtime_service=runtime_service or "ocr",
+                    cancel_checker=cancel_checker,
+                )
             if self._active_engine not in (None, "PaddleOCR VL"):
                 self._deactivate_active_engine()
                 return {

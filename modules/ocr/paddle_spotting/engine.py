@@ -5,6 +5,7 @@ import logging
 import threading
 import time
 from collections import Counter
+from contextlib import nullcontext
 from typing import Any, Callable
 from urllib.parse import urlparse
 
@@ -96,6 +97,19 @@ class PaddleOCRVLSpottingEngine(OCREngine):
         self.last_ambiguous_regions: list[dict[str, Any]] = []
         self._session = requests.Session()
         self._request_lock = threading.Lock()
+        self._inference_lease_factory: Callable[[], Any] | None = None
+
+    def set_inference_lease_factory(
+        self,
+        factory: Callable[[], Any] | None,
+    ) -> None:
+        """Install a short Router inference lease for the HTTP call only."""
+
+        self._inference_lease_factory = factory
+
+    def _inference_lease(self) -> Any:
+        factory = self._inference_lease_factory
+        return factory() if callable(factory) else nullcontext()
 
     def initialize(self, settings, **kwargs) -> None:
         config = settings.get_paddleocr_vl_spotting_settings()
@@ -389,12 +403,13 @@ class PaddleOCRVLSpottingEngine(OCREngine):
     def _send_request(self, payload: dict[str, Any]) -> dict[str, Any]:
         try:
             with self._request_lock:
-                response = self._session.post(
-                    self._chat_completions_url(),
-                    json=payload,
-                    headers={"Content-Type": "application/json"},
-                    timeout=float(self.request_timeout_sec),
-                )
+                with self._inference_lease():
+                    response = self._session.post(
+                        self._chat_completions_url(),
+                        json=payload,
+                        headers={"Content-Type": "application/json"},
+                        timeout=float(self.request_timeout_sec),
+                    )
         except requests.exceptions.RequestException as exc:
             raise LocalServiceConnectionError(
                 "Unable to reach the local PaddleOCR VL Spotting service.",

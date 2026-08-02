@@ -125,6 +125,9 @@ class Translator:
             runtime_identity_provider=lambda: runtime_manager.get_translation_cache_identity(
                 self.settings
             ),
+            inference_lease_factory=lambda: runtime_manager.router_inference_lease(
+                self.settings
+            ),
         )
     
     def _get_translator_key(self, localized_translator: str) -> str:
