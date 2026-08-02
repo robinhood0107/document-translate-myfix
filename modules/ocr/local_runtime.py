@@ -660,23 +660,43 @@ class LocalOCRRuntimeManager:
         )
         self._log_runtime_metadata(engine_key)
 
-    def shutdown(self) -> None:
+    def shutdown(self) -> dict[str, str | bool]:
         with self._lock:
+            gpu_release_expected = bool(
+                self._active_engine is not None
+                and not self._paddle_idle_released
+            )
             self._readiness_cache.clear()
             self._deactivate_active_engine()
             self._paddle_idle_released = False
+            return {
+                "runtime_state": "stopped",
+                "gpu_release_expected": gpu_release_expected,
+            }
 
-    def release_for_handoff(self) -> None:
-        """Release OCR GPU residency while preserving a reusable llama server."""
+    def release_for_handoff(self) -> dict[str, str | bool]:
+        """Release OCR GPU residency while preserving a reusable llama server.
+
+        The stage scheduler must distinguish a confirmed sleeping llama.cpp
+        process from a fallback managed stop.  Returning that fact keeps its
+        GPU lease and telemetry state honest without exposing implementation
+        details of the runtime manager.
+        """
 
         with self._lock:
             if self._active_engine not in (None, "PaddleOCR VL"):
                 self._deactivate_active_engine()
-                return
+                return {
+                    "runtime_state": "stopped",
+                    "gpu_release_expected": True,
+                }
             if self._active_engine is None:
                 running = self._running_managed_container_names("PaddleOCR VL")
                 if not running:
-                    return
+                    return {
+                        "runtime_state": "stopped",
+                        "gpu_release_expected": False,
+                    }
                 expected = self._managed_container_names("PaddleOCR VL")
                 if (
                     len(running) != len(expected)
@@ -684,24 +704,37 @@ class LocalOCRRuntimeManager:
                 ):
                     self._managed_start_attempted_engine = "PaddleOCR VL"
                     self._deactivate_active_engine()
-                    return
+                    return {
+                        "runtime_state": "stopped",
+                        "gpu_release_expected": True,
+                    }
                 self._active_engine = "PaddleOCR VL"
                 self._managed_start_attempted_engine = "PaddleOCR VL"
             if self._paddle_idle_released:
-                return
+                return {
+                    "runtime_state": "sleeping",
+                    "gpu_release_expected": False,
+                }
             if self._wait_for_paddle_llama_sleep():
                 self._paddle_idle_released = True
                 logger.info(
                     "PaddleOCR llama.cpp entered idle sleep; containers remain "
                     "available for the next OCR stage."
                 )
-                return
+                return {
+                    "runtime_state": "sleeping",
+                    "gpu_release_expected": True,
+                }
             logger.warning(
                 "PaddleOCR llama.cpp did not confirm idle sleep; falling back "
                 "to the normal managed stop before the next GPU stage."
             )
             self._deactivate_active_engine()
             self._paddle_idle_released = False
+            return {
+                "runtime_state": "stopped",
+                "gpu_release_expected": True,
+            }
 
     def _deactivate_active_engine(self) -> None:
         self._readiness_cache.clear()

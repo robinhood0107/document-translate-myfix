@@ -3425,6 +3425,10 @@ Riavviare ora?</translation>
 <context>
     <name>StageBatchedProcessor</name>
     <message>
+        <source>Managed runtime GPU release was not confirmed.</source>
+        <translation>Non è stato confermato il rilascio della memoria GPU del runtime gestito.</translation>
+    </message>
+    <message>
         <source>Gemma could not start because inpainter VRAM release was not confirmed.</source>
         <translation>Impossibile avviare Gemma perché il rilascio della VRAM del modello di inpainting non è stato confermato.</translation>
     </message>
