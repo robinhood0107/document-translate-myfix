@@ -788,6 +788,7 @@ def _configure_window(window, preset: dict[str, object], source_lang: str, targe
     app_config = preset.get("app", {})
     gemma = preset.get("gemma", {})
     ocr_client = preset.get("ocr_client", {})
+    paddle_spotting_ocr_client = preset.get("paddle_spotting_ocr_client", {})
     hunyuan_ocr_client = preset.get("hunyuan_ocr_client", {})
     mangalmm_ocr_client = preset.get("mangalmm_ocr_client", {})
     ocr_generic = preset.get("ocr_generic", {})
@@ -891,6 +892,22 @@ def _configure_window(window, preset: dict[str, object], source_lang: str, targe
     )
     ui.paddleocr_vl_max_new_tokens_spinbox.setValue(int(ocr_client.get("max_new_tokens", 1024)))
     ui.paddleocr_vl_parallel_workers_spinbox.setValue(int(ocr_client.get("parallel_workers", 8)))
+    # A benchmark preset may deliberately set any of these, but absent keys
+    # must leave the promoted Spotting engine's existing setting intact.  In
+    # particular, do not silently reduce its official 3000-token/360-second
+    # default merely because a benchmark does not mention Spotting.
+    if "server_url" in paddle_spotting_ocr_client:
+        ui.paddleocr_vl_spotting_server_url_input.setText(
+            str(paddle_spotting_ocr_client["server_url"])
+        )
+    if "max_completion_tokens" in paddle_spotting_ocr_client:
+        ui.paddleocr_vl_spotting_max_completion_tokens_spinbox.setValue(
+            int(paddle_spotting_ocr_client["max_completion_tokens"])
+        )
+    if "request_timeout_sec" in paddle_spotting_ocr_client:
+        ui.paddleocr_vl_spotting_request_timeout_spinbox.setValue(
+            int(paddle_spotting_ocr_client["request_timeout_sec"])
+        )
     ui.hunyuan_ocr_server_url_input.setText(
         str(hunyuan_ocr_client.get("server_url", "http://127.0.0.1:28080/v1"))
     )
@@ -906,30 +923,39 @@ def _configure_window(window, preset: dict[str, object], source_lang: str, targe
     ui.hunyuan_ocr_raw_response_logging_checkbox.setChecked(
         bool(hunyuan_ocr_client.get("raw_response_logging", False))
     )
-    ui.mangalmm_ocr_server_url_input.setText(
-        str(mangalmm_ocr_client.get("server_url", "http://127.0.0.1:28081/v1"))
-    )
-    ui.mangalmm_ocr_max_completion_tokens_spinbox.setValue(
-        int(mangalmm_ocr_client.get("max_completion_tokens", 256))
-    )
-    ui.mangalmm_ocr_parallel_workers_spinbox.setValue(
-        int(mangalmm_ocr_client.get("parallel_workers", 1))
-    )
-    ui.mangalmm_ocr_request_timeout_spinbox.setValue(
-        int(mangalmm_ocr_client.get("request_timeout_sec", 60))
-    )
-    ui.mangalmm_ocr_raw_response_logging_checkbox.setChecked(
-        bool(mangalmm_ocr_client.get("raw_response_logging", False))
-    )
-    ui.mangalmm_ocr_safe_resize_checkbox.setChecked(
-        bool(mangalmm_ocr_client.get("safe_resize", True))
-    )
-    ui.mangalmm_ocr_max_pixels_spinbox.setValue(
-        int(mangalmm_ocr_client.get("max_pixels", 1200000))
-    )
-    ui.mangalmm_ocr_max_long_side_spinbox.setValue(
-        int(mangalmm_ocr_client.get("max_long_side", 1280))
-    )
+    # As with Paddle Spotting, an absent benchmark key must leave the real
+    # MangaLMM full-page defaults/QSettings intact.  The previous generic
+    # fallback silently lowered the official 4096-token and 2116800/1728
+    # image budget, changing OCR behavior rather than measuring runtime
+    # handoff.
+    if "server_url" in mangalmm_ocr_client:
+        ui.mangalmm_ocr_server_url_input.setText(str(mangalmm_ocr_client["server_url"]))
+    if "max_completion_tokens" in mangalmm_ocr_client:
+        ui.mangalmm_ocr_max_completion_tokens_spinbox.setValue(
+            int(mangalmm_ocr_client["max_completion_tokens"])
+        )
+    if "parallel_workers" in mangalmm_ocr_client:
+        ui.mangalmm_ocr_parallel_workers_spinbox.setValue(
+            int(mangalmm_ocr_client["parallel_workers"])
+        )
+    if "request_timeout_sec" in mangalmm_ocr_client:
+        ui.mangalmm_ocr_request_timeout_spinbox.setValue(
+            int(mangalmm_ocr_client["request_timeout_sec"])
+        )
+    if "raw_response_logging" in mangalmm_ocr_client:
+        ui.mangalmm_ocr_raw_response_logging_checkbox.setChecked(
+            bool(mangalmm_ocr_client["raw_response_logging"])
+        )
+    if "safe_resize" in mangalmm_ocr_client:
+        ui.mangalmm_ocr_safe_resize_checkbox.setChecked(
+            bool(mangalmm_ocr_client["safe_resize"])
+        )
+    if "max_pixels" in mangalmm_ocr_client:
+        ui.mangalmm_ocr_max_pixels_spinbox.setValue(int(mangalmm_ocr_client["max_pixels"]))
+    if "max_long_side" in mangalmm_ocr_client:
+        ui.mangalmm_ocr_max_long_side_spinbox.setValue(
+            int(mangalmm_ocr_client["max_long_side"])
+        )
 
     ui.gemma_chunk_size_spinbox.setValue(int(gemma.get("chunk_size", 6)))
     ui.gemma_max_completion_tokens_spinbox.setValue(int(gemma.get("max_completion_tokens", 512)))
@@ -1263,6 +1289,159 @@ def _decoded_pixel_sha256(path: Path) -> str:
         return ""
 
 
+def _decoded_array_sha256(image: object) -> str:
+    """Hash an in-memory inpaint image with the file-pixel hash contract."""
+
+    try:
+        import numpy as np
+
+        array = np.ascontiguousarray(image)
+        header = json.dumps(
+            {"shape": list(array.shape), "dtype": str(array.dtype)},
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+        digest = hashlib.sha256()
+        digest.update(header)
+        digest.update(array.tobytes())
+        return digest.hexdigest()
+    except Exception:
+        return ""
+
+
+def _snapshot_json_value(value: object) -> object:
+    """Keep private lab contracts JSON-stable without leaking into product state."""
+
+    return json.loads(
+        json.dumps(value, ensure_ascii=False, sort_keys=True, default=str)
+    )
+
+
+def _snapshot_contract_sha256(value: object) -> str:
+    return hashlib.sha256(
+        json.dumps(
+            _snapshot_json_value(value),
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+    ).hexdigest()
+
+
+def _detection_contract_snapshot(blk) -> dict[str, object]:
+    """Capture detection geometry/order/mask before OCR mutates a block."""
+
+    mask = getattr(blk, "mask", None)
+    return {
+        "xyxy": [float(value) for value in getattr(blk, "xyxy", [])],
+        "bubble_xyxy": _snapshot_json_value(getattr(blk, "bubble_xyxy", None)),
+        "angle": float(getattr(blk, "angle", 0.0) or 0.0),
+        "text_class": _snapshot_json_value(getattr(blk, "text_class", None)),
+        "mask_decoded_pixel_sha256": _decoded_array_sha256(mask),
+    }
+
+
+def _canonical_ocr_raw_results(blocks, raw_results: object) -> dict[str, object]:
+    """Bind OCR raw results to stable block order, never generated UUID keys.
+
+    ``TextBlock.block_id`` is deliberately generated anew for each pipeline
+    invocation.  It is an implementation locator, not OCR output.  The
+    private benchmark contract instead records each raw result at its detected
+    block ordinal; detection order/geometry is captured separately and exact.
+    """
+
+    if not isinstance(raw_results, dict):
+        raise RuntimeError("OCR raw-result contract must be a dictionary.")
+    entries: list[dict[str, object]] = []
+    consumed: set[str] = set()
+    for ordinal, block in enumerate(blocks):
+        block_id = str(getattr(block, "block_id", "") or "").strip()
+        if not block_id or block_id not in raw_results:
+            raise RuntimeError("OCR raw-result contract is missing a retained block.")
+        consumed.add(block_id)
+        entries.append(
+            {
+                "block_ordinal": ordinal,
+                "raw_result": _snapshot_json_value(raw_results[block_id]),
+            }
+        )
+    if consumed != {str(key) for key in raw_results}:
+        raise RuntimeError("OCR raw-result contract has an unbound block.")
+    return {
+        "schema_version": 1,
+        "block_count": len(entries),
+        "entries": entries,
+    }
+
+
+def _install_private_stage_contract_capture(window):
+    """Attach benchmark-only upstream evidence capture to one pipeline run.
+
+    The product deliberately does not retain raw OCR answers in UI state.  A
+    benchmark with ``--export-page-snapshots`` does, so this temporary hook
+    stores canonical OCR raw results/page diagnostics and the in-memory
+    decoded inpaint image hash in the *private* page snapshot only.
+    """
+
+    processor = window.pipeline.stage_batched_processor
+    original_run_primary_ocr = processor._run_primary_ocr
+    original_finish_inpaint_page = processor._finish_inpaint_page
+    contracts: dict[str, dict[str, object]] = {}
+
+    def contract_for(image_path: object) -> dict[str, object]:
+        return contracts.setdefault(str(image_path), {})
+
+    def observed_run_primary_ocr(ctx, policy):
+        detection = [_detection_contract_snapshot(block) for block in ctx.blk_list]
+        result = original_run_primary_ocr(ctx, policy)
+        raw_results = _canonical_ocr_raw_results(
+            ctx.blk_list,
+            result.get("raw_results") or {},
+        )
+        page_profile = _snapshot_json_value(result.get("page_profile") or {})
+        contract = contract_for(ctx.image_path)
+        contract.update(
+            {
+                "detection": detection,
+                "detection_sha256": _snapshot_contract_sha256(detection),
+                "ocr_raw_results": raw_results,
+                "ocr_raw_results_sha256": _snapshot_contract_sha256(raw_results),
+                "ocr_page_profile": page_profile,
+                "ocr_page_profile_sha256": _snapshot_contract_sha256(page_profile),
+            }
+        )
+        return result
+
+    def observed_finish_inpaint_page(ctx, *args, **kwargs):
+        result = original_finish_inpaint_page(ctx, *args, **kwargs)
+        diagnostics = _snapshot_json_value(ctx.inpaint_diagnostics or {})
+        contract = contract_for(ctx.image_path)
+        contract.update(
+            {
+                "inpaint_decoded_pixel_sha256": _decoded_array_sha256(
+                    ctx.inpaint_input_img
+                ),
+                "inpaint_diagnostics": diagnostics,
+                "inpaint_diagnostics_sha256": _snapshot_contract_sha256(
+                    diagnostics
+                ),
+            }
+        )
+        return result
+
+    processor._run_primary_ocr = observed_run_primary_ocr
+    processor._finish_inpaint_page = observed_finish_inpaint_page
+    processor._benchmark_private_stage_contracts = contracts
+
+    def restore() -> None:
+        processor._run_primary_ocr = original_run_primary_ocr
+        processor._finish_inpaint_page = original_finish_inpaint_page
+        if hasattr(processor, "_benchmark_private_stage_contracts"):
+            delattr(processor, "_benchmark_private_stage_contracts")
+
+    return restore
+
+
 def _runtime_snapshot_from_summary(summary: dict[str, object]) -> dict[str, object]:
     if not isinstance(summary, dict):
         return {}
@@ -1294,6 +1473,14 @@ def _runtime_snapshot_from_summary(summary: dict[str, object]) -> dict[str, obje
 
 def _write_page_snapshots(window, run_dir: Path, loaded_paths: list[str]) -> Path:
     snapshots: list[dict[str, object]] = []
+    processor = getattr(window.pipeline, "stage_batched_processor", None)
+    private_contracts = getattr(
+        processor,
+        "_benchmark_private_stage_contracts",
+        {},
+    )
+    if not isinstance(private_contracts, dict):
+        private_contracts = {}
     for image_path in loaded_paths:
         state = window.image_ctrl.ensure_page_state(image_path)
         blk_list = list(state.get("blk_list") or [])
@@ -1310,6 +1497,9 @@ def _write_page_snapshots(window, run_dir: Path, loaded_paths: list[str]) -> Pat
             if translated_image_path
             else None
         )
+        private_contract = private_contracts.get(str(image_path), {})
+        if not isinstance(private_contract, dict):
+            private_contract = {}
         snapshots.append(
             {
                 "image_path": str(image_path),
@@ -1341,6 +1531,10 @@ def _write_page_snapshots(window, run_dir: Path, loaded_paths: list[str]) -> Pat
                     if translated_image is not None and translated_image.is_file()
                     else ""
                 ),
+                # The page snapshot lives in the managed private archive.
+                # Keep the raw OCR/diagnostic payloads there and bind the
+                # comparison gate to their canonical digests.
+                "private_stage_contract": private_contract,
                 "blocks": [_serialize_page_snapshot_block(block) for block in blk_list],
             }
         )
@@ -1383,6 +1577,26 @@ def _run_single_mode(
     performance_stats: dict[str, object] = {}
     loaded_paths: list[str] = []
     gemma_pagecache_reset: dict[str, object] = {}
+    router_handoff_lab_config_raw = preset.get("benchmark_router_handoff")
+    if isinstance(router_handoff_lab_config_raw, dict):
+        if product_managed_runtime:
+            raise ValueError(
+                "Router-handoff lab uses its own container and cannot use product-managed runtime."
+            )
+        workflow = str(
+            ((preset.get("app", {}) or {}).get("workflow_mode"))
+            or ((preset.get("benchmark_contract", {}) or {}).get("workflow_mode"))
+            or ""
+        )
+        if workflow != "stage_batched_pipeline":
+            raise ValueError("Router-handoff lab requires stage_batched_pipeline.")
+        configured_artifact = Path(
+            str(router_handoff_lab_config_raw.get("artifact_dir", "") or "")
+        ).expanduser().resolve()
+        if configured_artifact != run_dir.resolve():
+            raise ValueError(
+                "Router-handoff lab artifact_dir must be this private pipeline run directory."
+            )
     try:
         _log(
             "실행 시작: mode={mode} output={run_dir} images={count} source={source} target={target}".format(
@@ -1413,8 +1627,18 @@ def _run_single_mode(
         ):
             window = ComicTranslate()
             turbo4_lab_runtime = None
+            router_handoff_lab_runtime = None
+            private_stage_contract_restore = None
             try:
                 turbo4_lab_config = preset.get("benchmark_turbo4_kv")
+                router_handoff_lab_config = preset.get("benchmark_router_handoff")
+                if isinstance(turbo4_lab_config, dict) and isinstance(
+                    router_handoff_lab_config,
+                    dict,
+                ):
+                    raise ValueError(
+                        "Turbo4 and router-handoff lab adapters cannot run together."
+                    )
                 if isinstance(turbo4_lab_config, dict):
                     # This is a benchmarking/lab-only adapter.  It replaces
                     # the already-created product manager but deliberately
@@ -1428,11 +1652,34 @@ def _run_single_mode(
                         window,
                         turbo4_lab_config,
                     )
+                if isinstance(router_handoff_lab_config, dict):
+                    # Lab-only: the warm router process is included in E2E
+                    # timing, but individual model transitions remain under
+                    # the product RuntimeResourceArbiter.
+                    from router_handoff_lab_runtime import (
+                        install_router_handoff_lab_runtime_adapter,
+                    )
+
+                    router_handoff_lab_runtime = (
+                        install_router_handoff_lab_runtime_adapter(
+                            window,
+                            router_handoff_lab_config,
+                        )
+                    )
+                if (
+                    os.environ.get("CT_BENCH_EXPORT_PAGE_SNAPSHOTS", "").strip()
+                    == "1"
+                ):
+                    private_stage_contract_restore = (
+                        _install_private_stage_contract_capture(window)
+                    )
                 if os.environ.get("CT_BENCH_CLEAR_APP_CACHES", "").strip() == "1":
                     window.pipeline.cache_manager.clear_ocr_cache()
                     window.pipeline.cache_manager.clear_translation_cache()
                     _log("앱 OCR/번역 캐시 초기화 완료")
                 _configure_window(window, preset, source_lang, target_lang)
+                if router_handoff_lab_runtime is not None:
+                    router_handoff_lab_runtime.validate_window_contract()
                 _log("앱 설정 적용 완료")
                 loaded_paths = _load_or_create_project(
                     window,
@@ -1521,6 +1768,8 @@ def _run_single_mode(
 
                 started = time.perf_counter()
                 try:
+                    if router_handoff_lab_runtime is not None:
+                        router_handoff_lab_runtime.prepare_process()
                     if mode == "one-page":
                         _log("one-page 벤치 실행 중...")
                         window.pipeline.batch_process([loaded_paths[0]])
@@ -1568,10 +1817,17 @@ def _run_single_mode(
                     )
 
                 window.pipeline.release_model_caches()
+                if router_handoff_lab_runtime is not None:
+                    router_handoff_lab_runtime.verify_round_trip()
                 if turbo4_lab_runtime is not None:
                     write_json(
                         run_dir / "turbo4_lab_runtime.json",
                         turbo4_lab_runtime.adapter.evidence(),
+                    )
+                if router_handoff_lab_runtime is not None:
+                    write_json(
+                        run_dir / "router_handoff_lab_runtime.json",
+                        router_handoff_lab_runtime.session.evidence(),
                     )
                 window.emit_memlog(
                     "benchmark_run_finished",
@@ -1589,6 +1845,16 @@ def _run_single_mode(
                                 run_dir / "turbo4_lab_runtime.json",
                                 turbo4_lab_runtime.adapter.evidence(),
                             )
+                    if router_handoff_lab_runtime is not None:
+                        try:
+                            router_handoff_lab_runtime.close()
+                        finally:
+                            write_json(
+                                run_dir / "router_handoff_lab_runtime.json",
+                                router_handoff_lab_runtime.session.evidence(),
+                            )
+                    if private_stage_contract_restore is not None:
+                        private_stage_contract_restore()
                     window._skip_close_prompt = True
                     window.close()
                     app.processEvents()

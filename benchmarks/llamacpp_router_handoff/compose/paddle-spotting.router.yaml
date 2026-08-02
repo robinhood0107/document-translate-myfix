@@ -1,0 +1,60 @@
+services:
+  router:
+    image: ${LLAMA_CPP_IMAGE:-ghcr.io/ggml-org/llama.cpp@sha256:22e0e3bfe967af4fd1df6a918022abbfd4e72e4d40a4769e616a4176790acbcb}
+    pull_policy: never
+    container_name: ${ROUTER_CONTAINER_NAME}
+    restart: "no"
+    # See paddle-crop.router.yaml: this single-container lab uses the built-in
+    # bridge to avoid accumulating a Compose network for every ABBA arm.
+    network_mode: bridge
+    labels:
+      com.comictranslate.benchmark-protocol: ${ROUTER_PROTOCOL_VERSION:-llamacpp-router-handoff-v1}
+      com.comictranslate.benchmark-pair: paddle-spotting
+      com.comictranslate.benchmark-owner: ${ROUTER_OWNER_TOKEN}
+    gpus: all
+    environment:
+      NVIDIA_VISIBLE_DEVICES: all
+      NVIDIA_DRIVER_CAPABILITIES: compute,utility
+    ports:
+      - "127.0.0.1:${OCR_HOST_PORT}:8080"
+      - "127.0.0.1:${GEMMA_HOST_PORT}:8080"
+    volumes:
+      - type: volume
+        source: ocr-models
+        target: /models/ocr
+        read_only: true
+      - type: volume
+        source: gemma-models
+        target: /models/gemma
+        read_only: true
+      - type: bind
+        source: ${ROUTER_CONFIG_DIR}
+        target: /config
+        read_only: true
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:8080/health >/dev/null || exit 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 24
+      start_period: 5s
+    command:
+      - --host
+      - 0.0.0.0
+      - --port
+      - "8080"
+      - --models-preset
+      - /config/models.ini
+      - --models-max
+      - "1"
+      - --no-models-autoload
+      - --metrics
+      - --props
+      - --slots
+
+volumes:
+  ocr-models:
+    external: true
+    name: ${OCR_MODEL_VOLUME}
+  gemma-models:
+    external: true
+    name: ${GEMMA_MODEL_VOLUME}
