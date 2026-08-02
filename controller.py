@@ -24,6 +24,7 @@ from app.projects.project_types import (
 
 from modules.ocr.local_runtime import LocalOCRRuntimeManager
 from modules.translation.local_runtime import LocalGemmaRuntimeManager
+from modules.utils.local_llama_router import LocalLlamaRouterCoordinator
 from modules.ocr.selection import OCR_MODE_BEST_LOCAL, normalize_ocr_mode, resolve_ocr_engine
 from app.ui.canvas.text_item import TextBlockItem
 from app.ui.commands.box import DeleteBoxesCommand, DeleteTextBoxCommand
@@ -206,8 +207,13 @@ class ComicTranslate(ComicTranslateUI):
         self._last_batch_output_root = ""
         self._intermediate_preview_disabled_notices = set()
         self._automatic_progress_tracker = AutomaticProgressTracker()
-        self.local_ocr_runtime_manager = LocalOCRRuntimeManager()
-        self.local_translation_runtime_manager = LocalGemmaRuntimeManager()
+        self.local_llama_router_coordinator = LocalLlamaRouterCoordinator()
+        self.local_ocr_runtime_manager = LocalOCRRuntimeManager(
+            self.local_llama_router_coordinator
+        )
+        self.local_translation_runtime_manager = LocalGemmaRuntimeManager(
+            self.local_llama_router_coordinator
+        )
 
         self.image_ctrl = ImageStateController(self)
         self.rect_item_ctrl = RectItemController(self)
@@ -2900,6 +2906,10 @@ class ComicTranslate(ComicTranslateUI):
             pass
         try:
             self.local_translation_runtime_manager.shutdown()
+        except Exception:
+            pass
+        try:
+            self.local_llama_router_coordinator.stop_pair()
         except Exception:
             pass
         try:
