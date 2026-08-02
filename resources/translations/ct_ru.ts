@@ -3425,6 +3425,10 @@ Restart now?</source>
 <context>
     <name>StageBatchedProcessor</name>
     <message>
+        <source>Managed runtime GPU release was not confirmed.</source>
+        <translation>Не удалось подтвердить освобождение памяти GPU управляемой средой выполнения.</translation>
+    </message>
+    <message>
         <source>Gemma could not start because inpainter VRAM release was not confirmed.</source>
         <translation>Не удалось запустить Gemma, поскольку освобождение видеопамяти моделью восстановления изображения не подтверждено.</translation>
     </message>

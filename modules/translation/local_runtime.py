@@ -383,16 +383,26 @@ class LocalGemmaRuntimeManager:
             cancel_checker=cancel_checker,
         )
 
-    def shutdown(self) -> None:
+    def shutdown(self) -> dict[str, str | bool]:
         with self._lock:
             self._readiness_cache.clear()
-            if not (self._managed_active or self._managed_start_attempted):
+            gpu_release_expected = bool(
+                self._managed_active or self._managed_start_attempted
+            )
+            if not gpu_release_expected:
                 self._active_contract = None
-                return
+                return {
+                    "runtime_state": "stopped",
+                    "gpu_release_expected": False,
+                }
             self._stop_managed_container()
             self._managed_active = False
             self._managed_start_attempted = False
             self._active_contract = None
+            return {
+                "runtime_state": "stopped",
+                "gpu_release_expected": True,
+            }
 
     def _resolve_credentials(self, settings_page: Any) -> tuple[str, str]:
         creds = settings_page.get_credentials("Custom Local Server(Gemma)")
