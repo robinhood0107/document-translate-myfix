@@ -902,6 +902,46 @@ def test_windows_bats_resume_transient_worker_exit_and_keep_cuda_pair() -> None:
     assert ".venv-win-cuda13\\Scripts\\python.exe" in cuda13
 
 
+@pytest.mark.parametrize(
+    "name",
+    (
+        "benchmark_gemma_sampler_quality_v2.bat",
+        "benchmark_gemma_sampler_quality_v2_cuda13.bat",
+    ),
+)
+def test_windows_sampler_bats_launch_the_read_only_monitor_and_persist_runner_logs(name: str) -> None:
+    bat = (ROOT / "scripts" / name).read_text(encoding="utf-8")
+
+    assert "SAMPLER_NO_MONITOR" in bat
+    assert "build_gemma_sampler_monitor.bat --if-stale" in bat
+    assert 'start "Gemma Sampler Monitor"' in bat
+    assert '"%SAMPLER_MONITOR_EXE%" --run-root "%SAMPLER_RUN_ROOT%"' in bat
+    assert "--exit-on-completion" in bat
+    assert "SAMPLER_LOG_DIR" in bat
+    assert '>> "%SAMPLER_LOG%" 2>&1' in bat
+
+
+def test_monitor_builder_uses_scoop_fallback_and_private_executable_output() -> None:
+    builder = (ROOT / "scripts" / "build_gemma_sampler_monitor.bat").read_text(encoding="utf-8")
+
+    assert "%USERPROFILE%\\scoop\\shims\\go.exe" in builder
+    assert "%USERPROFILE%\\scoop\\apps\\go\\current\\bin\\go.exe" in builder
+    assert "banchmark_result_log\\tools\\gemma-monitor.exe" in builder
+    assert "--if-stale" in builder
+    assert "build -trimpath" in builder
+
+
+def test_monitor_source_uses_bubble_tea_alt_screen_and_bounded_snapshot_reads() -> None:
+    monitor = (ROOT / "scripts" / "gemma_sampler_monitor" / "main.go").read_text(encoding="utf-8")
+    snapshot = (ROOT / "scripts" / "gemma_sampler_monitor" / "snapshot.go").read_text(encoding="utf-8")
+
+    assert "tea.WithAltScreen()" in monitor
+    assert "runner·Docker·GPU 작업은 계속됩니다" in monitor
+    assert "readSharedFile" in snapshot
+    assert "file.Close()" in snapshot
+    assert "Do not tail or retain a handle" in snapshot
+
+
 def test_private_review_html_escapes_text_and_never_adds_source_paths() -> None:
     document = render_private_review_html(
         {
