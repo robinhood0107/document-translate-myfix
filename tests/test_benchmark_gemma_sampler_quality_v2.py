@@ -4,6 +4,7 @@ import hashlib
 import json
 from pathlib import Path
 import sys
+from types import SimpleNamespace
 
 import pytest
 
@@ -644,6 +645,35 @@ def test_startup_cleanup_failure_is_returned_to_the_calling_failure_path() -> No
     assert not replay._started
     assert replay.spec is None
     assert replay.contract is None
+
+
+def test_startup_failure_keeps_setup_cause_after_successful_terminal_cleanup() -> None:
+    class FailingPrepareCoordinator:
+        def classify_pair(self, *_args: object) -> SimpleNamespace:
+            return SimpleNamespace(kind=SimpleNamespace(value="crop"))
+
+        def prepare(self, *_args: object, **_kwargs: object) -> None:
+            raise RuntimeError("compose preparation root cause")
+
+        def finish(self, **_kwargs: object) -> None:
+            return None
+
+    replay = object.__new__(runtime.RouterGemmaReplayRuntime)
+    replay.settings = runtime.RouterLabSettings()
+    replay.coordinator = FailingPrepareCoordinator()
+    replay.ocr_manager = SimpleNamespace(_router_runtime_spec=lambda *_args: object())
+    replay.gemma_manager = SimpleNamespace(set_router_spec=lambda *_args: None)
+    replay.arbiter = object()
+    replay.adapter = object()
+    replay.spec = None
+    replay.contract = None
+    replay._started = False
+
+    with pytest.raises(runtime.RuntimeErrorV2, match="compose preparation root cause") as raised:
+        replay.start()
+
+    assert "terminal cleanup/GPU return verification passed" in str(raised.value)
+    assert isinstance(raised.value.__cause__, RuntimeError)
 
 
 def test_windows_bats_resume_transient_worker_exit_and_keep_cuda_pair() -> None:
