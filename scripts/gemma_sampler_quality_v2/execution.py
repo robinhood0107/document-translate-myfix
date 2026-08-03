@@ -201,9 +201,14 @@ def _assert_runtime_contract(runtime: RouterGemmaReplayRuntime) -> dict[str, Any
     contract = runtime.contract
     if contract is None:
         raise ExecutionError("Router runtime contract is unavailable after start.")
-    effective = dict(contract.effective_environment)
-    if str(effective.get("LLAMA_CTX_SIZE") or "") != str(CONTEXT_SIZE):
-        raise ExecutionError("Router runtime context size differs from the v2 contract.")
+    # Router v2 loads aliases from the pair's models.ini, rather than from a
+    # container-level LLAMA_CTX_SIZE environment variable.  The prepared
+    # Gemma material carries that model configuration and is fingerprinted
+    # together with the Router preset, so use it as the context-size proof.
+    gemma_runtime_options = dict(contract.gemma_model.runtime_options)
+    effective_context_size = str(gemma_runtime_options.get("LLAMA_CTX_SIZE") or "")
+    if effective_context_size != str(CONTEXT_SIZE):
+        raise ExecutionError("Router Gemma model context size differs from the v2 contract.")
     fixed = fixed_request_contract_payload()
     return {
         "fingerprint": contract.fingerprint,
@@ -217,7 +222,7 @@ def _assert_runtime_contract(runtime: RouterGemmaReplayRuntime) -> dict[str, Any
         "ocr_manifest_sha256": contract.ocr_model.ready_manifest_sha256,
         "gemma_model_sha256": contract.gemma_model.model_sha256,
         "gemma_manifest_sha256": contract.gemma_model.ready_manifest_sha256,
-        "effective_context_size": effective.get("LLAMA_CTX_SIZE"),
+        "effective_context_size": effective_context_size,
         "fixed_request_contract_sha256": canonical_sha256(fixed),
     }
 
