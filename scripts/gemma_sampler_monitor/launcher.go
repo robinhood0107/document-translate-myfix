@@ -105,7 +105,7 @@ func ensureMonitorBuilt(repositoryRoot string) error {
 		return fmt.Errorf("open private monitor build log: %w", err)
 	}
 	defer logFile.Close()
-	command := exec.Command("cmd.exe", "/d", "/s", "/c", fmt.Sprintf(`call "%s" --monitor-only-if-stale`, buildPath))
+	command := newBatchCommand(buildPath, "--monitor-only-if-stale")
 	command.Dir = repositoryRoot
 	command.Stdout = logFile
 	command.Stderr = logFile
@@ -164,7 +164,7 @@ func launchCampaignBatch(repositoryRoot string) error {
 	if err != nil {
 		return fmt.Errorf("open private launcher log: %w", err)
 	}
-	command := exec.Command("cmd.exe", "/d", "/s", "/c", fmt.Sprintf(`call "%s"`, batchPath))
+	command := newBatchCommand(batchPath)
 	command.Dir = repositoryRoot
 	command.Stdout = logFile
 	command.Stderr = logFile

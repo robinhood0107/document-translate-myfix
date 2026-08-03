@@ -5,6 +5,7 @@ import (
 	"math"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -166,6 +167,36 @@ func TestFindRepositoryRootFindsCuda13BatchFromLauncherLocation(t *testing.T) {
 	found, ok := findRepositoryRoot(launcherDir)
 	if !ok || found != root {
 		t.Fatalf("launcher could not resolve its repository root: found=%q ok=%v", found, ok)
+	}
+}
+
+func TestBatchCommandLineKeepsPathQuotesUnescaped(t *testing.T) {
+	got := batchCommandLine(`C:\sampler tools\build monitor.bat`, "--monitor-only-if-stale")
+	want := `cmd.exe /d /c call "C:\sampler tools\build monitor.bat" "--monitor-only-if-stale"`
+	if got != want {
+		t.Fatalf("unexpected batch command line: got=%q want=%q", got, want)
+	}
+	if strings.Contains(got, `\"`) {
+		t.Fatalf("CMD must not receive escaped path quotes: %q", got)
+	}
+}
+
+func TestBatchCommandRunsABatchWhosePathContainsSpacesOnWindows(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("native CMD execution is verified by the Windows Go test run")
+	}
+	root := t.TempDir()
+	batchPath := filepath.Join(root, "sampler tools", "probe.bat")
+	if err := os.MkdirAll(filepath.Dir(batchPath), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(batchPath, []byte("@echo off\r\nif /I \"%~1\"==\"--probe\" exit /b 0\r\nexit /b 1\r\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	command := newBatchCommand(batchPath, "--probe")
+	command.Dir = root
+	if output, err := command.CombinedOutput(); err != nil {
+		t.Fatalf("native CMD did not run quoted batch path: %v\n%s", err, output)
 	}
 }
 
