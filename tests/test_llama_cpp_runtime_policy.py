@@ -1,12 +1,17 @@
 from __future__ import annotations
 
+import os
 import subprocess
+import tempfile
 import unittest
+from pathlib import Path
 from unittest import mock
 
 from modules.utils.llama_cpp_runtime import (
     DEFAULT_LLAMA_CPP_IMAGE,
     normalize_llama_cpp_image,
+    resolve_docker_compose_command,
+    resolve_docker_executable,
     run_docker_command,
 )
 from modules.utils.exceptions import OperationCancelledError
@@ -46,6 +51,47 @@ class LlamaCppRuntimePolicyTests(unittest.TestCase):
         self.assertEqual(
             normalize_llama_cpp_image("ghcr.io/ggml-org/llama.cpp:server-cuda"),
             DEFAULT_LLAMA_CPP_IMAGE,
+        )
+
+    def test_windows_docker_exe_is_found_when_pathext_is_malformed(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_root:
+            root = Path(temporary_root)
+            shim_directory = root / "shim"
+            docker_directory = root / "docker"
+            shim_directory.mkdir()
+            docker_directory.mkdir()
+            (shim_directory / "docker").touch()
+            docker_exe = docker_directory / "docker.exe"
+            docker_exe.touch()
+            with mock.patch.dict(
+                "modules.utils.llama_cpp_runtime.os.environ",
+                {
+                    "PATH": os.pathsep.join((str(shim_directory), str(docker_directory))),
+                    "PATHEXT": ".CPL",
+                },
+                clear=False,
+            ), mock.patch(
+                "modules.utils.llama_cpp_runtime.shutil.which",
+                return_value=None,
+            ):
+                self.assertEqual(resolve_docker_executable(), str(docker_exe))
+
+    def test_compose_probe_uses_explicitly_discovered_docker_executable(self) -> None:
+        docker_exe = r"C:\Docker\docker.exe"
+        completed = subprocess.CompletedProcess([docker_exe, "compose", "version"], 0, "", "")
+        with mock.patch(
+            "modules.utils.llama_cpp_runtime._find_executable_on_path",
+            side_effect=[docker_exe, None],
+        ), mock.patch(
+            "modules.utils.llama_cpp_runtime.run_docker_command",
+            return_value=completed,
+        ) as run:
+            self.assertEqual(resolve_docker_compose_command(), (docker_exe, "compose"))
+
+        run.assert_called_once_with(
+            [docker_exe, "compose", "version"],
+            check=False,
+            cancel_checker=None,
         )
 
     def test_docker_command_cancellation_terminates_blocked_client(self) -> None:
