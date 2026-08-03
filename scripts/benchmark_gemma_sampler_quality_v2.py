@@ -54,18 +54,33 @@ from scripts.gemma_sampler_quality_v2.judgment import (  # noqa: E402
     open_holdout_packet,
     rank_sampler_results,
 )
+from scripts.gemma_sampler_quality_v2.incremental import (  # noqa: E402
+    apply_incremental_judgments,
+    build_incremental_judgment_packet,
+    mark_pending_batch,
+    new_incremental_ledger,
+    seed_ledger_from_completed_packet,
+    validate_incremental_ledger,
+    validate_incremental_packet,
+)
 from scripts.gemma_sampler_quality_v2.report import (  # noqa: E402
     build_phase_report,
     render_public_markdown,
 )
 from scripts.gemma_sampler_quality_v2.review import ReviewBoardError, render_private_review_html  # noqa: E402
-from scripts.gemma_sampler_quality_v2.storage import StorageError, atomic_write_json, read_json  # noqa: E402
+from scripts.gemma_sampler_quality_v2.storage import (  # noqa: E402
+    StorageError,
+    atomic_write_json,
+    read_json,
+    utc_now,
+)
 from scripts.gemma_sampler_quality_v2.protocol import ProtocolError  # noqa: E402
 
 
 FAMILY = "gemma-sampler-quality-v2"
 CATEGORY = "10-gemma-translation"
 EXIT_RESUME = 75
+INCREMENTAL_LEDGER_FILE = "incremental-judgment-ledger.json"
 
 
 def _private_path(value: str | Path) -> Path:
@@ -525,6 +540,194 @@ def command_build_judgment_packet(args: argparse.Namespace) -> int:
     )
 
 
+def _incremental_ledger(run: harness.ManagedArtifactRun, reference: Mapping[str, Any]) -> dict[str, Any]:
+    path = run.artifact_root / INCREMENTAL_LEDGER_FILE
+    if not path.exists():
+        return new_incremental_ledger(reference)
+    value = read_json(path)
+    if not isinstance(value, Mapping):
+        raise ExecutionError("Incremental judgment ledger is not a JSON object.")
+    ledger = dict(value)
+    validate_incremental_ledger(ledger, reference=reference)
+    return ledger
+
+
+def _incremental_summary(
+    *,
+    run: harness.ManagedArtifactRun,
+    ledger: Mapping[str, Any],
+    packet: Mapping[str, Any] | None,
+) -> dict[str, Any]:
+    pending = ledger.get("pending_batch")
+    return {
+        "run_root": str(run.run_root),
+        "judged_cluster_count": len(ledger.get("verdicts") or {}),
+        "applied_batch_count": len(ledger.get("applied_batches") or []),
+        "pending_batch": dict(pending) if isinstance(pending, Mapping) else None,
+        "observed_response_count": int(packet.get("observed_response_count") or 0) if packet else 0,
+        "pending_total_cluster_count": int(packet.get("pending_total_cluster_count") or 0) if packet else 0,
+        "batch_cluster_count": int(packet.get("batch_cluster_count") or 0) if packet else 0,
+        "unjudged_response_count": int(packet.get("unjudged_response_count") or 0) if packet else 0,
+    }
+
+
+def _checkpoint_incremental_error(
+    run: harness.ManagedArtifactRun,
+    *,
+    command: str,
+    error: BaseException,
+) -> None:
+    """Keep a durable judgment ledger resumable after an operator-visible error."""
+
+    try:
+        run.checkpoint(
+            metadata={
+                "command": command,
+                "state": "ERROR_REQUIRES_INSPECTION",
+                "error_type": type(error).__name__,
+                "error_message": str(error)[:4096],
+            }
+        )
+    except BaseException:
+        # Preserve the original exception. The previous running manifest remains
+        # resumable even when this best-effort diagnostic checkpoint cannot land.
+        pass
+
+
+def command_refresh_incremental_judgment(args: argparse.Namespace) -> int:
+    """Create or refresh one stable blind batch without closing the live campaign."""
+
+    run = _open_run(args)
+    try:
+        reference = load_frozen_reference(_private_path(args.reference))
+        ledger = _incremental_ledger(run, reference)
+        reuse_packet = str(args.reuse_packet or "").strip()
+        reuse_decisions = str(args.reuse_decisions or "").strip()
+        if bool(reuse_packet) != bool(reuse_decisions):
+            raise ExecutionError("Reusable packet and decisions must be supplied together.")
+        if reuse_packet:
+            completed_packet = _load_object(reuse_packet)
+            completed_decisions = _decision_map(
+                reuse_decisions,
+                collection_keys=("decisions", "rows"),
+                id_key="cluster_id",
+            )
+            ledger = seed_ledger_from_completed_packet(
+                ledger,
+                reference=reference,
+                packet=completed_packet,
+                decisions=completed_decisions,
+                source_label="temperature-r6-semantic-v4",
+            )
+
+        packet: dict[str, Any] | None = None
+        pending = ledger.get("pending_batch")
+        if isinstance(pending, Mapping):
+            packet_file = str(pending.get("packet_file") or "")
+            if Path(packet_file).name != packet_file:
+                raise ExecutionError("Incremental judgment pending packet path is invalid.")
+            value = read_json(run.artifact_root / packet_file)
+            if not isinstance(value, Mapping):
+                raise ExecutionError("Incremental judgment pending packet is unreadable.")
+            packet = dict(value)
+            validate_incremental_packet(packet, reference=reference)
+        else:
+            records = collect_completed_records(
+                _response_stores(args.response_run),
+                reference=reference,
+                snapshot=True,
+            )
+            packet = build_incremental_judgment_packet(
+                reference,
+                records,
+                ledger,
+                batch_size=int(args.batch_size),
+            )
+            if packet.get("rows"):
+                batch_number = ledger.get("next_batch_number")
+                if isinstance(batch_number, bool) or not isinstance(batch_number, int) or batch_number <= 0:
+                    raise ExecutionError("Incremental judgment ledger batch counter is invalid.")
+                packet_file = f"judgment-batch-{batch_number:04d}.json"
+                atomic_write_json(run.artifact_root / packet_file, packet)
+                ledger = mark_pending_batch(
+                    ledger,
+                    reference=reference,
+                    packet=packet,
+                    packet_file=packet_file,
+                )
+
+        atomic_write_json(run.artifact_root / INCREMENTAL_LEDGER_FILE, ledger)
+        summary = _incremental_summary(run=run, ledger=ledger, packet=packet)
+        run.checkpoint(metadata={"command": "refresh-incremental-judgment", "summary": summary})
+        print(json.dumps(summary, ensure_ascii=False))
+        return 0
+    except BaseException as exc:
+        _checkpoint_incremental_error(
+            run,
+            command="refresh-incremental-judgment",
+            error=exc,
+        )
+        raise
+
+
+def command_apply_incremental_judgment(args: argparse.Namespace) -> int:
+    """Apply one complete blind decision batch and leave the ledger resumable."""
+
+    if not str(args.resume_run or "").strip():
+        raise ExecutionError("Applying incremental judgments requires the existing ledger run.")
+    run = _open_run(args)
+    try:
+        reference = load_frozen_reference(_private_path(args.reference))
+        ledger = _incremental_ledger(run, reference)
+        pending = ledger.get("pending_batch")
+        if not isinstance(pending, Mapping):
+            raise ExecutionError("Incremental judgment ledger has no pending blind batch.")
+        packet_file = str(pending.get("packet_file") or "")
+        if Path(packet_file).name != packet_file:
+            raise ExecutionError("Incremental judgment pending packet path is invalid.")
+        packet_value = read_json(run.artifact_root / packet_file)
+        if not isinstance(packet_value, Mapping):
+            raise ExecutionError("Incremental judgment pending packet is unreadable.")
+        packet = dict(packet_value)
+        decisions = _decision_map(
+            args.decisions,
+            collection_keys=("decisions", "rows"),
+            id_key="cluster_id",
+        )
+        ledger = apply_incremental_judgments(
+            ledger,
+            reference=reference,
+            packet=packet,
+            decisions=decisions,
+            applied_utc=utc_now(),
+        )
+        decision_file = packet_file.removesuffix(".json") + "-decisions.json"
+        atomic_write_json(
+            run.artifact_root / decision_file,
+            {
+                "schema_version": packet.get("schema_version"),
+                "rule_version": packet.get("rule_version"),
+                "packet_id": packet.get("packet_id"),
+                "packet_sha256": packet.get("packet_sha256"),
+                "decisions": decisions,
+            },
+        )
+        atomic_write_json(run.artifact_root / INCREMENTAL_LEDGER_FILE, ledger)
+        summary = _incremental_summary(run=run, ledger=ledger, packet=None)
+        summary["applied_cluster_count"] = len(decisions)
+        summary["decision_file"] = decision_file
+        run.checkpoint(metadata={"command": "apply-incremental-judgment", "summary": summary})
+        print(json.dumps(summary, ensure_ascii=False))
+        return 0
+    except BaseException as exc:
+        _checkpoint_incremental_error(
+            run,
+            command="apply-incremental-judgment",
+            error=exc,
+        )
+        raise
+
+
 def command_rank(args: argparse.Namespace) -> int:
     reference = load_frozen_reference(_private_path(args.reference))
     all_records = collect_completed_records(
@@ -723,6 +926,21 @@ def build_parser() -> argparse.ArgumentParser:
     judgment.add_argument("--baseline-tuple", default="")
     _add_run_options(judgment)
     judgment.set_defaults(handler=command_build_judgment_packet)
+
+    incremental = subparsers.add_parser("refresh-incremental-judgment")
+    incremental.add_argument("--reference", required=True)
+    incremental.add_argument("--response-run", action="append", required=True)
+    incremental.add_argument("--reuse-packet", default="")
+    incremental.add_argument("--reuse-decisions", default="")
+    incremental.add_argument("--batch-size", type=int, default=100)
+    _add_run_options(incremental)
+    incremental.set_defaults(handler=command_refresh_incremental_judgment)
+
+    apply_incremental = subparsers.add_parser("apply-incremental-judgment")
+    apply_incremental.add_argument("--reference", required=True)
+    apply_incremental.add_argument("--decisions", required=True)
+    _add_run_options(apply_incremental)
+    apply_incremental.set_defaults(handler=command_apply_incremental_judgment)
 
     rank = subparsers.add_parser("rank")
     rank.add_argument("--reference", required=True)

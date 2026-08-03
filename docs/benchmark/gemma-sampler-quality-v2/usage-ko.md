@@ -51,3 +51,14 @@ monitor는 read-only다. `q`, `Esc`, `Ctrl+C`는 **monitor 창만** 닫고 runne
 PC 재부팅이나 BAT worker 강제 종료 뒤에는 같은 EXE를 다시 실행한다. 이미 first-valid로
 저장된 logical slot은 재추론하지 않는다. 정상 완료 전에는 수동으로 결과를 삭제하거나
 새 run ID를 만들지 않는다.
+
+## 실행 중 판정은 누가 하는가
+
+사용자는 별도 판정 BAT를 실행하지 않는다. 캠페인을 감독하는 에이전트가 live completion
+index를 읽기 전용 snapshot으로 열고, sampler·seed·순서를 숨긴 새 unique 번역만 작은 묶음으로
+판정한다. 기존 r6 판정과 같은 `case_id + 번역문 hash + rule version`은 재사용한다. 누적 판정은
+별도 private managed ledger에 원자 저장되며 campaign 응답·progress·manifest를 수정하지 않는다.
+
+캠페인 종료 후에도 바로 제품값을 바꾸지 않는다. 에이전트가 cleanup, 전체 응답 수, 미판정 0,
+140개 조합 통계와 필수 이름 gate를 확인해 사용자에게 제시하고, 사용자가 명시 승인해야 제품
+sampler PR 단계로 넘어간다.

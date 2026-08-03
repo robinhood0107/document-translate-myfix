@@ -18,7 +18,17 @@ if str(ROOT) not in sys.path:
 
 from scripts import benchmark_gemma_sampler_quality_v2 as sampler_cli  # noqa: E402
 from scripts import validation_artifact_harness as harness  # noqa: E402
-from scripts.gemma_sampler_quality_v2 import campaign, corpus, execution, judgment, protocol, report, runtime, storage  # noqa: E402
+from scripts.gemma_sampler_quality_v2 import (  # noqa: E402
+    campaign,
+    corpus,
+    execution,
+    incremental,
+    judgment,
+    protocol,
+    report,
+    runtime,
+    storage,
+)
 from scripts.gemma_sampler_quality_v2.storage import RunStore, read_json  # noqa: E402
 from scripts.gemma_sampler_quality_v2.review import render_private_review_html  # noqa: E402
 
@@ -523,6 +533,270 @@ def test_blind_cluster_judgment_propagates_to_each_actual_response() -> None:
     ranked = judgment.rank_sampler_results(records, verdicts)
     assert ranked[0]["major"] == 2
     assert ranked[0]["unique_error_cases"] == 1
+
+
+def _incremental_fixture() -> tuple[dict[str, object], list[dict[str, object]]]:
+    cases = [
+        {
+            "case_id": "case-tuning",
+            "split": "tuning",
+            "language": "ja-ko",
+            "source_text": "source tuning",
+            "context_after_text": "context tuning",
+            "canonical_translation": "정답 A",
+            "required_meaning": ["meaning A"],
+            "prohibited_changes": ["number_change"],
+        },
+        {
+            "case_id": "case-holdout",
+            "split": "holdout",
+            "language": "en-ko",
+            "source_text": "source holdout",
+            "context_after_text": "context holdout",
+            "canonical_translation": "정답 B",
+            "required_meaning": ["meaning B"],
+            "prohibited_changes": ["identity_change"],
+        },
+    ]
+    reference: dict[str, object] = {
+        "reference_sha256": "a" * 64,
+        "cases": cases,
+    }
+    records: list[dict[str, object]] = []
+    for index, (case, translation) in enumerate(zip(cases, ("후보 A", "후보 B"), strict=True)):
+        verdict = judgment.validate_response_envelope(
+            {"choices": [{"index": 0, "content": json.dumps({"translation": translation}, ensure_ascii=False), "finish_reason": "stop"}]}
+        )
+        records.append(
+            {
+                "case_id": case["case_id"],
+                "split": case["split"],
+                "logical_slot": f"slot-{index}",
+                "sampler": protocol.SamplerTuple(0.3, 0.95, 64, 0.0).payload(),
+                "response_validation": verdict.payload(),
+                "translation": verdict.translation,
+                "latency_ms": 10.0 + index,
+                "completion_tokens": 4 + index,
+            }
+        )
+    return reference, records
+
+
+def test_incremental_blind_batches_cover_all_478_splits_and_reuse_stable_clusters() -> None:
+    reference, records = _incremental_fixture()
+    ledger = incremental.new_incremental_ledger(reference)
+    packet = incremental.build_incremental_judgment_packet(
+        reference,
+        records,
+        ledger,
+        batch_size=1,
+    )
+
+    assert packet["scope"] == "all-478"
+    assert packet["pending_total_cluster_count"] == 2
+    assert packet["batch_cluster_count"] == 1
+    serialized = json.dumps(packet, ensure_ascii=False)
+    assert "logical_slot" not in serialized
+    assert "sampler_key" not in serialized
+    assert "top_p" not in serialized
+
+    cluster_id = packet["rows"][0]["cluster_id"]
+    ledger = incremental.mark_pending_batch(
+        ledger,
+        reference=reference,
+        packet=packet,
+        packet_file="judgment-batch-0001.json",
+    )
+    ledger = incremental.apply_incremental_judgments(
+        ledger,
+        reference=reference,
+        packet=packet,
+        decisions={
+            cluster_id: {
+                "decision": "PASS",
+                "category": "faithful_translation",
+                "naturalness": 5,
+            }
+        },
+        applied_utc="2026-08-04T00:00:00Z",
+    )
+    refreshed = incremental.build_incremental_judgment_packet(
+        reference,
+        records,
+        ledger,
+        batch_size=10,
+    )
+
+    assert refreshed["reused_judged_cluster_count"] == 1
+    assert refreshed["pending_total_cluster_count"] == 1
+    assert refreshed["rows"][0]["cluster_id"] != cluster_id
+
+
+def test_incremental_ledger_imports_prior_blind_decisions_and_final_rank_uses_all_cases() -> None:
+    reference, records = _incremental_fixture()
+    prior_packet = judgment.build_blind_judgment_packet(reference, records[:1], scope="tuning")
+    prior_cluster = prior_packet["rows"][0]["cluster_id"]
+    ledger = incremental.seed_ledger_from_completed_packet(
+        incremental.new_incremental_ledger(reference),
+        reference=reference,
+        packet=prior_packet,
+        decisions={
+            prior_cluster: {
+                "decision": "PASS",
+                "category": "faithful_translation",
+                "naturalness": 5,
+            }
+        },
+        source_label="prior-temperature",
+    )
+    packet = incremental.build_incremental_judgment_packet(reference, records, ledger, batch_size=10)
+    remaining_cluster = packet["rows"][0]["cluster_id"]
+    ledger = incremental.mark_pending_batch(
+        ledger,
+        reference=reference,
+        packet=packet,
+        packet_file="judgment-batch-0001.json",
+    )
+    ledger = incremental.apply_incremental_judgments(
+        ledger,
+        reference=reference,
+        packet=packet,
+        decisions={
+            remaining_cluster: {
+                "decision": "MINOR",
+                "category": "naturalness_grammar",
+                "naturalness": 3,
+            }
+        },
+        applied_utc="2026-08-04T00:01:00Z",
+    )
+    verdicts = incremental.bind_incremental_ledger_to_records(reference, records, ledger)
+    ranked = judgment.rank_sampler_results(records, verdicts, scope="all")
+
+    assert len(ledger["imports"]) == 1
+    assert ranked[0]["response_count"] == 2
+    assert ranked[0]["minor"] == 1
+    assert ranked[0]["unique_error_cases"] == 1
+
+
+def test_incremental_ledger_rejects_reusable_packet_from_changed_reference() -> None:
+    reference, records = _incremental_fixture()
+    prior_packet = judgment.build_blind_judgment_packet(reference, records[:1], scope="tuning")
+    prior_cluster = prior_packet["rows"][0]["cluster_id"]
+    prior_packet["rows"][0]["canonical_translation"] = "바뀐 정답"
+
+    with pytest.raises(judgment.JudgmentError, match="does not match the frozen reference"):
+        incremental.seed_ledger_from_completed_packet(
+            incremental.new_incremental_ledger(reference),
+            reference=reference,
+            packet=prior_packet,
+            decisions={
+                prior_cluster: {
+                    "decision": "PASS",
+                    "category": "faithful_translation",
+                    "naturalness": 5,
+                }
+            },
+            source_label="different-reference",
+        )
+
+
+def test_incremental_ledger_fails_closed_when_semantic_rule_version_changes() -> None:
+    reference, _records = _incremental_fixture()
+    ledger = incremental.new_incremental_ledger(reference)
+    ledger["rule_version"] = "different-rule"
+
+    with pytest.raises(judgment.JudgmentError, match="different semantic rule"):
+        incremental.validate_incremental_ledger(ledger, reference=reference)
+
+
+def test_incremental_packet_checks_identity_keys_without_rejecting_candidate_words() -> None:
+    reference, records = _incremental_fixture()
+    response_verdict = judgment.validate_response_envelope(
+        {
+            "choices": [
+                {
+                    "index": 0,
+                    "content": json.dumps(
+                        {"translation": "logical_slot sampler_key는 번역문의 일반 문자열이다"},
+                        ensure_ascii=False,
+                    ),
+                    "finish_reason": "stop",
+                }
+            ]
+        }
+    )
+    records[0]["translation"] = response_verdict.translation
+    records[0]["response_validation"] = response_verdict.payload()
+    packet = incremental.build_incremental_judgment_packet(
+        reference,
+        records,
+        incremental.new_incremental_ledger(reference),
+        batch_size=10,
+    )
+
+    incremental.validate_incremental_packet(packet, reference=reference)
+
+    packet["rows"][0]["sampler_key"] = "secret-arm"
+    packet["packet_sha256"] = protocol.canonical_sha256(
+        {key: value for key, value in packet.items() if key != "packet_sha256"}
+    )
+    with pytest.raises(judgment.JudgmentError, match="leaked sampler execution identity"):
+        incremental.validate_incremental_packet(packet, reference=reference)
+
+
+def test_incremental_command_error_preserves_running_run_for_resume() -> None:
+    checkpoints: list[dict[str, object]] = []
+
+    class FakeRun:
+        def checkpoint(self, *, metadata: dict[str, object]) -> None:
+            checkpoints.append(metadata)
+
+        def fail(self, *_args: object, **_kwargs: object) -> None:
+            raise AssertionError("incremental errors must not close the managed run")
+
+    sampler_cli._checkpoint_incremental_error(
+        FakeRun(),  # type: ignore[arg-type]
+        command="apply-incremental-judgment",
+        error=RuntimeError("checkpoint race"),
+    )
+
+    assert checkpoints == [
+        {
+            "command": "apply-incremental-judgment",
+            "state": "ERROR_REQUIRES_INSPECTION",
+            "error_type": "RuntimeError",
+            "error_message": "checkpoint race",
+        }
+    ]
+
+
+def test_live_snapshot_index_does_not_recover_or_rewrite_in_flight_case(tmp_path: Path) -> None:
+    root = tmp_path / "artifacts"
+    root.mkdir()
+    store = storage.RunStore(root)
+    destination = store.case_path(
+        phase="joint_top_p_top_k",
+        arm="joint-arm",
+        run="seed-run",
+        case_id="case-safe",
+    )
+    storage.atomic_write_json(
+        destination,
+        {
+            "status": "complete",
+            "recorded_utc": "2026-08-04T00:00:00Z",
+            "phase": "joint_top_p_top_k",
+            "arm_key": "joint-arm",
+            "case_id": "case-safe",
+            "logical_slot": "slot-safe",
+        },
+    )
+
+    assert list(store.iter_snapshot_completion_entries()) == []
+    assert not store.completion_index_path.exists()
+    assert store.completed_count() == 1
+    assert store.completion_index_path.exists()
 
 
 def test_automatic_blind_verdicts_hide_sampler_and_logical_slot_identity() -> None:

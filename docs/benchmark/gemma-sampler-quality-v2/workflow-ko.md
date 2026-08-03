@@ -5,10 +5,13 @@
    - 온도 10개 `top-p=1`, `top-k=0`, `min-p=0`
    - 나머지 joint top-p/top-k
    - 나머지 min-p
-3. Router unload·container stop·GPU 반환이 모두 성공하면
+3. 실행 중에는 완료 인덱스의 원자 snapshot만 읽어 새 unique 번역을 작은 blind 묶음으로
+   판정한다. live campaign과 raw 응답은 수정하지 않는다.
+4. Router unload·container stop·GPU 반환이 모두 성공하면
    `WAITING_FOR_FINAL_JUDGMENT`에서 자동 종료한다.
-4. 그 뒤 478개 전체를 blind semantic judgment로 판정한다.
-5. 사용자가 최종 후보를 명시 승인한 뒤에만 제품 sampler PR을 만든다.
+5. 누적 ledger를 최종 133,840응답에 다시 결합하고, 남은 새 unique 출력까지 판정하여
+   `UNJUDGED=0`을 확인한 뒤 140개 arm을 478개 전체로 순위화한다.
+6. 사용자가 최종 후보를 명시 승인한 뒤에만 제품 sampler PR을 만든다.
 
 고정 matrix는 r6 재실행 없이 새 응답 `124,280`개를 만든다.
 
@@ -32,3 +35,17 @@ catastrophic이다.
 
 완료된 raw envelope는 수정하지 않는다. 새 판정기는 raw envelope에서 현재 품질 view를
 메모리에서 다시 만들기 때문에, 기존 run은 GPU 재실행 없이 재판정·resume·재사용할 수 있다.
+
+## 분할 판정 ledger 계약
+
+분할 판정은 `faithful-translation-quality-v1` 규칙을 사용한다. 정답과 글자가 같은지는
+필수 조건이 아니다. 의미·인물·행동·관계·숫자·부정·질문/선언·정체성·동의/강제·검열/약화와
+자연스러움을 판정하고, 의미가 보존된 어투·어순·존댓말·의성어·동의어 차이는 통과시킨다.
+정상 번역을 추출할 수 있는 wrapper·channel frame·thought·finish reason은 진단값으로만 남긴다.
+실제 번역문에 `나Please세` 같은 혼합 token 손상이 남거나 번역이 비면 catastrophic이다.
+
+ledger key는 sampler 정보가 아니라 `case_id + translation_sha256`으로 고정한다. 그래서 이미
+판정한 동일 번역은 이후 arm과 seed에서 재사용할 수 있다. blind packet에는 sampler, arm,
+seed, logical slot, 실행 순서를 넣지 않는다. 실행 중 snapshot은 완전히 append된 completion
+index만 읽으며, 아직 index에 들어오지 않은 in-flight case를 복구하거나 campaign 파일을
+다시 쓰지 않는다. 최종 순위는 campaign 종료 및 cleanup 증명 전에는 만들지 않는다.
