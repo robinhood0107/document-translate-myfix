@@ -190,6 +190,39 @@ class ValidationArtifactHarnessTests(unittest.TestCase):
         with self.assertRaises(harness.ArtifactHarnessError):
             harness.ManagedArtifactRun.resume(run.run_root)
 
+    def test_exact_failed_atomic_replace_can_recover_with_audit_record(self) -> None:
+        run = self.create_run(family="recover-test")
+        error = PermissionError(
+            "[WinError 5] Access is denied: '.progress.json.partial-1-a' -> 'progress.json'"
+        )
+        run.fail(error, metadata={"command": "run-phase"})
+
+        recovered = harness.ManagedArtifactRun.recover_failed_atomic_replace(
+            run.run_root,
+            command="run-phase",
+            target_file_name="progress.json",
+        )
+
+        manifest = json.loads(recovered.manifest_path.read_text(encoding="utf-8"))
+        self.assertEqual(manifest["status"], "running")
+        self.assertEqual(manifest["metadata"]["state"], "RECOVERED_ATOMIC_REPLACE")
+        recovery_path = recovered.run_root / manifest["metadata"]["recovery_record"]
+        recovery = json.loads(recovery_path.read_text(encoding="utf-8"))
+        self.assertEqual(recovery["original_manifest"]["status"], "failed")
+        self.assertEqual(recovery["original_manifest"]["metadata"]["error_type"], "PermissionError")
+        self.assertEqual(harness.ManagedArtifactRun.resume(recovered.run_root).run_id, recovered.run_id)
+
+    def test_unrelated_failed_run_cannot_use_atomic_replace_recovery(self) -> None:
+        run = self.create_run(family="reject-recovery-test")
+        run.fail(RuntimeError("router contract changed"), metadata={"command": "run-phase"})
+
+        with self.assertRaises(harness.ArtifactHarnessError):
+            harness.ManagedArtifactRun.recover_failed_atomic_replace(
+                run.run_root,
+                command="run-phase",
+                target_file_name="progress.json",
+            )
+
     def test_cli_separator_is_not_executed_as_the_child_command(self) -> None:
         result = harness.main(
             [

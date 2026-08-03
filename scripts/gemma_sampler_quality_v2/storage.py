@@ -8,6 +8,7 @@ import json
 import os
 from pathlib import Path
 import re
+import time
 from typing import Any, Iterable, Mapping
 import uuid
 
@@ -19,6 +20,8 @@ class StorageError(RuntimeError):
 _SAFE_COMPONENT = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
 _COMPLETION_INDEX_FILE_NAME = "completion-index.jsonl"
 _LEGACY_COMPLETION_INDEX_FILE_NAME = "completion-index.json"
+_ATOMIC_REPLACE_ATTEMPTS = 8
+_ATOMIC_REPLACE_INITIAL_BACKOFF_SECONDS = 0.025
 
 
 def utc_now() -> str:
@@ -39,7 +42,19 @@ def atomic_write_json(path: Path, payload: Mapping[str, Any] | list[Any]) -> Non
             handle.write(canonical_json(payload))
             handle.flush()
             os.fsync(handle.fileno())
-        os.replace(temporary, path)
+        for attempt in range(_ATOMIC_REPLACE_ATTEMPTS):
+            try:
+                os.replace(temporary, path)
+                break
+            except PermissionError:
+                if attempt + 1 >= _ATOMIC_REPLACE_ATTEMPTS:
+                    raise
+                # Windows readers that do not request FILE_SHARE_DELETE can
+                # briefly reject the replace despite the old JSON remaining
+                # valid. Retrying the already-fsynced temporary file keeps
+                # the write atomic without treating a short read lock as a
+                # sampler failure.
+                time.sleep(_ATOMIC_REPLACE_INITIAL_BACKOFF_SECONDS * (2**attempt))
     finally:
         try:
             temporary.unlink()

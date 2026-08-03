@@ -106,7 +106,17 @@ def _decision_map(path: str | Path, *, collection_keys: tuple[str, ...], id_key:
 def _open_run(args: argparse.Namespace) -> harness.ManagedArtifactRun:
     resume = str(getattr(args, "resume_run", "") or "").strip()
     if resume:
-        return harness.ManagedArtifactRun.resume(_private_path(resume))
+        run_root = _private_path(resume)
+        try:
+            return harness.ManagedArtifactRun.resume(run_root)
+        except harness.ArtifactHarnessError:
+            if not str(getattr(args, "phase", "") or "").strip():
+                raise
+            return harness.ManagedArtifactRun.recover_failed_atomic_replace(
+                run_root,
+                command="run-phase",
+                target_file_name="progress.json",
+            )
     return harness.ManagedArtifactRun.create(
         family=FAMILY,
         category=CATEGORY,

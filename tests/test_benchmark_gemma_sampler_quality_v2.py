@@ -2,8 +2,11 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 from pathlib import Path
+import subprocess
 import sys
+import time
 from types import SimpleNamespace
 
 import pytest
@@ -13,7 +16,9 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from scripts.gemma_sampler_quality_v2 import corpus, execution, judgment, protocol, report, runtime  # noqa: E402
+from scripts import benchmark_gemma_sampler_quality_v2 as sampler_cli  # noqa: E402
+from scripts import validation_artifact_harness as harness  # noqa: E402
+from scripts.gemma_sampler_quality_v2 import corpus, execution, judgment, protocol, report, runtime, storage  # noqa: E402
 from scripts.gemma_sampler_quality_v2.storage import RunStore, read_json  # noqa: E402
 from scripts.gemma_sampler_quality_v2.review import render_private_review_html  # noqa: E402
 
@@ -142,6 +147,91 @@ def test_matrix_counts_exclude_temperature_zero_and_reuse_existing_rows() -> Non
     assert protocol.filters_disabled(top_k=0, top_p=1.0)
     with pytest.raises(protocol.ProtocolError):
         protocol.SamplerTuple(0.0, 0.95, 64, 0.0)
+
+
+def test_atomic_write_retries_a_transient_permission_error(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    destination = tmp_path / "progress.json"
+    original_replace = storage.os.replace
+    attempts = 0
+
+    def replace_after_one_lock(source: str | Path, target: str | Path) -> None:
+        nonlocal attempts
+        attempts += 1
+        if attempts == 1:
+            raise PermissionError("reader still holds the old progress file")
+        original_replace(source, target)
+
+    monkeypatch.setattr(storage.os, "replace", replace_after_one_lock)
+    monkeypatch.setattr(storage.time, "sleep", lambda _seconds: None)
+
+    storage.atomic_write_json(destination, {"state": "RUNNING"})
+
+    assert attempts == 2
+    assert read_json(destination) == {"state": "RUNNING"}
+    assert not list(tmp_path.glob(".progress.json.partial-*"))
+
+
+def test_atomic_write_survives_a_windows_reader_without_delete_share(tmp_path: Path) -> None:
+    if os.name != "nt":
+        pytest.skip("Windows file-share semantics are required for this regression test.")
+    destination = tmp_path / "progress.json"
+    destination.write_text('{"state":"old"}\n', encoding="utf-8")
+    lock_script = (
+        "$lock = [System.IO.File]::Open($env:GEMMA_MONITOR_LOCK_TARGET, [System.IO.FileMode]::Open, "
+        "[System.IO.FileAccess]::Read, [System.IO.FileShare]::Read); "
+        "[Console]::Out.WriteLine('LOCKED'); Start-Sleep -Milliseconds 700; $lock.Dispose()"
+    )
+    child_environment = dict(os.environ)
+    child_environment["GEMMA_MONITOR_LOCK_TARGET"] = str(destination)
+    process = subprocess.Popen(
+        ["powershell.exe", "-NoProfile", "-Command", lock_script],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        env=child_environment,
+    )
+    try:
+        assert process.stdout is not None
+        assert process.stdout.readline().strip() == "LOCKED"
+        started = time.monotonic()
+        storage.atomic_write_json(destination, {"state": "RUNNING"})
+        elapsed = time.monotonic() - started
+        _stdout, stderr = process.communicate(timeout=5)
+    finally:
+        if process.poll() is None:
+            process.kill()
+            process.wait(timeout=5)
+
+    assert process.returncode == 0, stderr
+    assert elapsed >= 0.3
+    assert read_json(destination) == {"state": "RUNNING"}
+
+
+def test_run_phase_reopens_only_the_known_progress_replace_failure(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    archive_root = tmp_path / "banchmark_result_log"
+    archive_root.mkdir()
+    monkeypatch.setattr(harness, "default_archive_root", lambda: archive_root)
+    monkeypatch.setattr(harness, "_is_ignored_by_git", lambda _path: True)
+    run = harness.ManagedArtifactRun.create(
+        family=sampler_cli.FAMILY,
+        category=sampler_cli.CATEGORY,
+        run_id="recover-known-progress-lock",
+    )
+    run.fail(
+        PermissionError("[WinError 5] '.progress.json.partial-1-a' -> 'progress.json'"),
+        metadata={"command": "run-phase"},
+    )
+
+    reopened = sampler_cli._open_run(
+        SimpleNamespace(resume_run=str(run.run_root), phase="temperature")
+    )
+
+    manifest = json.loads(reopened.manifest_path.read_text(encoding="utf-8"))
+    assert manifest["status"] == "running"
+    assert manifest["metadata"]["state"] == "RECOVERED_ATOMIC_REPLACE"
 
 
 def test_pinned_filter_contract_requires_image_build_and_exact_payload() -> None:
