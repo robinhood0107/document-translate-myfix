@@ -138,7 +138,10 @@ class RouterGemmaReplayRuntime:
                 ) from cleanup_error
             if isinstance(exc, RuntimeErrorV2):
                 raise
-            raise RuntimeErrorV2("Router v2 Gemma replay setup failed.") from exc
+            raise RuntimeErrorV2(
+                "Router v2 Gemma replay setup failed after terminal cleanup/GPU return "
+                f"verification passed: setup={exc}"
+            ) from exc
         snapshot = self.coordinator.snapshot()
         model_snapshot = self.adapter.model_snapshot(pair)
         if (
