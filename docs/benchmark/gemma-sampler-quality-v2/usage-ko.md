@@ -10,4 +10,4 @@ set SAMPLER_PHASE=temperature
 call scripts\benchmark_gemma_sampler_quality_v2_cuda13.bat
 ```
 
-joint phase는 `SAMPLER_SELECTION`에 선택된 두 temperature와 이전 temperature response run을 `SAMPLER_PRIOR_RESPONSE_RUN`으로 지정한다. min-p phase는 선택된 세 tuple과 이전 joint response run을 같은 방식으로 지정한다. BAT가 exit code 75를 받으면 동일 managed run을 자동 resume한다. 완료하면 raw 결과를 공개하거나 stage하지 말고, private blind judgment packet으로 다음 gate를 진행한다.
+joint phase는 `SAMPLER_SELECTION`에 선택된 두 temperature와 이전 temperature response run을 `SAMPLER_PRIOR_RESPONSE_RUN`으로 지정한다. min-p phase는 선택된 세 tuple과 이전 joint response run을 같은 방식으로 지정한다. BAT가 exit code 75를 받으면 동일 managed run을 자동 resume한다. Windows의 progress checkpoint 임시 파일 교체가 잠시 거부된 것으로 감사 기록이 남은 경우에만 동일 run을 복구할 수 있으며, 그 밖의 failed manifest는 재개하지 않는다. 완료하면 raw 결과를 공개하거나 stage하지 말고, private blind judgment packet으로 다음 gate를 진행한다.
