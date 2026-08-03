@@ -25,6 +25,7 @@ from .protocol import canonical_sha256
 
 INCREMENTAL_LEDGER_SCHEMA_VERSION = "gemma-sampler-incremental-ledger-v1"
 INCREMENTAL_PACKET_SCHEMA_VERSION = "gemma-sampler-incremental-packet-v1"
+INCREMENTAL_AMENDMENT_SCHEMA_VERSION = "gemma-sampler-incremental-amendment-v1"
 SEMANTIC_JUDGMENT_RULE_VERSION = "faithful-translation-quality-v1"
 SEMANTIC_JUDGMENT_RULE = {
     "failure_dimensions": [
@@ -115,6 +116,7 @@ def new_incremental_ledger(reference: Mapping[str, Any]) -> dict[str, Any]:
             "verdicts": {},
             "imports": [],
             "applied_batches": [],
+            "amendments": [],
             "next_batch_number": 1,
             "pending_batch": None,
         }
@@ -148,6 +150,79 @@ def validate_incremental_ledger(
             raise JudgmentError("Incremental judgment ledger cluster identity changed.")
         if str(verdict.get("decision") or "") not in _FINAL_DECISIONS:
             raise JudgmentError("Incremental judgment ledger contains a non-final verdict.")
+    amendments = ledger.get("amendments", [])
+    if not isinstance(amendments, list):
+        raise JudgmentError("Incremental judgment ledger amendment history is invalid.")
+    seen_amendments: set[str] = set()
+    last_amended_verdicts: dict[str, Mapping[str, Any]] = {}
+    for amendment in amendments:
+        if not isinstance(amendment, Mapping):
+            raise JudgmentError("Incremental judgment ledger contains an invalid amendment.")
+        amendment_id = str(amendment.get("amendment_id") or "")
+        changes = amendment.get("changes")
+        reason = str(amendment.get("reason") or "").strip()
+        if (
+            not amendment_id.startswith("amendment-")
+            or amendment_id in seen_amendments
+            or not isinstance(changes, list)
+            or not changes
+            or not reason
+            or not str(amendment.get("applied_utc") or "").strip()
+        ):
+            raise JudgmentError("Incremental judgment ledger amendment identity is invalid.")
+        seen_amendments.add(amendment_id)
+        if int(amendment.get("cluster_count") or 0) != len(changes):
+            raise JudgmentError("Incremental judgment ledger amendment count changed.")
+        if str(amendment.get("changes_sha256") or "") != canonical_sha256(changes):
+            raise JudgmentError("Incremental judgment ledger amendment changes hash is invalid.")
+        expected_id = "amendment-" + canonical_sha256(
+            {
+                "reference_sha256": str(ledger.get("reference_sha256") or ""),
+                "rule_version": str(ledger.get("rule_version") or ""),
+                "reason": reason,
+                "changes": changes,
+            }
+        )[:24]
+        if amendment_id != expected_id:
+            raise JudgmentError("Incremental judgment ledger amendment id changed.")
+        changed_clusters: set[str] = set()
+        for change in changes:
+            if not isinstance(change, Mapping):
+                raise JudgmentError("Incremental judgment ledger amendment change is invalid.")
+            before = change.get("before")
+            after = change.get("after")
+            if not isinstance(before, Mapping) or not isinstance(after, Mapping):
+                raise JudgmentError("Incremental judgment ledger amendment evidence is invalid.")
+            if str(change.get("before_sha256") or "") != canonical_sha256(before):
+                raise JudgmentError("Incremental judgment ledger amendment before hash changed.")
+            if str(change.get("after_sha256") or "") != canonical_sha256(after):
+                raise JudgmentError("Incremental judgment ledger amendment after hash changed.")
+            cluster_id = str(change.get("cluster_id") or "")
+            if (
+                not cluster_id.startswith("cluster-")
+                or cluster_id in changed_clusters
+                or cluster_id != str(before.get("cluster_id") or "")
+                or cluster_id != str(after.get("cluster_id") or "")
+                or str(change.get("case_id") or "") != str(before.get("case_id") or "")
+                or str(change.get("case_id") or "") != str(after.get("case_id") or "")
+                or not str(change.get("reason") or "").strip()
+            ):
+                raise JudgmentError("Incremental judgment ledger amendment binding changed.")
+            changed_clusters.add(cluster_id)
+            previous_after = last_amended_verdicts.get(cluster_id)
+            if previous_after is not None and dict(before) != dict(previous_after):
+                raise JudgmentError("Incremental judgment ledger amendment chain changed.")
+            last_amended_verdicts[cluster_id] = after
+    for cluster_id, latest_after in last_amended_verdicts.items():
+        current = verdicts.get(cluster_id)
+        if not isinstance(current, Mapping) or dict(current) != dict(latest_after):
+            raise JudgmentError("Incremental judgment ledger final verdict diverged from its audit history.")
+
+
+def incremental_verdict_sha256(verdict: Mapping[str, Any]) -> str:
+    """Return the stable precondition hash used by audited amendments."""
+
+    return canonical_sha256(dict(verdict))
 
 
 def _merge_verdict(
@@ -461,6 +536,105 @@ def apply_incremental_judgments(
     if isinstance(current_number, bool) or not isinstance(current_number, int) or current_number <= 0:
         raise JudgmentError("Incremental judgment ledger batch counter is invalid.")
     result["next_batch_number"] = current_number + 1
+    return _seal_ledger(result)
+
+
+def apply_incremental_amendments(
+    ledger: Mapping[str, Any],
+    *,
+    reference: Mapping[str, Any],
+    amendments: Mapping[str, Mapping[str, Any]],
+    reason: str,
+    applied_utc: str,
+) -> dict[str, Any]:
+    """Replace reviewed manual verdicts while preserving sealed before/after evidence."""
+
+    validate_incremental_ledger(ledger, reference=reference)
+    if ledger.get("pending_batch") not in (None, {}):
+        raise JudgmentError("Incremental amendments require no pending blind batch.")
+    normalized_reason = str(reason or "").strip()
+    if not normalized_reason:
+        raise JudgmentError("Incremental amendments require an overall reason.")
+    if not amendments:
+        raise JudgmentError("Incremental amendments require at least one cluster.")
+
+    result = deepcopy(dict(ledger))
+    verdicts = {str(key): dict(value) for key, value in dict(result["verdicts"]).items()}
+    changes: list[dict[str, Any]] = []
+    for cluster_id in sorted(amendments):
+        requested = amendments[cluster_id]
+        if not isinstance(requested, Mapping):
+            raise JudgmentError("Incremental amendment entry is invalid.")
+        previous = verdicts.get(str(cluster_id))
+        if previous is None:
+            raise JudgmentError("Incremental amendment references an unknown cluster verdict.")
+        if bool(previous.get("automatic", False)):
+            raise JudgmentError("Incremental amendment cannot replace an automatic verdict.")
+        expected_previous = str(requested.get("expected_previous_sha256") or "")
+        if expected_previous != incremental_verdict_sha256(previous):
+            raise JudgmentError("Incremental amendment previous verdict hash does not match.")
+        decision = str(requested.get("decision") or "")
+        category = str(requested.get("category") or "").strip()
+        naturalness = requested.get("naturalness")
+        item_reason = str(requested.get("reason") or "").strip()
+        if decision not in _FINAL_DECISIONS or not category or not item_reason:
+            raise JudgmentError("Incremental amendment replacement is incomplete.")
+        if (
+            isinstance(naturalness, bool)
+            or not isinstance(naturalness, (int, float))
+            or not 0 <= float(naturalness) <= 5
+        ):
+            raise JudgmentError("Incremental amendment naturalness must be between 0 and 5.")
+        replacement = {
+            "cluster_id": str(cluster_id),
+            "case_id": str(previous.get("case_id") or ""),
+            "decision": decision,
+            "category": category,
+            "naturalness": naturalness,
+            "automatic": False,
+            "rule_version": SEMANTIC_JUDGMENT_RULE_VERSION,
+        }
+        if replacement == previous:
+            raise JudgmentError("Incremental amendment does not change the existing verdict.")
+        change = {
+            "cluster_id": str(cluster_id),
+            "case_id": replacement["case_id"],
+            "reason": item_reason,
+            "before_sha256": incremental_verdict_sha256(previous),
+            "after_sha256": incremental_verdict_sha256(replacement),
+            "before": previous,
+            "after": replacement,
+        }
+        changes.append(change)
+        verdicts[str(cluster_id)] = replacement
+
+    amendment_id = "amendment-" + canonical_sha256(
+        {
+            "reference_sha256": str(result.get("reference_sha256") or ""),
+            "rule_version": str(result.get("rule_version") or ""),
+            "reason": normalized_reason,
+            "changes": changes,
+        }
+    )[:24]
+    history = [
+        dict(item)
+        for item in result.get("amendments", [])
+        if isinstance(item, Mapping)
+    ]
+    if any(str(item.get("amendment_id") or "") == amendment_id for item in history):
+        raise JudgmentError("Incremental amendment was already applied.")
+    history.append(
+        {
+            "amendment_id": amendment_id,
+            "reason": normalized_reason,
+            "changes_sha256": canonical_sha256(changes),
+            "cluster_count": len(changes),
+            "applied_utc": str(applied_utc),
+            "changes": changes,
+        }
+    )
+    result["verdicts"] = verdicts
+    result["amendments"] = history
     return _seal_ledger(result)
 
 

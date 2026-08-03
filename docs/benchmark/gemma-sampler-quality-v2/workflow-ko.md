@@ -50,6 +50,14 @@ seed, logical slot, 실행 순서를 넣지 않는다. 실행 중 snapshot은 �
 index만 읽으며, 아직 index에 들어오지 않은 in-flight case를 복구하거나 campaign 파일을
 다시 쓰지 않는다. 최종 순위는 campaign 종료 및 cleanup 증명 전에는 만들지 않는다.
 
+재사용한 과거 판정이 현재 semantic rule과 충돌하면 verdict를 직접 덮어쓰지 않는다.
+`amend-incremental-judgment`가 기존 verdict hash를 선행 조건으로 확인하고, cluster별 이전값·
+새 값·변경 사유·적용 시각을 ledger hash 안에 append-only 감사 기록으로 남긴 뒤에만 정정한다.
+validator는 같은 cluster의 연속 정정에서 이전 `after`와 다음 `before`, 마지막 `after`와 현재
+verdict가 정확히 이어지는지도 확인한다.
+자동 transport verdict, 존재하지 않는 cluster, stale 이전 hash, pending blind batch가 있는
+상태의 정정은 fail-closed한다.
+
 ## 최종 분석 계약
 
 `analyze-final-campaign`은 campaign이 `WAITING_FOR_FINAL_JUDGMENT`에 도달하고 managed run이

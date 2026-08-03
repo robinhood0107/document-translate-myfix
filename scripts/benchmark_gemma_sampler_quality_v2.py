@@ -59,6 +59,9 @@ from scripts.gemma_sampler_quality_v2.judgment import (  # noqa: E402
     rank_sampler_results,
 )
 from scripts.gemma_sampler_quality_v2.incremental import (  # noqa: E402
+    INCREMENTAL_AMENDMENT_SCHEMA_VERSION,
+    SEMANTIC_JUDGMENT_RULE_VERSION,
+    apply_incremental_amendments,
     apply_incremental_judgments,
     build_incremental_judgment_packet,
     mark_pending_batch,
@@ -567,6 +570,7 @@ def _incremental_summary(
         "run_root": str(run.run_root),
         "judged_cluster_count": len(ledger.get("verdicts") or {}),
         "applied_batch_count": len(ledger.get("applied_batches") or []),
+        "amendment_count": len(ledger.get("amendments") or []),
         "pending_batch": dict(pending) if isinstance(pending, Mapping) else None,
         "observed_response_count": int(packet.get("observed_response_count") or 0) if packet else 0,
         "pending_total_cluster_count": int(packet.get("pending_total_cluster_count") or 0) if packet else 0,
@@ -727,6 +731,71 @@ def command_apply_incremental_judgment(args: argparse.Namespace) -> int:
         _checkpoint_incremental_error(
             run,
             command="apply-incremental-judgment",
+            error=exc,
+        )
+        raise
+
+
+def command_amend_incremental_judgment(args: argparse.Namespace) -> int:
+    """Apply an audited correction to previously reviewed manual verdicts."""
+
+    if not str(args.resume_run or "").strip():
+        raise ExecutionError("Amending incremental judgments requires the existing ledger run.")
+    run = _open_run(args)
+    try:
+        reference = load_frozen_reference(_private_path(args.reference))
+        ledger = _incremental_ledger(run, reference)
+        payload = _load_object(args.amendments)
+        if payload.get("schema_version") != INCREMENTAL_AMENDMENT_SCHEMA_VERSION:
+            raise ExecutionError("Incremental amendment input schema is not current.")
+        if payload.get("rule_version") != SEMANTIC_JUDGMENT_RULE_VERSION:
+            raise ExecutionError("Incremental amendment input uses a different semantic rule.")
+        if str(payload.get("reference_sha256") or "") != str(
+            reference.get("reference_sha256") or ""
+        ):
+            raise ExecutionError("Incremental amendment input belongs to another reference.")
+        reason = str(payload.get("reason") or "").strip()
+        amendments = _decision_map(
+            args.amendments,
+            collection_keys=("amendments",),
+            id_key="cluster_id",
+        )
+        ledger = apply_incremental_amendments(
+            ledger,
+            reference=reference,
+            amendments=amendments,
+            reason=reason,
+            applied_utc=utc_now(),
+        )
+        latest = dict(ledger["amendments"][-1])
+        amendment_file = f"judgment-amendment-{len(ledger['amendments']):04d}.json"
+        atomic_write_json(
+            run.artifact_root / amendment_file,
+            {
+                "schema_version": INCREMENTAL_AMENDMENT_SCHEMA_VERSION,
+                "rule_version": SEMANTIC_JUDGMENT_RULE_VERSION,
+                "reference_sha256": str(reference.get("reference_sha256") or ""),
+                "amendment_id": latest.get("amendment_id"),
+                "reason": reason,
+                "amendments": amendments,
+            },
+        )
+        atomic_write_json(run.artifact_root / INCREMENTAL_LEDGER_FILE, ledger)
+        summary = _incremental_summary(run=run, ledger=ledger, packet=None)
+        summary.update(
+            {
+                "amended_cluster_count": len(amendments),
+                "amendment_id": latest.get("amendment_id"),
+                "amendment_file": amendment_file,
+            }
+        )
+        run.checkpoint(metadata={"command": "amend-incremental-judgment", "summary": summary})
+        print(json.dumps(summary, ensure_ascii=False))
+        return 0
+    except BaseException as exc:
+        _checkpoint_incremental_error(
+            run,
+            command="amend-incremental-judgment",
             error=exc,
         )
         raise
@@ -1004,6 +1073,12 @@ def build_parser() -> argparse.ArgumentParser:
     apply_incremental.add_argument("--decisions", required=True)
     _add_run_options(apply_incremental)
     apply_incremental.set_defaults(handler=command_apply_incremental_judgment)
+
+    amend_incremental = subparsers.add_parser("amend-incremental-judgment")
+    amend_incremental.add_argument("--reference", required=True)
+    amend_incremental.add_argument("--amendments", required=True)
+    _add_run_options(amend_incremental)
+    amend_incremental.set_defaults(handler=command_amend_incremental_judgment)
 
     final_analysis = subparsers.add_parser("analyze-final-campaign")
     final_analysis.add_argument("--reference", required=True)

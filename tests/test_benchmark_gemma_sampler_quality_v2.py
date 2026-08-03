@@ -680,6 +680,229 @@ def test_incremental_ledger_imports_prior_blind_decisions_and_final_rank_uses_al
     assert ranked[0]["unique_error_cases"] == 1
 
 
+def test_incremental_ledger_amends_stale_manual_verdict_with_sealed_audit() -> None:
+    reference, records = _incremental_fixture()
+    packet = judgment.build_blind_judgment_packet(reference, records[:1], scope="tuning")
+    cluster_id = packet["rows"][0]["cluster_id"]
+    ledger = incremental.seed_ledger_from_completed_packet(
+        incremental.new_incremental_ledger(reference),
+        reference=reference,
+        packet=packet,
+        decisions={
+            cluster_id: {
+                "decision": "MINOR",
+                "category": "onomatopoeia_transliteration",
+                "naturalness": 1,
+            }
+        },
+        source_label="stale-prior-rule-label",
+    )
+    previous = dict(ledger["verdicts"][cluster_id])
+
+    ledger = incremental.apply_incremental_amendments(
+        ledger,
+        reference=reference,
+        amendments={
+            cluster_id: {
+                "expected_previous_sha256": incremental.incremental_verdict_sha256(previous),
+                "decision": "PASS",
+                "category": "meaning_preserving_onomatopoeia",
+                "naturalness": 5,
+                "reason": "Current rule explicitly allows meaning-preserving onomatopoeia.",
+            }
+        },
+        reason="Correct imported verdicts that conflict with the sealed semantic rule.",
+        applied_utc="2026-08-04T01:00:00Z",
+    )
+
+    incremental.validate_incremental_ledger(ledger, reference=reference)
+    amended = ledger["verdicts"][cluster_id]
+    assert amended["decision"] == "PASS"
+    assert amended["category"] == "meaning_preserving_onomatopoeia"
+    assert len(ledger["amendments"]) == 1
+    change = ledger["amendments"][0]["changes"][0]
+    assert change["before"] == previous
+    assert change["after"] == amended
+    verdicts = incremental.bind_incremental_ledger_to_records(reference, records[:1], ledger)
+    ranked = judgment.rank_sampler_results(records[:1], verdicts, scope="all")
+    assert ranked[0]["minor"] == 0
+    assert ranked[0]["response_count"] == 1
+
+
+def test_incremental_amendment_fails_closed_on_stale_hash_or_automatic_verdict() -> None:
+    reference, records = _incremental_fixture()
+    packet = judgment.build_blind_judgment_packet(reference, records[:1], scope="tuning")
+    cluster_id = packet["rows"][0]["cluster_id"]
+    ledger = incremental.seed_ledger_from_completed_packet(
+        incremental.new_incremental_ledger(reference),
+        reference=reference,
+        packet=packet,
+        decisions={
+            cluster_id: {
+                "decision": "MINOR",
+                "category": "onomatopoeia_transliteration",
+                "naturalness": 1,
+            }
+        },
+        source_label="stale-prior-rule-label",
+    )
+    amendment = {
+        cluster_id: {
+            "expected_previous_sha256": "0" * 64,
+            "decision": "PASS",
+            "category": "meaning_preserving_onomatopoeia",
+            "naturalness": 5,
+            "reason": "Current rule explicitly allows this difference.",
+        }
+    }
+
+    with pytest.raises(judgment.JudgmentError, match="previous verdict hash"):
+        incremental.apply_incremental_amendments(
+            ledger,
+            reference=reference,
+            amendments=amendment,
+            reason="Correct a stale imported verdict.",
+            applied_utc="2026-08-04T01:00:00Z",
+        )
+
+    automatic = incremental.new_incremental_ledger(reference)
+    automatic["verdicts"] = {
+        cluster_id: {
+            **ledger["verdicts"][cluster_id],
+            "automatic": True,
+        }
+    }
+    automatic["ledger_sha256"] = protocol.canonical_sha256(
+        {key: value for key, value in automatic.items() if key != "ledger_sha256"}
+    )
+    amendment[cluster_id]["expected_previous_sha256"] = incremental.incremental_verdict_sha256(
+        automatic["verdicts"][cluster_id]
+    )
+    with pytest.raises(judgment.JudgmentError, match="automatic verdict"):
+        incremental.apply_incremental_amendments(
+            automatic,
+            reference=reference,
+            amendments=amendment,
+            reason="Automatic transport verdicts must be regenerated, not amended.",
+            applied_utc="2026-08-04T01:00:00Z",
+        )
+
+
+def test_incremental_amendment_audit_must_match_the_final_verdict() -> None:
+    reference, records = _incremental_fixture()
+    packet = judgment.build_blind_judgment_packet(reference, records[:1], scope="tuning")
+    cluster_id = packet["rows"][0]["cluster_id"]
+    ledger = incremental.seed_ledger_from_completed_packet(
+        incremental.new_incremental_ledger(reference),
+        reference=reference,
+        packet=packet,
+        decisions={
+            cluster_id: {
+                "decision": "MINOR",
+                "category": "onomatopoeia_transliteration",
+                "naturalness": 1,
+            }
+        },
+        source_label="stale-prior-rule-label",
+    )
+    previous = dict(ledger["verdicts"][cluster_id])
+    ledger = incremental.apply_incremental_amendments(
+        ledger,
+        reference=reference,
+        amendments={
+            cluster_id: {
+                "expected_previous_sha256": incremental.incremental_verdict_sha256(previous),
+                "decision": "PASS",
+                "category": "meaning_preserving_onomatopoeia",
+                "naturalness": 5,
+                "reason": "Current rule explicitly allows this difference.",
+            }
+        },
+        reason="Correct a stale imported verdict.",
+        applied_utc="2026-08-04T01:00:00Z",
+    )
+    ledger["verdicts"][cluster_id] = previous
+    ledger["ledger_sha256"] = protocol.canonical_sha256(
+        {key: value for key, value in ledger.items() if key != "ledger_sha256"}
+    )
+
+    with pytest.raises(judgment.JudgmentError, match="final verdict diverged"):
+        incremental.validate_incremental_ledger(ledger, reference=reference)
+
+
+def test_incremental_amendment_command_writes_audited_private_artifacts(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    archive_root = tmp_path / "banchmark_result_log"
+    archive_root.mkdir()
+    monkeypatch.setattr(harness, "default_archive_root", lambda: archive_root)
+    monkeypatch.setattr(harness, "_is_ignored_by_git", lambda _path: True)
+    reference, records = _incremental_fixture()
+    packet = judgment.build_blind_judgment_packet(reference, records[:1], scope="tuning")
+    cluster_id = packet["rows"][0]["cluster_id"]
+    ledger = incremental.seed_ledger_from_completed_packet(
+        incremental.new_incremental_ledger(reference),
+        reference=reference,
+        packet=packet,
+        decisions={
+            cluster_id: {
+                "decision": "MINOR",
+                "category": "onomatopoeia_transliteration",
+                "naturalness": 1,
+            }
+        },
+        source_label="stale-prior-rule-label",
+    )
+    run = harness.ManagedArtifactRun.create(
+        family=sampler_cli.FAMILY,
+        category=sampler_cli.CATEGORY,
+        run_id="amend-incremental-command",
+    )
+    storage.atomic_write_json(run.artifact_root / sampler_cli.INCREMENTAL_LEDGER_FILE, ledger)
+    reference_path = archive_root / "reference.json"
+    _write_json(reference_path, {})
+    monkeypatch.setattr(sampler_cli, "load_frozen_reference", lambda _path: reference)
+    amendment_path = archive_root / "amendment.json"
+    _write_json(
+        amendment_path,
+        {
+            "schema_version": incremental.INCREMENTAL_AMENDMENT_SCHEMA_VERSION,
+            "rule_version": incremental.SEMANTIC_JUDGMENT_RULE_VERSION,
+            "reference_sha256": reference["reference_sha256"],
+            "reason": "Correct a stale imported verdict.",
+            "amendments": {
+                cluster_id: {
+                    "expected_previous_sha256": incremental.incremental_verdict_sha256(
+                        ledger["verdicts"][cluster_id]
+                    ),
+                    "decision": "PASS",
+                    "category": "meaning_preserving_onomatopoeia",
+                    "naturalness": 5,
+                    "reason": "Current rule explicitly allows this difference.",
+                }
+            },
+        },
+    )
+
+    result = sampler_cli.command_amend_incremental_judgment(
+        SimpleNamespace(
+            resume_run=str(run.run_root),
+            reference=str(reference_path),
+            amendments=str(amendment_path),
+        )
+    )
+
+    assert result == 0
+    amended = read_json(run.artifact_root / sampler_cli.INCREMENTAL_LEDGER_FILE)
+    assert amended["verdicts"][cluster_id]["decision"] == "PASS"
+    assert amended["amendments"][0]["changes"][0]["before"]["decision"] == "MINOR"
+    artifact = read_json(run.artifact_root / "judgment-amendment-0001.json")
+    assert artifact["amendment_id"] == amended["amendments"][0]["amendment_id"]
+    manifest = read_json(run.manifest_path)
+    assert manifest["metadata"]["command"] == "amend-incremental-judgment"
+
+
 def test_incremental_ledger_rejects_reusable_packet_from_changed_reference() -> None:
     reference, records = _incremental_fixture()
     prior_packet = judgment.build_blind_judgment_packet(reference, records[:1], scope="tuning")

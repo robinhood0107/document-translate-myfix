@@ -58,6 +58,9 @@ PC 재부팅이나 BAT worker 강제 종료 뒤에는 같은 EXE를 다시 실�
 index를 읽기 전용 snapshot으로 열고, sampler·seed·순서를 숨긴 새 unique 번역만 작은 묶음으로
 판정한다. 기존 r6 판정과 같은 `case_id + 번역문 hash + rule version`은 재사용한다. 누적 판정은
 별도 private managed ledger에 원자 저장되며 campaign 응답·progress·manifest를 수정하지 않는다.
+재사용 판정이 현재 규칙과 충돌한 사실이 확인되면 에이전트는 감사 가능한 amendment 입력을
+만들어 `amend-incremental-judgment`로 정정한다. 이전 verdict hash가 달라졌거나 자동 판정이면
+명령이 거부되며, 사용자가 ledger를 직접 편집할 필요는 없다.
 
 캠페인 종료 후에도 바로 제품값을 바꾸지 않는다. 에이전트가 cleanup, 전체 응답 수, 미판정 0,
 140개 조합 통계와 필수 이름 gate를 확인해 사용자에게 제시하고, 사용자가 명시 승인해야 제품
