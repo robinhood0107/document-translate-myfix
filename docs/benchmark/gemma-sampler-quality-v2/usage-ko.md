@@ -62,3 +62,8 @@ index를 읽기 전용 snapshot으로 열고, sampler·seed·순서를 숨긴 �
 캠페인 종료 후에도 바로 제품값을 바꾸지 않는다. 에이전트가 cleanup, 전체 응답 수, 미판정 0,
 140개 조합 통계와 필수 이름 gate를 확인해 사용자에게 제시하고, 사용자가 명시 승인해야 제품
 sampler PR 단계로 넘어간다.
+
+종료 후 사용자가 추가 BAT를 실행할 필요는 없다. 감독 에이전트가 누적 ledger의 남은 번역을
+모두 판정하고 `analyze-final-campaign`을 실행한다. 이 명령은 완료된 r6·campaign·ledger와 private
+gate manifest를 읽어 public 집계 JSON과 private 오류 근거 JSON을 만든다. 어느 파일도 EXE가
+실행 중인 inference 응답을 수정하지 않는다.

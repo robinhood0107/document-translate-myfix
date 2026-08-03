@@ -22,6 +22,7 @@ from scripts.gemma_sampler_quality_v2 import (  # noqa: E402
     campaign,
     corpus,
     execution,
+    final_analysis,
     incremental,
     judgment,
     protocol,
@@ -797,6 +798,251 @@ def test_live_snapshot_index_does_not_recover_or_rewrite_in_flight_case(tmp_path
     assert not store.completion_index_path.exists()
     assert store.completed_count() == 1
     assert store.completion_index_path.exists()
+
+
+def _final_analysis_fixture() -> tuple[
+    dict[str, object],
+    protocol.CampaignPlan,
+    list[dict[str, object]],
+    list[dict[str, object]],
+    dict[str, object],
+]:
+    cases = [
+        {
+            "case_id": "case-name-age",
+            "split": "tuning",
+            "language": "ja-ko",
+            "source_text": "private source A",
+            "context_after_text": "private context A",
+            "canonical_translation": "본명 나나세 아야카 25세",
+            "required_meaning": ["name and age"],
+            "prohibited_changes": ["name_masking"],
+        },
+        {
+            "case_id": "case-meaning",
+            "split": "holdout",
+            "language": "en-ko",
+            "source_text": "private source B",
+            "context_after_text": "private context B",
+            "canonical_translation": "정답 B",
+            "required_meaning": ["meaning B"],
+            "prohibited_changes": ["meaning_change"],
+        },
+    ]
+    reference: dict[str, object] = {
+        "reference_sha256": "f" * 64,
+        "cases": cases,
+    }
+    baseline = protocol.SamplerArm(
+        "temperature",
+        protocol.SamplerTuple(0.7, 0.95, 64, 0.0),
+    )
+    joint = protocol.SamplerArm(
+        "joint_top_p_top_k",
+        protocol.SamplerTuple(0.7, 1.0, 0, 0.0),
+    )
+    minimum = protocol.SamplerArm(
+        "min_p",
+        protocol.SamplerTuple(0.7, 1.0, 0, 0.05),
+    )
+    plan = protocol.CampaignPlan(
+        temperature_arms=(baseline,),
+        joint_arms=(joint,),
+        min_p_arms=(minimum,),
+    )
+    translations = {
+        baseline.sampler.key: {
+            (20260802, "case-name-age"): "본명 나Please세 아야카 25세",
+            (20260803, "case-name-age"): "본명 나나세 아야카 25세",
+            (20260802, "case-meaning"): "정답 B",
+            (20260803, "case-meaning"): "정답 B",
+        },
+        joint.sampler.key: {
+            (20260802, "case-name-age"): "본명 나나세 아야카 25세",
+            (20260803, "case-name-age"): "본명 나나세 아야카 25세",
+            (20260802, "case-meaning"): "자연스러운 번역",
+            (20260803, "case-meaning"): "자연스러운 번역",
+        },
+        minimum.sampler.key: {
+            (20260802, "case-name-age"): "본명 나나세 아야카 25세",
+            (20260803, "case-name-age"): "본명 나나세 아야카 25세",
+            (20260802, "case-meaning"): "반대 번역",
+            (20260803, "case-meaning"): "반대 번역",
+        },
+    }
+
+    def records_for(arms: tuple[protocol.SamplerArm, ...]) -> list[dict[str, object]]:
+        records: list[dict[str, object]] = []
+        for arm in arms:
+            for seed in protocol.SEEDS:
+                for case in cases:
+                    case_id = str(case["case_id"])
+                    translation = translations[arm.sampler.key][(seed, case_id)]
+                    response = {
+                        "choices": [
+                            {
+                                "index": 0,
+                                "content": json.dumps(
+                                    {"translation": translation},
+                                    ensure_ascii=False,
+                                ),
+                                "finish_reason": "stop",
+                            }
+                        ]
+                    }
+                    verdict = judgment.validate_response_envelope(response)
+                    records.append(
+                        {
+                            "status": "complete",
+                            "phase": arm.phase,
+                            "arm_key": arm.key,
+                            "logical_slot": f"{arm.sampler.key}|{seed}|{case_id}",
+                            "case_id": case_id,
+                            "split": case["split"],
+                            "sampler": arm.sampler.payload(),
+                            "seed": seed,
+                            "reference_sha256": reference["reference_sha256"],
+                            "runtime_fingerprint": "runtime-one",
+                            "request_identity": {"case_id": case_id, "fixed": True},
+                            "response": response,
+                            "response_validation": verdict.payload(),
+                            "translation": verdict.translation if verdict.status == "VALID" else "",
+                            "latency_ms": 10.0,
+                            "completion_tokens": 4,
+                        }
+                    )
+        return records
+
+    r6_records = records_for((baseline,))
+    campaign_records = records_for((joint, minimum))
+    all_records = r6_records + campaign_records
+    ledger = incremental.new_incremental_ledger(reference)
+    packet = incremental.build_incremental_judgment_packet(reference, all_records, ledger, batch_size=10)
+    decisions = {
+        str(row["cluster_id"]): {
+            "decision": "MAJOR" if row["candidate_translation"] == "반대 번역" else "PASS",
+            "category": (
+                "semantic_reversal"
+                if row["candidate_translation"] == "반대 번역"
+                else "faithful_translation"
+            ),
+            "naturalness": 2 if row["candidate_translation"] == "반대 번역" else 5,
+        }
+        for row in packet["rows"]
+    }
+    ledger = incremental.mark_pending_batch(
+        ledger,
+        reference=reference,
+        packet=packet,
+        packet_file="judgment-batch-0001.json",
+    )
+    ledger = incremental.apply_incremental_judgments(
+        ledger,
+        reference=reference,
+        packet=packet,
+        decisions=decisions,
+        applied_utc="2026-08-04T00:00:00Z",
+    )
+    return reference, plan, r6_records, campaign_records, ledger
+
+
+def test_final_campaign_analysis_requires_exact_matrix_and_applies_name_age_gate() -> None:
+    reference, plan, r6_records, campaign_records, ledger = _final_analysis_fixture()
+    per_arm = 2 * len(protocol.SEEDS)
+    status = {
+        "state": "WAITING_FOR_FINAL_JUDGMENT",
+        "reference_sha256": reference["reference_sha256"],
+        "campaign_plan_sha256": plan.sha256,
+        "reused_logical_slots": per_arm,
+        "completed_new_logical_slots": per_arm * 2,
+        "expected_evidence_logical_slots": per_arm * 3,
+        "sampler_keys": list(plan.sampler_keys),
+        "seeds": list(protocol.SEEDS),
+        "r6_runtime_fingerprint": "runtime-one",
+        "runtime_fingerprint": "runtime-one",
+    }
+    plan_artifact = {
+        "campaign_plan_sha256": plan.sha256,
+        "plan": plan.payload(),
+        "reference_sha256": reference["reference_sha256"],
+    }
+    evidence = final_analysis.validate_final_campaign_evidence(
+        reference=reference,
+        r6_records=r6_records,
+        campaign_records=campaign_records,
+        r6_manifest={"status": "completed"},
+        campaign_manifest={"status": "completed"},
+        campaign_status=status,
+        campaign_plan_artifact=plan_artifact,
+        plan=plan,
+    )
+    gates = {
+        "schema_version": final_analysis.FINAL_GATE_SCHEMA_VERSION,
+        "reference_sha256": reference["reference_sha256"],
+        "gates": [
+            {
+                "gate_id": "required-name-age-v1",
+                "case_id": "case-name-age",
+                "required_substrings": ["나나세 아야카", "25"],
+            }
+        ],
+    }
+    public, private = final_analysis.build_final_campaign_analysis(
+        reference=reference,
+        records=r6_records + campaign_records,
+        ledger=ledger,
+        gates=gates,
+        evidence_summary=evidence,
+        plan=plan,
+    )
+
+    assert evidence["total_response_count"] == 12
+    assert len(public["ranked_arms"]) == 3
+    assert public["provisional_candidate_sampler_key"] == "t0.70-p1.00-k0-m0.00"
+    assert public["required_gates"][0]["excluded_sampler_keys"] == [
+        "t0.70-p0.95-k64-m0.00"
+    ]
+    assert public["product_promotion_allowed"] is False
+    assert len(public["seed_rows"]) == 3
+    assert {item["decision"] for item in private["error_clusters"]} == {
+        "CATASTROPHIC",
+        "MAJOR",
+    }
+    catastrophic = next(
+        item for item in private["error_clusters"] if item["decision"] == "CATASTROPHIC"
+    )
+    assert catastrophic["candidate_translation"] == ""
+    assert catastrophic["raw_response"] is not None
+
+
+def test_final_campaign_evidence_rejects_one_missing_sampler_seed_case() -> None:
+    reference, plan, r6_records, campaign_records, _ledger = _final_analysis_fixture()
+    per_arm = 2 * len(protocol.SEEDS)
+
+    with pytest.raises(judgment.JudgmentError, match="Final response counts"):
+        final_analysis.validate_final_campaign_evidence(
+            reference=reference,
+            r6_records=r6_records,
+            campaign_records=campaign_records[:-1],
+            r6_manifest={"status": "completed"},
+            campaign_manifest={"status": "completed"},
+            campaign_status={
+                "state": "WAITING_FOR_FINAL_JUDGMENT",
+                "reference_sha256": reference["reference_sha256"],
+                "campaign_plan_sha256": plan.sha256,
+                "reused_logical_slots": per_arm,
+                "completed_new_logical_slots": per_arm * 2,
+                "expected_evidence_logical_slots": per_arm * 3,
+                "sampler_keys": list(plan.sampler_keys),
+                "seeds": list(protocol.SEEDS),
+            },
+            campaign_plan_artifact={
+                "campaign_plan_sha256": plan.sha256,
+                "plan": plan.payload(),
+                "reference_sha256": reference["reference_sha256"],
+            },
+            plan=plan,
+        )
 
 
 def test_automatic_blind_verdicts_hide_sampler_and_logical_slot_identity() -> None:

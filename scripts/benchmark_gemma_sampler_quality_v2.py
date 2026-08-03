@@ -43,6 +43,10 @@ from scripts.gemma_sampler_quality_v2.execution import (  # noqa: E402
     sampler_keys_from_phase_status,
     select_phase,
 )
+from scripts.gemma_sampler_quality_v2.final_analysis import (  # noqa: E402
+    build_final_campaign_analysis,
+    validate_final_campaign_evidence,
+)
 from scripts.gemma_sampler_quality_v2.campaign import (  # noqa: E402
     campaign_preflight_summary,
     execute_campaign,
@@ -728,6 +732,65 @@ def command_apply_incremental_judgment(args: argparse.Namespace) -> int:
         raise
 
 
+def command_analyze_final_campaign(args: argparse.Namespace) -> int:
+    """Require terminal cleanup evidence and analyze every sealed response."""
+
+    run = _open_run(args)
+    try:
+        reference = load_frozen_reference(_private_path(args.reference))
+        r6_root = _private_path(args.r6_run)
+        campaign_root = _private_path(args.campaign_run)
+        ledger_root = _private_path(args.ledger_run)
+        r6_store = _response_store(str(r6_root))
+        campaign_store = _response_store(str(campaign_root))
+        r6_records = collect_completed_records((r6_store,), reference=reference)
+        campaign_records = collect_completed_records((campaign_store,), reference=reference)
+        ledger = _load_object(
+            ledger_root / harness.ARTIFACT_DIRECTORY_NAME / INCREMENTAL_LEDGER_FILE
+        )
+        gates = _load_object(args.gate_manifest)
+        evidence = validate_final_campaign_evidence(
+            reference=reference,
+            r6_records=r6_records,
+            campaign_records=campaign_records,
+            r6_manifest=_load_object(r6_root / harness.MANIFEST_FILE_NAME),
+            campaign_manifest=_load_object(campaign_root / harness.MANIFEST_FILE_NAME),
+            campaign_status=_load_object(
+                campaign_root / harness.ARTIFACT_DIRECTORY_NAME / "campaign-status.json"
+            ),
+            campaign_plan_artifact=_load_object(
+                campaign_root / harness.ARTIFACT_DIRECTORY_NAME / "campaign-plan.json"
+            ),
+        )
+        public, private = build_final_campaign_analysis(
+            reference=reference,
+            records=tuple(r6_records) + tuple(campaign_records),
+            ledger=ledger,
+            gates=gates,
+            evidence_summary=evidence,
+        )
+        atomic_write_json(run.artifact_root / "final-campaign-analysis-public.json", public)
+        atomic_write_json(run.artifact_root / "final-campaign-analysis-private.json", private)
+        _finish_run(
+            run,
+            command="analyze-final-campaign",
+            summary={
+                "state": public.get("state"),
+                "analysis_sha256": public.get("analysis_sha256"),
+                "sampler_count": evidence.get("sampler_count"),
+                "total_response_count": evidence.get("total_response_count"),
+                "provisional_candidate_sampler_key": public.get(
+                    "provisional_candidate_sampler_key"
+                ),
+                "product_promotion_allowed": False,
+            },
+        )
+        return 0
+    except BaseException as exc:
+        run.fail(exc, metadata={"command": "analyze-final-campaign"})
+        raise
+
+
 def command_rank(args: argparse.Namespace) -> int:
     reference = load_frozen_reference(_private_path(args.reference))
     all_records = collect_completed_records(
@@ -941,6 +1004,15 @@ def build_parser() -> argparse.ArgumentParser:
     apply_incremental.add_argument("--decisions", required=True)
     _add_run_options(apply_incremental)
     apply_incremental.set_defaults(handler=command_apply_incremental_judgment)
+
+    final_analysis = subparsers.add_parser("analyze-final-campaign")
+    final_analysis.add_argument("--reference", required=True)
+    final_analysis.add_argument("--r6-run", required=True)
+    final_analysis.add_argument("--campaign-run", required=True)
+    final_analysis.add_argument("--ledger-run", required=True)
+    final_analysis.add_argument("--gate-manifest", required=True)
+    _add_run_options(final_analysis)
+    final_analysis.set_defaults(handler=command_analyze_final_campaign)
 
     rank = subparsers.add_parser("rank")
     rank.add_argument("--reference", required=True)

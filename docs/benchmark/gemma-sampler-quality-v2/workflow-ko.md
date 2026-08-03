@@ -49,3 +49,15 @@ ledger key는 sampler 정보가 아니라 `case_id + translation_sha256`으로 �
 seed, logical slot, 실행 순서를 넣지 않는다. 실행 중 snapshot은 완전히 append된 completion
 index만 읽으며, 아직 index에 들어오지 않은 in-flight case를 복구하거나 campaign 파일을
 다시 쓰지 않는다. 최종 순위는 campaign 종료 및 cleanup 증명 전에는 만들지 않는다.
+
+## 최종 분석 계약
+
+`analyze-final-campaign`은 campaign이 `WAITING_FOR_FINAL_JUDGMENT`에 도달하고 managed run이
+정상 완료된 뒤에만 실행된다. r6 `9,560`개와 신규 `124,280`개를 합쳐, 140개 tuple마다 두 seed와
+478개 case가 정확히 한 번씩 있는지 검사한다. reference·plan·runtime·request identity가 하나라도
+다르거나 판정이 남아 있으면 보고서를 만들지 않는다.
+
+최종 private 보고서는 오류 번역과 gate 근거를 보존한다. public 집계에는 140개 전체 순위,
+온도 10개, joint 120개, min-p 비교 30개, seed별 수치와 오류율만 넣는다. 필수 이름·나이 gate는
+별도 private manifest의 문자열 계약으로 검사한다. 보고서 상태는 사용자 승인 대기이며,
+분석 명령 자체는 제품 기본값을 변경하지 않는다.
