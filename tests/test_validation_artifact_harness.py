@@ -193,7 +193,9 @@ class ValidationArtifactHarnessTests(unittest.TestCase):
     def test_exact_failed_atomic_replace_can_recover_with_audit_record(self) -> None:
         run = self.create_run(family="recover-test")
         error = PermissionError(
-            "[WinError 5] Access is denied: '.progress.json.partial-1-a' -> 'progress.json'"
+            "[WinError 5] Access is denied: "
+            "'C:\\private\\run\\.progress.json.partial-1-a' -> "
+            "'C:\\private\\run\\progress.json'"
         )
         run.fail(error, metadata={"command": "run-phase"})
 

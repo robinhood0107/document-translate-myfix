@@ -221,7 +221,11 @@ def test_run_phase_reopens_only_the_known_progress_replace_failure(
         run_id="recover-known-progress-lock",
     )
     run.fail(
-        PermissionError("[WinError 5] '.progress.json.partial-1-a' -> 'progress.json'"),
+        PermissionError(
+            "[WinError 5] Access is denied: "
+            "'C:\\private\\run\\.progress.json.partial-1-a' -> "
+            "'C:\\private\\run\\progress.json'"
+        ),
         metadata={"command": "run-phase"},
     )
 

@@ -82,11 +82,7 @@ def _is_exact_atomic_replace_permission_error(error_message: str, target_file_na
         rf"\[WinError 5\][^'\"]*['\"](?P<directory>[^'\"]*[\\/])\.{escaped_target}\.partial-[^'\"]+['\"]"
         rf"\s*->\s*['\"](?P=directory){escaped_target}['\"]"
     )
-    without_directory = re.compile(
-        rf"\[WinError 5\][^'\"]*['\"]\.{escaped_target}\.partial-[^'\"]+['\"]"
-        rf"\s*->\s*['\"]{escaped_target}['\"]"
-    )
-    return bool(with_directory.search(error_message) or without_directory.search(error_message))
+    return bool(with_directory.search(error_message))
 
 
 class ArtifactHarnessError(RuntimeError):
