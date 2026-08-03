@@ -24,6 +24,11 @@ source; Codex relies on this `AGENTS.md` entrypoint.
   contributor trailer.
 - Update Qt `.ts` and compiled `.qm` assets with every user-visible UI-text
   change.
+- For Gemma sampler benchmarks, rank only the normalized translated sentence:
+  preserve meaning and naturalness, accept meaning-preserving wording or
+  onomatopoeia variation, strip known channel/thought framing first, and keep
+  transport shape as private diagnostics. See the canonical quality rule in
+  `rules.md`; do not replay completed raw responses merely to apply it.
 
 ## Public documentation and private validation artifacts
 
