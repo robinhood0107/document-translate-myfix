@@ -699,6 +699,79 @@ def test_reused_phase_rows_require_matching_reference_runtime_and_request_contra
         )
 
 
+def test_complete_scope_records_keeps_holdout_sealed_without_weakening_tuning_matrix(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(execution, "CORPUS_CASE_COUNT", 2)
+    cases = [
+        {
+            "case_id": "case-holdout",
+            "split": "holdout",
+            "language": "ja-ko",
+            "source_text": "holdout source",
+            "context_after_text": "",
+            "canonical_translation": "holdout canonical",
+            "required_meaning": ["meaning"],
+            "prohibited_changes": ["number_change"],
+            "review_status": "APPROVED",
+        },
+        {
+            "case_id": "case-tuning",
+            "split": "tuning",
+            "language": "ja-ko",
+            "source_text": "tuning source",
+            "context_after_text": "",
+            "canonical_translation": "tuning canonical",
+            "required_meaning": ["meaning"],
+            "prohibited_changes": ["number_change"],
+            "review_status": "APPROVED",
+        },
+    ]
+    reference = {
+        "schema_version": corpus.REFERENCE_SCHEMA_VERSION,
+        "state": "FROZEN",
+        "case_identity": "language+source_text+context_after_text",
+        "cases": cases,
+    }
+    reference["reference_sha256"] = protocol.canonical_sha256(
+        {
+            "schema_version": reference["schema_version"],
+            "case_identity": reference["case_identity"],
+            "cases": reference["cases"],
+        }
+    )
+    sampler = protocol.SamplerTuple(0.7, 0.95, 64, 0.0)
+    records = [
+        {"case_id": str(case["case_id"]), "seed": seed, "sampler": sampler.payload()}
+        for case in cases
+        for seed in protocol.SEEDS
+    ]
+
+    selected = execution.complete_scope_records(
+        records,
+        reference=reference,
+        scope="tuning",
+        sampler_keys=(sampler.key,),
+    )
+    assert len(selected) == len(protocol.SEEDS)
+    assert {record["case_id"] for record in selected} == {"case-tuning"}
+
+    with pytest.raises(execution.ExecutionError, match="complete sampler matrix"):
+        execution.complete_scope_records(
+            [*records, dict(records[2])],
+            reference=reference,
+            scope="tuning",
+            sampler_keys=(sampler.key,),
+        )
+    with pytest.raises(execution.ExecutionError, match="every selected case and seed"):
+        execution.complete_scope_records(
+            [record for record in records if record["case_id"] != "case-tuning" or record["seed"] != protocol.SEEDS[0]],
+            reference=reference,
+            scope="tuning",
+            sampler_keys=(sampler.key,),
+        )
+
+
 def test_execution_phase_selection_requires_two_temps_or_three_tuples() -> None:
     with pytest.raises(protocol.ProtocolError):
         execution.select_phase("joint_top_p_top_k", selected_temperatures=(0.7,))

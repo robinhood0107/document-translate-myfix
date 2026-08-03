@@ -439,9 +439,11 @@ def complete_scope_records(
     allowed = tuple(str(key) for key in sampler_keys)
     if not allowed or len(set(allowed)) != len(allowed):
         raise ExecutionError("Sampler judgment requires a non-duplicate candidate tuple set.")
-    cases = [case for case in _case_list(reference) if case.get("split") == scope]
+    all_cases = _case_list(reference)
+    cases = [case for case in all_cases if case.get("split") == scope]
     if not cases:
         raise ExecutionError("Frozen reference has no cases for the requested judgment scope.")
+    case_split_by_id = {str(case["case_id"]): str(case.get("split") or "") for case in all_cases}
     expected = {
         (sampler_key, seed, str(case["case_id"]))
         for sampler_key in allowed
@@ -469,6 +471,10 @@ def complete_scope_records(
         case_id = str(record.get("case_id") or "")
         if not isinstance(seed, int) or seed not in SEEDS:
             raise ExecutionError("Private response record has an invalid fixed seed.")
+        if case_id not in case_split_by_id:
+            raise ExecutionError("Private response record case is absent from the frozen reference.")
+        if case_split_by_id[case_id] != scope:
+            continue
         identity = (sampler_key, seed, case_id)
         if identity not in expected or identity in observed:
             raise ExecutionError("Private response records do not form one complete sampler matrix.")
