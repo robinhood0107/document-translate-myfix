@@ -13,17 +13,33 @@ if "%SAMPLER_MAX_ATTEMPTS%"=="" set "SAMPLER_MAX_ATTEMPTS=3"
 if "%SAMPLER_TIMEOUT_SEC%"=="" set "SAMPLER_TIMEOUT_SEC=180"
 
 set "SAMPLER_RUN_ROOT=%CD%\banchmark_result_log\managed-runs\10-gemma-translation\gemma-sampler-quality-v2\%SAMPLER_RUN_ID%"
+set "SAMPLER_LOG_DIR=%CD%\banchmark_result_log\managed-runs\10-gemma-translation\gemma-sampler-quality-v2\supervisor-logs"
+set "SAMPLER_LOG=%SAMPLER_LOG_DIR%\%SAMPLER_RUN_ID%.log"
 set "SAMPLER_PYTHON=%CD%\.venv-win\Scripts\python.exe"
 if not exist "%SAMPLER_PYTHON%" (
   echo [GEMMA-SAMPLER-V2] .venv-win Python was not found.
   exit /b 2
 )
+if not exist "%SAMPLER_LOG_DIR%" mkdir "%SAMPLER_LOG_DIR%"
+
+if /I "%SAMPLER_NO_MONITOR%"=="1" goto monitor_ready
+if "%GEMMA_MONITOR_OUTPUT%"=="" set "GEMMA_MONITOR_OUTPUT=%CD%\banchmark_result_log\tools\gemma-monitor.exe"
+set "SAMPLER_MONITOR_EXE=%GEMMA_MONITOR_OUTPUT%"
+call scripts\build_gemma_sampler_monitor.bat --if-stale
+if errorlevel 1 (
+  echo [GEMMA-SAMPLER-V2] gemma-monitor build failed. Set SAMPLER_NO_MONITOR=1 only for a deliberate headless run.
+  exit /b 2
+)
+start "Gemma Sampler Monitor" "%SAMPLER_MONITOR_EXE%" --run-root "%SAMPLER_RUN_ROOT%" --poll-interval 1s --exit-on-completion
+
+:monitor_ready
+echo [GEMMA-SAMPLER-V2] Runner logs: %SAMPLER_LOG%
 
 :retry
 if "%SAMPLER_PRIOR_RESPONSE_RUN%"=="" (
-  call :run_phase
+  call :run_phase >> "%SAMPLER_LOG%" 2>&1
 ) else (
-  call :run_phase --prior-response-run "%SAMPLER_PRIOR_RESPONSE_RUN%"
+  call :run_phase --prior-response-run "%SAMPLER_PRIOR_RESPONSE_RUN%" >> "%SAMPLER_LOG%" 2>&1
 )
 set "SAMPLER_EXIT=%ERRORLEVEL%"
 if "%SAMPLER_EXIT%"=="75" (
