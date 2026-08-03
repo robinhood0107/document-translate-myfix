@@ -43,6 +43,10 @@ from scripts.gemma_sampler_quality_v2.execution import (  # noqa: E402
     sampler_keys_from_phase_status,
     select_phase,
 )
+from scripts.gemma_sampler_quality_v2.campaign import (  # noqa: E402
+    campaign_preflight_summary,
+    execute_campaign,
+)
 from scripts.gemma_sampler_quality_v2.judgment import (  # noqa: E402
     JudgmentError,
     bind_cluster_verdicts_to_records,
@@ -110,11 +114,12 @@ def _open_run(args: argparse.Namespace) -> harness.ManagedArtifactRun:
         try:
             return harness.ManagedArtifactRun.resume(run_root)
         except harness.ArtifactHarnessError:
-            if not str(getattr(args, "phase", "") or "").strip():
+            command = "run-campaign" if bool(getattr(args, "campaign", False)) else "run-phase"
+            if command != "run-campaign" and not str(getattr(args, "phase", "") or "").strip():
                 raise
             return harness.ManagedArtifactRun.recover_failed_atomic_replace(
                 run_root,
-                command="run-phase",
+                command=command,
                 target_file_name="progress.json",
             )
     return harness.ManagedArtifactRun.create(
@@ -303,6 +308,107 @@ def command_run_phase(args: argparse.Namespace) -> int:
             "completed_logical_slots": status.get("completed_logical_slots"),
             "expected_logical_slots": status.get("expected_logical_slots"),
             "reference_sha256": status.get("reference_sha256"),
+        },
+    )
+    return 0
+
+
+def _campaign_family_root() -> Path:
+    return harness.default_archive_root() / "managed-runs" / CATEGORY / FAMILY
+
+
+def _discover_frozen_reference_path() -> Path:
+    root = _campaign_family_root()
+    candidates: list[Path] = []
+    for candidate in sorted(root.glob("*/artifacts/reference-frozen.json")):
+        try:
+            reference = load_frozen_reference(candidate)
+        except (ExecutionError, StorageError):
+            continue
+        if reference.get("state") == "FROZEN":
+            candidates.append(candidate)
+    if len(candidates) != 1:
+        raise ExecutionError(
+            "Campaign requires exactly one user-approved frozen reference in the managed private archive."
+        )
+    return candidates[0]
+
+
+def _discover_r6_run_root(*, reference: Mapping[str, Any]) -> Path:
+    root = _campaign_family_root()
+    candidates: list[Path] = []
+    expected_reference = str(reference.get("reference_sha256") or "")
+    for candidate in sorted(root.glob("*/artifacts/phase-status/temperature.json")):
+        try:
+            status = _load_object(candidate)
+        except (ExecutionError, StorageError):
+            continue
+        if (
+            status.get("state") == "WAITING_FOR_JUDGMENT"
+            and status.get("phase") == "temperature"
+            and status.get("expected_logical_slots") == 9560
+            and status.get("completed_logical_slots") == 9560
+            and str(status.get("reference_sha256") or "") == expected_reference
+        ):
+            candidates.append(candidate.parents[2])
+    if len(candidates) != 1:
+        raise ExecutionError(
+            "Campaign requires exactly one complete r6 temperature run matching the frozen reference."
+        )
+    return candidates[0]
+
+
+def _resolve_campaign_inputs(args: argparse.Namespace) -> tuple[dict[str, Any], Path, RunStore]:
+    reference_value = str(getattr(args, "reference", "") or "").strip()
+    reference_path = _private_path(reference_value) if reference_value else _discover_frozen_reference_path()
+    reference = load_frozen_reference(reference_path)
+    r6_value = str(getattr(args, "r6_run", "") or "").strip()
+    r6_root = _private_path(r6_value) if r6_value else _discover_r6_run_root(reference=reference)
+    return reference, r6_root, _response_store(str(r6_root))
+
+
+def command_verify_campaign(args: argparse.Namespace) -> int:
+    reference, r6_root, r6_store = _resolve_campaign_inputs(args)
+    summary = campaign_preflight_summary(reference=reference, r6_store=r6_store)
+    summary["r6_run_id"] = r6_root.name
+    print(json.dumps(summary, ensure_ascii=False))
+    return 0
+
+
+def command_run_campaign(args: argparse.Namespace) -> int:
+    run = _open_run(args)
+    try:
+        reference, r6_root, r6_store = _resolve_campaign_inputs(args)
+        status = execute_campaign(
+            store=RunStore(run.artifact_root),
+            reference=reference,
+            r6_store=r6_store,
+            timeout_sec=float(args.timeout_sec),
+            max_attempts=int(args.max_attempts),
+        )
+    except ResumeRequired as exc:
+        run.checkpoint(
+            metadata={
+                "command": "run-campaign",
+                "state": "RESUME_REQUIRED",
+                "detail": str(exc)[:512],
+            }
+        )
+        print(f"RESUME_RUN={run.run_root}")
+        return EXIT_RESUME
+    except BaseException as exc:
+        run.fail(exc, metadata={"command": "run-campaign"})
+        raise
+    _finish_run(
+        run,
+        command="run-campaign",
+        summary={
+            "state": status.get("state"),
+            "completed_new_logical_slots": status.get("completed_new_logical_slots"),
+            "expected_new_logical_slots": status.get("expected_new_logical_slots"),
+            "expected_evidence_logical_slots": status.get("expected_evidence_logical_slots"),
+            "reference_sha256": status.get("reference_sha256"),
+            "r6_run_id": r6_root.name,
         },
     )
     return 0
@@ -577,6 +683,35 @@ def build_parser() -> argparse.ArgumentParser:
     )
     _add_run_options(run)
     run.set_defaults(handler=command_run_phase)
+
+    verify_campaign = subparsers.add_parser("verify-campaign")
+    verify_campaign.add_argument(
+        "--reference",
+        default="",
+        help="Optional private frozen reference override; default discovery requires exactly one.",
+    )
+    verify_campaign.add_argument(
+        "--r6-run",
+        default="",
+        help="Optional private r6 managed-run override; default discovery requires exactly one.",
+    )
+    verify_campaign.set_defaults(handler=command_verify_campaign)
+
+    campaign = subparsers.add_parser("run-campaign")
+    campaign.add_argument(
+        "--reference",
+        default="",
+        help="Optional private frozen reference override; default discovery requires exactly one.",
+    )
+    campaign.add_argument(
+        "--r6-run",
+        default="",
+        help="Optional private r6 managed-run override; default discovery requires exactly one.",
+    )
+    campaign.add_argument("--timeout-sec", type=float, default=180.0)
+    campaign.add_argument("--max-attempts", type=int, default=3)
+    _add_run_options(campaign)
+    campaign.set_defaults(handler=command_run_campaign, campaign=True)
 
     judgment = subparsers.add_parser("build-judgment-packet")
     judgment.add_argument("--reference", required=True)

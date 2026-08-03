@@ -1,32 +1,53 @@
 # Gemma sampler quality v2 사용법
 
-실제 입력과 결과는 모두 private archive에서만 지정한다. 먼저 reference가 `FROZEN` 상태이고 사용자 24개 표본 검수가 기록되어 있어야 한다.
+이 benchmark는 승인된 frozen reference와 완료된 r6를 private managed archive에서
+자동으로 찾아 검증한다. 원문·응답·판정 경로를 BAT나 명령줄에 붙여 넣지 않는다.
 
-Windows CUDA 13 장시간 실행 예시는 다음 환경 변수 형태다.
+## 실행할 것
+
+평소에는 `banchmark_result_log\\tools\\gemma-sampler-launcher.exe`를 더블클릭한다.
+이것만 실제 장시간 CUDA13 실행을 시작하는 진입점이다. launcher는 다음을 한 번에 한다.
+
+1. CUDA13 BAT를 백그라운드 supervisor로 시작한다.
+2. Bubble Tea 전체화면 monitor 하나만 연다.
+3. r6와 frozen reference를 읽기 전용으로 검사한다.
+4. 이미 살아 있는 runner가 있으면 새 runner를 만들지 않고 monitor만 다시 붙인다.
+5. 이전 Python worker가 끊긴 checkpoint라면 같은 campaign ID로 이어서 실행한다.
+
+launcher는 매번 monitor source가 더 새로우면 `scripts\build_gemma_sampler_monitor.bat
+--monitor-only-if-stale`를 먼저 호출한다. Scoop Go가
+설치되어 있으면 Scoop shim을 직접 찾으므로, 새 CMD를 열어 PATH를 다시 주입할 필요가
+없다. 실행 파일은 ignored private artifact 영역에만 만들어지며 Git에 올리지 않는다.
+
+`--verify`는 GPU·Docker·runner를 시작하지 않는 사전검사다.
 
 ```bat
-set SAMPLER_REFERENCE=<private-frozen-reference>
-set SAMPLER_PHASE=temperature
-call scripts\benchmark_gemma_sampler_quality_v2_cuda13.bat
+call scripts\benchmark_gemma_sampler_quality_v2_cuda13.bat --verify
 ```
 
-BAT를 실행하면 별도 `Gemma Sampler Monitor` 창이 자동으로 열린다. 이 창은 Go로
-빌드한 read-only 전용 TUI이며, runner·Docker·GPU 작업을 제어하지 않는다.
+일반 `scripts\benchmark_gemma_sampler_quality_v2.bat`는 같은 사전검사만 수행한다.
+실제 inference를 시작하지 않으므로, 실수로 일반 BAT를 눌러도 campaign은 시작되지 않는다.
 
-- 처음 한 번은 private archive의 `gemma-monitor.exe`를 빌드한다. Scoop Go가
-  설치되어 있으면 사용자 `Path`가 아직 갱신되지 않은 기존 CMD에서도 Scoop shim을
-  직접 찾아 사용하므로 별도 환경 변수 설정이 필요 없다.
-- 화면에는 현재 phase/state, 완료·잔여 수, 최근 완료 표본 기반의 rate/ETA, 파일
-  freshness, GPU별 VRAM·사용률·온도가 표시된다. ETA는 최근 연속 실행 구간의
-  30/90/240개 표본 rate 중앙값을 사용하며, progress가 90초 이상 갱신되지 않으면
-  추정을 일시 보류한다.
-- `q`, `Esc`, `Ctrl+C`는 모니터 창만 닫는다. 실제 runner·Docker·GPU 작업은 계속
-  실행된다. phase가 `WAITING_FOR_JUDGMENT`에 정상 도달하면 모니터는 잠시 결과를
-  보여 준 뒤 자동으로 닫힌다.
-- runner stdout/stderr는 private archive의 해당 run-id `supervisor-logs` 파일에
-  계속 추가 저장된다. raw 결과나 로그는 Git에 stage하지 않는다.
-- 의도적인 무인 실행에만 `set SAMPLER_NO_MONITOR=1`을 지정한다. 기본값은 모니터
-  표시다. Go 경로를 직접 지정해야 하는 특수 환경에서는 `GEMMA_MONITOR_GO`를,
-  private EXE 위치를 바꿔야 할 때만 `GEMMA_MONITOR_OUTPUT`을 지정할 수 있다.
+## monitor에서 보이는 것
 
-joint phase는 `SAMPLER_SELECTION`에 선택된 두 temperature와 이전 temperature response run을 `SAMPLER_PRIOR_RESPONSE_RUN`으로 지정한다. min-p phase는 선택된 세 tuple과 이전 joint response run을 같은 방식으로 지정한다. BAT가 exit code 75를 받으면 동일 managed run을 자동 resume한다. Windows의 progress checkpoint 임시 파일 교체가 잠시 거부된 것으로 감사 기록이 남은 경우에만 동일 run을 복구할 수 있으며, 그 밖의 failed manifest는 재개하지 않는다. 완료하면 raw 결과를 공개하거나 stage하지 말고, private blind judgment packet으로 다음 gate를 진행한다.
+- 새 실행 진행률: `완료 / 124,280`
+- r6 재사용: `9,560`, 전체 증거: `완료 + 재사용 / 133,840`
+- 현재 단계, temperature, top-p, top-k, min-p, seed, case 위치
+- valid·retry·timeout·indeterminate 수
+- r6 실측 기반 초기 ETA와 500응답 이후 live 속도 보정 ETA
+- 활성 실행 시간·retry backoff 시간, GPU VRAM·사용률·온도, checkpoint freshness
+- worker PID, 마지막 완료·마지막 상태, 정확한 private supervisor log 위치
+
+monitor는 read-only다. `q`, `Esc`, `Ctrl+C`는 **monitor 창만** 닫고 runner와 Docker
+작업은 계속한다. 다시 EXE를 더블클릭하면 살아 있는 runner에 다시 붙는다.
+
+## 언제 멈추는가
+
+정상 실행은 `WAITING_FOR_FINAL_JUDGMENT`에서 자동으로 멈춘다. Router unload와 GPU 반환이
+확인되기 전에는 이 상태로 바뀌지 않는다. contract mismatch, foreign runtime, slot drain
+실패, VRAM 반환 실패, 저장공간 부족은 fail-closed로 멈춘다. 이 경우에는 무작정 다시
+실행하지 말고 저장된 상태와 log를 확인한 뒤 원인을 해결한다.
+
+PC 재부팅이나 BAT worker 강제 종료 뒤에는 같은 EXE를 다시 실행한다. 이미 first-valid로
+저장된 logical slot은 재추론하지 않는다. 정상 완료 전에는 수동으로 결과를 삭제하거나
+새 run ID를 만들지 않는다.

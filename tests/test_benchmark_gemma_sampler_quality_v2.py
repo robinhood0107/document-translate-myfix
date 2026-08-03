@@ -18,7 +18,7 @@ if str(ROOT) not in sys.path:
 
 from scripts import benchmark_gemma_sampler_quality_v2 as sampler_cli  # noqa: E402
 from scripts import validation_artifact_harness as harness  # noqa: E402
-from scripts.gemma_sampler_quality_v2 import corpus, execution, judgment, protocol, report, runtime, storage  # noqa: E402
+from scripts.gemma_sampler_quality_v2 import campaign, corpus, execution, judgment, protocol, report, runtime, storage  # noqa: E402
 from scripts.gemma_sampler_quality_v2.storage import RunStore, read_json  # noqa: E402
 from scripts.gemma_sampler_quality_v2.review import render_private_review_html  # noqa: E402
 
@@ -147,6 +147,30 @@ def test_matrix_counts_exclude_temperature_zero_and_reuse_existing_rows() -> Non
     assert protocol.filters_disabled(top_k=0, top_p=1.0)
     with pytest.raises(protocol.ProtocolError):
         protocol.SamplerTuple(0.0, 0.95, 64, 0.0)
+
+
+def test_single_campaign_matrix_is_fixed_and_reuses_only_approved_rows() -> None:
+    plan = protocol.campaign_plan()
+
+    assert len(plan.temperature_arms) == 10
+    assert len(plan.joint_arms) == 120
+    assert len(plan.new_joint_arms) == 110
+    assert len(plan.min_p_arms) == 30
+    assert len(plan.new_min_p_arms) == 20
+    assert len(plan.sampler_keys) == 140
+    assert all(
+        arm.sampler.top_p == 1.0 and arm.sampler.top_k == 0 and arm.sampler.min_p == 0.0
+        for arm in plan.joint_arms[:10]
+    )
+    assert [arm.sampler.temperature for arm in plan.joint_arms[:10]] == list(protocol.TEMPERATURE_VALUES)
+    assert protocol.campaign_response_counts() == {
+        "r6_reused": 9560,
+        "joint_new": 105160,
+        "min_p_new": 19120,
+        "total_new": 124280,
+        "total_evidence": 133840,
+    }
+    assert plan.sha256 == protocol.campaign_plan().sha256
 
 
 def test_atomic_write_retries_a_transient_permission_error(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
@@ -782,6 +806,294 @@ def test_phase_report_exposes_tuning_scope_for_holdout_gate() -> None:
     assert packet["scope"] == "holdout"
 
 
+def test_campaign_preflight_reuses_complete_r6_without_starting_a_runtime(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(execution, "CORPUS_CASE_COUNT", 1)
+    case = {
+        "case_id": "case-safe",
+        "split": "tuning",
+        "language": "ja-ko",
+        "source_text": "source",
+        "context_after_text": "context",
+        "canonical_translation": "canonical",
+        "required_meaning": ["meaning"],
+        "prohibited_changes": ["number_change"],
+        "review_status": "APPROVED",
+    }
+    reference = {
+        "schema_version": corpus.REFERENCE_SCHEMA_VERSION,
+        "state": "FROZEN",
+        "case_identity": "language+source_text+context_after_text",
+        "cases": [case],
+    }
+    reference["reference_sha256"] = protocol.canonical_sha256(
+        {
+            "schema_version": reference["schema_version"],
+            "case_identity": reference["case_identity"],
+            "cases": reference["cases"],
+        }
+    )
+    request_identity = {"case_id": "case-safe", "request_sha256_without_sampler_or_seed": "a" * 64}
+    monkeypatch.setattr(
+        campaign,
+        "_campaign_request_identities",
+        lambda **_kwargs: ({"Japanese": object()}, {"case-safe": request_identity}),
+    )
+
+    run_root = tmp_path / "r6-run"
+    artifact_root = run_root / "artifacts"
+    artifact_root.mkdir(parents=True)
+    _write_json(run_root / "artifact-manifest.json", {"status": "completed"})
+    r6_store = RunStore(artifact_root)
+    plan = protocol.campaign_plan()
+    for arm in plan.temperature_arms:
+        for seed, order in zip(protocol.SEEDS, ("forward", "reverse"), strict=True):
+            slot = f"temperature|{arm.sampler.key}|seed-{seed}|case-safe"
+            r6_store.record_case_if_first(
+                phase="temperature",
+                arm=arm.key,
+                run=f"seed-{seed}-{order}",
+                case_id="case-safe",
+                logical_slot=slot,
+                payload={
+                    "status": "complete",
+                    "recorded_utc": "2026-08-03T00:00:00Z",
+                    "phase": "temperature",
+                    "arm_key": arm.key,
+                    "sampler": arm.sampler.payload(),
+                    "seed": seed,
+                    "case_id": "case-safe",
+                    "split": "tuning",
+                    "reference_sha256": reference["reference_sha256"],
+                    "runtime_fingerprint": "router-fingerprint",
+                    "request_identity": request_identity,
+                    "response_validation": {
+                        "schema_version": judgment.RESPONSE_VALIDATION_SCHEMA_VERSION,
+                        "status": "VALID",
+                    },
+                    "logical_slot": slot,
+                },
+            )
+    expected = len(plan.temperature_arms) * len(protocol.SEEDS)
+    r6_store.write_phase_status(
+        "temperature",
+        {
+            "state": "WAITING_FOR_JUDGMENT",
+            "phase": "temperature",
+            "reference_sha256": reference["reference_sha256"],
+            "arms": [arm.payload() for arm in plan.temperature_arms],
+            "expected_logical_slots": expected,
+            "completed_logical_slots": expected,
+        },
+    )
+    _write_json(
+        artifact_root / "runtime-contract.json",
+        {
+            "fingerprint": "router-fingerprint",
+            "image_ref": protocol.PINNED_LLAMA_CPP_IMAGE,
+            "binary_version": "version: 10133 (ff067f76d)",
+            "command_sha256": "b" * 64,
+            "preset_sha256": "c" * 64,
+            "effective_context_size": "4096",
+            "fixed_request_contract_sha256": protocol.canonical_sha256(
+                protocol.fixed_request_contract_payload()
+            ),
+        },
+    )
+
+    summary = campaign.campaign_preflight_summary(reference=reference, r6_store=r6_store)
+
+    assert summary["state"] == "READY_TO_RUN"
+    assert summary["response_counts"]["total_new"] == 124280
+    assert summary["case_count"] == 1
+
+
+def test_campaign_runs_one_runtime_session_then_waits_for_final_judgment(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(execution, "CORPUS_CASE_COUNT", 1)
+    monkeypatch.setattr(protocol, "TEMPERATURE_VALUES", (0.1,))
+    scaled_counts = {
+        "r6_reused": 2,
+        "joint_new": 22,
+        "min_p_new": 4,
+        "total_new": 26,
+        "total_evidence": 28,
+    }
+    monkeypatch.setattr(campaign, "campaign_response_counts", lambda: dict(scaled_counts))
+    case = {
+        "case_id": "case-safe",
+        "split": "tuning",
+        "language": "ja-ko",
+        "source_text": "source",
+        "context_after_text": "context",
+        "canonical_translation": "canonical",
+        "required_meaning": ["meaning"],
+        "prohibited_changes": ["number_change"],
+        "review_status": "APPROVED",
+    }
+    reference = {
+        "schema_version": corpus.REFERENCE_SCHEMA_VERSION,
+        "state": "FROZEN",
+        "case_identity": "language+source_text+context_after_text",
+        "cases": [case],
+    }
+    reference["reference_sha256"] = protocol.canonical_sha256(
+        {
+            "schema_version": reference["schema_version"],
+            "case_identity": reference["case_identity"],
+            "cases": reference["cases"],
+        }
+    )
+    request_identity = {"case_id": "case-safe", "request_sha256_without_sampler_or_seed": "a" * 64}
+    engine = object()
+    monkeypatch.setattr(
+        campaign,
+        "_campaign_request_identities",
+        lambda **_kwargs: ({"Japanese": engine}, {"case-safe": request_identity}),
+    )
+    monkeypatch.setattr(
+        execution,
+        "_case_request",
+        lambda _engine, _case, sampler, seed: (
+            {"sampler": sampler.payload(), "seed": seed},
+            request_identity,
+        ),
+    )
+
+    r6_run = tmp_path / "r6-run"
+    r6_artifacts = r6_run / "artifacts"
+    r6_artifacts.mkdir(parents=True)
+    _write_json(r6_run / "artifact-manifest.json", {"status": "completed"})
+    r6_store = RunStore(r6_artifacts)
+    plan = protocol.campaign_plan()
+    for seed, order in zip(protocol.SEEDS, ("forward", "reverse"), strict=True):
+        arm = plan.temperature_arms[0]
+        slot = f"temperature|{arm.sampler.key}|seed-{seed}|case-safe"
+        r6_store.record_case_if_first(
+            phase="temperature",
+            arm=arm.key,
+            run=f"seed-{seed}-{order}",
+            case_id="case-safe",
+            logical_slot=slot,
+            payload={
+                "status": "complete",
+                "recorded_utc": "2026-08-03T00:00:00Z",
+                "phase": "temperature",
+                "arm_key": arm.key,
+                "sampler": arm.sampler.payload(),
+                "seed": seed,
+                "case_id": "case-safe",
+                "split": "tuning",
+                "reference_sha256": reference["reference_sha256"],
+                "runtime_fingerprint": "router-fingerprint",
+                "request_identity": request_identity,
+                "response_validation": {"schema_version": judgment.RESPONSE_VALIDATION_SCHEMA_VERSION},
+                "logical_slot": slot,
+            },
+        )
+    r6_store.write_phase_status(
+        "temperature",
+        {
+            "state": "WAITING_FOR_JUDGMENT",
+            "phase": "temperature",
+            "reference_sha256": reference["reference_sha256"],
+            "arms": [arm.payload() for arm in plan.temperature_arms],
+            "expected_logical_slots": 2,
+            "completed_logical_slots": 2,
+        },
+    )
+    _write_json(
+        r6_artifacts / "runtime-contract.json",
+        {
+            "fingerprint": "router-fingerprint",
+            "image_ref": protocol.PINNED_LLAMA_CPP_IMAGE,
+            "binary_version": "version: 10133 (ff067f76d)",
+            "command_sha256": "b" * 64,
+            "preset_sha256": "c" * 64,
+            "effective_context_size": "4096",
+            "fixed_request_contract_sha256": protocol.canonical_sha256(
+                protocol.fixed_request_contract_payload()
+            ),
+        },
+    )
+
+    class FakeRuntime:
+        def __init__(self) -> None:
+            self.contract = _router_runtime_contract(gemma_context_size="4096")
+            self.started = 0
+            self.closed = 0
+
+        def start(self) -> object:
+            self.started += 1
+            return self.contract
+
+        def request(self, _payload: object, *, timeout_sec: float) -> runtime.ReplayResponse:
+            assert timeout_sec == 1.0
+            return runtime.ReplayResponse(
+                envelope={
+                    "choices": [
+                        {"index": 0, "finish_reason": "stop", "message": {"content": '{"translation":"ok"}'}}
+                    ]
+                },
+                latency_ms=1.0,
+                completion_tokens=1,
+            )
+
+        def close(self) -> None:
+            self.closed += 1
+
+    campaign_root = tmp_path / "campaign"
+    campaign_root.mkdir()
+    fake_runtime = FakeRuntime()
+    status = campaign.execute_campaign(
+        store=RunStore(campaign_root),
+        reference=reference,
+        r6_store=r6_store,
+        timeout_sec=1.0,
+        max_attempts=1,
+        runtime=fake_runtime,
+    )
+
+    assert status["state"] == "WAITING_FOR_FINAL_JUDGMENT"
+    assert status["completed_new_logical_slots"] == 26
+    assert fake_runtime.started == 1
+    assert fake_runtime.closed == 1
+    records = list(execution.iter_completed_records(RunStore(campaign_root)))
+    assert len(records) == 26
+    assert {record["reference_sha256"] for record in records} == {reference["reference_sha256"]}
+
+
+def test_campaign_progress_excludes_retry_backoff_from_active_elapsed(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    artifact_root = tmp_path / "artifacts"
+    artifact_root.mkdir()
+    store = RunStore(artifact_root)
+    validation = campaign.CampaignReuseValidation(
+        plan=protocol.campaign_plan(),
+        cases=(),
+        engines={},
+        request_identities={},
+        r6_records={},
+        r6_contract={},
+    )
+    moments = iter((100.0, 105.0))
+    monkeypatch.setattr(campaign.time, "monotonic", lambda: next(moments))
+
+    progress = campaign._CampaignProgress(store=store, validation=validation)
+    progress.add_backoff(2.0)
+    progress.write(state="RUNNING_JOINT")
+
+    payload = read_json(store.progress_path)
+    assert payload["active_elapsed_seconds"] == 3.0
+    assert payload["backoff_elapsed_seconds"] == 2.0
+
+
 def test_reused_phase_rows_require_matching_reference_runtime_and_request_contract(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -1084,29 +1396,30 @@ def test_startup_failure_keeps_setup_cause_after_successful_terminal_cleanup() -
     assert isinstance(raised.value.__cause__, RuntimeError)
 
 
-def test_windows_bats_resume_transient_worker_exit_and_keep_cuda_pair() -> None:
+def test_only_cuda13_bat_can_start_or_resume_the_campaign() -> None:
     bat = (ROOT / "scripts" / "benchmark_gemma_sampler_quality_v2.bat").read_text(encoding="utf-8")
     cuda13 = (ROOT / "scripts" / "benchmark_gemma_sampler_quality_v2_cuda13.bat").read_text(
         encoding="utf-8"
     )
-    assert "SAMPLER_EXIT%\"==\"75" in bat
-    assert "goto retry" in bat
-    assert "SAMPLER_PRIOR_RESPONSE_RUN" in bat
+    assert "Read-only campaign preflight only" in bat
+    assert "run-campaign" not in bat
+    assert "verify-campaign" in bat
     assert ".venv-win\\Scripts\\python.exe" in bat
+    assert "SAMPLER_EXIT%\"==\"75" in cuda13
+    assert "goto retry" in cuda13
+    assert "run-campaign" in cuda13
+    assert "SAMPLER_LAUNCHED_BY_EXE" in cuda13
+    assert "SAMPLER_PHASE" not in cuda13
     assert ".venv-win-cuda13\\Scripts\\python.exe" in cuda13
 
 
-@pytest.mark.parametrize(
-    "name",
-    (
-        "benchmark_gemma_sampler_quality_v2.bat",
-        "benchmark_gemma_sampler_quality_v2_cuda13.bat",
-    ),
-)
-def test_windows_sampler_bats_launch_the_read_only_monitor_and_persist_runner_logs(name: str) -> None:
-    bat = (ROOT / "scripts" / name).read_text(encoding="utf-8")
+def test_cuda13_bat_launches_the_read_only_monitor_and_persists_runner_logs() -> None:
+    bat = (ROOT / "scripts" / "benchmark_gemma_sampler_quality_v2_cuda13.bat").read_text(
+        encoding="utf-8"
+    )
 
     assert "SAMPLER_NO_MONITOR" in bat
+    assert "SAMPLER_VERIFY_ONLY" in bat
     assert "build_gemma_sampler_monitor.bat --if-stale" in bat
     assert 'start "Gemma Sampler Monitor"' in bat
     assert '"%SAMPLER_MONITOR_EXE%" --run-root "%SAMPLER_RUN_ROOT%"' in bat
@@ -1120,8 +1433,10 @@ def test_monitor_builder_uses_scoop_fallback_and_private_executable_output() -> 
 
     assert "%USERPROFILE%\\scoop\\shims\\go.exe" in builder
     assert "%USERPROFILE%\\scoop\\apps\\go\\current\\bin\\go.exe" in builder
-    assert "banchmark_result_log\\tools\\gemma-monitor.exe" in builder
+    assert "gemma-monitor.exe" in builder
+    assert "gemma-sampler-launcher.exe" in builder
     assert "--if-stale" in builder
+    assert "--monitor-only-if-stale" in builder
     assert "build -trimpath" in builder
 
 
@@ -1131,6 +1446,12 @@ def test_monitor_source_uses_bubble_tea_alt_screen_and_bounded_snapshot_reads() 
 
     assert "tea.WithAltScreen()" in monitor
     assert "runner·Docker·GPU 작업은 계속됩니다" in monitor
+    launcher = (ROOT / "scripts" / "gemma_sampler_monitor" / "launcher.go").read_text(encoding="utf-8")
+    assert "gemma-sampler-launcher.exe" in launcher
+    assert "--monitor-only-if-stale" in launcher
+    assert "windowsCampaignWorkerAlive" in launcher
+    assert "활성 시간 / ACTIVE:" in monitor
+    assert "runner log:" in monitor
     assert "readSharedFile" in snapshot
     assert "file.Close()" in snapshot
     assert "Do not tail or retain a handle" in snapshot
