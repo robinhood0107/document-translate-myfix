@@ -270,16 +270,191 @@ def test_pinned_filter_contract_requires_image_build_and_exact_payload() -> None
         ('{"translation":"나please세"}', "mixed_token_corruption"),
         ('{"translation":"나I세"}', "mixed_token_corruption"),
         ('{"translation":"   "}', "censorship_or_deletion"),
-        ('<|channel>thought<channel|>{"translation":"normal"}', "raw_channel_or_reasoning_leak"),
-        ('{"translation":"normal","extra":"x"}', "json_schema_order_count_or_finish"),
     ],
 )
-def test_raw_bad_outputs_are_catastrophic_before_product_sanitizing(content: str, category: str) -> None:
+def test_visible_translation_damage_remains_catastrophic(content: str, category: str) -> None:
     verdict = judgment.validate_response_envelope(
         {"choices": [{"index": 0, "content": content, "finish_reason": "stop"}]}
     )
     assert verdict.status == "CATASTROPHIC"
     assert verdict.category == category
+
+
+def test_channel_framing_and_hidden_thought_are_ignored_for_translation_quality() -> None:
+    content = '<|CHANNEL>THOUGHT\nactual hidden thought\n<channel|>{"translation":"<|channel>thought\\ninner thought\\n<channel|>normal"} trailing'
+    cleaned, sanitized = judgment._quality_channel_sanitize(content)
+    verdict = judgment.validate_response_envelope(
+        {"choices": [{"index": 0, "message": {"content": content}, "finish_reason": "stop"}]}
+    )
+
+    assert sanitized is True
+    assert cleaned == '{"translation":"normal"} trailing'
+    assert verdict.status == "VALID"
+    assert verdict.translation == "normal"
+    assert verdict.payload()["schema_version"] == judgment.RESPONSE_VALIDATION_SCHEMA_VERSION
+    assert verdict.payload()["sanitized_channel_tokens"] is True
+    assert "non_translation_envelope" in verdict.payload()["transport_diagnostics"]
+
+
+def test_channel_payload_inside_json_is_not_counted_as_visible_translation_damage() -> None:
+    content = '{"translation":"<|channel>thought\\nactual visible text\\n<channel|>normal"}'
+    verdict = judgment.validate_response_envelope(
+        {"choices": [{"index": 0, "content": content, "finish_reason": "stop"}]}
+    )
+
+    assert verdict.status == "VALID"
+    assert verdict.translation == "normal"
+    assert verdict.payload()["sanitized_channel_tokens"] is True
+
+
+@pytest.mark.parametrize(
+    "content",
+    [
+        '<|channel>thought\nactual thought text\n<channel|>{"translation":"normal"}',
+        '<|CHANNEL>THOUGHT\n<channel|>{"translation":"normal"}',
+        '{"translation":"normal","extra":"x"}',
+        '{"translation":"normal"} trailing text',
+    ],
+)
+def test_transport_shape_does_not_change_extractable_translation_quality(content: str) -> None:
+    verdict = judgment.validate_response_envelope(
+        {"choices": [{"index": 0, "content": content, "finish_reason": "length"}]}
+    )
+
+    assert verdict.status == "VALID"
+    assert verdict.translation == "normal"
+    assert "finish_reason" in verdict.payload()["transport_diagnostics"]
+
+
+def test_missing_translation_is_unjudged_not_a_semantic_failure() -> None:
+    verdict = judgment.validate_response_envelope(
+        {"choices": [{"index": 0, "content": "analysis only", "finish_reason": "stop"}]}
+    )
+
+    assert verdict.status == "UNJUDGED"
+    assert verdict.category == "translation_unavailable"
+
+
+def test_unjudged_translation_blocks_automatic_tuning_winner() -> None:
+    assert sampler_cli._rank_outcome(
+        "tuning",
+        [{"sampler_key": "t0.70-p0.95-k64-m0.00", "unjudged": 1}],
+    ) == {"status": "INSUFFICIENT_TRANSLATION_EVIDENCE"}
+    assert sampler_cli._rank_outcome(
+        "tuning",
+        [{"sampler_key": "t0.70-p0.95-k64-m0.00", "unjudged": 0}],
+    ) == {
+        "status": "PROVISIONAL_WINNER",
+        "provisional_sampler_key": "t0.70-p0.95-k64-m0.00",
+    }
+
+
+def test_blind_judgment_requires_current_in_memory_quality_view() -> None:
+    reference = {
+        "cases": [
+            {
+                "case_id": "case-safe",
+                "split": "tuning",
+                "language": "ja-ko",
+                "source_text": "source",
+                "context_after_text": "context",
+                "canonical_translation": "candidate",
+                "required_meaning": ["meaning"],
+                "prohibited_changes": ["number_change"],
+            }
+        ]
+    }
+    stale_validation = {
+        "status": "VALID",
+        "category": "",
+        "translation_sha256": hashlib.sha256(b"candidate").hexdigest(),
+        "message": "",
+    }
+    records = [
+        {
+            "case_id": "case-safe",
+            "split": "tuning",
+            "logical_slot": "slot-safe",
+            "sampler": protocol.SamplerTuple(0.7, 0.95, 64, 0.0).payload(),
+            "response_validation": stale_validation,
+            "translation": "candidate",
+        }
+    ]
+
+    with pytest.raises(judgment.JudgmentError, match="obsolete contract"):
+        judgment.build_blind_judgment_packet(reference, records)
+
+
+def test_legacy_raw_records_are_rejudged_without_mutating_the_private_run(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(execution, "CORPUS_CASE_COUNT", 1)
+    case = {
+        "case_id": "case-safe",
+        "split": "tuning",
+        "language": "ja-ko",
+        "source_text": "source",
+        "context_after_text": "context",
+        "canonical_translation": "candidate",
+        "required_meaning": ["meaning"],
+        "prohibited_changes": ["number_change"],
+        "review_status": "APPROVED",
+    }
+    reference = {
+        "schema_version": corpus.REFERENCE_SCHEMA_VERSION,
+        "state": "FROZEN",
+        "case_identity": "language+source_text+context_after_text",
+        "cases": [case],
+    }
+    reference["reference_sha256"] = protocol.canonical_sha256(
+        {
+            "schema_version": reference["schema_version"],
+            "case_identity": reference["case_identity"],
+            "cases": reference["cases"],
+        }
+    )
+    legacy_root = tmp_path / "legacy-artifacts"
+    legacy_root.mkdir()
+    legacy_store = RunStore(legacy_root)
+    assert legacy_store.record_case_if_first(
+        phase="temperature",
+        arm="temperature-t0.70-p0.95-k64-m0.00",
+        run="seed-20260802-forward",
+        case_id="case-safe",
+        logical_slot="legacy-slot",
+        payload={
+            "status": "complete",
+            "recorded_utc": "2026-08-03T00:00:00Z",
+            "phase": "temperature",
+            "arm_key": "temperature-t0.70-p0.95-k64-m0.00",
+            "case_id": "case-safe",
+            "logical_slot": "legacy-slot",
+            "split": "tuning",
+            "reference_sha256": reference["reference_sha256"],
+            "runtime_fingerprint": "router-fingerprint",
+            "request_identity": {"case_id": "case-safe"},
+            "response_validation": {"schema_version": "gemma-sampler-response-validation-v2"},
+            "translation": "old value",
+            "response": {
+                "choices": [
+                    {
+                        "index": 0,
+                        "content": '<|channel>thought\nprivate wrapper\n<channel|>{"translation":"candidate"} trailing',
+                        "finish_reason": "length",
+                    }
+                ]
+            },
+        },
+    )
+    case_path = legacy_root / next(iter(legacy_store.completed_index().values()))["path"]
+    before = case_path.read_bytes()
+
+    records = list(execution.iter_compatible_completed_records((RunStore(legacy_root),), reference=reference))
+
+    assert case_path.read_bytes() == before
+    assert records[0]["translation"] == "candidate"
+    assert records[0]["response_validation"]["schema_version"] == judgment.RESPONSE_VALIDATION_SCHEMA_VERSION
 
 
 def test_blind_cluster_judgment_propagates_to_each_actual_response() -> None:
@@ -350,6 +525,7 @@ def test_automatic_blind_verdicts_hide_sampler_and_logical_slot_identity() -> No
                 "logical_slot": "temperature|t0.70-p0.95-k64-m0.00|seed-20260802|case-safe",
                 "sampler": protocol.SamplerTuple(0.7, 0.95, 64, 0.0).payload(),
                 "response_validation": {
+                    "schema_version": judgment.RESPONSE_VALIDATION_SCHEMA_VERSION,
                     "status": "CATASTROPHIC",
                     "category": "mixed_token_corruption",
                 },
@@ -574,6 +750,7 @@ def test_phase_report_exposes_tuning_scope_for_holdout_gate() -> None:
         ranked=[],
         scope="tuning",
     )
+    assert tuning_report["schema_version"] == "gemma-sampler-report-v3"
     tuning_report.update(
         {
             "status": "PROVISIONAL_WINNER",
@@ -653,6 +830,14 @@ def test_reused_phase_rows_require_matching_reference_runtime_and_request_contra
             "reference_sha256": reference["reference_sha256"],
             "runtime_fingerprint": "router-fingerprint",
             "request_identity": request_identity,
+            "response_validation": {
+                "schema_version": judgment.RESPONSE_VALIDATION_SCHEMA_VERSION,
+                "status": "VALID",
+                "category": "",
+                "translation_sha256": "a" * 64,
+                "message": "",
+                "sanitized_channel_tokens": False,
+            },
             "logical_slot": slot,
         }
         prior.record_case_if_first(
@@ -697,6 +882,13 @@ def test_reused_phase_rows_require_matching_reference_runtime_and_request_contra
             runtime_fingerprint="different-router-fingerprint",
             request_identities={"case-safe": request_identity},
         )
+
+    first_path = prior.root / next(iter(prior.completed_index().values()))["path"]
+    stale_record = read_json(first_path)
+    stale_record["response_validation"].pop("schema_version")
+    _write_json(first_path, stale_record)
+    with pytest.raises(execution.ExecutionError, match="lacks raw Router output"):
+        list(execution.iter_compatible_completed_records((RunStore(prior_root),), reference=reference))
 
 
 def test_complete_scope_records_keeps_holdout_sealed_without_weakening_tuning_matrix(
@@ -838,6 +1030,8 @@ def test_rank_report_never_serializes_missing_usage_as_nonstandard_infinity() ->
         {"slot-safe": {"decision": "PASS", "naturalness": 5}},
     )
     summary = judgment.public_rank_summary(ranked, scope="tuning", reference_sha256="a" * 64)
+    assert summary["schema_version"] == judgment.JUDGMENT_SCHEMA_VERSION
+    assert summary["rows"][0]["unjudged"] == 0
     assert summary["rows"][0]["completion_tokens_mean"] is None
     assert "Infinity" not in json.dumps(summary, allow_nan=False)
 

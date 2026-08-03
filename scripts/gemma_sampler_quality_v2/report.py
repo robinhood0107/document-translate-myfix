@@ -24,7 +24,7 @@ def build_phase_report(
         reference_sha256=reference_sha256,
     )
     return {
-        "schema_version": "gemma-sampler-report-v2",
+        "schema_version": "gemma-sampler-report-v3",
         "scope": scope,
         "phase": str(phase_status.get("phase") or ""),
         "phase_state": str(phase_status.get("state") or ""),
@@ -52,8 +52,8 @@ def render_public_markdown(report: Mapping[str, Any]) -> str:
         f"- Reference SHA-256: `{report.get('reference_sha256', '')}`",
         f"- Completed slots: `{report.get('completed_logical_slots', 0)}` / `{report.get('expected_logical_slots', 0)}`",
         "",
-        "| sampler | catastrophic | major | minor | unique cases | naturalness | latency ms | completion tokens |",
-        "| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |",
+        "| sampler | catastrophic | major | minor | unjudged | unique cases | naturalness | latency ms | completion tokens |",
+        "| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |",
     ]
     def _metric(value: Any) -> str:
         if isinstance(value, bool) or not isinstance(value, (int, float)):
@@ -65,11 +65,12 @@ def render_public_markdown(report: Mapping[str, Any]) -> str:
         if not isinstance(row, Mapping):
             continue
         lines.append(
-            "| {key} | {cat} | {major} | {minor} | {cases} | {natural} | {latency} | {tokens} |".format(
+            "| {key} | {cat} | {major} | {minor} | {unjudged} | {cases} | {natural} | {latency} | {tokens} |".format(
                 key=str(row.get("sampler_key") or ""),
                 cat=int(row.get("catastrophic") or 0),
                 major=int(row.get("major") or 0),
                 minor=int(row.get("minor") or 0),
+                unjudged=int(row.get("unjudged") or 0),
                 cases=int(row.get("unique_error_cases") or 0),
                 natural=_metric(row.get("naturalness_mean")),
                 latency=_metric(row.get("latency_ms_mean")),

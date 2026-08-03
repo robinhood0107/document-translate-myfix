@@ -16,7 +16,11 @@ from scripts.benchmark_gemma_translation_only_matrix import (
 )
 
 from .corpus import CorpusError, REFERENCE_SCHEMA_VERSION, reference_summary
-from .judgment import ResponseVerdict, validate_response_envelope
+from .judgment import (
+    RESPONSE_VALIDATION_SCHEMA_VERSION,
+    ResponseVerdict,
+    validate_response_envelope,
+)
 from .protocol import (
     CHUNK_SIZE,
     CONTEXT_SIZE,
@@ -373,6 +377,25 @@ def iter_compatible_completed_records(
             request_identity = record.get("request_identity")
             if not isinstance(request_identity, Mapping):
                 raise ExecutionError("Private response record lacks its fixed request identity.")
+            raw_response = record.get("response")
+            if isinstance(raw_response, Mapping):
+                # Raw response evidence is immutable.  Re-derive the current
+                # quality view in memory so an evaluator change never forces
+                # a costly GPU replay or mutates a completed private run.
+                verdict = validate_response_envelope(raw_response)
+                normalized = dict(record)
+                normalized["response_validation"] = verdict.payload()
+                normalized["translation"] = verdict.translation if verdict.status == "VALID" else ""
+                yield normalized
+                continue
+            response_validation = record.get("response_validation")
+            if (
+                not isinstance(response_validation, Mapping)
+                or response_validation.get("schema_version") != RESPONSE_VALIDATION_SCHEMA_VERSION
+            ):
+                raise ExecutionError(
+                    "Private response record lacks raw Router output required for the current quality evaluation."
+                )
             yield record
 
 

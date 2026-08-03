@@ -350,6 +350,21 @@ def _completed_phase_status(path: str | Path, *, reference: Mapping[str, Any]) -
     return status
 
 
+def _rank_outcome(scope: str, ranked: list[Mapping[str, Any]]) -> dict[str, str]:
+    """Choose a next-step state without treating transport noise as quality loss."""
+
+    if scope == "tuning":
+        if not ranked:
+            return {"status": "NO_RESULT"}
+        if any(int(row.get("unjudged") or 0) for row in ranked):
+            return {"status": "INSUFFICIENT_TRANSLATION_EVIDENCE"}
+        return {
+            "status": "PROVISIONAL_WINNER",
+            "provisional_sampler_key": str(ranked[0].get("sampler_key") or ""),
+        }
+    return {"status": "HOLDOUT_REVIEWED"}
+
+
 def command_build_judgment_packet(args: argparse.Namespace) -> int:
     reference = load_frozen_reference(_private_path(args.reference))
     all_records = collect_completed_records(
@@ -437,11 +452,7 @@ def command_rank(args: argparse.Namespace) -> int:
     verdicts = bind_cluster_verdicts_to_records(records, packet, decisions)
     ranked = rank_sampler_results(records, verdicts, scope=args.scope)
     report = build_phase_report(phase_status=phase_status, ranked=ranked, scope=args.scope)
-    if args.scope == "tuning" and ranked:
-        report["status"] = "PROVISIONAL_WINNER"
-        report["provisional_sampler_key"] = ranked[0]["sampler_key"]
-    else:
-        report["status"] = "HOLDOUT_REVIEWED" if args.scope == "holdout" else "NO_RESULT"
+    report.update(_rank_outcome(args.scope, ranked))
     return _write_transform(
         args,
         command="rank",
