@@ -72,6 +72,19 @@ CATEGORY_NAMES = frozenset(
 )
 
 _SAFE_COMPONENT_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,95}$")
+
+
+def _is_exact_atomic_replace_permission_error(error_message: str, target_file_name: str) -> bool:
+    """Accept only the known Windows temp-file replacement failure shape."""
+
+    escaped_target = re.escape(target_file_name)
+    with_directory = re.compile(
+        rf"\[WinError 5\][^'\"]*['\"](?P<directory>[^'\"]*[\\/])\.{escaped_target}\.partial-[^'\"]+['\"]"
+        rf"\s*->\s*['\"](?P=directory){escaped_target}['\"]"
+    )
+    return bool(with_directory.search(error_message))
+
+
 class ArtifactHarnessError(RuntimeError):
     """Raised when an artifact run cannot be created or verified safely."""
 
@@ -376,15 +389,7 @@ class ManagedArtifactRun:
         return run
 
     @classmethod
-    def resume(cls, run_root: Path) -> "ManagedArtifactRun":
-        """Reopen an interrupted managed run whose manifest is still running.
-
-        Long private benchmarks deliberately leave a ``running`` manifest on a
-        transient worker exit.  Reopening only that state preserves the
-        original provenance while refusing to append artifacts to a completed
-        or fatally failed evidence set.
-        """
-
+    def _open_existing(cls, run_root: Path) -> tuple["ManagedArtifactRun", dict[str, Any]]:
         archive_root = _assert_archive_root(default_archive_root())
         resolved_run_root = run_root.resolve()
         category, family, run_id = _assert_managed_run_root(resolved_run_root, archive_root)
@@ -393,10 +398,6 @@ class ManagedArtifactRun:
             manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError) as exc:
             raise ArtifactHarnessError("Managed validation run manifest is unreadable.") from exc
-        if str(manifest.get("status") or "") != "running":
-            raise ArtifactHarnessError(
-                "Only an interrupted managed validation run with status 'running' can resume."
-            )
         archive = manifest.get("archive")
         if not isinstance(archive, Mapping):
             raise ArtifactHarnessError("Managed validation run manifest has no archive identity.")
@@ -416,18 +417,101 @@ class ManagedArtifactRun:
         created_utc = str(manifest.get("created_utc") or "").strip()
         if not created_utc:
             raise ArtifactHarnessError("Managed validation run is missing its creation timestamp.")
-        return cls(
-            archive_root=archive_root,
-            category=category,
-            family=family,
-            run_id=run_id,
-            run_root=resolved_run_root,
-            artifact_root=artifact_root,
-            log_root=log_root,
-            manifest_path=manifest_path,
-            created_utc=created_utc,
-            hash_limit_bytes=hash_limit,
+        return (
+            cls(
+                archive_root=archive_root,
+                category=category,
+                family=family,
+                run_id=run_id,
+                run_root=resolved_run_root,
+                artifact_root=artifact_root,
+                log_root=log_root,
+                manifest_path=manifest_path,
+                created_utc=created_utc,
+                hash_limit_bytes=hash_limit,
+            ),
+            dict(manifest),
         )
+
+    @classmethod
+    def resume(cls, run_root: Path) -> "ManagedArtifactRun":
+        """Reopen an interrupted managed run whose manifest is still running.
+
+        Long private benchmarks deliberately leave a ``running`` manifest on a
+        transient worker exit. Reopening only that state preserves the original
+        provenance while refusing to append artifacts to completed or failed
+        evidence sets.
+        """
+
+        run, manifest = cls._open_existing(run_root)
+        if str(manifest.get("status") or "") != "running":
+            raise ArtifactHarnessError(
+                "Only an interrupted managed validation run with status 'running' can resume."
+            )
+        return run
+
+    @classmethod
+    def recover_failed_atomic_replace(
+        cls,
+        run_root: Path,
+        *,
+        command: str,
+        target_file_name: str,
+    ) -> "ManagedArtifactRun":
+        """Reopen one audited, known-safe atomic-replace interruption.
+
+        This is intentionally narrower than ``resume``: generic failed runs
+        remain terminal. The caller must name the original command and target
+        file, and the failure must be the exact Windows-style temporary-file
+        replacement signature.
+        """
+
+        safe_target = str(target_file_name or "").strip()
+        if not safe_target or Path(safe_target).name != safe_target:
+            raise ArtifactHarnessError("Recovery target file name is unsafe.")
+        run, manifest = cls._open_existing(run_root)
+        metadata = manifest.get("metadata")
+        if not isinstance(metadata, Mapping):
+            raise ArtifactHarnessError("Failed validation run has no recovery metadata.")
+        error_message = str(metadata.get("error_message") or "")
+        if (
+            str(manifest.get("status") or "") != "failed"
+            or str(metadata.get("command") or "") != str(command)
+            or str(metadata.get("error_type") or "") != "PermissionError"
+            or not _is_exact_atomic_replace_permission_error(error_message, safe_target)
+        ):
+            raise ArtifactHarnessError("Failed validation run is not a recoverable atomic-replace interruption.")
+
+        original_manifest_sha256 = _sha256_file(run.manifest_path)
+        recovery_path = run.log_root / f"recovery-{original_manifest_sha256[:24]}.json"
+        recovery_record = {
+            "schema_version": "managed-artifact-recovery-v1",
+            "recovered_utc": _utc_now(),
+            "reason": "atomic-replace-permission-error",
+            "original_manifest_sha256": original_manifest_sha256,
+            "original_manifest": manifest,
+        }
+        if recovery_path.exists():
+            try:
+                existing = json.loads(recovery_path.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError) as exc:
+                raise ArtifactHarnessError("Existing recovery evidence is unreadable.") from exc
+            if not isinstance(existing, Mapping) or existing.get("original_manifest_sha256") != original_manifest_sha256:
+                raise ArtifactHarnessError("Existing recovery evidence does not match the failed manifest.")
+        else:
+            _atomic_write_json(recovery_path, recovery_record)
+
+        run.checkpoint(
+            metadata={
+                "command": str(command),
+                "state": "RECOVERED_ATOMIC_REPLACE",
+                "recovery_record": recovery_path.relative_to(run.run_root).as_posix(),
+                "original_manifest_sha256": original_manifest_sha256,
+                "original_error_type": str(metadata.get("error_type") or ""),
+                "original_error_message": error_message[:4096],
+            }
+        )
+        return run
 
     def _base_manifest(self, *, status: str, metadata: Mapping[str, Any]) -> dict[str, Any]:
         return {
