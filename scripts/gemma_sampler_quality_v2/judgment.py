@@ -10,22 +10,23 @@ import math
 import re
 from typing import Any, Iterable, Mapping, Sequence
 
+from modules.translation.llm.custom_local_gemma import CustomLocalGemmaTranslation
+
 from .corpus import CorpusError
 from .protocol import SamplerTuple, canonical_sha256
 
 
-JUDGMENT_SCHEMA_VERSION = "gemma-sampler-judgment-v2"
-_CHANNEL_OR_REASONING = re.compile(
-    r"<\|channel|<channel\||<\|(?:analysis|thought|reasoning)|</?(?:analysis|thought|reasoning)\b",
-    re.IGNORECASE,
-)
+JUDGMENT_SCHEMA_VERSION = "gemma-sampler-judgment-v4"
+RESPONSE_VALIDATION_SCHEMA_VERSION = "gemma-sampler-response-validation-v4"
 _MIXED_TOKEN_DAMAGE = re.compile(r"[가-힣][A-Za-z]+[가-힣]")
+_CHANNEL_FRAME_RE = re.compile(r"<\|channel\>.*?<channel\|>", re.IGNORECASE | re.DOTALL)
+_CHANNEL_TOKEN_RE = re.compile(r"<\|channel\>|<channel\|>", re.IGNORECASE)
 _VALID_DECISIONS = {"PASS", "MINOR", "MAJOR", "CATASTROPHIC", "REVIEW_REQUIRED"}
 _SEVERITY_ORDER = {"PASS": 0, "MINOR": 1, "MAJOR": 2, "CATASTROPHIC": 3}
 
 
 class JudgmentError(RuntimeError):
-    """Raised when a response or private review ledger violates v2 rules."""
+    """Raised when a response or private review ledger violates sampler-quality rules."""
 
 
 class _DuplicateKeyError(ValueError):
@@ -48,94 +49,218 @@ class ResponseVerdict:
     translation: str
     translation_sha256: str
     message: str
+    sanitized_channel_tokens: bool = False
+    transport_diagnostics: tuple[str, ...] = ()
 
     @property
     def catastrophic(self) -> bool:
         return self.status == "CATASTROPHIC"
 
+    @property
+    def unjudged(self) -> bool:
+        return self.status == "UNJUDGED"
+
     def payload(self) -> dict[str, Any]:
         return {
+            "schema_version": RESPONSE_VALIDATION_SCHEMA_VERSION,
             "status": self.status,
             "category": self.category,
             "translation_sha256": self.translation_sha256,
             "message": self.message,
+            "sanitized_channel_tokens": self.sanitized_channel_tokens,
+            "transport_diagnostics": list(self.transport_diagnostics),
         }
 
 
-def _catastrophic(category: str, message: str) -> ResponseVerdict:
+def _catastrophic(
+    category: str,
+    message: str,
+    *,
+    sanitized_channel_tokens: bool = False,
+    transport_diagnostics: Sequence[str] = (),
+) -> ResponseVerdict:
     return ResponseVerdict(
         status="CATASTROPHIC",
         category=category,
         translation="",
         translation_sha256="",
         message=message,
+        sanitized_channel_tokens=sanitized_channel_tokens,
+        transport_diagnostics=tuple(transport_diagnostics),
     )
 
 
-def _choice_content(envelope: Mapping[str, Any]) -> tuple[str, str | None]:
+def _unjudged(
+    category: str,
+    message: str,
+    *,
+    sanitized_channel_tokens: bool = False,
+    transport_diagnostics: Sequence[str] = (),
+) -> ResponseVerdict:
+    """Record missing quality evidence without converting it into a semantic error."""
+
+    return ResponseVerdict(
+        status="UNJUDGED",
+        category=category,
+        translation="",
+        translation_sha256="",
+        message=message,
+        sanitized_channel_tokens=sanitized_channel_tokens,
+        transport_diagnostics=tuple(transport_diagnostics),
+    )
+
+
+def _choice_contents(envelope: Mapping[str, Any]) -> tuple[tuple[str, ...], tuple[str, ...]]:
+    """Return every textual choice together with transport-only diagnostics.
+
+    The sampler experiment compares translated text.  Choice cardinality,
+    index, finish reason, and wrapper prose are retained as audit signals but
+    do not turn an otherwise extractable translation into a quality failure.
+    """
+
+    diagnostics: list[str] = []
     choices = envelope.get("choices")
-    if not isinstance(choices, list) or len(choices) != 1:
-        raise JudgmentError("response choice count is not exactly one")
-    choice = choices[0]
-    if not isinstance(choice, Mapping) or choice.get("index") != 0:
-        raise JudgmentError("response choice index is not zero")
-    finish_reason = choice.get("finish_reason")
-    if finish_reason != "stop":
-        raise JudgmentError("response did not finish with stop")
-    content: Any = choice.get("content")
-    if content is None and isinstance(choice.get("message"), Mapping):
-        content = choice["message"].get("content")
-    if not isinstance(content, str):
-        raise JudgmentError("response content is not a string")
-    return content, str(finish_reason)
+    if not isinstance(choices, list):
+        return (), ("choice_payload_missing",)
+    if len(choices) != 1:
+        diagnostics.append("choice_count")
+    contents: list[str] = []
+    for position, choice in enumerate(choices):
+        if not isinstance(choice, Mapping):
+            diagnostics.append("choice_shape")
+            continue
+        if choice.get("index") != 0:
+            diagnostics.append("choice_index")
+        if choice.get("finish_reason") != "stop":
+            diagnostics.append("finish_reason")
+        content: Any = choice.get("content")
+        if content is None and isinstance(choice.get("message"), Mapping):
+            content = choice["message"].get("content")
+        if not isinstance(content, str):
+            diagnostics.append(f"choice_{position}_content_missing")
+            continue
+        contents.append(content)
+    if not contents:
+        diagnostics.append("translation_content_missing")
+    return tuple(contents), tuple(dict.fromkeys(diagnostics))
 
 
-def _strict_json_object(content: str) -> Mapping[str, Any]:
+def _quality_channel_sanitize(text: str) -> tuple[str, bool]:
+    """Remove control framing before judging translation quality.
+
+    This deliberately has a broader scope than the product's strict response
+    parser: the lab evaluates the translated sentence, not Router framing.
+    The known product sanitizer remains part of the normalization so its
+    behavior is still represented, while paired and case-variant channel
+    frames (including their hidden thought text) are ignored for quality.
+    """
+
+    raw = str(text or "")
+    without_frames = _CHANNEL_FRAME_RE.sub("", raw)
+    product_cleaned = CustomLocalGemmaTranslation._strip_channel_tokens(without_frames)
+    cleaned = _CHANNEL_TOKEN_RE.sub("", product_cleaned).strip()
+    return cleaned, cleaned != raw.strip()
+
+
+def _translation_values_from_content(content: str) -> tuple[tuple[str, ...], tuple[str, ...], bool]:
+    """Find extractable one-key translation payloads inside arbitrary framing.
+
+    Leading thought text, token wrappers, additional metadata, and trailing
+    prose are transport diagnostics only.  A missing or ambiguous translation
+    remains unjudged because it provides no sentence to compare.
+    """
+
+    cleaned, sanitized_channel_tokens = _quality_channel_sanitize(content)
     decoder = json.JSONDecoder(object_pairs_hook=_unique_object)
-    start = len(content) - len(content.lstrip())
-    try:
-        parsed, end = decoder.raw_decode(content, start)
-    except _DuplicateKeyError as exc:
-        raise JudgmentError("response JSON contains duplicate keys") from exc
-    except json.JSONDecodeError as exc:
-        raise JudgmentError("response content is not one JSON object") from exc
-    if content[end:].strip():
-        raise JudgmentError("response JSON has trailing data")
-    if not isinstance(parsed, Mapping):
-        raise JudgmentError("response JSON root is not an object")
-    return parsed
+    values: list[str] = []
+    diagnostics: list[str] = []
+    cursor = 0
+    while True:
+        start = cleaned.find("{", cursor)
+        if start < 0:
+            break
+        try:
+            payload, end = decoder.raw_decode(cleaned, start)
+        except (_DuplicateKeyError, json.JSONDecodeError):
+            cursor = start + 1
+            continue
+        if isinstance(payload, Mapping) and isinstance(payload.get("translation"), str):
+            if set(payload) != {"translation"}:
+                diagnostics.append("translation_metadata")
+            if cleaned[:start].strip() or cleaned[end:].strip():
+                diagnostics.append("non_translation_envelope")
+            values.append(str(payload["translation"]))
+            cursor = end
+            continue
+        cursor = start + 1
+    return tuple(values), tuple(dict.fromkeys(diagnostics)), sanitized_channel_tokens
+
+
+def _require_current_response_validation(validation: Mapping[str, Any]) -> None:
+    if validation.get("schema_version") != RESPONSE_VALIDATION_SCHEMA_VERSION:
+        raise JudgmentError(
+            "Response validation uses an obsolete contract; rebuild the in-memory quality view from raw Router output."
+        )
 
 
 def validate_response_envelope(envelope: Mapping[str, Any]) -> ResponseVerdict:
-    """Classify raw Router output before any product sanitizer could alter it."""
+    """Classify only the sentence available for semantic quality judgment.
 
-    try:
-        content, _finish_reason = _choice_content(envelope)
-    except JudgmentError as exc:
-        return _catastrophic("json_schema_order_count_or_finish", str(exc))
-    if _CHANNEL_OR_REASONING.search(content):
-        return _catastrophic("raw_channel_or_reasoning_leak", "raw channel or reasoning token leaked")
-    try:
-        payload = _strict_json_object(content)
-    except JudgmentError as exc:
-        return _catastrophic("json_schema_order_count_or_finish", str(exc))
-    if set(payload) != {"translation"}:
-        return _catastrophic("json_schema_order_count_or_finish", "response schema is not exactly translation")
-    translation = payload.get("translation")
-    if not isinstance(translation, str):
-        return _catastrophic("json_schema_order_count_or_finish", "translation is not a string")
+    Raw Router framing stays in the private record.  If a translation can be
+    extracted, it is judged even when wrapper tokens, thought prose, choice
+    metadata, or trailing text violate the product's strict transport parser.
+    Those details remain non-ranking diagnostics.  A visibly empty or mixed
+    Korean/Latin sentence is still a genuine translation-quality failure.
+    """
+
+    contents, transport_diagnostics = _choice_contents(envelope)
+    values: list[str] = []
+    diagnostics = list(transport_diagnostics)
+    sanitized_channel_tokens = False
+    for content in contents:
+        extracted, content_diagnostics, content_sanitized = _translation_values_from_content(content)
+        values.extend(extracted)
+        diagnostics.extend(content_diagnostics)
+        sanitized_channel_tokens = sanitized_channel_tokens or content_sanitized
+    unique_values = tuple(dict.fromkeys(values))
+    if not unique_values:
+        return _unjudged(
+            "translation_unavailable",
+            "response contains no extractable translation value",
+            sanitized_channel_tokens=sanitized_channel_tokens,
+            transport_diagnostics=tuple(dict.fromkeys(diagnostics)),
+        )
+    if len(unique_values) != 1:
+        return _unjudged(
+            "translation_ambiguous",
+            "response contains more than one extractable translation value",
+            sanitized_channel_tokens=sanitized_channel_tokens,
+            transport_diagnostics=tuple(dict.fromkeys(diagnostics + ["translation_ambiguous"])),
+        )
+    translation, sanitized_translation = _quality_channel_sanitize(unique_values[0])
+    sanitized_channel_tokens = sanitized_channel_tokens or sanitized_translation
     if not translation.strip():
-        return _catastrophic("censorship_or_deletion", "translation is empty")
-    if _CHANNEL_OR_REASONING.search(translation):
-        return _catastrophic("raw_channel_or_reasoning_leak", "translation contains raw channel or reasoning token")
+        return _catastrophic(
+            "censorship_or_deletion",
+            "translation is empty",
+            sanitized_channel_tokens=sanitized_channel_tokens,
+            transport_diagnostics=tuple(dict.fromkeys(diagnostics)),
+        )
     if _MIXED_TOKEN_DAMAGE.search(translation):
-        return _catastrophic("mixed_token_corruption", "translation contains Korean/Latin token corruption")
+        return _catastrophic(
+            "mixed_token_corruption",
+            "translation contains Korean/Latin token corruption",
+            sanitized_channel_tokens=sanitized_channel_tokens,
+            transport_diagnostics=tuple(dict.fromkeys(diagnostics)),
+        )
     return ResponseVerdict(
         status="VALID",
         category="",
         translation=translation,
         translation_sha256=hashlib.sha256(translation.encode("utf-8")).hexdigest(),
         message="",
+        sanitized_channel_tokens=sanitized_channel_tokens,
+        transport_diagnostics=tuple(dict.fromkeys(diagnostics)),
     )
 
 
@@ -177,6 +302,7 @@ def build_blind_judgment_packet(
     candidate_sampler_keys: set[str] = set()
     grouped: dict[tuple[str, str], list[Mapping[str, Any]]] = defaultdict(list)
     automatic_counts: dict[tuple[str, str], int] = defaultdict(int)
+    unjudged_counts: dict[tuple[str, str], int] = defaultdict(int)
     for record in records:
         case_id = str(record.get("case_id") or "")
         case = cases.get(case_id)
@@ -189,13 +315,19 @@ def build_blind_judgment_packet(
         validation = record.get("response_validation")
         if not isinstance(validation, Mapping):
             raise JudgmentError("Response record lacks raw response validation.")
+        _require_current_response_validation(validation)
         status = str(validation.get("status") or "")
         logical_slot = str(record.get("logical_slot") or "")
         if not logical_slot:
             raise JudgmentError("Response record lacks logical slot identity.")
         if status == "CATASTROPHIC":
             automatic_counts[
-                (case_id, str(validation.get("category") or "json_schema_order_count_or_finish"))
+                (case_id, str(validation.get("category") or "translation_quality_failure"))
+            ] += 1
+            continue
+        if status == "UNJUDGED":
+            unjudged_counts[
+                (case_id, str(validation.get("category") or "translation_unavailable"))
             ] += 1
             continue
         if status != "VALID":
@@ -263,6 +395,14 @@ def build_blind_judgment_packet(
             }
             for (case_id, category), count in sorted(automatic_counts.items())
         ],
+        "unjudged_responses": [
+            {
+                "case_id": case_id,
+                "category": category,
+                "occurrence_count": count,
+            }
+            for (case_id, category), count in sorted(unjudged_counts.items())
+        ],
         "automatic_pass_clusters": auto_pass_clusters,
         "rows": rows,
     }
@@ -275,7 +415,7 @@ def apply_blind_judgments(
     """Return logical-slot verdicts with each cluster decision propagated."""
 
     if packet.get("schema_version") != JUDGMENT_SCHEMA_VERSION:
-        raise JudgmentError("Judgment packet schema version is not v2.")
+        raise JudgmentError("Judgment packet schema version is not current.")
     rows = packet.get("rows")
     automatic_pass = packet.get("automatic_pass_clusters")
     if not isinstance(rows, list) or not isinstance(automatic_pass, list):
@@ -333,6 +473,7 @@ def bind_cluster_verdicts_to_records(
         validation = record.get("response_validation")
         if not isinstance(validation, Mapping):
             continue
+        _require_current_response_validation(validation)
         slot = str(record.get("logical_slot") or "")
         case_id = str(record.get("case_id") or "")
         if not slot:
@@ -342,8 +483,18 @@ def bind_cluster_verdicts_to_records(
                 "logical_slot": slot,
                 "case_id": case_id,
                 "decision": "CATASTROPHIC",
-                "category": str(validation.get("category") or "json_schema_order_count_or_finish"),
+                "category": str(validation.get("category") or "translation_quality_failure"),
                 "naturalness": 0,
+                "automatic": True,
+            }
+            continue
+        if validation.get("status") == "UNJUDGED":
+            result[slot] = {
+                "logical_slot": slot,
+                "case_id": case_id,
+                "decision": "UNJUDGED",
+                "category": str(validation.get("category") or "translation_unavailable"),
+                "naturalness": None,
                 "automatic": True,
             }
             continue
@@ -383,6 +534,7 @@ def rank_sampler_results(
                 "catastrophic": 0,
                 "major": 0,
                 "minor": 0,
+                "unjudged": 0,
                 "unique_error_cases": set(),
                 "naturalness_values": [],
                 "latency_ms_values": [],
@@ -397,6 +549,9 @@ def rank_sampler_results(
         decision = str(verdict.get("decision") or "")
         if decision == "REVIEW_REQUIRED":
             raise JudgmentError("Cannot rank sampler results with review-required responses.")
+        if decision == "UNJUDGED":
+            entry["unjudged"] += 1
+            continue
         if decision not in _SEVERITY_ORDER:
             raise JudgmentError("Sampler verdict contains an invalid severity.")
         entry["response_count"] += 1
@@ -440,6 +595,7 @@ def rank_sampler_results(
             item["major"],
             item["minor"],
             item["unique_error_cases"],
+            item["unjudged"],
             -item["naturalness_mean"],
             float(item["latency_ms_mean"])
             if isinstance(item["latency_ms_mean"], (int, float))
@@ -503,6 +659,7 @@ def public_rank_summary(
                 "catastrophic": int(item.get("catastrophic") or 0),
                 "major": int(item.get("major") or 0),
                 "minor": int(item.get("minor") or 0),
+                "unjudged": int(item.get("unjudged") or 0),
                 "unique_error_cases": int(item.get("unique_error_cases") or 0),
                 "naturalness_mean": _optional_metric(item.get("naturalness_mean")),
                 "latency_ms_mean": _optional_metric(item.get("latency_ms_mean")),
