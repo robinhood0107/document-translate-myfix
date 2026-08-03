@@ -34,14 +34,35 @@ def normalize_llama_cpp_pull_policy(_: Any = None) -> str:
     return DEFAULT_LLAMA_CPP_PULL_POLICY
 
 
+def _find_executable_on_path(*names: str) -> str | None:
+    """Find an executable even when Windows ``PATHEXT`` is malformed.
+
+    ``shutil.which`` follows ``PATHEXT`` on Windows.  A launcher inherited from
+    a constrained shell can expose only an unrelated extension, making an
+    existing ``docker.exe`` invisible.  The explicit PATH scan keeps Docker
+    discovery fail-closed while avoiding reliance on that ambient setting.
+    """
+
+    for name in names:
+        resolved = shutil.which(name)
+        if resolved:
+            return resolved
+    directories = tuple(
+        raw_directory.strip().strip('"')
+        for raw_directory in os.environ.get("PATH", "").split(os.pathsep)
+    )
+    for name in names:
+        for directory in directories:
+            if not directory:
+                continue
+            candidate = Path(directory) / name
+            if candidate.is_file():
+                return str(candidate)
+    return None
+
+
 def resolve_docker_executable() -> str:
-    docker = shutil.which("docker")
-    if docker:
-        return docker
-    docker_exe = shutil.which("docker.exe")
-    if docker_exe:
-        return docker_exe
-    return "docker"
+    return _find_executable_on_path("docker.exe", "docker") or "docker"
 
 
 def run_docker_command(
@@ -185,10 +206,12 @@ def resolve_docker_compose_command(
     cancel_checker: Callable[[], bool] | None = None,
 ) -> tuple[str, ...]:
     candidates: list[tuple[str, ...]] = []
-    if shutil.which("docker") or shutil.which("docker.exe"):
-        candidates.append(("docker", "compose"))
-    if shutil.which("docker-compose"):
-        candidates.append(("docker-compose",))
+    docker = _find_executable_on_path("docker.exe", "docker")
+    if docker:
+        candidates.append((docker, "compose"))
+    docker_compose = _find_executable_on_path("docker-compose.exe", "docker-compose")
+    if docker_compose:
+        candidates.append((docker_compose,))
 
     for candidate in candidates:
         probe = run_docker_command(
@@ -197,8 +220,6 @@ def resolve_docker_compose_command(
             cancel_checker=cancel_checker,
         )
         if probe.returncode == 0:
-            if candidate[0] == "docker":
-                return (resolve_docker_executable(), *candidate[1:])
             return candidate
     raise RuntimeError("Docker Compose is not available.")
 
