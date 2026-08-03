@@ -72,6 +72,23 @@ CATEGORY_NAMES = frozenset(
 )
 
 _SAFE_COMPONENT_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,95}$")
+
+
+def _is_exact_atomic_replace_permission_error(error_message: str, target_file_name: str) -> bool:
+    """Accept only the known Windows temp-file replacement failure shape."""
+
+    escaped_target = re.escape(target_file_name)
+    with_directory = re.compile(
+        rf"\[WinError 5\][^'\"]*['\"](?P<directory>[^'\"]*[\\/])\.{escaped_target}\.partial-[^'\"]+['\"]"
+        rf"\s*->\s*['\"](?P=directory){escaped_target}['\"]"
+    )
+    without_directory = re.compile(
+        rf"\[WinError 5\][^'\"]*['\"]\.{escaped_target}\.partial-[^'\"]+['\"]"
+        rf"\s*->\s*['\"]{escaped_target}['\"]"
+    )
+    return bool(with_directory.search(error_message) or without_directory.search(error_message))
+
+
 class ArtifactHarnessError(RuntimeError):
     """Raised when an artifact run cannot be created or verified safely."""
 
@@ -406,16 +423,16 @@ class ManagedArtifactRun:
             raise ArtifactHarnessError("Managed validation run is missing its creation timestamp.")
         return (
             cls(
-            archive_root=archive_root,
-            category=category,
-            family=family,
-            run_id=run_id,
-            run_root=resolved_run_root,
-            artifact_root=artifact_root,
-            log_root=log_root,
-            manifest_path=manifest_path,
-            created_utc=created_utc,
-            hash_limit_bytes=hash_limit,
+                archive_root=archive_root,
+                category=category,
+                family=family,
+                run_id=run_id,
+                run_root=resolved_run_root,
+                artifact_root=artifact_root,
+                log_root=log_root,
+                manifest_path=manifest_path,
+                created_utc=created_utc,
+                hash_limit_bytes=hash_limit,
             ),
             dict(manifest),
         )
@@ -461,13 +478,11 @@ class ManagedArtifactRun:
         if not isinstance(metadata, Mapping):
             raise ArtifactHarnessError("Failed validation run has no recovery metadata.")
         error_message = str(metadata.get("error_message") or "")
-        temporary_marker = f".{safe_target}.partial-"
         if (
             str(manifest.get("status") or "") != "failed"
             or str(metadata.get("command") or "") != str(command)
             or str(metadata.get("error_type") or "") != "PermissionError"
-            or temporary_marker not in error_message
-            or safe_target not in error_message
+            or not _is_exact_atomic_replace_permission_error(error_message, safe_target)
         ):
             raise ArtifactHarnessError("Failed validation run is not a recoverable atomic-replace interruption.")
 

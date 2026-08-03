@@ -223,6 +223,22 @@ class ValidationArtifactHarnessTests(unittest.TestCase):
                 target_file_name="progress.json",
             )
 
+    def test_failed_recovery_requires_the_exact_windows_replace_path_pair(self) -> None:
+        run = self.create_run(family="reject-near-match-recovery-test")
+        error = PermissionError(
+            "[WinError 5] Access is denied: "
+            "'C:\\private\\other\\.progress.json.partial-1-a' -> "
+            "'C:\\private\\progress.json'"
+        )
+        run.fail(error, metadata={"command": "run-phase"})
+
+        with self.assertRaises(harness.ArtifactHarnessError):
+            harness.ManagedArtifactRun.recover_failed_atomic_replace(
+                run.run_root,
+                command="run-phase",
+                target_file_name="progress.json",
+            )
+
     def test_cli_separator_is_not_executed_as_the_child_command(self) -> None:
         result = harness.main(
             [
