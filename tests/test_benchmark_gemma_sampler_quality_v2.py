@@ -150,10 +150,21 @@ def test_pinned_filter_contract_requires_image_build_and_exact_payload() -> None
         binary_version="llama.cpp b10133",
         payload={"top_k": 0, "top_p": 1.0},
     )
+    protocol.assert_pinned_sampler_contract(
+        image_ref=protocol.PINNED_LLAMA_CPP_IMAGE,
+        binary_version="version: 10133 (ff067f76d)",
+        payload={"top_k": 0, "top_p": 1.0},
+    )
     with pytest.raises(protocol.ProtocolError):
         protocol.assert_pinned_sampler_contract(
             image_ref="other",
             binary_version="llama.cpp b10133",
+            payload={"top_k": 0, "top_p": 1.0},
+        )
+    with pytest.raises(protocol.ProtocolError, match="binary revision"):
+        protocol.assert_pinned_sampler_contract(
+            image_ref=protocol.PINNED_LLAMA_CPP_IMAGE,
+            binary_version="version: 10134 (ff067f76d)",
             payload={"top_k": 0, "top_p": 1.0},
         )
 
