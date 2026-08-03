@@ -201,6 +201,28 @@ def filters_disabled(*, top_k: int, top_p: float) -> bool:
     return int(top_k) <= 0 and float(top_p) >= 1.0
 
 
+def _matches_pinned_llama_cpp_build(binary_version: str) -> bool:
+    """Accept the pinned build's legacy and current llama-server formats."""
+
+    text = str(binary_version or "").strip()
+    numeric_build = PINNED_LLAMA_CPP_BUILD.removeprefix("b")
+    for line in text.splitlines():
+        legacy_tokens = {
+            token.strip("(),")
+            for token in line.split()
+            if token.strip("(),")
+        }
+        if PINNED_LLAMA_CPP_BUILD in legacy_tokens:
+            return True
+        label, separator, value = line.partition(":")
+        if label.strip().casefold() != "version" or not separator:
+            continue
+        reported_build = value.strip().split(maxsplit=1)[0] if value.strip() else ""
+        if reported_build == numeric_build:
+            return True
+    return False
+
+
 def assert_pinned_sampler_contract(
     *,
     image_ref: str,
@@ -211,7 +233,7 @@ def assert_pinned_sampler_contract(
 
     if str(image_ref) != PINNED_LLAMA_CPP_IMAGE:
         raise ProtocolError("Sampler test requires the pinned llama.cpp image digest.")
-    if PINNED_LLAMA_CPP_BUILD not in str(binary_version):
+    if not _matches_pinned_llama_cpp_build(binary_version):
         raise ProtocolError("Sampler test requires the pinned llama.cpp binary revision.")
     top_k = payload.get("top_k")
     top_p = payload.get("top_p")
