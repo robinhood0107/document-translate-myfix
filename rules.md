@@ -74,6 +74,15 @@ Claude-compatible tooling과 gstack을 위한 호환·routing 표면이다. 둘�
 - benchmark 자산은 `benchmarking/lab`에만 두고, 제품 반영은 별도 `feature/*`, `fix/*`, `chore/*` 작업 브랜치 PR로 승격한다.
 - `benchmarking/lab`도 실제 샘플 이미지, 테스트 결과 이미지, OCR/번역 로그, 작품명, 사용자 로컬 경로를 보관하는 장소로 쓰지 않는다.
 
+### Gemma sampler 번역 품질 판정 불변조건
+
+- Gemma sampler benchmark의 순위는 **추출·정규화한 번역문 품질만**으로 정한다. 정답과 글자가 다르다는 사실, 응답 envelope, 또는 strict parser 통과 여부만으로 품질 감점을 주지 않는다.
+- 원문과 필요한 문맥에 비추어 의미, 화자·대상·행동·관계·숫자·정체성, 부정·질문/선언·동의/강제, 검열·삭제·이름 마스킹, 그리고 한국어 문장을 실제로 훼손하는 혼합 token/외국어 잔재를 판정한다. 이 항목의 변형은 품질 오류다.
+- 의미를 보존한 존댓말·말투·어순·구두점·일반 동의어·의성어 차이는 통과시킨다. 자연스러움은 이들 의미 판정 다음의 순위 기준이다.
+- 알려진 channel frame의 대소문자 변형과 그 안의 thought 본문은 `translation` 값 안에 있어도 먼저 제거한다. choice 수·index·finish reason·JSON 여분 key·앞뒤 wrapper·후행 텍스트는 private 진단만 남기고 순위에는 쓰지 않는다.
+- 번역문을 하나도 추출할 수 없거나 서로 다른 번역문을 둘 이상 추출하면 `UNJUDGED`로 남기고 자동 승자를 막는다. 비어 있는 번역문 또는 정규화 뒤에도 남은 실제 혼합 token 손상만 자동 catastrophic이다.
+- 완료된 raw 응답은 수정하지 않는다. 판정 계약이 바뀌면 raw envelope에서 새 quality view를 메모리로 다시 만들어 재사용하며, 그 이유만으로 GPU 재실행을 요구하지 않는다.
+
 ## 2-1-1. 민감 산출물 / 원본명 금지 규칙
 
 아래 항목은 경로뿐 아니라 문서, 테스트 fixture, PR 설명에 내용으로도 넣지 않는다.
